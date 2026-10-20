@@ -39,6 +39,11 @@ from app.services.programs.reply_rules import (  # noqa: F401  (re-exported: oth
     OPT_OUT, PRICING, RECOMMENDED, SLA_BREACH_LABEL, VETERAN, WRONG_PERSON,
     alert_plan, cadence_action, classify, intents, staff_alert_gate, suggested_reply, urgency,
 )
+from app.services.programs.reply_rules import OPT_OUT_ASK_LABEL, opt_out_needs_person
+
+# An opt-out whose words also ask for something (#A): still an opt-out in
+# every way, but ONE staff alert so a person decides whether to call or email.
+OPT_OUT_ASK = "opt_out_request"
 
 def summarize(lead: Lead, body: str, result: Dict, channel: str, location: Optional[str]) -> str:
     name = ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title() or "A contact"
@@ -222,6 +227,8 @@ def alert_content(db: Session, prog: OutreachProgram, resp: ProgramResponse, kin
         status = "Needs a person"
     elif kind == HOT:
         status = "Wants a visit - call within %d min" % int(prog.hot_sla_minutes or 15)
+    elif kind == OPT_OUT_ASK:
+        status = OPT_OUT_ASK_LABEL
     else:
         status = "New Reply"
     head = "%s - %s" % (alert_title(prog), status)
@@ -259,6 +266,8 @@ def alert_content(db: Session, prog: OutreachProgram, resp: ProgramResponse, kin
     rows = [("Who", who), ("Replied by", "%s, %s" % (how, when_s)), ("Said", '"%s"' % said)]
     if event.get("reason"):
         rows.append(("Why a person is needed", event["reason"]))
+    elif kind == OPT_OUT_ASK:
+        rows.append(("Why a person is needed", OPT_OUT_ASK_LABEL + ". No automated texts will go to them."))
     if event.get("when"):
         rows.append(("Booked", "%s - %s" % (event.get("what") or "Visit", event["when"])))
     rows += [(k, v) for k, v in contacts if v]
@@ -281,6 +290,8 @@ def alert_content(db: Session, prog: OutreachProgram, resp: ProgramResponse, kin
         subject = "%s - Appointment booked: %s" % (alert_title(prog), name)
     elif kind == "handoff":
         subject = "%s - %s needs a person" % (alert_title(prog), name)
+    elif kind == OPT_OUT_ASK:
+        subject = "%s - %s opted out of texts but asked for something" % (alert_title(prog), name)
     if test:
         subject = "TEST - " + subject
     return {"sms": sms[:1500], "subject": subject, "html": "".join(body)}
@@ -505,6 +516,10 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
             old.handling_status, old.sla_due_at, old.closed_at = "closed", None, now
         if channel == "email":
             lead.allow_email = False          # an email opt-out of record
+    opt_out_ask = cls == OPT_OUT and opt_out_needs_person(body)
+    if opt_out_ask:
+        resp.recommended_action = ("%s. Automation has been stopped and no automated texts will go to them."
+                                   % OPT_OUT_ASK_LABEL)
     found = intents(body, cls)
     resp.intents = json.dumps(found) if found else None
     resp.urgency = urgency(cls)
@@ -524,6 +539,10 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
 
     msg = "%s %s" % ("🔥" if cls == HOT else "💬", resp.summary)
     plan = alert_plan(cls)
+    if opt_out_ask:
+        # Still closed and stopped (above); the setter stops the conversation
+        # (below). The one page is this alert - no text to the family.
+        plan = {"kind": OPT_OUT_ASK, "management": False, "external": True}
     if plan and staff_alerts:
         # staff_alerts=False (the simulator): no texts, emails OR in-app
         # notices - a synthetic family never reaches anyone's bell.
@@ -665,6 +684,16 @@ def sla_realert_cap() -> int:
         return DEFAULT_SLA_REALERTS
 
 
+def _ai_delivered_since(db: Session, conv, since: datetime) -> bool:
+    """A setter message that actually went to the family (sent, or simulated
+    for a test contact) at or after `since`. The booking path's own
+    confirmation is recorded as a delivered system turn and counts too."""
+    from app.models.program_models import ProgramConversationTurn as T
+    return db.query(T.id).filter(T.conversation_id == conv.id, T.role.in_(("ai", "system")),
+                                 T.delivery.in_(("sent", "simulated")),
+                                 T.created_at >= since).first() is not None
+
+
 def sla_sweep(db: Session, now: Optional[datetime] = None,
               organization_id: Optional[str] = None) -> List[ProgramResponse]:
     """Re-alert HOT responses still untouched past their SLA. Once per SLA window."""
@@ -710,8 +739,10 @@ def sla_sweep(db: Session, now: Optional[datetime] = None,
         from app.models.program_models import ProgramConversation
         conv = (db.query(ProgramConversation).filter(ProgramConversation.lead_id == lead.id)
                 .order_by(ProgramConversation.created_at.desc()).first())
+        # Only an AI message that actually REACHED them counts (#6): a draft
+        # waiting for a person, a held or blocked reply is not "AI talking".
         if conv is not None and conv.state not in ("human", "callback_requested") \
-                and (conv.last_ai_at or datetime.min) >= (resp.received_at or now):
+                and _ai_delivered_since(db, conv, resp.received_at or now):
             resp.sla_alert_count = cap
             db.commit()
             continue

@@ -814,12 +814,15 @@ def _over_limit(db, conv, now) -> Optional[str]:
 
 def _parse_follow_up(raw, now) -> datetime:
     """The family's own horizon, clamped to 1-90 days; 14 days if unclear.
-    Returned as UTC at 15:00 (10 AM Central) on that date."""
+    A date further out than 90 days is brought in to 90 (#14) - "next year"
+    must not become two weeks. Returned as UTC at 15:00 (10 AM Central)."""
     try:
         day = datetime.strptime(str(raw or "")[:10], "%Y-%m-%d")
     except ValueError:
         day = None
     today = A._today_central().date()
+    if day is not None and (day.date() - today).days > 90:
+        day = datetime.combine(today + timedelta(days=90), datetime.min.time())
     if day is None or not (1 <= (day.date() - today).days <= 90):
         day = datetime.combine(today + timedelta(days=14), datetime.min.time())
     return day.replace(hour=15, minute=0)
@@ -900,6 +903,20 @@ def clock_named(body: str, slot: datetime) -> bool:
         else _picked(r"\b%d(:00)?\s*(am|pm|a\.m\.|p\.m\.|o'?clock)?\b" % hour, t)
 
 
+_SAYS_MORNING = r"(?<!good )\b(morning|mornings)\b|\b(la|las) ma[ñn]anas?\b"
+_SAYS_LATER = r"(?<!good )\b(afternoon|afternoons|evening|evenings)\b|(?<!buenas )\btarde\b"
+
+
+def _part_contradicts(t: str, slot: datetime) -> bool:
+    """The family named ONE part of the day and this slot is in the other."""
+    am, pm = _picked(_SAYS_MORNING, t), _picked(_SAYS_LATER, t)
+    if am and not pm:
+        return slot.hour >= 12
+    if pm and not am:
+        return slot.hour < 12
+    return False
+
+
 def choice_evidence(body: str, slot: datetime, index: Optional[int]) -> bool:
     """Did the family actually pick THIS time? Their words must name its day,
     date, hour or position - an AI's guess never books an appointment, and a
@@ -907,6 +924,8 @@ def choice_evidence(body: str, slot: datetime, index: Optional[int]) -> bool:
     t = (body or "").lower()
     if not t:
         return False
+    if _part_contradicts(t, slot) and not clock_named(body, slot):
+        return False                                    # "Friday morning" never picks Friday 2 PM (#12)
     if _picked(r"\b%s\b" % slot.strftime("%A").lower(), t) or _picked(r"\b%s\b" % slot.strftime("%a").lower(), t):
         return True
     if _picked(r"\b%s\b" % slot.strftime("%B").lower(), t) and str(slot.day) in t:
@@ -915,6 +934,8 @@ def choice_evidence(body: str, slot: datetime, index: Optional[int]) -> bool:
         return True
     if index is not None and index in _ORD and _picked(_ORD[index], t):
         return True
+    if any(_picked(r"\b(%s|%s)\b" % (d, d[:3]), t) for d in _DAYS):
+        return False                                    # they named a different day: a day part alone isn't a pick
     if _picked(r"\bmorning\b", t) and slot.hour < 12:
         return True
     if _picked(r"\b(afternoon|evening)\b", t) and slot.hour >= 12:
@@ -1038,7 +1059,13 @@ def _deliver(db, prog, lead, conv, resp, text, action, mode, *, now) -> ProgramC
                      reason=(res.get("error") or "email not sent")[:240], response_id=resp.id)
     hours = contact_hours.check(lead, now)
     if not hours.get("permitted"):
-        conv.next_followup_at = contact_hours.next_permitted_utc(lead, now)
+        # The held reply itself is released by sweep(). next_followup_at only
+        # moves when nothing is set or it is earlier than the next allowed
+        # hour - an agreed later date (follow_up_later: "check back in 35
+        # days") is never pulled forward (#4).
+        nxt = contact_hours.next_permitted_utc(lead, now)
+        if conv.next_followup_at is None or (nxt is not None and conv.next_followup_at < nxt):
+            conv.next_followup_at = nxt
         return _turn(db, conv, "ai", text, action=action, delivery="held",
                      response_id=resp.id if resp else None, reason="outside contact hours")
     try:
@@ -1120,10 +1147,17 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         db.commit()
         return dict(out, action="handoff", state=conv.state)
     if cls == AUTO_REPLY:
-        conv.state = "waiting"
-        conv.next_followup_at = now + FOLLOWUP_GAP
-        _turn(db, conv, "system", None, action="wait",
-              reason="automatic reply - not answered; follow-up after %s UTC" % conv.next_followup_at.strftime("%Y-%m-%d %H:%M"))
+        # Only a conversation the AI is running moves to "waiting" (#5). A
+        # person's conversation (human / callback), offered times, a booking,
+        # an agreed later date or a stop are left exactly as they are.
+        if conv.state == "ai_active":
+            conv.state = "waiting"
+            conv.next_followup_at = now + FOLLOWUP_GAP
+            why = "automatic reply - not answered; follow-up after %s UTC" % conv.next_followup_at.strftime(
+                "%Y-%m-%d %H:%M")
+        else:
+            why = "automatic reply - not answered; conversation left as it was (%s)" % conv.state
+        _turn(db, conv, "system", None, action="wait", reason=why)
         db.commit()
         return dict(out, action="wait", state=conv.state)
     if conv.state in ("human", "stopped"):
