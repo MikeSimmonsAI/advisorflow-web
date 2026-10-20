@@ -228,6 +228,8 @@ def handle(db: Session, *, site, organization, result: Dict[str, Any],
         name = " ".join(x for x in (lead.first_name, lead.last_name) if x) or "Someone"
         what = str(payload.get("request_type") or "").strip()
         msg = "Website request from %s%s - contact them." % (name, (": " + what[:80]) if what else "")
+        if getattr(lead, "is_test", False):
+            msg = "TEST record - " + msg
         for uid in users:
             db.add(Notification(user_id=uid, lead_id=lead.id, type=NotificationType.DEMO_REQUEST,
                                 message=msg, link="/rate-requests?open=%s" % lead.id))

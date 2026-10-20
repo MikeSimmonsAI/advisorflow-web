@@ -842,6 +842,68 @@ def supplier_handoff(lead_id: str, body: HandoffIn, request: Request,
                                               follow_up_days=body.follow_up_days)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
-    log_action(db, lead.organization_id, user.id, action="energy.supplier_handoff",
-               target_type="lead", target_id=lead.id, details={"supplier": body.supplier})
+    if not out.get("duplicate"):
+        log_action(db, lead.organization_id, user.id, action="energy.supplier_handoff",
+                   target_type="lead", target_id=lead.id, details={"supplier": body.supplier})
     return out
+
+
+class HandoffOutcomeIn(BaseModel):
+    outcome: str = Field(..., max_length=40)
+    source: str = Field(..., max_length=40)
+    note: str = Field(..., max_length=500)
+
+
+@router.get("/leads/{lead_id}/handoffs")
+def lead_handoffs(lead_id: str, request: Request, db: Session = Depends(get_db),
+                  user: User = Depends(require_tenant_user)):
+    """This customer's supplier hand-offs and what is known about each."""
+    from app.services import energy_suppliers
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    return {"items": energy_suppliers.handoffs(lead),
+            "outcomes": list(energy_suppliers.OUTCOMES),
+            "sources": list(energy_suppliers.SOURCES)}
+
+
+@router.post("/leads/{lead_id}/handoffs/{handoff_id}/outcome",
+             dependencies=[Depends(require_not_observation)])
+def handoff_outcome(lead_id: str, handoff_id: str, body: HandoffOutcomeIn, request: Request,
+                    db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Record what happened to a hand-off. Never marks the customer enrolled."""
+    from app.services import energy_suppliers
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    try:
+        out = energy_suppliers.record_outcome(db, lead=lead, actor_user_id=user.id,
+                                              handoff_id=handoff_id, outcome=body.outcome,
+                                              source=body.source, note=body.note)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    log_action(db, lead.organization_id, user.id, action="energy.supplier_handoff_outcome",
+               target_type="lead", target_id=lead.id,
+               details={"handoff_id": handoff_id, "outcome": body.outcome, "source": body.source})
+    return out
+
+
+@router.get("/supplier-handoffs")
+def supplier_handoff_list(request: Request, state: str = Query("open", pattern="^(open|all)$"),
+                          db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Hand-offs across the customers this person may see - by default only
+    the ones still waiting for a final outcome, oldest first, so an incomplete
+    referral cannot quietly drop out of sight."""
+    from app.services import energy_suppliers
+    _org_id(db, user, request)
+    rows = (lead_scope.authorized_lead_query(db, user, request=request)
+            .filter(Lead.custom_fields.like('%"supplier_handoffs"%')).all())
+    names = _user_names(db, [l.assigned_to_id for l in rows])
+    items = []
+    for l in rows:
+        for h in energy_suppliers.handoffs(l):
+            if state == "open" and not energy_suppliers.is_open(h):
+                continue
+            items.append({"lead_id": l.id, "name": _name(l.first_name, l.last_name),
+                          "owner": names.get(l.assigned_to_id), "handoff": h,
+                          "lead_link": f"/rate-requests?open={l.id}"})
+    items.sort(key=lambda r: r["handoff"].get("at") or "")
+    return {"state": state, "total": len(items), "items": items}

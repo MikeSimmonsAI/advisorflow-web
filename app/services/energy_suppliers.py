@@ -89,23 +89,99 @@ def residential_only_refusal(lead) -> Optional[str]:
     return None
 
 
+# ── HAND-OFF OUTCOMES ──────────────────────────────────────────────────────
+# A hand-off is "we sent this customer to that supplier". What happened next
+# is a separate fact with two possible sources: what Atlantis staff were told
+# or believe (staff_report) and what the supplier itself confirmed
+# (supplier_confirmation - a supplier email, portal, report or rep). The two
+# are never merged: "confirmed" from a staff report is still not a supplier
+# confirmation, and NOTHING here marks a customer enrolled. Enrollment stays
+# the explicit Enroll action on Rate Requests.
+OUTCOME_REFERRED = "referred"
+OUTCOMES = ("awaiting_provider", "customer_action_pending", "confirmed",
+            "not_completed", "cancelled", "unknown")
+TERMINAL_OUTCOMES = ("confirmed", "not_completed", "cancelled")
+SOURCES = ("staff_report", "supplier_confirmation")
+TASK_SOURCE = "supplier_handoff"
+
+
+def _load_cf(lead) -> Dict[str, Any]:
+    try:
+        cf = json.loads(lead.custom_fields or "{}")
+        return cf if isinstance(cf, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def _stamp(now) -> str:
+    return now.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _lock(db: Session, lead):
+    """Row-lock the lead for the read-modify-write of its custom fields, so two
+    simultaneous clicks cannot both see "no open hand-off" (Postgres; a no-op
+    on SQLite, where writes are serialised anyway)."""
+    from app.models.models import Lead
+    try:
+        locked = (db.query(Lead).filter(Lead.id == lead.id)
+                  .with_for_update().populate_existing().first())
+        return locked or lead
+    except Exception:                                   # noqa: BLE001
+        return lead
+
+
+def handoffs(lead) -> List[Dict[str, Any]]:
+    """This lead's hand-offs, oldest first, with older entries normalised
+    (entries written before outcomes existed have no id/status)."""
+    out = []
+    for i, h in enumerate(_load_cf(lead).get("supplier_handoffs") or []):
+        if not isinstance(h, dict):
+            continue
+        h = dict(h)
+        h.setdefault("id", "legacy-%d" % i)
+        h.setdefault("status", OUTCOME_REFERRED)
+        h.setdefault("history", [])
+        out.append(h)
+    return out
+
+
+def is_open(h: Dict[str, Any]) -> bool:
+    return h.get("status") not in TERMINAL_OUTCOMES
+
+
 def record_handoff(db: Session, *, lead, actor_user_id: Optional[str], supplier: str,
                    note: str, follow_up_days: int = 2) -> Dict[str, Any]:
     """Record that an advisor handed this customer to a supplier, and open a
-    follow-up task to confirm the outcome."""
+    follow-up task to confirm the outcome.
+
+    ONE OPEN HAND-OFF PER SUPPLIER. A second request while an earlier hand-off
+    to the same supplier is still open (double click, browser retry, a second
+    advisor) returns that hand-off and its task with `duplicate: true` instead
+    of writing another entry and another task. Once the earlier one has a
+    final outcome a new hand-off is a new event and is recorded."""
+    import uuid
+
     from app.models.work_models import LeadTask
     if supplier not in SUPPLIER_KEYS:
         raise ValueError("Unknown supplier.")
     sup = next(s for s in catalog() if s["key"] == supplier)
+    lead = _lock(db, lead)
     now = datetime.utcnow()
-    try:
-        cf = json.loads(lead.custom_fields or "{}")
-        if not isinstance(cf, dict):
-            cf = {}
-    except (ValueError, TypeError):
-        cf = {}
-    entry = {"supplier": supplier, "at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-             "by": actor_user_id, "note": (note or "").strip()[:500]}
+    existing = [h for h in handoffs(lead) if h.get("supplier") == supplier and is_open(h)]
+    if existing:
+        h = existing[-1]
+        task = (db.query(LeadTask).filter(LeadTask.lead_id == lead.id,
+                                          LeadTask.source == TASK_SOURCE,
+                                          LeadTask.status == "open",
+                                          LeadTask.title == "Confirm outcome with %s" % sup["name"])
+                .order_by(LeadTask.created_at.desc()).first())
+        db.rollback()                                   # release the row lock; nothing written
+        return {"handoff": h, "task_id": task.id if task else None, "supplier": sup,
+                "duplicate": True}
+    cf = _load_cf(lead)
+    entry = {"id": uuid.uuid4().hex[:12], "supplier": supplier, "at": _stamp(now),
+             "by": actor_user_id, "note": (note or "").strip()[:500],
+             "status": OUTCOME_REFERRED, "history": []}
     cf["supplier_handoffs"] = (cf.get("supplier_handoffs") or []) + [entry]
     lead.custom_fields = json.dumps(cf)
     task = LeadTask(organization_id=lead.organization_id, lead_id=lead.id,
@@ -113,7 +189,63 @@ def record_handoff(db: Session, *, lead, actor_user_id: Optional[str], supplier:
                     details="Handed off %s. Confirm with: %s." % (now.strftime("%b %d"), sup["confirm_with"]),
                     due_at=now + timedelta(days=max(0, follow_up_days)), status="open",
                     assigned_to_id=lead.assigned_to_id or actor_user_id,
-                    created_by_id=actor_user_id, source="supplier_handoff")
+                    created_by_id=actor_user_id, source=TASK_SOURCE)
     db.add(task)
     db.commit()
-    return {"handoff": entry, "task_id": task.id, "supplier": sup}
+    return {"handoff": entry, "task_id": task.id, "supplier": sup, "duplicate": False}
+
+
+def record_outcome(db: Session, *, lead, actor_user_id: Optional[str], handoff_id: str,
+                   outcome: str, source: str, note: str) -> Dict[str, Any]:
+    """Record what happened to one hand-off. A final outcome (confirmed /
+    not_completed / cancelled) closes its confirmation task; an interim one
+    (awaiting_provider / customer_action_pending / unknown) keeps it open.
+    Never changes the lead's stage and never marks enrollment."""
+    from app.models.work_models import LeadTask
+    if outcome not in OUTCOMES:
+        raise ValueError("Unknown outcome.")
+    if source not in SOURCES:
+        raise ValueError("Say whether a person on our side reported this or the supplier confirmed it.")
+    if not (note or "").strip():
+        raise ValueError("Say how you know (who told you, or where the supplier confirmed it).")
+    lead = _lock(db, lead)
+    cf = _load_cf(lead)
+    raw = list(cf.get("supplier_handoffs") or [])
+    # Positions in the stored list (handoffs() skips non-dict junk, so its
+    # indexes would not line up with `raw`).
+    positions = [i for i, x in enumerate(raw) if isinstance(x, dict)]
+    norm = handoffs(lead)
+    k = next((j for j, h in enumerate(norm) if h["id"] == handoff_id), None)
+    if k is None:
+        db.rollback()
+        raise LookupError("Hand-off not found on this customer.")
+    idx = positions[k]
+    h = norm[k]
+    if not is_open(h):
+        db.rollback()
+        raise ValueError("This hand-off already has a final outcome (%s)." % h["status"])
+    now = datetime.utcnow()
+    h["history"] = list(h.get("history") or []) + [{
+        "at": _stamp(now), "by": actor_user_id, "from": h.get("status"), "to": outcome,
+        "source": source, "note": note.strip()[:500]}]
+    h["status"] = outcome
+    h["status_source"] = source
+    raw[idx] = h
+    cf["supplier_handoffs"] = raw
+    lead.custom_fields = json.dumps(cf)
+    closed = 0
+    if outcome in TERMINAL_OUTCOMES:
+        sup = next((s for s in catalog() if s["key"] == h.get("supplier")), None)
+        title = "Confirm outcome with %s" % (sup["name"] if sup else h.get("supplier"))
+        for t in (db.query(LeadTask).filter(LeadTask.lead_id == lead.id,
+                                            LeadTask.source == TASK_SOURCE,
+                                            LeadTask.status == "open",
+                                            LeadTask.title == title).all()):
+            t.status = "done"
+            t.completed_at = now
+            closed += 1
+    db.commit()
+    return {"handoff": h, "tasks_closed": closed,
+            "enrolled": False,
+            "next_step": ("If the supplier confirmed the enrollment, record it with Enroll on Rate Requests."
+                          if outcome == "confirmed" and source == "supplier_confirmation" else None)}
