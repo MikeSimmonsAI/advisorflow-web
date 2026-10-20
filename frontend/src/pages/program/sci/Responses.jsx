@@ -96,22 +96,30 @@ export default function Responses({ locationId, onChange, navigate }) {
 
   return (
     <>
-      <PageHead title="Responses" sub="One connected inbox for text messages, email replies and voicemails.">
+      <PageHead title="Responses" sub="Live family replies, organized by urgency and next action.">
         <Chip tone={newCount ? 'info' : ''}>{newCount} new {newCount === 1 ? 'reply' : 'replies'}</Chip>
+        <button type="button" className="sci-btn" onClick={() => { load(); loadSide() }}><Icon name="refresh" />Refresh</button>
         <button type="button" className="sci-btn" onClick={() => { setChannel('unknown'); setSel(null) }}><Icon name="alert" />View unmatched{unknown.length ? ` (${unknown.length})` : ''}</button>
       </PageHead>
+      <OutreachPulse locationId={locationId} navigate={navigate} />
       <section className="sci-kpis four" aria-label="Response numbers">
-        <Kpi icon="mail" tone="blue" value={rows ? newCount : null} label="New messages" note={`In ${statusLabel} view`} onClick={() => { setStatus('new'); setChannel('all') }} />
-        <Kpi icon="alert" tone="red" value={rows ? hotCount : null} label="HOT responses" note="Open, need a person" onClick={() => { setCls('hot'); setChannel('all') }} />
-        <Kpi icon="responses" tone="purple" value={rows ? activeCount : null} label="Active conversations" onClick={() => { setStatus('active'); setChannel('all') }} />
-        <Kpi icon="clock" tone="gold" value={rows ? slaCount : null} label="Past response SLA" note="Waiting longer than the target" />
+        <Kpi icon="mail" tone="blue" value={rows ? newCount : null} label="New / unread" note="Open latest unhandled replies" onClick={() => chooseQueue('new', 'open', 'attention')} />
+        <Kpi icon="alert" tone="red" value={rows ? hotCount : null} label="HOT priority" note="Urgent responses" onClick={() => chooseQueue('hot', 'open', 'attention')} />
+        <Kpi icon="responses" tone="purple" value={rows ? followCount : null} label="Needs follow-up" note="Opened or active" onClick={() => chooseQueue('followup', 'open', 'attention')} />
+        <Kpi icon="clock" tone="gold" value={rows ? slaCount : null} label="Past response SLA" note="Overdue first" onClick={() => chooseQueue('attention', 'open', 'attention')} />
       </section>
       <ErrorLine text={err} />
       <section className="sci-panel sci-convo" aria-label="Conversations">
         <div className="sci-convo-col">
           <div className="sci-panel-head" style={{ marginBottom: 8 }}>
-            <h2 className="sci-h2">Unified inbox</h2>
+            <div><h2 className="sci-h2">Action inbox</h2><p className="sci-micro sci-muted">Newest actionable messages first, then follow-ups.</p></div>
             {newCount > 0 && <Chip tone="bad">{newCount} new</Chip>}
+          </div>
+          <div className="sci-queue-tabs" role="group" aria-label="Inbox queues">
+            {queueOptions.map(([key, title, count, st, order]) => (
+              <button type="button" key={key} className={queue === key ? 'on' : ''} aria-pressed={queue === key}
+                onClick={() => chooseQueue(key, st, order)}>{title}<b>{rows ? count : '—'}</b></button>
+            ))}
           </div>
           <div style={{ marginBottom: 8 }}><SearchBox id="sci-r-q" value={q} onChange={setQ} placeholder="Search conversations" label="Search conversations" width="100%" /></div>
           <FilterChips items={chips} value={channel} onChange={k => { setChannel(k); setSel(null) }} label="Channel" />
@@ -130,6 +138,13 @@ export default function Responses({ locationId, onChange, navigate }) {
               </select>
             </div>
           )}
+          <div className="sci-inbox-toolbar">
+            <span>{rows ? `${list.length} shown` : 'Loading inbox'}{total !== null && total > all.length ? ` · latest ${all.length} of ${total}` : ''}</span>
+            <label htmlFor="sci-inbox-sort">Order</label>
+            <select id="sci-inbox-sort" className="sci-input sm" value={sortBy} onChange={e => setSortBy(e.target.value)}>
+              <option value="attention">Priority first</option><option value="recent">Newest first</option>
+            </select>
+          </div>
           <div className="sci-list" aria-label="Messages" style={{ marginTop: 6 }}>
             {channel === 'calls' ? (
               calls === null ? <p className="sci-loading">Loading…</p> : callList.length === 0 ? <Empty icon="voicemail">No voicemails.</Empty> : callList.map(c => (
@@ -161,14 +176,17 @@ export default function Responses({ locationId, onChange, navigate }) {
                   {all.length ? 'Try another filter or search.' : 'New conversations will appear here the moment a family replies.'}
                 </Empty>
               ) : list.map(r => (
-                <button key={r.id} type="button" className="sci-listitem" aria-current={sel?.kind === 'response' && sel.item.id === r.id} onClick={() => view(r)}>
+                <button key={r.id} type="button" className={`sci-listitem sci-inbox-item ${r.status === 'new' ? 'unread' : ''} ${r.sla_breached ? 'overdue' : ''}`}
+                  aria-current={sel?.kind === 'response' && sel.item.id === r.id} onClick={() => view(r)}>
                   <span className={`sci-initials${r.class === 'hot' ? ' hot' : ''}`}>{initials(r.name)}</span>
                   <span className="sci-listitem-body">
                     <b>{r.name || 'Contact'}{r.status === 'new' && <span className="sci-newdot" aria-label="new" />}</b>
                     <small>{r.body || r.summary}</small>
                     <small>
                       <Chip tone={CLASS_TONE[r.class]} plain>{r.label || CLASS_LABEL[r.class]}</Chip>{' '}
-                      {r.channel === 'sms' ? 'Text' : 'Email'} · {ago(r.received_at)}{r.sla_breached && ' · past SLA'}
+                      {r.channel === 'sms' ? 'Text' : 'Email'} · {ago(r.received_at)}{r.sla_breached && ' · PAST SLA'}
+                      {r.status === 'new' && <strong className="sci-inbox-new"> · NEW</strong>}
+                      {r.status === 'opened' && ' · Follow-up'}
                     </small>
                   </span>
                 </button>
