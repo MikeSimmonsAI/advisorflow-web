@@ -12,7 +12,8 @@ const ctx = {
     { type: 'workspace', organization_id:host, organization_name:'EVO Integrated Solutions LLC', organization_slug:'evo-integrated-solutions-llc', industry:'generic' },
     { type: 'workspace', organization_id:sci, organization_name:'Service Corporation International', organization_slug:'service-corporation-international', is_program:true, industry:'funeral' },
     { type: 'workspace', organization_id:energy, organization_name:'Atlantis Light & Power', organization_slug:'atlantis-light-power', industry:'energy' },
-    { type: 'workspace', organization_id:roofing, organization_name:'EvoSys Pro Roofing', organization_slug:'evosys-pro-roofing', industry:'generic' },
+    // program_route comes from the SERVER, only when roofing_program is switched on
+    { type: 'workspace', organization_id:roofing, organization_name:'EvoSys Pro Roofing', organization_slug:'evosys-pro-roofing', industry:'roofing', program_route:'/program/roofing' },
   ],
   product_contexts: [{ type:'product', key:'wholesale', label:'Wholesale Operations', organization_id:host, path:'/wholesale/evosense' }],
 }
@@ -40,6 +41,16 @@ test('program routing preserves SCI while separating roofing', () => {
   assert.equal(workspaceProgramDestination(ctx.workspace_contexts[1]), '/program')
   assert.equal(workspaceProgramDestination(ctx.workspace_contexts[3]), '/program/roofing')
   assert.equal(workspaceProgramDestination(ctx.workspace_contexts[2]), null)
+})
+
+test('a Roofing workspace whose program is not switched on is not offered as the Roofing app', () => {
+  const off = { ...ctx.workspace_contexts[3], industry: 'generic', program_route: null }
+  const c = { workspace_contexts: [ctx.workspace_contexts[0], ctx.workspace_contexts[1], ctx.workspace_contexts[2], off],
+              product_contexts: ctx.product_contexts }
+  const { visible, others } = programCards(c)
+  assert.equal(visible.some(x => x.display === 'Roofing'), false)
+  assert.deepEqual(others.map(x => x.organization_id), [roofing])
+  assert.equal(workspaceProgramDestination(off), null)
 })
 
 test('generic workspaces remain available when no named product uses them', () => {

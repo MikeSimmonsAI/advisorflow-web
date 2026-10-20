@@ -537,6 +537,11 @@ function HomeRedirect() {
     if (shouldLandInSci(ctx)) {
       return <Navigate to="/sci" replace />
     }
+    // A named product seat on the person's own home organization is their
+    // home program (server-decided): open it, never a previously selected app.
+    if (def.type === 'product' && def.path) {
+      return <Navigate to={def.path} replace />
+    }
     // A multi-program administrator starts at the program portal, never the
     // host organization's generic dashboard or the previously selected app.
     if (def.type === 'workspace_selector') {

@@ -3,8 +3,8 @@ export function programCards(ctx) {
   const products = ctx?.product_contexts || []
   const program = workspaces.filter(w => w.is_program ||
     w.program_route === '/program/roofing' ||
-    ['evosys-pro-roofing', 'atlantis-light-power'].includes(w.organization_slug) ||
-    ['energy', 'cleaning', 'roofing', 'insurance'].includes(w.industry))
+    ['atlantis-light-power'].includes(w.organization_slug) ||
+    ['energy', 'cleaning', 'insurance'].includes(w.industry))
   const others = workspaces.filter(w =>
     !program.some(p => p.organization_id === w.organization_id) &&
     !products.some(p => p.organization_id === w.organization_id))
@@ -12,11 +12,11 @@ export function programCards(ctx) {
     ...program.map(w => ({
       ...w,
       kind: w.is_program ? 'SCI · FAMILY SERVICES' :
-            w.program_route === '/program/roofing' || w.industry === 'roofing' || w.organization_slug === 'evosys-pro-roofing' ? 'ROOFING OPERATIONS' :
+            w.program_route === '/program/roofing' ? 'ROOFING OPERATIONS' :
             w.industry === 'energy' ? 'ENERGY OPERATIONS' : 'BUSINESS OPERATIONS',
-      display: w.is_program ? 'SCI' : w.organization_slug === 'evosys-pro-roofing' ? 'Roofing' : w.organization_name,
+      display: w.is_program ? 'SCI' : w.program_route === '/program/roofing' ? 'Roofing' : w.organization_name,
       summary: w.is_program ? 'Families, conversations, appointments and outreach' :
-               w.organization_slug === 'evosys-pro-roofing' || w.industry === 'roofing' ? 'AI activity, homeowner replies and inspections' :
+               w.program_route === '/program/roofing' ? 'AI activity, homeowner replies and inspections' :
                w.industry === 'energy' ? 'Customers, enrollments and energy operations' :
                'Your dedicated business workspace',
     })),
