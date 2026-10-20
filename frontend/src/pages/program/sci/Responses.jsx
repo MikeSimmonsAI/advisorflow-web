@@ -126,7 +126,7 @@ export default function Responses({ locationId, onChange, navigate }) {
           {(channel === 'all' || channel === 'sms' || channel === 'email') && (
             <div className="sci-row-gap" style={{ margin: '8px 0 4px', flexWrap: 'nowrap' }}>
               <label className="sci-sr" htmlFor="sci-r-status">Status</label>
-              <select id="sci-r-status" className="sci-input sm" style={{ flex: 1, width: 0 }} value={status} onChange={e => setStatus(e.target.value)}>
+              <select id="sci-r-status" className="sci-input sm" style={{ flex: 1, width: 0 }} value={status} onChange={e => { setStatus(e.target.value); setQueue('recent'); setSortBy('recent') }}>
                 <option value="open">Open</option><option value="new">New</option><option value="opened">Opened (follow-up)</option>
                 <option value="responded">Responded</option><option value="active">Active</option><option value="closed">Closed</option>
                 <option value="">All statuses</option>
