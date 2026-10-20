@@ -144,6 +144,17 @@ def still_free(db: Session, prog, slot: datetime, kind: str = VISIT) -> bool:
     return slot.strftime("%Y-%m-%dT%H:%M:00") in set(res.get("slots") or [])
 
 
+def _opted_out(db: Session, lead) -> bool:
+    if (getattr(lead, "status", None) or "").lower() in ("dnc", "opted_out", "unsubscribed"):
+        return True
+    try:
+        from app.services import sms_programs, wholesale_sms
+        phone = wholesale_sms.normalize_e164(getattr(lead, "phone", None))
+        return bool(phone) and phone in sms_programs.opted_out_numbers(db, lead.organization_id)
+    except Exception:                                    # noqa: BLE001
+        return False
+
+
 class _InternalRequest:
     """The booking page's own confirmation call, made in-process."""
 
@@ -164,6 +175,10 @@ def book(db: Session, prog, lead, slot: datetime, kind: str, *, family_text: boo
     advisor = program_advisor(db, prog)
     if advisor is None:
         return {"ok": False, "status": "no_calendar", "reason": "no booking calendar is set"}
+    if _opted_out(db, lead):
+        # A family who said STOP (or is suppressed) is never booked - by the
+        # setter or by staff - however the request reached here.
+        return {"ok": False, "status": "opted_out", "reason": "this family has opted out"}
     from app.services.sci_staging_demo import is_demo_lead
     from app.services.test_records import is_owner_test_lead
     owner_test = is_owner_test_lead(lead)

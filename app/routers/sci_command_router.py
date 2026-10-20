@@ -65,6 +65,13 @@ def _locations(db, org_id):
             .filter(LocationProfile.organization_id == org_id, LocationProfile.is_review_bucket.isnot(True)).all()}
 
 
+def _local_now():
+    """Booked times are stored as Central wall time - compare with Central now."""
+    from zoneinfo import ZoneInfo
+    from app.services.booking_time import DEFAULT_ZONE
+    return datetime.now(ZoneInfo(DEFAULT_ZONE)).replace(tzinfo=None)
+
+
 def _home_visit_waiting(conv) -> bool:
     """The family asked us to come to them and nobody has arranged it yet."""
     from app.services.programs.ai_setter import HOME_VISIT_REASON, memory_of
@@ -233,7 +240,7 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
     booked = (db.query(BookingLink).filter(BookingLink.lead_id.in_(org_leads),
                                            BookingLink.status.in_(("booked", "confirmed")),
                                            BookingLink.booked_time.isnot(None),
-                                           BookingLink.booked_time >= datetime.utcnow() - timedelta(hours=8)).count())
+                                           BookingLink.booked_time >= _local_now() - timedelta(hours=2)).count())
     contacted = (_eng.summary(db, org, since=start) or {}).get("contacted", 0)
 
     owner_alert = None

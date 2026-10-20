@@ -871,24 +871,49 @@ _ORD = {0: r"\b(first|1st|earlier|former|either|whichever|option (1|one)|#1)\b",
         1: r"\b(second|2nd|later|latter|option (2|two)|#2)\b"}
 
 
+_NEG_AFTER = re.compile(r"^[^.,;!?]{0,20}?\b(doesn'?t|does not|won'?t|will not|isn'?t|is not|not|can'?t|cannot|"
+                        r"no good|bad|busy)\b")
+_NEG_BEFORE = re.compile(r"\b(not|no|can'?t|cannot|won'?t|couldn'?t|except|but not)\b[^.,;!?]{0,12}$")
+
+
+def _picked(pattern: str, t: str) -> bool:
+    """The pattern appears in a clause that is not turning it down
+    ("Monday doesn't work", "not Monday", "can't do 10")."""
+    for m in re.finditer(pattern, t):
+        if _NEG_AFTER.search(t[m.end():]) or _NEG_BEFORE.search(t[:m.start()]):
+            continue
+        return True
+    return False
+
+
+def clock_named(body: str, slot: datetime) -> bool:
+    """The family's words name this slot's clock hour ("2", "2:00 pm", "noon")."""
+    t = (body or "").lower()
+    hour = int(slot.strftime("%I"))
+    if slot.hour == 12 and _picked(r"\bnoon\b", t):
+        return True
+    return _picked(r"\b%d(:%02d)?\s*(am|pm|a\.m\.|p\.m\.|o'?clock)?\b" % (hour, slot.minute), t) if slot.minute \
+        else _picked(r"\b%d(:00)?\s*(am|pm|a\.m\.|p\.m\.|o'?clock)?\b" % hour, t)
+
+
 def choice_evidence(body: str, slot: datetime, index: Optional[int]) -> bool:
     """Did the family actually pick THIS time? Their words must name its day,
-    date, hour or position - an AI's guess never books an appointment."""
+    date, hour or position - an AI's guess never books an appointment, and a
+    time they turned down ("Monday doesn't work") is never a pick."""
     t = (body or "").lower()
     if not t:
         return False
-    if re.search(r"\b%s\b" % slot.strftime("%A").lower(), t) or re.search(r"\b%s\b" % slot.strftime("%a").lower(), t):
+    if _picked(r"\b%s\b" % slot.strftime("%A").lower(), t) or _picked(r"\b%s\b" % slot.strftime("%a").lower(), t):
         return True
-    if re.search(r"\b%s\b" % slot.strftime("%B").lower(), t) and str(slot.day) in t:
+    if _picked(r"\b%s\b" % slot.strftime("%B").lower(), t) and str(slot.day) in t:
         return True
-    hour = int(slot.strftime("%I"))
-    if re.search(r"\b%d(:00)?\s*(am|pm|a\.m\.|p\.m\.|o'?clock)?\b" % hour, t):
+    if clock_named(body, slot):
         return True
-    if index is not None and index in _ORD and re.search(_ORD[index], t):
+    if index is not None and index in _ORD and _picked(_ORD[index], t):
         return True
-    if re.search(r"\bmorning\b", t) and slot.hour < 12:
+    if _picked(r"\bmorning\b", t) and slot.hour < 12:
         return True
-    if re.search(r"\b(afternoon|evening)\b", t) and slot.hour >= 12:
+    if _picked(r"\b(afternoon|evening)\b", t) and slot.hour >= 12:
         return True
     return False
 
@@ -1204,8 +1229,9 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                 preferred_day = slot.date()
                 # A day without a clock time ("Can you do Friday?") is a
                 # request for times THAT day, not a booking.
-                if not re.search(r"\d|noon|morning|afternoon|evening", (body or "").lower()) \
-                        or not choice_evidence(body, slot, None):
+                # A day part ("Thursday morning?") is a request for times
+                # too: only the family's own clock hour books an unoffered time.
+                if not clock_named(body, slot) or not choice_evidence(body, slot, None):
                     slot = None
                     action = "offer_times"
                     text = "Yes - would {TIMES} work for you?"
@@ -1276,7 +1302,24 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                 conv.last_ai_at = now
                 db.commit()
                 return dict(out, state=conv.state, booked_time=slot.isoformat())
-            if res.get("status") in ("taken", "unconfirmed", "already_booked"):
+            if res.get("status") == "opted_out":
+                conv.state = "stopped"
+                _turn(db, conv, "system", None, action="stop", reason="opted out - not booked, no further messages")
+                db.commit()
+                return dict(out, action="stop", state=conv.state)
+            if res.get("status") == "already_booked":
+                # They already have a visit and want a different time: a person
+                # moves it (the setter never reschedules). Never "filled up".
+                try:
+                    old = A.describe(datetime.fromisoformat(str(res.get("booked_time"))[:16]))
+                except (TypeError, ValueError):
+                    old = "their current time"
+                _handoff(db, prog, lead, conv, "wants to move their appointment from %s to %s"
+                         % (old, A.describe(slot)), notify=True)
+                text = ("Thank you. You're currently set for %s. I'll have someone reach out "
+                        "shortly to move it to %s if that time is still open." % (old, A.describe(slot)))
+                action = "handoff"
+            elif res.get("status") in ("taken", "unconfirmed"):
                 action = "offer_times"
                 was_offered = slot in choices
                 text = ("That time just filled up. Would {TIMES} work instead?" if was_offered

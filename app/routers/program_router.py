@@ -514,7 +514,9 @@ def program_appointments(when: str = Query("upcoming"), location_id: Optional[st
     """Booked visits for the program's families: upcoming (default), past or all."""
     from app.models.models import BookingLink
     prog = _program(db, user)
-    now = datetime.utcnow()
+    from app.services import booking_time as _bt
+    from zoneinfo import ZoneInfo as _ZI
+    now = datetime.now(_ZI(_bt.DEFAULT_ZONE)).replace(tzinfo=None)   # booked times are stored as local wall time
     q = (db.query(BookingLink, Lead).join(Lead, Lead.id == BookingLink.lead_id)
          .filter(Lead.organization_id == prog.organization_id, BookingLink.booked_time.isnot(None),
                  Lead.is_test.isnot(True),
@@ -544,7 +546,7 @@ def program_appointments(when: str = Query("upcoming"), location_id: Optional[st
         items.append({"id": b.id, "lead_id": l.id,
                       "name": " ".join(x for x in (l.first_name, l.last_name) if x) or "(no name)",
                       "phone": l.phone, "email": l.email, "location_id": loc, "location": names.get(loc),
-                      "when": b.booked_time.isoformat() + "Z", "status": b.status,
+                      "when": _bt.wire(db, b), "status": b.status,
                       "label": getattr(b, "appt_label", None), "minutes": getattr(b, "appt_duration", None)})
     return {"items": items, "when": when}
 
