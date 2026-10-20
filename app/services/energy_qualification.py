@@ -93,6 +93,11 @@ def fields_for(lead, cf: Dict[str, Any], segment: str) -> List[Dict[str, Any]]:
                    lead.notes or cf.get("question") or cf.get("message"), True),
         ]
     commercial = segment == "commercial"
+    c = cf.get("commercial") if isinstance(cf.get("commercial"), dict) else {}
+    locs = [l for l in (c.get("locations") or []) if isinstance(l, dict)]
+    loc_ends = sorted(l["contract_end_date"] for l in locs if l.get("contract_end_date"))
+    if not where and locs:
+        where = locs[0].get("address")
     return [
         _field("contact", "Email or phone", contact, True),
         _field("owner", "Atlantis advisor who owns this", lead.assigned_to_id, True),
@@ -100,10 +105,13 @@ def fields_for(lead, cf: Dict[str, Any], segment: str) -> List[Dict[str, Any]]:
         _field("company", "Business name", cf.get("company"),
                True, applies=commercial),
         _field("decision_maker", "Who signs for electricity", cf.get("decision_maker"), True, applies=commercial),
-        _field("locations", "Sites / meters", cf.get("locations") or cf.get("meters"), True, applies=commercial),
+        _field("locations", "Sites / meters",
+               ("%d recorded" % len(locs)) if locs else (cf.get("locations") or cf.get("meters")),
+               True, applies=commercial),
         _field("usage", "Usage or a recent bill", _usage_known(cf), True),
         _field("current_supplier", "Current supplier", cf.get("current_supplier"), False),
-        _field("contract_end_date", "Current contract ends", cf.get("contract_end_date"), commercial),
+        _field("contract_end_date", "Current contract ends",
+               cf.get("contract_end_date") or (loc_ends[0] if loc_ends else None), commercial),
         _field("move_date", "Move date", cf.get("move_date"), True, applies=(kind == "move")),
         _field("requested_start_date", "Wanted start date", cf.get("requested_start_date"), False),
         _field("consent", "Agreed to be contacted by text/phone",

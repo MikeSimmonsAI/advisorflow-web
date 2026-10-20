@@ -1015,3 +1015,85 @@ def request_missing_info(lead_id: str, request: Request, db: Session = Depends(g
         task.details = details
     db.commit()
     return {"task_id": task.id, "created": created, "missing": labels}
+
+
+# ── COMMERCIAL OPPORTUNITIES (advisor-led; see services/energy_commercial) ───
+
+class CommercialStageIn(BaseModel):
+    stage: str = Field(..., max_length=40)
+    note: str = Field("", max_length=500)
+    reason: str = Field("", max_length=300)
+    revisit_on: Optional[str] = Field(None, max_length=10)
+    expected_decision_date: Optional[str] = Field(None, max_length=10)
+    expected_annual_kwh: Optional[str] = Field(None, max_length=20)
+
+
+class CommercialLocationIn(BaseModel):
+    address: Optional[str] = None
+    utility: Optional[str] = None
+    meter_id: Optional[str] = None
+    current_supplier: Optional[str] = None
+    contract_end_date: Optional[str] = None
+    annual_kwh: Optional[str] = None
+    quote_status: Optional[str] = None
+    note: Optional[str] = None
+
+
+def _commercial_call(fn):
+    from app.services import energy_commercial as ec
+    try:
+        return fn(ec)
+    except ec.NotCommercial as exc:
+        raise HTTPException(409, str(exc))
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.get("/leads/{lead_id}/commercial")
+def commercial_view(lead_id: str, request: Request, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user)):
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    return _commercial_call(lambda ec: ec.view(lead))
+
+
+@router.post("/leads/{lead_id}/commercial/stage", dependencies=[Depends(require_not_observation)])
+def commercial_stage(lead_id: str, body: CommercialStageIn, request: Request,
+                     db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Move a commercial opportunity. Won only after supplier confirmation;
+    never marks enrollment; nothing is sent to anyone."""
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    out = _commercial_call(lambda ec: ec.set_stage(
+        db, lead, stage=body.stage, actor_id=user.id, note=body.note, reason=body.reason,
+        revisit_on=body.revisit_on, expected_decision_date=body.expected_decision_date,
+        expected_annual_kwh=body.expected_annual_kwh))
+    log_action(db, lead.organization_id, user.id, action="energy.commercial_stage",
+               target_type="lead", target_id=lead.id, details={"stage": body.stage}, commit=False)
+    db.commit()
+    return out
+
+
+@router.post("/leads/{lead_id}/commercial/locations", dependencies=[Depends(require_not_observation)])
+def commercial_add_location(lead_id: str, body: CommercialLocationIn, request: Request,
+                            db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    out = _commercial_call(lambda ec: ec.add_location(lead, body.model_dump(exclude_none=True)))
+    if not out.get("duplicate"):
+        log_action(db, lead.organization_id, user.id, action="energy.commercial_location_added",
+                   target_type="lead", target_id=lead.id, details={"location_id": out["location"]["id"]},
+                   commit=False)
+    db.commit()
+    return out
+
+
+@router.patch("/leads/{lead_id}/commercial/locations/{loc_id}",
+              dependencies=[Depends(require_not_observation)])
+def commercial_update_location(lead_id: str, loc_id: str, body: CommercialLocationIn, request: Request,
+                               db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    out = _commercial_call(lambda ec: ec.update_location(lead, loc_id, body.model_dump(exclude_unset=True)))
+    log_action(db, lead.organization_id, user.id, action="energy.commercial_location_updated",
+               target_type="lead", target_id=lead.id, details={"location_id": loc_id}, commit=False)
+    db.commit()
+    return out
