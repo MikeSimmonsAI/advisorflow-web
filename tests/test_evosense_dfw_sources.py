@@ -690,3 +690,33 @@ def test_negative_signals_subtract_and_never_stack():
     res = SC.property_opportunity(P(), stacked, None)
     labels = [f["label"] for f in res["factors"]]
     assert res["value"] == 0 and not any("Two signals" in l for l in labels)
+
+
+def test_no_database_transaction_is_held_open_across_a_source_call(client, db_session, sample_org,
+                                                                   dfw_files, fake_apis, monkeypatch):
+    """2026-10-20 14:25 UTC: a scheduled hunt held a transaction open while
+    a slow city lookup ran; Postgres ended the idle-in-transaction connection
+    after 5 minutes (deps.py) and the hunt failed with PendingRollbackError.
+    Every discovery download and every lookup batch must start with the
+    session's transaction closed."""
+    db = db_session
+    _, h = _admin(db, sample_org)
+    _enable(client, h, *ALL_DFW)
+    seen = []
+
+    def guard(original, label):
+        def wrapped(self, *a, **kw):
+            seen.append((label, db.in_transaction()))
+            return original(self, *a, **kw)
+        return wrapped
+    for name in dir(PV):
+        cls = getattr(PV, name)
+        if isinstance(cls, type) and issubclass(cls, PV.PublicRecordSource) and cls is not PV.PublicRecordSource:
+            for meth in ("search", "lookup_many"):
+                if meth in cls.__dict__:
+                    monkeypatch.setattr(cls, meth, guard(cls.__dict__[meth], "%s.%s" % (name, meth)))
+    s = _pilot(client, h)
+    out = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % s["id"], headers=h))
+    assert out["status"] == "succeeded", out
+    assert any(l.endswith(".search") for l, _ in seen) and any(l.endswith(".lookup_many") for l, _ in seen)
+    assert [l for l, open_ in seen if open_] == [], "a transaction was open during a network call"

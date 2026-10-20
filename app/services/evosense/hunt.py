@@ -212,6 +212,11 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
             break
         cfg.last_attempt_at = C.now()
         pq = dict(q, limit=min(share, max_properties - len(touched)))
+        # NO DATABASE TRANSACTION IS HELD OPEN ACROSS A NETWORK CALL. A county
+        # download can take minutes; the app's connections end any transaction
+        # idle for 5 minutes (deps.py), and the hunt then failed with
+        # PendingRollbackError at its next commit (2026-10-20 14:25 UTC).
+        db.commit()
         try:
             records = provider.search(cap, pq)
         except Exception as exc:  # noqa: BLE001 - one failing source never ends the hunt
@@ -418,8 +423,10 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                 continue
             cfg.last_attempt_at = C.now()
             by_id = {p.id: p for p in queued}
+            targets = [_target(p) for p in queued]
+            db.commit()                 # never idle in a transaction during the lookups (see _hunt_body)
             try:
-                res = provider.lookup_many([_target(p) for p in queued])
+                res = provider.lookup_many(targets)
             except Exception as exc:  # noqa: BLE001 - systemic source failure: recorded per property
                 _source_failed(db, org_id, strategy, provider, cfg, exc, counts, None)
                 code = exc.code if isinstance(exc, SRC.SourceError) else type(exc).__name__
