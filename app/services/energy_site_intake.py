@@ -71,7 +71,7 @@ _MOVE_SERVICES = {
     "utility support": "water",
 }
 _COPY_FIELDS = ("service_area", "monthly_usage", "locations", "move_date",
-                "services_requested", "request_type")
+                "services_requested", "request_type", "company")
 
 
 def is_energy(org) -> bool:
@@ -161,6 +161,9 @@ def handle(db: Session, *, site, organization, result: Dict[str, Any],
     done["request_kind"] = kind
 
     def _queue():
+        nonlocal lead
+        from app.services.energy_suppliers import _lock
+        lead = _lock(db, lead)
         if (lead.tier or "") in ("", "web_lead"):
             lead.tier = "new_inquiry"
         cf = _cf(lead)
@@ -206,6 +209,7 @@ def handle(db: Session, *, site, organization, result: Dict[str, Any],
                 EnergyMoveRequest.lead_id == lead.id,
                 EnergyMoveRequest.status.in_(OPEN_MOVE_STATUSES)).first()
             if existing is not None:
+                _refresh_move(existing, payload)
                 return existing.id
             services = move_services(payload.get("services_requested"))
             name = " ".join(x for x in (lead.first_name, lead.last_name) if x) or None
@@ -228,9 +232,44 @@ def handle(db: Session, *, site, organization, result: Dict[str, Any],
         name = " ".join(x for x in (lead.first_name, lead.last_name) if x) or "Someone"
         what = str(payload.get("request_type") or "").strip()
         msg = "Website request from %s%s - contact them." % (name, (": " + what[:80]) if what else "")
+        if getattr(lead, "is_test", False):
+            msg = "TEST record - " + msg
         for uid in users:
             db.add(Notification(user_id=uid, lead_id=lead.id, type=NotificationType.DEMO_REQUEST,
                                 message=msg, link="/rate-requests?open=%s" % lead.id))
         return len(users)
     done["alerted"] = _step(db, "alert", _alert) or 0
     return done
+
+
+
+def _refresh_move(m, payload: Dict[str, Any]) -> None:
+    """The same customer sent the move form again while their move is open.
+    A new move date replaces the old one (the customer knows their date) and a
+    newly picked service is ADDED with an unticked checklist item. Nothing is
+    removed and no ticked item is touched - an advisor's work is never undone
+    by a website form. Each change is noted on the move."""
+    from app.routers.energy_ops_router import SERVICES
+    notes = []
+    new_date = _parse_date(payload.get("move_date"))
+    if new_date and new_date != m.move_date:
+        notes.append("Customer re-sent the website form: move date %s -> %s."
+                     % (m.move_date.isoformat() if m.move_date else "not given", new_date.isoformat()))
+        m.move_date = new_date
+    services = json.loads(m.services) if m.services else []
+    checklist = json.loads(m.checklist) if m.checklist else []
+    keys = {i.get("key") for i in checklist}
+    added = [s for s in move_services(payload.get("services_requested")) if s not in services]
+    for s in added:
+        services.append(s)
+        if "svc_" + s not in keys:
+            checklist.insert(max(len(checklist) - 1, 0),
+                             {"key": "svc_" + s, "label": "Arrange: %s" % SERVICES[s],
+                              "done": False, "done_at": None, "done_by": None})
+    if added:
+        notes.append("Customer re-sent the website form and added: %s."
+                     % ", ".join(SERVICES[s] for s in added))
+        m.services = json.dumps(services)
+        m.checklist = json.dumps(checklist)
+    if notes:
+        m.notes = ((m.notes + "\n") if m.notes else "") + " ".join(notes)
