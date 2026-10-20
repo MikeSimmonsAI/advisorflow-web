@@ -506,10 +506,10 @@ ALT_HOME, ALT_PHONE, ALT_GUIDE, ALT_NONE = "home_visit", "phone", "guide", "none
 # in" / "stop over", which is a family coming in (Oct 19 overnight: the bare word
 # made an arriving family look like an opt-out). A real STOP is caught earlier by
 # the opt-out rules and never reaches the setter at all.
-_HARD_NO = re.compile(r"(^\s*stop\s*[.!]*\s*$|\bstop (texting|messaging|contacting|calling|emailing|sending|"
-                      r"bothering|it)\b|\b(unsubscribe|not interested|no thanks|no thank you|don'?t (text|contact|call|"
-                      r"message|email|bother)|do not (text|contact|call)|remove me|take me off|leave me alone|"
-                      r"wrong (number|person)|not for me|lose my number|quit (texting|messaging))\b)", re.I)
+_HARD_NO = re.compile(r"(\bstop\b(?!\s+(by|in|over|at|out|on)\b)|\b(unsubscribe|not interested|no thanks|no thank you|"
+                      r"don'?t (text|contact|call|message|email|bother)|do not (text|contact|call|message|email)|"
+                      r"remove me|take me off|leave me alone|wrong (number|person)|not for me|lose my number|"
+                      r"quit (texting|messaging))\b)", re.I)
 _BARE_NO = re.compile(r"^\s*(no+|nope|nah|no sir|no ma'?am|no,? i can'?t|i can'?t|can'?t|not really|negative)"
                       r"\s*[.!]*\s*$", re.I)
 _CANT_GET_THERE = re.compile(r"(can'?t (get|make it|drive|come)( (there|in|out|by|over))?\b|no (ride|transportation|car)\b|"
@@ -518,14 +518,19 @@ _CANT_GET_THERE = re.compile(r"(can'?t (get|make it|drive|come)( (there|in|out|b
 _NOT_THESE_TIMES = re.compile(r"\b(not this week|this week (is|isn'?t|won'?t|doesn'?t)|neither (one|of those|works|time)|"
                               r"none of (those|them|these)|those (times|days) (don'?t|won'?t)|not (those|that) "
                               r"(days?|times?))\b", re.I)
-_NO_HOME = re.compile(r"(don'?t want (anyone|anybody|someone|people|you) (coming|to come|at|in)( to| at)? my "
-                      r"(house|home|place)|not (at|to) my (house|home)|no home visits?|don'?t come to my)", re.I)
+_NO_HOME = re.compile(r"(don'?t (want|need) (anyone|anybody|someone|somebody|people|you|a home visit|home visits)|"
+                      r"(do not|don'?t|please don'?t|no need to) (come|visit|stop by)( out)?( to| at)? (my|our|the) "
+                      r"(house|home|place)|(nobody|no one|no-one) (should|needs to|can|is to) come|not (at|to) my (house|home)|"
+                      r"no home visits?|not a home visit|no visits? at (my|our) (house|home))", re.I)
 _INVITED_IN = re.compile(r"(stop by|come (in|by|out|see)|swing by|drop by|short visit|for a visit|visit (with )?us|"
                          r"sit down (with (me|us) )?(here|at)|meet (with )?(me|us) (here|at)|in person)", re.I)
-_WANTS_HOME = re.compile(r"(come (to|out to|by) (me|my (house|home|place)|the house)|can (you|someone|somebody|anyone) "
-                         r"(come|stop by|drop by|visit)( (here|out|over|to (me|my (house|home|place))))?\b(?! to (the|your))|"
-                         r"(rather|prefer|easier if|better if) (you|someone) (came|come|visit)|visit (me )?at (my )?home|"
-                         r"(meet|see me) at my (house|home|place)|home visit)", re.I)
+_WANTS_HOME = re.compile(r"(come (to|out to|over to) (me|us|my|our|her|his|their)\b(?! office)|"
+                         r"come (out|over) (here|to (me|us|my|our|her|his))|\bcome over\b(?! to (the|your|restland))|"
+                         r"(rather|prefer|easier if|better if) (you|someone|somebody) (came|come|visit)|"
+                         r"visit (me|us|her|him|them) at ((my|our|her|his|their) )?(home|house|place)|"
+                         r"(meet|see) (me|us) at (my|our) (house|home|place)|"
+                         r"(can'?t|cannot|unable to|doesn'?t|does not) (leave|get out of) the house|homebound|"
+                         r"\bhome visit\b)", re.I)
 HOME_VISIT_REASON = "Home visit requested - call the family to set a time"
 _OFFERS_HOME = re.compile(r"(come to (you|your (home|house|place))|(to|at) your (home|house|place)|stop by your|"
                           r"visit you at|bring it (by|over) to you|meet you at your)", re.I)
@@ -565,8 +570,12 @@ def _last_outbound(db, lead) -> str:
     return ""
 
 
+def _plain(text: Optional[str]) -> str:
+    return (text or "").replace("\u2019", "'").replace("\u2018", "'").strip()
+
+
 def what_was_declined(body: str, last_outbound: str, times_on_table: bool) -> Optional[str]:
-    b = (body or "").strip()
+    b = _plain(body)
     if not b:
         return None
     if _HARD_NO.search(b):
@@ -622,9 +631,14 @@ def decline_context(db, lead, conv, body: str) -> Dict:
     alt = alternative_for(db, lead, conv, declined) if declined in (DECLINED_VENUE, CANT_GET_THERE, DECLINED_HOME) \
         else ALT_NONE
     home_ok = bool(_location_settings(db, lead).get("home_visits"))
-    asks_home = bool(_WANTS_HOME.search(body or "")) and declined != DECLINED_HOME
-    accepted_home = already == ALT_HOME and bool(re.search(r"^\s*(yes|yeah|yep|sure|ok(ay)?|that would|please|"
-                                                           r"that works|sounds good|definitely|absolutely)", body or "", re.I))
+    b = _plain(body)
+    blocked = declined in (DECLINED_HOME, DECLINED_STOP)
+    asks_home = bool(_WANTS_HOME.search(b)) and not blocked
+    # A plain yes to OUR home-visit offer - not "ok, but I'd rather come in".
+    accepted_home = (already == ALT_HOME and not blocked
+                     and bool(re.search(r"^\s*(yes|yeah|yep|sure|ok(ay)?|that would|please|that works|sounds good|"
+                                        r"definitely|absolutely)\b", b, re.I))
+                     and not re.search(r"\b(but|rather|instead|come in|come there|stop by there|not)\b", b, re.I))
     return {"what_was_declined": declined, "alternative_to_offer": ALT_NONE if already else alt,
             "alternative_already_offered": already or None,
             "home_visits_offered_by_this_location": home_ok,
@@ -1028,7 +1042,10 @@ def _handoff(db, prog, lead, conv, reason, *, notify: bool):
             from app.services.programs import responses as R
             import html as _html
             who = L.first_last(lead)
-            sms = L.sms_line("handoff", who, detail="needs a person - %s" % (reason or ""),
+            home = reason == HOME_VISIT_REASON
+            sms = L.sms_line("home_visit" if home else "handoff", who,
+                             detail=("asked for a visit at home - call to set a time" if home
+                                     else "needs a person - %s" % (reason or "")),
                              link=L.family_link(lead.id))
             subject = "%s - %s needs a person" % (R.alert_title(prog), who)
             body = "<p>%s needs a person: %s</p>" % (_html.escape(who), _html.escape(reason or ""))

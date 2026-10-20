@@ -279,3 +279,47 @@ def test_the_advisor_alert_says_home_visit_request(setter, sample_advisor, monke
         R.on_inbound(db, lead, "Can someone come to my house?", "sms")
     texts = [c.kwargs["body"] for c in client.messages.create.call_args_list]
     assert texts and texts[0].startswith("SCI Home Visit Request | Ollie Testcase")
+
+
+# ── independent review findings (overnight Oct 19) ───────────────────────────
+
+@pytest.mark.parametrize("body", ["Please stop", "Stop please", "pls stop", "STOP NOW", "Stop. Thank you",
+                                  "stop this", "stop these texts", "Stop the messages"])
+def test_polite_stops_are_still_stops(body):
+    assert S.what_was_declined(body, INVITE, False) == S.DECLINED_STOP
+
+
+@pytest.mark.parametrize("body", ["Do not come to my house", "Please don’t come to my house",
+                                  "Nobody should come to my home", "I don't want a home visit",
+                                  "We don't need a home visit, we'll come in"])
+def test_dont_come_to_my_home_is_never_a_home_visit_request(body):
+    assert S.what_was_declined(body, INVITE, False) == S.DECLINED_HOME
+
+
+@pytest.mark.parametrize("body", ["Can you come up with another time?", "Can you come back to me next week?",
+                                  "Can you come down on the price?", "Can you visit Saturday instead?",
+                                  "Can someone come out to the cemetery with me?", "Can you come to Restland Saturday?",
+                                  "Can you stop by the funeral home and grab it", "I can stop by today.",
+                                  "Can I come by Friday?"])
+def test_ordinary_scheduling_is_not_a_home_visit_request(body):
+    assert not S._WANTS_HOME.search(S._plain(body))
+
+
+@pytest.mark.parametrize("body", ["Can someone come to my house?", "I'd rather you come to me", "Could you come over?",
+                                  "Would you be able to come to us?",
+                                  "My mom can't leave the house, could you visit her?", "Could you visit me at home",
+                                  "home visit please", "Can you come out here?"])
+def test_real_home_visit_requests_are_recognised(body):
+    assert S._WANTS_HOME.search(S._plain(body))
+
+
+def test_a_stop_after_a_home_offer_is_never_a_home_visit_page(setter, sample_advisor):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    _location(db, lead, home_visits=True)
+    conv = S.conversation_for(db, lead, create=True)
+    conv.memory = json.dumps({"alternative_offered": S.ALT_HOME})
+    db.commit()
+    for body in ("Yes stop sending these", "Ok, but I'd rather come in Tuesday"):
+        dc = S.decline_context(db, lead, conv, body)
+        assert not dc["family_asks_for_home_visit"], body

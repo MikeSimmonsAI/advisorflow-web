@@ -243,7 +243,8 @@ def alert_content(db: Session, prog: OutreachProgram, resp: ProgramResponse, kin
         except ValueError:
             _found = []
         sms_kind = HOT if (APPOINTMENT in _found or not _found) else "handoff"
-    if kind == "handoff" and (event.get("reason") or "").startswith("Home visit requested"):
+    from app.services.programs.ai_setter import HOME_VISIT_REASON as _HV
+    if kind == "handoff" and event.get("reason") == _HV:
         sms_kind = "home_visit"
     detail = None
     if kind == "booked" and event.get("when"):
