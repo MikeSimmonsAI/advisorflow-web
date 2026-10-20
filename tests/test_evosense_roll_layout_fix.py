@@ -73,14 +73,16 @@ def world(db_session, sample_org):
 
 
 def _state(db, org):
-    return {
-        "signals": sorted((s.id, s.active, s.normalized_value) for s in db.query(EvoSenseSignal).filter_by(organization_id=org)),
-        "props": sorted((p.id, p.opportunity_score, p.status) for p in db.query(EvoSenseProperty).filter_by(organization_id=org)),
-        "owners": sorted((o.id, o.display_name, o.mailing_street, o.mailing_zip) for o in db.query(EvoSenseOwner).filter_by(organization_id=org)),
-        "obs": sorted((o.id, o.adapter_version, o.payload) for o in db.query(EvoSenseObservation).filter_by(organization_id=org)),
-        "scores": sorted((s.id, s.is_current) for s in db.query(EvoSenseScore).filter_by(organization_id=org)),
-        "runs": db.query(EvoSenseReprocessRun).count(),
-    }
+    """Every row of every table the repair can write, in full."""
+    from app.models.evosense_models import EvoSensePerson, EvoSenseOwnership
+    out = {}
+    for model in (EvoSenseProperty, EvoSenseSignal, EvoSenseOwner, EvoSenseOwnership, EvoSenseObservation,
+                  EvoSensePerson):
+        out[model.__tablename__] = sorted(json.dumps(RF._row(o), sort_keys=True, default=str)
+                                          for o in db.query(model).filter_by(organization_id=org).all())
+    out["scores"] = sorted((s.id, s.is_current) for s in db.query(EvoSenseScore).filter_by(organization_id=org))
+    out["runs"] = db.query(EvoSenseReprocessRun).count()
+    return out
 
 
 def test_scope_is_exactly_the_misread_records(world):
@@ -136,13 +138,54 @@ def test_apply_needs_the_code_then_matches_the_dry_run_and_rolls_back_exactly(wo
         RP.rollback(db, org, run, user=None)
     RF.rollback(db, org, out["run_id"])
     db.commit()
+    db.expire_all()
     after = _state(db, org)
-    was = {s[0]: s[1:] for s in before["signals"]}
-    now = {s[0]: s[1:] for s in after["signals"]}
-    assert {k: now[k] for k in was} == was                        # every signal back as it was
-    assert all(not now[k][0] for k in set(now) - set(was))        # anything the repair made is off
-    assert after["props"] == before["props"] and after["owners"] == before["owners"]
-    assert after["obs"] == before["obs"]
+    before.pop("runs"), after.pop("runs")
+    for k in before:
+        assert after[k] == before[k], k                     # every row exactly as before
+
+
+def test_rollback_refuses_once_anything_changed_after_the_repair(world):
+    from app.services.evosense import signals as SIG
+    db, org = world["db"], world["org"]
+    out = RF.apply(db, org, confirm=RF.dry_run(db, org)["confirm_with"])
+    db.commit()
+    SIG.upsert(db, world["not_owed"], "MANUAL_OPERATOR_SIGNAL", source="manual", connector_kind="manual",
+               source_reference="person-1", confidence=70, normalized_value="seen boarded up")
+    db.commit()
+    snapshot = _state(db, org)
+    with pytest.raises(ValueError, match="Changed since the repair"):
+        RF.rollback(db, org, out["run_id"])
+    db.rollback()
+    assert _state(db, org) == snapshot                     # nothing undone
+
+
+def test_the_corrected_owner_joins_the_existing_identical_owner(db_session, sample_org):
+    """Production: the appraisal district already holds the same owner under
+    the full name. The repair re-links instead of creating a twin, and the
+    owner conflict the misread caused is settled."""
+    from app.models.evosense_models import EvoSenseOwnership
+    db, org = db_session, sample_org.id
+    p = _misread(db, org, v2_line(account="710001", owner1="GARCIA FILIBERTO", addr1="9 FAR AWAY LN"),
+                 "100 FIRST ST")
+    tad = {"source_reference": "TAD:710001:2026", "street_address": "100 FIRST ST", "city": "Fort Worth",
+           "state": "TX", "county": "Tarrant", "parcel_apn": "710001",
+           "owner": {"name": "GARCIA FILIBERTO", "mailing_street": "9 FAR AWAY LN", "mailing_city": "FORT WORTH",
+                     "mailing_state": "TX", "mailing_zip": "76106"}}
+    IN.ingest(db, org, PV.PROVIDERS["tad"], "ASSESSOR", tad)
+    db.commit()
+    assert len({l.owner_id for l in db.query(EvoSenseOwnership).filter_by(property_id=p.id, is_current=True)}) == 2
+    rep = RF.dry_run(db, org)
+    row = [x for x in rep["properties"] if x["property_id"] == p.id][0]
+    assert row["owner"]["action"] == "relink" and rep["totals"]["owners_relinked_to_existing"] == 1
+    owners_before = db.query(EvoSenseOwner).filter_by(organization_id=org).count()
+    RF.apply(db, org, confirm=rep["confirm_with"])
+    db.commit()
+    links = db.query(EvoSenseOwnership).filter_by(property_id=p.id, is_current=True).all()
+    assert len({l.owner_id for l in links}) == 1 and not any(l.in_conflict for l in links)
+    db.refresh(p)
+    assert not p.has_conflicts
+    assert db.query(EvoSenseOwner).filter_by(organization_id=org).count() == owners_before   # no twin
 
 
 def test_a_shared_owner_is_left_alone_and_listed(world, db_session, sample_org):
@@ -205,3 +248,26 @@ def test_tarrant_roll_only_pause_leaves_every_other_source_and_search_running(
                         json={"key": "tarrant_tax_roll", "enabled": True}).status_code == 200
     db.expire_all()
     assert {p.key for _, p, _ in HU._discovery_routes(db, org)} == before
+
+
+def test_relink_when_the_right_owner_is_already_linked_from_the_same_source(db_session, sample_org):
+    """An earlier (correctly read) roll already linked the right owner: the
+    misread link simply stops being current - no duplicate link."""
+    from app.models.evosense_models import EvoSenseOwnership
+    db, org = db_session, sample_org.id
+    p = _misread(db, org, v2_line(account="720001", owner1="GARCIA FILIBERTO", addr1="9 FAR AWAY LN"),
+                 "100 FIRST ST")
+    good = TT.TarrantTaxRollReader().record_from_raw(v2_line(account="720001", owner1="GARCIA FILIBERTO",
+                                                             addr1="9 FAR AWAY LN"), "x", ROLL_DATE)
+    good["street_address"] = "100 FIRST ST"
+    good["source_reference"] = "TCTAX:720001:20260925"
+    IN.ingest(db, org, PV.PROVIDERS["tarrant_tax_roll"], "TAX", good)
+    db.commit()
+    rep = RF.dry_run(db, org)
+    assert [x for x in rep["properties"] if x["property_id"] == p.id][0]["owner"]["action"] == "relink"
+    out = RF.apply(db, org, confirm=rep["confirm_with"])
+    db.commit()
+    cur = db.query(EvoSenseOwnership).filter_by(property_id=p.id, is_current=True).all()
+    assert len({l.owner_id for l in cur}) == 1
+    RF.rollback(db, org, out["run_id"])
+    db.commit()
