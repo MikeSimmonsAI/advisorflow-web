@@ -336,7 +336,7 @@ import AIWorkforceEmployee from './pages/AIWorkforceEmployee'
 const GodAIWorkforceBuilder = lazyPage(() => import('./pages/god/GodAIWorkforceBuilder'))
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
-         clearWorkspaceContext, getBranding } from './api/client'
+         clearWorkspaceContext, getBranding, fetchAndStoreBranding } from './api/client'
 import { decideWorkspaceAccess, contextsListWorkspace,
          VERIFYING, AUTHORIZED, DENIED, UNVERIFIED } from './auth/workspaceGuard'
 import { roleOf, routeFeatureDenied } from './auth/workspaceAuthority'
@@ -602,6 +602,35 @@ function useAuthorizedContexts() {
 }
 
 /**
+ * Validate the newly selected product workspace branding BEFORE navigating
+ * to a feature-guarded app. Cached SCI or Roofing branding must not cause a
+ * false refusal when switching to Wholesale.
+ */
+function ProductWorkspaceLaunch({ organizationId, destination }) {
+  const [state, setState] = useState('loading')
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    let alive = true
+    setState('loading')
+    fetchAndStoreBranding().then(b => {
+      if (alive) setState(b?.organization_id === organizationId ? 'ready' : 'error')
+    }).catch(() => { if (alive) setState('error') })
+    return () => { alive = false }
+  }, [organizationId, attempt])
+  if (state === 'ready') return <Navigate to={destination} replace />
+  return <main style={{ minHeight: '80vh', display: 'grid', placeItems: 'center', padding: 24 }}>
+    <div style={{ maxWidth: 420, textAlign: 'center' }}>
+      <h1 style={{ fontSize: 23 }}>{state === 'loading' ? 'Opening your program…' : 'Could not open this program'}</h1>
+      {state === 'error' && <>
+        <p>Your workspace could not be verified. Nothing was changed.</p>
+        <button type="button" onClick={() => setAttempt(a => a + 1)}>Try again</button>
+        <a href="/workspaces" style={{ display: 'block', marginTop: 14 }}>Choose another program</a>
+      </>}
+    </div>
+  </main>
+}
+
+/**
  * WorkspaceRoute — entering one customer workspace.
  *
  * The id in the URL is checked SERVER-SIDE before anything renders. A person
@@ -704,7 +733,7 @@ function WorkspaceRoute() {
     ).get('product')
     if (requestedProduct) {
       const path = productWorkspaceDestination(ctx, organizationId, requestedProduct)
-      if (path) return <Navigate to={path} replace />
+      if (path) return <ProductWorkspaceLaunch organizationId={organizationId} destination={path} />
       return <Navigate to="/workspaces" replace />
     }
     // ProtectedRoute already wraps its children in Layout + ContextBanner; the
