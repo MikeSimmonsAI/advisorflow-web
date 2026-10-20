@@ -69,8 +69,20 @@ _INTENT_PATTERNS = [
 ]
 SLA_BREACH_LABEL = "HOT RESPONSE — NOT YET HANDLED"
 
+# Days and times a family names when they are choosing or shaping a visit
+# (overnight Oct 19: "Saturday works better" and "Maybe next week" were LOW).
+_DAYS = r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekend|tomorrow|today|tonight)"
+_WEEKDAYS = r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekend)"
+_TIMING = (r"\b(%s|next week|this week|(this|in the|tomorrow) (morning|afternoon|evening)|mornings|afternoons|"
+           r"evenings|(after|before) (lunch|work|church|noon|school|\d{1,2})|(until|till|til) (\d{1,2}|noon|one|two|"
+           r"three|four|five|six|seven|eight))\b" % _WEEKDAYS)
+_SCHEDULE_PICK = (r"(?<!n't )(?<!not )(?<!no )\b(works (better|best|for (me|us))|(is|would be) (better|best) for (me|us)|"
+                  r"(i'?m|i am|we'?re|we are) (free|available)|%s\b(?![^.?!]{0,25}?\b(not|n'?t|no)\b)[^.?!]{0,25}?"
+                  r"\b(works|is good|is fine|good for|better|best))\b" % _DAYS)
+
 _HOT_PATTERNS = [
     (r"\b(appointment|appt|schedule|book|meet(ing)?|visit|tour|come (by|in|out)|stop by)\b", "wants a meeting or visit"),
+    (_SCHEDULE_PICK, "picked or suggested a time"),
     (r"\b(price|pricing|cost|costs|how much|payment|plan options|financ)", "asked about price"),
     (r"(?<!not )(?<!no longer )\b(interested|yes please|sounds good|i('| a)m in|sign me up|let'?s do)\b", "interested"),
     (r"\b(call me|reach (out|me)|get back to me|follow ?up|contact me|text me)\b", "requests follow-up"),
@@ -88,7 +100,8 @@ _BAD_DATA_PATTERNS = (r"\b(wrong (number|person|email|address)|this is not (him|
 # Of those, the ones about the PERSON (not the number/address on file).
 _WRONG_PERSON_PATTERNS = (r"\b(wrong person|this is not (him|her|me)|not (him|her)|no one (here )?by that name|"
                           r"(he|she) (doesn'?t|does not) live here|you have the wrong(?! (?:number|email|address))|not the right person)\b")
-_BEREAVEMENT = r"\b(passed away|passed on|died|deceased|funeral for|lost my (husband|wife|mother|father|son|daughter))\b"
+_BEREAVEMENT = (r"\b(passed away|passed on|died|deceased|funeral for|lost my (husband|wife|mother|father|son|daughter)|"
+                r"buried (my|our))\b")
 _LOW_PATTERNS = r"^\s*(ok(ay)?|k|thanks?( you)?|ok thanks?|thank you|thx|got it|received|👍|🙏)[\s.!]*$"
 
 _CLASS_FROM_REPLY = {
@@ -126,6 +139,8 @@ def classify(body: str, reply_classification: Optional[str] = None) -> Dict:
         return {"class": upstream, "reasons": ["classified as %s on arrival" % reply_classification]}
     if re.search(_LOW_PATTERNS, text) or not text:
         return {"class": LOW, "reasons": ["acknowledgement only"]}
+    if re.search(_TIMING, text):
+        return {"class": ACTIVE, "reasons": ["talked about when"]}
     if re.search(_INFO_ASK, text):
         return {"class": ACTIVE, "reasons": ["wants more information"]}
     if "?" in text or upstream == ACTIVE:
@@ -142,6 +157,9 @@ def intents(body: str, cls: Optional[str] = None) -> List[str]:
     wrong person, bad data, a bare acknowledgement, not interested)."""
     text = (body or "").strip().lower()
     found = [k for k, pat in _INTENT_PATTERNS if re.search(pat, text)]
+    if APPOINTMENT not in found and not re.search(_BEREAVEMENT, text) and (
+            re.search(_TIMING, text) or re.search(_SCHEDULE_PICK, text)):
+        found.insert(0, APPOINTMENT)                     # a day / time named is about a visit
     if re.search(_OPT_OUT_PHRASES, text) and re.search(r"\b(not interested|no thank(s| you))\b", text):
         found.append(NOT_INTERESTED)
     implied = {OPT_OUT: I_OPT_OUT, WRONG_PERSON: I_WRONG_PERSON, BAD_DATA: I_BAD_DATA}.get(cls)

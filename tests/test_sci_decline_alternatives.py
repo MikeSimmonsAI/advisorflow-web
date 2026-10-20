@@ -323,3 +323,33 @@ def test_a_stop_after_a_home_offer_is_never_a_home_visit_page(setter, sample_adv
     for body in ("Yes stop sending these", "Ok, but I'd rather come in Tuesday"):
         dc = S.decline_context(db, lead, conv, body)
         assert not dc["family_asks_for_home_visit"], body
+
+
+# --- 5C appointment-intent recognition (Oct 20 overnight) ------------------
+from app.services.programs import reply_rules as _rr
+
+
+@pytest.mark.parametrize("text,cls,appt", [
+    ("Saturday works better.", "hot", True),
+    ("Tomorrow is good", "hot", True),
+    ("I'm free Thursday", "hot", True),
+    ("Monday works for us", "hot", True),
+    ("Maybe next week", "active", True),
+    ("I work until five", "active", True),
+    ("After church on Sunday", "active", True),
+    ("Friday doesn't work for me", "active", True),
+    ("Saturday is not good", "active", True),
+    ("I'm not free Thursday", "active", True),
+    ("Today was a hard day", "active", False),
+    ("Tomorrow is my birthday", "active", False),
+])
+def test_timing_replies_are_recognised(text, cls, appt):
+    c = _rr.classify(text)
+    assert c["class"] == cls, (text, c)
+    assert (_rr.APPOINTMENT in _rr.intents(text, c["class"])) is appt, text
+
+
+def test_burial_is_bereavement_not_a_time_pick():
+    c = _rr.classify("We buried my wife on Tuesday")
+    assert "bereavement" in c["reasons"][0]
+    assert _rr.APPOINTMENT not in _rr.intents("We buried my wife on Tuesday", c["class"])
