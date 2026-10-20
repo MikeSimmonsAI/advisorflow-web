@@ -176,3 +176,32 @@ def test_routes_are_admin_only_and_the_dry_run_writes_nothing(client, world, adm
                        json={"confirm": "nope"}).status_code == 422
     assert client.post("/wholesale/evosense/roll-fix/%s/rollback" % rid, headers=admin_auth_headers,
                        json={"confirm": "ROLLBACK %s" % rid}).status_code == 200
+
+
+def test_tarrant_roll_only_pause_leaves_every_other_source_and_search_running(
+        client, db_session, sample_org, admin_auth_headers):
+    """The stand-by plan if the fix cannot ship before the next hunt: switch
+    off ONLY the Tarrant tax-roll source (Controls > Sources, or
+    PATCH /wholesale/evosense/providers). Searches are not edited."""
+    from app.services.evosense import hunt as HU
+    db, org = db_session, sample_org.id
+    keys = ("tarrant_tax_roll", "dallas_trw", "lgbs_tax_sales", "dcad", "collin_cad", "denton_gis",
+            "fw_open_cases")
+    for k in keys:
+        PV.config(db, org, k).enabled = True
+    db.commit()
+    before = {p.key for _, p, _ in HU._discovery_routes(db, org)}
+    assert "tarrant_tax_roll" in before
+    r = client.patch("/wholesale/evosense/providers", headers=admin_auth_headers,
+                     json={"key": "tarrant_tax_roll", "enabled": False})
+    assert r.status_code == 200, r.text
+    db.expire_all()
+    every = {p.key for _, p, _ in HU._discovery_routes(db, org)}           # "New Check Out": no focus
+    taxes = {p.key for _, p, _ in HU._discovery_routes(db, org, ["TAX"])}   # "Behind on Taxes"
+    assert every == before - {"tarrant_tax_roll"}
+    assert "tarrant_tax_roll" not in taxes and {"dallas_trw", "lgbs_tax_sales"} <= taxes
+    # undo is the same switch
+    assert client.patch("/wholesale/evosense/providers", headers=admin_auth_headers,
+                        json={"key": "tarrant_tax_roll", "enabled": True}).status_code == 200
+    db.expire_all()
+    assert {p.key for _, p, _ in HU._discovery_routes(db, org)} == before
