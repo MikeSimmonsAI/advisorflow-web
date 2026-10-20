@@ -157,3 +157,11 @@ def test_rederive_cleans_up_records_read_with_the_wrong_layout(db_session, sampl
     db.commit()
     left = {s.signal_type for s in db.query(EvoSenseSignal).filter_by(property_id=prop.id, active=True)}
     assert not ({"TAX_DELINQUENT", "TAX_SUIT"} & left), left
+
+
+def test_a_padded_old_line_with_blank_dates_is_not_taken_by_the_new_layout():
+    """Found in review: blank dates and blank money fit any layout. A padded
+    old-layout line must still read as the old layout."""
+    line = master_line(prior_due="000001250.40", deed_date="", delq_date="") + " " * 30
+    r, layout, _ = TT.parse_with_layout(line)
+    assert layout == "2025" and r["prior_due"] == "000001250.40"

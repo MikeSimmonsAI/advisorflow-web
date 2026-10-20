@@ -46,7 +46,9 @@ _SHIFT = 40
 MASTER_V2 = [(k, a, n) for k, a, n in MASTER if a < 327] + [
     ("owner1", 327, 50), ("owner2", 377, 50)] + [
     (k, a + _SHIFT, n) for k, a, n in MASTER if a >= 387]
-LAYOUTS = (("2026-10", MASTER_V2, 760), ("2025", MASTER, MIN_LINE))
+# 770: every real new line is 781 (old ones 741); a little slack for a
+# trimmed trailing blank, never enough to take an old line.
+LAYOUTS = (("2026-10", MASTER_V2, 770), ("2025", MASTER, MIN_LINE))
 
 # State property-tax-board codes as published by the Tarrant tax office
 # (Definition_Layout_SPTB_Codes): 1 = A1 single-family, 39 = A residential.
@@ -90,7 +92,10 @@ def layout_problems(r: Dict[str, str]) -> List[str]:
     Dates must be dates, money must be money - the checks the Oct 16 layout
     change would have failed on the first line."""
     bad = [k for k in ("def_start", "def_end", "deed_date", "delq_date") if not _DATE.match(r.get(k) or "")]
-    bad += [k for k in ("levy", "cur_due", "prior_due") if r.get(k) and not _MONEY.match(r[k])]
+    bad += [k for k in ("cur_due", "prior_due") if r.get(k) and not _MONEY.match(r[k])]
+    if not _MONEY.match(r.get("levy") or ""):
+        bad.append("levy")                       # every account has a levy, even $0.00
+    bad += [k for k in ("land", "impr") if r.get(k) and not (r[k].isdigit())]
     if not re.fullmatch(r"\d{11}", r.get("account") or ""):
         bad.append("account")
     if r.get("litig") and not re.fullmatch(r"[A-Z0-9]{1,2}", r["litig"]):
@@ -132,9 +137,6 @@ def state_code(v: str) -> Optional[str]:
     if len(v) == 2:
         return v
     return STATE_NAMES.get(v)
-
-
-OWNER_WIDTH = 30
 
 
 def name_truncated(line: str) -> bool:
