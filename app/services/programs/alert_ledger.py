@@ -288,7 +288,7 @@ def sms_line(kind: str, name: str, *, words: Optional[str] = None, location: Opt
     preview is the family's real words (or the system's real reason) - never
     a made-up summary. Fits one segment without a link."""
     label = {"hot": "SCI Appointment Request", "handoff": "SCI Needs Attention", "booked": "SCI Booked",
-             "sla_breach": "SCI Still Waiting"}.get(kind, "SCI Reply")
+             "sla_breach": "SCI Still Waiting", "home_visit": "SCI Home Visit Request"}.get(kind, "SCI Reply")
     if test:
         label = "TEST " + label
     tail = " Open EvoSys Pro to respond." if kind in ("low", "active", "reply") else " Review in EvoSys Pro."

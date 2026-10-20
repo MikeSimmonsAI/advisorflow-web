@@ -395,6 +395,7 @@ HONOUR THEIR TIMING:
 - "I need to talk to my husband / wife / kids first": NOT a no. Acknowledge warmly, say they're welcome to join, and ask one gentle question (or "follow_up_later" if they give a horizon). Never "close".
 - "When are you open?" / hours: there are no posted office hours in APPROVED INFORMATION - never invent any. Say I meet families by appointment and offer {{TIMES}} ("offer_times").
 - PERSONAL DELIVERY is an internal setting: never tell a family it is or isn't "available". If they ask whether someone can come to them and it isn't available, simply and warmly invite them in with {{TIMES}}.
+- THEY ASK US TO COME TO THEM (facts_known_for_certain.decline.family_asks_for_home_visit) and home_visits_offered_by_this_location is true: say yes warmly in one or two sentences and that I'll reach out personally to find a time that works ("handoff"). Never {{TIMES}}, never book it, never say it is scheduled. If home visits are not offered, invite them in with {{TIMES}} instead.
 - "Who is this?" / "What is this about?": answer plainly - this is {contact} with the family services team at {location}, following up on the planning information they asked about.
 - If asked whether the guide or a visit costs anything, do not use the words free, complimentary or no cost; say you're glad to send the guide and you can answer any cost questions.
 - "wait" only for a closing "ok"/"thanks" after an appointment is confirmed, or a message that needs no reply.
@@ -521,6 +522,11 @@ _NO_HOME = re.compile(r"(don'?t want (anyone|anybody|someone|people|you) (coming
                       r"(house|home|place)|not (at|to) my (house|home)|no home visits?|don'?t come to my)", re.I)
 _INVITED_IN = re.compile(r"(stop by|come (in|by|out|see)|swing by|drop by|short visit|for a visit|visit (with )?us|"
                          r"sit down (with (me|us) )?(here|at)|meet (with )?(me|us) (here|at)|in person)", re.I)
+_WANTS_HOME = re.compile(r"(come (to|out to|by) (me|my (house|home|place)|the house)|can (you|someone|somebody|anyone) "
+                         r"(come|stop by|drop by|visit)( (here|out|over|to (me|my (house|home|place))))?\b(?! to (the|your))|"
+                         r"(rather|prefer|easier if|better if) (you|someone) (came|come|visit)|visit (me )?at (my )?home|"
+                         r"(meet|see me) at my (house|home|place)|home visit)", re.I)
+HOME_VISIT_REASON = "Home visit requested - call the family to set a time"
 _OFFERS_HOME = re.compile(r"(come to (you|your (home|house|place))|(to|at) your (home|house|place)|stop by your|"
                           r"visit you at|bring it (by|over) to you|meet you at your)", re.I)
 
@@ -615,9 +621,14 @@ def decline_context(db, lead, conv, body: str) -> Dict:
     already = mem.get("alternative_offered")
     alt = alternative_for(db, lead, conv, declined) if declined in (DECLINED_VENUE, CANT_GET_THERE, DECLINED_HOME) \
         else ALT_NONE
+    home_ok = bool(_location_settings(db, lead).get("home_visits"))
+    asks_home = bool(_WANTS_HOME.search(body or "")) and declined != DECLINED_HOME
+    accepted_home = already == ALT_HOME and bool(re.search(r"^\s*(yes|yeah|yep|sure|ok(ay)?|that would|please|"
+                                                           r"that works|sounds good|definitely|absolutely)", body or "", re.I))
     return {"what_was_declined": declined, "alternative_to_offer": ALT_NONE if already else alt,
             "alternative_already_offered": already or None,
-            "home_visits_offered_by_this_location": bool(_location_settings(db, lead).get("home_visits"))}
+            "home_visits_offered_by_this_location": home_ok,
+            "family_asks_for_home_visit": asks_home or accepted_home}
 
 
 def validate_decision(d: Dict, body: str, conv, contact: Optional[str] = None) -> List[str]:
@@ -666,6 +677,11 @@ def validate_decision(d: Dict, body: str, conv, contact: Optional[str] = None) -
                         "never promise one")
     if declined == DECLINED_HOME and _OFFERS_HOME.search(reply):
         problems.append("they said they don't want anyone coming to their home - never offer that")
+    if dc.get("family_asks_for_home_visit") and dc.get("home_visits_offered_by_this_location") \
+            and action in ("book", "offer_times", "close"):
+        problems.append("they want someone to come to them and this location does home visits: say yes warmly and "
+                        "use handoff (I'll reach out personally to find a time) - never offer or book a visit at the "
+                        "location, never close")
     if action == "book" and dc.get("alternative_already_offered") == ALT_HOME:
         problems.append("a home visit is arranged personally by the advisor, never booked as a visit at the "
                         "location - use handoff so I confirm the time myself")
@@ -1342,7 +1358,12 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         conv.state = _handoff_state                     # stays visible as a callback request
 
     if action == "handoff" and conv.state != "human":
-        _handoff(db, prog, lead, conv, d.get("reason") or "the family wants a person", notify=True)
+        dc_ = getattr(conv, "_decline", None) or {}
+        home = bool(dc_.get("family_asks_for_home_visit") and dc_.get("home_visits_offered_by_this_location"))
+        if home:
+            merge_memory(conv, {"wants": ["home visit"], "next_step": HOME_VISIT_REASON})
+        _handoff(db, prog, lead, conv, HOME_VISIT_REASON if home else (d.get("reason") or "the family wants a person"),
+                 notify=True)
 
     if "{TIMES}" in text and action != "offer_times":
         # Times written into another kind of reply (e.g. guide + a visit

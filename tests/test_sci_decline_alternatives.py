@@ -230,3 +230,52 @@ def test_family_stopping_by_gets_times_not_a_goodbye(setter, sample_advisor):
     _, conv = _run(db, lead, "I can stop by this week", fake)
     assert len(fake.calls) == 1                                              # no "they said stop" correction
     assert _last_ai(db, conv).action == "offer_times" and conv.state != "closed"
+
+
+# ── a family ASKS for a home visit (overnight Oct 19) ────────────────────────
+
+YES_HOME = "Of course - I'd be glad to come to you. I'll reach out personally to find a time that works."
+
+
+@pytest.mark.parametrize("body", ["Can someone come to my house?", "I'd rather you come to me",
+                                  "Could you visit me at home?"])
+def test_a_home_visit_request_is_a_yes_and_goes_to_a_person(setter, sample_advisor, body):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    _location(db, lead, home_visits=True)
+    fake = _Fake([_d("offer_times", "Would {TIMES} work for a visit here?"), _d("handoff", YES_HOME)])
+    _, conv = _run(db, lead, body, fake)
+    assert len(fake.calls) == 2 and "never offer or book a visit at the location" in json.dumps(fake.calls[1]["messages"])
+    assert conv.state == "human" and conv.handoff_reason == S.HOME_VISIT_REASON
+    assert conv.booked_time is None
+    assert "home visit" in S.memory_of(conv).get("wants", [])
+
+
+def test_home_visit_request_where_not_offered_invites_them_in(setter, sample_advisor):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    fake = _Fake([_d("offer_times", "I'd love to meet with you - would {TIMES} work for a visit?")])
+    _, conv = _run(db, lead, "Can someone come to my house?", fake)
+    assert len(fake.calls) == 1 and conv.state != "human"
+
+
+def test_the_advisor_alert_says_home_visit_request(setter, sample_advisor, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+    from app.services import sms_programs
+    db, org, prog = setter["db"], setter["org"], setter["prog"]
+    org.org_twilio_phone_number = None
+    db.commit()
+    client = MagicMock()
+    client.messages.create.return_value = SimpleNamespace(sid="SMhv1", status="queued", error_code=None)
+    monkeypatch.setattr(sms_programs, "is_sci_org", lambda db_, oid: True)
+    monkeypatch.setattr(sms_programs, "sci_sender", lambda: (client, "+18449172171"))
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    _location(db, lead, home_visits=True)
+    from unittest.mock import patch
+    from app.services.programs import responses as R
+    with patch.object(S, "_get_client", return_value=_Fake([_d("handoff", YES_HOME)])), \
+         patch("app.services.email_service.send_email_via_provider", return_value={"success": True}):
+        R.on_inbound(db, lead, "Can someone come to my house?", "sms")
+    texts = [c.kwargs["body"] for c in client.messages.create.call_args_list]
+    assert texts and texts[0].startswith("SCI Home Visit Request | Ollie Testcase")
