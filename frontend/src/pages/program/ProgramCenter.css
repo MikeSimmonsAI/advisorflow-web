@@ -666,3 +666,14 @@ button.sci-tile[aria-expanded="true"] { border-color: var(--gold); box-shadow: 0
   max-height: 160px; overflow: auto; line-height: 1.55; }
 .sci-next-card .sci-micro { display: block; margin-top: 12px; }
 .sci-inbox-welcome .sci-footnote { justify-self: center; }
+
+
+/* Visible same-day and 7-day SCI engagement percentages on the reply desk. */
+.sci-pulse-rates {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:8px 0 14px;}
+.sci-pulse-rates > div {padding:10px 13px;border-radius:10px;background:#e9f5f3;border:1px solid #cfe7e3;}
+.sci-pulse-rates > div:first-child {background:#0c3d50;border-color:#0c3d50;color:white;}
+.sci-pulse-rates span {display:block;font-size:11px;font-weight:800;}
+.sci-pulse-rates b {display:block;font-size:clamp(24px,2.2vw,33px);font-weight:850;line-height:1.15;font-variant-numeric:tabular-nums;}
+.sci-pulse-rates small {display:block;font-size:10.5px;line-height:1.45;margin-top:2px;color:#526b73;}
+.sci-pulse-rates > div:first-child small {color:#b9d6dd;}
+@media(max-width:670px){.sci-pulse-rates{grid-template-columns:1fr;}}
