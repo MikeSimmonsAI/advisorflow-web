@@ -106,8 +106,11 @@ def _rr_ids(client, db, user, **params):
 
 
 def _nothing_sent(db):
+    """No text, no email, and no supplier transaction of any kind."""
+    from app.models.provider_transaction_models import ProviderTransaction
     assert db.query(Message).count() == 0
     assert db.query(EmailMessage).count() == 0
+    assert db.query(ProviderTransaction).count() == 0
 
 
 # ── JOURNEY 1: residential rate review ─────────────────────────────────────
@@ -140,6 +143,11 @@ def test_journey_residential_rate_review(client, w):
     _post(client, w["slug"], dict(p, message="Following up"))
     assert db.query(Lead).filter(Lead.organization_id == w["org"].id).count() == 1
     assert db.query(LeadTask).filter_by(lead_id=lead.id, status="open").count() == 1
+    # A returning visitor is a new request: the same admin is told again, and
+    # no one outside this workspace ever is.
+    assert {n.user_id for n in db.query(Notification)} == {w["admin"].id}
+    assert db.query(Notification).count() == 2
+    assert db.query(Notification).filter_by(user_id=w["fadmin"].id).count() == 0
 
     # Isolation: the other tenant has nothing and cannot open it.
     assert db.query(Lead).filter(Lead.organization_id == w["other"].id).count() == 0
