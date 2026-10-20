@@ -65,9 +65,25 @@ def _locations(db, org_id):
             .filter(LocationProfile.organization_id == org_id, LocationProfile.is_review_bucket.isnot(True)).all()}
 
 
+def _home_visit_waiting(conv) -> bool:
+    """The family asked us to come to them and nobody has arranged it yet."""
+    from app.services.programs.ai_setter import HOME_VISIT_REASON, memory_of
+    return bool(conv is not None and conv.state == "human" and conv.handoff_reason == HOME_VISIT_REASON
+                and not (memory_of(conv).get("home_visit") or {}).get("done"))
+
+
+def _home_visit_of(conv) -> Optional[dict]:
+    from app.services.programs.ai_setter import HOME_VISIT_REASON, memory_of
+    if conv is None or conv.handoff_reason != HOME_VISIT_REASON:
+        return None
+    return dict(memory_of(conv).get("home_visit") or {}, waiting=_home_visit_waiting(conv))
+
+
 def _badge(r, conv) -> str:
     if conv is not None and conv.state == "booked":
         return "Booked"
+    if _home_visit_waiting(conv):
+        return "Home visit"
     if r.response_class == "hot":
         return "New" if r.handling_status == "new" else "Hot"
     if r.response_class in ("bad_data", "wrong_person"):
@@ -89,7 +105,7 @@ def _actions(r, conv) -> list:
 
 _NEEDS_REPLY = ("new", "opened")
 _APPT_STATES = ("offered", "booked", "callback_requested")
-FILTERS = ("all", "needs_reply", "text", "email", "handled", "unread", "ai", "human", "appointments")
+FILTERS = ("all", "needs_reply", "text", "email", "handled", "unread", "ai", "human", "appointments", "home_visits")
 
 
 def _sender(db, r, lead) -> dict:
@@ -178,8 +194,9 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                       "sla_breached": bool(r.response_class == "hot" and r.handling_status == "new"
                                            and r.sla_due_at and r.sla_due_at <= datetime.utcnow()),
                       "setter_state": conv.state if conv else None, "actions": _actions(r, conv),
+                      "home_visit": _home_visit_waiting(conv),
                       "advisor": advisors.get(getattr(lead, "assigned_to_id", None))})
-    items.sort(key=lambda i: (not i["sla_breached"], _RANK.get(i["class"], 5),
+    items.sort(key=lambda i: (not i["sla_breached"], not i["home_visit"], _RANK.get(i["class"], 5),
                               -(datetime.fromisoformat(i["received_at"][:-1]).timestamp() if i["received_at"] else 0)))
     needs = sum(1 for i in items if i["class"] in ("hot", "active", "bad_data", "wrong_person") and not i["is_test"])
     filter_counts = {"all": len(items),
@@ -190,7 +207,8 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                      "unread": sum(1 for i in items if i["handling_status"] == "new"),
                      "ai": sum(1 for i in items if i["owner"] == "ai"),
                      "human": sum(1 for i in items if i["owner"] == "human"),
-                     "appointments": sum(1 for i in items if i["setter_state"] in _APPT_STATES)}
+                     "appointments": sum(1 for i in items if i["setter_state"] in _APPT_STATES),
+                     "home_visits": sum(1 for i in items if i["home_visit"])}
     if flt == "needs_reply":
         items = [i for i in items if i["handling_status"] in _NEEDS_REPLY and i["class"] != "auto_reply"]
     elif flt == "text":
@@ -203,6 +221,8 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
         items = [i for i in items if i["owner"] == flt]
     elif flt == "appointments":
         items = [i for i in items if i["setter_state"] in _APPT_STATES]
+    elif flt == "home_visits":
+        items = [i for i in items if i["home_visit"]]
 
     org_leads = db.query(Lead.id).filter(Lead.organization_id == org, Lead.is_test.isnot(True))
     booked = (db.query(BookingLink).filter(BookingLink.lead_id.in_(org_leads),
@@ -512,6 +532,7 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
                     "status": booking.status} if booking and booking.booked_time else None,
         "suggestion": _suggest(conv, latest, lead),
         "mail_task": _mail_task_of(conv),
+        "home_visit": _home_visit_of(conv),
         "handling": _handling(db, conv, lead, latest),
         "reply_to": _reply_target(db, latest, lead),
     }
@@ -909,7 +930,53 @@ def _open_tasks(db, org_id):
             continue
         out.append({"kind": "mail_guide", "lead_id": lead.id, "what": t["what"], "note": t.get("note"),
                     "name": ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title()})
+    # Home visits a family asked for that nobody has arranged yet (#234 follow-up).
+    from app.services.programs.ai_setter import HOME_VISIT_REASON
+    for c in (db.query(ProgramConversation).filter(ProgramConversation.organization_id == org_id,
+                                                   ProgramConversation.state == "human",
+                                                   ProgramConversation.handoff_reason == HOME_VISIT_REASON).all()):
+        if c.lead_id in test_ids or not _home_visit_waiting(c):
+            continue
+        lead = db.query(Lead).filter(Lead.id == c.lead_id).first()
+        if lead is None:
+            continue
+        out.append({"kind": "home_visit", "lead_id": lead.id, "what": "home visit",
+                    "note": "They asked for a visit at home - call to set a time",
+                    "name": ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title()})
     return out
+
+
+class HomeVisitIn(BaseModel):
+    lead_id: str
+    note: Optional[str] = None
+
+
+@router.post("/home-visit")
+def command_home_visit_arranged(body: HomeVisitIn, db: Session = Depends(get_db),
+                                user: User = Depends(require_tenant_user)):
+    """The advisor arranged the home visit the family asked for (by phone, on
+    their own calendar): the task leaves the list, recorded by who did it.
+    Nothing is booked or sent by this."""
+    import json as _json
+    from app.models.program_models import ProgramAlert
+    from app.services.programs import ai_setter
+    prog = _program(db, user, managers_only=False)
+    lead = db.query(Lead).filter(Lead.id == body.lead_id, Lead.organization_id == prog.organization_id).first()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Family not found.")
+    conv = ai_setter.conversation_for(db, lead)
+    mem = ai_setter.memory_of(conv)
+    who = getattr(user, "full_name", None) or getattr(user, "email", None) or "staff"
+    mem["home_visit"] = {"done": True, "done_at": datetime.utcnow().isoformat() + "Z", "done_by": who,
+                         "note": (body.note or "").strip()[:300] or None}
+    mem["alternative_outcome"] = mem.get("alternative_outcome") or "accepted"
+    conv.memory = _json.dumps(mem)
+    name = ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title() or "A family"
+    db.add(ProgramAlert(organization_id=prog.organization_id, kind="task", audience="team", channel="in_app",
+                        delivered=True, reason="home_visit_arranged",
+                        message="%s arranged the home visit for %s." % (who, name)))
+    db.commit()
+    return {"ok": True, "home_visit": mem["home_visit"]}
 
 
 class MailTaskIn(BaseModel):
