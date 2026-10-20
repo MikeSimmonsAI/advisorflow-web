@@ -65,7 +65,7 @@ Merge order: #245 → main and #242 → main (independent), then rebase/retarget
 - #247 branch: 372 focused passed.
 - #245 is covered by tests/test_evosense_tarrant_roll_layout.py and tests/test_evosense_roll_layout_fix.py.
 
-### Production state (read-only SELECTs, 01:25 CT)
+### Production state (read-only SELECTs, ~01:21 CT)
 - All live strategies: `daily_budget_cents = 0`, `pilot_allow_paid = false`.
 - `evosense_cost_ledger` is empty: **$0 spent ever**.
 - `paused_paid_data = false` and the org daily/monthly ceilings are NULL. The $0 strategy budgets are the only
@@ -91,7 +91,7 @@ The existing controls are enough; no code is needed. To run one pilot (each step
 - Appointments funnel step: needs a source of truth (wholesale_appointments) wired into readiness.funnel.
 
 ### P4 — Collin/Denton search focus (proposal only; nothing changed)
-Production (read-only, 01:35 CT):
+Production (read-only, ~01:22 CT):
 - Collin has **1,415** properties and Denton **972** (26% of 9,032). None is at 45+; the best scores are 33 and 37.
 - Their only active signals are derived ones: LONG_OWNERSHIP, ABSENTEE_OWNER, OUT_OF_STATE_OWNER, plus 15 closed
   code-history items.
