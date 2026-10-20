@@ -340,11 +340,14 @@ sc("r004", "regression", "Gerald",
 # not treated as a venue no.
 _INVITE = "Quick question from the cemetery: could you stop by for a short visit this week?"
 _GOODBYE = r"(take care|feel free to reach out|if you ever (have|need))"
+_HOME = r"(come to you|to you instead|to your (home|house|place)|visit you)"
 sc("r005", "regression", "Wanda",
-   ("No", "answer,offer_times", {"must_not": [_GOODBYE], **NO_BOOK}))
+   # Every SCI location offers home visits (Mike, Oct 19): the one alternative
+   # is a visit at their home - offered, never booked by the AI.
+   ("No", "answer", {"must": [_HOME], "must_not": [_GOODBYE, r"\{TIMES\}"], **NO_BOOK}))
 S[-1]["opening"] = _INVITE
 sc("r006", "regression", "Earl",
-   ("I can't get there", "answer,offer_times,send_guide", {"must_not": [_GOODBYE], **NO_BOOK}))
+   ("I can't get there", "answer", {"must": [_HOME], "must_not": [_GOODBYE], **NO_BOOK}))
 S[-1]["opening"] = _INVITE
 sc("r007", "regression", "Doris",
    ("That's not for me", "close", {"must_not": [r"\{TIMES\}", r"\b(am|pm)\b", r"(guide|phone call|come to you)"]}))
