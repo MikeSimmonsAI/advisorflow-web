@@ -352,6 +352,9 @@ def _lookup_decision(db, prop, strategy, provider, cap, decision, reason, outcom
 
 
 BACKLOG_LIMIT = 150
+# Recent negative public lookups are not permanent evidence. Avoid querying the
+# same address three times during adjacent daily strategy hunts; retry later.
+NO_MATCH_RECHECK_HOURS = 2
 
 
 def lookup_backlog(db, org_id: str, exclude=(), limit: int = BACKLOG_LIMIT) -> List[EvoSenseProperty]:
@@ -401,7 +404,7 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
 
     Paid sources never run here. Results go through the same ingest as any
     record, so every fact keeps its own observation and raw evidence."""
-    from app.models.evosense_models import EvoSenseObservation
+    from app.models.evosense_models import EvoSenseEnrichmentDecision, EvoSenseObservation
     from app.services.evosense.sources import base as SRC
     counts.setdefault("lookups", {})
     for cap in LOOKUP_ORDER:
@@ -415,7 +418,8 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                 continue                                  # NOT CONFIGURED: nothing to decide
             tally = counts["lookups"].setdefault(key, {"queued": 0, "found": 0, "no_match": 0,
                                                        "skipped_fresh": 0, "skipped_down": 0,
-                                                       "failed": 0, "review": 0, "failure_codes": {}, "duration_ms": 0})
+                                                       "failed": 0, "review": 0, "failure_codes": {}, "duration_ms": 0,
+                                                       "skipped_no_match": 0})
             applicable = [p for p in props if provider.applies(_target(p))]
             if not applicable:
                 continue
@@ -431,6 +435,20 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                 db.commit()
                 continue
             fresh_after = C.now() - timedelta(days=provider.freshness_days)
+            # A no-match is UNKNOWN, not permanent evidence that a case never
+            # exists. But querying the identical property/source in each of
+            # three closely spaced strategy runs wastes public API requests.
+            # One tenant-scoped batch query avoids a per-property SQL sweep.
+            negative_since = C.now() - timedelta(hours=NO_MATCH_RECHECK_HOURS)
+            recent_no_matches = {row[0] for row in (
+                db.query(EvoSenseEnrichmentDecision.property_id)
+                .filter(EvoSenseEnrichmentDecision.organization_id == org_id,
+                        EvoSenseEnrichmentDecision.property_id.in_([p.id for p in applicable]),
+                        EvoSenseEnrichmentDecision.provider_key == key,
+                        EvoSenseEnrichmentDecision.decision == C.L_QUEUE_FREE,
+                        EvoSenseEnrichmentDecision.outcome == "no_match",
+                        EvoSenseEnrichmentDecision.created_at >= negative_since)
+                .distinct().all())}
             queued = []
             for p in applicable:
                 recent = (db.query(EvoSenseObservation.id)
@@ -443,6 +461,12 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                                      "%s already answered within %s days." % (provider.label, provider.freshness_days),
                                      outcome="skipped")
                     tally["skipped_fresh"] += 1
+                elif p.id in recent_no_matches:
+                    _lookup_decision(db, p, strategy, provider, cap, C.L_SKIP_FRESH_DATA,
+                                     "A public-source lookup found no matching record in the last %s hours. "
+                                     "Automatically retry when the short cooldown expires."
+                                     % NO_MATCH_RECHECK_HOURS, outcome="skipped")
+                    tally["skipped_no_match"] += 1
                 else:
                     queued.append(p)
             if not queued:

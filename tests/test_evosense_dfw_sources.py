@@ -779,3 +779,58 @@ def test_one_failed_311_property_makes_run_partial_without_discarding_other_answ
     assert stats["failure_codes"] == {"TIMEOUT": 1}
     assert stats["failed"] + stats["no_match"] == stats["queued"]
     assert result["status"] == "partial"
+
+
+def test_recent_public_no_match_is_temporarily_cached_across_strategies(
+        client, db_session, sample_org, dfw_files, fake_apis, monkeypatch):
+    """Three adjacent hunts should not hammer Dallas 311 for the same no-match."""
+    _, h = _admin(db_session, sample_org)
+    _enable(client, h, *ALL_DFW)
+    calls = []
+
+    def no_match(self, targets):
+        calls.append(len(targets))
+        return {"results": {t["id"]: None for t in targets}, "errors": {}, "stats": {}}
+
+    monkeypatch.setattr(PV.Dallas311Source, "lookup_many", no_match)
+    first = _pilot(client, h, name="Dallas public lookup one")
+    one = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % first["id"], headers=h))
+    assert one["counts"]["lookups"]["dallas_311_code"]["no_match"] > 0
+    assert len(calls) == 1
+    second = _pilot(client, h, name="Dallas public lookup two")
+    two = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % second["id"], headers=h))
+    info = two["counts"]["lookups"]["dallas_311_code"]
+    assert info["skipped_no_match"] >= 1
+    assert len(calls) == 1              # no more network calls for recently checked homes
+    assert info["failed"] == 0
+    assert two["status"] == "succeeded" # cached no-match is not a failure
+    assert two["counts"]["spent_cents"] == 0
+
+
+def test_public_no_match_is_retried_after_short_cooldown_expires(
+        client, db_session, sample_org, dfw_files, fake_apis, monkeypatch):
+    """A negative answer is not permanent; new public complaints can appear."""
+    _, h = _admin(db_session, sample_org)
+    _enable(client, h, *ALL_DFW)
+    calls = []
+
+    def no_match(self, targets):
+        calls.append(len(targets))
+        return {"results": {t["id"]: None for t in targets}, "errors": {}, "stats": {}}
+
+    monkeypatch.setattr(PV.Dallas311Source, "lookup_many", no_match)
+    first = _pilot(client, h, name="Dallas public lookup now")
+    one = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % first["id"], headers=h))
+    assert one["counts"]["lookups"]["dallas_311_code"]["no_match"] >= 1
+    # Age only this test's negative answers; leave source observation data alone.
+    stale_at = datetime.utcnow() - timedelta(hours=3)
+    (db_session.query(EvoSenseEnrichmentDecision)
+       .filter(EvoSenseEnrichmentDecision.organization_id == sample_org.id,
+               EvoSenseEnrichmentDecision.provider_key == "dallas_311_code",
+               EvoSenseEnrichmentDecision.outcome == "no_match")
+       .update({EvoSenseEnrichmentDecision.created_at: stale_at}, synchronize_session=False))
+    db_session.commit()
+    second = _pilot(client, h, name="Dallas public lookup later")
+    two = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % second["id"], headers=h))
+    assert two["counts"]["lookups"]["dallas_311_code"]["queued"] >= 1
+    assert len(calls) == 2             # no-match was actually rechecked
