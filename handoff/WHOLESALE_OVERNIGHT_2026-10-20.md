@@ -35,7 +35,8 @@ problem is waiting on you: **#245**, the Tarrant tax-roll misread. Everything el
 
 **Not done / honest gaps**
 - Paid owner-contact lookup: prepared, **not switched on** (see the engineering notes; it needs your budget).
-- Collin/Denton county search expansion: not started overnight.
+- Collin/Denton: these two counties are about a quarter of everything found, but none of it can score 45+, because we have no
+  distress source there yet. A proposal is in the engineering notes; nothing was changed.
 - Appointments are not tracked as a funnel step yet; the funnel shows them as "unavailable".
 - Website still needs your hosting/DNS steps before it is live.
 
@@ -87,8 +88,26 @@ The existing controls are enough; no code is needed. To run one pilot (each step
 - After the #245 repair, re-check the 147 open work items on the 1,017 affected properties; most will be stale.
 - #248 reader: one reply with two prices keeps the later one and opens a PRICE_UNCLEAR hand-off. Revisit if real
   replies show the earlier figure is usually the real one.
-- Collin/Denton search proposal (P4): not started. It must be opt-in and must not edit New Check Out.
 - Appointments funnel step: needs a source of truth (wholesale_appointments) wired into readiness.funnel.
+
+### P4 — Collin/Denton search focus (proposal only; nothing changed)
+Production (read-only, 01:35 CT):
+- Collin has **1,415** properties and Denton **972** (26% of 9,032). None is at 45+; the best scores are 33 and 37.
+- Their only active signals are derived ones: LONG_OWNERSHIP, ABSENTEE_OWNER, OUT_OF_STATE_OWNER, plus 15 closed
+  code-history items.
+- We have no tax-delinquency, tax-sale or code-violation source for either county. LGBS lists both, but returned
+  0 rows for them; it covers Dallas (392) and Tarrant (365).
+- Behind on Taxes and Tired Landlord both include Collin and Denton. New Check Out has no county filter (all).
+
+Options:
+1. **Add a distress source** (recommended next build).
+   - Denton: the county's Sheriff's Sale page lists the monthly tax-sale properties (first Tuesday)
+     — <https://www.dentoncounty.gov/840/Sheriffs-Sale>, linked from <https://www.dentoncounty.gov/867/Delinquent-Tax-Sales>.
+   - Collin: the official tax-sale publisher still needs confirming (the county tax office, 972-547-5020).
+   - Format and terms of use need checking before writing an adapter.
+2. **Until then, opt-in per strategy:** only keep Collin/Denton properties that carry a distress signal, so hunts
+   stop filling the list with records that cannot qualify. This is Mike's choice per strategy. It must not edit
+   New Check Out.
 
 ### Local scratch (not in git; contains production-derived data, never posted)
 `/tmp/claude-0/-home-claude/e5e1c130-63b8-5ad7-bd8c-bfb704613d62/scratchpad/` contains:
