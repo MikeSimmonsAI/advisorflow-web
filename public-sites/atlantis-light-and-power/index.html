@@ -199,6 +199,7 @@
   .modal-body{padding:24px}
   .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .form-field{display:flex;flex-direction:column;gap:7px}
+  .form-field[hidden],[hidden]{display:none !important}
   .form-field.full{grid-column:1/-1}
   .form-field label{font-size:11px;font-weight:850;color:#5d7185;text-transform:uppercase;letter-spacing:.06em}
   .form-field input,.form-field select,.form-field textarea{min-height:48px;border:1px solid #d7e1ea;border-radius:11px;padding:10px 12px;outline:0;font-family:inherit}
@@ -493,6 +494,27 @@
         <div class="cta-actions"><button class="btn btn-primary" data-open-modal="residential">Start My Rate Review</button><button class="btn btn-ghost" data-open-modal="advisor">Talk to an Advisor</button></div>
       </div>
     </section>
+    <section id="how-enrollment-works" style="padding:56px 0 24px">
+      <div class="wrap" style="max-width:980px">
+        <span class="eyebrow">Before you switch</span>
+        <h2 style="margin:8px 0 14px">How choosing a plan works with Atlantis</h2>
+        <ol style="line-height:1.7;color:#3d5168;padding-left:20px;margin:0">
+          <li><b>You send a request.</b> It goes to an Atlantis advisor. Nothing is enrolled and nothing is signed.</li>
+          <li><b>Your advisor checks your address and usage</b> and shows you the plans a retail electricity provider is actually offering for that address that day.</li>
+          <li><b>You choose.</b> Your advisor tells you which provider the plan is with before anything is submitted.</li>
+          <li><b>The provider completes the enrollment</b> and emails you its official plan documents. Those documents, not this website, are your contract.</li>
+          <li><b>Atlantis confirms it with you</b> and keeps an eye on your renewal date.</li>
+        </ol>
+      </div>
+    </section>
+
+    <section id="privacy" style="padding:24px 0 56px">
+      <div class="wrap" style="max-width:980px">
+        <h2 style="font-size:24px;margin:0 0 10px">Privacy &amp; contact consent</h2>
+        <p style="color:#3d5168;line-height:1.7;margin:0 0 8px">When you send a request, Atlantis Light &amp; Power receives the details you type into the form so an advisor can respond to you. We use them to answer your request and, if you check the consent box, to contact you by phone, text or email about it. Texting is never a condition of getting help.</p>
+        <p style="color:#3d5168;line-height:1.7;margin:0">Reply STOP to any text to stop texts. To ask what we hold about you or to have it removed, email <a href="mailto:info@atlantis-enterprises.com">info@atlantis-enterprises.com</a> or call <a href="tel:8558536374">855-853-6374</a>.</p>
+      </div>
+    </section>
   </main>
 
   <footer>
@@ -500,7 +522,7 @@
       <div class="footer-grid">
         <div class="footer-brand"><a class="brand" href="#top"><span class="brand-mark"></span><span class="brand-text"><b>ATLANTIS</b><span>LIGHT &amp; POWER</span></span></a><p>A modern energy buying and customer-experience company for homes, businesses and partner referrals.</p></div>
         <div><h4>Solutions</h4><a href="#marketplace">Residential Energy</a><a href="#commercial">Business Energy</a><a href="#concierge">Move Concierge</a><a href="#partners">Partner Network</a></div>
-        <div><h4>Company</h4><a href="#top">About Atlantis</a><a href="#marketplace">Coverage</a><a href="#" data-open-modal="advisor">Contact</a></div>
+        <div><h4>Company</h4><a href="#top">About Atlantis</a><a href="#how-enrollment-works">How enrollment works</a><a href="#privacy">Privacy &amp; consent</a><a href="#" data-open-modal="advisor">Contact</a></div>
         <div><h4>Contact</h4><a href="tel:8558536374">855-853-6374</a><a href="mailto:info@atlantis-enterprises.com">info@atlantis-enterprises.com</a><a href="#" data-open-modal="advisor">Schedule a consultation</a></div>
       </div>
       <div class="footer-bottom"><span>© 2026 Atlantis Light &amp; Power.</span><span>Rates, terms and availability depend on your service address and the provider's current offering. Official plan documents are provided before enrollment.</span></div>

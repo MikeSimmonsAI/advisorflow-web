@@ -23,8 +23,11 @@ one field a seller reads first.
 
 NOTHING IS SENT. Same rule as every other public arrival path in this
 codebase: a form submission creates a record and starts no outreach. No
-cadence, no SMS, no email, no AI conversation, no notification. Outreach
-begins when a person decides it does.
+cadence, no SMS, no email, no AI conversation. Outreach begins when a person
+decides it does. The one exception is INSIDE the app: for an energy workspace
+`energy_site_intake` queues the request, opens a follow-up task (and a Move
+Concierge record for a move) and leaves an in-app alert for that workspace's
+own people - nothing leaves the platform.
 """
 
 from __future__ import annotations
@@ -368,6 +371,12 @@ def record_inquiry(db: Session, *, site: CustomerSite, organization: Organizatio
         lead = db.query(Lead).filter(Lead.id == result["lead_id"]).first()
         if lead is not None and not lead.assigned_to_id:
             lead.assigned_to_id = site.default_owner_user_id
+
+    # Energy workspaces: queue, follow-up task, move record, in-app alert.
+    # Best effort; never sends anything (see energy_site_intake).
+    from app.services import energy_site_intake
+    result["follow_up"] = energy_site_intake.handle(
+        db, site=site, organization=organization, result=result, payload=payload)
 
     if commit:
         db.commit()
