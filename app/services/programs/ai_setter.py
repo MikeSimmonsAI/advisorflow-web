@@ -755,7 +755,7 @@ _MAIL_ONLY = re.compile(r"\b((just|only) (mail|send)|mail (it )?only|don'?t (wan
 _ASKS_IF_HUMAN = re.compile(r"\b(robot|a bot|bot\b|\bai\b|automated|auto.?reply|real person|a real human|"
                             r"are you (a )?(human|person|real|computer|machine)|is this (a )?(person|human|real|computer))", re.I)
 _PLAN_PURCHASE_WITH_US = re.compile(
-    r"\b(?:bought|purchased?|paid for|signed up for|have|had|already have)\b.{0,85}?"
+    r"\b(?:bought|purchased?|paid for|signed up for)\b.{0,85}?"
     r"\b(?:plan|arrangements?|contract|plots?|spaces?|cemetery property)\b.{0,65}?"
     r"\b(?:from|with|through)\s+(?:you|your|this (?:funeral home|cemetery|location))\b", re.I)
 _REQUESTS_EXISTING_PLAN_VISIT = re.compile(
@@ -1430,6 +1430,11 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             _handoff(db, prog, lead, conv,
                      "no times to offer: %s; read the family's message before replying"
                      % (why or "calendar unavailable"), notify=True)
+            if resp is not None:
+                # Inbound triage may have generated a generic suggested_reply.
+                # Do not leave a scheduling promise in the advisor's send box
+                # when the calendar cannot produce a real appointment.
+                resp.suggested_reply = None
             _turn(db, conv, "system", None, action="handoff",
                   reason="calendar unavailable; generic automatic reply suppressed",
                   response_id=resp.id if resp else None)
