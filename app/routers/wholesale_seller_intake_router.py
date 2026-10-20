@@ -7,6 +7,9 @@ TWO ROUTERS IN ONE FILE, ON PURPOSE - they are the two ends of one record.
     browser never sees this URL or the key). No authentication for the seller.
     Rate limited on the shared public-intake budget. The organization comes
     ONLY from the key; any organization field in the payload is ignored.
+`public_router`  POST /site-intake/wholesale/{intake_key}/buyer-inquiry
+    The same, for the investor buy-box form on wholesale.evosyspro.live
+    (app/services/wholesale_buyer_intake.py). Creates a buyer + buy box only.
 
 `ops_router`     /wholesale/sms/...
     Signed-in, organization-scoped, behind the Wholesale entitlement. Every
@@ -92,6 +95,44 @@ def seller_inquiry(intake_key: str, payload: SellerInquiryPayload, request: Requ
     # nothing about scores, deals, buyers or internal workflow.
     return {"success": True, "reference": result["reference"],
             "sms_consent_recorded": result["sms_consent_recorded"]}
+
+
+class BuyerInquiryPayload(BaseModel):
+    """The investor buy-box form on the Wholesale site. Only these fields are
+    read; an organization, a consent timestamp or anything else is ignored."""
+    model_config = ConfigDict(extra="ignore")
+
+    full_name: Optional[str] = None
+    company: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    markets: Optional[str] = None
+    strategy: Optional[str] = None
+    budget: Optional[str] = None
+    notes: Optional[str] = None
+    contact_permission: Optional[Any] = None
+    submission_id: Optional[str] = None
+    source_url: Optional[str] = None
+    form_version: Optional[str] = None
+
+
+@public_router.post("/{intake_key}/buyer-inquiry", status_code=201)
+@limiter.shared_limit(public_intake.PUBLIC_INTAKE_LIMIT,
+                      scope=public_intake.PUBLIC_INTAKE_SCOPE)
+def buyer_inquiry(intake_key: str, payload: BuyerInquiryPayload, request: Request,
+                  db: Session = Depends(get_db)):
+    """Server-to-server from the Wholesale site's intake.php. Creates or reuses
+    a cash buyer and adds their buy box. Sends nothing to anyone."""
+    from app.services import wholesale_buyer_intake as buyers
+    try:
+        org, _settings = intake.resolve_destination(db, intake_key)
+    except intake.IntakeRefused as exc:
+        log.error("buyer-inquiry refused: %s", exc.reason)
+        raise HTTPException(status_code=503, detail=_REFUSED)
+    data = buyers.validate(payload.model_dump())
+    result = buyers.submit(db, org, data)
+    # The investor gets a reference - nothing about other buyers, deals or matching.
+    return {"success": True, "reference": result["reference"]}
 
 
 # ── Operator side ───────────────────────────────────────────────────────────

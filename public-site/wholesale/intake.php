@@ -69,6 +69,36 @@ $encoded=json_encode($record,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_INVAL
 $ok=@file_put_contents($file,$encoded,LOCK_EX);
 if ($ok===false) { error_log('wholesale intake: write failed');reply(503,'Registration is temporarily unavailable. Please try again later.'); }
 @chmod($file,0600);
+/* EvoSys bridge: when the host sets WHOLESALE_BUYER_INTAKE_URL (the platform's
+ * /site-intake/wholesale/<key>/buyer-inquiry address, key included), the same
+ * fields are posted server-to-server so the investor appears in EvoSys
+ * Wholesale > Buyers. The browser never sees that URL or the key. The private
+ * file above is written first and kept either way, so a platform outage never
+ * loses a registration; the file records whether the hand-off worked. */
+$bridge=getenv('WHOLESALE_BUYER_INTAKE_URL');
+if ($bridge && (str_starts_with($bridge,'https://')||preg_match('#^http://(127\.0\.0\.1|localhost)(:\d+)?/#',$bridge))) {
+  $body=json_encode($fields+['contact_permission'=>'yes','submission_id'=>$reference,
+    'source_url'=>'https://'.$host.'/buyers.html','form_version'=>'buyers-v1'],JSON_UNESCAPED_SLASHES);
+  $status=0;$resp='';
+  if (function_exists('curl_init')) {
+    $ch=curl_init($bridge);
+    curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>$body,CURLOPT_RETURNTRANSFER=>true,
+      CURLOPT_TIMEOUT=>20,CURLOPT_CONNECTTIMEOUT=>8,CURLOPT_FOLLOWLOCATION=>false,
+      CURLOPT_HTTPHEADER=>['Content-Type: application/json','Accept: application/json']]);
+    $resp=(string)curl_exec($ch);$status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);curl_close($ch);
+  } else {
+    $ctx=stream_context_create(['http'=>['method'=>'POST','timeout'=>20,'ignore_errors'=>true,
+      'header'=>"Content-Type: application/json\r\nAccept: application/json\r\n",'content'=>$body]]);
+    $resp=(string)@file_get_contents($bridge,false,$ctx);
+    if (isset($http_response_header[0])&&preg_match('/\s(\d{3})\s/',$http_response_header[0],$m)) $status=(int)$m[1];
+  }
+  $data=json_decode($resp,true);
+  $record['evosys']=($status>=200&&$status<300&&is_array($data)&&!empty($data['success']))
+    ? ['sent'=>true,'reference'=>(string)($data['reference']??''),'at'=>gmdate('c')]
+    : ['sent'=>false,'status'=>$status,'at'=>gmdate('c')];
+  if (empty($record['evosys']['sent'])) error_log('wholesale intake: EvoSys hand-off failed status='.$status.' ref='.$reference);
+  @file_put_contents($file,json_encode($record,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_INVALID_UTF8_SUBSTITUTE),LOCK_EX);
+}
 $notify=getenv('WHOLESALE_NOTIFY_EMAIL');
 if ($notify&&filter_var($notify,FILTER_VALIDATE_EMAIL)) {
   // Notification contains NO personal data; private record remains on the server.
