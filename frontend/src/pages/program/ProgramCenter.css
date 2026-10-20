@@ -602,3 +602,55 @@ button.sci-tile[aria-expanded="true"] { border-color: var(--gold); box-shadow: 0
 .sci-rows > .sci-kvbtn:first-child { border-top: 0; }
 .sci-kvbtn:hover { background: #f7fafc; }
 @media (max-width: 560px) { .sci-steps { justify-content: flex-start; flex-direction: column; gap: 6px; } .sci-steps li + li::before { display: none; } }
+
+
+/* SCI Action Inbox / real outreach pulse — additive, within the existing brand system */
+.sci-pulse { margin-bottom: 12px; padding: 14px 18px; border: 1px solid var(--line-2);
+  border-radius: 14px; box-shadow: var(--shadow); background: #fff; }
+.sci-pulse-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
+.sci-pulse-eyebrow { color: var(--teal); font-size: 10px; font-weight: 850; letter-spacing: 1.3px; }
+.sci-pulse-head h2 { font-size: 18px; font-weight: 800; letter-spacing: -.5px; color: var(--navy); }
+.sci-pulse-head p { font-size: 11px; color: var(--sub); }
+.sci-pulse-main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(190px, 1fr); gap: 18px; align-items: stretch; }
+.sci-pulse-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.sci-pulse-stat { border: 1px solid #e4edf0; background: #f8fbfd; border-radius: 10px; padding: 9px 10px; min-width: 0; }
+.sci-pulse-stat > span { color: var(--sub); font-size: 11px; font-weight: 700; display: block; }
+.sci-pulse-stat strong { display: block; color: var(--navy); font-size: clamp(21px, 2vw, 30px); font-weight: 850; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.sci-pulse-stat small { color: var(--muted); font-size: 10.5px; line-height: 1.3; display: block; }
+.sci-pulse-chart { border-left: 1px solid var(--line); padding-left: 15px; min-width: 0; }
+.sci-pulse-chart h3 { font-size: 11px; font-weight: 750; color: var(--navy); margin-bottom: 6px; }
+.sci-pulse-chart .sci-micro { font-size: 10px; margin-top: 3px; }
+.sci-pulse-trend { height: 58px; display: flex; gap: 4px; align-items: flex-end; border-bottom: 1px solid #dae5eb; }
+.sci-pulse-trend-day { flex: 1 1 0; min-width: 3px; background: linear-gradient(0deg, var(--teal), #66c4b8);
+  border-radius: 4px 4px 0 0; transition: opacity .1s; }
+.sci-pulse-trend-day:hover { opacity: .72; }
+.sci-pulse-bottom { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; color: var(--sub); font-size: 11px; margin-top: 9px; }
+.sci-pulse-bottom b { color: var(--ink); }
+.sci-pulse-bottom > :last-child { margin-left: auto; font-style: italic; }
+.sci-queue-tabs { display: flex; gap: 5px; overflow-x: auto; padding: 2px 0 8px; scrollbar-width: thin; }
+.sci-queue-tabs button { flex: none; display: inline-flex; gap: 5px; align-items: center; border: 1px solid var(--line-2);
+  background: #f6f9fb; color: var(--sub); border-radius: 9px; padding: 7px 9px; font-size: 11px; font-weight: 750; }
+.sci-queue-tabs button b { background: #e5ecf2; padding: 0 6px; border-radius: 5px; color: var(--ink); font-size: 10px; }
+.sci-queue-tabs button.on { border-color: var(--navy-3); background: var(--navy-2); color: #fff; }
+.sci-queue-tabs button.on b { background: #316078; color: #fff; }
+.sci-inbox-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 6px;
+  margin: 4px 0; font-size: 10.5px; color: var(--muted); }
+.sci-inbox-toolbar label { margin-left: auto; }
+.sci-inbox-toolbar select { min-width: 110px; max-width: 130px; padding: 4px 6px; height: 29px; font-size: 11px; }
+.sci-inbox-item.unread { background: #edf8ff; border-left-color: var(--blue); }
+.sci-inbox-item.overdue { background: #fff0f1; border-left-color: var(--red); }
+.sci-inbox-item.unread b { font-weight: 850; }
+.sci-inbox-new { color: #1678ae; font-size: 10px; }
+.sci-inbox-item[aria-current="true"] { background: #fff0d5; border-left-color: var(--gold-deep); }
+@media (max-width: 1250px) {
+ .sci-pulse-main { grid-template-columns: 1fr; gap: 7px; }
+ .sci-pulse-chart { border-left: 0; border-top: 1px solid var(--line); padding: 8px 0 0; }
+ .sci-pulse-trend { height: 44px; }
+ .sci-pulse-bottom > :last-child { margin-left: 0; }
+}
+@media (max-width: 670px) {
+ .sci-pulse { padding: 12px; }
+ .sci-pulse-head { flex-wrap: wrap; }
+ .sci-pulse-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+ .sci-queue-tabs button { font-size: 10.5px; }
+}
