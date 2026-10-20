@@ -353,3 +353,39 @@ def test_burial_is_bereavement_not_a_time_pick():
     c = _rr.classify("We buried my wife on Tuesday")
     assert "bereavement" in c["reasons"][0]
     assert _rr.APPOINTMENT not in _rr.intents("We buried my wife on Tuesday", c["class"])
+
+
+@pytest.mark.parametrize("text", [
+    "No thank you, nothing works for us",
+    "Not interested. Nothing works for me",
+    "Remove me from your list, nothing works for me",
+])
+def test_turning_times_down_with_an_opt_out_stays_opt_out(text):
+    assert _rr.classify(text)["class"] == "opt_out", text
+
+
+@pytest.mark.parametrize("text", ["Nothing works for me", "Neither works for me", "None of those work for us"])
+def test_turning_the_times_down_is_not_a_pick(text):
+    c = _rr.classify(text)
+    assert "picked or suggested a time" not in c["reasons"], (text, c)
+    assert c["class"] != "hot", (text, c)
+
+
+@pytest.mark.parametrize("text", ["Happy Monday!", "Have a blessed Sunday"])
+def test_day_greetings_are_not_appointment_intent(text):
+    c = _rr.classify(text)
+    assert _rr.APPOINTMENT not in _rr.intents(text, c["class"]), (text, c)
+
+
+@pytest.mark.parametrize("text", ["We buried dad Saturday", "We buried him last Saturday",
+                                  "Funeral is Saturday", "Laid my husband to rest Tuesday"])
+def test_grief_naming_a_day_is_bereavement(text):
+    c = _rr.classify(text)
+    assert "bereavement" in c["reasons"][0], (text, c)
+    assert _rr.APPOINTMENT not in _rr.intents(text, c["class"]), text
+
+
+def test_opt_out_naming_a_day_has_no_appointment_intent():
+    t = "Not interested. Have a good weekend"
+    c = _rr.classify(t)
+    assert c["class"] == "opt_out" and _rr.APPOINTMENT not in _rr.intents(t, c["class"])

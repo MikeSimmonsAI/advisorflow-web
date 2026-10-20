@@ -72,6 +72,11 @@ def _home_visit_waiting(conv) -> bool:
                 and not (memory_of(conv).get("home_visit") or {}).get("done"))
 
 
+def ai_setter_conv(db, lead_id):
+    return (db.query(ProgramConversation).filter(ProgramConversation.lead_id == lead_id)
+            .order_by(ProgramConversation.created_at.desc()).first())
+
+
 def _home_visit_of(conv) -> Optional[dict]:
     from app.services.programs.ai_setter import HOME_VISIT_REASON, memory_of
     if conv is None or conv.handoff_reason != HOME_VISIT_REASON:
@@ -937,6 +942,9 @@ def _open_tasks(db, org_id):
                                                    ProgramConversation.handoff_reason == HOME_VISIT_REASON).all()):
         if c.lead_id in test_ids or not _home_visit_waiting(c):
             continue
+        latest = ai_setter_conv(db, c.lead_id)          # only the family's current conversation counts
+        if latest is None or latest.id != c.id:
+            continue
         lead = db.query(Lead).filter(Lead.id == c.lead_id).first()
         if lead is None:
             continue
@@ -964,7 +972,9 @@ def command_home_visit_arranged(body: HomeVisitIn, db: Session = Depends(get_db)
     lead = db.query(Lead).filter(Lead.id == body.lead_id, Lead.organization_id == prog.organization_id).first()
     if lead is None:
         raise HTTPException(status_code=404, detail="Family not found.")
-    conv = ai_setter.conversation_for(db, lead)
+    conv = ai_setter.conversation_for(db, lead, create=False)
+    if not _home_visit_waiting(conv):
+        raise HTTPException(status_code=409, detail="This family has no home visit waiting to be arranged.")
     mem = ai_setter.memory_of(conv)
     who = getattr(user, "full_name", None) or getattr(user, "email", None) or "staff"
     mem["home_visit"] = {"done": True, "done_at": datetime.utcnow().isoformat() + "Z", "done_by": who,

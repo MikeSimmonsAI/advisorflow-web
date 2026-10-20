@@ -80,9 +80,24 @@ _SCHEDULE_PICK = (r"(?<!n't )(?<!not )(?<!no )\b(works (better|best|for (me|us))
                   r"(i'?m|i am|we'?re|we are) (free|available)|%s\b(?![^.?!]{0,25}?\b(not|n'?t|no)\b)[^.?!]{0,25}?"
                   r"\b(works|is good|is fine|good for|better|best))\b" % _DAYS)
 
+# "Nothing works for us" / "neither works" turns the times DOWN; a greeting
+# ("Happy Monday!", "have a blessed Sunday") names a day without meaning a visit.
+_NONE_WORKS = r"\b(nothing|neither|none|no (day|time|times|days))\b"
+_DAY_GREETING = r"\b(happy|blessed|good|great|nice|enjoy (your|the)|have a( good| great| nice| blessed)?)\s+%s\b" % _WEEKDAYS
+_TIME_PICK_WHY = "picked or suggested a time"
+
+
+def _names_a_time(text: str) -> bool:
+    return bool(re.search(_TIMING, text)) and not re.search(_DAY_GREETING, text)
+
+
+def _picks_a_time(text: str) -> bool:
+    return bool(re.search(_SCHEDULE_PICK, text)) and not re.search(_NONE_WORKS, text) \
+        and not re.search(_DAY_GREETING, text)
+
+
 _HOT_PATTERNS = [
     (r"\b(appointment|appt|schedule|book|meet(ing)?|visit|tour|come (by|in|out)|stop by)\b", "wants a meeting or visit"),
-    (_SCHEDULE_PICK, "picked or suggested a time"),
     (r"\b(price|pricing|cost|costs|how much|payment|plan options|financ)", "asked about price"),
     (r"(?<!not )(?<!no longer )\b(interested|yes please|sounds good|i('| a)m in|sign me up|let'?s do)\b", "interested"),
     (r"\b(call me|reach (out|me)|get back to me|follow ?up|contact me|text me)\b", "requests follow-up"),
@@ -101,7 +116,8 @@ _BAD_DATA_PATTERNS = (r"\b(wrong (number|person|email|address)|this is not (him|
 _WRONG_PERSON_PATTERNS = (r"\b(wrong person|this is not (him|her|me)|not (him|her)|no one (here )?by that name|"
                           r"(he|she) (doesn'?t|does not) live here|you have the wrong(?! (?:number|email|address))|not the right person)\b")
 _BEREAVEMENT = (r"\b(passed away|passed on|died|deceased|funeral for|lost my (husband|wife|mother|father|son|daughter)|"
-                r"buried (my|our))\b")
+                r"buried (my|our|him|her|mom|dad|mama|daddy|grand\w+)|laid (\w+ ){1,3}to rest|"
+                r"funeral (is|was|will be)|memorial (is|was|will be))\b")
 _LOW_PATTERNS = r"^\s*(ok(ay)?|k|thanks?( you)?|ok thanks?|thank you|thx|got it|received|👍|🙏)[\s.!]*$"
 
 _CLASS_FROM_REPLY = {
@@ -114,6 +130,8 @@ def classify(body: str, reply_classification: Optional[str] = None) -> Dict:
     """Deterministic and explainable. A stated need beats a stray keyword."""
     text = (body or "").strip().lower()
     hot = [why for pat, why in _HOT_PATTERNS if re.search(pat, text)]
+    if _picks_a_time(text):
+        hot.insert(1 if hot and hot[0] == "wants a meeting or visit" else 0, _TIME_PICK_WHY)
     bereaved = bool(re.search(_BEREAVEMENT, text))
     if re.search(_STOP_WORDS, text):
         return {"class": OPT_OUT, "reasons": ["asked to stop"]}
@@ -123,7 +141,7 @@ def classify(body: str, reply_classification: Optional[str] = None) -> Dict:
         return {"class": WRONG_PERSON, "reasons": ["says we have the wrong person"]}
     if re.search(_BAD_DATA_PATTERNS, text) and not hot:
         return {"class": BAD_DATA, "reasons": ["says the number / address is wrong"]}
-    weak = {"interested", "requests follow-up"}
+    weak = {"interested", "requests follow-up", _TIME_PICK_WHY}
     if hot and re.search(_OPT_OUT_PHRASES, text) and set(hot) <= weak:
         return {"class": OPT_OUT, "reasons": ["opted out or not interested"]}
     if hot:
@@ -139,7 +157,7 @@ def classify(body: str, reply_classification: Optional[str] = None) -> Dict:
         return {"class": upstream, "reasons": ["classified as %s on arrival" % reply_classification]}
     if re.search(_LOW_PATTERNS, text) or not text:
         return {"class": LOW, "reasons": ["acknowledgement only"]}
-    if re.search(_TIMING, text):
+    if _names_a_time(text):
         return {"class": ACTIVE, "reasons": ["talked about when"]}
     if re.search(_INFO_ASK, text):
         return {"class": ACTIVE, "reasons": ["wants more information"]}
@@ -157,8 +175,8 @@ def intents(body: str, cls: Optional[str] = None) -> List[str]:
     wrong person, bad data, a bare acknowledgement, not interested)."""
     text = (body or "").strip().lower()
     found = [k for k, pat in _INTENT_PATTERNS if re.search(pat, text)]
-    if APPOINTMENT not in found and not re.search(_BEREAVEMENT, text) and (
-            re.search(_TIMING, text) or re.search(_SCHEDULE_PICK, text)):
+    if APPOINTMENT not in found and not re.search(_BEREAVEMENT, text) \
+            and cls not in (OPT_OUT, WRONG_PERSON, BAD_DATA) and (_names_a_time(text) or _picks_a_time(text)):
         found.insert(0, APPOINTMENT)                     # a day / time named is about a visit
     if re.search(_OPT_OUT_PHRASES, text) and re.search(r"\b(not interested|no thank(s| you))\b", text):
         found.append(NOT_INTERESTED)

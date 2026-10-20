@@ -68,3 +68,25 @@ def test_another_workspace_cannot_mark_it(client, setter, sample_advisor):
     conv = S.conversation_for(db, lead, create=False)
     db.refresh(conv)
     assert not (S.memory_of(conv).get("home_visit") or {}).get("done")
+
+
+def test_cannot_mark_a_family_that_never_asked(client, setter, sample_advisor):
+    db, org, admin = setter["db"], setter["org"], setter["admin"]
+    lead = _lead_for(db, org, sample_advisor, "L004", phone="2145550104")
+    r = client.post("/program/command/home-visit", headers=_h(db, admin), json={"lead_id": lead.id})
+    assert r.status_code == 409
+    assert S.conversation_for(db, lead, create=False) is None
+
+
+def test_a_second_request_after_one_was_arranged_shows_again(client, setter, sample_advisor):
+    db, org, admin = setter["db"], setter["org"], setter["admin"]
+    lead = _home_request(db, org, sample_advisor)
+    h = _h(db, admin)
+    assert client.post("/program/command/home-visit", headers=h, json={"lead_id": lead.id}).status_code == 200
+    conv = S.conversation_for(db, lead, create=False)
+    conv.state, conv.handoff_reason = "ai_active", None
+    db.commit()
+    _run(db, lead, "Could you come to my house again next month?", _Fake([_d("handoff", YES_HOME)]))
+    home = client.get("/program/command", headers=h).json()
+    assert home["filter_counts"]["home_visits"] == 1
+    assert [t["lead_id"] for t in home["tasks"] if t["kind"] == "home_visit"] == [lead.id]

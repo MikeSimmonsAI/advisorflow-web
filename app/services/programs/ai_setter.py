@@ -1379,6 +1379,9 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         home = bool(dc_.get("family_asks_for_home_visit") and dc_.get("home_visits_offered_by_this_location"))
         if home:
             merge_memory(conv, {"wants": ["home visit"], "next_step": HOME_VISIT_REASON})
+            _m = memory_of(conv)                      # a NEW ask reopens the task even if an earlier one was arranged
+            _m["home_visit"] = {"done": False, "requested_at": datetime.utcnow().isoformat() + "Z"}
+            conv.memory = json.dumps(_m)
         _handoff(db, prog, lead, conv, HOME_VISIT_REASON if home else (d.get("reason") or "the family wants a person"),
                  notify=True)
 
