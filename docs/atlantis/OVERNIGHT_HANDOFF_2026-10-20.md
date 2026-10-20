@@ -1,79 +1,88 @@
 # Atlantis Light & Power — overnight handoff (2026-10-20)
 
-Lane C · tracking issue #237 · rules #239 and `C:\Dev\lanes\LANES.md`.
-This file is the durable record of the overnight V4 run. It is updated at the end of the run.
+Lane C · tracking #237 · rules #239 and `C:\Dev\lanes\LANES.md`. This is the durable, resumable record of the overnight V4 run.
 
-## 1. Production state (unchanged overnight)
-- main / Render backend + frontend: `aee2e142` (PR #241, Phase 1). `/health` and `/version` report aee2e14.
-- Live page: `https://api.evosyspro.live/site/atlantis-light-and-power`. Its stored md5 `e571d813…` matches main. It was **not** republished overnight.
-- Synthetic live lead "Release Check" (`atlantis-release-check-20261019@example.com`, id `011692da-…`) is still in place. It was created before test-record flagging existed, so it is NOT flagged `is_test`. The owner decides whether to flag it (owner item).
-- PR #116 is untouched (OPEN at `fb4b7399`). Chariot transactions OFF. No outreach, supplier action, DNS, WordPress, appointment or payment changes.
+## 1. Production (not changed by this session)
+- Production main is now `29b2d4b1`: another lane's emergency fix #245 (EvoSense tax roll), merged after Phase 1. Atlantis Phase 1 `aee2e142` (PR #241) is an ancestor of it, and #245 changes no Atlantis file. `/health` and `/version` return 200 for 29b2d4b (checked 00:57 CT).
+- Live page `https://api.evosyspro.live/site/atlantis-light-and-power`: 200, md5 `e571d8131231b6c441044bc5ec9b2961`, identical to the Phase 1 publish. It was not republished.
+- The live synthetic lead "Release Check" (`atlantis-release-check-20261019@example.com`, id `011692da-…`) is untouched. It predates test-record flagging and is NOT `is_test` (owner decides).
+- PR #116 untouched (OPEN, `fb4b7399`). Chariot transactions OFF. No outreach, supplier action, DNS, WordPress, appointment or payment change.
 
-## 2. Branch
-`feature/atlantis-phase2-ops`, cut from `aee2e142`. Not merged. A PR is opened for review only and needs a GO from Mike.
+## 2. Branch and PR
+`feature/atlantis-phase2-ops` (from `aee2e142`) → **draft PR #246**, review only, awaiting Mike's GO. It merges cleanly onto current main (`git merge-tree` exit 0).
 
 | Commit | What |
 |---|---|
-| 3ef90483 | Supplier hand-offs: one open hand-off per supplier (double-click safe), recorded outcomes, which never enroll. Reserved test addresses (example.com/.net/.org, .test/.example/.invalid/.localhost) are filed as `is_test` |
-| 9dd07db8 | Advisor qualification view: known / missing / next step / eligible suppliers; manual bill lines (actual vs estimated); one "Get missing details" task |
-| 4bb16dd9 | Move Concierge: completion needs every item ticked; cancel clears move tasks; a changed date surfaces late tasks; pending / next action / overdue; a re-sent form updates the open move and never unticks |
-| a7bceaec | Commercial: advisor-led stages on the same lead (Rate Requests tier moves forward only, never to Contract Signed). Won only after supplier confirmation. Lost/deferred carry a reason and history. Several service locations stay under one business |
-| b023ac62 | Field acquisition: door outcomes are recorded as what the rep said happened. Referrals need both a contact and permission, are credited to the rep, and land in the normal queue. Per-rep summary (managers see all reps, reps see themselves) |
-| 3ccf7619 | Fixes from the independent review (see §4) |
-| (docs) | `READINESS_EXTERNAL.md`, `SALES_PROGRAM.md`, this file |
+| 3ef90483 | Supplier hand-off: one open per supplier, outcomes (never enroll); reserved test addresses filed as `is_test` |
+| 9dd07db8 | Qualification view: known / missing / next step / eligible suppliers; manual bill lines; one missing-details task |
+| 4bb16dd9 | Move Concierge: complete only when all ticked; cancel clears move tasks; date change surfaces late tasks; re-sent form never unticks |
+| a7bceaec | Commercial: advisor-led stages, forward-only tier, won only after supplier confirmation; lost/deferred with reason/history; multi-site |
+| b023ac62 | Field acquisition: door outcomes, referral only with contact + permission, credited to rep, per-rep summary |
+| 3ccf7619 | Review #1 fixes (scope, locking, move integrity, data repair) |
+| a67cdb01 | Docs: external readiness, sales program, this handoff |
+| f01743fd | Manager intake view `GET /energy-ops/intake-health` |
+| b5042f9d | Staff screens: Field visits, New requests panel, hand-offs waiting for an outcome |
+| 7cca2a86 | Review #2 fixes + 16-journey acceptance suite |
 
-## 3. New endpoints (all under `/energy-ops`, tenant-scoped through `lead_scope`)
+## 3. What was built
+Backend endpoints, all under `/energy-ops` and tenant-scoped through `lead_scope`:
 - `GET /suppliers`
-- `POST /leads/{id}/handoff`
-- `GET /leads/{id}/handoffs`
+- `POST /leads/{id}/handoff`, `GET /leads/{id}/handoffs`
 - `POST /leads/{id}/handoffs/{hid}/outcome`
-- `GET /supplier-handoffs?state=open|all`
-- `GET|POST /leads/{id}/qualification`
-- `POST /leads/{id}/qualification/request-info`
-- `GET /leads/{id}/commercial`
-- `POST /leads/{id}/commercial/stage`
-- `POST|PATCH /leads/{id}/commercial/locations[/{loc}]`
-- `POST /field/visits`
-- `GET /field/summary?days=`
-- `PATCH /moves/{id}` and `POST /moves/{id}/checklist` (behaviour changes only)
+- `GET /supplier-handoffs`
+- `GET|POST /leads/{id}/qualification`, `POST …/qualification/request-info`
+- `GET /leads/{id}/commercial`, `POST …/commercial/stage`, `POST|PATCH …/commercial/locations`
+- `POST /field/visits`, `GET /field/summary`
+- `GET /intake-health` (managers)
+- Behaviour changes on `PATCH /moves/{id}` and `POST /moves/{id}/checklist`
 
-There are no schema changes and no migrations. Everything is stored in `Lead.custom_fields`, existing tables and audit entries. Shared hot spots (`auto_migrate`, `models/*`, `deps`, `main`, `App.jsx`, workflows, render yaml) were not touched.
+Screens. These need no new routes; `App.jsx`, `Layout.jsx` and `api/client.js` are untouched:
+- **Tasks & Follow-Up:** the "Field visits" view (`?view=field`), plus a manager "New requests" panel.
+- **Suppliers:** "Hand-offs waiting for an outcome", with an outcome form.
 
-## 4. Independent QA review — findings and outcomes
-Fixed in `3ccf7619`, each with a test:
-- **High.** A field rep could mark any workspace lead do-not-contact, or learn its id, by phone number. Matching now uses the rep's own lead scope. Matches the rep can't see are forwarded to the owner as a task, with no id returned and the lead left unchanged.
-- Two residents at one address were treated as duplicates. Email matching was case-sensitive.
-- Cancelling a move could cancel tasks on a lead the caller couldn't read, or one shared with another open move. Completion was checked before services added in the same change. A completed checklist could be unticked.
-- Custom-fields writes were not locked (lost-update risk). `_lock` swallowed errors and, with autoflush off, would have discarded pending edits.
-- A repeated commercial site dropped a newly supplied meter id.
-- An auto-flagged test lead stayed hidden even after a real person used the same contact.
-- A non-list `supplier_handoffs` broke the lead.
+There are **no screens yet** for the per-lead qualification and commercial views. Those belong on the lead detail page, which is shared across lanes, so they need coordination.
 
-## 5. Tests and how to run them (from `C:\Dev\lanes\atlantis`)
+No schema changes or migrations. Data lives in `Lead.custom_fields`, existing tables and audit entries.
+
+## 4. Independent reviews
+- **Review 1:** 1 high, several medium. All fixed in `3ccf7619` with tests.
+  - High: a field rep could change or learn leads outside their scope.
+  - Also fixed: apartment duplicates, case-sensitive email, move task scope and completion order, unlocked custom-field writes, `_lock` swallowing errors and dropping unflushed edits, meter id dropped on a repeated site, stale test flag, junk `supplier_handoffs`.
+- **Review 2:** 0 high, 2 medium, 6 low; every review-1 fix confirmed. All fixed in `7cca2a86` except one:
+  - Fixed medium: forwarded tasks counted as referrals; the field note was dropped.
+  - Fixed low: a finished move's services could change; closed statuses counted as unassigned; cancelled tasks in the denominator; "null" owner; double fetch; sticky error; form not reset; ARIA.
+  - **Not fixed (other lane):** `app/services/public_capture.py` `_parse_when` strips the timezone from a client `submitted_at` without converting to UTC, so a lead's `created_at` can be off by the visitor's UTC offset. This is shared intake code, so it's for Lane D. Effect on Atlantis: the manager panel's "waiting" ages for website requests may be off by a few hours.
+
+## 5. Tests (from `C:\Dev\lanes\atlantis`)
 ```
-python -m pytest -q -p no:cacheprovider tests/test_atlantis_field_ops.py tests/test_atlantis_move_concierge_ops.py tests/test_atlantis_commercial.py tests/test_atlantis_supplier_outcomes.py tests/test_atlantis_test_records.py tests/test_atlantis_qualification.py   # 57 passed
-python -m pytest -q -p no:cacheprovider tests/test_atlantis_operating_flow.py tests/test_customer_sites.py tests/test_lead_capacity_matrix.py tests/test_plan_limits_coverage.py                                                                                   # 72 passed, 2 failed (SCI files only)
-python -m pytest -q -p no:cacheprovider tests/test_atlantis_site_journeys.py tests/test_atlantis_pipeline_oct1.py tests/test_commercial_atlantis.py tests/test_atlantis_site_browser.py                                                                                # 44 passed
+python -m pytest -q -p no:cacheprovider -W ignore -rf tests/test_atlantis_*.py tests/test_commercial_atlantis.py tests/test_customer_sites.py tests/test_lead_capacity_matrix.py tests/test_plan_limits_coverage.py
 ```
-Known failures that are not Atlantis: `test_lead_capacity_matrix` and `test_plan_limits_coverage` name `services/programs/setter_eval.py` and `services/sci_staging_demo.py` (SCI Lane A). The same failures exist on main. The 54 full-suite and 9 `test_sci_decline_alternatives` failures noted on Phase 1 are also pre-existing on main.
+- The browser tests need Chromium; `test_atlantis_ops_browser.py` also needs `npm run build` in `frontend/` first.
+- Expected: everything passes except 2 guard tests (`test_lead_capacity_matrix`, `test_plan_limits_coverage`). Those fail only on SCI Lane A files (`services/programs/setter_eval.py`, `services/sci_staging_demo.py`), and the same failures exist on main.
+- The frontend build passes.
 
-## 6. External readiness and owner decisions
-See `READINESS_EXTERNAL.md` (domain cutover, sender and inbox, calendar, supplier matrix, ComparePower link, default advisor) and `SALES_PROGRAM.md` (playbooks, residential→commercial path, training, compensation structure with **no** rates, revenue readiness, owner decision sheet). Nothing in either document was activated.
+## 6. Owner decisions (detail in `READINESS_EXTERNAL.md` and `SALES_PROGRAM.md`)
+1. GO / NO-GO on PR #246.
+2. Production default advisor (unset; admin fallback works).
+3. Domain cutover for atlantislightandpower.com (GoDaddy DNS; no MX/SPF/DMARC).
+4. Sender and inbox: the inbound mailbox feature is Microsoft 365 only, while atlantis-enterprises.com uses Google Workspace.
+5. ComparePower referral URL (`COMPAREPOWER_AFFILIATE_URL` on the server).
+6. Supplier wording and eligibility confirmation.
+7. Compensation terms (structure documented, no rates).
+8. Whether to flag the Release Check lead as a test record.
 
-Owner-only items:
-1. Production default advisor (currently unset; admin fallback verified).
-2. Domain cutover for atlantislightandpower.com (GoDaddy DNS, no MX/SPF/DMARC).
-3. Sender and inbox choice. The inbound mailbox feature is Microsoft 365 only; atlantis-enterprises.com runs Google Workspace.
-4. ComparePower referral URL.
-5. Supplier wording and eligibility confirmation.
-6. Compensation terms.
-7. Whether to flag the Release Check lead as a test record.
-8. GO / NO-GO on merging the Phase 2 PR.
+## 7. Rollout and rollback
+- **Rollout after GO:**
+  1. Merge PR #246 only.
+  2. Wait for the Render deploy and check `/version`.
+  3. Run the acceptance suite against the merged main locally.
+  4. Open Suppliers and Tasks & Follow-Up as an admin.
+  No republish is needed (no page change). No migration.
+- **Rollback:** revert the merge commit (code only). The new `custom_fields` keys are ignored by older code.
 
-## 7. Rollback
-Production rollback is not needed: nothing was deployed. If the Phase 2 PR is merged later and must be undone, revert the merge commit on main. There are no migrations, so the revert is code-only. Data written into `custom_fields` keys (`supplier_handoffs` entries with status/history, `commercial`, `bill`, `field_rep_id`, `contact_permission`) is ignored by the older code.
-
-## 8. Next commands
-- Review the PR: `gh pr view <n> --repo MikeSimmonsAI/advisorflow-web`
-- After GO: merge only that PR, check Render `/version`, and run the journeys suite against main. No republish is needed: Phase 2 changes no page.
-- Not started overnight: website copy/edge-case improvements (dev only), manager queue additions (unassigned inquiries, time to first action), and residential→commercial training flags (needs a schema change, so coordinate with Lane D).
+## 8. Next steps for whoever resumes
+1. On GO, do the rollout above.
+2. Add the qualification and commercial panels to the lead detail page. This touches a shared page, so coordinate on #239 first.
+3. Hand the `public_capture` timezone finding to Lane D.
+4. Residential→commercial progression flags need a schema change. The path is documented in `SALES_PROGRAM.md`; coordinate with Lane D.
+5. Website copy/edge-case improvements (dev only) were not started.
