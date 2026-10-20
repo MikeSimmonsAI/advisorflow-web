@@ -1956,6 +1956,10 @@ def owner_names_revert(payload: OwnerNamesRevertIn, db: Session = Depends(get_db
     if not pl or pl.get("hash") != payload.plan:
         raise HTTPException(status_code=404, detail="No applied repair with that code.")
     out = ON.revert(db, org_id, pl, user=user)
+    db.commit()
+    return out
+
+
 @router.post("/roll-fix/{run_id}/rollback")
 def roll_fix_rollback(run_id: str, payload: ConfirmIn, db: Session = Depends(get_db),
                       user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
