@@ -1169,3 +1169,16 @@ def field_summary(request: Request, days: int = Query(30, ge=1, le=366),
     out = energy_field.summary(db, org_id=org_id, days=days, rep_id=rep)
     out["scope"] = "all_reps" if rep is None else "own"
     return out
+
+
+# ── INTAKE HEALTH (manager view) ────────────────────────────────────────────
+@router.get("/intake-health")
+def intake_health(request: Request, days: int = Query(30, ge=1, le=365),
+                  db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Unassigned new requests and time to first contact (recorded, not verified)."""
+    if not _is_manager(db, user, request):
+        raise HTTPException(403, "The intake view is for workspace managers.")
+    from app.services import energy_intake_health as ih
+    org_id = _org_id(db, user, request)
+    scoped = lead_scope.authorized_lead_query(db, user, Lead.id, request=request).scalar_subquery()
+    return ih.report(db, org_id=org_id, scoped=scoped, now=_now(), days=days)
