@@ -410,6 +410,11 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
             "role": m.role,
             "path": "/workspace/%s" % org.id,
             "is_program": org.id in program_orgs,
+            # Presentation hint only, NOT an entitlement. The dedicated route
+            # enforces the roofing_program feature and authorized workspace.
+            # A missing feature opens an honest setup-needed gate, not SCI UI.
+            "program_route": "/program/roofing" if
+                (org.industry or "").strip().lower() == "roofing" else None,
         })
 
     platform = [c for c in contexts if c["type"] == "platform"]

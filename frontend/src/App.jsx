@@ -148,6 +148,7 @@ import AIHub from './pages/AIHub'
 import Availability from './pages/Availability'
 import { Unauthorized, NotFound, VerificationUnavailable } from './pages/AccessState'
 import { decideSciDoor, shouldLandInSci, SCI_ORG_NAME } from './auth/sciDoor'
+import { workspaceProgramDestination } from './auth/workspaceProgramDoor'
 import CRMIntegration from './pages/CRMIntegration'
 import CRM from './pages/CRM'
 import TierDefinitions from './pages/TierDefinitions'
@@ -535,6 +536,13 @@ function HomeRedirect() {
     if (shouldLandInSci(ctx)) {
       return <Navigate to="/sci" replace />
     }
+    // Respect the user's already-selected workspace on subsequent visits.
+    // Roofing has its own mission-control shell, not the generic Overview.
+    const selected = user?.role !== 'god_admin'
+      ? (ctx.workspace_contexts || []).find(w => w.organization_id === getWorkspaceContext())
+      : null
+    const selectedProgram = workspaceProgramDestination(selected)
+    if (selectedProgram) return <Navigate to={selectedProgram} replace />
     if (def.type === 'workspace' && def.organization_id) {
       return <Navigate to={'/workspace/' + def.organization_id} replace />
     }
@@ -683,7 +691,8 @@ function WorkspaceRoute() {
     // center - never the general workspace tools - for every login, the
     // executive switching in included.
     const entry = (ctx?.workspace_contexts || []).find(w => w && w.organization_id === organizationId)
-    if (entry?.is_program) return <Navigate to="/program" replace />
+    const programDestination = workspaceProgramDestination(entry)
+    if (programDestination) return <Navigate to={programDestination} replace />
     // ProtectedRoute already wraps its children in Layout + ContextBanner; the
     // second banner this used to add was the same banner drawn twice.
     return <ProtectedRoute><AgencyHomeGate><Overview /></AgencyHomeGate></ProtectedRoute>
@@ -1298,8 +1307,11 @@ export default function App() {
         <Route path="/view/rate-requests" element={<Navigate to="/rate-requests" replace />} />
         <Route path="/view/:viewKey" element={<ProtectedRoute><WorkspaceView /></ProtectedRoute>} />
         <Route path="/workqueue" element={<ProtectedRoute><WorkQueue /></ProtectedRoute>} />
-        {/* EvoSys Pro Roofing - gated by the explicit `roofing_program` feature (server: /roofing-ops). */}
-        <Route path="/program/roofing" element={<ProtectedRoute bare feature="roofing_program"><RoofingShell /></ProtectedRoute>}>
+        {/* RoofingShell checks /roofing-ops/status against the CURRENT workspace.
+             Avoid using cached branding for a client-side feature rejection:
+             the previous workspace may be SCI while switching to Roofing.
+             /roofing-ops enforces membership and explicit roofing_program server-side. */}
+        <Route path="/program/roofing" element={<ProtectedRoute bare><RoofingShell /></ProtectedRoute>}>
           <Route index element={<RoofingMission />} />
           <Route path="queue" element={<RoofingQueue />} />
           <Route path="conversations" element={<RoofingConversations />} />
