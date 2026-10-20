@@ -271,3 +271,24 @@ def test_relink_when_the_right_owner_is_already_linked_from_the_same_source(db_s
     assert len({l.owner_id for l in cur}) == 1
     RF.rollback(db, org, out["run_id"])
     db.commit()
+
+
+def test_a_person_with_a_phone_on_file_is_never_removed(world):
+    """Review finding: removing a person cascades to their contact points."""
+    from app.models.evosense_models import EvoSenseContactPoint, EvoSensePerson
+    db, org = world["db"], world["org"]
+    owner = EV.CT.primary_owner(db, world["not_owed"])
+    people = db.query(EvoSensePerson).filter_by(owner_id=owner.id).all()
+    assert people
+    for pr in people:
+        db.add(EvoSenseContactPoint(organization_id=org, person_id=pr.id, owner_id=owner.id, kind="phone",
+                                    value="+18175550199", source="manual"))
+    db.commit()
+    n = db.query(EvoSenseContactPoint).count()
+    out = RF.apply(db, org, confirm=RF.dry_run(db, org)["confirm_with"])
+    db.commit()
+    assert db.query(EvoSenseContactPoint).count() == n
+    assert {p.id for p in people} <= {p.id for p in db.query(EvoSensePerson).filter_by(owner_id=owner.id)}
+    RF.rollback(db, org, out["run_id"])
+    db.commit()
+    assert db.query(EvoSenseContactPoint).count() == n

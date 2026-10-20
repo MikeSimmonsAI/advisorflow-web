@@ -210,14 +210,16 @@ def _digest(row: Dict[str, Any]) -> str:
 
 def _tracked(db, org_id: str, pids: List[str], obs_ids: List[str], owner_ids: List[str]):
     """{table: {id: row}} for every row the repair may touch."""
-    from app.models.evosense_models import EvoSensePerson
+    from app.models.evosense_models import EvoSenseContactPoint, EvoSensePerson
     out = {}
     q = [("evosense_properties", EvoSenseProperty, EvoSenseProperty.id.in_(pids or ["-"])),
          ("evosense_signals", EvoSenseSignal, EvoSenseSignal.property_id.in_(pids or ["-"])),
          ("evosense_ownerships", EvoSenseOwnership, EvoSenseOwnership.property_id.in_(pids or ["-"])),
          ("evosense_observations", EvoSenseObservation, EvoSenseObservation.id.in_(obs_ids or ["-"])),
          ("evosense_owners", EvoSenseOwner, EvoSenseOwner.id.in_(owner_ids or ["-"])),
-         ("evosense_persons", EvoSensePerson, EvoSensePerson.owner_id.in_(owner_ids or ["-"]))]
+         ("evosense_persons", EvoSensePerson, EvoSensePerson.owner_id.in_(owner_ids or ["-"])),
+         # tracked so a rollback can see (and refuse on) any change to them
+         ("evosense_contact_points", EvoSenseContactPoint, EvoSenseContactPoint.owner_id.in_(owner_ids or ["-"]))]
     for name, model, cond in q:
         out[name] = {o.id: _row(o) for o in db.query(model).filter(model.organization_id == org_id, cond).all()}
     out["evosense_scores"] = {sc.id: {"is_current": bool(sc.is_current)} for sc in db.query(EvoSenseScore)
@@ -242,10 +244,12 @@ _MODELS = None
 def _models():
     global _MODELS
     if _MODELS is None:
-        from app.models.evosense_models import EvoSensePerson
+        from app.models.evosense_models import EvoSenseContactPoint, EvoSensePerson
+        # parents before children: persons are restored before their contact points
         _MODELS = {"evosense_properties": EvoSenseProperty, "evosense_signals": EvoSenseSignal,
-                   "evosense_ownerships": EvoSenseOwnership, "evosense_observations": EvoSenseObservation,
-                   "evosense_owners": EvoSenseOwner, "evosense_persons": EvoSensePerson}
+                   "evosense_owners": EvoSenseOwner, "evosense_ownerships": EvoSenseOwnership,
+                   "evosense_observations": EvoSenseObservation, "evosense_persons": EvoSensePerson,
+                   "evosense_contact_points": EvoSenseContactPoint}
     return _MODELS
 
 
@@ -317,13 +321,24 @@ def _refresh_people(db, org_id: str, owner, source: str) -> None:
     want = {IN.name_key(f): (f, role) for f, role in IN._persons_for(owner.display_name, owner.owner_type)}
     for pr in db.query(EvoSensePerson).filter(EvoSensePerson.organization_id == org_id,
                                               EvoSensePerson.owner_id == owner.id).all():
-        if pr.name_key not in want and pr.lead_id is None and pr.source == source:
+        if pr.name_key not in want and pr.lead_id is None and pr.source == source \
+                and not _person_in_use(db, org_id, pr.id):
             db.delete(pr)
         want.pop(pr.name_key, None)
     for nk, (full, role) in want.items():
         db.add(EvoSensePerson(organization_id=org_id, owner_id=owner.id, full_name=full, name_key=nk,
                               role=role, source=source, is_test=owner.is_test))
     db.flush()
+
+
+def _person_in_use(db, org_id: str, person_id: str) -> bool:
+    """A person with a phone/email on file or a conversation is never removed
+    (contact points would go with it: ON DELETE CASCADE)."""
+    from app.models.evosense_models import EvoSenseContactPoint, EvoSenseEngagement
+    return (db.query(EvoSenseContactPoint.id).filter(EvoSenseContactPoint.organization_id == org_id,
+                                                     EvoSenseContactPoint.person_id == person_id).first() is not None
+            or db.query(EvoSenseEngagement.id).filter(EvoSenseEngagement.organization_id == org_id,
+                                                      EvoSenseEngagement.person_id == person_id).first() is not None)
 
 
 def _settle_owner_conflict(db, org_id: str, prop) -> None:

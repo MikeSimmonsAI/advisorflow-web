@@ -29,7 +29,7 @@ Scope = tax-roll observations stored by `tarrant_tax_roll/2` with a raw line of 
 | Retracted | 2,022 (1,005 TAX_DELINQUENT, 1,017 TAX_SUIT) |
 | Kept, wording corrected | 12 (truly delinquent) |
 | Preserved, other sources/records | 116 |
-| Owners corrected / left alone (shared) / unchanged | 995 / 16 / 6 |
+| Owners: re-linked to the existing identical owner / renamed / left alone | 992 / 18 / 1 (owner conflict settled on all but 16 properties) |
 | At 45+ before → after | 66 → 0 (max after 39) |
 
 ## If #245 cannot be deployed before the next hunt
@@ -46,4 +46,9 @@ Next scheduled hunts (UTC): New Check Out 13:34, Behind on Taxes 13:50, Tired La
 3. `POST .../roll-fix/dry-run` on production → compare with the numbers above (new misread records from any hunt before deploy will add to the scope).
 4. `POST .../roll-fix/apply` with the code from step 3 → spot-check 5 properties.
 5. Re-enable the Tarrant roll source if it was paused; watch the next hunt's stats (`layout_2026-10` count, no `unreadable_line` spike).
-Rollback at any point after 4: step 4's `run_id` → rollback route.
+Rollback after 4: step 4's `run_id` → rollback route. It restores every row exactly (verified on the copy) but
+**refuses once anything has touched those rows since** (the next hunt re-seeing a record, a rescore, a person's
+edit) — so decide on rollback before re-enabling hunts / the source.
+
+Contact points on the owners involved: 0 in production (checked); a person with a phone/email or a
+conversation is never removed by the repair (review finding, fixed and tested).
