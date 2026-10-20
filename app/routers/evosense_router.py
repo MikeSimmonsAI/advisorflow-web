@@ -645,8 +645,37 @@ def add_contact(property_id: str, payload: ContactIn, db: Session = Depends(get_
     C.log_event(db, org_id, "contact.manual", property_id=prop.id, user=user, actor_type=C.ACTOR_USER,
                 is_test=prop.is_test, summary="Contact added by hand")
     EV.rescore(db, prop)
+    from app.services.evosense import readiness as RD
+    RD.close_investigation(db, org_id, prop, user, "%s added by %s" % (
+        "Phone" if payload.kind == "phone" else "Email", user.full_name or user.email or "a user"))
     db.commit()
     return {"contacts": [c.id for c in touched], "status": prop.status}
+
+
+@router.get("/opportunity-queue")
+def opportunity_queue(limit: int = 50, county: Optional[str] = None, step: Optional[str] = None,
+                      include_test: bool = False, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_or_observer)):
+    """Which opportunities deserve action first, why, and what to do next. Reads only."""
+    from app.services.evosense import readiness as RD
+    return RD.queue(db, _read_org(db, user), limit=limit, county=county, step=step,
+                    include_test=include_test)
+
+
+@router.get("/funnel")
+def acquisition_funnel(include_test: bool = False, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_or_observer)):
+    """Where opportunities are getting stuck, counted from records. Reads only."""
+    from app.services.evosense import readiness as RD
+    return RD.funnel(db, _read_org(db, user), include_test=include_test)
+
+
+@router.get("/properties/{property_id}/readiness")
+def property_readiness(property_id: str, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_or_observer)):
+    from app.services.evosense import readiness as RD
+    org_id = _read_org(db, user)
+    return RD.for_property(db, _prop(db, org_id, property_id))
 
 
 class PermissionLinkIn(BaseModel):
@@ -707,6 +736,9 @@ def create_permission_link(property_id: str, payload: PermissionLinkIn, request:
                 % PM.last4(link.phone_normalized))
     if contact_added:
         EV.rescore(db, prop)
+        from app.services.evosense import readiness as RD
+        RD.close_investigation(db, org_id, prop, user, "Owner's number added with a permission link by %s"
+                               % (user.full_name or user.email or "a user"))
     db.commit()
     out = PM.link_json(link)
     out.update(url=url, contact_added=contact_added, **PM.message_text(link.business_name, link.owner_name, url))
@@ -788,8 +820,11 @@ def mark_wrong_party(property_id: str, contact_id: str, db: Session = Depends(ge
     C.log_event(db, org_id, "contact.wrong_party", property_id=prop.id, user=user,
                 actor_type=C.ACTOR_USER, is_test=prop.is_test, summary="Contact marked wrong party")
     EV.rescore(db, prop)
+    from app.services.evosense import readiness as RD
+    reopened = RD.reopen_investigation(db, org_id, prop, user,
+                                       "The number on file reached the wrong person.")
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "investigation_id": getattr(reopened, "id", None)}
 
 
 class ContactVerifyIn(BaseModel):

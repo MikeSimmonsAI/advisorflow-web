@@ -65,7 +65,7 @@ _NONPROFIT = re.compile(r" (FOUNDATION|HABITAT FOR HUMANITY|HOMEOWNERS ASSOCIATI
                         r"OWNERS ASSOCIATION|HOA|COMMUNITY DEVELOPMENT|NONPROFIT|NON PROFIT|LAND BANK) ")
 _GOVERNMENT = re.compile(r" (CITY|COUNTY|STATE) OF | HOUSING AUTHORITY | ISD | SCHOOL DISTRICT | "
                          r"UNITED STATES | US GOVT | SECRETARY OF HOUSING | HUD | WATER DISTRICT | "
-                         r"MUNICIPAL UTILITY ")
+                         r"MUNICIPAL UTILITY | VETERANS AFFAIRS | SECRETARY OF VETERANS ")
 
 
 def _norm_name(name: str) -> str:
@@ -116,6 +116,12 @@ def owner_type_of(name: str) -> str:
     if re.search(r" (LLC|L L C) ", n):
         return "llc"
     if re.search(r" (INC|CORP|CORPORATION|CO|LP|LTD|LLP|HOLDINGS|PROPERTIES|INVESTMENTS) ", n):
+        return "corporation"
+    # Lenders own houses too (bank-owned after foreclosure). "PNC BANK N A" and
+    # "AMERICAN AIRLINES FEDERAL CREDIT UNION" are companies, never a person to
+    # look up - they used to read as "individual" (2 to 5 plain words).
+    if re.search(r" (BANK|BANCORP|CREDIT UNION|SAVINGS|MORTGAGE|LENDING|FANNIE MAE|FREDDIE MAC|"
+                 r"NATIONAL ASSOC|NATIONAL ASSOCIATION|N A|FSB|FEDERAL HOME LOAN) ", n):
         return "corporation"
     if re.search(r" (EST|DECD|DECEASED|HEIRS?) ", n):
         return "estate_indicated"
