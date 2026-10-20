@@ -85,7 +85,9 @@ _QUICK = re.compile(r"\b(close (quickly|fast|soon|quick)|quick (close|sale)|asap
 _KIN = r"(mother|father|mom|dad|husband|wife|parents?|grand(ma|pa|mother|father)|aunt|uncle|brother|sister)"
 _ESTATE = re.compile(r"\b(inherited|inherit|estate|probate|passed away|late " + _KIN + r"|"
                      # "since my mom passed", "after my father died" - a death in the family, said plainly
-                     r"my " + _KIN + r" (passed|died)|since (she|he|they) (passed|died))\b", re.I)
+                     r"(my " + _KIN + r"|since (she|he|they)) (passed|died)\b"
+                     # "passed on it", "passed the inspection": not a death
+                     r"(?!\s+(on it|the|a|an|it|inspection|up)\b))\b", re.I)
 _PRICE_CTX = re.compile(r"\b(?:around|about|roughly|for|at|near|close to|asking|get|want)\s+\$?\s?"
                         r"([0-9]{2,3}(?:,[0-9]{3})*(?:\.[0-9]+)?)\s*(k|thousand|grand)?\b", re.I)
 _PRICE_ANY = re.compile(r"\$\s?([0-9][0-9,]*(?:\.[0-9]+)?)\s*(k|thousand)?|\b([0-9]{2,3})\s?(k|thousand|grand)\b", re.I)
@@ -99,6 +101,16 @@ _CONDITION = ((re.compile(r"\b(gutted|condemned|fire damage|falling apart|tear ?
                           r"needs)|needs (major )?repairs|major repairs)\b", re.I), "poor"),
               (re.compile(r"\b(needs some work|dated|could use|okay shape|ok shape)\b", re.I), "fair"),
               (re.compile(r"\b(good (shape|condition)|well maintained|move in ready)\b", re.I), "good"))
+
+
+_NEGATION = re.compile(r"\b(not|no|never|without|cannot|can'?t|couldn'?t|won'?t|doesn'?t|don'?t|isn'?t)\b", re.I)
+
+
+def _negated(text: str, m) -> bool:
+    """'cannot close in 30 days', 'no foundation issues', "doesn't need a new
+    roof": a negation in the three words before the phrase turns it around."""
+    before = re.findall(r"[\w']+", text[:m.start()])[-3:]
+    return bool(_NEGATION.search(" ".join(before)))
 
 
 def _sentences(text: str) -> List[str]:
@@ -227,6 +239,8 @@ def classify(text: str) -> Dict[str, Any]:
                                  (_LISTED, "listed_with_agent", "yes"),
                                  (_TENANT, "tenant_issue", "yes")):
             m = rx.search(t)
+            if m and ftype == "wants_quick_close" and _negated(t, m):
+                continue
             if m and not (ftype == "callback_request" and outcome == C.O_CALL_LATER):
                 fact(ftype, value, m)
         m = _ESTATE.search(t)
@@ -244,6 +258,8 @@ def classify(text: str) -> Dict[str, Any]:
                 break
         for rx, value in _CONDITION:
             m = rx.search(t)
+            if m and _negated(t, m):
+                continue
             if m:
                 fact("condition", value, m)
                 break

@@ -87,7 +87,7 @@ if ($bridge && (str_starts_with($bridge,'https://')||preg_match('#^http://(127\.
       CURLOPT_HTTPHEADER=>['Content-Type: application/json','Accept: application/json']]);
     $resp=(string)curl_exec($ch);$status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);curl_close($ch);
   } else {
-    $ctx=stream_context_create(['http'=>['method'=>'POST','timeout'=>20,'ignore_errors'=>true,
+    $ctx=stream_context_create(['http'=>['method'=>'POST','timeout'=>20,'ignore_errors'=>true,'follow_location'=>0,
       'header'=>"Content-Type: application/json\r\nAccept: application/json\r\n",'content'=>$body]]);
     $resp=(string)@file_get_contents($bridge,false,$ctx);
     if (isset($http_response_header[0])&&preg_match('/\s(\d{3})\s/',$http_response_header[0],$m)) $status=(int)$m[1];

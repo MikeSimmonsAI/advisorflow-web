@@ -106,22 +106,33 @@ def test_same_submission_twice_writes_nothing_new(client, world):
     assert db.query(WholesaleBuyer).count() == 1 and db.query(WholesaleBuyBox).count() == 1
 
 
-def test_returning_investor_is_reused_and_nothing_typed_is_overwritten(client, world):
+def test_existing_buyer_is_never_changed_by_a_public_form(client, world):
     db, evo = world["db"], world["evo"]
     db.add(WholesaleBuyer(organization_id=evo.id, entity_type="person", contact_name="J. Investor",
                           email=None, phone="214.555.0187", preferred_channel="sms",
-                          source="manual", notes="Met at REIA."))
+                          source="manual", notes="Met at REIA.", do_not_contact=True,
+                          do_not_contact_reason="Asked to stop"))
     db.commit()
-    r = post(client, form(strategy="Multifamily", budget="Flexible / Deal Dependent",
-                          submission_id="BUY-RETURN-1"))
+    # Someone types this buyer's phone with THEIR OWN email.
+    r = post(client, form(email="someone.else@example.com", strategy="Multifamily",
+                          budget="Flexible / Deal Dependent", submission_id="BUY-RETURN-1"))
     assert r.status_code == 201, r.text
     b = db.query(WholesaleBuyer).filter_by(organization_id=evo.id).one()   # matched by phone
+    assert b.email is None, "a public form never fills in a buyer's contact details"
     assert b.contact_name == "J. Investor" and b.preferred_channel == "sms" and b.source == "manual"
-    assert b.email == "jordan@example.com"                                 # blank filled
-    assert b.notes.startswith("Met at REIA.") and "Website buyer form" in b.notes
+    assert b.do_not_contact is True and b.phone == "214.555.0187"
+    assert b.notes.startswith("Met at REIA.") and "UNVERIFIED" in b.notes
     box = db.query(WholesaleBuyBox).filter_by(buyer_id=b.id).one()
+    assert box.is_active is False and "unverified" in box.label
     assert json.loads(box.property_types) == ["multi_family"] and json.loads(box.strategies) == ["rental"]
-    assert box.min_price is None and box.max_price is None
+    note = db.query(Notification).filter(Notification.link == "/wholesale/buyers").one()
+    assert "confirm with the buyer" in note.message
+
+
+def test_new_buyer_phone_is_stored_e164(client, world):
+    db = world["db"]
+    assert post(client, form(submission_id="BUY-E164")).status_code == 201
+    assert db.query(WholesaleBuyer).one().phone == "+12145550187"
 
 
 def test_permission_is_required_and_bad_answers_are_refused_with_field_errors(client, world):

@@ -18,9 +18,11 @@ NO UNCONTROLLED DUPLICATES
 --------------------------
   * the same `submission_id` twice returns the first result and writes nothing;
   * an existing buyer in this org with the same email or the same phone is
-    REUSED: nothing a person typed on that buyer is overwritten; the inquiry is
-    appended to their notes with its date and the new criteria become an extra
-    buy box (an investor who buys in two ways is two boxes, not one).
+    NOT changed by a public form - anyone can type someone else's email. The
+    form's criteria are kept as an INACTIVE buy box on that buyer, labelled
+    unverified, with a dated note, for a person to confirm with the buyer.
+    Nothing on the buyer (email, phone, name, do-not-contact, active) is
+    touched, and an inactive box never matches a deal.
 
 PERMISSION
 ----------
@@ -214,37 +216,37 @@ def submit(db: Session, org: Organization, d: Dict[str, Any]) -> Dict[str, Any]:
         return {"reference": prior.get("reference"), "action": "duplicate",
                 "buyer_id": prior.get("buyer_id")}
 
+    from app.services import wholesale_sms as ws
     reference = _reference()
     note = _note_line(d, reference)
     buyer = existing_buyer(db, org_id, d["email"], d["phone"])
-    action = "updated" if buyer is not None else "created"
+    action = "matched_existing" if buyer is not None else "created"
     if buyer is None:
         buyer = WholesaleBuyer(
             organization_id=org_id,
             entity_type="company" if d.get("company") else "person",
             company_name=d.get("company"), contact_name=d["full_name"],
-            phone=d["phone"], email=d["email"], preferred_channel="email",
+            phone=ws.normalize_e164(d["phone"]) or d["phone"], email=d["email"],
+            preferred_channel="email",
             source="website", source_detail="Public buyer form %s" % reference,
             notes=note, is_test=False)
         db.add(buyer)
     else:
-        # Fill only what is blank; a person's own entries are never overwritten.
-        if not buyer.email:
-            buyer.email = d["email"]
-        if not buyer.phone:
-            buyer.phone = d["phone"]
-        if not buyer.contact_name:
-            buyer.contact_name = d["full_name"]
-        if not buyer.company_name and d.get("company"):
-            buyer.company_name = d["company"]
-        buyer.notes = _append(buyer.notes, note)
+        # A public form cannot prove who sent it: the buyer's own fields stay
+        # exactly as a person entered them; only a dated, unverified note.
+        buyer.notes = _append(buyer.notes, "UNVERIFIED - a website form used this buyer's %s "
+                              "(name given: %s). Confirm with the buyer before using the criteria.\n%s"
+                              % ("email" if (buyer.email or "").lower() == d["email"] else "phone",
+                                 d["full_name"], note))
     db.flush()
 
     strategies, types = STRATEGIES[d["strategy"]]
     lo, hi = BUDGETS[d["budget"]]
     box = WholesaleBuyBox(
         organization_id=org_id, buyer_id=buyer.id,
-        label="Website %s" % datetime.utcnow().strftime("%Y-%m-%d"),
+        label="Website %s%s" % (datetime.utcnow().strftime("%Y-%m-%d"),
+                                " (unverified - confirm with buyer)" if action != "created" else ""),
+        is_active=(action == "created"),
         markets=json.dumps(markets_list(d["markets"])),
         strategies=json.dumps(strategies) if strategies else None,
         property_types=json.dumps(types) if types else None,
@@ -260,9 +262,12 @@ def submit(db: Session, org: Organization, d: Dict[str, Any]) -> Dict[str, Any]:
                  "source_url": d.get("source_url"), "form_version": d.get("form_version"),
                  "contact_permission": True, "sms_marketing_consent": False})
     WN.notify(db, org_id, kind=NotificationType.WHOLESALE_INQUIRY,
-              message="%s buyer from the website: %s - %s, %s. Ref %s" % (
-                  "New" if action == "created" else "Returning",
-                  d.get("company") or d["full_name"], d["strategy"], d["budget"], reference),
+              message=("New buyer from the website: %s - %s, %s. Ref %s" % (
+                  d.get("company") or d["full_name"], d["strategy"], d["budget"], reference))
+              if action == "created" else
+              ("Website buyer form used an existing buyer's contact details (%s). Criteria saved "
+               "as an inactive box - confirm with the buyer. Ref %s" % (
+                   buyer.company_name or buyer.contact_name or "buyer", reference)),
               link="/wholesale/buyers")
     db.commit()
     buyer_id = buyer.id

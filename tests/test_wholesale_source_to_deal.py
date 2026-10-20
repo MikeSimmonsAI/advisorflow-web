@@ -231,6 +231,12 @@ def test_public_records_to_promoted_deal_without_spending_or_sending(
     ("We could close in 20 weeks if the price is right", set(), {"wants_quick_close"}),
     ("The house passed inspection last year", set(), {"estate_context"}),
     ("The roof is new and the foundation is solid", set(), {"condition"}),
+    ("Since he passed the inspection we fixed it up", set(), {"estate_context"}),
+    ("My wife passed on it, she likes the house", set(), {"estate_context"}),
+    ("We cannot close in 30 days", set(), {"wants_quick_close"}),
+    ("There are no foundation issues", set(), {"condition"}),
+    ("It doesn't need a new roof", set(), {"condition"}),
+    ("My father passed away in March", {"estate_context"}, set()),
 ])
 def test_reader_hears_common_seller_phrasings(text, present, absent):
     from app.services.evosense import conversation as CV
@@ -265,3 +271,31 @@ def test_cut_off_owner_name_is_completed_only_by_the_same_owner(db_session, samp
     db.commit()
     db.refresh(first)
     assert not first.name_truncated and first.display_name == "ROBIN & PAT ETAL SAMPLE"
+
+
+def test_a_relative_at_the_same_address_does_not_rename_the_cut_owner(db_session, sample_org, strategy):
+    db, org = db_session, sample_org.id
+    tax = county_records()[0]
+    IN.ingest(db, org, PV.PROVIDERS["tarrant_tax_roll"], "TAX", tax["record"])
+    prop = db.query(EvoSenseProperty).one()
+    kid = json.loads(json.dumps(county_records()[1]["record"]))
+    kid["owner"]["name"] = "SAMPLE JOHN"                       # shares "SAMPLE", same mailing
+    IN.ingest(db, org, PV.PROVIDERS["tad"], "ASSESSOR", kid)
+    db.commit()
+    owners = {o.display_name: o for o in EV.CT.current_owners(db, prop)}
+    assert "SAMPLE ROBIN AND SAMPLE P" in owners and owners["SAMPLE ROBIN AND SAMPLE P"].name_truncated
+
+
+def test_completed_name_drops_cut_people_and_survives_rederive(db_session, sample_org, strategy):
+    from app.models.evosense_models import EvoSensePerson
+    from app.services.evosense import reprocess as RP
+    db, org = db_session, sample_org.id
+    for r in county_records()[:2]:
+        IN.ingest(db, org, PV.PROVIDERS[r["provider"]], r["capability"], r["record"])
+    db.commit()
+    prop = db.query(EvoSenseProperty).one()
+    owner = EV.CT.primary_owner(db, prop)
+    people = {p.full_name for p in db.query(EvoSensePerson).filter_by(owner_id=owner.id)}
+    assert not any(n.endswith(" P") for n in people), people          # the cut "SAMPLE P" is gone
+    after = RP.rederive(db, prop)
+    assert after["owner"]["name_truncated"] is False, "a cut record does not re-cut a completed name"
