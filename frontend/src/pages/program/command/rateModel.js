@@ -5,7 +5,7 @@ export const percentage = (numerator, denominator) => {
   return Number.isFinite(n) && Number.isFinite(d) && n >= 0 ? Math.round(n / d * 1000) / 10 : null
 }
 export const percentText = value => value == null || !Number.isFinite(Number(value))
-  ? '—' : `${Number(value).toFixed(1).replace(/\\.0$/, '')}%`
+  ? '—' : `${Number(value).toFixed(1).endsWith('.0') ? Number(value).toFixed(0) : Number(value).toFixed(1)}%`
 export const barWidth = value => value == null || !Number.isFinite(Number(value))
   ? '0%' : `${Math.min(100, Math.max(0, Number(value)))}%`
 export const eventMix = (replies, optOuts) => {
