@@ -78,6 +78,16 @@ def _lead(db, prog, user, sid: str, first: str, run_tag: str, location_id: Optio
     return lead
 
 
+def _last_reason(db, conv) -> Optional[str]:
+    """The setter's own recorded reason for its latest step (system or AI turn)."""
+    if conv is None:
+        return None
+    from app.models.program_models import ProgramConversationTurn
+    t = (db.query(ProgramConversationTurn).filter(ProgramConversationTurn.conversation_id == conv.id)
+         .order_by(ProgramConversationTurn.created_at.desc()).first())
+    return (t.reason or "")[:300] if t is not None else None
+
+
 def run_scenario(db: Session, prog, user, scenario: Dict, *, run_tag: str,
                  location_id: Optional[str] = None, capability: Optional[str] = None) -> Dict:
     from app.services.programs import ai_setter
@@ -105,7 +115,9 @@ def run_scenario(db: Session, prog, user, scenario: Dict, *, run_tag: str,
                     "state": conv.state if conv else None, "offered": res.get("offered"),
                     "booked": bool(res.get("booked_time")), "corrected": res.get("corrected"),
                     "confidence": res.get("confidence"), "objective": res.get("objective"),
-                    "held": res.get("held"), "ms": int((datetime.utcnow() - t0).total_seconds() * 1000)}
+                    "held": res.get("held"), "ms": int((datetime.utcnow() - t0).total_seconds() * 1000),
+                    # WHY a turn went to a person (AI error / limit / held) - no secrets in these strings.
+                    "error": res.get("error"), "why": _last_reason(db, conv)}
             if not turn["reply"] and conv is not None:
                 last = ai_setter._last_ai_text(conv)
                 if res.get("action") == "book" and last:
