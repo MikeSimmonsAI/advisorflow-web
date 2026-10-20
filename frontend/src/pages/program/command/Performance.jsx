@@ -6,6 +6,7 @@
    Reads /program/command/analytics, /analytics/records, /analytics/journey.
    Read-only: nothing on these screens sends, enrolls or approves. */
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { percentText, barWidth } from './rateModel'
 import { Link } from 'react-router-dom'
 import { api } from '../../../api/client'
 
@@ -92,7 +93,7 @@ export function PerformanceHome({ range, setRange, loc, setLoc, openMetric }) {
     {err && <p className="cmd-err">{err}</p>}
     {!d ? <p className="cmd-muted">Loading performance…</p> : <div className={`pf-home ${loading ? 'pf-stale' : ''}`}>
       <p className="pf-period">{d.window.label}{d.window.start_date && d.window.preset !== 'today' ? ` · ${fmtDay(d.window.start_date)} – ${fmtDay(d.window.end_date)}` : ''}
-        {' '}· Central Time · real families only (tests, demos and opt-outs never counted as results)</p>
+        {' '}· Central Time · real families only · STOP replies are engagement, never appointment wins · tests and demos excluded</p>
       <div className="pf-kpis">
         {HERO.map(([k, l, s]) => (
           <button key={k} className={`pf-kpi ${k === 'appointments' ? 'goal' : ''}`} onClick={() => open(k)}>
@@ -110,6 +111,7 @@ export function PerformanceHome({ range, setRange, loc, setLoc, openMetric }) {
           <small>{d.rates.avg_touches_per_family_all_time ?? '—'} all time</small></button>
       </div>
 
+      <PercentageScoreboard rates={d.rates || {}} m={m} period={d.window.label} />
       <div className="pf-grid">
         <section className="cmd-card pf-card">
           <h3>Conversion funnel <small>{d.window.label}</small></h3>
@@ -129,12 +131,12 @@ export function PerformanceHome({ range, setRange, loc, setLoc, openMetric }) {
 
       <div className="pf-grid">
         <section className="cmd-card pf-card">
-          <h3>Touch progression <small>Attempts vs completed deliveries</small></h3>
+          <h3>Which touch gets the best response? <small>Meaningful engagement rate per touch</small></h3>
           <TouchProgression rows={d.touches || []} open={open} />
         </section>
         <section className="cmd-card pf-card">
-          <h3>Family engagement <small>Every reply counts, including declines</small></h3>
-          <EngagementOutcomes m={m} open={open} />
+          <h3>What happened after outreach? <small>Percent of responses and next steps</small></h3>
+          <EngagementOutcomes m={m} rates={d.rates || {}} open={open} />
         </section>
       </div>
       <section className="cmd-card pf-card">
@@ -176,40 +178,87 @@ export function PerformanceHome({ range, setRange, loc, setLoc, openMetric }) {
   </>
 }
 
-/* Touches and engagement are separate measures: an outreach attempt is not
- * necessarily a completed delivery, and opting out is still a real response.
- * Every plotted value is sourced from the server's exact analytics counters. */
+/* Engagement is unique families who answered including STOP; touch 4+
+ * groups multiple attempts, but families are deduplicated. Zero denominators
+ * are shown as '—' rather than falsely claiming zero performance. */
+function PercentageScoreboard({ rates, m, period }) {
+  const entries = [
+    ['engagement_rate', 'Engaged families', rates.engaged_contacted, rates.engagement_denominator,
+      'Families contacted in this period who responded or opted out'],
+    ['opt_out_share', 'Responses that opted out', m.opt_outs?.value, m.responses_total?.value,
+      'STOP messages divided by all meaningful responses'],
+    ['offer_to_repliers_rate', 'Replying families offered times', rates.offered_repliers, m.repliers?.value,
+      'Families who replied and received appointment options in this period'],
+    ['booked_after_offer_rate', 'Offered families who booked', rates.booked_offered, rates.offered_families,
+      'Families offered times and booked in this period'],
+  ]
+  return <section className="pf-scoreboard" aria-label="Performance percentages">
+    <div className="pf-scoreboard-head"><h3>{period} · engagement percentages</h3>
+      <p>Real families · percentages have an auditable denominator</p></div>
+    <div className="pf-scoregrid">
+      {entries.map(([key, title, numerator, denominator, description]) =>
+        <div key={key} className="pf-score-item">
+          <span>{title}</span><b>{percentText(rates[key])}</b>
+          <small>{numerator != null && denominator != null && denominator > 0
+            ? `${n(numerator)} of ${n(denominator)}` : 'No qualifying data yet'}</small>
+          <p>{description}</p>
+        </div>)}
+    </div>
+  </section>
+}
 function TouchProgression({ rows, open }) {
   if (!rows.length) return <p className="cmd-muted">No touch data in this period.</p>
-  const max = Math.max(1, ...rows.map(r => Number(r.attempts) || 0))
   const label = t => t === '4+' ? '4th+ touch' : `${t}${({1:'st', 2:'nd', 3:'rd'})[t] || 'th'} touch`
-  return <div className="pf-activity-bars">
-    <div className="pf-activity-legend"><span className="attempt">Attempts</span><span className="complete">Completed deliveries</span></div>
-    {rows.map(r => <button type="button" key={r.touch} className="pf-activity-row"
-      onClick={() => open('delivered', { touch: r.touch })} title="Open delivered records for this touch">
-      <span className="pf-activity-label">{label(r.touch)}</span>
-      <span className="pf-activity-track">
-        <i className="pf-attempt-bar" style={{ width: `${(100 * (Number(r.attempts) || 0)) / max}%` }} />
-        <i className="pf-delivered-bar" style={{ width: `${(100 * Math.min(Number(r.delivered) || 0, Number(r.attempts) || 0)) / max}%` }} />
-      </span>
-      <span className="pf-activity-values"><b>{n(r.delivered)}</b><small> / {n(r.attempts)}</small></span>
-    </button>)}
-    <p className="pf-note">A completed touch means delivered—not merely scheduled or attempted. Select a row to review its records.</p>
+  return <div className="pf-activity-bars pf-rate-bars">
+    {rows.map(r => <div key={r.touch} className="pf-rate-touch">
+      <button type="button" className="pf-activity-row" onClick={() => open('engaged_families', { touch: r.touch })}
+        title="View families who engaged at this touch">
+        <span className="pf-activity-label">{label(r.touch)}</span>
+        <span className="pf-activity-track"><i className="pf-engagement-bar" style={{ width: barWidth(r.engagement_rate) }} /></span>
+        <span className="pf-activity-values"><b>{percentText(r.engagement_rate)}</b></span>
+      </button>
+      <div className="pf-touch-sub">{r.families
+        ? `${n(r.engaged)} of ${n(r.families)} contacted families engaged`
+        : 'No families contacted at this touch'}
+        {r.attempts ? ` · ${percentText(r.delivery_rate)} of ${n(r.attempts)} attempted touches delivered` : ''}
+      </div>
+    </div>)}
+    <p className="pf-note">A response (including STOP) is credited to the latest preceding touch. Rates compare distinct responding families with families contacted at that touch in this period. 4+ is grouped; no matching cohort shows —.</p>
   </div>
 }
-function EngagementOutcomes({ m, open }) {
-  const keys = [['replies','Family replies'], ['opt_outs','Opt-outs'], ['offers','Times offered'], ['appointments','Booked appointments']]
-  const vals = keys.map(([key, title]) => ({key,title,value:m[key]?.value ?? null}))
-  const max = Math.max(1, ...vals.map(x => Number(x.value) || 0))
+function EngagementOutcomes({ m, rates, open }) {
+  const total = m.responses_total?.value
+  const genuine = m.replies?.value
+  const optOut = m.opt_outs?.value
+  const share = rates.opt_out_share
+  const replyShare = total > 0 && genuine != null ? 100 * genuine / total : null
   return <div className="pf-activity-bars">
-    {vals.map(v => <button type="button" key={v.key} className="pf-activity-row"
-      onClick={() => open(v.key)} title={`View ${v.title.toLowerCase()} records`}>
-      <span className="pf-activity-label">{v.title}</span>
-      <span className="pf-activity-track"><i className="pf-engagement-bar"
-        style={{width:`${100 * (Number(v.value) || 0) / max}%`}} /></span>
-      <span className="pf-activity-values"><b>{n(v.value)}</b></span>
-    </button>)}
-    <p className="pf-note">A yes, no, question or opt-out all matter. Categories represent different journey events and must not be added together.</p>
+    <div className="pf-response-mix">
+      <div className="pf-response-head"><b>All meaningful responses</b>
+        <strong>{n(total)}</strong></div>
+      {total ? <div className="pf-response-stack" role="img"
+        aria-label={`${n(genuine)} regular responses, ${n(optOut)} opt-outs out of ${n(total)} total`}>
+        <span className="normal" style={{width:barWidth(replyShare)}} />
+        <span className="stopped" style={{width:barWidth(share)}} />
+      </div> : <div className="pf-empty-mix">No real responses in this period</div>}
+      <div className="pf-response-split">
+        <button onClick={() => open('replies')}><span className="mix-dot normal"/> Regular replies <b>{percentText(replyShare)}</b><small>({n(genuine)})</small></button>
+        <button onClick={() => open('opt_outs')}><span className="mix-dot stopped"/> Opt-outs <b>{percentText(share)}</b><small>({n(optOut)})</small></button>
+      </div>
+    </div>
+    <h4>From conversation to appointment</h4>
+    {[
+      ['offers','Offered times',rates.offer_to_repliers_rate,rates.offered_repliers,m.repliers?.value,
+        'replying families'],
+      ['appointments','Booked after offer',rates.booked_after_offer_rate,rates.booked_offered,rates.offered_families,
+        'families offered times'],
+    ].map(([key,label,rate,num,den,denLabel])=>
+      <button key={key} className="pf-rate-convert" onClick={() => open(key)}>
+        <span><b>{label}</b><small>{num != null && den ? `${n(num)} of ${n(den)} ${denLabel}` : 'No qualifying denominator yet'}</small></span>
+        <span className="pf-activity-track"><i className="pf-engagement-bar" style={{width:barWidth(rate)}} /></span>
+        <strong>{percentText(rate)}</strong>
+      </button>)}
+    <p className="pf-note">An opt-out is engagement, not a booked appointment. Conversion percentages use unique families, so one family's repeated replies do not inflate results.</p>
   </div>
 }
 function Funnel({ steps, open }) {
