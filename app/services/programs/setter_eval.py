@@ -7,7 +7,7 @@ the real reply path (classification, rules, memory, validation, slots) and is
 scored by the scenario's expectations plus universal rules.
 """
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -83,6 +83,13 @@ def run_scenario(db: Session, prog, user, scenario: Dict, *, run_tag: str,
     from app.services.programs import ai_setter
     from app.services.programs import responses as R
     lead = _lead(db, prog, user, scenario["id"], scenario["first_name"], run_tag, location_id)
+    if scenario.get("opening"):
+        # The message the family is answering (#234: a "No" answers OUR last
+        # question). A synthetic lead's simulated line stands in for a sent one.
+        from app.models.models import Message
+        db.add(Message(lead_id=lead.id, sender_id=user.id, body=scenario["opening"], delivery_status="simulated",
+                       sent_at=datetime.utcnow() - timedelta(minutes=30)))
+        db.commit()
     turns, failures = [], []
     token = ai_setter._CAPABILITY.set(capability or "sci_appointment_setter")
     try:
