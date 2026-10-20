@@ -1307,8 +1307,11 @@ export default function App() {
         <Route path="/view/rate-requests" element={<Navigate to="/rate-requests" replace />} />
         <Route path="/view/:viewKey" element={<ProtectedRoute><WorkspaceView /></ProtectedRoute>} />
         <Route path="/workqueue" element={<ProtectedRoute><WorkQueue /></ProtectedRoute>} />
-        {/* EvoSys Pro Roofing - gated by the explicit `roofing_program` feature (server: /roofing-ops). */}
-        <Route path="/program/roofing" element={<ProtectedRoute bare feature="roofing_program"><RoofingShell /></ProtectedRoute>}>
+        {/* RoofingShell checks /roofing-ops/status against the CURRENT workspace.
+             Avoid using cached branding for a client-side feature rejection:
+             the previous workspace may be SCI while switching to Roofing.
+             /roofing-ops enforces membership and explicit roofing_program server-side. */}
+        <Route path="/program/roofing" element={<ProtectedRoute bare><RoofingShell /></ProtectedRoute>}>
           <Route index element={<RoofingMission />} />
           <Route path="queue" element={<RoofingQueue />} />
           <Route path="conversations" element={<RoofingConversations />} />
