@@ -571,3 +571,43 @@ def god_demo(db: Session = Depends(get_db), god: User = Depends(require_god)):
     """Create or refresh the clearly labelled SAMPLE roofing workspace."""
     from app.services.roofing import demo_seed
     return demo_seed.seed(db, by_user_id=god.id)
+
+
+# ── mission control (the front door) ───────────────────────────────────────
+@router.get("/mission")
+def mission(lane_limit: int = Query(25, ge=1, le=500), ctx: C.Ctx = Depends(ctx_dep)):
+    from app.services.roofing import mission as MC
+    return MC.build(ctx.db, ctx, lane_limit=lane_limit)
+
+
+@router.get("/playbooks")
+def playbooks(ctx: C.Ctx = Depends(ctx_dep)):
+    from app.services.roofing import mission as MC
+    return MC.playbook(ctx.db, ctx)
+
+
+class TakeoverIn(BaseModel):
+    human: bool
+    reason: Optional[str] = Field(None, max_length=300)
+
+
+@router.post("/leads/{lead_id}/takeover", dependencies=_WRITE)
+def takeover(lead_id: str, body: TakeoverIn, ctx: C.Ctx = Depends(ctx_dep)):
+    """A person takes this conversation from the AI (or hands it back).
+
+    Uses the conversation engine's own mode switch, and pauses / resumes this
+    homeowner's follow-up sequence so no automated touch lands while a person
+    is talking to them. Resuming never restarts a finished or stopped sequence."""
+    from app.services import conversation_intel as ci
+    lead = _lead(ctx, lead_id)
+    ci.set_mode(ctx.db, lead, "human_active" if body.human else "ai_active", user=ctx.user, reason=body.reason)
+    cad = ctx.db.query(CadenceState).filter(CadenceState.lead_id == lead.id).first()
+    if cad is not None:
+        if body.human and cad.status == "active":
+            cad.status = "paused"
+        elif not body.human and cad.status == "paused":
+            cad.status = "active"
+    _audit(ctx, "roofing.takeover" if body.human else "roofing.handback", "lead", lead.id)
+    ctx.db.commit()
+    return {"lead_id": lead.id, "mode": "human_active" if body.human else "ai_active",
+            "follow_up": cad.status if cad is not None else None}

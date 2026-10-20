@@ -134,7 +134,7 @@ def seed(db: Session, by_user_id: Optional[str] = None, presenter_password: Opti
                  else 4 if roll < 0.80 else 5 if roll < 0.87 else 6 if roll < 0.93 else 7)
         if depth == 0:
             continue
-        touches = 1 + (rnd.randint(0, 3) if depth == 1 else rnd.randint(0, 1))
+        touches = 1 + rnd.randint(0, 3)
         t = created_at + timedelta(hours=2)
         sent = []
         for k in range(touches):
@@ -150,11 +150,21 @@ def seed(db: Session, by_user_id: Optional[str] = None, presenter_password: Opti
         if not sent:
             continue
         if depth == 1:
+            # Contacted, no reply yet: the sequence is still running for them.
+            from app.models.models import CadenceState
+            if not db.query(CadenceState).filter(CadenceState.lead_id == lead.id).first():
+                nxt = sent[-1] + timedelta(days=C.SEQUENCE_TOUCHES[min(len(sent), 4)]["day_offset"] + 1)
+                db.add(CadenceState(lead_id=lead.id, status="active", current_touch_number=len(sent),
+                                    cadence_started_at=sent[0], last_touch_sent_at=sent[-1],
+                                    next_touch_due_at=max(nxt, now + timedelta(hours=rnd.randint(1, 40)))))
             if rnd.random() < 0.12:
                 db.add(Reply(lead_id=lead.id, body="STOP", source="sms",
                              classification=ReplyClassification.DNC, received_at=sent[-1] + timedelta(hours=1),
                              reviewed_at=sent[-1] + timedelta(hours=3)))
                 lead.status = "dnc"
+                db.flush()
+                for cs in db.query(CadenceState).filter(CadenceState.lead_id == lead.id).all():
+                    cs.status, cs.next_touch_due_at = "stopped_dnc", None
             continue
         at = sent[-1] + timedelta(hours=rnd.randint(1, 20))
         if at > now:
@@ -172,7 +182,17 @@ def seed(db: Session, by_user_id: Optional[str] = None, presenter_password: Opti
                      reviewed_at=None if (recent or depth == 2) else at + timedelta(hours=2)))
         lead.status = "replied"
         if depth >= 3:
-            db.add(Message(lead_id=lead.id, sender_id=rep.id, send_state="delivered", delivery_status="delivered",
+            offer_link = None
+            if depth == 3:
+                # Offered times, homeowner hasn't picked one: an open (pending)
+                # booking link with no time - nothing to remind, nothing booked.
+                from app.services.sms_service import _encode_booking_token
+                offer_link = BookingLink(lead_id=lead.id, user_id=rep.id, status="pending",
+                                         token=_encode_booking_token(lead, rep), appt_label="Roof Inspection",
+                                         appt_duration=60, created_at=at + timedelta(minutes=12))
+                db.add(offer_link)
+                db.flush()
+            db.add(Message(booking_link_id=offer_link.id if offer_link else None, lead_id=lead.id, sender_id=rep.id, send_state="delivered", delivery_status="delivered",
                            send_source="manual", sent_at=at + timedelta(minutes=12),
                            body="Great, %s! I have Tuesday at 10:00 AM, Wednesday at 1:00 PM or Thursday at "
                                 "9:00 AM open - which works best?" % lead.first_name))

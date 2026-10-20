@@ -103,6 +103,17 @@ const ProgramCenter = lazyPage(() => import('./pages/program/ProgramCenter'))
 // SCI Live IS the phone command center (Oct 15: updated in place). The old
 // /program/command address redirects here; there is one SCI Live screen.
 const ProgramLive = lazyPage(() => import('./pages/program/command/Command'))
+// EvoSys Pro Roofing: its own shell (/program/roofing/*) and public page (/roofing).
+const RoofingShell = lazyPage(() => import('./pages/roofing/RoofingShell'))
+const RoofingMission = lazyPage(() => import('./pages/roofing/MissionControl'))
+const RoofingQueue = lazyPage(() => import('./pages/roofing/WorkQueue'))
+const RoofingConversations = lazyPage(() => import('./pages/roofing/Conversations'))
+const RoofingInspections = lazyPage(() => import('./pages/roofing/Inspections'))
+const RoofingPerformance = lazyPage(() => import('./pages/roofing/Performance'))
+const RoofingPipeline = lazyPage(() => import('./pages/roofing/Pipeline'))
+const RoofingLeads = lazyPage(() => import('./pages/roofing/LeadsData'))
+const RoofingSettings = lazyPage(() => import('./pages/roofing/Settings'))
+const RoofingLanding = lazyPage(() => import('./pages/roofing/RoofingLanding'))
 const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
 const DealOperationsClosing = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsClosing })))
 const DealOperationsDispositions = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsDispositions })))
@@ -1287,6 +1298,18 @@ export default function App() {
         <Route path="/view/rate-requests" element={<Navigate to="/rate-requests" replace />} />
         <Route path="/view/:viewKey" element={<ProtectedRoute><WorkspaceView /></ProtectedRoute>} />
         <Route path="/workqueue" element={<ProtectedRoute><WorkQueue /></ProtectedRoute>} />
+        {/* EvoSys Pro Roofing - gated by the explicit `roofing_program` feature (server: /roofing-ops). */}
+        <Route path="/program/roofing" element={<ProtectedRoute bare feature="roofing_program"><RoofingShell /></ProtectedRoute>}>
+          <Route index element={<RoofingMission />} />
+          <Route path="queue" element={<RoofingQueue />} />
+          <Route path="conversations" element={<RoofingConversations />} />
+          <Route path="inspections" element={<RoofingInspections />} />
+          <Route path="performance" element={<RoofingPerformance />} />
+          <Route path="pipeline" element={<RoofingPipeline />} />
+          <Route path="leads" element={<RoofingLeads />} />
+          <Route path="settings" element={<RoofingSettings />} />
+        </Route>
+        <Route path="/roofing" element={<RoofingLanding />} />
         <Route path="/program/live" element={<ProtectedRoute bare><ProgramLive /></ProtectedRoute>} />
         <Route path="/program/command" element={<Navigate to="/program/live" replace />} />
         <Route path="/program" element={<ProtectedRoute bare><ProgramEntry /></ProtectedRoute>} />

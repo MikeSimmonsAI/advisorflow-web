@@ -334,3 +334,32 @@ def test_sample_workspace_is_labelled_and_unsendable(db_session):
     assert d["sample_data"] is True and d["has_data"]
     stages = {s["key"]: s["count"] for s in d["stage_now"]}
     assert sum(stages.values()) == 64 and stages["won"] + stages["lost"] > 0
+
+
+# ── mission control ─────────────────────────────────────────────────────────
+def test_mission_control_lanes_attention_and_takeover(client, world):
+    db, a, rep, owner = world["db"], world["a"], world["a_rep"], world["a_owner"]
+    from app.services.cadence_service import start_cadence
+    now = datetime.utcnow()
+    working = lead(db, a, "Working", owner=rep)
+    start_cadence(db, working)
+    sent(db, working, rep, now - timedelta(hours=2))
+    q = lead(db, a, "Question", owner=rep); sent(db, q, rep, now - timedelta(hours=6))
+    reply(db, q, now - timedelta(hours=1), cls=ReplyClassification.QUESTION, body="Do you take insurance?")
+    y = lead(db, a, "Yes", owner=rep); sent(db, y, rep, now - timedelta(hours=6))
+    reply(db, y, now - timedelta(minutes=3))
+    m = client.get("/roofing-ops/mission", headers=h(db, owner))
+    assert m.status_code == 200, m.text
+    m = m.json()
+    lanes = {l["key"]: [c["name"].split()[0] for c in l["cards"]] for l in m["lanes"]}
+    assert lanes["human_needed"] == ["Question"] and lanes["requested"] == ["Yes"] and lanes["working"] == ["Working"]
+    assert m["ai"]["sequences_running"] == 1 and m["ai"]["touches_sent_today"] == 3 and m["ai"]["replies_today"] == 2
+    assert m["outcomes"]["contacted"] == 3 and m["outcomes"]["responded"] == 2
+    assert [a_["name"].split()[0] for a_ in m["attention"]] == ["Question", "Yes"]
+    # take over pauses the sequence; hand back resumes it
+    r = client.post("/roofing-ops/leads/%s/takeover" % working.id, json={"human": True}, headers=h(db, owner)).json()
+    assert r == {"lead_id": working.id, "mode": "human_active", "follow_up": "paused"}
+    r = client.post("/roofing-ops/leads/%s/takeover" % working.id, json={"human": False}, headers=h(db, owner)).json()
+    assert r["follow_up"] == "active"
+    p = client.get("/roofing-ops/playbooks", headers=h(db, owner)).json()
+    assert p["active"]["enrolled"] == 1 and len(p["available"]) == 5
