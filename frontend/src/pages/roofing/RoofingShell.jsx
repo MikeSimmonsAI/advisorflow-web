@@ -10,6 +10,7 @@ import { createContext, Suspense, useContext, useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { api, getCurrentUser } from '../../api/client'
 import { Avatar, ErrorNote, Icon, Loading, SampleTag, errText } from './ui'
+import ProgramSwitchLink from '../../components/ProgramSwitchLink'
 import './roofing.css'
 
 const RoofingCtx = createContext(null)
@@ -24,7 +25,7 @@ const NAV = [
   { to: `${BASE}/performance`, label: 'Performance', icon: 'chart' },
   { to: `${BASE}/pipeline`, label: 'Pipeline', icon: 'pipeline' },
   { to: `${BASE}/leads`, label: 'Leads & Data', icon: 'users' },
-  { to: `${BASE}/settings`, label: 'Settings & Playbooks', icon: 'settings' },
+  { to: `${BASE}/settings`, label: 'Roofing Setup', icon: 'settings' },
 ]
 
 export function BrandMark({ className = 'rf-brand__mark' }) {
@@ -93,7 +94,7 @@ export default function RoofingShell() {
             ? 'Switch to your roofing company’s workspace, or ask the platform owner to enable the Roofing program for it.'
             : errText(error)}</p>
           <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
-            <a className="rf-btn rf-btn--ghost" href="/">Back to EvoSys</a>
+            <a className="rf-btn rf-btn--ghost" href="/workspaces">Switch program</a>
             {!denied && <button className="rf-btn rf-btn--primary" onClick={loadStatus}>Try again</button>}
           </div>
         </div>
@@ -125,7 +126,7 @@ export default function RoofingShell() {
           </nav>
           <div className="rf-side__foot">
             <a href="/roofing" target="_blank" rel="noreferrer"><Icon name="roof" size={16} />Public roofing page</a>
-            <a href="/"><Icon name="back" size={16} />Back to EvoSys</a>
+            <ProgramSwitchLink />
           </div>
         </aside>
         <div className="rf-main">

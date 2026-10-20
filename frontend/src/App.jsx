@@ -67,6 +67,7 @@ import Appointments from './pages/Appointments'
 // app/services/workspace_views.py.
 import WorkspaceView from './pages/WorkspaceView'
 import WorkQueue from './pages/WorkQueue'
+import ProgramAccessPortal from './pages/program/ProgramAccessPortal'
 import AutoSendQueue from './pages/AutoSendQueue'
 import Reports from './pages/Reports'
 import CampaignBuilder from './pages/CampaignBuilder'
@@ -148,7 +149,7 @@ import AIHub from './pages/AIHub'
 import Availability from './pages/Availability'
 import { Unauthorized, NotFound, VerificationUnavailable } from './pages/AccessState'
 import { decideSciDoor, shouldLandInSci, SCI_ORG_NAME } from './auth/sciDoor'
-import { workspaceProgramDestination } from './auth/workspaceProgramDoor'
+import { workspaceProgramDestination, productWorkspaceDestination } from './auth/workspaceProgramDoor'
 import CRMIntegration from './pages/CRMIntegration'
 import CRM from './pages/CRM'
 import TierDefinitions from './pages/TierDefinitions'
@@ -335,7 +336,7 @@ import AIWorkforceEmployee from './pages/AIWorkforceEmployee'
 const GodAIWorkforceBuilder = lazyPage(() => import('./pages/god/GodAIWorkforceBuilder'))
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
-         clearWorkspaceContext, getBranding } from './api/client'
+         clearWorkspaceContext, getBranding, fetchAndStoreBranding } from './api/client'
 import { decideWorkspaceAccess, contextsListWorkspace,
          VERIFYING, AUTHORIZED, DENIED, UNVERIFIED } from './auth/workspaceGuard'
 import { roleOf, routeFeatureDenied } from './auth/workspaceAuthority'
@@ -536,8 +537,11 @@ function HomeRedirect() {
     if (shouldLandInSci(ctx)) {
       return <Navigate to="/sci" replace />
     }
-    // Respect the user's already-selected workspace on subsequent visits.
-    // Roofing has its own mission-control shell, not the generic Overview.
+    // A multi-program administrator starts at the program portal, never the
+    // host organization's generic dashboard or the previously selected app.
+    if (def.type === 'workspace_selector') {
+      return <Navigate to="/workspaces" replace />
+    }
     const selected = user?.role !== 'god_admin'
       ? (ctx.workspace_contexts || []).find(w => w.organization_id === getWorkspaceContext())
       : null
@@ -595,6 +599,35 @@ function useAuthorizedContexts() {
     error: state.error,
     retry: () => setAttempt(a => a + 1),
   }
+}
+
+/**
+ * Validate the newly selected product workspace branding BEFORE navigating
+ * to a feature-guarded app. Cached SCI or Roofing branding must not cause a
+ * false refusal when switching to Wholesale.
+ */
+function ProductWorkspaceLaunch({ organizationId, destination }) {
+  const [state, setState] = useState('loading')
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    let alive = true
+    setState('loading')
+    fetchAndStoreBranding().then(b => {
+      if (alive) setState(b?.organization_id === organizationId ? 'ready' : 'error')
+    }).catch(() => { if (alive) setState('error') })
+    return () => { alive = false }
+  }, [organizationId, attempt])
+  if (state === 'ready') return <Navigate to={destination} replace />
+  return <main style={{ minHeight: '80vh', display: 'grid', placeItems: 'center', padding: 24 }}>
+    <div style={{ maxWidth: 420, textAlign: 'center' }}>
+      <h1 style={{ fontSize: 23 }}>{state === 'loading' ? 'Opening your program…' : 'Could not open this program'}</h1>
+      {state === 'error' && <>
+        <p>Your workspace could not be verified. Nothing was changed.</p>
+        <button type="button" onClick={() => setAttempt(a => a + 1)}>Try again</button>
+        <a href="/workspaces" style={{ display: 'block', marginTop: 14 }}>Choose another program</a>
+      </>}
+    </div>
+  </main>
 }
 
 /**
@@ -693,6 +726,16 @@ function WorkspaceRoute() {
     const entry = (ctx?.workspace_contexts || []).find(w => w && w.organization_id === organizationId)
     const programDestination = workspaceProgramDestination(entry)
     if (programDestination) return <Navigate to={programDestination} replace />
+    // Product entries are likewise proven by the server context list and
+    // the product's own endpoint guard, never by a query parameter alone.
+    const requestedProduct = new URLSearchParams(
+      typeof window !== 'undefined' ? window.location.search : ''
+    ).get('product')
+    if (requestedProduct) {
+      const path = productWorkspaceDestination(ctx, organizationId, requestedProduct)
+      if (path) return <ProductWorkspaceLaunch organizationId={organizationId} destination={path} />
+      return <Navigate to="/workspaces" replace />
+    }
     // ProtectedRoute already wraps its children in Layout + ContextBanner; the
     // second banner this used to add was the same banner drawn twice.
     return <ProtectedRoute><AgencyHomeGate><Overview /></AgencyHomeGate></ProtectedRoute>
@@ -913,41 +956,20 @@ function WorkspaceSelector() {
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   if (!ctx) return null
   const workspaces = ctx.workspace_contexts || []
-  if (workspaces.length === 1) {
+  const products = ctx.product_contexts || []
+  if (workspaces.length === 1 && products.length === 0) {
     return <Navigate to={'/workspace/' + workspaces[0].organization_id} replace />
   }
-  return (
-    <div style={{ maxWidth: 520, margin: '12vh auto', padding: '0 24px' }}>
-      <h1 style={{ fontSize: 22, marginBottom: 4 }}>Choose a workspace</h1>
-      <p style={{ opacity: 0.65, marginTop: 0, fontSize: 14 }}>
-        You have access to more than one.
-      </p>
-      <div style={{ display: 'grid', gap: 10, marginTop: 24 }}>
-        {workspaces.map(w => (
-          <button
-            key={w.organization_id}
-            onClick={() => {
-              setWorkspaceContext(w.organization_id)
-              navigate('/workspace/' + w.organization_id)
-            }}
-            style={{
-              display: 'flex', justifyContent: 'space-between',
-              alignItems: 'baseline', gap: 12, padding: '14px 16px',
-              borderRadius: 10, border: '1px solid rgba(128,128,128,0.28)',
-              background: 'transparent', color: 'inherit', font: 'inherit',
-              fontSize: 15, textAlign: 'left', cursor: 'pointer',
-            }}
-          >
-            <span style={{ fontWeight: 600 }}>{w.organization_name}</span>
-            <span style={{ fontSize: 11, textTransform: 'uppercase',
-                           letterSpacing: '0.04em', opacity: 0.55 }}>
-              {w.role}
-            </span>
-          </button>
-        ))}
-      </div>
-    </div>
-  )
+  return <ProgramAccessPortal contexts={ctx} onChoose={(item) => {
+    // Selection is a context choice, not an authorization grant. The
+    // /workspace route confirms membership again and product routes enforce
+    // their own named seat.
+    setWorkspaceContext(item.organization_id)
+    const target = item.type === 'product'
+      ? '/workspace/' + item.organization_id + '?product=' + encodeURIComponent(item.key)
+      : '/workspace/' + item.organization_id
+    navigate(target)
+  }} />
 }
 
 /**

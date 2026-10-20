@@ -33,7 +33,7 @@ export function decideSciDoor(ctx) {
  * has no back office, lands in /sci. Everyone else keeps their existing route.
  */
 export function shouldLandInSci(ctx) {
-  if (!ctx || ctx.has_back_office) return false
+  if (!ctx || ctx.has_back_office || (ctx.product_contexts || []).length) return false
   if (ctx.workspace_count !== 1) return false
   const def = ctx.default_context || {}
   if (def.type !== 'workspace') return false

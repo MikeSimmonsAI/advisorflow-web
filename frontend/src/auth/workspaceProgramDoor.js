@@ -15,3 +15,12 @@ export function workspaceProgramDestination(entry) {
   if (entry.is_program) return '/program'
   return null
 }
+
+/** Product choice is trusted only if the server explicitly returned it for
+ * this exact authorized organization. A crafted query parameter cannot grant
+ * product access or change the hosting customer workspace. */
+export function productWorkspaceDestination(ctx, orgId, productKey) {
+  const match = (ctx?.product_contexts || []).find(p =>
+    p.organization_id === orgId && p.key === productKey && p.type === 'product')
+  return match?.path || null
+}
