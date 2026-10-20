@@ -54,9 +54,18 @@ def _row(db: Session, org_id: str, create: bool = False):
     from app.models.energy_models import EnergyTeamSettings
     row = db.query(EnergyTeamSettings).filter(EnergyTeamSettings.organization_id == org_id).first()
     if row is None and create:
-        row = EnergyTeamSettings(organization_id=org_id, data="{}")
-        db.add(row)
-        db.flush()
+        # two managers saving for the very first time at once: one insert wins,
+        # the other reloads it instead of failing
+        from sqlalchemy.exc import IntegrityError
+        sp = db.begin_nested()
+        try:
+            row = EnergyTeamSettings(organization_id=org_id, data="{}")
+            db.add(row)
+            db.flush()
+            sp.commit()
+        except IntegrityError:
+            sp.rollback()
+            row = db.query(EnergyTeamSettings).filter(EnergyTeamSettings.organization_id == org_id).first()
     return row
 
 

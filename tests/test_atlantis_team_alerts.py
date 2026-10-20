@@ -501,5 +501,27 @@ def test_queued_email_waits_for_the_real_commit_on_a_file_database(tmp_path, sen
     assert json.loads(ev.details)["email"]["state"] == "attempted"
     db.commit()
     assert len(sent) == 1                                             # once only
+
+    # rolled back, then a later commit: nothing is ever sent for it
+    lead2 = Lead(organization_id=org.id, first_name="Roll", last_name="Back", tier="new_inquiry", status="new")
+    db.add(lead2)
+    db.flush()
+    sp = db.begin_nested()
+    energy_team.alert_new_request(db, org=org, lead=lead2, event_key="website:file:2", origin="website")
+    db.flush()
+    sp.commit()
+    db.rollback()
+    db.add(Lead(organization_id=org.id, first_name="Other", last_name="Work", tier="new_inquiry", status="new"))
+    db.commit()
+    assert len(sent) == 1
+
+    # two alerts in one transaction: each is sent once at the commit
+    for n in (3, 4):
+        l = Lead(organization_id=org.id, first_name="Two%d" % n, last_name="Alerts", tier="new_inquiry", status="new")
+        db.add(l)
+        db.flush()
+        energy_team.alert_new_request(db, org=org, lead=l, event_key="website:file:%d" % n, origin="website")
+    db.commit()
+    assert len(sent) == 3 and all(m["to"] == "alerts@atlantis.example.test" for m in sent)
     db.close()
     eng.dispose()
