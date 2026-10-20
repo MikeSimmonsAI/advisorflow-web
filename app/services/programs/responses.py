@@ -39,6 +39,11 @@ from app.services.programs.reply_rules import (  # noqa: F401  (re-exported: oth
     OPT_OUT, PRICING, RECOMMENDED, SLA_BREACH_LABEL, VETERAN, WRONG_PERSON,
     alert_plan, cadence_action, classify, intents, staff_alert_gate, suggested_reply, urgency,
 )
+from app.services.programs.reply_rules import OPT_OUT_ASK_LABEL, opt_out_needs_person
+
+# An opt-out whose words also ask for something (#A): still an opt-out in
+# every way, but ONE staff alert so a person decides whether to call or email.
+OPT_OUT_ASK = "opt_out_request"
 
 def summarize(lead: Lead, body: str, result: Dict, channel: str, location: Optional[str]) -> str:
     name = ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title() or "A contact"
@@ -222,6 +227,8 @@ def alert_content(db: Session, prog: OutreachProgram, resp: ProgramResponse, kin
         status = "Needs a person"
     elif kind == HOT:
         status = "Wants a visit - call within %d min" % int(prog.hot_sla_minutes or 15)
+    elif kind == OPT_OUT_ASK:
+        status = OPT_OUT_ASK_LABEL
     else:
         status = "New Reply"
     head = "%s - %s" % (alert_title(prog), status)
@@ -243,6 +250,9 @@ def alert_content(db: Session, prog: OutreachProgram, resp: ProgramResponse, kin
         except ValueError:
             _found = []
         sms_kind = HOT if (APPOINTMENT in _found or not _found) else "handoff"
+    from app.services.programs.ai_setter import HOME_VISIT_REASON as _HV
+    if kind == "handoff" and event.get("reason") == _HV:
+        sms_kind = "home_visit"
     detail = None
     if kind == "booked" and event.get("when"):
         detail = "booked %s for %s" % (event.get("what") or "a visit", event["when"])
@@ -256,6 +266,8 @@ def alert_content(db: Session, prog: OutreachProgram, resp: ProgramResponse, kin
     rows = [("Who", who), ("Replied by", "%s, %s" % (how, when_s)), ("Said", '"%s"' % said)]
     if event.get("reason"):
         rows.append(("Why a person is needed", event["reason"]))
+    elif kind == OPT_OUT_ASK:
+        rows.append(("Why a person is needed", OPT_OUT_ASK_LABEL + ". No automated texts will go to them."))
     if event.get("when"):
         rows.append(("Booked", "%s - %s" % (event.get("what") or "Visit", event["when"])))
     rows += [(k, v) for k, v in contacts if v]
@@ -278,6 +290,8 @@ def alert_content(db: Session, prog: OutreachProgram, resp: ProgramResponse, kin
         subject = "%s - Appointment booked: %s" % (alert_title(prog), name)
     elif kind == "handoff":
         subject = "%s - %s needs a person" % (alert_title(prog), name)
+    elif kind == OPT_OUT_ASK:
+        subject = "%s - %s opted out of texts but asked for something" % (alert_title(prog), name)
     if test:
         subject = "TEST - " + subject
     return {"sms": sms[:1500], "subject": subject, "html": "".join(body)}
@@ -494,8 +508,18 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
             from datetime import timezone as _tz
             st.completed_at = datetime.now(_tz.utc)
         resp.closed_at = now
+        # Their earlier replies (new OR already opened/answered) are over too:
+        # no "still waiting" reminder or HOT line for a family who said stop.
+        for old in (db.query(ProgramResponse).filter(ProgramResponse.organization_id == lead.organization_id,
+                                                     ProgramResponse.lead_id == lead.id,
+                                                     ProgramResponse.handling_status != "closed").all()):
+            old.handling_status, old.sla_due_at, old.closed_at = "closed", None, now
         if channel == "email":
             lead.allow_email = False          # an email opt-out of record
+    opt_out_ask = cls == OPT_OUT and opt_out_needs_person(body)
+    if opt_out_ask:
+        resp.recommended_action = ("%s. Automation has been stopped and no automated texts will go to them."
+                                   % OPT_OUT_ASK_LABEL)
     found = intents(body, cls)
     resp.intents = json.dumps(found) if found else None
     resp.urgency = urgency(cls)
@@ -515,6 +539,10 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
 
     msg = "%s %s" % ("🔥" if cls == HOT else "💬", resp.summary)
     plan = alert_plan(cls)
+    if opt_out_ask:
+        # Still closed and stopped (above); the setter stops the conversation
+        # (below). The one page is this alert - no text to the family.
+        plan = {"kind": OPT_OUT_ASK, "management": False, "external": True}
     if plan and staff_alerts:
         # staff_alerts=False (the simulator): no texts, emails OR in-app
         # notices - a synthetic family never reaches anyone's bell.
@@ -606,16 +634,36 @@ def mark(db: Session, resp: ProgramResponse, state: str, user: User,
     order = ["new", "opened", "responded", "active", "closed"]
     if state not in order:
         raise ValueError("unknown handling state %r" % state)
-    if order.index(state) >= order.index(resp.handling_status or "new"):
-        resp.handling_status = state
-    if state in ("opened", "responded", "active", "closed") and not resp.opened_at:
-        resp.opened_at, resp.opened_by = now, user.id
-    if state in ("responded", "active", "closed") and not resp.responded_at:
-        resp.responded_at = now
-    if state in ("active", "closed") and not resp.active_at:
-        resp.active_at = now
-    if state == "closed":
-        resp.closed_at = now
+
+    def _apply(r):
+        if order.index(state) >= order.index(r.handling_status or "new"):
+            r.handling_status = state
+        if state in ("opened", "responded", "active", "closed") and not r.opened_at:
+            r.opened_at, r.opened_by = now, user.id
+        if state in ("responded", "active", "closed") and not r.responded_at:
+            r.responded_at = now
+        if state in ("active", "closed") and not r.active_at:
+            r.active_at = now
+        if state == "closed":
+            r.closed_at = now
+
+    _apply(resp)
+    if state in ("responded", "closed"):
+        # Answering / closing a family's newest reply answers their EARLIER
+        # open replies too - they must not come back in the inbox or be paged
+        # "past SLA". Never moved backwards; same actor stamps.
+        q = db.query(ProgramResponse).filter(ProgramResponse.organization_id == resp.organization_id,
+                                             ProgramResponse.lead_id == resp.lead_id,
+                                             ProgramResponse.id != resp.id,
+                                             ProgramResponse.handling_status != "closed")
+        if resp.received_at is not None:
+            q = q.filter(ProgramResponse.received_at <= resp.received_at)
+        for older in q.all():
+            # Dismissing an auto-reply or a bare "ok" never settles an earlier
+            # HOT question: only an answer sent, or closing a HOT reply, does.
+            if state == "closed" and older.response_class == HOT and resp.response_class != HOT:
+                continue
+            _apply(older)
     db.commit()
     return resp
 
@@ -634,6 +682,16 @@ def sla_realert_cap() -> int:
         return max(1, int(os.environ.get("PROGRAM_SLA_MAX_REALERTS") or DEFAULT_SLA_REALERTS))
     except ValueError:
         return DEFAULT_SLA_REALERTS
+
+
+def _ai_delivered_since(db: Session, conv, since: datetime) -> bool:
+    """A setter message that actually went to the family (sent, or simulated
+    for a test contact) at or after `since`. The booking path's own
+    confirmation is recorded as a delivered system turn and counts too."""
+    from app.models.program_models import ProgramConversationTurn as T
+    return db.query(T.id).filter(T.conversation_id == conv.id, T.role.in_(("ai", "system")),
+                                 T.delivery.in_(("sent", "simulated")),
+                                 T.created_at >= since).first() is not None
 
 
 def sla_sweep(db: Session, now: Optional[datetime] = None,
@@ -663,13 +721,28 @@ def sla_sweep(db: Session, now: Optional[datetime] = None,
         lead = db.query(Lead).filter(Lead.id == resp.lead_id).first()
         if lead is None:
             continue
+        from app.services.sci_staging_demo import is_demo_lead as _is_demo
+        from app.services.programs.appointments import _opted_out
+        # Opted out ON THE CHANNEL THE REPLY CAME IN ON: a text STOP does not
+        # close a family's later email asking to come in.
+        _gone = (_opted_out(db, lead) if (resp.channel or "sms") == "sms"
+                 else getattr(lead, "allow_email", True) is False)
+        if _is_demo(lead) or _gone:
+            # A made-up demo family never pages; one who said stop is closed.
+            resp.sla_alert_count = cap
+            if not _is_demo(lead):
+                resp.handling_status, resp.sla_due_at, resp.closed_at = "closed", None, now
+            db.commit()
+            continue
         # The AI is still talking with this family (offered times, waiting on
         # their answer, booked): nobody is "not answering" them - no reminder.
         from app.models.program_models import ProgramConversation
         conv = (db.query(ProgramConversation).filter(ProgramConversation.lead_id == lead.id)
                 .order_by(ProgramConversation.created_at.desc()).first())
+        # Only an AI message that actually REACHED them counts (#6): a draft
+        # waiting for a person, a held or blocked reply is not "AI talking".
         if conv is not None and conv.state not in ("human", "callback_requested") \
-                and (conv.last_ai_at or datetime.min) >= (resp.received_at or now):
+                and _ai_delivered_since(db, conv, resp.received_at or now):
             resp.sla_alert_count = cap
             db.commit()
             continue

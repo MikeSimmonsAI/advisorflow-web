@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../../api/client'
 import SelfCheck from '../SelfCheck'
+import PipelineHealth from '../PipelineHealth'
 import { Chip, Drawer, Empty, ErrorLine, Icon, Kpi, Loading, PageHead, Panel, STATUS_TONE, errText, ago, when } from './ui'
 
 const TILES = [
@@ -53,6 +54,7 @@ export default function Health({ goTab }) {
         <button type="button" className="sci-btn" disabled={busy} onClick={load}><Icon name="refresh" />{busy ? 'Checking…' : 'Refresh checks'}</button>
       </PageHead>
       <SelfCheck />
+      <PipelineHealth />
 
       <section className="sci-kpis four" aria-label="Health summary">
         <Kpi icon="check" tone="green" value={working} label="Modules working" note={`of ${TILES.length}`} />

@@ -179,7 +179,7 @@ export default function Command() {
     const state = a === 'close' || a === 'dismiss' ? 'closed' : 'opened'
     try {
       await api.post(`/program/responses/${item.response_id}/mark`, { state })
-      setToast(a === 'snooze' ? 'Snoozed - it stays in the list as handled.' : 'Closed.')
+      setToast(a === 'snooze' ? 'Marked as opened.' : 'Closed.')
       load()
     } catch (e) { setToast(e.message || 'Could not update.') }
   }
@@ -253,10 +253,13 @@ export default function Command() {
               <button onClick={() => setTab('appts')}><Icon n="cal" />
                 <span><b>{d.upcoming.visits_booked ? `${d.upcoming.visits_booked} appointment${d.upcoming.visits_booked === 1 ? '' : 's'} booked` : 'No appointments scheduled'}</b><br />
                   <small>{d.upcoming.visits_booked ? 'See who is coming in' : 'Get in touch to book a visit today'}</small></span>›</button>
-              {(d.tasks || []).map(t => (
-                <button key={`${t.kind}-${t.lead_id}`} onClick={() => openFamily(t.lead_id)}><Icon n="mail" />
+              {(d.tasks || []).map(t => t.kind === 'home_visit'
+                ? <button key={`${t.kind}-${t.lead_id}`} onClick={() => openFamily(t.lead_id)}><Icon n="cal" />
+                  <span><b>Call to set a home visit · {t.name}</b><br />
+                    <small>{t.note || 'They asked for a visit at home - call to set a time'}</small></span>›</button>
+                : <button key={`${t.kind}-${t.lead_id}`} onClick={() => openFamily(t.lead_id)}><Icon n="mail" />
                   <span><b>Mail a printed guide · {t.name}</b><br />
-                    <small>{t.note || 'Confirm the address, mail it, then mark it done'}</small></span>›</button>))}
+                    <small>{t.note || 'Confirm the address, mail it, then mark it done'}</small></span>›</button>)}
             </div>
           </div>
           <div>
@@ -334,7 +337,7 @@ function SearchResults({ q, loc, open }) {
 // ONE inbox for texts and emails, with its own filters. Reads the same
 // endpoint as Home; "Handled" brings back what was answered or closed.
 const FILTERS = [['all', 'All'], ['needs_reply', 'Needs reply'], ['unread', 'Unread'], ['ai', 'AI handling'], ['human', 'Human attention'],
-  ['appointments', 'Appointments'], ['text', 'Text'], ['email', 'Email'], ['handled', 'Handled']]
+  ['appointments', 'Appointments'], ['home_visits', 'Home visits'], ['text', 'Text'], ['email', 'Email'], ['handled', 'Handled']]
 
 function InboxTab({ loc, act, open, selected }) {
   const [flt, setFlt] = useState('all')
@@ -421,7 +424,7 @@ function SectionHead({ title, onAll }) {
 
 const ACT = {
   reply: ['reply', 'Reply', true], call: ['call', 'Call'], schedule: ['cal', 'Schedule'], note: ['note', 'Note'],
-  close: ['check', 'Close'], snooze: ['clock', 'Snooze'], review: ['note', 'Review', true], dismiss: ['x', 'Dismiss'],
+  close: ['check', 'Close'], snooze: ['clock', 'Mark opened'], review: ['note', 'Review', true], dismiss: ['x', 'Dismiss'],
 }
 
 function Inbox({ items, act, open, empty, selected }) {
@@ -559,6 +562,13 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
       api.get(`/program/command/slots?lead_id=${id}`).then(setSlots).catch(() => {})
     } catch (e) { toast(e.message || 'Could not book.') } finally { setBusy(false) }
   }
+  const homeVisitArranged = async () => {
+    try {
+      await api.post('/program/command/home-visit', { lead_id: id })
+      toast('Marked as arranged.')
+      load()
+    } catch (e) { toast(e.message || 'Could not update the home visit.') }
+  }
   const mailTask = async done => {
     try {
       await api.post('/program/command/mail-task', { lead_id: id, done })
@@ -657,6 +667,13 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
         {f.booking && <p className="cmd-booked"><Icon n="check" /> Booked {new Date(f.booking.when).toLocaleString([], { weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} · {f.booking.label || 'Visit'}</p>}
       </section>
 
+      {f.home_visit && <section className="cmd-card cmd-next">
+        <h3><Icon n="cal" /> Home visit</h3>
+        {f.home_visit.waiting
+          ? <><p>The family asked for a visit at home. Call them to set a time, then mark it arranged. Nothing was booked for them.</p>
+            <div className="cmd-send"><button className="primary" onClick={homeVisitArranged}>Mark as arranged</button></div></>
+          : <p>Arranged{f.home_visit.done_by ? ` by ${f.home_visit.done_by}` : ''}{f.home_visit.done_at ? ` · ${new Date(f.home_visit.done_at).toLocaleDateString()}` : ''}.</p>}
+      </section>}
       {f.mail_task && <section className="cmd-card cmd-next">
         <h3><Icon n="mail" /> Printed guide by mail</h3>
         {f.mail_task.done

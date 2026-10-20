@@ -263,6 +263,7 @@ class ProgramResponse(Base):
     __table_args__ = (
         Index("ix_program_responses_org_state", "organization_id", "handling_status"),
         Index("ix_program_responses_lead", "lead_id"),
+        Index("ix_program_responses_org_received", "organization_id", "received_at"),
     )
 
     id = Column(String, primary_key=True, default=_uuid)
@@ -305,6 +306,7 @@ class ProgramAlert(Base):
     __tablename__ = "program_alerts"
     __table_args__ = (Index("ix_program_alerts_response", "response_id"),
                       Index("ix_program_alerts_lead_created", "lead_id", "created_at"),
+                      Index("ix_program_alerts_org_created", "organization_id", "created_at"),
                       # ONE REPLY, ONE ALERT (Oct 19): one claim per page key,
                       # channel and recipient - see services/programs/alert_ledger.
                       Index("uq_program_alerts_dedupe", "dedupe_key", "channel", "recipient", unique=True,
@@ -654,7 +656,8 @@ class ProgramConversationTurn(Base):
     simulated (synthetic contact - nothing left the building), held (waiting
     for permitted hours), blocked (a rule refused it)."""
     __tablename__ = "program_conversation_turns"
-    __table_args__ = (Index("ix_program_conv_turns_conv", "conversation_id", "created_at"),)
+    __table_args__ = (Index("ix_program_conv_turns_conv", "conversation_id", "created_at"),
+                      Index("ix_program_conv_turns_org_created", "organization_id", "created_at"),)
 
     id = Column(String, primary_key=True, default=_uuid)
     conversation_id = Column(String, nullable=False)
