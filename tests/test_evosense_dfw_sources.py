@@ -720,3 +720,62 @@ def test_no_database_transaction_is_held_open_across_a_source_call(client, db_se
     assert out["status"] == "succeeded", out
     assert any(l.endswith(".search") for l, _ in seen) and any(l.endswith(".lookup_many") for l, _ in seen)
     assert [l for l, open_ in seen if open_] == [], "a transaction was open during a network call"
+
+
+def test_lookup_failure_reason_codes_are_safe_and_consistent():
+    """Do not expose exception messages containing URLs or private details."""
+    tally = {"failed": 0}
+    assert HU._count_lookup_failure(tally, B.SourceError(B.TIMEOUT_ERR, "PRIVATE: secret"), 3) == "TIMEOUT"
+    assert HU._count_lookup_failure(tally, "MISSING_PROVIDER_RESULT") == "MISSING_PROVIDER_RESULT"
+    assert HU._count_lookup_failure(tally, RuntimeError("password=secret")) == "OTHER"
+    assert tally == {"failed": 5, "failure_codes": {
+        "TIMEOUT": 3, "MISSING_PROVIDER_RESULT": 1, "OTHER": 1,
+    }}
+    assert "secret" not in str(tally)
+
+
+def test_systemic_311_failure_counts_all_attempts_and_does_not_masquerade_as_no_match(
+        client, db_session, sample_org, dfw_files, fake_apis, monkeypatch):
+    """The old code reported failed=N while queued=0 for a whole failed batch."""
+    _, headers = _admin(db_session, sample_org)
+    _enable(client, headers, *ALL_DFW)
+
+    def refused(self, targets):
+        assert targets
+        raise B.SourceError(B.TIMEOUT_ERR, "simulated slow public endpoint")
+    monkeypatch.setattr(PV.Dallas311Source, "lookup_many", refused)
+    strategy = _pilot(client, headers)
+    result = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % strategy["id"],
+                            headers=headers))
+    stats = result["counts"]["lookups"]["dallas_311_code"]
+    assert stats["queued"] >= 1
+    assert stats["failed"] == stats["queued"]
+    assert stats["failure_codes"] == {"TIMEOUT": stats["queued"]}
+    assert stats["no_match"] == 0
+    assert stats["duration_ms"] >= 0
+    assert result["status"] == "partial"
+    # A failing optional source must not cancel other evidence or spend money.
+    assert result["counts"]["spent_cents"] == 0
+    assert result["counts"]["sources"]["tarrant_tax_roll"]["records"] >= 1
+
+
+def test_one_failed_311_property_makes_run_partial_without_discarding_other_answers(
+        client, db_session, sample_org, dfw_files, fake_apis, monkeypatch):
+    """A provider returned the batch successfully but one property errored."""
+    _, headers = _admin(db_session, sample_org)
+    _enable(client, headers, *ALL_DFW)
+    def mixed(self, targets):
+        assert targets
+        return {"results": {t["id"]: None for t in targets[1:]},
+                "errors": {targets[0]["id"]: B.SourceError(B.TIMEOUT_ERR, "synthetic")},
+                "stats": {}}
+    monkeypatch.setattr(PV.Dallas311Source, "lookup_many", mixed)
+    strategy = _pilot(client, headers)
+    result = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % strategy["id"],
+                            headers=headers))
+    stats = result["counts"]["lookups"]["dallas_311_code"]
+    assert stats["queued"] >= 1
+    assert stats["failed"] == 1
+    assert stats["failure_codes"] == {"TIMEOUT": 1}
+    assert stats["failed"] + stats["no_match"] == stats["queued"]
+    assert result["status"] == "partial"
