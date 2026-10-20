@@ -21,11 +21,11 @@ export const sortInbox = (items, mode = 'attention') =>
     : priorityWeight(a) - priorityWeight(b) || latestMs(b) - latestMs(a) || String(a.id).localeCompare(String(b.id)))
 export const queueMatches = (r, queue) => {
   if (queue === 'new') return r.status === 'new'
-  if (queue === 'hot') return r.class === 'hot' && isOpenResponse(r)
+  if (queue === 'hot') return r.class === 'hot' && needsAttention(r)
   if (queue === 'followup') return ['opened', 'active'].includes(r.status)
   if (queue === 'handled') return ['responded', 'closed'].includes(r.status)
   if (queue === 'recent') return true
-  return isOpenResponse(r)
+  return needsAttention(r)
 }
 export const statusMatches = (r, status) =>
   !status || (status === 'open' ? isOpenResponse(r) : r.status === status)
