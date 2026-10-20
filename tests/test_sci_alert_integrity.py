@@ -220,3 +220,43 @@ def test_a_booking_page_booking_pages_the_team_once_and_never_by_the_legacy_path
         assert A.book(db, prog, lead2, slot.replace(hour=13), A.VISIT)["status"] == "confirmed"
     assert page2.call_count == 0
     assert ProgramAlert is not None
+
+
+def test_a_deliberately_blocked_held_reply_pages_nobody(wired, sample_advisor, monkeypatch):
+    """Review fix: campaign off / DNC is a policy block, not a failure - no page storm."""
+    from app.services.programs import ai_setter
+    db, org, prog, sent = wired["db"], wired["org"], wired["prog"], wired["sent"]
+    prog.ai_setter_mode = "auto"
+    db.commit()
+    a = _lead_for(db, org, sample_advisor, "L001")
+    conv = ProgramConversation(organization_id=org.id, lead_id=a.id, state="offered")
+    db.add(conv)
+    db.flush()
+    db.add(ProgramConversationTurn(conversation_id=conv.id, organization_id=org.id, lead_id=a.id, role="ai",
+                                   text="Would Tue 10 AM work?", action="offer_times", delivery="held"))
+    db.commit()
+
+    def refuse(*a_, **k):
+        raise ValueError("Lead x: CAMPAIGN OFF: this contact's campaign is not switched on")
+    monkeypatch.setattr("app.services.sms_service.send_sms", refuse)
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now: {"permitted": True})
+    monkeypatch.setattr("app.services.programs.appointments.program_advisor", lambda db_, p: sample_advisor)
+    before = len(_owner_texts(sent))
+    ai_setter.sweep(db)
+    assert db.query(ProgramConversationTurn).filter_by(lead_id=a.id).one().delivery == "blocked"
+    assert _owner_texts(sent)[before:] == []
+
+
+def test_a_text_stop_does_not_close_a_later_email_asking_to_come_in(wired, sample_advisor):
+    """Review fix: the reminder sweep honours the opt-out of the reply's own channel."""
+    db, org = wired["db"], wired["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    t0 = datetime.utcnow() - timedelta(hours=1)
+    _reply(db, lead, "STOP", "SM_C1", now=t0)
+    with patch("app.services.programs.responses._deliver_staff_alert", return_value=(True, None)):
+        resp = R.on_inbound(db, lead, "I changed my mind - I want to come in and see you Friday at 2", "email",
+                            reply_id="EM_C2", now=t0 + timedelta(minutes=5))
+    assert resp.response_class == "hot" and resp.handling_status == "new"
+    R.sla_sweep(db, now=t0 + timedelta(minutes=30))
+    db.refresh(resp)
+    assert resp.handling_status == "new"

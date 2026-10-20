@@ -250,7 +250,7 @@ def retry_failed(db: Session, *, now: Optional[datetime] = None, min_age_seconds
             db.commit()
             continue
         # Re-check what the first attempt checked: alerts switched off since,
-        # or a test / demo / opted-out family, never pages on a retry.
+        # or a test / demo family, never pages on a retry.
         why_not = _retry_blocked(db, prog, r)
         if why_not:
             r.send_state, r.reason = "skipped", why_not

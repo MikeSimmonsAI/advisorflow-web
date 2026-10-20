@@ -1289,12 +1289,10 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                     # words; the team was paged when it was booked.
                     t = _deliver(db, prog, lead, conv, resp, "You're already set for %s. If anything changes, "
                                  "just reply here." % A.describe(slot), "book", mode, now=now)
-                    conv.offered_slots = None
                     conv.ai_turns += 1
                     conv.last_ai_at = now
                     db.commit()
                     return dict(out, state=conv.state, booked_time=slot.isoformat(), delivery=t.delivery)
-                conv.offered_slots = None                # a booked family is not picking from old offers
                 A.notify_team_booked(db, prog, lead, slot, kind)
                 # The booking path already sent the family its confirmation
                 # text; a synthetic contact gets the same line, simulated.
@@ -1493,6 +1491,12 @@ def sweep(db: Session, now: Optional[datetime] = None) -> Dict:
             continue
         if not contact_hours.check(lead, now).get("permitted"):
             continue
+        from app.services.sci_staging_demo import is_demo_lead
+        from app.services.test_records import is_owner_test_lead
+        if A._opted_out(db, lead) or is_demo_lead(lead) or is_owner_test_lead(lead):
+            t.delivery, t.reason = "dropped", "family opted out / test or demo - not sent"
+            db.commit()
+            continue
         try:
             from app.services.sms_service import send_sms
             msg = send_sms(db, A.program_advisor(db, prog), lead, t.text, include_booking_link=False,
@@ -1504,15 +1508,22 @@ def sweep(db: Session, now: Optional[datetime] = None) -> Dict:
             db.rollback()
             t = db.merge(t)
             t.delivery, t.reason = "blocked", str(exc)[:240]
-            # The family never got our answer: a person picks it up.
-            try:
-                conv = db.merge(conv)
-                _handoff(db, prog, lead, conv, "held reply could not be sent: %s" % str(exc)[:120], notify=True)
-            except Exception:                            # noqa: BLE001
-                log.exception("handoff after a refused held reply failed for lead %s", lead.id)
+            # The family never got our answer because of a FAILURE: a person
+            # picks it up. A deliberate block (campaign off, DNC, review hold,
+            # test) is not a failure and pages nobody.
+            if not _POLICY_BLOCK.search(str(exc)):
+                try:
+                    conv = db.merge(conv)
+                    _handoff(db, prog, lead, conv, "held reply could not be sent: %s" % str(exc)[:120], notify=True)
+                except Exception:                        # noqa: BLE001
+                    log.exception("handoff after a refused held reply failed for lead %s", lead.id)
             db.commit()
     db.commit()
     return {"sent": sent}
+
+
+_POLICY_BLOCK = re.compile(r"(DNC|CAMPAIGN OFF|ON HOLD|DATA REVIEW|DUPLICATE REVIEW|LOCATION REVIEW|opted|"
+                           r"suppress|consent|\btest\b|\bdemo\b|PLAN CAPACITY|capacity)", re.I)
 
 
 FOLLOW_UP_STATES = ("offered", "info_requested", "waiting_future")

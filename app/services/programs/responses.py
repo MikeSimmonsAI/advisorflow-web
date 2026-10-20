@@ -674,7 +674,11 @@ def sla_sweep(db: Session, now: Optional[datetime] = None,
             continue
         from app.services.sci_staging_demo import is_demo_lead as _is_demo
         from app.services.programs.appointments import _opted_out
-        if _is_demo(lead) or _opted_out(db, lead):
+        # Opted out ON THE CHANNEL THE REPLY CAME IN ON: a text STOP does not
+        # close a family's later email asking to come in.
+        _gone = (_opted_out(db, lead) if (resp.channel or "sms") == "sms"
+                 else getattr(lead, "allow_email", True) is False)
+        if _is_demo(lead) or _gone:
             # A made-up demo family never pages; one who said stop is closed.
             resp.sla_alert_count = cap
             if not _is_demo(lead):
