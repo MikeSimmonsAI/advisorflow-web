@@ -1866,3 +1866,69 @@ def events(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db),
     return {"items": [{"id": e.id, "action": e.action, "summary": e.summary, "actor": e.actor_type,
                        "property_id": e.property_id, "strategy_id": e.strategy_id,
                        "is_test": e.is_test, "at": V._iso(e.created_at)} for e in rows]}
+
+
+# ── Cut-off owner names: preview, apply, undo (owner_names.py) ──────────────
+
+@router.get("/owner-names/preview")
+def owner_names_preview(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Every owner whose name a county file cut short, and whether a record on
+    file completes it: safe / ambiguous / unrecoverable. Writes nothing."""
+    from app.services.evosense import owner_names as ON
+    org_id = _read_org(db, user)
+    pv = ON.preview(db, org_id)
+    pl = ON.plan(db, org_id, pv)
+    pv["plan"] = {"hash": pl["hash"], "changes": len(pl["changes"]),
+                  "confirm_with": "APPLY %s" % pl["hash"]}
+    return pv
+
+
+@router.post("/owner-names/apply")
+def owner_names_apply(payload: ConfirmIn, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """Apply the SAFE rows only. The plan is rebuilt here; the typed code must
+    match it, so a preview that went stale cannot be applied."""
+    from app.services.evosense import owner_names as ON
+    _admin(user, db)
+    org_id = svc.write_org_id(db, user)
+    pl = ON.plan(db, org_id)
+    if not pl["changes"]:
+        raise HTTPException(status_code=409, detail="Nothing safe to apply.")
+    if payload.confirm != "APPLY %s" % pl["hash"]:
+        raise HTTPException(status_code=422, detail="Type APPLY %s to confirm (re-open the preview "
+                                                    "if the code changed)." % pl["hash"])
+    try:
+        out = ON.apply(db, org_id, pl, confirm=pl["hash"], user=user)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    C.log_event(db, org_id, "owner.name_repair_plan", user=user, actor_type=C.ACTOR_USER,
+                summary="Owner name repair %s applied (%s owners)" % (pl["hash"], out["applied"]),
+                details=pl)
+    db.commit()
+    return out
+
+
+class OwnerNamesRevertIn(BaseModel):
+    plan: str
+    confirm: str = ""
+
+
+@router.post("/owner-names/revert")
+def owner_names_revert(payload: OwnerNamesRevertIn, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    from app.models.evosense_models import EvoSenseEvent
+    from app.services.evosense import owner_names as ON
+    _admin(user, db)
+    org_id = svc.write_org_id(db, user)
+    if payload.confirm != "REVERT %s" % payload.plan:
+        raise HTTPException(status_code=422, detail="Type REVERT %s to confirm." % payload.plan)
+    ev = (db.query(EvoSenseEvent)
+          .filter(EvoSenseEvent.organization_id == org_id, EvoSenseEvent.action == "owner.name_repair_plan",
+                  EvoSenseEvent.details.contains(payload.plan))
+          .order_by(EvoSenseEvent.created_at.desc()).first())
+    pl = C.jload(ev.details, {}) if ev is not None else {}
+    if not pl or pl.get("hash") != payload.plan:
+        raise HTTPException(status_code=404, detail="No applied repair with that code.")
+    out = ON.revert(db, org_id, pl, user=user)
+    db.commit()
+    return out
