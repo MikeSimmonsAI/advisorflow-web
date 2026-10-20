@@ -183,6 +183,32 @@ def upsert_owner(db, org_id: str, prop: EvoSenseProperty, data: Dict[str, Any], 
         # a person typed the owner's full name: the truncation is resolved
         owner.name_truncated = False
         owner.review_flags = C.jdump(owner_flags(owner.display_name or name)) or None
+    elif owner.name_truncated and not truncated and mk and owner.mailing_key == mk:
+        # The SAME owner (same mailing address, a shared name word - see
+        # same_owner_other_spelling) arrives from a record that carries the
+        # whole name: the tax roll cut "SAMPLE ROBIN AND SAMPLE P" at its field
+        # width, the appraisal district publishes "ROBIN & PAT ETAL SAMPLE".
+        # The full name comes from a county record, not a guess, so it replaces
+        # the cut one and the "confirm the full name first" hold is lifted.
+        # The cut spelling stays on the event log.
+        cut = owner.display_name
+        owner.display_name = name
+        owner.name_key = nk
+        owner.name_truncated = False
+        otype = data.get("owner_type") or owner_type_of(name)
+        owner.owner_type = otype
+        owner.review_flags = C.jdump(owner_flags(name)) or None
+        known = {p.name_key for p in db.query(EvoSensePerson).filter(
+            EvoSensePerson.organization_id == org_id, EvoSensePerson.owner_id == owner.id).all()}
+        for full, role in _persons_for(name, otype):
+            if name_key(full) not in known:
+                db.add(EvoSensePerson(organization_id=org_id, owner_id=owner.id, full_name=full,
+                                      name_key=name_key(full), role=role, source=source,
+                                      is_test=is_test))
+        C.log_event(db, org_id, "owner.full_name", property_id=prop.id, is_test=is_test,
+                    summary="Owner's full name from %s replaced a cut-off name" % source,
+                    details={"was": cut, "now": name, "source": source})
+        db.flush()
 
     link = (db.query(EvoSenseOwnership)
             .filter(EvoSenseOwnership.organization_id == org_id,

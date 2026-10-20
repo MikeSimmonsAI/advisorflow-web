@@ -77,8 +77,15 @@ _WILLING = re.compile(r"\b((i'?d|i would|i will|i'?ll|we'?d|we would|would|might
 _INTEREST = re.compile(r"\b(yes|yeah|yep|interested|tell me more|sure)\b", re.I)
 _MAYBE = re.compile(r"\b(maybe|possibly|depends|might consider|not sure)\b", re.I)
 _QUICK = re.compile(r"\b(close (quickly|fast|soon|quick)|quick (close|sale)|asap|as soon as possible|"
-                    r"fast sale|sell (it )?fast|right away)\b", re.I)
-_ESTATE = re.compile(r"\b(inherited|inherit|estate|probate|passed away|late (mother|father|mom|dad|husband|wife))\b", re.I)
+                    r"fast sale|sell (it )?fast|right away|"
+                    # "could close in 30 days", "close within two weeks" - a timeframe a month or less
+                    r"close (in|within) ([1-9]|[12][0-9]|30) days|"
+                    r"close (in|within) (a|one|two|three|four|[1-4]) weeks?|"
+                    r"close (in|within) (a|one) month)\b", re.I)
+_KIN = r"(mother|father|mom|dad|husband|wife|parents?|grand(ma|pa|mother|father)|aunt|uncle|brother|sister)"
+_ESTATE = re.compile(r"\b(inherited|inherit|estate|probate|passed away|late " + _KIN + r"|"
+                     # "since my mom passed", "after my father died" - a death in the family, said plainly
+                     r"my " + _KIN + r" (passed|died)|since (she|he|they) (passed|died))\b", re.I)
 _PRICE_CTX = re.compile(r"\b(?:around|about|roughly|for|at|near|close to|asking|get|want)\s+\$?\s?"
                         r"([0-9]{2,3}(?:,[0-9]{3})*(?:\.[0-9]+)?)\s*(k|thousand|grand)?\b", re.I)
 _PRICE_ANY = re.compile(r"\$\s?([0-9][0-9,]*(?:\.[0-9]+)?)\s*(k|thousand)?|\b([0-9]{2,3})\s?(k|thousand|grand)\b", re.I)
@@ -87,7 +94,9 @@ _OCCUPANCY = ((re.compile(r"\b(vacant|empty|nobody lives|no one lives|sitting em
               (re.compile(r"\b(tenant|renter|rented|leased)\b", re.I), "tenant"),
               (re.compile(r"\b(i live there|we live there|my home|our home)\b", re.I), "owner_occupied"))
 _CONDITION = ((re.compile(r"\b(gutted|condemned|fire damage|falling apart|tear ?down|needs everything)\b", re.I), "distressed"),
-              (re.compile(r"\b(bad shape|rough shape|needs a lot|needs work|poor condition|fixer)\b", re.I), "poor"),
+              (re.compile(r"\b(bad shape|rough shape|needs a lot|needs work|poor condition|fixer|"
+                          r"needs (a )?(new )?roof|roof (leaks|is leaking|needs)|foundation (issues?|problems?|"
+                          r"needs)|needs (major )?repairs|major repairs)\b", re.I), "poor"),
               (re.compile(r"\b(needs some work|dated|could use|okay shape|ok shape)\b", re.I), "fair"),
               (re.compile(r"\b(good (shape|condition)|well maintained|move in ready)\b", re.I), "good"))
 
