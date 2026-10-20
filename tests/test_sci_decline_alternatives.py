@@ -207,3 +207,34 @@ def test_a_manager_turns_home_visits_on_per_location(client, setter, sample_advi
     conv = S.conversation_for(db, lead, create=True)
     assert S.alternative_for(db, lead, conv, S.DECLINED_VENUE) == S.ALT_HOME
     assert S.alternative_for(db, lead, conv, S.DECLINED_HOME) != S.ALT_HOME
+
+
+# ── "stop by" is a family coming in, not a STOP (overnight Oct 19) ───────────
+
+@pytest.mark.parametrize("body", ["I can stop by today.", "I'll stop by tomorrow", "Can I stop in Friday?",
+                                  "We can stop over after church", "I will stop at the office later"])
+def test_stop_by_is_never_read_as_a_stop(body):
+    assert S.what_was_declined(body, INVITE, False) != S.DECLINED_STOP
+
+
+@pytest.mark.parametrize("body", ["Stop", "STOP.", "stop texting me", "Please stop messaging me", "stop it"])
+def test_a_real_stop_is_still_a_stop(body):
+    assert S.what_was_declined(body, INVITE, False) == S.DECLINED_STOP
+
+
+def test_family_stopping_by_gets_times_not_a_goodbye(setter, sample_advisor):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    _invited(db, lead, sample_advisor)
+    fake = _Fake([_d("offer_times", "Wonderful - would {TIMES} work for you?")])
+    _, conv = _run(db, lead, "I can stop by this week", fake)
+    assert len(fake.calls) == 1                                              # no "they said stop" correction
+    assert _last_ai(db, conv).action == "offer_times" and conv.state != "closed"
+
+
+@pytest.mark.parametrize("body", ["Please stop", "Stop please", "pls stop", "STOP NOW", "Stop. Thank you",
+                                  "stop this", "stop these texts", "Stop the messages"])
+def test_polite_stops_are_still_stops(body):
+    # Independent review: these are not opt-outs to the reply rules, so the
+    # setter itself must still read them as a stop.
+    assert S.what_was_declined(body, INVITE, False) == S.DECLINED_STOP
