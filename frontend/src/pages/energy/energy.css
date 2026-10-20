@@ -78,3 +78,7 @@
 .eo-leadpanel .eo-panel { padding: 12px; }
 .eo-list { margin: 4px 0 8px; padding-left: 18px; }
 .eo-list li { margin: 2px 0; }
+
+/* Team & Alerts / New Requests */
+.eo-focus { outline: 2px solid #2b6ef3; outline-offset: -2px; }
+.eo-tabs .eo-pill { margin-left: 4px; }

@@ -164,6 +164,10 @@ def handle(db: Session, *, site, organization, result: Dict[str, Any],
         nonlocal lead
         from app.services.energy_suppliers import _lock
         lead = _lock(db, lead)
+        # Team & Alerts: an unowned request goes to the workspace's default
+        # advisor when one is set (managed in the app, not on the website).
+        from app.services import energy_team
+        energy_team.apply_default_advisor(db, organization.id, lead)
         if (lead.tier or "") in ("", "web_lead"):
             lead.tier = "new_inquiry"
         cf = _cf(lead)
@@ -227,17 +231,19 @@ def handle(db: Session, *, site, organization, result: Dict[str, Any],
         done["move_id"] = _step(db, "move", _move)
 
     def _alert():
-        from app.models.models import Notification, NotificationType
-        users = _recipients(db, lead=lead, site=site, organization=organization)
-        name = " ".join(x for x in (lead.first_name, lead.last_name) if x) or "Someone"
+        # ONE alert event per request: keyed to the open first-contact task, so a
+        # retry or a repeat form while it is still open alerts nobody again.
+        # Recipients come from Settings -> Team & Alerts (energy_team).
+        from app.services import energy_team
+        from app.services.energy_suppliers import _lock
+        locked = _lock(db, lead)
+        key = ("website:task:%s" % done["task_id"]) if done.get("task_id") else \
+            ("website:lead:%s:%s" % (locked.id, datetime.utcnow().strftime("%Y-%m-%d")))
         what = str(payload.get("request_type") or "").strip()
-        msg = "Website request from %s%s - contact them." % (name, (": " + what[:80]) if what else "")
-        if getattr(lead, "is_test", False):
-            msg = "TEST record - " + msg
-        for uid in users:
-            db.add(Notification(user_id=uid, lead_id=lead.id, type=NotificationType.DEMO_REQUEST,
-                                message=msg, link="/rate-requests?open=%s" % lead.id))
-        return len(users)
+        out = energy_team.alert_new_request(db, org=organization, lead=locked, event_key=key,
+                                            origin="website", what=what)
+        done["alert_event"] = out
+        return out["in_app"]
     done["alerted"] = _step(db, "alert", _alert) or 0
     return done
 

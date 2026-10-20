@@ -1184,3 +1184,186 @@ def intake_health(request: Request, days: int = Query(30, ge=1, le=365),
     org_id = _org_id(db, user, request)
     scoped = lead_scope.authorized_lead_query(db, user, Lead.id, request=request).scalar_subquery()
     return ih.report(db, org_id=org_id, scoped=scoped, now=_now(), days=days)
+
+
+# ── TEAM & ALERTS + the shared NEW REQUESTS inbox ───────────────────────────
+# services/energy_team.py. Energy workspaces only; everything audited; no
+# customer is ever contacted from here.
+class TeamMemberIn(BaseModel):
+    in_app: Optional[bool] = None
+    email: Optional[bool] = None
+    assignable: Optional[bool] = None
+
+
+class DefaultAdvisorIn(BaseModel):
+    user_id: Optional[str] = Field(None, max_length=64)
+
+
+class MailboxIn(BaseModel):
+    address: Optional[str] = Field(None, max_length=200)
+
+
+class MailboxCodeIn(BaseModel):
+    code: str = Field(..., min_length=4, max_length=12)
+
+
+class AssignIn(BaseModel):
+    user_id: str = Field(..., max_length=64)
+
+
+def _energy_org(db, user, request):
+    from app.models.models import Organization
+    from app.services import energy_team
+    org = db.query(Organization).filter(Organization.id == _org_id(db, user, request)).first()
+    if org is None or not energy_team.is_energy(org):
+        raise HTTPException(404, "Not available for this workspace.")
+    return org
+
+
+def _team_manager(db, user, request):
+    org = _energy_org(db, user, request)
+    if not _is_manager(db, user, request):
+        raise HTTPException(403, "Team & Alerts is managed by workspace managers.")
+    return org
+
+
+def _audit(db, org, user, action, target, details):
+    log_action(db, org.id, user.id, action=action, target_type="energy_team", target_id=target,
+               details=details, commit=False)
+
+
+@router.get("/team")
+def team_settings(request: Request, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services import energy_team
+    org = _team_manager(db, user, request)
+    return energy_team.team_view(db, org.id, lead_scope.effective_role(user, db, request))
+
+
+@router.patch("/team/members/{user_id}", dependencies=[Depends(require_not_observation)])
+def team_member_update(user_id: str, body: TeamMemberIn, request: Request, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user)):
+    from app.services import energy_team
+    org = _team_manager(db, user, request)
+    try:
+        out = energy_team.update_member(db, org.id, user.id, user_id, body.model_dump())
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
+    _audit(db, org, user, "energy.team_member", user_id, body.model_dump())
+    db.commit()
+    return out
+
+
+@router.put("/team/default-advisor", dependencies=[Depends(require_not_observation)])
+def team_default_advisor(body: DefaultAdvisorIn, request: Request, db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_user)):
+    from app.services import energy_team
+    org = _team_manager(db, user, request)
+    try:
+        out = energy_team.set_default(db, org.id, user.id, body.user_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    _audit(db, org, user, "energy.team_default_advisor", body.user_id or "none", out)
+    db.commit()
+    return out
+
+
+@router.put("/team/mailbox", dependencies=[Depends(require_not_observation)])
+def team_mailbox(body: MailboxIn, request: Request, db: Session = Depends(get_db),
+                 user: User = Depends(require_tenant_user)):
+    from app.services import energy_team
+    org = _team_manager(db, user, request)
+    try:
+        out = energy_team.set_mailbox(db, org.id, body.address, user.id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    _audit(db, org, user, "energy.team_mailbox", "mailbox", {"address": out["mailbox"]})
+    db.commit()
+    return out
+
+
+@router.post("/team/mailbox/send-test", dependencies=[Depends(require_not_observation)])
+def team_mailbox_test(request: Request, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services import energy_team
+    org = _team_manager(db, user, request)
+    try:
+        out = energy_team.send_test(db, org.id, user.id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    except RuntimeError as exc:
+        db.rollback()
+        raise HTTPException(502, str(exc))
+    _audit(db, org, user, "energy.team_mailbox_test", "mailbox", {"to": out["mailbox"]})
+    db.commit()
+    return out
+
+
+@router.post("/team/mailbox/confirm", dependencies=[Depends(require_not_observation)])
+def team_mailbox_confirm(body: MailboxCodeIn, request: Request, db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_user)):
+    from app.services import energy_team
+    org = _team_manager(db, user, request)
+    try:
+        out = energy_team.confirm(db, org.id, body.code, user.id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    _audit(db, org, user, "energy.team_mailbox_verified", "mailbox", {"address": out["mailbox"]})
+    db.commit()
+    return out
+
+
+@router.get("/new-requests")
+def new_requests(request: Request, state: str = Query("unclaimed", pattern="^(unclaimed|mine|all)$"),
+                 db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """The ONE shared inbox of new requests (website + field). Visible to
+    managers and to teammates who can be assigned requests; contact details
+    appear only for the request's owner (or a manager)."""
+    from app.services import energy_team
+    org = _energy_org(db, user, request)
+    mgr = _is_manager(db, user, request)
+    if not energy_team.may_use_inbox(db, org.id, user, mgr):
+        raise HTTPException(403, "You are not set up to take new requests. Ask a manager.")
+    out = energy_team.inbox(db, org.id, user, mgr, state)
+    out.update({"is_manager": mgr, "can_claim": energy_team.can_take(db, org.id, user.id)})
+    if mgr:
+        data = energy_team.load(db, org.id)
+        out["assignable"] = [{"user_id": p["user_id"], "name": p["name"]} for p in energy_team.people(db, org.id)
+                             if energy_team.flags(p, data)["assignable"]]
+    return out
+
+
+@router.post("/new-requests/{lead_id}/claim", dependencies=[Depends(require_not_observation)])
+def new_request_claim(lead_id: str, request: Request, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user)):
+    from app.services import energy_team
+    org = _energy_org(db, user, request)
+    try:
+        out = energy_team.claim_request(db, org, user, lead_id)
+    except PermissionError as exc:
+        db.rollback()
+        raise HTTPException(403, str(exc))
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(404, str(exc))
+    except energy_team.Conflict as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc))
+    db.commit()
+    out["link"] = "/leads/%s?tab=overview" % lead_id
+    return out
+
+
+@router.post("/new-requests/{lead_id}/assign", dependencies=[Depends(require_not_observation)])
+def new_request_assign(lead_id: str, body: AssignIn, request: Request, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user)):
+    from app.services import energy_team
+    org = _team_manager(db, user, request)
+    try:
+        out = energy_team.assign_request(db, org, user, lead_id, body.user_id)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(422, str(exc))
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(404, str(exc))
+    db.commit()
+    return out
