@@ -1,7 +1,8 @@
 /* Responses: one inbox for text and email replies, voicemails and replies from
    unknown senders. Left: the queue. Middle: the real conversation
    (GET /leads/{id}/timeline) and a reply box. Right: who, where, consent and
-   the next step. A reply is sent with POST /sms/send; the server's gates (STOP,
+   the next step. A reply is sent with POST /program/command/reply (as SCI Live
+   does), which also marks the family's reply answered; the server's gates (STOP,
    suppression, DNC, consent, the SCI switch) decide - never this page. */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../../api/client'
@@ -44,8 +45,8 @@ export default function Responses({ locationId, onChange, navigate }) {
   }
   const mark = async (r, state) => {
     try {
-      await api.post(`/program/responses/${r.id}/mark`, { state })
-      setSel({ kind: 'response', item: { ...r, status: state } }); load(); onChange()
+      const d = await api.post(`/program/responses/${r.id}/mark`, { state })
+      setSel({ kind: 'response', item: { ...r, status: d?.status || r.status } }); load(); onChange()
     } catch (e) { setErr(errText(e)) }
   }
   const handled = async u => {
@@ -158,7 +159,10 @@ export default function Responses({ locationId, onChange, navigate }) {
             <p className="sci-footnote"><Icon name="lock" />STOP and suppression rules always apply.</p>
           </div>
         ) : sel.kind === 'response' ? (
-          <ConversationPane r={sel.item} mark={mark} navigate={navigate} onSent={() => { load(); onChange() }} />
+          <ConversationPane r={sel.item} mark={mark} navigate={navigate} onSent={st => {
+            if (st) setSel(cur => (cur?.kind === 'response' && cur.item.id === sel.item.id ? { ...cur, item: { ...cur.item, status: st } } : cur))
+            load(); onChange()
+          }} />
         ) : sel.kind === 'call' ? (
           <CallPane c={sel.item} navigate={navigate} />
         ) : (
@@ -176,6 +180,7 @@ function ConversationPane({ r, mark, navigate, onSent }) {
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState({ tone: '', text: '' })
   const threadRef = useRef(null)
+  const sendKey = useRef(null)
   const loadThread = useCallback(() => {
     if (!r.lead_id) { setTl({ events: [], lead: null }); return }
     api.get(`/leads/${r.lead_id}/timeline`).then(d => { setTl(d); setTlErr('') }).catch(e => { setTlErr(errText(e)); setTl({ events: [], lead: null }) })
@@ -202,9 +207,13 @@ function ConversationPane({ r, mark, navigate, onSent }) {
     if (!text || busy) return
     setBusy(true); setNote({ tone: '', text: '' })
     try {
-      await api.post('/sms/send', { lead_id: r.lead_id, template: text, include_booking_link: false })
+      if (!sendKey.current) sendKey.current = window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`
+      const d = await api.post('/program/command/reply', {
+        lead_id: r.lead_id, response_id: r.id, channel: 'sms', text, idempotency_key: sendKey.current,
+      })
+      sendKey.current = null
       setDraft(''); setNote({ tone: 'ok', text: 'Sent. It appears in the thread once the carrier accepts it.' })
-      loadThread(); onSent()
+      loadThread(); onSent(d?.response_status)
     } catch (er) {
       setNote({ tone: 'bad', text: `Not sent: ${errText(er)}` })
     } finally { setBusy(false) }

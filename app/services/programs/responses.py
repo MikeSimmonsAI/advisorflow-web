@@ -497,11 +497,11 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
             from datetime import timezone as _tz
             st.completed_at = datetime.now(_tz.utc)
         resp.closed_at = now
-        # Their earlier HOT replies are over too: no "still waiting" reminder
-        # for a family who has since said stop.
+        # Their earlier replies (new OR already opened/answered) are over too:
+        # no "still waiting" reminder or HOT line for a family who said stop.
         for old in (db.query(ProgramResponse).filter(ProgramResponse.organization_id == lead.organization_id,
                                                      ProgramResponse.lead_id == lead.id,
-                                                     ProgramResponse.handling_status == "new").all()):
+                                                     ProgramResponse.handling_status != "closed").all()):
             old.handling_status, old.sla_due_at, old.closed_at = "closed", None, now
         if channel == "email":
             lead.allow_email = False          # an email opt-out of record
@@ -615,16 +615,36 @@ def mark(db: Session, resp: ProgramResponse, state: str, user: User,
     order = ["new", "opened", "responded", "active", "closed"]
     if state not in order:
         raise ValueError("unknown handling state %r" % state)
-    if order.index(state) >= order.index(resp.handling_status or "new"):
-        resp.handling_status = state
-    if state in ("opened", "responded", "active", "closed") and not resp.opened_at:
-        resp.opened_at, resp.opened_by = now, user.id
-    if state in ("responded", "active", "closed") and not resp.responded_at:
-        resp.responded_at = now
-    if state in ("active", "closed") and not resp.active_at:
-        resp.active_at = now
-    if state == "closed":
-        resp.closed_at = now
+
+    def _apply(r):
+        if order.index(state) >= order.index(r.handling_status or "new"):
+            r.handling_status = state
+        if state in ("opened", "responded", "active", "closed") and not r.opened_at:
+            r.opened_at, r.opened_by = now, user.id
+        if state in ("responded", "active", "closed") and not r.responded_at:
+            r.responded_at = now
+        if state in ("active", "closed") and not r.active_at:
+            r.active_at = now
+        if state == "closed":
+            r.closed_at = now
+
+    _apply(resp)
+    if state in ("responded", "closed"):
+        # Answering / closing a family's newest reply answers their EARLIER
+        # open replies too - they must not come back in the inbox or be paged
+        # "past SLA". Never moved backwards; same actor stamps.
+        q = db.query(ProgramResponse).filter(ProgramResponse.organization_id == resp.organization_id,
+                                             ProgramResponse.lead_id == resp.lead_id,
+                                             ProgramResponse.id != resp.id,
+                                             ProgramResponse.handling_status != "closed")
+        if resp.received_at is not None:
+            q = q.filter(ProgramResponse.received_at <= resp.received_at)
+        for older in q.all():
+            # Dismissing an auto-reply or a bare "ok" never settles an earlier
+            # HOT question: only an answer sent, or closing a HOT reply, does.
+            if state == "closed" and older.response_class == HOT and resp.response_class != HOT:
+                continue
+            _apply(older)
     db.commit()
     return resp
 

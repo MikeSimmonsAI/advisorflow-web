@@ -179,7 +179,7 @@ export default function Command() {
     const state = a === 'close' || a === 'dismiss' ? 'closed' : 'opened'
     try {
       await api.post(`/program/responses/${item.response_id}/mark`, { state })
-      setToast(a === 'snooze' ? 'Snoozed - it stays in the list as handled.' : 'Closed.')
+      setToast(a === 'snooze' ? 'Marked as opened.' : 'Closed.')
       load()
     } catch (e) { setToast(e.message || 'Could not update.') }
   }
@@ -424,7 +424,7 @@ function SectionHead({ title, onAll }) {
 
 const ACT = {
   reply: ['reply', 'Reply', true], call: ['call', 'Call'], schedule: ['cal', 'Schedule'], note: ['note', 'Note'],
-  close: ['check', 'Close'], snooze: ['clock', 'Snooze'], review: ['note', 'Review', true], dismiss: ['x', 'Dismiss'],
+  close: ['check', 'Close'], snooze: ['clock', 'Mark opened'], review: ['note', 'Review', true], dismiss: ['x', 'Dismiss'],
 }
 
 function Inbox({ items, act, open, empty, selected }) {
