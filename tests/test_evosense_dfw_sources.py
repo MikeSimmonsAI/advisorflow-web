@@ -298,7 +298,7 @@ def test_tax_roll_reads_only_real_delinquency_and_excludes_what_the_tax_office_s
     sig = {s["type"]: s for s in r["signals"]}
     assert "prior-year taxes due $1,250.40" in sig["TAX_DELINQUENT"]["value"]
     assert "TAX_SUIT" in sig
-    assert r["_raw"] == dfw_files["lines"][0] and r["_adapter_version"] == "tarrant_tax_roll/2"
+    assert r["_raw"] == dfw_files["lines"][0] and r["_adapter_version"] == "tarrant_tax_roll/3"
     # a current-year-only delinquency is dated by the roll's own delinquency date
     cur = {s["type"]: s for s in res["records"][1]["signals"]}["TAX_DELINQUENT"]
     assert cur["effective_at"] == "%d-02-01" % TODAY.year
@@ -417,7 +417,7 @@ def test_pilot_discovers_joins_and_scores_real_shaped_records(client, db_session
     t = obs["tarrant_tax_roll"]
     assert t.raw_payload == dfw_files["lines"][0]
     assert t.content_hash == hashlib.sha256(t.raw_payload.encode()).hexdigest()
-    assert t.adapter_version == "tarrant_tax_roll/2" and t.processing_status == "ingested"
+    assert t.adapter_version == "tarrant_tax_roll/3" and t.processing_status == "ingested"
     assert t.source_url
 
     # the two spellings of the same owner are one owner, not a conflict
