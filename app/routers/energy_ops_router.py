@@ -806,3 +806,42 @@ def add_move_task(move_id: str, payload: MoveTask, request: Request,
     db.commit()
     return {"id": t.id, "title": t.title, "status": t.status, "due_at": _iso(t.due_at),
             "lead_id": t.lead_id}
+
+
+# ── SUPPLIERS: what each can really do, and the advisor's manual hand-off ────
+# Ported from PR #116 (dd73a038) without its Chariot enrollment endpoints,
+# which are Phase 2 and stay off. Nothing here contacts a supplier.
+
+class HandoffIn(BaseModel):
+    supplier: str = Field(..., max_length=40)
+    note: str = Field("", max_length=500)
+    follow_up_days: int = Field(2, ge=0, le=30)
+
+
+@router.get("/suppliers")
+def supplier_catalog(user: User = Depends(require_tenant_user)):
+    from app.services import energy_suppliers
+    return {"suppliers": energy_suppliers.catalog()}
+
+
+@router.post("/leads/{lead_id}/handoff", dependencies=[Depends(require_not_observation)])
+def supplier_handoff(lead_id: str, body: HandoffIn, request: Request,
+                     db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Record a hand-off to a supplier and open a follow-up task. Sends nothing."""
+    from app.services import energy_suppliers
+    # Same scope rule as every lead route: this workspace, and an advisor only
+    # their own customers. Another tenant's id is a 404.
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    if body.supplier == "chariot":
+        why = energy_suppliers.residential_only_refusal(lead)
+        if why:
+            raise HTTPException(409, why)
+    try:
+        out = energy_suppliers.record_handoff(db, lead=lead, actor_user_id=user.id,
+                                              supplier=body.supplier, note=body.note,
+                                              follow_up_days=body.follow_up_days)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    log_action(db, lead.organization_id, user.id, action="energy.supplier_handoff",
+               target_type="lead", target_id=lead.id, details={"supplier": body.supplier})
+    return out
