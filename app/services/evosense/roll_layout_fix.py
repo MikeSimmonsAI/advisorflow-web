@@ -539,9 +539,10 @@ def apply(db, org_id: str, *, confirm: str, user=None) -> Dict[str, Any]:
     # old plan over repaired rows.
     targets = (db.query(EvoSenseObservation)
                .filter(EvoSenseObservation.id.in_([o.id for o in affected_observations(db, org_id)] or ["-"]))
-               .with_for_update().all())
+               .order_by(EvoSenseObservation.id).with_for_update().all())      # one lock order: no deadlock
     db.query(EvoSenseProperty.id).filter(
-        EvoSenseProperty.id.in_([o.property_id for o in targets] or ["-"])).with_for_update().all()
+        EvoSenseProperty.id.in_([o.property_id for o in targets] or ["-"])).order_by(
+        EvoSenseProperty.id).with_for_update().all()
     db.expire_all()
     if _hunt_running(db, org_id):
         raise ValueError("A hunt is running. Apply the repair when it has finished.")
