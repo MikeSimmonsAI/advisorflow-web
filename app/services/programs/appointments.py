@@ -148,9 +148,11 @@ def _opted_out(db: Session, lead) -> bool:
     if (getattr(lead, "status", None) or "").lower() in ("dnc", "opted_out", "unsubscribed"):
         return True
     try:
-        from app.services import sms_programs, wholesale_sms
-        phone = wholesale_sms.normalize_e164(getattr(lead, "phone", None))
-        return bool(phone) and phone in sms_programs.opted_out_numbers(db, lead.organization_id)
+        from app.services import sms_programs
+        digits = lambda v: "".join(ch for ch in str(v or "") if ch.isdigit())[-10:]   # noqa: E731
+        phone = digits(getattr(lead, "phone", None))
+        # Stored as +1..., 1... or 10 digits depending on the writer: compare the number itself.
+        return bool(phone) and phone in {digits(x) for x in sms_programs.opted_out_numbers(db, lead.organization_id)}
     except Exception:                                    # noqa: BLE001
         return False
 
