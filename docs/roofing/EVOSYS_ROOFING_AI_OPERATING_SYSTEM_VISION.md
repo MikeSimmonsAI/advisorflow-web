@@ -1,4 +1,4 @@
-> **DESIGN HOLD — OWNER APPROVAL REQUIRED (2026-10-20):** This document is a draft direction, NOT permission to implement, redesign, merge, or deploy. ChatGPT will create revised visual mockups for the owner to inspect. Do not implement this redesign until the owner expressly approves those mockups and issues a new build authorization. Existing roofing work should not be overwritten or redirected based solely on this document.
+> **APPROVED AND RELEASED (2026-10-20):** Owner explicitly authorized the Roofing program release in ChatGPT. The existing AI Mission Control build was merged in PR #262 and deployed at commit `e97e528b`. No further mockup approval is required for that release. Production feature activation remains a separate audited GOD MODE setup action; outbound messaging stays off until configured.
 
 # EvoSys Pro Roofing — AI Operations System (Design Handoff)
 **Date:** October 20, 2026  
