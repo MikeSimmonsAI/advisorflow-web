@@ -559,6 +559,9 @@ def _move_row(m: EnergyMoveRequest, names, now=None):
     checklist = json.loads(m.checklist) if m.checklist else []
     services = json.loads(m.services) if m.services else []
     done = sum(1 for i in checklist if i.get("done"))
+    pending = [i.get("label") for i in checklist if not i.get("done")]
+    today = (now or datetime.utcnow()).date()
+    is_open = m.status in OPEN_MOVE_STATUSES
     return {"id": m.id, "lead_id": m.lead_id, "org_contact_id": m.org_contact_id,
             "contact_name": m.contact_name,
             "move_date": iso_utc(m.move_date),
@@ -569,6 +572,9 @@ def _move_row(m: EnergyMoveRequest, names, now=None):
             "owner": names.get(m.assigned_to_id), "notes": m.notes,
             "created_at": _iso(m.created_at), "updated_at": _iso(m.updated_at),
             "completed_at": _iso(m.completed_at),
+            "pending_items": pending if is_open else [],
+            "next_action": (pending[0] if pending else "Mark the move completed") if is_open else None,
+            "overdue": bool(is_open and m.move_date and m.move_date < today and pending),
             "lead_link": f"/leads/{m.lead_id}" if m.lead_id else None,
             "contact_link": f"/contacts/{m.org_contact_id}" if m.org_contact_id else None}
 
@@ -601,6 +607,9 @@ def list_moves(request: Request, status: Optional[str] = Query(None),
         EnergyMoveRequest.move_date <= today + timedelta(days=14)).count()
     summary["no_move_date"] = base.filter(EnergyMoveRequest.status.in_(OPEN_MOVE_STATUSES),
                                           EnergyMoveRequest.move_date.is_(None)).count()
+    summary["past_move_date"] = base.filter(EnergyMoveRequest.status.in_(OPEN_MOVE_STATUSES),
+                                            EnergyMoveRequest.move_date.isnot(None),
+                                            EnergyMoveRequest.move_date < today).count()
     q = base
     if status == "open":
         q = q.filter(EnergyMoveRequest.status.in_(OPEN_MOVE_STATUSES))
@@ -715,9 +724,28 @@ def update_move(move_id: str, payload: MoveUpdate, request: Request,
         if payload.status not in MOVE_STATUSES:
             raise HTTPException(400, detail={"message": "Unknown status",
                                              "valid_statuses": list(MOVE_STATUSES)})
+        if payload.status == "completed":
+            pending = [i.get("label") for i in (json.loads(m.checklist) if m.checklist else [])
+                       if not i.get("done")]
+            if pending:
+                # An arranged service is not an active one: "completed" needs
+                # every item ticked, including "Confirm with customer that
+                # services are active".
+                raise HTTPException(409, detail={"message": "Tick every checklist item before completing this move.",
+                                                 "pending": pending})
         changed["status"] = {"from": m.status, "to": payload.status}
         m.status = payload.status
         m.completed_at = _now() if payload.status == "completed" else None
+        if payload.status == "cancelled" and m.lead_id:
+            n = 0
+            for t in (db.query(LeadTask).filter(LeadTask.organization_id == m.organization_id,
+                                                LeadTask.lead_id == m.lead_id,
+                                                LeadTask.source == "move_concierge",
+                                                LeadTask.status == "open").all()):
+                t.status = "cancelled"
+                t.completed_at = _now()
+                n += 1
+            changed["tasks_cancelled"] = n
     for f in ("move_date", "from_address", "to_address", "notes"):
         if f in sent and getattr(payload, f) != getattr(m, f):
             changed[f] = True
@@ -750,6 +778,15 @@ def update_move(move_id: str, payload: MoveUpdate, request: Request,
                 raise HTTPException(403, "Only a workspace manager can unassign.")
             changed["assigned"] = {"from": m.assigned_to_id, "to": None}
             m.assigned_to_id = None
+    tasks_to_review = []
+    if "move_date" in changed and m.move_date and m.lead_id:
+        cutoff = datetime(m.move_date.year, m.move_date.month, m.move_date.day) + timedelta(days=1)
+        tasks_to_review = [{"id": t.id, "title": t.title, "due_at": _iso(t.due_at)} for t in (
+            db.query(LeadTask).filter(LeadTask.organization_id == m.organization_id,
+                                      LeadTask.lead_id == m.lead_id,
+                                      LeadTask.source == "move_concierge",
+                                      LeadTask.status == "open", LeadTask.due_at.isnot(None),
+                                      LeadTask.due_at >= cutoff).all())]
     if changed:
         log_action(db, m.organization_id, user.id, action="move_request.updated",
                    target_type="move_request", target_id=m.id,
@@ -760,6 +797,9 @@ def update_move(move_id: str, payload: MoveUpdate, request: Request,
     db.refresh(m)
     out = _move_row(m, _user_names(db, [m.assigned_to_id]))
     out["changed"] = sorted(changed)
+    out["tasks_cancelled"] = changed.get("tasks_cancelled", 0)
+    # Tasks dated after the (new) move date - the advisor decides what to do.
+    out["tasks_to_review"] = tasks_to_review
     return out
 
 
