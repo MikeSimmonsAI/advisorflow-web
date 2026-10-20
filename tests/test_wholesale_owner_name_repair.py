@@ -96,7 +96,8 @@ def test_apply_needs_the_code_changes_only_names_and_lifts_the_lookup_hold(
     assert client.post("/wholesale/evosense/owner-names/apply", headers=admin_auth_headers,
                        json={"confirm": "APPLY wrong"}).status_code == 422
     r = client.post("/wholesale/evosense/owner-names/apply", headers=admin_auth_headers, json={"confirm": code})
-    assert r.status_code == 200, r.text and r.json()["applied"] == 1
+    assert r.status_code == 200, r.text
+    assert r.json()["applied"] == 1
     db.expire_all()
     o = _owner(db, cases["safe"])
     assert o.display_name == "ROBIN & PAT ETAL SAMPLE" and not o.name_truncated
