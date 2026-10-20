@@ -293,19 +293,48 @@ def same_owner_other_spelling(db, org_id: str, prop, name: str, mk: str) -> Opti
     return None
 
 
+_CUT_NOISE = {"AND", "ETAL", "ET", "AL", "THE", "OF"}
+_OPTIONAL = {"JR", "SR", "II", "III", "IV", "EST", "ESTATE"}
+
+
 def completes_cut_name(cut: Optional[str], full: Optional[str]) -> bool:
     """Is `full` the whole of the name a source cut at its field width?
-    Every word of the cut name is in the full name, except the last, which may
-    itself be cut ("BURNETTE P" -> "PATTIE"). "SAMPLE ROBIN AND SAMPLE P" is
-    completed by "ROBIN & PAT ETAL SAMPLE"; it is NOT completed by "SAMPLE
-    JOHN" (a relative at the same address is a different owner)."""
-    noise = {"AND", "ETAL", "ET", "AL", "THE", "OF"}
-    words = [w for w in re.sub(r"[^A-Z0-9 ]", " ", (cut or "").upper()).split() if w not in noise]
-    have = {w for w in re.sub(r"[^A-Z0-9 ]", " ", (full or "").upper()).split() if w not in noise}
-    if not words or not have:
+
+    The cut name is read person by person ("SAMPLE ROBIN AND SAMPLE P" = two
+    people). For each person the surname and first name must be in the full
+    name; a middle name, an initial or a suffix may be missing (appraisal
+    districts often drop them: "VIGIL SABINO SR AND VIGIL MARG" is completed
+    by "SABINO & MARGARIT VIGIL"). The very last word may itself be cut and
+    only has to begin a word of the full name ("P" -> "PATTIE").
+    "SAMPLE ROBIN AND SAMPLE P" is NOT completed by "SAMPLE JOHN" (a
+    relative at the same address is a different owner)."""
+    up = re.sub(r"[^A-Z0-9& ]", " ", (cut or "").upper())
+    have = {w for w in re.sub(r"[^A-Z0-9 ]", " ", (full or "").upper()).split() if w not in _CUT_NOISE}
+    people = [p.split() for p in re.split(r"\s(?:AND|&)\s", " %s " % up) if p.strip()]
+    # "... ZARAGOZA ETAL", "... LEOBARDO ETA": a trailing ET AL (whole or cut)
+    # says "and others" - it is not a word of anybody's name.
+    while people and people[-1] and (people[-1][-1] in _CUT_NOISE or
+                                     (len(people[-1]) > 2 and people[-1][-1] in ("ET", "ETA"))):
+        people[-1] = people[-1][:-1]
+    people = [p for p in people if p]
+    if not people or not have:
         return False
-    *whole, last = words
-    return all(w in have for w in whole) and any(h.startswith(last) for h in have)
+    last_word = people[-1][-1]
+    if not any(h.startswith(last_word) for h in have):
+        # A middle initial at the very end ("WHITE THOMAS E") may be missing
+        # from the full name - but only when that person's surname AND first
+        # name are both already confirmed. "SAMPLE P" alone must match.
+        rest = [w for w in people[-1][:-1] if w not in _CUT_NOISE and len(w) > 1 and w not in _OPTIONAL]
+        if not (len(last_word) == 1 and len(rest) >= 2 and all(w in have for w in rest[:2])):
+            return False
+    for i, words in enumerate(people):
+        words = [w for w in words if w not in _CUT_NOISE]
+        if i == len(people) - 1:
+            words = words[:-1]                     # the possibly-cut last word, checked above
+        key = [w for w in words if len(w) > 1 and w not in _OPTIONAL][:2]
+        if not all(w in have for w in key):
+            return False
+    return True
 
 
 def _persons_for(name: str, otype: str):

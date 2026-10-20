@@ -44,29 +44,78 @@ SAFE, AMBIGUOUS, UNRECOVERABLE = "safe", "ambiguous", "unrecoverable"
 FIELDS = ("display_name", "name_key", "name_truncated", "owner_type", "review_flags")
 
 
-def _owner_records(db, org_id: str, property_ids: List[str]) -> List[Dict[str, Any]]:
+def _owner_records(db, org_id: str, property_ids: List[str], own_obs=()) -> List[Dict[str, Any]]:
     """Every owner block any source recorded for these properties."""
     out = []
     for o in (db.query(EvoSenseObservation)
               .filter(EvoSenseObservation.organization_id == org_id,
                       EvoSenseObservation.property_id.in_(property_ids or ["-"])).all()):
-        rec = C.jload(o.payload, {}) or {}
+        again = reread(o)
+        rec = again or C.jload(o.payload, {}) or {}
         own = rec.get("owner") or {}
         if own.get("name"):
             out.append({"name": own["name"].strip(), "truncated": bool(own.get("name_truncated")),
                         "mailing_key": mailing_key(own.get("mailing_street"), own.get("mailing_zip")),
+                        "street_key": street_key(own.get("mailing_street")),
+                        # the very record that named this owner
+                        "own": o.id in own_obs, "reread": again is not None,
                         "source": o.provider_key, "reference": o.source_reference,
                         "observed_at": o.observed_at.isoformat() + "Z" if o.observed_at else None})
     return out
 
 
+def reread(obs) -> Optional[Dict[str, Any]]:
+    """A tax-roll observation is read again from its saved raw line with the
+    CURRENT reader: lines saved Oct 17-19, 2026 were stored under the wrong
+    column layout (cut names, missing mailing ZIP), and the raw line is the
+    truth. Anything else uses what was stored."""
+    if obs.provider_key != "tarrant_tax_roll" or not obs.raw_payload:
+        return None
+    try:
+        from app.services.evosense.sources.tarrant import TarrantTaxRollReader
+        return TarrantTaxRollReader().record_from_raw(obs.raw_payload, obs.source_url or "",
+                                                      obs.source_updated_at)
+    except Exception:  # noqa: BLE001 - an unreadable line keeps what was stored
+        return None
+
+
+def street_key(street: Optional[str]) -> Optional[str]:
+    from app.services.evosense import identity as ID
+    s, unit = ID.normalize_street(street)
+    return "%s|%s" % (s, unit or "") if s else None
+
+
+def _same_place(owner_key: Optional[str], own_streets, r: Dict[str, Any]) -> bool:
+    """Same mailing address: the full keys when both have a ZIP; otherwise the
+    normalized street with house number (and unit) must be identical."""
+    if owner_key and r.get("mailing_key"):
+        return r["mailing_key"] == owner_key
+    return bool(r.get("street_key")) and r["street_key"] in own_streets
+
+
 def classify(owner: EvoSenseOwner, records: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Pure: one cut owner + the owner records on file -> a verdict."""
     full = [r for r in records if not r["truncated"] and name_key(r["name"]) != owner.name_key]
+    # The very county row that named this owner, read again with the corrected
+    # layout: the same record, so the same owner - no name matching needed.
+    reread_own = sorted({r["name"] for r in full if r.get("own") and r.get("reread")})
+    if len(reread_own) == 1:
+        best = [r for r in full if r.get("own") and r["name"] == reread_own[0]]
+        return {"verdict": SAFE, "proposed": reread_own[0], "evidence": best,
+                "reason": "The same county record (%s) read again with the corrected column layout."
+                          % best[0]["source"]}
     if not full:
         return {"verdict": UNRECOVERABLE, "reason": "No record on file carries this owner's full name.",
                 "proposed": None, "evidence": []}
-    same_place = [r for r in full if owner.mailing_key and r["mailing_key"] == owner.mailing_key]
+    # Same mailing address. The owner's own key may lack a ZIP (the misread
+    # tax-roll lines); then the street of the owner's own records must match
+    # exactly - house number and street, normalized.
+    own_streets = {r.get("street_key") for r in records
+                   if r.get("street_key") and (r.get("own") or name_key(r["name"]) == owner.name_key)}
+    if owner.mailing_key:
+        parts = owner.mailing_key.split("|")
+        own_streets.add("%s|%s" % (parts[0], parts[1] if len(parts) > 1 else ""))
+    same_place = [r for r in full if r.get("own") or _same_place(owner.mailing_key, own_streets, r)]
     completing = [r for r in same_place if completes_cut_name(owner.display_name, r["name"])]
     names = sorted({name_key(r["name"]) for r in completing})
     if len(names) == 1:
@@ -101,12 +150,13 @@ def preview(db, org_id: str, *, include_test: bool = False) -> Dict[str, Any]:
         q = q.filter(EvoSenseOwner.is_test.is_(False))
     rows = []
     for o in q.all():
-        pids = [l.property_id for l in db.query(EvoSenseOwnership.property_id)
-                .filter(EvoSenseOwnership.organization_id == org_id, EvoSenseOwnership.owner_id == o.id,
-                        EvoSenseOwnership.is_current.is_(True)).all()]
+        links = (db.query(EvoSenseOwnership.property_id, EvoSenseOwnership.observation_id)
+                 .filter(EvoSenseOwnership.organization_id == org_id, EvoSenseOwnership.owner_id == o.id,
+                         EvoSenseOwnership.is_current.is_(True)).all())
+        pids = [l.property_id for l in links]
         if not pids:
             continue
-        v = classify(o, _owner_records(db, org_id, pids))
+        v = classify(o, _owner_records(db, org_id, pids, {l.observation_id for l in links if l.observation_id}))
         addr = [p.street_address for p in db.query(EvoSenseProperty.street_address)
                 .filter(EvoSenseProperty.id.in_(pids)).all() if p.street_address]
         rows.append({"owner_id": o.id, "old_name": o.display_name, "proposed": v["proposed"],

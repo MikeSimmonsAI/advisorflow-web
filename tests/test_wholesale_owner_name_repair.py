@@ -145,3 +145,46 @@ def test_plan_is_bound_to_its_workspace_and_its_code(db_session, sample_org, cas
 def test_a_plain_advisor_cannot_apply(client, db_session, sample_org, cases, auth_headers):
     r = client.post("/wholesale/evosense/owner-names/apply", headers=auth_headers, json={"confirm": "APPLY x"})
     assert r.status_code == 403
+
+
+@pytest.mark.parametrize("cut,full,same", [
+    ("SAMPLE ROBIN AND SAMPLE P", "ROBIN & PAT ETAL SAMPLE", True),
+    ("VIGIL SABINO SR AND VIGIL MARG", "SABINO & MARGARIT VIGIL", True),     # suffix dropped
+    ("GRISHAM LINDA M AND GRISHAM JE", "LINDA & JEFF GRISHAM", True),       # initial dropped
+    ("OLIVER JOHN ROSS AND OLIVER FR", "JOHN & FRANCIE OLIVER", True),      # middle name dropped
+    ("WHITE LYDIA AND WHITE THOMAS E", "LYDIA & THOMAS WHITE", True),       # trailing initial
+    ("PULIDO ALEJANDRO ZARAGOZA ETAL", "PULIDO ALEJANDRO ZARAGOZA and QUINTERO SANDRA", True),
+    ("GONZALEZ-ENRIQUEZ LEOBARDO ETA", "GONZALEZ-ENRIQUEZ LEOBARDO and KOBEL YESICA", True),
+    # different people stay different
+    ("SAMPLE ROBIN AND SAMPLE P", "SAMPLE JOHN", False),
+    ("SAMPLE ROBIN AND SAMPLE P", "ROBIN & JOHN SAMPLE", False),           # P is not JOHN
+    ("DOE MARY AND DOE J", "DOE JOHN", False),
+    ("GARCIA MARIA", "LOPEZ MARIA", False),
+    ("MAROOF JACQUELINE E EST THE JACQUELINE E MAROOF REV TR", "MAROOF JACQUELINE E EST", False),
+])
+def test_completion_rule(cut, full, same):
+    assert IN.completes_cut_name(cut, full) is same
+
+
+def test_a_misread_tax_roll_owner_is_completed_from_its_own_raw_line(db_session, sample_org):
+    """Owners created Oct 17-19 from tax-roll lines read under the wrong
+    layout: the preview re-reads the saved raw line with the current reader
+    and uses the full name the county actually published."""
+    from tests.test_evosense_tarrant_roll_layout import ROLL_DATE, v2_line
+    from app.services.evosense.sources import tarrant as TT
+    db, org = db_session, sample_org.id
+    full = "PRESTON HOYLE GILLHAM AND LETHA DIANNE PIRKLE"
+    line = v2_line(account="555001", owner1=full, prior_due="000000900.00")
+    old = {k: line[a - 1:a - 1 + n].strip() for k, a, n in TT.MASTER}      # the misread
+    old["litig"] = ""
+    rec = TT.TarrantTaxRollReader().record(old, TT.classify(old, ROLL_DATE), line, "x", ROLL_DATE)
+    rec["street_address"] = "2914 MC KINLEY AVE"
+    rec["owner"]["name_truncated"] = True                                     # as stored in production
+    IN.ingest(db, org, PV.PROVIDERS["tarrant_tax_roll"], "TAX", rec)
+    db.commit()
+    prop = db.query(EvoSenseProperty).filter_by(organization_id=org, parcel_apn="555001").one()
+    cut = _owner(db, prop)
+    assert cut.name_truncated and cut.display_name != full
+    pv = ON.preview(db, org)
+    row = [r for r in pv["rows"] if r["owner_id"] == cut.id][0]
+    assert row["verdict"] == "safe" and row["proposed"] == full, row
