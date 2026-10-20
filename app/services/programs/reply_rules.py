@@ -126,6 +126,14 @@ _CLASS_FROM_REPLY = {
 }
 
 
+def _hard_stop(body: str) -> bool:
+    try:
+        from app.services.optout_parser import contains_hard_stop_language
+        return bool(contains_hard_stop_language(body or ""))
+    except Exception:                                    # noqa: BLE001
+        return False
+
+
 def classify(body: str, reply_classification: Optional[str] = None) -> Dict:
     """Deterministic and explainable. A stated need beats a stray keyword."""
     text = (body or "").strip().lower()
@@ -134,6 +142,11 @@ def classify(body: str, reply_classification: Optional[str] = None) -> Dict:
         hot.insert(1 if hot and hot[0] == "wants a meeting or visit" else 0, _TIME_PICK_WHY)
     bereaved = bool(re.search(_BEREAVEMENT, text))
     if re.search(_STOP_WORDS, text):
+        return {"class": OPT_OUT, "reasons": ["asked to stop"]}
+    # The platform's own stop decision is final: a family who opted out is
+    # never paged as hot because the same text mentions a visit or a price
+    # ("Not interested in a visit, stop texting me.").
+    if (reply_classification or "").lower() == "dnc" or _hard_stop(body):
         return {"class": OPT_OUT, "reasons": ["asked to stop"]}
     if is_auto_reply(text) and not re.search(_OPT_OUT_PHRASES, text):
         return {"class": AUTO_REPLY, "reasons": ["automatic reply (driving / away), not a person"]}

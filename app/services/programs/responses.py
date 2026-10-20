@@ -497,6 +497,12 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
             from datetime import timezone as _tz
             st.completed_at = datetime.now(_tz.utc)
         resp.closed_at = now
+        # Their earlier HOT replies are over too: no "still waiting" reminder
+        # for a family who has since said stop.
+        for old in (db.query(ProgramResponse).filter(ProgramResponse.organization_id == lead.organization_id,
+                                                     ProgramResponse.lead_id == lead.id,
+                                                     ProgramResponse.handling_status == "new").all()):
+            old.handling_status, old.sla_due_at, old.closed_at = "closed", None, now
         if channel == "email":
             lead.allow_email = False          # an email opt-out of record
     found = intents(body, cls)
@@ -665,6 +671,15 @@ def sla_sweep(db: Session, now: Optional[datetime] = None,
             continue
         lead = db.query(Lead).filter(Lead.id == resp.lead_id).first()
         if lead is None:
+            continue
+        from app.services.sci_staging_demo import is_demo_lead as _is_demo
+        from app.services.programs.appointments import _opted_out
+        if _is_demo(lead) or _opted_out(db, lead):
+            # A made-up demo family never pages; one who said stop is closed.
+            resp.sla_alert_count = cap
+            if not _is_demo(lead):
+                resp.handling_status, resp.sla_due_at, resp.closed_at = "closed", None, now
+            db.commit()
             continue
         # The AI is still talking with this family (offered times, waiting on
         # their answer, booked): nobody is "not answering" them - no reminder.

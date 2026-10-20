@@ -204,7 +204,7 @@ def book(db: Session, prog, lead, slot: datetime, kind: str, *, family_text: boo
                         BookingLink.booked_time >= _today_central().replace(tzinfo=None)).first())
     if existing is not None and existing.booked_time:
         same = existing.booked_time.replace(tzinfo=None) == slot
-        return {"ok": same, "status": "confirmed" if same else "already_booked",
+        return {"ok": same, "status": "confirmed" if same else "already_booked", "already": True,
                 "booking_id": existing.id, "booked_time": existing.booked_time.isoformat()}
     if not still_free(db, prog, slot, kind):
         return {"ok": False, "status": "taken", "reason": "that time is no longer open"}
@@ -217,7 +217,7 @@ def book(db: Session, prog, lead, slot: datetime, kind: str, *, family_text: boo
                "appt_label": ("TEST - owner live test, safe to delete" if owner_test
                               else LABELS.get(kind, LABELS[VISIT])),
                "lead_name": ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip(),
-               "lead_phone": lead.phone or "", "duration_minutes": minutes_for(kind),
+               "lead_phone": lead.phone or "", "duration_minutes": minutes_for(kind), "from_setter": True,
                # Booked from an email conversation: the confirmation goes back by
                # email to the writer, not as a text to the record's phone.
                "skip_family_text": not family_text}

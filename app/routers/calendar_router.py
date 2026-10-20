@@ -317,6 +317,7 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
     lead = None
 
     org = None
+    _prog_slot = None
     if booking:
         advisor = db.query(User).filter(User.id == booking.user_id).first()
         lead = db.query(Lead).filter(Lead.id == booking.lead_id).first()
@@ -606,7 +607,11 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
 
     # ── Send FSA SMS notification ─────────────────────────────────────────────
     sms_result = {"success": False}
-    if advisor:
+    # SCI families are paged through the program's one-alert ledger, never by
+    # the advisor's legacy text / booking email as well (a booking used to
+    # page the owner two or three times).
+    _sci = _prog_slot is not None
+    if advisor and not _sci:
         try:
             notification_phone = getattr(advisor, 'notification_phone', None) or getattr(advisor, 'twilio_phone_number', None)
             if notification_phone and advisor.twilio_account_sid and advisor.twilio_auth_token_encrypted:
@@ -643,7 +648,19 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
 
     # ── Send advisor notification email ──────────────────────────────────────
     email_result = {"success": False}
-    if advisor and lead:
+    if _sci and lead is not None and booking is not None and not body.get("from_setter"):
+        # Booked by the family on the booking page: the team hears once, the
+        # same way as a setter booking (the setter pages for its own).
+        try:
+            from app.services.test_records import is_owner_test_lead
+            from app.services.programs.identity import program_for_org
+            from app.services.programs import appointments as _A
+            _prog = program_for_org(db, lead.organization_id)
+            if _prog is not None and not is_owner_test_lead(lead):
+                _A.notify_team_booked(db, _prog, lead, _prog_slot, _A.VISIT)
+        except Exception as e:                           # noqa: BLE001
+            logger.exception("booking-confirmed: SCI team page failed: %s", e)
+    if advisor and lead and not _sci:
         try:
             _send_booking_notification_email(advisor, lead, appt_label, slot_display, db)
             email_result = {"success": True}
