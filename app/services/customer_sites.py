@@ -372,6 +372,8 @@ def record_inquiry(db: Session, *, site: CustomerSite, organization: Organizatio
         if lead is not None and not lead.assigned_to_id:
             lead.assigned_to_id = site.default_owner_user_id
 
+    _flag_reserved_test_address(db, result=result, organization=organization, payload=payload)
+
     # Energy workspaces: queue, follow-up task, move record, in-app alert.
     # Best effort; never sends anything (see energy_site_intake).
     from app.services import energy_site_intake
@@ -381,3 +383,52 @@ def record_inquiry(db: Session, *, site: CustomerSite, organization: Organizatio
     if commit:
         db.commit()
     return result
+
+
+# RESERVED TEST ADDRESSES (RFC 2606 / RFC 6761). Nobody can own an address at
+# these domains, so a website request from one is a person testing the page -
+# a release check, a QA run, a demo. It is filed exactly like any other
+# request (so the whole path is still exercised) but flagged Lead.is_test,
+# which test_records.py already keeps out of every outreach path and every
+# performance report. Only a NEWLY created lead is flagged: an existing real
+# person who mistypes an address is never turned into a test record.
+_RESERVED_DOMAINS = ("example.com", "example.net", "example.org")
+_RESERVED_TLDS = (".test", ".example", ".invalid", ".localhost")
+
+
+def is_reserved_test_email(email) -> bool:
+    e = str(email or "").strip().lower()
+    if "@" not in e:
+        return False
+    domain = e.rsplit("@", 1)[1].rstrip(".")
+    return (domain in _RESERVED_DOMAINS
+            or any(domain.endswith("." + d) for d in _RESERVED_DOMAINS)
+            or any(domain.endswith(t) for t in _RESERVED_TLDS))
+
+
+def _flag_reserved_test_address(db: Session, *, result: Dict[str, Any],
+                                organization: Organization, payload: Dict[str, Any]) -> None:
+    if not result.get("lead_id"):
+        return
+    from app.models.models import Lead
+    reserved = is_reserved_test_email(payload.get("email"))
+    if result.get("action") == "created":
+        if not reserved:
+            return
+        lead = db.query(Lead).filter(Lead.id == result["lead_id"],
+                                     Lead.organization_id == organization.id).first()
+        if lead is not None:
+            lead.is_test = True
+            lead.test_note = lead.test_note or "Website request from a reserved test address"
+            result["is_test"] = True
+        return
+    # A record first created by a test address that now hears from a real
+    # address is a real person: stop hiding it from follow-up and reports.
+    if reserved or not (payload.get("email") or "").strip():
+        return
+    lead = db.query(Lead).filter(Lead.id == result["lead_id"],
+                                 Lead.organization_id == organization.id).first()
+    if lead is not None and lead.is_test and (lead.test_note or "").startswith("Website request from a reserved test address"):
+        lead.is_test = False
+        lead.test_note = "Test flag cleared: later website request from a real address"
+        result["is_test_cleared"] = True
