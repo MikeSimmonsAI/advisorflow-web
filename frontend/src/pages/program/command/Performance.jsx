@@ -60,7 +60,7 @@ const HERO = [
   ['new_families', 'New families', 'first touch in this period'],
   ['followup_families', 'Existing families', 'followed up (2nd+ touch)'],
   ['attempts', 'Outreach attempts', 'texts + emails tried'],
-  ['delivered', 'Delivered', 'confirmed by carrier / mail'],
+  ['delivered', 'Completed touches', 'confirmed delivered by carrier / mail'],
   ['replies', 'Replies', 'genuine family replies'],
   ['offers', 'Times offered', 'two real calendar times'],
   ['appointments', 'Appointments', 'confirmed on the calendar'],
@@ -127,6 +127,16 @@ export function PerformanceHome({ range, setRange, loc, setLoc, openMetric }) {
         </section>
       </div>
 
+      <div className="pf-grid">
+        <section className="cmd-card pf-card">
+          <h3>Touch progression <small>Attempts vs completed deliveries</small></h3>
+          <TouchProgression rows={d.touches || []} open={open} />
+        </section>
+        <section className="cmd-card pf-card">
+          <h3>Family engagement <small>Every reply counts, including declines</small></h3>
+          <EngagementOutcomes m={m} open={open} />
+        </section>
+      </div>
       <section className="cmd-card pf-card">
         <h3>Touch analytics <small>tap any number for the records</small></h3>
         <TouchTable rows={d.touches} open={open} />
@@ -166,6 +176,42 @@ export function PerformanceHome({ range, setRange, loc, setLoc, openMetric }) {
   </>
 }
 
+/* Touches and engagement are separate measures: an outreach attempt is not
+ * necessarily a completed delivery, and opting out is still a real response.
+ * Every plotted value is sourced from the server's exact analytics counters. */
+function TouchProgression({ rows, open }) {
+  if (!rows.length) return <p className="cmd-muted">No touch data in this period.</p>
+  const max = Math.max(1, ...rows.map(r => Number(r.attempts) || 0))
+  const label = t => t === '4+' ? '4th+ touch' : `${t}${({1:'st', 2:'nd', 3:'rd'})[t] || 'th'} touch`
+  return <div className="pf-activity-bars">
+    <div className="pf-activity-legend"><span className="attempt">Attempts</span><span className="complete">Completed deliveries</span></div>
+    {rows.map(r => <button type="button" key={r.touch} className="pf-activity-row"
+      onClick={() => open('delivered', { touch: r.touch })} title="Open delivered records for this touch">
+      <span className="pf-activity-label">{label(r.touch)}</span>
+      <span className="pf-activity-track">
+        <i className="pf-attempt-bar" style={{ width: `${(100 * (Number(r.attempts) || 0)) / max}%` }} />
+        <i className="pf-delivered-bar" style={{ width: `${(100 * Math.min(Number(r.delivered) || 0, Number(r.attempts) || 0)) / max}%` }} />
+      </span>
+      <span className="pf-activity-values"><b>{n(r.delivered)}</b><small> / {n(r.attempts)}</small></span>
+    </button>)}
+    <p className="pf-note">A completed touch means delivered—not merely scheduled or attempted. Select a row to review its records.</p>
+  </div>
+}
+function EngagementOutcomes({ m, open }) {
+  const keys = [['replies','Family replies'], ['opt_outs','Opt-outs'], ['offers','Times offered'], ['appointments','Booked appointments']]
+  const vals = keys.map(([key, title]) => ({key,title,value:m[key]?.value ?? null}))
+  const max = Math.max(1, ...vals.map(x => Number(x.value) || 0))
+  return <div className="pf-activity-bars">
+    {vals.map(v => <button type="button" key={v.key} className="pf-activity-row"
+      onClick={() => open(v.key)} title={`View ${v.title.toLowerCase()} records`}>
+      <span className="pf-activity-label">{v.title}</span>
+      <span className="pf-activity-track"><i className="pf-engagement-bar"
+        style={{width:`${100 * (Number(v.value) || 0) / max}%`}} /></span>
+      <span className="pf-activity-values"><b>{n(v.value)}</b></span>
+    </button>)}
+    <p className="pf-note">A yes, no, question or opt-out all matter. Categories represent different journey events and must not be added together.</p>
+  </div>
+}
 function Funnel({ steps, open }) {
   const top = Math.max(1, steps[0]?.value || 0)
   return <div className="pf-funnel">{steps.map((s, i) => (
