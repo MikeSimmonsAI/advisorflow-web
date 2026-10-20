@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "sci-home-visit-source-proof-20261019-1920",
-  "parent_run_id": "sci-home-visit-staging-proof-20261019-1912",
-  "project": "SCI \u2014 dependency-free home-visit regression closure",
-  "status": "COMPLETED",
+  "relay_run_id": "sci-import-migration-syntax-closure-20261019-1924",
+  "parent_run_id": "sci-home-visit-source-proof-20261019-1920",
+  "project": "SCI \u2014 repair Python compile break and verify latest SCI commits",
+  "status": "APPROVAL_REQUIRED",
   "branch": "sci-program",
-  "actions_run_id": "39345069002",
-  "timestamp_ct": "2026-10-19 19:03 CT",
+  "actions_run_id": "39345424538",
+  "timestamp_ct": "2026-10-19 19:05 CT",
   "issue": 1,
-  "status_comment_id": 6280069096
+  "status_comment_id": 6280103188
 }
