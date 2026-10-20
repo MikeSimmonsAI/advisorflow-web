@@ -907,3 +907,71 @@ def supplier_handoff_list(request: Request, state: str = Query("open", pattern="
                           "lead_link": f"/rate-requests?open={l.id}"})
     items.sort(key=lambda r: r["handoff"].get("at") or "")
     return {"state": state, "total": len(items), "items": items}
+
+
+# ── QUALIFICATION: what the advisor knows, what is missing, the next step ────
+# See services/energy_qualification. No prices, no savings, no OCR.
+
+class QualificationIn(BaseModel):
+    fields: Dict[str, Any] = Field(default_factory=dict)
+    bill: Optional[Dict[str, Any]] = None
+
+
+QUALIFY_TASK_SOURCE = "qualification"
+QUALIFY_TASK_TITLE = "Get missing details"
+
+
+@router.get("/leads/{lead_id}/qualification")
+def lead_qualification(lead_id: str, request: Request, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user)):
+    from app.services import energy_qualification as eq
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    return eq.qualify(lead)
+
+
+@router.post("/leads/{lead_id}/qualification", dependencies=[Depends(require_not_observation)])
+def update_qualification(lead_id: str, body: QualificationIn, request: Request,
+                         db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Record what the advisor learned (supplier, contract end, usage, bill
+    lines typed from the customer's bill, ...). Sends nothing."""
+    from app.services import energy_qualification as eq
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    try:
+        changed = eq.apply_update(lead, body.fields, body.bill)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    if changed:
+        log_action(db, lead.organization_id, user.id, action="energy.qualification_updated",
+                   target_type="lead", target_id=lead.id, details={"fields": sorted(changed)},
+                   commit=False)
+    db.commit()
+    db.refresh(lead)
+    return eq.qualify(lead)
+
+
+@router.post("/leads/{lead_id}/qualification/request-info",
+             dependencies=[Depends(require_not_observation)])
+def request_missing_info(lead_id: str, request: Request, db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_user)):
+    """ONE open internal task listing what is still missing. Asking again
+    updates that task instead of adding another. Nothing goes to the customer."""
+    from app.services import energy_qualification as eq
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    q = eq.qualify(lead)
+    labels = [f["label"] for f in q["fields"] if f["key"] in q["missing"] and f["key"] != "owner"]
+    if not labels:
+        raise HTTPException(409, "Nothing the next step needs is missing.")
+    details = "Still needed before the next step: " + "; ".join(labels) + ". Nothing has been sent to the customer."
+    task = (db.query(LeadTask).filter(LeadTask.lead_id == lead.id, LeadTask.status == "open",
+                                      LeadTask.source == QUALIFY_TASK_SOURCE).first())
+    created = task is None
+    if created:
+        task = LeadTask(organization_id=lead.organization_id, lead_id=lead.id, title=QUALIFY_TASK_TITLE,
+                        details=details, due_at=_now() + timedelta(days=1), status="open",
+                        assigned_to_id=lead.assigned_to_id or user.id, created_by_id=user.id,
+                        source=QUALIFY_TASK_SOURCE)
+        db.add(task)
+    else:
+        task.details = details
+    db.commit()
+    return {"task_id": task.id, "created": created, "missing": labels}

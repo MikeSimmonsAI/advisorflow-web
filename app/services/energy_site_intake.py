@@ -71,7 +71,7 @@ _MOVE_SERVICES = {
     "utility support": "water",
 }
 _COPY_FIELDS = ("service_area", "monthly_usage", "locations", "move_date",
-                "services_requested", "request_type")
+                "services_requested", "request_type", "company")
 
 
 def is_energy(org) -> bool:
