@@ -286,6 +286,14 @@ def user_authorized_platform_slugs(user: User, db: Session) -> set:
 # THE AUTHORIZED CONTEXT LIST — built by the server, never by the browser
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _roofing_enabled(org) -> bool:
+    try:
+        from app.services.roofing.common import explicitly_enabled
+        return explicitly_enabled(org)
+    except Exception:  # pragma: no cover - never let a hint break login
+        return False
+
+
 def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
     """Every context this caller may enter, and where they should land.
 
@@ -411,11 +419,12 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
             "role": m.role,
             "path": "/workspace/%s" % org.id,
             "is_program": org.id in program_orgs,
-            # Presentation hint only, NOT an entitlement. The dedicated route
-            # enforces the roofing_program feature and authorized workspace.
-            # A missing feature opens an honest setup-needed gate, not SCI UI.
-            "program_route": "/program/roofing" if
-                (org.industry or "").strip().lower() == "roofing" else None,
+            # Only a workspace whose Roofing program is actually switched on
+            # (explicit `roofing_program` entitlement) opens the Roofing app.
+            # Never by industry or slug alone: a Roofing org whose program was
+            # not set up opened a dead "isn't turned on" screen on every entry
+            # (prod, 2026-10-20). /roofing-ops still enforces it server-side.
+            "program_route": "/program/roofing" if _roofing_enabled(org) else None,
         })
 
     platform = [c for c in contexts if c["type"] == "platform"]
@@ -470,9 +479,17 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
         default = executive[0]
     elif platform:
         default = platform[0]
-    elif len(workspaces) == 1 and not product_contexts:
+    elif product_contexts:
+        # A named product seat hosted by the person's OWN home organization is
+        # their home program (wholesale@ -> Wholesale). Login opens it through
+        # the verified product handoff; every other workspace they hold stays
+        # one switch away. Never a customer workspace such as SCI or Roofing.
+        p0 = product_contexts[0]
+        default = {"type": "product", "key": p0["key"], "organization_id": p0["organization_id"],
+                   "path": "/workspace/%s?product=%s" % (p0["organization_id"], p0["key"])}
+    elif len(workspaces) == 1:
         default = workspaces[0]
-    elif workspaces or product_contexts:
+    elif workspaces:
         default = {"type": "workspace_selector", "path": "/workspaces"}
     else:
         # No membership of either kind. Not an error: this is every ordinary

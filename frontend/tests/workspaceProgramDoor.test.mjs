@@ -2,10 +2,11 @@ import { workspaceProgramDestination } from '../src/auth/workspaceProgramDoor.js
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-test('internal Roofing org enters the dedicated app even before feature setup', () => {
+test('a Roofing org whose program is NOT switched on never opens the Roofing app by its name', () => {
+  // prod 2026-10-20: routing by slug sent wholesale@ to a dead "isn't turned on" screen
   assert.equal(workspaceProgramDestination({
-    type: 'workspace', organization_slug: 'evosys-pro-roofing', is_program: false,
-  }), '/program/roofing')
+    type: 'workspace', organization_slug: 'evosys-pro-roofing', is_program: false, program_route: null,
+  }), null)
 })
 test('any explicitly configured roofing-industry program uses Mission Control', () => {
   assert.equal(workspaceProgramDestination({

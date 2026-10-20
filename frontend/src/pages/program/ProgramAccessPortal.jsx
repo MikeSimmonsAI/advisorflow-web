@@ -25,10 +25,10 @@ export default function ProgramAccessPortal({ contexts, onChoose }) {
           {visible.map((item, index) => (
             <button type="button" key={item.type + ':' + item.organization_id + ':' + (item.key || '')}
                     className={'pa-card pa-card--' + (item.is_program ? 'sci' : item.key === 'wholesale' ? 'wholesale' :
-                      item.industry === 'energy' ? 'energy' : item.industry === 'roofing' || item.organization_slug === 'evosys-pro-roofing' ? 'roofing' : 'general')}
+                      item.industry === 'energy' ? 'energy' : item.program_route === '/program/roofing' ? 'roofing' : 'general')}
                     onClick={() => onChoose(item)}>
               <div className="pa-card-top">
-                <span className="pa-card-symbol" aria-hidden="true">{item.is_program ? '✦' : item.key === 'wholesale' ? '⌂' : item.industry === 'energy' ? '⚡' : item.industry === 'roofing' || item.organization_slug === 'evosys-pro-roofing' ? '⌃' : '◈'}</span>
+                <span className="pa-card-symbol" aria-hidden="true">{item.is_program ? '✦' : item.key === 'wholesale' ? '⌂' : item.industry === 'energy' ? '⚡' : item.program_route === '/program/roofing' ? '⌃' : '◈'}</span>
                 <span className="pa-arrow" aria-hidden="true">↗</span>
               </div>
               <span className="pa-card-kind">{item.kind}</span>

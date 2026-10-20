@@ -50,7 +50,7 @@ export function MobileLogin() {
         const def = ctx && ctx.default_context
         const still = priorWorkspace && (ctx?.contexts || []).some(c => c.type === 'workspace' && c.organization_id === priorWorkspace)
         if (nextPath && still) setWorkspaceContext(priorWorkspace)
-        else if (def && def.type === 'workspace' && def.organization_id) setWorkspaceContext(def.organization_id)
+        else if (def && (def.type === 'workspace' || def.type === 'product') && def.organization_id) setWorkspaceContext(def.organization_id)
         else clearWorkspaceContext()
         if (nextPath && (still || !priorWorkspace) && nextPath.startsWith('/m')) { navigate(nextPath, { replace: true }); return }
       } catch { /* the shell re-asks */ }

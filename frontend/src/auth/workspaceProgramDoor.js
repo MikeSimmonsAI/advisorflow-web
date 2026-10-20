@@ -6,12 +6,10 @@
  */
 export function workspaceProgramDestination(entry) {
   if (!entry || entry.type && entry.type !== 'workspace') return null
-  // Future roofing companies are identified by the server's industry route.
-  // The one internal provisioning workspace also needs a landing while its
-  // GOD MODE feature activation has not yet run: show the dedicated feature
-  // gate instead of misleading generic/SCI navigation.
-  if (entry.program_route === '/program/roofing' ||
-      entry.organization_slug === 'evosys-pro-roofing') return '/program/roofing'
+  // The server sets program_route ONLY for a workspace whose Roofing program
+  // is switched on. Never route by slug or name: a Roofing org that was not
+  // set up opened a dead "isn't turned on" screen on every entry.
+  if (entry.program_route === '/program/roofing') return '/program/roofing'
   if (entry.is_program) return '/program'
   return null
 }
