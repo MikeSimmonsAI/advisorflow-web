@@ -559,6 +559,9 @@ def _move_row(m: EnergyMoveRequest, names, now=None):
     checklist = json.loads(m.checklist) if m.checklist else []
     services = json.loads(m.services) if m.services else []
     done = sum(1 for i in checklist if i.get("done"))
+    pending = [i.get("label") for i in checklist if not i.get("done")]
+    today = (now or datetime.utcnow()).date()
+    is_open = m.status in OPEN_MOVE_STATUSES
     return {"id": m.id, "lead_id": m.lead_id, "org_contact_id": m.org_contact_id,
             "contact_name": m.contact_name,
             "move_date": iso_utc(m.move_date),
@@ -569,6 +572,9 @@ def _move_row(m: EnergyMoveRequest, names, now=None):
             "owner": names.get(m.assigned_to_id), "notes": m.notes,
             "created_at": _iso(m.created_at), "updated_at": _iso(m.updated_at),
             "completed_at": _iso(m.completed_at),
+            "pending_items": pending if is_open else [],
+            "next_action": (pending[0] if pending else "Mark the move completed") if is_open else None,
+            "overdue": bool(is_open and m.move_date and m.move_date < today and pending),
             "lead_link": f"/leads/{m.lead_id}" if m.lead_id else None,
             "contact_link": f"/contacts/{m.org_contact_id}" if m.org_contact_id else None}
 
@@ -601,6 +607,9 @@ def list_moves(request: Request, status: Optional[str] = Query(None),
         EnergyMoveRequest.move_date <= today + timedelta(days=14)).count()
     summary["no_move_date"] = base.filter(EnergyMoveRequest.status.in_(OPEN_MOVE_STATUSES),
                                           EnergyMoveRequest.move_date.is_(None)).count()
+    summary["past_move_date"] = base.filter(EnergyMoveRequest.status.in_(OPEN_MOVE_STATUSES),
+                                            EnergyMoveRequest.move_date.isnot(None),
+                                            EnergyMoveRequest.move_date < today).count()
     q = base
     if status == "open":
         q = q.filter(EnergyMoveRequest.status.in_(OPEN_MOVE_STATUSES))
@@ -705,24 +714,34 @@ def _safe_json(raw):
         return raw
 
 
+def _move_tasks_ok(db, user, request, m) -> bool:
+    """Move tasks live on the LEAD and are not tied to one move. Touch them only
+    when the caller may read that lead (as get_move requires) and no OTHER open
+    move shares the lead - otherwise its tasks could be someone else's work."""
+    try:
+        lead_scope.load_lead_in_scope(db, user, m.lead_id, request)
+    except HTTPException:
+        return False
+    other = (db.query(EnergyMoveRequest.id)
+             .filter(EnergyMoveRequest.organization_id == m.organization_id,
+                     EnergyMoveRequest.lead_id == m.lead_id, EnergyMoveRequest.id != m.id,
+                     EnergyMoveRequest.status.in_(OPEN_MOVE_STATUSES)).first())
+    return other is None
+
+
 @router.patch("/moves/{move_id}", dependencies=[Depends(require_not_observation)])
 def update_move(move_id: str, payload: MoveUpdate, request: Request,
                 db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     m = _load_move(db, user, request, move_id)
     sent = payload.model_fields_set
     changed: Dict[str, Any] = {}
-    if "status" in sent and payload.status is not None and payload.status != m.status:
-        if payload.status not in MOVE_STATUSES:
-            raise HTTPException(400, detail={"message": "Unknown status",
-                                             "valid_statuses": list(MOVE_STATUSES)})
-        changed["status"] = {"from": m.status, "to": payload.status}
-        m.status = payload.status
-        m.completed_at = _now() if payload.status == "completed" else None
     for f in ("move_date", "from_address", "to_address", "notes"):
         if f in sent and getattr(payload, f) != getattr(m, f):
             changed[f] = True
             setattr(m, f, getattr(payload, f))
     if "services" in sent and payload.services is not None:
+        if m.status in ("completed", "cancelled") and payload.status in (None, m.status):
+            raise HTTPException(409, "This move is %s. Reopen it before changing services." % m.status)
         services = _validate_services(payload.services)
         old = json.loads(m.services) if m.services else []
         if services != old:
@@ -739,6 +758,32 @@ def update_move(move_id: str, payload: MoveUpdate, request: Request,
             m.services = json.dumps(services)
             m.checklist = json.dumps(checklist)
             changed["services"] = {"from": old, "to": services}
+    if "status" in sent and payload.status is not None and payload.status != m.status:
+        if payload.status not in MOVE_STATUSES:
+            raise HTTPException(400, detail={"message": "Unknown status",
+                                             "valid_statuses": list(MOVE_STATUSES)})
+        if payload.status == "completed":
+            pending = [i.get("label") for i in (json.loads(m.checklist) if m.checklist else [])
+                       if not i.get("done")]
+            if pending:
+                # An arranged service is not an active one: "completed" needs
+                # every item ticked, including "Confirm with customer that
+                # services are active".
+                raise HTTPException(409, detail={"message": "Tick every checklist item before completing this move.",
+                                                 "pending": pending})
+        changed["status"] = {"from": m.status, "to": payload.status}
+        m.status = payload.status
+        m.completed_at = _now() if payload.status == "completed" else None
+        if payload.status == "cancelled" and m.lead_id and _move_tasks_ok(db, user, request, m):
+            n = 0
+            for t in (db.query(LeadTask).filter(LeadTask.organization_id == m.organization_id,
+                                                LeadTask.lead_id == m.lead_id,
+                                                LeadTask.source == "move_concierge",
+                                                LeadTask.status == "open").all()):
+                t.status = "cancelled"
+                t.completed_at = _now()
+                n += 1
+            changed["tasks_cancelled"] = n
     if "assign_to" in sent:
         org_id = m.organization_id
         if payload.assign_to and payload.assign_to != m.assigned_to_id:
@@ -750,6 +795,15 @@ def update_move(move_id: str, payload: MoveUpdate, request: Request,
                 raise HTTPException(403, "Only a workspace manager can unassign.")
             changed["assigned"] = {"from": m.assigned_to_id, "to": None}
             m.assigned_to_id = None
+    tasks_to_review = []
+    if "move_date" in changed and m.move_date and m.lead_id and _move_tasks_ok(db, user, request, m):
+        cutoff = datetime(m.move_date.year, m.move_date.month, m.move_date.day) + timedelta(days=1)
+        tasks_to_review = [{"id": t.id, "title": t.title, "due_at": _iso(t.due_at)} for t in (
+            db.query(LeadTask).filter(LeadTask.organization_id == m.organization_id,
+                                      LeadTask.lead_id == m.lead_id,
+                                      LeadTask.source == "move_concierge",
+                                      LeadTask.status == "open", LeadTask.due_at.isnot(None),
+                                      LeadTask.due_at >= cutoff).all())]
     if changed:
         log_action(db, m.organization_id, user.id, action="move_request.updated",
                    target_type="move_request", target_id=m.id,
@@ -760,6 +814,9 @@ def update_move(move_id: str, payload: MoveUpdate, request: Request,
     db.refresh(m)
     out = _move_row(m, _user_names(db, [m.assigned_to_id]))
     out["changed"] = sorted(changed)
+    out["tasks_cancelled"] = changed.get("tasks_cancelled", 0)
+    # Tasks dated after the (new) move date - the advisor decides what to do.
+    out["tasks_to_review"] = tasks_to_review
     return out
 
 
@@ -771,6 +828,8 @@ def toggle_checklist(move_id: str, payload: ChecklistToggle, request: Request,
     item = next((i for i in checklist if i.get("key") == payload.key), None)
     if item is None:
         raise HTTPException(404, "Checklist item not found")
+    if m.status in ("completed", "cancelled") and bool(item.get("done")) != payload.done:
+        raise HTTPException(409, "This move is %s. Reopen it before changing the checklist." % m.status)
     if bool(item.get("done")) != payload.done:
         item["done"] = payload.done
         item["done_at"] = _iso(_now()) if payload.done else None
@@ -842,6 +901,286 @@ def supplier_handoff(lead_id: str, body: HandoffIn, request: Request,
                                               follow_up_days=body.follow_up_days)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
-    log_action(db, lead.organization_id, user.id, action="energy.supplier_handoff",
-               target_type="lead", target_id=lead.id, details={"supplier": body.supplier})
+    if not out.get("duplicate"):
+        log_action(db, lead.organization_id, user.id, action="energy.supplier_handoff",
+                   target_type="lead", target_id=lead.id, details={"supplier": body.supplier})
     return out
+
+
+class HandoffOutcomeIn(BaseModel):
+    outcome: str = Field(..., max_length=40)
+    source: str = Field(..., max_length=40)
+    note: str = Field(..., max_length=500)
+
+
+@router.get("/leads/{lead_id}/handoffs")
+def lead_handoffs(lead_id: str, request: Request, db: Session = Depends(get_db),
+                  user: User = Depends(require_tenant_user)):
+    """This customer's supplier hand-offs and what is known about each."""
+    from app.services import energy_suppliers
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    return {"items": energy_suppliers.handoffs(lead),
+            "outcomes": list(energy_suppliers.OUTCOMES),
+            "sources": list(energy_suppliers.SOURCES)}
+
+
+@router.post("/leads/{lead_id}/handoffs/{handoff_id}/outcome",
+             dependencies=[Depends(require_not_observation)])
+def handoff_outcome(lead_id: str, handoff_id: str, body: HandoffOutcomeIn, request: Request,
+                    db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Record what happened to a hand-off. Never marks the customer enrolled."""
+    from app.services import energy_suppliers
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    try:
+        out = energy_suppliers.record_outcome(db, lead=lead, actor_user_id=user.id,
+                                              handoff_id=handoff_id, outcome=body.outcome,
+                                              source=body.source, note=body.note)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    log_action(db, lead.organization_id, user.id, action="energy.supplier_handoff_outcome",
+               target_type="lead", target_id=lead.id,
+               details={"handoff_id": handoff_id, "outcome": body.outcome, "source": body.source})
+    return out
+
+
+@router.get("/supplier-handoffs")
+def supplier_handoff_list(request: Request, state: str = Query("open", pattern="^(open|all)$"),
+                          db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Hand-offs across the customers this person may see - by default only
+    the ones still waiting for a final outcome, oldest first, so an incomplete
+    referral cannot quietly drop out of sight."""
+    from app.services import energy_suppliers
+    _org_id(db, user, request)
+    rows = (lead_scope.authorized_lead_query(db, user, request=request)
+            .filter(Lead.custom_fields.like('%"supplier_handoffs"%')).all())
+    names = _user_names(db, [l.assigned_to_id for l in rows])
+    items = []
+    for l in rows:
+        for h in energy_suppliers.handoffs(l):
+            if state == "open" and not energy_suppliers.is_open(h):
+                continue
+            items.append({"lead_id": l.id, "name": _name(l.first_name, l.last_name),
+                          "owner": names.get(l.assigned_to_id), "handoff": h,
+                          "lead_link": f"/rate-requests?open={l.id}"})
+    items.sort(key=lambda r: r["handoff"].get("at") or "")
+    return {"state": state, "total": len(items), "items": items}
+
+
+# ── QUALIFICATION: what the advisor knows, what is missing, the next step ────
+# See services/energy_qualification. No prices, no savings, no OCR.
+
+class QualificationIn(BaseModel):
+    fields: Dict[str, Any] = Field(default_factory=dict)
+    bill: Optional[Dict[str, Any]] = None
+
+
+QUALIFY_TASK_SOURCE = "qualification"
+QUALIFY_TASK_TITLE = "Get missing details"
+
+
+@router.get("/leads/{lead_id}/qualification")
+def lead_qualification(lead_id: str, request: Request, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user)):
+    from app.services import energy_qualification as eq
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    return eq.qualify(lead)
+
+
+@router.post("/leads/{lead_id}/qualification", dependencies=[Depends(require_not_observation)])
+def update_qualification(lead_id: str, body: QualificationIn, request: Request,
+                         db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Record what the advisor learned (supplier, contract end, usage, bill
+    lines typed from the customer's bill, ...). Sends nothing."""
+    from app.services import energy_qualification as eq
+    from app.services.energy_suppliers import _lock
+    lead = _lock(db, lead_scope.load_lead_in_scope(db, user, lead_id, request))
+    try:
+        changed = eq.apply_update(lead, body.fields, body.bill)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    if changed:
+        log_action(db, lead.organization_id, user.id, action="energy.qualification_updated",
+                   target_type="lead", target_id=lead.id, details={"fields": sorted(changed)},
+                   commit=False)
+    db.commit()
+    db.refresh(lead)
+    return eq.qualify(lead)
+
+
+@router.post("/leads/{lead_id}/qualification/request-info",
+             dependencies=[Depends(require_not_observation)])
+def request_missing_info(lead_id: str, request: Request, db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_user)):
+    """ONE open internal task listing what is still missing. Asking again
+    updates that task instead of adding another. Nothing goes to the customer."""
+    from app.services import energy_qualification as eq
+    from app.services.energy_suppliers import _lock
+    lead = _lock(db, lead_scope.load_lead_in_scope(db, user, lead_id, request))
+    q = eq.qualify(lead)
+    labels = [f["label"] for f in q["fields"] if f["key"] in q["missing"] and f["key"] != "owner"]
+    if not labels:
+        raise HTTPException(409, "Nothing the next step needs is missing.")
+    details = "Still needed before the next step: " + "; ".join(labels) + ". Nothing has been sent to the customer."
+    task = (db.query(LeadTask).filter(LeadTask.lead_id == lead.id, LeadTask.status == "open",
+                                      LeadTask.source == QUALIFY_TASK_SOURCE).first())
+    created = task is None
+    if created:
+        task = LeadTask(organization_id=lead.organization_id, lead_id=lead.id, title=QUALIFY_TASK_TITLE,
+                        details=details, due_at=_now() + timedelta(days=1), status="open",
+                        assigned_to_id=lead.assigned_to_id or user.id, created_by_id=user.id,
+                        source=QUALIFY_TASK_SOURCE)
+        db.add(task)
+    else:
+        task.details = details
+    db.commit()
+    return {"task_id": task.id, "created": created, "missing": labels}
+
+
+# ── COMMERCIAL OPPORTUNITIES (advisor-led; see services/energy_commercial) ───
+
+class CommercialStageIn(BaseModel):
+    stage: str = Field(..., max_length=40)
+    note: str = Field("", max_length=500)
+    reason: str = Field("", max_length=300)
+    revisit_on: Optional[str] = Field(None, max_length=10)
+    expected_decision_date: Optional[str] = Field(None, max_length=10)
+    expected_annual_kwh: Optional[str] = Field(None, max_length=20)
+
+
+class CommercialLocationIn(BaseModel):
+    address: Optional[str] = None
+    utility: Optional[str] = None
+    meter_id: Optional[str] = None
+    current_supplier: Optional[str] = None
+    contract_end_date: Optional[str] = None
+    annual_kwh: Optional[str] = None
+    quote_status: Optional[str] = None
+    note: Optional[str] = None
+
+
+def _commercial_call(fn):
+    from app.services import energy_commercial as ec
+    try:
+        return fn(ec)
+    except ec.NotCommercial as exc:
+        raise HTTPException(409, str(exc))
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.get("/leads/{lead_id}/commercial")
+def commercial_view(lead_id: str, request: Request, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user)):
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    return _commercial_call(lambda ec: ec.view(lead))
+
+
+@router.post("/leads/{lead_id}/commercial/stage", dependencies=[Depends(require_not_observation)])
+def commercial_stage(lead_id: str, body: CommercialStageIn, request: Request,
+                     db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Move a commercial opportunity. Won only after supplier confirmation;
+    never marks enrollment; nothing is sent to anyone."""
+    from app.services.energy_suppliers import _lock
+    lead = _lock(db, lead_scope.load_lead_in_scope(db, user, lead_id, request))
+    out = _commercial_call(lambda ec: ec.set_stage(
+        db, lead, stage=body.stage, actor_id=user.id, note=body.note, reason=body.reason,
+        revisit_on=body.revisit_on, expected_decision_date=body.expected_decision_date,
+        expected_annual_kwh=body.expected_annual_kwh))
+    log_action(db, lead.organization_id, user.id, action="energy.commercial_stage",
+               target_type="lead", target_id=lead.id, details={"stage": body.stage}, commit=False)
+    db.commit()
+    return out
+
+
+@router.post("/leads/{lead_id}/commercial/locations", dependencies=[Depends(require_not_observation)])
+def commercial_add_location(lead_id: str, body: CommercialLocationIn, request: Request,
+                            db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services.energy_suppliers import _lock
+    lead = _lock(db, lead_scope.load_lead_in_scope(db, user, lead_id, request))
+    out = _commercial_call(lambda ec: ec.add_location(lead, body.model_dump(exclude_none=True)))
+    if not out.get("duplicate"):
+        log_action(db, lead.organization_id, user.id, action="energy.commercial_location_added",
+                   target_type="lead", target_id=lead.id, details={"location_id": out["location"]["id"]},
+                   commit=False)
+    db.commit()
+    return out
+
+
+@router.patch("/leads/{lead_id}/commercial/locations/{loc_id}",
+              dependencies=[Depends(require_not_observation)])
+def commercial_update_location(lead_id: str, loc_id: str, body: CommercialLocationIn, request: Request,
+                               db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services.energy_suppliers import _lock
+    lead = _lock(db, lead_scope.load_lead_in_scope(db, user, lead_id, request))
+    out = _commercial_call(lambda ec: ec.update_location(lead, loc_id, body.model_dump(exclude_unset=True)))
+    log_action(db, lead.organization_id, user.id, action="energy.commercial_location_updated",
+               target_type="lead", target_id=lead.id, details={"location_id": loc_id}, commit=False)
+    db.commit()
+    return out
+
+
+# ── FIELD ACQUISITION (door visits; see services/energy_field) ──────────────
+
+class FieldVisitIn(BaseModel):
+    outcome: str = Field(..., max_length=40)
+    address: str = Field(..., max_length=300)
+    zip_code: Optional[str] = Field(None, max_length=10)
+    first_name: Optional[str] = Field(None, max_length=80)
+    last_name: Optional[str] = Field(None, max_length=80)
+    phone: Optional[str] = Field(None, max_length=40)
+    email: Optional[str] = Field(None, max_length=200)
+    permission_to_contact: bool = False
+    segment: Optional[str] = Field(None, max_length=20)
+    company: Optional[str] = Field(None, max_length=160)
+    door_hanger_left: bool = False
+    appointment_note: Optional[str] = Field(None, max_length=300)
+    notes: Optional[str] = Field(None, max_length=1000)
+
+
+@router.post("/field/visits", dependencies=[Depends(require_not_observation)])
+def record_field_visit(body: FieldVisitIn, request: Request, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user)):
+    """A rep records one door. Credited to the person signed in - never to
+    someone else. A referral needs the resident's permission; nothing is sent."""
+    from app.models.models import Organization
+    from app.services import energy_field
+    org_id = _org_id(db, user, request)
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    try:
+        def visible(lead_id):
+            return (lead_scope.authorized_lead_query(db, user, Lead.id, request=request)
+                    .filter(Lead.id == lead_id).first() is not None)
+        return energy_field.record_visit(db, org=org, rep=user, data=body.model_dump(), visible=visible)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(422, str(exc))
+
+
+@router.get("/field/summary")
+def field_summary(request: Request, days: int = Query(30, ge=1, le=366),
+                  db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Per-rep field results from recorded activity. A manager sees every rep;
+    anyone else sees only their own row."""
+    from app.services import energy_field
+    org_id = _org_id(db, user, request)
+    rep = None if _is_manager(db, user, request) else user.id
+    out = energy_field.summary(db, org_id=org_id, days=days, rep_id=rep)
+    out["scope"] = "all_reps" if rep is None else "own"
+    return out
+
+
+# ── INTAKE HEALTH (manager view) ────────────────────────────────────────────
+@router.get("/intake-health")
+def intake_health(request: Request, days: int = Query(30, ge=1, le=365),
+                  db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Unassigned new requests and time to first contact (recorded, not verified)."""
+    if not _is_manager(db, user, request):
+        raise HTTPException(403, "The intake view is for workspace managers.")
+    from app.services import energy_intake_health as ih
+    org_id = _org_id(db, user, request)
+    scoped = lead_scope.authorized_lead_query(db, user, Lead.id, request=request).scalar_subquery()
+    return ih.report(db, org_id=org_id, scoped=scoped, now=_now(), days=days)
