@@ -455,3 +455,51 @@ def test_team_email_goes_out_only_after_the_request_is_saved(client, w, sent, mo
     ev = db.query(EnergyRequestAlert).filter_by(lead_id=real.id).one()
     db.refresh(ev)
     assert json.loads(ev.details)["email"]["state"] == "attempted"
+
+
+# 10 ── the real-database case the shared in-memory test DB cannot show: a
+# website alert is raised INSIDE a savepoint (energy_site_intake._step). Its
+# email must wait for the request's real commit - not fire on the savepoint
+# release, when another connection cannot see the event yet.
+def test_queued_email_waits_for_the_real_commit_on_a_file_database(tmp_path, sent, monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.models.models import Base
+    from app.models.energy_models import EnergyRequestAlert
+    from app.services import energy_team
+    eng = create_engine("sqlite:///%s" % (tmp_path / "alerts.db"))
+    Base.metadata.create_all(eng)
+    db = sessionmaker(bind=eng, autoflush=False)()
+    org = Organization(name="File DB", slug="fd-%s" % uuid.uuid4().hex[:6], plan="enterprise",
+                       industry="energy", is_active=True)
+    db.add(org)
+    db.commit()
+    mgr = User(organization_id=org.id, email="m-%s@example.com" % uuid.uuid4().hex[:5], password_hash="x",
+               full_name="M", role="org_admin", is_active=True, must_change_password=False)
+    db.add(mgr)
+    db.commit()
+    monkeypatch.setattr("app.services.email_service.describe_email_sender",
+                        lambda db_, org_id: {"ready": True, "from_email": "team@atlantis.example.test", "reason": None})
+    monkeypatch.setenv("OUTBOUND_EMAIL_ENERGY_TEAM_ALERT", "true")
+    energy_team.save(db, org.id, {"members": {}, "mailbox": {
+        "address": "alerts@atlantis.example.test", "verified_at": "2026-10-20T12:00:00Z",
+        "verified_address": "alerts@atlantis.example.test", "verified_from": "team@atlantis.example.test"}}, mgr.id)
+    db.commit()
+
+    lead = Lead(organization_id=org.id, first_name="Sav", last_name="Point", tier="new_inquiry", status="new")
+    db.add(lead)
+    db.flush()
+    sp = db.begin_nested()                               # exactly what _step does
+    out = energy_team.alert_new_request(db, org=org, lead=lead, event_key="website:file:1", origin="website")
+    db.flush()
+    sp.commit()
+    assert out["email"]["state"] == "queued" and sent == []        # savepoint release: nothing yet
+    db.commit()                                                       # the request is really saved
+    assert [m["to"] for m in sent] == ["alerts@atlantis.example.test"]
+    db.expire_all()
+    ev = db.query(EnergyRequestAlert).filter_by(event_key="website:file:1").one()
+    assert json.loads(ev.details)["email"]["state"] == "attempted"
+    db.commit()
+    assert len(sent) == 1                                             # once only
+    db.close()
+    eng.dispose()

@@ -60,8 +60,12 @@ def _row(db: Session, org_id: str, create: bool = False):
     return row
 
 
-def load(db: Session, org_id: str) -> Dict[str, Any]:
-    row = _row(db, org_id)
+def load(db: Session, org_id: str, lock: bool = False) -> Dict[str, Any]:
+    row = _row(db, org_id, create=lock)
+    if lock and row is not None:
+        from app.models.energy_models import EnergyTeamSettings
+        row = (db.query(EnergyTeamSettings).filter(EnergyTeamSettings.id == row.id)
+               .with_for_update().populate_existing().first()) or row
     try:
         d = json.loads(row.data) if row is not None and row.data else {}
     except (ValueError, TypeError):
@@ -210,7 +214,7 @@ def set_mailbox(db: Session, org_id: str, address: Optional[str], actor_id: str)
     address = (address or "").strip().lower() or None
     if address and ("@" not in address or " " in address or len(address) > 200):
         raise ValueError("Enter one email address for the shared mailbox.")
-    data = load(db, org_id)
+    data = load(db, org_id, lock=True)
     if data["mailbox"].get("address") != address:
         data["mailbox"] = {"address": address}          # a new address must be verified again
     save(db, org_id, data, actor_id)
@@ -220,7 +224,7 @@ def set_mailbox(db: Session, org_id: str, address: Optional[str], actor_id: str)
 def send_test(db: Session, org_id: str, actor_id: str) -> Dict[str, Any]:
     """Send a 6-digit code to the shared mailbox. Proves sending works; typing
     the code back proves the mailbox receives."""
-    data = load(db, org_id)
+    data = load(db, org_id, lock=True)
     mb = data["mailbox"]
     if not mb.get("address"):
         raise ValueError("Enter the shared mailbox address first.")
@@ -243,7 +247,7 @@ def send_test(db: Session, org_id: str, actor_id: str) -> Dict[str, Any]:
 
 
 def confirm(db: Session, org_id: str, code: str, actor_id: str) -> Dict[str, Any]:
-    data = load(db, org_id)
+    data = load(db, org_id, lock=True)
     mb = data["mailbox"]
     if not mb.get("code_hash"):
         raise ValueError("Send a test code first.")
@@ -354,14 +358,23 @@ def alert_new_request(db: Session, *, org, lead, event_key: str, origin: str, wh
 
 
 def _send_after_commit(db: Session, org_id: str, event_id: str) -> None:
+    """after_commit ALSO fires when a savepoint is released (the website intake
+    runs each step in one), while the request itself is still uncommitted and
+    invisible to another connection. So: ignore nested releases and deliver at
+    the first real commit; once only. If the request is rolled back, the next
+    real commit finds no event row and sends nothing."""
     from sqlalchemy import event as sa_event
+    state = {"done": False}
 
     def _fire(session):
+        if state["done"] or session.in_nested_transaction():
+            return
+        state["done"] = True
         try:
             deliver_queued(session.get_bind(), org_id, event_id)
         except Exception:                                   # noqa: BLE001
             log.exception("energy_team: queued alert email failed for event %s", event_id)
-    sa_event.listen(db, "after_commit", _fire, once=True)
+    sa_event.listen(db, "after_commit", _fire)
 
 
 def deliver_queued(bind, org_id: str, event_id: str) -> Dict[str, Any]:
@@ -496,6 +509,8 @@ def _take(db: Session, org, lead_id: str, new_owner_id: str, actor_id: str, how:
     if lead is None or not is_request(db, org.id, lead_id):
         raise LookupError("Not an open new request in this workspace.")
     lead = _lock(db, lead)
+    if not is_request(db, org.id, lead_id):          # closed while we waited for the lock
+        raise LookupError("Not an open new request in this workspace.")
     if lead.assigned_to_id == new_owner_id:
         return lead, False
     if lead.assigned_to_id and not allow_reassign:
@@ -573,7 +588,7 @@ def update_member(db: Session, org_id: str, actor_id: str, user_id: str, changes
     p = member(db, org_id, user_id)
     if p is None:
         raise LookupError("That person is not an active member of this team.")
-    data = load(db, org_id)
+    data = load(db, org_id, lock=True)
     cur = flags(p, data)
     for k in ("in_app", "email", "assignable"):
         if k in changes and changes[k] is not None:
@@ -588,7 +603,7 @@ def update_member(db: Session, org_id: str, actor_id: str, user_id: str, changes
 
 
 def set_default(db: Session, org_id: str, actor_id: str, user_id: Optional[str]) -> Dict[str, Any]:
-    data = load(db, org_id)
+    data = load(db, org_id, lock=True)
     if user_id and not can_take(db, org_id, user_id, data):
         raise ValueError("The default advisor must be an active team member who can be assigned requests.")
     data["default_advisor_id"] = user_id or None
