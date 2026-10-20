@@ -234,6 +234,7 @@ def _facts(db, prog, lead, conv) -> Dict:
         "mail_task_open": bool(memory_of(conv).get("mail_request")),
         "followups_sent": conv.followups_sent or 0,
         "personal_delivery_available": personal_delivery_available(db, lead),
+        "decline": getattr(conv, "_decline", None),
     }
 
 
@@ -397,6 +398,12 @@ HONOUR THEIR TIMING:
 - "Who is this?" / "What is this about?": answer plainly - this is {contact} with the family services team at {location}, following up on the planning information they asked about.
 - If asked whether the guide or a visit costs anything, do not use the words free, complimentary or no cost; say you're glad to send the guide and you can answer any cost questions.
 - "wait" only for a closing "ok"/"thanks" after an appointment is confirmed, or a message that needs no reply.
+- A "No" ANSWERS THE LAST QUESTION WE ASKED (facts_known_for_certain.decline). If what_was_declined is "declined_venue" or "cant_get_there", they turned down COMING IN, not every kind of help: offer the ONE alternative named in alternative_to_offer, once, short and warm, as your one question, then respect their answer:
+  * "home_visit": "No problem - I can come to you instead, if that's easier. Would that be more convenient?" (action "answer"; never {{TIMES}}, never book it - if they say yes, action "handoff" and say I'll reach out personally to find a time).
+  * "phone": offer a short phone appointment instead (action "offer_times", appointment_kind "phone").
+  * "guide": "No problem at all. Would it help if I sent you the planning guide so you have it handy?" (action "answer").
+  * "none", or alternative_already_offered is set and they say no again: thank them and close warmly ("close").
+  If what_was_declined is "declined_time": the times don't suit, the visit might - ask what week or time of day works, or "follow_up_later"; never repeat the same days. "declined_home": never suggest coming to their home. "stop": thank them briefly and "close" - no alternative, no times. "unclear_no" (a bare no to a general question): one short clarifying question or a warm close, never a pitch. NEVER mention any setting or what is or isn't available.
 - "close" ONLY when they clearly decline (not interested, no thanks, all set, already taken care of). A bare "k", "maybe", "idk", "lol" or an emoji is NOT a decline: reply warmly and ask one easy question (e.g. whether they'd like the planning guide).
 - They say they'll come in / want to meet / ask for times: offer times now ("offer_times"), unless times are already on the table - then ask which one.
 - They insist on a price before meeting: don't hand off. Acknowledge it plainly, say you can go over costs by phone, and offer a short phone call ("offer_times" with appointment_kind "phone", or "callback" if they name a time).
@@ -484,6 +491,130 @@ def third_person(reply: str, contact: Optional[str]) -> bool:
     return False
 
 
+# ── WHAT WAS DECLINED (#234, Oct 19) ─────────────────────────────────────────
+# A bare "No" answers the LAST QUESTION WE ASKED. "Could you stop by this
+# week?" -> "No" declines coming in, not every kind of help; the setter used to
+# close with a goodbye. Decided here in code from the last message the family
+# actually saw - never by the model alone - and STOP / not interested always
+# wins. At most ONE alternative, only one the location really offers.
+DECLINED_STOP, DECLINED_VENUE, DECLINED_TIME, DECLINED_HOME, CANT_GET_THERE, UNCLEAR_NO = (
+    "stop", "declined_venue", "declined_time", "declined_home", "cant_get_there", "unclear_no")
+ALT_HOME, ALT_PHONE, ALT_GUIDE, ALT_NONE = "home_visit", "phone", "guide", "none"
+
+_HARD_NO = re.compile(r"\b(stop|unsubscribe|not interested|no thanks|no thank you|don'?t (text|contact|call|message|"
+                      r"email|bother)|do not (text|contact|call)|remove me|take me off|leave me alone|wrong (number|"
+                      r"person)|not for me|lose my number|quit (texting|messaging))\b", re.I)
+_BARE_NO = re.compile(r"^\s*(no+|nope|nah|no sir|no ma'?am|no,? i can'?t|i can'?t|can'?t|not really|negative)"
+                      r"\s*[.!]*\s*$", re.I)
+_CANT_GET_THERE = re.compile(r"(can'?t (get|make it|drive|come)( (there|in|out|by|over))?\b|no (ride|transportation|car)\b|"
+                             r"don'?t drive|(too|kind of|pretty) far|hard (for me )?to get (there|out)|"
+                             r"not able to (get|come) (there|out|in))", re.I)
+_NOT_THESE_TIMES = re.compile(r"\b(not this week|this week (is|isn'?t|won'?t|doesn'?t)|neither (one|of those|works|time)|"
+                              r"none of (those|them|these)|those (times|days) (don'?t|won'?t)|not (those|that) "
+                              r"(days?|times?))\b", re.I)
+_NO_HOME = re.compile(r"(don'?t want (anyone|anybody|someone|people|you) (coming|to come|at|in)( to| at)? my "
+                      r"(house|home|place)|not (at|to) my (house|home)|no home visits?|don'?t come to my)", re.I)
+_INVITED_IN = re.compile(r"(stop by|come (in|by|out|see)|swing by|drop by|short visit|for a visit|visit (with )?us|"
+                         r"sit down (with (me|us) )?(here|at)|meet (with )?(me|us) (here|at)|in person)", re.I)
+_OFFERS_HOME = re.compile(r"(come to (you|your (home|house|place))|(to|at) your (home|house|place)|stop by your|"
+                          r"visit you at|bring it (by|over) to you|meet you at your)", re.I)
+
+
+def _track_alternative(conv, dc: Optional[Dict], action: Optional[str]) -> None:
+    """Record, without PII, the path declined -> alternative offered ->
+    accepted / declined, in the family's memory (reported apart from an
+    opt-out or a lost family)."""
+    if not dc:
+        return
+    mem = memory_of(conv)
+    declined, alt, already = dc.get("what_was_declined"), dc.get("alternative_to_offer"), dc.get("alternative_already_offered")
+    changed = False
+    if already and not mem.get("alternative_outcome"):
+        if action == "close" or declined == DECLINED_STOP:
+            mem["alternative_outcome"] = "declined"
+            changed = True
+        elif action in ("offer_times", "book", "handoff", "send_guide", "mail_guide", "callback"):
+            mem["alternative_outcome"] = "accepted"
+            changed = True
+    elif declined in (DECLINED_VENUE, CANT_GET_THERE) and alt not in (None, ALT_NONE) and action != "close":
+        mem.update(objection=declined, alternative_offered=alt)
+        changed = True
+    elif declined == DECLINED_STOP:
+        mem["objection"] = DECLINED_STOP
+        changed = True
+    if changed:
+        conv.memory = json.dumps(mem)
+
+
+def _last_outbound(db, lead) -> str:
+    """The last message the family actually received from us."""
+    for item in reversed(history(db, lead)):
+        if item.get("who") == "us":
+            return item.get("text") or ""
+    return ""
+
+
+def what_was_declined(body: str, last_outbound: str, times_on_table: bool) -> Optional[str]:
+    b = (body or "").strip()
+    if not b:
+        return None
+    if _HARD_NO.search(b):
+        return DECLINED_STOP
+    if _NO_HOME.search(b):
+        return DECLINED_HOME
+    if _NOT_THESE_TIMES.search(b):
+        return DECLINED_TIME
+    if _CANT_GET_THERE.search(b):
+        return CANT_GET_THERE
+    if _BARE_NO.search(b):
+        if times_on_table:
+            return DECLINED_TIME
+        if _INVITED_IN.search(last_outbound or ""):
+            return DECLINED_VENUE
+        return UNCLEAR_NO
+    return None
+
+
+def _location_settings(db, lead) -> Dict:
+    try:
+        from app.services.programs import identity
+        prof = identity.location_profile_for_lead(db, lead)
+        bs = getattr(prof, "brand_settings", None) if prof is not None else None
+        if isinstance(bs, str):
+            bs = json.loads(bs or "{}")
+        return bs if isinstance(bs, dict) else {}
+    except Exception:                                    # noqa: BLE001
+        return {}
+
+
+def alternative_for(db, lead, conv, declined: Optional[str]) -> str:
+    """The ONE alternative this location really offers, in order: a visit at
+    the family's home (only when the location's own setting "home_visits" is
+    on - the printed-guide delivery flag is NOT a home-appointment
+    permission), a phone appointment (setting "offer_phone_alternative"), the
+    planning guide if they don't have it yet, else none."""
+    bs = _location_settings(db, lead)
+    if bs.get("home_visits") and declined != DECLINED_HOME:
+        return ALT_HOME
+    if bs.get("offer_phone_alternative"):
+        return ALT_PHONE
+    if conv is not None and not _guide_sent(db, conv):
+        return ALT_GUIDE
+    return ALT_NONE
+
+
+def decline_context(db, lead, conv, body: str) -> Dict:
+    """Code-made facts about a decline, for the prompt and the validator."""
+    mem = memory_of(conv) if conv is not None else {}
+    declined = what_was_declined(body, _last_outbound(db, lead), bool(conv is not None and A.offered(conv)))
+    already = mem.get("alternative_offered")
+    alt = alternative_for(db, lead, conv, declined) if declined in (DECLINED_VENUE, CANT_GET_THERE, DECLINED_HOME) \
+        else ALT_NONE
+    return {"what_was_declined": declined, "alternative_to_offer": ALT_NONE if already else alt,
+            "alternative_already_offered": already or None,
+            "home_visits_offered_by_this_location": bool(_location_settings(db, lead).get("home_visits"))}
+
+
 def validate_decision(d: Dict, body: str, conv, contact: Optional[str] = None) -> List[str]:
     """Rules the model's answer must meet before anything is sent. Returned
     to the model once as a correction; if they still fail, a person decides."""
@@ -511,6 +642,28 @@ def validate_decision(d: Dict, body: str, conv, contact: Optional[str] = None) -
             and not (memory_of(conv) or {}).get("mail_request")):
         problems.append("they asked for the guide, not a printed or mailed copy - use send_guide (the system "
                         "texts or emails it, or offers a printed copy if a link can't go by text)")
+    dc = getattr(conv, "_decline", None) or {}
+    declined, alt = dc.get("what_was_declined"), dc.get("alternative_to_offer") or ALT_NONE
+    if declined == DECLINED_STOP and (action in ("offer_times", "book", "send_guide", "mail_guide", "callback")
+                                      or "{TIMES}" in reply or _OFFERS_HOME.search(reply)):
+        problems.append("they said stop / not interested - honour it: thank them briefly and close, with no "
+                        "alternative, no times and no offer")
+    if action == "close" and declined in (DECLINED_VENUE, CANT_GET_THERE) and alt != ALT_NONE:
+        problems.append("their \"no\" answered our invitation to COME IN - it is not a no to every kind of help. "
+                        "Don't close yet: offer the ONE alternative in facts (%s), once, warmly, as your one "
+                        "question" % alt)
+    if action == "close" and declined == DECLINED_TIME:
+        problems.append("they declined the times, not the visit - ask what week or time of day suits them "
+                        "(or follow_up_later), without repeating the same days")
+    if _OFFERS_HOME.search(reply) and (alt != ALT_HOME or declined == DECLINED_HOME) \
+            and not dc.get("home_visits_offered_by_this_location"):
+        problems.append("it offers to come to the family's home - this location does not offer home visits; "
+                        "never promise one")
+    if declined == DECLINED_HOME and _OFFERS_HOME.search(reply):
+        problems.append("they said they don't want anyone coming to their home - never offer that")
+    if action == "book" and dc.get("alternative_already_offered") == ALT_HOME:
+        problems.append("a home visit is arranged personally by the advisor, never booked as a visit at the "
+                        "location - use handoff so I confirm the time myself")
     if action == "close" and not _DECLINE.search(body or ""):
         problems.append("they did not decline - a short or unclear reply ('k', 'maybe', an emoji) is not a no; "
                         "answer it or ask one gentle question instead of closing")
@@ -924,6 +1077,14 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         conv.next_followup_at = None
         conv.followup_reason = None
 
+    # What a "No" declined is decided in code from the last message the family
+    # saw (#234); the prompt and the validator both read it.
+    try:
+        conv._decline = decline_context(db, lead, conv, body)
+    except Exception:                                    # noqa: BLE001 - never blocks a reply
+        log.exception("decline context failed for lead %s", lead.id)
+        conv._decline = None
+    out["decline"] = conv._decline
     try:
         try:
             d = decide(db, prog, lead, conv, resp, actor=actor)
@@ -975,6 +1136,7 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
               response_id=resp.id if resp else None)
         db.commit()
         return dict(out, action="handoff", state=conv.state, held=left or [why])
+    _track_alternative(conv, getattr(conv, "_decline", None), action)   # only for a reply that goes out
     if d.get("appointment_kind") in (A.PHONE, A.VISIT):
         conv.appointment_kind = d["appointment_kind"]
     if d.get("service_type"):
