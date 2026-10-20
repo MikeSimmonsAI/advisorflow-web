@@ -1097,3 +1097,50 @@ def commercial_update_location(lead_id: str, loc_id: str, body: CommercialLocati
                target_type="lead", target_id=lead.id, details={"location_id": loc_id}, commit=False)
     db.commit()
     return out
+
+
+# ── FIELD ACQUISITION (door visits; see services/energy_field) ──────────────
+
+class FieldVisitIn(BaseModel):
+    outcome: str = Field(..., max_length=40)
+    address: str = Field(..., max_length=300)
+    zip_code: Optional[str] = Field(None, max_length=10)
+    first_name: Optional[str] = Field(None, max_length=80)
+    last_name: Optional[str] = Field(None, max_length=80)
+    phone: Optional[str] = Field(None, max_length=40)
+    email: Optional[str] = Field(None, max_length=200)
+    permission_to_contact: bool = False
+    segment: Optional[str] = Field(None, max_length=20)
+    company: Optional[str] = Field(None, max_length=160)
+    door_hanger_left: bool = False
+    appointment_note: Optional[str] = Field(None, max_length=300)
+    notes: Optional[str] = Field(None, max_length=1000)
+
+
+@router.post("/field/visits", dependencies=[Depends(require_not_observation)])
+def record_field_visit(body: FieldVisitIn, request: Request, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user)):
+    """A rep records one door. Credited to the person signed in - never to
+    someone else. A referral needs the resident's permission; nothing is sent."""
+    from app.models.models import Organization
+    from app.services import energy_field
+    org_id = _org_id(db, user, request)
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    try:
+        return energy_field.record_visit(db, org=org, rep=user, data=body.model_dump())
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(422, str(exc))
+
+
+@router.get("/field/summary")
+def field_summary(request: Request, days: int = Query(30, ge=1, le=366),
+                  db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Per-rep field results from recorded activity. A manager sees every rep;
+    anyone else sees only their own row."""
+    from app.services import energy_field
+    org_id = _org_id(db, user, request)
+    rep = None if _is_manager(db, user, request) else user.id
+    out = energy_field.summary(db, org_id=org_id, days=days, rep_id=rep)
+    out["scope"] = "all_reps" if rep is None else "own"
+    return out
