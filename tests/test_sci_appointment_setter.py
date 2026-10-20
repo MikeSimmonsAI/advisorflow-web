@@ -60,6 +60,10 @@ def setter(program, sample_advisor, monkeypatch):
     monkeypatch.setenv("AI_BACKGROUND_AUTOMATION_ENABLED", "true")
     monkeypatch.setattr(A, "available_slots", lambda db, prog, **kw: (list(SLOTS), None))
     monkeypatch.setattr(A, "still_free", lambda db, prog, slot, *a, **k: slot in SLOTS)
+    # the booking path's own re-check reads the same fake calendar
+    monkeypatch.setattr("app.routers.calendar_router.compute_day_slots",
+                        lambda db, adv, day, **kw: {"slots": [x.strftime("%Y-%m-%dT%H:%M:00") for x in SLOTS
+                                                              if x.date() == day]})
     from app.services import ai_gateway
     ai_gateway._reset_for_tests()
     return program

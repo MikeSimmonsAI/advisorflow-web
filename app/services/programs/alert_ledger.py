@@ -53,7 +53,8 @@ log = logging.getLogger(__name__)
 
 # How important an event is. A page is suppressed only by an earlier page of
 # the SAME OR HIGHER tier for the same family inside the window.
-TIER = {"low": 1, "active": 1, "reply": 1, "hot": 2, "handoff": 2, "sla_breach": 2, "booked": 3}
+TIER = {"low": 1, "active": 1, "reply": 1, "hot": 2, "handoff": 2, "sla_breach": 2, "booked": 3,
+        "opt_out_request": 4}                       # never merged away: staff must not text them back
 DEFAULT_COALESCE_MINUTES = 30
 MAX_ATTEMPTS = 3
 # While a family's reply is being handled, a hand-off or a booking during that
@@ -207,6 +208,20 @@ def _send_row(db: Session, prog, row, *, sms_text: str, subject: str, html: str)
     db.flush()
 
 
+def _retry_blocked(db: Session, prog, r) -> Optional[str]:
+    if r.channel in ("sms", "email") and not getattr(prog, "staff_sms_alerts_enabled", False):
+        return "staff alerts are switched off for this program"
+    if r.lead_id:
+        from app.models.models import Lead
+        lead = db.query(Lead).filter(Lead.id == r.lead_id).first()
+        if lead is not None:
+            from app.services.sci_staging_demo import is_demo_lead
+            from app.services.test_records import is_owner_test_lead
+            if is_demo_lead(lead) or is_owner_test_lead(lead):
+                return "test or demo family - not paged"
+    return None
+
+
 def retry_failed(db: Session, *, now: Optional[datetime] = None, min_age_seconds: int = 90,
                  max_age_minutes: int = 120) -> int:
     """Retry pages that failed to send, by re-using their own row. A row is
@@ -233,6 +248,13 @@ def retry_failed(db: Session, *, now: Optional[datetime] = None, min_age_seconds
         prog = db.query(OutreachProgram).filter(OutreachProgram.organization_id == r.organization_id).first()
         if prog is None:
             r.send_state, r.reason = "failed", "program not found"
+            db.commit()
+            continue
+        # Re-check what the first attempt checked: alerts switched off since,
+        # or a test / demo family, never pages on a retry.
+        why_not = _retry_blocked(db, prog, r)
+        if why_not:
+            r.send_state, r.reason = "skipped", why_not
             db.commit()
             continue
         stored = r.retry_payload or ""
@@ -288,7 +310,8 @@ def sms_line(kind: str, name: str, *, words: Optional[str] = None, location: Opt
     preview is the family's real words (or the system's real reason) - never
     a made-up summary. Fits one segment without a link."""
     label = {"hot": "SCI Appointment Request", "handoff": "SCI Needs Attention", "booked": "SCI Booked",
-             "sla_breach": "SCI Still Waiting"}.get(kind, "SCI Reply")
+             "sla_breach": "SCI Still Waiting", "home_visit": "SCI Home Visit Request",
+             "opt_out_request": "SCI Opted Out But Asked - Call/Email, No Texts"}.get(kind, "SCI Reply")
     if test:
         label = "TEST " + label
     tail = " Open EvoSys Pro to respond." if kind in ("low", "active", "reply") else " Review in EvoSys Pro."

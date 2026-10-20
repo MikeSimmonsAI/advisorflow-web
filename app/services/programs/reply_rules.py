@@ -69,18 +69,94 @@ _INTENT_PATTERNS = [
 ]
 SLA_BREACH_LABEL = "HOT RESPONSE — NOT YET HANDLED"
 
+# Days and times a family names when they are choosing or shaping a visit
+# (overnight Oct 19: "Saturday works better" and "Maybe next week" were LOW).
+_DAYS = r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekend|tomorrow|today|tonight)"
+_WEEKDAYS = r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekend)"
+_TIMING = (r"\b(%s|next week|this week|(this|in the|tomorrow) (morning|afternoon|evening)|mornings|afternoons|"
+           r"evenings|(after|before) (lunch|work|church|noon|school|\d{1,2})|(until|till|til) (\d{1,2}|noon|one|two|"
+           r"three|four|five|six|seven|eight))\b" % _WEEKDAYS)
+_SCHEDULE_PICK = (r"(?<!n't )(?<!not )(?<!no )\b(works (better|best|for (me|us))|(is|would be) (better|best) for (me|us)|"
+                  r"(i'?m|i am|we'?re|we are) (free|available)|%s\b(?![^.?!]{0,25}?\b(not|n'?t|no)\b)[^.?!]{0,25}?"
+                  r"\b(works|is good|is fine|good for|better|best))\b" % _DAYS)
+
+# "Nothing works for us" / "neither works" turns the times DOWN; a greeting
+# ("Happy Monday!", "have a blessed Sunday") names a day without meaning a visit.
+_NONE_WORKS = r"\b(nothing|neither|none|no (day|time|times|days))\b"
+_DAY_GREETING = r"\b(happy|blessed|good|great|nice|enjoy (your|the)|have a( good| great| nice| blessed)?)\s+%s\b" % _WEEKDAYS
+_TIME_PICK_WHY = "picked or suggested a time"
+
+
+def _names_a_time(text: str) -> bool:
+    return bool(re.search(_TIMING, text)) and not re.search(_DAY_GREETING, text)
+
+
+def _picks_a_time(text: str) -> bool:
+    return bool(re.search(_SCHEDULE_PICK, text)) and not re.search(_NONE_WORKS, text) \
+        and not re.search(_DAY_GREETING, text)
+
+
 _HOT_PATTERNS = [
     (r"\b(appointment|appt|schedule|book|meet(ing)?|visit|tour|come (by|in|out)|stop by)\b", "wants a meeting or visit"),
     (r"\b(price|pricing|cost|costs|how much|payment|plan options|financ)", "asked about price"),
-    (r"(?<!not )(?<!no longer )\b(interested|yes please|sounds good|i('| a)m in|sign me up|let'?s do)\b", "interested"),
-    (r"\b(call me|reach (out|me)|get back to me|follow ?up|contact me|text me)\b", "requests follow-up"),
+    # Spanish: "cita" is a visit (#11).
+    (r"(?<!no )(?<!más )(?<!mas )(?<!una )\bcitas?\b", "asked about a cita"),
+    # "I'm in" counts only when it ENDS the message (punctuation / emoji may
+    # follow) or is followed by "for" / "!" - never "I'm in the hospital" or
+    # "I'm in Houston" (#13). Misspelt "interested" and Spanish interest count
+    # too; "no estoy interesado" is an opt-out phrase below, and a weak reason
+    # like this one never outranks an opt-out phrase.
+    (r"(?<!not )(?<!no longer )\b(interested|intrested|intersted|interessted|yes please|sounds good|sign me up|"
+     r"let'?s do)\b|\bi('|’| a)m in(?=\s+for\b|\s*!|[^\w]*$)|(?<!no )\bme interesa\b|\binteresad[oa]s?\b|"
+     r"(?<!no )\bquiero (ver|hacer|una)\b", "interested"),
+    (r"\b(call me|reach (out|me)|get back to me|follow ?up|contact me|text me)\b|(?<!no me )(?<!no )\bll[aá]m(e|eme)\b",
+     "requests follow-up"),
 ]
 # OPT-OUT only on an unmistakable request: the whole message is a carrier stop
 # word, or an explicit phrase. "Can I stop by Tuesday?" is a visit, not a STOP.
 _STOP_WORDS = r"^\s*(stop|stopall|unsubscribe|end|quit|cancel|optout|opt out|remove)\s*[.!]*\s*$"
 _OPT_OUT_PHRASES = (r"\b(remove me|take me off|unsubscribe me|opt me out|do not (contact|text|email|call) me|"
-                    r"don'?t (contact|text|email|call) me|stop (texting|emailing|contacting) me|leave me alone|"
-                    r"not interested|no thank(s| you)|lose my number)\b")
+                    r"(don'?t|do not|never)( ever)? (contact|text|email|call)( or (text|call|email))? me|"
+                    r"stop (texting|emailing|contacting) me|leave me alone|"
+                    r"not interested|no thank(s| you)|lose my number|"
+                    # Spanish (#11)
+                    r"no gracias|no quiero (una )?cita|(no|nunca) me (manden|mande|env[ií]en|escriban|llame|llamen)|ya no (me )?(manden|escriban)|"
+                    r"no (estoy|estamos) interesad[oa]s?|no (me|nos) interesa|b[oó]rr(a|e)me|"
+                    r"dejen de (escribir|mandar))\b")
+
+# AN OPT-OUT THAT ALSO ASKS FOR SOMETHING (#A). "Don't text me, call me",
+# "Not interested in the guide, can you just call me?", "Not right now",
+# "we already have plots but we need funeral arrangements". It stays an
+# opt-out - closed, cadence and conversation stopped, never another automated
+# text - but ONE staff alert goes out so a person decides (call / email).
+# A bare "STOP" / "unsubscribe" / "remove me" / "leave me alone" never pages.
+_NEG_LEAD = r"(?<!don't )(?<!dont )(?<!do not )(?<!never )(?<!stop )(?<!no more )"
+_OPT_OUT_ASK = re.compile(
+    r"\b(" + _NEG_LEAD + r"call me|" + _NEG_LEAD + r"phone me|" + _NEG_LEAD + r"email me|"
+    + _NEG_LEAD + r"send|we (need|want)|but (can|could|please|call|email|send|we|i'?d|maybe)|maybe|"
+    r"(?<!call me )(?<!me )later|next (week|month|year)|right now|after the|instead|"
+    # Spanish
+    r"(?<!no me )(?<!nunca me )ll[aá]m(e|eme|enme)|pero (puede|pueden|llame|me|necesit)|quiz[aá]s?|tal vez|m[aá]s (tarde|adelante)|despu[eé]s|"
+    r"(el )?pr[oó]ximo (a[ñn]o|mes)|(ahora|ahorita) no|necesit(o|amos)|queremos)\b")
+# Negated asks in the same clause ("please do not email me or call me").
+_NEG_CLAUSE = re.compile(r"\b(don'?t|do not|never|no)\b[^.,;!?]*$")
+OPT_OUT_ASK_LABEL = "Opted out of texts but asked for something - a person should decide (call / email)"
+
+
+def opt_out_needs_person(body: str) -> bool:
+    """An opt-out whose words also carry a request or soft timing. Pure; the
+    caller still treats the reply as an opt-out in every other way."""
+    text = (body or "").strip().lower().replace("’", "'")
+    if not text or re.search(_STOP_WORDS, text):
+        return False
+    # "Stop texting me right now" / "leave me alone right now" is emphasis,
+    # not timing.
+    text = re.sub(r"\b(alone|me) right now\b", r"\1", text)
+    for m in _OPT_OUT_ASK.finditer(text):
+        if re.match(r"(call|phone|email) me|send", m.group(0)) and _NEG_CLAUSE.search(text[:m.start()]):
+            continue                                     # "do not email me or call me"
+        return True
+    return False
 # BAD DATA is about the RECORD (wrong person / number), never about a death in
 # the family - for a funeral home a bereaved reply is the most important one.
 _BAD_DATA_PATTERNS = (r"\b(wrong (number|person|email|address)|this is not (him|her|me)|not (him|her)|"
@@ -88,7 +164,9 @@ _BAD_DATA_PATTERNS = (r"\b(wrong (number|person|email|address)|this is not (him|
 # Of those, the ones about the PERSON (not the number/address on file).
 _WRONG_PERSON_PATTERNS = (r"\b(wrong person|this is not (him|her|me)|not (him|her)|no one (here )?by that name|"
                           r"(he|she) (doesn'?t|does not) live here|you have the wrong(?! (?:number|email|address))|not the right person)\b")
-_BEREAVEMENT = r"\b(passed away|passed on|died|deceased|funeral for|lost my (husband|wife|mother|father|son|daughter))\b"
+_BEREAVEMENT = (r"\b(passed away|passed on|died|deceased|funeral for|lost my (husband|wife|mother|father|son|daughter)|"
+                r"buried (my|our|him|her|mom|dad|mama|daddy|grand\w+)|laid (\w+ ){1,3}to rest|"
+                r"funeral (is|was|will be)|memorial (is|was|will be))\b")
 _LOW_PATTERNS = r"^\s*(ok(ay)?|k|thanks?( you)?|ok thanks?|thank you|thx|got it|received|👍|🙏)[\s.!]*$"
 
 _CLASS_FROM_REPLY = {
@@ -97,12 +175,27 @@ _CLASS_FROM_REPLY = {
 }
 
 
+def _hard_stop(body: str) -> bool:
+    try:
+        from app.services.optout_parser import contains_hard_stop_language
+        return bool(contains_hard_stop_language(body or ""))
+    except Exception:                                    # noqa: BLE001
+        return False
+
+
 def classify(body: str, reply_classification: Optional[str] = None) -> Dict:
     """Deterministic and explainable. A stated need beats a stray keyword."""
     text = (body or "").strip().lower()
     hot = [why for pat, why in _HOT_PATTERNS if re.search(pat, text)]
+    if _picks_a_time(text):
+        hot.insert(1 if hot and hot[0] == "wants a meeting or visit" else 0, _TIME_PICK_WHY)
     bereaved = bool(re.search(_BEREAVEMENT, text))
     if re.search(_STOP_WORDS, text):
+        return {"class": OPT_OUT, "reasons": ["asked to stop"]}
+    # The platform's own stop decision is final: a family who opted out is
+    # never paged as hot because the same text mentions a visit or a price
+    # ("Not interested in a visit, stop texting me.").
+    if (reply_classification or "").lower() == "dnc" or _hard_stop(body):
         return {"class": OPT_OUT, "reasons": ["asked to stop"]}
     if is_auto_reply(text) and not re.search(_OPT_OUT_PHRASES, text):
         return {"class": AUTO_REPLY, "reasons": ["automatic reply (driving / away), not a person"]}
@@ -110,7 +203,7 @@ def classify(body: str, reply_classification: Optional[str] = None) -> Dict:
         return {"class": WRONG_PERSON, "reasons": ["says we have the wrong person"]}
     if re.search(_BAD_DATA_PATTERNS, text) and not hot:
         return {"class": BAD_DATA, "reasons": ["says the number / address is wrong"]}
-    weak = {"interested", "requests follow-up"}
+    weak = {"interested", "requests follow-up", _TIME_PICK_WHY, "asked about a cita"}
     if hot and re.search(_OPT_OUT_PHRASES, text) and set(hot) <= weak:
         return {"class": OPT_OUT, "reasons": ["opted out or not interested"]}
     if hot:
@@ -122,16 +215,28 @@ def classify(body: str, reply_classification: Optional[str] = None) -> Dict:
     if bereaved:
         return {"class": HOT, "reasons": ["bereavement mentioned - needs a personal reply"]}
     upstream = _CLASS_FROM_REPLY.get((reply_classification or "").lower())
+    if upstream == BAD_DATA and re.search(_IDENTITY_ASK, text) and not re.search(_WRONG_SAID, text):
+        # "Who is this?" is a question about US, not a statement that the
+        # number is wrong (#7): it is answered, not sent to Data Review.
+        return {"class": ACTIVE, "reasons": ["asked who we are"]}
     if upstream in (OPT_OUT, BAD_DATA, HOT):
         return {"class": upstream, "reasons": ["classified as %s on arrival" % reply_classification]}
     if re.search(_LOW_PATTERNS, text) or not text:
         return {"class": LOW, "reasons": ["acknowledgement only"]}
+    if _names_a_time(text):
+        return {"class": ACTIVE, "reasons": ["talked about when"]}
     if re.search(_INFO_ASK, text):
         return {"class": ACTIVE, "reasons": ["wants more information"]}
     if "?" in text or upstream == ACTIVE:
         return {"class": ACTIVE, "reasons": ["asked a question"]}
     return {"class": ACTIVE if len(text.split()) >= 4 else LOW,
             "reasons": ["engaged reply" if len(text.split()) >= 4 else "short reply"]}
+
+
+_IDENTITY_ASK = r"\b(who is this|who's this|who are you|what is this (about|regarding)|qui[eé]n es)\b"
+# An explicit wrong-number / wrong-person statement keeps the upstream BAD DATA.
+_WRONG_SAID = r"\b(wrong|not (him|her|me|my)|no one|nobody|doesn'?t live|does not live|don'?t know (him|her)|" \
+              r"never heard of|n[uú]mero equivocado|equivocad[oa])\b"
 
 
 _INFO_ASK = r"\b(more info|information|details|send (me|it|the)|brochure|guide|packet|flyer|mail me)\b"
@@ -142,6 +247,9 @@ def intents(body: str, cls: Optional[str] = None) -> List[str]:
     wrong person, bad data, a bare acknowledgement, not interested)."""
     text = (body or "").strip().lower()
     found = [k for k, pat in _INTENT_PATTERNS if re.search(pat, text)]
+    if APPOINTMENT not in found and not re.search(_BEREAVEMENT, text) \
+            and cls not in (OPT_OUT, WRONG_PERSON, BAD_DATA) and (_names_a_time(text) or _picks_a_time(text)):
+        found.insert(0, APPOINTMENT)                     # a day / time named is about a visit
     if re.search(_OPT_OUT_PHRASES, text) and re.search(r"\b(not interested|no thank(s| you))\b", text):
         found.append(NOT_INTERESTED)
     implied = {OPT_OUT: I_OPT_OUT, WRONG_PERSON: I_WRONG_PERSON, BAD_DATA: I_BAD_DATA}.get(cls)

@@ -52,6 +52,13 @@ PRESETS = ("today", "24h", "7d", "30d", "all", "custom")
 
 
 # ── time ────────────────────────────────────────────────────────────────────
+
+def _booked_ct(b):
+    """A booked time is stored as the advisor's LOCAL wall time (see
+    app/services/booking_time.py), never UTC: shown in Central as booked."""
+    from app.services import booking_time
+    return datetime.fromisoformat(booking_time.wire_obj(b)).astimezone(CT)
+
 def _utc_naive(local_dt: datetime) -> datetime:
     return local_dt.astimezone(UTC).replace(tzinfo=None)
 
@@ -361,7 +368,7 @@ class Ledger:
             self.bookings.append({"kind": "appointment", "id": b.id, "lead_id": b.lead_id, "at": at,
                                   "channel": None, "appt_at": b.booked_time,
                                   "text": "%s · %s" % (b.appt_label or "Visit",
-                                                       b.booked_time.replace(tzinfo=UTC).astimezone(CT)
+                                                       _booked_ct(b)
                                                        .strftime("%a %b %-d, %-I:%M %p CT")),
                                   "result": b.status, "touch": touch_before(b.lead_id, at),
                                   "location_id": self.families[b.lead_id]["location_id"]})
@@ -873,7 +880,7 @@ def journey(db: Session, org_id: str, lead_id: str) -> Optional[Dict]:
             add(b.confirmed_at or b.created_at, "booked",
                 "Appointment confirmed" if b.calendar_event_id else "Appointment booked (not yet on calendar)",
                 "%s · %s" % (b.appt_label or "Visit",
-                             b.booked_time.replace(tzinfo=UTC).astimezone(CT).strftime("%a %b %-d, %-I:%M %p CT")),
+                             _booked_ct(b).strftime("%a %b %-d, %-I:%M %p CT")),
                 result=b.status)
     ev.sort(key=lambda e: e["at"])
     for e in ev:
