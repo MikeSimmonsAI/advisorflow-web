@@ -361,7 +361,7 @@ SYSTEM_PROMPT = """You write as {contact}, the family-services advisor at {locat
 
 FIRST PERSON, ALWAYS. Every message goes out signed by {contact}, so write as {contact}: "I", "me", "my", "I'd be glad to". NEVER refer to {contact} by name or in the third person ("{contact} would be glad to help", "{contact} can go over it", "so {contact} can answer") - that reads as two different people. "We" is fine for the team at {location}.
 
-YOUR PRIMARY GOAL is a confirmed IN-PERSON VISIT at {location} - the family sitting down with me, so I can answer their questions, explain what applies to their situation and go over their options or existing file. A guide, a mailed copy or a text exchange is a step toward that visit, never the finish line. Work in this order: understand exactly what they said; answer their question or concern directly; give one genuine, specific reason a visit would help THEM (their guide reviewed with them, their questions answered in person, their existing file and contacts checked); invite them in with two real times ({{TIMES}}); when they pick one, book it. Honour a decline, a "just mail it", a timing request or a preferred channel without pressure - never make information conditional on a visit, and never ask the same question twice.
+YOUR PRIMARY GOAL is to help THIS family, which MAY involve an IN-PERSON VISIT at {location} - the family sitting down with me, so I can answer their questions, explain what applies to their situation and go over their options or existing file. An existing customer who already bought a plan is NOT a new-plan prospect: acknowledgement and an answer can be the finish line. Never push scheduling before understanding their message. Work in this order: understand exactly what they said; answer their question or concern directly; give one genuine, specific reason a visit would help THEM (their guide reviewed with them, their questions answered in person, their existing file and contacts checked); invite them in with two real times ({{TIMES}}); when they pick one, book it. Honour a decline, a "just mail it", a timing request or a preferred channel without pressure - never make information conditional on a visit, and never ask the same question twice.
 
 WORK IN THIS ORDER (fill every part of the JSON):
 1. UNDERSTAND. What do they actually mean, including indirect or casual wording ("maybe after the holidays" = not now, later; "my daughter handles that" = involve the daughter; "ok" after times were offered is NOT a choice)? Their mood? Any questions, worries or objections? Did they change their mind or return to an earlier question? Read FAMILY MEMORY first - never ask for something they already told us.
@@ -390,7 +390,7 @@ HONOUR THEIR TIMING:
 - UNCLEAR "already got it / them / that": it may mean the guide, their benefits, or arrangements. If FAMILY MEMORY and the conversation don't settle which, ask ONE short, warm clarifying question first (e.g. "Glad to hear it, Ronald - do you mean you already have your veteran benefits paperwork, or the planning guide?") - no {{TIMES}} in that message.
 - "We already have plots / a plan / property" WITHOUT saying where: it may well be with us - don't close. Thank them and ask one warm question (is that here at {location}?) or offer a review of their file.
 - Plan with ANOTHER funeral home / cemetery, or "already took care of all that": thank them warmly and respect it - no times, no push. At most one optional sentence that we're here if they ever want anything reviewed ("answer" or "close").
-- Existing plan WITH US / "already have a plan with you" -> invite them in for an in-person FILE REVIEW: going over their existing arrangements, important contact information, family instructions and whether anyone else should be authorised to access their file. Reassuring and personal; never suggest their plan is invalid or that new forms are legally required. Offer {{TIMES}} (ask which kind of review only if it is genuinely unclear).
+- Existing plan WITH US / "we purchased a plan from you last December" -> treat them as an EXISTING CUSTOMER, not a new planning lead. Specifically acknowledge the purchase claim WITHOUT pretending to have verified their contract or file. If they are simply explaining they already purchased, use action "answer", ask briefly whether they need help with their existing arrangements, and do NOT offer {{TIMES}} or push a meeting. A FILE REVIEW is a valid service when the family asks for a meeting or review; only then offer times. A person checks the plan details.
 - Wants to CHANGE an existing plan (contact person, burial to cremation, wishes): that is exactly what a review with me is for - offer times ("offer_times"); not a hand-off.
 - "I need to talk to my husband / wife / kids first": NOT a no. Acknowledge warmly, say they're welcome to join, and ask one gentle question (or "follow_up_later" if they give a horizon). Never "close".
 - "When are you open?" / hours: there are no posted office hours in APPROVED INFORMATION - never invent any. Say I meet families by appointment and offer {{TIMES}} ("offer_times").
@@ -668,6 +668,21 @@ def validate_decision(d: Dict, body: str, conv, contact: Optional[str] = None) -
     if action == "close" and _EXISTING_PLAN.search(body or "") and not _ELSEWHERE.search(body or ""):
         problems.append("they said they already have plots / a plan but not WHERE - it may be with us. Don't "
                         "close: thank them and ask warmly whether it's with us, or offer a review of their file")
+    if existing_plan_purchased_with_us(body):
+        # "We bought a plan from you" is an existing-customer statement,
+        # not permission to invent an appointment or a new sales opportunity.
+        if action in ("offer_times", "book") and not _REQUESTS_EXISTING_PLAN_VISIT.search(body or ""):
+            problems.append("EXISTING CUSTOMER: they already purchased a plan FROM US but did not "
+                            "request an appointment. Use answer: acknowledge their existing "
+                            "arrangements and ask whether they need help with anything.")
+        if action == "close":
+            problems.append("EXISTING CUSTOMER: a previous purchase is not a refusal. "
+                            "Acknowledge their plan instead of closing them as uninterested.")
+        if action != "wait" and not re.search(
+                r"\b(plan|arrangements?|contract|plots?|property|purchas(?:e|ed)|bought|prepaid|pre-?need)\b",
+                reply, re.I):
+            problems.append("EXISTING CUSTOMER: the reply must acknowledge the existing "
+                            "plan or arrangements; generic scheduling filler is not an answer.")
     if (action == "mail_guide" and (body or "").strip() and not _PRINTED.search(body or "")   # not a follow-up
             and not (memory_of(conv) or {}).get("mail_request")):
         problems.append("they asked for the guide, not a printed or mailed copy - use send_guide (the system "
@@ -739,6 +754,28 @@ _MAIL_ONLY = re.compile(r"\b((just|only) (mail|send)|mail (it )?only|don'?t (wan
                         r"no (visit|meeting|calls?)|not (looking|wanting) to meet)", re.I)
 _ASKS_IF_HUMAN = re.compile(r"\b(robot|a bot|bot\b|\bai\b|automated|auto.?reply|real person|a real human|"
                             r"are you (a )?(human|person|real|computer|machine)|is this (a )?(person|human|real|computer))", re.I)
+_PLAN_PURCHASE_WITH_US = re.compile(
+    r"\b(?:bought|purchased?|paid for|signed up for)\b.{0,85}?"
+    r"\b(?:plan|arrangements?|contract|plots?|spaces?|cemetery property)\b.{0,65}?"
+    r"\b(?:from|with|through)\s+(?:you|your|this (?:funeral home|cemetery|location))\b", re.I)
+_REQUESTS_EXISTING_PLAN_VISIT = re.compile(
+    r"\b(?:can|could|would|may) (?:i|we)\b.{0,60}\b(?:meet|come in|visit|review|schedule|book)|"
+    r"\b(?:want|need|like|looking) to\b.{0,50}\b(?:meet|review|schedule|book|come in)|"
+    r"\b(?:appointment|schedule (?:a|an) (?:meeting|review|visit))\b", re.I)
+
+
+def existing_plan_purchased_with_us(body: str) -> bool:
+    """Family's claim about an existing plan, not a verified contract status."""
+    text = (body or "").strip()
+    if not _PLAN_PURCHASE_WITH_US.search(text):
+        return False
+    if re.search(r"\b(?:never|didn'?t|did not|haven'?t|have not)\s+"
+                 r"(?:already\s+)?(?:buy|bought|purchase|purchased|pay|paid|have)\b",
+                 text, re.I):
+        return False
+    return True
+
+
 _EXISTING_PLAN = re.compile(r"\b(already (have|got|bought|took care)|have a plan|prearrang|bought (plots?|"
                             r"spaces?|property))", re.I)
 _SENTENCE = re.compile(r"[^.!?]+[.!?]*")
@@ -1387,9 +1424,23 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         if not slots:
             slots, why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT)
         if not slots:
-            _handoff(db, prog, lead, conv, "no times to offer: %s" % why, notify=True)
-            text = "Thank you. I'll reach out to find a time that works for you."
-            action = "handoff"
+            # No calendar slots is an operational block, not a reason to replace
+            # the family's contextual reply with a canned appointment sentence.
+            # Hand to the advisor; do not send fabricated filler to a customer.
+            _handoff(db, prog, lead, conv,
+                     "no times to offer: %s; read the family's message before replying"
+                     % (why or "calendar unavailable"), notify=True)
+            if resp is not None:
+                # Inbound triage may have generated a generic suggested_reply.
+                # Do not leave a scheduling promise in the advisor's send box
+                # when the calendar cannot produce a real appointment.
+                resp.suggested_reply = None
+            _turn(db, conv, "system", None, action="handoff",
+                  reason="calendar unavailable; generic automatic reply suppressed",
+                  response_id=resp.id if resp else None)
+            db.commit()
+            return dict(out, action="handoff", state=conv.state,
+                        held=["calendar unavailable: human response required"])
         else:
             text = _ensure_times_question(text)
             text = _fill_times(text, slots)
