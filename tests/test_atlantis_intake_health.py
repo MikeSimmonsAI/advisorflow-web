@@ -84,6 +84,8 @@ def test_manager_sees_unassigned_and_recorded_time_to_first_contact(client, w):
     assert body["unassigned"]["count"] == 1
     assert [x["lead_id"] for x in body["unassigned"]["oldest"]] == [leads["two@gmail.com"].id]
     assert "not a verified call time" in body["basis"]
+    # until Platform #238 is fixed, the hours are labelled provisional
+    assert body["timing_status"] == "provisional" and "#238" in body["timing_note"]
     assert db.query(Message).count() == 0 and db.query(EmailMessage).count() == 0
 
 

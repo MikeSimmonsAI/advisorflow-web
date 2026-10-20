@@ -119,6 +119,7 @@ def test_staff_screens_work_in_a_real_browser_at_phone_width(client, ws):
         # 2. manager panel on the queues screen
         page.goto(ORIGIN + "/energy/follow-up")
         page.locator('[data-testid="intake-health"]').wait_for(timeout=30000)
+        assert "#238" in page.locator('[data-testid="timing-provisional"]').inner_text()
         assert page.locator('[data-kpi="unassigned"] .eo-kpi-n').inner_text().strip() in ("0", "1")
 
         # 3. an open hand-off, its outcome recorded from the Suppliers page

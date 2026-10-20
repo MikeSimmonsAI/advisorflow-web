@@ -46,7 +46,7 @@ export default function IntakeHealth() {
         {data.first_contact.map(c => (
           <div key={c.source} className="eo-kpi" data-kpi={c.source}>
             <span className="eo-kpi-n">{hrs(c.median_hours)}</span>
-            <span className="eo-kpi-l">{c.label}: typical time to first contact</span>
+            <span className="eo-kpi-l">{c.label}: typical time to first contact{data.timing_status === 'provisional' ? ' (approx.)' : ''}</span>
             <span className="eo-sub">{c.contacted}/{c.requests} contacted · {c.open} open{c.overdue ? ` · ${c.overdue} overdue` : ''}{c.cancelled ? ` · ${c.cancelled} cancelled` : ''}</span>
           </div>
         ))}
@@ -63,6 +63,9 @@ export default function IntakeHealth() {
       )}
       {data.open_by_owner.some(o => o.overdue) && (
         <p className="eo-note">Overdue first contacts: {data.open_by_owner.filter(o => o.overdue).map(o => `${o.owner || 'Unknown'} ${o.overdue}`).join(' · ')}</p>
+      )}
+      {data.timing_status === 'provisional' && (
+        <div className="eo-banner" data-testid="timing-provisional">{data.timing_note}</div>
       )}
       <p className="eo-note">{data.basis}</p>
     </section>

@@ -26,6 +26,13 @@ FIRST_CONTACT = {"website": "Website requests", "field_referral": "Field referra
 BASIS = ("Time to first contact = from the request's first-contact task being created to a person "
          "marking it done. It reflects when the contact was recorded, not a verified call time. "
          "Test records are excluded.")
+# Platform #238 (open): a website request's stored time is taken from the
+# visitor's browser and its time-zone offset is dropped, so website request
+# ages and "time to first contact" can be off by the visitor's UTC offset.
+# Until #238 is fixed and verified these numbers are PROVISIONAL.
+TIMING_STATUS = "provisional"
+TIMING_NOTE = ("Provisional: website request times can be off by a few hours until a shared "
+               "time-stamp fix (Platform #238) is verified. Counts are exact; hours are approximate.")
 
 
 def _not_test():
@@ -105,4 +112,6 @@ def report(db, *, org_id: str, scoped, now: datetime, days: int) -> Dict[str, An
         "first_contact": channels,
         "open_by_owner": by_owner,
         "basis": BASIS,
+        "timing_status": TIMING_STATUS,
+        "timing_note": TIMING_NOTE,
     }
