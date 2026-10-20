@@ -86,3 +86,13 @@ python -m pytest -q -p no:cacheprovider -W ignore -rf tests/test_atlantis_*.py t
 3. Hand the `public_capture` timezone finding to Lane D.
 4. Residential→commercial progression flags need a schema change. The path is documented in `SALES_PROGRAM.md`; coordinate with Lane D.
 5. Website copy/edge-case improvements (dev only) were not started.
+
+## 9. Pre-GO update (2026-10-20 01:28 CT)
+- **#246 tested SHA `43b8369e`**: main `29b2d4b1` merged in with no conflicts.
+  - 16/16 journeys pass.
+  - Consolidated suites: 195 passed. The only 2 failures are the SCI guard tests, which also fail on main.
+  - Staff browser test and frontend build pass.
+- First-contact hours are labelled **provisional** in the product (API `timing_status`, a banner, "(approx.)") until Platform #238's timestamp fix is verified live.
+- **Follow-up PR #250** (`feature/atlantis-lead-panels`, stacked on #246) adds the lead-page energy details and business opportunity panels. `LeadDetail.jsx` gets 2 lines, coordinated on #239. It needs its own GO, after #246.
+- Live Chariot online enrollment confirmed `false` (read-only, 01:20 CT). #116 untouched.
+- The controlled rollout plan is in the #237 comment "PRE-GO REPORT".
