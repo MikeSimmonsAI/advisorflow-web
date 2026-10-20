@@ -38,7 +38,7 @@ export default function HandoffOutcomes({ suppliers = [], refreshKey = 0 }) {
   const names = Object.fromEntries(suppliers.map(s => [s.key, s.name]))
   const load = useCallback(() => {
     // keep the current rows on screen while refreshing (no flash, no lost focus)
-    api.get(`/energy-ops/supplier-handoffs?state=${state}`).then(setData)
+    api.get(`/energy-ops/supplier-handoffs?state=${state}`).then(d => { setErr(''); setData(d) })
       .catch(e => setErr(e.message || 'Could not load hand-offs'))
   }, [state])
   useEffect(() => { load() }, [load, refreshKey])
@@ -49,9 +49,9 @@ export default function HandoffOutcomes({ suppliers = [], refreshKey = 0 }) {
         {state === 'open' ? 'Hand-offs waiting for an outcome' : 'All hand-offs'}
         {data && <> <span className="eo-pill">{data.total}</span></>}
       </h2>
-      <div className="eo-tabs" role="tablist">
+      <div className="eo-tabs" role="group" aria-label="Which hand-offs">
         {['open', 'all'].map(s => (
-          <button key={s} type="button" role="tab" aria-selected={state === s}
+          <button key={s} type="button" aria-pressed={state === s}
             className={`eo-btn${state === s ? ' eo-btn--primary' : ''}`} onClick={() => setState(s)}>
             {s === 'open' ? 'Waiting' : 'All'}
           </button>
@@ -100,6 +100,7 @@ function OutcomeForm({ row, onDone }) {
     setBusy(true); setMsg('')
     api.post(`/energy-ops/leads/${row.lead_id}/handoffs/${row.handoff.id}/outcome`, { outcome, source, note })
       .then(r => {
+        setOutcome(''); setNote('')
         const who = row.name || 'this customer'
         onDone(r.next_step ? `Saved for ${who}. ${r.next_step}`
           : `Saved for ${who}. Not enrolled - enrollment is the Enroll action only.`)

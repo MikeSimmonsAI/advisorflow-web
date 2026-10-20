@@ -39,6 +39,7 @@ OUTCOMES = ("no_answer", "door_hanger_left", "declined", "interested",
 LEAD_OUTCOMES = ("interested", "appointment_requested", "business_lead")
 ACTION = "energy.field_visit"
 TASK_SOURCE = "field_referral"
+FORWARD_SOURCE = "field_forward"   # owner told about a visit to their customer
 DUP_WINDOW = timedelta(hours=12)
 BASIS = ("Visits are what each rep recorded; location is not verified (no GPS). "
          "Enrollments are counted only from the Enroll action on Rate Requests.")
@@ -122,7 +123,7 @@ def record_visit(db, *, org, rep, data: Dict[str, Any], visible=None) -> Dict[st
 
     def _owner_task(lead, title, detail):
         db.add(LeadTask(organization_id=org.id, lead_id=lead.id, title=title, details=detail,
-                        due_at=now + timedelta(hours=24), status="open", source=TASK_SOURCE,
+                        due_at=now + timedelta(hours=24), status="open", source=FORWARD_SOURCE,
                         assigned_to_id=lead.assigned_to_id, created_by_id=rep.id))
 
     lead_id, result = None, "recorded"
@@ -207,6 +208,7 @@ def record_visit(db, *, org, rep, data: Dict[str, Any], visible=None) -> Dict[st
                        target_id=lead_id or _norm(address)[:120],
                        details={"outcome": outcome, "address": address, "zip_code": zip_code or None,
                                 "lead_id": lead_id, "result": result, "who": who or None,
+                                "note": (str(data.get("notes") or "").strip()[:1000] or None),
                                 "door_hanger": bool(data.get("door_hanger_left")) or outcome == "door_hanger_left"},
                        commit=False)
     db.commit()

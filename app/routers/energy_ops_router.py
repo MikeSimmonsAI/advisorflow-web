@@ -740,6 +740,8 @@ def update_move(move_id: str, payload: MoveUpdate, request: Request,
             changed[f] = True
             setattr(m, f, getattr(payload, f))
     if "services" in sent and payload.services is not None:
+        if m.status in ("completed", "cancelled") and payload.status in (None, m.status):
+            raise HTTPException(409, "This move is %s. Reopen it before changing services." % m.status)
         services = _validate_services(payload.services)
         old = json.loads(m.services) if m.services else []
         if services != old:

@@ -180,3 +180,16 @@ def test_cancelling_one_move_leaves_another_open_moves_tasks(client, w):
     r = client.patch("/energy-ops/moves/%s" % m.id, headers=w["h"], json={"status": "cancelled"}).json()
     assert r["status"] == "cancelled" and not r.get("tasks_cancelled")
     assert db.query(LeadTask).get(t["id"]).status == "open"
+
+
+def test_finished_move_services_are_frozen_until_reopened(client, w):
+    _move_form(client, w)
+    m = _the_move(w)
+    _tick_all(client, w, m)
+    assert client.patch("/energy-ops/moves/%s" % m.id, headers=w["h"],
+                        json={"status": "completed"}).status_code == 200
+    r = client.patch("/energy-ops/moves/%s" % m.id, headers=w["h"],
+                     json={"services": ["electricity_start", "internet", "other"]})
+    assert r.status_code == 409
+    row = client.get("/energy-ops/moves/%s" % m.id, headers=w["h"]).json()
+    assert row["pending_items"] == []

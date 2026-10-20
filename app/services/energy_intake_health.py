@@ -20,6 +20,7 @@ from sqlalchemy import or_
 
 from app.models.models import Lead, User
 from app.models.work_models import LeadTask
+from app.services.agency.common import CLOSED_LEAD_STATUSES
 
 FIRST_CONTACT = {"website": "Website requests", "field_referral": "Field referrals"}
 BASIS = ("Time to first contact = from the request's first-contact task being created to a person "
@@ -55,7 +56,7 @@ def report(db, *, org_id: str, scoped, now: datetime, days: int) -> Dict[str, An
     unassigned_q = (db.query(Lead)
                     .filter(Lead.organization_id == org_id, Lead.id.in_(scoped), _not_test(),
                             Lead.assigned_to_id.is_(None), Lead.tier == "new_inquiry",
-                            or_(Lead.status.is_(None), ~Lead.status.in_(("dnc", "dead")))))
+                            or_(Lead.status.is_(None), ~Lead.status.in_(CLOSED_LEAD_STATUSES))))
     oldest = unassigned_q.order_by(Lead.created_at.asc(), Lead.id.asc()).limit(25).all()
 
     rows = (db.query(LeadTask, Lead)
@@ -78,7 +79,8 @@ def report(db, *, org_id: str, scoped, now: datetime, days: int) -> Dict[str, An
                 o["overdue"] += 1
         oldest_open = max((_hours(t.created_at, now) or 0.0 for t, _ in open_), default=None)
         channels.append({
-            "source": src, "label": label, "requests": len(mine),
+            "source": src, "label": label,
+            "requests": sum(1 for t, _ in mine if t.status != "cancelled"),   # cancelled shown separately
             "contacted": len(done), "open": len(open_),
             "overdue": sum(1 for t, _ in open_ if t.due_at is not None and t.due_at < now),
             "cancelled": sum(1 for t, _ in mine if t.status == "cancelled"),

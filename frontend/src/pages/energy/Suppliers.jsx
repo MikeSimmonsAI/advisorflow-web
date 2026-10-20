@@ -18,8 +18,8 @@ export default function Suppliers() {
   const [sups, setSups] = useState(null)
   const [err, setErr] = useState('')
   const [tick, setTick] = useState(0)
-  const load = useCallback(() => {
-    setTick(t => t + 1)
+  const load = useCallback((refresh) => {
+    if (refresh === true) setTick(t => t + 1)
     api.get('/energy-ops/suppliers').then(d => setSups(d.suppliers)).catch(e => setErr(e.message || 'Could not load suppliers'))
   }, [])
   useEffect(() => { load() }, [load])
@@ -35,7 +35,7 @@ export default function Suppliers() {
       {err && <div className="eo-banner eo-banner--error">{err}</div>}
       <div className="eo-banner">A quote is not an enrollment. A customer is only enrolled once the supplier confirms it.</div>
 
-      <Handoff suppliers={sups || []} onDone={load} />
+      <Handoff suppliers={sups || []} onDone={() => load(true)} />
 
       <HandoffOutcomes suppliers={sups || []} refreshKey={tick} />
 

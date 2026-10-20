@@ -31,7 +31,7 @@ const RESULT = {
   marked_dnc: 'Marked do-not-contact.',
   recorded: 'Visit recorded.',
 }
-const BLANK = { outcome: 'no_answer', address: '', zip_code: '', first_name: '', last_name: '', phone: '', email: '', company: '', note: '', permission_to_contact: false }
+const BLANK = { outcome: 'no_answer', address: '', zip_code: '', first_name: '', last_name: '', phone: '', email: '', company: '', notes: '', permission_to_contact: false }
 
 export default function FieldDesk() {
   const [f, setF] = useState(BLANK)
@@ -87,7 +87,7 @@ export default function FieldDesk() {
             </label>
           )}
         </>)}
-        <label>Note<input value={f.note} onChange={set('note')} placeholder="Optional" /></label>
+        <label>Note<input value={f.notes} onChange={set('notes')} placeholder="Optional" /></label>
         <button type="submit" className="eo-btn eo-btn--primary" disabled={busy}>{busy ? 'Saving…' : 'Save visit'}</button>
         {msg && <div className={msg.err ? 'eo-banner eo-banner--error' : 'eo-note'}>{msg.text}{msg.lead && <> <Link to={`/leads/${msg.lead}`}>Open</Link></>}</div>}
       </form>

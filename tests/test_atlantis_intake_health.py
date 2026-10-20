@@ -109,3 +109,31 @@ def test_field_referrals_are_counted_and_overdue_shows_by_owner(client, w):
     assert field["requests"] == 1 and field["overdue"] == 1 and field["median_hours"] is None
     assert sum(o["overdue"] for o in body["open_by_owner"]) == 1
     assert client.get("/energy-ops/intake-health?days=0", headers=_h(w, w["mgr"])).status_code == 422
+
+
+def test_forwarded_visits_and_closed_leads_do_not_distort_the_numbers(client, w):
+    db = w["db"]
+    _form(client, w, "four@gmail.com", "(817) 555-0220")
+    known = db.query(Lead).filter_by(email="four@gmail.com").one()
+    known.assigned_to_id = w["mgr"].id
+    db.commit()
+    # the advisor cannot see this lead: their visit is forwarded to its owner
+    r = client.post("/energy-ops/field/visits", headers=_h(w, w["adv"]),
+                    json={"outcome": "do_not_contact", "phone": "817-555-0220", "address": "8 Synthetic Ct",
+                          "notes": "Resident said stop knocking"}).json()
+    assert r["result"] == "forwarded_to_owner"
+    t = db.query(LeadTask).filter_by(lead_id=known.id, source="field_forward").one()
+    assert t.title == "Review do-not-contact request from the field"
+    _form(client, w, "five@gmail.com", "(817) 555-0221")
+    lost = db.query(Lead).filter_by(email="five@gmail.com").one()
+    lost.status = "lost"
+    db.commit()
+    body = client.get("/energy-ops/intake-health", headers=_h(w, w["mgr"])).json()
+    field = next(c for c in body["first_contact"] if c["source"] == "field_referral")
+    assert field["requests"] == 0 and field["open"] == 0
+    assert body["unassigned"]["count"] == 0
+
+    from app.models.models import AuditLogEntry
+    e = db.query(AuditLogEntry).filter_by(action="energy.field_visit").order_by(AuditLogEntry.id.desc()).first()
+    details = e.details if isinstance(e.details, dict) else __import__("json").loads(e.details)
+    assert details["note"] == "Resident said stop knocking"

@@ -47,7 +47,7 @@ export default function IntakeHealth() {
           <div key={c.source} className="eo-kpi" data-kpi={c.source}>
             <span className="eo-kpi-n">{hrs(c.median_hours)}</span>
             <span className="eo-kpi-l">{c.label}: typical time to first contact</span>
-            <span className="eo-sub">{c.contacted}/{c.requests} contacted · {c.open} open{c.overdue ? ` · ${c.overdue} overdue` : ''}</span>
+            <span className="eo-sub">{c.contacted}/{c.requests} contacted · {c.open} open{c.overdue ? ` · ${c.overdue} overdue` : ''}{c.cancelled ? ` · ${c.cancelled} cancelled` : ''}</span>
           </div>
         ))}
       </div>
@@ -62,7 +62,7 @@ export default function IntakeHealth() {
         </table>
       )}
       {data.open_by_owner.some(o => o.overdue) && (
-        <p className="eo-note">Overdue first contacts: {data.open_by_owner.filter(o => o.overdue).map(o => `${o.owner} ${o.overdue}`).join(' · ')}</p>
+        <p className="eo-note">Overdue first contacts: {data.open_by_owner.filter(o => o.overdue).map(o => `${o.owner || 'Unknown'} ${o.overdue}`).join(' · ')}</p>
       )}
       <p className="eo-note">{data.basis}</p>
     </section>
