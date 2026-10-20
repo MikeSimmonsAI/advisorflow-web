@@ -21,6 +21,7 @@ REASONS = {
     "TENANT_ISSUE": "Tenant situation needs judgment",
     "UNCLEAR": "EvoSense could not read the reply with confidence",
     "CONFLICT": "Sources conflict on a material fact",
+    "PRICE_UNCLEAR": "Seller named more than one price — confirm which one before relying on it",
     "LEGAL_SENSITIVE": "Sensitive or legal topic raised",
     "PROMOTION_READY": "Ready to promote into Wholesale",
     "AI_REVIEW_PENDING": "AI review pending — the seller's reply is saved but could not be read automatically",
