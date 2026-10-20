@@ -1144,3 +1144,16 @@ def command_journey(lead_id: str, db: Session = Depends(get_db), user: User = De
     if j is None:
         raise HTTPException(status_code=404, detail="Family not found.")
     return j
+
+
+@router.get("/pipeline-health")
+def command_pipeline_health(hours: int = Query(24, ge=1, le=336), db: Session = Depends(get_db),
+                            user: User = Depends(require_tenant_or_observer)):
+    """PIPELINE HEALTH (Phase Nine): stage-by-stage counts for the window and
+    every place a family's reply is stuck - what failed, where, how many,
+    since when, record ids to open, and the action needed. Read-only; no
+    names, numbers, emails or message words. Managers (and view-only
+    spectators) of THIS workspace only, like /program/self-check."""
+    from app.services.programs import pipeline_health
+    prog = _program(db, user)
+    return pipeline_health.report(db, prog, hours=hours)
