@@ -117,17 +117,6 @@ def move_services(text: Any) -> List[str]:
     return out
 
 
-def _recipients(db: Session, *, lead, site, organization) -> List[str]:
-    from app.models.models import User
-    if lead.assigned_to_id:
-        return [lead.assigned_to_id]
-    if getattr(site, "default_owner_user_id", None):
-        return [site.default_owner_user_id]
-    return [r[0] for r in db.query(User.id).filter(
-        User.organization_id == organization.id, User.role == "org_admin",
-        User.is_active.isnot(False)).all()]
-
-
 def _step(db: Session, name: str, fn) -> Optional[Any]:
     """Run one follow-up step in its own savepoint; never raise."""
     sp = db.begin_nested()

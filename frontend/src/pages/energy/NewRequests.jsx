@@ -26,7 +26,8 @@ function age(h) {
 export default function NewRequests() {
   const [params] = useSearchParams()
   const focus = params.get('open')
-  const [state, setState] = useState('unclaimed')
+  // a link to one request opens on All, so an already-assigned one is found too
+  const [state, setState] = useState(focus ? 'all' : 'unclaimed')
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
@@ -61,6 +62,7 @@ export default function NewRequests() {
         ))}
       </div>
       {msg && <div className="eo-note" role="status" data-testid="new-requests-msg">{msg}</div>}
+      {data.truncated && <div className="eo-note">Showing the oldest 200. Claim or assign some to see the rest.</div>}
       <div className="eo-panel">
         {data.items.length === 0 ? <div className="eo-empty">{state === 'unclaimed' ? 'Nothing waiting to be claimed.' : 'Nothing here.'}</div> : (
           <table className="eo-table">

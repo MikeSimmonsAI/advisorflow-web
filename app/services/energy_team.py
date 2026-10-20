@@ -88,12 +88,16 @@ def people(db: Session, org_id: str) -> List[Dict[str, Any]]:
     over users.role, as everywhere else on the platform)."""
     from app.models.sales_models import Membership, SCOPE_CUSTOMER_ORG
     from app.services.customer_provisioning import customer_people
-    ws_roles = {m.user_id: m.role for m in db.query(Membership).filter(
-        Membership.scope_type == SCOPE_CUSTOMER_ORG, Membership.scope_id == org_id,
-        Membership.is_active == True).all()}                       # noqa: E712
+    ws = {}
+    for m in db.query(Membership).filter(Membership.scope_type == SCOPE_CUSTOMER_ORG,
+                                         Membership.scope_id == org_id).all():
+        if m.is_active or m.user_id not in ws:      # an active row wins over an old one
+            ws[m.user_id] = (m.role, bool(m.is_active))
     out = []
     for u in customer_people(db, org_id):
-        role = ws_roles.get(u.id) or u.role
+        if u.id in ws and not ws[u.id][1]:
+            continue                                # membership turned off = left this team
+        role = ws[u.id][0] if u.id in ws else u.role
         if u.is_active is False or role not in TEAM_ROLES:
             continue
         out.append({"user_id": u.id, "name": u.full_name or u.email, "email": u.email,
@@ -146,8 +150,14 @@ def _switch_on() -> bool:
     return gate.source_enabled(gate.ENERGY_TEAM_ALERT)
 
 
+CODE_TTL_MINUTES = 30
+CODE_MAX_ATTEMPTS = 5
+
+
 def _hash(org_id: str, code: str) -> str:
-    return hashlib.sha256(("%s:%s" % (org_id, code.strip())).encode()).hexdigest()
+    import os
+    key = (os.getenv("JWT_SECRET") or "energy-team").encode()
+    return hmac.new(key, ("%s:%s" % (org_id, code.strip())).encode(), hashlib.sha256).hexdigest()
 
 
 def email_status(db: Session, org_id: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -226,6 +236,7 @@ def send_test(db: Session, org_id: str, actor_id: str) -> Dict[str, Any]:
     if not res["sent"]:
         raise RuntimeError("The test email was not sent: %s" % (res["error"] or "unknown error"))
     mb.update({"code_hash": _hash(org_id, code), "test_sent_at": _stamp(), "test_from": sender.get("from_email"),
+               "attempts": 0,
                "verified_at": None, "verified_address": None, "verified_from": None})
     save(db, org_id, data, actor_id)
     return email_status(db, org_id, data)
@@ -236,7 +247,20 @@ def confirm(db: Session, org_id: str, code: str, actor_id: str) -> Dict[str, Any
     mb = data["mailbox"]
     if not mb.get("code_hash"):
         raise ValueError("Send a test code first.")
+    try:
+        sent_at = datetime.strptime(mb.get("test_sent_at") or "", "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        sent_at = None
+    if sent_at is None or (_now() - sent_at).total_seconds() > CODE_TTL_MINUTES * 60 \
+            or int(mb.get("attempts") or 0) >= CODE_MAX_ATTEMPTS:
+        mb["code_hash"] = None
+        save(db, org_id, data, actor_id)
+        db.commit()
+        raise ValueError("That code has expired or had too many tries. Send a new test code.")
     if not hmac.compare_digest(mb["code_hash"], _hash(org_id, code or "")):
+        mb["attempts"] = int(mb.get("attempts") or 0) + 1
+        save(db, org_id, data, actor_id)
+        db.commit()
         raise ValueError("That code does not match the last test email.")
     mb.update({"verified_at": _stamp(), "verified_address": mb.get("address"),
                "verified_from": mb.get("test_from"), "code_hash": None})
@@ -292,9 +316,13 @@ def alert_new_request(db: Session, *, org, lead, event_key: str, origin: str, wh
     msg = "%s from %s%s. %s" % (label, _lead_name(lead), (": " + what[:80]) if what else "", tail)
     if getattr(lead, "is_test", False):
         msg = "TEST record - " + msg
+    can_inbox = {p["user_id"] for p in team if p["is_manager"] or flags(p, data)["assignable"]}
     for uid in recipients:
+        link = ("%s&open=%s" % (INBOX_LINK, lead.id)) if uid in can_inbox else "/energy/follow-up"
+        if owner and uid == owner["user_id"]:
+            link = "/leads/%s?tab=overview" % lead.id
         db.add(Notification(user_id=uid, lead_id=lead.id, type=NotificationType.DEMO_REQUEST,
-                            message=msg[:480], link="%s&open=%s" % (INBOX_LINK, lead.id)))
+                            message=msg[:480], link=link))
 
     status = email_status(db, org.id, data)
     if getattr(lead, "is_test", False):
@@ -304,26 +332,64 @@ def alert_new_request(db: Session, *, org, lead, event_key: str, origin: str, wh
     else:
         to = [status["mailbox"]] + [(p["notification_email"] or p["email"]) for p in team
                                     if flags(p, data)["email"] and (p["notification_email"] or p["email"])]
-        seen, results = set(), []
-        html = ("<p><b>%s</b></p><p>Open New Requests in the app to claim or assign it. "
-                "No message has been sent to the customer.</p>" % msg.replace("<", "&lt;"))
+        seen, uniq = set(), []
         for addr in to:
-            if addr.lower() in seen:
-                continue
-            seen.add(addr.lower())
-            results.append(_send(db, org.id, addr, "New %s - %s" % (label.lower(), _lead_name(lead)), html))
-        email = {"state": "attempted", "sent": sum(1 for r in results if r["sent"]),
-                 "failed": sum(1 for r in results if not r["sent"]), "results": results}
+            if addr.lower() not in seen:
+                seen.add(addr.lower())
+                uniq.append(addr)
+        # QUEUED, not sent: the emails go out only after this request is
+        # committed (see _after_commit), so a rolled-back request never
+        # emails anyone and a retry cannot email twice.
+        email = {"state": "queued", "to": uniq,
+                 "subject": "New %s - %s" % (label.lower(), _lead_name(lead)),
+                 "html": ("<p><b>%s</b></p><p>Open New Requests in the app to claim or assign it. "
+                          "No message has been sent to the customer.</p>" % msg.replace("<", "&lt;"))}
     event.details = json.dumps({"lead_id": lead.id, "origin": origin, "in_app": recipients,
                                 "fallback_to_managers": fallback, "assigned_to_id": lead.assigned_to_id,
                                 "by": actor_id, "email": email, "at": _stamp()})
+    if email["state"] == "queued":
+        _send_after_commit(db, org.id, event.id)
     return {"duplicate": False, "event_key": event_key, "in_app": len(recipients),
-            "fallback_to_managers": fallback, "email": email}
+            "fallback_to_managers": fallback, "email": {k: v for k, v in email.items() if k != "html"}}
+
+
+def _send_after_commit(db: Session, org_id: str, event_id: str) -> None:
+    from sqlalchemy import event as sa_event
+
+    def _fire(session):
+        try:
+            deliver_queued(session.get_bind(), org_id, event_id)
+        except Exception:                                   # noqa: BLE001
+            log.exception("energy_team: queued alert email failed for event %s", event_id)
+    sa_event.listen(db, "after_commit", _fire, once=True)
+
+
+def deliver_queued(bind, org_id: str, event_id: str) -> Dict[str, Any]:
+    """Send one committed event's queued emails in a fresh session and record
+    exactly what happened. An event that was rolled back is simply not found."""
+    from sqlalchemy.orm import Session as _S
+    from app.models.energy_models import EnergyRequestAlert
+    s = _S(bind=bind)
+    try:
+        ev = s.get(EnergyRequestAlert, event_id)
+        d = _json(ev.details) if ev is not None else {}
+        em = d.get("email") or {}
+        if ev is None or em.get("state") != "queued":
+            return {"state": "nothing"}
+        results = [_send(s, org_id, addr, em.get("subject") or "New request", em.get("html") or "")
+                   for addr in (em.get("to") or [])]
+        d["email"] = {"state": "attempted", "sent": sum(1 for r in results if r["sent"]),
+                      "failed": sum(1 for r in results if not r["sent"]), "results": results}
+        ev.details = json.dumps(d)
+        s.commit()
+        return d["email"]
+    finally:
+        s.close()
 
 
 def apply_default_advisor(db: Session, org_id: str, lead) -> Optional[str]:
     """New, unowned request + a default advisor set -> they own it."""
-    if lead.assigned_to_id:
+    if lead.assigned_to_id or (lead.tier or "") not in ("", "web_lead", "new_inquiry"):
         return None
     uid = default_advisor(db, org_id)
     if uid:
@@ -349,17 +415,41 @@ def _first_contact_tasks(db: Session, org_id: str, lead_id: str):
                                      LeadTask.source.in_(FIRST_CONTACT_SOURCES), LeadTask.status == "open").all()
 
 
+def _requests_q(db: Session, org_id: str):
+    """A NEW REQUEST = a lead in this workspace, in New, not closed, with an open
+    first-contact task from the website or a field referral. Imported or older
+    leads that merely sit in the New tier are not requests and never appear."""
+    from sqlalchemy import or_
+    from app.models.models import Lead
+    from app.models.work_models import LeadTask
+    open_task = db.query(LeadTask.lead_id).filter(
+        LeadTask.organization_id == org_id, LeadTask.source.in_(FIRST_CONTACT_SOURCES),
+        LeadTask.status == "open", LeadTask.lead_id.isnot(None))
+    return db.query(Lead).filter(Lead.organization_id == org_id, Lead.tier == "new_inquiry",
+                                 or_(Lead.status.is_(None), ~Lead.status.in_(CLOSED)),
+                                 Lead.id.in_(open_task.scalar_subquery()))
+
+
+def is_request(db: Session, org_id: str, lead_id: str) -> bool:
+    from app.models.models import Lead
+    return _requests_q(db, org_id).filter(Lead.id == lead_id).first() is not None
+
+
+LIMIT = 200
+
+
 def inbox(db: Session, org_id: str, viewer, is_manager: bool, state: str = "unclaimed") -> Dict[str, Any]:
     from sqlalchemy import or_
     from app.models.models import Lead, User
     from app.models.work_models import LeadTask
-    base = db.query(Lead).filter(Lead.organization_id == org_id, Lead.tier == "new_inquiry",
-                                 or_(Lead.status.is_(None), ~Lead.status.in_(CLOSED)))
+    base = _requests_q(db, org_id)
+    visible_all = base if is_manager else base.filter(
+        or_(Lead.assigned_to_id.is_(None), Lead.assigned_to_id == viewer.id))
     counts = {"unclaimed": base.filter(Lead.assigned_to_id.is_(None)).count(),
-              "mine": base.filter(Lead.assigned_to_id == viewer.id).count(), "all": base.count()}
+              "mine": base.filter(Lead.assigned_to_id == viewer.id).count(), "all": visible_all.count()}
     q = base.filter(Lead.assigned_to_id.is_(None)) if state == "unclaimed" else \
-        base.filter(Lead.assigned_to_id == viewer.id) if state == "mine" else base
-    leads = q.order_by(Lead.created_at.asc(), Lead.id.asc()).limit(200).all()
+        base.filter(Lead.assigned_to_id == viewer.id) if state == "mine" else visible_all
+    leads = q.order_by(Lead.created_at.asc(), Lead.id.asc()).limit(LIMIT).all()
     ids = [l.id for l in leads]
     tasks: Dict[str, Any] = {}
     if ids:
@@ -394,7 +484,8 @@ def inbox(db: Session, org_id: str, viewer, is_manager: bool, state: str = "uncl
             "phone": l.phone if open_ok else None, "email": l.email if open_ok else None,
             "can_open": open_ok, "link": "/leads/%s?tab=overview" % l.id if open_ok else None,
         })
-    return {"state": state, "counts": counts, "items": rows}
+    return {"state": state, "counts": counts, "items": rows,
+            "truncated": counts.get(state, 0) > LIMIT}
 
 
 def _take(db: Session, org, lead_id: str, new_owner_id: str, actor_id: str, how: str, allow_reassign: bool):
@@ -402,8 +493,8 @@ def _take(db: Session, org, lead_id: str, new_owner_id: str, actor_id: str, how:
     from app.routers.audit_log_router import log_action
     from app.services.energy_suppliers import _lock
     lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == org.id).first()
-    if lead is None:
-        raise LookupError("Request not found")
+    if lead is None or not is_request(db, org.id, lead_id):
+        raise LookupError("Not an open new request in this workspace.")
     lead = _lock(db, lead)
     if lead.assigned_to_id == new_owner_id:
         return lead, False

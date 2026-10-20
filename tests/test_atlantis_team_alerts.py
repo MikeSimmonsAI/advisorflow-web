@@ -351,3 +351,107 @@ def test_add_teammate_uses_the_existing_invitation(client, w, sent):
     w["db"].commit()
     _, later = _form(client, w, "AfterNina")
     assert nina["user_id"] not in _alerted(w, later)
+
+
+# 9 ── review fixes: only genuine open requests are in the inbox or claimable
+def test_only_open_requests_are_in_the_inbox_or_claimable(client, w, sent):
+    db = w["db"]
+    imported = Lead(organization_id=w["org"].id, first_name="Imported", last_name="Row", tier="new_inquiry",
+                    status="new", phone="(214) 555-0999", email="imported@gmail.com")
+    db.add(imported)
+    db.commit()
+    _, real = _form(client, w, "Real")
+    items = {i["lead_id"] for i in client.get("/energy-ops/new-requests?state=all", headers=_h(w, w["mgr"])).json()["items"]}
+    assert real.id in items and imported.id not in items
+    assert client.post("/energy-ops/new-requests/%s/claim" % imported.id, headers=_h(w, w["ava"])).status_code == 404
+    assert client.post("/energy-ops/new-requests/%s/assign" % imported.id, headers=_h(w, w["mgr"]),
+                       json={"user_id": w["ava"].id}).status_code == 404
+    db.refresh(imported)
+    assert imported.assigned_to_id is None
+    # once the first contact is done, the request leaves the inbox
+    client.post("/energy-ops/new-requests/%s/claim" % real.id, headers=_h(w, w["ava"]))
+    t = db.query(LeadTask).filter_by(lead_id=real.id, source="website").one()
+    t.status = "done"
+    db.commit()
+    assert real.id not in {i["lead_id"] for i in client.get("/energy-ops/new-requests?state=all",
+                                                             headers=_h(w, w["mgr"])).json()["items"]}
+
+
+def test_advisors_see_unclaimed_and_their_own_but_not_colleagues(client, w, sent):
+    _, a = _form(client, w, "ForAva")
+    _, b = _form(client, w, "ForBen")
+    _, c = _form(client, w, "Open")
+    client.post("/energy-ops/new-requests/%s/claim" % a.id, headers=_h(w, w["ava"]))
+    client.post("/energy-ops/new-requests/%s/claim" % b.id, headers=_h(w, w["ben"]))
+    seen = {i["lead_id"] for i in client.get("/energy-ops/new-requests?state=all", headers=_h(w, w["ava"])).json()["items"]}
+    assert seen == {a.id, c.id}
+    mgr = {i["lead_id"] for i in client.get("/energy-ops/new-requests?state=all", headers=_h(w, w["mgr"])).json()["items"]}
+    assert {a.id, b.id, c.id} <= mgr
+
+
+def test_someone_whose_membership_was_turned_off_is_off_the_team(client, w, sent):
+    from app.models.sales_models import Membership, SCOPE_CUSTOMER_ORG
+    db = w["db"]
+    _set(client, w, w["ava"], in_app=True)
+    db.add(Membership(user_id=w["ava"].id, scope_type=SCOPE_CUSTOMER_ORG, scope_id=w["org"].id,
+                      role="advisor", is_active=False))
+    db.commit()
+    team = client.get("/energy-ops/team", headers=_h(w, w["mgr"])).json()
+    assert w["ava"].id not in {m["user_id"] for m in team["members"]}
+    _, lead = _form(client, w, "AfterLeave")
+    assert w["ava"].id not in _alerted(w, lead)
+    assert client.post("/energy-ops/new-requests/%s/claim" % lead.id, headers=_h(w, w["ava"])).status_code == 403
+
+
+def test_mailbox_code_expires_and_locks_after_five_wrong_tries(client, w, sent, monkeypatch):
+    h = _h(w, w["mgr"])
+    monkeypatch.setattr("app.services.email_service.describe_email_sender",
+                        lambda db_, org_id: {"ready": True, "from_email": "team@atlantis.example.test", "reason": None})
+    monkeypatch.setenv("OUTBOUND_EMAIL_ENERGY_TEAM_ALERT", "true")
+    client.put("/energy-ops/team/mailbox", headers=h, json={"address": "alerts@atlantis.example.test"})
+    client.post("/energy-ops/team/mailbox/send-test", headers=h)
+    code = sent[-1]["subject"].split(": ")[-1]
+    wrong = "%06d" % ((int(code) + 1) % 1000000)
+    for _ in range(5):
+        assert client.post("/energy-ops/team/mailbox/confirm", headers=h, json={"code": wrong}).status_code == 422
+    r = client.post("/energy-ops/team/mailbox/confirm", headers=h, json={"code": code})
+    assert r.status_code == 422 and "Send a new test code" in r.json()["detail"]
+    # a fresh code works; an old one (expired) does not
+    client.post("/energy-ops/team/mailbox/send-test", headers=h)
+    code2 = sent[-1]["subject"].split(": ")[-1]
+    from app.services import energy_team
+    data = energy_team.load(w["db"], w["org"].id)
+    data["mailbox"]["test_sent_at"] = "2020-01-01T00:00:00Z"
+    energy_team.save(w["db"], w["org"].id, data, w["mgr"].id)
+    w["db"].commit()
+    assert client.post("/energy-ops/team/mailbox/confirm", headers=h, json={"code": code2}).status_code == 422
+
+
+def test_team_email_goes_out_only_after_the_request_is_saved(client, w, sent, monkeypatch):
+    from app.models.energy_models import EnergyRequestAlert
+    from app.services import energy_team
+    h = _h(w, w["mgr"])
+    monkeypatch.setattr("app.services.email_service.describe_email_sender",
+                        lambda db_, org_id: {"ready": True, "from_email": "team@atlantis.example.test", "reason": None})
+    monkeypatch.setenv("OUTBOUND_EMAIL_ENERGY_TEAM_ALERT", "true")
+    client.put("/energy-ops/team/mailbox", headers=h, json={"address": "alerts@atlantis.example.test"})
+    client.post("/energy-ops/team/mailbox/send-test", headers=h)
+    client.post("/energy-ops/team/mailbox/confirm", headers=h, json={"code": sent[-1]["subject"].split(": ")[-1]})
+    db = w["db"]
+    before = len(sent)
+    # a request whose transaction is rolled back emails nobody
+    lead = Lead(organization_id=w["org"].id, first_name="Rolled", last_name="Back", tier="new_inquiry", status="new")
+    db.add(lead)
+    db.flush()
+    out = energy_team.alert_new_request(db, org=w["org"], lead=lead, event_key="website:test:rollback", origin="website")
+    assert out["email"]["state"] == "queued" and len(sent) == before       # nothing sent yet
+    db.rollback()
+    db.commit()
+    assert len(sent) == before
+    assert db.query(EnergyRequestAlert).filter_by(event_key="website:test:rollback").count() == 0
+    # a committed one sends, and records the result
+    _, real = _form(client, w, "Saved")
+    assert len(sent) == before + 1 and sent[-1]["to"] == "alerts@atlantis.example.test"
+    ev = db.query(EnergyRequestAlert).filter_by(lead_id=real.id).one()
+    db.refresh(ev)
+    assert json.loads(ev.details)["email"]["state"] == "attempted"
