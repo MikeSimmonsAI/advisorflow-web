@@ -170,7 +170,7 @@ function NewMove({ meta, onClose, onCreated }) {
 // Link the move to an existing customer by SEARCHING (name, phone, email) -
 // staff never know an internal record id. Uses the same /leads/ search the
 // composer uses, so it is scoped to what this person may see.
-function LeadPicker({ value, onPick }) {
+export function LeadPicker({ value, onPick }) {
   const [q, setQ] = useState('')
   const [results, setResults] = useState([])
   const [picked, setPicked] = useState(null)

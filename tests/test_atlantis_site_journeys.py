@@ -249,3 +249,49 @@ def test_request_kind_mapping():
     assert esi.request_kind({"request_type": "Analyze my current bill"}) == "bill_review"
     assert esi.request_kind({"request_type": "something else"}) == "advisor"
     assert esi.move_services("Electricity, TV, Home Warranty") == ["electricity_start", "internet", "other"]
+
+
+# ── supplier hand-off (manual; nothing is sent to any supplier) ─────────────
+
+def test_residential_request_handed_off_records_and_opens_follow_up(client, w):
+    db = w["db"]
+    _post(client, w["slug"], _base("Hal", request_type="Compare electricity options"))
+    lead = _only_lead(db, w["org"])
+    cat = client.get("/energy-ops/suppliers", headers=_h(db, w["admin"])).json()["suppliers"]
+    chariot = next(s for s in cat if s["key"] == "chariot")
+    assert chariot["online_enrollment"] is False            # Phase 2 switch stays off
+    r = client.post("/energy-ops/leads/%s/handoff" % lead.id, headers=_h(db, w["admin"]),
+                    json={"supplier": "comparepower", "note": "Sent link"})
+    assert r.status_code == 200, r.text
+    db.refresh(lead)
+    cf = json.loads(lead.custom_fields)
+    assert cf["supplier_handoffs"][0]["supplier"] == "comparepower"
+    assert lead.tier == "new_inquiry"                      # a hand-off is not an enrollment
+    titles = {t.title for t in db.query(LeadTask).filter_by(lead_id=lead.id)}
+    assert "Confirm outcome with ComparePower" in titles
+    _nothing_sent(db)
+
+
+def test_business_cannot_be_handed_to_residential_only_chariot(client, w):
+    db = w["db"]
+    _post(client, w["slug"], _base("Bo", request_type="Commercial energy procurement",
+                                   company="Synthetic Shop", locations="1"))
+    lead = _only_lead(db, w["org"])
+    h = _h(db, w["admin"])
+    assert client.post("/energy-ops/leads/%s/handoff" % lead.id, headers=h,
+                       json={"supplier": "chariot"}).status_code == 409
+    assert client.post("/energy-ops/leads/%s/handoff" % lead.id, headers=h,
+                       json={"supplier": "gexa"}).status_code == 200
+
+
+def test_handoff_is_scoped_to_the_workspace_and_the_owner(client, w):
+    db = w["db"]
+    _post(client, w["slug"], _base("Ivy", request_type="Compare electricity options"))
+    lead = _only_lead(db, w["org"])
+    body = {"supplier": "gexa"}
+    assert client.post("/energy-ops/leads/%s/handoff" % lead.id, headers=_h(db, w["fadmin"]),
+                       json=body).status_code == 404       # other tenant
+    assert client.post("/energy-ops/leads/%s/handoff" % lead.id, headers=_h(db, w["adv"]),
+                       json=body).status_code in (403, 404)  # not this advisor's customer
+    assert client.post("/energy-ops/leads/%s/handoff" % lead.id, headers=_h(db, w["admin"]),
+                       json={"supplier": "nobody"}).status_code == 422
