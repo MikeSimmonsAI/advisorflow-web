@@ -7,6 +7,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../../api/client'
 import { CLASS_LABEL, CLASS_TONE, Chip, Empty, ErrorLine, FilterChips, Icon, Kpi, PageHead, SearchBox, ago, errText, initials, when } from './ui'
+import { queueMatches, sortInbox, statusMatches } from './inboxModel'
+import OutreachPulse from './OutreachPulse'
 
 const OPTED_OUT_STATUSES = ['dnc', 'opted_out', 'do_not_contact', 'unsubscribed']
 
@@ -14,6 +16,9 @@ export default function Responses({ locationId, onChange, navigate }) {
   const [q, setQ] = useState('')
   const [channel, setChannel] = useState('all')        // all | sms | email | calls | unknown
   const [status, setStatus] = useState('open')
+  const [queue, setQueue] = useState('attention')
+  const [sortBy, setSortBy] = useState('attention')
+  const [total, setTotal] = useState(null)
   const [cls, setCls] = useState('')
   const [rows, setRows] = useState(null)
   const [calls, setCalls] = useState(null)
@@ -24,20 +29,24 @@ export default function Responses({ locationId, onChange, navigate }) {
 
   const load = useCallback(() => {
     const q = new URLSearchParams()
-    q.set('status', status)
-    if (cls) q.set('response_class', cls)
+    q.set('limit', '500') // all statuses, server-capped; metrics disclose truncation
     if (locationId) q.set('location_id', locationId)
     const mine = ++seq.current
     api.get(`/program/responses?${q}`)
-      .then(d => { if (mine === seq.current) { setRows(d.items || []); setErr('') } })
-      .catch(e => { if (mine === seq.current) { setErr(errText(e)); setRows([]) } })
-  }, [status, cls, locationId])
+      .then(d => { if (mine === seq.current) { setRows(d.items || []); setTotal(d.total ?? null); setErr('') } })
+      .catch(e => { if (mine === seq.current) { setErr(errText(e)); setRows([]); setTotal(null) } })
+  }, [locationId])
   const loadSide = useCallback(() => {
     api.get('/voicemails').then(d => setCalls(Array.isArray(d) ? d : (d.items || d.voicemails || []))).catch(() => setCalls([]))
     api.get('/program/unmatched-replies').then(d => setUnknown(Array.isArray(d) ? d : [])).catch(() => setUnknown([]))
   }, [])
   useEffect(() => { load() }, [load])
   useEffect(() => { loadSide() }, [loadSide])
+  // Poll visible inbox only; do not mark messages as viewed on a refresh.
+  useEffect(() => {
+    const t = setInterval(() => { if (document.visibilityState === 'visible') { load(); loadSide() } }, 30000)
+    return () => clearInterval(t)
+  }, [load, loadSide])
 
   const view = r => {
     setSel({ kind: 'response', item: r })
@@ -55,7 +64,10 @@ export default function Responses({ locationId, onChange, navigate }) {
 
   const term = q.trim().toLowerCase()
   const hit = (...xs) => !term || xs.some(x => String(x || '').toLowerCase().includes(term))
-  const list = (rows || []).filter(r => (channel === 'all' || r.channel === channel) && hit(r.name, r.body, r.summary, r.location, r.source_lead_id))
+  const list = sortInbox((rows || []).filter(r =>
+    statusMatches(r, status) && queueMatches(r, queue) &&
+    (!cls || r.class === cls) && (channel === 'all' || r.channel === channel) &&
+    hit(r.name, r.body, r.summary, r.location, r.source_lead_id)), sortBy)
   const callList = (calls || []).filter(c => hit(c.lead_name, c.from, c.transcript))
   const unkList = unknown.filter(u => hit(u.from, u.subject, u.body, u.alias))
   const all = rows || []
@@ -63,12 +75,24 @@ export default function Responses({ locationId, onChange, navigate }) {
   const hotCount = all.filter(r => r.class === 'hot' && r.status !== 'closed').length
   const activeCount = all.filter(r => r.status === 'active').length
   const slaCount = all.filter(r => r.sla_breached).length
+  const followCount = all.filter(r => ['opened', 'active'].includes(r.status)).length
+  const handledCount = all.filter(r => ['responded', 'closed'].includes(r.status)).length
+  const queueOptions = [
+    ['attention', 'Needs attention', all.filter(r => r.status !== 'closed').length, 'open', 'attention'],
+    ['new', 'New / unread', newCount, 'open', 'attention'],
+    ['hot', 'HOT', hotCount, 'open', 'attention'],
+    ['followup', 'Follow-up', followCount, 'open', 'attention'],
+    ['recent', 'All recent', total ?? all.length, '', 'recent'],
+    ['handled', 'Handled', handledCount, '', 'recent'],
+  ]
+  const chooseQueue = (key, st, order) => {
+    setQueue(key); setStatus(st); setCls(''); setSortBy(order); setChannel('all'); setSel(null)
+  }
   const chips = [
     ['all', 'All', all.length], ['sms', 'Text', all.filter(r => r.channel === 'sms').length],
     ['email', 'Email', all.filter(r => r.channel === 'email').length],
     ['calls', 'Voicemail', calls ? calls.length : null], ['unknown', 'Unknown', unknown.length],
   ]
-  const statusLabel = { open: 'open', new: 'new', opened: 'opened', responded: 'responded', active: 'active', closed: 'closed', '': 'any status' }[status]
 
   return (
     <>
