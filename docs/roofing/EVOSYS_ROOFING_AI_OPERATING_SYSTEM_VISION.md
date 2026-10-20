@@ -1,3 +1,5 @@
+> **DESIGN HOLD — OWNER APPROVAL REQUIRED (2026-10-20):** This document is a draft direction, NOT permission to implement, redesign, merge, or deploy. ChatGPT will create revised visual mockups for the owner to inspect. Do not implement this redesign until the owner expressly approves those mockups and issues a new build authorization. Existing roofing work should not be overwritten or redirected based solely on this document.
+
 # EvoSys Pro Roofing — AI Operations System (Design Handoff)
 **Date:** October 20, 2026  
 **Status:** Owner-directed course correction for the in-progress Roofing vertical  
