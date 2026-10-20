@@ -324,7 +324,10 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
             res = OU.start(db, prop, strategy)
             counts["outreach_started" if res.get("started") else "outreach_blocked"] += 1
             db.commit()
-    return finish("partial" if counts["provider_errors"] else "succeeded")
+    # A source can answer a batch but fail for individual properties.
+    # Such a run is PARTIAL, not green, even if no source-wide error fired.
+    property_failures = sum(int(row.get("failed", 0)) for row in counts.get("lookups", {}).values())
+    return finish("partial" if counts["provider_errors"] or property_failures else "succeeded")
 
 
 # ── free public-record lookups (the cost governor's QUEUE_FREE_LOOKUP lane) ──
