@@ -470,9 +470,9 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
         default = executive[0]
     elif platform:
         default = platform[0]
-    elif len(workspaces) == 1:
+    elif len(workspaces) == 1 and not product_contexts:
         default = workspaces[0]
-    elif workspaces:
+    elif workspaces or product_contexts:
         default = {"type": "workspace_selector", "path": "/workspaces"}
     else:
         # No membership of either kind. Not an error: this is every ordinary
@@ -540,7 +540,7 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
         # Only program workspaces and nothing else (no back office, no
         # executive suite, not god): this login sees the program suite only.
         "program_only": bool(workspaces) and all(w.get("is_program") for w in workspaces)
-                        and not platform and not executive
+                        and not product_contexts and not platform and not executive
                         and getattr(user, "role", None) != "god_admin",
         "has_back_office": bool(platform),
         "workspace_count": len(workspaces),
