@@ -1831,3 +1831,49 @@ def events(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db),
     return {"items": [{"id": e.id, "action": e.action, "summary": e.summary, "actor": e.actor_type,
                        "property_id": e.property_id, "strategy_id": e.strategy_id,
                        "is_test": e.is_test, "at": V._iso(e.created_at)} for e in rows]}
+
+
+# ── Tarrant tax-roll misread (Oct 17-19, 2026): targeted repair ─────────────
+
+@router.post("/roll-fix/dry-run")
+def roll_fix_dry_run(db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                     _g: User = Depends(require_not_observation)):
+    """Exactly what the targeted repair would change, computed by running it
+    inside a savepoint that is rolled back. Writes nothing. Admin only."""
+    from app.services.evosense import roll_layout_fix as RF
+    _admin(user, db)
+    org_id = svc.write_org_id(db, user)
+    out = RF.dry_run(db, org_id)
+    db.rollback()
+    return out
+
+
+@router.post("/roll-fix/apply")
+def roll_fix_apply(payload: ConfirmIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                   _g: User = Depends(require_not_observation)):
+    from app.services.evosense import roll_layout_fix as RF
+    _admin(user, db)
+    org_id = svc.write_org_id(db, user)
+    try:
+        out = RF.apply(db, org_id, confirm=payload.confirm, user=user)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    return out
+
+
+@router.post("/roll-fix/{run_id}/rollback")
+def roll_fix_rollback(run_id: str, payload: ConfirmIn, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    from app.services.evosense import roll_layout_fix as RF
+    _admin(user, db)
+    org_id = svc.write_org_id(db, user)
+    if payload.confirm != "ROLLBACK %s" % run_id:
+        raise HTTPException(status_code=422, detail="Type ROLLBACK %s to confirm." % run_id)
+    try:
+        out = RF.rollback(db, org_id, run_id, user=user)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    db.commit()
+    return out
