@@ -82,22 +82,44 @@ def _sig_view(s) -> Dict[str, Any]:
 def _owner_fix(db, org_id: str, prop, obs, rec) -> Dict[str, Any]:
     """The owner change for this property, or why there is none."""
     from app.services.evosense.ingest import mailing_key, name_key, owner_flags, owner_type_of
+    from sqlalchemy import or_
+    from app.models.evosense_models import EvoSenseContactPoint
     links = (db.query(EvoSenseOwnership)
              .filter(EvoSenseOwnership.organization_id == org_id, EvoSenseOwnership.property_id == prop.id,
-                     EvoSenseOwnership.observation_id == obs.id).all())
+                     EvoSenseOwnership.observation_id == obs.id)
+             .order_by(EvoSenseOwnership.observed_at, EvoSenseOwnership.id).all())
     want = rec.get("owner") or {}
     if not links or not want.get("name"):
         return {"action": "none", "why": "no owner came from this record"}
     owner = db.query(EvoSenseOwner).filter(EvoSenseOwner.id == links[0].owner_id).first()
     if owner is None:
         return {"action": "none", "why": "owner missing"}
+    if (rec.get("parcel_apn") or "") != (prop.parcel_apn or ""):
+        return {"action": "ambiguous", "owner_id": owner.id,
+                "why": "the corrected record names parcel %s, not this property's %s - left for a person"
+                       % (rec.get("parcel_apn"), prop.parcel_apn)}
+    # A person's word on this property's owner always stands: any link a
+    # person entered or corrected makes the owner question theirs.
+    human = (db.query(EvoSenseOwnership.id)
+             .filter(EvoSenseOwnership.organization_id == org_id, EvoSenseOwnership.property_id == prop.id,
+                     or_(EvoSenseOwnership.source == "manual", EvoSenseOwnership.corrected_by_id.isnot(None)))
+             .count())
+    if human:
+        return {"action": "ambiguous", "owner_id": owner.id,
+                "why": "a person entered or corrected the owner of this property - left for a person"}
+    if db.query(EvoSenseContactPoint.id).filter(EvoSenseContactPoint.organization_id == org_id,
+                                                EvoSenseContactPoint.owner_id == owner.id).first() is not None:
+        return {"action": "ambiguous", "owner_id": owner.id,
+                "why": "this owner has a phone or email on file - left for a person"}
     elsewhere = (db.query(EvoSenseOwnership.id)
                  .filter(EvoSenseOwnership.organization_id == org_id, EvoSenseOwnership.owner_id == owner.id,
                          EvoSenseOwnership.property_id != prop.id).count())
+    # links with NO observation (typed in, or older ingests) count as other records
     other_sources = (db.query(EvoSenseOwnership.id)
                      .filter(EvoSenseOwnership.organization_id == org_id, EvoSenseOwnership.owner_id == owner.id,
                              EvoSenseOwnership.property_id == prop.id,
-                             EvoSenseOwnership.observation_id != obs.id).count())
+                             or_(EvoSenseOwnership.observation_id.is_(None),
+                                 EvoSenseOwnership.observation_id != obs.id)).count())
     after = {"display_name": want["name"], "name_key": name_key(want["name"]),
              "name_truncated": bool(want.get("name_truncated")),
              "owner_type": owner_type_of(want["name"]),
@@ -142,13 +164,57 @@ def _owner_fix(db, org_id: str, prop, obs, rec) -> Dict[str, Any]:
     return {"action": "correct", "owner_id": owner.id, "before": before, "after": after}
 
 
+SITUS_FIELDS = ("city", "zip_code", "unit")
+
+
+def _other_value(db, org_id: str, prop, obs, field: str):
+    """The value every OTHER record of this property agrees on, else None."""
+    vals = set()
+    for o in (db.query(EvoSenseObservation)
+              .filter(EvoSenseObservation.organization_id == org_id, EvoSenseObservation.property_id == prop.id,
+                      EvoSenseObservation.id != obs.id).order_by(EvoSenseObservation.id).all()):
+        v = (C.jload(o.payload, {}) or {}).get(field)
+        if v not in (None, ""):
+            vals.add(str(v).strip())
+    return vals.pop() if len(vals) == 1 else None
+
+
+def _fact_fixes(db, org_id: str, prop, obs, rec) -> Dict[str, Any]:
+    """Situs fields the misread record filled in first (city "Ct", "L"...):
+    only when the property STILL holds exactly the misread value and nobody
+    entered it. Replaced by the corrected record's value, else by the value
+    every other record agrees on, else cleared."""
+    old = C.jload(obs.payload, {}) or {}
+    entered = C.jload(getattr(prop, "user_facts", None), {}) or {}
+    out = {}
+    for f in SITUS_FIELDS:
+        ov, nv = old.get(f), rec.get(f)
+        if ov in (None, "") or ov == nv or f in entered or getattr(prop, f) != ov:
+            continue
+        repl = nv if nv not in (None, "") else _other_value(db, org_id, prop, obs, f)
+        if repl != ov:
+            out[f] = {"before": ov, "after": repl}
+    return out
+
+
 def _plan_property(db, org_id: str, obs, prop) -> Dict[str, Any]:
-    rec = _corrected(obs)
+    base = {"property_id": prop.id, "observation_id": obs.id, "address": prop.street_address,
+            "parcel_apn": prop.parcel_apn, "score_before": prop.opportunity_score, "status_before": prop.status}
+    try:
+        rec = _corrected(obs)
+    except Exception as exc:  # noqa: BLE001 - one unreadable line is listed, never fatal
+        rec, why = None, str(exc)[:160]
+    else:
+        why = "the corrected reader returned no record"
+    if rec is None:
+        return dict(base, unreadable=why, retract=[], rewrite=[], preserved=[], corrected_signals=[],
+                    corrected_not_added=[], facts={}, owner={"action": "none", "why": "line unreadable"},
+                    _record=None)
     keep_types = {s["type"]: s for s in (rec.get("signals") or [])}
     from_obs = (db.query(EvoSenseSignal)
                 .filter(EvoSenseSignal.organization_id == org_id, EvoSenseSignal.property_id == prop.id,
                         EvoSenseSignal.observation_id == obs.id, EvoSenseSignal.source == "tarrant_tax_roll",
-                        EvoSenseSignal.active.is_(True)).all())
+                        EvoSenseSignal.active.is_(True)).order_by(EvoSenseSignal.id).all())
     retract, rewrite = [], []
     for s in from_obs:
         good = keep_types.get(s.signal_type)
@@ -158,14 +224,16 @@ def _plan_property(db, org_id: str, obs, prop) -> Dict[str, Any]:
             rewrite.append(dict(_sig_view(s), new_value=good.get("value")))
     preserved = [_sig_view(s) for s in db.query(EvoSenseSignal)
                  .filter(EvoSenseSignal.organization_id == org_id, EvoSenseSignal.property_id == prop.id,
-                         EvoSenseSignal.active.is_(True)).all()
+                         EvoSenseSignal.active.is_(True)).order_by(EvoSenseSignal.id).all()
                  if not (s.observation_id == obs.id and s.source == "tarrant_tax_roll")
                  and s.source != "evosense_derived"]
-    return {"property_id": prop.id, "observation_id": obs.id, "address": prop.street_address,
-            "parcel_apn": prop.parcel_apn, "score_before": prop.opportunity_score, "status_before": prop.status,
-            "retract": retract, "rewrite": rewrite, "preserved": preserved,
-            "corrected_signals": [{"type": s["type"], "value": s.get("value")} for s in rec.get("signals") or []],
-            "owner": _owner_fix(db, org_id, prop, obs, rec), "_record": rec}
+    had = {s.signal_type for s in from_obs}
+    return dict(base, retract=retract, rewrite=rewrite, preserved=preserved,
+                corrected_signals=[{"type": s["type"], "value": s.get("value")} for s in rec.get("signals") or []],
+                # a corrected signal this record never produced is NOT invented here; it is listed for a person
+                corrected_not_added=sorted(t for t in keep_types if t not in had),
+                facts=_fact_fixes(db, org_id, prop, obs, rec),
+                owner=_owner_fix(db, org_id, prop, obs, rec), _record=rec)
 
 
 # ── before / after images ───────────────────────────────────────────────────
@@ -263,6 +331,8 @@ def _do(db, org_id: str, plan_rows: List[Dict[str, Any]], *, tag: str) -> List[D
         prop = db.query(EvoSenseProperty).filter(EvoSenseProperty.id == r["property_id"]).first()
         obs = db.query(EvoSenseObservation).filter(EvoSenseObservation.id == r["observation_id"]).first()
         rec = r["_record"]
+        if rec is None:                          # unreadable line: listed in the report, nothing changed
+            continue
         ids = {x["id"] for x in r["retract"]}
         for s in db.query(EvoSenseSignal).filter(EvoSenseSignal.id.in_(ids or ["-"])).all():
             s.active = False
@@ -278,6 +348,17 @@ def _do(db, org_id: str, plan_rows: List[Dict[str, Any]], *, tag: str) -> List[D
                 s.effective_at = datetime.strptime(g["effective_at"][:10], "%Y-%m-%d")
         obs.payload = C.jdump(IN._sanitize(rec))
         obs.adapter_version = rec.get("_adapter_version") or "tarrant_tax_roll/3"
+        if r.get("facts"):
+            for f, ch in r["facts"].items():
+                setattr(prop, f, ch["after"])
+            if "city" in r["facts"]:
+                prop.situs_city_basis = ("%s (corrected by %s)" % (obs.provider_key, VERSION)
+                                         if r["facts"]["city"]["after"] else None)
+            from app.services.evosense import identity as ID
+            if prop.street_address:
+                ID.apply_keys(prop, {"street_address": prop.street_address, "unit": prop.unit,
+                                     "zip_code": prop.zip_code, "city": prop.city, "state": prop.state,
+                                     "parcel_apn": prop.parcel_apn, "county": prop.county})
         o = r["owner"]
         if o["action"] == "correct":
             owner = db.query(EvoSenseOwner).filter(EvoSenseOwner.id == o["owner_id"]).first()
@@ -295,9 +376,11 @@ def _do(db, org_id: str, plan_rows: List[Dict[str, Any]], *, tag: str) -> List[D
                                 EvoSenseOwnership.source == link.source).first())
                 if twin is not None:
                     # The right owner is already linked from this source (an
-                    # earlier roll): the misread link stops being current.
+                    # earlier roll): the misread link stops being current. The
+                    # twin comes back only if the misread link is what displaced it.
+                    if link.is_current:
+                        twin.is_current = True
                     link.is_current = False
-                    twin.is_current = True
                 else:
                     link.owner_id = o["to_owner_id"]
             db.flush()
@@ -398,7 +481,11 @@ def _report(rows, after, code) -> Dict[str, Any]:
             "signals_retracted": sum(len(p["retract"]) for p in props),
             "signals_rewritten_kept": sum(len(p["rewrite"]) for p in props),
             "signals_preserved_other_sources": sum(len(p["preserved"]) for p in props),
-            "still_tax_delinquent": sum(1 for p in props if p["corrected_signals"]),
+            "still_tax_delinquent": sum(1 for p in props
+                                        if any(s["type"] == "TAX_DELINQUENT" for s in p["corrected_signals"])),
+            "corrected_signals_not_added": sum(len(p.get("corrected_not_added") or []) for p in props),
+            "situs_fields_corrected": sum(len(p.get("facts") or {}) for p in props),
+            "unreadable_lines_left_alone": sum(1 for p in props if p.get("unreadable")),
             "owners_corrected": sum(1 for p in props if p["owner"]["action"] == "correct"),
             "owners_relinked_to_existing": sum(1 for p in props if p["owner"]["action"] == "relink"),
             "owners_ambiguous_left_alone": sum(1 for p in props if p["owner"]["action"] == "ambiguous"),
@@ -447,6 +534,17 @@ def _hunt_running(db, org_id: str) -> bool:
 def apply(db, org_id: str, *, confirm: str, user=None) -> Dict[str, Any]:
     if _hunt_running(db, org_id):
         raise ValueError("A hunt is running. Apply the repair when it has finished.")
+    # LOCK FIRST, THEN PLAN (Postgres): a second apply (double click, client
+    # retry) waits here, then finds nothing in scope instead of replaying an
+    # old plan over repaired rows.
+    targets = (db.query(EvoSenseObservation)
+               .filter(EvoSenseObservation.id.in_([o.id for o in affected_observations(db, org_id)] or ["-"]))
+               .with_for_update().all())
+    db.query(EvoSenseProperty.id).filter(
+        EvoSenseProperty.id.in_([o.property_id for o in targets] or ["-"])).with_for_update().all()
+    db.expire_all()
+    if _hunt_running(db, org_id):
+        raise ValueError("A hunt is running. Apply the repair when it has finished.")
     pl = plan(db, org_id)
     if not pl["rows"]:
         raise ValueError("Nothing in scope - already repaired?")
@@ -455,8 +553,6 @@ def apply(db, org_id: str, *, confirm: str, user=None) -> Dict[str, Any]:
                          % pl["hash"])
     pids = [r["property_id"] for r in pl["rows"]]
     obs_ids = [r["observation_id"] for r in pl["rows"]]
-    # Lock the targets (Postgres) so nothing writes them while the repair works.
-    db.query(EvoSenseProperty.id).filter(EvoSenseProperty.id.in_(pids)).with_for_update().all()
     owner_ids = _owner_ids(db, org_id, pids, pl["rows"])
     before = _tracked(db, org_id, pids, obs_ids, owner_ids)
     run = EvoSenseReprocessRun(organization_id=org_id, rule_version=VERSION, status="dry_run",
@@ -468,6 +564,7 @@ def apply(db, org_id: str, *, confirm: str, user=None) -> Dict[str, Any]:
     db.flush()
     after_view = _do(db, org_id, pl["rows"], tag="run %s" % run.id)
     db.flush()
+    db.expire_all()                      # the after-image is what the database holds, not the session
     after = _tracked(db, org_id, pids, obs_ids, owner_ids)
     rep = _report(pl["rows"], after_view, pl["hash"])
     run.status = STATUS_APPLIED
@@ -488,6 +585,8 @@ def rollback(db, org_id: str, run_id: str, *, user=None) -> Dict[str, Any]:
     if run is None or run.status != STATUS_APPLIED or run.rule_version != VERSION:
         raise ValueError("Only an applied tax-roll repair of this workspace can be rolled back.")
     snap = C.jload(run.snapshot, {}) or {}
+    if not all(k in snap for k in ("pids", "obs_ids", "owner_ids", "before")):
+        raise ValueError("This run's saved before-image is incomplete; nothing was rolled back.")
     pids, obs_ids, owner_ids = snap["pids"], snap["obs_ids"], snap["owner_ids"]
     db.query(EvoSenseProperty.id).filter(EvoSenseProperty.id.in_(pids or ["-"])).with_for_update().all()
     expected = C.jload(run.applied_changes, {}) or {}

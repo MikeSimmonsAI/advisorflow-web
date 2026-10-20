@@ -1862,7 +1862,8 @@ def roll_fix_apply(payload: ConfirmIn, db: Session = Depends(get_db), user: User
         out = RF.apply(db, org_id, confirm=payload.confirm, user=user)
     except ValueError as exc:
         db.rollback()
-        raise HTTPException(status_code=422, detail=str(exc))
+        busy = "hunt is running" in str(exc) or "already repaired" in str(exc)
+        raise HTTPException(status_code=409 if busy else 422, detail=str(exc))
     db.commit()
     return out
 
@@ -1878,6 +1879,8 @@ def roll_fix_rollback(run_id: str, payload: ConfirmIn, db: Session = Depends(get
     try:
         out = RF.rollback(db, org_id, run_id, user=user)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        db.rollback()
+        changed = "Changed since the repair" in str(exc)
+        raise HTTPException(status_code=409 if changed else 404, detail=str(exc))
     db.commit()
     return out

@@ -42,13 +42,18 @@ workspace (read-only, ~11:00 CT). On that copy:
 - every changed row was classified;
 - the undo was run.
 
-**Dry run / apply totals** (identical on 2026-10-20 00:17 and ~11:00 CT):
+**Dry run / apply totals** (~11:00 CT copy, with the fixes from the independent review):
 - 2,022 false signals retracted (1,005 TAX_DELINQUENT, 1,017 TAX_SUIT).
 - 12 real delinquencies kept, with corrected wording.
 - 116 signals from other sources on these properties preserved — **all 116 byte-identical after the apply**.
 - Owners: 992 links moved to the identical owner already on file, 18 owners corrected, 1 shared owner left alone.
 - Properties at 45+: 66 → 0 (65 from 45–54, 1 from 55–64).
-- Plan code on the copy: **`APPLY ROLL FIX ab593b9808557955`**.
+- 11 property cities corrected: the misread line had filled an empty city with "Ct" (6) or "L" (5). All 11 become
+  "Fort Worth", taken from the corrected record or from the property's other records. Only a city the property
+  still holds exactly as misread is changed, and never one a person entered.
+- 0 unreadable lines. 0 corrected signals left un-added. 0 owners with a person-entered link, a phone or a parcel
+  mismatch: those cases would be left alone and listed.
+- Plan code on the copy: **`APPLY ROLL FIX 24ad3d2d2a72cb3e`**.
 
 **Every row the apply changed, by reason. 0 rows changed outside the rules below.**
 
@@ -61,7 +66,7 @@ workspace (read-only, ~11:00 CT). On that copy:
 | ownerships (other sources' links) | 994 | `in_conflict` true → false only (the false owner conflict is settled). **No owner changed on any other source's link.** |
 | owners | 18 | name and mailing fields of owners created only by a misread record |
 | persons | 4 replaced | people derived from those 18 owners' names; a person with a lead, phone, email or conversation is never removed |
-| properties | 1,017 | score, status, next action, contactability, conflicts and signal count only. **No address, parcel or building field changed.** |
+| properties | 1,017 | score, status, next action, contactability, conflicts and signal count; on 11 of them, city + its basis + street key (the misread city). **No street address, parcel or building field changed.** |
 | scores | 2,029 | new score rows; previous rows marked not current |
 | contact points | 0 | none |
 
@@ -80,20 +85,29 @@ Not touched by the apply:
 3. **Compare with this document.**
    - `scope`: 1,017 / 1,017.
    - `totals` match the table above.
-   - `confirm_with` = `APPLY ROLL FIX ab593b9808557955`, if no data has changed since ~11:00 CT.
+   - `confirm_with` = `APPLY ROLL FIX 24ad3d2d2a72cb3e`, if no data has changed since ~11:00 CT.
    - A different code means the data moved. Read `properties[*]` for the difference before going further.
 4. **Mike's go-ahead, then apply:** `POST /wholesale/evosense/roll-fix/apply` with the exact `confirm_with` text.
    - Save the returned `run_id`.
 5. **Verify** with the read-only SQL below, and spot-check 5 properties in EvoSense.
 6. **Decide on undo now, before anything else touches these rows.**
-   - Undo works only while the repaired rows are untouched. The next hunt that re-reads one of these properties
-     ends the undo window.
+   - Undo works only while every repaired row is exactly as the repair left it.
+   - Any of these end the undo window:
+     - a hunt that re-reads one of these properties;
+     - a rescore (the work-queue sweep, a contactability refresh, a person opening and acting on a property);
+     - a lookup on any owner the repair re-linked to, including owners on other properties.
+   - In practice, check right after the apply.
+   - Undo refuses (409) once anything has changed. It never overwrites later work.
 
 ### Verification SQL (read-only)
 The repaired observations are the Oct 17–19 tax-roll records. The corrected reader's own records start
 Oct 20 13:56 UTC, so the date window below separates the two.
 ```sql
--- R = the repaired observations
+-- R = the repaired observations. After the apply, the run's own list is exact:
+--   with r as (select o.id, o.property_id from evosense_observations o, evosense_reprocess_runs x
+--              where x.rule_version='roll_layout_fix/1' and x.status='roll_fix_applied'
+--                and o.id in (select json_array_elements_text(x.snapshot::json->'obs_ids')))
+-- Before the apply (and as a cross-check), the date window gives the same 1,017:
 with r as (select id, property_id from evosense_observations
             where provider_key='tarrant_tax_roll' and length(raw_payload)>=770
               and observed_at between '2026-10-17 12:53' and '2026-10-19 14:07')
@@ -112,6 +126,27 @@ select id, status, property_count, applied_at from evosense_reprocess_runs where
 ```
 The same query run on production **before** the cleanup (~12:00 CT today) returned: repaired_obs 1017,
 still_in_scope 1017, kept 2034, retracted 0, at_45_plus 66, other_evidence 116.
+
+## Independent review (PR #253)
+A separate reviewer found 1 blocker and 6 should-fix issues. All are fixed and tested:
+- **B1 (blocker):** typed-in owner links (no observation) were not counted. Any person-entered or corrected link,
+  or an owner with a phone or email, now makes the owner question a person's.
+- **S1:** apply now locks before planning, so a double click or a retry does nothing (409).
+- **S2:** a twin owner link is switched back on only if the misread link is what displaced it.
+- **S3:** stable ordering, so the plan code is deterministic.
+- **S4:** a record naming another parcel leaves the owner alone.
+- **S5:** the misread city (11 properties) is now corrected.
+- **S6:** corrected signals the record never produced are listed, not invented.
+- Also:
+  - an unreadable line is listed and left alone;
+  - the after-image is read back from the database;
+  - status codes: 409 for "busy / changed since".
+
+Measured on the production copy: B1, S4 and S6 apply to 0 rows today; S5 applies to 11.
+
+## Leftovers (deliberately not deleted)
+About 992 owners created by the misread end up with no links after the re-link, along with the people read off
+their names. They are harmless and left in place, so nothing is deleted.
 
 ## After the repair
 - About 147 open work items sit on these properties. Most were raised from the false signals; review them

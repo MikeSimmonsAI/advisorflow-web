@@ -352,6 +352,99 @@ def test_dry_run_and_apply_wait_while_a_hunt_is_running(client, world, admin_aut
     assert r.status_code == 409 and "hunt is running" in r.text
     r = client.post("/wholesale/evosense/roll-fix/apply", headers=admin_auth_headers,
                     json={"confirm": "APPLY ROLL FIX x"})
-    assert r.status_code == 422 and "hunt is running" in r.text
+    assert r.status_code == 409 and "hunt is running" in r.text
     db.expire_all()
     assert _state(db, org) == before
+
+
+# ── independent review of #253: fixes ───────────────────────────────────────
+
+def test_an_owner_a_person_entered_on_the_property_is_never_changed(world):
+    """Review B1: a typed-in link has no observation; it must count, and any
+    person-entered/corrected link makes the owner question a person's."""
+    from app.models.evosense_models import EvoSenseOwnership
+    db, org = world["db"], world["org"]
+    prop = world["not_owed"]
+    owner = EV.CT.primary_owner(db, prop)
+    db.add(EvoSenseOwnership(organization_id=org, property_id=prop.id, owner_id=owner.id, source="manual",
+                             observation_id=None, corrected_by_id="someone", is_current=True))
+    db.commit()
+    before = {f: getattr(owner, f) for f in RF.OWNER_FIELDS}
+    rep = RF.dry_run(db, org)
+    row = [p for p in rep["properties"] if p["property_id"] == prop.id][0]
+    assert row["owner"]["action"] == "ambiguous" and "person" in row["owner"]["why"]
+    RF.apply(db, org, confirm=rep["confirm_with"])
+    db.commit()
+    db.refresh(owner)
+    assert {f: getattr(owner, f) for f in RF.OWNER_FIELDS} == before
+    # the false tax evidence is still removed
+    assert not db.query(EvoSenseSignal).filter_by(property_id=prop.id, signal_type="TAX_SUIT", active=True).count()
+
+
+def test_a_record_naming_another_parcel_leaves_the_owner_alone(world):
+    """Review S4."""
+    db, org = world["db"], world["org"]
+    prop = world["not_owed"]
+    prop.parcel_apn = "99999999"
+    db.commit()
+    row = [p for p in RF.dry_run(db, org)["properties"] if p["property_id"] == prop.id][0]
+    assert row["owner"]["action"] == "ambiguous" and "parcel" in row["owner"]["why"]
+
+
+def test_a_situs_city_the_misread_filled_in_is_corrected_and_rolls_back(world):
+    """Production: 11 properties kept city "Ct" / "L" from the misread line
+    (first writer wins on an empty city). Only a value the property still
+    holds exactly as misread is changed."""
+    db, org = world["db"], world["org"]
+    prop, obs = world["not_owed"], [o for o in RF.affected_observations(db, org)
+                                    if o.property_id == world["not_owed"].id][0]
+    payload = json.loads(obs.payload)
+    payload["city"] = "Ct"
+    obs.payload = json.dumps(payload)
+    prop.city = "Ct"
+    other = world["owed"]                      # a property whose city was not misread: never touched
+    db.commit()
+    rep = RF.dry_run(db, org)
+    row = [p for p in rep["properties"] if p["property_id"] == prop.id][0]
+    assert row["facts"]["city"]["before"] == "Ct" and row["facts"]["city"]["after"] != "Ct"
+    assert rep["totals"]["situs_fields_corrected"] == 1
+    out = RF.apply(db, org, confirm=rep["confirm_with"])
+    db.commit()
+    db.refresh(prop)
+    assert prop.city == row["facts"]["city"]["after"]
+    RF.rollback(db, org, out["run_id"])
+    db.commit()
+    db.refresh(prop)
+    assert prop.city == "Ct"
+    assert other.city != "Ct"
+
+
+def test_a_second_apply_with_the_same_code_does_nothing(client, world, admin_auth_headers):
+    """Review S1: a double click or client retry must not replay the plan."""
+    db, org = world["db"], world["org"]
+    code = client.post("/wholesale/evosense/roll-fix/dry-run", headers=admin_auth_headers).json()["confirm_with"]
+    first = client.post("/wholesale/evosense/roll-fix/apply", headers=admin_auth_headers, json={"confirm": code})
+    assert first.status_code == 200, first.text
+    again = client.post("/wholesale/evosense/roll-fix/apply", headers=admin_auth_headers, json={"confirm": code})
+    assert again.status_code == 409 and "already repaired" in again.text
+    rid = first.json()["run_id"]
+    r = client.post("/wholesale/evosense/roll-fix/%s/rollback" % rid, headers=admin_auth_headers,
+                    json={"confirm": "ROLLBACK %s" % rid})
+    assert r.status_code == 200, r.text                    # the first run is still cleanly undoable
+
+
+def test_an_unreadable_line_is_listed_and_left_alone(world):
+    db, org = world["db"], world["org"]
+    obs = [o for o in RF.affected_observations(db, org) if o.property_id == world["owed"].id][0]
+    obs.raw_payload = "X" * 781
+    db.commit()
+    sigs_before = {s.id: s.active for s in db.query(EvoSenseSignal).filter_by(property_id=world["owed"].id)}
+    rep = RF.dry_run(db, org)
+    assert rep["totals"]["unreadable_lines_left_alone"] == 1
+    RF.apply(db, org, confirm=rep["confirm_with"])
+    db.commit()
+    db.expire_all()
+    assert {s.id: s.active for s in db.query(EvoSenseSignal).filter_by(property_id=world["owed"].id)
+            if s.id in sigs_before} == sigs_before
+    assert not db.query(EvoSenseSignal).filter_by(property_id=world["not_owed"].id, signal_type="TAX_SUIT",
+                                                   active=True).count()
