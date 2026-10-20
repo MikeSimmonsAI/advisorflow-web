@@ -104,7 +104,7 @@ Options:
    - Denton: the county's Sheriff's Sale page lists the monthly tax-sale properties (first Tuesday)
      — <https://www.dentoncounty.gov/840/Sheriffs-Sale>, linked from <https://www.dentoncounty.gov/867/Delinquent-Tax-Sales>.
    - Collin: the official tax-sale publisher still needs confirming (the county tax office, 972-547-5020).
-   - Format and terms of use need checking before writing an adapter.
+   - Checked: Denton publishes no downloadable list. The properties appear as legal notices in the Denton Record-Chronicle, and the auction runs on GovEase (a third-party site whose terms need review before any automated reading). Next step: ask the county tax office or GovEase whether a data feed exists. Do not scrape.
 2. **Until then, opt-in per strategy:** only keep Collin/Denton properties that carry a distress signal, so hunts
    stop filling the list with records that cannot qualify. This is Mike's choice per strategy. It must not edit
    New Check Out.
