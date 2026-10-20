@@ -188,3 +188,22 @@ def test_a_home_visit_yes_is_never_booked_as_a_cemetery_visit(setter, sample_adv
     assert len(fake.calls) == 2 and "arranged personally" in json.dumps(fake.calls[1]["messages"])
     assert conv.state == "human" and conv.booked_time is None
     assert S.memory_of(conv)["alternative_outcome"] == "accepted"
+
+
+def test_a_manager_turns_home_visits_on_per_location(client, setter, sample_advisor):
+    from app.models.program_models import LocationProfile
+    from tests.test_outreach_program import _h
+    db, org, admin = setter["db"], setter["org"], setter["admin"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    from app.services.programs import identity
+    prof = identity.location_profile_for_lead(db, lead)
+    prof.brand_settings = json.dumps({"planning_guide_link": "https://example.com/g"})
+    db.commit()
+    r = client.patch("/program/locations/%s" % prof.id, headers=_h(db, admin), json={"home_visits": True})
+    assert r.status_code == 200
+    db.refresh(prof)
+    bs = json.loads(prof.brand_settings)
+    assert bs["home_visits"] is True and bs["planning_guide_link"] == "https://example.com/g"   # nothing else lost
+    conv = S.conversation_for(db, lead, create=True)
+    assert S.alternative_for(db, lead, conv, S.DECLINED_VENUE) == S.ALT_HOME
+    assert S.alternative_for(db, lead, conv, S.DECLINED_HOME) != S.ALT_HOME

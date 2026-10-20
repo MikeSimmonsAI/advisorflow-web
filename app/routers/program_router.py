@@ -368,6 +368,10 @@ class ProfileIn(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
     postal_code: Optional[str] = None
+    # #234 (Oct 19): what this location really offers a family who can't or
+    # won't come in. Stored in brand_settings; read by the appointment setter.
+    home_visits: Optional[bool] = None
+    offer_phone_alternative: Optional[bool] = None
 
 
 @router.patch("/locations/{profile_id}")
@@ -390,6 +394,11 @@ def update_location(profile_id: str, body: ProfileIn, db: Session = Depends(get_
         if k in data and loc is not None:
             setattr(loc, k, (data.pop(k) or "").strip() or None)
         data.pop(k, None)
+    offers = {k: data.pop(k) for k in ("home_visits", "offer_phone_alternative") if k in data}
+    if offers:
+        bs = identity.brand_settings(p)
+        bs.update({k: bool(v) for k, v in offers.items() if v is not None})
+        p.brand_settings = json.dumps(bs)
     if "advisor_names" in data:
         p.advisor_names = json.dumps([a.strip() for a in data.pop("advisor_names") or [] if a.strip()])
     for k in ("email_display_name", "sms_identity_name"):
