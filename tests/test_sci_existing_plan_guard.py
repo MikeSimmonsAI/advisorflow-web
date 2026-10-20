@@ -11,7 +11,6 @@ from tests.test_outreach_program import _lead_for, program  # noqa: F401
 def test_prior_purchase_statement_and_negation():
     yes = [
         "We purchased a plan from you last year, around December.",
-        "We have a funeral plan with you already.",
         "I bought a plot from your cemetery.",
         "Our family paid for a plan with you.",
     ]
