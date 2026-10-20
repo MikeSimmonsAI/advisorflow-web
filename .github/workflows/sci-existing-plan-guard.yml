@@ -1,0 +1,32 @@
+# P1 SCI live-email regression: synthetic families and mocked calendar only.
+name: SCI existing-plan reply guard
+
+on:
+  pull_request:
+    paths:
+      - 'app/services/programs/ai_setter.py'
+      - 'tests/test_sci_existing_plan_guard.py'
+      - '.github/workflows/sci-existing-plan-guard.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sci-reply-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Compile reply engine and new regressions
+        run: python -m py_compile app/services/programs/ai_setter.py tests/test_sci_existing_plan_guard.py
+      - name: Test SCI setter and customer reply flows
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -m pytest -q -o addopts='' tests/test_sci_existing_plan_guard.py tests/test_sci_appointment_setter.py tests/test_sci_setter_v2.py tests/test_sci_decline_alternatives.py tests/test_sci_home_visit_queue.py
