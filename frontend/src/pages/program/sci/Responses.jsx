@@ -200,9 +200,9 @@ export default function Responses({ locationId, onChange, navigate }) {
             {channel !== 'calls' && channel !== 'unknown' && list.length > 0 ? (
               <div className="sci-next-card">
                 <span className="sci-pulse-eyebrow">UP NEXT · {list[0].sla_breached ? 'PAST SLA' : list[0].class === 'hot' ? 'HOT RESPONSE' : list[0].status === 'new' ? 'UNREAD REPLY' : 'FOLLOW-UP'}</span>
-                <h2>${'{'}list[0].name || 'A family is waiting'}</h2>
-                <p className="sci-next-meta">${'{'}list[0].location || 'Location being verified'} · ${'{'}list[0].channel === 'sms' ? 'Text' : 'Email'} · ${'{'}ago(list[0].received_at)}</p>
-                <blockquote>${'{'}list[0].body || list[0].summary || 'Open to see what this family needs.'}</blockquote>
+                <h2>{list[0].name || 'A family is waiting'}</h2>
+                <p className="sci-next-meta">{list[0].location || 'Location being verified'} · {list[0].channel === 'sms' ? 'Text' : 'Email'} · {ago(list[0].received_at)}</p>
+                <blockquote>{list[0].body || list[0].summary || 'Open to see what this family needs.'}</blockquote>
                 <button className="sci-btn primary" type="button" onClick={() => view(list[0])}>Open this conversation ›</button>
                 <p className="sci-micro sci-muted">Opening the conversation marks it viewed. The reply is not automatically sent.</p>
               </div>
