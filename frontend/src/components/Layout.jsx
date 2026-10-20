@@ -11,6 +11,7 @@ import ProfileOnboarding from './ProfileOnboarding'
 import GodReturnBar from './GodReturnBar'
 import ContextSwitcher from './ContextSwitcher'
 import WorkspaceAdminMenu from './WorkspaceAdminMenu'
+import ProgramSwitchLink from './ProgramSwitchLink'
 // A render error inside one page unmounts React's whole tree, rail included.
 // This keeps the failure inside the content area. See PageBoundary.
 import PageBoundary from './PageBoundary'
@@ -1207,6 +1208,7 @@ export default function Layout({ children }) {
                 </select>
               </label>
             )}
+            {(vertical || inWholesale) && <ProgramSwitchLink />}
             {vertical ? <WorkspaceAdminMenu /> : <ContextSwitcher current="workspace" />}
             <NotificationBell />
             {inWholesale && <WholesaleUser user={user} photo={profilePhoto} />}
