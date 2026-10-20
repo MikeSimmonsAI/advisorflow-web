@@ -90,6 +90,32 @@ def _lead_or_404(db: Session, user: User, lead_id: str) -> Lead:
     return lead
 
 
+def _note_lead_or_404(db: Session, user: User, lead_id: str) -> Lead:
+    """The lead for reading / adding notes. Same as _lead_or_404, plus: a
+    member of an SCI program's team works every family SCI Live shows them,
+    not only their own - so for a family of the active outreach program in
+    THIS workspace (a source record links it; never a test contact) an
+    advisor may read and add notes. Non-program leads are unchanged."""
+    try:
+        return _lead_or_404(db, user, lead_id)
+    except HTTPException:
+        from app.models.program_models import ProgramSourceRecord
+        from app.services.programs import identity
+        org_id = _org_id(db, user)
+        prog = identity.program_for_org(db, org_id)
+        lead = None
+        if prog is not None:
+            lead = (db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == prog.organization_id,
+                                          Lead.is_test.isnot(True),
+                                          exists().where(and_(ProgramSourceRecord.lead_id == Lead.id,
+                                                              ProgramSourceRecord.organization_id
+                                                              == prog.organization_id)))
+                    .first())
+        if lead is None:
+            raise
+        return lead
+
+
 def _reply_or_404(db: Session, user: User, reply_id: str):
     row = (db.query(Reply, Lead).join(Lead, Reply.lead_id == Lead.id)
            .filter(Reply.id == reply_id, *_lead_filters(db, user)).first())
@@ -742,7 +768,7 @@ def _note_out(n: LeadNote, names: Dict[str, str], user: User) -> dict:
 @router.get("/work/leads/{lead_id}/notes")
 def list_notes(lead_id: str, db: Session = Depends(get_db),
                user: User = Depends(require_tenant_or_observer)):
-    lead = _lead_or_404(db, user, lead_id)
+    lead = _note_lead_or_404(db, user, lead_id)
     notes = (db.query(LeadNote)
              .filter(LeadNote.organization_id == lead.organization_id, LeadNote.lead_id == lead.id)
              .order_by(LeadNote.pinned.desc(), LeadNote.created_at.desc()).limit(500).all())
@@ -763,7 +789,7 @@ class NoteIn(BaseModel):
 def create_note(lead_id: str, req: NoteIn, db: Session = Depends(get_db),
                 user: User = Depends(require_tenant_user),
                 _obs: User = Depends(require_not_observation)):
-    lead = _lead_or_404(db, user, lead_id)
+    lead = _note_lead_or_404(db, user, lead_id)
     if req.kind not in NOTE_KINDS:
         raise HTTPException(status_code=400, detail="kind must be note or internal")
     if not req.body.strip():

@@ -47,6 +47,12 @@ MAX_FOLLOWUPS = 2             # unanswered follow-ups the setter may send
 LOW_CONFIDENCE = 0.4          # below this the setter does not send; a person reviews
 OFFERED_FOLLOWUP = timedelta(days=2)     # times offered, no answer: one gentle check-in
 INFO_FOLLOWUP = timedelta(days=3)        # guide sent, no answer: one check-in
+ANSWER_FOLLOWUP = timedelta(days=2)      # question answered / guide to be mailed, no answer: one check-in
+NEXT_FOLLOWUP = timedelta(days=3)        # a follow-up went unanswered: the next one (up to MAX_FOLLOWUPS)
+ANSWER_FOLLOWUP_REASON = ("we answered their question and they have not written since; gently see if they "
+                          "have anything else on their mind or would like to set a time to talk")
+MAIL_FOLLOWUP_REASON = ("the team is mailing them a printed planning guide (never say it was mailed); gently see "
+                        "if they have questions or would like to go over it together")
 FOLLOWUP_GAP = timedelta(hours=20)
 ACTIONS = ("answer", "offer_times", "book", "callback", "send_guide", "mail_guide", "follow_up_later",
            "handoff", "close", "wait")
@@ -828,7 +834,7 @@ def _parse_follow_up(raw, now) -> datetime:
     return day.replace(hour=15, minute=0)
 
 
-def _schedule_follow_up(conv, action, now) -> None:
+def _schedule_follow_up(conv, action, now, *, db=None, lead=None) -> None:
     if (conv.followups_sent or 0) >= MAX_FOLLOWUPS:
         return
     if conv.state == "offered":
@@ -838,6 +844,16 @@ def _schedule_follow_up(conv, action, now) -> None:
         conv.state = "info_requested"
         conv.next_followup_at = now + INFO_FOLLOWUP
         conv.followup_reason = "the planning guide was sent; see if they have questions or would like to talk"
+    elif (action == "answer" and conv.state == "ai_active") or (action == "mail_guide"
+                                                                and conv.state == "info_requested"):
+        # One gentle, contextual check-in two days after an answer (or the
+        # mailed-guide promise) - never for a family that opted out; a person's,
+        # booked or stopped conversation never reaches this state.
+        if db is not None and lead is not None and A._opted_out(db, lead):
+            return
+        # Never earlier than a contact-hours time a held reply already set.
+        conv.next_followup_at = max(now + ANSWER_FOLLOWUP, conv.next_followup_at or now)
+        conv.followup_reason = ANSWER_FOLLOWUP_REASON if action == "answer" else MAIL_FOLLOWUP_REASON
 
 
 def _mail_task(db, prog, lead, conv) -> None:
@@ -1173,7 +1189,7 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         _handoff(db, prog, lead, conv, limit, notify=True)
         db.commit()
         return dict(out, action="handoff", state=conv.state)
-    if conv.state in ("waiting_future", "closed", "info_requested", "offered", "waiting"):
+    if conv.state in ("waiting_future", "closed", "info_requested", "offered", "waiting", "ai_active"):
         # The family wrote again: any scheduled follow-up is superseded.
         conv.next_followup_at = None
         conv.followup_reason = None
@@ -1500,9 +1516,7 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
     conv.ai_turns = (conv.ai_turns or 0) + 1
     conv.last_ai_at = now
     if t.delivery in ("sent", "simulated", "held"):
-        _schedule_follow_up(conv, action, now)
-    if conv.state == "ai_active" and action == "answer":
-        pass
+        _schedule_follow_up(conv, action, now, db=db, lead=lead)
     db.commit()
     return dict(out, state=conv.state, text=text, delivery=t.delivery)
 
@@ -1563,6 +1577,20 @@ _POLICY_BLOCK = re.compile(r"(DNC|CAMPAIGN OFF|ON HOLD|DATA REVIEW|DUPLICATE REV
 FOLLOW_UP_STATES = ("offered", "info_requested", "waiting_future")
 
 
+def _follow_up_due_filter():
+    """FOLLOW_UP_STATES, plus an ai_active conversation - but only one the
+    setter itself scheduled a check-in for after answering (its reason)."""
+    from sqlalchemy import and_, or_
+    C = ProgramConversation
+    return or_(C.state.in_(FOLLOW_UP_STATES),
+               and_(C.state == "ai_active", C.followup_reason == ANSWER_FOLLOWUP_REASON))
+
+
+def _follow_up_state(conv) -> bool:
+    return conv.state in FOLLOW_UP_STATES or (conv.state == "ai_active"
+                                              and conv.followup_reason == ANSWER_FOLLOWUP_REASON)
+
+
 def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20) -> Dict:
     """Due follow-ups: a family that has not answered since our last message,
     in a state where one gentle, CONTEXTUAL check-in helps (times offered,
@@ -1576,7 +1604,7 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
     due = (db.query(ProgramConversation)
            .filter(ProgramConversation.next_followup_at.isnot(None),
                    ProgramConversation.next_followup_at <= now,
-                   ProgramConversation.state.in_(FOLLOW_UP_STATES))
+                   _follow_up_due_filter())
            .order_by(ProgramConversation.next_followup_at).limit(limit).all())
     for conv in due:
         lead = db.query(Lead).filter(Lead.id == conv.lead_id).first()
@@ -1590,6 +1618,13 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
         stop = (lead is None or getattr(lead, "status", None) == "dnc" or _owner_test(lead)
                 or (conv.followups_sent or 0) >= MAX_FOLLOWUPS
                 or (conv.last_family_at and conv.last_ai_at and conv.last_family_at > conv.last_ai_at))
+        if not stop:
+            # Checked again at send time: opted out since, a person texted them
+            # by hand, or they booked outside the AI - no check-in.
+            from app.models.models import BookingLink as _BL
+            stop = (A._opted_out(db, lead) or _human_took_over(db, lead, conv)
+                    or db.query(_BL.id).filter(_BL.lead_id == lead.id,
+                                               _BL.status.in_(("booked", "confirmed"))).first() is not None)
         if stop:
             conv.next_followup_at = None
             done["skipped"] += 1
@@ -1636,6 +1671,12 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
         t = _deliver(db, prog, lead, conv, None, text, "follow_up", mode, now=now)
         conv.last_ai_at = now
         conv.ai_turns = (conv.ai_turns or 0) + 1
+        if t.delivery in ("sent", "simulated", "held"):
+            # Still unanswered after this one: the next check-in in three days,
+            # up to MAX_FOLLOWUPS, then none (also replaces a contact-hours retry).
+            conv.next_followup_at = (max(now + NEXT_FOLLOWUP, conv.next_followup_at or now)
+                                     if (conv.followups_sent or 0) < MAX_FOLLOWUPS and _follow_up_state(conv)
+                                     else None)
         done["sent" if t.delivery in ("sent", "simulated") else "drafted"] += 1
         db.commit()
     return done

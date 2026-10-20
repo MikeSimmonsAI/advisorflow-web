@@ -910,6 +910,16 @@ def command_assign(body: AssignIn, db: Session = Depends(get_db), user: User = D
     lead = db.query(Lead).filter(Lead.id == body.lead_id, Lead.organization_id == prog.organization_id).first()
     if lead is None:
         raise HTTPException(status_code=404, detail="Family not found.")
+    # An advisor takes an unassigned family or passes on their own; moving a
+    # family that belongs to someone else is a manager's call.
+    from app.services import lead_scope
+    if lead.assigned_to_id and lead.assigned_to_id != user.id and not lead_scope.is_manager_here(user, db):
+        raise HTTPException(status_code=403,
+                            detail="This family belongs to another advisor. Ask a manager to reassign it.")
+    if not lead.assigned_to_id and body.user_id and body.user_id != user.id \
+            and not lead_scope.is_manager_here(user, db):
+        raise HTTPException(status_code=403,
+                            detail="You can take an unassigned family yourself. Ask a manager to assign it to someone else.")
     if body.user_id:
         who = next((u for u in _team(db, prog.organization_id) if u.id == body.user_id), None)
         if who is None:

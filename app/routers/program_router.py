@@ -511,9 +511,10 @@ def program_lead_file_download(lead_id: str, file_id: str, db: Session = Depends
 def program_appointments(when: str = Query("upcoming"), location_id: Optional[str] = Query(None),
                          lead_id: Optional[str] = Query(None),
                          db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
-    """Booked visits for the program's families: upcoming (default), past or all."""
+    """Booked visits for the program's families: upcoming (default), past or all.
+    Read-only, so the whole SCI team reads it (an advisor's Appointments tab)."""
     from app.models.models import BookingLink
-    prog = _program(db, user)
+    prog = _program(db, user, managers_only=False)
     from app.services import booking_time as _bt
     from zoneinfo import ZoneInfo as _ZI
     now = datetime.now(_ZI(_bt.DEFAULT_ZONE)).replace(tzinfo=None)   # booked times are stored as local wall time
@@ -1115,14 +1116,26 @@ class MarkIn(BaseModel):
     state: str
 
 
+def _team_response(db: Session, user: User, prog, response_id: str) -> ProgramResponse:
+    """A reply the caller can see in SCI Live. Everyone on the program's team
+    works the replies (opened / responded / closed); this workspace only, and
+    an advisor never reaches a test contact's reply (SCI Live hides those).
+    Spectators never get here - their writes are refused centrally."""
+    q = db.query(ProgramResponse).filter(ProgramResponse.id == response_id,
+                                         ProgramResponse.organization_id == prog.organization_id)
+    if not _sees_program(db, user, prog.organization_id):
+        q = _test_records.exclude_test_responses(q)
+    r = q.first()
+    if r is None:
+        raise HTTPException(status_code=404, detail="Response not found.")
+    return r
+
+
 @router.post("/responses/{response_id}/mark")
 def mark_response(response_id: str, body: MarkIn, db: Session = Depends(get_db),
                   user: User = Depends(require_tenant_user)):
-    prog = _program(db, user)
-    r = db.query(ProgramResponse).filter(ProgramResponse.id == response_id,
-                                         ProgramResponse.organization_id == prog.organization_id).first()
-    if r is None:
-        raise HTTPException(status_code=404, detail="Response not found.")
+    prog = _program(db, user, managers_only=False)
+    r = _team_response(db, user, prog, response_id)
     before = r.handling_status
     try:
         responses.mark(db, r, body.state, user)
@@ -1144,11 +1157,8 @@ def response_viewed(response_id: str, db: Session = Depends(get_db),
     """KERRY OPENED, recorded automatically - but only when the program's
     primary contact opens it. A manager looking at a HOT reply must not stop
     its SLA clock; that would hide the very response management is watching."""
-    prog = _program(db, user)
-    r = db.query(ProgramResponse).filter(ProgramResponse.id == response_id,
-                                         ProgramResponse.organization_id == prog.organization_id).first()
-    if r is None:
-        raise HTTPException(status_code=404, detail="Response not found.")
+    prog = _program(db, user, managers_only=False)
+    r = _team_response(db, user, prog, response_id)
     if prog.primary_contact_user_id and user.id == prog.primary_contact_user_id \
             and (r.handling_status or "new") == "new":
         responses.mark(db, r, "opened", user)
@@ -1505,7 +1515,7 @@ def unmatched_replies(status: str = Query("open"), db: Session = Depends(get_db)
 @router.post("/unmatched-replies/{reply_id}/handled")
 def unmatched_handled(reply_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     from app.models.program_models import ProgramUnmatchedReply
-    prog = _program(db, user)
+    prog = _program(db, user, managers_only=False)    # the whole SCI team works these (SCI Live shows them)
     u = db.query(ProgramUnmatchedReply).filter(ProgramUnmatchedReply.id == reply_id,
                                                ProgramUnmatchedReply.organization_id == prog.organization_id).first()
     if u is None:
