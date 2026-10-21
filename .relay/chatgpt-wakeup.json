@@ -1,12 +1,11 @@
 {
-  "relay_run_id": "sci-poc-pr257-bounce-20261020-2328-r1",
-  "parent_run_id": "",
-  "project": "SCI 1 \u2014 POC-only release cleanup and bounce tracking",
+  "relay_run_id": "aiwf-launch-20261021-1141-r3",
+  "parent_run_id": "aiwf-launch-20261021-1140-r2",
+  "project": "EvoSys Pro AI Workforce launch: P0 controlled working MVP + eighth-grade-simple onboarding",
   "status": "BLOCKED",
-  "branch": "feature/sci-ops",
-  "timestamp_ct": "2026-10-21T05:55:55.365410+00:00",
+  "branch": "feature/ai-workforce-launch",
+  "actions_run_id": "39636855345",
+  "timestamp_ct": "2026-10-21 11:42 CT",
   "issue": 1,
-  "status_comment_id": 6308055091,
-  "watchdog_retry": true,
-  "watchdog_retry_utc": "2026-10-21T05:55:55.365425+00:00"
+  "status_comment_id": 6321333624
 }
