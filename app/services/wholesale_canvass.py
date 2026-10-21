@@ -208,7 +208,9 @@ def _hand_off(db: Session, org_id: str, user: User, r: Route, d: Door) -> None:
     mem_boss = None
     try:
         from app.models.sales_models import Membership, SCOPE_PRODUCT
-        m = (db.query(Membership).filter(Membership.scope_type == SCOPE_PRODUCT, Membership.scope_id == "wholesale",
+        from app.services import product_access as _PA
+        m = (db.query(Membership).filter(Membership.scope_type == SCOPE_PRODUCT,
+                                         Membership.scope_id == _PA.seat_scope(db, org_id),
                                          Membership.user_id == user.id, Membership.is_active.is_(True)).first())
         mem_boss = getattr(m, "reports_to_user_id", None)
     except Exception:  # noqa: BLE001
