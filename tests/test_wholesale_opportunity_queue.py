@@ -206,3 +206,43 @@ def test_field_login_cannot_read_the_queue_or_funnel(client, db_session, sample_
 ])
 def test_lenders_are_companies_not_people(name, expected):
     assert IN.owner_type_of(name) == expected
+
+
+def test_fast_queue_gives_the_same_next_step_as_the_full_evaluation_with_bounded_queries(
+        client, db_session, sample_org, strategy, admin_auth_headers):
+    """Production 2026-10-21: the queue evaluated all six steps for 500 houses
+    (~7,500 queries, 27 s). It now stops at each house's first unfinished
+    step; the answer must be identical to for_property's."""
+    from sqlalchemy import event
+    db, org = db_session, sample_org.id
+    houses = [_house(db, org, strategy, street="%d QUEUE ST" % i, apn="77700%02d" % i,
+                     mailing_street="%d ELSEWHERE" % i) for i in range(6)]
+    _low(db, org, strategy)
+    client.post("/wholesale/evosense/properties/%s/contacts" % houses[1].id, headers=admin_auth_headers,
+                json={"kind": "phone", "value": "817-555-0178", "person_name": "Owner"})
+    client.post("/wholesale/evosense/properties/%s/reply" % houses[2].id, headers=admin_auth_headers,
+                json={"text": "No thanks, not interested.", "delivery": "manual_entry"})
+    n = {"q": 0}
+
+    def count(*a, **k):
+        n["q"] += 1
+    event.listen(db.bind, "before_cursor_execute", count)
+    try:
+        q = RD.queue(db, org, limit=200)
+    finally:
+        event.remove(db.bind, "before_cursor_execute", count)
+    for item in q["items"]:
+        p = db.query(EvoSenseProperty).filter_by(id=item["property_id"]).one()
+        full = RD.for_property(db, p, EV.strategy_for(db, p))
+        assert item["next"] == full["next"], (item["address"], item["next"], full["next"])
+        assert item["work"] == full["work"]
+    full_ids = set()                                   # the old algorithm, verbatim: full evaluation
+    for p in (db.query(EvoSenseProperty).filter(EvoSenseProperty.organization_id == org,
+                                                 EvoSenseProperty.archived_at.is_(None),
+                                                 EvoSenseProperty.promoted_deal_id.is_(None),
+                                                 EvoSenseProperty.status.in_(RD.ACTIVE_STATUSES)).all()):
+        r = RD.for_property(db, p, EV.strategy_for(db, p))
+        if r["next"] is not None and not r["next"]["stopped"]:
+            full_ids.add(p.id)
+    assert {i["property_id"] for i in q["items"]} == full_ids
+    assert n["q"] < 15 * len(houses), n["q"]          # was ~15 per house plus per-house strategy lookups
