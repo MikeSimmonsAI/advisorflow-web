@@ -1367,3 +1367,206 @@ def new_request_assign(lead_id: str, body: AssignIn, request: Request, db: Sessi
         raise HTTPException(404, str(exc))
     db.commit()
     return out
+
+
+# ── CHARIOT ONLINE ENROLLMENT ("Enroll online with Chariot") ────────────────
+# services/chariot_enrollment.py. Beside the manual path (hand-off + Enroll).
+# Switched OFF until CHARIOT_ALLOW_TRANSACTIONS is set. Identity values (date
+# of birth, SSN / licence) pass through one request and are never stored.
+class ChariotEnrollIn(BaseModel):
+    # plain strings on purpose: a validation error must never echo an SSN back
+    product_id: Optional[str] = Field(None, max_length=40)
+    plan: Optional[Dict[str, Any]] = None              # the non-sensitive plan snapshot shown
+    zip: Optional[str] = Field(None, max_length=10)
+    esiid: Optional[str] = Field(None, max_length=40)
+    service_type: Optional[str] = Field(None, max_length=20)
+    service_start_date: Optional[str] = Field(None, max_length=20)
+    first_name: Optional[str] = Field(None, max_length=80)
+    last_name: Optional[str] = Field(None, max_length=80)
+    email: Optional[str] = Field(None, max_length=200)
+    phone: Optional[str] = Field(None, max_length=40)
+    dob: Optional[str] = Field(None, max_length=20)
+    ssn: Optional[str] = Field(None, max_length=20)
+    drivers_licence: Optional[str] = Field(None, max_length=40)
+    drivers_licence_state: Optional[str] = Field(None, max_length=4)
+    customer_authorized: bool = False
+
+
+class ChariotReconcileIn(BaseModel):
+    outcome: str = Field(..., max_length=20)
+    note: str = Field(..., max_length=1000)
+
+
+def _chariot_lead(db, user, request, lead_id):
+    org = _energy_org_for_chariot(db, user, request)
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    if lead.organization_id != org.id:
+        raise HTTPException(404, "Lead not found")
+    return org, lead
+
+
+def _energy_org_for_chariot(db, user, request):
+    from app.models.models import Organization
+    org = db.query(Organization).filter(Organization.id == _org_id(db, user, request)).first()
+    if org is None or (org.industry or "").lower() != "energy":
+        raise HTTPException(404, "Not available for this workspace.")
+    return org
+
+
+@router.get("/chariot/status")
+def chariot_status(request: Request, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services import chariot_enrollment as ce
+    _energy_org_for_chariot(db, user, request)
+    return ce.status()
+
+
+@router.get("/leads/{lead_id}/chariot")
+def chariot_for_lead(lead_id: str, request: Request, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_user)):
+    """Can this customer be enrolled online, what we already know, and any
+    earlier submission (so nobody submits twice)."""
+    from app.models.provider_transaction_models import ProviderTransaction
+    from app.services import chariot_enrollment as ce
+    from app.services import energy_enrollment as ee
+    _, lead = _chariot_lead(db, user, request, lead_id)
+    cls = ce.classification(lead)
+    eligible = ee.may_submit_to_provider(cls)
+    rows = (db.query(ProviderTransaction).filter(ProviderTransaction.organization_id == lead.organization_id,
+                                                 ProviderTransaction.lead_id == lead.id,
+                                                 ProviderTransaction.provider == ce.PROVIDER)
+            .order_by(ProviderTransaction.submitted_at.desc()).limit(5).all())
+    return {"status": ce.status(), "classification": cls, "eligible": eligible,
+            "reason": None if eligible else (
+                "Chariot online enrollment is for homes only. Use the business/partner workflow."
+                if cls in ee.HUMAN_ONLY_CLASSIFICATIONS else "Find out whether this is a home first."),
+            "prefill": {"first_name": lead.first_name, "last_name": lead.last_name, "email": lead.email,
+                        "phone": lead.phone, "zip": lead.zip_code},
+            "submissions": [ce.row_out(r) for r in rows]}
+
+
+def _chariot_read(fn, *args):
+    from app.services import chariot_enrollment as ce
+    try:
+        return fn(*args)
+    except ce.NotConnected as exc:
+        raise HTTPException(409, str(exc))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.get("/leads/{lead_id}/chariot/plans")
+def chariot_plans(lead_id: str, request: Request, zip: str = Query(..., max_length=10),
+                  db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services import chariot_enrollment as ce
+    _chariot_lead(db, user, request, lead_id)
+    return _chariot_read(ce.plans, zip)
+
+
+@router.get("/leads/{lead_id}/chariot/addresses")
+def chariot_addresses(lead_id: str, request: Request, zip: str = Query(..., max_length=10),
+                      address: str = Query(..., max_length=120),
+                      db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services import chariot_enrollment as ce
+    _chariot_lead(db, user, request, lead_id)
+    return _chariot_read(ce.addresses, zip, address)
+
+
+@router.get("/leads/{lead_id}/chariot/start-dates")
+def chariot_start_dates(lead_id: str, request: Request, esiid: str = Query(..., max_length=40),
+                        service_type: str = Query(..., max_length=20),
+                        start: str = Query("Standard Switch", max_length=20),
+                        db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services import chariot_enrollment as ce
+    _chariot_lead(db, user, request, lead_id)
+    return _chariot_read(ce.start_dates, esiid, service_type, start)
+
+
+@router.post("/leads/{lead_id}/chariot/enroll", dependencies=[Depends(require_not_observation)])
+def chariot_enroll(lead_id: str, body: ChariotEnrollIn, request: Request, db: Session = Depends(get_db),
+                   user: User = Depends(require_tenant_user)):
+    """Submit one residential enrollment to Chariot. Refused while switched off.
+    The customer's owner or a manager may submit."""
+    from app.services import chariot_enrollment as ce
+    from app.services import energy_enrollment as ee
+    _, lead = _chariot_lead(db, user, request, lead_id)
+    form = body.model_dump(exclude={"plan"})
+    try:
+        row = ce.submit_enrollment(db, organization_id=lead.organization_id, lead=lead,
+                                   actor_user_id=user.id, form=form, plan_snapshot=body.plan)
+    except (ce.SubmissionRefused, ee.EnrollmentNotReady) as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc))
+    except ValueError as exc:            # a sensitive value in the plan snapshot
+        db.rollback()
+        raise HTTPException(422, "The plan details could not be recorded: %s" % str(exc)[:200])
+    finally:
+        form = None                      # noqa: F841 - identity data goes no further
+    handoff_id = None
+    try:
+        handoff_id = ce.link_handoff(db, lead=lead, actor_user_id=user.id, row=row)
+    except Exception:                    # noqa: BLE001 - the submission is already on record
+        db.rollback()
+    log_action(db, lead.organization_id, user.id, action="energy.chariot_enrollment_submitted",
+               target_type="lead", target_id=lead.id,
+               details={"submission": row.id, "status": row.normalized_status, "reason": row.reason_code,
+                        "product_id": row.product_id, "esiid": row.esiid, "handoff": handoff_id,
+                        "customer_authorized": True}, commit=False)
+    db.commit()
+    out = ce.row_out(row)
+    out["handoff_id"] = handoff_id
+    return out
+
+
+@router.get("/enrollments")
+def chariot_enrollment_queue(request: Request, state: str = Query("open", pattern="^(open|all)$"),
+                             db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Chariot submissions waiting for a person to confirm what happened. A
+    manager sees the workspace; anyone else sees their own customers."""
+    from app.services import chariot_enrollment as ce
+    org = _energy_org_for_chariot(db, user, request)
+    rows = ce.queue(db, org.id, include_closed=(state == "all"))
+    visible = {r[0] for r in lead_scope.authorized_lead_query(db, user, Lead.id, request=request)
+               .filter(Lead.id.in_([r.lead_id for r in rows if r.lead_id] or ["-"])).all()}
+    rows = [r for r in rows if r.lead_id in visible]
+    names = {l.id: _name(l.first_name, l.last_name) for l in
+             db.query(Lead).filter(Lead.id.in_(list(visible) or ["-"])).all()}
+    return {"status": ce.status(), "state": state, "total": len(rows),
+            "items": [ce.row_out(r, names) for r in rows]}
+
+
+@router.post("/enrollments/{tx_id}/reconcile", dependencies=[Depends(require_not_observation)])
+def chariot_reconcile(tx_id: str, body: ChariotReconcileIn, request: Request, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user)):
+    """A person records what they verified. "enrolled" runs the SAME Enroll
+    action a manual enrollment uses; "not received" allows a fresh submission."""
+    from app.models.provider_transaction_models import ProviderTransaction
+    from app.services import chariot_enrollment as ce
+    org = _energy_org_for_chariot(db, user, request)
+    row = db.query(ProviderTransaction).filter(ProviderTransaction.id == tx_id,
+                                               ProviderTransaction.organization_id == org.id,
+                                               ProviderTransaction.provider == ce.PROVIDER).first()
+    if row is None or not row.lead_id:
+        raise HTTPException(404, "Submission not found")
+    lead = lead_scope.load_lead_in_scope(db, user, row.lead_id, request)
+    try:
+        ce.reconcile(db, row, user_id=user.id, outcome=body.outcome, note=body.note)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(422, str(exc))
+    log_action(db, org.id, user.id, action="energy.chariot_enrollment_reconciled", target_type="provider_transaction",
+               target_id=row.id, details={"outcome": body.outcome, "lead_id": row.lead_id}, commit=False)
+    db.commit()
+    try:
+        ce.close_handoff(db, lead=lead, actor_user_id=user.id, outcome=body.outcome, note=body.note)
+    except (LookupError, ValueError):
+        db.rollback()
+    enrolled = None
+    if body.outcome == ce.OUTCOME_ENROLLED:
+        from app.routers.rate_requests_router import EnrollPayload, enroll_rate_request
+        enrolled = enroll_rate_request(row.lead_id, EnrollPayload(
+            current_supplier="Chariot Energy",
+            note="Online enrollment with Chariot confirmed: %s" % body.note.strip()[:500]),
+            request, db, user)
+    out = ce.row_out(db.query(ProviderTransaction).get(row.id))
+    out["enrolled"] = bool(enrolled and enrolled.get("enrolled"))
+    return out
