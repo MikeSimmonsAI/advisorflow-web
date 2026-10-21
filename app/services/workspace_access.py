@@ -683,6 +683,16 @@ def selected_workspace_id(user: User, db: Session,
 # WRITING MEMBERSHIP
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _is_evosys_operator(db: Session, user_id: str, organization_id: str) -> bool:
+    """Same rule as plan_limits.usage_for: EvoSys staff seconded into a
+    customer from outside it do not occupy one of that customer's seats."""
+    from app.services import plan_limits
+    u = db.query(User).filter(User.id == user_id).first()
+    if u is None or u.organization_id == organization_id:
+        return False
+    return user_id in plan_limits._evosys_operator_ids(db, {user_id})
+
+
 def grant_workspace_membership(db: Session, user_id: str, organization_id: str,
                                role: str = DEFAULT_WORKSPACE_ROLE,
                                granted_by: Optional[str] = None,
@@ -728,7 +738,7 @@ def grant_workspace_membership(db: Session, user_id: str, organization_id: str,
         # A REVOKED membership coming back is a person regaining access, i.e.
         # a seat again - the guard below would never see them, because this
         # branch returns first. An already-active one (a re-role) adds nobody.
-        if not existing.is_active and check_capacity:
+        if not existing.is_active and check_capacity and not _is_evosys_operator(db, user_id, organization_id):
             from app.services import plan_limits
             plan_limits.require_capacity_for_org_id(
                 db, organization_id, plan_limits.LIMIT_USERS, adding=1)
@@ -752,7 +762,9 @@ def grant_workspace_membership(db: Session, user_id: str, organization_id: str,
     # workspace, and `plan_limits.usage_for` counts them for exactly that
     # reason. Guarding only `POST /admin/users` would have left this door -
     # the one a brand-sales operator actually walks through - wide open.
-    if check_capacity:
+    # An EvoSys operator account is not a customer seat (plan_limits.usage_for
+    # does not count it), so adding one never needs capacity either.
+    if check_capacity and not _is_evosys_operator(db, user_id, organization_id):
         from app.services import plan_limits
         plan_limits.require_capacity_for_org_id(
             db, organization_id, plan_limits.LIMIT_USERS, adding=1)
