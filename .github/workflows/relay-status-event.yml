@@ -16,6 +16,7 @@ permissions: {}
 concurrency:
   group: relay-signal
   cancel-in-progress: false
+  queue: max  # do not drop simultaneous terminal-status notifications from parallel lanes
 
 jobs:
   status:
