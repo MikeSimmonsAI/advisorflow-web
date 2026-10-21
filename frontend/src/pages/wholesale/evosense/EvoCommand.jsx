@@ -23,6 +23,7 @@ import {
 } from '../ds/ds'
 import '../ds/evo-pages.css'
 import PropertyPhoto, { usePropertyPhoto } from './PropertyPhoto'
+import { ActFirst, FunnelPanel } from './Readiness'
 
 const ACT_TONE = {
   'handoff.opened': 'attention', 'reply.read': 'info', 'reply.received': 'info', 'promoted': 'good',
@@ -185,6 +186,9 @@ export default function EvoCommand() {
         <RoutingReviews items={cc.routing_reviews} busy={busy} onResolve={resolveRouting} />
       ) : null}
 
+      {/* ── ACT FIRST: passed the threshold, not yet worked, most advanced first ─ */}
+      <ActFirst />
+
       {/* ── TOP OPPORTUNITIES (the board's image-led cards) ─────────────────── */}
       <h2 className="evo-section-title">
         Top Opportunities
@@ -266,6 +270,8 @@ export default function EvoCommand() {
               </div>
             )}
           </Panel>
+
+          <FunnelPanel />
 
           <Panel title="Pipeline at a glance" hint="every property EvoSense has evaluated, by state">
             <div className="evo-buckets">

@@ -645,8 +645,37 @@ def add_contact(property_id: str, payload: ContactIn, db: Session = Depends(get_
     C.log_event(db, org_id, "contact.manual", property_id=prop.id, user=user, actor_type=C.ACTOR_USER,
                 is_test=prop.is_test, summary="Contact added by hand")
     EV.rescore(db, prop)
+    from app.services.evosense import readiness as RD
+    RD.close_investigation(db, org_id, prop, user, "%s added by %s" % (
+        "Phone" if payload.kind == "phone" else "Email", user.full_name or user.email or "a user"))
     db.commit()
     return {"contacts": [c.id for c in touched], "status": prop.status}
+
+
+@router.get("/opportunity-queue")
+def opportunity_queue(limit: int = 50, county: Optional[str] = None, step: Optional[str] = None,
+                      include_test: bool = False, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_or_observer)):
+    """Which opportunities deserve action first, why, and what to do next. Reads only."""
+    from app.services.evosense import readiness as RD
+    return RD.queue(db, _read_org(db, user), limit=limit, county=county, step=step,
+                    include_test=include_test)
+
+
+@router.get("/funnel")
+def acquisition_funnel(include_test: bool = False, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_or_observer)):
+    """Where opportunities are getting stuck, counted from records. Reads only."""
+    from app.services.evosense import readiness as RD
+    return RD.funnel(db, _read_org(db, user), include_test=include_test)
+
+
+@router.get("/properties/{property_id}/readiness")
+def property_readiness(property_id: str, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_or_observer)):
+    from app.services.evosense import readiness as RD
+    org_id = _read_org(db, user)
+    return RD.for_property(db, _prop(db, org_id, property_id))
 
 
 class PermissionLinkIn(BaseModel):
@@ -707,6 +736,9 @@ def create_permission_link(property_id: str, payload: PermissionLinkIn, request:
                 % PM.last4(link.phone_normalized))
     if contact_added:
         EV.rescore(db, prop)
+        from app.services.evosense import readiness as RD
+        RD.close_investigation(db, org_id, prop, user, "Owner's number added with a permission link by %s"
+                               % (user.full_name or user.email or "a user"))
     db.commit()
     out = PM.link_json(link)
     out.update(url=url, contact_added=contact_added, **PM.message_text(link.business_name, link.owner_name, url))
@@ -788,8 +820,11 @@ def mark_wrong_party(property_id: str, contact_id: str, db: Session = Depends(ge
     C.log_event(db, org_id, "contact.wrong_party", property_id=prop.id, user=user,
                 actor_type=C.ACTOR_USER, is_test=prop.is_test, summary="Contact marked wrong party")
     EV.rescore(db, prop)
+    from app.services.evosense import readiness as RD
+    reopened = RD.reopen_investigation(db, org_id, prop, user,
+                                       "The number on file reached the wrong person.")
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "investigation_id": getattr(reopened, "id", None)}
 
 
 class ContactVerifyIn(BaseModel):
@@ -1831,6 +1866,72 @@ def events(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db),
     return {"items": [{"id": e.id, "action": e.action, "summary": e.summary, "actor": e.actor_type,
                        "property_id": e.property_id, "strategy_id": e.strategy_id,
                        "is_test": e.is_test, "at": V._iso(e.created_at)} for e in rows]}
+
+
+# ── Cut-off owner names: preview, apply, undo (owner_names.py) ──────────────
+
+@router.get("/owner-names/preview")
+def owner_names_preview(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Every owner whose name a county file cut short, and whether a record on
+    file completes it: safe / ambiguous / unrecoverable. Writes nothing."""
+    from app.services.evosense import owner_names as ON
+    org_id = _read_org(db, user)
+    pv = ON.preview(db, org_id)
+    pl = ON.plan(db, org_id, pv)
+    pv["plan"] = {"hash": pl["hash"], "changes": len(pl["changes"]),
+                  "confirm_with": "APPLY %s" % pl["hash"]}
+    return pv
+
+
+@router.post("/owner-names/apply")
+def owner_names_apply(payload: ConfirmIn, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """Apply the SAFE rows only. The plan is rebuilt here; the typed code must
+    match it, so a preview that went stale cannot be applied."""
+    from app.services.evosense import owner_names as ON
+    _admin(user, db)
+    org_id = svc.write_org_id(db, user)
+    pl = ON.plan(db, org_id)
+    if not pl["changes"]:
+        raise HTTPException(status_code=409, detail="Nothing safe to apply.")
+    if payload.confirm != "APPLY %s" % pl["hash"]:
+        raise HTTPException(status_code=422, detail="Type APPLY %s to confirm (re-open the preview "
+                                                    "if the code changed)." % pl["hash"])
+    try:
+        out = ON.apply(db, org_id, pl, confirm=pl["hash"], user=user)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    C.log_event(db, org_id, "owner.name_repair_plan", user=user, actor_type=C.ACTOR_USER,
+                summary="Owner name repair %s applied (%s owners)" % (pl["hash"], out["applied"]),
+                details=pl)
+    db.commit()
+    return out
+
+
+class OwnerNamesRevertIn(BaseModel):
+    plan: str
+    confirm: str = ""
+
+
+@router.post("/owner-names/revert")
+def owner_names_revert(payload: OwnerNamesRevertIn, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    from app.models.evosense_models import EvoSenseEvent
+    from app.services.evosense import owner_names as ON
+    _admin(user, db)
+    org_id = svc.write_org_id(db, user)
+    if payload.confirm != "REVERT %s" % payload.plan:
+        raise HTTPException(status_code=422, detail="Type REVERT %s to confirm." % payload.plan)
+    ev = (db.query(EvoSenseEvent)
+          .filter(EvoSenseEvent.organization_id == org_id, EvoSenseEvent.action == "owner.name_repair_plan",
+                  EvoSenseEvent.details.contains(payload.plan))
+          .order_by(EvoSenseEvent.created_at.desc()).first())
+    pl = C.jload(ev.details, {}) if ev is not None else {}
+    if not pl or pl.get("hash") != payload.plan:
+        raise HTTPException(status_code=404, detail="No applied repair with that code.")
+    out = ON.revert(db, org_id, pl, user=user)
+    db.commit()
+    return out
 
 
 # ── Tarrant tax-roll misread (Oct 17-19, 2026): targeted repair ─────────────
