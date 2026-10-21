@@ -100,6 +100,27 @@ await sleep(600)
 d = (await api(repTok, '/sales/opportunities/' + oppId)).body
 ok('4e. Text added to history only when the rep says it was sent', d.timeline.some(e => e.event_type === 'text_logged'))
 
+// COMPLETED must not depend on the 15-row feed: flood the feed with 20 notes
+// on other deals, then check Alvarez (called + texted earlier) is still Completed.
+const floodTargets = (await api(repTok, '/sales/opportunities')).body.stages.flatMap(s => s.opportunities)
+  .filter(o => o.id !== oppId)
+for (let i = 0; i < 20; i++) {
+  await api(repTok, '/sales/opportunities/' + floodTargets[i % floodTargets.length].id + '/notes',
+    { method: 'POST', body: JSON.stringify({ summary: 'feed filler ' + i, event_type: 'note' }) })
+}
+const myDayMine = (await api(repTok, '/sales/my-day?scope=mine')).body
+ok('16a. Feed is still capped at 15 (so the old method would miss work)', myDayMine.recent_activity.length === 15 &&
+   !myDayMine.recent_activity.some(e => e.opportunity_id === oppId))
+ok('16b. Server worked-today count still includes the called/texted lead', myDayMine.worked_today.count === 1 &&
+   myDayMine.worked_today.opportunity_ids[0] === oppId, JSON.stringify(myDayMine.worked_today))
+await page.goto(APP + '/sales/follow-ups', { waitUntil: 'networkidle2' }); await sleep(900)
+const compPill = await page.$$eval('button.ss-pill', b => b.map(x => x.textContent.trim()).find(t => t.startsWith('Completed')))
+await clickText(page, 'button.ss-pill', 'Completed')
+const compRows = await page.$$eval('.ss-listrow strong', els => els.map(e => e.textContent))
+ok('16c. Follow Ups → Completed shows the lead worked today', compPill === 'Completed (1)' && compRows.join() === 'Testfamily Alvarez', compPill + ' / ' + compRows.join(', '))
+await shot(page, 'e2e-02b-follow-ups-completed')
+await page.goto(APP + '/sales/leads/' + oppId, { waitUntil: 'networkidle2' }); await sleep(800)
+
 await clickText(page, '.ss-detail-actions button', 'Book Demo')
 await sleep(1200)
 ok('6a. Book Demo opens with this contact picked', page.url().includes('/sales/book?opp=' + oppId) && (await page.$eval('#bk-contact', s => s.value)) === oppId)
@@ -157,6 +178,9 @@ await page.keyboard.press('Escape'); await sleep(400)
 ok('11c. Keyboard: Escape closes it', !(await bodyText(page)).includes('What happened?'))
 
 const repNav = await page.$$eval('.sw-sidebar nav a', a => a.map(x => x.textContent.trim()))
+await page.goto(APP + '/sales', { waitUntil: 'networkidle2' }); await sleep(900)
+const repDay = await bodyText(page)
+ok('12b. Rep My Day has no team row and no "Your numbers" label', !repDay.includes('Your team') && !repDay.includes('Your numbers'))
 ok('12a. Rep sees the seven-item nav and no manager items', ['My Day', 'Leads', 'Follow Ups', 'Appointments', 'Demos to Build', 'Pipeline', 'Reports'].every(l => repNav.some(n => n.startsWith(l))) && !repNav.some(n => /Team Command|Salespeople|Team Pipeline/.test(n)), repNav.join(', '))
 
 // ── server-side permissions (not just hidden links) ───────────────────────
@@ -180,8 +204,23 @@ await login(mpage, 'manager@example.test')
 const mgrNav = await mpage.$$eval('.sw-sidebar nav a', a => a.map(x => x.textContent.trim()))
 ok('14. Manager keeps MY TEAM (Team Command etc.) alongside the simple nav', mgrNav.some(n => n.startsWith('Team Command')) && mgrNav.some(n => n.startsWith('Follow Ups')), mgrNav.join(', '))
 const mgrFollow = await mpage.goto(APP + '/sales/follow-ups', { waitUntil: 'networkidle2' }).then(() => sleep(800)).then(() => bodyText(mpage))
-ok('14a. Manager\'s Follow Ups badge counts their own list (none)', mgrNav.some(n => n === 'Follow Ups'), mgrNav.find(n => n.startsWith('Follow Ups')))
-ok('14b. Manager\'s Follow Ups is their own book, not the whole team', !mgrFollow.includes('Testfamily Zed') && !mgrFollow.includes('Testfamily Brooks'))
+ok('14b. Manager\'s Follow Ups is their own book, not the whole team', mgrFollow.includes('Testfamily Manager') && !mgrFollow.includes('Testfamily Zed') && !mgrFollow.includes('Testfamily Brooks'))
+// Manager My Day: personal cards vs a separate team row
+const mTok = mgrTok
+const mMine = (await api(mTok, '/sales/my-day?scope=mine')).body
+const mTeam = (await api(mTok, '/sales/my-day')).body
+await mpage.goto(APP + '/sales', { waitUntil: 'networkidle2' }); await sleep(1200)
+const mDay = await bodyText(mpage)
+const cardFollow = await mpage.$$eval('.ss-stat', c => c.map(x => x.innerText)).then(c => c.find(t => t.includes('Follow Ups')))
+const teamFollow = await mpage.$$eval('.ss-teamstat', c => c.map(x => x.innerText)).then(c => c.find(t => t.includes('Follow ups due')))
+ok('17a. Manager My Day labels the cards "Your numbers"', mDay.includes('Your numbers'))
+ok('17b. Manager\'s Follow Ups card = their own (1), not the team', cardFollow && cardFollow.trim().startsWith('1'), JSON.stringify(cardFollow))
+ok('17c. Team row is separate, labelled, and shows the team total', mDay.includes('Your team') && teamFollow &&
+   teamFollow.trim().startsWith(String(mTeam.metrics.follow_ups_due)) && mTeam.metrics.follow_ups_due > mMine.metrics.follow_ups_due,
+   'team ' + mTeam.metrics.follow_ups_due + ' vs mine ' + mMine.metrics.follow_ups_due)
+const mgrBadge = await mpage.$$eval('.sw-sidebar nav a', a => a.map(x => x.textContent.trim()).find(t => t.startsWith('Follow Ups')))
+ok('17d. Manager\'s Follow Ups badge matches their card', mgrBadge === 'Follow Ups1', mgrBadge)
+await mpage.screenshot({ path: `${OUT}/e2e-11-manager-my-day.png`, fullPage: true })
 await mpage.screenshot({ path: `${OUT}/e2e-10-manager-nav.png`, fullPage: true })
 
 // ── accessibility (axe-core) on the redesigned screens, as the rep ─────────

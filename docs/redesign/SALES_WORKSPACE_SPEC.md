@@ -55,10 +55,34 @@ Marking Won shows the existing onboarding status and links to the existing
 **Sold / Onboarding** area. No customer organisation is created here — that stays
 the existing, deliberate provisioning step (owner/manager).
 
+## Whose numbers (managers)
+
+- **My Day cards, Follow Ups, Reports** are always the viewer's own work
+  (`GET /sales/my-day?scope=mine`). For a manager they are labelled
+  **Your numbers**.
+- A manager also gets a separate, dashed **Your team** row (unscoped
+  `GET /sales/my-day`): follow ups due, deals needing action, demos to build,
+  appointments today, won this month, with a link to Team Command.
+- The Follow Ups badge in the sidebar is counted from the same list the Follow
+  Ups page shows, so the two always match.
+- A rep's view is unchanged: `scope=mine` never widens anything, and a rep gets
+  identical numbers with or without it.
+
+## Completed (Follow Ups)
+
+`GET /sales/my-day` returns `worked_today` — every deal in the caller's view they
+called or texted (`call_outcome` / `text_logged`) since the team's midnight,
+counted in SQL over the whole day. It no longer depends on the 15-row recent
+activity feed. Covered by `tests/test_sales_my_day_scope.py` (20 deals worked
+→ 20 counted while the feed still shows 15).
+
+## Backend additions (read-only, no schema change)
+
+`app/routers/sales_router.py`, `/sales/my-day` only:
+- optional `scope=auto|mine` (default `auto` = previous behaviour)
+- new response keys `scope`, `is_manager`, `worked_today`
+- `_visible_sales_appointments(..., personal=False)` — can only narrow
+
 ## Known limits
 
-- *Completed* on Follow Ups reads the last 15 timeline events from My Day, so a rep
-  logging more than that in one day will see an undercount.
-- For a manager, My Day's *Demos to Build* and *Appointments today* cards count the
-  team (unchanged server behaviour); Follow Ups and its badge count only their own.
 - Booking still emails the prospect the usual invitation, exactly as before.

@@ -125,6 +125,12 @@ db.add(Opportunity(brand_sales_org_id=brand.id, owner_user_id=other.id, company_
                    contact_name="Testfamily Zed", phone="(214) 555-0199", email="zed@example.test",
                    stage="prospect", status="open", next_action="Other rep's call", next_action_due_at=due(-1)))
 db.commit()
+# The manager's own book: one deal due today, so their personal numbers differ
+# visibly from the team's.
+db.add(Opportunity(brand_sales_org_id=brand.id, owner_user_id=mgr.id, company_name="Manager Own Test Co",
+                   contact_name="Testfamily Manager", phone="(214) 555-0188", email="mgrdeal@example.test",
+                   stage="discovery", status="open", next_action="Manager's own call", next_action_due_at=due(0)))
+db.commit()
 db.close()
 print("SEEDED", flush=True)
 

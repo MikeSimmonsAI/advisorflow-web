@@ -23,6 +23,8 @@ node e2e.mjs ./out ./outbox.log
 node shots.mjs ./shots ./rep.tok
 ```
 
-Result on 2026-10-21: 42/42 checks pass (rep journey, server-side permission
-refusals, keyboard, manager view, zero serious/critical axe issues on all seven
-screens), no console errors, only blocked host `fonts.googleapis.com`.
+Result on 2026-10-21 (after merging main 564806b): 49/49 checks pass — rep
+journey to Won → Sold / Onboarding, Completed with the activity feed flooded,
+manager personal vs team numbers, server-side permission refusals, keyboard,
+zero serious/critical axe issues on all seven screens; no console errors; only
+blocked host `fonts.googleapis.com`.
