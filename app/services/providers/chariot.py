@@ -190,6 +190,17 @@ def _multipart(fields: Dict[str, Any]):
     return {k: (None, "" if v is None else str(v)) for k, v in fields.items()}
 
 
+def _scrub(exc) -> str:
+    """An exception message, with the API key removed wherever it appears
+    (requests puts the full GET url - query string and all - in its errors)."""
+    import re as _re
+    msg = str(exc)
+    key = api_key()
+    if key:
+        msg = msg.replace(key, "[key]")
+    return _re.sub(r"(?i)(key=)[^&\s'\"]+", r"\1[key]", msg)[:300]
+
+
 def _call(operation: str, method: str, path: str, fields: Dict[str, Any]):
     """One request.
 
@@ -226,13 +237,13 @@ def _call(operation: str, method: str, path: str, fields: Dict[str, Any]):
                 operation=operation, ok=False,
                 normalized_status=base.PENDING_PROVIDER,
                 reason=REASON_OUTCOME_UNKNOWN,
-                raw_message=str(exc)[:300], detail={"request": echo}),
+                raw_message=_scrub(exc), detail={"request": echo}),
                 None, None, echo)
         return (base.ProviderResult(
             operation=operation, ok=False,
             normalized_status=base.INTEGRATION_ERROR,
             reason=base.REASON_TRANSPORT,
-            raw_message=str(exc)[:300], detail={"request": echo}),
+            raw_message=_scrub(exc), detail={"request": echo}),
             None, None, echo)
 
     status_code = getattr(response, "status_code", None)

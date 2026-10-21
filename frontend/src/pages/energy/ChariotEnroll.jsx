@@ -92,7 +92,8 @@ function OnlineForm({ leadId, info, onDone }) {
       ...svc, ...who, ...id, customer_authorized: ok }
     api.post(`/energy-ops/leads/${leadId}/chariot/enroll`, body)
       .then(r => { setId(EMPTY_ID); onDone(r) })
-      .catch(e2 => setMsg(e2.message || 'Not sent'))
+      .catch(e2 => setMsg(e2.status ? (e2.message || 'Not sent')
+        : 'The connection dropped while sending. The request MAY have reached Chariot - check Suppliers > Online enrollments before trying again.'))
       .finally(() => { setBusy(false); setId(EMPTY_ID) })      // identity values never linger
   }
   return (

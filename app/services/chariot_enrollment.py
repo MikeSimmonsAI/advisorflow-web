@@ -87,21 +87,22 @@ def classification(lead) -> str:
     except (ValueError, TypeError):
         cf = {}
     cf = cf if isinstance(cf, dict) else {}
-    seg = str(cf.get("segment") or "").lower()
+    from app.services.energy_qualification import segment_of
+    seg = segment_of(cf)
     kind = str(cf.get("request_kind") or "").lower()
-    if kind == "partner" or seg == "partner":
+    if seg == "partner":
         return ee.CLASS_PARTNER_REFERRAL
-    if seg == "commercial" or kind == "commercial":
+    if seg == "commercial":
         return ee.CLASS_COMMERCIAL_ENERGY
+    if seg != "residential":
+        return ee.CLASS_GENERAL_INQUIRY          # not known to be a home: not eligible
     if kind == "move":
         return ee.CLASS_MOVE_CONCIERGE
     if kind == "bill_review":
         return ee.CLASS_BILL_ANALYSIS
     if (lead.tier or "") in ("contract_signed", "renewal_due"):
         return ee.CLASS_RENEWAL
-    if seg == "residential" or kind in ("rate_review", ""):
-        return ee.CLASS_RESIDENTIAL_RATE_REVIEW
-    return ee.CLASS_GENERAL_INQUIRY
+    return ee.CLASS_RESIDENTIAL_RATE_REVIEW
 
 
 # ── read-only lookups (need the key, never the switch) ───────────────────────
@@ -112,6 +113,8 @@ def _need_key():
 
 def _read_out(res: base.ProviderResult) -> Dict[str, Any]:
     if not res.ok:
+        if res.normalized_status == base.INTEGRATION_ERROR:
+            return {"ok": False, "error": "Chariot could not be reached or did not accept our key. Try again later."}
         return {"ok": False, "error": res.raw_message or res.reason or res.normalized_status}
     return {"ok": True, "data": res.data}
 
@@ -170,9 +173,21 @@ def _digits(v) -> str:
     return re.sub(r"\D", "", str(v or ""))
 
 
+_ID_LIMITS = {"dob": 10, "ssn": 11, "drivers_licence": 30, "drivers_licence_state": 2}
+
+
 def build_fields(lead, form: Dict[str, Any]) -> Dict[str, Any]:
     """The Chariot field set from the lead + what the advisor typed. Identity
-    values are passed through only; nothing here stores them."""
+    values are passed through only; nothing here stores them, and a bad one is
+    refused by NAME, never by repeating it."""
+    for k, n in _ID_LIMITS.items():
+        if len(str(form.get(k) or "").strip()) > n:
+            raise ee.EnrollmentNotReady("The %s looks too long - check it and try again."
+                                        % k.replace("_", " ").replace("dob", "date of birth"))
+    if str(form.get("ssn") or "").strip() and len(_digits(form.get("ssn"))) != 9:
+        raise ee.EnrollmentNotReady("The SSN must have 9 digits.")
+    if str(form.get("esiid") or "").strip() and not re.fullmatch(r"\d{10,22}", str(form.get("esiid")).strip()):
+        raise ee.EnrollmentNotReady("Choose the meter from the address lookup (ESI ID).")
     st = SERVICE_TYPES.get(str(form.get("service_type") or "").lower())
     fields = {
         "Zip": str(form.get("zip") or lead.zip_code or "").strip(),
@@ -210,6 +225,15 @@ def submit_enrollment(db: Session, *, organization_id: str, lead, actor_user_id:
     payload, audit = ee.build_enrollment_payload(classification=classification(lead),
                                                  fields=build_fields(lead, form))
     esiid = audit.get("ESIID")
+    # Serialize: two tabs / two advisors / two leads for one meter must not
+    # both pass the check below. Lead row lock (all databases) + a meter lock
+    # on Postgres, both held until the attempt row is committed.
+    from app.services.energy_suppliers import _lock
+    lead = _lock(db, lead)
+    if db.get_bind().dialect.name == "postgresql" and esiid:
+        from sqlalchemy import text
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+                   {"k": "chariot-esiid:%s:%s" % (organization_id, esiid)})
     earlier = _blocking_row(db, organization_id, lead.id, esiid, base.OP_SUBMIT_ENROLLMENT)
     if earlier is not None:
         raise SubmissionRefused(
@@ -229,6 +253,12 @@ def submit_enrollment(db: Session, *, organization_id: str, lead, actor_user_id:
     db.commit()                        # the attempt is on record BEFORE anything is sent
     try:
         result = chariot.submit_enrollment(payload)
+    except chariot.ChariotTransactionsDisarmed:
+        payload = None
+        ptx.resolve(db, row, user_id=actor_user_id,
+                    note="[%s] Switched off before sending - nothing reached Chariot." % OUTCOME_NOT_RECEIVED,
+                    commit=True)
+        raise SubmissionRefused("Online enrollment was switched off before sending. Nothing was sent.")
     except Exception as exc:           # noqa: BLE001 - the row stays "outcome unknown"
         result = base.ProviderResult(operation=base.OP_SUBMIT_ENROLLMENT,
                                      normalized_status=base.PENDING_PROVIDER,
@@ -271,22 +301,25 @@ def reconcile(db: Session, row: ProviderTransaction, *, user_id: str, outcome: s
 def close_handoff(db: Session, *, lead, actor_user_id: str, outcome: str, note: str) -> Optional[str]:
     """Mirror a verified outcome onto the open Chariot hand-off, if any."""
     from app.services import energy_suppliers
-    open_h = next((h for h in energy_suppliers.handoffs(lead)
+    open_h = next((h for h in reversed(energy_suppliers.handoffs(lead))
                    if h.get("supplier") == "chariot" and energy_suppliers.is_open(h)), None)
     if open_h is None or outcome == OUTCOME_NOT_RECEIVED:
         return None
     energy_suppliers.record_outcome(
         db, lead=lead, actor_user_id=actor_user_id, handoff_id=open_h["id"],
         outcome="confirmed" if outcome == OUTCOME_ENROLLED else "not_completed",
-        source="supplier_confirmation" if outcome == OUTCOME_ENROLLED else "staff_report",
+        source="staff_report",
         note="Online submission confirmed: %s" % note.strip()[:300])
     return open_h["id"]
 
 
-def queue(db: Session, organization_id: str, *, include_closed: bool = False, limit: int = 100):
+def queue(db: Session, organization_id: str, *, include_closed: bool = False, limit: int = 100,
+          lead_ids=None):
     q = db.query(ProviderTransaction).filter(
         ProviderTransaction.organization_id == organization_id, ProviderTransaction.provider == PROVIDER,
         ProviderTransaction.operation.in_(base.TRANSACTIONAL_OPERATIONS))
+    if lead_ids is not None:
+        q = q.filter(ProviderTransaction.lead_id.in_(lead_ids))
     if not include_closed:
         q = q.filter(ProviderTransaction.resolved_at.is_(None))
     return q.order_by(ProviderTransaction.submitted_at.asc()).limit(limit).all()

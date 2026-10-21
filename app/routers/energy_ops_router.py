@@ -1385,10 +1385,12 @@ class ChariotEnrollIn(BaseModel):
     last_name: Optional[str] = Field(None, max_length=80)
     email: Optional[str] = Field(None, max_length=200)
     phone: Optional[str] = Field(None, max_length=40)
-    dob: Optional[str] = Field(None, max_length=20)
-    ssn: Optional[str] = Field(None, max_length=20)
-    drivers_licence: Optional[str] = Field(None, max_length=40)
-    drivers_licence_state: Optional[str] = Field(None, max_length=4)
+    # NO length limits here: a pydantic 422 would echo the value back. Lengths
+    # are checked in chariot_enrollment.build_fields, which names the field only.
+    dob: Optional[str] = None
+    ssn: Optional[str] = None
+    drivers_licence: Optional[str] = None
+    drivers_licence_state: Optional[str] = None
     customer_authorized: bool = False
 
 
@@ -1524,10 +1526,9 @@ def chariot_enrollment_queue(request: Request, state: str = Query("open", patter
     manager sees the workspace; anyone else sees their own customers."""
     from app.services import chariot_enrollment as ce
     org = _energy_org_for_chariot(db, user, request)
-    rows = ce.queue(db, org.id, include_closed=(state == "all"))
-    visible = {r[0] for r in lead_scope.authorized_lead_query(db, user, Lead.id, request=request)
-               .filter(Lead.id.in_([r.lead_id for r in rows if r.lead_id] or ["-"])).all()}
-    rows = [r for r in rows if r.lead_id in visible]
+    scoped = lead_scope.authorized_lead_query(db, user, Lead.id, request=request).scalar_subquery()
+    rows = ce.queue(db, org.id, include_closed=(state == "all"), lead_ids=scoped)
+    visible = {r.lead_id for r in rows}
     names = {l.id: _name(l.first_name, l.last_name) for l in
              db.query(Lead).filter(Lead.id.in_(list(visible) or ["-"])).all()}
     return {"status": ce.status(), "state": state, "total": len(rows),
@@ -1548,6 +1549,23 @@ def chariot_reconcile(tx_id: str, body: ChariotReconcileIn, request: Request, db
     if row is None or not row.lead_id:
         raise HTTPException(404, "Submission not found")
     lead = lead_scope.load_lead_in_scope(db, user, row.lead_id, request)
+    if body.outcome not in ce.OUTCOMES:
+        raise HTTPException(422, "Choose what happened: enrolled, not enrolled, or Chariot never received it.")
+    if not body.note.strip():
+        raise HTTPException(422, "Say how it was verified (call with the customer, Chariot's report, ...).")
+    if row.resolved_at is not None:
+        raise HTTPException(422, "This submission was already closed.")
+    enrolled = None
+    if body.outcome == ce.OUTCOME_ENROLLED:
+        # ENROLL FIRST, with the same action a manual enrollment uses. If it is
+        # refused (DNC / closed lead, no Completed stage) nothing is closed and
+        # the person sees why; the row stays open to try again.
+        from app.routers.rate_requests_router import EnrollPayload, enroll_rate_request
+        enrolled = enroll_rate_request(row.lead_id, EnrollPayload(
+            current_supplier="Chariot Energy",
+            note="Online enrollment with Chariot confirmed: %s" % body.note.strip()[:500]),
+            request, db, user)
+        db.refresh(row)
     try:
         ce.reconcile(db, row, user_id=user.id, outcome=body.outcome, note=body.note)
     except ValueError as exc:
@@ -1558,15 +1576,8 @@ def chariot_reconcile(tx_id: str, body: ChariotReconcileIn, request: Request, db
     db.commit()
     try:
         ce.close_handoff(db, lead=lead, actor_user_id=user.id, outcome=body.outcome, note=body.note)
-    except (LookupError, ValueError):
+    except Exception:                    # noqa: BLE001 - the confirmation itself is saved
         db.rollback()
-    enrolled = None
-    if body.outcome == ce.OUTCOME_ENROLLED:
-        from app.routers.rate_requests_router import EnrollPayload, enroll_rate_request
-        enrolled = enroll_rate_request(row.lead_id, EnrollPayload(
-            current_supplier="Chariot Energy",
-            note="Online enrollment with Chariot confirmed: %s" % body.note.strip()[:500]),
-            request, db, user)
     out = ce.row_out(db.query(ProviderTransaction).get(row.id))
     out["enrolled"] = bool(enrolled and enrolled.get("enrolled"))
     return out

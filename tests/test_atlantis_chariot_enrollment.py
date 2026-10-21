@@ -286,3 +286,84 @@ def test_scope_other_advisors_and_other_workspaces_cannot_touch_it(client, w, wi
     assert client.post("/energy-ops/enrollments/%s/reconcile" % tx["id"], headers=ho,
                        json={"outcome": "enrolled", "note": "x"}).status_code == 404
     assert len(wire.calls) == 1
+
+
+# ── review fixes ─────────────────────────────────────────────────────────────
+def test_a_lead_not_known_to_be_a_home_is_refused_even_by_direct_post(client, w, wire, monkeypatch):
+    monkeypatch.setenv(chariot.ENV_ALLOW_TRANSACTIONS, "true")
+    lead = _lead(client, w)
+    cf = json.loads(lead.custom_fields)
+    cf["segment"], cf["request_kind"] = "Commercial ", None          # odd spelling still means business
+    lead.custom_fields = json.dumps(cf)
+    w["db"].commit()
+    assert client.post("/energy-ops/leads/%s/chariot/enroll" % lead.id, headers=_h(w, w["adv"]),
+                       json=_form()).status_code == 409
+    cf["segment"] = None                                               # unknown: not eligible either
+    lead.custom_fields = json.dumps(cf)
+    w["db"].commit()
+    info = client.get("/energy-ops/leads/%s/chariot" % lead.id, headers=_h(w, w["adv"])).json()
+    assert info["eligible"] is False
+    assert client.post("/energy-ops/leads/%s/chariot/enroll" % lead.id, headers=_h(w, w["adv"]),
+                       json=_form()).status_code == 409
+    assert wire.calls == []
+
+
+def test_a_bad_identity_value_is_refused_by_name_never_echoed(client, w, wire, monkeypatch):
+    monkeypatch.setenv(chariot.ENV_ALLOW_TRANSACTIONS, "true")
+    lead = _lead(client, w)
+    long_ssn = "6667308099999999999999999"
+    r = client.post("/energy-ops/leads/%s/chariot/enroll" % lead.id, headers=_h(w, w["adv"]),
+                    json=_form(ssn=long_ssn))
+    assert r.status_code == 409 and long_ssn not in r.text and "ssn" in r.text.lower()
+    r = client.post("/energy-ops/leads/%s/chariot/enroll" % lead.id, headers=_h(w, w["adv"]),
+                    json=_form(dob="x" * 40))
+    assert r.status_code == 409 and "x" * 40 not in r.text
+    assert wire.calls == []
+
+
+def test_the_api_key_never_reaches_the_browser_on_a_connection_error(client, w, monkeypatch):
+    lead = _lead(client, w)
+    key = "test-key-not-a-real-credential"
+
+    def boom(method, url, *, params=None, files=None, timeout=None):
+        raise ConnectionError("Max retries exceeded with url: /api/broker/GetPlans?Zip=75201&Key=%s" % key)
+    prev = chariot.set_transport(boom)
+    try:
+        r = client.get("/energy-ops/leads/%s/chariot/plans?zip=75201" % lead.id, headers=_h(w, w["adv"]))
+    finally:
+        chariot.set_transport(prev)
+    assert r.status_code == 200 and r.json()["ok"] is False and key not in r.text
+    assert chariot._scrub(ConnectionError("x?Key=%s&y" % key)).count(key) == 0
+
+
+def test_switched_off_mid_request_is_recorded_as_nothing_sent(client, w, wire, monkeypatch):
+    monkeypatch.setenv(chariot.ENV_ALLOW_TRANSACTIONS, "true")
+    lead = _lead(client, w)
+
+    def disarmed(payload):
+        raise chariot.ChariotTransactionsDisarmed("off")
+    monkeypatch.setattr(chariot, "submit_enrollment", disarmed)
+    r = client.post("/energy-ops/leads/%s/chariot/enroll" % lead.id, headers=_h(w, w["adv"]), json=_form())
+    assert r.status_code == 409 and "Nothing was sent" in r.json()["detail"]
+    row = w["db"].query(ProviderTransaction).one()
+    assert row.resolved_at is not None and row.resolution_note.startswith("[not_received]")
+    monkeypatch.undo()
+
+
+def test_enrolled_is_refused_cleanly_when_the_customer_cannot_be_enrolled(client, w, wire, monkeypatch):
+    monkeypatch.setenv(chariot.ENV_ALLOW_TRANSACTIONS, "true")
+    db = w["db"]
+    lead = _lead(client, w)
+    wire.queue.append({"Status": "Enrollment has been completed",
+                       "Message": "Passed CreditCheck & No Deposit required", "RefrenceNumber": "R-5005"})
+    tx = client.post("/energy-ops/leads/%s/chariot/enroll" % lead.id, headers=_h(w, w["adv"]), json=_form()).json()
+    lead = db.query(Lead).get(lead.id)
+    lead.status = "dnc"
+    db.commit()
+    r = client.post("/energy-ops/enrollments/%s/reconcile" % tx["id"], headers=_h(w, w["adv"]),
+                    json={"outcome": "enrolled", "note": "Customer confirmed"})
+    assert r.status_code == 409
+    db.expire_all()
+    row = db.query(ProviderTransaction).get(tx["id"])
+    assert row.resolved_at is None                                      # nothing was closed
+    assert json.loads(db.query(Lead).get(lead.id).custom_fields)["supplier_handoffs"][0]["status"] == "referred"
