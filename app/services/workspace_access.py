@@ -296,9 +296,13 @@ def _experience(db, user, org, is_program) -> str:
 
 
 def _roofing_enabled(org) -> bool:
+    """Opens the Roofing APP as this workspace's home: the program is switched
+    on AND the business is a roofing company (or names no industry). A funeral
+    home with the Roofing capability keeps its own identity - see
+    program_experience.roofing_identity."""
     try:
-        from app.services.roofing.common import explicitly_enabled
-        return explicitly_enabled(org)
+        from app.services.program_experience import roofing_identity
+        return roofing_identity(org)
     except Exception:  # pragma: no cover - never let a hint break login
         return False
 
@@ -460,11 +464,38 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
         # host is that org when this person holds an active membership in it -
         # their home org (wholesale@) or an org_admin seat there (an operator
         # whose home column is empty, e.g. Michael).
+        #
+        # A SECOND WHOLESALE TENANT (#272, BookaBoost): an org explicitly set up
+        # as a Wholesale workspace (program_experience.is_wholesale_host) hosts
+        # it too - its own data, the same engine. Its workspace entry already
+        # carries experience == "wholesale" for this person. Preference, so
+        # EvoSys behaves exactly as before: the EvoSys host in the person's
+        # home org, then the EvoSys host anywhere, then another Wholesale
+        # workspace (home org first).
+        from app.services.program_experience import WHOLESALE_HOST_SLUG
+
+        def _is_evo(w):
+            return w["organization_slug"] == WHOLESALE_HOST_SLUG
+
+        def _is_other_host(w):
+            return (not _is_evo(w)) and w.get("experience") == WHOLESALE
+
         host = next((w for w in workspaces
-                     if w["organization_id"] == user.organization_id
-                     and w["organization_slug"] == "evo-integrated-solutions-llc"), None) or \
-            next((w for w in workspaces if w["organization_slug"] == "evo-integrated-solutions-llc"), None)
-        if named_wholesale and host:
+                     if w["organization_id"] == user.organization_id and _is_evo(w)), None) or \
+            next((w for w in workspaces if _is_evo(w)), None) or \
+            next((w for w in workspaces
+                  if w["organization_id"] == user.organization_id and _is_other_host(w)), None) or \
+            next((w for w in workspaces if _is_other_host(w)), None)
+        if not named_wholesale:
+            # Owner rule (#272): an org admin (or above) of a second-tenant
+            # Wholesale workspace gets the tile for THAT workspace without a
+            # named seat. Their workspace entry says experience == "wholesale"
+            # only when program_experience applied exactly that rule; EvoSys's
+            # own org never qualifies this way.
+            host = next((w for w in workspaces
+                         if w["organization_id"] == user.organization_id and _is_other_host(w)), None) or \
+                next((w for w in workspaces if _is_other_host(w)), None)
+        if host and (named_wholesale or _is_other_host(host)):
             product_contexts.append({
                 "type": "product", "key": WHOLESALE, "label": "Wholesale Operations",
                 "organization_id": host["organization_id"], "path": "/wholesale/evosense",

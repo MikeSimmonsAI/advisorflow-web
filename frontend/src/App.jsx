@@ -101,6 +101,7 @@ import MobileApp from './mobile/routes'
 // server's 402 — the entitlement itself is enforced on every one of those
 // endpoints, exactly as entitlements.py insists it must be.
 const ProgramCenter = lazyPage(() => import('./pages/program/ProgramCenter'))
+const SciImport = lazyPage(() => import('./pages/program/sci/SciImport'))
 // SCI Live IS the phone command center (Oct 15: updated in place). The old
 // /program/command address redirects here; there is one SCI Live screen.
 const ProgramLive = lazyPage(() => import('./pages/program/command/Command'))
@@ -889,6 +890,27 @@ function ProgramEntry() {
   return <ProgramCenter />
 }
 
+/** /program/import - SCI's Import Leads (the Intelligent Lead Importer, SCI
+    target). Inside the SCI area: a program-only login is never sent to the
+    general platform from here. Its requests carry the SCI workspace like every
+    SCI screen; a program-only login with none selected yet gets its program
+    workspace selected first (the same rule as ProgramOnlyGate) - in an
+    effect, and the importer is not drawn until it is done, because the
+    importer's first requests must already carry that workspace. */
+function SciImportEntry() {
+  const { phase, ctx } = useAuthorizedContexts()
+  const needsWorkspace = !!(ctx?.program_only && !getWorkspaceContext()
+                            && (ctx.workspace_contexts || [])[0]?.organization_id)
+  const [ready, setReady] = useState(false)
+  useEffect(() => {
+    if (phase === 'loading' && !ctx) return
+    if (needsWorkspace) setWorkspaceContext(ctx.workspace_contexts[0].organization_id)
+    setReady(true)
+  }, [phase, ctx, needsWorkspace])
+  if (!ready) return null
+  return <SciImport />
+}
+
 function SciFrontDoor() {
   const { phase, ctx, retry } = useAuthorizedContexts()
   const navigate = useNavigate()
@@ -1439,6 +1461,9 @@ export default function App() {
           <Route path="settings" element={<RoofingSettings />} />
         </Route>
         <Route path="/roofing" element={<RoofingLanding />} />
+        <Route path="/program/import" element={<Navigate to="/program/import/new" replace />} />
+        <Route path="/program/import/new" element={<ProtectedRoute bare><SciImportEntry /></ProtectedRoute>} />
+        <Route path="/program/import/:batchId" element={<ProtectedRoute bare><SciImportEntry /></ProtectedRoute>} />
         <Route path="/program/live" element={<ProtectedRoute bare><ProgramLive /></ProtectedRoute>} />
         <Route path="/program/command" element={<Navigate to="/program/live" replace />} />
         <Route path="/program" element={<ProtectedRoute bare><ProgramEntry /></ProtectedRoute>} />

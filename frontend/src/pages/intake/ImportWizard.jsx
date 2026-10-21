@@ -14,16 +14,35 @@ import '../../styles/shared.css'
 import './intake.css'
 import { EMAIL_LABEL, OrgBanner, Pill, RowTable, SMS_LABEL, STATUS_LABEL, STATUS_TONE, Tile,
          errorText, fmt } from './intakeShared'
-import { approveEnabled, commitGate, isAnalyzed, reachableStep, resolveStep, stepAfterCommit, orgNameMatches, approveBlockedReason } from './importSteps'
+import { lineCheckText, approveEnabled, commitGate, isAnalyzed, reachableStep, resolveStep, stepAfterCommit, orgNameMatches, approveBlockedReason } from './importSteps'
 
 const STEPS = ['Upload', 'Map Fields', 'Analyze & Clean', 'Classify', 'Review Problems',
                'Approve Import', 'Import Results']
+// SCI (target="sci"): the same engine for steps 1-5, no Classify step (an SCI
+// file's own status is SCI source data), and SCI's own loader at the end.
+// The numbers are the server's step numbers; the labels are what is shown.
+const SCI_STEPS = [[1, 'Upload'], [2, 'Map Fields'], [3, 'Analyze & Clean'], [5, 'Review Problems'],
+                   [6, 'Check & Load into SCI'], [7, 'Results']]
 const PIPELINE = [['parsing', 'Parsing'], ['normalizing', 'Normalizing'],
                   ['deduplicating', 'Deduplicating'], ['matching', 'Matching'],
                   ['classifying', 'Classifying'], ['analyzing', 'Analyzing'],
                   ['ready_for_review', 'Ready for Review']]
+const SCI_LEADS = '/program?tab=leads'
+// Staged or loaded into SCI: the rows can no longer change here (the server refuses too).
+const SCI_FROZEN = ['program_stage', 'program_load']
+// The server's answer when the CRM Import Center asks for an SCI batch.
+const SCI_REFUSAL = 'SCI files are loaded through SCI'
 
-export default function ImportWizard() {
+/**
+ * target   'crm' (default): the Import Center at /imports - unchanged.
+ *          'sci': an SCI workspace's lead import (/program/import). Steps 1-5
+ *          run on /program/intake; the last step is SCI's own check and load.
+ * basePath where this wizard's own pages live ('/imports' or '/program/import').
+ * onDone   optional: called with the batch after an SCI stage or load.
+ */
+export default function ImportWizard({ target = 'crm', basePath = '/imports', onDone } = {}) {
+  const sci = target === 'sci'
+  const apiBase = sci ? '/program/intake' : '/intake'
   const { batchId } = useParams()
   const [params, setParams] = useSearchParams()
   const navigate = useNavigate()
@@ -36,25 +55,27 @@ export default function ImportWizard() {
   // Never show a step the batch cannot be on: a stale ?step=6 on a batch that
   // has since been re-mapped falls back to where the server says it is.
   // Step gating lives in ./importSteps (pure, unit-tested).
-  const step = resolveStep(batch, urlStep, !!batchId)
+  const resolved = resolveStep(batch, urlStep, !!batchId)
+  // SCI has no Classify step: anything that would land on it opens Review.
+  const step = sci && resolved === 4 ? 5 : resolved
   // While the server is (re)analyzing, whichever of steps 3-5 asked for it
   // shows progress, and the same step renders the result when it finishes.
   const working = batch && ['processing', 'interrupted'].includes(batch.status) && step >= 3 && step <= 5
   const goStep = n => setParams(p => { const q = new URLSearchParams(p); q.set('step', n); return q })
 
   useEffect(() => {
-    api.get('/intake/context').then(setCtx).catch(e => setCtxErr(errorText(e)))
-    api.get('/intake/fields').then(setFieldsMeta).catch(() => {})
-  }, [])
+    api.get(`${apiBase}/context`).then(setCtx).catch(e => setCtxErr(errorText(e)))
+    api.get(`${apiBase}/fields`).then(setFieldsMeta).catch(() => {})
+  }, [apiBase])
 
   const load = useCallback(async () => {
     if (!batchId) return null
     try {
-      const b = await api.get(`/intake/batches/${batchId}`)
+      const b = await api.get(`${apiBase}/batches/${batchId}`)
       setBatch(b)
       return b
     } catch (e) { setErr(errorText(e)); return null }
-  }, [batchId])
+  }, [batchId, apiBase])
   useEffect(() => { load() }, [load])
 
   // Poll while the server is working; the tab may be closed at any time.
@@ -67,13 +88,32 @@ export default function ImportWizard() {
   if (ctxErr) {
     return (
       <div className="ic-page">
+        <h1 className="page-title">{sci ? 'Import Leads' : 'Import Center'}</h1>
+        <div className="ic-blocker">
+          <div className="ic-blocker-title">{sci ? 'This import is not available here' : 'Select an organization first'}</div>
+          <p>{ctxErr}</p>
+          {sci ? (
+            <p className="ic-muted">Only a manager of this SCI workspace can import leads into it.</p>
+          ) : (
+            <p className="ic-muted">Imports always belong to exactly one organization. Platform
+              owners must enter a customer before importing; nothing is ever imported at the
+              platform level.</p>
+          )}
+          {sci && <button className="btn btn--secondary" onClick={() => navigate(SCI_LEADS)}>Back to SCI Leads</button>}
+        </div>
+      </div>
+    )
+  }
+
+  // A batch made by the SCI importer is loaded by SCI, never by the CRM commit.
+  if (!sci && (batch?.destination === 'sci' || err === SCI_REFUSAL)) {
+    return (
+      <div className="ic-page">
         <h1 className="page-title">Import Center</h1>
         <div className="ic-blocker">
-          <div className="ic-blocker-title">Select an organization first</div>
-          <p>{ctxErr}</p>
-          <p className="ic-muted">Imports always belong to exactly one organization. Platform
-            owners must enter a customer before importing; nothing is ever imported at the
-            platform level.</p>
+          <div className="ic-blocker-title">This file belongs to SCI</div>
+          <p>{batch?.batch_code || 'This batch'} was uploaded with SCI's Import Leads. It is loaded through SCI, not into the CRM.</p>
+          <button className="btn btn--primary" onClick={() => navigate(`/program/import/${batch?.id || batchId}`)}>Open it in SCI Import Leads</button>
         </div>
       </div>
     )
@@ -83,12 +123,16 @@ export default function ImportWizard() {
     <div className="ic-page">
       <header className="page-header">
         <div>
-          <h1 className="page-title">Import Center</h1>
-          <p className="page-subtitle">Upload a file, see exactly what it contains, and decide what enters the CRM.
-            Uploading a contact does not make it a lead.</p>
+          <h1 className="page-title">{sci ? 'Import Leads into SCI' : 'Import Center'}</h1>
+          <p className="page-subtitle">{sci
+            ? <>Upload the list, check every column and every problem, then decide. Nothing is texted or emailed and nobody is put in a campaign by an import.</>
+            : <>Upload a file, see exactly what it contains, and decide what enters the CRM.
+                Uploading a contact does not make it a lead.</>}</p>
         </div>
         <div className="ic-header-actions">
-          <button className="btn btn--secondary" onClick={() => navigate('/imports')}>Import Ledger</button>
+          {sci
+            ? <button className="btn btn--secondary" onClick={() => navigate(SCI_LEADS)}>Back to SCI Leads</button>
+            : <button className="btn btn--secondary" onClick={() => navigate(basePath)}>Import Ledger</button>}
         </div>
       </header>
       <OrgBanner ctx={ctx} />
@@ -98,47 +142,57 @@ export default function ImportWizard() {
           <span className="ic-muted">{batch.filename}</span>
           <span className="ic-muted">{fmt(batch.rows_submitted)} rows</span>
           <span className="ic-muted">{batch.source}{batch.source_detail ? ` · ${batch.source_detail}` : ''}</span>
-          <Pill tone={STATUS_TONE[batch.status]}>{STATUS_LABEL[batch.status] || batch.status}</Pill>
+          <Pill tone={STATUS_TONE[batch.status]}>{sci ? (SCI_STATUS[batch.status] || STATUS_LABEL[batch.status] || batch.status) : (STATUS_LABEL[batch.status] || batch.status)}</Pill>
         </div>
       )}
-      <Stepper step={step} batch={batch} onGo={n => batch && goStep(n)} />
+      <Stepper step={step} batch={batch} onGo={n => batch && goStep(n)} steps={sci ? SCI_STEPS : null} />
       {err && <div className="ic-error">{err}</div>}
       {batch?.error && <div className="ic-error">{batch.error}</div>}
 
-      {step === 1 && <UploadStep ctx={ctx} onCreated={b => navigate(`/imports/${b.id}?step=2`)} />}
-      {step === 2 && batch && <MapStep batch={batch} meta={fieldsMeta} reload={load}
+      {step === 1 && <UploadStep ctx={ctx} sci={sci} apiBase={apiBase} onCreated={b => navigate(`${basePath}/${b.id}?step=2`)} />}
+      {step === 2 && batch && <MapStep batch={batch} meta={fieldsMeta} reload={load} sci={sci} apiBase={apiBase}
                                        onAnalyzed={() => { load(); goStep(3) }} />}
-      {working && <AnalyzeStep batch={batch} reload={load} catalog={fieldsMeta?.classifications || []}
+      {working && <AnalyzeStep batch={batch} reload={load} catalog={fieldsMeta?.classifications || []} apiBase={apiBase}
                                onNext={() => {}} onRemap={() => goStep(2)} />}
-      {!working && step === 3 && batch && <AnalyzeStep batch={batch} reload={load} catalog={fieldsMeta?.classifications || []}
-                                           onNext={() => goStep(4)} onRemap={() => goStep(2)} />}
-      {!working && step === 4 && batch && <ClassifyStep batch={batch} reload={load}
+      {!working && step === 3 && batch && <AnalyzeStep batch={batch} reload={load} catalog={fieldsMeta?.classifications || []} apiBase={apiBase} sci={sci}
+                                           nextLabel={sci ? 'Review problems →' : undefined}
+                                           onNext={() => goStep(sci ? 5 : 4)} onRemap={() => goStep(2)} />}
+      {!sci && !working && step === 4 && batch && <ClassifyStep batch={batch} reload={load} apiBase={apiBase}
                                             onDone={() => { load(); goStep(5) }} onNext={() => goStep(5)} />}
       {!working && step === 5 && batch && <ReviewStep batch={batch} reload={load} catalog={fieldsMeta?.classifications || []}
-                                          initialTab={params.get('tab')}
+                                          initialTab={params.get('tab')} apiBase={apiBase} sci={sci} title={sci ? 'Step 4 — Review Problems' : undefined}
+                                          nextLabel={sci ? 'Check what SCI will do →' : undefined}
                                           onNext={() => goStep(6)} />}
-      {step === 6 && batch && <ApproveStep batch={batch} ctx={ctx} reload={load}
+      {!sci && step === 6 && batch && <ApproveStep batch={batch} ctx={ctx} reload={load} apiBase={apiBase}
                                            onReview={tab => setParams(p => { const q = new URLSearchParams(p); q.set('step', 5); q.set('tab', tab); return q })}
                                            onCommitted={mode => { load(); goStep(stepAfterCommit(mode)) }}
-                                           onCancelled={() => navigate('/imports')} />}
-      {step === 7 && batch && <ResultsStep batch={batch} onLedger={() => navigate(`/imports?batch=${batch.id}`)}
+                                           onCancelled={() => navigate(basePath)} />}
+      {!sci && step === 7 && batch && <ResultsStep batch={batch} onLedger={() => navigate(`${basePath}?batch=${batch.id}`)}
                                            onApprove={() => goStep(6)} />}
+      {sci && step === 6 && batch && <SciLoadStep batch={batch}
+                                          onReview={() => goStep(5)}
+                                          onDone={async () => { const b = await load(); goStep(7); onDone && onDone(b) }} />}
+      {sci && step === 7 && batch && <SciResultsStep batch={batch} onLoad={() => goStep(6)}
+                                          onLeads={() => navigate(SCI_LEADS)} />}
     </div>
   )
 }
 
-function Stepper({ step, batch, onGo }) {
+const SCI_STATUS = { staged: 'Staged in SCI', committed: 'Loaded into SCI', ready_for_review: 'Ready to check',
+                     mapping: 'Mapping columns', processing: 'Analyzing', committing: 'Loading…' }
+
+function Stepper({ step, batch, onGo, steps = null }) {
   const analyzed = isAnalyzed(batch)
   const reach = reachableStep(batch)
+  const list = steps || STEPS.map((label, i) => [i + 1, label])
   return (
     <ol className="ic-stepper">
-      {STEPS.map((label, i) => {
-        const n = i + 1
+      {list.map(([n, label], i) => {
         const reachable = batch && (n <= 2 || (analyzed && n <= reach))
         return (
           <li key={label} className={`ic-step ${n === step ? 'ic-step--on' : ''} ${n < step ? 'ic-step--done' : ''}`}>
             <button type="button" disabled={!reachable} onClick={() => onGo(n)}>
-              <span className="ic-step-n">{n}</span><span className="ic-step-l">{label}</span>
+              <span className="ic-step-n">{i + 1}</span><span className="ic-step-l">{label}</span>
             </button>
           </li>
         )
@@ -149,7 +203,7 @@ function Stepper({ step, batch, onGo }) {
 
 // ── 1. Upload ───────────────────────────────────────────────────────────────
 
-function UploadStep({ ctx, onCreated }) {
+function UploadStep({ ctx, onCreated, sci = false, apiBase = '/intake' }) {
   const fileRef = useRef(null)
   const [file, setFile] = useState(null)
   const [form, setForm] = useState({ source: 'csv', source_detail: '', source_year: '',
@@ -170,10 +224,48 @@ function UploadStep({ ctx, onCreated }) {
     setBusy(true); setErr('')
     const fd = new FormData()
     fd.append('file', file)
-    Object.entries(form).forEach(([k, v]) => { if (String(v).trim()) fd.append(k, String(v).trim()) })
-    try { onCreated(await api.upload('/intake/batches', fd)) }
+    // SCI: the server marks the batch as an SCI file; only the list name travels.
+    const sent = sci ? { list_name: form.list_name } : form
+    Object.entries(sent).forEach(([k, v]) => { if (String(v).trim()) fd.append(k, String(v).trim()) })
+    try { onCreated(await api.upload(`${apiBase}/batches`, fd)) }
     catch (e) { setErr(errorText(e)) }
     finally { setBusy(false) }
+  }
+
+  if (sci) {
+    return (
+      <section className="panel ic-panel">
+        <div className="panel-header"><h2 className="panel-title">Step 1 — Upload the lead list</h2></div>
+        <div className={`ic-drop ${file ? 'ic-drop--has' : ''}`} onClick={() => fileRef.current?.click()}
+             onDragOver={e => e.preventDefault()}
+             onDrop={e => { e.preventDefault(); if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]) }}>
+          <input ref={fileRef} type="file" accept=".csv,.xlsx" hidden
+                 onChange={e => setFile(e.target.files[0] || null)} />
+          {file ? (
+            <><div className="ic-strong">{file.name}</div>
+              <div className="ic-muted">{(file.size / 1024 / 1024).toFixed(2)} MB · click to change</div></>
+          ) : (
+            <><div className="ic-strong">Drop the Excel or CSV list here</div>
+              <div className="ic-muted">or click to choose · nothing is loaded yet</div></>
+          )}
+        </div>
+        <div className="ic-form-grid">
+          <label className="ic-span2">Name for this list (optional)
+            <input className="settings-input" placeholder="e.g. October mailing responses"
+                   value={form.list_name} onChange={e => set('list_name', e.target.value)} />
+          </label>
+        </div>
+        <p className="ic-note">Usual columns: <b>Lead ID</b>, First Name, Last Name, Phone, Email,
+          <b> Location Friendly Name</b>, Primary Campaign, Lead Status, Last Activity Date. Other column names are fine —
+          you match them up on the next step.</p>
+        {err && <div className="ic-error">{err}</div>}
+        <div className="ic-actions">
+          <button className="btn btn--primary btn--lg" disabled={busy || !file} onClick={submit}>
+            {busy ? 'Reading file…' : 'Upload & read columns →'}
+          </button>
+        </div>
+      </section>
+    )
   }
 
   return (
@@ -244,8 +336,14 @@ function UploadStep({ ctx, onCreated }) {
 
 const KIND_LABEL = { standard: 'Platform field', custom: 'Custom field', vertical: 'Vertical field',
                      source: 'Keep as source data', ignore: 'Ignore' }
+const SCI_KIND_LABEL = { ...KIND_LABEL, source: 'Keep as SCI data' }
+// The SCI columns the importer keeps on purpose (see intake/fields.py
+// _SCI_HEADER_MAP and programs/intake_bridge.py): mapped, not "unmapped".
+const SCI_KEPT = { location_friendly_name: 'Location Friendly Name', primary_campaign: 'Primary Campaign',
+                   lead_status: 'Lead Status', last_activity: 'Last Activity',
+                   campaign_channel: 'Campaign Channel', lead_owner_manager: 'Lead Owner: Manager' }
 
-function MapStep({ batch, meta, reload, onAnalyzed }) {
+function MapStep({ batch, meta, reload, onAnalyzed, sci = false, apiBase = '/intake' }) {
   const [preview, setPreview] = useState(null)
   const [mapping, setMapping] = useState({})
   const [policy, setPolicy] = useState(batch.update_policy || { mode: 'fill_blanks', fields: [] })
@@ -255,13 +353,13 @@ function MapStep({ batch, meta, reload, onAnalyzed }) {
   const [err, setErr] = useState('')
 
   useEffect(() => {
-    api.get(`/intake/batches/${batch.id}/preview`).then(p => {
+    api.get(`${apiBase}/batches/${batch.id}/preview`).then(p => {
       setPreview(p)
       const m = {}
       p.columns.forEach(c => { m[c.header] = { kind: c.mapping.kind, target: c.mapping.target } })
       setMapping(m)
     }).catch(e => setErr(errorText(e)))
-  }, [batch.id])
+  }, [batch.id, apiBase])
 
   const standard = meta?.standard || []
   const groups = useMemo(() => {
@@ -274,30 +372,40 @@ function MapStep({ batch, meta, reload, onAnalyzed }) {
     Object.entries(mapping).forEach(([h, m]) => { if (m.kind === 'standard' && m.target) (t[m.target] = t[m.target] || []).push(h) })
     return t
   }, [mapping])
-  const unmapped = Object.values(mapping).filter(m => m.kind === 'source').length
+  const sciKept = m => sci && ['source', 'custom', 'vertical'].includes(m?.kind) && SCI_KEPT[m?.target]
+  const unmapped = Object.values(mapping).filter(m => m.kind === 'source' && !sciKept(m)).length
+  const kindLabels = sci ? SCI_KIND_LABEL : KIND_LABEL
   const set = (h, patch) => setMapping(m => ({ ...m, [h]: { ...m[h], ...patch } }))
   const slug = h => h.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 60) || 'field'
 
   async function saveAndAnalyze() {
     setBusy(true); setErr('')
     try {
-      await api.put(`/intake/batches/${batch.id}/mapping`, {
+      await api.put(`${apiBase}/batches/${batch.id}/mapping`, {
         mapping, update_policy: policy, classification: { date_order: dateOrder } })
-      await api.post(`/intake/batches/${batch.id}/analyze`, {})
+      await api.post(`${apiBase}/batches/${batch.id}/analyze`, {})
       onAnalyzed()
     } catch (e) { setErr(errorText(e)); reload() }
     finally { setBusy(false) }
   }
 
   if (!preview) return <section className="panel ic-panel"><div className="empty-state">{err || 'Reading columns…'}</div></section>
-  const cols = preview.columns.filter(c => !onlyUnmapped || mapping[c.header]?.kind === 'source')
+  const cols = preview.columns.filter(c => !onlyUnmapped || (mapping[c.header]?.kind === 'source' && !sciKept(mapping[c.header])))
   return (
     <section className="panel ic-panel">
       <div className="panel-header">
         <h2 className="panel-title">Step 2 — Map Fields</h2>
         <span className="panel-count">{preview.headers.length} columns · {fmt(preview.row_count)} rows</span>
       </div>
-      {unmapped > 0 && (
+      {sci && unmapped > 0 && (
+        <div className="ic-note">
+          <b>{unmapped} other column{unmapped === 1 ? '' : 's'}</b> will be kept with each family's SCI record exactly as in the file.
+          Map one only if it belongs in a field.
+          <label className="ic-inline"><input type="checkbox" checked={onlyUnmapped}
+                 onChange={e => setOnlyUnmapped(e.target.checked)} /> Show only these</label>
+        </div>
+      )}
+      {!sci && unmapped > 0 && (
         <div className="ic-warn">
           <b>{unmapped} unmapped column{unmapped === 1 ? '' : 's'}.</b> They are not lost — each is kept on the record as
           source data. Map, mark as a custom field, or ignore each one deliberately.
@@ -315,7 +423,7 @@ function MapStep({ batch, meta, reload, onAnalyzed }) {
               return (
                 <tr key={c.header} className={dupe ? 'ic-row--warn' : ''}>
                   <td className="ic-strong">{c.header}
-                    {c.mapping.confidence === 'low' || c.mapping.confidence === 'none' ?
+                    {!sciKept(m) && (c.mapping.confidence === 'low' || c.mapping.confidence === 'none') ?
                       <div className="ic-muted ic-small">no confident match</div> : null}</td>
                   <td className="ic-small ic-samples">{c.samples.length ? c.samples.join(' · ') : <span className="ic-muted">empty</span>}</td>
                   <td className="mono ic-small">{Math.round(100 * c.filled / Math.max(preview.row_count, 1))}%</td>
@@ -323,7 +431,7 @@ function MapStep({ batch, meta, reload, onAnalyzed }) {
                     <select className="filter-select ic-select-sm" value={m.kind}
                             onChange={e => set(c.header, { kind: e.target.value,
                               target: e.target.value === 'standard' ? '' : (e.target.value === 'ignore' ? null : slug(c.header)) })}>
-                      {Object.entries(KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                      {Object.entries(kindLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                     </select>
                   </td>
                   <td>
@@ -338,7 +446,10 @@ function MapStep({ batch, meta, reload, onAnalyzed }) {
                         ))}
                       </select>
                     )}
-                    {['custom', 'vertical', 'source'].includes(m.kind) && (
+                    {sciKept(m) && (
+                      <div className="ic-sci-kept" title={m.target}>Kept as SCI data — {SCI_KEPT[m.target]}</div>
+                    )}
+                    {!sciKept(m) && ['custom', 'vertical', 'source'].includes(m.kind) && (
                       <input className="settings-input ic-input-sm mono" value={m.target || ''}
                              onChange={e => set(c.header, { target: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') })} />
                     )}
@@ -351,7 +462,15 @@ function MapStep({ batch, meta, reload, onAnalyzed }) {
         </table>
       </div>
 
+      {sci && (
+        <div className="ic-note" data-testid="sci-map-note">
+          SCI needs <b>Lead ID</b> (Platform field “Source record ID”) and the location
+          (Location Friendly Name, kept as SCI data). Primary Campaign and Lead Status are kept as SCI data too.
+          Every original value is kept exactly as it is in the file.
+        </div>
+      )}
       <div className="ic-subpanel">
+        {!sci && <>
         <h3>When a row matches a record already in the CRM</h3>
         <label className="ic-radio"><input type="radio" checked={policy.mode === 'fill_blanks'}
                onChange={() => setPolicy({ mode: 'fill_blanks', fields: [] })} />
@@ -367,6 +486,7 @@ function MapStep({ batch, meta, reload, onAnalyzed }) {
             ))}
           </div>
         )}
+        </>}
         <h3>Dates written like 03/04/2021</h3>
         <select className="filter-select" value={dateOrder} onChange={e => setDateOrder(e.target.value)}>
           <option value="auto">Decide per column — flag anything ambiguous for review</option>
@@ -386,7 +506,7 @@ function MapStep({ batch, meta, reload, onAnalyzed }) {
 
 // ── 3. Analyze ──────────────────────────────────────────────────────────────
 
-function AnalyzeStep({ batch, reload, catalog, onNext, onRemap }) {
+function AnalyzeStep({ batch, reload, catalog, onNext, onRemap, apiBase = '/intake', nextLabel, sci = false }) {
   const [cat, setCat] = useState(null)
   const a = batch.analysis || {}
   if (batch.status === 'processing' || batch.status === 'interrupted') {
@@ -406,7 +526,7 @@ function AnalyzeStep({ batch, reload, catalog, onNext, onRemap }) {
           <div className="ic-warn">The analysis stopped responding (the server may have restarted).
             It is safe to run it again.
             <button className="btn btn--secondary btn--sm" onClick={async () => {
-              await api.post(`/intake/batches/${batch.id}/analyze`, {}); reload() }}>Run analysis again</button></div>
+              await api.post(`${apiBase}/batches/${batch.id}/analyze`, {}); reload() }}>Run analysis again</button></div>
         ) : <p className="ic-muted">Running on the server. You can close this tab — the result will be waiting in the Import Ledger.</p>}
       </section>
     )
@@ -434,17 +554,17 @@ function AnalyzeStep({ batch, reload, catalog, onNext, onRemap }) {
         <h2 className="panel-title">Step 3 — Analyze & Clean</h2>
         <span className="panel-count">{a.timing_seconds ? `${a.timing_seconds}s` : ''}</span>
       </div>
-      <p className="ic-muted">Every number is counted from the staged rows. Click any number to see the rows behind it.
-        Nothing has been written to the CRM.</p>
+      <p className="ic-muted">Every number is counted from the staged rows. Click any number to see the rows behind it.{' '}
+        {sci ? 'Nothing has been loaded into SCI yet.' : 'Nothing has been written to the CRM.'}</p>
 
       <h3 className="ic-group">The file</h3>
       <div className="ic-tiles">
         {T('Total rows', a.total_rows, 'all', 'blue')}
         {T('Unique records', a.unique_records, null, 'blue')}
-        {T('Duplicates in file', m.duplicates_in_file, 'match:duplicates_in_file', 'purple', 'merged into the first occurrence')}
+        {T('Duplicates in file', m.duplicates_in_file, 'match:duplicates_in_file', 'purple', sci ? 'linked to the same person' : 'merged into the first occurrence')}
         {T('Possible duplicates', m.possible_duplicates_in_file, 'match:possible_duplicates_in_file', 'amber', 'need a decision')}
-        {T('Existing CRM matches', m.existing_exact, 'match:existing_exact', 'blue', 'will update, not duplicate')}
-        {T('Possible CRM matches', m.existing_possible, 'match:existing_possible', 'amber')}
+        {T(sci ? 'Already in SCI' : 'Existing CRM matches', m.existing_exact, 'match:existing_exact', 'blue', sci ? 'same Lead ID — updated, never duplicated' : 'will update, not duplicate')}
+        {T(sci ? 'Possibly already in SCI' : 'Possible CRM matches', m.existing_possible, 'match:existing_possible', 'amber')}
         {T('New records', m.new_records, 'match:new', 'green')}
       </div>
 
@@ -486,7 +606,7 @@ function AnalyzeStep({ batch, reload, catalog, onNext, onRemap }) {
         {T('Invalid', st.invalid, 'status:invalid', 'red')}
         {T('Historical customers', a.historical_customers, 'flag:historical_customer', 'purple')}
         {T('Exact customer matches', m.exact_customer_matches, 'match:customer_exact', 'purple')}
-        {T('Would become leads', a.would_activate_as_leads_if_ready_committed, 'flag:creates_lead', 'green', 'Ready rows classified as opportunities')}
+        {!sci && T('Would become leads', a.would_activate_as_leads_if_ready_committed, 'flag:creates_lead', 'green', 'Ready rows classified as opportunities')}
         {T('SMS ready', a.sms_ready, 'sms:ready', 'green', 'mobile + consent + clean')}
         {T('Email ready', a.email_ready, 'email:ready', 'green')}
       </div>
@@ -496,11 +616,12 @@ function AnalyzeStep({ batch, reload, catalog, onNext, onRemap }) {
           Extra cells are kept on the row as source data.</div>
       )}
 
-      {cat && <RowTable batchId={batch.id} category={cat.c === 'all' ? null : cat.c} title={cat.t} catalog={catalog} />}
+      {cat && <RowTable batchId={batch.id} category={cat.c === 'all' ? null : cat.c} title={cat.t} catalog={catalog} apiBase={apiBase}
+                        sci={sci} editable={sci && !SCI_FROZEN.includes(batch.commit_mode)} onChanged={sci ? () => reload() : undefined} />}
 
       <div className="ic-actions">
         <button className="btn btn--secondary" onClick={onRemap}>← Change mapping</button>
-        <button className="btn btn--primary btn--lg" onClick={onNext}>Classify records →</button>
+        <button className="btn btn--primary btn--lg" onClick={onNext}>{nextLabel || 'Classify records →'}</button>
       </div>
     </section>
   )
@@ -508,7 +629,7 @@ function AnalyzeStep({ batch, reload, catalog, onNext, onRemap }) {
 
 // ── 4. Classify ─────────────────────────────────────────────────────────────
 
-function ClassifyStep({ batch, reload, onDone, onNext }) {
+function ClassifyStep({ batch, reload, onDone, onNext, apiBase = '/intake' }) {
   const [data, setData] = useState(null)
   const [vmap, setVmap] = useState({})
   const [fallback, setFallback] = useState('contact')
@@ -518,22 +639,22 @@ function ClassifyStep({ batch, reload, onDone, onNext }) {
   const [newCls, setNewCls] = useState({ key: '', label: '', record_class: 'contact', creates_lead: false })
 
   const loadVals = useCallback(() => {
-    api.get(`/intake/batches/${batch.id}/classification-values`).then(d => {
+    api.get(`${apiBase}/batches/${batch.id}/classification-values`).then(d => {
       setData(d)
       setFallback(d.fallback || 'contact')
       const m = {}
       d.values.forEach(v => { m[v.value] = v.classification || '' })
       setVmap(m)
     }).catch(e => setErr(errorText(e)))
-  }, [batch.id])
+  }, [batch.id, apiBase])
   useEffect(() => { loadVals() }, [loadVals])
 
   async function save() {
     setBusy(true); setErr('')
     try {
-      await api.put(`/intake/batches/${batch.id}/mapping`,
+      await api.put(`${apiBase}/batches/${batch.id}/mapping`,
                     { classification: { value_map: vmap, fallback } })
-      await api.post(`/intake/batches/${batch.id}/analyze`, {})
+      await api.post(`${apiBase}/batches/${batch.id}/analyze`, {})
       onDone()
     } catch (e) { setErr(errorText(e)) }
     finally { setBusy(false) }
@@ -640,7 +761,8 @@ const REVIEW_TABS = [
 const TAB_ALIASES = { duplicates: 'status:duplicate', blocked: 'status:blocked',
                       enrichment: 'status:needs_enrichment' }
 
-function ReviewStep({ batch, reload, catalog, onNext, initialTab }) {
+function ReviewStep({ batch, reload, catalog, onNext, initialTab, apiBase = '/intake', title, nextLabel, sci = false }) {
+  const tabLabel = (k, l) => (sci && k === 'status:existing_match' ? 'Already in SCI' : l)
   const [tab, setTab] = useState(TAB_ALIASES[initialTab] || REVIEW_TABS[0][0])
   const [tick, setTick] = useState(0)
   const [msg, setMsg] = useState('')
@@ -649,20 +771,20 @@ function ReviewStep({ batch, reload, catalog, onNext, initialTab }) {
   async function bulk(body, label) {
     if (!window.confirm(`${label} — apply to every row in “${REVIEW_TABS.find(t => t[0] === tab)[1]}”?`)) return
     try {
-      const r = await api.post(`/intake/batches/${batch.id}/rows/bulk`, { category: tab, ...body })
+      const r = await api.post(`${apiBase}/batches/${batch.id}/rows/bulk`, { category: tab, ...body })
       setMsg(`${fmt(r.updated)} rows updated${r.refused ? `, ${fmt(r.refused)} left as they were` : ''}.`)
       setTick(t => t + 1); reload()
     } catch (e) { setMsg(errorText(e)) }
   }
   return (
     <section className="panel ic-panel">
-      <div className="panel-header"><h2 className="panel-title">Step 5 — Review Problems</h2></div>
+      <div className="panel-header"><h2 className="panel-title">{title || 'Step 5 — Review Problems'}</h2></div>
       <p className="ic-muted">Uncertain matches are never merged automatically. Decide here, or leave them staged —
         they will not be imported until someone does.</p>
       <div className="ic-tabs">
         {REVIEW_TABS.map(([k, l]) => (
           <button key={k} className={`ic-tab ${tab === k ? 'ic-tab--on' : ''}`} onClick={() => setTab(k)}>
-            {l} <span className="ic-tab-n">{fmt(cnt(k))}</span></button>
+            {tabLabel(k, l)} <span className="ic-tab-n">{fmt(cnt(k))}</span></button>
         ))}
       </div>
       <div className="ic-bulk">
@@ -671,7 +793,7 @@ function ReviewStep({ batch, reload, catalog, onNext, initialTab }) {
           <button className="btn btn--secondary btn--sm" onClick={() => bulk({ approve: true }, 'Approve')}>Approve all</button>
           <button className="btn btn--secondary btn--sm" onClick={() => bulk({ skip: true }, 'Skip')}>Skip all</button></>}
         {tab === 'status:duplicate' && <>
-          <button className="btn btn--secondary btn--sm" onClick={() => bulk({ duplicate_resolution: 'merge' }, 'Merge into the first occurrence')}>Merge all into first occurrence</button>
+          <button className="btn btn--secondary btn--sm" onClick={() => bulk({ duplicate_resolution: 'merge' }, sci ? 'Link to the same person' : 'Merge into the first occurrence')}>{sci ? 'Link all to the same person' : 'Merge all into first occurrence'}</button>
           <button className="btn btn--secondary btn--sm" onClick={() => bulk({ duplicate_resolution: 'skip_incoming' }, 'Skip duplicates entirely')}>Skip all</button></>}
         {tab === 'status:existing_match' && <>
           <button className="btn btn--secondary btn--sm" onClick={() => bulk({ duplicate_resolution: 'update_existing' }, 'Update existing records')}>Update all existing</button>
@@ -680,9 +802,10 @@ function ReviewStep({ batch, reload, catalog, onNext, initialTab }) {
         {tab === 'status:needs_enrichment' && <span className="ic-muted ic-small">These have no usable phone or email. They can be preserved as contacts (never leads) on the Approve step.</span>}
       </div>
       {msg && <div className="ic-note">{msg}</div>}
-      <RowTable key={tab + tick} batchId={batch.id} category={tab} title={REVIEW_TABS.find(t => t[0] === tab)[1]}
-                catalog={catalog} editable onChanged={() => reload()} />
-      <div className="ic-actions"><button className="btn btn--primary btn--lg" onClick={onNext}>Continue to approval →</button></div>
+      <RowTable key={tab + tick} batchId={batch.id} category={tab} title={tabLabel(tab, REVIEW_TABS.find(t => t[0] === tab)[1])}
+                catalog={catalog} editable={!sci || !SCI_FROZEN.includes(batch.commit_mode)} onChanged={() => reload()}
+                apiBase={apiBase} sci={sci} />
+      <div className="ic-actions"><button className="btn btn--primary btn--lg" onClick={onNext}>{nextLabel || 'Continue to approval →'}</button></div>
     </section>
   )
 }
@@ -695,7 +818,7 @@ const MODES = [
   ['ready_and_review', 'Import Ready + Review', 'Also imports undecided review rows — possible duplicates are kept SEPARATE and never become leads.', ''],
 ]
 
-function ApproveStep({ batch, ctx, reload, onReview, onCommitted, onCancelled }) {
+function ApproveStep({ batch, ctx, reload, onReview, onCommitted, onCancelled, apiBase = '/intake' }) {
   const [mode, setMode] = useState('stage_only')
   const [enrich, setEnrich] = useState(true)
   const [pv, setPv] = useState(null)
@@ -703,9 +826,9 @@ function ApproveStep({ batch, ctx, reload, onReview, onCommitted, onCancelled })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   useEffect(() => {
-    api.get(`/intake/batches/${batch.id}/commit-preview?mode=${mode}&include_enrichment=${enrich}`)
+    api.get(`${apiBase}/batches/${batch.id}/commit-preview?mode=${mode}&include_enrichment=${enrich}`)
       .then(setPv).catch(e => setErr(errorText(e)))
-  }, [batch.id, mode, enrich])
+  }, [batch.id, mode, enrich, apiBase])
   const orgName = ctx?.organization_name || pv?.organization_name || ''
   const gate = commitGate(batch)
   const canPress = approveEnabled(batch, mode, typed, orgName, busy)
@@ -713,7 +836,7 @@ function ApproveStep({ batch, ctx, reload, onReview, onCommitted, onCancelled })
   async function go() {
     setBusy(true); setErr('')
     try {
-      await api.post(`/intake/batches/${batch.id}/commit`, { mode, include_enrichment: enrich,
+      await api.post(`${apiBase}/batches/${batch.id}/commit`, { mode, include_enrichment: enrich,
         confirm_organization_name: mode === 'stage_only' ? null : typed })
       // Every successful decision - including "Keep staged" - moves on to
       // Step 7, which reports what happened (or that everything is staged).
@@ -723,7 +846,7 @@ function ApproveStep({ batch, ctx, reload, onReview, onCommitted, onCancelled })
   }
   async function cancel() {
     if (!window.confirm('Cancel this batch? Nothing has been imported; the staged rows are kept for the record.')) return
-    await api.post(`/intake/batches/${batch.id}/cancel`, {})
+    await api.post(`${apiBase}/batches/${batch.id}/cancel`, {})
     onCancelled()
   }
   return (
@@ -836,6 +959,149 @@ function ResultsStep({ batch, onLedger, onApprove }) {
             {batch.status === 'staged' ? '← Import staged rows' : '← Import remaining staged rows'}</button>
         )}
         <button className="btn btn--primary" onClick={onLedger}>Open in Import Ledger</button>
+      </div>
+    </section>
+  )
+}
+
+// ── SCI: check & load (replaces Approve / Results for target="sci") ─────────
+//
+// The CRM commit never runs for an SCI file. This step asks SCI's own loader
+// what it would do with the reviewed rows (a check that changes nothing), then
+// either STAGES them (safe default: SCI keeps the rows, no family goes live)
+// or LOADS them (SCI holds anyone who needs a look and adds the clean families
+// to Leads). Neither texts, emails or enrolls anyone.
+
+const NOTHING_SENT = 'No texts or emails are sent and nobody is put in a campaign. Families are only contacted after someone picks them on Choose & Send.'
+
+function SciLoadStep({ batch, onReview, onDone }) {
+  const [pv, setPv] = useState(null)
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState('')
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    let live = true
+    setPv(null); setErr('')
+    api.get(`/program/leads/import/batches/${batch.id}/sci-preview`)
+      .then(d => { if (live) setPv(d) })
+      .catch(e => { if (live) setErr(errorText(e)) })
+    return () => { live = false }
+  }, [batch.id, batch.status, tick])
+
+  async function run(mode) {
+    if (mode === 'load' && !window.confirm(
+      `Load ${fmt(pv?.rows_to_sci || 0)} rows into SCI families?\n\n` +
+      'Clean families are added to SCI Leads. Anyone with an unknown location, a possible duplicate or a "not interested" status is held for review.\n\n' +
+      NOTHING_SENT)) return
+    setBusy(mode); setErr('')
+    try {
+      await api.post(`/program/leads/import/batches/${batch.id}/load`, { mode })
+      onDone()
+    } catch (e) { setErr(errorText(e)); setTick(t => t + 1) }
+    finally { setBusy('') }
+  }
+
+  if (!pv) return <section className="panel ic-panel"><div className="empty-state">{err || 'Asking SCI what this file would do…'}</div></section>
+  const st = pv.stage || {}
+  const ex = pv.existing || {}
+  const ids = pv.lead_id_problems || {}
+  const staged = batch.commit_mode === 'program_stage'
+  return (
+    <section className="panel ic-panel" data-testid="sci-load-step">
+      <div className="panel-header"><h2 className="panel-title">Step 5 — Check & Load into SCI</h2></div>
+      <p className="ic-muted">This is SCI's own check of the reviewed rows. It has not changed anything.</p>
+      {staged && <div className="ic-note">These rows are <b>staged</b> in SCI (kept, not live). Load them into SCI families when you are ready.</div>}
+
+      <h3 className="ic-group">The file</h3>
+      <div className="ic-tiles">
+        <Tile label="Rows in the file" value={pv.rows_in_file} tone="blue" />
+        <Tile label="Going to SCI" value={pv.rows_to_sci} tone="green" />
+        <Tile label="Left out on Review" value={pv.excluded?.total} tone="muted" />
+        <Tile label="People" value={st.contact_masters} tone="blue" sub="rows for the same person are linked" />
+      </div>
+
+      <h3 className="ic-group">Families</h3>
+      <div className="ic-tiles">
+        <Tile label="New Lead IDs" value={ex.new} tone="green" />
+        <Tile label="Already in SCI" value={ex.already_in_sci} tone="blue" sub="updated, never duplicated" />
+        <Tile label="Already in SCI Leads" value={ex.already_live} tone="blue" />
+        <Tile label="Already held for review" value={ex.on_hold} tone="amber" />
+      </div>
+
+      <h3 className="ic-group">Locations and checks</h3>
+      <div className="ic-tiles">
+        <Tile label="Matched to a location" value={st.location_mapped} tone="green" />
+        <Tile label="Location not recognized" value={st.location_review} tone="amber" sub="held for review" />
+        <Tile label="Possible duplicates" value={st.duplicate_review_rows} tone="amber" sub="held for review" />
+        <Tile label="Notes in name fields" value={st.data_note_rows} tone="amber" sub="held for review" />
+        <Tile label="Phones that won't work" value={st.bad_phone_rows} tone="red" sub="can still be emailed" />
+        <Tile label="No phone (email only)" value={st.no_phone_rows} tone="muted" />
+      </div>
+
+      {(pv.excluded?.by_reason || []).length > 0 && (
+        <div className="ic-note">Left out because of what was decided on Review:{' '}
+          {pv.excluded.by_reason.map(x => `${x.label} (${fmt(x.rows)})`).join(', ')}.
+          <button className="btn btn--secondary btn--sm" style={{ marginLeft: 8 }} onClick={onReview}>Change on Review</button></div>
+      )}
+      {(ids.blank > 0 || (ids.repeated || []).length > 0) && (
+        <div className="ic-warn" data-testid="sci-lead-id-problems">
+          <b>SCI needs one Lead ID per family.</b>
+          {ids.blank > 0 && <div>No Lead ID on rows {ids.blank_rows.join(', ')}.</div>}
+          {(ids.repeated || []).map(r => <div key={r.lead_id}>Lead ID {r.lead_id} is on rows {r.rows.join(', ')}.</div>)}
+        </div>
+      )}
+      {(st.bad_phones || []).length > 0 && (
+        <div className="ic-note">Phone numbers that won't work: {st.bad_phones.slice(0, 10).map(b => `row ${b.row} (${b.phone})`).join(', ')}
+          {st.bad_phones.length > 10 ? '…' : ''}</div>
+      )}
+      {(pv.blockers || []).length > 0 && (
+        <div className="ic-error" data-testid="sci-blockers">{pv.blockers.map(b => <div key={b}>{b}</div>)}</div>
+      )}
+      <div className="ic-note"><b>Nothing is sent.</b> {NOTHING_SENT}</div>
+      {err && <div className="ic-error">{err}</div>}
+      <div className="ic-actions">
+        <button className="btn btn--secondary" onClick={onReview} disabled={!!busy}>← Back to Review</button>
+        {!staged && (
+          <button className="btn btn--primary btn--lg" disabled={!pv.can_load || !!busy} onClick={() => run('stage')}
+                  title="SCI keeps the rows. No family is added to Leads yet.">
+            {busy === 'stage' ? 'Staging…' : 'Stage only (safe)'}</button>
+        )}
+        <button className={`btn ${staged ? 'btn--primary' : 'btn--secondary'} btn--lg`} disabled={!pv.can_load || !!busy}
+                onClick={() => run('load')}>
+          {busy === 'load' ? 'Loading…' : 'Load into SCI families'}</button>
+      </div>
+    </section>
+  )
+}
+
+function SciResultsStep({ batch, onLoad, onLeads }) {
+  const r = batch.commit_report || {}
+  const loaded = batch.commit_mode === 'program_load'
+  const lc = r.line_check || {}
+  if (batch.status === 'committing') {
+    return <section className="panel ic-panel"><div className="empty-state">Loading into SCI…</div></section>
+  }
+  return (
+    <section className="panel ic-panel" data-testid="sci-results">
+      <div className="panel-header"><h2 className="panel-title">Step 6 — Results</h2>
+        <Pill tone={loaded ? 'green' : 'amber'}>{loaded ? 'Loaded into SCI' : 'Staged in SCI'}</Pill></div>
+      <div className="ic-tiles">
+        <Tile label="Rows staged in SCI" value={r.staged} tone="blue" />
+        <Tile label="New families in Leads" value={r.families_created} tone="green" />
+        <Tile label="Newly held for review" value={r.held} tone="amber" />
+        <Tile label="Location not recognized" value={r.location_review} tone="amber" />
+        <Tile label="Possible duplicates" value={r.duplicate_review_rows} tone="amber" />
+        <Tile label="Already in SCI Leads" value={r.already_live} tone="blue" />
+        <Tile label="Left out on Review" value={r.excluded?.total} tone="muted" />
+      </div>
+      {loaded && (
+        <div className="ic-note" data-testid="sci-line-check">Phone check (mobile or landline): {lineCheckText(lc)}</div>
+      )}
+      <div className="ic-note"><b>Nothing was sent.</b> {NOTHING_SENT}</div>
+      {!loaded && <div className="ic-note">The rows are staged in SCI — no family has been added to Leads yet.</div>}
+      <div className="ic-actions">
+        {!loaded && <button className="btn btn--secondary" onClick={onLoad}>Load into SCI families →</button>}
+        <button className="btn btn--primary" onClick={onLeads}>Back to SCI Leads</button>
       </div>
     </section>
   )

@@ -244,20 +244,66 @@ def suggest(header: str) -> Dict[str, Optional[str]]:
     return {"kind": KIND_SOURCE, "target": N.slug(header), "confidence": "none"}
 
 
-def suggest_mapping(headers: List[str], org_custom_keys: Optional[Dict[str, str]] = None) -> Dict[str, dict]:
+# ── SCI program files (profile="sci") ───────────────────────────────────────
+# A file headed for an SCI (location outreach) program is read by SCI's own
+# loader (app/services/programs/importer.py), which needs a few columns the
+# CRM has no platform field for. These are suggested ONLY when the batch was
+# created from the SCI importer (profile="sci"); a CRM import never sees them,
+# so its suggestions stay exactly as they were. Everything outside the
+# standard kind is kept as SOURCE data - nothing here becomes a CRM field.
+SCI_PROFILE = "sci"
+_SCI_HEADER_MAP: Dict[str, tuple] = {
+    compact(h): (kind, target) for hs, kind, target in (
+        (("Lead ID", "LeadID", "Source Lead ID"), KIND_STANDARD, "source_record_id"),
+        (("Location Friendly Name", "Location", "Location Name", "Funeral Home",
+          "Facility", "Campus"), KIND_SOURCE, "location_friendly_name"),
+        (("Primary Campaign", "Campaign", "Campaign Name"), KIND_SOURCE, "primary_campaign"),
+        # The customer's own status is SCI source data (SCI holds "Not
+        # Interested" etc. itself); it is not a CRM record classification.
+        (("Lead Status", "Status"), KIND_SOURCE, "lead_status"),
+        # "Last Activity" in an SCI export is WHAT happened ("Call"), not a date.
+        (("Last Activity",), KIND_SOURCE, "last_activity"),
+        (("Last Activity Date",), KIND_STANDARD, "last_activity_date"),
+        (("Campaign Channel", "Channel"), KIND_SOURCE, "campaign_channel"),
+        (("Lead Owner: Manager", "Lead Owner Manager", "Manager"), KIND_SOURCE,
+         "lead_owner_manager"),
+    ) for h in hs
+}
+
+
+def suggest_mapping(headers: List[str], org_custom_keys: Optional[Dict[str, str]] = None,
+                    profile: Optional[str] = None) -> Dict[str, dict]:
     """Suggest a mapping for every header, resolving collisions.
 
     `org_custom_keys` maps compact(label or key) -> custom key for the
     organization's existing custom fields: a header that matches one of those
     is suggested as that custom field before anything else.
+
+    `profile="sci"`: the file is an SCI program file (see _SCI_HEADER_MAP).
+    Omitted (every CRM import), the result is exactly what it always was.
     """
     org_custom_keys = org_custom_keys or {}
     out: Dict[str, dict] = {}
     taken: Dict[str, str] = {}
+    if profile == SCI_PROFILE:
+        for h in headers:
+            hit = _SCI_HEADER_MAP.get(compact(h))
+            if hit is None:
+                continue
+            kind, target = hit
+            if kind == KIND_STANDARD:
+                if target in taken:
+                    continue
+                taken[target] = h
+            elif any(v.get("target") == target for v in out.values()):
+                continue            # first column wins; a second keeps its own slug
+            out[h] = {"kind": kind, "target": target, "confidence": "high"}
     # First pass: exact aliases win over keyword rules, in header order.
     ordered = sorted(enumerate(headers),
                      key=lambda it: 0 if compact(it[1]) in _ALIAS_INDEX else 1)
     for idx, h in ordered:
+        if h in out:
+            continue                # claimed by the SCI profile above
         c = compact(h)
         if c in org_custom_keys:
             out[h] = {"kind": KIND_CUSTOM, "target": org_custom_keys[c], "confidence": "high"}
