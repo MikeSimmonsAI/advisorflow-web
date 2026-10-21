@@ -360,16 +360,18 @@ def _card(opp: Opportunity, db: Session, appts: Optional[dict] = None,
     }
 
 
-def _visible_sales_appointments(db: Session, user: User, org):
+def _visible_sales_appointments(db: Session, user: User, org, personal: bool = False):
     """Appointment visibility, mirroring opportunity visibility exactly.
 
     A rep sees meetings they are ON, plus meetings attached to a deal they own
     (so an owner is never blind to a call a manager booked for their deal).
-    A manager sees the whole brand.
+    A manager sees the whole brand — unless `personal` asks for their own
+    meetings only, in which case the rep rule applies to them too. `personal`
+    can only ever NARROW what a caller sees.
     """
     q = db.query(SalesAppointment).filter(
         SalesAppointment.brand_sales_org_id == org.id)
-    if is_sales_manager(user, db, org.id):
+    if is_sales_manager(user, db, org.id) and not personal:
         return q
     own_appt_ids = [r[0] for r in db.query(AppointmentParticipant.appointment_id)
                     .filter(AppointmentParticipant.user_id == user.id).all()]
@@ -808,6 +810,7 @@ def sales_packages(brand_sales_org_id: Optional[str] = Query(None),
 
 @router.get("/my-day")
 def my_day(brand_sales_org_id: Optional[str] = Query(None),
+           scope: str = Query("auto", pattern="^(auto|mine)$"),
            user: User = Depends(require_sales_member),
            db: Session = Depends(get_db)):
     """The salesperson's operating brief.
@@ -819,6 +822,14 @@ def my_day(brand_sales_org_id: Optional[str] = Query(None),
     """
     org = _resolve_context(user, db, brand_sales_org_id)
     base = _scoped_opportunities(user, db, org)
+    # scope=mine (Lane F, #281): a manager's own book, so the redesigned My Day
+    # can show personal numbers and label the team's separately. It only ever
+    # narrows: a rep's visibility is already personal and is left exactly as
+    # it was (their own deals plus unowned ones).
+    manager = is_sales_manager(user, db, org.id)
+    personal = scope == "mine" and manager
+    if personal:
+        base = base.filter(Opportunity.owner_user_id == user.id)
     now = datetime.utcnow()
     # THE BRAND'S DAY, not UTC's: a rep in Chicago at 8pm is still on today.
     from app.services import workspace_time as wt
@@ -864,8 +875,19 @@ def my_day(brand_sales_org_id: Optional[str] = Query(None),
     day_start = _av.local_to_utc(today_local, 0, tz)
     day_end = _av.local_to_utc(today_local + timedelta(days=1), 0, tz)
 
-    appt_q = _visible_sales_appointments(db, user, org).filter(
+    appt_q = _visible_sales_appointments(db, user, org, personal=personal).filter(
         SalesAppointment.status != APPT_CANCELLED)
+
+    # WORKED TODAY — every deal in this view the CALLER called or texted since
+    # the brand's midnight. Counted in SQL over the whole day, not read off the
+    # 15-row recent-activity feed, so a busy day is never undercounted.
+    worked_ids = sorted({r[0] for r in (
+        db.query(OpportunityEvent.opportunity_id)
+        .filter(OpportunityEvent.opportunity_id.in_(scoped_ids or [""]),
+                OpportunityEvent.actor_user_id == user.id,
+                OpportunityEvent.event_type.in_(("call_outcome", "text_logged")),
+                OpportunityEvent.occurred_at >= day_start)
+        .distinct().all())})
     todays = (appt_q.filter(SalesAppointment.starts_at >= day_start,
                             SalesAppointment.starts_at < day_end)
               .order_by(SalesAppointment.starts_at.asc()).all())
@@ -894,6 +916,11 @@ def my_day(brand_sales_org_id: Optional[str] = Query(None),
     return {
         "brand_sales_org": {"id": org.id, "name": org.name,
                             "timezone": org.timezone},
+        # What the numbers below cover: "mine" = the caller's own book,
+        # "team" = everything a manager can see. A rep is always "mine".
+        "scope": "team" if (manager and not personal) else "mine",
+        "is_manager": manager,
+        "worked_today": {"count": len(worked_ids), "opportunity_ids": worked_ids},
         "metrics": {
             "active_opportunities": len(open_opps),
             "follow_ups_due": len(follow_ups),
