@@ -151,14 +151,15 @@ def _with_org_offer(platform, features, withdrawn=()):
     return platform
 
 
-def _with_product_lock(db, user, platform):
-    """EvoSys Wholesale is offered only to the logins named for it (and God
-    mode) once that lock is on - the same answer require_feature gives."""
+def _with_product_lock(db, user, platform, org=None):
+    """Wholesale is offered only to the logins named for it (and God mode) once
+    that lock is on - plus, in a second-tenant Wholesale workspace (#272), that
+    workspace's org admins and above. The same answer require_feature gives."""
     if not platform:
         return platform
     try:
         from app.services import product_access as _pa
-        if not _pa.may_use(db, user, _pa.WHOLESALE):
+        if not _pa.may_use_in(db, user, org, _pa.WHOLESALE):
             offered = dict(platform.get("offered") or {})
             offered["wholesale"] = False
             platform["offered"] = offered
@@ -350,7 +351,7 @@ def get_org_branding(
         # browser. The frontend uses it ONLY when the hostname is not itself a
         # brand domain, so a brand domain still decides its own chrome exactly
         # as before and no brand can be shown on another brand's host.
-        "platform": _with_product_lock(db, current_user, _with_org_offer(_platform_brand(db, org), features, withdrawn)),
+        "platform": _with_product_lock(db, current_user, _with_org_offer(_platform_brand(db, org), features, withdrawn), org),
         # THE WORKSPACE (LOCATION) THIS ANSWER WAS COMPUTED FOR. The shell
         # draws a location selector from `available` (only when there is more
         # than one) and sends the selection back as `header` - which is null

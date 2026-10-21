@@ -54,6 +54,35 @@ def may_use(db: Session, user: Optional[User], product: str = WHOLESALE) -> bool
     return _rows(db, product).filter(Membership.user_id == user.id).first() is not None
 
 
+# Workspace roles that open a SECOND-TENANT Wholesale workspace without a named
+# seat (owner rule, 2026-10-21, #272: "GOD mode and any org admin or above").
+WORKSPACE_ADMIN_ROLES = ("org_admin", "super_admin")
+
+
+def workspace_admin_access(db: Session, user: Optional[User], org) -> bool:
+    """True when `org` is a Wholesale workspace OTHER than EvoSys's (it carries
+    `wholesale_workspace`) and this person holds an active membership there as
+    org admin or above. EvoSys's own Wholesale org never qualifies: it stays
+    named-seats-only, exactly as before. Being a member of the workspace is
+    required - nobody (EvoSys operators included) gets in from outside it."""
+    if user is None or org is None or not getattr(user, "id", None):
+        return False
+    from app.services.program_experience import WHOLESALE_HOST_SLUG, is_wholesale_host
+    if (getattr(org, "slug", "") or "") == WHOLESALE_HOST_SLUG or not is_wholesale_host(org, user):
+        return False
+    return db.query(Membership.id).filter(
+        Membership.user_id == user.id, Membership.scope_type == "customer_org",
+        Membership.scope_id == org.id, Membership.role.in_(WORKSPACE_ADMIN_ROLES),
+        Membership.is_active.is_(True)).first() is not None
+
+
+def may_use_in(db: Session, user: Optional[User], org, product: str = WHOLESALE) -> bool:
+    """`may_use`, or - for Wholesale - the workspace-admin rule above for `org`."""
+    if may_use(db, user, product):
+        return True
+    return product == WHOLESALE and workspace_admin_access(db, user, org)
+
+
 def holders(db: Session, product: str = WHOLESALE) -> List[Dict]:
     out = []
     for m in _rows(db, product, active_only=False).order_by(Membership.created_at.asc()).all():
