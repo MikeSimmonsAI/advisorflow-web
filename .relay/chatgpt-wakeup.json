@@ -4,8 +4,9 @@
   "project": "EvoSys Pro AI Workforce + AI Operations + AI Deployment COMPLETE LAUNCH",
   "status": "BLOCKED",
   "branch": "feature/ai-workforce-launch",
-  "actions_run_id": "39644530037",
-  "timestamp_ct": "2026-10-21 12:34 CT",
+  "timestamp_ct": "2026-10-21T20:10:18.861871+00:00",
   "issue": 1,
-  "status_comment_id": 6322401027
+  "status_comment_id": 6322401027,
+  "watchdog_retry": true,
+  "watchdog_retry_utc": "2026-10-21T20:10:18.861888+00:00"
 }
