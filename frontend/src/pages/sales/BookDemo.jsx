@@ -165,10 +165,10 @@ function BookDemoBody() {
             {opp && EARLY.includes(opp.stage) && !moved && (
               <div className="ss-callout" style={{ marginBottom: 14 }}>
                 {opp.contact_name || opp.company_name} is still in <strong>{opp.stage_label}</strong>.
-                {' '}<button type="button" className="ss-link" onClick={moveToDemo}>Move to Demo Scheduled</button>
+                {' '}<button type="button" className="ss-link" onClick={moveToDemo}>Move to Demo &amp; Closing</button>
               </div>
             )}
-            {moved && <div className="ss-okbar">Moved to Demo Scheduled (Demo / Proposal).</div>}
+            {moved && <div className="ss-okbar">Moved to Demo &amp; Closing (Demo / Proposal).</div>}
             <div className="ss-actrow" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button type="button" className="ss-btn ss-blue" onClick={() => nav('/sales/appointments?date=' + date)}>
                 <Icon name="calendar" /> See it in Appointments

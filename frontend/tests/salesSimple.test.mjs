@@ -18,7 +18,7 @@ test('every real stage maps to exactly one simple column', () => {
 
 test('approved column order and labels', () => {
   assert.deepEqual(SIMPLE_COLUMNS.map(c => c.label),
-    ['New Leads', 'Follow Up', 'Demo Scheduled', 'Won'])
+    ['New Leads', 'Follow Up', 'Demo & Closing', 'Won'])
 })
 
 test('lost and unknown stages are kept, never dropped', () => {

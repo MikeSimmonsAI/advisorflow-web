@@ -39,7 +39,7 @@ export const SIMPLE_COLUMNS = [
     hint: 'Not reached yet' },
   { key: 'follow', label: 'Follow Up',      stages: ['contacted', 'discovery'],
     hint: 'Talking, learning what they need' },
-  { key: 'demo',   label: 'Demo Scheduled', stages: ['demo_build', 'demo_proposal', 'closing'],
+  { key: 'demo',   label: 'Demo & Closing', stages: ['demo_build', 'demo_proposal', 'closing'],
     hint: 'Demo, proposal or closing' },
   { key: 'won',    label: 'Won',            stages: ['won', 'onboarding', 'live'],
     hint: 'Sold — onboarding takes over' },

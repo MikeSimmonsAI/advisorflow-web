@@ -119,7 +119,7 @@ function PipelineBody() {
             </section>
           )}
           <p className="ss-footnote">
-            Each card shows its exact stage. Demo Scheduled groups Demo Build, Demo / Proposal and Closing;
+            Each card shows its exact stage. Demo &amp; Closing groups Demo Build, Demo / Proposal and Closing;
             Won groups Won, Onboarding and Live. Click a card, then use Pipeline stage on Lead Details to move it.
             Need every stage as its own column?{' '}
             <button type="button" className="ss-link" onClick={() => nav('/sales/pipeline/stages')}>Open the all-stages board</button>
