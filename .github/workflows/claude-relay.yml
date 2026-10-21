@@ -32,7 +32,8 @@ concurrency:
        contains(github.event.comment.body, 'BRANCH: feature/platform-command-center')) && 'platform' ||
       'unrecognized'
     }}
-  cancel-in-progress: false   # queue another job for the same lane; do not cancel it
+  cancel-in-progress: false   # never interrupt a lane's active worker
+  queue: max                  # preserve successive directives for that lane (up to GitHub's queue limit)
 
 jobs:
   relay:
