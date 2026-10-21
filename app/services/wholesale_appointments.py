@@ -114,7 +114,9 @@ def reps(db: Session, org_id: str, user: User) -> List[Dict[str, Any]]:
     from app.services import product_access as PA
     org = db.query(Organization).filter(Organization.id == org_id).first()
     visible = visible_user_ids(db, org_id, user)
-    people = (db.query(User).filter(User.organization_id == org_id, User.is_active.is_(True))
+    # Same "who is in this workspace" rule as the team page (home org; for a
+    # second Wholesale tenant also its members by membership - #272).
+    people = (T._people_q(db, org_id).filter(User.is_active.is_(True))
               .order_by(User.full_name.asc()).all())
     out = []
     for u in people:

@@ -156,7 +156,7 @@ def _check_manager(db: Session, org_id: str, user_id: str, reports_to: Optional[
     if reports_to == user_id:
         raise ValueError("Someone cannot report to themselves.")
     scope = _scope(db, org_id)
-    boss = db.query(User).filter(User.id == reports_to, User.organization_id == org_id).first()
+    boss = _people_q(db, org_id).filter(User.id == reports_to).first()
     if boss is None or _row(db, boss.id, scope=scope) is None:
         raise ValueError("The manager you picked is not on the Wholesale team.")
     seen, cur = {user_id}, reports_to
