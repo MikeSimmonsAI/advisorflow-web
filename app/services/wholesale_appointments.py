@@ -87,10 +87,10 @@ def visible_user_ids(db: Session, org_id: str, user: User) -> Optional[Set[str]]
     # (THIS workspace's team rows - a second tenant has its own, #272).
     from app.models.sales_models import Membership, SCOPE_PRODUCT
     from app.services import product_access as _PA
+    in_ws = T._people_q(db, org_id).with_entities(User.id)        # home org; + members for a second tenant
     rows = (db.query(Membership.user_id, Membership.reports_to_user_id)
-            .join(User, User.id == Membership.user_id)
             .filter(Membership.scope_type == SCOPE_PRODUCT, Membership.scope_id == _PA.seat_scope(db, org_id),
-                    Membership.is_active.is_(True), User.organization_id == org_id).all())
+                    Membership.is_active.is_(True), Membership.user_id.in_(in_ws)).all())
     kids: Dict[str, List[str]] = {}
     for uid, boss in rows:
         if boss:
