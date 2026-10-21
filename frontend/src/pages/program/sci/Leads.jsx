@@ -2,7 +2,8 @@
    Clicking a row opens the family's record inside the Family Service Center
    (Person.jsx). Reads GET /program/send/contacts - the same one-row-per-person
    list Choose & Send uses - so the two screens can never disagree. */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../../../api/client'
 import { Chip, Empty, ErrorLine, FilterChips, Loading, PageHead, Panel, SearchBox, errText, num, when } from './ui'
 
@@ -21,8 +22,7 @@ export default function Leads({ locations, locationId, openPerson, initialQuery 
   const [page, setPage] = useState(0)
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
-  const [importing, setImporting] = useState(false)
-  const [reload, setReload] = useState(0)
+  const navigate = useNavigate()
   const homes = useMemo(() => (locations || []).filter(l => !l.is_review_bucket), [locations])
 
   useEffect(() => { setLoc(locationId || '') }, [locationId])
@@ -40,16 +40,17 @@ export default function Leads({ locations, locationId, openPerson, initialQuery 
       .then(d => { if (alive) setData(d) })
       .catch(e => { if (alive) { setErr(errText(e)); setData({ items: [], total: 0 }) } })
     return () => { alive = false }
-  }, [q, show, loc, page, reload])
+  }, [q, show, loc, page])
 
   const pages = data ? Math.max(1, Math.ceil(data.total / PAGE)) : 1
 
   return (
     <>
       <PageHead title="Leads" sub="Every family in the program. Open one to update their record, add notes or keep files.">
-        <button type="button" className="sci-btn primary" onClick={() => setImporting(v => !v)}>{importing ? 'Close import' : 'Import leads'}</button>
+        {/* The Intelligent Lead Importer, SCI target: upload, match columns,
+            analyze, review, then SCI's own check and load (pages/program/sci/SciImport.jsx). */}
+        <button type="button" className="sci-btn primary" onClick={() => navigate('/program/import/new')}>Import Leads</button>
       </PageHead>
-      {importing && <ImportLeads onLoaded={() => setReload(n => n + 1)} />}
       <ErrorLine text={err} />
       <Panel title="Families" labelledBy="sci-leads"
         aside={<span className="sci-micro sci-muted">{data ? `${num(data.total)} found` : 'Loading…'}</span>}>
@@ -105,69 +106,3 @@ export default function Leads({ locations, locationId, openPerson, initialQuery 
   )
 }
 
-
-/* IMPORT LEADS: pick a file, check it (changes nothing), then load it live.
-   Loading puts clean contacts in the list, holds anyone who needs a look
-   (unknown location, possible duplicate, not interested), checks every new
-   phone for mobile vs landline, and SENDS NOTHING - families are only
-   contacted after they are picked on Choose & Send. */
-function ImportLeads({ onLoaded }) {
-  const [file, setFile] = useState(null)
-  const [check, setCheck] = useState(null)
-  const [done, setDone] = useState(null)
-  const [busy, setBusy] = useState('')
-  const [err, setErr] = useState('')
-  const input = useRef(null)
-  const send = async apply => {
-    if (!file) { setErr('Choose a file first.'); return }
-    setErr(''); setBusy(apply ? 'Loading…' : 'Checking…')
-    const fd = new FormData(); fd.append('file', file); fd.append('apply', apply ? 'true' : 'false')
-    try {
-      const r = await api.upload('/program/leads/import', fd)
-      if (apply) { setDone(r); setCheck(null); onLoaded() } else { setCheck(r); setDone(null) }
-    } catch (e) { setErr(errText(e)) } finally { setBusy('') }
-  }
-  const st = check?.stage || {}
-  const refused = st.refused || (st.errors && st.errors.length ? 'Some rows have a blank or repeated Lead ID.' : '')
-  return (
-    <Panel title="Import leads" labelledBy="sci-import">
-      <p className="sci-micro sci-muted" style={{ marginTop: 0 }}>
-        Excel (.xlsx) or CSV. Columns: Lead ID, First Name, Last Name, Phone, Email, Location Friendly Name, Primary Campaign, Lead Status (plus any others you have).
-        Step 1 checks the file and changes nothing. Step 2 loads it. Loading never sends anything.
-      </p>
-      <div className="sci-row-gap">
-        <input ref={input} className="sci-input" type="file" accept=".csv,.xlsx,.xls"
-          onChange={e => { setFile(e.target.files?.[0] || null); setCheck(null); setDone(null); setErr('') }} />
-        <button type="button" className="sci-btn" disabled={!file || !!busy} onClick={() => send(false)}>{busy === 'Checking…' ? busy : '1. Check file'}</button>
-        <button type="button" className="sci-btn primary" disabled={!check || !!refused || !!busy} onClick={() => send(true)}>{busy === 'Loading…' ? busy : '2. Load leads'}</button>
-      </div>
-      <ErrorLine text={err} />
-      {check && (
-        <div className="sci-card" style={{ marginTop: 12 }}>
-          <strong>{num(st.source_rows || 0)} rows · {num(st.contact_masters || 0)} people</strong>
-          <div className="sci-rows" style={{ marginTop: 8 }}>
-            <div className="sci-kv"><span>With a phone</span><span>{num(st.with_phone || 0)}</span></div>
-            <div className="sci-kv"><span>With an email</span><span>{num(st.with_email || 0)}</span></div>
-            <div className="sci-kv"><span>Matched to a location</span><span>{num(st.location_mapped || 0)}</span></div>
-            <div className="sci-kv"><span>Location not recognized (held for review)</span><span>{num(st.location_review || 0)}</span></div>
-            <div className="sci-kv"><span>Possible duplicates (held for review)</span><span>{num(st.duplicate_review_rows || 0)}</span></div>
-            <div className="sci-kv"><span>Phone numbers that won't work</span><span>{num(st.bad_phone_rows || 0)}</span></div>
-            <div className="sci-kv"><span>No phone (email only)</span><span>{num(st.no_phone_rows || 0)}</span></div>
-          </div>
-          {refused && <p role="alert" style={{ color: 'var(--bad)', marginBottom: 0 }}>Can't load this file: {refused}</p>}
-          {!refused && <p className="sci-micro sci-muted" style={{ marginBottom: 0 }}>Looks good. Press "2. Load leads" to put them in the list.</p>}
-        </div>
-      )}
-      {done && (
-        <div className="sci-card" style={{ marginTop: 12, borderColor: 'var(--ok)' }}>
-          <strong>Loaded. {num(done.promotion?.created || 0)} new families added.</strong>
-          <p className="sci-micro sci-muted" style={{ margin: '6px 0 0' }}>
-            {num(done.held?.held || 0)} held for review · {num(done.promotion?.already_live || 0)} were already in the list
-            {done.line_check && !done.line_check.error ? ` · phones checked for mobile vs landline` : ''}.
-            Nothing was sent. Pick who to reach on Choose & Send.
-          </p>
-        </div>
-      )}
-    </Panel>
-  )
-}

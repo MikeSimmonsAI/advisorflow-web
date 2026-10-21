@@ -148,3 +148,4 @@
   .ic-event .ic-muted { grid-column: auto; }
 }
 .ic-ok { color: var(--color-success, #0f7b4a); font-weight: 600; }
+.ic-sci-kept { font-size: 12px; color: var(--text-secondary, #555); white-space: normal; max-width: 260px; line-height: 1.35; }

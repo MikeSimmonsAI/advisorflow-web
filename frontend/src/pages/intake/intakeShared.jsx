@@ -118,7 +118,9 @@ export function errorText(err) {
 // ── staged rows ─────────────────────────────────────────────────────────────
 
 export function RowTable({ batchId, category, title, catalog = [], editable = false,
-                           onChanged, compact = false }) {
+                           onChanged, compact = false, apiBase = '/intake', sci = false }) {
+  // sci: an SCI file - no CRM classification column (SCI keeps the file's own status).
+  const cols = (sci ? 7 : 8) + (editable ? 1 : 0)
   const [data, setData] = useState(null)
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
@@ -134,16 +136,16 @@ export function RowTable({ batchId, category, title, catalog = [], editable = fa
     const params = new URLSearchParams({ page, per_page: perPage })
     if (category) params.set('category', category)
     if (q) params.set('search', q)
-    api.get(`/intake/batches/${batchId}/rows?${params}`)
+    api.get(`${apiBase}/batches/${batchId}/rows?${params}`)
       .then(d => { if (live) setData(d) })
       .catch(e => { if (live) setErr(errorText(e)) })
     return () => { live = false }
-  }, [batchId, category, page, q, perPage, busy])
+  }, [batchId, category, page, q, perPage, busy, apiBase])
 
   async function act(row, body) {
     setBusy(row.id); setErr('')
     try {
-      await api.patch(`/intake/batches/${batchId}/rows/${row.id}`, body)
+      await api.patch(`${apiBase}/batches/${batchId}/rows/${row.id}`, body)
       onChanged && onChanged()
     } catch (e) { setErr(errorText(e)) }
     finally { setBusy(null) }
@@ -166,13 +168,13 @@ export function RowTable({ batchId, category, title, catalog = [], editable = fa
           <thead>
             <tr>
               <th>Row</th><th>Name / Company</th><th>Phone</th><th>Email</th>
-              <th>Status</th><th>Classification</th><th>Outreach</th><th>Why</th>
+              <th>Status</th>{!sci && <th>Classification</th>}<th>Outreach</th><th>Why</th>
               {editable && <th>Decision</th>}
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={editable ? 9 : 8} className="ic-empty">No rows in this category.</td></tr>
+              <tr><td colSpan={cols} className="ic-empty">No rows in this category.</td></tr>
             )}
             {rows.map(r => (
               <tr key={r.id} className={busy === r.id ? 'ic-row--busy' : ''}>
@@ -187,7 +189,7 @@ export function RowTable({ batchId, category, title, catalog = [], editable = fa
                 <td className="mono ic-small">{r.email || <span className="ic-muted">{r.email_raw || '—'}</span>}</td>
                 <td><Pill tone={INTAKE_TONE[r.intake_status]}>{INTAKE_LABEL[r.intake_status] || r.intake_status}</Pill>
                   {r.dup_of_row && <div className="ic-muted ic-small">of row {r.dup_of_row}</div>}</td>
-                <td>
+                {!sci && <td>
                   {editable && r.intake_status !== 'imported' ? (
                     <select className="filter-select ic-select-sm" value={r.classification || ''}
                             onChange={e => act(r, { classification: e.target.value })}>
@@ -198,7 +200,7 @@ export function RowTable({ batchId, category, title, catalog = [], editable = fa
                     {r.creates_lead ? 'Contact + Lead' : 'Contact only'}
                     {r.classification_raw ? ` · “${r.classification_raw}”` : ''}
                   </div>
-                </td>
+                </td>}
                 <td className="ic-small">
                   <div>{SMS_LABEL[r.sms_status] || r.sms_status}</div>
                   <div>{EMAIL_LABEL[r.email_status] || r.email_status}</div>
@@ -216,7 +218,7 @@ export function RowTable({ batchId, category, title, catalog = [], editable = fa
                           <select className="filter-select ic-select-sm" value={r.duplicate_resolution || 'review'}
                                   onChange={e => act(r, { duplicate_resolution: e.target.value })}>
                             {r.intake_status === 'duplicate'
-                              ? <option value="merge">Merge into earlier row</option>
+                              ? <option value="merge">{sci ? 'Same person as earlier row' : 'Merge into earlier row'}</option>
                               : <option value="update_existing">Update existing</option>}
                             <option value="keep_separate">Keep separate</option>
                             <option value="skip_incoming">Skip incoming</option>

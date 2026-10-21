@@ -31,13 +31,18 @@ def _lead_phone(raw: Optional[str]) -> Optional[str]:
     return "1" + p if p else None
 
 
-def plan(db: Session, org: Organization) -> Dict:
+def plan(db: Session, org: Organization, only_keys: Optional[set] = None) -> Dict:
+    """only_keys: every count describes just these contact masters (one
+    imported file's families). None: the whole program, as always."""
     recs = (db.query(ProgramSourceRecord)
             .filter(ProgramSourceRecord.organization_id == org.id)
             .order_by(ProgramSourceRecord.row_number).all())
     groups: Dict[str, List[ProgramSourceRecord]] = defaultdict(list)
     for r in recs:
         groups[r.contact_master_key or r.source_lead_id].append(r)
+    if only_keys is not None:
+        groups = defaultdict(list, {k: v for k, v in groups.items() if k in only_keys})
+        recs = [r for v in groups.values() for r in v]
     # A contact with ANY held row stays staged: held records are excluded from
     # outreach and promotion until a person releases them (programs/holds.py).
     held = {k for k, v in groups.items() if any(getattr(x, "on_hold", False) for x in v)}
@@ -51,10 +56,12 @@ def plan(db: Session, org: Organization) -> Dict:
 
 def promote(db: Session, org: Organization, actor: Optional[User] = None, *,
             apply: bool = False, assign_to_id: Optional[str] = None,
-            only_keys: Optional[set] = None) -> Dict:
+            only_keys: Optional[set] = None, scope_counts: bool = False) -> Dict:
     """only_keys: promote just these contact masters (a record a person has
-    just released from hold) and leave every other staged row alone."""
-    p = plan(db, org)
+    just released from hold) and leave every other staged row alone.
+    scope_counts: the summary's counts describe only_keys too (an imported
+    file's own families) instead of the whole program."""
+    p = plan(db, org, only_keys if scope_counts else None)
     if only_keys is not None:
         p["groups"] = {k: v for k, v in p["groups"].items() if k in only_keys}
         p["to_create"] = len(p["groups"])
