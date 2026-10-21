@@ -235,8 +235,11 @@ def test_other_features_are_untouched_by_a_wholesale_workspace_override(
         client, db_session, world):
     w = world
     body = _nav(client, db_session, w["ub"])
-    from app.services.entitlements import ALL_FEATURE_KEYS
-    assert set(body["enabled_features"]) == set(ALL_FEATURE_KEYS) - {KEY}
+    from app.services.entitlements import ALL_FEATURE_KEYS, REQUIRES
+    # A module that REQUIRES the withdrawn key goes with it (e.g.
+    # `wholesale_workspace`, #272) - it is not an "other" feature.
+    dependents = {k for k, needs in REQUIRES.items() if KEY in needs}
+    assert set(body["enabled_features"]) == set(ALL_FEATURE_KEYS) - {KEY} - dependents
 
 
 def test_no_workspace_rows_means_the_old_answer(client, db_session, world):
