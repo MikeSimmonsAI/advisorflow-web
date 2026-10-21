@@ -47,7 +47,9 @@ function FollowUpsBody() {
     setLoading(true); setError(null)
     try {
       const [o, d] = await Promise.all([
-        api.get('/sales/opportunities'),
+        // include_lost: a lead called and then closed as Lost today still
+        // counts as Completed. Due lists only ever show open deals.
+        api.get('/sales/opportunities?include_lost=true'),
         api.get('/sales/my-day?scope=mine').catch(() => null),
       ])
       setDeals(o)
@@ -63,7 +65,7 @@ function FollowUpsBody() {
   // A manager's list is the brand; Follow Ups is their OWN people to contact.
   const mine = useMemo(() => {
     if (!deals) return []
-    const all = (deals.stages || []).flatMap(s => s.opportunities || [])
+    const all = (deals.stages || []).flatMap(s => s.opportunities || []).concat(deals.lost || [])
     return deals.is_manager ? all.filter(c => c.owner_user_id === deals.viewer_user_id) : all
   }, [deals])
 

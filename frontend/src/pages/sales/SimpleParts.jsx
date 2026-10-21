@@ -107,15 +107,34 @@ export function useNotice() {
 // ── modal frame ────────────────────────────────────────────────────────────
 
 export function Modal({ title, sub, onClose, children, footer, labelId }) {
+  const box = useRef(null)
+  // Keyboard users land INSIDE the dialog when it opens, Tab stays inside it,
+  // Escape closes it, and focus goes back to whatever opened it.
   useEffect(() => {
-    const onKey = e => { if (e.key === 'Escape') onClose() }
+    const opener = document.activeElement
+    const focusables = () => [...(box.current?.querySelectorAll(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])]
+    const first = box.current?.querySelector('[data-autofocus]') || focusables().find(el => !el.closest('.ss-modalhead'))
+    ;(first || box.current)?.focus()
+    const onKey = e => {
+      if (e.key === 'Escape') { onClose(); return }
+      if (e.key !== 'Tab') return
+      const f = focusables(); if (!f.length) return
+      const a = f[0], z = f[f.length - 1]
+      if (e.shiftKey && document.activeElement === a) { e.preventDefault(); z.focus() }
+      else if (!e.shiftKey && document.activeElement === z) { e.preventDefault(); a.focus() }
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      if (opener && typeof opener.focus === 'function' && document.contains(opener)) opener.focus()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const id = labelId || 'ss-modal-title'
   return (
     <div className="ss-modalback" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <section className="ss-modal" role="dialog" aria-modal="true" aria-labelledby={id}>
+      <section className="ss-modal" role="dialog" aria-modal="true" aria-labelledby={id} ref={box} tabIndex={-1}>
         <div className="ss-modalhead">
           <div>
             <h2 id={id}>{title}</h2>
@@ -243,8 +262,8 @@ export function CallOutcomeModal({ opp, tz, onClose, onSaved, onBook }) {
       <div className="ss-field" role="group" aria-labelledby="ss-what">
         <span className="ss-label" id="ss-what">What happened?</span>
         <div className="ss-outcomes">
-          {CALL_OUTCOMES.map(x => (
-            <button key={x.key} type="button" className="ss-outcome"
+          {CALL_OUTCOMES.map((x, i) => (
+            <button key={x.key} type="button" className="ss-outcome" data-autofocus={i === 0 ? true : undefined}
                     aria-pressed={outcome === x.key} onClick={() => pick(x.key)}>
               {x.label}
             </button>
@@ -365,7 +384,7 @@ export function TextModal({ opp, me, onClose, onLogged }) {
       <div style={{ height: 16 }} />
       <div className="ss-field" style={{ marginBottom: 0 }}>
         <label htmlFor="ss-text-msg">Message</label>
-        <textarea id="ss-text-msg" value={msg} maxLength={600} onChange={e => setMsg(e.target.value)} />
+        <textarea id="ss-text-msg" value={msg} maxLength={600} data-autofocus onChange={e => setMsg(e.target.value)} />
       </div>
     </Modal>
   )
