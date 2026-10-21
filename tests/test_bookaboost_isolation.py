@@ -102,7 +102,14 @@ def world(db_session):
     operator = _user(db, None, "operator-%d@evo.test" % next(_SEQ), role="advisor")
     _m(db, operator, "customer_org", evo.id)
     _m(db, operator, "product", "wholesale", "member")
-    return dict(db=db, evo=evo, bab=bab, evo_user=evo_user, bab_admin=bab_admin, operator=operator)
+    # Attackers NOT locked to Wholesale, so the general screens (intake, leads,
+    # reports) answer them and their own org checks are what is tested.
+    evo_plain = _user(db, evo, "evo-admin-%d@evo.test" % next(_SEQ))       # EvoSys admin, no seat
+    _m(db, evo_plain, "customer_org", evo.id)
+    bab_plain = _user(db, bab, "bab-advisor-%d@bab.test" % next(_SEQ), role="advisor")  # no seat
+    _m(db, bab_plain, "customer_org", bab.id, role="advisor")
+    return dict(db=db, evo=evo, bab=bab, evo_user=evo_user, bab_admin=bab_admin, operator=operator,
+                evo_plain=evo_plain, bab_plain=bab_plain)
 
 
 # ── Victim / attacker per scenario. The shared `theirs` fixture builds the
@@ -119,7 +126,9 @@ SCENARIOS = {
 @pytest.fixture(params=sorted(SCENARIOS))
 def scenario(request, world):
     v_org, v_user, a_user = SCENARIOS[request.param]
-    return dict(name=request.param, victim_org=world[v_org], victim=world[v_user], attacker=world[a_user])
+    plain = world["bab_plain"] if v_org == "evo" else world["evo_plain"]
+    return dict(name=request.param, victim_org=world[v_org], victim=world[v_user], attacker=world[a_user],
+                plain_attacker=plain)
 
 
 @pytest.fixture()
@@ -219,31 +228,50 @@ LISTING_ROUTES = [
 @pytest.mark.parametrize("forged", [False, True], ids=["own_workspace", "forged_header"])
 def test_no_list_report_or_search_screen_carries_the_victims_records(client, db_session, theirs,
                                                                       scenario, forged):
-    h = _attacker_headers(db_session, scenario, forged)
-    leaks = []
-    for path in LISTING_ROUTES:
-        r = client.get(path, headers=h)
-        if r.status_code != 200:
-            continue                                    # refused is fine; only answers can leak
-        body = r.text
-        hit = [m for m in VICTIM_MARKERS if m in body]
-        if hit:
-            leaks.append("%s -> %s" % (path, hit))
+    leaks, answered = [], 0
+    ws = scenario["victim_org"].id if forged else None
+    for who in (scenario["attacker"], scenario["plain_attacker"]):
+        h = _h(db_session, who, ws=ws)
+        for path in LISTING_ROUTES:
+            r = client.get(path, headers=h)
+            if r.status_code != 200:
+                continue                                # refused is fine; only answers can leak
+            answered += 1
+            hit = [m for m in VICTIM_MARKERS if m in r.text]
+            if hit:
+                leaks.append("%s as %s -> %s" % (path, who.email, hit))
+    assert answered >= 20, "too few screens answered (%d) - the check would prove nothing" % answered
     assert not leaks, "[%s] VICTIM DATA IN ATTACKER SCREENS:\n%s" % (scenario["name"], "\n".join(leaks))
 
 
 # ── 3. Imports: the victim's intake batch and contacts, by id ────────────────
 
 def test_import_batches_and_contacts_stay_in_their_tenant(client, db_session, scenario, auth_headers):
-    csv = b"first_name,last_name,phone,email\nINTAKE-VICTIM-ROW,Owner,2145550199,victim-row@example.com\n"
-    r = client.post("/intake/batches", headers=auth_headers, data={"source": "csv"},
-                    files={"file": ("victim.csv", io.BytesIO(csv), "text/csv")})
-    assert r.status_code == 200, r.text[:200]
-    bid = r.json()["id"]
-    assert client.post("/intake/batches/%s/analyze" % bid, headers=auth_headers).status_code == 202
-    rows = client.get("/intake/batches/%s/rows" % bid, headers=auth_headers).json()
-    row_id = (rows.get("rows") or rows.get("items") or [{}])[0].get("id", "missing")
-    paths = [("get", "/intake/batches/%s" % bid, None), ("get", "/intake/batches/%s/preview" % bid, None),
+    """The Wholesale property import files its owners as ONE intake batch (the
+    real path a Wholesale workspace uses; the general intake screens are locked
+    away from it). Then every intake / import-batch / contact route is attacked
+    by id - by the Wholesale-locked attacker AND by an unlocked admin/advisor of
+    the other org, plain and with a forged workspace header."""
+    from app.models.intake_models import OrgContact
+    csv = ("Address,City,State,Zip,First Name,Last Name,Phone,Email\n"
+           "77 Intake Victim Way,Dallas,TX,75201,INTAKE-VICTIM-ROW,Owner,2145550199,victim-row@example.com\n")
+    r = client.post("/wholesale/properties/import?is_test=true", headers=auth_headers,
+                    files={"file": ("victim.csv", io.BytesIO(csv.encode()), "text/csv")})
+    assert r.status_code == 200, r.text[:300]
+    bid = r.json()["intake_batch_id"]
+    assert bid, r.json()
+    contact = db_session.query(OrgContact).filter(OrgContact.organization_id == scenario["victim_org"].id).first()
+    assert contact is not None
+    cid, row_id = contact.id, "row-probe"
+    paths = [("get", "/intake/contacts/%s" % cid, None),
+             ("post", "/intake/contacts/%s/promote" % cid, {}),
+             ("delete", "/intake/contacts/%s" % cid, None),
+             ("post", "/intake/contacts/bulk-delete", {"ids": [cid]}),
+             ("post", "/intake/contacts/bulk-promote", {"ids": [cid]}),
+             ("get", "/import-batches/%s" % bid, None), ("get", "/import-batches/%s/rows" % bid, None),
+             ("post", "/import-batches/%s/ready" % bid, {}), ("post", "/import-batches/%s/commit" % bid, {}),
+             ("post", "/import-batches/%s/archive" % bid, {}), ("delete", "/import-batches/%s" % bid, None),
+             ("get", "/intake/batches/%s" % bid, None), ("get", "/intake/batches/%s/preview" % bid, None),
              ("get", "/intake/batches/%s/rows" % bid, None),
              ("get", "/intake/batches/%s/classification-values" % bid, None),
              ("get", "/intake/batches/%s/commit-preview" % bid, None),
@@ -257,20 +285,26 @@ def test_import_batches_and_contacts_stay_in_their_tenant(client, db_session, sc
                                                           "confirm_organization_name": scenario["victim_org"].name}),
              ("post", "/intake/batches/%s/rollback" % bid, {}),
              ("post", "/intake/batches/%s/cancel" % bid, {})]
-    for forged in (False, True):
-        h = _attacker_headers(db_session, scenario, forged)
-        bad = []
-        for method, path, payload in paths:
-            kw = {"headers": h}
-            if payload is not None:
-                kw["json"] = payload
-            rr = getattr(client, method)(path, **kw)
-            if rr.status_code < 400:
-                bad.append("%s %s -> %s" % (method.upper(), path, rr.status_code))
-        assert not bad, "[%s forged=%s] %s" % (scenario["name"], forged, bad)
-    # The victim's batch is still theirs and untouched.
-    got = client.get("/intake/batches/%s" % bid, headers=auth_headers)
-    assert got.status_code == 200 and got.json()["status"] == "ready_for_review"
+    bad = []
+    for who in (scenario["attacker"], scenario["plain_attacker"]):
+        for forged in (False, True):
+            h = _h(db_session, who, ws=scenario["victim_org"].id if forged else None)
+            for method, path, payload in paths:
+                kw = {"headers": h}
+                if payload is not None:
+                    kw["json"] = payload
+                rr = getattr(client, method)(path, **kw)
+                if rr.status_code < 400:
+                    bad.append("%s %s as %s forged=%s -> %s %s" % (method.upper(), path, who.email, forged,
+                                                                   rr.status_code, rr.text[:120]))
+    assert not bad, "[%s] IMPORT DATA REACHABLE ACROSS TENANTS:\n%s" % (scenario["name"], "\n".join(bad))
+    # The victim's batch and contact are still theirs and untouched.
+    from app.models.import_models import ImportBatch
+    db_session.expire_all()
+    b = db_session.query(ImportBatch).filter(ImportBatch.id == bid).one()
+    assert b.organization_id == scenario["victim_org"].id
+    c = db_session.query(OrgContact).filter(OrgContact.id == cid).one()
+    assert c.organization_id == scenario["victim_org"].id and (c.first_name or "") == "INTAKE-VICTIM-ROW"
 
 
 # ── 4. Background work: sweeps write only into the org they read ────────────
@@ -315,7 +349,7 @@ def test_bookaboost_team_changes_do_not_open_or_close_evosys(client, db_session,
     assert not _wholesale_ok(client, db, both, evo)
     admin_h = _h(db, world["bab_admin"], ws=bab.id)
     r = client.post("/wholesale/team/members", headers=admin_h,
-                    json={"user_id": both.id, "role": "canvasser"})
+                    json={"user_id": both.id, "role": "member"})
     assert r.status_code == 200, r.text[:300]
     assert _wholesale_ok(client, db, both, bab), "BookaBoost team member cannot open BookaBoost Wholesale"
     assert not _wholesale_ok(client, db, both, evo), "BookaBoost team grant opened EvoSys Wholesale"
