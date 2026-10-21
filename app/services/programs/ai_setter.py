@@ -1588,6 +1588,13 @@ def sweep(db: Session, now: Optional[datetime] = None) -> Dict:
                            send_source=ss.SCI_SETTER)
             t.delivery, t.message_id = "sent", getattr(msg, "id", None)
             sent += 1
+            # The held reply answered the family's message(s) it was written for:
+            # SCI Live stops listing them as waiting (the live path does this in _deliver).
+            for _r in (db.query(ProgramResponse).filter(ProgramResponse.lead_id == lead.id,
+                                                        ProgramResponse.organization_id == lead.organization_id,
+                                                        ProgramResponse.handling_status.in_(("new", "opened")),
+                                                        ProgramResponse.received_at <= t.created_at).all()):
+                _answered(_r, now)
             db.commit()                                  # a later failure must never un-mark this send
         except Exception as exc:                         # noqa: BLE001
             db.rollback()

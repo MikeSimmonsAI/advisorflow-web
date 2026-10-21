@@ -694,6 +694,17 @@ def _ai_delivered_since(db: Session, conv, since: datetime) -> bool:
                                  T.created_at >= since).first() is not None
 
 
+def ai_answered(db: Session, conv, resp) -> bool:
+    """The AI has already answered this reply (a message actually went to the
+    family after it arrived) and no person owns the conversation. Staff screens
+    show it as answered, not as a family waiting for a reply."""
+    if conv is None or resp is None or resp.received_at is None:
+        return False
+    if conv.state in ("human", "callback_requested", "stopped"):
+        return False
+    return _ai_delivered_since(db, conv, resp.received_at)
+
+
 def sla_sweep(db: Session, now: Optional[datetime] = None,
               organization_id: Optional[str] = None) -> List[ProgramResponse]:
     """Re-alert HOT responses still untouched past their SLA. Once per SLA window."""
