@@ -4,8 +4,9 @@
   "project": "SCI 1 \u2014 POC-only release cleanup and bounce tracking",
   "status": "BLOCKED",
   "branch": "feature/sci-ops",
-  "actions_run_id": "39544129460",
-  "timestamp_ct": "2026-10-20 23:28 CT",
+  "timestamp_ct": "2026-10-21T05:55:55.365410+00:00",
   "issue": 1,
-  "status_comment_id": 6308055091
+  "status_comment_id": 6308055091,
+  "watchdog_retry": true,
+  "watchdog_retry_utc": "2026-10-21T05:55:55.365425+00:00"
 }
