@@ -198,9 +198,9 @@ export default function EvoCommand() {
       {!hero && !spotlight.length ? (
         <Panel>
           <Empty title="Nothing found yet" icon="✓">
-            No property passes an active strategy yet. Run a hunt, or wait for the next automatic one. EvoSense hands
-            a conversation to you when a seller states a price, asks for an offer or a visit, or crosses a strategy's
-            intent threshold.
+            {ev('No property passes an active strategy yet. Run a hunt, or wait for the next automatic one. EvoSense hands '
+              + 'a conversation to you when a seller states a price, asks for an offer or a visit, or crosses a strategy\'s '
+              + 'intent threshold.')}
           </Empty>
         </Panel>
       ) : (
