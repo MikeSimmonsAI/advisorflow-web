@@ -311,6 +311,15 @@ const CSS = `
   color:#2c4056;cursor:pointer;min-height:44px}
 .ss-outcome:hover{border-color:#b9d8fb}
 .ss-outcome[aria-pressed="true"]{background:#e7f2ff;border-color:#1479f4;color:#0569d9;box-shadow:inset 0 0 0 1px #1479f4}
+.ss-decide{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ss-decision{border:1px solid #dce6f0;background:#fff;border-radius:8px;padding:11px 12px;text-align:left;cursor:pointer;color:#2c4056}
+.ss-decision strong{display:block;font-size:13px}
+.ss-decision small{display:block;font-size:11px;color:#4f5d70;margin-top:3px;line-height:1.4}
+.ss-decision[aria-checked="true"]{background:#e7f2ff;border-color:#1479f4;box-shadow:inset 0 0 0 1px #1479f4}
+.ss-phoneline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px}
+.ss-phoneline a{font-weight:700;color:#1565c0}
+.ss-phoneline small{flex-basis:100%;color:#3b6787;font-size:11px}
+.ss-shell .ss-nophone{font-size:11px;color:#5f6e83;padding:0 6px;white-space:nowrap}
 .ss-toast{position:fixed;bottom:23px;right:24px;background:#0c3f36;color:#fff;padding:14px 19px;border-radius:8px;
   box-shadow:0 12px 35px #0003;z-index:200;max-width:min(390px,90vw);font-size:12px}
 
@@ -365,6 +374,7 @@ const CSS = `
   .ss-shell .ss-weekday{border-right:0;border-bottom:1px solid #edf0f5;min-height:0}
   .ss-shell .ss-search{min-width:0;max-width:none;flex:1 1 100%}
   .ss-outcomes{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ss-decide{grid-template-columns:1fr}
   .ss-shell .ss-teamstats{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media(prefers-reduced-motion:reduce){ .ss-shell .ss-skel{animation:none} }

@@ -78,10 +78,15 @@ function LeadDetailsBody() {
     }
   }, [oppId])
   useEffect(() => { load() }, [load])
+  // After any save: reload this lead AND the sidebar badge, so a rescheduled
+  // next action leaves (or joins) Follow Ups without a browser refresh.
+  const changed = () => { load(); ctx?.refreshCounts && ctx.refreshCounts() }
+  const tz = ctx?.brand_sales_org?.timezone
 
   const contact = useContactActions({
+    tz,
     me: ctx?.user?.full_name, notify,
-    onChanged: () => load(),
+    onChanged: () => changed(),
     onBook: o => nav('/sales/book?opp=' + encodeURIComponent(o.id)),
   })
 
@@ -89,7 +94,7 @@ function LeadDetailsBody() {
   if (!opp) return <><BackLink /><ErrorLine error={error || 'Lead not found.'} onRetry={load} /></>
 
   const name = opp.contact_name || opp.company_name
-  const bucket = opp.status === 'open' ? dueBucket(opp.next_action_due_at) : null
+  const bucket = opp.status === 'open' ? dueBucket(opp.next_action_due_at, new Date(), tz) : null
   const isWon = ['won', 'onboarding', 'live'].includes(opp.stage)
   const hasPhone = !!telHref(opp.phone)
 
@@ -109,16 +114,23 @@ function LeadDetailsBody() {
                 : <DueStatus bucket={bucket} iso={opp.next_action_due_at} />}
             </div>
             <div className="ss-detail-actions">
-              <button type="button" className="ss-btn ss-green" disabled={!hasPhone}
-                      title={hasPhone ? '' : 'No phone number on this record'}
-                      onClick={() => contact.call(opp)}>
-                <Icon name="phone" /> Call
-              </button>
-              <button type="button" className="ss-btn ss-blue" disabled={!hasPhone}
-                      title={hasPhone ? '' : 'No phone number on this record'}
-                      onClick={() => contact.text(opp)}>
-                <Icon name="message" /> Text
-              </button>
+              {hasPhone ? (
+                <>
+                  <button type="button" className="ss-btn ss-green" onClick={() => contact.call(opp)}
+                          title="Opens your phone's dialer, then asks what happened">
+                    <Icon name="phone" /> Call
+                  </button>
+                  <button type="button" className="ss-btn ss-blue" onClick={() => contact.text(opp)}
+                          title="Opens your phone's messages app">
+                    <Icon name="message" /> Text
+                  </button>
+                </>
+              ) : (
+                <span className="ss-nophone" style={{ alignSelf: 'center' }}>
+                  No phone number.{' '}
+                  <button type="button" className="ss-link" onClick={() => nav('/sales/opportunities/' + opp.id)}>Add one on the full record</button>
+                </span>
+              )}
               <button type="button" className="ss-btn ss-soft"
                       onClick={() => nav('/sales/book?opp=' + encodeURIComponent(opp.id))}>
                 <Icon name="calendar" /> Book Demo
@@ -144,8 +156,8 @@ function LeadDetailsBody() {
                   <ContactInfo opp={opp} onAddNote={() => setTab('notes')} />
                   <div>
                     <h3>Status &amp; Next Action</h3>
-                    <StageField opp={opp} onSaved={o => { setOpp(prev => ({ ...prev, ...o })); notify('Stage updated.'); load() }} />
-                    <NextActionFields opp={opp} onSaved={() => { notify('Next action saved.'); load() }} compact />
+                    <StageField opp={opp} onSaved={o => { setOpp(prev => ({ ...prev, ...o })); notify('Stage updated.'); changed() }} />
+                    <NextActionFields opp={opp} onSaved={() => { notify('Next action saved.'); changed() }} compact />
                     <button type="button" className="ss-btn ss-green" onClick={() => setLogging(true)}>
                       <Icon name="check" /> Log Call Outcome
                     </button>
@@ -173,7 +185,7 @@ function LeadDetailsBody() {
 
           {tab === 'notes' && (
             <div className="ss-panelbody">
-              <NoteForm oppId={opp.id} onSaved={() => { notify('Note added.'); load() }} />
+              <NoteForm oppId={opp.id} onSaved={() => { notify('Note added.'); changed() }} />
               <Timeline items={(opp.timeline || []).filter(e => e.event_type === 'note')}
                         empty="No notes yet." />
             </div>
@@ -184,7 +196,7 @@ function LeadDetailsBody() {
               <div className="ss-twobox">
                 <div>
                   <h3>Next step</h3>
-                  <NextActionFields opp={opp} onSaved={() => { notify('Next action saved.'); load() }} />
+                  <NextActionFields opp={opp} onSaved={() => { notify('Next action saved.'); changed() }} />
                 </div>
                 <div>
                   <h3>Upcoming meetings</h3>
@@ -219,10 +231,10 @@ function LeadDetailsBody() {
 
       {logging && (
         <CallOutcomeModal
-          opp={opp}
+          opp={opp} tz={tz}
           onClose={() => setLogging(false)}
           onBook={o => nav('/sales/book?opp=' + encodeURIComponent(o.id))}
-          onSaved={() => { setLogging(false); notify('Call result saved.'); load() }}
+          onSaved={() => { setLogging(false); notify('Call result saved.'); changed() }}
         />
       )}
       {contact.modals}

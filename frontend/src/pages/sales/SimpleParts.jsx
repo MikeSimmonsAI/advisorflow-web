@@ -10,11 +10,11 @@
  * existing calendar card does. Nothing on these screens calls a messaging
  * provider, so nothing can reach a customer except by the rep's own hand.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import {
-  CALL_OUTCOMES, outcomeByKey, buildOutcomeRequests, telHref, smsHref, ymdPlusDays,
-  firstName,
+  CALL_OUTCOMES, NOT_INTERESTED_CHOICES, outcomeByKey, buildOutcomeRequests, telHref, smsHref,
+  ymdPlusDays, firstName, cleanPhone,
 } from './simpleSales'
 
 // ── icons (stroke icons drawn to match the approved prototype) ─────────────
@@ -132,97 +132,167 @@ export function Modal({ title, sub, onClose, children, footer, labelId }) {
   )
 }
 
+// ── phone number with copy (the desktop fallback) ─────────────────────────
+
+/** The number, a tap-to-dial link, and Copy — for a laptop with no dialer. */
+export function PhoneFallback({ phone, verb }) {
+  const [copied, setCopied] = useState(false)
+  async function copy() {
+    try { await navigator.clipboard.writeText(cleanPhone(phone) || phone); setCopied(true) }
+    catch { setCopied(false) }
+  }
+  return (
+    <div className="ss-phoneline">
+      <a href={(verb === 'text' ? smsHref : telHref)(phone) || undefined}>{phone}</a>
+      <button type="button" className="ss-btn ss-white ss-xs" onClick={copy}>{copied ? 'Copied' : 'Copy number'}</button>
+      <small>{verb === 'text' ? 'Messages didn’t open? Text this number from your phone.'
+        : 'Nothing dialed? Call this number from your phone.'}</small>
+    </div>
+  )
+}
+
 // ── "What happened?" ───────────────────────────────────────────────────────
 
 /**
- * The single post-call panel. Opened by the Call button (after the phone is
- * handed the number) and by "Log Call Outcome". Saves one timeline entry and,
- * when anything about the deal changes, one deal update.
+ * The single post-call panel, opened after Call hands the number to the
+ * device's dialer (or from "Log Call Outcome"). NOTHING is recorded by opening
+ * it — opening a dialer proves nothing. One timeline entry and, when the deal
+ * changes, one deal update are written only when the rep saves.
  *
- * onSaved({ outcome, opp }) — `opp` is the deal as the server returned it.
+ * Not Interested asks one explicit question: Close as Lost (no future
+ * follow-up) or Follow up later (rep picks the action and the date).
+ *
+ * onSaved({ outcome, decision, opp }) — `opp` is the deal as the server returned it.
+ * onBook(opp) — after saving Book a Meeting / "Save & book a demo": opens the
+ *   real booking form. No booking is assumed; only the scheduler creates one.
  */
-export function CallOutcomeModal({ opp, onClose, onSaved, onBook }) {
+export function CallOutcomeModal({ opp, tz, onClose, onSaved, onBook }) {
   const [outcome, setOutcome] = useState('')
+  const [decision, setDecision] = useState('')
   const [note, setNote] = useState('')
   const [nextAction, setNextAction] = useState(opp?.next_action || '')
   const [due, setDue] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  const saving = useRef(false)
+
+  const o = outcomeByKey(outcome)
+  const showNext = o && (!o.decide || decision === 'later')
 
   function pick(key) {
-    setOutcome(key)
-    const o = outcomeByKey(key)
-    // Suggest the obvious next step; the rep can change it before saving.
-    if (o) { setNextAction(o.next); setDue(ymdPlusDays(o.days)) }
+    setOutcome(key); setDecision(''); setError(null)
+    const x = outcomeByKey(key)
+    // Suggest the obvious next step; the rep can change or clear it. Not
+    // Interested suggests nothing — a later follow-up must be chosen.
+    if (x && !x.decide) { setNextAction(x.next || ''); setDue(x.days == null ? '' : ymdPlusDays(x.days, new Date(), tz)) }
+    else { setNextAction(''); setDue('') }
   }
 
-  async function save() {
-    setBusy(true); setError(null)
+  async function save(thenBook) {
+    if (saving.current) return            // no double submit
+    let req
     try {
-      const req = buildOutcomeRequests({ stage: opp.stage, outcome, note, nextAction, dueYmd: due })
+      req = buildOutcomeRequests({ stage: opp.stage, outcome, note, nextAction, dueYmd: due, decision })
+    } catch (e) { setError(e.message); return }
+    saving.current = true; setBusy(true); setError(null)
+    try {
       await api.post('/sales/opportunities/' + opp.id + '/notes', req.note)
       let updated = opp
       if (req.patch) updated = await api.patch('/sales/opportunities/' + opp.id, req.patch)
-      onSaved && onSaved({ outcome, opp: updated || opp })
-      if (outcome === 'book_meeting' && onBook) onBook(opp)
+      onSaved && onSaved({ outcome, decision, opp: updated || opp })
+      if ((thenBook || o?.books) && onBook) onBook(opp)
     } catch (e) {
       setError(e.message || 'Could not save the call result.')
     } finally {
-      setBusy(false)
+      saving.current = false; setBusy(false)
     }
   }
 
-  const tel = telHref(opp?.phone)
+  const primaryLabel = !o ? 'Save Call Result'
+    : o.decide && decision === 'lost' ? 'Close as Lost'
+    : o.decide && decision === 'later' ? 'Save follow-up'
+    : o.books ? 'Save & open booking'
+    : 'Save Call Result'
+  const canSave = !!o && (!o.decide || !!decision) && !busy
+
   return (
     <Modal
       title={'Call ' + (opp?.contact_name || opp?.company_name || '')}
-      sub="Your phone places the call. Then tell us what happened."
+      sub="Your phone’s dialer opens the call. Nothing is recorded until you save what happened."
       onClose={onClose}
       footer={<>
         <button type="button" className="ss-btn ss-white" onClick={onClose}>Cancel</button>
-        <button type="button" className="ss-btn ss-green" disabled={!outcome || busy} onClick={save}>
-          <Icon name="check" /> {busy ? 'Saving…' : 'Save Call Result'}
+        {o?.key === 'interested' && onBook && (
+          <button type="button" className="ss-btn ss-blue" disabled={busy} onClick={() => save(true)}>
+            Save &amp; book a demo
+          </button>
+        )}
+        <button type="button" className={'ss-btn ' + (o?.decide && decision === 'lost' ? 'ss-soft' : 'ss-green')}
+                disabled={!canSave} onClick={() => save(false)}>
+          <Icon name="check" /> {busy ? 'Saving…' : primaryLabel}
         </button>
       </>}
     >
       <div className="ss-callout">
         <strong>{opp?.contact_name || opp?.company_name}</strong>
-        {opp?.company_name && opp?.contact_name ? ' · ' + opp.company_name : ''}<br />
-        {tel
-          ? <>Phone: <a href={tel}>{opp.phone}</a> — tap to dial again.</>
-          : 'No phone number on this record. Add one on Lead Details.'}
+        {opp?.company_name && opp?.contact_name ? ' · ' + opp.company_name : ''}
+        {opp?.phone ? <PhoneFallback phone={opp.phone} verb="call" /> : <div>No phone number on this record.</div>}
       </div>
       <div style={{ height: 16 }} />
       <ErrorLine error={error} />
       <div className="ss-field" role="group" aria-labelledby="ss-what">
         <span className="ss-label" id="ss-what">What happened?</span>
         <div className="ss-outcomes">
-          {CALL_OUTCOMES.map(o => (
-            <button key={o.key} type="button" className="ss-outcome"
-                    aria-pressed={outcome === o.key} onClick={() => pick(o.key)}>
-              {o.label}
+          {CALL_OUTCOMES.map(x => (
+            <button key={x.key} type="button" className="ss-outcome"
+                    aria-pressed={outcome === x.key} onClick={() => pick(x.key)}>
+              {x.label}
             </button>
           ))}
         </div>
       </div>
+
+      {o?.decide && (
+        <div className="ss-field" role="radiogroup" aria-labelledby="ss-ni">
+          <span className="ss-label" id="ss-ni">What should happen with this lead?</span>
+          <div className="ss-decide">
+            {NOT_INTERESTED_CHOICES.map(c => (
+              <button key={c.key} type="button" role="radio" aria-checked={decision === c.key}
+                      className="ss-decision" onClick={() => { setDecision(c.key); setError(null) }}>
+                <strong>{c.label}</strong>
+                <small>{c.hint}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="ss-field">
         <label htmlFor="ss-call-note">Quick note (optional)</label>
         <textarea id="ss-call-note" value={note} maxLength={2000}
                   placeholder="Add an important detail…" onChange={e => setNote(e.target.value)} />
       </div>
-      <div className="ss-twobox">
-        <div className="ss-field">
-          <label htmlFor="ss-next">Next action</label>
-          <input id="ss-next" value={nextAction} maxLength={200}
-                 onChange={e => setNextAction(e.target.value)} />
+
+      {showNext && (
+        <div className="ss-twobox">
+          <div className="ss-field">
+            <label htmlFor="ss-next">Next action{o.decide ? ' *' : ''}</label>
+            <input id="ss-next" value={nextAction} maxLength={200} required={!!o.decide}
+                   placeholder={o.decide ? 'e.g. Check back after budget season' : ''}
+                   onChange={e => setNextAction(e.target.value)} />
+          </div>
+          <div className="ss-field">
+            <label htmlFor="ss-due">When{o.decide ? ' *' : ' (optional)'}</label>
+            <input id="ss-due" type="date" value={due} required={!!o.decide}
+                   min={ymdPlusDays(0, new Date(), tz)} onChange={e => setDue(e.target.value)} />
+          </div>
         </div>
-        <div className="ss-field">
-          <label htmlFor="ss-due">When</label>
-          <input id="ss-due" type="date" value={due} onChange={e => setDue(e.target.value)} />
-        </div>
-      </div>
-      {outcome === 'book_meeting' && (
-        <p className="ss-count-note" style={{ margin: 0 }}>After saving, the demo form opens with this contact picked.</p>
+      )}
+      {o?.books && (
+        <p className="ss-count-note" style={{ margin: 0 }}>
+          This records that they agreed to meet. The demo form opens next with this contact picked;
+          a meeting exists only once you book it there.
+        </p>
       )}
     </Modal>
   )
@@ -232,39 +302,46 @@ export function CallOutcomeModal({ opp, onClose, onSaved, onBook }) {
 
 /**
  * Opens the rep's own messaging app with the number and a starting message.
- * Logging is a separate, explicit click — opening the app is not proof that a
- * text was sent, so the timeline only records it when the rep says so.
+ * Three different things, kept distinct:
+ *   · Messages app opened  — shown as a note; nothing is recorded.
+ *   · Rep confirms sent    — "I sent it — add to history" writes the timeline.
+ *   · Delivered            — not knowable: the rep's own phone sends it, so
+ *                            EvoSys never claims delivery.
  */
 export function TextModal({ opp, me, onClose, onLogged }) {
   const name = firstName(opp?.contact_name)
   const [msg, setMsg] = useState(
     'Hi' + (name ? ' ' + name : '') + ', this is ' + (firstName(me) || 'your sales contact') +
     ' — just checking in. Is now a good time to connect?')
+  const [opened, setOpened] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  const saving = useRef(false)
   const sms = smsHref(opp?.phone)
   const href = sms ? sms + '?&body=' + encodeURIComponent(msg) : null
 
   async function logIt() {
-    setBusy(true); setError(null)
+    if (saving.current) return
+    saving.current = true; setBusy(true); setError(null)
     try {
+      const full = 'Text sent (confirmed by rep) — ' + msg
       await api.post('/sales/opportunities/' + opp.id + '/notes', {
         event_type: 'text_logged',
-        summary: ('Text sent — ' + msg).slice(0, 250),
-        detail: msg.length > 238 ? msg : null,
+        summary: full.slice(0, 250),
+        detail: full.length > 250 ? msg : null,
       })
       onLogged && onLogged()
     } catch (e) {
       setError(e.message || 'Could not record the text.')
     } finally {
-      setBusy(false)
+      saving.current = false; setBusy(false)
     }
   }
 
   return (
     <Modal
       title={'Text ' + (opp?.contact_name || opp?.company_name || '')}
-      sub="Opens your phone's messages app. Nothing is sent from here."
+      sub="Opens your phone’s messages app. EvoSys doesn’t send it and can’t see delivery."
       onClose={onClose}
       footer={<>
         <button type="button" className="ss-btn ss-white" onClick={onClose}>Close</button>
@@ -272,12 +349,19 @@ export function TextModal({ opp, me, onClose, onLogged }) {
           <Icon name="check" /> {busy ? 'Saving…' : 'I sent it — add to history'}
         </button>
         {href
-          ? <a className="ss-btn ss-blue" href={href}><Icon name="message" /> Open Messages</a>
+          ? <a className="ss-btn ss-blue" href={href} onClick={() => setOpened(true)}><Icon name="message" /> Open Messages</a>
           : <button type="button" className="ss-btn ss-blue" disabled>No phone number</button>}
       </>}
     >
       <ErrorLine error={error} />
-      <div className="ss-callout">To: {opp?.phone || 'no phone number on this record'}</div>
+      <div className="ss-callout">
+        To:{opp?.phone ? <PhoneFallback phone={opp.phone} verb="text" /> : ' no phone number on this record'}
+      </div>
+      {opened && (
+        <p className="ss-count-note" role="status" style={{ margin: '10px 0 0' }}>
+          Messages app opened — nothing has been sent or recorded yet. Click “I sent it” once you’ve sent it.
+        </p>
+      )}
       <div style={{ height: 16 }} />
       <div className="ss-field" style={{ marginBottom: 0 }}>
         <label htmlFor="ss-text-msg">Message</label>
@@ -288,31 +372,36 @@ export function TextModal({ opp, me, onClose, onLogged }) {
 }
 
 /**
- * Call and Text as the two square buttons the list rows use, or as full
- * buttons in a header. Handles both pop-ups itself.
+ * Call and Text for a lead, with both pop-ups. Call first hands the number to
+ * the device dialer (tel:), then opens "What happened?" — the click itself
+ * records nothing.
  */
-export function useContactActions({ me, onChanged, onBook, notify }) {
+export function useContactActions({ me, tz, onChanged, onBook, notify }) {
   const [calling, setCalling] = useState(null)
   const [texting, setTexting] = useState(null)
 
   function call(opp) {
-    // Hand the number to the phone first, then ask what happened. Calling
-    // from a laptop with no phone app simply shows the panel.
     const tel = telHref(opp.phone)
-    if (tel) { try { window.location.href = tel } catch { /* no dialer */ } }
+    if (!tel) return
+    try { window.location.href = tel } catch { /* no dialer on this device */ }
     setCalling(opp)
+  }
+  function text(opp) {
+    if (smsHref(opp.phone)) setTexting(opp)
   }
 
   const modals = <>
     {calling && (
       <CallOutcomeModal
-        opp={calling}
+        opp={calling} tz={tz}
         onClose={() => setCalling(null)}
         onBook={onBook}
-        onSaved={({ outcome, opp }) => {
+        onSaved={({ outcome, decision, opp }) => {
           setCalling(null)
-          notify && notify('Call result saved to ' + (opp.contact_name || opp.company_name) +
-            ' — ' + (outcomeByKey(outcome)?.label || '') + '.')
+          const label = outcome === 'not_interested'
+            ? (decision === 'lost' ? 'closed as Lost' : 'follow-up scheduled')
+            : (outcomeByKey(outcome)?.label || '')
+          notify && notify('Saved for ' + (opp.contact_name || opp.company_name) + ' — ' + label + '.')
           onChanged && onChanged(opp)
         }}
       />
@@ -330,21 +419,20 @@ export function useContactActions({ me, onChanged, onBook, notify }) {
       />
     )}
   </>
-  return { call, text: setTexting, modals }
+  return { call, text, modals }
 }
 
+/** The two square buttons on a list row — only when there is a usable number. */
 export function CallTextSquares({ opp, onCall, onText }) {
-  const has = !!telHref(opp.phone)
   const who = opp.contact_name || opp.company_name || 'contact'
+  if (!telHref(opp.phone)) return <span className="ss-nophone">No phone</span>
   return <>
     <button type="button" className="ss-square ss-green" aria-label={'Call ' + who}
-            aria-disabled={!has} title={has ? 'Call ' + opp.phone : 'No phone number'}
-            onClick={() => has && onCall(opp)}>
+            title={'Call ' + opp.phone} onClick={() => onCall(opp)}>
       <Icon name="phone" />
     </button>
     <button type="button" className="ss-square ss-blue" aria-label={'Text ' + who}
-            aria-disabled={!has} title={has ? 'Text ' + opp.phone : 'No phone number'}
-            onClick={() => has && onText(opp)}>
+            title={'Text ' + opp.phone} onClick={() => onText(opp)}>
       <Icon name="message" />
     </button>
   </>
