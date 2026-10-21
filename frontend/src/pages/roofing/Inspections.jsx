@@ -8,50 +8,63 @@
  * server; a taken slot comes back 409 and the openings reload.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import { useRoofing } from './RoofingShell'
 import { Avatar, Empty, ErrorNote, Icon, Loading, Panel, Pill, ago, errText, localWhen, useApi, useToast } from './ui'
 import './roofing-conv.css'
+import './roofing-inspect.css'
+
+const BASE = '/program/roofing/inspections'
 
 function ymd(d) {
   const p = (x) => String(x).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
+const TABS = [
+  ['upcoming', 'Upcoming', 'green', 'Booked and coming up - open the inspection when you arrive.'],
+  ['awaiting', 'Awaiting confirmation', 'orange', 'Homeowner said yes or was offered times - no time confirmed yet.'],
+  ['in_progress', 'In progress', 'blue', 'Being documented right now.'],
+  ['unfinished', 'Unfinished reports', 'amber', 'The visit happened but the report isn’t complete.'],
+  ['next_step', 'Needs estimate / follow-up', 'violet', 'Report complete - sales hasn’t taken the next step yet.'],
+  ['completed', 'Completed', 'slate', 'Finished reports, attached to the homeowner.'],
+]
+
 export default function Inspections() {
   const [params, setParams] = useSearchParams()
+  const nav = useNavigate()
   const leadId = params.get('lead') || ''
-  const pipe = useApi('/roofing-ops/pipeline')
-  const mission = useApi('/roofing-ops/mission')
+  const tab = params.get('tab') || ''
+  const dash = useApi('/roofing-ops/inspections')
   const [toast, say] = useToast()
+  const [busy, setBusy] = useState('')
 
-  const confirmed = useMemo(() => {
-    const col = (pipe.data?.columns || []).find((c) => c.key === 'inspection_booked')
-    return [...(col?.cards || [])].filter((c) => c.inspection_at).sort((a, b) => a.inspection_at.localeCompare(b.inspection_at))
-  }, [pipe.data])
-  const isPast = (naive) => {
-    const [d, t] = naive.split('T'); const [y, m, dd] = d.split('-').map(Number); const [hh, mm] = (t || '0:0').split(':').map(Number)
-    return new Date(y, m - 1, dd, hh, mm).getTime() < Date.now()
-  }
-  const upcoming = confirmed.filter((c) => !isPast(c.inspection_at))
-  const past = confirmed.filter((c) => isPast(c.inspection_at)).reverse()
-  const markInspected = async (c) => {
-    try {
-      await api.post(`/roofing-ops/leads/${c.lead_id}/stage`, { stage: 'inspected', reason: 'Inspection completed' })
-      say(`${c.name} marked inspected. Next step: send the estimate.`); pipe.reload(); mission.reload()
-    } catch (e) { say(errText(e), 'err') }
-  }
-  const requested = useMemo(() => (mission.data?.lanes || []).find((l) => l.key === 'requested')?.cards || [], [mission.data])
-
+  const B = dash.data?.buckets || {}
+  const C = dash.data?.counts || {}
   const open = (id) => { const p = new URLSearchParams(params); if (id) p.set('lead', id); else p.delete('lead'); setParams(p) }
+  const setTab = (k) => { const p = new URLSearchParams(params); p.set('tab', k); setParams(p) }
+
+  const act = async (item) => {
+    const k = item.action?.key
+    if (k === 'book') return open(item.lead_id)
+    if (item.inspection_id) {
+      return nav(k === 'report' || k === 'next' ? `${BASE}/${item.inspection_id}/report` : `${BASE}/${item.inspection_id}`)
+    }
+    setBusy(item.booking_link_id || item.lead_id)
+    try {
+      const ins = await api.post('/roofing-ops/inspections', { lead_id: item.lead_id, booking_link_id: item.booking_link_id || null })
+      nav(`${BASE}/${ins.id}`)
+    } catch (e) { say(errText(e), 'err') } finally { setBusy('') }
+  }
+  const shown = tab ? TABS.filter((t) => t[0] === tab) : TABS
 
   return (
-    <div className="rf-page">
+    <div className="rf-page ri-dash">
       <div className="rf-page__head">
         <div>
           <h1 className="rf-h1">Inspections</h1>
-          <p className="rf-lede">Confirmed inspections are on a salesperson's calendar. Requests are homeowners who said yes but haven't picked a time yet.</p>
+          <p className="rf-lede">From booked appointment to finished report. Open an inspection on site to record the roof, the damage and photos - then hand it to sales.</p>
         </div>
         {!leadId && <button className="rf-btn rf-btn--primary" onClick={() => open('pick')}><Icon name="calendar" size={18} />Book an inspection</button>}
       </div>
@@ -60,88 +73,98 @@ export default function Inspections() {
         <div style={{ marginBottom: 20 }}>
           {leadId === 'pick'
             ? <LeadPicker onPick={(id) => open(id)} onCancel={() => open('')} />
-            : <Booking key={leadId} leadId={leadId} onClose={() => open('')} say={say}
-                onBooked={() => { pipe.reload(); mission.reload() }} />}
+            : <Booking key={leadId} leadId={leadId} onClose={() => open('')} say={say} onBooked={() => dash.reload()} />}
         </div>
       )}
 
-      <div className="rf-insp-grid">
-        <div className="rf-stack">
-        <Panel title="Upcoming inspections" sub="Confirmed on a salesperson's calendar, soonest first"
-          actions={<Pill tone="green">{upcoming.length} upcoming</Pill>}>
-          {pipe.loading && !pipe.data && <Loading />}
-          {pipe.error && <ErrorNote onRetry={pipe.reload}>{pipe.error}</ErrorNote>}
-          {pipe.data && !upcoming.length && (
-            <Empty icon="calendar" title="No upcoming inspections">When a homeowner picks a time - or you book one for them - it shows here with the salesperson who's going.</Empty>
-          )}
-          <ul className="rf-insp-list">
-            {upcoming.map((c) => (
-              <li key={c.lead_id} className="rf-insp-row">
-                <span className="rf-insp-date">
-                  <b>{localWhen(c.inspection_at, { weekday: 'short', month: undefined, day: undefined, hour: undefined, minute: undefined })}</b>
-                  <span>{localWhen(c.inspection_at, { weekday: undefined, hour: undefined, minute: undefined })}</span>
-                </span>
-                <span className="rf-insp-main">
-                  <b>{c.name}</b>
-                  <span className="rf-muted">{c.address || 'No address on file'}</span>
-                  {c.roof_issue && <span className="rf-muted">{c.roof_issue}</span>}
-                </span>
-                <span className="rf-insp-time">
-                  <b>{localWhen(c.inspection_at, { weekday: undefined, month: undefined, day: undefined })}</b>
-                  <span className="rf-muted">{c.owner_name || 'Unassigned'}</span>
-                </span>
-                <Link className="rf-btn rf-btn--ghost rf-btn--sm" to={`/program/roofing/conversations?lead=${c.lead_id}`}>Open</Link>
-              </li>
+      {dash.error && <ErrorNote onRetry={dash.reload}>{dash.error}</ErrorNote>}
+      {dash.loading && !dash.data && <Loading />}
+      {dash.data && (
+        <>
+          <NextUp B={B} act={act} busy={busy} />
+          <div className="ri-strip" role="tablist" aria-label="Inspection status">
+            <button role="tab" aria-selected={!tab} className={`ri-strip__t ${!tab ? 'on' : ''}`} onClick={() => setTab('')}>
+              <b>{TABS.reduce((a, t) => a + (C[t[0]] || 0), 0)}</b><span>All</span>
+            </button>
+            {TABS.map(([k, label, tone]) => (
+              <button key={k} role="tab" aria-selected={tab === k} className={`ri-strip__t t-${tone} ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>
+                <b>{C[k] || 0}</b><span>{label}</span>
+              </button>
             ))}
-          </ul>
-        </Panel>
-        {past.length > 0 && (
-          <Panel title="Past inspections - record the result" sub="The time has passed. Mark each one inspected so the estimate step can start."
-            actions={<Pill tone="amber">{past.length} to update</Pill>}>
-            <ul className="rf-insp-list">
-              {past.map((c) => (
-                <li key={c.lead_id} className="rf-insp-row">
-                  <span className="rf-insp-date">
-                    <b>{localWhen(c.inspection_at, { weekday: 'short', month: undefined, day: undefined, hour: undefined, minute: undefined })}</b>
-                    <span>{localWhen(c.inspection_at, { weekday: undefined, hour: undefined, minute: undefined })}</span>
-                  </span>
-                  <span className="rf-insp-main">
-                    <b>{c.name}</b>
-                    <span className="rf-muted">{c.address || 'No address on file'}</span>
-                  </span>
-                  <span className="rf-insp-time"><span className="rf-muted">{c.owner_name || 'Unassigned'}</span></span>
-                  <button className="rf-btn rf-btn--navy rf-btn--sm" onClick={() => markInspected(c)}>Mark inspected</button>
-                </li>
-              ))}
-            </ul>
-          </Panel>
-        )}
-        </div>
-
-        <Panel title="Asked for an inspection" sub="Said yes - not booked yet. Offer times or book one now."
-          actions={<Pill tone="orange">{requested.length} waiting</Pill>}>
-          {mission.loading && !mission.data && <Loading />}
-          {mission.error && <ErrorNote onRetry={mission.reload}>{mission.error}</ErrorNote>}
-          {mission.data && !requested.length && (
-            <Empty icon="check" title="No open requests">Everyone who asked for an inspection has a time, or is still talking with the AI.</Empty>
+          </div>
+          {C.undocumented > 0 && (
+            <div className="rf-note rf-note--warn" style={{ marginBottom: 16 }}><Icon name="alert" size={16} />
+              <span>{C.undocumented} homeowner{C.undocumented === 1 ? ' was' : 's were'} marked inspected without a report.
+                <button className="ri-linkbtn" onClick={() => setTab('undocumented')}>Add the report</button></span></div>
           )}
-          <ul className="rf-insp-list">
-            {requested.map((c) => (
-              <li key={c.lead_id} className="rf-insp-row rf-insp-row--req">
-                <Avatar name={c.name} size={36} />
-                <span className="rf-insp-main">
-                  <b>{c.name}</b>
-                  <span className="rf-muted">{c.summary || c.address}</span>
-                </span>
-                <span className="rf-muted rf-insp-ago">{ago(c.last_activity_at)}</span>
-                <button className="rf-btn rf-btn--primary rf-btn--sm" onClick={() => open(c.lead_id)}>Book</button>
-              </li>
+          <div className="ri-buckets">
+            {(tab === 'undocumented' ? [['undocumented', 'Inspected without a report', 'amber', 'A stage was changed but nothing was documented.']] : shown).map(([k, label, tone, sub]) => (
+              (tab || (B[k] || []).length > 0) && (
+                <Panel key={k} title={label} sub={sub} actions={<Pill tone={tone}>{(B[k] || []).length}</Pill>}>
+                  {!(B[k] || []).length && <Empty icon="calendar" title="Nothing here right now" />}
+                  <ul className="rf-insp-list">
+                    {(B[k] || []).map((c) => (
+                      <li key={(c.inspection_id || c.booking_link_id || c.lead_id) + k} className="rf-insp-row ri-row">
+                        {c.when
+                          ? <span className="rf-insp-date">
+                              <b>{localWhen(c.when, { weekday: 'short', month: undefined, day: undefined, hour: undefined, minute: undefined })}</b>
+                              <span>{localWhen(c.when, { weekday: undefined, hour: undefined, minute: undefined })}</span>
+                            </span>
+                          : <Avatar name={c.name} size={40} />}
+                        <span className="rf-insp-main">
+                          <b>{c.name}{c.report_number ? <span className="ri-rn">{c.report_number}</span> : null}</b>
+                          <span className="rf-muted">{c.address || 'No address on file'}</span>
+                          <span className="rf-muted ri-row__meta">
+                            {[c.when && localWhen(c.when, { weekday: undefined, month: undefined, day: undefined }),
+                              c.inspector_name, c.severity_label && `${c.severity_label} damage`, c.recommendation_label,
+                              c.photo_count != null && `${c.photo_count} photo${c.photo_count === 1 ? '' : 's'}`,
+                              c.follow_up_at && `Follow up ${localWhen(c.follow_up_at, { hour: undefined, minute: undefined })}`,
+                              !c.when && (c.summary || c.roof_issue)].filter(Boolean).join(' · ')}
+                          </span>
+                        </span>
+                        <button className={`rf-btn rf-btn--sm ${['start', 'open', 'book', 'next'].includes(c.action?.key) ? 'rf-btn--primary' : 'rf-btn--ghost'}`}
+                          disabled={busy && busy === (c.booking_link_id || c.lead_id)} onClick={() => act(c)}>
+                          {c.action?.label || 'Open'}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </Panel>
+              )
             ))}
-          </ul>
-        </Panel>
-      </div>
+            {!tab && TABS.every(([k]) => !(B[k] || []).length) && (
+              <Empty icon="calendar" title="No inspections yet">Book one above. When the salesperson arrives, they open it here to document the roof.</Empty>
+            )}
+          </div>
+        </>
+      )}
       {toast}
     </div>
+  )
+}
+
+/** Phone only: the work, before the numbers. The report to finish first,
+ *  then the next visit on the calendar - each one tap away. */
+function NextUp({ B, act, busy }) {
+  const cont = (B.in_progress || [])[0] || (B.unfinished || [])[0]
+  const next = (B.upcoming || [])[0]
+  const follow = !cont && !next ? (B.next_step || [])[0] : null
+  const items = [cont && { k: 'cont', title: 'Finish this report', it: cont },
+    next && { k: 'next', title: 'Next inspection', it: next },
+    follow && { k: 'follow', title: 'Next sales step', it: follow }].filter(Boolean)
+  if (!items.length) return null
+  return (
+    <section className="ri-nextup" aria-label="Your next work">
+      {items.map(({ k, title, it }) => (
+        <div key={k} className={`ri-nextup__card ri-nextup__card--${k}`}>
+          <span className="ri-nextup__k">{title}</span>
+          <b>{it.name}</b>
+          <span className="ri-nextup__meta">{[it.when && localWhen(it.when), it.address].filter(Boolean).join(' \u00b7 ')}</span>
+          <button className="rf-btn rf-btn--primary ri-nextup__btn" disabled={busy && busy === (it.booking_link_id || it.lead_id)}
+            onClick={() => act(it)}>{it.action?.label || 'Open'}</button>
+        </div>
+      ))}
+    </section>
   )
 }
 
@@ -176,7 +199,7 @@ function LeadPicker({ onPick, onCancel }) {
   )
 }
 
-function Booking({ leadId, onClose, onBooked, say }) {
+export function Booking({ leadId, onClose, onBooked, say }) {
   const { status } = useRoofing()
   const ws = useApi(`/roofing-ops/leads/${leadId}`)
   const types = status?.profile?.inspection_types?.length ? status.profile.inspection_types : ['Roof Inspection']
@@ -232,6 +255,16 @@ function Booking({ leadId, onClose, onBooked, say }) {
     } finally { setBusy(false) }
   }
 
+  const navTo = useNavigate()
+  const [opening, setOpening] = useState(false)
+  // The booked appointment opens ITS inspection form (one per appointment).
+  const openForm = async () => {
+    setOpening(true)
+    try {
+      const ins = await api.post('/roofing-ops/inspections', { lead_id: leadId, booking_link_id: done.booking_id })
+      navTo(`${BASE}/${ins.id}`)
+    } catch (e) { say(errText(e), 'err'); setOpening(false) }
+  }
   const L = ws.data?.lead
   const optedOut = L?.status === 'dnc'
   return (
@@ -338,8 +371,9 @@ function Booking({ leadId, onClose, onBooked, say }) {
               : <><Icon name="chat" size={16} />No text sent to the homeowner</>}</li>
           </ul>
           <div className="rf-book__foot">
-            <Link className="rf-btn rf-btn--ghost" to={`/program/roofing/conversations?lead=${leadId}`}>Open conversation</Link>
-            <button className="rf-btn rf-btn--primary" onClick={onClose}>Done</button>
+            <Link className="rf-btn rf-btn--ghost" to={`/program/roofing/homeowners/${leadId}`}>Open homeowner</Link>
+            <button className="rf-btn rf-btn--ghost" onClick={onClose}>Done</button>
+            <button className="rf-btn rf-btn--primary" disabled={opening} onClick={openForm}><Icon name="clipboard" size={16} />{opening ? 'Opening…' : 'Open inspection form'}</button>
           </div>
         </div>
       )}

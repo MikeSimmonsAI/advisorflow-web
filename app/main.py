@@ -645,6 +645,12 @@ class SlowRequestLogMiddleware:
 
 app.add_middleware(SlowRequestLogMiddleware)
 
+# PUBLIC WHOLESALE WEBSITE on its own hostname (wholesale.evosyspro.live, whose
+# DNS points at this service). On that host only the site's pages and its form
+# exist; elsewhere the site's routes 404. See wholesale_public_site_router.py.
+from app.routers import wholesale_public_site_router  # noqa: E402
+app.add_middleware(wholesale_public_site_router.WholesaleSiteHostMiddleware)
+
 # Added LAST so it runs FIRST: every other middleware and the rate limiter see
 # the real address.
 app.add_middleware(ClientIPFromEdgeMiddleware)
@@ -888,6 +894,7 @@ app.include_router(brand_site_inquiry_router.router)
 from app.routers import wholesale_seller_intake_router  # noqa: E402
 app.include_router(wholesale_seller_intake_router.public_router)
 app.include_router(wholesale_seller_intake_router.ops_router)
+app.include_router(wholesale_public_site_router.router)
 # /permission/{token} - an owner gives (or declines) written permission for
 # follow-up on a link a caller sent. Public: the link token IS the authorization.
 from app.routers.permission_public_router import router as permission_public_router  # noqa: E402

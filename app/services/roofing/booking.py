@@ -84,7 +84,7 @@ def _parse_utc(raw: str) -> datetime:
 def notify_team(db: Session, ctx: C.Ctx, lead: Lead, profile: Optional[RoofingProfile],
                 salesperson: User, booking: BookingLink, label: str, when_label: str) -> List[str]:
     """ONE actionable alert per person per booking (deduplicated on the link)."""
-    link = "/program/roofing/inbox?lead=%s" % lead.id
+    link = "/program/roofing/homeowners/%s?" % lead.id        # opens the homeowner record
     ids = [salesperson.id] + [u for u in C.jload(getattr(profile, "notify_user_ids", None), []) if isinstance(u, str)]
     valid = {u.id for u in db.query(User).filter(User.organization_id == ctx.org_id,
                                                  User.id.in_(ids)).all()}
@@ -97,11 +97,11 @@ def notify_team(db: Session, ctx: C.Ctx, lead: Lead, profile: Optional[RoofingPr
             continue
         dup = (db.query(Notification).filter(Notification.user_id == uid, Notification.lead_id == lead.id,
                                              Notification.type == NotificationType.BOOKING_CONFIRMED,
-                                             Notification.link == link + "&booking=" + booking.id).first())
+                                             Notification.link == link + "booking=" + booking.id).first())
         if dup:
             continue
         db.add(Notification(user_id=uid, lead_id=lead.id, type=NotificationType.BOOKING_CONFIRMED,
-                            message=msg[:900], link=link + "&booking=" + booking.id))
+                            message=msg[:900], link=link + "booking=" + booking.id))
         sent.append(uid)
     return sent
 

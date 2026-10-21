@@ -400,6 +400,16 @@ def _hot_past_sla(db, org_id, now, test_ids) -> Optional[Dict]:
                     ProgramResponse.sla_due_at < now, ProgramResponse.received_at >= now - timedelta(days=30),
                     ~ProgramResponse.lead_id.in_(test_ids))
             .order_by(ProgramResponse.received_at).limit(ROW_LIMIT).all())
+    if rows:
+        # A HOT reply the AI already answered (times offered, follow-up agreed)
+        # is not a family waiting on staff.
+        from app.services.programs import responses as _R
+        lids = list({r.lead_id for r in rows})
+        latest = {}
+        for c in (db.query(ProgramConversation).filter(ProgramConversation.lead_id.in_(lids))
+                  .order_by(ProgramConversation.created_at).all()):
+            latest[c.lead_id] = c
+        rows = [r for r in rows if not _R.ai_answered(db, latest.get(r.lead_id), r)]
     if not rows:
         return None
     return _problem("hot_past_sla", "human_action", "high",
