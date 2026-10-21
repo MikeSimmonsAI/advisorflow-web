@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "sci-import-migration-syntax-closure-20261019-1924",
-  "parent_run_id": "sci-home-visit-source-proof-20261019-1920",
-  "project": "SCI \u2014 repair Python compile break and verify latest SCI commits",
-  "status": "APPROVAL_REQUIRED",
-  "branch": "sci-program",
-  "actions_run_id": "39345424538",
-  "timestamp_ct": "2026-10-19 19:05 CT",
+  "relay_run_id": "verify-sci-20261021-0415-c2",
+  "parent_run_id": "",
+  "project": "SCI harmless parallel smoke test",
+  "status": "COMPLETED",
+  "branch": "feature/sci-ops",
+  "actions_run_id": "39542958978",
+  "timestamp_ct": "2026-10-20 23:15 CT",
   "issue": 1,
-  "status_comment_id": 6280103188
+  "status_comment_id": 6307891272
 }
