@@ -110,6 +110,8 @@ const RoofingMission = lazyPage(() => import('./pages/roofing/MissionControl'))
 const RoofingQueue = lazyPage(() => import('./pages/roofing/WorkQueue'))
 const RoofingConversations = lazyPage(() => import('./pages/roofing/Conversations'))
 const RoofingInspections = lazyPage(() => import('./pages/roofing/Inspections'))
+const RoofingInspectionWorkspace = lazyPage(() => import('./pages/roofing/InspectionWorkspace'))
+const RoofingInspectionReport = lazyPage(() => import('./pages/roofing/InspectionReport'))
 const RoofingPerformance = lazyPage(() => import('./pages/roofing/Performance'))
 const RoofingPipeline = lazyPage(() => import('./pages/roofing/Pipeline'))
 const RoofingLeads = lazyPage(() => import('./pages/roofing/LeadsData'))
@@ -1429,6 +1431,8 @@ export default function App() {
           <Route path="queue" element={<RoofingQueue />} />
           <Route path="conversations" element={<RoofingConversations />} />
           <Route path="inspections" element={<RoofingInspections />} />
+          <Route path="inspections/:id" element={<RoofingInspectionWorkspace />} />
+          <Route path="inspections/:id/report" element={<RoofingInspectionReport />} />
           <Route path="performance" element={<RoofingPerformance />} />
           <Route path="pipeline" element={<RoofingPipeline />} />
           <Route path="leads" element={<RoofingLeads />} />

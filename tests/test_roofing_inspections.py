@@ -1,0 +1,167 @@
+# -*- coding: utf-8 -*-
+"""Roofing field inspections (issue #283): start from an appointment, save a
+draft, photos (upload, label, serve, delete), completion rules, report numbers,
+journey movement only from a completed report, the sales hand-off, several
+inspections for one homeowner, salesperson scope and tenant isolation."""
+import io
+import os
+from datetime import datetime, timedelta
+
+import pytest
+
+from app.models.models import BookingLink
+from app.models.roofing_models import RoofingInspection, RoofingOpportunity
+from tests.test_roofing_program import h, lead, org, user, world  # noqa: F401 (fixture)
+
+os.environ.setdefault("MEDIA_STORAGE_BACKEND", "database")
+
+PNG = (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+       b"\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfe\xa7\x35\x81\x84\x00\x00\x00\x00IEND\xaeB`\x82")
+
+
+def _book(db, l, rep, when):
+    b = BookingLink(lead_id=l.id, user_id=rep.id, status="booked", booked_time=when, appt_label="Roof Inspection",
+                    appt_duration=60, token="t-%s" % os.urandom(6).hex())
+    db.add(b)
+    db.commit()
+    return b
+
+
+def _photo(client, db, u, iid, data=PNG, label="damage"):
+    return client.post("/roofing-ops/inspections/%s/photos" % iid, headers=h(db, u),
+                       files={"file": ("roof.png", io.BytesIO(data), "image/png")},
+                       data={"label": label, "caption": "Hail hits on the north slope"})
+
+
+@pytest.fixture()
+def booked(world):
+    db = world["db"]
+    l = lead(db, world["a"], "Henry", owner=world["a_rep"], custom_fields='{"roof_issue": "Hail damage"}')
+    b = _book(db, l, world["a_rep"], datetime.now() + timedelta(days=1))
+    return dict(world, lead=l, booking=b)
+
+
+def test_full_inspection_lifecycle(client, booked):
+    db, rep, l, b = booked["db"], booked["a_rep"], booked["lead"], booked["booking"]
+    dash = client.get("/roofing-ops/inspections", headers=h(db, rep)).json()
+    assert [x["lead_id"] for x in dash["buckets"]["upcoming"]] == [l.id]
+    r = client.post("/roofing-ops/inspections", json={"lead_id": l.id, "booking_link_id": b.id}, headers=h(db, rep))
+    assert r.status_code == 200, r.text
+    ins = r.json()
+    assert ins["status"] == "in_progress" and ins["inspector_id"] == rep.id
+    assert ins["homeowner"]["name"].startswith("Henry") and "At least one photo" in ins["missing"]
+    # opening the same appointment again never makes a second report
+    again = client.post("/roofing-ops/inspections", json={"lead_id": l.id, "booking_link_id": b.id}, headers=h(db, rep))
+    assert again.json()["id"] == ins["id"]
+    iid = ins["id"]
+    # completing early is refused with what's missing
+    r = client.post("/roofing-ops/inspections/%s/complete" % iid, headers=h(db, rep))
+    assert r.status_code == 422 and "Roof condition" in r.json()["detail"]["missing"]
+    # save a draft, reopen it
+    r = client.patch("/roofing-ops/inspections/%s" % iid, headers=h(db, rep), json={
+        "roof_type": "Architectural shingle", "roof_age_years": 18, "roof_condition": "poor",
+        "damage": ["hail", "granule_loss"], "severity": "moderate", "affected_areas": ["North slope", "Ridge"],
+        "notes": "Consistent hail bruising on the north slope.", "recommendation": "replacement",
+        "insurance_claim": "yes"})
+    assert r.status_code == 200, r.text
+    assert client.patch("/roofing-ops/inspections/%s" % iid, headers=h(db, rep),
+                        json={"damage": ["made_up"]}).status_code == 400
+    d = client.get("/roofing-ops/inspections/%s" % iid, headers=h(db, rep)).json()
+    assert d["damage"] == ["granule_loss", "hail"] and d["missing"] == ["At least one photo"]
+    assert d["status"] == "in_progress"
+    # photos: upload, duplicate retry, label, serve, delete
+    p = _photo(client, db, rep, iid)
+    assert p.status_code == 200, p.text
+    assert _photo(client, db, rep, iid).json()["id"] == p.json()["id"]
+    pid = p.json()["id"]
+    assert client.patch("/roofing-ops/inspections/%s/photos/%s" % (iid, pid), headers=h(db, rep),
+                        json={"label": "shingles", "caption": "Close-up"}).json()["label"] == "shingles"
+    img = client.get("/roofing-ops/inspections/%s/photos/%s" % (iid, pid), headers=h(db, rep))
+    assert img.status_code == 200 and img.content == PNG and img.headers["content-type"] == "image/png"
+    assert client.post("/roofing-ops/inspections/%s/photos" % iid, headers=h(db, rep),
+                       files={"file": ("x.txt", io.BytesIO(b"not an image"), "text/plain")}).status_code in (400, 415, 422)
+    # stage has NOT moved yet: a draft is not a documented inspection
+    opp = db.query(RoofingOpportunity).filter(RoofingOpportunity.lead_id == l.id).one()
+    assert opp.stage != "inspected"
+    r = client.post("/roofing-ops/inspections/%s/complete" % iid, headers=h(db, rep))
+    assert r.status_code == 200, r.text
+    done = r.json()
+    assert done["status"] == "completed" and done["report_number"].startswith("R-")
+    assert done["next_action"] == "prepare_estimate" and done["opportunity"]["stage"] == "inspected"
+    # a completed report is locked for the inspector
+    assert client.patch("/roofing-ops/inspections/%s" % iid, headers=h(db, rep), json={"notes": "x"}).status_code == 409
+    assert client.delete("/roofing-ops/inspections/%s/photos/%s" % (iid, pid), headers=h(db, rep)).status_code == 409
+    dash = client.get("/roofing-ops/inspections", headers=h(db, rep)).json()
+    assert [x["inspection_id"] for x in dash["buckets"]["next_step"]] == [iid]
+    # hand-off: prepare estimate, then mark it sent -> Estimate Sent
+    r = client.post("/roofing-ops/inspections/%s/handoff" % iid, headers=h(db, rep),
+                    json={"action": "prepare_estimate", "estimate_amount": 14600, "scope": "Full tear-off"})
+    assert r.status_code == 200 and r.json()["opportunity"]["stage"] == "inspected"
+    assert r.json()["opportunity"]["estimate_amount"] == 14600
+    r = client.post("/roofing-ops/inspections/%s/handoff" % iid, headers=h(db, rep),
+                    json={"action": "prepare_estimate", "estimate_sent": True})
+    assert r.json()["opportunity"]["stage"] == "estimate_sent"
+    # the report stays on the homeowner
+    lw = client.get("/roofing-ops/leads/%s" % l.id, headers=h(db, rep)).json()
+    assert [x["report_number"] for x in lw["inspections"]] == [done["report_number"]]
+    # manager can reopen; the salesperson cannot
+    assert client.post("/roofing-ops/inspections/%s/reopen" % iid, headers=h(db, rep)).status_code == 403
+    assert client.post("/roofing-ops/inspections/%s/reopen" % iid,
+                       headers=h(db, booked["a_owner"])).json()["status"] == "in_progress"
+
+
+def test_close_no_work_and_follow_up(client, booked):
+    db, rep, l, b = booked["db"], booked["a_rep"], booked["lead"], booked["booking"]
+    iid = client.post("/roofing-ops/inspections", json={"lead_id": l.id, "booking_link_id": b.id},
+                      headers=h(db, rep)).json()["id"]
+    client.patch("/roofing-ops/inspections/%s" % iid, headers=h(db, rep), json={
+        "roof_condition": "good", "severity": "none", "notes": "Roof is sound.", "recommendation": "monitor"})
+    _photo(client, db, rep, iid, label="overview")
+    assert client.post("/roofing-ops/inspections/%s/handoff" % iid, headers=h(db, rep),
+                       json={"action": "close_no_work"}).status_code == 409   # report first
+    done = client.post("/roofing-ops/inspections/%s/complete" % iid, headers=h(db, rep)).json()
+    assert done["next_action"] == "schedule_follow_up"
+    r = client.post("/roofing-ops/inspections/%s/handoff" % iid, headers=h(db, rep),
+                    json={"action": "schedule_follow_up", "follow_up_at": "2026-12-01T10:00"})
+    assert r.status_code == 200 and r.json()["follow_up_at"].startswith("2026-12-01")
+    r = client.post("/roofing-ops/inspections/%s/handoff" % iid, headers=h(db, rep), json={"action": "close_no_work"})
+    assert r.json()["opportunity"]["stage"] == "lost"
+
+
+def test_two_inspections_for_one_homeowner(client, booked):
+    db, rep, l, b = booked["db"], booked["a_rep"], booked["lead"], booked["booking"]
+    b2 = _book(db, l, rep, datetime.now() + timedelta(days=9))
+    i1 = client.post("/roofing-ops/inspections", json={"lead_id": l.id, "booking_link_id": b.id}, headers=h(db, rep)).json()
+    i2 = client.post("/roofing-ops/inspections", json={"lead_id": l.id, "booking_link_id": b2.id}, headers=h(db, rep)).json()
+    assert i1["id"] != i2["id"]
+    assert db.query(RoofingInspection).filter(RoofingInspection.lead_id == l.id).count() == 2
+
+
+def test_scope_and_tenant_isolation(client, booked):
+    db, l, b = booked["db"], booked["lead"], booked["booking"]
+    iid = client.post("/roofing-ops/inspections", json={"lead_id": l.id, "booking_link_id": b.id},
+                      headers=h(db, booked["a_rep"])).json()["id"]
+    pid = _photo(client, db, booked["a_rep"], iid).json()["id"]
+    # another salesperson in the same company cannot see this homeowner's inspection
+    assert client.get("/roofing-ops/inspections/%s" % iid, headers=h(db, booked["a_rep2"])).status_code in (403, 404)
+    # another roofing company cannot see it, its photos or start one on the lead
+    other = booked["b_owner"]
+    assert client.get("/roofing-ops/inspections/%s" % iid, headers=h(db, other)).status_code == 404
+    assert client.get("/roofing-ops/inspections/%s/photos/%s" % (iid, pid), headers=h(db, other)).status_code == 404
+    assert client.post("/roofing-ops/inspections", json={"lead_id": l.id}, headers=h(db, other)).status_code in (403, 404)
+    # the owner sees everything
+    assert client.get("/roofing-ops/inspections/%s" % iid, headers=h(db, booked["a_owner"])).status_code == 200
+
+
+def test_demo_story_has_sample_inspections_with_photos(db_session):
+    from app.models.roofing_models import RoofingInspectionPhoto
+    from app.services.roofing import demo_seed
+    out = demo_seed.seed(db_session)
+    assert out["inspections_added"] > 5 and out["inspection_photos_added"] >= out["inspections_added"]
+    rows = db_session.query(RoofingInspection).filter(RoofingInspection.organization_id == out["organization_id"]).all()
+    done = [r for r in rows if r.status == "completed"]
+    assert done and all(r.report_number and r.notes and r.recommendation for r in done)
+    assert 0 < len([r for r in rows if r.status == "in_progress"]) <= 2
+    ph = db_session.query(RoofingInspectionPhoto).filter(RoofingInspectionPhoto.organization_id == out["organization_id"]).all()
+    assert ph and all(p.is_sample for p in ph)
+    assert demo_seed.seed(db_session)["inspections_added"] == 0     # idempotent

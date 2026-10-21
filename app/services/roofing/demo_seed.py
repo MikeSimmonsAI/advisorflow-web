@@ -292,7 +292,13 @@ def seed(db: Session, by_user_id: Optional[str] = None, presenter_password: Opti
     db.commit()
     leads = db.query(Lead).filter(Lead.organization_id == org.id).all()
     J.sync(db, org.id, leads)
+    # Field inspections on top of the story: completed reports with sample
+    # photos for everyone already past the inspection, a draft for a visit
+    # whose time just passed (issue #283).
+    from app.services.roofing import demo_inspections
+    insp = demo_inspections.seed(db, org, now)
     return {"organization_id": org.id, "organization_name": org.name, "created": created,
             "homeowners_added": made, "homeowners_total": len(leads),
             "users": [{"email": u.email, "name": u.full_name, "role": u.role} for u in users.values()],
-            "presenter_password_set": bool(presenter_password)}
+            "presenter_password_set": bool(presenter_password), "inspections_added": insp["inspections"],
+            "inspection_photos_added": insp["photos"]}

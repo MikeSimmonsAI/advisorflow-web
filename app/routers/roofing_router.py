@@ -18,7 +18,8 @@ through the existing public inquiry endpoint, not this router.
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -33,6 +34,7 @@ from app.services.platform_owner import require_tenant_context
 from app.services.roofing import booking as B
 from app.services.roofing import common as C
 from app.services.roofing import inbox as I
+from app.services.roofing import inspections as INS
 from app.services.roofing import journey as J
 from app.services.roofing import metrics as M
 from app.services.roofing import setup as S
@@ -357,6 +359,8 @@ def lead_workspace(lead_id: str, ctx: C.Ctx = Depends(ctx_dep)):
                  "owner_id": lead.assigned_to_id, "owner_name": names.get(lead.assigned_to_id),
                  "sms_consent": bool(lead.sms_consent), "created_at": C.iso(lead.created_at)},
         "roofing": C.lead_fields(lead),
+        # Every documented inspection stays attached to the homeowner through the sale.
+        "inspections": INS.for_lead(ctx, lead.id),
         "opportunity": {"stage": opp.stage, "stage_label": C.STAGE_LABEL[opp.stage],
                         "stage_entered_at": C.iso(opp.stage_entered_at), "estimate_amount": opp.estimate_amount,
                         "won_amount": opp.won_amount, "lost_reason": opp.lost_reason,
@@ -622,3 +626,101 @@ def takeover(lead_id: str, body: TakeoverIn, ctx: C.Ctx = Depends(ctx_dep)):
     ctx.db.commit()
     return {"lead_id": lead.id, "mode": "human_active" if body.human else "ai_active",
             "follow_up": cad.status if cad is not None else None}
+
+
+
+# ── field inspections (issue #283) ─────────────────────────────────────────
+class InspectionStartIn(BaseModel):
+    lead_id: str
+    booking_link_id: Optional[str] = None
+
+
+class HandoffIn(BaseModel):
+    action: str
+    estimate_amount: Optional[float] = None
+    estimate_sent: bool = False
+    scope: Optional[str] = Field(None, max_length=2000)
+    follow_up_at: Optional[str] = None
+    note: Optional[str] = Field(None, max_length=500)
+
+
+class PhotoPatch(BaseModel):
+    label: Optional[str] = None
+    caption: Optional[str] = Field(None, max_length=300)
+
+
+@router.get("/inspections")
+def inspections_dashboard(ctx: C.Ctx = Depends(ctx_dep)):
+    return INS.dashboard(ctx)
+
+
+@router.get("/inspections/choices")
+def inspection_choices(ctx: C.Ctx = Depends(ctx_dep)):
+    return INS.choices()
+
+
+@router.post("/inspections", dependencies=_WRITE)
+def inspection_start(body: InspectionStartIn, ctx: C.Ctx = Depends(ctx_dep)):
+    ins = INS.start(ctx, body.lead_id, body.booking_link_id)
+    _audit(ctx, "roofing.inspection.open", "roofing_inspection", ins.id)
+    ctx.db.commit()
+    return INS.to_json(ctx, ins)
+
+
+@router.get("/inspections/{inspection_id}")
+def inspection_get(inspection_id: str, ctx: C.Ctx = Depends(ctx_dep)):
+    return INS.to_json(ctx, INS.get(ctx, inspection_id))
+
+
+@router.patch("/inspections/{inspection_id}", dependencies=_WRITE)
+def inspection_save(inspection_id: str, body: Dict[str, Any] = Body(...), ctx: C.Ctx = Depends(ctx_dep)):
+    body = {k: v for k, v in (body or {}).items() if not k.startswith("_")}
+    ins = INS.save(ctx, INS.get(ctx, inspection_id), body)
+    return INS.to_json(ctx, ins)
+
+
+@router.post("/inspections/{inspection_id}/complete", dependencies=_WRITE)
+def inspection_complete(inspection_id: str, ctx: C.Ctx = Depends(ctx_dep)):
+    ins = INS.complete(ctx, INS.get(ctx, inspection_id))
+    _audit(ctx, "roofing.inspection.complete", "roofing_inspection", ins.id, {"report": ins.report_number})
+    ctx.db.commit()
+    return INS.to_json(ctx, ins)
+
+
+@router.post("/inspections/{inspection_id}/reopen", dependencies=_WRITE)
+def inspection_reopen(inspection_id: str, ctx: C.Ctx = Depends(ctx_dep)):
+    ins = INS.reopen(ctx, INS.get(ctx, inspection_id))
+    _audit(ctx, "roofing.inspection.reopen", "roofing_inspection", ins.id)
+    ctx.db.commit()
+    return INS.to_json(ctx, ins)
+
+
+@router.post("/inspections/{inspection_id}/handoff", dependencies=_WRITE)
+def inspection_handoff(inspection_id: str, body: HandoffIn, ctx: C.Ctx = Depends(ctx_dep)):
+    ins = INS.handoff(ctx, INS.get(ctx, inspection_id), body.action, body.model_dump())
+    _audit(ctx, "roofing.inspection.handoff", "roofing_inspection", ins.id, {"action": body.action})
+    ctx.db.commit()
+    return INS.to_json(ctx, ins)
+
+
+@router.post("/inspections/{inspection_id}/photos", dependencies=_WRITE)
+async def inspection_photo_add(inspection_id: str, file: UploadFile = File(...), label: Optional[str] = Form(None),
+                               caption: Optional[str] = Form(None), ctx: C.Ctx = Depends(ctx_dep)):
+    return await INS.add_photo(ctx, INS.get(ctx, inspection_id), file, label=label, caption=caption)
+
+
+@router.patch("/inspections/{inspection_id}/photos/{photo_id}", dependencies=_WRITE)
+def inspection_photo_update(inspection_id: str, photo_id: str, body: PhotoPatch, ctx: C.Ctx = Depends(ctx_dep)):
+    return INS.update_photo(ctx, INS.get(ctx, inspection_id), photo_id, body.model_dump(exclude_unset=True))
+
+
+@router.delete("/inspections/{inspection_id}/photos/{photo_id}", dependencies=_WRITE)
+def inspection_photo_delete(inspection_id: str, photo_id: str, ctx: C.Ctx = Depends(ctx_dep)):
+    INS.remove_photo(ctx, INS.get(ctx, inspection_id), photo_id)
+    return {"ok": True}
+
+
+@router.get("/inspections/{inspection_id}/photos/{photo_id}")
+def inspection_photo_bytes(inspection_id: str, photo_id: str, ctx: C.Ctx = Depends(ctx_dep)):
+    data, ctype = INS.photo_bytes(ctx, INS.get(ctx, inspection_id), photo_id)
+    return Response(content=data, media_type=ctype, headers={"Cache-Control": "private, max-age=300"})

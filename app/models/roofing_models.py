@@ -20,7 +20,7 @@ TENANT RULE: every row carries a NOT NULL organization_id and every query in
 app/services/roofing filters on it first. New tables only - created by
 Base.metadata.create_all, so no auto_migrate entry is needed.
 """
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.sql import func
 
 from app.models.models import Base, gen_uuid
@@ -92,3 +92,73 @@ class RoofingStageEvent(Base):
     actor_user_id = Column(String, nullable=True)       # NULL = derived from activity
     reason = Column(String(300), nullable=True)
     at = Column(DateTime, nullable=False, server_default=func.now())
+
+
+
+class RoofingInspection(Base):
+    """ONE documented field inspection: the findings a salesperson records at
+    the property, the photos, the recommendation and what happened next.
+
+    A booked appointment (BookingLink) says WHEN; this row says WHAT WAS FOUND.
+    A homeowner may have several (a re-inspection after a storm), each tied to
+    its own appointment. status: in_progress (started / saved as a draft) ->
+    completed (a final report, which is the only thing that moves the journey
+    to Inspected from here). Free-form lists are JSON text.
+    """
+    __tablename__ = "roofing_inspections"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = _org_col()
+    lead_id = Column(String, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False, index=True)
+    opportunity_id = Column(String, ForeignKey("roofing_opportunities.id", ondelete="SET NULL"), nullable=True)
+    booking_link_id = Column(String, ForeignKey("booking_links.id", ondelete="SET NULL"), nullable=True, index=True)
+    inspector_user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    scheduled_at = Column(DateTime, nullable=True)          # the appointment's local wall-clock time
+    inspection_type = Column(String, nullable=True)
+    status = Column(String(20), nullable=False, default="in_progress")
+    report_number = Column(String(20), nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    completed_by_id = Column(String, nullable=True)
+    roof_type = Column(String(40), nullable=True)
+    roof_age_years = Column(Integer, nullable=True)
+    stories = Column(Integer, nullable=True)
+    roof_condition = Column(String(20), nullable=True)
+    damage = Column(Text, nullable=True)                    # JSON list of checklist keys
+    severity = Column(String(20), nullable=True)
+    affected_areas = Column(Text, nullable=True)            # JSON list
+    notes = Column(Text, nullable=True)
+    recommendation = Column(String(20), nullable=True)
+    recommendation_notes = Column(Text, nullable=True)
+    insurance_claim = Column(String(20), nullable=True)
+    next_action = Column(String(40), nullable=True)
+    follow_up_at = Column(DateTime, nullable=True)
+    handoff = Column(Text, nullable=True)                   # JSON: last sales hand-off
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (Index("ix_rf_insp_org_status", "organization_id", "status"),)
+
+
+class RoofingInspectionPhoto(Base):
+    """A photo on an inspection. The bytes live wherever wholesale_files keeps
+    files (the database unless an object store is configured); the storage key
+    never leaves the server - every photo is served through an authenticated,
+    organization-checked route."""
+    __tablename__ = "roofing_inspection_photos"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = _org_col()
+    inspection_id = Column(String, ForeignKey("roofing_inspections.id", ondelete="CASCADE"),
+                           nullable=False, index=True)
+    lead_id = Column(String, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False, index=True)
+    label = Column(String(30), nullable=True)
+    caption = Column(String(300), nullable=True)
+    is_sample = Column(Boolean, nullable=False, default=False)
+    storage_backend = Column(String, nullable=False)
+    storage_key = Column(String, nullable=False)
+    content_type = Column(String, nullable=False)
+    byte_size = Column(Integer, nullable=False, default=0)
+    checksum = Column(String, nullable=True)
+    original_filename = Column(String, nullable=True)
+    position = Column(Integer, nullable=False, default=0)
+    created_by_id = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
