@@ -24,6 +24,7 @@ from app.models.models import Lead, Message, User
 from app.models.program_models import (LocationProfile, ProgramConversation, ProgramResponse,
                                        ProgramSourceRecord)
 from app.routers.program_router import _program, _require_manager
+from app.services import booking_time as _booking_time
 from app.services import test_records as _tr
 
 router = APIRouter(prefix="/program/command", tags=["sci-command"])
@@ -85,6 +86,17 @@ def _home_visit_requested(conv) -> bool:
     if hv.get("requested_at"):
         return not hv.get("done")
     return bool(conv.state == "human" and conv.handoff_reason == HOME_VISIT_REASON and not hv.get("done"))
+
+
+def _booked_text(db, booking) -> str:
+    """'Thursday, October 22 at 9 AM CT' - the stored local wall time in its own
+    zone, exactly as the family's confirmation said it (never converted)."""
+    from zoneinfo import ZoneInfo
+    from app.services import booking_time
+    from app.services.programs import appointments as _A
+    bt = booking.booked_time.replace(tzinfo=None)
+    zone = booking_time.zone_of_user(db, booking.user_id)
+    return "%s %s" % (_A.describe(bt), bt.replace(tzinfo=ZoneInfo(zone)).strftime("%Z"))
 
 
 def _home_visit_waiting(conv) -> bool:
@@ -575,7 +587,9 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
         "setter": {"state": conv.state, "offered": [A.describe(s) for s in A.offered(conv)],
                    "callback_window": conv.callback_window, "handoff_reason": conv.handoff_reason}
         if conv else None,
-        "booking": {"when": booking.booked_time.isoformat(), "label": booking.appt_label,
+        "booking": {"when": _booking_time.wire(db, booking), "label": booking.appt_label,
+                    # the appointment in its own time zone, as the family was told
+                    "when_text": _booked_text(db, booking),
                     "status": booking.status} if booking and booking.booked_time else None,
         "suggestion": _suggest(conv, latest, lead),
         "mail_task": _mail_task_of(conv),

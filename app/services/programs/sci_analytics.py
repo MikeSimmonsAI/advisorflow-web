@@ -111,6 +111,12 @@ def _in(at: Optional[datetime], w: Dict) -> bool:
     return at < w["end"]
 
 
+def _booked_wire(b) -> Optional[str]:
+    """A BookingLink's booked time for the browser, with its zone's offset."""
+    from app.services import booking_time
+    return booking_time.wire_obj(b)
+
+
 def _iso(at: Optional[datetime]) -> Optional[str]:
     return at.isoformat() + "Z" if at else None
 
@@ -366,7 +372,10 @@ class Ledger:
                 continue
             at = b.confirmed_at or b.created_at
             self.bookings.append({"kind": "appointment", "id": b.id, "lead_id": b.lead_id, "at": at,
-                                  "channel": None, "appt_at": b.booked_time,
+                                  "channel": None,
+                                  # booked_time is the advisor's LOCAL wall time (booking_time.py):
+                                  # sent with its real offset, never stamped as UTC
+                                  "appt_at": _booked_wire(b),
                                   "text": "%s · %s" % (b.appt_label or "Visit",
                                                        _booked_ct(b)
                                                        .strftime("%a %b %-d, %-I:%M %p CT")),
@@ -762,7 +771,7 @@ def present(L: Ledger, rows_: List[Dict], limit: int = 1000) -> Tuple[List[Dict]
                     "location": fam.get("location"), "phone": fam.get("phone"), "at": _iso(r.get("at")),
                     "touch": r.get("touch") or None, "channel": r.get("channel"), "result": r.get("result"),
                     "error": r.get("error"), "text": r.get("text"), "count": r.get("count"),
-                    "count_label": r.get("count_label"), "appt_at": _iso(r.get("appt_at")),
+                    "count_label": r.get("count_label"), "appt_at": r.get("appt_at"),
                     "next_touch_at": _iso(r.get("next_touch_at"))})
     return out, len(rows_) > limit
 
