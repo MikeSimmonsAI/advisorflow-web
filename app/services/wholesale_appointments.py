@@ -108,7 +108,9 @@ def may_book(db: Session, user: User) -> bool:
 
 def reps(db: Session, org_id: str, user: User) -> List[Dict[str, Any]]:
     """The people this person may give an appointment to."""
+    from app.models.models import Organization
     from app.services import product_access as PA
+    org = db.query(Organization).filter(Organization.id == org_id).first()
     visible = visible_user_ids(db, org_id, user)
     people = (db.query(User).filter(User.organization_id == org_id, User.is_active.is_(True))
               .order_by(User.full_name.asc()).all())
@@ -116,7 +118,7 @@ def reps(db: Session, org_id: str, user: User) -> List[Dict[str, Any]]:
     for u in people:
         if visible is not None and u.id not in visible:
             continue
-        if not PA.may_use(db, u, PA.WHOLESALE):
+        if not PA.may_use_in(db, u, org, PA.WHOLESALE):     # #272: a second tenant's admins too
             continue
         role = T.role_of(db, u)
         out.append({"user_id": u.id, "name": u.full_name or u.email,

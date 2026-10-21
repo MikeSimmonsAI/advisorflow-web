@@ -87,10 +87,18 @@ def t(db_session):
     _seat(db, both, bab, evo)
     probe = _user(db, crm, "probe-%d@example.com" % next(_SEQ))           # seat + non-host workspaces
     _seat(db, probe, crm, half, legacy)
-    bab_staff = _user(db, bab, "bab-staff-%d@example.com" % next(_SEQ))   # BookaBoost member, no seat
-    _m(db, bab_staff, "customer_org", bab.id)
+    bab_staff = _user(db, bab, "bab-staff-%d@example.com" % next(_SEQ), role="advisor")  # BookaBoost advisor, no seat
+    _m(db, bab_staff, "customer_org", bab.id, role="advisor")
+    bab_admin = _user(db, bab, "bab-admin-%d@example.com" % next(_SEQ))   # BookaBoost org admin, NO named seat
+    _m(db, bab_admin, "customer_org", bab.id, role="org_admin")
+    evo_admin = _user(db, evo, "evo-admin-%d@example.com" % next(_SEQ))   # EvoSys org admin, NO named seat
+    _m(db, evo_admin, "customer_org", evo.id, role="org_admin")
+    operator = _user(db, None, "evo-operator-%d@example.com" % next(_SEQ))  # EvoSys operator: admin in EvoSys only
+    _m(db, operator, "customer_org", evo.id, role="org_admin")
+    _m(db, operator, "product", "wholesale", "member")
     return dict(db=db, evo=evo, bab=bab, crm=crm, half=half, legacy=legacy,
-                evo_ws=evo_ws, bab_ws=bab_ws, both=both, probe=probe, bab_staff=bab_staff)
+                evo_ws=evo_ws, bab_ws=bab_ws, both=both, probe=probe, bab_staff=bab_staff,
+                bab_admin=bab_admin, evo_admin=evo_admin, operator=operator)
 
 
 def _contexts(client, db, u):
@@ -186,3 +194,52 @@ def test_bookaboost_login_cannot_name_the_evosys_workspace(client, t):
     r = client.get("/wholesale/settings", headers=h)
     if r.status_code == 200:
         assert r.json().get("organization_id") in (None, t["bab"].id)
+
+
+# ── Owner rule (Mike, 2026-10-21 00:54 CT): GOD + org admins and above; no EvoSys operators ──
+
+def test_bookaboost_org_admin_gets_wholesale_without_a_named_seat(client, t):
+    db, a, bab = t["db"], t["bab_admin"], t["bab"]
+    c = _contexts(client, db, a)
+    assert {x["organization_id"]: x["experience"] for x in c["workspace_contexts"]} == {bab.id: "wholesale"}
+    assert [p["organization_id"] for p in _tile(c)] == [bab.id]
+    h = _h(db, a, ws=bab.id)
+    assert client.get("/wholesale/settings", headers=h).status_code == 200
+    assert client.get("/wholesale/buyers", headers=h, params={"include_test": True}).status_code == 200
+    assert client.get("/leads/", headers=h).status_code == 403            # locked to Wholesale like a seat
+    b = client.get("/branding/org", headers=h).json()
+    assert (b.get("platform") or {}).get("offered", {}).get("wholesale") is not False
+
+
+def test_bookaboost_advisor_without_seat_stays_out(client, t):
+    db, s, bab = t["db"], t["bab_staff"], t["bab"]
+    c = _contexts(client, db, s)
+    assert c["workspace_contexts"][0]["experience"] == "platform" and _tile(c) == []
+    assert client.get("/wholesale/settings", headers=_h(db, s, ws=bab.id)).status_code == 403
+
+
+def test_evosys_rule_unchanged_admin_without_seat_stays_out(client, t):
+    db, a, evo = t["db"], t["evo_admin"], t["evo"]
+    c = _contexts(client, db, a)
+    assert c["workspace_contexts"][0]["experience"] == "platform" and _tile(c) == []
+    assert client.get("/wholesale/settings", headers=_h(db, a, ws=evo.id)).status_code == 403
+
+
+def test_evosys_operator_never_reaches_bookaboost(client, t):
+    db, op, bab = t["db"], t["operator"], t["bab"]
+    c = _contexts(client, db, op)
+    assert t["bab"].id not in {x["organization_id"] for x in c["workspace_contexts"]}
+    assert all(p["organization_id"] != bab.id for p in _tile(c))
+    h = _h(db, op, ws=bab.id)                                             # forged header
+    r = client.get("/wholesale/buyers", headers=h, params={"include_test": True})
+    if r.status_code == 200:                                              # header ignored -> their own EvoSys data, never BookaBoost's
+        assert all("BookaBoost" not in b["display_name"] for b in r.json()["buyers"])
+    else:
+        assert r.status_code in (400, 402, 403, 404)
+
+
+def test_god_sees_bookaboost_wholesale(client, t):
+    db = t["db"]
+    god = _user(db, None, "god-%d@example.com" % next(_SEQ), role="god_admin")
+    r = client.get("/wholesale/settings", headers={**_h(db, god), "X-Org-Override": t["bab"].id})
+    assert r.status_code == 200, r.text[:200]
