@@ -222,7 +222,21 @@ def evaluate(db: Session, *, employee: AIEmployee, lead: Lead, channel: str,
 
     # ── LAYER 1: THE PLATFORM'S OWN ANSWER. Authoritative. ──────────────────
     ctx = _build_context(db, lead, channel)
-    decision = qualification.qualify_one(lead, channel, ctx)
+    # A PRACTICE RECORD IN THE SIMULATION STAGE is judged as the prospect it
+    # pretends to be, so a customer's "Run test" exercises the real path
+    # instead of stopping at "internal record". Any stage that can reach a
+    # real person gets the ordinary answer. See workforce/practice.py.
+    from app.services.workforce import practice as wf_practice
+    if wf_practice.simulation_refuses_real_record(db, employee, lead):
+        return _deny("test_mode_practice_only",
+                     "Test mode works on practice records only; this is a "
+                     "real record in a real account.",
+                     channel=channel, decided_by="test_mode",
+                     lead_id=lead.id)
+    subject = (wf_practice.PracticeView(lead)
+               if wf_practice.simulation_practice_allowed(db, employee, lead)
+               else lead)
+    decision = qualification.qualify_one(subject, channel, ctx)
     bucket = decision.get("bucket")
     if bucket == qualification.EXCLUDED:
         return Eligibility(C.DENY, decision.get("reasons") or [],

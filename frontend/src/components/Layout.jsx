@@ -99,28 +99,16 @@ const NAV_GROUPS = [
     label: 'Engagement',
     items: [
       { to: '/ai-hub', label: 'AI Hub', icon: 'cpu' },
-      // NO featureKey and NO adminOnly, on purpose. /workforce/team is
-      // require_tenant_user and answers honestly for a customer who has hired
-      // nobody — an empty team is a real answer, and a hidden link would tell
-      // an advisor the product does not exist rather than that it is off.
-      // Whether an AI employee may actually act is decided at execution time
-      // by activation + entitlement on the server; this link decides nothing.
-      { to: '/ai-team', label: 'Your AI Team', icon: 'users' },
-      // ADMIN ONLY, and NO featureKey. Hiring, configuring and asking for an
-      // AI employee to be started are administrative acts, which is what the
-      // routes behind this enforce. No feature key, for the reason the line
-      // above gives: the workforce's own entitlement is answered per employee
-      // by the server, and a key this platform has never heard of would hide
-      // the screen for everyone.
-      { to: '/ai-workforce', label: 'My AI Workforce', icon: 'package', adminOnly: true },
-      // T9 — MANAGING the workforce rather than hiring it. NOT adminOnly and
-      // NO featureKey, for the reason the two lines above give twice over: an
-      // empty command centre is a real answer for a customer who has hired
-      // nobody, and the person who has to clear a handoff or decide a review
-      // is often not an org admin. Everything behind it is scoped to the
-      // caller's own workspace by the route signatures, and every write is
-      // additionally gated by require_not_observation on the server.
-      { to: '/ai-workforce-command', label: 'Workforce Command', icon: 'activity' },
+      // AI WORKFORCE — ONE ENTRY (Lane F, #5). It replaces "Your AI Team",
+      // "My AI Workforce" and "Workforce Command": a customer should not have
+      // to learn three products to use one. NO adminOnly: advisors watch the
+      // work and clear handoffs; the page shows management buttons only to
+      // people the server lets press them. NO featureKey: whether an AI
+      // worker may act is decided per worker on the server (offer, plan,
+      // test mode, activation), and an empty page is an honest answer for a
+      // workspace that has none - a hidden link would say the product does
+      // not exist.
+      { to: '/ai-workforce', label: 'AI Workforce', icon: 'users' },
       { to: '/email-queue', label: 'Email Queue', icon: 'mail', featureKey: 'email' },
       { to: '/campaigns', label: 'Campaigns', icon: 'target', adminOnly: true, featureKey: 'campaigns' },
       // NO featureKey. `proposals` is not a key in app/services/entitlements.py,

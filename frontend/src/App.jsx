@@ -346,6 +346,7 @@ import AIWorkforce from './pages/AIWorkforce'
 // back to the layer that owns it.
 import AIWorkforceCommand from './pages/AIWorkforceCommand'
 import AIWorkforceEmployee from './pages/AIWorkforceEmployee'
+import AIWorkforceHome from './pages/AIWorkforceHome'
 const GodAIWorkforceBuilder = lazyPage(() => import('./pages/god/GodAIWorkforceBuilder'))
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext, setBrandContext,
@@ -1568,29 +1569,25 @@ export default function App() {
         <Route path="/wholesale/evosense/strategies/:strategyId" element={<ProtectedRoute feature="wholesale_real_estate"><EvoStrategyBuilder /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/controls" element={<ProtectedRoute feature="wholesale_real_estate"><EvoControls /></ProtectedRoute>} />
         <Route path="/ai-hub" element={<ProtectedRoute><AIHub /></ProtectedRoute>} />
-        {/* YOUR AI TEAM. NOT requireAdmin, and no organization id in the path:
-            workforce_router.py resolves the workspace organization from the
-            caller's own context on every request, so a typed or bookmarked
-            URL cannot point at somebody else's team. The detail route is
-            registered after the list so the list is not read as an id. */}
-        <Route path="/ai-team" element={<ProtectedRoute><AITeam /></ProtectedRoute>} />
+        {/* AI WORKFORCE — ONE FRONT DOOR (Lane F, #5). Every customer reaches
+            the whole product from /ai-workforce: SET UP | WORKING | NEEDS YOU
+            | RESULTS. Not requireAdmin: advisors watch work and clear
+            handoffs too; every button that changes anything is admin-only on
+            the server (require_admin + require_not_observation) and the page
+            hides it from anyone the server would refuse. No organization id in
+            any path: the workspace comes from the caller's own context.
+
+            The older list pages redirect into the matching tab, so bookmarks
+            keep working. Their detailed screens stay reachable as advanced
+            views (no functionality removed), and every detail route is
+            registered after its list so a list is never read as an id. */}
+        <Route path="/ai-workforce" element={<ProtectedRoute><AIWorkforceHome /></ProtectedRoute>} />
+        <Route path="/ai-workforce/advanced" element={<ProtectedRoute requireAdmin><AIWorkforce /></ProtectedRoute>} />
+        <Route path="/ai-workforce/team" element={<ProtectedRoute><AITeam /></ProtectedRoute>} />
+        <Route path="/ai-workforce/command" element={<ProtectedRoute><AIWorkforceCommand /></ProtectedRoute>} />
+        <Route path="/ai-team" element={<Navigate to="/ai-workforce?tab=working" replace />} />
         <Route path="/ai-team/:employeeId" element={<ProtectedRoute><AIEmployeeDetail /></ProtectedRoute>} />
-        {/* MY AI WORKFORCE (T8). requireAdmin because every write behind it is
-            an administrative act — hiring, configuring, asking for an employee
-            to be switched on. No organization id in the path, for the same
-            reason as the team route above: ai_deployment_router.py resolves
-            the workspace from the caller's own context, so a bookmarked URL
-            cannot point at another customer's workforce. */}
-        <Route path="/ai-workforce" element={<ProtectedRoute requireAdmin><AIWorkforce /></ProtectedRoute>} />
-        {/* AI WORKFORCE COMMAND (T9) — the MANAGEMENT layer above T6/T7/T8.
-            Not requireAdmin: this is where a manager sees what needs a person
-            and clears it, and the read routes behind it are scoped to the
-            caller's own workspace by their signatures. The routes that change
-            anything carry require_not_observation on the server, so an
-            executive observing a customer read-only can look and cannot act.
-            The detail route is registered after the list route so the list is
-            not read as an employee id. */}
-        <Route path="/ai-workforce-command" element={<ProtectedRoute><AIWorkforceCommand /></ProtectedRoute>} />
+        <Route path="/ai-workforce-command" element={<Navigate to="/ai-workforce?tab=needs" replace />} />
         <Route path="/ai-workforce-command/:employeeId" element={<ProtectedRoute><AIWorkforceEmployee /></ProtectedRoute>} />
         {/* NOT requireAdmin. app/routers/availability_router.py scopes every
             endpoint to the calling advisor (_assert_can_read_advisor,

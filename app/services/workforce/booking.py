@@ -52,6 +52,10 @@ _log = logging.getLogger(__name__)
 DEFAULT_DAYS_AHEAD = 10
 MAX_DAYS_AHEAD = 21
 
+# The BookingLink status of an appointment made for a PRACTICE record in test
+# mode. Deliberately not "booked": see book_slot.
+PRACTICE_STATUS = "practice"
+
 
 def _org(db: Session, organization_id: str) -> Optional[Organization]:
     return (db.query(Organization)
@@ -210,9 +214,17 @@ def book_slot(db: Session, *, employee, lead: Lead, starts_at: str,
     # covers the different shape: two DIFFERENT runs, minutes apart, each
     # deciding to book. The record already has a live appointment, so the
     # answer is the existing one rather than a new row.
+    # PRACTICE BOOKINGS (test mode, workforce/practice.py) are stored with
+    # their own status so they never appear on a real agenda, never take a
+    # real slot, never trigger a reminder and never reach a calendar - every
+    # one of those readers selects "booked"/"confirmed" only.
+    from app.services.workforce import practice as wf_practice
+    practice = wf_practice.is_practice_record(lead)
+    live_statuses = (("booked", "confirmed", PRACTICE_STATUS) if practice
+                     else ("booked", "confirmed"))
     existing = (db.query(BookingLink)
                 .filter(BookingLink.lead_id == lead.id,
-                        BookingLink.status.in_(("booked", "confirmed")),
+                        BookingLink.status.in_(live_statuses),
                         BookingLink.booked_time.isnot(None))
                 .order_by(BookingLink.booked_time.asc()).first())
     if existing is not None:
@@ -236,7 +248,7 @@ def book_slot(db: Session, *, employee, lead: Lead, starts_at: str,
     booking = BookingLink(
         lead_id=lead.id,
         user_id=advisor.id,
-        status="booked",
+        status=PRACTICE_STATUS if practice else "booked",
         token=_encode_booking_token(lead, advisor),
         # NAIVE LOCAL WALL TIME, matching every existing tenant reader — see
         # the tenant_scheduling module docstring. Writing UTC here would put
@@ -249,6 +261,26 @@ def book_slot(db: Session, *, employee, lead: Lead, starts_at: str,
     db.add(booking)
     lead.status = "booked"
     db.flush()
+
+    if practice:
+        # A practice appointment for a pretend person: no calendar push and no
+        # case file. Nothing outside this row is touched.
+        return {
+            "booking_id": booking.id,
+            "already_booked": False,
+            "practice": True,
+            "advisor_id": advisor.id,
+            "advisor_name": advisor.full_name,
+            "appointment_type": label,
+            "duration_minutes": duration,
+            "starts_at": wanted.replace(microsecond=0).isoformat() + "Z",
+            "starts_at_local": start_local.replace(microsecond=0).isoformat(),
+            "timezone": work_tz,
+            "calendar_synced": False,
+            "confirmation_pending": False,
+            "message": "Practice appointment recorded. It is not on any "
+                       "real calendar.",
+        }
 
     # SIDE EFFECTS THAT CANNOT UN-BOOK THE MEETING. Each is best effort and
     # reported; none of them may raise out of here, because the appointment is
