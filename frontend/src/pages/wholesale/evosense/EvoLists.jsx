@@ -7,6 +7,11 @@ import { api } from '../../../api/client'
 import { errText } from '../wsShared'
 import { Alert, Panel } from '../ds/ds'
 
+// An address list to verify (an old mailing list, a purchased list): the
+// properties come in, the free county lookups fill the current owner, and
+// nothing is claimed about distress or foreclosure.
+const NO_CLAIM = '__addresses_only__'
+
 export default function EvoLists() {
   const [meta, setMeta] = useState(null)
   const [kind, setKind] = useState('')
@@ -23,7 +28,8 @@ export default function EvoLists() {
     setBusy(true); setErr(''); setOut(null)
     const fd = new FormData()
     fd.append('file', file)
-    fd.append('list_kind', kind)
+    // "Addresses only" sends no list kind: the rows assert NO distress signal.
+    if (kind !== NO_CLAIM) fd.append('list_kind', kind)
     if (source.trim()) fd.append('list_source', source.trim())
     try { setOut(await api.upload('/wholesale/evosense/import', fd)) }
     catch (e) { setErr(errText(e)) } finally { setBusy(false) }
@@ -37,11 +43,15 @@ export default function EvoLists() {
         <label>List kind
           <select className="filter-select" value={kind} onChange={e => setKind(e.target.value)}>
             <option value="">Choose…</option>
+            <option value={NO_CLAIM}>Addresses only — no distress claim (owner and status to be verified)</option>
             {(meta?.list_kinds || []).map(x => <option key={x.key} value={x.key}>{x.label}</option>)}
           </select>
         </label>
         {k ? <p className="evo-muted evo-small">Rows assert <b>{k.signal_label}</b> unless the row's own
           <code> signals</code> column says otherwise.</p> : null}
+        {kind === NO_CLAIM ? <p className="evo-muted evo-small">Rows assert <b>no signal</b>. Each property is
+          looked up in the free county records on the next hunt; one the county sources cannot answer stays
+          marked as needing verification.</p> : null}
         <label>Where the list came from
           <input className="settings-input" value={source} placeholder="e.g. Dallas County tax office, Sept 2026"
                  onChange={e => setSource(e.target.value)} />

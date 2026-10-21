@@ -30,3 +30,20 @@ Layout: 5 across ≥1360px when there are five; auto-fill (min 258px) below; 2 c
 - New `frontend/tests/programAccessRedesign.test.mjs` (10 tests): five identities/order, server-only cards, no hard-coded businesses or placeholder names, routing via `onChoose`, art + accent per variant, no external images, tokens scoped, toggle wired, AA contrast on buttons.
 - `npm run build` succeeds.
 - Headless Chromium against the built app with stubbed API: 47/47 checks — desktop 1600/1366, tablet 820, mobile 390; no overflow; art renders; no console errors; navigation parity; keyboard Tab reaches every card action and Enter opens; a two-business user sees only those two; a new kind of business shows as a full card and opens its own workspace.
+
+## Post-launch verification — 2026-10-21 10:30 CDT
+
+**Not a live signed-in check.** The browsers available to the assistant were signed in to an Executive-only login, and the assistant cannot type passwords. What was done instead is a **controlled reproduction of the exact permissions**:
+
+1. Read wholesale@'s and Michael Schlueter's real access rows from production (users, memberships, the 7 orgs they belong to, SCI program) — read-only.
+2. Loaded those rows into a scratch database and ran the server's own `authorized_contexts()` (the code behind `/auth/my-contexts`) from production `main` @ `91b5fe0`.
+3. Drove the production-built `/workspaces` page in Chromium with that exact answer, at desktop 1600, tablet 820 and mobile 390.
+
+| Login | Cards | Result |
+|---|---|---|
+| wholesale@ (today's data) | SCI · Atlantis · Roofing (EvoSys Pro Roofing) · Wholesale · **Restland (own purple Cemetery & Funeral card)** · Insurance (Max Life) · Back Office | 19/19: no duplicates, all art renders, no sideways scroll, no console errors, real name shown, every card opens its own workspace (SCI → /program/live, Roofing → /program/roofing, Wholesale → EVO ?product=wholesale, Back Office → /sales, others → /workspace/<their id>) |
+| Michael (today's data) | the same 7 + **WUPA** (Cemetery & Funeral, from his executive seat on that org) + Executive Suite | 20/20 |
+| wholesale@ with Restland's 00:40 settings (Roofing + Insurance on) | **two "Roofing" cards** — Restland's opens the Roofing app | reproduces the reported bug on production code |
+| same, with the identity fix (PR #290) | Restland back as its own card; one Roofing card | 19/19 |
+
+Screenshots: `screenshots/program-access/live-repro-2026-10-21/`. Still open: one look as wholesale@ in a real browser session.

@@ -96,3 +96,31 @@ def test_api_list_kinds_and_import_are_tenant_scoped(client, db_session, auth_he
     db_session.commit()
     assert (db_session.query(EvoSenseProperty)
             .filter(EvoSenseProperty.organization_id == other.id).count()) == 0
+
+
+ADDRESSES = ("street_address,city,state,zip_code,county,property_type,record_id\n"
+             "201 VERIFY LN,Dallas,TX,75215,Dallas,single_family,old-list:201\n"
+             "202 VERIFY LN,Fort Worth,TX,76105,Tarrant,single_family,old-list:202\n"
+             "203 VERIFY LN,Frisco,TX,75034,,single_family,old-list:203\n")
+
+
+def test_an_addresses_only_list_claims_nothing_and_waits_for_the_county_lookup(
+        client, db_session, auth_headers, sample_org):
+    """An old purchased list (e.g. 2010 mortgage data): the properties come in,
+    no distress or foreclosure is asserted, and a re-import creates nothing twice.
+    Dallas/Tarrant ones go to the free county lookup backlog; the rest stay
+    'owner not verified'."""
+    files = {"file": ("old.csv", ADDRESSES.encode(), "text/csv")}
+    r = client.post("/wholesale/evosense/import", headers=auth_headers, files=files)   # no list_kind
+    assert r.status_code == 200, r.text
+    assert r.json()["counts"]["created"] == 3 and r.json()["list_kind"] is None
+    props = db_session.query(EvoSenseProperty).filter_by(organization_id=sample_org.id).all()
+    assert len(props) == 3
+    assert db_session.query(EvoSenseSignal).filter(
+        EvoSenseSignal.property_id.in_([p.id for p in props]), EvoSenseSignal.active.is_(True),
+        EvoSenseSignal.source != "evosense_derived").count() == 0           # no claim of any kind
+    assert not db_session.query(EvoSenseSignal).filter_by(signal_type="PRE_FORECLOSURE").count()
+    backlog = {p.street_address for p in HU.lookup_backlog(db_session, sample_org.id)}
+    assert backlog == {"201 VERIFY LN", "202 VERIFY LN"}
+    again = client.post("/wholesale/evosense/import", headers=auth_headers, files=files)
+    assert again.json()["counts"]["created"] == 0 and again.json()["counts"]["seen"] == 3

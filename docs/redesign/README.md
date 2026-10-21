@@ -15,7 +15,8 @@ A permanent, protected workstream for redesigning EvoSys Pro screens **inside th
 
 | Screen | Branch | Issue | Status |
 |---|---|---|---|
-| Program Access (`/workspaces`) | `redesign/program-access-v1` | #275 | PR open — awaiting Mike's visual approval. Spec: [PROGRAM_ACCESS_SPEC.md](PROGRAM_ACCESS_SPEC.md) |
+| Program Access (`/workspaces`) | `redesign/program-access-v1` | #275 | Merged #277, live 2026-10-21 00:53 CDT. Spec: [PROGRAM_ACCESS_SPEC.md](PROGRAM_ACCESS_SPEC.md) |
+| Sales Workspace (My Day) | `redesign/sales-workspace-v1` | — | PR #287, draft, awaiting Mike's visual approval |
 
 Future examples (**not authorized until assigned**): `redesign/sci-dashboard`, `redesign/wholesale-dashboard`, `redesign/roofing-dashboard`, `redesign/atlantis-dashboard`, `redesign/insurance-dashboard`.
 
@@ -26,7 +27,8 @@ Future examples (**not authorized until assigned**): `redesign/sci-dashboard`, `
 3. Check open PRs for those files (Rule 6). Post concrete conflicts on the relay issue.
 4. Record the real start time (America/Chicago) and starting SHA on the issue.
 5. Build on the shared design system below; keep the screen's data and access logic untouched.
-6. Verify (tests, build, browser screenshots at desktop/tablet/mobile), open the PR, **do not merge until Mike approves the visuals**.
+6. Verify (tests, build, browser screenshots at desktop/tablet/mobile) and open the PR **as a draft** from the redesign template: `https://github.com/MikeSimmonsAI/advisorflow-web/compare/main...redesign/<screen>?template=redesign.md&labels=lane:ui-redesign`.
+7. **Do not add `owner-approved`, mark ready, or merge until Mike writes "APPROVE REDESIGN PR #NUMBER FOR MERGE"** (see [RULES.md → Owner approval](RULES.md#owner-approval-enforced-since-2026-10-21)). The required check *Redesign owner approval* enforces it.
 
 ## Shared design system (`frontend/src/design/`)
 
