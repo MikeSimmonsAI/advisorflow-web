@@ -1,422 +1,282 @@
 /**
- * My Day — the salesperson's home screen.
+ * My Day — the salesperson's home screen (Lane F redesign, #281).
  *
- * Every number and every row comes from /sales/my-day, computed from real
- * opportunity and appointment data.
+ * Layout follows Mike's approved "Simplified Sales Workflow – My Day" design:
+ * greeting, four workload cards, three big actions, today's priorities.
+ * Every number is real. Nothing is sample data.
  *
- * As of Checkpoint 2 the appointment panels are live. An empty "Today's
- * Schedule" now means the salesperson has nothing booked — which is a different
- * statement from the "not built yet" this screen used to make, and the empty
- * state says so.
+ * WHOSE NUMBERS. The cards are always the viewer's OWN work
+ * (/sales/my-day?scope=mine + their own deals). A manager additionally gets
+ * one clearly labelled "Your team" row from the unscoped /sales/my-day, so a
+ * personal number and a team number never share a card.
+ *
+ * What the old My Day showed that a rep still needs (meetings to confirm,
+ * proposals waiting on them) appears here only when there is something to do,
+ * so an empty day stays simple.
  */
-import { useEffect, useState, useCallback } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
-import SalesShell from './SalesShell'
-import NewProspect from './NewProspect'
-import {
-  Card, Chip, Metric, Empty, ErrorBar,
-  money, dateTime, dueLabel, wallTime,
-} from './parts'
-
-/** The team-timezone wall clock the server already resolved — see parts.jsx
- *  for why this must not go through `new Date(iso)`. */
-function apptTime(a) {
-  return wallTime(a.starts_at_local || a.starts_at)
-}
-
-const CONF_TONE = {
-  confirmed: 'green', declined: 'red', no_show: 'red',
-  cancelled: 'red', sent: 'amber', pending: 'amber',
-}
-
-export function ConfChip({ status }) {
-  if (!status) return null
-  return <Chip tone={CONF_TONE[status]}>{String(status).replace('_', ' ')}</Chip>
-}
-
-function ApptRow({ appt, onOpen, onConfirm }) {
-  return (
-    <div className="sw-row">
-      <button className="sw-rowlink"
-              onClick={() => appt.opportunity_id && onOpen(appt.opportunity_id)}>
-        <b>{apptTime(appt)} · {appt.prospect_company || appt.title}</b>
-        <p>
-          {appt.meeting_type || 'Meeting'}
-          {appt.participants?.length
-            ? ' · ' + appt.participants.map(p => p.full_name.split(' ')[0]).join(', ')
-            : ''}
-        </p>
-      </button>
-      <div className="sw-actions">
-        {/* The whole point of My Day: open EvoSys Pro, click Join, be in the
-            meeting. No hunting through Zoom for the link. */}
-        {appt.video?.join_url && (
-          <a className="sw-tiny sw-primary" href={appt.video.join_url}
-             target="_blank" rel="noopener noreferrer"
-             style={{ textDecoration: 'none' }}>Join meeting</a>
-        )}
-        <ConfChip status={appt.confirmation_status} />
-        {onConfirm && appt.confirmation_status !== 'confirmed' && (
-          <button className="sw-tiny sw-primary"
-                  onClick={() => onConfirm(appt.id)}>Confirm</button>
-        )}
-      </div>
-    </div>
-  )
-}
-
-/**
- * One proposal that needs something doing. Carries the REASON, because a list
- * of proposals with no explanation is a report — and My Day answers "what do I
- * do next", not "what exists".
- */
-function ProposalRow({ p, onOpen }) {
-  return (
-    <div className="sw-row">
-      <button className="sw-rowlink" onClick={() => onOpen(p.opportunity_id)}>
-        <b>{p.company || p.proposal_number}</b>
-        <p>
-          {p.proposal_number}{p.version > 1 ? ' v' + p.version : ''}
-          {p.amount != null ? ' · ' + money(p.amount) : ''}
-          {p.reason ? ' · ' + p.reason : ''}
-        </p>
-      </button>
-      <div className="sw-actions">
-        {p.urgency && <Chip tone={p.urgency}>{p.status_label}</Chip>}
-        <button className="sw-tiny sw-primary"
-                onClick={() => onOpen(p.opportunity_id)}>Open</button>
-      </div>
-    </div>
-  )
-}
-
-function OppRow({ opp, onOpen, note }) {
-  const due = dueLabel(opp.next_action_due_at)
-  return (
-    <div className="sw-row">
-      <button className="sw-rowlink" onClick={() => onOpen(opp.id)}>
-        <b>{opp.company_name}</b>
-        <p>
-          {opp.contact_name ? opp.contact_name + ' · ' : ''}
-          {note || opp.next_action || opp.stage_label}
-        </p>
-      </button>
-      <div className="sw-actions">
-        {opp.attention && <Chip tone="amber">{opp.attention}</Chip>}
-        {due.text && <Chip tone={due.tone}>{due.text}</Chip>}
-        <button className="sw-tiny sw-primary" onClick={() => onOpen(opp.id)}>Open</button>
-      </div>
-    </div>
-  )
-}
+import SalesShell, { useSales } from './SalesShell'
+import { wallTime } from './parts'
+import { followUpList, greeting, firstName, groupForSimpleBoard } from './simpleSales'
+import { Icon, ErrorLine, Skeleton } from './SimpleParts'
 
 export default function MyDay() {
+  return (
+    <SalesShell title="My Day" subtitle="Your simple plan for selling today.">
+      <MyDayBody />
+    </SalesShell>
+  )
+}
+
+function MyDayBody() {
   const nav = useNavigate()
-  const [data, setData] = useState(null)
+  const ctx = useSales()
+  const [day, setDay] = useState(null)
+  const [deals, setDeals] = useState(null)
+  const [team, setTeam] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [creating, setCreating] = useState(false)
-  const [wq, setWq] = useState(null)
-  // /workqueue/today caps each bucket at 100 rows; `totals` is the real size.
-  const wqCount = (key) => (typeof wq?.totals?.[key] === 'number' ? wq.totals[key] : (wq?.[key]?.length || 0))
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const [dayData, wqData] = await Promise.allSettled([
-        api.get('/sales/my-day'),
-        api.get('/workqueue/today'),
+      const [d, o] = await Promise.all([
+        api.get('/sales/my-day?scope=mine'),
+        api.get('/sales/opportunities').catch(() => null),
       ])
-      if (dayData.status === 'fulfilled') setData(dayData.value)
-      else throw new Error(dayData.reason?.message || 'Could not load My Day.')
-      if (wqData.status === 'fulfilled') setWq(wqData.value)
+      setDay(d); setDeals(o)
+      // Team figures only for a manager, and only in their own labelled row.
+      setTeam(d?.is_manager ? await api.get('/sales/my-day').catch(() => null) : null)
+    } catch (e) {
+      setError(e.message || 'Could not load your day.')
+    } finally {
+      setLoading(false)
     }
-    catch (e) { setError(e.message || 'Could not load My Day.') }
-    finally { setLoading(false) }
   }, [])
-
   useEffect(() => { load() }, [load])
 
-  const open = id => nav('/sales/opportunities/' + id)
-  const m = data?.metrics || {}
-  // Proposal queues. Defaulted so the first render before data arrives does not
-  // have to guard every list separately.
-  const P = data?.proposals || {}
+  // A manager's /sales/opportunities is the whole brand. My Day is "my" work,
+  // so narrow to the deals this person owns — the same rule My Pipeline uses.
+  const mine = useMemo(() => {
+    if (!deals) return []
+    const all = (deals.stages || []).flatMap(s => s.opportunities || [])
+    return deals.is_manager ? all.filter(c => c.owner_user_id === deals.viewer_user_id) : all
+  }, [deals])
+  const tz = ctx?.brand_sales_org?.timezone
+  const due = useMemo(() => followUpList(mine, 'today', '', new Date(), tz), [mine, tz])
+  const overdue = due.filter(c => c.due_bucket === 'overdue').length
+  const board = useMemo(() => groupForSimpleBoard({ stages: [{ opportunities: mine }] }), [mine])
 
-  /** Mark a meeting confirmed. Records the source as a staff action — that is
-   *  weaker evidence than a prospect clicking a link, and the API stores which. */
+  const m = day?.metrics || {}
+  const followCount = deals ? due.length : (m.follow_ups_due || 0)
+  const newLeads = deals ? board.new.length : (day?.stage_counts?.prospect || 0)
+  const meetingsToday = m.appointments_today || 0
+  const toConfirm = day?.needs_confirmation || []
+  const P = day?.proposals || {}
+  const proposals = [...(P.ready_to_send || []), ...(P.follow_up_required || [])]
+
   async function confirm(id) {
     try {
       await api.post('/sales/appointments/' + id + '/confirmation',
                      { confirmation_status: 'confirmed', source: 'staff_manual' })
       await load()
-    } catch (e) { setError(e.message || 'Could not confirm.') }
+    } catch (e) { setError(e.message || 'Could not confirm that meeting.') }
   }
 
-  const today = new Date().toLocaleDateString(undefined, {
-    weekday: 'long', month: 'long', day: 'numeric',
-  })
+  const name = firstName(ctx?.user?.full_name)
+  const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many)
+  const summary = loading && !day ? 'Loading your day…'
+    : 'You have ' + plural(followCount, 'follow up', 'follow ups') + ' and ' +
+      plural(meetingsToday, 'meeting', 'meetings') + ' on your plate today.'
 
   return (
-    <SalesShell
-      title="My Day"
-      subtitle={today + ' · your next actions and the deals that need you.'}
-      actions={
-        <>
-          <button className="sw-btn" onClick={load} disabled={loading}>Refresh</button>
-          <button className="sw-btn sw-primary" onClick={() => setCreating(true)}>+ New Prospect</button>
-        </>
-      }
-    >
-      <ErrorBar error={error} onRetry={load} />
+    <>
+      <ErrorLine error={error} onRetry={load} />
 
-      {creating && (
-        <NewProspect
-          onClose={() => setCreating(false)}
-          onCreated={opp => { setCreating(false); open(opp.id) }}
-        />
-      )}
-
-      {/* ── Advisor Work Queue ─────────────────────────────────────────────
-          Fetched in parallel with my-day. Only renders when at least one
-          bucket has items — an empty queue is not a card, it's silence.
-          Every chip navigates to /workqueue so the number leads to the work. */}
-      {wq && (wqCount('needs_text') + wqCount('needs_reply') +
-              wqCount('cadence_due') + wqCount('outcomes_needed')) > 0 && (
-        <div style={{
-          display: 'flex', gap: 12, flexWrap: 'wrap',
-          marginBottom: 18,
-          padding: '12px 16px',
-          borderRadius: 8,
-          background: 'var(--sw-surface2, #f3f6fa)',
-          border: '1px solid var(--sw-line, #dde3ea)',
-          alignItems: 'center',
-        }}>
-          <button onClick={() => nav('/workqueue')} style={{
-            background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-            fontSize: 11, fontWeight: 700, letterSpacing: '0.07em',
-            color: 'var(--sw-ink2, #6b7280)', marginRight: 4,
-          }}>TODAY'S WORK QUEUE →</button>
-          {wqCount('needs_text') > 0 && (
-            <button onClick={() => nav('/workqueue')} style={{
-              padding: '4px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
-              background: 'var(--sw-warn-bg, #fef3c7)',
-              color: 'var(--sw-warn-fg, #92400e)',
-              fontSize: 12, fontWeight: 600,
-            }}>{wqCount('needs_text')} need text</button>
-          )}
-          {wqCount('needs_reply') > 0 && (
-            <button onClick={() => nav('/workqueue')} style={{
-              padding: '4px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
-              background: 'var(--sw-ok-bg, #d1fae5)',
-              color: 'var(--sw-ok-fg, #065f46)',
-              fontSize: 12, fontWeight: 600,
-            }}>{wqCount('needs_reply')} to reply</button>
-          )}
-          {wqCount('cadence_due') > 0 && (
-            <button onClick={() => nav('/workqueue')} style={{
-              padding: '4px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
-              background: 'var(--sw-warn-bg, #fef3c7)',
-              color: 'var(--sw-warn-fg, #92400e)',
-              fontSize: 12, fontWeight: 600,
-            }}>{wqCount('cadence_due')} cadence due</button>
-          )}
-          {wqCount('outcomes_needed') > 0 && (
-            <button onClick={() => nav('/workqueue')} style={{
-              padding: '4px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
-              background: 'var(--sw-neu-bg, #e5e7eb)',
-              color: 'var(--sw-ink, #1f2937)',
-              fontSize: 12, fontWeight: 600,
-            }}>{wqCount('outcomes_needed')} outcome needed</button>
-          )}
+      <div className="ss-hero">
+        <div className="ss-sun" aria-hidden="true">☀️</div>
+        <div>
+          <h2>{greeting()}{name ? ', ' + name : ''}!</h2>
+          <p>{summary}</p>
         </div>
-      )}
-
-      <div className="sw-metrics">
-        <Metric label="ACTIVE OPPORTUNITIES" value={m.active_opportunities ?? '—'} />
-        <Metric label="FOLLOW-UPS DUE" value={m.follow_ups_due ?? '—'}
-                attn={!!m.follow_ups_due} sub="today or overdue" />
-        <Metric label="NEEDS ACTION" value={m.needs_action ?? '—'}
-                attn={!!m.needs_action} />
-        {/* Clickable: this number has a queue behind it now. */}
-        <Metric label="DEMOS TO BUILD" value={m.demos_to_build ?? '—'}
-                attn={!!m.demos_to_build} sub="open the queue"
-                onClick={() => nav('/sales/demos')} />
-        <Metric label="WON THIS MONTH" value={m.won_this_month ?? '—'}
-                sub={m.won_value_this_month ? money(m.won_value_this_month) + ' booked' : null} />
-        <Metric label="APPOINTMENTS TODAY" value={m.appointments_today ?? '—'}
-                sub={m.appointments_today
-                  ? (m.discoveries_today || 0) + ' discovery · ' + (m.demos_today || 0) + ' demo'
-                  : null} />
-        <Metric label="NEEDS CONFIRMATION" value={m.needs_confirmation ?? '—'}
-                attn={!!m.needs_confirmation} />
       </div>
 
-      <div className="sw-grid2">
-        <div>
-          <Card title="FOLLOW-UPS DUE" sub="Due today or already overdue" bodyless>
-            {loading && !data ? <div className="sw-card-b sw-subtle">Loading…</div>
-              : data?.follow_ups_due?.length
-                ? data.follow_ups_due.map(o => <OppRow key={o.id} opp={o} onOpen={open} />)
-                : <Empty title="Nothing due today">
-                    Follow-ups appear here when an opportunity has a next action dated
-                    today or earlier.
-                  </Empty>}
-          </Card>
-
-          <div className="sw-mt">
-            <Card title="DEALS NEEDING ACTION" sub="Derived from lifecycle state, not reminders" bodyless>
-              {data?.deals_needing_action?.length
-                ? data.deals_needing_action.map(o =>
-                    <OppRow key={o.id} opp={o} onOpen={open} note={o.attention} />)
-                : <Empty title="No deals flagged">
-                    A deal is flagged when its next action is overdue, a demo is past due,
-                    no next action is set, or it has stalled in one stage.
-                  </Empty>}
-            </Card>
-          </div>
-
-          <div className="sw-mt">
-            <Card title="DEMOS TO BUILD" sub="So you never have to ask whether yours is started" bodyless>
-              {data?.demos_to_build?.length
-                ? data.demos_to_build.map(o =>
-                    /* Straight into the build, not into the deal record. This
-                       card is about work to do, and the work has a workspace. */
-                    <OppRow key={o.id} opp={o}
-                            onOpen={id => nav('/sales/demo-build/' + id)}
-                            note={(o.demo_status || 'requested')
-                                  + (o.demo_due_at ? ' · due ' + dateTime(o.demo_due_at) : '')} />)
-                : <Empty title="No demos in the queue">
-                    A demo enters this queue when an opportunity moves to Demo Build.
-                  </Empty>}
-            </Card>
-          </div>
-
-          {/* ── Proposal work (Checkpoint 4) ──────────────────────────────
-              Each queue only renders when it has something in it. An empty
-              "Proposals expiring" card every single day trains a rep to stop
-              reading this column, which costs more than it gives. The one
-              exception is "to finish", where an empty state is genuinely
-              reassuring. */}
-          {P.ready_to_send?.length > 0 && (
-            <div className="sw-mt">
-              <Card title="READY TO SEND" sub="Finished, but the customer has not seen it" bodyless>
-                {P.ready_to_send.map(p => <ProposalRow key={p.proposal_id} p={p} onOpen={open} />)}
-              </Card>
-            </div>
-          )}
-
-          {P.follow_up_required?.length > 0 && (
-            <div className="sw-mt">
-              <Card title="FOLLOW-UP REQUIRED" sub="They went quiet, said no, or asked for a change" bodyless>
-                {P.follow_up_required.map(p => <ProposalRow key={p.proposal_id} p={p} onOpen={open} />)}
-              </Card>
-            </div>
-          )}
-
-          {P.recently_viewed?.length > 0 && (
-            <div className="sw-mt">
-              <Card title="RECENTLY VIEWED" sub="They are reading it right now — call while it's warm" bodyless>
-                {P.recently_viewed.map(p => <ProposalRow key={p.proposal_id} p={p} onOpen={open} />)}
-              </Card>
-            </div>
-          )}
-
-          {P.expiring?.length > 0 && (
-            <div className="sw-mt">
-              <Card title="PROPOSALS EXPIRING" sub="Within the next week" bodyless>
-                {P.expiring.map(p => <ProposalRow key={p.proposal_id} p={p} onOpen={open} />)}
-              </Card>
-            </div>
-          )}
-
-          <div className="sw-mt">
-            <Card title="PROPOSALS TO FINISH" sub="Started and not yet sent" bodyless>
-              {P.to_finish?.length
-                ? P.to_finish.map(p => <ProposalRow key={p.proposal_id} p={p} onOpen={open} />)
-                : <Empty title="Nothing half-written">
-                    Draft proposals appear here so one never sits forgotten.
-                  </Empty>}
-            </Card>
-          </div>
+      {day?.is_manager && (
+        <div className="ss-scopehead">
+          <h2>Your numbers</h2>
+          <span>Only deals and meetings that are yours. Your team's totals are further down.</span>
         </div>
+      )}
+      <div className="ss-stats">
+        <button type="button" className="ss-stat" onClick={() => nav('/sales/pipeline')}>
+          <div className="ss-num">{loading && !day ? '–' : newLeads}</div>
+          <div className="ss-name">New Leads</div>
+        </button>
+        <button type="button" className="ss-stat" onClick={() => nav('/sales/follow-ups')}>
+          <div className="ss-num">{loading && !day ? '–' : followCount}</div>
+          <div className="ss-name">Follow Ups</div>
+          <div className={'ss-detail' + (overdue ? '' : ' ss-calm')}>{overdue} overdue</div>
+        </button>
+        <button type="button" className="ss-stat" onClick={() => nav('/sales/demos')}>
+          <div className="ss-num">{loading && !day ? '–' : (m.demos_to_build || 0)}</div>
+          <div className="ss-name">Demos to Build</div>
+        </button>
+        <button type="button" className="ss-stat" onClick={() => nav('/sales/appointments')}>
+          <div className="ss-num">{loading && !day ? '–' : meetingsToday}</div>
+          <div className="ss-name">Appointments today</div>
+        </button>
+      </div>
 
-        <div>
-          {data?.next_appointment && (
-            <div style={{ marginBottom: 16 }}>
-              <Card title="UP NEXT" sub={data.next_appointment.meeting_type || 'Meeting'}>
-                <div style={{ fontSize: 22, fontWeight: 800 }}>
-                  {apptTime(data.next_appointment)}
-                </div>
-                <div style={{ fontSize: 13, fontWeight: 700, marginTop: 6 }}>
-                  {data.next_appointment.prospect_company || data.next_appointment.title}
-                </div>
-                <div className="sw-subtle" style={{ marginTop: 4 }}>
-                  {data.next_appointment.participants.map(p => p.full_name).join(' · ')}
-                </div>
-                <div className="sw-chips" style={{ marginTop: 10 }}>
-                  <ConfChip status={data.next_appointment.confirmation_status} />
-                  <Chip>{data.next_appointment.duration_minutes} min</Chip>
-                </div>
-                {data.next_appointment.opportunity_id && (
-                  <button className="sw-btn sw-mt" style={{ width: '100%' }}
-                          onClick={() => open(data.next_appointment.opportunity_id)}>
-                    Open the deal
-                  </button>
-                )}
-              </Card>
+      <div className="ss-quick">
+        <button type="button" className="ss-qgreen" onClick={() => nav('/sales/follow-ups')}>
+          <Icon name="phone" size={29} />
+          <span><strong>Start Follow Ups</strong><small>{plural(followCount, 'person', 'people')} to contact</small></span>
+        </button>
+        <button type="button" className="ss-qblue" onClick={() => nav('/sales/book')}>
+          <Icon name="calendar" size={29} />
+          <span><strong>Book a Demo</strong><small>Schedule a meeting</small></span>
+        </button>
+        <button type="button" className="ss-qgray" onClick={() => nav('/sales/pipeline')}>
+          <Icon name="users" size={29} />
+          <span><strong>View Pipeline</strong><small>See all deals</small></span>
+        </button>
+      </div>
+
+      {team && (
+        <section className="ss-teamrow" aria-labelledby="ss-team-h">
+          <div className="ss-teamrow-h">
+            <div>
+              <h2 id="ss-team-h">Your team</h2>
+              <span>Everyone you manage, including you</span>
             </div>
-          )}
-
-          <Card title="TODAY'S SCHEDULE"
-                sub={data ? (data.metrics.discoveries_today || 0) + ' discovery · '
-                            + (data.metrics.demos_today || 0) + ' demo' : 'Appointments'}
-                bodyless>
-            {loading && !data ? <div className="sw-card-b sw-subtle">Loading…</div>
-              : data?.todays_appointments?.length
-                ? data.todays_appointments.map(a => (
-                    <ApptRow key={a.id} appt={a} onOpen={open} />))
-                : <Empty title="Nothing booked today">
-                    Use <b>Find Team Time</b> on any opportunity to book a discovery
-                    or demo with everyone who needs to be there.
-                  </Empty>}
-          </Card>
-
-          <div className="sw-mt">
-            <Card title="NEEDS CONFIRMATION" sub="Booked but not yet confirmed" bodyless>
-              {data?.needs_confirmation?.length
-                ? data.needs_confirmation.map(a => (
-                    <ApptRow key={a.id} appt={a} onOpen={open} onConfirm={confirm} />))
-                : <Empty title="Everything upcoming is confirmed" />}
-            </Card>
+            <button type="button" className="ss-link" onClick={() => nav('/sales/manager')}>
+              Open Team Command <Icon name="arrow" size={14} />
+            </button>
           </div>
+          <div className="ss-teamstats">
+            <TeamStat n={team.metrics?.follow_ups_due} label="Follow ups due" />
+            <TeamStat n={team.metrics?.needs_action} label="Deals needing action" />
+            <TeamStat n={team.metrics?.demos_to_build} label="Demos to build" />
+            <TeamStat n={team.metrics?.appointments_today} label="Appointments today" />
+            <TeamStat n={team.metrics?.won_this_month} label="Won this month" />
+          </div>
+        </section>
+      )}
 
-          <div className="sw-mt">
-            <Card title="RECENT ACTIVITY" sub="Your pipeline's last movements" bodyless>
-              {data?.recent_activity?.length
-                ? <div className="sw-card-b">
-                    <div className="sw-timeline">
-                      {data.recent_activity.map(e => (
-                        <div className="sw-event" key={e.id}>
-                          <b>{e.summary}</b>
-                          <p>
-                            {dateTime(e.occurred_at)}
-                            {e.actor_name ? ' · ' + e.actor_name : ''}
-                            {e.detail ? ' · ' + e.detail : ''}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
+      <div className="ss-columns">
+        <div>
+          <section className="ss-panel" aria-labelledby="ss-prio">
+            <div className="ss-panelhd">
+              <div>
+                <h3 id="ss-prio">Today's Priorities</h3>
+                <p>A clear plan for your day</p>
+              </div>
+              <button type="button" className="ss-link"
+                      onClick={() => due[0] ? nav('/sales/leads/' + due[0].id) : nav('/sales/follow-ups')}>
+                Start working <Icon name="arrow" size={14} />
+              </button>
+            </div>
+            <div className="ss-panelbody">
+              {loading && !day ? <Skeleton rows={3} /> : (
+                <>
+                  <Priority n={1} tone="" done={!followCount} onClick={() => nav('/sales/follow-ups')}
+                    text={followCount
+                      ? 'Call or text ' + plural(followCount, 'follow up', 'follow ups') + (overdue ? ' — ' + overdue + ' overdue first' : '')
+                      : 'No follow ups due — nice work'} />
+                  <Priority n={2} tone="ss-blue-step" onClick={() => nav(meetingsToday ? '/sales/appointments' : '/sales/book')}
+                    text={meetingsToday
+                      ? 'Be ready for ' + plural(meetingsToday, 'meeting', 'meetings') + ' today'
+                      : 'Book 1–2 demos'} />
+                  <Priority n={3} tone="ss-green-step" onClick={() => nav('/sales/pipeline')}
+                    text={board.follow.length
+                      ? 'Move interested prospects to the next stage (' + board.follow.length + ' in Follow Up)'
+                      : 'Move interested prospects to the next stage'} />
+                </>
+              )}
+            </div>
+          </section>
+
+          {(day?.todays_appointments || []).length > 0 && (
+            <section className="ss-panel" aria-labelledby="ss-today">
+              <div className="ss-panelhd">
+                <div><h3 id="ss-today">Today's meetings</h3><p>In your team's time zone</p></div>
+                <button type="button" className="ss-link" onClick={() => nav('/sales/appointments')}>
+                  Open calendar <Icon name="arrow" size={14} />
+                </button>
+              </div>
+              <div className="ss-upnext">
+                {day.todays_appointments.map(a => (
+                  <div key={a.id} className="ss-compact">
+                    <strong>{wallTime(a.starts_at_local || a.starts_at)}</strong>
+                    <span className="ss-sp">{a.title || a.meeting_type}{a.prospect_company ? ' — ' + a.prospect_company : ''}</span>
+                    {a.video?.join_url && <a className="ss-btn ss-white ss-xs" href={a.video.join_url} target="_blank" rel="noreferrer">Join</a>}
+                    {a.opportunity_id && <button type="button" className="ss-btn ss-white ss-xs"
+                      onClick={() => nav('/sales/leads/' + a.opportunity_id)}>Open</button>}
                   </div>
-                : <Empty title="No activity yet">
-                    Every stage change, note, package selection and discovery
-                    completion lands here.
-                  </Empty>}
-            </Card>
-          </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {(toConfirm.length > 0 || proposals.length > 0) && (
+            <section className="ss-panel" aria-labelledby="ss-waiting">
+              <div className="ss-panelhd">
+                <div><h3 id="ss-waiting">Also waiting on you</h3><p>Only shown when there is something to do</p></div>
+              </div>
+              <div className="ss-upnext">
+                {toConfirm.map(a => (
+                  <div key={'c' + a.id} className="ss-compact">
+                    <span className="ss-status ss-amber">Confirm</span>
+                    <span className="ss-sp">{a.title || a.meeting_type} · {wallTime(a.starts_at_local || a.starts_at)}
+                      {a.prospect_company ? ' — ' + a.prospect_company : ''}</span>
+                    <button type="button" className="ss-btn ss-white ss-xs" onClick={() => confirm(a.id)}>Mark confirmed</button>
+                  </div>
+                ))}
+                {proposals.map(p => (
+                  <div key={'p' + p.proposal_id} className="ss-compact">
+                    <span className="ss-status ss-sblue">Proposal</span>
+                    <span className="ss-sp"><strong>{p.company || p.proposal_number}</strong>{p.reason ? ' — ' + p.reason : ''}</span>
+                    <button type="button" className="ss-btn ss-white ss-xs"
+                            onClick={() => nav('/sales/opportunities/' + p.opportunity_id)}>Open deal</button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+
+        <div className="ss-motivate">
+          <div className="ss-trophy" aria-hidden="true">🏆</div>
+          {m.won_this_month
+            ? <><h3>{plural(m.won_this_month, 'deal', 'deals')} won this month.</h3>
+                <p>Keep going — your next one is in today's list.</p></>
+            : <><h3>Small steps.<br />Big results.</h3>
+                <p>Your next deal is in today's list.</p></>}
         </div>
       </div>
-    </SalesShell>
+    </>
+  )
+}
+
+function TeamStat({ n, label }) {
+  return (
+    <div className="ss-teamstat">
+      <b>{n ?? '–'}</b>
+      <span>{label}</span>
+    </div>
+  )
+}
+
+function Priority({ n, tone, text, onClick, done }) {
+  return (
+    <div className="ss-prior">
+      <span className={'ss-step ' + (done ? 'ss-done' : tone)} aria-hidden="true">{done ? '✓' : n}</span>
+      <span className="ss-sp">{text}</span>
+      <button type="button" className="ss-link" onClick={onClick} aria-label={'Go: ' + text}>
+        <Icon name="chevright" size={16} />
+      </button>
+    </div>
   )
 }

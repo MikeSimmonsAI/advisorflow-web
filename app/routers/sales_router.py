@@ -54,6 +54,7 @@ from app.services import availability as _av
 from app.services import appointment_meetings as _apmeet
 from app.services import proposal_workqueue as _pwq
 from app.services import package_pricing as _pp
+from app.services import sales_suppression as _sdnc
 # The single answer to "may this person quote this price?", and the queue a
 # below-floor negotiation is routed into. Imported here rather than reimplemented
 # so the PATCH endpoint and the approval endpoint judge the same deal the same way.
@@ -307,7 +308,7 @@ def next_appt_map(db: Session, opps) -> dict:
 
 
 def _card(opp: Opportunity, db: Session, appts: Optional[dict] = None,
-          names: Optional[dict] = None) -> dict:
+          names: Optional[dict] = None, dnc: Optional[bool] = None) -> dict:
     """The shape both My Pipeline and My Day render. One serializer so a card
     can never mean two different things on two screens.
 
@@ -357,19 +358,25 @@ def _card(opp: Opportunity, db: Session, appts: Optional[dict] = None,
             "starts_at_local": _av.utc_to_local(nxt.starts_at, nxt.timezone),
         } if nxt else None,
         "confirmation_status": nxt.confirmation_status if nxt else None,
+        # Sales Do Not Contact (Lane F). `dnc` is precomputed for lists (one
+        # query for the whole board); a single card asks directly.
+        "do_not_contact": (bool(dnc) if dnc is not None
+                           else bool(_sdnc.for_opportunity(db, opp))),
     }
 
 
-def _visible_sales_appointments(db: Session, user: User, org):
+def _visible_sales_appointments(db: Session, user: User, org, personal: bool = False):
     """Appointment visibility, mirroring opportunity visibility exactly.
 
     A rep sees meetings they are ON, plus meetings attached to a deal they own
     (so an owner is never blind to a call a manager booked for their deal).
-    A manager sees the whole brand.
+    A manager sees the whole brand — unless `personal` asks for their own
+    meetings only, in which case the rep rule applies to them too. `personal`
+    can only ever NARROW what a caller sees.
     """
     q = db.query(SalesAppointment).filter(
         SalesAppointment.brand_sales_org_id == org.id)
-    if is_sales_manager(user, db, org.id):
+    if is_sales_manager(user, db, org.id) and not personal:
         return q
     own_appt_ids = [r[0] for r in db.query(AppointmentParticipant.appointment_id)
                     .filter(AppointmentParticipant.user_id == user.id).all()]
@@ -808,6 +815,7 @@ def sales_packages(brand_sales_org_id: Optional[str] = Query(None),
 
 @router.get("/my-day")
 def my_day(brand_sales_org_id: Optional[str] = Query(None),
+           scope: str = Query("auto", pattern="^(auto|mine)$"),
            user: User = Depends(require_sales_member),
            db: Session = Depends(get_db)):
     """The salesperson's operating brief.
@@ -819,13 +827,24 @@ def my_day(brand_sales_org_id: Optional[str] = Query(None),
     """
     org = _resolve_context(user, db, brand_sales_org_id)
     base = _scoped_opportunities(user, db, org)
+    # scope=mine (Lane F, #281): a manager's own book, so the redesigned My Day
+    # can show personal numbers and label the team's separately. It only ever
+    # narrows: a rep's visibility is already personal and is left exactly as
+    # it was (their own deals plus unowned ones).
+    manager = is_sales_manager(user, db, org.id)
+    personal = scope == "mine" and manager
+    if personal:
+        base = base.filter(Opportunity.owner_user_id == user.id)
     now = datetime.utcnow()
     # THE BRAND'S DAY, not UTC's: a rep in Chicago at 8pm is still on today.
     from app.services import workspace_time as wt
     tz = getattr(org, "timezone", None) or wt.default_timezone()
     open_opps = base.filter(Opportunity.status == "open").all()
+    # A suppressed prospect is never "due": their request outranks any date.
+    dnc_idx = _sdnc.index(db, [org.id])
 
-    follow_ups = [o for o in open_opps if wt.is_due_by_today(o.next_action_due_at, now, tz)]
+    follow_ups = [o for o in open_opps if wt.is_due_by_today(o.next_action_due_at, now, tz)
+                  and not _sdnc.in_index(dnc_idx, o)]
     follow_ups.sort(key=lambda o: o.next_action_due_at)
 
     needs_action = [o for o in open_opps if _attention(o)]
@@ -864,8 +883,19 @@ def my_day(brand_sales_org_id: Optional[str] = Query(None),
     day_start = _av.local_to_utc(today_local, 0, tz)
     day_end = _av.local_to_utc(today_local + timedelta(days=1), 0, tz)
 
-    appt_q = _visible_sales_appointments(db, user, org).filter(
+    appt_q = _visible_sales_appointments(db, user, org, personal=personal).filter(
         SalesAppointment.status != APPT_CANCELLED)
+
+    # WORKED TODAY — every deal in this view the CALLER called or texted since
+    # the brand's midnight. Counted in SQL over the whole day, not read off the
+    # 15-row recent-activity feed, so a busy day is never undercounted.
+    worked_ids = sorted({r[0] for r in (
+        db.query(OpportunityEvent.opportunity_id)
+        .filter(OpportunityEvent.opportunity_id.in_(scoped_ids or [""]),
+                OpportunityEvent.actor_user_id == user.id,
+                OpportunityEvent.event_type.in_(("call_outcome", "text_logged")),
+                OpportunityEvent.occurred_at >= day_start)
+        .distinct().all())})
     todays = (appt_q.filter(SalesAppointment.starts_at >= day_start,
                             SalesAppointment.starts_at < day_end)
               .order_by(SalesAppointment.starts_at.asc()).all())
@@ -894,6 +924,11 @@ def my_day(brand_sales_org_id: Optional[str] = Query(None),
     return {
         "brand_sales_org": {"id": org.id, "name": org.name,
                             "timezone": org.timezone},
+        # What the numbers below cover: "mine" = the caller's own book,
+        # "team" = everything a manager can see. A rep is always "mine".
+        "scope": "team" if (manager and not personal) else "mine",
+        "is_manager": manager,
+        "worked_today": {"count": len(worked_ids), "opportunity_ids": worked_ids},
         "metrics": {
             "active_opportunities": len(open_opps),
             "follow_ups_due": len(follow_ups),
@@ -906,9 +941,9 @@ def my_day(brand_sales_org_id: Optional[str] = Query(None),
             "discoveries_today": len(discoveries_today),
             "demos_today": len(demos_today),
         },
-        "follow_ups_due": [_card(o, db, appt_map, names) for o in follow_ups[:12]],
-        "deals_needing_action": [_card(o, db, appt_map, names) for o in needs_action[:12]],
-        "demos_to_build": [_card(o, db, appt_map, names) for o in demos_to_build[:12]],
+        "follow_ups_due": [_card(o, db, appt_map, names, _sdnc.in_index(dnc_idx, o)) for o in follow_ups[:12]],
+        "deals_needing_action": [_card(o, db, appt_map, names, _sdnc.in_index(dnc_idx, o)) for o in needs_action[:12]],
+        "demos_to_build": [_card(o, db, appt_map, names, _sdnc.in_index(dnc_idx, o)) for o in demos_to_build[:12]],
         "stage_counts": stage_counts,
         "recent_activity": [{
             "id": e.id, "opportunity_id": e.opportunity_id,
@@ -987,7 +1022,8 @@ def list_opportunities(brand_sales_org_id: Optional[str] = Query(None),
     # The board resolved an owner name per tile. A manager's brand-wide board is
     # a hundred tiles, and `_card` already takes a names map for exactly this.
     card_names = _name_map(db, [o.owner_user_id for o in rows])
-    cards = [_card(o, db, appts, card_names) for o in rows]
+    dnc_idx = _sdnc.index(db, [org.id])
+    cards = [_card(o, db, appts, card_names, _sdnc.in_index(dnc_idx, o)) for o in rows]
 
     by_stage = {s: [] for s in OPPORTUNITY_STAGES}
     lost = []
@@ -1064,6 +1100,14 @@ def create_opportunity(body: OpportunityCreate,
     _event(db, opp, user, "created", "Prospect created",
            "%s%s" % (opp.company_name,
                      (" · " + opp.contact_name) if opp.contact_name else ""))
+    # A new record for someone who asked not to be contacted is covered at
+    # once (matching is by phone/email): it is created — the history must be
+    # kept somewhere — but with no follow-up scheduled.
+    if _sdnc.for_opportunity(db, opp):
+        opp.next_action = None
+        opp.next_action_due_at = None
+        _event(db, opp, user, "do_not_contact",
+               "Matches a Do Not Contact request — no follow-up scheduled")
     db.commit()
     db.refresh(opp)
     return _card(opp, db, {})
@@ -1208,6 +1252,7 @@ def get_opportunity(opp_id: str,
             "actor_name": _user_name(db, e.actor_user_id),
         } for e in events],
         "can_reassign": is_sales_manager(user, db, opp.brand_sales_org_id),
+        "do_not_contact_detail": _dnc_out(db, opp, user),
         "can_override_value": is_sales_manager(user, db, opp.brand_sales_org_id),
         # Real meetings on this deal. Empty means none booked.
         "appointments": [_appt_brief(db, a) for a in upcoming_appts],
@@ -1226,6 +1271,14 @@ def patch_opportunity(opp_id: str, body: OpportunityPatch,
         BrandSalesOrg.id == opp.brand_sales_org_id).first()
     now = datetime.utcnow()
     data = body.model_dump(exclude_unset=True)
+
+    # DO NOT CONTACT outranks a follow-up. Scheduling one (a next action or a
+    # due date) for a suppressed prospect is refused; CLEARING them is allowed,
+    # and nothing here can lift the request — only the manager endpoint can.
+    if (data.get("next_action") or data.get("next_action_due_at")) and _sdnc.for_opportunity(db, opp):
+        raise HTTPException(status_code=409, detail=_sdnc.REFUSAL)
+    # A phone/email edit that lands on a suppressed contact is fine to save;
+    # the record simply becomes covered (matching is by contact detail).
 
     # ── stage ───────────────────────────────────────────────────────────────
     if "stage" in data and data["stage"] and data["stage"] != opp.stage:
@@ -1617,6 +1670,10 @@ def add_note(opp_id: str, body: NoteCreate,
              db: Session = Depends(get_db)):
     opp = _load(opp_id, user, db)
     assert_can_edit_opportunity(user, opp, db)
+    # Outreach records (a call outcome, a sent text) are refused for a prospect
+    # who asked not to be contacted. Plain notes are still allowed.
+    if (body.event_type or "note") in ("call_outcome", "text_logged") and _sdnc.for_opportunity(db, opp):
+        raise HTTPException(status_code=409, detail=_sdnc.REFUSAL)
     ev = _event(db, opp, user, body.event_type or "note",
                 body.summary.strip(), (body.detail or "").strip() or None)
     db.commit()
@@ -1624,6 +1681,90 @@ def add_note(opp_id: str, body: NoteCreate,
     return {"id": ev.id, "event_type": ev.event_type, "summary": ev.summary,
             "detail": ev.detail, "occurred_at": ev.occurred_at,
             "actor_name": user.full_name}
+
+
+# ── Do Not Contact (Lane F, #281) ───────────────────────────────────────────
+
+class DoNotContactIn(BaseModel):
+    reason: Optional[str] = Field(None, max_length=1000)
+
+
+class DoNotContactLiftIn(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=1000)
+
+
+def _dnc_row(db: Session, r) -> dict:
+    return {
+        "id": r.id, "phone": r.phone, "email": r.email, "reason": r.reason,
+        "recorded_at": r.recorded_at, "recorded_by": _user_name(db, r.recorded_by_user_id),
+        "lifted_at": r.lifted_at, "lifted_by": _user_name(db, r.lifted_by_user_id) if r.lifted_by_user_id else None,
+        "lift_reason": r.lift_reason, "source_opportunity_id": r.source_opportunity_id,
+    }
+
+
+def _dnc_out(db: Session, opp: Opportunity, user: User) -> dict:
+    active = _sdnc.for_opportunity(db, opp)
+    return {
+        "active": _dnc_row(db, active) if active else None,
+        "history": [_dnc_row(db, r) for r in _sdnc.history(db, opp)],
+        "can_record": bool(_sdnc.norm_phone(opp.phone) or _sdnc.norm_email(opp.email)),
+        # Correction is a manager's job (God counts as one), never a rep's.
+        "can_lift": is_sales_manager(user, db, opp.brand_sales_org_id),
+    }
+
+
+@router.post("/opportunities/{opp_id}/do-not-contact", status_code=201)
+def record_do_not_contact(opp_id: str, body: DoNotContactIn,
+                          user: User = Depends(require_sales_member),
+                          db: Session = Depends(get_db)):
+    """The prospect asked for no further contact. Distinct from Not Interested:
+    this blocks follow-ups, outreach logging, booking and every prospect email
+    for this phone/email in this brand — including duplicate records."""
+    opp = _load(opp_id, user, db)
+    assert_can_edit_opportunity(user, opp, db)
+    try:
+        row = _sdnc.record(db, opp, user, body.reason or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    for o in _sdnc.matching_opportunities(db, row):
+        o.next_action = None
+        o.next_action_due_at = None
+        _event(db, o, user, "do_not_contact",
+               "Do Not Contact recorded", row.reason)
+    db.commit()
+    return _dnc_out(db, opp, user)
+
+
+@router.get("/opportunities/{opp_id}/do-not-contact")
+def do_not_contact_status(opp_id: str,
+                          user: User = Depends(require_sales_member),
+                          db: Session = Depends(get_db)):
+    opp = _load(opp_id, user, db)
+    return _dnc_out(db, opp, user)
+
+
+@router.post("/do-not-contact/{suppression_id}/lift")
+def lift_do_not_contact(suppression_id: str, body: DoNotContactLiftIn,
+                        user: User = Depends(require_sales_member),
+                        db: Session = Depends(get_db)):
+    """The audited correction. Sales manager of that brand (or God) only, with
+    a reason. The row is kept; nothing is deleted and nothing reschedules."""
+    from app.models.sales_suppression_models import SalesContactSuppression
+    row = db.query(SalesContactSuppression).filter(
+        SalesContactSuppression.id == suppression_id).first()
+    # Not-found for anyone outside the brand, so ids cannot be probed.
+    if row is None or row.brand_sales_org_id not in sales_org_ids(user, db) and not is_sales_manager(user, db, row.brand_sales_org_id):
+        raise HTTPException(status_code=404, detail="Not found")
+    if not is_sales_manager(user, db, row.brand_sales_org_id):
+        raise HTTPException(status_code=403, detail="Only a sales manager can lift a Do Not Contact request.")
+    try:
+        _sdnc.lift(db, row, user, body.reason)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    for o in _sdnc.matching_opportunities(db, row):
+        _event(db, o, user, "do_not_contact_lifted", "Do Not Contact lifted", row.lift_reason)
+    db.commit()
+    return _dnc_row(db, row)
 
 
 @router.post("/opportunities/{opp_id}/reassign")

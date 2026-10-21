@@ -922,6 +922,15 @@ def send_proposal(db: Session, prop: Proposal, user, recipient_email=None,
     if not to_email:
         return {"ok": False, "sent": False,
                 "error": "No customer email address on this proposal."}
+    # SALES DO NOT CONTACT — a sales proposal is never emailed to a prospect
+    # who asked for no contact, whether matched by this address or by the deal.
+    if getattr(prop, "brand_sales_org_id", None):
+        from app.services import sales_suppression as _sdnc
+        from app.models.sales_models import Opportunity as _Opp
+        _deal = (db.query(_Opp).filter(_Opp.id == prop.opportunity_id).first()
+                 if getattr(prop, "opportunity_id", None) else None)
+        if _sdnc.find(db, prop.brand_sales_org_id, None, to_email) or _sdnc.for_opportunity(db, _deal):
+            return {"ok": False, "sent": False, "error": _sdnc.REFUSAL}
 
     pub = publish_proposal(db, prop, user, now=now)
     if not pub["ok"]:

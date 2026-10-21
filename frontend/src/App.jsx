@@ -250,6 +250,13 @@ const DemoQueue = lazyPage(() => import('./pages/sales/DemoQueue'))
 const DemoBuild = lazyPage(() => import('./pages/sales/DemoBuild'))
 const Salespeople = lazyPage(() => import('./pages/sales/Salespeople'))
 const Prospects = lazyPage(() => import('./pages/sales/Prospects'))
+// Simplified Sales Workspace screens (Lane F, #281).
+const FollowUps = lazyPage(() => import('./pages/sales/FollowUps'))
+const LeadDetails = lazyPage(() => import('./pages/sales/LeadDetails'))
+const BookDemo = lazyPage(() => import('./pages/sales/BookDemo'))
+const SimplePipeline = lazyPage(() => import('./pages/sales/SimplePipeline'))
+const SalesAppointments = lazyPage(() => import('./pages/sales/SalesAppointments'))
+const MyResults = lazyPage(() => import('./pages/sales/MyResults'))
 const GodUsers = lazyPage(() => import('./pages/god/GodUsers'))
 const Workspaces = lazyPage(() => import('./pages/god/Workspaces'))
 const UserAccessDiagnostic = lazyPage(() => import('./pages/god/UserAccessDiagnostic'))
@@ -1379,7 +1386,15 @@ export default function App() {
         {/* One component, two scopes. See the header of MyPipeline.jsx: the
             team board is not a second page, it is this page without the
             personal narrowing. */}
-        <Route path="/sales/pipeline" element={<SalesRoute><MyPipeline scope="mine" /></SalesRoute>} />
+        {/* /sales/pipeline is the simple four-column board (Lane F, #281); the
+            original every-stage board is unchanged one level down. */}
+        <Route path="/sales/pipeline" element={<SalesRoute><SimplePipeline /></SalesRoute>} />
+        <Route path="/sales/pipeline/stages" element={<SalesRoute><MyPipeline scope="mine" /></SalesRoute>} />
+        <Route path="/sales/follow-ups" element={<SalesRoute><FollowUps /></SalesRoute>} />
+        <Route path="/sales/leads/:oppId" element={<SalesRoute><LeadDetails /></SalesRoute>} />
+        <Route path="/sales/book" element={<SalesRoute><BookDemo /></SalesRoute>} />
+        <Route path="/sales/appointments" element={<SalesRoute><SalesAppointments /></SalesRoute>} />
+        <Route path="/sales/my-results" element={<SalesRoute><MyResults /></SalesRoute>} />
         <Route path="/sales/prospects" element={<SalesRoute><Prospects /></SalesRoute>} />
         <Route path="/sales/availability" element={<SalesRoute><MyAvailability /></SalesRoute>} />
         <Route path="/sales/onboarding" element={<SalesRoute><SalesImplementations /></SalesRoute>} />
