@@ -56,6 +56,9 @@ WHOLESALE_ALLOWED_PREFIXES = (
 )
 
 
+BACK_OFFICE_PREFIXES = ("/sales",)
+
+
 def _named_wholesale_seat(db: Session, user) -> bool:
     from app.models.sales_models import SCOPE_PRODUCT, Membership
     return db.query(Membership.id).filter(
@@ -121,6 +124,13 @@ def enforce(db: Session, user, request: Request) -> None:
     path = request.url.path or "/"
     if path.startswith(WHOLESALE_ALLOWED_PREFIXES):
         return
+    # The sales Back Office is its own destination on the launcher, not a
+    # general platform screen: a Wholesale-seat login that is also a member of
+    # the brand sales team works it (wholesale@, owner decision 2026-10-21).
+    if path.startswith(BACK_OFFICE_PREFIXES):
+        from app.services import workspace_access
+        if workspace_access.has_back_office(user, db):
+            return
     if locked_experience(db, user, request) == WHOLESALE:
         raise HTTPException(
             status_code=403,
