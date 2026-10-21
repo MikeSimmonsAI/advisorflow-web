@@ -666,3 +666,25 @@ def test_any_row_can_be_skipped_before_staging(client, sci):
     assert r.status_code == 200 and r.json()["intake_status"] == "skipped"
     p = client.get("/program/leads/import/batches/%s/sci-preview" % bid, headers=h).json()
     assert p["rows_to_sci"] == 1 and p["excluded"]["total"] == 1
+
+
+def test_a_decided_exact_in_file_duplicate_is_settled(client, sci):
+    """N009 is Dana Newfam again (same email) under a second Lead ID: an exact in-file duplicate. Once a
+    person decides (keep separate), it leaves the Duplicates count; "decide
+    later" puts it back."""
+    db, org, h = sci["db"], sci["org"], sci["mh"]
+    dup = _row("N009", "Dana", "Newfam", "dana.n@example.com", "2145550409", EG)
+    bid, _pv, rows = _through_review(client, h, _csv([NEW[0], dup]), skip=())
+    n9 = next(r for r in rows if r["source_record_id"] == "N009")
+    assert n9["intake_status"] == "duplicate"
+    assert client.get("/program/intake/batches/%s" % bid, headers=h).json()["analysis"]["status"]["duplicate"] == 1
+    r = client.patch("/program/intake/batches/%s/rows/%s" % (bid, n9["id"]), headers=h,
+                     json={"duplicate_resolution": "keep_separate"})
+    assert r.status_code == 200 and r.json()["intake_status"] == "approved", r.text
+    st = client.get("/program/intake/batches/%s" % bid, headers=h).json()["analysis"]["status"]
+    assert st.get("duplicate", 0) == 0
+    p = client.get("/program/leads/import/batches/%s/sci-preview" % bid, headers=h).json()
+    assert p["can_load"] is True and p["rows_to_sci"] == 2
+    r = client.patch("/program/intake/batches/%s/rows/%s" % (bid, n9["id"]), headers=h,
+                     json={"duplicate_resolution": "review"})
+    assert r.json()["intake_status"] == "duplicate", r.json()

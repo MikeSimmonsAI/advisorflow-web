@@ -465,9 +465,8 @@ function MapStep({ batch, meta, reload, onAnalyzed, sci = false, apiBase = '/int
       {sci && (
         <div className="ic-note" data-testid="sci-map-note">
           SCI needs <b>Lead ID</b> (Platform field “Source record ID”) and the location
-          (keep as source data named <span className="mono">location_friendly_name</span>). Primary Campaign
-          (<span className="mono">primary_campaign</span>) and Lead Status (<span className="mono">lead_status</span>) are
-          kept as source data. Every original value is kept exactly as it is in the file.
+          (Location Friendly Name, kept as SCI data). Primary Campaign and Lead Status are kept as SCI data too.
+          Every original value is kept exactly as it is in the file.
         </div>
       )}
       <div className="ic-subpanel">
@@ -555,14 +554,14 @@ function AnalyzeStep({ batch, reload, catalog, onNext, onRemap, apiBase = '/inta
         <h2 className="panel-title">Step 3 — Analyze & Clean</h2>
         <span className="panel-count">{a.timing_seconds ? `${a.timing_seconds}s` : ''}</span>
       </div>
-      <p className="ic-muted">Every number is counted from the staged rows. Click any number to see the rows behind it.
+      <p className="ic-muted">Every number is counted from the staged rows. Click any number to see the rows behind it.{' '}
         {sci ? 'Nothing has been loaded into SCI yet.' : 'Nothing has been written to the CRM.'}</p>
 
       <h3 className="ic-group">The file</h3>
       <div className="ic-tiles">
         {T('Total rows', a.total_rows, 'all', 'blue')}
         {T('Unique records', a.unique_records, null, 'blue')}
-        {T('Duplicates in file', m.duplicates_in_file, 'match:duplicates_in_file', 'purple', 'merged into the first occurrence')}
+        {T('Duplicates in file', m.duplicates_in_file, 'match:duplicates_in_file', 'purple', sci ? 'linked to the same person' : 'merged into the first occurrence')}
         {T('Possible duplicates', m.possible_duplicates_in_file, 'match:possible_duplicates_in_file', 'amber', 'need a decision')}
         {T(sci ? 'Already in SCI' : 'Existing CRM matches', m.existing_exact, 'match:existing_exact', 'blue', sci ? 'same Lead ID — updated, never duplicated' : 'will update, not duplicate')}
         {T(sci ? 'Possibly already in SCI' : 'Possible CRM matches', m.existing_possible, 'match:existing_possible', 'amber')}
@@ -794,7 +793,7 @@ function ReviewStep({ batch, reload, catalog, onNext, initialTab, apiBase = '/in
           <button className="btn btn--secondary btn--sm" onClick={() => bulk({ approve: true }, 'Approve')}>Approve all</button>
           <button className="btn btn--secondary btn--sm" onClick={() => bulk({ skip: true }, 'Skip')}>Skip all</button></>}
         {tab === 'status:duplicate' && <>
-          <button className="btn btn--secondary btn--sm" onClick={() => bulk({ duplicate_resolution: 'merge' }, 'Merge into the first occurrence')}>Merge all into first occurrence</button>
+          <button className="btn btn--secondary btn--sm" onClick={() => bulk({ duplicate_resolution: 'merge' }, sci ? 'Link to the same person' : 'Merge into the first occurrence')}>{sci ? 'Link all to the same person' : 'Merge all into first occurrence'}</button>
           <button className="btn btn--secondary btn--sm" onClick={() => bulk({ duplicate_resolution: 'skip_incoming' }, 'Skip duplicates entirely')}>Skip all</button></>}
         {tab === 'status:existing_match' && <>
           <button className="btn btn--secondary btn--sm" onClick={() => bulk({ duplicate_resolution: 'update_existing' }, 'Update existing records')}>Update all existing</button>

@@ -218,7 +218,7 @@ export function RowTable({ batchId, category, title, catalog = [], editable = fa
                           <select className="filter-select ic-select-sm" value={r.duplicate_resolution || 'review'}
                                   onChange={e => act(r, { duplicate_resolution: e.target.value })}>
                             {r.intake_status === 'duplicate'
-                              ? <option value="merge">Merge into earlier row</option>
+                              ? <option value="merge">{sci ? 'Same person as earlier row' : 'Merge into earlier row'}</option>
                               : <option value="update_existing">Update existing</option>}
                             <option value="keep_separate">Keep separate</option>
                             <option value="skip_incoming">Skip incoming</option>

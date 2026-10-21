@@ -195,6 +195,20 @@ def _settle_decided(db: Session, b: ImportBatch) -> int:
             continue
         r.intake_status = IntakeStatus.APPROVED
         n += 1
+    # An EXACT in-file duplicate (same phone/email as an earlier row) a person
+    # decided on (keep separate / merge into the earlier row) is decided too:
+    # SCI links the second Lead ID to the same person itself. Only rows a
+    # person touched (reviewed_at) - the importer's own default "merge" on a
+    # duplicate is not a decision.
+    for r in (db.query(ImportStagedRow)
+              .filter(ImportStagedRow.batch_id == b.id,
+                      ImportStagedRow.organization_id == b.organization_id,
+                      ImportStagedRow.intake_status == IntakeStatus.DUPLICATE,
+                      ImportStagedRow.reviewed_at.isnot(None),
+                      ImportStagedRow.duplicate_resolution.in_(
+                          (DuplicateResolution.KEEP_SEPARATE, DuplicateResolution.MERGE))).all()):
+        r.intake_status = IntakeStatus.APPROVED
+        n += 1
     # "Decide later" again: back to open review (the importer never approves a
     # possible duplicate nobody decided).
     for r in (db.query(ImportStagedRow)
@@ -202,7 +216,9 @@ def _settle_decided(db: Session, b: ImportBatch) -> int:
                       ImportStagedRow.organization_id == b.organization_id,
                       ImportStagedRow.intake_status == IntakeStatus.APPROVED,
                       ImportStagedRow.duplicate_resolution == DuplicateResolution.REVIEW).all()):
-        r.intake_status = IntakeStatus.NEEDS_REVIEW
+        # back to what the analysis said: an in-file duplicate, or open review
+        r.intake_status = (IntakeStatus.DUPLICATE if r.match_target_type == "staged_row"
+                           else IntakeStatus.NEEDS_REVIEW)
         n += 1
     if n:
         IR._refresh_analysis(db, b)
