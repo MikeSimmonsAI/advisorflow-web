@@ -367,3 +367,11 @@ def test_enrolled_is_refused_cleanly_when_the_customer_cannot_be_enrolled(client
     row = db.query(ProviderTransaction).get(tx["id"])
     assert row.resolved_at is None                                      # nothing was closed
     assert json.loads(db.query(Lead).get(lead.id).custom_fields)["supplier_handoffs"][0]["status"] == "referred"
+
+
+def test_a_wrongly_typed_identity_value_is_not_echoed(client, w, wire, monkeypatch):
+    monkeypatch.setenv(chariot.ENV_ALLOW_TRANSACTIONS, "false")
+    lead = _lead(client, w)
+    r = client.post("/energy-ops/leads/%s/chariot/enroll" % lead.id, headers=_h(w, w["adv"]),
+                    json=_form(ssn=666730809, dob=19901212))
+    assert r.status_code == 409 and "666730809" not in r.text and "19901212" not in r.text

@@ -1387,10 +1387,10 @@ class ChariotEnrollIn(BaseModel):
     phone: Optional[str] = Field(None, max_length=40)
     # NO length limits here: a pydantic 422 would echo the value back. Lengths
     # are checked in chariot_enrollment.build_fields, which names the field only.
-    dob: Optional[str] = None
-    ssn: Optional[str] = None
-    drivers_licence: Optional[str] = None
-    drivers_licence_state: Optional[str] = None
+    dob: Any = None                  # Any: even a wrong TYPE must not produce an echoing 422
+    ssn: Any = None
+    drivers_licence: Any = None
+    drivers_licence_state: Any = None
     customer_authorized: bool = False
 
 
@@ -1549,6 +1549,9 @@ def chariot_reconcile(tx_id: str, body: ChariotReconcileIn, request: Request, db
     if row is None or not row.lead_id:
         raise HTTPException(404, "Submission not found")
     lead = lead_scope.load_lead_in_scope(db, user, row.lead_id, request)
+    # two people confirming at once: the second waits, then sees it closed
+    row = (db.query(ProviderTransaction).filter(ProviderTransaction.id == row.id)
+           .with_for_update().populate_existing().first())
     if body.outcome not in ce.OUTCOMES:
         raise HTTPException(422, "Choose what happened: enrolled, not enrolled, or Chariot never received it.")
     if not body.note.strip():
@@ -1578,6 +1581,8 @@ def chariot_reconcile(tx_id: str, body: ChariotReconcileIn, request: Request, db
         ce.close_handoff(db, lead=lead, actor_user_id=user.id, outcome=body.outcome, note=body.note)
     except Exception:                    # noqa: BLE001 - the confirmation itself is saved
         db.rollback()
+        import logging
+        logging.getLogger(__name__).exception("chariot reconcile: hand-off %s not updated", row.id)
     out = ce.row_out(db.query(ProviderTransaction).get(row.id))
     out["enrolled"] = bool(enrolled and enrolled.get("enrolled"))
     return out
