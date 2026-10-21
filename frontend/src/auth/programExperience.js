@@ -13,6 +13,14 @@ export const PROGRAM_HOMES = {
   sci: '/program',
   roofing: '/program/roofing',
 }
+/** Where ENTERING a workspace opens, for dedicated programs that are not
+ * routed by program_route (SCI, Roofing) or the product hand-off (Wholesale).
+ * Insurance opens Max Life Command directly; nothing else is redirected. */
+export const PROGRAM_ENTRY = { insurance: '/agency' }
+export function programEntry(entry) {
+  return (entry && PROGRAM_ENTRY[entry.experience]) || null
+}
+
 const SHARED_OK = ['/change-password', '/login', '/logout', '/workspaces']
 
 export function activeWorkspaceEntry(ctx, selectedId, homeOrgId) {

@@ -1,26 +1,37 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { fetchMyContexts } from '../api/client'
+import { fetchMyContexts, getCurrentUser } from '../api/client'
+import './ProgramSwitchLink.css'
 
-/** Multi-program operator only. Nothing about the underlying platform is shown
- * in a customer's product navigation; this is solely a way to select a
- * different authorized program. */
-export default function ProgramSwitchLink({ className = '' }) {
+/**
+ * THE ONE "Switch program" BUTTON - top-right of every program's header
+ * (Wholesale, SCI, Atlantis, Roofing, Restland, Insurance). Same label, size
+ * and behaviour everywhere: it always goes to the program launcher
+ * (/workspaces), which sets the next workspace before that program loads.
+ *
+ * Drawn only for a person the SERVER lists with more than one program
+ * (/auth/my-contexts). It grants nothing; it is a way back to the launcher.
+ * God Mode has its own workspace controls and does not get it.
+ */
+export function hasSeveralPrograms(ctx) {
+  return ((ctx?.workspace_contexts?.length || 0) + (ctx?.product_contexts?.length || 0)) > 1
+}
+
+export default function ProgramSwitchLink({ className = '', tone = 'auto' }) {
   const [multi, setMulti] = useState(false)
+  const role = getCurrentUser()?.role
   useEffect(() => {
     let live = true
-    fetchMyContexts().then(c => {
-      if (live) setMulti((c?.workspace_contexts?.length || 0) + (c?.product_contexts?.length || 0) > 1)
-    }).catch(() => { if (live) setMulti(false) })
+    fetchMyContexts().then(c => { if (live) setMulti(hasSeveralPrograms(c)) })
+      .catch(() => { if (live) setMulti(false) })
     return () => { live = false }
   }, [])
-  if (!multi) return null
+  if (!multi || role === 'god_admin') return null
   return (
-    <Link to="/workspaces" className={className} style={{
-      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      gap: 6, fontSize: 12, fontWeight: 700, color: 'inherit',
-      border: '1px solid currentColor', opacity: .8, borderRadius: 9,
-      textDecoration: 'none', padding: '8px 10px', whiteSpace: 'nowrap',
-    }}>Switch program <span aria-hidden="true">↗</span></Link>
+    <Link to="/workspaces" className={`program-switch program-switch--${tone} ${className}`.trim()}
+          aria-label="Switch program">
+      <span className="program-switch__label">Switch program</span>
+      <span aria-hidden="true" className="program-switch__icon">↗</span>
+    </Link>
   )
 }

@@ -566,11 +566,22 @@ def god_setup(body: GodSetupIn, db: Session = Depends(get_db), god: User = Depen
     return S.setup(db, org, god.id, grant_features=True)
 
 
+class GodDemoIn(BaseModel):
+    organization_id: Optional[str] = None
+
+
 @god_router.post("/demo")
-def god_demo(db: Session = Depends(get_db), god: User = Depends(require_god)):
-    """Create or refresh the clearly labelled SAMPLE roofing workspace."""
+def god_demo(body: Optional[GodDemoIn] = None, db: Session = Depends(get_db), god: User = Depends(require_god)):
+    """Create or refresh the clearly labelled SAMPLE roofing story - in the
+    default "Summit Peak Roofing (SAMPLE)" workspace, or in one named roofing
+    workspace (its Roofing program must be on; it becomes a demo workspace, so
+    nothing in it can be sent). Idempotent. Sends nothing."""
     from app.services.roofing import demo_seed
-    return demo_seed.seed(db, by_user_id=god.id)
+    try:
+        return demo_seed.seed(db, by_user_id=god.id, organization_id=(body.organization_id if body else None))
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(409, str(e))
 
 
 # ── mission control (the front door) ───────────────────────────────────────

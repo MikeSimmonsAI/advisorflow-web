@@ -9,7 +9,7 @@ stopped the platform screens themselves. Hiding menu items is not isolation.
 This module is the single answer to "what experience is this workspace for
 this person", and the server enforces it:
 
-  experience_for(...)    'wholesale' | 'sci' | 'roofing' | 'energy' | 'platform'
+  experience_for(...)    'wholesale' | 'sci' | 'roofing' | 'insurance' | 'energy' | 'platform'
                          per workspace, published in /auth/my-contexts so the
                          app opens the right shell and never the platform one
                          for a program workspace;
@@ -64,10 +64,11 @@ def _named_wholesale_seat(db: Session, user) -> bool:
 
 
 def is_wholesale_host(org, user) -> bool:
-    """The org that hosts this person's named Wholesale seat: their own home
-    org, and only EvoSys's internal Wholesale org - never SCI or Roofing."""
+    """The org that hosts a named Wholesale seat: only EvoSys's internal
+    Wholesale org - never SCI, Roofing or any customer. The caller has already
+    established that this person holds an active membership there (home org
+    for wholesale@, an org_admin seat for an operator such as Michael)."""
     return bool(org is not None and user is not None
-                and org.id == getattr(user, "organization_id", None)
                 and (org.slug or "") == WHOLESALE_HOST_SLUG)
 
 
@@ -84,9 +85,21 @@ def experience_for(db: Session, user, org, is_program: bool, named_wholesale: Op
         named_wholesale = _named_wholesale_seat(db, user)
     if named_wholesale and is_wholesale_host(org, user):
         return "wholesale"
+    if _explicit(org, "insurance_agency"):
+        return "insurance"
     if (getattr(org, "industry", "") or "").strip().lower() == "energy":
         return "energy"
     return "platform"
+
+
+def _explicit(org, key: str) -> bool:
+    """The org's stored allow-list names `key` (a NULL legacy list does not count)."""
+    import json
+    try:
+        keys = json.loads(getattr(org, "enabled_features", None) or "null")
+    except (TypeError, ValueError):
+        return False
+    return isinstance(keys, list) and key in keys
 
 
 def locked_experience(db: Session, user, request: Optional[Request]) -> Optional[str]:
@@ -98,7 +111,7 @@ def locked_experience(db: Session, user, request: Optional[Request]) -> Optional
     from app.models.models import Organization
     from app.services import lead_scope
     org_id = lead_scope.active_workspace_org_id(user, db, request)
-    if not org_id or org_id != getattr(user, "organization_id", None):
+    if not org_id:
         return None
     org = db.query(Organization).filter(Organization.id == org_id).first()
     return WHOLESALE if is_wholesale_host(org, user) else None

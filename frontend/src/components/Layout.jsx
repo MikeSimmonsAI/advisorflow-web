@@ -1212,7 +1212,7 @@ export default function Layout({ children }) {
                 </select>
               </label>
             )}
-            {(vertical || inWholesale) && <ProgramSwitchLink />}
+            <ProgramSwitchLink />
             {vertical ? <WorkspaceAdminMenu /> : <ContextSwitcher current="workspace" />}
             <NotificationBell />
             {inWholesale && <WholesaleUser user={user} photo={profilePhoto} />}
