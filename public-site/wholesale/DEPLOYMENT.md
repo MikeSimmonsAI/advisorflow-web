@@ -22,6 +22,7 @@
 3. Configure TLS certificate for `wholesale.evosyspro.live` and force HTTPS.
 4. PHP 8+ is required for buyer registration. Ensure writable private storage **outside any publicly served document root**. Set server environment `WHOLESALE_INTAKE_DIR` to a private directory, e.g. `/home/ACCOUNT/wholesale-private/`. By default `intake.php` uses `dirname(__DIR__,2)/evosys-wholesale-private`. It rejects a path inside `DOCUMENT_ROOT`.
 5. **Connect investor registrations to EvoSys (recommended).** Set server environment `WHOLESALE_BUYER_INTAKE_URL` to `https://<platform API host>/site-intake/wholesale/<intake key>/buyer-inquiry`, using the SAME intake key the `/sell` page uses (Wholesale Settings → public intake key). Each registration then appears in EvoSys Wholesale → Buyers as a buyer with a buy box (source "website"), and the admins get an in-app notice. The private file is still written first and records whether the hand-off worked (`"evosys": {"sent": true}`), so nothing is lost if the platform is down. Nothing is texted or emailed to the investor.
+5b. **Retry missed hand-offs.** If the platform was unreachable when someone registered, the private file says `"sent": false`. On the host, `php resend.php` lists those registrations and `php resend.php --send` sends them, using the same environment variables. Schedule it hourly in cPanel → Cron Jobs (e.g. `0 * * * * cd /home/ACCOUNT/public_html/wholesale && php resend.php --send`). It re-uses each registration's reference, so nothing is created twice. `resend.php` and `bridge.php` answer 404 over the web.
 6. Optionally set `WHOLESALE_NOTIFY_EMAIL` to an existing mailbox. Only a reference number is emailed, not personal data.
 7. Create the mailbox or alias `wholesale@evosyspro.live` in the existing email provider and test inbound mail before advertising it as active.
 8. Test seller inquiry, buyer registration, careers, demo link, HTTPS, mobile navigation, and email alias. Check a test registration reached EvoSys Wholesale → Buyers, then mark it as a test or delete it there.
@@ -52,3 +53,5 @@ PHP preview: `WHOLESALE_INTAKE_DIR=/tmp/evosys-wholesale-private php -S localhos
 - [ ] `wholesale@evosyspro.live` alias created and tested
 - [ ] Production emails and applicant privacy checked
 - [ ] `WHOLESALE_BUYER_INTAKE_URL` set; a test registration shows up in EvoSys Wholesale → Buyers
+- [ ] Hourly `php resend.php --send` cron set
+- [ ] Form check run (tools/wholesale_site_check) on desktop + mobile

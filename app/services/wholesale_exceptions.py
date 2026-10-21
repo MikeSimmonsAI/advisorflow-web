@@ -248,6 +248,16 @@ def sweep(db: Session, org_id: str, user=None, *, include_test: bool = True,
              detail="Open for over %d hours. Why it stopped: %s.%s" % (
                  HANDOFF_STALE_HOURS, why, (" Suggested next step: %s." % h.next_action) if h.next_action else ""),
              priority=20, source="sweep:evosense_handoff_stale", is_test=bool(h.is_test))
+    # CONTACT INVESTIGATIONS: a property that passed its search's threshold and
+    # has no usable phone or email. Without this the property only sat in a
+    # status ("Look up the owner's contact") nobody owned. Highest score first;
+    # nothing is looked up or sent - a person finds the owner.
+    from app.services.evosense import readiness as RD
+    for ep, why in RD.contact_investigation_candidates(db, org_id, include_test=include_test):
+        fire("verify_contact", subject_type="evosense_property", subject_id=ep.id,
+             title="Find a way to reach the owner of %s" % (ep.street_address or "a property"),
+             detail=why, priority=RD.investigation_priority(ep.opportunity_score),
+             source="sweep:evosense_no_contact", is_test=bool(ep.is_test))
     # MISSING DISPOSITION DATA: a deal being sold on to a buyer that is missing
     # what a person has to supply. One item per deal listing everything missing.
     for d in (db.query(WholesaleDeal).filter(WholesaleDeal.organization_id == org_id,
@@ -281,6 +291,10 @@ def sweep(db: Session, org_id: str, user=None, *, include_test: bool = True,
             ep = db.query(EvoSenseProperty).filter(EvoSenseProperty.id == link.property_id,
                                                    EvoSenseProperty.organization_id == org_id).first()
             if ep is None or not want(ep.is_test):
+                continue
+            # Only properties worth working: a flag on a house that scored 20
+            # is noise in a person's queue (1,155 such items had piled up).
+            if not RD.worth_working(db, ep):
                 continue
             fire("title_ownership_anomaly", subject_type="evosense_property",
                  subject_id=ep.id, title="Check title / ownership: %s" % (ep.street_address or ""),
@@ -372,7 +386,8 @@ def _subject(db: Session, org_id: str, ex: WholesaleWorkException) -> Dict[str, 
         if p is not None:
             return {"type": "evosense_property", "label": ", ".join(
                 x for x in (p.street_address, p.city, p.state, p.zip_code) if x),
-                "county": p.county, "parcel_apn": p.parcel_apn}
+                "county": p.county, "parcel_apn": p.parcel_apn, "property_id": p.id,
+                "opportunity_score": p.opportunity_score, "status": p.status}
     if ex.subject_type == "lead":
         from app.models.models import Lead
         lead = db.query(Lead).filter(Lead.id == ex.subject_id, Lead.organization_id == org_id).first()
