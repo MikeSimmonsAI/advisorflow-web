@@ -714,3 +714,134 @@ def stop(db: Session, dep: AIEmployeeDeployment, *, actor: Optional[User],
                           actor_id=getattr(actor, "id", None))
     db.flush()
     return {"ok": True, "status": status(db, dep)}
+
+
+# ── WATCH IT WORK ────────────────────────────────────────────────────────────
+
+_BOARD_GROUPS = (
+    ("working_now", "Working now"),
+    ("waiting", "Waiting"),
+    ("needs_you", "Needs you"),
+    ("completed", "Completed"),
+    ("appointments", "Appointments"),
+    ("handoffs", "Passed to a person"),
+)
+
+
+def _board_group(state: str) -> str:
+    from app.services.workforce import constants as WC
+    if state in (WC.ASSIGNED, WC.ELIGIBILITY_PENDING, WC.ELIGIBLE, WC.WORKING):
+        return "working_now"
+    if state in (WC.WAITING_FOR_RESPONSE, WC.PAUSED):
+        return "waiting"
+    if state in (WC.NEEDS_REVIEW, WC.FAILED):
+        return "needs_you"
+    if state == WC.APPOINTMENT_BOOKED:
+        return "appointments"
+    if state in (WC.HUMAN_HANDOFF, WC.QUALIFIED):
+        return "handoffs"
+    return "completed"
+
+
+def work_board(db: Session, dep: AIEmployeeDeployment, *,
+               limit: int = 50) -> Dict[str, Any]:
+    """What this AI worker is doing, from its own work items. No estimates.
+
+    Every number is a count of rows; an empty group is shown as zero because
+    zero is what the rows say, and `has_any_work` lets the screen say "nothing
+    yet" instead of drawing a board of zeros as if it were activity.
+    """
+    from app.models.models import Lead
+    from app.models.workforce_models import (AIEmployeeRun, AIHandoff,
+                                             AIWorkItem)
+    emp = _employee(db, dep)
+    counts = {k: 0 for k, _ in _BOARD_GROUPS}
+    if emp is None:
+        return {"groups": [{"key": k, "label": l, "count": 0}
+                           for k, l in _BOARD_GROUPS],
+                "items": [], "has_any_work": False, "recent_runs": [],
+                "open_handoffs": 0}
+    items = (db.query(AIWorkItem)
+             .filter(AIWorkItem.employee_id == emp.id,
+                     AIWorkItem.organization_id == dep.organization_id)
+             .order_by(AIWorkItem.updated_at.desc())
+             .limit(500).all())
+    lead_ids = [i.subject_id for i in items if i.subject_type == "lead"]
+    leads = {}
+    if lead_ids:
+        for row in (db.query(Lead)
+                    .filter(Lead.organization_id == dep.organization_id,
+                            Lead.id.in_(lead_ids[:500])).all()):
+            leads[str(row.id)] = row
+    rows = []
+    for it in items:
+        group = _board_group(it.state)
+        counts[group] += 1
+        lead = leads.get(str(it.subject_id))
+        if len(rows) < limit:
+            rows.append({
+                "id": it.id,
+                "group": group,
+                "state": it.state,
+                "status": _STATE_WORDS.get(it.state, it.state),
+                "who": ("%s %s" % (lead.first_name or "", lead.last_name or "")
+                        ).strip() if lead else "A record",
+                "practice": bool(lead is not None and
+                                 getattr(lead, "is_test", False)),
+                "updated_at": (it.updated_at.isoformat() + "Z"
+                               if it.updated_at else None),
+            })
+    runs = (db.query(AIEmployeeRun)
+            .filter(AIEmployeeRun.employee_id == emp.id,
+                    AIEmployeeRun.organization_id == dep.organization_id)
+            .order_by(AIEmployeeRun.started_at.desc()).limit(10).all())
+    open_handoffs = (db.query(AIHandoff)
+                     .filter(AIHandoff.employee_id == emp.id,
+                             AIHandoff.organization_id == dep.organization_id,
+                             AIHandoff.status.in_(("open", "pending",
+                                                   "assigned")))
+                     .count())
+    return {
+        "groups": [{"key": k, "label": l, "count": counts[k]}
+                   for k, l in _BOARD_GROUPS],
+        "items": rows,
+        "has_any_work": bool(items),
+        "open_handoffs": open_handoffs,
+        "last_run_at": (runs[0].started_at.isoformat() + "Z"
+                        if runs and runs[0].started_at else None),
+        "recent_runs": [{"id": r.id, "status": r.status,
+                         "summary": r.summary, "work_item_id": r.work_item_id,
+                         "practice": r.mode == "simulation",
+                         "at": (r.started_at.isoformat() + "Z"
+                                if r.started_at else None)}
+                        for r in runs],
+    }
+
+
+def summary(db: Session, dep: AIEmployeeDeployment, *,
+            now: Optional[datetime] = None) -> Dict[str, Any]:
+    """Everything the customer's AI worker page needs, in one payload."""
+    test_diag = diagnose(db, dep, action="test", now=now)
+    start_diag = diagnose(db, dep, action="start", now=now)
+    st = status(db, dep)
+    health = worker_health(db, now=now)
+    return {
+        "deployment_id": dep.id,
+        "name": dep.display_name,
+        "job": dep.template_key,
+        "status": st,
+        "status_label": STATUS_WORDS.get(st, st),
+        "can_run_test": test_diag["ok"],
+        "can_start": start_diag["ok"] and st != S_TESTING,
+        "can_pause": st in (S_TESTING, S_LIVE),
+        "can_resume": st == S_PAUSED,
+        "can_stop": st in (S_TESTING, S_PAUSED, S_LIVE),
+        "test_blockers": test_diag["blockers"],
+        "start_blockers": start_diag["blockers"],
+        "needed_later_for_live": test_diag["needed_later_for_live"],
+        "last_test": _config_flag(dep, "last_test"),
+        "worker_running": health["running"],
+        "live_messages": False,
+        "live_messages_note": LIVE_OFF_NOTE,
+        "board": work_board(db, dep),
+    }
