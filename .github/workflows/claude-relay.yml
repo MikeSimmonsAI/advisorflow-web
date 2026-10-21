@@ -15,8 +15,25 @@ on:
 permissions: {}
 
 concurrency:
-  group: claude-relay-issue-${{ github.event.issue.number }}
-  cancel-in-progress: false   # serialize; never kill a run mid-flight
+  # Issue #1 is the relay mailbox, NOT a concurrency lane. Route by the
+  # directive's BRANCH line so SCI, Wholesale, Atlantis, Roofing, and Platform
+  # can run concurrently. Alias branches within a lane stay serialized.
+  # The guard still validates the exact branch before any checkout/push.
+  group: >-
+    claude-relay-${{
+      (contains(github.event.comment.body, 'BRANCH: sci-program') ||
+       contains(github.event.comment.body, 'BRANCH: feature/sci-appointment-recovery') ||
+       contains(github.event.comment.body, 'BRANCH: feature/sci-ops')) && 'sci' ||
+      (contains(github.event.comment.body, 'BRANCH: wholesale-nightly') ||
+       contains(github.event.comment.body, 'BRANCH: feature/wholesale-development')) && 'wholesale' ||
+      contains(github.event.comment.body, 'BRANCH: feature/atlantis-development') && 'atlantis' ||
+      contains(github.event.comment.body, 'BRANCH: feature/roofing-development') && 'roofing' ||
+      (contains(github.event.comment.body, 'BRANCH: platform-dev') ||
+       contains(github.event.comment.body, 'BRANCH: feature/platform-command-center')) && 'platform' ||
+      'unrecognized'
+    }}
+  cancel-in-progress: false   # never interrupt a lane's active worker
+  queue: max                  # preserve successive directives for that lane (up to GitHub's queue limit)
 
 jobs:
   relay:
@@ -37,7 +54,7 @@ jobs:
     env:
       RELAY_ISSUE: "1"
       RELAY_AUTHORIZED_ACTORS: MikeSimmonsAI
-      RELAY_ALLOWED_BRANCHES: 'sci-program,wholesale-nightly,platform-dev'
+      RELAY_ALLOWED_BRANCHES: 'sci-program,wholesale-nightly,platform-dev,feature/sci-appointment-recovery,feature/sci-ops,feature/wholesale-development,feature/atlantis-development,feature/roofing-development,feature/platform-command-center'
       RELAY_STATUS_ACTORS: ${{ vars.RELAY_STATUS_ACTORS || 'github-actions[bot],claude[bot]' }}
     steps:
       - name: Load the guard (from main)
