@@ -31,6 +31,7 @@ import {
 } from '../ds/ds'
 import '../ds/evo-pages.css'
 import EvoActions from './EvoActions'
+import { ReadinessPanel } from './Readiness'
 import EvoPermission from './EvoPermission'
 import EvoFollowUp from './EvoFollowUp'
 import PropertyPhoto from './PropertyPhoto'
@@ -427,8 +428,10 @@ export default function EvoProperty() {
       {/* NEXT ACTIONS — server-computed: what you can do, why not, what happens after */}
       <EvoActions d={d} propertyId={propertyId} busy={busy} act={act} onPromote={() => setPromoteOpen(true)} />
 
+      <ReadinessPanel propertyId={propertyId} refreshKey={JSON.stringify([p.status, p.contact_confidence, p.seller_intent])} />
+
       <nav className="evo-sec-nav" aria-label="Sections">
-        {[['record', 'Public record'], ['actions', 'What you can do'], ['intel', 'Intelligence'], ['conversation', 'Conversation'], ['facts', 'Seller facts'], ['deal', 'Deal intelligence'],
+        {[['readiness', 'Road to a deal'], ['record', 'Public record'], ['actions', 'What you can do'], ['intel', 'Intelligence'], ['conversation', 'Conversation'], ['facts', 'Seller facts'], ['deal', 'Deal intelligence'],
           ['signals', 'Why found'], ['owner', 'Owner & contact'], ['data', 'Data intelligence'], ['timeline', 'Timeline']]
           .map(([id, label]) => <a key={id} href={`#${id}`}>{label}</a>)}
       </nav>
