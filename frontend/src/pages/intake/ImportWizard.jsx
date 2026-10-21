@@ -14,7 +14,7 @@ import '../../styles/shared.css'
 import './intake.css'
 import { EMAIL_LABEL, OrgBanner, Pill, RowTable, SMS_LABEL, STATUS_LABEL, STATUS_TONE, Tile,
          errorText, fmt } from './intakeShared'
-import { approveEnabled, commitGate, isAnalyzed, reachableStep, resolveStep, stepAfterCommit, orgNameMatches, approveBlockedReason } from './importSteps'
+import { lineCheckText, approveEnabled, commitGate, isAnalyzed, reachableStep, resolveStep, stepAfterCommit, orgNameMatches, approveBlockedReason } from './importSteps'
 
 const STEPS = ['Upload', 'Map Fields', 'Analyze & Clean', 'Classify', 'Review Problems',
                'Approve Import', 'Import Results']
@@ -28,6 +28,8 @@ const PIPELINE = [['parsing', 'Parsing'], ['normalizing', 'Normalizing'],
                   ['classifying', 'Classifying'], ['analyzing', 'Analyzing'],
                   ['ready_for_review', 'Ready for Review']]
 const SCI_LEADS = '/program?tab=leads'
+// Staged or loaded into SCI: the rows can no longer change here (the server refuses too).
+const SCI_FROZEN = ['program_stage', 'program_load']
 // The server's answer when the CRM Import Center asks for an SCI batch.
 const SCI_REFUSAL = 'SCI files are loaded through SCI'
 
@@ -152,13 +154,13 @@ export default function ImportWizard({ target = 'crm', basePath = '/imports', on
                                        onAnalyzed={() => { load(); goStep(3) }} />}
       {working && <AnalyzeStep batch={batch} reload={load} catalog={fieldsMeta?.classifications || []} apiBase={apiBase}
                                onNext={() => {}} onRemap={() => goStep(2)} />}
-      {!working && step === 3 && batch && <AnalyzeStep batch={batch} reload={load} catalog={fieldsMeta?.classifications || []} apiBase={apiBase}
+      {!working && step === 3 && batch && <AnalyzeStep batch={batch} reload={load} catalog={fieldsMeta?.classifications || []} apiBase={apiBase} sci={sci}
                                            nextLabel={sci ? 'Review problems →' : undefined}
                                            onNext={() => goStep(sci ? 5 : 4)} onRemap={() => goStep(2)} />}
       {!sci && !working && step === 4 && batch && <ClassifyStep batch={batch} reload={load} apiBase={apiBase}
                                             onDone={() => { load(); goStep(5) }} onNext={() => goStep(5)} />}
       {!working && step === 5 && batch && <ReviewStep batch={batch} reload={load} catalog={fieldsMeta?.classifications || []}
-                                          initialTab={params.get('tab')} apiBase={apiBase} title={sci ? 'Step 4 — Review Problems' : undefined}
+                                          initialTab={params.get('tab')} apiBase={apiBase} sci={sci} title={sci ? 'Step 4 — Review Problems' : undefined}
                                           nextLabel={sci ? 'Check what SCI will do →' : undefined}
                                           onNext={() => goStep(6)} />}
       {!sci && step === 6 && batch && <ApproveStep batch={batch} ctx={ctx} reload={load} apiBase={apiBase}
@@ -334,6 +336,12 @@ function UploadStep({ ctx, onCreated, sci = false, apiBase = '/intake' }) {
 
 const KIND_LABEL = { standard: 'Platform field', custom: 'Custom field', vertical: 'Vertical field',
                      source: 'Keep as source data', ignore: 'Ignore' }
+const SCI_KIND_LABEL = { ...KIND_LABEL, source: 'Keep as SCI data' }
+// The SCI columns the importer keeps on purpose (see intake/fields.py
+// _SCI_HEADER_MAP and programs/intake_bridge.py): mapped, not "unmapped".
+const SCI_KEPT = { location_friendly_name: 'Location Friendly Name', primary_campaign: 'Primary Campaign',
+                   lead_status: 'Lead Status', last_activity: 'Last Activity',
+                   campaign_channel: 'Campaign Channel', lead_owner_manager: 'Lead Owner: Manager' }
 
 function MapStep({ batch, meta, reload, onAnalyzed, sci = false, apiBase = '/intake' }) {
   const [preview, setPreview] = useState(null)
@@ -364,7 +372,9 @@ function MapStep({ batch, meta, reload, onAnalyzed, sci = false, apiBase = '/int
     Object.entries(mapping).forEach(([h, m]) => { if (m.kind === 'standard' && m.target) (t[m.target] = t[m.target] || []).push(h) })
     return t
   }, [mapping])
-  const unmapped = Object.values(mapping).filter(m => m.kind === 'source').length
+  const sciKept = m => sci && ['source', 'custom', 'vertical'].includes(m?.kind) && SCI_KEPT[m?.target]
+  const unmapped = Object.values(mapping).filter(m => m.kind === 'source' && !sciKept(m)).length
+  const kindLabels = sci ? SCI_KIND_LABEL : KIND_LABEL
   const set = (h, patch) => setMapping(m => ({ ...m, [h]: { ...m[h], ...patch } }))
   const slug = h => h.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 60) || 'field'
 
@@ -380,14 +390,22 @@ function MapStep({ batch, meta, reload, onAnalyzed, sci = false, apiBase = '/int
   }
 
   if (!preview) return <section className="panel ic-panel"><div className="empty-state">{err || 'Reading columns…'}</div></section>
-  const cols = preview.columns.filter(c => !onlyUnmapped || mapping[c.header]?.kind === 'source')
+  const cols = preview.columns.filter(c => !onlyUnmapped || (mapping[c.header]?.kind === 'source' && !sciKept(mapping[c.header])))
   return (
     <section className="panel ic-panel">
       <div className="panel-header">
         <h2 className="panel-title">Step 2 — Map Fields</h2>
         <span className="panel-count">{preview.headers.length} columns · {fmt(preview.row_count)} rows</span>
       </div>
-      {unmapped > 0 && (
+      {sci && unmapped > 0 && (
+        <div className="ic-note">
+          <b>{unmapped} other column{unmapped === 1 ? '' : 's'}</b> will be kept with each family's SCI record exactly as in the file.
+          Map one only if it belongs in a field.
+          <label className="ic-inline"><input type="checkbox" checked={onlyUnmapped}
+                 onChange={e => setOnlyUnmapped(e.target.checked)} /> Show only these</label>
+        </div>
+      )}
+      {!sci && unmapped > 0 && (
         <div className="ic-warn">
           <b>{unmapped} unmapped column{unmapped === 1 ? '' : 's'}.</b> They are not lost — each is kept on the record as
           source data. Map, mark as a custom field, or ignore each one deliberately.
@@ -405,7 +423,7 @@ function MapStep({ batch, meta, reload, onAnalyzed, sci = false, apiBase = '/int
               return (
                 <tr key={c.header} className={dupe ? 'ic-row--warn' : ''}>
                   <td className="ic-strong">{c.header}
-                    {c.mapping.confidence === 'low' || c.mapping.confidence === 'none' ?
+                    {!sciKept(m) && (c.mapping.confidence === 'low' || c.mapping.confidence === 'none') ?
                       <div className="ic-muted ic-small">no confident match</div> : null}</td>
                   <td className="ic-small ic-samples">{c.samples.length ? c.samples.join(' · ') : <span className="ic-muted">empty</span>}</td>
                   <td className="mono ic-small">{Math.round(100 * c.filled / Math.max(preview.row_count, 1))}%</td>
@@ -413,7 +431,7 @@ function MapStep({ batch, meta, reload, onAnalyzed, sci = false, apiBase = '/int
                     <select className="filter-select ic-select-sm" value={m.kind}
                             onChange={e => set(c.header, { kind: e.target.value,
                               target: e.target.value === 'standard' ? '' : (e.target.value === 'ignore' ? null : slug(c.header)) })}>
-                      {Object.entries(KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                      {Object.entries(kindLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                     </select>
                   </td>
                   <td>
@@ -428,7 +446,10 @@ function MapStep({ batch, meta, reload, onAnalyzed, sci = false, apiBase = '/int
                         ))}
                       </select>
                     )}
-                    {['custom', 'vertical', 'source'].includes(m.kind) && (
+                    {sciKept(m) && (
+                      <div className="ic-sci-kept" title={m.target}>Kept as SCI data — {SCI_KEPT[m.target]}</div>
+                    )}
+                    {!sciKept(m) && ['custom', 'vertical', 'source'].includes(m.kind) && (
                       <input className="settings-input ic-input-sm mono" value={m.target || ''}
                              onChange={e => set(c.header, { target: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') })} />
                     )}
@@ -486,7 +507,7 @@ function MapStep({ batch, meta, reload, onAnalyzed, sci = false, apiBase = '/int
 
 // ── 3. Analyze ──────────────────────────────────────────────────────────────
 
-function AnalyzeStep({ batch, reload, catalog, onNext, onRemap, apiBase = '/intake', nextLabel }) {
+function AnalyzeStep({ batch, reload, catalog, onNext, onRemap, apiBase = '/intake', nextLabel, sci = false }) {
   const [cat, setCat] = useState(null)
   const a = batch.analysis || {}
   if (batch.status === 'processing' || batch.status === 'interrupted') {
@@ -535,7 +556,7 @@ function AnalyzeStep({ batch, reload, catalog, onNext, onRemap, apiBase = '/inta
         <span className="panel-count">{a.timing_seconds ? `${a.timing_seconds}s` : ''}</span>
       </div>
       <p className="ic-muted">Every number is counted from the staged rows. Click any number to see the rows behind it.
-        Nothing has been written to the CRM.</p>
+        {sci ? 'Nothing has been loaded into SCI yet.' : 'Nothing has been written to the CRM.'}</p>
 
       <h3 className="ic-group">The file</h3>
       <div className="ic-tiles">
@@ -543,8 +564,8 @@ function AnalyzeStep({ batch, reload, catalog, onNext, onRemap, apiBase = '/inta
         {T('Unique records', a.unique_records, null, 'blue')}
         {T('Duplicates in file', m.duplicates_in_file, 'match:duplicates_in_file', 'purple', 'merged into the first occurrence')}
         {T('Possible duplicates', m.possible_duplicates_in_file, 'match:possible_duplicates_in_file', 'amber', 'need a decision')}
-        {T('Existing CRM matches', m.existing_exact, 'match:existing_exact', 'blue', 'will update, not duplicate')}
-        {T('Possible CRM matches', m.existing_possible, 'match:existing_possible', 'amber')}
+        {T(sci ? 'Already in SCI' : 'Existing CRM matches', m.existing_exact, 'match:existing_exact', 'blue', sci ? 'same Lead ID — updated, never duplicated' : 'will update, not duplicate')}
+        {T(sci ? 'Possibly already in SCI' : 'Possible CRM matches', m.existing_possible, 'match:existing_possible', 'amber')}
         {T('New records', m.new_records, 'match:new', 'green')}
       </div>
 
@@ -586,7 +607,7 @@ function AnalyzeStep({ batch, reload, catalog, onNext, onRemap, apiBase = '/inta
         {T('Invalid', st.invalid, 'status:invalid', 'red')}
         {T('Historical customers', a.historical_customers, 'flag:historical_customer', 'purple')}
         {T('Exact customer matches', m.exact_customer_matches, 'match:customer_exact', 'purple')}
-        {T('Would become leads', a.would_activate_as_leads_if_ready_committed, 'flag:creates_lead', 'green', 'Ready rows classified as opportunities')}
+        {!sci && T('Would become leads', a.would_activate_as_leads_if_ready_committed, 'flag:creates_lead', 'green', 'Ready rows classified as opportunities')}
         {T('SMS ready', a.sms_ready, 'sms:ready', 'green', 'mobile + consent + clean')}
         {T('Email ready', a.email_ready, 'email:ready', 'green')}
       </div>
@@ -596,7 +617,8 @@ function AnalyzeStep({ batch, reload, catalog, onNext, onRemap, apiBase = '/inta
           Extra cells are kept on the row as source data.</div>
       )}
 
-      {cat && <RowTable batchId={batch.id} category={cat.c === 'all' ? null : cat.c} title={cat.t} catalog={catalog} apiBase={apiBase} />}
+      {cat && <RowTable batchId={batch.id} category={cat.c === 'all' ? null : cat.c} title={cat.t} catalog={catalog} apiBase={apiBase}
+                        sci={sci} editable={sci && !SCI_FROZEN.includes(batch.commit_mode)} onChanged={sci ? () => reload() : undefined} />}
 
       <div className="ic-actions">
         <button className="btn btn--secondary" onClick={onRemap}>← Change mapping</button>
@@ -740,7 +762,8 @@ const REVIEW_TABS = [
 const TAB_ALIASES = { duplicates: 'status:duplicate', blocked: 'status:blocked',
                       enrichment: 'status:needs_enrichment' }
 
-function ReviewStep({ batch, reload, catalog, onNext, initialTab, apiBase = '/intake', title, nextLabel }) {
+function ReviewStep({ batch, reload, catalog, onNext, initialTab, apiBase = '/intake', title, nextLabel, sci = false }) {
+  const tabLabel = (k, l) => (sci && k === 'status:existing_match' ? 'Already in SCI' : l)
   const [tab, setTab] = useState(TAB_ALIASES[initialTab] || REVIEW_TABS[0][0])
   const [tick, setTick] = useState(0)
   const [msg, setMsg] = useState('')
@@ -762,7 +785,7 @@ function ReviewStep({ batch, reload, catalog, onNext, initialTab, apiBase = '/in
       <div className="ic-tabs">
         {REVIEW_TABS.map(([k, l]) => (
           <button key={k} className={`ic-tab ${tab === k ? 'ic-tab--on' : ''}`} onClick={() => setTab(k)}>
-            {l} <span className="ic-tab-n">{fmt(cnt(k))}</span></button>
+            {tabLabel(k, l)} <span className="ic-tab-n">{fmt(cnt(k))}</span></button>
         ))}
       </div>
       <div className="ic-bulk">
@@ -780,8 +803,9 @@ function ReviewStep({ batch, reload, catalog, onNext, initialTab, apiBase = '/in
         {tab === 'status:needs_enrichment' && <span className="ic-muted ic-small">These have no usable phone or email. They can be preserved as contacts (never leads) on the Approve step.</span>}
       </div>
       {msg && <div className="ic-note">{msg}</div>}
-      <RowTable key={tab + tick} batchId={batch.id} category={tab} title={REVIEW_TABS.find(t => t[0] === tab)[1]}
-                catalog={catalog} editable onChanged={() => reload()} apiBase={apiBase} />
+      <RowTable key={tab + tick} batchId={batch.id} category={tab} title={tabLabel(tab, REVIEW_TABS.find(t => t[0] === tab)[1])}
+                catalog={catalog} editable={!sci || !SCI_FROZEN.includes(batch.commit_mode)} onChanged={() => reload()}
+                apiBase={apiBase} sci={sci} />
       <div className="ic-actions"><button className="btn btn--primary btn--lg" onClick={onNext}>{nextLabel || 'Continue to approval →'}</button></div>
     </section>
   )
@@ -1072,8 +1096,7 @@ function SciResultsStep({ batch, onLoad, onLeads }) {
         <Tile label="Left out on Review" value={r.excluded?.total} tone="muted" />
       </div>
       {loaded && (
-        <div className="ic-note">Phone check (mobile or landline):{' '}
-          {lc.error ? `could not run (${lc.error}) — it runs again later.` : `${fmt(lc.checked || 0)} checked${lc.remaining ? `, ${fmt(lc.remaining)} still to check` : ''}.`}</div>
+        <div className="ic-note" data-testid="sci-line-check">Phone check (mobile or landline): {lineCheckText(lc)}</div>
       )}
       <div className="ic-note"><b>Nothing was sent.</b> {NOTHING_SENT}</div>
       {!loaded && <div className="ic-note">The rows are staged in SCI — no family has been added to Leads yet.</div>}

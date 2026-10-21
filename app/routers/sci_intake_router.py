@@ -38,7 +38,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_tenant_user
-from app.models.import_models import ImportBatch
+from app.models.import_models import ImportBatch, ImportStagedRow
+from app.models.intake_models import DuplicateResolution, IntakeStatus
 from app.models.models import User
 from app.routers import intake_router as IR
 from app.routers.program_router import _sci_batch, _sci_importer, sci_batch_frozen
@@ -171,20 +172,66 @@ def rows(batch_id: str, category: Optional[str] = Query(None), search: Optional[
                             per_page=per_page, db=db, user=user)
 
 
+# A POSSIBLE DUPLICATE A PERSON DECIDED IS DECIDED. In the CRM importer a
+# decision on a duplicate leaves the row in "Needs review" until it is also
+# approved; for an SCI file the decision (keep separate / merge / update) IS
+# the review - SCI links people itself - so such a row is settled as approved
+# unless something else on it still needs a look.
+_DUP_CODES = {"possible_existing_match", "possible_duplicate_in_file"}
+_REVIEW_CODES = _DUP_CODES | {"unrecognized_classification", "ambiguous_consent", "ambiguous_date"}
+_DECIDED = (DuplicateResolution.KEEP_SEPARATE, DuplicateResolution.MERGE,
+            DuplicateResolution.UPDATE_EXISTING)
+
+
+def _settle_decided(db: Session, b: ImportBatch) -> int:
+    n = 0
+    for r in (db.query(ImportStagedRow)
+              .filter(ImportStagedRow.batch_id == b.id,
+                      ImportStagedRow.organization_id == b.organization_id,
+                      ImportStagedRow.intake_status == IntakeStatus.NEEDS_REVIEW,
+                      ImportStagedRow.duplicate_resolution.in_(_DECIDED)).all()):
+        codes = {x.get("code") for x in IR._j(r.status_reasons, []) if isinstance(x, dict)}
+        if codes & (_REVIEW_CODES - _DUP_CODES):
+            continue
+        r.intake_status = IntakeStatus.APPROVED
+        n += 1
+    # "Decide later" again: back to open review (the importer never approves a
+    # possible duplicate nobody decided).
+    for r in (db.query(ImportStagedRow)
+              .filter(ImportStagedRow.batch_id == b.id,
+                      ImportStagedRow.organization_id == b.organization_id,
+                      ImportStagedRow.intake_status == IntakeStatus.APPROVED,
+                      ImportStagedRow.duplicate_resolution == DuplicateResolution.REVIEW).all()):
+        r.intake_status = IntakeStatus.NEEDS_REVIEW
+        n += 1
+    if n:
+        IR._refresh_analysis(db, b)
+        db.commit()
+    return n
+
+
 @router.patch("/batches/{batch_id}/rows/{row_id}")
 def override_row(batch_id: str, row_id: str, body: IR.RowOverride, db: Session = Depends(get_db),
                  user: User = Depends(require_tenant_user)):
-    _batch(db, user, batch_id, edit=True)
+    b = _batch(db, user, batch_id, edit=True)
     with IR.sci_call():
-        return IR.override_row(batch_id, row_id, body, db=db, user=user)
+        out = IR.override_row(batch_id, row_id, body, db=db, user=user)
+    if body.duplicate_resolution is not None and _settle_decided(db, b):
+        row = db.query(ImportStagedRow).filter(ImportStagedRow.id == row_id,
+                                               ImportStagedRow.batch_id == b.id).first()
+        out = ENG.row_payload(row) if row is not None else out
+    return out
 
 
 @router.post("/batches/{batch_id}/rows/bulk")
 def bulk(batch_id: str, body: IR.BulkIn, db: Session = Depends(get_db),
          user: User = Depends(require_tenant_user)):
-    _batch(db, user, batch_id, edit=True)
+    b = _batch(db, user, batch_id, edit=True)
     with IR.sci_call():
-        return IR.bulk(batch_id, body, db=db, user=user)
+        out = IR.bulk(batch_id, body, db=db, user=user)
+    if body.duplicate_resolution is not None:
+        out["settled"] = _settle_decided(db, b)
+    return out
 
 
 @router.post("/batches/{batch_id}/cancel")

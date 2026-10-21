@@ -19,6 +19,7 @@ from app.models.program_models import ProgramSourceRecord
 from app.services.auth_service import create_access_token, hash_password
 from app.services.programs import setup
 from app.services.workspace_access import grant_workspace_membership
+from app.services.programs.line_check import run_for_org as REAL_RUN_FOR_ORG
 
 HEADER = ["Lead ID", "Lead Owner: Manager", "Lead Owner", "First Name", "Last Name", "Email",
           "Lead Status", "Last Activity", "Last Activity Date", "Phone", "Primary Campaign",
@@ -93,7 +94,7 @@ def _no_line_check(monkeypatch):
     calls = []
     from app.services.programs import line_check
 
-    def fake(db, org_id, limit=100, adapter=None):
+    def fake(db, org_id, limit=100, adapter=None, **kw):
         calls.append(org_id)
         return {"checked": 0, "results": {}, "remaining": 0, "mocked": True}
     monkeypatch.setattr(line_check, "run_for_org", fake)
@@ -256,7 +257,7 @@ def test_full_flow_program_only_manager(client, sci, _no_line_check):
     assert rep["mode"] == "load" and rep["staged"] == 7
     assert rep["families_created"] == 4                          # N001, N002, N004, N005
     assert rep["held"] == 1                                      # N003 (E002 was already held)
-    assert rep["already_live"] == 2 and rep["location_review"] == 2
+    assert rep["already_live"] == 1 and rep["location_review"] == 2
     assert rep["excluded"]["total"] == 2
     assert rep["texts_sent"] == 0 and rep["emails_sent"] == 0 and rep["enrolled"] == 0
     assert rep["line_check"]["mocked"] is True
@@ -559,3 +560,109 @@ def test_stale_committing_load_can_be_retried(client, sci):
     assert r.json()["report"]["families_created"] == 2
     db.refresh(b)
     assert b.status == "committed"
+
+
+# ── walkthrough fixes ───────────────────────────────────────────────────────
+
+def test_result_counts_describe_this_file_only(client, sci):
+    """'Already in SCI Leads' / held-not-promoted are this file's families,
+    not the whole program (E001 and E003 are live but not in these files)."""
+    db, org, h = sci["db"], sci["org"], sci["mh"]
+    a, _pv, _rows = _through_review(client, h, _csv(NEW[:2]), skip=())          # N001, N002
+    rep = client.post("/program/leads/import/batches/%s/load" % a, headers=h,
+                      json={"mode": "stage"}).json()["report"]
+    assert rep["already_live"] == 0 and rep["held_not_promoted"] == 0
+    assert rep["sci"]["promotion_plan"]["to_create"] == 2
+    b, _pv, _rows = _through_review(client, h, _csv([NEW[2], NEW[3]]), skip=())  # N003 (held), N004
+    rep = client.post("/program/leads/import/batches/%s/load" % b, headers=h,
+                      json={"mode": "load"}).json()["report"]
+    assert rep["families_created"] == 1 and rep["already_live"] == 0
+    assert rep["held_not_promoted"] == 1                         # N003 only
+    assert rep["sci"]["promotion"]["records"] == 2
+
+
+def test_line_check_only_this_files_families_never_opted_out(client, sci, monkeypatch):
+    """The paid lookup runs for this file's families only, and never for a
+    family that opted out - not for E003 (live, unchecked, not in the file)."""
+    from app.services.programs import line_check
+    real = REAL_RUN_FOR_ORG                                   # undo the autouse mock
+    looked = []
+
+    class FakeLookup:
+        def validate_phone(self, d):
+            looked.append(d)
+            return {"line_type": "mobile"}
+    monkeypatch.setattr("app.services.evosense.vendors.TwilioLookupLineType", FakeLookup)
+    monkeypatch.setattr(line_check, "run_for_org", real)
+    db, org, h = sci["db"], sci["org"], sci["mh"]
+    bid, _pv, rows = _through_review(client, h, _csv([NEW[0], NEW[5], NEW[1]]), skip=())  # N001, E001, N002
+    e1 = next(r for r in rows if r["source_record_id"] == "E001")
+    assert e1["intake_status"] == "blocked"
+    r = client.patch("/program/intake/batches/%s/rows/%s" % (bid, e1["id"]), headers=h, json={"approve": True})
+    assert r.status_code == 200, r.text
+    r = client.post("/program/leads/import/batches/%s/load" % bid, headers=h, json={"mode": "load"})
+    assert r.status_code == 200, r.text
+    lc = r.json()["report"]["line_check"]
+    assert sorted(looked) == ["2145550401", "2145550402"]
+    assert lc["checked"] == 2 and lc["results"] == {"mobile": 2} and lc["skipped_opted_out"] == 1
+    db.refresh(sci["dnc_lead"])
+    assert sci["dnc_lead"].status == "dnc" and sci["dnc_lead"].phone_line_type is None
+    e3 = db.query(Lead).filter_by(organization_id=org.id, first_name="Cara").one()
+    assert e3.phone_line_type is None                          # outside the file: not looked up
+
+
+def test_run_for_org_default_unchanged(db_session, sample_org, sci):
+    """Existing callers (no source_lead_ids) still check the whole program."""
+    real = REAL_RUN_FOR_ORG
+    seen = []
+
+    class A:
+        def validate_phone(self, d):
+            seen.append(d)
+            return {"line_type": "landline"}
+    out = real(db_session, sample_org.id, limit=100, adapter=A())
+    assert out == {"checked": len(seen), "results": {"landline": len(seen)}, "remaining": 0}
+    assert "2145550303" in seen                                  # E003, any family in the program
+
+
+def test_a_decided_duplicate_counts_as_decided(client, sci):
+    from app.models.import_models import ImportStagedRow
+    db, org, h = sci["db"], sci["org"], sci["mh"]
+    bid, _pv, _rows = _through_review(client, h, _csv(NEW[:2]), skip=())
+    row = db.query(ImportStagedRow).filter_by(batch_id=bid, source_record_id="N002").one()
+    row.intake_status, row.duplicate_resolution = "needs_review", "review"
+    row.status_reasons = json.dumps([{"code": "possible_existing_match", "detail": "email"}])
+    db.commit()
+    client.post("/program/intake/batches/%s/rows/bulk" % bid, headers=h,
+                json={"category": "status:ready", "approve": True})        # refresh the counts
+    b = client.get("/program/intake/batches/%s" % bid, headers=h).json()
+    assert b["analysis"]["status"]["needs_review"] == 1
+    r = client.patch("/program/intake/batches/%s/rows/%s" % (bid, row.id), headers=h,
+                     json={"duplicate_resolution": "keep_separate"})
+    assert r.status_code == 200 and r.json()["intake_status"] == "approved", r.text
+    b = client.get("/program/intake/batches/%s" % bid, headers=h).json()
+    assert b["analysis"]["status"].get("needs_review", 0) == 0
+    assert client.get("/program/leads/import/batches/%s/sci-preview" % bid,
+                      headers=h).json()["can_load"] is True
+    # "Decide later" again reopens it and blocks the load.
+    r = client.patch("/program/intake/batches/%s/rows/%s" % (bid, row.id), headers=h,
+                     json={"duplicate_resolution": "review"})
+    assert r.json()["intake_status"] == "needs_review"
+    assert client.get("/program/leads/import/batches/%s/sci-preview" % bid,
+                      headers=h).json()["can_load"] is False
+    # A row with another open question (an ambiguous date) stays in review.
+    row.status_reasons = json.dumps([{"code": "possible_existing_match"}, {"code": "ambiguous_date"}])
+    db.commit()
+    r = client.patch("/program/intake/batches/%s/rows/%s" % (bid, row.id), headers=h,
+                     json={"duplicate_resolution": "keep_separate"})
+    assert r.json()["intake_status"] == "needs_review"
+
+
+def test_any_row_can_be_skipped_before_staging(client, sci):
+    db, org, h = sci["db"], sci["org"], sci["mh"]
+    bid, _pv, rows = _through_review(client, h, _csv(NEW[:2]), skip=())
+    ready = next(r for r in rows if r["intake_status"] == "ready")
+    r = client.patch("/program/intake/batches/%s/rows/%s" % (bid, ready["id"]), headers=h, json={"skip": True})
+    assert r.status_code == 200 and r.json()["intake_status"] == "skipped"
+    p = client.get("/program/leads/import/batches/%s/sci-preview" % bid, headers=h).json()
+    assert p["rows_to_sci"] == 1 and p["excluded"]["total"] == 1

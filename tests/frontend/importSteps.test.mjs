@@ -1,6 +1,6 @@
 // Step 6 -> Step 7 gating of the guided importer (frontend/src/pages/intake/importSteps.js).
 import assert from 'node:assert/strict'
-import { approveEnabled, approveBlockedReason, commitGate, orgNameMatches, reachableStep, resolveStep, stepAfterCommit, stepFor }
+import { approveEnabled, approveBlockedReason, commitGate, lineCheckText, orgNameMatches, reachableStep, resolveStep, stepAfterCommit, stepFor }
   from '../../frontend/src/pages/intake/importSteps.js'
 
 const wf = (step, extra = {}) => ({ step, analyzed: true, classified: false, ...extra })
@@ -80,5 +80,14 @@ t('a disabled Import button always says why (empty box, mismatch)', () => {
   assert.equal(approveBlockedReason(b, 'ready_plus_review', 'evo integrated solutions llc', org), null)
   assert.equal(approveEnabled(b, 'ready_plus_review', 'evo integrated solutions llc', org), true)
   assert.equal(approveBlockedReason(b, 'stage_only', '', org), null)
+})
+t('SCI phone check is reported honestly from its results', () => {
+  assert.equal(lineCheckText({ checked: 5, results: { failed: 5 }, remaining: 0 }),
+               '5 looked up, 5 failed (no lookup service answered; they are tried again later).')
+  assert.equal(lineCheckText({ checked: 3, results: { mobile: 2, landline: 1 }, remaining: 0, skipped_opted_out: 1 }),
+               '3 looked up — 2 mobile, 1 landline; 1 opted-out not looked up.')
+  assert.equal(lineCheckText({ checked: 0, results: {}, remaining: 0 }), 'no new numbers to look up.')
+  assert.match(lineCheckText({ error: 'boom' }), /could not run \(boom\)/)
+  assert.equal(lineCheckText(null), 'not run.')
 })
 console.log(`${n} passed`)

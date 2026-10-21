@@ -2009,6 +2009,18 @@ def _excel_to_csv(content: bytes, filename: Optional[str]) -> bytes:
     return frame.to_csv(index=False).encode("utf-8")
 
 
+def _master_keys(db: Session, org_id: str, lead_ids) -> set:
+    """The contact groups (masters) the given source Lead IDs belong to."""
+    ids, keys = sorted(set(lead_ids or [])), set()
+    for i in range(0, len(ids), 900):
+        for key, lid in db.query(ProgramSourceRecord.contact_master_key,
+                                 ProgramSourceRecord.source_lead_id).filter(
+                ProgramSourceRecord.organization_id == org_id,
+                ProgramSourceRecord.source_lead_id.in_(ids[i:i + 900])).all():
+            keys.add(key or lid)
+    return keys
+
+
 def _load_source(db: Session, org, content: bytes, filename: Optional[str], apply: bool, actor: User,
                  *, stage_only: bool = False, only_lead_ids: Optional[List[str]] = None) -> dict:
     """Check (apply=False) or load (apply=True) a lead file: stage every row,
@@ -2030,7 +2042,8 @@ def _load_source(db: Session, org, content: bytes, filename: Optional[str], appl
     out = {"apply": apply, "stage": staged["summary"], "run_id": staged["run_id"]}
     if stage_only and apply:
         out["stage_only"] = True
-        out["promotion_plan"] = {k: v for k, v in promote.plan(db, org).items() if k != "groups"}
+        keys = _master_keys(db, org.id, only_lead_ids) if only_lead_ids is not None else None
+        out["promotion_plan"] = {k: v for k, v in promote.plan(db, org, keys).items() if k != "groups"}
         return out
     if not apply or staged["summary"].get("refused"):
         out["promotion_plan"] = {k: v for k, v in promote.plan(db, org).items() if k != "groups"}
@@ -2039,16 +2052,9 @@ def _load_source(db: Session, org, content: bytes, filename: Optional[str], appl
     db.commit()
     out["held"] = {k: v for k, v in held.items() if k != "source_lead_ids"}
     try:
-        only_keys = None
-        if only_lead_ids is not None:
-            ids, only_keys = sorted(set(only_lead_ids)), set()
-            for i in range(0, len(ids), 900):
-                for key, lid in db.query(ProgramSourceRecord.contact_master_key,
-                                         ProgramSourceRecord.source_lead_id).filter(
-                        ProgramSourceRecord.organization_id == org.id,
-                        ProgramSourceRecord.source_lead_id.in_(ids[i:i + 900])).all():
-                    only_keys.add(key or lid)
-        out["promotion"] = promote.promote(db, org, actor, apply=True, only_keys=only_keys)
+        only_keys = _master_keys(db, org.id, only_lead_ids) if only_lead_ids is not None else None
+        out["promotion"] = promote.promote(db, org, actor, apply=True, only_keys=only_keys,
+                                           scope_counts=only_keys is not None)
     except HTTPException:
         db.rollback()
         raise
@@ -2056,7 +2062,12 @@ def _load_source(db: Session, org, content: bytes, filename: Optional[str], appl
     # never texted (Twilio Lookup, about $0.008 a number; approved by Mike).
     try:
         from app.services.programs import line_check
-        out["line_check"] = line_check.run_for_org(db, org.id, limit=2000)
+        # A file's own load looks up only that file's families, never one
+        # that opted out; every other caller checks the program as before.
+        out["line_check"] = (line_check.run_for_org(db, org.id, limit=2000)
+                             if only_lead_ids is None else
+                             line_check.run_for_org(db, org.id, limit=2000,
+                                                    source_lead_ids=only_lead_ids))
     except Exception as exc:                             # noqa: BLE001
         db.rollback()
         out["line_check"] = {"error": str(exc)[:200]}
