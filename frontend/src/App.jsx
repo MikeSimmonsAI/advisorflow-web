@@ -149,6 +149,7 @@ import AIHub from './pages/AIHub'
 import Availability from './pages/Availability'
 import { Unauthorized, NotFound, VerificationUnavailable } from './pages/AccessState'
 import { decideSciDoor, shouldLandInSci, SCI_ORG_NAME } from './auth/sciDoor'
+import { experienceRedirect } from './auth/programExperience'
 import { workspaceProgramDestination, productWorkspaceDestination } from './auth/workspaceProgramDoor'
 import CRMIntegration from './pages/CRMIntegration'
 import CRM from './pages/CRM'
@@ -430,7 +431,23 @@ function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = fa
   // Service Center has its own navigation). Same checks above; only the
   // tenant Layout chrome is left out. The context banner stays.
   if (bare) return <><ContextBanner />{children}</>
-  return <ProgramOnlyGate><Layout><ContextBanner />{children}</Layout></ProgramOnlyGate>
+  return <ProgramOnlyGate><ExperienceGate><Layout><ContextBanner />{children}</Layout></ExperienceGate></ProgramOnlyGate>
+}
+
+/**
+ * A PROGRAM WORKSPACE NEVER DRAWS THE GENERAL PLATFORM. The server says which
+ * experience the current workspace is (Wholesale / SCI / Roofing); any
+ * general-platform page opened there goes to that program's home instead.
+ * Not authorization - the server refuses those APIs as well.
+ */
+function ExperienceGate({ children }) {
+  const { phase, ctx } = useAuthorizedContexts()
+  const user = getCurrentUser()
+  const here = typeof window !== 'undefined' ? window.location.pathname : ''
+  if (phase === 'loading' && !ctx) return null
+  const to = experienceRedirect(ctx, here, getWorkspaceContext(), user?.organization_id, user?.role)
+  if (to) return <Navigate to={to} replace />
+  return children
 }
 
 /**
@@ -731,6 +748,13 @@ function WorkspaceRoute() {
     const entry = (ctx?.workspace_contexts || []).find(w => w && w.organization_id === organizationId)
     const programDestination = workspaceProgramDestination(entry)
     if (programDestination) return <Navigate to={programDestination} replace />
+    // A Wholesale workspace (server-decided experience) opens Wholesale through
+    // the verified product hand-off - never the general platform Overview.
+    if (entry?.experience === 'wholesale' && !new URLSearchParams(
+      typeof window !== 'undefined' ? window.location.search : '').get('product')) {
+      const path = productWorkspaceDestination(ctx, organizationId, 'wholesale')
+      if (path) return <ProductWorkspaceLaunch organizationId={organizationId} destination={path} />
+    }
     // Product entries are likewise proven by the server context list and
     // the product's own endpoint guard, never by a query parameter alone.
     const requestedProduct = new URLSearchParams(
