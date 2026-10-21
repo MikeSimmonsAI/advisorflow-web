@@ -64,8 +64,11 @@ export function programCards(ctx) {
   const others = []
   for (const w of workspaces) {
     if (isProductHost(w)) continue
-    const program = programOf(w)
-    if (!program) { others.push(w); continue }
+    // A workspace whose kind of business has no dedicated identity yet still
+    // gets a full card, in the neutral EvoSys look (Mike, 2026-10-21) — never
+    // a plain row. Only the presentation is neutral; the workspace and its
+    // destination are exactly what the server listed.
+    const program = programOf(w) || 'business'
     const p = PROGRAMS[program]
     cards.push({ ...w, program, variant: p.variant, symbol: p.symbol, rank: p.rank, kind: p.kind, facts: p.facts,
                  display: displayName(program, w), summary: p.summary,
