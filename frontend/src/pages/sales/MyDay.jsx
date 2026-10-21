@@ -64,7 +64,8 @@ function MyDayBody() {
     const all = (deals.stages || []).flatMap(s => s.opportunities || [])
     return deals.is_manager ? all.filter(c => c.owner_user_id === deals.viewer_user_id) : all
   }, [deals])
-  const due = useMemo(() => followUpList(mine, 'today'), [mine])
+  const tz = ctx?.brand_sales_org?.timezone
+  const due = useMemo(() => followUpList(mine, 'today', '', new Date(), tz), [mine, tz])
   const overdue = due.filter(c => c.due_bucket === 'overdue').length
   const board = useMemo(() => groupForSimpleBoard({ stages: [{ opportunities: mine }] }), [mine])
 

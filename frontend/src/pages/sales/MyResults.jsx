@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
-import SalesShell from './SalesShell'
+import SalesShell, { useSales } from './SalesShell'
 import { money } from './parts'
 import { SIMPLE_COLUMNS, groupForSimpleBoard, followUpList } from './simpleSales'
 import { ErrorLine, Skeleton } from './SimpleParts'
@@ -23,6 +23,7 @@ export default function MyResults() {
 
 function Body() {
   const nav = useNavigate()
+  const ctx = useSales()
   const [day, setDay] = useState(null)
   const [deals, setDeals] = useState(null)
   const [error, setError] = useState(null)
@@ -48,7 +49,7 @@ function Body() {
   }, [deals])
   const g = useMemo(() => groupForSimpleBoard(mine), [mine])
   const open = mine.stages.flatMap(s => s.opportunities).filter(c => c.status === 'open')
-  const due = followUpList(open, 'today')
+  const due = followUpList(open, 'today', '', new Date(), ctx?.brand_sales_org?.timezone)
   const m = day?.metrics || {}
 
   if (loading && !day) return <div className="ss-panel"><Skeleton rows={5} /></div>

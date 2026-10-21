@@ -102,19 +102,28 @@ export function smsHref(phone) {
 
 // ── "What happened?" after a call ──────────────────────────────────────────
 
+// What each choice SUGGESTS. Every suggestion is shown in the form and can be
+// changed or cleared before saving; nothing is recorded until the rep saves.
+//   next / days — suggested next action and due date (null = no suggestion)
+//   decide      — Not Interested asks the rep to choose: close as Lost, or a
+//                 follow-up they schedule themselves. Never an automatic date.
+//   books       — after saving, the real booking form opens. Choosing it does
+//                 NOT mean a meeting exists; only the scheduler can say that.
 export const CALL_OUTCOMES = [
-  { key: 'connected',      label: 'Connected',      tone: 'blue',
-    next: 'Follow up', days: 2 },
-  { key: 'no_answer',      label: 'No Answer',      tone: 'gray',
-    next: 'Try calling again', days: 1 },
-  { key: 'voicemail',      label: 'Left Voicemail', tone: 'gray',
-    next: 'Call back', days: 2 },
-  { key: 'interested',     label: 'Interested',     tone: 'green',
-    next: 'Book a demo', days: 1 },
-  { key: 'not_interested', label: 'Not Interested', tone: 'red',
-    next: 'Check back in', days: 90 },
-  { key: 'book_meeting',   label: 'Book a Meeting', tone: 'teal',
-    next: 'Demo booked — prepare', days: 1, books: true },
+  { key: 'connected',      label: 'Connected',      next: 'Follow up', days: 2 },
+  { key: 'no_answer',      label: 'No Answer',      next: 'Try calling again', days: 1 },
+  { key: 'voicemail',      label: 'Left Voicemail', next: 'Call back', days: 2 },
+  { key: 'interested',     label: 'Interested',     next: 'Book a demo', days: 1 },
+  { key: 'not_interested', label: 'Not Interested', next: null, days: null, decide: true },
+  { key: 'book_meeting',   label: 'Book a Meeting', next: 'Book the meeting', days: 0, books: true },
+]
+
+// Not Interested → one of these, chosen explicitly.
+export const NOT_INTERESTED_CHOICES = [
+  { key: 'lost',  label: 'Close as Lost',
+    hint: 'Ends this deal. It stays in your history; no follow-up is scheduled.' },
+  { key: 'later', label: 'Follow up later',
+    hint: 'Only if they said a later time might work. You pick the date.' },
 ]
 
 export function outcomeByKey(key) {
@@ -132,11 +141,13 @@ export function stageAfterOutcome(currentStage, outcomeKey) {
   return null
 }
 
-/** YYYY-MM-DD `days` from `now`, in the viewer's calendar. */
-export function ymdPlusDays(days, now = new Date()) {
-  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (Number(days) || 0))
-  const p = x => String(x).padStart(2, '0')
-  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+/** YYYY-MM-DD `days` from today — today in the team's zone when `tz` is given. */
+export function ymdPlusDays(days, now = new Date(), tz) {
+  const base = tz ? ymdIn(now, tz) : null
+  let y, m, d
+  if (base) { [y, m, d] = base.split('-').map(Number) } else { y = now.getFullYear(); m = now.getMonth() + 1; d = now.getDate() }
+  const t = new Date(Date.UTC(y, m - 1, d + (Number(days) || 0)))
+  return t.toISOString().slice(0, 10)
 }
 
 /**
@@ -148,66 +159,117 @@ export function dueIsoFromYmd(ymd) {
   return /^\d{4}-\d{2}-\d{2}$/.test(ymd || '') ? ymd + 'T12:00:00' : null
 }
 
+// How each outcome reads on the deal's timeline. Book a Meeting records that
+// they AGREED to meet — the booking itself is logged by the scheduler only
+// when an appointment is actually created.
+const SUMMARY = {
+  connected: 'Connected',
+  no_answer: 'No answer',
+  voicemail: 'Left voicemail',
+  interested: 'Interested',
+  not_interested: 'Not interested',
+  book_meeting: 'Agreed to a meeting (not booked yet)',
+}
+
 /**
- * The two existing calls a recorded outcome makes:
+ * The existing calls a recorded outcome makes:
  *   1. POST /sales/opportunities/{id}/notes   (timeline entry, event_type call_outcome)
- *   2. PATCH /sales/opportunities/{id}       (next action + due, and the
- *      Prospect → Contacted step when a conversation actually happened)
- * Returns {note, patch}. `patch` is null when nothing about the deal changes.
+ *   2. PATCH /sales/opportunities/{id}       (next action, due date, stage) — only
+ *      when something about the deal changes.
+ *
+ * Not Interested needs `decision`: 'lost' closes the deal as Lost and clears the
+ * next action and date (no future follow-up); 'later' REQUIRES a next action
+ * and a date the rep chose. Throws with a plain message when something required
+ * is missing, so the form can show it.
  */
-export function buildOutcomeRequests({ stage, outcome, note, nextAction, dueYmd }) {
+export function buildOutcomeRequests({ stage, outcome, note, nextAction, dueYmd, decision }) {
   const o = outcomeByKey(outcome)
   if (!o) throw new Error('Pick what happened on the call.')
   const text = (note || '').trim()
-  const summary = ('Call: ' + o.label + (text ? ' — ' + text : '')).slice(0, 250)
+  const next = (nextAction || '').trim()
+  const due = dueIsoFromYmd(dueYmd)
+  let label = SUMMARY[o.key]
+  const patch = {}
+
+  if (o.decide) {
+    if (decision === 'lost') {
+      label = 'Not interested — closed as Lost'
+      patch.stage = LOST_STAGE
+      patch.loss_reason = 'Not interested (call)'
+      patch.next_action = null
+      patch.next_action_due_at = null
+    } else if (decision === 'later') {
+      if (!next) throw new Error('Add the next action for the later follow-up.')
+      if (!due) throw new Error('Pick the date for the later follow-up.')
+      label = 'Not interested now — follow up later'
+      patch.next_action = next
+      patch.next_action_due_at = due
+    } else {
+      throw new Error('Choose Close as Lost or Follow up later.')
+    }
+  } else {
+    if (next) patch.next_action = next
+    if (due) patch.next_action_due_at = due
+    const moved = stageAfterOutcome(stage, outcome)
+    if (moved) patch.stage = moved
+  }
+
+  const full = 'Call: ' + label + (text ? ' — ' + text : '')
+  const summary = full.slice(0, 250)
   // The summary is capped at 250 by the API; a longer note keeps its full text
   // in `detail` so nothing the rep typed is lost.
-  const body = {
-    event_type: 'call_outcome',
-    summary,
-    detail: summary.length < ('Call: ' + o.label + (text ? ' — ' + text : '')).length ? text : null,
-  }
-  const patch = {}
-  const next = (nextAction || '').trim()
-  if (next) patch.next_action = next
-  const due = dueIsoFromYmd(dueYmd)
-  if (due) patch.next_action_due_at = due
-  const moved = stageAfterOutcome(stage, outcome)
-  if (moved) patch.stage = moved
+  const body = { event_type: 'call_outcome', summary, detail: summary.length < full.length ? text : null }
   return { note: body, patch: Object.keys(patch).length ? patch : null }
 }
 
 // ── follow-up list filters ─────────────────────────────────────────────────
 
+/** YYYY-MM-DD of an instant in `tz` (falls back to the browser zone). */
+function ymdIn(date, tz) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: tz || undefined, year: 'numeric', month: '2-digit', day: '2-digit' })
+      .format(date)
+  } catch {
+    const p = x => String(x).padStart(2, '0')
+    return date.getFullYear() + '-' + p(date.getMonth() + 1) + '-' + p(date.getDate())
+  }
+}
+
 /**
- * Bucket a due date as 'overdue' | 'today' | 'later' | 'none', reading a
- * 00:00/12:00 UTC anchor as the calendar date it was written as (mirrors
- * parts.dueLabel and app/services/workspace_time.is_date_anchor).
+ * 'overdue' | 'today' | 'later' | 'none' — the SAME rule as the server
+ * (app/services/workspace_time.py is_overdue / is_due_by_today), read in the
+ * sales team's time zone so a badge, a list and My Day can never disagree:
+ *   · a date-only due (stored on a 00:00 / 12:00 UTC anchor) is that calendar
+ *     date: overdue once the team's day has moved past it;
+ *   · any other due is a real instant: overdue once it has passed, otherwise
+ *     due "today" when it falls on the team's current date.
  */
-export function dueBucket(iso, now = new Date()) {
+export function dueBucket(iso, now = new Date(), tz) {
   if (!iso) return 'none'
   const s = String(iso)
   const d = new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(s) ? s : s + 'Z')
   if (isNaN(d)) return 'none'
-  const anchor = d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 &&
+  const anchor = d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0 &&
     (d.getUTCHours() === 0 || d.getUTCHours() === 12)
-  const due = anchor ? new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) : d
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate())
-  if (dueDay < today) return 'overdue'
-  if (dueDay.getTime() === today.getTime()) return (!anchor && due < now) ? 'overdue' : 'today'
-  return 'later'
+  const today = ymdIn(now, tz)
+  if (anchor) {
+    const dueDay = d.toISOString().slice(0, 10)
+    return dueDay < today ? 'overdue' : dueDay === today ? 'today' : 'later'
+  }
+  if (d < now) return 'overdue'
+  return ymdIn(d, tz) <= today ? 'today' : 'later'
 }
 
 /** Open deals only, ordered: overdue first, then today, then by due date. */
-export function followUpList(cards, filter = 'today', query = '', now = new Date()) {
+export function followUpList(cards, filter = 'today', query = '', now = new Date(), tz) {
   const q = (query || '').trim().toLowerCase()
   const rank = { overdue: 0, today: 1, later: 2, none: 3 }
   return (cards || [])
     .filter(c => (c.status || 'open') === 'open')
-    .map(c => ({ c, b: dueBucket(c.next_action_due_at, now) }))
+    .map(c => ({ c, b: dueBucket(c.next_action_due_at, now, tz) }))
     .filter(({ b }) => filter === 'all' ? true
       : filter === 'overdue' ? b === 'overdue'
+      : filter === 'today_only' ? b === 'today'
       : b === 'overdue' || b === 'today')
     .filter(({ c }) => !q || [c.company_name, c.contact_name, c.phone, c.email, c.next_action]
       .filter(Boolean).some(v => String(v).toLowerCase().includes(q)))

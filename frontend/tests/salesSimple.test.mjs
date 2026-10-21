@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   REAL_STAGES, SIMPLE_COLUMNS, simpleColumnFor, entryStageFor, groupForSimpleBoard,
-  cleanPhone, telHref, smsHref, CALL_OUTCOMES, stageAfterOutcome, buildOutcomeRequests,
+  cleanPhone, telHref, smsHref, CALL_OUTCOMES, NOT_INTERESTED_CHOICES, stageAfterOutcome, buildOutcomeRequests,
   dueIsoFromYmd, ymdPlusDays, dueBucket, followUpList, greeting, firstName,
 } from '../src/pages/sales/simpleSales.js'
 
@@ -86,7 +86,7 @@ test('outcome becomes one timeline note and one deal update', () => {
 
 test('no-answer with no next step leaves the deal alone', () => {
   const r = buildOutcomeRequests({ stage: 'discovery', outcome: 'no_answer' })
-  assert.equal(r.note.summary, 'Call: No Answer')
+  assert.equal(r.note.summary, 'Call: No answer')
   assert.equal(r.patch, null)
 })
 
@@ -147,4 +147,81 @@ test('typed time in the team zone becomes the UTC booking time', async () => {
   assert.equal(wallToUtcNaive('2026-10-23', '14:15', 'UTC'), '2026-10-23T14:15:00')
   assert.equal(wallToUtcNaive('', '10:00', 'UTC'), null)
   assert.equal(wallToUtcNaive('2026-10-23', '10:00', 'Not/AZone'), null)
+})
+
+// ── refinements (master prompt 2026-10-21 11:20) ─────────────────────────
+
+test('Not Interested never schedules anything by itself', () => {
+  const o = CALL_OUTCOMES.find(x => x.key === 'not_interested')
+  assert.equal(o.next, null); assert.equal(o.days, null); assert.equal(o.decide, true)
+  assert.deepEqual(NOT_INTERESTED_CHOICES.map(c => c.label), ['Close as Lost', 'Follow up later'])
+  assert.throws(() => buildOutcomeRequests({ stage: 'contacted', outcome: 'not_interested' }), /Close as Lost or Follow up later/)
+})
+
+test('Not Interested → Close as Lost clears the next step and closes the deal', () => {
+  const r = buildOutcomeRequests({ stage: 'discovery', outcome: 'not_interested', decision: 'lost',
+    nextAction: 'should be ignored', dueYmd: '2027-01-01', note: 'Went with a competitor' })
+  assert.equal(r.note.summary, 'Call: Not interested — closed as Lost — Went with a competitor')
+  assert.deepEqual(r.patch, { stage: 'lost', loss_reason: 'Not interested (call)',
+    next_action: null, next_action_due_at: null })
+})
+
+test('Not Interested → Follow up later needs a chosen action AND date', () => {
+  assert.throws(() => buildOutcomeRequests({ stage: 'contacted', outcome: 'not_interested', decision: 'later', dueYmd: '2027-01-05' }), /next action/)
+  assert.throws(() => buildOutcomeRequests({ stage: 'contacted', outcome: 'not_interested', decision: 'later', nextAction: 'Check budget' }), /date/)
+  const r = buildOutcomeRequests({ stage: 'contacted', outcome: 'not_interested', decision: 'later',
+    nextAction: 'Check budget after Q1', dueYmd: '2027-01-05' })
+  assert.equal(r.note.summary, 'Call: Not interested now — follow up later')
+  assert.deepEqual(r.patch, { next_action: 'Check budget after Q1', next_action_due_at: '2027-01-05T12:00:00' })
+  assert.equal(r.patch.stage, undefined)                // real stage kept
+})
+
+test('Book a Meeting records agreement, never a booking', () => {
+  const r = buildOutcomeRequests({ stage: 'prospect', outcome: 'book_meeting', nextAction: 'Book the meeting', dueYmd: '2026-10-21' })
+  assert.match(r.note.summary, /not booked yet/)
+  assert.doesNotMatch(r.note.summary, /booked —|Demo booked/)
+  assert.equal(r.patch.stage, 'contacted')
+  assert.equal(CALL_OUTCOMES.find(x => x.key === 'book_meeting').books, true)
+})
+
+test('Left Voicemail follow-up is optional: clearing the date sends none', () => {
+  const r = buildOutcomeRequests({ stage: 'contacted', outcome: 'voicemail', nextAction: '', dueYmd: '' })
+  assert.equal(r.patch, null)
+})
+
+test('due buckets follow the TEAM time zone, matching the server rule', () => {
+  const lateChicago = new Date('2026-10-22T04:30:00Z')         // 11:30 PM Oct 21 in Chicago
+  assert.equal(dueBucket('2026-10-21T12:00:00', lateChicago, 'America/Chicago'), 'today')
+  assert.equal(dueBucket('2026-10-21T12:00:00', lateChicago, 'UTC'), 'overdue')
+  assert.equal(dueBucket('2026-10-22T00:00:00', lateChicago, 'America/Chicago'), 'later')
+  // a real instant: overdue once passed, else today if on the team's date
+  assert.equal(dueBucket('2026-10-22T04:00:00', lateChicago, 'America/Chicago'), 'overdue')
+  assert.equal(dueBucket('2026-10-22T04:45:00', lateChicago, 'America/Chicago'), 'today')
+  assert.equal(dueBucket('2026-10-22T06:00:00', lateChicago, 'America/Chicago'), 'later')   // 1 AM Oct 22 local
+})
+
+test('Due Now = Overdue + Today, with no overlap and no duplicates', () => {
+  const now = new Date('2026-10-21T15:00:00Z'); const tz = 'America/Chicago'
+  const cards = [
+    { id: 'a', status: 'open', next_action_due_at: '2026-10-20T12:00:00' },
+    { id: 'b', status: 'open', next_action_due_at: '2026-10-21T12:00:00' },
+    { id: 'c', status: 'open', next_action_due_at: '2026-10-21T14:00:00' },  // passed earlier today → overdue
+    { id: 'd', status: 'open', next_action_due_at: '2026-10-21T20:00:00' },  // later today → today
+    { id: 'e', status: 'open', next_action_due_at: '2026-10-23T12:00:00' },
+    { id: 'f', status: 'lost', next_action_due_at: '2026-10-19T12:00:00' },
+  ]
+  const now_ = followUpList(cards, 'today', '', now, tz).map(c => c.id)
+  const over = followUpList(cards, 'overdue', '', now, tz).map(c => c.id)
+  const tod = followUpList(cards, 'today_only', '', now, tz).map(c => c.id)
+  assert.deepEqual(over.sort(), ['a', 'c'])
+  assert.deepEqual(tod.sort(), ['b', 'd'])
+  assert.deepEqual([...now_].sort(), ['a', 'b', 'c', 'd'])
+  assert.equal(new Set(now_).size, now_.length)
+  assert.equal(over.length + tod.length, now_.length)
+})
+
+test('date suggestions use the team calendar', () => {
+  const lateChicago = new Date('2026-10-22T04:30:00Z')
+  assert.equal(ymdPlusDays(0, lateChicago, 'America/Chicago'), '2026-10-21')
+  assert.equal(ymdPlusDays(1, lateChicago, 'America/Chicago'), '2026-10-22')
 })

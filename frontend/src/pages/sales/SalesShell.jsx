@@ -110,27 +110,32 @@ export default function SalesShell({ title, subtitle, actions, children }) {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
 
+  // The Follow Ups badge is counted from the SAME list the Follow Ups screen
+  // shows — the caller's own open deals due today or earlier, in the TEAM's
+  // time zone — so the badge and the page can never disagree. Screens call
+  // refreshCounts() after a save so the badge moves with the list.
+  const loadCounts = useCallback(async (tz) => {
+    try {
+      const o = await api.get('/sales/opportunities')
+      const all = (o.stages || []).flatMap(st => st.opportunities || [])
+      const own = o.is_manager ? all.filter(c => c.owner_user_id === o.viewer_user_id) : all
+      setCounts({ follow_ups_due: followUpList(own, 'today', '', new Date(), tz).length })
+    } catch { /* counts are a nicety, never a blocker */ }
+  }, [])
+
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       const me = await api.get('/sales/me')
       setCtx(me)
-      try {
-        // The Follow Ups badge is counted from the SAME list the Follow Ups
-        // screen shows — the caller's own open deals due today or earlier —
-        // so the badge and the page can never disagree, for a rep or a manager.
-        const o = await api.get('/sales/opportunities')
-        const all = (o.stages || []).flatMap(st => st.opportunities || [])
-        const own = o.is_manager ? all.filter(c => c.owner_user_id === o.viewer_user_id) : all
-        setCounts({ follow_ups_due: followUpList(own, 'today').length })
-      } catch { /* counts are a nicety, never a blocker */ }
+      await loadCounts(me?.brand_sales_org?.timezone)
     } catch (e) {
       setError(e.message || 'Could not load the sales workspace.')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [loadCounts])
 
   useEffect(() => { load() }, [load])
 
@@ -255,7 +260,8 @@ export default function SalesShell({ title, subtitle, actions, children }) {
           <div className="sw-body">
             {loading && !ctx
               ? <div className="sw-subtle">Loading…</div>
-              : <SalesCtx.Provider value={{ ...ctx, counts, reloadContext: load }}>
+              : <SalesCtx.Provider value={{ ...ctx, counts, reloadContext: load,
+                  refreshCounts: () => loadCounts(ctx?.brand_sales_org?.timezone) }}>
                   {children}
                 </SalesCtx.Provider>}
           </div>
