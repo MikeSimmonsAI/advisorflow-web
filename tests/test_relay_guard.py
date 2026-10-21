@@ -255,3 +255,51 @@ def test_dry_run_of_the_workflow_guard_step(tmp_path, monkeypatch):
     out.write_text("")
     assert rg.main(["x", "decide"]) == 0            # GitHub re-delivers the same event
     assert "run=false" in out.read_text() and len(store) == 1
+
+
+# ── development lanes (Oct 19) ───────────────────────────────────────────────
+
+LANES = ["feature/sci-appointment-recovery", "feature/sci-ops",
+         "feature/wholesale-development", "feature/atlantis-development",
+         "feature/roofing-development", "feature/platform-command-center"]
+
+
+def _workflow_branches(name):
+    import re
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    text = open(os.path.join(root, ".github", "workflows", name), encoding="utf-8").read()
+    return re.search(r"RELAY_ALLOWED_BRANCHES:\s*'([^']+)'", text).group(1).split(",")
+
+
+def test_every_relay_workflow_allows_the_current_lanes_and_never_main():
+    for wf in ("claude-relay.yml", "relay-status-event.yml", "relay-handoff-watchdog.yml"):
+        allowed = _workflow_branches(wf)
+        assert all(lane in allowed for lane in LANES), wf
+        assert "main" not in allowed and "master" not in allowed, wf
+
+
+def test_a_directive_on_a_lane_branch_runs_on_that_lane_only():
+    kw = dict(KW, branches=["sci-program"] + LANES)
+    body = DIRECTIVE.replace("BRANCH: sci-program", "BRANCH: feature/wholesale-development")
+    run, why, info = rg.decide(ev(body), [], **kw)
+    assert run and info["branch"] == "feature/wholesale-development"
+    bad = DIRECTIVE.replace("BRANCH: sci-program", "BRANCH: feature/somebody-else")
+    assert not rg.decide(ev(bad, cid=102), [], **kw)[0]
+    main = DIRECTIVE.replace("BRANCH: sci-program", "BRANCH: main")
+    assert not rg.decide(ev(main, cid=103), [], **dict(kw, branches=kw["branches"] + ["main"]))[0]
+
+
+def test_claude_relay_serializes_by_lane_not_by_issue():
+    """Different project lanes may run in parallel, same lane cannot collide."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, ".github", "workflows", "claude-relay.yml"), encoding="utf-8") as f:
+        yml = f.read()
+    concurrency = yml.split("concurrency:", 1)[1].split("\njobs:", 1)[0]
+    assert "claude-relay-${{" in concurrency
+    assert "github.event.issue.number" not in concurrency
+    assert "cancel-in-progress: false" in concurrency
+    assert "queue: max" in concurrency
+    for branch in LANES:
+        assert "BRANCH: " + branch in concurrency
+    for lane in ("sci", "wholesale", "atlantis", "roofing", "platform"):
+        assert "&& '" + lane + "'" in concurrency

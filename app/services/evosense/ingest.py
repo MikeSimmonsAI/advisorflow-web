@@ -183,6 +183,41 @@ def upsert_owner(db, org_id: str, prop: EvoSenseProperty, data: Dict[str, Any], 
         # a person typed the owner's full name: the truncation is resolved
         owner.name_truncated = False
         owner.review_flags = C.jdump(owner_flags(owner.display_name or name)) or None
+    elif owner.name_truncated and not truncated and mk and owner.mailing_key == mk \
+            and completes_cut_name(owner.display_name, name):
+        # The SAME owner (same mailing address, a shared name word - see
+        # same_owner_other_spelling) arrives from a record that carries the
+        # whole name: the tax roll cut "SAMPLE ROBIN AND SAMPLE P" at its field
+        # width, the appraisal district publishes "ROBIN & PAT ETAL SAMPLE".
+        # The full name comes from a county record, not a guess, so it replaces
+        # the cut one and the "confirm the full name first" hold is lifted.
+        # The cut spelling stays on the event log.
+        cut = owner.display_name
+        owner.display_name = name
+        owner.name_key = nk
+        owner.name_truncated = False
+        otype = data.get("owner_type") or owner_type_of(name)
+        owner.owner_type = otype
+        owner.review_flags = C.jdump(owner_flags(name)) or None
+        # People read off the CUT spelling ("SAMPLE P") go; anyone a person
+        # entered, or EvoSense is working, stays.
+        cut_people = {name_key(f) for f, _ in _persons_for(cut or "", owner_type_of(cut or ""))}
+        for person in db.query(EvoSensePerson).filter(EvoSensePerson.organization_id == org_id,
+                                                      EvoSensePerson.owner_id == owner.id).all():
+            if person.name_key in cut_people and person.lead_id is None and person.source != "manual":
+                db.delete(person)
+        db.flush()
+        known = {p.name_key for p in db.query(EvoSensePerson).filter(
+            EvoSensePerson.organization_id == org_id, EvoSensePerson.owner_id == owner.id).all()}
+        for full, role in _persons_for(name, otype):
+            if name_key(full) not in known:
+                db.add(EvoSensePerson(organization_id=org_id, owner_id=owner.id, full_name=full,
+                                      name_key=name_key(full), role=role, source=source,
+                                      is_test=is_test))
+        C.log_event(db, org_id, "owner.full_name", property_id=prop.id, is_test=is_test,
+                    summary="Owner's full name from %s replaced a cut-off name" % source,
+                    details={"was": cut, "now": name, "source": source})
+        db.flush()
 
     link = (db.query(EvoSenseOwnership)
             .filter(EvoSenseOwnership.organization_id == org_id,
@@ -250,6 +285,21 @@ def same_owner_other_spelling(db, org_id: str, prop, name: str, mk: str) -> Opti
         if ow is not None and ow.mailing_key == mk and toks & _name_tokens(ow.display_name):
             return ow
     return None
+
+
+def completes_cut_name(cut: Optional[str], full: Optional[str]) -> bool:
+    """Is `full` the whole of the name a source cut at its field width?
+    Every word of the cut name is in the full name, except the last, which may
+    itself be cut ("BURNETTE P" -> "PATTIE"). "SAMPLE ROBIN AND SAMPLE P" is
+    completed by "ROBIN & PAT ETAL SAMPLE"; it is NOT completed by "SAMPLE
+    JOHN" (a relative at the same address is a different owner)."""
+    noise = {"AND", "ETAL", "ET", "AL", "THE", "OF"}
+    words = [w for w in re.sub(r"[^A-Z0-9 ]", " ", (cut or "").upper()).split() if w not in noise]
+    have = {w for w in re.sub(r"[^A-Z0-9 ]", " ", (full or "").upper()).split() if w not in noise}
+    if not words or not have:
+        return False
+    *whole, last = words
+    return all(w in have for w in whole) and any(h.startswith(last) for h in have)
 
 
 def _persons_for(name: str, otype: str):

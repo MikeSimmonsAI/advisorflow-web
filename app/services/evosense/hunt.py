@@ -22,6 +22,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -323,7 +324,10 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
             res = OU.start(db, prop, strategy)
             counts["outreach_started" if res.get("started") else "outreach_blocked"] += 1
             db.commit()
-    return finish("partial" if counts["provider_errors"] else "succeeded")
+    # A source can answer a batch but fail for individual properties.
+    # Such a run is PARTIAL, not green, even if no source-wide error fired.
+    property_failures = sum(int(row.get("failed", 0)) for row in counts.get("lookups", {}).values())
+    return finish("partial" if counts["provider_errors"] or property_failures else "succeeded")
 
 
 # ── free public-record lookups (the cost governor's QUEUE_FREE_LOOKUP lane) ──
@@ -348,6 +352,9 @@ def _lookup_decision(db, prop, strategy, provider, cap, decision, reason, outcom
 
 
 BACKLOG_LIMIT = 150
+# Recent negative public lookups are not permanent evidence. Avoid querying the
+# same address three times during adjacent daily strategy hunts; retry later.
+NO_MATCH_RECHECK_HOURS = 2
 
 
 def lookup_backlog(db, org_id: str, exclude=(), limit: int = BACKLOG_LIMIT) -> List[EvoSenseProperty]:
@@ -364,6 +371,29 @@ def lookup_backlog(db, org_id: str, exclude=(), limit: int = BACKLOG_LIMIT) -> L
     return [p for p in q.limit(limit + len(exclude or ())).all() if p.id not in (exclude or ())][:limit]
 
 
+def _lookup_failure_code(error) -> str:
+    """Safe reason code; never expose exception text, customer data or tokens."""
+    from app.services.evosense.sources import base as SRC
+    if isinstance(error, SRC.SourceError):
+        return error.code if error.code in SRC.ERROR_CODES else "OTHER"
+    if error == "MISSING_PROVIDER_RESULT":
+        return "MISSING_PROVIDER_RESULT"
+    if isinstance(error, TimeoutError):
+        return SRC.TIMEOUT_ERR
+    if isinstance(error, (ConnectionError, OSError)):
+        return "NETWORK_ERROR"
+    return "OTHER"
+
+
+def _count_lookup_failure(tally: Dict[str, Any], error, how_many: int = 1) -> str:
+    """A failed lookup contributes one attempted outcome and a coded reason."""
+    code = _lookup_failure_code(error)
+    tally["failed"] += how_many
+    codes = tally.setdefault("failure_codes", {})
+    codes[code] = codes.get(code, 0) + how_many
+    return code
+
+
 def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], counts) -> None:
     """Ask each enabled FREE public-record lookup source about each property it
     covers, recording one governor decision per (property, source):
@@ -374,7 +404,7 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
 
     Paid sources never run here. Results go through the same ingest as any
     record, so every fact keeps its own observation and raw evidence."""
-    from app.models.evosense_models import EvoSenseObservation
+    from app.models.evosense_models import EvoSenseEnrichmentDecision, EvoSenseObservation
     from app.services.evosense.sources import base as SRC
     counts.setdefault("lookups", {})
     for cap in LOOKUP_ORDER:
@@ -388,7 +418,8 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                 continue                                  # NOT CONFIGURED: nothing to decide
             tally = counts["lookups"].setdefault(key, {"queued": 0, "found": 0, "no_match": 0,
                                                        "skipped_fresh": 0, "skipped_down": 0,
-                                                       "failed": 0})
+                                                       "failed": 0, "review": 0, "failure_codes": {}, "duration_ms": 0,
+                                                       "skipped_no_match": 0})
             applicable = [p for p in props if provider.applies(_target(p))]
             if not applicable:
                 continue
@@ -404,6 +435,20 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                 db.commit()
                 continue
             fresh_after = C.now() - timedelta(days=provider.freshness_days)
+            # A no-match is UNKNOWN, not permanent evidence that a case never
+            # exists. But querying the identical property/source in each of
+            # three closely spaced strategy runs wastes public API requests.
+            # One tenant-scoped batch query avoids a per-property SQL sweep.
+            negative_since = C.now() - timedelta(hours=NO_MATCH_RECHECK_HOURS)
+            recent_no_matches = {row[0] for row in (
+                db.query(EvoSenseEnrichmentDecision.property_id)
+                .filter(EvoSenseEnrichmentDecision.organization_id == org_id,
+                        EvoSenseEnrichmentDecision.property_id.in_([p.id for p in applicable]),
+                        EvoSenseEnrichmentDecision.provider_key == key,
+                        EvoSenseEnrichmentDecision.decision == C.L_QUEUE_FREE,
+                        EvoSenseEnrichmentDecision.outcome == "no_match",
+                        EvoSenseEnrichmentDecision.created_at >= negative_since)
+                .distinct().all())}
             queued = []
             for p in applicable:
                 recent = (db.query(EvoSenseObservation.id)
@@ -416,6 +461,12 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                                      "%s already answered within %s days." % (provider.label, provider.freshness_days),
                                      outcome="skipped")
                     tally["skipped_fresh"] += 1
+                elif p.id in recent_no_matches:
+                    _lookup_decision(db, p, strategy, provider, cap, C.L_SKIP_FRESH_DATA,
+                                     "A public-source lookup found no matching record in the last %s hours. "
+                                     "Automatically retry when the short cooldown expires."
+                                     % NO_MATCH_RECHECK_HOURS, outcome="skipped")
+                    tally["skipped_no_match"] += 1
                 else:
                     queued.append(p)
             if not queued:
@@ -424,32 +475,47 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
             cfg.last_attempt_at = C.now()
             by_id = {p.id: p for p in queued}
             targets = [_target(p) for p in queued]
+            # A systemic batch failure still attempted all these lookups.
+            # Old counting put failed=N but queued=0 on that path.
+            tally["queued"] += len(queued)
             db.commit()                 # never idle in a transaction during the lookups (see _hunt_body)
+            started_at = time.monotonic()
             try:
                 res = provider.lookup_many(targets)
             except Exception as exc:  # noqa: BLE001 - systemic source failure: recorded per property
                 _source_failed(db, org_id, strategy, provider, cfg, exc, counts, None)
-                code = exc.code if isinstance(exc, SRC.SourceError) else type(exc).__name__
+                code = _count_lookup_failure(tally, exc, len(queued))
                 for p in queued:
                     _lookup_decision(db, p, strategy, provider, cap, C.L_QUEUE_FREE,
                                      "Free lookup failed: %s. UNKNOWN is not NO — nothing was concluded." % code,
                                      outcome="provider_failed")
-                    tally["failed"] += 1
                 db.commit()
                 continue
+            finally:
+                # Batch latency belongs in the run summary, even on errors.
+                # Never include query URLs, addresses or tokens.
+                tally["duration_ms"] += round((time.monotonic() - started_at) * 1000)
             PV.record_success(cfg, capability=cap)
             cfg.last_verified_at = C.now()
             found = 0
+            results = res.get("results", {})
+            errors = res.get("errors", {})
             for pid, p in by_id.items():
-                tally["queued"] += 1
-                err = res.get("errors", {}).get(pid)
+                err = errors.get(pid)
                 if err is not None:
+                    code = _count_lookup_failure(tally, err)
                     _lookup_decision(db, p, strategy, provider, cap, C.L_QUEUE_FREE,
-                                     "Free lookup failed for this property: %s" % getattr(err, "code", err),
+                                     "Free lookup failed for this property: %s" % code,
                                      outcome="provider_failed")
-                    tally["failed"] += 1
                     continue
-                rec = res.get("results", {}).get(pid)
+                if pid not in results:
+                    # A missing answer is UNKNOWN, not a true no-match.
+                    _count_lookup_failure(tally, "MISSING_PROVIDER_RESULT")
+                    _lookup_decision(db, p, strategy, provider, cap, C.L_QUEUE_FREE,
+                                     "Source omitted this property from its lookup response.",
+                                     outcome="provider_failed")
+                    continue
+                rec = results.get(pid)
                 if not rec:
                     _lookup_decision(db, p, strategy, provider, cap, C.L_QUEUE_FREE,
                                      "%s has no record for this property (not the same as 'none exists')."
@@ -463,9 +529,10 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                     _lookup_decision(db, p, strategy, provider, cap, C.L_QUEUE_FREE,
                                      "Record could not be ingested: %s" % str(exc)[:160],
                                      outcome="provider_failed")
-                    tally["failed"] += 1
+                    _count_lookup_failure(tally, exc)
                     continue
                 if outcome == "review":
+                    tally["review"] += 1
                     _lookup_decision(db, p, strategy, provider, cap, C.L_MANUAL_REVIEW,
                                      "%s answered, but its record might describe a different property; "
                                      "it waits in identity review." % provider.label, outcome="review")

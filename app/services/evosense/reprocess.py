@@ -39,7 +39,7 @@ from app.services.evosense import scoring as SC
 from app.services.evosense import signals as SIG
 from app.services.evosense import valuation as VAL
 from app.services.evosense.ingest import (DERIVATION_VERSION, INSTITUTIONAL, OWNER_TYPE_LABELS,
-                                          owner_flags, owner_type_of)
+                                          name_key, owner_flags, owner_type_of)
 
 RULE_VERSION = "%s + %s" % (DERIVATION_VERSION, SC.PO_VERSION)
 
@@ -198,7 +198,7 @@ def rederive(db, prop, *, strategy=None, weights=None, options=None, when=None) 
         v.estimated_value = v.estimated_value_source = v.estimated_value_at = None
         v.equity_pct = v.equity_basis = None
     notes, how_by_obs = [], {}
-    truncated = False
+    cut_keys: set = set()
     new_sigs: List[SimpleNamespace] = []
     existing = {(s.signal_type, s.source, s.source_reference): s for s in
                 db.query(EvoSenseSignal).filter(EvoSenseSignal.organization_id == prop.organization_id,
@@ -232,7 +232,7 @@ def rederive(db, prop, *, strategy=None, weights=None, options=None, when=None) 
         if rec.get("occupancy"):
             v.occupancy, v.occupancy_source = rec["occupancy"], o.provider_key
         if (rec.get("owner") or {}).get("name_truncated"):
-            truncated = True
+            cut_keys.add(name_key((rec.get("owner") or {}).get("name")))
         for sg in rec.get("signals") or []:
             ref = sg.get("ref") or rec.get("source_reference")
             prior = existing.get((sg["type"], o.provider_key, ref))
@@ -257,6 +257,10 @@ def rederive(db, prop, *, strategy=None, weights=None, options=None, when=None) 
 
     owner = CT.primary_owner(db, prop)
     vo, owner_after, owner_source = None, None, None
+    # A record that cut the owner's name only says THAT spelling is cut. Once
+    # a full-name record completed it (ingest.upsert_owner), the cut record
+    # does not make the owner cut again.
+    truncated = bool(owner is not None and name_key(owner.display_name) in cut_keys)
     if owner is not None:
         otype = owner_type_of(owner.display_name or "")
         flags = owner_flags(owner.display_name or "", truncated=truncated or bool(owner.name_truncated))

@@ -286,6 +286,23 @@ def user_authorized_platform_slugs(user: User, db: Session) -> set:
 # THE AUTHORIZED CONTEXT LIST — built by the server, never by the browser
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _experience(db, user, org, is_program) -> str:
+    try:
+        from app.services.program_experience import experience_for
+        return experience_for(db, user, org, is_program)
+    except Exception:  # pragma: no cover - never let a hint break login
+        _log.warning("could not resolve experience for %s", getattr(org, "id", None), exc_info=True)
+        return "platform"
+
+
+def _roofing_enabled(org) -> bool:
+    try:
+        from app.services.roofing.common import explicitly_enabled
+        return explicitly_enabled(org)
+    except Exception:  # pragma: no cover - never let a hint break login
+        return False
+
+
 def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
     """Every context this caller may enter, and where they should land.
 
@@ -407,13 +424,48 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
             "organization_id": org.id,
             "organization_name": org.name,
             "organization_slug": org.slug,
+            "industry": (org.industry or "").strip().lower(),
             "role": m.role,
             "path": "/workspace/%s" % org.id,
             "is_program": org.id in program_orgs,
+            # Only a workspace whose Roofing program is actually switched on
+            # (explicit `roofing_program` entitlement) opens the Roofing app.
+            # Never by industry or slug alone: a Roofing org whose program was
+            # not set up opened a dead "isn't turned on" screen on every entry
+            # (prod, 2026-10-20). /roofing-ops still enforces it server-side.
+            "program_route": "/program/roofing" if _roofing_enabled(org) else None,
+            # THE EXPERIENCE THIS WORKSPACE OPENS FOR THIS PERSON - the app
+            # renders this shell and never the general platform for a program
+            # workspace (program_experience enforces the Wholesale lock).
+            "experience": _experience(db, user, org, org.id in program_orgs),
         })
 
     platform = [c for c in contexts if c["type"] == "platform"]
     workspaces = [c for c in contexts if c["type"] == "workspace"]
+
+    # PRODUCT DESTINATIONS ARE NOT CUSTOMER MEMBERSHIPS. The Wholesale tile
+    # appears only for an active named product seat *and* an independently
+    # authorized workspace to host it. It never grants cross-tenant entry.
+    product_contexts: List[Dict[str, Any]] = []
+    try:
+        from app.models.sales_models import SCOPE_PRODUCT
+        from app.services.product_access import WHOLESALE
+        named_wholesale = (db.query(Membership.id).filter(
+            Membership.user_id == user.id,
+            Membership.scope_type == SCOPE_PRODUCT,
+            Membership.scope_id == WHOLESALE,
+            Membership.is_active.is_(True)).first() is not None)
+        host = next((w for w in workspaces
+                     if w["organization_id"] == user.organization_id), None)
+        # Wholesale product currently operates from EvoSys's internal org.
+        # Never silently run it against a customer such as SCI or Roofing.
+        if named_wholesale and host and host["organization_slug"] == "evo-integrated-solutions-llc":
+            product_contexts.append({
+                "type": "product", "key": WHOLESALE, "label": "Wholesale Operations",
+                "organization_id": host["organization_id"], "path": "/wholesale/evosense",
+            })
+    except Exception:
+        _log.warning("could not resolve product launcher for %s", user.id, exc_info=True)
 
     # ── where login should land ──
     #
@@ -440,6 +492,14 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
         default = executive[0]
     elif platform:
         default = platform[0]
+    elif product_contexts:
+        # A named product seat hosted by the person's OWN home organization is
+        # their home program (wholesale@ -> Wholesale). Login opens it through
+        # the verified product handoff; every other workspace they hold stays
+        # one switch away. Never a customer workspace such as SCI or Roofing.
+        p0 = product_contexts[0]
+        default = {"type": "product", "key": p0["key"], "organization_id": p0["organization_id"],
+                   "path": "/workspace/%s?product=%s" % (p0["organization_id"], p0["key"])}
     elif len(workspaces) == 1:
         default = workspaces[0]
     elif workspaces:
@@ -506,10 +566,11 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
         "platform_contexts": platform,
         "executive_contexts": executive,
         "workspace_contexts": workspaces,
+        "product_contexts": product_contexts,
         # Only program workspaces and nothing else (no back office, no
         # executive suite, not god): this login sees the program suite only.
         "program_only": bool(workspaces) and all(w.get("is_program") for w in workspaces)
-                        and not platform and not executive
+                        and not product_contexts and not platform and not executive
                         and getattr(user, "role", None) != "god_admin",
         "has_back_office": bool(platform),
         "workspace_count": len(workspaces),

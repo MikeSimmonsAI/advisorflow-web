@@ -67,6 +67,7 @@ import Appointments from './pages/Appointments'
 // app/services/workspace_views.py.
 import WorkspaceView from './pages/WorkspaceView'
 import WorkQueue from './pages/WorkQueue'
+import ProgramAccessPortal from './pages/program/ProgramAccessPortal'
 import AutoSendQueue from './pages/AutoSendQueue'
 import Reports from './pages/Reports'
 import CampaignBuilder from './pages/CampaignBuilder'
@@ -103,6 +104,17 @@ const ProgramCenter = lazyPage(() => import('./pages/program/ProgramCenter'))
 // SCI Live IS the phone command center (Oct 15: updated in place). The old
 // /program/command address redirects here; there is one SCI Live screen.
 const ProgramLive = lazyPage(() => import('./pages/program/command/Command'))
+// EvoSys Pro Roofing: its own shell (/program/roofing/*) and public page (/roofing).
+const RoofingShell = lazyPage(() => import('./pages/roofing/RoofingShell'))
+const RoofingMission = lazyPage(() => import('./pages/roofing/MissionControl'))
+const RoofingQueue = lazyPage(() => import('./pages/roofing/WorkQueue'))
+const RoofingConversations = lazyPage(() => import('./pages/roofing/Conversations'))
+const RoofingInspections = lazyPage(() => import('./pages/roofing/Inspections'))
+const RoofingPerformance = lazyPage(() => import('./pages/roofing/Performance'))
+const RoofingPipeline = lazyPage(() => import('./pages/roofing/Pipeline'))
+const RoofingLeads = lazyPage(() => import('./pages/roofing/LeadsData'))
+const RoofingSettings = lazyPage(() => import('./pages/roofing/Settings'))
+const RoofingLanding = lazyPage(() => import('./pages/roofing/RoofingLanding'))
 const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
 const DealOperationsClosing = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsClosing })))
 const DealOperationsDispositions = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsDispositions })))
@@ -137,6 +149,8 @@ import AIHub from './pages/AIHub'
 import Availability from './pages/Availability'
 import { Unauthorized, NotFound, VerificationUnavailable } from './pages/AccessState'
 import { decideSciDoor, shouldLandInSci, SCI_ORG_NAME } from './auth/sciDoor'
+import { experienceRedirect } from './auth/programExperience'
+import { workspaceProgramDestination, productWorkspaceDestination } from './auth/workspaceProgramDoor'
 import CRMIntegration from './pages/CRMIntegration'
 import CRM from './pages/CRM'
 import TierDefinitions from './pages/TierDefinitions'
@@ -323,7 +337,7 @@ import AIWorkforceEmployee from './pages/AIWorkforceEmployee'
 const GodAIWorkforceBuilder = lazyPage(() => import('./pages/god/GodAIWorkforceBuilder'))
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
-         clearWorkspaceContext, getBranding } from './api/client'
+         clearWorkspaceContext, getBranding, fetchAndStoreBranding } from './api/client'
 import { decideWorkspaceAccess, contextsListWorkspace,
          VERIFYING, AUTHORIZED, DENIED, UNVERIFIED } from './auth/workspaceGuard'
 import { roleOf, routeFeatureDenied } from './auth/workspaceAuthority'
@@ -417,7 +431,23 @@ function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = fa
   // Service Center has its own navigation). Same checks above; only the
   // tenant Layout chrome is left out. The context banner stays.
   if (bare) return <><ContextBanner />{children}</>
-  return <ProgramOnlyGate><Layout><ContextBanner />{children}</Layout></ProgramOnlyGate>
+  return <ProgramOnlyGate><ExperienceGate><Layout><ContextBanner />{children}</Layout></ExperienceGate></ProgramOnlyGate>
+}
+
+/**
+ * A PROGRAM WORKSPACE NEVER DRAWS THE GENERAL PLATFORM. The server says which
+ * experience the current workspace is (Wholesale / SCI / Roofing); any
+ * general-platform page opened there goes to that program's home instead.
+ * Not authorization - the server refuses those APIs as well.
+ */
+function ExperienceGate({ children }) {
+  const { phase, ctx } = useAuthorizedContexts()
+  const user = getCurrentUser()
+  const here = typeof window !== 'undefined' ? window.location.pathname : ''
+  if (phase === 'loading' && !ctx) return null
+  const to = experienceRedirect(ctx, here, getWorkspaceContext(), user?.organization_id, user?.role)
+  if (to) return <Navigate to={to} replace />
+  return children
 }
 
 /**
@@ -524,6 +554,21 @@ function HomeRedirect() {
     if (shouldLandInSci(ctx)) {
       return <Navigate to="/sci" replace />
     }
+    // A named product seat on the person's own home organization is their
+    // home program (server-decided): open it, never a previously selected app.
+    if (def.type === 'product' && def.path) {
+      return <Navigate to={def.path} replace />
+    }
+    // A multi-program administrator starts at the program portal, never the
+    // host organization's generic dashboard or the previously selected app.
+    if (def.type === 'workspace_selector') {
+      return <Navigate to="/workspaces" replace />
+    }
+    const selected = user?.role !== 'god_admin'
+      ? (ctx.workspace_contexts || []).find(w => w.organization_id === getWorkspaceContext())
+      : null
+    const selectedProgram = workspaceProgramDestination(selected)
+    if (selectedProgram) return <Navigate to={selectedProgram} replace />
     if (def.type === 'workspace' && def.organization_id) {
       return <Navigate to={'/workspace/' + def.organization_id} replace />
     }
@@ -576,6 +621,35 @@ function useAuthorizedContexts() {
     error: state.error,
     retry: () => setAttempt(a => a + 1),
   }
+}
+
+/**
+ * Validate the newly selected product workspace branding BEFORE navigating
+ * to a feature-guarded app. Cached SCI or Roofing branding must not cause a
+ * false refusal when switching to Wholesale.
+ */
+function ProductWorkspaceLaunch({ organizationId, destination }) {
+  const [state, setState] = useState('loading')
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    let alive = true
+    setState('loading')
+    fetchAndStoreBranding().then(b => {
+      if (alive) setState(b?.organization_id === organizationId ? 'ready' : 'error')
+    }).catch(() => { if (alive) setState('error') })
+    return () => { alive = false }
+  }, [organizationId, attempt])
+  if (state === 'ready') return <Navigate to={destination} replace />
+  return <main style={{ minHeight: '80vh', display: 'grid', placeItems: 'center', padding: 24 }}>
+    <div style={{ maxWidth: 420, textAlign: 'center' }}>
+      <h1 style={{ fontSize: 23 }}>{state === 'loading' ? 'Opening your program…' : 'Could not open this program'}</h1>
+      {state === 'error' && <>
+        <p>Your workspace could not be verified. Nothing was changed.</p>
+        <button type="button" onClick={() => setAttempt(a => a + 1)}>Try again</button>
+        <a href="/workspaces" style={{ display: 'block', marginTop: 14 }}>Choose another program</a>
+      </>}
+    </div>
+  </main>
 }
 
 /**
@@ -672,7 +746,25 @@ function WorkspaceRoute() {
     // center - never the general workspace tools - for every login, the
     // executive switching in included.
     const entry = (ctx?.workspace_contexts || []).find(w => w && w.organization_id === organizationId)
-    if (entry?.is_program) return <Navigate to="/program" replace />
+    const programDestination = workspaceProgramDestination(entry)
+    if (programDestination) return <Navigate to={programDestination} replace />
+    // A Wholesale workspace (server-decided experience) opens Wholesale through
+    // the verified product hand-off - never the general platform Overview.
+    if (entry?.experience === 'wholesale' && !new URLSearchParams(
+      typeof window !== 'undefined' ? window.location.search : '').get('product')) {
+      const path = productWorkspaceDestination(ctx, organizationId, 'wholesale')
+      if (path) return <ProductWorkspaceLaunch organizationId={organizationId} destination={path} />
+    }
+    // Product entries are likewise proven by the server context list and
+    // the product's own endpoint guard, never by a query parameter alone.
+    const requestedProduct = new URLSearchParams(
+      typeof window !== 'undefined' ? window.location.search : ''
+    ).get('product')
+    if (requestedProduct) {
+      const path = productWorkspaceDestination(ctx, organizationId, requestedProduct)
+      if (path) return <ProductWorkspaceLaunch organizationId={organizationId} destination={path} />
+      return <Navigate to="/workspaces" replace />
+    }
     // ProtectedRoute already wraps its children in Layout + ContextBanner; the
     // second banner this used to add was the same banner drawn twice.
     return <ProtectedRoute><AgencyHomeGate><Overview /></AgencyHomeGate></ProtectedRoute>
@@ -893,41 +985,20 @@ function WorkspaceSelector() {
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   if (!ctx) return null
   const workspaces = ctx.workspace_contexts || []
-  if (workspaces.length === 1) {
+  const products = ctx.product_contexts || []
+  if (workspaces.length === 1 && products.length === 0) {
     return <Navigate to={'/workspace/' + workspaces[0].organization_id} replace />
   }
-  return (
-    <div style={{ maxWidth: 520, margin: '12vh auto', padding: '0 24px' }}>
-      <h1 style={{ fontSize: 22, marginBottom: 4 }}>Choose a workspace</h1>
-      <p style={{ opacity: 0.65, marginTop: 0, fontSize: 14 }}>
-        You have access to more than one.
-      </p>
-      <div style={{ display: 'grid', gap: 10, marginTop: 24 }}>
-        {workspaces.map(w => (
-          <button
-            key={w.organization_id}
-            onClick={() => {
-              setWorkspaceContext(w.organization_id)
-              navigate('/workspace/' + w.organization_id)
-            }}
-            style={{
-              display: 'flex', justifyContent: 'space-between',
-              alignItems: 'baseline', gap: 12, padding: '14px 16px',
-              borderRadius: 10, border: '1px solid rgba(128,128,128,0.28)',
-              background: 'transparent', color: 'inherit', font: 'inherit',
-              fontSize: 15, textAlign: 'left', cursor: 'pointer',
-            }}
-          >
-            <span style={{ fontWeight: 600 }}>{w.organization_name}</span>
-            <span style={{ fontSize: 11, textTransform: 'uppercase',
-                           letterSpacing: '0.04em', opacity: 0.55 }}>
-              {w.role}
-            </span>
-          </button>
-        ))}
-      </div>
-    </div>
-  )
+  return <ProgramAccessPortal contexts={ctx} onChoose={(item) => {
+    // Selection is a context choice, not an authorization grant. The
+    // /workspace route confirms membership again and product routes enforce
+    // their own named seat.
+    setWorkspaceContext(item.organization_id)
+    const target = item.type === 'product'
+      ? '/workspace/' + item.organization_id + '?product=' + encodeURIComponent(item.key)
+      : '/workspace/' + item.organization_id
+    navigate(target)
+  }} />
 }
 
 /**
@@ -1287,6 +1358,21 @@ export default function App() {
         <Route path="/view/rate-requests" element={<Navigate to="/rate-requests" replace />} />
         <Route path="/view/:viewKey" element={<ProtectedRoute><WorkspaceView /></ProtectedRoute>} />
         <Route path="/workqueue" element={<ProtectedRoute><WorkQueue /></ProtectedRoute>} />
+        {/* RoofingShell checks /roofing-ops/status against the CURRENT workspace.
+             Avoid using cached branding for a client-side feature rejection:
+             the previous workspace may be SCI while switching to Roofing.
+             /roofing-ops enforces membership and explicit roofing_program server-side. */}
+        <Route path="/program/roofing" element={<ProtectedRoute bare><RoofingShell /></ProtectedRoute>}>
+          <Route index element={<RoofingMission />} />
+          <Route path="queue" element={<RoofingQueue />} />
+          <Route path="conversations" element={<RoofingConversations />} />
+          <Route path="inspections" element={<RoofingInspections />} />
+          <Route path="performance" element={<RoofingPerformance />} />
+          <Route path="pipeline" element={<RoofingPipeline />} />
+          <Route path="leads" element={<RoofingLeads />} />
+          <Route path="settings" element={<RoofingSettings />} />
+        </Route>
+        <Route path="/roofing" element={<RoofingLanding />} />
         <Route path="/program/live" element={<ProtectedRoute bare><ProgramLive /></ProtectedRoute>} />
         <Route path="/program/command" element={<Navigate to="/program/live" replace />} />
         <Route path="/program" element={<ProtectedRoute bare><ProgramEntry /></ProtectedRoute>} />

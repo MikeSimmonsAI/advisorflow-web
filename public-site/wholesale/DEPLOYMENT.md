@@ -21,9 +21,10 @@
 2. Upload the site's **contents**, not the parent folder, to that subdomain document root. Keep `build.py` and this guide off the public web root if preferred.
 3. Configure TLS certificate for `wholesale.evosyspro.live` and force HTTPS.
 4. PHP 8+ is required for buyer registration. Ensure writable private storage **outside any publicly served document root**. Set server environment `WHOLESALE_INTAKE_DIR` to a private directory, e.g. `/home/ACCOUNT/wholesale-private/`. By default `intake.php` uses `dirname(__DIR__,2)/evosys-wholesale-private`. It rejects a path inside `DOCUMENT_ROOT`.
-5. Optionally set `WHOLESALE_NOTIFY_EMAIL` to an existing mailbox. Only a reference number is emailed, not personal data. Inquiries can be viewed by a trusted operator from the private hosting directory until the backend integration is done. There is **no admin dashboard** for buyer intake in this package.
-6. Create the mailbox or alias `wholesale@evosyspro.live` in the existing email provider and test inbound mail before advertising it as active.
-7. Test seller inquiry, buyer registration, careers, demo link, HTTPS, mobile navigation, and email alias. The buyer registration is a stand-alone secure intake; a future backend adapter may replace private-file storage after Claude finishes that integration.
+5. **Connect investor registrations to EvoSys (recommended).** Set server environment `WHOLESALE_BUYER_INTAKE_URL` to `https://<platform API host>/site-intake/wholesale/<intake key>/buyer-inquiry`, using the SAME intake key the `/sell` page uses (Wholesale Settings → public intake key). Each registration then appears in EvoSys Wholesale → Buyers as a buyer with a buy box (source "website"), and the admins get an in-app notice. The private file is still written first and records whether the hand-off worked (`"evosys": {"sent": true}`), so nothing is lost if the platform is down. Nothing is texted or emailed to the investor.
+6. Optionally set `WHOLESALE_NOTIFY_EMAIL` to an existing mailbox. Only a reference number is emailed, not personal data.
+7. Create the mailbox or alias `wholesale@evosyspro.live` in the existing email provider and test inbound mail before advertising it as active.
+8. Test seller inquiry, buyer registration, careers, demo link, HTTPS, mobile navigation, and email alias. Check a test registration reached EvoSys Wholesale → Buyers, then mark it as a test or delete it there.
 
 ## Important boundaries
 
@@ -32,7 +33,7 @@
 - No property inventory or unverified financial returns are shown.
 - The EvoSys Pro public website is currently versioned in the repository under `public-site/`, deployed manually to GoDaddy per `public-site/DEPLOYMENT.md`. The new site belongs in **`public-site/wholesale/`** and can deploy as a separate subdomain document root.
 - Do **not** publish code with real secrets. Environment variables must be set in the host, not embedded in frontend files.
-- If you want investor submissions flowing directly into EvoSys Pro, have Claude wire the buyer intake payload (`intent=buyer`, full_name, company, email, phone, markets, strategy, budget, notes, contact_permission) to the existing organization-safe wholesale intake after the API contract is approved. Until then, records are only stored privately on the web server.
+- Investor submissions reach EvoSys Pro through `WHOLESALE_BUYER_INTAKE_URL` (step 5). Without it, records are only stored privately on the web server.
 
 ## Quick local preview
 
@@ -50,4 +51,4 @@ PHP preview: `WHOLESALE_INTAKE_DIR=/tmp/evosys-wholesale-private php -S localhos
 - [ ] Both wholesale careers roles published in Careers Manager
 - [ ] `wholesale@evosyspro.live` alias created and tested
 - [ ] Production emails and applicant privacy checked
-- [ ] Optional EvoSys Pro wholesale backend integration (future)
+- [ ] `WHOLESALE_BUYER_INTAKE_URL` set; a test registration shows up in EvoSys Wholesale → Buyers

@@ -109,8 +109,13 @@ def first_messages_late(db: Session, org_id: str, now: datetime) -> Dict:
 
 def bounces_unrecorded(db: Session, org_id: str, now: datetime) -> Dict:
     from app.models.inbound_mailbox_models import InboundMailboxMessage
+    # A shared mailbox contains NDR notices from multiple organizations.
+    # An NDR with no resolved organization is not proof that SCI (or any
+    # tenant) bounced an email. Keep unmatched notices in mailbox review;
+    # this tenant's self-check must only report positively scoped records.
     rows = (db.query(InboundMailboxMessage)
-            .filter(InboundMailboxMessage.received_at >= now - timedelta(days=7),
+            .filter(InboundMailboxMessage.organization_id == org_id,
+                    InboundMailboxMessage.received_at >= now - timedelta(days=7),
                     InboundMailboxMessage.outcome != "bounce").all())
     bad = [(r.subject or "")[:60] for r in rows if _NDR.match((r.subject or "").strip())]
     return _check("bounces_unrecorded", "Every bounce recorded", bad,
