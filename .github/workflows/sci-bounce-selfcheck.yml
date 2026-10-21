@@ -1,0 +1,32 @@
+# SCI POC: never attribute shared-mailbox delivery notices to the wrong tenant.
+name: SCI bounce self-check isolation
+
+on:
+  pull_request:
+    paths:
+      - 'app/services/programs/self_check.py'
+      - 'tests/test_program_self_check.py'
+      - '.github/workflows/sci-bounce-selfcheck.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Compile changed modules
+        run: python -m py_compile app/services/programs/self_check.py tests/test_program_self_check.py
+      - name: SCI bounce, shared-mailbox and self-check regression tests
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -m pytest -q -o addopts='' tests/test_program_self_check.py tests/test_mailbox_bounces.py tests/test_inbound_mailbox.py

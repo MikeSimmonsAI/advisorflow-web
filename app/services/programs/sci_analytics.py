@@ -52,6 +52,13 @@ PRESETS = ("today", "24h", "7d", "30d", "all", "custom")
 
 
 # ── time ────────────────────────────────────────────────────────────────────
+
+def _booked_ct(b):
+    """A booked time is stored as the advisor's LOCAL wall time (see
+    app/services/booking_time.py), never UTC: shown in Central as booked."""
+    from app.services import booking_time
+    return datetime.fromisoformat(booking_time.wire_obj(b)).astimezone(CT)
+
 def _utc_naive(local_dt: datetime) -> datetime:
     return local_dt.astimezone(UTC).replace(tzinfo=None)
 
@@ -361,7 +368,7 @@ class Ledger:
             self.bookings.append({"kind": "appointment", "id": b.id, "lead_id": b.lead_id, "at": at,
                                   "channel": None, "appt_at": b.booked_time,
                                   "text": "%s · %s" % (b.appt_label or "Visit",
-                                                       b.booked_time.replace(tzinfo=UTC).astimezone(CT)
+                                                       _booked_ct(b)
                                                        .strftime("%a %b %-d, %-I:%M %p CT")),
                                   "result": b.status, "touch": touch_before(b.lead_id, at),
                                   "location_id": self.families[b.lead_id]["location_id"]})
@@ -412,6 +419,10 @@ METRICS = {
     "pending": ("Awaiting delivery result", "attempt", "Sent, but the carrier has not reported delivery yet."),
     "families_delivered": ("Families reached", "family", "Unique families with at least one delivered attempt."),
     "replies": ("Replies", "reply", "Genuine family replies (auto-replies and opt-outs excluded)."),
+    "responses_total": ("All meaningful responses", "reply",
+                        "Every real family response including STOP/opt-out, but excluding automated replies."),
+    "engaged_families": ("Families engaged", "family",
+                         "Unique families who responded, including an opt-out, counted once per period."),
     "repliers": ("Families who replied", "family", "Unique families with a genuine reply."),
     "ai_messages": ("AI replies sent", "message", "Messages the SCI AI sent while talking with a family."),
     "staff_messages": ("Staff replies sent", "message", "Messages a person sent from SCI Live."),
@@ -512,12 +523,16 @@ def rows(L: Ledger, metric: str, w: Dict, f: Optional[Dict] = None) -> List[Dict
         return _families_from(L, [a for a in att if a["touch"] >= 2], "follow-up touches")
     if metric == "consent_blocked":
         return [b for b in L.blocked if inw(b) and _filters_ok(b, f)]
-    src = {"replies": L.replies, "ai_messages": L.ai_msgs, "staff_messages": L.staff_msgs,
+    src = {"replies": L.replies, "responses_total": L.replies + L.opt_outs,
+           "ai_messages": L.ai_msgs, "staff_messages": L.staff_msgs,
            "offers": L.offers, "appointments": L.bookings, "opt_outs": L.opt_outs}
     if metric in src:
         return [r for r in src[metric] if inw(r) and _filters_ok(r, f)]
     if metric == "repliers":
         return _families_from(L, [r for r in L.replies if inw(r) and _filters_ok(r, f)], "replies")
+    if metric == "engaged_families":
+        return _families_from(L, [r for r in (L.replies + L.opt_outs)
+                                  if inw(r) and _filters_ok(r, f)], "meaningful responses")
     if metric in SNAPSHOT:
         out = []
         for lid, fam in L.families.items():
@@ -581,17 +596,37 @@ def summary(L: Ledger, w: Dict, location_id: Optional[str] = None, daily_batch: 
     counts = {k: count(L, k, w, f) for k in METRICS}
     all_time = {k: count(L, k, allw, f) for k in METRICS if k not in SNAPSHOT}
 
+    # Percentages must represent real denominators. Unique responding families
+    # are intersected with the contacted cohort in the SAME window: replies
+    # arriving today from earlier outreach still count as activity, but must
+    # not inflate today's contacted-cohort response rate beyond 100%.
+    contacted_ids = {r["lead_id"] for r in rows(L, "families_contacted", w, f)}
+    engaged_ids = {r["lead_id"] for r in rows(L, "engaged_families", w, f)}
+    replying_ids = {r["lead_id"] for r in rows(L, "repliers", w, f)}
+    offered_ids = {r["lead_id"] for r in rows(L, "offers", w, f)}
+    booked_ids = {r["lead_id"] for r in rows(L, "appointments", w, f)}
     # touch analytics
     touches = []
     for t in ("1", "2", "3", "4+"):
         tf = dict(f, touch=t)
         fam = count(L, "families_contacted", w, tf)
         rep = count(L, "repliers", w, tf)
-        touches.append({"touch": t, "attempts": count(L, "attempts", w, tf), "families": fam,
-                        "delivered": count(L, "delivered", w, tf), "failed": count(L, "failed", w, tf),
+        cohort = {r["lead_id"] for r in rows(L, "families_contacted", w, tf)}
+        eng = {r["lead_id"] for r in rows(L, "engaged_families", w, tf)}
+        attempts = count(L, "attempts", w, tf)
+        delivered = count(L, "delivered", w, tf)
+        responses = count(L, "responses_total", w, tf)
+        opted_out = count(L, "opt_outs", w, tf)
+        touches.append({"touch": t, "attempts": attempts, "families": fam,
+                        "delivered": delivered, "failed": count(L, "failed", w, tf),
                         "replies": count(L, "replies", w, tf), "repliers": rep,
                         "offers": count(L, "offers", w, tf), "appointments": count(L, "appointments", w, tf),
-                        "reply_rate": _pct(rep, fam)})
+                        "reply_rate": _pct(rep, fam),
+                        "engaged": len(eng & cohort),
+                        "engagement_rate": _pct(len(eng & cohort), fam),
+                        "delivery_rate": _pct(delivered, attempts),
+                        "responses_total": responses, "opt_outs": opted_out,
+                        "opt_out_share": _pct(opted_out, responses)})
     fc = counts["families_contacted"]
     avg = round(counts["attempts"] / fc, 2) if fc else None
     afc = all_time["families_contacted"]
@@ -629,6 +664,15 @@ def summary(L: Ledger, w: Dict, location_id: Optional[str] = None, daily_batch: 
                         "all_time": all_time.get(k), "snapshot": k in SNAPSHOT} for k in METRICS},
         "rates": {"delivery_rate": _pct(counts["delivered"], counts["delivered"] + counts["failed"]),
                   "reply_rate": _pct(counts["repliers"], counts["families_contacted"]),
+                  "engagement_rate": _pct(len(contacted_ids & engaged_ids), len(contacted_ids)),
+                  "engaged_contacted": len(contacted_ids & engaged_ids),
+                  "engagement_denominator": len(contacted_ids),
+                  "opt_out_share": _pct(counts["opt_outs"], counts["responses_total"]),
+                  "offer_to_repliers_rate": _pct(len(offered_ids & replying_ids), len(replying_ids)),
+                  "offered_repliers": len(offered_ids & replying_ids),
+                  "booked_after_offer_rate": _pct(len(booked_ids & offered_ids), len(offered_ids)),
+                  "booked_offered": len(booked_ids & offered_ids),
+                  "offered_families": len(offered_ids),
                   "offer_rate": _pct(counts["offers"], counts["repliers"]),
                   "booking_rate": _pct(counts["appointments"], counts["families_contacted"]),
                   "avg_touches_per_family": avg, "avg_touches_per_family_all_time": avg_all},
@@ -873,7 +917,7 @@ def journey(db: Session, org_id: str, lead_id: str) -> Optional[Dict]:
             add(b.confirmed_at or b.created_at, "booked",
                 "Appointment confirmed" if b.calendar_event_id else "Appointment booked (not yet on calendar)",
                 "%s · %s" % (b.appt_label or "Visit",
-                             b.booked_time.replace(tzinfo=UTC).astimezone(CT).strftime("%a %b %-d, %-I:%M %p CT")),
+                             _booked_ct(b).strftime("%a %b %-d, %-I:%M %p CT")),
                 result=b.status)
     ev.sort(key=lambda e: e["at"])
     for e in ev:

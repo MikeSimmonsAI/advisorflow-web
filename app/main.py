@@ -943,6 +943,9 @@ from app.routers import energy_ops_router  # noqa: E402
 app.include_router(energy_ops_router.router)   # /energy-ops/* follow-up & renewal queues, move concierge
 from app.routers.agency_router import router as agency_router  # noqa: E402
 app.include_router(agency_router)   # /agency (Max Life Command; gated by `insurance_agency`)
+from app.routers import roofing_router  # noqa: E402
+app.include_router(roofing_router.router)       # /roofing-ops (EvoSys Pro Roofing; gated by `roofing_program`)
+app.include_router(roofing_router.god_router)   # /god/roofing/setup|demo (platform owner)
 from app.routers.push_router import router as push_router  # noqa: E402
 app.include_router(push_router)   # /push/* web push subscriptions (configured:false until VAPID keys + pywebpush)
 from app.routers.god_demo_router import router as god_demo_router  # noqa: E402

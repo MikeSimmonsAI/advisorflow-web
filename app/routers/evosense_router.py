@@ -1831,3 +1831,74 @@ def events(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db),
     return {"items": [{"id": e.id, "action": e.action, "summary": e.summary, "actor": e.actor_type,
                        "property_id": e.property_id, "strategy_id": e.strategy_id,
                        "is_test": e.is_test, "at": V._iso(e.created_at)} for e in rows]}
+
+
+# ── Tarrant tax-roll misread (Oct 17-19, 2026): targeted repair ─────────────
+
+@router.get("/roll-fix/status")
+def roll_fix_status(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Read-only: how many misread records are still in scope here, and the
+    repair runs so far (for the Controls screen). Admin only."""
+    from app.models.evosense_models import EvoSenseReprocessRun
+    from app.services.evosense import roll_layout_fix as RF
+    _admin(user, db)
+    org_id = svc.write_org_id(db, user)
+    runs = (db.query(EvoSenseReprocessRun)
+            .filter(EvoSenseReprocessRun.organization_id == org_id,
+                    EvoSenseReprocessRun.rule_version == RF.VERSION)
+            .order_by(EvoSenseReprocessRun.created_at.desc()).limit(5).all())
+    return {"in_scope": len(RF.affected_observations(db, org_id)), "hunt_running": RF._hunt_running(db, org_id),
+            "runs": [{"id": r.id, "status": r.status, "property_count": r.property_count,
+                      "applied_at": V._iso(r.applied_at), "rolled_back_at": V._iso(r.rolled_back_at),
+                      "totals": (C.jload(r.summary, {}) or {}).get("totals")} for r in runs]}
+
+
+@router.post("/roll-fix/dry-run")
+def roll_fix_dry_run(db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                     _g: User = Depends(require_not_observation)):
+    """Exactly what the targeted repair would change, computed by running it
+    inside a savepoint that is rolled back. Writes nothing. Admin only."""
+    from app.services.evosense import roll_layout_fix as RF
+    _admin(user, db)
+    org_id = svc.write_org_id(db, user)
+    try:
+        out = RF.dry_run(db, org_id)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc))
+    db.rollback()
+    return out
+
+
+@router.post("/roll-fix/apply")
+def roll_fix_apply(payload: ConfirmIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                   _g: User = Depends(require_not_observation)):
+    from app.services.evosense import roll_layout_fix as RF
+    _admin(user, db)
+    org_id = svc.write_org_id(db, user)
+    try:
+        out = RF.apply(db, org_id, confirm=payload.confirm, user=user)
+    except ValueError as exc:
+        db.rollback()
+        busy = "hunt is running" in str(exc) or "already repaired" in str(exc)
+        raise HTTPException(status_code=409 if busy else 422, detail=str(exc))
+    db.commit()
+    return out
+
+
+@router.post("/roll-fix/{run_id}/rollback")
+def roll_fix_rollback(run_id: str, payload: ConfirmIn, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    from app.services.evosense import roll_layout_fix as RF
+    _admin(user, db)
+    org_id = svc.write_org_id(db, user)
+    if payload.confirm != "ROLLBACK %s" % run_id:
+        raise HTTPException(status_code=422, detail="Type ROLLBACK %s to confirm." % run_id)
+    try:
+        out = RF.rollback(db, org_id, run_id, user=user)
+    except ValueError as exc:
+        db.rollback()
+        changed = "Changed since the repair" in str(exc)
+        raise HTTPException(status_code=409 if changed else 404, detail=str(exc))
+    db.commit()
+    return out

@@ -277,6 +277,19 @@ def _event_minutes(booking, body) -> int:
     return 30
 
 
+def _program_slot(db, lead, slot_display):
+    """The ISO local time of an outreach-program (SCI) booking, else None."""
+    if lead is None or not slot_display:
+        return None
+    try:
+        from app.services.programs.identity import program_for_org
+        if program_for_org(db, lead.organization_id) is None:
+            return None
+        return datetime.strptime(str(slot_display).strip()[:16], "%Y-%m-%dT%H:%M")
+    except Exception:                                    # noqa: BLE001
+        return None
+
+
 @router.post("/booking-confirmed")
 async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_db)):
     """
@@ -304,6 +317,7 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
     lead = None
 
     org = None
+    _prog_slot = None
     if booking:
         advisor = db.query(User).filter(User.id == booking.user_id).first()
         lead = db.query(Lead).filter(Lead.id == booking.lead_id).first()
@@ -355,6 +369,27 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
                 "note": "This appointment was already confirmed for this time.",
             }
 
+        # SCI: the time must still be open on this advisor's calendar - the
+        # booking page used to take a time another family already held, and a
+        # page booking with no connected calendar never held its time.
+        _prog_slot = _program_slot(db, lead, slot_display)
+        if _prog_slot is not None and advisor is not None:
+            try:
+                db.query(User).filter(User.id == advisor.id).with_for_update().first()
+            except Exception:                            # noqa: BLE001
+                pass
+            # The length the offer used: the setter sends it; the booking page
+            # offers 60-minute visits (its own link may carry another type's length).
+            try:
+                _mins = int(body.get("duration_minutes") or 60)
+            except (TypeError, ValueError):
+                _mins = 60
+            _res = compute_day_slots(db, advisor, _prog_slot.date(), program_visit=True, minutes=_mins)
+            if _prog_slot.strftime("%Y-%m-%dT%H:%M:00") not in set(_res.get("slots") or []):
+                logger.warning("booking-confirmed: booking=%s slot %s is not open - refusing", booking.id, slot_display)
+                raise HTTPException(status_code=409, detail="That time is no longer available. Please pick another time.")
+            booking.booked_time = _prog_slot
+            booking.appt_duration = _mins
         booking.status = "booked"
         from app.services.programs import booking_events as _be
         _be.add_pending(db, booking, lead, _be.BOOKED, slot_display)
@@ -572,7 +607,11 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
 
     # ── Send FSA SMS notification ─────────────────────────────────────────────
     sms_result = {"success": False}
-    if advisor:
+    # SCI families are paged through the program's one-alert ledger, never by
+    # the advisor's legacy text / booking email as well (a booking used to
+    # page the owner two or three times).
+    _sci = _prog_slot is not None
+    if advisor and not _sci:
         try:
             notification_phone = getattr(advisor, 'notification_phone', None) or getattr(advisor, 'twilio_phone_number', None)
             if notification_phone and advisor.twilio_account_sid and advisor.twilio_auth_token_encrypted:
@@ -609,7 +648,19 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
 
     # ── Send advisor notification email ──────────────────────────────────────
     email_result = {"success": False}
-    if advisor and lead:
+    if _sci and lead is not None and booking is not None and not body.get("from_setter"):
+        # Booked by the family on the booking page: the team hears once, the
+        # same way as a setter booking (the setter pages for its own).
+        try:
+            from app.services.test_records import is_owner_test_lead
+            from app.services.programs.identity import program_for_org
+            from app.services.programs import appointments as _A
+            _prog = program_for_org(db, lead.organization_id)
+            if _prog is not None and not is_owner_test_lead(lead):
+                _A.notify_team_booked(db, _prog, lead, _prog_slot, _A.VISIT)
+        except Exception as e:                           # noqa: BLE001
+            logger.exception("booking-confirmed: SCI team page failed: %s", e)
+    if advisor and lead and not _sci:
         try:
             _send_booking_notification_email(advisor, lead, appt_label, slot_display, db)
             email_result = {"success": True}
@@ -1310,6 +1361,17 @@ def compute_day_slots(db: Session, advisor, target_date, *, program_visit: bool,
             today = datetime.now(timezone.utc).astimezone(_ZI("America/Chicago")).date()
         except Exception:                                # noqa: BLE001
             today = date_cls.today()
+
+    # Never a past day, a weekend, or beyond the two-week window - for EVERY
+    # caller (booking page, setter offers, still_free re-checks, staff), not
+    # only the public /slots route (Oct 20: a time offered yesterday and a
+    # Saturday the AI chose were both booked).
+    if target_date < today:
+        return {"date": date, "advisor_id": advisor_id, "slots": [], "reason": "Date is in the past"}
+    if target_date > today + timedelta(days=14):
+        return {"date": date, "advisor_id": advisor_id, "slots": [], "reason": "Date is more than 14 days out"}
+    if target_date.weekday() >= 5:
+        return {"date": date, "advisor_id": advisor_id, "slots": [], "reason": "Weekend — no appointments"}
 
     # ── Build all candidate 30-min slots 9am-5pm Central ─────────────────────
     # We work in UTC internally; Chicago is UTC-5 (CST) / UTC-6 (CDT).

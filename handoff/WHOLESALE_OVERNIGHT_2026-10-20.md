@@ -117,3 +117,32 @@ Options:
 ### Next command if resuming
 `git checkout feature/wholesale-opportunity-queue && python -m pytest -p no:cacheprovider -o addopts="" -n 2 tests/test_wholesale_opportunity_queue.py`
 — then the Collin/Denton proposal, or the #245 production steps once Mike says GO.
+
+---
+
+## DAY UPDATE — 2026-10-20 (status as of ~12:30 CT)
+- **#245 (parser fix)** was merged and deployed overnight as 29b2d4b. Production has read 339 records with
+  `tarrant_tax_roll/3`. The paragraphs above that ask for a GO on #245 are out of date.
+- **#253: Tarrant cleanup tool only, from main.**
+  - Independently reviewed: the first pass found 1 blocker and 6 should-fix items, all fixed with tests. The second
+    pass found no blockers.
+  - Proof on a copy of today's production data: a real apply changed 0 rows outside scope, and the undo restored
+    everything exactly.
+  - Expected dry-run code: `APPLY ROLL FIX 24ad3d2d2a72cb3e`.
+  - **Not applied.** It needs: merge → dry run → Mike's GO → apply. The procedure is in #253's runbook.
+- **#252: fix for today's failed hunt (PendingRollbackError).**
+  - The Tired Landlord hunt held a transaction open more than 5 minutes during the Dallas 311 lookups, and Postgres
+    closed the connection (logged at 14:25:16 UTC).
+  - The fix closes the transaction before every source call. Its test fails on main and passes with the fix.
+- **#242:** main merged in (now includes #245 and Atlantis #250); 801 tests pass.
+- **#247:** brought up to date with the rest.
+  - The old roll-fix copy was removed, because #253 ships the reviewed one.
+  - Found and fixed: `POST /owner-names/apply` had lost its commit/return in the overnight conflict resolution. A
+    test assertion was written so that it couldn't catch this; that is fixed too.
+  - When #253 lands first, #247 will have a one-file append conflict in `evosense_router.py`. Keep both blocks.
+- **#248 and #249:** brought up to date with #242; tests pass.
+
+**Merge order now:**
+1. #253 and #252 (independent, from main).
+2. #242.
+3. #247 / #248 / #249, each re-checked against main at that point.

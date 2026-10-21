@@ -32,6 +32,7 @@ import './controls/pc.css'
 import EvoEvaluation from './EvoEvaluation'
 import EvoLists from './EvoLists'
 import SkipTraceCostPanel from '../ops/SkipTraceCostPanel'
+import RollFixPanel from './RollFixPanel'
 import * as M from './controls/model'
 import {
   CapabilityCard, CapabilityDrawer, FilterBar, KindTag, Latest, Pill, ProviderDrawer, Stat,
@@ -547,6 +548,8 @@ export default function EvoControls() {
             })}
           </div>
         </Panel>
+
+        {isAdmin ? <RollFixPanel /> : null}
 
         <Panel title="Opportunity scoring weights" hint={`deterministic · ${ctl.score_version || ''}${ctl.score_weights ? ' · customised' : ' · defaults'} · admin only`}>
           <div className="evo-form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>

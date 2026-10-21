@@ -141,7 +141,15 @@ PUBLIC_BOOKING_SOURCES = (PUBLIC_BOOKING_CONFIRMATION, PUBLIC_BOOKING_INTERNAL,
 #   guessing which variable to set.
 WHOLESALE_BUYER_DISPOSITION = "wholesale_buyer_disposition"
 
+# ENERGY TEAM ALERT (Atlantis Team & Alerts). An email to the workspace's OWN
+# team - its verified shared alert mailbox and teammates who turned email
+# alerts on - saying a new request arrived. Never a customer, so not a
+# send_source and no lead history row. Defaults OFF like everything here; the
+# Team & Alerts screen reports this switch by name while it is off.
+ENERGY_TEAM_ALERT = "energy_team_alert"
+
 _ENV_BY_SOURCE = {
+    ENERGY_TEAM_ALERT:         "OUTBOUND_EMAIL_ENERGY_TEAM_ALERT",
     WHOLESALE_BUYER_DISPOSITION: "OUTBOUND_EMAIL_WHOLESALE_BUYER_DISPOSITION",
     _src.BULK_AI:              "OUTBOUND_EMAIL_BULK_AI",
     _src.VOICE_BOOKING_LINK:   "OUTBOUND_EMAIL_VOICE_BOOKING_LINK",
