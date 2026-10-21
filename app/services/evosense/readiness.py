@@ -318,10 +318,58 @@ def _addr(p) -> str:
     return ", ".join(x for x in (p.street_address, p.city, p.zip_code) if x) or "(no address)"
 
 
+def _next_of(steps) -> Optional[Dict[str, Any]]:
+    """for_property's rule, on a (possibly partial) list of steps."""
+    nxt = None
+    for s in steps:
+        if s["state"] == STOP or s["state"] != DONE:
+            nxt = s
+            break
+    return nxt
+
+
+def _queue_row(db, prop, strategy, work, has_handoff: bool) -> Optional[Dict[str, Any]]:
+    """The queue's view of one property: the SAME answer as for_property's
+    `next`, computed only as far as needed.
+
+    for_property evaluates all six steps; the queue only needs the first one
+    that is not done. That is exact unless a later step overrides an earlier
+    one, which happens only when a hand-off exists (qualified/deal DONE) or
+    the property was promoted (excluded from the queue). So: a property with
+    a hand-off gets the full evaluation; every other one stops at its first
+    unfinished step. (Production 2026-10-21: 500 full evaluations took 27 s.)"""
+    if has_handoff:
+        r = for_property(db, prop, strategy)
+        r["work"] = work
+        return r
+    th = _threshold(strategy)
+    if prop.opportunity_score is not None and prop.opportunity_score < th:
+        return None                                   # evidence STOP: never in the queue
+    steps = []
+    if prop.opportunity_score is None:
+        steps.append(evidence_step(db, prop, strategy))
+    else:
+        steps.append(_step("evidence", "Distress evidence", DONE, None))
+    for fn in (owner_step, contact_step, conversation_step, qualified_step, deal_step):
+        if _next_of(steps) is not None:
+            break
+        steps.append(fn(db, prop))
+    nxt = _next_of(steps)
+    if nxt is None:
+        return None
+    return {"version": VERSION, "property_id": prop.id, "address": _addr(prop),
+            "county": prop.county, "score": prop.opportunity_score, "status": prop.status,
+            "strategy": getattr(strategy, "name", None),
+            "next": {"step": nxt["key"], "label": nxt["label"], "action": nxt["action"],
+                     "detail": nxt["detail"], "who": nxt.get("who"), "stopped": nxt["state"] == STOP},
+            "work": work}
+
+
 def queue(db, org_id: str, *, limit: int = 50, include_test: bool = False,
           county: Optional[str] = None, step: Optional[str] = None) -> Dict[str, Any]:
     """The properties that deserve action first, and what to do about each."""
-    from app.services.evosense import evaluate as EV
+    from app.models.evosense_models import EvoSenseStrategy
+    from app.models.wholesale_models import EXCEPTION_OPEN_STATUSES, WholesaleWorkException
     q = (db.query(EvoSenseProperty)
          .filter(EvoSenseProperty.organization_id == org_id,
                  EvoSenseProperty.archived_at.is_(None),
@@ -332,10 +380,25 @@ def queue(db, org_id: str, *, limit: int = 50, include_test: bool = False,
     if county:
         q = q.filter(func.lower(EvoSenseProperty.county) == county.lower())
     cands = q.order_by(EvoSenseProperty.opportunity_score.desc().nullslast()).limit(500).all()
+    ids = [p.id for p in cands] or ["-"]
+    # One query each for what used to be asked per property.
+    strategies = {s.id: s for s in db.query(EvoSenseStrategy).filter(EvoSenseStrategy.organization_id == org_id)}
+    work: Dict[str, List[Dict[str, Any]]] = {}
+    for r in (db.query(WholesaleWorkException)
+              .filter(WholesaleWorkException.organization_id == org_id,
+                      WholesaleWorkException.subject_type == "evosense_property",
+                      WholesaleWorkException.subject_id.in_(ids),
+                      WholesaleWorkException.status.in_(EXCEPTION_OPEN_STATUSES))
+              .order_by(WholesaleWorkException.priority.asc()).all()):
+        work.setdefault(r.subject_id, []).append({"id": r.id, "kind": r.kind, "title": r.title,
+                                                  "status": r.status, "assigned_to_id": r.assigned_to_id})
+    handoffs = {pid for (pid,) in db.query(EvoSenseHandoff.property_id)
+                .filter(EvoSenseHandoff.organization_id == org_id, EvoSenseHandoff.property_id.in_(ids))}
     rows = []
     for p in cands:
-        r = for_property(db, p, EV.strategy_for(db, p))
-        if r["next"] is None or r["next"]["stopped"]:
+        strategy = strategies.get(p.best_strategy_id or p.first_strategy_id)
+        r = _queue_row(db, p, strategy, work.get(p.id, []), p.id in handoffs)
+        if r is None or r["next"] is None or r["next"]["stopped"]:
             continue
         if step and r["next"]["step"] != step:
             continue
