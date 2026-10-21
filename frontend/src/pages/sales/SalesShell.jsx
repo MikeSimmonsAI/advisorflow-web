@@ -10,14 +10,17 @@
  * which role, and which permissions. That is presentation only: every route is
  * re-checked server-side. Hiding a nav item is not access control.
  */
-import { createContext, useContext, useEffect, useState, useCallback } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react'
+import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { api, logout } from '../../api/client'
 import GodReturnBar from '../../components/GodReturnBar'
 import ContextSwitcher from '../../components/ContextSwitcher'
 import ProgramSwitchLink from '../../components/ProgramSwitchLink'
 import '../../components/ContextSwitcher.css'
 import SalesStyles from './SalesStyles'
+import SimpleStyles from './SimpleStyles'
+import { Icon } from './SimpleParts'
+import { followUpList } from './simpleSales'
 import { initials, ErrorBar } from './parts'
 
 const SalesCtx = createContext(null)
@@ -26,46 +29,43 @@ export function useSales() {
   return useContext(SalesCtx)
 }
 
-// A manager is two people at once: an individual seller with their own book,
-// and the person running a team. Splitting the nav on exactly that line is the
-// point - MY WORK is "what do I owe?", MY TEAM is "what does my team need from
-// me?". The same deal appears under both only when the manager owns it, which
-// is honest rather than duplicated.
-//
-// Items marked soon:true render visibly disabled with a marker rather than
-// being hidden, so the shape of the workspace is legible without anything
-// unfinished being clickable.
+// THE APPROVED SIMPLE NAV (Lane F, #281 — "Simplified Sales Workflow – My
+// Day"). Seven items in the order the approved design shows them, so a new rep
+// sees what to do and nothing else. A manager is still two people at once: this
+// is their MY WORK as a seller, and MY TEAM below is unchanged.
 const NAV = [
-  { to: '/sales',              label: 'My Day',            icon: '⌂', end: true },
-  { to: '/sales/pipeline',     label: 'My Pipeline',       icon: '⇢', countKey: 'active_opportunities' },
-  { to: '/sales/prospects',    label: 'Prospects',         icon: '◇' },
-  { to: '/sales/availability', label: 'My Availability',   icon: '◷' },
+  { to: '/sales',              label: 'My Day',         icon: 'home', end: true },
+  { to: '/sales/prospects',    label: 'Leads',          icon: 'users' },
+  { to: '/sales/follow-ups',   label: 'Follow Ups',     icon: 'phone', countKey: 'follow_ups_due' },
+  { to: '/sales/appointments', label: 'Appointments',   icon: 'calendar' },
   // DEMOS TO BUILD is MY WORK, not a manager screen. `/sales/demo-queue`
-  // scopes to the caller's own book exactly as the pipeline does, so a rep
-  // sees the demos on their deals and a manager sees the brand's — the same
-  // list, narrowed by the same rule, rather than two screens.
-  { to: '/sales/demos',        label: 'Demos to Build',   icon: '▣' },
-  // THE DEMO SUITE, REACHABLE AT LAST. It has existed and worked for as long
-  // as somebody knew to type /demo-suite into the address bar, which is not a
-  // way to ship a sales tool. `present_demo` is the server's own answer from
-  // the `demo_suite` capability grant — the same row the Suite's routes check
-  // — so this item and the door behind it cannot disagree.
-  { to: '/demo-suite',         label: 'Demo Suite',       icon: '▶',
-    permission: 'present_demo' },
-  { to: '/sales/onboarding',   label: 'Sold / Onboarding', icon: '✓' },
-  // A rep's OWN compensation, scoped by their token server-side. It belongs in
-  // My Work rather than under the manager group: what you have earned is your
-  // own business, and needing a manager's nav to see it would be absurd.
-  { to: '/sales/my-compensation', label: 'My Compensation', icon: '＄' },
+  // scopes to the caller's own book exactly as the pipeline does.
+  { to: '/sales/demos',        label: 'Demos to Build', icon: 'play' },
+  { to: '/sales/pipeline',     label: 'Pipeline',       icon: 'pipeline' },
+  { to: '/sales/my-results',   label: 'Reports',        icon: 'chart' },
 ]
 
-// Team Availability is the one item that belongs to BOTH groups by right: a rep
-// needs it to find a colleague's free time, a manager needs it to run the week.
-// Rather than render the same link twice, it moves group depending on who is
-// looking. Rendering it in both places is the "confusing duplicate link" this
-// nav is meant to avoid.
-const REP_ONLY_NAV = [
-  { to: '/sales/team', label: 'Team Availability', icon: '▦' },
+// Everything a rep could reach before the redesign and still can — kept one
+// click away under "More" instead of crowding the seven items above. Nothing
+// here was removed; Sold / Onboarding is where a Won deal hands off.
+const MORE_NAV = [
+  { to: '/sales/book',            label: 'Book a Demo',       icon: 'calendar' },
+  { to: '/sales/pipeline/stages', label: 'All Deal Stages',   icon: 'pipeline' },
+  { to: '/sales/availability',    label: 'My Availability',   icon: 'calendar' },
+  // THE DEMO SUITE. `present_demo` is the server's own answer from the
+  // `demo_suite` capability grant — the same row the Suite's routes check.
+  { to: '/demo-suite',            label: 'Demo Suite',        icon: 'play',
+    permission: 'present_demo' },
+  { to: '/sales/onboarding',      label: 'Sold / Onboarding', icon: 'folder' },
+  // A rep's OWN compensation, scoped by their token server-side.
+  { to: '/sales/my-compensation', label: 'My Compensation',   icon: 'chart' },
+]
+
+// Team Availability belongs to BOTH groups by right: a rep needs it to find a
+// colleague's free time, a manager needs it to run the week. It sits under
+// More for a rep and under MY TEAM for a manager, never in both.
+const REP_ONLY_MORE = [
+  { to: '/sales/team', label: 'Team Availability', icon: 'team' },
 ]
 
 // Shown only to a manager - `permission` names the flag on /sales/me that
@@ -73,17 +73,17 @@ const REP_ONLY_NAV = [
 // server-side, so a rep who types the URL gets a 403, not a screen. The nav
 // item is a courtesy, never the control.
 const MANAGER_NAV = [
-  { to: '/sales/manager',       label: 'Team Command',      icon: '◎',
+  { to: '/sales/manager',       label: 'Team Command',      icon: 'home',
     permission: 'view_team_pipeline', end: true },
-  { to: '/sales/calendar',      label: 'Team Calendar',     icon: '▤',
+  { to: '/sales/calendar',      label: 'Team Calendar',     icon: 'calendar',
     permission: 'view_team_pipeline' },
-  { to: '/sales/team-pipeline', label: 'Team Pipeline',     icon: '⇉',
+  { to: '/sales/team-pipeline', label: 'Team Pipeline',     icon: 'pipeline',
     permission: 'view_team_pipeline' },
-  { to: '/sales/team',          label: 'Team Availability', icon: '▦',
+  { to: '/sales/team',          label: 'Team Availability', icon: 'team',
     permission: 'view_team_pipeline' },
-  { to: '/sales/proposals',     label: 'Demos / Proposals', icon: '◈',
+  { to: '/sales/proposals',     label: 'Demos / Proposals', icon: 'play',
     permission: 'view_team_pipeline' },
-  { to: '/sales/salespeople',   label: 'Salespeople',       icon: '⚇',
+  { to: '/sales/salespeople',   label: 'Salespeople',       icon: 'users',
     permission: 'view_team_pipeline' },
   // What the compensation rules PRODUCED — earned, on hold, payable, paid —
   // and the settlement of it. Not the configuration screen: rates and plans
@@ -91,23 +91,37 @@ const MANAGER_NAV = [
   // settling payments needs platform finance authority on top.
   // state tells CompensationCommand that it was opened from SalesShell so it
   // can wrap itself in SalesShell chrome instead of a disconnected Back button.
-  { to: '/sales/compensation',  label: 'Compensation',      icon: '＄',
+  { to: '/sales/compensation',  label: 'Compensation',      icon: 'chart',
     permission: 'view_team_pipeline', state: { fromSales: true } },
   // Reports is genuinely not built, and its PURPOSE has not been decided yet.
   // Team Command was built on the principle that a manager screen measuring
   // effort instead of obstacles becomes a stick; Reports may cut against that,
   // so it waits for a decision rather than for an engineer. Shown disabled so
   // nobody wonders whether it is hiding somewhere.
-  { to: '/sales/reports',       label: 'Reports',           icon: '◱',
+  { to: '/sales/reports',       label: 'Team Reports',           icon: 'chart',
     permission: 'view_team_pipeline', soon: true },
 ]
 
 export default function SalesShell({ title, subtitle, actions, children }) {
   const nav = useNavigate()
+  const loc = useLocation()
   const [ctx, setCtx] = useState(null)
   const [counts, setCounts] = useState({})
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
+
+  // The Follow Ups badge is counted from the SAME list the Follow Ups screen
+  // shows — the caller's own open deals due today or earlier, in the TEAM's
+  // time zone — so the badge and the page can never disagree. Screens call
+  // refreshCounts() after a save so the badge moves with the list.
+  const loadCounts = useCallback(async (tz) => {
+    try {
+      const o = await api.get('/sales/opportunities')
+      const all = (o.stages || []).flatMap(st => st.opportunities || [])
+      const own = o.is_manager ? all.filter(c => c.owner_user_id === o.viewer_user_id) : all
+      setCounts({ follow_ups_due: followUpList(own, 'today', '', new Date(), tz).length })
+    } catch { /* counts are a nicety, never a blocker */ }
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -115,16 +129,13 @@ export default function SalesShell({ title, subtitle, actions, children }) {
     try {
       const me = await api.get('/sales/me')
       setCtx(me)
-      try {
-        const day = await api.get('/sales/my-day')
-        setCounts(day.metrics || {})
-      } catch { /* counts are a nicety, never a blocker */ }
+      await loadCounts(me?.brand_sales_org?.timezone)
     } catch (e) {
       setError(e.message || 'Could not load the sales workspace.')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [loadCounts])
 
   useEffect(() => { load() }, [load])
 
@@ -137,23 +148,18 @@ export default function SalesShell({ title, subtitle, actions, children }) {
   // membership. Say that plainly instead of bouncing them somewhere confusing.
   if (!loading && !ctx) {
     return (
-      <div className="sw-scope">
+      <div className="sw-scope ss-shell">
         <SalesStyles />
+        <SimpleStyles />
         {/* Especially here. This is the screen you land on when the server says
             no, and it is exactly where being stranded would hurt most. */}
         <GodReturnBar context="the Sales Workspace" />
         <div style={{ padding: 60, maxWidth: 560, margin: '0 auto' }}>
           <h2 style={{ fontSize: 18, margin: '0 0 10px' }}>Sales workspace unavailable</h2>
           <ErrorBar error={error} onRetry={load} />
-          {/* THE SERVER'S REASON, NOT THIS FILE'S GUESS.
-              This used to state "This account has no active brand-sales
-              membership" unconditionally, whatever the server actually said.
-              For the platform owner that sentence was simply false — god access
-              never consults memberships — and it pointed at a fix (grant a
-              membership) that would have papered over the real condition: the
-              selected brand had no sales team record yet. ErrorBar above already
-              renders the server's own message; this line now only adds the
-              membership explanation when that IS the reason. */}
+          {/* THE SERVER'S REASON, NOT THIS FILE'S GUESS. ErrorBar above renders
+              the server's own message; this line only adds the membership
+              explanation when that IS the reason. */}
           <p style={{ fontSize: 12, color: '#5f7182', lineHeight: 1.7 }}>
             {/membership/i.test(error || '')
               ? 'This account has no active brand-sales membership, so there is no sales workspace to open. If that is wrong, ask an administrator to grant the membership.'
@@ -171,21 +177,23 @@ export default function SalesShell({ title, subtitle, actions, children }) {
 
   // One source of truth for "is this person running a team", read from the
   // server's own permission flag rather than from the role string, so the nav
-  // and the API can never disagree about who a manager is.
+  // and the API can never disagree about who a manager is. Hiding a nav item
+  // is presentation; every route is re-checked server-side.
   const isManager = !!ctx?.permissions?.view_team_pipeline
   const managerNav = MANAGER_NAV.filter(i => ctx?.permissions?.[i.permission])
-  // Team Availability moves into MY TEAM for a manager, so it is never drawn
-  // twice.
-  // MY WORK honours `permission` too, now that one of its items has one. An
-  // item WITHOUT a permission stays unconditional, exactly as before.
-  const myWork = (isManager ? NAV : [...NAV.slice(0, 3), ...REP_ONLY_NAV, ...NAV.slice(3)])
-    .filter(i => !i.permission || ctx?.permissions?.[i.permission])
+  const allowed = i => !i.permission || ctx?.permissions?.[i.permission]
+  const myWork = NAV.filter(allowed)
+  const more = (isManager ? MORE_NAV : [...MORE_NAV, ...REP_ONLY_MORE]).filter(allowed)
+  // Open "More" automatically when the current page lives in it, so the
+  // highlighted item is never hidden.
+  const inMore = more.some(i => loc.pathname === i.to || loc.pathname.startsWith(i.to + '/'))
 
   return (
-    <div className="sw-scope">
+    <div className="sw-scope ss-shell">
       <SalesStyles />
+      <SimpleStyles />
       <div className="sw-app">
-        <aside className="sw-sidebar">
+        <aside className="sw-sidebar" aria-label="Sales Workspace">
           <div className="sw-brand">
             <div className="sw-brandmark">{(platform || brand).charAt(0).toUpperCase()}</div>
             <div>
@@ -199,75 +207,32 @@ export default function SalesShell({ title, subtitle, actions, children }) {
               <div className="sw-avatar">{initials(person)}</div>
               <div>
                 <b>{person || '—'}</b>
-                <small>{ctx?.role_label || ''}</small>
+                <small>{ctx?.role_label || 'Sales Workspace'}</small>
               </div>
             </div>
           </div>
 
-          <div className="sw-navtitle">
-            MY WORK{isManager ? <span className="sw-navhint"> — as a seller</span> : null}
-          </div>
-          <nav className="sw-nav">
-            {myWork.map(item => {
-              const count = item.countKey ? counts[item.countKey] : null
-              if (item.soon) {
-                return (
-                  <a key={item.to} className="sw-disabled" aria-disabled="true">
-                    <span>{item.icon}</span><span>{item.label}</span>
-                    <span className="sw-soon">SOON</span>
-                  </a>
-                )
-              }
-              return (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.end}
-                  className={({ isActive }) => (isActive ? 'sw-on' : '')}
-                >
-                  <span>{item.icon}</span><span>{item.label}</span>
-                  {count ? <span className="sw-count">{count}</span> : null}
-                </NavLink>
-              )
-            })}
+          {isManager && <div className="sw-navtitle">MY WORK</div>}
+          <nav className="sw-nav" aria-label="My work">
+            {myWork.map(item => <NavItem key={item.to} item={item} count={item.countKey ? counts[item.countKey] : null} />)}
           </nav>
+
+          <MoreGroup items={more} defaultOpen={inMore} />
 
           {managerNav.length ? (
             <>
-              <div className="sw-navtitle">MY TEAM<span className="sw-navhint"> — as a manager</span></div>
-              <nav className="sw-nav">
-                {managerNav.map(item => {
-                  if (item.soon) {
-                    return (
-                      <a key={item.to} className="sw-disabled" aria-disabled="true"
-                         title="Deferred until its purpose is agreed — not hidden, not half-built.">
-                        <span>{item.icon}</span><span>{item.label}</span>
-                        <span className="sw-soon">LATER</span>
-                      </a>
-                    )
-                  }
-                  return (
-                    <NavLink
-                      key={item.to}
-                      to={item.to}
-                      end={item.end}
-                      state={item.state}
-                      className={({ isActive }) => (isActive ? 'sw-on' : '')}
-                    >
-                      <span>{item.icon}</span><span>{item.label}</span>
-                    </NavLink>
-                  )
-                })}
+              <div className="sw-navtitle">MY TEAM</div>
+              <nav className="sw-nav" aria-label="My team">
+                {managerNav.map(item => <NavItem key={item.to} item={item} />)}
               </nav>
             </>
           ) : null}
 
           <div className="sw-sidefill" />
           <div className="sw-mini">
-            {brand}
-            {ctx?.is_god && <><br />Owner access</>}
-            <br />
-            <button onClick={handleSignOut} style={{ marginTop: 8 }}>Sign out</button>
+            <b>{brand}</b>
+            {ctx?.is_god && <>Owner access<br /></>}
+            <button onClick={handleSignOut}>Sign out</button>
           </div>
         </aside>
 
@@ -280,23 +245,111 @@ export default function SalesShell({ title, subtitle, actions, children }) {
               {subtitle && <p>{subtitle}</p>}
             </div>
             <div className="sw-spacer" />
+            {actions}
             {/* The way INTO a customer workspace. Renders nothing at all for a
                 salesperson with no customer_org membership, which is most of
-                them - the button is not a feature everybody gets, it is the
-                visible half of an authorization the server already made. */}
+                them. */}
             <ProgramSwitchLink />
             <ContextSwitcher current="back_office" />
-            {actions}
+            <NavLink to="/sales/prospects" className="ss-iconbtn ss-hide-sm" aria-label="Search leads"
+                     title="Search leads">
+              <Icon name="search" size={20} />
+            </NavLink>
+            <div className="ss-circle" title={person} aria-hidden="true">{initials(person)}</div>
+            {/* PHONES ONLY. The sidebar collapses to a scrolling bar of the
+                seven main items, so everything under "More" — and Sign out —
+                is reached from this one button. Same allowed list as the
+                desktop "More"; the server still checks every route. */}
+            <MobileMore items={more} onSignOut={handleSignOut} />
           </header>
           <div className="sw-body">
             {loading && !ctx
               ? <div className="sw-subtle">Loading…</div>
-              : <SalesCtx.Provider value={{ ...ctx, reloadContext: load }}>
+              : <SalesCtx.Provider value={{ ...ctx, counts, reloadContext: load,
+                  refreshCounts: () => loadCounts(ctx?.brand_sales_org?.timezone) }}>
                   {children}
                 </SalesCtx.Provider>}
           </div>
         </main>
       </div>
+    </div>
+  )
+}
+
+function NavItem({ item, count }) {
+  if (item.soon) {
+    return (
+      <a className="sw-disabled" aria-disabled="true"
+         title="Deferred until its purpose is agreed — not hidden, not half-built.">
+        <Icon name={item.icon} /><span>{item.label}</span>
+        <span className="sw-soon">LATER</span>
+      </a>
+    )
+  }
+  return (
+    <NavLink to={item.to} end={item.end} state={item.state}
+             className={({ isActive }) => (isActive ? 'sw-on' : '')}>
+      <Icon name={item.icon} /><span>{item.label}</span>
+      {count ? <span className="sw-count">{count}</span> : null}
+    </NavLink>
+  )
+}
+
+function MoreGroup({ items, defaultOpen }) {
+  const [open, setOpen] = useState(defaultOpen)
+  useEffect(() => { if (defaultOpen) setOpen(true) }, [defaultOpen])
+  if (!items.length) return null
+  return (
+    <>
+      <button type="button" className="ss-more" aria-expanded={open}
+              onClick={() => setOpen(o => !o)}>
+        <Icon name="more" size={14} /> {open ? 'Less' : 'More'}
+      </button>
+      {open && (
+        <nav className="sw-nav" aria-label="More">
+          {items.map(item => <NavItem key={item.to} item={item} />)}
+        </nav>
+      )}
+    </>
+  )
+}
+
+function MobileMore({ items, onSignOut }) {
+  const [open, setOpen] = useState(false)
+  const btn = useRef(null)
+  const panel = useRef(null)
+  const loc = useLocation()
+  useEffect(() => { setOpen(false) }, [loc.pathname])
+  useEffect(() => {
+    if (!open) return undefined
+    const first = panel.current && panel.current.querySelector('a,button')
+    first && first.focus()
+    const onKey = e => {
+      if (e.key === 'Escape') { setOpen(false); btn.current && btn.current.focus() }
+    }
+    const onDown = e => {
+      if (panel.current && !panel.current.contains(e.target) && !btn.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onDown)
+    return () => { document.removeEventListener('keydown', onKey); document.removeEventListener('pointerdown', onDown) }
+  }, [open])
+  const here = items.some(i => loc.pathname === i.to || loc.pathname.startsWith(i.to + '/'))
+  return (
+    <div className="ss-mmore">
+      <button ref={btn} type="button" className={'ss-mmorebtn' + (here ? ' ss-here' : '')}
+              aria-expanded={open} aria-controls="ss-mmore-panel" aria-haspopup="true"
+              onClick={() => setOpen(o => !o)}>
+        <Icon name="more" size={18} /> More
+      </button>
+      {open && (
+        <div className="ss-mmorepanel" id="ss-mmore-panel" ref={panel}>
+          <nav className="sw-nav" aria-label="More pages">
+            {items.map(item => <NavItem key={item.to} item={item} />)}
+          </nav>
+          <button type="button" className="ss-mmoreout" onClick={onSignOut}>Sign out</button>
+        </div>
+      )}
     </div>
   )
 }

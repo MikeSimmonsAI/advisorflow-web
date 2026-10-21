@@ -261,7 +261,8 @@ def test_dry_run_of_the_workflow_guard_step(tmp_path, monkeypatch):
 
 LANES = ["feature/sci-appointment-recovery", "feature/sci-ops",
          "feature/wholesale-development", "feature/atlantis-development",
-         "feature/roofing-development", "feature/platform-command-center"]
+         "feature/roofing-development", "feature/platform-command-center",
+         "feature/bookaboost-wholesale", "feature/ai-workforce-launch"]
 
 
 def _workflow_branches(name):
@@ -301,5 +302,5 @@ def test_claude_relay_serializes_by_lane_not_by_issue():
     assert "queue: max" in concurrency
     for branch in LANES:
         assert "BRANCH: " + branch in concurrency
-    for lane in ("sci", "wholesale", "atlantis", "roofing", "platform"):
+    for lane in ("sci", "wholesale", "atlantis", "roofing", "platform", "bookaboost", "ai-workforce"):
         assert "&& '" + lane + "'" in concurrency

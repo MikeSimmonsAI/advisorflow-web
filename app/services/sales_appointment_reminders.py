@@ -293,6 +293,14 @@ def _process_one(db: Session, row: AppointmentReminder, now: datetime,
         report["skipped"] += 1
         return
 
+    # SALES DO NOT CONTACT — skipped with the reason on the row, never sent.
+    from app.services import sales_suppression as _sdnc
+    if _sdnc.for_appointment(db, appt):
+        row.status = REMINDER_SKIPPED
+        row.detail = "Prospect asked not to be contacted (Do Not Contact)."
+        report["skipped"] += 1
+        return
+
     if not send:
         row.attempts = (row.attempts or 0) + 1
         row.attempted_at = now
