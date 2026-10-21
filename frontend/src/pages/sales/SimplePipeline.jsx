@@ -96,8 +96,7 @@ function PipelineBody() {
                   )}
                   {cards.map(c => (
                     <div key={c.id} className="ss-dealcard">
-                      <button type="button" onClick={() => nav('/sales/leads/' + c.id)}
-                              aria-label={'Open ' + (c.contact_name || c.company_name)}>
+                      <button type="button" onClick={() => nav('/sales/leads/' + c.id)}>
                         <strong>{c.contact_name || c.company_name}</strong>
                         {c.contact_name && <small>{c.company_name}</small>}
                         {col.stages.length > 1 && <div className="ss-stage">{STAGE_LABELS[c.stage] || c.stage_label}</div>}

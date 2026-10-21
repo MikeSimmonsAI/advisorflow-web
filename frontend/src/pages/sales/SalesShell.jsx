@@ -20,6 +20,7 @@ import '../../components/ContextSwitcher.css'
 import SalesStyles from './SalesStyles'
 import SimpleStyles from './SimpleStyles'
 import { Icon } from './SimpleParts'
+import { followUpList } from './simpleSales'
 import { initials, ErrorBar } from './parts'
 
 const SalesCtx = createContext(null)
@@ -117,7 +118,17 @@ export default function SalesShell({ title, subtitle, actions, children }) {
       setCtx(me)
       try {
         const day = await api.get('/sales/my-day')
-        setCounts(day.metrics || {})
+        const metrics = { ...(day.metrics || {}) }
+        // A manager's /sales/my-day counts the whole team. The Follow Ups badge
+        // sits on THEIR OWN list, so count their own due deals instead — the
+        // badge and the list it opens must never disagree.
+        if (me?.permissions?.view_team_pipeline) {
+          const o = await api.get('/sales/opportunities')
+          const own = (o.stages || []).flatMap(s => s.opportunities || [])
+            .filter(c => c.owner_user_id === o.viewer_user_id)
+          metrics.follow_ups_due = followUpList(own, 'today').length
+        }
+        setCounts(metrics)
       } catch { /* counts are a nicety, never a blocker */ }
     } catch (e) {
       setError(e.message || 'Could not load the sales workspace.')

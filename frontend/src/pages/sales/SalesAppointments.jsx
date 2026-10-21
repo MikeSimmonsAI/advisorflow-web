@@ -18,11 +18,12 @@ import RescheduleDialog from './RescheduleDialog'
 import OutcomeDialog from './OutcomeDialog'
 import {
   ymd, addDays, dayFromYmd, startOfWeek, startOfMonth, endOfMonth, monthGridRange,
-  wallMinutes, wallTime, hourLabel,
+  wallMinutes, wallTime,
 } from './calendarTime'
 import { Icon, ErrorLine, Skeleton, Modal, useNotice } from './SimpleParts'
 
 const HOUR_H = 56
+const hourText = h => ((h % 12) || 12) + ':00 ' + (h < 12 || h === 24 ? 'AM' : 'PM')
 const VIEWS = [['day', 'Day'], ['week', 'Week'], ['month', 'Month']]
 
 function rangeFor(view, anchor) {
@@ -186,7 +187,7 @@ function DayGrid({ appts, onOpen }) {
       )}
       <div className="ss-calgrid">
         <div className="ss-timecol" aria-hidden="true">
-          {hours.map(h => <div key={h} className="ss-timecell">{hourLabel(h)}</div>)}
+          {hours.map(h => <div key={h} className="ss-timecell">{hourText(h)}</div>)}
         </div>
         <div className="ss-slotcol">
           {hours.map(h => <div key={h} className="ss-timeslot" />)}

@@ -16,7 +16,7 @@
  * Sold / Onboarding area. Creating the customer stays a deliberate step in the
  * existing provisioning flow — nothing here creates one.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import SalesShell, { useSales } from './SalesShell'
@@ -296,7 +296,7 @@ export function StageField({ opp, onSaved, small }) {
               onChange={e => choose(e.target.value)}>
         {SIMPLE_COLUMNS.map(c => (
           <optgroup key={c.key} label={c.label}>
-            {c.stages.map(s => <option key={s} value={s}>{c.label} — {STAGE_LABELS[s]}</option>)}
+            {c.stages.map(s => <option key={s} value={s}>{c.label === STAGE_LABELS[s] ? c.label : c.label + ' — ' + STAGE_LABELS[s]}</option>)}
           </optgroup>
         ))}
         <optgroup label="Closed">

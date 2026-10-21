@@ -72,11 +72,21 @@ function BookDemoBody() {
     api.get('/sales/meeting-types' + q).then(t => {
       const ordered = orderTypes(t || [])
       setTypes(ordered)
-      setTypeId(prev => (ordered.some(x => x.id === prev) ? prev : (ordered[0]?.id || '')))
+      setTypeId(prev => (ordered.some(x => x.id === prev) ? prev
+        : ((ordered.find(x => x.key === 'discovery') || ordered[0])?.id || '')))
     }).catch(e => setError(e.message || 'Could not load meeting types.'))
   }, [oppId])
 
   const type = types.find(t => t.id === typeId)
+  // The approved form offers two choices. The brand's exact Discovery and
+  // Demo types fill them; every other type is one click away under Other.
+  const primary = useMemo(() => {
+    const exact = k => types.find(t => t.key === k)
+    const pick = [exact('discovery') || types.find(t => /discovery/i.test(t.key + t.name)),
+                  exact('demo') || types.find(t => /demo/i.test(t.key + t.name) && !/discovery/i.test(t.key + t.name))]
+    return [...new Set(pick.filter(Boolean))]
+  }, [types])
+  const others = types.filter(t => !primary.includes(t))
   const opp = deals.find(d => d.id === oppId)
 
   // Who has to be there: the type's own role slots when they resolve to one
@@ -227,14 +237,27 @@ function BookDemoBody() {
               <span className="ss-label" id="bk-type">Type</span>
               <div>
                 {types.length === 0 && <small>No meeting types are set up yet — a 30-minute meeting will be booked.</small>}
-                {types.map(t => (
+                {primary.map(t => (
                   <label key={t.id} className="ss-choice">
                     <input type="radio" name="bk-type" value={t.id} checked={typeId === t.id}
                            onChange={() => setTypeId(t.id)} />
-                    {t.name}{t.duration_minutes ? ' (' + t.duration_minutes + ' min)' : ''}
+                    {t.name}
                   </label>
                 ))}
+                {others.length > 0 && (
+                  <label className="ss-choice">
+                    <input type="radio" name="bk-type" value="other" checked={!!typeId && !primary.some(t => t.id === typeId)}
+                           onChange={() => setTypeId(others[0].id)} />
+                    Other
+                  </label>
+                )}
               </div>
+              {others.length > 0 && !!typeId && !primary.some(t => t.id === typeId) && (
+                <select aria-label="Other meeting type" value={typeId} onChange={e => setTypeId(e.target.value)}>
+                  {others.map(t => <option key={t.id} value={t.id}>{t.name}{t.duration_minutes ? ' (' + t.duration_minutes + ' min)' : ''}</option>)}
+                </select>
+              )}
+              {type?.duration_minutes ? <small>{type.duration_minutes} minutes</small> : null}
             </div>
             <div className="ss-field" style={{ marginBottom: 0 }}>
               <label htmlFor="bk-notes">Notes (optional)</label>
