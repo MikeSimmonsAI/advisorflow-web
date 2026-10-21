@@ -119,7 +119,7 @@ def _person(u: User) -> Dict:
 def team(db: Session, org_id: str) -> Dict:
     """Everyone in this workspace: who is on the Wholesale team (with role and
     manager) and who is not yet. Other organizations' people never appear."""
-    people = db.query(User).filter(User.organization_id == org_id).order_by(User.created_at.asc()).all()
+    people = _people_q(db, org_id).order_by(User.created_at.asc()).all()
     ids = [u.id for u in people]
     rows = {}
     scope = _scope(db, org_id)
@@ -169,8 +169,23 @@ def _check_manager(db: Session, org_id: str, user_id: str, reports_to: Optional[
     return reports_to
 
 
+def _people_q(db: Session, org_id: str):
+    """Who belongs to this workspace's team page. EvoSys and every legacy org:
+    the home-org rule, exactly as before (EvoSys operators stay off EvoSys's
+    page). A second Wholesale tenant (#272): home org OR an active workspace
+    membership there - seats are per workspace, so this reaches nobody's
+    access anywhere else."""
+    q = db.query(User)
+    if _scope(db, org_id) == PA.WHOLESALE:
+        return q.filter(User.organization_id == org_id)
+    from sqlalchemy import or_
+    member_ids = db.query(Membership.user_id).filter(
+        Membership.scope_type == "customer_org", Membership.scope_id == org_id, Membership.is_active.is_(True))
+    return q.filter(or_(User.organization_id == org_id, User.id.in_(member_ids)))
+
+
 def _in_org(db: Session, org_id: str, user_id: str) -> User:
-    u = db.query(User).filter(User.id == user_id, User.organization_id == org_id).first()
+    u = _people_q(db, org_id).filter(User.id == user_id).first()
     if u is None:
         raise LookupError("No such person in this workspace.")
     return u

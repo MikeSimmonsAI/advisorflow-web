@@ -456,3 +456,28 @@ def test_shared_county_file_status_hides_who_uploaded_it_from_tenants(client, db
     r = client.get("/wholesale/evosense/sources/tad/upload",
                    headers={**_h(db_session, god), "X-Org-Override": world["bab"].id})
     assert r.status_code == 200 and r.json()["current"]["by"] == "platform-admin@evosys.test"
+
+
+# ── 7. Team page membership: BookaBoost by membership, EvoSys unchanged ─────
+
+def test_bookaboost_team_page_includes_members_by_workspace_membership(client, db_session, world):
+    """Someone GOD added to BookaBoost Wholesale who already had a login
+    elsewhere (home org elsewhere, BookaBoost membership) can be listed and put
+    on BookaBoost's team - and that changes nothing for them in EvoSys."""
+    db, bab, evo = db_session, world["bab"], world["evo"]
+    guest = _user(db, None, "guest-%d@bab.test" % next(_SEQ), role="advisor")
+    _m(db, guest, "customer_org", bab.id, role="advisor")
+    admin_h = _h(db, world["bab_admin"], ws=bab.id)
+    t = client.get("/wholesale/team", headers=admin_h).json()
+    assert guest.id in {p["user_id"] for p in t["not_on_team"]}
+    assert client.post("/wholesale/team/members", headers=admin_h,
+                       json={"user_id": guest.id, "role": "member"}).status_code == 200
+    assert _wholesale_ok(client, db, guest, bab)
+    assert not _wholesale_ok(client, db, guest, evo)
+    # EvoSys's team page keeps the home-org rule: the operator (EvoSys member,
+    # no home org) is still not listed there.
+    evo_admin_h = _h(db, world["evo_plain"], ws=evo.id)
+    r = client.get("/wholesale/team", headers=evo_admin_h)
+    if r.status_code == 200:
+        listed = {p["user_id"] for p in r.json()["members"] + r.json()["not_on_team"]}
+        assert world["operator"].id not in listed
