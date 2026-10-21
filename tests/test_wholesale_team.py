@@ -134,7 +134,7 @@ def test_a_field_login_is_refused_by_the_server_not_just_the_menu(
         client, admin_auth_headers, auth_headers, sample_advisor):
     ok(client.post("/wholesale/team/members", headers=admin_auth_headers,
                    json={"user_id": sample_advisor.id, "role": "canvasser", "confirm_lock": True}))
-    assert client.get("/leads", headers=auth_headers).status_code == 403
+    assert client.get("/leads/", headers=auth_headers).status_code == 403
     r = client.get("/wholesale/evosense/strategies", headers=auth_headers)
     assert r.status_code == 403 and "Field logins" in r.json()["detail"]
     assert client.get("/wholesale/team/me", headers=auth_headers).status_code == 200
@@ -142,7 +142,7 @@ def test_a_field_login_is_refused_by_the_server_not_just_the_menu(
     # Back to full access: everything they had before comes back
     ok(client.post("/wholesale/team/members", headers=admin_auth_headers,
                    json={"user_id": sample_advisor.id, "role": "member"}))
-    assert client.get("/leads", headers=auth_headers).status_code == 200
+    assert client.get("/leads/", headers=auth_headers).status_code == 200
 
 
 # ── hunts, lookups and strategy changes: admins and team managers only ──────
