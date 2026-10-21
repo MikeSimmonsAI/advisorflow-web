@@ -702,7 +702,17 @@ def ai_answered(db: Session, conv, resp) -> bool:
         return False
     if conv.state in ("human", "callback_requested", "stopped"):
         return False
-    return _ai_delivered_since(db, conv, resp.received_at)
+    from sqlalchemy import func as _sa_func
+    from app.models.program_models import ProgramConversationTurn as T
+    # the AI actually read THIS message (setter off / rolled back: it did not)...
+    if db.query(T.id).filter(T.conversation_id == conv.id, T.role == "family",
+                             T.response_id == resp.id).first() is None:
+        return False
+    # ...and a real answer went out after it - a scheduled follow-up answers nothing
+    return db.query(T.id).filter(T.conversation_id == conv.id, T.role.in_(("ai", "system")),
+                                 T.delivery.in_(("sent", "simulated")),
+                                 _sa_func.coalesce(T.action, "") != "follow_up",
+                                 T.created_at >= resp.received_at).first() is not None
 
 
 def sla_sweep(db: Session, now: Optional[datetime] = None,

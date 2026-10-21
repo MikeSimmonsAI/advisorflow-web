@@ -102,3 +102,37 @@ def test_a_new_message_after_the_ai_answered_needs_attention_again(client, auto,
     _run(db, lead, "Actually can you call me instead?", _Fake([]))
     item = next(i for i in _home(client, db, admin)["inbox"] if i["lead_id"] == lead.id)
     assert item["ai_answered"] is False and _home(client, db, admin)["counts"]["needs_attention"] == 1
+
+
+def test_a_follow_up_never_answers_a_message_the_ai_did_not_read(client, auto, sample_advisor):
+    """Review finding: setter off when the family wrote; a later scheduled check-in is not an answer."""
+    db, org, admin = auto["db"], auto["org"], auto["admin"]
+    lead = _real(db, _lead_for(db, org, sample_advisor, "L001"))
+    _run(db, lead, "Yes I'd like to come in", _Fake([_d("offer_times", "Would {TIMES} work?")]))
+    auto["prog"].ai_setter_mode = "off"
+    db.commit()
+    _run(db, lead, "Actually my husband passed, can someone call me today?", _Fake([]))
+    conv = S.conversation_for(db, lead, create=False)
+    db.add(ProgramConversationTurn(conversation_id=conv.id, organization_id=org.id, lead_id=lead.id, role="ai",
+                                   text="Just checking in - did any of those times work?", action="follow_up",
+                                   delivery="sent", created_at=datetime.utcnow() + timedelta(days=3)))
+    db.commit()
+    item = next(i for i in _home(client, db, admin)["inbox"] if i["lead_id"] == lead.id)
+    assert item["ai_answered"] is False and _home(client, db, admin)["counts"]["needs_attention"] == 1
+
+
+def test_a_held_follow_up_marks_nothing_answered(auto, sample_advisor, monkeypatch):
+    db, org = auto["db"], auto["org"]
+    lead = _real(db, _lead_for(db, org, sample_advisor, "L001"))
+    auto["prog"].ai_setter_mode = "off"
+    db.commit()
+    _run(db, lead, "Can someone call me?", _Fake([]))
+    auto["prog"].ai_setter_mode = "auto"
+    db.commit()
+    conv = S.conversation_for(db, lead)
+    db.add(ProgramConversationTurn(conversation_id=conv.id, organization_id=org.id, lead_id=lead.id, role="ai",
+                                   text="Just checking in.", action="follow_up", delivery="held"))
+    db.commit()
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": True})
+    S.sweep(db)
+    assert db.query(ProgramResponse).filter_by(lead_id=lead.id).one().handling_status == "new"
