@@ -296,9 +296,13 @@ def _experience(db, user, org, is_program) -> str:
 
 
 def _roofing_enabled(org) -> bool:
+    """Opens the Roofing APP as this workspace's home: the program is switched
+    on AND the business is a roofing company (or names no industry). A funeral
+    home with the Roofing capability keeps its own identity - see
+    program_experience.roofing_identity."""
     try:
-        from app.services.roofing.common import explicitly_enabled
-        return explicitly_enabled(org)
+        from app.services.program_experience import roofing_identity
+        return roofing_identity(org)
     except Exception:  # pragma: no cover - never let a hint break login
         return False
 
