@@ -472,7 +472,7 @@ function Appointments({ open }) {
       : rows.map(a => (
         <button key={a.id} className="cmd-card cmd-appt" onClick={() => open(a.lead_id)}>
           <Icon n="cal" /><span><b>{a.name}</b><small>{a.location || ''}</small></span>
-          <span className="cmd-item-meta"><b>{new Date(a.when.replace('Z', '')).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</b>
+          <span className="cmd-item-meta"><b>{new Date(a.when).toLocaleString([], { timeZone: 'America/Chicago', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}</b>
             <small>{a.label || 'Visit'}</small></span>
         </button>))}
   </>
@@ -664,7 +664,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
         {f.setter && <p className="cmd-setter">Appointment setter: <b>{f.setter.state.replace('_', ' ')}</b>
           {f.setter.offered.length ? ` · offered ${f.setter.offered.join(' or ')}` : ''}
           {f.setter.callback_window ? ` · callback ${f.setter.callback_window}` : ''}</p>}
-        {f.booking && <p className="cmd-booked"><Icon n="check" /> Booked {new Date(f.booking.when).toLocaleString([], { weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} · {f.booking.label || 'Visit'}</p>}
+        {f.booking && <p className="cmd-booked"><Icon n="check" /> Booked {f.booking.when_text || new Date(f.booking.when).toLocaleString([], { timeZone: 'America/Chicago', weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })} · {f.booking.label || 'Visit'}</p>}
       </section>
 
       {f.home_visit && <section className="cmd-card cmd-next">

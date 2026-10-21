@@ -8,8 +8,9 @@ import { Chip, Empty, ErrorLine, FilterChips, Kpi, Loading, PageHead, Panel, err
 const WHEN = [['upcoming', 'Upcoming'], ['past', 'Past'], ['all', 'All']]
 const STATUS = { booked: ['Booked', 'ok'], confirmed: ['Confirmed', 'ok'], cancelled: ['Cancelled', 'warn'], completed: ['Completed', ''] }
 
-const dayKey = iso => new Date(iso).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
-const timeOf = iso => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+// appointment times: Central wall time with its offset - shown in Central on any device
+const dayKey = iso => new Date(iso).toLocaleDateString([], { timeZone: 'America/Chicago', weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+const timeOf = iso => new Date(iso).toLocaleTimeString([], { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
 
 export default function Appointments({ locationId, openPerson }) {
   const [when, setWhen] = useState('upcoming')

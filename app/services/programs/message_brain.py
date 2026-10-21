@@ -38,6 +38,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
+from app.services import booking_time as _bt
 
 MAX_TOUCHES = 5
 REACTIVATION = "reactivation"
@@ -352,7 +353,7 @@ def context_packet(db: Session, lead, now: Optional[datetime] = None) -> Optiona
         "prior_inbound_replies": replies,
         "responses": [{"class": r.response_class, "intents": json.loads(r.intents or "[]"),
                        "status": r.handling_status} for r in responses[:5]],
-        "appointments": [{"status": b.status, "time": b.booked_time.isoformat() if b.booked_time else None}
+        "appointments": [{"status": b.status, "time": _bt.wire(db, b) if b.booked_time else None}
                          for b in booked],
         "appointment_booked": any(b.status in ("booked", "confirmed") for b in booked),
         "cadence_state": str(getattr(cad.status, "value", cad.status)) if cad else None,

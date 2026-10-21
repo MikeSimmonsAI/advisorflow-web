@@ -478,7 +478,7 @@ def _booked_without_calendar(db, org_id, now, cfg, test_ids, booking_user_id=Non
                     "Appointments are booked but never reached the calendar.",
                     "Check the calendar connection in Settings, then add these appointments to the calendar "
                     "by hand so nobody is missed.",
-                    count=len(rows), oldest=rows[0].booked_time or rows[0].created_at,
+                    count=len(rows), oldest=rows[0].created_at,       # booked_time is local wall time, not UTC
                     ids=[r.id for r in rows], id_type="booking")
 
 
