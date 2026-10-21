@@ -30,7 +30,7 @@ manager's **MY TEAM** group is unchanged.
 |---|---|
 | New Leads | prospect |
 | Follow Up | contacted, discovery |
-| Demo Scheduled | demo_build, demo_proposal, closing |
+| Demo & Closing | demo_build, demo_proposal, closing |
 | Won | won, onboarding, live |
 
 Lost and any unknown stage are listed under the board. Every card shows its
@@ -87,11 +87,10 @@ activity feed. Covered by `tests/test_sales_my_day_scope.py` (20 deals worked
 
 **Pipeline** — one **+ Add Lead** (header); the per-column buttons are gone. Every
 card shows its exact stage (Prospect, Contacted / Qualified, Discovery, Demo Build,
-Demo / Proposal, Closing, Won, Onboarding, Live), so a Closing deal under *Demo
-Scheduled* is never read as "a demo is booked". The footnote names which stages
-each column groups. *Proposal, not implemented:* if Mike wants the column title
-itself to be literal, rename "Demo Scheduled" → "Demo & Closing" — a one-word
-label change, held for his approval because it departs from the approved image.
+Demo / Proposal, Closing, Won, Onboarding, Live), so a Closing deal under *Demo &
+Closing* is never read as "a demo is booked". The footnote names which stages
+each column groups. **Column renamed "Demo Scheduled" → "Demo & Closing"** — approved by Mike
+2026-10-21 12:26 CDT (label only; stages, data and permissions unchanged).
 
 **Follow Ups** — filters **Due Now | Overdue | Today | Completed**, each with its
 count; heading **People to Contact Now**, "Overdue first, then today's follow-ups."
