@@ -13,7 +13,7 @@
  * The time a rep types is read in the sales team's time zone and converted to
  * the UTC the API stores (simpleSales.wallToUtcNaive).
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import SalesShell, { useSales } from './SalesShell'
@@ -48,12 +48,13 @@ function BookDemoBody() {
   const [deals, setDeals] = useState([])
   const [types, setTypes] = useState([])
   const [oppId, setOppId] = useState(params.get('opp') || '')
-  const [date, setDate] = useState(ymdPlusDays(1))
+  const [date, setDate] = useState(() => ymdPlusDays(1, new Date(), ctx?.brand_sales_org?.timezone))
   const [time, setTime] = useState('10:00')
   const [typeId, setTypeId] = useState('')
   const [notes, setNotes] = useState('')
   const [open, setOpen] = useState(null)
   const [busy, setBusy] = useState(false)
+  const submitting = useRef(false)   // one booking per click, however fast it is pressed
   const [error, setError] = useState(null)
   const [booked, setBooked] = useState(null)
   const [moved, setMoved] = useState(false)
@@ -119,6 +120,8 @@ function BookDemoBody() {
     if (!oppId) { setError('Pick the contact this demo is for.'); return }
     const startsAt = wallToUtcNaive(date, time, tz)
     if (!startsAt) { setError('Pick a date and time.'); return }
+    if (submitting.current) return
+    submitting.current = true
     setBusy(true)
     try {
       const appt = await api.post('/sales/appointments', {
@@ -136,6 +139,7 @@ function BookDemoBody() {
       setError((e.message || 'Could not book that time.') + ' Pick another time — open times are listed under the form.')
       findOpen()
     } finally {
+      submitting.current = false
       setBusy(false)
     }
   }
@@ -156,7 +160,8 @@ function BookDemoBody() {
         </div>
         <section className="ss-panel">
           <div className="ss-panelbody">
-            <p style={{ marginTop: 0 }}>It is on your calendar{opp?.email ? ' and the usual invitation is going to ' + opp.email : ''}.</p>
+            <p style={{ marginTop: 0 }}>The scheduler saved it on your calendar.</p>
+            <p className="ss-count-note"><InviteStatus appt={booked} email={opp?.email} /></p>
             {opp && EARLY.includes(opp.stage) && !moved && (
               <div className="ss-callout" style={{ marginBottom: 14 }}>
                 {opp.contact_name || opp.company_name} is still in <strong>{opp.stage_label}</strong>.
@@ -206,7 +211,7 @@ function BookDemoBody() {
             <div className="ss-twobox">
               <div className="ss-field">
                 <label htmlFor="bk-date">Date *</label>
-                <input id="bk-date" type="date" required min={ymdPlusDays(0)} value={date}
+                <input id="bk-date" type="date" required min={ymdPlusDays(0, new Date(), tz)} value={date}
                        onChange={e => setDate(e.target.value)} />
               </div>
               <div className="ss-field">
@@ -270,7 +275,7 @@ function BookDemoBody() {
           <div className="ss-icon" aria-hidden="true">🗓️</div>
           <h3>That's it!</h3>
           <p>Choose the contact, day and time. The appointment appears on your calendar
-            {opp?.email ? ' and the usual invitation is emailed to ' + opp.email : ''}.</p>
+            {opp?.email ? ', and the usual invitation is sent to ' + opp.email : ''}.</p>
           <button type="button" className="ss-btn ss-blue" disabled={busy || !oppId} onClick={create}>
             {busy ? 'Booking…' : 'Create Demo'}
           </button>
@@ -282,3 +287,19 @@ function BookDemoBody() {
 }
 
 function startLocal(date, time) { return date + 'T' + time + ':00' }
+
+/**
+ * What actually happened to the invitation, from the booking response — never
+ * more than the server knows. "Sent" means handed to the mail service, not
+ * delivered or read; the prospect's own confirmation shows on Appointments.
+ */
+function InviteStatus({ appt, email }) {
+  if (!email) return <>This lead has no email, so no invitation was sent.</>
+  const st = appt?.confirmation_status
+  if (appt?.confirmation_sent_at || st === 'sent') {
+    return <>Invitation email handed to the mail service for {email}. Delivery isn't confirmed — when they
+      confirm, it shows on Appointments.</>
+  }
+  if (st === 'confirmed') return <>The prospect has already confirmed.</>
+  return <>No invitation has gone out yet (status: {st || 'unknown'}). Open the meeting on Appointments to resend it.</>
+}
