@@ -161,20 +161,21 @@ def render_signed_pdf(envelope: Dict[str, Any], signers: List[Dict[str, Any]],
     buf = io.BytesIO()
     title = envelope.get("title") or "Document"
     env_id = envelope.get("id") or ""
+    brand = envelope.get("brand") or "EvoSys"   # the org's brand (#272 P4)
 
     def footer(canvas, doc):
         canvas.saveState()
         canvas.setFont("Helvetica", 7.5)
         canvas.setFillColor(colors.HexColor("#666666"))
         canvas.drawString(0.75 * inch, 0.5 * inch,
-                          "EvoSys e-signature  |  Envelope %s  |  Document fingerprint %s..." % (
+                          brand + " e-signature  |  Envelope %s  |  Document fingerprint %s..." % (
                               env_id, (envelope.get("document_sha256") or "")[:16]))
         canvas.drawRightString(7.75 * inch, 0.5 * inch, "Page %d" % doc.page)
         canvas.restoreState()
 
     doc = SimpleDocTemplate(buf, pagesize=letter, leftMargin=0.85 * inch, rightMargin=0.85 * inch,
                             topMargin=0.75 * inch, bottomMargin=0.8 * inch, title=title,
-                            author="EvoSys e-signature", subject="Envelope %s" % env_id)
+                            author=brand + " e-signature", subject="Envelope %s" % env_id)
     story: List[Any] = []
     for style, markup in html_blocks(envelope.get("document_html") or ""):
         story.append(Paragraph(markup, ST.get(style, ST["p"])))
@@ -189,7 +190,7 @@ def render_signed_pdf(envelope: Dict[str, Any], signers: List[Dict[str, Any]],
     # ── certificate of completion ──
     story.append(PageBreak())
     story.append(Paragraph("Certificate of Completion", ST["cert_h"]))
-    story.append(Paragraph("EvoSys electronic signature record", ST["sub"]))
+    story.append(Paragraph(brand + " electronic signature record", ST["sub"]))
     info = [
         ["Document", title],
         ["Envelope ID", env_id],
@@ -229,7 +230,7 @@ def render_signed_pdf(envelope: Dict[str, Any], signers: List[Dict[str, Any]],
         erows.append([Paragraph(_h.escape(fmt_time(e.get("at"))), ST["cert"]),
                       Paragraph(_h.escape(ACTION_LABEL.get(e.get("action"), e.get("action") or "")), ST["cert"]),
                       Paragraph(_h.escape(names.get(e.get("signer_id")) or (
-                          "Sender" if e.get("action") in ("sent", "voided") else "EvoSys")), ST["cert"]),
+                          "Sender" if e.get("action") in ("sent", "voided") else brand)), ST["cert"]),
                       Paragraph(_h.escape(e.get("ip") or ""), ST["cert"])])
     et = Table(erows, colWidths=[2.0 * inch, 2.2 * inch, 1.7 * inch, 1.0 * inch], repeatRows=1)
     et.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
@@ -240,6 +241,6 @@ def render_signed_pdf(envelope: Dict[str, Any], signers: List[Dict[str, Any]],
         "that address, agreed to use an electronic signature and to receive this record electronically, "
         "and signed. Signatures are applied under the federal ESIGN Act (15 U.S.C. 7001) and the Texas "
         "Uniform Electronic Transactions Act (Bus. & Com. Code ch. 322). The SHA-256 fingerprint of this "
-        "final PDF is kept by EvoSys; any change to the file changes that fingerprint.", ST["cert"])]
+        "final PDF is kept by " + brand + "; any change to the file changes that fingerprint.", ST["cert"])]
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
     return buf.getvalue()

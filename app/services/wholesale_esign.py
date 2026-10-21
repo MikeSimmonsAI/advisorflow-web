@@ -492,13 +492,15 @@ def get_provider(key: Optional[str]) -> SignatureProvider:
     return PROVIDERS[ManualSignatureProvider.key]
 
 
-def provider_report() -> List[Dict[str, Any]]:
-    """What the settings screen renders: every provider and whether it can run."""
+def provider_report(brand: str = "EvoSys") -> List[Dict[str, Any]]:
+    """What the settings screen renders: every provider and whether it can run.
+    `brand` names the built-in signer for this org ("EvoSys" unless another
+    brand's workspace - #272 P4)."""
     out = []
     for key, p in sorted(PROVIDERS.items()):
         out.append({
             "key": key,
-            "label": p.label,
+            "label": p.label.replace("EvoSys", brand) if key == EvoSysSignatureProvider.key else p.label,
             "electronic": p.electronic,
             "billable": bool(p.electronic),
             "configured": p.is_configured(),

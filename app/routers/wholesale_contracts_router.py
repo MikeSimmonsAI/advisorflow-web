@@ -664,7 +664,7 @@ def contract_send(deal_id: str, kind: str, payload: ContractIn, request: Request
                             title=title, status=esign.STATUS_APPROVED, parties=json.dumps(signers),
                             buyer_id=deal.assigned_buyer_id if kind != "purchase_agreement" else None,
                             uploaded_by_id=user.id,
-                            notes="Generated from the EvoSys starter template (%s)." % kind)
+                            notes="Generated from the %s starter template (%s)." % (_brand_word(db, org_id), kind))
     db.add(doc)
     db.flush()
     if getattr(provider, "builtin", False):
@@ -686,8 +686,8 @@ def contract_send(deal_id: str, kind: str, payload: ContractIn, request: Request
             deal.assignment_status = "sent"
         svc.log_event(db, org_id, "document.sent_for_signature", actor_type=ACTOR_USER,
                       actor_user_id=user.id, deal_id=deal.id,
-                      summary="%s sent for signature (EvoSys e-signature): %s" % (
-                          docs.KINDS[kind]["short"], ", ".join("%s (%s)" % (p["role"], p["email"]) for p in signers)))
+                      summary="%s sent for signature (%s e-signature): %s" % (
+                          docs.KINDS[kind]["short"], _brand_word(db, org_id), ", ".join("%s (%s)" % (p["role"], p["email"]) for p in signers)))
         db.commit()
         first = signers[0]
         return {"sent": True, "document_id": doc.id, "provider": provider.key, "external_ref": env.id,
@@ -801,12 +801,18 @@ def _own_doc(db: Session, org_id: str, document_id: str) -> WholesaleDocument:
     return doc
 
 
+def _brand_word(db: Session, org_id: str) -> str:
+    """"EvoSys" for EvoSys orgs (unchanged); another brand's own name (#272 P4)."""
+    from app.services.brand_config import brand_word
+    return brand_word(db, org_id)
+
+
 def _envelope(db: Session, org_id: str, document_id: str):
     from app.services import evosys_esign as ev
     _own_doc(db, org_id, document_id)
     env = ev.for_document(db, org_id, document_id)
     if env is None:
-        raise HTTPException(status_code=404, detail="This document was not sent with EvoSys e-signature.")
+        raise HTTPException(status_code=404, detail="This document was not sent with %s e-signature." % _brand_word(db, org_id))
     return ev, env
 
 
