@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import { LeadPicker } from './MoveConcierge'
 import HandoffOutcomes from './HandoffOutcomes'
+import ChariotQueue from './ChariotQueue'
 import './energy.css'
 
 export default function Suppliers() {
@@ -38,6 +39,8 @@ export default function Suppliers() {
       <Handoff suppliers={sups || []} onDone={() => load(true)} />
 
       <HandoffOutcomes suppliers={sups || []} refreshKey={tick} />
+
+      <ChariotQueue />
 
       <h2 className="eo-sec">What each supplier can do</h2>
       <div className="eo-panel">

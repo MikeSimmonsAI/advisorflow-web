@@ -690,3 +690,147 @@ def test_negative_signals_subtract_and_never_stack():
     res = SC.property_opportunity(P(), stacked, None)
     labels = [f["label"] for f in res["factors"]]
     assert res["value"] == 0 and not any("Two signals" in l for l in labels)
+
+
+def test_no_database_transaction_is_held_open_across_a_source_call(client, db_session, sample_org,
+                                                                   dfw_files, fake_apis, monkeypatch):
+    """2026-10-20 14:25 UTC: a scheduled hunt held a transaction open while
+    a slow city lookup ran; Postgres ended the idle-in-transaction connection
+    after 5 minutes (deps.py) and the hunt failed with PendingRollbackError.
+    Every discovery download and every lookup batch must start with the
+    session's transaction closed."""
+    db = db_session
+    _, h = _admin(db, sample_org)
+    _enable(client, h, *ALL_DFW)
+    seen = []
+
+    def guard(original, label):
+        def wrapped(self, *a, **kw):
+            seen.append((label, db.in_transaction()))
+            return original(self, *a, **kw)
+        return wrapped
+    for name in dir(PV):
+        cls = getattr(PV, name)
+        if isinstance(cls, type) and issubclass(cls, PV.PublicRecordSource) and cls is not PV.PublicRecordSource:
+            for meth in ("search", "lookup_many"):
+                if meth in cls.__dict__:
+                    monkeypatch.setattr(cls, meth, guard(cls.__dict__[meth], "%s.%s" % (name, meth)))
+    s = _pilot(client, h)
+    out = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % s["id"], headers=h))
+    assert out["status"] == "succeeded", out
+    assert any(l.endswith(".search") for l, _ in seen) and any(l.endswith(".lookup_many") for l, _ in seen)
+    assert [l for l, open_ in seen if open_] == [], "a transaction was open during a network call"
+
+
+def test_lookup_failure_reason_codes_are_safe_and_consistent():
+    """Do not expose exception messages containing URLs or private details."""
+    tally = {"failed": 0}
+    assert HU._count_lookup_failure(tally, B.SourceError(B.TIMEOUT_ERR, "PRIVATE: secret"), 3) == "TIMEOUT"
+    assert HU._count_lookup_failure(tally, "MISSING_PROVIDER_RESULT") == "MISSING_PROVIDER_RESULT"
+    assert HU._count_lookup_failure(tally, RuntimeError("password=secret")) == "OTHER"
+    assert tally == {"failed": 5, "failure_codes": {
+        "TIMEOUT": 3, "MISSING_PROVIDER_RESULT": 1, "OTHER": 1,
+    }}
+    assert "secret" not in str(tally)
+
+
+def test_systemic_311_failure_counts_all_attempts_and_does_not_masquerade_as_no_match(
+        client, db_session, sample_org, dfw_files, fake_apis, monkeypatch):
+    """The old code reported failed=N while queued=0 for a whole failed batch."""
+    _, headers = _admin(db_session, sample_org)
+    _enable(client, headers, *ALL_DFW)
+
+    def refused(self, targets):
+        assert targets
+        raise B.SourceError(B.TIMEOUT_ERR, "simulated slow public endpoint")
+    monkeypatch.setattr(PV.Dallas311Source, "lookup_many", refused)
+    strategy = _pilot(client, headers)
+    result = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % strategy["id"],
+                            headers=headers))
+    stats = result["counts"]["lookups"]["dallas_311_code"]
+    assert stats["queued"] >= 1
+    assert stats["failed"] == stats["queued"]
+    assert stats["failure_codes"] == {"TIMEOUT": stats["queued"]}
+    assert stats["no_match"] == 0
+    assert stats["duration_ms"] >= 0
+    assert result["status"] == "partial"
+    # A failing optional source must not cancel other evidence or spend money.
+    assert result["counts"]["spent_cents"] == 0
+    assert result["counts"]["sources"]["tarrant_tax_roll"]["records"] >= 1
+
+
+def test_one_failed_311_property_makes_run_partial_without_discarding_other_answers(
+        client, db_session, sample_org, dfw_files, fake_apis, monkeypatch):
+    """A provider returned the batch successfully but one property errored."""
+    _, headers = _admin(db_session, sample_org)
+    _enable(client, headers, *ALL_DFW)
+    def mixed(self, targets):
+        assert targets
+        return {"results": {t["id"]: None for t in targets[1:]},
+                "errors": {targets[0]["id"]: B.SourceError(B.TIMEOUT_ERR, "synthetic")},
+                "stats": {}}
+    monkeypatch.setattr(PV.Dallas311Source, "lookup_many", mixed)
+    strategy = _pilot(client, headers)
+    result = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % strategy["id"],
+                            headers=headers))
+    stats = result["counts"]["lookups"]["dallas_311_code"]
+    assert stats["queued"] >= 1
+    assert stats["failed"] == 1
+    assert stats["failure_codes"] == {"TIMEOUT": 1}
+    assert stats["failed"] + stats["no_match"] == stats["queued"]
+    assert result["status"] == "partial"
+
+
+def test_recent_public_no_match_is_temporarily_cached_across_strategies(
+        client, db_session, sample_org, dfw_files, fake_apis, monkeypatch):
+    """Three adjacent hunts should not hammer Dallas 311 for the same no-match."""
+    _, h = _admin(db_session, sample_org)
+    _enable(client, h, *ALL_DFW)
+    calls = []
+
+    def no_match(self, targets):
+        calls.append(len(targets))
+        return {"results": {t["id"]: None for t in targets}, "errors": {}, "stats": {}}
+
+    monkeypatch.setattr(PV.Dallas311Source, "lookup_many", no_match)
+    first = _pilot(client, h, name="Dallas public lookup one")
+    one = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % first["id"], headers=h))
+    assert one["counts"]["lookups"]["dallas_311_code"]["no_match"] > 0
+    assert len(calls) == 1
+    second = _pilot(client, h, name="Dallas public lookup two")
+    two = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % second["id"], headers=h))
+    info = two["counts"]["lookups"]["dallas_311_code"]
+    assert info["skipped_no_match"] >= 1
+    assert len(calls) == 1              # no more network calls for recently checked homes
+    assert info["failed"] == 0
+    assert two["status"] == "succeeded" # cached no-match is not a failure
+    assert two["counts"]["spent_cents"] == 0
+
+
+def test_public_no_match_is_retried_after_short_cooldown_expires(
+        client, db_session, sample_org, dfw_files, fake_apis, monkeypatch):
+    """A negative answer is not permanent; new public complaints can appear."""
+    _, h = _admin(db_session, sample_org)
+    _enable(client, h, *ALL_DFW)
+    calls = []
+
+    def no_match(self, targets):
+        calls.append(len(targets))
+        return {"results": {t["id"]: None for t in targets}, "errors": {}, "stats": {}}
+
+    monkeypatch.setattr(PV.Dallas311Source, "lookup_many", no_match)
+    first = _pilot(client, h, name="Dallas public lookup now")
+    one = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % first["id"], headers=h))
+    assert one["counts"]["lookups"]["dallas_311_code"]["no_match"] >= 1
+    # Age only this test's negative answers; leave source observation data alone.
+    stale_at = datetime.utcnow() - timedelta(hours=3)
+    (db_session.query(EvoSenseEnrichmentDecision)
+       .filter(EvoSenseEnrichmentDecision.organization_id == sample_org.id,
+               EvoSenseEnrichmentDecision.provider_key == "dallas_311_code",
+               EvoSenseEnrichmentDecision.outcome == "no_match")
+       .update({EvoSenseEnrichmentDecision.created_at: stale_at}, synchronize_session=False))
+    db_session.commit()
+    second = _pilot(client, h, name="Dallas public lookup later")
+    two = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % second["id"], headers=h))
+    assert two["counts"]["lookups"]["dallas_311_code"]["queued"] >= 1
+    assert len(calls) == 2             # no-match was actually rechecked

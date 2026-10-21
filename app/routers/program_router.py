@@ -514,7 +514,9 @@ def program_appointments(when: str = Query("upcoming"), location_id: Optional[st
     """Booked visits for the program's families: upcoming (default), past or all."""
     from app.models.models import BookingLink
     prog = _program(db, user)
-    now = datetime.utcnow()
+    from app.services import booking_time as _bt
+    from zoneinfo import ZoneInfo as _ZI
+    now = datetime.now(_ZI(_bt.DEFAULT_ZONE)).replace(tzinfo=None)   # booked times are stored as local wall time
     q = (db.query(BookingLink, Lead).join(Lead, Lead.id == BookingLink.lead_id)
          .filter(Lead.organization_id == prog.organization_id, BookingLink.booked_time.isnot(None),
                  Lead.is_test.isnot(True),
@@ -544,7 +546,7 @@ def program_appointments(when: str = Query("upcoming"), location_id: Optional[st
         items.append({"id": b.id, "lead_id": l.id,
                       "name": " ".join(x for x in (l.first_name, l.last_name) if x) or "(no name)",
                       "phone": l.phone, "email": l.email, "location_id": loc, "location": names.get(loc),
-                      "when": b.booked_time.isoformat() + "Z", "status": b.status,
+                      "when": _bt.wire(db, b), "status": b.status,
                       "label": getattr(b, "appt_label", None), "minutes": getattr(b, "appt_duration", None)})
     return {"items": items, "when": when}
 
@@ -1121,10 +1123,18 @@ def mark_response(response_id: str, body: MarkIn, db: Session = Depends(get_db),
                                          ProgramResponse.organization_id == prog.organization_id).first()
     if r is None:
         raise HTTPException(status_code=404, detail="Response not found.")
+    before = r.handling_status
     try:
         responses.mark(db, r, body.state, user)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    if body.state == "closed":
+        # No closed_by column: who closed it is recorded in the audit trail.
+        from app.routers.audit_log_router import log_action
+        log_action(db, prog.organization_id, user.id, action="sci.response_closed", target_type="program_response",
+                   target_id=r.id, before={"status": before}, after={"status": r.handling_status},
+                   details={"lead_id": r.lead_id, "closed_by": user.id,
+                            "closed_by_name": getattr(user, "full_name", None) or getattr(user, "email", None)})
     return {"id": r.id, "status": r.handling_status}
 
 
@@ -2578,8 +2588,22 @@ def hand_conversation(lead_id: str, body: ConversationHandIn, db: Session = Depe
             .order_by(ProgramConversation.created_at.desc()).first())
     if conv is None:
         raise HTTPException(status_code=404, detail="No conversation for this contact.")
-    conv.state = body.state
-    conv.handoff_reason = ("taken by %s" % (user.email or user.id)) if body.state == "human" else None
+    lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == prog.organization_id).first()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="No conversation for this contact.")
+    # Same path as SCI Live's AI/Human Handling: the opt-out / Do Not Contact
+    # block, cancelled follow-ups, dropped held replies, and an audit entry.
+    from app.services.programs import ai_setter
+    owner = ai_setter.HUMAN_OWNER if body.state == "human" else ai_setter.AI_OWNER
+    try:
+        conv = ai_setter.set_owner(db, lead, owner, actor=user.id,
+                                   note=("taken by %s" % (user.email or user.id)) if owner == ai_setter.HUMAN_OWNER
+                                   else None)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    from app.routers.audit_log_router import log_action
+    log_action(db, prog.organization_id, user.id, action="sci.conversation_owner", target_type="lead",
+               target_id=lead.id, details={"owner": owner, "via": "conversations.hand"})
     db.commit()
     return _conv_json(db, conv)
 

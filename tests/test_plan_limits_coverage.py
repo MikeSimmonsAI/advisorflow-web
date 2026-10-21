@@ -38,11 +38,15 @@ EXEMPT = {
     "scripts/seed_god_mode_orgs.py": "standalone dev seed script, not an app path",
     "seed.py": "standalone dev seed script, not an app path",
     "routers/program_router.py": "creates only the owner-only is_test booking preview contact (booking_test_link); program leads are created by programs/promote.py, which is gated",
+    # SCI (Oct 19): synthetic contacts that can never be messaged.
+    "services/programs/setter_eval.py": "owner-only (god) AI evaluation; creates is_test SIM-EVAL contacts with no phone or email, never messaged",
+    "services/sci_staging_demo.py": "SCI STAGING demo families; refuses unless APP_ENV=staging AND the database is positively the SCI staging one",
 
     # Demo scenario builders - fixtures, same category as sample_data.
     "services/demo_scenarios/brand_sales.py": "demo fixture builder; creates platform-scope users with organization_id=None",
     "services/demo_scenarios/customer_reactivation.py": "demo fixture builder",
     "services/agency/demo_seed.py": "Max Life DEMO seeder; refuses any org that is not the is_demo org it created",
+    "services/roofing/demo_seed.py": "Roofing SAMPLE seeder (god only); is_test homeowners and example.com sample reps in a workspace it flags is_demo",
 
     # THE DEMO SUITE'S SEEDER. Same category as the two fixture builders above,
     # and the reason is worth stating rather than inheriting: the tenants it

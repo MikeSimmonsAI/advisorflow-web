@@ -1,0 +1,69 @@
+/* Branded workspace card — requires an ancestor with class .ev-ds (evTokens.css). */
+.ev-wcard {
+  position: relative; display: flex; flex-direction: column; min-width: 0;
+  background: var(--ev-surface); border: 1px solid var(--ev-line); border-radius: var(--ev-radius-lg);
+  box-shadow: var(--ev-shadow-sm); overflow: hidden;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.ev-wcard::before { /* accent rule along the top edge */
+  content: ''; position: absolute; z-index: 2; inset: 0 0 auto 0; height: 4px; background: var(--acc);
+}
+.ev-wcard:hover { transform: translateY(-4px); box-shadow: var(--ev-shadow-lg); border-color: color-mix(in srgb, var(--acc) 35%, var(--ev-line)); }
+.ev-wcard:has(.ev-wcard-open:focus-visible) { box-shadow: var(--ev-focus), var(--ev-shadow-lg); transform: translateY(-4px); }
+
+.ev-wcard-art { position: relative; aspect-ratio: 400 / 180; background: var(--acc-soft); overflow: hidden; }
+.ev-wcard-art .ev-art { display: block; width: 100%; height: 100%; transition: transform .5s ease; }
+.ev-wcard:hover .ev-wcard-art .ev-art { transform: scale(1.035); }
+.ev-wcard-badge {
+  position: absolute; left: 16px; bottom: -20px; z-index: 1; width: 44px; height: 44px; border-radius: 13px;
+  display: grid; place-items: center; font-size: 21px; font-weight: 900; line-height: 1;
+  color: #fff; background: var(--acc-strong); border: 3px solid #fff; box-shadow: 0 6px 16px rgba(15, 31, 58, .16);
+}
+
+.ev-wcard-body { display: flex; flex-direction: column; flex: 1; padding: 30px 20px 20px; }
+.ev-wcard-kind { margin: 0; font: 800 10.5px/1.3 var(--ev-font); letter-spacing: .11em; text-transform: uppercase; color: var(--acc-strong); }
+.ev-wcard-name { margin: 7px 0 0; font: 700 22px/1.15 var(--ev-font-display); letter-spacing: -.02em; color: var(--ev-ink); overflow-wrap: anywhere; }
+.ev-wcard-org { margin: 4px 0 0; font: 600 12.5px/1.35 var(--ev-font); color: var(--ev-ink-3); overflow-wrap: anywhere; }
+.ev-wcard-summary { margin: 10px 0 0; font: 400 13.5px/1.55 var(--ev-font); color: var(--ev-ink-2); }
+
+.ev-wcard-facts {
+  list-style: none; margin: 16px 0 0; padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 6px 14px;
+  background: var(--acc-soft); border-radius: 12px;
+}
+.ev-wcard-facts li { display: flex; align-items: center; gap: 6px; font: 600 11.5px/1.3 var(--ev-font); color: var(--acc-ink); }
+.ev-wcard-facts li::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); flex: none; }
+
+.ev-wcard-foot { margin-top: auto; padding-top: 18px; }
+.ev-wcard-open { width: 100%; }
+.ev-wcard-open svg { transition: transform .18s ease; }
+.ev-wcard:hover .ev-wcard-open { background: var(--acc-ink); }
+.ev-wcard:hover .ev-wcard-open svg { transform: translateX(3px); }
+/* stretch the single button's hit area over the whole card */
+.ev-wcard-open::after { content: ''; position: absolute; inset: 0; z-index: 3; border-radius: inherit; }
+.ev-wcard-open:focus-visible { box-shadow: none; }
+
+/* ---- list layout ---- */
+.ev-wcard--list { flex-direction: row; align-items: stretch; }
+.ev-wcard--list .ev-wcard-art { aspect-ratio: auto; width: 240px; flex: none; }
+.ev-wcard--list .ev-wcard-badge { left: auto; right: -22px; bottom: auto; top: 50%; transform: translateY(-50%); }
+.ev-wcard--list .ev-wcard-body {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas:
+    "kind  foot" "name  foot" "org   foot" "sum   foot" "facts foot";
+  column-gap: 24px; padding: 20px 22px 20px 40px; align-items: start;
+}
+.ev-wcard--list .ev-wcard-kind { grid-area: kind; }
+.ev-wcard--list .ev-wcard-name { grid-area: name; }
+.ev-wcard--list .ev-wcard-org { grid-area: org; }
+.ev-wcard--list .ev-wcard-summary { grid-area: sum; }
+.ev-wcard--list .ev-wcard-facts { grid-area: facts; justify-self: start; }
+.ev-wcard--list .ev-wcard-foot { grid-area: foot; align-self: center; margin: 0; padding: 0; }
+.ev-wcard--list .ev-wcard-open { width: auto; white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .ev-wcard--list { flex-direction: column; }
+  .ev-wcard--list .ev-wcard-art { width: 100%; aspect-ratio: 400 / 150; }
+  .ev-wcard--list .ev-wcard-badge { right: auto; left: 16px; top: auto; bottom: -20px; transform: none; }
+  .ev-wcard--list .ev-wcard-body { display: flex; padding: 30px 20px 20px; }
+  .ev-wcard--list .ev-wcard-foot { margin-top: 16px; }
+  .ev-wcard--list .ev-wcard-open { width: 100%; }
+}

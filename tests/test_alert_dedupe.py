@@ -302,8 +302,16 @@ def test_no_reminder_while_the_ai_is_answering(wired, sample_advisor):
     lead = _lead_for(db, org, sample_advisor, "L001")
     t0 = datetime.utcnow() - timedelta(hours=2)
     _reply(db, lead, "Yes I want to come in and see you Friday at 2", "SM_K", now=t0)
-    db.add(ProgramConversation(organization_id=org.id, lead_id=lead.id, state="offered",
-                               last_ai_at=t0 + timedelta(seconds=20)))
+    from app.models.program_models import ProgramConversationTurn
+    conv = ProgramConversation(organization_id=org.id, lead_id=lead.id, state="offered",
+                               last_ai_at=t0 + timedelta(seconds=20))
+    db.add(conv)
+    db.flush()
+    # The AI's answer actually went out (a draft would not count - see
+    # tests/test_sci_lost_interest.py).
+    db.add(ProgramConversationTurn(conversation_id=conv.id, organization_id=org.id, lead_id=lead.id, role="ai",
+                                   text="Would Fri 2 PM work?", action="offer_times", delivery="sent",
+                                   created_at=t0 + timedelta(seconds=20)))
     db.commit()
     R.sla_sweep(db, now=t0 + timedelta(minutes=16))
     assert len([1 for c, t, b in sent if c == "sms" and t == OWNER_PHONE]) == 1

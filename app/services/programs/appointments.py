@@ -144,6 +144,19 @@ def still_free(db: Session, prog, slot: datetime, kind: str = VISIT) -> bool:
     return slot.strftime("%Y-%m-%dT%H:%M:00") in set(res.get("slots") or [])
 
 
+def _opted_out(db: Session, lead) -> bool:
+    if (getattr(lead, "status", None) or "").lower() in ("dnc", "opted_out", "unsubscribed"):
+        return True
+    try:
+        from app.services import sms_programs
+        digits = lambda v: "".join(ch for ch in str(v or "") if ch.isdigit())[-10:]   # noqa: E731
+        phone = digits(getattr(lead, "phone", None))
+        # Stored as +1..., 1... or 10 digits depending on the writer: compare the number itself.
+        return bool(phone) and phone in {digits(x) for x in sms_programs.opted_out_numbers(db, lead.organization_id)}
+    except Exception:                                    # noqa: BLE001
+        return False
+
+
 class _InternalRequest:
     """The booking page's own confirmation call, made in-process."""
 
@@ -164,6 +177,10 @@ def book(db: Session, prog, lead, slot: datetime, kind: str, *, family_text: boo
     advisor = program_advisor(db, prog)
     if advisor is None:
         return {"ok": False, "status": "no_calendar", "reason": "no booking calendar is set"}
+    if _opted_out(db, lead):
+        # A family who said STOP (or is suppressed) is never booked - by the
+        # setter or by staff - however the request reached here.
+        return {"ok": False, "status": "opted_out", "reason": "this family has opted out"}
     from app.services.sci_staging_demo import is_demo_lead
     from app.services.test_records import is_owner_test_lead
     owner_test = is_owner_test_lead(lead)
@@ -184,10 +201,12 @@ def book(db: Session, prog, lead, slot: datetime, kind: str, *, family_text: boo
     # An existing booking for this family is never doubled.
     existing = (db.query(BookingLink)
                 .filter(BookingLink.lead_id == lead.id, BookingLink.user_id == advisor.id,
-                        BookingLink.status.in_(("booked", "confirmed"))).first())
+                        BookingLink.status.in_(("booked", "confirmed")),
+                        # a visit that already happened is history, not a booking to move
+                        BookingLink.booked_time >= _today_central().replace(tzinfo=None)).first())
     if existing is not None and existing.booked_time:
         same = existing.booked_time.replace(tzinfo=None) == slot
-        return {"ok": same, "status": "confirmed" if same else "already_booked",
+        return {"ok": same, "status": "confirmed" if same else "already_booked", "already": True,
                 "booking_id": existing.id, "booked_time": existing.booked_time.isoformat()}
     if not still_free(db, prog, slot, kind):
         return {"ok": False, "status": "taken", "reason": "that time is no longer open"}
@@ -200,7 +219,7 @@ def book(db: Session, prog, lead, slot: datetime, kind: str, *, family_text: boo
                "appt_label": ("TEST - owner live test, safe to delete" if owner_test
                               else LABELS.get(kind, LABELS[VISIT])),
                "lead_name": ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip(),
-               "lead_phone": lead.phone or "", "duration_minutes": minutes_for(kind),
+               "lead_phone": lead.phone or "", "duration_minutes": minutes_for(kind), "from_setter": True,
                # Booked from an email conversation: the confirmation goes back by
                # email to the writer, not as a text to the record's phone.
                "skip_family_text": not family_text}
@@ -217,6 +236,10 @@ def book(db: Session, prog, lead, slot: datetime, kind: str, *, family_text: boo
         else:
             asyncio.run(booking_confirmed_webhook(_InternalRequest(payload), db))
     except Exception as exc:                             # noqa: BLE001
+        if getattr(exc, "status_code", None) == 409:
+            # The booking path's own re-check lost a race for this time.
+            db.rollback()
+            return {"ok": False, "status": "taken", "reason": "that time is no longer open"}
         log.exception("setter booking failed for lead %s", lead.id)
         db.rollback()
         return {"ok": False, "status": "error", "reason": str(exc)[:200]}

@@ -283,6 +283,36 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
                 detail="You must change your password before continuing. Use /auth/change-password."
             )
 
+    # PROGRAM ISOLATION (server-side). A Wholesale-seat login working in its
+    # Wholesale workspace reaches only Wholesale (+ the shared shell core),
+    # never the general platform screens or another program's menus. God and
+    # super_admin are the internal administration experience and never locked.
+    # See app/services/program_experience.py.
+    if user.role not in ("god_admin", "super_admin"):
+        from app.services import program_experience
+        program_experience.enforce(db, user, request)
+
+    # OPERATOR WITH NO HOME ORGANIZATION, WORKING IN A SELECTED WORKSPACE.
+    # A multi-program operator (Michael, issue #268) holds org_admin memberships
+    # in several customer workspaces but no users.organization_id. Hundreds of
+    # routes read the tenant and the role from the user row, so they refused him
+    # ("no customer organization is selected") even inside a workspace he
+    # administers. For THIS request only, the user row takes the workspace the
+    # server has just validated against an active membership, and that
+    # membership's role. Never for god/super_admin, never without a validated
+    # membership, never persisted (the instance is detached first).
+    if (user.role not in ("god_admin", "super_admin") and user.organization_id is None
+            and request is not None and request.headers.get("X-Workspace-Id")):
+        from app.services import workspace_access as _wa
+        _sel = _wa.selected_workspace_id(user, db, request)
+        _mrole = _wa.workspace_role(user, db, _sel) if _sel else None
+        # Administrators only: view-only (spectator) and ordinary org-less
+        # logins keep exactly the behaviour they had.
+        if _mrole in ("org_admin", "manager"):
+            db.expunge(user)
+            user.organization_id = _sel
+            user.role = _mrole
+
     # Cross-org context: god_admin can view any org's data or see ALL orgs combined.
     # expunge() detaches the user from the SQLAlchemy session BEFORE any mutation
     # so changes are never written back to the DB.
