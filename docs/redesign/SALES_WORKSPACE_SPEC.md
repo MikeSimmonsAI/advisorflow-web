@@ -126,17 +126,57 @@ booking response (handed to the mail service / not sent yet / no email on the le
 **Dialogs** — focus moves inside on open, Tab stays inside, Escape closes, focus
 returns to the button that opened it.
 
-## Do Not Contact — dependency, not built
+## Do Not Contact (sales prospects)
 
-The only authoritative suppression list, `SuppressionEntry`
-(`app/models/models.py`, enforced in `app/services/compliance_service.py`), is keyed
-to a **customer organization** and covers tenant leads. Sales prospects belong to a
-**brand sales org** and have no opt-out record, and nothing in the sales workspace
-sends messages through a provider (calls and texts go through the rep's own phone).
-Per the brief, no front-end-only flag was added. Supporting "Do not contact" for
-sales prospects needs a shared backend change (an opt-out record the scheduler's
-invitation sender and any future outreach both honour), coordinated on #239.
+**Why a sales table.** The existing list, `SuppressionEntry` (`app/models/models.py`,
+enforced in `compliance_service`), is keyed to a customer organization and covers
+phone only; sales prospects belong to a brand sales org and are reached by phone and
+email. So the record is `sales_contact_suppressions`
+(`app/models/sales_suppression_models.py`), using the **same phone normaliser**
+(`compliance_service.usable_us_phone`) so a number means the same thing on both
+sides. Coordinated on #239 before the shared files (`app/models/registry.py`, the
+invitation/reminder/confirmation/proposal senders) were touched.
+
+**What a row means.** Within one brand sales org, do not contact this phone and/or
+this email. Matching is by contact detail, so every duplicate record of the same
+person (other phone formatting, other capitalisation of the email) is covered,
+including duplicates created later. Rows are never deleted.
+
+**Recording.** A rep picks Not Interested → *Asked not to be contacted* on the
+call result (or the link on Lead Details). The call note is saved, the deal's
+follow-up is cleared, and `POST /sales/opportunities/{id}/do-not-contact` writes
+the row with who recorded it and why. It is distinct from Lost: the deal keeps its
+stage; it simply can no longer be contacted.
+
+**Enforced on the server** (`app/services/sales_suppression.py`):
+- scheduling a next action or due date → 409 (clearing is allowed)
+- logging a call result or a sent text → 409
+- booking a meeting → 409
+- prospect invitations, 24-hour reminders, demo confirmations and proposal emails
+  → nothing is sent (recorded as skipped, never raised to the caller)
+- My Day / Follow Ups never count a suppressed deal as due; a new duplicate gets
+  no follow-up.
+
+**Correction.** Only a sales manager of that brand (or the owner) can lift it,
+with a required reason: `POST /sales/do-not-contact/{id}/lift`. The row keeps
+recorded-by, lifted-by, both times and both reasons, and every matching deal gets
+a timeline entry. Lifting never schedules anything; a rep must set a new
+follow-up by hand. Nothing lifts a request automatically. Another brand's ids
+return 404.
+
+**Tests.** `tests/test_sales_do_not_contact.py` (12): recording, distinct from
+Lost, nothing-to-suppress, other rep refused, every enforcement path, every email
+sender sends nothing, duplicates by phone format and email case, new duplicate,
+other brand unaffected and unprobeable, manager-only lift with history kept.
+End-to-end DNC-0…DNC-14 cover the same through the screens.
 
 ## Known limits
 
 - Booking still emails the prospect the usual invitation, exactly as before.
+- Do Not Contact is sales-scoped: it does not add the number to a customer
+  workspace's own suppression list (different owner, different list), and the
+  customer list does not feed it.
+- Calls and texts go through the rep's own phone; the app removes Call/Text and
+  refuses to log them, but cannot stop someone dialling the number by hand.
+- A lead with no usable phone or email cannot be suppressed (nothing to match);
+  the server says so rather than saving an empty record.

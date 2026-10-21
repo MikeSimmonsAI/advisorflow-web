@@ -36,12 +36,23 @@ curl -X PUT http://127.0.0.1:8000/sales/availability/me -H "Authorization: Beare
                      {"day_of_week":2,"start_minute":0,"end_minute":1440},{"day_of_week":3,"start_minute":0,"end_minute":1440},
                      {"day_of_week":4,"start_minute":0,"end_minute":1440},{"day_of_week":5,"start_minute":0,"end_minute":1440},
                      {"day_of_week":6,"start_minute":0,"end_minute":1440}]}'
+python grant_demo.py ./local.db      # rep2 may present the Demo Suite (phone More check)
 npm i puppeteer-core axe-core          # next to the scripts
 SW_CHROME=/path/to/headless_shell node e2e.mjs ./out ./outbox.log
 SW_CHROME=/path/to/headless_shell node shots.mjs ./shots ./rep.tok
 ```
 
 Restart `run_local.py` before each full run (it rebuilds the throwaway database).
+
+**Closeout run 2026-10-21 13:20 CDT** (phone More menu, phone call-result dialog, Do Not
+Contact), on the branch after merging the "Demo & Closing" rename: **154/154 pass**, no console
+errors, only blocked host `fonts.googleapis.com`. New checks: MN-* (phone More for a rep, a rep
+with the Demo Suite grant and a manager — exact allowed pages, keyboard, Escape, outside tap,
+44px, every destination opens), MD-* (longest Not Interested form at 390x844, 390x600 and
+375x480 with a 2,000-character note — header and Save/Cancel stay on screen, a missing-date error
+is shown in view without losing the note, saves in full), DNC-* (record from a call, duplicate by
+phone format, follow-ups cleared, server 409s, booking refused, nothing sent, manager-only lift
+with reason, history kept, nothing rescheduled).
 
 **Independent re-run 2026-10-21 12:14 CDT** on head `c399da9` (a separate session, different
 machine, steps above): **81/81 pass**, no console errors, only blocked host

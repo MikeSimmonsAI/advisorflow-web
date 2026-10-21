@@ -332,6 +332,153 @@ await page.goto(APP + '/sales/leads/' + lead.id, { waitUntil: 'networkidle2' });
 await clickText(page, '.ss-detail-actions button', 'Call'); await clickText(page, '.ss-outcome', 'Not Interested', true)
 await shot(page, 'e2e-m-what-happened')
 
+// ════════════════ CLOSEOUT (2026-10-21): phone More, phone dialog, Do Not Contact ════════════════
+const vshot = (pg, n) => pg.screenshot({ path: `${OUT}/${n}.png`, fullPage: false })
+const inView = (pg, sel) => pg.$eval(sel, e => { const r = e.getBoundingClientRect()
+  return r.top >= 0 && r.left >= 0 && r.bottom <= window.innerHeight + 0.5 && r.right <= window.innerWidth + 0.5 && r.height > 0 })
+const overflowX = pg => pg.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+const BASE_MORE = ['Book a Demo', 'All Deal Stages', 'My Availability', 'Sold / Onboarding', 'My Compensation']
+const PATHS = { 'Book a Demo': '/sales/book', 'All Deal Stages': '/sales/pipeline/stages', 'My Availability': '/sales/availability',
+  'Demo Suite': '/demo-suite', 'Sold / Onboarding': '/sales/onboarding', 'My Compensation': '/sales/my-compensation', 'Team Availability': '/sales/team' }
+
+async function phoneMore(who, email, expected, absent) {
+  await logout(page); await page.setViewport({ width: 390, height: 844, hasTouch: true, isMobile: true }); await login(page, email)
+  await page.goto(APP + '/sales', { waitUntil: 'networkidle2' }); await sleep(700)
+  const box = await page.$eval('.ss-mmorebtn', e => { const r = e.getBoundingClientRect(); return { w: r.width, h: r.height, vis: getComputedStyle(e).display !== 'none' } }).catch(() => null)
+  ok(`MN-${who}. "More" button shown on a phone, >=44x44`, !!box && box.vis && box.w >= 44 && box.h >= 44, JSON.stringify(box))
+  // keyboard: Enter opens, focus moves in, Escape closes and returns focus
+  await page.focus('.ss-mmorebtn'); await page.keyboard.press('Enter'); await sleep(300)
+  const kb = await page.evaluate(() => ({ open: !!document.getElementById('ss-mmore-panel'),
+    inside: !!document.getElementById('ss-mmore-panel')?.contains(document.activeElement),
+    exp: document.querySelector('.ss-mmorebtn').getAttribute('aria-expanded') }))
+  const labels = await page.$$eval('#ss-mmore-panel a', a => a.map(x => x.textContent.replace('LATER', '').trim()))
+  const small = await page.$$eval('#ss-mmore-panel a, #ss-mmore-panel button', a => a.filter(x => x.getBoundingClientRect().height < 44).map(x => x.textContent.trim()))
+  ok(`MN-${who}. Keyboard: Enter opens, focus inside, aria-expanded=true`, kb.open && kb.inside && kb.exp === 'true', JSON.stringify(kb))
+  ok(`MN-${who}. Menu lists exactly the allowed pages`, JSON.stringify(labels) === JSON.stringify(expected), labels.join(', '))
+  ok(`MN-${who}. Not offered: ${absent.join(', ') || '(none)'}`, absent.every(a => !labels.includes(a)))
+  ok(`MN-${who}. Menu items and Sign out are >=44px tall; Sign out present`, small.length === 0 && (await page.$('#ss-mmore-panel .ss-mmoreout')) !== null, small.join(', '))
+  ok(`MN-${who}. No sideways scroll with the menu open`, (await overflowX(page)) <= 0)
+  await vshot(page, 'e2e-m-more-' + who)
+  await page.keyboard.press('Escape'); await sleep(200)
+  const esc = await page.evaluate(() => ({ open: !!document.getElementById('ss-mmore-panel'), back: document.activeElement?.classList.contains('ss-mmorebtn') }))
+  ok(`MN-${who}. Escape closes and returns focus to More`, !esc.open && esc.back, JSON.stringify(esc))
+  // outside tap closes
+  await page.tap('.ss-mmorebtn'); await sleep(200); await page.tap('.sw-body'); await sleep(200)
+  ok(`MN-${who}. Tapping outside closes it`, !(await page.$('#ss-mmore-panel')))
+  // touch: every destination opens
+  for (const l of expected) {
+    await page.goto(APP + '/sales', { waitUntil: 'networkidle2' }); await sleep(400)
+    await page.tap('.ss-mmorebtn'); await sleep(250)
+    const h = await page.evaluateHandle(l => [...document.querySelectorAll('#ss-mmore-panel a')].find(a => a.textContent.includes(l)), l)
+    await h.asElement().tap(); await sleep(900)
+    const path = await page.evaluate(() => location.pathname)
+    const t = await bodyText(page)
+    ok(`MN-${who}. Tap "${l}" opens ${PATHS[l]}`, path === PATHS[l] && !/Sales workspace unavailable|Forbidden|not allowed/i.test(t), path)
+  }
+}
+await phoneMore('rep', 'rep@example.test', [...BASE_MORE, 'Team Availability'], ['Demo Suite'])
+await phoneMore('rep-with-demo', 'rep2@example.test', ['Book a Demo', 'All Deal Stages', 'My Availability', 'Demo Suite', 'Sold / Onboarding', 'My Compensation', 'Team Availability'], [])
+await phoneMore('manager', 'manager@example.test', BASE_MORE, ['Demo Suite', 'Team Availability'])
+const teamBar = await page.$$eval('.sw-sidebar nav[aria-label="My team"] a', a => a.map(x => x.textContent.trim()))
+ok('MN-manager. MY TEAM pages stay in the phone top bar', teamBar.some(x => x.includes('Team Command')) && teamBar.some(x => x.includes('Team Availability')), teamBar.join(', '))
+
+// ── phone call-result dialog: the longest Not Interested form ───────────
+await logout(page); await page.setViewport({ width: 390, height: 844, hasTouch: true, isMobile: true }); await login(page, 'rep@example.test')
+const mk = async (body) => (await api(repTok, '/sales/opportunities', { method: 'POST', body: JSON.stringify(body) })).body
+const mobileLead = await mk({ company_name: 'Mobile Dialog Co', contact_name: 'Testfamily Mobile', phone: '(214) 555-0166', email: 'mobile@example.test', stage: 'contacted' })
+const LONG = ('Spoke with the owner for a while about their season, budget and current vendor contract. ').repeat(23).slice(0, 2000)
+for (const [w, h, label] of [[390, 844, '390x844'], [390, 600, '390x600'], [375, 480, '375x480-keyboard']]) {
+  await page.setViewport({ width: w, height: h, hasTouch: true, isMobile: true })
+  await page.goto(APP + '/sales/leads/' + mobileLead.id, { waitUntil: 'networkidle2' }); await sleep(700)
+  await clickText(page, '.ss-detail-actions button', 'Call'); await clickText(page, '.ss-outcome', 'Not Interested', true)
+  await clickText(page, '.ss-decision', 'Follow up later')
+  await page.type('#ss-call-note', LONG.slice(0, 300)); await page.$eval('#ss-call-note', (e, v) => { const s = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set; s.call(e, v); e.dispatchEvent(new Event('input', { bubbles: true })) }, LONG)
+  await page.type('#ss-next', 'Check back after budget season')
+  // try to save with no date: the error must be visible, nothing lost
+  await page.click('.ss-modalfoot .ss-primaryact'); await sleep(500)
+  const errVis = await page.$eval('.ss-modal [role=alert]', e => { const r = e.getBoundingClientRect(); const b = e.closest('.ss-modalbody').getBoundingClientRect(); return r.top >= b.top - 1 && r.bottom <= b.bottom + 1 }).catch(() => false)
+  const kept = await page.$eval('#ss-call-note', e => e.value.length)
+  ok(`MD-${label}. Missing date: error shown in view, note kept (${kept} chars)`, errVis && kept === LONG.length)
+  await page.$eval('#ss-due', e => e.scrollIntoView({ block: 'center' }))
+  await setDate(page, '#ss-due', (await page.$eval('#ss-due', e => e.min)))
+  // scroll the body to the very top: header + actions must still be on screen
+  await page.$eval('.ss-modalbody', e => { e.scrollTop = 0 }); await sleep(150)
+  const headTop = await inView(page, '.ss-modalhead h2'); const saveTop = await inView(page, '.ss-modalfoot .ss-primaryact'); const cancelTop = await inView(page, '.ss-modalfoot .ss-white')
+  await page.$eval('.ss-modalbody', e => { e.scrollTop = e.scrollHeight }); await sleep(150)
+  const headBot = await inView(page, '.ss-modalhead h2'); const saveBot = await inView(page, '.ss-modalfoot .ss-primaryact')
+  ok(`MD-${label}. Header + Save + Cancel on screen at top and bottom of the scroll`, headTop && saveTop && cancelTop && headBot && saveBot, JSON.stringify({ headTop, saveTop, cancelTop, headBot, saveBot }))
+  const tgt = await page.$$eval('.ss-modalfoot .ss-btn, .ss-outcome, .ss-decision, .ss-modalhead button, #ss-next, #ss-due', els => els.filter(e => { const r = e.getBoundingClientRect(); return r.height > 0 && (r.height < 44 || (e.matches('button') && r.width < 44)) }).map(e => (e.textContent.trim() || e.id || e.getAttribute('aria-label')).slice(0, 20) + ' ' + Math.round(e.getBoundingClientRect().width) + 'x' + Math.round(e.getBoundingClientRect().height)))
+  ok(`MD-${label}. Important targets >=44px`, tgt.length === 0, tgt.join(', '))
+  ok(`MD-${label}. No sideways scroll`, (await overflowX(page)) <= 0)
+  await page.$eval('.ss-modalbody', e => { e.scrollTop = e.scrollHeight / 2 }); await sleep(100)
+  await vshot(page, 'e2e-m-dialog-' + label)
+  if (label !== '375x480-keyboard') {
+    await clickText(page, '.ss-modalfoot button', 'Cancel'); await sleep(300)
+    ok(`MD-${label}. Cancel closes (not trapped)`, !(await page.$('[role=dialog]')))
+  } else {
+    await page.click('.ss-modalfoot .ss-primaryact'); await sleep(1200)
+    const got = (await api(repTok, '/sales/opportunities/' + mobileLead.id)).body
+    const n = (got.timeline || []).find(e => e.event_type === 'call_outcome')
+    ok('MD. Saved from the smallest screen: dialog closed, full note + follow-up stored', !(await page.$('[role=dialog]')) && n && (n.detail || '').length === LONG.length && got.next_action === 'Check back after budget season' && !!got.next_action_due_at,
+      `${(n?.detail || '').length} chars, next ${got.next_action}, due ${got.next_action_due_at}`)
+  }
+}
+
+// ── Do Not Contact through the UI ───────────────────────────────────────
+await page.setViewport({ width: 1440, height: 900 })
+const outboxBefore = outboxLines().length
+const today = new Date().toISOString().slice(0, 10) + 'T12:00:00'
+const optout = await mk({ company_name: 'Optout Co', contact_name: 'Testfamily Optout', phone: '(214) 555-0177', email: 'optout@example.test', stage: 'contacted', next_action: 'Call back', next_action_due_at: today })
+const optdup = await mk({ company_name: 'Optout Dup Co', contact_name: 'Testfamily Optdup', phone: '214.555.0177', email: 'other@example.test', stage: 'prospect', next_action: 'Intro call', next_action_due_at: today })
+await page.goto(APP + '/sales/leads/' + optout.id, { waitUntil: 'networkidle2' }); await sleep(700)
+ok('DNC-0. Rep sees no manager "Lift" control', !(await bodyText(page)).includes('Lift (manager correction)'))
+await clickText(page, '.ss-detail-actions button', 'Call'); await clickText(page, '.ss-outcome', 'Not Interested', true)
+const choices = await page.$$eval('.ss-decision strong', s => s.map(x => x.textContent))
+ok('DNC-1. Not Interested offers Close as Lost / Follow up later / Asked not to be contacted', choices.join('|') === 'Close as Lost|Follow up later|Asked not to be contacted', choices.join('|'))
+await clickText(page, '.ss-decision', 'Asked not to be contacted')
+await page.type('#ss-call-note', 'Please stop calling me.')
+const lbl = await page.$eval('.ss-modalfoot .ss-primaryact', b => b.textContent.trim())
+await page.click('.ss-modalfoot .ss-primaryact'); await sleep(1500)
+const od = (await api(repTok, '/sales/opportunities/' + optout.id)).body
+const dd = (await api(repTok, '/sales/opportunities/' + optdup.id)).body
+ok('DNC-2. "Record Do Not Contact" saves a server record (who + reason)', lbl.includes('Record Do Not Contact') && od.do_not_contact_detail?.active?.reason === 'Please stop calling me.' && !!od.do_not_contact_detail.active.recorded_by, JSON.stringify(od.do_not_contact_detail?.active || {}))
+ok('DNC-3. Distinct from Lost: deal stays open, follow-up cleared', od.stage !== 'lost' && od.status === 'open' && !od.next_action && !od.next_action_due_at)
+ok('DNC-4. Duplicate with the same phone in another format is covered, follow-up cleared', dd.do_not_contact === true && !dd.next_action_due_at)
+const lt = await bodyText(page)
+const actBtns = await page.$$eval('.ss-detail-actions button', b => b.map(x => x.textContent.trim()))
+ok('DNC-5. Lead shows the banner; no Call / Text / Book Demo / Log Call Outcome', lt.includes('Do Not Contact') && lt.includes('Please stop calling me.') && actBtns.length === 0 && !lt.includes('Log Call Outcome'), actBtns.join(','))
+await shot(page, 'e2e-dnc-lead-rep')
+await page.goto(APP + '/sales/follow-ups', { waitUntil: 'networkidle2' }); await sleep(800)
+const fuNames = await rowsNames(page)
+ok('DNC-6. Neither record is in Due Now', !fuNames.includes('Testfamily Optout') && !fuNames.includes('Testfamily Optdup'))
+const pat = await api(repTok, '/sales/opportunities/' + optdup.id, { method: 'PATCH', body: JSON.stringify({ next_action: 'Try again', next_action_due_at: today }) })
+const nte = await api(repTok, '/sales/opportunities/' + optdup.id + '/notes', { method: 'POST', body: JSON.stringify({ event_type: 'call_outcome', summary: 'Call — Reached' }) })
+ok('DNC-7. Server refuses a new follow-up and a call log on the duplicate (409)', pat.status === 409 && nte.status === 409, pat.status + '/' + nte.status)
+await page.goto(APP + '/sales/book?opp=' + optdup.id, { waitUntil: 'networkidle2' }); await sleep(800)
+const bk = await bodyText(page)
+const offered = await page.$$eval('select option', o => o.map(x => x.textContent))
+ok('DNC-8. Book a Demo refuses and never offers either person', bk.includes("Can't book") && !offered.some(t => /Optout|Optdup/.test(t)))
+await page.goto(APP + '/sales/pipeline', { waitUntil: 'networkidle2' }); await sleep(800)
+ok('DNC-9. Pipeline cards carry a "Do not contact" chip', (await page.$$eval('.ss-dnc', e => e.length)) >= 2)
+ok('DNC-10. Nothing was sent to either person', outboxLines().slice(outboxBefore).every(l => !/optout@|other@|555-?0177|5550177/.test(l)))
+// manager correction
+await logout(page); await login(page, 'manager@example.test')
+await page.goto(APP + '/sales/leads/' + optout.id, { waitUntil: 'networkidle2' }); await sleep(700)
+await clickText(page, '.ss-dncbanner button', 'Lift (manager correction)')
+await page.click('.ss-dncform .ss-blue'); await sleep(400)
+ok('DNC-11. Lift needs a reason', (await bodyText(page)).includes('Give the reason for lifting it.'))
+await page.type('#ss-dnc-reason', 'Recorded on the wrong person.')
+await shot(page, 'e2e-dnc-manager-lift')
+await page.click('.ss-dncform .ss-blue'); await sleep(1200)
+const od2 = (await api(mgrTok, '/sales/opportunities/' + optout.id)).body
+const dd2 = (await api(mgrTok, '/sales/opportunities/' + optdup.id)).body
+const h0 = od2.do_not_contact_detail?.history?.[0] || {}
+ok('DNC-12. Lifted with reason; history keeps who recorded and who lifted', !od2.do_not_contact_detail?.active && h0.lift_reason === 'Recorded on the wrong person.' && !!h0.lifted_by && !!h0.recorded_by)
+ok('DNC-13. Lifting does not reschedule anything', !od2.next_action_due_at && !dd2.next_action_due_at)
+ok('DNC-14. Lead shows Call again and the history', (await page.$$eval('.ss-detail-actions button', b => b.some(x => x.textContent.includes('Call')))) && (await bodyText(page)).includes('Do Not Contact history'))
+await page.setViewport({ width: 390, height: 844, hasTouch: true, isMobile: true }); await sleep(300)
+await shot(page, 'e2e-m-dnc-lifted-manager')
+
 console.log('blocked hosts:', [...blocked].join(', ') || 'none')
 console.log('console errors:', errors.length ? errors.join('\n  ') : 'none')
 await browser.close()

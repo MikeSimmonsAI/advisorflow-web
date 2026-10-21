@@ -36,9 +36,9 @@ Real headless-Chromium captures of the app running locally against synthetic tes
 
 ![8. Post-call "What happened?"](screenshots/sales-workspace/e2e-03-what-happened.png)
 
-### 9. Not Interested → Close as Lost / Follow up later
+### 9. Not Interested → Close as Lost / Follow up later / Asked not to be contacted
 
-![9. Not Interested → Close as Lost / Follow up later](screenshots/sales-workspace/e2e-09-not-interested-options.png)
+![9. Not Interested choices](screenshots/sales-workspace/e2e-09-not-interested-options.png)
 
 ### Reports
 
@@ -57,6 +57,34 @@ Real headless-Chromium captures of the app running locally against synthetic tes
 | "What happened?" (Not Interested) |
 |---|
 | ![](screenshots/sales-workspace/e2e-m-what-happened.png) |
+
+## Phone closeout — More menu, call-result dialog
+
+The phone top bar keeps the seven main items; everything else (and Sign out) is under **More**.
+
+| Rep | Rep allowed the Demo Suite | Manager (MY TEAM stays in the bar) |
+|---|---|---|
+| ![](screenshots/sales-workspace/e2e-m-more-rep.png) | ![](screenshots/sales-workspace/e2e-m-more-rep-with-demo.png) | ![](screenshots/sales-workspace/e2e-m-more-manager.png) |
+
+Longest Not Interested form (2,000-character note): header and Save/Cancel stay on screen while the middle scrolls.
+
+| 390×844 | 390×600 | 375×480 (keyboard open) |
+|---|---|---|
+| ![](screenshots/sales-workspace/e2e-m-dialog-390x844.png) | ![](screenshots/sales-workspace/e2e-m-dialog-390x600.png) | ![](screenshots/sales-workspace/e2e-m-dialog-375x480-keyboard.png) |
+
+## Do Not Contact
+
+### Recorded by the rep from a call — Call, Text and Book Demo removed
+
+![Do Not Contact on Lead Details](screenshots/sales-workspace/e2e-dnc-lead-rep.png)
+
+### Manager correction needs a reason
+
+![Manager lift](screenshots/sales-workspace/e2e-dnc-manager-lift.png)
+
+### After the lift — history kept, nothing rescheduled (phone)
+
+![After lift](screenshots/sales-workspace/e2e-m-dnc-lifted-manager.png)
 
 ## Tablet (820 px)
 
