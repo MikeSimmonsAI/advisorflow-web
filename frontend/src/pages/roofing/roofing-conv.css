@@ -114,7 +114,7 @@
 .rf .rf-book { padding: 20px 22px 22px; display: grid; gap: 16px; }
 .rf .rf-book__head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .rf .rf-book__who { display: flex; gap: 12px; align-items: center; min-width: 0; }
-.rf .rf-steps { list-style: none; margin: 0; padding: 0; display: flex; gap: 8px; }
+.rf ol.rf-steps { list-style: none; margin: 0; padding: 0; display: flex; gap: 8px; }
 .rf .rf-steps li { flex: 1; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: var(--rf-slate); padding-bottom: 10px; border-bottom: 3px solid var(--rf-line); }
 .rf .rf-steps li span { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--rf-mist-2); font-size: 12px; flex: none; }
 .rf .rf-steps li.on { color: var(--rf-ink); border-color: var(--rf-orange); }
