@@ -90,7 +90,13 @@ def _bab_members(db, bab):
 
 
 def _opens(client, h, org):
-    return client.get("/wholesale/settings", headers={**h, "X-Workspace-Id": org.id}).status_code == 200
+    """Wholesale answers AND the server resolved THIS workspace. A selection the
+    caller has no membership behind is discarded and the request falls back to
+    their own workspace - that answer is theirs, not `org`'s."""
+    hh = {**h, "X-Workspace-Id": org.id}
+    if client.get("/wholesale/settings", headers=hh).status_code != 200:
+        return False
+    return client.get("/branding/org", headers=hh).json().get("organization_id") == org.id
 
 
 def test_god_invites_a_bookaboost_admin_who_lands_in_bookaboost_wholesale(client, w):
