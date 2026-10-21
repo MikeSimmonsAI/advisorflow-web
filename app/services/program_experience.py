@@ -92,24 +92,76 @@ def is_wholesale_host(org, user) -> bool:
     return _explicit(org, WHOLESALE_WORKSPACE_KEY) and _explicit(org, "wholesale_real_estate")
 
 
-def experience_for(db: Session, user, org, is_program: bool, named_wholesale: Optional[bool] = None) -> str:
-    if is_program:
-        return "sci"
+# ─────────────────────────────────────────────────────────────────────────────
+# BUSINESS IDENTITY IS NOT A FEATURE SWITCH (2026-10-21)
+#
+# Production: switching Roofing + Insurance capabilities ON for Restland (a
+# funeral home) made the launcher call Restland "Roofing" - a second Roofing
+# card - because identity was read straight from the switches. A capability
+# says what a workspace CAN DO; it must never say what the business IS.
+#
+# Rule: a capability may name the business only when the business's own
+# industry agrees, or when the org records no specific industry at all
+# (generic / other / unset - those orgs have no identity of their own to
+# protect, which keeps every existing setup working). A funeral home, an
+# energy company, a cleaning company ... keeps its own identity whatever
+# capabilities are switched on, and the capabilities themselves keep working
+# (the Roofing API still checks `roofing_program`, the agency API still checks
+# `insurance_agency` - untouched here).
+# ─────────────────────────────────────────────────────────────────────────────
+NEUTRAL_INDUSTRIES = frozenset({"", "generic", "other", "none", "unknown"})
+ROOFING_FEATURE = "roofing_program"
+INSURANCE_FEATURE = "insurance_agency"
+
+
+def industry_of(org) -> str:
+    return (getattr(org, "industry", "") or "").strip().lower()
+
+
+def identity_allows(org, business: str) -> bool:
+    """May a capability present this org as `business`? Only when its own
+    industry is that business or names none."""
+    ind = industry_of(org)
+    return ind == business or ind in NEUTRAL_INDUSTRIES
+
+
+def roofing_identity(org) -> bool:
+    """This org IS a roofing company running the Roofing program: switch on
+    AND identity allows it. (The switch alone still enables the capability.)"""
+    if org is None:
+        return False
     try:
         from app.services.roofing.common import explicitly_enabled
-        if explicitly_enabled(org):
-            return "roofing"
-    except Exception:  # pragma: no cover
-        pass
+        enabled = explicitly_enabled(org)
+    except Exception:  # pragma: no cover - never let a hint break login
+        return False
+    return bool(enabled) and identity_allows(org, "roofing")
+
+
+def insurance_identity(org) -> bool:
+    """This org IS an insurance agency (Max Life Command shell)."""
+    return org is not None and _explicit(org, INSURANCE_FEATURE) and identity_allows(org, "insurance")
+
+
+def experience_for(db: Session, user, org, is_program: bool, named_wholesale: Optional[bool] = None) -> str:
+    # 1. Explicit identity markers first - they are set on purpose, never by a
+    #    capability toggle: the SCI program, and the Wholesale host (EvoSys's
+    #    own org, or an org explicitly listed as a Wholesale workspace).
+    if is_program:
+        return "sci"
     if named_wholesale is None:
         named_wholesale = _named_wholesale_seat(db, user)
     if named_wholesale and is_wholesale_host(org, user):
         return "wholesale"
     if _admin_of_second_tenant(db, user, org):
         return "wholesale"
-    if _explicit(org, "insurance_agency"):
+    # 2. Programs a capability can open - only where identity allows.
+    if roofing_identity(org):
+        return "roofing"
+    if insurance_identity(org):
         return "insurance"
-    if (getattr(org, "industry", "") or "").strip().lower() == "energy":
+    # 3. The business's own industry.
+    if industry_of(org) == "energy":
         return "energy"
     return "platform"
 
