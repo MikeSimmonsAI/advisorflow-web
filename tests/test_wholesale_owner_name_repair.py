@@ -98,6 +98,10 @@ def test_apply_needs_the_code_changes_only_names_and_lifts_the_lookup_hold(
     r = client.post("/wholesale/evosense/owner-names/apply", headers=admin_auth_headers, json={"confirm": code})
     assert r.status_code == 200, r.text
     assert r.json()["applied"] == 1
+    # COMMITTED, not just answered: throw away anything uncommitted in the
+    # shared test session; the repaired name must survive (the overnight merge
+    # had dropped the route's commit and this test still passed).
+    db.rollback()
     db.expire_all()
     o = _owner(db, cases["safe"])
     assert o.display_name == "ROBIN & PAT ETAL SAMPLE" and not o.name_truncated
@@ -117,6 +121,7 @@ def test_apply_needs_the_code_changes_only_names_and_lifts_the_lookup_hold(
     r = client.post("/wholesale/evosense/owner-names/revert", headers=admin_auth_headers,
                     json={"plan": plan_code, "confirm": "REVERT %s" % plan_code})
     assert r.status_code == 200 and r.json()["reverted"] == 1
+    db.rollback()                                   # the undo is committed too
     db.expire_all()
     o = _owner(db, cases["safe"])
     assert o.display_name == "SAMPLE ROBIN AND SAMPLE P" and o.name_truncated
