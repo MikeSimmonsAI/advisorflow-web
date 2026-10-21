@@ -937,6 +937,14 @@ def create_appointment(body: BookIn,
         if opp.brand_sales_org_id != org.id:
             raise HTTPException(status_code=404, detail="Opportunity not found")
 
+    # SALES DO NOT CONTACT (Lane F). A meeting is contact: refuse it for a
+    # prospect who asked for none — by the deal and by the contact details
+    # given here, so a duplicate or a typed-in email cannot slip past.
+    from app.services import sales_suppression as _sdnc
+    if (_sdnc.for_opportunity(db, opp)
+            or _sdnc.find(db, org.id, body.prospect_phone, body.prospect_email)):
+        raise HTTPException(status_code=409, detail=_sdnc.REFUSAL)
+
     mt = None
     duration = body.duration_minutes
     if body.meeting_type_id:
