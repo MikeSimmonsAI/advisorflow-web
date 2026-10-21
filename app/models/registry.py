@@ -34,7 +34,7 @@ from app.models.models import Base  # noqa: F401  (re-exported for callers)
 # tables whose module has been imported, so dropping this line makes every
 # sales table silently never appear. See claude/SALES_WORKSPACE_ARCHITECTURE.md.
 import app.models.sales_models  # noqa: F401  (imported for side effects)
-# Sales Do Not Contact (Lane F, #281) — same Base. Without this import the
+# Sales Do Not Contact (Lane F, #281) - same Base. Without this import the
 # sales_contact_suppressions table is never created and no opt-out can be kept.
 import app.models.sales_suppression_models  # noqa: F401  (imported for side effects)
 # Scheduling models register on the SAME Base for the same reason. Dropping this
