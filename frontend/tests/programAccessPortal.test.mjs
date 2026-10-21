@@ -49,12 +49,17 @@ test('a Roofing workspace whose program is not switched on is not offered as the
               product_contexts: ctx.product_contexts }
   const { visible, others } = programCards(c)
   assert.equal(visible.some(x => x.display === 'Roofing'), false)
-  assert.deepEqual(others.map(x => x.organization_id), [roofing])
+  // still offered, under its own name in the neutral look - not as the Roofing app
+  const card = visible.find(x => x.organization_id === roofing)
+  assert.equal(card.variant, 'general')
+  assert.equal(card.display, 'EvoSys Pro Roofing')
+  assert.deepEqual(others, [])
   assert.equal(workspaceProgramDestination(off), null)
 })
 
 test('generic workspaces remain available when no named product uses them', () => {
   const without = { workspace_contexts:ctx.workspace_contexts, product_contexts:[] }
-  assert.equal(programCards(without).others.length, 1)
-  assert.equal(programCards(without).others[0].organization_id, host)
+  const general = programCards(without).visible.filter(x => x.variant === 'general')
+  assert.deepEqual(general.map(x => x.organization_id), [host])
+  assert.equal(general[0].display, 'EVO Integrated Solutions LLC')
 })

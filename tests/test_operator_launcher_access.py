@@ -162,3 +162,18 @@ def test_michael_is_org_admin_inside_each_workspace_and_nowhere_else(client, w):
     db.expire_all()
     stored = db.query(User).filter(User.id == w["mike"].id).one()
     assert stored.role == "advisor" and stored.organization_id is None
+
+
+def test_wholesale_at_with_back_office_lands_on_launcher_and_works_sales(client, w):
+    """Owner decision 2026-10-21: wholesale@ is Sales Manager in the brand sales
+    team too - launcher first, Back Office card, and /sales is not refused by
+    the Wholesale lock (the general platform screens still are)."""
+    db = w["db"]
+    bso = db.query(BrandSalesOrg).first()
+    _m(db, w["ws"], "brand_sales_org", bso.id, "sales_manager")
+    c = _ctx(client, db, w["ws"])
+    assert c["default_context"]["type"] == "workspace_selector"
+    assert c["has_back_office"] is True and c["back_office_path"] == "/sales"
+    r = client.get("/sales/me", headers=_h(db, w["ws"]))
+    assert r.status_code == 200, r.text
+    assert client.get("/leads/status-funnel", headers=_h(db, w["ws"])).status_code == 403
