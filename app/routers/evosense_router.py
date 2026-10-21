@@ -1835,6 +1835,24 @@ def events(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db),
 
 # ── Tarrant tax-roll misread (Oct 17-19, 2026): targeted repair ─────────────
 
+@router.get("/roll-fix/status")
+def roll_fix_status(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Read-only: how many misread records are still in scope here, and the
+    repair runs so far (for the Controls screen). Admin only."""
+    from app.models.evosense_models import EvoSenseReprocessRun
+    from app.services.evosense import roll_layout_fix as RF
+    _admin(user, db)
+    org_id = svc.write_org_id(db, user)
+    runs = (db.query(EvoSenseReprocessRun)
+            .filter(EvoSenseReprocessRun.organization_id == org_id,
+                    EvoSenseReprocessRun.rule_version == RF.VERSION)
+            .order_by(EvoSenseReprocessRun.created_at.desc()).limit(5).all())
+    return {"in_scope": len(RF.affected_observations(db, org_id)), "hunt_running": RF._hunt_running(db, org_id),
+            "runs": [{"id": r.id, "status": r.status, "property_count": r.property_count,
+                      "applied_at": V._iso(r.applied_at), "rolled_back_at": V._iso(r.rolled_back_at),
+                      "totals": (C.jload(r.summary, {}) or {}).get("totals")} for r in runs]}
+
+
 @router.post("/roll-fix/dry-run")
 def roll_fix_dry_run(db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
                      _g: User = Depends(require_not_observation)):
