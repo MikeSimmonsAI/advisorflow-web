@@ -52,6 +52,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import ProgramSwitchLink from '../../components/ProgramSwitchLink'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   api, clearAllContext, fetchMyContexts, getCurrentUser, logout, setBrandContext,
@@ -313,7 +314,10 @@ export default function ExecutiveSuite({ children }) {
           </div>
         </aside>
 
-        <main className="ex-main">{children}</main>
+        <main className="ex-main">
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}><ProgramSwitchLink /></div>
+          {children}
+        </main>
       </div>
     </div>
   )

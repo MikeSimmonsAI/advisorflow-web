@@ -53,7 +53,8 @@ def test_provision_idempotent_all_demo_nothing_sent(client, db_session, god):
     org = db_session.query(Organization).filter(Organization.id == oid).one()
     assert org.is_demo is True and org.industry == "insurance" and "(DEMO)" in org.name
     c = rep["counts"]
-    assert c["agents"] == 4 and c["prospects"] == 5 and c["applications"] == 1 and c["recruits"] == 3
+    assert c["agents"] == 4 and c["prospects"] == 45 and c["applications"] >= 5 and c["recruits"] == 3
+    assert c["policies"] >= 3 and c["appointments"] >= 5   # the full demo story
     assert rep["status"]["insurance_agency_enabled"] is True
     assert {"leads", "insurance_agency"} <= set(rep["status"]["features"])
     assert "sms" not in rep["status"]["features"] and "email" not in rep["status"]["features"]
@@ -72,7 +73,7 @@ def test_provision_idempotent_all_demo_nothing_sent(client, db_session, god):
     leads = db_session.query(Lead).filter(Lead.organization_id == oid).all()
     assert leads and all(l.is_test for l in leads)
     assert all(l.email.endswith("@example.com") for l in leads)
-    assert all(l.phone.startswith("+1214555010") for l in leads)
+    assert all(l.phone.startswith("+121455501") for l in leads)   # 555-01xx, never real
     assert not any(l.sms_consent for l in leads)
     for model in (AgencyAgentProfile, AgencyProspectProfile, AgencyApplication, AgencyPolicy,
                   AgencyAppointment, AgencyTask, AgencyRecruit):
@@ -83,8 +84,10 @@ def test_provision_idempotent_all_demo_nothing_sent(client, db_session, god):
     assert all(u.email.endswith("@example.com") and u.full_name.startswith("DEMO") for u in users)
     assert all(u.must_change_password for u in users)   # random, unusable password
 
-    # nothing sent
-    assert db_session.query(Message).filter(Message.lead_id.in_([l.id for l in leads])).count() == 0
+    # nothing sent: the demo conversation is written as rows (send_source "demo"),
+    # never through a provider - no provider id on any of them, no email at all
+    msgs = db_session.query(Message).filter(Message.lead_id.in_([l.id for l in leads])).all()
+    assert all(m.send_source == "demo" and not m.twilio_sid for m in msgs)
     assert db_session.query(EmailMessage).count() == 0
 
     # audited
@@ -92,7 +95,7 @@ def test_provision_idempotent_all_demo_nothing_sent(client, db_session, god):
     assert {"god.demo.maxlife.org_created", "god.demo.maxlife.seeded"} <= acts
 
     st = client.get("/god/demo/maxlife", headers=hg).json()
-    assert st["exists"] and st["organization_id"] == oid and st["counts"]["prospects"] == 5
+    assert st["exists"] and st["organization_id"] == oid and st["counts"]["prospects"] == 45
 
 
 def test_refuses_non_demo_org(client, db_session, god):
@@ -127,7 +130,7 @@ def test_agency_endpoints_work_for_demo_org(client, db_session, god):
     s = client.get("/agency/summary", headers=hg)
     assert s.status_code == 200, s.text
     p = client.get("/agency/prospects", headers=hg)
-    assert p.status_code == 200 and p.json()["total"] == 5
+    assert p.status_code == 200 and p.json()["total"] == 45
     a = client.get("/agency/agents", headers=hg)
     assert a.status_code == 200 and len(a.json()["items"]) == 4
     # the demo org admin (entitlement path for a customer user) is entitled too

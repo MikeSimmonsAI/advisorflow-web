@@ -590,6 +590,9 @@ def evosense_attacks(ids):
          {"confirm": "APPLY %s" % ids["es_reprocess_run_id"]}),
         ("post", "%s/reprocess/%s/rollback" % (base, ids["es_reprocess_run_id"]),
          {"confirm": "ROLLBACK %s" % ids["es_reprocess_run_id"]}),
+        # another workspace's run id must not roll back anything here
+        ("post", "%s/roll-fix/%s/rollback" % (base, ids["es_reprocess_run_id"]),
+         {"confirm": "ROLLBACK %s" % ids["es_reprocess_run_id"]}),
     ]
 
 

@@ -16,6 +16,7 @@ permissions: {}
 concurrency:
   group: relay-signal
   cancel-in-progress: false
+  queue: max  # do not drop simultaneous terminal-status notifications from parallel lanes
 
 jobs:
   status:
@@ -32,7 +33,7 @@ jobs:
     env:
       RELAY_ISSUE: "1"
       RELAY_AUTHORIZED_ACTORS: MikeSimmonsAI
-      RELAY_ALLOWED_BRANCHES: 'sci-program,wholesale-nightly,platform-dev'
+      RELAY_ALLOWED_BRANCHES: 'sci-program,wholesale-nightly,platform-dev,feature/sci-appointment-recovery,feature/sci-ops,feature/wholesale-development,feature/atlantis-development,feature/roofing-development,feature/platform-command-center'
       RELAY_STATUS_ACTORS: ${{ vars.RELAY_STATUS_ACTORS || 'github-actions[bot],claude[bot]' }}
     steps:
       - uses: actions/checkout@v4

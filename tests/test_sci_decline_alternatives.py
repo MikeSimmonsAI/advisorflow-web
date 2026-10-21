@@ -232,9 +232,160 @@ def test_family_stopping_by_gets_times_not_a_goodbye(setter, sample_advisor):
     assert _last_ai(db, conv).action == "offer_times" and conv.state != "closed"
 
 
+# ── a family ASKS for a home visit (overnight Oct 19) ────────────────────────
+
+YES_HOME = "Of course - I'd be glad to come to you. I'll reach out personally to find a time that works."
+
+
+@pytest.mark.parametrize("body", ["Can someone come to my house?", "I'd rather you come to me",
+                                  "Could you visit me at home?"])
+def test_a_home_visit_request_is_a_yes_and_goes_to_a_person(setter, sample_advisor, body):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    _location(db, lead, home_visits=True)
+    fake = _Fake([_d("offer_times", "Would {TIMES} work for a visit here?"), _d("handoff", YES_HOME)])
+    _, conv = _run(db, lead, body, fake)
+    assert len(fake.calls) == 2 and "never offer or book a visit at the location" in json.dumps(fake.calls[1]["messages"])
+    assert conv.state == "human" and conv.handoff_reason == S.HOME_VISIT_REASON
+    assert conv.booked_time is None
+    assert "home visit" in S.memory_of(conv).get("wants", [])
+
+
+def test_home_visit_request_where_not_offered_invites_them_in(setter, sample_advisor):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    fake = _Fake([_d("offer_times", "I'd love to meet with you - would {TIMES} work for a visit?")])
+    _, conv = _run(db, lead, "Can someone come to my house?", fake)
+    assert len(fake.calls) == 1 and conv.state != "human"
+
+
+def test_the_advisor_alert_says_home_visit_request(setter, sample_advisor, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+    from app.services import sms_programs
+    db, org, prog = setter["db"], setter["org"], setter["prog"]
+    org.org_twilio_phone_number = None
+    db.commit()
+    client = MagicMock()
+    client.messages.create.return_value = SimpleNamespace(sid="SMhv1", status="queued", error_code=None)
+    monkeypatch.setattr(sms_programs, "is_sci_org", lambda db_, oid: True)
+    monkeypatch.setattr(sms_programs, "sci_sender", lambda: (client, "+18449172171"))
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    _location(db, lead, home_visits=True)
+    from unittest.mock import patch
+    from app.services.programs import responses as R
+    with patch.object(S, "_get_client", return_value=_Fake([_d("handoff", YES_HOME)])), \
+         patch("app.services.email_service.send_email_via_provider", return_value={"success": True}):
+        R.on_inbound(db, lead, "Can someone come to my house?", "sms")
+    texts = [c.kwargs["body"] for c in client.messages.create.call_args_list]
+    assert texts and texts[0].startswith("SCI Home Visit Request | Ollie Testcase")
+
+
+# ── independent review findings (overnight Oct 19) ───────────────────────────
+
 @pytest.mark.parametrize("body", ["Please stop", "Stop please", "pls stop", "STOP NOW", "Stop. Thank you",
                                   "stop this", "stop these texts", "Stop the messages"])
 def test_polite_stops_are_still_stops(body):
-    # Independent review: these are not opt-outs to the reply rules, so the
-    # setter itself must still read them as a stop.
     assert S.what_was_declined(body, INVITE, False) == S.DECLINED_STOP
+
+
+@pytest.mark.parametrize("body", ["Do not come to my house", "Please don’t come to my house",
+                                  "Nobody should come to my home", "I don't want a home visit",
+                                  "We don't need a home visit, we'll come in"])
+def test_dont_come_to_my_home_is_never_a_home_visit_request(body):
+    assert S.what_was_declined(body, INVITE, False) == S.DECLINED_HOME
+
+
+@pytest.mark.parametrize("body", ["Can you come up with another time?", "Can you come back to me next week?",
+                                  "Can you come down on the price?", "Can you visit Saturday instead?",
+                                  "Can someone come out to the cemetery with me?", "Can you come to Restland Saturday?",
+                                  "Can you stop by the funeral home and grab it", "I can stop by today.",
+                                  "Can I come by Friday?"])
+def test_ordinary_scheduling_is_not_a_home_visit_request(body):
+    assert not S._WANTS_HOME.search(S._plain(body))
+
+
+@pytest.mark.parametrize("body", ["Can someone come to my house?", "I'd rather you come to me", "Could you come over?",
+                                  "Would you be able to come to us?",
+                                  "My mom can't leave the house, could you visit her?", "Could you visit me at home",
+                                  "home visit please", "Can you come out here?"])
+def test_real_home_visit_requests_are_recognised(body):
+    assert S._WANTS_HOME.search(S._plain(body))
+
+
+def test_a_stop_after_a_home_offer_is_never_a_home_visit_page(setter, sample_advisor):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    _location(db, lead, home_visits=True)
+    conv = S.conversation_for(db, lead, create=True)
+    conv.memory = json.dumps({"alternative_offered": S.ALT_HOME})
+    db.commit()
+    for body in ("Yes stop sending these", "Ok, but I'd rather come in Tuesday"):
+        dc = S.decline_context(db, lead, conv, body)
+        assert not dc["family_asks_for_home_visit"], body
+
+
+# --- 5C appointment-intent recognition (Oct 20 overnight) ------------------
+from app.services.programs import reply_rules as _rr
+
+
+@pytest.mark.parametrize("text,cls,appt", [
+    ("Saturday works better.", "hot", True),
+    ("Tomorrow is good", "hot", True),
+    ("I'm free Thursday", "hot", True),
+    ("Monday works for us", "hot", True),
+    ("Maybe next week", "active", True),
+    ("I work until five", "active", True),
+    ("After church on Sunday", "active", True),
+    ("Friday doesn't work for me", "active", True),
+    ("Saturday is not good", "active", True),
+    ("I'm not free Thursday", "active", True),
+    ("Today was a hard day", "active", False),
+    ("Tomorrow is my birthday", "active", False),
+])
+def test_timing_replies_are_recognised(text, cls, appt):
+    c = _rr.classify(text)
+    assert c["class"] == cls, (text, c)
+    assert (_rr.APPOINTMENT in _rr.intents(text, c["class"])) is appt, text
+
+
+def test_burial_is_bereavement_not_a_time_pick():
+    c = _rr.classify("We buried my wife on Tuesday")
+    assert "bereavement" in c["reasons"][0]
+    assert _rr.APPOINTMENT not in _rr.intents("We buried my wife on Tuesday", c["class"])
+
+
+@pytest.mark.parametrize("text", [
+    "No thank you, nothing works for us",
+    "Not interested. Nothing works for me",
+    "Remove me from your list, nothing works for me",
+])
+def test_turning_times_down_with_an_opt_out_stays_opt_out(text):
+    assert _rr.classify(text)["class"] == "opt_out", text
+
+
+@pytest.mark.parametrize("text", ["Nothing works for me", "Neither works for me", "None of those work for us"])
+def test_turning_the_times_down_is_not_a_pick(text):
+    c = _rr.classify(text)
+    assert "picked or suggested a time" not in c["reasons"], (text, c)
+    assert c["class"] != "hot", (text, c)
+
+
+@pytest.mark.parametrize("text", ["Happy Monday!", "Have a blessed Sunday"])
+def test_day_greetings_are_not_appointment_intent(text):
+    c = _rr.classify(text)
+    assert _rr.APPOINTMENT not in _rr.intents(text, c["class"]), (text, c)
+
+
+@pytest.mark.parametrize("text", ["We buried dad Saturday", "We buried him last Saturday",
+                                  "Funeral is Saturday", "Laid my husband to rest Tuesday"])
+def test_grief_naming_a_day_is_bereavement(text):
+    c = _rr.classify(text)
+    assert "bereavement" in c["reasons"][0], (text, c)
+    assert _rr.APPOINTMENT not in _rr.intents(text, c["class"]), text
+
+
+def test_opt_out_naming_a_day_has_no_appointment_intent():
+    t = "Not interested. Have a good weekend"
+    c = _rr.classify(t)
+    assert c["class"] == "opt_out" and _rr.APPOINTMENT not in _rr.intents(t, c["class"])

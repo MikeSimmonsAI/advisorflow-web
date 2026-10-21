@@ -4,6 +4,7 @@
    production data and opens the exact records behind it. On a phone the
    side menu and screen tabs give way to the bottom tabs. */
 import { useEffect, useState } from 'react'
+import ProgramSwitchLink from '../../../components/ProgramSwitchLink'
 import { Link } from 'react-router-dom'
 import { api, getCurrentUser } from '../../../api/client'
 
@@ -50,6 +51,7 @@ export function TopBar({ batch }) {
           <small>{now.toLocaleDateString([], { ...CT, weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} · {clock(now)} CT</small></span>
         <span className="sl-av">{initials(u.full_name)}</span>
         <span className="sl-top-u"><b>{u.full_name || 'Signed in'}</b><small>{role}</small></span>
+        <ProgramSwitchLink />
       </div>
     </header>
   )

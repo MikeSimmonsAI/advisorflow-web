@@ -65,9 +65,65 @@ def _locations(db, org_id):
             .filter(LocationProfile.organization_id == org_id, LocationProfile.is_review_bucket.isnot(True)).all()}
 
 
+def _local_now():
+    """Booked times are stored as Central wall time - compare with Central now."""
+    from zoneinfo import ZoneInfo
+    from app.services.booking_time import DEFAULT_ZONE
+    return datetime.now(ZoneInfo(DEFAULT_ZONE)).replace(tzinfo=None)
+
+
+def _home_visit_requested(conv) -> bool:
+    """The request itself, as recorded in the family's memory when the setter
+    handed the conversation over (home_visit.requested_at) - it survives a
+    person taking the conversation or switching it back to the AI. Older
+    conversations without requested_at fall back to the hand-off reason."""
+    from app.services.programs.ai_setter import HOME_VISIT_REASON, memory_of
+    if conv is None:
+        return False
+    hv = memory_of(conv).get("home_visit")
+    hv = hv if isinstance(hv, dict) else {}
+    if hv.get("requested_at"):
+        return not hv.get("done")
+    return bool(conv.state == "human" and conv.handoff_reason == HOME_VISIT_REASON and not hv.get("done"))
+
+
+def _home_visit_waiting(conv) -> bool:
+    """The family asked us to come to them and nobody has arranged it yet -
+    on their CURRENT conversation, and never once they opted out."""
+    if conv is None or conv.state in ("stopped", "booked", "closed") or not _home_visit_requested(conv):
+        return False
+    from sqlalchemy.orm import object_session
+    try:
+        sess = object_session(conv)
+    except Exception:                                    # noqa: BLE001 - not a mapped row
+        sess = None
+    if sess is not None and getattr(conv, "lead_id", None):
+        latest = ai_setter_conv(sess, conv.lead_id)
+        if latest is not None and latest.id != conv.id:
+            return False
+    return True
+
+
+def ai_setter_conv(db, lead_id):
+    return (db.query(ProgramConversation).filter(ProgramConversation.lead_id == lead_id)
+            .order_by(ProgramConversation.created_at.desc()).first())
+
+
+def _home_visit_of(conv) -> Optional[dict]:
+    from app.services.programs.ai_setter import HOME_VISIT_REASON, memory_of
+    if conv is None:
+        return None
+    hv = memory_of(conv).get("home_visit")
+    if not isinstance(hv, dict) and conv.handoff_reason != HOME_VISIT_REASON:
+        return None
+    return dict(hv if isinstance(hv, dict) else {}, waiting=_home_visit_waiting(conv))
+
+
 def _badge(r, conv) -> str:
     if conv is not None and conv.state == "booked":
         return "Booked"
+    if _home_visit_waiting(conv):
+        return "Home visit"
     if r.response_class == "hot":
         return "New" if r.handling_status == "new" else "Hot"
     if r.response_class in ("bad_data", "wrong_person"):
@@ -89,7 +145,7 @@ def _actions(r, conv) -> list:
 
 _NEEDS_REPLY = ("new", "opened")
 _APPT_STATES = ("offered", "booked", "callback_requested")
-FILTERS = ("all", "needs_reply", "text", "email", "handled", "unread", "ai", "human", "appointments")
+FILTERS = ("all", "needs_reply", "text", "email", "handled", "unread", "ai", "human", "appointments", "home_visits")
 
 
 def _sender(db, r, lead) -> dict:
@@ -178,10 +234,12 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                       "sla_breached": bool(r.response_class == "hot" and r.handling_status == "new"
                                            and r.sla_due_at and r.sla_due_at <= datetime.utcnow()),
                       "setter_state": conv.state if conv else None, "actions": _actions(r, conv),
+                      "home_visit": _home_visit_waiting(conv),
                       "advisor": advisors.get(getattr(lead, "assigned_to_id", None))})
-    items.sort(key=lambda i: (not i["sla_breached"], _RANK.get(i["class"], 5),
+    items.sort(key=lambda i: (not i["sla_breached"], not i["home_visit"], _RANK.get(i["class"], 5),
                               -(datetime.fromisoformat(i["received_at"][:-1]).timestamp() if i["received_at"] else 0)))
-    needs = sum(1 for i in items if i["class"] in ("hot", "active", "bad_data", "wrong_person") and not i["is_test"])
+    needs = sum(1 for i in items if i["class"] in ("hot", "active", "bad_data", "wrong_person")
+                and i["handling_status"] in _NEEDS_REPLY and not i["is_test"])
     filter_counts = {"all": len(items),
                      "needs_reply": sum(1 for i in items if i["handling_status"] in _NEEDS_REPLY
                                         and i["class"] != "auto_reply"),
@@ -190,7 +248,8 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                      "unread": sum(1 for i in items if i["handling_status"] == "new"),
                      "ai": sum(1 for i in items if i["owner"] == "ai"),
                      "human": sum(1 for i in items if i["owner"] == "human"),
-                     "appointments": sum(1 for i in items if i["setter_state"] in _APPT_STATES)}
+                     "appointments": sum(1 for i in items if i["setter_state"] in _APPT_STATES),
+                     "home_visits": sum(1 for i in items if i["home_visit"])}
     if flt == "needs_reply":
         items = [i for i in items if i["handling_status"] in _NEEDS_REPLY and i["class"] != "auto_reply"]
     elif flt == "text":
@@ -203,12 +262,14 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
         items = [i for i in items if i["owner"] == flt]
     elif flt == "appointments":
         items = [i for i in items if i["setter_state"] in _APPT_STATES]
+    elif flt == "home_visits":
+        items = [i for i in items if i["home_visit"]]
 
     org_leads = db.query(Lead.id).filter(Lead.organization_id == org, Lead.is_test.isnot(True))
     booked = (db.query(BookingLink).filter(BookingLink.lead_id.in_(org_leads),
                                            BookingLink.status.in_(("booked", "confirmed")),
                                            BookingLink.booked_time.isnot(None),
-                                           BookingLink.booked_time >= datetime.utcnow() - timedelta(hours=8)).count())
+                                           BookingLink.booked_time >= _local_now() - timedelta(hours=2)).count())
     contacted = (_eng.summary(db, org, since=start) or {}).get("contacted", 0)
 
     owner_alert = None
@@ -230,7 +291,7 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
         "filter": flt, "filter_counts": filter_counts,
         "owner_alert": owner_alert,
         "inbox": items[:limit],
-        "tasks": _open_tasks(db, org),
+        "tasks": _open_tasks(db, org, location_id),
         "unknown": _unknown_senders(db, org, location_id),
         "upcoming": {"follow_up": len(items), "new": sum(1 for i in items if i["badge"] == "New"),
                      "review": sum(1 for i in items if i["badge"] == "Review"),
@@ -512,6 +573,7 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
                     "status": booking.status} if booking and booking.booked_time else None,
         "suggestion": _suggest(conv, latest, lead),
         "mail_task": _mail_task_of(conv),
+        "home_visit": _home_visit_of(conv),
         "handling": _handling(db, conv, lead, latest),
         "reply_to": _reply_target(db, latest, lead),
     }
@@ -606,6 +668,8 @@ def command_reply(body: ReplyIn, db: Session = Depends(get_db), user: User = Dep
         if not res.get("ok"):
             raise HTTPException(status_code=502, detail="Not sent: %s" % (res.get("error") or "the email was refused"))
         sent_at = datetime.utcnow()
+        from app.services.programs import responses as R
+        R.mark(db, resp, "responded", user)          # and the family's earlier open replies
     elif body.channel == "sms":
         from app.routers.compose_router import acting_advisor
         from app.services import send_guard
@@ -626,6 +690,7 @@ def command_reply(body: ReplyIn, db: Session = Depends(get_db), user: User = Dep
             R.mark(db, resp, "responded", user)
     else:
         raise HTTPException(status_code=422, detail="channel must be sms or email")
+    out["response_status"] = resp.handling_status if resp is not None else None
     # Ownership AFTER the send, stamped after it, so the AI never reads this
     # manual message as "a person took over" when it was told to continue.
     try:
@@ -811,11 +876,25 @@ def command_schedule(body: ScheduleIn, db: Session = Depends(get_db), user: User
     kind = body.kind if body.kind in (A.PHONE, A.VISIT) else A.VISIT
     res = A.book(db, prog, lead, slot, kind)
     if res.get("ok") and not res.get("simulated"):
-        conv = (db.query(ProgramConversation).filter(ProgramConversation.lead_id == lead.id)
-                .order_by(ProgramConversation.created_at.desc()).first())
-        if conv is not None:
-            conv.state, conv.booked_time = "booked", slot
+        # Like the setter: the conversation is booked (created if the family
+        # never had one) and the family's open replies are answered.
+        from app.services.programs import ai_setter
+        from app.services.programs import responses as R
+        conv = ai_setter.conversation_for(db, lead)
+        conv.state, conv.booked_time = "booked", slot
+        if res.get("booking_id"):
+            conv.booking_link_id = res.get("booking_id")
+        newest = (db.query(ProgramResponse).filter(ProgramResponse.organization_id == prog.organization_id,
+                                                   ProgramResponse.lead_id == lead.id,
+                                                   ProgramResponse.handling_status != "closed")
+                  .order_by(ProgramResponse.received_at.desc()).first())
+        if newest is not None:
+            R.mark(db, newest, "responded", user)
         A.notify_team_booked(db, prog, lead, slot, kind)
+        from app.routers.audit_log_router import log_action
+        log_action(db, prog.organization_id, user.id, action="sci.schedule", target_type="lead",
+                   target_id=lead.id, details={"booking_id": res.get("booking_id"), "time": slot.isoformat(),
+                                               "kind": kind}, commit=False)
         db.commit()
     return dict(res, label=A.describe(slot))
 
@@ -835,7 +914,11 @@ def command_assign(body: AssignIn, db: Session = Depends(get_db), user: User = D
         who = next((u for u in _team(db, prog.organization_id) if u.id == body.user_id), None)
         if who is None:
             raise HTTPException(status_code=422, detail="That person is not on this team.")
+    before = lead.assigned_to_id
     lead.assigned_to_id = body.user_id or None
+    from app.routers.audit_log_router import log_action
+    log_action(db, prog.organization_id, user.id, action="sci.assign", target_type="lead", target_id=lead.id,
+               before={"assigned_to_id": before}, after={"assigned_to_id": lead.assigned_to_id}, commit=False)
     db.commit()
     return {"lead_id": lead.id, "assigned_to_id": lead.assigned_to_id}
 
@@ -894,22 +977,93 @@ def _mail_task_of(conv):
             "done": bool(mr.get("done")), "done_at": mr.get("done_at"), "done_by": mr.get("done_by")}
 
 
-def _open_tasks(db, org_id):
+def _family_location(db, org_id, lead_id) -> Optional[str]:
+    """Where a family sits for the location filter: the location of their
+    newest reply (what the inbox filters on), else their source record's."""
+    r = (db.query(ProgramResponse.location_id).filter(ProgramResponse.organization_id == org_id,
+                                                      ProgramResponse.lead_id == lead_id)
+         .order_by(ProgramResponse.received_at.desc()).first())
+    if r is not None and r[0]:
+        return r[0]
+    rec = (db.query(ProgramSourceRecord.location_id).filter(ProgramSourceRecord.organization_id == org_id,
+                                                            ProgramSourceRecord.lead_id == lead_id).first())
+    return rec[0] if rec is not None else None
+
+
+def _open_tasks(db, org_id, location_id=None):
     out = []
     test_ids = {i for (i,) in db.query(Lead.id).filter(Lead.organization_id == org_id, Lead.is_test.is_(True))}
+
+    def _elsewhere(lead_id):
+        return bool(location_id) and _family_location(db, org_id, lead_id) != location_id
     rows = (db.query(ProgramConversation).filter(ProgramConversation.organization_id == org_id,
                                                  ProgramConversation.memory.isnot(None),
                                                  ProgramConversation.memory.like('%mail_request%')).all())
     for c in rows:
         t = _mail_task_of(c)
-        if not t or t["done"] or c.lead_id in test_ids:
+        if not t or t["done"] or c.lead_id in test_ids or _elsewhere(c.lead_id):
             continue
         lead = db.query(Lead).filter(Lead.id == c.lead_id).first()
         if lead is None:
             continue
         out.append({"kind": "mail_guide", "lead_id": lead.id, "what": t["what"], "note": t.get("note"),
                     "name": ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title()})
+    # Home visits a family asked for that nobody has arranged yet (#234 follow-up).
+    # Found by the request in memory (it survives a change of owner) or, for
+    # older conversations, by the hand-off reason; _home_visit_waiting decides.
+    from sqlalchemy import or_
+    from app.services.programs.ai_setter import HOME_VISIT_REASON
+    for c in (db.query(ProgramConversation).filter(ProgramConversation.organization_id == org_id,
+                                                   or_(ProgramConversation.memory.like('%home_visit%'),
+                                                       ProgramConversation.handoff_reason == HOME_VISIT_REASON))
+              .all()):
+        if c.lead_id in test_ids or not _home_visit_waiting(c) or _elsewhere(c.lead_id):
+            continue
+        latest = ai_setter_conv(db, c.lead_id)          # only the family's current conversation counts
+        if latest is None or latest.id != c.id:
+            continue
+        lead = db.query(Lead).filter(Lead.id == c.lead_id).first()
+        if lead is None:
+            continue
+        out.append({"kind": "home_visit", "lead_id": lead.id, "what": "home visit",
+                    "note": "They asked for a visit at home - call to set a time",
+                    "name": ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title()})
     return out
+
+
+class HomeVisitIn(BaseModel):
+    lead_id: str
+    note: Optional[str] = None
+
+
+@router.post("/home-visit")
+def command_home_visit_arranged(body: HomeVisitIn, db: Session = Depends(get_db),
+                                user: User = Depends(require_tenant_user)):
+    """The advisor arranged the home visit the family asked for (by phone, on
+    their own calendar): the task leaves the list, recorded by who did it.
+    Nothing is booked or sent by this."""
+    import json as _json
+    from app.models.program_models import ProgramAlert
+    from app.services.programs import ai_setter
+    prog = _program(db, user, managers_only=False)
+    lead = db.query(Lead).filter(Lead.id == body.lead_id, Lead.organization_id == prog.organization_id).first()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Family not found.")
+    conv = ai_setter.conversation_for(db, lead, create=False)
+    if not _home_visit_waiting(conv):
+        raise HTTPException(status_code=409, detail="This family has no home visit waiting to be arranged.")
+    mem = ai_setter.memory_of(conv)
+    who = getattr(user, "full_name", None) or getattr(user, "email", None) or "staff"
+    mem["home_visit"] = {"done": True, "done_at": datetime.utcnow().isoformat() + "Z", "done_by": who,
+                         "note": (body.note or "").strip()[:300] or None}
+    mem["alternative_outcome"] = mem.get("alternative_outcome") or "accepted"
+    conv.memory = _json.dumps(mem)
+    name = ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title() or "A family"
+    db.add(ProgramAlert(organization_id=prog.organization_id, kind="task", audience="team", channel="in_app",
+                        delivered=True, reason="home_visit_arranged",
+                        message="%s arranged the home visit for %s." % (who, name)))
+    db.commit()
+    return {"ok": True, "home_visit": mem["home_visit"]}
 
 
 class MailTaskIn(BaseModel):
@@ -1060,3 +1214,16 @@ def command_journey(lead_id: str, db: Session = Depends(get_db), user: User = De
     if j is None:
         raise HTTPException(status_code=404, detail="Family not found.")
     return j
+
+
+@router.get("/pipeline-health")
+def command_pipeline_health(hours: int = Query(24, ge=1, le=336), db: Session = Depends(get_db),
+                            user: User = Depends(require_tenant_or_observer)):
+    """PIPELINE HEALTH (Phase Nine): stage-by-stage counts for the window and
+    every place a family's reply is stuck - what failed, where, how many,
+    since when, record ids to open, and the action needed. Read-only; no
+    names, numbers, emails or message words. Managers (and view-only
+    spectators) of THIS workspace only, like /program/self-check."""
+    from app.services.programs import pipeline_health
+    prog = _program(db, user)
+    return pipeline_health.report(db, prog, hours=hours)

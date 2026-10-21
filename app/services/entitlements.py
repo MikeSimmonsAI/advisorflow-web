@@ -73,6 +73,10 @@ FEATURES: Dict[str, str] = {
     # Insurance-agency vertical (Max Life Command). A prospect IS a Lead, so it
     # REQUIRES `leads`. Max Life values are data (config/fixtures), not code.
     "insurance_agency": "Insurance agency command: prospects, distribution, applications, policies, recruiting",
+    # Roofing program (EvoSys Pro Roofing). A homeowner IS a Lead, so it
+    # REQUIRES `leads`. Turns on only when listed EXPLICITLY - a NULL
+    # allow-list is not a roofing company (app/services/roofing/common.py).
+    "roofing_program": "Roofing program: lead import, AI follow-up, inspections, roofing pipeline",
 
     # ── Admin features: sellable, and still only FEATURES ───────────────────
     #
@@ -138,6 +142,7 @@ REQUIRES = {
     "case_files":     ("leads",),
     "wholesale_real_estate": ("leads",),
     "insurance_agency": ("leads",),
+    "roofing_program": ("leads",),
 }
 
 

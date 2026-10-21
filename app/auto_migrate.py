@@ -1713,6 +1713,10 @@ INDEXES_TO_CREATE = [
     # recipient. Existing rows have no key and are unaffected.
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_program_alerts_dedupe ON program_alerts(dedupe_key, channel, recipient) WHERE dedupe_key IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_program_alerts_lead_created ON program_alerts(lead_id, created_at)",
+    # PIPELINE HEALTH (Phase Nine): per-tenant time-window reads.
+    "CREATE INDEX IF NOT EXISTS ix_program_alerts_org_created ON program_alerts(organization_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_program_conv_turns_org_created ON program_conversation_turns(organization_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_program_responses_org_received ON program_responses(organization_id, received_at)",
     "CREATE INDEX IF NOT EXISTS ix_cadence_touch_lead ON cadence_touch_logs(lead_id, touch_number)",
     "CREATE INDEX IF NOT EXISTS ix_cadence_touch_outcome ON cadence_touch_logs(organization_id, outcome, attempted_at)",
     # Unique per BRAND, not globally: two brands may each have a prospect

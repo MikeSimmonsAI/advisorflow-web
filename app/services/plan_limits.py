@@ -538,6 +538,24 @@ def entitlement_state(db: Session, org: Optional[Organization]) -> dict:
     }
 
 
+EVOSYS_INTERNAL_ORG_SLUG = "evo-integrated-solutions-llc"
+
+
+def _evosys_operator_ids(db: Session, user_ids) -> set:
+    """Of these users, the ones who are EvoSys's own operator accounts."""
+    ids = set(user_ids or ())
+    if not ids:
+        return set()
+    from app.models.sales_models import Membership, SCOPE_PLATFORM
+    internal = {r[0] for r in db.query(User.id).join(Organization, Organization.id == User.organization_id)
+                .filter(User.id.in_(ids), Organization.slug == EVOSYS_INTERNAL_ORG_SLUG).all()}
+    brand = {r[0] for r in db.query(Membership.user_id).join(User, User.id == Membership.user_id)
+             .filter(Membership.user_id.in_(ids), Membership.scope_type == SCOPE_PLATFORM,
+                     Membership.is_active == True,                  # noqa: E712
+                     User.organization_id.is_(None)).all()}
+    return internal | brand
+
+
 def usage_for(db: Session, org: Organization, key: str) -> int:
     """How many they are using today. Counts only what the limit is about."""
     if key == LIMIT_USERS:
@@ -572,6 +590,13 @@ def usage_for(db: Session, org: Organization, key: str) -> int:
                             User.is_active == True)          # noqa: E712
                     .all()}
 
+        # EVOSYS'S OWN OPERATOR ACCOUNTS ARE NOT A CUSTOMER'S SEATS (owner
+        # decision, 2026-10-21). Someone seconded in from outside this org who
+        # is EvoSys staff - homed in EvoSys's internal org, or holding no home
+        # org but an active brand (platform) membership - administers the
+        # customer for EvoSys; the customer is not buying that seat. People
+        # homed in the customer's own org always count.
+        seconded -= _evosys_operator_ids(db, seconded - homed)
         return len(homed | seconded)
     if key == LIMIT_LEADS:
         # HELD LEADS DO NOT CONSUME THE PLAN.

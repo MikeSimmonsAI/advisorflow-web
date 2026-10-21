@@ -92,14 +92,22 @@ export function activeKey(loc) {
     older sidebar's footer, kept. */
 function ExitLink() {
   const navigate = useNavigate()
-  const [only, setOnly] = useState(null)
+  const [view, setView] = useState(null)
   useEffect(() => {
     let alive = true
-    fetchMyContexts().then(c => { if (alive) setOnly(!!c?.program_only) }).catch(() => {})
+    fetchMyContexts().then(c => {
+      if (alive) setView({
+        only: !!c?.program_only,
+        multi: (c?.workspace_contexts?.length || 0) + (c?.product_contexts?.length || 0) > 1,
+      })
+    }).catch(() => {})
     return () => { alive = false }
   }, [])
-  if (only === null) return null
-  return only
+  if (!view) return null
+  // A multi-program login switches with the one Switch Program button in the
+  // top-right header (TopBar); the sidebar does not repeat it.
+  if (view.multi) return null
+  return view.only
     ? <button type="button" className="sl-exit" onClick={async () => { await logout(); window.location.href = '/login' }}>Sign out</button>
     : <button type="button" className="sl-exit" onClick={() => navigate('/')}>← Back to main menu</button>
 }
