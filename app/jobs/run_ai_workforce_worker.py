@@ -28,7 +28,7 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger("ai_workforce.worker")
 
 
-def run_pass(db, *, per_employee: int = 5) -> dict:
+def run_pass(db, *, per_employee: int = 5, now=None) -> dict:
     """Run every active employee once. The caller owns commit/rollback."""
     from app.models.workforce_models import AIEmployee
     from app.services.workforce import runtime
@@ -44,7 +44,8 @@ def run_pass(db, *, per_employee: int = 5) -> dict:
         summary["organizations"] += 1
         try:
             out = runtime.run_organization(db, org_id,
-                                           per_employee=per_employee)
+                                           per_employee=per_employee,
+                                           now=now)
         except Exception:                                    # noqa: BLE001
             log.exception("workforce worker: organization %s failed", org_id)
             summary["errors"] += 1
