@@ -22,17 +22,17 @@ export default function ProgramAccessPortal({ contexts, onChoose }) {
           <p>One login. Separate operations. Open a program to work inside its own dedicated experience.</p>
         </section>
         <section aria-label="Your programs" className="pa-grid">
-          {visible.map((item, index) => (
+          {visible.map((item) => (
             <button type="button" key={item.type + ':' + item.organization_id + ':' + (item.key || '')}
-                    className={'pa-card pa-card--' + (item.is_program ? 'sci' : item.key === 'wholesale' ? 'wholesale' :
-                      item.industry === 'energy' ? 'energy' : item.program_route === '/program/roofing' ? 'roofing' : 'general')}
+                    className={'pa-card pa-card--' + item.variant}
                     onClick={() => onChoose(item)}>
               <div className="pa-card-top">
-                <span className="pa-card-symbol" aria-hidden="true">{item.is_program ? '✦' : item.key === 'wholesale' ? '⌂' : item.industry === 'energy' ? '⚡' : item.program_route === '/program/roofing' ? '⌃' : '◈'}</span>
+                <span className="pa-card-symbol" aria-hidden="true">{item.symbol}</span>
                 <span className="pa-arrow" aria-hidden="true">↗</span>
               </div>
               <span className="pa-card-kind">{item.kind}</span>
               <strong>{item.display}</strong>
+              {item.orgLabel && <span className="pa-card-org">{item.orgLabel}</span>}
               <span className="pa-card-summary">{item.summary}</span>
               <span className="pa-card-open">Open program <span aria-hidden="true">→</span></span>
             </button>

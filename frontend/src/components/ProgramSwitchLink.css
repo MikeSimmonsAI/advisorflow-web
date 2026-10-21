@@ -1,0 +1,31 @@
+/* The one Switch Program button. Inherits the header's text colour so it reads
+   on light (Wholesale, Atlantis, Restland, Insurance) and dark (Roofing, SCI)
+   headers alike; size and shape are identical everywhere. */
+.program-switch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid currentColor;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  color: inherit;
+  background: transparent;
+  opacity: .9;
+  flex-shrink: 0;
+}
+.program-switch:hover { opacity: 1; text-decoration: none; }
+.program-switch:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.program-switch__icon { font-size: 12px; }
+@media (max-width: 640px) {
+  .program-switch { height: 34px; padding: 0 10px; font-size: 12px; }
+}
+/* In the shared platform header (Atlantis, Restland, Insurance, Wholesale) take
+   the theme's own text colour, so it is legible on the dark agency theme too. */
+.top-bar .program-switch { color: var(--text-primary); }

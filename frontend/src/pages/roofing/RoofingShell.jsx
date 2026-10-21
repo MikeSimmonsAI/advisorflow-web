@@ -126,7 +126,6 @@ export default function RoofingShell() {
           </nav>
           <div className="rf-side__foot">
             <a href="/roofing" target="_blank" rel="noreferrer"><Icon name="roof" size={16} />Public roofing page</a>
-            <ProgramSwitchLink />
           </div>
         </aside>
         <div className="rf-main">
@@ -137,6 +136,7 @@ export default function RoofingShell() {
             <span className="rf-top__title">{p.company_name}</span>
             {status.is_demo && <SampleTag />}
             <div className="rf-top__right">
+              <ProgramSwitchLink />
               <span className={`rf-live ${status.texts_on ? 'on' : ''}`} title="Automated texting for this workspace">
                 <span className="rf-live__dot" />{status.texts_on ? 'Automated texts on' : 'Automated texts off'}
               </span>
