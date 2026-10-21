@@ -77,6 +77,17 @@ ENV_PROMO_CODE = "CHARIOT_PROMO_CODE"    # Chariot issues the broker's codes.
 CUSTOMER_TYPE_RESIDENTIAL = "1"
 
 DEFAULT_TIMEOUT = 25
+# Chariot (Tim Richmond, Oct 6 2026): SubmitEnrollment / SubmitRenewal can take
+# up to 120 seconds. A shorter client timeout abandons a request the provider
+# may still complete - the one outcome that must never be guessed at.
+TRANSACTION_TIMEOUT = 125
+
+# Normalized reason for a transactional call whose answer never arrived.
+# Chariot has NO status inquiry, webhook or reference lookup after
+# SubmitEnrollment, so a timeout means "we do not know whether this person was
+# enrolled". It is pending and goes to a person; it is NEVER retried
+# automatically, because a retry can enrol the same person twice.
+REASON_OUTCOME_UNKNOWN = "outcome_unknown_do_not_resubmit"
 
 
 # ── CONFIGURATION, READ AT CALL TIME ────────────────────────────────────────
@@ -179,6 +190,17 @@ def _multipart(fields: Dict[str, Any]):
     return {k: (None, "" if v is None else str(v)) for k, v in fields.items()}
 
 
+def _scrub(exc) -> str:
+    """An exception message, with the API key removed wherever it appears
+    (requests puts the full GET url - query string and all - in its errors)."""
+    import re as _re
+    msg = str(exc)
+    key = api_key()
+    if key:
+        msg = msg.replace(key, "[key]")
+    return _re.sub(r"(?i)(key=)[^&\s'\"]+", r"\1[key]", msg)[:300]
+
+
 def _call(operation: str, method: str, path: str, fields: Dict[str, Any]):
     """One request.
 
@@ -198,17 +220,30 @@ def _call(operation: str, method: str, path: str, fields: Dict[str, Any]):
     # belongs in no structure that anything downstream might persist.
     echo = base.redact({k: v for k, v in payload.items() if k != "Key"})
 
+    transactional = operation in base.TRANSACTIONAL_OPERATIONS
     try:
         if method == "GET":
             response = _transport("GET", url, params=payload)
+        elif transactional:
+            response = _transport("POST", url, files=_multipart(payload),
+                                  timeout=TRANSACTION_TIMEOUT)
         else:
             response = _transport("POST", url, files=_multipart(payload))
     except Exception as exc:  # noqa: BLE001 - transport, not provider verdict
+        if transactional:
+            # The request may have reached Chariot. Pending + a person, never
+            # "failed" (which invites a resubmit) and never "done".
+            return (base.ProviderResult(
+                operation=operation, ok=False,
+                normalized_status=base.PENDING_PROVIDER,
+                reason=REASON_OUTCOME_UNKNOWN,
+                raw_message=_scrub(exc), detail={"request": echo}),
+                None, None, echo)
         return (base.ProviderResult(
             operation=operation, ok=False,
             normalized_status=base.INTEGRATION_ERROR,
             reason=base.REASON_TRANSPORT,
-            raw_message=str(exc)[:300], detail={"request": echo}),
+            raw_message=_scrub(exc), detail={"request": echo}),
             None, None, echo)
 
     status_code = getattr(response, "status_code", None)
