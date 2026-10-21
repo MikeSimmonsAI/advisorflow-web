@@ -118,7 +118,7 @@ export function errorText(err) {
 // ── staged rows ─────────────────────────────────────────────────────────────
 
 export function RowTable({ batchId, category, title, catalog = [], editable = false,
-                           onChanged, compact = false }) {
+                           onChanged, compact = false, apiBase = '/intake' }) {
   const [data, setData] = useState(null)
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
@@ -134,16 +134,16 @@ export function RowTable({ batchId, category, title, catalog = [], editable = fa
     const params = new URLSearchParams({ page, per_page: perPage })
     if (category) params.set('category', category)
     if (q) params.set('search', q)
-    api.get(`/intake/batches/${batchId}/rows?${params}`)
+    api.get(`${apiBase}/batches/${batchId}/rows?${params}`)
       .then(d => { if (live) setData(d) })
       .catch(e => { if (live) setErr(errorText(e)) })
     return () => { live = false }
-  }, [batchId, category, page, q, perPage, busy])
+  }, [batchId, category, page, q, perPage, busy, apiBase])
 
   async function act(row, body) {
     setBusy(row.id); setErr('')
     try {
-      await api.patch(`/intake/batches/${batchId}/rows/${row.id}`, body)
+      await api.patch(`${apiBase}/batches/${batchId}/rows/${row.id}`, body)
       onChanged && onChanged()
     } catch (e) { setErr(errorText(e)) }
     finally { setBusy(null) }

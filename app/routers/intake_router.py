@@ -155,6 +155,8 @@ def _batch_payload(db: Session, b: ImportBatch, detail: bool = False) -> dict:
             "existing_matches": a.get("match", {}).get("existing_exact", 0),
             "invalid": st.get("invalid", 0),
         })
+    if ENG.is_sci_batch(b):
+        out["destination"] = "sci"            # loaded by SCI, never by the CRM commit
     out["workflow"] = _workflow(status, bool(a.get("status")),
                                 bool(_j(b.classification_json, {}).get("confirmed_at")))
     # Step 6 -> 7 gate, decided HERE so the Approve button and POST /commit
@@ -588,6 +590,7 @@ def commit_preview(batch_id: str, mode: str = Query(CommitMode.STAGE_ONLY),
                    db: Session = Depends(get_db), user=Depends(require_import_review)):
     ctx = CTX.resolve(db, user)
     b = _batch_or_404(db, ctx, batch_id)
+    _refuse_sci(b)
     if mode not in CommitMode.ALL:
         raise HTTPException(400, "Unknown mode.")
     return CM.commit_preview(db, b, mode, include_enrichment) | {
@@ -612,6 +615,16 @@ def _commit_failed_retryable(b: ImportBatch, analyzed: bool) -> bool:
     POST /commit answered 409 "Analyze it first"."""
     return (b.status == ImportBatchStatus.FAILED and analyzed
             and bool(b.commit_mode) and b.commit_mode != CommitMode.STAGE_ONLY)
+
+
+SCI_REFUSAL = "SCI files are loaded through SCI"
+
+
+def _refuse_sci(b: ImportBatch) -> None:
+    """A batch made by the SCI importer is written by SCI's own loader
+    (/program/intake/batches/{id}/load) - never as CRM contacts and leads."""
+    if ENG.is_sci_batch(b):
+        raise HTTPException(409, SCI_REFUSAL)
 
 
 def commit_gate(b: ImportBatch, status: str, analyzed: bool):
@@ -659,6 +672,7 @@ def commit(batch_id: str, body: CommitIn, db: Session = Depends(get_db),
            user=Depends(require_import_commit)):
     ctx = CTX.resolve(db, user)
     b = _batch_or_404(db, ctx, batch_id)
+    _refuse_sci(b)
     if body.mode not in CommitMode.ALL:
         raise HTTPException(400, "Unknown mode.")
     analyzed = bool(_j(b.analysis_json, {}).get("status"))
@@ -728,6 +742,7 @@ def rollback(batch_id: str, body: RollbackIn, db: Session = Depends(get_db),
              user=Depends(require_import_manage)):
     ctx = CTX.resolve(db, user)
     b = _batch_or_404(db, ctx, batch_id)
+    _refuse_sci(b)
     if b.status not in _ROLLBACKABLE:
         raise HTTPException(409, f"A '{b.status}' batch has nothing to roll back.")
     if body.confirm_batch_code.strip() != (b.batch_code or ""):

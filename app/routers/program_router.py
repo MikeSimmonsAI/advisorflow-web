@@ -2009,15 +2009,24 @@ def _excel_to_csv(content: bytes, filename: Optional[str]) -> bytes:
     return frame.to_csv(index=False).encode("utf-8")
 
 
-def _load_source(db: Session, org, content: bytes, filename: Optional[str], apply: bool, actor: User) -> dict:
+def _load_source(db: Session, org, content: bytes, filename: Optional[str], apply: bool, actor: User,
+                 *, stage_only: bool = False) -> dict:
     """Check (apply=False) or load (apply=True) a lead file: stage every row,
     HOLD every record still in a review state, promote the clean contacts to
     live leads, then check each new number mobile vs landline. Never records
-    consent, never enrols anyone in a campaign, never sends anything."""
+    consent, never enrols anyone in a campaign, never sends anything.
+
+    stage_only=True (with apply=True): write the staging rows and STOP - no
+    holds, no promotion to live leads, no line check. Every existing caller
+    leaves it False and behaves exactly as before."""
     from app.services.programs import holds, promote
     content = _excel_to_csv(content, filename)
     staged = importer.stage(db, org, content, filename=filename, dry_run=not apply, actor_id=actor.id)
     out = {"apply": apply, "stage": staged["summary"], "run_id": staged["run_id"]}
+    if stage_only and apply:
+        out["stage_only"] = True
+        out["promotion_plan"] = {k: v for k, v in promote.plan(db, org).items() if k != "groups"}
+        return out
     if not apply or staged["summary"].get("refused"):
         out["promotion_plan"] = {k: v for k, v in promote.plan(db, org).items() if k != "groups"}
         return out
@@ -2059,6 +2068,211 @@ async def import_leads(file: UploadFile = File(...), apply: bool = Form(False),
         raise HTTPException(status_code=413, detail="Files up to 10 MB.")
     org = db.query(Organization).filter(Organization.id == prog.organization_id).first()
     return _load_source(db, org, content, file.filename, apply, user)
+
+
+# ── THE INTELLIGENT LEAD IMPORTER, LOADING INTO SCI ─────────────────────────
+#
+# Steps 1-5 (upload, map, analyze, review) run on the universal importer's
+# engine through /program/intake (sci_intake_router.py). The final write is
+# SCI's own: the batch's reviewed rows are turned back into SCI's CSV
+# (programs/intake_bridge.py) and handed to `_load_source` above - the same
+# path "Import leads" has always used. The CRM commit never runs for these
+# batches (intake_router refuses it).
+
+SCI_STAGE, SCI_LOAD = "program_stage", "program_load"
+
+
+def _sci_importer(db: Session, user: User):
+    """Managers of THIS SCI workspace only. A spectator reads the program but
+    does not import into it; an advisor does neither."""
+    prog = _program(db, user)
+    if not lead_scope.is_manager_here(user, db):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    org = db.query(Organization).filter(Organization.id == prog.organization_id).first()
+    return prog, org
+
+
+def _sci_batch(db: Session, prog: OutreachProgram, batch_id: str):
+    from app.models.import_models import ImportBatch
+    from app.services.intake import engine as _eng
+    b = (db.query(ImportBatch)
+         .filter(ImportBatch.id == batch_id, ImportBatch.organization_id == prog.organization_id)
+         .first())
+    if b is None or not _eng.is_sci_batch(b):
+        raise HTTPException(status_code=404, detail="Import batch not found in this workspace.")
+    return b
+
+
+def _existing_in_sci(db: Session, org_id: str, lead_ids: List[str]) -> dict:
+    already = live = held = 0
+    ids = sorted(set(lead_ids))
+    for i in range(0, len(ids), 900):
+        for rec in db.query(ProgramSourceRecord).filter(
+                ProgramSourceRecord.organization_id == org_id,
+                ProgramSourceRecord.source_lead_id.in_(ids[i:i + 900])).all():
+            already += 1
+            live += 1 if rec.lead_id else 0
+            held += 1 if rec.on_hold else 0
+    return {"lead_ids": len(ids), "already_in_sci": already, "already_live": live,
+            "on_hold": held, "new": len(ids) - already}
+
+
+def _sci_blockers(b, built: dict) -> List[str]:
+    out = []
+    if b.status not in ("ready_for_review", "staged", "committed"):
+        out.append("Analyze the file first (step 3).")
+    for c in built["missing_columns"]:
+        out.append("No column is mapped to '%s'. Map it on the Map Fields step." % c)
+    p = built["lead_id_problems"]
+    if p["blank"]:
+        out.append("%d row(s) have no Lead ID (rows %s). SCI needs one for every family - "
+                   "fix the file or skip those rows on Review."
+                   % (p["blank"], ", ".join(str(n) for n in p["blank_rows"][:20])))
+    for rep in p["repeated"][:20]:
+        out.append("Lead ID %s appears on rows %s. Skip the extra rows on Review."
+                   % (rep["lead_id"], ", ".join(str(n) for n in rep["rows"])))
+    if not built["included_rows"]:
+        out.append("No rows are left to load.")
+    return out
+
+
+def _sci_batch_json(b) -> dict:
+    return {"id": b.id, "batch_code": b.batch_code, "filename": b.source_filename,
+            "status": b.status, "commit_mode": b.commit_mode,
+            "committed_at": _iso(b.committed_at), "committed_by": b.committed_by_name}
+
+
+@router.get("/leads/import/batches/{batch_id}/sci-preview")
+def sci_import_preview(batch_id: str, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user)):
+    """What loading this reviewed batch into SCI would do. CHANGES NOTHING:
+    SCI's own check runs as a dry run (it records only that a check ran)."""
+    from app.services.programs import intake_bridge
+    prog, org = _sci_importer(db, user)
+    b = _sci_batch(db, prog, batch_id)
+    built = intake_bridge.build(db, b)
+    blockers = _sci_blockers(b, built)
+    out = {"batch": _sci_batch_json(b), "rows_in_file": b.original_row_count,
+           "rows_to_sci": built["included_rows"], "excluded": built["excluded"],
+           "columns": built["columns"], "missing_columns": built["missing_columns"],
+           "carried_columns": built["carried_columns"],
+           "lead_id_problems": built["lead_id_problems"],
+           "existing": _existing_in_sci(db, org.id, built["lead_ids"]),
+           "report": json.loads(b.commit_report_json) if b.commit_mode in (SCI_STAGE, SCI_LOAD)
+           and b.commit_report_json else None}
+    if built["included_rows"]:
+        res = _load_source(db, org, built["csv"], intake_bridge.sci_filename(b), False, user)
+        from app.services.programs.intake_bridge import translate_rows
+        out["stage"] = translate_rows(res["stage"], built["row_numbers"])
+        out["promotion_plan"] = res.get("promotion_plan")
+        if res["stage"].get("errors"):
+            blockers = blockers or ["SCI refuses this file: blank or repeated Lead IDs."]
+    out["blockers"] = blockers
+    out["can_load"] = not blockers and b.commit_mode != SCI_LOAD
+    out["sends_nothing"] = True
+    return out
+
+
+class SciLoadIn(BaseModel):
+    mode: str = "stage"
+
+
+@router.post("/leads/import/batches/{batch_id}/load")
+def sci_import_load(batch_id: str, body: Optional[SciLoadIn] = None, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user)):
+    """mode="stage" (the default, safe): write SCI's staging rows only - no
+    family is made live. mode="load": SCI's full load - stage, hold every
+    record that needs a look, add the clean families to Leads, check new
+    numbers mobile vs landline. Neither texts, emails, enrols anyone or
+    touches an existing family's contact preferences."""
+    from app.models.import_models import ImportBatch, ImportBatchStatus
+    from app.services.intake import audit as _audit, context as _ctx
+    from app.services.programs import intake_bridge
+    mode = (body.mode if body else "stage") or "stage"
+    if mode not in ("stage", "load"):
+        raise HTTPException(status_code=400, detail="mode must be 'stage' or 'load'.")
+    prog, org = _sci_importer(db, user)
+    b = _sci_batch(db, prog, batch_id)
+    stored = json.loads(b.commit_report_json) if b.commit_report_json else None
+    # IDEMPOTENT: a loaded batch is never loaded twice (a double click, a
+    # retry); staging a staged batch again changes nothing either.
+    if (b.commit_mode == SCI_LOAD and b.status == ImportBatchStatus.COMMITTED) or \
+            (mode == "stage" and b.commit_mode == SCI_STAGE and b.status == ImportBatchStatus.STAGED):
+        return {"batch": _sci_batch_json(b), "report": stored, "repeat": True}
+    if b.status not in (ImportBatchStatus.READY_FOR_REVIEW, ImportBatchStatus.STAGED):
+        raise HTTPException(status_code=409, detail="This batch is '%s'. Analyze the file first." % b.status
+                            if b.status not in (ImportBatchStatus.COMMITTING,)
+                            else "This batch is already being loaded.")
+    built = intake_bridge.build(db, b)
+    blockers = _sci_blockers(b, built)
+    if blockers:
+        raise HTTPException(status_code=422, detail={"message": blockers[0], "blockers": blockers})
+    # CLAIM THE BATCH (two clicks, two servers): only the request whose
+    # conditional UPDATE still sees the status it read goes on.
+    observed = b.status
+    claimed = (db.query(ImportBatch).filter(ImportBatch.id == b.id, ImportBatch.status == observed)
+               .update({ImportBatch.status: ImportBatchStatus.COMMITTING,
+                        ImportBatch.heartbeat_at: datetime.utcnow()}, synchronize_session=False))
+    db.commit()
+    if not claimed:
+        raise HTTPException(status_code=409, detail="This batch is already being loaded.")
+
+    def _release():
+        db.rollback()
+        db.query(ImportBatch).filter(ImportBatch.id == b.id).update(
+            {ImportBatch.status: observed}, synchronize_session=False)
+        db.commit()
+
+    try:
+        res = _load_source(db, org, built["csv"], intake_bridge.sci_filename(b), True, user,
+                           stage_only=(mode == "stage"))
+    except Exception:
+        _release()
+        raise
+    st = intake_bridge.translate_rows(res.get("stage") or {}, built["row_numbers"])
+    if st.get("refused"):
+        _release()
+        raise HTTPException(status_code=422, detail={"message": "SCI refused the file: %s" % st["refused"],
+                                                     "blockers": [st["refused"]]})
+    report = {
+        "mode": mode, "run_id": res.get("run_id"),
+        "rows_in_file": b.original_row_count, "rows_sent_to_sci": built["included_rows"],
+        "staged": st.get("staged", 0), "people": st.get("contact_masters", 0),
+        "location_mapped": st.get("location_mapped", 0), "location_review": st.get("location_review", 0),
+        "duplicate_review_rows": st.get("duplicate_review_rows", 0),
+        "data_note_rows": st.get("data_note_rows", 0), "bad_phone_rows": st.get("bad_phone_rows", 0),
+        "no_phone_rows": st.get("no_phone_rows", 0),
+        "excluded": built["excluded"],
+        "held": (res.get("held") or {}).get("held", 0),
+        "families_created": (res.get("promotion") or {}).get("created", 0),
+        "already_live": (res.get("promotion") or res.get("promotion_plan") or {}).get("already_live", 0),
+        "held_not_promoted": (res.get("promotion") or res.get("promotion_plan") or {}).get("held_not_promoted", 0),
+        "line_check": res.get("line_check"),
+        "sci": {k: v for k, v in res.items() if k != "stage"} | {"stage": st},
+        "texts_sent": 0, "emails_sent": 0, "enrolled": 0,
+    }
+    db.expire(b)
+    b = db.query(ImportBatch).filter(ImportBatch.id == b.id).first()
+    b.commit_mode = SCI_LOAD if mode == "load" else SCI_STAGE
+    b.commit_report_json = json.dumps(report, default=str)
+    b.status = ImportBatchStatus.COMMITTED if mode == "load" else ImportBatchStatus.STAGED
+    b.stage = "committed" if mode == "load" else "staged"
+    b.heartbeat_at = None
+    if mode == "load":
+        b.committed_at = datetime.utcnow()
+        b.committed_by_id = user.id
+        b.committed_by_name = getattr(user, "full_name", None) or getattr(user, "email", None)
+        b.committed_rows = report["staged"]
+    try:
+        ctx = _ctx.resolve(db, user)
+        _audit.record(db, ctx, "intake.sci_loaded" if mode == "load" else "intake.sci_staged", b.id,
+                      {k: report[k] for k in ("mode", "rows_sent_to_sci", "staged", "held",
+                                              "families_created", "location_review")}
+                      | {"excluded": report["excluded"]["total"], "run_id": report["run_id"]})
+    except HTTPException:
+        pass
+    db.commit()
+    return {"batch": _sci_batch_json(b), "report": report, "repeat": False}
 
 
 @god_router.post("/{organization_id}/load-source")
