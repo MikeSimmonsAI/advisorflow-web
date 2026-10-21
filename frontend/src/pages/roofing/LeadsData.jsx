@@ -10,6 +10,7 @@ import { useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import { BASE, useRoofing } from './RoofingShell'
+import AddHomeowner from './AddHomeowner'
 import { Avatar, Empty, ErrorNote, Icon, Loading, Panel, Pill, SampleTag, errText, n, useApi, useToast } from './ui'
 import './roofing-ops.css'
 
@@ -24,19 +25,25 @@ const STEPS = [
 export default function LeadsData() {
   const { status } = useRoofing()
   const [toast, say] = useToast()
+  const [adding, setAdding] = useState(false)
+  const [added, setAdded] = useState(0)
   return (
     <div className="rf-page">
       <div className="rf-page__head">
         <div>
           <h1 className="rf-h1">Leads &amp; data</h1>
-          <p className="rf-lede">Upload the leads you already have. EvoSys organizes and qualifies them, then starts the follow-up for everyone it’s allowed to contact.</p>
+          <p className="rf-lede">Add a homeowner by hand, or upload the leads you already have. EvoSys organizes and qualifies them; follow-up only starts when you start it.</p>
         </div>
-        <Link className="rf-btn rf-btn--ghost" to="/imports"><Icon name="file" size={16} />Past imports</Link>
+        <div className="rf-head-btns">
+          <button className="rf-btn rf-btn--primary rf-add__cta" onClick={() => setAdding(true)} aria-expanded={adding}><Icon name="plus" size={18} />Add Homeowner</button>
+          <Link className="rf-btn rf-btn--ghost" to="/imports"><Icon name="file" size={16} />Past imports</Link>
+        </div>
       </div>
       <div className="rf-stack">
+        {adding && <AddHomeowner onClose={() => setAdding(false)} onSaved={() => setAdded((x) => x + 1)} say={say} />}
         <ImportPanel status={status} />
         <Qualification status={status} say={say} />
-        <LeadTable status={status} />
+        <LeadTable status={status} refresh={added} />
       </div>
       {toast}
     </div>
@@ -198,7 +205,7 @@ function Qualification({ status, say }) {
 
 const URG_TONE = { emergency: 'red', high: 'orange', normal: 'blue', low: 'slate' }
 
-function LeadTable({ status }) {
+function LeadTable({ status, refresh = 0 }) {
   const nav = useNavigate()
   const [stage, setStage] = useState('')
   const [owner, setOwner] = useState('')
@@ -206,7 +213,7 @@ function LeadTable({ status }) {
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
   const qs = new URLSearchParams({ page: String(page), page_size: '25', ...(stage ? { stage } : {}), ...(owner ? { owner } : {}), ...(query ? { q: query } : {}) }).toString()
-  const { data, error, loading, reload } = useApi(`/roofing-ops/leads?${qs}`)
+  const { data, error, loading, reload } = useApi(`/roofing-ops/leads?${qs}`, [refresh])
   const pages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1
   const label = Object.fromEntries((status.stages || []).map((s) => [s.key, s.label]))
 
@@ -235,7 +242,7 @@ function LeadTable({ status }) {
       {!data && loading && <Loading />}
       {data && data.total === 0 && (
         <Empty icon="users" title={query || stage || owner ? 'No homeowners match' : 'No homeowners yet'}>
-          {query || stage || owner ? 'Try clearing a filter.' : 'Upload your first list above.'}
+          {query || stage || owner ? 'Try clearing a filter.' : 'Add a homeowner or upload your first list above.'}
         </Empty>
       )}
       {data && data.total > 0 && (
@@ -246,8 +253,8 @@ function LeadTable({ status }) {
               <tbody>
                 {data.items.map((r) => (
                   <tr key={r.lead_id} className="rf-row-link" tabIndex={0}
-                    onClick={() => nav(`${BASE}/conversations?lead=${r.lead_id}`)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') nav(`${BASE}/conversations?lead=${r.lead_id}`) }}>
+                    onClick={() => nav(`${BASE}/homeowners/${r.lead_id}`)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') nav(`${BASE}/homeowners/${r.lead_id}`) }}>
                     <td>
                       <div className="rf-cell-person">
                         <Avatar name={r.name} size={32} />
