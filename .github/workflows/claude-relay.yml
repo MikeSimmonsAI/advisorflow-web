@@ -16,7 +16,7 @@ permissions: {}
 
 concurrency:
   # Issue #1 is the relay mailbox, NOT a concurrency lane. Route by the
-  # directive's BRANCH line so SCI, Wholesale, Atlantis, Roofing, and Platform
+  # directive's BRANCH line so SCI, Wholesale, Atlantis, Roofing, BookaBoost, AI Workforce, and Platform
   # can run concurrently. Alias branches within a lane stay serialized.
   # The guard still validates the exact branch before any checkout/push.
   group: >-
@@ -26,10 +26,12 @@ concurrency:
        contains(github.event.comment.body, 'BRANCH: feature/sci-ops')) && 'sci' ||
       (contains(github.event.comment.body, 'BRANCH: wholesale-nightly') ||
        contains(github.event.comment.body, 'BRANCH: feature/wholesale-development')) && 'wholesale' ||
+      contains(github.event.comment.body, 'BRANCH: feature/bookaboost-wholesale') && 'bookaboost' ||
+      contains(github.event.comment.body, 'BRANCH: feature/ai-workforce-launch') && 'ai-workforce' ||
       contains(github.event.comment.body, 'BRANCH: feature/atlantis-development') && 'atlantis' ||
       contains(github.event.comment.body, 'BRANCH: feature/roofing-development') && 'roofing' ||
       (contains(github.event.comment.body, 'BRANCH: platform-dev') ||
-       contains(github.event.comment.body, 'BRANCH: feature/platform-command-center')) && 'platform' ||
+       contains(github.event.comment.body, 'BRANCH: feature/platform-command-center,feature/bookaboost-wholesale,feature/ai-workforce-launch')) && 'platform' ||
       'unrecognized'
     }}
   cancel-in-progress: false   # never interrupt a lane's active worker
