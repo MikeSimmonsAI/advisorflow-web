@@ -70,9 +70,9 @@ def w(db_session):
                        is_active=True, platform_id=bbp.id, enabled_features=json.dumps(BAB_FEATURES))
     db.add_all([evo, bab])
     db.commit()
-    god = User(organization_id=None, email="god@platform.test", full_name="God", role="god_admin", is_active=True,
+    god = User(organization_id=None, email="god@platform.example.com", full_name="God", role="god_admin", is_active=True,
                password_hash=hash_password("Pass12345!"), must_change_password=False)
-    evo_seat = User(organization_id=evo.id, email="wholesale@evo.test", full_name="Evo Seat", role="org_admin",
+    evo_seat = User(organization_id=evo.id, email="wholesale@evo.example.com", full_name="Evo Seat", role="org_admin",
                     is_active=True, password_hash=hash_password("Pass12345!"), must_change_password=False)
     db.add_all([god, evo_seat])
     db.commit()
@@ -96,18 +96,18 @@ def _opens(client, h, org):
 def test_god_invites_a_bookaboost_admin_who_lands_in_bookaboost_wholesale(client, w):
     db, bab, evo = w["db"], w["bab"], w["evo"]
     r = client.post("/god/customers/%s/users" % bab.id, headers=_h(db, w["god"]),
-                    json={"email": "owner@bab.test", "full_name": "BAB Owner", "role": "org_admin",
+                    json={"email": "owner@bab.example.com", "full_name": "BAB Owner", "role": "org_admin",
                           "base_url": "https://app.bookaboost.live"})
     assert r.status_code == 201, r.text[:300]
     setup = r.json()["setup_url"]
     assert setup and setup.startswith("https://app.bookaboost.live/activate?token=")
-    h = _activate_and_login(client, setup, "owner@bab.test")
+    h = _activate_and_login(client, setup, "owner@bab.example.com")
     ctx = client.get("/auth/my-contexts", headers=h).json()
     assert {x["organization_id"]: x["experience"] for x in ctx["workspace_contexts"]} == {bab.id: "wholesale"}
     assert [p["organization_id"] for p in ctx.get("product_contexts") or [] if p.get("key") == "wholesale"] == [bab.id]
     assert _opens(client, h, bab)
     assert not _opens(client, h, evo)                       # forged header: no EvoSys
-    owner = db.query(User).filter(User.email == "owner@bab.test").one()
+    owner = db.query(User).filter(User.email == "owner@bab.example.com").one()
     assert _bab_members(db, bab) == {owner.id: "org_admin"}
     assert w["evo_seat"].id not in _bab_members(db, bab)    # nobody from EvoSys was added
 
@@ -115,36 +115,36 @@ def test_god_invites_a_bookaboost_admin_who_lands_in_bookaboost_wholesale(client
 def test_bookaboost_admin_invites_an_admin_and_an_advisor(client, w):
     db, bab, evo = w["db"], w["bab"], w["evo"]
     r = client.post("/god/customers/%s/users" % bab.id, headers=_h(db, w["god"]),
-                    json={"email": "owner2@bab.test", "full_name": "BAB Owner", "role": "org_admin"})
-    owner_h = _activate_and_login(client, r.json()["setup_url"], "owner2@bab.test")
+                    json={"email": "owner2@bab.example.com", "full_name": "BAB Owner", "role": "org_admin"})
+    owner_h = _activate_and_login(client, r.json()["setup_url"], "owner2@bab.example.com")
     owner_ws = {**owner_h, "X-Workspace-Id": bab.id}
     made = {}
-    for email, role in (("admin2@bab.test", "org_admin"), ("rep@bab.test", "advisor")):
+    for email, role in (("admin2@bab.example.com", "org_admin"), ("rep@bab.example.com", "advisor")):
         r = client.post("/admin/users", headers=owner_ws, json={"email": email, "full_name": email.split("@")[0],
                                                                 "role": role})
         assert r.status_code in (200, 201), r.text[:300]
         made[email] = _activate_and_login(client, r.json()["setup_url"], email)
         u = db.query(User).filter(User.email == email).one()
         assert u.organization_id == bab.id                  # landed in BookaBoost, not EvoSys
-    assert _opens(client, made["admin2@bab.test"], bab)     # admin rule
-    assert not _opens(client, made["admin2@bab.test"], evo)
-    assert not _opens(client, made["rep@bab.test"], bab)    # an advisor needs a team seat first
-    rep = db.query(User).filter(User.email == "rep@bab.test").one()
+    assert _opens(client, made["admin2@bab.example.com"], bab)     # admin rule
+    assert not _opens(client, made["admin2@bab.example.com"], evo)
+    assert not _opens(client, made["rep@bab.example.com"], bab)    # an advisor needs a team seat first
+    rep = db.query(User).filter(User.email == "rep@bab.example.com").one()
     r = client.post("/wholesale/team/members", headers=owner_ws, json={"user_id": rep.id, "role": "member"})
     assert r.status_code == 200, r.text[:300]
-    assert _opens(client, made["rep@bab.test"], bab)        # BookaBoost's own seat
-    assert not _opens(client, made["rep@bab.test"], evo)
+    assert _opens(client, made["rep@bab.example.com"], bab)        # BookaBoost's own seat
+    assert not _opens(client, made["rep@bab.example.com"], evo)
 
 
 def test_a_forged_header_cannot_make_a_bookaboost_invite_land_in_evosys(client, w):
     db, bab, evo = w["db"], w["bab"], w["evo"]
     r = client.post("/god/customers/%s/users" % bab.id, headers=_h(db, w["god"]),
-                    json={"email": "owner3@bab.test", "full_name": "BAB Owner", "role": "org_admin"})
-    owner_h = _activate_and_login(client, r.json()["setup_url"], "owner3@bab.test")
+                    json={"email": "owner3@bab.example.com", "full_name": "BAB Owner", "role": "org_admin"})
+    owner_h = _activate_and_login(client, r.json()["setup_url"], "owner3@bab.example.com")
     r = client.post("/admin/users", headers={**owner_h, "X-Workspace-Id": evo.id},
-                    json={"email": "sneak@bab.test", "full_name": "Sneak", "role": "org_admin"})
+                    json={"email": "sneak@bab.example.com", "full_name": "Sneak", "role": "org_admin"})
     if r.status_code in (200, 201):
-        assert db.query(User).filter(User.email == "sneak@bab.test").one().organization_id == bab.id
+        assert db.query(User).filter(User.email == "sneak@bab.example.com").one().organization_id == bab.id
     else:
         assert r.status_code in (400, 403, 404)
     evo_people = {u.id for u in db.query(User).filter(User.organization_id == evo.id).all()}
@@ -156,7 +156,7 @@ def test_an_evosys_seat_holder_is_not_given_bookaboost_by_any_invite_path(client
     even then, as an advisor, their EvoSys seat does not open it."""
     db, bab = w["db"], w["bab"]
     r = client.post("/god/customers/%s/users" % bab.id, headers=_h(db, w["god"]),
-                    json={"email": "wholesale@evo.test", "role": "advisor"})
+                    json={"email": "wholesale@evo.example.com", "role": "advisor"})
     assert r.status_code in (200, 201, 409), r.text[:300]
     if r.status_code in (200, 201):
         assert not _opens(client, _h(db, w["evo_seat"]), bab)
