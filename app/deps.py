@@ -305,12 +305,13 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
             and request is not None and request.headers.get("X-Workspace-Id")):
         from app.services import workspace_access as _wa
         _sel = _wa.selected_workspace_id(user, db, request)
-        if _sel:
-            _mrole = _wa.workspace_role(user, db, _sel)
+        _mrole = _wa.workspace_role(user, db, _sel) if _sel else None
+        # Administrators only: view-only (spectator) and ordinary org-less
+        # logins keep exactly the behaviour they had.
+        if _mrole in ("org_admin", "manager"):
             db.expunge(user)
             user.organization_id = _sel
-            if _mrole in ("org_admin", "manager", "advisor", "viewer"):
-                user.role = _mrole
+            user.role = _mrole
 
     # Cross-org context: god_admin can view any org's data or see ALL orgs combined.
     # expunge() detaches the user from the SQLAlchemy session BEFORE any mutation
