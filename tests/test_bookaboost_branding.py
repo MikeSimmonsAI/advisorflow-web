@@ -118,7 +118,7 @@ def _pdf_text(pdf: bytes) -> str:
     """Decompress every stream of a reportlab PDF and return the raw text ops."""
     import base64
     out = [pdf.decode("latin-1", "ignore")]                 # plain objects, e.g. /Author
-    for m in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", pdf, re.S):
+    for m in re.finditer(rb"stream\r?\n(.*?)endstream", pdf, re.S):
         chunk = m.group(1).strip()
         for attempt in ("flate", "a85+flate"):
             try:
