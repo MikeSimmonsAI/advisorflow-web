@@ -56,7 +56,7 @@ jobs:
     env:
       RELAY_ISSUE: "1"
       RELAY_AUTHORIZED_ACTORS: MikeSimmonsAI
-      RELAY_ALLOWED_BRANCHES: 'sci-program,wholesale-nightly,platform-dev,feature/sci-appointment-recovery,feature/sci-ops,feature/wholesale-development,feature/atlantis-development,feature/roofing-development,feature/platform-command-center'
+      RELAY_ALLOWED_BRANCHES: 'sci-program,wholesale-nightly,platform-dev,feature/sci-appointment-recovery,feature/sci-ops,feature/wholesale-development,feature/atlantis-development,feature/roofing-development,feature/platform-command-center,feature/bookaboost-wholesale,feature/ai-workforce-launch'
       RELAY_STATUS_ACTORS: ${{ vars.RELAY_STATUS_ACTORS || 'github-actions[bot],claude[bot]' }}
     steps:
       - name: Load the guard (from main)
