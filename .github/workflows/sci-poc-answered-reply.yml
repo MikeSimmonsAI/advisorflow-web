@@ -1,0 +1,36 @@
+# SCI POC #295: release validation on PR merge-ref against latest main.
+name: SCI POC answered-reply release gate
+
+on:
+  pull_request:
+    paths:
+      - 'app/services/programs/ai_setter.py'
+      - 'app/services/programs/responses.py'
+      - 'app/services/programs/pipeline_health.py'
+      - 'app/routers/sci_command_router.py'
+      - 'tests/test_sci_poc_ai_answered.py'
+      - 'tests/test_sci_poc_existing_customer.py'
+      - '.github/workflows/sci-poc-answered-reply.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sci-poc-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install CI dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Compile SCI changed Python modules
+        run: python -m py_compile app/services/programs/ai_setter.py app/services/programs/responses.py app/services/programs/pipeline_health.py app/routers/sci_command_router.py tests/test_sci_poc_ai_answered.py tests/test_sci_poc_existing_customer.py
+      - name: Test SCI handled replies, existing customers and journey regressions
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -m pytest -q -o addopts='' tests/test_sci_poc_ai_answered.py tests/test_sci_poc_existing_customer.py tests/test_sci_journeys.py tests/test_program_self_check.py
