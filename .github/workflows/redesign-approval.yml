@@ -1,0 +1,49 @@
+# UI-REDESIGN lane: owner visual approval gate (docs/redesign/RULES.md).
+# Runs on every PR. Non-redesign PRs pass in seconds; redesign PRs
+# (label lane:ui-redesign or branch redesign/*) wait for the owner.
+name: Redesign approval
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled, ready_for_review, converted_to_draft]
+  pull_request_review:
+    types: [submitted, dismissed, edited]
+  workflow_dispatch:   # one-off: post a current result on every open PR
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  checks: write
+
+concurrency:
+  group: redesign-approval-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  approval:
+    name: Redesign owner approval
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The judge is always main's copy, never the PR's own (a PR cannot edit
+      # the script that decides whether it may merge).
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          sparse-checkout: .github/scripts
+          path: judge
+      # Bootstrap only: before this gate exists on main, use the PR's copy.
+      - if: hashFiles('judge/.github/scripts/redesign-approval.cjs') == ''
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+          path: judge
+      - uses: actions/github-script@v7
+        env:
+          REDESIGN_APPROVER: ${{ vars.REDESIGN_APPROVER }}
+        with:
+          script: |
+            const gate = require(process.env.GITHUB_WORKSPACE + '/judge/.github/scripts/redesign-approval.cjs')
+            if (context.eventName === 'workflow_dispatch') await gate.backfill({ github, context, core })
+            else await gate.runForEvent({ github, context, core })

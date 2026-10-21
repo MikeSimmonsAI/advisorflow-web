@@ -7,7 +7,7 @@ emailed or called. Approved by Mike 2026-10-12.
 """
 import logging
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional
 
 from sqlalchemy.orm import Session
 
@@ -44,17 +44,43 @@ def check_lead(db: Session, lead, adapter=None) -> Optional[str]:
     return line
 
 
-def run_for_org(db: Session, org_id: str, limit: int = 100, adapter=None) -> Dict:
-    """Check up to `limit` not-yet-checked SCI numbers; commit as it goes."""
+# A family that said no is never looked up (the lookup is paid, and nothing
+# will be texted to them anyway).
+OPTED_OUT_STATUSES = {"dnc", "do_not_contact", "opted_out", "deceased"}
+
+
+def opted_out(lead) -> bool:
+    return ((getattr(lead, "status", None) or "").lower() in OPTED_OUT_STATUSES
+            or getattr(lead, "allow_sms", None) is False)
+
+
+def run_for_org(db: Session, org_id: str, limit: int = 100, adapter=None, *,
+                source_lead_ids: Optional[Iterable[str]] = None) -> Dict:
+    """Check up to `limit` not-yet-checked SCI numbers; commit as it goes.
+
+    source_lead_ids: only the families behind these source Lead IDs (one
+    imported file), and never a family that opted out. None (every existing
+    caller) checks the whole program exactly as before."""
     from app.models.models import Lead
     from app.models.program_models import ProgramSourceRecord
-    ids = [x for (x,) in db.query(ProgramSourceRecord.lead_id).filter(
-        ProgramSourceRecord.organization_id == org_id, ProgramSourceRecord.lead_id.isnot(None)).distinct().all()]
+    base = db.query(ProgramSourceRecord.lead_id).filter(
+        ProgramSourceRecord.organization_id == org_id, ProgramSourceRecord.lead_id.isnot(None))
+    if source_lead_ids is None:
+        ids = [x for (x,) in base.distinct().all()]
+    else:
+        want, found = sorted(set(source_lead_ids)), set()
+        for i in range(0, len(want), 900):
+            found.update(x for (x,) in base.filter(
+                ProgramSourceRecord.source_lead_id.in_(want[i:i + 900])).distinct().all())
+        ids = sorted(found)
     done, counts = 0, {}
-    remaining = 0
+    remaining = skipped_opted_out = 0
     for i in range(0, len(ids), 500):
         for lead in db.query(Lead).filter(Lead.id.in_(ids[i:i + 500])).all():
             if not needs_check(lead):
+                continue
+            if source_lead_ids is not None and opted_out(lead):
+                skipped_opted_out += 1
                 continue
             if done >= limit:
                 remaining += 1
@@ -65,4 +91,7 @@ def run_for_org(db: Session, org_id: str, limit: int = 100, adapter=None) -> Dic
             if done % 25 == 0:
                 db.commit()
     db.commit()
-    return {"checked": done, "results": counts, "remaining": remaining}
+    out = {"checked": done, "results": counts, "remaining": remaining}
+    if source_lead_ids is not None:
+        out["skipped_opted_out"] = skipped_opted_out
+    return out

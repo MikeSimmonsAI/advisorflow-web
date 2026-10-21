@@ -1230,6 +1230,10 @@ from app.routers.program_router import (router as program_router,
                                         god_router as program_god_router)
 from app.routers.sci_command_router import router as sci_command_router
 app.include_router(sci_command_router)   # /program/command - SCI Command phone screens
+# /program/intake - the Intelligent Lead Importer's steps for an SCI workspace
+# (SCI managers only, SCI batches only); the final write is SCI's own loader.
+from app.routers.sci_intake_router import router as sci_intake_router  # noqa: E402
+app.include_router(sci_intake_router)
 app.include_router(program_router)
 app.include_router(program_public_router)  # public - the token IS the authorization
 app.include_router(program_god_router)
