@@ -116,13 +116,19 @@ def test_settings_signer_label_is_the_orgs_brand(client, brands):
 
 def _pdf_text(pdf: bytes) -> str:
     """Decompress every stream of a reportlab PDF and return the raw text ops."""
-    out = []
+    import base64
+    out = [pdf.decode("latin-1", "ignore")]                 # plain objects, e.g. /Author
     for m in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", pdf, re.S):
-        chunk = m.group(1)
-        try:
-            out.append(zlib.decompress(chunk).decode("latin-1"))
-        except Exception:  # noqa: BLE001
-            out.append(chunk.decode("latin-1", "ignore"))
+        chunk = m.group(1).strip()
+        for attempt in ("flate", "a85+flate"):
+            try:
+                data = chunk
+                if attempt == "a85+flate":                    # reportlab: ASCII85 then Flate
+                    data = base64.a85decode(data[:-2] if data.endswith(b"~>") else data)
+                out.append(zlib.decompress(data).decode("latin-1"))
+                break
+            except Exception:  # noqa: BLE001
+                continue
     return "\n".join(out)
 
 
