@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "verify-sci-20261021-0415-c2",
+  "relay_run_id": "verify-wholesale-20261021-0415-d2",
   "parent_run_id": "",
-  "project": "SCI harmless parallel smoke test",
+  "project": "Wholesale harmless parallel smoke test",
   "status": "COMPLETED",
-  "branch": "feature/sci-ops",
-  "actions_run_id": "39542958978",
+  "branch": "feature/wholesale-development",
+  "actions_run_id": "39542962459",
   "timestamp_ct": "2026-10-20 23:15 CT",
   "issue": 1,
-  "status_comment_id": 6307891272
+  "status_comment_id": 6307892046
 }
