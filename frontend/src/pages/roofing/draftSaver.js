@@ -94,7 +94,7 @@ export function createDraftSaver({ id, patch, storage, onState, onSaved, delay =
     return !Object.keys(pending).length && !inflight && state !== 'error'
   }
 
-  /** Put back what this phone still holds from before a refresh / crash. */
+  /** Put back what this device still holds from before a refresh / crash. */
   function restore() {
     try {
       const raw = storage && storage.getItem(key)

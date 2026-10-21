@@ -29,39 +29,39 @@ SAMPLE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file
 # (photo file, label, caption) sets per kind of finding
 SETS = {
     "hail": [("overview", "overview", "Front elevation - architectural shingle, 2 stories"),
-             ("hail", "damage", "Hail damage - impact bruises on the north slope (test square circled)"),
-             ("granules", "shingles", "Granule loss - bare shingle mat where the hail struck"),
-             ("gutter", "gutters", "Hail-dented front gutter with shingle granules in the trough")],
+             ("hail", "damage", "Hail-like impact marks - north slope (test square circled)"),
+             ("granules", "shingles", "Granule loss - exposed shingle surface at the impact points"),
+             ("gutter", "gutters", "Dented front gutter with shingle granules collecting in the trough")],
     "wind": [("overview", "overview", "Front elevation"),
-             ("missing", "damage", "Wind damage - missing shingles on the south slope, underlayment exposed"),
-             ("flashing", "flashing", "Flashing problem - step flashing lifted at the chimney")],
+             ("missing", "damage", "Missing shingles after a reported wind event - south slope, underlayment exposed"),
+             ("flashing", "flashing", "Deteriorated chimney flashing - step flashing lifted")],
     "leak": [("overview", "overview", "Front elevation"),
-             ("flashing", "flashing", "Leak source - chimney flashing pulled away from the brick"),
-             ("attic", "attic", "Leak evidence - water-stained attic decking below the chimney"),
-             ("interior", "interior", "Leak evidence - ceiling stain in the second bedroom")],
+             ("flashing", "flashing", "Deteriorated chimney flashing - pulled away from the brick"),
+             ("attic", "attic", "Water staining on the attic decking below the chimney"),
+             ("interior", "interior", "Interior ceiling water staining - second bedroom")],
     "age": [("overview", "overview", "Front elevation"),
             ("granules", "shingles", "Age wear - widespread granule loss, shingles near end of life"),
             ("gutter", "gutters", "Age wear - granules collecting in the gutters")],
 }
 FINDINGS = {
     "hail": dict(damage=["hail", "granule_loss", "gutters"], severity="moderate", condition="poor",
-                 areas=["North slope", "West slope", "Gutters"], rec="replacement", claim="yes",
-                 notes="Consistent hail bruising across the north and west slopes - roughly 9-12 hits per test square. "
-                       "Granule loss at the impact points and dents in the front gutter. Meets the threshold for an "
-                       "insurance claim; homeowner has a claim open with their carrier.",
+                 areas=["North slope", "West slope", "Gutters"], rec="replacement", claim="open_claim",
+                 notes="Hail-like impact marks across the north and west slopes - roughly 9-12 per test square. "
+                       "Granule loss at the impact points and dents in the front gutter. Homeowner reports an open "
+                       "claim with their insurance provider.",
                  scope="Full tear-off and replacement, architectural shingle, new drip edge and gutter section."),
     "wind": dict(damage=["wind", "missing", "flashing"], severity="moderate", condition="fair",
-                 areas=["South slope", "Ridge", "Chimney"], rec="repair", claim="maybe",
-                 notes="Six shingles missing on the south slope after last week's wind, two more creased and lifting. "
+                 areas=["South slope", "Ridge", "Chimney"], rec="repair", claim="plans_to_contact",
+                 notes="Six shingles missing on the south slope after a reported wind event, two more creased and lifting. "
                        "Step flashing at the chimney has pulled away. Decking is sound - a targeted repair will hold.",
                  scope="Replace 2 squares on the south slope, reseal and re-flash the chimney."),
     "leak": dict(damage=["leak", "flashing", "interior_stain", "decking"], severity="severe", condition="poor",
-                 areas=["Chimney", "Attic", "Interior ceiling"], rec="replacement", claim="maybe",
-                 notes="Active leak at the chimney. Flashing failed, water has stained the attic decking and the bedroom "
+                 areas=["Chimney", "Attic", "Interior ceiling"], rec="replacement", claim="not_discussed",
+                 notes="Evidence of water intrusion at the chimney. Flashing has failed; water has stained the attic decking and the bedroom "
                        "ceiling. Two sheets of decking are soft. Roof is 21 years old - replacement recommended over a patch.",
                  scope="Tear-off, replace soft decking, new chimney flashing and cricket, full replacement."),
     "age": dict(damage=["granule_loss", "cracked", "ventilation"], severity="minor", condition="fair",
-                areas=["South slope", "West slope", "Gutters"], rec="monitor", claim="no",
+                areas=["South slope", "West slope", "Gutters"], rec="monitor", claim="none_reported",
                 notes="No storm damage. Shingles are near end of life - granule loss and some cracking on the south and "
                       "west faces. No leaks today. Recommend planning a replacement within 2-3 years.",
                 scope="Re-inspect next spring; budget for replacement."),
@@ -182,7 +182,10 @@ def seed(db: Session, org, now: datetime) -> Dict[str, int]:
                 ins.handoff = C.jdump({"action": "close_no_work", "label": "Close - no work needed",
                                        "at": (ins.completed_at + timedelta(days=1)).isoformat()})
             elif stage in (C.ESTIMATE_SENT, C.WON):
-                ins.handoff = C.jdump({"action": "prepare_estimate", "label": "Estimate given to homeowner", "estimate_sent": True,
+                won = stage == C.WON
+                ins.handoff = C.jdump({"action": "mark_won" if won else "record_estimate_given",
+                                       "label": "Homeowner accepted - job won" if won else "Estimate given to homeowner",
+                                       "estimate_sent": True,
                                        "estimate_amount": opp.estimate_amount if opp else None,
                                        "at": (ins.completed_at + timedelta(hours=20)).isoformat()})
         db.add(ins)
@@ -196,8 +199,14 @@ def seed(db: Session, org, now: datetime) -> Dict[str, int]:
                 hand_at = min(ins.completed_at + timedelta(hours=20), now - timedelta(minutes=30))
                 hand["at"] = hand_at.isoformat()
                 ins.handoff = C.jdump(hand)
-                step = "mark_won" if stage == C.WON else hand.get("action")
-                ev.append(("handoff", hand_at, {"step": step}))
+                if stage in (C.ESTIMATE_SENT, C.WON):
+                    ev.append(("handoff", ins.completed_at + min(timedelta(hours=1), (hand_at - ins.completed_at) / 2), {"step": "prepare_estimate"}))
+                    ev.append(("handoff", hand_at, {"step": "record_estimate_given"}))
+                    if stage == C.WON:
+                        won_at = min(hand_at + timedelta(days=2), now - timedelta(minutes=20))
+                        ev.append(("handoff", max(won_at, hand_at + timedelta(minutes=5)), {"step": "mark_won"}))
+                else:
+                    ev.append(("handoff", hand_at, {"step": hand.get("action")}))
         for action, at, detail in ev:
             db.add(RoofingInspectionEvent(organization_id=org.id, inspection_id=ins.id, action=action,
                                           actor_user_id=ins.inspector_user_id, report_number=ins.report_number,

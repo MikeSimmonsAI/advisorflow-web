@@ -135,7 +135,7 @@ export default function InspectionWorkspace() {
     const ok = await saver.current.settle()
     if (!ok) {
       setBusy(false)
-      say('Your latest changes haven\u2019t reached the server yet, so the report can\u2019t be completed. They\u2019re kept on this phone and will save as soon as the connection is back.', 'err')
+      say('Your latest changes haven\u2019t reached the server yet, so the report can\u2019t be completed. They\u2019re saved on this device and will sync as soon as the connection is back.', 'err')
       return
     }
     try {
@@ -157,17 +157,17 @@ export default function InspectionWorkspace() {
         <Link to={BASE} className="rf-btn rf-btn--ghost rf-btn--sm"><Icon name="back" size={16} />Inspections</Link>
         <span className={`ri-save ri-save--${saving}`}>
           {locked ? (ins.status === 'completed' ? `Report ${ins.report_number}` : 'View only')
-            : saving === 'saving' ? 'Saving…' : saving === 'pending' ? 'Unsaved changes' : saving === 'error' ? 'Not saved yet - kept on this phone, retrying' : 'Draft saved'}
+            : saving === 'saving' ? 'Saving…' : saving === 'pending' ? 'Unsaved changes' : saving === 'error' ? 'Not synced yet - saved on this device, retrying' : 'Draft saved'}
         </span>
       </div>
 
       {restored > 0 && (
         <div className="rf-note" style={{ marginBottom: 12 }}><Icon name="refresh" size={16} />
-          <span>Restored {restored} change{restored === 1 ? '' : 's'} saved on this phone before the page closed - sending now.</span></div>
+          <span>Restored {restored} change{restored === 1 ? '' : 's'} saved on this device before the page closed - sending now.</span></div>
       )}
       {saving === 'error' && !locked && (
         <div className="rf-note rf-note--warn" style={{ marginBottom: 12 }}><Icon name="alert" size={16} />
-          <span>No connection to the server. Keep working - every change is kept on this phone and saves automatically when the connection is back.</span></div>
+          <span>No connection to the server. Keep working - your changes are saved on this device and will sync when the connection returns. They are not on the server yet.</span></div>
       )}
       <header className="ri-head rf-panel">
         <div className="ri-head__who">
@@ -244,7 +244,7 @@ export default function InspectionWorkspace() {
         <textarea className="rf-textarea" rows={3} disabled={locked} value={ins.recommendation_notes || ''}
           placeholder="Scope of work, materials, anything the estimate should include."
           onChange={(e) => set('recommendation_notes', e.target.value)} />
-        <label className="ri-lbl">Insurance claim</label>
+        <label className="ri-lbl">Insurance - as reported by the homeowner</label>
         <Chips options={ch.insurance_claim} value={ins.insurance_claim} onChange={(v) => set('insurance_claim', v)} disabled={locked} />
       </Section>
 
@@ -260,7 +260,7 @@ export default function InspectionWorkspace() {
             <div className="ri-finish__btns">
               <button className="rf-btn rf-btn--ghost" onClick={async () => {
                 const ok = await saver.current.settle()
-                say(ok ? 'Draft saved - you can come back to it any time' : 'Not saved yet - your changes are kept on this phone and will save when the connection is back', ok ? undefined : 'err')
+                say(ok ? 'Draft saved - you can come back to it any time' : 'Not synced yet - your changes are saved on this device and will sync when the connection is back', ok ? undefined : 'err')
               }}>Save draft</button>
               <button className="rf-btn rf-btn--primary" disabled={busy || unsynced} aria-disabled={busy || unsynced}
                 title={unsynced ? 'Your latest changes are still saving' : undefined} onClick={complete}>{completeLabel}</button>
@@ -269,7 +269,7 @@ export default function InspectionWorkspace() {
         )}
       <div className="ri-sticky">
         {ins.status !== 'completed' && !locked
-          ? <><span className={`ri-save--${saving}`}>{saving === 'saved' ? 'Draft saved' : saving === 'error' ? 'Notes kept on this phone' : 'Saving\u2026'}</span>
+          ? <><span className={`ri-save--${saving}`}>{saving === 'saved' ? 'Draft saved' : saving === 'error' ? 'Saved on this device only' : 'Saving\u2026'}</span>
             <button className={`rf-btn rf-btn--primary ${saving === 'error' ? 'ri-btn-wait' : ''}`} disabled={busy || unsynced}
               aria-disabled={busy || unsynced} onClick={complete}>{completeLabel}</button></>
           : <Link className="rf-btn rf-btn--primary" to={`${BASE}/${id}/report`}>View report</Link>}
@@ -394,7 +394,10 @@ export function Handoff({ ins, setIns, say }) {
   const [busy, setBusy] = useState(false)
   const st = ins.opportunity?.stage
   const next = nextStep(ins)
+  const inFlight = useRef(false)
   const go = async (action, extra = {}) => {
+    if (inFlight.current) return            // a second tap before the first answers records nothing twice
+    inFlight.current = true
     setBusy(true)
     try {
       const d = await api.post(`/roofing-ops/inspections/${ins.id}/handoff`, { action, ...extra })
@@ -406,7 +409,7 @@ export function Handoff({ ins, setIns, say }) {
         recommend_replacement: 'Replacement recommended', recommend_repair: 'Repair recommended',
         close_no_work: 'Closed - no work needed', mark_won: 'Job won', mark_lost: 'Marked as declined',
       }[action])
-    } catch (e) { say(errText(e), 'err') } finally { setBusy(false) }
+    } catch (e) { say(errText(e), 'err') } finally { inFlight.current = false; setBusy(false) }
   }
   const primary = () => setOpen({ estimate: 'estimate', record_given: 'given', follow_estimate: 'follow', close: 'close' }[next.key])
   const h = ins.handoff

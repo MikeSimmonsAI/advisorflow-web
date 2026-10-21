@@ -42,16 +42,30 @@ ROOF_TYPES = ["Asphalt shingle", "Architectural shingle", "Metal", "Tile", "Slat
               "Flat / low slope", "Other"]
 CONDITIONS = [("good", "Good"), ("fair", "Fair"), ("poor", "Poor"), ("failed", "Failed")]
 SEVERITIES = [("none", "No damage"), ("minor", "Minor"), ("moderate", "Moderate"), ("severe", "Severe")]
-DAMAGE = [("hail", "Hail impact"), ("wind", "Wind damage / lifted shingles"), ("missing", "Missing shingles"),
-          ("granule_loss", "Granule loss"), ("cracked", "Cracked / curled shingles"), ("leak", "Active leak"),
-          ("flashing", "Damaged flashing"), ("vents", "Vent / boot damage"), ("gutters", "Gutter damage"),
+DAMAGE = [("hail", "Hail-like impact marks"), ("wind", "Possible wind damage / lifted shingles"), ("missing", "Missing shingles"),
+          ("granule_loss", "Granule loss"), ("cracked", "Cracked / curled shingles"), ("leak", "Evidence of water intrusion"),
+          ("flashing", "Flashing deterioration"), ("vents", "Vent / boot damage"), ("gutters", "Gutter damage"),
           ("decking", "Soft or rotted decking"), ("ventilation", "Poor attic ventilation"),
           ("interior_stain", "Interior water stain"), ("tree", "Tree / debris impact"), ("moss", "Moss / algae")]
 AREAS = ["North slope", "South slope", "East slope", "West slope", "Ridge", "Valleys", "Chimney",
          "Skylights", "Gutters", "Attic", "Interior ceiling", "Garage", "Porch"]
 RECOMMENDATIONS = [("repair", "Repair"), ("replacement", "Full replacement"), ("monitor", "Monitor / maintenance"),
-                   ("none", "No work needed")]
-CLAIM = [("yes", "Insurance claim likely"), ("maybe", "Possible claim"), ("no", "No claim")]
+                   ("further_evaluation", "Further evaluation recommended"),
+                   ("none", "No immediate roofing work recommended")]
+# INSURANCE IS WHAT THE HOMEOWNER TELLS US - never a judgement on coverage.
+# The inspector documents what they see; the carrier decides claims. These are
+# the homeowner-reported answers the form offers.
+CLAIM = [("open_claim", "Homeowner reports an open claim"),
+         ("plans_to_contact", "Homeowner plans to contact their insurance"),
+         ("previous_claim", "Homeowner reports a previous claim"),
+         ("none_reported", "No claim reported"),
+         ("not_discussed", "Not discussed")]
+# Values stored by earlier builds of this form are still read, but shown as
+# the homeowner-reported fact they stood for - not as a coverage prediction.
+CLAIM_LEGACY = [("yes", "Homeowner reported a claim"), ("maybe", "Homeowner may contact their insurance"),
+                ("no", "No claim reported")]
+CLAIM_REPORTED = {"open_claim", "plans_to_contact", "previous_claim", "yes", "maybe"}
+INSURANCE_NOTE = "Coverage and claim decisions are made by the insurance provider."
 PHOTO_LABELS = [("overview", "Overview"), ("damage", "Damage"), ("shingles", "Shingles"), ("flashing", "Flashing"),
                 ("gutters", "Gutters"), ("vents", "Vents"), ("attic", "Attic"), ("interior", "Interior"),
                 ("other", "Other")]
@@ -63,7 +77,7 @@ MAX_PHOTOS = 60
 
 _KEYS = {"condition": {k for k, _ in CONDITIONS}, "severity": {k for k, _ in SEVERITIES},
          "damage": {k for k, _ in DAMAGE}, "recommendation": {k for k, _ in RECOMMENDATIONS},
-         "claim": {k for k, _ in CLAIM}, "label": {k for k, _ in PHOTO_LABELS},
+         "claim": {k for k, _ in CLAIM + CLAIM_LEGACY}, "label": {k for k, _ in PHOTO_LABELS},
          "handoff": {k for k, _ in HANDOFFS}}
 
 
@@ -141,21 +155,40 @@ def _event(ctx: C.Ctx, ins: RoofingInspection, action: str, **detail) -> None:
                                       detail=C.jdump(detail) if detail else None, at=datetime.utcnow()))
 
 
-def history(ctx: C.Ctx, ins: RoofingInspection) -> List[Dict[str, Any]]:
+def _names(ctx: C.Ctx, ids) -> Dict[str, str]:
+    """Display names for these user ids: the company's people, plus anyone
+    else who really acted here (e.g. an EvoSys operator working in this
+    company's workspace) - by their own name, never borrowed from someone else."""
     names = C.user_names(ctx.db, ctx.org_id)
+    missing = {i for i in ids if i and i not in names}
+    if missing:
+        from app.models.models import User
+        for u in ctx.db.query(User).filter(User.id.in_(missing)).all():
+            names[u.id] = u.full_name or u.email
+    return names
+
+
+def history(ctx: C.Ctx, ins: RoofingInspection) -> List[Dict[str, Any]]:
+    """The audit trail exactly as recorded: who did what, when."""
     rows = (ctx.db.query(RoofingInspectionEvent)
             .filter(RoofingInspectionEvent.organization_id == ctx.org_id,
                     RoofingInspectionEvent.inspection_id == ins.id)
             .order_by(RoofingInspectionEvent.at.asc()).all())
-    missing = {r.actor_user_id for r in rows if r.actor_user_id and r.actor_user_id not in names}
-    if missing:                     # e.g. an EvoSys operator working in this company's workspace
-        from app.models.models import User
-        for u in ctx.db.query(User).filter(User.id.in_(missing)).all():
-            names[u.id] = u.full_name or u.email
-    label = {"started": "Inspection started", "completed": "Report completed", "reopened": "Report reopened",
-             "recompleted": "Report completed again (revised)", "handoff": "Next step"}
-    return [{"action": r.action, "label": label.get(r.action, r.action), "by": names.get(r.actor_user_id),
-             "at": C.iso(r.at), "report_number": r.report_number, "detail": C.jload(r.detail, None)} for r in rows]
+    names = _names(ctx, [r.actor_user_id for r in rows])
+    label = {"started": "Inspection started", "completed": "Report completed", "reopened": "Report reopened for revision",
+             "recompleted": "Revised report completed", "handoff": "Sales step recorded"}
+    steps = dict(HANDOFFS, prepare_estimate="Estimate amount and scope recorded",
+                 schedule_follow_up="Follow-up reminder saved (not on a calendar)",
+                 record_estimate_given="Estimate recorded as given to homeowner")
+    out = []
+    for r in rows:
+        detail = C.jload(r.detail, None)
+        text = label.get(r.action, r.action)
+        if r.action == "handoff" and isinstance(detail, dict) and steps.get(detail.get("step")):
+            text = "Sales step: %s" % steps[detail["step"]]
+        out.append({"action": r.action, "label": text, "by": names.get(r.actor_user_id),
+                    "at": C.iso(r.at), "report_number": r.report_number, "detail": detail})
+    return out
 
 
 # ── start / open ────────────────────────────────────────────────────────────
@@ -340,6 +373,13 @@ def handoff(ctx: C.Ctx, ins: RoofingInspection, action: str, data: Dict[str, Any
     opp = J.ensure(db, ctx.org_id, [lead])[lead.id]
     detail: Dict[str, Any] = {}
     note = None
+    asked = action
+    # A repeated click (or a retried request) never records the same outcome twice.
+    if ((asked == "record_estimate_given" and opp.stage == C.ESTIMATE_SENT
+         and (C.jload(ins.handoff, {}) or {}).get("estimate_sent"))
+            or (asked == "mark_won" and opp.stage == C.WON)
+            or (asked in ("mark_lost", "close_no_work") and opp.stage == C.LOST)):
+        return ins
     if action == "record_estimate_given":
         action, data = "prepare_estimate", {**data, "estimate_sent": True}
     if action == "prepare_estimate":
@@ -364,10 +404,11 @@ def handoff(ctx: C.Ctx, ins: RoofingInspection, action: str, data: Dict[str, Any
             if C.RANK.get(opp.stage, -1) < C.RANK[C.ESTIMATE_SENT] and opp.stage != C.LOST:
                 J.set_stage(db, opp, C.ESTIMATE_SENT, ctx.user.id, "Estimate from report %s" % ins.report_number)
             ins.next_action = "follow_up_estimate"
-            note = "Estimate sent from inspection %s%s." % (ins.report_number, (" - $%s" % format(opp.estimate_amount, ",.0f")))
+            note = "Estimate recorded as given to the homeowner (inspection %s - $%s). No document was sent from the system." % (
+                ins.report_number, format(opp.estimate_amount, ",.0f"))
         else:
             ins.next_action = "send_estimate"
-            note = "Estimate being prepared from inspection %s%s." % (
+            note = "Estimate amount and scope recorded from inspection %s%s." % (
                 ins.report_number, (" - $%s" % format(opp.estimate_amount, ",.0f")) if opp.estimate_amount else "")
     elif action == "schedule_follow_up":
         when = data.get("follow_up_at")
@@ -418,7 +459,8 @@ def handoff(ctx: C.Ctx, ins: RoofingInspection, action: str, data: Dict[str, Any
                   else "Estimate prepared" if action == "prepare_estimate" else _label(HANDOFFS, action))
     ins.handoff = C.jdump({"action": action, "label": step_label, "at": datetime.utcnow().isoformat(),
                            "by": ctx.user.id, **detail})
-    _event(ctx, ins, "handoff", step=action, **{k: v for k, v in detail.items() if k != "scope"})
+    _event(ctx, ins, "handoff", step="record_estimate_given" if asked == "record_estimate_given" else action,
+           **{k: v for k, v in detail.items() if k != "scope"})
     if note:
         _note(ctx, ins, note)
     db.commit()
@@ -524,7 +566,7 @@ def remove_photo(ctx: C.Ctx, ins: RoofingInspection, photo_id: str) -> None:
 def to_json(ctx: C.Ctx, ins: RoofingInspection, full: bool = True) -> Dict[str, Any]:
     db = ctx.db
     lead = db.query(Lead).filter(Lead.id == ins.lead_id).first()
-    names = C.user_names(db, ctx.org_id)
+    names = _names(ctx, [ins.inspector_user_id, ins.completed_by_id])
     opp = J.ensure(db, ctx.org_id, [lead])[lead.id] if lead else None
     out = {
         "id": ins.id, "lead_id": ins.lead_id, "status": ins.status,
@@ -542,7 +584,8 @@ def to_json(ctx: C.Ctx, ins: RoofingInspection, full: bool = True) -> Dict[str, 
         "recommendation": ins.recommendation,
         "recommendation_label": _label(RECOMMENDATIONS, ins.recommendation) if ins.recommendation else None,
         "recommendation_notes": ins.recommendation_notes, "insurance_claim": ins.insurance_claim,
-        "insurance_claim_label": _label(CLAIM, ins.insurance_claim) if ins.insurance_claim else None,
+        "insurance_claim_label": _label(CLAIM + CLAIM_LEGACY, ins.insurance_claim) if ins.insurance_claim else None,
+        "insurance_note": INSURANCE_NOTE if ins.insurance_claim in CLAIM_REPORTED else None,
         "next_action": ins.next_action, "follow_up_at": ins.follow_up_at.isoformat() if ins.follow_up_at else None,
         "handoff": C.jload(ins.handoff, None),
         "homeowner": {"name": C.lead_name(lead), "phone": lead.phone, "email": lead.email,

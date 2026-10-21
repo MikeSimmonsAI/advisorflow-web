@@ -55,7 +55,7 @@ export default function InspectionReport() {
 
         <section className="ri-report__grid">
           <div><h3>Property</h3><p><b>{H.name}</b><br />{H.address || 'No address on file'}<br />{[H.phone, H.email].filter(Boolean).join(' · ')}</p></div>
-          <div><h3>Inspection</h3><p>{r.inspection_type}<br />Inspected: {fmtDate(r.started_at || r.scheduled_at)}{r.scheduled_at && r.started_at && fmtDate(r.scheduled_at) !== fmtDate(r.started_at) ? <><br />Appointment: {localWhen(r.scheduled_at)}</> : null}<br />Inspector: {r.inspector_name || '—'}</p></div>
+          <div><h3>Inspection</h3><p>{r.inspection_type}<br />Inspected: {fmtDate(r.started_at || r.scheduled_at)}{r.scheduled_at && r.started_at && fmtDate(r.scheduled_at) !== fmtDate(r.started_at) ? <><br />Appointment: {localWhen(r.scheduled_at)}</> : null}<br />Inspected by: {r.inspector_name || '—'}</p></div>
           <div><h3>Roof</h3><p>{r.roof_type || 'Type not recorded'}<br />{r.roof_age_years != null ? `${r.roof_age_years} years old` : 'Age not recorded'}{r.stories ? ` · ${r.stories} ${r.stories === 1 ? 'story' : 'stories'}` : ''}</p></div>
         </section>
 
@@ -63,7 +63,7 @@ export default function InspectionReport() {
           <div className={`ri-report__badge c-${r.roof_condition || 'na'}`}><span>Condition</span><b>{r.roof_condition_label || '—'}</b></div>
           <div className={`ri-report__badge s-${r.severity || 'na'}`}><span>Damage</span><b>{r.severity_label || '—'}</b></div>
           <div className="ri-report__badge"><span>Recommendation</span><b>{r.recommendation_label || '—'}</b></div>
-          <div className="ri-report__badge"><span>Insurance</span><b>{r.insurance_claim_label || '—'}</b></div>
+          <div className="ri-report__badge"><span>Insurance (homeowner-reported)</span><b>{r.insurance_claim_label || 'Not recorded'}</b></div>
         </section>
 
         <section>
@@ -77,6 +77,7 @@ export default function InspectionReport() {
           <h3>Recommendation</h3>
           <p><b>{r.recommendation_label || '—'}</b>{r.recommendation_notes ? ` - ${r.recommendation_notes}` : ''}</p>
           {r.opportunity?.estimate_amount ? <p><b>Estimate:</b> {money(r.opportunity.estimate_amount, false)}</p> : null}
+          {r.insurance_note && <p className="ri-report__fine">{r.insurance_note}</p>}
         </section>
 
         <section>
@@ -92,14 +93,15 @@ export default function InspectionReport() {
         </section>
 
         <footer className="ri-report__foot">
-          <div><span>Inspector</span><b>{r.completed_by_name || r.inspector_name || '—'}</b></div>
-          <div><span>Completed</span><b>{r.completed_at ? fmtDate(r.completed_at) : 'Not completed'}</b></div>
+          <div><span>Inspected by</span><b>{r.inspector_name || '—'}</b></div>
+          <div><span>Report completed by</span><b>{r.completed_at ? (r.completed_by_name || '—') : 'Not completed'}</b></div>
+          <div><span>Completed on</span><b>{r.completed_at ? fmtDate(r.completed_at) : 'Not completed'}</b></div>
           <p>This report records the visible condition of the roof on the date inspected. It is not a warranty.</p>
         </footer>
         {r.history?.length > 0 && (
           <section className="ri-report__hist">
             <h3>Report history{r.revised ? ' - revised' : ''}</h3>
-            <ul>{r.history.filter((e) => e.action !== 'handoff').map((e, i) => (
+            <ul>{r.history.map((e, i) => (
               <li key={i}><b>{e.label}</b> - {e.by || 'System'}, {new Date(e.at).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</li>
             ))}</ul>
           </section>

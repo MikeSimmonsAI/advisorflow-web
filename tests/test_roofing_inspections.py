@@ -164,6 +164,20 @@ def test_demo_story_has_sample_inspections_with_photos(db_session):
     assert 0 < len([r for r in rows if r.status == "in_progress"]) <= 2
     ph = db_session.query(RoofingInspectionPhoto).filter(RoofingInspectionPhoto.organization_id == out["organization_id"]).all()
     assert ph and all(p.is_sample for p in ph)
+    # PR #285 review: a sample report is never completed before its visit, its
+    # history runs in order, and nothing in it reads like a coverage decision.
+    from app.models.roofing_models import RoofingInspectionEvent
+    now = datetime.utcnow()
+    for r in done:
+        assert r.scheduled_at <= r.started_at < r.completed_at <= now, r.report_number
+        if r.booking_link_id:
+            assert db_session.get(BookingLink, r.booking_link_id).booked_time <= r.completed_at
+        ev = (db_session.query(RoofingInspectionEvent).filter(RoofingInspectionEvent.inspection_id == r.id)
+              .order_by(RoofingInspectionEvent.at).all())
+        assert [e.action for e in ev][:2] == ["started", "completed"]
+        assert all(r.started_at <= e.at <= now for e in ev)
+        assert "threshold" not in (r.notes or "").lower() and r.insurance_claim not in ("yes", "maybe", "no")
+    assert all("connection" not in (p.caption or "").lower() for p in ph)
     assert demo_seed.seed(db_session)["inspections_added"] == 0     # idempotent
 
 
@@ -238,3 +252,57 @@ def test_estimate_steps_follow_the_stage(client, booked):
     assert r["opportunity"]["stage"] == "won" and r["opportunity"]["won_amount"] == 9500
     acts = [(e["action"], (e["detail"] or {}).get("step")) for e in r["history"]]
     assert ("handoff", "mark_won") in acts and ("handoff", "schedule_follow_up") in acts
+
+
+def test_report_names_the_real_inspector_and_the_real_completer(client, booked):
+    """PR #285 final QA: 'Inspected by' is the inspector; 'completed by' and the
+    history name whoever really finished it - never one borrowed for the other."""
+    db, rep, owner, l, b = booked["db"], booked["a_rep"], booked["a_owner"], booked["lead"], booked["booking"]
+    iid = client.post("/roofing-ops/inspections", json={"lead_id": l.id, "booking_link_id": b.id},
+                      headers=h(db, rep)).json()["id"]
+    _ready(client, db, rep, iid)
+    r = client.post("/roofing-ops/inspections/%s/complete" % iid, headers=h(db, owner)).json()
+    assert r["inspector_id"] == rep.id and r["inspector_name"] and r["completed_by_name"]
+    assert r["completed_by_name"] != r["inspector_name"]
+    by = {e["action"]: e["by"] for e in r["history"]}
+    assert by["started"] == r["inspector_name"] and by["completed"] == r["completed_by_name"]
+    r = client.post("/roofing-ops/inspections/%s/handoff" % iid, headers=h(db, rep),
+                    json={"action": "prepare_estimate", "estimate_amount": 7000}).json()
+    last = r["history"][-1]
+    assert last["label"] == "Sales step: Estimate amount and scope recorded" and last["by"] == r["inspector_name"]
+
+
+def test_insurance_is_homeowner_reported_not_a_coverage_call(client, booked):
+    db, rep, l, b = booked["db"], booked["a_rep"], booked["lead"], booked["booking"]
+    iid = client.post("/roofing-ops/inspections", json={"lead_id": l.id, "booking_link_id": b.id},
+                      headers=h(db, rep)).json()["id"]
+    ch = client.get("/roofing-ops/inspections/choices", headers=h(db, rep)).json()
+    labels = " ".join(c["label"] for c in ch["insurance_claim"]).lower()
+    assert "likely" not in labels and "threshold" not in labels and "homeowner" in labels
+    r = client.patch("/roofing-ops/inspections/%s" % iid, headers=h(db, rep), json={"insurance_claim": "open_claim"}).json()
+    assert r["insurance_claim_label"] == "Homeowner reports an open claim"
+    assert "insurance provider" in r["insurance_note"]
+    r = client.patch("/roofing-ops/inspections/%s" % iid, headers=h(db, rep), json={"insurance_claim": "yes"}).json()
+    assert r["insurance_claim"] == "yes" and "likely" not in r["insurance_claim_label"].lower()   # older value, kept, neutral label
+    r = client.patch("/roofing-ops/inspections/%s" % iid, headers=h(db, rep), json={"insurance_claim": "none_reported"}).json()
+    assert r["insurance_note"] is None
+
+
+def test_repeated_sales_clicks_record_once(client, booked):
+    from app.models.roofing_models import RoofingInspectionEvent, RoofingOpportunity
+    db, rep, l, b = booked["db"], booked["a_rep"], booked["lead"], booked["booking"]
+    iid = client.post("/roofing-ops/inspections", json={"lead_id": l.id, "booking_link_id": b.id},
+                      headers=h(db, rep)).json()["id"]
+    _ready(client, db, rep, iid)
+    client.post("/roofing-ops/inspections/%s/complete" % iid, headers=h(db, rep))
+    hand = lambda body: client.post("/roofing-ops/inspections/%s/handoff" % iid, headers=h(db, rep), json=body)  # noqa: E731
+    hand({"action": "prepare_estimate", "estimate_amount": 9800})
+    for _ in range(3):
+        assert hand({"action": "record_estimate_given"}).status_code == 200
+    for _ in range(2):
+        assert hand({"action": "mark_won"}).status_code == 200
+    steps = [C.get("step") for C in (__import__("json").loads(e.detail or "{}") for e in
+             db.query(RoofingInspectionEvent).filter(RoofingInspectionEvent.inspection_id == iid,
+                                                     RoofingInspectionEvent.action == "handoff").all())]
+    assert steps.count("record_estimate_given") == 1 and steps.count("mark_won") == 1
+    assert db.query(RoofingOpportunity).filter(RoofingOpportunity.lead_id == l.id).count() == 1
