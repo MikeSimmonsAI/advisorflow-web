@@ -54,6 +54,8 @@ GATED = [
     (src.PIPELINE_AUTO_REPLY, "OUTBOUND_EMAIL_PIPELINE_AUTO_REPLY"),
     (src.APPOINTMENT_FOLLOWUP, "OUTBOUND_EMAIL_APPOINTMENT_FOLLOWUP"),
     (gate.STAFF_ESCALATION, "OUTBOUND_EMAIL_STAFF_ESCALATION"),
+    # Atlantis Team & Alerts: new-request email to the workspace's own team.
+    (gate.ENERGY_TEAM_ALERT, "OUTBOUND_EMAIL_ENERGY_TEAM_ALERT"),
     # The public Discovery / Demo booking paths. Three of them, because a brand
     # may want its sales team notified about website bookings without a single
     # prospect being emailed - and because confirmations and automated
@@ -73,7 +75,8 @@ GATED = [
 # compliance preflight against. Staff escalation goes to one of our own people;
 # the booking paths go to a brand-sales prospect or to the sales team, neither
 # of which is a family in a customer's tenant.
-NON_LEAD_SOURCES = ((gate.STAFF_ESCALATION, gate.WHOLESALE_BUYER_DISPOSITION)
+NON_LEAD_SOURCES = ((gate.STAFF_ESCALATION, gate.WHOLESALE_BUYER_DISPOSITION,
+                     gate.ENERGY_TEAM_ALERT)
                     + gate.PUBLIC_BOOKING_SOURCES)
 LEAD_SOURCES = [s for s, _ in GATED if s not in NON_LEAD_SOURCES]
 
