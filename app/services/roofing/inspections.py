@@ -57,7 +57,8 @@ PHOTO_LABELS = [("overview", "Overview"), ("damage", "Damage"), ("shingles", "Sh
                 ("other", "Other")]
 HANDOFFS = [("prepare_estimate", "Prepare estimate"), ("schedule_follow_up", "Schedule follow-up"),
             ("recommend_replacement", "Recommend replacement"), ("recommend_repair", "Recommend repair"),
-            ("close_no_work", "Close - no work needed")]
+            ("close_no_work", "Close - no work needed"), ("record_estimate_given", "Estimate given to homeowner"),
+            ("mark_won", "Homeowner accepted - job won"), ("mark_lost", "Homeowner declined")]
 MAX_PHOTOS = 60
 
 _KEYS = {"condition": {k for k, _ in CONDITIONS}, "severity": {k for k, _ in SEVERITIES},
@@ -339,6 +340,8 @@ def handoff(ctx: C.Ctx, ins: RoofingInspection, action: str, data: Dict[str, Any
     opp = J.ensure(db, ctx.org_id, [lead])[lead.id]
     detail: Dict[str, Any] = {}
     note = None
+    if action == "record_estimate_given":
+        action, data = "prepare_estimate", {**data, "estimate_sent": True}
     if action == "prepare_estimate":
         amt = data.get("estimate_amount")
         if amt not in (None, ""):
@@ -376,7 +379,7 @@ def handoff(ctx: C.Ctx, ins: RoofingInspection, action: str, data: Dict[str, Any
             raise HTTPException(400, "Follow-up date isn't a valid date.")
         detail["follow_up_at"] = ins.follow_up_at.isoformat()
         ins.next_action = "follow_up"
-        note = "Follow-up set for %s after inspection %s.%s" % (
+        note = "Follow-up reminder (not on a calendar) for %s after inspection %s.%s" % (
             ins.follow_up_at.strftime("%b %d, %Y"), ins.report_number,
             (" " + data["note"].strip()[:500]) if data.get("note") else "")
     elif action in ("recommend_replacement", "recommend_repair"):
@@ -384,13 +387,36 @@ def handoff(ctx: C.Ctx, ins: RoofingInspection, action: str, data: Dict[str, Any
         lead.custom_fields = C.jdump({**C.jload(lead.custom_fields, {}), "service_type": ins.recommendation})
         ins.next_action = "prepare_estimate"
         note = "Recommended %s after inspection %s." % (ins.recommendation, ins.report_number)
+    elif action == "mark_won":
+        if opp.stage != C.ESTIMATE_SENT:
+            raise HTTPException(409, "Record the estimate as given before marking the job won.")
+        amt = data.get("won_amount")
+        try:
+            amt = float(amt) if amt not in (None, "") else opp.estimate_amount
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Job amount must be a number")
+        opp.won_amount = amt
+        J.set_stage(db, opp, C.WON, ctx.user.id, "Accepted estimate from inspection %s" % ins.report_number)
+        ins.next_action = None
+        detail["won_amount"] = amt
+        note = "Homeowner accepted the estimate%s - job won." % (" ($%s)" % format(amt, ",.0f") if amt else "")
+    elif action == "mark_lost":
+        reason = (data.get("note") or "").strip()[:300]
+        if not reason:
+            raise HTTPException(400, "Say why the homeowner declined.")
+        J.set_stage(db, opp, C.LOST, ctx.user.id, reason)
+        ins.next_action = None
+        detail["reason"] = reason
+        note = "Homeowner declined after inspection %s: %s" % (ins.report_number, reason)
     elif action == "close_no_work":
         if opp.stage != C.LOST:
             J.set_stage(db, opp, C.LOST, ctx.user.id, "Inspection %s: no work needed" % ins.report_number)
         ins.recommendation = ins.recommendation or "none"
         ins.next_action = None
         note = "Closed after inspection %s - no work needed." % ins.report_number
-    ins.handoff = C.jdump({"action": action, "label": _label(HANDOFFS, action), "at": datetime.utcnow().isoformat(),
+    step_label = ("Estimate given to homeowner" if action == "prepare_estimate" and detail.get("estimate_sent")
+                  else "Estimate prepared" if action == "prepare_estimate" else _label(HANDOFFS, action))
+    ins.handoff = C.jdump({"action": action, "label": step_label, "at": datetime.utcnow().isoformat(),
                            "by": ctx.user.id, **detail})
     _event(ctx, ins, "handoff", step=action, **{k: v for k, v in detail.items() if k != "scope"})
     if note:
@@ -639,10 +665,13 @@ def dashboard(ctx: C.Ctx) -> Dict[str, Any]:
             buckets["in_progress" if fresh else "unfinished"].append(item)
             continue
         stage = item["stage"]
-        open_step = (stage not in (C.WON, C.LOST, C.ESTIMATE_SENT)
-                     and r.next_action in ("prepare_estimate", "send_estimate", "follow_up", "schedule_follow_up"))
+        open_step = (stage not in (C.WON, C.LOST)
+                     and r.next_action in ("prepare_estimate", "send_estimate", "follow_up", "schedule_follow_up",
+                                           "follow_up_estimate"))
         if open_step:
-            item["action"] = {"key": "next", "label": {"follow_up": "Follow up", "schedule_follow_up": "Schedule follow-up"}
+            item["action"] = {"key": "next", "label": {"follow_up": "Follow up", "schedule_follow_up": "Schedule follow-up",
+                                                       "send_estimate": "Record estimate given",
+                                                       "follow_up_estimate": "Follow up on estimate"}
                               .get(r.next_action, "Prepare estimate")}
             buckets["next_step"].append(item)
         else:

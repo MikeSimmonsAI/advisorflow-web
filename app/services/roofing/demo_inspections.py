@@ -20,21 +20,28 @@ from typing import Dict, List
 from sqlalchemy.orm import Session
 
 from app.models.models import BookingLink, Lead, User
-from app.models.roofing_models import RoofingInspection, RoofingInspectionPhoto, RoofingOpportunity
+from app.models.roofing_models import (RoofingInspection, RoofingInspectionEvent, RoofingInspectionPhoto,
+                                       RoofingOpportunity)
 from app.services.roofing import common as C
 
 SAMPLE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "static", "roofing_samples")
 
 # (photo file, label, caption) sets per kind of finding
 SETS = {
-    "hail": [("overview", "overview", "Front elevation"), ("hail", "damage", "Hail impacts on the north slope, chalked"),
-             ("granules", "shingles", "Granule loss where the hail hit"), ("gutter", "gutters", "Dented gutter, granules in the trough")],
-    "wind": [("overview", "overview", "Front elevation"), ("missing", "damage", "Missing shingles, underlayment exposed"),
-             ("flashing", "flashing", "Flashing lifted at the chimney")],
-    "leak": [("overview", "overview", "Front elevation"), ("flashing", "flashing", "Chimney flashing pulled away"),
-             ("attic", "attic", "Water staining on the attic decking"), ("interior", "interior", "Ceiling stain in bedroom 2")],
-    "age": [("overview", "overview", "Front elevation"), ("granules", "shingles", "Widespread granule loss - end of life"),
-            ("gutter", "gutters", "Granules collecting in the gutters")],
+    "hail": [("overview", "overview", "Front elevation - architectural shingle, 2 stories"),
+             ("hail", "damage", "Hail damage - impact bruises on the north slope (test square circled)"),
+             ("granules", "shingles", "Granule loss - bare shingle mat where the hail struck"),
+             ("gutter", "gutters", "Hail-dented front gutter with shingle granules in the trough")],
+    "wind": [("overview", "overview", "Front elevation"),
+             ("missing", "damage", "Wind damage - missing shingles on the south slope, underlayment exposed"),
+             ("flashing", "flashing", "Flashing problem - step flashing lifted at the chimney")],
+    "leak": [("overview", "overview", "Front elevation"),
+             ("flashing", "flashing", "Leak source - chimney flashing pulled away from the brick"),
+             ("attic", "attic", "Leak evidence - water-stained attic decking below the chimney"),
+             ("interior", "interior", "Leak evidence - ceiling stain in the second bedroom")],
+    "age": [("overview", "overview", "Front elevation"),
+            ("granules", "shingles", "Age wear - widespread granule loss, shingles near end of life"),
+            ("gutter", "gutters", "Age wear - granules collecting in the gutters")],
 }
 FINDINGS = {
     "hail": dict(damage=["hail", "granule_loss", "gutters"], severity="moderate", condition="poor",
@@ -65,6 +72,18 @@ ROOF = ["Architectural shingle", "Asphalt shingle", "Architectural shingle", "Me
 def _bytes(name: str) -> bytes:
     with open(os.path.join(SAMPLE_DIR, name + ".jpg"), "rb") as fh:
         return fh.read()
+
+
+def _utc(local: datetime, tz: str) -> datetime:
+    """Appointment times are wall-clock in the company's zone; started / completed /
+    history are UTC. Convert so the report's visit and its history agree."""
+    from datetime import timezone
+    from zoneinfo import ZoneInfo
+    try:
+        z = ZoneInfo(tz or "America/Chicago")
+    except Exception:
+        z = ZoneInfo("America/Chicago")
+    return local.replace(tzinfo=z).astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def seed(db: Session, org, now: datetime) -> Dict[str, int]:
@@ -123,10 +142,19 @@ def seed(db: Session, org, now: datetime) -> Dict[str, int]:
         f = FINDINGS[kind]
         when = (b.booked_time if b and b.booked_time else (opp.stage_entered_at if opp and opp.stage_entered_at else now)
                 - timedelta(days=1))
+        if not draft and when > now - timedelta(hours=2):
+            # A finished report's visit happened before it was written - never in the future.
+            when = (now - timedelta(days=rnd.randint(1, 6))).replace(hour=rnd.choice([9, 10, 13, 15]), minute=0,
+                                                                     second=0, microsecond=0)
+            if b is not None:
+                b.booked_time = when
+        at = _utc(when, getattr(org, "timezone", None))          # the visit, in UTC
+        if not draft and at > now - timedelta(hours=1):
+            at = now - timedelta(hours=1)
         ins = RoofingInspection(organization_id=org.id, lead_id=lid, opportunity_id=opp.id if opp else None,
                                 booking_link_id=b.id if b else None, inspector_user_id=(b.user_id if b else None) or lead.assigned_to_id,
                                 scheduled_at=when, inspection_type=(b.appt_label if b else None) or "Roof Inspection",
-                                started_at=when, roof_type=ROOF[rnd.randint(0, 3)],
+                                started_at=at, roof_type=ROOF[rnd.randint(0, 3)],
                                 roof_age_years=C.lead_fields(lead).get("roof_age") if isinstance(C.lead_fields(lead).get("roof_age"), int) else 15,
                                 stories=rnd.choice([1, 1, 2]), roof_condition=f["condition"],
                                 damage=C.jdump(f["damage"]), severity=f["severity"], affected_areas=C.jdump(f["areas"]),
@@ -144,7 +172,7 @@ def seed(db: Session, org, now: datetime) -> Dict[str, int]:
             n += 1
             ins.status = "completed"
             ins.report_number = "R-%04d" % (1000 + n)
-            ins.completed_at = when + timedelta(minutes=55)
+            ins.completed_at = min(at + timedelta(minutes=55), now - timedelta(minutes=45))
             ins.completed_by_id = ins.inspector_user_id
             nxt = {"replacement": "prepare_estimate", "repair": "prepare_estimate", "monitor": "schedule_follow_up"}
             ins.next_action = ("follow_up_estimate" if stage == C.ESTIMATE_SENT else None if stage in (C.WON, C.LOST)
@@ -154,11 +182,26 @@ def seed(db: Session, org, now: datetime) -> Dict[str, int]:
                 ins.handoff = C.jdump({"action": "close_no_work", "label": "Close - no work needed",
                                        "at": (ins.completed_at + timedelta(days=1)).isoformat()})
             elif stage in (C.ESTIMATE_SENT, C.WON):
-                ins.handoff = C.jdump({"action": "prepare_estimate", "label": "Prepare estimate", "estimate_sent": True,
+                ins.handoff = C.jdump({"action": "prepare_estimate", "label": "Estimate given to homeowner", "estimate_sent": True,
                                        "estimate_amount": opp.estimate_amount if opp else None,
                                        "at": (ins.completed_at + timedelta(hours=20)).isoformat()})
         db.add(ins)
         db.flush()
+        # The report's own history, on the same timeline as the visit.
+        ev = [("started", at, None)]
+        if ins.status == "completed":
+            ev.append(("completed", ins.completed_at, None))
+            hand = C.jload(ins.handoff, None)
+            if hand:
+                hand_at = min(ins.completed_at + timedelta(hours=20), now - timedelta(minutes=30))
+                hand["at"] = hand_at.isoformat()
+                ins.handoff = C.jdump(hand)
+                step = "mark_won" if stage == C.WON else hand.get("action")
+                ev.append(("handoff", hand_at, {"step": step}))
+        for action, at, detail in ev:
+            db.add(RoofingInspectionEvent(organization_id=org.id, inspection_id=ins.id, action=action,
+                                          actor_user_id=ins.inspector_user_id, report_number=ins.report_number,
+                                          detail=C.jdump(detail) if detail else None, at=at))
         for i, (fname, label, caption) in enumerate(pics):
             data = cache.get(fname) or cache.setdefault(fname, _bytes(fname))
             stored = files.put(org.id, "roofing_inspection", data, "image/jpeg", db=db)

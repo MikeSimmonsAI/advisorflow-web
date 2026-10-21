@@ -164,3 +164,30 @@
 }
 .rf .rf-page.ri, .rf .rf-page.ri-report-page { box-sizing: border-box; }
 .rf .ri-report__hist ul { margin: 0; padding-left: 18px; font-size: 12.5px; color: #3b4c66; display: grid; gap: 3px; }
+.rf .ri .rf-btn--primary:disabled { opacity: .55; cursor: not-allowed; box-shadow: none; }
+.rf .ri .ri-btn-wait:disabled { background: var(--rf-amber-soft); color: var(--rf-amber); border: 1.5px solid var(--rf-amber); opacity: 1; font-size: 13.5px; }
+.rf .ri-small { font-size: 12.5px; margin: 0; }
+/* ── phone dashboard: the work first, the numbers compact ─────────────── */
+.rf .ri-nextup { display: none; }
+@media (max-width: 640px) {
+  .rf .ri-nextup { display: grid; gap: 10px; margin-bottom: 12px; }
+  .rf .ri-nextup__card { display: grid; gap: 3px; padding: 14px; border-radius: var(--rf-radius); background: var(--rf-navy); color: #fff;
+    box-shadow: var(--rf-shadow); }
+  .rf .ri-nextup__card--next { background: var(--rf-white); color: var(--rf-ink); border: 1px solid var(--rf-line); border-left: 4px solid var(--rf-green); }
+  .rf .ri-nextup__card--follow { background: var(--rf-white); color: var(--rf-ink); border: 1px solid var(--rf-line); border-left: 4px solid var(--rf-violet); }
+  .rf .ri-nextup__k { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--rf-orange); }
+  .rf .ri-nextup__card b { font-size: 17px; }
+  .rf .ri-nextup__meta { font-size: 13px; opacity: .8; }
+  .rf .ri-nextup__btn { margin-top: 8px; min-height: 46px; justify-content: center; width: 100%; }
+  .rf .ri-strip { display: flex; overflow-x: auto; gap: 6px; margin: 0 -16px 14px; padding: 2px 16px 4px; scrollbar-width: none; }
+  .rf .ri-strip::-webkit-scrollbar { display: none; }
+  .rf .ri-strip__t { flex: 0 0 auto; display: flex; align-items: baseline; gap: 6px; padding: 8px 12px; border-top-width: 3px; box-shadow: none; }
+  .rf .ri-strip__t b { font-size: 16px; }
+  .rf .ri-strip__t span { font-size: 12px; white-space: nowrap; }
+  .rf .ri-dash .rf-page__head .rf-btn--primary { width: 100%; justify-content: center; }
+}
+
+/* Phone: property / inspection / roof read top-to-bottom instead of squeezed columns */
+@media (max-width: 520px) {
+  .rf .ri-report__grid { grid-template-columns: 1fr; gap: 10px; }
+}

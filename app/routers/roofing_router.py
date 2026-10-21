@@ -639,6 +639,7 @@ class HandoffIn(BaseModel):
     action: str
     estimate_amount: Optional[float] = None
     estimate_sent: bool = False
+    won_amount: Optional[float] = None
     scope: Optional[str] = Field(None, max_length=2000)
     follow_up_at: Optional[str] = None
     note: Optional[str] = Field(None, max_length=500)

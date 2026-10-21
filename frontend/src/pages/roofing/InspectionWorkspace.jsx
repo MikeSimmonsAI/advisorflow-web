@@ -124,6 +124,11 @@ export default function InspectionWorkspace() {
   const locked = ins.status === 'completed' || !ins.can_edit
   const H = ins.homeowner || {}
 
+  // Complete is only offered when the server holds every change. The server
+  // still refuses an incomplete report on its own (second layer).
+  const unsynced = saving !== 'saved'
+  const completeLabel = busy ? 'Completing\u2026' : saving === 'error' ? 'Save pending \u2014 reconnect to complete'
+    : unsynced ? 'Saving\u2026' : 'Complete report'
   const complete = async () => {
     setBusy(true); setMissing(null)
     // Never complete on top of changes the server hasn't got yet.
@@ -257,14 +262,16 @@ export default function InspectionWorkspace() {
                 const ok = await saver.current.settle()
                 say(ok ? 'Draft saved - you can come back to it any time' : 'Not saved yet - your changes are kept on this phone and will save when the connection is back', ok ? undefined : 'err')
               }}>Save draft</button>
-              <button className="rf-btn rf-btn--primary" disabled={busy} onClick={complete}>{busy ? 'Completing…' : 'Complete report'}</button>
+              <button className="rf-btn rf-btn--primary" disabled={busy || unsynced} aria-disabled={busy || unsynced}
+                title={unsynced ? 'Your latest changes are still saving' : undefined} onClick={complete}>{completeLabel}</button>
             </div>
           </div>
         )}
       <div className="ri-sticky">
         {ins.status !== 'completed' && !locked
-          ? <><span className={`ri-save--${saving}`}>{saving === 'saved' ? 'Draft saved' : saving === 'error' ? 'Not saved yet - retrying' : 'Saving…'}</span>
-            <button className="rf-btn rf-btn--primary" disabled={busy} onClick={complete}>Complete report</button></>
+          ? <><span className={`ri-save--${saving}`}>{saving === 'saved' ? 'Draft saved' : saving === 'error' ? 'Notes kept on this phone' : 'Saving\u2026'}</span>
+            <button className={`rf-btn rf-btn--primary ${saving === 'error' ? 'ri-btn-wait' : ''}`} disabled={busy || unsynced}
+              aria-disabled={busy || unsynced} onClick={complete}>{completeLabel}</button></>
           : <Link className="rf-btn rf-btn--primary" to={`${BASE}/${id}/report`}>View report</Link>}
       </div>
       {toast}
@@ -363,40 +370,67 @@ function Photos({ ins, setIns, locked, say, labels }) {
   )
 }
 
+/** What sales should do next, from the homeowner's REAL stage - never the
+ *  step already done. Recording an estimate as given never claims a document
+ *  was produced or sent; a follow-up is a reminder on the record, not a
+ *  calendar event. */
+export function nextStep(ins) {
+  const st = ins.opportunity?.stage
+  const amt = ins.opportunity?.estimate_amount
+  if (st === 'won' || st === 'lost') return { key: 'closed' }
+  if (st === 'estimate_sent') return { key: 'follow_estimate', label: 'Follow up on estimate', icon: 'calendar' }
+  if (ins.recommendation === 'none') return { key: 'close', label: 'Close - no work needed', icon: 'close' }
+  if (amt != null) return { key: 'record_given', label: 'Record estimate given', icon: 'check' }
+  return { key: 'estimate', label: 'Prepare estimate', icon: 'dollar' }
+}
+
 export function Handoff({ ins, setIns, say }) {
   const [open, setOpen] = useState(null)
   const [amt, setAmt] = useState(ins.opportunity?.estimate_amount ?? '')
+  const [won, setWon] = useState(ins.opportunity?.estimate_amount ?? '')
   const [scope, setScope] = useState(ins.recommendation_notes || '')
-  const [sent, setSent] = useState(false)
   const [when, setWhen] = useState('')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const st = ins.opportunity?.stage
-  const closed = st === 'won' || st === 'lost'
+  const next = nextStep(ins)
   const go = async (action, extra = {}) => {
     setBusy(true)
     try {
       const d = await api.post(`/roofing-ops/inspections/${ins.id}/handoff`, { action, ...extra })
       setIns((cur) => ({ ...cur, ...d, photos: cur.photos })); setOpen(null)
-      say({ prepare_estimate: extra.estimate_sent ? 'Estimate marked sent - homeowner moved to Estimate Sent' : 'Estimate saved on the homeowner',
-        schedule_follow_up: 'Follow-up scheduled', recommend_replacement: 'Replacement recommended',
-        recommend_repair: 'Repair recommended', close_no_work: 'Closed - no work needed' }[action])
+      say({
+        prepare_estimate: 'Estimate amount saved on the homeowner. Nothing was sent.',
+        record_estimate_given: 'Recorded as given - homeowner moved to Estimate Sent. Nothing was emailed from here.',
+        schedule_follow_up: 'Follow-up reminder saved on the homeowner (not added to a calendar).',
+        recommend_replacement: 'Replacement recommended', recommend_repair: 'Repair recommended',
+        close_no_work: 'Closed - no work needed', mark_won: 'Job won', mark_lost: 'Marked as declined',
+      }[action])
     } catch (e) { say(errText(e), 'err') } finally { setBusy(false) }
   }
+  const primary = () => setOpen({ estimate: 'estimate', record_given: 'given', follow_estimate: 'follow', close: 'close' }[next.key])
   const h = ins.handoff
   return (
     <section className="ri-sec ri-handoff">
       <h2 className="ri-sec__h"><span className="ri-sec__n done"><Icon name="arrow" size={14} /></span>Next step for sales</h2>
       <p className="rf-muted">The homeowner is at <b>{ins.opportunity?.stage_label}</b>
-        {ins.opportunity?.estimate_amount ? <> · estimate {money(ins.opportunity.estimate_amount, false)}</> : null}.
-        {h ? <> Last step: <b>{h.label}</b>.</> : null}</p>
-      {closed ? <p className="rf-muted">This job is closed. The report stays on the homeowner's record.</p> : (
+        {ins.opportunity?.estimate_amount != null ? <> · estimate {money(ins.opportunity.estimate_amount, false)}</> : null}
+        {ins.opportunity?.won_amount != null && st === 'won' ? <> · job {money(ins.opportunity.won_amount, false)}</> : null}.
+        {h ? <> Last recorded: <b>{h.label}</b>{h.follow_up_at ? ` (${localWhen(h.follow_up_at, { hour: undefined, minute: undefined })})` : ''}.</> : null}</p>
+      {next.key === 'closed' ? <p className="rf-muted">This job is closed. The report stays on the homeowner's record.</p> : (
         <div className="ri-actions">
-          <button className="rf-btn rf-btn--primary" onClick={() => setOpen('estimate')}><Icon name="dollar" size={18} />Prepare estimate</button>
-          <button className="rf-btn rf-btn--ghost" onClick={() => setOpen('follow')}><Icon name="calendar" size={18} />Schedule follow-up</button>
-          <button className="rf-btn rf-btn--ghost" disabled={busy} onClick={() => go('recommend_replacement')}><Icon name="roof" size={18} />Recommend replacement</button>
-          <button className="rf-btn rf-btn--ghost" disabled={busy} onClick={() => go('recommend_repair')}><Icon name="settings" size={18} />Recommend repair</button>
-          <button className="rf-btn rf-btn--ghost" onClick={() => setOpen('close')}><Icon name="close" size={18} />Close - no work needed</button>
+          <button className="rf-btn rf-btn--primary" onClick={primary}><Icon name={next.icon} size={18} />{next.label}</button>
+          {st === 'estimate_sent' && <>
+            <button className="rf-btn rf-btn--ghost" onClick={() => setOpen('won')}><Icon name="check" size={18} />Homeowner accepted</button>
+            <button className="rf-btn rf-btn--ghost" onClick={() => setOpen('lost')}><Icon name="close" size={18} />Homeowner declined</button>
+          </>}
+          {st !== 'estimate_sent' && <>
+            {next.key !== 'estimate' && <button className="rf-btn rf-btn--ghost" onClick={() => setOpen('estimate')}><Icon name="dollar" size={18} />{ins.opportunity?.estimate_amount != null ? 'Change estimate' : 'Prepare estimate'}</button>}
+            <button className="rf-btn rf-btn--ghost" onClick={() => setOpen('follow')}><Icon name="calendar" size={18} />Schedule follow-up</button>
+            {ins.recommendation !== 'replacement' && <button className="rf-btn rf-btn--ghost" disabled={busy} onClick={() => go('recommend_replacement')}><Icon name="roof" size={18} />Recommend replacement</button>}
+            {ins.recommendation !== 'repair' && <button className="rf-btn rf-btn--ghost" disabled={busy} onClick={() => go('recommend_repair')}><Icon name="settings" size={18} />Recommend repair</button>}
+            {next.key !== 'close' && <button className="rf-btn rf-btn--ghost" onClick={() => setOpen('close')}><Icon name="close" size={18} />Close - no work needed</button>}
+          </>}
         </div>
       )}
       {open === 'estimate' && (
@@ -407,18 +441,40 @@ export function Handoff({ ins, setIns, say }) {
           <label className="ri-lbl">Scope of work
             <textarea className="rf-textarea" rows={3} value={scope} onChange={(e) => setScope(e.target.value)} />
           </label>
-          <label className="rf-check"><input type="checkbox" checked={sent} onChange={(e) => setSent(e.target.checked)} />
-            <span><b>I've given this estimate to the homeowner</b><span className="rf-muted">Moves them to Estimate Sent. Nothing is emailed from here.</span></span></label>
+          <p className="rf-muted ri-small">Saves the amount and scope on the homeowner. No estimate document is created or sent.</p>
           <div className="ri-finish__btns"><button className="rf-btn rf-btn--ghost" onClick={() => setOpen(null)}>Cancel</button>
-            <button className="rf-btn rf-btn--primary" disabled={busy} onClick={() => go('prepare_estimate', { estimate_amount: amt === '' ? null : Number(amt), scope, estimate_sent: sent })}>Save estimate</button></div>
+            <button className="rf-btn rf-btn--primary" disabled={busy || amt === ''} onClick={() => go('prepare_estimate', { estimate_amount: Number(amt), scope })}>Save estimate</button></div>
+        </div>
+      )}
+      {open === 'given' && (
+        <div className="ri-form">
+          <p>Record that you gave the homeowner the <b>{money(ins.opportunity?.estimate_amount, false)}</b> estimate (in person, by email or by text from your own phone)?
+            They move to <b>Estimate Sent</b>. Nothing is emailed from here.</p>
+          <div className="ri-finish__btns"><button className="rf-btn rf-btn--ghost" onClick={() => setOpen(null)}>Cancel</button>
+            <button className="rf-btn rf-btn--primary" disabled={busy} onClick={() => go('record_estimate_given')}>Record estimate given</button></div>
         </div>
       )}
       {open === 'follow' && (
         <div className="ri-form">
           <label className="ri-lbl">Follow up on<input className="rf-input" type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} /></label>
-          <label className="ri-lbl">Note<input className="rf-input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Waiting on the adjuster" /></label>
+          <label className="ri-lbl">Note<input className="rf-input" value={note} onChange={(e) => setNote(e.target.value)} placeholder={st === 'estimate_sent' ? 'e.g. Call to answer questions on the estimate' : 'e.g. Waiting on the adjuster'} /></label>
+          <p className="rf-muted ri-small">Saved as a reminder on this homeowner and on the Inspections list. It is not added to a calendar and nothing is sent to the homeowner.</p>
           <div className="ri-finish__btns"><button className="rf-btn rf-btn--ghost" onClick={() => setOpen(null)}>Cancel</button>
-            <button className="rf-btn rf-btn--primary" disabled={busy || !when} onClick={() => go('schedule_follow_up', { follow_up_at: when, note })}>Schedule</button></div>
+            <button className="rf-btn rf-btn--primary" disabled={busy || !when} onClick={() => go('schedule_follow_up', { follow_up_at: when, note })}>Save reminder</button></div>
+        </div>
+      )}
+      {open === 'won' && (
+        <div className="ri-form">
+          <label className="ri-lbl">Job amount ($)<input className="rf-input" inputMode="decimal" value={won} onChange={(e) => setWon(e.target.value.replace(/[^\d.]/g, ''))} /></label>
+          <div className="ri-finish__btns"><button className="rf-btn rf-btn--ghost" onClick={() => setOpen(null)}>Cancel</button>
+            <button className="rf-btn rf-btn--primary" disabled={busy} onClick={() => go('mark_won', { won_amount: won === '' ? null : Number(won) })}>Mark job won</button></div>
+        </div>
+      )}
+      {open === 'lost' && (
+        <div className="ri-form">
+          <label className="ri-lbl">Why did they decline?<input className="rf-input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Went with a cheaper bid" /></label>
+          <div className="ri-finish__btns"><button className="rf-btn rf-btn--ghost" onClick={() => setOpen(null)}>Cancel</button>
+            <button className="rf-btn rf-btn--navy" disabled={busy || !note.trim()} onClick={() => go('mark_lost', { note })}>Mark declined</button></div>
         </div>
       )}
       {open === 'close' && (

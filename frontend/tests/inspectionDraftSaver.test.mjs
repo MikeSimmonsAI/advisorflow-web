@@ -93,3 +93,81 @@ test('a value the server rejects is kept but not retried forever', async () => {
   assert.equal(c.size, 0, 'no endless retry of a refused value')
   assert.deepEqual(s.pending, { roof_age_years: '999' })
 })
+
+// ── PR #285 review: the tab closes WHILE a save is in flight ────────────────
+function hangingPatch() {
+  const calls = []
+  const patch = (b) => new Promise(() => { calls.push(b) })   // never answers: the phone died first
+  return { patch, calls }
+}
+
+test('crash during an in-flight save keeps the in-flight field AND the newer edit', async () => {
+  const st = memStorage(); const c = clock(); const h = hangingPatch()
+  const a = createDraftSaver({ id: 'c1', storage: st, schedule: c.schedule, cancel: c.cancel, patch: h.patch })
+  a.set('notes', 'A')
+  a.flush()                                   // request for notes=A goes out and never comes back
+  await new Promise((r) => setImmediate(r))
+  assert.deepEqual(h.calls, [{ notes: 'A' }])
+  a.set('severity', 'high')                   // typed while notes=A is in flight
+  assert.deepEqual(JSON.parse(st.getItem('rf-insp-draft:c1')).fields, { notes: 'A', severity: 'high' },
+    'the recovery copy holds the unconfirmed in-flight field too')
+  a.dispose()                                 // tab killed
+
+  const server = {}
+  const b = createDraftSaver({ id: 'c1', storage: st, schedule: c.schedule, cancel: c.cancel,
+    patch: async (x) => { Object.assign(server, x); return server } })
+  assert.deepEqual(b.restore(), { notes: 'A', severity: 'high' })
+  assert.equal(await b.settle(), true)
+  assert.deepEqual(server, { notes: 'A', severity: 'high' }, 'both reach the server after reopening')
+  assert.equal(st.getItem('rf-insp-draft:c1'), null)
+})
+
+test('crash during flight with a NEWER value for the same field: the newer value wins', async () => {
+  const st = memStorage(); const c = clock(); const h = hangingPatch()
+  const a = createDraftSaver({ id: 'c2', storage: st, schedule: c.schedule, cancel: c.cancel, patch: h.patch })
+  a.set('notes', 'old text')
+  a.flush()
+  await new Promise((r) => setImmediate(r))
+  a.set('notes', 'new text typed during the save')
+  assert.deepEqual(JSON.parse(st.getItem('rf-insp-draft:c2')).fields, { notes: 'new text typed during the save' })
+  a.dispose()
+  const server = {}
+  const b = createDraftSaver({ id: 'c2', storage: st, schedule: c.schedule, cancel: c.cancel,
+    patch: async (x) => { Object.assign(server, x); return server } })
+  b.restore()
+  assert.equal(await b.settle(), true)
+  assert.equal(server.notes, 'new text typed during the save')
+})
+
+test('a confirmed save removes only what it confirmed', async () => {
+  const st = memStorage(); const c = clock(); let release
+  const server = {}
+  const s = createDraftSaver({ id: 'c3', storage: st, schedule: c.schedule, cancel: c.cancel,
+    patch: (x) => (release ? Promise.resolve(Object.assign(server, x))
+      : new Promise((res) => { release = () => { Object.assign(server, x); res(server) } })) })
+  s.set('notes', 'A')
+  const p = s.flush()
+  await new Promise((r) => setImmediate(r))
+  s.set('severity', 'high')
+  release(); await p
+  assert.deepEqual(JSON.parse(st.getItem('rf-insp-draft:c3')).fields, { severity: 'high' },
+    'notes confirmed and dropped from the phone copy; severity still waiting')
+  assert.notEqual(s.state, 'saved', 'never "saved" while severity is unconfirmed')
+  await c.runAll()
+  assert.equal(s.state, 'saved')
+  assert.equal(st.getItem('rf-insp-draft:c3'), null)
+  assert.deepEqual(server, { notes: 'A', severity: 'high' })
+})
+
+test('a failed save followed by rapid edits loses nothing', async () => {
+  const st = memStorage(); const c = clock(); let fail = true; const server = {}
+  const s = createDraftSaver({ id: 'c4', storage: st, schedule: c.schedule, cancel: c.cancel,
+    patch: async (x) => { if (fail) throw err(undefined); Object.assign(server, x); return server } })
+  s.set('notes', 'n1')
+  await c.runAll()                                      // fails
+  for (let i = 2; i <= 12; i += 1) s.set(i % 2 ? 'notes' : 'recommendation_notes', 'v' + i)
+  assert.deepEqual(JSON.parse(st.getItem('rf-insp-draft:c4')).fields, { notes: 'v11', recommendation_notes: 'v12' })
+  fail = false
+  assert.equal(await s.settle(), true)
+  assert.deepEqual(server, { notes: 'v11', recommendation_notes: 'v12' })
+})

@@ -55,7 +55,7 @@ export default function InspectionReport() {
 
         <section className="ri-report__grid">
           <div><h3>Property</h3><p><b>{H.name}</b><br />{H.address || 'No address on file'}<br />{[H.phone, H.email].filter(Boolean).join(' · ')}</p></div>
-          <div><h3>Inspection</h3><p>{r.inspection_type}<br />{r.scheduled_at ? localWhen(r.scheduled_at) : fmtDate(r.started_at)}<br />Inspector: {r.inspector_name || '—'}</p></div>
+          <div><h3>Inspection</h3><p>{r.inspection_type}<br />Inspected: {fmtDate(r.started_at || r.scheduled_at)}{r.scheduled_at && r.started_at && fmtDate(r.scheduled_at) !== fmtDate(r.started_at) ? <><br />Appointment: {localWhen(r.scheduled_at)}</> : null}<br />Inspector: {r.inspector_name || '—'}</p></div>
           <div><h3>Roof</h3><p>{r.roof_type || 'Type not recorded'}<br />{r.roof_age_years != null ? `${r.roof_age_years} years old` : 'Age not recorded'}{r.stories ? ` · ${r.stories} ${r.stories === 1 ? 'story' : 'stories'}` : ''}</p></div>
         </section>
 

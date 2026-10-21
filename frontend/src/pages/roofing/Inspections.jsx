@@ -60,7 +60,7 @@ export default function Inspections() {
   const shown = tab ? TABS.filter((t) => t[0] === tab) : TABS
 
   return (
-    <div className="rf-page">
+    <div className="rf-page ri-dash">
       <div className="rf-page__head">
         <div>
           <h1 className="rf-h1">Inspections</h1>
@@ -81,6 +81,7 @@ export default function Inspections() {
       {dash.loading && !dash.data && <Loading />}
       {dash.data && (
         <>
+          <NextUp B={B} act={act} busy={busy} />
           <div className="ri-strip" role="tablist" aria-label="Inspection status">
             <button role="tab" aria-selected={!tab} className={`ri-strip__t ${!tab ? 'on' : ''}`} onClick={() => setTab('')}>
               <b>{TABS.reduce((a, t) => a + (C[t[0]] || 0), 0)}</b><span>All</span>
@@ -139,6 +140,31 @@ export default function Inspections() {
       )}
       {toast}
     </div>
+  )
+}
+
+/** Phone only: the work, before the numbers. The report to finish first,
+ *  then the next visit on the calendar - each one tap away. */
+function NextUp({ B, act, busy }) {
+  const cont = (B.in_progress || [])[0] || (B.unfinished || [])[0]
+  const next = (B.upcoming || [])[0]
+  const follow = !cont && !next ? (B.next_step || [])[0] : null
+  const items = [cont && { k: 'cont', title: 'Finish this report', it: cont },
+    next && { k: 'next', title: 'Next inspection', it: next },
+    follow && { k: 'follow', title: 'Next sales step', it: follow }].filter(Boolean)
+  if (!items.length) return null
+  return (
+    <section className="ri-nextup" aria-label="Your next work">
+      {items.map(({ k, title, it }) => (
+        <div key={k} className={`ri-nextup__card ri-nextup__card--${k}`}>
+          <span className="ri-nextup__k">{title}</span>
+          <b>{it.name}</b>
+          <span className="ri-nextup__meta">{[it.when && localWhen(it.when), it.address].filter(Boolean).join(' \u00b7 ')}</span>
+          <button className="rf-btn rf-btn--primary ri-nextup__btn" disabled={busy && busy === (it.booking_link_id || it.lead_id)}
+            onClick={() => act(it)}>{it.action?.label || 'Open'}</button>
+        </div>
+      ))}
+    </section>
   )
 }
 

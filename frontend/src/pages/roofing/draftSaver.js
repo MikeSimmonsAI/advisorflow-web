@@ -19,16 +19,22 @@ export function createDraftSaver({ id, patch, storage, onState, onSaved, delay =
                                    schedule = (fn, ms) => setTimeout(fn, ms), cancel = (h) => clearTimeout(h) }) {
   const key = `rf-insp-draft:${id}`
   let pending = {}
+  let sending = null      // the body of the request in flight - unconfirmed until the server answers
   let inflight = null
   let timer = null
   let attempt = 0
   let state = 'saved'
   let lastError = null
 
-  const setState = (s, err) => { state = s; lastError = err || null; onState && onState(s, { error: lastError, pendingKeys: Object.keys(pending) }) }
+  const setState = (s, err) => { state = s; lastError = err || null; onState && onState(s, { error: lastError, pendingKeys: Object.keys(unconfirmed()) }) }
+  // THE RECOVERY COPY IS EVERYTHING NOT YET CONFIRMED: the request in flight
+  // AND whatever was typed after it, newer values winning. Closing the tab
+  // mid-request therefore loses neither (PR #285 review).
+  const unconfirmed = () => ({ ...(sending || {}), ...pending })
   const persist = () => {
     try {
-      if (Object.keys(pending).length) storage && storage.setItem(key, JSON.stringify({ fields: pending, at: Date.now() }))
+      const all = unconfirmed()
+      if (Object.keys(all).length) storage && storage.setItem(key, JSON.stringify({ fields: all, at: Date.now() }))
       else storage && storage.removeItem(key)
     } catch { /* storage full or blocked: the in-memory queue still holds it */ }
   }
@@ -49,11 +55,14 @@ export function createDraftSaver({ id, patch, storage, onState, onSaved, delay =
     const body = pending
     if (!Object.keys(body).length) { if (state !== 'error') setState('saved'); return state !== 'error' }
     pending = {}
+    sending = body
+    persist()
     setState('saving')
     inflight = Promise.resolve().then(() => patch(body))
     try {
       const doc = await inflight
       inflight = null
+      sending = null                        // confirmed: only now does it leave the recovery copy
       attempt = 0
       onSaved && onSaved(doc, Object.keys(body), { ...pending })
       persist()
@@ -61,6 +70,7 @@ export function createDraftSaver({ id, patch, storage, onState, onSaved, delay =
       return true
     } catch (err) {
       inflight = null
+      sending = null
       pending = { ...body, ...pending }     // newer typing wins over the failed copy
       persist()
       setState('error', err)
@@ -98,8 +108,8 @@ export function createDraftSaver({ id, patch, storage, onState, onSaved, delay =
     } catch { return null }
   }
 
-  function discard() { pending = {}; persist() }   // the report was completed elsewhere
-  function hasPending() { return Object.keys(pending).length > 0 || !!inflight }
+  function discard() { pending = {}; sending = null; persist() }   // the report was completed elsewhere
+  function hasPending() { return Object.keys(pending).length > 0 || !!inflight || !!sending }
   function dispose() { if (timer) cancel(timer); timer = null }
-  return { set, flush, settle, restore, discard, hasPending, dispose, get state() { return state }, get pending() { return { ...pending } } }
+  return { set, flush, settle, restore, discard, hasPending, dispose, get state() { return state }, get pending() { return { ...pending } }, get unconfirmed() { return unconfirmed() } }
 }

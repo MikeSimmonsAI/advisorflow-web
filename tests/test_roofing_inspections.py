@@ -212,3 +212,29 @@ def test_report_numbers_never_collide_and_history_survives_reopen(client, booked
     reopened = next(e for e in again["history"] if e["action"] == "reopened")
     assert reopened["detail"]["previously_completed_at"] == first["completed_at"]
     assert db.query(RoofingInspectionEvent).filter(RoofingInspectionEvent.inspection_id == ids[0]).count() == 4
+
+
+def test_estimate_steps_follow_the_stage(client, booked):
+    db, rep, l, b = booked["db"], booked["a_rep"], booked["lead"], booked["booking"]
+    iid = client.post("/roofing-ops/inspections", json={"lead_id": l.id, "booking_link_id": b.id}, headers=h(db, rep)).json()["id"]
+    _ready(client, db, rep, iid)
+    client.post("/roofing-ops/inspections/%s/complete" % iid, headers=h(db, rep))
+    hand = lambda body: client.post("/roofing-ops/inspections/%s/handoff" % iid, headers=h(db, rep), json=body)  # noqa: E731
+    # can't win a job before an estimate was given
+    assert hand({"action": "mark_won"}).status_code == 409
+    r = hand({"action": "prepare_estimate", "estimate_amount": 9800}).json()
+    assert r["opportunity"]["stage"] == "inspected" and r["handoff"]["label"] == "Estimate prepared"
+    assert r["next_action"] == "send_estimate"
+    dash = client.get("/roofing-ops/inspections", headers=h(db, rep)).json()
+    assert next(x for x in dash["buckets"]["next_step"] if x["inspection_id"] == iid)["action"]["label"] == "Record estimate given"
+    r = hand({"action": "record_estimate_given"}).json()
+    assert r["opportunity"]["stage"] == "estimate_sent" and r["handoff"]["label"] == "Estimate given to homeowner"
+    dash = client.get("/roofing-ops/inspections", headers=h(db, rep)).json()
+    assert next(x for x in dash["buckets"]["next_step"] if x["inspection_id"] == iid)["action"]["label"] == "Follow up on estimate"
+    r = hand({"action": "schedule_follow_up", "follow_up_at": "2026-11-02T09:00", "note": "Questions on scope"}).json()
+    assert r["opportunity"]["stage"] == "estimate_sent"
+    assert hand({"action": "mark_lost"}).status_code == 400                     # a reason is required
+    r = hand({"action": "mark_won", "won_amount": 9500}).json()
+    assert r["opportunity"]["stage"] == "won" and r["opportunity"]["won_amount"] == 9500
+    acts = [(e["action"], (e["detail"] or {}).get("step")) for e in r["history"]]
+    assert ("handoff", "mark_won") in acts and ("handoff", "schedule_follow_up") in acts
