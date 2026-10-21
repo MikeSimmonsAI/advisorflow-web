@@ -119,6 +119,7 @@ const RoofingLeads = lazyPage(() => import('./pages/roofing/LeadsData'))
 const RoofingHomeowner = lazyPage(() => import('./pages/roofing/Homeowner'))
 const RoofingSettings = lazyPage(() => import('./pages/roofing/Settings'))
 const RoofingLanding = lazyPage(() => import('./pages/roofing/RoofingLanding'))
+const RoofingDemo = lazyPage(() => import('./pages/roofing/demo/DemoApp'))
 const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
 const DealOperationsClosing = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsClosing })))
 const DealOperationsDispositions = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsDispositions })))
@@ -1478,6 +1479,8 @@ export default function App() {
           <Route path="settings" element={<RoofingSettings />} />
         </Route>
         <Route path="/roofing" element={<RoofingLanding />} />
+        {/* PUBLIC interactive demo - fictional data only, no login, no Roofing API. */}
+        <Route path="/roofing/demo/*" element={<RoofingDemo />} />
         <Route path="/program/import" element={<Navigate to="/program/import/new" replace />} />
         <Route path="/program/import/new" element={<ProtectedRoute bare><SciImportEntry /></ProtectedRoute>} />
         <Route path="/program/import/:batchId" element={<ProtectedRoute bare><SciImportEntry /></ProtectedRoute>} />
