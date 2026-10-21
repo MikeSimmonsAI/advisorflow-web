@@ -31,7 +31,7 @@ concurrency:
       contains(github.event.comment.body, 'BRANCH: feature/atlantis-development') && 'atlantis' ||
       contains(github.event.comment.body, 'BRANCH: feature/roofing-development') && 'roofing' ||
       (contains(github.event.comment.body, 'BRANCH: platform-dev') ||
-       contains(github.event.comment.body, 'BRANCH: feature/platform-command-center,feature/bookaboost-wholesale,feature/ai-workforce-launch')) && 'platform' ||
+       contains(github.event.comment.body, 'BRANCH: feature/platform-command-center')) && 'platform' ||
       'unrecognized'
     }}
   cancel-in-progress: false   # never interrupt a lane's active worker
