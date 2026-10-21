@@ -16,7 +16,7 @@ os.environ.update({
     "DATABASE_URL": "sqlite:///" + DB,
     "JWT_SECRET": "local-only-secret-not-used-anywhere-32chars!!",
     "BOOKING_BASE_URL": "http://127.0.0.1:4173",
-    "CORS_EXTRA_ORIGINS": "http://127.0.0.1:4173,http://localhost:4173",
+    "CORS_EXTRA_ORIGINS": "http://127.0.0.1:4173,http://localhost:4173,http://127.0.0.1:4174",
     "WEB_PUSH_AUTO_KEYS": "0",
     "RELAY_ENABLED": "0",
 })

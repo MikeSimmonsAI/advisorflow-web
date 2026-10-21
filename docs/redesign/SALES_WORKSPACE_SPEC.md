@@ -83,6 +83,61 @@ activity feed. Covered by `tests/test_sales_my_day_scope.py` (20 deals worked
 - new response keys `scope`, `is_manager`, `worked_today`
 - `_visible_sales_appointments(..., personal=False)` — can only narrow
 
+## Final refinements (2026-10-21, master prompt 11:20 CT)
+
+**Pipeline** — one **+ Add Lead** (header); the per-column buttons are gone. Every
+card shows its exact stage (Prospect, Contacted / Qualified, Discovery, Demo Build,
+Demo / Proposal, Closing, Won, Onboarding, Live), so a Closing deal under *Demo
+Scheduled* is never read as "a demo is booked". The footnote names which stages
+each column groups. *Proposal, not implemented:* if Mike wants the column title
+itself to be literal, rename "Demo Scheduled" → "Demo & Closing" — a one-word
+label change, held for his approval because it departs from the approved image.
+
+**Follow Ups** — filters **Due Now | Overdue | Today | Completed**, each with its
+count; heading **People to Contact Now**, "Overdue first, then today's follow-ups."
+- Due Now = open deals due today or earlier = Overdue + Today (never overlapping).
+- Overdue / Today use the server's own rule (`workspace_time.is_overdue` /
+  `is_due_by_today`) in the **sales team's time zone** — same for the list, the
+  sidebar badge, My Day and Reports.
+- Completed = server `worked_today` (whole day, any status — includes a lead closed
+  as Lost after today's call).
+- Counts ignore the search box; the badge refreshes after any save.
+
+**Call / Text** — Call hands the number to the device dialer (`tel:`) and opens
+*What happened?*; the click records nothing. The panel shows the number with
+**Copy number** for a desktop with no dialer. Text opens the device messages app
+(`sms:`); opening it records nothing; only **I sent it — add to history** writes
+"Text sent (confirmed by rep)". Delivery is never claimed (EvoSys does not send
+these). Call/Text appear only when the lead has a usable number.
+
+**Call outcomes**
+| Choice | What it suggests (editable) | What is saved |
+|---|---|---|
+| Connected | Follow up, +2 days | note + next step; Prospect → Contacted |
+| No Answer | Try calling again, +1 day | note + retry date; stage unchanged |
+| Left Voicemail | Call back, +2 days (optional) | note (+ follow-up if kept) |
+| Interested | Book a demo, +1 day; **Save & book a demo** | note + next step; Prospect → Contacted |
+| Not Interested | nothing — rep must choose | **Close as Lost**: stage lost, loss reason, next action and date cleared. **Follow up later**: rep-chosen action + date required; stage kept |
+| Book a Meeting | Book the meeting, today | "agreed to a meeting (not booked yet)"; opens the booking form. The scheduler alone logs a booking |
+
+**Booking** — one booking per click (client guard; the server's clash check is
+the second line). The confirmation reports the invitation's real state from the
+booking response (handed to the mail service / not sent yet / no email on the lead).
+
+**Dialogs** — focus moves inside on open, Tab stays inside, Escape closes, focus
+returns to the button that opened it.
+
+## Do Not Contact — dependency, not built
+
+The only authoritative suppression list, `SuppressionEntry`
+(`app/models/models.py`, enforced in `app/services/compliance_service.py`), is keyed
+to a **customer organization** and covers tenant leads. Sales prospects belong to a
+**brand sales org** and have no opt-out record, and nothing in the sales workspace
+sends messages through a provider (calls and texts go through the rep's own phone).
+Per the brief, no front-end-only flag was added. Supporting "Do not contact" for
+sales prospects needs a shared backend change (an opt-out record the scheduler's
+invitation sender and any future outreach both honour), coordinated on #239.
+
 ## Known limits
 
 - Booking still emails the prospect the usual invitation, exactly as before.

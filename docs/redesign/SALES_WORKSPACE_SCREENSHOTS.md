@@ -1,97 +1,121 @@
 # Sales Workspace redesign — screenshots (Lane F, PR #287)
 
-Real browser captures of the app running locally against synthetic test records. *Before* = unmodified `main`; *After* = `redesign/sales-workspace-v1`.
+Real headless-Chromium captures of the app running locally against synthetic test records (no production data). *Before* = unmodified `main`; *After* = `redesign/sales-workspace-v1`. Refreshed 2026-10-21 after the final refinements.
 
-## My Day
+## Final review set (desktop)
 
-| Before — Old My Day | After — desktop |
-|---|---|
-| ![Before: My Day](screenshots/sales-workspace/before-my_day.png) | ![After: My Day](screenshots/sales-workspace/my_day-desktop.png) |
+### 1. My Day — salesperson
 
-| Tablet | Phone |
-|---|---|
-| ![My Day tablet](screenshots/sales-workspace/my_day-tablet.png) | ![My Day phone](screenshots/sales-workspace/my_day-mobile.png) |
+![1. My Day — salesperson](screenshots/sales-workspace/my_day-desktop.png)
 
-## Follow Ups
+### 2. My Day — manager (Your numbers vs Your team)
 
-| Before — Old Prospects list | After — desktop |
-|---|---|
-| ![Before: Follow Ups](screenshots/sales-workspace/before-prospects.png) | ![After: Follow Ups](screenshots/sales-workspace/follow_ups-desktop.png) |
+![2. My Day — manager (Your numbers vs Your team)](screenshots/sales-workspace/e2e-11-manager-my-day.png)
 
-| Tablet | Phone |
-|---|---|
-| ![Follow Ups tablet](screenshots/sales-workspace/follow_ups-tablet.png) | ![Follow Ups phone](screenshots/sales-workspace/follow_ups-mobile.png) |
+### 3. Follow Ups — Due Now | Overdue | Today | Completed
 
-## Lead Details
+![3. Follow Ups — Due Now | Overdue | Today | Completed](screenshots/sales-workspace/follow_ups-desktop.png)
 
-| Before — Old opportunity record | After — desktop |
-|---|---|
-| ![Before: Lead Details](screenshots/sales-workspace/before-opportunity.png) | ![After: Lead Details](screenshots/sales-workspace/lead_details-desktop.png) |
+### 4. Lead Details
 
-| Tablet | Phone |
-|---|---|
-| ![Lead Details tablet](screenshots/sales-workspace/lead_details-tablet.png) | ![Lead Details phone](screenshots/sales-workspace/lead_details-mobile.png) |
+![4. Lead Details](screenshots/sales-workspace/lead_details-desktop.png)
 
-## Book a Demo
+### 5. Book a Demo
 
-| Before — Old Team Calendar (booking lived here) | After — desktop |
-|---|---|
-| ![Before: Book a Demo](screenshots/sales-workspace/before-calendar.png) | ![After: Book a Demo](screenshots/sales-workspace/book_a_demo-desktop.png) |
+![5. Book a Demo](screenshots/sales-workspace/book_a_demo-desktop.png)
 
-| Tablet | Phone |
-|---|---|
-| ![Book a Demo tablet](screenshots/sales-workspace/book_a_demo-tablet.png) | ![Book a Demo phone](screenshots/sales-workspace/book_a_demo-mobile.png) |
+### 6. Pipeline — one Add Lead, exact stage on every card
 
-## Pipeline
+![6. Pipeline — one Add Lead, exact stage on every card](screenshots/sales-workspace/pipeline-desktop.png)
 
-| Before — Old nine-stage board | After — desktop |
-|---|---|
-| ![Before: Pipeline](screenshots/sales-workspace/before-pipeline.png) | ![After: Pipeline](screenshots/sales-workspace/pipeline-desktop.png) |
+### 7. Appointments
 
-| Tablet | Phone |
-|---|---|
-| ![Pipeline tablet](screenshots/sales-workspace/pipeline-tablet.png) | ![Pipeline phone](screenshots/sales-workspace/pipeline-mobile.png) |
+![7. Appointments](screenshots/sales-workspace/appointments-desktop.png)
 
-## Appointments
+### 8. Post-call "What happened?"
 
-| Before — Old Team Calendar | After — desktop |
-|---|---|
-| ![Before: Appointments](screenshots/sales-workspace/before-calendar.png) | ![After: Appointments](screenshots/sales-workspace/appointments-desktop.png) |
+![8. Post-call "What happened?"](screenshots/sales-workspace/e2e-03-what-happened.png)
 
-| Tablet | Phone |
-|---|---|
-| ![Appointments tablet](screenshots/sales-workspace/appointments-tablet.png) | ![Appointments phone](screenshots/sales-workspace/appointments-mobile.png) |
+### 9. Not Interested → Close as Lost / Follow up later
+
+![9. Not Interested → Close as Lost / Follow up later](screenshots/sales-workspace/e2e-09-not-interested-options.png)
+
+### Reports
+
+![Reports](screenshots/sales-workspace/reports-desktop.png)
+
+## Phone (390 px) — main workflows
+
+| My Day | Follow Ups | Lead Details |
+|---|---|---|
+| ![](screenshots/sales-workspace/my_day-mobile.png) | ![](screenshots/sales-workspace/follow_ups-mobile.png) | ![](screenshots/sales-workspace/lead_details-mobile.png) |
+
+| Book a Demo | Pipeline | Appointments |
+|---|---|---|
+| ![](screenshots/sales-workspace/book_a_demo-mobile.png) | ![](screenshots/sales-workspace/pipeline-mobile.png) | ![](screenshots/sales-workspace/appointments-mobile.png) |
+
+| "What happened?" (Not Interested) |
+|---|
+| ![](screenshots/sales-workspace/e2e-m-what-happened.png) |
+
+## Tablet (820 px)
+
+| My Day | Follow Ups | Lead Details |
+|---|---|---|
+| ![](screenshots/sales-workspace/my_day-tablet.png) | ![](screenshots/sales-workspace/follow_ups-tablet.png) | ![](screenshots/sales-workspace/lead_details-tablet.png) |
+
+| Book a Demo | Pipeline | Appointments |
+|---|---|---|
+| ![](screenshots/sales-workspace/book_a_demo-tablet.png) | ![](screenshots/sales-workspace/pipeline-tablet.png) | ![](screenshots/sales-workspace/appointments-tablet.png) |
 
 ## Walkthrough moments
 
-### Reports (personal)
+### Follow Ups after login (Due Now = badge)
 
-![Reports (personal)](screenshots/sales-workspace/reports-desktop.png)
-
-### Follow Ups → Completed
-
-![Follow Ups → Completed](screenshots/sales-workspace/e2e-02b-follow-ups-completed.png)
-
-### "What happened?" after a call
-
-!["What happened?" after a call](screenshots/sales-workspace/e2e-03-what-happened.png)
+![Follow Ups after login (Due Now = badge)](screenshots/sales-workspace/e2e-02-follow-ups-due-now.png)
 
 ### Book a Demo with an open time picked
 
 ![Book a Demo with an open time picked](screenshots/sales-workspace/e2e-04-book-a-demo.png)
 
+### Booked — real invitation status
+
+![Booked — real invitation status](screenshots/sales-workspace/e2e-05-booked.png)
+
 ### Booked demo on Appointments
 
 ![Booked demo on Appointments](screenshots/sales-workspace/e2e-06-appointments.png)
 
-### Deal in Demo Scheduled
+### Pipeline after booking
 
-![Deal in Demo Scheduled](screenshots/sales-workspace/e2e-07-pipeline.png)
+![Pipeline after booking](screenshots/sales-workspace/e2e-07-pipeline.png)
 
-### Won → onboarding hand-off
+### Won → existing Sold / Onboarding hand-off
 
-![Won → onboarding hand-off](screenshots/sales-workspace/e2e-08-won-handoff.png)
+![Won → existing Sold / Onboarding hand-off](screenshots/sales-workspace/e2e-08-won-handoff.png)
 
-### Manager My Day — Your numbers vs Your team
+### Completed — every lead worked today
 
-![Manager My Day — Your numbers vs Your team](screenshots/sales-workspace/e2e-11-manager-my-day.png)
+![Completed — every lead worked today](screenshots/sales-workspace/e2e-10-follow-ups-completed.png)
+
+## Before (current main) for comparison
+
+### Before — My Day
+
+![Before: My Day](screenshots/sales-workspace/before-my_day.png)
+
+### Before — Prospects list
+
+![Before: Prospects list](screenshots/sales-workspace/before-prospects.png)
+
+### Before — Opportunity record
+
+![Before: Opportunity record](screenshots/sales-workspace/before-opportunity.png)
+
+### Before — Nine-stage pipeline
+
+![Before: Nine-stage pipeline](screenshots/sales-workspace/before-pipeline.png)
+
+### Before — Team Calendar
+
+![Before: Team Calendar](screenshots/sales-workspace/before-calendar.png)
