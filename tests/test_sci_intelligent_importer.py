@@ -443,3 +443,119 @@ def test_load_source_existing_callers_unchanged(client, db_session, sample_org):
                     files={"file": ("x.csv", _csv(NEW[:2]), "text/csv")}, data={"apply": "true"})
     assert r.status_code == 200 and r.json()["promotion"]["created"] == 2
     assert "stage_only" not in r.json()
+
+
+# ── review fixes ────────────────────────────────────────────────────────────
+
+def test_load_promotes_only_this_batchs_families(client, sci):
+    """Batch A staged only; loading batch B must not make A's rows live."""
+    db, org, h = sci["db"], sci["org"], sci["mh"]
+    a, _pv, _rows = _through_review(client, h, _csv(NEW[:2]), skip=())          # N001, N002
+    assert client.post("/program/leads/import/batches/%s/load" % a, headers=h,
+                       json={"mode": "stage"}).json()["report"]["staged"] == 2
+    b, _pv, _rows = _through_review(client, h, _csv([NEW[3]]), skip=())         # N004
+    r = client.post("/program/leads/import/batches/%s/load" % b, headers=h, json={"mode": "load"})
+    assert r.status_code == 200, r.text
+    assert r.json()["report"]["families_created"] == 1
+    recs = {x.source_lead_id: x for x in db.query(ProgramSourceRecord).filter_by(organization_id=org.id)}
+    assert recs["N004"].lead_id and not recs["N001"].lead_id and not recs["N002"].lead_id
+    r = client.post("/program/leads/import/batches/%s/load" % a, headers=h, json={"mode": "load"})
+    assert r.status_code == 200 and r.json()["report"]["families_created"] == 2
+
+
+def test_staged_batch_is_frozen(client, sci):
+    db, org, h = sci["db"], sci["org"], sci["mh"]
+    bid, pv, rows = _through_review(client, h, _csv(NEW[:2]), skip=())
+    client.post("/program/leads/import/batches/%s/load" % bid, headers=h, json={"mode": "stage"})
+    msg = "already staged in SCI - upload again"
+    calls = [
+        client.patch("/program/intake/batches/%s/rows/%s" % (bid, rows[0]["id"]), headers=h, json={"skip": True}),
+        client.post("/program/intake/batches/%s/rows/bulk" % bid, headers=h,
+                    json={"category": "status:ready", "skip": True}),
+        client.put("/program/intake/batches/%s/mapping" % bid, headers=h, json={"mapping": {}}),
+        client.post("/program/intake/batches/%s/analyze" % bid, headers=h),
+        client.post("/program/intake/batches/%s/cancel" % bid, headers=h),
+    ]
+    for r in calls:
+        assert r.status_code == 409 and msg in r.json()["detail"], r.text
+    # The rows are as staged; loading makes exactly those live.
+    r = client.post("/program/leads/import/batches/%s/load" % bid, headers=h, json={"mode": "load"})
+    assert r.status_code == 200 and r.json()["report"]["families_created"] == 2
+
+
+def test_crm_intake_routes_refuse_sci_batches(client, sci):
+    db, org, ah = sci["db"], sci["org"], sci["ah"]
+    org.enabled_features = None
+    db.commit()
+    bid, _pv, rows = _through_review(client, ah, _csv(NEW), skip=())
+    dnc_row = next(r for r in rows if r["source_record_id"] == "E001")
+    assert dnc_row["intake_status"] == "blocked"
+    listed = client.get("/intake/batches", headers=ah).json()
+    assert bid not in {b["id"] for b in listed["batches"]}
+    refusal = "SCI files are loaded through SCI"
+    for r in (client.get("/intake/batches/%s" % bid, headers=ah),
+              client.get("/intake/batches/%s/preview" % bid, headers=ah),
+              client.get("/intake/batches/%s/rows" % bid, headers=ah),
+              client.patch("/intake/batches/%s/rows/%s" % (bid, dnc_row["id"]), headers=ah,
+                           json={"approve": True}),
+              client.post("/intake/batches/%s/rows/bulk" % bid, headers=ah,
+                          json={"category": "status:blocked", "approve": True}),
+              client.put("/intake/batches/%s/mapping" % bid, headers=ah, json={"mapping": {}}),
+              client.post("/intake/batches/%s/analyze" % bid, headers=ah),
+              client.get("/intake/batches/%s/rollback-plan" % bid, headers=ah),
+              client.post("/intake/batches/%s/cancel" % bid, headers=ah),
+              client.get("/intake/batches/%s/audit" % bid, headers=ah)):
+        assert r.status_code == 409 and r.json()["detail"] == refusal, r.text
+    row = client.get("/program/intake/batches/%s/rows?category=status:blocked" % bid,
+                     headers=ah).json()["rows"][0]
+    assert row["intake_status"] == "blocked"                       # the DNC row is unchanged
+    b = db.query(ImportBatch).filter_by(id=bid).one()
+    assert b.status == "ready_for_review"
+    # The CRM ledger still lists CRM batches.
+    r = client.post("/intake/batches", headers=ah,
+                    files={"file": ("crm.csv", _csv(NEW[:1]), "text/csv")}, data={"source": "csv"})
+    assert r.status_code == 200
+    assert r.json()["id"] in {b["id"] for b in client.get("/intake/batches", headers=ah).json()["batches"]}
+
+
+def test_undecided_duplicates_block_the_load(client, sci):
+    from app.models.import_models import ImportStagedRow
+    db, org, h = sci["db"], sci["org"], sci["mh"]
+    bid, _pv, rows = _through_review(client, h, _csv(NEW[:2]), skip=())
+    row = db.query(ImportStagedRow).filter_by(batch_id=bid, source_record_id="N002").one()
+    row.intake_status, row.duplicate_resolution = "needs_review", "review"
+    db.commit()
+    p = client.get("/program/leads/import/batches/%s/sci-preview" % bid, headers=h).json()
+    assert p["can_load"] is False and any("possible duplicate" in x for x in p["blockers"])
+    for mode in ("stage", "load"):
+        r = client.post("/program/leads/import/batches/%s/load" % bid, headers=h, json={"mode": mode})
+        assert r.status_code == 422, r.text
+    r = client.patch("/program/intake/batches/%s/rows/%s" % (bid, row.id), headers=h,
+                     json={"duplicate_resolution": "keep_separate"})
+    assert r.status_code == 200, r.text
+    p = client.get("/program/leads/import/batches/%s/sci-preview" % bid, headers=h).json()
+    assert p["can_load"] is True
+
+
+def test_sci_upload_capped_at_10mb(client, sci):
+    big = _csv(NEW[:1]) + b"x" * (10 * 1024 * 1024)
+    r = _upload(client, sci["mh"], big)
+    assert r.status_code == 413
+
+
+def test_stale_committing_load_can_be_retried(client, sci):
+    from datetime import datetime, timedelta
+    db, org, h = sci["db"], sci["org"], sci["mh"]
+    bid, _pv, _rows = _through_review(client, h, _csv(NEW[:2]), skip=())
+    b = db.query(ImportBatch).filter_by(id=bid).one()
+    b.status, b.heartbeat_at = "committing", datetime.utcnow() - timedelta(minutes=2)
+    db.commit()
+    r = client.post("/program/leads/import/batches/%s/load" % bid, headers=h, json={"mode": "load"})
+    assert r.status_code == 409 and "already being loaded" in r.json()["detail"]
+    b.heartbeat_at = datetime.utcnow() - timedelta(minutes=20)        # the load was killed
+    db.commit()
+    r = client.post("/program/leads/import/batches/%s/load" % bid, headers=h, json={"mode": "load"})
+    assert r.status_code == 200, r.text
+    assert r.json()["report"]["families_created"] == 2
+    db.refresh(b)
+    assert b.status == "committed"

@@ -571,8 +571,9 @@ def test_J_unreadable_calendar_hands_off_and_never_invents_a_time(journey, monke
     conv = _conv(db, lead)
     assert conv.state == "human" and "no times to offer" in conv.handoff_reason
     assert A.offered(conv) == [] and not _bookings(db, lead)
-    text = line.to(lead, SS.SCI_SETTER)[-1]["body"]
-    assert not S._CLOCK.search(text) and "{TIMES}" not in text
+    # Oct 20 (09a31ade): with no times to offer the setter sends the family
+    # NOTHING - a person picks it up; no filler text, no invented time.
+    assert line.to(lead, SS.SCI_SETTER) == []
     owner = _owner_texts(j)
     assert len(owner) == 1 and owner[0].startswith("SCI Needs Attention | Ollie Testcase")
 

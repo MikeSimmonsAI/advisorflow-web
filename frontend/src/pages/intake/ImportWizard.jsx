@@ -28,6 +28,8 @@ const PIPELINE = [['parsing', 'Parsing'], ['normalizing', 'Normalizing'],
                   ['classifying', 'Classifying'], ['analyzing', 'Analyzing'],
                   ['ready_for_review', 'Ready for Review']]
 const SCI_LEADS = '/program?tab=leads'
+// The server's answer when the CRM Import Center asks for an SCI batch.
+const SCI_REFUSAL = 'SCI files are loaded through SCI'
 
 /**
  * target   'crm' (default): the Import Center at /imports - unchanged.
@@ -102,14 +104,14 @@ export default function ImportWizard({ target = 'crm', basePath = '/imports', on
   }
 
   // A batch made by the SCI importer is loaded by SCI, never by the CRM commit.
-  if (!sci && batch?.destination === 'sci') {
+  if (!sci && (batch?.destination === 'sci' || err === SCI_REFUSAL)) {
     return (
       <div className="ic-page">
         <h1 className="page-title">Import Center</h1>
         <div className="ic-blocker">
           <div className="ic-blocker-title">This file belongs to SCI</div>
-          <p>{batch.batch_code} was uploaded with SCI's Import Leads. It is loaded through SCI, not into the CRM.</p>
-          <button className="btn btn--primary" onClick={() => navigate(`/program/import/${batch.id}`)}>Open it in SCI Import Leads</button>
+          <p>{batch?.batch_code || 'This batch'} was uploaded with SCI's Import Leads. It is loaded through SCI, not into the CRM.</p>
+          <button className="btn btn--primary" onClick={() => navigate(`/program/import/${batch?.id || batchId}`)}>Open it in SCI Import Leads</button>
         </div>
       </div>
     )

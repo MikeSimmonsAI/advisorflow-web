@@ -41,7 +41,7 @@ from app.deps import get_db, require_tenant_user
 from app.models.import_models import ImportBatch
 from app.models.models import User
 from app.routers import intake_router as IR
-from app.routers.program_router import _sci_batch, _sci_importer
+from app.routers.program_router import _sci_batch, _sci_importer, sci_batch_frozen
 from app.services.intake import audit
 from app.services.intake import context as CTX
 from app.services.intake import engine as ENG
@@ -57,9 +57,18 @@ def _guard(db: Session, user: User):
     return prog, ctx
 
 
-def _batch(db: Session, user: User, batch_id: str) -> ImportBatch:
+def _batch(db: Session, user: User, batch_id: str, *, edit: bool = False) -> ImportBatch:
     prog, _ctx = _guard(db, user)
-    return _sci_batch(db, prog, batch_id)
+    b = _sci_batch(db, prog, batch_id)
+    if edit and sci_batch_frozen(b):
+        # What SCI holds is what was staged; changing the rows here afterwards
+        # would make this batch say something SCI never received.
+        raise HTTPException(status_code=409,
+                            detail="This file is already staged in SCI - upload again to change it.")
+    return b
+
+
+MAX_SCI_UPLOAD = 10 * 1024 * 1024          # SCI's own limit (POST /program/leads/import)
 
 
 @router.get("/context")
@@ -72,7 +81,8 @@ def context(db: Session = Depends(get_db), user: User = Depends(require_tenant_u
 @router.get("/fields")
 def fields(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     _guard(db, user)
-    return IR.get_fields(db=db, user=user)
+    with IR.sci_call():
+        return IR.get_fields(db=db, user=user)
 
 
 @router.get("/batches")
@@ -95,7 +105,9 @@ async def upload(file: UploadFile = File(...), list_name: Optional[str] = Form(N
                  source_detail: Optional[str] = Form(None),
                  db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     _prog, ctx = _guard(db, user)
-    content = await file.read(ENG.MAX_UPLOAD_BYTES + 1)
+    content = await file.read(MAX_SCI_UPLOAD + 1)
+    if len(content) > MAX_SCI_UPLOAD:
+        raise HTTPException(status_code=413, detail="Files up to 10 MB.")
     try:
         b = ENG.create_batch(db, ctx, content=content, filename=file.filename or "upload.csv",
                              source=ENG.SCI_SOURCE_SYSTEM, source_detail=source_detail,
@@ -115,33 +127,38 @@ async def upload(file: UploadFile = File(...), list_name: Optional[str] = Form(N
 @router.get("/batches/{batch_id}")
 def get_batch(batch_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     _batch(db, user, batch_id)
-    return IR.get_batch(batch_id, db=db, user=user)
+    with IR.sci_call():
+        return IR.get_batch(batch_id, db=db, user=user)
 
 
 @router.get("/batches/{batch_id}/preview")
 def preview(batch_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     _batch(db, user, batch_id)
-    return IR.preview(batch_id, db=db, user=user)
+    with IR.sci_call():
+        return IR.preview(batch_id, db=db, user=user)
 
 
 @router.put("/batches/{batch_id}/mapping")
 def save_mapping(batch_id: str, body: IR.MappingIn, db: Session = Depends(get_db),
                  user: User = Depends(require_tenant_user)):
-    _batch(db, user, batch_id)
-    return IR.save_mapping(batch_id, body, db=db, user=user)
+    _batch(db, user, batch_id, edit=True)
+    with IR.sci_call():
+        return IR.save_mapping(batch_id, body, db=db, user=user)
 
 
 @router.get("/batches/{batch_id}/classification-values")
 def classification_values(batch_id: str, db: Session = Depends(get_db),
                           user: User = Depends(require_tenant_user)):
     _batch(db, user, batch_id)
-    return IR.classification_values(batch_id, db=db, user=user)
+    with IR.sci_call():
+        return IR.classification_values(batch_id, db=db, user=user)
 
 
 @router.post("/batches/{batch_id}/analyze", status_code=202)
 def analyze(batch_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
-    _batch(db, user, batch_id)
-    return IR.analyze(batch_id, db=db, user=user)
+    _batch(db, user, batch_id, edit=True)
+    with IR.sci_call():
+        return IR.analyze(batch_id, db=db, user=user)
 
 
 @router.get("/batches/{batch_id}/rows")
@@ -149,31 +166,36 @@ def rows(batch_id: str, category: Optional[str] = Query(None), search: Optional[
          page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=200),
          db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     _batch(db, user, batch_id)
-    return IR.list_rows(batch_id, category=category, search=search, page=page,
-                        per_page=per_page, db=db, user=user)
+    with IR.sci_call():
+        return IR.list_rows(batch_id, category=category, search=search, page=page,
+                            per_page=per_page, db=db, user=user)
 
 
 @router.patch("/batches/{batch_id}/rows/{row_id}")
 def override_row(batch_id: str, row_id: str, body: IR.RowOverride, db: Session = Depends(get_db),
                  user: User = Depends(require_tenant_user)):
-    _batch(db, user, batch_id)
-    return IR.override_row(batch_id, row_id, body, db=db, user=user)
+    _batch(db, user, batch_id, edit=True)
+    with IR.sci_call():
+        return IR.override_row(batch_id, row_id, body, db=db, user=user)
 
 
 @router.post("/batches/{batch_id}/rows/bulk")
 def bulk(batch_id: str, body: IR.BulkIn, db: Session = Depends(get_db),
          user: User = Depends(require_tenant_user)):
-    _batch(db, user, batch_id)
-    return IR.bulk(batch_id, body, db=db, user=user)
+    _batch(db, user, batch_id, edit=True)
+    with IR.sci_call():
+        return IR.bulk(batch_id, body, db=db, user=user)
 
 
 @router.post("/batches/{batch_id}/cancel")
 def cancel(batch_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
-    _batch(db, user, batch_id)
-    return IR.cancel(batch_id, db=db, user=user)
+    _batch(db, user, batch_id, edit=True)
+    with IR.sci_call():
+        return IR.cancel(batch_id, db=db, user=user)
 
 
 @router.get("/batches/{batch_id}/audit")
 def batch_audit(batch_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     _batch(db, user, batch_id)
-    return IR.batch_audit(batch_id, db=db, user=user)
+    with IR.sci_call():
+        return IR.batch_audit(batch_id, db=db, user=user)

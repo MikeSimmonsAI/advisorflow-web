@@ -138,6 +138,7 @@ def build(db: Session, batch: ImportBatch) -> dict:
     excluded = Counter()
     excluded_rows: List[dict] = []
     included: List[Tuple[int, "OrderedDict[str, str]"]] = []
+    undecided: List[int] = []
     for r in rows:
         why = exclusion_reason(r)
         raw = _j(r.raw_data, {})
@@ -162,6 +163,9 @@ def build(db: Session, batch: ImportBatch) -> dict:
             v = raw.get(h, "")
             line[h] = "" if v is None else str(v)
         included.append((r.row_number, line))
+        if r.intake_status == IntakeStatus.NEEDS_REVIEW \
+                and r.duplicate_resolution == DuplicateResolution.REVIEW:
+            undecided.append(r.row_number)
 
     # SCI refuses a file with a blank or repeated Lead ID; say which rows.
     ids = [(n, (line.get(COL["lead_id"]) or "").strip()) for n, line in included]
@@ -191,6 +195,8 @@ def build(db: Session, batch: ImportBatch) -> dict:
                      "by_reason": [{"reason": k, "label": EXCLUDED_LABELS[k], "rows": v}
                                    for k, v in excluded.most_common()],
                      "rows": excluded_rows},
+        # Possible duplicates nobody decided yet: SCI must not load them.
+        "undecided_duplicates": {"count": len(undecided), "rows": undecided[:500]},
         "lead_id_problems": {
             "blank_rows": blank_ids[:500], "blank": len(blank_ids),
             "repeated": [{"lead_id": k, "rows": v} for k, v in sorted(repeated.items())][:500],
