@@ -126,7 +126,7 @@ def main() -> int:
     threshold = int(os.environ.get("HANDOFF_STALE_MINUTES") or 10)
     max_age = int(os.environ.get("HANDOFF_MAX_AGE_MINUTES") or 360)
     max_retries = int(os.environ.get("HANDOFF_MAX_RETRIES") or 2)
-    branches = _csv("RELAY_ALLOWED_BRANCHES", "sci-program,wholesale-nightly,platform-dev,feature/sci-appointment-recovery,feature/wholesale-development,feature/atlantis-development,feature/platform-command-center")
+    branches = _csv("RELAY_ALLOWED_BRANCHES", "sci-program,wholesale-nightly,platform-dev,feature/sci-appointment-recovery,feature/sci-ops,feature/wholesale-development,feature/atlantis-development,feature/roofing-development,feature/platform-command-center")
     automation = _csv("RELAY_STATUS_ACTORS", DEFAULT_AUTOMATION)
     actors = _csv("RELAY_AUTHORIZED_ACTORS", "MikeSimmonsAI")
     status_actors = automation + [a for a in actors if a not in automation]
