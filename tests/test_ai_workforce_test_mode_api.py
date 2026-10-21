@@ -158,3 +158,43 @@ def test_no_test_mode_route_takes_an_organization_id():
         assert "organization" not in route.path
         names = {p.name for p in route.dependant.query_params}
         assert not any("org" in n for n in names), route.path
+
+
+def test_home_is_one_honest_payload(client, admin_auth_headers, auth_headers,
+                                    db_session, sample_org, lq_offered):
+    r = client.get("/ai-workforce/home", headers=admin_auth_headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    cards = {c["key"]: c for c in body["jobs"]}
+    assert list(cards) == ["lead_qualifier", "appointment_setter",
+                           "follow_up_specialist", "customer_care_agent"]
+    assert cards["lead_qualifier"]["availability"] == "available"
+    assert cards["lead_qualifier"]["can_set_up"] is True
+    # Not verified end to end yet -> labelled truthfully, not offered as working.
+    for key in ("appointment_setter", "follow_up_specialist",
+                "customer_care_agent"):
+        assert cards[key]["can_set_up"] is False
+        assert cards[key]["availability"] in ("coming_soon", "not_offered",
+                                              "not_on_plan")
+    assert body["workers"] == [] and body["can_manage"] is True
+    rate = body["results"]["real"]["ready_rate"]
+    assert rate["shown"] is False and rate["how"].startswith("N/A")
+
+    dep_id = _hire_and_set_up(client, admin_auth_headers, db_session,
+                              sample_org)
+    client.post("/ai-workforce/deployments/%s/test-mode/run" % dep_id,
+                headers=admin_auth_headers)
+    body = client.get("/ai-workforce/home", headers=admin_auth_headers).json()
+    assert len(body["workers"]) == 1
+    assert body["results"]["practice"]["qualified"] == 1
+    assert body["results"]["real"]["finished"] == 0
+    kinds = [n["kind"] for n in body["needs_you"]]
+    assert "handoff" in kinds
+    handoff = [n for n in body["needs_you"] if n["kind"] == "handoff"][0]
+    assert handoff["practice"] is True and handoff["what"] and handoff["next"]
+    assert [c for c in body["jobs"] if c["key"] == "lead_qualifier"][0][
+        "availability"] == "set_up"
+
+    # An advisor can see it, and is told they cannot manage it.
+    adv = client.get("/ai-workforce/home", headers=auth_headers)
+    assert adv.status_code == 200 and adv.json()["can_manage"] is False

@@ -845,3 +845,210 @@ def summary(db: Session, dep: AIEmployeeDeployment, *,
         "live_messages_note": LIVE_OFF_NOTE,
         "board": work_board(db, dep),
     }
+
+
+# ── THE ONE CUSTOMER FRONT DOOR: /ai-workforce ───────────────────────────────
+
+# Jobs whose whole customer journey (setup -> Run test -> Start working ->
+# results) has an end-to-end acceptance test on the real worker. A job not in
+# this set is shown as "Coming soon", never as something that works.
+VERIFIED_JOBS = ("lead_qualifier",)
+
+JOB_CARDS = (
+    ("lead_qualifier", "Lead Qualifier",
+     "Finds out which leads are interested and ready.",
+     "Your leads, what makes a good lead for you, and a person to pass "
+     "ready leads to."),
+    ("appointment_setter", "Appointment Setter",
+     "Helps schedule appointments.",
+     "Your open times, the kind of appointment, and whose calendar to use."),
+    ("follow_up_specialist", "Follow-Up Specialist",
+     "Follows up when people have not responded.",
+     "Your leads, how often to follow up, and a person to pass replies to."),
+    ("customer_care_agent", "Customer Care",
+     "Helps answer routine customer questions.",
+     "Answers to your common questions and a person for anything else."),
+)
+
+# A finished-work count below this gives a rate that would mislead (one
+# qualified out of one is "100%"). Below it the screen says N/A and why.
+MIN_FOR_RATE = 5
+
+
+def job_cards(db: Session, organization_id: str) -> List[Dict[str, Any]]:
+    from app.services.ai_deployment import catalog as t8_catalog
+    by_key = {r["template_key"]: r
+              for r in t8_catalog.customer_catalog(db, organization_id)}
+    cards = []
+    for key, title, does, needs in JOB_CARDS:
+        row = by_key.get(key) or {}
+        comm = (row.get("commerce") or {}).get("commercial_state")
+        held = [d for d in row.get("deployments", [])]
+        if key not in VERIFIED_JOBS:
+            availability, label, why = (
+                "coming_soon", "Coming soon",
+                "This AI worker is still being tested. It is not ready for "
+                "your account yet.")
+        elif held:
+            availability, label, why = (
+                "set_up", "Already set up",
+                "You already have this AI worker. Open it below.")
+        elif row.get("can_hire"):
+            availability, label, why = ("available", "Available",
+                                        "Ready to set up.")
+        elif comm in (D.COMM_AVAILABLE, D.COMM_PENDING, D.COMM_LAPSED):
+            availability, label, why = (
+                "not_on_plan", "Not on your plan",
+                "Ask your administrator to add it to your plan.")
+        else:
+            availability, label, why = (
+                "not_offered", "Not available",
+                "This AI worker is not offered on your account.")
+        cards.append({"key": key, "title": title, "does": does,
+                      "needs": needs, "availability": availability,
+                      "availability_label": label, "why": why,
+                      "can_set_up": availability == "available",
+                      "deployment_ids": [d["id"] for d in held]})
+    return cards
+
+
+def results(db: Session, organization_id: str) -> Dict[str, Any]:
+    """Outcomes counted from work items. Practice and real kept apart."""
+    from app.models.ai_deployment_models import AIEmployeeDeployment
+    from app.models.models import Lead
+    from app.models.workforce_models import AIHandoff, AIWorkItem
+    from app.services.workforce import constants as WC
+
+    emp_ids = [r[0] for r in
+               db.query(AIEmployeeDeployment.employee_id)
+               .filter(AIEmployeeDeployment.organization_id
+                       == organization_id,
+                       AIEmployeeDeployment.employee_id.isnot(None)).all()]
+    out = {}
+    for kind in ("practice", "real"):
+        out[kind] = {"finished": 0, "qualified": 0, "appointments": 0,
+                     "handed_to_person": 0, "said_no": 0,
+                     "could_not_reach": 0, "needs_a_person": 0,
+                     "in_progress": 0}
+    if emp_ids:
+        rows = (db.query(AIWorkItem.state, Lead.is_test)
+                .outerjoin(Lead, Lead.id == AIWorkItem.subject_id)
+                .filter(AIWorkItem.organization_id == organization_id,
+                        AIWorkItem.employee_id.in_(emp_ids)).all())
+        for state, is_test in rows:
+            b = out["practice" if is_test else "real"]
+            if state in WC.TERMINAL_STATES:
+                b["finished"] += 1
+            if state == WC.QUALIFIED:
+                b["qualified"] += 1
+            elif state == WC.APPOINTMENT_BOOKED:
+                b["appointments"] += 1
+            elif state == WC.HUMAN_HANDOFF:
+                b["handed_to_person"] += 1
+            elif state in (WC.NOT_INTERESTED, WC.DO_NOT_CONTACT):
+                b["said_no"] += 1
+            elif state in (WC.BAD_CONTACT, WC.EXHAUSTED):
+                b["could_not_reach"] += 1
+            elif state in (WC.NEEDS_REVIEW, WC.FAILED):
+                b["needs_a_person"] += 1
+            elif state not in WC.TERMINAL_STATES:
+                b["in_progress"] += 1
+        open_h = (db.query(AIHandoff)
+                  .filter(AIHandoff.organization_id == organization_id,
+                          AIHandoff.employee_id.in_(emp_ids),
+                          AIHandoff.status == "open").count())
+    else:
+        open_h = 0
+    for kind, b in out.items():
+        good = b["qualified"] + b["appointments"]
+        if b["finished"] >= MIN_FOR_RATE:
+            b["ready_rate"] = {"value": round(100.0 * good / b["finished"]),
+                               "shown": True,
+                               "how": "%d ready out of %d finished"
+                                      % (good, b["finished"])}
+        else:
+            b["ready_rate"] = {"value": None, "shown": False,
+                               "how": "N/A - needs at least %d finished leads "
+                                      "to be fair (now %d)."
+                                      % (MIN_FOR_RATE, b["finished"])}
+    out["open_handoffs"] = open_h
+    out["note"] = ("Practice results come from pretend leads in test mode. "
+                   "Real results come from real leads only.")
+    return out
+
+
+def needs_you(db: Session, organization_id: str,
+              summaries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Everything waiting on a person: setup gaps, reviews, open handoffs."""
+    from app.models.models import Lead
+    from app.models.workforce_models import AIHandoff, AIWorkItem
+    from app.services.workforce import constants as WC
+    out = []
+    for s in summaries:
+        if s["status"] in (S_RETIRED,):
+            continue
+        for b in (s["test_blockers"] if s["status"] != S_TESTING
+                  else s["start_blockers"]):
+            if b["code"] == "worker_not_running" and s["status"] != S_TESTING:
+                continue
+            out.append({"kind": "setup", "worker": s["name"],
+                        "deployment_id": s["deployment_id"], **b})
+    emp_names = {}
+    from app.models.ai_deployment_models import AIEmployeeDeployment
+    for d in (db.query(AIEmployeeDeployment)
+              .filter(AIEmployeeDeployment.organization_id
+                      == organization_id).all()):
+        if d.employee_id:
+            emp_names[d.employee_id] = (d.display_name, d.id)
+    if emp_names:
+        for h in (db.query(AIHandoff)
+                  .filter(AIHandoff.organization_id == organization_id,
+                          AIHandoff.employee_id.in_(list(emp_names)),
+                          AIHandoff.status == "open")
+                  .order_by(AIHandoff.created_at.desc()).limit(50).all()):
+            lead = (db.query(Lead)
+                    .filter(Lead.id == h.subject_id,
+                            Lead.organization_id == organization_id).first())
+            name, dep_id = emp_names.get(h.employee_id, ("AI worker", None))
+            out.append({
+                "kind": "handoff", "worker": name, "deployment_id": dep_id,
+                "code": "handoff", "who": "customer",
+                "what": "%s is ready for a person." % (
+                    ("%s %s" % (lead.first_name or "", lead.last_name or ""))
+                    .strip() if lead else "A lead"),
+                "why": h.summary or "Your AI worker passed this lead to you.",
+                "next": "Call or message them, then mark it done.",
+                "practice": bool(lead is not None and lead.is_test),
+                "handoff_id": h.id, "fix": None})
+        for it in (db.query(AIWorkItem)
+                   .filter(AIWorkItem.organization_id == organization_id,
+                           AIWorkItem.employee_id.in_(list(emp_names)),
+                           AIWorkItem.state.in_((WC.NEEDS_REVIEW,
+                                                 WC.FAILED)))
+                   .order_by(AIWorkItem.updated_at.desc()).limit(50).all()):
+            name, dep_id = emp_names.get(it.employee_id, ("AI worker", None))
+            out.append({
+                "kind": "review", "worker": name, "deployment_id": dep_id,
+                "code": it.state, "who": "customer",
+                "what": "Your AI worker stopped and needs you to look.",
+                "why": it.state_reason or "It was not sure what to do.",
+                "next": "Open the lead and decide what happens next.",
+                "work_item_id": it.id, "fix": None})
+    return out
+
+
+def home(db: Session, organization_id: str, *,
+         now: Optional[datetime] = None) -> Dict[str, Any]:
+    """The whole AI Workforce page for one workspace, in one call."""
+    from app.services.ai_deployment import lifecycle
+    deps = [d for d in lifecycle.list_for_org(db, organization_id,
+                                              include_retired=False)]
+    summaries = [summary(db, d, now=now) for d in deps]
+    return {
+        "jobs": job_cards(db, organization_id),
+        "workers": summaries,
+        "needs_you": needs_you(db, organization_id, summaries),
+        "results": results(db, organization_id),
+        "live_messages": False,
+        "live_messages_note": LIVE_OFF_NOTE,
+    }

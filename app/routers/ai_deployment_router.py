@@ -472,3 +472,17 @@ def test_mode_stop(deployment_id: str, request: Request,
                    ) -> Dict[str, Any]:
     """STOP: off, queue parked, history kept. Start working turns it back on."""
     return _test_mode_act(t8_test_mode.stop, deployment_id, request, db, user)
+
+
+@router.get("/home")
+def workforce_home(request: Request, db: Session = Depends(get_db),
+                   user: User = Depends(require_tenant_user)
+                   ) -> Dict[str, Any]:
+    """The single AI Workforce page: job cards, each AI worker, what needs a
+    person, and results counted from real rows. The caller's workspace only."""
+    org_id = _org_id(user, db, request)
+    out = t8_test_mode.home(db, org_id)
+    # The SAME test require_admin applies to the buttons' routes, so the page
+    # never offers a button the server would refuse.
+    out["can_manage"] = bool(lead_scope.is_manager_here(user, db, request))
+    return out
