@@ -76,11 +76,60 @@ def workspace_admin_access(db: Session, user: Optional[User], org) -> bool:
         Membership.is_active.is_(True)).first() is not None
 
 
+# ── PER-WORKSPACE SEATS FOR SECOND WHOLESALE TENANTS (#272 P3) ──────────────
+#
+# The legacy seat (scope_id "wholesale") is ONE row per person for the whole
+# platform. That is still the rule for EvoSys's Wholesale org and every other
+# org. A second-tenant Wholesale workspace (BookaBoost Wholesale) keeps its own
+# rows, scope_id "wholesale:<org id>", so its team screen can never open, close
+# or lock down anybody's EvoSys access - and an EvoSys seat never opens it.
+# lock_on() counts only legacy rows: a tenant team change cannot flip the lock.
+TENANT_SEAT_PREFIX = WHOLESALE + ":"
+
+
+def _as_org(db: Session, org_or_id):
+    if org_or_id is None or not isinstance(org_or_id, str):
+        return org_or_id
+    from app.models.models import Organization
+    return db.query(Organization).filter(Organization.id == org_or_id).first()
+
+
+def is_second_tenant(db: Session, org_or_id) -> bool:
+    """A Wholesale workspace that is NOT EvoSys's built-in one."""
+    org = _as_org(db, org_or_id)
+    if org is None:
+        return False
+    from app.services.program_experience import WHOLESALE_HOST_SLUG, is_wholesale_host
+    # is_wholesale_host needs "a person" only to refuse an anonymous call; the
+    # answer here is about the org alone.
+    return (getattr(org, "slug", "") or "") != WHOLESALE_HOST_SLUG and is_wholesale_host(org, object())
+
+
+def seat_scope(db: Session, org_or_id) -> str:
+    """The membership scope_id that holds Wholesale seats for this workspace."""
+    org = _as_org(db, org_or_id)
+    return TENANT_SEAT_PREFIX + org.id if is_second_tenant(db, org) else WHOLESALE
+
+
+def holds_tenant_seat(db: Session, user: Optional[User], org) -> bool:
+    if user is None or org is None or not getattr(user, "id", None):
+        return False
+    return _rows(db, TENANT_SEAT_PREFIX + org.id).filter(Membership.user_id == user.id).first() is not None
+
+
 def may_use_in(db: Session, user: Optional[User], org, product: str = WHOLESALE) -> bool:
-    """`may_use`, or - for Wholesale - the workspace-admin rule above for `org`."""
-    if may_use(db, user, product):
+    """Who may use Wholesale IN THIS WORKSPACE.
+
+    A second-tenant workspace: GOD, its org admins and above, or a seat on ITS
+    OWN team - never a legacy (EvoSys) seat, which is how EvoSys operators stay
+    out (owner rule, #272). Everywhere else: exactly `may_use`, as before."""
+    if user is None:
+        return False
+    if getattr(user, "role", None) == "god_admin":
         return True
-    return product == WHOLESALE and workspace_admin_access(db, user, org)
+    if product == WHOLESALE and is_second_tenant(db, org):
+        return workspace_admin_access(db, user, org) or holds_tenant_seat(db, user, org)
+    return may_use(db, user, product)
 
 
 def holders(db: Session, product: str = WHOLESALE) -> List[Dict]:
@@ -103,14 +152,24 @@ def _user_by_email(db: Session, email: str) -> User:
     return u
 
 
-def grant(db: Session, email: str, *, granted_by: Optional[str] = None, product: str = WHOLESALE) -> Dict:
-    """Name a login for the product. Idempotent; reactivates a revoked grant."""
+def _valid_scope(product: str, scope_id: Optional[str]) -> str:
     if product not in PRODUCTS:
         raise ValueError("unknown product")
+    scope = scope_id or product
+    if scope != product and not scope.startswith(product + ":"):
+        raise ValueError("unknown seat scope")
+    return scope
+
+
+def grant(db: Session, email: str, *, granted_by: Optional[str] = None, product: str = WHOLESALE,
+          scope_id: Optional[str] = None) -> Dict:
+    """Name a login for the product (or, with `scope_id`, for ONE second-tenant
+    workspace's team). Idempotent; reactivates a revoked grant."""
+    scope = _valid_scope(product, scope_id)
     u = _user_by_email(db, email)
-    row = _rows(db, product, active_only=False).filter(Membership.user_id == u.id).first()
+    row = _rows(db, scope, active_only=False).filter(Membership.user_id == u.id).first()
     if row is None:
-        row = Membership(user_id=u.id, scope_type=SCOPE_PRODUCT, scope_id=product, role=MEMBER,
+        row = Membership(user_id=u.id, scope_type=SCOPE_PRODUCT, scope_id=scope, role=MEMBER,
                          is_active=True, granted_by=granted_by, created_at=datetime.utcnow())
         db.add(row)
         action = "granted"
@@ -120,12 +179,13 @@ def grant(db: Session, email: str, *, granted_by: Optional[str] = None, product:
     else:
         action = "unchanged"
     db.commit()
-    return {"email": u.email, "action": action, "lock_on": True}
+    return {"email": u.email, "action": action, "lock_on": lock_on(db, product) if scope != product else True}
 
 
-def revoke(db: Session, email: str, *, product: str = WHOLESALE) -> Dict:
+def revoke(db: Session, email: str, *, product: str = WHOLESALE, scope_id: Optional[str] = None) -> Dict:
+    scope = _valid_scope(product, scope_id)
     u = _user_by_email(db, email)
-    row = _rows(db, product).filter(Membership.user_id == u.id).first()
+    row = _rows(db, scope).filter(Membership.user_id == u.id).first()
     if row is None:
         return {"email": u.email, "action": "not a holder", "lock_on": lock_on(db, product)}
     row.is_active = False

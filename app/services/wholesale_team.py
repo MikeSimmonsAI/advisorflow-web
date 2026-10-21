@@ -58,35 +58,55 @@ WHOLESALE_ONLY = (MANAGER, TEAM_LEAD, FIELD_SPECIALIST, CANVASSER)
 FIELD_ROLES = (FIELD_SPECIALIST, CANVASSER)
 
 
-def _row(db: Session, user_id: str, active_only: bool = True) -> Optional[Membership]:
+def _scope(db: Session, org_id: Optional[str]) -> str:
+    """Which seat rows belong to this workspace's team: EvoSys's org and every
+    legacy org share the platform row ("wholesale"); a second-tenant Wholesale
+    workspace has its own ("wholesale:<org id>", product_access - #272 P3)."""
+    return PA.seat_scope(db, org_id) if org_id else PA.WHOLESALE
+
+
+def _active_org_id(db: Session, user: User) -> Optional[str]:
+    """The workspace this request is in (X-Workspace-Id backed by a membership,
+    else the home org) - the same seam every Wholesale query resolves through."""
+    try:
+        from app.services.lead_scope import active_workspace_org_id
+        return active_workspace_org_id(user, db)
+    except Exception:  # noqa: BLE001 - never widen: fall back to the home org
+        return getattr(user, "organization_id", None)
+
+
+def _row(db: Session, user_id: str, active_only: bool = True,
+         scope: str = PA.WHOLESALE) -> Optional[Membership]:
     q = db.query(Membership).filter(Membership.scope_type == SCOPE_PRODUCT,
-                                    Membership.scope_id == PA.WHOLESALE,
+                                    Membership.scope_id == scope,
                                     Membership.user_id == user_id)
     if active_only:
         q = q.filter(Membership.is_active.is_(True))
     return q.first()
 
 
-def role_of(db: Session, user: Optional[User]) -> Optional[str]:
-    """The person's team role, or None when they hold no active grant."""
+def role_of(db: Session, user: Optional[User], org_id: Optional[str] = None) -> Optional[str]:
+    """The person's team role IN THIS WORKSPACE (`org_id`, else the active one),
+    or None when they hold no active grant there. A BookaBoost field role never
+    follows the same person into EvoSys, nor the reverse."""
     if user is None or not getattr(user, "id", None):
         return None
-    row = _row(db, user.id)
+    row = _row(db, user.id, scope=_scope(db, org_id or _active_org_id(db, user)))
     if row is None:
         return None
     return row.role if row.role in ROLES else MEMBER
 
 
-def is_wholesale_only(db: Session, user: Optional[User]) -> bool:
+def is_wholesale_only(db: Session, user: Optional[User], org_id: Optional[str] = None) -> bool:
     if getattr(user, "role", None) in ("god_admin", "super_admin"):
         return False
-    return role_of(db, user) in WHOLESALE_ONLY
+    return role_of(db, user, org_id) in WHOLESALE_ONLY
 
 
-def is_field(db: Session, user: Optional[User]) -> bool:
+def is_field(db: Session, user: Optional[User], org_id: Optional[str] = None) -> bool:
     if getattr(user, "role", None) in ("god_admin", "super_admin"):
         return False
-    return role_of(db, user) in FIELD_ROLES
+    return role_of(db, user, org_id) in FIELD_ROLES
 
 
 # ── the team page ───────────────────────────────────────────────────────────
@@ -102,9 +122,10 @@ def team(db: Session, org_id: str) -> Dict:
     people = db.query(User).filter(User.organization_id == org_id).order_by(User.created_at.asc()).all()
     ids = [u.id for u in people]
     rows = {}
+    scope = _scope(db, org_id)
     if ids:
         for m in (db.query(Membership)
-                  .filter(Membership.scope_type == SCOPE_PRODUCT, Membership.scope_id == PA.WHOLESALE,
+                  .filter(Membership.scope_type == SCOPE_PRODUCT, Membership.scope_id == scope,
                           Membership.user_id.in_(ids)).all()):
             rows[m.user_id] = m
     members, others = [], []
@@ -134,15 +155,16 @@ def _check_manager(db: Session, org_id: str, user_id: str, reports_to: Optional[
         return None
     if reports_to == user_id:
         raise ValueError("Someone cannot report to themselves.")
+    scope = _scope(db, org_id)
     boss = db.query(User).filter(User.id == reports_to, User.organization_id == org_id).first()
-    if boss is None or _row(db, boss.id) is None:
+    if boss is None or _row(db, boss.id, scope=scope) is None:
         raise ValueError("The manager you picked is not on the Wholesale team.")
     seen, cur = {user_id}, reports_to
     while cur:
         if cur in seen:
             raise ValueError("That would make a loop: they would end up reporting to themselves.")
         seen.add(cur)
-        up = _row(db, cur)
+        up = _row(db, cur, scope=scope)
         cur = up.reports_to_user_id if up is not None else None
     return reports_to
 
@@ -165,13 +187,21 @@ def add_or_update(db: Session, org_id: str, actor: User, user_id: str, role: str
     if u.id == actor.id and role != MEMBER:
         raise ValueError("You cannot lock your own login down.")
     reports_to = _check_manager(db, org_id, u.id, reports_to_user_id)
-    first_ever = not PA.lock_on(db)
-    PA.grant(db, u.email, granted_by=actor.id)
-    # The person setting up the very first team member keeps their own access:
-    # the first grant turns the named-login rule on for everyone.
-    if first_ever and getattr(actor, "role", None) != "god_admin" and _row(db, actor.id) is None:
-        PA.grant(db, actor.email, granted_by=actor.id)
-    row = _row(db, u.id)
+    scope = _scope(db, org_id)
+    if scope == PA.WHOLESALE:
+        first_ever = not PA.lock_on(db)
+        PA.grant(db, u.email, granted_by=actor.id)
+        # The person setting up the very first team member keeps their own access:
+        # the first grant turns the named-login rule on for everyone.
+        if first_ever and getattr(actor, "role", None) != "god_admin" and _row(db, actor.id) is None:
+            PA.grant(db, actor.email, granted_by=actor.id)
+    else:
+        # A second-tenant workspace's OWN seat. It never touches the platform
+        # row, so it cannot open, close or lock down anyone's EvoSys access,
+        # and it never turns the platform lock on. Its admins are already in
+        # (product_access.workspace_admin_access).
+        PA.grant(db, u.email, granted_by=actor.id, scope_id=scope)
+    row = _row(db, u.id, scope=scope)
     row.role = role
     row.reports_to_user_id = reports_to
     db.commit()
@@ -184,11 +214,12 @@ def remove(db: Session, org_id: str, actor: User, user_id: str) -> Dict:
     u = _in_org(db, org_id, user_id)
     if u.id == actor.id:
         raise ValueError("You cannot take yourself off the team.")
-    row = _row(db, u.id)
+    scope = _scope(db, org_id)
+    row = _row(db, u.id, scope=scope)
     if row is None:
         return team(db, org_id)
     for child in (db.query(Membership)
-                  .filter(Membership.scope_type == SCOPE_PRODUCT, Membership.scope_id == PA.WHOLESALE,
+                  .filter(Membership.scope_type == SCOPE_PRODUCT, Membership.scope_id == scope,
                           Membership.reports_to_user_id == u.id).all()):
         child.reports_to_user_id = row.reports_to_user_id
     row.is_active = False
