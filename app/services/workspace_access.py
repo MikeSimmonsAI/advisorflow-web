@@ -482,7 +482,16 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
             next((w for w in workspaces
                   if w["organization_id"] == user.organization_id and _is_other_host(w)), None) or \
             next((w for w in workspaces if _is_other_host(w)), None)
-        if named_wholesale and host:
+        if not named_wholesale:
+            # Owner rule (#272): an org admin (or above) of a second-tenant
+            # Wholesale workspace gets the tile for THAT workspace without a
+            # named seat. Their workspace entry says experience == "wholesale"
+            # only when program_experience applied exactly that rule; EvoSys's
+            # own org never qualifies this way.
+            host = next((w for w in workspaces
+                         if w["organization_id"] == user.organization_id and _is_other_host(w)), None) or \
+                next((w for w in workspaces if _is_other_host(w)), None)
+        if host and (named_wholesale or _is_other_host(host)):
             product_contexts.append({
                 "type": "product", "key": WHOLESALE, "label": "Wholesale Operations",
                 "organization_id": host["organization_id"], "path": "/wholesale/evosense",

@@ -102,6 +102,8 @@ def experience_for(db: Session, user, org, is_program: bool, named_wholesale: Op
         named_wholesale = _named_wholesale_seat(db, user)
     if named_wholesale and is_wholesale_host(org, user):
         return "wholesale"
+    if _admin_of_second_tenant(db, user, org):
+        return "wholesale"
     if _explicit(org, "insurance_agency"):
         return "insurance"
     if (getattr(org, "industry", "") or "").strip().lower() == "energy":
@@ -123,7 +125,10 @@ def locked_experience(db: Session, user, request: Optional[Request]) -> Optional
     """The program this request is confined to, or None."""
     if user is None or getattr(user, "role", None) in INTERNAL_ROLES:
         return None
-    if not _named_wholesale_seat(db, user):
+    named = _named_wholesale_seat(db, user)
+    # Cheap gate first: only a named seat, or someone who is an admin of SOME
+    # workspace, can be locked - everyone else stops here with one query.
+    if not named and not _admin_anywhere(db, user):
         return None
     from app.models.models import Organization
     from app.services import lead_scope
@@ -131,7 +136,34 @@ def locked_experience(db: Session, user, request: Optional[Request]) -> Optional
     if not org_id:
         return None
     org = db.query(Organization).filter(Organization.id == org_id).first()
-    return WHOLESALE if is_wholesale_host(org, user) else None
+    if named and is_wholesale_host(org, user):
+        return WHOLESALE
+    return WHOLESALE if _admin_of_second_tenant(db, user, org) else None
+
+
+def _admin_anywhere(db: Session, user) -> bool:
+    """One query: is this person an admin of ANY org whose stored list mentions
+    the Wholesale-workspace key? (A coarse text match; the exact rule is
+    re-checked by workspace_admin_access on the active org.) Ordinary admins of
+    every other customer stop here, so the lock costs them one query."""
+    from app.models.models import Organization
+    from app.models.sales_models import Membership
+    from app.services.product_access import WORKSPACE_ADMIN_ROLES
+    return (db.query(Membership.id)
+            .join(Organization, Organization.id == Membership.scope_id)
+            .filter(Membership.user_id == user.id, Membership.scope_type == "customer_org",
+                    Membership.role.in_(WORKSPACE_ADMIN_ROLES), Membership.is_active.is_(True),
+                    Organization.enabled_features.like('%"' + WHOLESALE_WORKSPACE_KEY + '"%'))
+            .first() is not None)
+
+
+def _admin_of_second_tenant(db: Session, user, org) -> bool:
+    """Owner rule (#272): in a Wholesale workspace other than EvoSys's, its org
+    admins and above open Wholesale without a named seat."""
+    if user is None or getattr(user, "role", None) in INTERNAL_ROLES:
+        return False
+    from app.services.product_access import workspace_admin_access
+    return workspace_admin_access(db, user, org)
 
 
 def enforce(db: Session, user, request: Request) -> None:

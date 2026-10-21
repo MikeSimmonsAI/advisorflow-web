@@ -606,13 +606,11 @@ def require_feature(key: str):
         if getattr(user, "role", None) == "god_admin":
             return user
 
-        # EVOSYS WHOLESALE IS FOR NAMED LOGINS (product_access). Once any login
-        # has been named, a workspace entitlement alone is not enough.
-        if key == "wholesale_real_estate":
-            from app.services import product_access as _pa
-            if not _pa.may_use(db, user, _pa.WHOLESALE):
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                                    detail="EvoSys Wholesale is limited to named logins.")
+        # WHOLESALE IS FOR NAMED LOGINS (product_access). Once any login has
+        # been named, a workspace entitlement alone is not enough. The check
+        # runs below, once the active workspace is known: in a second-tenant
+        # Wholesale workspace (BookaBoost, #272) its org admins and above also
+        # qualify (product_access.may_use_in). EvoSys's org is unchanged.
 
         # WHICH CUSTOMER'S ENTITLEMENT — THE ONE SEAM, NOT A SECOND ONE.
         #
@@ -643,6 +641,11 @@ def require_feature(key: str):
                 detail="This is a customer workspace feature and your account has no "
                        "customer organization.")
         org = db.query(Organization).filter(Organization.id == org_id).first()
+        if key == "wholesale_real_estate":
+            from app.services import product_access as _pa
+            if not _pa.may_use_in(db, user, org, _pa.WHOLESALE):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                    detail="Wholesale is limited to named logins and this workspace's admins.")
         # ONE override query for the whole decision (platform + brand + org +
         # rows scoped inside the org); both checks below reuse it.
         ov = None
