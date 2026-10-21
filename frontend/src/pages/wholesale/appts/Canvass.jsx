@@ -11,6 +11,7 @@ import { dayLabel, tomorrowCentral } from './apptTime'
 import './appts.css'
 import OutboxBar from './OutboxBar'
 import { all, getKept, saveOrKeep, subscribe } from './outbox'
+import { ev } from '../engine'
 
 // What is still waiting on this phone shows as done, marked "on this phone".
 async function withWaiting(prefix, rows) {
@@ -62,7 +63,7 @@ function BuildRoute({ onBuilt }) {
         <label className="ap-lab">Day<input type="date" className="ap-input" value={day} onChange={(e) => setDay(e.target.value)} /></label>
         <label className="ap-lab ap-lab--full">Name (optional)<input className="ap-input" placeholder="e.g. Oak Cliff Saturday" value={name} onChange={(e) => setName(e.target.value)} /></label>
       </div>
-      <p className="evo-small evo-muted">{count === null ? 'Doors come from EvoSense findings in those ZIPs, best first. Owners who opted out are skipped.'
+      <p className="evo-small evo-muted">{count === null ? ev('Doors come from EvoSense findings in those ZIPs, best first. Owners who opted out are skipped.')
         : `${count} door${count === 1 ? '' : 's'} available there.`}</p>
       <button type="button" className="evo-btn evo-btn--primary" disabled={busy || !count} onClick={build}>{busy ? 'Building…' : 'Build route'}</button>
       <Alert>{err}</Alert>

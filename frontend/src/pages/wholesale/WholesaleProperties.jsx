@@ -22,6 +22,7 @@ import {
 } from './ds/ds'
 import './ds/evo-pages.css'
 import ContactLookup from './wsContactLookup'
+import { ev } from './engine'
 
 const PROPERTY_TYPES = ['single_family', 'duplex', 'triplex', 'fourplex',
                         'multi_family', 'condo', 'townhouse', 'mobile', 'land',
@@ -143,9 +144,9 @@ export default function WholesaleProperties() {
                    <div className="evo-actionbar" style={{ justifyContent: 'center' }}>
                      <button type="button" className="evo-btn evo-btn--primary" onClick={() => setShowAdd(true)}>+ Add property</button>
                      <button type="button" className="evo-btn evo-btn--secondary" onClick={() => setShowImport(true)}>Import list</button>
-                     <Link className="evo-btn evo-btn--ghost" to="/wholesale/evosense">Let EvoSense discover them</Link>
+                     <Link className="evo-btn evo-btn--ghost" to="/wholesale/evosense">{ev('Let EvoSense discover them')}</Link>
                    </div>) : null}>
-            {stageFilter || q || bandFilter ? 'Try a different search or filter.' : 'Add one manually, import a list, or let EvoSense discover them.'}
+            {stageFilter || q || bandFilter ? 'Try a different search or filter.' : ev('Add one manually, import a list, or let EvoSense discover them.')}
           </Empty>
         ) : null}
 

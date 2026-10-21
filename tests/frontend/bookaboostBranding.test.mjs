@@ -8,7 +8,7 @@
  *
  *     node tests/frontend/bookaboostBranding.test.mjs
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { engineName, engineLabel, productName } from '../../frontend/src/theme.js'
@@ -53,16 +53,25 @@ check('WholesaleShell only says "Powered by" when there is an engine name', () =
   if (s.includes('Powered by EvoSense</span>')) throw new Error('hard-coded Powered by EvoSense remains')
   if (!s.includes("engine = 'EvoSense'")) throw new Error('default engine is not EvoSense')
 })
-check('Command and Controls heroes go through ev()', () => {
-  for (const f of ['frontend/src/pages/wholesale/evosense/EvoCommand.jsx',
-                   'frontend/src/pages/wholesale/evosense/EvoControls.jsx']) {
-    const s = read(f)
-    for (const line of s.split('\n')) {
+check('every on-screen EvoSense / EvoSys Field string in the Wholesale pages goes through ev()', () => {
+  const base = join(REPO, 'frontend', 'src', 'pages', 'wholesale')
+  const walk = (d) => readdirSync(d).flatMap((n) => {
+    const p = join(d, n)
+    return statSync(p).isDirectory() ? walk(p) : (/\.(jsx|js)$/.test(n) ? [p] : [])
+  })
+  const skip = [join(base, 'engine.js'), join(base, 'ds', 'ds.jsx')]   // the helper; WORLDS is never rendered
+  const bad = []
+  for (const f of walk(base)) {
+    if (skip.includes(f)) continue
+    for (const line of readFileSync(f, 'utf8').split('\n')) {
       const t = line.trim()
       if (t.startsWith('*') || t.startsWith('//') || t.startsWith('/*')) continue
-      if (/EvoSense/.test(t) && !/ev\('/.test(t)) throw new Error(f + ': unwrapped -> ' + t.slice(0, 90))
+      if (/\.startsWith\('EvoSense/.test(t)) continue            // compares a server message; shows nothing
+      if (/title: 'EvoSys Field'/.test(t)) continue                 // fieldApp.js constant, chosen per workspace below it
+      if (/EvoSense|EvoSys Field/.test(t) && !/ev\('/.test(t)) bad.push(f.slice(base.length) + ': ' + t.slice(0, 90))
     }
   }
+  if (bad.length) throw new Error('unwrapped:\n      ' + bad.join('\n      '))
 })
 check('the signer page names the sender brand, not EvoSys', () => {
   const s = read('frontend/src/pages/portal/SignDocument.jsx')
