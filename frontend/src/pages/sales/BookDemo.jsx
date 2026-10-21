@@ -46,6 +46,7 @@ function BookDemoBody() {
   const me = ctx?.user?.id
 
   const [deals, setDeals] = useState([])
+  const [blockedPick, setBlockedPick] = useState(null)   // ?opp= points at a Do Not Contact lead
   const [types, setTypes] = useState([])
   const [oppId, setOppId] = useState(params.get('opp') || '')
   const [date, setDate] = useState(() => ymdPlusDays(1, new Date(), ctx?.brand_sales_org?.timezone))
@@ -61,8 +62,11 @@ function BookDemoBody() {
 
   useEffect(() => {
     api.get('/sales/opportunities').then(o => {
-      const all = (o.stages || []).flatMap(s => s.opportunities || [])
+      let all = (o.stages || []).flatMap(s => s.opportunities || [])
         .filter(c => c.status === 'open')
+      const asked = all.find(c => c.id === params.get('opp'))
+      if (asked && asked.do_not_contact) { setBlockedPick(asked); setOppId('') }
+      all = all.filter(c => !c.do_not_contact)   // never offered for booking
         .sort((a, b) => String(a.contact_name || a.company_name).localeCompare(String(b.contact_name || b.company_name)))
       setDeals(all)
     }).catch(e => setError(e.message || 'Could not load your contacts.'))
@@ -194,6 +198,12 @@ function BookDemoBody() {
         </button>
       </div>
       <ErrorLine error={error} />
+      {blockedPick && (
+        <div className="ss-dncbanner" role="alert">
+          <strong>Can't book {blockedPick.contact_name || blockedPick.company_name}</strong>
+          This prospect asked not to be contacted, so no meeting or invitation can be created. A sales manager can review it on the lead.
+        </div>
+      )}
       <div className="ss-twoform">
         <section className="ss-panel">
           <form className="ss-formpanel" onSubmit={e => { e.preventDefault(); create() }}>

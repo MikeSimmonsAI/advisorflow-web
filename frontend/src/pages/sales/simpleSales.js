@@ -124,6 +124,12 @@ export const NOT_INTERESTED_CHOICES = [
     hint: 'Ends this deal. It stays in your history; no follow-up is scheduled.' },
   { key: 'later', label: 'Follow up later',
     hint: 'Only if they said a later time might work. You pick the date.' },
+  // Distinct from Not Interested: an explicit request for no further contact.
+  // Recorded on the server (POST /sales/opportunities/{id}/do-not-contact),
+  // which then blocks follow-ups, outreach logging, booking and every
+  // prospect email for this phone/email — duplicates included.
+  { key: 'dnc', label: 'Asked not to be contacted',
+    hint: 'Do Not Contact: stops follow-ups, bookings and emails for this phone and email. A manager can correct it.' },
 ]
 
 export function outcomeByKey(key) {
@@ -198,6 +204,12 @@ export function buildOutcomeRequests({ stage, outcome, note, nextAction, dueYmd,
       patch.loss_reason = 'Not interested (call)'
       patch.next_action = null
       patch.next_action_due_at = null
+    } else if (decision === 'dnc') {
+      // The call result is written FIRST (outreach logging is refused once the
+      // request is on file); the caller then records the Do Not Contact.
+      label = 'Asked not to be contacted'
+      patch.next_action = null
+      patch.next_action_due_at = null
     } else if (decision === 'later') {
       if (!next) throw new Error('Add the next action for the later follow-up.')
       if (!due) throw new Error('Pick the date for the later follow-up.')
@@ -205,7 +217,7 @@ export function buildOutcomeRequests({ stage, outcome, note, nextAction, dueYmd,
       patch.next_action = next
       patch.next_action_due_at = due
     } else {
-      throw new Error('Choose Close as Lost or Follow up later.')
+      throw new Error('Choose Close as Lost, Follow up later, or Asked not to be contacted.')
     }
   } else {
     if (next) patch.next_action = next
@@ -266,6 +278,8 @@ export function followUpList(cards, filter = 'today', query = '', now = new Date
   const rank = { overdue: 0, today: 1, later: 2, none: 3 }
   return (cards || [])
     .filter(c => (c.status || 'open') === 'open')
+    // Do Not Contact is never "due" — same rule as the server's My Day list.
+    .filter(c => filter === 'all' || !c.do_not_contact)
     .map(c => ({ c, b: dueBucket(c.next_action_due_at, now, tz) }))
     .filter(({ b }) => filter === 'all' ? true
       : filter === 'overdue' ? b === 'overdue'

@@ -161,7 +161,7 @@ function FollowUpsBody() {
           <span>Next up: <strong>{nextUp.contact_name || nextUp.company_name}</strong>
             {nextUp.next_action ? ' — ' + nextUp.next_action : ''}</span>
           <span style={{ flex: 1 }} />
-          {telHref(nextUp.phone) && (
+          {telHref(nextUp.phone) && !nextUp.do_not_contact && (
             <button type="button" className="ss-btn ss-green ss-xs"
                     onClick={() => { const o = nextUp; setNextUp(null); contact.call(o) }}>
               <Icon name="phone" /> Call

@@ -13,7 +13,7 @@ import { api } from '../../api/client'
 import SalesShell from './SalesShell'
 import NewProspect from './NewProspect'
 import { SIMPLE_COLUMNS, STAGE_LABELS, groupForSimpleBoard } from './simpleSales'
-import { Icon, ErrorLine, Skeleton } from './SimpleParts'
+import { Icon, ErrorLine, Skeleton, DncChip } from './SimpleParts'
 
 const TONE = ['', 'ss-c2', 'ss-c3', 'ss-c4']
 
@@ -92,6 +92,7 @@ function PipelineBody() {
                         {/* The REAL stage, on every card: the column is a grouping,
                             this is the fact (Closing is not "a demo is booked"). */}
                         <span className="ss-stagechip">{STAGE_LABELS[c.stage] || c.stage_label || c.stage}</span>
+                        {c.do_not_contact && <> <DncChip /></>}
                       </button>
                     </div>
                   ))}

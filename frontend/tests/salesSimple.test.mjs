@@ -154,8 +154,8 @@ test('typed time in the team zone becomes the UTC booking time', async () => {
 test('Not Interested never schedules anything by itself', () => {
   const o = CALL_OUTCOMES.find(x => x.key === 'not_interested')
   assert.equal(o.next, null); assert.equal(o.days, null); assert.equal(o.decide, true)
-  assert.deepEqual(NOT_INTERESTED_CHOICES.map(c => c.label), ['Close as Lost', 'Follow up later'])
-  assert.throws(() => buildOutcomeRequests({ stage: 'contacted', outcome: 'not_interested' }), /Close as Lost or Follow up later/)
+  assert.deepEqual(NOT_INTERESTED_CHOICES.map(c => c.label), ['Close as Lost', 'Follow up later', 'Asked not to be contacted'])
+  assert.throws(() => buildOutcomeRequests({ stage: 'contacted', outcome: 'not_interested' }), /Close as Lost, Follow up later, or Asked not to be contacted/)
 })
 
 test('Not Interested → Close as Lost clears the next step and closes the deal', () => {
@@ -224,4 +224,22 @@ test('date suggestions use the team calendar', () => {
   const lateChicago = new Date('2026-10-22T04:30:00Z')
   assert.equal(ymdPlusDays(0, lateChicago, 'America/Chicago'), '2026-10-21')
   assert.equal(ymdPlusDays(1, lateChicago, 'America/Chicago'), '2026-10-22')
+})
+
+test('Asked not to be contacted: call result first, follow-up cleared, stage kept', () => {
+  const r = buildOutcomeRequests({ stage: 'discovery', outcome: 'not_interested', decision: 'dnc',
+    nextAction: 'ignored', dueYmd: '2027-01-01', note: 'Said stop calling' })
+  assert.equal(r.note.summary, 'Call: Asked not to be contacted — Said stop calling')
+  assert.deepEqual(r.patch, { next_action: null, next_action_due_at: null })
+})
+
+test('a Do Not Contact lead is never due, but stays visible under All', () => {
+  const now = new Date('2026-10-21T15:00:00Z')
+  const cards = [
+    { id: 'a', status: 'open', next_action_due_at: '2026-10-20T12:00:00' },
+    { id: 'b', status: 'open', next_action_due_at: '2026-10-20T12:00:00', do_not_contact: true },
+  ]
+  assert.deepEqual(followUpList(cards, 'today', '', now).map(c => c.id), ['a'])
+  assert.deepEqual(followUpList(cards, 'overdue', '', now).map(c => c.id), ['a'])
+  assert.deepEqual(followUpList(cards, 'all', '', now).map(c => c.id).sort(), ['a', 'b'])
 })

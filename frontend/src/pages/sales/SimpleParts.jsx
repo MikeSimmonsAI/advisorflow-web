@@ -108,6 +108,18 @@ export function useNotice() {
 
 export function Modal({ title, sub, onClose, children, footer, labelId }) {
   const box = useRef(null)
+  // ON A PHONE the dialog is sized to the VISIBLE viewport, which shrinks when
+  // the on-screen keyboard opens — so the header and Save/Cancel stay on
+  // screen while only the middle scrolls. (100vh does not shrink for the
+  // keyboard; visualViewport does.)
+  const [vh, setVh] = useState(null)
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return undefined
+    const on = () => setVh(Math.round(vv.height))
+    on(); vv.addEventListener('resize', on)
+    return () => vv.removeEventListener('resize', on)
+  }, [])
   // Keyboard users land INSIDE the dialog when it opens, Tab stays inside it,
   // Escape closes it, and focus goes back to whatever opened it.
   useEffect(() => {
@@ -133,7 +145,8 @@ export function Modal({ title, sub, onClose, children, footer, labelId }) {
   }, [])
   const id = labelId || 'ss-modal-title'
   return (
-    <div className="ss-modalback" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
+    <div className="ss-modalback" style={vh ? { '--ss-vvh': vh + 'px' } : undefined}
+         onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
       <section className="ss-modal" role="dialog" aria-modal="true" aria-labelledby={id} ref={box} tabIndex={-1}>
         <div className="ss-modalhead">
           <div>
@@ -144,7 +157,7 @@ export function Modal({ title, sub, onClose, children, footer, labelId }) {
             <Icon name="x" />
           </button>
         </div>
-        <div className="ss-modalbody">{children}</div>
+        <div className="ss-modalbody" tabIndex={-1}>{children}</div>
         {footer && <div className="ss-modalfoot">{footer}</div>}
       </section>
     </div>
@@ -194,6 +207,12 @@ export function CallOutcomeModal({ opp, tz, onClose, onSaved, onBook }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const saving = useRef(false)
+  const errBox = useRef(null)
+  // The body scrolls on a phone; bring a save error into view so it is never
+  // hidden below the fold while the rep looks at the (fixed) Save button.
+  useEffect(() => {
+    if (error && errBox.current) errBox.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [error])
 
   const o = outcomeByKey(outcome)
   const showNext = o && (!o.decide || decision === 'later')
@@ -218,6 +237,12 @@ export function CallOutcomeModal({ opp, tz, onClose, onSaved, onBook }) {
       await api.post('/sales/opportunities/' + opp.id + '/notes', req.note)
       let updated = opp
       if (req.patch) updated = await api.patch('/sales/opportunities/' + opp.id, req.patch)
+      if (o?.decide && decision === 'dnc') {
+        // The real record — the server enforces it from here on.
+        await api.post('/sales/opportunities/' + opp.id + '/do-not-contact',
+                       { reason: note.trim() || 'Prospect asked not to be contacted (on a call).' })
+        updated = { ...(updated || opp), do_not_contact: true }
+      }
       onSaved && onSaved({ outcome, decision, opp: updated || opp })
       if ((thenBook || o?.books) && onBook) onBook(opp)
     } catch (e) {
@@ -230,6 +255,7 @@ export function CallOutcomeModal({ opp, tz, onClose, onSaved, onBook }) {
   const primaryLabel = !o ? 'Save Call Result'
     : o.decide && decision === 'lost' ? 'Close as Lost'
     : o.decide && decision === 'later' ? 'Save follow-up'
+    : o.decide && decision === 'dnc' ? 'Record Do Not Contact'
     : o.books ? 'Save & open booking'
     : 'Save Call Result'
   const canSave = !!o && (!o.decide || !!decision) && !busy
@@ -246,7 +272,7 @@ export function CallOutcomeModal({ opp, tz, onClose, onSaved, onBook }) {
             Save &amp; book a demo
           </button>
         )}
-        <button type="button" className={'ss-btn ' + (o?.decide && decision === 'lost' ? 'ss-soft' : 'ss-green')}
+        <button type="button" className={'ss-btn ss-primaryact ' + (o?.decide && decision === 'lost' ? 'ss-soft' : o?.decide && decision === 'dnc' ? 'ss-danger' : 'ss-green')}
                 disabled={!canSave} onClick={() => save(false)}>
           <Icon name="check" /> {busy ? 'Saving…' : primaryLabel}
         </button>
@@ -258,7 +284,7 @@ export function CallOutcomeModal({ opp, tz, onClose, onSaved, onBook }) {
         {opp?.phone ? <PhoneFallback phone={opp.phone} verb="call" /> : <div>No phone number on this record.</div>}
       </div>
       <div style={{ height: 16 }} />
-      <ErrorLine error={error} />
+      <div ref={errBox}><ErrorLine error={error} /></div>
       <div className="ss-field" role="group" aria-labelledby="ss-what">
         <span className="ss-label" id="ss-what">What happened?</span>
         <div className="ss-outcomes">
@@ -401,12 +427,12 @@ export function useContactActions({ me, tz, onChanged, onBook, notify }) {
 
   function call(opp) {
     const tel = telHref(opp.phone)
-    if (!tel) return
+    if (!tel || opp.do_not_contact) return
     try { window.location.href = tel } catch { /* no dialer on this device */ }
     setCalling(opp)
   }
   function text(opp) {
-    if (smsHref(opp.phone)) setTexting(opp)
+    if (smsHref(opp.phone) && !opp.do_not_contact) setTexting(opp)
   }
 
   const modals = <>
@@ -418,7 +444,7 @@ export function useContactActions({ me, tz, onChanged, onBook, notify }) {
         onSaved={({ outcome, decision, opp }) => {
           setCalling(null)
           const label = outcome === 'not_interested'
-            ? (decision === 'lost' ? 'closed as Lost' : 'follow-up scheduled')
+            ? (decision === 'lost' ? 'closed as Lost' : decision === 'dnc' ? 'Do Not Contact recorded' : 'follow-up scheduled')
             : (outcomeByKey(outcome)?.label || '')
           notify && notify('Saved for ' + (opp.contact_name || opp.company_name) + ' — ' + label + '.')
           onChanged && onChanged(opp)
@@ -444,6 +470,7 @@ export function useContactActions({ me, tz, onChanged, onBook, notify }) {
 /** The two square buttons on a list row — only when there is a usable number. */
 export function CallTextSquares({ opp, onCall, onText }) {
   const who = opp.contact_name || opp.company_name || 'contact'
+  if (opp.do_not_contact) return <DncChip />
   if (!telHref(opp.phone)) return <span className="ss-nophone">No phone</span>
   return <>
     <button type="button" className="ss-square ss-green" aria-label={'Call ' + who}
@@ -455,4 +482,9 @@ export function CallTextSquares({ opp, onCall, onText }) {
       <Icon name="message" />
     </button>
   </>
+}
+
+/** The one visual for a prospect on Do Not Contact. */
+export function DncChip() {
+  return <span className="ss-status ss-red ss-dnc" title="This prospect asked not to be contacted">Do not contact</span>
 }

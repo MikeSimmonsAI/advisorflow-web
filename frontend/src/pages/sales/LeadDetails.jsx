@@ -26,7 +26,7 @@ import {
 } from './simpleSales'
 import {
   Icon, DueStatus, ErrorLine, Skeleton, initialsOf, useNotice, useContactActions,
-  CallOutcomeModal,
+  CallOutcomeModal, DncChip,
 } from './SimpleParts'
 
 const TABS = [
@@ -97,6 +97,8 @@ function LeadDetailsBody() {
   const bucket = opp.status === 'open' ? dueBucket(opp.next_action_due_at, new Date(), tz) : null
   const isWon = ['won', 'onboarding', 'live'].includes(opp.stage)
   const hasPhone = !!telHref(opp.phone)
+  const dnc = opp.do_not_contact_detail || {}
+  const blocked = !!(dnc.active || opp.do_not_contact)
 
   return (
     <>
@@ -114,7 +116,7 @@ function LeadDetailsBody() {
                 : <DueStatus bucket={bucket} iso={opp.next_action_due_at} />}
             </div>
             <div className="ss-detail-actions">
-              {hasPhone ? (
+              {blocked ? <DncChip /> : hasPhone ? (
                 <>
                   <button type="button" className="ss-btn ss-green" onClick={() => contact.call(opp)}
                           title="Opens your phone's dialer, then asks what happened">
@@ -131,12 +133,16 @@ function LeadDetailsBody() {
                   <button type="button" className="ss-link" onClick={() => nav('/sales/opportunities/' + opp.id)}>Add one on the full record</button>
                 </span>
               )}
-              <button type="button" className="ss-btn ss-soft"
-                      onClick={() => nav('/sales/book?opp=' + encodeURIComponent(opp.id))}>
-                <Icon name="calendar" /> Book Demo
-              </button>
+              {!blocked && (
+                <button type="button" className="ss-btn ss-soft"
+                        onClick={() => nav('/sales/book?opp=' + encodeURIComponent(opp.id))}>
+                  <Icon name="calendar" /> Book Demo
+                </button>
+              )}
             </div>
           </div>
+          <DoNotContactPanel opp={opp} detail={dnc}
+                             onChanged={msg => { notify(msg); changed() }} />
         </div>
 
         <div className="ss-tabs" role="tablist" aria-label="Lead sections">
@@ -157,10 +163,12 @@ function LeadDetailsBody() {
                   <div>
                     <h3>Status &amp; Next Action</h3>
                     <StageField opp={opp} onSaved={o => { setOpp(prev => ({ ...prev, ...o })); notify('Stage updated.'); changed() }} />
-                    <NextActionFields opp={opp} onSaved={() => { notify('Next action saved.'); changed() }} compact />
-                    <button type="button" className="ss-btn ss-green" onClick={() => setLogging(true)}>
-                      <Icon name="check" /> Log Call Outcome
-                    </button>
+                    {!blocked && <NextActionFields opp={opp} onSaved={() => { notify('Next action saved.'); changed() }} compact />}
+                    {!blocked && (
+                      <button type="button" className="ss-btn ss-green" onClick={() => setLogging(true)}>
+                        <Icon name="check" /> Log Call Outcome
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -196,7 +204,9 @@ function LeadDetailsBody() {
               <div className="ss-twobox">
                 <div>
                   <h3>Next step</h3>
-                  <NextActionFields opp={opp} onSaved={() => { notify('Next action saved.'); changed() }} />
+                  {blocked
+                    ? <p className="ss-count-note" style={{ margin: '0 0 12px' }}>No follow-ups: this prospect asked not to be contacted.</p>
+                    : <NextActionFields opp={opp} onSaved={() => { notify('Next action saved.'); changed() }} />}
                 </div>
                 <div>
                   <h3>Upcoming meetings</h3>
@@ -211,10 +221,12 @@ function LeadDetailsBody() {
                         </span>
                       </div>
                     ))}
-                  <button type="button" className="ss-btn ss-white ss-xs" style={{ marginTop: 10 }}
-                          onClick={() => nav('/sales/book?opp=' + encodeURIComponent(opp.id))}>
-                    <Icon name="calendar" /> Book Demo
-                  </button>
+                  {!blocked && (
+                    <button type="button" className="ss-btn ss-white ss-xs" style={{ marginTop: 10 }}
+                            onClick={() => nav('/sales/book?opp=' + encodeURIComponent(opp.id))}>
+                      <Icon name="calendar" /> Book Demo
+                    </button>
+                  )}
                 </div>
               </div>
               {(isWon || post?.provisioned) && <div style={{ marginTop: 18 }}><WonHandoff opp={opp} post={post} isGod={!!ctx?.is_god} /></div>}
@@ -240,6 +252,105 @@ function LeadDetailsBody() {
       {contact.modals}
       {notice}
     </>
+  )
+}
+
+/**
+ * Do Not Contact — the prospect's explicit request, kept on the server
+ * (sales_contact_suppressions). A rep records it; only a sales manager can
+ * lift it, with a reason, and the history stays. Nothing here is local state.
+ */
+function DoNotContactPanel({ opp, detail, onChanged }) {
+  const [mode, setMode] = useState(null)       // 'record' | 'lift' | null
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const active = detail.active
+  const past = (detail.history || []).filter(r => r.lifted_at)
+
+  async function submit() {
+    const r = reason.trim()
+    if (mode === 'lift' && r.length < 3) { setError('Give the reason for lifting it.'); return }
+    setBusy(true); setError(null)
+    try {
+      if (mode === 'record') {
+        await api.post('/sales/opportunities/' + opp.id + '/do-not-contact',
+                       { reason: r || 'Prospect asked not to be contacted.' })
+        onChanged('Do Not Contact recorded. Follow-ups cleared.')
+      } else {
+        await api.post('/sales/do-not-contact/' + active.id + '/lift', { reason: r })
+        onChanged('Do Not Contact lifted. No follow-up was scheduled — set one if needed.')
+      }
+      setMode(null); setReason('')
+    } catch (e) {
+      setError(e.message || 'Could not save that.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const form = mode && (
+    <div className="ss-dncform">
+      <div className="ss-field">
+        <label htmlFor="ss-dnc-reason">{mode === 'record' ? 'What did they say? (optional)' : 'Why is it being lifted? (required)'}</label>
+        <textarea id="ss-dnc-reason" rows={2} maxLength={1000} value={reason}
+                  onChange={e => setReason(e.target.value)}
+                  placeholder={mode === 'record' ? 'e.g. Asked us to stop calling.' : 'e.g. Recorded on the wrong person.'} />
+      </div>
+      {error && <div className="ss-err" role="alert">{error}</div>}
+      <div className="ss-row-actions">
+        <button type="button" className="ss-btn ss-white ss-xs" onClick={() => { setMode(null); setError(null) }}>Cancel</button>
+        <button type="button" className={'ss-btn ss-xs ' + (mode === 'record' ? 'ss-danger' : 'ss-blue')}
+                disabled={busy} onClick={submit}>
+          {busy ? 'Saving…' : mode === 'record' ? 'Record Do Not Contact' : 'Lift Do Not Contact'}
+        </button>
+      </div>
+    </div>
+  )
+
+  if (active) {
+    return (
+      <div className="ss-dncbanner" role="status">
+        <strong>Do Not Contact</strong>
+        This prospect asked not to be contacted. Recorded by {active.recorded_by || 'a team member'} on {when(active.recorded_at)}
+        {active.reason ? <> — “{active.reason}”</> : null}. Calls, texts, follow-ups, bookings and emails are blocked
+        for {[active.phone && 'this phone', active.email && 'this email'].filter(Boolean).join(' and ')} across every record.
+        {detail.can_lift && !mode && (
+          <div style={{ marginTop: 8 }}>
+            <button type="button" className="ss-btn ss-white ss-xs" onClick={() => setMode('lift')}>Lift (manager correction)</button>
+          </div>
+        )}
+        {form}
+        {past.length > 0 && <DncHistory rows={past} />}
+      </div>
+    )
+  }
+  return (
+    <div className="ss-dncline">
+      {!mode && detail.can_record && (
+        <button type="button" className="ss-link ss-dnclink" onClick={() => setMode('record')}>
+          Prospect asked not to be contacted?
+        </button>
+      )}
+      {form}
+      {past.length > 0 && <DncHistory rows={past} />}
+    </div>
+  )
+}
+
+function DncHistory({ rows }) {
+  return (
+    <details className="ss-dnchist">
+      <summary>Do Not Contact history ({rows.length})</summary>
+      <ul>
+        {rows.map(r => (
+          <li key={r.id}>
+            Recorded by {r.recorded_by || '—'} {when(r.recorded_at)}{r.reason ? ' (“' + r.reason + '”)' : ''};
+            lifted by {r.lifted_by || '—'} {when(r.lifted_at)}: “{r.lift_reason}”
+          </li>
+        ))}
+      </ul>
+    </details>
   )
 }
 
@@ -422,6 +533,7 @@ function NoteForm({ oppId, onSaved }) {
 const EVENT_TITLES = {
   note: 'Note', call_outcome: 'Call', text_logged: 'Text', stage_changed: 'Stage changed',
   created: 'Lead added', appointment_booked: 'Meeting booked', reassigned: 'Reassigned',
+  do_not_contact: 'Do Not Contact', do_not_contact_lifted: 'Do Not Contact lifted',
 }
 
 function Timeline({ items, empty }) {
