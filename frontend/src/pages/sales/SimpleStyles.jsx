@@ -250,12 +250,11 @@ const CSS = `
 .ss-shell .ss-dealcard > button{background:none;border:0;padding:0;text-align:left;width:100%;cursor:pointer;color:inherit}
 .ss-shell .ss-dealcard strong{display:block;font-size:11px;line-height:1.4}
 .ss-shell .ss-dealcard small{display:block;font-size:10px;color:#5f6e83;margin-top:4px;line-height:1.35}
-.ss-shell .ss-dealcard .ss-stage{margin-top:7px;font-size:10px;color:#5f6e83}
+.ss-shell .ss-dealcard .ss-stagechip{display:inline-block;margin-top:8px;font-size:10px;font-weight:700;color:#3d5167;background:#f2f6fa;border:1px solid #e0e8f0;border-radius:5px;padding:2px 7px}
 .ss-shell .ss-dealcard select{margin-top:7px;width:100%;border:1px solid #dce4ee;border-radius:6px;padding:5px 6px;
   font-size:10px;background:#fff;color:#283e58}
 .ss-shell .ss-boardempty{text-align:center;color:#5f6e83;font-size:12px;padding:36px 8px}
 .ss-shell .ss-boardempty strong{display:block;color:#1d4a3a;font-size:13px;margin:6px 0 4px}
-.ss-shell .ss-addlead{width:100%;justify-content:center}
 .ss-shell .ss-footnote{margin-top:20px;color:#5f6e83;font-size:11px}
 
 /* ── Appointments ───────────────────────────────────────────────────── */

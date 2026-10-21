@@ -12,7 +12,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import SalesShell from './SalesShell'
 import NewProspect from './NewProspect'
-import { SIMPLE_COLUMNS, STAGE_LABELS, groupForSimpleBoard, entryStageFor } from './simpleSales'
+import { SIMPLE_COLUMNS, STAGE_LABELS, groupForSimpleBoard } from './simpleSales'
 import { Icon, ErrorLine, Skeleton } from './SimpleParts'
 
 const TONE = ['', 'ss-c2', 'ss-c3', 'ss-c4']
@@ -30,7 +30,7 @@ function PipelineBody() {
   const [resp, setResp] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [creatingIn, setCreatingIn] = useState(null)
+  const [creating, setCreating] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -51,18 +51,6 @@ function PipelineBody() {
     })
   }, [resp])
 
-  async function created(opp, colKey) {
-    setCreatingIn(null)
-    const stage = entryStageFor(colKey)
-    // A new lead starts as a Prospect. Adding it from a later column moves it
-    // there with the same stage change the Lead Details picker makes.
-    if (stage && stage !== opp.stage) {
-      try { await api.patch('/sales/opportunities/' + opp.id, { stage }) }
-      catch (e) { setError(e.message || 'Lead added, but its stage could not be set.') }
-    }
-    load()
-  }
-
   return (
     <>
       <div className="ss-sections">
@@ -70,7 +58,9 @@ function PipelineBody() {
           <h2>My Pipeline</h2>
           <p>See where each customer stands. Click a card to work the deal.</p>
         </div>
-        <button type="button" className="ss-btn ss-white" onClick={() => setCreatingIn('new')}>
+        {/* THE one Add Lead. A new lead starts as a Prospect (New Leads) — the
+            same rule as everywhere else; it is moved from Lead Details. */}
+        <button type="button" className="ss-btn ss-white" onClick={() => setCreating(true)}>
           <Icon name="plus" /> Add Lead
         </button>
       </div>
@@ -99,15 +89,12 @@ function PipelineBody() {
                       <button type="button" onClick={() => nav('/sales/leads/' + c.id)}>
                         <strong>{c.contact_name || c.company_name}</strong>
                         {c.contact_name && <small>{c.company_name}</small>}
-                        {col.stages.length > 1 && <div className="ss-stage">{STAGE_LABELS[c.stage] || c.stage_label}</div>}
+                        {/* The REAL stage, on every card: the column is a grouping,
+                            this is the fact (Closing is not "a demo is booked"). */}
+                        <span className="ss-stagechip">{STAGE_LABELS[c.stage] || c.stage_label || c.stage}</span>
                       </button>
                     </div>
                   ))}
-                  {col.key !== 'won' && (
-                    <button type="button" className="ss-btn ss-white ss-addlead" onClick={() => setCreatingIn(col.key)}>
-                      <Icon name="plus" /> Add Lead
-                    </button>
-                  )}
                 </section>
               )
             })}
@@ -132,14 +119,16 @@ function PipelineBody() {
             </section>
           )}
           <p className="ss-footnote">
-            Click any card, then use Pipeline stage on Lead Details to move it. Need every stage?{' '}
+            Each card shows its exact stage. Demo Scheduled groups Demo Build, Demo / Proposal and Closing;
+            Won groups Won, Onboarding and Live. Click a card, then use Pipeline stage on Lead Details to move it.
+            Need every stage as its own column?{' '}
             <button type="button" className="ss-link" onClick={() => nav('/sales/pipeline/stages')}>Open the all-stages board</button>
           </p>
         </>
       )}
 
-      {creatingIn && (
-        <NewProspect onClose={() => setCreatingIn(null)} onCreated={opp => created(opp, creatingIn)} />
+      {creating && (
+        <NewProspect onClose={() => setCreating(false)} onCreated={() => { setCreating(false); load() }} />
       )}
     </>
   )
