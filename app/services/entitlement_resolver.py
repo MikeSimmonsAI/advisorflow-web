@@ -99,6 +99,7 @@ CATEGORIES: Dict[str, str] = {
     "master_dashboard": "Reporting & Analytics",
     "ai_assist": "AI & Automation",
     "wholesale_real_estate": "Vertical",
+    "wholesale_workspace": "Vertical",
 }
 DEFAULT_CATEGORY = "Other"
 

@@ -70,6 +70,12 @@ FEATURES: Dict[str, str] = {
     # them. An organization with this key and no `leads` is the incoherent
     # configuration the WUPA note below records, in a new shape.
     "wholesale_real_estate": "Wholesale real estate acquisition and disposition",
+    # Makes this org a WHOLESALE WORKSPACE: named Wholesale seats open the
+    # Wholesale app here, locked to it, exactly like EvoSys's own Wholesale org.
+    # A second tenant of the shared engine (BookaBoost - #272) on its own data.
+    # Counts only when listed EXPLICITLY together with `wholesale_real_estate`
+    # (app/services/program_experience.py) - a NULL allow-list never does.
+    "wholesale_workspace": "Wholesale workspace: this organization runs the Wholesale app as its own tenant",
     # Insurance-agency vertical (Max Life Command). A prospect IS a Lead, so it
     # REQUIRES `leads`. Max Life values are data (config/fixtures), not code.
     "insurance_agency": "Insurance agency command: prospects, distribution, applications, policies, recruiting",
@@ -141,6 +147,7 @@ REQUIRES = {
     "crm_connectors": ("crm",),
     "case_files":     ("leads",),
     "wholesale_real_estate": ("leads",),
+    "wholesale_workspace": ("wholesale_real_estate",),
     "insurance_agency": ("leads",),
     "roofing_program": ("leads",),
 }
