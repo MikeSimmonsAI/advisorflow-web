@@ -286,6 +286,15 @@ def user_authorized_platform_slugs(user: User, db: Session) -> set:
 # THE AUTHORIZED CONTEXT LIST — built by the server, never by the browser
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _experience(db, user, org, is_program) -> str:
+    try:
+        from app.services.program_experience import experience_for
+        return experience_for(db, user, org, is_program)
+    except Exception:  # pragma: no cover - never let a hint break login
+        _log.warning("could not resolve experience for %s", getattr(org, "id", None), exc_info=True)
+        return "platform"
+
+
 def _roofing_enabled(org) -> bool:
     try:
         from app.services.roofing.common import explicitly_enabled
@@ -425,6 +434,10 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
             # not set up opened a dead "isn't turned on" screen on every entry
             # (prod, 2026-10-20). /roofing-ops still enforces it server-side.
             "program_route": "/program/roofing" if _roofing_enabled(org) else None,
+            # THE EXPERIENCE THIS WORKSPACE OPENS FOR THIS PERSON - the app
+            # renders this shell and never the general platform for a program
+            # workspace (program_experience enforces the Wholesale lock).
+            "experience": _experience(db, user, org, org.id in program_orgs),
         })
 
     platform = [c for c in contexts if c["type"] == "platform"]

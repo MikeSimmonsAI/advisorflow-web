@@ -283,6 +283,15 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
                 detail="You must change your password before continuing. Use /auth/change-password."
             )
 
+    # PROGRAM ISOLATION (server-side). A Wholesale-seat login working in its
+    # Wholesale workspace reaches only Wholesale (+ the shared shell core),
+    # never the general platform screens or another program's menus. God and
+    # super_admin are the internal administration experience and never locked.
+    # See app/services/program_experience.py.
+    if user.role not in ("god_admin", "super_admin"):
+        from app.services import program_experience
+        program_experience.enforce(db, user, request)
+
     # Cross-org context: god_admin can view any org's data or see ALL orgs combined.
     # expunge() detaches the user from the SQLAlchemy session BEFORE any mutation
     # so changes are never written back to the DB.

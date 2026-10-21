@@ -950,7 +950,11 @@ export default function Layout({ children }) {
               // means the answer has not arrived yet, and the item stays
               // hidden until it does — a nav entry that appears a second late
               // is far better than one that flashes and vanishes.
-              if (item.programOnly && !programActive && !sciAvailable) return false
+              // SCI's Family Service Center shows ONLY inside SCI. Holding SCI
+              // somewhere else no longer puts it on another workspace's rail
+              // (prod 2026-10-20: it appeared on wholesale@'s screens). Other
+              // programs are reached through "Switch program".
+              if (item.programOnly && !programActive) return false
               if (item.launchOnly &&
                   (!launchNavState?.exists || launchNavState.completed)) return false
               // A capability item is NEVER shown on the strength of a role.
