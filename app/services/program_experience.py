@@ -31,6 +31,10 @@ from sqlalchemy.orm import Session
 
 WHOLESALE = "wholesale"
 WHOLESALE_HOST_SLUG = "evo-integrated-solutions-llc"
+# Explicit allow-list key that makes ANOTHER org a Wholesale workspace (second
+# tenant of the shared engine, e.g. BookaBoost - #272). Registered in
+# app/services/entitlements.py. Only an explicit listing counts.
+WHOLESALE_WORKSPACE_KEY = "wholesale_workspace"
 INTERNAL_ROLES = ("god_admin", "super_admin")
 
 # What a Wholesale-locked request may reach. Everything Wholesale itself calls
@@ -64,12 +68,25 @@ def _named_wholesale_seat(db: Session, user) -> bool:
 
 
 def is_wholesale_host(org, user) -> bool:
-    """The org that hosts a named Wholesale seat: only EvoSys's internal
-    Wholesale org - never SCI, Roofing or any customer. The caller has already
-    established that this person holds an active membership there (home org
-    for wholesale@, an org_admin seat for an operator such as Michael)."""
-    return bool(org is not None and user is not None
-                and (org.slug or "") == WHOLESALE_HOST_SLUG)
+    """An org that hosts a named Wholesale seat. Two kinds, and nothing else:
+
+      * EvoSys's internal Wholesale org (WHOLESALE_HOST_SLUG) - built in, so
+        EvoSys Wholesale keeps working with no data change; and
+      * any other org whose stored allow-list EXPLICITLY names
+        WHOLESALE_WORKSPACE_KEY together with `wholesale_real_estate` - a second
+        Wholesale tenant such as BookaBoost (#272) runs the same shared engine
+        on its own data.
+
+    Never by industry, slug pattern or a NULL ("everything") allow-list, so SCI,
+    Roofing, Atlantis and every customer that merely has the Wholesale feature
+    (e.g. a CRM customer with `wholesale_real_estate`) are NOT hosts. The caller
+    has already established that this person holds an active membership there
+    (home org for wholesale@, an org_admin seat for an operator)."""
+    if org is None or user is None:
+        return False
+    if (org.slug or "") == WHOLESALE_HOST_SLUG:
+        return True
+    return _explicit(org, WHOLESALE_WORKSPACE_KEY) and _explicit(org, "wholesale_real_estate")
 
 
 def experience_for(db: Session, user, org, is_program: bool, named_wholesale: Optional[bool] = None) -> str:
@@ -124,4 +141,6 @@ def enforce(db: Session, user, request: Request) -> None:
     if locked_experience(db, user, request) == WHOLESALE:
         raise HTTPException(
             status_code=403,
-            detail="This workspace runs EvoSys Wholesale. That screen is not part of Wholesale.")
+            # Brand-neutral: a second Wholesale tenant (BookaBoost) must not be
+            # told it runs "EvoSys Wholesale".
+            detail="This workspace runs Wholesale. That screen is not part of Wholesale.")
