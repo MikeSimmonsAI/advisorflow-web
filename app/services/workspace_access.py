@@ -455,11 +455,16 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
             Membership.scope_type == SCOPE_PRODUCT,
             Membership.scope_id == WHOLESALE,
             Membership.is_active.is_(True)).first() is not None)
-        host = next((w for w in workspaces
-                     if w["organization_id"] == user.organization_id), None)
         # Wholesale product currently operates from EvoSys's internal org.
-        # Never silently run it against a customer such as SCI or Roofing.
-        if named_wholesale and host and host["organization_slug"] == "evo-integrated-solutions-llc":
+        # Never silently run it against a customer such as SCI or Roofing. The
+        # host is that org when this person holds an active membership in it -
+        # their home org (wholesale@) or an org_admin seat there (an operator
+        # whose home column is empty, e.g. Michael).
+        host = next((w for w in workspaces
+                     if w["organization_id"] == user.organization_id
+                     and w["organization_slug"] == "evo-integrated-solutions-llc"), None) or \
+            next((w for w in workspaces if w["organization_slug"] == "evo-integrated-solutions-llc"), None)
+        if named_wholesale and host:
             product_contexts.append({
                 "type": "product", "key": WHOLESALE, "label": "Wholesale Operations",
                 "organization_id": host["organization_id"], "path": "/wholesale/evosense",
@@ -488,11 +493,17 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
         default = next((c for c in contexts if c["type"] == "platform" and c.get("path") == "/god"), None)
         if default is None:
             default = platform[0] if platform else (executive[0] if executive else {"type": "legacy_tenant", "path": "/"})
+    elif (len(workspaces) + len(product_contexts) > 1) and (executive or platform):
+        # A MULTI-PROGRAM OPERATOR who also has a back office / executive suite
+        # starts at the program launcher ("Choose your business"), where Back
+        # Office is one card among the programs - never dropped straight into
+        # the back office (Michael, 2026-10-20, issue #268).
+        default = {"type": "workspace_selector", "path": "/workspaces"}
     elif executive:
         default = executive[0]
     elif platform:
         default = platform[0]
-    elif product_contexts:
+    elif product_contexts and product_contexts[0]["organization_id"] == getattr(user, "organization_id", None):
         # A named product seat hosted by the person's OWN home organization is
         # their home program (wholesale@ -> Wholesale). Login opens it through
         # the verified product handoff; every other workspace they hold stays
@@ -573,6 +584,9 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
                         and not product_contexts and not platform and not executive
                         and getattr(user, "role", None) != "god_admin",
         "has_back_office": bool(platform),
+        # The launcher's Back Office card: the established entry, only when the
+        # server confirms a back office (never derived in the browser).
+        "back_office_path": (platform[0].get("path") or "/sales") if platform else None,
         "workspace_count": len(workspaces),
         "default_context": default,
         # Entitlements and readiness. Not contexts, and deliberately named so.

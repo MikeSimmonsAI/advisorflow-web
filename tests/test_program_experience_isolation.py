@@ -137,3 +137,25 @@ def test_cross_program_direct_api_isolation(client, w):
     assert client.get("/wholesale/settings", headers=_h(db, w["sci_staff"], ws=w["evo"].id)).status_code in (402, 403)
     # Wholesale cannot read SCI data while standing in Wholesale
     assert client.get("/program/command", headers=_h(db, w["ws"], ws=w["evo"].id)).status_code in (403, 404)
+
+
+def test_insurance_workspace_is_named_from_its_explicit_entitlement(client, w):
+    """Unified launcher: an agency workspace that EXPLICITLY holds insurance_agency
+    is the Insurance program; an insurance-industry org with a legacy NULL list is
+    not. Naming the experience grants nothing - membership still decides."""
+    db = w["db"]
+    ins = _org(db, "Max Life Demo Agency (DEMO)", "max-life-demo-agency", "insurance",
+               ["leads", "insurance_agency", "users"])
+    legacy = Organization(name="Legacy Agency", slug="legacy-%s" % uuid.uuid4().hex[:4], plan="trial",
+                          industry="insurance", is_active=True, enabled_features=None)
+    db.add(legacy)
+    db.commit()
+    _m(db, w["ws"], "customer_org", ins.id)
+    _m(db, w["ws"], "customer_org", legacy.id)
+    c = client.get("/auth/my-contexts", headers=_h(db, w["ws"])).json()
+    exp = {x["organization_id"]: x["experience"] for x in c["workspace_contexts"]}
+    assert exp[ins.id] == "insurance" and exp[legacy.id] == "platform"
+    assert exp[w["sci"].id] == "sci" and exp[w["atl"].id] == "energy"
+    # someone without a membership never sees it
+    c2 = client.get("/auth/my-contexts", headers=_h(db, w["sci_staff"])).json()
+    assert ins.id not in {x["organization_id"] for x in c2["workspace_contexts"]}

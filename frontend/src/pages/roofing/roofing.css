@@ -200,3 +200,11 @@
 .rf-gate { min-height: 100vh; display: grid; place-items: center; background: var(--rf-mist); padding: 24px; }
 .rf-gate__card { max-width: 560px; padding: 32px; display: grid; gap: 10px; }
 @media (max-width: 760px) { .rf-live { display: none; } }
+/* Phone header: menu, company, Switch program, avatar - the title and the
+   sample tag give way so the one Switch Program button always fits. */
+@media (max-width: 640px) {
+  .rf-top { gap: 10px; }
+  .rf-top__title { font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rf-top > .rf-sample, .rf-top > [class*="sample"] { display: none; }
+  .rf-top__right { gap: 8px; }
+}

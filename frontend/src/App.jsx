@@ -149,7 +149,7 @@ import AIHub from './pages/AIHub'
 import Availability from './pages/Availability'
 import { Unauthorized, NotFound, VerificationUnavailable } from './pages/AccessState'
 import { decideSciDoor, shouldLandInSci, SCI_ORG_NAME } from './auth/sciDoor'
-import { experienceRedirect } from './auth/programExperience'
+import { experienceRedirect, programEntry } from './auth/programExperience'
 import { workspaceProgramDestination, productWorkspaceDestination } from './auth/workspaceProgramDoor'
 import CRMIntegration from './pages/CRMIntegration'
 import CRM from './pages/CRM'
@@ -336,7 +336,7 @@ import AIWorkforceCommand from './pages/AIWorkforceCommand'
 import AIWorkforceEmployee from './pages/AIWorkforceEmployee'
 const GodAIWorkforceBuilder = lazyPage(() => import('./pages/god/GodAIWorkforceBuilder'))
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
-         api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
+         api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext, setBrandContext,
          clearWorkspaceContext, getBranding, fetchAndStoreBranding } from './api/client'
 import { decideWorkspaceAccess, contextsListWorkspace,
          VERIFYING, AUTHORIZED, DENIED, UNVERIFIED } from './auth/workspaceGuard'
@@ -554,6 +554,17 @@ function HomeRedirect() {
     if (shouldLandInSci(ctx)) {
       return <Navigate to="/sci" replace />
     }
+    // INSIDE A WORKSPACE, "Overview" (/) STAYS IN IT. The sidebar's Overview
+    // is `/`; it used to fall through to the login default below, so Atlantis'
+    // Overview sent wholesale@ back to Wholesale. Login and the program
+    // launcher always set the selection first, so a fresh login still lands
+    // on its default; this only keeps a person where they already chose to be.
+    const chosen = user?.role !== 'god_admin' && user?.role !== 'super_admin'
+      ? (ctx.workspace_contexts || []).find(w => w.organization_id === getWorkspaceContext())
+      : null
+    if (chosen && def.type !== 'executive') {
+      return <Navigate to={'/workspace/' + chosen.organization_id} replace />
+    }
     // A named product seat on the person's own home organization is their
     // home program (server-decided): open it, never a previously selected app.
     if (def.type === 'product' && def.path) {
@@ -621,6 +632,41 @@ function useAuthorizedContexts() {
     error: state.error,
     retry: () => setAttempt(a => a + 1),
   }
+}
+
+/**
+ * NO WRONG-BRAND FLASH. A workspace's home (Overview, the energy / agency
+ * dashboards, the sidebar) is chosen from the STORED branding. Right after a
+ * switch that cache still describes the previous workspace, so the generic
+ * EvoSys dashboard painted first and the real one replaced it a moment later
+ * (Atlantis, 2026-10-20). Nothing renders until the stored branding is the
+ * selected workspace's own.
+ */
+function WorkspaceBrandReady({ organizationId, children }) {
+  const cached = getBranding()
+  const fits = !organizationId || cached?.organization_id === organizationId
+  const [state, setState] = useState(fits ? 'ready' : 'loading')
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    if (fits) { setState('ready'); return undefined }
+    let alive = true
+    setState('loading')
+    fetchAndStoreBranding().then(b => {
+      if (alive) setState(b?.organization_id === organizationId ? 'ready' : 'error')
+    }).catch(() => { if (alive) setState('error') })
+    return () => { alive = false }
+  }, [organizationId, fits, attempt])
+  if (state === 'ready' && fits) return children
+  return <main style={{ minHeight: '80vh', display: 'grid', placeItems: 'center', padding: 24 }}>
+    <div style={{ maxWidth: 420, textAlign: 'center', color: 'var(--text-secondary)' }}>
+      {state === 'error' ? <>
+        <h1 style={{ fontSize: 22 }}>Could not open this program</h1>
+        <p>Your workspace could not be verified. Nothing was changed.</p>
+        <button type="button" onClick={() => setAttempt(a => a + 1)}>Try again</button>
+        <a href="/workspaces" style={{ display: 'block', marginTop: 14 }}>Switch program</a>
+      </> : <span role="status">Opening your program…</span>}
+    </div>
+  </main>
 }
 
 /**
@@ -748,6 +794,12 @@ function WorkspaceRoute() {
     const entry = (ctx?.workspace_contexts || []).find(w => w && w.organization_id === organizationId)
     const programDestination = workspaceProgramDestination(entry)
     if (programDestination) return <Navigate to={programDestination} replace />
+    // Other dedicated programs (Insurance -> /agency) open their own home
+    // directly, after this workspace's branding is verified.
+    const entryHome = programEntry(entry)
+    if (entryHome && !new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('product')) {
+      return <ProductWorkspaceLaunch organizationId={organizationId} destination={entryHome} />
+    }
     // A Wholesale workspace (server-decided experience) opens Wholesale through
     // the verified product hand-off - never the general platform Overview.
     if (entry?.experience === 'wholesale' && !new URLSearchParams(
@@ -767,7 +819,9 @@ function WorkspaceRoute() {
     }
     // ProtectedRoute already wraps its children in Layout + ContextBanner; the
     // second banner this used to add was the same banner drawn twice.
-    return <ProtectedRoute><AgencyHomeGate><Overview /></AgencyHomeGate></ProtectedRoute>
+    return <WorkspaceBrandReady organizationId={organizationId}>
+      <ProtectedRoute><AgencyHomeGate><Overview /></AgencyHomeGate></ProtectedRoute>
+    </WorkspaceBrandReady>
   }
 
   if (decision.state === DENIED) {
@@ -990,6 +1044,14 @@ function WorkspaceSelector() {
     return <Navigate to={'/workspace/' + workspaces[0].organization_id} replace />
   }
   return <ProgramAccessPortal contexts={ctx} onChoose={(item) => {
+    // Back Office / Executive Suite: leave any program workspace first, so no
+    // stale workspace header follows the person into the back office.
+    if (item.type === 'back_office') { clearWorkspaceContext(); navigate(item.path || '/sales'); return }
+    if (item.type === 'executive') {
+      clearWorkspaceContext()
+      if (item.platform_id) setBrandContext(item.platform_id, item.platform_name || '')
+      navigate('/executive'); return
+    }
     // Selection is a context choice, not an authorization grant. The
     // /workspace route confirms membership again and product routes enforce
     // their own named seat.

@@ -104,7 +104,9 @@ function ExitLink() {
     return () => { alive = false }
   }, [])
   if (!view) return null
-  if (view.multi) return <button type="button" className="sl-exit" onClick={() => navigate('/workspaces')}>← Switch program</button>
+  // A multi-program login switches with the one Switch Program button in the
+  // top-right header (TopBar); the sidebar does not repeat it.
+  if (view.multi) return null
   return view.only
     ? <button type="button" className="sl-exit" onClick={async () => { await logout(); window.location.href = '/login' }}>Sign out</button>
     : <button type="button" className="sl-exit" onClick={() => navigate('/')}>← Back to main menu</button>
