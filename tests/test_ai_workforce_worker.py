@@ -34,7 +34,7 @@ def test_worker_is_not_wired_into_render_or_main():
 def test_a_pass_with_no_employees_claims_nothing(db_session):
     out = _load().run_pass(db_session)
     assert out == {"organizations": 0, "employees": 0, "claimed": 0,
-                   "ran": 0, "errors": 0}
+                   "ran": 0, "errors": 0, "leases_recovered": 0}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -127,7 +127,7 @@ def test_the_worker_pass_claims_and_runs_a_queued_lead(db_session):
 
     # The worker, not a test helper, claimed it and ran it.
     assert out == {"organizations": 1, "employees": 1, "claimed": 1,
-                   "ran": 1, "errors": 0}
+                   "ran": 1, "errors": 0, "leases_recovered": 0}
     item = _items(db_session, emp)[0]
     assert item.state != C.ASSIGNED, "the item was never worked"
 
