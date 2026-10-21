@@ -448,3 +448,20 @@ def test_an_unreadable_line_is_listed_and_left_alone(world):
             if s.id in sigs_before} == sigs_before
     assert not db.query(EvoSenseSignal).filter_by(property_id=world["not_owed"].id, signal_type="TAX_SUIT",
                                                    active=True).count()
+
+
+def test_status_route_is_admin_only_and_read_only(client, world, admin_auth_headers, auth_headers):
+    db, org = world["db"], world["org"]
+    assert client.get("/wholesale/evosense/roll-fix/status", headers=auth_headers).status_code == 403
+    before = _state(db, org)
+    r = client.get("/wholesale/evosense/roll-fix/status", headers=admin_auth_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["in_scope"] == 2 and r.json()["runs"] == [] and r.json()["hunt_running"] is False
+    db.expire_all()
+    assert _state(db, org) == before
+    code = client.post("/wholesale/evosense/roll-fix/dry-run", headers=admin_auth_headers).json()["confirm_with"]
+    rid = client.post("/wholesale/evosense/roll-fix/apply", headers=admin_auth_headers,
+                      json={"confirm": code}).json()["run_id"]
+    s = client.get("/wholesale/evosense/roll-fix/status", headers=admin_auth_headers).json()
+    assert s["in_scope"] == 0 and s["runs"][0]["id"] == rid and s["runs"][0]["status"] == "roll_fix_applied"
+    assert s["runs"][0]["totals"]["signals_retracted"] == 2

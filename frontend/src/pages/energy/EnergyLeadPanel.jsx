@@ -13,6 +13,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api/client'
+import ChariotEnroll from './ChariotEnroll'
 import './energy.css'
 
 const STATE = { have: 'Have it', missing: 'Missing', unknown: 'Not known', na: '—' }
@@ -39,6 +40,7 @@ export default function EnergyLeadPanel({ leadId }) {
     <div className="eo eo-leadpanel" data-testid="energy-lead-panel">
       <Qualification q={q} leadId={leadId} onSaved={setQ} />
       {q.segment === 'commercial' && <Commercial leadId={leadId} onChange={load} />}
+      {q.segment === 'residential' && <ChariotEnroll leadId={leadId} />}
     </div>
   )
 }
