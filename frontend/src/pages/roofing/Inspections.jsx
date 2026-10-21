@@ -199,7 +199,7 @@ function LeadPicker({ onPick, onCancel }) {
   )
 }
 
-function Booking({ leadId, onClose, onBooked, say }) {
+export function Booking({ leadId, onClose, onBooked, say }) {
   const { status } = useRoofing()
   const ws = useApi(`/roofing-ops/leads/${leadId}`)
   const types = status?.profile?.inspection_types?.length ? status.profile.inspection_types : ['Roof Inspection']
@@ -255,6 +255,16 @@ function Booking({ leadId, onClose, onBooked, say }) {
     } finally { setBusy(false) }
   }
 
+  const navTo = useNavigate()
+  const [opening, setOpening] = useState(false)
+  // The booked appointment opens ITS inspection form (one per appointment).
+  const openForm = async () => {
+    setOpening(true)
+    try {
+      const ins = await api.post('/roofing-ops/inspections', { lead_id: leadId, booking_link_id: done.booking_id })
+      navTo(`${BASE}/${ins.id}`)
+    } catch (e) { say(errText(e), 'err'); setOpening(false) }
+  }
   const L = ws.data?.lead
   const optedOut = L?.status === 'dnc'
   return (
@@ -361,8 +371,9 @@ function Booking({ leadId, onClose, onBooked, say }) {
               : <><Icon name="chat" size={16} />No text sent to the homeowner</>}</li>
           </ul>
           <div className="rf-book__foot">
-            <Link className="rf-btn rf-btn--ghost" to={`/program/roofing/conversations?lead=${leadId}`}>Open conversation</Link>
-            <button className="rf-btn rf-btn--primary" onClick={onClose}>Done</button>
+            <Link className="rf-btn rf-btn--ghost" to={`/program/roofing/homeowners/${leadId}`}>Open homeowner</Link>
+            <button className="rf-btn rf-btn--ghost" onClick={onClose}>Done</button>
+            <button className="rf-btn rf-btn--primary" disabled={opening} onClick={openForm}><Icon name="clipboard" size={16} />{opening ? 'Opening…' : 'Open inspection form'}</button>
           </div>
         </div>
       )}

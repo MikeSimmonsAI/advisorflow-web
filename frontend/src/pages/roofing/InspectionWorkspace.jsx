@@ -122,6 +122,8 @@ export default function InspectionWorkspace() {
   if (!ins) return <div className="rf-page"><Loading label="Opening the inspection" /></div>
   const ch = ins.choices || CHOICES_FALLBACK
   const locked = ins.status === 'completed' || !ins.can_edit
+  // Opened before the appointment day: say plainly which date the report will carry.
+  const early = !locked && ins.scheduled_at && ins.scheduled_at.slice(0, 10) > new Date().toLocaleDateString('en-CA')
   const H = ins.homeowner || {}
 
   // Complete is only offered when the server holds every change. The server
@@ -169,12 +171,17 @@ export default function InspectionWorkspace() {
         <div className="rf-note rf-note--warn" style={{ marginBottom: 12 }}><Icon name="alert" size={16} />
           <span>No connection to the server. Keep working - your changes are saved on this device and will sync when the connection returns. They are not on the server yet.</span></div>
       )}
+      {early && (
+        <div className="rf-note rf-note--warn"><Icon name="calendar" size={18} />
+          <span>This appointment is booked for <b>{localWhen(ins.scheduled_at)}</b>. If you’re at the property now, the report will record today as the inspection date.</span></div>
+      )}
       <header className="ri-head rf-panel">
         <div className="ri-head__who">
           <Avatar name={H.name} size={52} />
           <div>
             <h1 className="ri-h1">{H.name}</h1>
             <p className="ri-addr"><Icon name="pin" size={15} />{H.address || 'No address on file'}</p>
+            <Link className="ri-holink" to={`/program/roofing/homeowners/${ins.lead_id}`}>Homeowner record</Link>
           </div>
         </div>
         <div className="ri-head__tags">
@@ -182,7 +189,7 @@ export default function InspectionWorkspace() {
           {ins.sample_data && <SampleTag />}
         </div>
         <dl className="ri-facts">
-          <div><dt>When</dt><dd>{ins.scheduled_at ? localWhen(ins.scheduled_at) : 'Not scheduled'}</dd></div>
+          <div><dt>When</dt><dd>{ins.scheduled_at ? localWhen(ins.scheduled_at) : `Unscheduled visit · started ${ins.started_at ? new Date(ins.started_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'now'}`}</dd></div>
           <div><dt>Type</dt><dd>{ins.inspection_type}</dd></div>
           <div><dt>Inspector</dt><dd>{ins.inspector_name || '—'}</dd></div>
           <div><dt>Stage</dt><dd>{ins.opportunity?.stage_label}</dd></div>

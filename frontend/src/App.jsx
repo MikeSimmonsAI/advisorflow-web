@@ -116,6 +116,7 @@ const RoofingInspectionReport = lazyPage(() => import('./pages/roofing/Inspectio
 const RoofingPerformance = lazyPage(() => import('./pages/roofing/Performance'))
 const RoofingPipeline = lazyPage(() => import('./pages/roofing/Pipeline'))
 const RoofingLeads = lazyPage(() => import('./pages/roofing/LeadsData'))
+const RoofingHomeowner = lazyPage(() => import('./pages/roofing/Homeowner'))
 const RoofingSettings = lazyPage(() => import('./pages/roofing/Settings'))
 const RoofingLanding = lazyPage(() => import('./pages/roofing/RoofingLanding'))
 const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
@@ -1458,6 +1459,7 @@ export default function App() {
           <Route path="performance" element={<RoofingPerformance />} />
           <Route path="pipeline" element={<RoofingPipeline />} />
           <Route path="leads" element={<RoofingLeads />} />
+          <Route path="homeowners/:leadId" element={<RoofingHomeowner />} />
           <Route path="settings" element={<RoofingSettings />} />
         </Route>
         <Route path="/roofing" element={<RoofingLanding />} />

@@ -323,6 +323,9 @@ def _next_action(lead: Lead, opp: RoofingOpportunity, sig: J.Signals, cadence) -
         return {"key": "await_reply", "label": "Follow-up running - touch %d sent" % (cadence.current_touch_number or 0)}
     if opp.stage == C.CONTACTED:
         return {"key": "await_reply", "label": "Waiting on a reply"}
+    if lead.source == "manual" and opp.stage in (C.IMPORTED, C.QUALIFIED):
+        # Added by hand - usually someone who called in or is standing at the door.
+        return {"key": "inspect", "label": "Book an inspection, or start one on site"}
     if opp.stage == C.QUALIFIED:
         return {"key": "enroll", "label": "Ready to start follow-up"}
     return {"key": "review", "label": "Review why this homeowner isn't ready to contact"}
@@ -349,6 +352,7 @@ def lead_workspace(lead_id: str, ctx: C.Ctx = Depends(ctx_dep)):
     names = C.user_names(ctx.db, ctx.org_id)
     notes = (ctx.db.query(LeadNote).filter(LeadNote.organization_id == ctx.org_id, LeadNote.lead_id == lead.id)
              .order_by(LeadNote.created_at.desc()).limit(50).all())
+    names = INS._names(ctx, [n.author_user_id for n in notes])   # authors by their own name
     b = sig.booked(lead.id)
     return {
         "lead": {"id": lead.id, "name": C.lead_name(lead), "first_name": lead.first_name,
@@ -385,6 +389,113 @@ def lead_workspace(lead_id: str, ctx: C.Ctx = Depends(ctx_dep)):
         "notes": [{"id": n.id, "body": n.body, "author": names.get(n.author_user_id), "at": C.iso(n.created_at)}
                   for n in notes],
     }
+
+
+LEAD_SOURCES = ["Phone call", "Website", "Referral", "Door visit", "Past estimate", "Other"]
+
+
+class HomeownerIn(BaseModel):
+    first_name: str = Field(..., min_length=1, max_length=80)
+    last_name: Optional[str] = Field(None, max_length=80)
+    phone: Optional[str] = Field(None, max_length=40)
+    email: Optional[str] = Field(None, max_length=200)
+    street_address: Optional[str] = Field(None, max_length=200)
+    city: Optional[str] = Field(None, max_length=100)
+    state: Optional[str] = Field(None, max_length=40)
+    zip_code: Optional[str] = Field(None, max_length=20)
+    roof_issue: Optional[str] = Field(None, max_length=300)
+    service_type: Optional[str] = None
+    urgency: Optional[str] = None
+    roof_age: Optional[float] = Field(None, ge=0, le=150)
+    source: Optional[str] = Field(None, max_length=60)
+    owner_id: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=4000)
+    allow_duplicate: bool = False
+
+
+def _possible_duplicates(ctx: C.Ctx, body: "HomeownerIn", phone_n: str) -> List[Dict[str, Any]]:
+    """Homeowners in THIS company only that look like the same person or the
+    same property: phone + last name, email, or street + ZIP."""
+    from app.services.dedup_service import normalize_last_name
+    last_n = normalize_last_name(body.last_name or "")
+    email = (body.email or "").strip().lower()
+    street = " ".join((body.street_address or "").lower().split())
+    zc = (body.zip_code or "").strip()[:5]
+    q = ctx.db.query(Lead).filter(Lead.organization_id == ctx.org_id)
+    out = []
+    for l in q.all():
+        why = None
+        if phone_n and l.phone == phone_n and last_n and normalize_last_name(l.last_name or "") == last_n:
+            why = "Same phone and last name"
+        elif email and (l.email or "").strip().lower() == email:
+            why = "Same email"
+        elif street and zc and " ".join((l.street_address or "").lower().split()) == street \
+                and (l.zip_code or "").strip()[:5] == zc:
+            why = "Same property address"
+        if why:
+            out.append({"lead_id": l.id, "name": C.lead_name(l), "address": C.address(l), "phone": l.phone,
+                        "reason": why})
+    return out[:5]
+
+
+@router.post("/leads", status_code=201, dependencies=_WRITE)
+def add_homeowner(body: HomeownerIn, ctx: C.Ctx = Depends(ctx_dep)):
+    """ADD ONE HOMEOWNER by hand - a real Lead in THIS roofing company.
+
+    Same record the importer makes (address on the Lead, roofing answers in
+    custom_fields under the importer's keys), same plan-capacity check, same
+    master-contact retention and audit. Saving sends nothing, starts no
+    follow-up and books nothing: contact consent is not assumed, so the
+    homeowner only becomes contactable through the normal checks."""
+    from app.services import lead_capacity, master_contacts
+    from app.services.dedup_service import normalize_phone
+    data = body.model_dump() if hasattr(body, "model_dump") else body.dict()
+    for k in ("service_type", "urgency"):
+        if data.get(k) not in (None, "") and data[k] not in C.CHOICES[k]:
+            raise HTTPException(400, "%s must be one of %s" % (k, ", ".join(C.CHOICES[k])))
+    if not (body.phone or body.email or body.street_address):
+        raise HTTPException(400, "Add a phone, an email or the property address so you can reach this homeowner.")
+    phone_n = normalize_phone(body.phone or "") if body.phone else ""
+    owner_id = body.owner_id or None
+    if owner_id and owner_id != ctx.user.id:
+        C.require_manager(ctx)
+    if owner_id:
+        if ctx.db.query(User).filter(User.id == owner_id, User.organization_id == ctx.org_id).first() is None:
+            raise HTTPException(404, "Salesperson not found in this company")
+    elif ctx.db.query(User).filter(User.id == ctx.user.id, User.organization_id == ctx.org_id).first():
+        owner_id = ctx.user.id                   # a salesperson's own homeowner by default
+    dups = _possible_duplicates(ctx, body, phone_n)
+    if dups and not body.allow_duplicate:
+        raise HTTPException(409, {"code": "POSSIBLE_DUPLICATE",
+                                  "message": "This looks like a homeowner you already have.",
+                                  "duplicates": dups})
+    lead_capacity.require_capacity_user_initiated(ctx.db, ctx.org, adding=1)
+    cf = {k: data[k] for k in ("roof_issue", "service_type", "urgency", "roof_age") if data.get(k) not in (None, "")}
+    if isinstance(cf.get("roof_age"), float) and cf["roof_age"].is_integer():
+        cf["roof_age"] = int(cf["roof_age"])
+    source = body.source if body.source in LEAD_SOURCES else ("Other" if body.source else None)
+    now = datetime.utcnow()
+    lead = Lead(organization_id=ctx.org_id, assigned_to_id=owner_id,
+                first_name=body.first_name.strip(), last_name=(body.last_name or "").strip(),
+                phone=phone_n or None, phone_raw=body.phone or None, email=(body.email or "").strip() or None,
+                street_address=(body.street_address or "").strip() or None, city=(body.city or "").strip() or None,
+                state=(body.state or "").strip().upper() or None, zip_code=(body.zip_code or "").strip() or None,
+                status="new", contact_channel="sms" if phone_n else "email_only",
+                source="manual", source_detail=source or "Added by hand", source_file="manual",
+                is_test=bool(getattr(ctx.org, "is_demo", False)),
+                notes=(body.notes or "").strip() or None, custom_fields=C.jdump(cf),
+                duplicate_resolved_at=now if dups else None,   # a person chose "create separately"
+                created_at=now, updated_at=now)
+    ctx.db.add(lead)
+    ctx.db.flush()
+    master_contacts.record_lead(ctx.db, lead, source="manual", source_detail="Roofing - added by hand",
+                                ingestion_path="roofing_router.add_homeowner")
+    if lead.notes:
+        ctx.db.add(LeadNote(organization_id=ctx.org_id, lead_id=lead.id, author_user_id=ctx.user.id, body=lead.notes))
+    J.ensure(ctx.db, ctx.org_id, [lead])
+    _audit(ctx, "roofing.lead.create", "lead", lead.id, {"source": lead.source_detail, "kept_separate": bool(dups)})
+    ctx.db.commit()
+    return {"lead_id": lead.id, "name": C.lead_name(lead), "created": True}
 
 
 class LeadPatch(BaseModel):

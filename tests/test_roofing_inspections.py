@@ -177,6 +177,7 @@ def test_demo_story_has_sample_inspections_with_photos(db_session):
         assert [e.action for e in ev][:2] == ["started", "completed"]
         assert all(r.started_at <= e.at <= now for e in ev)
         assert "threshold" not in (r.notes or "").lower() and r.insurance_claim not in ("yes", "maybe", "no")
+        assert r.stories == 2 and r.roof_type == "Architectural shingle"   # what the sample overview photo shows
     assert all("connection" not in (p.caption or "").lower() for p in ph)
     assert demo_seed.seed(db_session)["inspections_added"] == 0     # idempotent
 

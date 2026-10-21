@@ -32,14 +32,14 @@ SETS = {
              ("hail", "damage", "Hail-like impact marks - north slope (test square circled)"),
              ("granules", "shingles", "Granule loss - exposed shingle surface at the impact points"),
              ("gutter", "gutters", "Dented front gutter with shingle granules collecting in the trough")],
-    "wind": [("overview", "overview", "Front elevation"),
+    "wind": [("overview", "overview", "Front elevation - architectural shingle, 2 stories"),
              ("missing", "damage", "Missing shingles after a reported wind event - south slope, underlayment exposed"),
              ("flashing", "flashing", "Deteriorated chimney flashing - step flashing lifted")],
-    "leak": [("overview", "overview", "Front elevation"),
+    "leak": [("overview", "overview", "Front elevation - architectural shingle, 2 stories"),
              ("flashing", "flashing", "Deteriorated chimney flashing - pulled away from the brick"),
              ("attic", "attic", "Water staining on the attic decking below the chimney"),
              ("interior", "interior", "Interior ceiling water staining - second bedroom")],
-    "age": [("overview", "overview", "Front elevation"),
+    "age": [("overview", "overview", "Front elevation - architectural shingle, 2 stories"),
             ("granules", "shingles", "Age wear - widespread granule loss, shingles near end of life"),
             ("gutter", "gutters", "Age wear - granules collecting in the gutters")],
 }
@@ -66,7 +66,6 @@ FINDINGS = {
                       "west faces. No leaks today. Recommend planning a replacement within 2-3 years.",
                 scope="Re-inspect next spring; budget for replacement."),
 }
-ROOF = ["Architectural shingle", "Asphalt shingle", "Architectural shingle", "Metal"]
 
 
 def _bytes(name: str) -> bytes:
@@ -154,9 +153,9 @@ def seed(db: Session, org, now: datetime) -> Dict[str, int]:
         ins = RoofingInspection(organization_id=org.id, lead_id=lid, opportunity_id=opp.id if opp else None,
                                 booking_link_id=b.id if b else None, inspector_user_id=(b.user_id if b else None) or lead.assigned_to_id,
                                 scheduled_at=when, inspection_type=(b.appt_label if b else None) or "Roof Inspection",
-                                started_at=at, roof_type=ROOF[rnd.randint(0, 3)],
+                                started_at=at, roof_type="Architectural shingle",   # matches the sample overview photo
                                 roof_age_years=C.lead_fields(lead).get("roof_age") if isinstance(C.lead_fields(lead).get("roof_age"), int) else 15,
-                                stories=rnd.choice([1, 1, 2]), roof_condition=f["condition"],
+                                stories=2,                                 # the sample overview photo is a 2-story house roof_condition=f["condition"],
                                 damage=C.jdump(f["damage"]), severity=f["severity"], affected_areas=C.jdump(f["areas"]),
                                 notes=f["notes"], recommendation=f["rec"], recommendation_notes=f["scope"],
                                 insurance_claim=f["claim"])

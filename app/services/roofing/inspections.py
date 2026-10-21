@@ -622,6 +622,7 @@ def for_lead(ctx: C.Ctx, lead_id: str) -> List[Dict[str, Any]]:
                                                    RoofingInspection.lead_id == lead_id)
             .order_by(RoofingInspection.created_at.desc()).all())
     return [{"id": r.id, "status": r.status, "report_number": r.report_number,
+             "booking_link_id": r.booking_link_id, "started_at": C.iso(r.started_at),
              "scheduled_at": r.scheduled_at.isoformat() if r.scheduled_at else None,
              "completed_at": C.iso(r.completed_at), "recommendation": r.recommendation,
              "recommendation_label": _label(RECOMMENDATIONS, r.recommendation) if r.recommendation else None}

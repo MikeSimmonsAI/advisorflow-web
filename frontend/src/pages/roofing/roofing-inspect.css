@@ -213,3 +213,4 @@
   html, body, #root, .rf, .rf .rf-page, .rf .ri-report-page, .rf .ri-report { background: #fff !important; }
   .rf .ri-report__hist { background: none !important; }
 }
+.rf .ri-holink { font-size: 13px; font-weight: 700; color: var(--rf-orange-2, #d9580c); }

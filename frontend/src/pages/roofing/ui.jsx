@@ -74,6 +74,12 @@ export function localWhen(naive, opts = {}) {
   const dt = new Date(y, m - 1, day, hh, mm)
   return dt.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', ...opts })
 }
+/** 12145551234 / +12145551234 -> (214) 555-1234; anything else as given. */
+export function phoneFmt(p) {
+  const d = String(p || '').replace(/\D/g, '')
+  const t = d.length === 11 && d[0] === '1' ? d.slice(1) : d
+  return t.length === 10 ? `(${t.slice(0, 3)}) ${t.slice(3, 6)}-${t.slice(6)}` : (p || '')
+}
 export const initials = (name) => (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join('')
 
 // ── primitives ─────────────────────────────────────────────────────────────
@@ -194,6 +200,7 @@ const P = {
   print: 'M7 9V3h10v6M7 17H4v-7h16v7h-3M7 14h10v7H7z',
   trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
   clipboard: 'M9 4h6v3H9zM7 5H5v16h14V5h-2M8 12h8M8 16h5',
+  plus: 'M12 5v14M5 12h14',
 }
 export function Icon({ name, size = 20, className = '', title }) {
   return (
