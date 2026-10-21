@@ -298,6 +298,7 @@ def test_claude_relay_serializes_by_lane_not_by_issue():
     assert "claude-relay-${{" in concurrency
     assert "github.event.issue.number" not in concurrency
     assert "cancel-in-progress: false" in concurrency
+    assert "queue: max" in concurrency
     for branch in LANES:
         assert "BRANCH: " + branch in concurrency
     for lane in ("sci", "wholesale", "atlantis", "roofing", "platform"):
