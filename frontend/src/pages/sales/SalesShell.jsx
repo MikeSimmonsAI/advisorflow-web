@@ -10,7 +10,7 @@
  * which role, and which permissions. That is presentation only: every route is
  * re-checked server-side. Hiding a nav item is not access control.
  */
-import { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { api, logout } from '../../api/client'
 import GodReturnBar from '../../components/GodReturnBar'
@@ -256,6 +256,11 @@ export default function SalesShell({ title, subtitle, actions, children }) {
               <Icon name="search" size={20} />
             </NavLink>
             <div className="ss-circle" title={person} aria-hidden="true">{initials(person)}</div>
+            {/* PHONES ONLY. The sidebar collapses to a scrolling bar of the
+                seven main items, so everything under "More" — and Sign out —
+                is reached from this one button. Same allowed list as the
+                desktop "More"; the server still checks every route. */}
+            <MobileMore items={more} onSignOut={handleSignOut} />
           </header>
           <div className="sw-body">
             {loading && !ctx
@@ -306,5 +311,45 @@ function MoreGroup({ items, defaultOpen }) {
         </nav>
       )}
     </>
+  )
+}
+
+function MobileMore({ items, onSignOut }) {
+  const [open, setOpen] = useState(false)
+  const btn = useRef(null)
+  const panel = useRef(null)
+  const loc = useLocation()
+  useEffect(() => { setOpen(false) }, [loc.pathname])
+  useEffect(() => {
+    if (!open) return undefined
+    const first = panel.current && panel.current.querySelector('a,button')
+    first && first.focus()
+    const onKey = e => {
+      if (e.key === 'Escape') { setOpen(false); btn.current && btn.current.focus() }
+    }
+    const onDown = e => {
+      if (panel.current && !panel.current.contains(e.target) && !btn.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onDown)
+    return () => { document.removeEventListener('keydown', onKey); document.removeEventListener('pointerdown', onDown) }
+  }, [open])
+  const here = items.some(i => loc.pathname === i.to || loc.pathname.startsWith(i.to + '/'))
+  return (
+    <div className="ss-mmore">
+      <button ref={btn} type="button" className={'ss-mmorebtn' + (here ? ' ss-here' : '')}
+              aria-expanded={open} aria-controls="ss-mmore-panel" aria-haspopup="true"
+              onClick={() => setOpen(o => !o)}>
+        <Icon name="more" size={18} /> More
+      </button>
+      {open && (
+        <div className="ss-mmorepanel" id="ss-mmore-panel" ref={panel}>
+          <nav className="sw-nav" aria-label="More pages">
+            {items.map(item => <NavItem key={item.to} item={item} />)}
+          </nav>
+          <button type="button" className="ss-mmoreout" onClick={onSignOut}>Sign out</button>
+        </div>
+      )}
+    </div>
   )
 }

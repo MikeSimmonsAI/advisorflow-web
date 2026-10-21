@@ -300,7 +300,26 @@ const CSS = `
 
 /* ── modal + toast ──────────────────────────────────────────────────── */
 .ss-modalback{position:fixed;inset:0;background:#0a1839a3;display:flex;align-items:center;justify-content:center;padding:16px;z-index:100}
-.ss-modal{width:min(550px,100%);max-height:92vh;overflow-y:auto;background:#fff;border-radius:14px;box-shadow:0 25px 90px #0003}
+/* Header and footer stay put; only the middle scrolls, so Save/Cancel are
+   always reachable — including at 390px and with the keyboard open. */
+.ss-modal{width:min(550px,100%);max-height:min(92vh,calc(var(--ss-vvh,100vh) - 32px));display:flex;flex-direction:column;
+  overflow:hidden;background:#fff;border-radius:14px;box-shadow:0 25px 90px #0003}
+.ss-modalhead{flex:0 0 auto}
+.ss-modalbody{flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;outline:none}
+.ss-modalfoot{flex:0 0 auto;background:#fff}
+.ss-btn.ss-danger{background:#b02a3e;color:#fff}
+.ss-btn.ss-danger:hover{background:#8f2032}
+.ss-dnc{white-space:nowrap}
+.ss-shell .ss-mmore{display:none}
+.ss-dncbanner{background:#fff0f1;border:1px solid #ffd2d8;color:#8f2032;border-radius:9px;padding:12px 14px;font-size:12px;line-height:1.5;margin-bottom:14px}
+.ss-dncbanner strong{display:block;font-size:13px;margin-bottom:2px}
+.ss-dncform{margin-top:10px;color:var(--ss-ink,#0a1839)}
+.ss-dncform .ss-row-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.ss-dncline{margin-top:6px}
+.ss-dnclink{font-size:12px;color:#8f2032}
+.ss-dnchist{margin-top:8px;font-size:12px}
+.ss-dnchist summary{cursor:pointer}
+.ss-dnchist ul{margin:6px 0 0;padding-left:18px}
 .ss-modalhead{padding:22px 24px 15px;border-bottom:1px solid var(--ss-line);display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
 .ss-modalhead h2{font-size:20px;margin:0}
 .ss-modalhead p{font-size:12px;color:#5f6e83;margin:5px 0 0}
@@ -349,6 +368,21 @@ const CSS = `
   .ss-shell .sw-topbar{min-height:74px;padding:14px 17px;position:static}
   .ss-shell .sw-topbar h1{font-size:20px}
   .ss-shell .ss-hide-sm{display:none}
+  /* Phone "More": everything the desktop More holds, plus Sign out. */
+  .ss-shell .ss-mmore{display:block;position:relative}
+  .ss-shell .ss-mmorebtn{min-height:44px;min-width:44px;display:inline-flex;align-items:center;gap:6px;padding:0 12px;
+    border:1px solid var(--ss-line);border-radius:10px;background:#fff;color:var(--ss-ink);font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+  .ss-shell .ss-mmorebtn.ss-here{border-color:var(--ss-blue);color:var(--ss-blue-dark)}
+  .ss-shell .ss-mmorebtn:focus-visible,.ss-shell .ss-mmoreout:focus-visible{outline:3px solid var(--ss-blue);outline-offset:2px}
+  .ss-shell .ss-mmorepanel{position:absolute;right:0;top:100%;width:min(320px,calc(100vw - 24px));margin-top:8px;z-index:60;background:#fff;border:1px solid var(--ss-line);
+    border-radius:12px;box-shadow:0 18px 50px #0a183933;padding:8px;max-height:70vh;overflow-y:auto}
+  .ss-shell .ss-mmorepanel .sw-nav{flex-direction:column;gap:2px}
+  .ss-shell .ss-mmorepanel .sw-nav a{min-height:44px;display:flex;align-items:center;gap:10px;padding:10px 12px;font-size:14px;
+    color:var(--ss-ink);white-space:normal;border-radius:8px}
+  .ss-shell .ss-mmorepanel .sw-nav a svg{display:inline-block}
+  .ss-shell .ss-mmorepanel .sw-nav a.sw-on{background:#eaf2ff;color:var(--ss-blue-dark)}
+  .ss-shell .ss-mmoreout{width:100%;min-height:44px;margin-top:6px;border:0;border-top:1px solid var(--ss-line);background:none;
+    font:inherit;font-size:14px;text-align:left;padding:10px 12px;color:var(--ss-sub);cursor:pointer}
   .ss-shell .sw-body{padding:17px 14px 40px}
   .ss-shell .ss-hero{padding:20px 16px}
   .ss-shell .ss-hero h2{font-size:19px}
@@ -375,6 +409,20 @@ const CSS = `
   .ss-shell .ss-search{min-width:0;max-width:none;flex:1 1 100%}
   .ss-outcomes{grid-template-columns:repeat(2,minmax(0,1fr))}
   .ss-decide{grid-template-columns:1fr}
+  /* Phone dialog: edge to edge at the bottom, 44px+ touch targets. */
+  .ss-modalback{padding:0;align-items:flex-end}
+  .ss-modal{width:100%;max-height:calc(var(--ss-vvh,100vh) - 12px);border-radius:14px 14px 0 0}
+  .ss-modalhead{padding:14px 16px 10px}
+  .ss-modalhead h2{font-size:17px}
+  .ss-modalbody{padding:14px 16px}
+  .ss-modalfoot{padding:10px 16px calc(10px + env(safe-area-inset-bottom));gap:8px}
+  .ss-modalfoot .ss-btn{min-height:44px;flex:1 1 auto}
+  .ss-modalfoot .ss-primaryact{flex:2 1 auto}
+  .ss-outcome{min-height:48px}
+  .ss-decision{min-height:56px}
+  .ss-field input,.ss-field textarea,.ss-field select{min-height:44px;font-size:16px}
+  .ss-modal .ss-iconbtn{width:44px;height:44px}
+  .ss-phoneline .ss-btn{min-height:44px}
   .ss-shell .ss-teamstats{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media(prefers-reduced-motion:reduce){ .ss-shell .ss-skel{animation:none} }
