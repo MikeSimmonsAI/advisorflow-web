@@ -48,7 +48,7 @@ export default function InspectionReport() {
           </div>
           <div className="ri-report__id">
             <div className="ri-report__title">Roof Inspection Report</div>
-            <div>{r.report_number ? `Report ${r.report_number}` : 'Report number assigned on completion'}</div>
+            <div>{r.report_number ? `Report ${r.report_number}${r.revised ? ' (revised)' : ''}` : 'Report number assigned on completion'}</div>
             <div>{fmtDate(r.completed_at || r.started_at)}</div>
           </div>
         </header>
@@ -96,6 +96,14 @@ export default function InspectionReport() {
           <div><span>Completed</span><b>{r.completed_at ? fmtDate(r.completed_at) : 'Not completed'}</b></div>
           <p>This report records the visible condition of the roof on the date inspected. It is not a warranty.</p>
         </footer>
+        {r.history?.length > 0 && (
+          <section className="ri-report__hist">
+            <h3>Report history{r.revised ? ' - revised' : ''}</h3>
+            <ul>{r.history.filter((e) => e.action !== 'handoff').map((e, i) => (
+              <li key={i}><b>{e.label}</b> - {e.by || 'System'}, {new Date(e.at).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</li>
+            ))}</ul>
+          </section>
+        )}
       </article>
 
       {!draft && <div className="no-print" style={{ maxWidth: 860, margin: '20px auto 0' }}>

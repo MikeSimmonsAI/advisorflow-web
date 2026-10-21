@@ -165,3 +165,50 @@ def test_demo_story_has_sample_inspections_with_photos(db_session):
     ph = db_session.query(RoofingInspectionPhoto).filter(RoofingInspectionPhoto.organization_id == out["organization_id"]).all()
     assert ph and all(p.is_sample for p in ph)
     assert demo_seed.seed(db_session)["inspections_added"] == 0     # idempotent
+
+
+def _ready(client, db, u, iid):
+    client.patch("/roofing-ops/inspections/%s" % iid, headers=h(db, u), json={
+        "roof_condition": "fair", "severity": "minor", "damage": ["wind"], "notes": "Lifted tabs.",
+        "recommendation": "repair"})
+    _photo(client, db, u, iid, data=PNG + os.urandom(4))
+
+
+def test_report_numbers_never_collide_and_history_survives_reopen(client, booked):
+    from app.models.roofing_models import RoofingInspectionEvent
+    db, rep, owner, l = booked["db"], booked["a_rep"], booked["a_owner"], booked["lead"]
+    ids = []
+    for k in range(3):
+        b = _book(db, l, rep, datetime.now() + timedelta(days=k + 2))
+        iid = client.post("/roofing-ops/inspections", json={"lead_id": l.id, "booking_link_id": b.id},
+                          headers=h(db, rep)).json()["id"]
+        _ready(client, db, rep, iid)
+        ids.append(iid)
+    nums = [client.post("/roofing-ops/inspections/%s/complete" % i, headers=h(db, rep)).json()["report_number"] for i in ids]
+    assert len(set(nums)) == 3
+    # delete the middle report's row: the next number still never repeats one in use
+    db.query(RoofingInspection).filter(RoofingInspection.id == ids[1]).delete()
+    db.commit()
+    b = _book(db, l, rep, datetime.now() + timedelta(days=9))
+    iid = client.post("/roofing-ops/inspections", json={"lead_id": l.id, "booking_link_id": b.id}, headers=h(db, rep)).json()["id"]
+    _ready(client, db, rep, iid)
+    n4 = client.post("/roofing-ops/inspections/%s/complete" % iid, headers=h(db, rep)).json()["report_number"]
+    assert n4 not in (nums[0], nums[2]) and int(n4.split("-")[1]) > max(int(x.split("-")[1]) for x in nums)
+    # the database refuses a duplicate number outright
+    from sqlalchemy.exc import IntegrityError
+    dup = db.query(RoofingInspection).filter(RoofingInspection.id == ids[2]).one()
+    dup.report_number = nums[0]
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+    # reopen + complete again: same number, earlier completion kept in history
+    first = client.get("/roofing-ops/inspections/%s" % ids[0], headers=h(db, rep)).json()
+    client.post("/roofing-ops/inspections/%s/reopen" % ids[0], headers=h(db, owner))
+    client.patch("/roofing-ops/inspections/%s" % ids[0], headers=h(db, rep), json={"notes": "Lifted tabs; also a cracked boot."})
+    again = client.post("/roofing-ops/inspections/%s/complete" % ids[0], headers=h(db, owner)).json()
+    assert again["report_number"] == first["report_number"] and again["revised"] is True
+    acts = [e["action"] for e in again["history"]]
+    assert acts == ["started", "completed", "reopened", "recompleted"]
+    reopened = next(e for e in again["history"] if e["action"] == "reopened")
+    assert reopened["detail"]["previously_completed_at"] == first["completed_at"]
+    assert db.query(RoofingInspectionEvent).filter(RoofingInspectionEvent.inspection_id == ids[0]).count() == 4

@@ -20,7 +20,7 @@ TENANT RULE: every row carries a NOT NULL organization_id and every query in
 app/services/roofing filters on it first. New tables only - created by
 Base.metadata.create_all, so no auto_migrate entry is needed.
 """
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.sql import func
 
 from app.models.models import Base, gen_uuid
@@ -136,7 +136,10 @@ class RoofingInspection(Base):
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    __table_args__ = (Index("ix_rf_insp_org_status", "organization_id", "status"),)
+    __table_args__ = (Index("ix_rf_insp_org_status", "organization_id", "status"),
+                      # One report number per company, ever - the backstop behind the
+                      # locked allocation in services/roofing/inspections.py.
+                      UniqueConstraint("organization_id", "report_number", name="uq_rf_insp_org_report"))
 
 
 class RoofingInspectionPhoto(Base):
@@ -162,3 +165,20 @@ class RoofingInspectionPhoto(Base):
     position = Column(Integer, nullable=False, default=0)
     created_by_id = Column(String, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
+
+
+
+class RoofingInspectionEvent(Base):
+    """The history of one inspection report: started, completed, reopened,
+    completed again, handed to sales. Append-only - a reopen never erases who
+    completed the report before or when; each completion is its own row."""
+    __tablename__ = "roofing_inspection_events"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = _org_col()
+    inspection_id = Column(String, ForeignKey("roofing_inspections.id", ondelete="CASCADE"),
+                           nullable=False, index=True)
+    action = Column(String(30), nullable=False)        # started | completed | reopened | recompleted | handoff
+    actor_user_id = Column(String, nullable=True)
+    report_number = Column(String(20), nullable=True)
+    detail = Column(Text, nullable=True)               # JSON
+    at = Column(DateTime, nullable=False, server_default=func.now())

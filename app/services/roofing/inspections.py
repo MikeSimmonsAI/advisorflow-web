@@ -27,9 +27,10 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 
 from app.models.models import BookingLink, Lead
-from app.models.roofing_models import RoofingInspection, RoofingInspectionPhoto
+from app.models.roofing_models import RoofingInspection, RoofingInspectionEvent, RoofingInspectionPhoto
 from app.services import lead_scope
 from app.services.roofing import common as C
 from app.services.roofing import journey as J
@@ -107,10 +108,53 @@ def _may_write(ctx: C.Ctx, ins: RoofingInspection) -> None:
         raise HTTPException(403, "Only the assigned inspector or a manager can change this inspection.")
 
 
+def _lock_numbering(ctx: C.Ctx) -> None:
+    """Serialize report-number allocation for this one company (Postgres row
+    lock on the organization, held to the end of the transaction). SQLite -
+    tests - serializes writers itself."""
+    try:
+        if ctx.db.bind is not None and ctx.db.bind.dialect.name == "postgresql":
+            from sqlalchemy import text
+            ctx.db.execute(text("SELECT id FROM organizations WHERE id = :i FOR UPDATE"), {"i": ctx.org_id})
+    except Exception:  # noqa: BLE001 - the unique constraint is still the backstop
+        pass
+
+
 def _next_number(ctx: C.Ctx) -> str:
-    n = ctx.db.query(RoofingInspection).filter(RoofingInspection.organization_id == ctx.org_id,
-                                               RoofingInspection.report_number.isnot(None)).count()
-    return "R-%04d" % (1001 + n)
+    """The next unused R-#### for this company. Highest number in use + 1, so a
+    deleted or skipped report can never make two reports share a number."""
+    hi = 1000
+    for (rn,) in (ctx.db.query(RoofingInspection.report_number)
+                  .filter(RoofingInspection.organization_id == ctx.org_id,
+                          RoofingInspection.report_number.isnot(None)).all()):
+        try:
+            hi = max(hi, int(str(rn).split("-")[-1]))
+        except (TypeError, ValueError):
+            continue
+    return "R-%04d" % (hi + 1)
+
+
+def _event(ctx: C.Ctx, ins: RoofingInspection, action: str, **detail) -> None:
+    ctx.db.add(RoofingInspectionEvent(organization_id=ctx.org_id, inspection_id=ins.id, action=action,
+                                      actor_user_id=ctx.user.id, report_number=ins.report_number,
+                                      detail=C.jdump(detail) if detail else None, at=datetime.utcnow()))
+
+
+def history(ctx: C.Ctx, ins: RoofingInspection) -> List[Dict[str, Any]]:
+    names = C.user_names(ctx.db, ctx.org_id)
+    rows = (ctx.db.query(RoofingInspectionEvent)
+            .filter(RoofingInspectionEvent.organization_id == ctx.org_id,
+                    RoofingInspectionEvent.inspection_id == ins.id)
+            .order_by(RoofingInspectionEvent.at.asc()).all())
+    missing = {r.actor_user_id for r in rows if r.actor_user_id and r.actor_user_id not in names}
+    if missing:                     # e.g. an EvoSys operator working in this company's workspace
+        from app.models.models import User
+        for u in ctx.db.query(User).filter(User.id.in_(missing)).all():
+            names[u.id] = u.full_name or u.email
+    label = {"started": "Inspection started", "completed": "Report completed", "reopened": "Report reopened",
+             "recompleted": "Report completed again (revised)", "handoff": "Next step"}
+    return [{"action": r.action, "label": label.get(r.action, r.action), "by": names.get(r.actor_user_id),
+             "at": C.iso(r.at), "report_number": r.report_number, "detail": C.jload(r.detail, None)} for r in rows]
 
 
 # ── start / open ────────────────────────────────────────────────────────────
@@ -148,6 +192,8 @@ def start(ctx: C.Ctx, lead_id: str, booking_link_id: Optional[str] = None) -> Ro
     if not ctx.manager and ctx.user.id not in (ins.inspector_user_id, lead.assigned_to_id):
         raise HTTPException(403, "Only the assigned inspector or a manager can start this inspection.")
     db.add(ins)
+    db.flush()
+    _event(ctx, ins, "started")
     db.commit()
     return ins
 
@@ -231,26 +277,49 @@ def complete(ctx: C.Ctx, ins: RoofingInspection) -> RoofingInspection:
     miss = missing_for_completion(ctx, ins)
     if miss:
         raise HTTPException(422, {"message": "The report isn't finished yet.", "missing": miss})
+    again = ins.report_number is not None            # completed before, reopened, now completed again
     ins.status = COMPLETED
     ins.completed_at = datetime.utcnow()
     ins.completed_by_id = ctx.user.id
-    ins.report_number = ins.report_number or _next_number(ctx)
+    if not again:
+        _lock_numbering(ctx)
+        ins.report_number = _next_number(ctx)
     ins.next_action = {"replacement": "prepare_estimate", "repair": "prepare_estimate",
                        "monitor": "schedule_follow_up", "none": "close_no_work"}.get(ins.recommendation)
     lead = ctx.db.query(Lead).filter(Lead.id == ins.lead_id).first()
     opp = J.ensure(ctx.db, ctx.org_id, [lead])[lead.id]
     if C.RANK.get(opp.stage, -1) < C.RANK[C.INSPECTED] and opp.stage != C.LOST:
         J.set_stage(ctx.db, opp, C.INSPECTED, ctx.user.id, "Inspection report %s completed" % ins.report_number)
-    _note(ctx, ins, "Inspection report %s completed: %s condition, %s damage. Recommendation: %s."
-          % (ins.report_number, _label(CONDITIONS, ins.roof_condition), _label(SEVERITIES, ins.severity).lower(),
+    _event(ctx, ins, "recompleted" if again else "completed")
+    _note(ctx, ins, ("Inspection report %s completed again (revised): " if again else "Inspection report %s completed: ")
+          % ins.report_number + "%s condition, %s damage. Recommendation: %s."
+          % (_label(CONDITIONS, ins.roof_condition), _label(SEVERITIES, ins.severity).lower(),
              _label(RECOMMENDATIONS, ins.recommendation)))
-    ctx.db.commit()
+    try:
+        ctx.db.commit()
+    except IntegrityError:
+        # Lost a race for the number despite the lock (another database, a
+        # manual insert): the unique constraint refused it. Nothing was saved -
+        # complete again with the next free number.
+        ctx.db.rollback()
+        if again:
+            raise
+        fresh = ctx.db.query(RoofingInspection).filter(RoofingInspection.id == ins.id).first()
+        if fresh is None or fresh.status == COMPLETED:
+            raise HTTPException(409, "This report was just completed by someone else.")
+        return complete(ctx, fresh)
     return ins
 
 
 def reopen(ctx: C.Ctx, ins: RoofingInspection) -> RoofingInspection:
     if not ctx.manager:
         raise HTTPException(403, "Only a manager can reopen a completed report.")
+    if ins.status != COMPLETED:
+        return ins
+    # The earlier completion stays on record (its event row, and completed_at /
+    # completed_by until the report is completed again).
+    _event(ctx, ins, "reopened", previously_completed_at=C.iso(ins.completed_at),
+           previously_completed_by=ins.completed_by_id)
     ins.status = IN_PROGRESS
     ins.updated_at = datetime.utcnow()
     _note(ctx, ins, "Inspection report %s reopened for changes." % (ins.report_number or ""))
@@ -323,6 +392,7 @@ def handoff(ctx: C.Ctx, ins: RoofingInspection, action: str, data: Dict[str, Any
         note = "Closed after inspection %s - no work needed." % ins.report_number
     ins.handoff = C.jdump({"action": action, "label": _label(HANDOFFS, action), "at": datetime.utcnow().isoformat(),
                            "by": ctx.user.id, **detail})
+    _event(ctx, ins, "handoff", step=action, **{k: v for k, v in detail.items() if k != "scope"})
     if note:
         _note(ctx, ins, note)
     db.commit()
@@ -463,6 +533,8 @@ def to_json(ctx: C.Ctx, ins: RoofingInspection, full: bool = True) -> Dict[str, 
         out["company"] = _company(ctx)
         out["sample_data"] = bool(getattr(ctx.org, "is_demo", False))
         out["choices"] = choices()
+        out["history"] = history(ctx, ins)
+        out["revised"] = any(h["action"] == "recompleted" for h in out["history"])
     else:
         out["photo_count"] = len(_photo_rows(ctx, ins))
     return out

@@ -163,3 +163,4 @@
   .rf .ri-chip { min-height: 40px; padding: 0 12px; font-size: 13.5px; }
 }
 .rf .rf-page.ri, .rf .rf-page.ri-report-page { box-sizing: border-box; }
+.rf .ri-report__hist ul { margin: 0; padding-left: 18px; font-size: 12.5px; color: #3b4c66; display: grid; gap: 3px; }

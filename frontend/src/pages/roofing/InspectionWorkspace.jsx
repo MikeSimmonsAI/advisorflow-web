@@ -11,6 +11,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, fetchObjectUrl } from '../../api/client'
 import { Avatar, ErrorNote, Icon, Loading, Pill, SampleTag, errText, localWhen, money, useApi, useToast } from './ui'
 import './roofing-inspect.css'
+import { createDraftSaver } from './draftSaver'
 
 const BASE = '/program/roofing/inspections'
 
@@ -68,31 +69,54 @@ export default function InspectionWorkspace() {
   const [ins, setIns] = useState(null)
   const [saving, setSaving] = useState('saved')
   const [toast, say] = useToast()
-  const pending = useRef({})
-  const timer = useRef(null)
+  const saver = useRef(null)
   const [busy, setBusy] = useState(false)
   const [missing, setMissing] = useState(null)
+  const [restored, setRestored] = useState(0)
 
-  useEffect(() => { if (res.data) setIns(res.data) }, [res.data])
+  // One saver per inspection. Server answers update the computed fields
+  // (missing items, status) without overwriting anything typed since.
+  useEffect(() => {
+    let storage = null
+    try { storage = window.localStorage } catch { storage = null }
+    const s = createDraftSaver({
+      id,
+      patch: (body) => api.patch(`/roofing-ops/inspections/${id}`, body),
+      storage,
+      onState: (st) => setSaving(st),
+      onSaved: (doc, sentKeys, stillPending) => setIns((cur) => {
+        if (!cur) return doc
+        const keep = Object.fromEntries(Object.keys(stillPending).map((k) => [k, cur[k]]))
+        return { ...doc, photos: cur.photos, ...keep }
+      }),
+    })
+    saver.current = s
+    const online = () => s.flush()
+    const hide = () => { if (document.visibilityState === 'hidden') s.flush() }
+    window.addEventListener('online', online)
+    document.addEventListener('visibilitychange', hide)
+    window.addEventListener('pagehide', online)
+    return () => {
+      window.removeEventListener('online', online)
+      document.removeEventListener('visibilitychange', hide)
+      window.removeEventListener('pagehide', online)
+      s.flush(); s.dispose()
+    }
+  }, [id])
 
-  const flush = async () => {
-    const body = pending.current; pending.current = {}
-    if (!Object.keys(body).length) return
-    setSaving('saving')
-    try {
-      const d = await api.patch(`/roofing-ops/inspections/${id}`, body)
-      setIns((cur) => ({ ...d, ...Object.fromEntries(Object.keys(pending.current).map((k) => [k, cur[k]])) }))
-      setSaving('saved')
-    } catch (e) { setSaving('error'); say(errText(e), 'err') }
-  }
+  useEffect(() => {
+    if (!res.data) return
+    const s = saver.current
+    if (res.data.status === 'completed') { s?.discard(); setIns(res.data); return }
+    const back = s?.restore()
+    setIns(back ? { ...res.data, ...back } : res.data)
+    if (back) setRestored(Object.keys(back).length)
+  }, [res.data])
+
   const set = (field, value) => {
     setIns((cur) => ({ ...cur, [field]: value }))
-    pending.current[field] = value
-    setSaving('pending')
-    clearTimeout(timer.current)
-    timer.current = setTimeout(flush, 700)
+    saver.current?.set(field, value)
   }
-  useEffect(() => () => { clearTimeout(timer.current); flush() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (res.error) return <div className="rf-page"><ErrorNote onRetry={res.reload}>{res.error}</ErrorNote></div>
   if (!ins) return <div className="rf-page"><Loading label="Opening the inspection" /></div>
@@ -101,8 +125,14 @@ export default function InspectionWorkspace() {
   const H = ins.homeowner || {}
 
   const complete = async () => {
-    clearTimeout(timer.current); await flush()
     setBusy(true); setMissing(null)
+    // Never complete on top of changes the server hasn't got yet.
+    const ok = await saver.current.settle()
+    if (!ok) {
+      setBusy(false)
+      say('Your latest changes haven\u2019t reached the server yet, so the report can\u2019t be completed. They\u2019re kept on this phone and will save as soon as the connection is back.', 'err')
+      return
+    }
     try {
       const d = await api.post(`/roofing-ops/inspections/${id}/complete`)
       setIns(d); say(`Report ${d.report_number} completed`)
@@ -122,10 +152,18 @@ export default function InspectionWorkspace() {
         <Link to={BASE} className="rf-btn rf-btn--ghost rf-btn--sm"><Icon name="back" size={16} />Inspections</Link>
         <span className={`ri-save ri-save--${saving}`}>
           {locked ? (ins.status === 'completed' ? `Report ${ins.report_number}` : 'View only')
-            : saving === 'saving' ? 'Saving…' : saving === 'pending' ? 'Unsaved changes' : saving === 'error' ? 'Not saved - retrying on next change' : 'Draft saved'}
+            : saving === 'saving' ? 'Saving…' : saving === 'pending' ? 'Unsaved changes' : saving === 'error' ? 'Not saved yet - kept on this phone, retrying' : 'Draft saved'}
         </span>
       </div>
 
+      {restored > 0 && (
+        <div className="rf-note" style={{ marginBottom: 12 }}><Icon name="refresh" size={16} />
+          <span>Restored {restored} change{restored === 1 ? '' : 's'} saved on this phone before the page closed - sending now.</span></div>
+      )}
+      {saving === 'error' && !locked && (
+        <div className="rf-note rf-note--warn" style={{ marginBottom: 12 }}><Icon name="alert" size={16} />
+          <span>No connection to the server. Keep working - every change is kept on this phone and saves automatically when the connection is back.</span></div>
+      )}
       <header className="ri-head rf-panel">
         <div className="ri-head__who">
           <Avatar name={H.name} size={52} />
@@ -215,14 +253,17 @@ export default function InspectionWorkspace() {
             )}
             {!missing && ins.missing?.length > 0 && <p className="rf-muted">Still needed before you can complete: {ins.missing.join(', ')}.</p>}
             <div className="ri-finish__btns">
-              <button className="rf-btn rf-btn--ghost" onClick={async () => { clearTimeout(timer.current); await flush(); say('Draft saved - you can come back to it any time') }}>Save draft</button>
+              <button className="rf-btn rf-btn--ghost" onClick={async () => {
+                const ok = await saver.current.settle()
+                say(ok ? 'Draft saved - you can come back to it any time' : 'Not saved yet - your changes are kept on this phone and will save when the connection is back', ok ? undefined : 'err')
+              }}>Save draft</button>
               <button className="rf-btn rf-btn--primary" disabled={busy} onClick={complete}>{busy ? 'Completing…' : 'Complete report'}</button>
             </div>
           </div>
         )}
       <div className="ri-sticky">
         {ins.status !== 'completed' && !locked
-          ? <><span>{saving === 'saved' ? 'Draft saved' : 'Saving…'}</span>
+          ? <><span className={`ri-save--${saving}`}>{saving === 'saved' ? 'Draft saved' : saving === 'error' ? 'Not saved yet - retrying' : 'Saving…'}</span>
             <button className="rf-btn rf-btn--primary" disabled={busy} onClick={complete}>Complete report</button></>
           : <Link className="rf-btn rf-btn--primary" to={`${BASE}/${id}/report`}>View report</Link>}
       </div>
