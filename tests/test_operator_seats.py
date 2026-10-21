@@ -52,3 +52,25 @@ def test_evosys_operators_are_not_customer_seats(db_session):
     assert PL.usage_for(db, cust, PL.LIMIT_USERS) == 3    # staff, outsider, homeless
     # EvoSys's own org still counts the people homed there
     assert PL.usage_for(db, evo, PL.LIMIT_USERS) == 1
+
+
+def test_granting_an_operator_into_a_full_customer_needs_no_seat(db_session, monkeypatch):
+    import pytest
+    from fastapi import HTTPException
+    from app.services import workspace_access as wa
+
+    def full(*a, **k):                                   # the customer is at its ceiling
+        raise HTTPException(status_code=402, detail="full")
+    monkeypatch.setattr(PL, "require_capacity_for_org_id", full)
+    db = db_session
+    evo = db.query(Organization).filter(Organization.slug == "evo-integrated-solutions-llc").first() \
+        or _org(db, "evo-integrated-solutions-llc", "EVO Integrated Solutions LLC")
+    cust = _org(db, "full-%s" % uuid.uuid4().hex[:6], "Full Customer")
+    outsider = _u(db, _org(db, "o-%s" % uuid.uuid4().hex[:6], "Other"), "out")
+    with pytest.raises(HTTPException) as e:
+        wa.grant_workspace_membership(db, outsider.id, cust.id, role="org_admin")
+    assert e.value.status_code == 402
+    operator = _u(db, evo, "op")
+    assert wa.grant_workspace_membership(db, operator.id, cust.id, role="org_admin").is_active
+    staff = _u(db, cust, "own")                           # homed there: never an operator
+    assert wa._is_evosys_operator(db, staff.id, cust.id) is False
