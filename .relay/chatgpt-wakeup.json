@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "verify-wholesale-20261021-0415-d2",
+  "relay_run_id": "sci-poc-pr257-bounce-20261020-2328-r1",
   "parent_run_id": "",
-  "project": "Wholesale harmless parallel smoke test",
-  "status": "COMPLETED",
-  "branch": "feature/wholesale-development",
-  "actions_run_id": "39542962459",
-  "timestamp_ct": "2026-10-20 23:15 CT",
+  "project": "SCI 1 \u2014 POC-only release cleanup and bounce tracking",
+  "status": "BLOCKED",
+  "branch": "feature/sci-ops",
+  "actions_run_id": "39544129460",
+  "timestamp_ct": "2026-10-20 23:28 CT",
   "issue": 1,
-  "status_comment_id": 6307892046
+  "status_comment_id": 6308055091
 }
