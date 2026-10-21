@@ -516,3 +516,123 @@ def test_kill_switch_stops_test_mode_and_says_so(db_session, monkeypatch):
     assert report["verdict"] == "NEEDS_ATTENTION"
     assert "safety_stop" in [p["code"] for p in report["problems"]]
     assert db_session.query(AIEmployeeRun).count() == 0
+
+
+# ── 5. M3: APPOINTMENT SETTER, THE SAME PATH ─────────────────────────────────
+
+def _setter(db):
+    acct = Account(db, template_key="appointment_setter")
+    dep = acct.hire_and_set_up()
+    return acct, dep
+
+
+def test_appointment_setter_books_a_practice_appointment_on_the_real_worker(
+        db_session, monkeypatch):
+    from app.models.models import BookingLink
+    from app.services import tenant_scheduling
+    from app.services.workforce import booking as wf_booking
+
+    def no_calendar(*a, **k):
+        raise AssertionError("a practice booking reached a real calendar")
+
+    def no_case_file(*a, **k):
+        raise AssertionError("a practice booking created a case file")
+
+    monkeypatch.setattr(tenant_scheduling, "_push_to_calendar", no_calendar)
+    monkeypatch.setattr(tenant_scheduling, "_make_case_file", no_case_file)
+
+    acct, dep = _setter(db_session)
+    report = test_mode.run_test(db_session, dep, actor=acct.admin,
+                                now=NOON_ISH)
+    db_session.commit()
+    assert report["verdict"] == "PASS", report["problems"]
+    assert report["ended_state"] == WC.APPOINTMENT_BOOKED
+    assert [p["claimed"] for p in report["worker_passes"]] == [1, 1]
+    tools = [t["tool"] for t in report["what_it_tried"]]
+    assert tools.index("calendar.get_availability") < \
+        tools.index("appointment.book")
+    appt = report["practice_appointment"]
+    assert appt and appt["practice"] is True
+    assert appt["on_a_real_calendar"] is False
+
+    rows = db_session.query(BookingLink).filter(
+        BookingLink.lead_id == report["practice_lead"]["id"]).all()
+    assert len(rows) == 1
+    assert rows[0].status == wf_booking.PRACTICE_STATUS
+    # Nothing selecting real appointments sees it.
+    assert db_session.query(BookingLink).filter(
+        BookingLink.status.in_(("booked", "confirmed"))).count() == 0
+
+
+def test_a_practice_booking_does_not_take_a_real_slot(db_session):
+    from app.services.workforce import booking as wf_booking
+    acct, dep = _setter(db_session)
+    report = test_mode.run_test(db_session, dep, actor=acct.admin,
+                                now=NOON_ISH)
+    assert report["verdict"] == "PASS"
+    taken = report["practice_appointment"]["starts_at"]
+    emp = acct.employee(dep)
+    real = Lead(organization_id=acct.org.id, first_name="Real",
+                last_name="Caller", phone="+12145550188",
+                email="real.caller@example.invalid", status="new",
+                source="import", allow_sms=True, allow_email=True,
+                sms_consent=True, is_test=False)
+    db_session.add(real)
+    db_session.flush()
+    slots = wf_booking.available_slots(db_session, employee=emp, lead=real,
+                                       advisor=acct.admin, days_ahead=7,
+                                       now=NOON_ISH)
+    assert slots["availability_status"] == "ok"
+    assert taken in [s["starts_at"] for s in slots["slots"]], \
+        "the practice appointment removed a real opening"
+
+
+def test_no_open_times_is_needs_attention_with_the_fix(db_session,
+                                                     monkeypatch):
+    from app.services import tenant_scheduling
+    acct, dep = _setter(db_session)
+    # The calendar answers, and has nothing open.
+    monkeypatch.setattr(tenant_scheduling, "availability",
+                        lambda *a, **k: {"availability_status": "ok",
+                                         "slots": [], "reason": None})
+    report = test_mode.run_test(db_session, dep, actor=acct.admin,
+                                now=NOON_ISH)
+    assert report["verdict"] == "NEEDS_ATTENTION"
+    assert report["ran"] is True
+    p = report["problems"][0]
+    assert p["code"] == "no_open_times", report["problems"]
+    assert "Availability" in p["next"]
+
+
+def test_both_verified_jobs_are_offered_and_the_rest_are_not(db_session):
+    acct = Account(db_session)
+    for key in ("appointment_setter",):
+        wf_service.set_offering(db_session, platform_id=acct.brand.id,
+                                template_key=key, enabled=True)
+        tpl = wf_registry.template(key)
+        item = t8_sim._catalogue_item(db_session, acct.brand,
+                                      key="m3-%s" % key, name=tpl.name,
+                                      entitlement_key=tpl.entitlement_key)
+        t8_sim._set_terms(db_session, acct.brand.id, key, item.key)
+        t8_sim._purchase(db_session, acct.org, item)
+    db_session.commit()
+    cards = {c["key"]: c for c in test_mode.job_cards(db_session,
+                                                      acct.org.id)}
+    assert cards["lead_qualifier"]["can_set_up"]
+    assert cards["appointment_setter"]["can_set_up"]
+    assert cards["follow_up_specialist"]["availability"] == "coming_soon"
+    assert cards["customer_care_agent"]["availability"] == "coming_soon"
+
+
+def test_reports_never_show_an_internal_action_name(db_session):
+    for key in ("lead_qualifier", "appointment_setter"):
+        acct = Account(db_session, template_key=key)
+        dep = acct.hire_and_set_up()
+        report = test_mode.run_test(db_session, dep, actor=acct.admin,
+                                    now=NOON_ISH)
+        assert report["verdict"] == "PASS", (key, report["problems"])
+        for t in report["what_it_tried"]:
+            assert t["action"] != t["tool"] and "." not in t["action"], t
+        for s in report["steps"]:
+            assert "_" not in s["step"], s
+        assert report["pretend_reply"]

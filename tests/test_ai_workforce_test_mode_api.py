@@ -199,3 +199,27 @@ def test_home_is_one_honest_payload(client, admin_auth_headers, auth_headers,
     # An advisor can see it, and is told they cannot manage it.
     adv = client.get("/ai-workforce/home", headers=auth_headers)
     assert adv.status_code == 200 and adv.json()["can_manage"] is False
+
+
+def test_admin_health_reports_the_queue_worker_truthfully(client, db_session,
+                                                           sample_org,
+                                                           monkeypatch):
+    from app.models.job_models import JobRun
+    from app.models.models import User
+    from app.services.auth_service import create_access_token, hash_password
+    god = User(organization_id=sample_org.id, email="god@tm.invalid",
+               password_hash=hash_password("GodPass123!"),
+               full_name="Operator", role="god_admin",
+               must_change_password=False)
+    db_session.add(god)
+    db_session.commit()
+    h = {"Authorization": "Bearer %s" % create_access_token(god, db_session)}
+    body = client.get("/god/workforce/health", headers=h).json()
+    assert body["queue_worker"]["running"] is False
+    assert body["queue_worker"]["last_run_at"] is None
+    db_session.add(JobRun(job_name="ai_workforce_worker",
+                          started_at=datetime.utcnow(), status="success",
+                          metrics={"claimed": 0}))
+    db_session.commit()
+    body = client.get("/god/workforce/health", headers=h).json()
+    assert body["queue_worker"]["running"] is True

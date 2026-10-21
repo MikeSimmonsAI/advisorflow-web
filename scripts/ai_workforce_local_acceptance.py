@@ -8,14 +8,15 @@ WHAT IT DOES, against a FRESH LOCAL SQLITE DATABASE ONLY:
     1. builds the schema;
     2. creates a synthetic brand, a synthetic (non-demo) customer account, an
        owner and an advisor - every address ends in .invalid;
-    3. the brand offers AI Lead Qualifier, prices it as a quoted (no amount)
-       catalogue item and the account holds it - the same T8/T2 rows a real
-       brand admin creates;
+    3. the brand offers AI Lead Qualifier and AI Appointment Setter, prices
+       each as a quoted (no amount) catalogue item and the account holds them
+       - the same T8/T2 rows a real brand admin creates;
     4. the platform allows TEST MODE (simulation) for that brand and account;
     5. the real worker's main() records one pass, so the worker is "running";
     6. unless --seed-only: hire -> answer setup -> Run test -> Start working
        -> a practice lead queued -> the background worker pass works it ->
-       results read back. Prints a JSON proof and exits 0 only if every step
+       pause / resume / stop -> Appointment Setter Run test books a PRACTICE
+       appointment (on no real calendar) -> results read back. Prints a JSON proof and exits 0 only if every step
        held.
 
 WHAT IT REFUSES. Any DATABASE_URL that is not a local sqlite file. It sets
@@ -102,14 +103,15 @@ def seed(db, *, owner_password: str):
         db.add(adv)
     db.flush()
 
-    wf_service.set_offering(db, platform_id=brand.id,
-                            template_key="lead_qualifier", enabled=True)
-    tpl = wf_registry.template("lead_qualifier")
-    item = sim._catalogue_item(db, brand, key="acceptance-lead-qualifier",
-                               name=tpl.name,
-                               entitlement_key=tpl.entitlement_key)
-    sim._set_terms(db, brand.id, "lead_qualifier", item.key)
-    sim._purchase(db, org, item)
+    for key in ("lead_qualifier", "appointment_setter"):
+        wf_service.set_offering(db, platform_id=brand.id, template_key=key,
+                                enabled=True)
+        tpl = wf_registry.template(key)
+        item = sim._catalogue_item(db, brand, key="acceptance-%s" % key,
+                                   name=tpl.name,
+                                   entitlement_key=tpl.entitlement_key)
+        sim._set_terms(db, brand.id, key, item.key)
+        sim._purchase(db, org, item)
     for scope, sid in ((wf_activation.SCOPE_PLATFORM, ""),
                        (wf_activation.SCOPE_BRAND, brand.id),
                        (wf_activation.SCOPE_CUSTOMER, org.id)):
@@ -192,6 +194,31 @@ def journey(db, org, owner) -> dict:
          and stopped["status"] == test_mode.S_STOPPED,
          paused=paused["status"], resumed=resumed["status"],
          stopped=stopped["status"])
+
+    # M3: the Appointment Setter, same path, practice booking only.
+    from app.models.models import BookingLink
+    setter = lifecycle.select(db, org=org, template_key="appointment_setter",
+                              actor=owner, provisioning_key="acceptance-as")
+    lifecycle.configure(db, setter, {
+        "goal": "Book a first appointment with interested leads.",
+        "audience": {"statuses": ["new"]}, "channels": ["sms", "email"],
+        "hours": every_day, "working_hours": every_day,
+        "timezone": "America/Chicago", "handoff_to": owner.id,
+        "handoff_user_id": owner.id, "booking_owner": owner.id}, actor=owner)
+    db.commit()
+    as_report = test_mode.run_test(db, setter, actor=owner)
+    db.commit()
+    booking = (db.query(BookingLink)
+               .filter(BookingLink.lead_id
+                       == (as_report.get("practice_lead") or {}).get("id"))
+               .first())
+    step("appointment_setter_run_test_pass",
+         as_report["verdict"] == "PASS"
+         and booking is not None and booking.status == "practice",
+         verdict=as_report["verdict"], ended=as_report.get("ended_state"),
+         booking_status=getattr(booking, "status", None),
+         appointment=as_report.get("practice_appointment"),
+         problems=as_report.get("problems"))
 
     home = test_mode.home(db, org.id)
     step("results_from_real_rows",

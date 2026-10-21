@@ -415,8 +415,12 @@ def health(db: Session = Depends(get_db),
               .filter(AISupervisorEvent.created_at >= since,
                       AISupervisorEvent.acknowledged_at.is_(None))
               .order_by(AISupervisorEvent.created_at.desc()).limit(50).all())
+    # THE QUEUE WORKER, from its own job_runs rows (never a guess): whether
+    # it has recorded a successful pass recently, and what the last one did.
+    from app.services.ai_deployment import test_mode as t8_test_mode
     return {
         "window_days": days,
+        "queue_worker": t8_test_mode.worker_health(db),
         "stalled_work_items": len(stalled),
         "stalled_sample": [{"id": i.id, "employee_id": i.employee_id,
                             "state": i.state,

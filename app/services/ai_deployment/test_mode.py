@@ -363,17 +363,35 @@ _PRACTICE_REPLIES = {
 }
 _DEFAULT_REPLY = "Yes, I'm interested. Please tell me more."
 
-_GOOD_ENDINGS = None  # filled lazily (workforce constants import)
-
 _TOOL_WORDS = {
-    "conversation.send_sms": "Sent a practice text",
+    "appointment.book": "Booked a practice appointment",
+    "appointment.reschedule": "Moved a practice appointment",
+    "calendar.get_availability": "Looked up open appointment times",
+    "conversation.get_history": "Read the conversation so far",
+    "conversation.place_call": "Placed a practice call",
+    "conversation.prepare_email": "Wrote an email",
+    "conversation.prepare_sms": "Wrote a text",
     "conversation.send_email": "Sent a practice email",
+    "conversation.send_sms": "Sent a practice text",
+    "customer.get_context": "Looked up the customer",
+    "employee.mark_exhausted": "Stopped after the allowed number of tries",
     "employee.mark_qualified": "Marked the lead as ready",
-    "employee.mark_not_interested": "Marked the lead as not interested",
-    "employee.request_handoff": "Passed the lead to a person",
-    "employee.handoff": "Passed the lead to a person",
-    "calendar.book_appointment": "Booked a practice appointment",
-    "calendar.find_availability": "Looked for open appointment times",
+    "employee.pause_work_item": "Paused this lead",
+    "employee.request_review": "Asked a person to look",
+    "employee.wait_for_response": "Waited for an answer",
+    "handoff.create": "Passed the lead to a person",
+    "knowledge.search": "Checked your business information",
+    "lead.add_note": "Added a note",
+    "lead.get": "Looked up the lead",
+    "lead.get_context": "Looked up the lead",
+    "lead.mark_bad_contact": "Marked the contact details as not working",
+    "lead.mark_do_not_contact": "Marked the lead as do not contact",
+    "lead.mark_not_interested": "Marked the lead as not interested",
+    "lead.update_qualification": "Updated what it learned about the lead",
+    "memory.remember": "Remembered a detail",
+    "opportunity.create": "Opened a sales opportunity",
+    "opportunity.get": "Looked up the sales opportunity",
+    "opportunity.update": "Updated the sales opportunity",
 }
 
 _STATE_WORDS = {
@@ -395,13 +413,20 @@ _STATE_WORDS = {
 }
 
 
-def _good_endings():
-    global _GOOD_ENDINGS
-    if _GOOD_ENDINGS is None:
-        from app.services.workforce import constants as WC
-        _GOOD_ENDINGS = frozenset({WC.QUALIFIED, WC.APPOINTMENT_BOOKED,
-                                   WC.HUMAN_HANDOFF})
-    return _GOOD_ENDINGS
+def _good_endings(job_role: Optional[str] = None):
+    """Which endings mean THIS job did its job.
+
+    Job-specific on purpose. An Appointment Setter that hands the lead to a
+    person because the calendar had no open times did NOT pass - it is the
+    customer's calendar that needs fixing, and the test has to say so.
+    """
+    from app.services.workforce import constants as WC
+    by_job = {
+        "lead_qualifier": frozenset({WC.QUALIFIED, WC.HUMAN_HANDOFF}),
+        "appointment_setter": frozenset({WC.APPOINTMENT_BOOKED}),
+    }
+    return by_job.get(job_role or "", frozenset({
+        WC.QUALIFIED, WC.APPOINTMENT_BOOKED, WC.HUMAN_HANDOFF}))
 
 
 def _within_hours_moment(db: Session, emp, now: datetime) -> datetime:
@@ -532,15 +557,18 @@ def run_test(db: Session, dep: AIEmployeeDeployment, *, actor: Optional[User],
               if t.decision != "allowed" else None,
               "run_id": t.run_id}
              for t in tools]
-    steps = [{"step": _STATE_WORDS.get(e.to_state, e.to_state),
+    steps = [{"step": ("Read the lead's answer and kept going"
+                       if (e.reason or "") == "picked up again"
+                       else _STATE_WORDS.get(e.to_state, e.to_state)),
               "state": e.to_state, "reason": e.reason,
               "at": e.created_at.isoformat() + "Z" if e.created_at else None}
              for e in events]
     claimed = sum(p.get("claimed", 0) for p in passes)
     errors = sum(p.get("errors", 0) for p in passes)
     ended = item.state
-    good = (ended in _good_endings() and claimed >= 1 and errors == 0
-            and runs and all(r.status == "completed" for r in runs))
+    good = (ended in _good_endings(emp.job_role) and claimed >= 1
+            and errors == 0 and runs
+            and all(r.status == "completed" for r in runs))
 
     if good:
         verdict, headline = "PASS", "PASS - Your AI worker completed the test."
@@ -548,7 +576,8 @@ def run_test(db: Session, dep: AIEmployeeDeployment, *, actor: Optional[User],
     else:
         verdict = "NEEDS_ATTENTION"
         headline = "NEEDS ATTENTION - Here is what to fix."
-        problems = [_explain_ending(item, tools, runs, claimed, errors)]
+        problems = [_explain_ending(item, tools, runs, claimed, errors,
+                                    handoffs=handoffs)]
 
     report = {
         "verdict": verdict,
@@ -562,6 +591,8 @@ def run_test(db: Session, dep: AIEmployeeDeployment, *, actor: Optional[User],
         "ended_as": _STATE_WORDS.get(ended, ended),
         "ended_state": ended,
         "pretend_reply_sent": replied,
+        "pretend_reply": (_PRACTICE_REPLIES.get(emp.job_role, _DEFAULT_REPLY)
+                          if replied else None),
         "steps": steps,
         "what_it_tried": tried,
         "refused": [t for t in tried if not t["allowed"]],
@@ -569,6 +600,7 @@ def run_test(db: Session, dep: AIEmployeeDeployment, *, actor: Optional[User],
                       "to_user_id": h.assigned_to_user_id,
                       "status": h.status} for h in handoffs],
         "run_ids": [r.id for r in runs],
+        "practice_appointment": _practice_appointment(tools),
         "worker_passes": passes,
         "tested_as_if": test_now.isoformat() + "Z",
         "tested_outside_hours": test_now != real_now,
@@ -588,8 +620,33 @@ def run_test(db: Session, dep: AIEmployeeDeployment, *, actor: Optional[User],
     return report
 
 
-def _explain_ending(item, tools, runs, claimed, errors) -> Dict:
+def _practice_appointment(tools) -> Optional[Dict[str, Any]]:
+    for t in tools:
+        if t.tool_key == "appointment.book" and t.decision == "allowed":
+            try:
+                data = json.loads(t.result_summary or "{}")
+            except (TypeError, ValueError):
+                data = {}
+            return {"starts_at": data.get("starts_at"),
+                    "starts_at_local": data.get("starts_at_local"),
+                    "timezone": data.get("timezone"),
+                    "with": data.get("advisor_name"),
+                    "practice": bool(data.get("practice")),
+                    "on_a_real_calendar": bool(data.get("calendar_synced"))}
+    return None
+
+
+def _explain_ending(item, tools, runs, claimed, errors, *,
+                    handoffs=()) -> Dict:
     from app.services.workforce import constants as WC
+    if item.state == WC.HUMAN_HANDOFF and any(
+            (h.reason_code or "") == "appointment_requires_human"
+            for h in handoffs):
+        return _blocker(
+            "no_open_times", "Your AI worker could not find an open time.",
+            "The calendar it books into has no open times in the next week.",
+            "Open Availability and set the days and hours people can book. "
+            "Then run the test again.", fix="availability")
     if claimed == 0:
         return _blocker(
             "not_picked_up", "Your AI worker did not pick up the test lead.",
@@ -852,7 +909,7 @@ def summary(db: Session, dep: AIEmployeeDeployment, *,
 # Jobs whose whole customer journey (setup -> Run test -> Start working ->
 # results) has an end-to-end acceptance test on the real worker. A job not in
 # this set is shown as "Coming soon", never as something that works.
-VERIFIED_JOBS = ("lead_qualifier",)
+VERIFIED_JOBS = ("lead_qualifier", "appointment_setter")
 
 JOB_CARDS = (
     ("lead_qualifier", "Lead Qualifier",

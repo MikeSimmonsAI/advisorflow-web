@@ -27,7 +27,7 @@
  *   POST   /ai-workforce/deployments/:id/retire
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import PageShell from '../components/PageShell'
 import '../styles/shared.css'
@@ -234,7 +234,7 @@ function fromConfiguration (cfg, businessName) {
   }
 }
 
-function TestReport ({ report }) {
+function TestReport ({ report, onFix }) {
   if (!report) return null
   const pass = report.verdict === 'PASS'
   return (
@@ -263,20 +263,31 @@ function TestReport ({ report }) {
               </ul>
             </>
           )}
+          {report.practice_appointment ? (
+            <p>
+              It booked a practice appointment
+              {report.practice_appointment.with ? <> with <strong>{report.practice_appointment.with}</strong></> : null}
+              {report.practice_appointment.starts_at_local ? <> for <strong>{new Date(report.practice_appointment.starts_at_local).toLocaleString([], { weekday: 'long', hour: 'numeric', minute: '2-digit' })}</strong></> : null}.
+              {' '}It is not on any real calendar.
+            </p>
+          ) : null}
           {!!report.handoffs?.length && (
             <p>It passed the lead to a person on your team, just like it will with real leads. You can see it under <strong>Needs You</strong>.</p>
           )}
           {report.pretend_reply_sent ? (
-            <p className="wf-muted">To finish the test, the pretend lead wrote back: “yes, I’m interested.”</p>
+            <p className="wf-muted">To finish the test, the pretend lead wrote back: “{report.pretend_reply}”</p>
           ) : null}
         </>
       ) : null}
-      <ProblemList problems={report.problems} />
+      <ProblemList problems={report.problems} onFix={onFix} />
     </section>
   )
 }
 
 function SetupWizard ({ deploymentId, businessName, canManage, onClose, onChanged }) {
+  // Every hook sits above the early "Loading" return below; a hook after a
+  // conditional return changes the hook order between renders (React #310).
+  const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const step = params.get('step') || 'business'
   const [dep, setDep] = useState(null)
@@ -371,7 +382,10 @@ function SetupWizard ({ deploymentId, businessName, canManage, onClose, onChange
     return <div className="panel wf-empty">{error || 'Loading your AI worker…'}</div>
   }
 
-  const fixStep = (p) => goStep(p.fix === 'handoff' ? 'handoff' : 'business')
+  const fixStep = (p) => {
+    if (p.fix === 'availability') { navigate('/availability'); return }
+    goStep(p.fix === 'handoff' ? 'handoff' : 'business')
+  }
 
   return (
     <section className="panel wf-wizard" aria-label="Set up your AI worker">
@@ -508,7 +522,7 @@ function SetupWizard ({ deploymentId, businessName, canManage, onClose, onChange
             disabled={busy || !summary.can_run_test || !canManage} onClick={runTest}>
             {busy ? 'Testing… this takes a few seconds' : 'Run test'}
           </button>
-          <TestReport report={report} />
+          <TestReport report={report} onFix={fixStep} />
           {!report && summary.last_test ? (
             <p className="wf-muted">Last test: {summary.last_test.verdict === 'PASS' ? 'PASS' : 'NEEDS ATTENTION'}.</p>
           ) : null}
@@ -639,6 +653,7 @@ function ResultsPanel ({ title, r, note }) {
 // ── THE PAGE ─────────────────────────────────────────────────────────────────
 
 export default function AIWorkforceHome () {
+  const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const tab = TABS.some(t => t.key === params.get('tab')) ? params.get('tab') : 'setup'
   const openId = params.get('worker')
@@ -783,7 +798,7 @@ export default function AIWorkforceHome () {
                   {n.practice ? <Badge tone="purple">Practice</Badge> : null}
                   {n.kind === 'handoff' ? <Badge tone="green">Ready for you</Badge> : null}
                 </div>
-                <ProblemList problems={[n]} onFix={n.deployment_id ? (p) => openWorker(n.deployment_id, p.fix === 'handoff' ? 'handoff' : 'business') : null} />
+                <ProblemList problems={[n]} onFix={n.deployment_id ? (p) => (p.fix === 'availability' ? navigate('/availability') : openWorker(n.deployment_id, p.fix === 'handoff' ? 'handoff' : 'business')) : null} />
               </li>
             ))}
           </ul>

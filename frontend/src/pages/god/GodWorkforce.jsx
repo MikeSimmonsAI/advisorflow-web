@@ -477,6 +477,12 @@ export default function GodWorkforce () {
           <div className="gm-card">
             <Sec>HEALTH</Sec>
             <div className="gm-stats" style={{ marginBottom: 14 }}>
+              <Stat k="QUEUE WORKER"
+                    v={health?.queue_worker?.running ? 'RUNNING' : 'NOT RUNNING'}
+                    tone={health?.queue_worker?.running ? undefined : '#b26a00'}
+                    s={health?.queue_worker?.last_success_at
+                      ? `last good pass ${new Date(health.queue_worker.last_success_at).toLocaleString()}`
+                      : 'no successful pass recorded'} />
               <Stat k="STALLED" v={health?.stalled_work_items ?? 0}
                     s="due and not moving" />
               <Stat k="TOOL ERRORS" v={health?.tool_errors ?? 0} s="last 7 days" />
