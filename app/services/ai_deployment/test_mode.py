@@ -724,7 +724,7 @@ _BOARD_GROUPS = (
     ("needs_you", "Needs you"),
     ("completed", "Completed"),
     ("appointments", "Appointments"),
-    ("handoffs", "Passed to a person"),
+    ("handoffs", "Ready for a person"),
 )
 
 
@@ -968,8 +968,8 @@ def results(db: Session, organization_id: str) -> Dict[str, Any]:
                                       % (good, b["finished"])}
         else:
             b["ready_rate"] = {"value": None, "shown": False,
-                               "how": "N/A - needs at least %d finished leads "
-                                      "to be fair (now %d)."
+                               "how": "Not measured yet: a fair rate needs "
+                                      "at least %d finished leads (now %d)."
                                       % (MIN_FOR_RATE, b["finished"])}
     out["open_handoffs"] = open_h
     out["note"] = ("Practice results come from pretend leads in test mode. "
@@ -1044,7 +1044,10 @@ def home(db: Session, organization_id: str, *,
     deps = [d for d in lifecycle.list_for_org(db, organization_id,
                                               include_retired=False)]
     summaries = [summary(db, d, now=now) for d in deps]
+    org = (db.query(Organization)
+           .filter(Organization.id == organization_id).first())
     return {
+        "business_name": getattr(org, "name", None),
         "jobs": job_cards(db, organization_id),
         "workers": summaries,
         "needs_you": needs_you(db, organization_id, summaries),

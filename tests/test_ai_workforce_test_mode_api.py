@@ -178,7 +178,8 @@ def test_home_is_one_honest_payload(client, admin_auth_headers, auth_headers,
                                               "not_on_plan")
     assert body["workers"] == [] and body["can_manage"] is True
     rate = body["results"]["real"]["ready_rate"]
-    assert rate["shown"] is False and rate["how"].startswith("N/A")
+    assert rate["shown"] is False and rate["value"] is None
+    assert "at least 5" in rate["how"]
 
     dep_id = _hire_and_set_up(client, admin_auth_headers, db_session,
                               sample_org)
