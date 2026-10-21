@@ -1589,6 +1589,23 @@ def sweep(db: Session, now: Optional[datetime] = None) -> Dict:
             t.delivery, t.message_id = "sent", getattr(msg, "id", None)
             sent += 1
             db.commit()                                  # a later failure must never un-mark this send
+            # The held reply answered the family's message it was written for
+            # (and their earlier open ones): SCI Live stops listing them as waiting,
+            # as the live path does in _deliver. A follow-up answers nothing.
+            if t.response_id and t.action != "follow_up":
+                try:
+                    _for = db.query(ProgramResponse).filter(ProgramResponse.id == t.response_id).first()
+                    if _for is not None and _for.received_at is not None:
+                        for _r in (db.query(ProgramResponse).filter(
+                                ProgramResponse.lead_id == lead.id,
+                                ProgramResponse.organization_id == lead.organization_id,
+                                ProgramResponse.handling_status.in_(("new", "opened")),
+                                ProgramResponse.received_at <= _for.received_at).all()):
+                            _answered(_r, now)
+                        db.commit()
+                except Exception:                        # noqa: BLE001
+                    db.rollback()
+                    log.exception("marking answered after a held reply failed for lead %s", lead.id)
         except Exception as exc:                         # noqa: BLE001
             db.rollback()
             t = db.merge(t)

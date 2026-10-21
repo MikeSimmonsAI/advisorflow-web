@@ -210,6 +210,7 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
     advisors = {u.id: (u.full_name or u.email) for u in db.query(User).filter(User.id.in_(list(_adv_ids)))} \
         if _adv_ids else {}
     needle = (q or "").strip().lower()
+    from app.services.programs import responses as R
     items = []
     for lid, r in newest.items():
         lead = leads.get(lid)
@@ -221,6 +222,7 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                                who["sender_email"], who["sender_name"], who["subject"])):
             continue
         conv = convs.get(lid)
+        answered = R.ai_answered(db, conv, r) if r.handling_status in _NEEDS_REPLY else False
         items.append({"lead_id": lid, "response_id": r.id, "name": name, "location": loc,
                       "phone": getattr(lead, "phone", None),
                       "channel_label": "EMAIL" if r.channel == "email" else ("VOICEMAIL" if r.channel == "voicemail" else "TEXT"),
@@ -232,17 +234,20 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                       "class": r.response_class, "badge": _badge(r, conv), "channel": r.channel,
                       "received_at": r.received_at.isoformat() + "Z" if r.received_at else None,
                       "sla_breached": bool(r.response_class == "hot" and r.handling_status == "new"
+                                           and not answered
                                            and r.sla_due_at and r.sla_due_at <= datetime.utcnow()),
+                      # the AI already answered this reply: shown, but not as waiting on staff
+                      "ai_answered": answered,
                       "setter_state": conv.state if conv else None, "actions": _actions(r, conv),
                       "home_visit": _home_visit_waiting(conv),
                       "advisor": advisors.get(getattr(lead, "assigned_to_id", None))})
     items.sort(key=lambda i: (not i["sla_breached"], not i["home_visit"], _RANK.get(i["class"], 5),
                               -(datetime.fromisoformat(i["received_at"][:-1]).timestamp() if i["received_at"] else 0)))
     needs = sum(1 for i in items if i["class"] in ("hot", "active", "bad_data", "wrong_person")
-                and i["handling_status"] in _NEEDS_REPLY and not i["is_test"])
+                and i["handling_status"] in _NEEDS_REPLY and not i["is_test"] and not i["ai_answered"])
     filter_counts = {"all": len(items),
                      "needs_reply": sum(1 for i in items if i["handling_status"] in _NEEDS_REPLY
-                                        and i["class"] != "auto_reply"),
+                                        and i["class"] != "auto_reply" and not i["ai_answered"]),
                      "text": sum(1 for i in items if i["channel"] != "email"),
                      "email": sum(1 for i in items if i["channel"] == "email"),
                      "unread": sum(1 for i in items if i["handling_status"] == "new"),
@@ -251,7 +256,8 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                      "appointments": sum(1 for i in items if i["setter_state"] in _APPT_STATES),
                      "home_visits": sum(1 for i in items if i["home_visit"])}
     if flt == "needs_reply":
-        items = [i for i in items if i["handling_status"] in _NEEDS_REPLY and i["class"] != "auto_reply"]
+        items = [i for i in items if i["handling_status"] in _NEEDS_REPLY and i["class"] != "auto_reply"
+                 and not i["ai_answered"]]
     elif flt == "text":
         items = [i for i in items if i["channel"] != "email"]
     elif flt == "email":
