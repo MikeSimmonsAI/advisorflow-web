@@ -113,6 +113,7 @@ function LeadDetailsBody() {
               <p>{opp.contact_name ? opp.company_name : (opp.industry || '')}</p>
               {isWon ? <span className="ss-status ss-sgreen">Won</span>
                 : opp.stage === LOST_STAGE ? <span className="ss-status">Lost</span>
+                : blocked ? null
                 : <DueStatus bucket={bucket} iso={opp.next_action_due_at} />}
             </div>
             <div className="ss-detail-actions">
@@ -312,9 +313,9 @@ function DoNotContactPanel({ opp, detail, onChanged }) {
     return (
       <div className="ss-dncbanner" role="status">
         <strong>Do Not Contact</strong>
-        This prospect asked not to be contacted. Recorded by {active.recorded_by || 'a team member'} on {when(active.recorded_at)}
-        {active.reason ? <> — “{active.reason}”</> : null}. Calls, texts, follow-ups, bookings and emails are blocked
+        This prospect asked not to be contacted. Calls, texts, follow-ups, bookings and emails are blocked
         for {[active.phone && 'this phone', active.email && 'this email'].filter(Boolean).join(' and ')} across every record.
+        <div>Recorded by {active.recorded_by || 'a team member'} on {when(active.recorded_at)}{active.reason ? <>: “{active.reason}”</> : null}</div>
         {detail.can_lift && !mode && (
           <div style={{ marginTop: 8 }}>
             <button type="button" className="ss-btn ss-white ss-xs" onClick={() => setMode('lift')}>Lift (manager correction)</button>

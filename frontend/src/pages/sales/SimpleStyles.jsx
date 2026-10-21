@@ -421,7 +421,7 @@ const CSS = `
   .ss-outcome{min-height:48px}
   .ss-decision{min-height:56px}
   .ss-field input,.ss-field textarea,.ss-field select{min-height:44px;font-size:16px}
-  .ss-modal .ss-iconbtn{width:44px;height:44px}
+  .ss-shell .ss-modal .ss-iconbtn{width:44px;min-width:44px;height:44px;flex:none}
   .ss-phoneline .ss-btn{min-height:44px}
   .ss-shell .ss-teamstats{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
