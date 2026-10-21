@@ -30,6 +30,19 @@ const CSS = `
 .ss-shell .sw-avatar{width:32px;height:32px;background:#315b7f;color:#d7f0ff;font-size:10px}
 .ss-shell .sw-profile b{font-size:11px;color:#fff}
 .ss-shell .sw-profile small{color:#8fb0c7;font-size:10px;margin-top:3px}
+/* Other Workspaces (#300): one entry under the identity card, desktop/tablet. */
+.ss-shell .ss-otherws{display:flex;align-items:center;gap:10px;min-height:44px;padding:9px 10px;border-radius:10px;
+  text-decoration:none;font:inherit;color:#dbe8f3;border:1px solid #27455f;background:transparent}
+.ss-shell .ss-otherws>span{flex:1;min-width:0;display:flex;flex-direction:column}
+.ss-shell .ss-otherws b{font-size:12px;color:#fff;font-weight:700}
+.ss-shell .ss-otherws small{font-size:10px;color:#8fb0c7;margin-top:2px}
+.ss-shell .ss-otherws svg{width:17px;height:17px;flex:none}
+.ss-shell .ss-otherws:hover{background:#16436c;border-color:#2f5a80}
+.ss-shell .ss-otherws:focus-visible{outline:3px solid #7cb7ff;outline-offset:2px}
+.ss-shell .ss-otherws-side{margin:-15px 2px 22px}
+.ss-shell .ss-otherws-menu{display:none}
+.ss-shell .ss-otherws-err{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;font-size:11px;color:#c9d9e6;border-style:dashed}
+.ss-shell .ss-otherws-err button{background:none;border:0;padding:0;color:#9fd0ff;text-decoration:underline;font:inherit;cursor:pointer;min-height:24px}
 .ss-shell .sw-nav{gap:5px}
 .ss-shell .sw-nav a{color:#bbd0e3;border-radius:6px;gap:11px;padding:12px 13px;font-size:12px;font-weight:500}
 .ss-shell .sw-nav a svg{width:16px;height:16px;flex:0 0 auto}
@@ -369,6 +382,13 @@ const CSS = `
   .ss-shell .sw-topbar h1{font-size:20px}
   .ss-shell .ss-hide-sm{display:none}
   /* Phone "More": everything the desktop More holds, plus Sign out. */
+  .ss-shell .ss-otherws-side{display:none}
+  .ss-shell .ss-mmorepanel .ss-otherws-menu{display:flex;margin-top:6px;border-color:var(--ss-line);color:var(--ss-ink);background:#f4f8fc}
+  .ss-shell .ss-mmorepanel .ss-otherws-menu b{color:var(--ss-ink);font-size:14px}
+  .ss-shell .ss-mmorepanel .ss-otherws-menu small{color:#55657a;font-size:12px}
+  .ss-shell .ss-mmorepanel .ss-otherws-menu:hover{background:#eaf2ff}
+  .ss-shell .ss-mmorepanel .ss-otherws-err{color:var(--ss-sub)}
+  .ss-shell .ss-mmorepanel .ss-otherws-err button{color:var(--ss-blue-dark)}
   .ss-shell .ss-mmore{display:block;position:relative}
   .ss-shell .ss-mmorebtn{min-height:44px;min-width:44px;display:inline-flex;align-items:center;gap:6px;padding:0 12px;
     border:1px solid var(--ss-line);border-radius:10px;background:#fff;color:var(--ss-ink);font:inherit;font-size:13px;font-weight:700;cursor:pointer}

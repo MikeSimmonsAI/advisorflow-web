@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import {
   REAL_STAGES, SIMPLE_COLUMNS, simpleColumnFor, entryStageFor, groupForSimpleBoard,
   cleanPhone, telHref, smsHref, CALL_OUTCOMES, NOT_INTERESTED_CHOICES, stageAfterOutcome, buildOutcomeRequests,
-  dueIsoFromYmd, ymdPlusDays, dueBucket, followUpList, greeting, firstName,
+  dueIsoFromYmd, ymdPlusDays, dueBucket, followUpList, greeting, firstName, otherWorkspaceCount,
 } from '../src/pages/sales/simpleSales.js'
 
 test('every real stage maps to exactly one simple column', () => {
@@ -242,4 +242,21 @@ test('a Do Not Contact lead is never due, but stays visible under All', () => {
   assert.deepEqual(followUpList(cards, 'today', '', now).map(c => c.id), ['a'])
   assert.deepEqual(followUpList(cards, 'overdue', '', now).map(c => c.id), ['a'])
   assert.deepEqual(followUpList(cards, 'all', '', now).map(c => c.id).sort(), ['a', 'b'])
+})
+
+test('Other Workspaces counts only real other destinations, never for God', () => {
+  const ws = (id, name, industry = '') => ({ type: 'workspace', organization_id: id, organization_name: name, organization_slug: id, industry })
+  const backOffice = { has_back_office: true, back_office_path: '/sales' }
+  // A rep with only this Sales Workspace: nothing to switch to.
+  assert.equal(otherWorkspaceCount({ ...backOffice, workspace_contexts: [], product_contexts: [], executive_contexts: [] }, 'advisor'), 0)
+  // One customer workspace.
+  assert.equal(otherWorkspaceCount({ ...backOffice, workspace_contexts: [ws('a', 'Testco A')] }, 'advisor'), 1)
+  // Six workspaces + an Executive Suite; the Back Office card (here) is not counted.
+  const six = ['a', 'b', 'c', 'd', 'e', 'f'].map(x => ws(x, 'Testco ' + x))
+  assert.equal(otherWorkspaceCount({ ...backOffice, workspace_contexts: six,
+    executive_contexts: [{ type: 'executive', platform_id: 'p1', platform_name: 'EvoSys Pro' }] }, 'advisor'), 7)
+  // God Mode keeps its own return bar.
+  assert.equal(otherWorkspaceCount({ ...backOffice, workspace_contexts: six }, 'god_admin'), 0)
+  // No answer from the server: no entry, never a guess.
+  assert.equal(otherWorkspaceCount(null, 'advisor'), 0)
 })
