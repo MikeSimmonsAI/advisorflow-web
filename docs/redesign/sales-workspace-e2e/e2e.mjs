@@ -1,12 +1,18 @@
 // Lane F end-to-end rep journey (master prompt 2026-10-21 §13) against the
 // LOCAL app with synthetic data. Any request to a non-local host is aborted.
-import chromium from '@sparticuz/chromium'
 import pp from 'puppeteer-core'
 import fs from 'node:fs'
+// Browser: SW_CHROME=<path to a headless-shell build> (recommended - see README),
+// otherwise @sparticuz/chromium.
+async function launchOpts() {
+  if (process.env.SW_CHROME) return { executablePath: process.env.SW_CHROME, args: ['--no-sandbox', '--disable-dev-shm-usage'], headless: true }
+  const chromium = (await import('@sparticuz/chromium')).default
+  return { executablePath: await chromium.executablePath(), args: chromium.args, headless: true }
+}
 
 const OUT = process.argv[2]
 const OUTBOX = process.argv[3]
-const APP = 'http://127.0.0.1:4173'
+const APP = process.env.SW_APP || 'http://localhost:5173'  // must be an origin the backend allows (README)
 const API = 'http://127.0.0.1:8000'
 fs.mkdirSync(OUT, { recursive: true })
 const steps = []
@@ -27,7 +33,7 @@ const api = async (tok, path, opts = {}) => {
 const outboxLines = () => fs.readFileSync(OUTBOX, 'utf8').split('\n').filter(Boolean)
 const setDate = (page, sel, v) => page.$eval(sel, (e, v) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(e, v); e.dispatchEvent(new Event('input', { bubbles: true })) }, v)
 
-const browser = await pp.launch({ executablePath: await chromium.executablePath(), args: chromium.args, headless: true })
+const browser = await pp.launch(await launchOpts())
 const blocked = new Set(); const errors = []
 async function newPage(w = 1440, h = 900) {
   const page = await browser.newPage()

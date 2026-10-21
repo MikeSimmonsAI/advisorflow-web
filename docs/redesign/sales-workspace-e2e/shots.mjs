@@ -1,11 +1,17 @@
 // Lane F screenshots against the LOCAL app only. Any request to a host other
 // than 127.0.0.1/localhost is aborted and reported.
-import chromium from '@sparticuz/chromium'
 import pp from 'puppeteer-core'
 import fs from 'node:fs'
+// Browser: SW_CHROME=<path to a headless-shell build> (recommended - see README),
+// otherwise @sparticuz/chromium.
+async function launchOpts() {
+  if (process.env.SW_CHROME) return { executablePath: process.env.SW_CHROME, args: ['--no-sandbox', '--disable-dev-shm-usage'], headless: true }
+  const chromium = (await import('@sparticuz/chromium')).default
+  return { executablePath: await chromium.executablePath(), args: chromium.args, headless: true }
+}
 
 const OUT = process.argv[2]
-const APP = 'http://127.0.0.1:4173'
+const APP = process.env.SW_APP || 'http://localhost:5173'  // must be an origin the backend allows (README)
 const API = 'http://127.0.0.1:8000'
 fs.mkdirSync(OUT, { recursive: true })
 
@@ -14,7 +20,7 @@ const opps = await (await fetch(API + '/sales/opportunities', { headers: { Autho
 const all = opps.stages.flatMap(s => s.opportunities)
 const lead = all.find(o => o.contact_name === 'Testfamily Alvarez')
 
-const browser = await pp.launch({ executablePath: await chromium.executablePath(), args: chromium.args, headless: true })
+const browser = await pp.launch(await launchOpts())
 const blocked = new Set(); const errors = []
 const page = await browser.newPage()
 await page.setRequestInterception(true)
