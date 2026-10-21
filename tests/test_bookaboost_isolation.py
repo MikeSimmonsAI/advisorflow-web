@@ -432,3 +432,27 @@ def test_bookaboost_team_seat_is_its_own_and_its_field_fence_stays_home(client, 
     evo_team = client.get("/wholesale/team", headers=evo_admin_h)
     if evo_team.status_code == 200:
         assert canv.id not in json.dumps(evo_team.json())
+
+
+# ── 6. Shared platform files never show a platform person to a tenant ──────
+
+def test_shared_county_file_status_hides_who_uploaded_it_from_tenants(client, db_session, world, monkeypatch):
+    from app.services.evosense import providers as PV
+    real = PV.upload_status
+
+    def with_upload(key):
+        out = real(key)
+        out["current"] = {"uploaded_at": "2026-10-20T12:00:00Z", "source_date": "2026-10-01",
+                          "by": "platform-admin@evosys.test", "via": "upload", "size": 1234}
+        return out
+    monkeypatch.setattr(PV, "upload_status", with_upload)
+    for who, org in ((world["bab_admin"], world["bab"]), (world["evo_user"], world["evo"])):
+        r = client.get("/wholesale/evosense/sources/tad/upload", headers=_h(db_session, who, ws=org.id))
+        assert r.status_code == 200, (who.email, r.status_code, r.text[:160])
+        cur = r.json().get("current") or {}
+        assert "by" not in cur and "platform-admin@evosys.test" not in r.text
+        assert cur.get("uploaded_at") and cur.get("source_date")          # still useful to the tenant
+    god = _user(db_session, None, "god-%d@evo.test" % next(_SEQ), role="god_admin")
+    r = client.get("/wholesale/evosense/sources/tad/upload",
+                   headers={**_h(db_session, god), "X-Org-Override": world["bab"].id})
+    assert r.status_code == 200 and r.json()["current"]["by"] == "platform-admin@evosys.test"
