@@ -226,3 +226,41 @@ export function greeting(now = new Date()) {
 export function firstName(full) {
   return (full || '').trim().split(/\s+/)[0] || ''
 }
+
+// ── typed time → booking time ──────────────────────────────────────────────
+
+/**
+ * The offset (minutes, local minus UTC) of `tz` at the given UTC instant,
+ * read from the browser's own time-zone database.
+ */
+function zoneOffsetMinutes(utcMs, tz) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(utcMs))
+  const v = {}
+  parts.forEach(p => { v[p.type] = Number(p.value) })
+  const asUtc = Date.UTC(v.year, v.month - 1, v.day, v.hour % 24, v.minute, v.second)
+  return Math.round((asUtc - utcMs) / 60000)
+}
+
+/**
+ * A wall-clock date + time typed in the sales team's time zone, as the naive
+ * UTC string POST /sales/appointments expects ("2026-10-23T15:00:00").
+ * Two passes so a time on a daylight-saving change day still resolves to the
+ * offset that applies at that moment.
+ */
+export function wallToUtcNaive(ymd, hm, tz) {
+  const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd || '')
+  const t = /^(\d{1,2}):(\d{2})/.exec(hm || '')
+  if (!d || !t) return null
+  const wall = Date.UTC(+d[1], +d[2] - 1, +d[3], +t[1], +t[2])
+  let utc = wall
+  try {
+    utc = wall - zoneOffsetMinutes(wall, tz || 'America/Chicago') * 60000
+    utc = wall - zoneOffsetMinutes(utc, tz || 'America/Chicago') * 60000
+  } catch {
+    return null
+  }
+  return new Date(utc).toISOString().slice(0, 19)
+}

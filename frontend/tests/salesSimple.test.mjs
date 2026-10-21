@@ -138,3 +138,13 @@ test('greeting and first name never invent a person', () => {
   assert.equal(firstName('Kerry Allan'), 'Kerry')
   assert.equal(firstName(''), '')
 })
+
+test('typed time in the team zone becomes the UTC booking time', async () => {
+  const { wallToUtcNaive } = await import('../src/pages/sales/simpleSales.js')
+  assert.equal(wallToUtcNaive('2026-10-23', '10:00', 'America/Chicago'), '2026-10-23T15:00:00')  // CDT
+  assert.equal(wallToUtcNaive('2026-12-01', '10:00', 'America/Chicago'), '2026-12-01T16:00:00')  // CST
+  assert.equal(wallToUtcNaive('2026-11-01', '09:30', 'America/New_York'), '2026-11-01T14:30:00') // day DST ends
+  assert.equal(wallToUtcNaive('2026-10-23', '14:15', 'UTC'), '2026-10-23T14:15:00')
+  assert.equal(wallToUtcNaive('', '10:00', 'UTC'), null)
+  assert.equal(wallToUtcNaive('2026-10-23', '10:00', 'Not/AZone'), null)
+})
