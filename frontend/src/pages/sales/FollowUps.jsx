@@ -7,8 +7,9 @@
  * leaves the due list if it is no longer due, and the next person is offered.
  *
  * Data: GET /sales/opportunities (the same scoped list My Pipeline uses) and
- * /sales/my-day's recent activity for "Completed" — deals with a call or text
- * recorded today. Nothing here is sample data.
+ * /sales/my-day?scope=mine's `worked_today` for "Completed" — every deal this
+ * person called or texted since the team's midnight, counted by the server
+ * over the whole day. Nothing here is sample data.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -20,15 +21,6 @@ import {
   Icon, DueStatus, ErrorLine, Skeleton, initialsOf, useNotice, useContactActions,
   CallTextSquares,
 } from './SimpleParts'
-
-const WORKED = ['call_outcome', 'text_logged']
-
-function isToday(iso) {
-  if (!iso) return false
-  const d = new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(String(iso)) ? iso : iso + 'Z')
-  const n = new Date()
-  return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate()
-}
 
 export default function FollowUps() {
   return (
@@ -42,7 +34,7 @@ function FollowUpsBody() {
   const nav = useNavigate()
   const ctx = useSales()
   const [deals, setDeals] = useState(null)
-  const [recent, setRecent] = useState([])
+  const [workedList, setWorkedList] = useState([])
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
@@ -56,10 +48,10 @@ function FollowUpsBody() {
     try {
       const [o, d] = await Promise.all([
         api.get('/sales/opportunities'),
-        api.get('/sales/my-day').catch(() => null),
+        api.get('/sales/my-day?scope=mine').catch(() => null),
       ])
       setDeals(o)
-      setRecent(d?.recent_activity || [])
+      setWorkedList(d?.worked_today?.opportunity_ids || [])
     } catch (e) {
       setError(e.message || 'Could not load your follow ups.')
     } finally {
@@ -76,11 +68,16 @@ function FollowUpsBody() {
   }, [deals])
 
   const due = useMemo(() => followUpList(mine, 'today', query), [mine, query])
-  const workedIds = useMemo(() => new Set(recent
-    .filter(e => WORKED.includes(e.event_type) && isToday(e.occurred_at))
-    .map(e => e.opportunity_id)), [recent])
-  const completed = useMemo(() => followUpList(mine, 'all', query).filter(c => workedIds.has(c.id)),
-    [mine, query, workedIds])
+  const workedIds = useMemo(() => new Set(workedList), [workedList])
+  // Completed covers every deal worked today, whatever its status now — a
+  // follow-up that was called and then marked Won still counts as done.
+  const completed = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return mine.filter(c => workedIds.has(c.id))
+      .filter(c => !q || [c.company_name, c.contact_name, c.phone, c.email, c.next_action]
+        .filter(Boolean).some(v => String(v).toLowerCase().includes(q)))
+      .map(c => ({ ...c, due_bucket: 'done' }))
+  }, [mine, workedIds, query])
 
   const rows = filter === 'overdue' ? due.filter(c => c.due_bucket === 'overdue')
     : filter === 'today' ? due.filter(c => c.due_bucket === 'today')

@@ -117,18 +117,13 @@ export default function SalesShell({ title, subtitle, actions, children }) {
       const me = await api.get('/sales/me')
       setCtx(me)
       try {
-        const day = await api.get('/sales/my-day')
-        const metrics = { ...(day.metrics || {}) }
-        // A manager's /sales/my-day counts the whole team. The Follow Ups badge
-        // sits on THEIR OWN list, so count their own due deals instead — the
-        // badge and the list it opens must never disagree.
-        if (me?.permissions?.view_team_pipeline) {
-          const o = await api.get('/sales/opportunities')
-          const own = (o.stages || []).flatMap(s => s.opportunities || [])
-            .filter(c => c.owner_user_id === o.viewer_user_id)
-          metrics.follow_ups_due = followUpList(own, 'today').length
-        }
-        setCounts(metrics)
+        // The Follow Ups badge is counted from the SAME list the Follow Ups
+        // screen shows — the caller's own open deals due today or earlier —
+        // so the badge and the page can never disagree, for a rep or a manager.
+        const o = await api.get('/sales/opportunities')
+        const all = (o.stages || []).flatMap(st => st.opportunities || [])
+        const own = o.is_manager ? all.filter(c => c.owner_user_id === o.viewer_user_id) : all
+        setCounts({ follow_ups_due: followUpList(own, 'today').length })
       } catch { /* counts are a nicety, never a blocker */ }
     } catch (e) {
       setError(e.message || 'Could not load the sales workspace.')

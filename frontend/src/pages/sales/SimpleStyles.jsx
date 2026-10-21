@@ -21,7 +21,7 @@ const CSS = `
 /* ── frame ──────────────────────────────────────────────────────────── */
 .ss-shell .sw-app{grid-template-columns:224px minmax(0,1fr);background:var(--ss-bg)}
 .ss-shell .sw-sidebar{background:linear-gradient(165deg,#081d2e,#071728);color:#c8dbec;
-  padding:24px 10px 20px;border-right:0}
+  padding:24px 10px 20px;border-right:0;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#27455f transparent}
 .ss-shell .sw-brand{gap:11px;padding:0 10px 26px;color:#fff}
 .ss-shell .sw-brandmark{width:30px;height:30px;border-radius:7px;background:#09ab88;color:#002620;font-size:16px}
 .ss-shell .sw-brand b{font-size:14px;font-weight:800}
@@ -123,6 +123,19 @@ const CSS = `
 .ss-shell .ss-motivate .ss-trophy{font-size:38px;margin-bottom:10px}
 .ss-shell .ss-motivate h3{font-size:15px;margin:0 0 8px}
 .ss-shell .ss-motivate p{font-size:11px;margin:0;max-width:210px;line-height:1.5;color:#47826e}
+
+/* ── personal vs team (manager My Day) ──────────────────────────────── */
+.ss-shell .ss-scopehead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:0 0 10px}
+.ss-shell .ss-scopehead h2{font-size:14px;margin:0;font-weight:800}
+.ss-shell .ss-scopehead span{font-size:11px;color:#5f6e83}
+.ss-shell .ss-teamrow{border:1px dashed #b9c8d8;background:#f3f6fa;border-radius:9px;padding:14px 18px;margin-bottom:21px}
+.ss-shell .ss-teamrow-h{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.ss-shell .ss-teamrow-h h2{font-size:14px;margin:0;font-weight:800;display:inline}
+.ss-shell .ss-teamrow-h span{font-size:11px;color:#5f6e83;margin-left:10px}
+.ss-shell .ss-teamstats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.ss-shell .ss-teamstat{background:#fff;border:1px solid var(--ss-line);border-radius:7px;padding:10px 12px}
+.ss-shell .ss-teamstat b{display:block;font-size:19px;font-weight:800}
+.ss-shell .ss-teamstat span{font-size:11px;color:#4f5d70}
 
 /* ── sections / toolbar / lists ─────────────────────────────────────── */
 .ss-shell .ss-sections{display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:14px}
@@ -312,11 +325,12 @@ const CSS = `
   .ss-shell .ss-boards{grid-template-columns:repeat(2,minmax(0,1fr))}
   .ss-shell .ss-twoform{grid-template-columns:1fr}
   .ss-shell .ss-formside{min-height:0}
+  .ss-shell .ss-teamstats{grid-template-columns:repeat(3,minmax(0,1fr))}
 }
 @media(max-width:820px){
   .ss-shell .sw-app{display:block}
   .ss-shell .sw-sidebar{position:sticky;top:0;z-index:20;width:100%;height:auto;padding:10px 12px;flex-direction:row;
-    align-items:center;gap:12px;overflow-x:auto;scrollbar-width:none}
+    align-items:center;gap:12px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
   .ss-shell .sw-sidebar::-webkit-scrollbar{display:none}
   .ss-shell .sw-brand{padding:0;flex:none}
   .ss-shell .sw-brand small,.ss-shell .sw-profile,.ss-shell .sw-mini,.ss-shell .sw-sidefill,
@@ -352,6 +366,7 @@ const CSS = `
   .ss-shell .ss-weekday{border-right:0;border-bottom:1px solid #edf0f5;min-height:0}
   .ss-shell .ss-search{min-width:0;max-width:none;flex:1 1 100%}
   .ss-outcomes{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ss-shell .ss-teamstats{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media(prefers-reduced-motion:reduce){ .ss-shell .ss-skel{animation:none} }
 `

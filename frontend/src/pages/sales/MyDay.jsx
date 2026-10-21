@@ -3,8 +3,12 @@
  *
  * Layout follows Mike's approved "Simplified Sales Workflow – My Day" design:
  * greeting, four workload cards, three big actions, today's priorities.
- * Every number is real — /sales/my-day plus the rep's own open deals for the
- * overdue count. Nothing is sample data.
+ * Every number is real. Nothing is sample data.
+ *
+ * WHOSE NUMBERS. The cards are always the viewer's OWN work
+ * (/sales/my-day?scope=mine + their own deals). A manager additionally gets
+ * one clearly labelled "Your team" row from the unscoped /sales/my-day, so a
+ * personal number and a team number never share a card.
  *
  * What the old My Day showed that a rep still needs (meetings to confirm,
  * proposals waiting on them) appears here only when there is something to do,
@@ -31,6 +35,7 @@ function MyDayBody() {
   const ctx = useSales()
   const [day, setDay] = useState(null)
   const [deals, setDeals] = useState(null)
+  const [team, setTeam] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -38,10 +43,12 @@ function MyDayBody() {
     setLoading(true); setError(null)
     try {
       const [d, o] = await Promise.all([
-        api.get('/sales/my-day'),
+        api.get('/sales/my-day?scope=mine'),
         api.get('/sales/opportunities').catch(() => null),
       ])
       setDay(d); setDeals(o)
+      // Team figures only for a manager, and only in their own labelled row.
+      setTeam(d?.is_manager ? await api.get('/sales/my-day').catch(() => null) : null)
     } catch (e) {
       setError(e.message || 'Could not load your day.')
     } finally {
@@ -95,6 +102,12 @@ function MyDayBody() {
         </div>
       </div>
 
+      {day?.is_manager && (
+        <div className="ss-scopehead">
+          <h2>Your numbers</h2>
+          <span>Only deals and meetings that are yours. Your team's totals are further down.</span>
+        </div>
+      )}
       <div className="ss-stats">
         <button type="button" className="ss-stat" onClick={() => nav('/sales/pipeline')}>
           <div className="ss-num">{loading && !day ? '–' : newLeads}</div>
@@ -129,6 +142,27 @@ function MyDayBody() {
           <span><strong>View Pipeline</strong><small>See all deals</small></span>
         </button>
       </div>
+
+      {team && (
+        <section className="ss-teamrow" aria-labelledby="ss-team-h">
+          <div className="ss-teamrow-h">
+            <div>
+              <h2 id="ss-team-h">Your team</h2>
+              <span>Everyone you manage, including you</span>
+            </div>
+            <button type="button" className="ss-link" onClick={() => nav('/sales/manager')}>
+              Open Team Command <Icon name="arrow" size={14} />
+            </button>
+          </div>
+          <div className="ss-teamstats">
+            <TeamStat n={team.metrics?.follow_ups_due} label="Follow ups due" />
+            <TeamStat n={team.metrics?.needs_action} label="Deals needing action" />
+            <TeamStat n={team.metrics?.demos_to_build} label="Demos to build" />
+            <TeamStat n={team.metrics?.appointments_today} label="Appointments today" />
+            <TeamStat n={team.metrics?.won_this_month} label="Won this month" />
+          </div>
+        </section>
+      )}
 
       <div className="ss-columns">
         <div>
@@ -222,6 +256,15 @@ function MyDayBody() {
         </div>
       </div>
     </>
+  )
+}
+
+function TeamStat({ n, label }) {
+  return (
+    <div className="ss-teamstat">
+      <b>{n ?? '–'}</b>
+      <span>{label}</span>
+    </div>
   )
 }
 

@@ -2,7 +2,7 @@
  * Reports — "Your progress at a glance." (Lane F, #281)
  *
  * The rep's own snapshot, from the same real data My Day uses
- * (/sales/my-day and the rep's open deals). Team reporting for managers is a
+ * (/sales/my-day?scope=mine and the viewer's own deals — personal for a manager too). Team reporting for managers is a
  * separate, still-undecided screen and is not implied here.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -31,7 +31,7 @@ function Body() {
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const [d, o] = await Promise.all([api.get('/sales/my-day'), api.get('/sales/opportunities?include_lost=true')])
+      const [d, o] = await Promise.all([api.get('/sales/my-day?scope=mine'), api.get('/sales/opportunities?include_lost=true')])
       setDay(d); setDeals(o)
     } catch (e) { setError(e.message || 'Could not load your results.') }
     finally { setLoading(false) }
