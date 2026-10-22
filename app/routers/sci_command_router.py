@@ -883,6 +883,24 @@ def command_slots(lead_id: str, kind: str = "visit", db: Session = Depends(get_d
             "reason": why}
 
 
+@router.get("/day-slots")
+def command_day_slots(lead_id: str, date: str, kind: str = "visit", db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_or_observer)):
+    """Every open time on the day a person picks ("Choose custom time")."""
+    from datetime import date as _date
+    from app.services.programs import appointments as A
+    prog = _program(db, user, managers_only=False)
+    try:
+        day = _date.fromisoformat(date[:10])
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Pick a date.")
+    slots, why = A.all_slots_on_day(db, prog, day, kind=kind if kind in (A.PHONE, A.VISIT) else A.VISIT)
+    return {"date": day.isoformat(),
+            "slots": [{"value": s.isoformat(), "label": A.describe(s),
+                       "day": s.strftime("%a %b %-d"), "time": s.strftime("%-I:%M %p")} for s in slots],
+            "reason": why}
+
+
 class ScheduleIn(BaseModel):
     lead_id: str
     slot: str                       # local Central ISO, from /slots

@@ -1884,6 +1884,32 @@ async def _program_sla_loop():
                         except Exception as exc:                 # noqa: BLE001
                             db.rollback()
                             _logger.error("program self-check error: %s", exc, exc_info=True)
+                        # Families who said yes to coming in and have no time
+                        # an hour later: page the team (8 AM - 8 PM Central).
+                        try:
+                            from app.services.programs import email_touches as _et_sv
+                            from app.services.programs import stuck_visits as _sv
+                            from datetime import timedelta as _td_sv, datetime as _dt_sv
+                            from zoneinfo import ZoneInfo as _ZI
+                            _hr = _dt_sv.now(_ZI("America/Chicago")).hour
+                            if 8 <= _hr < 20 and _et_sv.pass_due(key="stuck_visits", every=_td_sv(minutes=30)):
+                                _n = _sv.alert_all(db)
+                                if _n:
+                                    out["stuck_visit_alerts"] = _n
+                        except Exception as exc:                 # noqa: BLE001
+                            db.rollback()
+                            _logger.error("stuck-visit check error: %s", exc, exc_info=True)
+                        # Nightly practice run (about 6 AM Central): the setter
+                        # answers the regression conversations in practice
+                        # mode; the team is told only when one goes wrong.
+                        try:
+                            from app.services.programs import practice_run as _pr
+                            _p = _pr.run_if_due(db)
+                            if _p:
+                                out["practice_run"] = _p
+                        except Exception as exc:                 # noqa: BLE001
+                            db.rollback()
+                            _logger.error("practice run error: %s", exc, exc_info=True)
                         # Appointment setter: replies held for the family's
                         # contact hours go out once those hours open.
                         try:

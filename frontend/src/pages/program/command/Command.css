@@ -228,3 +228,7 @@ body:has(.cmd)::before { display: none; }
 .cmd-pick-result { margin: 12px 0 0; padding: 10px 12px; border-radius: 10px; font-weight: 600; }
 .cmd-pick-result.ok { background: #e8f5ec; color: #17663a; }
 .cmd-pick-result.bad { background: #fdecea; color: #a1271b; }
+
+.cmd-custom-day { display: flex; align-items: center; gap: 10px; font-weight: 600; margin: 4px 0 10px; }
+.cmd-custom-day input { font-size: 16px; padding: 8px 10px; border: 1px solid var(--c-line, #d9dee5); border-radius: 10px; }
+.cmd-slots-day button { flex: 1 1 28%; padding: 10px 6px; }
