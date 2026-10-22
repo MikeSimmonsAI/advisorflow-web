@@ -609,7 +609,15 @@ def _page_for_reply(db: Session, prog: OutreachProgram, resp: ProgramResponse, l
     return _L.page(db, prog, lead_id=lead.id, key="reply:%s" % (resp.reply_id or resp.id), kind=kind,
                    sms_text=c["sms"], subject=c["subject"], html=c["html"], response_id=resp.id,
                    management=bool(plan and plan.get("management")) or kind == "handoff",
+                   # A home-visit request is its own job for a person: never
+                   # folded into an earlier "needs a human" page (Oct 22).
+                   coalesce=not (kind == "handoff" and event.get("reason") == _home_visit_reason()),
                    audit_message=msg)
+
+
+def _home_visit_reason() -> str:
+    from app.services.programs.ai_setter import HOME_VISIT_REASON
+    return HOME_VISIT_REASON
 
 
 def safe_on_inbound(db: Session, lead: Lead, body: str, channel: str, **kw) -> None:

@@ -53,7 +53,7 @@ log = logging.getLogger(__name__)
 
 # How important an event is. A page is suppressed only by an earlier page of
 # the SAME OR HIGHER tier for the same family inside the window.
-TIER = {"low": 1, "active": 1, "reply": 1, "hot": 2, "handoff": 2, "sla_breach": 2, "booked": 3, "home_visit": 3,
+TIER = {"low": 1, "active": 1, "reply": 1, "hot": 2, "handoff": 2, "sla_breach": 2, "booked": 3,
         "opt_out_request": 4}                       # never merged away: staff must not text them back
 DEFAULT_COALESCE_MINUTES = 30
 MAX_ATTEMPTS = 3
