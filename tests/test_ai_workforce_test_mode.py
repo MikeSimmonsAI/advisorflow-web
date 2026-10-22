@@ -606,7 +606,7 @@ def test_no_open_times_is_needs_attention_with_the_fix(db_session,
 
 def test_both_verified_jobs_are_offered_and_the_rest_are_not(db_session):
     acct = Account(db_session)
-    for key in ("appointment_setter",):
+    for key in ("appointment_setter", "follow_up_specialist"):
         wf_service.set_offering(db_session, platform_id=acct.brand.id,
                                 template_key=key, enabled=True)
         tpl = wf_registry.template(key)
@@ -620,7 +620,8 @@ def test_both_verified_jobs_are_offered_and_the_rest_are_not(db_session):
                                                       acct.org.id)}
     assert cards["lead_qualifier"]["can_set_up"]
     assert cards["appointment_setter"]["can_set_up"]
-    assert cards["follow_up_specialist"]["availability"] == "coming_soon"
+    assert cards["follow_up_specialist"]["can_set_up"]
+    assert cards["follow_up_specialist"]["proven"] is True
     assert cards["customer_care_agent"]["availability"] == "coming_soon"
 
 
@@ -641,7 +642,8 @@ def test_every_registered_job_has_a_card_with_an_honest_label(db_session):
 
 
 def test_reports_never_show_an_internal_action_name(db_session):
-    for key in ("lead_qualifier", "appointment_setter"):
+    for key in ("lead_qualifier", "appointment_setter",
+                "follow_up_specialist"):
         acct = Account(db_session, template_key=key)
         dep = acct.hire_and_set_up()
         report = test_mode.run_test(db_session, dep, actor=acct.admin,
@@ -652,3 +654,54 @@ def test_reports_never_show_an_internal_action_name(db_session):
         for s in report["steps"]:
             assert "_" not in s["step"], s
         assert report["pretend_reply"]
+
+
+# ── 6. FOLLOW-UP SPECIALIST, THE SAME PATH ───────────────────────────────────
+
+def test_follow_up_specialist_end_to_end_on_the_real_worker(db_session,
+                                                           monkeypatch):
+    from app.services import tenant_scheduling
+    from app.services.workforce_intelligence import collect as t9_collect
+    from app.services.workforce_intelligence import scope as t9_scope
+
+    def no_calendar(*a, **k):
+        raise AssertionError("a practice follow-up reached a real calendar")
+
+    monkeypatch.setattr(tenant_scheduling, "_push_to_calendar", no_calendar)
+
+    # T8 offering/hire/config, through the shipping services.
+    acct = Account(db_session, template_key="follow_up_specialist")
+    dep = acct.hire_and_set_up()
+    emp = acct.employee(dep)
+    assert emp.job_role == "follow_up_specialist"
+
+    report = test_mode.run_test(db_session, dep, actor=acct.admin,
+                                now=NOON_ISH)
+    db_session.commit()
+    assert report["verdict"] == "PASS", report["problems"]
+    assert report["ended_state"] in (WC.QUALIFIED, WC.APPOINTMENT_BOOKED,
+                                     WC.HUMAN_HANDOFF)
+    # T6 queue + worker: two real passes, the second woken by the reply.
+    assert [p["claimed"] for p in report["worker_passes"]] == [1, 1]
+    assert report["pretend_reply_sent"] is True
+    assert "went quiet" in report["pretend_reply"]
+
+    # Persisted tool executions: outbound was practice-only, none refused.
+    rows = (db_session.query(AIToolExecution)
+            .filter(AIToolExecution.work_item_id == report["work_item_id"])
+            .all())
+    assert rows and all(r.decision == "allowed" for r in rows)
+    sends = [r for r in rows if r.tool_key.startswith("conversation.send_")]
+    assert sends and all(r.simulated for r in sends)
+    assert not report["refused"]
+
+    # Persisted outcome + T9 evidence read from real rows.
+    item = db_session.query(AIWorkItem).get(report["work_item_id"])
+    assert item.state == report["ended_state"]
+    scope = t9_scope.for_system([acct.org.id])
+    counts = t9_collect.work_counts_by_state(db_session, scope)
+    assert report["ended_state"] in json.dumps(counts)
+
+    # No real person was reachable: the lead is a practice record.
+    lead = db_session.query(Lead).get(report["practice_lead"]["id"])
+    assert lead.is_test is True

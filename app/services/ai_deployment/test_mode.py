@@ -360,6 +360,9 @@ _PRACTICE_REPLIES = {
                        "I'm the one who decides."),
     "appointment_setter": ("Yes, I'd like to set up a time to talk. Weekday "
                            "mornings work best for me."),
+    "follow_up_specialist": ("Sorry I went quiet - yes, I'm still "
+                             "interested. Weekday mornings work best for "
+                             "me."),
 }
 _DEFAULT_REPLY = "Yes, I'm interested. Please tell me more."
 
@@ -424,6 +427,10 @@ def _good_endings(job_role: Optional[str] = None):
     by_job = {
         "lead_qualifier": frozenset({WC.QUALIFIED, WC.HUMAN_HANDOFF}),
         "appointment_setter": frozenset({WC.APPOINTMENT_BOOKED}),
+        # Moving the contact forward (ready, booked) or handing a live answer
+        # to a person closes the loop. Silence or a refusal does not.
+        "follow_up_specialist": frozenset({
+            WC.QUALIFIED, WC.APPOINTMENT_BOOKED, WC.HUMAN_HANDOFF}),
     }
     return by_job.get(job_role or "", frozenset({
         WC.QUALIFIED, WC.APPOINTMENT_BOOKED, WC.HUMAN_HANDOFF}))
@@ -909,7 +916,8 @@ def summary(db: Session, dep: AIEmployeeDeployment, *,
 # Jobs whose whole customer journey (setup -> Run test -> Start working ->
 # results) has an end-to-end acceptance test on the real worker. A job not in
 # this set is shown as "Coming soon", never as something that works.
-VERIFIED_JOBS = ("lead_qualifier", "appointment_setter")
+VERIFIED_JOBS = ("lead_qualifier", "appointment_setter",
+                 "follow_up_specialist")
 
 JOB_CARDS = (
     ("lead_qualifier", "Lead Qualifier",
