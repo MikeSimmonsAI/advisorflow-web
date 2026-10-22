@@ -104,6 +104,25 @@ jobs:
           chmod +x .git/hooks/pre-push
           echo "RELAY_PUSH_BRANCH=$BRANCH" >> "$GITHUB_ENV"
 
+      # This lane needs a full test environment. Prepare it in trusted
+      # Actions setup, outside Claude's restricted command approvals.
+      - name: Set up AI Workforce Python
+        if: steps.guard.outputs.run == 'true' && steps.guard.outputs.branch == 'feature/ai-workforce-launch'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install AI Workforce test dependencies
+        if: steps.guard.outputs.run == 'true' && steps.guard.outputs.branch == 'feature/ai-workforce-launch'
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m pytest --version
+          python -c "import fastapi, sqlalchemy"
+
       - name: Claude executes the directive
         id: claude
         if: steps.guard.outputs.run == 'true'
@@ -228,3 +247,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash "$RELAY_DIR/signal.sh"
+
+      # Claude uses continue-on-error to protect committed checkpoints and
+      # guarantee a terminal status. Surface a trusted BLOCKED result as a
+      # failed run AFTER the ChatGPT wake-up signal has been emitted.
+      - name: Mark blocked relay execution as failed
+        if: always() && steps.guard.outputs.run == 'true' && steps.finalize.outputs.status == 'BLOCKED'
+        run: |
+          echo "::error::Claude reported BLOCKED. See the terminal [RELAY:CLAUDE_STATUS] on issue #1."
+          exit 1
