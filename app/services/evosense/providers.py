@@ -1473,7 +1473,10 @@ def _markets(db, org_id: str) -> List[str]:
     out = []
     for s in (db.query(EvoSenseStrategy)
               .filter(EvoSenseStrategy.organization_id == org_id, EvoSenseStrategy.status == "active").all()):
+        from app.services.evosense.sources.lgbs import wants_all_texas
         for c in C.jload(getattr(s, "counties", None), []) or []:
+            if wants_all_texas([str(c)]):
+                continue                       # "All Texas" is not a county; statewide sources cover it
             name = re.sub(r"\s+county$", "", str(c).strip(), flags=re.I).title()
             if name and name not in out:
                 out.append(name)

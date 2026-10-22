@@ -119,7 +119,7 @@ export function CapabilityCard({ cap, providers, counties, onOpen, selected }) {
       <span className="pc-card__name">{M.capName(cap.capability)}</span>
       <span className="pc-card__desc">{M.CAP_PURPOSE[cap.capability] || ''}</span>
       <span className="pc-card__foot">
-        <span className="pc-cov" title="Counties with a live, county-wide source">
+        <span className="pc-cov" title="Counties with a live source (county, city or Texas statewide)">
           <b>{cov.live}</b>/{cov.total} counties live{cov.cityOnly ? <> · {cov.cityOnly} city-only</> : null}
         </span>
         <span className="pc-card__best">{best ? M.shortLabel(best.label) : 'No source'}</span>
@@ -130,12 +130,29 @@ export function CapabilityCard({ cap, providers, counties, onOpen, selected }) {
 }
 
 export function CountyMatrix({ rows, onOpenProvider }) {
+  const [q, setQ] = useState('')
+  const [all, setAll] = useState(false)
+  const many = rows.length > 30
+  const needle = q.trim().toLowerCase()
+  const match = needle ? rows.filter((r) => r.county.toLowerCase().includes(needle)) : rows
+  const shown = many && !all && !needle ? match.slice(0, 30) : match
   return (
+    <div>
+    {many ? (
+      <div className="pc-actions" style={{ marginBottom: 8 }}>
+        <input type="search" className="evo-input" placeholder={`Find a county (${rows.length} counties)`} value={q}
+               onChange={(e) => setQ(e.target.value)} aria-label="Find a county" />
+        {!needle ? (
+          <button type="button" className="evo-btn evo-btn--ghost" onClick={() => setAll(!all)}>
+            {all ? 'Show fewer' : `Show all ${rows.length} counties`}</button>
+        ) : null}
+      </div>
+    ) : null}
     <div className="pc-matrix" role="table" aria-label="County coverage">
       <div className="pc-matrix__row is-head" role="row">
         <span role="columnheader">County</span><span role="columnheader">Coverage</span><span role="columnheader">Best source</span>
       </div>
-      {rows.map((r) => (
+      {shown.map((r) => (
         <div key={r.county} className="pc-matrix__row" role="row">
           <span role="cell" className="pc-strong">{r.county}</span>
           <span role="cell"><Pill tone={M.CELL_TONE[r.cell]}>{M.CELL_LABEL[r.cell]}</Pill></span>
@@ -147,6 +164,10 @@ export function CountyMatrix({ rows, onOpenProvider }) {
           </span>
         </div>
       ))}
+    </div>
+    {many && !all && !needle && match.length > shown.length ? (
+      <p className="pc-sub" style={{ marginTop: 6 }}>Showing {shown.length} of {match.length} counties.</p>
+    ) : null}
     </div>
   )
 }
@@ -162,7 +183,7 @@ export function CapabilityDrawer({ cap, providers, counties, onClose, onOpenProv
       <div className="pc-drawer">
         <div className="pc-drawer__status">
           <Pill tone={st.tone}>{st.label}</Pill>
-          <span className="pc-muted">{cov.live}/{cov.total} counties with a live county-wide source{cov.cityOnly ? ` · ${cov.cityOnly} with a city-only source` : ''}</span>
+          <span className="pc-muted">{cov.live}/{cov.total} counties with a live source{cov.cityOnly ? ` · ${cov.cityOnly} with a city-only source` : ''}</span>
         </div>
         {cap.note ? <p className="pc-note">{cap.note}</p> : null}
         {st.issues.length ? (
