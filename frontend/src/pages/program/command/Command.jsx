@@ -490,6 +490,8 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
   const [slots, setSlots] = useState(null)
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState({})
+  const [pick, setPick] = useState(null)        // slot tapped, waiting for "Book it"
+  const [booked, setBooked] = useState(null)    // what happened, shown on the card
   const [menu, setMenu] = useState(false)
   const [picking, setPicking] = useState(false)
   const composer = useRef(null)
@@ -552,15 +554,26 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
     } catch (e) { toast(e.message || 'Could not change.') } finally { setBusy(false) }
   }
   const book = async s => {
-    if (!window.confirm(`Book ${f.name} for ${s.label}? The family gets a confirmation text.`)) return
-    setBusy(true)
+    setBusy(true); setBooked(null)
     try {
       const r = await api.post('/program/command/schedule', { lead_id: id, slot: s.value, kind: 'visit' })
-      toast(r.ok ? (r.simulated ? `Simulated: ${r.label} is open, but nothing was booked for real (test/demo family).` : `Booked - ${r.label}. Confirmed on the calendar.`)
-        : (r.reason || 'That time is no longer open.'))
+      const msg = r.ok ? (r.simulated ? `Test family - ${r.label} is open, but nothing was booked or sent.`
+        : `Booked ${r.label}. ${f.name} was texted the confirmation, and it's on the calendar.`)
+        : (r.reason ? `Not booked: ${r.reason}.` : 'Not booked: that time is no longer open.')
+      setBooked({ ok: !!r.ok, msg }); toast(msg); setPick(null)
       load()
       api.get(`/program/command/slots?lead_id=${id}`).then(setSlots).catch(() => {})
-    } catch (e) { toast(e.message || 'Could not book.') } finally { setBusy(false) }
+    } catch (e) { const msg = e.message || 'Could not book.'; setBooked({ ok: false, msg }); toast(msg) } finally { setBusy(false) }
+  }
+  // The family hasn't picked a time: put two open times in a text for them to choose from.
+  const offerTimes = () => {
+    const two = (slots?.slots || []).slice(0, 2)
+    if (!two.length) return
+    const first = (f.name || '').split(' ')[0].toLowerCase().replace(/^./, c => c.toUpperCase())
+    const when = two.map(s => `${dayLabel(s.value)} at ${s.time}`).join(' or ')
+    setMode('text'); setView('conversation')
+    setText(`Hi ${first}, I have ${when} open for a visit. Which works better for you? If neither does, just tell me a day and time that's good for you.`)
+    setTimeout(() => { composer.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); composer.current?.focus() }, 50)
   }
   const homeVisitArranged = async () => {
     try {
@@ -690,13 +703,24 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
 
       <section className="cmd-card cmd-sched" ref={schedRef}>
         <h3><Icon n="cal" /> Quick schedule a visit</h3>
+        <p className="cmd-muted small">Tap a time to book it. The family gets a text confirming it. Not sure they want that time? Use "Text them times to pick" instead.</p>
         {slots === null ? <p className="cmd-muted">Checking the calendar…</p>
           : slots.slots.length ? <div className="cmd-slots">{slots.slots.slice(0, 2).map(s => (
-            <button key={s.value} disabled={busy} onClick={() => book(s)}><small>{dayLabel(s.value)}</small>{s.time}</button>))}</div>
+            <button key={s.value} className={pick?.value === s.value ? 'on' : ''} disabled={busy} onClick={() => { setPick(s); setBooked(null) }}><small>{dayLabel(s.value)}</small>{s.time}</button>))}</div>
             : <p className="cmd-muted">{slots.reason || 'No open times right now.'}</p>}
-        {slots?.slots?.length > 2 && <details><summary>Choose custom time ›</summary>
+        {slots?.slots?.length > 2 && <details><summary>More open times ›</summary>
           <div className="cmd-slots">{slots.slots.slice(2).map(s => (
-            <button key={s.value} disabled={busy} onClick={() => book(s)}><small>{dayLabel(s.value)}</small>{s.time}</button>))}</div></details>}
+            <button key={s.value} className={pick?.value === s.value ? 'on' : ''} disabled={busy} onClick={() => { setPick(s); setBooked(null) }}><small>{dayLabel(s.value)}</small>{s.time}</button>))}</div></details>}
+        {pick && <div className="cmd-pick" role="group" aria-label="Confirm booking">
+          <p>Book <b>{f.name}</b> for <b>{pick.label || `${dayLabel(pick.value)} ${pick.time}`}</b>?{f.phone ? ` They get a text at ${fmtPhone(f.phone)} confirming it.` : ' They have no phone on file, so call them to let them know.'}</p>
+          <div className="cmd-send">
+            <button disabled={busy} onClick={() => setPick(null)}>Cancel</button>
+            <button className="primary" disabled={busy} onClick={() => book(pick)}>{busy ? 'Booking…' : f.phone ? 'Book it & text them' : 'Book it'}</button>
+          </div>
+        </div>}
+        {booked && <p className={`cmd-pick-result ${booked.ok ? 'ok' : 'bad'}`}>{booked.msg}</p>}
+        {!f.is_demo && f.phone && !f.handling?.opted_out && slots?.slots?.length > 0 && !f.booking &&
+          <div className="cmd-send"><button onClick={offerTimes}><Icon n="reply" /> Text them times to pick</button></div>}
       </section>
 
       <section className="cmd-card cmd-compose">
