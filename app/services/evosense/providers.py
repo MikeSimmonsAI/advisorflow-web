@@ -776,6 +776,76 @@ class TexasParcelOwnerSource(PublicRecordSource):
         return {"parcels_at_test_point": len(rows)}
 
 
+class TexasParcelRollSource(PublicRecordSource):
+    """Find houses anywhere in Texas from each county's 2026 appraisal roll as
+    published by TxGIO (sources/txgio_roll.py). Absentee- or estate-owned
+    residences only; the engine scores them like any appraisal-roll record.
+    Dallas, Collin and Denton have their own live discovery and are skipped."""
+    scope, counties, scope_name = "state", (), "Texas"
+    key = "txgio_roll"
+    label = "Texas statewide appraisal rolls - find houses (TxGIO 2026 parcels)"
+    capabilities = (C.PROPERTY_SEARCH,)
+    discovery = True
+    coverage = ("Texas, all 254 counties - each appraisal district's 2026 roll: absentee- or estate-owned "
+                "houses with owner of record, mailing address and tax value. A few counties per hunt.")
+    jurisdiction = "Texas (statewide)"
+    source_type = "State GIS office - county appraisal rolls (2026 land parcels)"
+    access_method = "One county file per hunt slot; only its attribute table is streamed (HTTP byte ranges)"
+    public_url = "https://geographic.texas.gov/stratmap/land-parcels.html"
+    refresh = "TxGIO 2026 collection (acquired 2026-09-25); each record carries its district's tax year"
+    freshness_days = 180
+    adapter_version = "txgio_parcel_roll/1"
+    OWN_DISCOVERY = ("Dallas", "Collin", "Denton")
+    COUNTIES_PER_HUNT = 2
+    terms_note = "Public statewide parcel data published by the Texas Geographic Information Office."
+
+    def _targets(self, query) -> List[str]:
+        from app.services.evosense.sources.lgbs import wants_all_texas
+        from app.services.evosense.sources.txgio_roll import TEXAS_COUNTIES, county_name
+        named = _county(query)
+        if not named or wants_all_texas(named):
+            pool = list(TEXAS_COUNTIES) if named else []
+        else:
+            pool = [c for c in (county_name(n) for n in named) if c]
+        return [c for c in pool if c not in self.OWN_DISCOVERY]
+
+    def search(self, capability, query):
+        from app.services.evosense.sources.txgio_roll import TxRollReader
+        out = Records()
+        states = [s.upper() for s in query.get("states") or []]
+        if capability != C.PROPERTY_SEARCH or (states and "TX" not in states):
+            out.stats = {"skipped": "not a Texas property search"}
+            return out
+        pool = self._targets(query)
+        if not pool:
+            out.stats = {"skipped": "no county without its own discovery source in this strategy"}
+            return out
+        day = int(query.get("rotate") if query.get("rotate") is not None else datetime.utcnow().timetuple().tm_yday)
+        k = min(self.COUNTIES_PER_HUNT, len(pool))
+        start = (day * k) % len(pool)
+        picks = [pool[(start + i) % len(pool)] for i in range(k)]
+        limit = int(query.get("limit") or 25)
+        per = max(1, limit // k)
+        stats: Dict[str, Any] = {"counties": picks, "pool": len(pool)}
+        reader = TxRollReader()
+        for c in picks:
+            res = reader.discover(c, limit=per, rotate=(day // max(1, len(pool) // k)) * per,
+                                  cities=query.get("cities"), zips=query.get("zips"))
+            out.extend(res["records"])
+            stats[c] = res["stats"]
+            out.source_url = res["source_url"]
+        out.stats = stats
+        return out
+
+    def verify(self):
+        from app.services.evosense.sources import base as SB_
+        from app.services.evosense.sources.txgio_roll import county_url
+        info = SB_._probe(county_url("King"))
+        if not info.get("ranged") or not info.get("size"):
+            raise SB_.SourceError(SB_.DOWNLOAD_FAILED, "TxGIO parcel files do not answer byte ranges")
+        return {"king_county_bytes": info["size"]}
+
+
 class FortWorthOpenCasesSource(PublicRecordSource):
     scope, counties, scope_name = "city", ("Tarrant",), "City of Fort Worth"
     key = "fw_open_cases"
@@ -1034,7 +1104,7 @@ PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
     SandboxPropertyRecords(), SandboxVacancy(), SandboxTaxRoll(), SandboxPublicRecords(),
     SandboxSkipTrace(), SandboxSkipTraceBackup(), SandboxPhoneValidation(),
     ManualSource(), CsvImportSource(),
-    TarrantTaxRollSource(), DallasTrwSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), TexasParcelOwnerSource(), CensusGeocoderSource(),
+    TarrantTaxRollSource(), DallasTrwSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), TexasParcelOwnerSource(), TexasParcelRollSource(), CensusGeocoderSource(),
     FortWorthCodeSource(), FortWorthOpenCasesSource(), Dallas311Source(), LgbsTaxSaleSource(),
     DallasForeclosureManual(), DallasTaxManual(),
     RentCastInterface(), RegridInterface(), AttomInterface(), TracerfyContactSource(),
