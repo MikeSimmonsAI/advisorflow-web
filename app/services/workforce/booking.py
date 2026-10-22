@@ -351,8 +351,15 @@ def reschedule(db: Session, *, employee, lead: Lead, booking_link_id: str,
     from app.services import tenant_scheduling
     work_tz = tenant_scheduling.Settings(advisor).timezone
     previous = booking.booked_time
-    booking.booked_time = tenant_scheduling._to_local(wanted, work_tz)
-    booking.status = "booked"
+    new_local = tenant_scheduling._to_local(wanted, work_tz)
+    if previous is not None and previous == new_local:
+        raise ValueError("That is already the appointment time. Offer "
+                         "another opening.")
+    booking.booked_time = new_local
+    # A practice appointment stays a practice appointment: setting "booked"
+    # here would put a pretend person on the real agenda and reminders.
+    if booking.status != PRACTICE_STATUS:
+        booking.status = "booked"
     booking.confirmation_sent = False
     db.flush()
     return {"booking_id": booking.id,

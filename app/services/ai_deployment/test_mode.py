@@ -363,6 +363,8 @@ _PRACTICE_REPLIES = {
     "follow_up_specialist": ("Sorry I went quiet - yes, I'm still "
                              "interested. Weekday mornings work best for "
                              "me."),
+    "scheduling_coordinator": ("Something came up - could we reschedule "
+                               "my appointment to another time?"),
     "reactivation_specialist": ("Thanks for checking in - I'm still "
                                 "interested. Weekday mornings work best "
                                 "for me."),
@@ -438,6 +440,8 @@ def _good_endings(job_role: Optional[str] = None):
         # or a refusal is not.
         "reactivation_specialist": frozenset({
             WC.QUALIFIED, WC.APPOINTMENT_BOOKED, WC.HUMAN_HANDOFF}),
+        # Keeping the appointment real means it ends booked, at the new time.
+        "scheduling_coordinator": frozenset({WC.APPOINTMENT_BOOKED}),
     }
     return by_job.get(job_role or "", frozenset({
         WC.QUALIFIED, WC.APPOINTMENT_BOOKED, WC.HUMAN_HANDOFF}))
@@ -509,6 +513,16 @@ def run_test(db: Session, dep: AIEmployeeDeployment, *, actor: Optional[User],
     lead = wf_practice.create_practice_lead(
         db, organization_id=dep.organization_id,
         assigned_to_id=emp.handoff_user_id)
+    if emp.job_role == "scheduling_coordinator":
+        # This job keeps an EXISTING appointment real, so the practice person
+        # starts with one (a practice booking: no calendar, no reminders).
+        from app.services.workforce import booking as wf_booking
+        open_slots = wf_booking.available_slots(
+            db, employee=emp, lead=lead, now=test_now).get("slots") or []
+        if open_slots:
+            wf_booking.book_slot(db, employee=emp, lead=lead,
+                                 starts_at=open_slots[0]["starts_at"],
+                                 now=test_now)
     wf_queue.enqueue(db, emp, [lead.id], subject_type="lead",
                      job_key=emp.job_role, actor_kind=WC.ACTOR_HUMAN,
                      actor_id=getattr(actor, "id", None))
@@ -924,7 +938,8 @@ def summary(db: Session, dep: AIEmployeeDeployment, *,
 # results) has an end-to-end acceptance test on the real worker. A job not in
 # this set is shown as "Coming soon", never as something that works.
 VERIFIED_JOBS = ("lead_qualifier", "appointment_setter",
-                 "follow_up_specialist", "reactivation_specialist")
+                 "follow_up_specialist", "reactivation_specialist",
+                 "scheduling_coordinator")
 
 JOB_CARDS = (
     ("lead_qualifier", "Lead Qualifier",

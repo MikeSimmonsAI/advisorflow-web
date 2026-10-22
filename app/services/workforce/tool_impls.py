@@ -621,7 +621,7 @@ def appointment_reschedule(ctx, args, auth) -> Dict:
     if lead is None:
         raise ToolRefusal(C.DENY_RECORD_NOT_FOUND, "No such record.")
     try:
-        return dict(wf_booking.reschedule(
+        result = dict(wf_booking.reschedule(
             ctx.db, employee=ctx.employee, lead=lead,
             booking_link_id=args.get("booking_link_id"),
             starts_at=args.get("start_at"), now=ctx.now),
@@ -629,6 +629,11 @@ def appointment_reschedule(ctx, args, auth) -> Dict:
             _target_id=args.get("booking_link_id"))
     except ValueError as exc:
         raise ToolRefusal(C.DENY_BUSINESS_RULE, str(exc)[:255])
+    # The appointment is real again at its new time: that closes the work.
+    result.update(_terminal(ctx, C.APPOINTMENT_BOOKED,
+                            "appointment rescheduled",
+                            result.get("starts_at_local")))
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════

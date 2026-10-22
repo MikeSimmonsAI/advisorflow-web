@@ -781,3 +781,58 @@ def test_reactivation_age_is_never_permission_to_contact(db_session,
             .all())
     assert not [r for r in rows if r.tool_key.startswith("conversation.send_")
                 and r.decision == "allowed"]
+
+
+# ── 8. SCHEDULING COORDINATOR: MOVE A REAL (PRACTICE) APPOINTMENT ────────────
+
+def test_scheduling_coordinator_reschedules_without_touching_a_calendar(
+        db_session, monkeypatch):
+    from app.models.models import BookingLink
+    from app.services import tenant_scheduling
+    from app.services.workforce import booking as wf_booking
+    from app.services.workforce_intelligence import collect as t9_collect
+    from app.services.workforce_intelligence import scope as t9_scope
+
+    def no_calendar(*a, **k):
+        raise AssertionError("a practice reschedule reached a real calendar")
+
+    monkeypatch.setattr(tenant_scheduling, "_push_to_calendar", no_calendar)
+    monkeypatch.setattr(tenant_scheduling, "_make_case_file", no_calendar)
+
+    acct = Account(db_session, template_key="scheduling_coordinator")
+    dep = acct.hire_and_set_up()
+    assert acct.employee(dep).job_role == "scheduling_coordinator"
+
+    report = test_mode.run_test(db_session, dep, actor=acct.admin,
+                                now=NOON_ISH)
+    db_session.commit()
+    assert report["verdict"] == "PASS", report["problems"]
+    assert report["ended_state"] == WC.APPOINTMENT_BOOKED
+    assert [p["claimed"] for p in report["worker_passes"]] == [1, 1]
+    assert "reschedule" in report["pretend_reply"]
+    tools = [t["tool"] for t in report["what_it_tried"]]
+    assert tools.index("calendar.get_availability") < \
+        tools.index("appointment.reschedule")
+    assert "appointment.book" not in tools
+
+    # One appointment, moved, and still a practice row on no real agenda.
+    rows = db_session.query(BookingLink).filter(
+        BookingLink.lead_id == report["practice_lead"]["id"]).all()
+    assert len(rows) == 1
+    assert rows[0].status == wf_booking.PRACTICE_STATUS
+    assert db_session.query(BookingLink).filter(
+        BookingLink.status.in_(("booked", "confirmed"))).count() == 0
+
+    exec_rows = (db_session.query(AIToolExecution)
+                 .filter(AIToolExecution.work_item_id == report["work_item_id"])
+                 .all())
+    assert [r for r in exec_rows if r.tool_key == "appointment.reschedule"
+            and r.decision == "allowed"]
+    assert all(r.simulated for r in exec_rows
+               if r.tool_key.startswith("conversation.send_"))
+
+    item = db_session.query(AIWorkItem).get(report["work_item_id"])
+    assert item.state == WC.APPOINTMENT_BOOKED
+    counts = t9_collect.work_counts_by_state(
+        db_session, t9_scope.for_system([acct.org.id]))
+    assert WC.APPOINTMENT_BOOKED in json.dumps(counts)
