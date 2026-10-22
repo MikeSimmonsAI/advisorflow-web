@@ -555,3 +555,28 @@ def switchboard_run_worker(db: Session = Depends(get_db)) -> Dict[str, Any]:
     from app.jobs import run_ai_workforce_worker as worker
     summary = worker.run_once(db)
     return {"summary": summary, "status": t8_switchboard.status(db)}
+
+
+@router.get("/control")
+def control_page(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """The God Mode AI Workforce page: one plain-language summary."""
+    return t8_switchboard.control_summary(db)
+
+
+class StopWrite(BaseModel):
+    on: bool
+    reason: Optional[str] = None
+
+
+@router.post("/control/emergency-stop")
+def control_emergency_stop(payload: StopWrite,
+                           db: Session = Depends(get_db),
+                           user: User = Depends(require_god)
+                           ) -> Dict[str, Any]:
+    result = t8_switchboard.emergency_stop(
+        db, on=payload.on, actor_user_id=user.id,
+        reason=(payload.reason or ("Emergency stop %s in God Mode by %s"
+                                   % ("pressed" if payload.on else "released",
+                                      user.email or user.id))))
+    db.commit()
+    return {"result": result, "control": t8_switchboard.control_summary(db)}

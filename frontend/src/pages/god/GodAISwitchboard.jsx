@@ -39,7 +39,7 @@ function Pill ({ ok, children }) {
   )
 }
 
-export default function GodAISwitchboard () {
+export default function GodAISwitchboard ({ embedded = false, onChange } = {}) {
   const [data, setData] = useState(null)
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
@@ -59,6 +59,7 @@ export default function GodAISwitchboard () {
       const r = await api.post(path, body)
       setData(r.status)
       setNote(done(r))
+      if (onChange) onChange()
     } catch (e) {
       setErr(message(e, 'That did not work.'))
     } finally { setBusy('') }
@@ -87,42 +88,8 @@ export default function GodAISwitchboard () {
   const w = data.worker || {}
   const stopped = data.environment_kill || data.platform_killed
 
-  return (
+  const brandCards = (
     <>
-      <div className="gm-card" style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>
-              AI Workforce — safe test mode
-            </div>
-            <div style={{ color: 'var(--gm-blue)', fontSize: 12, maxWidth: 760, lineHeight: 1.5 }}>
-              Turn it on for a brand or one account. Customers there can then pick an AI worker,
-              answer a few questions, run a test and start it. It practices on pretend leads only —
-              <strong> real texts, emails and calls are {data.real_messages ? 'ON' : 'OFF'}</strong>.
-              Ready jobs: {(data.jobs_ready || []).map(j => JOB_NAMES[j] || j).join(', ')}.
-            </div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 12, marginBottom: 4 }}>
-              Background worker: <Pill ok={w.running}>{w.running ? 'RUNNING' : 'NOT RUNNING YET'}</Pill>
-            </div>
-            <div style={{ color: 'var(--gm-blue)', fontSize: 11, marginBottom: 6 }}>
-              {w.last_success_at ? `Last good pass ${new Date(w.last_success_at).toLocaleString()}` : 'No pass recorded yet (it starts about a minute after each deploy).'}
-            </div>
-            <button className="gm-btn" disabled={!!busy} onClick={runNow}>
-              {busy === 'run' ? 'RUNNING…' : 'RUN WORKER NOW'}
-            </button>
-          </div>
-        </div>
-        {stopped && (
-          <div style={{ color: T.red, fontSize: 12, marginTop: 10 }}>
-            The emergency stop is ON. Nothing will run until it is cleared.
-          </div>
-        )}
-        {note && <div style={{ color: T.teal, fontSize: 12, marginTop: 10 }}>{note}</div>}
-        {err && <div style={{ color: T.red, fontSize: 12, marginTop: 10 }}>{err}</div>}
-      </div>
-
       {(data.brands || []).map(brand => (
         <div key={brand.id} className="gm-card" style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
@@ -184,6 +151,65 @@ export default function GodAISwitchboard () {
           </div>
         </div>
       ))}
+    </>
+  )
+
+  if (embedded) {
+    return (
+      <>
+        <div className="gm-card" style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--gm-blue)', flex: 1, minWidth: 260 }}>
+            &quot;On&quot; means safe test mode: customers in that account can set up an AI worker,
+            run a test and start it. It practices on pretend leads only.
+          </span>
+          <button className="gm-btn" disabled={!!busy} onClick={runNow}>
+            {busy === 'run' ? 'RUNNING…' : 'RUN WORKER NOW'}
+          </button>
+          {note && <div style={{ color: T.teal, fontSize: 12, width: '100%' }}>{note}</div>}
+          {err && <div style={{ color: T.red, fontSize: 12, width: '100%' }}>{err}</div>}
+        </div>
+        {brandCards}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <div className="gm-card" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>
+              AI Workforce — safe test mode
+            </div>
+            <div style={{ color: 'var(--gm-blue)', fontSize: 12, maxWidth: 760, lineHeight: 1.5 }}>
+              Turn it on for a brand or one account. Customers there can then pick an AI worker,
+              answer a few questions, run a test and start it. It practices on pretend leads only —
+              <strong> real texts, emails and calls are {data.real_messages ? 'ON' : 'OFF'}</strong>.
+              Ready jobs: {(data.jobs_ready || []).map(j => JOB_NAMES[j] || j).join(', ')}.
+            </div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 12, marginBottom: 4 }}>
+              Background worker: <Pill ok={w.running}>{w.running ? 'RUNNING' : 'NOT RUNNING YET'}</Pill>
+            </div>
+            <div style={{ color: 'var(--gm-blue)', fontSize: 11, marginBottom: 6 }}>
+              {w.last_success_at ? `Last good pass ${new Date(w.last_success_at).toLocaleString()}` : 'No pass recorded yet (it starts about a minute after each deploy).'}
+            </div>
+            <button className="gm-btn" disabled={!!busy} onClick={runNow}>
+              {busy === 'run' ? 'RUNNING…' : 'RUN WORKER NOW'}
+            </button>
+          </div>
+        </div>
+        {stopped && (
+          <div style={{ color: T.red, fontSize: 12, marginTop: 10 }}>
+            The emergency stop is ON. Nothing will run until it is cleared.
+          </div>
+        )}
+        {note && <div style={{ color: T.teal, fontSize: 12, marginTop: 10 }}>{note}</div>}
+        {err && <div style={{ color: T.red, fontSize: 12, marginTop: 10 }}>{err}</div>}
+      </div>
+
+      {brandCards}
     </>
   )
 }

@@ -167,3 +167,70 @@ def test_god_routes_brand_names_and_permissions(client, db_session):
     r = client.post("/god/ai-workforce/switchboard/run-worker-now", headers=g)
     assert r.status_code == 200, r.text
     assert "summary" in r.json()
+
+
+def test_control_page_reads_plainly_and_the_stop_really_stops(client,
+                                                              db_session):
+    import importlib.util
+    from app.services.workforce import practice
+    from app.services.workforce import queue as wf_queue
+    from app.services.workforce import service as wf_service
+    from app.models.workforce_models import AIEmployee
+    brand, orgs, admin, god = _world(db_session)
+    g = {"Authorization": "Bearer %s" % create_access_token(god, db_session)}
+    a = {"Authorization": "Bearer %s" % create_access_token(admin, db_session)}
+    assert client.get("/god/ai-workforce/control",
+                      headers=a).status_code in (401, 403)
+
+    off = client.get("/god/ai-workforce/control", headers=g).json()
+    assert off["headline"].startswith("Off.")
+    assert off["real_messages"] is False
+
+    switchboard.enable(db_session, platform_id=brand.id)
+    db_session.commit()
+    on = client.get("/god/ai-workforce/control", headers=g).json()
+    assert on["headline"].startswith("Working in safe test mode for 2 of 2")
+    assert any("background worker" in p for p in on["problems"])
+
+    # A queued practice lead, then the stop.
+    dep = t8_lifecycle.select(db_session, org=orgs[0],
+                              template_key="lead_qualifier", actor=admin,
+                              provisioning_key="sb-stop")
+    every = {"days": [0, 1, 2, 3, 4, 5, 6], "start": "00:00", "end": "23:59"}
+    t8_lifecycle.configure(db_session, dep, {
+        "goal": "x", "audience": {"statuses": ["new"]},
+        "channels": ["sms", "email"], "hours": every, "working_hours": every,
+        "timezone": "America/Chicago", "good_lead": ["y"],
+        "handoff_to": admin.id, "handoff_user_id": admin.id}, actor=admin)
+    emp = db_session.get(AIEmployee, dep.employee_id)
+    wf_service.activate(db_session, emp, WC.SIMULATION, actor=admin)
+    lead = practice.create_practice_lead(db_session,
+                                         organization_id=orgs[0].id)
+    wf_queue.enqueue(db_session, emp, [lead.id], job_key=emp.job_role)
+    db_session.commit()
+
+    r = client.post("/god/ai-workforce/control/emergency-stop", headers=g,
+                    json={"on": True})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["control"]["stopped"] is True
+    assert body["control"]["headline"].startswith("Stopped.")
+    assert body["result"]["work_parked"] == 1
+
+    spec = importlib.util.spec_from_file_location(
+        "wfw", os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "app", "jobs",
+            "run_ai_workforce_worker.py"))
+    w = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(w)
+    assert w.run_once(db_session, per_employee=5)["claimed"] == 0
+
+    r = client.post("/god/ai-workforce/control/emergency-stop", headers=g,
+                    json={"on": False})
+    assert r.json()["control"]["stopped"] is False
+    db_session.expire_all()
+    assert w.run_once(db_session, per_employee=5)["claimed"] == 1
+    recent = client.get("/god/ai-workforce/control",
+                        headers=g).json()["recent"]
+    assert recent and recent[0]["account"] == orgs[0].name
+    assert all("." not in x["what"] for x in recent)

@@ -288,6 +288,7 @@ const GodSupport = lazyPage(() => import('./pages/god/GodSupport'))
 // same characters are harmless, which is why the route comment below may
 // write the path out in full and this one may not.
 const GodAIOperations = lazyPage(() => import('./pages/god/GodAIOperations'))
+const GodAIControl = lazyPage(() => import('./pages/god/GodAIControl'))
 const GodMaintenanceOps = lazyPage(() => import('./pages/god/GodMaintenanceOps'))
 // GOD MODE -> MANAGE ACCESS. One person, every context they hold, corrected in
 // place. Registered BEFORE the God catch-all route below, or it would silently
@@ -1787,6 +1788,7 @@ export default function App() {
             or it silently renders the Command Center instead. GodRoute here
             is convenience only — every endpoint behind it is require_god, so
             a typed URL is refused by the server, not by a missing link. */}
+        <Route path="/god/ai"                    element={<GodRoute><GodModeLayout><GodAIControl /></GodModeLayout></GodRoute>} />
         <Route path="/god/workforce"             element={<GodRoute><GodModeLayout><GodWorkforce /></GodModeLayout></GodRoute>} />
         {/* AI OPERATIONS (T7) — how an authorized employee reaches the world.
             A SEPARATE SCREEN FROM THE ONE ABOVE ON PURPOSE: one answers "what
