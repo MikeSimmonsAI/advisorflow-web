@@ -729,6 +729,53 @@ class CensusGeocoderSource(PublicRecordSource):
         return {"matches": res["matches"]}
 
 
+class TexasParcelOwnerSource(PublicRecordSource):
+    """Owner of record anywhere in Texas from the state's assembled parcel
+    layer, for properties no county-specific source can look up (any county
+    outside DFW; Tarrant outside Fort Worth and Collin / Denton without an
+    account number). See sources/txgio.py for the strict address check."""
+    scope, counties, scope_name = "state", (), "Texas"
+    key = "txgio_parcels"
+    label = "Texas statewide parcels - owner of record (TxGIO StratMap)"
+    capabilities = (C.ASSESSOR, C.OWNERSHIP)
+    lookup_capability = C.ASSESSOR
+    coverage = ("Texas, all 254 counties - owner of record and mailing address from each appraisal "
+                "district's roll, assembled by the Texas Geographic Information Office")
+    jurisdiction = "Texas (statewide)"
+    source_type = "State GIS office - statewide appraisal-district parcels"
+    access_method = "Census geocode, then the parcel at that point (public ArcGIS identify), two calls per address"
+    public_url = "https://geographic.texas.gov/"
+    refresh = "Refreshed by TxGIO from each county's certified roll (tax year shown on each record)"
+    freshness_days = 180
+    adapter_version = "txgio_stratmap_parcels/1"
+    terms_note = "Public statewide parcel data published by the Texas Geographic Information Office."
+
+    @staticmethod
+    def _county_source_covers(t) -> bool:
+        c = (t.get("county") or "").strip().lower().replace(" county", "")
+        apn = bool(t.get("parcel_apn"))
+        if c == "dallas":
+            return True                                   # DCAD: by account or by address
+        if c == "tarrant":
+            return apn or (t.get("city") or "").strip().lower() == "fort worth"
+        if c in ("collin", "denton"):
+            return apn
+        return False
+
+    def applies(self, target):
+        return ((target.get("state") or "TX").upper() == "TX" and bool(target.get("street_address"))
+                and bool(target.get("city") or target.get("zip_code")) and not self._county_source_covers(target))
+
+    def lookup_one(self, target):
+        from app.services.evosense.sources.txgio import TxParcelReader
+        return TxParcelReader().lookup(target)
+
+    def verify(self):
+        from app.services.evosense.sources.txgio import TxParcelReader
+        rows = TxParcelReader().identify(-95.3980, 29.7900)
+        return {"parcels_at_test_point": len(rows)}
+
+
 class FortWorthOpenCasesSource(PublicRecordSource):
     scope, counties, scope_name = "city", ("Tarrant",), "City of Fort Worth"
     key = "fw_open_cases"
@@ -987,7 +1034,7 @@ PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
     SandboxPropertyRecords(), SandboxVacancy(), SandboxTaxRoll(), SandboxPublicRecords(),
     SandboxSkipTrace(), SandboxSkipTraceBackup(), SandboxPhoneValidation(),
     ManualSource(), CsvImportSource(),
-    TarrantTaxRollSource(), DallasTrwSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), CensusGeocoderSource(),
+    TarrantTaxRollSource(), DallasTrwSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), TexasParcelOwnerSource(), CensusGeocoderSource(),
     FortWorthCodeSource(), FortWorthOpenCasesSource(), Dallas311Source(), LgbsTaxSaleSource(),
     DallasForeclosureManual(), DallasTaxManual(),
     RentCastInterface(), RegridInterface(), AttomInterface(), TracerfyContactSource(),
