@@ -85,11 +85,18 @@ def same_parcel_address(target_street: str, situs: Optional[str], city: Optional
 class TxParcelReader:
     adapter_version = "txgio_stratmap_parcels/1"
 
-    def identify(self, lon: float, lat: float) -> list:
-        d = 0.0015
+    # (half-extent in degrees, tolerance in pixels of an 800 px map): the
+    # first is the parcel under the point; the second reaches ~80 m, because
+    # a Census point is interpolated along the street centerline and often
+    # lands in the road or on the lot next door. The same-address test below
+    # is what makes a wider search safe.
+    REACH = ((0.0015, 2), (0.003, 100))
+
+    def identify(self, lon: float, lat: float, d: float = 0.0015, tolerance: int = 2) -> list:
         j = B.get_json(IDENTIFY, {"geometry": '{"x":%s,"y":%s}' % (lon, lat),
                                   "geometryType": "esriGeometryPoint", "sr": "4326", "layers": "all",
-                                  "tolerance": "2", "mapExtent": "%s,%s,%s,%s" % (lon - d, lat - d, lon + d, lat + d),
+                                  "tolerance": str(tolerance),
+                                  "mapExtent": "%s,%s,%s,%s" % (lon - d, lat - d, lon + d, lat + d),
                                   "imageDisplay": "800,800,96", "returnGeometry": "false", "f": "json"})
         if not isinstance(j, dict) or "results" not in j:
             raise B.SourceError(B.SOURCE_FORMAT_CHANGED, "TxGIO parcels identify did not return results")
@@ -109,11 +116,14 @@ class TxParcelReader:
         xy = m.get("coordinates") or {}
         if xy.get("x") is None or xy.get("y") is None:
             return None
-        parcels = [a for a in self.identify(xy["x"], xy["y"])
-                   if same_parcel_address(street, _v(a, "SITUS_ADDR"), _v(a, "SITUS_CITY") or target.get("city"))]
-        if len(parcels) != 1:
-            return None                                   # none, or ambiguous: never a guess
-        return self.record(target, parcels[0], cty, xy)
+        for d, tol in self.REACH:
+            parcels = [a for a in self.identify(xy["x"], xy["y"], d, tol)
+                       if same_parcel_address(street, _v(a, "SITUS_ADDR"), _v(a, "SITUS_CITY") or target.get("city"))]
+            if len(parcels) == 1:
+                return self.record(target, parcels[0], cty, xy)
+            if len(parcels) > 1:
+                return None                               # ambiguous: never a guess
+        return None
 
     def record(self, target, a: Dict[str, Any], county_name: str, xy) -> Dict[str, Any]:
         from app.services.evosense.sources.tarrant import state_code

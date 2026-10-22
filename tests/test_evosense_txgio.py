@@ -29,14 +29,16 @@ def parcel(situs="1015 HEIGHTS BLVD , HOUSTON, TX 77008", owner="CASTILLO AURELI
 
 @pytest.fixture()
 def api(monkeypatch):
-    state = {"census": census(), "parcels": [parcel()], "calls": []}
+    state = {"census": census(), "parcels": [parcel()], "calls": [], "tolerances": []}
 
     def get_json(url, params=None):
         state["calls"].append(url)
         if url.startswith(CENSUS):
             return state["census"]
         if url.startswith(TX.IDENTIFY):
-            return {"results": state["parcels"]}
+            state["tolerances"].append(params["tolerance"])
+            wide = params["tolerance"] != "2"
+            return {"results": state["parcels"] + (state.get("wide") or [] if wide else [])}
         raise AssertionError("unexpected call %s" % url)
     monkeypatch.setattr(B, "get_json", get_json)
     return state
@@ -129,3 +131,18 @@ def test_a_settings_row_created_by_another_request_is_reused_not_an_error(db_ses
     assert row is not None and row.provider_key == "txgio_parcels"
     assert db_session.query(EvoSenseProviderConfig).filter_by(
         organization_id=sample_org.id, provider_key="txgio_parcels").count() == 1
+
+
+def test_a_point_on_the_street_reaches_the_house_a_little_wider(api):
+    """Census points sit on the street centerline: the tight search finds
+    only the neighbour, the ~80 m search finds the house itself."""
+    api["parcels"] = [parcel(situs="1017 HEIGHTS BLVD , HOUSTON, TX 77008", owner="NEIGHBOR")]
+    api["wide"] = [parcel()]
+    rec = TX.TxParcelReader().lookup(T)
+    assert rec["owner"]["name"] == "CASTILLO AURELIANO G"
+    assert api["tolerances"] == ["2", "100"]
+
+
+def test_the_tight_search_is_enough_when_it_matches(api):
+    TX.TxParcelReader().lookup(T)
+    assert api["tolerances"] == ["2"]
