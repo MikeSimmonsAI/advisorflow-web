@@ -1072,8 +1072,20 @@ def config(db, org_id: str, key: str):
             organization_id=org_id, provider_key=key,
             enabled=p.connector_kind in (C.MANUAL, C.IMPORT),
             priority={"sandbox_skiptrace": 10, "sandbox_skiptrace_backup": 20}.get(key, 100))
-        db.add(row)
-        db.flush()
+        # Two screens loading at once (Providers + Controls) both create the
+        # row for a newly added source; the loser must read the winner's row,
+        # not fail the whole request. A SAVEPOINT keeps the outer work intact.
+        from sqlalchemy.exc import IntegrityError
+        try:
+            with db.begin_nested():
+                db.add(row)
+                db.flush()
+        except IntegrityError:
+            row = (db.query(EvoSenseProviderConfig)
+                   .filter(EvoSenseProviderConfig.organization_id == org_id,
+                           EvoSenseProviderConfig.provider_key == key).first())
+            if row is None:
+                raise
     return row
 
 

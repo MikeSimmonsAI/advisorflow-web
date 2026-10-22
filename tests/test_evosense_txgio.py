@@ -97,3 +97,35 @@ def test_it_covers_only_what_no_county_source_can(target, covered):
     src = PV.PROVIDERS["txgio_parcels"]
     assert src.applies(t) is covered
     assert src.scope == "state" and not src.costs and src.lookup_capability == "ASSESSOR"
+
+
+def test_a_settings_row_created_by_another_request_is_reused_not_an_error(db_session, sample_org):
+    """Providers and Controls load together; both may create a new source's
+    settings row. The second must read the first one's row."""
+    from app.models.evosense_models import EvoSenseProviderConfig
+    from sqlalchemy.orm import sessionmaker
+    other = sessionmaker(bind=db_session.get_bind())()
+    try:
+        other.add(EvoSenseProviderConfig(organization_id=sample_org.id, provider_key="txgio_parcels",
+                                         enabled=False, priority=100))
+        other.commit()
+    finally:
+        other.close()
+    # This session has not seen it yet: the lookup misses, the insert collides.
+    real_query = db_session.query
+    calls = {"n": 0}
+
+    def query(*a, **k):
+        q = real_query(*a, **k)
+        if a and a[0] is EvoSenseProviderConfig and calls["n"] == 0:
+            calls["n"] += 1
+            return q.filter(EvoSenseProviderConfig.id == "nothing-yet")
+        return q
+    db_session.query = query
+    try:
+        row = PV.config(db_session, sample_org.id, "txgio_parcels")
+    finally:
+        db_session.query = real_query
+    assert row is not None and row.provider_key == "txgio_parcels"
+    assert db_session.query(EvoSenseProviderConfig).filter_by(
+        organization_id=sample_org.id, provider_key="txgio_parcels").count() == 1
