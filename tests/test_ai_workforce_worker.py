@@ -25,10 +25,25 @@ def test_worker_does_nothing_when_a_kill_switch_is_engaged(monkeypatch):
     assert _load().main() == 0
 
 
-def test_worker_is_not_wired_into_render_or_main():
-    for rel in ("render.yaml", os.path.join("app", "main.py")):
-        text = open(os.path.join(ROOT, rel), encoding="utf-8").read()
-        assert "run_ai_workforce_worker" not in text
+def test_worker_runs_in_the_backend_once_and_nowhere_else():
+    """Wired as the backend-owned loop, not as a second service."""
+    from app import service_role
+    from app.models.job_models import JobName, LOOP_JOB_NAMES
+    assert JobName.AI_WORKFORCE_WORKER in LOOP_JOB_NAMES
+    assert service_role.SCHEDULER_OWNER[JobName.AI_WORKFORCE_WORKER] == \
+        service_role.ROLE_BACKEND
+    main_src = open(os.path.join(ROOT, "app", "main.py"),
+                    encoding="utf-8").read()
+    assert "JobName.AI_WORKFORCE_WORKER:  _ai_workforce_worker_loop" in main_src
+    assert "run_ai_workforce_worker" not in open(
+        os.path.join(ROOT, "render.yaml"), encoding="utf-8").read()
+
+
+def test_run_once_does_nothing_when_an_emergency_switch_is_on(db_session,
+                                                              monkeypatch):
+    monkeypatch.setenv("AI_OPERATIONS_KILL", "1")
+    assert _load().run_once(db_session) == {"skipped":
+                                            "emergency stop engaged"}
 
 
 def test_a_pass_with_no_employees_claims_nothing(db_session):

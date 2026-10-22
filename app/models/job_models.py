@@ -63,6 +63,10 @@ class JobName:
     # Talks only to the browsers' own push services, only for people who
     # turned phone alerts on. Named so the ledger can say when it stopped.
     WEB_PUSH = "web_push_loop"
+    # The AI Workforce queue worker: claims due AI work items and runs them.
+    # Every 2 minutes in the backend. Real messages stay off unless
+    # AI_OPERATIONS_LIVE_SEND is set (app/jobs/run_ai_workforce_worker.py).
+    AI_WORKFORCE_WORKER = "ai_workforce_worker"
 
     # Render cron SERVICES. Separate names on purpose, even where the work
     # overlaps a loop above: cadence runs hourly in the web dyno AND daily as a
@@ -109,6 +113,7 @@ LOOP_JOB_NAMES = (
     JobName.WHOLESALE_EXCEPTIONS,
     JobName.PROGRAM_SLA,
     JobName.WEB_PUSH,
+    JobName.AI_WORKFORCE_WORKER,
 )
 
 ALL_JOB_NAMES = LOOP_JOB_NAMES + CRON_JOB_NAMES
@@ -129,6 +134,7 @@ EXPECTED_INTERVAL_MINUTES = {
     JobName.WHOLESALE_EXCEPTIONS: 60,
     JobName.PROGRAM_SLA: 2,
     JobName.WEB_PUSH: 60,                 # checks in hourly when idle; sends every 20s when busy
+    JobName.AI_WORKFORCE_WORKER: 2,
     JobName.CADENCE_CRON: 24 * 60,        # render.yaml: "0 14 * * *"
     JobName.EMAIL_POLLER: 5,              # render.yaml: "*/5 * * * *"
     # ai_conversation_cron is RETIRED (see RETIRED_JOB_NAMES): no interval, so
