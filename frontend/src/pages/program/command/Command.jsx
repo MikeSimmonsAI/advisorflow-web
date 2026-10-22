@@ -492,6 +492,8 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
   const [done, setDone] = useState({})
   const [pick, setPick] = useState(null)        // slot tapped, waiting for "Book it"
   const [booked, setBooked] = useState(null)    // what happened, shown on the card
+  const [customDay, setCustomDay] = useState('')     // "Choose custom time": the day picked
+  const [daySlots, setDaySlots] = useState(null)     // every open time that day
   const [menu, setMenu] = useState(false)
   const [picking, setPicking] = useState(false)
   const composer = useRef(null)
@@ -565,11 +567,24 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
       api.get(`/program/command/slots?lead_id=${id}`).then(setSlots).catch(() => {})
     } catch (e) { const msg = e.message || 'Could not book.'; setBooked({ ok: false, msg }); toast(msg) } finally { setBusy(false) }
   }
+  const loadDay = async d => {
+    setCustomDay(d); setDaySlots(d ? 'loading' : null); setPick(null)
+    if (!d) return
+    try { setDaySlots(await api.get(`/program/command/day-slots?lead_id=${id}&date=${d}`)) }
+    catch (e) { setDaySlots({ slots: [], reason: e.message || 'Could not read the calendar.' }) }
+  }
+  const firstName = () => (f.name || '').split(' ')[0].toLowerCase().replace(/^./, c => c.toUpperCase())
+  // Ask the family about ONE time (picked by a person) instead of booking it outright.
+  const offerOne = s => {
+    setMode('text'); setView('conversation'); setPick(null)
+    setText(`Hi ${firstName()}, would ${dayLabel(s.value)} at ${s.time} work for a visit? Or pick another time here: {BOOKING}`)
+    setTimeout(() => { composer.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); composer.current?.focus() }, 50)
+  }
   // The family hasn't picked a time: put two open times in a text for them to choose from.
   const offerTimes = () => {
     const two = (slots?.slots || []).slice(0, 2)
     if (!two.length) return
-    const first = (f.name || '').split(' ')[0].toLowerCase().replace(/^./, c => c.toUpperCase())
+    const first = firstName()
     const when = two.map(s => `${dayLabel(s.value)} at ${s.time}`).join(' or ')
     setMode('text'); setView('conversation')
     setText(`Hi ${first}, I have ${when} open for a visit. Which works better for you? Or pick another time here: {BOOKING}`)
@@ -703,7 +718,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
 
       <section className="cmd-card cmd-sched" ref={schedRef}>
         <h3><Icon n="cal" /> Quick schedule a visit</h3>
-        <p className="cmd-muted small">Tap a time to book it. The family gets a text confirming it. Not sure they want that time? Use "Text them times to pick" - it includes their booking link.</p>
+        <p className="cmd-muted small">Tap a time to book it. The family gets a text confirming it. Not sure they want that time? Tap "Ask them first", or "Text them times to pick" - both include their booking link.</p>
         {slots === null ? <p className="cmd-muted">Checking the calendar…</p>
           : slots.slots.length ? <div className="cmd-slots">{slots.slots.slice(0, 2).map(s => (
             <button key={s.value} className={pick?.value === s.value ? 'on' : ''} disabled={busy} onClick={() => { setPick(s); setBooked(null) }}><small>{dayLabel(s.value)}</small>{s.time}</button>))}</div>
@@ -711,10 +726,22 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
         {slots?.slots?.length > 2 && <details><summary>More open times ›</summary>
           <div className="cmd-slots">{slots.slots.slice(2).map(s => (
             <button key={s.value} className={pick?.value === s.value ? 'on' : ''} disabled={busy} onClick={() => { setPick(s); setBooked(null) }}><small>{dayLabel(s.value)}</small>{s.time}</button>))}</div></details>}
+        <details className="cmd-custom" onToggle={e => { if (e.target.open && !customDay) { const t = new Date(Date.now() + 864e5); loadDay(t.toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })) } }}>
+          <summary>Choose custom time ›</summary>
+          <label className="cmd-custom-day">Day
+            <input type="date" value={customDay} min={new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })}
+                   onChange={e => loadDay(e.target.value)} /></label>
+          {daySlots === 'loading' ? <p className="cmd-muted">Checking that day…</p>
+            : daySlots && (daySlots.slots.length
+              ? <div className="cmd-slots cmd-slots-day">{daySlots.slots.map(s => (
+                <button key={s.value} className={pick?.value === s.value ? 'on' : ''} disabled={busy} onClick={() => { setPick(s); setBooked(null) }}>{s.time}</button>))}</div>
+              : <p className="cmd-muted">{daySlots.reason || 'No open times that day.'} Try another day.</p>)}
+        </details>
         {pick && <div className="cmd-pick" role="group" aria-label="Confirm booking">
           <p>Book <b>{f.name}</b> for <b>{pick.label || `${dayLabel(pick.value)} ${pick.time}`}</b>?{f.phone ? ` They get a text at ${fmtPhone(f.phone)} confirming it.` : ' They have no phone on file, so call them to let them know.'}</p>
           <div className="cmd-send">
             <button disabled={busy} onClick={() => setPick(null)}>Cancel</button>
+            {f.phone && !f.handling?.opted_out && <button disabled={busy} onClick={() => offerOne(pick)}>Ask them first</button>}
             <button className="primary" disabled={busy} onClick={() => book(pick)}>{busy ? 'Booking…' : f.phone ? 'Book it & text them' : 'Book it'}</button>
           </div>
         </div>}
@@ -734,6 +761,8 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
             {!f.reply_to.threadable && <><br />{f.reply_to.why_not}</>}</p>
           : <p className="cmd-replyto bad">There is no email from this family to answer. Reply by text, or add a note.</p>)}
         {mode === 'email' && f.is_demo && <input className="cmd-subj" value={subject} onChange={e => setSubject(e.target.value)} placeholder="Subject" />}
+        {mode === 'text' && /\blink\b/i.test(text) && !/\{BOOKING\}|\{GUIDE\}|https?:\/\//i.test(text) &&
+          <p className="cmd-replyto bad">This text mentions a link but has none in it. <button className="link" onClick={() => setText(t => `${t.trim()} {BOOKING}`)}>Add their booking link</button></p>}
         <textarea ref={composer} value={text} onChange={e => setText(e.target.value)} rows={4}
                   placeholder={mode === 'note' ? 'Write a note about this family...' : mode === 'text' ? 'Write a text...' : 'Write an email...'} />
         <div className="cmd-send">

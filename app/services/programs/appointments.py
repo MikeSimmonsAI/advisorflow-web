@@ -128,6 +128,25 @@ def slots_on_day(db: Session, prog, day, want: int = 2, kind: str = VISIT) -> Tu
     return sorted(pick[:want]), None
 
 
+def all_slots_on_day(db: Session, prog, day, kind: str = VISIT) -> Tuple[List[datetime], Optional[str]]:
+    """EVERY open time on one day (a person picking a custom time)."""
+    from app.routers.calendar_router import compute_day_slots
+    advisor = program_advisor(db, prog)
+    if advisor is None:
+        return [], "no booking calendar is set for the program"
+    today = _today_central().date()
+    if day < today:
+        return [], "that day has passed"
+    res = compute_day_slots(db, advisor, day, program_visit=True, today=today, minutes=minutes_for(kind))
+    if res.get("calendar_error"):
+        return [], "the calendar cannot be read right now"
+    slots = sorted(datetime.fromisoformat(x) for x in res.get("slots") or [])
+    if day == today:
+        now_c = _today_central().replace(tzinfo=None)
+        slots = [x for x in slots if x > now_c]
+    return slots, (None if slots else "no open times that day")
+
+
 def describe(slot: datetime) -> str:
     return slot.strftime("%A, %B %-d at %-I:%M %p").replace(":00 ", " ")
 

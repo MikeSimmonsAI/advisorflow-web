@@ -1016,6 +1016,24 @@ _ARRIVING_TODAY = re.compile(r"\b(today|tonight|right now|on (my|our) way|headed
 _CHANGE_EXISTING = re.compile(r"\b(cancel|reschedul|move (my|our|the) appointment|change (my|our|the) appointment)", re.I)
 
 
+_WANTS_IN = re.compile(r"\b(appointment|set up a time|schedule (a|an|my)|come (by|in|over)|stop (by|in)|"
+                       r"swing by|drop by|meet (with )?you|sit down with)\b", re.I)
+_NEGATIVE = re.compile(r"\b(not|don'?t|can'?t|cannot|won'?t|no|never|stop)\b", re.I)
+# A reply that promises a meeting without a time: "see you tomorrow", "I'll be
+# ready to meet with you", "looking forward to seeing you" (Henry, Oct 22).
+_EMPTY_PROMISE = re.compile(r"(see you (then|tomorrow|soon|on|monday|tuesday|wednesday|thursday|friday|saturday)|"
+                            r"ready (for|to meet with|to see) you|look(ing)? forward to (seeing|meeting|our (visit|meeting|conversation))|"
+                            r"when you come (by|in))", re.I)
+
+
+def wants_visit(body: str) -> bool:
+    """The family says yes to coming in (not arriving now, not changing or
+    cancelling, not a no)."""
+    b = body or ""
+    return bool(_WANTS_IN.search(b)) and not (_ARRIVING_TODAY.search(b) or _CHANGE_EXISTING.search(b)
+                                              or _NEGATIVE.search(b))
+
+
 def future_visit_day(body: str, today) -> Optional[object]:
     """The later day a family says they'll come in on ("I can come by
     tomorrow if that is ok") - a yes to a visit that still needs a time.
@@ -1324,17 +1342,32 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
 
     preferred_day = None
     if action in ("handoff", "answer") and conv.booked_time is None:
+        # HARD RULE (Henry, Oct 22): a family who said yes to coming in never
+        # gets a reply without a real time. "I can come by tomorrow" -> times
+        # that day; a "see you then" with no time -> times; a hand-off of a
+        # plain yes -> times. Arriving today, a home-visit ask, upset or
+        # grieving families, and changes to a booking still go to a person.
         _dc = getattr(conv, "_decline", None) or {}
-        _later = None if _dc.get("family_asks_for_home_visit") else future_visit_day(body, A._today_central().date())
-        if _later is not None:
-            # "I can come by tomorrow" is a yes to a visit: offer real times
-            # that day, never "see you tomorrow" with no time (Henry, Oct 22).
-            preferred_day = _later
+        _home = bool(_dc.get("family_asks_for_home_visit"))
+        _today = A._today_central().date()
+        _later = None if _home else future_visit_day(body, _today)
+        _mood = (und.get("mood") or "").lower()
+        _calm = _mood not in ("upset", "grieving", "negative")
+        _promise = (bool(_EMPTY_PROMISE.search(text or "")) and not _ARRIVING_TODAY.search(body or "")
+                    and not _NEGATIVE.search(body or "") and not _CHANGE_EXISTING.search(body or ""))
+        _plain_yes = action == "handoff" and _calm and wants_visit(body)
+        if not _home and _calm and (_later is not None or _promise or _plain_yes):
             action = "offer_times"
             out["action"] = action
-            _word = "tomorrow" if (_later - A._today_central().date()).days == 1 else _later.strftime("%A")
-            text = "Wonderful, I'd be glad to see you %s. Would {TIMES} work for you?" % _word
-            merge_memory(conv, {"best_times": _word, "readiness": "ready"})
+            out["corrected"] = "a yes to coming in always gets real times"
+            if _later is not None:
+                preferred_day = _later
+                _word = "tomorrow" if (_later - _today).days == 1 else _later.strftime("%A")
+                text = "Wonderful, I'd be glad to see you %s. Would {TIMES} work for you?" % _word
+                merge_memory(conv, {"best_times": _word, "readiness": "ready"})
+            else:
+                text = "Wonderful, I'd be glad to sit down with you. Would {TIMES} work for you?"
+                merge_memory(conv, {"readiness": "ready"})
     if action == "book":
         slot = None
         choices = A.offered(conv)
