@@ -1,12 +1,11 @@
 {
-  "relay_run_id": "aiwf-alljobs-20261022-0929-r3",
-  "parent_run_id": "aiwf-alljobs-20261022-0826-r2b",
-  "project": "EvoSys Pro AI Workforce \u2014 complete all 11 workers in safe test mode",
-  "status": "COMPLETED",
-  "branch": "feature/ai-workforce-launch",
-  "timestamp_ct": "2026-10-22T17:33:29.407381+00:00",
+  "relay_run_id": "wholesale-texas-20261022-2307z-a1",
+  "parent_run_id": "",
+  "project": "EvoSys Wholesale Lane B \u2014 Texas targeted searches / reliable county expansion",
+  "status": "BLOCKED",
+  "branch": "feature/wholesale-development",
+  "actions_run_id": "39870174024",
+  "timestamp_ct": "2026-10-22 18:13 CT",
   "issue": 1,
-  "status_comment_id": 6343526674,
-  "watchdog_retry": true,
-  "watchdog_retry_utc": "2026-10-22T17:33:29.407395+00:00"
+  "status_comment_id": 6353378168
 }
