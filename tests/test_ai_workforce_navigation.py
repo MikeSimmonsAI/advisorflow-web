@@ -127,17 +127,27 @@ def test_every_routed_workforce_component_is_imported_and_exists():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_the_god_rail_links_to_a_registered_workforce_route():
+    """ONE God rail entry, the plain-language AI Workforce page, and from it
+    the three technical consoles, all still routed."""
     rail = _read(GOD_SHELL)
-    assert "'/god/workforce'" in rail, (
+    assert "'/god/ai'" in rail, (
         "Nothing in the God rail reaches AI Workforce. A built, routed, "
         "deployed screen nobody can find is the same as a missing one.")
-    assert "/god/workforce" in _registered_routes(_read(APP_JSX))
+    routes = _registered_routes(_read(APP_JSX))
+    for path in ("/god/ai", "/god/workforce", "/god/ai-operations",
+                 "/god/ai-deployment"):
+        assert path in routes, path
+    src = _read(APP_JSX)
+    assert src.index('path="/god/ai"') < src.index('path="/god/*"')
+    control = _read(os.path.join(FE, "pages", "god", "GodAIControl.jsx"))
+    for path in ("/god/workforce", "/god/ai-operations", "/god/ai-deployment"):
+        assert 'to="%s"' % path in control, path
 
 
 def test_the_god_rail_icon_key_exists_in_the_icon_table():
     """ICONS[icon] has no fallback — a missing key draws nothing."""
     rail = _read(GOD_SHELL)
-    entry = re.search(r"path:\s*'/god/workforce',\s*icon:\s*'([a-zA-Z]+)'", rail)
+    entry = re.search(r"path:\s*'/god/ai',\s*icon:\s*'([a-zA-Z]+)'", rail)
     assert entry, "The AI Workforce rail entry has no icon."
     icons = set(re.findall(r"^\s{2}([a-zA-Z]+):\s*'M", rail, re.M))
     assert entry.group(1) in icons, (

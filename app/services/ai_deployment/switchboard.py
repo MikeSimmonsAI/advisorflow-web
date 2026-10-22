@@ -288,3 +288,138 @@ def apply_brands(db: Session, entries: Iterable[str]) -> List[Dict]:
             _log.exception("AI workforce startup brands: enabling %s failed",
                            entry)
     return out
+
+
+# ── THE GOD MODE CONTROL PAGE ────────────────────────────────────────────────
+
+def emergency_stop(db: Session, *, on: bool, actor_user_id: Optional[str],
+                   reason: str) -> Dict[str, Any]:
+    """The platform-wide stop. ON: every AI worker everywhere stops at its
+    next step and queued work is parked. OFF: work may resume (each AI worker
+    still needs its own account switched on). The caller commits."""
+    from app.models.workforce_models import AIEmployee
+    from app.services.workforce import activation as wf_activation
+    from app.services.workforce import queue as wf_queue
+    wf_activation.set_kill_switch(db, wf_activation.SCOPE_PLATFORM, "",
+                                  bool(on), actor_user_id=actor_user_id,
+                                  reason=reason)
+    parked = 0
+    if on:
+        for emp in db.query(AIEmployee).all():
+            parked += wf_queue.pause_all(db, employee_id=emp.id,
+                                         reason="emergency stop: %s" % reason,
+                                         actor_id=actor_user_id)
+    else:
+        for emp in (db.query(AIEmployee)
+                    .filter(AIEmployee.status == "active",
+                            AIEmployee.paused_at.is_(None)).all()):
+            wf_queue.resume_all(db, employee_id=emp.id,
+                                reason="emergency stop released",
+                                actor_id=actor_user_id)
+    db.flush()
+    return {"stopped": bool(on), "work_parked": parked}
+
+
+def control_summary(db: Session, *, now=None) -> Dict[str, Any]:
+    """Everything the owner needs on one screen, in plain words."""
+    from datetime import datetime, timedelta
+    from app.models.ai_deployment_models import AIEmployeeDeployment
+    from app.models.models import Lead
+    from app.models.workforce_models import (AIEmployee, AIHandoff,
+                                             AIToolExecution, AIWorkItem)
+    from app.services.ai_deployment import test_mode
+    from app.services.workforce import constants as WC
+
+    now = now or datetime.utcnow()
+    st = status(db)
+    stopped = bool(st["environment_kill"] or st["platform_killed"])
+    accounts = [a for b in st["brands"] for a in b["accounts"]]
+    on = sum(1 for a in accounts if a["summary"].startswith("Ready"))
+    worker = st["worker"]
+
+    org_names = {o.id: o.name for o in db.query(Organization).all()}
+    emp_rows = db.query(AIEmployee).all()
+    emp_names = {e.id: e.name for e in emp_rows}
+    deps = (db.query(AIEmployeeDeployment)
+            .filter(AIEmployeeDeployment.state != D.RETIRED).all())
+
+    counts = {"working_now": 0, "waiting": 0, "needs_a_person": 0,
+              "finished": 0}
+    for (state,) in db.query(AIWorkItem.state).all():
+        if state in (WC.ASSIGNED, WC.ELIGIBILITY_PENDING, WC.ELIGIBLE,
+                     WC.WORKING):
+            counts["working_now"] += 1
+        elif state in (WC.WAITING_FOR_RESPONSE, WC.PAUSED):
+            counts["waiting"] += 1
+        elif state in (WC.NEEDS_REVIEW, WC.FAILED):
+            counts["needs_a_person"] += 1
+        elif state in WC.TERMINAL_STATES:
+            counts["finished"] += 1
+    open_handoffs = db.query(AIHandoff).filter(
+        AIHandoff.status == "open").count()
+
+    since = now - timedelta(days=7)
+    recent = []
+    rows = (db.query(AIToolExecution)
+            .filter(AIToolExecution.created_at >= since)
+            .order_by(AIToolExecution.created_at.desc()).limit(25).all())
+    lead_ids = {r.target_id for r in rows if r.target_type == "lead"}
+    practice_ids = set()
+    if lead_ids:
+        practice_ids = {lid for (lid,) in db.query(Lead.id).filter(
+            Lead.id.in_(list(lead_ids)), Lead.is_test.is_(True)).all()}
+    words = test_mode._TOOL_WORDS
+    for r in rows:
+        recent.append({
+            "at": r.created_at.isoformat() + "Z" if r.created_at else None,
+            "account": org_names.get(r.organization_id, "Unknown account"),
+            "worker": emp_names.get(r.employee_id, "AI worker"),
+            "what": words.get(r.tool_key, r.tool_key),
+            "result": (("Not done: %s" % (r.denial_reason
+                                          or "a safety rule said no"))[:140]
+                       if r.decision != "allowed"
+                       else ("Practice only - nothing sent" if r.simulated
+                             else "Done")),
+            "practice": bool(r.simulated) or r.target_id in practice_ids,
+        })
+
+    problems = []
+    if stopped:
+        problems.append("The emergency stop is ON. No AI worker will do "
+                        "anything until you release it.")
+    if not worker["running"]:
+        problems.append("The background worker has not checked in for over "
+                        "%d minutes. New work will wait. It restarts with "
+                        "every deploy; if this stays, press Run worker now "
+                        "and check the error shown." % worker["fresh_minutes"])
+    elif worker.get("last_status") == "error":
+        problems.append("The background worker's last pass had an error.")
+    if counts["needs_a_person"]:
+        problems.append("%d lead(s) are waiting for a person to decide what "
+                        "happens next." % counts["needs_a_person"])
+
+    if stopped:
+        headline = "Stopped. The emergency stop is on."
+    elif on == 0:
+        headline = "Off. No account has AI workers turned on."
+    else:
+        headline = ("Working in safe test mode for %d of %d accounts. "
+                    "Real messages are %s." % (
+                        on, len(accounts),
+                        "ON" if st["real_messages"] else "OFF"))
+
+    return {
+        "headline": headline,
+        "stopped": stopped,
+        "stopped_by_environment": bool(st["environment_kill"]),
+        "real_messages": st["real_messages"],
+        "worker": worker,
+        "accounts_on": on,
+        "accounts_total": len(accounts),
+        "ai_workers": len(deps),
+        "work": counts,
+        "open_handoffs": open_handoffs,
+        "problems": problems,
+        "recent": recent,
+        "switchboard": st,
+    }

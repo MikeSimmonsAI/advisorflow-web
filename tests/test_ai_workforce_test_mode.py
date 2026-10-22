@@ -636,3 +636,22 @@ def test_reports_never_show_an_internal_action_name(db_session):
         for s in report["steps"]:
             assert "_" not in s["step"], s
         assert report["pretend_reply"]
+
+
+def test_an_evening_booking_is_not_refused(db_session):
+    """10:30 PM Central is already tomorrow in UTC; booking must still work."""
+    from app.models.workforce_models import AIEmployee
+    from app.services.workforce import booking as wf_booking
+    acct, dep = _setter(db_session)
+    emp = acct.employee(dep)
+    lead = practice.create_practice_lead(db_session,
+                                         organization_id=acct.org.id)
+    evening = _next_weekday_1500_utc().replace(hour=3, minute=30)  # 22:30 CT
+    slots = wf_booking.available_slots(db_session, employee=emp, lead=lead,
+                                       advisor=acct.admin, days_ahead=7,
+                                       now=evening)
+    assert slots["availability_status"] == "ok" and slots["slots"]
+    booked = wf_booking.book_slot(db_session, employee=emp, lead=lead,
+                                  starts_at=slots["slots"][0]["starts_at"],
+                                  advisor=acct.admin, now=evening)
+    assert booked["booking_id"] and not booked.get("already_booked")
