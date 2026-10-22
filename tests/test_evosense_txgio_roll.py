@@ -3,7 +3,7 @@
   * only residential parcels with a situs address and a named owner;
   * kept when the owner mails elsewhere (absentee) or the owner is an estate;
     a PO-box mailing address proves nothing and is not kept on that ground;
-  * Dallas / Collin / Denton (their own discovery) are never read here;
+  * Dallas / Collin / Denton / Harris (their own discovery) are never read here;
   * 'All Texas' rotates through every other county; a strategy with no
     county list is not served (existing strategies keep what they had).
 """
@@ -112,10 +112,11 @@ def test_source_targets_counties_and_never_reads_dallas_collin_denton(rolls):
     assert src.scope == "state" and src.discovery and not src.costs and "PROPERTY_SEARCH" in src.capabilities
     assert len(src.search("PROPERTY_SEARCH", {"states": ["TX"], "limit": 10})) == 0          # no county list
     assert len(src.search("PROPERTY_SEARCH", {"states": ["TX"], "counties": ["Dallas", "Collin"], "limit": 10})) == 0
-    got = src.search("PROPERTY_SEARCH", {"states": ["TX"], "counties": ["Harris County"], "limit": 10})
-    assert got and all(r["county"] == "Harris" for r in got)
+    assert len(src.search("PROPERTY_SEARCH", {"states": ["TX"], "counties": ["Harris"], "limit": 10})) == 0  # HCAD's own
+    got = src.search("PROPERTY_SEARCH", {"states": ["TX"], "counties": ["Bexar County"], "limit": 10})
+    assert got and all(r["county"] == "Bexar" for r in got)
     rolls.clear()
     src.search("PROPERTY_SEARCH", {"states": ["TX"], "counties": ["All Texas"], "limit": 10, "rotate": 3})
     assert len(rolls) == 2
-    assert not any(u.endswith(("48113_lp.zip", "48085_lp.zip", "48121_lp.zip")) for u in rolls)
+    assert not any(u.endswith(("48113_lp.zip", "48085_lp.zip", "48121_lp.zip", "48201_lp.zip")) for u in rolls)
     assert len(src.search("PROPERTY_SEARCH", {"states": ["OK"], "counties": ["Harris"], "limit": 5})) == 0
