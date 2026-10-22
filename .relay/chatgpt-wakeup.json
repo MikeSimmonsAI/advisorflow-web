@@ -4,8 +4,9 @@
   "project": "EvoSys Wholesale Lane B \u2014 Texas targeted hunt implementation, retry after safe branch fast-forward",
   "status": "COMPLETED",
   "branch": "feature/wholesale-development",
-  "actions_run_id": "39870632544",
-  "timestamp_ct": "2026-10-22 18:17 CT",
+  "timestamp_ct": "2026-10-22T23:54:40.464790+00:00",
   "issue": 1,
-  "status_comment_id": 6353441854
+  "status_comment_id": 6353441854,
+  "watchdog_retry": true,
+  "watchdog_retry_utc": "2026-10-22T23:54:40.464804+00:00"
 }
