@@ -220,3 +220,11 @@ body:has(.cmd)::before { display: none; }
 @media (max-width: 360px) { .cmd-btns button, .cmd-btns a { font-size: 13px; padding: 9px 4px; gap: 4px; } }
 .cmd-top > div { min-width: 0; }
 .cmd-top .cmd-sub { white-space: normal; }
+
+/* Quick schedule: in-page confirm (window.confirm is unreliable on phones) */
+.cmd-slots button.on { border-color: var(--c-blue); box-shadow: 0 0 0 2px var(--c-blue) inset; }
+.cmd-pick { margin-top: 12px; padding: 12px; border-radius: 12px; background: var(--c-bg, #f4f6f9); }
+.cmd-pick p { margin: 0 0 10px; font-size: 16px; line-height: 1.4; }
+.cmd-pick-result { margin: 12px 0 0; padding: 10px 12px; border-radius: 10px; font-weight: 600; }
+.cmd-pick-result.ok { background: #e8f5ec; color: #17663a; }
+.cmd-pick-result.bad { background: #fdecea; color: #a1271b; }
