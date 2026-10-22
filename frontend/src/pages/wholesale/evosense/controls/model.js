@@ -148,6 +148,7 @@ export function scopeOf(p) {
   if (a.scope === 'county') {
     return { key: 'county', label: counties.length === 1 ? `${counties[0]} County` : `${counties.length} counties`, counties }
   }
+  if (a.scope === 'state') return { key: 'state', label: `${a.scope_name || 'State'} statewide`, counties }
   if (a.scope === 'national') return { key: 'national', label: 'Nationwide', counties }
   if (a.scope === 'sandbox') return { key: 'sandbox', label: 'Sandbox records only', counties }
   if (a.scope === 'any') return { key: 'any', label: 'Any property', counties }
