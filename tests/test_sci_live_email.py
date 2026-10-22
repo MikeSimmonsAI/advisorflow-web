@@ -132,7 +132,7 @@ def test_ai_answers_an_email_in_its_thread_in_auto(setter, sample_advisor):
     prog.ai_setter_mode = "auto"
     db.commit()
     lead = _estes(db, org, sample_advisor)
-    fake = _Fake([_d("close", "Thank you for letting us know, Ailene. We're glad your father's plans are in place.")])
+    fake = _Fake([_d("offer_times", "Thank you, Ailene. I'd be glad to go over your father's plans with you - would {TIMES} work?")])
     with patch.object(ai_setter, "_get_client", return_value=fake), \
          patch("app.services.inbound_mailbox_service._access_token_send", return_value="tok"), \
          patch("app.services.programs.email_reply.httpx.post", return_value=_graph_ok()) as post, \
@@ -172,7 +172,7 @@ def test_human_handling_stops_ai_and_ai_handling_resumes_after_a_manual_text(set
     # ...then hands the conversation back to the AI.
     r = client.post("/program/command/handling", headers=h, json={"lead_id": lead.id, "owner": "ai"})
     assert r.json()["handling"]["owner"] == "ai"
-    fake = _Fake([_d("answer", "Glad to help. Would a short call or a visit be easier?")])
+    fake = _Fake([_d("offer_times", "Glad to help. Would {TIMES} work for a short visit?")])
     with patch.object(ai_setter, "_get_client", return_value=fake), \
          patch("app.services.sms_service.send_sms") as send, \
          patch("app.services.programs.responses._deliver_staff_alert", return_value=(True, None)):
@@ -357,7 +357,7 @@ def test_an_ai_text_reply_marks_the_message_answered(setter, sample_advisor, mon
     db.commit()
     monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": True})
     lead = _lead_for(db, org, sample_advisor, "L001")
-    fake = _Fake([_d("answer", "Glad to help. Would a short visit be easier?")])
+    fake = _Fake([_d("offer_times", "Glad to help. Would {TIMES} work for a short visit?")])
     with patch.object(ai_setter, "_get_client", return_value=fake), \
          patch("app.services.sms_service.send_sms") as send, \
          patch("app.services.programs.responses._deliver_staff_alert", return_value=(True, None)):

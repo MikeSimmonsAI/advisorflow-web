@@ -65,6 +65,15 @@ def _location(db, lead, **settings):
     db.commit()
 
 
+def _back_to_ai(db, lead):
+    """THE RULE (Oct 22) hands every non-appointment reply to a person; these
+    tests then follow the AI's next step as if the person handed it back."""
+    conv = S.conversation_for(db, lead, create=False)
+    assert conv.state == "human"
+    conv.state = "ai_active"
+    db.commit()
+
+
 def _last_ai(db, conv):
     t = _ai_turns(db, conv)
     return t[-1] if t else None
@@ -124,12 +133,13 @@ def test_second_no_after_the_alternative_closes_warmly(setter, sample_advisor):
     lead = _lead_for(db, org, sample_advisor, "L001")
     _invited(db, lead, sample_advisor)
     _run(db, lead, "No", _Fake([_d("answer", GUIDE_OFFER)]))
+    _back_to_ai(db, lead)
     db.add(Message(lead_id=lead.id, sender_id=sample_advisor.id, body=GUIDE_OFFER, delivery_status="delivered",
                    sent_at=datetime.utcnow()))
     db.commit()
     fake = _Fake([_d("close", GOODBYE)])
     _, conv = _run(db, lead, "No", fake)
-    assert len(fake.calls) == 1 and conv.state == "closed"                  # one alternative, then respect it
+    assert len(fake.calls) == 1 and conv.state == "human"                   # one alternative, then a person
     assert S.memory_of(conv)["alternative_outcome"] == "declined"
 
 
@@ -151,7 +161,8 @@ def test_a_clear_no_that_reaches_the_ai_never_gets_an_alternative_pitch(setter, 
     fake = _Fake([_d("offer_times", "Understood - would a phone call work instead, {TIMES}?"),
                   _d("close", GOODBYE)])
     _, conv = _run(db, lead, "That's not for me", fake)
-    assert len(fake.calls) == 2 and conv.state == "closed" and _last_ai(db, conv).text == GOODBYE
+    assert len(fake.calls) == 2 and conv.state == "human" and _last_ai(db, conv).text == GOODBYE
+    assert _last_ai(db, conv).delivery == "blocked"                         # THE RULE: the goodbye never goes out
 
 
 def test_dont_come_to_my_home_never_gets_a_home_offer(setter, sample_advisor):
@@ -170,7 +181,7 @@ def test_no_to_a_general_question_is_not_treated_as_a_venue_no(setter, sample_ad
     _invited(db, lead, sample_advisor, text=HELP)
     fake = _Fake([_d("close", GOODBYE)])
     _, conv = _run(db, lead, "No", fake)
-    assert len(fake.calls) == 1 and conv.state == "closed"
+    assert len(fake.calls) == 1 and conv.state == "human"
 
 
 def test_a_home_visit_yes_is_never_booked_as_a_cemetery_visit(setter, sample_advisor):
@@ -179,6 +190,7 @@ def test_a_home_visit_yes_is_never_booked_as_a_cemetery_visit(setter, sample_adv
     _location(db, lead, home_visits=True)
     _invited(db, lead, sample_advisor)
     _run(db, lead, "No", _Fake([_d("answer", HOME_OFFER)]))
+    _back_to_ai(db, lead)
     db.add(Message(lead_id=lead.id, sender_id=sample_advisor.id, body=HOME_OFFER, delivery_status="delivered",
                    sent_at=datetime.utcnow()))
     db.commit()
