@@ -98,7 +98,9 @@ def _in_query(rec: Dict, q: Dict) -> bool:
     zips = [z[:5] for z in q.get("zips") or []]
     checks = []
     if counties:
-        checks.append(norm(rec.get("county")) in counties)
+        from app.services.evosense.sources.lgbs import wants_all_texas
+        checks.append(norm(rec.get("county")) in counties
+                      or (wants_all_texas(counties) and (rec.get("state") or "").upper() == "TX"))
     if cities:
         checks.append((rec.get("city") or "").lower() in cities)
     if zips:
@@ -375,11 +377,12 @@ def _county(q: Dict[str, Any]) -> List[str]:
 
 
 def _wants(q: Dict[str, Any], county: str) -> bool:
+    from app.services.evosense.sources.lgbs import wants_all_texas
     counties = _county(q)
     states = [s.upper() for s in q.get("states") or []]
     if states and "TX" not in states:
         return False
-    return not counties or county in counties
+    return not counties or county in counties or wants_all_texas(counties)
 
 
 class TarrantTaxRollSource(PublicRecordSource):
@@ -825,15 +828,16 @@ class Dallas311Source(PublicRecordSource):
 
 
 class LgbsTaxSaleSource(PublicRecordSource):
-    scope, counties = "county", ("Dallas", "Tarrant", "Collin", "Denton", "Ellis", "Kaufman",
-                                 "Rockwall", "Parker", "Johnson")
+    scope, counties, scope_name = "state", (), "Texas"
     key = "lgbs_tax_sales"
-    label = "Tax-foreclosure lawsuits & sales (Linebarger)"
+    label = "Tax-foreclosure lawsuits & sales (Linebarger, all Texas counties)"
     capabilities = (C.TAX,)
     discovery = True
-    coverage = ("North Texas counties - properties taken to judgment for unpaid property tax and "
-                "listed for the county tax sale (owner still holds title)")
-    jurisdiction = "Dallas, Tarrant and nearby counties, TX"
+    coverage = ("Texas statewide - every county the firm lists (95 on 2026-10-21): properties taken to "
+                "judgment for unpaid property tax and listed for the county tax sale (owner still holds title). "
+                "A strategy with no county list keeps the 9 North Texas counties; name any county, or "
+                "'All Texas' for all of them.")
+    jurisdiction = "Texas (statewide)"
     source_type = "Taxing units' delinquent-tax attorneys - public sale list"
     access_method = "Public JSON list (taxsales.lgbs.com), a few paged requests per hunt"
     public_url = "https://taxsales.lgbs.com/"
@@ -850,10 +854,9 @@ class LgbsTaxSaleSource(PublicRecordSource):
         if states and "TX" not in states:
             out.stats = {"skipped": "strategy is not in Texas"}
             return out
-        wanted = [c for c in _county(query) if c in COUNTIES] if _county(query) else list(COUNTIES)
-        if not wanted:
-            out.stats = {"skipped": "strategy counties are outside the tax-sale list's coverage"}
-            return out
+        # No county list: the North Texas default (unchanged). Otherwise any
+        # Texas county named, or 'All Texas' for every county listed.
+        wanted = _county(query) or list(COUNTIES)
         res = LgbsTaxSaleReader().discover(limit=int(query.get("limit") or 25), counties=wanted)
         out.extend(res["records"])
         out.stats, out.source_url = res["stats"], res["source_url"]
@@ -1447,9 +1450,9 @@ def capability_report(db, org_id: str, rows: List[Dict[str, Any]]) -> List[Dict[
             kind = C.NOT_BUILT
         per_market = []
         for m in markets:
-            here = [p for p in live if p.scope == "national" or m in p.counties]
+            here = [p for p in live if p.scope in ("national", "state") or m in p.counties]
             man = [p for p in manual if p.scope == "any" or m in p.counties]
-            down = [p for p in unavailable if p.connector_kind == C.REAL and (p.scope == "national" or m in p.counties)]
+            down = [p for p in unavailable if p.connector_kind == C.REAL and (p.scope in ("national", "state") or m in p.counties)]
             if here:
                 city_only = all(p.scope == "city" for p in here)
                 per_market.append({"market": "%s County" % m, "kind": C.REAL,

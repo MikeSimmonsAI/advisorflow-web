@@ -87,3 +87,9 @@ test('paid exposure reads the server channel and the provider switches', () => {
   assert.equal(x.on.length, 0)
   assert.equal(x.channel.state, 'NOTHING CONNECTED')
 })
+
+test('a statewide source reads as statewide, not as a county list', () => {
+  const s = M.scopeOf({ coverage_area: { scope: "state", counties: [], scope_name: "Texas" } })
+  assert.equal(s.key, 'state')
+  assert.equal(s.label, 'Texas statewide')
+})

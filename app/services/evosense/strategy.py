@@ -407,7 +407,9 @@ def geography_match(strategy, prop) -> Tuple[bool, str]:
         checks.append((prop.zip_code or "")[:5] in [z[:5] for z in zips])
     counties = [norm(c) for c in lst(strategy, "counties")]
     if counties:
-        checks.append(norm(prop.county) in counties)
+        from app.services.evosense.sources.lgbs import wants_all_texas
+        checks.append(norm(prop.county) in counties
+                      or (wants_all_texas(counties) and (prop.state or "TX").upper()[:2] == "TX"))
     cities = [c.strip().lower() for c in lst(strategy, "cities")]
     if cities:
         checks.append((prop.city or "").strip().lower() in cities)

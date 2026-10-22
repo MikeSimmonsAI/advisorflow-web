@@ -38,6 +38,9 @@ DALLAS = [
     row(7, "00000555600000000", "", sale_type="FUTURE SALE"),                            # no address
 ]
 TARRANT = [row(8, "04669029", "2656 S PIPELINE RD W", city="EULESS", county="TARRANT COUNTY")]
+HARRIS = [row(9, "0761230000012", "900 BAYOU ST", city="HOUSTON", county="HARRIS COUNTY"),
+          row(10, "0761230000013", "910 BAYOU ST", city="HOUSTON", county="HARRIS COUNTY", sale_type="STRUCK OFF")]
+BEXAR = [row(11, "05123000040", "77 ALAMO WAY", city="SAN ANTONIO", county="BEXAR COUNTY")]
 
 
 @pytest.fixture()
@@ -49,7 +52,9 @@ def lgbs_api(monkeypatch, no_network):  # noqa: F811
         if url.startswith(LG.API):
             params = params or {}
             calls.append(params)
-            rows = {"DALLAS COUNTY": DALLAS, "TARRANT COUNTY": TARRANT}.get(params.get("county"), [])
+            by = {"DALLAS COUNTY": DALLAS, "TARRANT COUNTY": TARRANT, "HARRIS COUNTY": HARRIS,
+                  "BEXAR COUNTY": BEXAR}
+            rows = by.get(params.get("county"), []) if params.get("county") else DALLAS + TARRANT + HARRIS + BEXAR
             off, lim = int(params.get("offset", 0)), int(params.get("limit", 200))
             page = rows[off:off + lim]
             return {"count": len(rows), "next": "x" if off + lim < len(rows) else None, "results": page}
@@ -92,13 +97,41 @@ def test_window_rotates_so_every_listing_is_reached(lgbs_api):
     assert seen == {"200 SOON ST", "100 HELD ST", "2656 S PIPELINE RD W"}
 
 
-def test_source_skips_strategies_outside_its_counties(lgbs_api):
+def test_source_skips_strategies_outside_texas_and_serves_any_texas_county(lgbs_api):
     src = PV.PROVIDERS["lgbs_tax_sales"]
     assert len(src.search("TAX", {"states": ["OK"], "limit": 5})) == 0
-    assert len(src.search("TAX", {"states": ["TX"], "counties": ["Harris"], "limit": 5})) == 0
+    got = src.search("TAX", {"states": ["TX"], "counties": ["Harris"], "limit": 5})
+    assert [(r["county"], r["street_address"]) for r in got] == [("Harris", "900 BAYOU ST")]   # struck off skipped
     got = src.search("TAX", {"states": ["TX"], "counties": ["Tarrant County"], "limit": 5})
     assert [r["county"] for r in got] == ["Tarrant"]
     assert src.discovery and src.connector_kind == "real" and not src.costs
+    assert src.scope == "state" and src.scope_name == "Texas"
+
+
+def test_no_county_list_keeps_the_north_texas_default(lgbs_api):
+    """An existing strategy with no county list sees exactly what it saw before."""
+    got = PV.PROVIDERS["lgbs_tax_sales"].search("TAX", {"states": ["TX"], "limit": 50})
+    assert {r["county"] for r in got} == {"Dallas", "Tarrant"}
+    assert all(c.get("county") for c in lgbs_api)                   # per-county requests, as before
+
+
+def test_all_texas_reads_every_county_in_one_statewide_pass(lgbs_api):
+    got = PV.PROVIDERS["lgbs_tax_sales"].search("TAX", {"states": ["TX"], "counties": ["All Texas"], "limit": 50})
+    assert {r["county"] for r in got} == {"Dallas", "Tarrant", "Harris", "Bexar"}
+    assert all("county" not in c for c in lgbs_api) and len(lgbs_api) == 1
+
+
+def test_all_texas_keeps_the_county_sources_and_the_geography_check():
+    from types import SimpleNamespace
+    from app.services.evosense import strategy as ST
+    assert PV._wants({"states": ["TX"], "counties": ["All Texas"]}, "dallas")
+    assert not PV._wants({"states": ["TX"], "counties": ["Harris"]}, "dallas")
+    strat = SimpleNamespace(states='["TX"]', counties='["All Texas"]', cities="[]", zips="[]")
+    ok_tx, _ = ST.geography_match(strat, SimpleNamespace(county="Harris", city="Houston", zip_code="77002", state="TX"))
+    assert ok_tx
+    strat2 = SimpleNamespace(states='["TX"]', counties='["Dallas"]', cities="[]", zips="[]")
+    ok_h, _ = ST.geography_match(strat2, SimpleNamespace(county="Harris", city="Houston", zip_code="77002", state="TX"))
+    assert not ok_h
 
 
 def _dcad_zip(tmp_path):
