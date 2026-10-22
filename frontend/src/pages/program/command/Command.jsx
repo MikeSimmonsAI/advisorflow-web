@@ -572,7 +572,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
     const first = (f.name || '').split(' ')[0].toLowerCase().replace(/^./, c => c.toUpperCase())
     const when = two.map(s => `${dayLabel(s.value)} at ${s.time}`).join(' or ')
     setMode('text'); setView('conversation')
-    setText(`Hi ${first}, I have ${when} open for a visit. Which works better for you? If neither does, just tell me a day and time that's good for you.`)
+    setText(`Hi ${first}, I have ${when} open for a visit. Which works better for you? Or pick another time here: {BOOKING}`)
     setTimeout(() => { composer.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); composer.current?.focus() }, 50)
   }
   const homeVisitArranged = async () => {
@@ -703,7 +703,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
 
       <section className="cmd-card cmd-sched" ref={schedRef}>
         <h3><Icon n="cal" /> Quick schedule a visit</h3>
-        <p className="cmd-muted small">Tap a time to book it. The family gets a text confirming it. Not sure they want that time? Use "Text them times to pick" instead.</p>
+        <p className="cmd-muted small">Tap a time to book it. The family gets a text confirming it. Not sure they want that time? Use "Text them times to pick" - it includes their booking link.</p>
         {slots === null ? <p className="cmd-muted">Checking the calendar…</p>
           : slots.slots.length ? <div className="cmd-slots">{slots.slots.slice(0, 2).map(s => (
             <button key={s.value} className={pick?.value === s.value ? 'on' : ''} disabled={busy} onClick={() => { setPick(s); setBooked(null) }}><small>{dayLabel(s.value)}</small>{s.time}</button>))}</div>
@@ -739,6 +739,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
         <div className="cmd-send">
           {mode !== 'note' && f.suggested_reply && text !== f.suggested_reply && <button className="link" onClick={() => setText(f.suggested_reply)}>Use suggested reply</button>}
           {mode === 'email' && !f.is_demo && !text.includes('{GUIDE}') && <button className="link" onClick={() => setText(t => `${t.trim()}${t.trim() ? ' ' : ''}{GUIDE}`)}>Add guide link</button>}
+          {mode === 'text' && !f.is_demo && !text.includes('{BOOKING}') && <button className="link" onClick={() => setText(t => `${t.trim()}${t.trim() ? ' ' : ''}Pick a time that works for you here: {BOOKING}`)}>Add booking link</button>}
           {mode !== 'note' && !f.is_demo && <button disabled={busy || !text.trim() || !canSend} onClick={() => send('ai')}>Send &amp; let AI continue</button>}
           <button className="primary" disabled={busy || !text.trim() || (mode !== 'note' && !f.is_demo && !canSend)} onClick={() => send('human')}>
             {mode === 'note' ? 'Save note' : mode === 'text' ? 'Send text' : 'Send email'}</button>

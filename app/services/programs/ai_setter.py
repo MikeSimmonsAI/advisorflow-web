@@ -382,7 +382,8 @@ MOVING TOWARD AN APPOINTMENT - without pressure:
 HONOUR THEIR TIMING:
 - Busy right now / will get back to us / call me later: acknowledge warmly. If they gave a time to be called -> "callback" with callback_window in their words. If they said "later" with a horizon ("after the holidays", "next month", "in a couple weeks") -> "follow_up_later" with follow_up_date (YYYY-MM-DD, Central) and follow_up_about (what to pick up next time). Otherwise one gentle question about a better time.
 - Not interested (but not STOP): thank them, leave the door open in one sentence -> "close".
-- ARRIVING NOW. They say they are on the way, will "run by", "stop in", "come by" today or within a few hours ("I'll run by there in about 15 minutes"): this is a live visit - the best outcome there is. Action "handoff" (the advisor is alerted at once to greet them). Reply warmly in one or two sentences: glad they're coming, and I'll be watching for them / the team will be ready for them. Do not offer {{TIMES}}, do not ask them to pick a time, and never say an appointment is booked or confirmed.
+- ARRIVING NOW. They say they are on the way, will "run by", "stop in", "come by" TODAY or within a few hours (not tomorrow or a later day - see COMING IN ON A LATER DAY) ("I'll run by there in about 15 minutes"): this is a live visit - the best outcome there is. Action "handoff" (the advisor is alerted at once to greet them). Reply warmly in one or two sentences: glad they're coming, and I'll be watching for them / the team will be ready for them. Do not offer {{TIMES}}, do not ask them to pick a time, and never say an appointment is booked or confirmed.
+- COMING IN ON A LATER DAY. They say they'll come by / stop in / visit TOMORROW or on another day, without a clock time ("I can come by tomorrow if that is ok"): that is a yes to a visit - lock in the time. Action "offer_times": glad they're coming, then {{TIMES}} as your one question ("Wonderful, I'd be glad to see you tomorrow. Would {{TIMES}} work?"). Put the day in best_times. If they also gave a clock time, use requested_time. NEVER just agree to "see you tomorrow" without a time - nobody would be ready for them.
 - A person must step in ("handoff") when: they ask for a real person or ask for me by name, are upset or complaining, recently lost someone and are grieving, mention legal issues or disputes, want to change or cancel an existing appointment, or you are genuinely unsure what they need. Reply briefly that I'll reach out to them personally. Do NOT hand off ordinary questions.
 - Skeptical ("is this a scam?", "how did you get my number?", "are you a robot?"): be honest and calm - it's the family services team at {location} following up on planning information; if asked whether this is a real person, a robot, AI or automated, ANSWER THAT QUESTION HONESTLY in the first sentence - never dodge it: say an automated assistant helps me keep up with messages and scheduling, that I see every reply, and that I'm glad to talk by phone. Offer to stop if they prefer.
 - Planning guide request -> "send_guide": say you'll get the guide to them AND invite them to sit down with you so you can go over it together and answer what applies to them, with {{TIMES}} as your one question (e.g. "...and I'd be glad to go over it with you in person - would {{TIMES}} work for a short visit?"). The system adds the guide or, by text, arranges it.
@@ -1008,6 +1009,41 @@ def day_named(body: str, today) -> Optional[object]:
     return None
 
 
+_COMING_IN = re.compile(r"\b(come|coming|stop|stopping|run|drop|swing|pop) (by|in|over|there|down)\b|"
+                        r"\b(visit|meet|see you)\b", re.I)
+_ARRIVING_TODAY = re.compile(r"\b(today|tonight|right now|on (my|our) way|headed (over|there|your way)|"
+                             r"in (about |around )?\d+ ?(min|minutes|mins)|this (morning|afternoon|evening))\b", re.I)
+_CHANGE_EXISTING = re.compile(r"\b(cancel|reschedul|move (my|our|the) appointment|change (my|our|the) appointment)", re.I)
+
+
+def future_visit_day(body: str, today) -> Optional[object]:
+    """The later day a family says they'll come in on ("I can come by
+    tomorrow if that is ok") - a yes to a visit that still needs a time.
+    None when they're arriving today, changing an appointment, or name no day."""
+    b = body or ""
+    if not _COMING_IN.search(b) or _ARRIVING_TODAY.search(b) or _CHANGE_EXISTING.search(b):
+        return None
+    day = day_named(b, today)
+    return day if day is not None and day > today else None
+
+
+def booking_link_line(db, lead) -> str:
+    """'Or pick another time here: <link>' for an SCI text - empty when this
+    sender may not carry links or the program has no booking calendar."""
+    if getattr(lead, "is_test", False):
+        return ""                                       # a test contact never mints a booking link
+    try:
+        from app.services import sms_programs as _sp
+        from app.services.programs import identity
+        if _sp.content_allowance(db, lead).get("allow_links", True) is False:
+            return ""
+        url = identity.program_booking_url(db, lead)
+    except Exception:                                   # noqa: BLE001 - never block the reply
+        log.exception("booking link for lead %s failed", getattr(lead, "id", None))
+        return ""
+    return ("Or pick another time here: %s" % url) if url else ""
+
+
 def decide(db, prog, lead, conv, resp, *, actor: Optional[str] = None, note: Optional[str] = None,
            follow_up: Optional[str] = None) -> Dict:
     """The AI's one next step. Raises on any AI failure (caller hands off).
@@ -1287,6 +1323,18 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         return dict(out, state=conv.state)
 
     preferred_day = None
+    if action in ("handoff", "answer") and conv.booked_time is None:
+        _dc = getattr(conv, "_decline", None) or {}
+        _later = None if _dc.get("family_asks_for_home_visit") else future_visit_day(body, A._today_central().date())
+        if _later is not None:
+            # "I can come by tomorrow" is a yes to a visit: offer real times
+            # that day, never "see you tomorrow" with no time (Henry, Oct 22).
+            preferred_day = _later
+            action = "offer_times"
+            out["action"] = action
+            _word = "tomorrow" if (_later - A._today_central().date()).days == 1 else _later.strftime("%A")
+            text = "Wonderful, I'd be glad to see you %s. Would {TIMES} work for you?" % _word
+            merge_memory(conv, {"best_times": _word, "readiness": "ready"})
     if action == "book":
         slot = None
         choices = A.offered(conv)
@@ -1448,6 +1496,11 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             conv.offered_at = now
             conv.state = "offered"
             out["offered"] = [s.isoformat() for s in slots]
+            if not (resp is not None and resp.channel == "email"):
+                _line = booking_link_line(db, lead)
+                if _line:
+                    text = "%s\n%s" % (text, _line)
+                    allowed_links.append(_line.split(": ", 1)[1])
 
     if action == "send_guide":
         from app.services import sms_programs
@@ -1695,6 +1748,10 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
             conv.offered_slots = json.dumps([x.isoformat() for x in slots])
             conv.offered_at = now
             conv.state = "offered"
+            _line = booking_link_line(db, lead)
+            if _line:
+                text = "%s\n%s" % (text, _line)
+                allowed.append(_line.split(": ", 1)[1])
         if action == "close":
             conv.state = "closed"
         if check_text(text, allowed_links=allowed, contact=prog.primary_contact_name):

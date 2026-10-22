@@ -35,7 +35,9 @@ def universal_checks(turn: Dict, contact: Optional[str] = None) -> List[str]:
         bad.append("claims a booking that did not happen")
     if ai_setter._CLAIM_MAILED.search(text):
         bad.append("claims something was mailed")
-    if re.search(r"https?://", text) and turn.get("action") != "send_guide":
+    # The one link an offer may carry is the family's own pick-a-time line.
+    _rest = re.sub(r"Or pick another time here: https?://\S+", "", text) if turn.get("action") == "offer_times" else text
+    if re.search(r"https?://", _rest) and turn.get("action") != "send_guide":
         bad.append("link outside send_guide")
     if _FILLED_TIME.search(text) and turn.get("action") not in ("offer_times", "book", "answer", "callback",
                                                                  "follow_up_later") and not turn.get("offered"):
