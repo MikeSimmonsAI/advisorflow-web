@@ -4,8 +4,9 @@
   "project": "EvoSys Pro AI Workforce \u2014 complete all 11 workers in safe test mode",
   "status": "COMPLETED",
   "branch": "feature/ai-workforce-launch",
-  "actions_run_id": "39796278374",
-  "timestamp_ct": "2026-10-22 09:42 CT",
+  "timestamp_ct": "2026-10-22T17:33:29.407381+00:00",
   "issue": 1,
-  "status_comment_id": 6343526674
+  "status_comment_id": 6343526674,
+  "watchdog_retry": true,
+  "watchdog_retry_utc": "2026-10-22T17:33:29.407395+00:00"
 }
