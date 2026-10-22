@@ -38,6 +38,7 @@ LINES = [
     row("0005", "STORE OWNER", "18", "OAK", "9 ELM", cls="F1"),
     row("0006", "PO BOX OWNER", "20", "OAK", "PO BOX 5"),
     row("0007", "FAR AWAY", "22", "OAK", "1 PINE RD", mail_city="DENVER", mail_state="CO"),
+    row("0008", "CURRENT OWNER", "24", "OAK", "510 BERING DR STE 680"),
 ]
 
 
@@ -68,6 +69,7 @@ def test_keeps_absentee_and_estate_houses(hcad):
     assert a["_source_url"].endswith("/CAMA/2026/Real_acct_owner.zip")
     assert got["22 OAK ST"]["owner"]["mailing_state"] == "CO"
     assert hcad[0][0] == "hcad_roll"
+    assert res["stats"]["no_owner"] == 1                      # "CURRENT OWNER" is not a name
 
 
 def test_changed_header_is_a_format_error():
