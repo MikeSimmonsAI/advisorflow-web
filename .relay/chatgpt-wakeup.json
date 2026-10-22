@@ -1,12 +1,11 @@
 {
-  "relay_run_id": "aiwf-launch-20261021-1230-r4",
-  "parent_run_id": "aiwf-launch-20261021-1141-r3",
-  "project": "EvoSys Pro AI Workforce + AI Operations + AI Deployment COMPLETE LAUNCH",
+  "relay_run_id": "aiwf-alljobs-20261022-0813-r1",
+  "parent_run_id": "",
+  "project": "EvoSys Pro AI Workforce \u2014 ALL ELEVEN AI WORKERS, fully usable in safe test mode",
   "status": "BLOCKED",
   "branch": "feature/ai-workforce-launch",
-  "timestamp_ct": "2026-10-21T23:21:09.849312+00:00",
+  "actions_run_id": "39785052240",
+  "timestamp_ct": "2026-10-22 08:16 CT",
   "issue": 1,
-  "status_comment_id": 6322401027,
-  "watchdog_retry": true,
-  "watchdog_retry_utc": "2026-10-21T23:21:09.849324+00:00"
+  "status_comment_id": 6341705436
 }
