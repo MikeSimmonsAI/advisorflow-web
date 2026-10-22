@@ -705,3 +705,79 @@ def test_follow_up_specialist_end_to_end_on_the_real_worker(db_session,
     # No real person was reachable: the lead is a practice record.
     lead = db_session.query(Lead).get(report["practice_lead"]["id"])
     assert lead.is_test is True
+
+
+# ── 7. REACTIVATION SPECIALIST, A DORMANT BUT FICTIONAL CONTACT ──────────────
+
+def _aged_practice_lead(monkeypatch, status="contacted"):
+    """Make the practice lead look like a long-dormant, once-interested one."""
+    real = practice.create_practice_lead
+
+    def aged(db, **kw):
+        lead = real(db, **{**kw, "status": status})
+        lead.created_at = datetime.utcnow() - timedelta(days=700)
+        db.flush()
+        return lead
+
+    monkeypatch.setattr(practice, "create_practice_lead", aged)
+
+
+def test_reactivation_specialist_end_to_end_on_the_real_worker(db_session,
+                                                              monkeypatch):
+    from app.services import tenant_scheduling
+    from app.services.workforce_intelligence import collect as t9_collect
+    from app.services.workforce_intelligence import scope as t9_scope
+
+    def no_calendar(*a, **k):
+        raise AssertionError("a practice reactivation reached a real calendar")
+
+    monkeypatch.setattr(tenant_scheduling, "_push_to_calendar", no_calendar)
+    _aged_practice_lead(monkeypatch)
+
+    acct = Account(db_session, template_key="reactivation_specialist")
+    dep = acct.hire_and_set_up()
+    assert acct.employee(dep).job_role == "reactivation_specialist"
+
+    report = test_mode.run_test(db_session, dep, actor=acct.admin,
+                                now=NOON_ISH)
+    db_session.commit()
+    assert report["verdict"] == "PASS", report["problems"]
+    assert report["ended_state"] in (WC.QUALIFIED, WC.APPOINTMENT_BOOKED,
+                                     WC.HUMAN_HANDOFF)
+    assert [p["claimed"] for p in report["worker_passes"]] == [1, 1]
+    assert report["pretend_reply_sent"] is True
+    assert "still interested" in report["pretend_reply"]
+
+    rows = (db_session.query(AIToolExecution)
+            .filter(AIToolExecution.work_item_id == report["work_item_id"])
+            .all())
+    assert rows and all(r.decision == "allowed" for r in rows)
+    sends = [r for r in rows if r.tool_key.startswith("conversation.send_")]
+    assert sends and all(r.simulated for r in sends)
+    assert not report["refused"]
+
+    item = db_session.query(AIWorkItem).get(report["work_item_id"])
+    assert item.state == report["ended_state"]
+    scope = t9_scope.for_system([acct.org.id])
+    counts = t9_collect.work_counts_by_state(db_session, scope)
+    assert report["ended_state"] in json.dumps(counts)
+
+    lead = db_session.query(Lead).get(report["practice_lead"]["id"])
+    assert lead.is_test is True
+
+
+def test_reactivation_age_is_never_permission_to_contact(db_session,
+                                                        monkeypatch):
+    """A dormant contact who opted out stays unreachable however old."""
+    _aged_practice_lead(monkeypatch, status="dnc")
+    acct = Account(db_session, template_key="reactivation_specialist")
+    dep = acct.hire_and_set_up()
+    report = test_mode.run_test(db_session, dep, actor=acct.admin,
+                                now=NOON_ISH)
+    db_session.commit()
+    assert report["verdict"] != "PASS"
+    rows = (db_session.query(AIToolExecution)
+            .filter(AIToolExecution.work_item_id == report["work_item_id"])
+            .all())
+    assert not [r for r in rows if r.tool_key.startswith("conversation.send_")
+                and r.decision == "allowed"]
