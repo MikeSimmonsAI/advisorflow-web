@@ -365,6 +365,7 @@ ROTATE_TARRANT_POOL = 9000     # delinquent residential accounts on the roll (ap
 ROTATE_DCAD_POOL = 7000        # POOR / VERY POOR / UNDESIRABLE residences (approx.)
 ROTATE_FW_OPEN_POOL = 1_000_000     # wrapped by the reader to the open-case count
 ROTATE_DALLAS_TRW_POOL = 1_000_000  # wrapped again by the reader to the real pool size
+ROTATE_HCAD_POOL = 150_000      # absentee / estate-owned Harris houses (approx.); the reader wraps
 
 
 def rotation_skip(window: int, pool: int, today: Optional[datetime] = None) -> int:
@@ -795,7 +796,7 @@ class TexasParcelRollSource(PublicRecordSource):
     refresh = "TxGIO 2026 collection (acquired 2026-09-25); each record carries its district's tax year"
     freshness_days = 180
     adapter_version = "txgio_parcel_roll/1"
-    OWN_DISCOVERY = ("Dallas", "Collin", "Denton")
+    OWN_DISCOVERY = ("Dallas", "Collin", "Denton", "Harris")
     COUNTIES_PER_HUNT = 2
     terms_note = "Public statewide parcel data published by the Texas Geographic Information Office."
 
@@ -844,6 +845,51 @@ class TexasParcelRollSource(PublicRecordSource):
         if not info.get("ranged") or not info.get("size"):
             raise SB_.SourceError(SB_.DOWNLOAD_FAILED, "TxGIO parcel files do not answer byte ranges")
         return {"king_county_bytes": info["size"]}
+
+
+class HarrisRollSource(PublicRecordSource):
+    """Find houses in Harris County from HCAD's own public data file
+    (sources/hcad.py): absentee- or estate-owned residences, same rule as the
+    statewide rolls. A different window of the file each day."""
+    scope, counties = "county", ("Harris",)
+    key = "hcad_roll"
+    label = "Harris County appraisal roll - find houses (HCAD public data)"
+    capabilities = (C.PROPERTY_SEARCH,)
+    discovery = True
+    coverage = ("Harris County, TX - HCAD's current appraisal roll: absentee- or estate-owned houses with "
+                "owner of record, mailing address, tax value and year built.")
+    jurisdiction = "Harris County, TX"
+    source_type = "Appraisal district public data file"
+    access_method = "HCAD Real_acct_owner.zip from download.hcad.org; only real_acct.txt is read"
+    public_url = "https://hcad.org/pdata/pdata-property-downloads.html"
+    refresh = "Published by HCAD (preliminary, then certified values) for the current tax year"
+    freshness_days = 120
+    adapter_version = "hcad_real_acct/1"
+    terms_note = "HCAD publishes these files on its website for public download."
+
+    def search(self, capability, query):
+        from app.services.evosense.sources.hcad import HcadRollReader
+        out = Records()
+        if capability != C.PROPERTY_SEARCH or not _wants(query, "harris"):
+            out.stats = {"skipped": "strategy does not include Harris County"}
+            return out
+        limit = int(query.get("limit") or 25)
+        skip = (int(query["rotate"]) * limit) if query.get("rotate") is not None else \
+            rotation_skip(limit, ROTATE_HCAD_POOL)
+        res = HcadRollReader().discover(limit=limit, rotate=skip,
+                                        cities=query.get("cities"), zips=query.get("zips"))
+        out.extend(res["records"])
+        out.stats, out.source_url = res["stats"], res["source_url"]
+        return out
+
+    def verify(self):
+        from app.services.evosense.sources import base as SB_
+        from app.services.evosense.sources.hcad import HcadRollReader
+        url = HcadRollReader().url()
+        info = SB_._probe(url)
+        if not info.get("size"):
+            raise SB_.SourceError(SB_.DOWNLOAD_FAILED, "HCAD file did not report a size")
+        return {"url": url, "bytes": info["size"], "byte_ranges": bool(info.get("ranged"))}
 
 
 class FortWorthOpenCasesSource(PublicRecordSource):
@@ -1104,7 +1150,7 @@ PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
     SandboxPropertyRecords(), SandboxVacancy(), SandboxTaxRoll(), SandboxPublicRecords(),
     SandboxSkipTrace(), SandboxSkipTraceBackup(), SandboxPhoneValidation(),
     ManualSource(), CsvImportSource(),
-    TarrantTaxRollSource(), DallasTrwSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), TexasParcelOwnerSource(), TexasParcelRollSource(), CensusGeocoderSource(),
+    TarrantTaxRollSource(), DallasTrwSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), TexasParcelOwnerSource(), TexasParcelRollSource(), HarrisRollSource(), CensusGeocoderSource(),
     FortWorthCodeSource(), FortWorthOpenCasesSource(), Dallas311Source(), LgbsTaxSaleSource(),
     DallasForeclosureManual(), DallasTaxManual(),
     RentCastInterface(), RegridInterface(), AttomInterface(), TracerfyContactSource(),
