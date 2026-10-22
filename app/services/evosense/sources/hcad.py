@@ -42,15 +42,22 @@ def _j(*parts) -> str:
     return re.sub(r"\s+", " ", " ".join((p or "").strip() for p in parts)).strip()
 
 
+PLACEHOLDER_OWNERS = {"CURRENT OWNER", "UNKNOWN OWNER", "OWNER UNKNOWN", "UNKNOWN"}
+
+
 def as_roll_row(r: Dict[str, str]) -> Dict[str, str]:
-    """One real_acct.txt row in the statewide reader's field names."""
+    """One real_acct.txt row in the statewide reader's field names. HCAD
+    writes "CURRENT OWNER" where it has no name to mail to; that is no owner."""
+    owner = (r.get("mailto") or "").strip()
+    if owner.upper() in PLACEHOLDER_OWNERS:
+        owner = ""
     num = _j(r.get("str_num"), r.get("str_num_sfx"))
     street = _j(r.get("str_pfx"), r.get("str"), r.get("str_sfx"), r.get("str_sfx_dir"))
     if num in ("0", ""):
         num = ""
     return {
         "PROP_ID": (r.get("acct") or "").strip(),
-        "OWNER_NAME": (r.get("mailto") or "").strip(),
+        "OWNER_NAME": owner,
         "STAT_LAND_": (r.get("state_class") or "").strip(),
         "LOC_LAND_U": "",
         "SITUS_NUM": num,
