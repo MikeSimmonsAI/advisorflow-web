@@ -76,7 +76,8 @@ def run_strategy(db, org_id: str, strategy: EvoSenseStrategy, *, trigger: str = 
         return run
     try:
         run = _run_locked(db, org_id, strategy, trigger=trigger, user=user,
-                          max_properties=max_properties, enrich=enrich)
+                          max_properties=max_properties, enrich=enrich,
+                          renew=lambda: SCH.renew(db, strategy, token))
         # The next due time is written BEFORE the lock is released, so no
         # other worker can see "unlocked and still due" in between.
         if run.status != "skipped":
@@ -87,7 +88,7 @@ def run_strategy(db, org_id: str, strategy: EvoSenseStrategy, *, trigger: str = 
 
 
 def _run_locked(db, org_id: str, strategy: EvoSenseStrategy, *, trigger: str, user,
-                max_properties: int, enrich: bool) -> EvoSenseRun:
+                max_properties: int, enrich: bool, renew=None) -> EvoSenseRun:
     ctl = C.controls(db, org_id)
     run = EvoSenseRun(organization_id=org_id, strategy_id=strategy.id, trigger=trigger)
     db.add(run)
@@ -125,7 +126,7 @@ def _run_locked(db, org_id: str, strategy: EvoSenseStrategy, *, trigger: str, us
         return finish("skipped", "Strategy is %s" % strategy.status)
     try:
         return _hunt_body(db, org_id, strategy, run, ctl, counts, finish, user=user,
-                          max_properties=max_properties, enrich=enrich)
+                          max_properties=max_properties, enrich=enrich, renew=renew)
     except Exception as exc:  # noqa: BLE001 - recorded, surfaced, retried; never silent
         db.rollback()
         run = db.query(EvoSenseRun).filter(EvoSenseRun.id == run_id).first()
@@ -193,7 +194,12 @@ def _source_failed(db, org_id, strategy, provider, cfg, exc, counts, user):
                 summary="%s failed — %s: %s" % (provider.label, code, msg[:160]))
 
 
-def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_properties, enrich):
+class LeaseLost(RuntimeError):
+    """The hunt lock expired and another worker may hold it: stop, don't double-run."""
+
+
+def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_properties, enrich,
+               renew=None):
     q = _query(strategy)
     pilot = ST.is_pilot(strategy)
     if pilot:
@@ -211,6 +217,8 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
     for cap, provider, cfg in routes:
         if len(touched) >= max_properties:
             break
+        if renew is not None and not renew():
+            raise LeaseLost("hunt lock lease was lost; stopped before %s" % provider.key)
         cfg.last_attempt_at = C.now()
         pq = dict(q, limit=min(share, max_properties - len(touched)))
         # NO DATABASE TRANSACTION IS HELD OPEN ACROSS A NETWORK CALL. A county

@@ -37,7 +37,11 @@ log = logging.getLogger(__name__)
 
 CADENCES = ("manual", "daily", "interval")
 DEFAULT_CADENCE = "daily"
-LOCK_FOR = timedelta(hours=2)          # longer than any bounded hunt; expires if a worker dies
+# The lock is a short LEASE the running hunt renews before every source (`renew`).
+# A worker that dies (a backend restart/deploy kills the hunt thread) frees its
+# strategy within LOCK_FOR instead of freezing discovery for 2 hours. Must exceed
+# the slowest single source call (a county download), since renewal is per source.
+LOCK_FOR = timedelta(minutes=20)
 RETRY_AFTER_FAILURE = timedelta(hours=1)
 TICK_SECONDS = 900                     # the platform loop wakes every 15 minutes
 
@@ -116,6 +120,16 @@ def claim(db, strategy, *, due_only: bool = False) -> Optional[str]:
         {"tok": token, "until": now + LOCK_FOR, "id": sched.id, "now": now})
     db.commit()
     return token if res.rowcount == 1 else None
+
+
+def renew(db, strategy, token: str) -> bool:
+    """Extend a held lease. False = the lease was lost (expired and re-claimed by
+    another worker); the caller must stop hunting rather than double-run."""
+    res = db.execute(text("UPDATE evosense_hunt_schedules SET locked_until = :until "
+                          "WHERE strategy_id = :sid AND lock_token = :tok"),
+                     {"until": C.now() + LOCK_FOR, "sid": strategy.id, "tok": token})
+    db.commit()
+    return res.rowcount == 1
 
 
 def release(db, strategy, token: str) -> None:
