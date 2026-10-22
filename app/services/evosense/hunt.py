@@ -358,15 +358,20 @@ NO_MATCH_RECHECK_HOURS = 2
 
 
 def lookup_backlog(db, org_id: str, exclude=(), limit: int = BACKLOG_LIMIT) -> List[EvoSenseProperty]:
-    """Recent properties in a county with a free address lookup that still have
-    no account number - newest first. The lookups' own freshness rule keeps a
-    property that was just looked up from being looked up again."""
+    """Recent Texas properties that still have no account number OR no
+    current owner of record - newest first. Each lookup source decides which
+    of them it covers (applies), and its own freshness rule keeps a property
+    that was just looked up from being looked up again."""
+    from sqlalchemy import and_, exists, or_
+    from app.models.evosense_models import EvoSenseOwnership
+    has_owner = exists().where(and_(EvoSenseOwnership.property_id == EvoSenseProperty.id,
+                                    EvoSenseOwnership.is_current.is_(True)))
     q = (db.query(EvoSenseProperty)
          .filter(EvoSenseProperty.organization_id == org_id,
-                 EvoSenseProperty.parcel_apn.is_(None),
+                 or_(EvoSenseProperty.parcel_apn.is_(None), ~has_owner),
                  EvoSenseProperty.street_address.isnot(None),
                  EvoSenseProperty.archived_at.is_(None),
-                 EvoSenseProperty.county.in_(("Dallas", "Tarrant")))
+                 or_(EvoSenseProperty.state.is_(None), EvoSenseProperty.state == "TX"))
          .order_by(EvoSenseProperty.discovered_at.desc()))
     return [p for p in q.limit(limit + len(exclude or ())).all() if p.id not in (exclude or ())][:limit]
 
