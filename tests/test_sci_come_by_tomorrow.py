@@ -197,3 +197,22 @@ def test_stuck_family_pages_the_team_once_a_day(setter, sample_advisor, monkeypa
     assert SV.alert_all(db) == 0                                    # once per family per day
     rows = db.query(ProgramAlert).filter(ProgramAlert.dedupe_key.like("stuck_visit:%")).all()
     assert rows and all("wants to come in" in (r.message or "") for r in rows)
+
+
+# ── soft no (James, Oct 22: "Close it for now") ─────────────────────────────
+
+@pytest.mark.parametrize("body,soft", [("Close it for now\n\nSent from my iPhone", True),
+                                       ("Not right now, maybe later", True), ("Please hold off for now", True),
+                                       ("Not now, but I can come in next week", False), ("yes", False),
+                                       ("I can come by tomorrow", False), ("what is this", False)])
+def test_soft_no_is_recognised(body, soft):
+    assert S.is_soft_no(body) is soft
+
+
+def test_soft_no_sends_nothing_and_hands_to_a_person(setter, sample_advisor, monkeypatch):
+    db, lead, _ = _setup(setter, sample_advisor, monkeypatch)
+    fake = _Fake([_d("close", "Thank you for letting me know. Take care.")])
+    _, conv = _run(db, lead, "Close it for now\n\nSent from my iPhone", fake)
+    assert conv.state == "human" and "Call them once and offer a short visit" in conv.handoff_reason
+    assert not fake.calls                                       # the AI was never asked - nothing drafted
+    assert not [t for t in _ai_turns(db, conv) if t.text]

@@ -1026,6 +1026,22 @@ _EMPTY_PROMISE = re.compile(r"(see you (then|tomorrow|soon|on|monday|tuesday|wed
                             r"when you come (by|in))", re.I)
 
 
+# "Close it for now", "not right now", "maybe later", "hold off" - a soft no.
+# A real STOP / unsubscribe is handled before this by the opt-out path.
+_SOFT_NO = re.compile(r"\b(close (it|this|my request|the request)( out)?( for now)?|not (right )?now|"
+                      r"not at this (time|point)|maybe (later|another time|down the road)|hold off|"
+                      r"put (it|this|me) on hold|not ready (yet|right now)|not interested (right now|at this time|for now)|"
+                      r"(take|put) (me|it) off (for now|the list for now)|some other time|another time)\b", re.I)
+SOFT_NO_REASON = ("Soft no - they said \"%s\". Nothing was sent. Call them once and offer a short visit; "
+                  "if it's still no, set a check-back date.")
+
+
+def is_soft_no(body: str) -> bool:
+    b = (body or "").strip()
+    # "Not now, but I can come in next week" is a yes with a timing - not a soft no.
+    return bool(b) and len(b) <= 200 and bool(_SOFT_NO.search(b)) and not _WANTS_IN.search(b)
+
+
 def wants_visit(body: str) -> bool:
     """The family says yes to coming in (not arriving now, not changing or
     cancelling, not a no)."""
@@ -1264,6 +1280,17 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         _handoff(db, prog, lead, conv, limit, notify=True)
         db.commit()
         return dict(out, action="handoff", state=conv.state)
+    if is_soft_no(body):
+        # SOFT NO (James, Oct 22: "Close it for now"). Not a STOP, not a
+        # goodbye: the AI sends nothing, and a person gets ONE clear job -
+        # call once and offer a short visit. Outreach to them pauses because
+        # they replied; a person decides whether to set a check-back.
+        merge_memory(conv, {"next_step": "soft no - call once to offer a short visit",
+                            "readiness": "not_ready"})
+        _handoff(db, prog, lead, conv, SOFT_NO_REASON % (body or "").strip()[:80], notify=True)
+        _turn(db, conv, "system", None, action="handoff", reason="soft no - nothing sent; a person calls once")
+        db.commit()
+        return dict(out, action="handoff", state=conv.state, soft_no=True)
     if conv.state in ("waiting_future", "closed", "info_requested", "offered", "waiting"):
         # The family wrote again: any scheduled follow-up is superseded.
         conv.next_followup_at = None

@@ -375,4 +375,11 @@ for _i, (_name, _said) in enumerate([
 ], start=9):
     sc("r%03d" % _i, "regression", _name,
        (_said, "offer_times", {"must": [_TIMES], "must_not": [_EMPTY], **NO_BOOK}))
+# James (Oct 22): "Close it for now" after an email. A soft no: nothing goes
+# out automatically (no goodbye, no pitch); a person calls once.
+for _i, (_name, _said) in enumerate([("James", "Close it for now\n\nSent from my iPhone"),
+                                     ("Velma", "Not right now, maybe later"),
+                                     ("Otis", "Please hold off for now")], start=21):
+    sc("r%03d" % _i, "regression", _name,
+       (_said, "handoff", {"must_not": [r"\b(am|pm)\b", r"(take care|feel free to reach out)"], **NO_BOOK}))
 REGRESSIONS = S
