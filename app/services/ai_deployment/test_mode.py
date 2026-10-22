@@ -922,10 +922,45 @@ JOB_CARDS = (
     ("follow_up_specialist", "Follow-Up Specialist",
      "Follows up when people have not responded.",
      "Your leads, how often to follow up, and a person to pass replies to."),
+    ("reactivation_specialist", "Reactivation Specialist",
+     "Reaches out to old contacts to see if they are interested again.",
+     "An old contact list you have the right to contact, and a person to "
+     "pass interested people to."),
+    ("sales_assistant", "Sales Assistant",
+     "Helps an active sale along and brings a person in at the right time.",
+     "Approved answers about what you sell and a salesperson to hand over "
+     "to."),
+    ("scheduling_coordinator", "Scheduling Coordinator",
+     "Confirms, reminds about and reschedules appointments.",
+     "Your calendar and your appointment types."),
     ("customer_care_agent", "Customer Care",
      "Helps answer routine customer questions.",
      "Answers to your common questions and a person for anything else."),
+    ("receptionist", "Receptionist",
+     "Greets new contacts, finds out what they need and sends them to the "
+     "right place, by text and email.",
+     "Your common questions, your calendar and a person to pass people to."),
+    ("support_specialist", "Support Specialist",
+     "Works support requests by email and passes hard ones to a person.",
+     "Your support email and a person to escalate to."),
+    ("prospecting_specialist", "Prospecting Specialist",
+     "Works prospects you imported, only where the import gave permission.",
+     "A list of prospects you imported with permission to contact them."),
+    ("manager_supervisor", "AI Manager",
+     "Watches your AI team and tells you what needs attention. It never "
+     "contacts anyone.",
+     "A person who should receive its reports."),
 )
+
+# Plain-English prerequisite shown on a card, where one is known.
+JOB_PREREQUISITES = {
+    "receptionist": "Phone answering is switched off for the whole platform, "
+                    "so this worker would only use text and email.",
+    "prospecting_specialist": "Needs prospects that arrived through the "
+                              "normal import, with contact permission.",
+    "support_specialist": "Needs the support email connection to be "
+                          "tested first.",
+}
 
 # A finished-work count below this gives a rate that would mislead (one
 # qualified out of one is "100%"). Below it the screen says N/A and why.
@@ -943,9 +978,10 @@ def job_cards(db: Session, organization_id: str) -> List[Dict[str, Any]]:
         held = [d for d in row.get("deployments", [])]
         if key not in VERIFIED_JOBS:
             availability, label, why = (
-                "coming_soon", "Coming soon",
-                "This AI worker is still being tested. It is not ready for "
-                "your account yet.")
+                "coming_soon", "Not yet proven",
+                "You can see this AI worker, but it has not passed its own "
+                "end-to-end test yet, so it cannot be set up. "
+                + JOB_PREREQUISITES.get(key, ""))
         elif held:
             availability, label, why = (
                 "set_up", "Already set up",
@@ -963,7 +999,9 @@ def job_cards(db: Session, organization_id: str) -> List[Dict[str, Any]]:
                 "This AI worker is not offered on your account.")
         cards.append({"key": key, "title": title, "does": does,
                       "needs": needs, "availability": availability,
-                      "availability_label": label, "why": why,
+                      "availability_label": label, "why": why.strip(),
+                      "proven": key in VERIFIED_JOBS,
+                      "prerequisite": JOB_PREREQUISITES.get(key),
                       "can_set_up": availability == "available",
                       "deployment_ids": [d["id"] for d in held]})
     return cards

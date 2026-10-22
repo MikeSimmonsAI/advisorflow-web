@@ -624,6 +624,22 @@ def test_both_verified_jobs_are_offered_and_the_rest_are_not(db_session):
     assert cards["customer_care_agent"]["availability"] == "coming_soon"
 
 
+def test_every_registered_job_has_a_card_with_an_honest_label(db_session):
+    acct = Account(db_session)
+    cards = test_mode.job_cards(db_session, acct.org.id)
+    assert sorted(c["key"] for c in cards) == sorted(
+        wf_registry.ALL_TEMPLATE_KEYS)
+    assert len(cards) == 11
+    for c in cards:
+        assert c["title"] and c["does"] and c["availability_label"]
+        if not c["proven"]:
+            assert c["availability"] == "coming_soon"
+            assert not c["can_set_up"]
+            assert c["availability_label"] == "Not yet proven"
+        else:
+            assert c["key"] in test_mode.VERIFIED_JOBS
+
+
 def test_reports_never_show_an_internal_action_name(db_session):
     for key in ("lead_qualifier", "appointment_setter"):
         acct = Account(db_session, template_key=key)
