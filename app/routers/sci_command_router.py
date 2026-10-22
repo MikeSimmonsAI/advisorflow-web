@@ -253,8 +253,11 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                       "setter_state": conv.state if conv else None, "actions": _actions(r, conv),
                       "home_visit": _home_visit_waiting(conv),
                       "advisor": advisors.get(getattr(lead, "assigned_to_id", None))})
-    items.sort(key=lambda i: (not i["sla_breached"], not i["home_visit"], _RANK.get(i["class"], 5),
-                              -(datetime.fromisoformat(i["received_at"][:-1]).timestamp() if i["received_at"] else 0)))
+    # NEWEST FIRST, always (Oct 22, Mike): what came in today is at the top - an
+    # older hot or overdue reply never pushes today's messages down the list.
+    # Hot / overdue / home-visit still show as badges and in their own filters.
+    items.sort(key=lambda i: -(datetime.fromisoformat(i["received_at"][:-1]).timestamp()
+                               if i["received_at"] else 0))
     needs = sum(1 for i in items if i["class"] in ("hot", "active", "bad_data", "wrong_person")
                 and i["handling_status"] in _NEEDS_REPLY and not i["is_test"] and not i["ai_answered"])
     filter_counts = {"all": len(items),
