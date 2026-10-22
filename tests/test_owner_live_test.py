@@ -38,7 +38,7 @@ def test_live_test_endpoint_owner_only_and_never_pages_team(setter, client):
     admin.role = "god_admin"
     db.commit()
     h = dict(h, **{"X-Org-Override": setter["org"].id})
-    fake = _Fake([_d("answer", "Thanks for writing. Would a short call or a visit be easier?")])
+    fake = _Fake([_d("offer_times", "Thanks for writing. Would {TIMES} work for a short visit?")])
     from app.services.programs import ai_setter
     with patch.object(ai_setter, "_get_client", return_value=fake), \
          patch("app.services.programs.responses._deliver_staff_alert") as staff, \
@@ -63,7 +63,7 @@ def test_owner_test_books_for_real_and_runs_auto_with_program_off(setter, monkey
     assert TR.is_owner_test_lead(me)
     assert TR.owner_live_test_send_allowed(db, me, ss.APPOINTMENT_FOLLOWUP)
     # program OFF, owner test still answered in AUTO
-    fake = _Fake([_d("answer", "Thanks for writing. Would a short call or a visit be easier?")])
+    fake = _Fake([_d("offer_times", "Thanks for writing. Would {TIMES} work for a short visit?")])
     from unittest.mock import patch as _p
     with _p.object(ai_setter, "_get_client", return_value=fake), \
          _p("app.services.contact_hours.check", return_value={"permitted": True}), \
