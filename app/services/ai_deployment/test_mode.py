@@ -936,6 +936,14 @@ def job_cards(db: Session, organization_id: str) -> List[Dict[str, Any]]:
     from app.services.ai_deployment import catalog as t8_catalog
     by_key = {r["template_key"]: r
               for r in t8_catalog.customer_catalog(db, organization_id)}
+    from app.services.workforce import activation as wf_activation
+    from app.services.workforce import constants as WC
+    org = (db.query(Organization)
+           .filter(Organization.id == organization_id).first())
+    r = wf_activation.resolve(db, organization_id=organization_id,
+                              platform_id=getattr(org, "platform_id", None))
+    allowed_here = (not r.killed) and (WC.ACTIVATION_RANK.get(r.state, 0)
+                                       >= WC.ACTIVATION_RANK[WC.SIMULATION])
     cards = []
     for key, title, does, needs in JOB_CARDS:
         row = by_key.get(key) or {}
@@ -950,6 +958,13 @@ def job_cards(db: Session, organization_id: str) -> List[Dict[str, Any]]:
             availability, label, why = (
                 "set_up", "Already set up",
                 "You already have this AI worker. Open it below.")
+        elif row.get("can_hire") and not allowed_here:
+            availability, label, why = (
+                "not_turned_on", "Not turned on yet",
+                ("All AI work is stopped for safety right now."
+                 if r.killed else
+                 "AI workers are not turned on for your account yet. Ask "
+                 "your administrator."))
         elif row.get("can_hire"):
             availability, label, why = ("available", "Available",
                                         "Ready to set up.")

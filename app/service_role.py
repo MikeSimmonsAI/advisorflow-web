@@ -118,6 +118,9 @@ SCHEDULER_OWNER: Dict[str, str] = {
     JobName.PROGRAM_SLA: ROLE_BACKEND,
     # Phone alerts. Once, so an alert buzzes a phone once.
     JobName.WEB_PUSH: ROLE_BACKEND,
+    # AI Workforce queue worker. Once, so a work item is claimed by one
+    # process (the claim is also a row-level lease, as a second lock).
+    JobName.AI_WORKFORCE_WORKER: ROLE_BACKEND,
 }
 
 # A guard rather than a comment: a loop added to JobName without an owner here
