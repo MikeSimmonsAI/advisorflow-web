@@ -187,6 +187,14 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
     es_ids["es_observation_id"] = db_session.query(EvoSenseObservation).filter(
         EvoSenseObservation.organization_id == sample_org.id,
         EvoSenseObservation.property_id == es_prop.id).first().id
+    # An imported list (cohort) of A's, so the cohort routes are attacked
+    # against a list that exists rather than a 404 they would return anyway.
+    db_session.add(EvoSenseObservation(
+        organization_id=sample_org.id, property_id=es_prop.id, provider_key="csv_import",
+        connector_kind="import", capability="distress_list",
+        source_reference="csv:victimlist:row1", is_test=True))
+    db_session.commit()
+    es_ids["es_cohort_kind"] = "victimlist"
     # Phase 7.1: a real open routing review of A's (an inbound SMS that could
     # belong to two of A's conversations), so its resolve route is attacked
     # against a row that exists.
@@ -560,6 +568,11 @@ def evosense_attacks(ids):
         ("post", "%s/properties/%s/signals" % (base, ep), {"signal_type": "VACANT"}),
         ("post", "%s/properties/%s/comps" % (base, ep), {"street_address": "1 X", "sale_price": 1, "sale_date": "2026-01-01", "source_reference": "x"}),
         ("post", "%s/properties/%s/rescore" % (base, ep), None),
+        # Imported-list cohorts and the audited identity correction.
+        ("get", "%s/cohorts/%s" % (base, ids["es_cohort_kind"]), None),
+        ("post", "%s/cohorts/%s/recheck" % (base, ids["es_cohort_kind"]), None),
+        ("post", "%s/properties/%s/identity" % (base, ep),
+         {"city": "Stolen", "evidence_url": "https://example.com/record"}),
         ("post", "%s/properties/%s/retry-reading" % (base, ep), None),
         ("post", "%s/routing-reviews/%s" % (base, ids["es_routing_review_id"]),
          {"engagement_id": None}),
@@ -715,3 +728,30 @@ def test_every_id_bearing_wholesale_route_is_in_the_attack_list(theirs):
     assert not missing, (
         "These wholesale endpoints name a record but are not attacked in this "
         "file:\n" + "\n".join(sorted(set(missing))))
+
+
+def test_cohort_and_identity_routes_work_for_the_owner_and_stay_scoped(
+        client, theirs, auth_headers, other_headers, db_session, sample_org):
+    """The authorized half of the probes above: the owner is served, and the
+    attacker sees none of A's list, even under the same list name."""
+    base = "/wholesale/evosense"
+    kind = theirs["es_cohort_kind"]
+    mine = client.get("%s/cohorts/%s" % (base, kind), headers=auth_headers)
+    assert mine.status_code == 200, mine.text[:300]
+    assert len(mine.json()["rows"]) == 1
+    listed = ok(client.get("%s/cohorts" % base, headers=auth_headers))["cohorts"]
+    assert {"kind": kind, "properties": 1} in listed
+
+    theirs_view = ok(client.get("%s/cohorts" % base, headers=other_headers))["cohorts"]
+    assert theirs_view == []
+    assert client.get("%s/cohorts/%s" % (base, kind), headers=other_headers).status_code == 404
+    assert client.post("%s/cohorts/%s/recheck" % (base, kind),
+                       headers=other_headers).status_code == 404
+
+    body = {"city": "Stolen", "evidence_url": "https://example.com/record"}
+    url = "%s/properties/%s/identity" % (base, theirs["es_property_id"])
+    assert client.post(url, headers=other_headers, json=body).status_code in (403, 404)
+    from app.models.evosense_models import EvoSenseProperty
+    db_session.expire_all()
+    prop = db_session.query(EvoSenseProperty).get(theirs["es_property_id"])
+    assert prop.city != "Stolen"
