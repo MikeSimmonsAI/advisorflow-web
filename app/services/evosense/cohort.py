@@ -249,7 +249,10 @@ def owner_status(db, prop) -> Dict[str, Any]:
     official = [s for s in srcs if s in OFFICIAL_OWNER_SOURCES]
     status = "CONFLICT" if len(owners) > 1 or any(l.in_conflict for l in links) else \
         "VERIFIED" if official else "UNVERIFIED"
+    from app.services.evosense.ingest import REVIEW_FLAG_LABELS, owner_flags
+    flags = owner_flags(o.display_name or "")
     return {"status": status, "name": o.display_name, "owner_id": o.id, "sources": srcs,
+            "flags": [{"key": f, "label": REVIEW_FLAG_LABELS.get(f, f)} for f in flags],
             "mailing": ", ".join(x for x in (o.mailing_street, o.mailing_city, o.mailing_state, o.mailing_zip) if x),
             "other_names": [x.display_name for x in owners[1:]]}
 
@@ -288,6 +291,9 @@ def _next_action(prio, owner, tax, contact) -> str:
         return "Resolve which owner is current"
     if owner["status"] != "VERIFIED":
         return "Confirm the owner on the county record"
+    keys = {f["key"] for f in owner.get("flags") or []}
+    if "ESTATE_INDICATED" in keys or "LIFE_ESTATE" in keys:
+        return "Confirm probate / heirs (who can sell) on the county and court record before any contact"
     if prio == "PARK":
         return "Park - no current distress on record; recheck monthly"
     if not (contact["phones"] or contact["emails"]):

@@ -1092,6 +1092,29 @@ def correct_identity(property_id: str, payload: IdentityIn, db: Session = Depend
         raise HTTPException(status_code=422, detail=str(exc))
 
 
+class MergeIn(BaseModel):
+    duplicate_id: str
+    reason: str
+
+
+@router.post("/properties/{property_id}/merge")
+def merge_duplicate(property_id: str, payload: MergeIn, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """Fold a duplicate property for the SAME house into this one (admin).
+    Refused for different houses or a duplicate somebody has worked."""
+    from app.services.evosense import identity_fix as IF
+    org_id = svc.write_org_id(db, user)
+    _admin(user, db)
+    keep = _prop(db, org_id, property_id)
+    drop = _prop(db, org_id, payload.duplicate_id)
+    if len((payload.reason or "").strip()) < 5:
+        raise HTTPException(status_code=422, detail="Say why these are the same house.")
+    try:
+        return IF.merge_duplicate(db, org_id, keep, drop, user=user, reason=payload.reason)
+    except IF.MergeRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
 @router.patch("/properties/{property_id}/facts")
 def edit_property_facts(property_id: str, payload: FactsIn, db: Session = Depends(get_db),
                         user: User = Depends(require_tenant_user),

@@ -88,3 +88,71 @@ def test_api_is_admin_only(client, admin_auth_headers, auth_headers, props):
     r = client.post("/wholesale/evosense/properties/%s/identity" % pid, headers=admin_auth_headers, json=body)
     assert r.status_code == 200, r.text[:300]
     assert r.json()["changed"]["zip_code"]["now"] == "75052"
+
+
+# ── a lookup's answer never creates a second property for the house ────────
+
+COLLIN = ("record_id,street_address,city,state,zip_code,county\n"
+          "top100-2010:c,1301 STARPOINT,Wylie,TX,75098,Collin\n")
+
+
+def _collin_rec(street="1301 STARPOINT LN", zip_code="75098", geo="R-4128-002-0040-1"):
+    return {"source_reference": "CCAD:%s:2026" % geo, "street_address": street, "city": "Wylie", "state": "TX",
+            "zip_code": zip_code, "county": "Collin", "parcel_apn": geo,
+            "owner": {"name": "SAMPLE COLLIN OWNER", "mailing_street": "1301 STARPOINT LN",
+                      "mailing_city": "Wylie", "mailing_state": "TX", "mailing_zip": "75098"},
+            "signals": [], "_source_url": "https://data.texas.gov/resource/nne4-8riu.json"}
+
+
+@pytest.fixture()
+def starpoint(db_session, sample_org, sample_advisor):
+    HU.import_csv(db_session, sample_org.id, COLLIN, user=sample_advisor)
+    db_session.commit()
+    return db_session.query(EvoSenseProperty).filter(EvoSenseProperty.organization_id == sample_org.id).one()
+
+
+def test_a_lookup_answer_with_a_suffix_and_another_account_format_attaches_to_its_house(db_session, sample_org,
+                                                                                       starpoint):
+    from app.services.evosense import ingest as IN
+    out, prop = IN.ingest(db_session, sample_org.id, PV.PROVIDERS["collin_cad"], "ASSESSOR", _collin_rec(),
+                          target=starpoint)
+    db_session.commit()
+    assert out == "merged" and prop.id == starpoint.id
+    assert db_session.query(EvoSenseProperty).filter(EvoSenseProperty.organization_id == sample_org.id).count() == 1
+    assert db_session.query(EvoSenseOwnership).filter_by(property_id=starpoint.id, is_current=True).count() == 1
+
+
+def test_a_lookup_answer_for_another_house_waits_in_review_never_new(db_session, sample_org, starpoint):
+    from app.services.evosense import ingest as IN
+    out, prop = IN.ingest(db_session, sample_org.id, PV.PROVIDERS["collin_cad"], "ASSESSOR",
+                          _collin_rec(street="1303 STARPOINT LN", geo="R-9"), target=starpoint)
+    db_session.commit()
+    assert out == "review" and prop is None
+    assert db_session.query(EvoSenseProperty).filter(EvoSenseProperty.organization_id == sample_org.id).count() == 1
+
+
+def test_a_duplicate_for_the_same_house_folds_in_and_its_owner_moves(db_session, sample_org, sample_advisor,
+                                                                     starpoint):
+    from app.services.evosense import ingest as IN
+    out, dup = IN.ingest(db_session, sample_org.id, PV.PROVIDERS["collin_cad"], "ASSESSOR", _collin_rec())
+    db_session.commit()
+    assert out == "created" and dup.id != starpoint.id                       # the production failure, reproduced
+    res = IF.merge_duplicate(db_session, sample_org.id, starpoint, dup, user=sample_advisor,
+                             reason="Same house: Collin CAD R-4128-002-0040-1")
+    assert res["observations_moved"] == 1
+    assert db_session.query(EvoSenseProperty).filter(EvoSenseProperty.organization_id == sample_org.id).count() == 1
+    link = db_session.query(EvoSenseOwnership).filter_by(property_id=starpoint.id, is_current=True).one()
+    assert link.source == "collin_cad"
+    db_session.refresh(starpoint)
+    assert starpoint.parcel_apn == "R-4128-002-0040-1"                      # the county's own account format
+    ev = db_session.query(EvoSenseEvent).filter_by(property_id=starpoint.id, action="identity.merged").one()
+    assert dup.id in ev.details
+
+
+def test_merge_refuses_a_different_house(db_session, sample_org, sample_advisor, starpoint):
+    from app.services.evosense import ingest as IN
+    _, other = IN.ingest(db_session, sample_org.id, PV.PROVIDERS["collin_cad"], "ASSESSOR",
+                         _collin_rec(street="99 ELSEWHERE LN", geo="R-77"))
+    db_session.commit()
+    with pytest.raises(IF.MergeRefused):
+        IF.merge_duplicate(db_session, sample_org.id, starpoint, other, user=sample_advisor, reason="not the same")

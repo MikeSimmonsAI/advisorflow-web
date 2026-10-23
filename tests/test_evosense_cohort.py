@@ -86,3 +86,12 @@ def test_api_view_and_recheck(client, top, auth_headers, monkeypatch):
     assert client.get("/wholesale/evosense/cohorts/nope", headers=auth_headers).status_code == 404
     r = client.post("/wholesale/evosense/cohorts/top100-2010/recheck", headers=auth_headers)
     assert r.status_code == 200 and started == ["top100-2010"]
+
+
+def test_an_estate_named_owner_is_flagged_for_probate_confirmation_not_scored():
+    owner = {"status": "VERIFIED", "name": "WARD ISEBELL EST OF",
+             "flags": [{"key": "ESTATE_INDICATED", "label": "x"}]}
+    act = CO._next_action("C", owner, {"status": "NOT CHECKED"}, {"phones": 0, "emails": 0})
+    assert "probate" in act and "before any contact" in act
+    from app.services.evosense.ingest import owner_flags
+    assert owner_flags("WARD ISEBELL EST OF") == ["ESTATE_INDICATED"]

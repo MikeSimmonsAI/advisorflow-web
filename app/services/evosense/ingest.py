@@ -405,11 +405,30 @@ def _parse_date(value) -> Optional[datetime]:
     return None
 
 
+def _is_target(target, rec: Dict[str, Any]) -> bool:
+    """A lookup's answer describes the house it was asked about when the
+    house number and street agree (suffixes, directions and account formats
+    may differ: '1301 STARPOINT' / '1301 STARPOINT LN') and the ZIP, when
+    both sides have one, is the same."""
+    from app.services.evosense.sources.txgio import same_parcel_address
+    if not same_parcel_address(target.street_address or "", rec.get("street_address")):
+        return False
+    z1 = re.sub(r"\D", "", str(target.zip_code or ""))[:5]
+    z2 = re.sub(r"\D", "", str(rec.get("zip_code") or ""))[:5]
+    return not (z1 and z2 and z1 != z2)
+
+
 def ingest(db, org_id: str, provider, capability: str, rec: Dict[str, Any], *,
            strategy_id: Optional[str] = None, run_id: Optional[str] = None,
            is_test: bool = False, user=None, cost_cents: int = 0,
-           ledger_id: Optional[str] = None) -> Tuple[str, Optional[EvoSenseProperty]]:
-    """Returns (outcome, property). outcome: created|merged|seen|review."""
+           ledger_id: Optional[str] = None, target: Optional[EvoSenseProperty] = None
+           ) -> Tuple[str, Optional[EvoSenseProperty]]:
+    """Returns (outcome, property). outcome: created|merged|seen|review.
+
+    `target`: the property a LOOKUP was asked about. Its answer is about that
+    house, so it never creates a new property: it attaches to the target when
+    the house number and street agree, and otherwise waits in identity review
+    with the target as the candidate."""
     ref = str(rec.get("source_reference") or "").strip()
     if not ref:
         raise ValueError("Every observation needs a source_reference.")
@@ -434,6 +453,14 @@ def ingest(db, org_id: str, provider, capability: str, rec: Dict[str, Any], *,
         return "seen", prop
 
     match, prop, candidates, keys = ID.resolve(db, org_id, rec)
+    if target is not None and not (prop is not None and prop.id == target.id
+                                   and match in (ID.EXACT, ID.PROBABLE)):
+        if _is_target(target, rec) and (prop is None or prop.id == target.id):
+            match, prop, candidates, keys = ID.EXACT, target, [target], ["lookup target", "street"]
+        else:
+            extra = [c for c in (candidates or ([prop] if prop is not None else [])) if c.id != target.id]
+            match, prop, candidates = ID.AMBIGUOUS, None, [target] + extra
+            keys = list(keys or []) + ["lookup target"]
     raw = raw_evidence(rec)
     obs = EvoSenseObservation(
         organization_id=org_id, property_id=prop.id if prop else None,
