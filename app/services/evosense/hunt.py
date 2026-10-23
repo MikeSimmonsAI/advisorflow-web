@@ -74,15 +74,18 @@ def run_strategy(db, org_id: str, strategy: EvoSenseStrategy, *, trigger: str = 
                     summary="Hunt not started: this strategy is already hunting")
         db.commit()
         return run
+    SCH.interrupt_stale_runs(db, strategy)
+    keeper = SCH.LeaseKeeper(db, strategy, token).start()
     try:
         run = _run_locked(db, org_id, strategy, trigger=trigger, user=user,
                           max_properties=max_properties, enrich=enrich,
-                          renew=lambda: SCH.renew(db, strategy, token))
+                          renew=lambda: keeper.ok() and SCH.renew(db, strategy, token))
         # The next due time is written BEFORE the lock is released, so no
         # other worker can see "unlocked and still due" in between.
         if run.status != "skipped":
             SCH.record_result(db, strategy, run)
     finally:
+        keeper.stop()
         SCH.release(db, strategy, token)
     return run
 
@@ -194,6 +197,17 @@ def _source_failed(db, org_id, strategy, provider, cfg, exc, counts, user):
                 summary="%s failed — %s: %s" % (provider.label, code, msg[:160]))
 
 
+def _checkpoint(run, counts, source_key: Optional[str], *, stage: str = "discovery") -> None:
+    """Progress saved on the run as each source finishes, so a hunt cut off by
+    a restart shows exactly what it completed (and recovery can say so)."""
+    prog = counts.setdefault("progress", {"sources_done": []})
+    if source_key and source_key not in prog["sources_done"]:
+        prog["sources_done"].append(source_key)
+    prog["stage"] = stage
+    prog["at"] = C.now().isoformat()
+    run.counts = C.jdump(counts)
+
+
 class LeaseLost(RuntimeError):
     """The hunt lock expired and another worker may hold it: stop, don't double-run."""
 
@@ -255,8 +269,11 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
             if prop is not None:
                 touched[prop.id] = prop
         db.flush()
+        _checkpoint(run, counts, provider.key)
         db.commit()
 
+    _checkpoint(run, counts, None, stage="lookups")
+    db.commit()
     if touched:
         free_lookups(db, org_id, strategy, run, list(touched.values()), counts)
     backlog = lookup_backlog(db, org_id, exclude=set(touched))
