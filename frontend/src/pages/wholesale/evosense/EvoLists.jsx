@@ -3,6 +3,7 @@
  * every provider (identity, dedupe, signals, scoring). What a list says is its
  * claim — stored as evidence and labelled unverified. */
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../../api/client'
 import { errText } from '../wsShared'
 import { Alert, Panel } from '../ds/ds'
@@ -20,8 +21,10 @@ export default function EvoLists() {
   const [busy, setBusy] = useState(false)
   const [out, setOut] = useState(null)
   const [err, setErr] = useState('')
+  const [lists, setLists] = useState([])
 
   useEffect(() => { api.get('/wholesale/evosense/import/list-kinds').then(setMeta).catch(e => setErr(errText(e))) }, [])
+  useEffect(() => { api.get('/wholesale/evosense/cohorts').then(r => setLists(r.cohorts || [])).catch(() => {}) }, [out])
 
   async function go() {
     if (!file || !kind) return
@@ -37,6 +40,17 @@ export default function EvoLists() {
 
   const k = meta?.list_kinds?.find(x => x.key === kind)
   return (
+    <>
+    {lists.length ? (
+      <Panel title="Imported lists" hint="Each list followed as a group: owner now, taxes, foreclosure, score and next action">
+        <ul style={{ margin: 0, paddingLeft: 18 }}>
+          {lists.map(l => (
+            <li key={l.kind}><Link to={`/wholesale/evosense/lists/${encodeURIComponent(l.kind)}`}>
+              {l.kind === 'top100-2010' ? 'Top 100 (2010 list)' : l.kind}</Link> — {l.properties} properties</li>
+          ))}
+        </ul>
+      </Panel>
+    ) : null}
     <Panel title="Import a distress list"
            hint="Same ingest, dedupe and scoring as every source · each row's claim is kept as evidence, not verified fact">
       <div style={{ display: 'grid', gap: 12, maxWidth: 640 }}>
@@ -75,5 +89,6 @@ export default function EvoLists() {
         ) : null}
       </div>
     </Panel>
+    </>
   )
 }

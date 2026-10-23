@@ -1748,6 +1748,66 @@ async def _web_push_loop():
         await asyncio.sleep(20)
 
 
+async def _ai_workforce_worker_loop():
+    """AI Workforce queue worker: claim due AI work items and run them.
+
+    Every 2 minutes, one instance at a time (_pass_claimed), recorded in
+    job_runs as `ai_workforce_worker` so the customer and God screens can say
+    whether it is really running. Also re-applies AI_WORKFORCE_TEST_MODE_BRANDS
+    once at start. An AI employee nobody switched on claims nothing; real
+    messages stay off unless AI_OPERATIONS_LIVE_SEND is set. Any emergency
+    switch (AI_WORKFORCE_KILL / AI_OPERATIONS_KILL) stops the pass.
+    """
+    from app.services.job_run_service import record_job_run
+    from app.models.job_models import JobName
+    from app.deps import SessionLocal
+    import logging as _log
+    _logger = _log.getLogger("ai_workforce_worker_loop")
+    interval = 120
+    await asyncio.sleep(70)  # startup delay - offset from the other loops
+
+    def _bootstrap():
+        # AI_WORKFORCE_TEST_MODE_BRANDS: comma-separated brand ids or slugs
+        # whose accounts get SAFE TEST MODE at every start (simulation only;
+        # it can never switch on real messages). Unset = nothing is changed.
+        entries = (os.environ.get("AI_WORKFORCE_TEST_MODE_BRANDS") or ""
+                   ).split(",")
+        if not any(e.strip() for e in entries):
+            return
+        db = SessionLocal()
+        try:
+            from app.services.ai_deployment import switchboard
+            out = switchboard.apply_brands(db, entries)
+            if out:
+                _logger.info("AI workforce test mode applied at start: %s", out)
+        finally:
+            db.close()
+    try:
+        await _off_loop(_bootstrap)
+    except Exception:                                        # noqa: BLE001
+        _logger.exception("AI workforce test-mode bootstrap failed")
+
+    while True:
+        if not await _pass_claimed(JobName.AI_WORKFORCE_WORKER, interval):
+            await asyncio.sleep(interval)
+            continue
+        try:
+            async with record_job_run(JobName.AI_WORKFORCE_WORKER,
+                                      db_factory=SessionLocal) as _m:
+                def _one_pass():
+                    from app.jobs import run_ai_workforce_worker as worker
+                    db = SessionLocal()
+                    try:
+                        return worker.run_once(db)
+                    finally:
+                        db.close()
+                summary = await _off_loop(_one_pass)
+                _m.update(summary or {})
+        except Exception:                                    # noqa: BLE001
+            _logger.exception("AI workforce worker pass failed")
+        await asyncio.sleep(interval)
+
+
 async def _program_sla_loop():
     """Location outreach programs: re-alert HOT replies past their SLA, and
     (only when PROGRAM_EMAIL_TOUCHES_SENDING is on) send due campaign emails.
@@ -1824,6 +1884,32 @@ async def _program_sla_loop():
                         except Exception as exc:                 # noqa: BLE001
                             db.rollback()
                             _logger.error("program self-check error: %s", exc, exc_info=True)
+                        # Families who said yes to coming in and have no time
+                        # an hour later: page the team (8 AM - 8 PM Central).
+                        try:
+                            from app.services.programs import email_touches as _et_sv
+                            from app.services.programs import stuck_visits as _sv
+                            from datetime import timedelta as _td_sv, datetime as _dt_sv
+                            from zoneinfo import ZoneInfo as _ZI
+                            _hr = _dt_sv.now(_ZI("America/Chicago")).hour
+                            if 8 <= _hr < 20 and _et_sv.pass_due(key="stuck_visits", every=_td_sv(minutes=30)):
+                                _n = _sv.alert_all(db)
+                                if _n:
+                                    out["stuck_visit_alerts"] = _n
+                        except Exception as exc:                 # noqa: BLE001
+                            db.rollback()
+                            _logger.error("stuck-visit check error: %s", exc, exc_info=True)
+                        # Nightly practice run (about 6 AM Central): the setter
+                        # answers the regression conversations in practice
+                        # mode; the team is told only when one goes wrong.
+                        try:
+                            from app.services.programs import practice_run as _pr
+                            _p = _pr.run_if_due(db)
+                            if _p:
+                                out["practice_run"] = _p
+                        except Exception as exc:                 # noqa: BLE001
+                            db.rollback()
+                            _logger.error("practice run error: %s", exc, exc_info=True)
                         # Appointment setter: replies held for the family's
                         # contact hours go out once those hours open.
                         try:
@@ -2256,6 +2342,7 @@ async def on_startup():
         JobName.WHOLESALE_EXCEPTIONS: _wholesale_exception_loop,
         JobName.PROGRAM_SLA:          _program_sla_loop,
         JobName.WEB_PUSH:             _web_push_loop,
+        JobName.AI_WORKFORCE_WORKER:  _ai_workforce_worker_loop,
     }
     for _job_name in _plan["start"]:
         _factory = _loop_factories.get(_job_name)

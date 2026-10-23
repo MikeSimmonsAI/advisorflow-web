@@ -24,6 +24,7 @@ from app.models.models import Lead, Message, User
 from app.models.program_models import (LocationProfile, ProgramConversation, ProgramResponse,
                                        ProgramSourceRecord)
 from app.routers.program_router import _program, _require_manager
+from app.services import booking_time as _booking_time
 from app.services import test_records as _tr
 
 router = APIRouter(prefix="/program/command", tags=["sci-command"])
@@ -87,6 +88,17 @@ def _home_visit_requested(conv) -> bool:
     return bool(conv.state == "human" and conv.handoff_reason == HOME_VISIT_REASON and not hv.get("done"))
 
 
+def _booked_text(db, booking) -> str:
+    """'Thursday, October 22 at 9 AM CT' - the stored local wall time in its own
+    zone, exactly as the family's confirmation said it (never converted)."""
+    from zoneinfo import ZoneInfo
+    from app.services import booking_time
+    from app.services.programs import appointments as _A
+    bt = booking.booked_time.replace(tzinfo=None)
+    zone = booking_time.zone_of_user(db, booking.user_id)
+    return "%s %s" % (_A.describe(bt), bt.replace(tzinfo=ZoneInfo(zone)).strftime("%Z"))
+
+
 def _home_visit_waiting(conv) -> bool:
     """The family asked us to come to them and nobody has arranged it yet -
     on their CURRENT conversation, and never once they opted out."""
@@ -144,8 +156,17 @@ def _actions(r, conv) -> list:
 
 
 _NEEDS_REPLY = ("new", "opened")
+_HANDOFF_STATES = ("human", "callback_requested")
+
+
+def _human_handoff(r, conv) -> bool:
+    """RED FLAG (Mike, Oct 22): the AI handed this family to a person and
+    nobody has handled it yet. Clears when the reply is answered or closed,
+    when they book, or when the conversation goes back to the AI."""
+    return bool(conv is not None and conv.state in _HANDOFF_STATES and conv.booked_time is None
+                and r is not None and r.handling_status in _NEEDS_REPLY)
 _APPT_STATES = ("offered", "booked", "callback_requested")
-FILTERS = ("all", "needs_reply", "text", "email", "handled", "unread", "ai", "human", "appointments", "home_visits")
+FILTERS = ("all", "handoff", "needs_reply", "text", "email", "handled", "unread", "ai", "human", "appointments", "home_visits")
 
 
 def _sender(db, r, lead) -> dict:
@@ -240,12 +261,18 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                       "ai_answered": answered,
                       "setter_state": conv.state if conv else None, "actions": _actions(r, conv),
                       "home_visit": _home_visit_waiting(conv),
+                      "human_handoff": _human_handoff(r, conv),
+                      "handoff_reason": (conv.handoff_reason or "")[:200] if _human_handoff(r, conv) else None,
                       "advisor": advisors.get(getattr(lead, "assigned_to_id", None))})
-    items.sort(key=lambda i: (not i["sla_breached"], not i["home_visit"], _RANK.get(i["class"], 5),
-                              -(datetime.fromisoformat(i["received_at"][:-1]).timestamp() if i["received_at"] else 0)))
+    # NEWEST FIRST, always (Oct 22, Mike): what came in today is at the top - an
+    # older hot or overdue reply never pushes today's messages down the list.
+    # Hot / overdue / home-visit still show as badges and in their own filters.
+    items.sort(key=lambda i: -(datetime.fromisoformat(i["received_at"][:-1]).timestamp()
+                               if i["received_at"] else 0))
     needs = sum(1 for i in items if i["class"] in ("hot", "active", "bad_data", "wrong_person")
                 and i["handling_status"] in _NEEDS_REPLY and not i["is_test"] and not i["ai_answered"])
     filter_counts = {"all": len(items),
+                     "handoff": sum(1 for i in items if i["human_handoff"] and not i["is_test"]),
                      "needs_reply": sum(1 for i in items if i["handling_status"] in _NEEDS_REPLY
                                         and i["class"] != "auto_reply" and not i["ai_answered"]),
                      "text": sum(1 for i in items if i["channel"] != "email"),
@@ -255,7 +282,9 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                      "human": sum(1 for i in items if i["owner"] == "human"),
                      "appointments": sum(1 for i in items if i["setter_state"] in _APPT_STATES),
                      "home_visits": sum(1 for i in items if i["home_visit"])}
-    if flt == "needs_reply":
+    if flt == "handoff":
+        items = [i for i in items if i["human_handoff"]]
+    elif flt == "needs_reply":
         items = [i for i in items if i["handling_status"] in _NEEDS_REPLY and i["class"] != "auto_reply"
                  and not i["ai_answered"]]
     elif flt == "text":
@@ -292,7 +321,7 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                                                       ProgramConversation.state == "callback_requested").count())
     return {
         "locations": [{"id": k, "name": v} for k, v in sorted(locs.items(), key=lambda kv: kv[1])],
-        "counts": {"needs_attention": needs, "replies_today": today_rows, "visits_booked": booked,
+        "counts": {"needs_attention": needs, "human_handoff": filter_counts["handoff"], "replies_today": today_rows, "visits_booked": booked,
                    "contacted_today": contacted},
         "filter": flt, "filter_counts": filter_counts,
         "owner_alert": owner_alert,
@@ -567,6 +596,8 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
         "team": team,
         "status": latest.handling_status if latest else None,
         "badge": _badge(latest, conv) if latest else None,
+        "human_handoff": _human_handoff(latest, conv),
+        "handoff_reason": conv.handoff_reason if conv is not None and _human_handoff(latest, conv) else None,
         "response_id": latest.id if latest else None,
         "suggested_reply": (_er.strip_signature(db, lead, latest.suggested_reply)
                             if latest and latest.suggested_reply else None),
@@ -575,7 +606,9 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
         "setter": {"state": conv.state, "offered": [A.describe(s) for s in A.offered(conv)],
                    "callback_window": conv.callback_window, "handoff_reason": conv.handoff_reason}
         if conv else None,
-        "booking": {"when": booking.booked_time.isoformat(), "label": booking.appt_label,
+        "booking": {"when": _booking_time.wire(db, booking), "label": booking.appt_label,
+                    # the appointment in its own time zone, as the family was told
+                    "when_text": _booked_text(db, booking),
                     "status": booking.status} if booking and booking.booked_time else None,
         "suggestion": _suggest(conv, latest, lead),
         "mail_task": _mail_task_of(conv),
@@ -648,13 +681,20 @@ def command_reply(body: ReplyIn, db: Session = Depends(get_db), user: User = Dep
     if not text:
         raise HTTPException(status_code=422, detail="Write a reply first.")
     # One approved sign-off, added by the system; {GUIDE} = the family's guide link.
-    if body.channel == "sms" and ("{GUIDE}" in text or "http" in text.lower()):
+    if body.channel == "sms" and ("{GUIDE}" in text or "{BOOKING}" in text or "http" in text.lower()):
         from app.services import sms_programs
         if sms_programs.is_sci_org(db, lead.organization_id) and not sms_programs.sms_links_enabled():
             raise HTTPException(status_code=422, detail=(
                 "Links in texts are being blocked by carriers on this line (Twilio 30007). "
                 "Send the guide link by email, or offer a printed copy by mail."))
     text = email_reply.guide_token(db, lead, email_reply.strip_signature(db, lead, text))
+    if "{BOOKING}" in text:
+        # {BOOKING} = this family's own pick-a-time link (the cadence's link).
+        from app.services.programs import identity as _identity
+        _url = _identity.program_booking_url(db, lead)
+        if not _url:
+            raise HTTPException(status_code=422, detail="This family has no booking link (no booking calendar is set).")
+        text = text.replace("{BOOKING}", _url)
     if body.then not in ("human", "ai"):
         raise HTTPException(status_code=422, detail="then must be human or ai")
     resp = None
@@ -855,6 +895,24 @@ def command_slots(lead_id: str, kind: str = "visit", db: Session = Depends(get_d
     prog = _program(db, user, managers_only=False)
     slots, why = A.available_slots(db, prog, want=4, kind=kind if kind in (A.PHONE, A.VISIT) else A.VISIT)
     return {"slots": [{"value": s.isoformat(), "label": A.describe(s),
+                       "day": s.strftime("%a %b %-d"), "time": s.strftime("%-I:%M %p")} for s in slots],
+            "reason": why}
+
+
+@router.get("/day-slots")
+def command_day_slots(lead_id: str, date: str, kind: str = "visit", db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_or_observer)):
+    """Every open time on the day a person picks ("Choose custom time")."""
+    from datetime import date as _date
+    from app.services.programs import appointments as A
+    prog = _program(db, user, managers_only=False)
+    try:
+        day = _date.fromisoformat(date[:10])
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Pick a date.")
+    slots, why = A.all_slots_on_day(db, prog, day, kind=kind if kind in (A.PHONE, A.VISIT) else A.VISIT)
+    return {"date": day.isoformat(),
+            "slots": [{"value": s.isoformat(), "label": A.describe(s),
                        "day": s.strftime("%a %b %-d"), "time": s.strftime("%-I:%M %p")} for s in slots],
             "reason": why}
 

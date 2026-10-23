@@ -8,6 +8,7 @@
  * server answered - it never claims success on an error.
  */
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { API_BASE } from '../../api/client'
 import { BrandMark } from './RoofingShell'
 import { Icon } from './ui'
@@ -313,6 +314,8 @@ function MissionPreview() {
 export default function RoofingLanding() {
   useFont()
   useEffect(() => { document.title = 'EvoSys Pro Roofing — Turn roofing leads into booked inspections' }, [])
+  // Arriving at /roofing#demo (e.g. "Book a live demo" from the demo) lands on the form.
+  useEffect(() => { const id = (window.location.hash || '').slice(1); if (id) setTimeout(() => scrollTo(id), 150) }, [])
   return (
     <div className="rf rfl">
       <header className="rfl-hero">
@@ -328,7 +331,10 @@ export default function RoofingLanding() {
             <button type="button" onClick={() => scrollTo('preview')}>Product</button>
             <a href="/login">Sign in</a>
           </div>
-          <button type="button" className="rf-btn rf-btn--primary rf-btn--sm" onClick={() => scrollTo('demo')}>Book a demo</button>
+          <div className="rfl-nav__ctas">
+            <Link className="rf-btn rf-btn--on-dark rf-btn--sm rfl-nav__explore" to="/roofing/demo">Explore the demo</Link>
+            <button type="button" className="rf-btn rf-btn--primary rf-btn--sm" onClick={() => scrollTo('demo')}>Book a demo</button>
+          </div>
         </nav>
 
         <div className="rfl-hero__inner">
@@ -337,8 +343,8 @@ export default function RoofingLanding() {
             <h1 className="rfl-h1">Turn Roofing Leads<br /><span>Into Booked Inspections.</span></h1>
             <p className="rfl-sub">Already have leads? EvoSys Pro helps you turn them into conversations, scheduled inspections, and new business through AI-powered outreach and follow-up.</p>
             <div className="rfl-ctas">
-              <button type="button" className="rf-btn rf-btn--primary rfl-cta" onClick={() => scrollTo('how')}>See it in action</button>
-              <button type="button" className="rf-btn rf-btn--on-dark rfl-cta" onClick={() => scrollTo('demo')}>Get a demo</button>
+              <Link className="rf-btn rf-btn--primary rfl-cta" to="/roofing/demo"><Icon name="play" size={18} />Explore the Roofing Demo</Link>
+              <button type="button" className="rf-btn rf-btn--on-dark rfl-cta" onClick={() => scrollTo('demo')}>Book a demo</button>
             </div>
           </div>
           <div className="rfl-stats" aria-label="Sample results">
@@ -397,6 +403,18 @@ export default function RoofingLanding() {
             </ul>
           </div>
           <MissionPreview />
+        </div>
+        <div className="rfl-wrap rfl-choose">
+          <div className="rfl-choose__card">
+            <h3>Explore it yourself</h3>
+            <p>Click through the real back office with a sample roofing company - Mission Control, AI conversations, inspections with photos, reports and the pipeline. No sign-up.</p>
+            <Link className="rf-btn rf-btn--primary" to="/roofing/demo"><Icon name="play" size={18} />Explore the Roofing Demo</Link>
+          </div>
+          <div className="rfl-choose__card">
+            <h3>See it with our team</h3>
+            <p>Book a live walkthrough and we’ll show you how EvoSys Pro would work your own lead list.</p>
+            <button type="button" className="rf-btn rf-btn--ghost" onClick={() => scrollTo('demo')}>Book a live demo</button>
+          </div>
         </div>
       </section>
 

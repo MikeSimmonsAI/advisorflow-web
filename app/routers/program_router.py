@@ -2783,15 +2783,30 @@ def audit_lead(lead_id: str, db: Session = Depends(get_db), user: User = Depends
 
 # ── appointment setter: conversations and the synthetic simulator ──────────
 
+def _local_wire(db, conv, at):
+    """A setter time (local wall time of the program's booking calendar) with its offset."""
+    if at is None:
+        return None
+    from app.services import booking_time
+    memo = db.info.setdefault("_sci_booking_zone", {})
+    if conv.organization_id not in memo:                 # once per org per request
+        from app.services.programs.identity import program_for_org
+        prog = program_for_org(db, conv.organization_id)
+        memo[conv.organization_id] = (booking_time.zone_of_user(db, getattr(prog, "booking_user_id", None))
+                                      if prog else booking_time.DEFAULT_ZONE)
+    return booking_time.to_wire(at.replace(tzinfo=None) if at.tzinfo else at, memo[conv.organization_id])
+
+
 def _conv_json(db, conv, lead=None, turns: bool = False) -> dict:
     from app.models.program_models import ProgramConversationTurn
     from app.services.programs import appointments as _A
     out = {"id": conv.id, "lead_id": conv.lead_id, "state": conv.state, "is_test": bool(conv.is_test),
            "appointment_kind": conv.appointment_kind, "service_type": conv.service_type,
-           "offered": [s.isoformat() for s in _A.offered(conv)],
+           # offered/booked times are the program calendar's LOCAL wall time: sent with their offset
+           "offered": [_local_wire(db, conv, s) for s in _A.offered(conv)],
            "offered_text": [_A.describe(s) for s in _A.offered(conv)],
            "callback_window": conv.callback_window,
-           "booked_time": conv.booked_time.isoformat() if conv.booked_time else None,
+           "booked_time": _local_wire(db, conv, conv.booked_time),
            "handoff_reason": conv.handoff_reason, "ai_turns": conv.ai_turns,
            "last_family_at": conv.last_family_at.isoformat() if conv.last_family_at else None,
            "last_ai_at": conv.last_ai_at.isoformat() if conv.last_ai_at else None,
@@ -3171,7 +3186,8 @@ def setter_live_test_cleanup(db: Session = Depends(get_db), user: User = Depends
                                           BookingLink.status.in_(("booked", "confirmed"))).all():
         had_event = b.calendar_event_id
         res = cancel_calendar_event(db, b)
-        out.append({"booking_id": b.id, "booked_time": b.booked_time.isoformat() if b.booked_time else None,
+        from app.services import booking_time as _bt
+        out.append({"booking_id": b.id, "booked_time": _bt.wire(db, b) if b.booked_time else None,
                     "calendar_event_id": had_event, "result": res.get("note"), "status": b.status})
     for c in db.query(ProgramConversation).filter(ProgramConversation.lead_id == lead.id).all():
         c.state = "stopped"

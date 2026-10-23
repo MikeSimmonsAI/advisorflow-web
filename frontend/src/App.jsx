@@ -119,6 +119,7 @@ const RoofingLeads = lazyPage(() => import('./pages/roofing/LeadsData'))
 const RoofingHomeowner = lazyPage(() => import('./pages/roofing/Homeowner'))
 const RoofingSettings = lazyPage(() => import('./pages/roofing/Settings'))
 const RoofingLanding = lazyPage(() => import('./pages/roofing/RoofingLanding'))
+const RoofingDemo = lazyPage(() => import('./pages/roofing/demo/DemoApp'))
 const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
 const DealOperationsClosing = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsClosing })))
 const DealOperationsDispositions = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsDispositions })))
@@ -149,6 +150,7 @@ const EvoProperty = lazyPage(() => import('./pages/wholesale/evosense/EvoPropert
 const EvoStrategies = lazyPage(() => import('./pages/wholesale/evosense/EvoStrategies').then(m => ({ default: m.EvoStrategies })))
 const EvoStrategyBuilder = lazyPage(() => import('./pages/wholesale/evosense/EvoStrategies').then(m => ({ default: m.EvoStrategyBuilder })))
 const EvoControls = lazyPage(() => import('./pages/wholesale/evosense/EvoControls'))
+const EvoCohort = lazyPage(() => import('./pages/wholesale/evosense/EvoCohort'))
 import AIHub from './pages/AIHub'
 import Availability from './pages/Availability'
 import { Unauthorized, NotFound, VerificationUnavailable } from './pages/AccessState'
@@ -287,6 +289,7 @@ const GodSupport = lazyPage(() => import('./pages/god/GodSupport'))
 // same characters are harmless, which is why the route comment below may
 // write the path out in full and this one may not.
 const GodAIOperations = lazyPage(() => import('./pages/god/GodAIOperations'))
+const GodAIControl = lazyPage(() => import('./pages/god/GodAIControl'))
 const GodMaintenanceOps = lazyPage(() => import('./pages/god/GodMaintenanceOps'))
 // GOD MODE -> MANAGE ACCESS. One person, every context they hold, corrected in
 // place. Registered BEFORE the God catch-all route below, or it would silently
@@ -1479,6 +1482,8 @@ export default function App() {
           <Route path="settings" element={<RoofingSettings />} />
         </Route>
         <Route path="/roofing" element={<RoofingLanding />} />
+        {/* PUBLIC interactive demo - fictional data only, no login, no Roofing API. */}
+        <Route path="/roofing/demo/*" element={<RoofingDemo />} />
         <Route path="/program/import" element={<Navigate to="/program/import/new" replace />} />
         <Route path="/program/import/new" element={<ProtectedRoute bare><SciImportEntry /></ProtectedRoute>} />
         <Route path="/program/import/:batchId" element={<ProtectedRoute bare><SciImportEntry /></ProtectedRoute>} />
@@ -1565,6 +1570,7 @@ export default function App() {
         <Route path="/wholesale/evosense/strategies" element={<ProtectedRoute feature="wholesale_real_estate"><EvoStrategies /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/strategies/:strategyId" element={<ProtectedRoute feature="wholesale_real_estate"><EvoStrategyBuilder /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/controls" element={<ProtectedRoute feature="wholesale_real_estate"><EvoControls /></ProtectedRoute>} />
+        <Route path="/wholesale/evosense/lists/:kind" element={<ProtectedRoute feature="wholesale_real_estate"><EvoCohort /></ProtectedRoute>} />
         <Route path="/ai-hub" element={<ProtectedRoute><AIHub /></ProtectedRoute>} />
         {/* AI WORKFORCE — ONE FRONT DOOR (Lane F, #5). Every customer reaches
             the whole product from /ai-workforce: SET UP | WORKING | NEEDS YOU
@@ -1784,6 +1790,7 @@ export default function App() {
             or it silently renders the Command Center instead. GodRoute here
             is convenience only — every endpoint behind it is require_god, so
             a typed URL is refused by the server, not by a missing link. */}
+        <Route path="/god/ai"                    element={<GodRoute><GodModeLayout><GodAIControl /></GodModeLayout></GodRoute>} />
         <Route path="/god/workforce"             element={<GodRoute><GodModeLayout><GodWorkforce /></GodModeLayout></GodRoute>} />
         {/* AI OPERATIONS (T7) — how an authorized employee reaches the world.
             A SEPARATE SCREEN FROM THE ONE ABOVE ON PURPOSE: one answers "what

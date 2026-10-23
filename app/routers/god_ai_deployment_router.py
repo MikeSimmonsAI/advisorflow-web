@@ -97,12 +97,45 @@ def templates(db: Session = Depends(get_db)) -> Dict[str, Any]:
 # BRAND TERMS
 # ---------------------------------------------------------------------------
 
+def _find_brand(db: Session, ref: str) -> Optional[Platform]:
+    """A brand by id, slug or name - case and spacing do not matter.
+
+    The God screen used to need the internal platform id, and production logs
+    show brand NAMES being typed into it and failing with 404.
+    """
+    raw = (ref or "").strip()
+    if not raw:
+        return None
+    row = db.query(Platform).filter(Platform.id == raw).first()
+    if row is not None:
+        return row
+    low = raw.lower()
+    squashed = "".join(ch for ch in low if ch.isalnum())
+    for p in db.query(Platform).all():
+        names = {(p.slug or "").lower(), (p.name or "").lower()}
+        if low in names or squashed in {"".join(c for c in n if c.isalnum())
+                                        for n in names}:
+            return p
+    return None
+
+
+@router.get("/brands")
+def list_brands(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Every brand, for the God screen's brand picker."""
+    return {"brands": [{"id": p.id, "name": p.name, "slug": p.slug}
+                       for p in db.query(Platform)
+                       .order_by(Platform.name.asc()).all()]}
+
+
 @router.get("/brands/{platform_id}/catalog")
 def brand_catalog(platform_id: str, db: Session = Depends(get_db)
                   ) -> Dict[str, Any]:
-    brand = db.query(Platform).filter(Platform.id == platform_id).first()
+    brand = _find_brand(db, platform_id)
     if brand is None:
-        raise HTTPException(status_code=404, detail="No such brand.")
+        raise HTTPException(
+            status_code=404,
+            detail="No brand called %r. Pick one from the list." % platform_id)
+    platform_id = brand.id
     return {
         "brand": {"id": brand.id, "name": brand.name, "slug": brand.slug},
         "catalog": t8_catalog.brand_catalog(db, platform_id),
@@ -138,8 +171,10 @@ def set_terms(platform_id: str, payload: TermsWrite,
     """
     import json
 
-    if db.query(Platform).filter(Platform.id == platform_id).first() is None:
+    _brand = _find_brand(db, platform_id)
+    if _brand is None:
         raise HTTPException(status_code=404, detail="No such brand.")
+    platform_id = _brand.id
     from app.services.workforce import registry as wf_registry
     spec = wf_registry.template(payload.template_key)
     if spec is None:
@@ -449,3 +484,99 @@ def readiness_detail(deployment_id: str,
     result = t8_readiness.refresh(db, row)
     db.commit()
     return result.as_dict()
+
+
+# ---------------------------------------------------------------------------
+# THE SWITCHBOARD - safe test mode on/off by brand and account, in one click
+#
+# Picked from lists the screen gets from GET /switchboard, so nobody types a
+# brand id. Turning ON means safe test mode only (simulation; reaches nobody).
+# See app/services/ai_deployment/switchboard.py.
+# ---------------------------------------------------------------------------
+
+from app.services.ai_deployment import switchboard as t8_switchboard  # noqa: E402
+
+
+@router.get("/switchboard")
+def switchboard_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Every brand and account, whether AI can work there, and the worker."""
+    return t8_switchboard.status(db)
+
+
+class SwitchboardWrite(BaseModel):
+    platform_id: str
+    organization_ids: Optional[List[str]] = None   # None = every account
+    jobs: Optional[List[str]] = None               # None = every ready job
+
+
+@router.post("/switchboard/enable")
+def switchboard_enable(payload: SwitchboardWrite,
+                       db: Session = Depends(get_db),
+                       user: User = Depends(require_god)) -> Dict[str, Any]:
+    brand = _find_brand(db, payload.platform_id)
+    if brand is None:
+        raise HTTPException(status_code=404, detail="No such brand.")
+    try:
+        result = t8_switchboard.enable(
+            db, platform_id=brand.id,
+            organization_ids=payload.organization_ids, jobs=payload.jobs,
+            actor_user_id=user.id,
+            reason="Turned on in God Mode by %s" % (user.email or user.id))
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.commit()
+    return {"result": result, "status": t8_switchboard.status(db)}
+
+
+@router.post("/switchboard/disable")
+def switchboard_disable(payload: SwitchboardWrite,
+                        db: Session = Depends(get_db),
+                        user: User = Depends(require_god)) -> Dict[str, Any]:
+    brand = _find_brand(db, payload.platform_id)
+    if brand is None:
+        raise HTTPException(status_code=404, detail="No such brand.")
+    try:
+        result = t8_switchboard.disable(
+            db, platform_id=brand.id,
+            organization_ids=payload.organization_ids,
+            actor_user_id=user.id,
+            reason="Turned off in God Mode by %s" % (user.email or user.id))
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.commit()
+    return {"result": result, "status": t8_switchboard.status(db)}
+
+
+@router.post("/switchboard/run-worker-now")
+def switchboard_run_worker(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Run one worker pass right now (same code the scheduled loop runs)."""
+    from app.jobs import run_ai_workforce_worker as worker
+    summary = worker.run_once(db)
+    return {"summary": summary, "status": t8_switchboard.status(db)}
+
+
+@router.get("/control")
+def control_page(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """The God Mode AI Workforce page: one plain-language summary."""
+    return t8_switchboard.control_summary(db)
+
+
+class StopWrite(BaseModel):
+    on: bool
+    reason: Optional[str] = None
+
+
+@router.post("/control/emergency-stop")
+def control_emergency_stop(payload: StopWrite,
+                           db: Session = Depends(get_db),
+                           user: User = Depends(require_god)
+                           ) -> Dict[str, Any]:
+    result = t8_switchboard.emergency_stop(
+        db, on=payload.on, actor_user_id=user.id,
+        reason=(payload.reason or ("Emergency stop %s in God Mode by %s"
+                                   % ("pressed" if payload.on else "released",
+                                      user.email or user.id))))
+    db.commit()
+    return {"result": result, "control": t8_switchboard.control_summary(db)}

@@ -56,6 +56,7 @@ const AVAIL_TONE = {
   coming_soon: 'neutral',
   not_on_plan: 'amber',
   not_offered: 'neutral',
+  not_turned_on: 'amber',
 }
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']

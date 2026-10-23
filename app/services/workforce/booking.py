@@ -157,6 +157,19 @@ def available_slots(db: Session, *, employee, lead: Lead,
     }
 
 
+def _days_to_cover(wanted: datetime, now: datetime) -> int:
+    """How many days of availability to re-read so `wanted` is inside it.
+
+    THE BUG THIS FIXES (found 2026-10-21, 10:48 PM Central). The re-read
+    window starts at the WORKSPACE's local today, but this used to count days
+    on UTC dates. After 7 PM Central it is already tomorrow in UTC, so a slot
+    offered for tomorrow morning fell outside a one-day window and every
+    booking was refused with "No openings in that range". One extra day covers
+    any workspace offset from UTC; the slot must still match exactly.
+    """
+    return max(1, min((wanted.date() - now.date()).days + 2, MAX_DAYS_AHEAD))
+
+
 def _parse_starts_at(raw: str) -> Optional[datetime]:
     """Accept exactly what availability emitted: naive UTC ISO with a Z."""
     if not isinstance(raw, str):
@@ -197,7 +210,7 @@ def book_slot(db: Session, *, employee, lead: Lead, starts_at: str,
         raise ValueError("That time is already in the past.")
 
     # ── RE-READ. The employee may only take a slot still on offer. ──────────
-    days = max(1, min((wanted.date() - now.date()).days + 1, MAX_DAYS_AHEAD))
+    days = _days_to_cover(wanted, now)
     fresh = available_slots(db, employee=employee, lead=lead, advisor=advisor,
                             days_ahead=days, now=now)
     if fresh.get("availability_status") != "ok":
@@ -339,7 +352,7 @@ def reschedule(db: Session, *, employee, lead: Lead, booking_link_id: str,
     if wanted is None or wanted <= now:
         raise ValueError("That is not a valid future time.")
 
-    days = max(1, min((wanted.date() - now.date()).days + 1, MAX_DAYS_AHEAD))
+    days = _days_to_cover(wanted, now)
     fresh = available_slots(db, employee=employee, lead=lead, advisor=advisor,
                             days_ahead=days, now=now)
     if fresh.get("availability_status") != "ok":

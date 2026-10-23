@@ -137,3 +137,12 @@
   .mc-funnel li { grid-template-columns: 100px minmax(0, 1fr) 40px 48px; gap: 8px; }
   .wq-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+/* Small phones (320-400px): cards wrap instead of widening the page. */
+@media (max-width: 400px) {
+  .mc-cards { padding: 10px 12px 14px; }
+  .mc-card { min-width: 0; }
+  .mc-card__top { flex-wrap: wrap; }
+  .mc-card__who { min-width: 0; flex: 1; }
+  .mc-card__who span { overflow-wrap: anywhere; }
+  .mc-card__foot { flex-wrap: wrap; }
+}

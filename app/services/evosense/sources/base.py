@@ -15,6 +15,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -190,12 +191,34 @@ def _request(url: str, headers: Optional[Dict[str, str]] = None, method: str = "
             raise SourceError(RATE_LIMITED, "%s answered %s" % (_host(url), exc.code),
                               retry_after=int(ra) if ra and str(ra).isdigit() else 900)
         if exc.code in (401, 403):
-            raise SourceError(AUTH_FAILED, "%s refused the request (%s)" % (_host(url), exc.code))
+            raise SourceError(AUTH_FAILED, "%s refused the request (%s)%s" % (_host(url), exc.code, _refusal_detail(exc)))
         raise SourceError(DOWNLOAD_FAILED, "%s answered %s" % (_host(url), exc.code))
     except (TimeoutError, OSError) as exc:  # URLError is an OSError
         if "timed out" in str(exc).lower():
             raise SourceError(TIMEOUT_ERR, "%s did not answer in %ss" % (_host(url), TIMEOUT))
         raise SourceError(DOWNLOAD_FAILED, "%s: %s" % (_host(url), str(exc)[:160]))
+
+
+def _refusal_detail(exc) -> str:
+    """Who refused, in a few words: an S3 'AccessDenied', a CloudFront / WAF
+    block page and a server's own login wall need different fixes."""
+    bits = []
+    try:
+        hdr = exc.headers or {}
+        for k in ("Server", "X-Cache", "X-Amzn-Waf-Action"):
+            if hdr.get(k):
+                bits.append("%s=%s" % (k.lower(), str(hdr.get(k))[:40]))
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        body = exc.read(600).decode("utf-8", "replace")
+        text = re.sub(r"<[^>]+>", " ", body)
+        text = re.sub(r"\s+", " ", text).strip()
+        if text:
+            bits.append('"%s"' % text[:120])
+    except Exception:  # noqa: BLE001
+        pass
+    return (" - " + "; ".join(bits)) if bits else ""
 
 
 def _host(url: str) -> str:

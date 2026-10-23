@@ -108,8 +108,8 @@ def test_an_addresses_only_list_claims_nothing_and_waits_for_the_county_lookup(
         client, db_session, auth_headers, sample_org):
     """An old purchased list (e.g. 2010 mortgage data): the properties come in,
     no distress or foreclosure is asserted, and a re-import creates nothing twice.
-    Dallas/Tarrant ones go to the free county lookup backlog; the rest stay
-    'owner not verified'."""
+    Every Texas one goes to the free owner-lookup backlog (county sources for
+    DFW, the statewide parcel layer elsewhere); until then 'owner not verified'."""
     files = {"file": ("old.csv", ADDRESSES.encode(), "text/csv")}
     r = client.post("/wholesale/evosense/import", headers=auth_headers, files=files)   # no list_kind
     assert r.status_code == 200, r.text
@@ -121,6 +121,6 @@ def test_an_addresses_only_list_claims_nothing_and_waits_for_the_county_lookup(
         EvoSenseSignal.source != "evosense_derived").count() == 0           # no claim of any kind
     assert not db_session.query(EvoSenseSignal).filter_by(signal_type="PRE_FORECLOSURE").count()
     backlog = {p.street_address for p in HU.lookup_backlog(db_session, sample_org.id)}
-    assert backlog == {"201 VERIFY LN", "202 VERIFY LN"}
+    assert backlog == {"201 VERIFY LN", "202 VERIFY LN", "203 VERIFY LN"}
     again = client.post("/wholesale/evosense/import", headers=auth_headers, files=files)
     assert again.json()["counts"]["created"] == 0 and again.json()["counts"]["seen"] == 3

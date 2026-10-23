@@ -309,7 +309,7 @@ def sms_line(kind: str, name: str, *, words: Optional[str] = None, location: Opt
     """A short, specific staff text. The label says WHAT happened; the
     preview is the family's real words (or the system's real reason) - never
     a made-up summary. Fits one segment without a link."""
-    label = {"hot": "SCI Appointment Request", "handoff": "SCI Needs Attention", "booked": "SCI Booked",
+    label = {"hot": "SCI Appointment Request", "handoff": "SCI HUMAN HANDOFF", "booked": "SCI Booked",
              "sla_breach": "SCI Still Waiting", "home_visit": "SCI Home Visit Request",
              "opt_out_request": "SCI Opted Out But Asked - Call/Email, No Texts"}.get(kind, "SCI Reply")
     if test:

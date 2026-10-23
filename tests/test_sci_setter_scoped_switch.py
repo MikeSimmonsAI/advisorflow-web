@@ -19,7 +19,7 @@ class _Client:
 
     def _create(self, **kw):
         self.calls += 1
-        body = json.dumps({"action": "answer", "intent": "question", "reply": "Happy to help. Would a short call or a visit be easier?"})
+        body = json.dumps({"action": "offer_times", "intent": "question", "reply": "Happy to help. Would {TIMES} work for a short visit?"})
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=body))], usage=None)
 
 
@@ -51,7 +51,10 @@ def _reply(db, org, adv, prog, mode):
     db.commit()
     lead = _lead_for(db, org, adv, "L001")
     c = _Client()
+    from datetime import datetime as _dt
+    from app.services.programs import appointments as _A
     with patch.object(S, "_get_client", return_value=c), \
+         patch.object(_A, "available_slots", lambda db_, prog_, **kw: ([_dt(2030, 1, 8, 10, 0), _dt(2030, 1, 9, 14, 0)], None)), \
          patch("app.services.programs.responses._deliver_staff_alert", return_value=(True, None)), \
          patch("app.services.sms_service.send_sms") as send:
         R.on_inbound(db, lead, "What does the guide cover?", "sms")

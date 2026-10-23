@@ -218,20 +218,16 @@ const NAV = [
   // AI WORKFORCE
   // ══════════════════════════════════════════════════════════════════════
   //
-  // Three entries and not the same screen: authority (who an employee is and
-  // what it may do), reach (what was actually attempted), and deployment
-  // (what each brand sells and where every hired employee has got to).
+  // ONE ENTRY (owner, Oct 21 2026: "make it easier to work with"). The page
+  // is plain language: what is on, the worker, real messages on/off, the
+  // emergency stop, recent AI activity and every account's switch. The three
+  // technical consoles (/god/workforce, /god/ai-operations,
+  // /god/ai-deployment) keep their routes and are linked from that page as
+  // "Advanced".
   { group: 'AI WORKFORCE' },
-  { label: 'AI Workforce',     path: '/god/workforce',         icon: 'cpu',
-    hint: 'Job library, tool gateway, activation staging, kill switch, '
-        + 'evaluation and simulation' },
-  { label: 'AI Operations',    path: '/god/ai-operations',     icon: 'activity',
-    hint: 'Dark-launch state, provider resolution per channel, one '
-        + 'customer’s supervisor read, unattributable inbound, and the '
-        + 'synthetic proofs' },
-  { label: 'AI Deployment',    path: '/god/ai-deployment',     icon: 'package',
-    hint: 'Brand commercial terms, every customer’s deployment state, '
-        + 'readiness, activation, reconciliation and the orphan sweep' },
+  { label: 'AI Workforce',     path: '/god/ai',                icon: 'cpu',
+    hint: 'Turn AI workers on or off per account, see what they are doing, '
+        + 'emergency stop' },
 
   // ══════════════════════════════════════════════════════════════════════
   // SECURITY & PLATFORM — access, audit, health, jobs and every diagnostic.

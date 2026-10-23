@@ -21,11 +21,13 @@ is what the customer screen and the admin screens read to say whether the
 worker is actually running. A worker that has never recorded a pass is "not
 running", never "healthy".
 
-OFF BY DEFAULT. Not scheduled by `app/main.py`. A Render cron entry is the
-deployment path (see handoff/ai-workforce/RELEASE_PLAN.md) and is an owner
-decision. Even run by hand it exits at once unless AI_OPERATIONS_ENABLED is set
-and no kill switch is engaged, and the per-employee activation stage still
-decides whether anything is claimed.
+WHERE IT RUNS. Inside the backend web service, every 2 minutes, as the
+`ai_workforce_worker` loop owned by SERVICE_ROLE=backend (app/main.py,
+app/service_role.py) - no separate paid service. `run_once` is that loop's
+body and God Mode's "Run worker now". `main()` stays for running it as a cron
+or by hand. Any emergency switch stops it; the per-employee activation stage
+decides what is claimed, and real messages stay off unless
+AI_OPERATIONS_LIVE_SEND is set.
 """
 
 import logging
@@ -105,6 +107,45 @@ def run_pass(db, *, per_employee: int = 5, now=None,
             summary["claimed"] += r.get("claimed", 0)
             summary["ran"] += r.get("ran", 0)
     return summary
+
+
+def worker_allowed() -> bool:
+    """False when any emergency switch is engaged. Nothing else gates it:
+    whether an AI employee may do anything is decided per employee by its
+    activation stage, and an employee nobody switched on claims nothing."""
+    from app.services.ai_operations import flags
+    from app.services.workforce import activation as wf_activation
+    if wf_activation.env_kill_engaged():
+        return False
+    return not flags.kill_engaged()
+
+
+def run_once(db, *, per_employee: int = None) -> dict:
+    """One full pass, committed. Used by the backend loop and God Mode.
+
+    REAL MESSAGES STAY OFF HERE unless AI_OPERATIONS_LIVE_SEND is set: the
+    pass runs with simulated adapters installed, which is a second, separate
+    lock behind the activation stage (SIMULATION already refuses every
+    outward tool).
+    """
+    from app.services.workforce import outbound as wf_outbound
+    if not worker_allowed():
+        return {"skipped": "emergency stop engaged"}
+    per = per_employee or int(os.environ.get("AI_WORKFORCE_WORKER_BATCH", "5"))
+    live = (os.environ.get("AI_OPERATIONS_LIVE_SEND") or "").strip().lower() \
+        in ("1", "true", "yes", "on")
+    try:
+        if live:
+            summary = run_pass(db, per_employee=per)
+        else:
+            with wf_outbound.use_simulated_adapters():
+                summary = run_pass(db, per_employee=per)
+        db.commit()
+        return summary
+    except Exception:                                        # noqa: BLE001
+        db.rollback()
+        log.exception("AI workforce worker pass failed")
+        raise
 
 
 def main() -> int:
