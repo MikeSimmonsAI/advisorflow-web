@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "aiwf-restland-catalog-20261022-2030-r4",
-  "parent_run_id": "aiwf-alljobs-20261022-0929-r3",
-  "project": "EvoSys Pro AI Workforce \u2014 fix production four-card rollout discrepancy; all 11 visible; further proof",
+  "relay_run_id": "bookaboost-backlog-security-20261022-2057-r1",
+  "parent_run_id": "",
+  "project": "EvoSys Pro BookaBoost Wholesale tenant isolation \u2014 clear P3/P4 backlog",
   "status": "COMPLETED",
-  "branch": "feature/ai-workforce-launch",
-  "actions_run_id": "39884619469",
-  "timestamp_ct": "2026-10-22 20:44 CT",
+  "branch": "feature/bookaboost-wholesale",
+  "actions_run_id": "39887860843",
+  "timestamp_ct": "2026-10-22 21:17 CT",
   "issue": 1,
-  "status_comment_id": 6355378530
+  "status_comment_id": 6355787977
 }
