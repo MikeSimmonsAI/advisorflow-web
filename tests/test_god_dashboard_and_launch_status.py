@@ -155,3 +155,12 @@ def test_missing_credentials_and_github_failure_fail_closed(monkeypatch):
 
 def test_github_endpoint_is_god_only(client, auth_headers):
     assert client.get("/god/launch-board/github", headers=auth_headers).status_code in (401, 403)
+
+
+def test_ai_control_summary_lists_all_eleven_jobs_honestly(db_session):
+    from app.services.ai_deployment import switchboard, test_mode
+    jobs = switchboard.control_summary(db_session)["jobs"]
+    assert len(jobs) == 11
+    proven = {j["key"] for j in jobs if j["proven"]}
+    assert proven == set(test_mode.VERIFIED_JOBS)
+    assert all(j["workers"] == 0 and j["runs_7d"] == {"completed": 0, "failed": 0} for j in jobs)

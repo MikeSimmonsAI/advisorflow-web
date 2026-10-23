@@ -33,6 +33,7 @@ import json
 import logging
 from typing import Any, Dict, Iterable, List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.models import Organization, Platform
@@ -410,6 +411,7 @@ def control_summary(db: Session, *, now=None) -> Dict[str, Any]:
 
     return {
         "headline": headline,
+        "jobs": _job_overview(db, emp_rows, deps, now),
         "stopped": stopped,
         "stopped_by_environment": bool(st["environment_kill"]),
         "real_messages": st["real_messages"],
@@ -423,3 +425,52 @@ def control_summary(db: Session, *, now=None) -> Dict[str, Any]:
         "recent": recent,
         "switchboard": st,
     }
+
+
+def _job_overview(db: Session, emp_rows, deps, now) -> List[Dict[str, Any]]:
+    """Every job in the catalog, honestly labelled.
+
+    `proven` comes from test_mode.VERIFIED_JOBS (an end-to-end acceptance test
+    on the real worker). A job not in that set is "Not proven yet" however many
+    workers hold it. Counts are rows: AI workers holding the job, how many of
+    those are deployed, and their runs in the last 7 days. Read-only.
+    """
+    from datetime import timedelta
+    from app.models.workforce_models import AIEmployeeRun
+    from app.services.ai_deployment import test_mode
+    deployed_emp = {d.employee_id for d in deps if d.employee_id}
+    by_role: Dict[str, Dict[str, int]] = {}
+    role_of = {}
+    for e in emp_rows:
+        role_of[e.id] = e.job_role
+        b = by_role.setdefault(e.job_role or "", {"workers": 0, "deployed": 0})
+        b["workers"] += 1
+        if e.id in deployed_emp:
+            b["deployed"] += 1
+    runs: Dict[str, Dict[str, int]] = {}
+    try:
+        for emp_id, st_, n in (db.query(AIEmployeeRun.employee_id,
+                                        AIEmployeeRun.status,
+                                        func.count())
+                               .filter(AIEmployeeRun.started_at
+                                       >= now - timedelta(days=7))
+                               .group_by(AIEmployeeRun.employee_id,
+                                         AIEmployeeRun.status).all()):
+            r = runs.setdefault(role_of.get(emp_id) or "", {"completed": 0,
+                                                           "failed": 0})
+            if st_ == "completed":
+                r["completed"] += int(n)
+            elif st_ in ("failed", "error"):
+                r["failed"] += int(n)
+    except Exception:                                        # noqa: BLE001
+        db.rollback()
+        runs = {}
+    out = []
+    for key, name, what, _needs in test_mode.JOB_CARDS:
+        b = by_role.get(key, {"workers": 0, "deployed": 0})
+        out.append({"key": key, "name": name, "what": what,
+                    "proven": key in test_mode.VERIFIED_JOBS,
+                    "prerequisite": test_mode.JOB_PREREQUISITES.get(key),
+                    "workers": b["workers"], "deployed": b["deployed"],
+                    "runs_7d": runs.get(key, {"completed": 0, "failed": 0})})
+    return out
