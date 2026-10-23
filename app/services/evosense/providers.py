@@ -1037,6 +1037,40 @@ class Dallas311Source(PublicRecordSource):
         return {"rows": len(rows)}
 
 
+class AustinCodeSource(PublicRecordSource):
+    scope, counties, scope_name = "city", ("Travis",), "City of Austin"
+    key = "austin_code"
+    label = "City of Austin — Austin Code complaint cases"
+    capabilities = (C.CODE_VIOLATION,)
+    lookup_capability = C.CODE_VIOLATION
+    coverage = "City of Austin — code complaint cases worked by Austin Code inspectors (last 2 years)"
+    jurisdiction = "City of Austin, TX"
+    source_type = "City open data (Socrata)"
+    access_method = "Public Socrata SODA query, one address (house number + ZIP) per call"
+    public_url = "https://data.austintexas.gov/d/6wtj-zbtb"
+    refresh = "Updated by the city (continuously)"
+    freshness_days = 30
+    adapter_version = "austin_code/1"
+
+    def applies(self, target):
+        county = (target.get("county") or "").strip().lower().replace(" county", "")
+        city = (target.get("city") or "").strip().lower()
+        return bool(target.get("street_address")) and (city == "austin" or (county == "travis" and not city))
+
+    def lookup_one(self, target):
+        from app.services.evosense.sources.austin import AustinCodeReader
+        r = AustinCodeReader()
+        return r.to_record(target, r.lookup(target["street_address"], target.get("zip_code")))
+
+    def verify(self):
+        from app.services.evosense.sources import base as SB_
+        from app.services.evosense.sources.austin import API
+        rows = SB_.get_json(API, {"$limit": 1, "$order": "opened_date DESC"})
+        if not isinstance(rows, list) or not rows or "case_id" not in rows[0]:
+            raise SB_.SourceError(SB_.SOURCE_FORMAT_CHANGED, "Austin code cases did not return case rows")
+        return {"newest_case_opened": (rows[0].get("opened_date") or "")[:10]}
+
+
 class LgbsTaxSaleSource(PublicRecordSource):
     scope, counties, scope_name = "state", (), "Texas"
     key = "lgbs_tax_sales"
@@ -1197,7 +1231,7 @@ PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
     SandboxPropertyRecords(), SandboxVacancy(), SandboxTaxRoll(), SandboxPublicRecords(),
     SandboxSkipTrace(), SandboxSkipTraceBackup(), SandboxPhoneValidation(),
     ManualSource(), CsvImportSource(),
-    TarrantTaxRollSource(), DallasTrwSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), TexasParcelOwnerSource(), TexasParcelRollSource(), HarrisRollSource(), TravisDelinquentSource(), CensusGeocoderSource(),
+    TarrantTaxRollSource(), DallasTrwSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), TexasParcelOwnerSource(), TexasParcelRollSource(), HarrisRollSource(), TravisDelinquentSource(), AustinCodeSource(), CensusGeocoderSource(),
     FortWorthCodeSource(), FortWorthOpenCasesSource(), Dallas311Source(), LgbsTaxSaleSource(),
     DallasForeclosureManual(), DallasTaxManual(),
     RentCastInterface(), RegridInterface(), AttomInterface(), TracerfyContactSource(),
