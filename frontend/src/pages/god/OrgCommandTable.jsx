@@ -82,6 +82,7 @@ export function buildRows({ orgs = [], customers = [], billingRows = null }) {
         plan: c.plan || o.plan || null,
         industry: c.industry,
         is_active: c.is_active,
+        is_demo: !!c.is_demo,
         user_count: c.user_count,
         lead_count: c.lead_count,
         implementation: c.implementation,
@@ -340,7 +341,10 @@ function Row({ r, onEnter, onSuspend, onGo, busy }) {
   return (
     <tr>
       <td>
-        <div className="gm-orgname">{r.name}</div>
+        <div className="gm-orgname">
+          {r.name}
+          {r.is_demo ? <>{" "}<Pill tone="blue" title="Demonstration account — not a paying customer">DEMO</Pill></> : null}
+        </div>
         <div className="gm-orgsub">
           {r.slug || r.id.slice(0, 8)}
           {r.industry ? ' · ' + r.industry : ''}
