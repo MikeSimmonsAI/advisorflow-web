@@ -58,20 +58,34 @@ WHOLESALE_ONLY = (MANAGER, TEAM_LEAD, FIELD_SPECIALIST, CANVASSER)
 FIELD_ROLES = (FIELD_SPECIALIST, CANVASSER)
 
 
-def _row(db: Session, user_id: str, active_only: bool = True) -> Optional[Membership]:
+def _org(db: Session, org_id: Optional[str]):
+    if not org_id:
+        return None
+    from app.models.models import Organization
+    return db.query(Organization).filter(Organization.id == org_id).first()
+
+
+def seat_key_for_org(db: Session, org_id: Optional[str]) -> str:
+    """The seat rows that govern this workspace (legacy for EvoSys, own for a second tenant)."""
+    return PA.seat_key(_org(db, org_id))
+
+
+def _row(db: Session, user_id: str, active_only: bool = True, key: Optional[str] = None) -> Optional[Membership]:
     q = db.query(Membership).filter(Membership.scope_type == SCOPE_PRODUCT,
-                                    Membership.scope_id == PA.WHOLESALE,
+                                    Membership.scope_id == (key or PA.WHOLESALE),
                                     Membership.user_id == user_id)
     if active_only:
         q = q.filter(Membership.is_active.is_(True))
     return q.first()
 
 
-def role_of(db: Session, user: Optional[User]) -> Optional[str]:
-    """The person's team role, or None when they hold no active grant."""
+def role_of(db: Session, user: Optional[User], org_id: Optional[str] = None) -> Optional[str]:
+    """The person's team role, or None when they hold no active grant. Judged
+    against the seat rows of `org_id` (default: their home workspace), so a
+    seat held in one Wholesale tenant never reads as a role in the other."""
     if user is None or not getattr(user, "id", None):
         return None
-    row = _row(db, user.id)
+    row = _row(db, user.id, key=seat_key_for_org(db, org_id or getattr(user, "organization_id", None)))
     if row is None:
         return None
     return row.role if row.role in ROLES else MEMBER
@@ -97,6 +111,7 @@ def _person(u: User) -> Dict:
 
 
 def team(db: Session, org_id: str) -> Dict:
+    key = seat_key_for_org(db, org_id)
     """Everyone in this workspace: who is on the Wholesale team (with role and
     manager) and who is not yet. Other organizations' people never appear."""
     people = db.query(User).filter(User.organization_id == org_id).order_by(User.created_at.asc()).all()
@@ -104,7 +119,7 @@ def team(db: Session, org_id: str) -> Dict:
     rows = {}
     if ids:
         for m in (db.query(Membership)
-                  .filter(Membership.scope_type == SCOPE_PRODUCT, Membership.scope_id == PA.WHOLESALE,
+                  .filter(Membership.scope_type == SCOPE_PRODUCT, Membership.scope_id == key,
                           Membership.user_id.in_(ids)).all()):
             rows[m.user_id] = m
     members, others = [], []
@@ -119,7 +134,7 @@ def team(db: Session, org_id: str) -> Dict:
         else:
             others.append({**_person(u), "was_member": m is not None})
     return {
-        "lock_on": PA.lock_on(db),
+        "lock_on": PA.lock_on(db, key),
         "roles": [{"key": r, "label": ROLE_LABELS[r], "help": ROLE_HELP[r],
                    "wholesale_only": r in WHOLESALE_ONLY} for r in ROLES],
         "members": members,
@@ -128,6 +143,7 @@ def team(db: Session, org_id: str) -> Dict:
 
 
 def _check_manager(db: Session, org_id: str, user_id: str, reports_to: Optional[str]) -> Optional[str]:
+    key = seat_key_for_org(db, org_id)
     """The manager must be an active team member of the same workspace, and the
     tree may not loop back on itself."""
     if not reports_to:
@@ -135,14 +151,14 @@ def _check_manager(db: Session, org_id: str, user_id: str, reports_to: Optional[
     if reports_to == user_id:
         raise ValueError("Someone cannot report to themselves.")
     boss = db.query(User).filter(User.id == reports_to, User.organization_id == org_id).first()
-    if boss is None or _row(db, boss.id) is None:
+    if boss is None or _row(db, boss.id, key=key) is None:
         raise ValueError("The manager you picked is not on the Wholesale team.")
     seen, cur = {user_id}, reports_to
     while cur:
         if cur in seen:
             raise ValueError("That would make a loop: they would end up reporting to themselves.")
         seen.add(cur)
-        up = _row(db, cur)
+        up = _row(db, cur, key=key)
         cur = up.reports_to_user_id if up is not None else None
     return reports_to
 
@@ -165,13 +181,14 @@ def add_or_update(db: Session, org_id: str, actor: User, user_id: str, role: str
     if u.id == actor.id and role != MEMBER:
         raise ValueError("You cannot lock your own login down.")
     reports_to = _check_manager(db, org_id, u.id, reports_to_user_id)
-    first_ever = not PA.lock_on(db)
-    PA.grant(db, u.email, granted_by=actor.id)
+    key = seat_key_for_org(db, org_id)
+    first_ever = not PA.lock_on(db, key)
+    PA.grant(db, u.email, granted_by=actor.id, product=key)
     # The person setting up the very first team member keeps their own access:
     # the first grant turns the named-login rule on for everyone.
-    if first_ever and getattr(actor, "role", None) != "god_admin" and _row(db, actor.id) is None:
-        PA.grant(db, actor.email, granted_by=actor.id)
-    row = _row(db, u.id)
+    if first_ever and getattr(actor, "role", None) != "god_admin" and _row(db, actor.id, key=key) is None:
+        PA.grant(db, actor.email, granted_by=actor.id, product=key)
+    row = _row(db, u.id, key=key)
     row.role = role
     row.reports_to_user_id = reports_to
     db.commit()
@@ -184,11 +201,12 @@ def remove(db: Session, org_id: str, actor: User, user_id: str) -> Dict:
     u = _in_org(db, org_id, user_id)
     if u.id == actor.id:
         raise ValueError("You cannot take yourself off the team.")
-    row = _row(db, u.id)
+    key = seat_key_for_org(db, org_id)
+    row = _row(db, u.id, key=key)
     if row is None:
         return team(db, org_id)
     for child in (db.query(Membership)
-                  .filter(Membership.scope_type == SCOPE_PRODUCT, Membership.scope_id == PA.WHOLESALE,
+                  .filter(Membership.scope_type == SCOPE_PRODUCT, Membership.scope_id == key,
                           Membership.reports_to_user_id == u.id).all()):
         child.reports_to_user_id = row.reports_to_user_id
     row.is_active = False

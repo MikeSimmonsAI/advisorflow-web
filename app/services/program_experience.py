@@ -63,11 +63,20 @@ WHOLESALE_ALLOWED_PREFIXES = (
 BACK_OFFICE_PREFIXES = ("/sales",)
 
 
-def _named_wholesale_seat(db: Session, user) -> bool:
+def _named_wholesale_seat(db: Session, user, org=None) -> bool:
+    """An active named seat. With `org`, only THAT workspace's seat counts (the
+    legacy EvoSys row, or a second tenant's own wholesale:<org_id> row); with no
+    org, a seat in any workspace (the cheap pre-gate)."""
     from app.models.sales_models import SCOPE_PRODUCT, Membership
-    return db.query(Membership.id).filter(
+    q = db.query(Membership.id).filter(
         Membership.user_id == user.id, Membership.scope_type == SCOPE_PRODUCT,
-        Membership.scope_id == WHOLESALE, Membership.is_active.is_(True)).first() is not None
+        Membership.is_active.is_(True))
+    if org is not None:
+        from app.services.product_access import seat_key
+        q = q.filter(Membership.scope_id == seat_key(org))
+    else:
+        q = q.filter(Membership.scope_id.like(WHOLESALE + "%"))
+    return q.first() is not None
 
 
 def is_wholesale_host(org, user) -> bool:
@@ -149,8 +158,8 @@ def experience_for(db: Session, user, org, is_program: bool, named_wholesale: Op
     #    own org, or an org explicitly listed as a Wholesale workspace).
     if is_program:
         return "sci"
-    if named_wholesale is None:
-        named_wholesale = _named_wholesale_seat(db, user)
+    if named_wholesale is None or org is not None:
+        named_wholesale = _named_wholesale_seat(db, user, org) if org is not None else _named_wholesale_seat(db, user)
     if named_wholesale and is_wholesale_host(org, user):
         return "wholesale"
     if _admin_of_second_tenant(db, user, org):
@@ -191,7 +200,7 @@ def locked_experience(db: Session, user, request: Optional[Request]) -> Optional
     if not org_id:
         return None
     org = db.query(Organization).filter(Organization.id == org_id).first()
-    if named and is_wholesale_host(org, user):
+    if named and _named_wholesale_seat(db, user, org) and is_wholesale_host(org, user):
         return WHOLESALE
     return WHOLESALE if _admin_of_second_tenant(db, user, org) else None
 

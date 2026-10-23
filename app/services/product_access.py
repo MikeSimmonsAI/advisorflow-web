@@ -29,6 +29,33 @@ WHOLESALE = "wholesale"
 WHOLESALE_FEATURE = "wholesale_real_estate"
 PRODUCTS = (WHOLESALE,)
 MEMBER = "member"
+ORG_SEAT_PREFIX = WHOLESALE + ":"
+
+
+def org_seat_key(org_id: str) -> str:
+    """The per-workspace seat row key of a second-tenant Wholesale workspace."""
+    return ORG_SEAT_PREFIX + str(org_id)
+
+
+def is_org_seat_key(product: Optional[str]) -> bool:
+    return bool(product) and str(product).startswith(ORG_SEAT_PREFIX)
+
+
+def seat_key(org) -> str:
+    """Which seat rows govern Wholesale in `org`. EvoSys's own org (and anything
+    that is not an explicit second Wholesale tenant) keeps the legacy
+    "wholesale" row; a second tenant such as BookaBoost has its own
+    "wholesale:<org_id>" rows, so neither tenant can grant, revoke or read the
+    other's seats."""
+    if org is None or not getattr(org, "id", None):
+        return WHOLESALE
+    from app.services.program_experience import (
+        WHOLESALE_HOST_SLUG, WHOLESALE_WORKSPACE_KEY, _explicit)
+    if (getattr(org, "slug", "") or "") == WHOLESALE_HOST_SLUG:
+        return WHOLESALE
+    if _explicit(org, WHOLESALE_WORKSPACE_KEY) and _explicit(org, WHOLESALE_FEATURE):
+        return org_seat_key(org.id)
+    return WHOLESALE
 
 
 def _rows(db: Session, product: str, active_only: bool = True):
@@ -49,6 +76,10 @@ def may_use(db: Session, user: Optional[User], product: str = WHOLESALE) -> bool
         return False
     if getattr(user, "role", None) == "god_admin":
         return True
+    if is_org_seat_key(product):
+        # A second tenant is closed by default: God, its admins (see
+        # workspace_admin_access) and named per-workspace seats only.
+        return _rows(db, product).filter(Membership.user_id == user.id).first() is not None
     if not lock_on(db, product):
         return True                                    # not configured yet: unchanged behaviour
     return _rows(db, product).filter(Membership.user_id == user.id).first() is not None
@@ -78,9 +109,13 @@ def workspace_admin_access(db: Session, user: Optional[User], org) -> bool:
 
 def may_use_in(db: Session, user: Optional[User], org, product: str = WHOLESALE) -> bool:
     """`may_use`, or - for Wholesale - the workspace-admin rule above for `org`."""
-    if may_use(db, user, product):
+    if product != WHOLESALE:
+        return may_use(db, user, product)
+    # Only THIS workspace's seat rows count: an EvoSys seat opens nothing in
+    # BookaBoost and a BookaBoost seat opens nothing in EvoSys.
+    if may_use(db, user, seat_key(org)):
         return True
-    return product == WHOLESALE and workspace_admin_access(db, user, org)
+    return workspace_admin_access(db, user, org)
 
 
 def holders(db: Session, product: str = WHOLESALE) -> List[Dict]:
@@ -105,7 +140,7 @@ def _user_by_email(db: Session, email: str) -> User:
 
 def grant(db: Session, email: str, *, granted_by: Optional[str] = None, product: str = WHOLESALE) -> Dict:
     """Name a login for the product. Idempotent; reactivates a revoked grant."""
-    if product not in PRODUCTS:
+    if product not in PRODUCTS and not is_org_seat_key(product):
         raise ValueError("unknown product")
     u = _user_by_email(db, email)
     row = _rows(db, product, active_only=False).filter(Membership.user_id == u.id).first()
