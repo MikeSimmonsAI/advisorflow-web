@@ -83,7 +83,10 @@ def get_team(db: Session = Depends(get_db), user: User = Depends(require_tenant_
 @router.post("/members", dependencies=[Depends(require_not_observation)])
 def put_member(body: MemberIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     _admin(db, user)
-    if not PA.lock_on(db) and not body.confirm_lock:
+    key = T.seat_key_for_org(db, svc.write_org_id(db, user))
+    # Only EvoSys's legacy seat turns a lock on for everyone; a second tenant's
+    # own seats never change who else can open Wholesale.
+    if key == PA.WHOLESALE and not PA.lock_on(db) and not body.confirm_lock:
         raise HTTPException(409, "Adding the first team member turns on named logins: from then on only the "
                                  "people on this team can open Wholesale. Confirm to continue.")
     try:

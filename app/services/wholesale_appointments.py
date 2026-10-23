@@ -120,7 +120,7 @@ def reps(db: Session, org_id: str, user: User) -> List[Dict[str, Any]]:
             continue
         if not PA.may_use_in(db, u, org, PA.WHOLESALE):     # #272: a second tenant's admins too
             continue
-        role = T.role_of(db, u)
+        role = T.role_of(db, u, org_id)
         out.append({"user_id": u.id, "name": u.full_name or u.email,
                     "role": role, "role_label": T.ROLE_LABELS.get(role) if role else None,
                     "field": role in T.FIELD_ROLES})
