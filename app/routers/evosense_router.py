@@ -1061,6 +1061,37 @@ class FactsIn(BaseModel):
     year_built: Optional[float] = None
 
 
+class IdentityIn(BaseModel):
+    street_address: Optional[str] = None
+    city: Optional[str] = None
+    zip_code: Optional[str] = None
+    county: Optional[str] = None
+    parcel_apn: Optional[str] = None
+    evidence_url: str
+    note: Optional[str] = None
+
+
+@router.post("/properties/{property_id}/identity")
+def correct_identity(property_id: str, payload: IdentityIn, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """Correct a property's account number / county / address from an official
+    record (admin). Audited with before/after and the record's address; then
+    the free county lookups answer for the corrected house. The owner is never
+    typed in here."""
+    from app.services.evosense import identity_fix as IF
+    org_id = svc.write_org_id(db, user)
+    _admin(user, db)
+    prop = _prop(db, org_id, property_id)
+    sent = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if k in IF.FIELDS}
+    try:
+        return IF.correct(db, org_id, prop, sent, user=user, evidence_url=payload.evidence_url, note=payload.note)
+    except IF.IdentityConflict as exc:
+        raise HTTPException(status_code=409, detail="%s already belongs to another property (%s); that needs a "
+                                                    "merge review, not an edit." % (exc.key, exc.other_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
 @router.patch("/properties/{property_id}/facts")
 def edit_property_facts(property_id: str, payload: FactsIn, db: Session = Depends(get_db),
                         user: User = Depends(require_tenant_user),
