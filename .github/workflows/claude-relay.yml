@@ -134,7 +134,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_args: >-
             --max-turns 120
-            --allowedTools "Read,Write,Edit,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git fetch origin main:*),Bash(git merge origin/main:*),Bash(git merge --abort:*),Bash(python3:*),Bash(python:*),Bash(pip:*),Bash(pytest:*),Bash(gh issue comment 1:*),Bash(gh issue view 1:*),Bash(cat:*),Bash(ls:*),Bash(date:*),Bash(TZ=America/Chicago date:*)"
+            --allowedTools "Read,Write,Edit,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git fetch origin main:*),Bash(git merge origin/main:*),Bash(git merge --abort:*),Bash(git checkout --theirs --:*),Bash(git checkout origin/main --:*),Bash(git restore --source=origin/main --:*),Bash(git ls-files -u:*),Bash(python3:*),Bash(python:*),Bash(pip:*),Bash(pytest:*),Bash(gh issue comment 1:*),Bash(gh issue view 1:*),Bash(cat:*),Bash(ls:*),Bash(date:*),Bash(TZ=America/Chicago date:*)"
             --disallowedTools "Bash(git push origin main:*),Bash(git push origin master:*),Bash(git checkout main:*),Bash(gh pr merge:*),Bash(gh api:*)"
           prompt: |
             You are Claude, executing ONE relay directive for Mike Simmons.

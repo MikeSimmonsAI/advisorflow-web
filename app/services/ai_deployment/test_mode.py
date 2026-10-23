@@ -360,6 +360,14 @@ _PRACTICE_REPLIES = {
                        "I'm the one who decides."),
     "appointment_setter": ("Yes, I'd like to set up a time to talk. Weekday "
                            "mornings work best for me."),
+    "follow_up_specialist": ("Sorry I went quiet - yes, I'm still "
+                             "interested. Weekday mornings work best for "
+                             "me."),
+    "scheduling_coordinator": ("Something came up - could we reschedule "
+                               "my appointment to another time?"),
+    "reactivation_specialist": ("Thanks for checking in - I'm still "
+                                "interested. Weekday mornings work best "
+                                "for me."),
 }
 _DEFAULT_REPLY = "Yes, I'm interested. Please tell me more."
 
@@ -424,6 +432,16 @@ def _good_endings(job_role: Optional[str] = None):
     by_job = {
         "lead_qualifier": frozenset({WC.QUALIFIED, WC.HUMAN_HANDOFF}),
         "appointment_setter": frozenset({WC.APPOINTMENT_BOOKED}),
+        # Moving the contact forward (ready, booked) or handing a live answer
+        # to a person closes the loop. Silence or a refusal does not.
+        "follow_up_specialist": frozenset({
+            WC.QUALIFIED, WC.APPOINTMENT_BOOKED, WC.HUMAN_HANDOFF}),
+        # A dormant contact who answers and moves forward is a win; silence
+        # or a refusal is not.
+        "reactivation_specialist": frozenset({
+            WC.QUALIFIED, WC.APPOINTMENT_BOOKED, WC.HUMAN_HANDOFF}),
+        # Keeping the appointment real means it ends booked, at the new time.
+        "scheduling_coordinator": frozenset({WC.APPOINTMENT_BOOKED}),
     }
     return by_job.get(job_role or "", frozenset({
         WC.QUALIFIED, WC.APPOINTMENT_BOOKED, WC.HUMAN_HANDOFF}))
@@ -495,6 +513,16 @@ def run_test(db: Session, dep: AIEmployeeDeployment, *, actor: Optional[User],
     lead = wf_practice.create_practice_lead(
         db, organization_id=dep.organization_id,
         assigned_to_id=emp.handoff_user_id)
+    if emp.job_role == "scheduling_coordinator":
+        # This job keeps an EXISTING appointment real, so the practice person
+        # starts with one (a practice booking: no calendar, no reminders).
+        from app.services.workforce import booking as wf_booking
+        open_slots = wf_booking.available_slots(
+            db, employee=emp, lead=lead, now=test_now).get("slots") or []
+        if open_slots:
+            wf_booking.book_slot(db, employee=emp, lead=lead,
+                                 starts_at=open_slots[0]["starts_at"],
+                                 now=test_now)
     wf_queue.enqueue(db, emp, [lead.id], subject_type="lead",
                      job_key=emp.job_role, actor_kind=WC.ACTOR_HUMAN,
                      actor_id=getattr(actor, "id", None))
@@ -909,7 +937,9 @@ def summary(db: Session, dep: AIEmployeeDeployment, *,
 # Jobs whose whole customer journey (setup -> Run test -> Start working ->
 # results) has an end-to-end acceptance test on the real worker. A job not in
 # this set is shown as "Coming soon", never as something that works.
-VERIFIED_JOBS = ("lead_qualifier", "appointment_setter")
+VERIFIED_JOBS = ("lead_qualifier", "appointment_setter",
+                 "follow_up_specialist", "reactivation_specialist",
+                 "scheduling_coordinator")
 
 JOB_CARDS = (
     ("lead_qualifier", "Lead Qualifier",
@@ -922,10 +952,45 @@ JOB_CARDS = (
     ("follow_up_specialist", "Follow-Up Specialist",
      "Follows up when people have not responded.",
      "Your leads, how often to follow up, and a person to pass replies to."),
+    ("reactivation_specialist", "Reactivation Specialist",
+     "Reaches out to old contacts to see if they are interested again.",
+     "An old contact list you have the right to contact, and a person to "
+     "pass interested people to."),
+    ("sales_assistant", "Sales Assistant",
+     "Helps an active sale along and brings a person in at the right time.",
+     "Approved answers about what you sell and a salesperson to hand over "
+     "to."),
+    ("scheduling_coordinator", "Scheduling Coordinator",
+     "Confirms, reminds about and reschedules appointments.",
+     "Your calendar and your appointment types."),
     ("customer_care_agent", "Customer Care",
      "Helps answer routine customer questions.",
      "Answers to your common questions and a person for anything else."),
+    ("receptionist", "Receptionist",
+     "Greets new contacts, finds out what they need and sends them to the "
+     "right place, by text and email.",
+     "Your common questions, your calendar and a person to pass people to."),
+    ("support_specialist", "Support Specialist",
+     "Works support requests by email and passes hard ones to a person.",
+     "Your support email and a person to escalate to."),
+    ("prospecting_specialist", "Prospecting Specialist",
+     "Works prospects you imported, only where the import gave permission.",
+     "A list of prospects you imported with permission to contact them."),
+    ("manager_supervisor", "AI Manager",
+     "Watches your AI team and tells you what needs attention. It never "
+     "contacts anyone.",
+     "A person who should receive its reports."),
 )
+
+# Plain-English prerequisite shown on a card, where one is known.
+JOB_PREREQUISITES = {
+    "receptionist": "Phone answering is switched off for the whole platform, "
+                    "so this worker would only use text and email.",
+    "prospecting_specialist": "Needs prospects that arrived through the "
+                              "normal import, with contact permission.",
+    "support_specialist": "Needs the support email connection to be "
+                          "tested first.",
+}
 
 # A finished-work count below this gives a rate that would mislead (one
 # qualified out of one is "100%"). Below it the screen says N/A and why.
@@ -951,9 +1016,10 @@ def job_cards(db: Session, organization_id: str) -> List[Dict[str, Any]]:
         held = [d for d in row.get("deployments", [])]
         if key not in VERIFIED_JOBS:
             availability, label, why = (
-                "coming_soon", "Coming soon",
-                "This AI worker is still being tested. It is not ready for "
-                "your account yet.")
+                "coming_soon", "Not yet proven",
+                "You can see this AI worker, but it has not passed its own "
+                "end-to-end test yet, so it cannot be set up. "
+                + JOB_PREREQUISITES.get(key, ""))
         elif held:
             availability, label, why = (
                 "set_up", "Already set up",
@@ -978,7 +1044,9 @@ def job_cards(db: Session, organization_id: str) -> List[Dict[str, Any]]:
                 "This AI worker is not offered on your account.")
         cards.append({"key": key, "title": title, "does": does,
                       "needs": needs, "availability": availability,
-                      "availability_label": label, "why": why,
+                      "availability_label": label, "why": why.strip(),
+                      "proven": key in VERIFIED_JOBS,
+                      "prerequisite": JOB_PREREQUISITES.get(key),
                       "can_set_up": availability == "available",
                       "deployment_ids": [d["id"] for d in held]})
     return cards
