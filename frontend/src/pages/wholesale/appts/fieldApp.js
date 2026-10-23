@@ -6,6 +6,8 @@
  * Appointments - so a rep who adds it to their phone or tablet gets the
  * right app with the right icon. Leaving Wholesale puts the original back. */
 
+import { engine } from '../engine'
+
 const FIELD = { manifest: '/manifest-field.webmanifest', icon: '/icons/field-apple-180.png', title: 'EvoSys Field' }
 let saved = null
 
@@ -28,7 +30,9 @@ export function applyFieldAppHead(on) {
     if (!saved) saved = { manifest: m.getAttribute('href'), icon: i.getAttribute('href'), title: t.getAttribute('content') }
     if (m.getAttribute('href') !== FIELD.manifest) m.setAttribute('href', FIELD.manifest)
     if (i.getAttribute('href') !== FIELD.icon) i.setAttribute('href', FIELD.icon)
-    t.setAttribute('content', FIELD.title)
+    // A second Wholesale tenant's field app is never titled with another
+    // brand's name (#272 P4); EvoSys keeps "EvoSys Field".
+    t.setAttribute('content', engine() ? FIELD.title : 'Field')
   } else if (saved) {
     if (saved.manifest) m.setAttribute('href', saved.manifest)
     if (saved.icon) i.setAttribute('href', saved.icon)

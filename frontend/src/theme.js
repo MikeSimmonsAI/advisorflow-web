@@ -96,6 +96,25 @@ export function productName(branding, module) {
 }
 
 /**
+ * The acquisition engine's on-screen name for this workspace. "EvoSense"
+ * everywhere it always was - including when the server sends no `engine` key,
+ * which is every workspace except a second Wholesale tenant. A second tenant
+ * (BookaBoost Wholesale, #272) gets null: show neutral wording, never another
+ * brand's name.
+ */
+export function engineName(branding) {
+  const p = branding && branding.platform
+  const products = p && p.products
+  if (products && Object.prototype.hasOwnProperty.call(products, 'engine')) return products.engine || null
+  return 'EvoSense'
+}
+
+/** "EvoSense · Acquisition" -> "Acquisition" when the workspace has no engine name. */
+export function engineLabel(branding, withEngine, neutral) {
+  return engineName(branding) ? withEngine : neutral
+}
+
+/**
  * Apply the workspace platform's theme to the document when the host is not a
  * brand domain. A no-op on every brand domain.
  */

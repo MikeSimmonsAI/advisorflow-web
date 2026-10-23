@@ -179,6 +179,29 @@ def _wholesale_team(db, user):
         return {"role": None, "wholesale_only": False, "field": False}
 
 
+def _workspace_products(db, org, slug):
+    """Product and engine names for THIS workspace.
+
+    Every brand and customer keeps exactly what it had: the brand's product name
+    (EvoSysPro -> "EvoSys Wholesale", BookaBoost -> none) and the EvoSense engine
+    name. A SECOND-TENANT Wholesale workspace (BookaBoost Wholesale, #272 P4) is
+    its own product: its name is the workspace's own name, and it is never shown
+    another brand's engine name (white-label rule: a brand's users never see
+    another brand's name). Everyone else's payload is unchanged - no `engine`
+    key at all, which the app reads as "EvoSense" (frontend/src/theme.js)."""
+    from app.services.brand_config import product_name
+    products = {"wholesale": product_name(slug, "wholesale")}
+    try:
+        from app.services.program_experience import WHOLESALE_HOST_SLUG, is_wholesale_host
+        if (getattr(org, "slug", "") or "") != WHOLESALE_HOST_SLUG and is_wholesale_host(org, object()):
+            products = {"wholesale": (getattr(org, "brand_name", None) or getattr(org, "name", None)
+                                      or products["wholesale"]),
+                        "engine": None}
+    except Exception:  # noqa: BLE001 - branding must not break a login
+        pass
+    return products
+
+
 def _platform_brand(db, org):
     """The presentation of the platform (white-label brand) an organization
     belongs to, or None. Never raises: branding must not break a login."""
@@ -199,7 +222,9 @@ def _platform_brand(db, org):
                 "theme": cfg.get("theme_slug") or row.slug,
                 # Commercial product names this brand sells (EvoSysPro ->
                 # "EvoSys Wholesale"). None when the brand has not named one.
-                "products": {"wholesale": product_name(row.slug, "wholesale")},
+                # `engine` names the acquisition engine on screen ("EvoSense");
+                # None means "show neutral wording". See _workspace_products.
+                "products": _workspace_products(db, org, row.slug),
                 # WHETHER the brand offers the module at all - a separate
                 # question from what it calls it. A brand with no commercial
                 # name (BookaBoost) still offers Wholesale unless the brand
