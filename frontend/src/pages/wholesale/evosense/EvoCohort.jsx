@@ -192,6 +192,7 @@ export default function EvoCohort() {
                     <td data-label="Owner now">
                       <Word value={r.owner.status} /> <span className="evo-small">{r.owner.name || ''}</span>
                       {r.owner.sources?.length ? <span className="evo-prop__sub" style={{ display: 'block' }}>per {r.owner.sources.join(', ')}</span> : null}
+                      {(r.owner.flags || []).map((f) => <Tag key={f.key} kind="estimate" title={f.label}>{f.key === 'ESTATE_INDICATED' ? 'Estate indicated' : f.key === 'LIFE_ESTATE' ? 'Life estate' : f.key === 'MULTIPLE_OWNERS_ETAL' ? 'ET AL' : f.key.toLowerCase()}</Tag>)}
                     </td>
                     <td data-label="Taxes" title={r.tax.detail || ''}>
                       <Word value={r.tax.status} />
