@@ -1,9 +1,13 @@
-/* EVOSENSE — AN IMPORTED LIST, FOLLOWED AS A GROUP (e.g. the 2010 Top 100).
+/* EVOSENSE — AN IMPORTED LIST, FOLLOWED AS A GROUP (e.g. the Top 100).
  *
  * Every property the list brought in, on one screen: who owns it now and how
  * we know, tax and foreclosure status with their evidence, the ordinary score
  * with what earned it and what holds it back, a priority and the next action.
  * "Work queue" narrows to properties a person can act on today.
+ *
+ * Mortgage foreclosure (a scheduled trustee sale: CLAIMED by the list until a
+ * clerk notice VERIFIES it) and property taxes are separate columns - current
+ * taxes never cancel a foreclosure. A list's name is never read for dates.
  *
  * Nothing here imports, buys or sends anything. "Re-check public records"
  * runs the free county lookups and county tax files again for this list.
@@ -20,19 +24,24 @@ const PRIORITY = { A: 'A — act now', B: 'B — strong', C: 'C — watch', REVI
 const TONE = {
   VERIFIED: 'live', CONFLICT: 'danger', UNVERIFIED: 'estimate', 'NO OWNER': 'danger',
   'TAX SALE': 'danger', 'TAX LAWSUIT': 'danger', DELINQUENT: 'danger', CURRENT: 'live', 'NOT CHECKED': 'estimate',
-  'ACTIVE NOTICE': 'danger', POSTPONED: 'danger', CANCELED: 'info', RESOLVED: 'info', UNVERIFIED_FC: 'estimate',
+  'VERIFIED NOTICE': 'danger', CLAIMED: 'estimate', POSTPONED: 'danger', CANCELED: 'info', RESOLVED: 'info',
+  'SALE PASSED': 'info', 'NO EVIDENCE': undefined,
 }
+const LABEL = { CLAIMED: 'Claimed — source supplied', 'VERIFIED NOTICE': 'Verified notice', 'SALE PASSED': 'Sale date passed',
+  'NO EVIDENCE': 'No evidence on file' }
 const FILTERS = [
   ['priority', 'Priority', ['A', 'B', 'C', 'REVIEW', 'PARK']],
   ['owner', 'Owner', ['VERIFIED', 'UNVERIFIED', 'CONFLICT', 'NO OWNER']],
   ['tax', 'Taxes', ['TAX SALE', 'TAX LAWSUIT', 'DELINQUENT', 'CURRENT', 'NOT CHECKED']],
-  ['foreclosure', 'Foreclosure', ['ACTIVE NOTICE', 'POSTPONED', 'CANCELED', 'RESOLVED', 'NO CURRENT EVIDENCE', 'UNVERIFIED']],
+  ['foreclosure', 'Foreclosure', ['VERIFIED NOTICE', 'CLAIMED', 'POSTPONED', 'CANCELED', 'RESOLVED', 'SALE PASSED', 'NO EVIDENCE']],
 ]
 
-function Word({ value, fc }) {
+function Word({ value }) {
   if (!value) return <span className="evo-muted">—</span>
-  return <Tag kind={TONE[fc && value === 'UNVERIFIED' ? 'UNVERIFIED_FC' : value]}>{value}</Tag>
+  return <Tag kind={TONE[value]}>{LABEL[value] || value}</Tag>
 }
+
+const listTitle = (kind) => (/^top100/i.test(kind) ? 'Top 100' : `List: ${kind}`)
 
 export default function EvoCohort() {
   const { kind } = useParams()
@@ -69,6 +78,7 @@ export default function EvoCohort() {
       (!county || r.county === county) &&
       (!queue || (r.owner.status === 'VERIFIED' && ['A', 'B', 'C'].includes(r.priority))))
     if (sort === 'score') rs = rs.slice().sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
+    if (sort === 'sale') rs = rs.slice().sort((a, b) => (a.foreclosure.days ?? 9999) - (b.foreclosure.days ?? 9999))
     if (sort === 'address') rs = rs.slice().sort((a, b) => (a.street_address || '').localeCompare(b.street_address || ''))
     return rs
   }, [data, params])  // eslint-disable-line react-hooks/exhaustive-deps
@@ -90,11 +100,12 @@ export default function EvoCohort() {
       <Hero
         scene="street"
         eyebrow="Imported list"
-        title={kind === 'top100-2010' ? 'Top 100 (2010 list)' : `List: ${kind}`}
-        sub="Every property this list brought in — who owns it now, what the public record shows today, and what to do next. The list's age is never treated as current evidence."
+        title={listTitle(kind)}
+        sub="Every property this list brought in — who owns it now, the scheduled foreclosure sale (claimed by the list until a county notice confirms it), taxes, score and the next step."
         meta={s ? [
           { label: <><b>{s.properties}</b> properties</> },
           { label: <><b>{s.owner.VERIFIED || 0}</b> verified owners</> },
+          { label: <><b>{(s.sale_dates?.supplied || 0) + (s.sale_dates?.verified || 0)}</b> with a sale date ({s.sale_dates?.verified || 0} verified)</> },
           { label: <><b>{(s.priority.A || 0) + (s.priority.B || 0)}</b> priority A/B</>, tone: (s.priority.A || s.priority.B) ? 'paused' : undefined },
         ] : null}
         actions={<>
@@ -117,7 +128,7 @@ export default function EvoCohort() {
             {FILTERS.map(([k, label]) => Object.entries(k === 'priority' ? s.priority : s[k] || {}).map(([v, n]) => (
               <button key={k + v} type="button" className="evo-bucketbtn" aria-pressed={get(k) === v}
                       onClick={() => set(k, get(k) === v ? '' : v)}>
-                {label}: {k === 'priority' ? PRIORITY[v] : v} <span className="evo-seg__n">({n})</span>
+                {label}: {k === 'priority' ? PRIORITY[v] : (LABEL[v] || v)} <span className="evo-seg__n">({n})</span>
               </button>
             )))}
           </div>
@@ -138,7 +149,7 @@ export default function EvoCohort() {
             <label key={k}><span className="evo-sr">{label}</span>
               <select className="evo-select" value={get(k)} onChange={(e) => set(k, e.target.value)}>
                 <option value="">{label}: all</option>
-                {vals.map((v) => <option key={v} value={v}>{k === 'priority' ? PRIORITY[v] : v}</option>)}
+                {vals.map((v) => <option key={v} value={v}>{k === 'priority' ? PRIORITY[v] : (LABEL[v] || v)}</option>)}
               </select>
             </label>
           ))}
@@ -152,6 +163,7 @@ export default function EvoCohort() {
             <select className="evo-select" value={sort} onChange={(e) => set('sort', e.target.value)}>
               <option value="priority">Priority, then score</option>
               <option value="score">Highest score</option>
+              <option value="sale">Soonest sale date</option>
               <option value="address">Address A–Z</option>
             </select>
           </label>
@@ -169,7 +181,7 @@ export default function EvoCohort() {
                   <th scope="col" className="is-num">Score</th>
                   <th scope="col">Owner now</th>
                   <th scope="col">Taxes</th>
-                  <th scope="col">Foreclosure</th>
+                  <th scope="col">Foreclosure sale</th>
                   <th scope="col">Other signals</th>
                   <th scope="col">Next action</th>
                 </tr>
@@ -198,10 +210,16 @@ export default function EvoCohort() {
                       <Word value={r.tax.status} />
                       {r.tax.date ? <span className="evo-prop__sub" style={{ display: 'block' }}>{r.tax.date}</span> : null}
                     </td>
-                    <td data-label="Foreclosure" title={r.foreclosure.detail || ''}><Word value={r.foreclosure.status} fc /></td>
+                    <td data-label="Foreclosure sale" title={r.foreclosure.detail || ''}>
+                      {r.foreclosure.sale_date ? <b style={{ display: 'block' }}>{r.foreclosure.sale_date}{r.foreclosure.days != null && r.foreclosure.days >= 0 ? ` · ${r.foreclosure.days} days` : ''}</b> : null}
+                      <Word value={r.foreclosure.status} />
+                      {r.foreclosure.last_checked ? <span className="evo-prop__sub" style={{ display: 'block' }}>last checked {r.foreclosure.last_checked}</span> : null}
+                    </td>
                     <td data-label="Other signals"><Chips items={r.signals} max={3} /></td>
                     <td data-label="Next action">
                       <span className="evo-small">{r.next_action}</span>
+                      {r.earned?.length ? <span className="evo-prop__sub" style={{ display: 'block' }}>Why: {r.earned.map((f) => `+${f.points} ${f.label}`).join('; ')}</span> : null}
+                      {r.list_claims?.list_owner_name ? <span className="evo-prop__sub" style={{ display: 'block' }}>List's owner name: {r.list_claims.list_owner_name}</span> : null}
                       {r.missing?.length ? <span className="evo-prop__sub" style={{ display: 'block' }}>Missing: {r.missing.join('; ')}</span> : null}
                     </td>
                   </tr>

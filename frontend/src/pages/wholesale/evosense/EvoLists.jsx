@@ -17,6 +17,7 @@ export default function EvoLists() {
   const [meta, setMeta] = useState(null)
   const [kind, setKind] = useState('')
   const [source, setSource] = useState('')
+  const [saleDate, setSaleDate] = useState('')
   const [file, setFile] = useState(null)
   const [busy, setBusy] = useState(false)
   const [out, setOut] = useState(null)
@@ -34,6 +35,7 @@ export default function EvoLists() {
     // "Addresses only" sends no list kind: the rows assert NO distress signal.
     if (kind !== NO_CLAIM) fd.append('list_kind', kind)
     if (source.trim()) fd.append('list_source', source.trim())
+    if (saleDate) fd.append('declared_sale_date', saleDate)
     try { setOut(await api.upload('/wholesale/evosense/import', fd)) }
     catch (e) { setErr(errText(e)) } finally { setBusy(false) }
   }
@@ -46,7 +48,7 @@ export default function EvoLists() {
         <ul style={{ margin: 0, paddingLeft: 18 }}>
           {lists.map(l => (
             <li key={l.kind}><Link to={`/wholesale/evosense/lists/${encodeURIComponent(l.kind)}`}>
-              {l.kind === 'top100-2010' ? 'Top 100 (2010 list)' : l.kind}</Link> — {l.properties} properties</li>
+              {/^top100/i.test(l.kind) ? 'Top 100' : l.kind}</Link> — {l.properties} properties</li>
           ))}
         </ul>
       </Panel>
@@ -69,6 +71,11 @@ export default function EvoLists() {
         <label>Where the list came from
           <input className="settings-input" value={source} placeholder="e.g. Dallas County tax office, Sept 2026"
                  onChange={e => setSource(e.target.value)} />
+        </label>
+        <label>Foreclosure sale date for the whole list (optional)
+          <input className="settings-input" type="date" value={saleDate} onChange={e => setSaleDate(e.target.value)} />
+          <span className="evo-muted evo-small">Only if the list states one sale date for every row. Rows with their own
+            sale date column keep theirs. Recorded as your claim until a county notice confirms it. The file name is never read for dates.</span>
         </label>
         <label>CSV file
           <input type="file" accept=".csv" onChange={e => setFile(e.target.files[0] || null)} />
