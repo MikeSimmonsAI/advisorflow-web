@@ -289,6 +289,35 @@ class DeterministicProvider(BaseProvider):
                     "No openings, so a person should arrange this.")
         return (None, {}, "")
 
+    def _toward_reschedule(self, context: Dict, available, lead_id,
+                           existing, why):
+        """Move the appointment the record already has to a time the calendar
+        just offered. Same rule as booking: no invented times, and a refusal
+        moves on to the next opening rather than repeating itself."""
+        if "calendar.get_availability" in available \
+                and not self._read_calendar_yet(context):
+            return ("calendar.get_availability",
+                    {"lead_id": lead_id, "days_ahead": 7},
+                    "%s — read real availability before moving it." % why)
+        slots = self._offered_slots(context)
+        attempt = sum(1 for o in self._observations(context)
+                      if o.get("tool") == "appointment.reschedule")
+        if slots and attempt < len(slots):
+            return ("appointment.reschedule",
+                    {"booking_link_id": existing["booking_link_id"],
+                     "start_at": slots[attempt]["starts_at"]},
+                    "%s — moving it to an opening the calendar returned."
+                    % why)
+        if self._read_calendar_yet(context):
+            return ("handoff.create",
+                    {"reason_code": "appointment_requires_human",
+                     "summary": "They want a different time and the calendar "
+                                "had no openings to move it to.",
+                     "recommended_action": "Offer them a time by hand.",
+                     "priority": "high"},
+                    "No openings, so a person should rearrange this.")
+        return (None, {}, "")
+
     def plan(self, request: ModelRequest) -> ModelResponse:
         ctx = request.context
         facts = ctx.get("facts") or {}
@@ -336,8 +365,14 @@ class DeterministicProvider(BaseProvider):
                 why = ("They asked about a time"
                        if self._has(reply, self.BOOKING)
                        else "They replied positively")
-                tool, args, rationale = self._toward_appointment(
-                    ctx, available, lead_id, why)
+                existing = facts.get("booking") or {}
+                if existing.get("booking_link_id") \
+                        and "appointment.reschedule" in available:
+                    tool, args, rationale = self._toward_reschedule(
+                        ctx, available, lead_id, existing, why)
+                else:
+                    tool, args, rationale = self._toward_appointment(
+                        ctx, available, lead_id, why)
                 if tool:
                     return out(tool, args, rationale)
                 if "employee.mark_qualified" in available:

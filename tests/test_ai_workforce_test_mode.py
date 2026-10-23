@@ -606,7 +606,7 @@ def test_no_open_times_is_needs_attention_with_the_fix(db_session,
 
 def test_both_verified_jobs_are_offered_and_the_rest_are_not(db_session):
     acct = Account(db_session)
-    for key in ("appointment_setter",):
+    for key in ("appointment_setter", "follow_up_specialist"):
         wf_service.set_offering(db_session, platform_id=acct.brand.id,
                                 template_key=key, enabled=True)
         tpl = wf_registry.template(key)
@@ -620,12 +620,30 @@ def test_both_verified_jobs_are_offered_and_the_rest_are_not(db_session):
                                                       acct.org.id)}
     assert cards["lead_qualifier"]["can_set_up"]
     assert cards["appointment_setter"]["can_set_up"]
-    assert cards["follow_up_specialist"]["availability"] == "coming_soon"
+    assert cards["follow_up_specialist"]["can_set_up"]
+    assert cards["follow_up_specialist"]["proven"] is True
     assert cards["customer_care_agent"]["availability"] == "coming_soon"
 
 
+def test_every_registered_job_has_a_card_with_an_honest_label(db_session):
+    acct = Account(db_session)
+    cards = test_mode.job_cards(db_session, acct.org.id)
+    assert sorted(c["key"] for c in cards) == sorted(
+        wf_registry.ALL_TEMPLATE_KEYS)
+    assert len(cards) == 11
+    for c in cards:
+        assert c["title"] and c["does"] and c["availability_label"]
+        if not c["proven"]:
+            assert c["availability"] == "coming_soon"
+            assert not c["can_set_up"]
+            assert c["availability_label"] == "Not yet proven"
+        else:
+            assert c["key"] in test_mode.VERIFIED_JOBS
+
+
 def test_reports_never_show_an_internal_action_name(db_session):
-    for key in ("lead_qualifier", "appointment_setter"):
+    for key in ("lead_qualifier", "appointment_setter",
+                "follow_up_specialist"):
         acct = Account(db_session, template_key=key)
         dep = acct.hire_and_set_up()
         report = test_mode.run_test(db_session, dep, actor=acct.admin,
@@ -636,6 +654,188 @@ def test_reports_never_show_an_internal_action_name(db_session):
         for s in report["steps"]:
             assert "_" not in s["step"], s
         assert report["pretend_reply"]
+
+
+# ── 6. FOLLOW-UP SPECIALIST, THE SAME PATH ───────────────────────────────────
+
+def test_follow_up_specialist_end_to_end_on_the_real_worker(db_session,
+                                                           monkeypatch):
+    from app.services import tenant_scheduling
+    from app.services.workforce_intelligence import collect as t9_collect
+    from app.services.workforce_intelligence import scope as t9_scope
+
+    def no_calendar(*a, **k):
+        raise AssertionError("a practice follow-up reached a real calendar")
+
+    monkeypatch.setattr(tenant_scheduling, "_push_to_calendar", no_calendar)
+
+    # T8 offering/hire/config, through the shipping services.
+    acct = Account(db_session, template_key="follow_up_specialist")
+    dep = acct.hire_and_set_up()
+    emp = acct.employee(dep)
+    assert emp.job_role == "follow_up_specialist"
+
+    report = test_mode.run_test(db_session, dep, actor=acct.admin,
+                                now=NOON_ISH)
+    db_session.commit()
+    assert report["verdict"] == "PASS", report["problems"]
+    assert report["ended_state"] in (WC.QUALIFIED, WC.APPOINTMENT_BOOKED,
+                                     WC.HUMAN_HANDOFF)
+    # T6 queue + worker: two real passes, the second woken by the reply.
+    assert [p["claimed"] for p in report["worker_passes"]] == [1, 1]
+    assert report["pretend_reply_sent"] is True
+    assert "went quiet" in report["pretend_reply"]
+
+    # Persisted tool executions: outbound was practice-only, none refused.
+    rows = (db_session.query(AIToolExecution)
+            .filter(AIToolExecution.work_item_id == report["work_item_id"])
+            .all())
+    assert rows and all(r.decision == "allowed" for r in rows)
+    sends = [r for r in rows if r.tool_key.startswith("conversation.send_")]
+    assert sends and all(r.simulated for r in sends)
+    assert not report["refused"]
+
+    # Persisted outcome + T9 evidence read from real rows.
+    item = db_session.query(AIWorkItem).get(report["work_item_id"])
+    assert item.state == report["ended_state"]
+    scope = t9_scope.for_system([acct.org.id])
+    counts = t9_collect.work_counts_by_state(db_session, scope)
+    assert report["ended_state"] in json.dumps(counts)
+
+    # No real person was reachable: the lead is a practice record.
+    lead = db_session.query(Lead).get(report["practice_lead"]["id"])
+    assert lead.is_test is True
+
+
+# ── 7. REACTIVATION SPECIALIST, A DORMANT BUT FICTIONAL CONTACT ──────────────
+
+def _aged_practice_lead(monkeypatch, status="contacted"):
+    """Make the practice lead look like a long-dormant, once-interested one."""
+    real = practice.create_practice_lead
+
+    def aged(db, **kw):
+        lead = real(db, **{**kw, "status": status})
+        lead.created_at = datetime.utcnow() - timedelta(days=700)
+        db.flush()
+        return lead
+
+    monkeypatch.setattr(practice, "create_practice_lead", aged)
+
+
+def test_reactivation_specialist_end_to_end_on_the_real_worker(db_session,
+                                                              monkeypatch):
+    from app.services import tenant_scheduling
+    from app.services.workforce_intelligence import collect as t9_collect
+    from app.services.workforce_intelligence import scope as t9_scope
+
+    def no_calendar(*a, **k):
+        raise AssertionError("a practice reactivation reached a real calendar")
+
+    monkeypatch.setattr(tenant_scheduling, "_push_to_calendar", no_calendar)
+    _aged_practice_lead(monkeypatch)
+
+    acct = Account(db_session, template_key="reactivation_specialist")
+    dep = acct.hire_and_set_up()
+    assert acct.employee(dep).job_role == "reactivation_specialist"
+
+    report = test_mode.run_test(db_session, dep, actor=acct.admin,
+                                now=NOON_ISH)
+    db_session.commit()
+    assert report["verdict"] == "PASS", report["problems"]
+    assert report["ended_state"] in (WC.QUALIFIED, WC.APPOINTMENT_BOOKED,
+                                     WC.HUMAN_HANDOFF)
+    assert [p["claimed"] for p in report["worker_passes"]] == [1, 1]
+    assert report["pretend_reply_sent"] is True
+    assert "still interested" in report["pretend_reply"]
+
+    rows = (db_session.query(AIToolExecution)
+            .filter(AIToolExecution.work_item_id == report["work_item_id"])
+            .all())
+    assert rows and all(r.decision == "allowed" for r in rows)
+    sends = [r for r in rows if r.tool_key.startswith("conversation.send_")]
+    assert sends and all(r.simulated for r in sends)
+    assert not report["refused"]
+
+    item = db_session.query(AIWorkItem).get(report["work_item_id"])
+    assert item.state == report["ended_state"]
+    scope = t9_scope.for_system([acct.org.id])
+    counts = t9_collect.work_counts_by_state(db_session, scope)
+    assert report["ended_state"] in json.dumps(counts)
+
+    lead = db_session.query(Lead).get(report["practice_lead"]["id"])
+    assert lead.is_test is True
+
+
+def test_reactivation_age_is_never_permission_to_contact(db_session,
+                                                        monkeypatch):
+    """A dormant contact who opted out stays unreachable however old."""
+    _aged_practice_lead(monkeypatch, status="dnc")
+    acct = Account(db_session, template_key="reactivation_specialist")
+    dep = acct.hire_and_set_up()
+    report = test_mode.run_test(db_session, dep, actor=acct.admin,
+                                now=NOON_ISH)
+    db_session.commit()
+    assert report["verdict"] != "PASS"
+    rows = (db_session.query(AIToolExecution)
+            .filter(AIToolExecution.work_item_id == report["work_item_id"])
+            .all())
+    assert not [r for r in rows if r.tool_key.startswith("conversation.send_")
+                and r.decision == "allowed"]
+
+
+# ── 8. SCHEDULING COORDINATOR: MOVE A REAL (PRACTICE) APPOINTMENT ────────────
+
+def test_scheduling_coordinator_reschedules_without_touching_a_calendar(
+        db_session, monkeypatch):
+    from app.models.models import BookingLink
+    from app.services import tenant_scheduling
+    from app.services.workforce import booking as wf_booking
+    from app.services.workforce_intelligence import collect as t9_collect
+    from app.services.workforce_intelligence import scope as t9_scope
+
+    def no_calendar(*a, **k):
+        raise AssertionError("a practice reschedule reached a real calendar")
+
+    monkeypatch.setattr(tenant_scheduling, "_push_to_calendar", no_calendar)
+    monkeypatch.setattr(tenant_scheduling, "_make_case_file", no_calendar)
+
+    acct = Account(db_session, template_key="scheduling_coordinator")
+    dep = acct.hire_and_set_up()
+    assert acct.employee(dep).job_role == "scheduling_coordinator"
+
+    report = test_mode.run_test(db_session, dep, actor=acct.admin,
+                                now=NOON_ISH)
+    db_session.commit()
+    assert report["verdict"] == "PASS", report["problems"]
+    assert report["ended_state"] == WC.APPOINTMENT_BOOKED
+    assert [p["claimed"] for p in report["worker_passes"]] == [1, 1]
+    assert "reschedule" in report["pretend_reply"]
+    tools = [t["tool"] for t in report["what_it_tried"]]
+    assert tools.index("calendar.get_availability") < \
+        tools.index("appointment.reschedule")
+    assert "appointment.book" not in tools
+
+    # One appointment, moved, and still a practice row on no real agenda.
+    rows = db_session.query(BookingLink).filter(
+        BookingLink.lead_id == report["practice_lead"]["id"]).all()
+    assert len(rows) == 1
+    assert rows[0].status == wf_booking.PRACTICE_STATUS
+    assert db_session.query(BookingLink).filter(
+        BookingLink.status.in_(("booked", "confirmed"))).count() == 0
+
+    exec_rows = (db_session.query(AIToolExecution)
+                 .filter(AIToolExecution.work_item_id == report["work_item_id"])
+                 .all())
+    assert [r for r in exec_rows if r.tool_key == "appointment.reschedule"
+            and r.decision == "allowed"]
+    assert all(r.simulated for r in exec_rows
+               if r.tool_key.startswith("conversation.send_"))
+
+    item = db_session.query(AIWorkItem).get(report["work_item_id"])
+    assert item.state == WC.APPOINTMENT_BOOKED
+    counts = t9_collect.work_counts_by_state(
+        db_session, t9_scope.for_system([acct.org.id]))
+    assert WC.APPOINTMENT_BOOKED in json.dumps(counts)
 
 
 def test_an_evening_booking_is_not_refused(db_session):
