@@ -666,7 +666,8 @@ def test_the_owner_has_a_screen_for_this_and_it_is_wired_up():
     import re
     page = _fe("pages/god/GodExecutiveAccess.jsx")
     app = _fe("App.jsx")
-    shell = _fe("pages/GodShell.jsx")
+    # The God rail and its tabs live in godNav.js since the Oct 22 2026 redesign.
+    shell = _fe("pages/god/godNav.js")
 
     # It calls the real endpoints.
     for endpoint in ("/executive/admin/executives",
