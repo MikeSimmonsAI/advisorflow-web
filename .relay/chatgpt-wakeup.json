@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "bookaboost-backlog-security-20261022-2057-r1",
-  "parent_run_id": "",
-  "project": "EvoSys Pro BookaBoost Wholesale tenant isolation \u2014 clear P3/P4 backlog",
-  "status": "COMPLETED",
+  "relay_run_id": "bookaboost-backlog-security-20261022-2120-r2",
+  "parent_run_id": "bookaboost-backlog-security-20261022-2057-r1",
+  "project": "EvoSys Pro BookaBoost Wholesale P3 security \u2014 finish and test replacement for old PR 293",
+  "status": "BLOCKED",
   "branch": "feature/bookaboost-wholesale",
-  "actions_run_id": "39887860843",
-  "timestamp_ct": "2026-10-22 21:17 CT",
+  "actions_run_id": "39888888669",
+  "timestamp_ct": "2026-10-22 21:29 CT",
   "issue": 1,
-  "status_comment_id": 6355787977
+  "status_comment_id": 6355944798
 }
