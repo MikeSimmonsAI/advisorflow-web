@@ -9,6 +9,7 @@ import { PUSH_STATUS, pushApi, readPushStatus, subscribePush, unsubscribePush } 
 import { registerServiceWorker } from '../../../mobile/pwa'
 import { isInstalled, isIOS } from './fieldApp'
 import './appts.css'
+import { ev } from '../engine'
 
 export default function PhoneAlerts({ compact = false }) {
   const papi = pushApi(api)
@@ -36,8 +37,8 @@ export default function PhoneAlerts({ compact = false }) {
   if (status === null || status === PUSH_STATUS.UNCONFIGURED) return null
   const needsInstall = isIOS() && !isInstalled()
   let body
-  if (needsInstall) body = <span>On iPhone and iPad, add EvoSys Field to your home screen first, then open it from the icon and turn alerts on here.</span>
-  else if (status === PUSH_STATUS.UNSUPPORTED) body = <span>This browser can't show alerts. Open EvoSys Field from your home screen.</span>
+  if (needsInstall) body = <span>{ev('On iPhone and iPad, add EvoSys Field to your home screen first, then open it from the icon and turn alerts on here.')}</span>
+  else if (status === PUSH_STATUS.UNSUPPORTED) body = <span>{ev('This browser can\'t show alerts. Open EvoSys Field from your home screen.')}</span>
   else if (status === PUSH_STATUS.DENIED) body = <span>Alerts are blocked for this app. Turn them on in your phone's settings, then come back.</span>
   else if (status === PUSH_STATUS.SUBSCRIBED) body = <span>On. New visits, changes, offer answers and hot leads buzz this phone.</span>
   else body = <span>Get a buzz on this phone for new visits, changes, offer answers and hot leads - even with the app closed.</span>

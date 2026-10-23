@@ -17,6 +17,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../../api/client'
 import { canRunHunts, isWholesaleAdmin } from '../../../auth/workspaceAuthority'
 import { errText } from '../wsShared'
+import { ev } from '../engine'
 import {
   Alert, Chips, Empty, EvoApp, Feed, Hero, Metric, Metrics, Num, PageSkeleton, Panel, PropCard,
   PropertyThumb, Ring, SandboxTag, Scores, Status, Tag, ago, cents, humanize, money, when,
@@ -79,7 +80,7 @@ export default function EvoCommand() {
     try {
       const r = await api.post(`/wholesale/evosense/routing-reviews/${reviewId}`, { engagement_id: engagementId })
       setNotice(engagementId ? `Message attached and read${r.outcome ? ` as ${humanize(r.outcome).toLowerCase()}` : ''}.`
-        : 'Marked as not belonging to any EvoSense conversation.')
+        : ev('Marked as not belonging to any EvoSense conversation.'))
       await load()
     } catch (e) { setError(errText(e)) } finally { setBusy(false) }
   }
@@ -105,7 +106,7 @@ export default function EvoCommand() {
   const top = [...found].sort((x, y) => (y.opportunity_score ?? -1) - (x.opportunity_score ?? -1))
   const best = top[0]
   const spotlight = top.slice(0, 4)
-  const hunting = paused ? { label: 'EvoSense paused', tone: 'paused' }
+  const hunting = paused ? { label: ev('EvoSense paused'), tone: 'paused' }
     : a.hunting === 'active' ? { label: 'Hunting automatically', tone: 'live' }
     : { label: huntLabel, tone: undefined }
 
@@ -114,8 +115,8 @@ export default function EvoCommand() {
       <Hero
         scene="skyline"
         eyebrow="Acquisition Intelligence"
-        title="EvoSense Acquisition Command"
-        sub="Set the strategy. Let EvoSense find the opportunity."
+        title={ev('EvoSense Acquisition Command')}
+        sub={ev('Set the strategy. Let EvoSense find the opportunity.')}
         quote="Opportunity doesn't wait to be listed."
         meta={[
           hunting,
@@ -126,12 +127,12 @@ export default function EvoCommand() {
         actions={<>
           <button type="button" className={`evo-btn ${paused ? 'evo-btn--success' : 'evo-btn--secondary'}`}
                   onClick={togglePause} disabled={busy || (paused && !isAdmin)}
-                  title={paused && !isAdmin ? 'Only an administrator of this workspace can resume EvoSense.' : undefined}>
-            {paused ? 'Resume EvoSense' : 'Pause EvoSense'}
+                  title={paused && !isAdmin ? ev('Only an administrator of this workspace can resume EvoSense.') : undefined}>
+            {paused ? ev('Resume EvoSense') : ev('Pause EvoSense')}
           </button>
           <button type="button" className="evo-btn evo-btn--primary" onClick={huntAll}
                   disabled={busy || paused || !(cc.strategies || []).length || !canRunHunts()}
-                  title={!canRunHunts() ? 'Only an admin or a team manager can do this.' : paused ? 'EvoSense is paused' : 'Runs every active strategy now — the same hunt the scheduler runs'}>
+                  title={!canRunHunts() ? 'Only an admin or a team manager can do this.' : paused ? ev('EvoSense is paused') : 'Runs every active strategy now — the same hunt the scheduler runs'}>
             {busy ? 'Hunting…' : 'Run hunt now'}
           </button>
         </>}
@@ -140,14 +141,14 @@ export default function EvoCommand() {
       <Alert>{error}</Alert>
       <Alert kind="ok">{notice}</Alert>
       {paused ? (
-        <Alert kind="warn"><span><strong>EvoSense is paused.</strong> Nothing is discovered, bought or sent. Seller
+        <Alert kind="warn"><span><strong>{ev('EvoSense is paused.')}</strong> Nothing is discovered, bought or sent. Seller
           replies are still saved and opt-outs are still honoured.</span></Alert>
       ) : null}
       {cc.sandbox && cc.sandbox.banner ? (
         <p className="evo-sandbox-line"><SandboxTag /> {cc.sandbox.banner}</p>
       ) : null}
 
-      <Metrics label="EvoSense totals">
+      <Metrics label={ev('EvoSense totals')}>
         <Metric label="Top opportunity" value={best ? best.opportunity_score : null} tone="success"
                 sub={best ? best.address : 'nothing scored yet'} />
         <Metric label="Properties evaluated" value={t.properties_evaluated}
@@ -197,9 +198,9 @@ export default function EvoCommand() {
       {!hero && !spotlight.length ? (
         <Panel>
           <Empty title="Nothing found yet" icon="✓">
-            No property passes an active strategy yet. Run a hunt, or wait for the next automatic one. EvoSense hands
-            a conversation to you when a seller states a price, asks for an offer or a visit, or crosses a strategy's
-            intent threshold.
+            {ev('No property passes an active strategy yet. Run a hunt, or wait for the next automatic one. EvoSense hands '
+              + 'a conversation to you when a seller states a price, asks for an offer or a visit, or crosses a strategy\'s '
+              + 'intent threshold.')}
           </Empty>
         </Panel>
       ) : (
@@ -273,7 +274,7 @@ export default function EvoCommand() {
 
           <FunnelPanel />
 
-          <Panel title="Pipeline at a glance" hint="every property EvoSense has evaluated, by state">
+          <Panel title="Pipeline at a glance" hint={ev('every property EvoSense has evaluated, by state')}>
             <div className="evo-buckets">
               {cc.buckets.filter((b) => b.count).map((b) => (
                 <Link key={b.key} className="evo-bucket" to={`/wholesale/evosense/inbox?bucket=${b.key}`}>
@@ -295,7 +296,7 @@ export default function EvoCommand() {
               key: i, tone: ACT_TONE[e.action] || 'quiet',
               text: <>{e.summary}{e.address ? <> — <Link className="evo-feedlink" to={`/wholesale/evosense/property/${e.property_id}`}>{e.address}</Link></> : null}</>,
               meta: `${ago(e.at)} · ${e.actor === 'user' ? 'you' : e.actor}`,
-            }))} empty="EvoSense has not done anything yet." />
+            }))} empty={ev('EvoSense has not done anything yet.')} />
           </Panel>
         </aside>
       </div>
@@ -373,7 +374,7 @@ function NeedsYouHero({ n, onOpen }) {
             <button type="button" className="evo-btn evo-btn--primary evo-btn--lg" onClick={onOpen}>Open opportunity</button>
           </div>
         </div>
-        <p className="evo-hero__stop">EvoSense stops here. It never makes an offer, signs anything or moves money.</p>
+        <p className="evo-hero__stop">{ev('EvoSense stops here. It never makes an offer, signs anything or moves money.')}</p>
       </div>
     </section>
   )

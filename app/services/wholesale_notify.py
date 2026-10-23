@@ -118,7 +118,7 @@ def email_recipients(db, org_id: str, settings, assignee_id: Optional[str]) -> L
     return sorted(set(out))
 
 
-def _email_html(org_name: str, job: dict, link: Optional[str]) -> tuple:
+def _email_html(org_name: str, job: dict, link: Optional[str], product: Optional[str] = None) -> tuple:
     import html
     d = job["details"]
     heading = {"new": "New seller inquiry", "re-engaged": "A seller came back (re-engaged)",
@@ -141,8 +141,9 @@ def _email_html(org_name: str, job: dict, link: Optional[str]) -> tuple:
     subject = "%s - %s" % (heading, d.get("address") or d.get("reference") or "")
     return subject[:180], ("<p><strong>%s</strong></p><table>%s</table>%s%s"
                            "<p style='color:#56637a;font-size:12px'>You receive this because %s has "
-                           "seller inquiry emails turned on in EvoSys Wholesale settings.</p>"
-                           % (html.escape(heading), body, extra, cta, html.escape(org_name)))
+                           "seller inquiry emails turned on in %s settings.</p>"
+                           % (html.escape(heading), body, extra, cta, html.escape(org_name),
+                              html.escape(product or "EvoSys Wholesale")))
 
 
 def send_pending_email(db) -> List[dict]:
@@ -178,7 +179,9 @@ def _send_one(db, job: dict) -> dict:
     except Exception:  # noqa: BLE001
         base = None
     link = ("%s/wholesale/deals/%s" % (base.rstrip("/"), job["deal_id"])) if base and job.get("deal_id") else None
-    subject, body = _email_html(getattr(org, "name", "") or "Your workspace", job, link)
+    from app.services.brand_config import wholesale_product
+    subject, body = _email_html(getattr(org, "name", "") or "Your workspace", job, link,
+                                wholesale_product(db, org))
     from app.services.email_service import send_email_via_provider
     sent, errors = 0, []
     for addr in to:

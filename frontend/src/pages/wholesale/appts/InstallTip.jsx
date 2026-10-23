@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { canPromptInstall, isInstalled, isIOS, onInstallable, promptInstall } from './fieldApp'
 import './appts.css'
+import { ev } from '../engine'
 
 const KEY = 'evo_field_install_tip_closed'
 
@@ -18,7 +19,7 @@ export default function InstallTip() {
     <div className="it-tip" role="note">
       <img src="/icons/field-192.png" alt="" width="44" height="44" />
       <div className="it-text">
-        <strong>Put EvoSys Field on your home screen</strong>
+        <strong>{ev('Put EvoSys Field on your home screen')}</strong>
         {can ? <span>One tap and it opens straight to your appointments.</span>
           : isIOS() ? <span>iPhone or iPad: tap Share <span aria-hidden="true">⎙</span>, then <b>Add to Home Screen</b>.</span>
             : <span>Android: tap the browser menu ⋮, then <b>Install app</b> or <b>Add to Home screen</b>.</span>}
