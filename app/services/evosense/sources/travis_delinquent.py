@@ -1,180 +1,202 @@
-"""Travis County, Texas: the Tax Office's published delinquent-tax roll (capability: "tax delinquency").
+"""Travis County, Texas: the Tax Office's published delinquent-tax file.
 
     https://tax-office.traviscountytx.gov/about-us/reports-data/property-taxes
+    https://tax-office.traviscountytx.gov/voterdata/TaxDelqOpenData.csv
 
-NOT LIVE VERIFIED. When this adapter was written the build sandbox could not reach
-the county site, so the column names below are an alias list of the headers a
-county tax export normally carries, not a copy of a fetched file. The parser is
-header-driven and strict: if the required columns cannot be found it raises
-SOURCE_FORMAT_CHANGED instead of guessing. Replace/extend COLUMN_ALIASES with the
-first real header row.
+Verified against the live file on 2026-10-22 (Last-Modified 2026-10-20,
+1.74 MB, 7,533 accounts, one row per account). Real header:
 
-WHAT QUALIFIES (all must hold, else the row is counted and dropped):
-  - a county account id AND an owner name from the roll itself (no placeholders)
-  - a past-due balance > 0 for a tax year strictly before the current tax year
-  - a situs street address
-  - an appraisal lookup (`residential_lookup`, e.g. the CAD roll) says the same
-    account is residential improved property. No lookup, no lead: a tax roll alone
-    cannot tell a house from a vacant lot.
-The whole file is never saved: only qualifying rows, capped by `limit`, leave the adapter.
+    Account #, Last Tax Roll Year, Property Type Code, Land Value,
+    Improvement Value, Ag Market, Appraisal Value, Ag Taxable Value,
+    Assessed Value, Exemptions, Delinquent Total, Current Year Total,
+    Total Due, Sequence #, 1st Year Delinquent, Cause #, Judgement Date,
+    Bankruptcy Number, Owner ID, Owner Name, Address 1, Address 2, Address 3,
+    City, State, Zip Code, Country, Street Number, Street Name, Property Zip,
+    Legal Description
+
+City/State/Zip belong to the OWNER'S mailing address; the property itself
+has only Street Number, Street Name and Property Zip.
+
+KEPT (all must hold; every rejection is counted):
+  - Property Type Code A1 (single-family house) - the file's own state class,
+    so no outside lookup is needed to tell a house from a lot. Other A codes,
+    land, commercial and personal property are counted and left out;
+  - Delinquent Total (past-due balance, NOT the current-year bill) at least
+    `min_due`;
+  - an account whose last tax roll year is current (stale accounts are left);
+  - not in bankruptcy;
+  - a situs house number and street, and a named owner.
+A Cause # means a delinquent-tax lawsuit (TAX_SUIT); a Judgement Date is kept
+as evidence. Nothing here is a foreclosure or a tax sale.
 """
 from __future__ import annotations
 
 import csv
 import io
 import re
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from app.services.evosense.sources import base as B
 
 PAGE = "https://tax-office.traviscountytx.gov/about-us/reports-data/property-taxes"
-CAPABILITY = "tax delinquency"          # not "tax foreclosure": no suit is implied
-RESIDENTIAL_TYPES = ("single_family", "townhouse", "condo", "duplex")
-
-COLUMN_ALIASES = {
-    "account": ("account", "account number", "account no", "acct", "acct no", "prop id", "propid", "property id"),
-    "owner": ("owner", "owner name", "name", "taxpayer"),
-    "year": ("tax year", "year", "levy year"),
-    "due": ("total due", "amount due", "balance due", "delinquent amount", "balance", "total"),
-    "situs": ("situs", "situs address", "property address", "site address", "address"),
-    "mail1": ("mailing address", "mail address", "owner address", "address 1", "mail address 1"),
-    "city": ("mailing city", "mail city", "city"),
-    "state": ("mailing state", "mail state", "state"),
-    "zip": ("mailing zip", "mail zip", "zip", "zip code"),
-}
-REQUIRED = ("account", "owner", "year", "due", "situs")
-
-
-def _norm(h: str) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"[_\-]", " ", (h or "").strip().lower()))
-
-
-def map_columns(header: Iterable[str]) -> Dict[str, int]:
-    idx = {_norm(h): i for i, h in enumerate(header)}
-    out: Dict[str, int] = {}
-    for field, names in COLUMN_ALIASES.items():
-        for n in names:
-            if n in idx:
-                out[field] = idx[n]
-                break
-    missing = [f for f in REQUIRED if f not in out]
-    if missing:
-        raise B.SourceError(B.SOURCE_FORMAT_CHANGED,
-                            "Travis delinquent file lacks column(s) %s; saw %s"
-                            % (", ".join(missing), ", ".join(sorted(idx)[:12])))
-    return out
+FILE = "https://tax-office.traviscountytx.gov/voterdata/TaxDelqOpenData.csv"
+HOUSE_CLASSES = ("A1",)
+REQUIRED = ("Account #", "Property Type Code", "Delinquent Total", "Owner Name", "Street Number",
+            "Street Name", "Property Zip", "Last Tax Roll Year")
 
 
 def money(v) -> float:
-    s = re.sub(r"[^\d.\-()]", "", str(v or ""))
-    neg = s.startswith("(") or s.startswith("-")
-    s = s.strip("()-")
     try:
-        x = float(s)
+        return float(re.sub(r"[^\d.\-]", "", str(v or "")) or 0)
     except ValueError:
         return 0.0
-    return -x if neg else x
 
 
-def current_tax_year(today: datetime) -> int:
-    """Texas taxes for year N are billed ~Oct N and go delinquent Feb 1 N+1.
-    Until Feb 1 the newest year is not past due."""
-    return today.year if today.month >= 2 else today.year - 1
+def _year(v) -> Optional[int]:
+    m = re.match(r"^\s*((?:19|20)\d{2})\s*$", str(v or ""))
+    return int(m.group(1)) if m else None
+
+
+def latest_roll_year(today: datetime) -> int:
+    """Year N bills go out in October N and fall delinquent February 1, N+1;
+    in October 2026 the newest roll in a delinquent file is 2025."""
+    return today.year - 1 if today.month >= 2 else today.year - 2
+
+
+def rows_from_text(text: str) -> List[Dict[str, str]]:
+    reader = csv.reader(io.StringIO(text))
+    header = [h.strip() for h in next(reader, [])]
+    missing = [c for c in REQUIRED if c not in header]
+    if missing:
+        raise B.SourceError(B.SOURCE_FORMAT_CHANGED, "Travis delinquent file lacks %s; header is %s"
+                            % (", ".join(missing), ", ".join(header[:10])))
+    out = []
+    for cells in reader:
+        if not cells or not any(c.strip() for c in cells):
+            continue
+        cells += [""] * (len(header) - len(cells))
+        out.append({h: (cells[i] or "").strip() for i, h in enumerate(header)})
+    return out
+
+
+def situs(r: Dict[str, str]) -> Optional[str]:
+    """'1012' + 'MILTON ST W' -> '1012 W MILTON ST' (the file puts the
+    direction last; the rest of EvoSense writes it first)."""
+    num = (r.get("Street Number") or "").strip().lstrip("0")
+    name = re.sub(r"\s+", " ", (r.get("Street Name") or "").strip().upper())
+    if not num or not name:
+        return None
+    m = re.match(r"^(.*\S)\s+(N|S|E|W|NE|NW|SE|SW)$", name)
+    if m:
+        name = "%s %s" % (m.group(2), m.group(1))
+    return "%s %s" % (num, name)
 
 
 class TravisDelinquentReader:
-    adapter_version = "travis_delinquent/1"
+    adapter_version = "travis_delinquent/2"
 
-    def discover_rows(self, rows: Iterable[List[str]], *, limit: int,
-                      residential_lookup: Optional[Callable[[str], Optional[Dict[str, Any]]]] = None,
-                      min_due: float = 500.0, today: Optional[datetime] = None) -> Dict[str, Any]:
+    def fetch(self) -> str:
+        return B.get_text(FILE, max_bytes=20 * 1024 * 1024)
+
+    def discover(self, *, limit: int, min_due: float = 250.0, skip: int = 0, zips=None,
+                 today: Optional[datetime] = None, text: Optional[str] = None) -> Dict[str, Any]:
         today = today or datetime.utcnow()
-        it = iter(rows)
-        cols = map_columns(next(it, []))
+        rows = rows_from_text(text if text is not None else self.fetch())
+        newest = latest_roll_year(today)
+        zips = {z[:5] for z in zips or [] if z}
         stats: Counter = Counter()
-        accts: Dict[str, Dict[str, Any]] = {}
-        get = lambda r, k: (r[cols[k]].strip() if k in cols and cols[k] < len(r) else "")  # noqa: E731
-        for r in it:
+        pool: List[Dict[str, str]] = []
+        for r in rows:
             stats["rows"] += 1
-            acct = re.sub(r"\s", "", get(r, "account"))
-            if not acct:
-                stats["no_account"] += 1
+            cls = (r.get("Property Type Code") or "").upper()
+            if cls not in HOUSE_CLASSES:
+                stats["other_residential" if cls.startswith("A") else "not_residential"] += 1
                 continue
-            m = re.search(r"(19|20)\d{2}", get(r, "year"))
-            yr = int(m.group(0)) if m else None
-            due = money(get(r, "due"))
-            if yr is None or due <= 0 or yr >= current_tax_year(today):
-                stats["not_past_due"] += 1
+            stats["houses"] += 1
+            yr = _year(r.get("Last Tax Roll Year"))
+            if yr is None or yr < newest - 1:
+                stats["stale_account"] += 1
                 continue
-            a = accts.setdefault(acct, {"account": acct, "years": set(), "due": 0.0, "row": r, "seen": set()})
-            key = (yr, due, get(r, "owner"))
-            if key in a["seen"]:                      # an exact repeated row is not a second debt
-                stats["duplicate_rows"] += 1
-                continue
-            a["seen"].add(key)
-            a["years"].add(yr)
-            a["due"] += due
-        if residential_lookup is None:
-            stats["no_residential_lookup"] = len(accts)
-            return {"records": [], "stats": dict(stats), "source_url": PAGE}
-        recs: List[Dict[str, Any]] = []
-        for acct in sorted(accts):
-            a = accts[acct]
-            r = a["row"]
-            owner = re.sub(r"\s+", " ", get(r, "owner"))
-            situs = re.sub(r"\s+", " ", get(r, "situs"))
-            if not owner or owner.upper() in ("UNKNOWN", "N/A", "OWNER", "CURRENT OWNER"):
-                stats["missing_owner"] += 1
-            elif not re.match(r"^\d", situs):
-                stats["no_situs"] += 1
-            elif a["due"] < min_due:
+            if money(r.get("Delinquent Total")) < min_due:
                 stats["below_min_due"] += 1
-            else:
-                prop = residential_lookup(acct) or {}
-                if prop.get("property_type") not in RESIDENTIAL_TYPES or not prop.get("improved", True):
-                    stats["not_residential"] += 1
-                elif _street_key(prop.get("street_address")) != _street_key(situs):
-                    stats["situs_mismatch"] += 1
-                else:
-                    recs.append(self.record(a, owner, situs, get, cols, today))
-            if len(recs) >= limit:
-                break
-        stats["records"] = len(recs)
-        return {"records": recs, "stats": dict(stats), "source_url": PAGE}
+                continue
+            if (r.get("Bankruptcy Number") or "").strip():
+                stats["bankruptcy_skipped"] += 1
+                continue
+            owner = (r.get("Owner Name") or "").strip()
+            if not owner or owner.upper() in ("CURRENT OWNER", "UNKNOWN OWNER", "UNKNOWN"):
+                stats["no_owner"] += 1
+                continue
+            if not situs(r):
+                stats["no_situs"] += 1
+                continue
+            if zips and (r.get("Property Zip") or "")[:5] not in zips:
+                continue
+            pool.append(r)
+        pool.sort(key=lambda r: r["Account #"])
+        stats["delinquent_houses"] = len(pool)
+        stats["with_lawsuit"] = sum(1 for r in pool if (r.get("Cause #") or "").strip())
+        records = []
+        if pool:
+            start = skip % len(pool)
+            take = min(limit, len(pool))
+            if start + take > len(pool):
+                stats["wrapped"] = start + take - len(pool)
+            records = [self.record(pool[(start + i) % len(pool)], today) for i in range(take)]
+        stats["records"] = len(records)
+        return {"records": records, "stats": dict(stats), "source_url": FILE}
 
-    def discover_csv(self, text: str, **kw) -> Dict[str, Any]:
-        return self.discover_rows(csv.reader(io.StringIO(text)), **kw)
-
-    def record(self, a, owner, situs, get, cols, today) -> Dict[str, Any]:
-        years = sorted(a["years"])
-        r = a["row"]
-        what = ("Travis County tax roll: $%s past due, tax year%s %s"
-                % (format(a["due"], ",.2f"), "s" if len(years) > 1 else "",
-                   "%s-%s" % (years[0], years[-1]) if len(years) > 1 else years[0]))
-        return {
-            "source_reference": "TRAVISDQ:%s" % a["account"],
-            "street_address": situs, "unit": None, "city": None, "state": "TX", "zip_code": None,
-            "county": "Travis", "parcel_apn": a["account"],
-            "owner": {"name": owner, "mailing_street": get(r, "mail1") or None,
-                      "mailing_city": get(r, "city").title() or None,
-                      "mailing_state": get(r, "state").upper() or None,
-                      "mailing_zip": re.sub(r"\D", "", get(r, "zip"))[:5] or None},
-            "signals": [{"type": "TAX_DELINQUENT", "confidence": 90, "value": what,
-                         "raw": "ACCOUNT=%s;YEARS=%s;DUE=%.2f" % (a["account"], ",".join(map(str, years)), a["due"]),
-                         "evidence_basis": "Travis County Tax Office delinquent roll (balance remaining)",
-                         "observed_days_ago": 0}],
-            "_raw": {"account": a["account"], "years": years, "due": a["due"]},
-            "_source_url": PAGE, "_source_updated_at": None, "_adapter_version": self.adapter_version,
-            "_evidence": {"capability": CAPABILITY, "live_verified": False},
+    def record(self, r: Dict[str, str], today: datetime) -> Dict[str, Any]:
+        from app.services.evosense.sources.tarrant import state_code
+        acct = r["Account #"].strip()
+        due = money(r.get("Delinquent Total"))
+        first = _year(r.get("1st Year Delinquent"))
+        roll = _year(r.get("Last Tax Roll Year"))
+        since = first or roll
+        owner = {"name": re.sub(r"\s*&\s*$", "", r["Owner Name"].strip()),
+                 "mailing_street": B.mailing_line(r.get("Address 1"), r.get("Address 2"), r.get("Address 3")),
+                 "mailing_city": (r.get("City") or "").title() or None,
+                 "mailing_state": state_code((r.get("State") or "").upper()) if r.get("State") else None,
+                 "mailing_zip": re.sub(r"\D", "", r.get("Zip Code") or "")[:5] or None}
+        what = ("Travis County Tax Office: $%s delinquent (past due, not this year's bill)%s"
+                % (format(due, ",.2f"), ", unpaid since tax year %s" % since if since else ""))
+        sigs = [{"type": "TAX_DELINQUENT", "confidence": 90, "value": what,
+                 "raw": "ACCOUNT=%s;DELINQUENT_TOTAL=%s;FIRST_YEAR=%s;ROLL_YEAR=%s"
+                        % (acct, r.get("Delinquent Total"), r.get("1st Year Delinquent"), r.get("Last Tax Roll Year")),
+                 "effective_at": "%s-02-01" % (since + 1) if since else None,
+                 "evidence_basis": "Travis County Tax Office delinquent-tax file (balance still owed as of the file)",
+                 "observed_days_ago": 0}]
+        cause = (r.get("Cause #") or "").strip()
+        if cause:
+            sigs.append({"type": "TAX_SUIT", "confidence": 90,
+                         "value": "delinquent-tax lawsuit, cause %s%s"
+                                  % (cause, "; judgment %s" % r["Judgement Date"] if r.get("Judgement Date") else ""),
+                         "raw": "CAUSE=%s;JUDGMENT=%s" % (cause, r.get("Judgement Date") or ""),
+                         "evidence_basis": "Travis County Tax Office delinquent-tax file (Cause #)",
+                         "observed_days_ago": 0})
+        appraisal = None
+        val = money(r.get("Appraisal Value"))
+        if val > 0:
+            appraisal = {"value": int(val), "land": int(money(r.get("Land Value"))) or None,
+                         "improvements": int(money(r.get("Improvement Value"))) or None, "year": roll,
+                         "district": "Travis Central Appraisal District",
+                         "basis": "Travis County Tax Office delinquent file (appraised value on the roll)"}
+        rec = {
+            "source_reference": "TRAVISDELQ:%s" % acct,
+            "street_address": situs(r), "unit": None, "city": None, "state": "TX",
+            "zip_code": re.sub(r"\D", "", r.get("Property Zip") or "")[:5] or None,
+            "county": "Travis", "parcel_apn": acct, "property_type": "single_family",
+            "owner": owner, "signals": sigs,
+            "occupancy": "owner_occupied" if re.search(r"\bHS?\b", (r.get("Exemptions") or "").upper()) else None,
+            "_raw": dict(r), "_source_url": FILE, "_source_updated_at": None,
+            "_adapter_version": self.adapter_version,
+            "_evidence": {"account": acct, "delinquent_total": due, "current_year_total": money(r.get("Current Year Total")),
+                          "first_year_delinquent": first, "last_roll_year": roll, "cause": cause or None,
+                          "judgment_date": r.get("Judgement Date") or None, "legal": r.get("Legal Description") or None,
+                          "property_class": r.get("Property Type Code")},
         }
-
-
-_SUFFIX = {"STREET": "ST", "DRIVE": "DR", "ROAD": "RD", "LANE": "LN", "AVENUE": "AVE", "COURT": "CT",
-           "BOULEVARD": "BLVD", "TRAIL": "TRL", "CIRCLE": "CIR"}
-
-
-def _street_key(s: Optional[str]) -> str:
-    toks = re.sub(r"[^A-Z0-9 ]", " ", (s or "").upper()).split()
-    return " ".join(_SUFFIX.get(t, t) for t in toks)
+        if appraisal:
+            rec["appraisal"] = appraisal
+        return rec
