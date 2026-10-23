@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "wholesale-distress-20261023-0040-a3",
-  "parent_run_id": "wholesale-texas-20261022-2314-a2",
-  "project": "EvoSense Wholesale \u2014 official delinquent-tax residential lead source, small real connector",
-  "status": "COMPLETED",
+  "relay_run_id": "wholesale-main-sync-20261022-2035-r1",
+  "parent_run_id": "",
+  "project": "EvoSys Wholesale \u2014 bring development branch current with main (SYNC ONLY)",
+  "status": "BLOCKED",
   "branch": "feature/wholesale-development",
-  "actions_run_id": "39879460200",
-  "timestamp_ct": "2026-10-22 19:42 CT",
+  "actions_run_id": "39885144085",
+  "timestamp_ct": "2026-10-22 20:39 CT",
   "issue": 1,
-  "status_comment_id": 6354589961
+  "status_comment_id": 6355315766
 }
