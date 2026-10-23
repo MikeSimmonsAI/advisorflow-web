@@ -43,6 +43,10 @@ def test_every_starter_names_its_sources():
         clean, problems = ST.validate(v)
         assert not problems and clean["provider_preferences"]["discovery"]
     assert ST.starter_values("behind_on_taxes")["provider_preferences"]["discovery"] == ["TAX"]
+    # Tired Landlord reads every absentee-owner roll, Harris and statewide included.
+    tl = ST.starter_values("tired_landlord")["provider_preferences"]["discovery"]
+    assert {"collin_cad", "denton_gis", "hcad_roll", "txgio_roll", "TAX"} == set(tl)
+    assert all(k in PV.PROVIDERS for k in tl if k.islower())
 
 
 def test_starter_api_stores_the_focus(client, auth_headers, admin_auth_headers):
