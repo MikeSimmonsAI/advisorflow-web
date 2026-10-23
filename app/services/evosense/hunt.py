@@ -162,17 +162,29 @@ def discovery_focus(strategy) -> List[str]:
     return [str(x) for x in focus if x] if isinstance(focus, list) else []
 
 
+def expand_focus(focus: Optional[List[str]]) -> List[str]:
+    """A strategy that names one appraisal-roll source (Tired Landlord named
+    collin_cad and denton_gis) means the FAMILY: every owner-roll source,
+    including ones added later (Harris, statewide), reads for it - no strategy
+    has to be edited when a new county comes online."""
+    focus = list(focus or [])
+    fams = {getattr(PV.PROVIDERS.get(k), "discovery_family", None) for k in focus} - {None}
+    return focus + sorted(f for f in fams if f not in focus)
+
+
 def _discovery_routes(db, org_id, focus: Optional[List[str]] = None):
     """(capability, provider, cfg) for every connected DISCOVERY source. A
     public-record LOOKUP source (TAD, geocoder, code cases) is never asked to
     discover; it is called per property in the lookup stage. With a focus,
     only the named capabilities / sources discover."""
     out, seen = [], set()
+    focus = expand_focus(focus)
     for cap in DISCOVERY:
         for provider, cfg, _cost in PV.route(db, org_id, cap):
             if not getattr(provider, "discovery", True):
                 continue
-            if focus and cap not in focus and provider.key not in focus:
+            if focus and cap not in focus and provider.key not in focus \
+                    and getattr(provider, "discovery_family", None) not in focus:
                 continue
             if (provider.key, cap) in seen:
                 continue

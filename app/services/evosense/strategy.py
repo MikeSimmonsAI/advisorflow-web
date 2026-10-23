@@ -298,8 +298,7 @@ STARTERS = {
                    "occupancy_preferences": ["non_owner_occupied"],
                    "preferred_signals": ["ABSENTEE_OWNER", "OUT_OF_STATE_OWNER", "TIRED_LANDLORD",
                                          "CODE_COMPLAINT", "CODE_VIOLATION", "TAX_DELINQUENT"],
-                   "provider_preferences": {"discovery": ["collin_cad", "denton_gis", "hcad_roll", "txgio_roll",
-                                                          "TAX"]}},
+                   "provider_preferences": {"discovery": ["OWNER_ROLLS", "TAX"]}},
     },
     "problem_property": {
         "name": "Problem Property",
