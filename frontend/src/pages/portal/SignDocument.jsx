@@ -109,7 +109,7 @@ export default function SignDocument() {
     try {
       const j = await call(token)
       setD(j); setErr(null)
-      document.title = `Sign: ${j.title} · EvoSys`
+      document.title = `Sign: ${j.title} · ${j.brand || 'EvoSys'}`
       setName((n) => n || (j.signer && j.signer.name) || '')
     } catch (e) { setErr(e.message) }
   }, [token])
@@ -135,7 +135,7 @@ export default function SignDocument() {
 
   if (!d) {
     return <div style={page}><div style={wrap}>
-      <h1 style={{ fontSize: 22 }}>EvoSys e-signature</h1>
+      <h1 style={{ fontSize: 22 }}>Electronic signature</h1>
       <div style={{ ...box, color: err ? C.bad : C.mute }}>{err || 'Loading the document…'}</div>
     </div></div>
   }
@@ -146,7 +146,7 @@ export default function SignDocument() {
 
   return (
     <div style={page}><div style={wrap}>
-      <div style={{ fontSize: 13, color: C.mute, fontWeight: 700, letterSpacing: 0.5 }}>EVOSYS E-SIGNATURE</div>
+      <div style={{ fontSize: 13, color: C.mute, fontWeight: 700, letterSpacing: 0.5 }}>{`${d.brand || 'EvoSys'} e-signature`.toUpperCase()}</div>
       <h1 style={{ fontSize: 22, margin: '6px 0 4px' }}>{d.title}</h1>
       <div style={{ color: C.mute }}>From {d.sender}{d.organization && d.organization !== d.sender ? ` · ${d.organization}` : ''}</div>
       {d.message ? <div style={{ ...box, background: '#eff6ff' }}>{d.message}</div> : null}
@@ -260,7 +260,7 @@ export default function SignDocument() {
       ) : null}
 
       <p style={{ fontSize: 11, color: C.mute, marginTop: 24, textAlign: 'center' }}>
-        Secured by EvoSys e-signature · document fingerprint {String(d.document_sha256 || '').slice(0, 16)}…</p>
+        Secured by {d.brand || 'EvoSys'} e-signature · document fingerprint {String(d.document_sha256 || '').slice(0, 16)}…</p>
     </div></div>
   )
 }

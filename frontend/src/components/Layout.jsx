@@ -4,7 +4,7 @@ import { getCurrentUser, refreshCurrentUser, logout, getBranding, clearBranding,
 import { findSciWorkspace } from '../auth/sciDoor'
 import { isManagerRole, isWorkspaceManagerRole, roleOf, workspaceFeatures, canEnterProduct, WHOLESALE_FEATURE, workspaceLocationChoices, activeLocationId } from '../auth/workspaceAuthority'
 import { enterCustomer as enterCustomerContext } from '../pages/god/enterCustomer'
-import { detectTheme, shellTheme, shellThemeSource, productName, BRAND_CONFIG, THEMES } from '../theme.js'
+import { detectTheme, shellTheme, shellThemeSource, productName, engineName, BRAND_CONFIG, THEMES } from '../theme.js'
 import SignalPulse from './SignalPulse'
 import NotificationBell from './NotificationBell'
 import ProfileOnboarding from './ProfileOnboarding'
@@ -694,6 +694,10 @@ export default function Layout({ children }) {
   // The commercial product name this brand gives the Wholesale module
   // (EvoSysPro -> "EvoSys Wholesale"); the neutral module name otherwise.
   const WHOLESALE_PRODUCT = productName(branding, 'wholesale') || 'Wholesale'
+  // The acquisition engine's name for THIS workspace ("EvoSense"; null for a
+  // second Wholesale tenant, which never shows another brand's name - #272).
+  const WHOLESALE_ENGINE = engineName(branding)
+  const navSectionLabel = (label) => (label === 'Acquisition · EvoSense' && !WHOLESALE_ENGINE ? 'Acquisition' : label)
   useWholesaleTitle(inWholesale, WHOLESALE_PRODUCT)
   const brandName = isGodAdmin ? 'AdvisorFlow' : (branding?.brand_name || SHELL_BRAND.displayName)
   // WHAT THE WORKSPACE ITSELF IS CALLED, which is not the same question as
@@ -786,7 +790,7 @@ export default function Layout({ children }) {
                   style={{ height: 72, maxWidth: 180, objectFit: 'contain', borderRadius: 6, display: 'block', margin: '0 auto' }}
                   onError={() => setLogoFailed(true)}
                 />
-                {inWholesale ? <WholesaleProductLine name={WHOLESALE_PRODUCT} /> : null}
+                {inWholesale ? <WholesaleProductLine name={WHOLESALE_PRODUCT} engine={WHOLESALE_ENGINE} /> : null}
               </span>
             )
           ) : (
@@ -794,7 +798,7 @@ export default function Layout({ children }) {
               <SignalPulse color="blue" size={9} />
             ) : (
               inWholesale
-                ? <span className="wsx-brand"><span className="brand-mark">{brandName}</span><WholesaleProductLine name={WHOLESALE_PRODUCT} /></span>
+                ? <span className="wsx-brand"><span className="brand-mark">{brandName}</span><WholesaleProductLine name={WHOLESALE_PRODUCT} engine={WHOLESALE_ENGINE} /></span>
                 : <><SignalPulse color="blue" size={9} /><span className="brand-mark">{brandName}</span></>
             )
           )}
@@ -982,7 +986,7 @@ export default function Layout({ children }) {
                 if (items.length === 0) return null
                 return (
                   <div key={group.label} className="nav-section">
-                    {!sidebarCollapsed && <div className="nav-section-label">{group.label}</div>}
+                    {!sidebarCollapsed && <div className="nav-section-label">{navSectionLabel(group.label)}</div>}
                     {sidebarCollapsed && <div className="nav-divider" />}
                     {items.map((item) => (
                       <NavLink key={item.to} to={item.to} end={item.to === '/' || !!item.end}
@@ -1032,7 +1036,7 @@ export default function Layout({ children }) {
                     if (items.length === 0) return null
                     return (
                       <div key={group.label} className="nav-section">
-                        {!sidebarCollapsed && <div className="nav-section-label">{group.label}</div>}
+                        {!sidebarCollapsed && <div className="nav-section-label">{navSectionLabel(group.label)}</div>}
                         {sidebarCollapsed && <div className="nav-divider" />}
                         {items.map(renderItem)}
                       </div>
@@ -1064,7 +1068,7 @@ export default function Layout({ children }) {
               if (items.length === 0) return null
               return (
                 <div key={group.label} className="nav-section">
-                  {!sidebarCollapsed && <div className="nav-section-label">{group.label}</div>}
+                  {!sidebarCollapsed && <div className="nav-section-label">{navSectionLabel(group.label)}</div>}
                   {sidebarCollapsed && <div className="nav-divider" />}
                   {items.map((item) => (
                     <NavLink key={item.to} to={item.to} end={item.to === '/' || !!item.end}

@@ -111,10 +111,16 @@ def _send(db: Session, env: EsignEnvelope, to: str, subject: str, html: str, *,
         return False
 
 
-def _wrap(body: str, org_name: str) -> str:
+def _brand(db: Session, env: EsignEnvelope) -> str:
+    """"EvoSys" for EvoSys orgs (unchanged); another brand's own name (#272 P4)."""
+    from app.services.brand_config import brand_word
+    return brand_word(db, _org(db, env.organization_id))
+
+
+def _wrap(body: str, org_name: str, brand: str = "EvoSys") -> str:
     return ("<div style='font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#111;"
-            "max-width:560px'>%s<p style='color:#777;font-size:12px;margin-top:28px'>Sent with EvoSys "
-            "e-signature on behalf of %s.</p></div>" % (body, _esc(org_name or "the sender")))
+            "max-width:560px'>%s<p style='color:#777;font-size:12px;margin-top:28px'>Sent with %s "
+            "e-signature on behalf of %s.</p></div>" % (body, _esc(brand), _esc(org_name or "the sender")))
 
 
 def _esc(s: Any) -> str:
@@ -148,7 +154,7 @@ def _email_link(db: Session, env: EsignEnvelope, s: EsignSigner, *, reminder: bo
                 ("<p>Message from %s: %s</p>" % (_esc(who), _esc(env.message))) if env.message else "",
                 _button(sign_url(token), "Review and sign")))
     subject = ("Reminder: please sign %s" if reminder else "Please sign: %s") % env.title
-    ok = _send(db, env, s.email, subject, _wrap(body, _org_name(db, env)), kind="link")
+    ok = _send(db, env, s.email, subject, _wrap(body, _org_name(db, env), _brand(db, env)), kind="link")
     _event(db, env, "reminder" if reminder else "link_sent", signer=s, detail={"delivered": ok})
     return ok
 
@@ -242,7 +248,7 @@ def public_view(db: Session, token: str, *, ip=None, ua=None) -> Dict[str, Any]:
     name, _, dom = s.email.partition("@")
     return {
         "title": env.title, "status": env.status, "sender": env.sender_name or _org_name(db, env),
-        "organization": _org_name(db, env), "message": env.message,
+        "organization": _org_name(db, env), "message": env.message, "brand": _brand(db, env),
         "signer": {"name": s.name, "role": s.role, "email_masked": name[:2] + "***@" + dom,
                    "status": s.status, "verified": bool(s.verified_at), "signed_at": s.signed_at},
         "parties": [{"role": x.role, "name": x.name, "status": x.status, "you": x.id == s.id} for x in signers],
@@ -268,10 +274,10 @@ def send_code(db: Session, token: str, *, ip=None, ua=None) -> Dict[str, Any]:
     code = "%06d" % secrets.randbelow(1_000_000)
     s.code_hash, s.code_expires_at, s.code_attempts = _code_hash(s, code), now + CODE_TTL, 0
     s.codes_sent, s.code_sent_at = (s.codes_sent or 0) + 1, now
-    body = ("<p>Your EvoSys signing code for <b>%s</b> is:</p><p style='font-size:30px;letter-spacing:6px;"
+    body = ("<p>Your " + _esc(_brand(db, env)) + " signing code for <b>%s</b> is:</p><p style='font-size:30px;letter-spacing:6px;"
             "font-weight:bold'>%s</p><p>It expires in 10 minutes. If you didn't ask for it, ignore this email."
             "</p>" % (_esc(env.title), code))
-    ok = _send(db, env, s.email, "Your signing code: %s" % code, _wrap(body, _org_name(db, env)), kind="code")
+    ok = _send(db, env, s.email, "Your signing code: %s" % code, _wrap(body, _org_name(db, env), _brand(db, env)), kind="code")
     _event(db, env, "code_sent", signer=s, ip=ip, ua=ua, detail={"delivered": ok})
     db.commit()
     if not ok:
@@ -359,7 +365,7 @@ def decline(db: Session, token: str, reason: str, *, ip=None, ua=None) -> Dict[s
             "<p>%s (%s) declined to sign <b>%s</b>.</p>%s" % (
                 _esc(s.name or s.email), _esc(s.role), _esc(env.title),
                 ("<p>Their reason: %s</p>" % _esc(s.decline_reason)) if s.decline_reason else ""),
-            _org_name(db, env)), kind="declined")
+            _org_name(db, env), _brand(db, env)), kind="declined")
     _sync_document(db, env)
     db.commit()
     return {"declined": True}
@@ -392,6 +398,7 @@ def finalize(db: Session, env: EsignEnvelope) -> None:
     _event(db, env, "completed")
     db.flush()
     e, sg, ev = snapshot(db, env)
+    e["brand"] = _brand(db, env)
     pdf = esign_pdf.render_signed_pdf(e, sg, ev)
     env.final_pdf, env.final_sha256 = pdf, _sha(pdf)
     att = [{"filename": _filename(env.title), "content": base64.b64encode(pdf).decode("ascii"),
@@ -403,7 +410,7 @@ def finalize(db: Session, env: EsignEnvelope) -> None:
         _send(db, env, to, "Completed: %s" % env.title, _wrap(
             "<p>Everyone has signed <b>%s</b>. Your signed copy is attached.</p>"
             "<p style='font-size:12px;color:#555'>Envelope %s &middot; signed PDF fingerprint (SHA-256) %s</p>" % (
-                _esc(env.title), _esc(env.id), _esc(env.final_sha256)), _org_name(db, env)),
+                _esc(env.title), _esc(env.id), _esc(env.final_sha256)), _org_name(db, env), _brand(db, env)),
             kind="completed", attachments=att)
     _sync_document(db, env)
 
@@ -427,7 +434,7 @@ def _sync_document(db: Session, env: EsignEnvelope) -> None:
     if not outcome:
         return
     apply_signature_outcome(db, doc, {"outcome": outcome, "signed_pdf_url": None,
-                                      "audit_log_url": None}, actor="EvoSys e-signature")
+                                      "audit_log_url": None}, actor="%s e-signature" % _brand(db, env))
     if outcome == esign.STATUS_SIGNED:
         doc.file_url = "/wholesale/documents/%s/signed.pdf" % doc.id
         doc.file_name = _filename(env.title)
@@ -483,7 +490,7 @@ def void(db: Session, env: EsignEnvelope, reason: Optional[str], user=None) -> D
         if s.link_sent_at and s.status not in ("signed", "declined"):
             _send(db, env, s.email, "Withdrawn: %s" % env.title, _wrap(
                 "<p>The sender withdrew <b>%s</b>. Your signing link no longer works and nothing more is "
-                "needed from you.</p>" % _esc(env.title), _org_name(db, env)), kind="voided")
+                "needed from you.</p>" % _esc(env.title), _org_name(db, env), _brand(db, env)), kind="voided")
     if env.document_id:
         from app.models.wholesale_models import WholesaleDocument
         from app.services import wholesale_esign as esign

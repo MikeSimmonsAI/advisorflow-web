@@ -12,6 +12,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import { errText } from './wsShared'
 import { Alert, Empty, Metric, Metrics, Panel, ago, humanize, money } from './ds/ds'
+import { ev } from './engine'
 
 function Count({ label, value, to, sub, tone, attention }) {
   const metric = <Metric label={label} value={value} sub={sub} tone={tone} attention={attention} />
@@ -123,7 +124,7 @@ export default function MorningCommand({ includeTest, dealSteps = 0 }) {
                attention={data.appointments.items.some((a) => a.status === 'requested')} />
         <Count label="Awaiting contact data"
                value={(data.awaiting_contact_data.wholesale_deals || 0) + (data.awaiting_contact_data.evosense_properties || 0)}
-               sub={`${data.awaiting_contact_data.evosense_properties || 0} EvoSense · ${data.awaiting_contact_data.wholesale_deals || 0} deals`}
+               sub={`${data.awaiting_contact_data.evosense_properties || 0} ${ev('EvoSense')} · ${data.awaiting_contact_data.wholesale_deals || 0} deals`}
                to={data.awaiting_contact_data.evosense_properties ? data.awaiting_contact_data.evosense_link : data.awaiting_contact_data.link} />
         <Count label="Nurture due" value={data.nurture.due} sub={`${data.nurture.upcoming_14_days} more in 14 days`}
                to={data.nurture.items[0]?.link} />
