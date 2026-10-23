@@ -48,7 +48,8 @@ def test_trends_comparison_when_previous_period_has_data(db_session, sample_org)
     _lead(db_session, sample_org, 20, now)   # previous window
     db_session.commit()
     change = god_dashboard.trends(db_session, days=14, now=now)["leads"]["vs_previous"]
-    assert change == {"previous": 1, "pct": 100}
+    # One lead in the previous window is too small a base for a percentage.
+    assert change == {"previous": 1, "pct": None}
 
 
 def test_trends_endpoint_is_god_only(client, auth_headers):
@@ -164,3 +165,9 @@ def test_ai_control_summary_lists_all_eleven_jobs_honestly(db_session):
     proven = {j["key"] for j in jobs if j["proven"]}
     assert proven == set(test_mode.VERIFIED_JOBS)
     assert all(j["workers"] == 0 and j["runs_7d"] == {"completed": 0, "failed": 0} for j in jobs)
+
+
+def test_small_previous_period_gives_count_not_percentage():
+    assert god_dashboard._change(587, 5) == {"previous": 5, "pct": None}
+    assert god_dashboard._change(30, 20) == {"previous": 20, "pct": 50}
+    assert god_dashboard._change(3, 0) is None
