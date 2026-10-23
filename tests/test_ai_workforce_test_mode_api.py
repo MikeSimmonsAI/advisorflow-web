@@ -166,13 +166,14 @@ def test_home_is_one_honest_payload(client, admin_auth_headers, auth_headers,
     assert r.status_code == 200, r.text
     body = r.json()
     cards = {c["key"]: c for c in body["jobs"]}
-    assert list(cards) == ["lead_qualifier", "appointment_setter",
-                           "follow_up_specialist", "customer_care_agent"]
+    assert len(cards) == 11
+    assert list(cards)[:3] == ["lead_qualifier", "appointment_setter",
+                               "follow_up_specialist"]
     assert cards["lead_qualifier"]["availability"] == "available"
     assert cards["lead_qualifier"]["can_set_up"] is True
     # Not verified end to end yet -> labelled truthfully, not offered as working.
     for key in ("appointment_setter", "follow_up_specialist",
-                "customer_care_agent"):
+                "customer_care_agent"):  # none offered to this org
         assert cards[key]["can_set_up"] is False
         assert cards[key]["availability"] in ("coming_soon", "not_offered",
                                               "not_on_plan")
