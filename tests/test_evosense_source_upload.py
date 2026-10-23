@@ -119,3 +119,24 @@ def test_feed_with_the_token_replaces_the_copy(client, db_session, monkeypatch):
     bad = client.post("/source-feeds/tad", content=b"junk", headers={"X-Source-Token": TOKEN})
     assert bad.status_code == 422
     assert SB.uploaded_info("tad")["via"] == "feed"          # the good copy is untouched
+
+
+def test_uploader_email_is_hidden_from_tenants_but_not_platform_admins(
+        client, db_session, sample_org, god_headers):
+    # god_headers promotes sample_advisor, so the tenant caller is a second user.
+    from app.models.models import User
+    from app.services.auth_service import create_access_token, hash_password
+    tenant_user = User(organization_id=sample_org.id, email="tenant-admin@example.com",
+                       password_hash=hash_password("TestPass123!"), full_name="Tenant Admin",
+                       role="org_admin", must_change_password=False)
+    db_session.add(tenant_user)
+    db_session.commit()
+    auth_headers = {"Authorization": "Bearer %s" % create_access_token(tenant_user, db_session)}
+    up =client.post("/wholesale/evosense/sources/tad/upload", headers=god_headers,
+                     files={"file": ("PropertyData(Delimited)_R.ZIP", _tad_zip(), "application/zip")})
+    assert up.status_code == 200, up.text
+    tenant = client.get("/wholesale/evosense/sources/tad/upload", headers=auth_headers).json()
+    assert tenant["current"] and "by" not in tenant["current"]
+    assert "@" not in str(tenant)
+    god = client.get("/wholesale/evosense/sources/tad/upload", headers=god_headers).json()
+    assert "@" in (god["current"].get("by") or "")

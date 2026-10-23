@@ -1710,8 +1710,14 @@ def source_upload_status(db: Session = Depends(get_db),
     """Which file TAD takes, where to download it, and the copy on file. TAD is
     the only source that takes an upload, so the path names it (no id in it)."""
     source_key = "tad"
-    return {**PV.upload_status(source_key),
-            "can_upload": getattr(user, "role", None) in PV.PLATFORM_ADMIN_ROLES,
+    is_platform_admin = getattr(user, "role", None) in PV.PLATFORM_ADMIN_ROLES
+    status = PV.upload_status(source_key)
+    if not is_platform_admin and isinstance(status.get("current"), dict):
+        # The copy is shared by every workspace; which platform staffer
+        # uploaded it is not a tenant's business.
+        status["current"] = {k: v for k, v in status["current"].items() if k != "by"}
+    return {**status,
+            "can_upload": is_platform_admin,
             "access": PV.platform_access(db, source_key)}
 
 
