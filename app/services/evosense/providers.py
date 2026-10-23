@@ -365,6 +365,7 @@ ROTATE_TARRANT_POOL = 9000     # delinquent residential accounts on the roll (ap
 ROTATE_DCAD_POOL = 7000        # POOR / VERY POOR / UNDESIRABLE residences (approx.)
 ROTATE_FW_OPEN_POOL = 1_000_000     # wrapped by the reader to the open-case count
 ROTATE_DALLAS_TRW_POOL = 1_000_000  # wrapped again by the reader to the real pool size
+ROTATE_TRAVIS_POOL = 1_000_000    # wrapped by the reader to the real pool
 ROTATE_HCAD_POOL = 150_000      # absentee / estate-owned Harris houses (approx.); the reader wraps
 
 
@@ -892,6 +893,48 @@ class HarrisRollSource(PublicRecordSource):
         return {"url": url, "bytes": info["size"], "byte_ranges": bool(info.get("ranged"))}
 
 
+class TravisDelinquentSource(PublicRecordSource):
+    """Travis County delinquent-tax houses from the county Tax Office's own
+    published file (sources/travis_delinquent.py): single-family (A1),
+    past-due balance, not in bankruptcy; a tax lawsuit when a cause number
+    is on file."""
+    scope, counties = "county", ("Travis",)
+    key = "travis_delinquent"
+    label = "Travis County delinquent taxes (Tax Office file)"
+    capabilities = (C.TAX,)
+    discovery = True
+    coverage = ("Travis County, TX - every account the Tax Office lists as delinquent: houses (A1) with a "
+                "past-due balance, owner and mailing address, appraised value, lawsuit cause number")
+    jurisdiction = "Travis County, TX"
+    source_type = "County tax assessor-collector delinquent file"
+    access_method = "Published CSV on tax-office.traviscountytx.gov (about 2 MB, whole file per hunt)"
+    public_url = "https://tax-office.traviscountytx.gov/about-us/reports-data/property-taxes"
+    refresh = "Republished by the Tax Office (file dated in its Last-Modified header)"
+    freshness_days = 30
+    adapter_version = "travis_delinquent/2"
+    terms_note = "Open data the Travis County Tax Office publishes for download."
+
+    def search(self, capability, query):
+        from app.services.evosense.sources.travis_delinquent import TravisDelinquentReader
+        out = Records()
+        if capability != C.TAX or not _wants(query, "travis"):
+            out.stats = {"skipped": "strategy does not include Travis County"}
+            return out
+        limit = int(query.get("limit") or 25)
+        res = TravisDelinquentReader().discover(
+            limit=limit, min_due=float(query.get("min_tax_due") or 250),
+            skip=rotation_skip(limit, ROTATE_TRAVIS_POOL), zips=query.get("zips"))
+        out.extend(res["records"])
+        out.stats, out.source_url = res["stats"], res["source_url"]
+        return out
+
+    def verify(self):
+        from app.services.evosense.sources import base as SB_
+        from app.services.evosense.sources.travis_delinquent import FILE, rows_from_text
+        rows = rows_from_text(SB_.get_text(FILE, max_bytes=20 * 1024 * 1024))
+        return {"rows": len(rows)}
+
+
 class FortWorthOpenCasesSource(PublicRecordSource):
     scope, counties, scope_name = "city", ("Tarrant",), "City of Fort Worth"
     key = "fw_open_cases"
@@ -1150,7 +1193,7 @@ PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
     SandboxPropertyRecords(), SandboxVacancy(), SandboxTaxRoll(), SandboxPublicRecords(),
     SandboxSkipTrace(), SandboxSkipTraceBackup(), SandboxPhoneValidation(),
     ManualSource(), CsvImportSource(),
-    TarrantTaxRollSource(), DallasTrwSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), TexasParcelOwnerSource(), TexasParcelRollSource(), HarrisRollSource(), CensusGeocoderSource(),
+    TarrantTaxRollSource(), DallasTrwSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), TexasParcelOwnerSource(), TexasParcelRollSource(), HarrisRollSource(), TravisDelinquentSource(), CensusGeocoderSource(),
     FortWorthCodeSource(), FortWorthOpenCasesSource(), Dallas311Source(), LgbsTaxSaleSource(),
     DallasForeclosureManual(), DallasTaxManual(),
     RentCastInterface(), RegridInterface(), AttomInterface(), TracerfyContactSource(),
