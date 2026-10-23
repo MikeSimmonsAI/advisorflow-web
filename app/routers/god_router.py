@@ -366,11 +366,23 @@ def god_stats(god: User = Depends(require_god), db: Session = Depends(get_db)):
         active_org_count = db.execute(text("SELECT COUNT(DISTINCT organization_id) FROM leads")).scalar() or 0
     except Exception:
         active_org_count = 0
-    return {"total_platforms": len(platforms) or 3, "total_orgs": total_orgs,
+    # No fallback number: an empty or failed brand query reports what it found
+    # (it used to say 3 whatever happened).
+    return {"total_platforms": len(platforms), "total_orgs": total_orgs,
             "active_orgs": active_org_count, "total_leads": total_leads,
             "new_leads_30d": new_leads_30d, "total_users": total_users,
             "total_admins": total_admins, "platforms": platforms,
             "as_of": iso_utc(datetime.utcnow())}
+
+
+@router.get("/dashboard/trends")
+def god_dashboard_trends(days: int = Query(14, ge=7, le=60),
+                         god: User = Depends(require_god),
+                         db: Session = Depends(get_db)):
+    """Daily counts for the Dashboard charts. Real and test kept apart.
+    See app/services/god_dashboard.py."""
+    from app.services import god_dashboard
+    return god_dashboard.trends(db, days=days)
 
 
 @router.get("/platform-health")
