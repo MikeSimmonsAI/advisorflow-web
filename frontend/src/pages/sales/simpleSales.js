@@ -12,6 +12,8 @@
 // ── the simple pipeline ────────────────────────────────────────────────────
 
 // Real stages, in lifecycle order (sales_models.OPPORTUNITY_STAGES).
+import { programCards } from '../program/programAccessModel.js'
+
 export const REAL_STAGES = [
   'prospect', 'contacted', 'discovery', 'demo_build', 'demo_proposal',
   'closing', 'won', 'onboarding', 'live',
@@ -339,4 +341,17 @@ export function wallToUtcNaive(ymd, hm, tz) {
     return null
   }
   return new Date(utc).toISOString().slice(0, 19)
+}
+
+/**
+ * OTHER WORKSPACES (#300). How many places other than this Sales Workspace the
+ * person may open from the program launcher (/workspaces) — counted with the
+ * launcher's own card model over the server's /auth/my-contexts answer, so the
+ * sidebar entry and the launcher can never disagree. The Back Office card is
+ * where they already are, so it does not count. God Mode keeps its own return
+ * bar and is never offered this (same rule as the old "Switch program" link).
+ */
+export function otherWorkspaceCount(ctx, role) {
+  if (!ctx || role === 'god_admin') return 0
+  return programCards(ctx).visible.filter(c => c.type !== 'back_office').length
 }

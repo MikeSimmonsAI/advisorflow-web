@@ -63,3 +63,20 @@ journey to Won → Sold / Onboarding, Completed with the activity feed flooded,
 manager personal vs team numbers, server-side permission refusals, keyboard,
 zero serious/critical axe issues on all seven screens; no console errors; only
 blocked host `fonts.googleapis.com`.
+
+## Other Workspaces (#300)
+
+After `run_local.py` has seeded, add the four workspace cases and run the walkthrough:
+
+```
+DATABASE_URL=sqlite:///$(pwd)/local.db JWT_SECRET='local-only-secret-not-used-anywhere-32chars!!' \
+  APP_ROOT=/path/to/advisorflow-web python fixture_other_workspaces.py
+SW_CHROME=/path/to/headless_shell node switcher.mjs ./out-switcher          # after
+SW_CHROME=/path/to/headless_shell node switcher.mjs ./out-switcher before   # main, for comparison
+```
+
+Result on 2026-10-21 13:55 CDT (`fix/sales-workspace-switcher`): **108/108 pass**, no console
+errors, only blocked host `fonts.googleapis.com`. Rep (no other workspace), manager with one,
+manager with six + Executive Suite, owner (god_admin) at 1440, 1280, 820, 390 and 375 px; launcher
+cards, entering a workspace and returning to Sales, phone More, `/auth/my-contexts` failure +
+retry, keyboard, axe.
