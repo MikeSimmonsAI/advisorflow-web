@@ -74,15 +74,18 @@ def run_strategy(db, org_id: str, strategy: EvoSenseStrategy, *, trigger: str = 
                     summary="Hunt not started: this strategy is already hunting")
         db.commit()
         return run
+    SCH.interrupt_stale_runs(db, strategy)
+    keeper = SCH.LeaseKeeper(db, strategy, token).start()
     try:
         run = _run_locked(db, org_id, strategy, trigger=trigger, user=user,
                           max_properties=max_properties, enrich=enrich,
-                          renew=lambda: SCH.renew(db, strategy, token))
+                          renew=lambda: keeper.ok() and SCH.renew(db, strategy, token))
         # The next due time is written BEFORE the lock is released, so no
         # other worker can see "unlocked and still due" in between.
         if run.status != "skipped":
             SCH.record_result(db, strategy, run)
     finally:
+        keeper.stop()
         SCH.release(db, strategy, token)
     return run
 
@@ -159,17 +162,29 @@ def discovery_focus(strategy) -> List[str]:
     return [str(x) for x in focus if x] if isinstance(focus, list) else []
 
 
+def expand_focus(focus: Optional[List[str]]) -> List[str]:
+    """A strategy that names one appraisal-roll source (Tired Landlord named
+    collin_cad and denton_gis) means the FAMILY: every owner-roll source,
+    including ones added later (Harris, statewide), reads for it - no strategy
+    has to be edited when a new county comes online."""
+    focus = list(focus or [])
+    fams = {getattr(PV.PROVIDERS.get(k), "discovery_family", None) for k in focus} - {None}
+    return focus + sorted(f for f in fams if f not in focus)
+
+
 def _discovery_routes(db, org_id, focus: Optional[List[str]] = None):
     """(capability, provider, cfg) for every connected DISCOVERY source. A
     public-record LOOKUP source (TAD, geocoder, code cases) is never asked to
     discover; it is called per property in the lookup stage. With a focus,
     only the named capabilities / sources discover."""
     out, seen = [], set()
+    focus = expand_focus(focus)
     for cap in DISCOVERY:
         for provider, cfg, _cost in PV.route(db, org_id, cap):
             if not getattr(provider, "discovery", True):
                 continue
-            if focus and cap not in focus and provider.key not in focus:
+            if focus and cap not in focus and provider.key not in focus \
+                    and getattr(provider, "discovery_family", None) not in focus:
                 continue
             if (provider.key, cap) in seen:
                 continue
@@ -192,6 +207,17 @@ def _source_failed(db, org_id, strategy, provider, cfg, exc, counts, user):
     C.log_event(db, org_id, "provider.failed", strategy_id=strategy.id, is_test=strategy.is_test,
                 actor_type=C.ACTOR_USER if user else C.ACTOR_AUTOMATION,
                 summary="%s failed — %s: %s" % (provider.label, code, msg[:160]))
+
+
+def _checkpoint(run, counts, source_key: Optional[str], *, stage: str = "discovery") -> None:
+    """Progress saved on the run as each source finishes, so a hunt cut off by
+    a restart shows exactly what it completed (and recovery can say so)."""
+    prog = counts.setdefault("progress", {"sources_done": []})
+    if source_key and source_key not in prog["sources_done"]:
+        prog["sources_done"].append(source_key)
+    prog["stage"] = stage
+    prog["at"] = C.now().isoformat()
+    run.counts = C.jdump(counts)
 
 
 class LeaseLost(RuntimeError):
@@ -255,8 +281,11 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
             if prop is not None:
                 touched[prop.id] = prop
         db.flush()
+        _checkpoint(run, counts, provider.key)
         db.commit()
 
+    _checkpoint(run, counts, None, stage="lookups")
+    db.commit()
     if touched:
         free_lookups(db, org_id, strategy, run, list(touched.values()), counts)
     backlog = lookup_backlog(db, org_id, exclude=set(touched))

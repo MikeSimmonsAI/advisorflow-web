@@ -50,3 +50,20 @@ def test_starter_api_stores_the_focus(client, auth_headers, admin_auth_headers):
     assert r.status_code in (200, 201), r.text[:300]
     s = r.json()
     assert s["provider_preferences"]["discovery"] == ["TAX"]
+
+
+def test_naming_one_owner_roll_source_means_the_whole_family(monkeypatch):
+    """Tired Landlord strategies saved before Harris existed name collin_cad and
+    denton_gis: every owner-roll source reads for them, including new ones."""
+    prov = {C.PROPERTY_SEARCH: ["dcad", "collin_cad", "denton_gis", "hcad_roll", "txgio_roll"],
+            C.TAX: ["dallas_trw"]}
+
+    def route(db, org_id, cap):
+        return [(PV.PROVIDERS[k], None, 0) for k in prov.get(cap, [])]
+    monkeypatch.setattr(PV, "route", route)
+    keys = lambda focus: [p.key for _c, p, _cfg in HU._discovery_routes(None, "o", focus)]
+    assert keys(["collin_cad", "denton_gis", "TAX"]) == ["collin_cad", "denton_gis", "hcad_roll", "txgio_roll",
+                                                         "dallas_trw"]
+    assert keys(["OWNER_ROLLS"]) == ["collin_cad", "denton_gis", "hcad_roll", "txgio_roll"]
+    assert "dcad" not in keys(["OWNER_ROLLS", "TAX"])                      # condition rating is not an owner roll
+    assert ST.starter_values("tired_landlord")["provider_preferences"]["discovery"] == ["OWNER_ROLLS", "TAX"]

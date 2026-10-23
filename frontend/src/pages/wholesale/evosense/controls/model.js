@@ -148,7 +148,11 @@ export function scopeOf(p) {
   if (a.scope === 'county') {
     return { key: 'county', label: counties.length === 1 ? `${counties[0]} County` : `${counties.length} counties`, counties }
   }
-  if (a.scope === 'state') return { key: 'state', label: `${a.scope_name || 'State'} statewide`, counties }
+  if (a.scope === 'state') {
+    const v = a.verified_counties
+    return { key: 'state', counties,
+      label: `${a.scope_name || 'State'} statewide` + (Array.isArray(v) ? ` · data in ${v.length} ${v.length === 1 ? 'county' : 'counties'}` : '') }
+  }
   if (a.scope === 'national') return { key: 'national', label: 'Nationwide', counties }
   if (a.scope === 'sandbox') return { key: 'sandbox', label: 'Sandbox records only', counties }
   if (a.scope === 'any') return { key: 'any', label: 'Any property', counties }
@@ -157,6 +161,8 @@ export function scopeOf(p) {
 
 /** All 254 Texas counties (Texas Association of Counties list). */
 export const TEXAS_COUNTIES = Object.freeze(['Anderson', 'Andrews', 'Angelina', 'Aransas', 'Archer', 'Armstrong', 'Atascosa', 'Austin', 'Bailey', 'Bandera', 'Bastrop', 'Baylor', 'Bee', 'Bell', 'Bexar', 'Blanco', 'Borden', 'Bosque', 'Bowie', 'Brazoria', 'Brazos', 'Brewster', 'Briscoe', 'Brooks', 'Brown', 'Burleson', 'Burnet', 'Caldwell', 'Calhoun', 'Callahan', 'Cameron', 'Camp', 'Carson', 'Cass', 'Castro', 'Chambers', 'Cherokee', 'Childress', 'Clay', 'Cochran', 'Coke', 'Coleman', 'Collin', 'Collingsworth', 'Colorado', 'Comal', 'Comanche', 'Concho', 'Cooke', 'Coryell', 'Cottle', 'Crane', 'Crockett', 'Crosby', 'Culberson', 'Dallam', 'Dallas', 'Dawson', 'Deaf Smith', 'Delta', 'Denton', 'DeWitt', 'Dickens', 'Dimmit', 'Donley', 'Duval', 'Eastland', 'Ector', 'Edwards', 'Ellis', 'El Paso', 'Erath', 'Falls', 'Fannin', 'Fayette', 'Fisher', 'Floyd', 'Foard', 'Fort Bend', 'Franklin', 'Freestone', 'Frio', 'Gaines', 'Galveston', 'Garza', 'Gillespie', 'Glasscock', 'Goliad', 'Gonzales', 'Gray', 'Grayson', 'Gregg', 'Grimes', 'Guadalupe', 'Hale', 'Hall', 'Hamilton', 'Hansford', 'Hardeman', 'Hardin', 'Harris', 'Harrison', 'Hartley', 'Haskell', 'Hays', 'Hemphill', 'Henderson', 'Hidalgo', 'Hill', 'Hockley', 'Hood', 'Hopkins', 'Houston', 'Howard', 'Hudspeth', 'Hunt', 'Hutchinson', 'Irion', 'Jack', 'Jackson', 'Jasper', 'Jeff Davis', 'Jefferson', 'Jim Hogg', 'Jim Wells', 'Johnson', 'Jones', 'Karnes', 'Kaufman', 'Kendall', 'Kenedy', 'Kent', 'Kerr', 'Kimble', 'King', 'Kinney', 'Kleberg', 'Knox', 'Lamar', 'Lamb', 'Lampasas', 'La Salle', 'Lavaca', 'Lee', 'Leon', 'Liberty', 'Limestone', 'Lipscomb', 'Live Oak', 'Llano', 'Loving', 'Lubbock', 'Lynn', 'McCulloch', 'McLennan', 'McMullen', 'Madison', 'Marion', 'Martin', 'Mason', 'Matagorda', 'Maverick', 'Medina', 'Menard', 'Midland', 'Milam', 'Mills', 'Mitchell', 'Montague', 'Montgomery', 'Moore', 'Morris', 'Motley', 'Nacogdoches', 'Navarro', 'Newton', 'Nolan', 'Nueces', 'Ochiltree', 'Oldham', 'Orange', 'Palo Pinto', 'Panola', 'Parker', 'Parmer', 'Pecos', 'Polk', 'Potter', 'Presidio', 'Rains', 'Randall', 'Reagan', 'Real', 'Red River', 'Reeves', 'Refugio', 'Roberts', 'Robertson', 'Rockwall', 'Runnels', 'Rusk', 'Sabine', 'San Augustine', 'San Jacinto', 'San Patricio', 'San Saba', 'Schleicher', 'Scurry', 'Shackelford', 'Shelby', 'Sherman', 'Smith', 'Somervell', 'Starr', 'Stephens', 'Sterling', 'Stonewall', 'Sutton', 'Swisher', 'Tarrant', 'Taylor', 'Terrell', 'Terry', 'Throckmorton', 'Titus', 'Tom Green', 'Travis', 'Trinity', 'Tyler', 'Upshur', 'Upton', 'Uvalde', 'Val Verde', 'Van Zandt', 'Victoria', 'Walker', 'Waller', 'Ward', 'Washington', 'Webb', 'Wharton', 'Wheeler', 'Wichita', 'Wilbarger', 'Willacy', 'Williamson', 'Wilson', 'Winkler', 'Wise', 'Wood', 'Yoakum', 'Young', 'Zapata', 'Zavala'])
+
+export const verifiedCounties = (p) => ((p && p.coverage_area) || {}).verified_counties || []
 
 const isTexasWide = (p) => p.connector_kind !== 'sandbox' && scopeOf(p).key === 'state'
   && String(((p.coverage_area || {}).scope_name) || '').toLowerCase() === 'texas'
@@ -211,7 +217,9 @@ export function coverageFor(capability, providers, counties, now = Date.now()) {
       const s = scopeOf(p)
       if (s.key === 'any') return false
       if (s.key === 'national') return true
-      if (s.key === 'state') return isTexasWide(p) && TEXAS_COUNTIES.includes(county)
+      // A statewide source covers a county only where it has returned data
+      // (verified_counties) - never just because it declares statewide scope.
+      if (s.key === 'state') return isTexasWide(p) && verifiedCounties(p).includes(county)
       return s.counties.includes(county)
     }).map((p) => ({ p, cell: cellFor(p, now) })).filter((x) => x.cell)
     here.sort((a, b) => CELL[a.cell][0] - CELL[b.cell][0])
@@ -241,7 +249,7 @@ export function capabilityStatus(cap, providers, now = Date.now()) {
 export function bestProvider(cap, providers, now = Date.now()) {
   const serving = sortProviders((providers || []).filter((p) => (p.capabilities || []).includes(cap.capability)
     && p.connector_kind !== 'sandbox'), now)
-  const reach = (p) => (scopeOf(p).key === 'national' ? 999 : scopeOf(p).key === 'state' ? 254
+  const reach = (p) => (scopeOf(p).key === 'national' ? 999 : scopeOf(p).key === 'state' ? verifiedCounties(p).length
     : scopeOf(p).key === 'city' ? 0.5 : scopeOf(p).counties.length)
   const widest = (g) => serving.filter((p) => groupOf(p, now) === g).sort((a, b) => reach(b) - reach(a))[0]
   return widest('live')

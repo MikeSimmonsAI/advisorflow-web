@@ -1039,7 +1039,14 @@ SOFT_NO_REASON = ("Soft no - they said \"%s\". Nothing was sent. Call them once 
 def is_soft_no(body: str) -> bool:
     b = (body or "").strip()
     # "Not now, but I can come in next week" is a yes with a timing - not a soft no.
-    return bool(b) and len(b) <= 200 and bool(_SOFT_NO.search(b)) and not _WANTS_IN.search(b)
+    # "Not right now - call me tomorrow" is a callback request, not a soft no.
+    return (bool(b) and len(b) <= 200 and bool(_SOFT_NO.search(b)) and not _WANTS_IN.search(b)
+            and not re.search(r"\bcall (me|you|back)\b", b, re.I))
+
+
+_REAL_TIME = re.compile(r"\b\d{1,2}(:\d{2})?\s?(AM|PM)\b")    # a real time we filled in (A.describe)
+NEEDS_HUMAN_REASON = ("Needs a human - the AI could not move this to an appointment, so nothing was sent "
+                      "(%s). Contact them personally.")
 
 
 def wants_visit(body: str) -> bool:
@@ -1210,8 +1217,10 @@ def _handoff(db, prog, lead, conv, reason, *, notify: bool):
                              detail=("asked for a visit at home - call to set a time" if home
                                      else "needs a person - %s" % (reason or "")),
                              link=L.family_link(lead.id))
-            subject = "%s - %s needs a person" % (R.alert_title(prog), who)
-            body = "<p>%s needs a person: %s</p>" % (_html.escape(who), _html.escape(reason or ""))
+            subject = "%s - HUMAN HANDOFF: %s needs a person" % (R.alert_title(prog), who)
+            body = ('<p style="background:#c62828;color:#ffffff;font-size:16px;font-weight:800;padding:10px 14px;'
+                    'border-radius:8px">HUMAN HANDOFF - the AI sent this family nothing.</p>'
+                    "<p>%s needs a person: %s</p>" % (_html.escape(who), _html.escape(reason or "")))
             L.page(db, prog, lead_id=lead.id, key="handoff:%s:%s" % (conv.id, datetime.utcnow().strftime("%Y%m%d%H%M")),
                    kind="handoff", sms_text=sms, subject=subject, html=body, management=True,
                    audit_message="%s needs a person: %s" % (who, reason))
@@ -1649,6 +1658,28 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             conv.offered_at = now
             conv.state = "offered"
             out["offered"] = [s.isoformat() for s in slots]
+    # THE RULE (Mike, Oct 22): the AI sends a family something ONLY when it
+    # moves them to an appointment - real open times, or a booking (bookings
+    # return above). A question, a soft no, an info request, a goodbye,
+    # anything else: nothing goes out; Mike / Michael Schlueter get "needs a
+    # human" with the family's words and the AI's draft to use or ignore.
+    # STOP is handled before this (opt-out). Someone arriving now still gets
+    # a short "we'll be ready for you" - that IS an appointment being met.
+    _moves_to_appt = bool(out.get("offered")) or bool(_REAL_TIME.search(text or ""))
+    _arriving = action == "handoff" and bool(_ARRIVING_TODAY.search(body or "")) and bool(_COMING_IN.search(body or ""))
+    if not (_moves_to_appt or _arriving):
+        if resp is not None and text:
+            resp.suggested_reply = text                  # the draft, for the person to use or ignore
+        if action not in ("handoff", "callback"):        # those two already paged the team above
+            _handoff(db, prog, lead, conv, NEEDS_HUMAN_REASON % (d.get("reason") or action or "unclear")[:160],
+                     notify=True)
+        else:
+            conv.state = "callback_requested" if action == "callback" else "human"
+        _turn(db, conv, "ai", text or None, action=action, delivery="blocked",
+              reason="needs a human - the reply did not move them to an appointment, so nothing was sent",
+              response_id=resp.id if resp else None)
+        db.commit()
+        return dict(out, action="handoff", state=conv.state, held=["needs a human: no times or booking"])
     problems = check_text(text, allowed_links=allowed_links,
                           channel=(resp.channel if resp is not None else "sms") or "sms",
                           contact=prog.primary_contact_name)
@@ -1812,8 +1843,13 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
             if _line:
                 text = "%s\n%s" % (text, _line)
                 allowed.append(_line.split(": ", 1)[1])
-        if action == "close":
-            conv.state = "closed"
+        if not _REAL_TIME.search(text or ""):
+            # THE RULE: an automatic follow-up goes out only with real times.
+            _turn(db, conv, "system", None, action="wait",
+                  reason="follow-up not sent: it did not offer real times (needs-a-human rule)")
+            db.commit()
+            done["skipped"] += 1
+            continue
         if check_text(text, allowed_links=allowed, contact=prog.primary_contact_name):
             db.commit()
             done["skipped"] += 1

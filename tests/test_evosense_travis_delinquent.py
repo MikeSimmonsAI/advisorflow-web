@@ -1,69 +1,93 @@
-"""Travis delinquent-tax adapter. Fixture headers are ASSUMED, not copied from a live
-file (the build sandbox had no access to the county site). No network, no paid calls."""
+"""Travis County delinquent-tax file. The header is the LIVE file's header
+(TaxDelqOpenData.csv, checked 2026-10-22); the rows are synthetic.
+
+  * houses only: Property Type Code A1 (other A codes, land, commercial out);
+  * Delinquent Total is the past-due balance - the current-year bill never
+    qualifies a house; below the minimum, bankrupt or stale accounts are out;
+  * a cause number is a tax lawsuit; the situs direction moves to the front;
+  * City/State/Zip are the owner's mailing address, not the house's.
+"""
 from datetime import datetime
 
 import pytest
 
+from app.services.evosense import providers as PV
 from app.services.evosense.sources import base as B
 from app.services.evosense.sources import travis_delinquent as TD
 
 TODAY = datetime(2026, 10, 22)
-CSV = """Account Number,Owner Name,Tax Year,Total Due,Situs Address,Mailing Address,Mailing City,Mailing State,Mailing Zip
-0101,SAMPLE PAT,2024,"$1,200.50",12 Oak Street,PO BOX 4,AUSTIN,TX,78701-0004
-0101,SAMPLE PAT,2025,800.00,12 Oak Street,PO BOX 4,AUSTIN,TX,78701-0004
-0101,SAMPLE PAT,2025,800.00,12 Oak Street,PO BOX 4,AUSTIN,TX,78701-0004
-0202,SAMPLE LOT LLC,2024,900.00,500 Vacant Rd,,,,
-0303,,2024,900.00,7 Elm Dr,,,,
-0404,SAMPLE JO,2026,900.00,9 Pine Ln,,,,
-0505,SAMPLE LOW,2024,50.00,1 Tiny Ln,,,,
-0606,SAMPLE MISMATCH,2024,900.00,3 Ash Ct,,,,
-"""
-PROPS = {
-    "0101": {"property_type": "single_family", "improved": True, "street_address": "12 OAK ST"},
-    "0202": {"property_type": "land", "improved": False, "street_address": "500 VACANT RD"},
-    "0303": {"property_type": "single_family", "street_address": "7 ELM DR"},
-    "0404": {"property_type": "single_family", "street_address": "9 PINE LN"},
-    "0505": {"property_type": "single_family", "street_address": "1 TINY LN"},
-    "0606": {"property_type": "single_family", "street_address": "99 OTHER ST"},
-}
+HEADER = ("Account #,Last Tax Roll Year ,Property Type Code,Land Value,Improvement Value,Ag Market,Appraisal Value,"
+          "Ag Taxable Value,Assessed Value,Exemptions,Delinquent Total,Current Year Total,Total Due,Sequence #,"
+          "1st Year Delinquent,Cause #,Judgement Date,Bankruptcy Number,Owner ID,Owner Name,Address 1,Address 2,"
+          "Address 3,City,State,Zip Code,Country,Street Number,Street Name,Property Zip,Legal Description")
 
 
-def run(**kw):
-    return TD.TravisDelinquentReader().discover_csv(CSV, limit=10, today=TODAY, **kw)
+def row(acct, cls="A1", delq="4979.45", cur="0", first="2023", cause="", judg="", bk="", owner="SAMPLE PAT",
+        num="913", street="GIBSON ST W", pzip="78704", roll="2025", ex=""):
+    return ",".join([acct, roll, cls, "576054", "153296", "0", "729350", "0", "729350", ex, delq, cur,
+                     "4979.45", "0", first, cause, judg, bk, "000001828028", owner, "", "9 ELM AVE", "",
+                     "DALLAS", "TX", "752011234", "", num, street, pzip, "LOT 7 BLK 9"])
 
 
-def test_only_past_due_residential_matched_owner_verified_qualifies():
-    out = run(residential_lookup=PROPS.get)
-    assert [r["parcel_apn"] for r in out["records"]] == ["0101"]
-    st = out["stats"]
-    assert st["not_residential"] == 1 and st["missing_owner"] == 1 and st["situs_mismatch"] == 1
-    assert st["below_min_due"] == 1 and st["not_past_due"] == 1      # 2026 levy is not yet delinquent
+CSV = "\r\n".join([HEADER,
+                   row("0001"),                                              # kept
+                   row("0002", cause="GN21006856", judg="4/27/2026", first="2021", num="7302", street="LENAPE TRL"),
+                   row("0003", cls="C1"),                                    # vacant lot
+                   row("0004", cls="F1"),                                    # commercial
+                   row("0005", cls="A4"),                                    # other residential code
+                   row("0006", delq="25"),                                   # below minimum
+                   row("0007", delq="0", cur="3200"),                        # only this year's bill
+                   row("0008", bk="26-30011"),                               # bankruptcy
+                   row("0009", roll="2006"),                                 # stale account
+                   row("0010", owner=""),                                    # no owner
+                   row("0011", num="", street=""),                           # no situs
+                   ]) + "\r\n"
 
 
-def test_duplicate_rows_are_summed_by_year_not_double_counted_as_accounts():
-    rec = run(residential_lookup=PROPS.get)["records"][0]
-    assert rec["_raw"]["years"] == [2024, 2025]
-    assert rec["_raw"]["due"] == 2000.5          # the repeated 2025 row counted once
-    assert rec["owner"]["mailing_zip"] == "78701"
-    assert rec["signals"][0]["type"] == "TAX_DELINQUENT"
-    assert rec["_evidence"] == {"capability": "tax delinquency", "live_verified": False}
+def test_keeps_only_past_due_houses_and_counts_every_rejection():
+    res = TD.TravisDelinquentReader().discover(limit=10, today=TODAY, text=CSV)
+    got = {r["parcel_apn"]: r for r in res["records"]}
+    assert set(got) == {"0001", "0002"}
+    s = res["stats"]
+    assert s["rows"] == 11 and s["houses"] == 8 and s["not_residential"] == 2 and s["other_residential"] == 1
+    assert s["below_min_due"] == 2 and s["bankruptcy_skipped"] == 1 and s["stale_account"] == 1
+    assert s["no_owner"] == 1 and s["no_situs"] == 1 and s["delinquent_houses"] == 2 and s["with_lawsuit"] == 1
 
 
-def test_no_lookup_means_no_leads():
-    out = run()
-    assert out["records"] == [] and out["stats"]["no_residential_lookup"] >= 1
+def test_record_fields():
+    res = TD.TravisDelinquentReader().discover(limit=10, today=TODAY, text=CSV)
+    a = {r["parcel_apn"]: r for r in res["records"]}["0001"]
+    assert a["street_address"] == "913 W GIBSON ST" and a["zip_code"] == "78704" and a["city"] is None
+    assert a["county"] == "Travis" and a["property_type"] == "single_family"
+    assert a["owner"]["mailing_street"] == "9 ELM AVE" and a["owner"]["mailing_city"] == "Dallas"
+    assert a["owner"]["mailing_zip"] == "75201"
+    sig = a["signals"][0]
+    assert sig["type"] == "TAX_DELINQUENT" and "$4,979.45" in sig["value"] and "2023" in sig["value"]
+    assert sig["effective_at"] == "2024-02-01"
+    assert a["appraisal"]["value"] == 729350
+    b = {r["parcel_apn"]: r for r in res["records"]}["0002"]
+    assert [x["type"] for x in b["signals"]] == ["TAX_DELINQUENT", "TAX_SUIT"]
+    assert "GN21006856" in b["signals"][1]["value"] and "4/27/2026" in b["signals"][1]["value"]
 
 
-def test_year_before_feb_first_rolls_back():
-    assert TD.current_tax_year(datetime(2027, 1, 15)) == 2026
-    assert TD.current_tax_year(datetime(2027, 2, 2)) == 2027
-
-
-def test_unknown_header_fails_loudly():
+def test_a_changed_header_is_a_format_error():
     with pytest.raises(B.SourceError) as e:
-        TD.TravisDelinquentReader().discover_csv("foo,bar\n1,2\n", limit=1)
+        TD.rows_from_text("Account Number,Owner Name,Tax Year\n1,A,2024\n")
     assert e.value.code == B.SOURCE_FORMAT_CHANGED
 
 
-def test_limit_caps_output():
-    assert len(run(residential_lookup=PROPS.get)["records"]) <= 10
+def test_source_answers_for_travis_tax_only(monkeypatch):
+    monkeypatch.setattr(TD.TravisDelinquentReader, "fetch", lambda self: CSV)
+    src = PV.PROVIDERS["travis_delinquent"]
+    assert src.discovery and not src.costs and src.counties == ("Travis",)
+    assert len(src.search("TAX", {"states": ["TX"], "counties": ["Dallas"], "limit": 5})) == 0
+    assert len(src.search("TAX", {"states": ["TX"], "counties": ["Travis County"], "limit": 5})) == 2
+    assert len(src.search("TAX", {"states": ["TX"], "counties": ["All Texas"], "limit": 1})) == 1
+    assert len(src.search("PROPERTY_SEARCH", {"states": ["TX"], "counties": ["Travis"], "limit": 5})) == 0
+
+
+def test_the_live_files_byte_order_mark_is_not_part_of_the_header():
+    """The real TaxDelqOpenData.csv begins with a UTF-8 BOM (seen from production
+    2026-10-23: 'lacks Account #; header is <BOM>Account #, ...')."""
+    rows = TD.rows_from_text("\ufeff" + CSV)
+    assert rows[0]["Account #"] == "0001"

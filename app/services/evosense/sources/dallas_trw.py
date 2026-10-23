@@ -80,7 +80,8 @@ class TrwReader:
         return BASE + found[0]
 
     def discover(self, *, limit: int, skip: int = 0, min_due_cents: int = 25000,
-                 today: Optional[datetime] = None, max_rows: int = 3_000_000) -> Dict[str, Any]:
+                 today: Optional[datetime] = None, max_rows: int = 3_000_000,
+                 accounts: Optional[set] = None) -> Dict[str, Any]:
         """The data member is sorted by jurisdiction, then tax year, then account,
         so one account's delinquent years are spread through the county block.
         The whole county block (~1M rows, ~60 MB of byte ranges) is read once,
@@ -123,6 +124,12 @@ class TrwReader:
                     if line[439:440] != "R" or line[221:223] != "A1":
                         continue
                     r = parse(line)
+                    if accounts is not None:
+                        # A targeted check of named DCAD accounts (an imported list):
+                        # every account seen on the roll is recorded as checked.
+                        if r["cad_account"] not in accounts:
+                            continue
+                        stats.setdefault("checked", set()).add(r["cad_account"])
                     due = _d(r["due_date"])
                     if r["balance"] <= 0 or due is None or due >= today:
                         continue
@@ -159,6 +166,8 @@ class TrwReader:
                 pool.append(acc)
         pool.sort(key=lambda a: a["account"])
         stats["delinquent_accounts"] = len(pool)
+        if accounts is not None:
+            skip, limit = 0, len(pool)
         records: List[Dict[str, Any]] = []
         if pool:
             start = skip % len(pool)

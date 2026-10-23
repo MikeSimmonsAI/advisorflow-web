@@ -156,8 +156,17 @@ def _actions(r, conv) -> list:
 
 
 _NEEDS_REPLY = ("new", "opened")
+_HANDOFF_STATES = ("human", "callback_requested")
+
+
+def _human_handoff(r, conv) -> bool:
+    """RED FLAG (Mike, Oct 22): the AI handed this family to a person and
+    nobody has handled it yet. Clears when the reply is answered or closed,
+    when they book, or when the conversation goes back to the AI."""
+    return bool(conv is not None and conv.state in _HANDOFF_STATES and conv.booked_time is None
+                and r is not None and r.handling_status in _NEEDS_REPLY)
 _APPT_STATES = ("offered", "booked", "callback_requested")
-FILTERS = ("all", "needs_reply", "text", "email", "handled", "unread", "ai", "human", "appointments", "home_visits")
+FILTERS = ("all", "handoff", "needs_reply", "text", "email", "handled", "unread", "ai", "human", "appointments", "home_visits")
 
 
 def _sender(db, r, lead) -> dict:
@@ -252,6 +261,8 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                       "ai_answered": answered,
                       "setter_state": conv.state if conv else None, "actions": _actions(r, conv),
                       "home_visit": _home_visit_waiting(conv),
+                      "human_handoff": _human_handoff(r, conv),
+                      "handoff_reason": (conv.handoff_reason or "")[:200] if _human_handoff(r, conv) else None,
                       "advisor": advisors.get(getattr(lead, "assigned_to_id", None))})
     # NEWEST FIRST, always (Oct 22, Mike): what came in today is at the top - an
     # older hot or overdue reply never pushes today's messages down the list.
@@ -261,6 +272,7 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
     needs = sum(1 for i in items if i["class"] in ("hot", "active", "bad_data", "wrong_person")
                 and i["handling_status"] in _NEEDS_REPLY and not i["is_test"] and not i["ai_answered"])
     filter_counts = {"all": len(items),
+                     "handoff": sum(1 for i in items if i["human_handoff"] and not i["is_test"]),
                      "needs_reply": sum(1 for i in items if i["handling_status"] in _NEEDS_REPLY
                                         and i["class"] != "auto_reply" and not i["ai_answered"]),
                      "text": sum(1 for i in items if i["channel"] != "email"),
@@ -270,7 +282,9 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                      "human": sum(1 for i in items if i["owner"] == "human"),
                      "appointments": sum(1 for i in items if i["setter_state"] in _APPT_STATES),
                      "home_visits": sum(1 for i in items if i["home_visit"])}
-    if flt == "needs_reply":
+    if flt == "handoff":
+        items = [i for i in items if i["human_handoff"]]
+    elif flt == "needs_reply":
         items = [i for i in items if i["handling_status"] in _NEEDS_REPLY and i["class"] != "auto_reply"
                  and not i["ai_answered"]]
     elif flt == "text":
@@ -307,7 +321,7 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                                                       ProgramConversation.state == "callback_requested").count())
     return {
         "locations": [{"id": k, "name": v} for k, v in sorted(locs.items(), key=lambda kv: kv[1])],
-        "counts": {"needs_attention": needs, "replies_today": today_rows, "visits_booked": booked,
+        "counts": {"needs_attention": needs, "human_handoff": filter_counts["handoff"], "replies_today": today_rows, "visits_booked": booked,
                    "contacted_today": contacted},
         "filter": flt, "filter_counts": filter_counts,
         "owner_alert": owner_alert,
@@ -582,6 +596,8 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
         "team": team,
         "status": latest.handling_status if latest else None,
         "badge": _badge(latest, conv) if latest else None,
+        "human_handoff": _human_handoff(latest, conv),
+        "handoff_reason": conv.handoff_reason if conv is not None and _human_handoff(latest, conv) else None,
         "response_id": latest.id if latest else None,
         "suggested_reply": (_er.strip_signature(db, lead, latest.suggested_reply)
                             if latest and latest.suggested_reply else None),
