@@ -165,8 +165,16 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
     seeded = sandbox_seed.seed_review(db_session, sample_org.id, sample_advisor, replies=True)
     db_session.commit()
     es_prop = sandbox_seed.prop_at(db_session, sample_org.id, "1418 Cedar Springs Rd")
+    # An imported list of A's (cohort), so the list routes are attacked against
+    # a list that exists in A's workspace.
+    from app.services.evosense import hunt as _HU
+    _HU.import_csv(db_session, sample_org.id,
+                   "record_id,street_address,city,state,zip_code\n"
+                   "victim-list-2010:1,77 Victim List Ln,Dallas,TX,75215\n", user=sample_advisor)
+    db_session.commit()
     es_ids = {
         "es_property_id": es_prop.id,
+        "es_list_kind": "victim-list-2010",
         "es_strategy_id": seeded["strategies"]["dfw"],
         "es_handoff_id": db_session.query(EvoSenseHandoff).filter(
             EvoSenseHandoff.organization_id == sample_org.id).first().id,
@@ -560,6 +568,12 @@ def evosense_attacks(ids):
         ("post", "%s/properties/%s/signals" % (base, ep), {"signal_type": "VACANT"}),
         ("post", "%s/properties/%s/comps" % (base, ep), {"street_address": "1 X", "sale_price": 1, "sale_date": "2026-01-01", "source_reference": "x"}),
         ("post", "%s/properties/%s/rescore" % (base, ep), None),
+        ("post", "%s/properties/%s/identity" % (base, ep),
+         {"parcel_apn": "STOLEN", "evidence_url": "https://example.gov/x"}),
+        ("post", "%s/properties/%s/merge" % (base, ep), {"duplicate_id": ep, "reason": "planted merge"}),
+        # an imported list is named by its kind; another workspace's list is absent here
+        ("get", "%s/cohorts/%s" % (base, ids["es_list_kind"]), None),
+        ("post", "%s/cohorts/%s/recheck" % (base, ids["es_list_kind"]), None),
         ("post", "%s/properties/%s/retry-reading" % (base, ep), None),
         ("post", "%s/routing-reviews/%s" % (base, ids["es_routing_review_id"]),
          {"engagement_id": None}),
