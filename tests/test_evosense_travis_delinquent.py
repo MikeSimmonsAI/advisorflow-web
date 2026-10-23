@@ -84,3 +84,10 @@ def test_source_answers_for_travis_tax_only(monkeypatch):
     assert len(src.search("TAX", {"states": ["TX"], "counties": ["Travis County"], "limit": 5})) == 2
     assert len(src.search("TAX", {"states": ["TX"], "counties": ["All Texas"], "limit": 1})) == 1
     assert len(src.search("PROPERTY_SEARCH", {"states": ["TX"], "counties": ["Travis"], "limit": 5})) == 0
+
+
+def test_the_live_files_byte_order_mark_is_not_part_of_the_header():
+    """The real TaxDelqOpenData.csv begins with a UTF-8 BOM (seen from production
+    2026-10-23: 'lacks Account #; header is <BOM>Account #, ...')."""
+    rows = TD.rows_from_text("\ufeff" + CSV)
+    assert rows[0]["Account #"] == "0001"

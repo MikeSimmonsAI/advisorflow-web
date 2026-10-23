@@ -66,8 +66,9 @@ def latest_roll_year(today: datetime) -> int:
 
 
 def rows_from_text(text: str) -> List[Dict[str, str]]:
-    reader = csv.reader(io.StringIO(text))
-    header = [h.strip() for h in next(reader, [])]
+    # The live file starts with a UTF-8 byte-order mark ("\ufeffAccount #").
+    reader = csv.reader(io.StringIO(text.lstrip("\ufeff")))
+    header = [h.strip().lstrip("\ufeff") for h in next(reader, [])]
     missing = [c for c in REQUIRED if c not in header]
     if missing:
         raise B.SourceError(B.SOURCE_FORMAT_CHANGED, "Travis delinquent file lacks %s; header is %s"
