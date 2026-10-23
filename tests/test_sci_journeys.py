@@ -376,7 +376,7 @@ def test_E_family_asks_for_a_person_ai_stops_staff_paged_once_with_context(journ
     conv = _conv(db, lead)
     assert conv.state == "human" and conv.handoff_reason == "family asked to speak with a person"
     owner = _owner_texts(j)
-    assert len(owner) == 1 and owner[0].startswith("SCI Needs Attention | Ollie Testcase")
+    assert len(owner) == 1 and owner[0].startswith("SCI HUMAN HANDOFF | Ollie Testcase")
     em = _owner_emails(j)
     assert len(em) == 1 and "needs a person" in em[0] and "family asked to speak with a person" in em[0]
     assert words in em[0] and "(214) 555-0101" in em[0]               # actionable: their words + how to reach them
@@ -584,7 +584,7 @@ def test_J_unreadable_calendar_hands_off_and_never_invents_a_time(journey, monke
     # NOTHING - a person picks it up; no filler text, no invented time.
     assert line.to(lead, SS.SCI_SETTER) == []
     owner = _owner_texts(j)
-    assert len(owner) == 1 and owner[0].startswith("SCI Needs Attention | Ollie Testcase")
+    assert len(owner) == 1 and owner[0].startswith("SCI HUMAN HANDOFF | Ollie Testcase")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -610,7 +610,7 @@ def test_K_family_without_a_location_is_held_for_review_and_never_texted(journey
     assert conv.state == "human" and "LOCATION REVIEW" in (conv.handoff_reason or "")
     assert [t.delivery for t in _ai_turns(db, lead)] == ["blocked"]
     owner = _owner_texts(j)
-    assert len(owner) == 1 and owner[0].startswith("SCI Needs Attention | Lee Nowhere")
+    assert len(owner) == 1 and owner[0].startswith("SCI HUMAN HANDOFF | Lee Nowhere")
     assert "Location:" not in owner[0] or "Location: Unassigned / Location Review." in owner[0]   # honest, not invented
     for loc in (EG, SH, "Striffler-Hamby"):
         assert loc not in owner[0]

@@ -273,7 +273,13 @@ def alert_content(db: Session, prog: OutreachProgram, resp: ProgramResponse, kin
     rows += [(k, v) for k, v in contacts if v]
     if resp.campaign_family:
         rows.append(("Campaign", resp.campaign_family.replace("_", " ").title()))
-    body = ['<p style="font-size:16px;font-weight:700;margin:0 0 10px">%s</p>' % _html.escape(head),
+    body = []
+    if kind == "handoff":
+        # RED FLAG (Mike, Oct 22): a hand-off is impossible to miss.
+        body.append('<p style="background:#c62828;color:#ffffff;font-size:16px;font-weight:800;padding:10px 14px;'
+                    'border-radius:8px;margin:0 0 12px">HUMAN HANDOFF - the AI sent this family nothing. '
+                    'A person needs to contact them.</p>')
+    body += ['<p style="font-size:16px;font-weight:700;margin:0 0 10px">%s</p>' % _html.escape(head),
             '<table cellpadding="4" style="border-collapse:collapse;font-size:14px">']
     for k, v in rows:
         val = _html.escape(v)
@@ -289,7 +295,7 @@ def alert_content(db: Session, prog: OutreachProgram, resp: ProgramResponse, kin
     if kind == "booked":
         subject = "%s - Appointment booked: %s" % (alert_title(prog), name)
     elif kind == "handoff":
-        subject = "%s - %s needs a person" % (alert_title(prog), name)
+        subject = "%s - HUMAN HANDOFF: %s needs a person" % (alert_title(prog), name)
     elif kind == OPT_OUT_ASK:
         subject = "%s - %s opted out of texts but asked for something" % (alert_title(prog), name)
     if test:

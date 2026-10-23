@@ -1217,8 +1217,10 @@ def _handoff(db, prog, lead, conv, reason, *, notify: bool):
                              detail=("asked for a visit at home - call to set a time" if home
                                      else "needs a person - %s" % (reason or "")),
                              link=L.family_link(lead.id))
-            subject = "%s - %s needs a person" % (R.alert_title(prog), who)
-            body = "<p>%s needs a person: %s</p>" % (_html.escape(who), _html.escape(reason or ""))
+            subject = "%s - HUMAN HANDOFF: %s needs a person" % (R.alert_title(prog), who)
+            body = ('<p style="background:#c62828;color:#ffffff;font-size:16px;font-weight:800;padding:10px 14px;'
+                    'border-radius:8px">HUMAN HANDOFF - the AI sent this family nothing.</p>'
+                    "<p>%s needs a person: %s</p>" % (_html.escape(who), _html.escape(reason or "")))
             L.page(db, prog, lead_id=lead.id, key="handoff:%s:%s" % (conv.id, datetime.utcnow().strftime("%Y%m%d%H%M")),
                    kind="handoff", sms_text=sms, subject=subject, html=body, management=True,
                    audit_message="%s needs a person: %s" % (who, reason))

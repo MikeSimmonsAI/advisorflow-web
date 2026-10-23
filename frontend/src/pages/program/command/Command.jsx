@@ -336,7 +336,7 @@ function SearchResults({ q, loc, open }) {
 
 // ONE inbox for texts and emails, with its own filters. Reads the same
 // endpoint as Home; "Handled" brings back what was answered or closed.
-const FILTERS = [['all', 'All'], ['needs_reply', 'Needs reply'], ['unread', 'Unread'], ['ai', 'AI handling'], ['human', 'Human attention'],
+const FILTERS = [['all', 'All'], ['handoff', 'Human handoff'], ['needs_reply', 'Needs reply'], ['unread', 'Unread'], ['ai', 'AI handling'], ['human', 'Human attention'],
   ['appointments', 'Appointments'], ['home_visits', 'Home visits'], ['text', 'Text'], ['email', 'Email'], ['handled', 'Handled']]
 
 function InboxTab({ loc, act, open, selected }) {
@@ -357,9 +357,11 @@ function InboxTab({ loc, act, open, selected }) {
   const c = r?.filter_counts || {}
   return <>
     <header className="cmd-top"><h1>Inbox</h1>{c.unread ? <p className="cmd-sub">{c.unread} new</p> : null}</header>
+    {c.handoff > 0 && flt !== 'handoff' && <button className="cmd-handoff-bar" onClick={() => setFlt('handoff')}>
+      <b>HUMAN HANDOFF</b> {c.handoff === 1 ? '1 family needs' : `${c.handoff} families need`} a person - the AI sent them nothing. Tap to see them ›</button>}
     <div className="cmd-chips" role="tablist">
       {FILTERS.map(([k, l]) => (
-        <button key={k} role="tab" aria-selected={flt === k} className={flt === k ? 'on' : ''} onClick={() => setFlt(k)}>
+        <button key={k} role="tab" aria-selected={flt === k} className={`${flt === k ? 'on' : ''} ${k === 'handoff' && c.handoff ? 'red' : ''}`} onClick={() => setFlt(k)}>
           {l}{k !== 'handled' && c[k] !== undefined ? <i>{c[k]}</i> : null}</button>))}
     </div>
     {r && flt !== 'handled' && <Unknown items={(r.unknown || []).filter(u => ['all', 'needs_reply', 'unread', 'human'].includes(flt) || (flt === 'email' && u.channel_label === 'EMAIL') || (flt === 'text' && u.channel_label !== 'EMAIL'))} reload={load} />}
@@ -433,7 +435,7 @@ function Inbox({ items, act, open, empty, selected }) {
     const email = i.channel === 'email'
     const title = email && (i.sender_name || i.sender_email) ? (i.sender_name || i.sender_email) : i.name
     return (
-      <article key={i.lead_id} className={`cmd-card cmd-item ${selected === i.lead_id ? 'sel' : ''}`}>
+      <article key={i.lead_id} className={`cmd-card cmd-item ${selected === i.lead_id ? 'sel' : ''} ${i.human_handoff ? 'handoff' : ''}`}>
         <button className="cmd-item-main" onClick={() => open(i.lead_id)}>
           <span className={`dot ${i.class}`} />
           <span className="cmd-item-text">
@@ -441,6 +443,7 @@ function Inbox({ items, act, open, empty, selected }) {
             <span className="cmd-row2">
               <em className={`chan ${email ? 'email' : 'text'}`}>{i.channel_label || (email ? 'EMAIL' : 'TEXT')}</em>
               <em className={`chan ${i.owner === 'human' ? 'human' : 'ai'}`}>{i.owner === 'human' ? 'PERSON' : 'AI'}</em>
+              {i.human_handoff && <em className="chan handoff">HUMAN HANDOFF</em>}
               {i.is_test && <em className="chan human">TEST</em>}
               <em className={`badge ${BADGE[i.badge] || 'low'}`}>{i.badge}</em>
             </span>
@@ -639,6 +642,12 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
         <button onClick={() => schedRef.current?.scrollIntoView({ behavior: 'smooth' })}><Icon n="cal" s={22} />Schedule Visit</button>
         <button onClick={() => focusComposer('note')}><Icon n="note" s={22} />Add Note</button>
       </div>
+      {f.human_handoff && <section className="cmd-handoff-banner" role="alert">
+        <b>HUMAN HANDOFF</b>
+        <p>The AI sent this family nothing. A person needs to contact them.{f.handoff_reason ? ` Why: ${f.handoff_reason}` : ''}</p>
+        {f.suggested_reply && <p className="small">The AI's draft is saved: tap Reply, then "Use suggested reply" - or write your own.</p>}
+        {f.response_id && <button onClick={markHandled}>Mark handled</button>}
+      </section>}
       {!f.is_demo && <ResendBar key={`rs-${id}`} id={id} onDone={load} />}
 
       <div className="cmd-seg two cmd-fview" role="tablist" aria-label="View">

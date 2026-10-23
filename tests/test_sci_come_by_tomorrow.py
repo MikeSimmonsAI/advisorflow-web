@@ -216,3 +216,28 @@ def test_soft_no_sends_nothing_and_hands_to_a_person(setter, sample_advisor, mon
     assert conv.state == "human" and "Call them once and offer a short visit" in conv.handoff_reason
     assert not fake.calls                                       # the AI was never asked - nothing drafted
     assert not [t for t in _ai_turns(db, conv) if t.text]
+
+
+# ── HUMAN HANDOFF red flag (Mike, Oct 22) ──────────────────────────────────
+
+def test_a_handoff_is_flagged_in_sci_live_until_handled(setter, sample_advisor, client, monkeypatch):
+    from tests.test_sci_live_email import _h
+    db, lead, _ = _setup(setter, sample_advisor, monkeypatch)
+    _run(db, lead, "Close it for now", _Fake([]))
+    h = _h(db, setter["admin"])
+    home = client.get("/program/command", headers=h).json()
+    item = [i for i in home["inbox"] if i["lead_id"] == lead.id][0]
+    assert item["human_handoff"] is True and "Soft no" in item["handoff_reason"]
+    assert home["filter_counts"]["handoff"] == 1 and home["counts"]["human_handoff"] == 1
+    only = client.get("/program/command?filter=handoff", headers=h).json()["inbox"]
+    assert [i["lead_id"] for i in only] == [lead.id]
+    fam = client.get("/program/command/family/%s" % lead.id, headers=h).json()
+    assert fam["human_handoff"] is True
+    client.post("/program/responses/%s/mark" % fam["response_id"], headers=h, json={"state": "closed"})
+    fam = client.get("/program/command/family/%s" % lead.id, headers=h).json()
+    assert fam["human_handoff"] is False                                  # handled: the red flag clears
+
+
+def test_handoff_alert_text_says_human_handoff():
+    from app.services.programs import alert_ledger as L
+    assert L.sms_line("handoff", "Henry Simmons", detail="x").startswith("SCI HUMAN HANDOFF | Henry Simmons")

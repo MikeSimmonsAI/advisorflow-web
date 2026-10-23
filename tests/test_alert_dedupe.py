@@ -257,7 +257,7 @@ def test_handoff_during_a_reply_is_one_page_not_two(wired, sample_advisor):
     with patch.object(ai_setter, "on_family_reply", side_effect=setter):
         _reply(db, lead, "Can a real person call me?", "SM_H")
     owner = [b for c, t, b in sent if c == "sms" and t == OWNER_PHONE]
-    assert len(owner) == 1 and owner[0].startswith("SCI Needs Attention | Ollie Testcase")
+    assert len(owner) == 1 and owner[0].startswith("SCI HUMAN HANDOFF | Ollie Testcase")
     em = [b for c, t, b in sent if c == "email" and t == OWNER_EMAIL]
     assert len(em) == 1 and "needs a person" in em[0] and "the family wants a person" in em[0]
 
