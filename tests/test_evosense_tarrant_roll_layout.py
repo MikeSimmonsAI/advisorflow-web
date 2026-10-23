@@ -165,3 +165,14 @@ def test_a_padded_old_line_with_blank_dates_is_not_taken_by_the_new_layout():
     line = master_line(prior_due="000001250.40", deed_date="", delq_date="") + " " * 30
     r, layout, _ = TT.parse_with_layout(line)
     assert layout == "2025" and r["prior_due"] == "000001250.40"
+
+
+def test_a_targeted_check_reads_only_the_named_accounts(tmp_path, monkeypatch, no_network):
+    lines = [v2_line(account=str(1000 + i), prior_due="000000900.00" if i % 2 else "000000000.00")
+             for i in range(6)]
+    f = write_zip(tmp_path / "TaxRoll20261016.zip", {"Master.dat": "\n".join(lines) + "\n"})
+    monkeypatch.setenv("EVOSENSE_SRC_TARRANT_TAX_ROLL_PATH", f)
+    res = TT.TarrantTaxRollReader().discover(limit=1, today=ROLL_DATE, accounts={"1002", "1003", "1005", "9999"},
+                                             min_due=1.0)
+    assert res["stats"]["checked"] == {"1002", "1003", "1005"}
+    assert sorted(r["parcel_apn"] for r in res["records"]) == ["1003", "1005"]

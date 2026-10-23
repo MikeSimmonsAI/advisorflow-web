@@ -212,7 +212,8 @@ class TarrantTaxRollReader:
         return TAX_ROLL_BASE + found[-1]
 
     def discover(self, *, limit: int, scan_limit: int = 800_000, min_due: float = 250.0,
-                 today: Optional[datetime] = None, skip: int = 0) -> Dict[str, Any]:
+                 today: Optional[datetime] = None, skip: int = 0,
+                 accounts: Optional[set] = None) -> Dict[str, Any]:
         """`skip` passes over the first N qualifying accounts so successive hunts
         reach different delinquent accounts; if the roll runs out first, the
         window wraps to the start (never returns fewer because of rotation)."""
@@ -229,7 +230,7 @@ class TarrantTaxRollReader:
         try:
             for line in B.text_lines(oz.zip, "Master.dat"):
                 stats["scanned"] += 1
-                if stats["scanned"] > scan_limit or len(records) >= limit:
+                if accounts is None and (stats["scanned"] > scan_limit or len(records) >= limit):
                     break
                 if len(line) < MIN_LINE:
                     stats["short_line"] += 1
@@ -246,6 +247,13 @@ class TarrantTaxRollReader:
                         raise
                     continue
                 stats["layout_" + layout] += 1
+                if accounts is not None:
+                    # Targeted check of named TAD accounts: read the whole roll,
+                    # keep only these, record each one the roll carries.
+                    if apn(r["account"]) not in accounts:
+                        continue
+                    stats.setdefault("checked", set()).add(apn(r["account"]))
+                    limit = max(limit, len(accounts))
                 if r["sptb"] not in RESIDENTIAL_SPTB:
                     continue
                 stats["residential"] += 1
