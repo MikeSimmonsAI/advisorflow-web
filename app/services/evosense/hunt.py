@@ -572,7 +572,7 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                     continue
                 try:
                     outcome, merged = IN.ingest(db, org_id, provider, cap, rec, strategy_id=strategy.id,
-                                                run_id=run.id, is_test=strategy.is_test)
+                                                run_id=run.id, is_test=strategy.is_test, target=p)
                 except Exception as exc:  # noqa: BLE001
                     _lookup_decision(db, p, strategy, provider, cap, C.L_QUEUE_FREE,
                                      "Record could not be ingested: %s" % str(exc)[:160],

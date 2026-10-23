@@ -96,3 +96,64 @@ def correct(db, org_id: str, prop: EvoSenseProperty, changes: Dict[str, Any], *,
     EV.rescore(db, prop, EV.strategy_for(db, prop))
     db.commit()
     return {"changed": changed, "lookups": counts.get("lookups")}
+
+
+# ── one house, one property: merge a duplicate created for the same house ──
+
+_WORK = ("EvoSenseEngagement", "EvoSenseMessage", "EvoSenseFact", "EvoSenseHandoff", "EvoSenseFeedback",
+         "EvoSenseFollowUp", "EvoSensePermissionLink", "EvoSenseEvalGroundTruth", "EvoSenseCostEntry")
+
+
+class MergeRefused(Exception):
+    pass
+
+
+def merge_duplicate(db, org_id: str, keep: EvoSenseProperty, drop: EvoSenseProperty, *, user,
+                    reason: str) -> Dict[str, Any]:
+    """Fold `drop` (a second property for the same house) into `keep`.
+
+    Only for the same house (same house number and street, same ZIP when both
+    have one) and only when nobody has worked the duplicate (no conversation,
+    follow-up, permission link, fact, cost...). Its OBSERVATIONS - the source
+    records - move to `keep` and are applied again through the normal attach
+    path, which rebuilds owner links and signals on `keep`; the duplicate's
+    derived rows (owner links, signals, scores) are removed with it. Audited."""
+    from app.models import evosense_models as M
+    from app.services.evosense import evaluate as EV
+    from app.services.evosense import ingest as IN
+    from app.services.evosense import providers as PV
+    if keep.id == drop.id or keep.organization_id != org_id or drop.organization_id != org_id:
+        raise MergeRefused("Choose two different properties in this workspace.")
+    if not IN._is_target(keep, {"street_address": drop.street_address, "zip_code": drop.zip_code}):
+        raise MergeRefused("These are not the same house (number, street or ZIP differ).")
+    for name in _WORK:
+        model = getattr(M, name)
+        if db.query(model).filter(model.property_id == drop.id).count():
+            raise MergeRefused("The duplicate has work on it (%s); settle it by hand." % name)
+    obs = db.query(M.EvoSenseObservation).filter(M.EvoSenseObservation.property_id == drop.id).all()
+    moved = [o.id for o in obs]
+    for model in (M.EvoSenseOwnership, M.EvoSenseSignal, M.EvoSenseScore):
+        db.query(model).filter(model.property_id == drop.id).delete(synchronize_session=False)
+    db.query(M.EvoSenseEnrichmentDecision).filter(M.EvoSenseEnrichmentDecision.property_id == drop.id) \
+        .update({"property_id": keep.id}, synchronize_session=False)
+    db.query(M.EvoSenseEvent).filter(M.EvoSenseEvent.property_id == drop.id) \
+        .update({"property_id": keep.id}, synchronize_session=False)
+    drop_snapshot = {"id": drop.id, "street_address": drop.street_address, "zip_code": drop.zip_code,
+                     "parcel_apn": drop.parcel_apn, "county": drop.county}
+    for o in obs:
+        o.property_id = keep.id
+    db.flush()
+    db.delete(drop)
+    db.flush()
+    for o in obs:
+        provider = PV.PROVIDERS.get(o.provider_key)
+        if provider is None:
+            continue
+        IN.attach_to(db, keep, provider, o.capability, C.jload(o.payload, {}) or {}, o,
+                     IN.source_rank(provider, o.capability), user=user)
+    C.log_event(db, org_id, "identity.merged", property_id=keep.id, user=user, actor_type=C.ACTOR_USER,
+                is_test=keep.is_test, summary="Duplicate property folded into this one (%d source records moved)"
+                % len(moved), details={"duplicate": drop_snapshot, "observations": moved, "reason": reason[:500]})
+    EV.rescore(db, keep, EV.strategy_for(db, keep))
+    db.commit()
+    return {"kept": keep.id, "removed": drop_snapshot, "observations_moved": len(moved)}
