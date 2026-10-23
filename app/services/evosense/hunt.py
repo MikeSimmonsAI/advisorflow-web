@@ -74,20 +74,24 @@ def run_strategy(db, org_id: str, strategy: EvoSenseStrategy, *, trigger: str = 
                     summary="Hunt not started: this strategy is already hunting")
         db.commit()
         return run
+    SCH.interrupt_stale_runs(db, strategy)
+    keeper = SCH.LeaseKeeper(db, strategy, token).start()
     try:
         run = _run_locked(db, org_id, strategy, trigger=trigger, user=user,
-                          max_properties=max_properties, enrich=enrich)
+                          max_properties=max_properties, enrich=enrich,
+                          renew=lambda: keeper.ok() and SCH.renew(db, strategy, token))
         # The next due time is written BEFORE the lock is released, so no
         # other worker can see "unlocked and still due" in between.
         if run.status != "skipped":
             SCH.record_result(db, strategy, run)
     finally:
+        keeper.stop()
         SCH.release(db, strategy, token)
     return run
 
 
 def _run_locked(db, org_id: str, strategy: EvoSenseStrategy, *, trigger: str, user,
-                max_properties: int, enrich: bool) -> EvoSenseRun:
+                max_properties: int, enrich: bool, renew=None) -> EvoSenseRun:
     ctl = C.controls(db, org_id)
     run = EvoSenseRun(organization_id=org_id, strategy_id=strategy.id, trigger=trigger)
     db.add(run)
@@ -125,7 +129,7 @@ def _run_locked(db, org_id: str, strategy: EvoSenseStrategy, *, trigger: str, us
         return finish("skipped", "Strategy is %s" % strategy.status)
     try:
         return _hunt_body(db, org_id, strategy, run, ctl, counts, finish, user=user,
-                          max_properties=max_properties, enrich=enrich)
+                          max_properties=max_properties, enrich=enrich, renew=renew)
     except Exception as exc:  # noqa: BLE001 - recorded, surfaced, retried; never silent
         db.rollback()
         run = db.query(EvoSenseRun).filter(EvoSenseRun.id == run_id).first()
@@ -158,17 +162,29 @@ def discovery_focus(strategy) -> List[str]:
     return [str(x) for x in focus if x] if isinstance(focus, list) else []
 
 
+def expand_focus(focus: Optional[List[str]]) -> List[str]:
+    """A strategy that names one appraisal-roll source (Tired Landlord named
+    collin_cad and denton_gis) means the FAMILY: every owner-roll source,
+    including ones added later (Harris, statewide), reads for it - no strategy
+    has to be edited when a new county comes online."""
+    focus = list(focus or [])
+    fams = {getattr(PV.PROVIDERS.get(k), "discovery_family", None) for k in focus} - {None}
+    return focus + sorted(f for f in fams if f not in focus)
+
+
 def _discovery_routes(db, org_id, focus: Optional[List[str]] = None):
     """(capability, provider, cfg) for every connected DISCOVERY source. A
     public-record LOOKUP source (TAD, geocoder, code cases) is never asked to
     discover; it is called per property in the lookup stage. With a focus,
     only the named capabilities / sources discover."""
     out, seen = [], set()
+    focus = expand_focus(focus)
     for cap in DISCOVERY:
         for provider, cfg, _cost in PV.route(db, org_id, cap):
             if not getattr(provider, "discovery", True):
                 continue
-            if focus and cap not in focus and provider.key not in focus:
+            if focus and cap not in focus and provider.key not in focus \
+                    and getattr(provider, "discovery_family", None) not in focus:
                 continue
             if (provider.key, cap) in seen:
                 continue
@@ -193,7 +209,23 @@ def _source_failed(db, org_id, strategy, provider, cfg, exc, counts, user):
                 summary="%s failed — %s: %s" % (provider.label, code, msg[:160]))
 
 
-def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_properties, enrich):
+def _checkpoint(run, counts, source_key: Optional[str], *, stage: str = "discovery") -> None:
+    """Progress saved on the run as each source finishes, so a hunt cut off by
+    a restart shows exactly what it completed (and recovery can say so)."""
+    prog = counts.setdefault("progress", {"sources_done": []})
+    if source_key and source_key not in prog["sources_done"]:
+        prog["sources_done"].append(source_key)
+    prog["stage"] = stage
+    prog["at"] = C.now().isoformat()
+    run.counts = C.jdump(counts)
+
+
+class LeaseLost(RuntimeError):
+    """The hunt lock expired and another worker may hold it: stop, don't double-run."""
+
+
+def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_properties, enrich,
+               renew=None):
     q = _query(strategy)
     pilot = ST.is_pilot(strategy)
     if pilot:
@@ -211,6 +243,8 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
     for cap, provider, cfg in routes:
         if len(touched) >= max_properties:
             break
+        if renew is not None and not renew():
+            raise LeaseLost("hunt lock lease was lost; stopped before %s" % provider.key)
         cfg.last_attempt_at = C.now()
         pq = dict(q, limit=min(share, max_properties - len(touched)))
         # NO DATABASE TRANSACTION IS HELD OPEN ACROSS A NETWORK CALL. A county
@@ -247,8 +281,11 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
             if prop is not None:
                 touched[prop.id] = prop
         db.flush()
+        _checkpoint(run, counts, provider.key)
         db.commit()
 
+    _checkpoint(run, counts, None, stage="lookups")
+    db.commit()
     if touched:
         free_lookups(db, org_id, strategy, run, list(touched.values()), counts)
     backlog = lookup_backlog(db, org_id, exclude=set(touched))
@@ -358,15 +395,20 @@ NO_MATCH_RECHECK_HOURS = 2
 
 
 def lookup_backlog(db, org_id: str, exclude=(), limit: int = BACKLOG_LIMIT) -> List[EvoSenseProperty]:
-    """Recent properties in a county with a free address lookup that still have
-    no account number - newest first. The lookups' own freshness rule keeps a
-    property that was just looked up from being looked up again."""
+    """Recent Texas properties that still have no account number OR no
+    current owner of record - newest first. Each lookup source decides which
+    of them it covers (applies), and its own freshness rule keeps a property
+    that was just looked up from being looked up again."""
+    from sqlalchemy import and_, exists, or_
+    from app.models.evosense_models import EvoSenseOwnership
+    has_owner = exists().where(and_(EvoSenseOwnership.property_id == EvoSenseProperty.id,
+                                    EvoSenseOwnership.is_current.is_(True)))
     q = (db.query(EvoSenseProperty)
          .filter(EvoSenseProperty.organization_id == org_id,
-                 EvoSenseProperty.parcel_apn.is_(None),
+                 or_(EvoSenseProperty.parcel_apn.is_(None), ~has_owner),
                  EvoSenseProperty.street_address.isnot(None),
                  EvoSenseProperty.archived_at.is_(None),
-                 EvoSenseProperty.county.in_(("Dallas", "Tarrant")))
+                 or_(EvoSenseProperty.state.is_(None), EvoSenseProperty.state == "TX"))
          .order_by(EvoSenseProperty.discovered_at.desc()))
     return [p for p in q.limit(limit + len(exclude or ())).all() if p.id not in (exclude or ())][:limit]
 

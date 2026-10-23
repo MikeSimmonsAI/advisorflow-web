@@ -52,6 +52,10 @@ _log = logging.getLogger(__name__)
 DEFAULT_DAYS_AHEAD = 10
 MAX_DAYS_AHEAD = 21
 
+# The BookingLink status of an appointment made for a PRACTICE record in test
+# mode. Deliberately not "booked": see book_slot.
+PRACTICE_STATUS = "practice"
+
 
 def _org(db: Session, organization_id: str) -> Optional[Organization]:
     return (db.query(Organization)
@@ -153,6 +157,19 @@ def available_slots(db: Session, *, employee, lead: Lead,
     }
 
 
+def _days_to_cover(wanted: datetime, now: datetime) -> int:
+    """How many days of availability to re-read so `wanted` is inside it.
+
+    THE BUG THIS FIXES (found 2026-10-21, 10:48 PM Central). The re-read
+    window starts at the WORKSPACE's local today, but this used to count days
+    on UTC dates. After 7 PM Central it is already tomorrow in UTC, so a slot
+    offered for tomorrow morning fell outside a one-day window and every
+    booking was refused with "No openings in that range". One extra day covers
+    any workspace offset from UTC; the slot must still match exactly.
+    """
+    return max(1, min((wanted.date() - now.date()).days + 2, MAX_DAYS_AHEAD))
+
+
 def _parse_starts_at(raw: str) -> Optional[datetime]:
     """Accept exactly what availability emitted: naive UTC ISO with a Z."""
     if not isinstance(raw, str):
@@ -193,7 +210,7 @@ def book_slot(db: Session, *, employee, lead: Lead, starts_at: str,
         raise ValueError("That time is already in the past.")
 
     # ── RE-READ. The employee may only take a slot still on offer. ──────────
-    days = max(1, min((wanted.date() - now.date()).days + 1, MAX_DAYS_AHEAD))
+    days = _days_to_cover(wanted, now)
     fresh = available_slots(db, employee=employee, lead=lead, advisor=advisor,
                             days_ahead=days, now=now)
     if fresh.get("availability_status") != "ok":
@@ -210,9 +227,17 @@ def book_slot(db: Session, *, employee, lead: Lead, starts_at: str,
     # covers the different shape: two DIFFERENT runs, minutes apart, each
     # deciding to book. The record already has a live appointment, so the
     # answer is the existing one rather than a new row.
+    # PRACTICE BOOKINGS (test mode, workforce/practice.py) are stored with
+    # their own status so they never appear on a real agenda, never take a
+    # real slot, never trigger a reminder and never reach a calendar - every
+    # one of those readers selects "booked"/"confirmed" only.
+    from app.services.workforce import practice as wf_practice
+    practice = wf_practice.is_practice_record(lead)
+    live_statuses = (("booked", "confirmed", PRACTICE_STATUS) if practice
+                     else ("booked", "confirmed"))
     existing = (db.query(BookingLink)
                 .filter(BookingLink.lead_id == lead.id,
-                        BookingLink.status.in_(("booked", "confirmed")),
+                        BookingLink.status.in_(live_statuses),
                         BookingLink.booked_time.isnot(None))
                 .order_by(BookingLink.booked_time.asc()).first())
     if existing is not None:
@@ -236,7 +261,7 @@ def book_slot(db: Session, *, employee, lead: Lead, starts_at: str,
     booking = BookingLink(
         lead_id=lead.id,
         user_id=advisor.id,
-        status="booked",
+        status=PRACTICE_STATUS if practice else "booked",
         token=_encode_booking_token(lead, advisor),
         # NAIVE LOCAL WALL TIME, matching every existing tenant reader — see
         # the tenant_scheduling module docstring. Writing UTC here would put
@@ -249,6 +274,26 @@ def book_slot(db: Session, *, employee, lead: Lead, starts_at: str,
     db.add(booking)
     lead.status = "booked"
     db.flush()
+
+    if practice:
+        # A practice appointment for a pretend person: no calendar push and no
+        # case file. Nothing outside this row is touched.
+        return {
+            "booking_id": booking.id,
+            "already_booked": False,
+            "practice": True,
+            "advisor_id": advisor.id,
+            "advisor_name": advisor.full_name,
+            "appointment_type": label,
+            "duration_minutes": duration,
+            "starts_at": wanted.replace(microsecond=0).isoformat() + "Z",
+            "starts_at_local": start_local.replace(microsecond=0).isoformat(),
+            "timezone": work_tz,
+            "calendar_synced": False,
+            "confirmation_pending": False,
+            "message": "Practice appointment recorded. It is not on any "
+                       "real calendar.",
+        }
 
     # SIDE EFFECTS THAT CANNOT UN-BOOK THE MEETING. Each is best effort and
     # reported; none of them may raise out of here, because the appointment is
@@ -307,7 +352,7 @@ def reschedule(db: Session, *, employee, lead: Lead, booking_link_id: str,
     if wanted is None or wanted <= now:
         raise ValueError("That is not a valid future time.")
 
-    days = max(1, min((wanted.date() - now.date()).days + 1, MAX_DAYS_AHEAD))
+    days = _days_to_cover(wanted, now)
     fresh = available_slots(db, employee=employee, lead=lead, advisor=advisor,
                             days_ahead=days, now=now)
     if fresh.get("availability_status") != "ok":

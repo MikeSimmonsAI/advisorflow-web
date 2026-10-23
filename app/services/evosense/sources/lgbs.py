@@ -3,7 +3,8 @@
     https://taxsales.lgbs.com           public map and list
     https://taxsales.lgbs.com/api/property_sales/?county=DALLAS%20COUNTY&state=TX
 
-Linebarger is the delinquent-tax law firm for most North Texas taxing units.
+Linebarger is the delinquent-tax law firm for many Texas taxing units; its
+list covered 95 Texas counties (4,202 rows) on 2026-10-21.
 Its public list names every property it has taken to judgment for unpaid
 property tax and is selling (or will sell) at the county's tax sale: address,
 county account number, cause (case) number, adjudged value, minimum bid,
@@ -36,11 +37,17 @@ PAGE = "https://taxsales.lgbs.com/"
 PAGE_SIZE = 200
 MAX_PAGES = 30                      # 6,000 rows per county - a hard stop, never an endless crawl
 
-# The counties EvoSense discovers in, as Linebarger names them.
+STATE_PAGE_SIZE = 1000
+STATE_MAX_PAGES = 15                # 15,000 Texas rows - a hard stop (4,202 listed on 2026-10-21)
+
+# The North Texas counties a strategy WITHOUT a county list has always hunted.
+# Kept as the default so an existing strategy's results do not change; any
+# Texas county Linebarger lists can be named, or ALL_TEXAS for every county.
 COUNTIES = {"dallas": "DALLAS COUNTY", "tarrant": "TARRANT COUNTY", "collin": "COLLIN COUNTY",
             "denton": "DENTON COUNTY", "ellis": "ELLIS COUNTY", "kaufman": "KAUFMAN COUNTY",
             "rockwall": "ROCKWALL COUNTY", "parker": "PARKER COUNTY", "johnson": "JOHNSON COUNTY"}
 DEFAULT_COUNTIES = ("dallas", "tarrant")
+ALL_TEXAS = ("all texas", "all of texas", "texas", "statewide", "all", "*")
 
 KEEP = "keep"
 
@@ -79,8 +86,13 @@ def _date(v) -> Optional[datetime]:
 
 
 def county_key(name: str) -> Optional[str]:
-    n = re.sub(r"\s+county$", "", (name or "").strip().lower())
-    return n if n in COUNTIES else None
+    """'TRAVIS COUNTY' -> 'travis'. Any Texas county, not only the defaults."""
+    n = re.sub(r"\s+", " ", re.sub(r"\s+county$", "", (name or "").strip().lower())).strip()
+    return n or None
+
+
+def wants_all_texas(counties) -> bool:
+    return any((c or "").strip().lower() in ALL_TEXAS for c in counties or ())
 
 
 def account(county: str, acct: str) -> str:
@@ -99,11 +111,23 @@ class LgbsTaxSaleReader:
     def fetch_county(self, county: str) -> List[Dict[str, Any]]:
         rows: List[Dict[str, Any]] = []
         for page in range(MAX_PAGES):
-            j = B.get_json(API, {"county": COUNTIES[county], "state": "TX",
+            j = B.get_json(API, {"county": COUNTIES.get(county) or "%s COUNTY" % county.upper(), "state": "TX",
                                  "limit": PAGE_SIZE, "offset": page * PAGE_SIZE})
             if not isinstance(j, dict) or "results" not in j:
                 raise B.SourceError(B.SOURCE_FORMAT_CHANGED, "taxsales.lgbs.com did not return a results list")
             rows.extend(j["results"] or [])
+            if not j.get("next"):
+                break
+        return rows
+
+    def fetch_state(self) -> List[Dict[str, Any]]:
+        """Every Texas row in a few large pages (one pass serves all counties)."""
+        rows: List[Dict[str, Any]] = []
+        for page in range(STATE_MAX_PAGES):
+            j = B.get_json(API, {"state": "TX", "limit": STATE_PAGE_SIZE, "offset": page * STATE_PAGE_SIZE})
+            if not isinstance(j, dict) or "results" not in j:
+                raise B.SourceError(B.SOURCE_FORMAT_CHANGED, "taxsales.lgbs.com did not return a results list")
+            rows.extend(r for r in (j["results"] or []) if (r.get("state") or "TX").upper() == "TX")
             if not j.get("next"):
                 break
         return rows
@@ -118,11 +142,27 @@ class LgbsTaxSaleReader:
         stats: Counter = Counter()
         today = today or datetime.utcnow()
         keep: List[Dict[str, Any]] = []
-        for c in counties:
-            if c not in COUNTIES:
-                continue
-            rows = self.fetch_county(c)
-            stats["listed_%s" % c] = len(rows)
+        statewide = wants_all_texas(counties)
+        named = [county_key(c) for c in counties or () if county_key(c)]
+        if statewide or any(c not in COUNTIES for c in named):
+            # Outside the default set (or all of Texas): one statewide pass,
+            # filtered here, instead of one request series per county.
+            allrows = self.fetch_state()
+            stats["listed_texas"] = len(allrows)
+            stats["listed_counties"] = len({county_key(r.get("county")) for r in allrows})
+            groups: Dict[str, List[Dict[str, Any]]] = {}
+            for r in allrows:
+                k = county_key(r.get("county"))
+                if k and (statewide or k in named):
+                    groups.setdefault(k, []).append(r)
+            pairs = sorted(groups.items())
+        else:
+            pairs = []
+            for c in named:
+                rows = self.fetch_county(c)
+                stats["listed_%s" % c] = len(rows)
+                pairs.append((c, rows))
+        for c, rows in pairs:
             for r in rows:
                 kind = classify(r)
                 stats[kind] += 1

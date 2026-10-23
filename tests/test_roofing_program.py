@@ -320,7 +320,7 @@ def test_enroll_respects_qualification_and_text_switch(client, world):
 def test_sample_workspace_is_labelled_and_unsendable(db_session):
     from app.services.roofing import demo_seed
     out = demo_seed.seed(db_session)
-    assert out["homeowners_total"] == 64
+    assert out["homeowners_total"] == 96
     org_ = db_session.query(Organization).filter(Organization.id == out["organization_id"]).one()
     feats = json.loads(org_.enabled_features)
     assert org_.is_demo and "sms" not in feats and "email" not in feats and "cadences" not in feats
@@ -329,11 +329,11 @@ def test_sample_workspace_is_labelled_and_unsendable(db_session):
     again = demo_seed.seed(db_session)
     assert again["homeowners_added"] == 0
     from app.services.roofing import metrics as M
-    d0, d1 = M.parse_range(None, None)
+    d0, d1 = M.parse_range(None, None, days=60)   # the story spans 45 days
     d = M.compute(db_session, org_, leads, d0, d1)
     assert d["sample_data"] is True and d["has_data"]
     stages = {s["key"]: s["count"] for s in d["stage_now"]}
-    assert sum(stages.values()) == 64 and stages["won"] + stages["lost"] > 0
+    assert sum(stages.values()) == 96 and stages["won"] + stages["lost"] > 0
 
 
 # ── mission control ─────────────────────────────────────────────────────────
@@ -363,3 +363,42 @@ def test_mission_control_lanes_attention_and_takeover(client, world):
     assert r["follow_up"] == "active"
     p = client.get("/roofing-ops/playbooks", headers=h(db, owner)).json()
     assert p["active"]["enrolled"] == 1 and len(p["available"]) == 5
+
+
+def test_sample_story_can_fill_a_named_roofing_workspace(client, db_session):
+    """The demo story can be seeded into a real roofing workspace (e.g. EvoSys Pro
+    Roofing): it becomes a demo tenant (labelled, unsendable), every homeowner is
+    a test record, the AI side of the conversation exists, and the god endpoint
+    refuses a workspace whose Roofing program is off."""
+    from app.models.conversation_models import ConversationState
+    from app.services import send_source as SS
+    db = db_session
+    target = org(db, "EvoSys Pro Roofing Test")
+    off = org(db, "Not Roofing", features=("leads",))
+    god = User(organization_id=None, email="god-%d@roof.test" % next(_SEQ), full_name="God",
+               password_hash=hash_password("Pass12345!"), role="god_admin", is_active=True,
+               must_change_password=False)
+    db.add(god)
+    db.commit()
+    r = client.post("/god/roofing/demo", json={"organization_id": off.id}, headers=h(db, god))
+    assert r.status_code == 409
+    r = client.post("/god/roofing/demo", json={"organization_id": target.id}, headers=h(db, god))
+    assert r.status_code == 200, r.text
+    assert r.json()["homeowners_total"] == 96
+    db.refresh(target)
+    assert target.is_demo is True
+    leads = db.query(Lead).filter(Lead.organization_id == target.id).all()
+    assert all(l.is_test and l.email.endswith("@example.com") and "555" in l.phone for l in leads)
+    ids = [l.id for l in leads]
+    assert db.query(Message).filter(Message.lead_id.in_(ids), Message.send_source == SS.AI_CONVERSATION).count() > 0
+    assert db.query(ConversationState).filter(ConversationState.organization_id == target.id).count() > 0
+    assert db.query(RoofingOpportunity).filter(RoofingOpportunity.organization_id == target.id,
+                                               RoofingOpportunity.stage == "won").count() > 0
+    # idempotent, and the default SAMPLE workspace is untouched by it
+    again = client.post("/god/roofing/demo", json={"organization_id": target.id}, headers=h(db, god)).json()
+    assert again["homeowners_added"] == 0
+    assert db.query(Organization).filter(Organization.slug == "evosys-roofing-sample").count() == 0
+    # non-god cannot run it
+    owner = user(db, target, "org_admin", "tgt")
+    assert client.post("/god/roofing/demo", json={"organization_id": target.id},
+                       headers=h(db, owner)).status_code == 403

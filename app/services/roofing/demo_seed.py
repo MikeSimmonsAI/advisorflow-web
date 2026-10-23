@@ -57,14 +57,41 @@ def _phone(i: int) -> str:
     return "+1214555%04d" % (100 + (i % 100))
 
 
+def _team(org) -> list:
+    """The sample salespeople. In the default SAMPLE org they keep their
+    original addresses; seeded into another roofing workspace they get an
+    address of their own (still example.com, still unusable passwords)."""
+    if org.slug == SLUG:
+        return TEAM
+    return [(e.replace("@example.com", "+%s@example.com" % org.slug), n, r) for e, n, r in TEAM]
+
+
 def seed(db: Session, by_user_id: Optional[str] = None, presenter_password: Optional[str] = None,
-         now: Optional[datetime] = None) -> Dict[str, Any]:
+         now: Optional[datetime] = None, organization_id: Optional[str] = None,
+         homeowners: int = 96) -> Dict[str, Any]:
+    """Seed the SAMPLE roofing story.
+
+    organization_id: seed an existing roofing workspace (its Roofing program
+    must already be on) instead of the default "Summit Peak Roofing (SAMPLE)".
+    That workspace is flagged is_demo, which labels every screen as sample data
+    and makes every outbound provider refuse it (demo_guard) - nothing in it
+    can text, email or touch a real calendar.
+    """
     from app.services import workspace_access
     from app.services.auth_service import hash_password
     now = now or datetime.utcnow()
     rnd = random.Random(20261020)
-    org = db.query(Organization).filter(Organization.slug == SLUG).first()
+    homeowners = max(1, min(int(homeowners or 96), 99))
     created = False
+    if organization_id:
+        org = db.query(Organization).filter(Organization.id == organization_id).first()
+        if org is None:
+            raise ValueError("Organization not found.")
+        if not C.explicitly_enabled(org):
+            raise ValueError("Turn the Roofing program on for this workspace before adding sample data.")
+        org.is_demo = True
+    else:
+        org = db.query(Organization).filter(Organization.slug == SLUG).first()
     if org is None:
         org = Organization(name=NAME, slug=SLUG, plan="enterprise", industry="roofing", is_active=True,
                            is_demo=True, brand_name="Summit Peak Roofing", timezone="America/Chicago",
@@ -74,14 +101,17 @@ def seed(db: Session, by_user_id: Optional[str] = None, presenter_password: Opti
         created = True
     elif not org.is_demo:
         raise ValueError("The sample slug belongs to a real organization; refusing to touch it.")
-    keys = C.jload(org.enabled_features, [])
-    keys = keys if isinstance(keys, list) else []
-    org.enabled_features = C.jdump(sorted(set(keys) | set(DEMO_FEATURES)))
+    if not organization_id:
+        keys = C.jload(org.enabled_features, [])
+        keys = keys if isinstance(keys, list) else []
+        org.enabled_features = C.jdump(sorted(set(keys) | set(DEMO_FEATURES)))
+    team = _team(org)
+    company = "Summit Peak Roofing" if org.slug == SLUG else (org.brand_name or org.name)
     S.setup(db, org, by_user_id, grant_features=False)
     prof = S.ensure_profile(db, org)
 
     users = {}
-    for email, name, role in TEAM:
+    for email, name, role in team:
         u = db.query(User).filter(User.email == email).first()
         if u is not None and u.organization_id != org.id:
             raise ValueError("Sample user %s belongs to another organization." % email)
@@ -99,25 +129,27 @@ def seed(db: Session, by_user_id: Optional[str] = None, presenter_password: Opti
         except Exception:  # noqa: BLE001 - membership is a convenience for entering the sample
             pass
         users[email] = u
-    reps = [users[e] for e, _, r in TEAM if r == "advisor"]
-    owner = users[TEAM[0][0]]
-    prof.company_name = "Summit Peak Roofing"
+    reps = [users[e] for e, _, r in team if r == "advisor"]
+    owner = users[team[0][0]]
+    prof.company_name = company
     prof.color_primary, prof.color_accent = "#0b1f3a", "#f97316"
     prof.service_areas = C.jdump(["Plano", "Frisco", "McKinney", "Allen", "Richardson"])
     prof.default_salesperson_id = reps[0].id
     prof.notify_user_ids = C.jdump([owner.id])
 
     made = 0
-    for i in range(64):
+    from app.models.conversation_models import ConversationState
+    from app.services import send_source as SS
+    for i in range(homeowners):
         email = "homeowner%02d@example.com" % i
         if db.query(Lead).filter(Lead.organization_id == org.id, Lead.email == email).first():
             continue
         made += 1
         city, zc = CITIES[i % len(CITIES)]
         rep = reps[i % len(reps)]
-        created_at = now - timedelta(days=rnd.randint(1, 29), hours=rnd.randint(0, 10))
+        created_at = now - timedelta(days=rnd.randint(1, 44), hours=rnd.randint(0, 10))
         lead = Lead(organization_id=org.id, assigned_to_id=rep.id, first_name=FIRST[i % 30],
-                    last_name=LAST[(i * 7) % 20], email=email, phone=_phone(i), is_test=True,
+                    last_name=LAST[(i * 7 + i // 30) % 20], email=email, phone=_phone(i), is_test=True,
                     street_address="%d %s" % (1200 + i * 37, STREETS[i % 10]), city=city, state="TX",
                     zip_code=zc, source="csv", source_detail=SOURCES[i % 4], status="new",
                     sms_consent=True, created_at=created_at,
@@ -140,7 +172,7 @@ def seed(db: Session, by_user_id: Optional[str] = None, presenter_password: Opti
         for k in range(touches):
             tmpl = C.SEQUENCE_TOUCHES[min(k, len(C.SEQUENCE_TOUCHES) - 1)]
             body = (tmpl["message_template"].replace("{first_name}", lead.first_name)
-                    .replace("{advisor_name}", rep.full_name).replace("{org_name}", "Summit Peak Roofing"))
+                    .replace("{advisor_name}", rep.full_name).replace("{org_name}", company))
             if t > now:
                 break
             db.add(Message(lead_id=lead.id, sender_id=rep.id, body=body, send_state="delivered",
@@ -181,6 +213,31 @@ def seed(db: Session, by_user_id: Optional[str] = None, presenter_password: Opti
                      is_hot=cls == ReplyClassification.INTERESTED,
                      reviewed_at=None if (recent or depth == 2) else at + timedelta(hours=2)))
         lead.status = "replied"
+        # THE AI'S SIDE OF THE CONVERSATION. A question gets answered by the AI;
+        # some homeowners then say yes, some still want a person.
+        mode, priority, intent, human_reason = "ai_active", "low_priority", "interested", None
+        last_out = None
+        if cls == ReplyClassification.QUESTION:
+            answer = ("Yes - the inspection is completely free and takes about 45 minutes. We work with "
+                      "insurance claims every week and can meet your adjuster. Would you like me to find a time?")
+            last_out = at + timedelta(minutes=3)
+            db.add(Message(lead_id=lead.id, sender_id=rep.id, body=answer, send_state="delivered",
+                           delivery_status="delivered", send_source=SS.AI_CONVERSATION, sent_at=last_out))
+            if rnd.random() < 0.5 and last_out + timedelta(hours=1) < now:
+                db.add(Reply(lead_id=lead.id, body="Okay, that helps. Yes, let's set it up.", source="sms",
+                             classification=ReplyClassification.INTERESTED, is_hot=True,
+                             received_at=last_out + timedelta(hours=1)))
+                intent = "ready_to_book"
+                priority = "needs_human"
+                mode = "waiting_on_human"
+                human_reason = "Said yes after the AI answered - offer inspection times"
+            else:
+                intent, mode = "question", "waiting_on_customer"
+        elif cls == ReplyClassification.NOT_INTERESTED:
+            intent, mode = "not_interested", "ai_paused"
+        elif depth == 2:
+            intent, priority, mode = "ready_to_book", "needs_human", "waiting_on_human"
+            human_reason = "Wants an inspection - confirm a time"
         if depth >= 3:
             offer_link = None
             if depth == 3:
@@ -192,8 +249,12 @@ def seed(db: Session, by_user_id: Optional[str] = None, presenter_password: Opti
                                          appt_duration=60, created_at=at + timedelta(minutes=12))
                 db.add(offer_link)
                 db.flush()
-            db.add(Message(booking_link_id=offer_link.id if offer_link else None, lead_id=lead.id, sender_id=rep.id, send_state="delivered", delivery_status="delivered",
-                           send_source="manual", sent_at=at + timedelta(minutes=12),
+            last_out = at + timedelta(minutes=12)
+            mode, priority, intent, human_reason = (("waiting_on_customer", "low_priority", "times_offered", None)
+                                                    if depth == 3 else ("ai_active", "low_priority", "booked", None))
+            db.add(Message(booking_link_id=offer_link.id if offer_link else None, lead_id=lead.id,
+                           sender_id=rep.id, send_state="delivered", delivery_status="delivered",
+                           send_source=SS.AI_CONVERSATION, sent_at=last_out,
                            body="Great, %s! I have Tuesday at 10:00 AM, Wednesday at 1:00 PM or Thursday at "
                                 "9:00 AM open - which works best?" % lead.first_name))
         if depth >= 4:
@@ -206,6 +267,12 @@ def seed(db: Session, by_user_id: Optional[str] = None, presenter_password: Opti
                              confirmation_sent=True, reminder_24hr_sent=True, reminder_1hr_sent=True)
             db.add(bl)
             lead.status = "booked"
+        if not db.query(ConversationState).filter(ConversationState.lead_id == lead.id).first():
+            db.add(ConversationState(organization_id=org.id, lead_id=lead.id, state="active", mode=mode,
+                                     priority=priority, current_intent=intent, needs_human_reason=human_reason,
+                                     has_open_question=intent == "question", last_inbound_at=at,
+                                     last_outbound_at=last_out, last_meaningful_at=last_out or at,
+                                     last_meaningful_event="Homeowner replied", updated_at=now))
         db.flush()
         if depth >= 5:
             opp = J.sync(db, org.id, [lead])[lead.id]
@@ -225,7 +292,13 @@ def seed(db: Session, by_user_id: Optional[str] = None, presenter_password: Opti
     db.commit()
     leads = db.query(Lead).filter(Lead.organization_id == org.id).all()
     J.sync(db, org.id, leads)
+    # Field inspections on top of the story: completed reports with sample
+    # photos for everyone already past the inspection, a draft for a visit
+    # whose time just passed (issue #283).
+    from app.services.roofing import demo_inspections
+    insp = demo_inspections.seed(db, org, now)
     return {"organization_id": org.id, "organization_name": org.name, "created": created,
             "homeowners_added": made, "homeowners_total": len(leads),
             "users": [{"email": u.email, "name": u.full_name, "role": u.role} for u in users.values()],
-            "presenter_password_set": bool(presenter_password)}
+            "presenter_password_set": bool(presenter_password), "inspections_added": insp["inspections"],
+            "inspection_photos_added": insp["photos"]}

@@ -95,7 +95,7 @@ def record_visit(db, *, org, rep, data: Dict[str, Any], visible=None) -> Dict[st
     router passes the rep's lead scope). A match the rep may not see is never
     revealed (no id, no "existing customer" result) and never changed by the
     rep - its owner gets an internal task instead."""
-    from app.models.models import Lead, Notification, NotificationType, User
+    from app.models.models import Lead
     from app.models.work_models import LeadTask
     from app.routers.audit_log_router import log_action
     from app.services.dedup_service import normalize_phone
@@ -171,6 +171,8 @@ def record_visit(db, *, org, rep, data: Dict[str, Any], visible=None) -> Dict[st
                         street_address=address, zip_code=zip_code or None,
                         sms_consent=False, custom_fields=json.dumps(cf),
                         notes=(str(data.get("notes") or "").strip()[:1000] or None))
+            from app.services import energy_team
+            energy_team.apply_default_advisor(db, org.id, lead)
             db.add(lead)
             db.flush()
             master_contacts.record_lead(db, lead, source="Atlantis Field Referral",
@@ -181,16 +183,12 @@ def record_visit(db, *, org, rep, data: Dict[str, Any], visible=None) -> Dict[st
                                     "recorded by the rep. No text consent. Nothing has been sent."
                                     % (rep.full_name or rep.email, outcome),
                             due_at=now + timedelta(hours=24), status="open", source=TASK_SOURCE,
-                            created_by_id=rep.id))
-            admins = [r[0] for r in db.query(User.id).filter(
-                User.organization_id == org.id, User.role == "org_admin",
-                User.is_active.isnot(False)).all()]
-            for uid in admins:
-                db.add(Notification(user_id=uid, lead_id=lead.id, type=NotificationType.DEMO_REQUEST,
-                                    message="Field referral from %s: %s - assign an advisor."
-                                            % (rep.full_name or rep.email,
-                                               "business" if commercial else "home"),
-                                    link="/rate-requests?open=%s" % lead.id))
+                            assigned_to_id=lead.assigned_to_id, created_by_id=rep.id))
+            # same shared New Requests queue and the same one-alert rule as the website
+            energy_team.alert_new_request(
+                db, org=org, lead=lead, event_key="field:%s" % lead.id, origin="field",
+                what="%s, from %s" % ("business" if commercial else "home", rep.full_name or rep.email),
+                actor_id=rep.id)
             lead_id, result = lead.id, "new_referral"
     elif outcome == "do_not_contact" and (phone or email):
         existing = _find_person(db, org.id, phone, email)

@@ -99,6 +99,14 @@ def terms_for(db: Session, platform_id: Optional[str],
             .first())
 
 
+# "Included with every package, including an account with no package on file."
+# Many real accounts resolve to no package (never subscribed, catalogue not
+# seeded), so naming plans alone would leave them out. Set by the God Mode
+# switchboard; whether AI may actually run is still decided per account by the
+# activation scopes.
+ALL_PLANS = "*"
+
+
 def plan_key_for(db: Session, org: Optional[Organization]) -> Optional[str]:
     """The customer's package key, through the platform's own resolution.
 
@@ -284,7 +292,8 @@ def resolve_offer(db: Session, org: Organization, template_key: str) -> Offer:
 
     # --- Is the customer's package allowed to hold it? ---------------------
     eligible = json_list(terms.eligible_plan_keys, []) or []
-    if eligible and (plan_key or "") not in eligible:
+    if eligible and ALL_PLANS not in eligible \
+            and (plan_key or "") not in eligible:
         offer.state = D.COMM_NOT_OFFERED
         offer.detail = ("This AI employee is not available on the current "
                         "package.")
@@ -295,7 +304,7 @@ def resolve_offer(db: Session, org: Organization, template_key: str) -> Offer:
 
     # --- Included with the package? ----------------------------------------
     included = json_list(terms.included_plan_keys, []) or []
-    if plan_key and plan_key in included:
+    if ALL_PLANS in included or (plan_key and plan_key in included):
         offer.state = D.COMM_INCLUDED
         offer.detail = "Included with the current package."
         return offer

@@ -381,11 +381,23 @@ def test_unconfigured_operating_hours_are_not_permission(db_session):
 # THE QUEUE
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _own(db, lead, org):
+    """Put the shared fixture lead in THIS test's account.
+
+    The queue refuses a lead from another account at enqueue time, and these
+    tests are about queue mechanics, not tenancy (tenancy has its own tests).
+    """
+    lead.organization_id = org.id
+    db.flush()
+    return lead
+
+
 def test_enqueue_is_idempotent(db_session, sample_lead):
     brand = _brand(db_session)
     org = _org(db_session, brand)
     admin = _admin(db_session, org)
     emp = _hire(db_session, org, admin)
+    _own(db_session, sample_lead, org)
     first = wf_queue.enqueue(db_session, emp, [sample_lead.id])
     second = wf_queue.enqueue(db_session, emp, [sample_lead.id])
     db_session.commit()
@@ -401,6 +413,7 @@ def test_only_one_worker_can_claim_an_item(db_session, sample_lead):
     org = _org(db_session, brand)
     admin = _admin(db_session, org)
     emp = _hire(db_session, org, admin)
+    _own(db_session, sample_lead, org)
     wf_queue.enqueue(db_session, emp, [sample_lead.id])
     db_session.commit()
     first = wf_queue.claim(db_session, emp, limit=5)
@@ -414,6 +427,7 @@ def test_a_stale_claim_token_cannot_write(db_session, sample_lead):
     org = _org(db_session, brand)
     admin = _admin(db_session, org)
     emp = _hire(db_session, org, admin)
+    _own(db_session, sample_lead, org)
     wf_queue.enqueue(db_session, emp, [sample_lead.id])
     db_session.commit()
     (item, _token), = wf_queue.claim(db_session, emp, limit=1)
@@ -428,6 +442,7 @@ def test_an_illegal_transition_raises(db_session, sample_lead):
     org = _org(db_session, brand)
     admin = _admin(db_session, org)
     emp = _hire(db_session, org, admin)
+    _own(db_session, sample_lead, org)
     wf_queue.enqueue(db_session, emp, [sample_lead.id])
     db_session.commit()
     item = (db_session.query(AIWorkItem)
@@ -443,6 +458,7 @@ def test_pausing_an_employee_pauses_its_queue(db_session, sample_lead):
     org = _org(db_session, brand)
     admin = _admin(db_session, org)
     emp = _hire(db_session, org, admin)
+    _own(db_session, sample_lead, org)
     wf_queue.enqueue(db_session, emp, [sample_lead.id])
     db_session.commit()
     wf_service.pause(db_session, emp, reason="test", actor=admin)
@@ -457,6 +473,7 @@ def test_resuming_returns_items_at_eligibility(db_session, sample_lead):
     org = _org(db_session, brand)
     admin = _admin(db_session, org)
     emp = _hire(db_session, org, admin)
+    _own(db_session, sample_lead, org)
     wf_queue.enqueue(db_session, emp, [sample_lead.id])
     db_session.commit()
     wf_service.pause(db_session, emp, reason="test", actor=admin)

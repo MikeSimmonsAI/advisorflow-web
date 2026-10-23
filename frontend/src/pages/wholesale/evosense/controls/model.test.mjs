@@ -87,3 +87,31 @@ test('paid exposure reads the server channel and the provider switches', () => {
   assert.equal(x.on.length, 0)
   assert.equal(x.channel.state, 'NOTHING CONNECTED')
 })
+
+test('a statewide source reads as statewide, not as a county list', () => {
+  const s = M.scopeOf({ coverage_area: { scope: "state", counties: [], scope_name: "Texas" } })
+  assert.equal(s.key, 'state')
+  assert.equal(s.label, 'Texas statewide')
+})
+
+test('a Texas statewide source lists all 254 counties but covers only those where it returned data', () => {
+  const now = Date.parse('2026-10-22T03:00:00Z')
+  const base = { connector_kind: 'real', enabled: true, configured: true, operational: true, state: 'HEALTHY',
+                 healthy: true, last_success_at: '2026-10-22T02:00:00Z' }
+  const providers = [
+    { ...base, key: 'tarrant_tax_roll', label: 'Tarrant County tax roll', capabilities: ['TAX'],
+      coverage_area: { scope: 'county', counties: ['Tarrant'] } },
+    { ...base, key: 'lgbs_tax_sales', label: 'Tax sales (all Texas counties)', capabilities: ['TAX'],
+      coverage_area: { scope: 'state', counties: [], scope_name: 'Texas', verified_counties: ['Harris', 'Tarrant'] } },
+  ]
+  assert.equal(M.TEXAS_COUNTIES.length, 254)
+  const counties = M.countyUniverse(providers)
+  assert.equal(counties.length, 254)                         // the whole state is listed...
+  assert.equal(counties[0], 'Tarrant')                       // county-specific first
+  const cov = M.coverageFor('TAX', providers, counties, now)
+  assert.equal(cov.rows.find((r) => r.county === 'Harris').best.key, 'lgbs_tax_sales')
+  assert.equal(cov.rows.find((r) => r.county === 'Tarrant').sources.length, 2)
+  assert.equal(cov.rows.find((r) => r.county === 'Bexar').cell, 'none')   // ...but declared scope is not coverage
+  assert.equal(cov.live, 2)
+  assert.equal(M.scopeOf(providers[1]).label, 'Texas statewide · data in 2 counties')
+})

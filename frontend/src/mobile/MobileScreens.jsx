@@ -23,7 +23,7 @@ import { useMobile, useApi, ScreenHead, Loading, ErrorState, Empty, Icon, isAuth
 import { needsAttention, refusalReasons, canCompose, relTime, humanize, groupByDay,
          workspaceChoices, parseTs, NOT_AVAILABLE, greetingName, mobilePathFor, mobileSkin } from './mobileHelpers'
 import { BrainStrip } from './MobileAgency'
-import { hasAgencyFeature } from '../verticals/agencyVertical'
+import { agencyVerticalFor } from '../verticals/agencyVertical'
 import { readableTimestamps, replaceKeys } from '../utils/humanize'
 import { APP_STATUS_LABELS } from '../pages/agency/agencyFormat'
 import { readPushStatus, subscribePush, unsubscribePush, pushApi, pushRowState, PUSH_STATUS } from './push'
@@ -50,7 +50,7 @@ export function MobileLogin() {
         const def = ctx && ctx.default_context
         const still = priorWorkspace && (ctx?.contexts || []).some(c => c.type === 'workspace' && c.organization_id === priorWorkspace)
         if (nextPath && still) setWorkspaceContext(priorWorkspace)
-        else if (def && def.type === 'workspace' && def.organization_id) setWorkspaceContext(def.organization_id)
+        else if (def && (def.type === 'workspace' || def.type === 'product') && def.organization_id) setWorkspaceContext(def.organization_id)
         else clearWorkspaceContext()
         if (nextPath && (still || !priorWorkspace) && nextPath.startsWith('/m')) { navigate(nextPath, { replace: true }); return }
       } catch { /* the shell re-asks */ }
@@ -79,7 +79,7 @@ export function MobileHome() {
   const { branding } = useMobile()
   // An insurance-agency workspace's "needs attention" is the agency attention
   // list (the same one the desktop Command Center shows), not just replies.
-  if (hasAgencyFeature(branding)) return <AgencyMobileHome />
+  if (agencyVerticalFor(branding)) return <AgencyMobileHome />  // insurance agencies only - a capability alone never changes identity
   // A wholesale workspace's work is deals that need a person (offer requests,
   // asking prices, callbacks), not the reply inbox.
   if (mobileSkin(branding) === 'wholesale') return <WholesaleMobileHome />

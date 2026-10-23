@@ -126,11 +126,12 @@ def test_held_reply_keeps_the_agreed_follow_up_date(setter, sample_advisor, monk
     day = (A._today_central().date() + timedelta(days=35)).isoformat()
     fake = _Fake([_d("follow_up_later", "Of course - I'll check back with you next month.",
                      follow_up_date=day, follow_up_about="check in after the holidays")])
-    _, conv = _run(db, lead, "We're busy now, can you check back next month?", fake)
+    resp, conv = _run(db, lead, "We're busy now, can you check back next month?", fake)
     turns = db.query(ProgramConversationTurn).filter_by(conversation_id=conv.id, role="ai").all()
-    assert [t.delivery for t in turns] == ["held"]
-    assert conv.state == "waiting_future"
-    assert conv.next_followup_at == datetime.strptime(day, "%Y-%m-%d").replace(hour=15)   # not 10 h from now
+    # THE RULE (Oct 22): "check back next month" is not an appointment - a
+    # person takes it; nothing is held to go out later.
+    assert [t.delivery for t in turns] == ["blocked"]
+    assert conv.state == "human" and resp.suggested_reply.startswith("Of course")
 
 
 def test_held_reply_with_no_date_still_waits_for_open_hours(setter, sample_advisor, monkeypatch):
@@ -138,8 +139,9 @@ def test_held_reply_with_no_date_still_waits_for_open_hours(setter, sample_advis
     nxt = datetime(2031, 1, 6, 14, 30)
     _auto_closed_hours(setter, monkeypatch, nxt)
     lead = _lead_for(db, org, sample_advisor, "L001")
-    _, conv = _run(db, lead, "What does the guide include?", _Fake([_d("answer", "It covers your options. Any questions?")]))
-    assert conv.next_followup_at == nxt
+    _, conv = _run(db, lead, "What does the guide include?",
+                   _Fake([_d("offer_times", "It covers your options. Would {TIMES} work to go over it?")]))
+    assert conv.next_followup_at is not None and conv.next_followup_at >= datetime.utcnow()   # never before it goes out
 
 
 # 5 ─ an auto-reply never takes a conversation away from a person ─────────────

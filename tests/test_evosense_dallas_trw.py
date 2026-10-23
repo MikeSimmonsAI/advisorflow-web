@@ -146,3 +146,15 @@ def test_reprocess_rebuilds_v2_from_raw_and_redates_v1(trw):
                           payload=json.dumps(v1, default=str), source_url=T.PAGE)
     fixed, how = RP.rebuild_record(old, None)
     assert fixed["signals"][0]["effective_at"] is None and how.startswith("stored payload")
+
+
+def test_a_targeted_check_reads_only_the_named_accounts_and_reports_each_one_seen(trw):
+    """An imported list's DCAD accounts: every one the roll carries is 'checked',
+    only delinquent ones come back, rotation never hides one."""
+    trw(ROWS[:-1] + [line(account="Z1", cad="00000999999000000", year="2024", total=0, bal=0)] + ROWS[-1:])
+    res = T.TrwReader().discover(limit=1, skip=7, today=TODAY,
+                                 accounts={"00000111111000000", "00000999999000000", "00000NOTONROLL000"},
+                                 min_due_cents=100)
+    assert res["stats"]["checked"] == {"00000111111000000", "00000999999000000"}
+    refs = {r["source_reference"] for r in res["records"]}
+    assert "DALTRW:Z1" not in refs and "DALTRW:A1" in refs and "DALTRW:A7" in refs

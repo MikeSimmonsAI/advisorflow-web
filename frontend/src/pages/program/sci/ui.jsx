@@ -17,6 +17,14 @@ export const when = iso => {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
+// Appointment times are SCI calendar (Central) wall times sent with their
+// offset: always shown in Central with the zone, on any device.
+export const APPT_TZ = 'America/Chicago'
+export const apptWhen = iso => {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString([], { timeZone: APPT_TZ, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
+}
 export const ago = iso => {
   if (!iso) return ''
   const d = new Date(iso)

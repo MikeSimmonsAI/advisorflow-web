@@ -342,7 +342,7 @@ function Details({ ws, leadId, fields, say, onChanged }) {
       </div>
 
       <div className="rf-conv__sect">
-        <div className="rf-conv__secthead"><h3>Homeowner</h3></div>
+        <div className="rf-conv__secthead"><h3>Homeowner</h3><Link className="rf-btn rf-btn--ghost rf-btn--sm" to={`/program/roofing/homeowners/${leadId}`}>Open record</Link></div>
         <dl className="rf-dl">
           <dt>Phone</dt><dd>{L.phone || '—'}</dd>
           <dt>Email</dt><dd>{L.email || '—'}</dd>

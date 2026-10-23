@@ -424,7 +424,7 @@ export function EvoStrategyBuilder() {
               <label className="evo-field is-full" htmlFor="sb-name"><span className="evo-field__label">Name this strategy</span>
                 <input id="sb-name" className="evo-input" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="DFW Distressed SFR" /></label>
               <ListInput id="sb-states" label="States" value={form.states} onChange={(v) => set('states', v)} hint="TX" />
-              <ListInput id="sb-counties" label="Counties" value={form.counties} onChange={(v) => set('counties', v)} hint="Dallas, Tarrant" />
+              <ListInput id="sb-counties" label="Counties" value={form.counties} onChange={(v) => set('counties', v)} hint="Any Texas county, e.g. Dallas, Harris, Bexar - or All Texas" />
               <ListInput id="sb-cities" label="Cities" value={form.cities} onChange={(v) => set('cities', v)} hint="optional" />
               <ListInput id="sb-zips" label="ZIP codes" value={form.zips} onChange={(v) => set('zips', v)} hint="optional" />
             </div>

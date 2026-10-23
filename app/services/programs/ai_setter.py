@@ -382,7 +382,8 @@ MOVING TOWARD AN APPOINTMENT - without pressure:
 HONOUR THEIR TIMING:
 - Busy right now / will get back to us / call me later: acknowledge warmly. If they gave a time to be called -> "callback" with callback_window in their words. If they said "later" with a horizon ("after the holidays", "next month", "in a couple weeks") -> "follow_up_later" with follow_up_date (YYYY-MM-DD, Central) and follow_up_about (what to pick up next time). Otherwise one gentle question about a better time.
 - Not interested (but not STOP): thank them, leave the door open in one sentence -> "close".
-- ARRIVING NOW. They say they are on the way, will "run by", "stop in", "come by" today or within a few hours ("I'll run by there in about 15 minutes"): this is a live visit - the best outcome there is. Action "handoff" (the advisor is alerted at once to greet them). Reply warmly in one or two sentences: glad they're coming, and I'll be watching for them / the team will be ready for them. Do not offer {{TIMES}}, do not ask them to pick a time, and never say an appointment is booked or confirmed.
+- ARRIVING NOW. They say they are on the way, will "run by", "stop in", "come by" TODAY or within a few hours (not tomorrow or a later day - see COMING IN ON A LATER DAY) ("I'll run by there in about 15 minutes"): this is a live visit - the best outcome there is. Action "handoff" (the advisor is alerted at once to greet them). Reply warmly in one or two sentences: glad they're coming, and I'll be watching for them / the team will be ready for them. Do not offer {{TIMES}}, do not ask them to pick a time, and never say an appointment is booked or confirmed.
+- COMING IN ON A LATER DAY. They say they'll come by / stop in / visit TOMORROW or on another day, without a clock time ("I can come by tomorrow if that is ok"): that is a yes to a visit - lock in the time. Action "offer_times": glad they're coming, then {{TIMES}} as your one question ("Wonderful, I'd be glad to see you tomorrow. Would {{TIMES}} work?"). Put the day in best_times. If they also gave a clock time, use requested_time. NEVER just agree to "see you tomorrow" without a time - nobody would be ready for them.
 - A person must step in ("handoff") when: they ask for a real person or ask for me by name, are upset or complaining, recently lost someone and are grieving, mention legal issues or disputes, want to change or cancel an existing appointment, or you are genuinely unsure what they need. Reply briefly that I'll reach out to them personally. Do NOT hand off ordinary questions.
 - Skeptical ("is this a scam?", "how did you get my number?", "are you a robot?"): be honest and calm - it's the family services team at {location} following up on planning information; if asked whether this is a real person, a robot, AI or automated, ANSWER THAT QUESTION HONESTLY in the first sentence - never dodge it: say an automated assistant helps me keep up with messages and scheduling, that I see every reply, and that I'm glad to talk by phone. Offer to stop if they prefer.
 - Planning guide request -> "send_guide": say you'll get the guide to them AND invite them to sit down with you so you can go over it together and answer what applies to them, with {{TIMES}} as your one question (e.g. "...and I'd be glad to go over it with you in person - would {{TIMES}} work for a short visit?"). The system adds the guide or, by text, arranges it.
@@ -1008,6 +1009,82 @@ def day_named(body: str, today) -> Optional[object]:
     return None
 
 
+_COMING_IN = re.compile(r"\b(come|coming|stop|stopping|run|drop|swing|pop) (by|in|over|there|down)\b|"
+                        r"\b(visit|meet|see you)\b", re.I)
+_ARRIVING_TODAY = re.compile(r"\b(today|tonight|right now|on (my|our) way|headed (over|there|your way)|"
+                             r"in (about |around )?\d+ ?(min|minutes|mins)|this (morning|afternoon|evening))\b", re.I)
+_CHANGE_EXISTING = re.compile(r"\b(cancel|reschedul|move (my|our|the) appointment|change (my|our|the) appointment)", re.I)
+
+
+_WANTS_IN = re.compile(r"\b(appointment|set up a time|schedule (a|an|my)|come (by|in|over)|stop (by|in)|"
+                       r"swing by|drop by|meet (with )?you|sit down with)\b", re.I)
+_NEGATIVE = re.compile(r"\b(not|don'?t|can'?t|cannot|won'?t|no|never|stop)\b", re.I)
+# A reply that promises a meeting without a time: "see you tomorrow", "I'll be
+# ready to meet with you", "looking forward to seeing you" (Henry, Oct 22).
+_EMPTY_PROMISE = re.compile(r"(see you (then|tomorrow|soon|on|monday|tuesday|wednesday|thursday|friday|saturday)|"
+                            r"ready (for|to meet with|to see) you|look(ing)? forward to (seeing|meeting|our (visit|meeting|conversation))|"
+                            r"when you come (by|in))", re.I)
+
+
+# "Close it for now", "not right now", "maybe later", "hold off" - a soft no.
+# A real STOP / unsubscribe is handled before this by the opt-out path.
+_SOFT_NO = re.compile(r"\b(close (it|this|my request|the request)( out)?( for now)?|not (right )?now|"
+                      r"not at this (time|point)|maybe (later|another time|down the road)|hold off|"
+                      r"put (it|this|me) on hold|not ready (yet|right now)|not interested (right now|at this time|for now)|"
+                      r"(take|put) (me|it) off (for now|the list for now)|some other time|another time)\b", re.I)
+SOFT_NO_REASON = ("Soft no - they said \"%s\". Nothing was sent. Call them once and offer a short visit; "
+                  "if it's still no, set a check-back date.")
+
+
+def is_soft_no(body: str) -> bool:
+    b = (body or "").strip()
+    # "Not now, but I can come in next week" is a yes with a timing - not a soft no.
+    # "Not right now - call me tomorrow" is a callback request, not a soft no.
+    return (bool(b) and len(b) <= 200 and bool(_SOFT_NO.search(b)) and not _WANTS_IN.search(b)
+            and not re.search(r"\bcall (me|you|back)\b", b, re.I))
+
+
+_REAL_TIME = re.compile(r"\b\d{1,2}(:\d{2})?\s?(AM|PM)\b")    # a real time we filled in (A.describe)
+NEEDS_HUMAN_REASON = ("Needs a human - the AI could not move this to an appointment, so nothing was sent "
+                      "(%s). Contact them personally.")
+
+
+def wants_visit(body: str) -> bool:
+    """The family says yes to coming in (not arriving now, not changing or
+    cancelling, not a no)."""
+    b = body or ""
+    return bool(_WANTS_IN.search(b)) and not (_ARRIVING_TODAY.search(b) or _CHANGE_EXISTING.search(b)
+                                              or _NEGATIVE.search(b))
+
+
+def future_visit_day(body: str, today) -> Optional[object]:
+    """The later day a family says they'll come in on ("I can come by
+    tomorrow if that is ok") - a yes to a visit that still needs a time.
+    None when they're arriving today, changing an appointment, or name no day."""
+    b = body or ""
+    if not _COMING_IN.search(b) or _ARRIVING_TODAY.search(b) or _CHANGE_EXISTING.search(b):
+        return None
+    day = day_named(b, today)
+    return day if day is not None and day > today else None
+
+
+def booking_link_line(db, lead) -> str:
+    """'Or pick another time here: <link>' for an SCI text - empty when this
+    sender may not carry links or the program has no booking calendar."""
+    if getattr(lead, "is_test", False):
+        return ""                                       # a test contact never mints a booking link
+    try:
+        from app.services import sms_programs as _sp
+        from app.services.programs import identity
+        if _sp.content_allowance(db, lead).get("allow_links", True) is False:
+            return ""
+        url = identity.program_booking_url(db, lead)
+    except Exception:                                   # noqa: BLE001 - never block the reply
+        log.exception("booking link for lead %s failed", getattr(lead, "id", None))
+        return ""
+    return ("Or pick another time here: %s" % url) if url else ""
+
+
 def decide(db, prog, lead, conv, resp, *, actor: Optional[str] = None, note: Optional[str] = None,
            follow_up: Optional[str] = None) -> Dict:
     """The AI's one next step. Raises on any AI failure (caller hands off).
@@ -1140,8 +1217,10 @@ def _handoff(db, prog, lead, conv, reason, *, notify: bool):
                              detail=("asked for a visit at home - call to set a time" if home
                                      else "needs a person - %s" % (reason or "")),
                              link=L.family_link(lead.id))
-            subject = "%s - %s needs a person" % (R.alert_title(prog), who)
-            body = "<p>%s needs a person: %s</p>" % (_html.escape(who), _html.escape(reason or ""))
+            subject = "%s - HUMAN HANDOFF: %s needs a person" % (R.alert_title(prog), who)
+            body = ('<p style="background:#c62828;color:#ffffff;font-size:16px;font-weight:800;padding:10px 14px;'
+                    'border-radius:8px">HUMAN HANDOFF - the AI sent this family nothing.</p>'
+                    "<p>%s needs a person: %s</p>" % (_html.escape(who), _html.escape(reason or "")))
             L.page(db, prog, lead_id=lead.id, key="handoff:%s:%s" % (conv.id, datetime.utcnow().strftime("%Y%m%d%H%M")),
                    kind="handoff", sms_text=sms, subject=subject, html=body, management=True,
                    audit_message="%s needs a person: %s" % (who, reason))
@@ -1210,6 +1289,17 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         _handoff(db, prog, lead, conv, limit, notify=True)
         db.commit()
         return dict(out, action="handoff", state=conv.state)
+    if is_soft_no(body):
+        # SOFT NO (James, Oct 22: "Close it for now"). Not a STOP, not a
+        # goodbye: the AI sends nothing, and a person gets ONE clear job -
+        # call once and offer a short visit. Outreach to them pauses because
+        # they replied; a person decides whether to set a check-back.
+        merge_memory(conv, {"next_step": "soft no - call once to offer a short visit",
+                            "readiness": "not_ready"})
+        _handoff(db, prog, lead, conv, SOFT_NO_REASON % (body or "").strip()[:80], notify=True)
+        _turn(db, conv, "system", None, action="handoff", reason="soft no - nothing sent; a person calls once")
+        db.commit()
+        return dict(out, action="handoff", state=conv.state, soft_no=True)
     if conv.state in ("waiting_future", "closed", "info_requested", "offered", "waiting"):
         # The family wrote again: any scheduled follow-up is superseded.
         conv.next_followup_at = None
@@ -1287,6 +1377,33 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         return dict(out, state=conv.state)
 
     preferred_day = None
+    if action in ("handoff", "answer") and conv.booked_time is None:
+        # HARD RULE (Henry, Oct 22): a family who said yes to coming in never
+        # gets a reply without a real time. "I can come by tomorrow" -> times
+        # that day; a "see you then" with no time -> times; a hand-off of a
+        # plain yes -> times. Arriving today, a home-visit ask, upset or
+        # grieving families, and changes to a booking still go to a person.
+        _dc = getattr(conv, "_decline", None) or {}
+        _home = bool(_dc.get("family_asks_for_home_visit"))
+        _today = A._today_central().date()
+        _later = None if _home else future_visit_day(body, _today)
+        _mood = (und.get("mood") or "").lower()
+        _calm = _mood not in ("upset", "grieving", "negative")
+        _promise = (bool(_EMPTY_PROMISE.search(text or "")) and not _ARRIVING_TODAY.search(body or "")
+                    and not _NEGATIVE.search(body or "") and not _CHANGE_EXISTING.search(body or ""))
+        _plain_yes = action == "handoff" and _calm and wants_visit(body)
+        if not _home and _calm and (_later is not None or _promise or _plain_yes):
+            action = "offer_times"
+            out["action"] = action
+            out["corrected"] = "a yes to coming in always gets real times"
+            if _later is not None:
+                preferred_day = _later
+                _word = "tomorrow" if (_later - _today).days == 1 else _later.strftime("%A")
+                text = "Wonderful, I'd be glad to see you %s. Would {TIMES} work for you?" % _word
+                merge_memory(conv, {"best_times": _word, "readiness": "ready"})
+            else:
+                text = "Wonderful, I'd be glad to sit down with you. Would {TIMES} work for you?"
+                merge_memory(conv, {"readiness": "ready"})
     if action == "book":
         slot = None
         choices = A.offered(conv)
@@ -1448,6 +1565,11 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             conv.offered_at = now
             conv.state = "offered"
             out["offered"] = [s.isoformat() for s in slots]
+            if not (resp is not None and resp.channel == "email"):
+                _line = booking_link_line(db, lead)
+                if _line:
+                    text = "%s\n%s" % (text, _line)
+                    allowed_links.append(_line.split(": ", 1)[1])
 
     if action == "send_guide":
         from app.services import sms_programs
@@ -1536,6 +1658,28 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             conv.offered_at = now
             conv.state = "offered"
             out["offered"] = [s.isoformat() for s in slots]
+    # THE RULE (Mike, Oct 22): the AI sends a family something ONLY when it
+    # moves them to an appointment - real open times, or a booking (bookings
+    # return above). A question, a soft no, an info request, a goodbye,
+    # anything else: nothing goes out; Mike / Michael Schlueter get "needs a
+    # human" with the family's words and the AI's draft to use or ignore.
+    # STOP is handled before this (opt-out). Someone arriving now still gets
+    # a short "we'll be ready for you" - that IS an appointment being met.
+    _moves_to_appt = bool(out.get("offered")) or bool(_REAL_TIME.search(text or ""))
+    _arriving = action == "handoff" and bool(_ARRIVING_TODAY.search(body or "")) and bool(_COMING_IN.search(body or ""))
+    if not (_moves_to_appt or _arriving):
+        if resp is not None and text:
+            resp.suggested_reply = text                  # the draft, for the person to use or ignore
+        if action not in ("handoff", "callback"):        # those two already paged the team above
+            _handoff(db, prog, lead, conv, NEEDS_HUMAN_REASON % (d.get("reason") or action or "unclear")[:160],
+                     notify=True)
+        else:
+            conv.state = "callback_requested" if action == "callback" else "human"
+        _turn(db, conv, "ai", text or None, action=action, delivery="blocked",
+              reason="needs a human - the reply did not move them to an appointment, so nothing was sent",
+              response_id=resp.id if resp else None)
+        db.commit()
+        return dict(out, action="handoff", state=conv.state, held=["needs a human: no times or booking"])
     problems = check_text(text, allowed_links=allowed_links,
                           channel=(resp.channel if resp is not None else "sms") or "sms",
                           contact=prog.primary_contact_name)
@@ -1589,6 +1733,23 @@ def sweep(db: Session, now: Optional[datetime] = None) -> Dict:
             t.delivery, t.message_id = "sent", getattr(msg, "id", None)
             sent += 1
             db.commit()                                  # a later failure must never un-mark this send
+            # The held reply answered the family's message it was written for
+            # (and their earlier open ones): SCI Live stops listing them as waiting,
+            # as the live path does in _deliver. A follow-up answers nothing.
+            if t.response_id and t.action != "follow_up":
+                try:
+                    _for = db.query(ProgramResponse).filter(ProgramResponse.id == t.response_id).first()
+                    if _for is not None and _for.received_at is not None:
+                        for _r in (db.query(ProgramResponse).filter(
+                                ProgramResponse.lead_id == lead.id,
+                                ProgramResponse.organization_id == lead.organization_id,
+                                ProgramResponse.handling_status.in_(("new", "opened")),
+                                ProgramResponse.received_at <= _for.received_at).all()):
+                            _answered(_r, now)
+                        db.commit()
+                except Exception:                        # noqa: BLE001
+                    db.rollback()
+                    log.exception("marking answered after a held reply failed for lead %s", lead.id)
         except Exception as exc:                         # noqa: BLE001
             db.rollback()
             t = db.merge(t)
@@ -1678,8 +1839,17 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
             conv.offered_slots = json.dumps([x.isoformat() for x in slots])
             conv.offered_at = now
             conv.state = "offered"
-        if action == "close":
-            conv.state = "closed"
+            _line = booking_link_line(db, lead)
+            if _line:
+                text = "%s\n%s" % (text, _line)
+                allowed.append(_line.split(": ", 1)[1])
+        if not _REAL_TIME.search(text or ""):
+            # THE RULE: an automatic follow-up goes out only with real times.
+            _turn(db, conv, "system", None, action="wait",
+                  reason="follow-up not sent: it did not offer real times (needs-a-human rule)")
+            db.commit()
+            done["skipped"] += 1
+            continue
         if check_text(text, allowed_links=allowed, contact=prog.primary_contact_name):
             db.commit()
             done["skipped"] += 1

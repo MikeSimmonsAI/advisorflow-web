@@ -73,9 +73,35 @@ def enqueue(db: Session, employee: AIEmployee, subject_ids: Sequence[str], *,
     """
     job_key = job_key or employee.job_role or "work"
     created, skipped, invalid = 0, 0, 0
+
+    # TENANCY AT THE DOOR, not only at run time. Eligibility already refuses a
+    # foreign lead when the item is worked, but an item that names another
+    # tenant's record should never exist in this tenant's queue at all - it
+    # would sit on screens and in counts as "assigned" work. A lead id that is
+    # not in the employee's own organization is counted as invalid.
+    own_leads = None
+    if subject_type == "lead":
+        from app.models.models import Lead
+        wanted = [str(r).strip() for r in subject_ids
+                  if r is not None and str(r).strip()]
+        own_leads = set()
+        for i in range(0, len(wanted), 500):
+            chunk = wanted[i:i + 500]
+            own_leads.update(
+                str(r[0]) for r in
+                db.query(Lead.id)
+                .filter(Lead.organization_id == employee.organization_id,
+                        Lead.id.in_(chunk)).all())
+
     for raw in subject_ids:
         sid = (str(raw) if raw is not None else "").strip()
         if not sid:
+            invalid += 1
+            continue
+        if own_leads is not None and sid not in own_leads:
+            _log.warning("AUDIT: workforce enqueue refused lead %s for "
+                         "employee %s: not in organization %s", sid,
+                         employee.id, employee.organization_id)
             invalid += 1
             continue
         item = AIWorkItem(

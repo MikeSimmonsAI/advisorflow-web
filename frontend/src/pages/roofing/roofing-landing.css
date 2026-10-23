@@ -166,3 +166,20 @@
   .rfl-form { padding: 20px 16px; }
   .rfl-form__grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Explore the demo (#299) */
+.rfl-nav__ctas { display: flex; gap: 8px; align-items: center; }
+.rfl a.rf-btn { text-decoration: none; }
+.rfl-choose { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 40px; }
+.rfl-choose__card { background: #fff; border: 1px solid var(--rf-line); border-radius: 16px; padding: 22px; display: grid; gap: 10px; align-content: start; }
+.rfl-choose__card:first-child { border: 2px solid var(--rf-orange); }
+.rfl-choose__card h3 { margin: 0; font-size: 19px; color: var(--rf-ink); }
+.rfl-choose__card p { margin: 0; color: #5b6b82; line-height: 1.5; }
+.rfl-choose__card .rf-btn { justify-self: start; }
+@media (max-width: 760px) {
+  .rfl-choose { grid-template-columns: minmax(0, 1fr); }
+  .rfl-nav__ctas { margin-left: auto; }
+  .rfl-nav__ctas .rf-btn { padding: 0 10px; font-size: 12.5px; }
+  .rfl-choose__card .rf-btn { justify-self: stretch; justify-content: center; }
+}
+@media (max-width: 420px) { .rfl-nav__explore { display: none; } }

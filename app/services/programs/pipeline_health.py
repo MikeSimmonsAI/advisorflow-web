@@ -400,6 +400,16 @@ def _hot_past_sla(db, org_id, now, test_ids) -> Optional[Dict]:
                     ProgramResponse.sla_due_at < now, ProgramResponse.received_at >= now - timedelta(days=30),
                     ~ProgramResponse.lead_id.in_(test_ids))
             .order_by(ProgramResponse.received_at).limit(ROW_LIMIT).all())
+    if rows:
+        # A HOT reply the AI already answered (times offered, follow-up agreed)
+        # is not a family waiting on staff.
+        from app.services.programs import responses as _R
+        lids = list({r.lead_id for r in rows})
+        latest = {}
+        for c in (db.query(ProgramConversation).filter(ProgramConversation.lead_id.in_(lids))
+                  .order_by(ProgramConversation.created_at).all()):
+            latest[c.lead_id] = c
+        rows = [r for r in rows if not _R.ai_answered(db, latest.get(r.lead_id), r)]
     if not rows:
         return None
     return _problem("hot_past_sla", "human_action", "high",
@@ -468,7 +478,7 @@ def _booked_without_calendar(db, org_id, now, cfg, test_ids, booking_user_id=Non
                     "Appointments are booked but never reached the calendar.",
                     "Check the calendar connection in Settings, then add these appointments to the calendar "
                     "by hand so nobody is missed.",
-                    count=len(rows), oldest=rows[0].booked_time or rows[0].created_at,
+                    count=len(rows), oldest=rows[0].created_at,       # booked_time is local wall time, not UTC
                     ids=[r.id for r in rows], id_type="booking")
 
 

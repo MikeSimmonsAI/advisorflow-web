@@ -18,7 +18,8 @@ through the existing public inquiry endpoint, not this router.
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -33,6 +34,7 @@ from app.services.platform_owner import require_tenant_context
 from app.services.roofing import booking as B
 from app.services.roofing import common as C
 from app.services.roofing import inbox as I
+from app.services.roofing import inspections as INS
 from app.services.roofing import journey as J
 from app.services.roofing import metrics as M
 from app.services.roofing import setup as S
@@ -321,6 +323,9 @@ def _next_action(lead: Lead, opp: RoofingOpportunity, sig: J.Signals, cadence) -
         return {"key": "await_reply", "label": "Follow-up running - touch %d sent" % (cadence.current_touch_number or 0)}
     if opp.stage == C.CONTACTED:
         return {"key": "await_reply", "label": "Waiting on a reply"}
+    if lead.source == "manual" and opp.stage in (C.IMPORTED, C.QUALIFIED):
+        # Added by hand - usually someone who called in or is standing at the door.
+        return {"key": "inspect", "label": "Book an inspection, or start one on site"}
     if opp.stage == C.QUALIFIED:
         return {"key": "enroll", "label": "Ready to start follow-up"}
     return {"key": "review", "label": "Review why this homeowner isn't ready to contact"}
@@ -347,6 +352,7 @@ def lead_workspace(lead_id: str, ctx: C.Ctx = Depends(ctx_dep)):
     names = C.user_names(ctx.db, ctx.org_id)
     notes = (ctx.db.query(LeadNote).filter(LeadNote.organization_id == ctx.org_id, LeadNote.lead_id == lead.id)
              .order_by(LeadNote.created_at.desc()).limit(50).all())
+    names = INS._names(ctx, [n.author_user_id for n in notes])   # authors by their own name
     b = sig.booked(lead.id)
     return {
         "lead": {"id": lead.id, "name": C.lead_name(lead), "first_name": lead.first_name,
@@ -357,6 +363,8 @@ def lead_workspace(lead_id: str, ctx: C.Ctx = Depends(ctx_dep)):
                  "owner_id": lead.assigned_to_id, "owner_name": names.get(lead.assigned_to_id),
                  "sms_consent": bool(lead.sms_consent), "created_at": C.iso(lead.created_at)},
         "roofing": C.lead_fields(lead),
+        # Every documented inspection stays attached to the homeowner through the sale.
+        "inspections": INS.for_lead(ctx, lead.id),
         "opportunity": {"stage": opp.stage, "stage_label": C.STAGE_LABEL[opp.stage],
                         "stage_entered_at": C.iso(opp.stage_entered_at), "estimate_amount": opp.estimate_amount,
                         "won_amount": opp.won_amount, "lost_reason": opp.lost_reason,
@@ -381,6 +389,113 @@ def lead_workspace(lead_id: str, ctx: C.Ctx = Depends(ctx_dep)):
         "notes": [{"id": n.id, "body": n.body, "author": names.get(n.author_user_id), "at": C.iso(n.created_at)}
                   for n in notes],
     }
+
+
+LEAD_SOURCES = ["Phone call", "Website", "Referral", "Door visit", "Past estimate", "Other"]
+
+
+class HomeownerIn(BaseModel):
+    first_name: str = Field(..., min_length=1, max_length=80)
+    last_name: Optional[str] = Field(None, max_length=80)
+    phone: Optional[str] = Field(None, max_length=40)
+    email: Optional[str] = Field(None, max_length=200)
+    street_address: Optional[str] = Field(None, max_length=200)
+    city: Optional[str] = Field(None, max_length=100)
+    state: Optional[str] = Field(None, max_length=40)
+    zip_code: Optional[str] = Field(None, max_length=20)
+    roof_issue: Optional[str] = Field(None, max_length=300)
+    service_type: Optional[str] = None
+    urgency: Optional[str] = None
+    roof_age: Optional[float] = Field(None, ge=0, le=150)
+    source: Optional[str] = Field(None, max_length=60)
+    owner_id: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=4000)
+    allow_duplicate: bool = False
+
+
+def _possible_duplicates(ctx: C.Ctx, body: "HomeownerIn", phone_n: str) -> List[Dict[str, Any]]:
+    """Homeowners in THIS company only that look like the same person or the
+    same property: phone + last name, email, or street + ZIP."""
+    from app.services.dedup_service import normalize_last_name
+    last_n = normalize_last_name(body.last_name or "")
+    email = (body.email or "").strip().lower()
+    street = " ".join((body.street_address or "").lower().split())
+    zc = (body.zip_code or "").strip()[:5]
+    q = ctx.db.query(Lead).filter(Lead.organization_id == ctx.org_id)
+    out = []
+    for l in q.all():
+        why = None
+        if phone_n and l.phone == phone_n and last_n and normalize_last_name(l.last_name or "") == last_n:
+            why = "Same phone and last name"
+        elif email and (l.email or "").strip().lower() == email:
+            why = "Same email"
+        elif street and zc and " ".join((l.street_address or "").lower().split()) == street \
+                and (l.zip_code or "").strip()[:5] == zc:
+            why = "Same property address"
+        if why:
+            out.append({"lead_id": l.id, "name": C.lead_name(l), "address": C.address(l), "phone": l.phone,
+                        "reason": why})
+    return out[:5]
+
+
+@router.post("/leads", status_code=201, dependencies=_WRITE)
+def add_homeowner(body: HomeownerIn, ctx: C.Ctx = Depends(ctx_dep)):
+    """ADD ONE HOMEOWNER by hand - a real Lead in THIS roofing company.
+
+    Same record the importer makes (address on the Lead, roofing answers in
+    custom_fields under the importer's keys), same plan-capacity check, same
+    master-contact retention and audit. Saving sends nothing, starts no
+    follow-up and books nothing: contact consent is not assumed, so the
+    homeowner only becomes contactable through the normal checks."""
+    from app.services import lead_capacity, master_contacts
+    from app.services.dedup_service import normalize_phone
+    data = body.model_dump() if hasattr(body, "model_dump") else body.dict()
+    for k in ("service_type", "urgency"):
+        if data.get(k) not in (None, "") and data[k] not in C.CHOICES[k]:
+            raise HTTPException(400, "%s must be one of %s" % (k, ", ".join(C.CHOICES[k])))
+    if not (body.phone or body.email or body.street_address):
+        raise HTTPException(400, "Add a phone, an email or the property address so you can reach this homeowner.")
+    phone_n = normalize_phone(body.phone or "") if body.phone else ""
+    owner_id = body.owner_id or None
+    if owner_id and owner_id != ctx.user.id:
+        C.require_manager(ctx)
+    if owner_id:
+        if ctx.db.query(User).filter(User.id == owner_id, User.organization_id == ctx.org_id).first() is None:
+            raise HTTPException(404, "Salesperson not found in this company")
+    elif ctx.db.query(User).filter(User.id == ctx.user.id, User.organization_id == ctx.org_id).first():
+        owner_id = ctx.user.id                   # a salesperson's own homeowner by default
+    dups = _possible_duplicates(ctx, body, phone_n)
+    if dups and not body.allow_duplicate:
+        raise HTTPException(409, {"code": "POSSIBLE_DUPLICATE",
+                                  "message": "This looks like a homeowner you already have.",
+                                  "duplicates": dups})
+    lead_capacity.require_capacity_user_initiated(ctx.db, ctx.org, adding=1)
+    cf = {k: data[k] for k in ("roof_issue", "service_type", "urgency", "roof_age") if data.get(k) not in (None, "")}
+    if isinstance(cf.get("roof_age"), float) and cf["roof_age"].is_integer():
+        cf["roof_age"] = int(cf["roof_age"])
+    source = body.source if body.source in LEAD_SOURCES else ("Other" if body.source else None)
+    now = datetime.utcnow()
+    lead = Lead(organization_id=ctx.org_id, assigned_to_id=owner_id,
+                first_name=body.first_name.strip(), last_name=(body.last_name or "").strip(),
+                phone=phone_n or None, phone_raw=body.phone or None, email=(body.email or "").strip() or None,
+                street_address=(body.street_address or "").strip() or None, city=(body.city or "").strip() or None,
+                state=(body.state or "").strip().upper() or None, zip_code=(body.zip_code or "").strip() or None,
+                status="new", contact_channel="sms" if phone_n else "email_only",
+                source="manual", source_detail=source or "Added by hand", source_file="manual",
+                is_test=bool(getattr(ctx.org, "is_demo", False)),
+                notes=(body.notes or "").strip() or None, custom_fields=C.jdump(cf),
+                duplicate_resolved_at=now if dups else None,   # a person chose "create separately"
+                created_at=now, updated_at=now)
+    ctx.db.add(lead)
+    ctx.db.flush()
+    master_contacts.record_lead(ctx.db, lead, source="manual", source_detail="Roofing - added by hand",
+                                ingestion_path="roofing_router.add_homeowner")
+    if lead.notes:
+        ctx.db.add(LeadNote(organization_id=ctx.org_id, lead_id=lead.id, author_user_id=ctx.user.id, body=lead.notes))
+    J.ensure(ctx.db, ctx.org_id, [lead])
+    _audit(ctx, "roofing.lead.create", "lead", lead.id, {"source": lead.source_detail, "kept_separate": bool(dups)})
+    ctx.db.commit()
+    return {"lead_id": lead.id, "name": C.lead_name(lead), "created": True}
 
 
 class LeadPatch(BaseModel):
@@ -566,11 +681,22 @@ def god_setup(body: GodSetupIn, db: Session = Depends(get_db), god: User = Depen
     return S.setup(db, org, god.id, grant_features=True)
 
 
+class GodDemoIn(BaseModel):
+    organization_id: Optional[str] = None
+
+
 @god_router.post("/demo")
-def god_demo(db: Session = Depends(get_db), god: User = Depends(require_god)):
-    """Create or refresh the clearly labelled SAMPLE roofing workspace."""
+def god_demo(body: Optional[GodDemoIn] = None, db: Session = Depends(get_db), god: User = Depends(require_god)):
+    """Create or refresh the clearly labelled SAMPLE roofing story - in the
+    default "Summit Peak Roofing (SAMPLE)" workspace, or in one named roofing
+    workspace (its Roofing program must be on; it becomes a demo workspace, so
+    nothing in it can be sent). Idempotent. Sends nothing."""
     from app.services.roofing import demo_seed
-    return demo_seed.seed(db, by_user_id=god.id)
+    try:
+        return demo_seed.seed(db, by_user_id=god.id, organization_id=(body.organization_id if body else None))
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(409, str(e))
 
 
 # ── mission control (the front door) ───────────────────────────────────────
@@ -611,3 +737,102 @@ def takeover(lead_id: str, body: TakeoverIn, ctx: C.Ctx = Depends(ctx_dep)):
     ctx.db.commit()
     return {"lead_id": lead.id, "mode": "human_active" if body.human else "ai_active",
             "follow_up": cad.status if cad is not None else None}
+
+
+
+# ── field inspections (issue #283) ─────────────────────────────────────────
+class InspectionStartIn(BaseModel):
+    lead_id: str
+    booking_link_id: Optional[str] = None
+
+
+class HandoffIn(BaseModel):
+    action: str
+    estimate_amount: Optional[float] = None
+    estimate_sent: bool = False
+    won_amount: Optional[float] = None
+    scope: Optional[str] = Field(None, max_length=2000)
+    follow_up_at: Optional[str] = None
+    note: Optional[str] = Field(None, max_length=500)
+
+
+class PhotoPatch(BaseModel):
+    label: Optional[str] = None
+    caption: Optional[str] = Field(None, max_length=300)
+
+
+@router.get("/inspections")
+def inspections_dashboard(ctx: C.Ctx = Depends(ctx_dep)):
+    return INS.dashboard(ctx)
+
+
+@router.get("/inspections/choices")
+def inspection_choices(ctx: C.Ctx = Depends(ctx_dep)):
+    return INS.choices()
+
+
+@router.post("/inspections", dependencies=_WRITE)
+def inspection_start(body: InspectionStartIn, ctx: C.Ctx = Depends(ctx_dep)):
+    ins = INS.start(ctx, body.lead_id, body.booking_link_id)
+    _audit(ctx, "roofing.inspection.open", "roofing_inspection", ins.id)
+    ctx.db.commit()
+    return INS.to_json(ctx, ins)
+
+
+@router.get("/inspections/{inspection_id}")
+def inspection_get(inspection_id: str, ctx: C.Ctx = Depends(ctx_dep)):
+    return INS.to_json(ctx, INS.get(ctx, inspection_id))
+
+
+@router.patch("/inspections/{inspection_id}", dependencies=_WRITE)
+def inspection_save(inspection_id: str, body: Dict[str, Any] = Body(...), ctx: C.Ctx = Depends(ctx_dep)):
+    body = {k: v for k, v in (body or {}).items() if not k.startswith("_")}
+    ins = INS.save(ctx, INS.get(ctx, inspection_id), body)
+    return INS.to_json(ctx, ins)
+
+
+@router.post("/inspections/{inspection_id}/complete", dependencies=_WRITE)
+def inspection_complete(inspection_id: str, ctx: C.Ctx = Depends(ctx_dep)):
+    ins = INS.complete(ctx, INS.get(ctx, inspection_id))
+    _audit(ctx, "roofing.inspection.complete", "roofing_inspection", ins.id, {"report": ins.report_number})
+    ctx.db.commit()
+    return INS.to_json(ctx, ins)
+
+
+@router.post("/inspections/{inspection_id}/reopen", dependencies=_WRITE)
+def inspection_reopen(inspection_id: str, ctx: C.Ctx = Depends(ctx_dep)):
+    ins = INS.reopen(ctx, INS.get(ctx, inspection_id))
+    _audit(ctx, "roofing.inspection.reopen", "roofing_inspection", ins.id)
+    ctx.db.commit()
+    return INS.to_json(ctx, ins)
+
+
+@router.post("/inspections/{inspection_id}/handoff", dependencies=_WRITE)
+def inspection_handoff(inspection_id: str, body: HandoffIn, ctx: C.Ctx = Depends(ctx_dep)):
+    ins = INS.handoff(ctx, INS.get(ctx, inspection_id), body.action, body.model_dump())
+    _audit(ctx, "roofing.inspection.handoff", "roofing_inspection", ins.id, {"action": body.action})
+    ctx.db.commit()
+    return INS.to_json(ctx, ins)
+
+
+@router.post("/inspections/{inspection_id}/photos", dependencies=_WRITE)
+async def inspection_photo_add(inspection_id: str, file: UploadFile = File(...), label: Optional[str] = Form(None),
+                               caption: Optional[str] = Form(None), ctx: C.Ctx = Depends(ctx_dep)):
+    return await INS.add_photo(ctx, INS.get(ctx, inspection_id), file, label=label, caption=caption)
+
+
+@router.patch("/inspections/{inspection_id}/photos/{photo_id}", dependencies=_WRITE)
+def inspection_photo_update(inspection_id: str, photo_id: str, body: PhotoPatch, ctx: C.Ctx = Depends(ctx_dep)):
+    return INS.update_photo(ctx, INS.get(ctx, inspection_id), photo_id, body.model_dump(exclude_unset=True))
+
+
+@router.delete("/inspections/{inspection_id}/photos/{photo_id}", dependencies=_WRITE)
+def inspection_photo_delete(inspection_id: str, photo_id: str, ctx: C.Ctx = Depends(ctx_dep)):
+    INS.remove_photo(ctx, INS.get(ctx, inspection_id), photo_id)
+    return {"ok": True}
+
+
+@router.get("/inspections/{inspection_id}/photos/{photo_id}")
+def inspection_photo_bytes(inspection_id: str, photo_id: str, ctx: C.Ctx = Depends(ctx_dep)):
+    data, ctype = INS.photo_bytes(ctx, INS.get(ctx, inspection_id), photo_id)
+    return Response(content=data, media_type=ctype, headers={"Cache-Control": "private, max-age=300"})

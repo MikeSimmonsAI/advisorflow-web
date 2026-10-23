@@ -127,17 +127,27 @@ def test_every_routed_workforce_component_is_imported_and_exists():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_the_god_rail_links_to_a_registered_workforce_route():
+    """ONE God rail entry, the plain-language AI Workforce page, and from it
+    the three technical consoles, all still routed."""
     rail = _read(GOD_SHELL)
-    assert "'/god/workforce'" in rail, (
+    assert "'/god/ai'" in rail, (
         "Nothing in the God rail reaches AI Workforce. A built, routed, "
         "deployed screen nobody can find is the same as a missing one.")
-    assert "/god/workforce" in _registered_routes(_read(APP_JSX))
+    routes = _registered_routes(_read(APP_JSX))
+    for path in ("/god/ai", "/god/workforce", "/god/ai-operations",
+                 "/god/ai-deployment"):
+        assert path in routes, path
+    src = _read(APP_JSX)
+    assert src.index('path="/god/ai"') < src.index('path="/god/*"')
+    control = _read(os.path.join(FE, "pages", "god", "GodAIControl.jsx"))
+    for path in ("/god/workforce", "/god/ai-operations", "/god/ai-deployment"):
+        assert 'to="%s"' % path in control, path
 
 
 def test_the_god_rail_icon_key_exists_in_the_icon_table():
     """ICONS[icon] has no fallback — a missing key draws nothing."""
     rail = _read(GOD_SHELL)
-    entry = re.search(r"path:\s*'/god/workforce',\s*icon:\s*'([a-zA-Z]+)'", rail)
+    entry = re.search(r"path:\s*'/god/ai',\s*icon:\s*'([a-zA-Z]+)'", rail)
     assert entry, "The AI Workforce rail entry has no icon."
     icons = set(re.findall(r"^\s{2}([a-zA-Z]+):\s*'M", rail, re.M))
     assert entry.group(1) in icons, (
@@ -146,22 +156,34 @@ def test_the_god_rail_icon_key_exists_in_the_icon_table():
         "an empty glyph." % entry.group(1))
 
 
-def test_the_tenant_nav_links_to_the_ai_team_and_does_not_hide_it_behind_a_flag():
-    """A hidden link says the product does not exist, not that it is off.
+def test_the_tenant_nav_has_one_ai_workforce_entry_not_hidden_behind_a_flag():
+    """ONE entry, for everybody in the workspace (Lane F, #5).
 
-    `/workforce/team` is require_tenant_user and answers honestly for a
-    customer who has hired nobody. Whether an AI employee may actually ACT is
-    decided at execution time by activation plus entitlement on the server —
-    never by whether a nav row was drawn.
+    "Your AI Team", "My AI Workforce" and "Workforce Command" were three rows
+    for one product. They are one row now. A hidden link says the product does
+    not exist, not that it is off: whether an AI worker may actually ACT is
+    decided at execution time on the server - never by whether a nav row was
+    drawn - so the row carries no featureKey and no adminOnly.
     """
     nav = _read(LAYOUT)
-    row = re.search(r"\{[^{}]*to:\s*'/ai-team'[^{}]*\}", nav)
-    assert row, "Layout.jsx has no /ai-team nav entry."
-    assert "featureKey" not in row.group(0), (
-        "The AI Team nav row asks isFeatureEnabled() for a key. No workforce "
-        "template declares a feature key, and asking for a key the server has "
-        "never heard of is the mistake documented in entitlements.py.")
-    assert "/ai-team" in _registered_routes(_read(APP_JSX))
+    row = re.search(r"\{[^{}]*to:\s*'/ai-workforce'[^{}]*\}", nav)
+    assert row, "Layout.jsx has no /ai-workforce nav entry."
+    assert "featureKey" not in row.group(0)
+    assert "adminOnly" not in row.group(0)
+    assert "'AI Workforce'" in row.group(0)
+    for retired in ("/ai-team", "/ai-workforce-command"):
+        assert not re.search(r"\{[^{}]*to:\s*'%s'[^{}]*\}" % retired, nav), (
+            "%s is a separate nav row again; the customer should see one "
+            "AI Workforce entry." % retired)
+    routes = _registered_routes(_read(APP_JSX))
+    assert "/ai-workforce" in routes
+
+
+def test_the_old_list_urls_redirect_into_the_new_tabs():
+    src = _read(APP_JSX)
+    assert re.search(r'path="/ai-team"\s+element=\{<Navigate to="/ai-workforce\?tab=working"', src)
+    assert re.search(r'path="/ai-workforce-command"\s+element=\{<Navigate to="/ai-workforce\?tab=needs"', src)
+    assert src.index('path="/ai-workforce-command"') < src.index('path="/ai-workforce-command/:employeeId"')
 
 
 # ═══════════════════════════════════════════════════════════════════════════

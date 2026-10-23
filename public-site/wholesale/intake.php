@@ -69,6 +69,20 @@ $encoded=json_encode($record,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_INVAL
 $ok=@file_put_contents($file,$encoded,LOCK_EX);
 if ($ok===false) { error_log('wholesale intake: write failed');reply(503,'Registration is temporarily unavailable. Please try again later.'); }
 @chmod($file,0600);
+/* EvoSys bridge: when the host sets WHOLESALE_BUYER_INTAKE_URL (the platform's
+ * /site-intake/wholesale/<key>/buyer-inquiry address, key included), the same
+ * fields are posted server-to-server so the investor appears in EvoSys
+ * Wholesale > Buyers. The browser never sees that URL or the key. The private
+ * file above is written first and kept either way, so a platform outage never
+ * loses a registration; the file records whether the hand-off worked. */
+require_once __DIR__.'/bridge.php';
+$bridge=evosys_bridge_url();
+if ($bridge) {
+  $record['host']=$host;
+  $record['evosys']=evosys_send($bridge,$fields,$reference,$host);
+  if (empty($record['evosys']['sent'])) error_log('wholesale intake: EvoSys hand-off failed status='.$record['evosys']['status'].' ref='.$reference.' (php resend.php retries it)');
+  @file_put_contents($file,json_encode($record,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_INVALID_UTF8_SUBSTITUTE),LOCK_EX);
+}
 $notify=getenv('WHOLESALE_NOTIFY_EMAIL');
 if ($notify&&filter_var($notify,FILTER_VALIDATE_EMAIL)) {
   // Notification contains NO personal data; private record remains on the server.

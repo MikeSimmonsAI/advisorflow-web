@@ -101,3 +101,23 @@ export function approveBlockedReason(batch, mode, typed, orgName, busy = false) 
   if (!orgNameMatches(typed, orgName)) return `That doesn't match “${orgName}” yet.`
   return null
 }
+
+/** SCI load results: what the paid mobile/landline lookup actually did, in
+ *  words - counted from its results, so "5 looked up" never hides that all
+ *  5 failed. `lc` is report.line_check from POST /program/leads/import/batches/{id}/load. */
+export function lineCheckText(lc) {
+  const n = v => Number(v || 0).toLocaleString('en-US')
+  if (!lc) return 'not run.'
+  if (lc.error) return `could not run (${lc.error}) — it runs again later.`
+  const res = lc.results || {}
+  const looked = lc.checked || 0
+  if (!looked) return lc.remaining ? `none looked up yet, ${n(lc.remaining)} waiting.` : 'no new numbers to look up.'
+  const failed = res.failed || 0
+  const parts = Object.entries(res).filter(([k]) => k !== 'failed').map(([k, v]) => `${n(v)} ${k}`)
+  let out = `${n(looked)} looked up`
+  if (parts.length) out += ` — ${parts.join(', ')}`
+  if (failed) out += `, ${n(failed)} failed (no lookup service answered; they are tried again later)`
+  if (lc.remaining) out += `; ${n(lc.remaining)} still to look up`
+  if (lc.skipped_opted_out) out += `; ${n(lc.skipped_opted_out)} opted-out not looked up`
+  return out + '.'
+}

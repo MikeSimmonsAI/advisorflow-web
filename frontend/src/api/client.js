@@ -424,6 +424,10 @@ export async function fetchObjectUrl(path) {
     typeof window !== 'undefined' ? window.location.pathname : '/',
     { orgId: getOrgContext()?.orgId || null, noOrgContext: false, asCustomer: null })
   if (orgOverride) headers['X-Org-Override'] = orgOverride
+  // ...and the selected workspace, so a multi-workspace login reads the file
+  // from the workspace it is standing in (a roofing inspection photo).
+  const wsId = getWorkspaceContext()
+  if (wsId) headers['X-Workspace-Id'] = wsId
   const res = await fetch(`${API_BASE}${path}`, { headers })
   if (!res.ok) {
     const err = new Error(res.status === 404 ? 'File not found' : 'Could not load file')

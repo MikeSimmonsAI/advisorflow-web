@@ -367,3 +367,122 @@ def retire(deployment_id: str, payload: RetireRequest, request: Request,
     out = t8_views.describe(db, row)
     out["result"] = result
     return out
+
+
+# ---------------------------------------------------------------------------
+# SAFE TEST MODE - the customer's Run test / Start working / Pause / Stop
+#
+# Every route here acts on the caller's OWN deployment (404 for anybody
+# else's), and none can reach a real person: test mode is the simulation stage
+# on practice records only. See app/services/ai_deployment/test_mode.py.
+# Reading is open to the workspace; acting is admin-only and refused in
+# observation mode, exactly like the routes above.
+# ---------------------------------------------------------------------------
+
+from app.services.ai_deployment import test_mode as t8_test_mode  # noqa: E402
+
+
+@router.get("/deployments/{deployment_id}/test-mode")
+def test_mode_summary(deployment_id: str, request: Request,
+                      db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user)
+                      ) -> Dict[str, Any]:
+    """Status, what is in the way, last test, and the work board."""
+    org_id = _org_id(user, db, request)
+    row = _deployment(db, org_id, deployment_id)
+    return t8_test_mode.summary(db, row)
+
+
+@router.post("/deployments/{deployment_id}/test-mode/run")
+def test_mode_run(deployment_id: str, request: Request,
+                  db: Session = Depends(get_db),
+                  user: User = Depends(require_admin),
+                  _guard: User = Depends(require_not_observation)
+                  ) -> Dict[str, Any]:
+    """RUN TEST: one practice lead through the real worker. PASS or NEEDS
+    ATTENTION, with what it tried, what it did and what it was refused."""
+    org_id = _org_id(user, db, request)
+    row = _deployment(db, org_id, deployment_id)
+    try:
+        report = t8_test_mode.run_test(db, row, actor=user)
+    except Exception:                                        # noqa: BLE001
+        db.rollback()
+        _log.exception("ai_workforce: run test failed for %s", deployment_id)
+        return {"verdict": "NEEDS_ATTENTION",
+                "headline": "NEEDS ATTENTION - Here is what to fix.",
+                "ran": False,
+                "problems": [{
+                    "code": "test_crashed",
+                    "what": "The test could not finish.",
+                    "why": "Something inside the system went wrong. Nothing "
+                           "was sent to anyone.",
+                    "next": "Try again in a minute. If it keeps happening, "
+                            "ask your administrator.",
+                    "who": "admin", "fix": None}]}
+    db.commit()
+    return report
+
+
+def _test_mode_act(fn, deployment_id, request, db, user):
+    org_id = _org_id(user, db, request)
+    row = _deployment(db, org_id, deployment_id)
+    try:
+        out = fn(db, row, actor=user)
+    except t8_lifecycle.DeploymentRefused as exc:
+        db.rollback()
+        raise _refused(exc)
+    db.commit()
+    return {"result": out, "summary": t8_test_mode.summary(db, row)}
+
+
+@router.post("/deployments/{deployment_id}/test-mode/start")
+def test_mode_start(deployment_id: str, request: Request,
+                    db: Session = Depends(get_db),
+                    user: User = Depends(require_admin),
+                    _guard: User = Depends(require_not_observation)
+                    ) -> Dict[str, Any]:
+    """START WORKING in test mode. Refused, with reasons, unless truly ready."""
+    return _test_mode_act(t8_test_mode.start, deployment_id, request, db, user)
+
+
+@router.post("/deployments/{deployment_id}/test-mode/pause")
+def test_mode_pause(deployment_id: str, request: Request,
+                    db: Session = Depends(get_db),
+                    user: User = Depends(require_admin),
+                    _guard: User = Depends(require_not_observation)
+                    ) -> Dict[str, Any]:
+    return _test_mode_act(t8_test_mode.pause, deployment_id, request, db, user)
+
+
+@router.post("/deployments/{deployment_id}/test-mode/resume")
+def test_mode_resume(deployment_id: str, request: Request,
+                     db: Session = Depends(get_db),
+                     user: User = Depends(require_admin),
+                     _guard: User = Depends(require_not_observation)
+                     ) -> Dict[str, Any]:
+    return _test_mode_act(t8_test_mode.resume, deployment_id, request, db,
+                          user)
+
+
+@router.post("/deployments/{deployment_id}/test-mode/stop")
+def test_mode_stop(deployment_id: str, request: Request,
+                   db: Session = Depends(get_db),
+                   user: User = Depends(require_admin),
+                   _guard: User = Depends(require_not_observation)
+                   ) -> Dict[str, Any]:
+    """STOP: off, queue parked, history kept. Start working turns it back on."""
+    return _test_mode_act(t8_test_mode.stop, deployment_id, request, db, user)
+
+
+@router.get("/home")
+def workforce_home(request: Request, db: Session = Depends(get_db),
+                   user: User = Depends(require_tenant_user)
+                   ) -> Dict[str, Any]:
+    """The single AI Workforce page: job cards, each AI worker, what needs a
+    person, and results counted from real rows. The caller's workspace only."""
+    org_id = _org_id(user, db, request)
+    out = t8_test_mode.home(db, org_id)
+    # The SAME test require_admin applies to the buttons' routes, so the page
+    # never offers a button the server would refuse.
+    out["can_manage"] = bool(lead_scope.is_manager_here(user, db, request))
+    return out

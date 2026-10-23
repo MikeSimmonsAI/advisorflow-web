@@ -116,4 +116,4 @@ def test_a_field_login_can_turn_phone_alerts_on(client, admin_auth_headers, auth
     assert client.get("/push/config", headers=auth_headers).status_code == 200
     assert client.get("/push/status", headers=auth_headers).status_code == 200
     # still fenced everywhere else
-    assert client.get("/leads", headers=auth_headers).status_code == 403
+    assert client.get("/leads/", headers=auth_headers).status_code == 403

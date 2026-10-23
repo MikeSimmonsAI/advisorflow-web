@@ -37,7 +37,11 @@ log = logging.getLogger(__name__)
 
 CADENCES = ("manual", "daily", "interval")
 DEFAULT_CADENCE = "daily"
-LOCK_FOR = timedelta(hours=2)          # longer than any bounded hunt; expires if a worker dies
+# The lock is a short LEASE the running hunt renews before every source (`renew`).
+# A worker that dies (a backend restart/deploy kills the hunt thread) frees its
+# strategy within LOCK_FOR instead of freezing discovery for 2 hours. Must exceed
+# the slowest single source call (a county download), since renewal is per source.
+LOCK_FOR = timedelta(minutes=20)
 RETRY_AFTER_FAILURE = timedelta(hours=1)
 TICK_SECONDS = 900                     # the platform loop wakes every 15 minutes
 
@@ -116,6 +120,91 @@ def claim(db, strategy, *, due_only: bool = False) -> Optional[str]:
         {"tok": token, "until": now + LOCK_FOR, "id": sched.id, "now": now})
     db.commit()
     return token if res.rowcount == 1 else None
+
+
+def renew(db, strategy, token: str) -> bool:
+    """Extend a held lease. False = the lease was lost (expired and re-claimed by
+    another worker); the caller must stop hunting rather than double-run."""
+    res = db.execute(text("UPDATE evosense_hunt_schedules SET locked_until = :until "
+                          "WHERE strategy_id = :sid AND lock_token = :tok"),
+                     {"until": C.now() + LOCK_FOR, "sid": strategy.id, "tok": token})
+    db.commit()
+    return res.rowcount == 1
+
+
+class LeaseKeeper:
+    """Renews a held lease in the background while one long call runs (a
+    county file scan, the lookup stage), so a single step longer than
+    LOCK_FOR never lets a second worker start the same hunt. Its own
+    short-lived session: the hunt's session is never touched from this thread.
+    `ok()` is False once a renewal finds the lease gone."""
+
+    def __init__(self, db, strategy, token: str, every: Optional[float] = None):
+        import threading
+        self.bind = db.get_bind()
+        self.sid, self.token = strategy.id, token
+        self.every = every if every is not None else LOCK_FOR.total_seconds() / 4
+        self.lost = False
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, name="evosense-lease", daemon=True)
+
+    def renew_once(self) -> bool:
+        from sqlalchemy.orm import Session
+        s = Session(bind=self.bind)
+        try:
+            res = s.execute(text("UPDATE evosense_hunt_schedules SET locked_until = :until "
+                                 "WHERE strategy_id = :sid AND lock_token = :tok"),
+                            {"until": C.now() + LOCK_FOR, "sid": self.sid, "tok": self.token})
+            s.commit()
+            if res.rowcount != 1:
+                self.lost = True
+        except Exception as exc:  # noqa: BLE001 - a missed beat is retried; the lease has slack
+            log.warning("evosense lease renewal failed: %s", exc)
+            s.rollback()
+        finally:
+            s.close()
+        return not self.lost
+
+    def _loop(self):
+        while not self._stop.wait(self.every):
+            if not self.renew_once():
+                return
+
+    def start(self):
+        self._thread.start()
+        return self
+
+    def ok(self) -> bool:
+        return not self.lost
+
+    def stop(self):
+        self._stop.set()
+
+
+def interrupt_stale_runs(db, strategy, *, keep_run_id: Optional[str] = None) -> int:
+    """Whoever holds the lock is the only live hunt of this strategy, so any
+    other run still marked running was cut off (a deploy or restart killed
+    its thread). Close it out with what it had saved, instead of leaving it
+    'running' forever."""
+    from app.models.evosense_models import EvoSenseRun
+    rows = (db.query(EvoSenseRun)
+            .filter(EvoSenseRun.strategy_id == strategy.id, EvoSenseRun.status == "running")
+            .all())
+    n = 0
+    for run in rows:
+        if keep_run_id and run.id == keep_run_id:
+            continue
+        saved = C.jload(run.counts, {}) or {}
+        done = (saved.get("progress") or {}).get("sources_done") or []
+        run.status = "failed"
+        run.finished_at = C.now()
+        run.error = ("Interrupted: the server restarted during this hunt. Records it saved are kept"
+                     + ("; sources finished: %s" % ", ".join(done) if done else "")
+                     + ". The next hunt continues normally.")
+        n += 1
+    if n:
+        db.commit()
+    return n
 
 
 def release(db, strategy, token: str) -> None:

@@ -280,6 +280,18 @@ def execute(db: Session, employee: AIEmployee, item: AIWorkItem, *,
                                 actor_kind=C.ACTOR_AI_EMPLOYEE,
                                 actor_id=employee.id, run_id=run.id,
                                 claim_token=claim_token)
+        elif item.state == C.WAITING_FOR_RESPONSE:
+            # PICKED UP AGAIN - a reply arrived or the follow-up time came.
+            # Without this the item entered the turn loop still marked
+            # "waiting", and the loop ends a run after ANY successful step on
+            # a waiting item. So an employee that read the calendar after a
+            # "yes, let's book" stopped before it could book - every time.
+            # Working it now means only a real send puts it back to waiting.
+            wf_queue.transition(db, item, C.WORKING,
+                                reason="picked up again",
+                                actor_kind=C.ACTOR_AI_EMPLOYEE,
+                                actor_id=employee.id, run_id=run.id,
+                                claim_token=claim_token)
 
         lead = _lead_for(db, item)
         available = wf_tools.available_tools(ctx)

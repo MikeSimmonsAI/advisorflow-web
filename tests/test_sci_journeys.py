@@ -249,6 +249,13 @@ def _home_offered(j, lead):
     _invited(j["db"], lead, j["advisor"])
     fake = _Fake([_d("answer", HOME_OFFER)])
     _inbound(j, lead, "No", "SM_B1", fake)
+    # THE RULE (Oct 22): a "No" is not an appointment - nothing goes out and a
+    # person is paged with the AI's draft. These journeys then follow the
+    # family's next reply as if the person handed the conversation back.
+    conv = _conv(j["db"], lead)
+    assert conv.state == "human"
+    conv.state = "ai_active"
+    j["db"].commit()
     return fake
 
 
@@ -258,7 +265,7 @@ def test_B_declined_visit_home_offered_once_accepted_goes_to_a_person(journey, c
     fake = _home_offered(j, lead)
     ctx = json.loads(fake.calls[0]["messages"][-1]["content"])
     assert ctx["facts_known_for_certain"]["decline"]["alternative_to_offer"] == S.ALT_HOME
-    assert [s["template"] for s in line.to(lead, SS.SCI_SETTER)] == [HOME_OFFER]       # offered once
+    assert line.to(lead, SS.SCI_SETTER) == []                                         # THE RULE: drafted, not sent
     assert S.memory_of(_conv(db, lead))["alternative_offered"] == S.ALT_HOME
 
     fake2 = _Fake([_d("book", "", slot_choice=1),
@@ -269,7 +276,7 @@ def test_B_declined_visit_home_offered_once_accepted_goes_to_a_person(journey, c
     assert conv.state == "human" and conv.handoff_reason == S.HOME_VISIT_REASON
     assert conv.booked_time is None and not _bookings(db, lead)    # NO automatic booking
     assert db.query(BookingLink).filter_by(lead_id=lead.id).count() == 0
-    assert [s["template"] for s in line.to(lead, SS.SCI_SETTER)].count(HOME_OFFER) == 1
+    assert line.to(lead, SS.SCI_SETTER) == []                      # nothing automatic went to them
     assert S.memory_of(conv)["alternative_outcome"] == "accepted"
     hv = [t for t in _owner_texts(j) if t.startswith("SCI Home Visit Request | Ollie Testcase")]
     assert len(hv) == 1
@@ -294,10 +301,10 @@ def test_C_home_visit_declined_closes_respectfully_and_never_pushes_again(journe
     fake = _Fake([_d("close", GOODBYE)])
     _inbound(j, lead, "No", "SM_C2", fake)
     conv = _conv(db, lead)
-    assert len(fake.calls) == 1 and conv.state == "closed"         # no correction pushing an alternative
+    assert len(fake.calls) == 1 and conv.state == "human"          # no correction pushing an alternative; a person
     assert S.memory_of(conv)["alternative_outcome"] == "declined"
     assert conv.next_followup_at is None and not _bookings(db, lead)
-    assert line.to(lead, SS.SCI_SETTER)[-1]["template"] == GOODBYE
+    assert line.to(lead, SS.SCI_SETTER) == []                      # THE RULE: the goodbye is never sent
     n = len(line.sent)
     # nothing comes back later: the follow-up and held-reply sweeps send nothing
     later = _Fake([_d("offer_times", "Would {TIMES} work for a visit?")])
@@ -328,7 +335,7 @@ def test_D_guide_request_invites_in_then_printed_copy_becomes_a_mail_task(journe
                                     "glad to sit down and go over it with you once you've had a look.")])
     _inbound(j, lead, "Please mail a printed copy to 123 Main Street", "SM_D2", fake2)
     conv = _conv(db, lead)
-    assert conv.state == "info_requested" and S.memory_of(conv)["mail_request"]["requested"] is True
+    assert conv.state == "human" and S.memory_of(conv)["mail_request"]["requested"] is True   # THE RULE: a person
     assert db.query(ProgramAlert).filter_by(organization_id=j["org"].id, kind="task", reason="mail_guide").count() == 1
     assert not _bookings(db, lead)
 
@@ -347,11 +354,12 @@ def test_D_with_links_on_the_guide_link_is_texted(journey, monkeypatch):
     j, db, line = journey, journey["db"], journey["line"]
     monkeypatch.setenv("SCI_SMS_LINKS", "on")
     lead = _family(j)
-    fake = _Fake([_d("send_guide", "Happy to. Here is the planning guide.")])
+    fake = _Fake([_d("send_guide", "Happy to. Here is the planning guide, and I'd be glad to go over it with you - "
+                                   "would {TIMES} work?")])
     _inbound(j, lead, "Can you send me the planning guide?", "SM_D3", fake)
     conv = _conv(db, lead)
     assert "http" in line.to(lead, SS.SCI_SETTER)[0]["body"]
-    assert conv.state == "info_requested" and conv.next_followup_at is not None    # one check-in scheduled
+    assert conv.state == "offered" and conv.next_followup_at is not None           # one check-in scheduled
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -368,7 +376,7 @@ def test_E_family_asks_for_a_person_ai_stops_staff_paged_once_with_context(journ
     conv = _conv(db, lead)
     assert conv.state == "human" and conv.handoff_reason == "family asked to speak with a person"
     owner = _owner_texts(j)
-    assert len(owner) == 1 and owner[0].startswith("SCI Needs Attention | Ollie Testcase")
+    assert len(owner) == 1 and owner[0].startswith("SCI HUMAN HANDOFF | Ollie Testcase")
     em = _owner_emails(j)
     assert len(em) == 1 and "needs a person" in em[0] and "family asked to speak with a person" in em[0]
     assert words in em[0] and "(214) 555-0101" in em[0]               # actionable: their words + how to reach them
@@ -391,15 +399,16 @@ def test_E_family_asks_for_a_person_ai_stops_staff_paged_once_with_context(journ
 def test_F_two_quick_replies_answered_in_order_once_each_one_alert(journey):
     j, db, line = journey, journey["db"], journey["line"]
     lead = _family(j)
-    a1 = "It covers your options, your wishes and the questions families usually ask."
-    a2 = "Yes - it walks through burial and cremation choices alike."
-    fake = _Fake([_d("answer", a1), _d("answer", a2)])
+    a1 = "It covers your options, your wishes and the questions families usually ask. Would {TIMES} work to go over it?"
+    a2 = "Yes - it walks through burial and cremation choices alike. Would {TIMES} work?"
+    fake = _Fake([_d("offer_times", a1), _d("offer_times", a2)])
     _inbound(j, lead, "What does the guide cover?", "SM_F1", fake)
     _inbound(j, lead, "Does it include cremation options too?", "SM_F2", fake)
     assert len(fake.calls) == 2
     # the second decision saw the first answer the family actually received
-    assert a1 in fake.calls[1]["messages"][-1]["content"]
-    assert [s["template"] for s in line.to(lead, SS.SCI_SETTER)] == [a1, a2]
+    assert a1.split(" Would")[0] in fake.calls[1]["messages"][-1]["content"]
+    sent = [s["template"] for s in line.to(lead, SS.SCI_SETTER)]
+    assert len(sent) == 2 and sent[0].startswith(a1.split(" Would")[0]) and sent[1].startswith(a2.split(" Would")[0])
     resps = db.query(ProgramResponse).filter_by(lead_id=lead.id).order_by(ProgramResponse.received_at).all()
     assert len(resps) == 2
     for resp in resps:                                                # one AI answer per reply
@@ -452,8 +461,8 @@ def _count(xs):
 def test_H_two_families_at_two_locations_keep_their_own_identity(journey, client):
     j, db, line = journey, journey["db"], journey["line"]
     ollie, pat = _family(j, OLLIE), _family(j, PAT)
-    fo = _Fake([_d("answer", "Thank you for writing back. What questions can I answer for you?")])
-    fp = _Fake([_d("answer", "Thank you for writing back. What would be most helpful to know?")])
+    fo = _Fake([_d("offer_times", "Thank you for writing back. Would {TIMES} work for a short visit?")])
+    fp = _Fake([_d("offer_times", "Thank you for writing back. Would {TIMES} work for you?")])
     _inbound(j, ollie, "Yes, I would like to come in for a visit", "SM_H1", fo)
     _inbound(j, pat, "Yes, I would like to come in for a visit", "SM_H2", fp)
 
@@ -571,10 +580,11 @@ def test_J_unreadable_calendar_hands_off_and_never_invents_a_time(journey, monke
     conv = _conv(db, lead)
     assert conv.state == "human" and "no times to offer" in conv.handoff_reason
     assert A.offered(conv) == [] and not _bookings(db, lead)
-    text = line.to(lead, SS.SCI_SETTER)[-1]["body"]
-    assert not S._CLOCK.search(text) and "{TIMES}" not in text
+    # Oct 20 (09a31ade): with no times to offer the setter sends the family
+    # NOTHING - a person picks it up; no filler text, no invented time.
+    assert line.to(lead, SS.SCI_SETTER) == []
     owner = _owner_texts(j)
-    assert len(owner) == 1 and owner[0].startswith("SCI Needs Attention | Ollie Testcase")
+    assert len(owner) == 1 and owner[0].startswith("SCI HUMAN HANDOFF | Ollie Testcase")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -585,7 +595,7 @@ def test_K_family_without_a_location_is_held_for_review_and_never_texted(journey
     j, db = journey, journey["db"]
     monkeypatch.setattr(sms_service, "send_sms", REAL_SEND_SMS)       # the production sender, gates and all
     lead = _family(j, LEE)
-    fake = _Fake([_d("answer", "Thank you for writing back. What questions can I answer for you?")])
+    fake = _Fake([_d("offer_times", "Thank you for writing back. Would {TIMES} work for a short visit?")])
     _inbound(j, lead, "Yes I would like to come in", "SM_K1", fake)
 
     family_phone = "+1" + LEE["phone"]
@@ -600,7 +610,7 @@ def test_K_family_without_a_location_is_held_for_review_and_never_texted(journey
     assert conv.state == "human" and "LOCATION REVIEW" in (conv.handoff_reason or "")
     assert [t.delivery for t in _ai_turns(db, lead)] == ["blocked"]
     owner = _owner_texts(j)
-    assert len(owner) == 1 and owner[0].startswith("SCI Needs Attention | Lee Nowhere")
+    assert len(owner) == 1 and owner[0].startswith("SCI HUMAN HANDOFF | Lee Nowhere")
     assert "Location:" not in owner[0] or "Location: Unassigned / Location Review." in owner[0]   # honest, not invented
     for loc in (EG, SH, "Striffler-Hamby"):
         assert loc not in owner[0]

@@ -78,7 +78,20 @@ export function hasAgencyFeature(branding) {
   return Array.isArray(f) && f.includes(AGENCY_FEATURE)
 }
 
+/**
+ * BUSINESS IDENTITY IS NOT A FEATURE SWITCH (2026-10-21). The capability lets a
+ * workspace use the agency screens; it only gives the workspace the Max Life
+ * presentation when the business is an insurance agency, or names no industry
+ * of its own. A funeral home with `insurance_agency` on stays a funeral home.
+ * Mirrors app/services/program_experience.identity_allows.
+ */
+export const NEUTRAL_INDUSTRIES = ['', 'generic', 'other', 'none', 'unknown']
+export function identityAllows(branding, business) {
+  const ind = String((branding && branding.industry) || '').trim().toLowerCase()
+  return ind === business || NEUTRAL_INDUSTRIES.includes(ind)
+}
+
 /** The agency vertical for this workspace, or null. */
 export function agencyVerticalFor(branding) {
-  return hasAgencyFeature(branding) ? AGENCY : null
+  return hasAgencyFeature(branding) && identityAllows(branding, 'insurance') ? AGENCY : null
 }
