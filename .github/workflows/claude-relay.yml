@@ -106,8 +106,8 @@ jobs:
 
       # This lane needs a full test environment. Prepare it in trusted
       # Actions setup, outside Claude's restricted command approvals.
-      - name: Set up AI Workforce Python
-        if: steps.guard.outputs.run == 'true' && steps.guard.outputs.branch == 'feature/ai-workforce-launch'
+      - name: Set up AI Workforce / BookaBoost Python
+        if: steps.guard.outputs.run == 'true' && (steps.guard.outputs.branch == 'feature/ai-workforce-launch' || steps.guard.outputs.branch == 'feature/bookaboost-wholesale')
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -116,8 +116,8 @@ jobs:
             requirements.txt
             requirements-dev.txt
 
-      - name: Install AI Workforce test dependencies
-        if: steps.guard.outputs.run == 'true' && steps.guard.outputs.branch == 'feature/ai-workforce-launch'
+      - name: Install lane test dependencies
+        if: steps.guard.outputs.run == 'true' && (steps.guard.outputs.branch == 'feature/ai-workforce-launch' || steps.guard.outputs.branch == 'feature/bookaboost-wholesale')
         run: |
           python -m pip install -r requirements-dev.txt
           python -m pytest --version
