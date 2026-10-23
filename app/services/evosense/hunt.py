@@ -436,7 +436,8 @@ def _count_lookup_failure(tally: Dict[str, Any], error, how_many: int = 1) -> st
     return code
 
 
-def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], counts) -> None:
+def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], counts, *,
+                 force_ids: Optional[set] = None) -> None:
     """Ask each enabled FREE public-record lookup source about each property it
     covers, recording one governor decision per (property, source):
 
@@ -493,6 +494,11 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                 .distinct().all())}
             queued = []
             for p in applicable:
+                if force_ids and p.id in force_ids:
+                    # A person just corrected this house's identifiers: earlier
+                    # answers (or no-matches) were about the wrong address/account.
+                    queued.append(p)
+                    continue
                 recent = (db.query(EvoSenseObservation.id)
                           .filter(EvoSenseObservation.organization_id == org_id,
                                   EvoSenseObservation.property_id == p.id,

@@ -12,15 +12,12 @@
  */
 import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { api, logout } from '../../api/client'
+import { api, logout, fetchMyContexts, getCurrentUser } from '../../api/client'
 import GodReturnBar from '../../components/GodReturnBar'
-import ContextSwitcher from '../../components/ContextSwitcher'
-import ProgramSwitchLink from '../../components/ProgramSwitchLink'
-import '../../components/ContextSwitcher.css'
 import SalesStyles from './SalesStyles'
 import SimpleStyles from './SimpleStyles'
 import { Icon } from './SimpleParts'
-import { followUpList } from './simpleSales'
+import { followUpList, otherWorkspaceCount } from './simpleSales'
 import { initials, ErrorBar } from './parts'
 
 const SalesCtx = createContext(null)
@@ -109,6 +106,7 @@ export default function SalesShell({ title, subtitle, actions, children }) {
   const [counts, setCounts] = useState({})
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
+  const others = useOtherWorkspaces()
 
   // The Follow Ups badge is counted from the SAME list the Follow Ups screen
   // shows — the caller's own open deals due today or earlier, in the TEAM's
@@ -211,6 +209,9 @@ export default function SalesShell({ title, subtitle, actions, children }) {
               </div>
             </div>
           </div>
+          {/* DESKTOP: the one way to another business, under who you are.
+              Phones get the same entry inside More (the sidebar is a bar). */}
+          <OtherWorkspacesLink state={others} className="ss-otherws ss-otherws-side" />
 
           {isManager && <div className="sw-navtitle">MY WORK</div>}
           <nav className="sw-nav" aria-label="My work">
@@ -246,11 +247,6 @@ export default function SalesShell({ title, subtitle, actions, children }) {
             </div>
             <div className="sw-spacer" />
             {actions}
-            {/* The way INTO a customer workspace. Renders nothing at all for a
-                salesperson with no customer_org membership, which is most of
-                them. */}
-            <ProgramSwitchLink />
-            <ContextSwitcher current="back_office" />
             <NavLink to="/sales/prospects" className="ss-iconbtn ss-hide-sm" aria-label="Search leads"
                      title="Search leads">
               <Icon name="search" size={20} />
@@ -260,7 +256,7 @@ export default function SalesShell({ title, subtitle, actions, children }) {
                 seven main items, so everything under "More" — and Sign out —
                 is reached from this one button. Same allowed list as the
                 desktop "More"; the server still checks every route. */}
-            <MobileMore items={more} onSignOut={handleSignOut} />
+            <MobileMore items={more} onSignOut={handleSignOut} others={others} />
           </header>
           <div className="sw-body">
             {loading && !ctx
@@ -314,7 +310,7 @@ function MoreGroup({ items, defaultOpen }) {
   )
 }
 
-function MobileMore({ items, onSignOut }) {
+function MobileMore({ items, onSignOut, others }) {
   const [open, setOpen] = useState(false)
   const btn = useRef(null)
   const panel = useRef(null)
@@ -347,9 +343,56 @@ function MobileMore({ items, onSignOut }) {
           <nav className="sw-nav" aria-label="More pages">
             {items.map(item => <NavItem key={item.to} item={item} />)}
           </nav>
+          <OtherWorkspacesLink state={others} className="ss-otherws ss-otherws-menu" />
           <button type="button" className="ss-mmoreout" onClick={onSignOut}>Sign out</button>
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * OTHER WORKSPACES (#300) — replaces the header's "Switch program" link and
+ * "Switch View" dropdown with one entry. It only opens the existing program
+ * launcher (/workspaces), which lists the server's authorized destinations
+ * and sets the workspace/brand context itself; nothing is chosen here and
+ * no access is granted here (every route re-checks on the server).
+ *
+ * Shown only when /auth/my-contexts lists at least one other destination. If
+ * that call fails it says so and offers a retry — never a guessed list.
+ */
+function useOtherWorkspaces() {
+  const [state, setState] = useState({ phase: 'loading', count: 0 })
+  const load = useCallback((force) => {
+    setState(s => ({ ...s, phase: 'loading' }))
+    fetchMyContexts(force ? { force: true } : {})
+      .then(c => setState({ phase: 'ready', count: otherWorkspaceCount(c, getCurrentUser()?.role) }))
+      .catch(() => setState({ phase: 'error', count: 0 }))
+  }, [])
+  useEffect(() => { load(false) }, [load])
+  return { ...state, retry: () => load(true) }
+}
+
+function OtherWorkspacesLink({ state, className }) {
+  if (!state) return null
+  if (state.phase === 'error') {
+    return (
+      <div className={className + ' ss-otherws-err'} role="status">
+        <span>Couldn’t check your other workspaces.</span>
+        <button type="button" onClick={state.retry}>Try again</button>
+      </div>
+    )
+  }
+  if (state.phase !== 'ready' || state.count < 1) return null
+  return (
+    <NavLink to="/workspaces" className={className}
+             title="Open the workspace launcher to switch to another business you have access to">
+      <Icon name="grid" />
+      <span>
+        <b>Other Workspaces</b>
+        <small>{state.count === 1 ? '1 other business' : state.count + ' other businesses'}</small>
+      </span>
+      <Icon name="chevright" size={16} />
+    </NavLink>
   )
 }
