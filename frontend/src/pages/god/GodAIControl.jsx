@@ -12,11 +12,12 @@
  *   (switches: see GodAISwitchboard)
  */
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { api } from '../../api/client'
 import GodStyles from './GodStyles'
 import GodAISwitchboard from './GodAISwitchboard'
 import { T } from './godTheme'
+import { Pill } from './ui/GodKit'
 
 function message (e, fallback) {
   const d = e?.data?.detail ?? e?.detail
@@ -41,7 +42,6 @@ function when (iso) {
 }
 
 export default function GodAIControl () {
-  const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -79,21 +79,18 @@ export default function GodAIControl () {
       <div className="gm-grid-overlay" />
       <div style={{ position: 'relative', zIndex: 1, maxWidth: 1400, margin: '0 auto', padding: '24px 26px 60px' }}>
         <div style={{ marginBottom: 16 }}>
-          <button className="gm-btn" style={{ marginBottom: 12 }} onClick={() => navigate('/god')}>
-            ← COMMAND CENTER
-          </button>
           <h1 style={{ margin: 0, color: 'var(--gm-head)', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>AI Workforce</h1>
           <div style={{ color: T.dim, fontSize: 13, marginTop: 8 }}>
             Turn AI workers on or off for any account, see what they are doing, and stop everything with one button.
           </div>
         </div>
 
-        {err && <div className="gm-card" style={{ color: T.red, fontSize: 13, marginBottom: 14 }}>{err}</div>}
+        {err && <div className="gm-card" style={{ padding: '16px 18px', color: T.red, fontSize: 13, marginBottom: 14 }}>{err}</div>}
         {!data && !err && <div className="gm-card"><div className="gm-empty">Loading…</div></div>}
 
         {data && (
           <>
-            <div className="gm-card" style={{ marginBottom: 14, borderColor: data.stopped ? T.red : undefined }}>
+            <div className="gm-card" style={{ padding: '16px 18px', marginBottom: 14, borderColor: data.stopped ? T.red : undefined }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
                 <div style={{ fontSize: 17, fontWeight: 700, color: data.stopped ? T.red : T.head }}>
                   {data.headline}
@@ -139,7 +136,48 @@ export default function GodAIControl () {
               <Box label="Finished" value={data.work.finished} sub="all-time" />
             </div>
 
-            <div className="gm-card" style={{ marginBottom: 14 }}>
+            {Array.isArray(data.jobs) && (
+              <div className="gm-card" style={{ padding: '16px 18px', marginBottom: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+                  <div style={{ fontWeight: 700 }}>
+                    The {data.jobs.length} AI jobs
+                  </div>
+                  <div style={{ fontSize: 12, color: T.dim }}>
+                    {data.jobs.filter(j => j.proven).length} proven end to end in test mode ·{' '}
+                    {data.jobs.filter(j => !j.proven).length} not proven yet · {data.jobs.filter(j => j.deployed).length} in use
+                  </div>
+                </div>
+                <div className="gm-tablewrap" tabIndex={0} role="region" aria-label="AI jobs">
+                  <table className="gm-table">
+                    <thead className="gm-thead"><tr><th>Job</th><th>What it does</th><th>Status</th><th>AI workers</th><th>Runs, 7 days</th></tr></thead>
+                    <tbody>
+                      {data.jobs.map(j => (
+                        <tr key={j.key}>
+                          <td style={{ fontWeight: 650, whiteSpace: 'nowrap' }}>{j.name}</td>
+                          <td>{j.what}{j.prerequisite ? <div style={{ color: T.dim, fontSize: 11.5, marginTop: 2 }}>{j.prerequisite}</div> : null}</td>
+                          <td style={{ whiteSpace: 'nowrap' }}>
+                            <Pill tone={j.proven ? 'good' : 'off'}>
+                              {j.proven ? 'Proven in test mode' : 'Not proven yet'}
+                            </Pill>
+                          </td>
+                          <td>{j.workers ? `${j.workers} (${j.deployed} deployed)` : 'None'}</td>
+                          <td style={{ whiteSpace: 'nowrap' }}>
+                            {j.runs_7d.completed || j.runs_7d.failed
+                              ? `${j.runs_7d.completed} finished · ${j.runs_7d.failed} failed` : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ fontSize: 11.5, color: T.dim, marginTop: 8 }}>
+                  "Proven" means an automatic test runs the whole job on practice leads with nothing sent. It does not mean
+                  real messages are on — that is the Real messages setting above.
+                </div>
+              </div>
+            )}
+
+            <div className="gm-card" style={{ padding: '16px 18px', marginBottom: 14 }}>
               <div style={{ fontWeight: 700, marginBottom: 8 }}>What the AI did recently (last 7 days)</div>
               {data.recent.length ? (
                 <div className="gm-tablewrap" tabIndex={0} role="region" aria-label="Recent AI activity">
@@ -168,7 +206,7 @@ export default function GodAIControl () {
         <div style={{ fontWeight: 700, margin: '6px 0 8px' }}>Turn AI workers on or off</div>
         <GodAISwitchboard key={refreshKey} embedded onChange={load} />
 
-        <div className="gm-card" style={{ marginTop: 14, fontSize: 12, color: T.dim }}>
+        <div className="gm-card" style={{ padding: '16px 18px', marginTop: 14, fontSize: 12, color: T.dim }}>
           <strong>Advanced (technical):</strong>{' '}
           <Link to="/god/workforce">engine &amp; job library</Link>{' · '}
           <Link to="/god/ai-operations">messaging switches</Link>{' · '}

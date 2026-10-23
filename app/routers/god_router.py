@@ -221,6 +221,9 @@ def _enrich_org(db: Session, org: Organization) -> dict:
         "org_phone": getattr(org, "org_phone", None),
         "org_address": getattr(org, "org_address", None),
         "industry": getattr(org, "industry", None),
+        # Lets a screen label a demonstration tenant as such rather than
+        # showing it beside paying customers unmarked.
+        "is_demo": bool(getattr(org, "is_demo", False)),
     }
 
 
@@ -363,14 +366,31 @@ def god_stats(god: User = Depends(require_god), db: Session = Depends(get_db)):
     except Exception:
         platforms = []
     try:
-        active_org_count = db.execute(text("SELECT COUNT(DISTINCT organization_id) FROM leads")).scalar() or 0
+        # Demonstration tenants are not active customers either.
+        active_org_count = db.execute(text("""
+            SELECT COUNT(DISTINCT l.organization_id) FROM leads l
+            JOIN organizations o ON o.id = l.organization_id
+            WHERE (o.is_demo IS NULL OR o.is_demo = FALSE)
+        """)).scalar() or 0
     except Exception:
         active_org_count = 0
-    return {"total_platforms": len(platforms) or 3, "total_orgs": total_orgs,
+    # No fallback number: an empty or failed brand query reports what it found
+    # (it used to say 3 whatever happened).
+    return {"total_platforms": len(platforms), "total_orgs": total_orgs,
             "active_orgs": active_org_count, "total_leads": total_leads,
             "new_leads_30d": new_leads_30d, "total_users": total_users,
             "total_admins": total_admins, "platforms": platforms,
             "as_of": iso_utc(datetime.utcnow())}
+
+
+@router.get("/dashboard/trends")
+def god_dashboard_trends(days: int = Query(14, ge=7, le=60),
+                         god: User = Depends(require_god),
+                         db: Session = Depends(get_db)):
+    """Daily counts for the Dashboard charts. Real and test kept apart.
+    See app/services/god_dashboard.py."""
+    from app.services import god_dashboard
+    return god_dashboard.trends(db, days=days)
 
 
 @router.get("/platform-health")

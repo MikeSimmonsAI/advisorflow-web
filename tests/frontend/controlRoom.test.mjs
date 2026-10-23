@@ -38,7 +38,8 @@ ok(V.directionDisabledReason({ give_direction: { setup_required: true, message: 
 eq(V.directionDisabledReason({ give_direction: { setup_required: false } }), null)
 
 // wiring: route, nav, page contents, no dark-only styling, mobile breakpoint, no tokens in browser code
-const app = src('App.jsx'), shell = src('pages/GodShell.jsx'), page = src('pages/god/ControlRoom.jsx')
+// Oct 22 2026: the God rail and its tabs live in pages/god/godNav.js.
+const app = src('App.jsx'), shell = src('pages/god/godNav.js'), page = src('pages/god/ControlRoom.jsx')
 ok(app.includes('path="/god/control-room"') && app.indexOf('/god/control-room') < app.indexOf('path="/god/*"'))
 ok(shell.includes("path: '/god/control-room'"))
 ok(page.includes('@media (max-width: 800px)'), 'responsive')

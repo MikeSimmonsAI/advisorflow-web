@@ -94,3 +94,15 @@ def act(pid: int, action: str, body: ActionIn, god: User = Depends(require_god),
     _, replayed = _run(ops[action], idempotency_key,
                        {pid: body.expected_version} if body.expected_version is not None else None)
     return {"ok": True, "replayed": replayed}
+
+
+@router.get("/github")
+def github_status(refresh: bool = False, _god: User = Depends(require_god)):
+    """Per-project delivery ladder from GitHub (read-only, cached 90s).
+
+    Committed / pushed / PR opened / merged / in production are separate
+    states; anything that cannot be checked is "unknown", never assumed.
+    See app/services/launch_status.py.
+    """
+    from app.services import launch_status
+    return launch_status.cached(force=bool(refresh))

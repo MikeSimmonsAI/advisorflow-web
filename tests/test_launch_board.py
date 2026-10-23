@@ -144,7 +144,8 @@ class RouterContract(unittest.TestCase):
                   and any(isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
                           and isinstance(d.func.value, ast.Name) and d.func.value.id == "router"
                           for d in n.decorator_list)]
-        self.assertEqual(len(routes), 3)
+        # 3 board routes + the read-only GitHub status (Oct 22 2026 Launch Board).
+        self.assertEqual(len(routes), 4)
         for fn in routes:
             self.assertIn("require_god", ast.dump(fn.args), fn.name)
         with open(os.path.join(ROOT, "app", "main.py"), encoding="utf-8") as f:
