@@ -597,6 +597,7 @@ class DcadSource(PublicRecordSource):
 
 class CollinCadSource(PublicRecordSource):
     scope, counties = "county", ("Collin",)
+    discovery_family = "OWNER_ROLLS"   # appraisal rolls that find absentee / estate-owned houses
     key = "collin_cad"
     label = "Collin Central Appraisal District (Collin CAD) appraisal roll"
     capabilities = (C.PROPERTY_SEARCH, C.ASSESSOR, C.OWNERSHIP)
@@ -650,6 +651,7 @@ class CollinCadSource(PublicRecordSource):
 
 class DentonGisSource(PublicRecordSource):
     scope, counties = "county", ("Denton",)
+    discovery_family = "OWNER_ROLLS"   # appraisal rolls that find absentee / estate-owned houses
     key = "denton_gis"
     label = "Denton County GIS parcel layer (Denton CAD roll fields)"
     capabilities = (C.PROPERTY_SEARCH, C.ASSESSOR, C.OWNERSHIP)
@@ -784,6 +786,7 @@ class TexasParcelRollSource(PublicRecordSource):
     residences only; the engine scores them like any appraisal-roll record.
     Dallas, Collin and Denton have their own live discovery and are skipped."""
     scope, counties, scope_name = "state", (), "Texas"
+    discovery_family = "OWNER_ROLLS"   # appraisal rolls that find absentee / estate-owned houses
     key = "txgio_roll"
     label = "Texas statewide appraisal rolls - find houses (TxGIO 2026 parcels)"
     capabilities = (C.PROPERTY_SEARCH,)
@@ -853,6 +856,7 @@ class HarrisRollSource(PublicRecordSource):
     (sources/hcad.py): absentee- or estate-owned residences, same rule as the
     statewide rolls. A different window of the file each day."""
     scope, counties = "county", ("Harris",)
+    discovery_family = "OWNER_ROLLS"   # appraisal rolls that find absentee / estate-owned houses
     key = "hcad_roll"
     label = "Harris County appraisal roll - find houses (HCAD public data)"
     capabilities = (C.PROPERTY_SEARCH,)
@@ -1642,6 +1646,43 @@ def _markets(db, org_id: str) -> List[str]:
     return out
 
 
+def verified_counties(db, org_id: str, keys) -> Dict[str, set]:
+    """Counties where a statewide source has actually returned a record for
+    this workspace. A source that DECLARES statewide scope is not counted as
+    covering a county until it has produced data there."""
+    from app.models.evosense_models import EvoSenseObservation, EvoSenseProperty
+    keys = list(keys)
+    if not keys:
+        return {}
+    rows = (db.query(EvoSenseObservation.provider_key, EvoSenseProperty.county)
+            .join(EvoSenseProperty, EvoSenseProperty.id == EvoSenseObservation.property_id)
+            .filter(EvoSenseObservation.organization_id == org_id,
+                    EvoSenseObservation.provider_key.in_(keys),
+                    EvoSenseProperty.county.isnot(None))
+            .group_by(EvoSenseObservation.provider_key, EvoSenseProperty.county).all())
+    from app.services.evosense.sources.txgio_roll import county_name
+    out: Dict[str, set] = {}
+    for key, county in rows:
+        c = county_name(county or "")          # canonical spelling: "MCLENNAN" -> "McLennan"
+        if c:
+            out.setdefault(key, set()).add(c)
+    return out
+
+
+def attach_verified_counties(db, org_id: str, rows: List[Dict[str, Any]]) -> None:
+    wide = [r for r in rows if (r.get("coverage_area") or {}).get("scope") in ("state", "national")]
+    ver = verified_counties(db, org_id, [r["key"] for r in wide])
+    for r in wide:
+        r["coverage_area"] = dict(r["coverage_area"], verified_counties=sorted(ver.get(r["key"], ())))
+
+
+def _covers(p, m: str, by_key) -> bool:
+    if p.scope in ("national", "state"):
+        ca = (by_key.get(p.key) or {}).get("coverage_area") or {}
+        return m in (ca.get("verified_counties") or ())
+    return m in p.counties
+
+
 def capability_report(db, org_id: str, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Each capability, rated honestly overall AND per market (county).
 
@@ -1671,7 +1712,7 @@ def capability_report(db, org_id: str, rows: List[Dict[str, Any]]) -> List[Dict[
             kind = C.NOT_BUILT
         per_market = []
         for m in markets:
-            here = [p for p in live if p.scope in ("national", "state") or m in p.counties]
+            here = [p for p in live if _covers(p, m, by_key)]
             man = [p for p in manual if p.scope == "any" or m in p.counties]
             down = [p for p in unavailable if p.connector_kind == C.REAL and (p.scope in ("national", "state") or m in p.counties)]
             if here:
@@ -1704,6 +1745,7 @@ def status_report(db, org_id: str) -> Dict[str, Any]:
     """The Service Providers screen. Every status comes from `canonical()`.
     No credential ever appears."""
     rows = [_provider_row(db, org_id, key) for key in PROVIDERS]
+    attach_verified_counties(db, org_id, rows)
     return {"providers": rows, "capabilities": capability_report(db, org_id, rows),
             "markets": ["%s County" % m for m in _markets(db, org_id)],
             "states": list(STATES),
