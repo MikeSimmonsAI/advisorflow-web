@@ -68,11 +68,14 @@ def test_tax_check_ingests_a_delinquent_account_and_records_a_clean_one(top, mon
 
 def test_status_words_are_evidence_bound(top):
     rows = CO.rows(top["db"], top["org"], "top100-2010")
-    assert all(r["foreclosure"]["status"] == "UNVERIFIED" for r in rows)
+    # no sale date in the rows and none declared: no claim - and "no evidence" is not "no foreclosure"
+    assert all(r["foreclosure"]["status"] == "NO EVIDENCE" for r in rows)
+    assert "Not proof there is none" in rows[0]["foreclosure"]["detail"]
     assert all(r["owner"]["status"] == "NO OWNER" for r in rows)            # the list carried no owner
     assert all(r["priority"] == "REVIEW" for r in rows)
     s = CO.summary(rows)
-    assert s["properties"] == 3 and s["foreclosure"] == {"UNVERIFIED": 3}
+    assert s["properties"] == 3 and s["foreclosure"] == {"NO EVIDENCE": 3}
+    assert s["sale_dates"] == {"supplied": 0, "verified": 0, "missing": 3, "dates": {}}
 
 
 def test_api_view_and_recheck(client, top, auth_headers, monkeypatch):

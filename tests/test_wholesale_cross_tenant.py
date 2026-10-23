@@ -574,6 +574,8 @@ def evosense_attacks(ids):
         # an imported list is named by its kind; another workspace's list is absent here
         ("get", "%s/cohorts/%s" % (base, ids["es_list_kind"]), None),
         ("post", "%s/cohorts/%s/recheck" % (base, ids["es_list_kind"]), None),
+        ("post", "%s/cohorts/%s/declare-sale" % (base, ids["es_list_kind"]),
+         {"sale_date": "2026-11-03", "note": "planted claim"}),
         ("post", "%s/properties/%s/retry-reading" % (base, ep), None),
         ("post", "%s/routing-reviews/%s" % (base, ids["es_routing_review_id"]),
          {"engagement_id": None}),
@@ -632,6 +634,9 @@ def upload_attacks(ids):
          {"doc_type": "purchase_contract"}, "file"),
         ("/wholesale/outreach/%s/proof-of-funds" % ids["outreach_id"], png, {},
          "file"),
+        ("/wholesale/evosense/cohorts/%s/reattach" % ids["es_list_kind"],
+         (b"street_address,zip_code,sale_date\n77 Victim List Ln,75215,2026-11-03\n", "planted.csv", "text/csv"),
+         {}, "file"),
     ]
 
 

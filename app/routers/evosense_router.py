@@ -407,8 +407,12 @@ async def import_preview(file: UploadFile = File(...), db: Session = Depends(get
 @router.post("/import")
 async def import_properties(file: UploadFile = File(...), strategy_id: Optional[str] = Form(None),
                             list_kind: Optional[str] = Form(None), list_source: Optional[str] = Form(None),
+                            declared_sale_date: Optional[str] = Form(None),
                             db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
                             _g: User = Depends(require_not_observation)):
+    """Import a property list. `declared_sale_date`: a scheduled foreclosure
+    sale date the PERSON states for every row that has no sale date of its own
+    (recorded as their claim). The file name is never read for dates."""
     org_id = svc.write_org_id(db, user)
     raw = await file.read()
     if len(raw) > 25 * 1024 * 1024:
@@ -421,7 +425,8 @@ async def import_properties(file: UploadFile = File(...), strategy_id: Optional[
     try:
         out = HU.import_csv(db, org_id, text, user=user, strategy=strategy,
                             filename=file.filename or "upload.csv",
-                            list_kind=(list_kind or None), list_source=((list_source or "").strip()[:120] or None))
+                            list_kind=(list_kind or None), list_source=((list_source or "").strip()[:120] or None),
+                            declared_sale_date=(declared_sale_date or "").strip() or None)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     db.commit()
@@ -1381,6 +1386,52 @@ def cohort_recheck(kind: str, db: Session = Depends(get_db), user: User = Depend
         raise HTTPException(status_code=404, detail="Unknown list")
     started = CO.start_recheck(org_id, kind, user_id=user.id)
     return {"status": "started" if started else "already_running"}
+
+
+class DeclareSaleIn(BaseModel):
+    sale_date: str
+    note: str
+
+
+@router.post("/cohorts/{kind}/declare-sale")
+def cohort_declare_sale(kind: str, payload: DeclareSaleIn, db: Session = Depends(get_db),
+                        user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """Record a scheduled foreclosure sale date a person states for every
+    house on an imported list - as their claim, shown as unverified."""
+    from app.services.evosense import cohort as CO
+    org_id = svc.write_org_id(db, user)
+    _admin(user, db)
+    try:
+        if not CO.members(db, org_id, kind):
+            raise HTTPException(status_code=404, detail="No properties came from that list")
+        return CO.declare_sale(db, org_id, kind, payload.sale_date, user=user, note=payload.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post("/cohorts/{kind}/reattach")
+async def cohort_reattach(kind: str, file: UploadFile = File(...), declared_sale_date: Optional[str] = Form(None),
+                          db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                          _g: User = Depends(require_not_observation)):
+    """Read an imported list's full file again and attach the columns the first
+    import left out to the SAME houses (matched to the list's own rows)."""
+    from app.services.evosense import cohort as CO
+    org_id = svc.write_org_id(db, user)
+    _admin(user, db)
+    raw = await file.read()
+    if len(raw) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File is larger than 25 MB.")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+    try:
+        if not CO.members(db, org_id, kind):
+            raise HTTPException(status_code=404, detail="No properties came from that list")
+        return CO.reattach(db, org_id, kind, text, user=user, filename=file.filename or "list.csv",
+                           declared_sale_date=(declared_sale_date or "").strip() or None)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @router.post("/strategies/{strategy_id}/pilot-archive")
