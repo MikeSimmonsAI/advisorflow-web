@@ -1288,6 +1288,47 @@ def hunt_now(strategy_id: str, background: bool = False, db: Session = Depends(g
     return {"run_id": run.id, "status": run.status, "error": run.error, "counts": C.jload(run.counts, {})}
 
 
+# ── imported-list cohorts (e.g. the 2010 Top 100) ──────────────────────────
+
+@router.get("/cohorts")
+def list_cohorts(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services.evosense import cohort as CO
+    return {"cohorts": CO.cohorts(db, _read_org(db, user))}
+
+
+@router.get("/cohorts/{kind}")
+def cohort_view(kind: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Every property one imported list brought in: current owner, tax and
+    foreclosure status with their evidence, score with what earned it and what
+    holds it back, priority and the next action. Read-only."""
+    from app.services.evosense import cohort as CO
+    org_id = _read_org(db, user)
+    try:
+        rs = CO.rows(db, org_id, kind)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Unknown list")
+    if not rs:
+        raise HTTPException(status_code=404, detail="No properties came from that list")
+    return {"kind": kind, "summary": CO.summary(rs), "rows": rs,
+            "last_recheck": CO.last_recheck(db, org_id, kind), "rechecking": CO.running(org_id, kind)}
+
+
+@router.post("/cohorts/{kind}/recheck")
+def cohort_recheck(kind: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                   _g: User = Depends(require_not_observation)):
+    """Re-check the list against the free public records (owner lookups, county
+    delinquency files, statewide tax-suit list) and rescore. $0; nothing sent."""
+    from app.services.evosense import cohort as CO
+    org_id = svc.write_org_id(db, user)
+    try:
+        if not CO.members(db, org_id, kind):
+            raise HTTPException(status_code=404, detail="No properties came from that list")
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Unknown list")
+    started = CO.start_recheck(org_id, kind, user_id=user.id)
+    return {"status": "started" if started else "already_running"}
+
+
 @router.post("/strategies/{strategy_id}/pilot-archive")
 def pilot_archive(strategy_id: str, db: Session = Depends(get_db),
                   user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
