@@ -113,8 +113,12 @@ def test_current_taxes_do_not_cancel_a_scheduled_foreclosure(db_session, sample_
     owner = {"status": "VERIFIED", "name": "SAMPLE OWNER", "flags": []}
     fc = {"status": "CLAIMED", "days": 11, "sale_date": SOON.isoformat(), "verified": False}
     tax = {"status": "CURRENT"}
-    assert CO._priority(20, owner, tax, fc, ["PRE_FORECLOSURE"]) == "A"
-    assert "Confirm the" in CO._next_action("A", owner, tax, {"phones": 0, "emails": 0}, dict(fc, county="Dallas"))
+    # a CLAIM with current taxes stays an open lead (B), never parked; only a
+    # verified clerk notice makes it "act now" (A) - taxes current or not
+    assert CO._priority(20, owner, tax, fc, ["PRE_FORECLOSURE"]) == "B"
+    assert "Confirm the" in CO._next_action("B", owner, tax, {"phones": 0, "emails": 0}, dict(fc, county="Dallas"))
+    verified = dict(fc, status="VERIFIED NOTICE", verified=True, document="202600002332")
+    assert CO._priority(20, owner, tax, verified, ["PRE_FORECLOSURE"]) == "A"
 
 
 def test_a_passed_sale_date_is_not_current_distress():

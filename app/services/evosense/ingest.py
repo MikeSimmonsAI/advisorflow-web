@@ -617,7 +617,11 @@ def _apply_signals(db, prop, provider, rec, observation_id, cost_cents, user=Non
                                "adapter_version": rec.get("_adapter_version"),
                                "limitations": s.get("limitations"),
                                # a mortgage-foreclosure claim / notice: the scheduled sale
-                               "sale_date": s.get("sale_date"), "claim": s.get("claim")},
+                               "sale_date": s.get("sale_date"), "claim": s.get("claim"),
+                               # a clerk notice: what it is and where it is filed
+                               "foreclosure_type": s.get("foreclosure_type"), "document": s.get("document"),
+                               "document_url": s.get("document_url"), "recorded": s.get("recorded"),
+                               "sale_date_basis": s.get("sale_date_basis"), "matched_by": s.get("matched_by")},
                    cost_cents=cost_cents if len(rec.get("signals") or []) == 1 else 0,
                    evidence_basis=s.get("evidence_basis"), case_status=s.get("case_status"),
                    rule_version=rec.get("_adapter_version"),

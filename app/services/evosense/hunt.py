@@ -238,6 +238,13 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
     routes = _discovery_routes(db, org_id, focus)
     if focus:
         counts["discovery_focus"] = focus
+        if not routes:
+            # Nothing connected can serve what this strategy hunts: say so -
+            # a hunt that searched nothing is BLOCKED, never "succeeded".
+            counts["blocked"] = ("No connected source serves this strategy's search (%s). Enable one under "
+                                 "Sources, or import a list." % ", ".join(focus))
+            C.log_event(db, org_id, "hunt.blocked", strategy_id=strategy.id, is_test=strategy.is_test,
+                        actor_type=C.ACTOR_USER if user else C.ACTOR_AUTOMATION, summary=counts["blocked"])
     real = [r for r in routes if r[1].connector_kind == C.REAL]
     share = max(1, -(-max_properties // max(1, len(real))))      # ceil: a fair share per real source
     counts["sources"] = {}
@@ -365,7 +372,8 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
     # A source can answer a batch but fail for individual properties.
     # Such a run is PARTIAL, not green, even if no source-wide error fired.
     property_failures = sum(int(row.get("failed", 0)) for row in counts.get("lookups", {}).values())
-    return finish("partial" if counts["provider_errors"] or property_failures else "succeeded")
+    return finish("partial" if counts["provider_errors"] or property_failures or counts.get("blocked")
+                  else "succeeded")
 
 
 # ── free public-record lookups (the cost governor's QUEUE_FREE_LOOKUP lane) ──
@@ -680,17 +688,31 @@ def distress_list_kinds() -> List[Dict[str, str]]:
              "signal_label": CATALOG[v["signal"]]["label"]} for k, v in DISTRESS_LISTS.items()]
 
 
-def foreclosure_claim(sale, *, source: str, declared_by: Optional[str] = None) -> Dict[str, Any]:
-    """A PRE_FORECLOSURE signal as a list's CLAIM of a scheduled sale.
+TAX_LIST_SIGNALS = ("TAX_DELINQUENT", "TAX_SUIT", "TAX_SALE")
+
+
+def foreclosure_claim(sale, *, source: str, declared_by: Optional[str] = None,
+                      case_status: Optional[str] = None, tax: bool = False) -> Dict[str, Any]:
+    """A list's CLAIM of a scheduled sale: a mortgage / trustee sale
+    (PRE_FORECLOSURE) - or, on a tax list, a tax foreclosure sale (TAX_SALE).
 
     `sale` comes from a row's sale_date column or from a date a person
-    declared for the whole list - never from a file name."""
+    declared for the whole list - never from a file name. A row's own
+    case_status (postponed, cancelled ...) is kept, never overwritten."""
     how = ("declared for the whole list by %s" % declared_by) if declared_by else "stated in the row's sale date"
+    status = (case_status or "").strip().lower() or "scheduled"
+    if tax:
+        return {"type": "TAX_SALE", "confidence": 60, "claim": "imported",
+                "sale_date": sale.strftime("%Y-%m-%d"), "foreclosure_type": "tax_foreclosure_sale",
+                "value": "Tax foreclosure sale %s %s - claimed by %s (%s); not verified against the sale list "
+                         "or court record" % (status, sale.strftime("%Y-%m-%d"), source, how),
+                "evidence_basis": "imported list claim", "case_status": status,
+                "limitations": "A list's claim of a tax sale date. Confirm on the county / constable sale list."}
     return {"type": "PRE_FORECLOSURE", "confidence": 60, "claim": "imported",
             "sale_date": sale.strftime("%Y-%m-%d"),
             "value": "Foreclosure sale scheduled %s - claimed by %s (%s); not verified against the county "
                      "clerk's notice" % (sale.strftime("%Y-%m-%d"), source, how),
-            "evidence_basis": "imported list claim", "case_status": "scheduled",
+            "evidence_basis": "imported list claim", "case_status": status,
             "limitations": "A list's claim of a scheduled trustee sale. Confirm on the county clerk's posted "
                            "Notice of (Substitute) Trustee Sale; sales are often postponed or cancelled."}
 
@@ -774,11 +796,14 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
             rejected.append({"line": i, "reason": "sale_date is not a date (use YYYY-MM-DD or MM/DD/YYYY)"})
             continue
         fc_claim = None
+        # A sale date on a TAX list is a tax sale, never a mortgage foreclosure.
+        tax_list = bool(kind) and kind["signal"] in TAX_LIST_SIGNALS
+        row_status = (row.get("case_status") or "").strip() or None
         if sale is not None:
-            fc_claim = foreclosure_claim(sale, source=source_label)
+            fc_claim = foreclosure_claim(sale, source=source_label, case_status=row_status, tax=tax_list)
             counts["sale_dates"] += 1
         elif declared is not None:
-            fc_claim = foreclosure_claim(declared, source=source_label,
+            fc_claim = foreclosure_claim(declared, source=source_label, case_status=row_status, tax=tax_list,
                                          declared_by=getattr(user, "email", None) or "the importer")
             counts["sale_dates_declared"] += 1
         if row.get("owner_name"):
@@ -820,7 +845,7 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
         if fc_claim is not None:
             # one foreclosure claim per row: a list kind's own PRE_FORECLOSURE
             # takes the sale date instead of being doubled
-            rec["signals"] = [x for x in rec.get("signals") or [] if x["type"] != "PRE_FORECLOSURE"] + [fc_claim]
+            rec["signals"] = [x for x in rec.get("signals") or [] if x["type"] != fc_claim["type"]] + [fc_claim]
         outcome, prop = IN.ingest(db, org_id, provider, C.PROPERTY_SEARCH, rec,
                                   strategy_id=getattr(strategy, "id", None), user=user)
         counts[outcome] = counts.get(outcome, 0) + 1

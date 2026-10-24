@@ -322,11 +322,14 @@ STARTERS = {
     },
     "pre_foreclosure": {
         "name": "Pre-Foreclosure",
-        "description": "Houses with a posted foreclosure notice.",
-        "data": ("Fed by foreclosure-notice lists you import (Properties > Import list, list type "
-                 "Foreclosure notices) - county postings, or a PropStream export if you ever have one."),
-        "free_today": False,
-        "fields": {"preferred_signals": ["PRE_FORECLOSURE", "TAX_DELINQUENT", "VACANT"],
+        "description": "Houses with a foreclosure sale notice filed with the county clerk.",
+        "data": ("Works today on free data in Dallas, Tarrant and Denton counties: every foreclosure sale "
+                 "notice filed with the county clerk (trustee, substitute trustee, HOA, judicial). Other "
+                 "counties (Collin included): import a foreclosure-notice list (list type \"Foreclosure / "
+                 "trustee-sale postings\") or record a notice by hand."),
+        "free_today": True,
+        "fields": {"counties": ["Dallas", "Tarrant", "Denton"],
+                   "preferred_signals": ["PRE_FORECLOSURE", "TAX_SALE", "TAX_DELINQUENT", "VACANT"],
                    "provider_preferences": {"discovery": ["FORECLOSURE"]}},
     },
     "probate": {
