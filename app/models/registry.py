@@ -262,6 +262,8 @@ import app.models.wholesale_models  # noqa: F401  (imported for side effects)
 # rooms have nowhere to record a link or a view, and a revoked link would have
 # no row to be revoked on.
 import app.models.wholesale_share_models  # noqa: F401  (imported for side effects)
+# Buyer network import batches and rows (reviewable, retryable, reversible imports).
+import app.models.wholesale_buyer_import_models  # noqa: F401  (imported for side effects)
 # EvoSense Acquisition Engine (evosense_*): strategies, canonical properties,
 # observations, signals, owner graph, scores, cost ledger, engagements. Phase 7.
 # Added to BOTH blocks in this file, per the merge-artefact note above.
@@ -539,6 +541,8 @@ import app.models.wholesale_models  # noqa: F401  (imported for side effects)
 # rooms have nowhere to record a link or a view, and a revoked link would have
 # no row to be revoked on.
 import app.models.wholesale_share_models  # noqa: F401  (imported for side effects)
+# Buyer network import batches and rows (reviewable, retryable, reversible imports).
+import app.models.wholesale_buyer_import_models  # noqa: F401  (imported for side effects)
 # EvoSense Acquisition Engine (evosense_*): strategies, canonical properties,
 # observations, signals, owner graph, scores, cost ledger, engagements. Phase 7.
 # Added to BOTH blocks in this file, per the merge-artefact note above.

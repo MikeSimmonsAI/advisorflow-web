@@ -1444,6 +1444,13 @@ COLUMNS_TO_ADD = [
     ("evosense_provider_configs", "truth_gate", "TEXT"),
     # P3: a cash buyer's identity lives in the shared contact database.
     ("wholesale_buyers", "org_contact_id", "VARCHAR"),
+    # Buyer network import (2026-10-24): what the operator's own buyer file said.
+    ("wholesale_buyers", "financing_preference", "VARCHAR"),
+    ("wholesale_buyers", "purchase_evidence", "TEXT"),
+    ("wholesale_buyers", "file_pof_status", "VARCHAR"),
+    ("wholesale_buyers", "file_status", "VARCHAR"),
+    ("wholesale_buyers", "file_last_contact_at", "TIMESTAMP"),
+    ("wholesale_buyers", "file_last_response_at", "TIMESTAMP"),
     ("evosense_provider_evaluations", "mode", "VARCHAR"),
     ("evosense_provider_evaluations", "plan", "TEXT"),
     ("evosense_provider_evaluations", "max_spend_cents", "INTEGER"),

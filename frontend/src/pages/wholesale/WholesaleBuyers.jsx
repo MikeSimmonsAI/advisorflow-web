@@ -15,6 +15,8 @@ import {
 } from './wsShared'
 import { ConfirmDelete } from './wsFiles'
 import ContactLookup from './wsContactLookup'
+import { BuyerImportWizard, BuyerNetworkPanel } from './wsBuyerNetwork'
+import './wsUnderwriting.css'
 import { Alert, Drawer, Empty as EvoEmpty, EvoApp, Hero, Metric, Metrics, Panel, Skeleton, Tag } from './ds/ds'
 import './ds/evo-pages.css'
 
@@ -120,6 +122,7 @@ export default function WholesaleBuyers() {
                 sub={buyers.some((b) => !(b.buy_boxes || []).length) ? 'some buyers have none' : null} />
       </Metrics>
 
+      <BuyerNetworkPanel includeTest={includeTest} refreshKey={buyers.length} />
       <Panel flush>
         <div className="evo-filterbar">
           <label className="evo-search">
@@ -227,7 +230,7 @@ export default function WholesaleBuyers() {
       ) : null}
 
       {showAdd ? <AddBuyer onClose={() => setShowAdd(false)} onDone={() => { setShowAdd(false); setNotice('Buyer added. Give them a buy box so they appear in matches.'); load() }} /> : null}
-      {showImport ? <BuyerImport onClose={() => setShowImport(false)} onDone={(msg) => { setNotice(msg); load() }} /> : null}
+      {showImport ? <BuyerImportWizard onClose={() => setShowImport(false)} onDone={(msg) => { setNotice(msg); load() }} /> : null}
       {showFind ? <FindBuyers onClose={() => setShowFind(false)} onDone={(msg) => { setNotice(msg); load() }} /> : null}
       {lookupIds ? <ContactLookup kind="buyer" what="buyer" ids={lookupIds} onClose={() => setLookupIds(null)}
                                   onDone={(msg) => { setNotice(msg); setPicked({}); load() }} /> : null}

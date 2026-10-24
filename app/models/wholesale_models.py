@@ -929,6 +929,14 @@ class WholesaleBuyer(Base):
     # Who this buyer IS, in the shared contact database (Universal Intake).
     # The buyer ROLE (buy boxes, standing, outreach, claims) stays on this row.
     org_contact_id = Column(String, ForeignKey("org_contacts.id", ondelete="SET NULL"), nullable=True)
+    # From the operator's OWN buyer file (import). Kept as what the file said -
+    # never treated as evidence this platform observed (see wholesale_buyer_network).
+    financing_preference = Column(String, nullable=True)   # cash, hard_money, conventional, private, mixed
+    purchase_evidence = Column(Text, nullable=True)        # e.g. "bought 1418 Elm St 03/2026"
+    file_pof_status = Column(String, nullable=True)        # what their file said about proof of funds
+    file_status = Column(String, nullable=True)            # active / inactive as their file said
+    file_last_contact_at = Column(DateTime, nullable=True)
+    file_last_response_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
