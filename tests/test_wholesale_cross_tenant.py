@@ -291,6 +291,13 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
     voffer = ok(client.post("/wholesale/appointments/%s/offers" % appt["id"], headers=auth_headers,
                             json={"arv": 200000, "repairs": 30000, "offer": 150000}))
 
+    # A buyer-network import batch (synthetic rows) of the VICTIM organization.
+    imp = ok(client.post("/wholesale/buyers/imports", headers=auth_headers,
+                         files={"file": ("victim_buyers.csv",
+                                         b"Company,Email\nVictim Buyer Co,victim@example.test\n", "text/csv")},
+                         data={"is_test": "true"}))
+    imp_row = imp["sample"][0]["id"]
+
     return {
         **es_ids,
         "appointment_id": appt["id"],
@@ -317,6 +324,8 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
         "approval_id": an_id(approval, "approval"),
         "document_id": an_id(document, "document"),
         "buyer_id": an_id(buyer, "buyer"),
+        "import_batch_id": imp["id"],
+        "import_row_id": imp_row,
         "box_id": an_id(box, "buy_box", "box"),
         "outreach_id": (outreach_rows[0].get("outreach_id")
                         if outreach_rows else None),
@@ -390,6 +399,16 @@ def attacks(ids):
          {"label": "planted", "states": ["TX"]}),
         ("patch", "/wholesale/buy-boxes/%s" % ids["box_id"], {"label": "taken"}),
         ("delete", "/wholesale/buy-boxes/%s" % ids["box_id"], None),
+        # buyer network imports
+        ("get", "/wholesale/buyers/imports/%s" % ids["import_batch_id"], None),
+        ("get", "/wholesale/buyers/imports/%s/rows" % ids["import_batch_id"], None),
+        ("get", "/wholesale/buyers/imports/%s/errors.csv" % ids["import_batch_id"], None),
+        ("put", "/wholesale/buyers/imports/%s/mapping" % ids["import_batch_id"], {"mapping": {}}),
+        ("post", "/wholesale/buyers/imports/%s/analyze" % ids["import_batch_id"], {}),
+        ("patch", "/wholesale/buyers/imports/%s/rows/%s" % (ids["import_batch_id"], ids["import_row_id"]),
+         {"decision": "skip"}),
+        ("post", "/wholesale/buyers/imports/%s/commit" % ids["import_batch_id"], {}),
+        ("post", "/wholesale/buyers/imports/%s/rollback" % ids["import_batch_id"], {}),
         ("get", "/wholesale/buyers/%s/intel" % ids["buyer_id"], None),
         ("get", "/wholesale/deals/%s/buyer-intel" % d, None),
         ("get", "/wholesale/deals/%s/package" % d, None),
