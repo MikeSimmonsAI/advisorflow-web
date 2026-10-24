@@ -31,12 +31,15 @@ import { SellerIntelPanel } from './wsIntel'
 import { ValuationPanel } from './wsValuation'
 import { DocumentDrawer } from './wsDocuments'
 import { SharingWorkspace } from './wsSharing'
+import { UnderwritingTab, WorkflowStrip } from './wsUnderwriting'
+import './wsUnderwriting.css'
 import DealOpsPanel, { DistributionNotice, LeadTemperatureChip, useDistribution } from './ops/DealOpsPanel'
 import { EvoApp, Hero, PageSkeleton, PropertyThumb, Ring, Status, Tag, humanize, money, shortDate } from './ds/ds'
 import './ds/evo-pages.css'
 
 const TABS = [
   ['overview', 'Overview'],
+  ['underwriting', 'Deal analysis'],
   ['ops', 'Callbacks, notes & control'],
   ['seller', 'Seller & conversation'],
   ['analysis', 'Analysis & comps'],
@@ -59,6 +62,7 @@ export default function WholesaleDeal() {
   const { dealId } = useParams()
   const [room, setRoom] = useState(null)
   const [tab, setTab] = useState('overview')
+  const [flowKey, setFlowKey] = useState(0)
   const distribution = useDistribution()
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
@@ -176,6 +180,7 @@ export default function WholesaleDeal() {
           filled with a plausible number, because a header that guesses is a
           header nobody can price a deal from. */}
       <DealSummary room={room} nextAction={nextAction} goTo={setTab} />
+      <WorkflowStrip dealId={deal.id} goTo={setTab} refreshKey={flowKey} />
 
       <div className="ws-tabs">
         {TABS.map(([key, label]) => (
@@ -184,6 +189,7 @@ export default function WholesaleDeal() {
         ))}
       </div>
 
+      {tab === 'underwriting' ? <UnderwritingTab dealId={deal.id} goTo={setTab} onChanged={() => { setFlowKey((k) => k + 1); load() }} /> : null}
       {tab === 'overview' ? <Overview room={room} goTo={setTab} reload={load} /> : null}
       {tab === 'ops' ? <DealOpsPanel dealId={deal.id} /> : null}
       {tab === 'seller' ? <SellerTab room={room} act={act} busy={busy} /> : null}
