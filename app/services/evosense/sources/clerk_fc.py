@@ -442,8 +442,13 @@ class ClerkForeclosureReader:
                 out.append(d)
         return out
 
-    def discover(self, counties: Iterable[str], *, limit: int = 250, today: Optional[date] = None) -> Dict[str, Any]:
-        """Upcoming scheduled sales with an address, soonest first."""
+    def discover(self, counties: Iterable[str], *, limit: int = 250, today: Optional[date] = None,
+                 rotate: Optional[int] = None) -> Dict[str, Any]:
+        """Upcoming scheduled sales with an address. Counties take turns
+        (Dallas, Tarrant, Denton, Dallas ...) so a small run reaches every
+        county, and each day starts at a different place in that order so
+        daily runs reach new notices instead of re-reading the same first
+        ones. A run that can take everything gets everything."""
         today = today or date.today()
         stats: Dict[str, Any] = {}
         recs: List[Tuple[date, Dict[str, Any]]] = []
@@ -466,8 +471,21 @@ class ClerkForeclosureReader:
                     continue
                 recs.append((sd, rec))
             stats[c] = st
-        recs.sort(key=lambda t: (t[0], t[1]["source_reference"]))
-        return {"records": [r for _, r in recs[:limit]], "stats": stats,
+        by_county: Dict[str, List[Tuple[date, Dict[str, Any]]]] = {}
+        for sd, r in recs:
+            by_county.setdefault(r["county"], []).append((sd, r))
+        lanes = [sorted(v, key=lambda t: (t[0], t[1]["source_reference"])) for _, v in sorted(by_county.items())]
+        order: List[Dict[str, Any]] = []
+        while any(lanes):
+            for lane in lanes:
+                if lane:
+                    order.append(lane.pop(0)[1])
+        if len(order) > limit and order:
+            day = date.today().timetuple().tm_yday if rotate is None else rotate
+            start = (day * limit) % len(order)
+            order = order[start:] + order[:start]
+        stats["rotation_start"] = 0 if len(recs) <= limit else start
+        return {"records": order[:limit], "stats": stats,
                 "source_url": "https://%s/" % COUNTIES["dallas"]["host"], "source_updated_at": datetime.utcnow()}
 
     def check(self, county: str, props: List[Dict[str, Any]], *, today: Optional[date] = None) -> Dict[str, Any]:

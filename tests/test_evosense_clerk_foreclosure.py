@@ -420,3 +420,16 @@ def test_clerk_source_feeds_only_strategies_that_ask_for_foreclosure(db_session,
     assert CO.CLERK_SOURCE not in keys(["TAX"])
     assert CO.CLERK_SOURCE in keys(["FORECLOSURE"])               # the Pre-Foreclosure starter
     assert CO.CLERK_SOURCE in keys([CO.CLERK_SOURCE])
+
+
+# 16 ── small daily runs reach every county and new notices each day ─────────
+
+def test_discovery_alternates_counties_and_rotates_daily(clerks):
+    r = F.ClerkForeclosureReader()
+    one = r.discover(["dallas", "tarrant", "denton"], limit=3, rotate=0)["records"]
+    assert {x["county"] for x in one} == {"Dallas", "Tarrant", "Denton"}      # every county, not 3 Dallas notices
+    day1 = {x["source_reference"] for x in r.discover(["dallas", "tarrant", "denton"], limit=3, rotate=1)["records"]}
+    day0 = {x["source_reference"] for x in one}
+    assert day1 != day0                                                      # the next day reaches other notices
+    everything = r.discover(["dallas", "tarrant", "denton"], limit=500, rotate=7)["records"]
+    assert len(everything) == len({x["source_reference"] for x in everything})   # no repeats when all fit
