@@ -236,7 +236,15 @@ def legal_match(legal: Optional[Dict[str, Any]], text: str) -> Dict[str, Any]:
     res = {"result": "", "phase_conflict": False, "detail": None}
     if not legal:
         return res
-    found = [x for x in notice_legals(text) if subdivision_in(legal["core"], x["context"])]
+    # the clerk's search snippet often stops mid-name ('LOT 1, BLOCK D, GARDEN'):
+    # a lot/block whose context starts the plat name counts when the same
+    # notice names the whole plat elsewhere
+    whole = subdivision_in(legal["core"], text)
+    words = lambda ctx: set(norm(ctx).replace("/", " ").split())
+    lead = [w for w in legal["core"] if len(w) >= 4][:1]
+    found = [x for x in notice_legals(text)
+             if subdivision_in(legal["core"], x["context"])
+             or (whole and lead and lead[0] in words(x["context"]))]
     if not found:
         return res
     want_lots, want_block = set(legal["lots"]), legal.get("block")
@@ -318,12 +326,20 @@ def decide(ident: Dict[str, Any], text: str, index_city: Optional[str] = None) -
         sig["legal"] = lg["result"]
         if lg["phase_conflict"]:
             sig["phase_conflict"] = True
+    if not lg["result"] and ident.get("legal") and subdivision_in(ident["legal"]["core"], text):
+        # the plat is named but no lot/block can be read (a poor scan): never
+        # proof, but worth a person's look when the city or the name agrees
+        sig["subdivision"] = True
     nm = name_match(ident.get("names") or [], text)
     if nm:
         sig["name"] = nm
     city = (ident.get("city") or "").strip().upper()
     ic = norm(index_city or "")
     if city and ic and (ic == city or ic.startswith(city + " ") or ic.replace(" ", "") == city.replace(" ", "")):
+        sig["city"] = True
+    elif city and not ic and len(city) >= 4 and re.search(r"\b%s\b" % re.escape(norm(city)), norm(text)):
+        # no city on the clerk's index: the notice's own 'addition to the City
+        # of Cedar Hill' says the same thing
         sig["city"] = True
     has_parcel, legal = "parcel" in sig, sig.get("legal")
     kinds = []
@@ -333,6 +349,8 @@ def decide(ident: Dict[str, Any], text: str, index_city: Optional[str] = None) -
         kinds.append("legal description (%s)" % lg["detail"])
     if nm:
         kinds.append("%s name" % ("owner/borrower" if nm == "strong" else "surname"))
+    if sig.get("subdivision"):
+        kinds.append("subdivision named (lot/block unreadable)")
     if sig.get("city"):
         kinds.append("index city")
     out = {"signals": sig, "matched_by": " + ".join(kinds) + " (notice text)" if kinds else ""}
@@ -353,6 +371,12 @@ def decide(ident: Dict[str, Any], text: str, index_city: Optional[str] = None) -
                                                     "(often an OCR slip) - confirm on the notice")
     if verified:
         return dict(out, decision=VERIFIED, reason="")
+    if sig.get("subdivision") and not (has_parcel or legal):
+        if nm or sig.get("city"):
+            return dict(out, decision=CANDIDATE,
+                        reason="the notice names the subdivision%s but its lot/block cannot be read - confirm on "
+                               "the notice" % (" and the owner" if nm else " in the same city"))
+        return dict(out, decision=NONE, reason="")
     if not (has_parcel or legal) and nm != "strong":
         # one surname (or a city) alone names nobody: not even a candidate
         return dict(out, decision=NONE, reason="")

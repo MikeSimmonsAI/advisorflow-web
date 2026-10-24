@@ -25,7 +25,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.services import wholesale_enrichment as WE
 from app.services.evosense import common as C
@@ -330,6 +330,9 @@ class PublicRecordSource(AcquisitionProvider):
     refresh = ""
     terms_note = "Public record, published free by the government body for download or query."
     adapter_version = ""
+    # Records saved by these older adapter versions lack a field the matching
+    # now needs: they are looked up again even inside the freshness window.
+    stale_adapter_versions: Tuple[str, ...] = ()
     lookup_capability: Optional[str] = None
 
     def applies(self, target: Dict[str, Any]) -> bool:
@@ -751,7 +754,9 @@ class TexasParcelOwnerSource(PublicRecordSource):
     public_url = "https://geographic.texas.gov/"
     refresh = "Refreshed by TxGIO from each county's certified roll (tax year shown on each record)"
     freshness_days = 180
-    adapter_version = "txgio_stratmap_parcels/1"
+    adapter_version = "txgio_stratmap_parcels/2"
+    # /1 did not keep LEGAL_DESC, which the foreclosure matcher reads (lot/block)
+    stale_adapter_versions = ("txgio_stratmap_parcels/1",)
     terms_note = "Public statewide parcel data published by the Texas Geographic Information Office."
 
     @staticmethod

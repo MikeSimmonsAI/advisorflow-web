@@ -502,6 +502,20 @@ def norm_words(text: Optional[str]) -> List[str]:
     return M.norm(text).replace("/", " ").split()
 
 
+def subdivision_phrase(legal: Dict[str, Any]) -> str:
+    """The words of the plat name to search for, as they stand next to each
+    other: 'RESERVE AT HIGH POINTE PH 3' -> 'HIGH POINTE' (not 'RESERVE HIGH',
+    which no notice contains - the phrase search needs adjacent words)."""
+    runs: List[List[str]] = [[]]
+    for w in norm_words(legal.get("subdivision")):
+        if w in legal["core"]:
+            runs[-1].append(w)
+        elif runs[-1]:
+            runs.append([])
+    best = max(runs, key=len)
+    return " ".join(best[:2])
+
+
 def _name_queries(ident: Dict[str, Any]) -> List[str]:
     """What to search the notices for: the list's borrower as written
     (first and last name, the order a notice uses), then the owner of
@@ -731,7 +745,7 @@ class ClerkForeclosureReader:
             for d in search(pid):
                 add(d, index_text(d))
         if legal and not any(M.legal_match(legal, " ".join(v["texts"]))["result"] for v in pool.values()):
-            phrase = " ".join([w for w in norm_words(legal["subdivision"]) if w in legal["core"]][:2])
+            phrase = subdivision_phrase(legal)
             if phrase:
                 for d in search('"%s"' % phrase):
                     add(d, index_text(d))
