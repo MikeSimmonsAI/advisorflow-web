@@ -452,3 +452,26 @@ def test_last_recheck_time_is_marked_utc(db_session, sample_org):
                 details={"kind": "t100"})
     db_session.commit()
     assert CO.last_recheck(db_session, sample_org.id, "t100")["at"].endswith("Z")
+
+
+# 19 ── the clerk and the appraisal district space street names differently ──
+
+def test_running_brook_and_runningbrook_are_the_same_street():
+    doc = {"propAddress": [{"address1": "2728 RUNNING BROOK LN", "zip": "75228", "city": "DALLAS"}]}
+    assert F.same_place(doc, "2728 RUNNINGBROOK LN", "75228", "Dallas")
+    assert F.same_place({"ocrText": "Property: 2233 PARKHURST DRIVE, ARLINGTON, TX 76001"},
+                        "2233 PARK HURST DR", "76001", "Arlington")
+    assert not F.same_place(doc, "2729 RUNNINGBROOK LN", "75228", "Dallas")          # never the neighbour
+    assert not F.same_place(doc, "2728 RUNNING BROOK LN", "76001", "Arlington")      # nor another town
+
+
+# 20 ── a large window is read in chunks: nothing skipped, nothing doubled ────
+
+def test_window_reads_in_chunks_without_losing_or_doubling_notices(monkeypatch, clerks):
+    many = [dallas_doc(100 + i, "%d BULK ST" % (100 + i), "DALLAS", "75201", SALE) for i in range(600)]
+    clerks.DOCS = {"dallas": many}
+    monkeypatch.setattr(F, "PAGE", 250)
+    p = clerks("dallas")
+    got = p.window(SALE - timedelta(days=40), SALE + timedelta(days=40))
+    assert len(got) == 600 and len({d["docId"] for d in got}) == 600
+    assert any("offset" in q and q["offset"] != "0" for q in p.queries)   # one day held 600: paged, de-duplicated

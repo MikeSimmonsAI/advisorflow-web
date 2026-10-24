@@ -1392,20 +1392,39 @@ def list_cohorts(db: Session = Depends(get_db), user: User = Depends(require_ten
 
 
 @router.get("/cohorts/{kind}")
-def cohort_view(kind: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+def cohort_view(kind: str, request: Request, status_only: bool = False, db: Session = Depends(get_db),
+                user: User = Depends(require_tenant_user)):
     """Every property one imported list brought in: current owner, tax and
     foreclosure status with their evidence, score with what earned it and what
-    holds it back, priority and the next action. Read-only."""
+    holds it back, priority and the next action. Read-only.
+
+    `status_only=1`: just whether a re-check is running and the last one's
+    result - what the page polls while a re-check runs, instead of re-reading
+    every row. The full answer is gzip-compressed when the browser accepts it
+    (the Top 100 is ~250 KB of JSON, ~25 KB compressed)."""
     from app.services.evosense import cohort as CO
     org_id = _read_org(db, user)
     try:
-        rs = CO.rows(db, org_id, kind)
+        CO._prefix(kind)
     except ValueError:
         raise HTTPException(status_code=404, detail="Unknown list")
+    if status_only:
+        return {"kind": kind, "last_recheck": CO.last_recheck(db, org_id, kind),
+                "rechecking": CO.running(org_id, kind, db)}
+    rs = CO.rows(db, org_id, kind)
     if not rs:
         raise HTTPException(status_code=404, detail="No properties came from that list")
-    return {"kind": kind, "summary": CO.summary(rs), "rows": rs,
+    body = {"kind": kind, "summary": CO.summary(rs), "rows": rs,
             "last_recheck": CO.last_recheck(db, org_id, kind), "rechecking": CO.running(org_id, kind, db)}
+    if "gzip" not in (request.headers.get("accept-encoding") or "").lower():
+        return body
+    import gzip as _gz
+    import json as _json
+    from fastapi.encoders import jsonable_encoder
+    from fastapi.responses import Response as _Resp
+    raw = _json.dumps(jsonable_encoder(body), separators=(",", ":")).encode("utf-8")
+    return _Resp(content=_gz.compress(raw, compresslevel=6), media_type="application/json",
+                 headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
 
 
 @router.post("/cohorts/{kind}/recheck")

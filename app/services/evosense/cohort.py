@@ -547,22 +547,139 @@ def _next_action(prio, owner, tax, contact, fc=None) -> str:
     return "Call or mail %s about the property" % owner["name"]
 
 
+def _prefetch(db, org_id: str, props: List[EvoSenseProperty]) -> Dict[str, Any]:
+    """Everything the list view needs for ALL its properties, in about a
+    dozen queries instead of ~15 per property (the Top 100 took 4-8 s)."""
+    from app.models.evosense_models import EvoSenseControl, EvoSenseOwner, EvoSenseStrategy
+    ids = [p.id for p in props]
+    pre: Dict[str, Any] = {"signals": {}, "links": {}, "owners": {}, "tax_event": {}, "contacts": {},
+                           "claims": {}, "strategies": {}}
+    if not ids:
+        return pre
+    for sig in (db.query(EvoSenseSignal).filter(EvoSenseSignal.organization_id == org_id,
+                                                EvoSenseSignal.property_id.in_(ids)).all()):
+        pre["signals"].setdefault(sig.property_id, []).append(sig)
+    links = (db.query(EvoSenseOwnership).filter(EvoSenseOwnership.organization_id == org_id,
+                                                EvoSenseOwnership.property_id.in_(ids),
+                                                EvoSenseOwnership.is_current.is_(True)).all())
+    for l in links:
+        pre["links"].setdefault(l.property_id, []).append(l)
+    owner_ids = sorted({l.owner_id for l in links if l.owner_id})
+    if owner_ids:
+        for o in db.query(EvoSenseOwner).filter(EvoSenseOwner.organization_id == org_id,
+                                                EvoSenseOwner.id.in_(owner_ids)).all():
+            pre["owners"][o.id] = o
+        for cp in (db.query(EvoSenseContactPoint).filter(EvoSenseContactPoint.owner_id.in_(owner_ids),
+                                                         EvoSenseContactPoint.status == "active").all()):
+            pre["contacts"].setdefault(cp.owner_id, []).append(cp)
+    for ev in (db.query(EvoSenseEvent).filter(EvoSenseEvent.organization_id == org_id,
+                                              EvoSenseEvent.action == TAX_CHECK_EVENT,
+                                              EvoSenseEvent.property_id.in_(ids))
+               .order_by(EvoSenseEvent.created_at.asc()).all()):
+        pre["tax_event"][ev.property_id] = ev                 # ascending: the newest wins
+    for pid, payload in (db.query(EvoSenseObservation.property_id, EvoSenseObservation.payload)
+                         .filter(EvoSenseObservation.organization_id == org_id,
+                                 EvoSenseObservation.property_id.in_(ids),
+                                 EvoSenseObservation.provider_key == "csv_import").all()):
+        pre["claims"].setdefault(pid, []).append(payload)
+    sids = sorted({p.best_strategy_id or p.first_strategy_id for p in props if (p.best_strategy_id or p.first_strategy_id)})
+    if sids:
+        for st in db.query(EvoSenseStrategy).filter(EvoSenseStrategy.organization_id == org_id,
+                                                    EvoSenseStrategy.id.in_(sids)).all():
+            pre["strategies"][st.id] = st
+    ctl = db.query(EvoSenseControl).filter(EvoSenseControl.organization_id == org_id).first()
+    pre["weights"] = C.jload(getattr(ctl, "score_weights", None), None) if ctl is not None else None
+    pre["options"] = C.jload(getattr(ctl, "scoring_options", None), None) if ctl is not None else None
+    return pre
+
+
+def _owners_of(pre, prop) -> List[Any]:
+    links = pre["links"].get(prop.id, [])
+    owners = [pre["owners"][l.owner_id] for l in links if l.owner_id in pre["owners"]]
+    disputed = {l.owner_id for l in links if l.in_conflict}
+    return sorted(owners, key=lambda o: (o.id in disputed, o.created_at or C.now()))
+
+
+def _owner_status_pre(pre, prop) -> Dict[str, Any]:
+    links = pre["links"].get(prop.id, [])
+    owners = _owners_of(pre, prop)
+    if not owners:
+        return {"status": "NO OWNER", "name": None, "sources": []}
+    o = owners[0]
+    srcs = sorted({l.source for l in links if l.owner_id == o.id})
+    official = [x for x in srcs if x in OFFICIAL_OWNER_SOURCES]
+    status = "CONFLICT" if len(owners) > 1 or any(l.in_conflict for l in links) else \
+        "VERIFIED" if official else "UNVERIFIED"
+    from app.services.evosense.ingest import REVIEW_FLAG_LABELS, owner_flags
+    flags = owner_flags(o.display_name or "")
+    return {"status": status, "name": o.display_name, "owner_id": o.id, "sources": srcs,
+            "flags": [{"key": f, "label": REVIEW_FLAG_LABELS.get(f, f)} for f in flags],
+            "mailing": ", ".join(x for x in (o.mailing_street, o.mailing_city, o.mailing_state, o.mailing_zip) if x),
+            "other_names": [x.display_name for x in owners[1:]]}
+
+
+def _tax_status_pre(pre, prop, sigs) -> Dict[str, Any]:
+    t = [x for x in sigs if x.signal_type in TAX_TYPES]
+    if t:
+        kinds = sorted({x.signal_type for x in t})
+        best = "TAX SALE" if "TAX_SALE" in kinds else "TAX LAWSUIT" if ("TAX_SUIT" in kinds or "TAX_FORECLOSURE" in kinds) \
+            else "DELINQUENT"
+        x = max(t, key=lambda y: y.observed_at or C.now())
+        return {"status": best, "detail": x.normalized_value or x.raw_value, "source": x.source,
+                "date": x.observed_at.strftime("%Y-%m-%d") if x.observed_at else None}
+    ev = pre["tax_event"].get(prop.id)
+    if ev is not None:
+        d = C.jload(ev.details, {}) or {}
+        return {"status": "CURRENT", "detail": ev.summary, "source": d.get("source"),
+                "date": d.get("file_date") or ev.created_at.strftime("%Y-%m-%d")}
+    return {"status": "NOT CHECKED", "detail": "No county delinquency file connected for %s County"
+            % (prop.county or "this")}
+
+
+def _contacts_pre(pre, owner_id) -> Dict[str, Any]:
+    c = Counter()
+    for cp in pre["contacts"].get(owner_id, []) if owner_id else []:
+        c["phones" if cp.kind == "phone" else "emails" if cp.kind == "email" else "other"] += 1
+        if cp.verified_at or (cp.validation or "") == "valid":
+            c["verified"] += 1
+    return {"phones": c["phones"], "emails": c["emails"], "verified": c["verified"]}
+
+
+def _list_claims_pre(pre, prop) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for payload in pre["claims"].get(prop.id, []):
+        p = C.jload(payload, {}) or {}
+        out.update(((p.get("evidence") or {}).get("list_claims")) or {})
+        v = p.get("valuation") or {}
+        if v.get("value"):
+            out.setdefault("list_value", v.get("value"))
+        if v.get("mortgage") is not None:
+            out.setdefault("list_unpaid_balance", v.get("mortgage"))
+    return out
+
+
 def rows(db, org_id: str, kind: str) -> List[Dict[str, Any]]:
-    from app.services.evosense import evaluate as EV
     from app.services.evosense import scoring as SC
+    from app.services.evosense import signals as SIG
     out = []
     ms = members(db, org_id, kind)
     checks = clerk_checks(db, org_id, [p.id for p in ms])
+    pre = _prefetch(db, org_id, ms)
+    clerk_counties = _CLERK_COUNTIES()
+    now = C.now()
     for p in ms:
-        sigs = _signals(db, p)
-        owner = owner_status(db, p)
-        tax = tax_status(db, p, sigs)
+        all_sigs = pre["signals"].get(p.id, [])
+        sigs = [x for x in all_sigs if x.active]
+        owner = _owner_status_pre(pre, p)
+        tax = _tax_status_pre(pre, p, sigs)
         fc = foreclosure_status(sigs, check=checks.get(p.id))
-        contact = contacts(db, owner.get("owner_id"))
-        distress = sorted({s.signal_type for s in sigs if s.signal_type not in ("LONG_OWNERSHIP",)})
-        strategy = EV.strategy_for(db, p)
-        po = SC.property_opportunity(p, EV.stacked_signals(db, p), strategy, weights=EV.score_weights(db, org_id),
-                                     owner=EV.CT.primary_owner(db, p), options=EV.score_options(db, org_id))
+        contact = _contacts_pre(pre, owner.get("owner_id"))
+        distress = sorted({x.signal_type for x in sigs if x.signal_type not in ("LONG_OWNERSHIP",)})
+        sid = p.best_strategy_id or p.first_strategy_id
+        strategy = pre["strategies"].get(sid) if sid else None
+        owners = _owners_of(pre, p)
+        po = SC.property_opportunity(p, SIG.stack(all_sigs, now), strategy, weights=pre["weights"],
+                                     owner=owners[0] if owners else None, options=pre["options"])
         earned = [f for f in po.get("factors") or [] if (f.get("points") or 0) > 0]
         held = [f["label"] for f in po.get("factors") or [] if (f.get("points") or 0) <= 0][:4]
         fc["county"] = p.county
@@ -571,7 +688,7 @@ def rows(db, org_id: str, kind: str) -> List[Dict[str, Any]]:
             missing.append("tax status (no county file)")
         if fc["status"] in ("CLAIMED", "NO EVIDENCE") and not fc.get("clerk_checked"):
             missing.append("clerk foreclosure-notice check (%s County notices not read automatically)"
-                           % (p.county or "this") if _county(p) not in _CLERK_COUNTIES() else
+                           % (p.county or "this") if _county(p) not in clerk_counties else
                            "clerk foreclosure-notice check (run Re-check)")
         if p.equity_pct is None:
             missing.append("equity (no mortgage or value estimate)")
@@ -590,7 +707,7 @@ def rows(db, org_id: str, kind: str) -> List[Dict[str, Any]]:
             "earned": [{"points": f["points"], "label": f["label"]} for f in earned],
             "held_back": held, "missing": missing, "priority": prio,
             "next_action": _next_action(prio, owner, tax, contact, fc), "status": p.status,
-            "list_claims": _list_claims(db, p),
+            "list_claims": _list_claims_pre(pre, p),
         })
     rank = {"A": 0, "B": 1, "C": 2, "REVIEW": 3, "PARK": 4}
     out.sort(key=lambda r: (rank[r["priority"]], -(r["score"] or 0),

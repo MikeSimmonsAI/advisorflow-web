@@ -1139,7 +1139,7 @@ class ClerkForeclosureSource(PublicRecordSource):
     public_url = "https://dallas.tx.publicsearch.us/"
     refresh = "Notices are filed daily; sales are the first Tuesday of each month"
     freshness_days = 7
-    adapter_version = "tx_clerk_fc/1"
+    adapter_version = "tx_clerk_fc/2"
     terms_note = ("Official public record, free and anonymous. Only notice index data and the clerk's own "
                   "text excerpt are read - no paid document images. A notice proves a sale was scheduled, "
                   "not that it happened.")

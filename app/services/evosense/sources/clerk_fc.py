@@ -48,7 +48,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from app.services.evosense.sources import base as B
 
-ADAPTER_VERSION = "tx_clerk_fc/1"
+ADAPTER_VERSION = "tx_clerk_fc/2"
 PAGE = 250                       # the portal's own page size limit
 MAX_PAGES = 16                   # 4,000 notices per county per read - a hard stop
 SPACING = 0.6                    # seconds between requests (a person paging is slower; still gentle)
@@ -222,6 +222,18 @@ def _text(doc: Dict[str, Any]) -> str:
     return " ".join([doc.get("ocrText") or ""] + [h for h in hl if isinstance(h, str)])
 
 
+def match_key(street: Optional[str]) -> Optional[str]:
+    """street_key with the spaces inside the street name removed: the clerk
+    writes "2728 RUNNING BROOK LN" and the appraisal district "2728
+    RUNNINGBROOK LN"; "2233 PARK HURST" / "2233 PARKHURST" (both real misses,
+    2026-10-24). The house number stays separate."""
+    k = street_key(street)
+    if not k:
+        return None
+    num, _, name = k.partition(" ")
+    return "%s %s" % (num, name.replace(" ", ""))
+
+
 def same_place(doc: Dict[str, Any], street: str, zip_code: Optional[str], city: Optional[str]) -> bool:
     """True when the notice names THIS house: same house number and street
     name, and the same ZIP or city. The full-text fallback also accepts the
@@ -229,10 +241,11 @@ def same_place(doc: Dict[str, Any], street: str, zip_code: Optional[str], city: 
     want = street_key(street)
     if not want:
         return False
+    want_m = match_key(street)
     z = re.sub(r"\D", "", zip_code or "")[:5]
     c = (city or "").strip().upper()
     for a in addresses(doc):
-        if street_key(a.get("address1")) == want:
+        if match_key(a.get("address1")) == want_m:
             az = re.sub(r"\D", "", str(a.get("zip") or ""))[:5]
             ac = (a.get("city") or "").strip().upper().replace(", TEXAS", "").replace(" TEXAS", "")
             if (z and az == z) or (c and ac and (ac == c or ac.startswith(c) or c.startswith(ac))):
@@ -242,6 +255,10 @@ def same_place(doc: Dict[str, Any], street: str, zip_code: Optional[str], city: 
     t = re.sub(r"\s+", " ", t)
     if (" %s " % want) in (" %s " % t) or t.startswith(want + " "):
         return bool((z and z in t) or (c and c in t))
+    num, _, name = want_m.partition(" ")
+    tight = re.sub(r"(?<=[A-Z]) (?=[A-Z])", "", t)          # letters run together, numbers kept apart
+    if re.search(r"(^| )%s %s( |$)" % (re.escape(num), re.escape(name)), tight):
+        return bool((z and z in t) or (c and c.replace(" ", "") in tight))
     return False
 
 
@@ -335,15 +352,42 @@ class ClerkPortal:
         raise B.SourceError(B.TIMEOUT_ERR, "%s did not answer the search in %ss" % (self.host, int(timeout)))
 
     def window(self, start: date, end: date) -> List[Dict[str, Any]]:
-        """Every foreclosure notice in the date window, all pages."""
-        out: List[Dict[str, Any]] = []
-        rng = "%s,%s" % (start.strftime("%Y%m%d"), end.strftime("%Y%m%d"))
-        for page in range(MAX_PAGES):
-            docs = self.fetch({self.cfg["window"]: rng, "offset": str(page * PAGE)})
-            out.extend(docs)
-            if len(docs) < PAGE:
-                break
-        return out
+        """Every foreclosure notice in the date window.
+
+        Read in short date chunks, each small enough for ONE page. Paging a
+        large window (offset 250, 500 ...) is not stable on this portal:
+        Tarrant's 1,495 paged rows held only 1,288 different notices and
+        skipped others (read live 2026-10-24). A chunk that still fills a
+        page is split in half until it does not; a single day that fills a
+        page falls back to paging, de-duplicated."""
+        seen: Dict[Any, Dict[str, Any]] = {}
+        step = 7 if self.cfg["window_on"] == "recorded" else 31
+        todo: List[Tuple[date, date]] = []
+        d = start
+        while d <= end:
+            e = min(end, d + timedelta(days=step - 1))
+            todo.append((d, e))
+            d = e + timedelta(days=1)
+        reads = 0
+        while todo and reads < MAX_PAGES * 8:
+            a, b = todo.pop(0)
+            rng = "%s,%s" % (a.strftime("%Y%m%d"), b.strftime("%Y%m%d"))
+            docs = self.fetch({self.cfg["window"]: rng})
+            reads += 1
+            if len(docs) >= PAGE and a < b:
+                mid = a + timedelta(days=(b - a).days // 2)
+                todo[:0] = [(a, mid), (mid + timedelta(days=1), b)]
+                continue
+            if len(docs) >= PAGE:                       # one day, still full: page it
+                for page in range(1, MAX_PAGES):
+                    more = self.fetch({self.cfg["window"]: rng, "offset": str(page * PAGE)})
+                    reads += 1
+                    docs = docs + more
+                    if len(more) < PAGE:
+                        break
+            for x in docs:
+                seen[x.get("docId") or x.get("id") or x.get("docNumber")] = x
+        return list(seen.values())
 
     def full_text(self, value: str, limit: int = 50) -> List[Dict[str, Any]]:
         """The portal's full-text search over the notices' OCR text."""
@@ -508,7 +552,7 @@ class ClerkForeclosureReader:
         index: Dict[str, List[Dict[str, Any]]] = {}
         for d in docs:
             for a in addresses(d):
-                k = street_key(a.get("address1"))
+                k = match_key(a.get("address1"))
                 if k:
                     index.setdefault(k, []).append(d)
         matches: Dict[str, List[Tuple[Dict[str, Any], str]]] = {}
@@ -520,7 +564,8 @@ class ClerkForeclosureReader:
             if not k:
                 st["no_match"] += 1
                 continue
-            hit = [d for d in index.get(k, []) if same_place(d, t["street_address"], t.get("zip_code"), t.get("city"))]
+            hit = [d for d in index.get(match_key(t.get("street_address")), [])
+                   if same_place(d, t["street_address"], t.get("zip_code"), t.get("city"))]
             how = "clerk index address"
             if not hit:
                 st["full_text_searches"] += 1
