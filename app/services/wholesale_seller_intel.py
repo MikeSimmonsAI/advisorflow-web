@@ -405,3 +405,49 @@ def fact_json(f: WholesaleSellerFact) -> Dict[str, Any]:
             "verified_at": f.verified_at.isoformat() + "Z" if f.verified_at else None,
             "confidence": f.confidence,
             "at": f.created_at.isoformat() + "Z" if f.created_at else None}
+
+
+# ── What one seller message SAYS, read conservatively (2026-10-24) ─────────
+#
+# The AI reading returns a timeline for almost any message with a time word in
+# it. "Can someone come look at it this week?" is a request for a visit, not a
+# selling timeline - but it was read as "30 days" and silently replaced the
+# seller's own "as soon as possible". These readers decide what a message
+# explicitly states; the caller keeps an established fact unless the new
+# message states its replacement.
+import re as _re
+
+_TIMELINE_EXPLICIT = _re.compile(
+    r"\b(asap|a\.s\.a\.p|as soon as (possible|i can|we can)|right away|immediately|quickly|fast|"
+    r"no rush|not in (a|any) (hurry|rush)|whenever|take my time|"
+    r"(sell|close|closing|move|moving|out|gone|done|list)\b[^.?!]{0,40}\b(in|within|by|before|after|next)\b"
+    r"[^.?!]{0,25}\b(\d+|a|an|one|two|three|four|six|few|couple)\s*(day|week|month|year)s?|"
+    r"(in|within) (\d+|a|an|one|two|three|four|six|few|couple) (day|week|month|year)s?|"
+    r"next (month|year|spring|summer|fall|winter)|(by|before) (the )?(end of|january|february|march|april|may|"
+    r"june|july|august|september|october|november|december))\b", _re.I)
+
+_VISIT = _re.compile(
+    r"\b(come (out|by|over|look|see|take a look)|look at (it|the (house|home|property|place))|"
+    r"see (it|the (house|home|property|place))|walk ?through|appointment|visit|meet (up|with|you|me)|"
+    r"stop by|swing by|schedule|set up a time|show you (the|it))\b", _re.I)
+
+_PRICE_OBJECTION = _re.compile(
+    r"\b(too low|sounds low|that'?s low|low ?ball|insult|offered (me )?more|told me more|more than that|"
+    r"not enough|worth more|can you do better|do better than|counter|won'?t (take|accept) less|"
+    r"other investors?|another investor)\b", _re.I)
+
+
+def states_timeline(text: str) -> bool:
+    """The message itself states when the seller wants to sell / move."""
+    return bool(_TIMELINE_EXPLICIT.search(text or ""))
+
+
+def asks_for_visit(text: str) -> bool:
+    """The seller asks for someone to come see the property / meet."""
+    return bool(_VISIT.search(text or ""))
+
+
+def price_objection(text: str) -> bool:
+    """The seller pushes back on price or mentions a competing number."""
+    return bool(_PRICE_OBJECTION.search(text or ""))
+

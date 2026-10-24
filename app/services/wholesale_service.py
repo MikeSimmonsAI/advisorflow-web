@@ -814,6 +814,19 @@ def apply_seller_reply(db: Session, org_id: str, deal: WholesaleDeal,
 
     before = {"band": profile.qualification_band, "intent": profile.ai_intent}
 
+    # ── An established timeline is not replaced by an inference ─────────────
+    # A seller who said "as soon as possible" and later "can someone come look
+    # at it this week?" still wants to sell as soon as possible: the second
+    # message states a visit, not a timeline. The new value is kept for review
+    # (event below); the seller's own words stay the fact.
+    from app.services import wholesale_seller_intel as SI
+    timeline_conflict = None
+    new_tl = reading.get("timeline")
+    if new_tl and profile.timeline and new_tl != profile.timeline and not SI.states_timeline(message_text):
+        timeline_conflict = {"kept": profile.timeline, "read_as": new_tl, "quote": (message_text or "")[:300],
+                             "why": "the message does not state a selling timeline"}
+        reading = dict(reading, timeline=None)
+
     for field in ("is_available", "considering_selling", "timeline",
                   "property_condition", "major_repairs", "occupancy",
                   "motivation", "reason_for_selling", "mortgage_note",
@@ -831,17 +844,50 @@ def apply_seller_reply(db: Session, org_id: str, deal: WholesaleDeal,
     profile.needs_human = bool(reading.get("needs_human"))
     profile.needs_human_reason = reading.get("needs_human_reason")
 
+    if timeline_conflict:
+        log_event(db, org_id, "seller.timeline_conflict", actor_type=ACTOR_SYSTEM,
+                  actor_label="seller reply reader", deal_id=deal.id,
+                  summary="Timeline kept as %s; this message was read as %s but does not state a timeline "
+                          "- review if it changed" % (timeline_conflict["kept"], timeline_conflict["read_as"]),
+                  details=timeline_conflict)
+
+    # ── A request for a visit goes to scheduling; a price push-back to a person
+    if SI.asks_for_visit(message_text) and (profile.appointment_status or "none") in (
+            "none", "cancelled", "completed", "no_show"):
+        profile.appointment_status = "requested"
+        when = reading.get("best_callback_time")
+        log_event(db, org_id, "seller.appointment_requested", actor_type=ACTOR_SYSTEM,
+                  actor_label="seller reply reader", deal_id=deal.id,
+                  summary="Seller asked for a visit%s - book it on Appointments" % (
+                      (" (%s)" % when) if when else ""),
+                  details={"quote": (message_text or "")[:300], "when": when})
+        if not reading.get("needs_human"):
+            reading = dict(reading, needs_human=True,
+                           needs_human_reason="Seller asked for a visit%s - book the appointment" % (
+                               (" (%s)" % when) if when else ""))
+    if SI.price_objection(message_text):
+        reading = dict(reading, needs_human=True,
+                       needs_human_reason=((reading.get("needs_human_reason") + "; ")
+                                           if reading.get("needs_human_reason") else "")
+                       + "Seller pushed back on price - a person handles the numbers")
+        log_event(db, org_id, "seller.price_objection", actor_type=ACTOR_SYSTEM,
+                  actor_label="seller reply reader", deal_id=deal.id,
+                  summary="Seller pushed back on price - needs a person",
+                  details={"quote": (message_text or "")[:300]})
+    profile.needs_human = bool(reading.get("needs_human"))
+    profile.needs_human_reason = reading.get("needs_human_reason")
+
     # ── What the seller said, with provenance (wholesale_seller_intel) ──────
     # Every fact this message established is written with the words it came
     # from and the message it came from. The outcome is EvoSense's reading of
     # the same words - one reader of seller language across the platform.
-    from app.services import wholesale_seller_intel as SI
     heard = SI.record_message_facts(db, profile, deal, lead, message_text, reading,
                                     message_ref=("reply:%s" % reply_id) if reply_id else "manual",
                                     channel=channel)
     outcome = heard["outcome"]
     if reading.get("source") != "ai" and reading.get("intent") == wholesale_ai.INTENT_NEEDS_HUMAN \
-            and outcome not in (None, "UNKNOWN"):
+            and outcome not in (None, "UNKNOWN") \
+            and not (SI.asks_for_visit(message_text) or SI.price_objection(message_text)):
         # The pattern reader found nothing, but EvoSense's reader of the same
         # words did (e.g. "can you make me an offer?"): that is not a message
         # nobody can understand, so it does not need a person for THAT reason.

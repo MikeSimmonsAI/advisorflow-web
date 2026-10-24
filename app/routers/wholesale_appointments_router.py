@@ -91,7 +91,9 @@ def list_reps(db: Session = Depends(get_db), user: User = Depends(require_tenant
 @router.post("", dependencies=[Depends(require_not_observation)])
 def book(body: BookIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     org_id = svc.write_org_id(db, user)
-    return A.appt_json(db, A.book(db, org_id, user, body.model_dump()))
+    # exclude_unset: "assigned_to_id" absent means "pick by the workspace rules";
+    # sent as null means "leave it unassigned on purpose".
+    return A.appt_json(db, A.book(db, org_id, user, body.model_dump(exclude_unset=True)))
 
 
 @router.patch("/{appt_id}", dependencies=[Depends(require_not_observation)])

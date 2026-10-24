@@ -292,6 +292,10 @@ def draft_reply(
     # no funeral framing, no booking link, and what they already told us.
     from app.services import wholesale_seller_context as WSC
     seller_ctx = WSC.context_for_lead(db, lead)
+    if seller_ctx and seller_ctx.get("opted_out"):
+        # A seller who asked not to be contacted gets no draft at all.
+        return {"suggested_reply": "", "booking_url": None, "booking_link_id": None,
+                "source": "opted_out", "wholesale_seller": True}
     if seller_ctx:
         booking, booking_url = None, ""
     else:
