@@ -1,0 +1,42 @@
+name: SCI Expo Go external connectivity diagnostics
+on:
+  push:
+    branches: [chatgpt/sci-expo-go-pilot-20261016]
+    paths: ['.github/workflows/sci-expo-diagnostic.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check public Expo tunnel DNS, connection, and app manifest
+        run: |
+          host=68y35cw-anonymous-8081.exp.direct
+          echo "Host resolution:"
+          getent ahosts "$host" || true
+          echo "iOS expo manifest:"
+          curl -v -L --connect-timeout 10 --max-time 30 --output /tmp/ios-response -D /tmp/ios-headers \
+            -H 'expo-platform: ios' \
+            -H 'accept: application/expo+json,application/json' \
+            "https://$host/" || true
+          echo "HTTP response headers:"
+          sed -n '1,65p' /tmp/ios-headers 2>/dev/null || true
+          echo "Response excerpt:"
+          head -c 1500 /tmp/ios-response 2>/dev/null || true
+          echo ""
+          echo "Android manifest:"
+          curl -sS -L --connect-timeout 10 --max-time 30 --output /tmp/android-response -D /tmp/android-headers \
+            -H 'expo-platform: android' \
+            -H 'accept: application/expo+json,application/json' "https://$host/" || true
+          cat /tmp/android-headers 2>/dev/null | head -30 || true
+          head -c 900 /tmp/android-response 2>/dev/null || true
+          echo ""
+          echo "JS bundle availability:"
+          curl -sS -L --connect-timeout 10 --max-time 30 --output /tmp/js-response -D /tmp/js-headers \
+            -H 'expo-platform: ios' \
+            "https://$host/node_modules/expo-router/entry.bundle?platform=ios&dev=true&hot=false" || true
+          cat /tmp/js-headers 2>/dev/null | head -35 || true
+          head -c 900 /tmp/js-response 2>/dev/null || true
+          echo ""

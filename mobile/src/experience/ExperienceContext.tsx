@@ -65,7 +65,7 @@ export function ExperienceProvider({ children }: { children: React.ReactNode }) 
    *  into a context that must not send one. */
   const applyContext = useCallback((exp: Experience | null) => {
     setRequestContext({
-      workspaceOrgId: exp?.kind === 'advisor' ? exp.organizationId ?? null : null,
+      workspaceOrgId: (exp?.kind === 'advisor' || exp?.kind === 'program') ? exp.organizationId ?? null : null,
       brandOverride: null,
     });
   }, []);
@@ -122,7 +122,7 @@ export function ExperienceProvider({ children }: { children: React.ReactNode }) 
       queryClient.clear();
       applyContext(next);
 
-      if (next.kind === 'advisor' && next.organizationId) {
+      if ((next.kind === 'advisor' || next.kind === 'program') && next.organizationId) {
         // The server confirms the membership before the first screen paints.
         await authApi.enterWorkspace(next.organizationId);
       }
