@@ -187,6 +187,8 @@ def submit(db: Session, org_id: str, user: User, appt_id: str, arv, repairs, off
                             created_at=datetime.utcnow())
     db.add(o)
     db.flush()
+    if status == "within":
+        to_deal(db, org_id, user, o, appt)
     if status == "pending":
         from app.services import wholesale_notify as N
         from app.models.models import NotificationType
@@ -199,6 +201,39 @@ def submit(db: Session, org_id: str, user: User, appt_id: str, arv, repairs, off
                  link="/wholesale/appointments?approvals=1")
     db.commit()
     return offer_json(db, o, field=field)
+
+
+def to_deal(db: Session, org_id: str, user: User, o: WholesaleFieldOffer, appt) -> None:
+    """An offer that STANDS (inside the limit, or approved) made at a visit is
+    part of the deal's negotiation: it goes into the deal's offer history and
+    becomes the deal's current proposed number - the same record the deal room,
+    the offer approval and the contract read. Once per field offer. A visit
+    with no deal yet (not promoted) keeps it on the visit only."""
+    if not getattr(appt, "deal_id", None):
+        return
+    from app.models.wholesale_models import OFFER_FROM_US, WholesaleDeal, WholesaleOffer
+    from app.services import wholesale_service as svc
+    deal = db.query(WholesaleDeal).filter(WholesaleDeal.id == appt.deal_id,
+                                          WholesaleDeal.organization_id == org_id).first()
+    if deal is None:
+        return
+    tag = "field offer %s" % o.id
+    if db.query(WholesaleOffer.id).filter(WholesaleOffer.deal_id == deal.id,
+                                          WholesaleOffer.notes.like("%" + tag + "%")).first():
+        return
+    row = WholesaleOffer(organization_id=org_id, deal_id=deal.id, direction=OFFER_FROM_US, amount=o.offer,
+                         mao_at_time=o.mao, status="presented", presented_at=o.created_at or datetime.utcnow(),
+                         created_by_id=o.requested_by_id or user.id, created_by_actor="user",
+                         notes=("Made at the field visit (%s; %s). ARV $%s, repairs $%s. %s%s" % (
+                             appt.address or "property", tag, "{:,}".format(o.arv or 0), "{:,}".format(o.repairs or 0),
+                             "Approved by an admin." if o.status == "approved" else "Inside the rep's limit.",
+                             (" " + o.note) if o.note else ""))[:4000])
+    db.add(row)
+    deal.proposed_offer = o.offer
+    svc.log_event(db, org_id, "offer.recorded", actor_type="user", actor_user_id=user.id, deal_id=deal.id,
+                  summary="Field offer $%s at the visit (%s)" % ("{:,}".format(o.offer),
+                                                                "approved" if o.status == "approved" else "within limit"),
+                  after={"amount": o.offer, "mao": o.mao, "field_offer_id": o.id, "appointment_id": appt.id})
 
 
 def arv_on_file(db: Session, org_id: str, appt) -> Optional[int]:
@@ -254,6 +289,11 @@ def decide(db: Session, org_id: str, user: User, offer_id: str, approve: bool, n
     o.status = "approved" if approve else "declined"
     o.decided_by_id, o.decided_at = user.id, datetime.utcnow()
     o.decision_note = (note or "").strip()[:2000] or None
+    if approve:
+        from app.models.wholesale_ops_models import WholesaleFieldAppointment as Appt
+        appt = db.query(Appt).filter(Appt.id == o.appointment_id, Appt.organization_id == org_id).first()
+        if appt is not None:
+            to_deal(db, org_id, user, o, appt)
     if o.requested_by_id:
         from app.services import wholesale_notify as N
         from app.models.models import NotificationType

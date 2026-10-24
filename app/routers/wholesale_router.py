@@ -3085,6 +3085,17 @@ def close_deal(deal_id: str, payload: CloseIn, request: Request,
     """
     org_id = svc.write_org_id(db, user)
     deal = svc.get_deal(db, org_id, deal_id)
+    if deal.assigned_buyer_id:
+        # Closing an ASSIGNED deal is the assignment happening: the same
+        # approval the assignment stage asks for. Closing straight from the
+        # board used to skip it (audit 2026-10-24).
+        settings = svc.resolve_settings(db, org_id, commit=False)
+        approvals = (db.query(WholesaleApproval)
+                     .filter(WholesaleApproval.deal_id == deal.id,
+                             WholesaleApproval.organization_id == org_id).all())
+        refusal = pipeline.guard_transition(settings, deal, "assignment_pending", approvals)
+        if refusal:
+            raise HTTPException(status_code=409, detail=refusal)
     fee = analysis.money(payload.wholesale_fee_collected)
     if fee is not None:
         deal.wholesale_fee_collected = fee

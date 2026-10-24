@@ -238,12 +238,18 @@ def book(db: Session, org_id: str, user: User, data: Dict[str, Any]) -> Wholesal
     if minutes not in DURATIONS:
         raise HTTPException(422, "Length must be 15, 30, 45, 60, 90 or 120 minutes.")
     title = (data.get("title") or "").strip() or ("Visit - %s" % (address or "seller"))[:200]
+    starts = parse_when(data["starts_at"])
+    dup = _same_visit(db, org_id, starts, evo, wsp, deal)
+    if dup is not None:
+        # the same visit booked twice (double click, two people, a retry):
+        # one appointment, never two on the calendar
+        return dup
     a = WholesaleFieldAppointment(
         organization_id=org_id,
         evosense_property_id=getattr(evo, "id", None), property_id=getattr(wsp, "id", None),
         deal_id=getattr(deal, "id", None), lead_id=getattr(lead, "id", None),
         assigned_to_id=_rep(db, org_id, user, data.get("assigned_to_id")),
-        starts_at=parse_when(data["starts_at"]), duration_minutes=minutes,
+        starts_at=starts, duration_minutes=minutes,
         address=address, title=title, notes=(data.get("notes") or "").strip() or None,
         status="scheduled", source=data.get("source") or ("property" if evo or wsp else "manual"),
         source_ref=data.get("source_ref"), created_by_id=user.id,
@@ -254,9 +260,49 @@ def book(db: Session, org_id: str, user: User, data: Dict[str, Any]) -> Wholesal
         a.source = "manual"
     db.add(a)
     db.flush()
+    sync_seller(db, org_id, a)
     _tell_rep(db, org_id, user, a, "New appointment")
     db.commit()
     return a
+
+
+def _same_visit(db: Session, org_id: str, starts, evo, wsp, deal) -> Optional[WholesaleFieldAppointment]:
+    keys = [(WholesaleFieldAppointment.deal_id, getattr(deal, "id", None)),
+            (WholesaleFieldAppointment.property_id, getattr(wsp, "id", None)),
+            (WholesaleFieldAppointment.evosense_property_id, getattr(evo, "id", None))]
+    for col, val in keys:
+        if val:
+            return (db.query(WholesaleFieldAppointment)
+                    .filter(WholesaleFieldAppointment.organization_id == org_id, col == val,
+                            WholesaleFieldAppointment.starts_at == starts,
+                            WholesaleFieldAppointment.status == "scheduled").first())
+    return None
+
+
+_SELLER_STATUS = {"scheduled": "scheduled", "completed": "completed", "no_show": "no_show",
+                  "cancelled": "cancelled"}
+
+
+def sync_seller(db: Session, org_id: str, a: WholesaleFieldAppointment) -> None:
+    """Keep the seller's appointment (what the Morning board and the deal room
+    read) in step with the visit on the calendar: booked, moved, done,
+    no-show or cancelled. A seller with no profile yet (not promoted) is left
+    alone."""
+    from app.models.wholesale_models import WholesaleSellerProfile
+    if not a.lead_id:
+        return
+    q = db.query(WholesaleSellerProfile).filter(WholesaleSellerProfile.organization_id == org_id,
+                                                WholesaleSellerProfile.lead_id == a.lead_id)
+    if a.property_id:
+        q = q.filter(WholesaleSellerProfile.property_id == a.property_id)
+    status = _SELLER_STATUS.get(a.status)
+    if status is None:
+        return
+    for prof in q.all():
+        if status == "cancelled" and prof.appointment_at and prof.appointment_at != a.starts_at:
+            continue                                  # a different, still-standing appointment
+        prof.appointment_status = status
+        prof.appointment_at = a.starts_at
 
 
 def _tell_rep(db: Session, org_id: str, user: User, a: WholesaleFieldAppointment, what: str) -> None:
@@ -373,6 +419,7 @@ def change(db: Session, org_id: str, user: User, appt_id: str, data: Dict[str, A
             _tell_rep(db, org_id, user, a, "Appointment cancelled")
     if data.get("outcome") is not None:
         log_outcome(db, org_id, user, a, data["outcome"], data.get("outcome_note"), data.get("follow_up_at"))
+    sync_seller(db, org_id, a)
     db.commit()
     return a
 
