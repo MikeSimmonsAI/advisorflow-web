@@ -320,7 +320,7 @@ export default function EvoCohort() {
                       <Word value={r.tax.status} />
                       {r.tax.date ? <span className="evo-prop__sub" style={{ display: 'block' }}>{r.tax.date}</span> : null}
                     </td>
-                    <td data-label="Foreclosure sale" title={r.foreclosure.detail || ''}>
+                    <td data-label="Foreclosure sale" className="is-stack" title={r.foreclosure.detail || ''}>
                       {r.foreclosure.sale_date ? <b style={{ display: 'block' }}>{r.foreclosure.sale_date}{r.foreclosure.days != null && r.foreclosure.days >= 0 ? ` · ${r.foreclosure.days} days` : ''}</b> : null}
                       <span className="evo-small">{r.foreclosure.category}. </span><Word value={r.foreclosure.status} fc />
                       {r.foreclosure.foreclosure_type ? <span className="evo-prop__sub" style={{ display: 'block' }}>{r.foreclosure.foreclosure_type}</span> : null}
@@ -334,7 +334,7 @@ export default function EvoCohort() {
                       {r.foreclosure.evidence ? (
                         <details className="evo-prop__sub" onClick={(e) => e.stopPropagation()}>
                           <summary>What the notice says</summary>
-                          <span style={{ display: 'block', whiteSpace: 'normal', maxWidth: 360 }}>{r.foreclosure.evidence}</span>
+                          <span style={{ display: 'block', whiteSpace: 'normal', maxWidth: 420, textAlign: 'left' }}>{r.foreclosure.evidence}</span>
                         </details>) : null}
                       {r.foreclosure.claimed_sale_date && r.foreclosure.status !== 'VERIFIED NOTICE' ? <span className="evo-prop__sub" style={{ display: 'block' }}>list claims {r.foreclosure.claimed_sale_date}</span> : null}
                       <span className="evo-prop__sub" style={{ display: 'block' }}>

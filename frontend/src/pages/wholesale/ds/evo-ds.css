@@ -458,6 +458,9 @@ span.evo-prop__addr { color: var(--evo-navy); }
     color: var(--evo-text-tertiary); text-align: left; }
   .evo-table--cards td[data-label=""]::before, .evo-table--cards td.is-lead::before { content: none; }
   .evo-table--cards td.is-lead { display: block; text-align: left; padding-bottom: 8px; }
+  /* a dense cell (several lines, an expandable note) reads top-to-bottom on a phone */
+  .evo-table--cards td.is-stack { display: block; text-align: left; }
+  .evo-table--cards td.is-stack::before { display: block; margin-bottom: 4px; }
   .evo-table--cards .is-num { text-align: right; }
 }
 
