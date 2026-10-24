@@ -382,8 +382,9 @@ def foreclosure_status(sigs, today=None, check: Optional[Dict[str, Any]] = None)
                                            pick["document"], pick["sale_date"]), **dict(kw, confidence=70))
             extra = ("; also posted for %s (a re-posting - the earlier sale may be postponed)" %
                      ", ".join(dates[1:])) if len(dates) > 1 else ""
-            return out("VERIFIED NOTICE", "%s scheduled %s - notice %s filed %s%s" % (
-                pick["type"], pick["sale_date"], pick["document"], pick["recorded"] or "", extra), **kw)
+            return out("VERIFIED NOTICE", "%s scheduled %s - notice %s%s%s" % (
+                pick["type"], pick["sale_date"], pick["document"],
+                " filed %s" % pick["recorded"] if pick["recorded"] else "", extra), **kw)
         if cancelled:
             c = cancelled[-1]
             return out("CANCELED", "Notice %s withdrawn / cancelled" % c["document"], **dict(kw, document=c["document"]))

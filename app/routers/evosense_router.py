@@ -933,6 +933,7 @@ class SignalIn(BaseModel):
     record_url: Optional[str] = None
     case_status: Optional[str] = None          # scheduled | postponed | canceled | resolved
     foreclosure_type: Optional[str] = None
+    filed_date: Optional[str] = None           # the clerk's filed / posted stamp, YYYY-MM-DD
 
 
 FORECLOSURE_ENTRY = ("PRE_FORECLOSURE", "TAX_SALE")
@@ -960,8 +961,12 @@ def add_signal(property_id: str, payload: SignalIn, db: Session = Depends(get_db
         sale = SC._sale_date(payload.sale_date) if payload.sale_date else None
         if payload.sale_date and sale is None:
             raise HTTPException(status_code=422, detail="Sale date must be YYYY-MM-DD.")
+        filed = SC._sale_date(payload.filed_date) if payload.filed_date else None
+        if payload.filed_date and filed is None:
+            raise HTTPException(status_code=422, detail="Filed date must be YYYY-MM-DD.")
         doc = (payload.document_number or "").strip()[:60] or None
         prov.update({"sale_date": sale.isoformat() if sale else None, "document": doc,
+                     "recorded": filed.isoformat() if filed else None,
                      "document_url": (payload.record_url or "").strip()[:500] or None,
                      "foreclosure_type": (payload.foreclosure_type or "").strip()[:40] or None,
                      "matched_by": "read on the county record by a person"})
