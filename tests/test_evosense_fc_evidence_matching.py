@@ -83,8 +83,40 @@ def test_neighbouring_lot_in_the_same_subdivision_is_rejected():
 
 
 def test_same_lot_in_another_block_is_rejected():
-    r = M.decide(SPRING, "Lot 12, Block 4/6009, SPRING RIDGE ADDITION. Grantor(s): MAREK KOWALCZYK", "DALLAS")
+    r = M.decide(SPRING, "Lot 12, Block 4/6009, SPRING RIDGE ADDITION. Grantor(s): JANE ROE", "DALLAS")
     assert r["decision"] == M.REJECTED
+
+
+# Found on production 2026-10-24: true notices that the first version rejected
+# (scan slips and multi-lot wording). People and numbers changed.
+
+def test_scan_slips_with_the_borrowers_full_name_are_held_not_rejected():
+    ident = {"parcel_ids": [], "legal": M.cad_legal("IRON HORSE PHASE 2", "I", ["11"]), "names": ["ROE JANE ANN"],
+             "city": "Mesquite"}
+    r = M.decide(ident, "DALLAS LOT 1], BLOCK I, IRON HORSE PHASE 2, AN ADDITION TO THE CITY OF MESQUITE "
+                        "Grantor(s): JANE ANN ROE", "MESQUITE")
+    assert r["decision"] == M.CANDIDATE and "confirm on the notice" in r["reason"]
+
+
+def test_block_zero_and_letter_o_are_the_same_block():
+    ident = {"parcel_ids": [], "legal": M.cad_legal("ST AUGUSTINE HIGHLANDS", "O/6757", ["2"]), "names": ["ROE JANE"],
+             "city": "Dallas"}
+    r = M.decide(ident, "Lot 2, Block 0/6757, ST. AUGUSTINE HIGHLANDS ADDITION. Grantor: JANE ROE", "DALLAS")
+    assert r["decision"] == M.VERIFIED
+
+
+def test_every_lot_of_a_multi_lot_notice_counts():
+    ident = {"parcel_ids": [], "legal": M.cad_legal("MORGAN HEIGHTS", "B", ["17"]), "names": [], "city": "Glenn Heights"}
+    r = M.decide(ident, "Property To Be Sold. LOTS 16 AND 17, BLOCK B OF MORGAN HEIGHTS ADDITION", "GLENN HEIGHTS")
+    assert r["decision"] == M.VERIFIED
+
+
+def test_a_replatted_lot_matches_its_original_lot_only_with_the_name():
+    ident = {"parcel_ids": [], "legal": M.cad_legal("BELMEAD", "L/4869", ["20A"]), "names": ["ROE JANE ANN"],
+             "city": "Dallas"}
+    text = "LOTS 19 AND 20, BLOCK L/4869, BELMEAD ADDITION"
+    assert M.decide(ident, text, "DALLAS")["decision"] == M.CANDIDATE                 # partial + city only
+    assert M.decide(ident, text + " Grantor: JANE ANN ROE", "DALLAS")["decision"] == M.VERIFIED
 
 
 def test_owner_name_only_is_a_candidate_not_verified():
@@ -92,9 +124,12 @@ def test_owner_name_only_is_a_candidate_not_verified():
     assert r["decision"] == M.CANDIDATE and "needs" in r["reason"]
 
 
-def test_city_only_is_a_candidate_not_verified():
-    r = M.decide(SPRING, "NOTICE OF SUBSTITUTE TRUSTEE SALE", "DALLAS")
-    assert r["decision"] == M.CANDIDATE
+def test_city_only_or_one_surname_is_never_verified_or_even_a_candidate():
+    assert M.decide(SPRING, "NOTICE OF SUBSTITUTE TRUSTEE SALE", "DALLAS")["decision"] == M.NONE
+    assert M.decide(SPRING, "executed by ANNA KOWALCZYK", "DALLAS")["decision"] == M.NONE
+    # an LLC owner's business word is not a name ('Housing and Urban Development')
+    llc = {"parcel_ids": [], "legal": None, "names": ["DYNAMIC DEVELOPMENT INTERESTS LLC"], "city": "Dallas"}
+    assert M.decide(llc, "Secretary of Housing and Urban Development", "DALLAS")["decision"] == M.NONE
 
 
 def test_a_common_name_in_the_same_city_is_never_verified():
