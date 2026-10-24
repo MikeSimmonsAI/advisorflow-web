@@ -24,6 +24,7 @@ from app.models.models import User
 from app.services import wholesale_deal_package as PK
 from app.services import wholesale_service as svc
 from app.services.entitlements import require_feature
+from app.utils.content_disposition import content_disposition
 
 router = APIRouter(prefix="/wholesale", tags=["wholesale-package"],
                    dependencies=[Depends(require_feature("wholesale_real_estate"))])
@@ -90,7 +91,7 @@ def withdraw_package(deal_id: str, payload: WithdrawIn, db: Session = Depends(ge
 
 def _pdf(data: bytes, name: str) -> Response:
     return Response(content=data, media_type="application/pdf",
-                    headers={"Content-Disposition": 'inline; filename="%s"' % name,
+                    headers={"Content-Disposition": content_disposition(name, "inline"),
                              "Cache-Control": "no-store"})
 
 
