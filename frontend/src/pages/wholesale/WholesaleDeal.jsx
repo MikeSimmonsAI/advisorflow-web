@@ -33,6 +33,7 @@ import { DocumentDrawer } from './wsDocuments'
 import { SharingWorkspace } from './wsSharing'
 import { UnderwritingTab, WorkflowStrip } from './wsUnderwriting'
 import { BuyerIntelPanel } from './wsBuyerIntel'
+import { DealPackagePanel } from './wsPackage'
 import './wsUnderwriting.css'
 import DealOpsPanel, { DistributionNotice, LeadTemperatureChip, useDistribution } from './ops/DealOpsPanel'
 import { EvoApp, Hero, PageSkeleton, PropertyThumb, Ring, Status, Tag, humanize, money, shortDate } from './ds/ds'
@@ -201,8 +202,9 @@ export default function WholesaleDeal() {
       {tab === 'buyers' ? <><DistributionNotice distribution={distribution} kind="buyers" /><BuyersTab room={room} act={act} busy={busy} /></> : null}
       {tab === 'closing' ? <ClosingTab room={room} act={act} busy={busy} /> : null}
       {tab === 'sharing'
-        ? <SharingWorkspace deal={deal} buyers={room.buyer_matches}
-                            act={act} busy={busy} /> : null}
+        ? <><DealPackagePanel dealId={deal.id} onChanged={() => { setFlowKey((k) => k + 1); load() }} />
+            <SharingWorkspace deal={deal} buyers={room.buyer_matches}
+                            act={act} busy={busy} /></> : null}
       {tab === 'audit' ? <AuditTab room={room} /> : null}
     </EvoApp>
   )

@@ -392,6 +392,12 @@ def attacks(ids):
         ("delete", "/wholesale/buy-boxes/%s" % ids["box_id"], None),
         ("get", "/wholesale/buyers/%s/intel" % ids["buyer_id"], None),
         ("get", "/wholesale/deals/%s/buyer-intel" % d, None),
+        ("get", "/wholesale/deals/%s/package" % d, None),
+        ("post", "/wholesale/deals/%s/package" % d, {}),
+        ("post", "/wholesale/deals/%s/package/submit" % d, {}),
+        ("post", "/wholesale/deals/%s/package/publish" % d, {}),
+        ("post", "/wholesale/deals/%s/package/withdraw" % d, {}),
+        ("get", "/wholesale/deals/%s/package.pdf" % d, None),
 
         # ── Disposition: the path that can actually send something ──────────
         ("post", "/wholesale/deals/%s/match-buyers" % d, {}),
