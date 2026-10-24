@@ -88,7 +88,7 @@ function CheckedPanel({ last, running }) {
 }
 
 function RecordNotice({ row, onDone, onCancel }) {
-  const [f, setF] = useState({ document_number: '', sale_date: row.foreclosure.claimed_sale_date || row.foreclosure.sale_date || '', case_status: 'scheduled', record_url: '', note: '' })
+  const [f, setF] = useState({ document_number: '', sale_date: row.foreclosure.claimed_sale_date || row.foreclosure.sale_date || '', case_status: 'scheduled', filed_date: '', record_url: '', note: '' })
   const [err, setErr] = useState('')
   const [saving, setSaving] = useState(false)
   async function save(e) {
@@ -106,6 +106,8 @@ function RecordNotice({ row, onDone, onCancel }) {
           <input className="evo-select" value={f.document_number} onChange={up('document_number')} placeholder="e.g. 2026-0099123" /></label>
         <label className="evo-small">Sale date
           <input className="evo-select" type="date" value={f.sale_date} onChange={up('sale_date')} /></label>
+        <label className="evo-small">Filed / posted date (optional)
+          <input className="evo-select" type="date" value={f.filed_date} onChange={up('filed_date')} /></label>
         <label className="evo-small">Status on the record
           <select className="evo-select" value={f.case_status} onChange={up('case_status')}>
             {['scheduled', 'postponed', 'canceled', 'resolved'].map((v) => <option key={v} value={v}>{v}</option>)}

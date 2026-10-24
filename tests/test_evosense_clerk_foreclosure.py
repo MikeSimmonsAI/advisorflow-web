@@ -359,8 +359,19 @@ def test_manual_notice_needs_a_document_number_to_count_as_verified(client, db_s
     sigs = db_session.query(EvoSenseSignal).filter_by(property_id=p.id, signal_type="PRE_FORECLOSURE").all()
     st = CO.foreclosure_status(sigs)
     assert st["status"] == "VERIFIED NOTICE" and st["document"] == "2026-0099123"
+    assert " filed " not in st["detail"]                 # no filed date given: no dangling "filed"
     bad = client.post(url, headers=admin_auth_headers, json={"signal_type": "PRE_FORECLOSURE", "sale_date": "soon"})
     assert bad.status_code == 422
+    bad = client.post(url, headers=admin_auth_headers, json={"signal_type": "PRE_FORECLOSURE", "sale_date": SALE.isoformat(),
+                                                             "document_number": "2026-0099123", "filed_date": "Aug"})
+    assert bad.status_code == 422
+    r = client.post(url, headers=admin_auth_headers, json={"signal_type": "PRE_FORECLOSURE", "sale_date": SALE.isoformat(),
+                                                           "document_number": "2026-0099123", "filed_date": "2026-08-20"})
+    assert r.status_code == 200, r.text
+    db_session.expire_all()
+    st = CO.foreclosure_status(db_session.query(EvoSenseSignal).filter_by(property_id=p.id,
+                                                                          signal_type="PRE_FORECLOSURE").all())
+    assert "notice 2026-0099123 filed 2026-08-20" in st["detail"]   # the clerk's stamp, read by a person
 
 
 # 12 ── tenant isolation: one org's check never touches another's houses ──────
