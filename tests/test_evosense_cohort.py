@@ -68,11 +68,14 @@ def test_tax_check_ingests_a_delinquent_account_and_records_a_clean_one(top, mon
 
 def test_status_words_are_evidence_bound(top):
     rows = CO.rows(top["db"], top["org"], "top100-2010")
-    assert all(r["foreclosure"]["status"] == "UNVERIFIED" for r in rows)
+    # no sale date in the rows and none declared: no claim - and "no evidence" is not "no foreclosure"
+    assert all(r["foreclosure"]["status"] == "NO EVIDENCE" for r in rows)
+    assert "Not proof there is none" in rows[0]["foreclosure"]["detail"]
     assert all(r["owner"]["status"] == "NO OWNER" for r in rows)            # the list carried no owner
     assert all(r["priority"] == "REVIEW" for r in rows)
     s = CO.summary(rows)
-    assert s["properties"] == 3 and s["foreclosure"] == {"UNVERIFIED": 3}
+    assert s["properties"] == 3 and s["foreclosure"] == {"NO EVIDENCE": 3}
+    assert s["sale_dates"] == {"supplied": 0, "verified": 0, "missing": 3, "dates": {}}
 
 
 def test_api_view_and_recheck(client, top, auth_headers, monkeypatch):
@@ -86,3 +89,62 @@ def test_api_view_and_recheck(client, top, auth_headers, monkeypatch):
     assert client.get("/wholesale/evosense/cohorts/nope", headers=auth_headers).status_code == 404
     r = client.post("/wholesale/evosense/cohorts/top100-2010/recheck", headers=auth_headers)
     assert r.status_code == 200 and started == ["top100-2010"]
+
+
+def test_an_estate_named_owner_is_flagged_for_probate_confirmation_not_scored():
+    owner = {"status": "VERIFIED", "name": "WARD ISEBELL EST OF",
+             "flags": [{"key": "ESTATE_INDICATED", "label": "x"}]}
+    act = CO._next_action("C", owner, {"status": "NOT CHECKED"}, {"phones": 0, "emails": 0})
+    assert "probate" in act and "before any contact" in act
+    from app.services.evosense.ingest import owner_flags
+    assert owner_flags("WARD ISEBELL EST OF") == ["ESTATE_INDICATED"]
+
+
+# ── speed: the list is built in a fixed number of queries, with the same answer ──
+
+def test_rows_use_a_fixed_number_of_queries_and_match_the_per_row_answer(top, monkeypatch):
+    from sqlalchemy import event
+    from app.services.evosense import evaluate as EV
+    from app.services.evosense import scoring as SC
+    db, org = top["db"], top["org"]
+    more = "record_id,street_address,city,state,zip_code,owner_name,mailing_street,mailing_city,mailing_state,mailing_zip\n" + \
+        "".join("top100-2010:%d,%d Bulk St,Dallas,TX,75201,OWNER %d,%d PO Rd,Austin,TX,78701\n" % (10 + i, 100 + i, i, i)
+                for i in range(30))
+    HU.import_csv(db, org, more, user=top["user"], filename="more.csv")
+    db.commit()
+    props = CO.members(db, org, "top100-2010")
+    assert len(props) == 33
+    n = {"q": 0}
+    bind = db.get_bind()
+
+    def count(*a, **k):
+        n["q"] += 1
+    event.listen(bind, "before_cursor_execute", count)
+    try:
+        rows = {r["id"]: r for r in CO.rows(db, org, "top100-2010")}
+    finally:
+        event.remove(bind, "before_cursor_execute", count)
+    assert n["q"] <= 20, n["q"]                              # was ~15 per property
+    for p in props:                                         # identical to the per-property functions
+        r = rows[p.id]
+        assert r["owner"] == CO.owner_status(db, p)
+        assert r["tax"] == CO.tax_status(db, p, CO._signals(db, p))
+        assert r["contacts"] == CO.contacts(db, r["owner"].get("owner_id"))
+        assert r["list_claims"] == CO._list_claims(db, p)
+        po = SC.property_opportunity(p, EV.stacked_signals(db, p), EV.strategy_for(db, p),
+                                     weights=EV.score_weights(db, org), owner=EV.CT.primary_owner(db, p),
+                                     options=EV.score_options(db, org))
+        assert r["score"] == po.get("value")
+
+
+def test_view_is_compressed_and_polling_reads_only_the_status(client, db_session, sample_org, sample_advisor,
+                                                               admin_auth_headers):
+    HU.import_csv(db_session, sample_org.id, LIST, user=sample_advisor, filename="top.csv")
+    db_session.commit()
+    url = "/wholesale/evosense/cohorts/top100-2010"
+    full = client.get(url, headers=dict(admin_auth_headers, **{"Accept-Encoding": "gzip"}))
+    assert full.status_code == 200 and full.headers.get("content-encoding") == "gzip"
+    assert len(full.json()["rows"]) == 3                   # the client decompresses transparently
+    st = client.get(url + "?status_only=1", headers=admin_auth_headers)
+    assert st.status_code == 200 and set(st.json()) == {"kind", "last_recheck", "rechecking"}
+    assert client.get("/wholesale/evosense/cohorts/x'y", headers=admin_auth_headers).status_code == 404

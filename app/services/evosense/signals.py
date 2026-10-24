@@ -64,6 +64,9 @@ CATALOG: Dict[str, Dict[str, Any]] = {
     "MANUAL_OPERATOR_SIGNAL": {"label": "Operator flag", "points": 5, "current_days": 180, "stale_days": 365},
     # DFW public-record additions (property_opportunity/v2)
     "TAX_SUIT":             {"label": "Tax suit / litigation", "points": 8, "current_days": 365, "stale_days": 730},
+    # A tax-foreclosure SALE on the calendar (sheriff / constable sale after a
+    # judgment) - the property is listed with a date. Stacks on the suit.
+    "TAX_SALE":             {"label": "Tax foreclosure sale scheduled", "points": 6, "current_days": 120, "stale_days": 240},
     "CODE_COMPLAINT":       {"label": "Code complaint (311)", "points": 3, "current_days": 180, "stale_days": 365},
     "ACTIVE_LISTING":       {"label": "Active listing", "points": -12, "current_days": 60, "stale_days": 120},
     "RECENT_SALE":          {"label": "Recent sale", "points": -10, "current_days": 365, "stale_days": 730},
@@ -84,7 +87,8 @@ CATALOG: Dict[str, Dict[str, Any]] = {
 # spec and are kept (renaming stored evidence is an unnecessary rewrite);
 # every key reports the family it belongs to.
 FAMILY = {
-    "TAX_DELINQUENT": "TAX_DELINQUENT", "TAX_SUIT": "TAX_DELINQUENT", "LIEN": "OTHER",
+    "TAX_DELINQUENT": "TAX_DELINQUENT", "TAX_SUIT": "TAX_DELINQUENT", "TAX_SALE": "TAX_DELINQUENT",
+    "LIEN": "OTHER",
     "PRE_FORECLOSURE": "PRE_FORECLOSURE", "ABSENTEE_OWNER": "ABSENTEE_OWNER",
     "OUT_OF_STATE_OWNER": "OUT_OF_STATE_OWNER", "VACANT": "VACANT",
     "CODE_VIOLATION": "CODE_VIOLATION", "CODE_COMPLAINT": "CODE_VIOLATION",

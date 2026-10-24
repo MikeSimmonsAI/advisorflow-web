@@ -83,7 +83,7 @@ def same_parcel_address(target_street: str, situs: Optional[str], city: Optional
 
 
 class TxParcelReader:
-    adapter_version = "txgio_stratmap_parcels/1"
+    adapter_version = "txgio_stratmap_parcels/2"     # /2 keeps LEGAL_DESC
 
     # (half-extent in degrees, tolerance in pixels of an 800 px map): the
     # first is the parcel under the point; the second reaches ~80 m, because
@@ -152,7 +152,7 @@ class TxParcelReader:
             "county": county, "parcel_apn": target.get("parcel_apn"),
             "latitude": xy.get("y"), "longitude": xy.get("x"),
             "owner": owner, "signals": [],
-            "_raw": {k: a.get(k) for k in ("PROP_ID", "GEO_ID", "OWNER_NAME", "NAME_CARE", "SITUS_ADDR",
+            "_raw": {k: a.get(k) for k in ("PROP_ID", "GEO_ID", "LEGAL_DESC", "OWNER_NAME", "NAME_CARE", "SITUS_ADDR",
                                            "SITUS_CITY", "SITUS_ZIP", "MAIL_ADDR", "MAIL_LINE1", "MAIL_LINE2",
                                            "MAIL_CITY", "MAIL_STAT", "MAIL_ZIP", "COUNTY", "TAX_YEAR",
                                            "DATE_ACQ", "SOURCE") if k in a},

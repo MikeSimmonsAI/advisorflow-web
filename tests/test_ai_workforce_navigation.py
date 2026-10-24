@@ -128,9 +128,11 @@ def test_every_routed_workforce_component_is_imported_and_exists():
 
 def test_the_god_rail_links_to_a_registered_workforce_route():
     """ONE God rail entry, the plain-language AI Workforce page, and from it
-    the three technical consoles, all still routed."""
-    rail = _read(GOD_SHELL)
-    assert "'/god/ai'" in rail, (
+    the three technical consoles, all still routed. Since the Oct 22 2026
+    redesign the rail is the six SECTIONS in godNav.js, and AI Workforce is
+    one of them."""
+    rail = _read(os.path.join(FE, "pages", "god", "godNav.js"))
+    assert "path: '/god/ai'" in rail, (
         "Nothing in the God rail reaches AI Workforce. A built, routed, "
         "deployed screen nobody can find is the same as a missing one.")
     routes = _registered_routes(_read(APP_JSX))
@@ -146,10 +148,10 @@ def test_the_god_rail_links_to_a_registered_workforce_route():
 
 def test_the_god_rail_icon_key_exists_in_the_icon_table():
     """ICONS[icon] has no fallback — a missing key draws nothing."""
-    rail = _read(GOD_SHELL)
-    entry = re.search(r"path:\s*'/god/ai',\s*icon:\s*'([a-zA-Z]+)'", rail)
+    nav = _read(os.path.join(FE, "pages", "god", "godNav.js"))
+    entry = re.search(r"label: 'AI Workforce', icon:\s*'([a-zA-Z]+)', path: '/god/ai'", nav)
     assert entry, "The AI Workforce rail entry has no icon."
-    icons = set(re.findall(r"^\s{2}([a-zA-Z]+):\s*'M", rail, re.M))
+    icons = set(re.findall(r"^\s{2}([a-zA-Z]+):\s*'M", _read(GOD_SHELL), re.M))
     assert entry.group(1) in icons, (
         "The rail asks for icon '%s', which ICONS does not define. The call "
         "sites index ICONS directly with no fallback, so the row renders with "

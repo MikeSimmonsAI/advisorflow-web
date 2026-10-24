@@ -20,11 +20,14 @@ organization once; point the platform's job runner (or cron) at it. The
 from __future__ import annotations
 
 import csv
+import re
 import hashlib
 import io
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+
+from sqlalchemy import or_
 
 from app.models.evosense_models import EvoSenseProperty, EvoSenseRun, EvoSenseStrategy
 from app.services.evosense import common as C
@@ -172,7 +175,7 @@ def expand_focus(focus: Optional[List[str]]) -> List[str]:
     return focus + sorted(f for f in fams if f not in focus)
 
 
-def _discovery_routes(db, org_id, focus: Optional[List[str]] = None):
+def _discovery_routes(db, org_id, focus: Optional[List[str]] = None, *, sandbox_allowed: bool = True):
     """(capability, provider, cfg) for every connected DISCOVERY source. A
     public-record LOOKUP source (TAD, geocoder, code cases) is never asked to
     discover; it is called per property in the lookup stage. With a focus,
@@ -180,11 +183,16 @@ def _discovery_routes(db, org_id, focus: Optional[List[str]] = None):
     out, seen = [], set()
     focus = expand_focus(focus)
     for cap in DISCOVERY:
-        for provider, cfg, _cost in PV.route(db, org_id, cap):
+        for provider, cfg, _cost in PV.route(db, org_id, cap, sandbox_allowed=sandbox_allowed):
             if not getattr(provider, "discovery", True):
                 continue
             if focus and cap not in focus and provider.key not in focus \
                     and getattr(provider, "discovery_family", None) not in focus:
+                continue
+            if getattr(provider, "discovery_opt_in", False) and not (focus and (cap in focus or provider.key in focus)):
+                # An opt-in source (county clerk foreclosure notices) feeds only
+                # a strategy that asks for it - enabling it never changes what an
+                # existing all-sources strategy brings in.
                 continue
             if (provider.key, cap) in seen:
                 continue
@@ -234,9 +242,18 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
                            "outreach": "off", "paid_data": "on" if ST.pilot_spend_cap(strategy) else "off"}
     touched: Dict[str, EvoSenseProperty] = {}
     focus = discovery_focus(strategy)
-    routes = _discovery_routes(db, org_id, focus)
+    # Sandbox (synthetic) sources feed TEST strategies only: switching one on
+    # can never put invented houses into a real strategy's results.
+    routes = _discovery_routes(db, org_id, focus, sandbox_allowed=bool(getattr(strategy, "is_test", False)))
     if focus:
         counts["discovery_focus"] = focus
+        if not routes:
+            # Nothing connected can serve what this strategy hunts: say so -
+            # a hunt that searched nothing is BLOCKED, never "succeeded".
+            counts["blocked"] = ("No connected source serves this strategy's search (%s). Enable one under "
+                                 "Sources, or import a list." % ", ".join(focus))
+            C.log_event(db, org_id, "hunt.blocked", strategy_id=strategy.id, is_test=strategy.is_test,
+                        actor_type=C.ACTOR_USER if user else C.ACTOR_AUTOMATION, summary=counts["blocked"])
     real = [r for r in routes if r[1].connector_kind == C.REAL]
     share = max(1, -(-max_properties // max(1, len(real))))      # ceil: a fair share per real source
     counts["sources"] = {}
@@ -364,7 +381,8 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
     # A source can answer a batch but fail for individual properties.
     # Such a run is PARTIAL, not green, even if no source-wide error fired.
     property_failures = sum(int(row.get("failed", 0)) for row in counts.get("lookups", {}).values())
-    return finish("partial" if counts["provider_errors"] or property_failures else "succeeded")
+    return finish("partial" if counts["provider_errors"] or property_failures or counts.get("blocked")
+                  else "succeeded")
 
 
 # ── free public-record lookups (the cost governor's QUEUE_FREE_LOOKUP lane) ──
@@ -499,11 +517,18 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                     # answers (or no-matches) were about the wrong address/account.
                     queued.append(p)
                     continue
-                recent = (db.query(EvoSenseObservation.id)
-                          .filter(EvoSenseObservation.organization_id == org_id,
-                                  EvoSenseObservation.property_id == p.id,
-                                  EvoSenseObservation.provider_key == key,
-                                  EvoSenseObservation.observed_at >= fresh_after).first())
+                q = (db.query(EvoSenseObservation.id)
+                     .filter(EvoSenseObservation.organization_id == org_id,
+                             EvoSenseObservation.property_id == p.id,
+                             EvoSenseObservation.provider_key == key,
+                             EvoSenseObservation.observed_at >= fresh_after))
+                stale = tuple(getattr(provider, "stale_adapter_versions", ()) or ())
+                if stale:
+                    # a record from an older adapter that lacks a field we now
+                    # read (TxGIO /1: no legal description) is not fresh
+                    q = q.filter(or_(EvoSenseObservation.adapter_version.is_(None),
+                                     ~EvoSenseObservation.adapter_version.in_(stale)))
+                recent = q.first()
                 if recent is not None:
                     _lookup_decision(db, p, strategy, provider, cap, C.L_SKIP_FRESH_DATA,
                                      "%s already answered within %s days." % (provider.label, provider.freshness_days),
@@ -572,7 +597,7 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                     continue
                 try:
                     outcome, merged = IN.ingest(db, org_id, provider, cap, rec, strategy_id=strategy.id,
-                                                run_id=run.id, is_test=strategy.is_test)
+                                                run_id=run.id, is_test=strategy.is_test, target=p)
                 except Exception as exc:  # noqa: BLE001
                     _lookup_decision(db, p, strategy, provider, cap, C.L_QUEUE_FREE,
                                      "Record could not be ingested: %s" % str(exc)[:160],
@@ -643,6 +668,9 @@ CSV_COLUMNS = ("street_address", "unit", "city", "state", "zip_code", "county", 
                "property_type", "owner_name", "mailing_street", "mailing_city", "mailing_state",
                "mailing_zip", "estimated_value", "mortgage_balance", "last_sale_date", "signals",
                "record_id", "bedrooms", "bathrooms", "square_feet", "year_built")
+# Columns that never change a row's identity (adding them to a file re-sees
+# the same rows): the list's claims about the property.
+CLAIM_COLUMNS = ("sale_date", "list_owner_name", "loan_type")
 BUILDING_COLUMNS = ("bedrooms", "bathrooms", "square_feet", "year_built")
 # Evidence columns a DISTRESS LIST may carry. They describe the list's claim;
 # they are stored as the signal's evidence, never as verified fact.
@@ -676,9 +704,39 @@ def distress_list_kinds() -> List[Dict[str, str]]:
              "signal_label": CATALOG[v["signal"]]["label"]} for k, v in DISTRESS_LISTS.items()]
 
 
+TAX_LIST_SIGNALS = ("TAX_DELINQUENT", "TAX_SUIT", "TAX_SALE")
+
+
+def foreclosure_claim(sale, *, source: str, declared_by: Optional[str] = None,
+                      case_status: Optional[str] = None, tax: bool = False) -> Dict[str, Any]:
+    """A list's CLAIM of a scheduled sale: a mortgage / trustee sale
+    (PRE_FORECLOSURE) - or, on a tax list, a tax foreclosure sale (TAX_SALE).
+
+    `sale` comes from a row's sale_date column or from a date a person
+    declared for the whole list - never from a file name. A row's own
+    case_status (postponed, cancelled ...) is kept, never overwritten."""
+    how = ("declared for the whole list by %s" % declared_by) if declared_by else "stated in the row's sale date"
+    status = (case_status or "").strip().lower() or "scheduled"
+    if tax:
+        return {"type": "TAX_SALE", "confidence": 60, "claim": "imported",
+                "sale_date": sale.strftime("%Y-%m-%d"), "foreclosure_type": "tax_foreclosure_sale",
+                "value": "Tax foreclosure sale %s %s - claimed by %s (%s); not verified against the sale list "
+                         "or court record" % (status, sale.strftime("%Y-%m-%d"), source, how),
+                "evidence_basis": "imported list claim", "case_status": status,
+                "limitations": "A list's claim of a tax sale date. Confirm on the county / constable sale list."}
+    return {"type": "PRE_FORECLOSURE", "confidence": 60, "claim": "imported",
+            "sale_date": sale.strftime("%Y-%m-%d"),
+            "value": "Foreclosure sale scheduled %s - claimed by %s (%s); not verified against the county "
+                     "clerk's notice" % (sale.strftime("%Y-%m-%d"), source, how),
+            "evidence_basis": "imported list claim", "case_status": status,
+            "limitations": "A list's claim of a scheduled trustee sale. Confirm on the county clerk's posted "
+                           "Notice of (Substitute) Trustee Sale; sales are often postponed or cancelled."}
+
+
 def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: str = "upload.csv",
                max_rows: int = 5000, list_kind: Optional[str] = None,
-               list_source: Optional[str] = None) -> Dict[str, Any]:
+               list_source: Optional[str] = None, declared_sale_date: Optional[str] = None,
+               ) -> Dict[str, Any]:
     """A property list through the SAME ingest as every provider. Re-importing
     the same file is idempotent (row identity = record_id, or a hash of the row).
 
@@ -689,6 +747,13 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
     list is two pieces of evidence, not one overwriting the other."""
     if list_kind is not None and list_kind not in DISTRESS_LISTS:
         raise ValueError("Unknown list kind %r. Known: %s" % (list_kind, ", ".join(DISTRESS_LISTS)))
+    # The file NAME is only a label for people: nothing below reads a date,
+    # a year or a distress claim out of it. A sale date for every row exists
+    # only when a person declares one here (recorded as theirs).
+    declared = _parse_list_date(declared_sale_date) if declared_sale_date else None
+    if declared_sale_date and declared is None:
+        raise ValueError("The list's sale date is not a date (use YYYY-MM-DD or MM/DD/YYYY)")
+    source_label = list_source or "an imported list"
     kind = DISTRESS_LISTS.get(list_kind) if list_kind else None
     from app.services.evosense import propstream_csv as PS
     fmt = None
@@ -702,7 +767,8 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
         raise ValueError("The file needs a street_address column. Columns understood: %s"
                          % ", ".join(CSV_COLUMNS))
     provider = PV.PROVIDERS["csv_import"]
-    counts = {"rows": 0, "created": 0, "merged": 0, "seen": 0, "review": 0, "rejected": 0}
+    counts = {"rows": 0, "created": 0, "merged": 0, "seen": 0, "review": 0, "rejected": 0,
+              "sale_dates": 0, "sale_dates_declared": 0}
     rejected: List[Dict[str, Any]] = []
     for i, row in enumerate(reader, start=2):
         if counts["rows"] >= max_rows:
@@ -729,11 +795,33 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
                 rec["valuation"] = {"value": int(float(row["estimated_value"].replace(",", "").replace("$", ""))),
                                     "mortgage": int(float(row["mortgage_balance"].replace(",", "").replace("$", "")))
                                     if row.get("mortgage_balance") else None,
-                                    "basis": "imported file %s" % filename}
+                                    # never the file name: a name is a label, not evidence
+                                    # (a name like "Appraisal District 2010.csv" would
+                                    # otherwise read as a 2010 tax value)
+                                    "basis": "imported list (value as the file states it)"}
         except ValueError:
             counts["rejected"] += 1
             rejected.append({"line": i, "reason": "estimated_value / mortgage_balance not a number"})
             continue
+        claims = {k: row.get(k) for k in CLAIM_COLUMNS if row.get(k)}
+        if claims:
+            rec["_evidence"] = {"list_claims": claims}
+        sale = _parse_list_date(row.get("sale_date")) if row.get("sale_date") else None
+        if row.get("sale_date") and sale is None:
+            counts["rejected"] += 1
+            rejected.append({"line": i, "reason": "sale_date is not a date (use YYYY-MM-DD or MM/DD/YYYY)"})
+            continue
+        fc_claim = None
+        # A sale date on a TAX list is a tax sale, never a mortgage foreclosure.
+        tax_list = bool(kind) and kind["signal"] in TAX_LIST_SIGNALS
+        row_status = (row.get("case_status") or "").strip() or None
+        if sale is not None:
+            fc_claim = foreclosure_claim(sale, source=source_label, case_status=row_status, tax=tax_list)
+            counts["sale_dates"] += 1
+        elif declared is not None:
+            fc_claim = foreclosure_claim(declared, source=source_label, case_status=row_status, tax=tax_list,
+                                         declared_by=getattr(user, "email", None) or "the importer")
+            counts["sale_dates_declared"] += 1
         if row.get("owner_name"):
             rec["owner"] = {"name": row["owner_name"], "mailing_street": row.get("mailing_street"),
                             "mailing_city": row.get("mailing_city"),
@@ -770,6 +858,10 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
         else:
             rec["signals"] = [{"type": s, "confidence": 60, "value": "from imported list"}
                               for s in sigs if s in CATALOG]
+        if fc_claim is not None:
+            # one foreclosure claim per row: a list kind's own PRE_FORECLOSURE
+            # takes the sale date instead of being doubled
+            rec["signals"] = [x for x in rec.get("signals") or [] if x["type"] != fc_claim["type"]] + [fc_claim]
         outcome, prop = IN.ingest(db, org_id, provider, C.PROPERTY_SEARCH, rec,
                                   strategy_id=getattr(strategy, "id", None), user=user)
         counts[outcome] = counts.get(outcome, 0) + 1
@@ -824,10 +916,17 @@ def preview_csv(db, org_id: str, content: str, *, filename: str = "upload.csv") 
 
 
 def _parse_list_date(value):
-    v = (value or "").strip()
+    """A date written in a cell or typed by a person. Never a bare year, and
+    never a value that merely contains digits (a file name, a list tag)."""
+    v = re.sub(r"\s+", " ", str(value or "")).strip().rstrip(".")
     if not v:
         return None
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%Y/%m/%d"):
+    v = re.sub(r"(\d)(st|nd|rd|th)\b", r"\1", v, flags=re.I)
+    if re.fullmatch(r"\d{2}-\d{2}-\d{4}", v):
+        v = v.replace("-", "/")
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%Y/%m/%d", "%b %d, %Y", "%B %d, %Y", "%b %d %Y",
+                "%B %d %Y", "%d %b %Y", "%d %B %Y", "%Y-%m-%dT%H:%M:%S", "%m/%d/%Y %H:%M:%S",
+                "%Y-%m-%d %H:%M:%S"):
         try:
             return datetime.strptime(v, fmt)
         except ValueError:

@@ -405,11 +405,30 @@ def _parse_date(value) -> Optional[datetime]:
     return None
 
 
+def _is_target(target, rec: Dict[str, Any]) -> bool:
+    """A lookup's answer describes the house it was asked about when the
+    house number and street agree (suffixes, directions and account formats
+    may differ: '1301 STARPOINT' / '1301 STARPOINT LN') and the ZIP, when
+    both sides have one, is the same."""
+    from app.services.evosense.sources.txgio import same_parcel_address
+    if not same_parcel_address(target.street_address or "", rec.get("street_address")):
+        return False
+    z1 = re.sub(r"\D", "", str(target.zip_code or ""))[:5]
+    z2 = re.sub(r"\D", "", str(rec.get("zip_code") or ""))[:5]
+    return not (z1 and z2 and z1 != z2)
+
+
 def ingest(db, org_id: str, provider, capability: str, rec: Dict[str, Any], *,
            strategy_id: Optional[str] = None, run_id: Optional[str] = None,
            is_test: bool = False, user=None, cost_cents: int = 0,
-           ledger_id: Optional[str] = None) -> Tuple[str, Optional[EvoSenseProperty]]:
-    """Returns (outcome, property). outcome: created|merged|seen|review."""
+           ledger_id: Optional[str] = None, target: Optional[EvoSenseProperty] = None,
+           target_trusted: bool = False) -> Tuple[str, Optional[EvoSenseProperty]]:
+    """Returns (outcome, property). outcome: created|merged|seen|review.
+
+    `target`: the property a LOOKUP was asked about. Its answer is about that
+    house, so it never creates a new property: it attaches to the target when
+    the house number and street agree, and otherwise waits in identity review
+    with the target as the candidate."""
     ref = str(rec.get("source_reference") or "").strip()
     if not ref:
         raise ValueError("Every observation needs a source_reference.")
@@ -424,6 +443,16 @@ def ingest(db, org_id: str, provider, capability: str, rec: Dict[str, Any], *,
         # IDEMPOTENT. The same record seen again refreshes evidence; it never
         # creates a second observation, property or signal.
         existing.last_seen_at = C.now()
+        stale = tuple(getattr(provider, "stale_adapter_versions", ()) or ())
+        new_version = rec.get("_adapter_version")
+        if stale and existing.adapter_version in stale and new_version and new_version != existing.adapter_version:
+            # Saved by an adapter that dropped a field we now read (TxGIO /1
+            # kept no LEGAL_DESC): the same record, read again, replaces its
+            # evidence - still one observation, never a second.
+            fresh = raw_evidence(rec)
+            existing.raw_payload, existing.content_hash = fresh["raw_payload"], fresh["content_hash"]
+            existing.adapter_version = new_version
+            existing.observed_at = C.now()
         prop = None
         if existing.property_id:
             prop = db.query(EvoSenseProperty).filter(
@@ -434,6 +463,18 @@ def ingest(db, org_id: str, provider, capability: str, rec: Dict[str, Any], *,
         return "seen", prop
 
     match, prop, candidates, keys = ID.resolve(db, org_id, rec)
+    if target is not None and target_trusted:
+        # The caller KNOWS the house (a row of a list matched to the property
+        # that list's own earlier import created): attach, whatever the keys say.
+        match, prop, candidates, keys = ID.EXACT, target, [target], ["list row"]
+    elif target is not None and not (prop is not None and prop.id == target.id
+                                   and match in (ID.EXACT, ID.PROBABLE)):
+        if _is_target(target, rec) and (prop is None or prop.id == target.id):
+            match, prop, candidates, keys = ID.EXACT, target, [target], ["lookup target", "street"]
+        else:
+            extra = [c for c in (candidates or ([prop] if prop is not None else [])) if c.id != target.id]
+            match, prop, candidates = ID.AMBIGUOUS, None, [target] + extra
+            keys = list(keys or []) + ["lookup target"]
     raw = raw_evidence(rec)
     obs = EvoSenseObservation(
         organization_id=org_id, property_id=prop.id if prop else None,
@@ -584,7 +625,13 @@ def _apply_signals(db, prop, provider, rec, observation_id, cost_cents, user=Non
                                "observation": observation_id,
                                "source_url": rec.get("_source_url"),
                                "adapter_version": rec.get("_adapter_version"),
-                               "limitations": s.get("limitations")},
+                               "limitations": s.get("limitations"),
+                               # a mortgage-foreclosure claim / notice: the scheduled sale
+                               "sale_date": s.get("sale_date"), "claim": s.get("claim"),
+                               # a clerk notice: what it is and where it is filed
+                               "foreclosure_type": s.get("foreclosure_type"), "document": s.get("document"),
+                               "document_url": s.get("document_url"), "recorded": s.get("recorded"),
+                               "sale_date_basis": s.get("sale_date_basis"), "matched_by": s.get("matched_by")},
                    cost_cents=cost_cents if len(rec.get("signals") or []) == 1 else 0,
                    evidence_basis=s.get("evidence_basis"), case_status=s.get("case_status"),
                    rule_version=rec.get("_adapter_version"),

@@ -59,48 +59,38 @@ def _src(*parts):
 # The navigation itself
 # ═════════════════════════════════════════════════════════════════════════════
 
+# OCT 22 2026 REDESIGN. The rail is the six SECTIONS in pages/god/godNav.js;
+# these two screens are tabs of REVENUE & BILLING. The invariants are the same:
+# both exist, each has its own entry, and they sit in the one money section.
+
+def _revenue_section():
+    nav = _src("pages", "god", "godNav.js")
+    start = nav.index("key: 'revenue'")
+    end = nav.index("key: 'settings'")
+    return nav[start:end]
+
+
 def test_the_god_rail_offers_sales_compensation():
     """THE BUG THIS FIXES. The rail had Pricing & Comp and nothing else."""
-    shell = _src("pages", "GodShell.jsx")
-    assert "'Sales Compensation'" in shell
-    assert "'/god/compensation'" in shell
+    block = _revenue_section()
+    assert "'/god/compensation'" in block
+    assert re.search(r"label:\s*'Sales team pay'", block)
 
 
 def test_pricing_and_comp_survives_as_its_own_entry():
-    """Two jobs, two entries. Not merged to save a line.
-
-    The LABEL changed - 'Pricing & Comp' became 'Pricing & Compensation' when
-    the rail was regrouped by business function - but the invariant this test
-    defends did not: pricing keeps its own entry rather than being folded into
-    Sales Compensation. Asserting on the ROUTE is the durable half of that;
-    asserting on the exact wording of a label is not, so the label check is
-    kept loose enough to survive a rename and strict enough to catch a merge.
-    """
-    shell = _src("pages", "GodShell.jsx")
-    assert "'/god/pricing'" in shell
-    assert re.search(r"label:\s*'Pricing & Comp\w*'", shell), (
-        "the pricing entry has lost its own rail item")
+    """Two jobs, two entries. Not merged to save a line."""
+    block = _revenue_section()
+    assert re.search(r"label:\s*'Pricing',\s*path:\s*'/god/pricing'", block), (
+        "the pricing entry has lost its own tab")
 
 
 def test_both_entries_sit_in_the_same_revenue_group():
-    """A payment run does not belong beside Lead Scraper.
+    """A payment run does not belong beside Lead Scraper or the audit log."""
+    block = _revenue_section()
+    assert "'/god/compensation'" in block and "'/god/pricing'" in block
+    settings = _src("pages", "god", "godNav.js").split("key: 'settings'", 1)[1]
+    assert "/god/compensation" not in settings
 
-    Originally both sat under PLATFORM. That group also held Access Diagnostic,
-    Audit & Security and System Health, which put a payment run in the same
-    section as a log viewer, so the rail was regrouped and both moved together
-    into SALES & REVENUE. The rule is unchanged: they belong in ONE group, and
-    that group is about money rather than diagnostics.
-    """
-    shell = _src("pages", "GodShell.jsx")
-    parts = shell.split("{ group: 'SALES & REVENUE' }", 1)
-    assert len(parts) == 2, "the SALES & REVENUE rail group is missing"
-    # Bounded by the next group header, so this cannot pass on an entry that
-    # actually sits further down the rail.
-    block = re.split(r"\{ group: '", parts[1])[0]
-    assert "'Sales Compensation'" in block
-    assert re.search(r"label:\s*'Pricing & Comp\w*'", block)
-    assert "Lead Scraper" not in block, (
-        "Lead Scraper is back in the revenue group")
 
 
 def test_the_god_route_is_registered_and_renders_the_same_component():

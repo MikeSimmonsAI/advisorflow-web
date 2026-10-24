@@ -272,6 +272,10 @@ const FeatureEntitlements = lazyPage(() => import('./pages/god/FeatureEntitlemen
 const GodVoiceConfig = lazyPage(() => import('./pages/god/GodVoiceConfig'))
 const GodRevenueHistory = lazyPage(() => import('./pages/god/GodRevenueHistory'))
 const ControlRoom = lazyPage(() => import('./pages/god/ControlRoom'))
+// Oct 22 2026 God Mode redesign: the Launch Board (from GitHub) and the
+// Settings & Security overview. Both are new; no existing route changed.
+const GodLaunchBoardPage = lazyPage(() => import('./pages/god/LaunchBoardPage'))
+const GodSettingsHub = lazyPage(() => import('./pages/god/SettingsHub'))
 const RoadmapBoard = lazyPage(() => import('./pages/god/RoadmapBoard'))
 const GodLaunches = lazyPage(() => import('./pages/god/GodLaunches'))
 import HelpSupport from './pages/HelpSupport'
@@ -1758,6 +1762,8 @@ export default function App() {
         <Route path="/god/lead-intelligence"     element={<GodRoute><GodModeLayout><LeadIntelligence /></GodModeLayout></GodRoute>} />
         {/* Control Room: relay status, timeline, Needs Mike, Give Direction */}
         <Route path="/god/control-room"          element={<GodRoute><GodModeLayout><ControlRoom /></GodModeLayout></GodRoute>} />
+        <Route path="/god/launch-board"          element={<GodRoute><GodModeLayout><GodLaunchBoardPage /></GodModeLayout></GodRoute>} />
+        <Route path="/god/settings"              element={<GodRoute><GodModeLayout><GodSettingsHub /></GodModeLayout></GodRoute>} />
         {/* GOD-04: platform roadmap board */}
         <Route path="/god/roadmap"               element={<GodRoute><GodModeLayout><RoadmapBoard /></GodModeLayout></GodRoute>} />
         {/* Customer Launches — the staff view of onboarding intake. Sits in

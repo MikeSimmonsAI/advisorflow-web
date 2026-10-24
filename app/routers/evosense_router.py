@@ -407,8 +407,12 @@ async def import_preview(file: UploadFile = File(...), db: Session = Depends(get
 @router.post("/import")
 async def import_properties(file: UploadFile = File(...), strategy_id: Optional[str] = Form(None),
                             list_kind: Optional[str] = Form(None), list_source: Optional[str] = Form(None),
+                            declared_sale_date: Optional[str] = Form(None),
                             db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
                             _g: User = Depends(require_not_observation)):
+    """Import a property list. `declared_sale_date`: a scheduled foreclosure
+    sale date the PERSON states for every row that has no sale date of its own
+    (recorded as their claim). The file name is never read for dates."""
     org_id = svc.write_org_id(db, user)
     raw = await file.read()
     if len(raw) > 25 * 1024 * 1024:
@@ -421,7 +425,8 @@ async def import_properties(file: UploadFile = File(...), strategy_id: Optional[
     try:
         out = HU.import_csv(db, org_id, text, user=user, strategy=strategy,
                             filename=file.filename or "upload.csv",
-                            list_kind=(list_kind or None), list_source=((list_source or "").strip()[:120] or None))
+                            list_kind=(list_kind or None), list_source=((list_source or "").strip()[:120] or None),
+                            declared_sale_date=(declared_sale_date or "").strip() or None)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     db.commit()
@@ -922,18 +927,62 @@ def add_evosense_comp(property_id: str, payload: EvoCompIn, db: Session = Depend
 class SignalIn(BaseModel):
     signal_type: str
     note: Optional[str] = None
+    # A foreclosure / tax-sale notice a person read on the county record:
+    document_number: Optional[str] = None
+    sale_date: Optional[str] = None
+    record_url: Optional[str] = None
+    case_status: Optional[str] = None          # scheduled | postponed | canceled | resolved
+    foreclosure_type: Optional[str] = None
+    filed_date: Optional[str] = None           # the clerk's filed / posted stamp, YYYY-MM-DD
+
+
+FORECLOSURE_ENTRY = ("PRE_FORECLOSURE", "TAX_SALE")
 
 
 @router.post("/properties/{property_id}/signals")
 def add_signal(property_id: str, payload: SignalIn, db: Session = Depends(get_db),
                user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """A signal a person observed. A foreclosure / tax sale entered by hand is
+    VERIFIED only with the record's document number and the sale date a person
+    read on it; without them it is kept as that person's CLAIM."""
     org_id = svc.write_org_id(db, user)
     prop = _prop(db, org_id, property_id)
     if payload.signal_type not in SIG.CATALOG or SIG.CATALOG[payload.signal_type].get("derived"):
         raise HTTPException(status_code=422, detail="Choose a signal a person can observe.")
+    prov: Dict[str, Any] = {"user": user.id}
+    value = payload.note or "entered by a person"
+    status = None
+    ref = None
+    if payload.signal_type in FORECLOSURE_ENTRY:
+        from app.services.evosense import scoring as SC
+        status = (payload.case_status or "scheduled").strip().lower()
+        if status not in ("scheduled", "postponed", "canceled", "resolved"):
+            raise HTTPException(status_code=422, detail="Status must be scheduled, postponed, canceled or resolved.")
+        sale = SC._sale_date(payload.sale_date) if payload.sale_date else None
+        if payload.sale_date and sale is None:
+            raise HTTPException(status_code=422, detail="Sale date must be YYYY-MM-DD.")
+        filed = SC._sale_date(payload.filed_date) if payload.filed_date else None
+        if payload.filed_date and filed is None:
+            raise HTTPException(status_code=422, detail="Filed date must be YYYY-MM-DD.")
+        doc = (payload.document_number or "").strip()[:60] or None
+        prov.update({"sale_date": sale.isoformat() if sale else None, "document": doc,
+                     "recorded": filed.isoformat() if filed else None,
+                     "document_url": (payload.record_url or "").strip()[:500] or None,
+                     "foreclosure_type": (payload.foreclosure_type or "").strip()[:40] or None,
+                     "matched_by": "read on the county record by a person",
+                     # what the person read (grantor, instrument, parcel match...): kept whole here,
+                     # the signal's one-line value is cut at 200 characters
+                     "note": (payload.note or "").strip()[:4000] or None})
+        if not (doc and sale):
+            prov["claim"] = "operator"            # no document number + date: a claim, not a verified notice
+        ref = "OPERATOR:%s:%s" % (payload.signal_type, doc or (sale.isoformat() if sale else "undated"))
+        value = "%s %s%s - %s%s" % ("Foreclosure sale" if payload.signal_type == "PRE_FORECLOSURE" else "Tax sale",
+                                    status, " %s" % sale.isoformat() if sale else "",
+                                    ("document %s read on the county record" % doc) if doc else "entered without a document number (claim)",
+                                    "; %s" % payload.note if payload.note else "")
     SIG.upsert(db, prop, payload.signal_type, source="operator", connector_kind=C.MANUAL,
-               confidence=70, normalized_value=payload.note or "entered by a person",
-               provenance={"user": user.id}, user=user)
+               confidence=80 if (status and not prov.get("claim")) else 70, normalized_value=value,
+               provenance=prov, case_status=status, source_reference=ref, user=user)
     C.log_event(db, org_id, "signal.manual", property_id=prop.id, user=user, actor_type=C.ACTOR_USER,
                 is_test=prop.is_test, summary="Signal added: %s" % payload.signal_type)
     EV.rescore(db, prop)
@@ -1090,6 +1139,29 @@ def correct_identity(property_id: str, payload: IdentityIn, db: Session = Depend
                                                     "merge review, not an edit." % (exc.key, exc.other_id))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+
+
+class MergeIn(BaseModel):
+    duplicate_id: str
+    reason: str
+
+
+@router.post("/properties/{property_id}/merge")
+def merge_duplicate(property_id: str, payload: MergeIn, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """Fold a duplicate property for the SAME house into this one (admin).
+    Refused for different houses or a duplicate somebody has worked."""
+    from app.services.evosense import identity_fix as IF
+    org_id = svc.write_org_id(db, user)
+    _admin(user, db)
+    keep = _prop(db, org_id, property_id)
+    drop = _prop(db, org_id, payload.duplicate_id)
+    if len((payload.reason or "").strip()) < 5:
+        raise HTTPException(status_code=422, detail="Say why these are the same house.")
+    try:
+        return IF.merge_duplicate(db, org_id, keep, drop, user=user, reason=payload.reason)
+    except IF.MergeRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.patch("/properties/{property_id}/facts")
@@ -1328,20 +1400,39 @@ def list_cohorts(db: Session = Depends(get_db), user: User = Depends(require_ten
 
 
 @router.get("/cohorts/{kind}")
-def cohort_view(kind: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+def cohort_view(kind: str, request: Request, status_only: bool = False, db: Session = Depends(get_db),
+                user: User = Depends(require_tenant_user)):
     """Every property one imported list brought in: current owner, tax and
     foreclosure status with their evidence, score with what earned it and what
-    holds it back, priority and the next action. Read-only."""
+    holds it back, priority and the next action. Read-only.
+
+    `status_only=1`: just whether a re-check is running and the last one's
+    result - what the page polls while a re-check runs, instead of re-reading
+    every row. The full answer is gzip-compressed when the browser accepts it
+    (the Top 100 is ~250 KB of JSON, ~25 KB compressed)."""
     from app.services.evosense import cohort as CO
     org_id = _read_org(db, user)
     try:
-        rs = CO.rows(db, org_id, kind)
+        CO._prefix(kind)
     except ValueError:
         raise HTTPException(status_code=404, detail="Unknown list")
+    if status_only:
+        return {"kind": kind, "last_recheck": CO.last_recheck(db, org_id, kind),
+                "rechecking": CO.running(org_id, kind, db)}
+    rs = CO.rows(db, org_id, kind)
     if not rs:
         raise HTTPException(status_code=404, detail="No properties came from that list")
-    return {"kind": kind, "summary": CO.summary(rs), "rows": rs,
-            "last_recheck": CO.last_recheck(db, org_id, kind), "rechecking": CO.running(org_id, kind)}
+    body = {"kind": kind, "summary": CO.summary(rs), "rows": rs,
+            "last_recheck": CO.last_recheck(db, org_id, kind), "rechecking": CO.running(org_id, kind, db)}
+    if "gzip" not in (request.headers.get("accept-encoding") or "").lower():
+        return body
+    import gzip as _gz
+    import json as _json
+    from fastapi.encoders import jsonable_encoder
+    from fastapi.responses import Response as _Resp
+    raw = _json.dumps(jsonable_encoder(body), separators=(",", ":")).encode("utf-8")
+    return _Resp(content=_gz.compress(raw, compresslevel=6), media_type="application/json",
+                 headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
 
 
 @router.post("/cohorts/{kind}/recheck")
@@ -1356,8 +1447,101 @@ def cohort_recheck(kind: str, db: Session = Depends(get_db), user: User = Depend
             raise HTTPException(status_code=404, detail="No properties came from that list")
     except ValueError:
         raise HTTPException(status_code=404, detail="Unknown list")
+    if CO.running(org_id, kind, db):
+        return {"status": "already_running"}
     started = CO.start_recheck(org_id, kind, user_id=user.id)
+    if started:
+        CO.mark_started(db, org_id, kind, user=user)
     return {"status": "started" if started else "already_running"}
+
+
+class MatchPreviewIn(BaseModel):
+    property_ids: Optional[List[str]] = None
+    kind: Optional[str] = None
+    evidence_only: bool = False
+    max_searches: Optional[int] = None
+
+
+@router.post("/foreclosure/match-preview")
+def foreclosure_match_preview(payload: MatchPreviewIn, db: Session = Depends(get_db),
+                              user: User = Depends(require_tenant_user),
+                              _g: User = Depends(require_not_observation)):
+    """Admin: what the county clerk matcher would attach to these properties
+    (or an imported list) - read-only, nothing is recorded or scored."""
+    from app.services.evosense import cohort as CO
+    org_id = svc.write_org_id(db, user)
+    _admin(user, db)
+    ids = [x for x in (payload.property_ids or []) if isinstance(x, str)][:300]
+    if not ids and not payload.kind:
+        raise HTTPException(status_code=422, detail="Send property_ids or a list kind.")
+    if payload.kind:
+        try:
+            if not CO.members(db, org_id, payload.kind):
+                raise HTTPException(status_code=404, detail="No properties came from that list")
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Unknown list")
+    ms = payload.max_searches if payload.max_searches is None else max(0, min(int(payload.max_searches), 600))
+    job = CO.start_preview(org_id, property_ids=ids or None, kind=payload.kind, evidence_only=payload.evidence_only,
+                           max_searches=ms)
+    return {"job": job, "status": "running"}
+
+
+@router.get("/foreclosure/match-preview/{job}")
+def foreclosure_match_preview_result(job: str, db: Session = Depends(get_db),
+                                     user: User = Depends(require_tenant_user)):
+    from app.services.evosense import cohort as CO
+    org_id = svc.write_org_id(db, user)
+    _admin(user, db)
+    r = CO.preview_result(org_id, job)
+    if r is None:
+        raise HTTPException(status_code=404, detail="No such preview")
+    return {k: v for k, v in r.items() if k != "org_id"}
+
+
+class DeclareSaleIn(BaseModel):
+    sale_date: str
+    note: str
+
+
+@router.post("/cohorts/{kind}/declare-sale")
+def cohort_declare_sale(kind: str, payload: DeclareSaleIn, db: Session = Depends(get_db),
+                        user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """Record a scheduled foreclosure sale date a person states for every
+    house on an imported list - as their claim, shown as unverified."""
+    from app.services.evosense import cohort as CO
+    org_id = svc.write_org_id(db, user)
+    _admin(user, db)
+    try:
+        if not CO.members(db, org_id, kind):
+            raise HTTPException(status_code=404, detail="No properties came from that list")
+        return CO.declare_sale(db, org_id, kind, payload.sale_date, user=user, note=payload.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post("/cohorts/{kind}/reattach")
+async def cohort_reattach(kind: str, file: UploadFile = File(...), declared_sale_date: Optional[str] = Form(None),
+                          db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                          _g: User = Depends(require_not_observation)):
+    """Read an imported list's full file again and attach the columns the first
+    import left out to the SAME houses (matched to the list's own rows)."""
+    from app.services.evosense import cohort as CO
+    org_id = svc.write_org_id(db, user)
+    _admin(user, db)
+    raw = await file.read()
+    if len(raw) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File is larger than 25 MB.")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+    try:
+        if not CO.members(db, org_id, kind):
+            raise HTTPException(status_code=404, detail="No properties came from that list")
+        return CO.reattach(db, org_id, kind, text, user=user, filename=file.filename or "list.csv",
+                           declared_sale_date=(declared_sale_date or "").strip() or None)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @router.post("/strategies/{strategy_id}/pilot-archive")

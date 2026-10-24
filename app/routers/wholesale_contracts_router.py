@@ -598,7 +598,24 @@ def _contract_values(db: Session, org_id: str, deal: WholesaleDeal, user: User,
     org = db.query(Organization).filter(Organization.id == org_id).first()
     return docs.build_values(deal=deal, prop=prop, seller_name=seller_name,
                              seller_email=getattr(lead, "email", None), buyer=buyer,
-                             org_name=getattr(org, "name", None), user=user, overrides=overrides)
+                             org_name=getattr(org, "name", None), user=user, overrides=overrides,
+                             legal_description=_legal_on_file(db, org_id, deal))
+
+
+def _legal_on_file(db: Session, org_id: str, deal: WholesaleDeal) -> Optional[str]:
+    """The appraisal district's legal description of the house this deal came
+    from (EvoSense keeps the county record it was verified with). None when
+    nothing is on file: the contract then defers to the title commitment."""
+    try:
+        from app.models.evosense_models import EvoSenseProperty
+        from app.services.evosense import fc_match as FM
+        evo = (db.query(EvoSenseProperty).filter(EvoSenseProperty.organization_id == org_id,
+                                                 EvoSenseProperty.promoted_deal_id == deal.id).first())
+        legal = FM.identity(db, evo).get("legal") if evo is not None else None
+        raw = (legal or {}).get("raw") or None
+        return " ".join(str(raw).split()) if raw else None
+    except Exception:  # noqa: BLE001 - a missing description never blocks a contract
+        return None
 
 
 @router.get("/contract-kits")
@@ -638,6 +655,29 @@ def contract_preview(deal_id: str, kind: str, payload: ContractIn,
             "notice": docs.STARTER_NOTICE}
 
 
+def _test_deal_outside_signers(db: Session, org_id: str, deal: WholesaleDeal, signers, user: User):
+    """On a test deal, the signer emails that do not belong to a login of this
+    workspace (or the person sending). Empty for a real deal."""
+    if not getattr(deal, "is_test", False):
+        return []
+    inside = {(getattr(user, "email", "") or "").strip().lower()}
+    inside |= {(e or "").strip().lower() for (e,) in
+               db.query(User.email).filter(User.organization_id == org_id).all()}
+    out = []
+    for p in signers:
+        e = (p.get("email") or "").strip().lower()
+        if not e or e in inside:
+            continue                     # a missing email is the 'fill these in' check's job
+        domain = e.rsplit("@", 1)[-1]
+        if domain in _RESERVED or domain.rsplit(".", 1)[-1] in ("test", "example", "invalid", "localhost"):
+            continue                     # reserved names that can never receive mail (RFC 2606)
+        out.append(p.get("email"))
+    return out
+
+
+_RESERVED = {"example.com", "example.net", "example.org"}
+
+
 @router.post("/deals/{deal_id}/contracts/{kind}/send")
 def contract_send(deal_id: str, kind: str, payload: ContractIn, request: Request,
                   db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
@@ -650,6 +690,13 @@ def contract_send(deal_id: str, kind: str, payload: ContractIn, request: Request
     org_id = svc.write_org_id(db, user)
     deal = svc.get_deal(db, org_id, deal_id)
     values = _contract_values(db, org_id, deal, user, payload.values)
+    outside = _test_deal_outside_signers(db, org_id, deal, docs.parties(kind, values), user)
+    if outside:
+        # a TEST deal never emails a signing link to anyone outside the
+        # workspace (a real seller's address on a test deal, a typo'd override)
+        raise HTTPException(status_code=409, detail=(
+            "This is a test deal: signing links go only to people in this workspace. Not sent to %s."
+            % ", ".join(outside)))
     miss = docs.missing(kind, values) + docs.signer_problems(kind, values)
     if miss:
         raise HTTPException(status_code=409, detail="Fill these in first: %s." % ", ".join(miss))

@@ -165,8 +165,16 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
     seeded = sandbox_seed.seed_review(db_session, sample_org.id, sample_advisor, replies=True)
     db_session.commit()
     es_prop = sandbox_seed.prop_at(db_session, sample_org.id, "1418 Cedar Springs Rd")
+    # An imported list of A's (cohort), so the list routes are attacked against
+    # a list that exists in A's workspace.
+    from app.services.evosense import hunt as _HU
+    _HU.import_csv(db_session, sample_org.id,
+                   "record_id,street_address,city,state,zip_code\n"
+                   "victim-list-2010:1,77 Victim List Ln,Dallas,TX,75215\n", user=sample_advisor)
+    db_session.commit()
     es_ids = {
         "es_property_id": es_prop.id,
+        "es_list_kind": "victim-list-2010",
         "es_strategy_id": seeded["strategies"]["dfw"],
         "es_handoff_id": db_session.query(EvoSenseHandoff).filter(
             EvoSenseHandoff.organization_id == sample_org.id).first().id,
@@ -227,6 +235,10 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
     es_ids["es_gate_provider"] = "reapi_comps"
     es_ids["es_reprocess_run_id"] = evosense_reprocess.dry_run(
         db_session, sample_org.id, user=sample_advisor).id
+    # a finished foreclosure match preview of A's (held in memory, keyed by org)
+    from app.services.evosense import cohort as _CO
+    _CO._PREVIEWS["a0preview0001"] = {"status": "done", "org_id": sample_org.id, "result": {"results": []}}
+    es_ids["es_preview_job"] = "a0preview0001"
     db_session.commit()
 
     # A seller fact of A's (seller intelligence verify route).
@@ -568,11 +580,14 @@ def evosense_attacks(ids):
         ("post", "%s/properties/%s/signals" % (base, ep), {"signal_type": "VACANT"}),
         ("post", "%s/properties/%s/comps" % (base, ep), {"street_address": "1 X", "sale_price": 1, "sale_date": "2026-01-01", "source_reference": "x"}),
         ("post", "%s/properties/%s/rescore" % (base, ep), None),
-        # Imported-list cohorts and the audited identity correction.
-        ("get", "%s/cohorts/%s" % (base, ids["es_cohort_kind"]), None),
-        ("post", "%s/cohorts/%s/recheck" % (base, ids["es_cohort_kind"]), None),
         ("post", "%s/properties/%s/identity" % (base, ep),
-         {"city": "Stolen", "evidence_url": "https://example.com/record"}),
+         {"parcel_apn": "STOLEN", "evidence_url": "https://example.gov/x"}),
+        ("post", "%s/properties/%s/merge" % (base, ep), {"duplicate_id": ep, "reason": "planted merge"}),
+        # an imported list is named by its kind; another workspace's list is absent here
+        ("get", "%s/cohorts/%s" % (base, ids["es_list_kind"]), None),
+        ("post", "%s/cohorts/%s/recheck" % (base, ids["es_list_kind"]), None),
+        ("post", "%s/cohorts/%s/declare-sale" % (base, ids["es_list_kind"]),
+         {"sale_date": "2026-11-03", "note": "planted claim"}),
         ("post", "%s/properties/%s/retry-reading" % (base, ep), None),
         ("post", "%s/routing-reviews/%s" % (base, ids["es_routing_review_id"]),
          {"engagement_id": None}),
@@ -594,6 +609,7 @@ def evosense_attacks(ids):
         # derived state; applying or rolling back someone else's would rewrite
         # their records.
         ("get", "%s/reprocess/%s" % (base, ids["es_reprocess_run_id"]), None),
+        ("get", "%s/foreclosure/match-preview/%s" % (base, ids["es_preview_job"]), None),
         ("get", "%s/provider-evaluations/%s" % (base, ids["es_evaluation_id"]), None),
         ("post", "%s/provider-evaluations/%s/purge" % (base, ids["es_evaluation_id"]), None),
         ("post", "%s/provider-evaluations/%s/execute" % (base, ids["es_evaluation_id"]),
@@ -631,6 +647,9 @@ def upload_attacks(ids):
          {"doc_type": "purchase_contract"}, "file"),
         ("/wholesale/outreach/%s/proof-of-funds" % ids["outreach_id"], png, {},
          "file"),
+        ("/wholesale/evosense/cohorts/%s/reattach" % ids["es_list_kind"],
+         (b"street_address,zip_code,sale_date\n77 Victim List Ln,75215,2026-11-03\n", "planted.csv", "text/csv"),
+         {}, "file"),
     ]
 
 

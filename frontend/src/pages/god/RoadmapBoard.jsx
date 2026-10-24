@@ -8,6 +8,7 @@
  * Replaces the old hardcoded NEXT_MODULES chip list in ProductStatus.
  */
 import { useState, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import roadmapData from '../../data/platformRoadmap.json'
 
 const BOARD_STYLES = `
@@ -96,26 +97,28 @@ const BOARD_STYLES = `
 
 // ── colour tokens per status ──────────────────────────────────────────────────
 const STATUS_META = {
-  COMPLETE:        { label: 'Complete',      bg: 'var(--gm-pill-teal-bg)', text: 'var(--gm-teal)', border: 'var(--gm-teal)', dbg: 'var(--gm-pill-teal-bg)', dtxt: 'var(--gm-teal)', dborder: 'var(--gm-teal)' },
+  COMPLETE:        { label: 'Complete in snapshot', bg: 'var(--gm-pill-teal-bg)', text: 'var(--gm-teal)', border: 'var(--gm-teal)', dbg: 'var(--gm-pill-teal-bg)', dtxt: 'var(--gm-teal)', dborder: 'var(--gm-teal)' },
   // IN_PROGRESS is the honest middle of built -> tested -> committed -> pushed ->
   // merged -> deployed -> live verified. Anything between merge and live
   // verification lands here, and it counts as NEEDS ACTION below so active work
   // shows on the default tab instead of hiding under "All items".
-  IN_PROGRESS:     { label: 'In progress',   bg: 'var(--gm-pill-blue-bg)', text: 'var(--gm-pill-blue-fg)', border: 'var(--gm-pill-blue-bd)', dbg: 'var(--gm-pill-blue-bg)', dtxt: 'var(--gm-pill-blue-fg)', dborder: 'var(--gm-blue)' },
-  FINISH:          { label: 'Finish',        bg: 'var(--gm-pill-amber-bg)', text: 'var(--gm-amber)', border: 'var(--gm-amber)', dbg: 'var(--gm-pill-amber-bg)', dtxt: 'var(--gm-amber)', dborder: 'var(--gm-pill-amber-bd)' },
-  CONSOLIDATE:     { label: 'Consolidate',   bg: 'var(--gm-pill-amber-bg)', text: 'var(--gm-red)', border: 'var(--gm-amber)', dbg: 'var(--gm-pill-amber-bg)', dtxt: 'var(--gm-amber)', dborder: 'var(--gm-red)' },
-  REMOVE:          { label: 'Remove',        bg: 'var(--gm-pill-purple-bg)', text: 'var(--gm-purple)', border: 'var(--gm-pill-purple-bd)', dbg: 'var(--gm-pill-purple-bg)', dtxt: 'var(--gm-purple)', dborder: 'var(--gm-purple)' },
-  NOT_BUILT:       { label: 'Not built',     bg: 'var(--gm-pill-off-bg)', text: 'var(--gm-pill-off-fg)', border: 'var(--gm-pill-off-bd)', dbg: 'var(--gm-pill-off-bg)', dtxt: 'var(--gm-pill-off-fg)', dborder: 'var(--gm-pill-off-bd)' },
-  POLICY_REQUIRED: { label: 'Policy needed', bg: 'var(--gm-pill-amber-bg)', text: 'var(--gm-amber)', border: 'var(--gm-amber)', dbg: 'var(--gm-pill-amber-bg)', dtxt: 'var(--gm-amber)', dborder: 'var(--gm-pill-amber-bd)' },
+  IN_PROGRESS:     { label: 'In progress', bg: 'var(--gm-pill-blue-bg)', text: 'var(--gm-pill-blue-fg)', border: 'var(--gm-pill-blue-bd)', dbg: 'var(--gm-pill-blue-bg)', dtxt: 'var(--gm-pill-blue-fg)', dborder: 'var(--gm-blue)' },
+  FINISH:          { label: 'In progress', bg: 'var(--gm-pill-amber-bg)', text: 'var(--gm-amber)', border: 'var(--gm-amber)', dbg: 'var(--gm-pill-amber-bg)', dtxt: 'var(--gm-amber)', dborder: 'var(--gm-pill-amber-bd)' },
+  CONSOLIDATE:     { label: 'Superseded', bg: 'var(--gm-pill-amber-bg)', text: 'var(--gm-red)', border: 'var(--gm-amber)', dbg: 'var(--gm-pill-amber-bg)', dtxt: 'var(--gm-amber)', dborder: 'var(--gm-red)' },
+  REMOVE:          { label: 'Obsolete', bg: 'var(--gm-pill-purple-bg)', text: 'var(--gm-purple)', border: 'var(--gm-pill-purple-bd)', dbg: 'var(--gm-pill-purple-bg)', dtxt: 'var(--gm-purple)', dborder: 'var(--gm-purple)' },
+  NOT_BUILT:       { label: 'Not started', bg: 'var(--gm-pill-off-bg)', text: 'var(--gm-pill-off-fg)', border: 'var(--gm-pill-off-bd)', dbg: 'var(--gm-pill-off-bg)', dtxt: 'var(--gm-pill-off-fg)', dborder: 'var(--gm-pill-off-bd)' },
+  POLICY_REQUIRED: { label: 'Needs owner decision', bg: 'var(--gm-pill-amber-bg)', text: 'var(--gm-amber)', border: 'var(--gm-amber)', dbg: 'var(--gm-pill-amber-bg)', dtxt: 'var(--gm-amber)', dborder: 'var(--gm-pill-amber-bd)' },
   BLOCKED:         { label: 'Blocked',       bg: 'var(--gm-pill-red-bg)', text: 'var(--gm-red)', border: 'var(--gm-pill-red-bd)', dbg: 'var(--gm-pill-red-bg)', dtxt: 'var(--gm-red)', dborder: 'var(--gm-red)' },
 }
 const PRIORITY_COLOR = { P0: 'var(--gm-red)', P1: 'var(--gm-amber)', P2: 'var(--gm-blue)', P3: 'var(--gm-text)' }
 
 const NEEDS_ACTION = new Set(['IN_PROGRESS','FINISH','CONSOLIDATE','REMOVE','NOT_BUILT','POLICY_REQUIRED','BLOCKED'])
 const FILTER_TABS = [
-  { key: 'action',   label: 'Needs action' },
+  { key: 'action',   label: 'Open items'   },
+  { key: 'blocked',  label: 'Blocked'      },
+  { key: 'decision', label: 'Needs owner decision' },
+  { key: 'complete', label: 'Complete in snapshot' },
   { key: 'all',      label: 'All items'    },
-  { key: 'complete', label: 'Complete'     },
 ]
 
 // GOD MODE IS PERMANENTLY LIGHT, so this board no longer asks the document what
@@ -148,7 +151,7 @@ function ProgressBar({ done, total }) {
       <div className="rm-prog-track">
         <div className="rm-prog-fill" style={{ width: `${pct}%` }} />
       </div>
-      <span className="rm-prog-label">{done}/{total} ({pct}%)</span>
+      <span className="rm-prog-label">{done} of {total} marked complete</span>
     </div>
   )
 }
@@ -197,6 +200,8 @@ function SystemSection({ system, items, filter }) {
   const visible = items.filter(item => {
     if (filter === 'complete') return item.status === 'COMPLETE'
     if (filter === 'action')   return NEEDS_ACTION.has(item.status)
+    if (filter === 'blocked')  return item.status === 'BLOCKED'
+    if (filter === 'decision') return item.status === 'POLICY_REQUIRED' || !!item.decision_required
     return true
   })
   if (visible.length === 0) return null
@@ -255,7 +260,7 @@ export default function RoadmapBoard() {
       progress: byStatus.IN_PROGRESS || 0,
       action:   data.items.filter(i => NEEDS_ACTION.has(i.status)).length,
       blocked:  byStatus.BLOCKED || 0,
-      decision: data.items.filter(i => i.decision_required).length,
+      decision: data.items.filter(i => i.status === 'POLICY_REQUIRED' || i.decision_required).length,
     }
   }, [data])
 
@@ -265,17 +270,24 @@ export default function RoadmapBoard() {
     </div>
   )
 
-  const pct = totals.all ? Math.round((totals.complete / totals.all) * 100) : 0
-
   return (
-    <div className="rm-board">
+    <div className="rm-board" style={{ padding: "20px 24px 60px", maxWidth: 1400, margin: "0 auto" }}>
       <style>{BOARD_STYLES}</style>
 
-      {/* Summary strip */}
+      {/* THIS IS AN ARCHIVE. The file is a frozen snapshot and nothing here is
+          re-checked. Current status is the Launch Board, read from GitHub. */}
+      <div className="rm-alert rm-alert-warn" style={{ borderRadius: 10, padding: '12px 16px', fontSize: 12, marginBottom: 14 }}>
+        <strong>Archive — snapshot from {data.generated_on}, not re-verified.</strong>{' '}
+        These {data.items.length} items are what the roadmap said on that date. An item shown as
+        "Complete in snapshot" still needs to be checked before you rely on it. For what is being built,
+        merged and released now, use <Link to="/god/launch-board">Launch Board › Projects</Link>.
+      </div>
+
+      {/* Summary strip — counts only, no completion percentage */}
       <div className="rm-summary">
         <div className="rm-summary-card">
-          <div className="rm-summary-n" style={{ color: 'var(--gm-teal)' }}>{pct}%</div>
-          <div className="rm-summary-l">Complete</div>
+          <div className="rm-summary-n">{totals.complete}/{totals.all}</div>
+          <div className="rm-summary-l">Complete in snapshot</div>
         </div>
         <div className="rm-summary-card">
           <div className="rm-summary-n" style={{ color: 'var(--gm-pill-blue-fg)' }}>{totals.progress}</div>
@@ -283,7 +295,7 @@ export default function RoadmapBoard() {
         </div>
         <div className="rm-summary-card">
           <div className="rm-summary-n">{totals.action}</div>
-          <div className="rm-summary-l">Need action</div>
+          <div className="rm-summary-l">Open items</div>
         </div>
         <div className="rm-summary-card">
           <div className="rm-summary-n" style={{ color: 'var(--gm-red)' }}>{totals.blocked}</div>
@@ -291,11 +303,7 @@ export default function RoadmapBoard() {
         </div>
         <div className="rm-summary-card">
           <div className="rm-summary-n" style={{ color: 'var(--gm-amber)' }}>{totals.decision}</div>
-          <div className="rm-summary-l">Decisions needed</div>
-        </div>
-        <div className="rm-summary-card">
-          <div className="rm-summary-n">{totals.complete}/{totals.all}</div>
-          <div className="rm-summary-l">Items done</div>
+          <div className="rm-summary-l">Needs owner decision</div>
         </div>
       </div>
 
@@ -313,7 +321,7 @@ export default function RoadmapBoard() {
         <input className="rm-search" value={search} onChange={e => setSearch(e.target.value)}
                placeholder="Search items…" />
         <div className="rm-legend">
-          {Object.entries(STATUS_META).slice(0,4).map(([k, v]) => (
+          {Object.entries(STATUS_META).filter(([k]) => k !== 'FINISH').slice(0,4).map(([k, v]) => (
             <span key={k} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <span className="rm-legend-dot" style={{ background: v.bg, border: `1px solid ${v.border}` }} />
               <span className="rm-legend-text">{v.label}</span>
