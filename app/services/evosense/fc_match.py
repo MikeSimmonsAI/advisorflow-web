@@ -53,7 +53,13 @@ _GENERIC = {"ADDITION", "ADDN", "ADD", "ADDIT", "PHASE", "PH", "PHS", "SECTION",
 _NAME_STOP = {"AND", "ET", "AL", "ETAL", "UX", "VIR", "ETUX", "ETVIR", "TRUST", "TRUSTEE", "TRUSTEES", "REVOCABLE",
               "LIVING", "FAMILY", "ESTATE", "ESTATE OF", "OF", "THE", "LLC", "INC", "LP", "LTD", "CO", "CORP",
               "JR", "SR", "II", "III", "IV", "MR", "MRS", "MS", "DBA", "LIFE", "LE", "HUSBAND", "WIFE", "SINGLE",
-              "MARRIED", "PERSON", "MAN", "WOMAN", "SPOUSE", "UNMARRIED", "AKA", "FKA", "NULL", "NONE", "TR"}
+              "MARRIED", "PERSON", "MAN", "WOMAN", "SPOUSE", "UNMARRIED", "AKA", "FKA", "NULL", "NONE", "TR",
+              # business words: an LLC's name is not a person, and 'DEVELOPMENT'
+              # or 'HOMES' appears in half the notices (read live 2026-10-24)
+              "DEVELOPMENT", "DEVELOPMENTS", "HOMES", "HOME", "PROPERTIES", "PROPERTY", "INVESTMENTS", "INVESTMENT",
+              "HOLDINGS", "HOLDING", "GROUP", "CAPITAL", "REALTY", "REAL", "ENTERPRISES", "VENTURES", "PARTNERS",
+              "MANAGEMENT", "SERVICES", "SOLUTIONS", "INTERESTS", "ASSETS", "FUND", "COMPANY", "LIMITED",
+              "PARTNERSHIP", "ASSOCIATION", "BANK", "MORTGAGE", "FINANCIAL", "TEXAS", "DALLAS", "NATIONAL"}
 # a surname this common is never evidence on its own
 _COMMON = {"SMITH", "JOHNSON", "WILLIAMS", "BROWN", "JONES", "GARCIA", "MILLER", "DAVIS", "RODRIGUEZ", "MARTINEZ",
            "HERNANDEZ", "LOPEZ", "GONZALEZ", "WILSON", "ANDERSON", "THOMAS", "TAYLOR", "MOORE", "JACKSON", "MARTIN",
@@ -131,13 +137,36 @@ def phase_of(name: Optional[str], trailing: bool = True) -> Optional[str]:
 
 
 def _lots(fragment: str) -> Set[str]:
-    return {_num(x) for x in re.findall(r"\b(?:LOTS?|LT)\s+(?:NO\s+)?(\d{1,4}[A-Z]?|[A-Z]{3,9})\b", fragment)
-            if _num(x).isalnum() and (_num(x)[0].isdigit())}
+    out = {_num(x) for x in re.findall(r"\b(?:LOTS?|LT)\s+(?:NO\s+)?(\d{1,4}[A-Z]?|[A-Z]{3,9})\b", fragment)
+           if _num(x).isalnum() and (_num(x)[0].isdigit())}
+    # 'LOTS 16 AND 17, BLOCK B' / 'LOTS 4, 5 & 6' / 'LOTS 19-20': every lot named
+    for m in re.finditer(r"\bLOTS\s+((?:\d{1,4}[A-Z]?\s*(?:,|&|AND|-|THROUGH|THRU)\s*)+\d{1,4}[A-Z]?)\b", fragment):
+        out |= set(re.findall(r"\d{1,4}[A-Z]?", m.group(1)))
+    return out
 
 
 def _block(b: str) -> str:
     b = _num(b.strip().upper())
     return b.split("/")[0] if "/" in b and b.split("/")[0] else b
+
+
+def _same_block(a: Optional[str], b: Optional[str]) -> bool:
+    """Blocks agree; a scanned 'O' and '0', 'I' and '1' are the same mark."""
+    if a is None or b is None:
+        return True
+    t = str.maketrans("OI", "01")
+    return a.translate(t) == b.translate(t)
+
+
+def _lot_hit(want: Set[str], found: Set[str]) -> str:
+    """'exact' - a lot agrees; 'base' - only as a replat ('20A' / '20');
+    '' - no lot agrees."""
+    if want & found:
+        return "exact"
+    base = lambda v: re.sub(r"[A-Z]+$", "", v)
+    if {base(x) for x in want} & {base(x) for x in found}:
+        return "base"
+    return ""
 
 
 def cad_legal(subdivision: Optional[str], block: Optional[str], lots: Iterable[str], raw: str = "") -> Optional[Dict[str, Any]]:
@@ -212,10 +241,10 @@ def legal_match(legal: Optional[Dict[str, Any]], text: str) -> Dict[str, Any]:
         return res
     want_lots, want_block = set(legal["lots"]), legal.get("block")
     for x in found:
-        lot_ok = bool(want_lots & x["lots"])
-        block_ok = (want_block is None or x["block"] is None) or x["block"] == want_block
+        lot_ok = _lot_hit(want_lots, x["lots"])
+        block_ok = _same_block(want_block, x["block"])
         if lot_ok and block_ok:
-            res["result"] = "full" if (want_block and x["block"]) else "partial"
+            res["result"] = "full" if (want_block and x["block"] and lot_ok == "exact") else "partial"
             ph_n, ph_c = phase_of(x["context"], trailing=False), legal.get("phase")
             readable = lambda v: bool(v and re.fullmatch(r"\d{1,2}[A-Z]?", v))   # 'HI' is an OCR slip, not a phase
             res["phase_conflict"] = readable(ph_n) and readable(ph_c) and ph_n != ph_c
@@ -308,6 +337,13 @@ def decide(ident: Dict[str, Any], text: str, index_city: Optional[str] = None) -
         kinds.append("index city")
     out = {"signals": sig, "matched_by": " + ".join(kinds) + " (notice text)" if kinds else ""}
     if legal == "conflict" and not has_parcel:
+        if nm == "strong":
+            # the borrower's full name with a lot/block that reads differently
+            # is far more often a scan slip ('LOT 1]', 'BLOCK 43' for 13) than a
+            # neighbour with the same name: a person checks it, it is never
+            # dropped and never auto-verified
+            return dict(out, decision=CANDIDATE, reason="borrower/owner name matches but the notice's lot/block "
+                                                        "reads differently (%s) - confirm on the notice" % lg["detail"])
         return dict(out, decision=REJECTED, reason="same subdivision, different lot/block: %s" % lg["detail"])
     verified = ((has_parcel and (nm or sig.get("city") or legal in ("full", "partial")))
                 or (legal == "full" and (nm or sig.get("city")))
@@ -317,6 +353,9 @@ def decide(ident: Dict[str, Any], text: str, index_city: Optional[str] = None) -
                                                     "(often an OCR slip) - confirm on the notice")
     if verified:
         return dict(out, decision=VERIFIED, reason="")
+    if not (has_parcel or legal) and nm != "strong":
+        # one surname (or a city) alone names nobody: not even a candidate
+        return dict(out, decision=NONE, reason="")
     if sig:
         missing = "a parcel number or the lot/block/subdivision" if not (has_parcel or legal) else "a second, independent match"
         return dict(out, decision=CANDIDATE, reason="only %s - needs %s" % (", ".join(kinds) or "a partial match", missing))
