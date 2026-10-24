@@ -81,6 +81,7 @@ LABELS = {
     "address": "Property address",
     "city": "City", "zip": "ZIP", "county": "County",
     "parcel": "Appraisal district account",
+    "legal_description": "Legal description (appraisal district record)",
     "price": "Purchase price",
     "earnest_money": "Earnest money",
     "option_days": "Option period (days)",
@@ -132,7 +133,7 @@ def _day(v) -> Optional[str]:
     return str(v)
 
 # Things a person may type on the send screen. Anything else is ignored.
-OVERRIDABLE = ("seller_name", "seller_email", "buyer_entity", "buyer_signer", "buyer_email",
+OVERRIDABLE = ("legal_description", "seller_name", "seller_email", "buyer_entity", "buyer_signer", "buyer_email",
                "assignee_name", "assignee_signer", "assignee_email", "price", "earnest_money",
                "option_days", "option_fee", "title_company", "closing_date", "contract_date",
                "assignment_fee", "assignee_deposit", "closing_costs", "possession",
@@ -142,7 +143,8 @@ DATE_KEYS = ("closing_date", "contract_date")
 
 
 def build_values(*, deal=None, prop=None, seller_name=None, seller_email=None, buyer=None,
-                 org_name=None, user=None, overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                 org_name=None, user=None, overrides: Optional[Dict[str, Any]] = None,
+                 legal_description: Optional[str] = None) -> Dict[str, Any]:
     """Every value a document can use, from the deal first and the person's
     typed overrides second. Money and dates are formatted here, once."""
     g = lambda o, a: getattr(o, a, None) if o is not None else None   # noqa: E731
@@ -161,6 +163,7 @@ def build_values(*, deal=None, prop=None, seller_name=None, seller_email=None, b
         "zip": g(prop, "zip_code"),
         "county": g(prop, "county"),
         "parcel": g(prop, "parcel_apn"),
+        "legal_description": legal_description,
         "price": g(deal, "contract_price"),
         "earnest_money": g(deal, "earnest_money"),
         "option_fee": g(deal, "option_fee"),
@@ -245,6 +248,15 @@ def _property(r: _R) -> str:
         (" (appraisal district account %s)" % _h.escape(r.v["parcel"])) if r.v.get("parcel") else ""))
 
 
+def _legal(r: _R) -> str:
+    if r.v.get("legal_description"):
+        return (", legally described as <b>%s</b> according to the appraisal district record. If the "
+                "title commitment issued by the title company named below describes the Property "
+                "differently, the title commitment governs." % _h.escape(str(r.v["legal_description"])))
+    return (". The legal description will be the one shown in the title commitment issued by the "
+            "title company named below.")
+
+
 def _purchase(r: _R) -> str:
     return f"""
 <h1>Residential Real Estate Purchase Agreement</h1>
@@ -253,8 +265,7 @@ def _purchase(r: _R) -> str:
 and/or assigns</b> ("Buyer").</p>
 <h2>1. The property</h2>
 <p>Seller agrees to sell and Buyer agrees to buy the land and all improvements and fixtures at
-{_property(r)} (the "Property"). The legal description will be the one shown in the title
-commitment issued by the title company named below.</p>
+{_property(r)} (the "Property"){_legal(r)}</p>
 <h2>2. Price</h2>
 <p>The purchase price is <b>{r('price')}</b>, paid in cash or certified funds at closing. This
 purchase is not contingent on Buyer obtaining a loan.</p>
