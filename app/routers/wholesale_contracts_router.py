@@ -598,7 +598,24 @@ def _contract_values(db: Session, org_id: str, deal: WholesaleDeal, user: User,
     org = db.query(Organization).filter(Organization.id == org_id).first()
     return docs.build_values(deal=deal, prop=prop, seller_name=seller_name,
                              seller_email=getattr(lead, "email", None), buyer=buyer,
-                             org_name=getattr(org, "name", None), user=user, overrides=overrides)
+                             org_name=getattr(org, "name", None), user=user, overrides=overrides,
+                             legal_description=_legal_on_file(db, org_id, deal))
+
+
+def _legal_on_file(db: Session, org_id: str, deal: WholesaleDeal) -> Optional[str]:
+    """The appraisal district's legal description of the house this deal came
+    from (EvoSense keeps the county record it was verified with). None when
+    nothing is on file: the contract then defers to the title commitment."""
+    try:
+        from app.models.evosense_models import EvoSenseProperty
+        from app.services.evosense import fc_match as FM
+        evo = (db.query(EvoSenseProperty).filter(EvoSenseProperty.organization_id == org_id,
+                                                 EvoSenseProperty.promoted_deal_id == deal.id).first())
+        legal = FM.identity(db, evo).get("legal") if evo is not None else None
+        raw = (legal or {}).get("raw") or None
+        return " ".join(str(raw).split()) if raw else None
+    except Exception:  # noqa: BLE001 - a missing description never blocks a contract
+        return None
 
 
 @router.get("/contract-kits")

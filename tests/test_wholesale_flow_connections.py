@@ -116,3 +116,28 @@ def test_closing_an_assigned_deal_needs_the_assignment_approval(client, auth_hea
     db_session.expire_all()
     assert db_session.query(WholesaleDeal).filter(WholesaleDeal.id == deal_id).first().stage == "closed"
     assert db_session.query(Lead).count() >= 1
+
+
+def test_the_purchase_agreement_carries_the_legal_description_on_file(client, auth_headers, db_session, sample_org):
+    """The appraisal district's legal description the property was verified
+    with goes into the contract (editable); with none on file, the contract
+    defers to the title commitment as before."""
+    import json as _json
+    from app.models.evosense_models import EvoSenseObservation
+    pid, deal_id = _deal(client, auth_headers, street="81 Joint Test Ln")
+    url = "/wholesale/deals/%s/contracts/purchase_agreement/preview" % deal_id
+    before = ok(client.post(url, headers=auth_headers, json={}))
+    assert "title commitment issued by the title company" in before["html"]
+    assert not before["values"].get("legal_description")
+    raw = _json.dumps({"ACCOUNT_INFO": {"ACCOUNT_NUM": "00000999999000000", "LEGAL1": "KING OAK ADDITION",
+                                        "LEGAL2": "BLK 5 LOT 12", "OWNER_NAME1": "TEST SELLER JOINT"}})
+    db_session.add(EvoSenseObservation(organization_id=sample_org.id, property_id=pid, provider_key="dcad",
+                                       connector_kind="real", capability="property_record",
+                                       source_reference="DCAD:test", raw_payload=raw, payload=raw))
+    db_session.commit()
+    after = ok(client.post(url, headers=auth_headers, json={}))
+    assert after["values"]["legal_description"] == "KING OAK ADDITION BLK 5 LOT 12"
+    assert "legally described as <b>KING OAK ADDITION BLK 5 LOT 12</b>" in after["html"]
+    assert "the title commitment governs" in after["html"]
+    fixed = ok(client.post(url, headers=auth_headers, json={"values": {"legal_description": "LOT 12, BLOCK 5, KING OAK ADDITION"}}))
+    assert "LOT 12, BLOCK 5, KING OAK ADDITION" in fixed["html"]
