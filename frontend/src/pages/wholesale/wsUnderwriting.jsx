@@ -165,6 +165,73 @@ function Provenance({ dealId, refreshKey }) {
   )
 }
 
+function FindComps({ dealId, onAdded }) {
+  const [res, setRes] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const [entry, setEntry] = useState({})
+  const [radius, setRadius] = useState(1)
+  const [months, setMonths] = useState(12)
+  async function search(allowRentcast) {
+    setBusy(true); setErr(null)
+    try { setRes(await api.post(`/wholesale/deals/${dealId}/comps/find`, { radius_miles: Number(radius), months: Number(months), allow_rentcast_call: !!allowRentcast })) }
+    catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+  async function add(c) {
+    const e = entry[c.key] || {}
+    setBusy(true); setErr(null)
+    try {
+      await api.post(`/wholesale/deals/${dealId}/comps/find/add`, { key: c.key, sale_price: e.price ? Number(e.price) : null, source_reference: e.ref || null, radius_miles: Number(radius), months: Number(months) })
+      if (onAdded) onAdded()
+      await search(false)
+    } catch (x) { setErr(x.message) } finally { setBusy(false) }
+  }
+  return (
+    <div className="uw-steps" style={{ marginTop: 10 }}>
+      <div className="uw-row" style={{ marginTop: 0 }}>
+        <button type="button" className="btn btn--primary btn--sm" disabled={busy} onClick={() => search(false)}>{busy ? 'Searching…' : 'Find comps automatically'}</button>
+        <label>Within <input type="number" min="0.25" max="5" step="0.25" value={radius} onChange={(e) => setRadius(e.target.value)} style={{ width: 60 }} /> mi</label>
+        <label>Last <input type="number" min="1" max="36" value={months} onChange={(e) => setMonths(e.target.value)} style={{ width: 50 }} /> months</label>
+      </div>
+      {err ? <div className="ws-error">{err}</div> : null}
+      {res ? (
+        <>
+          <ul className="uw-history" style={{ marginTop: 8 }}>
+            {res.sources.map((s) => (
+              <li key={s.key}><b>{s.label}</b> ({s.cost}): {s.available ? `${s.found} found` : s.why}{s.error ? ` - ${s.error}` : ''}
+                {s.key === 'rentcast_listings' && s.available && !s.found ? <> · <button type="button" className="btn btn--secondary btn--sm" disabled={busy} onClick={() => search(true)}>Use 1 free RentCast lookup</button></> : null}</li>))}
+          </ul>
+          {res.gap ? <div className="uw-missing" style={{ marginTop: 6 }}>{res.gap}</div> : null}
+          {(res.notes || []).map((n) => <p key={n} className="ws-muted uw-small">{n}</p>)}
+          {res.candidates.length ? (
+            <div className="uw-table-wrap"><table className="uw-table">
+              <thead><tr><th>Address</th><th>What it is</th><th>Date</th><th className="ws-num">Price</th><th className="ws-num">Score</th><th>Add</th></tr></thead>
+              <tbody>{res.candidates.map((c) => (
+                <tr key={c.key} className={c.excluded.length ? 'is-quiet' : ''}>
+                  <td>{c.address}{c.distance_miles != null ? <span className="ws-muted"> · {c.distance_miles} mi</span> : null}
+                    <div className="ws-muted uw-small">{[c.square_feet && `${c.square_feet} sq ft`, c.year_built && `built ${c.year_built}`, c.legal].filter(Boolean).join(' · ')}</div>
+                    <details><summary className="uw-small">why</summary><div className="uw-small">{c.why.join('; ')}{c.excluded.length ? <div className="ws-error">Not comparable: {c.excluded.join('; ')}</div> : null}<div className="ws-muted">{c.source} · {c.source_reference}</div></div></details></td>
+                  <td><span className={`ws-pill ${c.price_kind === 'CLOSED_SALE' ? 'is-ok' : c.price_kind === 'TRANSFER_NO_PRICE' ? 'is-warn' : ''}`}>{c.kind_label}</span></td>
+                  <td className="uw-small">{c.date || '—'}<div className="ws-muted">{c.date_kind}</div></td>
+                  <td className="ws-num">{c.price != null ? fmtMoney(c.price) : '—'}</td>
+                  <td className="ws-num">{c.score}</td>
+                  <td>{c.needs_price ? (
+                    <div className="uw-row" style={{ marginTop: 0 }}>
+                      <input type="number" placeholder="Sale price" style={{ width: 95 }} onChange={(e) => setEntry({ ...entry, [c.key]: { ...(entry[c.key] || {}), price: e.target.value } })} />
+                      <input placeholder="MLS # / source" style={{ width: 110 }} onChange={(e) => setEntry({ ...entry, [c.key]: { ...(entry[c.key] || {}), ref: e.target.value } })} />
+                      <button type="button" className="btn btn--secondary btn--sm" disabled={busy} onClick={() => add(c)}>Add</button>
+                    </div>) : c.usable_for_arv ? <button type="button" className="btn btn--secondary btn--sm" disabled={busy} onClick={() => add(c)}>Add</button>
+                    : <span className="ws-muted uw-small">{c.excluded.length ? 'not comparable' : 'reference only'}</span>}</td>
+                </tr>))}</tbody>
+            </table></div>
+          ) : <p className="ws-muted">No candidates from the connected sources.</p>}
+          <p className="ws-muted uw-small">{res.rule}</p>
+        </>
+      ) : <p className="ws-muted uw-small">Searches county deed records, the Johnson County roll and RentCast listings (inside the free cap). Nothing is added until you add it.</p>}
+    </div>
+  )
+}
+
 export function UnderwritingTab({ dealId, goTo, onChanged }) {
   const [a, setA] = useState(null)
   const [form, setForm] = useState({})
@@ -286,6 +353,7 @@ export function UnderwritingTab({ dealId, goTo, onChanged }) {
               </tr>))}</tbody>
           </table></div>
         ) : <p className="ws-muted">No comparable sales yet. Import a CSV or add them under Analysis &amp; comps.</p>}
+        <FindComps dealId={dealId} onAdded={() => { load(); if (onChanged) onChanged() }} />
         <button type="button" className="btn btn--secondary btn--sm" onClick={() => goTo('analysis')}>Edit comps</button>
       </div>
 

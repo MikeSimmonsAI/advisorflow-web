@@ -216,6 +216,24 @@ class Index:
         hit = self.con.execute("SELECT row, legal FROM acct WHERE geo = ?", (geo,)).fetchone()
         return self._row(*hit) if hit else None
 
+    def same_subdivision(self, subdivision: str, limit: int = 400) -> List[Dict[str, Any]]:
+        """Accounts whose legal description names the same platted subdivision (core words)."""
+        from app.services.evosense import fc_match as M
+        core = M.subdivision_core(subdivision)
+        if not core:
+            return []
+        like = "%" + " ".join(core) + "%"
+        out = []
+        for data, legal in self.con.execute("SELECT row, legal FROM acct WHERE legal LIKE ? LIMIT ?",
+                                            (like, limit * 3)):
+            r = self._row(data, legal)
+            parsed = M.parse_cad_legal_text(r["LEGAL"]) if r.get("LEGAL") else None
+            if parsed and parsed.get("core") == core:
+                out.append(r)
+                if len(out) >= limit:
+                    break
+        return out
+
     def by_addr(self, key: str) -> List[Dict[str, Any]]:
         return [self._row(*x) for x in self.con.execute("SELECT row, legal FROM acct WHERE addr = ?", (key,)).fetchall()]
 

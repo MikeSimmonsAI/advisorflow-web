@@ -259,3 +259,57 @@ async def import_comps(deal_id: str, file: UploadFile = File(...), db: Session =
     db.commit()
     return {"added": len(added), "refused": refused,
             "analysis": UW.analyze(db, org_id, deal, _last_assumptions(db, org_id, deal.id))}
+
+
+# ── Automatic comparable sales ─────────────────────────────────────────────
+
+class FindCompsIn(BaseModel):
+    radius_miles: Optional[float] = None
+    months: Optional[int] = None
+    sqft_tolerance_pct: Optional[int] = None
+    allow_rentcast_call: bool = False      # spend one of the free monthly RentCast lookups if none is cached
+
+
+@router.post("/deals/{deal_id}/comps/find", dependencies=[Depends(require_not_observation)])
+def find_comps(deal_id: str, payload: FindCompsIn, db: Session = Depends(get_db),
+               user: User = Depends(require_tenant_user)):
+    """Search every connected source for comparable sales. Writes nothing to the deal."""
+    from app.services import wholesale_auto_comps as AC
+    org_id = svc.write_org_id(db, user)
+    deal = svc.get_deal(db, org_id, deal_id)
+    out = AC.find(db, org_id, deal, user, payload.model_dump(exclude_unset=True))
+    svc.log_event(db, org_id, "comps.searched", actor_type=svc.ACTOR_USER, actor_user_id=user.id, deal_id=deal.id,
+                  summary="Comparable sales searched: %d closed, %d transfers needing a price, %d listings" % (
+                      out["counts"]["closed_sales_usable"], out["counts"]["transfers_need_price"],
+                      out["counts"]["listings_reference_only"]),
+                  after={"sources": [{"key": s["key"], "available": s["available"], "found": s["found"]}
+                                     for s in out["sources"]]})
+    db.commit()
+    return out
+
+
+class AddFoundIn(BaseModel):
+    key: str
+    sale_price: Optional[float] = None
+    source_reference: Optional[str] = None
+    radius_miles: Optional[float] = None
+    months: Optional[int] = None
+
+
+@router.post("/deals/{deal_id}/comps/find/add", dependencies=[Depends(require_not_observation)])
+def add_found_comp(deal_id: str, payload: AddFoundIn, db: Session = Depends(get_db),
+                   user: User = Depends(require_tenant_user)):
+    """Add one shortlisted candidate. The candidate is looked up again on the server by its key,
+    so what it IS (sale, transfer, listing) comes from the source, not from the request."""
+    from app.services import wholesale_auto_comps as AC
+    org_id = svc.write_org_id(db, user)
+    deal = svc.get_deal(db, org_id, deal_id)
+    res = AC.find(db, org_id, deal, user, {k: v for k, v in (("radius_miles", payload.radius_miles),
+                                                              ("months", payload.months)) if v is not None})
+    cand = next((c for c in res["candidates"] if c["key"] == payload.key), None)
+    if cand is None:
+        raise HTTPException(status_code=404, detail="That candidate is no longer in the search results.")
+    comp = AC.add_candidate(db, org_id, deal, user, cand, payload.sale_price, payload.source_reference)
+    analysis = svc.recalculate_analysis(db, org_id, deal, user)
+    db.commit()
+    return {"comp_id": comp.id, "arv": analysis.get("arv") if isinstance(analysis, dict) else None}

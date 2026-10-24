@@ -142,3 +142,10 @@ def test_registered_as_a_free_johnson_only_source():
     p = PV.PROVIDERS["johnson_cad"]
     assert not p.costs and p.applies({"county": "Johnson", "street_address": "1 A St"})
     assert not p.applies({"county": "Tarrant", "street_address": "1 A St"})
+
+
+def test_same_subdivision_finds_platted_neighbours(roll):
+    idx = J.load_index()
+    rows = idx.same_subdivision("TESTSTONE ESTATES PH 2")
+    assert [r["GEO ACCOUNT NUM"] for r in rows] == ["126.9001.00010"]
+    assert idx.same_subdivision("NOWHERE ADDN") == []

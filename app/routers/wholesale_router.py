@@ -2553,6 +2553,9 @@ def update_comp(comp_id: str, payload: CompIn, request: Request,
         raise HTTPException(status_code=404, detail="Comp not found")
     data = payload.model_dump(exclude_unset=True)
     was_included = bool(comp.included)
+    # Audit history for manual adjustments: what each changed field was and became.
+    before = {k: (str(getattr(comp, k)) if getattr(comp, k, None) is not None else None)
+              for k in data if k in _COMP_FIELDS or k == "sale_date"}
     if "sale_date" in data:
         comp.sale_date = _parse_date(data.pop("sale_date"))
     for key, value in data.items():
@@ -2577,9 +2580,13 @@ def update_comp(comp_id: str, payload: CompIn, request: Request,
             summary=("Comp %s in the ARV: %s"
                      % ("included" if comp.included else "excluded", label)))
     if [k for k in data if k != "included"]:
+        after = {k: (str(getattr(comp, k)) if getattr(comp, k, None) is not None else None) for k in before}
+        changed = {k: {"from": before[k], "to": after[k]} for k in before if before[k] != after[k]}
         svc.log_event(db, org_id, "comp.updated", actor_type=ACTOR_USER,
                       actor_user_id=user.id, deal_id=deal.id,
-                      summary="Comp edited: %s" % label)
+                      summary="Comp edited: %s (%s)" % (label, ", ".join(sorted(changed)) or "no change"),
+                      before={k: v["from"] for k, v in changed.items()},
+                      after={k: v["to"] for k, v in changed.items()})
     summary = svc.recalculate_analysis(db, org_id, deal, user)
     db.commit()
     return {"comp": comp_json(comp), "analysis": summary}
