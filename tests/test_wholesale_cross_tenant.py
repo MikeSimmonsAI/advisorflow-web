@@ -390,6 +390,8 @@ def attacks(ids):
          {"label": "planted", "states": ["TX"]}),
         ("patch", "/wholesale/buy-boxes/%s" % ids["box_id"], {"label": "taken"}),
         ("delete", "/wholesale/buy-boxes/%s" % ids["box_id"], None),
+        ("get", "/wholesale/buyers/%s/intel" % ids["buyer_id"], None),
+        ("get", "/wholesale/deals/%s/buyer-intel" % d, None),
 
         # ── Disposition: the path that can actually send something ──────────
         ("post", "/wholesale/deals/%s/match-buyers" % d, {}),

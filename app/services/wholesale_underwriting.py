@@ -385,8 +385,12 @@ def analyze(db, org_id: str, deal, overrides: Optional[Dict[str, Any]] = None) -
     if a.get("rent_monthly") is None:
         missing.append("Monthly rent (for the rental scenario)")
     for r in gate.get("reasons") or []:
-        if r not in " ".join(missing):
-            missing.append(r)
+        low = r.lower()
+        # the MAO gate restates the two gaps already listed above; keep one line each
+        if (arv is None and low.startswith("no arv")) or (low.startswith("repairs are") and any(
+                m.startswith("Repairs:") for m in missing)) or r in " ".join(missing):
+            continue
+        missing.append(r)
 
     conf_arv = (getattr(deal, "arv_confidence", None) or ("insufficient" if arv is None else "low"))
     rep_conf = {"VERIFIED": "high", "INSPECTION_ESTIMATE": "high", "MANUAL_ESTIMATE": "medium",
