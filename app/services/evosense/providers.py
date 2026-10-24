@@ -1117,21 +1117,22 @@ class LgbsTaxSaleSource(PublicRecordSource):
 
 class ClerkForeclosureSource(PublicRecordSource):
     """Posted foreclosure notices filed with the county clerk (Dallas, Tarrant,
-    Denton): substitute trustee / trustee sales, HOA assessment-lien sales,
+    Denton, Johnson): substitute trustee / trustee sales, HOA assessment-lien sales,
     judicial and tax sales, each with its document number and sale date.
     Collin County's clerk portal has no foreclosure department - reported as
     not connected, never as "no foreclosure"."""
-    scope, counties = "county", ("Dallas", "Tarrant", "Denton")
+    scope, counties = "county", ("Dallas", "Tarrant", "Denton", "Johnson")
     key = "tx_clerk_foreclosure"
-    label = "County clerk foreclosure notices (Dallas, Tarrant, Denton)"
+    label = "County clerk foreclosure notices (Dallas, Tarrant, Denton, Johnson)"
     capabilities = (C.FORECLOSURE,)
     discovery = True
     discovery_opt_in = True      # only a strategy whose search names FORECLOSURE (or this source) hunts it
-    coverage = ("Dallas, Tarrant and Denton County, TX - every foreclosure sale notice filed with the county "
-                "clerk (trustee, substitute trustee, HOA assessment-lien, judicial and tax sales), with "
+    coverage = ("Dallas, Tarrant, Denton and Johnson County, TX - every foreclosure sale notice filed with the "
+                "county clerk (trustee, substitute trustee, HOA assessment-lien, judicial and tax sales), with "
                 "document number, sale date and the clerk's indexed address. Not connected: Collin (no "
-                "foreclosure department on its clerk portal) and every other county.")
-    jurisdiction = "Dallas, Tarrant and Denton County, TX"
+                "foreclosure department on its clerk portal), Ellis, Kaufman, Rockwall (not on the clerk "
+                "search) and every other county.")
+    jurisdiction = "Dallas, Tarrant, Denton and Johnson County, TX"
     source_type = "County Clerk - posted foreclosure notices (official record)"
     access_method = ("The clerks' free public record search (publicsearch.us), as an anonymous visitor: "
                      "a few paged requests per county, spaced apart")
@@ -1224,7 +1225,7 @@ class DallasForeclosureManual(ManualOnlySource):
     jurisdiction = "Texas"
     source_type = "County Clerk foreclosure postings"
     public_url = "https://www.collincountytx.gov/"
-    terms_note = ("Dallas, Tarrant and Denton notices are read automatically (tx_clerk_foreclosure). "
+    terms_note = ("Dallas, Tarrant, Denton and Johnson notices are read automatically (tx_clerk_foreclosure). "
                   "Elsewhere a person enters the notice; without a document number it stays a claim.")
 
 

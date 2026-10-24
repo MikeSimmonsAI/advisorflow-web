@@ -3,6 +3,7 @@
     https://dallas.tx.publicsearch.us    department FC ("Foreclosures")
     https://tarrant.tx.publicsearch.us   department FC
     https://denton.tx.publicsearch.us    department FC
+    https://johnson.tx.publicsearch.us   department FC
 
 In Texas a non-judicial foreclosure (deed-of-trust trustee or substitute
 trustee sale, and an HOA assessment-lien sale under a declaration) must be
@@ -10,8 +11,8 @@ posted and filed with the county clerk at least 21 days before the sale, which
 is held on the first Tuesday of the month (Tex. Prop. Code 51.002). These
 three clerks publish every filed notice in a free, anonymous search (the
 GovOS / Kofile "publicsearch" portal): document number, recorded date, sale
-date (Dallas, Denton: the day; Tarrant: the month), the property address the
-clerk indexed (Dallas, Tarrant), and the notice's own OCR text, which the
+date (Dallas, Denton, Johnson: the day; Tarrant: the month), the property address
+the clerk indexed (Dallas, Tarrant, Johnson), and the notice's own OCR text, which the
 portal's full-text search reads.
 
 The portal's browser client talks to the server over one websocket
@@ -64,11 +65,19 @@ COUNTIES: Dict[str, Dict[str, Any]] = {
                 "window": "recordedDateRange", "window_on": "recorded", "sale": "month", "address": True},
     "denton": {"host": "denton.tx.publicsearch.us", "label": "Denton County Clerk",
                "window": "instrumentDateRange", "window_on": "sale", "sale": "day", "address": False},
+    # read live 2026-10-23: 44 notices for the 2026-11-03 sale, every one with its address
+    "johnson": {"host": "johnson.tx.publicsearch.us", "label": "Johnson County Clerk",
+                "window": "instrumentDateRange", "window_on": "sale", "sale": "day", "address": True},
 }
 # Counties checked and found to have NO foreclosure department on their clerk
 # portal (so no automatic source) - reported as such, never as "no foreclosure".
-NO_PORTAL = {"collin": "Collin County Clerk's record search has no foreclosure department "
-                       "(checked 2026-10-23); notices are posted at the courthouse."}
+NO_PORTAL = {
+    "collin": "Collin County Clerk's record search has no foreclosure department (checked 2026-10-23); "
+              "notices are posted at the courthouse.",
+    "ellis": "Ellis County Clerk is not on the public record search EvoSense reads (checked 2026-10-23).",
+    "kaufman": "Kaufman County Clerk is not on the public record search EvoSense reads (checked 2026-10-23).",
+    "rockwall": "Rockwall County Clerk is not on the public record search EvoSense reads (checked 2026-10-23).",
+}
 
 MONTHS = {m: i for i, m in enumerate(("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP",
                                       "OCT", "NOV", "DEC"), 1)}

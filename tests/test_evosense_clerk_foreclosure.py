@@ -385,7 +385,7 @@ def test_a_strategy_with_no_working_source_is_blocked_not_green(db_session, samp
     v = ST.starter_values("pre_foreclosure")
     clean, problems = ST.validate(v)
     assert not problems
-    assert "Dallas, Tarrant and Denton" in ST.STARTERS["pre_foreclosure"]["data"]
+    assert "Dallas, Tarrant, Denton and Johnson" in ST.STARTERS["pre_foreclosure"]["data"]
     from app.models.evosense_models import EvoSenseStrategy
     s = EvoSenseStrategy(organization_id=sample_org.id, name="PF", status="active",
                          provider_preferences=C.jdump({"discovery": ["FORECLOSURE"]}))
@@ -433,3 +433,13 @@ def test_discovery_alternates_counties_and_rotates_daily(clerks):
     assert day1 != day0                                                      # the next day reaches other notices
     everything = r.discover(["dallas", "tarrant", "denton"], limit=500, rotate=7)["records"]
     assert len(everything) == len({x["source_reference"] for x in everything})   # no repeats when all fit
+
+
+# 17 ── which county clerks are read, and which are honestly not ─────────────
+
+def test_county_coverage_is_stated_county_by_county():
+    assert set(F.COUNTIES) == {"dallas", "tarrant", "denton", "johnson"}
+    for c in ("collin", "ellis", "kaufman", "rockwall"):
+        assert "checked 2026-10-23" in F.NO_PORTAL[c]
+    with pytest.raises(B.SourceError):
+        F.ClerkPortal("ellis")                      # never a pretend read
