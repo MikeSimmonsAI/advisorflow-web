@@ -329,7 +329,7 @@ def foreclosure_status(sigs, today=None, check: Optional[Dict[str, Any]] = None)
     checked = (check or {}).get("checked")
     base = {"verified": False, "sale_date": None, "days": None, "claimed_sale_date": None, "notices": [],
             "document": None, "document_url": None, "foreclosure_type": None, "source": None,
-            "evidence_reference": None, "observed": None, "clerk_checked": checked,
+            "evidence_reference": None, "evidence": None, "observed": None, "clerk_checked": checked,
             "clerk_source": (check or {}).get("source"), "confidence": 0,
             "last_checked": checked}
     claim_dates = sorted({d for d in (_sd(prov[x.id].get("sale_date")) for x in claims) if d})
@@ -360,7 +360,7 @@ def foreclosure_status(sigs, today=None, check: Optional[Dict[str, Any]] = None)
                           "type": KIND.get(pv.get("foreclosure_type") or "", pv.get("foreclosure_type")
                                            or "Foreclosure notice"),
                           "status": (x.case_status or "scheduled").lower(), "source": x.source,
-                          "matched_by": pv.get("matched_by"),
+                          "matched_by": pv.get("matched_by"), "evidence": pv.get("note"),
                           "observed": x.observed_at.strftime("%Y-%m-%d") if x.observed_at else None})
         rows_.sort(key=lambda r: r["sale_date"] or "")
         base["notices"] = rows_
@@ -371,7 +371,7 @@ def foreclosure_status(sigs, today=None, check: Optional[Dict[str, Any]] = None)
         pick = live[0] if live else rows_[-1]
         kw = {"verified": True, "sale_date": pick["sale_date"], "document": pick["document"],
               "document_url": pick["url"], "foreclosure_type": pick["type"], "source": pick["source"],
-              "evidence_reference": pick["document"], "observed": pick["observed"],
+              "evidence_reference": pick["document"], "evidence": pick.get("evidence"), "observed": pick["observed"],
               "confidence": 92 if (pick.get("matched_by") or "").startswith("clerk index") else 85}
         if live:
             dates = sorted({r["sale_date"] for r in live})

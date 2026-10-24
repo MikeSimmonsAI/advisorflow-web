@@ -331,6 +331,11 @@ export default function EvoCohort() {
                             : `Notice ${r.foreclosure.document}`}
                           {r.foreclosure.notices?.length > 1 ? ` · ${r.foreclosure.notices.length} notices on file` : ''}
                         </span>) : null}
+                      {r.foreclosure.evidence ? (
+                        <details className="evo-prop__sub" onClick={(e) => e.stopPropagation()}>
+                          <summary>What the notice says</summary>
+                          <span style={{ display: 'block', whiteSpace: 'normal', maxWidth: 360 }}>{r.foreclosure.evidence}</span>
+                        </details>) : null}
                       {r.foreclosure.claimed_sale_date && r.foreclosure.status !== 'VERIFIED NOTICE' ? <span className="evo-prop__sub" style={{ display: 'block' }}>list claims {r.foreclosure.claimed_sale_date}</span> : null}
                       <span className="evo-prop__sub" style={{ display: 'block' }}>
                         {r.foreclosure.clerk_checked ? `clerk checked ${r.foreclosure.clerk_checked}` : 'clerk not checked'}

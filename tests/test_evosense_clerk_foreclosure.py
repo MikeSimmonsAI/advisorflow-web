@@ -372,6 +372,15 @@ def test_manual_notice_needs_a_document_number_to_count_as_verified(client, db_s
     st = CO.foreclosure_status(db_session.query(EvoSenseSignal).filter_by(property_id=p.id,
                                                                           signal_type="PRE_FORECLOSURE").all())
     assert "notice 2026-0099123 filed 2026-08-20" in st["detail"]   # the clerk's stamp, read by a person
+    long_note = "Grantors A and B; Lot 5, Block A, Russell Creek Phase III; instrument 2003-0130192; " * 6
+    r = client.post(url, headers=admin_auth_headers, json={"signal_type": "PRE_FORECLOSURE", "sale_date": SALE.isoformat(),
+                                                           "document_number": "2026-0099123", "note": long_note})
+    assert r.status_code == 200, r.text
+    db_session.expire_all()
+    st = CO.foreclosure_status(db_session.query(EvoSenseSignal).filter_by(property_id=p.id,
+                                                                          signal_type="PRE_FORECLOSURE").all())
+    assert len(long_note) > 400 and st["evidence"] == long_note.strip()     # the whole note, not 200 characters
+    assert st["notices"][-1]["evidence"] == long_note.strip()
 
 
 # 12 ── tenant isolation: one org's check never touches another's houses ──────
