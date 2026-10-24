@@ -106,7 +106,7 @@ def account(county: str, acct: str) -> str:
 
 
 class LgbsTaxSaleReader:
-    adapter_version = "lgbs_tax_sales/1"
+    adapter_version = "lgbs_tax_sales/2"
 
     def fetch_county(self, county: str) -> List[Dict[str, Any]]:
         rows: List[Dict[str, Any]] = []
@@ -238,6 +238,19 @@ class LgbsTaxSaleReader:
                           "sale_date": sale_at.strftime("%Y-%m-%d") if sale_at else None,
                           "adjudged_value": value, "minimum_bid": minimum, "notes": notes or None},
         }
+        if sale_at and sale_at.date() >= as_of.date():
+            # A dated sheriff / constable tax sale on the calendar: its own
+            # signal (a tax foreclosure SALE, never a mortgage foreclosure).
+            rec["signals"].append({
+                "type": "TAX_SALE", "confidence": 95,
+                "value": "Tax foreclosure sale scheduled %s (%s County, cause %s)" % (
+                    sale_at.strftime("%Y-%m-%d"), c.title() if c else "", cause or "on file"),
+                "raw": "SALE=%s;CAUSE=%s;STATUS=%s" % (sale_at.strftime("%Y-%m-%d"), cause, r.get("status")),
+                "effective_at": sale_at.strftime("%Y-%m-%d"), "observed_days_ago": 0,
+                "evidence_basis": "tax sale date listed by the taxing units' attorneys",
+                "case_status": "scheduled", "sale_date": sale_at.strftime("%Y-%m-%d"),
+                "foreclosure_type": "tax_foreclosure_sale", "document": cause or None,
+                "ref": "LGBS-SALE:%s:%s" % (r.get("uid"), sale_at.strftime("%Y%m%d"))})
         if len(geo) == 2 and all(isinstance(x, (int, float)) for x in geo):
             rec["longitude"], rec["latitude"] = geo[0], geo[1]
         return rec

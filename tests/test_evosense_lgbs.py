@@ -77,7 +77,10 @@ def test_record_carries_the_judgment_as_evidence(lgbs_api):
     res = LG.LgbsTaxSaleReader().discover(limit=50, counties=("dallas", "tarrant"))
     soon = next(r for r in res["records"] if r["street_address"] == "200 SOON ST")
     sig = {s["type"]: s for s in soon["signals"]}
-    assert set(sig) == {"TAX_SUIT", "TAX_DELINQUENT"}
+    assert set(sig) == {"TAX_SUIT", "TAX_DELINQUENT", "TAX_SALE"}      # a dated sale is its own signal
+    assert sig["TAX_SALE"]["sale_date"] and sig["TAX_SALE"]["foreclosure_type"] == "tax_foreclosure_sale"
+    held = next(r for r in res["records"] if r["street_address"] == "100 HELD ST")
+    assert "TAX_SALE" not in {s["type"] for s in held["signals"]}       # no date: no sale signal
     assert "cause TX-24-00002" in sig["TAX_SUIT"]["value"] and "tax sale scheduled" in sig["TAX_SUIT"]["value"]
     assert "minimum bid $18,401" in sig["TAX_SUIT"]["value"]
     assert soon["county"] == "Dallas" and soon["parcel_apn"] == "00000555100000000"

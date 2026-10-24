@@ -194,6 +194,26 @@ def resolve(db, org_id: str, record: Dict) -> Tuple[str, Optional[EvoSenseProper
                 and (p.unit is None or k["unit"] is None)]
         if near:
             return AMBIGUOUS, None, near, ["street", "unit differs"]
+    # Same house number and ZIP, and the same street once spaces, directions
+    # and the suffix are ignored: "2728 RUNNING BROOK LANE" (a clerk notice)
+    # is "2728 RUNNINGBROOK LN" (the county). A new property here would be a
+    # duplicate (live 2026-10-24); one such house is the same house, several
+    # wait for a person.
+    if k["number_street"] and k["zip5"]:
+        from app.services.evosense.sources.txgio import _core
+        num, core = _core(k["number_street"])
+        if num and core:
+            pool = base.filter(EvoSenseProperty.zip_code.like(k["zip5"] + "%"),
+                               EvoSenseProperty.street_address.like(num + " %")).all()
+            same = [p for p in pool if _core(p.street_address) == (num, core)
+                    and ((p.unit or None) == k["unit"])]
+            if len(same) == 1:
+                p = same[0]
+                if not (k["apn_key"] and p.apn_key and p.apn_key != k["apn_key"]):
+                    return PROBABLE, p, [p], ["street (spacing)", "zip"]
+                return AMBIGUOUS, None, [p], ["street (spacing)", "zip"]
+            if len(same) > 1:
+                return AMBIGUOUS, None, same, ["street (spacing)", "zip"]
     return NEW, None, [], []
 
 

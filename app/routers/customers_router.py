@@ -669,6 +669,43 @@ def cleanup_execute(req: CleanupExecute, db: Session = Depends(get_db),
                                 execution_id=req.execution_id)
 
 
+class WholesaleCleanupPreview(BaseModel):
+    org_ids: Optional[List[str]] = None
+
+
+class WholesaleCleanupExecute(BaseModel):
+    execution_id: str
+    confirmation: str
+
+
+@router.post("/cleanup/wholesale/preview")
+def wholesale_cleanup_preview(req: WholesaleCleanupPreview, db: Session = Depends(get_db),
+                              user: User = Depends(require_god)):
+    """Wholesale / EvoSense rows flagged test, with every dependent row, saved
+    with a full backup as a receipt. Deletes nothing."""
+    from app.services import wholesale_cleanup as WC
+    plan = WC.preview(db, user, org_ids=req.org_ids)
+    log_action(db, None, user.id, action="data_cleanup.previewed", target_type="cleanup",
+               target_id=plan["execution_id"],
+               details={"execution_id": plan["execution_id"], "rules": [WC.RULE], "total_records": plan["total"]},
+               note="Wholesale test-data preview. Nothing was deleted.")
+    return plan
+
+
+@router.post("/cleanup/wholesale/execute")
+def wholesale_cleanup_execute(req: WholesaleCleanupExecute, db: Session = Depends(get_db),
+                              user: User = Depends(require_god)):
+    from app.services import wholesale_cleanup as WC
+    return WC.execute(db, user, execution_id=req.execution_id, confirmation=req.confirmation)
+
+
+@router.get("/cleanup/wholesale/{execution_id}/backup")
+def wholesale_cleanup_backup(execution_id: str, db: Session = Depends(get_db), user: User = Depends(require_god)):
+    """The full backup (every column of every row) a Wholesale cleanup saved."""
+    from app.services import wholesale_cleanup as WC
+    return WC.backup(db, user, execution_id)
+
+
 @router.get("/cleanup/history")
 def cleanup_history(limit: int = Query(50, ge=1, le=500),
                     status: Optional[str] = Query(None),

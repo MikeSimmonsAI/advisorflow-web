@@ -1087,7 +1087,7 @@ class LgbsTaxSaleSource(PublicRecordSource):
     public_url = "https://taxsales.lgbs.com/"
     refresh = "Updated by the firm as suits, judgments and sales change"
     freshness_days = 14
-    adapter_version = "lgbs_tax_sales/1"
+    adapter_version = "lgbs_tax_sales/2"
     terms_note = ("Public list published by the taxing units' attorneys; robots.txt allows all agents. "
                   "Struck-off, sold and cancelled rows are skipped - only properties the owner still holds.")
 
@@ -1113,6 +1113,57 @@ class LgbsTaxSaleSource(PublicRecordSource):
         if not isinstance(j, dict) or "count" not in j:
             raise SB_.SourceError(SB_.SOURCE_FORMAT_CHANGED, "taxsales.lgbs.com did not return a count")
         return {"dallas_listed": j["count"]}
+
+
+class ClerkForeclosureSource(PublicRecordSource):
+    """Posted foreclosure notices filed with the county clerk (Dallas, Tarrant,
+    Denton, Johnson): substitute trustee / trustee sales, HOA assessment-lien sales,
+    judicial and tax sales, each with its document number and sale date.
+    Collin County posts notices on a bot-protected page (read by a person and
+    recorded with Record a notice) - reported as
+    not connected, never as "no foreclosure"."""
+    scope, counties = "county", ("Dallas", "Tarrant", "Denton", "Johnson")
+    key = "tx_clerk_foreclosure"
+    label = "County clerk foreclosure notices (Dallas, Tarrant, Denton, Johnson)"
+    capabilities = (C.FORECLOSURE,)
+    discovery = True
+    discovery_opt_in = True      # only a strategy whose search names FORECLOSURE (or this source) hunts it
+    coverage = ("Dallas, Tarrant, Denton and Johnson County, TX - every foreclosure sale notice filed with the "
+                "county clerk (trustee, substitute trustee, HOA assessment-lien, judicial and tax sales), with "
+                "document number, sale date and the clerk's indexed address. Not read automatically: Collin "
+                "(its notice page is bot-protected), Ellis, Kaufman and Rockwall (the county posts scanned "
+                "notice files - check them by hand and use Record a notice) and every other county.")
+    jurisdiction = "Dallas, Tarrant, Denton and Johnson County, TX"
+    source_type = "County Clerk - posted foreclosure notices (official record)"
+    access_method = ("The clerks' free public record search (publicsearch.us), as an anonymous visitor: "
+                     "a few paged requests per county, spaced apart")
+    public_url = "https://dallas.tx.publicsearch.us/"
+    refresh = "Notices are filed daily; sales are the first Tuesday of each month"
+    freshness_days = 7
+    adapter_version = "tx_clerk_fc/2"
+    terms_note = ("Official public record, free and anonymous. Only notice index data and the clerk's own "
+                  "text excerpt are read - no paid document images. A notice proves a sale was scheduled, "
+                  "not that it happened.")
+
+    def search(self, capability, query):
+        from app.services.evosense.sources.clerk_fc import COUNTIES, ClerkForeclosureReader
+        out = Records()
+        states = [s.upper() for s in query.get("states") or []]
+        if states and "TX" not in states:
+            out.stats = {"skipped": "strategy is not in Texas"}
+            return out
+        wanted = _county(query)
+        from app.services.evosense.sources.lgbs import wants_all_texas
+        if not wanted or wants_all_texas(wanted):
+            wanted = list(COUNTIES)
+        res = ClerkForeclosureReader().discover(wanted, limit=int(query.get("limit") or 25))
+        out.extend(res["records"])
+        out.stats, out.source_url = res["stats"], res["source_url"]
+        return out
+
+    def verify(self):
+        from app.services.evosense.sources.clerk_fc import ClerkForeclosureReader
+        return ClerkForeclosureReader().verify("dallas")
 
 
 class TracerfyContactSource(AcquisitionProvider):
@@ -1164,16 +1215,19 @@ class ManualOnlySource(AcquisitionProvider):
 
 
 class DallasForeclosureManual(ManualOnlySource):
-    scope, counties = "county", ("Dallas",)
+    # The key is kept (stored tenant settings refer to it); the channel now
+    # covers every county WITHOUT a connected clerk source (Collin and the rest).
+    scope, counties = "county", ()
     key = "dallas_foreclosure_manual"
-    label = "Dallas County foreclosure notices (manual)"
+    label = "Foreclosure notices - manual entry (counties without a clerk source)"
     capabilities = (C.FORECLOSURE,)
-    coverage = "Dallas County, TX — notices of trustee sale posted with the County Clerk"
-    jurisdiction = "Dallas County, TX"
+    coverage = ("Any Texas county whose clerk notices are not read automatically (Collin and others): "
+                "a person reads the posted notice and records it with its document number and sale date")
+    jurisdiction = "Texas"
     source_type = "County Clerk foreclosure postings"
-    public_url = "https://www.dallascounty.org/"
-    terms_note = ("No free structured export. Postings are read by a person and entered "
-                  "manually (signal PRE_FORECLOSURE) or imported by CSV.")
+    public_url = "https://www.collincountytx.gov/"
+    terms_note = ("Dallas, Tarrant, Denton and Johnson notices are read automatically (tx_clerk_foreclosure). "
+                  "Elsewhere a person enters the notice; without a document number it stays a claim.")
 
 
 class DallasTaxManual(ManualOnlySource):
@@ -1233,6 +1287,7 @@ PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
     ManualSource(), CsvImportSource(),
     TarrantTaxRollSource(), DallasTrwSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), TexasParcelOwnerSource(), TexasParcelRollSource(), HarrisRollSource(), TravisDelinquentSource(), AustinCodeSource(), CensusGeocoderSource(),
     FortWorthCodeSource(), FortWorthOpenCasesSource(), Dallas311Source(), LgbsTaxSaleSource(),
+    ClerkForeclosureSource(),
     DallasForeclosureManual(), DallasTaxManual(),
     RentCastInterface(), RegridInterface(), AttomInterface(), TracerfyContactSource(),
 )}

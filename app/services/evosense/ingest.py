@@ -421,8 +421,8 @@ def _is_target(target, rec: Dict[str, Any]) -> bool:
 def ingest(db, org_id: str, provider, capability: str, rec: Dict[str, Any], *,
            strategy_id: Optional[str] = None, run_id: Optional[str] = None,
            is_test: bool = False, user=None, cost_cents: int = 0,
-           ledger_id: Optional[str] = None, target: Optional[EvoSenseProperty] = None
-           ) -> Tuple[str, Optional[EvoSenseProperty]]:
+           ledger_id: Optional[str] = None, target: Optional[EvoSenseProperty] = None,
+           target_trusted: bool = False) -> Tuple[str, Optional[EvoSenseProperty]]:
     """Returns (outcome, property). outcome: created|merged|seen|review.
 
     `target`: the property a LOOKUP was asked about. Its answer is about that
@@ -453,7 +453,11 @@ def ingest(db, org_id: str, provider, capability: str, rec: Dict[str, Any], *,
         return "seen", prop
 
     match, prop, candidates, keys = ID.resolve(db, org_id, rec)
-    if target is not None and not (prop is not None and prop.id == target.id
+    if target is not None and target_trusted:
+        # The caller KNOWS the house (a row of a list matched to the property
+        # that list's own earlier import created): attach, whatever the keys say.
+        match, prop, candidates, keys = ID.EXACT, target, [target], ["list row"]
+    elif target is not None and not (prop is not None and prop.id == target.id
                                    and match in (ID.EXACT, ID.PROBABLE)):
         if _is_target(target, rec) and (prop is None or prop.id == target.id):
             match, prop, candidates, keys = ID.EXACT, target, [target], ["lookup target", "street"]
@@ -611,7 +615,13 @@ def _apply_signals(db, prop, provider, rec, observation_id, cost_cents, user=Non
                                "observation": observation_id,
                                "source_url": rec.get("_source_url"),
                                "adapter_version": rec.get("_adapter_version"),
-                               "limitations": s.get("limitations")},
+                               "limitations": s.get("limitations"),
+                               # a mortgage-foreclosure claim / notice: the scheduled sale
+                               "sale_date": s.get("sale_date"), "claim": s.get("claim"),
+                               # a clerk notice: what it is and where it is filed
+                               "foreclosure_type": s.get("foreclosure_type"), "document": s.get("document"),
+                               "document_url": s.get("document_url"), "recorded": s.get("recorded"),
+                               "sale_date_basis": s.get("sale_date_basis"), "matched_by": s.get("matched_by")},
                    cost_cents=cost_cents if len(rec.get("signals") or []) == 1 else 0,
                    evidence_basis=s.get("evidence_basis"), case_status=s.get("case_status"),
                    rule_version=rec.get("_adapter_version"),
