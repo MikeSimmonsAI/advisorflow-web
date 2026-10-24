@@ -72,8 +72,9 @@ COUNTIES: Dict[str, Dict[str, Any]] = {
 # Counties checked and found to have NO foreclosure department on their clerk
 # portal (so no automatic source) - reported as such, never as "no foreclosure".
 NO_PORTAL = {
-    "collin": "Collin County Clerk's record search has no foreclosure department (checked 2026-10-23); "
-              "notices are posted at the courthouse.",
+    "collin": "Collin County posts its notices on its own page, https://apps2.collincountytx.gov/"
+              "ForeclosureNotices (checked 2026-10-23). It is behind bot protection, so EvoSense does not "
+              "read it automatically: look the house up there and use Record a notice with its notice number.",
     "ellis": "Ellis County Clerk is not on the public record search EvoSense reads (checked 2026-10-23).",
     "kaufman": "Kaufman County Clerk is not on the public record search EvoSense reads (checked 2026-10-23).",
     "rockwall": "Rockwall County Clerk is not on the public record search EvoSense reads (checked 2026-10-23).",

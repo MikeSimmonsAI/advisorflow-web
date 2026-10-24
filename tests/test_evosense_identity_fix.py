@@ -132,9 +132,16 @@ def test_a_lookup_answer_for_another_house_waits_in_review_never_new(db_session,
 
 
 def test_a_duplicate_for_the_same_house_folds_in_and_its_owner_moves(db_session, sample_org, sample_advisor,
-                                                                     starpoint):
+                                                                     starpoint, monkeypatch):
+    from app.services.evosense import identity as ID
     from app.services.evosense import ingest as IN
+    # Identity now recognises "1301 STARPOINT" / "1301 STARPOINT LN" in the
+    # same ZIP as one house, so the old production duplicate is no longer
+    # created on its own - it is forced here to exercise the merge.
+    real_resolve = ID.resolve
+    monkeypatch.setattr(ID, "resolve", lambda db, org, rec: (ID.NEW, None, [], []))
     out, dup = IN.ingest(db_session, sample_org.id, PV.PROVIDERS["collin_cad"], "ASSESSOR", _collin_rec())
+    monkeypatch.setattr(ID, "resolve", real_resolve)
     db_session.commit()
     assert out == "created" and dup.id != starpoint.id                       # the production failure, reproduced
     res = IF.merge_duplicate(db_session, sample_org.id, starpoint, dup, user=sample_advisor,
@@ -156,3 +163,11 @@ def test_merge_refuses_a_different_house(db_session, sample_org, sample_advisor,
     db_session.commit()
     with pytest.raises(IF.MergeRefused):
         IF.merge_duplicate(db_session, sample_org.id, starpoint, other, user=sample_advisor, reason="not the same")
+
+
+
+def test_the_starpoint_duplicate_is_no_longer_created(db_session, sample_org, starpoint):
+    from app.services.evosense import ingest as IN
+    out, prop = IN.ingest(db_session, sample_org.id, PV.PROVIDERS["collin_cad"], "ASSESSOR", _collin_rec())
+    db_session.commit()
+    assert prop.id == starpoint.id and out != "created"
