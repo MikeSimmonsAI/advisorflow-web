@@ -512,6 +512,9 @@ def customer_organizations(db: Session, *, platform_id: Optional[str] = None,
             "slug": o.slug,
             "platform": {"id": platform.id, "name": platform.name} if platform else None,
             "is_active": bool(o.is_active),
+            # A demonstration tenant is a real row but not a customer; screens
+            # label it rather than counting it beside paying customers.
+            "is_demo": bool(getattr(o, "is_demo", False)),
             "plan": o.plan,
             "industry": o.industry,
             "user_count": int(users),

@@ -47,9 +47,18 @@ ALIASES: Dict[str, Tuple[str, ...]] = {
     "square_feet": ("Building Sqft", "Living Sqft", "Building Square Feet", "Sq Ft", "Square Footage",
                     "Living Square Feet"),
     "year_built": ("Year Built", "Effective Year Built"),
-    "estimated_value": ("Est. Value", "Estimated Value", "Est Value", "AVM", "Estimated Market Value"),
+    "estimated_value": ("Est. Value", "Estimated Value", "Est Value", "AVM", "Estimated Market Value",
+                        "Property Value"),
     "mortgage_balance": ("Est. Remaining Balance of Open Loans", "Total Loan Balance", "Est. Loan Balance",
-                         "Open Mortgage Balance", "Loan Balance", "Total Open Loans"),
+                         "Open Mortgage Balance", "Loan Balance", "Total Open Loans", "Unpaid Balance"),
+    # the list's own name for the owner - kept as the list's claim, compared
+    # with the county's owner of record, never written as the owner
+    "list_owner_name": ("Recipient Name", "Mail Recipient", "Mailing Name"),
+    "loan_type": ("Loan Type", "Mortgage Type"),
+    # a scheduled mortgage-foreclosure sale stated by the list (a column only -
+    # never a file name)
+    "sale_date": ("Sale Date", "Foreclosure Date", "Foreclosure Sale Date", "Auction Date",
+                  "Trustee Sale Date", "Scheduled Sale Date", "Sale Date (Foreclosure)"),
     "estimated_equity": ("Est. Equity", "Estimated Equity", "Equity"),
     "last_sale_date": ("Last Sale Date", "Last Sale Recording Date", "Last Sold Date"),
     "record_id": ("PropStream ID", "Property ID", "Record ID"),
@@ -74,7 +83,8 @@ NO = {"no", "n", "false", "f", "0", "", "none", "n/a", "na", "-"}
 CANON_COLUMNS = ("street_address", "unit", "city", "state", "zip_code", "county", "parcel_apn",
                  "property_type", "owner_name", "mailing_street", "mailing_city", "mailing_state",
                  "mailing_zip", "estimated_value", "mortgage_balance", "last_sale_date", "signals",
-                 "record_id", "bedrooms", "bathrooms", "square_feet", "year_built")
+                 "record_id", "bedrooms", "bathrooms", "square_feet", "year_built",
+                 "sale_date", "list_owner_name", "loan_type")
 
 _LOOKUP = {norm(a): c for c, al in ALIASES.items() for a in al}
 _FLAG_LOOKUP = {norm(a): s for s, al in FLAGS.items() for a in al}

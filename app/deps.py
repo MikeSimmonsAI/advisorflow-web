@@ -283,6 +283,36 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
                 detail="You must change your password before continuing. Use /auth/change-password."
             )
 
+    # PROGRAM ISOLATION (server-side). A Wholesale-seat login working in its
+    # Wholesale workspace reaches only Wholesale (+ the shared shell core),
+    # never the general platform screens or another program's menus. God and
+    # super_admin are the internal administration experience and never locked.
+    # See app/services/program_experience.py.
+    if user.role not in ("god_admin", "super_admin"):
+        from app.services import program_experience
+        program_experience.enforce(db, user, request)
+
+    # OPERATOR WITH NO HOME ORGANIZATION, WORKING IN A SELECTED WORKSPACE.
+    # A multi-program operator (Michael, issue #268) holds org_admin memberships
+    # in several customer workspaces but no users.organization_id. Hundreds of
+    # routes read the tenant and the role from the user row, so they refused him
+    # ("no customer organization is selected") even inside a workspace he
+    # administers. For THIS request only, the user row takes the workspace the
+    # server has just validated against an active membership, and that
+    # membership's role. Never for god/super_admin, never without a validated
+    # membership, never persisted (the instance is detached first).
+    if (user.role not in ("god_admin", "super_admin") and user.organization_id is None
+            and request is not None and request.headers.get("X-Workspace-Id")):
+        from app.services import workspace_access as _wa
+        _sel = _wa.selected_workspace_id(user, db, request)
+        _mrole = _wa.workspace_role(user, db, _sel) if _sel else None
+        # Administrators only: view-only (spectator) and ordinary org-less
+        # logins keep exactly the behaviour they had.
+        if _mrole in ("org_admin", "manager"):
+            db.expunge(user)
+            user.organization_id = _sel
+            user.role = _mrole
+
     # Cross-org context: god_admin can view any org's data or see ALL orgs combined.
     # expunge() detaches the user from the SQLAlchemy session BEFORE any mutation
     # so changes are never written back to the DB.
@@ -428,6 +458,16 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
         from app.services import wholesale_team as _wt
         _refusal = _wt.fence_user(db, user, request.url.path, request.method)
         if _refusal:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_refusal)
+
+    # ── SPECTATOR FENCE (Oct 19) ─────────────────────────────────────────────
+    # A view-only login (every workspace membership "spectator") may read, never
+    # write - refused here for EVERY route, so no endpoint can forget to check.
+    if user.role in ("advisor", "viewer"):
+        from app.services import spectator as _spec
+        _refusal = _spec.refusal(db, user, request.url.path, request.method)
+        if _refusal:
+            _log.info("spectator write refused user=%s %s %s", user.id, request.method, request.url.path)
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_refusal)
 
     return user

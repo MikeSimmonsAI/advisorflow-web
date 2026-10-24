@@ -77,9 +77,12 @@ const ENERGY = {
         { to: '/contacts', label: 'Contacts', icon: 'database', adminOnly: true, featureKey: 'imports' },
         // The Rate Requests work queue (pages/vertical/RateRequests.jsx) replaced
         // the read-only configured view; the route is feature-gated like /leads.
+        // Atlantis shared inbox: every website request + field referral, claim / assign.
+        { to: '/energy/follow-up?view=new', label: 'New Requests', icon: 'mail', featureKey: 'leads' },
         { to: '/rate-requests', label: 'Rate Requests', icon: 'zap', featureKey: 'leads' },
         { to: '/pipeline', label: 'Sales Pipeline', icon: 'trending-up' },
         { to: '/energy/move-concierge', label: 'Move Concierge', icon: 'truck', featureKey: 'leads' },
+        { to: '/energy/suppliers', label: 'Suppliers', icon: 'zap', featureKey: 'leads' },
       ],
     },
     {
@@ -96,6 +99,8 @@ const ENERGY = {
       items: [
         { to: '/crm-connectors', label: 'Integrations', icon: 'link', adminOnly: true, featureKey: 'crm_connectors' },
         { to: '/users', label: 'Team & Access', icon: 'user-plus', adminOnly: true, featureKey: 'users' },
+        // Settings -> Team & Alerts: alert recipients, who can be assigned, default advisor, mailbox.
+        { to: '/energy/follow-up?view=team', label: 'Team & Alerts', icon: 'sliders', adminOnly: true, featureKey: 'leads' },
         // `launchOnly` is kept, not dropped to force the item into the rail.
         // A workspace with no open implementation has no Launch Center to
         // open, and a permanent link to a 404 is worse than an honest gap.

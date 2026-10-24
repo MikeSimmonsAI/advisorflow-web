@@ -64,6 +64,18 @@ SOURCE_OPTIONS = [
 ]
 SOURCE_LABELS = dict(SOURCE_OPTIONS)
 
+# A batch made by the SCI importer (see create_batch). Deliberately NOT in
+# SOURCE_OPTIONS: the CRM importer's source list is unchanged, and a CRM
+# upload can never mark its own batch as an SCI one.
+SCI_DESTINATION = "sci"
+SCI_SOURCE_SYSTEM = "program"
+SCI_SOURCE_LABEL = "SCI program file"
+
+
+def is_sci_batch(batch) -> bool:
+    return bool(batch is not None and batch.pipeline == PIPELINE
+                and batch.source_system == SCI_SOURCE_SYSTEM)
+
 
 class IntakeError(ValueError):
     """A problem the operator can fix (bad file, bad mapping)."""
@@ -227,7 +239,14 @@ def create_batch(db: Session, ctx, *, content: bytes, filename: str, source: str
                  source_detail: Optional[str] = None, source_year: Optional[int] = None,
                  list_name: Optional[str] = None, campaign_purpose: Optional[str] = None,
                  offer_hook: Optional[str] = None, tags: Optional[List[str]] = None,
-                 display_name: Optional[str] = None) -> ImportBatch:
+                 display_name: Optional[str] = None,
+                 destination: Optional[str] = None) -> ImportBatch:
+    """destination="sci": a file headed for the workspace's SCI program (made
+    only by the SCI importer, /program/intake). It is marked source_system
+    "program" - the value SCI's own contacts carry, so the analysis matches
+    families already loaded by Lead ID - and gets SCI-aware mapping
+    suggestions. It is never committed by the CRM commit (intake_router
+    refuses it); SCI's own loader writes it. Omitted: exactly as before."""
     if not content:
         raise IntakeError("The uploaded file is empty.")
     if len(content) > MAX_UPLOAD_BYTES:
@@ -240,6 +259,9 @@ def create_batch(db: Session, ctx, *, content: bytes, filename: str, source: str
         raise IntakeError("The file has a header row but no data rows.")
 
     source_key = source if source in SOURCE_LABELS else "other"
+    source_label = SOURCE_LABELS[source_key]
+    if destination == SCI_DESTINATION:
+        source_key, source_label = SCI_SOURCE_SYSTEM, SCI_SOURCE_LABEL
     batch = ImportBatch(
         organization_id=ctx.org_id,
         created_by_id=ctx.actor_id, created_by_name=ctx.actor_name,
@@ -251,7 +273,7 @@ def create_batch(db: Session, ctx, *, content: bytes, filename: str, source: str
         stage="mapping", progress_pct=0,
         acting_user_id=ctx.actor_id, acting_user_name=ctx.actor_name,
         acting_role=ctx.role, acted_as_platform_owner=ctx.acting_as_platform_owner,
-        source_label=SOURCE_LABELS[source_key], source_system=source_key,
+        source_label=source_label, source_system=source_key,
         source_detail=(source_detail or None),
         source_year=source_year, import_list_name=list_name,
         campaign_purpose=campaign_purpose, offer_hook=offer_hook,
@@ -270,10 +292,16 @@ def create_batch(db: Session, ctx, *, content: bytes, filename: str, source: str
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         size_bytes=len(content), sha256=hashlib.sha256(content).hexdigest(),
         content=content))
-    mapping = F.suggest_mapping(headers, org_custom_field_keys(db, ctx.org_id))
+    mapping = F.suggest_mapping(headers, org_custom_field_keys(db, ctx.org_id),
+                                profile=(F.SCI_PROFILE if destination == SCI_DESTINATION
+                                         else None))
     batch.mapping_json = json.dumps(mapping)
-    batch.classification_json = json.dumps(default_classification_config(headers, mapping,
-                                                                         rows, db, ctx.org_id))
+    cls_cfg = default_classification_config(headers, mapping, rows, db, ctx.org_id)
+    if destination == SCI_DESTINATION:
+        # SCI's exports are US files ("1/5/2026" is January 5). The Map step
+        # still lets a person change it.
+        cls_cfg["date_order"] = N.DATE_MDY
+    batch.classification_json = json.dumps(cls_cfg)
     batch.update_policy_json = json.dumps(DEFAULT_UPDATE_POLICY)
     batch.analysis_json = json.dumps({"read": {"blank_rows": stats["blank_rows"],
                                                "malformed_rows": stats["malformed_rows"][:200],

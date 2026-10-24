@@ -38,6 +38,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
+from app.services import booking_time as _bt
 
 MAX_TOUCHES = 5
 REACTIVATION = "reactivation"
@@ -112,7 +113,7 @@ PLAYBOOKS: Dict[str, Dict] = {
                   2: ["One thing worth keeping with your guide", "A quick tip from {location}"],
                   3: ["A question families often ask us", "About veteran benefits"],
                   4: ["Would a short visit help?", "A time to talk at {location}?"],
-                  5: ["Should I keep this open for you?", "Close out your request?"],
+                  5: ["Morning or afternoon, {first_name}?"],
                   REACTIVATION: ["Still here if you need us - {location}"]}),
     "veteran_official": _pb(
         "veteran_official", "Veteran Official",
@@ -125,7 +126,7 @@ PLAYBOOKS: Dict[str, Dict] = {
          "the DD-214 is commonly requested", "benefits depend on the individual record"],
         subjects={1: ["Your veteran planning request - {location}"], 2: ["A quick tip from {location}"],
                   3: ["About veteran benefits"], 4: ["A time to talk at {location}?"],
-                  5: ["Should I keep this open for you?"], REACTIVATION: ["Still here if you need us - {location}"]}),
+                  5: ["Morning or afternoon, {first_name}?"], REACTIVATION: ["Still here if you need us - {location}"]}),
     "veteran_spanish": _pb(
         "veteran_spanish", "Veteran (Spanish callouts)",
         "you asked us for veteran planning information", "veteran planning",
@@ -136,7 +137,7 @@ PLAYBOOKS: Dict[str, Dict] = {
         ["veteran planning information is available", "the DD-214 is commonly requested"],
         subjects={1: ["Your veteran planning request - {location}"], 2: ["A quick tip from {location}"],
                   3: ["Information in Spanish?"], 4: ["A time to talk at {location}?"],
-                  5: ["Should I keep this open for you?"], REACTIVATION: ["Still here if you need us - {location}"]}),
+                  5: ["Morning or afternoon, {first_name}?"], REACTIVATION: ["Still here if you need us - {location}"]}),
     "general_survey": _pb(
         "general_survey", "General Survey",
         "you returned our planning survey", "planning ahead",
@@ -147,7 +148,7 @@ PLAYBOOKS: Dict[str, Dict] = {
         ["the person returned a planning survey", "planning ahead records a person's wishes"],
         subjects={1: ["Thank you for your survey - {location}"], 2: ["Why families plan ahead"],
                   3: ["Where to start"], 4: ["A short conversation at {location}?"],
-                  5: ["Should I keep this open for you?"], REACTIVATION: ["Still here if you need us - {location}"]}),
+                  5: ["Morning or afternoon, {first_name}?"], REACTIVATION: ["Still here if you need us - {location}"]}),
     "life_story": _pb(
         "life_story", "Life Story",
         "you requested a Life Story from us", "capturing a life story",
@@ -158,7 +159,7 @@ PLAYBOOKS: Dict[str, Dict] = {
         ["the person requested a Life Story"],
         subjects={1: ["Your Life Story request - {location}"], 2: ["The details worth keeping"],
                   3: ["How a Life Story comes together"], 4: ["A time to get started?"],
-                  5: ["Should I keep this open for you?"], REACTIVATION: ["Still here if you need us - {location}"]}),
+                  5: ["Morning or afternoon, {first_name}?"], REACTIVATION: ["Still here if you need us - {location}"]}),
     "cemetery_x_sell": _pb(
         "cemetery_x_sell", "Cemetery Planning",
         "you showed interest in cemetery planning with us", "cemetery planning",
@@ -169,7 +170,7 @@ PLAYBOOKS: Dict[str, Dict] = {
         ["visiting the grounds is possible", "options include burial, mausoleum and cremation placement"],
         subjects={1: ["Cemetery planning at {location}"], 2: ["Seeing the grounds first"],
                   3: ["The options, simply"], 4: ["A short visit to {location}?"],
-                  5: ["Should I keep this open for you?"], REACTIVATION: ["Still here if you need us - {location}"]}),
+                  5: ["Morning or afternoon, {first_name}?"], REACTIVATION: ["Still here if you need us - {location}"]}),
     "cremation": _pb(
         "cremation", "Cremation Information",
         "you asked us for cremation information", "cremation planning",
@@ -180,7 +181,7 @@ PLAYBOOKS: Dict[str, Dict] = {
         ["the person asked for cremation information", "there are several placement options"],
         subjects={1: ["Your cremation information - {location}"], 2: ["Putting your wishes in writing"],
                   3: ["What happens after cremation"], 4: ["A short conversation at {location}?"],
-                  5: ["Should I keep this open for you?"], REACTIVATION: ["Still here if you need us - {location}"]}),
+                  5: ["Morning or afternoon, {first_name}?"], REACTIVATION: ["Still here if you need us - {location}"]}),
     "re_engagement": _pb(
         "re_engagement", "Re-engagement",
         "you were in touch with us about planning", "planning ahead",
@@ -191,7 +192,7 @@ PLAYBOOKS: Dict[str, Dict] = {
         ["the person was previously in touch with the location"],
         subjects={1: ["Following up from {location}"], 2: ["Why families plan ahead"],
                   3: ["Where to start"], 4: ["A short conversation at {location}?"],
-                  5: ["Should I keep this open for you?"], REACTIVATION: ["Still here if you need us - {location}"]}),
+                  5: ["Morning or afternoon, {first_name}?"], REACTIVATION: ["Still here if you need us - {location}"]}),
     # Seminar and Web Lead had no playbook and fell back to re-engagement, so a
     # first email that rightly said "you signed up for one of our seminars" was
     # HELD by the quality gate for not saying why we were writing.
@@ -215,58 +216,66 @@ PLAYBOOKS: Dict[str, Dict] = {
 FAMILY_FALLBACK = "re_engagement"
 
 # Strategy per touch: what this touch is FOR. The copy below implements it.
+# THE MISSION IS AN APPOINTMENT (Mike, Oct 22): every touch asks for a visit
+# and carries the family's pick-a-time link. No "should I close this out?"
+# touch - that invites a no and gets nobody in the door.
 TOUCH_STRATEGY = {
-    1: "Reference what they requested and ask for a simple reply.",
-    2: "Give one useful piece of information tied to the original campaign.",
-    3: "Address a common question or concern for that campaign.",
-    4: "Offer an easy appointment as the next step.",
-    5: "Permission-based soft close: the last active touch.",
-    REACTIVATION: "A fresh angle, later - never a recycled touch 1.",
+    1: "Reference what they requested; invite them in to go over it; booking link.",
+    2: "One useful piece of information, tied to why a short visit helps; booking link.",
+    3: "Address a common question and offer to answer it in person; booking link.",
+    4: "Openings this week - save one for them; booking link.",
+    5: "Make it easy: morning or afternoon? booking link.",
+    REACTIVATION: "A fresh angle, later - still asking for a visit; booking link.",
 }
 
 _EMAIL = {
-    1: ("Hi {first_name},\n\nIt's {contact} at {location}. {Why}, and I want to make sure it "
-        "actually got to you.\n\n{flyer_line}"
-        "Is there anything I can send you or help with? Just reply here and I'll take care of it."
-        "\n\n{contact}\n{location}"),
-    2: ("Hi {first_name},\n\nIt's {contact} again at {location}. {useful}\n\nIf a question comes "
-        "up, just reply here. I read every reply myself.\n\n{contact}\n{location}"),
-    3: ("Hi {first_name},\n\n{question}\n\nWhat would be most helpful to know? A one-line reply is "
-        "plenty.\n\n{contact}\n{location}"),
-    4: ("Hi {first_name},\n\nSometimes it's easier to talk things through in person. I'd be glad to "
-        "set aside a few unhurried minutes with you at {location}, no decisions needed.\n\n"
-        "If that would help, just reply with a day that tends to work for you.\n\n{contact}\n{location}"),
-    5: ("Hi {first_name},\n\nI don't want to keep filling your inbox. Would you like me to keep your "
-        "request open, or close it out for now? A one-word reply either way is perfect.\n\n"
+    1: ("Hi {first_name},\n\nIt's {contact} at {location}. {Why}, and I want to make sure you get "
+        "everything that goes with it.\n\n{flyer_line}"
+        "The easiest way is a short visit here. I'll go over it with you in person and answer your "
+        "questions, with no decisions needed.\n\n{booking_line}"
+        "Or just reply with a day that works and I'll set it up.\n\n{contact}\n{location}"),
+    2: ("Hi {first_name},\n\n{useful}\n\nThat's exactly the kind of thing I go over with families "
+        "in a short visit at {location}, so nothing gets missed.\n\n{booking_line}"
+        "Or reply with a day that's good for you and I'll hold a time.\n\n{contact}\n{location}"),
+    3: ("Hi {first_name},\n\n{question}\n\nCould you sit down with me this week so I can answer it "
+        "for your situation?\n\n{booking_line}"
+        "Or just reply with a day and time that suits you.\n\n{contact}\n{location}"),
+    4: ("Hi {first_name},\n\nI have a few openings this week at {location} and I'd like to save one "
+        "for you. It's a short, unhurried visit, and you're welcome to bring family along.\n\n"
+        "{booking_line}Or reply with the day that works best and I'll hold it for you.\n\n"
+        "{contact}\n{location}"),
+    5: ("Hi {first_name},\n\nI'd still like to get a time on the calendar with you at {location}. "
+        "Whatever is easier for you works for me.\n\n{booking_line}"
+        "Or just reply \"morning\" or \"afternoon\" and I'll find a time that fits.\n\n"
         "{contact}\n{location}"),
     REACTIVATION: ("Hi {first_name},\n\nIt's {contact} at {location}. Some time has passed since "
-                   "{why}, and I wanted you to know the offer to help still stands - whenever "
-                   "the timing is right for you.\n\nIf there's anything you'd like to know, just "
-                   "reply here.\n\n{contact}\n{location}"),
+                   "{why}, and I'd still be glad to sit down with you and go over it.\n\n"
+                   "{booking_line}Or reply with a day that works and I'll set it up.\n\n"
+                   "{contact}\n{location}"),
 }
 # Subjects read like one person writing to another. The playbooks' older
 # subject lists ("A quick tip from ...", "Why families plan ahead") read like a
 # newsletter, and Yahoo filed them under Offers or Spam (inbox tests 2026-10-12).
 PERSONAL_SUBJECTS = {
     1: "Following up, {first_name}",
-    2: "A thought for you, {first_name}",
+    2: "A time to sit down, {first_name}?",
     3: "{first_name}, a quick question",
     4: "Would a short visit help, {first_name}?",
-    5: "Should I keep this open, {first_name}?",
+    5: "Morning or afternoon, {first_name}?",
     REACTIVATION: "Still here for you, {first_name}",
 }
 PERSONAL_SUBJECTS_NO_NAME = {
-    1: "Following up", 2: "A thought for you", 3: "A quick question",
-    4: "Would a short visit help?", 5: "Should I keep this open?", REACTIVATION: "Still here for you",
+    1: "Following up", 2: "A time to sit down?", 3: "A quick question",
+    4: "Would a short visit help?", 5: "Morning or afternoon?", REACTIVATION: "Still here for you",
 }
 
 _SMS = {
-    1: "Hi {first_name}, this is {contact} with {location}. {Why} - did you get what you needed? Just reply here.",
-    2: "Hi {first_name}, {contact} at {location}. Quick tip on {topic}: reply and I'll send it over.",
-    3: "Hi {first_name}, {contact} at {location}. Any questions about {topic} I can answer? Just reply.",
-    4: "Hi {first_name}, {contact} at {location}. Would a short visit help? Reply with a day that works.",
-    5: "Hi {first_name}, {contact} at {location}. Should I keep your request open or close it out? Just reply.",
-    REACTIVATION: "Hi {first_name}, {contact} at {location}. Still glad to help whenever the time is right - just reply.",
+    1: "Hi {first_name}, this is {contact} with {location}. {Why} - could you stop by for a short visit so I can go over it with you? Just reply with a day.",
+    2: "Hi {first_name}, {contact} at {location}. I'd like to go over your {topic} questions in person - just reply with a day that works for a short visit.",
+    3: "Hi {first_name}, {contact} at {location}. I have a few openings this week - could I save one for you? Just reply with a day.",
+    4: "Hi {first_name}, {contact} at {location}. Would a short visit help? Reply with a day that works and I'll hold it.",
+    5: "Hi {first_name}, {contact} at {location}. I'd still like to get a short visit on the calendar - mornings or afternoons better for you? Just reply.",
+    REACTIVATION: "Hi {first_name}, {contact} at {location}. I'd still be glad to sit down with you about {topic} - what day works? Just reply.",
 }
 
 
@@ -352,7 +361,7 @@ def context_packet(db: Session, lead, now: Optional[datetime] = None) -> Optiona
         "prior_inbound_replies": replies,
         "responses": [{"class": r.response_class, "intents": json.loads(r.intents or "[]"),
                        "status": r.handling_status} for r in responses[:5]],
-        "appointments": [{"status": b.status, "time": b.booked_time.isoformat() if b.booked_time else None}
+        "appointments": [{"status": b.status, "time": _bt.wire(db, b) if b.booked_time else None}
                          for b in booked],
         "appointment_booked": any(b.status in ("booked", "confirmed") for b in booked),
         "cadence_state": str(getattr(cad.status, "value", cad.status)) if cad else None,
@@ -380,7 +389,7 @@ def _cap(s: str) -> str:
 
 
 def compose(packet: Dict, touch, channel: str = "email", *, flyer_line: str = "",
-            variant: int = 0) -> Dict:
+            booking_url: str = "", variant: int = 0) -> Dict:
     """Subject (email) and body for this touch, from the family's playbook."""
     pb = playbook(packet.get("campaign_family"))
     fields = {
@@ -390,6 +399,9 @@ def compose(packet: Dict, touch, channel: str = "email", *, flyer_line: str = ""
         "why": pb["why"], "Why": _cap(pb["why"]),
         "topic": pb["topic"], "useful": pb["useful_info"], "question": pb["common_question"],
         "flyer_line": (flyer_line.strip() + "\n\n") if flyer_line and flyer_line.strip() else "",
+        # The family's own pick-a-time page (the same link the texts carry).
+        "booking_line": ("Pick a time that works for you here: %s\n\n" % booking_url.strip())
+                        if booking_url and booking_url.strip() else "",
     }
     from app.services.programs.identity import render
     tmpl = (_EMAIL if channel == "email" else _SMS).get(touch)

@@ -31,11 +31,13 @@ import {
 } from '../ds/ds'
 import '../ds/evo-pages.css'
 import EvoActions from './EvoActions'
+import { ReadinessPanel } from './Readiness'
 import EvoPermission from './EvoPermission'
 import EvoFollowUp from './EvoFollowUp'
 import PropertyPhoto from './PropertyPhoto'
 import DealCalculator from '../calc/DealCalculator'
 import { prefillFromProperty } from '../calc/prefill'
+import { ev } from '../engine'
 
 /** Free links: Google Maps, Street View, and the county's own record page. */
 function PlaceLinks({ links }) {
@@ -342,7 +344,7 @@ export default function EvoProperty() {
       {/* 1 ── HERO (board: the property workspace banner) ───────────────── */}
       <Hero
         scene="parcel" sceneDrawn
-        eyebrow="EvoSense · Property Intelligence"
+        eyebrow={ev('EvoSense · Property Intelligence')}
         title={<span id="prop-title">{p.address}{p.unit ? ` #${p.unit}` : ''}</span>}
         sub={`${place} ${p.zip_code || ''}${p.county ? ` · ${p.county} County` : ''}`}
         meta={[
@@ -427,8 +429,10 @@ export default function EvoProperty() {
       {/* NEXT ACTIONS — server-computed: what you can do, why not, what happens after */}
       <EvoActions d={d} propertyId={propertyId} busy={busy} act={act} onPromote={() => setPromoteOpen(true)} />
 
+      <ReadinessPanel propertyId={propertyId} refreshKey={JSON.stringify([p.status, p.contact_confidence, p.seller_intent])} />
+
       <nav className="evo-sec-nav" aria-label="Sections">
-        {[['record', 'Public record'], ['actions', 'What you can do'], ['intel', 'Intelligence'], ['conversation', 'Conversation'], ['facts', 'Seller facts'], ['deal', 'Deal intelligence'],
+        {[['readiness', 'Road to a deal'], ['record', 'Public record'], ['actions', 'What you can do'], ['intel', 'Intelligence'], ['conversation', 'Conversation'], ['facts', 'Seller facts'], ['deal', 'Deal intelligence'],
           ['signals', 'Why found'], ['owner', 'Owner & contact'], ['data', 'Data intelligence'], ['timeline', 'Timeline']]
           .map(([id, label]) => <a key={id} href={`#${id}`}>{label}</a>)}
       </nav>
@@ -436,7 +440,7 @@ export default function EvoProperty() {
       <div className="evo-cols evo-cols--wide-rail">
         <div className="evo-stack">
           {/* 2 ── INTELLIGENCE ─────────────────────────────────────────── */}
-          <Panel title="EvoSense intelligence" id="intel" hint="Select a score to see exactly why">
+          <Panel title={ev('EvoSense intelligence')} id="intel" hint="Select a score to see exactly why">
             <div className="evo-scores">
               {['opportunity', 'contact', 'intent'].map((k) => (
                 <Score key={k} kind={k}
@@ -467,7 +471,7 @@ export default function EvoProperty() {
                     return (
                       <li key={m.id} className={`evo-msg evo-msg--${m.direction === 'inbound' ? 'in' : 'out'}`}>
                         <div className="evo-msg__meta">
-                          <span>{m.direction === 'inbound' ? 'Seller said' : 'EvoSense sent'}</span>
+                          <span>{m.direction === 'inbound' ? 'Seller said' : ev('EvoSense sent')}</span>
                           <span>· {ago(m.at)}</span>
                           {m.delivery === 'sandbox_simulated' ? <Tag kind="sandbox">Simulated</Tag> : null}
                         </div>
@@ -576,7 +580,7 @@ export default function EvoProperty() {
           <FieldVisitsPanel propertyId={propertyId} refreshKey={notice} />
 
           {/* 3 ── WHY FOUND ────────────────────────────────────────────── */}
-          <Panel title="Why EvoSense found it" id="signals" hint="Evidence, not truth · aging counts half, stale counts nothing · dates are the source's own">
+          <Panel title={ev('Why EvoSense found it')} id="signals" hint="Evidence, not truth · aging counts half, stale counts nothing · dates are the source's own">
             {!d.signals.length ? <p className="evo-muted" style={{ margin: 0 }}>No signals.</p> : (
               <>
               <ul className="evo-signal-list">
@@ -793,7 +797,7 @@ export default function EvoProperty() {
             </Panel>
           ) : null}
 
-          <Panel title="Your judgment" hint="Recorded for review · EvoSense does not retrain itself">
+          <Panel title="Your judgment" hint={ev('Recorded for review · EvoSense does not retrain itself')}>
             <div className="evo-chips" style={{ gap: 8 }}>
               {FEEDBACK.map(([k, label]) => (
                 <button key={k} type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy}
@@ -817,12 +821,12 @@ export default function EvoProperty() {
                           if (r) setPromoteOpen(false)
                         }}>Promote</button>
               </>}>
-        <p style={{ marginTop: 0 }}>This creates a Wholesale deal for this property and carries its EvoSense history with it:
+        <p style={{ marginTop: 0 }}>This creates a Wholesale deal for this property and carries its {ev('EvoSense')} history with it:
           owner, contacts, signals, the seller's words and the preliminary numbers.</p>
         <ul style={{ color: 'var(--evo-text-secondary)', paddingLeft: 18, lineHeight: 1.7 }}>
           <li>Nothing is sent to the seller.</li>
           <li>No offer is made — offers still go through Deal Operations' approval gates.</li>
-          <li>EvoSense stops working this owner; the deal team takes over.</li>
+          <li>{ev('EvoSense stops working this owner; the deal team takes over.')}</li>
         </ul>
       </Drawer>
 

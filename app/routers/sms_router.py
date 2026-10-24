@@ -699,7 +699,15 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
     except Exception:
         pass  # never let a classification failure break the Twilio webhook response
 
-    if is_hot and lead.assigned_to:
+    # A LOCATION OUTREACH PROGRAM family's reply is alerted by the program
+    # (one page per reply, below). The generic hot-reply email would be a
+    # second email about the same message (Oct 19).
+    try:
+        from app.services.programs import identity as _pid
+        _program_org = _pid.program_for_org(db, lead.organization_id) is not None
+    except Exception:                                       # noqa: BLE001
+        _program_org = False
+    if is_hot and lead.assigned_to and not _program_org:
         from app.services.notification_service import notify_hot_reply
         try:
             notify_hot_reply(db, lead.assigned_to, lead, reply)

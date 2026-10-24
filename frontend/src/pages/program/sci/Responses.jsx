@@ -1,11 +1,14 @@
 /* Responses: one inbox for text and email replies, voicemails and replies from
    unknown senders. Left: the queue. Middle: the real conversation
    (GET /leads/{id}/timeline) and a reply box. Right: who, where, consent and
-   the next step. A reply is sent with POST /sms/send; the server's gates (STOP,
+   the next step. A reply is sent with POST /program/command/reply (as SCI Live
+   does), which also marks the family's reply answered; the server's gates (STOP,
    suppression, DNC, consent, the SCI switch) decide - never this page. */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../../api/client'
 import { CLASS_LABEL, CLASS_TONE, Chip, Empty, ErrorLine, FilterChips, Icon, Kpi, PageHead, SearchBox, ago, errText, initials, when } from './ui'
+import { queueMatches, sortInbox, statusMatches } from './inboxModel'
+import OutreachPulse from './OutreachPulse'
 
 const OPTED_OUT_STATUSES = ['dnc', 'opted_out', 'do_not_contact', 'unsubscribed']
 
@@ -13,6 +16,9 @@ export default function Responses({ locationId, onChange, navigate }) {
   const [q, setQ] = useState('')
   const [channel, setChannel] = useState('all')        // all | sms | email | calls | unknown
   const [status, setStatus] = useState('open')
+  const [queue, setQueue] = useState('attention')
+  const [sortBy, setSortBy] = useState('attention')
+  const [total, setTotal] = useState(null)
   const [cls, setCls] = useState('')
   const [rows, setRows] = useState(null)
   const [calls, setCalls] = useState(null)
@@ -23,29 +29,33 @@ export default function Responses({ locationId, onChange, navigate }) {
 
   const load = useCallback(() => {
     const q = new URLSearchParams()
-    q.set('status', status)
-    if (cls) q.set('response_class', cls)
+    q.set('limit', '500') // all statuses, server-capped; metrics disclose truncation
     if (locationId) q.set('location_id', locationId)
     const mine = ++seq.current
     api.get(`/program/responses?${q}`)
-      .then(d => { if (mine === seq.current) { setRows(d.items || []); setErr('') } })
-      .catch(e => { if (mine === seq.current) { setErr(errText(e)); setRows([]) } })
-  }, [status, cls, locationId])
+      .then(d => { if (mine === seq.current) { setRows(d.items || []); setTotal(d.total ?? null); setErr('') } })
+      .catch(e => { if (mine === seq.current) { setErr(errText(e)); setRows([]); setTotal(null) } })
+  }, [locationId])
   const loadSide = useCallback(() => {
     api.get('/voicemails').then(d => setCalls(Array.isArray(d) ? d : (d.items || d.voicemails || []))).catch(() => setCalls([]))
     api.get('/program/unmatched-replies').then(d => setUnknown(Array.isArray(d) ? d : [])).catch(() => setUnknown([]))
   }, [])
   useEffect(() => { load() }, [load])
   useEffect(() => { loadSide() }, [loadSide])
+  // Poll visible inbox only; do not mark messages as viewed on a refresh.
+  useEffect(() => {
+    const t = setInterval(() => { if (document.visibilityState === 'visible') { load(); loadSide() } }, 30000)
+    return () => clearInterval(t)
+  }, [load, loadSide])
 
   const view = r => {
     setSel({ kind: 'response', item: r })
-    api.post(`/program/responses/${r.id}/viewed`, {}).catch(() => { /* viewing never fails the screen */ })
+    api.post(`/program/responses/${r.id}/viewed`, {}).then(() => { load(); onChange() }).catch(() => { /* keep inbox usable on failed viewed receipt */ })
   }
   const mark = async (r, state) => {
     try {
-      await api.post(`/program/responses/${r.id}/mark`, { state })
-      setSel({ kind: 'response', item: { ...r, status: state } }); load(); onChange()
+      const d = await api.post(`/program/responses/${r.id}/mark`, { state })
+      setSel({ kind: 'response', item: { ...r, status: d?.status || r.status } }); load(); onChange()
     } catch (e) { setErr(errText(e)) }
   }
   const handled = async u => {
@@ -54,46 +64,69 @@ export default function Responses({ locationId, onChange, navigate }) {
 
   const term = q.trim().toLowerCase()
   const hit = (...xs) => !term || xs.some(x => String(x || '').toLowerCase().includes(term))
-  const list = (rows || []).filter(r => (channel === 'all' || r.channel === channel) && hit(r.name, r.body, r.summary, r.location, r.source_lead_id))
+  const list = sortInbox((rows || []).filter(r =>
+    statusMatches(r, status) && queueMatches(r, queue) &&
+    (!cls || r.class === cls) && (channel === 'all' || r.channel === channel) &&
+    hit(r.name, r.body, r.summary, r.location, r.source_lead_id)), sortBy)
   const callList = (calls || []).filter(c => hit(c.lead_name, c.from, c.transcript))
   const unkList = unknown.filter(u => hit(u.from, u.subject, u.body, u.alias))
   const all = rows || []
   const newCount = all.filter(r => r.status === 'new').length
-  const hotCount = all.filter(r => r.class === 'hot' && r.status !== 'closed').length
+  const hotCount = all.filter(r => r.class === 'hot' && ['new', 'opened', 'active'].includes(r.status)).length
   const activeCount = all.filter(r => r.status === 'active').length
   const slaCount = all.filter(r => r.sla_breached).length
+  const followCount = all.filter(r => ['opened', 'active'].includes(r.status)).length
+  const handledCount = all.filter(r => ['responded', 'closed'].includes(r.status)).length
+  const queueOptions = [
+    ['attention', 'Needs attention', all.filter(r => ['new', 'opened', 'active'].includes(r.status)).length, 'open', 'attention'],
+    ['new', 'New / unread', newCount, 'open', 'attention'],
+    ['hot', 'HOT', hotCount, 'open', 'attention'],
+    ['followup', 'Follow-up', followCount, 'open', 'attention'],
+    ['recent', 'All recent', total ?? all.length, '', 'recent'],
+    ['handled', 'Handled', handledCount, '', 'recent'],
+  ]
+  const chooseQueue = (key, st, order) => {
+    setQueue(key); setStatus(st); setCls(''); setSortBy(order); setChannel('all'); setSel(null)
+  }
   const chips = [
     ['all', 'All', all.length], ['sms', 'Text', all.filter(r => r.channel === 'sms').length],
     ['email', 'Email', all.filter(r => r.channel === 'email').length],
     ['calls', 'Voicemail', calls ? calls.length : null], ['unknown', 'Unknown', unknown.length],
   ]
-  const statusLabel = { open: 'open', new: 'new', opened: 'opened', responded: 'responded', active: 'active', closed: 'closed', '': 'any status' }[status]
 
   return (
     <>
-      <PageHead title="Responses" sub="One connected inbox for text messages, email replies and voicemails.">
+      <PageHead title="Responses" sub="Live family replies, organized by urgency and next action.">
         <Chip tone={newCount ? 'info' : ''}>{newCount} new {newCount === 1 ? 'reply' : 'replies'}</Chip>
+        <button type="button" className="sci-btn" onClick={() => { load(); loadSide() }}><Icon name="refresh" />Refresh</button>
         <button type="button" className="sci-btn" onClick={() => { setChannel('unknown'); setSel(null) }}><Icon name="alert" />View unmatched{unknown.length ? ` (${unknown.length})` : ''}</button>
       </PageHead>
+      <OutreachPulse locationId={locationId} navigate={navigate} />
       <section className="sci-kpis four" aria-label="Response numbers">
-        <Kpi icon="mail" tone="blue" value={rows ? newCount : null} label="New messages" note={`In ${statusLabel} view`} onClick={() => { setStatus('new'); setChannel('all') }} />
-        <Kpi icon="alert" tone="red" value={rows ? hotCount : null} label="HOT responses" note="Open, need a person" onClick={() => { setCls('hot'); setChannel('all') }} />
-        <Kpi icon="responses" tone="purple" value={rows ? activeCount : null} label="Active conversations" onClick={() => { setStatus('active'); setChannel('all') }} />
-        <Kpi icon="clock" tone="gold" value={rows ? slaCount : null} label="Past response SLA" note="Waiting longer than the target" />
+        <Kpi icon="mail" tone="blue" value={rows ? newCount : null} label="New / unread" note="Open latest unhandled replies" onClick={() => chooseQueue('new', 'open', 'attention')} />
+        <Kpi icon="alert" tone="red" value={rows ? hotCount : null} label="HOT priority" note="Urgent responses" onClick={() => chooseQueue('hot', 'open', 'attention')} />
+        <Kpi icon="responses" tone="purple" value={rows ? followCount : null} label="Needs follow-up" note="Opened or active" onClick={() => chooseQueue('followup', 'open', 'attention')} />
+        <Kpi icon="clock" tone="gold" value={rows ? slaCount : null} label="Past response SLA" note="Overdue first" onClick={() => chooseQueue('attention', 'open', 'attention')} />
       </section>
       <ErrorLine text={err} />
       <section className="sci-panel sci-convo" aria-label="Conversations">
         <div className="sci-convo-col">
           <div className="sci-panel-head" style={{ marginBottom: 8 }}>
-            <h2 className="sci-h2">Unified inbox</h2>
+            <div><h2 className="sci-h2">Action inbox</h2><p className="sci-micro sci-muted">Newest actionable messages first, then follow-ups.</p></div>
             {newCount > 0 && <Chip tone="bad">{newCount} new</Chip>}
+          </div>
+          <div className="sci-queue-tabs" role="group" aria-label="Inbox queues">
+            {queueOptions.map(([key, title, count, st, order]) => (
+              <button type="button" key={key} className={queue === key ? 'on' : ''} aria-pressed={queue === key}
+                onClick={() => chooseQueue(key, st, order)}>{title}<b>{rows ? count : '—'}</b></button>
+            ))}
           </div>
           <div style={{ marginBottom: 8 }}><SearchBox id="sci-r-q" value={q} onChange={setQ} placeholder="Search conversations" label="Search conversations" width="100%" /></div>
           <FilterChips items={chips} value={channel} onChange={k => { setChannel(k); setSel(null) }} label="Channel" />
           {(channel === 'all' || channel === 'sms' || channel === 'email') && (
             <div className="sci-row-gap" style={{ margin: '8px 0 4px', flexWrap: 'nowrap' }}>
               <label className="sci-sr" htmlFor="sci-r-status">Status</label>
-              <select id="sci-r-status" className="sci-input sm" style={{ flex: 1, width: 0 }} value={status} onChange={e => setStatus(e.target.value)}>
+              <select id="sci-r-status" className="sci-input sm" style={{ flex: 1, width: 0 }} value={status} onChange={e => { setStatus(e.target.value); setQueue('recent'); setSortBy('recent') }}>
                 <option value="open">Open</option><option value="new">New</option><option value="opened">Opened (follow-up)</option>
                 <option value="responded">Responded</option><option value="active">Active</option><option value="closed">Closed</option>
                 <option value="">All statuses</option>
@@ -105,6 +138,13 @@ export default function Responses({ locationId, onChange, navigate }) {
               </select>
             </div>
           )}
+          <div className="sci-inbox-toolbar">
+            <span>{rows ? `${list.length} shown` : 'Loading inbox'}{total !== null && total > all.length ? ` · latest ${all.length} of ${total}` : ''}</span>
+            <label htmlFor="sci-inbox-sort">Order</label>
+            <select id="sci-inbox-sort" className="sci-input sm" value={sortBy} onChange={e => setSortBy(e.target.value)}>
+              <option value="attention">Priority first</option><option value="recent">Newest first</option>
+            </select>
+          </div>
           <div className="sci-list" aria-label="Messages" style={{ marginTop: 6 }}>
             {channel === 'calls' ? (
               calls === null ? <p className="sci-loading">Loading…</p> : callList.length === 0 ? <Empty icon="voicemail">No voicemails.</Empty> : callList.map(c => (
@@ -136,14 +176,17 @@ export default function Responses({ locationId, onChange, navigate }) {
                   {all.length ? 'Try another filter or search.' : 'New conversations will appear here the moment a family replies.'}
                 </Empty>
               ) : list.map(r => (
-                <button key={r.id} type="button" className="sci-listitem" aria-current={sel?.kind === 'response' && sel.item.id === r.id} onClick={() => view(r)}>
+                <button key={r.id} type="button" className={`sci-listitem sci-inbox-item ${r.status === 'new' ? 'unread' : ''} ${r.sla_breached ? 'overdue' : ''}`}
+                  aria-current={sel?.kind === 'response' && sel.item.id === r.id} onClick={() => view(r)}>
                   <span className={`sci-initials${r.class === 'hot' ? ' hot' : ''}`}>{initials(r.name)}</span>
                   <span className="sci-listitem-body">
                     <b>{r.name || 'Contact'}{r.status === 'new' && <span className="sci-newdot" aria-label="new" />}</b>
                     <small>{r.body || r.summary}</small>
                     <small>
                       <Chip tone={CLASS_TONE[r.class]} plain>{r.label || CLASS_LABEL[r.class]}</Chip>{' '}
-                      {r.channel === 'sms' ? 'Text' : 'Email'} · {ago(r.received_at)}{r.sla_breached && ' · past SLA'}
+                      {r.channel === 'sms' ? 'Text' : 'Email'} · {ago(r.received_at)}{r.sla_breached && ' · PAST SLA'}
+                      {r.status === 'new' && <strong className="sci-inbox-new"> · NEW</strong>}
+                      {r.status === 'opened' && ' · Follow-up'}
                     </small>
                   </span>
                 </button>
@@ -153,12 +196,24 @@ export default function Responses({ locationId, onChange, navigate }) {
         </div>
 
         {!sel ? (
-          <div className="sci-convo-col sci-convo-empty" style={{ display: 'grid', placeItems: 'center' }}>
-            <Empty icon="responses" title="Every family deserves a timely reply.">Select a conversation to see the full timeline, the family's location, consent and the next step.</Empty>
+          <div className="sci-convo-col sci-convo-empty sci-inbox-welcome">
+            {channel !== 'calls' && channel !== 'unknown' && list.length > 0 ? (
+              <div className="sci-next-card">
+                <span className="sci-pulse-eyebrow">UP NEXT · {list[0].sla_breached ? 'PAST SLA' : list[0].class === 'hot' ? 'HOT RESPONSE' : list[0].status === 'new' ? 'UNREAD REPLY' : 'FOLLOW-UP'}</span>
+                <h2>{list[0].name || 'A family is waiting'}</h2>
+                <p className="sci-next-meta">{list[0].location || 'Location being verified'} · {list[0].channel === 'sms' ? 'Text' : 'Email'} · {ago(list[0].received_at)}</p>
+                <blockquote>{list[0].body || list[0].summary || 'Open to see what this family needs.'}</blockquote>
+                <button className="sci-btn primary" type="button" onClick={() => view(list[0])}>Open this conversation ›</button>
+                <p className="sci-micro sci-muted">Opening the conversation marks it viewed. The reply is not automatically sent.</p>
+              </div>
+            ) : <Empty icon="responses" title="Choose a conversation">Select a message to see its timeline, family context and next step.</Empty>}
             <p className="sci-footnote"><Icon name="lock" />STOP and suppression rules always apply.</p>
           </div>
         ) : sel.kind === 'response' ? (
-          <ConversationPane r={sel.item} mark={mark} navigate={navigate} onSent={() => { load(); onChange() }} />
+          <ConversationPane r={sel.item} mark={mark} navigate={navigate} onSent={st => {
+            if (st) setSel(cur => (cur?.kind === 'response' && cur.item.id === sel.item.id ? { ...cur, item: { ...cur.item, status: st } } : cur))
+            load(); onChange()
+          }} />
         ) : sel.kind === 'call' ? (
           <CallPane c={sel.item} navigate={navigate} />
         ) : (
@@ -176,6 +231,7 @@ function ConversationPane({ r, mark, navigate, onSent }) {
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState({ tone: '', text: '' })
   const threadRef = useRef(null)
+  const sendKey = useRef(null)
   const loadThread = useCallback(() => {
     if (!r.lead_id) { setTl({ events: [], lead: null }); return }
     api.get(`/leads/${r.lead_id}/timeline`).then(d => { setTl(d); setTlErr('') }).catch(e => { setTlErr(errText(e)); setTl({ events: [], lead: null }) })
@@ -202,9 +258,13 @@ function ConversationPane({ r, mark, navigate, onSent }) {
     if (!text || busy) return
     setBusy(true); setNote({ tone: '', text: '' })
     try {
-      await api.post('/sms/send', { lead_id: r.lead_id, template: text, include_booking_link: false })
+      if (!sendKey.current) sendKey.current = window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`
+      const d = await api.post('/program/command/reply', {
+        lead_id: r.lead_id, response_id: r.id, channel: 'sms', text, idempotency_key: sendKey.current,
+      })
+      sendKey.current = null
       setDraft(''); setNote({ tone: 'ok', text: 'Sent. It appears in the thread once the carrier accepts it.' })
-      loadThread(); onSent()
+      loadThread(); onSent(d?.response_status)
     } catch (er) {
       setNote({ tone: 'bad', text: `Not sent: ${errText(er)}` })
     } finally { setBusy(false) }

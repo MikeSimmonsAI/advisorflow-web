@@ -146,6 +146,55 @@ def product_name(slug: Optional[str], module: str) -> Optional[str]:
     return PRODUCT_NAMES.get((slug or "").strip().lower(), {}).get(module)
 
 
+def _org_platform_slug(db, org) -> Optional[str]:
+    try:
+        if org is not None and isinstance(org, str):
+            from app.models.models import Organization
+            org = db.query(Organization).filter(Organization.id == org).first()
+        pid = getattr(org, "platform_id", None)
+        if not pid:
+            return None
+        from app.models.models import Platform
+        row = db.query(Platform).filter(Platform.id == pid).first()
+        return (getattr(row, "slug", None) or "").strip().lower() or None
+    except Exception:  # noqa: BLE001 - a name must never break a send
+        return None
+
+
+def brand_word(db, org) -> str:
+    """The brand name a customer's own clients see on services the platform runs
+    for them (e-signature emails, the signing page, signed PDFs, notices).
+
+    "EvoSys" for EvoSys Pro organizations and for any organization whose brand
+    cannot be resolved - exactly what all of them showed before (#272 P4).
+    Another brand's organizations see their own brand's name, never EvoSys
+    (white-label rule: a brand's users never see another brand's name)."""
+    slug = _org_platform_slug(db, org)
+    if not slug or slug == "evosyspro":
+        return "EvoSys"
+    return (config_for_slug(db, slug) or {}).get("display_name") or "EvoSys"
+
+
+def wholesale_product(db, org) -> str:
+    """This workspace's Wholesale product name for notices. "EvoSys Wholesale"
+    for EvoSys Pro organizations and any org without a brand (unchanged). A
+    second Wholesale tenant (its own workspace - #272) uses its own name; any
+    other brand its product name, else the neutral "Wholesale"."""
+    try:
+        if org is not None and isinstance(org, str):
+            from app.models.models import Organization
+            org = db.query(Organization).filter(Organization.id == org).first()
+        slug = _org_platform_slug(db, org)
+        if not slug or slug == "evosyspro":
+            return product_name("evosyspro", "wholesale")
+        from app.services.program_experience import WHOLESALE_HOST_SLUG, is_wholesale_host
+        if (getattr(org, "slug", "") or "") != WHOLESALE_HOST_SLUG and is_wholesale_host(org, object()):
+            return getattr(org, "brand_name", None) or getattr(org, "name", None) or "Wholesale"
+        return product_name(slug, "wholesale") or "Wholesale"
+    except Exception:  # noqa: BLE001
+        return "Wholesale"
+
+
 # What a brand with no row and no frozen entry gets. Every value is either
 # neutral or None; nothing here impersonates a brand that does exist.
 UNKNOWN_BRAND = {

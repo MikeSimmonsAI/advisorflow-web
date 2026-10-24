@@ -20,6 +20,7 @@ import VoicemailPlayer from '../../../components/telephony/VoicemailPlayer'
 import { Journey, MetricDrill, PerformanceHome, ResendBar } from './Performance'
 import { Home, ScreenTabs, TopBar, useHomeData } from './Dashboard'
 import { LIVE_SCREENS, MobileNav, SideNav } from './SciNav'
+import Consent from './Consent'
 import './Dashboard.css'
 import './Command.css'
 import './Performance.css'
@@ -178,7 +179,7 @@ export default function Command() {
     const state = a === 'close' || a === 'dismiss' ? 'closed' : 'opened'
     try {
       await api.post(`/program/responses/${item.response_id}/mark`, { state })
-      setToast(a === 'snooze' ? 'Snoozed - it stays in the list as handled.' : 'Closed.')
+      setToast(a === 'snooze' ? 'Marked as opened.' : 'Closed.')
       load()
     } catch (e) { setToast(e.message || 'Could not update.') }
   }
@@ -201,7 +202,7 @@ export default function Command() {
   // their own), so coming back here never leaves "Settings" in the title.
   useEffect(() => {
     const name = family ? (familyView === 'journey' ? 'Family Journey' : 'Conversation') : drill ? 'Metric Drill-down'
-      : { search: 'Families', inbox: 'Conversations', appts: 'Appointments', reports: 'Analytics' }[tab] || 'SCI Live'
+      : { search: 'Families', inbox: 'Conversations', appts: 'Appointments', reports: 'Analytics', consent: 'Opt-ins & Opt-outs' }[tab] || 'SCI Live'
     document.title = `${name} · SCI · EvoSys Pro`
   }, [tab, family, familyView, drill])
   // Clicking the menu item of the screen already open: back to its top.
@@ -225,7 +226,7 @@ export default function Command() {
   if (drill) {
     return frame(<MetricDrill key={JSON.stringify(drill)} spec={drill} range={drill.range || range} loc={loc} onBack={() => back({ m: null })} openFamily={openFamily} />, 'wide')
   }
-  return frame(<div className={`cmd ${tab === 'home' || tab === 'reports' || (tab === 'inbox' && wide) ? 'cmd-wide' : ''}`}>
+  return frame(<div className={`cmd ${tab === 'home' || tab === 'reports' || tab === 'consent' || (tab === 'inbox' && wide) ? 'cmd-wide' : ''}`}>
       {tab === 'home' && <>
         {err && <p className="cmd-err">{err}</p>}
         <div className="sl-search"><SearchBox q={q} setQ={v => { setQ(v); if (v.trim()) setTab('search') }} /></div>
@@ -239,7 +240,7 @@ export default function Command() {
         {(d?.counts?.needs_attention > 0 || (d?.unknown || []).length > 0) && (
           <button className="sl-alert" onClick={() => go('inbox')}><b>{d.counts.needs_attention} famil{d.counts.needs_attention === 1 ? 'y needs' : 'ies need'} a reply</b>
             {(d.unknown || []).length ? <span> · {d.unknown.length} unknown caller{d.unknown.length === 1 ? '' : 's'}</span> : null}<em>Open inbox ›</em></button>)}
-        <Home a={home.a} sched={home.sched} openMetric={setDrill} openFamily={openFamily} />
+        <Home a={home.a} sched={home.sched} consent={home.consent} openMetric={setDrill} openFamily={openFamily} />
         {d && <div className="cmd-cols">
           <div>
             <Unknown items={d.unknown} toast={setToast} reload={load} />
@@ -252,10 +253,13 @@ export default function Command() {
               <button onClick={() => setTab('appts')}><Icon n="cal" />
                 <span><b>{d.upcoming.visits_booked ? `${d.upcoming.visits_booked} appointment${d.upcoming.visits_booked === 1 ? '' : 's'} booked` : 'No appointments scheduled'}</b><br />
                   <small>{d.upcoming.visits_booked ? 'See who is coming in' : 'Get in touch to book a visit today'}</small></span>›</button>
-              {(d.tasks || []).map(t => (
-                <button key={`${t.kind}-${t.lead_id}`} onClick={() => openFamily(t.lead_id)}><Icon n="mail" />
+              {(d.tasks || []).map(t => t.kind === 'home_visit'
+                ? <button key={`${t.kind}-${t.lead_id}`} onClick={() => openFamily(t.lead_id)}><Icon n="cal" />
+                  <span><b>Call to set a home visit · {t.name}</b><br />
+                    <small>{t.note || 'They asked for a visit at home - call to set a time'}</small></span>›</button>
+                : <button key={`${t.kind}-${t.lead_id}`} onClick={() => openFamily(t.lead_id)}><Icon n="mail" />
                   <span><b>Mail a printed guide · {t.name}</b><br />
-                    <small>{t.note || 'Confirm the address, mail it, then mark it done'}</small></span>›</button>))}
+                    <small>{t.note || 'Confirm the address, mail it, then mark it done'}</small></span>›</button>)}
             </div>
           </div>
           <div>
@@ -279,11 +283,12 @@ export default function Command() {
         <SearchResults q={q} loc={loc} open={openFamily} />
       </>}
       {tab === 'appts' && <Appointments open={openFamily} />}
+      {tab === 'consent' && <Consent />}
       {tab === 'reports' && <section id="sl-reports" className="sl-reports">
         <SectionHead title="Analytics · performance & reports" />
         <PerformanceHome range={range} setRange={setRange} loc={loc} setLoc={setLoc} openMetric={setDrill} />
       </section>}
-    </div>, tab === 'home' || tab === 'inbox' || tab === 'reports' ? 'wide' : '')
+    </div>, tab === 'home' || tab === 'inbox' || tab === 'reports' || tab === 'consent' ? 'wide' : '')
 }
 
 function useWide() {
@@ -331,8 +336,8 @@ function SearchResults({ q, loc, open }) {
 
 // ONE inbox for texts and emails, with its own filters. Reads the same
 // endpoint as Home; "Handled" brings back what was answered or closed.
-const FILTERS = [['all', 'All'], ['needs_reply', 'Needs reply'], ['unread', 'Unread'], ['ai', 'AI handling'], ['human', 'Human attention'],
-  ['appointments', 'Appointments'], ['text', 'Text'], ['email', 'Email'], ['handled', 'Handled']]
+const FILTERS = [['all', 'All'], ['handoff', 'Human handoff'], ['needs_reply', 'Needs reply'], ['unread', 'Unread'], ['ai', 'AI handling'], ['human', 'Human attention'],
+  ['appointments', 'Appointments'], ['home_visits', 'Home visits'], ['text', 'Text'], ['email', 'Email'], ['handled', 'Handled']]
 
 function InboxTab({ loc, act, open, selected }) {
   const [flt, setFlt] = useState('all')
@@ -352,9 +357,11 @@ function InboxTab({ loc, act, open, selected }) {
   const c = r?.filter_counts || {}
   return <>
     <header className="cmd-top"><h1>Inbox</h1>{c.unread ? <p className="cmd-sub">{c.unread} new</p> : null}</header>
+    {c.handoff > 0 && flt !== 'handoff' && <button className="cmd-handoff-bar" onClick={() => setFlt('handoff')}>
+      <b>HUMAN HANDOFF</b> {c.handoff === 1 ? '1 family needs' : `${c.handoff} families need`} a person - the AI sent them nothing. Tap to see them ›</button>}
     <div className="cmd-chips" role="tablist">
       {FILTERS.map(([k, l]) => (
-        <button key={k} role="tab" aria-selected={flt === k} className={flt === k ? 'on' : ''} onClick={() => setFlt(k)}>
+        <button key={k} role="tab" aria-selected={flt === k} className={`${flt === k ? 'on' : ''} ${k === 'handoff' && c.handoff ? 'red' : ''}`} onClick={() => setFlt(k)}>
           {l}{k !== 'handled' && c[k] !== undefined ? <i>{c[k]}</i> : null}</button>))}
     </div>
     {r && flt !== 'handled' && <Unknown items={(r.unknown || []).filter(u => ['all', 'needs_reply', 'unread', 'human'].includes(flt) || (flt === 'email' && u.channel_label === 'EMAIL') || (flt === 'text' && u.channel_label !== 'EMAIL'))} reload={load} />}
@@ -419,7 +426,7 @@ function SectionHead({ title, onAll }) {
 
 const ACT = {
   reply: ['reply', 'Reply', true], call: ['call', 'Call'], schedule: ['cal', 'Schedule'], note: ['note', 'Note'],
-  close: ['check', 'Close'], snooze: ['clock', 'Snooze'], review: ['note', 'Review', true], dismiss: ['x', 'Dismiss'],
+  close: ['check', 'Close'], snooze: ['clock', 'Mark opened'], review: ['note', 'Review', true], dismiss: ['x', 'Dismiss'],
 }
 
 function Inbox({ items, act, open, empty, selected }) {
@@ -428,7 +435,7 @@ function Inbox({ items, act, open, empty, selected }) {
     const email = i.channel === 'email'
     const title = email && (i.sender_name || i.sender_email) ? (i.sender_name || i.sender_email) : i.name
     return (
-      <article key={i.lead_id} className={`cmd-card cmd-item ${selected === i.lead_id ? 'sel' : ''}`}>
+      <article key={i.lead_id} className={`cmd-card cmd-item ${selected === i.lead_id ? 'sel' : ''} ${i.human_handoff ? 'handoff' : ''}`}>
         <button className="cmd-item-main" onClick={() => open(i.lead_id)}>
           <span className={`dot ${i.class}`} />
           <span className="cmd-item-text">
@@ -436,6 +443,7 @@ function Inbox({ items, act, open, empty, selected }) {
             <span className="cmd-row2">
               <em className={`chan ${email ? 'email' : 'text'}`}>{i.channel_label || (email ? 'EMAIL' : 'TEXT')}</em>
               <em className={`chan ${i.owner === 'human' ? 'human' : 'ai'}`}>{i.owner === 'human' ? 'PERSON' : 'AI'}</em>
+              {i.human_handoff && <em className="chan handoff">HUMAN HANDOFF</em>}
               {i.is_test && <em className="chan human">TEST</em>}
               <em className={`badge ${BADGE[i.badge] || 'low'}`}>{i.badge}</em>
             </span>
@@ -467,7 +475,7 @@ function Appointments({ open }) {
       : rows.map(a => (
         <button key={a.id} className="cmd-card cmd-appt" onClick={() => open(a.lead_id)}>
           <Icon n="cal" /><span><b>{a.name}</b><small>{a.location || ''}</small></span>
-          <span className="cmd-item-meta"><b>{new Date(a.when.replace('Z', '')).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</b>
+          <span className="cmd-item-meta"><b>{new Date(a.when).toLocaleString([], { timeZone: 'America/Chicago', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}</b>
             <small>{a.label || 'Visit'}</small></span>
         </button>))}
   </>
@@ -485,6 +493,10 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
   const [slots, setSlots] = useState(null)
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState({})
+  const [pick, setPick] = useState(null)        // slot tapped, waiting for "Book it"
+  const [booked, setBooked] = useState(null)    // what happened, shown on the card
+  const [customDay, setCustomDay] = useState('')     // "Choose custom time": the day picked
+  const [daySlots, setDaySlots] = useState(null)     // every open time that day
   const [menu, setMenu] = useState(false)
   const [picking, setPicking] = useState(false)
   const composer = useRef(null)
@@ -547,15 +559,46 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
     } catch (e) { toast(e.message || 'Could not change.') } finally { setBusy(false) }
   }
   const book = async s => {
-    if (!window.confirm(`Book ${f.name} for ${s.label}? The family gets a confirmation text.`)) return
-    setBusy(true)
+    setBusy(true); setBooked(null)
     try {
       const r = await api.post('/program/command/schedule', { lead_id: id, slot: s.value, kind: 'visit' })
-      toast(r.ok ? (r.simulated ? `Simulated: ${r.label} is open, but nothing was booked for real (test/demo family).` : `Booked - ${r.label}. Confirmed on the calendar.`)
-        : (r.reason || 'That time is no longer open.'))
+      const msg = r.ok ? (r.simulated ? `Test family - ${r.label} is open, but nothing was booked or sent.`
+        : `Booked ${r.label}. ${f.name} was texted the confirmation, and it's on the calendar.`)
+        : (r.reason ? `Not booked: ${r.reason}.` : 'Not booked: that time is no longer open.')
+      setBooked({ ok: !!r.ok, msg }); toast(msg); setPick(null)
       load()
       api.get(`/program/command/slots?lead_id=${id}`).then(setSlots).catch(() => {})
-    } catch (e) { toast(e.message || 'Could not book.') } finally { setBusy(false) }
+    } catch (e) { const msg = e.message || 'Could not book.'; setBooked({ ok: false, msg }); toast(msg) } finally { setBusy(false) }
+  }
+  const loadDay = async d => {
+    setCustomDay(d); setDaySlots(d ? 'loading' : null); setPick(null)
+    if (!d) return
+    try { setDaySlots(await api.get(`/program/command/day-slots?lead_id=${id}&date=${d}`)) }
+    catch (e) { setDaySlots({ slots: [], reason: e.message || 'Could not read the calendar.' }) }
+  }
+  const firstName = () => (f.name || '').split(' ')[0].toLowerCase().replace(/^./, c => c.toUpperCase())
+  // Ask the family about ONE time (picked by a person) instead of booking it outright.
+  const offerOne = s => {
+    setMode('text'); setView('conversation'); setPick(null)
+    setText(`Hi ${firstName()}, would ${dayLabel(s.value)} at ${s.time} work for a visit? Or pick another time here: {BOOKING}`)
+    setTimeout(() => { composer.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); composer.current?.focus() }, 50)
+  }
+  // The family hasn't picked a time: put two open times in a text for them to choose from.
+  const offerTimes = () => {
+    const two = (slots?.slots || []).slice(0, 2)
+    if (!two.length) return
+    const first = firstName()
+    const when = two.map(s => `${dayLabel(s.value)} at ${s.time}`).join(' or ')
+    setMode('text'); setView('conversation')
+    setText(`Hi ${first}, I have ${when} open for a visit. Which works better for you? Or pick another time here: {BOOKING}`)
+    setTimeout(() => { composer.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); composer.current?.focus() }, 50)
+  }
+  const homeVisitArranged = async () => {
+    try {
+      await api.post('/program/command/home-visit', { lead_id: id })
+      toast('Marked as arranged.')
+      load()
+    } catch (e) { toast(e.message || 'Could not update the home visit.') }
   }
   const mailTask = async done => {
     try {
@@ -599,6 +642,12 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
         <button onClick={() => schedRef.current?.scrollIntoView({ behavior: 'smooth' })}><Icon n="cal" s={22} />Schedule Visit</button>
         <button onClick={() => focusComposer('note')}><Icon n="note" s={22} />Add Note</button>
       </div>
+      {f.human_handoff && <section className="cmd-handoff-banner" role="alert">
+        <b>HUMAN HANDOFF</b>
+        <p>The AI sent this family nothing. A person needs to contact them.{f.handoff_reason ? ` Why: ${f.handoff_reason}` : ''}</p>
+        {f.suggested_reply && <p className="small">The AI's draft is saved: tap Reply, then "Use suggested reply" - or write your own.</p>}
+        {f.response_id && <button onClick={markHandled}>Mark handled</button>}
+      </section>}
       {!f.is_demo && <ResendBar key={`rs-${id}`} id={id} onDone={load} />}
 
       <div className="cmd-seg two cmd-fview" role="tablist" aria-label="View">
@@ -652,9 +701,16 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
         {f.setter && <p className="cmd-setter">Appointment setter: <b>{f.setter.state.replace('_', ' ')}</b>
           {f.setter.offered.length ? ` · offered ${f.setter.offered.join(' or ')}` : ''}
           {f.setter.callback_window ? ` · callback ${f.setter.callback_window}` : ''}</p>}
-        {f.booking && <p className="cmd-booked"><Icon n="check" /> Booked {new Date(f.booking.when).toLocaleString([], { weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} · {f.booking.label || 'Visit'}</p>}
+        {f.booking && <p className="cmd-booked"><Icon n="check" /> Booked {f.booking.when_text || new Date(f.booking.when).toLocaleString([], { timeZone: 'America/Chicago', weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })} · {f.booking.label || 'Visit'}</p>}
       </section>
 
+      {f.home_visit && <section className="cmd-card cmd-next">
+        <h3><Icon n="cal" /> Home visit</h3>
+        {f.home_visit.waiting
+          ? <><p>The family asked for a visit at home. Call them to set a time, then mark it arranged. Nothing was booked for them.</p>
+            <div className="cmd-send"><button className="primary" onClick={homeVisitArranged}>Mark as arranged</button></div></>
+          : <p>Arranged{f.home_visit.done_by ? ` by ${f.home_visit.done_by}` : ''}{f.home_visit.done_at ? ` · ${new Date(f.home_visit.done_at).toLocaleDateString()}` : ''}.</p>}
+      </section>}
       {f.mail_task && <section className="cmd-card cmd-next">
         <h3><Icon n="mail" /> Printed guide by mail</h3>
         {f.mail_task.done
@@ -671,13 +727,36 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
 
       <section className="cmd-card cmd-sched" ref={schedRef}>
         <h3><Icon n="cal" /> Quick schedule a visit</h3>
+        <p className="cmd-muted small">Tap a time to book it. The family gets a text confirming it. Not sure they want that time? Tap "Ask them first", or "Text them times to pick" - both include their booking link.</p>
         {slots === null ? <p className="cmd-muted">Checking the calendar…</p>
           : slots.slots.length ? <div className="cmd-slots">{slots.slots.slice(0, 2).map(s => (
-            <button key={s.value} disabled={busy} onClick={() => book(s)}><small>{dayLabel(s.value)}</small>{s.time}</button>))}</div>
+            <button key={s.value} className={pick?.value === s.value ? 'on' : ''} disabled={busy} onClick={() => { setPick(s); setBooked(null) }}><small>{dayLabel(s.value)}</small>{s.time}</button>))}</div>
             : <p className="cmd-muted">{slots.reason || 'No open times right now.'}</p>}
-        {slots?.slots?.length > 2 && <details><summary>Choose custom time ›</summary>
+        {slots?.slots?.length > 2 && <details><summary>More open times ›</summary>
           <div className="cmd-slots">{slots.slots.slice(2).map(s => (
-            <button key={s.value} disabled={busy} onClick={() => book(s)}><small>{dayLabel(s.value)}</small>{s.time}</button>))}</div></details>}
+            <button key={s.value} className={pick?.value === s.value ? 'on' : ''} disabled={busy} onClick={() => { setPick(s); setBooked(null) }}><small>{dayLabel(s.value)}</small>{s.time}</button>))}</div></details>}
+        <details className="cmd-custom" onToggle={e => { if (e.target.open && !customDay) { const t = new Date(Date.now() + 864e5); loadDay(t.toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })) } }}>
+          <summary>Choose custom time ›</summary>
+          <label className="cmd-custom-day">Day
+            <input type="date" value={customDay} min={new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })}
+                   onChange={e => loadDay(e.target.value)} /></label>
+          {daySlots === 'loading' ? <p className="cmd-muted">Checking that day…</p>
+            : daySlots && (daySlots.slots.length
+              ? <div className="cmd-slots cmd-slots-day">{daySlots.slots.map(s => (
+                <button key={s.value} className={pick?.value === s.value ? 'on' : ''} disabled={busy} onClick={() => { setPick(s); setBooked(null) }}>{s.time}</button>))}</div>
+              : <p className="cmd-muted">{daySlots.reason || 'No open times that day.'} Try another day.</p>)}
+        </details>
+        {pick && <div className="cmd-pick" role="group" aria-label="Confirm booking">
+          <p>Book <b>{f.name}</b> for <b>{pick.label || `${dayLabel(pick.value)} ${pick.time}`}</b>?{f.phone ? ` They get a text at ${fmtPhone(f.phone)} confirming it.` : ' They have no phone on file, so call them to let them know.'}</p>
+          <div className="cmd-send">
+            <button disabled={busy} onClick={() => setPick(null)}>Cancel</button>
+            {f.phone && !f.handling?.opted_out && <button disabled={busy} onClick={() => offerOne(pick)}>Ask them first</button>}
+            <button className="primary" disabled={busy} onClick={() => book(pick)}>{busy ? 'Booking…' : f.phone ? 'Book it & text them' : 'Book it'}</button>
+          </div>
+        </div>}
+        {booked && <p className={`cmd-pick-result ${booked.ok ? 'ok' : 'bad'}`}>{booked.msg}</p>}
+        {!f.is_demo && f.phone && !f.handling?.opted_out && slots?.slots?.length > 0 && !f.booking &&
+          <div className="cmd-send"><button onClick={offerTimes}><Icon n="reply" /> Text them times to pick</button></div>}
       </section>
 
       <section className="cmd-card cmd-compose">
@@ -691,11 +770,14 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
             {!f.reply_to.threadable && <><br />{f.reply_to.why_not}</>}</p>
           : <p className="cmd-replyto bad">There is no email from this family to answer. Reply by text, or add a note.</p>)}
         {mode === 'email' && f.is_demo && <input className="cmd-subj" value={subject} onChange={e => setSubject(e.target.value)} placeholder="Subject" />}
+        {mode === 'text' && /\blink\b/i.test(text) && !/\{BOOKING\}|\{GUIDE\}|https?:\/\//i.test(text) &&
+          <p className="cmd-replyto bad">This text mentions a link but has none in it. <button className="link" onClick={() => setText(t => `${t.trim()} {BOOKING}`)}>Add their booking link</button></p>}
         <textarea ref={composer} value={text} onChange={e => setText(e.target.value)} rows={4}
                   placeholder={mode === 'note' ? 'Write a note about this family...' : mode === 'text' ? 'Write a text...' : 'Write an email...'} />
         <div className="cmd-send">
           {mode !== 'note' && f.suggested_reply && text !== f.suggested_reply && <button className="link" onClick={() => setText(f.suggested_reply)}>Use suggested reply</button>}
           {mode === 'email' && !f.is_demo && !text.includes('{GUIDE}') && <button className="link" onClick={() => setText(t => `${t.trim()}${t.trim() ? ' ' : ''}{GUIDE}`)}>Add guide link</button>}
+          {mode === 'text' && !f.is_demo && !text.includes('{BOOKING}') && <button className="link" onClick={() => setText(t => `${t.trim()}${t.trim() ? ' ' : ''}Pick a time that works for you here: {BOOKING}`)}>Add booking link</button>}
           {mode !== 'note' && !f.is_demo && <button disabled={busy || !text.trim() || !canSend} onClick={() => send('ai')}>Send &amp; let AI continue</button>}
           <button className="primary" disabled={busy || !text.trim() || (mode !== 'note' && !f.is_demo && !canSend)} onClick={() => send('human')}>
             {mode === 'note' ? 'Save note' : mode === 'text' ? 'Send text' : 'Send email'}</button>

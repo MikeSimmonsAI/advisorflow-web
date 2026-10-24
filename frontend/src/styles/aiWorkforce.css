@@ -76,3 +76,86 @@
   font-weight: 700;
   color: var(--text-strong);
 }
+
+/* ── AI Workforce front door (AIWorkforceHome.jsx). Tokens only. ───────── */
+.wf-h2 { margin: 8px 0 0; font-size: 18px; font-weight: 700; color: var(--text-strong); }
+.wf-muted { color: var(--text-muted); font-size: 14px; line-height: 1.5; margin: 0; }
+.wf-intro { font-size: 16px; line-height: 1.55; color: var(--text-body); margin: 0; }
+.wf-error {
+  padding: 12px 14px; border-radius: var(--radius-sm, 10px);
+  border: 1px solid var(--danger, #c0392b); color: var(--text-strong);
+  background: var(--surface-card); font-size: 15px;
+}
+.wf-ok { font-size: 16px; margin: 0; }
+.wf-livenote {
+  padding: 12px 14px; border-radius: var(--radius-sm, 10px);
+  border: 1px solid var(--border-default); background: var(--surface-card);
+  font-size: 15px; line-height: 1.5; color: var(--text-body);
+}
+.wf-jobs { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.wf-job { display: flex; flex-direction: column; gap: 10px; padding: 18px; }
+.wf-job__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.wf-job__head h3 { margin: 0; font-size: 18px; }
+.wf-job__does { margin: 0; font-size: 16px; line-height: 1.5; color: var(--text-strong); }
+.wf-job__needs { margin: 0; font-size: 14px; line-height: 1.5; color: var(--text-body); flex: 1; }
+.wf-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.wf-list__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; flex-wrap: wrap; }
+.wf-wizard { display: flex; flex-direction: column; gap: 16px; padding: 20px; }
+.wf-wizard__top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.wf-wizard__title { margin: 0 0 6px; font-size: 20px; color: var(--text-strong); }
+.wf-progress__text { font-size: 15px; font-weight: 600; color: var(--text-strong); margin-bottom: 6px; }
+.wf-progress__bar { height: 8px; border-radius: 999px; background: var(--border-default); overflow: hidden; }
+.wf-progress__bar span { display: block; height: 100%; background: var(--accent, var(--brand-primary, #2563eb)); border-radius: 999px; }
+.wf-qs { display: flex; flex-direction: column; gap: 16px; max-width: 640px; }
+.wf-q { display: flex; flex-direction: column; gap: 6px; border: 0; padding: 0; margin: 0; }
+.wf-q--row { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px; }
+.wf-q--row .input { width: auto; }
+.wf-q__label { font-size: 16px; font-weight: 600; color: var(--text-strong); }
+.wf-q__help { font-size: 14px; color: var(--text-muted); }
+.wf-q .input, .wf-q textarea, .wf-q select { font-size: 16px; min-height: 44px; }
+.wf-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.wf-chip, .wf-check {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 44px;
+  padding: 8px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-sm, 10px);
+  background: var(--surface-card); font-size: 15px; cursor: pointer;
+}
+.wf-checklist { display: flex; flex-direction: column; gap: 8px; }
+.wf-nav { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.wf-bigbutton { align-self: flex-start; min-height: 52px; font-size: 18px; padding-left: 28px; padding-right: 28px; }
+.wf-report { padding: 16px; border-radius: var(--radius-sm, 10px); border: 2px solid var(--border-default); background: var(--surface-card); }
+.wf-report h3 { margin: 0 0 8px; font-size: 20px; }
+.wf-report h4 { margin: 12px 0 4px; font-size: 15px; }
+.wf-report p { margin: 6px 0; font-size: 15px; line-height: 1.5; }
+.wf-report--pass { border-color: var(--success, #1e8e3e); }
+.wf-report--attn { border-color: var(--warning, #b26a00); }
+.wf-steps { margin: 0; padding-left: 22px; font-size: 15px; line-height: 1.6; }
+.wf-problems { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.wf-problem {
+  display: flex; flex-direction: column; gap: 4px; padding: 12px 14px;
+  border-left: 4px solid var(--warning, #b26a00); background: var(--surface-card);
+  border-radius: var(--radius-sm, 10px); font-size: 15px; line-height: 1.5;
+}
+.wf-problem__what { font-weight: 700; color: var(--text-strong); }
+.wf-problem__who { color: var(--text-muted); }
+.wf-problem .btn { align-self: flex-start; margin-top: 4px; }
+.wf-later summary { cursor: pointer; font-size: 14px; color: var(--text-muted); }
+.wf-worker { display: flex; flex-direction: column; gap: 12px; padding: 18px; }
+.wf-worker__head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.wf-worker__head h3 { margin: 0 0 6px; }
+.wf-worker__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.wf-worker__actions .btn { min-height: 40px; }
+.wf-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.wf-table th, .wf-table td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border-default); }
+.wf-table caption { text-align: left; padding-bottom: 6px; }
+.wf-table .badge { margin-left: 6px; }
+.wf-needs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.wf-need { padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.wf-need__head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.wf-results { padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+.wf-results h3 { margin: 0; }
+.wf-tabs .btn { min-height: 44px; font-size: 15px; }
+@media (max-width: 640px) {
+  .wf-wizard, .wf-worker, .wf-job { padding: 14px; }
+  .wf-table { font-size: 13px; }
+  .wf-table th:nth-child(3), .wf-table td:nth-child(3) { display: none; }
+}

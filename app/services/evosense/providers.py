@@ -98,7 +98,9 @@ def _in_query(rec: Dict, q: Dict) -> bool:
     zips = [z[:5] for z in q.get("zips") or []]
     checks = []
     if counties:
-        checks.append(norm(rec.get("county")) in counties)
+        from app.services.evosense.sources.lgbs import wants_all_texas
+        checks.append(norm(rec.get("county")) in counties
+                      or (wants_all_texas(counties) and (rec.get("state") or "").upper() == "TX"))
     if cities:
         checks.append((rec.get("city") or "").lower() in cities)
     if zips:
@@ -363,6 +365,8 @@ ROTATE_TARRANT_POOL = 9000     # delinquent residential accounts on the roll (ap
 ROTATE_DCAD_POOL = 7000        # POOR / VERY POOR / UNDESIRABLE residences (approx.)
 ROTATE_FW_OPEN_POOL = 1_000_000     # wrapped by the reader to the open-case count
 ROTATE_DALLAS_TRW_POOL = 1_000_000  # wrapped again by the reader to the real pool size
+ROTATE_TRAVIS_POOL = 1_000_000    # wrapped by the reader to the real pool
+ROTATE_HCAD_POOL = 150_000      # absentee / estate-owned Harris houses (approx.); the reader wraps
 
 
 def rotation_skip(window: int, pool: int, today: Optional[datetime] = None) -> int:
@@ -375,11 +379,12 @@ def _county(q: Dict[str, Any]) -> List[str]:
 
 
 def _wants(q: Dict[str, Any], county: str) -> bool:
+    from app.services.evosense.sources.lgbs import wants_all_texas
     counties = _county(q)
     states = [s.upper() for s in q.get("states") or []]
     if states and "TX" not in states:
         return False
-    return not counties or county in counties
+    return not counties or county in counties or wants_all_texas(counties)
 
 
 class TarrantTaxRollSource(PublicRecordSource):
@@ -395,7 +400,7 @@ class TarrantTaxRollSource(PublicRecordSource):
     public_url = "https://www.tarrantcountytx.gov/en/tax/property-tax/tarrant-county-tax-roll.html"
     refresh = "Published daily"
     freshness_days = 30
-    adapter_version = "tarrant_tax_roll/2"
+    adapter_version = "tarrant_tax_roll/3"
 
     def search(self, capability, query):
         from app.services.evosense.sources.tarrant import TarrantTaxRollReader
@@ -592,6 +597,7 @@ class DcadSource(PublicRecordSource):
 
 class CollinCadSource(PublicRecordSource):
     scope, counties = "county", ("Collin",)
+    discovery_family = "OWNER_ROLLS"   # appraisal rolls that find absentee / estate-owned houses
     key = "collin_cad"
     label = "Collin Central Appraisal District (Collin CAD) appraisal roll"
     capabilities = (C.PROPERTY_SEARCH, C.ASSESSOR, C.OWNERSHIP)
@@ -645,6 +651,7 @@ class CollinCadSource(PublicRecordSource):
 
 class DentonGisSource(PublicRecordSource):
     scope, counties = "county", ("Denton",)
+    discovery_family = "OWNER_ROLLS"   # appraisal rolls that find absentee / estate-owned houses
     key = "denton_gis"
     label = "Denton County GIS parcel layer (Denton CAD roll fields)"
     capabilities = (C.PROPERTY_SEARCH, C.ASSESSOR, C.OWNERSHIP)
@@ -724,6 +731,212 @@ class CensusGeocoderSource(PublicRecordSource):
         from app.services.evosense.sources.census import CensusGeocoder
         res = CensusGeocoder().geocode("100 E Weatherford St", "Fort Worth", "TX", None, "Tarrant")
         return {"matches": res["matches"]}
+
+
+class TexasParcelOwnerSource(PublicRecordSource):
+    """Owner of record anywhere in Texas from the state's assembled parcel
+    layer, for properties no county-specific source can look up (any county
+    outside DFW; Tarrant outside Fort Worth and Collin / Denton without an
+    account number). See sources/txgio.py for the strict address check."""
+    scope, counties, scope_name = "state", (), "Texas"
+    key = "txgio_parcels"
+    label = "Texas statewide parcels - owner of record (TxGIO StratMap)"
+    capabilities = (C.ASSESSOR, C.OWNERSHIP)
+    lookup_capability = C.ASSESSOR
+    coverage = ("Texas, all 254 counties - owner of record and mailing address from each appraisal "
+                "district's roll, assembled by the Texas Geographic Information Office")
+    jurisdiction = "Texas (statewide)"
+    source_type = "State GIS office - statewide appraisal-district parcels"
+    access_method = "Census geocode, then the parcel at that point (public ArcGIS identify), two calls per address"
+    public_url = "https://geographic.texas.gov/"
+    refresh = "Refreshed by TxGIO from each county's certified roll (tax year shown on each record)"
+    freshness_days = 180
+    adapter_version = "txgio_stratmap_parcels/1"
+    terms_note = "Public statewide parcel data published by the Texas Geographic Information Office."
+
+    @staticmethod
+    def _county_source_covers(t) -> bool:
+        c = (t.get("county") or "").strip().lower().replace(" county", "")
+        apn = bool(t.get("parcel_apn"))
+        if c == "dallas":
+            return True                                   # DCAD: by account or by address
+        if c == "tarrant":
+            return apn or (t.get("city") or "").strip().lower() == "fort worth"
+        if c in ("collin", "denton"):
+            return apn
+        return False
+
+    def applies(self, target):
+        return ((target.get("state") or "TX").upper() == "TX" and bool(target.get("street_address"))
+                and bool(target.get("city") or target.get("zip_code")) and not self._county_source_covers(target))
+
+    def lookup_one(self, target):
+        from app.services.evosense.sources.txgio import TxParcelReader
+        return TxParcelReader().lookup(target)
+
+    def verify(self):
+        from app.services.evosense.sources.txgio import TxParcelReader
+        rows = TxParcelReader().identify(-95.3980, 29.7900)
+        return {"parcels_at_test_point": len(rows)}
+
+
+class TexasParcelRollSource(PublicRecordSource):
+    """Find houses anywhere in Texas from each county's 2026 appraisal roll as
+    published by TxGIO (sources/txgio_roll.py). Absentee- or estate-owned
+    residences only; the engine scores them like any appraisal-roll record.
+    Dallas, Collin and Denton have their own live discovery and are skipped."""
+    scope, counties, scope_name = "state", (), "Texas"
+    discovery_family = "OWNER_ROLLS"   # appraisal rolls that find absentee / estate-owned houses
+    key = "txgio_roll"
+    label = "Texas statewide appraisal rolls - find houses (TxGIO 2026 parcels)"
+    capabilities = (C.PROPERTY_SEARCH,)
+    discovery = True
+    coverage = ("Texas, all 254 counties - each appraisal district's 2026 roll: absentee- or estate-owned "
+                "houses with owner of record, mailing address and tax value. A few counties per hunt.")
+    jurisdiction = "Texas (statewide)"
+    source_type = "State GIS office - county appraisal rolls (2026 land parcels)"
+    access_method = "One county file per hunt slot; only its attribute table is streamed (HTTP byte ranges)"
+    public_url = "https://geographic.texas.gov/stratmap/land-parcels.html"
+    refresh = "TxGIO 2026 collection (acquired 2026-09-25); each record carries its district's tax year"
+    freshness_days = 180
+    adapter_version = "txgio_parcel_roll/1"
+    OWN_DISCOVERY = ("Dallas", "Collin", "Denton", "Harris")
+    COUNTIES_PER_HUNT = 2
+    terms_note = "Public statewide parcel data published by the Texas Geographic Information Office."
+
+    def _targets(self, query) -> List[str]:
+        from app.services.evosense.sources.lgbs import wants_all_texas
+        from app.services.evosense.sources.txgio_roll import TEXAS_COUNTIES, county_name
+        named = _county(query)
+        if not named or wants_all_texas(named):
+            pool = list(TEXAS_COUNTIES) if named else []
+        else:
+            pool = [c for c in (county_name(n) for n in named) if c]
+        return [c for c in pool if c not in self.OWN_DISCOVERY]
+
+    def search(self, capability, query):
+        from app.services.evosense.sources.txgio_roll import TxRollReader
+        out = Records()
+        states = [s.upper() for s in query.get("states") or []]
+        if capability != C.PROPERTY_SEARCH or (states and "TX" not in states):
+            out.stats = {"skipped": "not a Texas property search"}
+            return out
+        pool = self._targets(query)
+        if not pool:
+            out.stats = {"skipped": "no county without its own discovery source in this strategy"}
+            return out
+        day = int(query.get("rotate") if query.get("rotate") is not None else datetime.utcnow().timetuple().tm_yday)
+        k = min(self.COUNTIES_PER_HUNT, len(pool))
+        start = (day * k) % len(pool)
+        picks = [pool[(start + i) % len(pool)] for i in range(k)]
+        limit = int(query.get("limit") or 25)
+        per = max(1, limit // k)
+        stats: Dict[str, Any] = {"counties": picks, "pool": len(pool)}
+        reader = TxRollReader()
+        for c in picks:
+            res = reader.discover(c, limit=per, rotate=(day // max(1, len(pool) // k)) * per,
+                                  cities=query.get("cities"), zips=query.get("zips"))
+            out.extend(res["records"])
+            stats[c] = res["stats"]
+            out.source_url = res["source_url"]
+        out.stats = stats
+        return out
+
+    def verify(self):
+        from app.services.evosense.sources import base as SB_
+        from app.services.evosense.sources.txgio_roll import county_url
+        info = SB_._probe(county_url("King"))
+        if not info.get("ranged") or not info.get("size"):
+            raise SB_.SourceError(SB_.DOWNLOAD_FAILED, "TxGIO parcel files do not answer byte ranges")
+        return {"king_county_bytes": info["size"]}
+
+
+class HarrisRollSource(PublicRecordSource):
+    """Find houses in Harris County from HCAD's own public data file
+    (sources/hcad.py): absentee- or estate-owned residences, same rule as the
+    statewide rolls. A different window of the file each day."""
+    scope, counties = "county", ("Harris",)
+    discovery_family = "OWNER_ROLLS"   # appraisal rolls that find absentee / estate-owned houses
+    key = "hcad_roll"
+    label = "Harris County appraisal roll - find houses (HCAD public data)"
+    capabilities = (C.PROPERTY_SEARCH,)
+    discovery = True
+    coverage = ("Harris County, TX - HCAD's current appraisal roll: absentee- or estate-owned houses with "
+                "owner of record, mailing address, tax value and year built.")
+    jurisdiction = "Harris County, TX"
+    source_type = "Appraisal district public data file"
+    access_method = "HCAD Real_acct_owner.zip from download.hcad.org; only real_acct.txt is read"
+    public_url = "https://hcad.org/pdata/pdata-property-downloads.html"
+    refresh = "Published by HCAD (preliminary, then certified values) for the current tax year"
+    freshness_days = 120
+    adapter_version = "hcad_real_acct/1"
+    terms_note = "HCAD publishes these files on its website for public download."
+
+    def search(self, capability, query):
+        from app.services.evosense.sources.hcad import HcadRollReader
+        out = Records()
+        if capability != C.PROPERTY_SEARCH or not _wants(query, "harris"):
+            out.stats = {"skipped": "strategy does not include Harris County"}
+            return out
+        limit = int(query.get("limit") or 25)
+        skip = (int(query["rotate"]) * limit) if query.get("rotate") is not None else \
+            rotation_skip(limit, ROTATE_HCAD_POOL)
+        res = HcadRollReader().discover(limit=limit, rotate=skip,
+                                        cities=query.get("cities"), zips=query.get("zips"))
+        out.extend(res["records"])
+        out.stats, out.source_url = res["stats"], res["source_url"]
+        return out
+
+    def verify(self):
+        from app.services.evosense.sources import base as SB_
+        from app.services.evosense.sources.hcad import HcadRollReader
+        url = HcadRollReader().url()
+        info = SB_._probe(url)
+        if not info.get("size"):
+            raise SB_.SourceError(SB_.DOWNLOAD_FAILED, "HCAD file did not report a size")
+        return {"url": url, "bytes": info["size"], "byte_ranges": bool(info.get("ranged"))}
+
+
+class TravisDelinquentSource(PublicRecordSource):
+    """Travis County delinquent-tax houses from the county Tax Office's own
+    published file (sources/travis_delinquent.py): single-family (A1),
+    past-due balance, not in bankruptcy; a tax lawsuit when a cause number
+    is on file."""
+    scope, counties = "county", ("Travis",)
+    key = "travis_delinquent"
+    label = "Travis County delinquent taxes (Tax Office file)"
+    capabilities = (C.TAX,)
+    discovery = True
+    coverage = ("Travis County, TX - every account the Tax Office lists as delinquent: houses (A1) with a "
+                "past-due balance, owner and mailing address, appraised value, lawsuit cause number")
+    jurisdiction = "Travis County, TX"
+    source_type = "County tax assessor-collector delinquent file"
+    access_method = "Published CSV on tax-office.traviscountytx.gov (about 2 MB, whole file per hunt)"
+    public_url = "https://tax-office.traviscountytx.gov/about-us/reports-data/property-taxes"
+    refresh = "Republished by the Tax Office (file dated in its Last-Modified header)"
+    freshness_days = 30
+    adapter_version = "travis_delinquent/2"
+    terms_note = "Open data the Travis County Tax Office publishes for download."
+
+    def search(self, capability, query):
+        from app.services.evosense.sources.travis_delinquent import TravisDelinquentReader
+        out = Records()
+        if capability != C.TAX or not _wants(query, "travis"):
+            out.stats = {"skipped": "strategy does not include Travis County"}
+            return out
+        limit = int(query.get("limit") or 25)
+        res = TravisDelinquentReader().discover(
+            limit=limit, min_due=float(query.get("min_tax_due") or 250),
+            skip=rotation_skip(limit, ROTATE_TRAVIS_POOL), zips=query.get("zips"))
+        out.extend(res["records"])
+        out.stats, out.source_url = res["stats"], res["source_url"]
+        return out
+
+    def verify(self):
+        from app.services.evosense.sources import base as SB_
+        from app.services.evosense.sources.travis_delinquent import FILE, rows_from_text
+        rows = rows_from_text(SB_.get_text(FILE, max_bytes=20 * 1024 * 1024))
+        return {"rows": len(rows)}
 
 
 class FortWorthOpenCasesSource(PublicRecordSource):
@@ -824,22 +1037,57 @@ class Dallas311Source(PublicRecordSource):
         return {"rows": len(rows)}
 
 
+class AustinCodeSource(PublicRecordSource):
+    scope, counties, scope_name = "city", ("Travis",), "City of Austin"
+    key = "austin_code"
+    label = "City of Austin — Austin Code complaint cases"
+    capabilities = (C.CODE_VIOLATION,)
+    lookup_capability = C.CODE_VIOLATION
+    coverage = "City of Austin — code complaint cases worked by Austin Code inspectors (last 2 years)"
+    jurisdiction = "City of Austin, TX"
+    source_type = "City open data (Socrata)"
+    access_method = "Public Socrata SODA query, one address (house number + ZIP) per call"
+    public_url = "https://data.austintexas.gov/d/6wtj-zbtb"
+    refresh = "Updated by the city (continuously)"
+    freshness_days = 30
+    adapter_version = "austin_code/1"
+
+    def applies(self, target):
+        county = (target.get("county") or "").strip().lower().replace(" county", "")
+        city = (target.get("city") or "").strip().lower()
+        return bool(target.get("street_address")) and (city == "austin" or (county == "travis" and not city))
+
+    def lookup_one(self, target):
+        from app.services.evosense.sources.austin import AustinCodeReader
+        r = AustinCodeReader()
+        return r.to_record(target, r.lookup(target["street_address"], target.get("zip_code")))
+
+    def verify(self):
+        from app.services.evosense.sources import base as SB_
+        from app.services.evosense.sources.austin import API
+        rows = SB_.get_json(API, {"$limit": 1, "$order": "opened_date DESC"})
+        if not isinstance(rows, list) or not rows or "case_id" not in rows[0]:
+            raise SB_.SourceError(SB_.SOURCE_FORMAT_CHANGED, "Austin code cases did not return case rows")
+        return {"newest_case_opened": (rows[0].get("opened_date") or "")[:10]}
+
+
 class LgbsTaxSaleSource(PublicRecordSource):
-    scope, counties = "county", ("Dallas", "Tarrant", "Collin", "Denton", "Ellis", "Kaufman",
-                                 "Rockwall", "Parker", "Johnson")
+    scope, counties, scope_name = "state", (), "Texas"
     key = "lgbs_tax_sales"
-    label = "Tax-foreclosure lawsuits & sales (Linebarger)"
+    label = "Tax-foreclosure lawsuits & sales (Linebarger, all Texas counties)"
     capabilities = (C.TAX,)
     discovery = True
-    coverage = ("North Texas counties - properties taken to judgment for unpaid property tax and "
-                "listed for the county tax sale (owner still holds title)")
-    jurisdiction = "Dallas, Tarrant and nearby counties, TX"
+    coverage = ("Texas statewide - every county the firm lists (95 on 2026-10-21): properties taken to "
+                "judgment for unpaid property tax and listed for the county tax sale (owner still holds title). "
+                "A strategy with no county list keeps the 9 North Texas counties; name any county, or "
+                "'All Texas' for all of them.")
+    jurisdiction = "Texas (statewide)"
     source_type = "Taxing units' delinquent-tax attorneys - public sale list"
     access_method = "Public JSON list (taxsales.lgbs.com), a few paged requests per hunt"
     public_url = "https://taxsales.lgbs.com/"
     refresh = "Updated by the firm as suits, judgments and sales change"
     freshness_days = 14
-    adapter_version = "lgbs_tax_sales/1"
+    adapter_version = "lgbs_tax_sales/2"
     terms_note = ("Public list published by the taxing units' attorneys; robots.txt allows all agents. "
                   "Struck-off, sold and cancelled rows are skipped - only properties the owner still holds.")
 
@@ -850,10 +1098,9 @@ class LgbsTaxSaleSource(PublicRecordSource):
         if states and "TX" not in states:
             out.stats = {"skipped": "strategy is not in Texas"}
             return out
-        wanted = [c for c in _county(query) if c in COUNTIES] if _county(query) else list(COUNTIES)
-        if not wanted:
-            out.stats = {"skipped": "strategy counties are outside the tax-sale list's coverage"}
-            return out
+        # No county list: the North Texas default (unchanged). Otherwise any
+        # Texas county named, or 'All Texas' for every county listed.
+        wanted = _county(query) or list(COUNTIES)
         res = LgbsTaxSaleReader().discover(limit=int(query.get("limit") or 25), counties=wanted)
         out.extend(res["records"])
         out.stats, out.source_url = res["stats"], res["source_url"]
@@ -866,6 +1113,57 @@ class LgbsTaxSaleSource(PublicRecordSource):
         if not isinstance(j, dict) or "count" not in j:
             raise SB_.SourceError(SB_.SOURCE_FORMAT_CHANGED, "taxsales.lgbs.com did not return a count")
         return {"dallas_listed": j["count"]}
+
+
+class ClerkForeclosureSource(PublicRecordSource):
+    """Posted foreclosure notices filed with the county clerk (Dallas, Tarrant,
+    Denton, Johnson): substitute trustee / trustee sales, HOA assessment-lien sales,
+    judicial and tax sales, each with its document number and sale date.
+    Collin County posts notices on a bot-protected page (read by a person and
+    recorded with Record a notice) - reported as
+    not connected, never as "no foreclosure"."""
+    scope, counties = "county", ("Dallas", "Tarrant", "Denton", "Johnson")
+    key = "tx_clerk_foreclosure"
+    label = "County clerk foreclosure notices (Dallas, Tarrant, Denton, Johnson)"
+    capabilities = (C.FORECLOSURE,)
+    discovery = True
+    discovery_opt_in = True      # only a strategy whose search names FORECLOSURE (or this source) hunts it
+    coverage = ("Dallas, Tarrant, Denton and Johnson County, TX - every foreclosure sale notice filed with the "
+                "county clerk (trustee, substitute trustee, HOA assessment-lien, judicial and tax sales), with "
+                "document number, sale date and the clerk's indexed address. Not read automatically: Collin "
+                "(its notice page is bot-protected), Ellis, Kaufman and Rockwall (the county posts scanned "
+                "notice files - check them by hand and use Record a notice) and every other county.")
+    jurisdiction = "Dallas, Tarrant, Denton and Johnson County, TX"
+    source_type = "County Clerk - posted foreclosure notices (official record)"
+    access_method = ("The clerks' free public record search (publicsearch.us), as an anonymous visitor: "
+                     "a few paged requests per county, spaced apart")
+    public_url = "https://dallas.tx.publicsearch.us/"
+    refresh = "Notices are filed daily; sales are the first Tuesday of each month"
+    freshness_days = 7
+    adapter_version = "tx_clerk_fc/2"
+    terms_note = ("Official public record, free and anonymous. Only notice index data and the clerk's own "
+                  "text excerpt are read - no paid document images. A notice proves a sale was scheduled, "
+                  "not that it happened.")
+
+    def search(self, capability, query):
+        from app.services.evosense.sources.clerk_fc import COUNTIES, ClerkForeclosureReader
+        out = Records()
+        states = [s.upper() for s in query.get("states") or []]
+        if states and "TX" not in states:
+            out.stats = {"skipped": "strategy is not in Texas"}
+            return out
+        wanted = _county(query)
+        from app.services.evosense.sources.lgbs import wants_all_texas
+        if not wanted or wants_all_texas(wanted):
+            wanted = list(COUNTIES)
+        res = ClerkForeclosureReader().discover(wanted, limit=int(query.get("limit") or 25))
+        out.extend(res["records"])
+        out.stats, out.source_url = res["stats"], res["source_url"]
+        return out
+
+    def verify(self):
+        from app.services.evosense.sources.clerk_fc import ClerkForeclosureReader
+        return ClerkForeclosureReader().verify("dallas")
 
 
 class TracerfyContactSource(AcquisitionProvider):
@@ -917,16 +1215,19 @@ class ManualOnlySource(AcquisitionProvider):
 
 
 class DallasForeclosureManual(ManualOnlySource):
-    scope, counties = "county", ("Dallas",)
+    # The key is kept (stored tenant settings refer to it); the channel now
+    # covers every county WITHOUT a connected clerk source (Collin and the rest).
+    scope, counties = "county", ()
     key = "dallas_foreclosure_manual"
-    label = "Dallas County foreclosure notices (manual)"
+    label = "Foreclosure notices - manual entry (counties without a clerk source)"
     capabilities = (C.FORECLOSURE,)
-    coverage = "Dallas County, TX — notices of trustee sale posted with the County Clerk"
-    jurisdiction = "Dallas County, TX"
+    coverage = ("Any Texas county whose clerk notices are not read automatically (Collin and others): "
+                "a person reads the posted notice and records it with its document number and sale date")
+    jurisdiction = "Texas"
     source_type = "County Clerk foreclosure postings"
-    public_url = "https://www.dallascounty.org/"
-    terms_note = ("No free structured export. Postings are read by a person and entered "
-                  "manually (signal PRE_FORECLOSURE) or imported by CSV.")
+    public_url = "https://www.collincountytx.gov/"
+    terms_note = ("Dallas, Tarrant, Denton and Johnson notices are read automatically (tx_clerk_foreclosure). "
+                  "Elsewhere a person enters the notice; without a document number it stays a claim.")
 
 
 class DallasTaxManual(ManualOnlySource):
@@ -984,8 +1285,9 @@ PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
     SandboxPropertyRecords(), SandboxVacancy(), SandboxTaxRoll(), SandboxPublicRecords(),
     SandboxSkipTrace(), SandboxSkipTraceBackup(), SandboxPhoneValidation(),
     ManualSource(), CsvImportSource(),
-    TarrantTaxRollSource(), DallasTrwSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), CensusGeocoderSource(),
+    TarrantTaxRollSource(), DallasTrwSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), TexasParcelOwnerSource(), TexasParcelRollSource(), HarrisRollSource(), TravisDelinquentSource(), AustinCodeSource(), CensusGeocoderSource(),
     FortWorthCodeSource(), FortWorthOpenCasesSource(), Dallas311Source(), LgbsTaxSaleSource(),
+    ClerkForeclosureSource(),
     DallasForeclosureManual(), DallasTaxManual(),
     RentCastInterface(), RegridInterface(), AttomInterface(), TracerfyContactSource(),
 )}
@@ -1022,8 +1324,20 @@ def config(db, org_id: str, key: str):
             organization_id=org_id, provider_key=key,
             enabled=p.connector_kind in (C.MANUAL, C.IMPORT),
             priority={"sandbox_skiptrace": 10, "sandbox_skiptrace_backup": 20}.get(key, 100))
-        db.add(row)
-        db.flush()
+        # Two screens loading at once (Providers + Controls) both create the
+        # row for a newly added source; the loser must read the winner's row,
+        # not fail the whole request. A SAVEPOINT keeps the outer work intact.
+        from sqlalchemy.exc import IntegrityError
+        try:
+            with db.begin_nested():
+                db.add(row)
+                db.flush()
+        except IntegrityError:
+            row = (db.query(EvoSenseProviderConfig)
+                   .filter(EvoSenseProviderConfig.organization_id == org_id,
+                           EvoSenseProviderConfig.provider_key == key).first())
+            if row is None:
+                raise
     return row
 
 
@@ -1411,11 +1725,51 @@ def _markets(db, org_id: str) -> List[str]:
     out = []
     for s in (db.query(EvoSenseStrategy)
               .filter(EvoSenseStrategy.organization_id == org_id, EvoSenseStrategy.status == "active").all()):
+        from app.services.evosense.sources.lgbs import wants_all_texas
         for c in C.jload(getattr(s, "counties", None), []) or []:
+            if wants_all_texas([str(c)]):
+                continue                       # "All Texas" is not a county; statewide sources cover it
             name = re.sub(r"\s+county$", "", str(c).strip(), flags=re.I).title()
             if name and name not in out:
                 out.append(name)
     return out
+
+
+def verified_counties(db, org_id: str, keys) -> Dict[str, set]:
+    """Counties where a statewide source has actually returned a record for
+    this workspace. A source that DECLARES statewide scope is not counted as
+    covering a county until it has produced data there."""
+    from app.models.evosense_models import EvoSenseObservation, EvoSenseProperty
+    keys = list(keys)
+    if not keys:
+        return {}
+    rows = (db.query(EvoSenseObservation.provider_key, EvoSenseProperty.county)
+            .join(EvoSenseProperty, EvoSenseProperty.id == EvoSenseObservation.property_id)
+            .filter(EvoSenseObservation.organization_id == org_id,
+                    EvoSenseObservation.provider_key.in_(keys),
+                    EvoSenseProperty.county.isnot(None))
+            .group_by(EvoSenseObservation.provider_key, EvoSenseProperty.county).all())
+    from app.services.evosense.sources.txgio_roll import county_name
+    out: Dict[str, set] = {}
+    for key, county in rows:
+        c = county_name(county or "")          # canonical spelling: "MCLENNAN" -> "McLennan"
+        if c:
+            out.setdefault(key, set()).add(c)
+    return out
+
+
+def attach_verified_counties(db, org_id: str, rows: List[Dict[str, Any]]) -> None:
+    wide = [r for r in rows if (r.get("coverage_area") or {}).get("scope") in ("state", "national")]
+    ver = verified_counties(db, org_id, [r["key"] for r in wide])
+    for r in wide:
+        r["coverage_area"] = dict(r["coverage_area"], verified_counties=sorted(ver.get(r["key"], ())))
+
+
+def _covers(p, m: str, by_key) -> bool:
+    if p.scope in ("national", "state"):
+        ca = (by_key.get(p.key) or {}).get("coverage_area") or {}
+        return m in (ca.get("verified_counties") or ())
+    return m in p.counties
 
 
 def capability_report(db, org_id: str, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1447,9 +1801,9 @@ def capability_report(db, org_id: str, rows: List[Dict[str, Any]]) -> List[Dict[
             kind = C.NOT_BUILT
         per_market = []
         for m in markets:
-            here = [p for p in live if p.scope == "national" or m in p.counties]
+            here = [p for p in live if _covers(p, m, by_key)]
             man = [p for p in manual if p.scope == "any" or m in p.counties]
-            down = [p for p in unavailable if p.connector_kind == C.REAL and (p.scope == "national" or m in p.counties)]
+            down = [p for p in unavailable if p.connector_kind == C.REAL and (p.scope in ("national", "state") or m in p.counties)]
             if here:
                 city_only = all(p.scope == "city" for p in here)
                 per_market.append({"market": "%s County" % m, "kind": C.REAL,
@@ -1480,6 +1834,7 @@ def status_report(db, org_id: str) -> Dict[str, Any]:
     """The Service Providers screen. Every status comes from `canonical()`.
     No credential ever appears."""
     rows = [_provider_row(db, org_id, key) for key in PROVIDERS]
+    attach_verified_counties(db, org_id, rows)
     return {"providers": rows, "capabilities": capability_report(db, org_id, rows),
             "markets": ["%s County" % m for m in _markets(db, org_id)],
             "states": list(STATES),

@@ -16,6 +16,10 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import { humanizeKey } from '../../utils/humanize'
+import IntakeHealth from './IntakeHealth'
+import FieldDesk from './FieldDesk'
+import NewRequests from './NewRequests'
+import TeamAlerts from './TeamAlerts'
 import './energy.css'
 
 const NA = 'Not yet available'
@@ -45,10 +49,33 @@ function leadDetail(row) {
   return '—'
 }
 
-export default function FollowUpQueues({ initialQueue = 'follow_up_due', title, subtitle }) {
+// Two more screens share this route (no new routes in App.jsx):
+//   ?view=new   NEW REQUESTS - the shared inbox (claim / assign)
+//   ?view=team  SETTINGS -> TEAM & ALERTS (managers)
+const VIEWS = {
+  new: ['New Requests', 'Every website request and field referral, in one place. Claim one to make it yours, or assign it.', NewRequests],
+  team: ['Team & Alerts', 'Who is alerted about new requests, who can take them, the default advisor and the shared alert mailbox.', TeamAlerts],
+}
+
+export default function FollowUpQueues(props) {
+  const [params] = useSearchParams()
+  const v = VIEWS[params.get('view')]
+  if (!v) return <QueuesScreen {...props} />
+  const [title, subtitle, Screen] = v
+  return (
+    <div className="eo" data-testid={`energy-view-${params.get('view')}`}>
+      <div className="eo-head"><div><h1>{title}</h1><p className="eo-sub">{subtitle}</p></div>
+        <Link className="eo-btn" to="/energy/follow-up">Tasks & Follow-Up</Link></div>
+      <Screen />
+    </div>
+  )
+}
+
+function QueuesScreen({ initialQueue = 'follow_up_due', title, subtitle }) {
   const [params, setParams] = useSearchParams()
   const navigate = useNavigate()
   const active = params.get('queue') || initialQueue
+  const view = params.get('view')
   const [summary, setSummary] = useState(null)
   const [data, setData] = useState(null)
   const [page, setPage] = useState(1)
@@ -79,9 +106,16 @@ export default function FollowUpQueues({ initialQueue = 'follow_up_due', title, 
           <h1>{title || 'Tasks & Follow-Up'}</h1>
           <p className="eo-sub">{subtitle || 'Follow-ups due, overdue and upcoming; customers to renew or reactivate; leads that went quiet.'}</p>
         </div>
-        <Link className="eo-btn" to="/workqueue">Manage tasks</Link>
+        <span style={{ display: 'flex', gap: 6 }}>
+          {view === 'field'
+            ? <button type="button" className="eo-btn" onClick={() => setParams({})}>Back to queues</button>
+            : <button type="button" className="eo-btn" onClick={() => setParams({ view: 'field' })} data-testid="open-field">Field visits</button>}
+          <Link className="eo-btn" to="/workqueue">Manage tasks</Link>
+        </span>
       </div>
       {error && <div className="eo-banner eo-banner--error">{error}</div>}
+      {view === 'field' ? <FieldDesk /> : <>
+      {initialQueue === 'follow_up_due' && <IntakeHealth />}
 
       <div className="eo-kpis" role="tablist">
         {queues.map(q => (
@@ -158,6 +192,7 @@ export default function FollowUpQueues({ initialQueue = 'follow_up_due', title, 
       {(active === 'reactivation' || active === 'previous_customers') && (
         <p className="eo-note">Promotion to a lead is a deliberate action on the contact record. Nothing on this list is promoted automatically.</p>
       )}
+      </>}
     </div>
   )
 }

@@ -75,6 +75,7 @@ def test_every_gated_source_is_disabled_by_default(monkeypatch):
     """The statement this build makes: no repaired email path can send."""
     _enable(monkeypatch)
     assert gate.enablement_report() == {
+        "energy_team_alert": False,
         "bulk_ai": False,
         "voice_booking_link": False,
         "pipeline_auto_reply": False,

@@ -198,5 +198,12 @@ export function isManagerRole(role) {
  *  center): mirrors backend lead_scope.is_manager_here, which also admits the
  *  workspace "manager" role. A manager is NOT an administrator (isManagerRole). */
 export function isWorkspaceManagerRole(role) {
-  return isManagerRole(role) || role === 'manager'
+  // 'spectator' (Oct 19) SEES the whole workspace like a manager; the backend
+  // refuses every write it sends (services/spectator.py).
+  return isManagerRole(role) || role === 'manager' || role === 'spectator'
+}
+
+/** View-only login: sees, never changes. Mirrors backend services/spectator. */
+export function isSpectatorRole(role) {
+  return role === 'spectator'
 }

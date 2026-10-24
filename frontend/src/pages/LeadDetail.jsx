@@ -16,6 +16,7 @@ import { useTerminology } from '../terminology'
 import HumanDialerPanel from '../components/telephony/HumanDialerPanel'
 import VoicemailPlayer from '../components/telephony/VoicemailPlayer'
 import ConversationBrain from '../components/ConversationBrain'
+import EnergyLeadPanel from './energy/EnergyLeadPanel'
 import '../styles/shared.css'
 import './LeadDetail.css'
 import './LeadCommandCenter.css'
@@ -1805,6 +1806,7 @@ export default function LeadDetail() {
                 <button type="button" className="lcc-btn" onClick={() => setShowCaseFile(true)}>Open client record</button>
               </div>
               {isFuneral && <OutcomeTracker leadId={leadId} />}
+              {terminology.industry === 'energy' && <EnergyLeadPanel leadId={leadId} />}
             </div>
           )}
         </section>

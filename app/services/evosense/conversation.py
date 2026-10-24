@@ -73,23 +73,51 @@ _OFFER = re.compile(r"\b(make (me )?an offer|what would you (offer|pay|give)|sen
 _CALLBACK = re.compile(r"\b(call me|give me a call|can you call|phone me)\b", re.I)
 _WILLING = re.compile(r"\b((i'?d|i would|i will|i'?ll|we'?d|we would|would|might)\s+(probably\s+|likely\s+|definitely\s+|"
                       r"consider\s+)?sell(ing)?|willing to sell|want(s)? to sell|looking to sell|ready to sell|"
-                      r"open to selling|thinking (about|of) selling)\b", re.I)
+                      r"open to selling|thinking (about|of) selling|"
+                      # "I'd take 150,000", "we would accept around 140k" - a price they would sell at
+                      r"(i'?d|i would|we'?d|we would) (take|accept) (around |about |at least )?\$?\s?[0-9]{2,3})\b", re.I)
 _INTEREST = re.compile(r"\b(yes|yeah|yep|interested|tell me more|sure)\b", re.I)
 _MAYBE = re.compile(r"\b(maybe|possibly|depends|might consider|not sure)\b", re.I)
 _QUICK = re.compile(r"\b(close (quickly|fast|soon|quick)|quick (close|sale)|asap|as soon as possible|"
-                    r"fast sale|sell (it )?fast|right away)\b", re.I)
-_ESTATE = re.compile(r"\b(inherited|inherit|estate|probate|passed away|late (mother|father|mom|dad|husband|wife))\b", re.I)
-_PRICE_CTX = re.compile(r"\b(?:around|about|roughly|for|at|near|close to|asking|get|want)\s+\$?\s?"
-                        r"([0-9]{2,3}(?:,[0-9]{3})*(?:\.[0-9]+)?)\s*(k|thousand|grand)?\b", re.I)
+                    r"fast sale|sell (it )?fast|right away|"
+                    # "could close in 30 days", "close within two weeks" - a timeframe a month or less
+                    r"close (in|within) ([1-9]|[12][0-9]|30) days|"
+                    r"close (in|within) (a|one|two|three|four|[1-4]) weeks?|"
+                    r"close (in|within) (a|one) month)\b", re.I)
+_KIN = r"(mother|father|mom|dad|husband|wife|parents?|grand(ma|pa|mother|father)|aunt|uncle|brother|sister)"
+_ESTATE = re.compile(r"\b(inherited|inherit|estate|probate|passed away|late " + _KIN + r"|"
+                     # "since my mom passed", "after my father died" - a death in the family, said plainly
+                     r"(my " + _KIN + r"|since (she|he|they)) (passed|died)\b"
+                     # "passed on it", "passed the inspection": not a death
+                     r"(?!\s+(on it|the|a|an|it|inspection|up)\b))\b", re.I)
+_PRICE_CTX = re.compile(r"\b(?:around|about|roughly|for|at|near|close to|asking|get|want|take|accept|at least)\s+\$?\s?"
+                        r"([0-9]{2,3}(?:,[0-9]{3})*(?:\.[0-9]+)?)\s*(k|thousand|grand)?\b"
+                        # "for 30 years", "about 18 months", "in about 60 days", "3 bedrooms",
+                        # "at 817 555 0164" are durations, sizes and phone numbers - not prices
+                        r"(?![\s-]*(?:years?|yrs?|months?|mos?|weeks?|wks?|days?|hours?|hrs?|minutes?|"
+                        r"%|percent|sq|square|feet|ft|acres?|beds?|bedrooms?|baths?|bathrooms?|br|ba|"
+                        r"miles?|units?|people|kids|times)\b)(?![\s.-]?\d)", re.I)
 _PRICE_ANY = re.compile(r"\$\s?([0-9][0-9,]*(?:\.[0-9]+)?)\s*(k|thousand)?|\b([0-9]{2,3})\s?(k|thousand|grand)\b", re.I)
 
 _OCCUPANCY = ((re.compile(r"\b(vacant|empty|nobody lives|no one lives|sitting empty)\b", re.I), "vacant"),
               (re.compile(r"\b(tenant|renter|rented|leased)\b", re.I), "tenant"),
               (re.compile(r"\b(i live there|we live there|my home|our home)\b", re.I), "owner_occupied"))
 _CONDITION = ((re.compile(r"\b(gutted|condemned|fire damage|falling apart|tear ?down|needs everything)\b", re.I), "distressed"),
-              (re.compile(r"\b(bad shape|rough shape|needs a lot|needs work|poor condition|fixer)\b", re.I), "poor"),
+              (re.compile(r"\b(bad shape|rough shape|needs a lot|needs work|poor condition|fixer|"
+                          r"needs (a )?(new )?roof|roof (leaks|is leaking|needs)|foundation (issues?|problems?|"
+                          r"needs)|needs (major )?repairs|major repairs)\b", re.I), "poor"),
               (re.compile(r"\b(needs some work|dated|could use|okay shape|ok shape)\b", re.I), "fair"),
               (re.compile(r"\b(good (shape|condition)|well maintained|move in ready)\b", re.I), "good"))
+
+
+_NEGATION = re.compile(r"\b(not|no|never|without|cannot|can'?t|couldn'?t|won'?t|doesn'?t|don'?t|isn'?t)\b", re.I)
+
+
+def _negated(text: str, m) -> bool:
+    """'cannot close in 30 days', 'no foundation issues', "doesn't need a new
+    roof": a negation in the three words before the phrase turns it around."""
+    before = re.findall(r"[\w']+", text[:m.start()])[-3:]
+    return bool(_NEGATION.search(" ".join(before)))
 
 
 def _sentences(text: str) -> List[str]:
@@ -106,30 +134,52 @@ def _quote(text: str, match_span: Tuple[int, int]) -> str:
     return text[max(0, match_span[0] - 60): match_span[1] + 60].strip()[:240]
 
 
-def parse_price(text: str) -> Optional[Tuple[int, str, Tuple[int, int]]]:
-    """(dollars, note, span). Shorthand like "around 150" is read as $150,000
-    and says so — the note travels with the fact."""
-    m = _PRICE_ANY.search(text)
-    if m:
+def _price_from(m, ctx: bool) -> Optional[Tuple[int, str, Tuple[int, int]]]:
+    if not ctx:
         if m.group(3):
-            return int(m.group(3)) * 1000, "“%s” read as $%s" % (m.group(0).strip(), format(int(m.group(3)) * 1000, ",")), m.span()
+            v = int(m.group(3)) * 1000
+            return v, "“%s” read as $%s" % (m.group(0).strip(), format(v, ",")), m.span()
         v = float(m.group(1).replace(",", ""))
         if (m.group(2) or "").lower() in ("k", "thousand"):
             v *= 1000
         if v < 1000:
             v *= 1000
-        if v >= 10000:
-            return int(v), "stated as “%s”" % m.group(0).strip(), m.span()
-    m = _PRICE_CTX.search(text)
-    if m:
-        v = float(m.group(1).replace(",", ""))
-        if (m.group(2) or "") or v < 1000:
-            v = v * 1000 if v < 1000 else v
-            return int(v), "seller said “%s” — read as $%s (shorthand for thousands)" % (
-                m.group(0).strip(), format(int(v), ",")), m.span()
-        if v >= 10000:
-            return int(v), "stated as “%s”" % m.group(0).strip(), m.span()
-    return None
+        return (int(v), "stated as “%s”" % m.group(0).strip(), m.span()) if v >= 10000 else None
+    v = float(m.group(1).replace(",", ""))
+    if (m.group(2) or "") or v < 1000:
+        v = v * 1000 if v < 1000 else v
+        return int(v), "seller said “%s” — read as $%s (shorthand for thousands)" % (
+            m.group(0).strip(), format(int(v), ",")), m.span()
+    return (int(v), "stated as “%s”" % m.group(0).strip(), m.span()) if v >= 10000 else None
+
+
+def parse_prices(text: str) -> List[Tuple[int, str, Tuple[int, int]]]:
+    """Every price the seller named, in the order they said them. A "$150k"
+    and an "around 150" over the same words count once."""
+    found: List[Tuple[int, str, Tuple[int, int]]] = []
+    for rx, ctx in ((_PRICE_ANY, False), (_PRICE_CTX, True)):
+        for m in rx.finditer(text or ""):
+            p = _price_from(m, ctx)
+            if p and not any(p[2][0] < q[2][1] and q[2][0] < p[2][1] for q in found):
+                found.append(p)
+    return sorted(found, key=lambda p: p[2][0])
+
+
+def parse_price(text: str) -> Optional[Tuple[int, str, Tuple[int, int]]]:
+    """(dollars, note, span). Shorthand like "around 150" is read as $150,000
+    and says so — the note travels with the fact. When the seller names more
+    than one price ("I'd take 150. Actually I need at least 180") the LAST one
+    is kept - a correction comes after what it corrects - and the note names
+    every figure so a person confirms before anything relies on it."""
+    prices = parse_prices(text)
+    if not prices:
+        return None
+    last = prices[-1]
+    others = sorted({p[0] for p in prices if p[0] != last[0]})
+    if not others:
+        return last
+    return last[0], "%s; seller also said %s — confirm the price with them" % (
+        last[1], " and ".join("$" + format(v, ",") for v in others)), last[2]
 
 
 def nurture_date(text: str, when: datetime, default_days: int) -> Tuple[datetime, str]:
@@ -162,6 +212,7 @@ def classify(text: str) -> Dict[str, Any]:
     """Deterministic reading. Reports only what it matched."""
     t = text or ""
     facts: List[Dict[str, Any]] = []
+    price_conflict = False
 
     def fact(ftype, value, m, note=None):
         facts.append({"fact_type": ftype, "value": value, "quote": _quote(t, m.span()),
@@ -218,6 +269,8 @@ def classify(text: str) -> Dict[str, Any]:
                                  (_LISTED, "listed_with_agent", "yes"),
                                  (_TENANT, "tenant_issue", "yes")):
             m = rx.search(t)
+            if m and ftype == "wants_quick_close" and _negated(t, m):
+                continue
             if m and not (ftype == "callback_request" and outcome == C.O_CALL_LATER):
                 fact(ftype, value, m)
         m = _ESTATE.search(t)
@@ -228,6 +281,7 @@ def classify(text: str) -> Dict[str, Any]:
         if p:
             facts.append({"fact_type": "asking_price", "value": str(p[0]),
                           "quote": _quote(t, p[2]), "note": p[1]})
+            price_conflict = len({q[0] for q in parse_prices(t)}) > 1
         for rx, value in _OCCUPANCY:
             m = rx.search(t)
             if m:
@@ -235,6 +289,8 @@ def classify(text: str) -> Dict[str, Any]:
                 break
         for rx, value in _CONDITION:
             m = rx.search(t)
+            if m and _negated(t, m):
+                continue
             if m:
                 fact("condition", value, m)
                 break
@@ -243,6 +299,7 @@ def classify(text: str) -> Dict[str, Any]:
             if m:
                 fact("nurture_timing", m.group(0), m)
     return {"outcome": outcome, "opt_out": opt_out, "facts": facts, "reader": "rules",
+            "price_conflict": price_conflict,
             "confident": outcome != C.O_UNKNOWN}
 
 
@@ -518,6 +575,8 @@ def evaluate(db, org_id: str, msg: EvoSenseMessage, *, user=None) -> Dict[str, A
             reasons.append("TENANT_ISSUE")
         if outcome == C.O_UNKNOWN:
             reasons.append("UNCLEAR")
+        if reading.get("price_conflict"):
+            reasons.append("PRICE_UNCLEAR")     # two prices in one reply: a person confirms
         if reasons:
             HO.open_handoff(db, prop, reasons, engagement=engagement,
                             priority=min(100, 40 + (si["value"] or 0) // 2),

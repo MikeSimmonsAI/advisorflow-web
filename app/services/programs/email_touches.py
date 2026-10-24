@@ -442,7 +442,14 @@ def build_message(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof:
                "strategy": brain.TOUCH_STRATEGY[1], "family": fam.key, "source": "family copy"}
     else:
         flyer_line = r["fields"].get("flyer_link") or ""
-        msg = dict(brain.compose(packet, touch, "email", flyer_line=flyer_line), source="playbook")
+        try:
+            from app.services.programs.identity import program_booking_url
+            booking_url = program_booking_url(db, lead) or ""
+        except Exception:                                # noqa: BLE001 - copy still goes, reply CTA stands
+            log.exception("booking link for email touch failed for lead %s", lead.id)
+            booking_url = ""
+        msg = dict(brain.compose(packet, touch, "email", flyer_line=flyer_line, booking_url=booking_url),
+                   source="playbook")
     prior = [html.unescape(re.sub(r"<[^>]+>", " ", m.body_html or "")) for m in
              db.query(EmailMessage).filter(EmailMessage.lead_id == lead.id,
                                            EmailMessage.status != "failed").limit(10).all()]
@@ -452,6 +459,10 @@ def build_message(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof:
     verdict = brain.quality(packet, msg, prior_bodies=prior, other_locations=others,
                             expected_display_name=packet.get("display_name"))
     msg["body_html"] = text_to_html(msg["body"], r.get("flyer_url") or "")
+    _bu = locals().get("booking_url") or ""
+    if _bu and _bu != (r.get("flyer_url") or ""):
+        _esc = html.escape(_bu)
+        msg["body_html"] = msg["body_html"].replace(_esc, '<a href="%s">%s</a>' % (_esc, _esc))
     return {"message": msg, "quality": verdict, "packet": packet}
 
 

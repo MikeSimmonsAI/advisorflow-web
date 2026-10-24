@@ -231,6 +231,24 @@ def _build_context(db: Session, employee: AIEmployee, item: AIWorkItem,
            .filter(Organization.id == employee.organization_id).first())
     if org is not None:
         ctx["facts"]["business_name"] = org.brand_name or org.name
+    if lead is not None:
+        # The appointment this record already has, so a job that keeps one
+        # real (scheduling coordinator) can move it instead of booking anew.
+        from app.models.models import BookingLink
+        from app.services.workforce import booking as wf_booking
+        from app.services.workforce import practice as wf_practice
+        live = ("booked", "confirmed")
+        if wf_practice.is_practice_record(lead):
+            live = live + (wf_booking.PRACTICE_STATUS,)
+        existing = (db.query(BookingLink)
+                    .filter(BookingLink.lead_id == lead.id,
+                            BookingLink.status.in_(live),
+                            BookingLink.booked_time.isnot(None))
+                    .order_by(BookingLink.booked_time.asc()).first())
+        if existing is not None:
+            ctx["facts"]["booking"] = {
+                "booking_link_id": existing.id,
+                "booked_time_local": existing.booked_time.isoformat()}
     ctx["observations"] = observations[-8:]
     return ctx
 
@@ -277,6 +295,18 @@ def execute(db: Session, employee: AIEmployee, item: AIWorkItem, *,
 
         if item.state == C.ELIGIBLE:
             wf_queue.transition(db, item, C.WORKING, reason="run started",
+                                actor_kind=C.ACTOR_AI_EMPLOYEE,
+                                actor_id=employee.id, run_id=run.id,
+                                claim_token=claim_token)
+        elif item.state == C.WAITING_FOR_RESPONSE:
+            # PICKED UP AGAIN - a reply arrived or the follow-up time came.
+            # Without this the item entered the turn loop still marked
+            # "waiting", and the loop ends a run after ANY successful step on
+            # a waiting item. So an employee that read the calendar after a
+            # "yes, let's book" stopped before it could book - every time.
+            # Working it now means only a real send puts it back to waiting.
+            wf_queue.transition(db, item, C.WORKING,
+                                reason="picked up again",
                                 actor_kind=C.ACTOR_AI_EMPLOYEE,
                                 actor_id=employee.id, run_id=run.id,
                                 claim_token=claim_token)

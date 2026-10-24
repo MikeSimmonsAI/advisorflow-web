@@ -183,11 +183,31 @@ def test_the_workspace_action_passes_the_exact_organization_id():
 # THE RAIL
 # ═══════════════════════════════════════════════════════════════════════════
 
+GOD_NAV = os.path.join(FE, "pages", "god", "godNav.js")
+
+# OCT 22 2026 REDESIGN. The rail is SECTIONS in pages/god/godNav.js: six
+# destinations, each with the screens that used to be rail entries as its
+# tabs. GodShell renders them; it no longer carries a NAV array of its own.
+SIX_SECTIONS = ("Dashboard", "Organizations", "AI Workforce", "Launch Board",
+                "Revenue & Billing", "Settings & Security")
+
+
+def _nav_block():
+    src = _read(GOD_NAV)
+    block = src[src.index("export const SECTIONS = ["):]
+    return block[:block.index("\n]")]
+
+
 def _nav_paths():
-    src = _read(GOD_SHELL)
-    block = src[src.index("const NAV = ["):]
-    block = block[:block.index("\n]")]
-    return re.findall(r"path:\s*'([^']+)'", block)
+    return re.findall(r"path:\s*'([^']+)'", _nav_block())
+
+
+def test_the_shell_renders_the_six_sections():
+    shell = _read(GOD_SHELL)
+    assert "from './god/godNav'" in shell and "SECTIONS.map(" in shell
+    assert "locate(location.pathname)" in shell, (
+        "the shell does not work out the lit section from the URL")
+    assert "const NAV = [" not in shell, "an old second navigation list is back"
 
 
 def test_every_rail_path_is_a_registered_route():
@@ -197,7 +217,7 @@ def test_every_rail_path_is_a_registered_route():
     prefixes = {r.rstrip("/*") for r in routes}
     dead = []
     for p in _nav_paths():
-        base = p.split("#")[0]          # hash entries jump within a page
+        base = p.split("#")[0].split("?")[0]
         if not base or base in routes:
             continue
         if any(base == pref or base.startswith(pref + "/") for pref in prefixes if pref):
@@ -210,12 +230,9 @@ def test_workspaces_appears_exactly_once_in_the_rail():
     """It was in the primary nav AND under Jump To - the same screen listed
     twice reads as two different things."""
     src = _read(GOD_SHELL)
-    nav = src[src.index("const NAV = ["):]
-    nav = nav[:nav.index("\n]")]
     jump = src[src.index("const JUMP = ["):]
     jump = jump[:jump.index("\n]")]
-
-    assert nav.count("'/god/workspaces'") == 1, "Workspaces duplicated in NAV"
+    assert _nav_paths().count("/god/workspaces") == 1, "Workspaces duplicated"
     assert "/god/workspaces" not in jump, (
         "Workspaces is still in Jump To as well as the primary navigation")
 
@@ -231,27 +248,24 @@ def test_jump_to_carries_only_genuinely_different_contexts():
             "Jump To duplicates the primary navigation entry %s" % p)
 
 
-# Sep 28 2026: regrouped per the EvoSys Pro spec §29. COMMAND + CUSTOMERS
-# became PLATFORM; LEADS & AUTOMATION became LEAD INTELLIGENCE.
-@pytest.mark.parametrize("group", [
-    "PLATFORM", "SALES & REVENUE", "LEAD INTELLIGENCE",
-    "AI WORKFORCE", "SECURITY & PLATFORM",
-])
-def test_the_rail_is_grouped_by_business_function(group):
-    src = _read(GOD_SHELL)
-    assert "group: '%s'" % group in src, "missing rail group %r" % group
+@pytest.mark.parametrize("section", SIX_SECTIONS)
+def test_the_rail_is_grouped_by_business_function(section):
+    block = _nav_block()
+    assert re.search(r"key: '[a-z]+', label: '%s'" % re.escape(section), block), (
+        "missing rail section %r" % section)
+
+
+def test_the_rail_has_exactly_six_destinations():
+    assert len(re.findall(r"^\s+key: '", _nav_block(), re.M)) == 6
 
 
 def test_organizations_customers_and_workspaces_each_explain_themselves():
     """Three nouns the backend keeps separate. An owner who cannot tell them
     apart picks one at random and concludes the product is confused."""
-    src = _read(GOD_SHELL)
-    nav = src[src.index("const NAV = ["):]
-    nav = nav[:nav.index("\n]")]
+    block = _nav_block()
     for path in ("/god/organizations", "/god/customers", "/god/workspaces"):
-        entry = nav[nav.index("'%s'" % path):]
-        entry = entry[:entry.index("},") + 2]
-        assert "hint:" in entry, "%s has no description in the rail" % path
+        line = [l for l in block.splitlines() if "path: '%s'" % path in l and "{ label:" in l]
+        assert line and "hint:" in line[0], "%s has no description" % path
 
 
 def test_the_rail_does_not_hard_code_a_brand_website():

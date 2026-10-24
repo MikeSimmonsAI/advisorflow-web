@@ -19,6 +19,7 @@ import {
 } from '../ds/ds'
 import '../ds/evo-pages.css'
 import './evo-actions.css'
+import { ev } from '../engine'
 
 const PAGE = 50
 // The order an operator scans the buckets in: what needs them first.
@@ -174,7 +175,7 @@ export default function EvoInbox() {
         scene="street"
         eyebrow="Opportunity Discovery"
         title="Discovery Inbox"
-        sub="Everything EvoSense found, why it matters, and what happens next."
+        sub={ev('Everything EvoSense found, why it matters, and what happens next.')}
         quote="Every property has a story. We find the ones worth telling."
         meta={data ? [
           { label: <><b>{allCount}</b> evaluated</> },

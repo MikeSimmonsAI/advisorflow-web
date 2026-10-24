@@ -25,7 +25,7 @@ import uuid
 
 from sqlalchemy import (
     Boolean, Column, DateTime, ForeignKey, Index, Integer, LargeBinary, String,
-    Text, UniqueConstraint,
+    Text, UniqueConstraint, text,
 )
 
 from app.models.models import Base
@@ -263,6 +263,7 @@ class ProgramResponse(Base):
     __table_args__ = (
         Index("ix_program_responses_org_state", "organization_id", "handling_status"),
         Index("ix_program_responses_lead", "lead_id"),
+        Index("ix_program_responses_org_received", "organization_id", "received_at"),
     )
 
     id = Column(String, primary_key=True, default=_uuid)
@@ -303,7 +304,14 @@ class ProgramAlert(Base):
     message leaves the building.
     """
     __tablename__ = "program_alerts"
-    __table_args__ = (Index("ix_program_alerts_response", "response_id"),)
+    __table_args__ = (Index("ix_program_alerts_response", "response_id"),
+                      Index("ix_program_alerts_lead_created", "lead_id", "created_at"),
+                      Index("ix_program_alerts_org_created", "organization_id", "created_at"),
+                      # ONE REPLY, ONE ALERT (Oct 19): one claim per page key,
+                      # channel and recipient - see services/programs/alert_ledger.
+                      Index("uq_program_alerts_dedupe", "dedupe_key", "channel", "recipient", unique=True,
+                            sqlite_where=text("dedupe_key IS NOT NULL"),
+                            postgresql_where=text("dedupe_key IS NOT NULL")),)
 
     id = Column(String, primary_key=True, default=_uuid)
     organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
@@ -324,6 +332,17 @@ class ProgramAlert(Base):
     provider_status = Column(String, nullable=True)
     provider_error = Column(String, nullable=True)
     status_at = Column(DateTime, nullable=True)
+    # ONE REPLY, ONE ALERT (Oct 19). dedupe_key names the logical event
+    # (reply:<id>, booked:<lead>:<slot>, sla:<response id>...). send_state:
+    # sending | sent | failed | merged (same conversation, already paged) |
+    # skipped (alerts off / no recipient). attempts and last_attempt_at make
+    # a retry an update of this row, never a second page.
+    lead_id = Column(String, nullable=True)
+    dedupe_key = Column(String, nullable=True)
+    send_state = Column(String, nullable=True)
+    attempts = Column(Integer, nullable=True)
+    last_attempt_at = Column(DateTime, nullable=True)
+    retry_payload = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -637,7 +656,8 @@ class ProgramConversationTurn(Base):
     simulated (synthetic contact - nothing left the building), held (waiting
     for permitted hours), blocked (a rule refused it)."""
     __tablename__ = "program_conversation_turns"
-    __table_args__ = (Index("ix_program_conv_turns_conv", "conversation_id", "created_at"),)
+    __table_args__ = (Index("ix_program_conv_turns_conv", "conversation_id", "created_at"),
+                      Index("ix_program_conv_turns_org_created", "organization_id", "created_at"),)
 
     id = Column(String, primary_key=True, default=_uuid)
     conversation_id = Column(String, nullable=False)

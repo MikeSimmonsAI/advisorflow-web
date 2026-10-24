@@ -92,6 +92,7 @@ ROLE_LABELS = {
     "org_admin": "Workspace Admin",
     "advisor": "Workspace User",
     "viewer": "Workspace Viewer",
+    "spectator": "Spectator (view only)",
     "super_admin": "Platform Operator",
     "god_admin": "Platform Owner",
 }

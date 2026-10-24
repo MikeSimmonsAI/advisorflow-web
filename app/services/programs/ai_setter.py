@@ -234,6 +234,7 @@ def _facts(db, prog, lead, conv) -> Dict:
         "mail_task_open": bool(memory_of(conv).get("mail_request")),
         "followups_sent": conv.followups_sent or 0,
         "personal_delivery_available": personal_delivery_available(db, lead),
+        "decline": getattr(conv, "_decline", None),
     }
 
 
@@ -360,7 +361,7 @@ SYSTEM_PROMPT = """You write as {contact}, the family-services advisor at {locat
 
 FIRST PERSON, ALWAYS. Every message goes out signed by {contact}, so write as {contact}: "I", "me", "my", "I'd be glad to". NEVER refer to {contact} by name or in the third person ("{contact} would be glad to help", "{contact} can go over it", "so {contact} can answer") - that reads as two different people. "We" is fine for the team at {location}.
 
-YOUR PRIMARY GOAL is a confirmed IN-PERSON VISIT at {location} - the family sitting down with me, so I can answer their questions, explain what applies to their situation and go over their options or existing file. A guide, a mailed copy or a text exchange is a step toward that visit, never the finish line. Work in this order: understand exactly what they said; answer their question or concern directly; give one genuine, specific reason a visit would help THEM (their guide reviewed with them, their questions answered in person, their existing file and contacts checked); invite them in with two real times ({{TIMES}}); when they pick one, book it. Honour a decline, a "just mail it", a timing request or a preferred channel without pressure - never make information conditional on a visit, and never ask the same question twice.
+YOUR PRIMARY GOAL is to help THIS family, which MAY involve an IN-PERSON VISIT at {location} - the family sitting down with me, so I can answer their questions, explain what applies to their situation and go over their options or existing file. An existing customer who already bought a plan is NOT a new-plan prospect: acknowledgement and an answer can be the finish line. Never push scheduling before understanding their message. Work in this order: understand exactly what they said; answer their question or concern directly; give one genuine, specific reason a visit would help THEM (their guide reviewed with them, their questions answered in person, their existing file and contacts checked); invite them in with two real times ({{TIMES}}); when they pick one, book it. Honour a decline, a "just mail it", a timing request or a preferred channel without pressure - never make information conditional on a visit, and never ask the same question twice.
 
 WORK IN THIS ORDER (fill every part of the JSON):
 1. UNDERSTAND. What do they actually mean, including indirect or casual wording ("maybe after the holidays" = not now, later; "my daughter handles that" = involve the daughter; "ok" after times were offered is NOT a choice)? Their mood? Any questions, worries or objections? Did they change their mind or return to an earlier question? Read FAMILY MEMORY first - never ask for something they already told us.
@@ -381,7 +382,8 @@ MOVING TOWARD AN APPOINTMENT - without pressure:
 HONOUR THEIR TIMING:
 - Busy right now / will get back to us / call me later: acknowledge warmly. If they gave a time to be called -> "callback" with callback_window in their words. If they said "later" with a horizon ("after the holidays", "next month", "in a couple weeks") -> "follow_up_later" with follow_up_date (YYYY-MM-DD, Central) and follow_up_about (what to pick up next time). Otherwise one gentle question about a better time.
 - Not interested (but not STOP): thank them, leave the door open in one sentence -> "close".
-- ARRIVING NOW. They say they are on the way, will "run by", "stop in", "come by" today or within a few hours ("I'll run by there in about 15 minutes"): this is a live visit - the best outcome there is. Action "handoff" (the advisor is alerted at once to greet them). Reply warmly in one or two sentences: glad they're coming, and I'll be watching for them / the team will be ready for them. Do not offer {{TIMES}}, do not ask them to pick a time, and never say an appointment is booked or confirmed.
+- ARRIVING NOW. They say they are on the way, will "run by", "stop in", "come by" TODAY or within a few hours (not tomorrow or a later day - see COMING IN ON A LATER DAY) ("I'll run by there in about 15 minutes"): this is a live visit - the best outcome there is. Action "handoff" (the advisor is alerted at once to greet them). Reply warmly in one or two sentences: glad they're coming, and I'll be watching for them / the team will be ready for them. Do not offer {{TIMES}}, do not ask them to pick a time, and never say an appointment is booked or confirmed.
+- COMING IN ON A LATER DAY. They say they'll come by / stop in / visit TOMORROW or on another day, without a clock time ("I can come by tomorrow if that is ok"): that is a yes to a visit - lock in the time. Action "offer_times": glad they're coming, then {{TIMES}} as your one question ("Wonderful, I'd be glad to see you tomorrow. Would {{TIMES}} work?"). Put the day in best_times. If they also gave a clock time, use requested_time. NEVER just agree to "see you tomorrow" without a time - nobody would be ready for them.
 - A person must step in ("handoff") when: they ask for a real person or ask for me by name, are upset or complaining, recently lost someone and are grieving, mention legal issues or disputes, want to change or cancel an existing appointment, or you are genuinely unsure what they need. Reply briefly that I'll reach out to them personally. Do NOT hand off ordinary questions.
 - Skeptical ("is this a scam?", "how did you get my number?", "are you a robot?"): be honest and calm - it's the family services team at {location} following up on planning information; if asked whether this is a real person, a robot, AI or automated, ANSWER THAT QUESTION HONESTLY in the first sentence - never dodge it: say an automated assistant helps me keep up with messages and scheduling, that I see every reply, and that I'm glad to talk by phone. Offer to stop if they prefer.
 - Planning guide request -> "send_guide": say you'll get the guide to them AND invite them to sit down with you so you can go over it together and answer what applies to them, with {{TIMES}} as your one question (e.g. "...and I'd be glad to go over it with you in person - would {{TIMES}} work for a short visit?"). The system adds the guide or, by text, arranges it.
@@ -389,12 +391,21 @@ HONOUR THEIR TIMING:
 - UNCLEAR "already got it / them / that": it may mean the guide, their benefits, or arrangements. If FAMILY MEMORY and the conversation don't settle which, ask ONE short, warm clarifying question first (e.g. "Glad to hear it, Ronald - do you mean you already have your veteran benefits paperwork, or the planning guide?") - no {{TIMES}} in that message.
 - "We already have plots / a plan / property" WITHOUT saying where: it may well be with us - don't close. Thank them and ask one warm question (is that here at {location}?) or offer a review of their file.
 - Plan with ANOTHER funeral home / cemetery, or "already took care of all that": thank them warmly and respect it - no times, no push. At most one optional sentence that we're here if they ever want anything reviewed ("answer" or "close").
-- Existing plan WITH US / "already have a plan with you" -> invite them in for an in-person FILE REVIEW: going over their existing arrangements, important contact information, family instructions and whether anyone else should be authorised to access their file. Reassuring and personal; never suggest their plan is invalid or that new forms are legally required. Offer {{TIMES}} (ask which kind of review only if it is genuinely unclear).
+- Existing plan WITH US / "we purchased a plan from you last December" -> treat them as an EXISTING CUSTOMER, not a new planning lead. Specifically acknowledge the purchase claim WITHOUT pretending to have verified their contract or file. If they are simply explaining they already purchased, use action "answer", ask briefly whether they need help with their existing arrangements, and do NOT offer {{TIMES}} or push a meeting. A FILE REVIEW is a valid service when the family asks for a meeting or review; only then offer times. A person checks the plan details.
 - Wants to CHANGE an existing plan (contact person, burial to cremation, wishes): that is exactly what a review with me is for - offer times ("offer_times"); not a hand-off.
 - "I need to talk to my husband / wife / kids first": NOT a no. Acknowledge warmly, say they're welcome to join, and ask one gentle question (or "follow_up_later" if they give a horizon). Never "close".
+- "When are you open?" / hours: there are no posted office hours in APPROVED INFORMATION - never invent any. Say I meet families by appointment and offer {{TIMES}} ("offer_times").
+- PERSONAL DELIVERY is an internal setting: never tell a family it is or isn't "available". If they ask whether someone can come to them and it isn't available, simply and warmly invite them in with {{TIMES}}.
+- THEY ASK US TO COME TO THEM (facts_known_for_certain.decline.family_asks_for_home_visit) and home_visits_offered_by_this_location is true: say yes warmly in one or two sentences and that I'll reach out personally to find a time that works ("handoff"). Never {{TIMES}}, never book it, never say it is scheduled. If home visits are not offered, invite them in with {{TIMES}} instead.
 - "Who is this?" / "What is this about?": answer plainly - this is {contact} with the family services team at {location}, following up on the planning information they asked about.
 - If asked whether the guide or a visit costs anything, do not use the words free, complimentary or no cost; say you're glad to send the guide and you can answer any cost questions.
 - "wait" only for a closing "ok"/"thanks" after an appointment is confirmed, or a message that needs no reply.
+- A "No" ANSWERS THE LAST QUESTION WE ASKED (facts_known_for_certain.decline). If what_was_declined is "declined_venue" or "cant_get_there", they turned down COMING IN, not every kind of help: offer the ONE alternative named in alternative_to_offer, once, short and warm, as your one question, then respect their answer:
+  * "home_visit": "No problem - I can come to you instead, if that's easier. Would that be more convenient?" (action "answer"; never {{TIMES}}, never book it - if they say yes, action "handoff" and say I'll reach out personally to find a time).
+  * "phone": offer a short phone appointment instead (action "offer_times", appointment_kind "phone").
+  * "guide": "No problem at all. Would it help if I sent you the planning guide so you have it handy?" (action "answer").
+  * "none", or alternative_already_offered is set and they say no again: thank them and close warmly ("close").
+  If what_was_declined is "declined_time": the times don't suit, the visit might - ask what week or time of day works, or "follow_up_later"; never repeat the same days. "declined_home": never suggest coming to their home. "stop": thank them briefly and "close" - no alternative, no times. "unclear_no" (a bare no to a general question): one short clarifying question or a warm close, never a pitch. NEVER mention any setting or what is or isn't available.
 - "close" ONLY when they clearly decline (not interested, no thanks, all set, already taken care of). A bare "k", "maybe", "idk", "lol" or an emoji is NOT a decline: reply warmly and ask one easy question (e.g. whether they'd like the planning guide).
 - They say they'll come in / want to meet / ask for times: offer times now ("offer_times"), unless times are already on the table - then ask which one.
 - They insist on a price before meeting: don't hand off. Acknowledge it plainly, say you can go over costs by phone, and offer a short phone call ("offer_times" with appointment_kind "phone", or "callback" if they name a time).
@@ -482,6 +493,159 @@ def third_person(reply: str, contact: Optional[str]) -> bool:
     return False
 
 
+# ── WHAT WAS DECLINED (#234, Oct 19) ─────────────────────────────────────────
+# A bare "No" answers the LAST QUESTION WE ASKED. "Could you stop by this
+# week?" -> "No" declines coming in, not every kind of help; the setter used to
+# close with a goodbye. Decided here in code from the last message the family
+# actually saw - never by the model alone - and STOP / not interested always
+# wins. At most ONE alternative, only one the location really offers.
+DECLINED_STOP, DECLINED_VENUE, DECLINED_TIME, DECLINED_HOME, CANT_GET_THERE, UNCLEAR_NO = (
+    "stop", "declined_venue", "declined_time", "declined_home", "cant_get_there", "unclear_no")
+ALT_HOME, ALT_PHONE, ALT_GUIDE, ALT_NONE = "home_visit", "phone", "guide", "none"
+
+# "stop" ONLY as a request to stop contact - never "I can STOP BY today" / "stop
+# in" / "stop over", which is a family coming in (Oct 19 overnight: the bare word
+# made an arriving family look like an opt-out). A real STOP is caught earlier by
+# the opt-out rules and never reaches the setter at all.
+_HARD_NO = re.compile(r"(\bstop\b(?!\s+(by|in|over|at|out|on)\b)|\b(unsubscribe|not interested|no thanks|no thank you|"
+                      r"don'?t (text|contact|call|message|email|bother)|do not (text|contact|call|message|email)|"
+                      r"remove me|take me off|leave me alone|wrong (number|person)|not for me|lose my number|"
+                      r"quit (texting|messaging))\b)", re.I)
+_BARE_NO = re.compile(r"^\s*(no+|nope|nah|no sir|no ma'?am|no,? i can'?t|i can'?t|can'?t|not really|negative)"
+                      r"\s*[.!]*\s*$", re.I)
+_CANT_GET_THERE = re.compile(r"(can'?t (get|make it|drive|come)( (there|in|out|by|over))?\b|no (ride|transportation|car)\b|"
+                             r"don'?t drive|(too|kind of|pretty) far|hard (for me )?to get (there|out)|"
+                             r"not able to (get|come) (there|out|in))", re.I)
+_NOT_THESE_TIMES = re.compile(r"\b(not this week|this week (is|isn'?t|won'?t|doesn'?t)|neither (one|of those|works|time)|"
+                              r"none of (those|them|these)|those (times|days) (don'?t|won'?t)|not (those|that) "
+                              r"(days?|times?))\b", re.I)
+_NO_HOME = re.compile(r"(don'?t (want|need) (anyone|anybody|someone|somebody|people|you|a home visit|home visits)|"
+                      r"(do not|don'?t|please don'?t|no need to) (come|visit|stop by)( out)?( to| at)? (my|our|the) "
+                      r"(house|home|place)|(nobody|no one|no-one) (should|needs to|can|is to) come|not (at|to) my (house|home)|"
+                      r"no home visits?|not a home visit|no visits? at (my|our) (house|home))", re.I)
+_INVITED_IN = re.compile(r"(stop by|come (in|by|out|see)|swing by|drop by|short visit|for a visit|visit (with )?us|"
+                         r"sit down (with (me|us) )?(here|at)|meet (with )?(me|us) (here|at)|in person)", re.I)
+_WANTS_HOME = re.compile(r"(come (to|out to|over to) (me|us|my|our|her|his|their)\b(?! office)|"
+                         r"come (out|over) (here|to (me|us|my|our|her|his))|\bcome over\b(?! to (the|your|restland))|"
+                         r"(rather|prefer|easier if|better if) (you|someone|somebody) (came|come|visit)|"
+                         r"visit (me|us|her|him|them) at ((my|our|her|his|their) )?(home|house|place)|"
+                         r"(meet|see) (me|us) at (my|our) (house|home|place)|"
+                         r"(can'?t|cannot|unable to|doesn'?t|does not) (leave|get out of) the house|homebound|"
+                         r"\bhome visit\b)", re.I)
+HOME_VISIT_REASON = "Home visit requested - call the family to set a time"
+_OFFERS_HOME = re.compile(r"(come to (you|your (home|house|place))|(to|at) your (home|house|place)|stop by your|"
+                          r"visit you at|bring it (by|over) to you|meet you at your)", re.I)
+
+
+def _track_alternative(conv, dc: Optional[Dict], action: Optional[str]) -> None:
+    """Record, without PII, the path declined -> alternative offered ->
+    accepted / declined, in the family's memory (reported apart from an
+    opt-out or a lost family)."""
+    if not dc:
+        return
+    mem = memory_of(conv)
+    declined, alt, already = dc.get("what_was_declined"), dc.get("alternative_to_offer"), dc.get("alternative_already_offered")
+    changed = False
+    if already and not mem.get("alternative_outcome"):
+        if action == "close" or declined == DECLINED_STOP:
+            mem["alternative_outcome"] = "declined"
+            changed = True
+        elif action in ("offer_times", "book", "handoff", "send_guide", "mail_guide", "callback"):
+            mem["alternative_outcome"] = "accepted"
+            changed = True
+    elif declined in (DECLINED_VENUE, CANT_GET_THERE) and alt not in (None, ALT_NONE) and action != "close":
+        mem.update(objection=declined, alternative_offered=alt)
+        changed = True
+    elif declined == DECLINED_STOP:
+        mem["objection"] = DECLINED_STOP
+        changed = True
+    if changed:
+        conv.memory = json.dumps(mem)
+
+
+def _last_outbound(db, lead) -> str:
+    """The last message the family actually received from us."""
+    for item in reversed(history(db, lead)):
+        if item.get("who") == "us":
+            return item.get("text") or ""
+    return ""
+
+
+def _plain(text: Optional[str]) -> str:
+    return (text or "").replace("\u2019", "'").replace("\u2018", "'").strip()
+
+
+def what_was_declined(body: str, last_outbound: str, times_on_table: bool) -> Optional[str]:
+    b = _plain(body)
+    if not b:
+        return None
+    if _HARD_NO.search(b):
+        return DECLINED_STOP
+    if _NO_HOME.search(b):
+        return DECLINED_HOME
+    if _NOT_THESE_TIMES.search(b):
+        return DECLINED_TIME
+    if _CANT_GET_THERE.search(b):
+        return CANT_GET_THERE
+    if _BARE_NO.search(b):
+        if times_on_table:
+            return DECLINED_TIME
+        if _INVITED_IN.search(last_outbound or ""):
+            return DECLINED_VENUE
+        return UNCLEAR_NO
+    return None
+
+
+def _location_settings(db, lead) -> Dict:
+    try:
+        from app.services.programs import identity
+        prof = identity.location_profile_for_lead(db, lead)
+        bs = getattr(prof, "brand_settings", None) if prof is not None else None
+        if isinstance(bs, str):
+            bs = json.loads(bs or "{}")
+        return bs if isinstance(bs, dict) else {}
+    except Exception:                                    # noqa: BLE001
+        return {}
+
+
+def alternative_for(db, lead, conv, declined: Optional[str]) -> str:
+    """The ONE alternative this location really offers, in order: a visit at
+    the family's home (only when the location's own setting "home_visits" is
+    on - the printed-guide delivery flag is NOT a home-appointment
+    permission), a phone appointment (setting "offer_phone_alternative"), the
+    planning guide if they don't have it yet, else none."""
+    bs = _location_settings(db, lead)
+    if bs.get("home_visits") and declined != DECLINED_HOME:
+        return ALT_HOME
+    if bs.get("offer_phone_alternative"):
+        return ALT_PHONE
+    if conv is not None and not _guide_sent(db, conv):
+        return ALT_GUIDE
+    return ALT_NONE
+
+
+def decline_context(db, lead, conv, body: str) -> Dict:
+    """Code-made facts about a decline, for the prompt and the validator."""
+    mem = memory_of(conv) if conv is not None else {}
+    declined = what_was_declined(body, _last_outbound(db, lead), bool(conv is not None and A.offered(conv)))
+    already = mem.get("alternative_offered")
+    alt = alternative_for(db, lead, conv, declined) if declined in (DECLINED_VENUE, CANT_GET_THERE, DECLINED_HOME) \
+        else ALT_NONE
+    home_ok = bool(_location_settings(db, lead).get("home_visits"))
+    b = _plain(body)
+    blocked = declined in (DECLINED_HOME, DECLINED_STOP)
+    asks_home = bool(_WANTS_HOME.search(b)) and not blocked
+    # A plain yes to OUR home-visit offer - not "ok, but I'd rather come in".
+    accepted_home = (already == ALT_HOME and not blocked
+                     and bool(re.search(r"^\s*(yes|yeah|yep|sure|ok(ay)?|that would|please|that works|sounds good|"
+                                        r"definitely|absolutely)\b", b, re.I))
+                     and not re.search(r"\b(but|rather|instead|come in|come there|stop by there|not)\b", b, re.I))
+    return {"what_was_declined": declined, "alternative_to_offer": ALT_NONE if already else alt,
+            "alternative_already_offered": already or None,
+            "home_visits_offered_by_this_location": home_ok,
+            "family_asks_for_home_visit": asks_home or accepted_home}
+
+
 def validate_decision(d: Dict, body: str, conv, contact: Optional[str] = None) -> List[str]:
     """Rules the model's answer must meet before anything is sent. Returned
     to the model once as a correction; if they still fail, a person decides."""
@@ -505,10 +669,52 @@ def validate_decision(d: Dict, body: str, conv, contact: Optional[str] = None) -
     if action == "close" and _EXISTING_PLAN.search(body or "") and not _ELSEWHERE.search(body or ""):
         problems.append("they said they already have plots / a plan but not WHERE - it may be with us. Don't "
                         "close: thank them and ask warmly whether it's with us, or offer a review of their file")
+    if existing_plan_purchased_with_us(body):
+        # "We bought a plan from you" is an existing-customer statement,
+        # not permission to invent an appointment or a new sales opportunity.
+        if action in ("offer_times", "book") and not _REQUESTS_EXISTING_PLAN_VISIT.search(body or ""):
+            problems.append("EXISTING CUSTOMER: they already purchased a plan FROM US but did not "
+                            "request an appointment. Use answer: acknowledge their existing "
+                            "arrangements and ask whether they need help with anything.")
+        if action == "close":
+            problems.append("EXISTING CUSTOMER: a previous purchase is not a refusal. "
+                            "Acknowledge their plan instead of closing them as uninterested.")
+        if action != "wait" and not re.search(
+                r"\b(plan|arrangements?|contract|plots?|property|purchas(?:e|ed)|bought|prepaid|pre-?need)\b",
+                reply, re.I):
+            problems.append("EXISTING CUSTOMER: the reply must acknowledge the existing "
+                            "plan or arrangements; generic scheduling filler is not an answer.")
     if (action == "mail_guide" and (body or "").strip() and not _PRINTED.search(body or "")   # not a follow-up
             and not (memory_of(conv) or {}).get("mail_request")):
         problems.append("they asked for the guide, not a printed or mailed copy - use send_guide (the system "
                         "texts or emails it, or offers a printed copy if a link can't go by text)")
+    dc = getattr(conv, "_decline", None) or {}
+    declined, alt = dc.get("what_was_declined"), dc.get("alternative_to_offer") or ALT_NONE
+    if declined == DECLINED_STOP and (action in ("offer_times", "book", "send_guide", "mail_guide", "callback")
+                                      or "{TIMES}" in reply or _OFFERS_HOME.search(reply)):
+        problems.append("they said stop / not interested - honour it: thank them briefly and close, with no "
+                        "alternative, no times and no offer")
+    if action == "close" and declined in (DECLINED_VENUE, CANT_GET_THERE) and alt != ALT_NONE:
+        problems.append("their \"no\" answered our invitation to COME IN - it is not a no to every kind of help. "
+                        "Don't close yet: offer the ONE alternative in facts (%s), once, warmly, as your one "
+                        "question" % alt)
+    if action == "close" and declined == DECLINED_TIME:
+        problems.append("they declined the times, not the visit - ask what week or time of day suits them "
+                        "(or follow_up_later), without repeating the same days")
+    if _OFFERS_HOME.search(reply) and (alt != ALT_HOME or declined == DECLINED_HOME) \
+            and not dc.get("home_visits_offered_by_this_location"):
+        problems.append("it offers to come to the family's home - this location does not offer home visits; "
+                        "never promise one")
+    if declined == DECLINED_HOME and _OFFERS_HOME.search(reply):
+        problems.append("they said they don't want anyone coming to their home - never offer that")
+    if dc.get("family_asks_for_home_visit") and dc.get("home_visits_offered_by_this_location") \
+            and action in ("book", "offer_times", "close"):
+        problems.append("they want someone to come to them and this location does home visits: say yes warmly and "
+                        "use handoff (I'll reach out personally to find a time) - never offer or book a visit at the "
+                        "location, never close")
+    if action == "book" and dc.get("alternative_already_offered") == ALT_HOME:
+        problems.append("a home visit is arranged personally by the advisor, never booked as a visit at the "
+                        "location - use handoff so I confirm the time myself")
     if action == "close" and not _DECLINE.search(body or ""):
         problems.append("they did not decline - a short or unclear reply ('k', 'maybe', an emoji) is not a no; "
                         "answer it or ask one gentle question instead of closing")
@@ -549,6 +755,28 @@ _MAIL_ONLY = re.compile(r"\b((just|only) (mail|send)|mail (it )?only|don'?t (wan
                         r"no (visit|meeting|calls?)|not (looking|wanting) to meet)", re.I)
 _ASKS_IF_HUMAN = re.compile(r"\b(robot|a bot|bot\b|\bai\b|automated|auto.?reply|real person|a real human|"
                             r"are you (a )?(human|person|real|computer|machine)|is this (a )?(person|human|real|computer))", re.I)
+_PLAN_PURCHASE_WITH_US = re.compile(
+    r"\b(?:bought|purchased?|paid for|signed up for)\b.{0,85}?"
+    r"\b(?:plan|arrangements?|contract|plots?|spaces?|cemetery property)\b.{0,65}?"
+    r"\b(?:from|with|through)\s+(?:you|your|this (?:funeral home|cemetery|location))\b", re.I)
+_REQUESTS_EXISTING_PLAN_VISIT = re.compile(
+    r"\b(?:can|could|would|may) (?:i|we)\b.{0,60}\b(?:meet|come in|visit|review|schedule|book)|"
+    r"\b(?:want|need|like|looking) to\b.{0,50}\b(?:meet|review|schedule|book|come in)|"
+    r"\b(?:appointment|schedule (?:a|an) (?:meeting|review|visit))\b", re.I)
+
+
+def existing_plan_purchased_with_us(body: str) -> bool:
+    """Family's claim about an existing plan, not a verified contract status."""
+    text = (body or "").strip()
+    if not _PLAN_PURCHASE_WITH_US.search(text):
+        return False
+    if re.search(r"\b(?:never|didn'?t|did not|haven'?t|have not)\s+"
+                 r"(?:already\s+)?(?:buy|bought|purchase|purchased|pay|paid|have)\b",
+                 text, re.I):
+        return False
+    return True
+
+
 _EXISTING_PLAN = re.compile(r"\b(already (have|got|bought|took care)|have a plan|prearrang|bought (plots?|"
                             r"spaces?|property))", re.I)
 _SENTENCE = re.compile(r"[^.!?]+[.!?]*")
@@ -624,12 +852,15 @@ def _over_limit(db, conv, now) -> Optional[str]:
 
 def _parse_follow_up(raw, now) -> datetime:
     """The family's own horizon, clamped to 1-90 days; 14 days if unclear.
-    Returned as UTC at 15:00 (10 AM Central) on that date."""
+    A date further out than 90 days is brought in to 90 (#14) - "next year"
+    must not become two weeks. Returned as UTC at 15:00 (10 AM Central)."""
     try:
         day = datetime.strptime(str(raw or "")[:10], "%Y-%m-%d")
     except ValueError:
         day = None
     today = A._today_central().date()
+    if day is not None and (day.date() - today).days > 90:
+        day = datetime.combine(today + timedelta(days=90), datetime.min.time())
     if day is None or not (1 <= (day.date() - today).days <= 90):
         day = datetime.combine(today + timedelta(days=14), datetime.min.time())
     return day.replace(hour=15, minute=0)
@@ -681,29 +912,79 @@ _ORD = {0: r"\b(first|1st|earlier|former|either|whichever|option (1|one)|#1)\b",
         1: r"\b(second|2nd|later|latter|option (2|two)|#2)\b"}
 
 
+# A turn-down attached to the day/hour itself ("Monday doesn't work", "10 is
+# bad"), not one later in the sentence ("Monday works but not Tuesday") and
+# not a reassurance ("not a problem", "not bad", "can't wait").
+_NEG_AFTER = re.compile(r"^\s*(at \S+\s*|is\s+|would\s+|will\s+|just\s+|really\s+)*"
+                        r"(doesn'?t|does not|won'?t|will not|isn'?t|is not|not|can'?t|cannot|no good|bad|busy)\b"
+                        r"(?!\s+(a |an |be a |too )?(problem|issue|bad|wait))")
+_NEG_BEFORE = re.compile(r"\b(not|no|can'?t|cannot|won'?t|couldn'?t|except)\b(?:(?!\b(but|and|or)\b)[^.,;!?]){0,12}$")
+
+
+def _picked(pattern: str, t: str) -> bool:
+    """The pattern appears in a clause that is not turning it down
+    ("Monday doesn't work", "not Monday", "can't do 10")."""
+    for m in re.finditer(pattern, t):
+        if _NEG_AFTER.search(t[m.end():]) or _NEG_BEFORE.search(t[:m.start()]):
+            continue
+        return True
+    return False
+
+
+def clock_named(body: str, slot: datetime) -> bool:
+    """The family's words name this slot's clock hour ("2", "2:00 pm", "noon")."""
+    t = (body or "").lower()
+    hour = int(slot.strftime("%I"))
+    if slot.hour == 12 and _picked(r"\bnoon\b", t):
+        return True
+    return _picked(r"\b%d(:%02d)?\s*(am|pm|a\.m\.|p\.m\.|o'?clock)?\b" % (hour, slot.minute), t) if slot.minute \
+        else _picked(r"\b%d(:00)?\s*(am|pm|a\.m\.|p\.m\.|o'?clock)?\b" % hour, t)
+
+
+_SAYS_MORNING = r"(?<!good )\b(morning|mornings)\b|\b(la|las) ma[ñn]anas?\b"
+_SAYS_LATER = r"(?<!good )\b(afternoon|afternoons|evening|evenings)\b|(?<!buenas )\btarde\b"
+
+
+def _part_contradicts(t: str, slot: datetime) -> bool:
+    """The family named ONE part of the day and this slot is in the other."""
+    am, pm = _picked(_SAYS_MORNING, t), _picked(_SAYS_LATER, t)
+    if am and not pm:
+        return slot.hour >= 12
+    if pm and not am:
+        return slot.hour < 12
+    return False
+
+
 def choice_evidence(body: str, slot: datetime, index: Optional[int]) -> bool:
     """Did the family actually pick THIS time? Their words must name its day,
-    date, hour or position - an AI's guess never books an appointment."""
+    date, hour or position - an AI's guess never books an appointment, and a
+    time they turned down ("Monday doesn't work") is never a pick."""
     t = (body or "").lower()
     if not t:
         return False
-    if re.search(r"\b%s\b" % slot.strftime("%A").lower(), t) or re.search(r"\b%s\b" % slot.strftime("%a").lower(), t):
+    if _part_contradicts(t, slot) and not clock_named(body, slot):
+        return False                                    # "Friday morning" never picks Friday 2 PM (#12)
+    if _picked(r"\b%s\b" % slot.strftime("%A").lower(), t) or _picked(r"\b%s\b" % slot.strftime("%a").lower(), t):
         return True
-    if re.search(r"\b%s\b" % slot.strftime("%B").lower(), t) and str(slot.day) in t:
+    if _picked(r"\b%s\b" % slot.strftime("%B").lower(), t) and str(slot.day) in t:
         return True
-    hour = int(slot.strftime("%I"))
-    if re.search(r"\b%d(:00)?\s*(am|pm|a\.m\.|p\.m\.|o'?clock)?\b" % hour, t):
+    if clock_named(body, slot):
         return True
-    if index is not None and index in _ORD and re.search(_ORD[index], t):
+    if index is not None and index in _ORD and _picked(_ORD[index], t):
         return True
-    if re.search(r"\bmorning\b", t) and slot.hour < 12:
+    if any(_picked(r"\b(%s|%s)\b" % (d, d[:3]), t) for d in _DAYS):
+        return False                                    # they named a different day: a day part alone isn't a pick
+    if _picked(r"\bmorning\b", t) and slot.hour < 12:
         return True
-    if re.search(r"\b(afternoon|evening)\b", t) and slot.hour >= 12:
+    if _picked(r"\b(afternoon|evening)\b", t) and slot.hour >= 12:
         return True
     return False
 
 
 _DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+
+_WANTS_PHONE = re.compile(r"\b(phone call|by phone|over the phone|call me|a call\b|phone instead)", re.I)
 
 
 def day_part(body: str) -> Optional[str]:
@@ -726,6 +1007,82 @@ def day_named(body: str, today) -> Optional[object]:
     if re.search(r"\btomorrow\b", t):
         return today + timedelta(days=1)
     return None
+
+
+_COMING_IN = re.compile(r"\b(come|coming|stop|stopping|run|drop|swing|pop) (by|in|over|there|down)\b|"
+                        r"\b(visit|meet|see you)\b", re.I)
+_ARRIVING_TODAY = re.compile(r"\b(today|tonight|right now|on (my|our) way|headed (over|there|your way)|"
+                             r"in (about |around )?\d+ ?(min|minutes|mins)|this (morning|afternoon|evening))\b", re.I)
+_CHANGE_EXISTING = re.compile(r"\b(cancel|reschedul|move (my|our|the) appointment|change (my|our|the) appointment)", re.I)
+
+
+_WANTS_IN = re.compile(r"\b(appointment|set up a time|schedule (a|an|my)|come (by|in|over)|stop (by|in)|"
+                       r"swing by|drop by|meet (with )?you|sit down with)\b", re.I)
+_NEGATIVE = re.compile(r"\b(not|don'?t|can'?t|cannot|won'?t|no|never|stop)\b", re.I)
+# A reply that promises a meeting without a time: "see you tomorrow", "I'll be
+# ready to meet with you", "looking forward to seeing you" (Henry, Oct 22).
+_EMPTY_PROMISE = re.compile(r"(see you (then|tomorrow|soon|on|monday|tuesday|wednesday|thursday|friday|saturday)|"
+                            r"ready (for|to meet with|to see) you|look(ing)? forward to (seeing|meeting|our (visit|meeting|conversation))|"
+                            r"when you come (by|in))", re.I)
+
+
+# "Close it for now", "not right now", "maybe later", "hold off" - a soft no.
+# A real STOP / unsubscribe is handled before this by the opt-out path.
+_SOFT_NO = re.compile(r"\b(close (it|this|my request|the request)( out)?( for now)?|not (right )?now|"
+                      r"not at this (time|point)|maybe (later|another time|down the road)|hold off|"
+                      r"put (it|this|me) on hold|not ready (yet|right now)|not interested (right now|at this time|for now)|"
+                      r"(take|put) (me|it) off (for now|the list for now)|some other time|another time)\b", re.I)
+SOFT_NO_REASON = ("Soft no - they said \"%s\". Nothing was sent. Call them once and offer a short visit; "
+                  "if it's still no, set a check-back date.")
+
+
+def is_soft_no(body: str) -> bool:
+    b = (body or "").strip()
+    # "Not now, but I can come in next week" is a yes with a timing - not a soft no.
+    # "Not right now - call me tomorrow" is a callback request, not a soft no.
+    return (bool(b) and len(b) <= 200 and bool(_SOFT_NO.search(b)) and not _WANTS_IN.search(b)
+            and not re.search(r"\bcall (me|you|back)\b", b, re.I))
+
+
+_REAL_TIME = re.compile(r"\b\d{1,2}(:\d{2})?\s?(AM|PM)\b")    # a real time we filled in (A.describe)
+NEEDS_HUMAN_REASON = ("Needs a human - the AI could not move this to an appointment, so nothing was sent "
+                      "(%s). Contact them personally.")
+
+
+def wants_visit(body: str) -> bool:
+    """The family says yes to coming in (not arriving now, not changing or
+    cancelling, not a no)."""
+    b = body or ""
+    return bool(_WANTS_IN.search(b)) and not (_ARRIVING_TODAY.search(b) or _CHANGE_EXISTING.search(b)
+                                              or _NEGATIVE.search(b))
+
+
+def future_visit_day(body: str, today) -> Optional[object]:
+    """The later day a family says they'll come in on ("I can come by
+    tomorrow if that is ok") - a yes to a visit that still needs a time.
+    None when they're arriving today, changing an appointment, or name no day."""
+    b = body or ""
+    if not _COMING_IN.search(b) or _ARRIVING_TODAY.search(b) or _CHANGE_EXISTING.search(b):
+        return None
+    day = day_named(b, today)
+    return day if day is not None and day > today else None
+
+
+def booking_link_line(db, lead) -> str:
+    """'Or pick another time here: <link>' for an SCI text - empty when this
+    sender may not carry links or the program has no booking calendar."""
+    if getattr(lead, "is_test", False):
+        return ""                                       # a test contact never mints a booking link
+    try:
+        from app.services import sms_programs as _sp
+        from app.services.programs import identity
+        if _sp.content_allowance(db, lead).get("allow_links", True) is False:
+            return ""
+        url = identity.program_booking_url(db, lead)
+    except Exception:                                   # noqa: BLE001 - never block the reply
+        log.exception("booking link for lead %s failed", getattr(lead, "id", None))
+        return ""
+    return ("Or pick another time here: %s" % url) if url else ""
 
 
 def decide(db, prog, lead, conv, resp, *, actor: Optional[str] = None, note: Optional[str] = None,
@@ -816,7 +1173,13 @@ def _deliver(db, prog, lead, conv, resp, text, action, mode, *, now) -> ProgramC
                      reason=(res.get("error") or "email not sent")[:240], response_id=resp.id)
     hours = contact_hours.check(lead, now)
     if not hours.get("permitted"):
-        conv.next_followup_at = contact_hours.next_permitted_utc(lead, now)
+        # The held reply itself is released by sweep(). next_followup_at only
+        # moves when nothing is set or it is earlier than the next allowed
+        # hour - an agreed later date (follow_up_later: "check back in 35
+        # days") is never pulled forward (#4).
+        nxt = contact_hours.next_permitted_utc(lead, now)
+        if conv.next_followup_at is None or (nxt is not None and conv.next_followup_at < nxt):
+            conv.next_followup_at = nxt
         return _turn(db, conv, "ai", text, action=action, delivery="held",
                      response_id=resp.id if resp else None, reason="outside contact hours")
     try:
@@ -841,31 +1204,26 @@ def _handoff(db, prog, lead, conv, reason, *, notify: bool):
         notify = False                  # a synthetic contact never pages the team
     if notify:
         try:
-            from app.models.program_models import ProgramAlert
+            from app.services.programs import alert_ledger as L
+            # ONE REPLY, ONE ALERT (Oct 19): during a family's reply the
+            # hand-off is folded into that reply's single page.
+            if L.defer({"type": "handoff", "reason": (reason or "")[:250]}):
+                return
             from app.services.programs import responses as R
-            title = R.alert_title(prog)
-            who0 = ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title() or "A family"
-            # Say WHO and WHY: "arriving in 15 minutes" must not read like any
-            # other hand-off (Oct 15: Thomas Calloway was on his way in).
-            sms = "%s: %s needs a person - %s. Please check SCI Live." % (title, who0, (reason or "")[:120])
-            if getattr(lead, "is_test", False):
-                sms = "TEST - " + sms
-            targets = [("primary", "sms", prog.alert_phone), ("primary", "email", prog.alert_email)]
-            for m in R._managers(prog):
-                if (m.get("role") or "").lower() == "team":
-                    targets += [("team", "sms", m.get("phone")), ("team", "email", m.get("email"))]
-            who = ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title() or "A family"
-            for aud, ch, to in targets:
-                if not to:
-                    continue
-                ok, why = R.staff_alert_gate(to, ch, aud, bool(prog.staff_sms_alerts_enabled))
-                text = sms if ch == "sms" else "%s needs a person: %s" % (who, reason)
-                rc: Dict = {}
-                if ok:
-                    ok, why = R._deliver_staff_alert(db, prog, ch, to, text, kind="handoff", receipt=rc)
-                db.add(R.sms_alert_record(ProgramAlert(organization_id=prog.organization_id, kind="handoff",
-                                                       audience=aud, channel=ch, recipient=to, delivered=bool(ok),
-                                                       reason=why, message=text[:2000]), rc))
+            import html as _html
+            who = L.first_last(lead)
+            home = reason == HOME_VISIT_REASON
+            sms = L.sms_line("home_visit" if home else "handoff", who,
+                             detail=("asked for a visit at home - call to set a time" if home
+                                     else "needs a person - %s" % (reason or "")),
+                             link=L.family_link(lead.id))
+            subject = "%s - HUMAN HANDOFF: %s needs a person" % (R.alert_title(prog), who)
+            body = ('<p style="background:#c62828;color:#ffffff;font-size:16px;font-weight:800;padding:10px 14px;'
+                    'border-radius:8px">HUMAN HANDOFF - the AI sent this family nothing.</p>'
+                    "<p>%s needs a person: %s</p>" % (_html.escape(who), _html.escape(reason or "")))
+            L.page(db, prog, lead_id=lead.id, key="handoff:%s:%s" % (conv.id, datetime.utcnow().strftime("%Y%m%d%H%M")),
+                   kind="handoff", sms_text=sms, subject=subject, html=body, management=True,
+                   audit_message="%s needs a person: %s" % (who, reason))
         except Exception:                                # noqa: BLE001
             log.exception("handoff alert failed for lead %s", lead.id)
 
@@ -905,10 +1263,17 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         db.commit()
         return dict(out, action="handoff", state=conv.state)
     if cls == AUTO_REPLY:
-        conv.state = "waiting"
-        conv.next_followup_at = now + FOLLOWUP_GAP
-        _turn(db, conv, "system", None, action="wait",
-              reason="automatic reply - not answered; follow-up after %s UTC" % conv.next_followup_at.strftime("%Y-%m-%d %H:%M"))
+        # Only a conversation the AI is running moves to "waiting" (#5). A
+        # person's conversation (human / callback), offered times, a booking,
+        # an agreed later date or a stop are left exactly as they are.
+        if conv.state == "ai_active":
+            conv.state = "waiting"
+            conv.next_followup_at = now + FOLLOWUP_GAP
+            why = "automatic reply - not answered; follow-up after %s UTC" % conv.next_followup_at.strftime(
+                "%Y-%m-%d %H:%M")
+        else:
+            why = "automatic reply - not answered; conversation left as it was (%s)" % conv.state
+        _turn(db, conv, "system", None, action="wait", reason=why)
         db.commit()
         return dict(out, action="wait", state=conv.state)
     if conv.state in ("human", "stopped"):
@@ -924,11 +1289,30 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         _handoff(db, prog, lead, conv, limit, notify=True)
         db.commit()
         return dict(out, action="handoff", state=conv.state)
+    if is_soft_no(body):
+        # SOFT NO (James, Oct 22: "Close it for now"). Not a STOP, not a
+        # goodbye: the AI sends nothing, and a person gets ONE clear job -
+        # call once and offer a short visit. Outreach to them pauses because
+        # they replied; a person decides whether to set a check-back.
+        merge_memory(conv, {"next_step": "soft no - call once to offer a short visit",
+                            "readiness": "not_ready"})
+        _handoff(db, prog, lead, conv, SOFT_NO_REASON % (body or "").strip()[:80], notify=True)
+        _turn(db, conv, "system", None, action="handoff", reason="soft no - nothing sent; a person calls once")
+        db.commit()
+        return dict(out, action="handoff", state=conv.state, soft_no=True)
     if conv.state in ("waiting_future", "closed", "info_requested", "offered", "waiting"):
         # The family wrote again: any scheduled follow-up is superseded.
         conv.next_followup_at = None
         conv.followup_reason = None
 
+    # What a "No" declined is decided in code from the last message the family
+    # saw (#234); the prompt and the validator both read it.
+    try:
+        conv._decline = decline_context(db, lead, conv, body)
+    except Exception:                                    # noqa: BLE001 - never blocks a reply
+        log.exception("decline context failed for lead %s", lead.id)
+        conv._decline = None
+    out["decline"] = conv._decline
     try:
         try:
             d = decide(db, prog, lead, conv, resp, actor=actor)
@@ -937,6 +1321,8 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             d = decide(db, prog, lead, conv, resp, actor=actor,
                        note="Your last answer was not valid. Return the JSON with action set to exactly one of: "
                             + ", ".join(ACTIONS) + ".")
+        if d.get("action") == "callback" and not (d.get("reply") or "").strip():
+            d["reply"] = "Thank you - I'll give you a call then."
         problems = validate_decision(d, body, conv, prog.primary_contact_name)
         if problems:
             # ONE chance to fix it, told exactly what was wrong.
@@ -978,6 +1364,7 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
               response_id=resp.id if resp else None)
         db.commit()
         return dict(out, action="handoff", state=conv.state, held=left or [why])
+    _track_alternative(conv, getattr(conv, "_decline", None), action)   # only for a reply that goes out
     if d.get("appointment_kind") in (A.PHONE, A.VISIT):
         conv.appointment_kind = d["appointment_kind"]
     if d.get("service_type"):
@@ -990,6 +1377,33 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         return dict(out, state=conv.state)
 
     preferred_day = None
+    if action in ("handoff", "answer") and conv.booked_time is None:
+        # HARD RULE (Henry, Oct 22): a family who said yes to coming in never
+        # gets a reply without a real time. "I can come by tomorrow" -> times
+        # that day; a "see you then" with no time -> times; a hand-off of a
+        # plain yes -> times. Arriving today, a home-visit ask, upset or
+        # grieving families, and changes to a booking still go to a person.
+        _dc = getattr(conv, "_decline", None) or {}
+        _home = bool(_dc.get("family_asks_for_home_visit"))
+        _today = A._today_central().date()
+        _later = None if _home else future_visit_day(body, _today)
+        _mood = (und.get("mood") or "").lower()
+        _calm = _mood not in ("upset", "grieving", "negative")
+        _promise = (bool(_EMPTY_PROMISE.search(text or "")) and not _ARRIVING_TODAY.search(body or "")
+                    and not _NEGATIVE.search(body or "") and not _CHANGE_EXISTING.search(body or ""))
+        _plain_yes = action == "handoff" and _calm and wants_visit(body)
+        if not _home and _calm and (_later is not None or _promise or _plain_yes):
+            action = "offer_times"
+            out["action"] = action
+            out["corrected"] = "a yes to coming in always gets real times"
+            if _later is not None:
+                preferred_day = _later
+                _word = "tomorrow" if (_later - _today).days == 1 else _later.strftime("%A")
+                text = "Wonderful, I'd be glad to see you %s. Would {TIMES} work for you?" % _word
+                merge_memory(conv, {"best_times": _word, "readiness": "ready"})
+            else:
+                text = "Wonderful, I'd be glad to sit down with you. Would {TIMES} work for you?"
+                merge_memory(conv, {"readiness": "ready"})
     if action == "book":
         slot = None
         choices = A.offered(conv)
@@ -1007,8 +1421,9 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                 preferred_day = slot.date()
                 # A day without a clock time ("Can you do Friday?") is a
                 # request for times THAT day, not a booking.
-                if not re.search(r"\d|noon|morning|afternoon|evening", (body or "").lower()) \
-                        or not choice_evidence(body, slot, None):
+                # A day part ("Thursday morning?") is a request for times
+                # too: only the family's own clock hour books an unoffered time.
+                if not clock_named(body, slot) or not choice_evidence(body, slot, None):
                     slot = None
                     action = "offer_times"
                     text = "Yes - would {TIMES} work for you?"
@@ -1019,6 +1434,12 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                 slot = picked[0]
         if slot is None and action == "offer_times":
             pass
+        elif slot is None and choices and _WANTS_PHONE.search(body or "") and (conv.appointment_kind or A.VISIT) != A.PHONE:
+            # "ok let's do a phone call" while in-person times are on the table:
+            # switch to phone times, don't re-ask about the visit times (s094).
+            conv.appointment_kind = A.PHONE
+            action = "offer_times"
+            text = "Of course - would {TIMES} work for a short call?"
         elif slot is None and choices and day_part(body) and not all(
                 (c.hour < 12) == (day_part(body) == "morning") for c in choices):
             # "Mornings are better" while an afternoon time is on the table:
@@ -1051,6 +1472,15 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                     conv.last_ai_at = now
                     db.commit()
                     return dict(out, state=conv.state, booked_time=slot.isoformat(), simulated=True)
+                if res.get("already"):
+                    # Their time was already booked: reassure them in our own
+                    # words; the team was paged when it was booked.
+                    t = _deliver(db, prog, lead, conv, resp, "You're already set for %s. If anything changes, "
+                                 "just reply here." % A.describe(slot), "book", mode, now=now)
+                    conv.ai_turns += 1
+                    conv.last_ai_at = now
+                    db.commit()
+                    return dict(out, state=conv.state, booked_time=slot.isoformat(), delivery=t.delivery)
                 A.notify_team_booked(db, prog, lead, slot, kind)
                 # The booking path already sent the family its confirmation
                 # text; a synthetic contact gets the same line, simulated.
@@ -1073,7 +1503,24 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                 conv.last_ai_at = now
                 db.commit()
                 return dict(out, state=conv.state, booked_time=slot.isoformat())
-            if res.get("status") in ("taken", "unconfirmed", "already_booked"):
+            if res.get("status") == "opted_out":
+                conv.state = "stopped"
+                _turn(db, conv, "system", None, action="stop", reason="opted out - not booked, no further messages")
+                db.commit()
+                return dict(out, action="stop", state=conv.state)
+            if res.get("status") == "already_booked":
+                # They already have a visit and want a different time: a person
+                # moves it (the setter never reschedules). Never "filled up".
+                try:
+                    old = A.describe(datetime.fromisoformat(str(res.get("booked_time"))[:16]))
+                except (TypeError, ValueError):
+                    old = "their current time"
+                _handoff(db, prog, lead, conv, "wants to move their appointment from %s to %s"
+                         % (old, A.describe(slot)), notify=True)
+                text = ("Thank you. You're currently set for %s. I'll have someone reach out "
+                        "shortly to move it to %s if that time is still open." % (old, A.describe(slot)))
+                action = "handoff"
+            elif res.get("status") in ("taken", "unconfirmed"):
                 action = "offer_times"
                 was_offered = slot in choices
                 text = ("That time just filled up. Would {TIMES} work instead?" if was_offered
@@ -1094,9 +1541,23 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         if not slots:
             slots, why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT)
         if not slots:
-            _handoff(db, prog, lead, conv, "no times to offer: %s" % why, notify=True)
-            text = "Thank you. I'll reach out to find a time that works for you."
-            action = "handoff"
+            # No calendar slots is an operational block, not a reason to replace
+            # the family's contextual reply with a canned appointment sentence.
+            # Hand to the advisor; do not send fabricated filler to a customer.
+            _handoff(db, prog, lead, conv,
+                     "no times to offer: %s; read the family's message before replying"
+                     % (why or "calendar unavailable"), notify=True)
+            if resp is not None:
+                # Inbound triage may have generated a generic suggested_reply.
+                # Do not leave a scheduling promise in the advisor's send box
+                # when the calendar cannot produce a real appointment.
+                resp.suggested_reply = None
+            _turn(db, conv, "system", None, action="handoff",
+                  reason="calendar unavailable; generic automatic reply suppressed",
+                  response_id=resp.id if resp else None)
+            db.commit()
+            return dict(out, action="handoff", state=conv.state,
+                        held=["calendar unavailable: human response required"])
         else:
             text = _ensure_times_question(text)
             text = _fill_times(text, slots)
@@ -1104,6 +1565,11 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             conv.offered_at = now
             conv.state = "offered"
             out["offered"] = [s.isoformat() for s in slots]
+            if not (resp is not None and resp.channel == "email"):
+                _line = booking_link_line(db, lead)
+                if _line:
+                    text = "%s\n%s" % (text, _line)
+                    allowed_links.append(_line.split(": ", 1)[1])
 
     if action == "send_guide":
         from app.services import sms_programs
@@ -1172,7 +1638,15 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         conv.state = _handoff_state                     # stays visible as a callback request
 
     if action == "handoff" and conv.state != "human":
-        _handoff(db, prog, lead, conv, d.get("reason") or "the family wants a person", notify=True)
+        dc_ = getattr(conv, "_decline", None) or {}
+        home = bool(dc_.get("family_asks_for_home_visit") and dc_.get("home_visits_offered_by_this_location"))
+        if home:
+            merge_memory(conv, {"wants": ["home visit"], "next_step": HOME_VISIT_REASON})
+            _m = memory_of(conv)                      # a NEW ask reopens the task even if an earlier one was arranged
+            _m["home_visit"] = {"done": False, "requested_at": datetime.utcnow().isoformat() + "Z"}
+            conv.memory = json.dumps(_m)
+        _handoff(db, prog, lead, conv, HOME_VISIT_REASON if home else (d.get("reason") or "the family wants a person"),
+                 notify=True)
 
     if "{TIMES}" in text and action != "offer_times":
         # Times written into another kind of reply (e.g. guide + a visit
@@ -1184,6 +1658,28 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             conv.offered_at = now
             conv.state = "offered"
             out["offered"] = [s.isoformat() for s in slots]
+    # THE RULE (Mike, Oct 22): the AI sends a family something ONLY when it
+    # moves them to an appointment - real open times, or a booking (bookings
+    # return above). A question, a soft no, an info request, a goodbye,
+    # anything else: nothing goes out; Mike / Michael Schlueter get "needs a
+    # human" with the family's words and the AI's draft to use or ignore.
+    # STOP is handled before this (opt-out). Someone arriving now still gets
+    # a short "we'll be ready for you" - that IS an appointment being met.
+    _moves_to_appt = bool(out.get("offered")) or bool(_REAL_TIME.search(text or ""))
+    _arriving = action == "handoff" and bool(_ARRIVING_TODAY.search(body or "")) and bool(_COMING_IN.search(body or ""))
+    if not (_moves_to_appt or _arriving):
+        if resp is not None and text:
+            resp.suggested_reply = text                  # the draft, for the person to use or ignore
+        if action not in ("handoff", "callback"):        # those two already paged the team above
+            _handoff(db, prog, lead, conv, NEEDS_HUMAN_REASON % (d.get("reason") or action or "unclear")[:160],
+                     notify=True)
+        else:
+            conv.state = "callback_requested" if action == "callback" else "human"
+        _turn(db, conv, "ai", text or None, action=action, delivery="blocked",
+              reason="needs a human - the reply did not move them to an appointment, so nothing was sent",
+              response_id=resp.id if resp else None)
+        db.commit()
+        return dict(out, action="handoff", state=conv.state, held=["needs a human: no times or booking"])
     problems = check_text(text, allowed_links=allowed_links,
                           channel=(resp.channel if resp is not None else "sms") or "sms",
                           contact=prog.primary_contact_name)
@@ -1224,18 +1720,56 @@ def sweep(db: Session, now: Optional[datetime] = None) -> Dict:
             continue
         if not contact_hours.check(lead, now).get("permitted"):
             continue
+        from app.services.sci_staging_demo import is_demo_lead
+        from app.services.test_records import is_owner_test_lead
+        if A._opted_out(db, lead) or is_demo_lead(lead) or is_owner_test_lead(lead):
+            t.delivery, t.reason = "dropped", "family opted out / test or demo - not sent"
+            db.commit()
+            continue
         try:
             from app.services.sms_service import send_sms
             msg = send_sms(db, A.program_advisor(db, prog), lead, t.text, include_booking_link=False,
                            send_source=ss.SCI_SETTER)
             t.delivery, t.message_id = "sent", getattr(msg, "id", None)
             sent += 1
+            db.commit()                                  # a later failure must never un-mark this send
+            # The held reply answered the family's message it was written for
+            # (and their earlier open ones): SCI Live stops listing them as waiting,
+            # as the live path does in _deliver. A follow-up answers nothing.
+            if t.response_id and t.action != "follow_up":
+                try:
+                    _for = db.query(ProgramResponse).filter(ProgramResponse.id == t.response_id).first()
+                    if _for is not None and _for.received_at is not None:
+                        for _r in (db.query(ProgramResponse).filter(
+                                ProgramResponse.lead_id == lead.id,
+                                ProgramResponse.organization_id == lead.organization_id,
+                                ProgramResponse.handling_status.in_(("new", "opened")),
+                                ProgramResponse.received_at <= _for.received_at).all()):
+                            _answered(_r, now)
+                        db.commit()
+                except Exception:                        # noqa: BLE001
+                    db.rollback()
+                    log.exception("marking answered after a held reply failed for lead %s", lead.id)
         except Exception as exc:                         # noqa: BLE001
             db.rollback()
             t = db.merge(t)
             t.delivery, t.reason = "blocked", str(exc)[:240]
+            # The family never got our answer because of a FAILURE: a person
+            # picks it up. A deliberate block (campaign off, DNC, review hold,
+            # test) is not a failure and pages nobody.
+            if not _POLICY_BLOCK.search(str(exc)):
+                try:
+                    conv = db.merge(conv)
+                    _handoff(db, prog, lead, conv, "held reply could not be sent: %s" % str(exc)[:120], notify=True)
+                except Exception:                        # noqa: BLE001
+                    log.exception("handoff after a refused held reply failed for lead %s", lead.id)
+            db.commit()
     db.commit()
     return {"sent": sent}
+
+
+_POLICY_BLOCK = re.compile(r"(DNC|CAMPAIGN OFF|ON HOLD|DATA REVIEW|DUPLICATE REVIEW|LOCATION REVIEW|opted|"
+                           r"suppress|consent|\btest\b|\bdemo\b|PLAN CAPACITY|capacity)", re.I)
 
 
 FOLLOW_UP_STATES = ("offered", "info_requested", "waiting_future")
@@ -1305,8 +1839,17 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
             conv.offered_slots = json.dumps([x.isoformat() for x in slots])
             conv.offered_at = now
             conv.state = "offered"
-        if action == "close":
-            conv.state = "closed"
+            _line = booking_link_line(db, lead)
+            if _line:
+                text = "%s\n%s" % (text, _line)
+                allowed.append(_line.split(": ", 1)[1])
+        if not _REAL_TIME.search(text or ""):
+            # THE RULE: an automatic follow-up goes out only with real times.
+            _turn(db, conv, "system", None, action="wait",
+                  reason="follow-up not sent: it did not offer real times (needs-a-human rule)")
+            db.commit()
+            done["skipped"] += 1
+            continue
         if check_text(text, allowed_links=allowed, contact=prog.primary_contact_name):
             db.commit()
             done["skipped"] += 1

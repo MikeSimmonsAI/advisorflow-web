@@ -468,8 +468,9 @@ def _read(*p):
 
 
 def test_every_god_nav_target_is_a_registered_route():
-    shell = _read("frontend", "src", "pages", "GodShell.jsx")
-    block = shell[shell.index("const NAV = ["):]
+    # Oct 22 2026: the rail is the six SECTIONS (and their tabs) in godNav.js.
+    nav = _read("frontend", "src", "pages", "god", "godNav.js")
+    block = nav[nav.index("export const SECTIONS = ["):]
     block = block[:block.index("\n]")]
     paths = re.findall(r"path:\s*'([^']+)'", block)
     assert paths
@@ -481,10 +482,10 @@ def test_every_god_nav_target_is_a_registered_route():
 
 
 def test_moved_lead_tools_stay_reachable():
-    shell = _read("frontend", "src", "pages", "GodShell.jsx")
-    for group in ("PLATFORM", "SALES & REVENUE", "LEAD INTELLIGENCE", "AI WORKFORCE",
-                  "SECURITY & PLATFORM"):
-        assert "group: '%s'" % group in shell
+    shell = _read("frontend", "src", "pages", "god", "godNav.js")
+    for section in ("Dashboard", "Organizations", "AI Workforce", "Launch Board",
+                    "Revenue & Billing", "Settings & Security"):
+        assert "label: '%s'" % section in shell
     for p in ("/god/lead-intelligence", "/god/entitlements",
               "/god/diagnostics/qualification"):
         assert "'%s'" % p in shell

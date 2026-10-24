@@ -31,6 +31,7 @@ import {
   ago, humanize, money, moneyK, shortDate, useEnvironment,
 } from './ds/ds'
 import './ds/evo-pages.css'
+import { ev } from './engine'
 
 const CLOSING_STAGES = ['under_contract', 'disposition', 'buyer_identified', 'assignment_pending', 'title_closing']
 const DISPO_STAGES = ['under_contract', 'disposition', 'buyer_identified', 'assignment_pending']
@@ -180,7 +181,7 @@ export default function WholesaleCommand({ focus }) {
             <div role="tabpanel" id="panel-pipeline" aria-labelledby="tab-pipeline" hidden={tab !== 'pipeline'}>
               {!ops.active_deals.length ? (
                 <Empty title="No active deals" action={<Link className="evo-btn evo-btn--primary" to="/wholesale/evosense">Open Acquisition Command</Link>}>
-                  EvoSense is hunting for your next opportunity. Promote one — or add a property — to start a deal.
+                  {ev('EvoSense is hunting for your next opportunity. Promote one — or add a property — to start a deal.')}
                 </Empty>
               ) : (
                 <div className="evo-table-wrap">

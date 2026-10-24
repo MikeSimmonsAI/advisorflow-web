@@ -255,6 +255,8 @@ def seed_maxlife_demo(db: Session, *, organization: Optional[Organization] = Non
                 db.add(AgencyRecruitMilestone(organization_id=org.id, recruit_id=r.id, label="State exam",
                                               status="pending", due=date.today() - timedelta(days=1)))
     db.flush()
+    _showcase(db, org, users, now)
+    db.flush()
     after = counts(db, org.id)
     if commit:
         db.commit()
@@ -270,3 +272,109 @@ def seed_maxlife_demo(db: Session, *, organization: Optional[Organization] = Non
         "presenter_password_set": bool(password),
         "sent": {"sms": 0, "email": 0, "invitations": 0},
     }
+
+
+# ── THE FULL DEMO STORY ─────────────────────────────────────────────────────
+# A demo with five prospects shows the screens, not the business. These are
+# forty more DEMO households moving through the same agency: AI conversations,
+# discovery calls, applications in every working state, issued policies. Every
+# row is is_demo / is_test, every address example.com, every phone 555-01xx -
+# nothing here can be sent to, and the seed calls no provider. Keyed on email,
+# so a second run adds nothing.
+SHOW_FIRST = ["Avery", "Blake", "Carmen", "Derek", "Elena", "Felix", "Gloria", "Hector", "Iris", "Jamal",
+              "Keisha", "Luis", "Monica", "Nolan", "Olivia", "Pedro", "Quinn", "Rosa", "Tyler", "Uma"]
+SHOW_LAST = ["Alvarez", "Bennett", "Chang", "Dawson", "Ellis", "Fischer", "Grant", "Harper", "Ibarra", "Jensen"]
+SHOW_NEEDS = [["family_protection"], ["final_expense"], ["retirement"], ["living_benefits"],
+              ["family_protection", "living_benefits"], ["business_owner"], ["retirement", "final_expense"]]
+SHOW_ASK = ["Can you explain what living benefits are?", "What would $250k of coverage cost for me?",
+            "My mom needs final expense coverage - can you help?", "Is whole life better than term for us?",
+            "We just had a baby and want to get coverage in place.", "How does an annuity protect retirement savings?"]
+SHOW_AI = ("Great question - I can walk you through it. A licensed agent can go over your exact numbers on a "
+           "15-minute call. Would tomorrow at 10:00 AM or 2:00 PM work?")
+PRODUCTS = ["term_life", "whole_life", "final_expense", "indexed_universal_life", "retirement_annuity"]
+
+
+def _showcase(db: Session, org: Organization, users: Dict[str, User], now) -> None:
+    import random
+    from app.models.models import Message, ReplyClassification
+    rnd = random.Random(20261020)
+    agents = [users["demo.maya@example.com"], users["demo.andre@example.com"], users["demo.priya@example.com"]]
+    for i in range(40):
+        first, last = SHOW_FIRST[i % 20], SHOW_LAST[(i * 3 + i // 20) % 10]
+        email = "demo.%s.%s.%d@example.com" % (first.lower(), last.lower(), i)
+        if db.query(Lead.id).filter(Lead.organization_id == org.id, Lead.email == email).first():
+            continue
+        agent = agents[i % 3]
+        created = now - timedelta(days=rnd.randint(1, 55), hours=rnd.randint(0, 9))
+        # 0 new . 1 contacted . 2 conversation . 3 appointment . 4 application . 5 issued
+        roll = rnd.random()
+        depth = (0 if roll < .08 else 1 if roll < .20 else 2 if roll < .38 else 3 if roll < .56
+                 else 4 if roll < .80 else 5)
+        lead = Lead(organization_id=org.id, first_name=first, last_name=last, email=email,
+                    phone="+1214555%04d" % (150 + i), state=["TX", "OK", "LA"][i % 3],
+                    source="website", source_detail=["DEMO Find-your-path", "DEMO referral", "DEMO seminar list"][i % 3],
+                    status="new" if depth == 0 else "contacted" if depth == 1 else "replied" if depth == 2 else "booked",
+                    is_test=True, created_at=created, assigned_to_id=agent.id if depth else None)
+        db.add(lead)
+        db.flush()
+        db.add(AgencyProspectProfile(organization_id=org.id, lead_id=lead.id,
+                                     need_categories=jdump(SHOW_NEEDS[i % len(SHOW_NEEDS)]),
+                                     intent_level=["high", "medium", "low"][i % 3],
+                                     household=jdump({"spouse": i % 2 == 0, "children": i % 4}),
+                                     page="/find-your-path", is_demo=True))
+        if depth == 0:
+            continue
+        t = created + timedelta(hours=1)
+        db.add(Message(lead_id=lead.id, sender_id=agent.id, send_state="delivered", delivery_status="delivered",
+                       send_source="demo", sent_at=t,
+                       body="Hi %s, this is %s's office at Max Life (DEMO). Thanks for reaching out - what's the "
+                            "most important thing you want your coverage to do?" % (first, agent.full_name)))
+        if depth == 1:
+            continue
+        t = t + timedelta(hours=rnd.randint(1, 30))
+        if t > now:
+            t = now - timedelta(minutes=rnd.randint(10, 300))
+        db.add(Reply(lead_id=lead.id, body=SHOW_ASK[i % len(SHOW_ASK)], source="sms", received_at=t,
+                     classification=ReplyClassification.QUESTION,
+                     reviewed_at=None if depth == 2 and i % 2 else t + timedelta(hours=1)))
+        db.add(Message(lead_id=lead.id, sender_id=agent.id, send_state="delivered", delivery_status="delivered",
+                       send_source="demo", sent_at=t + timedelta(minutes=2), body=SHOW_AI))
+        if depth == 2:
+            continue
+        upcoming = depth == 3 and i % 2 == 0
+        when = (now + timedelta(days=rnd.randint(0, 6), hours=rnd.randint(1, 8)) if upcoming
+                else t + timedelta(days=rnd.randint(1, 4)))
+        db.add(AgencyAppointment(organization_id=org.id, lead_id=lead.id, agent_user_id=agent.id,
+                                 type="discovery", medium=["phone", "video", "in_person"][i % 3], starts_at=when,
+                                 status="confirmed" if upcoming else ("missed" if depth == 3 else "completed"),
+                                 notes="DEMO", is_demo=True))
+        if depth == 3:
+            continue
+        product = PRODUCTS[i % len(PRODUCTS)]
+        status = "issued" if depth == 5 else ["submitted", "underwriting", "requirements_requested",
+                                               "awaiting_client", "approved"][i % 5]
+        sub = when + timedelta(days=2)
+        app = AgencyApplication(organization_id=org.id, lead_id=lead.id, agent_user_id=agent.id,
+                                owner_user_id=agent.id, carrier="DEMO Carrier (entered)", product_category=product,
+                                status=status, status_changed_at=min(sub + timedelta(days=6), now),
+                                submitted_at=sub, is_demo=True, created_at=sub - timedelta(days=1))
+        db.add(app)
+        db.flush()
+        path = ["draft", "submitted"] + ([] if status == "submitted" else
+                                         ["underwriting"] if status in ("underwriting", "approved", "issued") else [status])
+        if status in ("approved", "issued"):
+            path.append("approved")
+        if status == "issued":
+            path.append("issued")
+        prev = None
+        for k, st in enumerate(path):
+            db.add(AgencyApplicationEvent(organization_id=org.id, application_id=app.id, from_status=prev,
+                                          to_status=st, at=min(sub + timedelta(days=k * 2), now),
+                                          by_user_id=agent.id, note="DEMO"))
+            prev = st
+        if depth == 5:
+            db.add(AgencyPolicy(organization_id=org.id, lead_id=lead.id, application_id=app.id,
+                                agent_user_id=agent.id, policy_number="DEMO-POL-%04d" % (100 + i),
+                                carrier="DEMO Carrier (entered)", product_category=product, status="in_force",
+                                effective_date=(min(sub + timedelta(days=12), now)).date(),
+                                annual_review_date=(sub + timedelta(days=377)).date(), is_demo=True))

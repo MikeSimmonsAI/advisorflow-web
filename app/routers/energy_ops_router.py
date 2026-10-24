@@ -559,6 +559,9 @@ def _move_row(m: EnergyMoveRequest, names, now=None):
     checklist = json.loads(m.checklist) if m.checklist else []
     services = json.loads(m.services) if m.services else []
     done = sum(1 for i in checklist if i.get("done"))
+    pending = [i.get("label") for i in checklist if not i.get("done")]
+    today = (now or datetime.utcnow()).date()
+    is_open = m.status in OPEN_MOVE_STATUSES
     return {"id": m.id, "lead_id": m.lead_id, "org_contact_id": m.org_contact_id,
             "contact_name": m.contact_name,
             "move_date": iso_utc(m.move_date),
@@ -569,6 +572,9 @@ def _move_row(m: EnergyMoveRequest, names, now=None):
             "owner": names.get(m.assigned_to_id), "notes": m.notes,
             "created_at": _iso(m.created_at), "updated_at": _iso(m.updated_at),
             "completed_at": _iso(m.completed_at),
+            "pending_items": pending if is_open else [],
+            "next_action": (pending[0] if pending else "Mark the move completed") if is_open else None,
+            "overdue": bool(is_open and m.move_date and m.move_date < today and pending),
             "lead_link": f"/leads/{m.lead_id}" if m.lead_id else None,
             "contact_link": f"/contacts/{m.org_contact_id}" if m.org_contact_id else None}
 
@@ -601,6 +607,9 @@ def list_moves(request: Request, status: Optional[str] = Query(None),
         EnergyMoveRequest.move_date <= today + timedelta(days=14)).count()
     summary["no_move_date"] = base.filter(EnergyMoveRequest.status.in_(OPEN_MOVE_STATUSES),
                                           EnergyMoveRequest.move_date.is_(None)).count()
+    summary["past_move_date"] = base.filter(EnergyMoveRequest.status.in_(OPEN_MOVE_STATUSES),
+                                            EnergyMoveRequest.move_date.isnot(None),
+                                            EnergyMoveRequest.move_date < today).count()
     q = base
     if status == "open":
         q = q.filter(EnergyMoveRequest.status.in_(OPEN_MOVE_STATUSES))
@@ -705,24 +714,34 @@ def _safe_json(raw):
         return raw
 
 
+def _move_tasks_ok(db, user, request, m) -> bool:
+    """Move tasks live on the LEAD and are not tied to one move. Touch them only
+    when the caller may read that lead (as get_move requires) and no OTHER open
+    move shares the lead - otherwise its tasks could be someone else's work."""
+    try:
+        lead_scope.load_lead_in_scope(db, user, m.lead_id, request)
+    except HTTPException:
+        return False
+    other = (db.query(EnergyMoveRequest.id)
+             .filter(EnergyMoveRequest.organization_id == m.organization_id,
+                     EnergyMoveRequest.lead_id == m.lead_id, EnergyMoveRequest.id != m.id,
+                     EnergyMoveRequest.status.in_(OPEN_MOVE_STATUSES)).first())
+    return other is None
+
+
 @router.patch("/moves/{move_id}", dependencies=[Depends(require_not_observation)])
 def update_move(move_id: str, payload: MoveUpdate, request: Request,
                 db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     m = _load_move(db, user, request, move_id)
     sent = payload.model_fields_set
     changed: Dict[str, Any] = {}
-    if "status" in sent and payload.status is not None and payload.status != m.status:
-        if payload.status not in MOVE_STATUSES:
-            raise HTTPException(400, detail={"message": "Unknown status",
-                                             "valid_statuses": list(MOVE_STATUSES)})
-        changed["status"] = {"from": m.status, "to": payload.status}
-        m.status = payload.status
-        m.completed_at = _now() if payload.status == "completed" else None
     for f in ("move_date", "from_address", "to_address", "notes"):
         if f in sent and getattr(payload, f) != getattr(m, f):
             changed[f] = True
             setattr(m, f, getattr(payload, f))
     if "services" in sent and payload.services is not None:
+        if m.status in ("completed", "cancelled") and payload.status in (None, m.status):
+            raise HTTPException(409, "This move is %s. Reopen it before changing services." % m.status)
         services = _validate_services(payload.services)
         old = json.loads(m.services) if m.services else []
         if services != old:
@@ -739,6 +758,32 @@ def update_move(move_id: str, payload: MoveUpdate, request: Request,
             m.services = json.dumps(services)
             m.checklist = json.dumps(checklist)
             changed["services"] = {"from": old, "to": services}
+    if "status" in sent and payload.status is not None and payload.status != m.status:
+        if payload.status not in MOVE_STATUSES:
+            raise HTTPException(400, detail={"message": "Unknown status",
+                                             "valid_statuses": list(MOVE_STATUSES)})
+        if payload.status == "completed":
+            pending = [i.get("label") for i in (json.loads(m.checklist) if m.checklist else [])
+                       if not i.get("done")]
+            if pending:
+                # An arranged service is not an active one: "completed" needs
+                # every item ticked, including "Confirm with customer that
+                # services are active".
+                raise HTTPException(409, detail={"message": "Tick every checklist item before completing this move.",
+                                                 "pending": pending})
+        changed["status"] = {"from": m.status, "to": payload.status}
+        m.status = payload.status
+        m.completed_at = _now() if payload.status == "completed" else None
+        if payload.status == "cancelled" and m.lead_id and _move_tasks_ok(db, user, request, m):
+            n = 0
+            for t in (db.query(LeadTask).filter(LeadTask.organization_id == m.organization_id,
+                                                LeadTask.lead_id == m.lead_id,
+                                                LeadTask.source == "move_concierge",
+                                                LeadTask.status == "open").all()):
+                t.status = "cancelled"
+                t.completed_at = _now()
+                n += 1
+            changed["tasks_cancelled"] = n
     if "assign_to" in sent:
         org_id = m.organization_id
         if payload.assign_to and payload.assign_to != m.assigned_to_id:
@@ -750,6 +795,15 @@ def update_move(move_id: str, payload: MoveUpdate, request: Request,
                 raise HTTPException(403, "Only a workspace manager can unassign.")
             changed["assigned"] = {"from": m.assigned_to_id, "to": None}
             m.assigned_to_id = None
+    tasks_to_review = []
+    if "move_date" in changed and m.move_date and m.lead_id and _move_tasks_ok(db, user, request, m):
+        cutoff = datetime(m.move_date.year, m.move_date.month, m.move_date.day) + timedelta(days=1)
+        tasks_to_review = [{"id": t.id, "title": t.title, "due_at": _iso(t.due_at)} for t in (
+            db.query(LeadTask).filter(LeadTask.organization_id == m.organization_id,
+                                      LeadTask.lead_id == m.lead_id,
+                                      LeadTask.source == "move_concierge",
+                                      LeadTask.status == "open", LeadTask.due_at.isnot(None),
+                                      LeadTask.due_at >= cutoff).all())]
     if changed:
         log_action(db, m.organization_id, user.id, action="move_request.updated",
                    target_type="move_request", target_id=m.id,
@@ -760,6 +814,9 @@ def update_move(move_id: str, payload: MoveUpdate, request: Request,
     db.refresh(m)
     out = _move_row(m, _user_names(db, [m.assigned_to_id]))
     out["changed"] = sorted(changed)
+    out["tasks_cancelled"] = changed.get("tasks_cancelled", 0)
+    # Tasks dated after the (new) move date - the advisor decides what to do.
+    out["tasks_to_review"] = tasks_to_review
     return out
 
 
@@ -771,6 +828,8 @@ def toggle_checklist(move_id: str, payload: ChecklistToggle, request: Request,
     item = next((i for i in checklist if i.get("key") == payload.key), None)
     if item is None:
         raise HTTPException(404, "Checklist item not found")
+    if m.status in ("completed", "cancelled") and bool(item.get("done")) != payload.done:
+        raise HTTPException(409, "This move is %s. Reopen it before changing the checklist." % m.status)
     if bool(item.get("done")) != payload.done:
         item["done"] = payload.done
         item["done_at"] = _iso(_now()) if payload.done else None
@@ -806,3 +865,724 @@ def add_move_task(move_id: str, payload: MoveTask, request: Request,
     db.commit()
     return {"id": t.id, "title": t.title, "status": t.status, "due_at": _iso(t.due_at),
             "lead_id": t.lead_id}
+
+
+# ── SUPPLIERS: what each can really do, and the advisor's manual hand-off ────
+# Ported from PR #116 (dd73a038) without its Chariot enrollment endpoints,
+# which are Phase 2 and stay off. Nothing here contacts a supplier.
+
+class HandoffIn(BaseModel):
+    supplier: str = Field(..., max_length=40)
+    note: str = Field("", max_length=500)
+    follow_up_days: int = Field(2, ge=0, le=30)
+
+
+@router.get("/suppliers")
+def supplier_catalog(user: User = Depends(require_tenant_user)):
+    from app.services import energy_suppliers
+    return {"suppliers": energy_suppliers.catalog()}
+
+
+@router.post("/leads/{lead_id}/handoff", dependencies=[Depends(require_not_observation)])
+def supplier_handoff(lead_id: str, body: HandoffIn, request: Request,
+                     db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Record a hand-off to a supplier and open a follow-up task. Sends nothing."""
+    from app.services import energy_suppliers
+    # Same scope rule as every lead route: this workspace, and an advisor only
+    # their own customers. Another tenant's id is a 404.
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    if body.supplier == "chariot":
+        why = energy_suppliers.residential_only_refusal(lead)
+        if why:
+            raise HTTPException(409, why)
+    try:
+        out = energy_suppliers.record_handoff(db, lead=lead, actor_user_id=user.id,
+                                              supplier=body.supplier, note=body.note,
+                                              follow_up_days=body.follow_up_days)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    if not out.get("duplicate"):
+        log_action(db, lead.organization_id, user.id, action="energy.supplier_handoff",
+                   target_type="lead", target_id=lead.id, details={"supplier": body.supplier})
+    return out
+
+
+class HandoffOutcomeIn(BaseModel):
+    outcome: str = Field(..., max_length=40)
+    source: str = Field(..., max_length=40)
+    note: str = Field(..., max_length=500)
+
+
+@router.get("/leads/{lead_id}/handoffs")
+def lead_handoffs(lead_id: str, request: Request, db: Session = Depends(get_db),
+                  user: User = Depends(require_tenant_user)):
+    """This customer's supplier hand-offs and what is known about each."""
+    from app.services import energy_suppliers
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    return {"items": energy_suppliers.handoffs(lead),
+            "outcomes": list(energy_suppliers.OUTCOMES),
+            "sources": list(energy_suppliers.SOURCES)}
+
+
+@router.post("/leads/{lead_id}/handoffs/{handoff_id}/outcome",
+             dependencies=[Depends(require_not_observation)])
+def handoff_outcome(lead_id: str, handoff_id: str, body: HandoffOutcomeIn, request: Request,
+                    db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Record what happened to a hand-off. Never marks the customer enrolled."""
+    from app.services import energy_suppliers
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    try:
+        out = energy_suppliers.record_outcome(db, lead=lead, actor_user_id=user.id,
+                                              handoff_id=handoff_id, outcome=body.outcome,
+                                              source=body.source, note=body.note)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    log_action(db, lead.organization_id, user.id, action="energy.supplier_handoff_outcome",
+               target_type="lead", target_id=lead.id,
+               details={"handoff_id": handoff_id, "outcome": body.outcome, "source": body.source})
+    return out
+
+
+@router.get("/supplier-handoffs")
+def supplier_handoff_list(request: Request, state: str = Query("open", pattern="^(open|all)$"),
+                          db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Hand-offs across the customers this person may see - by default only
+    the ones still waiting for a final outcome, oldest first, so an incomplete
+    referral cannot quietly drop out of sight."""
+    from app.services import energy_suppliers
+    _org_id(db, user, request)
+    rows = (lead_scope.authorized_lead_query(db, user, request=request)
+            .filter(Lead.custom_fields.like('%"supplier_handoffs"%')).all())
+    names = _user_names(db, [l.assigned_to_id for l in rows])
+    items = []
+    for l in rows:
+        for h in energy_suppliers.handoffs(l):
+            if state == "open" and not energy_suppliers.is_open(h):
+                continue
+            items.append({"lead_id": l.id, "name": _name(l.first_name, l.last_name),
+                          "owner": names.get(l.assigned_to_id), "handoff": h,
+                          "lead_link": f"/rate-requests?open={l.id}"})
+    items.sort(key=lambda r: r["handoff"].get("at") or "")
+    return {"state": state, "total": len(items), "items": items}
+
+
+# ── QUALIFICATION: what the advisor knows, what is missing, the next step ────
+# See services/energy_qualification. No prices, no savings, no OCR.
+
+class QualificationIn(BaseModel):
+    fields: Dict[str, Any] = Field(default_factory=dict)
+    bill: Optional[Dict[str, Any]] = None
+
+
+QUALIFY_TASK_SOURCE = "qualification"
+QUALIFY_TASK_TITLE = "Get missing details"
+
+
+@router.get("/leads/{lead_id}/qualification")
+def lead_qualification(lead_id: str, request: Request, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user)):
+    from app.services import energy_qualification as eq
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    return eq.qualify(lead)
+
+
+@router.post("/leads/{lead_id}/qualification", dependencies=[Depends(require_not_observation)])
+def update_qualification(lead_id: str, body: QualificationIn, request: Request,
+                         db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Record what the advisor learned (supplier, contract end, usage, bill
+    lines typed from the customer's bill, ...). Sends nothing."""
+    from app.services import energy_qualification as eq
+    from app.services.energy_suppliers import _lock
+    lead = _lock(db, lead_scope.load_lead_in_scope(db, user, lead_id, request))
+    try:
+        changed = eq.apply_update(lead, body.fields, body.bill)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    if changed:
+        log_action(db, lead.organization_id, user.id, action="energy.qualification_updated",
+                   target_type="lead", target_id=lead.id, details={"fields": sorted(changed)},
+                   commit=False)
+    db.commit()
+    db.refresh(lead)
+    return eq.qualify(lead)
+
+
+@router.post("/leads/{lead_id}/qualification/request-info",
+             dependencies=[Depends(require_not_observation)])
+def request_missing_info(lead_id: str, request: Request, db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_user)):
+    """ONE open internal task listing what is still missing. Asking again
+    updates that task instead of adding another. Nothing goes to the customer."""
+    from app.services import energy_qualification as eq
+    from app.services.energy_suppliers import _lock
+    lead = _lock(db, lead_scope.load_lead_in_scope(db, user, lead_id, request))
+    q = eq.qualify(lead)
+    labels = [f["label"] for f in q["fields"] if f["key"] in q["missing"] and f["key"] != "owner"]
+    if not labels:
+        raise HTTPException(409, "Nothing the next step needs is missing.")
+    details = "Still needed before the next step: " + "; ".join(labels) + ". Nothing has been sent to the customer."
+    task = (db.query(LeadTask).filter(LeadTask.lead_id == lead.id, LeadTask.status == "open",
+                                      LeadTask.source == QUALIFY_TASK_SOURCE).first())
+    created = task is None
+    if created:
+        task = LeadTask(organization_id=lead.organization_id, lead_id=lead.id, title=QUALIFY_TASK_TITLE,
+                        details=details, due_at=_now() + timedelta(days=1), status="open",
+                        assigned_to_id=lead.assigned_to_id or user.id, created_by_id=user.id,
+                        source=QUALIFY_TASK_SOURCE)
+        db.add(task)
+    else:
+        task.details = details
+    db.commit()
+    return {"task_id": task.id, "created": created, "missing": labels}
+
+
+# ── COMMERCIAL OPPORTUNITIES (advisor-led; see services/energy_commercial) ───
+
+class CommercialStageIn(BaseModel):
+    stage: str = Field(..., max_length=40)
+    note: str = Field("", max_length=500)
+    reason: str = Field("", max_length=300)
+    revisit_on: Optional[str] = Field(None, max_length=10)
+    expected_decision_date: Optional[str] = Field(None, max_length=10)
+    expected_annual_kwh: Optional[str] = Field(None, max_length=20)
+
+
+class CommercialLocationIn(BaseModel):
+    address: Optional[str] = None
+    utility: Optional[str] = None
+    meter_id: Optional[str] = None
+    current_supplier: Optional[str] = None
+    contract_end_date: Optional[str] = None
+    annual_kwh: Optional[str] = None
+    quote_status: Optional[str] = None
+    note: Optional[str] = None
+
+
+def _commercial_call(fn):
+    from app.services import energy_commercial as ec
+    try:
+        return fn(ec)
+    except ec.NotCommercial as exc:
+        raise HTTPException(409, str(exc))
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.get("/leads/{lead_id}/commercial")
+def commercial_view(lead_id: str, request: Request, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user)):
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    return _commercial_call(lambda ec: ec.view(lead))
+
+
+@router.post("/leads/{lead_id}/commercial/stage", dependencies=[Depends(require_not_observation)])
+def commercial_stage(lead_id: str, body: CommercialStageIn, request: Request,
+                     db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Move a commercial opportunity. Won only after supplier confirmation;
+    never marks enrollment; nothing is sent to anyone."""
+    from app.services.energy_suppliers import _lock
+    lead = _lock(db, lead_scope.load_lead_in_scope(db, user, lead_id, request))
+    out = _commercial_call(lambda ec: ec.set_stage(
+        db, lead, stage=body.stage, actor_id=user.id, note=body.note, reason=body.reason,
+        revisit_on=body.revisit_on, expected_decision_date=body.expected_decision_date,
+        expected_annual_kwh=body.expected_annual_kwh))
+    log_action(db, lead.organization_id, user.id, action="energy.commercial_stage",
+               target_type="lead", target_id=lead.id, details={"stage": body.stage}, commit=False)
+    db.commit()
+    return out
+
+
+@router.post("/leads/{lead_id}/commercial/locations", dependencies=[Depends(require_not_observation)])
+def commercial_add_location(lead_id: str, body: CommercialLocationIn, request: Request,
+                            db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services.energy_suppliers import _lock
+    lead = _lock(db, lead_scope.load_lead_in_scope(db, user, lead_id, request))
+    out = _commercial_call(lambda ec: ec.add_location(lead, body.model_dump(exclude_none=True)))
+    if not out.get("duplicate"):
+        log_action(db, lead.organization_id, user.id, action="energy.commercial_location_added",
+                   target_type="lead", target_id=lead.id, details={"location_id": out["location"]["id"]},
+                   commit=False)
+    db.commit()
+    return out
+
+
+@router.patch("/leads/{lead_id}/commercial/locations/{loc_id}",
+              dependencies=[Depends(require_not_observation)])
+def commercial_update_location(lead_id: str, loc_id: str, body: CommercialLocationIn, request: Request,
+                               db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services.energy_suppliers import _lock
+    lead = _lock(db, lead_scope.load_lead_in_scope(db, user, lead_id, request))
+    out = _commercial_call(lambda ec: ec.update_location(lead, loc_id, body.model_dump(exclude_unset=True)))
+    log_action(db, lead.organization_id, user.id, action="energy.commercial_location_updated",
+               target_type="lead", target_id=lead.id, details={"location_id": loc_id}, commit=False)
+    db.commit()
+    return out
+
+
+# ── FIELD ACQUISITION (door visits; see services/energy_field) ──────────────
+
+class FieldVisitIn(BaseModel):
+    outcome: str = Field(..., max_length=40)
+    address: str = Field(..., max_length=300)
+    zip_code: Optional[str] = Field(None, max_length=10)
+    first_name: Optional[str] = Field(None, max_length=80)
+    last_name: Optional[str] = Field(None, max_length=80)
+    phone: Optional[str] = Field(None, max_length=40)
+    email: Optional[str] = Field(None, max_length=200)
+    permission_to_contact: bool = False
+    segment: Optional[str] = Field(None, max_length=20)
+    company: Optional[str] = Field(None, max_length=160)
+    door_hanger_left: bool = False
+    appointment_note: Optional[str] = Field(None, max_length=300)
+    notes: Optional[str] = Field(None, max_length=1000)
+
+
+@router.post("/field/visits", dependencies=[Depends(require_not_observation)])
+def record_field_visit(body: FieldVisitIn, request: Request, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user)):
+    """A rep records one door. Credited to the person signed in - never to
+    someone else. A referral needs the resident's permission; nothing is sent."""
+    from app.models.models import Organization
+    from app.services import energy_field
+    org_id = _org_id(db, user, request)
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    try:
+        def visible(lead_id):
+            return (lead_scope.authorized_lead_query(db, user, Lead.id, request=request)
+                    .filter(Lead.id == lead_id).first() is not None)
+        return energy_field.record_visit(db, org=org, rep=user, data=body.model_dump(), visible=visible)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(422, str(exc))
+
+
+@router.get("/field/summary")
+def field_summary(request: Request, days: int = Query(30, ge=1, le=366),
+                  db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Per-rep field results from recorded activity. A manager sees every rep;
+    anyone else sees only their own row."""
+    from app.services import energy_field
+    org_id = _org_id(db, user, request)
+    rep = None if _is_manager(db, user, request) else user.id
+    out = energy_field.summary(db, org_id=org_id, days=days, rep_id=rep)
+    out["scope"] = "all_reps" if rep is None else "own"
+    return out
+
+
+# ── INTAKE HEALTH (manager view) ────────────────────────────────────────────
+@router.get("/intake-health")
+def intake_health(request: Request, days: int = Query(30, ge=1, le=365),
+                  db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Unassigned new requests and time to first contact (recorded, not verified)."""
+    if not _is_manager(db, user, request):
+        raise HTTPException(403, "The intake view is for workspace managers.")
+    from app.services import energy_intake_health as ih
+    org_id = _org_id(db, user, request)
+    scoped = lead_scope.authorized_lead_query(db, user, Lead.id, request=request).scalar_subquery()
+    return ih.report(db, org_id=org_id, scoped=scoped, now=_now(), days=days)
+
+
+# ── TEAM & ALERTS + the shared NEW REQUESTS inbox ───────────────────────────
+# services/energy_team.py. Energy workspaces only; everything audited; no
+# customer is ever contacted from here.
+class TeamMemberIn(BaseModel):
+    in_app: Optional[bool] = None
+    email: Optional[bool] = None
+    assignable: Optional[bool] = None
+
+
+class DefaultAdvisorIn(BaseModel):
+    user_id: Optional[str] = Field(None, max_length=64)
+
+
+class MailboxIn(BaseModel):
+    address: Optional[str] = Field(None, max_length=200)
+
+
+class MailboxCodeIn(BaseModel):
+    code: str = Field(..., min_length=4, max_length=12)
+
+
+class AssignIn(BaseModel):
+    user_id: str = Field(..., max_length=64)
+
+
+def _energy_org(db, user, request):
+    from app.models.models import Organization
+    from app.services import energy_team
+    org = db.query(Organization).filter(Organization.id == _org_id(db, user, request)).first()
+    if org is None or not energy_team.is_energy(org):
+        raise HTTPException(404, "Not available for this workspace.")
+    return org
+
+
+def _team_manager(db, user, request):
+    org = _energy_org(db, user, request)
+    if not _is_manager(db, user, request):
+        raise HTTPException(403, "Team & Alerts is managed by workspace managers.")
+    return org
+
+
+def _audit(db, org, user, action, target, details):
+    log_action(db, org.id, user.id, action=action, target_type="energy_team", target_id=target,
+               details=details, commit=False)
+
+
+@router.get("/team")
+def team_settings(request: Request, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services import energy_team
+    org = _team_manager(db, user, request)
+    return energy_team.team_view(db, org.id, lead_scope.effective_role(user, db, request))
+
+
+@router.patch("/team/members/{user_id}", dependencies=[Depends(require_not_observation)])
+def team_member_update(user_id: str, body: TeamMemberIn, request: Request, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user)):
+    from app.services import energy_team
+    org = _team_manager(db, user, request)
+    try:
+        out = energy_team.update_member(db, org.id, user.id, user_id, body.model_dump())
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
+    _audit(db, org, user, "energy.team_member", user_id, body.model_dump())
+    db.commit()
+    return out
+
+
+@router.put("/team/default-advisor", dependencies=[Depends(require_not_observation)])
+def team_default_advisor(body: DefaultAdvisorIn, request: Request, db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_user)):
+    from app.services import energy_team
+    org = _team_manager(db, user, request)
+    try:
+        out = energy_team.set_default(db, org.id, user.id, body.user_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    _audit(db, org, user, "energy.team_default_advisor", body.user_id or "none", out)
+    db.commit()
+    return out
+
+
+@router.put("/team/mailbox", dependencies=[Depends(require_not_observation)])
+def team_mailbox(body: MailboxIn, request: Request, db: Session = Depends(get_db),
+                 user: User = Depends(require_tenant_user)):
+    from app.services import energy_team
+    org = _team_manager(db, user, request)
+    try:
+        out = energy_team.set_mailbox(db, org.id, body.address, user.id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    _audit(db, org, user, "energy.team_mailbox", "mailbox", {"address": out["mailbox"]})
+    db.commit()
+    return out
+
+
+@router.post("/team/mailbox/send-test", dependencies=[Depends(require_not_observation)])
+def team_mailbox_test(request: Request, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services import energy_team
+    org = _team_manager(db, user, request)
+    try:
+        out = energy_team.send_test(db, org.id, user.id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    except RuntimeError as exc:
+        db.rollback()
+        raise HTTPException(502, str(exc))
+    _audit(db, org, user, "energy.team_mailbox_test", "mailbox", {"to": out["mailbox"]})
+    db.commit()
+    return out
+
+
+@router.post("/team/mailbox/confirm", dependencies=[Depends(require_not_observation)])
+def team_mailbox_confirm(body: MailboxCodeIn, request: Request, db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_user)):
+    from app.services import energy_team
+    org = _team_manager(db, user, request)
+    try:
+        out = energy_team.confirm(db, org.id, body.code, user.id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    _audit(db, org, user, "energy.team_mailbox_verified", "mailbox", {"address": out["mailbox"]})
+    db.commit()
+    return out
+
+
+@router.get("/new-requests")
+def new_requests(request: Request, state: str = Query("unclaimed", pattern="^(unclaimed|mine|all)$"),
+                 db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """The ONE shared inbox of new requests (website + field). Visible to
+    managers and to teammates who can be assigned requests; contact details
+    appear only for the request's owner (or a manager)."""
+    from app.services import energy_team
+    org = _energy_org(db, user, request)
+    mgr = _is_manager(db, user, request)
+    if not energy_team.may_use_inbox(db, org.id, user, mgr):
+        raise HTTPException(403, "You are not set up to take new requests. Ask a manager.")
+    out = energy_team.inbox(db, org.id, user, mgr, state)
+    out.update({"is_manager": mgr, "can_claim": energy_team.can_take(db, org.id, user.id)})
+    if mgr:
+        data = energy_team.load(db, org.id)
+        out["assignable"] = [{"user_id": p["user_id"], "name": p["name"]} for p in energy_team.people(db, org.id)
+                             if energy_team.flags(p, data)["assignable"]]
+    return out
+
+
+@router.post("/new-requests/{lead_id}/claim", dependencies=[Depends(require_not_observation)])
+def new_request_claim(lead_id: str, request: Request, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user)):
+    from app.services import energy_team
+    org = _energy_org(db, user, request)
+    try:
+        out = energy_team.claim_request(db, org, user, lead_id)
+    except PermissionError as exc:
+        db.rollback()
+        raise HTTPException(403, str(exc))
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(404, str(exc))
+    except energy_team.Conflict as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc))
+    db.commit()
+    out["link"] = "/leads/%s?tab=overview" % lead_id
+    return out
+
+
+@router.post("/new-requests/{lead_id}/assign", dependencies=[Depends(require_not_observation)])
+def new_request_assign(lead_id: str, body: AssignIn, request: Request, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user)):
+    from app.services import energy_team
+    org = _team_manager(db, user, request)
+    try:
+        out = energy_team.assign_request(db, org, user, lead_id, body.user_id)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(422, str(exc))
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(404, str(exc))
+    db.commit()
+    return out
+
+
+# ── CHARIOT ONLINE ENROLLMENT ("Enroll online with Chariot") ────────────────
+# services/chariot_enrollment.py. Beside the manual path (hand-off + Enroll).
+# Switched OFF until CHARIOT_ALLOW_TRANSACTIONS is set. Identity values (date
+# of birth, SSN / licence) pass through one request and are never stored.
+class ChariotEnrollIn(BaseModel):
+    # plain strings on purpose: a validation error must never echo an SSN back
+    product_id: Optional[str] = Field(None, max_length=40)
+    plan: Optional[Dict[str, Any]] = None              # the non-sensitive plan snapshot shown
+    zip: Optional[str] = Field(None, max_length=10)
+    esiid: Optional[str] = Field(None, max_length=40)
+    service_type: Optional[str] = Field(None, max_length=20)
+    service_start_date: Optional[str] = Field(None, max_length=20)
+    first_name: Optional[str] = Field(None, max_length=80)
+    last_name: Optional[str] = Field(None, max_length=80)
+    email: Optional[str] = Field(None, max_length=200)
+    phone: Optional[str] = Field(None, max_length=40)
+    # NO length limits here: a pydantic 422 would echo the value back. Lengths
+    # are checked in chariot_enrollment.build_fields, which names the field only.
+    dob: Any = None                  # Any: even a wrong TYPE must not produce an echoing 422
+    ssn: Any = None
+    drivers_licence: Any = None
+    drivers_licence_state: Any = None
+    customer_authorized: bool = False
+
+
+class ChariotReconcileIn(BaseModel):
+    outcome: str = Field(..., max_length=20)
+    note: str = Field(..., max_length=1000)
+
+
+def _chariot_lead(db, user, request, lead_id):
+    org = _energy_org_for_chariot(db, user, request)
+    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    if lead.organization_id != org.id:
+        raise HTTPException(404, "Lead not found")
+    return org, lead
+
+
+def _energy_org_for_chariot(db, user, request):
+    from app.models.models import Organization
+    org = db.query(Organization).filter(Organization.id == _org_id(db, user, request)).first()
+    if org is None or (org.industry or "").lower() != "energy":
+        raise HTTPException(404, "Not available for this workspace.")
+    return org
+
+
+@router.get("/chariot/status")
+def chariot_status(request: Request, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services import chariot_enrollment as ce
+    _energy_org_for_chariot(db, user, request)
+    return ce.status()
+
+
+@router.get("/leads/{lead_id}/chariot")
+def chariot_for_lead(lead_id: str, request: Request, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_user)):
+    """Can this customer be enrolled online, what we already know, and any
+    earlier submission (so nobody submits twice)."""
+    from app.models.provider_transaction_models import ProviderTransaction
+    from app.services import chariot_enrollment as ce
+    from app.services import energy_enrollment as ee
+    _, lead = _chariot_lead(db, user, request, lead_id)
+    cls = ce.classification(lead)
+    eligible = ee.may_submit_to_provider(cls)
+    rows = (db.query(ProviderTransaction).filter(ProviderTransaction.organization_id == lead.organization_id,
+                                                 ProviderTransaction.lead_id == lead.id,
+                                                 ProviderTransaction.provider == ce.PROVIDER)
+            .order_by(ProviderTransaction.submitted_at.desc()).limit(5).all())
+    return {"status": ce.status(), "classification": cls, "eligible": eligible,
+            "reason": None if eligible else (
+                "Chariot online enrollment is for homes only. Use the business/partner workflow."
+                if cls in ee.HUMAN_ONLY_CLASSIFICATIONS else "Find out whether this is a home first."),
+            "prefill": {"first_name": lead.first_name, "last_name": lead.last_name, "email": lead.email,
+                        "phone": lead.phone, "zip": lead.zip_code},
+            "submissions": [ce.row_out(r) for r in rows]}
+
+
+def _chariot_read(fn, *args):
+    from app.services import chariot_enrollment as ce
+    try:
+        return fn(*args)
+    except ce.NotConnected as exc:
+        raise HTTPException(409, str(exc))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.get("/leads/{lead_id}/chariot/plans")
+def chariot_plans(lead_id: str, request: Request, zip: str = Query(..., max_length=10),
+                  db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services import chariot_enrollment as ce
+    _chariot_lead(db, user, request, lead_id)
+    return _chariot_read(ce.plans, zip)
+
+
+@router.get("/leads/{lead_id}/chariot/addresses")
+def chariot_addresses(lead_id: str, request: Request, zip: str = Query(..., max_length=10),
+                      address: str = Query(..., max_length=120),
+                      db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services import chariot_enrollment as ce
+    _chariot_lead(db, user, request, lead_id)
+    return _chariot_read(ce.addresses, zip, address)
+
+
+@router.get("/leads/{lead_id}/chariot/start-dates")
+def chariot_start_dates(lead_id: str, request: Request, esiid: str = Query(..., max_length=40),
+                        service_type: str = Query(..., max_length=20),
+                        start: str = Query("Standard Switch", max_length=20),
+                        db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services import chariot_enrollment as ce
+    _chariot_lead(db, user, request, lead_id)
+    return _chariot_read(ce.start_dates, esiid, service_type, start)
+
+
+@router.post("/leads/{lead_id}/chariot/enroll", dependencies=[Depends(require_not_observation)])
+def chariot_enroll(lead_id: str, body: ChariotEnrollIn, request: Request, db: Session = Depends(get_db),
+                   user: User = Depends(require_tenant_user)):
+    """Submit one residential enrollment to Chariot. Refused while switched off.
+    The customer's owner or a manager may submit."""
+    from app.services import chariot_enrollment as ce
+    from app.services import energy_enrollment as ee
+    _, lead = _chariot_lead(db, user, request, lead_id)
+    form = body.model_dump(exclude={"plan"})
+    try:
+        row = ce.submit_enrollment(db, organization_id=lead.organization_id, lead=lead,
+                                   actor_user_id=user.id, form=form, plan_snapshot=body.plan)
+    except (ce.SubmissionRefused, ee.EnrollmentNotReady) as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc))
+    except ValueError as exc:            # a sensitive value in the plan snapshot
+        db.rollback()
+        raise HTTPException(422, "The plan details could not be recorded: %s" % str(exc)[:200])
+    finally:
+        form = None                      # noqa: F841 - identity data goes no further
+    handoff_id = None
+    try:
+        handoff_id = ce.link_handoff(db, lead=lead, actor_user_id=user.id, row=row)
+    except Exception:                    # noqa: BLE001 - the submission is already on record
+        db.rollback()
+    log_action(db, lead.organization_id, user.id, action="energy.chariot_enrollment_submitted",
+               target_type="lead", target_id=lead.id,
+               details={"submission": row.id, "status": row.normalized_status, "reason": row.reason_code,
+                        "product_id": row.product_id, "esiid": row.esiid, "handoff": handoff_id,
+                        "customer_authorized": True}, commit=False)
+    db.commit()
+    out = ce.row_out(row)
+    out["handoff_id"] = handoff_id
+    return out
+
+
+@router.get("/enrollments")
+def chariot_enrollment_queue(request: Request, state: str = Query("open", pattern="^(open|all)$"),
+                             db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Chariot submissions waiting for a person to confirm what happened. A
+    manager sees the workspace; anyone else sees their own customers."""
+    from app.services import chariot_enrollment as ce
+    org = _energy_org_for_chariot(db, user, request)
+    scoped = lead_scope.authorized_lead_query(db, user, Lead.id, request=request).scalar_subquery()
+    rows = ce.queue(db, org.id, include_closed=(state == "all"), lead_ids=scoped)
+    visible = {r.lead_id for r in rows}
+    names = {l.id: _name(l.first_name, l.last_name) for l in
+             db.query(Lead).filter(Lead.id.in_(list(visible) or ["-"])).all()}
+    return {"status": ce.status(), "state": state, "total": len(rows),
+            "items": [ce.row_out(r, names) for r in rows]}
+
+
+@router.post("/enrollments/{tx_id}/reconcile", dependencies=[Depends(require_not_observation)])
+def chariot_reconcile(tx_id: str, body: ChariotReconcileIn, request: Request, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user)):
+    """A person records what they verified. "enrolled" runs the SAME Enroll
+    action a manual enrollment uses; "not received" allows a fresh submission."""
+    from app.models.provider_transaction_models import ProviderTransaction
+    from app.services import chariot_enrollment as ce
+    org = _energy_org_for_chariot(db, user, request)
+    row = db.query(ProviderTransaction).filter(ProviderTransaction.id == tx_id,
+                                               ProviderTransaction.organization_id == org.id,
+                                               ProviderTransaction.provider == ce.PROVIDER).first()
+    if row is None or not row.lead_id:
+        raise HTTPException(404, "Submission not found")
+    lead = lead_scope.load_lead_in_scope(db, user, row.lead_id, request)
+    # two people confirming at once: the second waits, then sees it closed
+    row = (db.query(ProviderTransaction).filter(ProviderTransaction.id == row.id)
+           .with_for_update().populate_existing().first())
+    if body.outcome not in ce.OUTCOMES:
+        raise HTTPException(422, "Choose what happened: enrolled, not enrolled, or Chariot never received it.")
+    if not body.note.strip():
+        raise HTTPException(422, "Say how it was verified (call with the customer, Chariot's report, ...).")
+    if row.resolved_at is not None:
+        raise HTTPException(422, "This submission was already closed.")
+    enrolled = None
+    if body.outcome == ce.OUTCOME_ENROLLED:
+        # ENROLL FIRST, with the same action a manual enrollment uses. If it is
+        # refused (DNC / closed lead, no Completed stage) nothing is closed and
+        # the person sees why; the row stays open to try again.
+        from app.routers.rate_requests_router import EnrollPayload, enroll_rate_request
+        enrolled = enroll_rate_request(row.lead_id, EnrollPayload(
+            current_supplier="Chariot Energy",
+            note="Online enrollment with Chariot confirmed: %s" % body.note.strip()[:500]),
+            request, db, user)
+        db.refresh(row)
+    try:
+        ce.reconcile(db, row, user_id=user.id, outcome=body.outcome, note=body.note)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(422, str(exc))
+    log_action(db, org.id, user.id, action="energy.chariot_enrollment_reconciled", target_type="provider_transaction",
+               target_id=row.id, details={"outcome": body.outcome, "lead_id": row.lead_id}, commit=False)
+    db.commit()
+    try:
+        ce.close_handoff(db, lead=lead, actor_user_id=user.id, outcome=body.outcome, note=body.note)
+    except Exception:                    # noqa: BLE001 - the confirmation itself is saved
+        db.rollback()
+        import logging
+        logging.getLogger(__name__).exception("chariot reconcile: hand-off %s not updated", row.id)
+    out = ce.row_out(db.query(ProviderTransaction).get(row.id))
+    out["enrolled"] = bool(enrolled and enrolled.get("enrolled"))
+    return out

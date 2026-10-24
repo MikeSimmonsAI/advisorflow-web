@@ -1,0 +1,62 @@
+# SCI POC - verify the Intelligent Lead Importer before release.
+# All records are synthetic; no production access or outbound providers.
+name: SCI Intelligent Importer
+
+on:
+  pull_request:
+    paths:
+      - 'app/routers/sci_intake_router.py'
+      - 'app/routers/program_router.py'
+      - 'app/routers/intake_router.py'
+      - 'app/services/programs/intake_bridge.py'
+      - 'app/services/programs/promote.py'
+      - 'app/services/programs/line_check.py'
+      - 'app/services/intake/**'
+      - 'frontend/src/pages/intake/**'
+      - 'frontend/src/pages/program/sci/**'
+      - 'tests/test_sci_intelligent_importer.py'
+      - '.github/workflows/sci-intelligent-importer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sci-import-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Compile new importer and SCI integration
+        run: |
+          python -m py_compile app/routers/sci_intake_router.py app/routers/program_router.py app/routers/intake_router.py app/services/programs/intake_bridge.py app/services/programs/promote.py app/services/programs/line_check.py tests/test_sci_intelligent_importer.py
+      - name: Test SCI import, existing source loader, opt-outs and isolation
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python -m pytest -q -o addopts='' tests/test_sci_intelligent_importer.py tests/test_program_load_source.py tests/test_program_self_check.py tests/test_sci_journeys.py
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Test intelligent importer wizard steps
+        run: node --test ../tests/frontend/importSteps.test.mjs
+      - name: Build frontend for production
+        run: npm run build

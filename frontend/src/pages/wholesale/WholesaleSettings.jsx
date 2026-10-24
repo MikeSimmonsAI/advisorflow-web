@@ -13,6 +13,7 @@ import { errText, fmtLabel, Note, Reads, Why } from './wsShared'
 import { TemplateLibrary } from './wsContracts'
 import { Alert, EvoApp, Hero, PageSkeleton } from './ds/ds'
 import './ds/evo-pages.css'
+import { ev } from './engine'
 
 const SECTIONS = [
   ['rules', 'Deal rules'], ['markets', 'Markets'], ['approvals', 'Approvals'], ['automation', 'Automation'],
@@ -505,7 +506,7 @@ function PublicContactPanel({ value, set }) {
         </div>
         <div className="ws-field">
           <label htmlFor="ws-public-name">Name owners see</label>
-          <input id="ws-public-name" className="ws-input" type="text" autoComplete="off" placeholder="e.g. EvoSense Properties"
+          <input id="ws-public-name" className="ws-input" type="text" autoComplete="off" placeholder={ev('e.g. EvoSense Properties').replace('Acquisition Properties', 'Your Company Properties')}
                  value={bizName} onChange={(e) => set('public_business_name', e.target.value)} />
         </div>
       </div>

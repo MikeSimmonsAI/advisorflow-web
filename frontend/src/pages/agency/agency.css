@@ -346,6 +346,7 @@ html:root[data-workspace-vertical="agency"] .top-bar {
 }
 html:root[data-workspace-vertical="agency"] .top-bar-time { color: #d4ae64 !important; }
 html:root[data-workspace-vertical="agency"] .top-bar-date { color: #8a8478 !important; }
+html:root[data-workspace-vertical="agency"] .top-bar .program-switch { color: #d4ae64; }
 
 /* ── S8: forms, picker, pager, conversations ───────────────────────────── */
 .ag-form { border: 1px solid var(--ag-line); border-radius: 10px; padding: 14px; margin: 8px 0 12px; }

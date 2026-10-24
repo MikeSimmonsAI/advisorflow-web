@@ -220,3 +220,29 @@ body:has(.cmd)::before { display: none; }
 @media (max-width: 360px) { .cmd-btns button, .cmd-btns a { font-size: 13px; padding: 9px 4px; gap: 4px; } }
 .cmd-top > div { min-width: 0; }
 .cmd-top .cmd-sub { white-space: normal; }
+
+/* Quick schedule: in-page confirm (window.confirm is unreliable on phones) */
+.cmd-slots button.on { border-color: var(--c-blue); box-shadow: 0 0 0 2px var(--c-blue) inset; }
+.cmd-pick { margin-top: 12px; padding: 12px; border-radius: 12px; background: var(--c-bg, #f4f6f9); }
+.cmd-pick p { margin: 0 0 10px; font-size: 16px; line-height: 1.4; }
+.cmd-pick-result { margin: 12px 0 0; padding: 10px 12px; border-radius: 10px; font-weight: 600; }
+.cmd-pick-result.ok { background: #e8f5ec; color: #17663a; }
+.cmd-pick-result.bad { background: #fdecea; color: #a1271b; }
+
+.cmd-custom-day { display: flex; align-items: center; gap: 10px; font-weight: 600; margin: 4px 0 10px; }
+.cmd-custom-day input { font-size: 16px; padding: 8px 10px; border: 1px solid var(--c-line, #d9dee5); border-radius: 10px; }
+.cmd-slots-day button { flex: 1 1 28%; padding: 10px 6px; }
+
+/* HUMAN HANDOFF (Mike, Oct 22): red, impossible to miss */
+.cmd .chan.handoff { background: #c62828; color: #fff; font-weight: 800; letter-spacing: .02em; }
+.cmd-item.handoff { border-left: 5px solid #c62828; }
+.cmd-handoff-bar { display: block; width: 100%; text-align: left; margin: 0 0 12px; padding: 12px 14px; border: 0;
+  border-radius: 12px; background: #c62828; color: #fff; font-size: 15px; cursor: pointer; }
+.cmd-handoff-bar b { margin-right: 6px; }
+.cmd-chips button.red { background: #fdecea; color: #a1271b; border-color: #c62828; }
+.cmd-chips button.red.on { background: #c62828; color: #fff; }
+.cmd-handoff-banner { margin: 10px 0; padding: 12px 14px; border-radius: 12px; background: #fdecea; border: 2px solid #c62828; color: #7a1a12; }
+.cmd-handoff-banner b { display: inline-block; background: #c62828; color: #fff; padding: 2px 10px; border-radius: 999px; font-size: 13px; letter-spacing: .03em; }
+.cmd-handoff-banner p { margin: 8px 0 0; font-size: 15px; line-height: 1.4; }
+.cmd-handoff-banner p.small { font-size: 13.5px; }
+.cmd-handoff-banner button { margin-top: 10px; }

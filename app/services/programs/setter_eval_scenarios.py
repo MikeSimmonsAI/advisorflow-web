@@ -335,4 +335,51 @@ sc("r003", "regression", "Lester",
 sc("r004", "regression", "Gerald",
    ("Is this a real person or a robot?", "answer",
     {"must": [r"(assistant|automated)"], "must_not": [r"\bi'?m (a real person|human)\b"]}))
+# #234 (Oct 19): "could you stop by?" -> "No" got a goodbye. A no to COMING IN
+# gets one alternative; a clear no is respected; a no to a general question is
+# not treated as a venue no.
+_INVITE = "Quick question from the cemetery: could you stop by for a short visit this week?"
+_GOODBYE = r"(take care|feel free to reach out|if you ever (have|need))"
+_HOME = r"(come to you|to you instead|to your (home|house|place)|visit you)"
+sc("r005", "regression", "Wanda",
+   # Every SCI location offers home visits (Mike, Oct 19): the one alternative
+   # is a visit at their home - offered, never booked by the AI.
+   ("No", "answer", {"must": [_HOME], "must_not": [_GOODBYE, r"\{TIMES\}"], **NO_BOOK}))
+S[-1]["opening"] = _INVITE
+sc("r006", "regression", "Earl",
+   ("I can't get there", "answer", {"must": [_HOME], "must_not": [_GOODBYE], **NO_BOOK}))
+S[-1]["opening"] = _INVITE
+sc("r007", "regression", "Doris",
+   ("That's not for me", "close", {"must_not": [r"\{TIMES\}", r"\b(am|pm)\b", r"(guide|phone call|come to you)"]}))
+S[-1]["opening"] = _INVITE
+sc("r008", "regression", "Vernon",
+   ("No", "answer,close", {"must_not": [r"(come to you|your home)"], **NO_BOOK}))
+S[-1]["opening"] = "Is there anything else we can help you with?"
+# Henry (Oct 22): "I can come by tomorrow if that is ok with you" got "I'll be
+# ready to meet with you when you come by tomorrow" - no time, no link, nothing
+# booked. Every way of saying yes to coming in must get real times.
+_EMPTY = r"(see you (then|tomorrow|soon)|ready (for|to meet with) you|look(ing)? forward to (seeing|meeting))"
+for _i, (_name, _said) in enumerate([
+        ("Henry", "Thanks for your text I can come by tomorrow if that is ok with you"),
+        ("Opal", "I could stop by Friday"),
+        ("Curtis", "We can come in tomorrow"),
+        ("Inez", "I'll swing by after work one day this week"),
+        ("Lloyd", "Tomorrow is good for me to come in"),
+        ("Mabel", "I can come by Monday"),
+        ("Vernell", "We could come in next week sometime"),
+        ("Roscoe", "yes I'll come in"),
+        ("Hattie", "I'd like to come by and talk"),
+        ("Odell", "Sure I can meet with you"),
+        ("Pearl", "my husband and I can come in thursday"),
+        ("Alvin", "I can come by tomorrow afternoon"),
+], start=9):
+    sc("r%03d" % _i, "regression", _name,
+       (_said, "offer_times", {"must": [_TIMES], "must_not": [_EMPTY], **NO_BOOK}))
+# James (Oct 22): "Close it for now" after an email. A soft no: nothing goes
+# out automatically (no goodbye, no pitch); a person calls once.
+for _i, (_name, _said) in enumerate([("James", "Close it for now\n\nSent from my iPhone"),
+                                     ("Velma", "Not right now, maybe later"),
+                                     ("Otis", "Please hold off for now")], start=21):
+    sc("r%03d" % _i, "regression", _name,
+       (_said, "handoff", {"must_not": [r"\b(am|pm)\b", r"(take care|feel free to reach out)"], **NO_BOOK}))
 REGRESSIONS = S

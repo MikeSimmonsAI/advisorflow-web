@@ -151,14 +151,15 @@ def _with_org_offer(platform, features, withdrawn=()):
     return platform
 
 
-def _with_product_lock(db, user, platform):
-    """EvoSys Wholesale is offered only to the logins named for it (and God
-    mode) once that lock is on - the same answer require_feature gives."""
+def _with_product_lock(db, user, platform, org=None):
+    """Wholesale is offered only to the logins named for it (and God mode) once
+    that lock is on - plus, in a second-tenant Wholesale workspace (#272), that
+    workspace's org admins and above. The same answer require_feature gives."""
     if not platform:
         return platform
     try:
         from app.services import product_access as _pa
-        if not _pa.may_use(db, user, _pa.WHOLESALE):
+        if not _pa.may_use_in(db, user, org, _pa.WHOLESALE):
             offered = dict(platform.get("offered") or {})
             offered["wholesale"] = False
             platform["offered"] = offered
@@ -176,6 +177,29 @@ def _wholesale_team(db, user):
                 "field": _wt.is_field(db, user)}
     except Exception:  # noqa: BLE001 - branding must not break a login
         return {"role": None, "wholesale_only": False, "field": False}
+
+
+def _workspace_products(db, org, slug):
+    """Product and engine names for THIS workspace.
+
+    Every brand and customer keeps exactly what it had: the brand's product name
+    (EvoSysPro -> "EvoSys Wholesale", BookaBoost -> none) and the EvoSense engine
+    name. A SECOND-TENANT Wholesale workspace (BookaBoost Wholesale, #272 P4) is
+    its own product: its name is the workspace's own name, and it is never shown
+    another brand's engine name (white-label rule: a brand's users never see
+    another brand's name). Everyone else's payload is unchanged - no `engine`
+    key at all, which the app reads as "EvoSense" (frontend/src/theme.js)."""
+    from app.services.brand_config import product_name
+    products = {"wholesale": product_name(slug, "wholesale")}
+    try:
+        from app.services.program_experience import WHOLESALE_HOST_SLUG, is_wholesale_host
+        if (getattr(org, "slug", "") or "") != WHOLESALE_HOST_SLUG and is_wholesale_host(org, object()):
+            products = {"wholesale": (getattr(org, "brand_name", None) or getattr(org, "name", None)
+                                      or products["wholesale"]),
+                        "engine": None}
+    except Exception:  # noqa: BLE001 - branding must not break a login
+        pass
+    return products
 
 
 def _platform_brand(db, org):
@@ -198,7 +222,9 @@ def _platform_brand(db, org):
                 "theme": cfg.get("theme_slug") or row.slug,
                 # Commercial product names this brand sells (EvoSysPro ->
                 # "EvoSys Wholesale"). None when the brand has not named one.
-                "products": {"wholesale": product_name(row.slug, "wholesale")},
+                # `engine` names the acquisition engine on screen ("EvoSense");
+                # None means "show neutral wording". See _workspace_products.
+                "products": _workspace_products(db, org, row.slug),
                 # WHETHER the brand offers the module at all - a separate
                 # question from what it calls it. A brand with no commercial
                 # name (BookaBoost) still offers Wholesale unless the brand
@@ -350,7 +376,7 @@ def get_org_branding(
         # browser. The frontend uses it ONLY when the hostname is not itself a
         # brand domain, so a brand domain still decides its own chrome exactly
         # as before and no brand can be shown on another brand's host.
-        "platform": _with_product_lock(db, current_user, _with_org_offer(_platform_brand(db, org), features, withdrawn)),
+        "platform": _with_product_lock(db, current_user, _with_org_offer(_platform_brand(db, org), features, withdrawn), org),
         # THE WORKSPACE (LOCATION) THIS ANSWER WAS COMPUTED FOR. The shell
         # draws a location selector from `available` (only when there is more
         # than one) and sends the selection back as `header` - which is null

@@ -34,6 +34,9 @@ from app.models.models import Base  # noqa: F401  (re-exported for callers)
 # tables whose module has been imported, so dropping this line makes every
 # sales table silently never appear. See claude/SALES_WORKSPACE_ARCHITECTURE.md.
 import app.models.sales_models  # noqa: F401  (imported for side effects)
+# Sales Do Not Contact (Lane F, #281) - same Base. Without this import the
+# sales_contact_suppressions table is never created and no opt-out can be kept.
+import app.models.sales_suppression_models  # noqa: F401  (imported for side effects)
 # Scheduling models register on the SAME Base for the same reason. Dropping this
 # line makes availability_profiles / sales_appointments / participants silently
 # never appear, and the sales workspace loses scheduling with no error.
@@ -281,6 +284,7 @@ import app.models.telephony_models  # noqa: F401  (imported for side effects)
 import app.models.skiptrace_cost_models  # noqa: F401  (imported for side effects)
 import app.models.inbound_mailbox_models  # noqa: F401  (imported for side effects)
 import app.models.agency_models  # noqa: F401  (imported for side effects)
+import app.models.roofing_models  # noqa: F401  (imported for side effects)
 import app.models.energy_models  # noqa: F401  (imported for side effects)
 import app.models.push_models  # noqa: F401  (push_subscriptions, push_events — web push)
 import app.models.idempotency_models  # noqa: F401  (idempotency_keys - database-level at-most-once)
@@ -555,6 +559,7 @@ import app.models.telephony_models  # noqa: F401  (imported for side effects)
 import app.models.skiptrace_cost_models  # noqa: F401  (imported for side effects)
 import app.models.inbound_mailbox_models  # noqa: F401  (imported for side effects)
 import app.models.agency_models  # noqa: F401  (imported for side effects)
+import app.models.roofing_models  # noqa: F401  (imported for side effects)
 import app.models.energy_models  # noqa: F401  (imported for side effects)
 import app.models.push_models  # noqa: F401  (push_subscriptions, push_events — web push)
 import app.models.idempotency_models  # noqa: F401  (idempotency_keys - database-level at-most-once)

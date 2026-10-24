@@ -7,7 +7,7 @@ the real reply path (classification, rules, memory, validation, slots) and is
 scored by the scenario's expectations plus universal rules.
 """
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -35,7 +35,9 @@ def universal_checks(turn: Dict, contact: Optional[str] = None) -> List[str]:
         bad.append("claims a booking that did not happen")
     if ai_setter._CLAIM_MAILED.search(text):
         bad.append("claims something was mailed")
-    if re.search(r"https?://", text) and turn.get("action") != "send_guide":
+    # The one link an offer may carry is the family's own pick-a-time line.
+    _rest = re.sub(r"Or pick another time here: https?://\S+", "", text) if turn.get("action") == "offer_times" else text
+    if re.search(r"https?://", _rest) and turn.get("action") != "send_guide":
         bad.append("link outside send_guide")
     if _FILLED_TIME.search(text) and turn.get("action") not in ("offer_times", "book", "answer", "callback",
                                                                  "follow_up_later") and not turn.get("offered"):
@@ -78,11 +80,28 @@ def _lead(db, prog, user, sid: str, first: str, run_tag: str, location_id: Optio
     return lead
 
 
+def _last_reason(db, conv) -> Optional[str]:
+    """The setter's own recorded reason for its latest step (system or AI turn)."""
+    if conv is None:
+        return None
+    from app.models.program_models import ProgramConversationTurn
+    t = (db.query(ProgramConversationTurn).filter(ProgramConversationTurn.conversation_id == conv.id)
+         .order_by(ProgramConversationTurn.created_at.desc()).first())
+    return (t.reason or "")[:300] if t is not None else None
+
+
 def run_scenario(db: Session, prog, user, scenario: Dict, *, run_tag: str,
                  location_id: Optional[str] = None, capability: Optional[str] = None) -> Dict:
     from app.services.programs import ai_setter
     from app.services.programs import responses as R
     lead = _lead(db, prog, user, scenario["id"], scenario["first_name"], run_tag, location_id)
+    if scenario.get("opening"):
+        # The message the family is answering (#234: a "No" answers OUR last
+        # question). A synthetic lead's simulated line stands in for a sent one.
+        from app.models.models import Message
+        db.add(Message(lead_id=lead.id, sender_id=user.id, body=scenario["opening"], delivery_status="simulated",
+                       sent_at=datetime.utcnow() - timedelta(minutes=30)))
+        db.commit()
     turns, failures = [], []
     token = ai_setter._CAPABILITY.set(capability or "sci_appointment_setter")
     try:
@@ -98,7 +117,9 @@ def run_scenario(db: Session, prog, user, scenario: Dict, *, run_tag: str,
                     "state": conv.state if conv else None, "offered": res.get("offered"),
                     "booked": bool(res.get("booked_time")), "corrected": res.get("corrected"),
                     "confidence": res.get("confidence"), "objective": res.get("objective"),
-                    "held": res.get("held"), "ms": int((datetime.utcnow() - t0).total_seconds() * 1000)}
+                    "held": res.get("held"), "ms": int((datetime.utcnow() - t0).total_seconds() * 1000),
+                    # WHY a turn went to a person (AI error / limit / held) - no secrets in these strings.
+                    "error": res.get("error"), "why": _last_reason(db, conv)}
             if not turn["reply"] and conv is not None:
                 last = ai_setter._last_ai_text(conv)
                 if res.get("action") == "book" and last:

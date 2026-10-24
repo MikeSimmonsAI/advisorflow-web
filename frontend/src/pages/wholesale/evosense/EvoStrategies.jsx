@@ -21,6 +21,7 @@ import {
 } from '../ds/ds'
 import { Scene } from '../ds/scenes'
 import '../ds/evo-pages.css'
+import { ev } from '../engine'
 
 // Card headers: generic stock photography, never a photo of a property this
 // strategy found.
@@ -38,7 +39,7 @@ function nextHunt(a) {
   if (!a) return '—'
   if (a.state === 'running') return 'Hunting now'
   if (a.state === 'manual') return 'Manual only'
-  if (a.state === 'paused') return 'Paused (EvoSense or discovery)'
+  if (a.state === 'paused') return ev('Paused (EvoSense or discovery)')
   if (a.state === 'strategy_paused') return 'Strategy paused'
   return a.next_due_at ? when(a.next_due_at) : '—'
 }
@@ -107,8 +108,8 @@ export function EvoStrategies() {
       <Hero
         scene="bridge"
         eyebrow="Acquisition Strategy"
-        title="EvoSense Strategies"
-        sub="Tell EvoSense where to hunt and what opportunity looks like."
+        title={ev('EvoSense Strategies')}
+        sub={ev('Tell EvoSense where to hunt and what opportunity looks like.')}
         quote="Right property. Right people. Right result."
       />
       <TabBar label="Strategy status" value={tab} onChange={setTab} controls={false}
@@ -152,8 +153,8 @@ export function EvoStrategies() {
       ) : !shown.length ? (
         <Panel>
           <Empty page title="No strategies yet" action={!canHunt ? null :
-            <button type="button" className="evo-btn evo-btn--primary" onClick={() => navigate('/wholesale/evosense/strategies/new')}>Tell EvoSense what to hunt</button>}>
-            A strategy tells EvoSense where to look, what makes a property interesting, how much it may spend finding
+            <button type="button" className="evo-btn evo-btn--primary" onClick={() => navigate('/wholesale/evosense/strategies/new')}>{ev('Tell EvoSense what to hunt')}</button>}>
+            {ev('A strategy tells EvoSense where to look,')} what makes a property interesting, how much it may spend finding
             the owner, and when to bring you in.
           </Empty>
         </Panel>
@@ -414,17 +415,17 @@ export function EvoStrategyBuilder() {
       <Link className="evo-crumb" to="/wholesale/evosense/strategies">← Strategies</Link>
       <Link className="evo-crumb" to="/wholesale/evosense/strategies">← All strategies</Link>
       <Hero compact scene="bridge" eyebrow="Strategy builder"
-            title={isNew ? 'Tell EvoSense what to hunt' : (form.name || 'Edit strategy')}
-            sub="Eight plain questions. EvoSense reads the whole strategy back to you before it hunts." />
+            title={isNew ? ev('Tell EvoSense what to hunt') : (form.name || 'Edit strategy')}
+            sub={ev('Eight plain questions. EvoSense reads the whole strategy back to you before it hunts.')} />
       <Alert>{error}</Alert>
       <div className="evo-builder">
         <div className="evo-stack">
-          <Step n={1} q="Where should EvoSense hunt?" hint="Counties, cities or ZIP codes — as broad or as narrow as your market.">
+          <Step n={1} q={ev('Where should EvoSense hunt?')} hint="Counties, cities or ZIP codes — as broad or as narrow as your market.">
             <div className="evo-form-grid">
               <label className="evo-field is-full" htmlFor="sb-name"><span className="evo-field__label">Name this strategy</span>
                 <input id="sb-name" className="evo-input" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="DFW Distressed SFR" /></label>
               <ListInput id="sb-states" label="States" value={form.states} onChange={(v) => set('states', v)} hint="TX" />
-              <ListInput id="sb-counties" label="Counties" value={form.counties} onChange={(v) => set('counties', v)} hint="Dallas, Tarrant" />
+              <ListInput id="sb-counties" label="Counties" value={form.counties} onChange={(v) => set('counties', v)} hint="Any Texas county, e.g. Dallas, Harris, Bexar - or All Texas" />
               <ListInput id="sb-cities" label="Cities" value={form.cities} onChange={(v) => set('cities', v)} hint="optional" />
               <ListInput id="sb-zips" label="ZIP codes" value={form.zips} onChange={(v) => set('zips', v)} hint="optional" />
             </div>
@@ -459,12 +460,12 @@ export function EvoStrategyBuilder() {
             <p className="evo-field__label" style={{ margin: '16px 0 8px' }}>Every property must show</p>
             <Picks options={signals} value={form.required_signals} onChange={(v) => set('required_signals', v)} label="Required signals" />
           </Step>
-          <Step n={4} q="What should EvoSense avoid?" hint="Properties showing any of these are skipped entirely.">
+          <Step n={4} q={ev('What should EvoSense avoid?')} hint="Properties showing any of these are skipped entirely.">
             <Picks options={signals} value={form.excluded_signals} onChange={(v) => set('excluded_signals', v)} label="Excluded signals" />
           </Step>
-          <Step n={5} q="How much may EvoSense spend?" hint={isWholesaleAdmin()
-            ? 'Enforced atomically on the server. $0 per day means EvoSense buys nothing.'
-            : 'Only an administrator of this workspace can set or change spending. Without a budget, EvoSense buys nothing.'}>
+          <Step n={5} q={ev('How much may EvoSense spend?')} hint={isWholesaleAdmin()
+            ? ev('Enforced atomically on the server. $0 per day means EvoSense buys nothing.')
+            : ev('Only an administrator of this workspace can set or change spending. Without a budget, EvoSense buys nothing.')}>
             <div className="evo-form-grid">
               <NumIn id="sb-day" label="Per day" prefix="$" disabled={!isWholesaleAdmin()} value={form.daily_budget} onChange={(v) => set('daily_budget', v)} />
               <NumIn id="sb-mon" label="Per month" prefix="$" disabled={!isWholesaleAdmin()} value={form.monthly_budget} onChange={(v) => set('monthly_budget', v)} />
@@ -472,7 +473,7 @@ export function EvoStrategyBuilder() {
               <NumIn id="sb-ap" disabled={!isWholesaleAdmin()} label="Ask me before spending above" prefix="$" value={form.approval_over} onChange={(v) => set('approval_over', v)} />
             </div>
           </Step>
-          <Step n={6} q="When should EvoSense bring you in?">
+          <Step n={6} q={ev('When should EvoSense bring you in?')}>
             <div className="evo-form-grid">
               <NumIn id="sb-po" label="Opportunity score worth acting on" value={form.min_opportunity_score} onChange={(v) => set('min_opportunity_score', v)} suffix="/100" />
               <NumIn id="sb-cc" label="Contact confidence to reach out" value={form.min_contact_confidence} onChange={(v) => set('min_contact_confidence', v)} suffix="/100" />

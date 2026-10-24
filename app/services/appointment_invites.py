@@ -455,6 +455,12 @@ def send_prospect_invitation(db: Session, appt: SalesAppointment,
         # no email on file, and the internal team is already synced.
         return {"ok": False, "sent": False, "reason": "no_prospect_email"}
 
+    # SALES DO NOT CONTACT. A prospect who asked for no contact gets no email
+    # of any kind — invite, reschedule or cancel. Reported, never raised.
+    from app.services import sales_suppression as _sdnc
+    if _sdnc.for_appointment(db, appt):
+        return {"ok": False, "sent": False, "reason": "do_not_contact"}
+
     ident = brand_identity(db, appt)
     tok = get_or_create_token(db, appt, now=now)
     # The BRAND's own host. This is the line that used to email a prospect an

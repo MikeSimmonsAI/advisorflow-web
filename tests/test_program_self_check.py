@@ -25,6 +25,7 @@ def test_unrecorded_bounce_is_flagged_and_endpoint_reports(client, db_session, s
     box = InboundMailbox(address="support@evosyspro.live", is_active=True, last_polled_at=datetime.utcnow())
     db_session.add(box); db_session.commit()
     db_session.add(InboundMailboxMessage(mailbox_id=box.id, graph_message_id="g", outcome="no_lead",
+                                         organization_id=sample_org.id,
                                          subject="Undeliverable: Following up, Paula", received_at=datetime.utcnow()))
     db_session.commit()
     r = client.get("/program/self-check", headers=_h(db_session, admin))
@@ -107,3 +108,22 @@ def test_a_real_premature_cadence_text_is_still_caught(db_session, sample_org):
     _txt(db_session, l, admin, 2, now)
     c = sc.texts_too_close(db_session, sample_org.id, now)
     assert c["ok"] is False and c["people"] == ["Edna T"]
+
+
+def test_shared_mailbox_ndrs_without_an_org_are_not_false_sci_failures(db_session, sample_org):
+    """The shared support mailbox receives delivery notices across tenants.
+
+    No organization was resolved for this notice; SCI's per-program health
+    check must not claim it is an SCI family's bounce.
+    """
+    from app.models.inbound_mailbox_models import InboundMailbox, InboundMailboxMessage
+    box = InboundMailbox(address="shared-poc@example.test", is_active=True,
+                         last_polled_at=datetime.utcnow())
+    db_session.add(box)
+    db_session.commit()
+    db_session.add(InboundMailboxMessage(mailbox_id=box.id, graph_message_id="unassigned-ndr",
+                                         organization_id=None, outcome="no_lead",
+                                         subject="Undeliverable: Shared-mailbox notice",
+                                         received_at=datetime.utcnow()))
+    db_session.commit()
+    assert sc.bounces_unrecorded(db_session, sample_org.id, datetime.utcnow())["ok"] is True

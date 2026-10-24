@@ -60,6 +60,10 @@ def setter(program, sample_advisor, monkeypatch):
     monkeypatch.setenv("AI_BACKGROUND_AUTOMATION_ENABLED", "true")
     monkeypatch.setattr(A, "available_slots", lambda db, prog, **kw: (list(SLOTS), None))
     monkeypatch.setattr(A, "still_free", lambda db, prog, slot, *a, **k: slot in SLOTS)
+    # the booking path's own re-check reads the same fake calendar
+    monkeypatch.setattr("app.routers.calendar_router.compute_day_slots",
+                        lambda db, adv, day, **kw: {"slots": [x.strftime("%Y-%m-%dT%H:%M:00") for x in SLOTS
+                                                              if x.date() == day]})
     from app.services import ai_gateway
     ai_gateway._reset_for_tests()
     return program
@@ -119,16 +123,15 @@ def test_lester_guide_then_offer_then_booked(setter, sample_advisor, monkeypatch
     lead.is_test = True
     db.commit()
     fake = _Fake([
-        _d("send_guide", "Happy to. Here is the planning guide, and I'm glad to answer any questions."),
-        _d("offer_times", "Would a short visit help? I have {TIMES}.", appointment_kind="visit"),
+        _d("send_guide", "Happy to. Here is the planning guide, and I'd be glad to go over it with you in person - "
+                         "would {TIMES} work?"),
         _d("book", "", slot_choice=2),
     ])
     _run(db, lead, "Would really like this to receive guide, any questions I would contact you. Is this possible?", fake)
-    _run(db, lead, "Yes, I'd like to talk about it in person.", fake)
     _, conv = _run(db, lead, "Wednesday works for me.", fake)
     texts = [t.text for t in _ai_turns(db, conv)]
     assert "planning-guide" in texts[0] or "http" in texts[0]
-    assert A.describe(SLOTS[0]) in texts[1] and A.describe(SLOTS[1]) in texts[1]
+    assert A.describe(SLOTS[0]) in texts[0] and A.describe(SLOTS[1]) in texts[0]
     assert conv.state == "booked" and conv.booked_time == SLOTS[1]
     assert all(t.delivery == "simulated" for t in _ai_turns(db, conv))   # synthetic: nothing left
     assert "SIMULATED" in _ai_turns(db, conv)[-1].reason                  # never claimed as a real booking
@@ -141,14 +144,13 @@ def test_oscar_callback_request_hands_to_person(setter, sample_advisor):
     db, org = setter["db"], setter["org"]
     lead = _lead_for(db, org, sample_advisor, "L001", first="Oscar")
     fake = _Fake([
-        _d("answer", "Of course, Oscar. Call whenever it suits you. Or if it's easier, I can call you - what time is good?"),
         _d("callback", "Perfect, I'll call you tomorrow afternoon.", callback_window="tomorrow afternoon"),
     ])
-    _run(db, lead, "I'll call you", fake)
     resp, conv = _run(db, lead, "Tomorrow afternoon is fine, have her call me", fake)
     assert conv.state == "callback_requested" and conv.callback_window == "tomorrow afternoon"
-    assert resp.suggested_reply.startswith("Perfect")          # draft mode: a person sends it
-    assert [t.delivery for t in _ai_turns(db, conv)] == ["draft", "draft"]
+    # THE RULE (Oct 22): not an appointment -> nothing goes out; the draft waits for a person
+    assert resp.suggested_reply.startswith("Perfect")
+    assert [t.delivery for t in _ai_turns(db, conv)] == ["blocked"]
 
 
 # ── Larry: busy, reconnect later ─────────────────────────────────────────────
@@ -158,8 +160,9 @@ def test_larry_busy_gets_a_gentle_answer_not_times(setter, sample_advisor):
     lead = _lead_for(db, org, sample_advisor, "L001", first="Larry")
     fake = _Fake([_d("answer", "No problem at all, Larry. When is a better time to reconnect?")])
     resp, conv = _run(db, lead, "Will get back with you later, I'm on a house", fake)
-    assert conv.state == "ai_active" and not A.offered(conv)
-    assert "better time" in resp.suggested_reply
+    # THE RULE (Oct 22): no appointment in the reply -> a person, nothing sent
+    assert conv.state == "human" and not A.offered(conv)
+    assert "better time" in resp.suggested_reply and _ai_turns(db, conv)[-1].delivery == "blocked"
 
 
 # ── Marion: existing plan -> plan review, asks which kind, no urgency ────────
@@ -172,7 +175,11 @@ def test_marion_existing_plan_offer_review_and_unsafe_text_is_held(setter, sampl
         _d("offer_times", "Prices go up next month, so act now - {TIMES}?"),
         _d("offer_times", "Prices go up next month, so act now - {TIMES}?"),   # told once, does it again
     ])
-    _run(db, lead, "I already have a plan with you", fake)
+    _run(db, lead, "I already have a plan with you", _Fake([fake.decisions.pop(0)]))
+    conv = ai_setter.conversation_for(db, lead, create=False)
+    assert conv.state == "human"                      # THE RULE: existing customer, no times -> a person
+    conv.state = "ai_active"                          # a person hands it back to the AI
+    db.commit()
     resp, conv = _run(db, lead, "The prearrangement file", fake)
     held = _ai_turns(db, conv)[-1]
     assert held.delivery == "blocked" and "pressure" in held.reason       # fabricated urgency never goes out
@@ -229,8 +236,9 @@ def test_auto_mode_sends_from_the_program_line_with_its_own_source(setter, sampl
         db_.flush()
         return m
     with patch("app.services.sms_service.send_sms", side_effect=fake_send):
-        _, conv = _run(db, lead, "What does the guide include?", _Fake([_d("answer", "It covers your options and wishes. Any questions?")]))
-    assert sent == [("It covers your options and wishes. Any questions?", ss.SCI_SETTER)]
+        _, conv = _run(db, lead, "What does the guide include?",
+                       _Fake([_d("offer_times", "It covers your options and wishes. Would {TIMES} work to go over it?")]))
+    assert len(sent) == 1 and sent[0][1] == ss.SCI_SETTER and A.describe(SLOTS[0]) in sent[0][0]
     assert _ai_turns(db, conv)[0].delivery == "sent"
 
 
@@ -242,7 +250,8 @@ def test_auto_mode_outside_hours_holds_then_sweep_sends(setter, sample_advisor, 
     allowed = {"v": False}
     monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": allowed["v"]})
     monkeypatch.setattr("app.services.contact_hours.next_permitted_utc", lambda lead, now=None: datetime.utcnow())
-    _, conv = _run(db, lead, "What does the guide include?", _Fake([_d("answer", "Happy to explain. Any questions?")]))
+    _, conv = _run(db, lead, "What does the guide include?",
+                   _Fake([_d("offer_times", "Happy to explain in person. Would {TIMES} work?")]))
     assert _ai_turns(db, conv)[0].delivery == "held"
     allowed["v"] = True
     with patch("app.services.sms_service.send_sms", return_value=MagicMock(id="m1")) as s:
@@ -316,10 +325,8 @@ def test_never_books_a_time_the_family_did_not_choose(setter, sample_advisor):
     lead = _lead_for(db, org, sample_advisor, "L001", first="Marion")
     lead.is_test = True
     db.commit()
-    fake = _Fake([_d("answer", "Thank you, Marion. Would you like to review your prearrangement file or your flower care service?"),
-                  _d("offer_times", "Would {TIMES} work for a review?"), _d("book", "", slot_choice=1)])
-    _run(db, lead, "I already have a plan with you", fake)
-    _run(db, lead, "The prearrangement file", fake)
+    fake = _Fake([_d("offer_times", "Would {TIMES} work for a review?"), _d("book", "", slot_choice=1)])
+    _run(db, lead, "I'd like to review my prearrangement file", fake)
     _, conv = _run(db, lead, "Sounds good to me", fake)
     assert conv.state == "offered" and conv.booked_time is None
     assert "Which works better" in _ai_turns(db, conv)[-1].text
@@ -339,7 +346,7 @@ def test_a_malformed_ai_answer_gets_one_correction(setter, sample_advisor):
     lead = _lead_for(db, org, sample_advisor, "L001", first="Oscar")
     fake = _Fake([_d(""), _d("answer", "Of course, Oscar - call whenever suits you. Would you like me to call you instead?")])
     resp, conv = _run(db, lead, "I'll call you", fake)
-    assert len(fake.calls) == 2 and conv.state == "ai_active" and resp.suggested_reply.startswith("Of course")
+    assert len(fake.calls) == 2 and conv.state == "human" and resp.suggested_reply.startswith("Of course")
 
 
 def test_asking_for_a_day_offers_times_that_day(setter, sample_advisor, monkeypatch):

@@ -35,6 +35,21 @@ MASTER = [("account", 1, 11), ("sptb", 31, 3), ("roll", 34, 2), ("legal", 36, 12
           ("cur_due", 661, 12), ("prior_due", 673, 12), ("status", 685, 15), ("litig", 740, 2)]
 MIN_LINE = 690
 
+# The roll published from Oct 16, 2026 widened the two owner-name fields from
+# 30 to 50 characters (no more cut-off names); every field after them moved
+# 40 characters right and lines grew from 741 to 781. Reading a new line with
+# the old layout turned the land value into "prior-year taxes due" and a date
+# into a "tax suit" (production, Oct 17-19). The layout is now CHOSEN per line
+# and CHECKED: a line neither layout reads sensibly stops the source instead
+# of inventing tax evidence.
+_SHIFT = 40
+MASTER_V2 = [(k, a, n) for k, a, n in MASTER if a < 327] + [
+    ("owner1", 327, 50), ("owner2", 377, 50)] + [
+    (k, a + _SHIFT, n) for k, a, n in MASTER if a >= 387]
+# 770: every real new line is 781 (old ones 741); a little slack for a
+# trimmed trailing blank, never enough to take an old line.
+LAYOUTS = (("2026-10", MASTER_V2, 770), ("2025", MASTER, MIN_LINE))
+
 # State property-tax-board codes as published by the Tarrant tax office
 # (Definition_Layout_SPTB_Codes): 1 = A1 single-family, 39 = A residential.
 RESIDENTIAL_SPTB = {"001": "single_family", "039": None}
@@ -68,11 +83,48 @@ def _num(v: str) -> float:
         return 0.0
 
 
-def parse_master(line: str) -> Dict[str, str]:
+_DATE = re.compile(r"^(\d{2}/\d{2}/\d{4})?$")
+_MONEY = re.compile(r"^\d+\.\d{2}$")
+
+
+def layout_problems(r: Dict[str, str]) -> List[str]:
+    """Why a parsed line does NOT look like a tax-roll row (empty = it does).
+    Dates must be dates, money must be money - the checks the Oct 16 layout
+    change would have failed on the first line."""
+    bad = [k for k in ("def_start", "def_end", "deed_date", "delq_date") if not _DATE.match(r.get(k) or "")]
+    bad += [k for k in ("cur_due", "prior_due") if r.get(k) and not _MONEY.match(r[k])]
+    if not _MONEY.match(r.get("levy") or ""):
+        bad.append("levy")                       # every account has a levy, even $0.00
+    bad += [k for k in ("land", "impr") if r.get(k) and not (r[k].isdigit())]
+    if not re.fullmatch(r"\d{11}", r.get("account") or ""):
+        bad.append("account")
+    if r.get("litig") and not re.fullmatch(r"[A-Z0-9]{1,2}", r["litig"]):
+        bad.append("litig")
+    return bad
+
+
+def parse_with_layout(line: str):
+    """(fields, layout name) for the first layout that reads this line
+    sensibly; raises SOURCE_FORMAT_CHANGED when none does."""
     if len(line) < MIN_LINE:
         raise B.SourceError(B.SOURCE_FORMAT_CHANGED, "tax-roll line is %s characters; layout expects %s+"
                             % (len(line), MIN_LINE))
-    return {k: line[a - 1:a - 1 + n].strip() for k, a, n in MASTER}
+    why = []
+    for name, spec, min_len in LAYOUTS:
+        if len(line) < min_len:
+            continue
+        r = {k: line[a - 1:a - 1 + n].strip() for k, a, n in spec}
+        bad = layout_problems(r)
+        if not bad:
+            return r, name, spec
+        why.append("%s: %s" % (name, ", ".join(bad)))
+    raise B.SourceError(B.SOURCE_FORMAT_CHANGED,
+                        "tax-roll line (%s characters) does not fit a known layout (%s)"
+                        % (len(line), "; ".join(why) or "too short"))
+
+
+def parse_master(line: str) -> Dict[str, str]:
+    return parse_with_layout(line)[0]
 
 
 def apn(account: str) -> str:
@@ -87,14 +139,15 @@ def state_code(v: str) -> Optional[str]:
     return STATE_NAMES.get(v)
 
 
-OWNER_WIDTH = 30
-
-
 def name_truncated(line: str) -> bool:
-    """The roll's owner fields are 30 characters wide. A field filled to its
-    last character ("ANDRADE ANGEL AND MURILLO GLOR") was cut off by the
-    layout, not by the owner's name ending there."""
-    for name, a, n in MASTER:
+    """The roll's owner fields are 30 (before Oct 2026) or 50 characters wide.
+    A field filled to its last character ("ANDRADE ANGEL AND MURILLO GLOR")
+    was cut off by the layout, not by the owner's name ending there."""
+    try:
+        spec = parse_with_layout(line)[2]
+    except B.SourceError:
+        spec = MASTER
+    for name, a, n in spec:
         if name in ("owner1", "owner2") and len(line) >= a - 1 + n:
             field = line[a - 1:a - 1 + n]
             if field.strip() and field[-1] != " ":
@@ -146,7 +199,7 @@ def classify(r: Dict[str, str], today: datetime) -> Dict[str, Any]:
 class TarrantTaxRollReader:
     """Discovery: residential accounts with delinquent taxes on the current roll."""
 
-    adapter_version = "tarrant_tax_roll/2"
+    adapter_version = "tarrant_tax_roll/3"   # 3: Oct 2026 layout + per-line layout check
 
     def locate(self) -> str:
         override = B.local_override("tarrant_tax_roll")
@@ -159,7 +212,8 @@ class TarrantTaxRollReader:
         return TAX_ROLL_BASE + found[-1]
 
     def discover(self, *, limit: int, scan_limit: int = 800_000, min_due: float = 250.0,
-                 today: Optional[datetime] = None, skip: int = 0) -> Dict[str, Any]:
+                 today: Optional[datetime] = None, skip: int = 0,
+                 accounts: Optional[set] = None) -> Dict[str, Any]:
         """`skip` passes over the first N qualifying accounts so successive hunts
         reach different delinquent accounts; if the roll runs out first, the
         window wraps to the start (never returns fewer because of rotation)."""
@@ -176,14 +230,30 @@ class TarrantTaxRollReader:
         try:
             for line in B.text_lines(oz.zip, "Master.dat"):
                 stats["scanned"] += 1
-                if stats["scanned"] > scan_limit or len(records) >= limit:
+                if accounts is None and (stats["scanned"] > scan_limit or len(records) >= limit):
                     break
                 if len(line) < MIN_LINE:
                     stats["short_line"] += 1
                     if stats["short_line"] > 50:
                         raise B.SourceError(B.SOURCE_FORMAT_CHANGED, "many tax-roll lines shorter than the layout")
                     continue
-                r = parse_master(line)
+                try:
+                    r, layout, _spec = parse_with_layout(line)
+                except B.SourceError:
+                    # One odd line is skipped and counted; a file the reader
+                    # cannot make sense of stops here rather than invent data.
+                    stats["unreadable_line"] += 1
+                    if stats["unreadable_line"] > 50 and stats["unreadable_line"] * 20 > stats["scanned"]:
+                        raise
+                    continue
+                stats["layout_" + layout] += 1
+                if accounts is not None:
+                    # Targeted check of named TAD accounts: read the whole roll,
+                    # keep only these, record each one the roll carries.
+                    if apn(r["account"]) not in accounts:
+                        continue
+                    stats.setdefault("checked", set()).add(apn(r["account"]))
+                    limit = max(limit, len(accounts))
                 if r["sptb"] not in RESIDENTIAL_SPTB:
                     continue
                 stats["residential"] += 1
@@ -249,7 +319,13 @@ class TarrantTaxRollReader:
         # so it is shown as evidence with no points.
         verified = c["prior_due"] > 0 or standard_delinquency(c["delinquent_since"])
         when = c["delinquent_since"].strftime("%Y-%m-%d") if c["delinquent_since"] and not c["prior_due"] else None
-        if verified:
+        if not c["delinquent"]:
+            # Not delinquent as of the roll's date (e.g. this year's bill, due
+            # next February; a deferral; an exempt owner). Discovery never
+            # reaches here; a RE-READ of a saved line can, and must not turn
+            # an ordinary bill into tax evidence.
+            signals = []
+        elif verified:
             signals = [{"type": "TAX_DELINQUENT", "confidence": 90, "value": "; ".join(bits), "raw": raw_tax,
                         "effective_at": when, "evidence_basis": "tax roll delinquency date" if when else
                         "tax roll prior-year balance", "observed_days_ago": observed_days}]
@@ -260,7 +336,7 @@ class TarrantTaxRollReader:
                         "raw": raw_tax, "effective_at": when, "evidence_basis": "tax roll delinquency date",
                         "observed_days_ago": observed_days}]
         lit = (r.get("litig") or "").strip().upper()
-        if lit and lit not in ("N", "0", "00"):
+        if lit and lit not in ("N", "0", "00") and c["delinquent"]:
             signals.append({"type": "TAX_SUIT", "confidence": 70,
                             "value": "tax-roll litigation indicator set (%s)" % lit,
                             "raw": "LITIG=%s" % lit, "observed_days_ago": observed_days})

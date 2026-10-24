@@ -566,6 +566,16 @@ def _intel_options():
             "outcomes": {k: SI.LABELS[k] for k in SI.QUALIFICATION_OUTCOMES}}
 
 
+def _brand_word_for_settings(s) -> str:
+    """The org's brand word for the built-in signer label (#272 P4); "EvoSys" when unknown."""
+    try:
+        from sqlalchemy.orm import object_session
+        from app.services.brand_config import brand_word
+        return brand_word(object_session(s), getattr(s, "organization_id", None))
+    except Exception:  # noqa: BLE001
+        return "EvoSys"
+
+
 def settings_json(s: WholesaleSettings) -> Dict[str, Any]:
     out = {
         "investor_percentage": _num(s.investor_percentage),
@@ -640,7 +650,7 @@ def settings_json(s: WholesaleSettings) -> Dict[str, Any]:
         # added there appears here without this line being touched — and, more
         # to the point, so this list cannot say a provider exists that the
         # signature path would not actually use.
-        "esign": esign.provider_report(),
+        "esign": esign.provider_report(_brand_word_for_settings(s)),
     }
     out["signature_capability"] = esign.capability()
     return out

@@ -204,7 +204,9 @@ export default function Login() {
         const def = ctx && ctx.default_context
         if (def && def.path) {
           dest = def.path
-          if (def.type === 'workspace' && def.organization_id) {
+          // A product home (wholesale@ -> Wholesale) runs inside its host
+          // workspace, so that workspace is selected too.
+          if ((def.type === 'workspace' || def.type === 'product') && def.organization_id) {
             setWorkspaceContext(def.organization_id)
           } else {
             clearWorkspaceContext()
@@ -212,7 +214,13 @@ export default function Login() {
         }
         // BACK TO WHERE THEY WERE after an expired session - into the same
         // workspace when they still have it, otherwise the default above.
-        if (nextPath) {
+        // Never return into the Roofing app for a workspace whose Roofing
+        // program is not switched on (the server's program_route says so):
+        // that was a dead "isn't turned on" screen after every re-login.
+        const priorEntry = (ctx?.workspace_contexts || []).find(w => w.organization_id === priorWorkspace)
+        const deadRoofing = nextPath && nextPath.startsWith('/program/roofing') &&
+          !(priorEntry && priorEntry.program_route === '/program/roofing')
+        if (nextPath && !deadRoofing) {
           const still = priorWorkspace && (ctx?.contexts || []).some(c => c.type === 'workspace' && c.organization_id === priorWorkspace)
           if (still) { setWorkspaceContext(priorWorkspace); dest = nextPath }
           else if (!priorWorkspace) dest = nextPath

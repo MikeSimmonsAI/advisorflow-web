@@ -205,6 +205,13 @@ COLUMNS_TO_ADD = [
     ("program_alerts", "provider_status", "VARCHAR"),
     ("program_alerts", "provider_error", "VARCHAR"),
     ("program_alerts", "status_at", "TIMESTAMP"),
+    # ONE REPLY, ONE ALERT (Oct 19) - services/programs/alert_ledger.py
+    ("program_alerts", "lead_id", "VARCHAR"),
+    ("program_alerts", "dedupe_key", "VARCHAR"),
+    ("program_alerts", "send_state", "VARCHAR"),
+    ("program_alerts", "attempts", "INTEGER"),
+    ("program_alerts", "last_attempt_at", "TIMESTAMP"),
+    ("program_alerts", "retry_payload", "TEXT"),
     ("program_source_records", "hide_location", "BOOLEAN DEFAULT FALSE"),
     ("booking_links", "short_code", "VARCHAR"),
     ("location_profiles", "link_key", "VARCHAR"),
@@ -1702,6 +1709,14 @@ INDEXES_TO_CREATE = [
     # already exists, so these ship here from day one rather than after the
     # first production row makes it impossible.
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_cadence_touch_attempt ON cadence_touch_logs(cadence_state_id, touch_number, attempt_seq)",
+    # ONE REPLY, ONE ALERT (Oct 19): one claim per page key, channel and
+    # recipient. Existing rows have no key and are unaffected.
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_program_alerts_dedupe ON program_alerts(dedupe_key, channel, recipient) WHERE dedupe_key IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS ix_program_alerts_lead_created ON program_alerts(lead_id, created_at)",
+    # PIPELINE HEALTH (Phase Nine): per-tenant time-window reads.
+    "CREATE INDEX IF NOT EXISTS ix_program_alerts_org_created ON program_alerts(organization_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_program_conv_turns_org_created ON program_conversation_turns(organization_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_program_responses_org_received ON program_responses(organization_id, received_at)",
     "CREATE INDEX IF NOT EXISTS ix_cadence_touch_lead ON cadence_touch_logs(lead_id, touch_number)",
     "CREATE INDEX IF NOT EXISTS ix_cadence_touch_outcome ON cadence_touch_logs(organization_id, outcome, attempted_at)",
     # Unique per BRAND, not globally: two brands may each have a prospect

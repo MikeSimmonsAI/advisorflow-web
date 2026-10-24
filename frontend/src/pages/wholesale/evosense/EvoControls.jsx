@@ -25,6 +25,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../../api/client'
 import { isWholesaleAdmin } from '../../../auth/workspaceAuthority'
 import { errText } from '../wsShared'
+import { ev } from '../engine'
 import { Alert, Drawer, EvoApp, Metric, Metrics, PageSkeleton, Panel, TabBar, ago, cents, humanize } from '../ds/ds'
 import '../ds/evo-pages.css'
 import './controls-tabs.css'
@@ -32,6 +33,7 @@ import './controls/pc.css'
 import EvoEvaluation from './EvoEvaluation'
 import EvoLists from './EvoLists'
 import SkipTraceCostPanel from '../ops/SkipTraceCostPanel'
+import RollFixPanel from './RollFixPanel'
 import * as M from './controls/model'
 import {
   CapabilityCard, CapabilityDrawer, FilterBar, KindTag, Latest, Pill, ProviderDrawer, Stat,
@@ -374,7 +376,7 @@ export default function EvoControls() {
     <EvoApp world="acquisition">
       <header className="pc-banner">
         <div className="pc-banner__text">
-          <p className="pc-banner__eyebrow">EvoSense · System intelligence</p>
+          <p className="pc-banner__eyebrow">{ev('EvoSense · System intelligence')}</p>
           <h1 className="pc-banner__title">Providers &amp; Controls</h1>
           <p className="pc-banner__sub">Where your data comes from, what is working, and what can cost money.</p>
         </div>
@@ -522,7 +524,7 @@ export default function EvoControls() {
 
       {/* ── CONTROLS & COMPLIANCE ───────────────────────────────────────── */}
       <div className="evo-stack" role="tabpanel" id="panel-controls" aria-labelledby="tab-controls" hidden={tab !== 'controls'}>
-        <Panel title="EvoSense controls" hint="Anyone can pause. Only an admin can resume.">
+        <Panel title={ev('EvoSense controls')} hint="Anyone can pause. Only an admin can resume.">
           {!isAdmin ? <p className="pc-sub" style={{ margin: '0 0 12px' }}>You can pause any switch. Resuming, provider changes, scoring weights and budgets need an administrator of this workspace.</p> : null}
           <div className="evo-switches">
             {SWITCHES.map(([k, label, help]) => {
@@ -547,6 +549,8 @@ export default function EvoControls() {
             })}
           </div>
         </Panel>
+
+        {isAdmin ? <RollFixPanel /> : null}
 
         <Panel title="Opportunity scoring weights" hint={`deterministic · ${ctl.score_version || ''}${ctl.score_weights ? ' · customised' : ' · defaults'} · admin only`}>
           <div className="evo-form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
@@ -581,7 +585,7 @@ export default function EvoControls() {
           <ul className="evo-checklist">
             <li>An opted-out or suppressed owner is never contacted again — by any strategy, ever.</li>
             <li>Owners are contacted at most once every {ctl.owner_touch_cap_days} days, across every strategy.</li>
-            <li>EvoSense never makes an offer, signs anything or moves money. It hands the conversation to you.</li>
+            <li>{ev('EvoSense never makes an offer, signs anything or moves money. It hands the conversation to you.')}</li>
             <li>Scores, budgets and do-not-contact decisions are deterministic rules; AI only reads replies.</li>
             <li>A phone found in public records or by skip trace is never permission to text. Only a consent record under the Wholesale seller SMS program is.</li>
             <li>Provider credentials stay on the server and are never sent to a browser.</li>

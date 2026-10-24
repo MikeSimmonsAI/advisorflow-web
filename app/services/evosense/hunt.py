@@ -20,8 +20,10 @@ organization once; point the platform's job runner (or cron) at it. The
 from __future__ import annotations
 
 import csv
+import re
 import hashlib
 import io
+import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -73,20 +75,24 @@ def run_strategy(db, org_id: str, strategy: EvoSenseStrategy, *, trigger: str = 
                     summary="Hunt not started: this strategy is already hunting")
         db.commit()
         return run
+    SCH.interrupt_stale_runs(db, strategy)
+    keeper = SCH.LeaseKeeper(db, strategy, token).start()
     try:
         run = _run_locked(db, org_id, strategy, trigger=trigger, user=user,
-                          max_properties=max_properties, enrich=enrich)
+                          max_properties=max_properties, enrich=enrich,
+                          renew=lambda: keeper.ok() and SCH.renew(db, strategy, token))
         # The next due time is written BEFORE the lock is released, so no
         # other worker can see "unlocked and still due" in between.
         if run.status != "skipped":
             SCH.record_result(db, strategy, run)
     finally:
+        keeper.stop()
         SCH.release(db, strategy, token)
     return run
 
 
 def _run_locked(db, org_id: str, strategy: EvoSenseStrategy, *, trigger: str, user,
-                max_properties: int, enrich: bool) -> EvoSenseRun:
+                max_properties: int, enrich: bool, renew=None) -> EvoSenseRun:
     ctl = C.controls(db, org_id)
     run = EvoSenseRun(organization_id=org_id, strategy_id=strategy.id, trigger=trigger)
     db.add(run)
@@ -124,7 +130,7 @@ def _run_locked(db, org_id: str, strategy: EvoSenseStrategy, *, trigger: str, us
         return finish("skipped", "Strategy is %s" % strategy.status)
     try:
         return _hunt_body(db, org_id, strategy, run, ctl, counts, finish, user=user,
-                          max_properties=max_properties, enrich=enrich)
+                          max_properties=max_properties, enrich=enrich, renew=renew)
     except Exception as exc:  # noqa: BLE001 - recorded, surfaced, retried; never silent
         db.rollback()
         run = db.query(EvoSenseRun).filter(EvoSenseRun.id == run_id).first()
@@ -157,17 +163,34 @@ def discovery_focus(strategy) -> List[str]:
     return [str(x) for x in focus if x] if isinstance(focus, list) else []
 
 
-def _discovery_routes(db, org_id, focus: Optional[List[str]] = None):
+def expand_focus(focus: Optional[List[str]]) -> List[str]:
+    """A strategy that names one appraisal-roll source (Tired Landlord named
+    collin_cad and denton_gis) means the FAMILY: every owner-roll source,
+    including ones added later (Harris, statewide), reads for it - no strategy
+    has to be edited when a new county comes online."""
+    focus = list(focus or [])
+    fams = {getattr(PV.PROVIDERS.get(k), "discovery_family", None) for k in focus} - {None}
+    return focus + sorted(f for f in fams if f not in focus)
+
+
+def _discovery_routes(db, org_id, focus: Optional[List[str]] = None, *, sandbox_allowed: bool = True):
     """(capability, provider, cfg) for every connected DISCOVERY source. A
     public-record LOOKUP source (TAD, geocoder, code cases) is never asked to
     discover; it is called per property in the lookup stage. With a focus,
     only the named capabilities / sources discover."""
     out, seen = [], set()
+    focus = expand_focus(focus)
     for cap in DISCOVERY:
-        for provider, cfg, _cost in PV.route(db, org_id, cap):
+        for provider, cfg, _cost in PV.route(db, org_id, cap, sandbox_allowed=sandbox_allowed):
             if not getattr(provider, "discovery", True):
                 continue
-            if focus and cap not in focus and provider.key not in focus:
+            if focus and cap not in focus and provider.key not in focus \
+                    and getattr(provider, "discovery_family", None) not in focus:
+                continue
+            if getattr(provider, "discovery_opt_in", False) and not (focus and (cap in focus or provider.key in focus)):
+                # An opt-in source (county clerk foreclosure notices) feeds only
+                # a strategy that asks for it - enabling it never changes what an
+                # existing all-sources strategy brings in.
                 continue
             if (provider.key, cap) in seen:
                 continue
@@ -192,7 +215,23 @@ def _source_failed(db, org_id, strategy, provider, cfg, exc, counts, user):
                 summary="%s failed — %s: %s" % (provider.label, code, msg[:160]))
 
 
-def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_properties, enrich):
+def _checkpoint(run, counts, source_key: Optional[str], *, stage: str = "discovery") -> None:
+    """Progress saved on the run as each source finishes, so a hunt cut off by
+    a restart shows exactly what it completed (and recovery can say so)."""
+    prog = counts.setdefault("progress", {"sources_done": []})
+    if source_key and source_key not in prog["sources_done"]:
+        prog["sources_done"].append(source_key)
+    prog["stage"] = stage
+    prog["at"] = C.now().isoformat()
+    run.counts = C.jdump(counts)
+
+
+class LeaseLost(RuntimeError):
+    """The hunt lock expired and another worker may hold it: stop, don't double-run."""
+
+
+def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_properties, enrich,
+               renew=None):
     q = _query(strategy)
     pilot = ST.is_pilot(strategy)
     if pilot:
@@ -201,17 +240,33 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
                            "outreach": "off", "paid_data": "on" if ST.pilot_spend_cap(strategy) else "off"}
     touched: Dict[str, EvoSenseProperty] = {}
     focus = discovery_focus(strategy)
-    routes = _discovery_routes(db, org_id, focus)
+    # Sandbox (synthetic) sources feed TEST strategies only: switching one on
+    # can never put invented houses into a real strategy's results.
+    routes = _discovery_routes(db, org_id, focus, sandbox_allowed=bool(getattr(strategy, "is_test", False)))
     if focus:
         counts["discovery_focus"] = focus
+        if not routes:
+            # Nothing connected can serve what this strategy hunts: say so -
+            # a hunt that searched nothing is BLOCKED, never "succeeded".
+            counts["blocked"] = ("No connected source serves this strategy's search (%s). Enable one under "
+                                 "Sources, or import a list." % ", ".join(focus))
+            C.log_event(db, org_id, "hunt.blocked", strategy_id=strategy.id, is_test=strategy.is_test,
+                        actor_type=C.ACTOR_USER if user else C.ACTOR_AUTOMATION, summary=counts["blocked"])
     real = [r for r in routes if r[1].connector_kind == C.REAL]
     share = max(1, -(-max_properties // max(1, len(real))))      # ceil: a fair share per real source
     counts["sources"] = {}
     for cap, provider, cfg in routes:
         if len(touched) >= max_properties:
             break
+        if renew is not None and not renew():
+            raise LeaseLost("hunt lock lease was lost; stopped before %s" % provider.key)
         cfg.last_attempt_at = C.now()
         pq = dict(q, limit=min(share, max_properties - len(touched)))
+        # NO DATABASE TRANSACTION IS HELD OPEN ACROSS A NETWORK CALL. A county
+        # download can take minutes; the app's connections end any transaction
+        # idle for 5 minutes (deps.py), and the hunt then failed with
+        # PendingRollbackError at its next commit (2026-10-20 14:25 UTC).
+        db.commit()
         try:
             records = provider.search(cap, pq)
         except Exception as exc:  # noqa: BLE001 - one failing source never ends the hunt
@@ -241,8 +296,11 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
             if prop is not None:
                 touched[prop.id] = prop
         db.flush()
+        _checkpoint(run, counts, provider.key)
         db.commit()
 
+    _checkpoint(run, counts, None, stage="lookups")
+    db.commit()
     if touched:
         free_lookups(db, org_id, strategy, run, list(touched.values()), counts)
     backlog = lookup_backlog(db, org_id, exclude=set(touched))
@@ -318,7 +376,11 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
             res = OU.start(db, prop, strategy)
             counts["outreach_started" if res.get("started") else "outreach_blocked"] += 1
             db.commit()
-    return finish("partial" if counts["provider_errors"] else "succeeded")
+    # A source can answer a batch but fail for individual properties.
+    # Such a run is PARTIAL, not green, even if no source-wide error fired.
+    property_failures = sum(int(row.get("failed", 0)) for row in counts.get("lookups", {}).values())
+    return finish("partial" if counts["provider_errors"] or property_failures or counts.get("blocked")
+                  else "succeeded")
 
 
 # ── free public-record lookups (the cost governor's QUEUE_FREE_LOOKUP lane) ──
@@ -343,23 +405,55 @@ def _lookup_decision(db, prop, strategy, provider, cap, decision, reason, outcom
 
 
 BACKLOG_LIMIT = 150
+# Recent negative public lookups are not permanent evidence. Avoid querying the
+# same address three times during adjacent daily strategy hunts; retry later.
+NO_MATCH_RECHECK_HOURS = 2
 
 
 def lookup_backlog(db, org_id: str, exclude=(), limit: int = BACKLOG_LIMIT) -> List[EvoSenseProperty]:
-    """Recent properties in a county with a free address lookup that still have
-    no account number - newest first. The lookups' own freshness rule keeps a
-    property that was just looked up from being looked up again."""
+    """Recent Texas properties that still have no account number OR no
+    current owner of record - newest first. Each lookup source decides which
+    of them it covers (applies), and its own freshness rule keeps a property
+    that was just looked up from being looked up again."""
+    from sqlalchemy import and_, exists, or_
+    from app.models.evosense_models import EvoSenseOwnership
+    has_owner = exists().where(and_(EvoSenseOwnership.property_id == EvoSenseProperty.id,
+                                    EvoSenseOwnership.is_current.is_(True)))
     q = (db.query(EvoSenseProperty)
          .filter(EvoSenseProperty.organization_id == org_id,
-                 EvoSenseProperty.parcel_apn.is_(None),
+                 or_(EvoSenseProperty.parcel_apn.is_(None), ~has_owner),
                  EvoSenseProperty.street_address.isnot(None),
                  EvoSenseProperty.archived_at.is_(None),
-                 EvoSenseProperty.county.in_(("Dallas", "Tarrant")))
+                 or_(EvoSenseProperty.state.is_(None), EvoSenseProperty.state == "TX"))
          .order_by(EvoSenseProperty.discovered_at.desc()))
     return [p for p in q.limit(limit + len(exclude or ())).all() if p.id not in (exclude or ())][:limit]
 
 
-def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], counts) -> None:
+def _lookup_failure_code(error) -> str:
+    """Safe reason code; never expose exception text, customer data or tokens."""
+    from app.services.evosense.sources import base as SRC
+    if isinstance(error, SRC.SourceError):
+        return error.code if error.code in SRC.ERROR_CODES else "OTHER"
+    if error == "MISSING_PROVIDER_RESULT":
+        return "MISSING_PROVIDER_RESULT"
+    if isinstance(error, TimeoutError):
+        return SRC.TIMEOUT_ERR
+    if isinstance(error, (ConnectionError, OSError)):
+        return "NETWORK_ERROR"
+    return "OTHER"
+
+
+def _count_lookup_failure(tally: Dict[str, Any], error, how_many: int = 1) -> str:
+    """A failed lookup contributes one attempted outcome and a coded reason."""
+    code = _lookup_failure_code(error)
+    tally["failed"] += how_many
+    codes = tally.setdefault("failure_codes", {})
+    codes[code] = codes.get(code, 0) + how_many
+    return code
+
+
+def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], counts, *,
+                 force_ids: Optional[set] = None) -> None:
     """Ask each enabled FREE public-record lookup source about each property it
     covers, recording one governor decision per (property, source):
 
@@ -369,7 +463,7 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
 
     Paid sources never run here. Results go through the same ingest as any
     record, so every fact keeps its own observation and raw evidence."""
-    from app.models.evosense_models import EvoSenseObservation
+    from app.models.evosense_models import EvoSenseEnrichmentDecision, EvoSenseObservation
     from app.services.evosense.sources import base as SRC
     counts.setdefault("lookups", {})
     for cap in LOOKUP_ORDER:
@@ -383,7 +477,8 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                 continue                                  # NOT CONFIGURED: nothing to decide
             tally = counts["lookups"].setdefault(key, {"queued": 0, "found": 0, "no_match": 0,
                                                        "skipped_fresh": 0, "skipped_down": 0,
-                                                       "failed": 0})
+                                                       "failed": 0, "review": 0, "failure_codes": {}, "duration_ms": 0,
+                                                       "skipped_no_match": 0})
             applicable = [p for p in props if provider.applies(_target(p))]
             if not applicable:
                 continue
@@ -399,8 +494,27 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                 db.commit()
                 continue
             fresh_after = C.now() - timedelta(days=provider.freshness_days)
+            # A no-match is UNKNOWN, not permanent evidence that a case never
+            # exists. But querying the identical property/source in each of
+            # three closely spaced strategy runs wastes public API requests.
+            # One tenant-scoped batch query avoids a per-property SQL sweep.
+            negative_since = C.now() - timedelta(hours=NO_MATCH_RECHECK_HOURS)
+            recent_no_matches = {row[0] for row in (
+                db.query(EvoSenseEnrichmentDecision.property_id)
+                .filter(EvoSenseEnrichmentDecision.organization_id == org_id,
+                        EvoSenseEnrichmentDecision.property_id.in_([p.id for p in applicable]),
+                        EvoSenseEnrichmentDecision.provider_key == key,
+                        EvoSenseEnrichmentDecision.decision == C.L_QUEUE_FREE,
+                        EvoSenseEnrichmentDecision.outcome == "no_match",
+                        EvoSenseEnrichmentDecision.created_at >= negative_since)
+                .distinct().all())}
             queued = []
             for p in applicable:
+                if force_ids and p.id in force_ids:
+                    # A person just corrected this house's identifiers: earlier
+                    # answers (or no-matches) were about the wrong address/account.
+                    queued.append(p)
+                    continue
                 recent = (db.query(EvoSenseObservation.id)
                           .filter(EvoSenseObservation.organization_id == org_id,
                                   EvoSenseObservation.property_id == p.id,
@@ -411,6 +525,12 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                                      "%s already answered within %s days." % (provider.label, provider.freshness_days),
                                      outcome="skipped")
                     tally["skipped_fresh"] += 1
+                elif p.id in recent_no_matches:
+                    _lookup_decision(db, p, strategy, provider, cap, C.L_SKIP_FRESH_DATA,
+                                     "A public-source lookup found no matching record in the last %s hours. "
+                                     "Automatically retry when the short cooldown expires."
+                                     % NO_MATCH_RECHECK_HOURS, outcome="skipped")
+                    tally["skipped_no_match"] += 1
                 else:
                     queued.append(p)
             if not queued:
@@ -418,31 +538,48 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                 continue
             cfg.last_attempt_at = C.now()
             by_id = {p.id: p for p in queued}
+            targets = [_target(p) for p in queued]
+            # A systemic batch failure still attempted all these lookups.
+            # Old counting put failed=N but queued=0 on that path.
+            tally["queued"] += len(queued)
+            db.commit()                 # never idle in a transaction during the lookups (see _hunt_body)
+            started_at = time.monotonic()
             try:
-                res = provider.lookup_many([_target(p) for p in queued])
+                res = provider.lookup_many(targets)
             except Exception as exc:  # noqa: BLE001 - systemic source failure: recorded per property
                 _source_failed(db, org_id, strategy, provider, cfg, exc, counts, None)
-                code = exc.code if isinstance(exc, SRC.SourceError) else type(exc).__name__
+                code = _count_lookup_failure(tally, exc, len(queued))
                 for p in queued:
                     _lookup_decision(db, p, strategy, provider, cap, C.L_QUEUE_FREE,
                                      "Free lookup failed: %s. UNKNOWN is not NO — nothing was concluded." % code,
                                      outcome="provider_failed")
-                    tally["failed"] += 1
                 db.commit()
                 continue
+            finally:
+                # Batch latency belongs in the run summary, even on errors.
+                # Never include query URLs, addresses or tokens.
+                tally["duration_ms"] += round((time.monotonic() - started_at) * 1000)
             PV.record_success(cfg, capability=cap)
             cfg.last_verified_at = C.now()
             found = 0
+            results = res.get("results", {})
+            errors = res.get("errors", {})
             for pid, p in by_id.items():
-                tally["queued"] += 1
-                err = res.get("errors", {}).get(pid)
+                err = errors.get(pid)
                 if err is not None:
+                    code = _count_lookup_failure(tally, err)
                     _lookup_decision(db, p, strategy, provider, cap, C.L_QUEUE_FREE,
-                                     "Free lookup failed for this property: %s" % getattr(err, "code", err),
+                                     "Free lookup failed for this property: %s" % code,
                                      outcome="provider_failed")
-                    tally["failed"] += 1
                     continue
-                rec = res.get("results", {}).get(pid)
+                if pid not in results:
+                    # A missing answer is UNKNOWN, not a true no-match.
+                    _count_lookup_failure(tally, "MISSING_PROVIDER_RESULT")
+                    _lookup_decision(db, p, strategy, provider, cap, C.L_QUEUE_FREE,
+                                     "Source omitted this property from its lookup response.",
+                                     outcome="provider_failed")
+                    continue
+                rec = results.get(pid)
                 if not rec:
                     _lookup_decision(db, p, strategy, provider, cap, C.L_QUEUE_FREE,
                                      "%s has no record for this property (not the same as 'none exists')."
@@ -451,14 +588,15 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                     continue
                 try:
                     outcome, merged = IN.ingest(db, org_id, provider, cap, rec, strategy_id=strategy.id,
-                                                run_id=run.id, is_test=strategy.is_test)
+                                                run_id=run.id, is_test=strategy.is_test, target=p)
                 except Exception as exc:  # noqa: BLE001
                     _lookup_decision(db, p, strategy, provider, cap, C.L_QUEUE_FREE,
                                      "Record could not be ingested: %s" % str(exc)[:160],
                                      outcome="provider_failed")
-                    tally["failed"] += 1
+                    _count_lookup_failure(tally, exc)
                     continue
                 if outcome == "review":
+                    tally["review"] += 1
                     _lookup_decision(db, p, strategy, provider, cap, C.L_MANUAL_REVIEW,
                                      "%s answered, but its record might describe a different property; "
                                      "it waits in identity review." % provider.label, outcome="review")
@@ -521,6 +659,9 @@ CSV_COLUMNS = ("street_address", "unit", "city", "state", "zip_code", "county", 
                "property_type", "owner_name", "mailing_street", "mailing_city", "mailing_state",
                "mailing_zip", "estimated_value", "mortgage_balance", "last_sale_date", "signals",
                "record_id", "bedrooms", "bathrooms", "square_feet", "year_built")
+# Columns that never change a row's identity (adding them to a file re-sees
+# the same rows): the list's claims about the property.
+CLAIM_COLUMNS = ("sale_date", "list_owner_name", "loan_type")
 BUILDING_COLUMNS = ("bedrooms", "bathrooms", "square_feet", "year_built")
 # Evidence columns a DISTRESS LIST may carry. They describe the list's claim;
 # they are stored as the signal's evidence, never as verified fact.
@@ -554,9 +695,39 @@ def distress_list_kinds() -> List[Dict[str, str]]:
              "signal_label": CATALOG[v["signal"]]["label"]} for k, v in DISTRESS_LISTS.items()]
 
 
+TAX_LIST_SIGNALS = ("TAX_DELINQUENT", "TAX_SUIT", "TAX_SALE")
+
+
+def foreclosure_claim(sale, *, source: str, declared_by: Optional[str] = None,
+                      case_status: Optional[str] = None, tax: bool = False) -> Dict[str, Any]:
+    """A list's CLAIM of a scheduled sale: a mortgage / trustee sale
+    (PRE_FORECLOSURE) - or, on a tax list, a tax foreclosure sale (TAX_SALE).
+
+    `sale` comes from a row's sale_date column or from a date a person
+    declared for the whole list - never from a file name. A row's own
+    case_status (postponed, cancelled ...) is kept, never overwritten."""
+    how = ("declared for the whole list by %s" % declared_by) if declared_by else "stated in the row's sale date"
+    status = (case_status or "").strip().lower() or "scheduled"
+    if tax:
+        return {"type": "TAX_SALE", "confidence": 60, "claim": "imported",
+                "sale_date": sale.strftime("%Y-%m-%d"), "foreclosure_type": "tax_foreclosure_sale",
+                "value": "Tax foreclosure sale %s %s - claimed by %s (%s); not verified against the sale list "
+                         "or court record" % (status, sale.strftime("%Y-%m-%d"), source, how),
+                "evidence_basis": "imported list claim", "case_status": status,
+                "limitations": "A list's claim of a tax sale date. Confirm on the county / constable sale list."}
+    return {"type": "PRE_FORECLOSURE", "confidence": 60, "claim": "imported",
+            "sale_date": sale.strftime("%Y-%m-%d"),
+            "value": "Foreclosure sale scheduled %s - claimed by %s (%s); not verified against the county "
+                     "clerk's notice" % (sale.strftime("%Y-%m-%d"), source, how),
+            "evidence_basis": "imported list claim", "case_status": status,
+            "limitations": "A list's claim of a scheduled trustee sale. Confirm on the county clerk's posted "
+                           "Notice of (Substitute) Trustee Sale; sales are often postponed or cancelled."}
+
+
 def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: str = "upload.csv",
                max_rows: int = 5000, list_kind: Optional[str] = None,
-               list_source: Optional[str] = None) -> Dict[str, Any]:
+               list_source: Optional[str] = None, declared_sale_date: Optional[str] = None,
+               ) -> Dict[str, Any]:
     """A property list through the SAME ingest as every provider. Re-importing
     the same file is idempotent (row identity = record_id, or a hash of the row).
 
@@ -567,6 +738,13 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
     list is two pieces of evidence, not one overwriting the other."""
     if list_kind is not None and list_kind not in DISTRESS_LISTS:
         raise ValueError("Unknown list kind %r. Known: %s" % (list_kind, ", ".join(DISTRESS_LISTS)))
+    # The file NAME is only a label for people: nothing below reads a date,
+    # a year or a distress claim out of it. A sale date for every row exists
+    # only when a person declares one here (recorded as theirs).
+    declared = _parse_list_date(declared_sale_date) if declared_sale_date else None
+    if declared_sale_date and declared is None:
+        raise ValueError("The list's sale date is not a date (use YYYY-MM-DD or MM/DD/YYYY)")
+    source_label = list_source or "an imported list"
     kind = DISTRESS_LISTS.get(list_kind) if list_kind else None
     from app.services.evosense import propstream_csv as PS
     fmt = None
@@ -580,7 +758,8 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
         raise ValueError("The file needs a street_address column. Columns understood: %s"
                          % ", ".join(CSV_COLUMNS))
     provider = PV.PROVIDERS["csv_import"]
-    counts = {"rows": 0, "created": 0, "merged": 0, "seen": 0, "review": 0, "rejected": 0}
+    counts = {"rows": 0, "created": 0, "merged": 0, "seen": 0, "review": 0, "rejected": 0,
+              "sale_dates": 0, "sale_dates_declared": 0}
     rejected: List[Dict[str, Any]] = []
     for i, row in enumerate(reader, start=2):
         if counts["rows"] >= max_rows:
@@ -607,11 +786,33 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
                 rec["valuation"] = {"value": int(float(row["estimated_value"].replace(",", "").replace("$", ""))),
                                     "mortgage": int(float(row["mortgage_balance"].replace(",", "").replace("$", "")))
                                     if row.get("mortgage_balance") else None,
-                                    "basis": "imported file %s" % filename}
+                                    # never the file name: a name is a label, not evidence
+                                    # (a name like "Appraisal District 2010.csv" would
+                                    # otherwise read as a 2010 tax value)
+                                    "basis": "imported list (value as the file states it)"}
         except ValueError:
             counts["rejected"] += 1
             rejected.append({"line": i, "reason": "estimated_value / mortgage_balance not a number"})
             continue
+        claims = {k: row.get(k) for k in CLAIM_COLUMNS if row.get(k)}
+        if claims:
+            rec["_evidence"] = {"list_claims": claims}
+        sale = _parse_list_date(row.get("sale_date")) if row.get("sale_date") else None
+        if row.get("sale_date") and sale is None:
+            counts["rejected"] += 1
+            rejected.append({"line": i, "reason": "sale_date is not a date (use YYYY-MM-DD or MM/DD/YYYY)"})
+            continue
+        fc_claim = None
+        # A sale date on a TAX list is a tax sale, never a mortgage foreclosure.
+        tax_list = bool(kind) and kind["signal"] in TAX_LIST_SIGNALS
+        row_status = (row.get("case_status") or "").strip() or None
+        if sale is not None:
+            fc_claim = foreclosure_claim(sale, source=source_label, case_status=row_status, tax=tax_list)
+            counts["sale_dates"] += 1
+        elif declared is not None:
+            fc_claim = foreclosure_claim(declared, source=source_label, case_status=row_status, tax=tax_list,
+                                         declared_by=getattr(user, "email", None) or "the importer")
+            counts["sale_dates_declared"] += 1
         if row.get("owner_name"):
             rec["owner"] = {"name": row["owner_name"], "mailing_street": row.get("mailing_street"),
                             "mailing_city": row.get("mailing_city"),
@@ -648,6 +849,10 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
         else:
             rec["signals"] = [{"type": s, "confidence": 60, "value": "from imported list"}
                               for s in sigs if s in CATALOG]
+        if fc_claim is not None:
+            # one foreclosure claim per row: a list kind's own PRE_FORECLOSURE
+            # takes the sale date instead of being doubled
+            rec["signals"] = [x for x in rec.get("signals") or [] if x["type"] != fc_claim["type"]] + [fc_claim]
         outcome, prop = IN.ingest(db, org_id, provider, C.PROPERTY_SEARCH, rec,
                                   strategy_id=getattr(strategy, "id", None), user=user)
         counts[outcome] = counts.get(outcome, 0) + 1
@@ -702,10 +907,17 @@ def preview_csv(db, org_id: str, content: str, *, filename: str = "upload.csv") 
 
 
 def _parse_list_date(value):
-    v = (value or "").strip()
+    """A date written in a cell or typed by a person. Never a bare year, and
+    never a value that merely contains digits (a file name, a list tag)."""
+    v = re.sub(r"\s+", " ", str(value or "")).strip().rstrip(".")
     if not v:
         return None
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%Y/%m/%d"):
+    v = re.sub(r"(\d)(st|nd|rd|th)\b", r"\1", v, flags=re.I)
+    if re.fullmatch(r"\d{2}-\d{2}-\d{4}", v):
+        v = v.replace("-", "/")
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%Y/%m/%d", "%b %d, %Y", "%B %d, %Y", "%b %d %Y",
+                "%B %d %Y", "%d %b %Y", "%d %B %Y", "%Y-%m-%dT%H:%M:%S", "%m/%d/%Y %H:%M:%S",
+                "%Y-%m-%d %H:%M:%S"):
         try:
             return datetime.strptime(v, fmt)
         except ValueError:

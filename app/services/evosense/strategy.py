@@ -291,13 +291,14 @@ STARTERS = {
     "tired_landlord": {
         "name": "Tired Landlord",
         "description": "Rental houses held 10+ years by an owner who lives somewhere else.",
-        "data": "Works today on free data: Dallas, Tarrant, Collin and Denton owner records.",
+        "data": ("Works today on free data: Dallas, Tarrant, Collin, Denton and Harris owner records, "
+                 "and every other Texas county's appraisal roll when the state's files are reachable."),
         "free_today": True,
         "fields": {"owner_geography": "absentee", "min_ownership_years": 10,
                    "occupancy_preferences": ["non_owner_occupied"],
                    "preferred_signals": ["ABSENTEE_OWNER", "OUT_OF_STATE_OWNER", "TIRED_LANDLORD",
                                          "CODE_COMPLAINT", "CODE_VIOLATION", "TAX_DELINQUENT"],
-                   "provider_preferences": {"discovery": ["collin_cad", "denton_gis", "TAX"]}},
+                   "provider_preferences": {"discovery": ["OWNER_ROLLS", "TAX"]}},
     },
     "problem_property": {
         "name": "Problem Property",
@@ -321,11 +322,14 @@ STARTERS = {
     },
     "pre_foreclosure": {
         "name": "Pre-Foreclosure",
-        "description": "Houses with a posted foreclosure notice.",
-        "data": ("Fed by foreclosure-notice lists you import (Properties > Import list, list type "
-                 "Foreclosure notices) - county postings, or a PropStream export if you ever have one."),
-        "free_today": False,
-        "fields": {"preferred_signals": ["PRE_FORECLOSURE", "TAX_DELINQUENT", "VACANT"],
+        "description": "Houses with a foreclosure sale notice filed with the county clerk.",
+        "data": ("Works today on free data in Dallas, Tarrant, Denton and Johnson counties: every foreclosure sale "
+                 "notice filed with the county clerk (trustee, substitute trustee, HOA, judicial). Other "
+                 "counties (Collin included): import a foreclosure-notice list (list type \"Foreclosure / "
+                 "trustee-sale postings\") or record a notice by hand."),
+        "free_today": True,
+        "fields": {"counties": ["Dallas", "Tarrant", "Denton", "Johnson"],
+                   "preferred_signals": ["PRE_FORECLOSURE", "TAX_SALE", "TAX_DELINQUENT", "VACANT"],
                    "provider_preferences": {"discovery": ["FORECLOSURE"]}},
     },
     "probate": {
@@ -407,7 +411,9 @@ def geography_match(strategy, prop) -> Tuple[bool, str]:
         checks.append((prop.zip_code or "")[:5] in [z[:5] for z in zips])
     counties = [norm(c) for c in lst(strategy, "counties")]
     if counties:
-        checks.append(norm(prop.county) in counties)
+        from app.services.evosense.sources.lgbs import wants_all_texas
+        checks.append(norm(prop.county) in counties
+                      or (wants_all_texas(counties) and (prop.state or "TX").upper()[:2] == "TX"))
     cities = [c.strip().lower() for c in lst(strategy, "cities")]
     if cities:
         checks.append((prop.city or "").strip().lower() in cities)

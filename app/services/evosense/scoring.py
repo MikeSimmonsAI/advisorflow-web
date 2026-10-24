@@ -107,6 +107,65 @@ def clean_options(raw: Any) -> Dict[str, Any]:
     return out
 
 
+# ── mortgage foreclosure: a scheduled sale, claimed or verified ────────────
+# An imported list's foreclosure claim (a "pre-foreclosure" list, a sale date
+# column, a sale date a person declared for a list) counts, at CLAIM_SHARE of
+# the signal's weight, until a clerk / trustee notice record confirms it. A
+# scheduled sale coming up soon adds urgency; a sale date that has passed is
+# not current distress (the sale may have happened, been cancelled or been
+# postponed) and scores 0 until checked. Property-tax status never enters here.
+CLAIM_SHARE = 0.75
+CLAIM_SOURCES = ("csv_import",)
+URGENCY = ((14, 12), (30, 9), (45, 6))       # days to the sale -> points (verified notice)
+
+
+def _sale_date(v):
+    from datetime import date, datetime as _dt
+    if not v:
+        return None
+    if isinstance(v, (date, _dt)):
+        return v if isinstance(v, date) and not isinstance(v, _dt) else v.date()
+    try:
+        return _dt.strptime(str(v)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def foreclosure_terms(stacked_signal: Dict[str, Any], today=None) -> Dict[str, Any]:
+    from datetime import date
+    today = today or date.today()
+    ev = stacked_signal.get("evidence") or []
+    def claimed(e):
+        p = e.get("provenance") or {}
+        return bool(p.get("claim")) or e.get("source") in CLAIM_SOURCES
+    verified_ev = [e for e in ev if not claimed(e)]
+    verified = bool(verified_ev)
+    pool = verified_ev or ev
+    dates = sorted({d for d in (_sale_date((e.get("provenance") or {}).get("sale_date")) for e in pool) if d})
+    upcoming = [d for d in dates if d >= today]
+    sale = upcoming[0] if upcoming else (dates[-1] if dates else None)
+    who = "clerk / trustee notice" if verified else "claimed by an imported list - not yet verified against the clerk notice"
+    out = {"verified": verified, "sale_date": sale.isoformat() if sale else None, "days": None,
+           "passed": False, "urgency": 0, "urgency_label": None,
+           "label": "Pre-foreclosure (%s)" % who}
+    if sale is None:
+        return out
+    days = (sale - today).days
+    out["days"] = days
+    if days < 0:
+        out["passed"] = True
+        out["label"] = ("Foreclosure sale date %s has passed - outcome unknown (sold, cancelled or postponed); "
+                        "not counted until checked" % sale.isoformat())
+        return out
+    pts = next((p for limit, p in URGENCY if days <= limit), 0)
+    if pts and not verified:
+        pts = int(round(pts * 2 / 3))
+    out["urgency"] = pts
+    out["urgency_label"] = "Foreclosure sale scheduled %s - %d day%s away (%s)" % (
+        sale.isoformat(), days, "" if days == 1 else "s", "verified notice" if verified else "claimed, unverified")
+    return out
+
+
 def version_for(weights: Optional[Dict[str, int]] = None, options: Optional[Dict[str, Any]] = None) -> str:
     """The score version THIS tenant's configuration produces: the platform
     version, plus a fingerprint of any weight / option override. A tenant
@@ -197,6 +256,15 @@ def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy,
             label = "Owned %s years (since deed transfer)" % prop.ownership_years if prop.ownership_years else label
         elif stype == "HIGH_EQUITY":
             continue                       # equity is scored once, below, from the number
+        fc = None
+        if stype == "PRE_FORECLOSURE":
+            fc = foreclosure_terms(s)
+            if fc["passed"]:
+                factors.append(_f(0, fc["label"], {"signal": stype, "sale_date": fc["sale_date"]}))
+                continue
+            if not fc["verified"]:
+                pts = int(round(pts * CLAIM_SHARE))
+            label = fc["label"]
         if s["freshness"] == SIG.AGING:
             pts = int(pts / 2)
             label += " (aging evidence, half weight)"
@@ -210,6 +278,11 @@ def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy,
                                            "record_sources": s.get("record_sources"),
                                            "evidence_date": s.get("evidence_date"),
                                            "observed_at": s["observed_at"]}))
+        if fc and fc["urgency"]:
+            total += fc["urgency"]
+            factors.append(_f(fc["urgency"], fc["urgency_label"],
+                              {"signal": stype, "sale_date": fc["sale_date"], "days": fc["days"],
+                               "verified": fc["verified"]}))
         elif spec.get("points", 0) == 0 and stype not in ("OTHER",):
             factors.append(_f(0, "%s — 0 points under this configuration" % label, {"signal": stype}))
 

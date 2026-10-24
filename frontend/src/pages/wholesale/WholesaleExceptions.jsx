@@ -2,6 +2,7 @@
  * whole CRM". A VA sees only what is assigned to them; an administrator sees
  * the whole queue, assigns it, sweeps for new exceptions and takes escalations. */
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../api/client'
 import '../../styles/shared.css'
 import './wholesale.css'
@@ -34,7 +35,10 @@ function Item({ it, manager, people, onDone }) {
         {it.is_test ? <Tag kind="sandbox">Test</Tag> : null}
       </div>
       {it.subject?.label ? <div className="ws-comp__sub">{it.subject.label}
-        {it.subject.phone ? ` · ${it.subject.phone}` : ''}{it.subject.email ? ` · ${it.subject.email}` : ''}</div> : null}
+        {it.subject.phone ? ` · ${it.subject.phone}` : ''}{it.subject.email ? ` · ${it.subject.email}` : ''}
+        {it.subject.opportunity_score != null ? ` · score ${it.subject.opportunity_score}` : ''}
+        {it.subject.type === 'evosense_property' && it.subject.property_id ? <>{' · '}
+          <Link to={`/wholesale/evosense/property/${it.subject.property_id}`}>Open property</Link></> : null}</div> : null}
       {it.detail ? <p style={{ margin: '8px 0' }}>{it.detail}</p> : null}
       <div className="ws-comp__sub">
         raised {fmtWhen(it.created_at)} · {it.status.replace(/_/g, ' ')}

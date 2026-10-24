@@ -8,7 +8,8 @@ from app.routers import calendar_router as CR
 from app.services.programs import appointments as A
 from tests.test_outreach_program import _lead_for, program  # noqa: F401 (fixture)
 
-DAY = date.today() + timedelta(days=30)
+# Inside the 14-day booking window every slot path now enforces (Oct 20).
+DAY = date.today() + timedelta(days=7)
 while DAY.weekday() >= 5:
     DAY += timedelta(days=1)
 

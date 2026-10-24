@@ -57,13 +57,23 @@ def _program(db: Session, user: User, managers_only: bool = True) -> OutreachPro
     prog = identity.program_for_org(db, _org_id(db, user))
     if prog is None:
         raise HTTPException(status_code=404, detail="This workspace has no outreach program.")
-    if managers_only and not lead_scope.is_manager_here(user, db):
+    if managers_only and not _sees_program(db, user, prog.organization_id):
         raise HTTPException(status_code=403, detail="Admin access required.")
     return prog
 
 
+def _sees_program(db: Session, user: User, org_id: Optional[str] = None) -> bool:
+    """Managers work the program; a SPECTATOR of this workspace reads it too.
+    A spectator's writes never get this far - deps.get_current_user refuses
+    them for every route (services/spectator.py)."""
+    if lead_scope.is_manager_here(user, db):
+        return True
+    from app.services import spectator as _spec
+    return _spec.holds_spectator_seat(db, user, org_id or _org_id(db, user)) and _spec.is_spectator(db, user)
+
+
 def _require_manager(db: Session, user: User) -> None:
-    if not lead_scope.is_manager_here(user, db):
+    if not _sees_program(db, user):
         raise HTTPException(status_code=403, detail="Admin access required.")
 
 
@@ -179,7 +189,7 @@ def _program_json(db: Session, prog: OutreachProgram) -> dict:
 def program_status(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     """Whether this workspace runs a program - a 200 either way, for the nav."""
     prog = identity.program_for_org(db, lead_scope.active_workspace_org_id(user, db) or user.organization_id)
-    manager = bool(prog) and lead_scope.is_manager_here(user, db)
+    manager = bool(prog) and _sees_program(db, user, prog.organization_id)
     return {"active": prog is not None and manager, "name": prog.name if prog else None}
 
 
@@ -358,6 +368,10 @@ class ProfileIn(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
     postal_code: Optional[str] = None
+    # #234 (Oct 19): what this location really offers a family who can't or
+    # won't come in. Stored in brand_settings; read by the appointment setter.
+    home_visits: Optional[bool] = None
+    offer_phone_alternative: Optional[bool] = None
 
 
 @router.patch("/locations/{profile_id}")
@@ -380,6 +394,11 @@ def update_location(profile_id: str, body: ProfileIn, db: Session = Depends(get_
         if k in data and loc is not None:
             setattr(loc, k, (data.pop(k) or "").strip() or None)
         data.pop(k, None)
+    offers = {k: data.pop(k) for k in ("home_visits", "offer_phone_alternative") if k in data}
+    if offers:
+        bs = identity.brand_settings(p)
+        bs.update({k: bool(v) for k, v in offers.items() if v is not None})
+        p.brand_settings = json.dumps(bs)
     if "advisor_names" in data:
         p.advisor_names = json.dumps([a.strip() for a in data.pop("advisor_names") or [] if a.strip()])
     for k in ("email_display_name", "sms_identity_name"):
@@ -495,7 +514,9 @@ def program_appointments(when: str = Query("upcoming"), location_id: Optional[st
     """Booked visits for the program's families: upcoming (default), past or all."""
     from app.models.models import BookingLink
     prog = _program(db, user)
-    now = datetime.utcnow()
+    from app.services import booking_time as _bt
+    from zoneinfo import ZoneInfo as _ZI
+    now = datetime.now(_ZI(_bt.DEFAULT_ZONE)).replace(tzinfo=None)   # booked times are stored as local wall time
     q = (db.query(BookingLink, Lead).join(Lead, Lead.id == BookingLink.lead_id)
          .filter(Lead.organization_id == prog.organization_id, BookingLink.booked_time.isnot(None),
                  Lead.is_test.isnot(True),
@@ -525,7 +546,7 @@ def program_appointments(when: str = Query("upcoming"), location_id: Optional[st
         items.append({"id": b.id, "lead_id": l.id,
                       "name": " ".join(x for x in (l.first_name, l.last_name) if x) or "(no name)",
                       "phone": l.phone, "email": l.email, "location_id": loc, "location": names.get(loc),
-                      "when": b.booked_time.isoformat() + "Z", "status": b.status,
+                      "when": _bt.wire(db, b), "status": b.status,
                       "label": getattr(b, "appt_label", None), "minutes": getattr(b, "appt_duration", None)})
     return {"items": items, "when": when}
 
@@ -701,7 +722,7 @@ def dashboard(location_id: Optional[str] = Query(None), db: Session = Depends(ge
         "reporting": _reporting(db, recs, resps, prog),
         "readiness": readiness(db, prog),
         "readiness_test": _readiness_summary(org_id, db),
-        "viewer_is_manager": lead_scope.is_manager_here(user, db),
+        "viewer_is_manager": _sees_program(db, user),
     }
 
 
@@ -1102,10 +1123,18 @@ def mark_response(response_id: str, body: MarkIn, db: Session = Depends(get_db),
                                          ProgramResponse.organization_id == prog.organization_id).first()
     if r is None:
         raise HTTPException(status_code=404, detail="Response not found.")
+    before = r.handling_status
     try:
         responses.mark(db, r, body.state, user)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    if body.state == "closed":
+        # No closed_by column: who closed it is recorded in the audit trail.
+        from app.routers.audit_log_router import log_action
+        log_action(db, prog.organization_id, user.id, action="sci.response_closed", target_type="program_response",
+                   target_id=r.id, before={"status": before}, after={"status": r.handling_status},
+                   details={"lead_id": r.lead_id, "closed_by": user.id,
+                            "closed_by_name": getattr(user, "full_name", None) or getattr(user, "email", None)})
     return {"id": r.id, "status": r.handling_status}
 
 
@@ -1980,15 +2009,42 @@ def _excel_to_csv(content: bytes, filename: Optional[str]) -> bytes:
     return frame.to_csv(index=False).encode("utf-8")
 
 
-def _load_source(db: Session, org, content: bytes, filename: Optional[str], apply: bool, actor: User) -> dict:
+def _master_keys(db: Session, org_id: str, lead_ids) -> set:
+    """The contact groups (masters) the given source Lead IDs belong to."""
+    ids, keys = sorted(set(lead_ids or [])), set()
+    for i in range(0, len(ids), 900):
+        for key, lid in db.query(ProgramSourceRecord.contact_master_key,
+                                 ProgramSourceRecord.source_lead_id).filter(
+                ProgramSourceRecord.organization_id == org_id,
+                ProgramSourceRecord.source_lead_id.in_(ids[i:i + 900])).all():
+            keys.add(key or lid)
+    return keys
+
+
+def _load_source(db: Session, org, content: bytes, filename: Optional[str], apply: bool, actor: User,
+                 *, stage_only: bool = False, only_lead_ids: Optional[List[str]] = None) -> dict:
     """Check (apply=False) or load (apply=True) a lead file: stage every row,
     HOLD every record still in a review state, promote the clean contacts to
     live leads, then check each new number mobile vs landline. Never records
-    consent, never enrols anyone in a campaign, never sends anything."""
+    consent, never enrols anyone in a campaign, never sends anything.
+
+    stage_only=True (with apply=True): write the staging rows and STOP - no
+    holds, no promotion to live leads, no line check. Every existing caller
+    leaves it False and behaves exactly as before.
+
+    only_lead_ids (with apply=True): promote ONLY the contact groups of these
+    source Lead IDs - a reviewed import batch makes its own families live and
+    never another file's staged rows. None (every existing caller) promotes
+    every staged contact, exactly as before."""
     from app.services.programs import holds, promote
     content = _excel_to_csv(content, filename)
     staged = importer.stage(db, org, content, filename=filename, dry_run=not apply, actor_id=actor.id)
     out = {"apply": apply, "stage": staged["summary"], "run_id": staged["run_id"]}
+    if stage_only and apply:
+        out["stage_only"] = True
+        keys = _master_keys(db, org.id, only_lead_ids) if only_lead_ids is not None else None
+        out["promotion_plan"] = {k: v for k, v in promote.plan(db, org, keys).items() if k != "groups"}
+        return out
     if not apply or staged["summary"].get("refused"):
         out["promotion_plan"] = {k: v for k, v in promote.plan(db, org).items() if k != "groups"}
         return out
@@ -1996,7 +2052,9 @@ def _load_source(db: Session, org, content: bytes, filename: Optional[str], appl
     db.commit()
     out["held"] = {k: v for k, v in held.items() if k != "source_lead_ids"}
     try:
-        out["promotion"] = promote.promote(db, org, actor, apply=True)
+        only_keys = _master_keys(db, org.id, only_lead_ids) if only_lead_ids is not None else None
+        out["promotion"] = promote.promote(db, org, actor, apply=True, only_keys=only_keys,
+                                           scope_counts=only_keys is not None)
     except HTTPException:
         db.rollback()
         raise
@@ -2004,7 +2062,12 @@ def _load_source(db: Session, org, content: bytes, filename: Optional[str], appl
     # never texted (Twilio Lookup, about $0.008 a number; approved by Mike).
     try:
         from app.services.programs import line_check
-        out["line_check"] = line_check.run_for_org(db, org.id, limit=2000)
+        # A file's own load looks up only that file's families, never one
+        # that opted out; every other caller checks the program as before.
+        out["line_check"] = (line_check.run_for_org(db, org.id, limit=2000)
+                             if only_lead_ids is None else
+                             line_check.run_for_org(db, org.id, limit=2000,
+                                                    source_lead_ids=only_lead_ids))
     except Exception as exc:                             # noqa: BLE001
         db.rollback()
         out["line_check"] = {"error": str(exc)[:200]}
@@ -2030,6 +2093,237 @@ async def import_leads(file: UploadFile = File(...), apply: bool = Form(False),
         raise HTTPException(status_code=413, detail="Files up to 10 MB.")
     org = db.query(Organization).filter(Organization.id == prog.organization_id).first()
     return _load_source(db, org, content, file.filename, apply, user)
+
+
+# ── THE INTELLIGENT LEAD IMPORTER, LOADING INTO SCI ─────────────────────────
+#
+# Steps 1-5 (upload, map, analyze, review) run on the universal importer's
+# engine through /program/intake (sci_intake_router.py). The final write is
+# SCI's own: the batch's reviewed rows are turned back into SCI's CSV
+# (programs/intake_bridge.py) and handed to `_load_source` above - the same
+# path "Import leads" has always used. The CRM commit never runs for these
+# batches (intake_router refuses it).
+
+SCI_STAGE, SCI_LOAD = "program_stage", "program_load"
+SCI_STALE_LOAD = timedelta(minutes=15)
+
+
+def sci_batch_frozen(b) -> bool:
+    """Staged or loaded into SCI: its rows are what SCI holds, so they can no
+    longer change here. Upload the file again to change anything."""
+    return b.commit_mode in (SCI_STAGE, SCI_LOAD)
+
+
+def _sci_importer(db: Session, user: User):
+    """Managers of THIS SCI workspace only. A spectator reads the program but
+    does not import into it; an advisor does neither."""
+    prog = _program(db, user)
+    if not lead_scope.is_manager_here(user, db):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    org = db.query(Organization).filter(Organization.id == prog.organization_id).first()
+    return prog, org
+
+
+def _sci_batch(db: Session, prog: OutreachProgram, batch_id: str):
+    from app.models.import_models import ImportBatch
+    from app.services.intake import engine as _eng
+    b = (db.query(ImportBatch)
+         .filter(ImportBatch.id == batch_id, ImportBatch.organization_id == prog.organization_id)
+         .first())
+    if b is None or not _eng.is_sci_batch(b):
+        raise HTTPException(status_code=404, detail="Import batch not found in this workspace.")
+    return b
+
+
+def _existing_in_sci(db: Session, org_id: str, lead_ids: List[str]) -> dict:
+    already = live = held = 0
+    ids = sorted(set(lead_ids))
+    for i in range(0, len(ids), 900):
+        for rec in db.query(ProgramSourceRecord).filter(
+                ProgramSourceRecord.organization_id == org_id,
+                ProgramSourceRecord.source_lead_id.in_(ids[i:i + 900])).all():
+            already += 1
+            live += 1 if rec.lead_id else 0
+            held += 1 if rec.on_hold else 0
+    return {"lead_ids": len(ids), "already_in_sci": already, "already_live": live,
+            "on_hold": held, "new": len(ids) - already}
+
+
+def _sci_blockers(b, built: dict, status: Optional[str] = None) -> List[str]:
+    out = []
+    if (status or b.status) not in ("ready_for_review", "staged", "committed"):
+        out.append("Analyze the file first (step 3).")
+    for c in built["missing_columns"]:
+        out.append("No column is mapped to '%s'. Map it on the Map Fields step." % c)
+    p = built["lead_id_problems"]
+    if p["blank"]:
+        out.append("%d row(s) have no Lead ID (rows %s). SCI needs one for every family - "
+                   "fix the file or skip those rows on Review."
+                   % (p["blank"], ", ".join(str(n) for n in p["blank_rows"][:20])))
+    for rep in p["repeated"][:20]:
+        out.append("Lead ID %s appears on rows %s. Skip the extra rows on Review."
+                   % (rep["lead_id"], ", ".join(str(n) for n in rep["rows"])))
+    und = built.get("undecided_duplicates") or {}
+    if und.get("count"):
+        out.append("%d possible duplicate(s) still need a decision on Review (rows %s): keep "
+                   "separate, merge or skip each one first."
+                   % (und["count"], ", ".join(str(n) for n in und["rows"][:20])))
+    if not built["included_rows"]:
+        out.append("No rows are left to load.")
+    return out
+
+
+def _sci_batch_json(b) -> dict:
+    return {"id": b.id, "batch_code": b.batch_code, "filename": b.source_filename,
+            "status": b.status, "commit_mode": b.commit_mode,
+            "committed_at": _iso(b.committed_at), "committed_by": b.committed_by_name}
+
+
+@router.get("/leads/import/batches/{batch_id}/sci-preview")
+def sci_import_preview(batch_id: str, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user)):
+    """What loading this reviewed batch into SCI would do. CHANGES NOTHING:
+    SCI's own check runs as a dry run (it records only that a check ran)."""
+    from app.services.programs import intake_bridge
+    prog, org = _sci_importer(db, user)
+    b = _sci_batch(db, prog, batch_id)
+    built = intake_bridge.build(db, b)
+    blockers = _sci_blockers(b, built)
+    out = {"batch": _sci_batch_json(b), "rows_in_file": b.original_row_count,
+           "rows_to_sci": built["included_rows"], "excluded": built["excluded"],
+           "columns": built["columns"], "missing_columns": built["missing_columns"],
+           "carried_columns": built["carried_columns"],
+           "lead_id_problems": built["lead_id_problems"],
+           "existing": _existing_in_sci(db, org.id, built["lead_ids"]),
+           "report": json.loads(b.commit_report_json) if b.commit_mode in (SCI_STAGE, SCI_LOAD)
+           and b.commit_report_json else None}
+    if built["included_rows"]:
+        res = _load_source(db, org, built["csv"], intake_bridge.sci_filename(b), False, user)
+        from app.services.programs.intake_bridge import translate_rows
+        out["stage"] = translate_rows(res["stage"], built["row_numbers"])
+        out["promotion_plan"] = res.get("promotion_plan")
+        if res["stage"].get("errors"):
+            blockers = blockers or ["SCI refuses this file: blank or repeated Lead IDs."]
+    out["blockers"] = blockers
+    out["can_load"] = not blockers and b.commit_mode != SCI_LOAD
+    out["sends_nothing"] = True
+    return out
+
+
+class SciLoadIn(BaseModel):
+    mode: str = "stage"
+
+
+@router.post("/leads/import/batches/{batch_id}/load")
+def sci_import_load(batch_id: str, body: Optional[SciLoadIn] = None, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user)):
+    """mode="stage" (the default, safe): write SCI's staging rows only - no
+    family is made live. mode="load": SCI's full load - stage, hold every
+    record that needs a look, add the clean families to Leads, check new
+    numbers mobile vs landline. Neither texts, emails, enrols anyone or
+    touches an existing family's contact preferences."""
+    from app.models.import_models import ImportBatch, ImportBatchStatus
+    from app.services.intake import audit as _audit, context as _ctx
+    from app.services.programs import intake_bridge
+    mode = (body.mode if body else "stage") or "stage"
+    if mode not in ("stage", "load"):
+        raise HTTPException(status_code=400, detail="mode must be 'stage' or 'load'.")
+    prog, org = _sci_importer(db, user)
+    b = _sci_batch(db, prog, batch_id)
+    stored = json.loads(b.commit_report_json) if b.commit_report_json else None
+    # IDEMPOTENT: a loaded batch is never loaded twice (a double click, a
+    # retry); staging a staged batch again changes nothing either.
+    if (b.commit_mode == SCI_LOAD and b.status == ImportBatchStatus.COMMITTED) or \
+            (mode == "stage" and b.commit_mode == SCI_STAGE and b.status == ImportBatchStatus.STAGED):
+        return {"batch": _sci_batch_json(b), "report": stored, "repeat": True}
+    # A load that died mid-way (the process was killed) leaves the batch
+    # 'committing'. After SCI_STALE_LOAD it may be retried: SCI's load is
+    # idempotent on the source Lead ID, so a retry finishes rather than
+    # duplicates. The status it goes back to on failure is the one before.
+    observed, observed_hb = b.status, b.heartbeat_at
+    stale = (observed == ImportBatchStatus.COMMITTING
+             and (observed_hb is None
+                  or datetime.utcnow() - observed_hb.replace(tzinfo=None) > SCI_STALE_LOAD))
+    if stale:
+        before = ImportBatchStatus.STAGED if b.commit_mode == SCI_STAGE else ImportBatchStatus.READY_FOR_REVIEW
+    elif observed == ImportBatchStatus.COMMITTING:
+        raise HTTPException(status_code=409, detail="This batch is already being loaded.")
+    elif observed not in (ImportBatchStatus.READY_FOR_REVIEW, ImportBatchStatus.STAGED):
+        raise HTTPException(status_code=409, detail="This batch is '%s'. Analyze the file first." % observed)
+    else:
+        before = observed
+    built = intake_bridge.build(db, b)
+    blockers = _sci_blockers(b, built, status=before)
+    if blockers:
+        raise HTTPException(status_code=422, detail={"message": blockers[0], "blockers": blockers})
+    # CLAIM THE BATCH (two clicks, two servers): only the request whose
+    # conditional UPDATE still sees the status (and heartbeat) it read goes on.
+    claim = db.query(ImportBatch).filter(ImportBatch.id == b.id, ImportBatch.status == observed)
+    if stale:
+        claim = (claim.filter(ImportBatch.heartbeat_at.is_(None)) if observed_hb is None
+                 else claim.filter(ImportBatch.heartbeat_at == observed_hb))
+    claimed = claim.update({ImportBatch.status: ImportBatchStatus.COMMITTING,
+                            ImportBatch.heartbeat_at: datetime.utcnow()}, synchronize_session=False)
+    db.commit()
+    if not claimed:
+        raise HTTPException(status_code=409, detail="This batch is already being loaded.")
+
+    def _release():
+        db.rollback()
+        db.query(ImportBatch).filter(ImportBatch.id == b.id).update(
+            {ImportBatch.status: before}, synchronize_session=False)
+        db.commit()
+
+    try:
+        res = _load_source(db, org, built["csv"], intake_bridge.sci_filename(b), True, user,
+                           stage_only=(mode == "stage"), only_lead_ids=built["lead_ids"])
+    except Exception:
+        _release()
+        raise
+    st = intake_bridge.translate_rows(res.get("stage") or {}, built["row_numbers"])
+    if st.get("refused"):
+        _release()
+        raise HTTPException(status_code=422, detail={"message": "SCI refused the file: %s" % st["refused"],
+                                                     "blockers": [st["refused"]]})
+    report = {
+        "mode": mode, "run_id": res.get("run_id"),
+        "rows_in_file": b.original_row_count, "rows_sent_to_sci": built["included_rows"],
+        "staged": st.get("staged", 0), "people": st.get("contact_masters", 0),
+        "location_mapped": st.get("location_mapped", 0), "location_review": st.get("location_review", 0),
+        "duplicate_review_rows": st.get("duplicate_review_rows", 0),
+        "data_note_rows": st.get("data_note_rows", 0), "bad_phone_rows": st.get("bad_phone_rows", 0),
+        "no_phone_rows": st.get("no_phone_rows", 0),
+        "excluded": built["excluded"],
+        "held": (res.get("held") or {}).get("held", 0),
+        "families_created": (res.get("promotion") or {}).get("created", 0),
+        "already_live": (res.get("promotion") or res.get("promotion_plan") or {}).get("already_live", 0),
+        "held_not_promoted": (res.get("promotion") or res.get("promotion_plan") or {}).get("held_not_promoted", 0),
+        "line_check": res.get("line_check"),
+        "sci": {k: v for k, v in res.items() if k != "stage"} | {"stage": st},
+        "texts_sent": 0, "emails_sent": 0, "enrolled": 0,
+    }
+    db.expire(b)
+    b = db.query(ImportBatch).filter(ImportBatch.id == b.id).first()
+    b.commit_mode = SCI_LOAD if mode == "load" else SCI_STAGE
+    b.commit_report_json = json.dumps(report, default=str)
+    b.status = ImportBatchStatus.COMMITTED if mode == "load" else ImportBatchStatus.STAGED
+    b.stage = "committed" if mode == "load" else "staged"
+    b.heartbeat_at = None
+    if mode == "load":
+        b.committed_at = datetime.utcnow()
+        b.committed_by_id = user.id
+        b.committed_by_name = getattr(user, "full_name", None) or getattr(user, "email", None)
+        b.committed_rows = report["staged"]
+    try:
+        ctx = _ctx.resolve(db, user)
+        _audit.record(db, ctx, "intake.sci_loaded" if mode == "load" else "intake.sci_staged", b.id,
+                      {k: report[k] for k in ("mode", "rows_sent_to_sci", "staged", "held",
+                                              "families_created", "location_review")}
+                      | {"excluded": report["excluded"]["total"], "run_id": report["run_id"]})
+    except HTTPException:
+        pass
+    db.commit()
+    return {"batch": _sci_batch_json(b), "report": report, "repeat": False}
 
 
 @god_router.post("/{organization_id}/load-source")
@@ -2489,15 +2783,30 @@ def audit_lead(lead_id: str, db: Session = Depends(get_db), user: User = Depends
 
 # ── appointment setter: conversations and the synthetic simulator ──────────
 
+def _local_wire(db, conv, at):
+    """A setter time (local wall time of the program's booking calendar) with its offset."""
+    if at is None:
+        return None
+    from app.services import booking_time
+    memo = db.info.setdefault("_sci_booking_zone", {})
+    if conv.organization_id not in memo:                 # once per org per request
+        from app.services.programs.identity import program_for_org
+        prog = program_for_org(db, conv.organization_id)
+        memo[conv.organization_id] = (booking_time.zone_of_user(db, getattr(prog, "booking_user_id", None))
+                                      if prog else booking_time.DEFAULT_ZONE)
+    return booking_time.to_wire(at.replace(tzinfo=None) if at.tzinfo else at, memo[conv.organization_id])
+
+
 def _conv_json(db, conv, lead=None, turns: bool = False) -> dict:
     from app.models.program_models import ProgramConversationTurn
     from app.services.programs import appointments as _A
     out = {"id": conv.id, "lead_id": conv.lead_id, "state": conv.state, "is_test": bool(conv.is_test),
            "appointment_kind": conv.appointment_kind, "service_type": conv.service_type,
-           "offered": [s.isoformat() for s in _A.offered(conv)],
+           # offered/booked times are the program calendar's LOCAL wall time: sent with their offset
+           "offered": [_local_wire(db, conv, s) for s in _A.offered(conv)],
            "offered_text": [_A.describe(s) for s in _A.offered(conv)],
            "callback_window": conv.callback_window,
-           "booked_time": conv.booked_time.isoformat() if conv.booked_time else None,
+           "booked_time": _local_wire(db, conv, conv.booked_time),
            "handoff_reason": conv.handoff_reason, "ai_turns": conv.ai_turns,
            "last_family_at": conv.last_family_at.isoformat() if conv.last_family_at else None,
            "last_ai_at": conv.last_ai_at.isoformat() if conv.last_ai_at else None,
@@ -2559,8 +2868,22 @@ def hand_conversation(lead_id: str, body: ConversationHandIn, db: Session = Depe
             .order_by(ProgramConversation.created_at.desc()).first())
     if conv is None:
         raise HTTPException(status_code=404, detail="No conversation for this contact.")
-    conv.state = body.state
-    conv.handoff_reason = ("taken by %s" % (user.email or user.id)) if body.state == "human" else None
+    lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == prog.organization_id).first()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="No conversation for this contact.")
+    # Same path as SCI Live's AI/Human Handling: the opt-out / Do Not Contact
+    # block, cancelled follow-ups, dropped held replies, and an audit entry.
+    from app.services.programs import ai_setter
+    owner = ai_setter.HUMAN_OWNER if body.state == "human" else ai_setter.AI_OWNER
+    try:
+        conv = ai_setter.set_owner(db, lead, owner, actor=user.id,
+                                   note=("taken by %s" % (user.email or user.id)) if owner == ai_setter.HUMAN_OWNER
+                                   else None)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    from app.routers.audit_log_router import log_action
+    log_action(db, prog.organization_id, user.id, action="sci.conversation_owner", target_type="lead",
+               target_id=lead.id, details={"owner": owner, "via": "conversations.hand"})
     db.commit()
     return _conv_json(db, conv)
 
@@ -2863,7 +3186,8 @@ def setter_live_test_cleanup(db: Session = Depends(get_db), user: User = Depends
                                           BookingLink.status.in_(("booked", "confirmed"))).all():
         had_event = b.calendar_event_id
         res = cancel_calendar_event(db, b)
-        out.append({"booking_id": b.id, "booked_time": b.booked_time.isoformat() if b.booked_time else None,
+        from app.services import booking_time as _bt
+        out.append({"booking_id": b.id, "booked_time": _bt.wire(db, b) if b.booked_time else None,
                     "calendar_event_id": had_event, "result": res.get("note"), "status": b.status})
     for c in db.query(ProgramConversation).filter(ProgramConversation.lead_id == lead.id).all():
         c.state = "stopped"

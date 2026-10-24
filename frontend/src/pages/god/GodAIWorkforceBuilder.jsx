@@ -36,8 +36,9 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import GodStyles from './GodStyles'
 import { T } from './godTheme'
+import GodAISwitchboard from './GodAISwitchboard'
 
-const TABS = ['Overview', 'Brand terms', 'Deployments', 'Proof']
+const TABS = ['Turn on / off', 'Overview', 'Brand terms', 'Deployments', 'Proof']
 
 const MODES = [
   ['addon', 'Recurring add-on'],
@@ -93,7 +94,8 @@ const message = (e, fallback) =>
 
 export default function GodAIWorkforceBuilder () {
   const navigate = useNavigate()
-  const [tab, setTab] = useState('Overview')
+  const [tab, setTab] = useState('Turn on / off')
+  const [brandList, setBrandList] = useState([])
   const [overview, setOverview] = useState(null)
   const [templates, setTemplates] = useState([])
   const [brandId, setBrandId] = useState('')
@@ -130,6 +132,12 @@ export default function GodAIWorkforceBuilder () {
   useEffect(() => {
     if (tab === 'Deployments') loadDeployments()
   }, [tab, loadDeployments])
+  useEffect(() => {
+    if (tab !== 'Brand terms' || brandList.length) return
+    api.get('/god/ai-workforce/brands')
+      .then(r => setBrandList(r.brands || []))
+      .catch(e => setErr(message(e, 'Could not load the brand list.')))
+  }, [tab, brandList.length])
 
   async function loadBrand () {
     if (!brandId.trim()) return
@@ -229,6 +237,8 @@ export default function GodAIWorkforceBuilder () {
           ))}
         </div>
 
+        {tab === 'Turn on / off' && <GodAISwitchboard />}
+
         {tab === 'Overview' && (
           <>
             <div className="gm-card" style={{ marginBottom: 16 }}>
@@ -289,9 +299,12 @@ export default function GodAIWorkforceBuilder () {
           <div className="gm-card">
             <Sec>Brand commercial terms</Sec>
             <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-              <input className="gm-input" placeholder="Brand (platform) id"
+              <select className="gm-input" aria-label="Brand"
                 value={brandId} onChange={e => setBrandId(e.target.value)}
-                style={{ minWidth: 340 }} />
+                style={{ minWidth: 340 }}>
+                <option value="">Pick a brand…</option>
+                {brandList.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
               <button className="gm-btn gm-primary" onClick={loadBrand} disabled={busy}>
                 LOAD
               </button>

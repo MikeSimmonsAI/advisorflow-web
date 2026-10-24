@@ -135,6 +135,20 @@ def test_capabilities_are_rated_per_market(client, db_session, sample_org, dfw_f
     _enable(client, h, "lgbs_tax_sales")
     prov = ok(client.get("/wholesale/evosense/providers", headers=h))
     tax = {m["market"]: m for m in {c["capability"]: c for c in prov["capabilities"]}["TAX"]["by_market"]}
+    # Statewide by declaration is not coverage: Dallas is covered once the
+    # statewide source has actually returned a Dallas record.
+    assert tax["Dallas County"]["kind"] != "real"
+    from app.models.evosense_models import EvoSenseObservation, EvoSenseProperty
+    org_id = sample_org.id
+    p = EvoSenseProperty(organization_id=org_id, street_address="1 TAX SALE LN", city="Dallas", state="TX",
+                         zip_code="75215", county="Dallas", address_key="k-lgbs-dallas")
+    db_session.add(p)
+    db_session.flush()
+    db_session.add(EvoSenseObservation(organization_id=org_id, property_id=p.id, provider_key="lgbs_tax_sales",
+                                       source_reference="LGBS:test", connector_kind="real", capability="TAX"))
+    db_session.commit()
+    prov = ok(client.get("/wholesale/evosense/providers", headers=h))
+    tax = {m["market"]: m for m in {c["capability"]: c for c in prov["capabilities"]}["TAX"]["by_market"]}
     assert tax["Dallas County"]["kind"] == "real"
     code = {m["market"]: m for m in caps["CODE_VIOLATION"]["by_market"]}
     assert "City of Dallas only" in code["Dallas County"]["label"]

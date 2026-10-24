@@ -1,0 +1,80 @@
+/*
+ * EvoSys Pro redesign tokens (UI-REDESIGN lane, docs/redesign/RULES.md).
+ *
+ * SCOPED, NOT GLOBAL. Everything hangs off `.ev-ds` so adopting the design
+ * system is opt-in per screen; nothing here re-points index.css tokens that
+ * the rest of the app depends on.
+ *
+ * Business identity = `data-accent` on any element inside `.ev-ds`. Each
+ * business sets --acc (main), --acc-strong (text/button, AA on white),
+ * --acc-soft (tints) and --acc-ink (deep tone for artwork).
+ */
+.ev-ds {
+  --ev-font: Inter, "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ev-font-display: "Space Grotesk", Inter, system-ui, sans-serif;
+
+  --ev-bg: #f4f7fc;
+  --ev-surface: #ffffff;
+  --ev-surface-2: #f7f9fd;
+  --ev-line: #e2e9f3;
+  --ev-line-strong: #cbd7e8;
+  --ev-ink: #0f1f3a;
+  --ev-ink-2: #3c4f6b;
+  --ev-ink-3: #5f7290;
+  --ev-brand: #1d5fd1;
+  --ev-brand-strong: #164bb0;
+  --ev-brand-soft: #e8f0ff;
+
+  --ev-radius-sm: 10px;
+  --ev-radius: 16px;
+  --ev-radius-lg: 22px;
+  --ev-shadow-sm: 0 1px 2px rgba(15, 31, 58, .05), 0 4px 14px rgba(15, 31, 58, .05);
+  --ev-shadow: 0 2px 4px rgba(15, 31, 58, .04), 0 14px 34px rgba(15, 31, 58, .08);
+  --ev-shadow-lg: 0 4px 8px rgba(15, 31, 58, .05), 0 22px 50px rgba(15, 31, 58, .14);
+  --ev-focus: 0 0 0 3px #fff, 0 0 0 5px var(--acc, var(--ev-brand));
+
+  --ev-gutter: clamp(16px, 3.4vw, 40px);
+  --ev-max: 1480px;
+
+  font-family: var(--ev-font);
+  color: var(--ev-ink);
+}
+
+/* ---- business accents (Rule 3: each business keeps its own identity) ---- */
+.ev-ds [data-accent],
+.ev-ds[data-accent] { --acc: var(--ev-brand); --acc-strong: var(--ev-brand-strong); --acc-soft: var(--ev-brand-soft); --acc-ink: #0e2f6b; }
+.ev-ds [data-accent="sci"]       { --acc: #2f6fdb; --acc-strong: #1f56b8; --acc-soft: #e8f0fe; --acc-ink: #123a7a; }
+.ev-ds [data-accent="energy"]    { --acc: #f2a516; --acc-strong: #9a5f00; --acc-soft: #fff5de; --acc-ink: #6b4300; }
+.ev-ds [data-accent="roofing"]   { --acc: #ee6a24; --acc-strong: #b5470f; --acc-soft: #fff0e6; --acc-ink: #7a2f08; }
+.ev-ds [data-accent="wholesale"] { --acc: #22a06b; --acc-strong: #137a4f; --acc-soft: #e5f7ee; --acc-ink: #0b4d31; }
+.ev-ds [data-accent="insurance"] { --acc: #1595a6; --acc-strong: #0d6f7d; --acc-soft: #e2f5f7; --acc-ink: #07434c; }
+.ev-ds [data-accent="funeral"]   { --acc: #7357b8; --acc-strong: #5a3f9e; --acc-soft: #f1edfa; --acc-ink: #34216a; }
+.ev-ds [data-accent="office"]    { --acc: #475569; --acc-strong: #334155; --acc-soft: #eef1f5; --acc-ink: #1e293b; }
+.ev-ds [data-accent="general"]   { --acc: #5b6b85; --acc-strong: #44526a; --acc-soft: #eef1f6; --acc-ink: #27324a; }
+
+/* ---- shared primitives ---- */
+.ev-container { width: 100%; max-width: var(--ev-max); margin: 0 auto; padding-left: var(--ev-gutter); padding-right: var(--ev-gutter); box-sizing: border-box; }
+
+.ev-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 42px; padding: 0 18px; border-radius: 11px; border: 0;
+  font: 700 14px/1 var(--ev-font); letter-spacing: -.005em; cursor: pointer;
+  text-decoration: none; transition: background-color .15s, transform .15s, box-shadow .15s;
+}
+.ev-btn--primary { background: var(--acc-strong, var(--ev-brand-strong)); color: #fff; }
+.ev-btn--primary:hover { background: var(--acc-ink, #0e2f6b); }
+.ev-btn--ghost { background: transparent; color: var(--ev-ink-2); border: 1px solid var(--ev-line-strong); }
+.ev-btn--ghost:hover { background: var(--ev-surface-2); color: var(--ev-ink); }
+.ev-btn:focus-visible { outline: none; box-shadow: var(--ev-focus); }
+
+.ev-eyebrow { font: 800 11px/1.2 var(--ev-font); letter-spacing: .14em; text-transform: uppercase; color: var(--acc-strong, var(--ev-brand-strong)); }
+
+.ev-pill {
+  display: inline-flex; align-items: center; gap: 7px; padding: 6px 11px; border-radius: 999px;
+  background: var(--ev-surface); border: 1px solid var(--ev-line); color: var(--ev-ink-2);
+  font: 600 12px/1 var(--ev-font); white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ev-ds *, .ev-ds *::before, .ev-ds *::after { transition: none !important; animation: none !important; }
+}

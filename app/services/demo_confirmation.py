@@ -332,6 +332,10 @@ def send(db: Session, appt, *, actor=None, graphic_url=None, graphic_alt=None,
     to = getattr(appt, "prospect_email", None)
     if not to:
         raise ValueError("This appointment has no prospect email address.")
+    # SALES DO NOT CONTACT — the same refusal shape as a missing address.
+    from app.services import sales_suppression as _sdnc
+    if _sdnc.for_appointment(db, appt):
+        raise ValueError(_sdnc.REFUSAL)
 
     ident = brand_identity(db, appt)
     industry, rep = _context(db, appt)

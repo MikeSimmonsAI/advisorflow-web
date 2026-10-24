@@ -407,8 +407,12 @@ async def import_preview(file: UploadFile = File(...), db: Session = Depends(get
 @router.post("/import")
 async def import_properties(file: UploadFile = File(...), strategy_id: Optional[str] = Form(None),
                             list_kind: Optional[str] = Form(None), list_source: Optional[str] = Form(None),
+                            declared_sale_date: Optional[str] = Form(None),
                             db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
                             _g: User = Depends(require_not_observation)):
+    """Import a property list. `declared_sale_date`: a scheduled foreclosure
+    sale date the PERSON states for every row that has no sale date of its own
+    (recorded as their claim). The file name is never read for dates."""
     org_id = svc.write_org_id(db, user)
     raw = await file.read()
     if len(raw) > 25 * 1024 * 1024:
@@ -421,7 +425,8 @@ async def import_properties(file: UploadFile = File(...), strategy_id: Optional[
     try:
         out = HU.import_csv(db, org_id, text, user=user, strategy=strategy,
                             filename=file.filename or "upload.csv",
-                            list_kind=(list_kind or None), list_source=((list_source or "").strip()[:120] or None))
+                            list_kind=(list_kind or None), list_source=((list_source or "").strip()[:120] or None),
+                            declared_sale_date=(declared_sale_date or "").strip() or None)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     db.commit()
@@ -645,8 +650,37 @@ def add_contact(property_id: str, payload: ContactIn, db: Session = Depends(get_
     C.log_event(db, org_id, "contact.manual", property_id=prop.id, user=user, actor_type=C.ACTOR_USER,
                 is_test=prop.is_test, summary="Contact added by hand")
     EV.rescore(db, prop)
+    from app.services.evosense import readiness as RD
+    RD.close_investigation(db, org_id, prop, user, "%s added by %s" % (
+        "Phone" if payload.kind == "phone" else "Email", user.full_name or user.email or "a user"))
     db.commit()
     return {"contacts": [c.id for c in touched], "status": prop.status}
+
+
+@router.get("/opportunity-queue")
+def opportunity_queue(limit: int = 50, county: Optional[str] = None, step: Optional[str] = None,
+                      include_test: bool = False, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_or_observer)):
+    """Which opportunities deserve action first, why, and what to do next. Reads only."""
+    from app.services.evosense import readiness as RD
+    return RD.queue(db, _read_org(db, user), limit=limit, county=county, step=step,
+                    include_test=include_test)
+
+
+@router.get("/funnel")
+def acquisition_funnel(include_test: bool = False, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_or_observer)):
+    """Where opportunities are getting stuck, counted from records. Reads only."""
+    from app.services.evosense import readiness as RD
+    return RD.funnel(db, _read_org(db, user), include_test=include_test)
+
+
+@router.get("/properties/{property_id}/readiness")
+def property_readiness(property_id: str, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_or_observer)):
+    from app.services.evosense import readiness as RD
+    org_id = _read_org(db, user)
+    return RD.for_property(db, _prop(db, org_id, property_id))
 
 
 class PermissionLinkIn(BaseModel):
@@ -707,6 +741,9 @@ def create_permission_link(property_id: str, payload: PermissionLinkIn, request:
                 % PM.last4(link.phone_normalized))
     if contact_added:
         EV.rescore(db, prop)
+        from app.services.evosense import readiness as RD
+        RD.close_investigation(db, org_id, prop, user, "Owner's number added with a permission link by %s"
+                               % (user.full_name or user.email or "a user"))
     db.commit()
     out = PM.link_json(link)
     out.update(url=url, contact_added=contact_added, **PM.message_text(link.business_name, link.owner_name, url))
@@ -788,8 +825,11 @@ def mark_wrong_party(property_id: str, contact_id: str, db: Session = Depends(ge
     C.log_event(db, org_id, "contact.wrong_party", property_id=prop.id, user=user,
                 actor_type=C.ACTOR_USER, is_test=prop.is_test, summary="Contact marked wrong party")
     EV.rescore(db, prop)
+    from app.services.evosense import readiness as RD
+    reopened = RD.reopen_investigation(db, org_id, prop, user,
+                                       "The number on file reached the wrong person.")
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "investigation_id": getattr(reopened, "id", None)}
 
 
 class ContactVerifyIn(BaseModel):
@@ -887,18 +927,62 @@ def add_evosense_comp(property_id: str, payload: EvoCompIn, db: Session = Depend
 class SignalIn(BaseModel):
     signal_type: str
     note: Optional[str] = None
+    # A foreclosure / tax-sale notice a person read on the county record:
+    document_number: Optional[str] = None
+    sale_date: Optional[str] = None
+    record_url: Optional[str] = None
+    case_status: Optional[str] = None          # scheduled | postponed | canceled | resolved
+    foreclosure_type: Optional[str] = None
+    filed_date: Optional[str] = None           # the clerk's filed / posted stamp, YYYY-MM-DD
+
+
+FORECLOSURE_ENTRY = ("PRE_FORECLOSURE", "TAX_SALE")
 
 
 @router.post("/properties/{property_id}/signals")
 def add_signal(property_id: str, payload: SignalIn, db: Session = Depends(get_db),
                user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """A signal a person observed. A foreclosure / tax sale entered by hand is
+    VERIFIED only with the record's document number and the sale date a person
+    read on it; without them it is kept as that person's CLAIM."""
     org_id = svc.write_org_id(db, user)
     prop = _prop(db, org_id, property_id)
     if payload.signal_type not in SIG.CATALOG or SIG.CATALOG[payload.signal_type].get("derived"):
         raise HTTPException(status_code=422, detail="Choose a signal a person can observe.")
+    prov: Dict[str, Any] = {"user": user.id}
+    value = payload.note or "entered by a person"
+    status = None
+    ref = None
+    if payload.signal_type in FORECLOSURE_ENTRY:
+        from app.services.evosense import scoring as SC
+        status = (payload.case_status or "scheduled").strip().lower()
+        if status not in ("scheduled", "postponed", "canceled", "resolved"):
+            raise HTTPException(status_code=422, detail="Status must be scheduled, postponed, canceled or resolved.")
+        sale = SC._sale_date(payload.sale_date) if payload.sale_date else None
+        if payload.sale_date and sale is None:
+            raise HTTPException(status_code=422, detail="Sale date must be YYYY-MM-DD.")
+        filed = SC._sale_date(payload.filed_date) if payload.filed_date else None
+        if payload.filed_date and filed is None:
+            raise HTTPException(status_code=422, detail="Filed date must be YYYY-MM-DD.")
+        doc = (payload.document_number or "").strip()[:60] or None
+        prov.update({"sale_date": sale.isoformat() if sale else None, "document": doc,
+                     "recorded": filed.isoformat() if filed else None,
+                     "document_url": (payload.record_url or "").strip()[:500] or None,
+                     "foreclosure_type": (payload.foreclosure_type or "").strip()[:40] or None,
+                     "matched_by": "read on the county record by a person",
+                     # what the person read (grantor, instrument, parcel match...): kept whole here,
+                     # the signal's one-line value is cut at 200 characters
+                     "note": (payload.note or "").strip()[:4000] or None})
+        if not (doc and sale):
+            prov["claim"] = "operator"            # no document number + date: a claim, not a verified notice
+        ref = "OPERATOR:%s:%s" % (payload.signal_type, doc or (sale.isoformat() if sale else "undated"))
+        value = "%s %s%s - %s%s" % ("Foreclosure sale" if payload.signal_type == "PRE_FORECLOSURE" else "Tax sale",
+                                    status, " %s" % sale.isoformat() if sale else "",
+                                    ("document %s read on the county record" % doc) if doc else "entered without a document number (claim)",
+                                    "; %s" % payload.note if payload.note else "")
     SIG.upsert(db, prop, payload.signal_type, source="operator", connector_kind=C.MANUAL,
-               confidence=70, normalized_value=payload.note or "entered by a person",
-               provenance={"user": user.id}, user=user)
+               confidence=80 if (status and not prov.get("claim")) else 70, normalized_value=value,
+               provenance=prov, case_status=status, source_reference=ref, user=user)
     C.log_event(db, org_id, "signal.manual", property_id=prop.id, user=user, actor_type=C.ACTOR_USER,
                 is_test=prop.is_test, summary="Signal added: %s" % payload.signal_type)
     EV.rescore(db, prop)
@@ -1024,6 +1108,60 @@ class FactsIn(BaseModel):
     bathrooms: Optional[float] = None
     square_feet: Optional[float] = None
     year_built: Optional[float] = None
+
+
+class IdentityIn(BaseModel):
+    street_address: Optional[str] = None
+    city: Optional[str] = None
+    zip_code: Optional[str] = None
+    county: Optional[str] = None
+    parcel_apn: Optional[str] = None
+    evidence_url: str
+    note: Optional[str] = None
+
+
+@router.post("/properties/{property_id}/identity")
+def correct_identity(property_id: str, payload: IdentityIn, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """Correct a property's account number / county / address from an official
+    record (admin). Audited with before/after and the record's address; then
+    the free county lookups answer for the corrected house. The owner is never
+    typed in here."""
+    from app.services.evosense import identity_fix as IF
+    org_id = svc.write_org_id(db, user)
+    _admin(user, db)
+    prop = _prop(db, org_id, property_id)
+    sent = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if k in IF.FIELDS}
+    try:
+        return IF.correct(db, org_id, prop, sent, user=user, evidence_url=payload.evidence_url, note=payload.note)
+    except IF.IdentityConflict as exc:
+        raise HTTPException(status_code=409, detail="%s already belongs to another property (%s); that needs a "
+                                                    "merge review, not an edit." % (exc.key, exc.other_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+class MergeIn(BaseModel):
+    duplicate_id: str
+    reason: str
+
+
+@router.post("/properties/{property_id}/merge")
+def merge_duplicate(property_id: str, payload: MergeIn, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """Fold a duplicate property for the SAME house into this one (admin).
+    Refused for different houses or a duplicate somebody has worked."""
+    from app.services.evosense import identity_fix as IF
+    org_id = svc.write_org_id(db, user)
+    _admin(user, db)
+    keep = _prop(db, org_id, property_id)
+    drop = _prop(db, org_id, payload.duplicate_id)
+    if len((payload.reason or "").strip()) < 5:
+        raise HTTPException(status_code=422, detail="Say why these are the same house.")
+    try:
+        return IF.merge_duplicate(db, org_id, keep, drop, user=user, reason=payload.reason)
+    except IF.MergeRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.patch("/properties/{property_id}/facts")
@@ -1251,6 +1389,116 @@ def hunt_now(strategy_id: str, background: bool = False, db: Session = Depends(g
                 "note": "Follow progress in the strategy's runs and the event log."}
     run = HU.run_strategy(db, org_id, s, trigger="manual", user=user)
     return {"run_id": run.id, "status": run.status, "error": run.error, "counts": C.jload(run.counts, {})}
+
+
+# ── imported-list cohorts (e.g. the 2010 Top 100) ──────────────────────────
+
+@router.get("/cohorts")
+def list_cohorts(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services.evosense import cohort as CO
+    return {"cohorts": CO.cohorts(db, _read_org(db, user))}
+
+
+@router.get("/cohorts/{kind}")
+def cohort_view(kind: str, request: Request, status_only: bool = False, db: Session = Depends(get_db),
+                user: User = Depends(require_tenant_user)):
+    """Every property one imported list brought in: current owner, tax and
+    foreclosure status with their evidence, score with what earned it and what
+    holds it back, priority and the next action. Read-only.
+
+    `status_only=1`: just whether a re-check is running and the last one's
+    result - what the page polls while a re-check runs, instead of re-reading
+    every row. The full answer is gzip-compressed when the browser accepts it
+    (the Top 100 is ~250 KB of JSON, ~25 KB compressed)."""
+    from app.services.evosense import cohort as CO
+    org_id = _read_org(db, user)
+    try:
+        CO._prefix(kind)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Unknown list")
+    if status_only:
+        return {"kind": kind, "last_recheck": CO.last_recheck(db, org_id, kind),
+                "rechecking": CO.running(org_id, kind, db)}
+    rs = CO.rows(db, org_id, kind)
+    if not rs:
+        raise HTTPException(status_code=404, detail="No properties came from that list")
+    body = {"kind": kind, "summary": CO.summary(rs), "rows": rs,
+            "last_recheck": CO.last_recheck(db, org_id, kind), "rechecking": CO.running(org_id, kind, db)}
+    if "gzip" not in (request.headers.get("accept-encoding") or "").lower():
+        return body
+    import gzip as _gz
+    import json as _json
+    from fastapi.encoders import jsonable_encoder
+    from fastapi.responses import Response as _Resp
+    raw = _json.dumps(jsonable_encoder(body), separators=(",", ":")).encode("utf-8")
+    return _Resp(content=_gz.compress(raw, compresslevel=6), media_type="application/json",
+                 headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
+
+
+@router.post("/cohorts/{kind}/recheck")
+def cohort_recheck(kind: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                   _g: User = Depends(require_not_observation)):
+    """Re-check the list against the free public records (owner lookups, county
+    delinquency files, statewide tax-suit list) and rescore. $0; nothing sent."""
+    from app.services.evosense import cohort as CO
+    org_id = svc.write_org_id(db, user)
+    try:
+        if not CO.members(db, org_id, kind):
+            raise HTTPException(status_code=404, detail="No properties came from that list")
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Unknown list")
+    if CO.running(org_id, kind, db):
+        return {"status": "already_running"}
+    started = CO.start_recheck(org_id, kind, user_id=user.id)
+    if started:
+        CO.mark_started(db, org_id, kind, user=user)
+    return {"status": "started" if started else "already_running"}
+
+
+class DeclareSaleIn(BaseModel):
+    sale_date: str
+    note: str
+
+
+@router.post("/cohorts/{kind}/declare-sale")
+def cohort_declare_sale(kind: str, payload: DeclareSaleIn, db: Session = Depends(get_db),
+                        user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """Record a scheduled foreclosure sale date a person states for every
+    house on an imported list - as their claim, shown as unverified."""
+    from app.services.evosense import cohort as CO
+    org_id = svc.write_org_id(db, user)
+    _admin(user, db)
+    try:
+        if not CO.members(db, org_id, kind):
+            raise HTTPException(status_code=404, detail="No properties came from that list")
+        return CO.declare_sale(db, org_id, kind, payload.sale_date, user=user, note=payload.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post("/cohorts/{kind}/reattach")
+async def cohort_reattach(kind: str, file: UploadFile = File(...), declared_sale_date: Optional[str] = Form(None),
+                          db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                          _g: User = Depends(require_not_observation)):
+    """Read an imported list's full file again and attach the columns the first
+    import left out to the SAME houses (matched to the list's own rows)."""
+    from app.services.evosense import cohort as CO
+    org_id = svc.write_org_id(db, user)
+    _admin(user, db)
+    raw = await file.read()
+    if len(raw) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File is larger than 25 MB.")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+    try:
+        if not CO.members(db, org_id, kind):
+            raise HTTPException(status_code=404, detail="No properties came from that list")
+        return CO.reattach(db, org_id, kind, text, user=user, filename=file.filename or "list.csv",
+                           declared_sale_date=(declared_sale_date or "").strip() or None)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @router.post("/strategies/{strategy_id}/pilot-archive")
@@ -1831,3 +2079,140 @@ def events(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db),
     return {"items": [{"id": e.id, "action": e.action, "summary": e.summary, "actor": e.actor_type,
                        "property_id": e.property_id, "strategy_id": e.strategy_id,
                        "is_test": e.is_test, "at": V._iso(e.created_at)} for e in rows]}
+
+
+# ── Cut-off owner names: preview, apply, undo (owner_names.py) ──────────────
+
+@router.get("/owner-names/preview")
+def owner_names_preview(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Every owner whose name a county file cut short, and whether a record on
+    file completes it: safe / ambiguous / unrecoverable. Writes nothing."""
+    from app.services.evosense import owner_names as ON
+    org_id = _read_org(db, user)
+    pv = ON.preview(db, org_id)
+    pl = ON.plan(db, org_id, pv)
+    pv["plan"] = {"hash": pl["hash"], "changes": len(pl["changes"]),
+                  "confirm_with": "APPLY %s" % pl["hash"]}
+    return pv
+
+
+@router.post("/owner-names/apply")
+def owner_names_apply(payload: ConfirmIn, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """Apply the SAFE rows only. The plan is rebuilt here; the typed code must
+    match it, so a preview that went stale cannot be applied."""
+    from app.services.evosense import owner_names as ON
+    _admin(user, db)
+    org_id = svc.write_org_id(db, user)
+    pl = ON.plan(db, org_id)
+    if not pl["changes"]:
+        raise HTTPException(status_code=409, detail="Nothing safe to apply.")
+    if payload.confirm != "APPLY %s" % pl["hash"]:
+        raise HTTPException(status_code=422, detail="Type APPLY %s to confirm (re-open the preview "
+                                                    "if the code changed)." % pl["hash"])
+    try:
+        out = ON.apply(db, org_id, pl, confirm=pl["hash"], user=user)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    C.log_event(db, org_id, "owner.name_repair_plan", user=user, actor_type=C.ACTOR_USER,
+                summary="Owner name repair %s applied (%s owners)" % (pl["hash"], out["applied"]),
+                details=pl)
+    db.commit()
+    return out
+
+
+class OwnerNamesRevertIn(BaseModel):
+    plan: str
+    confirm: str = ""
+
+
+@router.post("/owner-names/revert")
+def owner_names_revert(payload: OwnerNamesRevertIn, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    from app.models.evosense_models import EvoSenseEvent
+    from app.services.evosense import owner_names as ON
+    _admin(user, db)
+    org_id = svc.write_org_id(db, user)
+    if payload.confirm != "REVERT %s" % payload.plan:
+        raise HTTPException(status_code=422, detail="Type REVERT %s to confirm." % payload.plan)
+    ev = (db.query(EvoSenseEvent)
+          .filter(EvoSenseEvent.organization_id == org_id, EvoSenseEvent.action == "owner.name_repair_plan",
+                  EvoSenseEvent.details.contains(payload.plan))
+          .order_by(EvoSenseEvent.created_at.desc()).first())
+    pl = C.jload(ev.details, {}) if ev is not None else {}
+    if not pl or pl.get("hash") != payload.plan:
+        raise HTTPException(status_code=404, detail="No applied repair with that code.")
+    out = ON.revert(db, org_id, pl, user=user)
+    db.commit()
+    return out
+
+
+# ── Tarrant tax-roll misread (Oct 17-19, 2026): targeted repair ─────────────
+
+@router.get("/roll-fix/status")
+def roll_fix_status(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Read-only: how many misread records are still in scope here, and the
+    repair runs so far (for the Controls screen). Admin only."""
+    from app.models.evosense_models import EvoSenseReprocessRun
+    from app.services.evosense import roll_layout_fix as RF
+    _admin(user, db)
+    org_id = svc.write_org_id(db, user)
+    runs = (db.query(EvoSenseReprocessRun)
+            .filter(EvoSenseReprocessRun.organization_id == org_id,
+                    EvoSenseReprocessRun.rule_version == RF.VERSION)
+            .order_by(EvoSenseReprocessRun.created_at.desc()).limit(5).all())
+    return {"in_scope": len(RF.affected_observations(db, org_id)), "hunt_running": RF._hunt_running(db, org_id),
+            "runs": [{"id": r.id, "status": r.status, "property_count": r.property_count,
+                      "applied_at": V._iso(r.applied_at), "rolled_back_at": V._iso(r.rolled_back_at),
+                      "totals": (C.jload(r.summary, {}) or {}).get("totals")} for r in runs]}
+
+
+@router.post("/roll-fix/dry-run")
+def roll_fix_dry_run(db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                     _g: User = Depends(require_not_observation)):
+    """Exactly what the targeted repair would change, computed by running it
+    inside a savepoint that is rolled back. Writes nothing. Admin only."""
+    from app.services.evosense import roll_layout_fix as RF
+    _admin(user, db)
+    org_id = svc.write_org_id(db, user)
+    try:
+        out = RF.dry_run(db, org_id)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc))
+    db.rollback()
+    return out
+
+
+@router.post("/roll-fix/apply")
+def roll_fix_apply(payload: ConfirmIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                   _g: User = Depends(require_not_observation)):
+    from app.services.evosense import roll_layout_fix as RF
+    _admin(user, db)
+    org_id = svc.write_org_id(db, user)
+    try:
+        out = RF.apply(db, org_id, confirm=payload.confirm, user=user)
+    except ValueError as exc:
+        db.rollback()
+        busy = "hunt is running" in str(exc) or "already repaired" in str(exc)
+        raise HTTPException(status_code=409 if busy else 422, detail=str(exc))
+    db.commit()
+    return out
+
+
+@router.post("/roll-fix/{run_id}/rollback")
+def roll_fix_rollback(run_id: str, payload: ConfirmIn, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    from app.services.evosense import roll_layout_fix as RF
+    _admin(user, db)
+    org_id = svc.write_org_id(db, user)
+    if payload.confirm != "ROLLBACK %s" % run_id:
+        raise HTTPException(status_code=422, detail="Type ROLLBACK %s to confirm." % run_id)
+    try:
+        out = RF.rollback(db, org_id, run_id, user=user)
+    except ValueError as exc:
+        db.rollback()
+        changed = "Changed since the repair" in str(exc)
+        raise HTTPException(status_code=409 if changed else 404, detail=str(exc))
+    db.commit()
+    return out

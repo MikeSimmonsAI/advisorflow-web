@@ -99,7 +99,7 @@ export default function Prospects() {
 
   return (
     <SalesShell
-      title="Prospects"
+      title="Leads"
       subtitle={isManager
         ? 'Every company your team is selling to, as a list you can work down.'
         : 'The companies you are selling to, plus anything nobody has picked up yet.'}
@@ -116,7 +116,7 @@ export default function Prospects() {
 
       {creating && (
         <NewProspect onClose={() => setCreating(false)}
-                     onCreated={o => { setCreating(false); nav('/sales/opportunities/' + o.id) }} />
+                     onCreated={o => { setCreating(false); nav('/sales/leads/' + o.id) }} />
       )}
 
       <div className="sw-metrics">
@@ -245,7 +245,7 @@ export default function Prospects() {
                       </td>
                       <td>
                         <button className="sw-btn"
-                                onClick={() => nav('/sales/opportunities/' + o.id)}>
+                                onClick={() => nav('/sales/leads/' + o.id)}>
                           Open
                         </button>
                       </td>

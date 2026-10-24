@@ -82,11 +82,11 @@ export function WholesaleUser({ user, photo }) {
  * the module (EvoSysPro -> "EvoSys Wholesale") and the engine that powers it.
  * EvoSense is the acquisition engine, never the platform or the product name.
  */
-export function WholesaleProductLine({ name }) {
+export function WholesaleProductLine({ name, engine = 'EvoSense' }) {
   return (
     <span className="wsx-product">
       <span className="wsx-product__name">{name}</span>
-      <span className="wsx-product__engine">Powered by EvoSense</span>
+      {engine ? <span className="wsx-product__engine">Powered by {engine}</span> : null}
     </span>
   )
 }

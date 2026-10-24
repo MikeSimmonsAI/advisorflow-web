@@ -1,17 +1,17 @@
 /**
- * GodShell — permanent God Mode layout shell.
+ * GodShell — the God Mode layout: rail, header, authority bar, section tabs.
  *
- * Aug 25 2026: extended, not replaced. What was already here and is PRESERVED —
- * the SVG icon set, the impersonation banner + RETURN TO PLATFORM control, the
- * live clock, sign-out, and the active-route logic. What was ADDED — a
- * collapsible rail, three nav entries from the owner spec (Platforms, Leads,
- * Pipeline & Cadence), and honest NEEDS BUILD markers so navigation never
- * pretends a screen exists.
+ * OCT 22 2026 REDESIGN. The rail carries SIX destinations (pages/god/godNav.js):
+ * Dashboard, Organizations, AI Workforce, Launch Board, Revenue & Billing,
+ * Settings & Security. Every screen that used to be its own rail entry is a TAB
+ * of one of them, shown in the tab bar under the authority bar. No route was
+ * removed: every old URL still opens the same screen, now with its section lit
+ * and its tab selected. godNav.js lists where each retired entry went.
  *
- * Only two God routes are registered in App.jsx today: /god and
- * /god/organizations. Every other entry is marked `built: false` and routes to
- * the Command Center via the /god/* catch-all. When you build a screen, add its
- * <Route> in App.jsx and flip `built` to true here — nowhere else.
+ * PRESERVED from before: the SVG icon set, JUMP TO (Customer App, Wholesale),
+ * the data-driven BRANDS links, the authority bar with RESUME / EXIT, the live
+ * clock, change password and sign out, the collapsible rail and the mobile
+ * drawer.
  */
 import { useState, useEffect } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
@@ -21,6 +21,8 @@ import { api, getCurrentUser, logout, clearBrandingCSS } from '../api/client'
 import { applyTheme, hostTheme, THEMES } from '../theme'
 import { classifyRoute, PLATFORM } from '../auth/routeAuthority'
 import GodStyles from './god/GodStyles'
+import { SECTIONS, locate } from './god/godNav'
+import './god/ui/godKit.css'
 
 function Ico({ d, size = 16, children }) {
   return (
@@ -103,172 +105,8 @@ const JUMP = [
     hint: 'EvoSysPro product: EvoSense acquisition and wholesale deal operations, in the selected workspace' },
 ]
 
-/**
- * THE PRIMARY NAVIGATION CARRIES WORKING MODULES ONLY.
- *
- * It used to carry seventeen entries, ten of them tagged NEEDS BUILD, all
- * routing to the /god/* catch-all — so two thirds of the owner's navigation was
- * a list of doors that opened onto the same room, and a product with a real
- * control plane read as a prototype.
- *
- * Nothing was faked to remove those tags. Every entry below is a registered
- * route in App.jsx backed by real endpoints. The unfinished work did not
- * disappear either: it is stated once, honestly, in PRODUCT STATUS on the
- * Command Center (COMING NEXT), where each item names what it is actually
- * waiting on. `Roadmap` at the bottom of this rail jumps straight to it.
- *
- * If you build one of those, add its <Route> in App.jsx, flip `live` in
- * ProductStatus.MODULES, and add it here. Three edits, no other bookkeeping.
- *
- * SEP 28 2026 — regrouped per spec §29 into PLATFORM, SALES & REVENUE, LEAD
- * INTELLIGENCE, AI WORKFORCE, SECURITY & PLATFORM (BRANDS stays data-driven
- * below). Every previous target is still here or still routed; see the
- * comments on each group for what moved. An entry may carry a query string
- * (?tab=) — isActive compares the tab as well as the path.
- */
-const NAV = [
-  // ══════════════════════════════════════════════════════════════════════
-  // PLATFORM — Sep 28 2026 reorganization (spec §29).
-  // ══════════════════════════════════════════════════════════════════════
-  //
-  // COMMAND and CUSTOMERS were merged into PLATFORM. Nothing was removed:
-  // Command Center is now "Dashboard" (same /god route) and every customer
-  // entry kept its path. The three nouns are still explained by their hints:
-  //
-  //   ORGANIZATIONS  the records and their administration
-  //   CUSTOMERS      the commercial relationship — lifecycle and Customer 360
-  //   WORKSPACES     the live tenant environments people actually work in
-  { group: 'PLATFORM' },
-  { label: 'Dashboard',        path: '/god',                  icon: 'command',
-    hint: 'Command Center — platform health, status and what needs attention' },
-  // Control Room: the one screen for the ChatGPT <-> Claude relay.
-  { label: 'Control Room',     path: '/god/control-room',     icon: 'activity',
-    hint: 'Who is working, what is next, what needs you — and where to give direction' },
-  // Platform overview is where the owner should LAND — with no customer
-  // selected — rather than arriving already inside somebody's tenant.
-  { label: 'Platform Overview', path: '/god/platform',        icon: 'layers',
-    hint: 'Every brand and customer, with no customer selected' },
-  { label: 'Organizations',    path: '/god/organizations',    icon: 'building',
-    hint: 'Organization records and administration' },
-  { label: 'Customers',        path: '/god/customers',        icon: 'globe',
-    hint: 'Commercial lifecycle and Customer 360' },
-  { label: 'Workspaces',       path: '/god/workspaces',       icon: 'layers',
-    hint: 'Live tenant environments — enter one as its brand or customer' },
-  { label: 'Users & Identity', path: '/god/users-all',        icon: 'users',
-    hint: 'One row per human, every context they hold' },
-  { label: 'Manage Access',    path: '/god/access',           icon: 'shield',
-    hint: 'Open a person: brands, workspaces, demo, training — corrected in place' },
-  { label: 'SCI & Wholesale Access', path: '/god/access-setup', icon: 'shield',
-    hint: 'Put SCI under a login; name who may use EvoSys Wholesale' },
-  { label: 'Feature Entitlements', path: '/god/entitlements', icon: 'toggle',
-    hint: 'Platform → brand → organization → workspace → role feature access' },
-  // Implementations is the handoff that follows a won customer; Customer
-  // Launches is the same customers seen from the other side (what THEY still
-  // owe us). Two entries, one record — /god/launch reads the Implementation rows.
-  { label: 'Implementations',  path: '/god/implementations',  icon: 'branch',
-    hint: 'Onboarding handoff for sold customers' },
-  { label: 'Customer Launches', path: '/god/launches',        icon: 'branch',
-    hint: 'Onboarding intake — including customers who never started' },
-  { label: 'Demo Suite',       path: '/god/demo-suite',       icon: 'monitor',
-    hint: "Each brand's demonstration environment, and who has presented" },
-  { label: 'Training',         path: '/god/training',         icon: 'flag',
-    hint: 'Who has been asked to learn what, and where they stopped' },
-
-  // ══════════════════════════════════════════════════════════════════════
-  // SALES & REVENUE — money in, and who earned it.
-  // ══════════════════════════════════════════════════════════════════════
-  //
-  // Pricing & Compensation DEFINES the rules; Sales Compensation is the money
-  // those rules produced; Billing & Revenue is what CUSTOMERS pay. Three jobs,
-  // three entries.
-  { group: 'SALES & REVENUE' },
-  { label: 'Sales Operations', path: '/god/sales-operations', icon: 'trending',
-    hint: 'Pipeline and sales org operations' },
-  { label: 'Pricing & Compensation', path: '/god/pricing',    icon: 'dollar',
-    hint: 'Discount floors, commission plans, caps' },
-  { label: 'Sales Compensation', path: '/god/compensation',   icon: 'briefcase',
-    hint: 'The ledger — earned, payable, paid' },
-  { label: 'Billing & Revenue', path: '/god/billing',         icon: 'dollar',
-    hint: 'What customers pay and who needs chasing' },
-  { label: 'Revenue History',  path: '/god/revenue-history', icon: 'trending',
-    hint: 'Payment history, invoice status breakdown, plan breakdown' },
-
-  // ══════════════════════════════════════════════════════════════════════
-  // LEAD INTELLIGENCE — one control center, five tabs (spec §30).
-  // ══════════════════════════════════════════════════════════════════════
-  //
-  // Replaces LEADS & AUTOMATION. The tabs live on ONE route and are selected
-  // by ?tab=, so the rail and the page cannot disagree about what exists.
-  // The standalone screens are NOT removed: /god/lead-scraper and
-  // /god/lead-browser are still routed (and embedded by the tabs), and the
-  // read-only Qualification Diagnostic moved to SECURITY & PLATFORM below.
-  { group: 'LEAD INTELLIGENCE' },
-  { label: 'Overview',          path: '/god/lead-intelligence',                   icon: 'target',
-    hint: 'Pipeline, sources, qualification distribution and recent activity' },
-  { label: 'Qualification Engine', path: '/god/lead-intelligence?tab=qualification', icon: 'filter',
-    hint: 'Thresholds and READY / REVIEW / EXCLUDED, explained' },
-  { label: 'Lead Scraper',      path: '/god/lead-intelligence?tab=scraper',       icon: 'grid',
-    hint: 'Find businesses by industry and geography — staged, never auto-routed' },
-  { label: 'Lead Browser',      path: '/god/lead-intelligence?tab=browser',       icon: 'users',
-    hint: 'Prospect pool and the master lead database, filtered server-side' },
-  { label: 'Rules & Routing',   path: '/god/lead-intelligence?tab=routing',       icon: 'branch',
-    hint: 'Suggest destinations; route only by explicit action into Universal Intake' },
-
-  // ══════════════════════════════════════════════════════════════════════
-  // AI WORKFORCE
-  // ══════════════════════════════════════════════════════════════════════
-  //
-  // Three entries and not the same screen: authority (who an employee is and
-  // what it may do), reach (what was actually attempted), and deployment
-  // (what each brand sells and where every hired employee has got to).
-  { group: 'AI WORKFORCE' },
-  { label: 'AI Workforce',     path: '/god/workforce',         icon: 'cpu',
-    hint: 'Job library, tool gateway, activation staging, kill switch, '
-        + 'evaluation and simulation' },
-  { label: 'AI Operations',    path: '/god/ai-operations',     icon: 'activity',
-    hint: 'Dark-launch state, provider resolution per channel, one '
-        + 'customer’s supervisor read, unattributable inbound, and the '
-        + 'synthetic proofs' },
-  { label: 'AI Deployment',    path: '/god/ai-deployment',     icon: 'package',
-    hint: 'Brand commercial terms, every customer’s deployment state, '
-        + 'readiness, activation, reconciliation and the orphan sweep' },
-
-  // ══════════════════════════════════════════════════════════════════════
-  // SECURITY & PLATFORM — access, audit, health, jobs and every diagnostic.
-  // ══════════════════════════════════════════════════════════════════════
-  //
-  // DIAGNOSTICS and SUPPORT were folded in here (Sep 28 2026). Same paths.
-  { group: 'SECURITY & PLATFORM' },
-  { label: 'Access & Permissions', path: '/god/diagnostics/user-access', icon: 'shield',
-    hint: 'What a given person can actually reach' },
-  { label: 'Executive Access', path: '/god/executive-access', icon: 'shield',
-    hint: 'Which customers each executive oversees' },
-  { label: 'Audit & Security', path: '/god/audit',            icon: 'shield'   },
-  { label: 'System Health',    path: '/god#platform-health',  icon: 'monitor'  },
-  { label: 'Background Jobs',    path: '/god/diagnostics/job-runs', icon: 'activity',
-    hint: 'Run history for cadence, AI, and review loops' },
-  // Moved from LEADS & AUTOMATION: it is a read-only diagnostic (who may be
-  // contacted on each channel, and why not). Lead Intelligence links to it.
-  { label: 'Qualification Diagnostic', path: '/god/diagnostics/qualification', icon: 'filter',
-    hint: 'Who may be contacted on each channel, and why not — read-only' },
-  { label: 'Twilio Diagnostics', path: '/god/diagnostics/twilio',   icon: 'monitor',
-    hint: 'Delivery receipt config and message delivery breakdown' },
-  { label: 'Email Diagnostics',  path: '/god/diagnostics/email',    icon: 'monitor',
-    hint: 'Reply mailboxes, inbound reply log, sender status' },
-  { label: 'Voice Configuration', path: '/god/voice',               icon: 'settings',
-    hint: 'Agent mappings, version pins, attempt policy, test calls' },
-  { label: 'Maintenance Ops',    path: '/god/maintenance',           icon: 'tool',
-    hint: 'Booking cleanup (dry-run), phone audit — silent, no SMS/email sent' },
-  { label: 'Support',            path: '/god/support',               icon: 'message',
-    hint: 'Every brand’s queue, what the platform repaired by itself, '
-        + 'cross-brand incidents, and the daily brief' },
-  { label: 'Roadmap',          path: '/god/roadmap',           icon: 'flag',
-    hint: '93 capability items across 15 systems — what is complete, what needs finishing' },
-]
-
-// Pages whose rail entries are tabs selected by ?tab=.
-const NAV_TABBED = new Set(
-  NAV.filter(n => n.path && n.path.includes('?')).map(n => n.path.split('?')[0]))
+// THE PRIMARY NAVIGATION is SECTIONS in ./god/godNav.js — six entries, each
+// with its tabs. Add a screen by adding a tab there and its <Route> in App.jsx.
 
 function LiveClock() {
   const [now, setNow] = useState(new Date())
@@ -364,26 +202,9 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
 
   function handleLogout() { logout(); navigate('/login') }
 
-  // A hash entry ("/god#platform-health") is a jump WITHIN the Command Center,
-  // so it must never claim the active state — otherwise two rail items light up
-  // at once on /god.
-  //
-  // An entry with a query string ("/god/lead-intelligence?tab=scraper") is one
-  // TAB of a page: it is active only when the path matches AND the tab does.
-  // The bare page entry is active only when no tab (or the default one) is set,
-  // so exactly one Lead Intelligence row lights up at a time.
-  const isActive = (path) => {
-    if (!path || path.includes('#')) return false
-    const [base, qs] = path.split('?')
-    if (qs !== undefined || NAV_TABBED.has(base)) {
-      if (location.pathname !== base) return false
-      const want = new URLSearchParams(qs || '').get('tab') || ''
-      const have = new URLSearchParams(location.search).get('tab') || ''
-      return want === (have === 'overview' ? '' : have)
-    }
-    return base === '/god' ? location.pathname === '/god' : location.pathname.startsWith(base)
-  }
-  const current = NAV.find(n => n.path && isActive(n.path))
+  // One section is lit and one of its tabs is selected, from the URL alone.
+  const here = locate(location.pathname)
+  const current = here.section
   // 248, not 220. At 220 the label had ~93px left after the icon, the gap and
   // the NEEDS BUILD tag, so "Pipeline & Cadence", "Communications" and
   // "Audit & Security" were all being ellipsised.
@@ -474,24 +295,18 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
 
         {/* Nav */}
         <nav style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 0' }}>
-          {NAV.map((item, i) => {
-            if (item.group) {
-              // Collapsed, a heading has no room and no icon to stand in for
-              // it, so it becomes a hairline rule instead of clipped text.
-              return collapsed
-                ? <div key={'g' + i} className="gm-nav-rule" />
-                : <div key={'g' + i} className="gm-nav-head">{item.group}</div>
-            }
-            const { label, path, icon } = item
-            const active = isActive(path)
+          {SECTIONS.map(({ key, label, path, icon, hint }) => {
+            const active = here.section.key === key
             return (
-              <NavLink key={path} to={path} title={collapsed ? label : undefined}
+              <NavLink key={key} to={path} end={path === '/god'}
+                title={collapsed ? label : hint}
+                aria-current={active ? 'page' : undefined}
                 className={`gm-nav-item ${active ? 'gm-active' : ''}`}
                 style={collapsed
                   ? { justifyContent: 'center', padding: '10px 0', margin: '1px 6px' }
-                  : undefined}
+                  : { padding: '11px 14px' }}
               >
-                <Ico d={ICONS[icon]} size={16} />
+                <Ico d={ICONS[icon]} size={17} />
                 {!collapsed && <span className="gm-nav-label">{label}</span>}
               </NavLink>
             )
@@ -681,6 +496,12 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
               <b style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {current?.label || 'God Mode'}
               </b>
+              {!isMobile && here.tab && here.section.tabs.length > 1 ? (
+                <>
+                  <span style={{ color: 'var(--gm-ghost)' }}>/</span>
+                  <span style={{ color: 'var(--gm-dim)', whiteSpace: 'nowrap' }}>{here.tab.label}</span>
+                </>
+              ) : null}
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: 'var(--gm-dim)', fontSize: '12px' }}>
@@ -798,6 +619,23 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
             </>
           ) : null}
         </div>
+
+        {/* ── Section tabs ── the screens inside the lit section. Hidden when a
+            section has one screen. Scrolls sideways on a phone. */}
+        {here.section.tabs.length > 1 ? (
+          <nav className="gk-tabs" aria-label={here.section.label + ' sections'}>
+            {here.section.tabs.map(t => {
+              const on = here.tab && here.tab.path === t.path
+              return (
+                <NavLink key={t.path} to={t.path} end title={t.hint}
+                  aria-current={on ? 'page' : undefined}
+                  className={`gk-tab ${on ? 'gk-tab--on' : ''}`}>
+                  {t.label}
+                </NavLink>
+              )
+            })}
+          </nav>
+        ) : null}
 
         <main style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', background: 'var(--gm-bg)' }}>
           {children}
