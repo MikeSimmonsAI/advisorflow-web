@@ -332,7 +332,7 @@ export default function EvoCohort() {
                           {r.foreclosure.notices?.length > 1 ? ` · ${r.foreclosure.notices.length} notices on file` : ''}
                         </span>) : null}
                       {r.foreclosure.reposted_for?.length ? (
-                        <span className="evo-prop__sub" style={{ display: 'block', color: '#b45309', fontWeight: 600 }}>
+                        <span className="evo-prop__sub" style={{ display: 'block', color: '#b45309', fontWeight: 600, whiteSpace: 'normal', overflow: 'visible', textOverflow: 'clip' }}>
                           Also posted for {r.foreclosure.reposted_for.join(', ')}: the {r.foreclosure.sale_date} sale may be postponed. Check the clerk the week of the sale.
                         </span>) : null}
                       {r.foreclosure.other_records?.length ? (
