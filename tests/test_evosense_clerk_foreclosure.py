@@ -443,3 +443,12 @@ def test_county_coverage_is_stated_county_by_county():
         assert "checked 2026-10-23" in F.NO_PORTAL[c]
     with pytest.raises(B.SourceError):
         F.ClerkPortal("ellis")                      # never a pretend read
+
+
+# 18 ── the re-check time is sent as UTC, so the screen shows the true time ───
+
+def test_last_recheck_time_is_marked_utc(db_session, sample_org):
+    C.log_event(db_session, sample_org.id, "cohort.rechecked", summary="List t100 re-checked against public records (1 properties)",
+                details={"kind": "t100"})
+    db_session.commit()
+    assert CO.last_recheck(db_session, sample_org.id, "t100")["at"].endswith("Z")
