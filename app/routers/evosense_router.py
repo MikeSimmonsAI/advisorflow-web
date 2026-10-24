@@ -927,18 +927,54 @@ def add_evosense_comp(property_id: str, payload: EvoCompIn, db: Session = Depend
 class SignalIn(BaseModel):
     signal_type: str
     note: Optional[str] = None
+    # A foreclosure / tax-sale notice a person read on the county record:
+    document_number: Optional[str] = None
+    sale_date: Optional[str] = None
+    record_url: Optional[str] = None
+    case_status: Optional[str] = None          # scheduled | postponed | canceled | resolved
+    foreclosure_type: Optional[str] = None
+
+
+FORECLOSURE_ENTRY = ("PRE_FORECLOSURE", "TAX_SALE")
 
 
 @router.post("/properties/{property_id}/signals")
 def add_signal(property_id: str, payload: SignalIn, db: Session = Depends(get_db),
                user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """A signal a person observed. A foreclosure / tax sale entered by hand is
+    VERIFIED only with the record's document number and the sale date a person
+    read on it; without them it is kept as that person's CLAIM."""
     org_id = svc.write_org_id(db, user)
     prop = _prop(db, org_id, property_id)
     if payload.signal_type not in SIG.CATALOG or SIG.CATALOG[payload.signal_type].get("derived"):
         raise HTTPException(status_code=422, detail="Choose a signal a person can observe.")
+    prov: Dict[str, Any] = {"user": user.id}
+    value = payload.note or "entered by a person"
+    status = None
+    ref = None
+    if payload.signal_type in FORECLOSURE_ENTRY:
+        from app.services.evosense import scoring as SC
+        status = (payload.case_status or "scheduled").strip().lower()
+        if status not in ("scheduled", "postponed", "canceled", "resolved"):
+            raise HTTPException(status_code=422, detail="Status must be scheduled, postponed, canceled or resolved.")
+        sale = SC._sale_date(payload.sale_date) if payload.sale_date else None
+        if payload.sale_date and sale is None:
+            raise HTTPException(status_code=422, detail="Sale date must be YYYY-MM-DD.")
+        doc = (payload.document_number or "").strip()[:60] or None
+        prov.update({"sale_date": sale.isoformat() if sale else None, "document": doc,
+                     "document_url": (payload.record_url or "").strip()[:500] or None,
+                     "foreclosure_type": (payload.foreclosure_type or "").strip()[:40] or None,
+                     "matched_by": "read on the county record by a person"})
+        if not (doc and sale):
+            prov["claim"] = "operator"            # no document number + date: a claim, not a verified notice
+        ref = "OPERATOR:%s:%s" % (payload.signal_type, doc or (sale.isoformat() if sale else "undated"))
+        value = "%s %s%s - %s%s" % ("Foreclosure sale" if payload.signal_type == "PRE_FORECLOSURE" else "Tax sale",
+                                    status, " %s" % sale.isoformat() if sale else "",
+                                    ("document %s read on the county record" % doc) if doc else "entered without a document number (claim)",
+                                    "; %s" % payload.note if payload.note else "")
     SIG.upsert(db, prop, payload.signal_type, source="operator", connector_kind=C.MANUAL,
-               confidence=70, normalized_value=payload.note or "entered by a person",
-               provenance={"user": user.id}, user=user)
+               confidence=80 if (status and not prov.get("claim")) else 70, normalized_value=value,
+               provenance=prov, case_status=status, source_reference=ref, user=user)
     C.log_event(db, org_id, "signal.manual", property_id=prop.id, user=user, actor_type=C.ACTOR_USER,
                 is_test=prop.is_test, summary="Signal added: %s" % payload.signal_type)
     EV.rescore(db, prop)
@@ -1369,7 +1405,7 @@ def cohort_view(kind: str, db: Session = Depends(get_db), user: User = Depends(r
     if not rs:
         raise HTTPException(status_code=404, detail="No properties came from that list")
     return {"kind": kind, "summary": CO.summary(rs), "rows": rs,
-            "last_recheck": CO.last_recheck(db, org_id, kind), "rechecking": CO.running(org_id, kind)}
+            "last_recheck": CO.last_recheck(db, org_id, kind), "rechecking": CO.running(org_id, kind, db)}
 
 
 @router.post("/cohorts/{kind}/recheck")
@@ -1384,7 +1420,11 @@ def cohort_recheck(kind: str, db: Session = Depends(get_db), user: User = Depend
             raise HTTPException(status_code=404, detail="No properties came from that list")
     except ValueError:
         raise HTTPException(status_code=404, detail="Unknown list")
+    if CO.running(org_id, kind, db):
+        return {"status": "already_running"}
     started = CO.start_recheck(org_id, kind, user_id=user.id)
+    if started:
+        CO.mark_started(db, org_id, kind, user=user)
     return {"status": "started" if started else "already_running"}
 
 

@@ -18,13 +18,18 @@ ingest path (an observation per source, dated evidence, one property):
 Status words (``rows``) are evidence-bound and never come from a list's name
 or tag. Mortgage foreclosure, tax delinquency, tax foreclosure and probate are
 separate columns; a current tax account says nothing about a mortgage.
-  * CLAIMED     - a list (a sale-date column, or a sale date a person declared
-                  for the list) says a trustee sale is scheduled; not yet
-                  confirmed on the county clerk's posted notice;
-  * VERIFIED    - a clerk / trustee notice record from a connected source;
-  * SALE PASSED - the scheduled date is behind us: sold, cancelled or
-                  postponed is unknown until checked;
-  * NO EVIDENCE - nothing says foreclosure, which is not proof there is none.
+Foreclosure groups (``category``):
+  A VERIFIED NOTICE - a notice filed with the county clerk schedules the sale
+                      (document number, sale date, link to the record);
+  B CLAIMED         - a list says a sale is scheduled; the county's clerk
+                      notices are not read automatically, so not yet checked;
+  C CONFLICT        - the clerk notice and the list disagree on the sale date
+    POSTPONED       - a source says the sale was postponed;
+  D CANCELED / RESOLVED / SALE PASSED - withdrawn, done, or the date is behind
+                      us (outcome unknown until checked);
+  E NO NOTICE FOUND - the clerk record was checked and holds no notice for this
+                      address; NOT proof there is no foreclosure.
+    NO EVIDENCE     - nothing claims a foreclosure and no clerk check ran.
 """
 from __future__ import annotations
 
@@ -42,6 +47,8 @@ OFFICIAL_OWNER_SOURCES = {"dcad", "tad", "collin_cad", "denton_gis", "txgio_parc
 TAX_TYPES = ("TAX_DELINQUENT", "TAX_SUIT", "TAX_SALE", "TAX_FORECLOSURE")
 FORECLOSURE_TYPES = ("PRE_FORECLOSURE", "FORECLOSURE_NOTICE", "FORECLOSURE", "AUCTION")
 TAX_CHECK_EVENT = "cohort.tax_checked"
+FC_CHECK_EVENT = "cohort.foreclosure_checked"
+CLERK_SOURCE = "tx_clerk_foreclosure"
 
 
 def _prefix(kind: str) -> str:
@@ -170,6 +177,69 @@ def tax_check(db, org_id: str, props: List[EvoSenseProperty], *, user=None, run_
     return out
 
 
+def fc_check(db, org_id: str, props: List[EvoSenseProperty], *, user=None) -> Dict[str, Any]:
+    """Look THESE properties up in the county clerks' filed foreclosure
+    notices. Each match is ingested onto that property (never a new one); every
+    property in a connected county gets a dated 'checked' event, matched or
+    not. A county without a clerk source, or whose source failed, says so -
+    its properties are not marked as checked."""
+    from app.services.evosense import ingest as IN
+    from app.services.evosense import providers as PV
+    from app.services.evosense.sources import base as SB
+    from app.services.evosense.sources.clerk_fc import COUNTIES, NO_PORTAL, ClerkForeclosureReader, notice_facts, to_record
+    reader = ClerkForeclosureReader()
+    groups: Dict[str, List[EvoSenseProperty]] = {}
+    for p in props:
+        groups.setdefault(_county(p) or "unknown", []).append(p)
+    out: Dict[str, Any] = {}
+    for county, ps in sorted(groups.items()):
+        if county not in COUNTIES:
+            out[county] = {"status": "NOT CONNECTED", "properties": len(ps),
+                           "reason": NO_PORTAL.get(county, "No county clerk foreclosure source is connected for %s "
+                                                          "County" % county.title())}
+            continue
+        targets = [{"id": p.id, "street_address": p.street_address, "zip_code": p.zip_code, "city": p.city}
+                   for p in ps]
+        try:
+            res = reader.check(county, targets)
+        except SB.SourceError as exc:
+            db.rollback()
+            out[county] = {"status": "FAILED", "properties": len(ps), "error": "%s: %s" % (exc.code, exc.message)}
+            continue
+        except Exception as exc:  # noqa: BLE001 - one county never stops the others
+            db.rollback()
+            out[county] = {"status": "FAILED", "properties": len(ps), "error": str(exc)[:200]}
+            continue
+        portal, ingested = res["portal"], 0
+        for p in ps:
+            hits = res["matches"].get(p.id, [])
+            docs = []
+            for doc, how in hits:
+                f = notice_facts(portal, doc)
+                docs.append({k: f[k] for k in ("document_number", "sale_date", "recorded", "category", "status", "url")})
+                rec = to_record(portal, doc, target={"street_address": p.street_address, "city": p.city,
+                                                     "zip_code": p.zip_code}, matched_by=how)
+                if rec is None:
+                    continue
+                try:
+                    IN.ingest(db, org_id, PV.PROVIDERS[CLERK_SOURCE], C.FORECLOSURE, rec, user=user,
+                              is_test=p.is_test, target=p, target_trusted=True)
+                    ingested += 1
+                except Exception as exc:  # noqa: BLE001 - one notice never ends the check
+                    C.log.warning("cohort foreclosure ingest (%s): %s", county, exc)
+            C.log_event(db, org_id, FC_CHECK_EVENT, property_id=p.id, user=user,
+                        actor_type=C.ACTOR_USER if user else C.ACTOR_SYSTEM, is_test=p.is_test,
+                        summary=("%s: %d foreclosure notice%s on file" % (portal.cfg["label"], len(docs),
+                                                                           "" if len(docs) == 1 else "s"))
+                        if docs else "%s: no foreclosure notice found for this address" % portal.cfg["label"],
+                        details={"source": portal.cfg["label"], "county": county, "matched": len(docs),
+                                 "documents": docs, "checked": C.now().strftime("%Y-%m-%d"),
+                                 "search": "https://%s/" % portal.host})
+        db.commit()
+        out[county] = dict(res["stats"], ingested=ingested)
+    return out
+
+
 def _addr_key(street: Optional[str]) -> str:
     from app.services.evosense.identity import normalize_street
     return (normalize_street(street or "")[0] or "").upper()
@@ -189,6 +259,12 @@ def recheck(db, org_id: str, kind: str, *, user=None) -> Dict[str, Any]:
                     props, counts)
     db.commit()
     tax = tax_check(db, org_id, props, user=user)
+    try:
+        fc = fc_check(db, org_id, props, user=user)
+    except Exception as exc:  # noqa: BLE001 - the rest of the re-check still lands
+        db.rollback()
+        C.log.exception("cohort foreclosure check failed (%s)", kind)
+        fc = {"all": {"status": "FAILED", "error": str(exc)[:200]}}
     for p in props:
         db.refresh(p)
         EV.rescore(db, p, EV.strategy_for(db, p))
@@ -196,9 +272,21 @@ def recheck(db, org_id: str, kind: str, *, user=None) -> Dict[str, Any]:
     C.log_event(db, org_id, "cohort.rechecked", user=user,
                 actor_type=C.ACTOR_USER if user else C.ACTOR_SYSTEM,
                 summary="List %s re-checked against public records (%d properties)" % (kind, len(props)),
-                details={"kind": kind, "lookups": counts.get("lookups"), "tax": tax})
+                details={"kind": kind, "lookups": counts.get("lookups"), "tax": tax, "foreclosure": fc,
+                         "outcome": recheck_outcome(tax, fc)})
     db.commit()
-    return {"properties": len(props), "lookups": counts.get("lookups"), "tax": tax}
+    return {"properties": len(props), "lookups": counts.get("lookups"), "tax": tax, "foreclosure": fc,
+            "outcome": recheck_outcome(tax, fc)}
+
+
+def recheck_outcome(tax: Dict[str, Any], fc: Dict[str, Any]) -> str:
+    """COMPLETED when every connected source answered; PARTIAL when one failed
+    (the others still landed); FAILED when nothing did."""
+    parts = list((tax or {}).values()) + [v for v in (fc or {}).values() if v.get("status") != "NOT CONNECTED"]
+    bad = [v for v in parts if isinstance(v, dict) and (v.get("error") or v.get("status") == "FAILED")]
+    if parts and len(bad) == len(parts):
+        return "FAILED"
+    return "PARTIAL" if bad else "COMPLETED"
 
 
 # ── the view ────────────────────────────────────────────────────────────────
@@ -209,35 +297,135 @@ def _signals(db, prop) -> List[EvoSenseSignal]:
                     EvoSenseSignal.property_id == prop.id, EvoSenseSignal.active.is_(True)).all())
 
 
-def foreclosure_status(sigs, today=None) -> Dict[str, Any]:
+CATEGORY = {"VERIFIED NOTICE": "A", "CLAIMED": "B", "CONFLICT": "C", "POSTPONED": "C", "CANCELED": "D",
+            "RESOLVED": "D", "SALE PASSED": "D", "NO NOTICE FOUND": "E", "NO EVIDENCE": "E"}
+CATEGORY_LABELS = {"A": "Verified scheduled foreclosure", "B": "Claimed - awaiting verification",
+                   "C": "Conflicting or postponed", "D": "Canceled / resolved / sale date passed",
+                   "E": "No notice found - not proof of no foreclosure"}
+
+
+def _sd(v):
+    from app.services.evosense import scoring as SC
+    return SC._sale_date(v)
+
+
+def foreclosure_status(sigs, today=None, check: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Mortgage / trustee / HOA / judicial foreclosure status of one property.
+
+    `sigs`: its active signals. `check`: the latest clerk check for it
+    ({"checked", "source", "matched", ...}) or None when its county's clerk
+    notices are not read automatically (or no check has run yet)."""
     from datetime import date
     from app.services.evosense import scoring as SC
     today = today or date.today()
     fc = [x for x in sigs if x.signal_type in FORECLOSURE_TYPES]
-    if not fc:
-        return {"status": "NO EVIDENCE", "verified": False, "sale_date": None, "days": None,
-                "detail": "No foreclosure claim or notice on file. Not proof there is none: no county "
-                          "clerk notice source is connected for this county.", "last_checked": None}
-    ev = [{"source": x.source, "provenance": C.jload(x.provenance, {}) or {}} for x in fc]
-    terms = SC.foreclosure_terms({"evidence": ev}, today=today)
-    newest = max(fc, key=lambda x: x.observed_at or C.now())
-    cs = (newest.case_status or "").upper()
-    if terms["passed"]:
-        word = "SALE PASSED"
-    elif cs in ("POSTPONED", "CANCELED", "CANCELLED", "RESOLVED", "SOLD"):
-        word = {"CANCELLED": "CANCELED", "SOLD": "RESOLVED"}.get(cs, cs)
-    elif terms["verified"]:
-        word = "VERIFIED NOTICE"
-    else:
-        word = "CLAIMED"
-    pick = next((x for x in fc if (C.jload(x.provenance, {}) or {}).get("sale_date") == terms["sale_date"]), newest)
-    prov = C.jload(pick.provenance, {}) or {}
-    return {"status": word, "verified": terms["verified"], "sale_date": terms["sale_date"],
-            "days": terms["days"], "detail": pick.normalized_value or pick.raw_value, "source": pick.source,
-            "evidence_reference": prov.get("record") or pick.source_reference,
-            "observed": pick.observed_at.strftime("%Y-%m-%d") if pick.observed_at else None,
-            "last_checked": (getattr(pick, "last_seen_at", None) or pick.observed_at).strftime("%Y-%m-%d")
-            if (getattr(pick, "last_seen_at", None) or pick.observed_at) else None}
+    prov = {x.id: (C.jload(x.provenance, {}) or {}) for x in fc}
+
+    def is_claim(x):
+        return bool(prov[x.id].get("claim")) or x.source in SC.CLAIM_SOURCES
+
+    claims = [x for x in fc if is_claim(x)]
+    notices = [x for x in fc if not is_claim(x)]
+    checked = (check or {}).get("checked")
+    base = {"verified": False, "sale_date": None, "days": None, "claimed_sale_date": None, "notices": [],
+            "document": None, "document_url": None, "foreclosure_type": None, "source": None,
+            "evidence_reference": None, "observed": None, "clerk_checked": checked,
+            "clerk_source": (check or {}).get("source"), "confidence": 0,
+            "last_checked": checked}
+    claim_dates = sorted({d for d in (_sd(prov[x.id].get("sale_date")) for x in claims) if d})
+    upcoming_claims = [d for d in claim_dates if d >= today]
+    claim_sale = upcoming_claims[0] if upcoming_claims else (claim_dates[-1] if claim_dates else None)
+    if claim_sale:
+        base["claimed_sale_date"] = claim_sale.isoformat()
+
+    def days(d):
+        return (d - today).days if d else None
+
+    def out(status, detail, **kw):
+        r = dict(base)
+        r.update(kw)
+        r["status"], r["detail"], r["category"] = status, detail, CATEGORY[status]
+        r["category_label"] = CATEGORY_LABELS[r["category"]]
+        if r.get("sale_date") and r.get("days") is None:
+            r["days"] = days(_sd(r["sale_date"]))
+        return r
+
+    if notices:
+        from app.services.evosense.sources.clerk_fc import CATEGORY_LABELS as KIND
+        rows_ = []
+        for x in notices:
+            pv = prov[x.id]
+            rows_.append({"document": pv.get("document") or x.source_reference, "url": pv.get("document_url")
+                          or pv.get("source_url"), "sale_date": pv.get("sale_date"), "recorded": pv.get("recorded"),
+                          "type": KIND.get(pv.get("foreclosure_type") or "", pv.get("foreclosure_type")
+                                           or "Foreclosure notice"),
+                          "status": (x.case_status or "scheduled").lower(), "source": x.source,
+                          "matched_by": pv.get("matched_by"),
+                          "observed": x.observed_at.strftime("%Y-%m-%d") if x.observed_at else None})
+        rows_.sort(key=lambda r: r["sale_date"] or "")
+        base["notices"] = rows_
+        live = [r for r in rows_ if r["status"] == "scheduled" and _sd(r["sale_date"]) and _sd(r["sale_date"]) >= today]
+        cancelled = [r for r in rows_ if r["status"] in ("canceled", "cancelled", "withdrawn")]
+        postponed = [r for r in rows_ if r["status"] == "postponed"]
+        resolved = [r for r in rows_ if r["status"] in ("resolved", "sold")]
+        pick = live[0] if live else rows_[-1]
+        kw = {"verified": True, "sale_date": pick["sale_date"], "document": pick["document"],
+              "document_url": pick["url"], "foreclosure_type": pick["type"], "source": pick["source"],
+              "evidence_reference": pick["document"], "observed": pick["observed"],
+              "confidence": 92 if (pick.get("matched_by") or "").startswith("clerk index") else 85}
+        if live:
+            dates = sorted({r["sale_date"] for r in live})
+            if claim_sale and claim_sale >= today and claim_sale.isoformat() not in dates:
+                return out("CONFLICT", "The list says the sale is %s; the %s notice %s schedules it for %s. "
+                                       "Open the notice to see which sale is live." % (
+                                           claim_sale.isoformat(), base["clerk_source"] or "county clerk",
+                                           pick["document"], pick["sale_date"]), **dict(kw, confidence=70))
+            extra = ("; also posted for %s (a re-posting - the earlier sale may be postponed)" %
+                     ", ".join(dates[1:])) if len(dates) > 1 else ""
+            return out("VERIFIED NOTICE", "%s scheduled %s - notice %s filed %s%s" % (
+                pick["type"], pick["sale_date"], pick["document"], pick["recorded"] or "", extra), **kw)
+        if cancelled:
+            c = cancelled[-1]
+            return out("CANCELED", "Notice %s withdrawn / cancelled" % c["document"], **dict(kw, document=c["document"]))
+        if resolved:
+            return out("RESOLVED", "Sale reported done / resolved (%s)" % resolved[-1]["document"], **kw)
+        if postponed:
+            return out("POSTPONED", "Sale reported postponed (%s)" % postponed[-1]["document"], **kw)
+        if claim_sale and claim_sale >= today:
+            return out("CONFLICT", "The list says the sale is %s, but the clerk record only shows notice %s for %s "
+                                   "(passed). No notice found for the list's date." % (
+                                       claim_sale.isoformat(), pick["document"], pick["sale_date"]),
+                       **dict(kw, verified=False, sale_date=claim_sale.isoformat(), confidence=40))
+        return out("SALE PASSED", "Clerk notice %s scheduled the sale for %s - that date has passed; sold, "
+                                  "cancelled or postponed is unknown until checked" % (pick["document"], pick["sale_date"]),
+                   **kw)
+
+    if claims:
+        newest = max(claims, key=lambda x: x.observed_at or C.now())
+        cs = (newest.case_status or "").upper()
+        kw = {"sale_date": claim_sale.isoformat() if claim_sale else None, "source": newest.source,
+              "evidence_reference": prov[newest.id].get("record") or newest.source_reference,
+              "observed": newest.observed_at.strftime("%Y-%m-%d") if newest.observed_at else None,
+              "confidence": 50}
+        if cs in ("POSTPONED", "CANCELED", "CANCELLED", "RESOLVED", "SOLD"):
+            word = {"CANCELLED": "CANCELED", "SOLD": "RESOLVED"}.get(cs, cs)
+            return out(word, "The list reports the sale %s" % word.lower(), **kw)
+        if claim_sale and claim_sale < today:
+            return out("SALE PASSED", "The list's sale date %s has passed - outcome unknown until checked"
+                       % claim_sale.isoformat(), **kw)
+        if checked:
+            return out("NO NOTICE FOUND", "Claimed by the list for %s, but the %s holds no foreclosure notice for "
+                                          "this address (checked %s). Not proof there is none: the notice may be "
+                                          "unindexed, filed late, or the sale may have been cancelled."
+                       % (kw["sale_date"] or "an unstated date", base["clerk_source"], checked), **dict(kw, confidence=25))
+        return out("CLAIMED", "%s - not yet checked against a county clerk notice" % (newest.normalized_value
+                                                                                       or newest.raw_value or "Claimed"),
+                   **kw)
+    if checked:
+        return out("NO NOTICE FOUND", "No foreclosure claim, and the %s holds no notice for this address (checked "
+                                      "%s). Not proof there is none." % (base["clerk_source"], checked))
+    return out("NO EVIDENCE", "No foreclosure claim or notice on file, and no county clerk check has run for this "
+                              "address. Not proof there is none.")
 
 
 def tax_status(db, prop, sigs) -> Dict[str, Any]:
@@ -301,20 +489,22 @@ IMMINENT_DAYS = 45
 
 
 def _priority(score, owner, tax, fc, distress) -> str:
-    """A: a scheduled foreclosure sale within IMMINENT_DAYS (verified, or
-    claimed by the list - the next action then says to confirm it), a tax sale
-    or a tax lawsuit. B: delinquent taxes or a score of 45+. C: other current
-    distress. Taxes being current never lowers a foreclosure."""
+    """A: a sale scheduled on a VERIFIED clerk notice within IMMINENT_DAYS, a
+    tax sale or a tax lawsuit. B: any other open foreclosure lead (verified
+    further out, claimed, conflicting, postponed, claimed-but-not-found),
+    delinquent taxes or a score of 45+. C: other current distress, or a sale
+    that passed / was cancelled. A claim alone is never "act now"; taxes being
+    current never lowers a foreclosure."""
     if owner["status"] != "VERIFIED":
         return "REVIEW"
-    imminent = fc.get("days") is not None and 0 <= fc["days"] <= IMMINENT_DAYS \
-        and fc["status"] in ("VERIFIED NOTICE", "CLAIMED", "POSTPONED")
+    imminent = fc.get("days") is not None and 0 <= fc["days"] <= IMMINENT_DAYS and fc["status"] == "VERIFIED NOTICE"
     if imminent or tax["status"] in ("TAX SALE", "TAX LAWSUIT"):
         return "A"
-    if fc["status"] in ("VERIFIED NOTICE", "CLAIMED", "POSTPONED") or tax["status"] == "DELINQUENT" \
-            or (score or 0) >= 45:
+    open_lead = fc["status"] in ("VERIFIED NOTICE", "CLAIMED", "CONFLICT", "POSTPONED") or \
+        (fc["status"] == "NO NOTICE FOUND" and fc.get("claimed_sale_date"))
+    if open_lead or tax["status"] == "DELINQUENT" or (score or 0) >= 45:
         return "B"
-    if distress or fc["status"] == "SALE PASSED":
+    if distress or fc["status"] in ("SALE PASSED", "CANCELED"):
         return "C"
     return "PARK"
 
@@ -330,10 +520,25 @@ def _next_action(prio, owner, tax, contact, fc=None) -> str:
     keys = {f["key"] for f in owner.get("flags") or []}
     if "ESTATE_INDICATED" in keys or "LIFE_ESTATE" in keys:
         return "Confirm probate / heirs (who can sell) on the county and court record before any contact"
-    if fc.get("status") == "CLAIMED" and fc.get("days") is not None:
-        return ("Confirm the %s trustee sale on the %s County clerk's posted notice (%d days left), then "
-                "reach %s" % (fc["sale_date"], fc.get("county") or "", fc["days"], owner["name"]))
-    if fc.get("status") == "SALE PASSED":
+    st = fc.get("status")
+    if st == "VERIFIED NOTICE" and fc.get("days") is not None and fc["days"] >= 0:
+        return ("Sale confirmed on clerk notice %s for %s (%d days). Reach %s now; recheck the clerk record the "
+                "week of the sale for a cancellation or postponement" % (fc.get("document"), fc["sale_date"],
+                                                                         fc["days"], owner["name"]))
+    if st == "CONFLICT":
+        return "Dates disagree - open clerk notice %s and confirm which sale is live, then reach %s" % (
+            fc.get("document"), owner["name"])
+    if st == "NO NOTICE FOUND" and fc.get("claimed_sale_date"):
+        return ("No clerk notice found for the claimed %s sale (checked %s). Look up the address on the %s "
+                "County clerk search for that month, or get the notice's document number from the list's source"
+                % (fc["claimed_sale_date"], fc.get("clerk_checked"), fc.get("county") or ""))
+    if st == "CLAIMED" and fc.get("days") is not None:
+        return ("Confirm the %s sale on the %s County clerk's posted notice (%d days left; that county's notices "
+                "are not read automatically) and record the document number, then reach %s"
+                % (fc["sale_date"], fc.get("county") or "", fc["days"], owner["name"]))
+    if st == "CANCELED":
+        return "Notice withdrawn - ask %s whether the loan was reinstated; keep only if other distress" % owner["name"]
+    if st == "SALE PASSED":
         return "Check whether the %s sale happened, was cancelled or postponed" % fc.get("sale_date")
     if prio == "PARK":
         return "Park - no current distress on record; recheck monthly"
@@ -346,11 +551,13 @@ def rows(db, org_id: str, kind: str) -> List[Dict[str, Any]]:
     from app.services.evosense import evaluate as EV
     from app.services.evosense import scoring as SC
     out = []
-    for p in members(db, org_id, kind):
+    ms = members(db, org_id, kind)
+    checks = clerk_checks(db, org_id, [p.id for p in ms])
+    for p in ms:
         sigs = _signals(db, p)
         owner = owner_status(db, p)
         tax = tax_status(db, p, sigs)
-        fc = foreclosure_status(sigs)
+        fc = foreclosure_status(sigs, check=checks.get(p.id))
         contact = contacts(db, owner.get("owner_id"))
         distress = sorted({s.signal_type for s in sigs if s.signal_type not in ("LONG_OWNERSHIP",)})
         strategy = EV.strategy_for(db, p)
@@ -362,8 +569,10 @@ def rows(db, org_id: str, kind: str) -> List[Dict[str, Any]]:
         missing = []
         if tax["status"] == "NOT CHECKED":
             missing.append("tax status (no county file)")
-        if fc["status"] in ("CLAIMED", "NO EVIDENCE"):
-            missing.append("clerk foreclosure-notice check")
+        if fc["status"] in ("CLAIMED", "NO EVIDENCE") and not fc.get("clerk_checked"):
+            missing.append("clerk foreclosure-notice check (%s County notices not read automatically)"
+                           % (p.county or "this") if _county(p) not in _CLERK_COUNTIES() else
+                           "clerk foreclosure-notice check (run Re-check)")
         if p.equity_pct is None:
             missing.append("equity (no mortgage or value estimate)")
         if owner["status"] != "VERIFIED":
@@ -387,6 +596,24 @@ def rows(db, org_id: str, kind: str) -> List[Dict[str, Any]]:
     out.sort(key=lambda r: (rank[r["priority"]], -(r["score"] or 0),
                             r["foreclosure"]["days"] if r["foreclosure"]["days"] is not None else 9999,
                             r["street_address"] or ""))
+    return out
+
+
+def _CLERK_COUNTIES():
+    from app.services.evosense.sources.clerk_fc import COUNTIES
+    return set(COUNTIES)
+
+
+def clerk_checks(db, org_id: str, prop_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    """The latest clerk foreclosure check per property."""
+    if not prop_ids:
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for ev in (db.query(EvoSenseEvent)
+               .filter(EvoSenseEvent.organization_id == org_id, EvoSenseEvent.action == FC_CHECK_EVENT,
+                       EvoSenseEvent.property_id.in_(prop_ids))
+               .order_by(EvoSenseEvent.created_at.asc()).all()):
+        out[ev.property_id] = C.jload(ev.details, {}) or {}
     return out
 
 
@@ -420,7 +647,9 @@ def summary(rs: List[Dict[str, Any]]) -> Dict[str, Any]:
     buckets = Counter()
     for sc_ in scores:
         buckets["%d-%d" % (sc_ // 10 * 10, sc_ // 10 * 10 + 9)] += 1
-    return {"sale_dates": sale_dates, "score_buckets": dict(sorted(buckets.items(), key=lambda kv: int(kv[0].split("-")[0]))),
+    cats = Counter(f.get("category") or "E" for f in fcs)
+    groups = {k: {"label": CATEGORY_LABELS[k], "count": cats.get(k, 0)} for k in "ABCDE"}
+    return {"groups": groups, "sale_dates": sale_dates, "score_buckets": dict(sorted(buckets.items(), key=lambda kv: int(kv[0].split("-")[0]))),
             "properties": len(rs), "owner": c("owner"), "tax": c("tax"), "foreclosure": c("foreclosure"),
             "priority": dict(Counter(r["priority"] for r in rs)),
             "score": {"scored": len(scores), "max": max(scores) if scores else None,
@@ -475,8 +704,32 @@ def last_recheck(db, org_id: str, kind: str) -> Optional[Dict[str, Any]]:
     return {"at": ev.created_at.isoformat() if ev.created_at else None, "details": C.jload(ev.details, {})}
 
 
-def running(org_id: str, kind: str) -> bool:
-    return ("%s:%s" % (org_id, kind)) in _RUNNING
+RECHECK_STARTED = "cohort.recheck_started"
+
+
+def running(org_id: str, kind: str, db=None) -> bool:
+    """True while a re-check of this list is under way - in this process, or
+    (with `db`) started by any server process within the hour and not yet
+    finished. A crashed run stops counting as running after the hour."""
+    if ("%s:%s" % (org_id, kind)) in _RUNNING:
+        return True
+    if db is None:
+        return False
+    from datetime import timedelta
+    started = (db.query(EvoSenseEvent)
+               .filter(EvoSenseEvent.organization_id == org_id, EvoSenseEvent.action == RECHECK_STARTED,
+                       EvoSenseEvent.summary.like("List %s %%" % kind))
+               .order_by(EvoSenseEvent.created_at.desc()).first())
+    if started is None or started.created_at is None or C.now() - started.created_at > timedelta(hours=1):
+        return False
+    done = last_recheck(db, org_id, kind)
+    return not (done and done["at"] and done["at"] >= started.created_at.isoformat())
+
+
+def mark_started(db, org_id: str, kind: str, user=None):
+    C.log_event(db, org_id, RECHECK_STARTED, user=user, actor_type=C.ACTOR_USER if user else C.ACTOR_SYSTEM,
+                summary="List %s re-check started" % kind, details={"kind": kind})
+    db.commit()
 
 
 # ── a list's own claims, attached to the houses it already brought in ──────
