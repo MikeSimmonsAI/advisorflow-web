@@ -111,9 +111,9 @@ def _person(u: User) -> Dict:
 
 
 def team(db: Session, org_id: str) -> Dict:
-    key = seat_key_for_org(db, org_id)
     """Everyone in this workspace: who is on the Wholesale team (with role and
     manager) and who is not yet. Other organizations' people never appear."""
+    key = seat_key_for_org(db, org_id)
     people = db.query(User).filter(User.organization_id == org_id).order_by(User.created_at.asc()).all()
     ids = [u.id for u in people]
     rows = {}
@@ -143,9 +143,9 @@ def team(db: Session, org_id: str) -> Dict:
 
 
 def _check_manager(db: Session, org_id: str, user_id: str, reports_to: Optional[str]) -> Optional[str]:
-    key = seat_key_for_org(db, org_id)
     """The manager must be an active team member of the same workspace, and the
     tree may not loop back on itself."""
+    key = seat_key_for_org(db, org_id)
     if not reports_to:
         return None
     if reports_to == user_id:

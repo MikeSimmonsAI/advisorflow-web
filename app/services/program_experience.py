@@ -158,8 +158,11 @@ def experience_for(db: Session, user, org, is_program: bool, named_wholesale: Op
     #    own org, or an org explicitly listed as a Wholesale workspace).
     if is_program:
         return "sci"
-    if named_wholesale is None or org is not None:
-        named_wholesale = _named_wholesale_seat(db, user, org) if org is not None else _named_wholesale_seat(db, user)
+    if named_wholesale is None:
+        # Judged against THIS workspace's seat rows when there is one (#272):
+        # an EvoSys seat never reads as a BookaBoost seat, or the reverse. A
+        # caller that already knows the answer passes it in and is trusted.
+        named_wholesale = _named_wholesale_seat(db, user, org)
     if named_wholesale and is_wholesale_host(org, user):
         return "wholesale"
     if _admin_of_second_tenant(db, user, org):
