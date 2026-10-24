@@ -187,6 +187,11 @@ def _discovery_routes(db, org_id, focus: Optional[List[str]] = None):
             if focus and cap not in focus and provider.key not in focus \
                     and getattr(provider, "discovery_family", None) not in focus:
                 continue
+            if getattr(provider, "discovery_opt_in", False) and not (focus and (cap in focus or provider.key in focus)):
+                # An opt-in source (county clerk foreclosure notices) feeds only
+                # a strategy that asks for it - enabling it never changes what an
+                # existing all-sources strategy brings in.
+                continue
             if (provider.key, cap) in seen:
                 continue
             seen.add((provider.key, cap))

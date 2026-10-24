@@ -1126,6 +1126,7 @@ class ClerkForeclosureSource(PublicRecordSource):
     label = "County clerk foreclosure notices (Dallas, Tarrant, Denton)"
     capabilities = (C.FORECLOSURE,)
     discovery = True
+    discovery_opt_in = True      # only a strategy whose search names FORECLOSURE (or this source) hunts it
     coverage = ("Dallas, Tarrant and Denton County, TX - every foreclosure sale notice filed with the county "
                 "clerk (trustee, substitute trustee, HOA assessment-lien, judicial and tax sales), with "
                 "document number, sale date and the clerk's indexed address. Not connected: Collin (no "
