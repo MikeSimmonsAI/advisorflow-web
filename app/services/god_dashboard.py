@@ -41,9 +41,17 @@ def _series(rows, labels: List[str]) -> Dict[str, List[int]]:
     return {"real": real, "test": test}
 
 
+# A percentage needs a real base. Against a handful of rows it is noise
+# ("+11640%" from 5 leads to 587): below this the previous count is returned
+# with no percentage, and the screen shows the count instead.
+MIN_PREVIOUS_FOR_PCT = 20
+
+
 def _change(current: int, previous: int) -> Optional[Dict[str, Any]]:
     if not previous:
         return None
+    if previous < MIN_PREVIOUS_FOR_PCT:
+        return {"previous": previous, "pct": None}
     return {"previous": previous,
             "pct": round(100.0 * (current - previous) / previous)}
 

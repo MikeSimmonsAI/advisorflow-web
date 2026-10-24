@@ -60,10 +60,14 @@ function TrendCard ({ title, series, color, unit = '' }) {
     <Card title={title} note={`last ${series.real.length} days`}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
         <span className="gk-kpi-value">{fmt(series.real_total)}{unit}</span>
-        {ch ? (
+        {ch && ch.pct !== null && ch.pct !== undefined ? (
           <Pill tone={ch.pct >= 0 ? 'good' : 'warn'} title={`Previous period: ${ch.previous}`}>
             {ch.pct >= 0 ? '+' : ''}{ch.pct}% vs previous
           </Pill>
+        ) : ch ? (
+          <span className="gk-row-meta" title="Too few in the previous period for a meaningful percentage">
+            previous period: {fmt(ch.previous)}
+          </span>
         ) : <span className="gk-row-meta">no previous period to compare</span>}
       </div>
       <Spark values={series.real} label={`${title}, real, daily`} color={color} />
@@ -138,7 +142,9 @@ export default function GodCommandCenter () {
 
   const rows = buildRows({ orgs, customers: realCustomers, billingRows })
   const watch = rows
-    .filter(r => !r.is_demo && !r._org?.is_demo)
+    // Suspended accounts are switched off on purpose; they stay in the full
+    // Organizations table but do not crowd the watchlist.
+    .filter(r => !r.is_demo && !r._org?.is_demo && r.is_active !== false)
     .slice()
     .sort((x, y) => (x.health_score ?? 101) - (y.health_score ?? 101))
     .slice(0, 6)
@@ -262,7 +268,7 @@ export default function GodCommandCenter () {
 
         {/* ── Watchlist ── */}
         <div style={{ marginTop: 14 }}>
-          <Card title="Organization watchlist" note="lowest health first · demonstration accounts left out"
+          <Card title="Organization watchlist" note="active accounts, lowest health first · demo and suspended accounts left out"
             action={<ActionLink to="/god/organizations">All organizations</ActionLink>}>
             {loading ? <Loading /> : !watch.length ? <Empty>No organizations yet.</Empty> : (
               <ul className="gk-list">
