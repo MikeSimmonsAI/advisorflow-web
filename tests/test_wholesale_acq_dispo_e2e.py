@@ -126,6 +126,12 @@ def test_acquisition_then_analysis_then_disposition(client, auth_headers, db_ses
     ok(client.post("/wholesale/outreach/%s/response" % row["outreach_id"], headers=H,
                    json={"status": "offer_submitted", "offer_amount": price + 12000, "response_note": "by phone"}))
     assert ok(client.get("/wholesale/deals/%s/package" % deal_id, headers=H))["status"] == "under_offer"
+    ds = ok(client.get("/wholesale/deals/%s/disposition-summary" % deal_id, headers=H))
+    f = {x["key"]: x["count"] for x in ds["funnel"]}
+    assert f["offers"] == 1 and f["opened"] == 0                    # no tracked open, so none claimed
+    assert ds["offers"][0]["net"] == 12000 and ds["offers"][0]["buyer"] == "Pecan Flip Co"
+    assert any("proof of funds" in x["why"] for x in ds["follow_ups"])
+    assert ds["closing_checklist"]["next"] == "Buyer selected"
     learned = ok(client.get("/wholesale/buyers/%s/intel" % real["id"], headers=H))
     assert learned["tier"]["tier"] == "VERIFIED_ACTIVE_BUYER"      # an offer + a reply, both real
     assert learned["learned"]["zips"] == {"75216": 1}
@@ -143,6 +149,13 @@ def test_acquisition_then_analysis_then_disposition(client, auth_headers, db_ses
     paid = ok(client.get("/wholesale/deals/%s" % deal_id, headers=H))["deal"]
     assert paid["payment_state"] == "fee_collected"
     assert ok(client.get("/wholesale/deals/%s/package" % deal_id, headers=H))["status"] == "closed"
+    ck = ok(client.get("/wholesale/deals/%s/disposition-summary" % deal_id, headers=H))["closing_checklist"]
+    done = {x["label"]: x["done"] for x in ck["steps"]}
+    assert done["Closed"] and done["Fee collected"] and done["Assignment approved"] and done["Deal package approved"]
+    an = ok(client.get("/wholesale/disposition/analytics", headers=H, params={"include_test": True}))
+    assert an["deals_closed"] >= 1 and an["offers"] >= 1 and an["deal_sheets_sent"] >= 0
+    real_only = ok(client.get("/wholesale/disposition/analytics", headers=H))
+    assert real_only["deals_closed"] == 0                           # a test deal never counts as real business
 
     # the workflow strip sees the whole path, and management reporting still loads
     steps = {w["key"]: w["state"] for w in ok(client.get("/wholesale/deals/%s/underwriting" % deal_id, headers=H))["workflow"]}
