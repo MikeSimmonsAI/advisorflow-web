@@ -193,11 +193,16 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
               </button>
             ) : (
               <button className="btn btn--secondary" disabled={busy}
-                      onClick={() => setPublished('buyer', true)}>
-                Publish the investor room
+                      onClick={() => setPublished('buyer', true)}
+                      title="Publishes only an approved deal package">
+                Publish the approved package
               </button>
             )}
           </div>
+          <p className="ws-muted" style={{ fontSize: 12.5, marginTop: 8 }}>
+            Investors only ever see content an admin approved in the Deal package above. Saving a change
+            here takes a live page down until the new version is approved; the same links then work again.
+          </p>
         </div>
 
         {/* ── The seller's page ────────────────────────────────────────── */}

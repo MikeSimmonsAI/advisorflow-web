@@ -1582,8 +1582,11 @@ def build_buyer_message(deal: WholesaleDeal, prop: WholesaleProperty,
     "estimated" beside it is a representation, and this module does not make
     representations on Mike's behalf.
     """
-    price = analysis.money(asking_price) or analysis.money(deal.buyer_price) \
-        or analysis.money(deal.contract_price) or analysis.money(deal.proposed_offer)
+    # What WE pay the seller (contract price, our offer, the MAO) is never a price
+    # shown to a buyer. Only a price meant for buyers: the one typed for this send,
+    # the investor page's asking price, or the agreed assignment price.
+    price = analysis.money(asking_price) or analysis.money(getattr(deal, "buyer_room_asking_price", None)) \
+        or analysis.money(deal.buyer_price)
     where = ", ".join(x for x in (prop.city, prop.state) if x) or "Address on request"
     subject = "Off-market deal: %s%s" % (
         where, " — %s" % prop.property_type.replace("_", " ") if prop.property_type else "")
@@ -1605,9 +1608,11 @@ def build_buyer_message(deal: WholesaleDeal, prop: WholesaleProperty,
         lines.append("Details: " + " · ".join(specs))
     if price is not None:
         lines.append("Asking: $%s" % _fmt(price))
-    if deal.arv is not None:
+    # Our workings go out only when a person switched them on for investors - the
+    # same switches the investor page obeys, so the email never says more than the page.
+    if deal.arv is not None and getattr(deal, "buyer_room_show_arv", False):
         lines.append("ARV: $%s (%s)" % (_fmt(deal.arv), deal.arv_source or "estimated"))
-    if deal.repair_estimate is not None:
+    if deal.repair_estimate is not None and getattr(deal, "buyer_room_show_repairs", False):
         lines.append("Estimated repairs: $%s (%s)"
                      % (_fmt(deal.repair_estimate), deal.repair_estimate_source or "estimated"))
     if deal.close_of_escrow_target:

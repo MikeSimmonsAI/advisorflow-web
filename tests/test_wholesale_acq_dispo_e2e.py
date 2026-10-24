@@ -28,7 +28,8 @@ COMPS = ("address,sale_price,sale_date,sqft,beds,baths,distance_miles,mls_number
          "4600 Pecan Ln,207000,2026-07-15,1400,3,2,0.5,deed-4600\n")
 
 
-def test_acquisition_then_analysis_then_disposition(client, auth_headers, db_session, sample_org):
+def test_acquisition_then_analysis_then_disposition(client, auth_headers, db_session, sample_org,
+                                                    admin_auth_headers):
     H = auth_headers
 
     # ── ORIGINAL ACQUISITIONS PATH ───────────────────────────────────────
@@ -112,8 +113,9 @@ def test_acquisition_then_analysis_then_disposition(client, auth_headers, db_ses
     _photo(db_session, deal_id)
     pk = ok(client.post("/wholesale/deals/%s/package/submit" % deal_id, headers=H))
     assert pk["status"] == "review"
-    ok(client.post("/wholesale/approvals/%s/decide" % pk["approval"]["id"], headers=H, json={"approve": True}))
-    assert ok(client.post("/wholesale/deals/%s/package/publish" % deal_id, headers=H))["status"] == "published"
+    ok(client.post("/wholesale/approvals/%s/decide" % pk["approval"]["id"], headers=admin_auth_headers,
+                   json={"approve": True}))
+    assert ok(client.post("/wholesale/deals/%s/package/publish" % deal_id, headers=admin_auth_headers))["status"] == "published"
 
     # ── ORIGINAL MATCH + DISPOSITION ────────────────────────────────────
     ok(client.post("/wholesale/deals/%s/match-buyers" % deal_id, headers=H, json={}))

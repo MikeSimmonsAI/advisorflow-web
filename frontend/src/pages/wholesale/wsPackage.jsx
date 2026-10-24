@@ -8,6 +8,7 @@ import { api, fetchObjectUrl } from '../../api/client'
 
 const ORDER = ['draft', 'review', 'approved', 'published', 'under_offer', 'closed']
 const NAMES = { draft: 'Draft', review: 'In review', approved: 'Approved', published: 'Published', under_offer: 'Under offer', closed: 'Closed' }
+const STEP_OF = { changed: 'published' }
 
 export function DealPackagePanel({ dealId, onChanged }) {
   const [st, setSt] = useState(null)
@@ -25,7 +26,7 @@ export function DealPackagePanel({ dealId, onChanged }) {
     try { const url = await fetchObjectUrl(`/wholesale/deals/${dealId}/package.pdf`); window.open(url, '_blank', 'noopener') } catch (e) { setErr(e.message) }
   }
   if (!st) return <div className="panel ws-panel">{err ? <div className="ws-error">{err}</div> : 'Loading the deal package…'}</div>
-  const idx = ORDER.indexOf(st.status)
+  const idx = ORDER.indexOf(STEP_OF[st.status] || st.status)
   return (
     <div className="panel ws-panel uw-package">
       <div className="panel-title ws-panel-title">
@@ -47,9 +48,13 @@ export function DealPackagePanel({ dealId, onChanged }) {
       ) : null}
       {err ? <div className="ws-error">{err}</div> : null}
       {st.notes.map((n) => <div key={n} className="uw-missing" style={{ marginBottom: 6 }}>{n}</div>)}
+      {st.status === 'changed' ? <div className="ws-error" style={{ marginBottom: 6 }}>Investors see a dead link right now.</div> : null}
       {st.missing.length && st.status !== 'none' ? (
-        <div className="uw-missing"><b>Before review</b><ul>{st.missing.map((m) => <li key={m}>{m}</li>)}</ul>
-          <span className="uw-small">Set these in the investor page settings below.</span></div>
+        <div className="uw-missing"><b>Needed before review</b><ul>{st.missing.map((m) => <li key={m}>{m}</li>)}</ul></div>
+      ) : null}
+      {(st.recommended || []).length && st.status !== 'none' ? (
+        <div className="uw-missing" style={{ marginTop: 6 }}><b>Recommended</b><ul>{st.recommended.map((m) => <li key={m}>{m}</li>)}</ul>
+          <span className="uw-small">Set these in the investor page settings below. The approver sees what is missing.</span></div>
       ) : null}
       <div className="uw-row">
         {st.can.submit ? <button type="button" className="btn btn--primary btn--sm" disabled={busy} onClick={() => act('/submit')}>Send for approval</button> : null}
@@ -60,7 +65,8 @@ export function DealPackagePanel({ dealId, onChanged }) {
       </div>
       <p className="ws-muted uw-small">
         The package is exactly what investors see - address, asking price, photos and anything you switch on below.
-        It never includes the seller, your contract price, MAO or fee. Edits after approval send it back for review.
+        It never includes the seller, your contract price, MAO or fee. Only an admin or team manager can approve or
+        publish it, and any change after approval takes the live page down until it is approved again.
       </p>
     </div>
   )

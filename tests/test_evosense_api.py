@@ -97,7 +97,7 @@ def test_inbox_filters_search_and_paging(client, auth_headers, seeded):
 # ── the HTTP journey: promote ───────────────────────────────────────────────
 
 def test_promote_over_http_and_the_rooms_never_see_acquisition_intel(client, auth_headers, db_session,
-                                                                    sample_org, seeded):
+                                                                    sample_org, seeded, admin_auth_headers):
     pid = _flagship_id(db_session, sample_org.id)
     out = ok(client.post("/wholesale/evosense/properties/%s/promote" % pid, headers=auth_headers, json={}))
     again = ok(client.post("/wholesale/evosense/properties/%s/promote" % pid, headers=auth_headers, json={}))
@@ -111,9 +111,10 @@ def test_promote_over_http_and_the_rooms_never_see_acquisition_intel(client, aut
     # read them as an outsider would.
     ok(client.patch("/wholesale/deals/%s/publication" % out["deal_id"], headers=auth_headers,
                     json={"buyer_room_summary": "Three bed in Dallas."}))
-    for audience in ("buyer", "seller"):
-        ok(client.post("/wholesale/deals/%s/publication/state" % out["deal_id"], headers=auth_headers,
-                       json={"audience": audience, "published": True}))
+    from tests.wholesale_publish_helpers import approve_and_publish
+    approve_and_publish(client, auth_headers, admin_auth_headers, out["deal_id"])
+    ok(client.post("/wholesale/deals/%s/publication/state" % out["deal_id"], headers=auth_headers,
+                   json={"audience": "seller", "published": True}))
     buyer = ok(client.post("/wholesale/buyers", headers=auth_headers,
                            json={"company_name": "Room Test Capital", "email": "r@example.com",
                                  "is_test": True}))

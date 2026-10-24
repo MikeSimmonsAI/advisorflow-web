@@ -2916,6 +2916,10 @@ def decide_approval(approval_id: str, payload: ApprovalDecisionIn, request: Requ
                         WholesaleApproval.organization_id == org_id).first())
     if approval is None:
         raise HTTPException(status_code=404, detail="Approval not found")
+    if approval.kind == "package" and payload.approve:
+        from app.services import wholesale_deal_package as PK
+        if not PK.can_publish(db, user):
+            raise HTTPException(status_code=403, detail=PK.PUBLISH_ROLE_REFUSAL)
     svc.decide_approval(db, org_id, approval, payload.approve, user, payload.comments)
     db.commit()
     db.refresh(approval)

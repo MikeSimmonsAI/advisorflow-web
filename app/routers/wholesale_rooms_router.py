@@ -156,6 +156,13 @@ def _resolve(db: Session, token: str, audience: str):
     if not published:
         raise HTTPException(status_code=404,
                             detail="This link is no longer available.")
+    # An investor page is served only while it shows exactly what was approved.
+    # Content edited after approval (or never approved) reads like a dead link.
+    if audience == AUDIENCE_BUYER:
+        from app.services import wholesale_deal_package as PK
+        if not PK.serving(db, deal.organization_id, deal):
+            raise HTTPException(status_code=404,
+                                detail="This link is no longer available.")
     return link, deal
 
 
@@ -295,10 +302,17 @@ def set_publication_state(deal_id: str, payload: PublishStateIn, request: Reques
     now = datetime.utcnow()
 
     if payload.audience == AUDIENCE_BUYER:
-        deal.buyer_room_published = bool(payload.published)
+        # ONE investor publication policy, whichever screen or route is used:
+        # publishing goes through the approved deal package (exact content, admin
+        # or manager); taking the page down is always allowed.
+        from app.services import wholesale_deal_package as PK
         if payload.published:
-            deal.buyer_room_published_at = now
-            deal.buyer_room_published_by_id = user.id
+            PK.publish(db, org_id, deal, user)
+        else:
+            PK.withdraw(db, org_id, deal, user, "taken down from Sharing")
+        db.commit()
+        db.refresh(deal)
+        return _publication_json(db, deal)
     else:
         deal.seller_room_published = bool(payload.published)
         if payload.published:
