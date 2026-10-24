@@ -406,3 +406,17 @@ def test_recheck_running_state_survives_other_workers(db_session, sample_org, sa
                 details={"kind": "t100"})
     db_session.commit()
     assert CO.running(sample_org.id, "t100", db_session) is False
+
+
+# 15 ── enabling the clerk source never changes an all-sources strategy ───────
+
+def test_clerk_source_feeds_only_strategies_that_ask_for_foreclosure(db_session, sample_org, clerks):
+    from app.services.evosense import providers as PV
+    cfg = PV.config(db_session, sample_org.id, CO.CLERK_SOURCE)
+    cfg.enabled = True
+    db_session.commit()
+    keys = lambda focus: {p.key for _c, p, _cfg in HU._discovery_routes(db_session, sample_org.id, focus)}
+    assert CO.CLERK_SOURCE not in keys([])                       # e.g. "New Check Out": no focus
+    assert CO.CLERK_SOURCE not in keys(["TAX"])
+    assert CO.CLERK_SOURCE in keys(["FORECLOSURE"])               # the Pre-Foreclosure starter
+    assert CO.CLERK_SOURCE in keys([CO.CLERK_SOURCE])
