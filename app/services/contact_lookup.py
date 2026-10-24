@@ -321,9 +321,11 @@ def lookup_one(db, org_id: str, k: Kind, r, user, settings, provider) -> Dict[st
     if k.key == "property":
         from app.routers.wholesale_router import enrich_property
         out = enrich_property(db, org_id, user, settings, provider, r)
-        return {"id": r.id, "name": k.name(r), "status": out["status"], "message": out.get("message"),
-                "filled": {"phone": out["phones"][0]} if out.get("phones") else
-                          ({"email": out["emails"][0]} if out.get("emails") else {}),
+        attached = out.get("match_quality") in (None, "MATCHED")
+        return {"id": r.id, "name": k.name(r), "status": out["status"],
+                "message": out.get("match_quality_why") if not attached else out.get("message"),
+                "filled": {} if not attached else ({"phone": out["phones"][0]} if out.get("phones") else
+                                                   ({"email": out["emails"][0]} if out.get("emails") else {})),
                 "cost_cents": out.get("cost_cents") or 0}
     a = k.address(db, r)
     data = WE.EnrichmentInput(

@@ -385,6 +385,14 @@ def execute(db, prop, strategy, decision: EvoSenseEnrichmentDecision, *, user=No
             else:
                 B.charge(db, entry, success=True)
             touched = CT.apply_result(db, owner, result, provider)
+            if not touched and ((result.match_evidence or {}).get("guard") or {}).get("verdict") == "NO_VERIFIED_MATCH":
+                # The provider answered (and may have billed) - but about someone else.
+                attempts.append({"provider": provider.key, "result": "no_verified_match",
+                                 "why": result.match_evidence["guard"]["why"], "charged": cost})
+                outcome = "no_match"
+                decision.provider_key = provider.key
+                decision.ledger_id = entry.id
+                break
             for cp in touched:
                 if entry.contact_point_id is None:
                     entry.contact_point_id = cp.id
