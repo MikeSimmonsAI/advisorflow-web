@@ -58,3 +58,24 @@ def test_priority_explains_every_point_and_disqualified_is_zero():
     p = BI.priority(70, False, t, h)
     assert p["score"] == 85 and sum(x["points"] for x in p["explain"]) == 85
     assert BI.priority(70, True, t, h)["score"] == 0
+
+
+def test_a_deal_does_not_learn_from_itself(client, auth_headers):
+    """Offers on THIS deal are evidence for the tier, never a history bonus on this same deal."""
+    from tests.test_wholesale_acq_dispo_e2e import ok
+    H = auth_headers
+    ES = "/wholesale/evosense"
+    pid = ok(client.post(ES + "/properties", headers=H, json={
+        "street_address": "12 Self Learn Ln", "city": "Dallas", "state": "TX", "zip_code": "75216",
+        "county": "Dallas", "property_type": "single_family", "is_test": True}))["property_id"]
+    ok(client.post(ES + "/properties/%s/owner" % pid, headers=H, json={"name": "Self Learn Owner"}))
+    deal_id = ok(client.post(ES + "/properties/%s/promote" % pid, headers=H, json={}))["deal_id"]
+    b = ok(client.post("/wholesale/buyers", headers=H, json={"company_name": "Self Co", "email": "s@example.test", "is_test": True}))
+    ok(client.post("/wholesale/buyers/%s/buy-boxes" % b["id"], headers=H, json={"label": "x", "states": ["TX"]}))
+    ok(client.post("/wholesale/deals/%s/disposition" % deal_id, headers=H, json={"buyer_ids": [b["id"]], "channel": "email"}))
+    row = [x for x in ok(client.get("/wholesale/deals/%s/buyer-board" % deal_id, headers=H))["buyers"] if x["buyer_id"] == b["id"]][0]
+    ok(client.post("/wholesale/outreach/%s/response" % row["outreach_id"], headers=H,
+                   json={"status": "offer_submitted", "offer_amount": 100000}))
+    me = [x for x in ok(client.get("/wholesale/deals/%s/buyer-intel" % deal_id, headers=H))["buyers"] if x["buyer_id"] == b["id"]][0]
+    assert me["tier"]["tier"] == "VERIFIED_ACTIVE_BUYER"
+    assert me["history_fit"]["points"] == 0

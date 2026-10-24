@@ -145,12 +145,12 @@ def history_fit(rev: Dict[str, Any], zip_code: Optional[str], property_type: Opt
     if n:
         p = min(8, 4 * n)
         pts += p
-        lines.append({"points": p, "why": "Offered on or bought %d deal%s in ZIP %s" % (n, "" if n == 1 else "s", zip_code)})
+        lines.append({"points": p, "why": "Offered on, was chosen for, or bought %d other deal%s in ZIP %s" % (n, "" if n == 1 else "s", zip_code)})
     t = rev["property_types"].get(property_type or "", 0)
     if t:
         p = min(4, 2 * t)
         pts += p
-        lines.append({"points": p, "why": "Acted on %d %s deal%s" % (t, (property_type or "").replace("_", " "), "" if t == 1 else "s")})
+        lines.append({"points": p, "why": "Acted on %d other %s deal%s" % (t, (property_type or "").replace("_", " "), "" if t == 1 else "s")})
     lo, hi = rev.get("price_low"), rev.get("price_high")
     if price and lo is not None:
         if lo * 0.8 <= price <= hi * 1.2:
@@ -251,7 +251,8 @@ def for_deal(db, org_id: str, deal: Any) -> Dict[str, Any]:
         b = r["buyer"]
         t = tier(b, activity.get(b.id))
         counts[t["tier"]] += 1
-        rev = revealed(hist.get(b.id) or [])
+        # learn from OTHER deals only - this deal's own offers must not vote for themselves
+        rev = revealed([x for x in (hist.get(b.id) or []) if x.get("deal_id") != deal.id])
         h = history_fit(rev, getattr(prop, "zip_code", None), getattr(prop, "property_type", None), price)
         pr = priority(r["score"], r["disqualified"], t, h)
         items.append({

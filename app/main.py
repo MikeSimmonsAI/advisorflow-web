@@ -1206,6 +1206,10 @@ from app.routers.wholesale_underwriting_router import router as wholesale_underw
 app.include_router(wholesale_underwriting_router)   # /wholesale/deals/{id}/underwriting - Analyze deal
 from app.routers.wholesale_buyer_intel_router import router as wholesale_buyer_intel_router  # noqa: E402
 app.include_router(wholesale_buyer_intel_router)   # /wholesale/deals/{id}/buyer-intel - cash buyer intelligence
+from app.routers.wholesale_package_router import router as wholesale_package_router  # noqa: E402
+from app.routers.wholesale_package_router import public_router as wholesale_package_public  # noqa: E402
+app.include_router(wholesale_package_router)   # /wholesale/deals/{id}/package - investor deal package
+app.include_router(wholesale_package_public)   # public — token IS the authorization (package PDF)
 from app.routers.wholesale_canvass_router import router as wholesale_canvass_router  # noqa: E402
 app.include_router(wholesale_canvass_router)   # /wholesale/canvass - door-knocking routes
 from app.routers.wholesale_team_router import router as wholesale_team_router  # noqa: E402

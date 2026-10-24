@@ -104,6 +104,17 @@ def test_acquisition_then_analysis_then_disposition(client, auth_headers, db_ses
     assert tiers[claimed["id"]] == "UNVERIFIED_CONTACT"            # 50 typed deals count for nothing
     assert all(x["explain"] and x["fit_factors"] for x in intel["buyers"])
 
+    # ── NEW: INVESTOR DEAL PACKAGE, approved through the Approval Center ─
+    from tests.test_wholesale_deal_package import _photo
+    ok(client.post("/wholesale/deals/%s/package" % deal_id, headers=H))
+    ok(client.patch("/wholesale/deals/%s/publication" % deal_id, headers=H, json={
+        "buyer_room_summary": "Vacant 3/2, roof and kitchen.", "buyer_room_asking_price": price + 12000}))
+    _photo(db_session, deal_id)
+    pk = ok(client.post("/wholesale/deals/%s/package/submit" % deal_id, headers=H))
+    assert pk["status"] == "review"
+    ok(client.post("/wholesale/approvals/%s/decide" % pk["approval"]["id"], headers=H, json={"approve": True}))
+    assert ok(client.post("/wholesale/deals/%s/package/publish" % deal_id, headers=H))["status"] == "published"
+
     # ── ORIGINAL MATCH + DISPOSITION ────────────────────────────────────
     ok(client.post("/wholesale/deals/%s/match-buyers" % deal_id, headers=H, json={}))
     assert ok(client.get("/wholesale/deals/%s/matches" % deal_id, headers=H))["matches"]
@@ -114,6 +125,7 @@ def test_acquisition_then_analysis_then_disposition(client, auth_headers, db_ses
     # the buyer phones back with an offer - a person records it
     ok(client.post("/wholesale/outreach/%s/response" % row["outreach_id"], headers=H,
                    json={"status": "offer_submitted", "offer_amount": price + 12000, "response_note": "by phone"}))
+    assert ok(client.get("/wholesale/deals/%s/package" % deal_id, headers=H))["status"] == "under_offer"
     learned = ok(client.get("/wholesale/buyers/%s/intel" % real["id"], headers=H))
     assert learned["tier"]["tier"] == "VERIFIED_ACTIVE_BUYER"      # an offer + a reply, both real
     assert learned["learned"]["zips"] == {"75216": 1}
@@ -130,6 +142,7 @@ def test_acquisition_then_analysis_then_disposition(client, auth_headers, db_ses
         "amount": fee, "method": "wire", "reference": "WIRE-FX-2", "collected_at": "2026-11-09"}))
     paid = ok(client.get("/wholesale/deals/%s" % deal_id, headers=H))["deal"]
     assert paid["payment_state"] == "fee_collected"
+    assert ok(client.get("/wholesale/deals/%s/package" % deal_id, headers=H))["status"] == "closed"
 
     # the workflow strip sees the whole path, and management reporting still loads
     steps = {w["key"]: w["state"] for w in ok(client.get("/wholesale/deals/%s/underwriting" % deal_id, headers=H))["workflow"]}
