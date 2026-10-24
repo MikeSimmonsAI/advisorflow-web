@@ -145,6 +145,26 @@ function RepairEditor({ dealId, evoId, onSaved, busy, setBusy, setErr }) {
   )
 }
 
+function Provenance({ dealId, refreshKey }) {
+  const [p, setP] = useState(null)
+  useEffect(() => { api.get(`/wholesale/deals/${dealId}/provenance`).then(setP).catch(() => setP(null)) }, [dealId, refreshKey])
+  if (!p) return null
+  const show = (v) => (v == null || v === '' ? 'not on file' : typeof v === 'number' && v > 999 ? fmtMoney(v) : String(v))
+  return (
+    <div className="ws-panel">
+      <h4 style={{ marginTop: 0 }}>Where these numbers come from</h4>
+      <div className="uw-table-wrap"><table className="uw-table">
+        <thead><tr><th>Fact</th><th>Value</th><th>Source</th><th>Checked</th></tr></thead>
+        <tbody>{p.facts.map((f) => (
+          <tr key={f.fact} className={f.value == null ? 'is-quiet' : ''}><td>{f.fact}</td><td>{show(f.value)}</td>
+            <td className="uw-small">{f.source}{f.note ? <div className="ws-muted">{f.note}</div> : null}</td>
+            <td>{f.verified === true ? <span className="ws-pill is-ok">verified</span> : f.verified === false ? <span className="ws-pill">not verified</span> : '—'}</td></tr>))}</tbody>
+      </table></div>
+      <p className="ws-muted uw-small">{p.rule}</p>
+    </div>
+  )
+}
+
 export function UnderwritingTab({ dealId, goTo, onChanged }) {
   const [a, setA] = useState(null)
   const [form, setForm] = useState({})
@@ -290,6 +310,8 @@ export function UnderwritingTab({ dealId, goTo, onChanged }) {
             .map(([k, v]) => <div key={k}><dt>{k}</dt><dd className={v ? '' : 'is-quiet'}>{v || 'not on file'}</dd></div>)}
         </dl>
       </div>
+
+      <Provenance dealId={dealId} refreshKey={a.calculated_at} />
 
       {a.history?.length ? (
         <div className="ws-panel">

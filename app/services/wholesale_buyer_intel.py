@@ -140,7 +140,7 @@ def history_fit(rev: Dict[str, Any], zip_code: Optional[str], property_type: Opt
     pts = 0
     lines: List[Dict[str, Any]] = []
     if not rev or not (rev.get("deals_acted_on") or rev.get("deals_passed")):
-        return {"points": 0, "lines": [{"points": 0, "why": "No offers, picks or passes from this buyer yet - nothing learned."}]}
+        return {"points": 0, "lines": [{"points": 0, "why": "No offers, picks or passes from this buyer on other deals yet - nothing learned."}]}
     n = rev["zips"].get(zip_code or "", 0)
     if n:
         p = min(8, 4 * n)
