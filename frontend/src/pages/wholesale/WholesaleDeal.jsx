@@ -32,6 +32,7 @@ import { ValuationPanel } from './wsValuation'
 import { DocumentDrawer } from './wsDocuments'
 import { SharingWorkspace } from './wsSharing'
 import { UnderwritingTab, WorkflowStrip } from './wsUnderwriting'
+import { BuyerIntelPanel } from './wsBuyerIntel'
 import './wsUnderwriting.css'
 import DealOpsPanel, { DistributionNotice, LeadTemperatureChip, useDistribution } from './ops/DealOpsPanel'
 import { EvoApp, Hero, PageSkeleton, PropertyThumb, Ring, Status, Tag, humanize, money, shortDate } from './ds/ds'
@@ -1289,6 +1290,7 @@ function BuyersTab({ room, act, busy }) {
 
   return (
     <>
+      <BuyerIntelPanel dealId={deal.id} refreshKey={matches.length} />
       <div className="panel ws-panel">
         <div className="panel-title ws-panel-title">
           <span>Matched buyers ({matches.length})</span>
