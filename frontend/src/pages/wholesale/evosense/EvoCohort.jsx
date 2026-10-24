@@ -335,6 +335,10 @@ export default function EvoCohort() {
                         <span className="evo-prop__sub" style={{ display: 'block', color: '#b45309', fontWeight: 600, whiteSpace: 'normal', overflow: 'visible', textOverflow: 'clip' }}>
                           Also posted for {r.foreclosure.reposted_for.join(', ')}: the {r.foreclosure.sale_date} sale may be postponed. Check the clerk the week of the sale.
                         </span>) : null}
+                      {r.foreclosure.pending_actions?.length ? (
+                        <span className="evo-prop__sub" style={{ display: 'block', color: '#b91c1c', fontWeight: 600, whiteSpace: 'normal', overflow: 'visible', textOverflow: 'clip' }}>
+                          Pending {r.foreclosure.pending_actions.map((a) => (a.type === 'hoa_assessment_lien_sale' ? 'HOA lien' : 'judicial') + ' foreclosure (' + a.document + ')').join(', ')}: no sale date yet.
+                        </span>) : null}
                       {r.foreclosure.other_records?.length ? (
                         <details className="evo-prop__sub" onClick={(e) => e.stopPropagation()}>
                           <summary>Other records on file ({r.foreclosure.other_records.length})</summary>

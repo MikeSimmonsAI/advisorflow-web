@@ -227,6 +227,10 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
     es_ids["es_gate_provider"] = "reapi_comps"
     es_ids["es_reprocess_run_id"] = evosense_reprocess.dry_run(
         db_session, sample_org.id, user=sample_advisor).id
+    # a finished foreclosure match preview of A's (held in memory, keyed by org)
+    from app.services.evosense import cohort as _CO
+    _CO._PREVIEWS["a0preview0001"] = {"status": "done", "org_id": sample_org.id, "result": {"results": []}}
+    es_ids["es_preview_job"] = "a0preview0001"
     db_session.commit()
 
     # A seller fact of A's (seller intelligence verify route).
@@ -597,6 +601,7 @@ def evosense_attacks(ids):
         # derived state; applying or rolling back someone else's would rewrite
         # their records.
         ("get", "%s/reprocess/%s" % (base, ids["es_reprocess_run_id"]), None),
+        ("get", "%s/foreclosure/match-preview/%s" % (base, ids["es_preview_job"]), None),
         ("get", "%s/provider-evaluations/%s" % (base, ids["es_evaluation_id"]), None),
         ("post", "%s/provider-evaluations/%s/purge" % (base, ids["es_evaluation_id"]), None),
         ("post", "%s/provider-evaluations/%s/execute" % (base, ids["es_evaluation_id"]),

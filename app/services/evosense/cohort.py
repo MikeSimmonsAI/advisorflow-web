@@ -198,8 +198,9 @@ def fc_check(db, org_id: str, props: List[EvoSenseProperty], *, user=None) -> Di
                            "reason": NO_PORTAL.get(county, "No county clerk foreclosure source is connected for %s "
                                                           "County" % county.title())}
             continue
-        targets = [{"id": p.id, "street_address": p.street_address, "zip_code": p.zip_code, "city": p.city}
-                   for p in ps]
+        from app.services.evosense import fc_match as FM
+        targets = [{"id": p.id, "street_address": p.street_address, "zip_code": p.zip_code, "city": p.city,
+                    "identity": FM.identity(db, p)} for p in ps]
         try:
             res = reader.check(county, targets)
         except SB.SourceError as exc:
@@ -210,13 +211,18 @@ def fc_check(db, org_id: str, props: List[EvoSenseProperty], *, user=None) -> Di
             db.rollback()
             out[county] = {"status": "FAILED", "properties": len(ps), "error": str(exc)[:200]}
             continue
-        portal, ingested = res["portal"], 0
+        portal, ingested, already = res["portal"], 0, 0
         for p in ps:
             hits = res["matches"].get(p.id, [])
             docs = []
+            on_file = _recorded_documents(db, p)
             for doc, how in hits:
                 f = notice_facts(portal, doc)
-                docs.append({k: f[k] for k in ("document_number", "sale_date", "recorded", "category", "status", "url")})
+                docs.append(dict({k: f[k] for k in ("document_number", "sale_date", "recorded", "category", "status",
+                                                    "url")}, matched_by=how))
+                if doc_key(f["document_number"]) in on_file:
+                    already += 1                          # a person already recorded this notice: never a second copy
+                    continue
                 rec = to_record(portal, doc, target={"street_address": p.street_address, "city": p.city,
                                                      "zip_code": p.zip_code}, matched_by=how)
                 if rec is None:
@@ -234,10 +240,31 @@ def fc_check(db, org_id: str, props: List[EvoSenseProperty], *, user=None) -> Di
                         if docs else "%s: no foreclosure notice found for this address" % portal.cfg["label"],
                         details={"source": portal.cfg["label"], "county": county, "matched": len(docs),
                                  "documents": docs, "checked": C.now().strftime("%Y-%m-%d"),
+                                 "candidates": res.get("candidates", {}).get(p.id, []),
+                                 "rejected": res.get("rejected", {}).get(p.id, []),
                                  "search": "https://%s/" % portal.host})
         db.commit()
-        out[county] = dict(res["stats"], ingested=ingested)
+        out[county] = dict(res["stats"], ingested=ingested, already_recorded=already,
+                           candidate_list=[dict(c, property_id=pid) for pid, cs in res.get("candidates", {}).items()
+                                           for c in cs][:50])
     return out
+
+
+_DOC_PREFIX = re.compile(r"^(?:DALLAS|TARRANT|DENTON|JOHNSON|COLLIN|ELLIS|KAUFMAN|ROCKWALL)-(?:FC-)?", re.I)
+
+
+def doc_key(doc: Optional[str]) -> str:
+    """'JOHNSON-2026-392' (recorded by hand) and '2026-392' (the clerk's own
+    number) are the same notice."""
+    return _DOC_PREFIX.sub("", (doc or "").strip().upper())
+
+
+def _recorded_documents(db, prop) -> set:
+    rows = (db.query(EvoSenseSignal.provenance)
+            .filter(EvoSenseSignal.organization_id == prop.organization_id, EvoSenseSignal.property_id == prop.id,
+                    EvoSenseSignal.signal_type.in_(FORECLOSURE_TYPES), EvoSenseSignal.source == "operator",
+                    EvoSenseSignal.active.is_(True)).all())
+    return {doc_key((C.jload(r[0], {}) or {}).get("document")) for r in rows} - {""}
 
 
 def _addr_key(street: Optional[str]) -> str:
@@ -330,7 +357,7 @@ def foreclosure_status(sigs, today=None, check: Optional[Dict[str, Any]] = None)
     base = {"verified": False, "sale_date": None, "days": None, "claimed_sale_date": None, "notices": [],
             "document": None, "document_url": None, "foreclosure_type": None, "source": None,
             "evidence_reference": None, "evidence": None, "observed": None, "clerk_checked": checked,
-            "reposted_for": [], "other_records": [],
+            "reposted_for": [], "other_records": [], "pending_actions": [],
             "clerk_source": (check or {}).get("source"), "confidence": 0,
             "last_checked": checked}
     # what a person recorded beside the notice that decides the status (a lawsuit, a
@@ -338,6 +365,12 @@ def foreclosure_status(sigs, today=None, check: Optional[Dict[str, Any]] = None)
     base["other_records"] = [{"document": prov[x.id].get("document") or x.source_reference,
                               "url": prov[x.id].get("document_url"), "note": prov[x.id].get("note")}
                              for x in claims if prov[x.id].get("note")]
+    # a lawsuit to foreclose (HOA lien, judicial) with no sale date yet
+    base["pending_actions"] = [{"document": prov[x.id].get("document") or x.source_reference,
+                                "type": prov[x.id].get("foreclosure_type"), "url": prov[x.id].get("document_url")}
+                               for x in claims if not prov[x.id].get("sale_date")
+                               and prov[x.id].get("foreclosure_type") in ("hoa_assessment_lien_sale",
+                                                                          "judicial_foreclosure_sale")]
     claim_dates = sorted({d for d in (_sd(prov[x.id].get("sale_date")) for x in claims) if d})
     upcoming_claims = [d for d in claim_dates if d >= today]
     claim_sale = upcoming_claims[0] if upcoming_claims else (claim_dates[-1] if claim_dates else None)
@@ -368,6 +401,13 @@ def foreclosure_status(sigs, today=None, check: Optional[Dict[str, Any]] = None)
                           "status": (x.case_status or "scheduled").lower(), "source": x.source,
                           "matched_by": pv.get("matched_by"), "evidence": pv.get("note"),
                           "observed": x.observed_at.strftime("%Y-%m-%d") if x.observed_at else None})
+        # one notice once: recorded by hand AND read from the clerk is still one notice
+        by_doc: Dict[str, Dict[str, Any]] = {}
+        for r in rows_:
+            k = doc_key(r["document"]) or r["document"]
+            if k not in by_doc or (r.get("evidence") and not by_doc[k].get("evidence")):
+                by_doc[k] = r
+        rows_ = list(by_doc.values())
         rows_.sort(key=lambda r: r["sale_date"] or "")
         base["notices"] = rows_
         live = [r for r in rows_ if r["status"] == "scheduled" and _sd(r["sale_date"]) and _sd(r["sale_date"]) >= today]
@@ -817,6 +857,99 @@ def start_recheck(org_id: str, kind: str, *, user_id: Optional[str] = None, sess
 
     threading.Thread(target=work, name="evosense-cohort-%s" % kind[:12], daemon=True).start()
     return True
+
+
+# ── read-only match preview ─────────────────────────────────────────────────
+
+_PREVIEWS: Dict[str, Dict[str, Any]] = {}
+
+
+def match_preview(db, org_id: str, *, property_ids: Optional[List[str]] = None, kind: Optional[str] = None,
+                  evidence_only: bool = False, max_searches: Optional[int] = None) -> Dict[str, Any]:
+    """What the clerk matcher WOULD attach to these properties - nothing is
+    written. ``evidence_only`` hides the street from the matcher, so only the
+    legal description / parcel / name path can find the notice: the honest
+    test of automatic discovery for notices without a street."""
+    from app.services.evosense import fc_match as FM
+    from app.services.evosense.sources import base as SB
+    from app.services.evosense.sources.clerk_fc import COUNTIES, ClerkForeclosureReader, notice_facts
+    if kind:
+        props = members(db, org_id, kind)
+    else:
+        props = (db.query(EvoSenseProperty)
+                 .filter(EvoSenseProperty.organization_id == org_id, EvoSenseProperty.id.in_(property_ids or []))
+                 .all())
+    reader = ClerkForeclosureReader()
+    groups: Dict[str, List[EvoSenseProperty]] = {}
+    for p in props:
+        groups.setdefault(_county(p) or "unknown", []).append(p)
+    out: Dict[str, Any] = {"properties": len(props), "evidence_only": evidence_only, "counties": {}, "results": []}
+    for county, ps in sorted(groups.items()):
+        if county not in COUNTIES:
+            out["counties"][county] = {"status": "NOT CONNECTED", "properties": len(ps)}
+            for p in ps:
+                out["results"].append({"id": p.id, "address": p.street_address, "county": county,
+                                       "outcome": "not connected"})
+            continue
+        targets = []
+        for p in ps:
+            ident = FM.identity(db, p)
+            targets.append({"id": p.id, "street_address": None if evidence_only else p.street_address,
+                            "zip_code": p.zip_code, "city": p.city, "identity": ident})
+        try:
+            res = reader.check(county, targets, max_searches=max_searches)
+        except SB.SourceError as exc:
+            out["counties"][county] = {"status": "FAILED", "error": "%s: %s" % (exc.code, exc.message)}
+            continue
+        out["counties"][county] = res["stats"]
+        portal = res["portal"]
+        for p, t in zip(ps, targets):
+            found = [dict({k: f[k] for k in ("document_number", "sale_date", "recorded", "url")}, matched_by=how)
+                     for doc, how in res["matches"].get(p.id, []) for f in [notice_facts(portal, doc)]]
+            cands = res["candidates"].get(p.id, [])
+            rej = res["rejected"].get(p.id, [])
+            out["results"].append({
+                "id": p.id, "address": p.street_address, "city": p.city, "county": county,
+                "identity": {"parcel_ids": t["identity"]["parcel_ids"][:3],
+                             "legal": (t["identity"]["legal"] or {}).get("raw"),
+                             "names": t["identity"]["names"][:3]},
+                "outcome": "verified" if found else ("candidate" if cands else "no match"),
+                "verified": found, "candidates": cands, "rejected": rej})
+    return out
+
+
+def start_preview(org_id: str, *, property_ids: Optional[List[str]] = None, kind: Optional[str] = None,
+                  evidence_only: bool = False, max_searches: Optional[int] = None, session_factory=None) -> str:
+    """Run a match preview on a worker thread (the clerk searches take
+    minutes); poll preview_result(job)."""
+    import threading
+    import uuid
+    job = uuid.uuid4().hex[:12]
+    _PREVIEWS[job] = {"status": "running", "org_id": org_id, "started": C.now().isoformat() + "Z"}
+
+    def work():
+        factory = session_factory
+        if factory is None:
+            from app.deps import SessionLocal as factory
+        db = factory()
+        try:
+            r = match_preview(db, org_id, property_ids=property_ids, kind=kind, evidence_only=evidence_only,
+                              max_searches=max_searches)
+            _PREVIEWS[job].update(status="done", result=r, finished=C.now().isoformat() + "Z")
+        except Exception as exc:  # noqa: BLE001 - reported to the caller
+            C.log.exception("evosense match preview failed")
+            _PREVIEWS[job].update(status="failed", error=str(exc)[:300])
+        finally:
+            db.rollback()                                  # a preview never writes
+            db.close()
+
+    threading.Thread(target=work, name="evosense-fc-preview-%s" % job, daemon=True).start()
+    return job
+
+
+def preview_result(org_id: str, job: str) -> Optional[Dict[str, Any]]:
+    r = _PREVIEWS.get(job)
+    return r if r and r.get("org_id") == org_id else None
 
 
 def last_recheck(db, org_id: str, kind: str) -> Optional[Dict[str, Any]]:
