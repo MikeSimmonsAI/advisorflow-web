@@ -68,7 +68,20 @@ def _person(db, owner, full_name, role, source) -> EvoSensePerson:
 
 def apply_result(db, owner: EvoSenseOwner, result, provider, *, manual_user=None
                  ) -> List[EvoSenseContactPoint]:
-    """Write an EnrichmentResult into the graph. Returns the contact points touched."""
+    """Write an EnrichmentResult into the graph. Returns the contact points touched.
+
+    A result whose person is NOT the owner of record (or is listed as deceased)
+    writes nothing - see app/services/contact_match_guard.py. A manual entry by a
+    person is never second-guessed here."""
+    from app.services import contact_match_guard as G
+    guard = None
+    if manual_user is None and provider.connector_kind != C.MANUAL:
+        guard = G.assess(owner.display_name, result)
+        if guard["verdict"] == G.NO_VERIFIED_MATCH:
+            owner.last_enriched_at = C.now()
+            result.match_evidence = dict(result.match_evidence or {}, guard=guard)
+            db.flush()
+            return []
     person = None
     if result.message and result.message.startswith("person:"):
         full, _, role = result.message[7:].partition("|")
@@ -134,12 +147,16 @@ def apply_result(db, owner: EvoSenseOwner, result, provider, *, manual_user=None
         cp.looked_up_at = C.now()
         cp.source_last_seen = getattr(item, "last_seen", None) or cp.source_last_seen
         ev = getattr(item, "match_evidence", None) or getattr(result, "match_evidence", None)
+        if guard is not None:
+            ev = dict(ev or {}, match_quality=guard["verdict"], match_quality_why=guard["why"])
         if ev:
             cp.match_evidence = _json.dumps(ev, default=str)
         if getattr(result, "raw_permitted", False) and getattr(result, "raw_payload", None):
             cp.raw_evidence = _json.dumps(result.raw_payload, default=str)[:20000]
         if cp.trust_state is None:
             cp.trust_state = "candidate"
+        if guard is not None and guard["verdict"] == G.PROBABLE and not cp.status_reason:
+            cp.status_reason = "probable match: %s" % guard["why"]
         # A number already known as wrong-party / suppressed anywhere in this
         # organization inherits that status: a new strategy cannot resurrect it.
         prior = (db.query(EvoSenseContactPoint)

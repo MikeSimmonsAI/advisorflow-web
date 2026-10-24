@@ -178,9 +178,20 @@ def test_funding_partner_needs_an_address_then_gets_looked_up(client, auth_heade
 
 
 def test_property_owner_lookup_writes_the_seller(client, auth_headers, db_session, admin_auth_headers):
+    # The fake vendor answers with RICK CASTRO. For an owner of record with another
+    # name that is someone else: nothing may be written onto that seller.
+    other = ok(client.post("/wholesale/properties", headers=auth_headers,
+                           json={"street_address": "2600 Kirby St", "city": "Dallas", "state": "TX",
+                                 "county": "Dallas", "zip_code": "75203", "owner_name": "Elizabeth Bryant"}))
+    oid = other.get("id") or other["property"]["id"]
+    out = ok(client.post("/wholesale/contact-lookup/run", headers=admin_auth_headers,
+                         json={"kind": "property", "ids": [oid], "max_cost_cents": 10}))
+    assert out["found"] == 0
+    from app.models.wholesale_models import WholesaleSellerProfile as _P
+    assert db_session.query(_P).filter(_P.property_id == oid).count() == 0
     prop = ok(client.post("/wholesale/properties", headers=auth_headers,
                           json={"street_address": "2620 Kirby St", "city": "Dallas", "state": "TX",
-                                "county": "Dallas", "zip_code": "75203", "owner_name": "Elizabeth Bryant"}))
+                                "county": "Dallas", "zip_code": "75203", "owner_name": "Rick Castro"}))
     pid = prop.get("id") or prop["property"]["id"]
     est = ok(client.post("/wholesale/contact-lookup/estimate", headers=auth_headers,
                          json={"kind": "property", "ids": [pid]}))

@@ -447,6 +447,16 @@ def enrich(property_id: str, payload: EnrichIn, db: Session = Depends(get_db),
     return out
 
 
+@router.get("/properties/{property_id}/enrichment-status")
+def enrichment_status(property_id: str, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_or_observer)):
+    """Not requested / Processing / Matched / Partial / No verified match / Failed, with the
+    contacts and whether each matched the owner of record (contact_match_guard)."""
+    from app.services import contact_match_guard as G
+    org_id = svc.read_org_id(db, user)
+    return G.property_status(db, _prop(db, org_id, property_id))
+
+
 @router.post("/properties/{property_id}/outreach")
 def outreach(property_id: str, db: Session = Depends(get_db),
              user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):

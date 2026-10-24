@@ -235,6 +235,20 @@ function Truth({ children }) {
   return <Tag kind={truthKind(children)}>{String(children).split(' — ')[0].split(' (')[0]}</Tag>
 }
 
+function EnrichmentStatus({ propertyId, refreshKey }) {
+  const [st, setSt] = useState(null)
+  useEffect(() => { api.get(`/wholesale/evosense/properties/${propertyId}/enrichment-status`).then(setSt).catch(() => setSt(null)) }, [propertyId, refreshKey])
+  if (!st) return null
+  const tone = st.status === 'MATCHED' ? '#0f7a3d' : st.status === 'PARTIAL' ? '#9a6400' : st.status === 'NO_VERIFIED_MATCH' || st.status === 'FAILED' ? '#b42318' : '#555'
+  return (
+    <p className="evo-small" style={{ margin: '6px 0 10px' }}>
+      Contact lookup: <b style={{ color: tone }}>{st.label}</b>
+      {st.contacts.length ? <> · {st.contacts.map((c) => `${c.kind} ${c.quality === 'MATCHED' ? '(name matches owner)' : '(probable - confirm)'}`).join(', ')}</> : null}
+      {st.last_decision && st.last_decision.reasons && st.last_decision.reasons.length && !st.contacts.length ? <span className="evo-muted"> · {st.last_decision.reasons[0]}</span> : null}
+    </p>
+  )
+}
+
 export default function EvoProperty() {
   const { propertyId } = useParams()
   const [d, setD] = useState(null)
@@ -427,6 +441,7 @@ export default function EvoProperty() {
       </section>
 
       {/* NEXT ACTIONS — server-computed: what you can do, why not, what happens after */}
+      <EnrichmentStatus propertyId={propertyId} refreshKey={busy} />
       <EvoActions d={d} propertyId={propertyId} busy={busy} act={act} onPromote={() => setPromoteOpen(true)} />
 
       <ReadinessPanel propertyId={propertyId} refreshKey={JSON.stringify([p.status, p.contact_confidence, p.seller_intent])} />

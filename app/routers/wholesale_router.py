@@ -1926,7 +1926,23 @@ def enrich_property(db: Session, org_id: str, user: User, settings, provider,
     record.completed_at = datetime.utcnow()
 
     deal = svc.deal_for_property(db, org_id, prop.id)
-    if result.found_anything:
+    # Is the person the provider found the owner of record? (contact_match_guard)
+    from app.services import contact_match_guard as G
+    guard = G.assess(prop.owner_name, result) if (result.found_anything and provider.key != "manual") else None
+    if guard is not None:
+        ev = dict(result.match_evidence or {}, match_quality=guard["verdict"], match_quality_why=guard["why"])
+        result.match_evidence = ev
+        record.result = result.to_json()
+    if guard is not None and guard["verdict"] != G.MATCHED:
+        # Wrong person: nothing attached. Probable: kept on the request for a person
+        # to confirm (manual contact), never written onto the seller automatically.
+        record.status = (enrichment.STATUS_NO_MATCH if guard["verdict"] == G.NO_VERIFIED_MATCH
+                         else record.status)
+        record.error = guard["why"]
+        svc.log_event(db, org_id, "enrichment.not_attached", actor_type=ACTOR_USER, actor_user_id=user.id,
+                      property_id=prop.id, deal_id=getattr(deal, "id", None),
+                      summary="%s: %s" % (G.LABELS[guard["verdict"]], guard["why"])[:250])
+    elif result.found_anything:
         applied = _apply_enrichment(db, org_id, user, prop, result)
         if deal is not None and settings.auto_stage_on_enrichment:
             svc._set_stage_unchecked(db, deal, "ready_for_outreach",
@@ -1943,7 +1959,9 @@ def enrich_property(db: Session, org_id: str, user: User, settings, provider,
                   after={"status": result.status,
                          "phones": len(result.phones),
                          "emails": len(result.emails)})
-    return {"property_id": prop.id, "status": result.status,
+    return {"property_id": prop.id, "status": record.status,
+            "match_quality": guard["verdict"] if guard else None,
+            "match_quality_why": guard["why"] if guard else None,
             "message": result.message,
             "phones": [p.number for p in result.phones],
             "emails": [str(e) for e in result.emails],
