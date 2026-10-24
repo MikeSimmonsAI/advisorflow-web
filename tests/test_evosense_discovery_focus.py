@@ -14,7 +14,7 @@ def _fake_route(monkeypatch):
             C.PROPERTY_SEARCH: ["dcad", "collin_cad", "denton_gis"],
             C.CODE_VIOLATION: ["fw_open_cases"]}
 
-    def route(db, org_id, cap):
+    def route(db, org_id, cap, **kw):
         return [(SimpleNamespace(key=k, discovery=True), None, 0) for k in prov.get(cap, [])]
     monkeypatch.setattr(PV, "route", route)
 
@@ -58,7 +58,7 @@ def test_naming_one_owner_roll_source_means_the_whole_family(monkeypatch):
     prov = {C.PROPERTY_SEARCH: ["dcad", "collin_cad", "denton_gis", "hcad_roll", "txgio_roll"],
             C.TAX: ["dallas_trw"]}
 
-    def route(db, org_id, cap):
+    def route(db, org_id, cap, **kw):
         return [(PV.PROVIDERS[k], None, 0) for k in prov.get(cap, [])]
     monkeypatch.setattr(PV, "route", route)
     keys = lambda focus: [p.key for _c, p, _cfg in HU._discovery_routes(None, "o", focus)]

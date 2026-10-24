@@ -139,11 +139,23 @@ export default function EvoCohort() {
     api.get(`/wholesale/evosense/cohorts/${encodeURIComponent(kind)}`).then(setData).catch((e) => setError(errText(e)))
   }, [kind])
   useEffect(() => { load() }, [load])
+  // While a re-check runs, ask only "is it done?" (a few hundred bytes) every
+  // 20 s; re-read the full list once, when it has finished.
+  const rechecking = !!data?.rechecking
   useEffect(() => {
-    if (!data?.rechecking) return undefined
-    const t = setTimeout(load, 15000)
-    return () => clearTimeout(t)
-  }, [data, load])
+    if (!rechecking) return undefined
+    let stop = false
+    const tick = async () => {
+      try {
+        const st = await api.get(`/wholesale/evosense/cohorts/${encodeURIComponent(kind)}?status_only=1`)
+        if (stop) return
+        if (!st.rechecking) { load(); return }
+      } catch (e) { /* keep waiting; the next tick tries again */ }
+      if (!stop) timer = setTimeout(tick, 20000)
+    }
+    let timer = setTimeout(tick, 20000)
+    return () => { stop = true; clearTimeout(timer) }
+  }, [rechecking, kind, load])
 
   const get = (k) => params.get(k) || ''
   const set = (k, v) => { const p = new URLSearchParams(params); if (v) p.set(k, v); else p.delete(k); setParams(p, { replace: true }) }
@@ -173,7 +185,7 @@ export default function EvoCohort() {
       const r = await api.post(`/wholesale/evosense/cohorts/${encodeURIComponent(kind)}/recheck`)
       setNote(r.status === 'started' ? 'Re-check started — owner records, county tax files and county clerk foreclosure notices take a few minutes. This page refreshes itself and shows the result when every source has answered.'
         : 'A re-check of this list is already running.')
-      setTimeout(load, 2000)
+      if (r.status === 'started') setData((d) => (d ? { ...d, rechecking: true } : d))
     } catch (e) { setError(errText(e)) } finally { setBusy(false) }
   }
 

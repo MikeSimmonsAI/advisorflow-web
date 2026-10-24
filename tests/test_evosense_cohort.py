@@ -98,3 +98,53 @@ def test_an_estate_named_owner_is_flagged_for_probate_confirmation_not_scored():
     assert "probate" in act and "before any contact" in act
     from app.services.evosense.ingest import owner_flags
     assert owner_flags("WARD ISEBELL EST OF") == ["ESTATE_INDICATED"]
+
+
+# ── speed: the list is built in a fixed number of queries, with the same answer ──
+
+def test_rows_use_a_fixed_number_of_queries_and_match_the_per_row_answer(top, monkeypatch):
+    from sqlalchemy import event
+    from app.services.evosense import evaluate as EV
+    from app.services.evosense import scoring as SC
+    db, org = top["db"], top["org"]
+    more = "record_id,street_address,city,state,zip_code,owner_name,mailing_street,mailing_city,mailing_state,mailing_zip\n" + \
+        "".join("top100-2010:%d,%d Bulk St,Dallas,TX,75201,OWNER %d,%d PO Rd,Austin,TX,78701\n" % (10 + i, 100 + i, i, i)
+                for i in range(30))
+    HU.import_csv(db, org, more, user=top["user"], filename="more.csv")
+    db.commit()
+    props = CO.members(db, org, "top100-2010")
+    assert len(props) == 33
+    n = {"q": 0}
+    bind = db.get_bind()
+
+    def count(*a, **k):
+        n["q"] += 1
+    event.listen(bind, "before_cursor_execute", count)
+    try:
+        rows = {r["id"]: r for r in CO.rows(db, org, "top100-2010")}
+    finally:
+        event.remove(bind, "before_cursor_execute", count)
+    assert n["q"] <= 20, n["q"]                              # was ~15 per property
+    for p in props:                                         # identical to the per-property functions
+        r = rows[p.id]
+        assert r["owner"] == CO.owner_status(db, p)
+        assert r["tax"] == CO.tax_status(db, p, CO._signals(db, p))
+        assert r["contacts"] == CO.contacts(db, r["owner"].get("owner_id"))
+        assert r["list_claims"] == CO._list_claims(db, p)
+        po = SC.property_opportunity(p, EV.stacked_signals(db, p), EV.strategy_for(db, p),
+                                     weights=EV.score_weights(db, org), owner=EV.CT.primary_owner(db, p),
+                                     options=EV.score_options(db, org))
+        assert r["score"] == po.get("value")
+
+
+def test_view_is_compressed_and_polling_reads_only_the_status(client, db_session, sample_org, sample_advisor,
+                                                               admin_auth_headers):
+    HU.import_csv(db_session, sample_org.id, LIST, user=sample_advisor, filename="top.csv")
+    db_session.commit()
+    url = "/wholesale/evosense/cohorts/top100-2010"
+    full = client.get(url, headers=dict(admin_auth_headers, **{"Accept-Encoding": "gzip"}))
+    assert full.status_code == 200 and full.headers.get("content-encoding") == "gzip"
+    assert len(full.json()["rows"]) == 3                   # the client decompresses transparently
+    st = client.get(url + "?status_only=1", headers=admin_auth_headers)
+    assert st.status_code == 200 and set(st.json()) == {"kind", "last_recheck", "rechecking"}
+    assert client.get("/wholesale/evosense/cohorts/x'y", headers=admin_auth_headers).status_code == 404

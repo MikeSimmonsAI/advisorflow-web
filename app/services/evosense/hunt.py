@@ -173,7 +173,7 @@ def expand_focus(focus: Optional[List[str]]) -> List[str]:
     return focus + sorted(f for f in fams if f not in focus)
 
 
-def _discovery_routes(db, org_id, focus: Optional[List[str]] = None):
+def _discovery_routes(db, org_id, focus: Optional[List[str]] = None, *, sandbox_allowed: bool = True):
     """(capability, provider, cfg) for every connected DISCOVERY source. A
     public-record LOOKUP source (TAD, geocoder, code cases) is never asked to
     discover; it is called per property in the lookup stage. With a focus,
@@ -181,7 +181,7 @@ def _discovery_routes(db, org_id, focus: Optional[List[str]] = None):
     out, seen = [], set()
     focus = expand_focus(focus)
     for cap in DISCOVERY:
-        for provider, cfg, _cost in PV.route(db, org_id, cap):
+        for provider, cfg, _cost in PV.route(db, org_id, cap, sandbox_allowed=sandbox_allowed):
             if not getattr(provider, "discovery", True):
                 continue
             if focus and cap not in focus and provider.key not in focus \
@@ -240,7 +240,9 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
                            "outreach": "off", "paid_data": "on" if ST.pilot_spend_cap(strategy) else "off"}
     touched: Dict[str, EvoSenseProperty] = {}
     focus = discovery_focus(strategy)
-    routes = _discovery_routes(db, org_id, focus)
+    # Sandbox (synthetic) sources feed TEST strategies only: switching one on
+    # can never put invented houses into a real strategy's results.
+    routes = _discovery_routes(db, org_id, focus, sandbox_allowed=bool(getattr(strategy, "is_test", False)))
     if focus:
         counts["discovery_focus"] = focus
         if not routes:
