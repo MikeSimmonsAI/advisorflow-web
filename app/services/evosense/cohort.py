@@ -701,7 +701,16 @@ def last_recheck(db, org_id: str, kind: str) -> Optional[Dict[str, Any]]:
           .order_by(EvoSenseEvent.created_at.desc()).first())
     if ev is None:
         return None
-    return {"at": ev.created_at.isoformat() if ev.created_at else None, "details": C.jload(ev.details, {})}
+    # Stored times are UTC without a zone; say so ("Z"), or a browser shows
+    # 9:03 PM Central as "2:03 AM" (read live 2026-10-24).
+    return {"at": _utc_iso(ev.created_at), "details": C.jload(ev.details, {})}
+
+
+def _utc_iso(dt) -> Optional[str]:
+    if dt is None:
+        return None
+    s = dt.isoformat()
+    return s if (dt.tzinfo is not None or s.endswith("Z")) else s + "Z"
 
 
 RECHECK_STARTED = "cohort.recheck_started"
@@ -722,8 +731,11 @@ def running(org_id: str, kind: str, db=None) -> bool:
                .order_by(EvoSenseEvent.created_at.desc()).first())
     if started is None or started.created_at is None or C.now() - started.created_at > timedelta(hours=1):
         return False
-    done = last_recheck(db, org_id, kind)
-    return not (done and done["at"] and done["at"] >= started.created_at.isoformat())
+    done = (db.query(EvoSenseEvent)
+            .filter(EvoSenseEvent.organization_id == org_id, EvoSenseEvent.action == "cohort.rechecked",
+                    EvoSenseEvent.summary.like("List %s %%" % kind))
+            .order_by(EvoSenseEvent.created_at.desc()).first())
+    return not (done is not None and done.created_at is not None and done.created_at >= started.created_at)
 
 
 def mark_started(db, org_id: str, kind: str, user=None):
