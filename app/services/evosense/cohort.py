@@ -330,8 +330,14 @@ def foreclosure_status(sigs, today=None, check: Optional[Dict[str, Any]] = None)
     base = {"verified": False, "sale_date": None, "days": None, "claimed_sale_date": None, "notices": [],
             "document": None, "document_url": None, "foreclosure_type": None, "source": None,
             "evidence_reference": None, "evidence": None, "observed": None, "clerk_checked": checked,
+            "reposted_for": [], "other_records": [],
             "clerk_source": (check or {}).get("source"), "confidence": 0,
             "last_checked": checked}
+    # what a person recorded beside the notice that decides the status (a lawsuit, a
+    # lis pendens, a list's source) - shown on the row, never counted as a sale
+    base["other_records"] = [{"document": prov[x.id].get("document") or x.source_reference,
+                              "url": prov[x.id].get("document_url"), "note": prov[x.id].get("note")}
+                             for x in claims if prov[x.id].get("note")]
     claim_dates = sorted({d for d in (_sd(prov[x.id].get("sale_date")) for x in claims) if d})
     upcoming_claims = [d for d in claim_dates if d >= today]
     claim_sale = upcoming_claims[0] if upcoming_claims else (claim_dates[-1] if claim_dates else None)
@@ -382,6 +388,7 @@ def foreclosure_status(sigs, today=None, check: Optional[Dict[str, Any]] = None)
                                            pick["document"], pick["sale_date"]), **dict(kw, confidence=70))
             extra = ("; also posted for %s (a re-posting - the earlier sale may be postponed)" %
                      ", ".join(dates[1:])) if len(dates) > 1 else ""
+            kw["reposted_for"] = dates[1:]
             return out("VERIFIED NOTICE", "%s scheduled %s - notice %s%s%s" % (
                 pick["type"], pick["sale_date"], pick["document"],
                 " filed %s" % pick["recorded"] if pick["recorded"] else "", extra), **kw)
