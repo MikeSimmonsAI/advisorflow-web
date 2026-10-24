@@ -1202,6 +1202,8 @@ app.include_router(wholesale_funding_router)
 app.include_router(wholesale_exceptions_router)
 from app.routers.wholesale_appointments_router import router as wholesale_appointments_router  # noqa: E402
 app.include_router(wholesale_appointments_router)   # /wholesale/appointments - field appointments
+from app.routers.wholesale_underwriting_router import router as wholesale_underwriting_router  # noqa: E402
+app.include_router(wholesale_underwriting_router)   # /wholesale/deals/{id}/underwriting - Analyze deal
 from app.routers.wholesale_canvass_router import router as wholesale_canvass_router  # noqa: E402
 app.include_router(wholesale_canvass_router)   # /wholesale/canvass - door-knocking routes
 from app.routers.wholesale_team_router import router as wholesale_team_router  # noqa: E402
