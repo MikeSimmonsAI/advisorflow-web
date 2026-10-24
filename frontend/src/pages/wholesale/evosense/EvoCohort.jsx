@@ -205,7 +205,8 @@ export default function EvoCohort() {
           { label: <><b>{(s.priority.A || 0) + (s.priority.B || 0)}</b> priority A/B</>, tone: (s.priority.A || s.priority.B) ? 'paused' : undefined },
         ] : null}
         actions={<>
-          <button type="button" className="evo-btn evo-btn--primary" disabled={busy || data?.rechecking} onClick={recheck}>
+          <button type="button" className="evo-btn evo-btn--primary" disabled={busy || !data || data?.rechecking} onClick={recheck}
+                  title={!data ? 'Nothing to re-check: this list has no properties' : undefined}>
             {data?.rechecking ? 'Re-checking…' : 'Re-check public records'}</button>
           <Link className="evo-btn evo-btn--secondary" to="/wholesale/evosense/inbox">Discovery Inbox</Link>
         </>}
@@ -246,7 +247,7 @@ export default function EvoCohort() {
         </Panel>
       ) : null}
 
-      <Panel flush>
+      {!data && error ? null : <Panel flush>
         <div className="evo-filterbar">
           <label className="evo-small" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <input type="checkbox" checked={queue} onChange={(e) => set('queue', e.target.checked ? '1' : '')} />
@@ -351,7 +352,7 @@ export default function EvoCohort() {
             </table>
           </div>
         ) : null}
-      </Panel>
+      </Panel>}
     </EvoApp>
   )
 }

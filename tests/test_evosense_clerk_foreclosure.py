@@ -207,7 +207,7 @@ def test_recheck_splits_verified_claimed_conflict_and_not_found(db_session, samp
     assert db_session.query(EvoSenseProperty).filter_by(organization_id=sample_org.id).count() == n_before  # no new houses
     assert res["dallas"]["status"] == "COMPLETED" and res["dallas"]["matched_index"] == 3   # 4405 FALLS: address read from the notice text
     assert res["dallas"]["matched_full_text"] == 1                         # 3069 KIESTRIDGE: only the clerk's full-text search finds it
-    assert res["collin"]["status"] == "NOT CONNECTED" and "no foreclosure department" in res["collin"]["reason"]
+    assert res["collin"]["status"] == "NOT CONNECTED" and "Record a notice" in res["collin"]["reason"]
     rows = _rows(db_session, sample_org)
     dell = rows["1345 DELL OAK DR"]["foreclosure"]
     assert dell["status"] == "VERIFIED NOTICE" and dell["category"] == "A" and dell["verified"] is True
@@ -475,3 +475,23 @@ def test_window_reads_in_chunks_without_losing_or_doubling_notices(monkeypatch, 
     got = p.window(SALE - timedelta(days=40), SALE + timedelta(days=40))
     assert len(got) == 600 and len({d["docId"] for d in got}) == 600
     assert any("offset" in q and q["offset"] != "0" for q in p.queries)   # one day held 600: paged, de-duplicated
+
+
+# 21 ── a notice spelled with a space is the same house, not a new one ──────
+
+def test_running_brook_notice_attaches_to_runningbrook_house(db_session, sample_org):
+    from app.services.evosense import identity as ID
+    p = EvoSenseProperty(organization_id=sample_org.id, street_address="2728 RUNNINGBROOK LN", zip_code="75228",
+                         city="Dallas", state="TX")
+    ID.apply_keys(p, {"street_address": p.street_address, "zip_code": "75228", "city": "Dallas", "state": "TX"})
+    db_session.add(p)
+    db_session.commit()
+    m, prop, _c, keys = ID.resolve(db_session, sample_org.id, {"street_address": "2728 RUNNING BROOK LANE",
+                                                               "zip_code": "75228", "city": "Dallas", "state": "TX"})
+    assert m == ID.PROBABLE and prop.id == p.id
+    m2, prop2, _c2, _k2 = ID.resolve(db_session, sample_org.id, {"street_address": "2728 RUNNING BROOK LANE",
+                                                                 "zip_code": "75229", "city": "Dallas", "state": "TX"})
+    assert m2 == ID.NEW and prop2 is None                       # another ZIP: another house
+    m3, _p3, _c3, _k3 = ID.resolve(db_session, sample_org.id, {"street_address": "2730 RUNNING BROOK LANE",
+                                                               "zip_code": "75228", "city": "Dallas", "state": "TX"})
+    assert m3 == ID.NEW                                         # the neighbour stays separate
