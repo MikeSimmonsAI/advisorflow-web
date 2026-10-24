@@ -409,3 +409,32 @@ def test_pending_hoa_suit_is_shown_and_is_not_a_sale(client, db_session, sample_
     assert st["status"] != "VERIFIED NOTICE" and st["status"] != "CANCELED"
     assert st["pending_actions"] and st["pending_actions"][0]["document"] == "D226170973"
     assert st["pending_actions"][0]["type"] == "hoa_assessment_lien_sale"
+
+
+# Found on production 2026-10-24 (the last Top 100 exceptions). People and
+# numbers changed; the text shapes are the clerk's.
+
+def test_a_snippet_that_stops_mid_plat_name_still_counts_when_the_notice_names_the_plat():
+    ident = {"parcel_ids": [], "legal": M.cad_legal("GARDEN OAKS REV", "D", ["1"]), "names": ["ROE JANE ANN"],
+             "city": "Irving"}
+    text = ("IRVING , GARDEN OAKS ADDITION REVISED, AN ADDITION TO THE CITY OF IRVING Grantor: JANE ANN ROE "
+            "Legal Description: LOT 1, BLOCK D, GARDEN")
+    assert M.decide(ident, text, "IRVING")["decision"] == M.VERIFIED
+    # the neighbour's notice in the same plat is still another house
+    other = "GARDEN OAKS ADDITION REVISED Legal Description: LOT 8, BLOCK C, GARDEN"
+    assert M.decide(ident, other, "IRVING")["decision"] == M.REJECTED
+
+
+def test_a_scanned_notice_naming_only_the_plat_is_a_candidate_never_verified():
+    ident = {"parcel_ids": ["160386100K0170000"], "legal": M.cad_legal("RESERVE AT HIGH POINTE PH 3", "K", ["17"]),
+             "names": ["ROE JANE"], "city": "Cedar Hill"}
+    scan = (" RESERVE AT HIGH POINTE, PHASE I, AN ADDITION TO THE _ CILYOF CEDAR HILL, DALLAS COUNTY, TEXAS, "
+            "ACCORDING TO THE AP THEREOF")
+    r = M.decide(ident, scan, None)                      # the clerk indexed no city for it
+    assert r["decision"] == M.CANDIDATE and "cannot be read" in r["reason"]
+    assert M.decide(ident, "RESERVE AT HIGH POINTE", None)["decision"] == M.NONE   # the plat alone: nothing
+
+
+def test_the_plat_search_phrase_uses_words_that_stand_together():
+    assert F.subdivision_phrase(M.cad_legal("RESERVE AT HIGH POINTE PH 3", "K", ["17"])) == "HIGH POINTE"
+    assert F.subdivision_phrase(M.cad_legal("GARDEN OAKS REV", "D", ["1"])) == "GARDEN OAKS"

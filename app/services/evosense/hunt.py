@@ -27,6 +27,8 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import or_
+
 from app.models.evosense_models import EvoSenseProperty, EvoSenseRun, EvoSenseStrategy
 from app.services.evosense import common as C
 from app.services.evosense import conversation as CV
@@ -515,11 +517,18 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                     # answers (or no-matches) were about the wrong address/account.
                     queued.append(p)
                     continue
-                recent = (db.query(EvoSenseObservation.id)
-                          .filter(EvoSenseObservation.organization_id == org_id,
-                                  EvoSenseObservation.property_id == p.id,
-                                  EvoSenseObservation.provider_key == key,
-                                  EvoSenseObservation.observed_at >= fresh_after).first())
+                q = (db.query(EvoSenseObservation.id)
+                     .filter(EvoSenseObservation.organization_id == org_id,
+                             EvoSenseObservation.property_id == p.id,
+                             EvoSenseObservation.provider_key == key,
+                             EvoSenseObservation.observed_at >= fresh_after))
+                stale = tuple(getattr(provider, "stale_adapter_versions", ()) or ())
+                if stale:
+                    # a record from an older adapter that lacks a field we now
+                    # read (TxGIO /1: no legal description) is not fresh
+                    q = q.filter(or_(EvoSenseObservation.adapter_version.is_(None),
+                                     ~EvoSenseObservation.adapter_version.in_(stale)))
+                recent = q.first()
                 if recent is not None:
                     _lookup_decision(db, p, strategy, provider, cap, C.L_SKIP_FRESH_DATA,
                                      "%s already answered within %s days." % (provider.label, provider.freshness_days),

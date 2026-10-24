@@ -83,7 +83,7 @@ def same_parcel_address(target_street: str, situs: Optional[str], city: Optional
 
 
 class TxParcelReader:
-    adapter_version = "txgio_stratmap_parcels/1"
+    adapter_version = "txgio_stratmap_parcels/2"     # /2 keeps LEGAL_DESC
 
     # (half-extent in degrees, tolerance in pixels of an 800 px map): the
     # first is the parcel under the point; the second reaches ~80 m, because

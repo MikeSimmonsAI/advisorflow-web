@@ -834,3 +834,30 @@ def test_public_no_match_is_retried_after_short_cooldown_expires(
     two = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % second["id"], headers=h))
     assert two["counts"]["lookups"]["dallas_311_code"]["queued"] >= 1
     assert len(calls) == 2             # no-match was actually rechecked
+
+
+def test_a_record_saved_by_an_older_adapter_missing_a_needed_field_is_looked_up_again(
+        client, db_session, sample_org, dfw_files, fake_apis, monkeypatch):
+    """TxGIO /1 records were saved without LEGAL_DESC, which the foreclosure
+    matcher now reads (lot/block). Such a record is not 'fresh': the next run
+    asks the source again. Records from the current adapter stay fresh."""
+    db = db_session
+    _, h = _admin(db, sample_org)
+    _enable(client, h, "tarrant_tax_roll", "tad", "census_geocoder", "fw_code_violations")
+    s = _pilot(client, h, counties=["Tarrant"])
+    ok(client.post("/wholesale/evosense/strategies/%s/hunt" % s["id"], headers=h))
+    n_tad = db.query(EvoSenseObservation).filter(EvoSenseObservation.organization_id == sample_org.id,
+                                                 EvoSenseObservation.provider_key == "tad").count()
+    assert n_tad >= 1
+    # current-adapter records: the second run skips them as fresh
+    again = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % s["id"], headers=h))
+    assert again["counts"]["lookups"]["tad"]["queued"] == 0
+    # the same records, but saved by an adapter version now known to lack a field
+    (db.query(EvoSenseObservation)
+       .filter(EvoSenseObservation.organization_id == sample_org.id, EvoSenseObservation.provider_key == "tad")
+       .update({EvoSenseObservation.adapter_version: "tad_old/1"}, synchronize_session=False))
+    db.commit()
+    monkeypatch.setattr(PV.TadSource, "stale_adapter_versions", ("tad_old/1",))
+    third = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % s["id"], headers=h))
+    assert third["counts"]["lookups"]["tad"]["queued"] >= 1
+    assert db.query(EvoSenseProperty).filter(EvoSenseProperty.organization_id == sample_org.id).count() > 0
