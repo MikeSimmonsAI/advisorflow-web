@@ -1,0 +1,11 @@
+{
+  "relay_run_id": "bookaboost-backlog-consolidate-20261022-2138-r1",
+  "parent_run_id": "",
+  "project": "BookaBoost security backlog \u2014 consolidate PR 337 and supersede stale PR 293 safely",
+  "status": "BLOCKED",
+  "branch": "feature/bookaboost-wholesale",
+  "actions_run_id": "39890580805",
+  "timestamp_ct": "2026-10-22 21:41 CT",
+  "issue": 1,
+  "status_comment_id": 6356094040
+}
