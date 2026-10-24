@@ -858,6 +858,15 @@ def test_a_record_saved_by_an_older_adapter_missing_a_needed_field_is_looked_up_
        .update({EvoSenseObservation.adapter_version: "tad_old/1"}, synchronize_session=False))
     db.commit()
     monkeypatch.setattr(PV.TadSource, "stale_adapter_versions", ("tad_old/1",))
+    n_obs = db.query(EvoSenseObservation).filter(EvoSenseObservation.organization_id == sample_org.id).count()
     third = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % s["id"], headers=h))
     assert third["counts"]["lookups"]["tad"]["queued"] >= 1
-    assert db.query(EvoSenseProperty).filter(EvoSenseProperty.organization_id == sample_org.id).count() > 0
+    db.expire_all()
+    # the same records read again REPLACE the stale evidence: still one
+    # observation each, now from the current adapter
+    assert db.query(EvoSenseObservation).filter(EvoSenseObservation.organization_id == sample_org.id).count() == n_obs
+    assert db.query(EvoSenseObservation).filter(EvoSenseObservation.organization_id == sample_org.id,
+                                                EvoSenseObservation.provider_key == "tad",
+                                                EvoSenseObservation.adapter_version == "tad_old/1").count() == 0
+    fourth = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % s["id"], headers=h))
+    assert fourth["counts"]["lookups"]["tad"]["queued"] == 0          # fresh again: no more lookups

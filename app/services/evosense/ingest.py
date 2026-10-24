@@ -443,6 +443,16 @@ def ingest(db, org_id: str, provider, capability: str, rec: Dict[str, Any], *,
         # IDEMPOTENT. The same record seen again refreshes evidence; it never
         # creates a second observation, property or signal.
         existing.last_seen_at = C.now()
+        stale = tuple(getattr(provider, "stale_adapter_versions", ()) or ())
+        new_version = rec.get("_adapter_version")
+        if stale and existing.adapter_version in stale and new_version and new_version != existing.adapter_version:
+            # Saved by an adapter that dropped a field we now read (TxGIO /1
+            # kept no LEGAL_DESC): the same record, read again, replaces its
+            # evidence - still one observation, never a second.
+            fresh = raw_evidence(rec)
+            existing.raw_payload, existing.content_hash = fresh["raw_payload"], fresh["content_hash"]
+            existing.adapter_version = new_version
+            existing.observed_at = C.now()
         prop = None
         if existing.property_id:
             prop = db.query(EvoSenseProperty).filter(
