@@ -34,7 +34,7 @@ def storage(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_a_whole_deal_from_intake_to_fee_collected(client, auth_headers, storage):
+def test_a_whole_deal_from_intake_to_fee_collected(client, auth_headers, storage, admin_auth_headers):
     H = auth_headers
 
     # ── 1. A property is typed in ─────────────────────────────────────────
@@ -173,8 +173,9 @@ def test_a_whole_deal_from_intake_to_fee_collected(client, auth_headers, storage
                           "buyer_room_condition": "Roof at end of life.",
                           "buyer_room_show_arv": True,
                           "buyer_room_show_comps": True}))
-    ok(client.post("/wholesale/deals/%s/publication/state" % deal_id, headers=H,
-                   json={"audience": "buyer", "published": True}))
+    # Published the only way the product allows: package -> admin approval -> publish.
+    from tests.wholesale_publish_helpers import approve_and_publish
+    approve_and_publish(client, H, admin_auth_headers, deal_id)
     link = ok(client.post("/wholesale/deals/%s/share-links" % deal_id, headers=H,
                           json={"audience": "buyer", "buyer_id": buyer["id"],
                                 "recipient_name": "Lone Oak Capital"}))

@@ -25,14 +25,21 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 
-STATUSES = ("none", "draft", "review", "approved", "published", "under_offer", "closed", "withdrawn")
+STATUSES = ("none", "draft", "review", "approved", "published", "changed", "under_offer", "closed", "withdrawn")
 LABELS = {"none": "No package yet", "draft": "Draft", "review": "In review", "approved": "Approved",
-          "published": "Published", "under_offer": "Under offer", "closed": "Closed", "withdrawn": "Withdrawn"}
-VOLATILE = ("published", "you", "recipient_name", "photos", "documents")
+          "published": "Published", "changed": "Changed after approval - hidden from investors",
+          "under_offer": "Under offer", "closed": "Closed", "withdrawn": "Withdrawn"}
+# Per-visitor fields: never part of what is approved.
+VOLATILE = ("published", "you", "recipient_name")
+# Shown to investors but NOT marketing content: changing them must not take a live
+# page down mid-sale (closing dates, the operator's own branding, the legal notice).
+NOT_MATERIAL = ("closing", "brand", "disclosure", "deal_id")
 KIND = "package"
 
 
 def content(db, deal) -> Dict[str, Any]:
+    """Exactly what the investor page shows (the publication whitelist), photos and
+    documents included, so swapping a photo is a change like any other."""
     from app.services import wholesale_publication as pub
     p = pub.buyer_room_payload(db, deal)
     out = {k: v for k, v in p.items() if k not in VOLATILE}
@@ -41,8 +48,44 @@ def content(db, deal) -> Dict[str, Any]:
     return out
 
 
+def material(c: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: v for k, v in c.items() if k not in NOT_MATERIAL}
+
+
 def content_hash(c: Dict[str, Any]) -> str:
-    return hashlib.sha256(json.dumps(c, sort_keys=True, default=str).encode()).hexdigest()[:16]
+    return hashlib.sha256(json.dumps(material(c), sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def _latest_approved(apps) -> Optional[Any]:
+    for a in reversed(apps):
+        if a.status == "approved":
+            return a
+    return None
+
+
+def serving(db, org_id: str, deal) -> bool:
+    """THE ONE RULE for every investor-facing route: the page is live only while it is
+    published AND what it would show is exactly what was last approved. Any edit,
+    photo or document change, or a publish through any route, takes it dark until
+    approved again. Withdrawn / unpublished is never served."""
+    if not deal.buyer_room_published:
+        return False
+    a = _latest_approved(_approvals(db, org_id, deal.id))
+    return a is not None and _inputs(a).get("hash") == content_hash(content(db, deal))
+
+
+def can_publish(db, user) -> bool:
+    """Approving and publishing investor content: an admin or a Wholesale team manager."""
+    from app.services import wholesale_team as team
+    from app.services.lead_scope import effective_role
+    if getattr(user, "role", None) in ("god_admin", "super_admin"):
+        return True
+    if (effective_role(user, db) or "").lower() in ("org_admin", "super_admin", "god_admin"):
+        return True
+    return team.role_of(db, user) == team.MANAGER
+
+
+PUBLISH_ROLE_REFUSAL = "Only an admin or a team manager can approve or publish investor content."
 
 
 def _events(db, org_id, deal_id) -> List[Any]:
@@ -78,8 +121,10 @@ def status(db, org_id: str, deal) -> Dict[str, Any]:
     created = [e for e in evs if e.action == "package.created"]
     last_ev = evs[-1] if evs else None
     last_app = apps[-1] if apps else None
-    approved_hash = _inputs(last_app).get("hash") if last_app is not None and last_app.status == "approved" else None
+    latest_ok = _latest_approved(apps)
+    approved_hash = _inputs(latest_ok).get("hash") if latest_ok is not None else None
     changed_since_approval = bool(approved_hash and approved_hash != h)
+    live = bool(deal.buyer_room_published) and approved_hash is not None and not changed_since_approval
     notes: List[str] = []
 
     if deal.closed_at is not None and deal.buyer_room_published:
@@ -88,19 +133,22 @@ def status(db, org_id: str, deal) -> Dict[str, Any]:
         key = "none"
     elif last_ev is not None and last_ev.action == "package.withdrawn" and not deal.buyer_room_published:
         key = "withdrawn"
+    elif deal.buyer_room_published and not live:
+        key = "changed"
+        notes.append("Investors cannot see this page: %s Send it for approval again; the existing links "
+                     "come back once it is approved." % (
+                         "it was never approved." if approved_hash is None
+                         else "its content changed after it was approved."))
     elif deal.buyer_room_published:
         offers = (db.query(WholesaleBuyerOutreach)
                   .filter(WholesaleBuyerOutreach.organization_id == org_id,
                           WholesaleBuyerOutreach.deal_id == deal.id,
                           WholesaleBuyerOutreach.offer_amount.isnot(None)).count())
         key = "under_offer" if (offers or deal.assigned_buyer_id) else "published"
-        if approved_hash is None:
-            notes.append("The investor page was turned on directly (Sharing tab), not through a package approval.")
-        elif changed_since_approval:
-            notes.append("The published content changed after it was approved. Submit it for review again.")
     elif last_app is not None and last_app.status == "pending" and last_app.created_at >= created[-1].created_at:
         key = "review"
-    elif approved_hash and not changed_since_approval and last_app.created_at >= created[-1].created_at:
+    elif (approved_hash and not changed_since_approval and last_app is latest_ok
+          and last_app.created_at >= created[-1].created_at):
         key = "approved"
     else:
         key = "draft"
@@ -109,26 +157,27 @@ def status(db, org_id: str, deal) -> Dict[str, Any]:
         if changed_since_approval:
             notes.append("Content changed after approval - it needs review again.")
 
-    missing = []
-    if not cur.get("asking_price"):
-        missing.append("Asking price for investors")
+    missing = []                      # blocks review
     if not (cur.get("property") or {}).get("line1"):
         missing.append("Property address")
+    recommended = []                  # shown to the approver; does not block
+    if not cur.get("asking_price"):
+        recommended.append("Asking price for investors")
     if not cur.get("summary"):
-        missing.append("Summary for investors")
+        recommended.append("Summary for investors")
     if not cur.get("photo_count"):
-        missing.append("At least one photo marked for investors")
+        recommended.append("At least one photo marked for investors")
     return {
         "status": key, "label": LABELS[key], "version": len(created), "content_hash": h,
         "approved_hash": approved_hash, "changed_since_approval": changed_since_approval,
         "approval": ({"id": last_app.id, "status": last_app.status, "requested_at": iso_utc(last_app.created_at),
                       "decided_at": iso_utc(last_app.decided_at), "comments": last_app.comments}
                      if last_app is not None else None),
-        "notes": notes, "missing": missing, "content": cur,
+        "notes": notes, "missing": missing, "recommended": recommended, "content": cur, "live": live,
         "can": {"create": True,
-                "submit": key in ("draft", "approved") and bool(created) and not missing,
+                "submit": key in ("draft", "approved", "changed") and bool(created) and not missing,
                 "publish": key == "approved",
-                "withdraw": key in ("published", "under_offer")},
+                "withdraw": key in ("published", "under_offer", "changed")},
         "history": [{"at": iso_utc(e.created_at), "summary": e.summary} for e in evs]
                    + [{"at": iso_utc(a.created_at), "summary": "Review requested (%s)" % a.status} for a in apps],
     }
@@ -164,8 +213,16 @@ def submit(db, org_id, deal, user) -> Dict[str, Any]:
 
 def publish(db, org_id, deal, user) -> Dict[str, Any]:
     from app.services import wholesale_service as svc
+    if not can_publish(db, user):
+        svc.log_event(db, org_id, "publication.refused", actor_type=svc.ACTOR_USER, actor_user_id=user.id,
+                      deal_id=deal.id, summary="Publish refused: role")
+        db.commit()
+        raise HTTPException(status_code=403, detail=PUBLISH_ROLE_REFUSAL)
     st = status(db, org_id, deal)
     if st["status"] != "approved":
+        svc.log_event(db, org_id, "publication.refused", actor_type=svc.ACTOR_USER, actor_user_id=user.id,
+                      deal_id=deal.id, summary="Publish refused: package is %s" % st["label"].lower())
+        db.commit()
         raise HTTPException(status_code=409, detail=(
             "Only an approved package can be published. Status now: %s.%s" % (
                 st["label"], " " + " ".join(st["notes"]) if st["notes"] else "")))

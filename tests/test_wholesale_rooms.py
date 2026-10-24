@@ -116,10 +116,24 @@ def world(client, auth_headers, storage):
             "public_doc": public_doc["id"], "private_doc": private_doc["id"]}
 
 
+ADMIN = {}
+
+
+@pytest.fixture(autouse=True)
+def _admin_headers(admin_auth_headers):
+    """Investor pages are approved and published by an admin (server-enforced)."""
+    ADMIN.clear()
+    ADMIN.update(admin_auth_headers)
+
+
 def publish(client, headers, deal_id, audience, **fields):
     if fields:
         ok(client.patch("/wholesale/deals/%s/publication" % deal_id,
                         headers=headers, json=fields))
+    if audience == "buyer":
+        from tests.wholesale_publish_helpers import approve_and_publish
+        approve_and_publish(client, headers, dict(ADMIN), deal_id)
+        return ok(client.get("/wholesale/deals/%s/publication" % deal_id, headers=headers))
     return ok(client.post("/wholesale/deals/%s/publication/state" % deal_id,
                           headers=headers,
                           json={"audience": audience, "published": True}))
