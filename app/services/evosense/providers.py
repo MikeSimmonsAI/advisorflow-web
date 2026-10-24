@@ -1131,8 +1131,8 @@ class ClerkForeclosureSource(PublicRecordSource):
     coverage = ("Dallas, Tarrant, Denton and Johnson County, TX - every foreclosure sale notice filed with the "
                 "county clerk (trustee, substitute trustee, HOA assessment-lien, judicial and tax sales), with "
                 "document number, sale date and the clerk's indexed address. Not read automatically: Collin "
-                "(its notice page is bot-protected - check it by hand and use Record a notice), Ellis, "
-                "Kaufman, Rockwall (not on the clerk search) and every other county.")
+                "(its notice page is bot-protected), Ellis, Kaufman and Rockwall (the county posts scanned "
+                "notice files - check them by hand and use Record a notice) and every other county.")
     jurisdiction = "Dallas, Tarrant, Denton and Johnson County, TX"
     source_type = "County Clerk - posted foreclosure notices (official record)"
     access_method = ("The clerks' free public record search (publicsearch.us), as an anonymous visitor: "

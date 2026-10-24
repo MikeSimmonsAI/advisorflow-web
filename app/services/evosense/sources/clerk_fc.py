@@ -69,15 +69,25 @@ COUNTIES: Dict[str, Dict[str, Any]] = {
     "johnson": {"host": "johnson.tx.publicsearch.us", "label": "Johnson County Clerk",
                 "window": "instrumentDateRange", "window_on": "sale", "sale": "day", "address": True},
 }
-# Counties checked and found to have NO foreclosure department on their clerk
-# portal (so no automatic source) - reported as such, never as "no foreclosure".
+# Counties whose official notices EvoSense does not read automatically (bot
+# protection or scanned files): each says where the official notices are and
+# to record them by hand - reported as such, never as "no foreclosure".
 NO_PORTAL = {
     "collin": "Collin County posts its notices on its own page, https://apps2.collincountytx.gov/"
               "ForeclosureNotices (checked 2026-10-23). It is behind bot protection, so EvoSense does not "
               "read it automatically: look the house up there and use Record a notice with its notice number.",
-    "ellis": "Ellis County Clerk is not on the public record search EvoSense reads (checked 2026-10-23).",
-    "kaufman": "Kaufman County Clerk is not on the public record search EvoSense reads (checked 2026-10-23).",
-    "rockwall": "Rockwall County Clerk is not on the public record search EvoSense reads (checked 2026-10-23).",
+    "ellis": "Ellis County Clerk posts one scanned file per sale date in its Archive Center, "
+             "https://www.elliscountytx.gov/ArchiveCenter/ (\"County Clerk Foreclosures\"; checked 2026-10-23, "
+             "re-checked 2026-10-24). It is a scanned image with no searchable text, so EvoSense does not read it "
+             "automatically: find the house in the file for the sale date and use Record a notice with the page.",
+    "kaufman": "Kaufman County Clerk posts one scanned file per sale month on its Foreclosures page, "
+               "https://www.kaufmancounty.net/383/Foreclosures (checked 2026-10-23, re-checked 2026-10-24). It is "
+               "a scanned image with no searchable text, so EvoSense does not read it automatically: find the house "
+               "in the month's file and use Record a notice with the page.",
+    "rockwall": "Rockwall County posts each notice as its own scanned file, listed by grantor name under the sale "
+                "month, at https://www.rockwallcountytexas.com/792/Foreclosure-Notices (checked 2026-10-23, "
+                "re-checked 2026-10-24). EvoSense does not read the scans automatically: open the owner's notice "
+                "and use Record a notice with its file number.",
 }
 
 MONTHS = {m: i for i, m in enumerate(("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP",
