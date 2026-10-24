@@ -1455,6 +1455,49 @@ def cohort_recheck(kind: str, db: Session = Depends(get_db), user: User = Depend
     return {"status": "started" if started else "already_running"}
 
 
+class MatchPreviewIn(BaseModel):
+    property_ids: Optional[List[str]] = None
+    kind: Optional[str] = None
+    evidence_only: bool = False
+    max_searches: Optional[int] = None
+
+
+@router.post("/foreclosure/match-preview")
+def foreclosure_match_preview(payload: MatchPreviewIn, db: Session = Depends(get_db),
+                              user: User = Depends(require_tenant_user),
+                              _g: User = Depends(require_not_observation)):
+    """Admin: what the county clerk matcher would attach to these properties
+    (or an imported list) - read-only, nothing is recorded or scored."""
+    from app.services.evosense import cohort as CO
+    org_id = svc.write_org_id(db, user)
+    _admin(user, db)
+    ids = [x for x in (payload.property_ids or []) if isinstance(x, str)][:300]
+    if not ids and not payload.kind:
+        raise HTTPException(status_code=422, detail="Send property_ids or a list kind.")
+    if payload.kind:
+        try:
+            if not CO.members(db, org_id, payload.kind):
+                raise HTTPException(status_code=404, detail="No properties came from that list")
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Unknown list")
+    ms = payload.max_searches if payload.max_searches is None else max(0, min(int(payload.max_searches), 600))
+    job = CO.start_preview(org_id, property_ids=ids or None, kind=payload.kind, evidence_only=payload.evidence_only,
+                           max_searches=ms)
+    return {"job": job, "status": "running"}
+
+
+@router.get("/foreclosure/match-preview/{job}")
+def foreclosure_match_preview_result(job: str, db: Session = Depends(get_db),
+                                     user: User = Depends(require_tenant_user)):
+    from app.services.evosense import cohort as CO
+    org_id = svc.write_org_id(db, user)
+    _admin(user, db)
+    r = CO.preview_result(org_id, job)
+    if r is None:
+        raise HTTPException(status_code=404, detail="No such preview")
+    return {k: v for k, v in r.items() if k != "org_id"}
+
+
 class DeclareSaleIn(BaseModel):
     sale_date: str
     note: str

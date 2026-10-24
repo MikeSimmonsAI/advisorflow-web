@@ -46,9 +46,10 @@ import uuid
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from app.services.evosense import fc_match as M
 from app.services.evosense.sources import base as B
 
-ADAPTER_VERSION = "tx_clerk_fc/2"
+ADAPTER_VERSION = "tx_clerk_fc/3"
 PAGE = 250                       # the portal's own page size limit
 MAX_PAGES = 16                   # 4,000 notices per county per read - a hard stop
 SPACING = 0.6                    # seconds between requests (a person paging is slower; still gentle)
@@ -472,6 +473,67 @@ def default_window(today: Optional[date] = None) -> Tuple[date, date]:
     return today - timedelta(days=62), today + timedelta(days=155)
 
 
+
+def index_text(doc: Dict[str, Any]) -> str:
+    """Everything the clerk returned about a notice that can name the house:
+    the index's address lines (a legal description in Tarrant / Johnson) and
+    the notice text the search showed."""
+    parts = [x for x in (doc.get("propertyAddress") or []) if isinstance(x, str)]
+    for a in doc.get("propAddress") or []:
+        if isinstance(a, dict):
+            parts.append(" ".join(str(a.get(k) or "") for k in ("address1", "address2", "city")))
+    return " ".join(parts + [_text(doc)])
+
+
+def index_city(doc: Dict[str, Any]) -> Optional[str]:
+    for a in doc.get("propAddress") or []:
+        if isinstance(a, dict) and a.get("city"):
+            return str(a["city"]).replace(", TEXAS", "").strip()
+    for x in doc.get("propertyAddress") or []:
+        if isinstance(x, str) and "," in x:
+            parts = [y.strip() for y in x.split(",")]
+            city = parts[-2] if len(parts) >= 3 else parts[0]
+            if city and not re.search(r"\d", city):
+                return city
+    return None
+
+
+def norm_words(text: Optional[str]) -> List[str]:
+    return M.norm(text).replace("/", " ").split()
+
+
+def _name_queries(ident: Dict[str, Any]) -> List[str]:
+    """What to search the notices for: the list's borrower as written
+    (first and last name, the order a notice uses), then the owner of
+    record's most distinctive word (an appraisal roll writes LAST FIRST)."""
+    out: List[str] = []
+    for owner in ident.get("list_names") or []:
+        for g in M.name_groups(owner):
+            last = g[-1]
+            if len(last) >= 4 and last not in M._COMMON and not last.isdigit():
+                q = last                                   # an uncommon surname finds the notice on its own
+            elif len(g) >= 2:
+                q = " ".join(g[-2:])                       # 'ERIC LEE': first and last name as written
+            else:
+                q = ""
+            if q and q not in out:
+                out.append(q)
+    for owner in ident.get("owner_names") or []:
+        for g in M.name_groups(owner):
+            rare = sorted([w for w in g if len(w) >= 4 and w not in M._COMMON and not w.isdigit()], key=len, reverse=True)
+            if rare and rare[0] not in out and not any(rare[0] in x.split() for x in out):
+                out.append(rare[0])
+    return out
+
+
+def _brief(p: "ClerkPortal", x: Dict[str, Any]) -> Dict[str, Any]:
+    d = x["doc"]
+    sd, _ = sale_date(d)
+    return {"document": d.get("docNumber") or d.get("documentNumber"), "url": p.doc_url(d),
+            "sale_date": sd.isoformat() if sd else None, "decision": x["decision"], "signals": x["signals"],
+            "reason": x.get("reason") or x.get("matched_by"), "text": (x.get("text") or "")[:300]}
+
+
 class ClerkForeclosureReader:
     """Discovery (every notice in a window) and per-property checks."""
     adapter_version = ADAPTER_VERSION
@@ -552,11 +614,21 @@ class ClerkForeclosureReader:
         return {"records": order[:limit], "stats": stats,
                 "source_url": "https://%s/" % COUNTIES["dallas"]["host"], "source_updated_at": datetime.utcnow()}
 
-    def check(self, county: str, props: List[Dict[str, Any]], *, today: Optional[date] = None) -> Dict[str, Any]:
-        """Which of THESE properties have a filed notice. Each property is
-        matched first on the clerk's indexed address, then by the clerk's own
-        full-text search of the notices for '<number> <street>'.
-        Returns {"matches": {prop id: [(doc, matched_by)]}, "stats": {...}}."""
+    def check(self, county: str, props: List[Dict[str, Any]], *, today: Optional[date] = None,
+              max_searches: Optional[int] = None) -> Dict[str, Any]:
+        """Which of THESE properties have a filed notice.
+
+        1. the clerk's indexed address (street + ZIP/city);
+        2. the clerk's full-text search of the notices for '<number> <street>';
+        3. when the street finds nothing and the property's identity is known
+           (``t["identity"]`` from fc_match.identity): the notices whose index
+           or text carry its legal description, parcel number or owner /
+           borrower name, each judged by fc_match.decide - VERIFIED only with
+           two independent kinds of evidence, otherwise a CANDIDATE for a
+           person, and REJECTED when the notice names another lot.
+
+        Returns {"matches": {prop id: [(doc, matched_by)]}, "candidates":
+        {prop id: [...]}, "rejected": {prop id: [...]}, "stats": {...}}."""
         today = today or date.today()
         p = self.portal(county)
         docs = self.notices(county, today)
@@ -566,37 +638,125 @@ class ClerkForeclosureReader:
                 k = match_key(a.get("address1"))
                 if k:
                     index.setdefault(k, []).append(d)
+        # notices the clerk indexed by LEGAL DESCRIPTION (Tarrant, Johnson):
+        # matched locally, without another request
+        legal_index = [(d, index_text(d)) for d in docs if M.notice_legals(index_text(d))]
         matches: Dict[str, List[Tuple[Dict[str, Any], str]]] = {}
+        candidates: Dict[str, List[Dict[str, Any]]] = {}
+        rejected: Dict[str, List[Dict[str, Any]]] = {}
         st = {"status": "COMPLETED", "notices_in_window": len(docs), "properties": len(props),
-              "matched_index": 0, "matched_full_text": 0, "no_match": 0, "full_text_searches": 0}
+              "matched_index": 0, "matched_full_text": 0, "matched_evidence": 0, "candidates": 0,
+              "rejected": 0, "no_match": 0, "full_text_searches": 0, "evidence_searches": 0,
+              "legal_indexed_notices": len(legal_index)}
         start, _end = default_window(today)
+        need = sum(1 for t in props if t.get("identity"))
+        budget = {"left": max_searches if max_searches is not None else min(400, 40 + 6 * need)}
         for t in props:
-            k = street_key(t.get("street_address"))
-            if not k:
-                st["no_match"] += 1
-                continue
-            hit = [d for d in index.get(match_key(t.get("street_address")), [])
-                   if same_place(d, t["street_address"], t.get("zip_code"), t.get("city"))]
-            how = "clerk index address"
-            if not hit:
-                st["full_text_searches"] += 1
-                found = p.full_text(k)
-                hit = [d for d in found if same_place(d, t["street_address"], t.get("zip_code"), t.get("city"))]
-                hit = [d for d in hit if (sale_date(d)[0] or today) >= start]
-                how = "notice text (clerk full-text search)"
+            street = t.get("street_address")
+            k = street_key(street)
+            hit: List[Dict[str, Any]] = []
+            how = ""
+            if k:
+                hit = [d for d in index.get(match_key(street), [])
+                       if same_place(d, street, t.get("zip_code"), t.get("city"))]
+                how = "clerk index address"
+                if not hit:
+                    st["full_text_searches"] += 1
+                    found = p.full_text(k)
+                    hit = [d for d in found if same_place(d, street, t.get("zip_code"), t.get("city"))]
+                    hit = [d for d in hit if (sale_date(d)[0] or today) >= start]
+                    how = "notice text (clerk full-text search)"
+            ev_hits: List[Tuple[Dict[str, Any], str]] = []
+            if not hit and t.get("identity"):
+                ev = self._corroborate(p, t["identity"], legal_index, start, budget, st)
+                ev_hits = [(x["doc"], "evidence: " + x["matched_by"]) for x in ev if x["decision"] == M.VERIFIED]
+                cands = [_brief(p, x) for x in ev if x["decision"] == M.CANDIDATE]
+                rej = [_brief(p, x) for x in ev if x["decision"] == M.REJECTED]
+                if cands:
+                    candidates[t["id"]] = cands
+                if rej:
+                    rejected[t["id"]] = rej
             uniq, seen = [], set()
-            for d in hit:
+            for d, h in [(d, how) for d in hit] + ev_hits:
                 key = d.get("docId") or d.get("id")
                 if key not in seen:
                     seen.add(key)
-                    uniq.append((d, how))
+                    uniq.append((d, h))
             if uniq:
                 matches[t["id"]] = uniq
-                st["matched_index" if how.startswith("clerk index") else "matched_full_text"] += 1
+                h0 = uniq[0][1]
+                st["matched_index" if h0.startswith("clerk index") else
+                   "matched_evidence" if h0.startswith("evidence") else "matched_full_text"] += 1
             else:
                 st["no_match"] += 1
+                if t["id"] in candidates:
+                    st["candidates"] += 1
+            if t["id"] in rejected:
+                st["rejected"] += 1
         st["requests"] = p.calls
-        return {"matches": matches, "stats": st, "portal": p}
+        st["search_budget_left"] = budget["left"]
+        return {"matches": matches, "candidates": candidates, "rejected": rejected, "stats": st, "portal": p}
+
+    def _corroborate(self, p: "ClerkPortal", ident: Dict[str, Any], legal_index: List[Tuple[Dict[str, Any], str]],
+                     start: date, budget: Dict[str, int], st: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Candidate notices for one property from its legal description,
+        parcel number and names; each judged by fc_match.decide."""
+        pool: Dict[Any, Dict[str, Any]] = {}
+
+        def add(d: Dict[str, Any], text: str) -> None:
+            sd, _ = sale_date(d)
+            if sd is not None and sd < start:
+                return                                   # an old notice is history, not this sale
+            key = d.get("docId") or d.get("id") or d.get("docNumber")
+            slot = pool.setdefault(key, {"doc": d, "texts": []})
+            if text and text not in slot["texts"]:
+                slot["texts"].append(text)
+
+        def search(value: str) -> List[Dict[str, Any]]:
+            if budget["left"] <= 0 or not value:
+                return []
+            budget["left"] -= 1
+            st["evidence_searches"] += 1
+            try:
+                return p.full_text(value, limit=100)
+            except B.SourceError:
+                return []
+
+        legal = ident.get("legal")
+        if legal:
+            for d, txt in legal_index:
+                if M.subdivision_in(legal["core"], txt):
+                    add(d, txt)
+        for pid in [x for x in ident.get("parcel_ids") or [] if M._pid(x)][:2]:
+            for d in search(pid):
+                add(d, index_text(d))
+        if legal and not any(M.legal_match(legal, " ".join(v["texts"]))["result"] for v in pool.values()):
+            phrase = " ".join([w for w in norm_words(legal["subdivision"]) if w in legal["core"]][:2])
+            if phrase:
+                for d in search('"%s"' % phrase):
+                    add(d, index_text(d))
+        for value in _name_queries(ident)[:2]:
+            for d in search('"%s"' % value):
+                add(d, index_text(d))
+        # a notice found by name or parcel whose snippet does not show the lot:
+        # ask for the block, and read the lot in that notice's snippet
+        if legal and legal.get("block"):
+            short = [k for k, v in pool.items() if not M.notice_legals(" ".join(v["texts"]))]
+            if short:
+                b = legal["block"]
+                raw_block = re.search(r"\bBLK\s+(\S+)", M.norm(legal.get("raw") or ""))
+                q = raw_block.group(1) if raw_block and "/" in raw_block.group(1) else "BLOCK %s" % b
+                for d in search('"%s"' % q):
+                    key = d.get("docId") or d.get("id") or d.get("docNumber")
+                    if key in pool:
+                        add(d, index_text(d))
+        out = []
+        for v in pool.values():
+            text = " ".join(v["texts"])
+            r = M.decide(ident, text, index_city(v["doc"]))
+            if r["decision"] != M.NONE:
+                out.append(dict(r, doc=v["doc"], text=text[:600]))
+        return out
 
     def verify(self, county: str = "dallas") -> Dict[str, Any]:
         p = self.portal(county)
