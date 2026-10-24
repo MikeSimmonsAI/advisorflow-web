@@ -331,6 +331,18 @@ export default function EvoCohort() {
                             : `Notice ${r.foreclosure.document}`}
                           {r.foreclosure.notices?.length > 1 ? ` · ${r.foreclosure.notices.length} notices on file` : ''}
                         </span>) : null}
+                      {r.foreclosure.reposted_for?.length ? (
+                        <span className="evo-prop__sub" style={{ display: 'block', color: '#b45309', fontWeight: 600 }}>
+                          Also posted for {r.foreclosure.reposted_for.join(', ')}: the {r.foreclosure.sale_date} sale may be postponed. Check the clerk the week of the sale.
+                        </span>) : null}
+                      {r.foreclosure.other_records?.length ? (
+                        <details className="evo-prop__sub" onClick={(e) => e.stopPropagation()}>
+                          <summary>Other records on file ({r.foreclosure.other_records.length})</summary>
+                          {r.foreclosure.other_records.map((o, i) => (
+                            <span key={i} style={{ display: 'block', whiteSpace: 'normal', maxWidth: 420, textAlign: 'left', marginTop: 4 }}>
+                              {o.url ? <a href={o.url} target="_blank" rel="noreferrer">{o.document}</a> : o.document}: {o.note}
+                            </span>))}
+                        </details>) : null}
                       {r.foreclosure.evidence ? (
                         <details className="evo-prop__sub" onClick={(e) => e.stopPropagation()}>
                           <summary>What the notice says</summary>

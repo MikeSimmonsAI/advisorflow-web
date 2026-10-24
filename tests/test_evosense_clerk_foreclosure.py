@@ -383,6 +383,41 @@ def test_manual_notice_needs_a_document_number_to_count_as_verified(client, db_s
     assert st["notices"][-1]["evidence"] == long_note.strip()
 
 
+def test_a_reposting_and_other_records_are_on_the_row_not_hidden(client, db_session, sample_org, admin_auth_headers):
+    """A notice re-posted for a later sale shows as its own field (not only in a
+    tooltip), and a record kept beside the notice (a lis pendens) is shown too -
+    without ever turning the property into a verified sale."""
+    from app.models.models import User
+    HU.import_csv(db_session, sample_org.id, "street_address,city,state,zip_code\n9 Repost Way,Plano,TX,75023\n",
+                  user=db_session.query(User).first())
+    db_session.commit()
+    p = db_session.query(EvoSenseProperty).filter_by(organization_id=sample_org.id).first()
+    url = "/wholesale/evosense/properties/%s/signals" % p.id
+    later = first_tuesday_after(SALE + timedelta(days=1))
+    for doc, sd in (("2026-1", SALE), ("2026-2", later)):
+        r = client.post(url, headers=admin_auth_headers, json={"signal_type": "PRE_FORECLOSURE", "document_number": doc,
+                                                               "sale_date": sd.isoformat()})
+        assert r.status_code == 200, r.text
+    db_session.expire_all()
+    sigs = db_session.query(EvoSenseSignal).filter_by(property_id=p.id, signal_type="PRE_FORECLOSURE").all()
+    st = CO.foreclosure_status(sigs)
+    assert st["status"] == "VERIFIED NOTICE" and st["sale_date"] == SALE.isoformat()
+    assert st["reposted_for"] == [later.isoformat()]
+    # a lis pendens: a document, no sale date -> kept as a record, never a verified sale
+    HU.import_csv(db_session, sample_org.id, "street_address,city,state,zip_code\n11 Lawsuit Ln,Plano,TX,75023\n",
+                  user=db_session.query(User).first())
+    db_session.commit()
+    q = db_session.query(EvoSenseProperty).filter_by(organization_id=sample_org.id, street_address="11 LAWSUIT LN").first() \
+        or [x for x in db_session.query(EvoSenseProperty).filter_by(organization_id=sample_org.id).all() if x.id != p.id][0]
+    r = client.post("/wholesale/evosense/properties/%s/signals" % q.id, headers=admin_auth_headers,
+                    json={"signal_type": "PRE_FORECLOSURE", "document_number": "LP-1", "note": "HOA suit, cause 1"})
+    assert r.status_code == 200, r.text
+    db_session.expire_all()
+    st = CO.foreclosure_status(db_session.query(EvoSenseSignal).filter_by(property_id=q.id).all())
+    assert st["status"] != "VERIFIED NOTICE"
+    assert st["other_records"] == [{"document": "LP-1", "url": None, "note": "HOA suit, cause 1"}]
+
+
 # 12 ── tenant isolation: one org's check never touches another's houses ──────
 
 def test_one_tenants_check_never_touches_another(db_session, sample_org, sample_advisor, clerks):
