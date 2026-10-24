@@ -441,6 +441,7 @@ def test_county_coverage_is_stated_county_by_county():
     assert set(F.COUNTIES) == {"dallas", "tarrant", "denton", "johnson"}
     for c in ("collin", "ellis", "kaufman", "rockwall"):
         assert "checked 2026-10-23" in F.NO_PORTAL[c]
+        assert "https://" in F.NO_PORTAL[c] and "Record a notice" in F.NO_PORTAL[c]   # where to look, what to do
     with pytest.raises(B.SourceError):
         F.ClerkPortal("ellis")                      # never a pretend read
 
