@@ -239,6 +239,12 @@ def book(db: Session, org_id: str, user: User, data: Dict[str, Any]) -> Wholesal
         raise HTTPException(422, "Length must be 15, 30, 45, 60, 90 or 120 minutes.")
     title = (data.get("title") or "").strip() or ("Visit - %s" % (address or "seller"))[:200]
     starts = parse_when(data["starts_at"])
+    if "assigned_to_id" in data:
+        assigned, how = _rep(db, org_id, user, data.get("assigned_to_id")), "chosen by the booker"
+        if not assigned:
+            how = "left unassigned by the booker"
+    else:
+        assigned, how = default_rep(db, org_id, user, deal, starts)
     dup = _same_visit(db, org_id, starts, evo, wsp, deal)
     if dup is not None:
         # the same visit booked twice (double click, two people, a retry):
@@ -248,7 +254,7 @@ def book(db: Session, org_id: str, user: User, data: Dict[str, Any]) -> Wholesal
         organization_id=org_id,
         evosense_property_id=getattr(evo, "id", None), property_id=getattr(wsp, "id", None),
         deal_id=getattr(deal, "id", None), lead_id=getattr(lead, "id", None),
-        assigned_to_id=_rep(db, org_id, user, data.get("assigned_to_id")),
+        assigned_to_id=assigned,
         starts_at=starts, duration_minutes=minutes,
         address=address, title=title, notes=(data.get("notes") or "").strip() or None,
         status="scheduled", source=data.get("source") or ("property" if evo or wsp else "manual"),
@@ -261,9 +267,76 @@ def book(db: Session, org_id: str, user: User, data: Dict[str, Any]) -> Wholesal
     db.add(a)
     db.flush()
     sync_seller(db, org_id, a)
-    _tell_rep(db, org_id, user, a, "New appointment")
+    _audit(db, org_id, user, a, "appointment.booked",
+           "Appointment booked for %s - %s" % (_when(a), ("assigned to %s (%s)" % (_name(db, a.assigned_to_id), how))
+                                                 if a.assigned_to_id else "UNASSIGNED (%s)" % how),
+           {"assigned_to_id": a.assigned_to_id, "how": how})
+    if a.assigned_to_id:
+        _tell_rep(db, org_id, user, a, "New appointment")
+    else:
+        _tell_unassigned(db, org_id, a)
     db.commit()
     return a
+
+
+def default_rep(db: Session, org_id: str, user: User, deal, starts) -> tuple:
+    """Who gets a new appointment when the booker names nobody, by the
+    workspace's existing rules, in order:
+      1. the deal's own owner (deal.assigned_to_id), if they may take visits;
+      2. the workspace's default person (Wholesale settings: inquiry assignee);
+      3. the field rep with the fewest upcoming visits (ties: name order);
+      4. nobody - the appointment is UNASSIGNED and the admins are told.
+    Only people of THIS workspace who may use Wholesale are ever chosen."""
+    eligible = {r["user_id"]: r for r in reps(db, org_id, user)}
+    owner = getattr(deal, "assigned_to_id", None)
+    if owner and owner in eligible:
+        return owner, "the deal's owner"
+    from app.models.wholesale_models import WholesaleSettings
+    st = db.query(WholesaleSettings).filter(WholesaleSettings.organization_id == org_id).first()
+    default = getattr(st, "inquiry_assignee_id", None)
+    if default and default in eligible:
+        return default, "workspace default person"
+    field = [r for r in eligible.values() if r["field"]]
+    if field:
+        now = _now()
+        def load(r):
+            return (db.query(WholesaleFieldAppointment.id)
+                    .filter(WholesaleFieldAppointment.organization_id == org_id,
+                            WholesaleFieldAppointment.assigned_to_id == r["user_id"],
+                            WholesaleFieldAppointment.status == "scheduled",
+                            WholesaleFieldAppointment.starts_at >= now).count())
+        best = sorted(field, key=lambda r: (load(r), (r["name"] or "").lower()))[0]
+        return best["user_id"], "field rep with the fewest upcoming visits"
+    return None, "no eligible rep - waiting in the unassigned queue"
+
+
+def _when(a: WholesaleFieldAppointment) -> str:
+    local = a.starts_at.replace(tzinfo=timezone.utc).astimezone(CENTRAL)
+    return "%s %s" % (local.strftime("%a %b ") + str(local.day), local.strftime("%I:%M %p").lstrip("0"))
+
+
+def _audit(db: Session, org_id: str, user: Optional[User], a: WholesaleFieldAppointment, action: str,
+           summary: str, details: Dict[str, Any]) -> None:
+    from app.services import wholesale_service as svc
+    try:
+        svc.log_event(db, org_id, action, actor_type="user" if user else "system",
+                      actor_user_id=getattr(user, "id", None), deal_id=a.deal_id, property_id=a.property_id,
+                      summary=summary[:500], details=dict(details, appointment_id=a.id))
+    except Exception:  # noqa: BLE001 - the audit line never fails the booking
+        pass
+
+
+def _tell_unassigned(db: Session, org_id: str, a: WholesaleFieldAppointment) -> None:
+    """Nobody may take it: the workspace's default person, or its admins, see
+    it on the bell. Nothing is texted or emailed."""
+    from app.models.models import NotificationType
+    from app.models.wholesale_models import WholesaleSettings
+    from app.services import wholesale_notify as N
+    st = db.query(WholesaleSettings).filter(WholesaleSettings.organization_id == org_id).first()
+    N.notify(db, org_id, kind=NotificationType.WHOLESALE_APPOINTMENT,
+             assignee_id=getattr(st, "inquiry_assignee_id", None),
+             message="Unassigned appointment: %s at %s. Give it to a rep." % (_when(a), a.address or "the property"),
+             link="/wholesale/appointments")
 
 
 def _same_visit(db: Session, org_id: str, starts, evo, wsp, deal) -> Optional[WholesaleFieldAppointment]:
@@ -396,6 +469,11 @@ def change(db: Session, org_id: str, user: User, appt_id: str, data: Dict[str, A
         a.starts_at = parse_when(data["starts_at"])
         if a.status in ("no_show", "cancelled"):
             a.status = "scheduled"          # moved to a new time: it is back on
+    if a.assigned_to_id != before_rep:
+        _audit(db, org_id, user, a, "appointment.reassigned",
+               "Appointment %s: %s -> %s" % (_when(a), _name(db, before_rep) or "unassigned",
+                                             _name(db, a.assigned_to_id) or "unassigned"),
+               {"from": before_rep, "to": a.assigned_to_id})
     if a.assigned_to_id and a.assigned_to_id != before_rep:
         _tell_rep(db, org_id, user, a, "Appointment handed to you")
     elif a.assigned_to_id and a.starts_at != before_time:

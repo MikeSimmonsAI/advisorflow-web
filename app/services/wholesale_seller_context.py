@@ -51,6 +51,23 @@ RELATIONSHIP_RECORDS = (
     "asked to hear from us."
 )
 
+RELATIONSHIP_CONVERSATION = (
+    "PROPERTY SELLER - CONVERSATION IN PROGRESS. The seller has already replied to us (see the "
+    "conversation history). Do NOT introduce yourself or the company again and do not write a "
+    "cold opener. Answer their MOST RECENT message directly, in a natural way, using what they "
+    "already told us."
+)
+
+CONVERSATION_RULES = (
+    "- Reply to the seller's most recent message first; that is what this draft is for.\n"
+    "- If they asked for a visit or named a day/time, acknowledge it (e.g. 'Thursday afternoon') and "
+    "say a team member will confirm the time with them. Do not confirm a time yourself.\n"
+    "- If they pushed back on price or mentioned another investor's number, acknowledge it calmly "
+    "without arguing and without naming any number; say the numbers are worked out with a person after "
+    "seeing the property.\n"
+    "- Do not repeat questions they already answered (see 'What they already told us')."
+)
+
 GUARDRAILS = (
     "- This conversation is about the seller's PROPERTY. Ignore any funeral, cemetery or "
     "planning-appointment framing elsewhere in these instructions.\n"
@@ -140,8 +157,17 @@ def context_for_lead(db, lead) -> Optional[Dict[str, Any]]:
         consent = getattr(rec, "status", None) if rec is not None else None
     except Exception:  # noqa: BLE001
         consent = None
+    replied = 0
+    try:
+        from app.models.models import Reply
+        replied = db.query(Reply.id).filter(Reply.lead_id == lead.id).count()
+    except Exception:  # noqa: BLE001
+        replied = 0
+    relationship = (RELATIONSHIP_CONVERSATION if replied
+                    else RELATIONSHIP_INQUIRY if inquiry else RELATIONSHIP_RECORDS)
     return {"inquiry": inquiry, "properties": props, "sms_consent": consent or "none on file",
-            "relationship": RELATIONSHIP_INQUIRY if inquiry else RELATIONSHIP_RECORDS}
+            "relationship": relationship, "in_conversation": bool(replied),
+            "opted_out": (getattr(lead, "status", None) == "dnc")}
 
 
 def prompt_block(ctx: Optional[Dict[str, Any]]) -> str:
@@ -156,8 +182,12 @@ def prompt_block(ctx: Optional[Dict[str, Any]]) -> str:
             lines.extend("  - %s: %s" % (k, v) for k, v in p["known"].items())
         else:
             lines.append("What they already told us: nothing yet.")
+        if p.get("appointment_status") in ("requested", "scheduled"):
+            lines.append("Appointment: %s (a person books and confirms it)" % p["appointment_status"])
     lines.append("SMS program consent: %s" % ctx["sms_consent"])
     lines.append("Rules for sellers:")
+    if ctx.get("in_conversation"):
+        lines.append(CONVERSATION_RULES)
     lines.append(GUARDRAILS)
     return "\n".join(lines)
 

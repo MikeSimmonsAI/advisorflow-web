@@ -12,7 +12,7 @@ export default function BookAppointment({ open, onClose, onBooked, link = {}, ad
   const [day, setDay] = useState(tomorrowCentral())
   const [time, setTime] = useState('10:00')
   const [minutes, setMinutes] = useState(60)
-  const [rep, setRep] = useState('')
+  const [rep, setRep] = useState('auto')
   const [addr, setAddr] = useState(address || '')
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState(false)
@@ -27,11 +27,15 @@ export default function BookAppointment({ open, onClose, onBooked, link = {}, ad
   async function save() {
     setBusy(true); setErr(null)
     try {
-      const a = await api.post('/wholesale/appointments', {
+      const body = {
         ...link, starts_at: centralToIso(day, time), duration_minutes: Number(minutes),
-        assigned_to_id: rep || null, address: addr.trim() || null, title: title || null,
-        notes: notes.trim() || null,
-      })
+        address: addr.trim() || null, title: title || null, notes: notes.trim() || null,
+      }
+      // 'auto': no assigned_to_id, so the server picks by the workspace rules
+      // (the deal's owner, then the default person, then the least-busy rep).
+      if (rep !== 'auto') body.assigned_to_id = rep || null
+      const a = await api.post('/wholesale/appointments', body)
+      setRep('auto')
       setNotes('')
       if (onBooked) onBooked(a)
       if (onClose) onClose()
@@ -59,7 +63,8 @@ export default function BookAppointment({ open, onClose, onBooked, link = {}, ad
           </select></label>
         <label className="ap-lab">Who goes
           <select className="ap-input" value={rep} onChange={(e) => setRep(e.target.value)}>
-            <option value="">Not decided yet</option>
+            <option value="auto">Assign automatically</option>
+            <option value="">Leave unassigned</option>
             {(reps || []).map((r) => <option key={r.user_id} value={r.user_id}>
               {r.name}{r.role_label ? ` - ${r.role_label}` : ''}</option>)}
           </select></label>
