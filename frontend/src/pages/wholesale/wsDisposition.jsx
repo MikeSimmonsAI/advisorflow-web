@@ -50,6 +50,13 @@ export function DispositionPanel({ dealId, refreshKey }) {
       <div className="panel-title ws-panel-title"><span>Disposition</span>
         <span className="ws-muted uw-small">Closing checklist {ck.done}/{ck.total}{ck.next ? ` · next: ${ck.next}` : ''}</span></div>
 
+      {s.readiness ? (
+        <div className={s.readiness.ready ? 'ws-muted uw-small' : 'uw-missing'} style={{ marginBottom: 8 }}>
+          <b>{s.readiness.ready ? 'Ready to market' : 'Not ready to market yet'}</b> ·{' '}
+          {s.readiness.checks.map((c) => `${c.ok ? '✓' : '○'} ${c.check}`).join(' · ')} · {s.readiness.eligible_buyers} eligible buyer(s)
+          {s.readiness.ineligible_buyers.length ? <div className="uw-small">Not eligible: {s.readiness.ineligible_buyers.slice(0, 5).map((x) => `${x.buyer} (${x.why})`).join('; ')}</div> : null}
+        </div>
+      ) : null}
       <div className="uw-flow" aria-label="Engagement">
         {s.funnel.map((f) => (
           <span key={f.key} className="uw-step" style={{ cursor: 'default' }} title={f.note || ''}>

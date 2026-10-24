@@ -158,11 +158,44 @@ def summary(db, org_id: str, deal, now: Optional[datetime] = None) -> Dict[str, 
         ("Fee collected", deal.wholesale_fee_collected is not None),
     ]
     steps = [{"label": l, "done": bool(d)} for l, d in checklist]
+
+    # READY TO MARKET? Facts only - nothing here sends or blocks a send by itself.
+    from app.services import wholesale_deal_package as PK
+    live = PK.serving(db, org_id, deal)
+    readiness = [
+        {"check": "Contract signed with the seller", "ok": deal.contract_status == "signed"},
+        {"check": "Contract approved", "ok": "contract" in apps},
+        {"check": "Max offer calculated from ARV and repairs", "ok": deal.max_allowable_offer is not None},
+        {"check": "Investor package approved and live", "ok": bool(live)},
+        {"check": "A price for buyers is set",
+         "ok": bool(getattr(deal, "buyer_room_asking_price", None) or deal.buyer_price)},
+    ]
+    eligible, ineligible = 0, []
+    for m in (db.query(WholesaleBuyerMatch)
+              .filter(WholesaleBuyerMatch.organization_id == org_id, WholesaleBuyerMatch.deal_id == deal.id).all()):
+        b = buyers.get(m.buyer_id) or db.query(WholesaleBuyer).filter(WholesaleBuyer.id == m.buyer_id).first()
+        if b is None:
+            continue
+        why = []
+        if m.disqualified:
+            why.append(m.disqualified_reason or "outside the buy box")
+        if not (b.email or b.phone):
+            why.append("no phone or email")
+        if b.do_not_contact:
+            why.append("do not contact")
+        if not b.is_active:
+            why.append("inactive")
+        if why:
+            ineligible.append({"buyer": getattr(b, "company_name", None) or b.contact_name, "why": "; ".join(why)})
+        else:
+            eligible += 1
     nxt = next((s["label"] for s in steps if not s["done"]), None)
     return {"deal_id": deal.id, "contract_price": contract, "funnel": funnel, "offers": items,
             "highlights": highlights, "follow_ups": follow,
             "closing_checklist": {"steps": steps, "done": sum(1 for s in steps if s["done"]), "total": len(steps),
                                   "next": nxt},
+            "readiness": {"checks": readiness, "ready": all(c["ok"] for c in readiness),
+                          "eligible_buyers": eligible, "ineligible_buyers": ineligible[:50]},
             "rules": {"no_reply_days": NO_REPLY_DAYS, "deadline_days": DEADLINE_DAYS}}
 
 
