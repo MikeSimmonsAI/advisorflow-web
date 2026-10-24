@@ -399,6 +399,7 @@ def attacks(ids):
         ("post", "/wholesale/deals/%s/package/withdraw" % d, {}),
         ("get", "/wholesale/deals/%s/package.pdf" % d, None),
         ("get", "/wholesale/deals/%s/disposition-summary" % d, None),
+        ("get", "/wholesale/deals/%s/provenance" % d, None),
 
         # ── Disposition: the path that can actually send something ──────────
         ("post", "/wholesale/deals/%s/match-buyers" % d, {}),
