@@ -785,6 +785,39 @@ class TexasParcelOwnerSource(PublicRecordSource):
         return {"parcels_at_test_point": len(rows)}
 
 
+class JohnsonCadSource(PublicRecordSource):
+    """Johnson County's own appraisal roll (JCAD certified records, free download).
+    Adds what the statewide layer lacks for Johnson: the legal description
+    (subdivision / block / lot) the clerk indexes foreclosure notices by, the
+    mailing address, and the last deed's recording date. See sources/johnson.py."""
+    scope, counties = "county", ("Johnson",)
+    key = "johnson_cad"
+    label = "Johnson County appraisal roll (JCAD certified records)"
+    capabilities = (C.ASSESSOR, C.OWNERSHIP, C.PARCEL)
+    lookup_capability = C.ASSESSOR
+    coverage = "Johnson County, TX - owner, mailing address, legal description, deed date (no sale prices)"
+    jurisdiction = "Johnson County, Texas"
+    source_type = "County appraisal district - certified roll"
+    access_method = "Published zip read with byte ranges once, indexed on disk, then looked up locally"
+    public_url = "https://johnsoncad.com/downloads"
+    refresh = "Certified each August; supplements during the year"
+    freshness_days = 120
+    adapter_version = "johnson_cad_roll/1"
+    terms_note = "Public appraisal roll, published free by the Central Appraisal District of Johnson County."
+
+    def applies(self, target):
+        c = (target.get("county") or "").strip().lower().replace(" county", "")
+        return c == "johnson" and bool(target.get("street_address") or target.get("parcel_apn"))
+
+    def lookup_one(self, target):
+        from app.services.evosense.sources.johnson import JohnsonReader
+        return JohnsonReader().lookup(target)
+
+    def verify(self):
+        from app.services.evosense.sources.johnson import JohnsonReader
+        return {"accounts": JohnsonReader().count()}
+
+
 class TexasParcelRollSource(PublicRecordSource):
     """Find houses anywhere in Texas from each county's 2026 appraisal roll as
     published by TxGIO (sources/txgio_roll.py). Absentee- or estate-owned
@@ -1290,7 +1323,7 @@ PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
     SandboxPropertyRecords(), SandboxVacancy(), SandboxTaxRoll(), SandboxPublicRecords(),
     SandboxSkipTrace(), SandboxSkipTraceBackup(), SandboxPhoneValidation(),
     ManualSource(), CsvImportSource(),
-    TarrantTaxRollSource(), DallasTrwSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), TexasParcelOwnerSource(), TexasParcelRollSource(), HarrisRollSource(), TravisDelinquentSource(), AustinCodeSource(), CensusGeocoderSource(),
+    TarrantTaxRollSource(), DallasTrwSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), TexasParcelOwnerSource(), JohnsonCadSource(), TexasParcelRollSource(), HarrisRollSource(), TravisDelinquentSource(), AustinCodeSource(), CensusGeocoderSource(),
     FortWorthCodeSource(), FortWorthOpenCasesSource(), Dallas311Source(), LgbsTaxSaleSource(),
     ClerkForeclosureSource(),
     DallasForeclosureManual(), DallasTaxManual(),

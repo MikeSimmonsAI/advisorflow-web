@@ -388,7 +388,7 @@ def decide(ident: Dict[str, Any], text: str, index_city: Optional[str] = None) -
 
 # ── a property's identity from the records already on file ───────────────────
 
-LEGAL_SOURCES = ("collin_cad", "dcad", "tad", "tarrant_tax_roll", "txgio_parcels", "denton_gis")
+LEGAL_SOURCES = ("collin_cad", "dcad", "tad", "tarrant_tax_roll", "txgio_parcels", "denton_gis", "johnson_cad")
 
 
 def _js(raw: Any) -> Optional[Dict[str, Any]]:
@@ -439,6 +439,16 @@ def facts_from_record(provider: str, raw: Any) -> Dict[str, Any]:
         if d.get("LEGAL_DESC") and str(d.get("LEGAL_DESC")).upper() != "NULL":
             out["legal"] = parse_cad_legal_text(d["LEGAL_DESC"])
         out["names"] = [d.get("OWNER_NAME")] if d.get("OWNER_NAME") and d.get("OWNER_NAME") != "Null" else []
+    elif provider == "johnson_cad":
+        d = _js(raw) or {}
+        out["parcel_ids"] = [d.get("GEO ACCOUNT NUM"), d.get("ACCOUNT")]
+        if d.get("LEGAL"):
+            out["legal"] = parse_cad_legal_text(d["LEGAL"])
+        if not out["legal"] and d.get("SUBDIVISION") and (d.get("BLOCK") or d.get("LOT")):
+            out["legal"] = cad_legal(d.get("SUBDIVISION"), d.get("BLOCK"), [d.get("LOT")],
+                                     " ".join(str(x) for x in (d.get("SUBDIVISION"), d.get("BLOCK"), d.get("LOT"))
+                                              if x))
+        out["names"] = [x for x in (d.get("NAME"), d.get("NAME2")) if x]
     elif provider == "denton_gis":
         d = _js(raw) or {}
         out["parcel_ids"] = [d.get("prop_id"), d.get("PID")]

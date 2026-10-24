@@ -43,7 +43,7 @@ from app.models.evosense_models import (EvoSenseContactPoint, EvoSenseEvent, Evo
 from app.services.evosense import common as C
 
 OFFICIAL_OWNER_SOURCES = {"dcad", "tad", "collin_cad", "denton_gis", "txgio_parcels", "hcad_roll",
-                          "txgio_roll", "dallas_trw", "tarrant_tax_roll", "travis_delinquent"}
+                          "txgio_roll", "dallas_trw", "tarrant_tax_roll", "travis_delinquent", "johnson_cad"}
 TAX_TYPES = ("TAX_DELINQUENT", "TAX_SUIT", "TAX_SALE", "TAX_FORECLOSURE")
 FORECLOSURE_TYPES = ("PRE_FORECLOSURE", "FORECLOSURE_NOTICE", "FORECLOSURE", "AUCTION")
 TAX_CHECK_EVENT = "cohort.tax_checked"
