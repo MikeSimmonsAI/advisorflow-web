@@ -969,7 +969,10 @@ def add_signal(property_id: str, payload: SignalIn, db: Session = Depends(get_db
                      "recorded": filed.isoformat() if filed else None,
                      "document_url": (payload.record_url or "").strip()[:500] or None,
                      "foreclosure_type": (payload.foreclosure_type or "").strip()[:40] or None,
-                     "matched_by": "read on the county record by a person"})
+                     "matched_by": "read on the county record by a person",
+                     # what the person read (grantor, instrument, parcel match...): kept whole here,
+                     # the signal's one-line value is cut at 200 characters
+                     "note": (payload.note or "").strip()[:4000] or None})
         if not (doc and sale):
             prov["claim"] = "operator"            # no document number + date: a claim, not a verified notice
         ref = "OPERATOR:%s:%s" % (payload.signal_type, doc or (sale.isoformat() if sale else "undated"))
