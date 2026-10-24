@@ -101,6 +101,12 @@ class ItemizedIn(BaseModel):
     contingency_pct: float = 15
     quality: str = "standard"
     notes: Optional[str] = None
+    # "manual" (default), "photo" (a reviewed photo-analysis draft) or "contractor"
+    # (a contractor's own numbers - saved as an INSPECTION estimate, name required)
+    basis: str = "manual"
+    contractor: Optional[str] = None
+    # an inspection or verified estimate is never replaced without saying so
+    confirm_replace: bool = False
 
 
 @router.post("/deals/{deal_id}/repairs/itemized", dependencies=[Depends(require_not_observation)])
@@ -113,14 +119,32 @@ def itemized_repairs(deal_id: str, payload: ItemizedIn, db: Session = Depends(ge
     deal = svc.get_deal(db, org_id, deal_id)
     items = [i.model_dump() for i in (payload.items or [])]
     source = "itemized estimate"
+    status, confidence = REP.MANUAL_ESTIMATE, "medium"
+    if payload.basis == "photo":
+        source = "photo-assisted estimate (reviewed by a person)"
+    elif payload.basis == "contractor":
+        if not (payload.contractor or "").strip():
+            raise HTTPException(status_code=422, detail="Name the contractor whose numbers these are.")
+        source = "contractor estimate: %s" % payload.contractor.strip()[:80]
+        status, confidence = REP.INSPECTION_ESTIMATE, "high"
+    elif payload.basis != "manual":
+        raise HTTPException(status_code=400, detail="basis must be manual, photo or contractor.")
     if payload.from_visit:
         items = _visit_lines(db, org_id, user, deal, payload.from_visit)
         source = "field visit walkthrough"
+    current = (deal.repair_status or "").upper()
+    if (current in (REP.INSPECTION_ESTIMATE, REP.VERIFIED) and status != REP.INSPECTION_ESTIMATE
+            and not payload.confirm_replace):
+        raise HTTPException(status_code=409, detail=(
+            "This deal already has a %s repair estimate. Saving would replace it with a lower-standing "
+            "estimate - confirm to replace it (the old one stays in the history)."
+            % ("verified" if current == REP.VERIFIED else "contractor / inspection")))
     try:
         est = UW.itemized(items, payload.contingency_pct, payload.quality)
-        REP.record(db, org_id, deal, status=REP.MANUAL_ESTIMATE, amount=est["base"], low=est["low"],
-                   high=est["high"], source=source, user=user, confidence="medium",
-                   notes=payload.notes or est["basis"], provenance={"itemized": est})
+        REP.record(db, org_id, deal, status=status, amount=est["base"], low=est["low"],
+                   high=est["high"], source=source, user=user, confidence=confidence,
+                   notes=payload.notes or est["basis"], provenance={"itemized": est, "basis": payload.basis,
+                                                                    "contractor": payload.contractor})
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     svc.log_event(db, org_id, "repairs.itemized", actor_type="user", actor_user_id=user.id, deal_id=deal.id,
@@ -313,3 +337,41 @@ def add_found_comp(deal_id: str, payload: AddFoundIn, db: Session = Depends(get_
     analysis = svc.recalculate_analysis(db, org_id, deal, user)
     db.commit()
     return {"comp_id": comp.id, "arv": analysis.get("arv") if isinstance(analysis, dict) else None}
+
+
+
+# ── Photo-assisted repairs ─────────────────────────────────────────────────
+
+@router.get("/deals/{deal_id}/repairs/photo-ai")
+def photo_ai_status(deal_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Is photo analysis available here, how many photos are on the deal, today's use."""
+    from app.services import wholesale_photo_repairs as PR
+    org_id = svc.read_org_id(db, user)
+    if not org_id:
+        raise HTTPException(status_code=409, detail="No customer organization selected.")
+    deal = svc.get_deal(db, org_id, deal_id)
+    return {**PR.provider_status(), "photos": len(PR._photos(db, org_id, deal)), "used_today": PR.used_today(db, org_id),
+            "daily_cap": PR.daily_cap(), "cost_source": PR.COST_SOURCE, "cost_as_of": PR.COST_AS_OF,
+            "items": {k: {"category": v[0], "item": v[1], "unit": v[2], "low": v[3], "base": v[4], "high": v[5]}
+                      for k, v in PR.DFW_COSTS.items()}}
+
+
+class PhotoAnalysisIn(BaseModel):
+    photo_ids: Optional[List[str]] = None
+
+
+@router.post("/deals/{deal_id}/repairs/photo-analysis", dependencies=[Depends(require_not_observation)])
+def photo_analysis(deal_id: str, payload: PhotoAnalysisIn, db: Session = Depends(get_db),
+                   user: User = Depends(require_tenant_user)):
+    """A DRAFT estimate from the deal's photos. Saves nothing to the deal's repairs."""
+    from app.services import wholesale_photo_repairs as PR
+    org_id = svc.write_org_id(db, user)
+    deal = svc.get_deal(db, org_id, deal_id)
+    out = PR.analyze(db, org_id, deal, user, photo_ids=payload.photo_ids, client=_vision_client())
+    db.commit()
+    return out
+
+
+def _vision_client():
+    """Test seam (None in production: the AI gateway's own client is used)."""
+    return None

@@ -419,6 +419,8 @@ def attacks(ids):
         ("get", "/wholesale/deals/%s/package.pdf" % d, None),
         ("get", "/wholesale/deals/%s/disposition-summary" % d, None),
         ("get", "/wholesale/deals/%s/provenance" % d, None),
+        ("get", "/wholesale/deals/%s/repairs/photo-ai" % d, None),
+        ("post", "/wholesale/deals/%s/repairs/photo-analysis" % d, {}),
         ("post", "/wholesale/deals/%s/comps/find" % d, {}),
         ("post", "/wholesale/deals/%s/comps/find/add" % d, {"key": "x", "sale_price": 1, "source_reference": "abc"}),
 

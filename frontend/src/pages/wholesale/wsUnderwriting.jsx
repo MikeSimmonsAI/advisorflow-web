@@ -92,14 +92,50 @@ function RepairEditor({ dealId, evoId, onSaved, busy, setBusy, setErr }) {
     api.get(`/wholesale/appointments?property_id=${encodeURIComponent(evoId)}&when=all&include_test=true`)
       .then((r) => setVisits(r.items || [])).catch(() => setVisits([]))
   }, [evoId])
+  const [basis, setBasis] = useState('manual')
+  const [contractor, setContractor] = useState('')
+  const [draft, setDraft] = useState(null)
   const set = (i, k, v) => setLines(lines.map((l, j) => (j === i ? { ...l, [k]: v } : l)))
   const subtotal = lines.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.unit_cost) || 0), 0)
   async function save(body) {
     setBusy(true); setErr(null)
-    try { await api.post(`/wholesale/deals/${dealId}/repairs/itemized`, body); onSaved() } catch (e) { setErr(e.message) } finally { setBusy(false) }
+    const full = { ...body, basis: body.from_visit ? 'manual' : basis, contractor: basis === 'contractor' ? contractor : null }
+    try {
+      await api.post(`/wholesale/deals/${dealId}/repairs/itemized`, full); onSaved()
+    } catch (e) {
+      if (e.status === 409 && window.confirm(`${e.message}\n\nReplace it?`)) {
+        try { await api.post(`/wholesale/deals/${dealId}/repairs/itemized`, { ...full, confirm_replace: true }); onSaved() } catch (x) { setErr(x.message) }
+      } else { setErr(e.message) }
+    } finally { setBusy(false) }
+  }
+  async function analyzePhotos() {
+    setBusy(true); setErr(null)
+    try {
+      const d = await api.post(`/wholesale/deals/${dealId}/repairs/photo-analysis`, {})
+      setDraft(d)
+      if (d.lines && d.lines.length) {
+        setLines(d.lines.map((l) => ({ category: l.category, item: l.item, quantity: l.quantity, unit: l.unit, unit_cost: l.unit_cost })))
+        setBasis('photo')
+      }
+    } catch (e) { setErr(e.message) } finally { setBusy(false) }
   }
   return (
     <div className="uw-repairs">
+      <div className="uw-row" style={{ marginTop: 0, marginBottom: 8 }}>
+        <button type="button" className="btn btn--secondary btn--sm" disabled={busy} onClick={analyzePhotos}>Analyze photos (AI draft)</button>
+        <label>Numbers from <select value={basis} onChange={(e) => setBasis(e.target.value)}>
+          <option value="manual">My own estimate</option><option value="photo">Photo draft I reviewed</option><option value="contractor">A contractor</option></select></label>
+        {basis === 'contractor' ? <input placeholder="Contractor name" value={contractor} onChange={(e) => setContractor(e.target.value)} style={{ width: 170 }} /> : null}
+      </div>
+      {draft ? (
+        <div className="uw-missing" style={{ marginBottom: 8 }}>
+          <b>{draft.ai.used ? `Photo draft (${draft.ai.provider}) - review every line before saving` : `Photo analysis not run: ${draft.ai.why}`}</b>
+          {draft.photos.filter((p) => !p.ok).length ? <div className="uw-small">Skipped photos: {draft.photos.filter((p) => !p.ok).map((p) => p.problems.join(' ')).join(' · ')}</div> : null}
+          {draft.observations && draft.observations.length ? <ul>{draft.observations.slice(0, 8).map((o, i) => <li key={i}>{o.area.replace('_', ' ')}: {o.text}</li>)}</ul> : null}
+          <div className="uw-small">Not visible in photos (budget for these): {draft.not_visible.map((x) => x.what).join('; ')}.</div>
+          <div className="uw-small ws-muted">Unit costs: {draft.cost_source} ({draft.cost_as_of}).</div>
+        </div>
+      ) : null}
       <div className="uw-table-wrap">
         <table className="uw-table">
           <thead><tr><th>Category</th><th>What</th><th>Qty</th><th>Unit</th><th>Unit cost</th><th className="ws-num">Line</th><th /></tr></thead>
