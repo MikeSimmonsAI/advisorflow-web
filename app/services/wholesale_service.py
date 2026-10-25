@@ -202,7 +202,8 @@ def create_property(db: Session, org_id: str, user: Optional[User],
 
 PROPERTY_FIELDS = (
     "street_address", "unit", "city", "state", "zip_code", "county", "market",
-    "parcel_apn", "property_type", "bedrooms", "bathrooms", "square_feet",
+    "parcel_apn", "property_type", "property_category", "property_subtype", "acreage", "unit_count",
+    "building_sqft", "bedrooms", "bathrooms", "square_feet",
     "lot_size_sqft", "year_built", "estimated_value", "estimated_value_source",
     "mortgage_balance", "mortgage_source", "liens_note", "ownership_type",
     "owner_name", "owner_mailing_street", "owner_mailing_city",

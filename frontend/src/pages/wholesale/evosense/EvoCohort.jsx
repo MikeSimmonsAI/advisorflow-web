@@ -24,6 +24,7 @@ import { errText } from '../wsShared'
 import { Alert, Chips, Empty, EvoApp, Hero, Panel, Ring, Skeleton, Tag } from '../ds/ds'
 import '../ds/evo-pages.css'
 import { ContactBatchPanel } from './Acquire'
+import { PropertyTypeSelect, TypeLabel } from './ptypes'
 import './evo-actions.css'
 
 const PRIORITY = { A: 'A — act now', B: 'B — strong', C: 'C — watch', REVIEW: 'Review', PARK: 'Park' }
@@ -176,6 +177,8 @@ export default function EvoCohort() {
       (!get('foreclosure') || r.foreclosure.status === get('foreclosure')) &&
       (!get('group') || r.foreclosure.category === get('group')) &&
       (!county || r.county === county) &&
+      (!get('ptype') || ((r.property_class?.category || 'unknown') === get('ptype'))) &&
+      (!get('psubtype') || r.property_class?.subtype === get('psubtype')) &&
       (!queue || (r.owner.status === 'VERIFIED' && ['A', 'B', 'C'].includes(r.priority))))
     // "priority" keeps the server's order: the universal opportunity rank
     const grp = { A: 0, B: 1, C: 2, REVIEW: 3, PARK: 4 }
@@ -291,6 +294,9 @@ export default function EvoCohort() {
               </select>
             </label>
           ))}
+          <PropertyTypeSelect compact value={get('ptype')} sub={get('psubtype')}
+            onChange={(c, st) => { const p = new URLSearchParams(params); c ? p.set('ptype', c) : p.delete('ptype');
+              st ? p.set('psubtype', st) : p.delete('psubtype'); setParams(p, { replace: true }) }} />
           <label><span className="evo-sr">County</span>
             <select className="evo-select" value={county} onChange={(e) => set('county', e.target.value)}>
               <option value="">County: all</option>
@@ -347,6 +353,7 @@ export default function EvoCohort() {
                         {[r.city, r.county ? `${r.county} County` : null, r.zip_code].filter(Boolean).join(' · ')}
                         {r.ownership_years != null ? ` · owned ${r.ownership_years} yrs` : ''}
                       </span>
+                      <span className="evo-prop__sub" style={{ display: 'block' }}><TypeLabel pc={r.property_class} /></span>
                     </td>
                     <td data-label="Priority" title={r.opportunity?.priority?.why || ''}>
                       {r.opportunity?.priority?.value != null ? <b>{r.opportunity.priority.value}</b> : <span className="evo-muted">—</span>}

@@ -330,6 +330,11 @@ class WholesaleProperty(Base):
     parcel_apn = Column(String, nullable=True)
 
     property_type = Column(String, nullable=True)      # single_family, duplex, land, ...
+    property_category = Column(String, nullable=True)  # normalized (evosense/property_class.py)
+    property_subtype = Column(String, nullable=True)
+    acreage = Column(Numeric(14, 3), nullable=True)
+    unit_count = Column(Integer, nullable=True)
+    building_sqft = Column(Integer, nullable=True)
     bedrooms = Column(Numeric(5, 1), nullable=True)
     bathrooms = Column(Numeric(5, 1), nullable=True)
     square_feet = Column(Integer, nullable=True)
@@ -995,6 +1000,17 @@ class WholesaleBuyBox(Base):
     rehab_tolerance = Column(String, nullable=True)
     min_spread = Column(Numeric(14, 2), nullable=True)
     notes = Column(Text, nullable=True)
+    # beyond houses: land, multifamily, commercial, industrial, agricultural
+    min_acres = Column(Numeric(14, 3), nullable=True)
+    max_acres = Column(Numeric(14, 3), nullable=True)
+    min_units = Column(Integer, nullable=True)
+    max_units = Column(Integer, nullable=True)
+    min_building_sqft = Column(Integer, nullable=True)
+    max_building_sqft = Column(Integer, nullable=True)
+    min_cap_rate = Column(Numeric(6, 2), nullable=True)   # desired, percent
+    value_add = Column(Boolean, nullable=True)
+    distress_tolerance = Column(String, nullable=True)
+    criteria = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
