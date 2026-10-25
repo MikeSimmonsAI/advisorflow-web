@@ -33,6 +33,8 @@ export default function Person({ leadId, onBack, isManager }) {
   const [fileNote, setFileNote] = useState('')
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef(null)
+  const [dnc, setDnc] = useState(null)          // null = closed; string = the reason being typed
+  const [dncBusy, setDncBusy] = useState(false)
 
   const loadLead = useCallback(() => {
     setErr('')
@@ -95,6 +97,18 @@ export default function Person({ leadId, onBack, isManager }) {
     ...(tl?.voice_calls || []).map(c => ({ type: 'call', timestamp: c.started_at || c.created_at, body: `Call · ${c.status || c.direction || ''}` })),
   ].sort((a, b) => (+new Date(a.timestamp) || 0) - (+new Date(b.timestamp) || 0))
 
+  const markDnc = async () => {
+    setDncBusy(true); setErr('')
+    try {
+      const r = await api.post('/program/command/dnc', { lead_id: leadId, reason: dnc || '' })
+      setDnc(null)
+      setMsg(`${name} is on Do Not Contact. No texts, emails, AI replies or calls will go to them${r.phone_suppressed ? ', and their number is on the suppression list' : ''}.`)
+      loadLead()
+      api.get(`/program/reach/${leadId}`).then(setReach).catch(() => {})
+    } catch (er) { setErr(errText(er)) } finally { setDncBusy(false) }
+  }
+  const isDnc = (lead?.status || '').toLowerCase() === 'dnc'
+
   return (
     <>
       <div className="sci-row-gap" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
@@ -102,8 +116,21 @@ export default function Person({ leadId, onBack, isManager }) {
         <div className="sci-row-gap">
           {lead?.status && <Chip tone={lead.status === 'hot' ? 'bad' : lead.status === 'booked' ? 'ok' : ''}>{STATUS_LABEL[lead.status] || lead.status}</Chip>}
           {reach && <Chip tone={reach.reaches === 'Text + Email' ? 'ok' : 'warn'}>{reach.reaches}</Chip>}
+          {lead && !isDnc && dnc === null &&
+            <button type="button" className="sci-btn sm danger" onClick={() => setDnc('')}>Do not contact</button>}
         </div>
       </div>
+      {isDnc && <p className="sci-dnc-banner" role="status"><b>DO NOT CONTACT</b> No texts, emails, AI replies or calls go to this family.</p>}
+      {dnc !== null && (
+        <div className="sci-dnc-confirm" role="group" aria-label="Confirm Do Not Contact">
+          <p><b>Put {name} on Do Not Contact?</b> Every text, email, AI reply and follow-up stops for good, and their number goes on the suppression list.</p>
+          <input value={dnc} onChange={e => setDnc(e.target.value)} placeholder="Reason (optional) - e.g. asked by phone not to be contacted" maxLength={200} />
+          <div className="sci-row-gap">
+            <button type="button" className="sci-btn sm" onClick={() => setDnc(null)} disabled={dncBusy}>Cancel</button>
+            <button type="button" className="sci-btn sm dangerfill" onClick={markDnc} disabled={dncBusy}>{dncBusy ? 'Saving…' : 'Yes, do not contact'}</button>
+          </div>
+        </div>
+      )}
       <PageHead title={name} sub={[lead?.phone, lead?.email].filter(Boolean).join(' · ') || 'No contact details'} />
       <ErrorLine text={err} />
       <Notice text={msg} onClose={() => setMsg('')} />

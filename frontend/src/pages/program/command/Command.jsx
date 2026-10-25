@@ -495,6 +495,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
   const [done, setDone] = useState({})
   const [pick, setPick] = useState(null)        // slot tapped, waiting for "Book it"
   const [booked, setBooked] = useState(null)    // what happened, shown on the card
+  const [dncAsk, setDncAsk] = useState(null)         // Do Not Contact: null = closed, string = reason
   const [customDay, setCustomDay] = useState('')     // "Choose custom time": the day picked
   const [daySlots, setDaySlots] = useState(null)     // every open time that day
   const [menu, setMenu] = useState(false)
@@ -607,6 +608,13 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
       load()
     } catch (e) { toast(e.message || 'Could not update the task.') }
   }
+  const markDnc = async () => {
+    setBusy(true)
+    try {
+      await api.post('/program/command/dnc', { lead_id: id, reason: dncAsk || '' })
+      setDncAsk(null); toast(`${f.name} is on Do Not Contact. Nothing more goes to them.`); load()
+    } catch (e) { toast(e.message || 'Could not update.') } finally { setBusy(false) }
+  }
   const markHandled = async () => {
     try { await api.post(`/program/responses/${f.response_id}/mark`, { state: 'closed' }); toast('Marked handled.'); load() }
     catch (e) { toast(e.message || 'Could not update.') }
@@ -633,6 +641,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
             {f.response_id && <button onClick={markHandled}>Mark handled</button>}
             {!f.mail_task && <button onClick={() => mailTask(false)}>Add task: mail a printed guide</button>}
             {f.phone && <button onClick={() => { navigator.clipboard?.writeText(f.phone).then(() => toast('Phone copied.')).catch(() => {}) }}>Copy phone number</button>}
+            {!f.is_demo && !f.handling?.opted_out && <button className="danger" onClick={() => setDncAsk('')}>Do not contact</button>}
           </div>}
         </span>
       </header>
@@ -642,6 +651,16 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
         <button onClick={() => schedRef.current?.scrollIntoView({ behavior: 'smooth' })}><Icon n="cal" s={22} />Schedule Visit</button>
         <button onClick={() => focusComposer('note')}><Icon n="note" s={22} />Add Note</button>
       </div>
+      {dncAsk !== null && <section className="cmd-handoff-banner" role="group" aria-label="Confirm Do Not Contact">
+        <b>DO NOT CONTACT</b>
+        <p>Put {f.name} on Do Not Contact? Every text, email, AI reply and follow-up stops for good, and their number goes on the suppression list.</p>
+        <input className="cmd-subj" value={dncAsk} onChange={e => setDncAsk(e.target.value)} maxLength={200}
+               placeholder="Reason (optional) - e.g. asked by phone not to be contacted" />
+        <div className="cmd-send"><button disabled={busy} onClick={() => setDncAsk(null)}>Cancel</button>
+          <button className="primary" disabled={busy} onClick={markDnc}>Yes, do not contact</button></div>
+      </section>}
+      {f.handling?.opted_out && <section className="cmd-handoff-banner" role="status"><b>DO NOT CONTACT</b>
+        <p>This family opted out or was marked Do Not Contact. Nothing goes to them.</p></section>}
       {f.human_handoff && <section className="cmd-handoff-banner" role="alert">
         <b>HUMAN HANDOFF</b>
         <p>The AI sent this family nothing. A person needs to contact them.{f.handoff_reason ? ` Why: ${f.handoff_reason}` : ''}</p>
