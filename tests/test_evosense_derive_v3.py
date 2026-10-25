@@ -42,6 +42,11 @@ NOW = datetime(2026, 9, 26, 12, 0, 0)
     ("2427 LILLIAN ST", "2427 LILLIAN ST", "76111", "75201", False),  # ZIPs disagree
     ("PO BOX 44", "500 MAIN ST", None, None, None),                 # nothing to compare
     (None, "500 MAIN ST", None, None, None),
+    ("41 MAPLE GRN", "41 MAPLE GREEN", "75002", "75002", True),   # USPS suffix spelling
+    ("120 FM 999", "120 S FM 999", "75001", "75001", True),            # one side omits the directional
+    ("120 FM 999", "120 S FM 999", None, "75001", False),              # ...only with both ZIPs agreeing
+    ("100 N MAIN ST", "100 S MAIN ST", "75201", "75201", False),         # two different directionals
+    ("41 MAPLE GRN", "43 MAPLE GREEN", "75002", "75002", False),
 ])
 def test_same_address_is_suffix_tolerant_and_unknown_is_not_different(a, b, za, zb, expect):
     assert same_address(a, b, za, zb) is expect

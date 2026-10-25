@@ -26,6 +26,8 @@ ADAPTERS (provider-independent - add one by writing a class with `available` and
                        budget the platform already enforces)                     FREE TIER
     reapi_comps        RealEstateAPI PropertyComps - closed comps, but BLOCKED until
                        the sold-comps truth gate passes and the owner approves     PAID
+    attom_comps        ATTOM nearby sales - same gate; Texas amounts are UNVERIFIED
+                       until ATTOM states in writing what they are                 PAID
 
 Candidates are a shortlist. A person adds one to the deal; a transfer needs its
 price and where the price came from (MLS number, closing statement) before it
@@ -256,15 +258,15 @@ class ReapiComps(Adapter):
     def available(self, db, org_id, subject):
         from app.services.evosense import providers as PV
         from app.services.evosense import truth_gate as TG
-        p = PV.PROVIDERS.get("reapi_comps")
+        p = PV.PROVIDERS.get(self.key)
         if p is None:
             return False, "Adapter not installed."
         why = []
         if p.missing_config():
-            why.append("REAPI_API_KEY is not set")
+            why.append("%s is not set" % ", ".join(p.missing_config()))
         if getattr(p, "evaluation_only", False):
             why.append("the vendor is evaluation-only until the owner approves it")
-        if not TG.passes(db, org_id, "reapi_comps"):
+        if not TG.passes(db, org_id, self.key):
             why.append("the sold-comps truth gate has not passed (Texas prices must be shown to be closed "
                        "sales, with storage and display rights)")
         if why:
@@ -275,7 +277,13 @@ class ReapiComps(Adapter):
         return []
 
 
-ADAPTERS: List[Adapter] = [CountyTransfers(), JohnsonSubdivision(), RentcastListings(), ReapiComps()]
+class AttomSales(ReapiComps):
+    key = "attom_comps"
+    label = "ATTOM nearby sales"
+    cost = "paid - ATTOM subscription / quote (no published per-call price)"
+
+
+ADAPTERS: List[Adapter] = [CountyTransfers(), JohnsonSubdivision(), RentcastListings(), ReapiComps(), AttomSales()]
 
 
 # ── ranking ─────────────────────────────────────────────────────────────────

@@ -300,3 +300,62 @@ def _known_unknowns(prop, facts):
     if not prop.mortgage_balance:
         out.append("Mortgage / liens: unknown")
     return out
+
+
+def release_test_promotions(db, org_id: str = None, *, deal_ids=None, user=None) -> int:
+    """A REAL discovered property must never stay tied to a TEST deal.
+
+    It happens when a real property is promoted and the resulting deal is then
+    marked as a test record (a rehearsal on a real address). The test deal and
+    its whole history stay exactly as they are; only the discovery record's
+    pointer is released, so the real property goes back into contact lookups,
+    rankings and the call queue like any other. The release is logged on the
+    property (deal id, wholesale property id, when it was promoted) - nothing is
+    deleted. Idempotent: a second pass finds nothing."""
+    from app.models.evosense_models import EvoSenseProperty
+    from app.models.wholesale_models import WholesaleDeal
+    q = (db.query(EvoSenseProperty, WholesaleDeal)
+         .join(WholesaleDeal, WholesaleDeal.id == EvoSenseProperty.promoted_deal_id)
+         .filter(EvoSenseProperty.is_test.isnot(True), WholesaleDeal.is_test.is_(True),
+                 WholesaleDeal.organization_id == EvoSenseProperty.organization_id))
+    if org_id:
+        q = q.filter(EvoSenseProperty.organization_id == org_id)
+    if deal_ids is not None:
+        if not deal_ids:
+            return 0
+        q = q.filter(WholesaleDeal.id.in_(list(deal_ids)))
+    released = []
+    for prop, deal in q.all():
+        before = {"deal_id": prop.promoted_deal_id, "wholesale_property_id": prop.promoted_property_id,
+                  "promoted_at": prop.promoted_at.isoformat() + "Z" if prop.promoted_at else None}
+        prop.promoted_deal_id = None
+        prop.promoted_property_id = None
+        prop.promoted_at = None
+        for eng in (db.query(EvoSenseEngagement)
+                    .filter(EvoSenseEngagement.organization_id == prop.organization_id,
+                            EvoSenseEngagement.property_id == prop.id,
+                            EvoSenseEngagement.status == "promoted").all()):
+            eng.status = "stopped"          # never resumes outreach by itself
+        C.log_event(db, prop.organization_id, "promotion.released_test_deal", property_id=prop.id, user=user,
+                    actor_type=C.ACTOR_USER if user else C.ACTOR_AUTOMATION, is_test=False,
+                    summary="Released from a TEST deal - this is a real property, so the test rehearsal no "
+                            "longer blocks lookups, rankings or calls. The test deal is kept unchanged.",
+                    details=before)
+        try:
+            from app.services.evosense import evaluate as EV
+            EV.refresh_status(db, prop)
+        except Exception:                                   # noqa: BLE001
+            C.log.exception("status refresh after test-deal release failed")
+        released.append(prop)
+    if released:
+        db.flush()
+        try:
+            from app.services.evosense import opportunity as OP
+            by_org = {}
+            for p in released:
+                by_org.setdefault(p.organization_id, []).append(p)
+            for o, ps in by_org.items():
+                OP.refresh(db, o, ps)
+        except Exception:                                   # noqa: BLE001 - the view catches up on its own
+            C.log.exception("opportunity refresh after test-deal release failed")
+    return len(released)

@@ -6,6 +6,7 @@ EVALUATION ONLY until Mike approves a provider for production.
     dataskip          DataSkip /api/v1/skip-trace       CONTACT_ENRICHMENT
     twilio_lookup     Twilio Lookup v2 line type        PHONE_VALIDATION
     reapi_comps       RealEstateAPI /v3/PropertyComps   COMPS
+    attom_comps       ATTOM sale/snapshot + profile     COMPS (Texas prices UNVERIFIED)
     sandbox_comps     synthetic comps (test records)    COMPS (SANDBOX)
 
 WHAT "EVALUATION ONLY" MEANS (`evaluation_only = True`):
@@ -413,6 +414,159 @@ def _ptype(v):
             "MOBILE": "mobile_home", "LAND": "land"}.get(t, (v or "").lower() or None)
 
 
+class AttomComps(VendorAdapter):
+    """ATTOM Property API - nearby sales (COMPS) plus a property PROFILE
+    (characteristics, owner, mortgage, assessment, AVM, sales history), built
+    from ATTOM's published API reference:
+
+        base     https://api.gateway.attomdata.com/propertyapi/v1.0.0/
+        header   APIKey: <key>, Accept: application/json
+        sale/snapshot            latitude + longitude + radius (miles) +
+                                 startSaleSearchDate / endSaleSearchDate
+        property/detailmortgageowner, assessment/detail, attomavm/detail,
+        saleshistory/detail      address1 (street) + address2 (city, ST ZIP)
+
+    TEXAS: ATTOM itself lists Texas among non-disclosure states where sale data
+    "is not always available" and where it ESTIMATES a sales value. So a Texas
+    sale amount from ATTOM is classified UNVERIFIED_RECORD - never a closed
+    sale - until the sold-comps truth gate is passed with ATTOM's written
+    statement of what the amount is. Outside non-disclosure states it is a
+    public-record price. The AVM, assessed and market values are reference
+    only and never an ARV.
+
+    Response field names follow ATTOM's documented property schema; anything
+    missing stays None (nothing is filled in). Confirm them on the first
+    sandbox / evaluation call before relying on a field."""
+    key = "attom_comps"
+    label = "ATTOM property data and nearby sales"
+    capabilities = (C.COMPS,)
+    required_env = ("ATTOM_API_KEY",)
+    costs = {C.COMPS: 0}          # ATTOM prices by quote / subscription - set a cost override
+    price_confirmed = False
+    price_note = ("ATTOM does not publish per-call pricing (subscription / quote). Set a cost override "
+                  "from the written quote before any evaluation.")
+    public_url = "https://api.developer.attomdata.com/docs"
+    coverage = "US property, assessment, AVM, mortgage and sales records; Texas sale amounts not always available"
+    adapter_version = "attom/propertyapi-v1"
+    BASE = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/"
+
+    def _get(self, path: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        return _http("GET", self.BASE + path, params={k: v for k, v in params.items() if v not in (None, "")},
+                     headers={"APIKey": self._env("ATTOM_API_KEY"), "Accept": "application/json"})
+
+    @staticmethod
+    def _address(subject: Dict[str, Any]) -> Dict[str, str]:
+        line2 = ", ".join(x for x in (subject.get("city"), " ".join(
+            y for y in (subject.get("state"), subject.get("zip_code")) if y)) if x)
+        return {"address1": subject.get("street_address") or "", "address2": line2}
+
+    def search(self, capability: str, subject: Dict[str, Any]) -> List[Dict[str, Any]]:
+        if capability != C.COMPS:
+            return []
+        if subject.get("latitude") is None or subject.get("longitude") is None:
+            raise ProviderFailure("ATTOM nearby sales need the property's map position")
+        from datetime import date, timedelta
+        days = int(subject.get("max_days_back") or 365)
+        body = self._get("sale/snapshot", {
+            "latitude": subject["latitude"], "longitude": subject["longitude"],
+            "radius": subject.get("max_radius_miles") or 1,
+            "startSaleSearchDate": (date.today() - timedelta(days=days)).strftime("%Y/%m/%d"),
+            "endSaleSearchDate": date.today().strftime("%Y/%m/%d"),
+            "propertyType": "SFR" if (subject.get("property_type") or "single_family") == "single_family" else None,
+            "pageSize": 25})
+        if body.get("_status") == 404:
+            return []
+        state = (subject.get("state") or "").upper()
+        return [attom_comp(r, state) for r in body.get("property") or []]
+
+    def profile(self, subject: Dict[str, Any]) -> Dict[str, Any]:
+        """Everything ATTOM holds on ONE property, each value labelled with what
+        it is. Four calls; a package that answers 404 is reported as missing."""
+        addr = self._address(subject)
+        out: Dict[str, Any] = {"provider": self.key, "at": _now_iso(), "missing": []}
+        for name, path in (("detail", "property/detailmortgageowner"), ("assessment", "assessment/detail"),
+                           ("avm", "attomavm/detail"), ("history", "saleshistory/detail")):
+            body = self._get(path, addr)
+            rows = [] if body.get("_status") == 404 else (body.get("property") or [])
+            if not rows:
+                out["missing"].append(name)
+                continue
+            out[name] = rows[0]
+        return attom_profile(out, (subject.get("state") or "").upper())
+
+
+def _g(d: Any, *path):
+    for k in path:
+        if not isinstance(d, dict):
+            return None
+        d = d.get(k)
+    return d
+
+
+def _attom_price_source(amount, state: str) -> Optional[str]:
+    if not amount:
+        return None
+    return CR.PRICE_UNVERIFIED_RECORD if state in NON_DISCLOSURE_STATES else CR.PRICE_PUBLIC_RECORD
+
+
+def attom_comp(r: Dict[str, Any], subject_state: str) -> Dict[str, Any]:
+    state = (_g(r, "address", "countrySubd") or subject_state or "").upper()
+    amount = _num(_g(r, "sale", "amount", "saleamt"))
+    return {
+        "provider_record_id": _g(r, "identifier", "attomId") or _g(r, "identifier", "Id"),
+        "street_address": _g(r, "address", "line1"), "city": _g(r, "address", "locality"), "state": state,
+        "zip_code": _g(r, "address", "postal1"),
+        "sale_price": amount,
+        "sale_date": _g(r, "sale", "saleTransDate") or _g(r, "sale", "amount", "salerecdate"),
+        "price_source": _attom_price_source(amount, state),
+        "square_feet": _num(_g(r, "building", "size", "livingsize") or _g(r, "building", "size", "universalsize")),
+        "bedrooms": _num(_g(r, "building", "rooms", "beds")),
+        "bathrooms": _num(_g(r, "building", "rooms", "bathstotal")),
+        "year_built": _num(_g(r, "summary", "yearbuilt")),
+        "property_type": _ptype(_g(r, "summary", "proptype")),
+        "latitude": _num(_g(r, "location", "latitude")), "longitude": _num(_g(r, "location", "longitude")),
+        "distance_miles": _num(_g(r, "location", "distance")),
+        "sale_type": (_g(r, "sale", "amount", "saletranstype") or None),
+        "reference": {"note": "ATTOM sale amount - in Texas not proof of a closed price"},
+    }
+
+
+def attom_profile(raw: Dict[str, Any], state: str) -> Dict[str, Any]:
+    d, a, v, h = raw.get("detail") or {}, raw.get("assessment") or {}, raw.get("avm") or {}, raw.get("history") or {}
+    history = []
+    for s in (h.get("salehistory") or [])[:10]:
+        amt = _num(_g(s, "amount", "saleamt"))
+        history.append({"date": _g(s, "saleTransDate") or _g(s, "amount", "salerecdate"), "amount": amt,
+                        "kind": _attom_price_source(amt, state) or "TRANSFER_NO_PRICE",
+                        "deed": _g(s, "amount", "saledoctype") or _g(s, "amount", "saletranstype")})
+    return {
+        "provider": raw.get("provider"), "at": raw.get("at"), "missing": raw.get("missing") or [],
+        "identifier": {"attom_id": _g(d, "identifier", "attomId"), "apn": _g(d, "identifier", "apn"),
+                       "fips": _g(d, "identifier", "fips")},
+        "characteristics": {"square_feet": _num(_g(d, "building", "size", "livingsize")),
+                            "bedrooms": _num(_g(d, "building", "rooms", "beds")),
+                            "bathrooms": _num(_g(d, "building", "rooms", "bathstotal")),
+                            "year_built": _num(_g(d, "summary", "yearbuilt")),
+                            "property_type": _ptype(_g(d, "summary", "proptype"))},
+        "owner_name": _g(d, "owner", "owner1", "fullname"),
+        "mortgage": {"amount": _num(_g(d, "mortgage", "amount")), "lender": _g(d, "mortgage", "lender", "lastname"),
+                     "date": _g(d, "mortgage", "date"),
+                     "truth": "ORIGINAL recorded loan amount - not today's payoff"},
+        "assessment": {"assessed": _num(_g(a, "assessment", "assessed", "assdttlvalue")),
+                       "market": _num(_g(a, "assessment", "market", "mktttlvalue")),
+                       "tax_amount": _num(_g(a, "assessment", "tax", "taxamt")),
+                       "tax_year": _g(a, "assessment", "tax", "taxyear"),
+                       "truth": "Assessment / tax values - not a sale price and not an ARV"},
+        "avm": {"value": _num(_g(v, "avm", "amount", "value")), "low": _num(_g(v, "avm", "amount", "low")),
+                "high": _num(_g(v, "avm", "amount", "high")), "score": _num(_g(v, "avm", "amount", "scr")),
+                "date": _g(v, "avm", "eventDate"), "truth": "Vendor AVM - an estimate, never an ARV"},
+        "sales_history": history,
+        "texas_rule": ("Texas is a non-disclosure state: ATTOM sale amounts here are classified UNVERIFIED "
+                       "until ATTOM states in writing what they represent") if state in NON_DISCLOSURE_STATES
+        else None,
+    }
+
+
 class SandboxComps(AcquisitionProvider):
     """Synthetic comps for software testing of the COMPS evaluation mode. Only
     ever runs on test properties (the harness refuses a real one). Returns a
@@ -450,4 +604,4 @@ class SandboxComps(AcquisitionProvider):
 
 
 VENDOR_PROVIDERS = (TracerfySkipTrace(), RealEstateApiSkipTrace(), DataSkipSkipTrace(),
-                    TwilioLookupLineType(), RealEstateApiComps(), SandboxComps())
+                    TwilioLookupLineType(), RealEstateApiComps(), AttomComps(), SandboxComps())

@@ -329,6 +329,20 @@ def run_due(db, *, org_id: Optional[str] = None, now=None) -> Dict[str, Any]:
         db.rollback()
         C.log.exception("evosense contactability backfill failed")
     try:
+        from app.services.evosense import signals as SIGR
+        report["absentee_rechecked"] = SIGR.recheck_absentee(db, org_id)
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        C.log.exception("evosense absentee recheck failed")
+    try:
+        from app.services.evosense import promotion as PROMO
+        report["test_promotions_released"] = PROMO.release_test_promotions(db, org_id)
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        C.log.exception("evosense test-deal release failed")
+    try:
         from app.services.evosense import contact_batch as CBATCH
         report["contact_batch_steps"] = CBATCH.run_due(db)
     except Exception:  # noqa: BLE001 - a batch never stops the hunt

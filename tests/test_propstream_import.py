@@ -56,3 +56,43 @@ def test_preview_then_import_then_reimport(client, auth_headers, db_session):
     pv2 = client.post("/wholesale/evosense/import/preview", headers=auth_headers,
                       files={"file": ("p.csv", SYNTHETIC.encode(), "text/csv")}).json()
     assert pv2["already_imported"] == 2 and pv2["new"] == 0
+
+
+WITH_PHONES = (
+    "Address,City,State,Zip,Owner 1 First Name,Owner 1 Last Name,Mailing Address,Mailing City,Mailing State,"
+    "Mailing Zip,Phone 1,Mobile Phone 2,Landline 1,Email 1,PropStream ID\n"
+    "5 Synth Ln,Dallas,TX,75216,PAT,SAMPLE,5 Synth Ln,Dallas,TX,75216,(214) 555-0101,214-555-0102,,"
+    "pat@example.test,PS-10\n"
+    "6 Synth Ln,Dallas,TX,75216,JO,EXAMPLE,6 Synth Ln,Dallas,TX,75216,2145550103,,2145550103,,PS-11\n")
+
+
+def test_skip_traced_phone_and_email_columns_are_mapped():
+    import csv
+    text, rep = PS.convert(WITH_PHONES)
+    rows = list(csv.DictReader(io.StringIO(text)))
+    assert rows[0]["phones"] == "2145550101|unknown;2145550102|mobile"
+    assert rows[0]["emails"] == "pat@example.test"
+    assert rows[1]["phones"] == "2145550103|unknown"                         # the same number once
+    assert rep["contacts_found"] == {"rows": 2, "phones": 3, "emails": 1}
+
+
+def test_list_contacts_attach_only_to_the_owner_the_list_names(db_session, sample_org):
+    from app.models.evosense_models import EvoSenseContactPoint, EvoSenseOwner, EvoSenseOwnership
+    from app.services.evosense import hunt as HU
+    db, org = db_session, sample_org.id
+    out = HU.import_csv(db, org, WITH_PHONES, user=None, filename="synthetic_propstream.csv")
+    assert out["counts"]["created"] == 2 and out["counts"].get("contacts_attached", 0) == 4
+    # now a county owner of record who is SOMEONE ELSE replaces the list's owner on 5 Synth Ln
+    p = db.query(EvoSenseProperty).filter(EvoSenseProperty.street_address == "5 Synth Ln").one()
+    for link in db.query(EvoSenseOwnership).filter(EvoSenseOwnership.property_id == p.id).all():
+        link.is_current = False
+    other = EvoSenseOwner(organization_id=org, display_name="LEE DIFFERENT", owner_type="individual")
+    db.add(other)
+    db.flush()
+    db.add(EvoSenseOwnership(organization_id=org, property_id=p.id, owner_id=other.id, is_current=True,
+                             source="dcad"))
+    db.flush()
+    counts = {}
+    HU._attach_list_contacts(db, p, {"phones": "2145550199|mobile", "owner_name": "PAT SAMPLE"}, "x", counts)
+    assert counts == {"contacts_refused": 1}
+    assert db.query(EvoSenseContactPoint).filter(EvoSenseContactPoint.owner_id == other.id).count() == 0

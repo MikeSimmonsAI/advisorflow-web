@@ -35,6 +35,10 @@ SCENARIOS = [
      None, {"MULTIPLE_PROPERTIES"}, "handed_off", False),
     ("uncertain ownership", "It's my mother's house, I'm not sure if I'm the one who can sell it.",
      None, None, "handed_off", False),
+    ("estate representative", "I'm the executor of my late father's estate. We might sell the house.",
+     None, {"ESTATE"}, "handed_off", False),
+    ("wants appointment", "Sure, you can come look at the house Thursday afternoon.",
+     None, {"APPOINTMENT"}, "handed_off", False),
 ]
 
 
@@ -194,3 +198,20 @@ def test_enrichment_queue_orders_by_priority_and_buys_nothing(client, auth_heade
     assert db.query(EvoSenseCostEntry).filter(EvoSenseCostEntry.organization_id == org).count() == 0
     r = client.get("/wholesale/evosense/enrichment/queue", headers=auth_headers)
     assert r.status_code == 200 and "Nothing is bought" in r.json()["notice"]
+
+
+def test_qualification_comes_only_from_the_sellers_words(db_session, world):
+    from app.services.evosense import qualification as Q
+    db, org = db_session, world["org_id"]
+    prop = SS.prop_at(db, org, FLAGSHIP)
+    before = Q.for_property(db, prop)
+    assert before["known"] == 0                                   # distress is never read as motivation
+    CV.receive(db, org, SS.engagement_for(db, prop),
+               "Yes I'd sell. The roof is leaking and nobody lives there. I already have an offer from "
+               "another investor.", delivery="sandbox_simulated")
+    db.commit()
+    q = {r["key"]: r["answer"] for r in Q.for_property(db, prop)["questions"]}
+    assert q["open_to_selling"]["who"] == "seller said"
+    assert q["repairs"] and "roof" in q["repairs"]["quote"].lower()
+    assert q["existing_offer"] and q["existing_offer"]["who"] == "seller said"
+    assert q["timeline"] is None and q["authority"] is None       # not said, so not known

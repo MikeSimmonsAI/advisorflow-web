@@ -78,3 +78,12 @@ def test_a_callable_owner_becomes_one_va_call_task_and_the_outcome_closes_it(db_
     db.commit()
     assert q.one().status == "complete"
     assert CL.call_queue(db, org)["rows"] == []                        # not interested: off the call list
+
+
+def test_repairs_are_read_in_either_word_order_and_never_from_a_denial():
+    from app.services.evosense import qualification as Q
+    kinds = lambda t: [f["fact_type"] for f in Q.extra_facts(t)]
+    assert "known_repairs" in kinds("The roof is leaking and the foundation is cracked")
+    assert "known_repairs" in kinds("needs a new roof")
+    assert "known_repairs" not in kinds("The roof isn't leaking, it's fine")
+    assert "known_repairs" not in kinds("no foundation problems at all")

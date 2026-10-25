@@ -715,6 +715,16 @@ def set_test_flag(db: Session, org_id: str, prop: WholesaleProperty, is_test: bo
         lead.is_test = is_test
         lead.test_note = (note or "Wholesale test record") if is_test else None
         changed["leads"].append(lead.id)
+    if is_test and changed["deals"]:
+        # A rehearsal on a REAL address must not keep the real discovery record
+        # tied to the test deal (it would block lookups, rankings and calls).
+        try:
+            from app.services.evosense import promotion as _PROMO
+            changed["evosense_released"] = _PROMO.release_test_promotions(
+                db, org_id, deal_ids=changed["deals"], user=user)
+        except Exception:                                   # noqa: BLE001 - never block the test marking
+            import logging as _lg
+            _lg.getLogger(__name__).exception("test flag: EvoSense release failed")
     log_event(db, org_id, "property.test_flag", actor_type=ACTOR_USER,
               actor_user_id=getattr(user, "id", None), property_id=prop.id,
               summary=("Marked as a TEST record" if is_test else "Test marking removed")

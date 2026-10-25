@@ -26,7 +26,10 @@ EXTRA_FACTS = (
     ("known_repairs", re.compile(r"\b((new|bad|leaking|old) (roof|hvac|ac|a/c|furnace|water heater|plumbing|"
                                  r"wiring|foundation)|foundation (issue|issues|problem|problems|crack)|"
                                  r"(needs?|need) (a )?(new )?(roof|hvac|ac|a/c|plumbing|wiring|windows|kitchen|"
-                                 r"bathroom|flooring|paint)|water damage|mold|termite|fire damage)\b", re.I)),
+                                 r"bathroom|flooring|paint)|water damage|mold|termite|fire damage|"
+                                 r"(roof|foundation|hvac|ac|a/c|furnace|water heater|plumbing|wiring|ceiling|"
+                                 r"pipes?) (is |are )?(leaking|leaks|bad|broken|damaged|cracked|cracking|"
+                                 r"shot|out|caving in|falling apart))\b", re.I)),
     ("authority_to_sell", re.compile(r"\b(i('m| am) the (owner|executor|executrix|administrator|trustee)|"
                                      r"(it'?s|it is|the house is|home is) (mine|in my name)|"
                                      r"i own (it|the (house|home|property))|power of attorney|i have poa)\b", re.I)),

@@ -94,6 +94,7 @@ def same_address(street_a: Optional[str], street_b: Optional[str],
     b, ub = normalize_street(street_b)
     if not a or not b:
         return None
+    a, b = _compare_form(a), _compare_form(b)
     za = re.sub(r"\D", "", str(zip_a or ""))[:5]
     zb = re.sub(r"\D", "", str(zip_b or ""))[:5]
     zips_differ = bool(za and zb and za != zb)
@@ -110,7 +111,46 @@ def same_address(street_a: Optional[str], street_b: Optional[str],
     core_b, suf_b = _split_suffix(b)
     if core_a == core_b and (suf_a is None or suf_b is None):
         return not zips_differ
+    # ONE side states a pre-directional the other omits ("120 S FM 999" vs
+    # "120 FM 999") - the same place when nothing else differs and both ZIPs
+    # are known and agree. Two different directionals stay different.
+    da, db_ = _drop_predir(a), _drop_predir(b)
+    if (da != a) != (db_ != b) and za and zb and not zips_differ:
+        if da == db_:
+            return True
+        ca, sa = _split_suffix(da)
+        cb, sb = _split_suffix(db_)
+        if ca == cb and (sa is None or sb is None):
+            return True
     return False
+
+
+# Comparison-only spellings (USPS Publication 28). They are NOT applied to the
+# stored identity keys - changing those would split existing records - only to
+# the "is the mailing address the house itself" question.
+_COMPARE_SUFFIX = {
+    "GREEN": "GRN", "GLEN": "GLN", "TRACE": "TRCE", "CREEK": "CRK", "HILL": "HL", "HILLS": "HLS",
+    "HEIGHTS": "HTS", "MEADOW": "MDW", "MEADOWS": "MDWS", "VALLEY": "VLY", "VIEW": "VW", "VISTA": "VIS",
+    "GROVE": "GRV", "ESTATES": "ESTS", "LANDING": "LNDG", "SPRING": "SPG", "SPRINGS": "SPGS",
+    "KNOLL": "KNL", "CANYON": "CYN", "PLAZA": "PLZ", "CENTER": "CTR", "MANOR": "MNR", "HARBOR": "HBR",
+    "LAKE": "LK", "LAKES": "LKS", "BRANCH": "BR", "CRT": "CT", "CIRC": "CIR", "PKY": "PKWY",
+    "TRL": "TRL", "TRAILS": "TRL", "XING": "XING", "CRSE": "CRSE", "COURSE": "CRSE",
+}
+_PREDIRS = frozenset(("N", "S", "E", "W", "NE", "NW", "SE", "SW"))
+
+
+def _compare_form(norm: str) -> str:
+    toks = norm.split()
+    if len(toks) >= 2:
+        toks[-1] = _COMPARE_SUFFIX.get(toks[-1], toks[-1])
+    return " ".join(toks)
+
+
+def _drop_predir(norm: str) -> str:
+    toks = norm.split()
+    if len(toks) >= 3 and toks[1] in _PREDIRS:
+        return " ".join([toks[0]] + toks[2:])
+    return norm
 
 
 def normalize_apn(apn: Optional[str]) -> Optional[str]:
