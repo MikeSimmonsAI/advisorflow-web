@@ -338,14 +338,10 @@ def _kick_batch(org_id: str, batch_id: str) -> None:
     threading.Thread(target=work, name="evosense-contact-batch", daemon=True).start()
 
 
-@router.post("/contact-batches/{batch_id}/{action}")
-def contact_batch_action(batch_id: str, action: str, db: Session = Depends(get_db),
-                         user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+def _batch_action(batch_id: str, action: str, db, user):
     """start | pause | resume | stop | emergency_stop. Starting needs an admin;
     anyone working the queue may pause or stop."""
     from app.services.evosense import contact_batch as CB
-    if action not in ("start", "pause", "resume", "stop", "emergency_stop"):
-        raise HTTPException(status_code=404, detail="Unknown action")
     if action in ("start", "resume"):
         _require_manager(db, user)
     org_id = svc.write_org_id(db, user)
@@ -358,6 +354,38 @@ def contact_batch_action(batch_id: str, action: str, db: Session = Depends(get_d
     if b.status == "running":
         _kick_batch(org_id, b.id)
     return CB.payload(db, b, items=False)
+
+
+@router.post("/contact-batches/{batch_id}/start")
+def contact_batch_start(batch_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                        _g: User = Depends(require_not_observation)):
+    return _batch_action(batch_id, "start", db, user)
+
+
+@router.post("/contact-batches/{batch_id}/resume")
+def contact_batch_resume(batch_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                         _g: User = Depends(require_not_observation)):
+    return _batch_action(batch_id, "resume", db, user)
+
+
+@router.post("/contact-batches/{batch_id}/pause")
+def contact_batch_pause(batch_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                        _g: User = Depends(require_not_observation)):
+    return _batch_action(batch_id, "pause", db, user)
+
+
+@router.post("/contact-batches/{batch_id}/stop")
+def contact_batch_stop(batch_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                       _g: User = Depends(require_not_observation)):
+    return _batch_action(batch_id, "stop", db, user)
+
+
+@router.post("/contact-batches/{batch_id}/emergency_stop")
+def contact_batch_emergency_stop(batch_id: str, db: Session = Depends(get_db),
+                                 user: User = Depends(require_tenant_user),
+                                 _g: User = Depends(require_not_observation)):
+    """Stops this batch and pauses every paid lookup in the workspace."""
+    return _batch_action(batch_id, "emergency_stop", db, user)
 
 
 # ── human first contact: the call queue and one-click call outcomes ────────

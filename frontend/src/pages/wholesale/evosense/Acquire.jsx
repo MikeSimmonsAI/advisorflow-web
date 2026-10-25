@@ -172,7 +172,7 @@ export function ContactBatchPanel({ source }) {
           ) : null}
           <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
             {['approved', 'paused'].includes(batch.status) ? <button type="button" className="evo-btn evo-btn--primary evo-btn--sm" disabled={busy}
-              onClick={() => act(async () => { await api.post(`/wholesale/evosense/contact-batches/${batch.id}/${batch.status === 'paused' ? 'resume' : 'start'}`); load() })}>
+              onClick={() => act(async () => { await api.post(batch.status === 'paused' ? `/wholesale/evosense/contact-batches/${batch.id}/resume` : `/wholesale/evosense/contact-batches/${batch.id}/start`); load() })}>
               {batch.status === 'paused' ? 'Resume' : 'Start lookups'}</button> : null}
             {batch.status === 'running' ? <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" disabled={busy}
               onClick={() => act(async () => { await api.post(`/wholesale/evosense/contact-batches/${batch.id}/pause`); load() })}>Pause</button> : null}

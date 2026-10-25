@@ -413,6 +413,10 @@ def attacks(ids):
         ("post", "/wholesale/evosense/contact-batches/%s/approve" % ids["contact_batch_id"],
          {"phrase": "APPROVE 1 LOOKUPS UP TO $0.10"}),
         ("post", "/wholesale/evosense/contact-batches/%s/start" % ids["contact_batch_id"], {}),
+        ("post", "/wholesale/evosense/contact-batches/%s/resume" % ids["contact_batch_id"], {}),
+        ("post", "/wholesale/evosense/contact-batches/%s/pause" % ids["contact_batch_id"], {}),
+        ("post", "/wholesale/evosense/contact-batches/%s/stop" % ids["contact_batch_id"], {}),
+        ("post", "/wholesale/evosense/contact-batches/%s/emergency_stop" % ids["contact_batch_id"], {}),
         ("get", "/wholesale/buyers/imports/%s/rows" % ids["import_batch_id"], None),
         ("get", "/wholesale/buyers/imports/%s/errors.csv" % ids["import_batch_id"], None),
         ("put", "/wholesale/buyers/imports/%s/mapping" % ids["import_batch_id"], {"mapping": {}}),
@@ -763,7 +767,6 @@ def test_every_id_bearing_wholesale_route_is_in_the_attack_list(theirs):
     # A document KIND is a path parameter too (contracts/{kind}/...); the attack
     # uses the purchase agreement, so that word squashes like an id.
     values.add("purchase_agreement")
-    values.add("start")              # contact-batches/{id}/{action}
 
     def template(path):
         return "/".join("{}" if part in values else part
