@@ -638,6 +638,7 @@ def evosense_attacks(ids):
         ("post", "%s/properties/%s/dismiss" % (base, ep), {"reason": "planted"}),
         ("post", "%s/properties/%s/feedback" % (base, ep), {"kind": "BAD_FIT"}),
         ("post", "%s/properties/%s/contacts" % (base, ep), {"kind": "phone", "value": "2145559999"}),
+        ("post", "%s/properties/%s/property-type" % (base, ep), {"category": "commercial"}),
         ("post", "%s/properties/%s/permission-link" % (base, ep), {"phone": "2145559999"}),
         ("post", "%s/properties/%s/follow-up" % (base, ep), {"due_at": "2030-01-01T15:00:00Z"}),
         ("post", "%s/follow-ups/%s/complete" % (base, ids["es_followup_id"]), {"note": "x"}),

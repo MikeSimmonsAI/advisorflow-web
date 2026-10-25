@@ -771,6 +771,7 @@ def rows_for(db, org_id: str, ms: List[EvoSenseProperty], *, sort: str = "priori
             "held_back": held, "missing": missing, "priority": prio,
             "next_action": _next_action(prio, owner, tax, contact, fc), "status": p.status,
             "list_claims": _list_claims_pre(pre, p),
+            "property_class": _pclass_view(p),
             "opportunity": opp.get(p.id),
         })
     rank = {"A": 0, "B": 1, "C": 2, "REVIEW": 3, "PARK": 4}
@@ -788,6 +789,11 @@ def rows_for(db, org_id: str, ms: List[EvoSenseProperty], *, sort: str = "priori
     for i, r in enumerate(out, 1):
         r["rank"] = i
     return out
+
+
+def _pclass_view(p) -> Dict[str, Any]:
+    from app.services.evosense import property_class as PCL
+    return PCL.view(p)
 
 
 def _CLERK_COUNTIES():
