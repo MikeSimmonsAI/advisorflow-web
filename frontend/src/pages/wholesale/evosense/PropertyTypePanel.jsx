@@ -132,6 +132,13 @@ export default function PropertyTypePanel({ propertyId, canEdit }) {
           <ul className="evo-small" style={{ margin: 0, paddingLeft: 18 }}>{d.questions.map((q) => <li key={q}>{q}</li>)}</ul>
         </>
       ) : null}
+      {d.closing_checklist?.length ? (
+        <>
+          <h3 className="evo-small" style={{ margin: '12px 0 4px', textTransform: 'uppercase', letterSpacing: '.06em' }}>Closing checklist</h3>
+          {d.contract_note ? <Alert kind="warn">{d.contract_note}</Alert> : null}
+          <ul className="evo-small" style={{ margin: 0, paddingLeft: 18 }}>{d.closing_checklist.map((q) => <li key={q}>{q}</li>)}</ul>
+        </>
+      ) : null}
       {err ? <Alert kind="warn">{err}</Alert> : null}
     </Panel>
   )
