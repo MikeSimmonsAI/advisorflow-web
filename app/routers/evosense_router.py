@@ -189,6 +189,43 @@ def property_detail(property_id: str, db: Session = Depends(get_db),
     return out
 
 
+# ── first contact: what may be said, on which channel ──────────────────────
+
+@router.get("/properties/{property_id}/first-contact")
+def first_contact(property_id: str, db: Session = Depends(get_db),
+                  user: User = Depends(require_tenant_or_observer)):
+    """Which first contact is permitted for this owner now, the approved
+    wording, and why the other channels are not. Read-only; nothing is sent."""
+    from app.services.evosense import first_contact as FC
+    org_id = _read_org(db, user)
+    return FC.plan(db, org_id, _prop(db, org_id, property_id))
+
+
+class WordingIn(BaseModel):
+    text: str
+
+
+@router.post("/first-contact/check")
+def first_contact_check(body: WordingIn, user: User = Depends(require_tenant_or_observer)):
+    """Would this first message pass? (No claims of being human, no money
+    before underwriting, no foreclosure promises, no legal advice, no pressure.)"""
+    from app.services.evosense import first_contact as FC
+    return FC.guard(body.text[:4000])
+
+
+@router.get("/enrichment/queue")
+def enrichment_queue(limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_or_observer)):
+    from app.services.evosense import automation as AU
+    return AU.enrichment_queue(db, _read_org(db, user), limit=limit)
+
+
+@router.get("/automation/readiness")
+def automation_readiness(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    from app.services.evosense import automation as AU
+    return AU.readiness(db, _read_org(db, user))
+
+
 # ── the opportunity view: assess every property now ────────────────────────
 
 _OPP_RUNNING: dict = {}

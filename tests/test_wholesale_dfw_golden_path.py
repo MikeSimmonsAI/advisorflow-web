@@ -58,6 +58,13 @@ def test_dfw_golden_path(client, auth_headers, admin_auth_headers, db_session, s
     d = ok(client.get(ES + "/properties/%s" % pid, headers=H))
     assert d["scores"]["property_opportunity"]["factors"] and d["facts"]["arv"]["value"] is None
     step(2, "evidence shown, no invented ARV")
+    # the opportunity view: categories from evidence, no dollar figure without a verified ARV
+    o = d["opportunity"]
+    assert {c["key"] for c in o["categories"]} >= {"vacant", "tax_delinquent"}
+    assert o["economics"]["status"] == "not_supportable" and o["economics"]["score"] is None
+
+    def opp():
+        return ok(client.get(ES + "/properties/%s" % pid, headers=H))["opportunity"]
     # 3. ownership
     ok(client.post(ES + "/properties/%s/owner" % pid, headers=H, json={
         "name": "GOLDEN TEST OWNER", "mailing_street": "1 Elsewhere Rd", "mailing_city": "Plano",
@@ -146,6 +153,11 @@ def test_dfw_golden_path(client, auth_headers, admin_auth_headers, db_session, s
     mao = run["offer"]["mao"]
     assert mao and run["offer"]["can_request_approval"], (run["offer"], run["arv"], run["repairs"], run["missing"])
     step(16, "MAO")
+    e = opp()["economics"]
+    # the seller stated $150,000 earlier: the spread is measured at that price, labelled hypothetical
+    assert e["status"] == "supportable" and e["basis"] == "hypothetical"
+    assert e["spreads"]["hypothetical"]["value"] == e["target"]["investor_purchase_price"] - 150000
+    assert abs(e["target"]["max_acquisition"] - mao) <= 1, (e["target"], mao)
     # 17-18. offer, approval
     appr = ok(client.post("/wholesale/deals/%s/approvals" % deal_id, headers=H, json={"kind": "offer", "amount": mao}))
     ok(client.post("/wholesale/approvals/%s/decide" % appr["id"], headers=A, json={"approve": True}))
@@ -161,6 +173,8 @@ def test_dfw_golden_path(client, auth_headers, admin_auth_headers, db_session, s
     ok(client.post("/wholesale/approvals/%s/decide" % ca["id"], headers=A, json={"approve": True}))
     ok(client.post("/wholesale/deals/%s/stage" % deal_id, headers=H, json={"stage": "under_contract"}))
     step(19, "contract")
+    e = opp()["economics"]
+    assert e["spreads"]["contracted"]["value"] == e["target"]["investor_purchase_price"] - price
     # 20. buyer network import (synthetic file with a duplicate row)
     csv = ("Company,Contact Name,Email,Phone,Counties,Max Price,Strategy\n"
            "SYNTH GP Flip LLC,Gail Test,gail@gp.example.test,214-555-0161,Dallas,250000,flip\n"
@@ -205,6 +219,8 @@ def test_dfw_golden_path(client, auth_headers, admin_auth_headers, db_session, s
         "action": "offer", "amount": price + 11000, "closing_date": "2026-11-20", "financing": "cash",
         "proof_of_funds": "can_provide", "contact_name": "Gail Test", "contact_email": "gail@gp.example.test"}))
     step(25, "engagement recorded"); step(26, "buyer offer received")
+    e = opp()["economics"]
+    assert e["basis"] == "buyer_offered" and e["spreads"]["buyer_offered"]["value"] == 11000
     # 27. compare
     ds = ok(client.get("/wholesale/deals/%s/disposition-summary" % deal_id, headers=H))
     f = {x["key"]: x["count"] for x in ds["funnel"]}
@@ -230,6 +246,9 @@ def test_dfw_golden_path(client, auth_headers, admin_auth_headers, db_session, s
     ok(client.post("/wholesale/deals/%s/fee-collected" % deal_id, headers=H, json={
         "amount": fee, "method": "wire", "reference": "WIRE-GP-1", "collected_at": "2026-11-21"}))
     step(30, "closed"); step(31, "fee recorded")
+    o = opp()
+    assert o["economics"]["basis"] == "realized" and o["economics"]["spreads"]["realized"]["value"] == fee
+    assert o["workflow_state"]["key"] == "CLOSED"
     # 32. reporting
     ck = ok(client.get("/wholesale/deals/%s/disposition-summary" % deal_id, headers=H))["closing_checklist"]
     assert {s["label"]: s["done"] for s in ck["steps"]}["Fee collected"] is True

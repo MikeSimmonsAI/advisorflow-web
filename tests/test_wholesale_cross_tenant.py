@@ -593,6 +593,7 @@ def evosense_attacks(ids):
         ("get", "%s/properties/%s/photo.jpg" % (base, ep), None),
         ("post", "%s/properties/%s/enrich" % (base, ep), {"approved": True}),
         ("get", "%s/properties/%s/enrichment-status" % (base, ep), None),
+        ("get", "%s/properties/%s/first-contact" % (base, ep), None),
         ("post", "%s/properties/%s/outreach" % (base, ep), None),
         ("post", "%s/properties/%s/reply" % (base, ep), {"text": "STOP", "delivery": "manual_entry"}),
         ("post", "%s/properties/%s/nurture" % (base, ep), {"choice": "30_days"}),

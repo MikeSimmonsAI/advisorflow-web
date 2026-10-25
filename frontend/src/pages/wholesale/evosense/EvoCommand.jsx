@@ -25,6 +25,7 @@ import {
 import '../ds/evo-pages.css'
 import PropertyPhoto, { usePropertyPhoto } from './PropertyPhoto'
 import { ActFirst, FunnelPanel } from './Readiness'
+import { ReadyToRun } from './Acquire'
 
 const ACT_TONE = {
   'handoff.opened': 'attention', 'reply.read': 'info', 'reply.received': 'info', 'promoted': 'good',
@@ -273,6 +274,8 @@ export default function EvoCommand() {
           </Panel>
 
           <FunnelPanel />
+
+          <ReadyToRun />
 
           <Panel title="Pipeline at a glance" hint={ev('every property EvoSense has evaluated, by state')}>
             <div className="evo-buckets">
