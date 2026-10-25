@@ -706,13 +706,22 @@ def _list_claims_pre(pre, prop) -> Dict[str, Any]:
     return out
 
 
-def rows(db, org_id: str, kind: str) -> List[Dict[str, Any]]:
+def rows(db, org_id: str, kind: str, *, sort: str = "priority") -> List[Dict[str, Any]]:
+    """`sort="priority"` (default): the universal opportunity engine's rank
+    (evosense/opportunity.py). `sort="group"`: the list's own A/B/C groups."""
+    from app.services.evosense import opportunity as OP
     from app.services.evosense import scoring as SC
     from app.services.evosense import signals as SIG
     out = []
     ms = members(db, org_id, kind)
     checks = clerk_checks(db, org_id, [p.id for p in ms])
     pre = _prefetch(db, org_id, ms)
+    try:
+        opp = OP.build(db, org_id, ms, pre=pre, checks=checks)
+    except Exception:  # noqa: BLE001 - the list still shows without the derived view
+        db.rollback()
+        C.log.exception("opportunity view failed for list %s", kind)
+        opp = {}
     clerk_counties = _CLERK_COUNTIES()
     now = C.now()
     for p in ms:
@@ -756,11 +765,22 @@ def rows(db, org_id: str, kind: str) -> List[Dict[str, Any]]:
             "held_back": held, "missing": missing, "priority": prio,
             "next_action": _next_action(prio, owner, tax, contact, fc), "status": p.status,
             "list_claims": _list_claims_pre(pre, p),
+            "opportunity": opp.get(p.id),
         })
     rank = {"A": 0, "B": 1, "C": 2, "REVIEW": 3, "PARK": 4}
-    out.sort(key=lambda r: (rank[r["priority"]], -(r["score"] or 0),
-                            r["foreclosure"]["days"] if r["foreclosure"]["days"] is not None else 9999,
-                            r["street_address"] or ""))
+    if sort == "group":
+        out.sort(key=lambda r: (rank[r["priority"]], -(r["score"] or 0),
+                                r["foreclosure"]["days"] if r["foreclosure"]["days"] is not None else 9999,
+                                r["street_address"] or ""))
+    else:
+        def pv(r):
+            o = r.get("opportunity") or {}
+            return (o.get("priority") or {}).get("value")
+        out.sort(key=lambda r: (pv(r) is None, -(pv(r) or 0),
+                                -((r.get("opportunity") or {}).get("urgency") or {}).get("value", 0),
+                                rank[r["priority"]], r["street_address"] or ""))
+    for i, r in enumerate(out, 1):
+        r["rank"] = i
     return out
 
 
@@ -820,7 +840,43 @@ def summary(rs: List[Dict[str, Any]]) -> Dict[str, Any]:
             "score": {"scored": len(scores), "max": max(scores) if scores else None,
                       "median": sorted(scores)[len(scores) // 2] if scores else None},
             "with_contacts": sum(1 for r in rs if r["contacts"]["phones"] or r["contacts"]["emails"]),
-            "counties": dict(Counter(r["county"] for r in rs))}
+            "counties": dict(Counter(r["county"] for r in rs)),
+            "readiness": readiness(rs)}
+
+
+def readiness(rs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The operating picture of a list, from the same per-row answers the page shows."""
+    opp = [r.get("opportunity") or {} for r in rs]
+    eligible = [o for o in opp if (o.get("workflow_state") or {}).get("key") in ("OUTREACH_QUEUED",)]
+    blocked = Counter()
+    for r, o in zip(rs, opp):
+        if (o.get("workflow_state") or {}).get("key") == "OUTREACH_QUEUED":
+            continue
+        nxt = (o.get("next_action") or {}).get("key")
+        blocked[{"verify_owner": "owner not verified", "resolve_owner": "owner in conflict",
+                 "confirm_notice": "sale date not confirmed on a clerk notice",
+                 "review_auction_status": "sale passed or postponed - status unknown",
+                 "confirm_heirs": "estate - who can sell is unknown",
+                 "find_contact": "no phone or email for the owner",
+                 "review_outreach_eligibility": "contact on file but no permitted channel (consent / DNC)",
+                 "escalate_deadline": "verified sale soon - waiting for a person",
+                 "do_not_contact": "owner asked not to be contacted",
+                 "monitor": "low opportunity, no deadline"}.get(nxt, nxt or "not assessed")] += 1
+    return {
+        "properties": len(rs),
+        "verified_notices": sum(1 for r in rs if r["foreclosure"].get("status") == "VERIFIED NOTICE"),
+        "verified_ownership": sum(1 for r in rs if r["owner"].get("status") == "VERIFIED"),
+        "with_contact_data": sum(1 for r in rs if r["contacts"]["phones"] or r["contacts"]["emails"]),
+        "needing_enrichment": sum(1 for r in rs if r["owner"].get("status") == "VERIFIED"
+                                  and not (r["contacts"]["phones"] or r["contacts"]["emails"])),
+        "sufficient_valuation": sum(1 for o in opp if ((o.get("economics") or {}).get("arv") or {}).get("verified")),
+        "supportable_financials": sum(1 for o in opp if (o.get("economics") or {}).get("status") == "supportable"),
+        "eligible_for_outreach": len(eligible),
+        "blocked": dict(blocked.most_common()),
+        "evidence_confidence": dict(Counter((o.get("confidence") or {}).get("label") for o in opp)),
+        "note": "Eligible means a channel is permitted now (consent, do-not-call and validation checks passed). "
+                "Nothing is sent from this view.",
+    }
 
 
 _RUNNING: Dict[str, datetime] = {}

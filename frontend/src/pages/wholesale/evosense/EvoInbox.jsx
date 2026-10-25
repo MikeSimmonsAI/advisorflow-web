@@ -113,8 +113,14 @@ export default function EvoInbox() {
   const bucket = params.get('bucket') || ''
   const strategy = params.get('strategy') || ''
   const signal = params.get('signal') || ''
-  const sort = params.get('sort') || 'opportunity'
+  const sort = params.get('sort') || 'priority'
   const offset = Number(params.get('offset') || 0)
+  // Top 10 / 25 / 100 are views of the SAME ranking, not separate lists
+  const top = params.get('top') || ''
+  const pageSize = top ? Number(top) : PAGE
+  const category = params.get('category') || ''
+  const econ = params.get('economics') || ''
+  const conf = params.get('confidence') || ''
   const county = params.get('county') || ''
   const source = params.get('source') || ''
   const minScore = params.get('min_score') || ''
@@ -130,7 +136,10 @@ export default function EvoInbox() {
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const p = new URLSearchParams({ limit: PAGE, offset, sort })
+      const p = new URLSearchParams({ limit: pageSize, offset: top ? 0 : offset, sort })
+      if (category) p.set('category', category)
+      if (econ) p.set('economics', econ)
+      if (conf) p.set('confidence', conf)
       if (bucket) p.set('bucket', bucket)
       if (strategy) p.set('strategy_id', strategy)
       if (signal) p.set('signal', signal)
@@ -142,7 +151,7 @@ export default function EvoInbox() {
       EXTRA.forEach(([k]) => { if (params.get(k)) p.set(k, params.get(k)) })
       setData(await api.get('/wholesale/evosense/inbox?' + p.toString()))
     } catch (e) { setError(errText(e)) } finally { setLoading(false) }
-  }, [bucket, strategy, signal, sort, offset, params, county, source, minScore, archived])
+  }, [bucket, strategy, signal, sort, offset, params, county, source, minScore, archived, pageSize, top, category, econ, conf])
   useEffect(() => { load() }, [load])
 
   function set(k, v) {
@@ -243,9 +252,47 @@ export default function EvoInbox() {
             <input type="checkbox" checked={archived} onChange={(e) => set('archived', e.target.checked ? '1' : '')} />
             Rolled-back pilot
           </label>
+          <label><span className="evo-sr">Category</span>
+            <select className="evo-select" value={category} onChange={(e) => set('category', e.target.value)}
+                    data-testid="inbox-category">
+              <option value="">All opportunities</option>
+              {(data?.categories || []).map((c) => <option key={c.key} value={c.key}>{c.label} ({c.count})</option>)}
+            </select>
+          </label>
+          <label><span className="evo-sr">Economics</span>
+            <select className="evo-select" value={econ} onChange={(e) => set('economics', e.target.value)}>
+              <option value="">Any economics</option>
+              <option value="supportable">Spread supportable</option>
+              <option value="needs_underwriting">Needs underwriting</option>
+            </select>
+          </label>
+          <label><span className="evo-sr">Evidence confidence</span>
+            <select className="evo-select" value={conf} onChange={(e) => set('confidence', e.target.value)}>
+              <option value="">Any confidence</option>
+              <option value="verified">Verified evidence</option>
+              <option value="partial">Partial evidence</option>
+              <option value="insufficient">Insufficient evidence</option>
+            </select>
+          </label>
+          <label><span className="evo-sr">Show</span>
+            <select className="evo-select" value={top} onChange={(e) => set('top', e.target.value)} data-testid="inbox-top">
+              <option value="">All (paged)</option>
+              <option value="10">Top 10</option>
+              <option value="25">Top 25</option>
+              <option value="100">Top 100</option>
+            </select>
+          </label>
           <label><span className="evo-sr">Sort</span>
             <select className="evo-select" value={sort} onChange={(e) => set('sort', e.target.value)}>
-              <option value="opportunity">Highest opportunity</option>
+              <option value="priority">Overall priority</option>
+              <option value="urgency">Most urgent</option>
+              <option value="spread">Largest supported spread</option>
+              <option value="confidence">Strongest evidence</option>
+              <option value="engagement">Seller engagement</option>
+              <option value="deadline">Soonest sale date</option>
+              <option value="next_due">Next follow-up due</option>
+              <option value="last_activity">Latest activity</option>
+              <option value="opportunity">Highest seller opportunity</option>
               <option value="intent">Highest seller intent</option>
               <option value="contact">Best contact</option>
               <option value="newest">Newest</option>
@@ -281,8 +328,12 @@ export default function EvoInbox() {
                 <caption className="evo-sr">Discovered properties</caption>
                 <thead>
                   <tr>
+                    {sort === 'priority' ? <th scope="col" className="is-num">#</th> : null}
                     <th scope="col">Property</th>
+                    <th scope="col" className="is-num" title="Documented blend of seller opportunity, urgency, economics and engagement - not a probability">Priority</th>
                     <th scope="col" className="is-num">Opportunity</th>
+                    <th scope="col">Urgency</th>
+                    <th scope="col">Economics</th>
                     <th scope="col" className="is-num">Contact</th>
                     <th scope="col" className="is-num">Intent</th>
                     <th scope="col">Signals</th>
@@ -291,9 +342,10 @@ export default function EvoInbox() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.items.map((p) => (
+                  {data.items.map((p, idx) => (
                     <tr key={p.id} className={`is-link${p.status === 'needs_you' ? ' is-attention' : ''}`}
                         onClick={() => navigate(`/wholesale/evosense/property/${p.id}`)}>
+                      {sort === 'priority' ? <td className="is-num" data-label="Rank">{(top ? 0 : offset) + idx + 1}</td> : null}
                       <td className="is-lead" data-label="">
                         <div className="evo-prop">
                           <PropertyThumb address={p.address} />
@@ -322,14 +374,35 @@ export default function EvoInbox() {
                           </div>
                         </div>
                       </td>
+                      <td className="is-num" data-label="Priority" title={p.opportunity?.priority_why || ''}>
+                        {p.opportunity?.priority != null ? <b>{p.opportunity.priority}</b> : <span className="evo-muted">—</span>}
+                        {p.opportunity?.confidence ? (
+                          <span className="evo-small evo-muted" style={{ display: 'block' }}>{p.opportunity.confidence} evidence</span>
+                        ) : null}
+                      </td>
                       <td className="is-num" data-label="Opportunity"><Ring kind="opportunity" value={p.opportunity_score} /></td>
+                      <td data-label="Urgency">
+                        {p.opportunity && p.opportunity.urgency ? (
+                          <span className="evo-small">
+                            <b>{p.opportunity.urgency_label}</b>
+                            {p.opportunity.deadline ? <span className="evo-muted" style={{ display: 'block' }}>sale {p.opportunity.deadline}</span> : null}
+                          </span>
+                        ) : <span className="evo-muted evo-small">none known</span>}
+                      </td>
+                      <td data-label="Economics" title={(p.opportunity?.economics_needs || []).join(' · ')}>
+                        {p.opportunity?.economics_status === 'supportable' || p.opportunity?.economics_status === 'partial'
+                          ? <span className="evo-small">{p.opportunity.economics_headline}</span>
+                          : <Tag kind="estimate" title={(p.opportunity?.economics_needs || []).join(' · ')}>Needs underwriting</Tag>}
+                      </td>
                       <td className="is-num" data-label="Contact"><Num kind="contact" value={p.contact_confidence} /></td>
                       <td className="is-num" data-label="Intent"><Num kind="intent" value={p.seller_intent} /></td>
-                      <td data-label="Signals"><Chips items={p.signals} max={2} /></td>
+                      <td data-label="Signals"><Chips items={p.opportunity?.categories?.length ? p.opportunity.categories.map((c) => c.label) : p.signals} max={3} /></td>
                       <td data-label="Status">
                         <span className="evo-statusnext">
                           <Status status={p.status} />
-                          <span className="evo-next">{p.next_action || '—'}</span>
+                          <span className="evo-next">{p.opportunity?.next_action ? (
+                            <span title={p.opportunity.next_action.why}>{p.opportunity.next_action.label}</span>
+                          ) : (p.next_action || '—')}</span>
                         </span>
                         {p.next_step ? (
                           <Link className={`evo-nextstep evo-nextstep--${p.next_step.tone || 'default'}`}
@@ -347,6 +420,9 @@ export default function EvoInbox() {
                 </tbody>
               </table>
             </div>
+            {top ? (
+              <div className="evo-pager"><span>Top {data.items.length} of {data.total} by {sort === 'priority' ? 'overall priority' : 'this sort'}</span></div>
+            ) : (
             <div className="evo-pager">
               <span>{offset + 1}–{offset + data.items.length} of {data.total}</span>
               <span style={{ display: 'flex', gap: 8 }}>
@@ -356,6 +432,15 @@ export default function EvoInbox() {
                         onClick={() => set('offset', String(offset + PAGE))}>Next</button>
               </span>
             </div>
+            )}
+            {data.weights ? (
+              <p className="evo-small evo-muted" style={{ padding: '0 20px 14px' }}>
+                Priority is a rules-based blend - seller opportunity {data.weights.weights.seller_opportunity}%,
+                urgency {data.weights.weights.urgency}%, economics {data.weights.weights.economics}%,
+                engagement {data.weights.weights.engagement}%. A dimension that is unknown is left out, never counted as zero.
+                It is not a probability of contract or closing.
+              </p>
+            ) : null}
           </>
         ) : null}
       </Panel>

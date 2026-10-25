@@ -164,6 +164,7 @@ export default function EvoCohort() {
   const queue = get('queue') === '1'
   const sort = get('sort') || 'priority'
   const county = get('county')
+  const topN = get('top')
 
   const rows = useMemo(() => {
     if (!data) return []
@@ -175,10 +176,14 @@ export default function EvoCohort() {
       (!get('group') || r.foreclosure.category === get('group')) &&
       (!county || r.county === county) &&
       (!queue || (r.owner.status === 'VERIFIED' && ['A', 'B', 'C'].includes(r.priority))))
+    // "priority" keeps the server's order: the universal opportunity rank
+    const grp = { A: 0, B: 1, C: 2, REVIEW: 3, PARK: 4 }
+    if (sort === 'group') rs = rs.slice().sort((a, b) => (grp[a.priority] - grp[b.priority]) || ((b.score ?? -1) - (a.score ?? -1)))
+    if (sort === 'urgency') rs = rs.slice().sort((a, b) => (b.opportunity?.urgency?.value ?? -1) - (a.opportunity?.urgency?.value ?? -1))
     if (sort === 'score') rs = rs.slice().sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
     if (sort === 'sale') rs = rs.slice().sort((a, b) => (a.foreclosure.days ?? 9999) - (b.foreclosure.days ?? 9999))
     if (sort === 'address') rs = rs.slice().sort((a, b) => (a.street_address || '').localeCompare(b.street_address || ''))
-    return rs
+    return topN ? rs.slice(0, Number(topN)) : rs
   }, [data, params])  // eslint-disable-line react-hooks/exhaustive-deps
 
   async function recheck() {
@@ -232,6 +237,25 @@ export default function EvoCohort() {
         </Panel>
       ) : null}
 
+      {s?.readiness ? (
+        <Panel title="Ready to work?">
+          <div className="evo-chips" style={{ flexWrap: 'wrap', gap: 8 }} data-testid="cohort-readiness">
+            {[['verified_notices', 'verified notices'], ['verified_ownership', 'verified owners'],
+              ['with_contact_data', 'with a phone or email'], ['needing_enrichment', 'need contact data'],
+              ['sufficient_valuation', 'with a verified ARV'], ['supportable_financials', 'with a supportable spread'],
+              ['eligible_for_outreach', 'eligible for outreach now']].map(([k, label]) => (
+              <span key={k} className="evo-tag"><b>{s.readiness[k]}</b>&nbsp;{label}</span>
+            ))}
+          </div>
+          {Object.keys(s.readiness.blocked || {}).length ? (
+            <p className="evo-small" style={{ marginTop: 10 }}>
+              Not yet outreach-ready: {Object.entries(s.readiness.blocked).map(([why, n]) => `${n} ${why}`).join(' · ')}
+            </p>
+          ) : null}
+          <p className="evo-small evo-muted" style={{ marginTop: 6 }}>{s.readiness.note}</p>
+        </Panel>
+      ) : null}
+
       {s ? (
         <Panel title="Where the list stands">
           <div className="evo-chips" style={{ flexWrap: 'wrap', gap: 8 }}>
@@ -269,9 +293,19 @@ export default function EvoCohort() {
               {counties.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </label>
+          <label><span className="evo-sr">Show</span>
+            <select className="evo-select" value={topN} onChange={(e) => set('top', e.target.value)} data-testid="cohort-top">
+              <option value="">All</option>
+              <option value="10">Top 10</option>
+              <option value="25">Top 25</option>
+              <option value="100">Top 100</option>
+            </select>
+          </label>
           <label><span className="evo-sr">Sort</span>
             <select className="evo-select" value={sort} onChange={(e) => set('sort', e.target.value)}>
-              <option value="priority">Priority, then score</option>
+              <option value="priority">Overall priority (rank)</option>
+              <option value="urgency">Most urgent</option>
+              <option value="group">List groups A–C, then score</option>
               <option value="score">Highest score</option>
               <option value="sale">Soonest sale date</option>
               <option value="address">Address A–Z</option>
@@ -286,9 +320,11 @@ export default function EvoCohort() {
               <caption className="evo-sr">Properties from this list</caption>
               <thead>
                 <tr>
+                  <th scope="col" className="is-num">#</th>
                   <th scope="col">Property</th>
-                  <th scope="col">Priority</th>
+                  <th scope="col" title="Documented blend of seller opportunity, urgency, economics and engagement - not a probability">Priority</th>
                   <th scope="col" className="is-num">Score</th>
+                  <th scope="col">Urgency · money · evidence</th>
                   <th scope="col">Owner now</th>
                   <th scope="col">Taxes</th>
                   <th scope="col">Foreclosure sale</th>
@@ -299,6 +335,7 @@ export default function EvoCohort() {
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.id} className="is-link" onClick={() => navigate(`/wholesale/evosense/property/${r.id}`)}>
+                    <td className="is-num" data-label="Rank">{r.rank}</td>
                     <td className="is-lead" data-label="">
                       <Link className="evo-prop__addr" to={`/wholesale/evosense/property/${r.id}`} onClick={(e) => e.stopPropagation()}>
                         {r.street_address}</Link>
@@ -307,9 +344,25 @@ export default function EvoCohort() {
                         {r.ownership_years != null ? ` · owned ${r.ownership_years} yrs` : ''}
                       </span>
                     </td>
-                    <td data-label="Priority"><b>{PRIORITY[r.priority]}</b></td>
+                    <td data-label="Priority" title={r.opportunity?.priority?.why || ''}>
+                      {r.opportunity?.priority?.value != null ? <b>{r.opportunity.priority.value}</b> : <span className="evo-muted">—</span>}
+                      <span className="evo-prop__sub" style={{ display: 'block' }}>{PRIORITY[r.priority]}</span>
+                    </td>
                     <td className="is-num" data-label="Score" title={[...r.earned.map((f) => `+${f.points} ${f.label}`), ...r.held_back].join('\n')}>
                       <Ring kind="opportunity" value={r.score} />
+                    </td>
+                    <td data-label="Urgency · money · evidence" className="is-stack">
+                      {r.opportunity ? (
+                        <>
+                          <span className="evo-small" style={{ display: 'block' }}><b>Urgency {r.opportunity.urgency.label}</b>
+                            {r.opportunity.urgency.deadline ? ` · ${r.opportunity.urgency.deadline}` : ''}</span>
+                          <span className="evo-prop__sub" style={{ display: 'block', whiteSpace: 'normal' }}
+                                title={(r.opportunity.economics.needs || []).join(' · ')}>
+                            {r.opportunity.economics.headline}</span>
+                          <span className="evo-prop__sub" style={{ display: 'block' }}>{r.opportunity.confidence.label} evidence
+                            {r.opportunity.engagement?.value != null ? ` · ${r.opportunity.engagement.label}` : ''}</span>
+                        </>
+                      ) : <span className="evo-muted">—</span>}
                     </td>
                     <td data-label="Owner now">
                       <Word value={r.owner.status} /> <span className="evo-small">{r.owner.name || ''}</span>
@@ -364,7 +417,11 @@ export default function EvoCohort() {
                     </td>
                     <td data-label="Other signals"><Chips items={r.signals} max={3} /></td>
                     <td data-label="Next action">
-                      <span className="evo-small">{r.next_action}</span>
+                      {r.opportunity?.next_action ? (
+                        <Link className="evo-nextstep" to={r.opportunity.next_action.link || `/wholesale/evosense/property/${r.id}`}
+                              title={r.opportunity.next_action.why} onClick={(e) => e.stopPropagation()}>
+                          {r.opportunity.next_action.label} →</Link>) : null}
+                      <span className="evo-small" style={{ display: 'block' }}>{r.next_action}</span>
                       {r.earned?.length ? <span className="evo-prop__sub" style={{ display: 'block' }}>Why: {r.earned.map((f) => `+${f.points} ${f.label}`).join('; ')}</span> : null}
                       {r.list_claims?.list_owner_name ? <span className="evo-prop__sub" style={{ display: 'block' }}>List's owner name: {r.list_claims.list_owner_name}</span> : null}
                       {r.missing?.length ? <span className="evo-prop__sub" style={{ display: 'block' }}>Missing: {r.missing.join('; ')}</span> : null}

@@ -294,6 +294,22 @@ class EvoSenseProperty(Base):
     contactability_detail = Column(Text, nullable=True)       # JSON: channels, reasons
     contactability_at = Column(DateTime, nullable=True)
     first_contactable_at = Column(DateTime, nullable=True)   # economics milestone
+    # THE OPPORTUNITY VIEW (evosense/opportunity.py): seller opportunity, urgency,
+    # economics, evidence confidence and engagement side by side, a documented
+    # priority blend, one next action. Derived, cached, refreshed in batches;
+    # the detail JSON holds every factor.
+    priority_score = Column(Integer, nullable=True)
+    urgency_score = Column(Integer, nullable=True)
+    economics_status = Column(String, nullable=True)          # supportable | partial | not_supportable
+    spread_base = Column(Integer, nullable=True)              # best-grounded spread, never revenue
+    evidence_confidence = Column(String, nullable=True)       # verified | partial | insufficient
+    opportunity_categories = Column(String, nullable=True)    # ",pre_foreclosure,absentee,"
+    next_best_action = Column(String, nullable=True)
+    workflow_state = Column(String, nullable=True)
+    sale_deadline = Column(Date, nullable=True)
+    opportunity_detail = Column(Text, nullable=True)
+    opportunity_hash = Column(String, nullable=True)
+    opportunity_at = Column(DateTime, nullable=True)
     signal_count = Column(Integer, nullable=False, default=0)
     next_action = Column(String, nullable=True)
     next_action_detail = Column(String, nullable=True)

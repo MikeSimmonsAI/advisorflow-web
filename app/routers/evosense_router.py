@@ -134,6 +134,7 @@ def inbox(bucket: Optional[str] = None, strategy_id: Optional[str] = None, q: Op
           min_beds: Optional[str] = None, min_baths: Optional[str] = None,
           min_owned_years: Optional[str] = None, max_owned_years: Optional[str] = None,
           max_score: Optional[str] = None,
+          category: Optional[str] = None, economics: Optional[str] = None, confidence: Optional[str] = None,
           db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     org_id = _read_org(db, user)
     filters = {"city": city, "zip": zip, "property_type": property_type, "occupancy": occupancy,
@@ -145,7 +146,8 @@ def inbox(bucket: Optional[str] = None, strategy_id: Optional[str] = None, q: Op
                "max_score": max_score}
     out = V.inbox(db, org_id, bucket=bucket, strategy_id=strategy_id, q=q,
                   signal=signal, sort=sort, limit=limit, offset=offset, county=county,
-                  min_score=min_score, source=source, archived=archived, filters=filters)
+                  min_score=min_score, source=source, archived=archived, filters=filters,
+                  category=category, economics=economics, confidence=confidence)
     # One server-computed next step per row (read-only; see services/evosense/actions.py).
     items = out.get("items") if isinstance(out, dict) else None
     if items:
@@ -176,7 +178,70 @@ def property_detail(property_id: str, db: Session = Depends(get_db),
     out["follow_ups"] = FU.open_for(db, org_id, prop)
     out["permission"] = PM.status_for(db, org_id, prop, [c["value"] for c in out.get("contacts") or []
                                                          if c.get("kind") == "phone"])
+    # the universal opportunity view, assessed fresh for the page (read-only:
+    # the cached columns are refreshed by the backfill, not by a page view)
+    from app.services.evosense import opportunity as OP
+    try:
+        out["opportunity"] = OP.build(db, org_id, [prop]).get(prop.id)
+    except Exception:  # noqa: BLE001 - a derived view never breaks the page
+        db.rollback()
+        out["opportunity"] = None
     return out
+
+
+# ── the opportunity view: assess every property now ────────────────────────
+
+_OPP_RUNNING: dict = {}
+
+
+@router.post("/opportunity/refresh")
+def opportunity_refresh(db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                        _g: User = Depends(require_not_observation)):
+    """Assess every property in this workspace now (normally the 15-minute
+    scheduler does it in batches). Runs in the background in batches of 500;
+    reads stored records only - no provider is called, nothing is sent."""
+    import threading
+    from app.services.evosense import opportunity as OP
+    org_id = svc.write_org_id(db, user)
+    if _OPP_RUNNING.get(org_id):
+        return {"status": "already_running"}
+    _OPP_RUNNING[org_id] = C.now()
+
+    def work():
+        from app.deps import SessionLocal
+        s = SessionLocal()
+        try:
+            for _ in range(200):                         # at most 100,000 properties per run
+                if OP.backfill(s, org_id=org_id) == 0:
+                    break
+            C.log_event(s, org_id, "opportunity.refreshed", user=None, actor_type=C.ACTOR_SYSTEM,
+                        summary="Opportunity view refreshed for every property")
+            s.commit()
+        except Exception:  # noqa: BLE001
+            s.rollback()
+            C.log.exception("opportunity refresh crashed for %s", org_id)
+        finally:
+            _OPP_RUNNING.pop(org_id, None)
+            s.close()
+    threading.Thread(target=work, name="evosense-opportunity", daemon=True).start()
+    return {"status": "started"}
+
+
+@router.get("/opportunity/status")
+def opportunity_status(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    from sqlalchemy import func as F
+    from app.services.evosense import opportunity as OP
+    org_id = _read_org(db, user)
+    q = db.query(EvoSenseProperty).filter(EvoSenseProperty.organization_id == org_id,
+                                          EvoSenseProperty.archived_at.is_(None))
+    total = q.count()
+    assessed = q.filter(EvoSenseProperty.opportunity_at.isnot(None)).count()
+    return {"properties": total, "assessed": assessed, "running": bool(_OPP_RUNNING.get(org_id)),
+            "version": OP.VERSION, "weights": OP.WEIGHTS, "weight_notes": OP.WEIGHT_NOTES,
+            "economics": dict(q.with_entities(EvoSenseProperty.economics_status, F.count(EvoSenseProperty.id))
+                              .group_by(EvoSenseProperty.economics_status).all()),
+            "confidence": dict(q.with_entities(EvoSenseProperty.evidence_confidence, F.count(EvoSenseProperty.id))
+                               .group_by(EvoSenseProperty.evidence_confidence).all())}
 
 
 def _public_links(prop) -> dict:
@@ -1410,8 +1475,8 @@ def list_cohorts(db: Session = Depends(get_db), user: User = Depends(require_ten
 
 
 @router.get("/cohorts/{kind}")
-def cohort_view(kind: str, request: Request, status_only: bool = False, db: Session = Depends(get_db),
-                user: User = Depends(require_tenant_user)):
+def cohort_view(kind: str, request: Request, status_only: bool = False, sort: str = "priority",
+                db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     """Every property one imported list brought in: current owner, tax and
     foreclosure status with their evidence, score with what earned it and what
     holds it back, priority and the next action. Read-only.
@@ -1429,7 +1494,7 @@ def cohort_view(kind: str, request: Request, status_only: bool = False, db: Sess
     if status_only:
         return {"kind": kind, "last_recheck": CO.last_recheck(db, org_id, kind),
                 "rechecking": CO.running(org_id, kind, db)}
-    rs = CO.rows(db, org_id, kind)
+    rs = CO.rows(db, org_id, kind, sort="group" if sort == "group" else "priority")
     if not rs:
         raise HTTPException(status_code=404, detail="No properties came from that list")
     body = {"kind": kind, "summary": CO.summary(rs), "rows": rs,

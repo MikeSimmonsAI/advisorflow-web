@@ -329,6 +329,12 @@ def run_due(db, *, org_id: Optional[str] = None, now=None) -> Dict[str, Any]:
         db.rollback()
         C.log.exception("evosense contactability backfill failed")
     try:
+        from app.services.evosense import opportunity as OP
+        report["opportunity_assessed"] = OP.backfill(db, org_id=org_id)
+    except Exception:  # noqa: BLE001 - a derived view never stops the hunt or the replies
+        db.rollback()
+        C.log.exception("evosense opportunity backfill failed")
+    try:
         report["replies_retried"] = CV.retry_pending(db, org_id=org_id)
     except Exception:  # noqa: BLE001
         db.rollback()
