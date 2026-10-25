@@ -116,10 +116,14 @@ export default function Person({ leadId, onBack, isManager }) {
         <div className="sci-row-gap">
           {lead?.status && <Chip tone={lead.status === 'hot' ? 'bad' : lead.status === 'booked' ? 'ok' : ''}>{STATUS_LABEL[lead.status] || lead.status}</Chip>}
           {reach && <Chip tone={reach.reaches === 'Text + Email' ? 'ok' : 'warn'}>{reach.reaches}</Chip>}
-          {lead && !isDnc && dnc === null &&
-            <button type="button" className="sci-btn sm danger" onClick={() => setDnc('')}>Do not contact</button>}
         </div>
       </div>
+      <PageHead title={name} sub={[lead?.phone, lead?.email].filter(Boolean).join(' · ') || 'No contact details'}>
+        {lead && (isDnc
+          ? <span className="sci-dnc-big on" role="status">ON DO NOT CONTACT</span>
+          : <button type="button" className="sci-dnc-big" onClick={() => setDnc(dnc === null ? '' : null)}
+                    aria-expanded={dnc !== null}>DO NOT CONTACT</button>)}
+      </PageHead>
       {isDnc && <p className="sci-dnc-banner" role="status"><b>DO NOT CONTACT</b> No texts, emails, AI replies or calls go to this family.</p>}
       {dnc !== null && (
         <div className="sci-dnc-confirm" role="group" aria-label="Confirm Do Not Contact">
@@ -131,7 +135,6 @@ export default function Person({ leadId, onBack, isManager }) {
           </div>
         </div>
       )}
-      <PageHead title={name} sub={[lead?.phone, lead?.email].filter(Boolean).join(' · ') || 'No contact details'} />
       <ErrorLine text={err} />
       <Notice text={msg} onClose={() => setMsg('')} />
 

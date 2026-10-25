@@ -684,3 +684,11 @@ button.sci-tile[aria-expanded="true"] { border-color: var(--gold); box-shadow: 0
 .sci-dnc-confirm { margin: 0 0 12px; padding: 12px 14px; border-radius: 10px; background: #fff5f5; border: 1px solid #f0c6c9; }
 .sci-dnc-confirm p { margin: 0 0 8px; font-size: 14.5px; line-height: 1.4; }
 .sci-dnc-confirm input { width: 100%; box-sizing: border-box; font-size: 15px; padding: 8px 10px; margin-bottom: 8px; border: 1px solid #d9dee5; border-radius: 8px; }
+
+/* Do Not Contact - big and on the family's main screen (Mike, Oct 25) */
+.sci-head-actions .sci-dnc-big, .sci-dnc-big { background: #c62828; color: #fff; border: 2px solid #fff; border-radius: 10px;
+  padding: 12px 20px; font-size: 16px; font-weight: 800; letter-spacing: .04em; cursor: pointer; white-space: nowrap;
+  box-shadow: 0 2px 8px #0004; }
+.sci-dnc-big:hover { background: #a91f1f; }
+.sci-dnc-big.on { cursor: default; background: #fff; color: #c62828; border-color: #c62828; box-shadow: none; }
+@media (max-width: 640px) { .sci-dnc-big { width: 100%; text-align: center; margin-top: 10px; } }
