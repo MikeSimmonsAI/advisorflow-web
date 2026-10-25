@@ -27,6 +27,7 @@ export const WORLDS = {
     mark: 'E', label: 'EvoSense · Acquisition', cls: '',
     tabs: [
       ['/wholesale/evosense', 'Acquisition Command', true],
+      ['/wholesale/foreclosures', 'Foreclosures'],
       ['/wholesale/evosense/inbox', 'Discovery Inbox'],
       ['/wholesale/evosense/strategies', 'Strategies'],
       ['/wholesale/evosense/controls', 'Providers & Controls'],

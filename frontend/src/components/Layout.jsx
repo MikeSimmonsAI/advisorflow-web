@@ -151,6 +151,7 @@ const NAV_GROUPS = [
     label: 'Acquisition · EvoSense',
     items: [
       { to: '/wholesale/evosense', label: 'Acquisition Command', icon: 'target', featureKey: 'wholesale_real_estate', end: true },
+      { to: '/wholesale/foreclosures', label: 'Foreclosures', icon: 'calendar', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/evosense/inbox', label: 'Discovery Inbox', icon: 'search', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/evosense/strategies', label: 'Strategies', icon: 'zap', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/evosense/controls', label: 'Providers & Controls', icon: 'shield-check', featureKey: 'wholesale_real_estate' },

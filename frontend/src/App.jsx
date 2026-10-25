@@ -151,6 +151,7 @@ const EvoStrategies = lazyPage(() => import('./pages/wholesale/evosense/EvoStrat
 const EvoStrategyBuilder = lazyPage(() => import('./pages/wholesale/evosense/EvoStrategies').then(m => ({ default: m.EvoStrategyBuilder })))
 const EvoControls = lazyPage(() => import('./pages/wholesale/evosense/EvoControls'))
 const EvoCohort = lazyPage(() => import('./pages/wholesale/evosense/EvoCohort'))
+const ForeclosureCenter = lazyPage(() => import('./pages/wholesale/evosense/ForeclosureCenter'))
 import AIHub from './pages/AIHub'
 import Availability from './pages/Availability'
 import { Unauthorized, NotFound, VerificationUnavailable } from './pages/AccessState'
@@ -1575,6 +1576,7 @@ export default function App() {
         <Route path="/wholesale/evosense/strategies/:strategyId" element={<ProtectedRoute feature="wholesale_real_estate"><EvoStrategyBuilder /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/controls" element={<ProtectedRoute feature="wholesale_real_estate"><EvoControls /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/lists/:kind" element={<ProtectedRoute feature="wholesale_real_estate"><EvoCohort /></ProtectedRoute>} />
+        <Route path="/wholesale/foreclosures" element={<ProtectedRoute feature="wholesale_real_estate"><ForeclosureCenter /></ProtectedRoute>} />
         <Route path="/ai-hub" element={<ProtectedRoute><AIHub /></ProtectedRoute>} />
         {/* AI WORKFORCE — ONE FRONT DOOR (Lane F, #5). Every customer reaches
             the whole product from /ai-workforce: SET UP | WORKING | NEEDS YOU

@@ -343,6 +343,12 @@ def run_due(db, *, org_id: Optional[str] = None, now=None) -> Dict[str, Any]:
         db.rollback()
         C.log.exception("evosense test-deal release failed")
     try:
+        from app.services.evosense import foreclosure_cycles as FCC
+        report["foreclosure_months"] = FCC.auto(db, org_id)
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        C.log.exception("evosense foreclosure month pass failed")
+    try:
         from app.services.evosense import contact_batch as CBATCH
         report["contact_batch_steps"] = CBATCH.run_due(db)
     except Exception:  # noqa: BLE001 - a batch never stops the hunt

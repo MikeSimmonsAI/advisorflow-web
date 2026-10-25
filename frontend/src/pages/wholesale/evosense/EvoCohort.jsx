@@ -216,6 +216,7 @@ export default function EvoCohort() {
           <button type="button" className="evo-btn evo-btn--primary" disabled={busy || !data || data?.rechecking} onClick={recheck}
                   title={!data ? 'Nothing to re-check: this list has no properties' : undefined}>
             {data?.rechecking ? 'Re-checking…' : 'Re-check public records'}</button>
+          <Link className="evo-btn evo-btn--secondary" to="/wholesale/foreclosures">Foreclosure Command Center</Link>
           <Link className="evo-btn evo-btn--secondary" to="/wholesale/evosense/inbox">Discovery Inbox</Link>
         </>}
       />
