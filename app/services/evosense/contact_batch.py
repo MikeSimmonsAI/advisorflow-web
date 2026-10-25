@@ -38,8 +38,8 @@ MAX_ATTEMPTS = 2
 STEP = 10                                  # items per run_step
 LEASE = timedelta(minutes=10)
 INTERRUPTED_AFTER = timedelta(minutes=15)  # an item "processing" this long died mid-call
-REVIEW_OWNER_TYPES = ("estate_indicated", "trust", "llc", "corporation", "unknown", "government",
-                      "nonprofit", "bank", "church")
+REVIEW_OWNER_TYPES = ("estate", "estate_indicated", "life_estate", "trust", "llc", "corporation", "unknown",
+                      "government", "nonprofit", "bank", "church")
 CONF_RANK = {"verified": 0, "partial": 1, "insufficient": 2}
 
 STATE_LABELS = {"ready": "Ready for lookup", "review": "Needs a person first", "skipped": "Skipped",
@@ -126,7 +126,8 @@ def _classify(p, owner, owner_status: Dict[str, Any], contacts: Dict[str, Any], 
     if owner.owner_type in INSTITUTIONAL:
         return "skipped", "Institutional owner - not a typical seller"
     if owner.owner_type in REVIEW_OWNER_TYPES or {"ESTATE_INDICATED", "LIFE_ESTATE"} & set(flags):
-        kind = {"estate_indicated": "an estate", "trust": "a trust", "llc": "a company (LLC)",
+        kind = {"estate_indicated": "an estate", "estate": "an estate", "life_estate": "a life estate",
+                "trust": "a trust", "llc": "a company (LLC)",
                 "corporation": "a company", "unknown": "an owner type the record does not state"}.get(
             owner.owner_type, "an estate / life estate")
         return "review", "The owner of record is %s - confirm who can sell before paying for a lookup" % kind
