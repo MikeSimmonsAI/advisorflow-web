@@ -40,7 +40,7 @@ const POINTS = [
 ]
 
 export default function ProgramAccessPortal({ contexts, onChoose, user: userProp, onSignOut }) {
-  const { visible, others } = programCards(contexts)
+  const { visible, others, previews } = programCards(contexts)
   const [view, setView] = useState(readView)
   const user = userProp !== undefined ? userProp : getCurrentUser()
   const personName = user?.full_name || user?.name || user?.email || ''
@@ -143,7 +143,25 @@ export default function ProgramAccessPortal({ contexts, onChoose, user: userProp
             </section>
           )}
 
-          {!visible.length && !others.length && (
+          {previews.length > 0 && (
+            <section className="pa-previews" aria-labelledby="pa-previews-title">
+              <div className="pa-toolbar">
+                <div>
+                  <h2 id="pa-previews-title">Previews</h2>
+                  <p>Mockups for prospects who are not live customers yet. Each opens its demo link in a new tab.</p>
+                </div>
+              </div>
+              <div className={'pa-grid pa-grid--' + view + ' pa-grid--n' + Math.min(previews.length, 5)} role="list" aria-label="Previews">
+                {previews.map(item => (
+                  <div role="listitem" key={item.organization_id}>
+                    <WorkspaceCard item={item} onOpen={onChoose} layout={view} actionLabel="Open preview" />
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {!visible.length && !others.length && !previews.length && (
             <div className="pa-empty">
               <b>No workspaces have been assigned to this account.</b>
               <span>Ask your administrator to grant access to a program.</span>

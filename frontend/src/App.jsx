@@ -1081,10 +1081,18 @@ function WorkspaceSelector() {
   if (!ctx) return null
   const workspaces = ctx.workspace_contexts || []
   const products = ctx.product_contexts || []
-  if (workspaces.length === 1 && products.length === 0) {
+  const previews = ctx.preview_contexts || []
+  if (workspaces.length === 1 && products.length === 0 && previews.length === 0) {
     return <Navigate to={'/workspace/' + workspaces[0].organization_id} replace />
   }
   return <ProgramAccessPortal contexts={ctx} onChoose={(item) => {
+    // A PREVIEW is a deal's existing public demo link, not a workspace: no
+    // context is set and nothing is entered. It opens in a new tab so the
+    // launcher stays where it was.
+    if (item.type === 'preview') {
+      if (item.url) window.open(item.url, '_blank', 'noopener,noreferrer')
+      return
+    }
     // Back Office / Executive Suite: leave any program workspace first, so no
     // stale workspace header follows the person into the back office.
     if (item.type === 'back_office') { clearWorkspaceContext(); navigate(item.path || '/sales'); return }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { programCards } from '../src/pages/program/programAccessModel.js'
+import { programCards, previewCards, previewName, businessKind } from '../src/pages/program/programAccessModel.js'
 import { workspaceProgramDestination, productWorkspaceDestination } from '../src/auth/workspaceProgramDoor.js'
 
 const host = 'ffb18ae7-evo'
@@ -62,4 +62,42 @@ test('generic workspaces remain available when no named product uses them', () =
   const general = programCards(without).visible.filter(x => x.variant === 'general')
   assert.deepEqual(general.map(x => x.organization_id), [host])
   assert.equal(general[0].display, 'EVO Integrated Solutions LLC')
+})
+
+
+test('a general client keeps its real name and its own kind of business', () => {
+  const c = { workspace_contexts: [
+    { type: 'workspace', organization_id: 'ccb', organization_name: 'Commercial Cleaning Blueprint', organization_slug: 'commercial-cleaning-blueprint', industry: 'cleaning' },
+    { type: 'workspace', organization_id: 'x', organization_name: 'Some New Client', organization_slug: 'snc', industry: 'something-new' },
+  ] }
+  const { visible } = programCards(c)
+  const ccb = visible.find(x => x.organization_id === 'ccb')
+  assert.equal(ccb.display, 'Commercial Cleaning Blueprint')
+  assert.equal(ccb.kind, 'COMMERCIAL CLEANING')
+  // An industry the launcher has no label for still gets a full card with its own name.
+  const other = visible.find(x => x.organization_id === 'x')
+  assert.equal(other.display, 'Some New Client')
+  assert.equal(other.kind, businessKind('unknown'))
+})
+
+test('previews are separate, labelled, one per deal, and never invented', () => {
+  const pc = { preview_contexts: [
+    { type: 'preview', opportunity_id: 'o1', company_name: 'Countryside Land Partners', contact_name: 'Samuel St.Germain', stage_label: 'Demo / Proposal', proposal_sent: true, demo_slot: 'platform', url: 'https://app.example.test/demo/abc' },
+    { type: 'preview', opportunity_id: 'o1', company_name: 'Countryside Land Partners', url: 'https://app.example.test/demo/dup' },
+    { type: 'preview', opportunity_id: 'o2', company_name: 'Commercial Cleaning Blueprint — Daniel Almaguer', contact_name: 'Daniel Almaguer', stage_label: 'Demo Build', demo_slot: 'platform', url: 'https://app.example.test/demo/def' },
+    { type: 'preview', opportunity_id: 'o3', company_name: 'No Link Co' },
+  ] }
+  const { visible, previews } = programCards(pc)
+  assert.equal(visible.length, 0, 'a preview is never a workspace card')
+  assert.deepEqual(previews.map(p => p.display), ['Commercial Cleaning Blueprint', 'Countryside Land Partners'])
+  assert.ok(previews.every(p => p.kind.startsWith('PREVIEW')))
+  assert.deepEqual(previews.find(p => p.opportunity_id === 'o1').facts, ['Demo / Proposal', 'Proposal sent', 'Platform demo'])
+  assert.equal(previews.find(p => p.opportunity_id === 'o1').url, 'https://app.example.test/demo/abc')
+  assert.deepEqual(previewCards({}), [])
+})
+
+test('preview name drops only an exact contact suffix', () => {
+  assert.equal(previewName({ company_name: 'Acme — Jo Smith', contact_name: 'Jo Smith' }), 'Acme')
+  assert.equal(previewName({ company_name: 'Acme — Sales', contact_name: 'Jo Smith' }), 'Acme — Sales')
+  assert.equal(previewName({ company_name: 'Acme' }), 'Acme')
 })

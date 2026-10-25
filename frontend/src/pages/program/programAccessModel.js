@@ -36,6 +36,22 @@ const PROGRAMS = {
                facts: ['Portfolio', 'Performance', 'Reporting'] },
 }
 
+// A GENERAL business keeps its own identity: the card is titled with the
+// organization's real name and labelled with the kind of business the server
+// recorded for it (organizations.industry). This is a vocabulary of
+// industries, never a list of clients - a new client appears by itself.
+const INDUSTRY_KINDS = {
+  cleaning: 'COMMERCIAL CLEANING',
+  real_estate: 'REAL ESTATE',
+  land: 'LAND & REAL ESTATE',
+  fiber: 'FIBER & TELECOM',
+  wellness: 'HEALTH & WELLNESS',
+  dental: 'DENTAL PRACTICE',
+  automotive: 'AUTOMOTIVE',
+}
+export function businessKind(industry) {
+  return INDUSTRY_KINDS[String(industry || '').trim().toLowerCase()] || PROGRAMS.business.kind
+}
 
 /** Which program a server-listed workspace runs, or null (shown under "Other"). */
 export function programOf(w) {
@@ -70,7 +86,8 @@ export function programCards(ctx) {
     // destination are exactly what the server listed.
     const program = programOf(w) || 'business'
     const p = PROGRAMS[program]
-    cards.push({ ...w, program, variant: p.variant, symbol: p.symbol, rank: p.rank, kind: p.kind, facts: p.facts,
+    const kind = program === 'business' ? businessKind(w.industry) : p.kind
+    cards.push({ ...w, program, variant: p.variant, symbol: p.symbol, rank: p.rank, kind, facts: p.facts,
                  display: displayName(program, w), summary: p.summary,
                  orgLabel: displayName(program, w) === w.organization_name ? null : w.organization_name })
   }
@@ -96,5 +113,38 @@ export function programCards(ctx) {
                  summary: p.summary, orgLabel: ex.platform_name || null })
   }
   cards.sort((a, b) => a.rank - b.rank || String(a.display).localeCompare(String(b.display)))
-  return { visible: cards, others }
+  return { visible: cards, others, previews: previewCards(ctx) }
+}
+
+/** "Commercial Cleaning Blueprint — Daniel Almaguer" -> the business name,
+ *  only when the tail is exactly the deal's contact. Never guesses beyond that. */
+export function previewName(p) {
+  const name = String(p?.company_name || '').trim()
+  const contact = String(p?.contact_name || '').trim()
+  const tail = ' — ' + contact
+  return contact && name.endsWith(tail) && name.length > tail.length ? name.slice(0, -tail.length) : name
+}
+
+/**
+ * PREVIEWS - a live demo of an OPEN deal (server `preview_contexts`, sales
+ * managers only). Shown apart from the workspaces and labelled as a preview:
+ * it opens the deal's existing demo link and is never a live business.
+ * One card per deal; a deal that already has a workspace is never here.
+ */
+export function previewCards(ctx) {
+  const seen = new Set()
+  const out = []
+  for (const p of ctx?.preview_contexts || []) {
+    if (!p?.url || !p.opportunity_id || seen.has(p.opportunity_id)) continue
+    seen.add(p.opportunity_id)
+    const display = previewName(p)
+    const facts = [p.stage_label, p.proposal_sent ? 'Proposal sent' : null,
+                   p.demo_slot === 'platform' ? 'Platform demo' : 'Website concept'].filter(Boolean)
+    out.push({ ...p, organization_id: 'preview:' + p.opportunity_id, program: 'preview', variant: 'general',
+               symbol: '◇', rank: 20, kind: 'PREVIEW · NOT A LIVE WORKSPACE',
+               display, orgLabel: p.contact_name && display !== p.company_name ? p.contact_name : null,
+               summary: 'A mockup built for this prospect. Opens the demo link - no live data and no customer workspace yet.',
+               facts })
+  }
+  return out.sort((a, b) => String(a.display).localeCompare(String(b.display)))
 }
