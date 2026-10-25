@@ -209,7 +209,8 @@ def _source_failed(db, org_id, strategy, provider, cfg, exc, counts, user):
     else:
         code, msg = type(exc).__name__, str(exc)[:200]
         PV.record_failure(cfg, "%s: %s" % (code, msg))
-    counts["provider_errors"] += 1
+    # a list re-check passes a bare dict: count without assuming the key
+    counts["provider_errors"] = counts.get("provider_errors", 0) + 1
     counts.setdefault("source_errors", []).append({"provider": provider.key, "code": code,
                                                    "message": msg[:200]})
     C.log_event(db, org_id, "provider.failed", strategy_id=strategy.id, is_test=strategy.is_test,

@@ -194,7 +194,8 @@ def build_index(rows: Iterator[Dict[str, Any]], path: str,
 
 
 def _cache_path(meta: Dict[str, Any]) -> str:
-    tag = B.sha256("%s|%s|%s|%s" % (url(), meta.get("size"), meta.get("last_modified"), ADAPTER_VERSION))[:16]
+    tag = B.sha256("%s|%s|%s|%s|%s" % (url(), meta.get("size"), meta.get("last_modified"), ADAPTER_VERSION,
+                                       meta.get("stamp") or ""))[:16]
     return os.path.join(B.cache_dir(), "johnson_cad-%s.sqlite" % tag)
 
 
@@ -238,15 +239,29 @@ class Index:
         return [self._row(*x) for x in self.con.execute("SELECT row, legal FROM acct WHERE addr = ?", (key,)).fetchall()]
 
 
-def load_index() -> Index:
-    """The cached index, building it from the published file when needed."""
+def forget_index() -> None:
+    """Drop the in-memory index (a new copy of the file was uploaded)."""
     with _LOCK:
-        if _MEMO.get("index"):
+        _MEMO.pop("index", None)
+        _MEMO.pop("stamp", None)
+
+
+def _upload_stamp() -> Optional[str]:
+    info = B.uploaded_info("johnson_cad")
+    return "%s|%s" % (info.get("uploaded_at"), info.get("size")) if info else None
+
+
+def load_index() -> Index:
+    """The cached index, building it from the published file (or the copy a
+    platform admin uploaded, which is read first) when needed."""
+    with _LOCK:
+        stamp = _upload_stamp()
+        if _MEMO.get("index") and _MEMO.get("stamp") == stamp:
             return _MEMO["index"]
         oz = B.open_zip("johnson_cad", url())
         try:
             meta = {"url": url(), "size": oz.meta.get("size"), "last_modified": oz.meta.get("last_modified")}
-            path = _cache_path(oz.meta)
+            path = _cache_path(dict(oz.meta, stamp=stamp))
             if not os.path.exists(path):
                 n = build_index(parse_rows(B.text_lines(oz.zip, MEMBER)), path,
                                 legal_rows(B.text_lines(oz.zip, LEGAL_MEMBER)))
@@ -258,6 +273,7 @@ def load_index() -> Index:
             oz.close()
         meta["built_at"] = datetime.utcfromtimestamp(os.path.getmtime(path)).isoformat()
         _MEMO["index"] = Index(path, meta)
+        _MEMO["stamp"] = stamp
         return _MEMO["index"]
 
 

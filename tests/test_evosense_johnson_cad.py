@@ -149,3 +149,88 @@ def test_same_subdivision_finds_platted_neighbours(roll):
     rows = idx.same_subdivision("TESTSTONE ESTATES PH 2")
     assert [r["GEO ACCOUNT NUM"] for r in rows] == ["126.9001.00010"]
     assert idx.same_subdivision("NOWHERE ADDN") == []
+
+
+# ── JCAD refuses cloud servers: a platform admin uploads the free file ──────
+
+@pytest.fixture
+def uploads(tmp_path, monkeypatch):
+    monkeypatch.setenv("EVOSENSE_SOURCE_UPLOAD_DIR", str(tmp_path / "up"))
+    monkeypatch.setenv("EVOSENSE_SOURCE_CACHE", str(tmp_path / "cache"))
+    monkeypatch.delenv("EVOSENSE_SRC_JOHNSON_CAD_PATH", raising=False)
+    J._MEMO.clear()
+    yield
+    J._MEMO.clear()
+
+
+@pytest.fixture
+def god_headers(db_session, sample_org, sample_advisor):
+    from app.services.auth_service import create_access_token
+    sample_advisor.role = "god_admin"
+    db_session.commit()
+    return {"Authorization": "Bearer %s" % create_access_token(sample_advisor, db_session),
+            "X-Org-Override": sample_org.id}
+
+
+UP = "/wholesale/evosense/sources/johnson_cad/upload"
+
+
+def test_jcad_upload_status_and_admin_only(client, auth_headers, uploads):
+    st = client.get(UP, headers=auth_headers).json()
+    assert st["uploadable"] and st["download_page"] == "https://johnsoncad.com/downloads"
+    assert st["publisher"] == "JCAD" and st["current"] is None and st["can_upload"] is False
+    r = client.post(UP, headers=auth_headers, files={"file": ("j.zip", build_zip(SYNTH), "application/zip")})
+    assert r.status_code == 403 and not B.uploaded_info("johnson_cad")
+
+
+def test_jcad_upload_validates_lifts_the_block_and_the_reader_uses_it(client, db_session, god_headers, uploads,
+                                                                     monkeypatch):
+    from app.services.evosense import providers as PV
+    PV.block_platform(db_session, "johnson_cad", "AUTH_FAILED", "AUTH_FAILED: johnsoncad.com refused the request (403)")
+    db_session.commit()
+    assert client.post(UP, headers=god_headers, files={"file": ("x.zip", b"nope", "application/zip")}).status_code == 422
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("externalnal.tab", HEADER + "\r\n")
+    r = client.post(UP, headers=god_headers, files={"file": ("x.zip", buf.getvalue(), "application/zip")})
+    assert r.status_code == 422 and "externallegal.tab" in r.json()["detail"]
+    r = client.post(UP, headers=god_headers,
+                    files={"file": ("x.zip", build_zip(SYNTH, header="ACCOUNT\tNAME"), "application/zip")})
+    assert r.status_code == 422 and "missing columns" in r.json()["detail"]
+    assert PV.platform_blocked(db_session, "johnson_cad")
+
+    # the publisher is never called once a copy is on file
+    def no_network(*a, **k):
+        raise AssertionError("JCAD was called although a copy was uploaded")
+    monkeypatch.setattr(B, "_probe", no_network)
+    ok = client.post(UP, headers=god_headers,
+                     files={"file": ("BATCH_896.all_.zip", build_zip(SYNTH), "application/zip")})
+    assert ok.status_code == 200, ok.text
+    db_session.expire_all()
+    assert not PV.platform_blocked(db_session, "johnson_cad")
+    rec = J.JohnsonReader().lookup({"street_address": "397 TESTSTONE DR", "city": "Burleson"})
+    assert rec and rec["source_reference"] == "JCAD:126.9001.00010:2026"
+    assert rec["owner"]["name"] == "SYNTH OWNER ONE"
+    assert J.load_index().rows == 1204
+
+    # a newer upload replaces the index in memory without a restart
+    more = SYNTH + [row(**{"GEO ACCOUNT NUM": "126.9002.00010", "NAME": "SYNTH NEW", "SITUS STREET NUM": "5",
+                           "SITUS STREET NAME": "NEWER LN", "SITUS CITY": "CLEBURNE"})]
+    assert client.post(UP, headers=god_headers,
+                       files={"file": ("BATCH_896.all_.zip", build_zip(more), "application/zip")}).status_code == 200
+    assert J.load_index().rows == 1205
+
+
+def test_a_blocked_source_does_not_crash_a_list_recheck(db_session):
+    """cohort.recheck hands free_lookups a bare dict; a source refusing the
+    server used to raise KeyError('provider_errors') and kill the whole re-check."""
+    from types import SimpleNamespace
+    from app.services.evosense import hunt as HU
+    from app.services.evosense import providers as PV
+    from app.services.evosense.sources.base import AUTH_FAILED, SourceError
+    counts = {}
+    p = PV.PROVIDERS["johnson_cad"]
+    cfg = PV.config(db_session, "org-x", "johnson_cad")
+    HU._source_failed(db_session, "org-x", SimpleNamespace(id=None, is_test=False), p, cfg,
+                      SourceError(AUTH_FAILED, "johnsoncad.com refused the request (403)"), counts, None)
+    assert counts["provider_errors"] == 1 and counts["source_errors"][0]["code"] == AUTH_FAILED
