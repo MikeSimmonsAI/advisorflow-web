@@ -11,7 +11,7 @@ here returns None for them after one indexed lookup.
 """
 import json
 import logging
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -207,6 +207,8 @@ def context_for(db: Session, lead: Lead, channel: str = "sms",
             # content policy strips links / phone numbers otherwise.
             "location_phone": prof.facility_phone or "",
             "call_line": _call_line(prof.facility_phone),
+            # #378: the ways this location meets families, for "I can meet with you {appointment_options}."
+            "appointment_options": appointment_options(prof),
             "booking_link": prof.appointment_link or "",
             "planning_guide_link": planning_guide_link(prof, db=db, family=(rec.campaign_family if rec else None)),
         },
@@ -239,6 +241,31 @@ def brand_settings(prof) -> Dict:
         return v if isinstance(v, dict) else {}
     except (TypeError, ValueError):
         return {}
+
+
+def appointment_ways(prof) -> List[str]:
+    """The ways THIS location meets a family (#378): always at the location;
+    at the family's home when its setting "home_visits" is on; by phone when
+    "offer_phone_alternative" is on. Never an option the location hasn't enabled."""
+    bs = brand_settings(prof) if prof is not None else {}
+    ways = ["location"]
+    if bs.get("home_visits"):
+        ways.append("home")
+    if bs.get("offer_phone_alternative"):
+        ways.append("phone")
+    return ways
+
+
+def appointment_options(prof) -> str:
+    """'here at Striffler-Hamby Mortuary, at your home, or by phone' - only the
+    ways this location has enabled. Goes after "I can meet with you ..."."""
+    name = getattr(prof, "official_name", None)
+    here = "here at our office" if (not name or hides_location(prof)) else "here at %s" % name
+    parts = {"location": here, "home": "at your home", "phone": "by phone"}
+    words = [parts[w] for w in appointment_ways(prof)]
+    if len(words) == 1:
+        return words[0]
+    return ", ".join(words[:-1]) + (", or " if len(words) > 2 else " or ") + words[-1]
 
 
 def planning_guide_link(prof, db: Optional[Session] = None, family: Optional[str] = None) -> str:

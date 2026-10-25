@@ -20,6 +20,14 @@ The mission is an appointment. Every reply either gets the family a time or puts
 
 Every touch asks for a short visit. Every email carries the family's pick-a-time link, with "reply with a day" as the fallback. There is no "should I close this out?" message.
 
+**#378, appointment-first everywhere:**
+- The first text and first email of every campaign (veteran guide, survey, seminar, cremation and the rest) use the information to open the conversation, then ask for a short appointment.
+- Follow-up texts 2 to 6 ask for a visit, with the family's booking link.
+- Families are offered only the ways their location has turned on: always at the location, at home if home visits are on (all 39 today), and by phone if phone appointments are on (none today).
+- An email waits at least 4 hours after a text, so the two never arrive minutes apart.
+- "I got it, thank you" gets real times to go over it together.
+- "Busy this week" gets times next week.
+
 ## Safety nets
 
 - **Stuck-family alert.** Runs every 30 minutes, 8 AM to 8 PM Central. It catches anyone who said yes to coming in and has no booking, times or link an hour later. One text and one email per family per day.

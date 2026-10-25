@@ -231,8 +231,8 @@ TOUCH_STRATEGY = {
 _EMAIL = {
     1: ("Hi {first_name},\n\nIt's {contact} at {location}. {Why}, and I want to make sure you get "
         "everything that goes with it.\n\n{flyer_line}"
-        "The easiest way is a short visit here. I'll go over it with you in person and answer your "
-        "questions, with no decisions needed.\n\n{booking_line}"
+        "The easiest way is a short visit. I can meet with you {options} and go over it together, "
+        "with no decisions needed.\n\n{booking_line}"
         "Or just reply with a day that works and I'll set it up.\n\n{contact}\n{location}"),
     2: ("Hi {first_name},\n\n{useful}\n\nThat's exactly the kind of thing I go over with families "
         "in a short visit at {location}, so nothing gets missed.\n\n{booking_line}"
@@ -241,7 +241,8 @@ _EMAIL = {
         "for your situation?\n\n{booking_line}"
         "Or just reply with a day and time that suits you.\n\n{contact}\n{location}"),
     4: ("Hi {first_name},\n\nI have a few openings this week at {location} and I'd like to save one "
-        "for you. It's a short, unhurried visit, and you're welcome to bring family along.\n\n"
+        "for you. It's a short, unhurried visit - I can meet with you {options} - and you're welcome "
+        "to bring family along.\n\n"
         "{booking_line}Or reply with the day that works best and I'll hold it for you.\n\n"
         "{contact}\n{location}"),
     5: ("Hi {first_name},\n\nI'd still like to get a time on the calendar with you at {location}. "
@@ -270,9 +271,9 @@ PERSONAL_SUBJECTS_NO_NAME = {
 }
 
 _SMS = {
-    1: "Hi {first_name}, this is {contact} with {location}. {Why} - could you stop by for a short visit so I can go over it with you? Just reply with a day.",
+    1: "Hi {first_name}, this is {contact} with {location}. {Why} - could we go over it in a short visit? I can meet you {options}. Just reply with a day.",
     2: "Hi {first_name}, {contact} at {location}. I'd like to go over your {topic} questions in person - just reply with a day that works for a short visit.",
-    3: "Hi {first_name}, {contact} at {location}. I have a few openings this week - could I save one for you? Just reply with a day.",
+    3: "Hi {first_name}, {contact} at {location}. I have a few openings this week - I can meet with you {options}. Could I save one for you? Just reply with a day.",
     4: "Hi {first_name}, {contact} at {location}. Would a short visit help? Reply with a day that works and I'll hold it.",
     5: "Hi {first_name}, {contact} at {location}. I'd still like to get a short visit on the calendar - mornings or afternoons better for you? Just reply.",
     REACTIVATION: "Hi {first_name}, {contact} at {location}. I'd still be glad to sit down with you about {topic} - what day works? Just reply.",
@@ -340,6 +341,8 @@ def context_packet(db: Session, lead, now: Optional[datetime] = None) -> Optiona
         "first_name": (lead.first_name or "").strip().title() or None,
         "last_name": (lead.last_name or "").strip().title() or None,
         "location": prof.official_name if prof else None,
+        # #378: the ways this location meets families (at the location / home / phone)
+        "appointment_options": identity.appointment_options(prof) if prof else None,
         "location_id": prof.location_id if prof else None,
         "location_alias": prof.email_alias if prof else None,
         "alias_receiving": bool(prof is not None and aliases.receiving(prog, prof)),
@@ -399,6 +402,7 @@ def compose(packet: Dict, touch, channel: str = "email", *, flyer_line: str = ""
         "why": pb["why"], "Why": _cap(pb["why"]),
         "topic": pb["topic"], "useful": pb["useful_info"], "question": pb["common_question"],
         "flyer_line": (flyer_line.strip() + "\n\n") if flyer_line and flyer_line.strip() else "",
+        "options": packet.get("appointment_options") or ("here at %s" % (packet.get("location") or "our office")),
         # The family's own pick-a-time page (the same link the texts carry).
         "booking_line": ("Pick a time that works for you here: %s\n\n" % booking_url.strip())
                         if booking_url and booking_url.strip() else "",

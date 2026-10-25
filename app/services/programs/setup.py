@@ -237,6 +237,13 @@ def ensure_locations(db: Session, org: Organization, actor: User,
     return out
 
 
+def _appointment_first_sms(key: str, default: str) -> str:
+    """#378: a new program starts with appointment-first texts."""
+    from app.services.programs.appointment_copy import FAMILY_COPY
+    # Seeds never ask the family to call: the reply line, not the call line.
+    return ((FAMILY_COPY.get(key) or {}).get("sms") or default).replace("{call_line}", "{reply_instructions}")
+
+
 def ensure_campaign_families(db: Session, org: Organization) -> List[CampaignFamily]:
     have = {f.key: f for f in db.query(CampaignFamily)
             .filter(CampaignFamily.organization_id == org.id).all()}
@@ -253,7 +260,7 @@ def ensure_campaign_families(db: Session, org: Organization) -> List[CampaignFam
                 asset_category=spec["asset_category"],
                 language=spec.get("language", "en"),
                 first_touch_email_mode="hosted", followup_email_mode="attached",
-                sms_template=spec["sms"], email_subject_template=spec["subject"],
+                sms_template=_appointment_first_sms(spec["key"], spec["sms"]), email_subject_template=spec["subject"],
                 email_body_template=spec["body"], is_active=False,
             )
             db.add(fam)

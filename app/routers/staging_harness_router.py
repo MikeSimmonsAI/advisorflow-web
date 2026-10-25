@@ -1099,7 +1099,7 @@ def send_test_sms(body: SendSmsIn, db: Session = Depends(get_db), god: User = De
                if rec is not None else None)
         if not ctx or not ctx.get("ok") or fam is None or not fam.sms_template:
             raise HTTPException(status_code=409, detail="No campaign text resolves for this test contact.")
-        template = identity.render(fam.sms_template, ctx["fields"])
+        template = identity.render(fam.sms_template, identity._with_booking(db, lead, fam.sms_template, ctx["fields"]))
     try:
         msg = sms_service.send_sms(db, god, lead, template, include_booking_link=False,
                                    send_source=_ss.MANUAL, sent_by_user_id=god.id)

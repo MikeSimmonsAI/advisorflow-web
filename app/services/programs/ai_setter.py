@@ -234,8 +234,21 @@ def _facts(db, prog, lead, conv) -> Dict:
         "mail_task_open": bool(memory_of(conv).get("mail_request")),
         "followups_sent": conv.followups_sent or 0,
         "personal_delivery_available": personal_delivery_available(db, lead),
+        # #378: the ONLY ways this location meets families - name no other.
+        "appointment_ways_this_location_offers": _appointment_ways(db, lead),
         "decline": getattr(conv, "_decline", None),
     }
+
+
+def _appointment_ways(db, lead) -> List[str]:
+    try:
+        from app.services.programs import identity
+        prof = identity.location_profile_for_lead(db, lead)
+        names = {"location": "a visit at the location", "home": "a visit at the family's home",
+                 "phone": "a phone appointment"}
+        return [names[w] for w in identity.appointment_ways(prof)]
+    except Exception:                                    # noqa: BLE001
+        return ["a visit at the location"]
 
 
 def personal_delivery_available(db, lead) -> bool:
@@ -375,12 +388,13 @@ ANSWERING QUESTIONS. When APPROVED INFORMATION answers the question, ANSWER IT i
 MOVING TOWARD AN APPOINTMENT - without pressure:
 - A call or visit is offered when it genuinely helps (they're interested, have questions only I can answer in person, or asked). Never offer times twice in a row if they didn't engage with the first offer; respond to what they said instead. Never invent urgency.
 - To offer times, write the placeholder {{TIMES}} where two times belong ("Would {{TIMES}} work for a short visit?"). That sentence IS your one question - do not ask anything else in the same message. The system fills in two REAL open times. NEVER write a day or clock time yourself (repeating times already offered is fine). If they mentioned when they're free ("afternoons", "next Tuesday"), put it in best_times so times can match.
+- THE WAYS WE MEET (facts_known_for_certain.appointment_ways_this_location_offers): {{TIMES}} are times at the location. When the list also has a visit at their home or a phone appointment, you may add ONE short clause after your question naming them ("...work? I can also come to your home if that's easier."). Never offer a way that is not on that list.
 - Visit = about an hour (60 minutes) in person; a phone appointment is about 30 minutes. Family members are welcome - if a spouse or adult child should be included, say so warmly.
 - BOOK only when their words clearly pick ONE of the times we offered ("the first one", "Thursday at 10 works") -> slot_choice 1 or 2. If they name a different specific day AND time, use requested_time YYYY-MM-DDTHH:MM (Central); the system checks it. "Friday works" when Friday has more than one possibility, "sure", "ok", "sounds good" -> do NOT book; ask which time.
 - Never say an appointment is booked, set or confirmed - the system confirms bookings itself.
 
 HONOUR THEIR TIMING:
-- Busy right now / will get back to us / call me later: acknowledge warmly. If they gave a time to be called -> "callback" with callback_window in their words. If they said "later" with a horizon ("after the holidays", "next month", "in a couple weeks") -> "follow_up_later" with follow_up_date (YYYY-MM-DD, Central) and follow_up_about (what to pick up next time). Otherwise one gentle question about a better time.
+- Busy right now / will get back to us / call me later: acknowledge warmly and still work toward a time that suits them - busy is not a no. If they gave a time to be called -> "callback" with callback_window in their words. Busy this week, or "next week is better" -> "offer_times" for a later day (put "next week" or the day in best_times; the system finds real times then). Only a long horizon ("after the holidays", "next month", "in a few weeks") -> "follow_up_later" with follow_up_date (YYYY-MM-DD, Central) and follow_up_about. Never end with a vague "reach out whenever".
 - Not interested (but not STOP): thank them, leave the door open in one sentence -> "close".
 - ARRIVING NOW. They say they are on the way, will "run by", "stop in", "come by" TODAY or within a few hours (not tomorrow or a later day - see COMING IN ON A LATER DAY) ("I'll run by there in about 15 minutes"): this is a live visit - the best outcome there is. Action "handoff" (the advisor is alerted at once to greet them). Reply warmly in one or two sentences: glad they're coming, and I'll be watching for them / the team will be ready for them. Do not offer {{TIMES}}, do not ask them to pick a time, and never say an appointment is booked or confirmed.
 - COMING IN ON A LATER DAY. They say they'll come by / stop in / visit TOMORROW or on another day, without a clock time ("I can come by tomorrow if that is ok"): that is a yes to a visit - lock in the time. Action "offer_times": glad they're coming, then {{TIMES}} as your one question ("Wonderful, I'd be glad to see you tomorrow. Would {{TIMES}} work?"). Put the day in best_times. If they also gave a clock time, use requested_time. NEVER just agree to "see you tomorrow" without a time - nobody would be ready for them.
@@ -388,6 +402,7 @@ HONOUR THEIR TIMING:
 - Skeptical ("is this a scam?", "how did you get my number?", "are you a robot?"): be honest and calm - it's the family services team at {location} following up on planning information; if asked whether this is a real person, a robot, AI or automated, ANSWER THAT QUESTION HONESTLY in the first sentence - never dodge it: say an automated assistant helps me keep up with messages and scheduling, that I see every reply, and that I'm glad to talk by phone. Offer to stop if they prefer.
 - Planning guide request -> "send_guide": say you'll get the guide to them AND invite them to sit down with you so you can go over it together and answer what applies to them, with {{TIMES}} as your one question (e.g. "...and I'd be glad to go over it with you in person - would {{TIMES}} work for a short visit?"). The system adds the guide or, by text, arranges it.
 - PRINTED / PAPER / MAILED copy (they say printed, paper, hard copy, mail it, to my house/address - NOT a plain "send me the guide", which is "send_guide" by text): a printed-guide request is an opening for a personal meeting - recognise it. If PERSONAL DELIVERY is available (facts_known_for_certain.personal_delivery_available), offer to bring it personally and sit down together: "Absolutely, Lester. I'd be happy to bring that planning guide to you personally so we can sit down and go over the important information together. What's a good day and time for me to stop by?" (action "mail_guide"; no {{TIMES}}; put any day/time they give in best_times). If personal delivery is NOT available: "mail_guide" - honour it (a printed guide will be arranged; confirm the address only if it is missing or incomplete - never claim it has been mailed) and in the same message invite them in so we can go over it together, with {{TIMES}}. If times were already offered and they asked for the mail copy instead, do NOT offer times again - honour the mail request and add ONE soft, personal sentence that you'd be glad to sit down and go over it with them once they've had a look (no {{TIMES}}, no question needed). If they have ALREADY said they only want it mailed and nothing else, just honour that.
+- THEY GOT THE INFORMATION we asked about ("I did get it, thank you", "yes I received the guide"): that is a clear, friendly answer - not a goodbye. Thank them and invite them to go over it together: action "offer_times" with {{TIMES}} ("Glad it reached you, Kevin. I'd be glad to go over it with you so you know what applies to your family - would {{TIMES}} work?"). Information starts the conversation; the appointment is the goal.
 - UNCLEAR "already got it / them / that": it may mean the guide, their benefits, or arrangements. If FAMILY MEMORY and the conversation don't settle which, ask ONE short, warm clarifying question first (e.g. "Glad to hear it, Ronald - do you mean you already have your veteran benefits paperwork, or the planning guide?") - no {{TIMES}} in that message.
 - "We already have plots / a plan / property" WITHOUT saying where: it may well be with us - don't close. Thank them and ask one warm question (is that here at {location}?) or offer a review of their file.
 - Plan with ANOTHER funeral home / cemetery, or "already took care of all that": thank them warmly and respect it - no times, no push. At most one optional sentence that we're here if they ever want anything reviewed ("answer" or "close").
@@ -643,6 +658,7 @@ def decline_context(db, lead, conv, body: str) -> Dict:
     return {"what_was_declined": declined, "alternative_to_offer": ALT_NONE if already else alt,
             "alternative_already_offered": already or None,
             "home_visits_offered_by_this_location": home_ok,
+            "appointment_ways": _appointment_ways(db, lead),
             "family_asks_for_home_visit": asks_home or accepted_home}
 
 
@@ -715,6 +731,10 @@ def validate_decision(d: Dict, body: str, conv, contact: Optional[str] = None) -
     if action == "book" and dc.get("alternative_already_offered") == ALT_HOME:
         problems.append("a home visit is arranged personally by the advisor, never booked as a visit at the "
                         "location - use handoff so I confirm the time myself")
+    if re.search(r"\b(by phone|over the phone|phone (appointment|call|visit))\b", reply, re.I) \
+            and "phone" not in " ".join(dc.get("appointment_ways") or []) and action in ("offer_times", "answer"):
+        problems.append("it offers a phone appointment, and this location does not offer them - offer only "
+                        "facts_known_for_certain.appointment_ways_this_location_offers")
     if action == "close" and not _DECLINE.search(body or ""):
         problems.append("they did not decline - a short or unclear reply ('k', 'maybe', an emoji) is not a no; "
                         "answer it or ask one gentle question instead of closing")
@@ -1047,6 +1067,42 @@ def is_soft_no(body: str) -> bool:
 _REAL_TIME = re.compile(r"\b\d{1,2}(:\d{2})?\s?(AM|PM)\b")    # a real time we filled in (A.describe)
 NEEDS_HUMAN_REASON = ("Needs a human - the AI could not move this to an appointment, so nothing was sent "
                       "(%s). Contact them personally.")
+
+
+# "I did get it, thank you" / "yes I received the guide" (Kevin, Oct 23).
+_GOT_INFO = re.compile(r"\b(i|we)\s+(did\s+)?(got|get|received|receive|have)\s+(it|them|that|the\s+(guide|"
+                       r"information|info|packet|paperwork|benefits guide|planning guide|certificate))\b", re.I)
+_ALREADY_ARRANGED = re.compile(r"\b(already (have|made|bought|purchased|got) (a |our |my )?(plan|arrangements|"
+                               r"plot|space|lot|policy)|taken care of|all set)\b", re.I)
+
+
+_NOT_A_YES = re.compile(r"(n'?t\b|\b(not|no|stop|never|nothing|good|all i needed|reach out if|afford|another|"
+                        r"other|elsewhere|plan|bought|purchased|passed|died|death|lost|funeral|grief|plots?|"
+                        r"policy|insurance|remove|unsubscribe)\b)", re.I)
+
+
+def wants_next_week(body: str) -> bool:
+    """'next week is better' - not 'not next week', 'out of town next week',
+    or 'the week after next' (#378 review)."""
+    b = (body or "").lower()
+    if "next week" not in b or "after next" in b:
+        return False
+    for clause in re.split(r"[.!?;,]| but ", b):
+        if "next week" in clause and re.search(r"(n't|\b(not|no|out|away|gone|busy|trip|travel|vacation|"
+                                               r"cannot|unavailable)\b)", clause):
+            return False
+    return True
+
+
+def got_the_information(body: str) -> bool:
+    """They received what we sent / asked about - a short, clear, friendly
+    answer ("I did get it, thank you"). Never a decline, an existing customer,
+    another funeral home, a loss in the family, or a question (#378 review)."""
+    b = (body or "").strip()
+    if not _GOT_INFO.search(b) or "?" in b or len(b) > 160:
+        return False
+    return not (_NOT_A_YES.search(b) or _ALREADY_ARRANGED.search(b) or _CHANGE_EXISTING.search(b)
+                or existing_plan_purchased_with_us(b) or _EXISTING_PLAN.search(b) or _DECLINE.search(b))
 
 
 def wants_visit(body: str) -> bool:
@@ -1392,7 +1448,9 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         _promise = (bool(_EMPTY_PROMISE.search(text or "")) and not _ARRIVING_TODAY.search(body or "")
                     and not _NEGATIVE.search(body or "") and not _CHANGE_EXISTING.search(body or ""))
         _plain_yes = action == "handoff" and _calm and wants_visit(body)
-        if not _home and _calm and (_later is not None or _promise or _plain_yes):
+        _got_info = (action == "answer" and got_the_information(body)
+                     and not (getattr(conv, "_decline", None) or {}).get("what_was_declined"))
+        if not _home and _calm and (_later is not None or _promise or _plain_yes or _got_info):
             action = "offer_times"
             out["action"] = action
             out["corrected"] = "a yes to coming in always gets real times"
@@ -1401,6 +1459,12 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                 _word = "tomorrow" if (_later - _today).days == 1 else _later.strftime("%A")
                 text = "Wonderful, I'd be glad to see you %s. Would {TIMES} work for you?" % _word
                 merge_memory(conv, {"best_times": _word, "readiness": "ready"})
+            elif _got_info and not (_promise or _plain_yes):
+                # #378 (Kevin, Oct 23): "I did get it, thank you" - the guide
+                # started the conversation; now offer to go over it together.
+                text = ("Glad it reached you. I'd be glad to go over it with you so you know what applies to "
+                        "your family - would {TIMES} work for a short visit?")
+                merge_memory(conv, {"info_provided": ["they received the information"]})
             else:
                 text = "Wonderful, I'd be glad to sit down with you. Would {TIMES} work for you?"
                 merge_memory(conv, {"readiness": "ready"})
@@ -1534,6 +1598,15 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         slots, why = ([], None)
         if preferred_day is None:
             preferred_day = day_named(body, A._today_central().date())
+        if preferred_day is None and wants_next_week(body):
+            # "Busy this week, next week is better" (#378): the first open day next week.
+            _t = A._today_central().date()
+            _mon = _t + timedelta(days=(7 - _t.weekday()))
+            for _i in range(5):
+                _s, _w = A.slots_on_day(db, prog, _mon + timedelta(days=_i), kind=conv.appointment_kind or A.VISIT)
+                if _s:
+                    preferred_day = _mon + timedelta(days=_i)
+                    break
         if preferred_day is not None:
             slots, why = A.slots_on_day(db, prog, preferred_day, kind=conv.appointment_kind or A.VISIT)
         if not slots and day_part(body):

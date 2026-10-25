@@ -39,7 +39,7 @@ def test_follow_ups_use_their_own_words(program, sample_advisor):
     assert "quick question" in t3 and "Eastern Gate Memorial Gardens" in t3
     # a touch the cadence has no text for falls back to the re-engagement family
     t4 = render_cadence_message(db, lead, sample_advisor, 4, "")
-    assert "checking in" in t4
+    assert "I can meet you" in t4                               # #378: re-engagement asks for a visit
 
 
 def test_platform_cadence_never_supplies_program_text(program, sample_advisor):
