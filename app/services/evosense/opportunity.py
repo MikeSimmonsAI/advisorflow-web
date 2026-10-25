@@ -907,7 +907,53 @@ def refresh(db, org_id: str, props: List[Any], *, now: Optional[datetime] = None
         stats["assessed"] += 1
         if cache(p, res, now):
             stats["changed"] += 1
+    try:
+        stats["escalated"] = escalate(db, props, results)
+    except Exception:  # noqa: BLE001 - the view is cached even if a hand-off cannot be opened
+        C.log.exception("opportunity: deadline escalation failed")
     return stats
+
+
+ESCALATE_STATES = ("DISCOVERED", "VERIFIED", "CONTACT_DATA_READY", "OUTREACH_ELIGIBILITY_CHECK", "OUTREACH_QUEUED")
+DEADLINE_REASON = "AUCTION_DEADLINE"
+
+
+def escalate(db, props: List[Any], results: Dict[str, Dict[str, Any]]) -> int:
+    """A verified foreclosure sale within ESCALATE_DAYS, and no conversation
+    under way: put it in front of a person (the existing NEEDS YOU hand-off).
+    Once per sale date - a person who resolved it is not asked again."""
+    from app.models.evosense_models import EvoSenseHandoff
+    from app.services.evosense import evaluate as EV
+    from app.services.evosense import handoff as HO
+    due = [p for p in props if (results.get(p.id) or {}).get("urgency", {}).get("escalate")
+           and results[p.id]["workflow_state"]["key"] in ESCALATE_STATES and not p.promoted_deal_id]
+    if not due:
+        return 0
+    seen = {}
+    for h in (db.query(EvoSenseHandoff).filter(EvoSenseHandoff.property_id.in_([p.id for p in due])).all()):
+        for r in C.jload(h.reasons, []) or []:
+            if r.get("code") == DEADLINE_REASON:
+                seen.setdefault(h.property_id, set()).add(r.get("sale_date"))
+    n = 0
+    for p in due:
+        res = results[p.id]
+        sale = res["urgency"].get("deadline")
+        if sale in seen.get(p.id, set()):
+            continue
+        h = HO.open_handoff(db, p, [DEADLINE_REASON], priority=90,
+                            next_action="Sale %s - decide how to reach the owner (%s)" % (
+                                sale, res["next_action"]["label"]))
+        reasons = C.jload(h.reasons, []) or []
+        for r in reasons:
+            if r.get("code") == DEADLINE_REASON:
+                r["sale_date"] = sale
+        h.reasons = C.jdump(reasons)
+        C.log_event(db, p.organization_id, "opportunity.escalated", property_id=p.id, is_test=p.is_test,
+                    actor_type=C.ACTOR_AUTOMATION,
+                    summary="Verified foreclosure sale %s within %s days - handed to a person" % (sale, ESCALATE_DAYS))
+        EV.refresh_status(db, p)
+        n += 1
+    return n
 
 
 STALE_AFTER = timedelta(hours=20)       # urgency moves with the calendar: re-assess daily

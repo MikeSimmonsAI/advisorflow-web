@@ -249,7 +249,8 @@ def classify(text: str) -> Dict[str, Any]:
         outcome = C.O_WANTS_OFFER
     elif _PRICE_HIGH.search(t):
         outcome = C.O_PRICE_TOO_HIGH
-    elif _WILLING.search(t) or _INTEREST.search(t):
+    elif _WILLING.search(t) or any(not _negated(t, m) for m in _INTEREST.finditer(t)):
+        # "not sure" / "no, not interested" never reads as interest
         outcome = C.O_INTERESTED
     elif _ESTATE.search(t):
         outcome = C.O_ESTATE
@@ -456,8 +457,11 @@ def evaluate(db, org_id: str, msg: EvoSenseMessage, *, user=None) -> Dict[str, A
         db.commit()
         return {"message_id": msg.id, "outcome": outcome, "facts": [], "actions": [],
                 "status": prop.status}
+    # situations a person must handle (reply_flags.py); an opt-out still wins
+    from app.services.evosense import reply_flags as RF
+    flags = [] if hard else RF.read(text)
     ai = None
-    if not hard and not reading["confident"] and not ctl.paused_ai_replies and not prop.is_test:
+    if not hard and not flags and not reading["confident"] and not ctl.paused_ai_replies and not prop.is_test:
         from app.services import wholesale_ai
         try:
             ai = wholesale_ai.extract_from_message(text, org_id=org_id, actor="evosense",
@@ -476,8 +480,9 @@ def evaluate(db, org_id: str, msg: EvoSenseMessage, *, user=None) -> Dict[str, A
     if reading["opt_out"] and outcome not in (C.O_DNC, C.O_WRONG_PERSON):
         outcome = C.O_DNC               # a STOP anywhere wins, whatever else was said
     msg.outcome = outcome
-    msg.reading = C.jdump({"rules": reading, "ai": ai and {k: ai.get(k) for k in
-                                                           ("intent", "summary", "confidence", "source")}})
+    msg.reading = C.jdump({"rules": reading, "flags": flags, "ai": ai and {k: ai.get(k) for k in
+                                                                           ("intent", "summary", "confidence",
+                                                                            "source")}})
 
     # facts, with provenance. A newer statement of the same kind supersedes.
     made = []
@@ -527,6 +532,11 @@ def evaluate(db, org_id: str, msg: EvoSenseMessage, *, user=None) -> Dict[str, A
         set_nurture(db, prop, engagement, lead, until, "%s — seller said “%s”" % (
             outcome.replace("_", " ").title(), _sentences(text)[-1][:120] if _sentences(text) else text[:120]))
         actions.append("Nurture until %s (%s)" % (until.strftime("%b %d, %Y"), why))
+        if outcome == C.O_CALL_LATER:
+            # "call me tomorrow" asks for a PERSON's call, not another text
+            HO.open_handoff(db, prop, ["CALLBACK"], engagement=engagement, priority=70,
+                            next_action="Call the seller %s" % until.strftime("%b %d"))
+            actions.append("NEEDS YOU: CALLBACK %s" % until.strftime("%b %d"))
     elif outcome in (C.O_ALREADY_SOLD, C.O_NOT_OWNER, C.O_LISTED, C.O_HARD_NO):
         engagement.status = "stopped"
         if lead is not None:
@@ -587,6 +597,35 @@ def evaluate(db, org_id: str, msg: EvoSenseMessage, *, user=None) -> Dict[str, A
                 cadence_service.stop_cadence_for_lead(db, lead.id, "handed_off")
             engagement.cadence_paused_by_evosense = True
             actions.append("NEEDS YOU: " + ", ".join(reasons))
+
+    angry = any(f["code"] == "ANGRY" for f in flags)
+    if flags and (engagement.status != "stopped" or angry):
+        codes = [f["code"] for f in flags]
+        if "DECEASED_OWNER" in codes and not any(f.fact_type == "estate_context" for f in made):
+            q = next(f["quote"] for f in flags if f["code"] == "DECEASED_OWNER")
+            row = EvoSenseFact(organization_id=org_id, property_id=prop.id, engagement_id=engagement.id,
+                               message_id=msg.id, fact_type="estate_context", value="owner deceased (seller stated)",
+                               truth_state=C.T_SELLER_STATED, quote=q[:250], extracted_by="rules", confidence=80)
+            db.add(row)
+            made.append(row)
+        if "AUCTION_UPDATE" in codes:
+            q = next(f["quote"] for f in flags if f["code"] == "AUCTION_UPDATE")
+            db.add(EvoSenseFact(organization_id=org_id, property_id=prop.id, engagement_id=engagement.id,
+                                message_id=msg.id, fact_type="auction_status", value=q[:120],
+                                truth_state=C.T_SELLER_STATED, quote=q[:250], extracted_by="rules", confidence=70))
+        HO.open_handoff(db, prop, ["ESTATE" if c == "DECEASED_OWNER" else c for c in codes], engagement=engagement,
+                        priority=80 if "ANGRY" not in codes else 60,
+                        next_action=RF.NEXT_ACTION[codes[0]])
+        if lead is not None and not lead.is_test:
+            from app.services import cadence_service
+            cadence_service.stop_cadence_for_lead(db, lead.id, "angry_reply" if "ANGRY" in codes else "handed_off")
+        engagement.cadence_paused_by_evosense = True
+        if angry:
+            # automated outreach ends for this conversation; a person may still
+            # reply. Do-not-contact only follows the owner's own opt-out words.
+            engagement.status = "stopped"
+            engagement.blocked_reason = "angry_reply"
+        actions.append("NEEDS YOU: " + ", ".join(codes))
 
     C.log_event(db, org_id, "reply.read", property_id=prop.id, is_test=prop.is_test,
                 actor_type=C.ACTOR_AUTOMATION if not user else C.ACTOR_USER, user=user,

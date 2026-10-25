@@ -32,6 +32,7 @@ import {
 import '../ds/evo-pages.css'
 import EvoActions from './EvoActions'
 import OpportunityCard from './OpportunityCard'
+import { FirstContactPlan } from './Acquire'
 import { ReadinessPanel } from './Readiness'
 import EvoPermission from './EvoPermission'
 import EvoFollowUp from './EvoFollowUp'
@@ -443,6 +444,7 @@ export default function EvoProperty() {
 
       {/* THE OPPORTUNITY VIEW — priority, urgency, money, evidence, next action */}
       <OpportunityCard o={d.opportunity} />
+      <FirstContactPlan propertyId={propertyId} />
 
       {/* NEXT ACTIONS — server-computed: what you can do, why not, what happens after */}
       <EnrichmentStatus propertyId={propertyId} refreshKey={busy} />
