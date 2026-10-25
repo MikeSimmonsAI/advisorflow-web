@@ -348,3 +348,13 @@ def test_a_deadline_hand_off_is_not_a_conversation_and_a_test_deal_never_touches
     db.commit()
     res = OP.build(db, org, [a])[a.id]
     assert res["workflow_state"]["key"] != "CLOSED" and "realized" not in res["economics"]["spreads"]
+
+
+def test_a_new_engine_version_reassesses_every_property(batch, monkeypatch):
+    db, org = batch["db"], batch["org"]
+    OP.refresh(db, org, [batch[k] for k in "abcde"])
+    db.commit()
+    assert OP.backfill(db, org_id=org) == 0
+    monkeypatch.setattr(OP, "VERSION", "opportunity/v999")
+    assert OP.backfill(db, org_id=org) == 5
+    assert OP.backfill(db, org_id=org) == 0

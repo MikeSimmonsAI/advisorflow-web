@@ -35,7 +35,10 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from app.services.evosense import common as C
 
-VERSION = "opportunity/v1"
+VERSION = "opportunity/v2"
+# v2 = v1 + a deadline-only hand-off is not a conversation; a test deal never
+# changes a real property. The version is part of the cache key, so a new
+# version re-assesses every property on the next backfill passes.
 
 # ── documented weights ──────────────────────────────────────────────────────
 # Priority = weighted average of the KNOWN dimensions (0-100 each).
@@ -863,7 +866,7 @@ def build(db, org_id: str, props: List[Any], *, now: Optional[datetime] = None,
 
 def _hash(res: Dict[str, Any]) -> str:
     body = {k: v for k, v in res.items() if k != "computed_at"}
-    return hashlib.sha1(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()[:20]
+    return VERSION + ":" + hashlib.sha1(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()[:20]
 
 
 def cache(prop, res: Dict[str, Any], now: Optional[datetime] = None) -> bool:
@@ -980,7 +983,9 @@ def backfill(db, *, org_id: Optional[str] = None, limit: int = BACKFILL_BATCH, n
     q = db.query(EvoSenseProperty).filter(EvoSenseProperty.archived_at.is_(None),
                                           or_(EvoSenseProperty.opportunity_at.is_(None),
                                               EvoSenseProperty.opportunity_at < now - STALE_AFTER,
-                                              EvoSenseProperty.opportunity_at < EvoSenseProperty.last_evaluated_at))
+                                              EvoSenseProperty.opportunity_at < EvoSenseProperty.last_evaluated_at,
+                                              EvoSenseProperty.opportunity_hash.is_(None),
+                                              ~EvoSenseProperty.opportunity_hash.like(VERSION + ":%")))
     if org_id:
         q = q.filter(EvoSenseProperty.organization_id == org_id)
     rows = (q.with_entities(EvoSenseProperty.id, EvoSenseProperty.organization_id)
