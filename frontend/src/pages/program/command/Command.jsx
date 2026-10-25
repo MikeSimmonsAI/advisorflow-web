@@ -641,7 +641,6 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
             {f.response_id && <button onClick={markHandled}>Mark handled</button>}
             {!f.mail_task && <button onClick={() => mailTask(false)}>Add task: mail a printed guide</button>}
             {f.phone && <button onClick={() => { navigator.clipboard?.writeText(f.phone).then(() => toast('Phone copied.')).catch(() => {}) }}>Copy phone number</button>}
-            {!f.is_demo && !f.handling?.opted_out && <button className="danger" onClick={() => setDncAsk('')}>Do not contact</button>}
           </div>}
         </span>
       </header>
@@ -650,6 +649,10 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
         <button className="primary" onClick={() => focusComposer(replyMode())}><Icon n="reply" s={22} />Reply</button>
         <button onClick={() => schedRef.current?.scrollIntoView({ behavior: 'smooth' })}><Icon n="cal" s={22} />Schedule Visit</button>
         <button onClick={() => focusComposer('note')}><Icon n="note" s={22} />Add Note</button>
+        {!f.is_demo && (f.handling?.opted_out
+          ? <span className="cmd-dnc-quick on" role="status">ON DO NOT CONTACT</span>
+          : <button className="cmd-dnc-quick" aria-expanded={dncAsk !== null}
+                    onClick={() => setDncAsk(dncAsk === null ? '' : null)}>DO NOT CONTACT</button>)}
       </div>
       {dncAsk !== null && <section className="cmd-handoff-banner" role="group" aria-label="Confirm Do Not Contact">
         <b>DO NOT CONTACT</b>

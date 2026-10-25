@@ -247,3 +247,10 @@ body:has(.cmd)::before { display: none; }
 .cmd-handoff-banner p.small { font-size: 13.5px; }
 .cmd-handoff-banner button { margin-top: 10px; }
 .cmd-menu button.danger { color: #c62828; font-weight: 700; }
+
+/* Do Not Contact on the family's main screen (Mike, Oct 25) */
+.cmd-quick { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+.cmd-quick .cmd-dnc-quick { background: #c62828; color: #fff; border: 1px solid #c62828; font-weight: 800; letter-spacing: .03em;
+  display: flex; align-items: center; justify-content: center; border-radius: 12px; min-height: 48px; cursor: pointer; }
+.cmd-quick .cmd-dnc-quick:hover { background: #a91f1f; }
+.cmd-quick .cmd-dnc-quick.on { background: #fdecea; color: #a1271b; cursor: default; }
