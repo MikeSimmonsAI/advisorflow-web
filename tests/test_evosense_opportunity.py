@@ -171,16 +171,22 @@ def test_refresh_caches_and_is_idempotent_and_the_backfill_finds_stale_rows(batc
     props = [batch[k] for k in "abcde"]
     s1 = OP.refresh(db, org, props)
     db.commit()
-    assert s1 == {"assessed": 5, "changed": 5, "failed": 0}
+    assert {k: s1[k] for k in ("assessed", "changed", "failed")} == {"assessed": 5, "changed": 5, "failed": 0}
     a = batch["a"]
     db.refresh(a)
     assert a.priority_score is not None and a.urgency_score == 92 and a.next_best_action == "escalate_deadline"
     assert a.economics_status == "not_supportable" and a.spread_base is None
     assert ",foreclosure_auction," in a.opportunity_categories and a.sale_deadline is not None
     assert OP.compact(a)["next_action"]["label"] == OP.ACTIONS["escalate_deadline"]
+    # the imminent sale was handed to a person, so its next answer differs once
     s2 = OP.refresh(db, org, props)
     db.commit()
-    assert s2["changed"] == 0                                          # unchanged evidence writes nothing new
+    assert s2["changed"] == 1
+    db.refresh(a)
+    assert a.workflow_state == "HUMAN_HANDOFF"
+    s3 = OP.refresh(db, org, props)
+    db.commit()
+    assert s3["changed"] == 0                                          # unchanged evidence writes nothing new
     # nothing stale -> the backfill has nothing to do; a rescore makes one stale again
     assert OP.backfill(db, org_id=org) == 0
     a.last_evaluated_at = C.now() + timedelta(seconds=5)
@@ -297,3 +303,25 @@ def test_the_list_view_ranks_by_the_same_engine_and_reports_readiness(db_session
     assert rd["properties"] == 2 and rd["verified_notices"] == 1
     assert rd["supportable_financials"] == 0 and rd["eligible_for_outreach"] == 0
     assert sum(rd["blocked"].values()) == 2
+
+
+def test_an_imminent_verified_sale_goes_to_a_person_once(batch):
+    from app.models.evosense_models import EvoSenseHandoff
+    db, org = batch["db"], batch["org"]
+    props = [batch[k] for k in "abcde"]
+    s1 = OP.refresh(db, org, props)
+    db.commit()
+    assert s1["escalated"] == 1                      # only the verified sale 8 days out
+    a = batch["a"]
+    db.refresh(a)
+    h = db.query(EvoSenseHandoff).filter(EvoSenseHandoff.property_id == a.id).one()
+    assert {r["code"] for r in C.jload(h.reasons)} == {OP.DEADLINE_REASON}
+    assert a.status == C.S_NEEDS_YOU
+    # a person resolves it; the next refresh does not ask again for the same sale
+    h.status = "resolved"
+    db.commit()
+    a.opportunity_hash = None
+    assert OP.refresh(db, org, props).get("escalated", 0) == 0
+    assert db.query(EvoSenseHandoff).filter(EvoSenseHandoff.property_id == a.id).count() == 1
+    # the claim-only sale is never escalated
+    assert db.query(EvoSenseHandoff).filter(EvoSenseHandoff.property_id == batch["c"].id).count() == 0

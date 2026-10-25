@@ -26,6 +26,7 @@ REASONS = {
     "PROMOTION_READY": "Ready to promote into Wholesale",
     "AI_REVIEW_PENDING": "AI review pending — the seller's reply is saved but could not be read automatically",
     "ROUTING_REVIEW": "An inbound SMS may belong to this property — confirm before it is used",
+    "AUCTION_DEADLINE": "Verified foreclosure sale within two weeks — a person decides how to reach the owner",
     "HUMAN_REQUESTED": "Seller asked for a person (or whether this is automated)",
     "ANGRY": "Hostile reply — automated outreach stopped; a person decides whether to reply",
     "MULTIPLE_PROPERTIES": "Seller mentioned more than one property",
