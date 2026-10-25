@@ -677,3 +677,10 @@ button.sci-tile[aria-expanded="true"] { border-color: var(--gold); box-shadow: 0
 .sci-pulse-rates small {display:block;font-size:10.5px;line-height:1.45;margin-top:2px;color:#526b73;}
 .sci-pulse-rates > div:first-child small {color:#b9d6dd;}
 @media(max-width:670px){.sci-pulse-rates{grid-template-columns:1fr;}}
+
+/* Do Not Contact (Oct 25) */
+.sci-dnc-banner { margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; background: #fdecea; border: 2px solid #c62828; color: #7a1a12; font-size: 14.5px; }
+.sci-dnc-banner b { background: #c62828; color: #fff; padding: 2px 10px; border-radius: 999px; font-size: 12.5px; margin-right: 8px; letter-spacing: .03em; }
+.sci-dnc-confirm { margin: 0 0 12px; padding: 12px 14px; border-radius: 10px; background: #fff5f5; border: 1px solid #f0c6c9; }
+.sci-dnc-confirm p { margin: 0 0 8px; font-size: 14.5px; line-height: 1.4; }
+.sci-dnc-confirm input { width: 100%; box-sizing: border-box; font-size: 15px; padding: 8px 10px; margin-bottom: 8px; border: 1px solid #d9dee5; border-radius: 8px; }
