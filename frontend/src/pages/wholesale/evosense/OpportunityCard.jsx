@@ -19,7 +19,7 @@ const FLAG = {
   unknown_liens: 'Liens unknown', unknown_payoff: 'Payoff unknown',
 }
 
-export default function OpportunityCard({ o }) {
+export default function OpportunityCard({ o, q }) {
   const [open, setOpen] = useState(false)
   if (!o) return null
   const e = o.economics || {}
@@ -55,6 +55,18 @@ export default function OpportunityCard({ o }) {
           </ul>
         ) : null}
       </div>
+
+      {q ? (
+        <div className="evo-small" style={{ marginTop: 12 }}>
+          <b>Seller qualification: {q.known} of {q.of} known</b>
+          {q.next_question ? <span className="evo-muted"> · next question: “{q.next_question}”</span> : null}
+          <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+            {q.questions.filter((x) => x.answer).map((x) => (
+              <li key={x.key}>{x.label}: <b>{x.answer.value}</b> ({x.answer.who}{x.answer.quote ? `: “${x.answer.quote}”` : ''})</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {o.next_action ? (
         <p style={{ marginTop: 12 }}>

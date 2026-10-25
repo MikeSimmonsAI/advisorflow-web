@@ -1499,7 +1499,7 @@ EXCEPTION_KINDS = (
     "verify_owner", "verify_contact", "property_research", "bad_or_missing_data",
     "missing_photos_docs", "buyer_criteria_verification", "proof_of_funds_verification",
     "buyer_research", "missing_disposition_data", "seller_callback_requested",
-    "ai_exception", "title_ownership_anomaly", "escalate_to_owner",
+    "ai_exception", "title_ownership_anomaly", "escalate_to_owner", "seller_first_call",
 )
 EXCEPTION_OUTCOMES = ("complete", "unable_to_verify", "needs_more_info", "escalate")
 EXCEPTION_OPEN_STATUSES = ("open", "assigned", "needs_more_info", "escalated")

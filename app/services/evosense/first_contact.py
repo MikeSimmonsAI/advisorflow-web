@@ -43,7 +43,8 @@ CALL_RULES = [
     "Do not name a price or promise a cash offer before the deal is underwritten and approved.",
     "Do not mention the foreclosure unless they do - and never misstate its status.",
     "If they ask to stop, mark do-not-contact before you hang up.",
-    "Only call between 8 AM and 9 PM their local time, and never a number on a do-not-call list.",
+    "Texas calling hours (their local time): after 9 AM and before 9 PM Monday-Saturday, after noon and "
+    "before 9 PM Sunday. Never a number on a do-not-call or suppression list.",
 ]
 FIRST_EMAIL = {
     "subject": "Your property at {address}",

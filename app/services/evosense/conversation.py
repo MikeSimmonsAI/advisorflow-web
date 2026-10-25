@@ -295,6 +295,11 @@ def classify(text: str) -> Dict[str, Any]:
             if m:
                 fact("condition", value, m)
                 break
+        # qualification facts the outcome rules do not cover (an existing
+        # offer, named repairs, authority to sell) - facts only, never an outcome
+        from app.services.evosense import qualification as QF
+        for f in QF.extra_facts(t):
+            facts.append({"fact_type": f["fact_type"], "value": f["value"], "quote": f["quote"], "note": None})
         if outcome in (C.O_NOT_NOW, C.O_CALL_LATER, C.O_MAYBE, C.O_FAMILY):
             m = _NOT_NOW.search(t) or _CALL_LATER.search(t) or _MAYBE.search(t) or _FAMILY.search(t)
             if m:

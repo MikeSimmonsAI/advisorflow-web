@@ -178,6 +178,8 @@ def property_detail(property_id: str, db: Session = Depends(get_db),
     out["follow_ups"] = FU.open_for(db, org_id, prop)
     out["permission"] = PM.status_for(db, org_id, prop, [c["value"] for c in out.get("contacts") or []
                                                          if c.get("kind") == "phone"])
+    from app.services.evosense import qualification as QF
+    out["qualification"] = QF.for_property(db, prop)
     # the universal opportunity view, assessed fresh for the page (read-only:
     # the cached columns are refreshed by the backfill, not by a page view)
     from app.services.evosense import opportunity as OP
@@ -218,6 +220,214 @@ def enrichment_queue(limit: int = Query(100, ge=1, le=500), db: Session = Depend
                      user: User = Depends(require_tenant_or_observer)):
     from app.services.evosense import automation as AU
     return AU.enrichment_queue(db, _read_org(db, user), limit=limit)
+
+
+# ── contact-lookup batches (nothing is bought without a typed approval) ────
+
+def _batch(db, org_id: str, batch_id: str):
+    from app.models.evosense_models import EvoSenseContactBatch
+    b = db.query(EvoSenseContactBatch).filter(EvoSenseContactBatch.id == batch_id,
+                                              EvoSenseContactBatch.organization_id == org_id).first()
+    if b is None:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    return b
+
+
+def _require_manager(db, user):
+    from app.services import wholesale_exceptions as WX
+    if not WX.is_manager(db, user):
+        raise HTTPException(status_code=403, detail="Only an organization admin can approve or start paid lookups.")
+
+
+@router.get("/contact-batches/preflight")
+def contact_batch_preflight(source: str = "list:top100-2010", db: Session = Depends(get_db),
+                            user: User = Depends(require_tenant_or_observer)):
+    """Free: who is ready, who needs a person first, duplicates, the provider's
+    own price and the most the batch could cost. Nothing is bought."""
+    from app.services.evosense import contact_batch as CB
+    try:
+        return CB.preflight(db, _read_org(db, user), source)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Unknown list")
+
+
+class BatchIn(BaseModel):
+    source: str = "list:top100-2010"
+    max_lookups: Optional[int] = None
+
+
+@router.post("/contact-batches")
+def contact_batch_create(body: BatchIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                         _g: User = Depends(require_not_observation)):
+    from app.services.evosense import contact_batch as CB
+    org_id = svc.write_org_id(db, user)
+    try:
+        b = CB.create(db, org_id, body.source, user=user, max_lookups=body.max_lookups)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Unknown list")
+    db.commit()
+    return CB.payload(db, b)
+
+
+@router.get("/contact-batches")
+def contact_batch_list(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    from app.models.evosense_models import EvoSenseContactBatch
+    from app.services.evosense import contact_batch as CB
+    org_id = _read_org(db, user)
+    rows = (db.query(EvoSenseContactBatch).filter(EvoSenseContactBatch.organization_id == org_id)
+            .order_by(EvoSenseContactBatch.created_at.desc()).limit(20).all())
+    return {"batches": [CB.payload(db, b, items=False) for b in rows],
+            "provider": CB.provider_facts(db, org_id)}
+
+
+@router.get("/contact-batches/{batch_id}")
+def contact_batch_get(batch_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    from app.services.evosense import contact_batch as CB
+    org_id = _read_org(db, user)
+    return CB.payload(db, _batch(db, org_id, batch_id))
+
+
+class ApproveIn(BaseModel):
+    phrase: str
+    daily_lookups: Optional[int] = None
+
+
+@router.post("/contact-batches/{batch_id}/approve")
+def contact_batch_approve(batch_id: str, body: ApproveIn, db: Session = Depends(get_db),
+                          user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """THE spend authorization: the typed phrase names the count and the cap."""
+    from app.services.evosense import contact_batch as CB
+    _require_manager(db, user)
+    org_id = svc.write_org_id(db, user)
+    b = _batch(db, org_id, batch_id)
+    try:
+        changes = CB.approve(db, org_id, b, body.phrase, user, daily_lookups=body.daily_lookups)
+    except CB.ApprovalRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    db.commit()
+    return dict(CB.payload(db, b), changes=changes)
+
+
+_BATCH_THREADS: dict = {}
+
+
+def _kick_batch(org_id: str, batch_id: str) -> None:
+    """Work a running batch now, on a worker thread (the scheduler continues it
+    after a restart)."""
+    import threading
+    if _BATCH_THREADS.get(batch_id):
+        return
+    _BATCH_THREADS[batch_id] = True
+
+    def work():
+        from app.deps import SessionLocal
+        from app.services.evosense import contact_batch as CB
+        s = SessionLocal()
+        try:
+            for _ in range(100):
+                b = _batch(s, org_id, batch_id)
+                if b.status != "running":
+                    break
+                CB.run_step(s, org_id, b)
+        except Exception:  # noqa: BLE001
+            s.rollback()
+            C.log.exception("contact batch %s worker crashed", batch_id)
+        finally:
+            _BATCH_THREADS.pop(batch_id, None)
+            s.close()
+    threading.Thread(target=work, name="evosense-contact-batch", daemon=True).start()
+
+
+def _batch_action(batch_id: str, action: str, db, user):
+    """start | pause | resume | stop | emergency_stop. Starting needs an admin;
+    anyone working the queue may pause or stop."""
+    from app.services.evosense import contact_batch as CB
+    if action in ("start", "resume"):
+        _require_manager(db, user)
+    org_id = svc.write_org_id(db, user)
+    b = _batch(db, org_id, batch_id)
+    try:
+        CB.set_status(db, org_id, b, action, user=user)
+    except CB.ApprovalRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    db.commit()
+    if b.status == "running":
+        _kick_batch(org_id, b.id)
+    return CB.payload(db, b, items=False)
+
+
+@router.post("/contact-batches/{batch_id}/start")
+def contact_batch_start(batch_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                        _g: User = Depends(require_not_observation)):
+    return _batch_action(batch_id, "start", db, user)
+
+
+@router.post("/contact-batches/{batch_id}/resume")
+def contact_batch_resume(batch_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                         _g: User = Depends(require_not_observation)):
+    return _batch_action(batch_id, "resume", db, user)
+
+
+@router.post("/contact-batches/{batch_id}/pause")
+def contact_batch_pause(batch_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                        _g: User = Depends(require_not_observation)):
+    return _batch_action(batch_id, "pause", db, user)
+
+
+@router.post("/contact-batches/{batch_id}/stop")
+def contact_batch_stop(batch_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                       _g: User = Depends(require_not_observation)):
+    return _batch_action(batch_id, "stop", db, user)
+
+
+@router.post("/contact-batches/{batch_id}/emergency_stop")
+def contact_batch_emergency_stop(batch_id: str, db: Session = Depends(get_db),
+                                 user: User = Depends(require_tenant_user),
+                                 _g: User = Depends(require_not_observation)):
+    """Stops this batch and pauses every paid lookup in the workspace."""
+    return _batch_action(batch_id, "emergency_stop", db, user)
+
+
+# ── human first contact: the call queue and one-click call outcomes ────────
+
+@router.get("/call-queue")
+def call_queue(limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db),
+               user: User = Depends(require_tenant_or_observer)):
+    from app.services.evosense import calling as CL
+    return CL.call_queue(db, _read_org(db, user), limit=limit)
+
+
+@router.post("/call-queue/sweep")
+def call_queue_sweep(db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                     _g: User = Depends(require_not_observation)):
+    """Put every callable owner in the VA queue (once each)."""
+    from app.services.evosense import calling as CL
+    org_id = svc.write_org_id(db, user)
+    n = CL.sweep(db, org_id)
+    db.commit()
+    return {"queued": n}
+
+
+class CallOutcomeIn(BaseModel):
+    outcome: str
+    note: Optional[str] = None
+    callback_at: Optional[str] = None
+    contact_point_id: Optional[str] = None
+
+
+@router.post("/properties/{property_id}/call-outcome")
+def call_outcome(property_id: str, body: CallOutcomeIn, db: Session = Depends(get_db),
+                 user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    from app.services.evosense import calling as CL
+    org_id = svc.write_org_id(db, user)
+    prop = _prop(db, org_id, property_id)
+    try:
+        out = CL.record_outcome(db, org_id, prop, user, outcome=body.outcome, note=body.note,
+                                callback_at=body.callback_at, contact_point_id=body.contact_point_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    return out
 
 
 @router.get("/automation/readiness")
