@@ -25,6 +25,12 @@ const REHAB = ['light', 'moderate', 'heavy', 'full_gut']
 const PROPERTY_TYPES = ['single_family', 'duplex', 'triplex', 'fourplex',
                         'multi_family', 'condo', 'townhouse', 'mobile', 'land',
                         'commercial', 'other']
+// Whole categories (a box naming one matches every subtype in it) and the
+// common investment subtypes. A buyer is never matched to a category they do not buy.
+const CATEGORY_TYPES = ['residential', 'multifamily', 'commercial', 'industrial', 'land', 'agricultural',
+                        'mixed_use', 'specialty']
+const SUBTYPE_TYPES = ['warehouse', 'office', 'retail', 'ranch', 'farm', 'undeveloped_acreage', 'self_storage',
+                       'mobile_home_park', 'rv_park', 'hotel']
 
 export default function WholesaleBuyers() {
   const [buyers, setBuyers] = useState([])
@@ -320,7 +326,8 @@ function BuyBoxes({ buyer, onChanged, onClose }) {
     label: '', states: '', counties: '', cities: '', zips: '', markets: '',
     property_types: [], strategies: [], min_price: '', max_price: '',
     min_beds: '', min_sqft: '', max_sqft: '', min_year_built: '',
-    rehab_tolerance: '', min_spread: '',
+    rehab_tolerance: '', min_spread: '', min_acres: '', max_acres: '', min_units: '', max_units: '',
+    min_building_sqft: '', max_building_sqft: '', min_cap_rate: '', distress_tolerance: '', criteria: '', value_add: false,
   })
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -349,16 +356,22 @@ function BuyBoxes({ buyer, onChanged, onClose }) {
       if (form.property_types.length) payload.property_types = form.property_types
       if (form.strategies.length) payload.strategies = form.strategies
       for (const key of ['min_price', 'max_price', 'min_beds', 'min_sqft',
-                         'max_sqft', 'min_year_built', 'min_spread']) {
+                         'max_sqft', 'min_year_built', 'min_spread', 'min_acres', 'max_acres', 'min_units',
+                         'max_units', 'min_building_sqft', 'max_building_sqft', 'min_cap_rate']) {
         if (form[key] !== '') payload[key] = Number(form[key])
       }
       if (form.rehab_tolerance) payload.rehab_tolerance = form.rehab_tolerance
+      if (form.distress_tolerance) payload.distress_tolerance = form.distress_tolerance
+      if (form.criteria.trim()) payload.criteria = form.criteria.trim()
+      if (form.value_add) payload.value_add = true
       await api.post(`/wholesale/buyers/${buyer.id}/buy-boxes`, payload)
       onChanged()
       setForm({ label: '', states: '', counties: '', cities: '', zips: '',
                 markets: '', property_types: [], strategies: [], min_price: '',
                 max_price: '', min_beds: '', min_sqft: '', max_sqft: '',
-                min_year_built: '', rehab_tolerance: '', min_spread: '' })
+                min_year_built: '', rehab_tolerance: '', min_spread: '', min_acres: '', max_acres: '',
+                min_units: '', max_units: '', min_building_sqft: '', max_building_sqft: '', min_cap_rate: '',
+                distress_tolerance: '', criteria: '', value_add: false })
     } catch (e) { setError(errText(e)) } finally { setBusy(false) }
   }
 
@@ -424,7 +437,11 @@ function BuyBoxes({ buyer, onChanged, onClose }) {
           ['counties', 'Counties'], ['cities', 'Cities'], ['zips', 'ZIPs'],
           ['markets', 'Markets'], ['min_price', 'Min price'], ['max_price', 'Max price'],
           ['min_beds', 'Min beds'], ['min_sqft', 'Min sq ft'], ['max_sqft', 'Max sq ft'],
-          ['min_year_built', 'Built after'], ['min_spread', 'Min spread']].map(
+          ['min_year_built', 'Built after'], ['min_spread', 'Min spread'],
+          ['min_acres', 'Min acres'], ['max_acres', 'Max acres'], ['min_units', 'Min units'], ['max_units', 'Max units'],
+          ['min_building_sqft', 'Min building sq ft'], ['max_building_sqft', 'Max building sq ft'],
+          ['min_cap_rate', 'Desired cap rate (%)'], ['distress_tolerance', 'Distress tolerance'],
+          ['criteria', 'Other criteria']].map(
           ([key, label]) => (
             <div className="ws-field" key={key}>
               <label>{label}</label>
@@ -444,7 +461,7 @@ function BuyBoxes({ buyer, onChanged, onClose }) {
       <div style={{ marginTop: 12 }}>
         <div className="ws-k">Property types</div>
         <div className="ws-actions" style={{ marginTop: 6 }}>
-          {PROPERTY_TYPES.map((t) => (
+          {[...CATEGORY_TYPES, ...SUBTYPE_TYPES, ...PROPERTY_TYPES].map((t) => (
             <label className="ws-checkbox" key={t}>
               <input type="checkbox" checked={form.property_types.includes(t)}
                      onChange={() => toggle('property_types', t)} />
@@ -453,6 +470,11 @@ function BuyBoxes({ buyer, onChanged, onClose }) {
           ))}
         </div>
       </div>
+
+      <label className="ws-checkbox" style={{ marginTop: 10 }}>
+        <input type="checkbox" checked={form.value_add} onChange={(e) => set('value_add', e.target.checked)} />
+        Interested in value-add properties
+      </label>
 
       <div style={{ marginTop: 12 }}>
         <div className="ws-k">Strategy</div>

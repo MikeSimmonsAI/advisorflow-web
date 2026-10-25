@@ -18,6 +18,7 @@ import { errText } from '../wsShared'
 import { Alert, Empty, EvoApp, Metric, Metrics, PageHead, Panel, Ring, Search, Seg, Skeleton, Tabs, Tag } from '../ds/ds'
 import '../ds/evo-pages.css'
 import { ContactBatchPanel } from './Acquire'
+import { CATEGORY_LABEL, PropertyTypeSelect, TypeLabel } from './ptypes'
 import './evo-actions.css'
 
 const KEY = 'evo_fcc_month'
@@ -103,6 +104,7 @@ function PropertyTable({ items, columns, navigate, extra }) {
                   {r.street_address}</Link>
                 <span className="evo-prop__sub" style={{ display: 'block' }}>
                   {[r.city, r.county ? `${r.county} County` : null].filter(Boolean).join(' · ')}</span>
+                <span className="evo-prop__sub" style={{ display: 'block' }}><TypeLabel pc={r.property_class} /></span>
                 {(r.auction.flags || []).map((f) => <span key={f} className="evo-prop__sub evo-fcc-flag">{f}</span>)}
                 <Actions r={r} />
               </td>
@@ -321,6 +323,11 @@ export default function ForeclosureCenter() {
                 <ul className="evo-fcc-list">{Object.entries(data.counties).map(([k, v]) => (
                   <li key={k}><button className="evo-linkbtn" onClick={() => { setCounty(k === 'Unknown' ? '' : k); drill({}) }}>{k}</button><b>{v}</b></li>))}</ul>
               </Panel>
+              <Panel title="Property types" hint="From the county's own category code">
+                <ul className="evo-fcc-list">{Object.entries(data.property_types || {}).map(([k, v]) => (
+                  <li key={k}><button className="evo-linkbtn" onClick={() => drill({ ptype: k })}>
+                    {k === 'unknown' ? 'Property type needs review' : CATEGORY_LABEL[k] || k}</button><b>{v}</b></li>))}</ul>
+              </Panel>
               <Panel title="Notices">
                 <ul className="evo-fcc-list">{Object.entries(data.statuses).map(([k, v]) => (
                   <li key={k}><button className="evo-linkbtn" onClick={() => drill({ status: k })}>{v.label}</button><b>{v.count}</b></li>))}</ul>
@@ -360,6 +367,16 @@ export default function ForeclosureCenter() {
                 </select>
                 <select className="evo-select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort">
                   {SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                </select>
+                <PropertyTypeSelect compact value={filter.ptype} sub={filter.psubtype}
+                  onChange={(c, st) => { setFilter({ ...filter, ptype: c, psubtype: st }); setPage(1) }} />
+                <select className="evo-select" value={filter.type || ''} aria-label="Foreclosure type"
+                        onChange={(e) => { setFilter({ ...filter, type: e.target.value }); setPage(1) }}>
+                  <option value="">Any foreclosure type</option>
+                  <option value="trustee">Trustee sale (deed of trust)</option>
+                  <option value="hoa">HOA lien</option>
+                  <option value="judicial">Judicial</option>
+                  <option value="tax">Tax foreclosure</option>
                 </select>
                 <select className="evo-select" value={filter.status || ''} aria-label="Notice status"
                         onChange={(e) => { setFilter({ ...filter, status: e.target.value }); setPage(1) }}>

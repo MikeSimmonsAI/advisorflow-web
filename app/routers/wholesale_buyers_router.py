@@ -79,6 +79,11 @@ def buy_box_json(b: WholesaleBuyBox) -> Dict[str, Any]:
         "min_year_built": b.min_year_built, "max_year_built": b.max_year_built,
         "rehab_tolerance": b.rehab_tolerance, "min_spread": _num(b.min_spread),
         "notes": b.notes,
+        "min_acres": _num(b.min_acres), "max_acres": _num(b.max_acres),
+        "min_units": b.min_units, "max_units": b.max_units,
+        "min_building_sqft": b.min_building_sqft, "max_building_sqft": b.max_building_sqft,
+        "min_cap_rate": _num(b.min_cap_rate), "value_add": b.value_add,
+        "distress_tolerance": b.distress_tolerance, "criteria": b.criteria,
     }
 
 
@@ -442,6 +447,16 @@ class BuyBoxIn(BaseModel):
     rehab_tolerance: Optional[str] = None
     min_spread: Optional[float] = None
     notes: Optional[str] = None
+    min_acres: Optional[float] = None
+    max_acres: Optional[float] = None
+    min_units: Optional[int] = None
+    max_units: Optional[int] = None
+    min_building_sqft: Optional[int] = None
+    max_building_sqft: Optional[int] = None
+    min_cap_rate: Optional[float] = None
+    value_add: Optional[bool] = None
+    distress_tolerance: Optional[str] = None
+    criteria: Optional[str] = None
 
 
 _BOX_JSON_FIELDS = ("markets", "states", "counties", "cities", "zips",

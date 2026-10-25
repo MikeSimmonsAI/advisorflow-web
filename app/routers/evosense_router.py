@@ -135,9 +135,11 @@ def inbox(bucket: Optional[str] = None, strategy_id: Optional[str] = None, q: Op
           min_owned_years: Optional[str] = None, max_owned_years: Optional[str] = None,
           max_score: Optional[str] = None,
           category: Optional[str] = None, economics: Optional[str] = None, confidence: Optional[str] = None,
+          ptype: Optional[str] = None, psubtype: Optional[str] = None,
           db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     org_id = _read_org(db, user)
     filters = {"city": city, "zip": zip, "property_type": property_type, "occupancy": occupancy,
+               "ptype": ptype, "psubtype": psubtype,
                "owner": owner, "street": street, "parcel": parcel, "missing": missing,
                "min_value": min_value, "max_value": max_value,
                "min_year_built": min_year_built, "max_year_built": max_year_built,
@@ -2677,6 +2679,7 @@ def foreclosures_properties(month: Optional[str] = None, view: str = "all", page
                             financial: Optional[str] = None, min_score: Optional[int] = None,
                             type: Optional[str] = None, attention: Optional[str] = None,
                             carried: Optional[str] = None, deals: Optional[str] = None,
+                            ptype: Optional[str] = None, psubtype: Optional[str] = None,
                             sort: str = "opportunity", db: Session = Depends(get_db),
                             user: User = Depends(require_tenant_or_observer)):
     """The month's working list - the existing ranking, filtered and paged on the server."""
@@ -2690,13 +2693,13 @@ def foreclosures_properties(month: Optional[str] = None, view: str = "all", page
     rs = FCC.filter_rows(rs, {"county": county, "q": q, "status": status, "verified": verified, "owner": owner,
                               "contact": contact, "acquisition": acquisition, "financial": financial,
                               "min_score": min_score, "type": type, "attention": attention, "carried": carried,
-                              "deals": deals, "sort": sort})
+                              "deals": deals, "ptype": ptype, "psubtype": psubtype, "sort": sort})
     per_page = max(1, min(int(per_page or 50), 200))
     page = max(1, int(page or 1))
     total = len(rs)
     keep = ("id", "street_address", "city", "zip_code", "county", "owner", "foreclosure", "contacts", "score",
             "rank", "next_action", "auction", "contact_state", "acquisition", "financial", "needs_attention",
-            "equity", "tax")
+            "equity", "tax", "property_class")
     items = []
     for r in rs[(page - 1) * per_page: page * per_page]:
         x = {k: r.get(k) for k in keep}
@@ -2796,3 +2799,76 @@ def foreclosure_event_status(event_id: str, body: FcStatusIn, db: Session = Depe
         raise HTTPException(status_code=422, detail=str(exc))
     db.commit()
     return out
+
+
+# ── property types ──────────────────────────────────────────────────────────
+
+@router.get("/property-types")
+def property_types(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """The normalized categories and subtypes, this workspace's counts, and the
+    source coverage by property type (what is connected, verified, paid, missing)."""
+    from sqlalchemy import func
+    from app.models.evosense_models import EvoSenseProperty
+    from app.services.evosense import property_class as PCL
+    org_id = _read_org(db, user)
+    counts = dict(db.query(func.coalesce(EvoSenseProperty.property_category, "unclassified"),
+                           func.count(EvoSenseProperty.id))
+                  .filter(EvoSenseProperty.organization_id == org_id, EvoSenseProperty.archived_at.is_(None),
+                          EvoSenseProperty.is_test.is_(False))
+                  .group_by(func.coalesce(EvoSenseProperty.property_category, "unclassified")).all())
+    return {"categories": [{"key": c, "label": PCL.CATEGORY_LABELS[c],
+                            "subtypes": [{"key": s, "label": PCL.SUBTYPE_LABELS.get(s, s)} for s in PCL.SUBTYPES[c]],
+                            "count": counts.get(c, 0)} for c in PCL.CATEGORIES],
+            "unclassified_yet": counts.get("unclassified", 0),
+            "coverage": PCL.coverage(db, org_id)}
+
+
+class PropertyTypeIn(BaseModel):
+    category: str
+    subtype: Optional[str] = None
+    note: str = ""
+
+
+@router.post("/properties/{property_id}/property-type")
+def property_type_set(property_id: str, body: PropertyTypeIn, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """A person states the type (the only route to mixed-use / specialty, which
+    have no county code). The county's codes stay on record as evidence."""
+    from app.services.evosense import property_class as PCL
+    org_id = svc.write_org_id(db, user)
+    prop = _prop(db, org_id, property_id)
+    try:
+        out = PCL.set_by_person(db, prop, body.category, body.subtype or None, user=user, note=body.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    return out
+
+
+@router.get("/properties/{property_id}/type-details")
+def property_type_details(property_id: str, db: Session = Depends(get_db),
+                          user: User = Depends(require_tenant_or_observer)):
+    """The fields that matter for this property's type (each with its source)
+    and the type's own analysis - or exactly what is missing for one."""
+    from app.services.evosense import type_details as TD
+    org_id = _read_org(db, user)
+    return TD.view(db, _prop(db, org_id, property_id))
+
+
+class TypeFactsIn(BaseModel):
+    values: Dict[str, Any] = {}
+    evidence: Dict[str, str] = {}
+
+
+@router.post("/properties/{property_id}/type-facts")
+def property_type_facts(property_id: str, body: TypeFactsIn, db: Session = Depends(get_db),
+                        user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    from app.services.evosense import type_details as TD
+    org_id = svc.write_org_id(db, user)
+    prop = _prop(db, org_id, property_id)
+    try:
+        TD.set_facts(db, prop, user, body.values, body.evidence)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    return TD.view(db, prop)

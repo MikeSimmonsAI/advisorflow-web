@@ -46,6 +46,12 @@ def _entered_note(prop) -> str:
     return "Building facts entered on the acquisition page: %s. " % "; ".join(parts)
 
 
+def _type_fact(prop, key):
+    from app.services.evosense.type_details import facts
+    v = (facts(prop).get(key) or {}).get("value")
+    return v if isinstance(v, (int, float)) else None
+
+
 def promote(db, org_id: str, prop, user, *, note: str = None) -> Dict[str, Any]:
     if user is None:
         raise HTTPException(status_code=403, detail="Only a person can promote an opportunity.")
@@ -72,6 +78,10 @@ def promote(db, org_id: str, prop, user, *, note: str = None) -> Dict[str, Any]:
         "parcel_apn": prop.parcel_apn, "property_type": prop.property_type,
         "bedrooms": prop.bedrooms, "bathrooms": prop.bathrooms, "square_feet": prop.square_feet,
         "year_built": prop.year_built, "estimated_value": market,
+        "property_category": prop.property_category if prop.property_category not in (None, "unknown") else None,
+        "property_subtype": prop.property_subtype,
+        "acreage": _type_fact(prop, "acreage"), "unit_count": _type_fact(prop, "unit_count"),
+        "building_sqft": _type_fact(prop, "building_sqft"),
         "estimated_value_source": VALUE_IMPORTED if market is not None else None,
         "mortgage_balance": prop.mortgage_balance,
         "mortgage_source": VALUE_IMPORTED if prop.mortgage_balance is not None else None,

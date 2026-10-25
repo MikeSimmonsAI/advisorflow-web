@@ -294,3 +294,21 @@ def test_a_month_of_200_properties_builds_quickly(db_session, sample_org, monkey
     t = time.monotonic()
     F.summary(db, org, "2026-11")                                            # served from the 1-minute cache
     assert time.monotonic() - t < 1
+
+
+def test_property_type_filters_combine_with_county_and_month(world, monkeypatch):
+    db, org = world["db"], world["org"]
+    monkeypatch.setattr(F, "_today", lambda: TODAY)
+    world["a"].property_category, world["a"].property_subtype = "commercial", "office"
+    world["b"].property_category = "land"
+    db.commit()
+    F.start_month(db, org, "2026-11")
+    db.commit()
+    F._CACHE.clear()
+    rs = F.rows(db, org, "2026-11")
+    assert {r["id"] for r in F.filter_rows(rs, {"ptype": "commercial", "county": "Dallas"})} == {world["a"].id}
+    assert len(F.filter_rows(rs, {"ptype": "land", "county": "Dallas"})) == 0     # the land one is in Tarrant
+    unknown = F.filter_rows(rs, {"ptype": "unknown"})
+    assert len(unknown) == 2 and all(r["property_class"]["needs_review"] for r in unknown)   # never hidden
+    assert F.summary(db, org, "2026-11")["property_types"] == {"unknown": 2, "commercial": 1, "land": 1}
+    assert len(F.rows(db, org, "2026-11")) == 4                                    # nothing dropped

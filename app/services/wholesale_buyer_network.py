@@ -87,7 +87,11 @@ PTYPE = {"sfr": "single_family", "single family": "single_family", "single-famil
          "duplex": "duplex", "triplex": "multifamily", "fourplex": "multifamily", "quad": "multifamily",
          "condo": "condo", "townhouse": "townhome", "townhome": "townhome", "land": "land", "lot": "land",
          "lots": "land", "mobile": "mobile_home", "mobile home": "mobile_home", "manufactured": "mobile_home",
-         "commercial": "commercial"}
+         "commercial": "commercial", "residential": "residential", "industrial": "industrial",
+         "warehouse": "warehouse", "office": "office", "retail": "retail", "agricultural": "agricultural",
+         "farm": "farm", "ranch": "ranch", "acreage": "land", "mixed use": "mixed_use", "mixed-use": "mixed_use",
+         "self storage": "self_storage", "storage": "self_storage", "rv park": "rv_park",
+         "mobile home park": "mobile_home_park", "hotel": "hotel", "apartments": "multifamily"}
 FINANCING = {"cash": "cash", "all cash": "cash", "hard money": "hard_money", "hml": "hard_money",
              "private money": "private", "private": "private", "conventional": "conventional", "bank": "conventional",
              "dscr": "conventional", "mixed": "mixed", "cash or finance": "mixed", "both": "mixed"}

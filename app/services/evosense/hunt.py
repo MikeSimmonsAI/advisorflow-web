@@ -671,7 +671,14 @@ CSV_COLUMNS = ("street_address", "unit", "city", "state", "zip_code", "county", 
                "record_id", "bedrooms", "bathrooms", "square_feet", "year_built")
 # Columns that never change a row's identity (adding them to a file re-sees
 # the same rows): the list's claims about the property.
-CLAIM_COLUMNS = ("sale_date", "list_owner_name", "loan_type")
+CLAIM_COLUMNS = ("sale_date", "list_owner_name", "loan_type", "property_subtype", "asking_price")
+# Type-specific facts a list may carry (land, multifamily, commercial ...):
+# kept as the LIST'S CLAIM on the property (type_details), never over a
+# person's entry. file column -> type-details field
+TYPE_COLUMNS = {"acreage": "acreage", "units": "unit_count", "unit_count": "unit_count",
+                "building_sqft": "building_sqft", "zoning": "zoning", "ag_use": "land_use",
+                "gross_income": "gross_income", "operating_expenses": "operating_expenses", "noi": "noi",
+                "cap_rate": "cap_rate", "vacancy_pct": "vacancy_pct", "occupancy_pct": "occupancy_pct"}
 BUILDING_COLUMNS = ("bedrooms", "bathrooms", "square_feet", "year_built")
 # Evidence columns a DISTRESS LIST may carry. They describe the list's claim;
 # they are stored as the signal's evidence, never as verified fact.
@@ -869,6 +876,18 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
         counts[outcome] = counts.get(outcome, 0) + 1
         if outcome == "created" and prop is not None:
             created_ids.append(prop.id)
+        if prop is not None and any(row.get(c) for c in TYPE_COLUMNS):
+            from app.services.evosense import type_details as TD
+            vals = {}
+            for col, field in TYPE_COLUMNS.items():
+                if row.get(col):
+                    try:
+                        TD._clean(field, row[col])
+                        vals[field] = row[col]
+                    except ValueError as exc:
+                        rejected.append({"line": i, "reason": "%s ignored: %s" % (col, exc)})
+            if vals:
+                counts["type_facts"] = counts.get("type_facts", 0) + TD.import_claims(prop, vals)
         if prop is not None and (row.get("phones") or row.get("emails")):
             _attach_list_contacts(db, prop, row, list_source or filename, counts)
         if prop is not None:
@@ -1006,6 +1025,14 @@ def preview_csv(db, org_id: str, content: str, *, filename: str = "upload.csv") 
             out["signals"][sig] = out["signals"].get(sig, 0) + 1
         if row.get("phones") or row.get("emails"):
             out["rows_with_contacts"] = out.get("rows_with_contacts", 0) + 1
+        for col in TYPE_COLUMNS:
+            if row.get(col):
+                out.setdefault("type_columns", {})[col] = out.get("type_columns", {}).get(col, 0) + 1
+        if row.get("property_type"):
+            from app.services.evosense.property_class import from_text
+            m = from_text(row["property_type"])
+            k = m[0] if m else "unknown"
+            out.setdefault("property_types", {})[k] = out.get("property_types", {}).get(k, 0) + 1
         if len(out["sample"]) < 5:
             out["sample"].append({k: row.get(k) for k in ("street_address", "city", "zip_code", "owner_name",
                                                           "signals")})
