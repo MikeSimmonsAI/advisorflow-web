@@ -115,6 +115,33 @@ QUESTIONS = {
 }
 
 
+# What a closing for each kind of property needs beyond a house - a checklist for
+# a person, not legal advice. The platform's starter purchase agreement was
+# written for houses; these are the gaps the separate Texas contracts build
+# must close (and an attorney must review) before it is used for these types.
+CLOSING_CHECKLIST = {
+    "residential": ["Title commitment and survey (or T-47 affidavit)", "Payoff and reinstatement figures",
+                    "Seller's disclosure where it applies", "Assignment and buyer disclosure (Occ. Code 1101.0045)"],
+    "multifamily": ["Rent roll and leases (certified by the seller)", "Tenant estoppels", "Security deposits and rent proration",
+                    "Service contracts to assign or cancel", "Operating statements (12-24 months)", "Inspections and code compliance"],
+    "commercial": ["Leases, estoppels and SNDAs", "Rent and CAM reconciliation / proration", "Phase I environmental site assessment",
+                   "Zoning and certificate of occupancy", "Survey and title (ALTA)", "Due-diligence and feasibility period"],
+    "industrial": ["Phase I environmental (Phase II if flagged)", "Leases and estoppels", "Zoning, access and truck circulation",
+                   "Utilities and power capacity", "ALTA survey and title", "Due-diligence period"],
+    "land": ["Survey and legal access (recorded easement or frontage)", "Zoning and platting / subdivision status",
+             "Utility availability letters", "Floodplain determination", "Feasibility period", "Deed restrictions and easements"],
+    "agricultural": ["Agricultural-use valuation and who pays rollback taxes (Tax Code 23.55)", "Water rights, wells and permits",
+                     "Mineral rights reserved or conveyed", "Survey, access and fencing", "Grazing / farm leases in place",
+                     "Improvements and equipment conveyed"],
+    "mixed_use": ["Residential and commercial leases", "Estoppels", "Separate income and expense statements", "Zoning for both uses",
+                  "Phase I environmental where commercial use warrants it"],
+    "specialty": ["Operating history and licenses", "Business vs real-estate allocation", "Leases / occupancy agreements",
+                  "Environmental and zoning review", "Title and survey"],
+}
+CONTRACT_NOTE = ("The starter purchase agreement was written for houses. For %s properties have a Texas real estate "
+                 "attorney adapt it (or use their form) - this checklist is what it needs to cover.")
+
+
 def facts(prop) -> Dict[str, Any]:
     return C.jload(getattr(prop, "type_facts", None), {}) or {}
 
@@ -317,5 +344,7 @@ def view(db, prop) -> Dict[str, Any]:
             "deal": [f for f in fields if f["key"] in DEAL_FIELDS],
             "analysis": analysis(cat, fs, appraisal=appraisal),
             "questions": QUESTIONS.get(cat, []),
+            "closing_checklist": CLOSING_CHECKLIST.get(cat, []),
+            "contract_note": (CONTRACT_NOTE % pc["category_label"].lower()) if cat not in ("residential", "unknown") else None,
             "fields": {k: {"label": v[0], "kind": v[1]} for k, v in FIELDS.items()},
             "note": "Each value shows where it came from. Missing values are shown as missing, never filled in."}

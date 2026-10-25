@@ -100,3 +100,14 @@ def test_an_import_brings_type_and_type_facts_as_the_lists_claim(db_session, sam
     assert v["analysis"]["values"]["Income value"] == 1875000 and v["analysis"]["stage"] == "preliminary"
     pv = HU.preview_csv(db_session, sample_org.id, csv_text)
     assert pv["property_types"] == {"commercial": 1, "agricultural": 1} and pv["type_columns"]["acreage"] == 2
+
+
+def test_non_residential_types_carry_a_closing_checklist_and_a_contract_warning(db_session, sample_org):
+    p = EvoSenseProperty(organization_id=sample_org.id, street_address="5 Synth Ag Rd", city="Cleburne", state="TX",
+                         is_test=True, status="new", property_category="agricultural")
+    db_session.add(p)
+    db_session.flush()
+    v = TD.view(db_session, p)
+    assert any("rollback" in x for x in v["closing_checklist"]) and "written for houses" in v["contract_note"]
+    p.property_category = "residential"
+    assert TD.view(db_session, p)["contract_note"] is None
