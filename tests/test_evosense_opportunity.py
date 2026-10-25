@@ -178,12 +178,12 @@ def test_refresh_caches_and_is_idempotent_and_the_backfill_finds_stale_rows(batc
     assert a.economics_status == "not_supportable" and a.spread_base is None
     assert ",foreclosure_auction," in a.opportunity_categories and a.sale_deadline is not None
     assert OP.compact(a)["next_action"]["label"] == OP.ACTIONS["escalate_deadline"]
-    # the imminent sale was handed to a person, so its next answer differs once
+    # the imminent sale was handed to a person; that is not a conversation, so the answer is unchanged
     s2 = OP.refresh(db, org, props)
     db.commit()
-    assert s2["changed"] == 1
+    assert s2["changed"] == 0
     db.refresh(a)
-    assert a.workflow_state == "HUMAN_HANDOFF"
+    assert a.workflow_state != "HUMAN_HANDOFF" and a.next_best_action == "escalate_deadline"
     s3 = OP.refresh(db, org, props)
     db.commit()
     assert s3["changed"] == 0                                          # unchanged evidence writes nothing new
@@ -325,3 +325,26 @@ def test_an_imminent_verified_sale_goes_to_a_person_once(batch):
     assert db.query(EvoSenseHandoff).filter(EvoSenseHandoff.property_id == a.id).count() == 1
     # the claim-only sale is never escalated
     assert db.query(EvoSenseHandoff).filter(EvoSenseHandoff.property_id == batch["c"].id).count() == 0
+
+
+def test_a_deadline_hand_off_is_not_a_conversation_and_a_test_deal_never_touches_a_real_property(batch):
+    db, org = batch["db"], batch["org"]
+    a = batch["a"]
+    OP.refresh(db, org, [a])                         # escalates the 8-day sale
+    db.commit()
+    res = OP.build(db, org, [a])[a.id]
+    assert res["workflow_state"]["key"] != "HUMAN_HANDOFF"
+    assert res["next_action"]["key"] == "escalate_deadline" and "Find Contact" in res["next_action"]["why"]
+    from app.models.wholesale_models import WholesaleDeal, WholesaleProperty
+    wp = WholesaleProperty(organization_id=org, street_address="1 Verified Sale St", city="Dallas", state="TX",
+                           zip_code="75216", is_test=True)
+    db.add(wp)
+    db.flush()
+    d = WholesaleDeal(organization_id=org, property_id=wp.id, stage="closed", arv=200000, contract_price=90000,
+                      assignment_fee=15000, wholesale_fee_collected=15000, is_test=True)
+    db.add(d)
+    db.flush()
+    a.promoted_deal_id, a.is_test = d.id, False
+    db.commit()
+    res = OP.build(db, org, [a])[a.id]
+    assert res["workflow_state"]["key"] != "CLOSED" and "realized" not in res["economics"]["spreads"]
