@@ -514,7 +514,7 @@ def workflow_state(*, status: Optional[str], owner_status: str, contactability: 
         return "ANALYSIS"
     if status == C.S_SUPPRESSED or outcome == C.O_DNC:
         return "DO_NOT_CONTACT"
-    if has_handoff or status == C.S_NEEDS_YOU:
+    if has_handoff:                       # (a deadline-only escalation is not a conversation)
         return "HUMAN_HANDOFF"
     if outcome == C.O_APPOINTMENT:
         return "APPOINTMENT"
@@ -586,8 +586,10 @@ def next_action(*, prop_id: str, wstate: str, owner: Dict[str, Any], fc: Dict[st
         return _act("follow_up", existing_next or "Owner asked to be contacted later", plink)
     if urg.get("escalate") and wstate in ("VERIFIED", "CONTACT_DATA_READY", "OUTREACH_ELIGIBILITY_CHECK",
                                          "DISCOVERED"):
-        return _act("escalate_deadline", "Verified sale in %s days - a person should decide the approach now"
-                    % (fc or {}).get("days"), plink)
+        no_contact = not (contacts.get("phones") or contacts.get("emails"))
+        return _act("escalate_deadline", "Verified sale in %s days - a person decides the approach now%s"
+                    % ((fc or {}).get("days"), "; no phone or email for the owner yet (Find Contact)"
+                       if no_contact else ""), plink)
     if wstate == "OUTREACH_QUEUED":
         return _act("start_conversation", "Contact is permitted on a channel", plink)
     if wstate == "CONTACT_ATTEMPTED":
@@ -779,9 +781,16 @@ def build(db, org_id: str, props: List[Any], *, now: Optional[datetime] = None,
                                                   EvoSenseEngagement.property_id.in_(ids))
               .order_by(EvoSenseEngagement.updated_at.asc()).all()):
         engs[e.property_id] = e
-    handoffs = {pid for (pid,) in db.query(EvoSenseHandoff.property_id).filter(
-        EvoSenseHandoff.organization_id == org_id, EvoSenseHandoff.property_id.in_(ids),
-        EvoSenseHandoff.status.in_(("open", "acknowledged"))).all()}
+    # an open hand-off is a conversation for a person - unless all it says is
+    # "a verified sale is close" (our own deadline escalation), which is not a
+    # conversation and must not read as one
+    handoffs = set()
+    for pid, reasons in db.query(EvoSenseHandoff.property_id, EvoSenseHandoff.reasons).filter(
+            EvoSenseHandoff.organization_id == org_id, EvoSenseHandoff.property_id.in_(ids),
+            EvoSenseHandoff.status.in_(("open", "acknowledged"))).all():
+        codes = {r.get("code") for r in (C.jload(reasons, []) or [])}
+        if codes - {DEADLINE_REASON}:
+            handoffs.add(pid)
     fus: Dict[str, datetime] = {}
     for pid, due in (db.query(EvoSenseFollowUp.property_id, EvoSenseFollowUp.due_at)
                      .filter(EvoSenseFollowUp.organization_id == org_id, EvoSenseFollowUp.property_id.in_(ids),
@@ -819,6 +828,8 @@ def build(db, org_id: str, props: List[Any], *, now: Optional[datetime] = None,
                 verified.append(lbl)
         f = facts.get(p.id, {})
         deal = deals.get(p.promoted_deal_id) if p.promoted_deal_id else None
+        if deal is not None and deal.get("is_test") and not p.is_test:
+            deal = None                    # a TEST deal never changes a real property's money or stage
         if deal is not None:
             arv_in, rep_in, rep_ok = deal["arv"], deal["repairs"], deal["repairs_accepted"]
         else:
