@@ -709,18 +709,24 @@ def _list_claims_pre(pre, prop) -> Dict[str, Any]:
 def rows(db, org_id: str, kind: str, *, sort: str = "priority") -> List[Dict[str, Any]]:
     """`sort="priority"` (default): the universal opportunity engine's rank
     (evosense/opportunity.py). `sort="group"`: the list's own A/B/C groups."""
+    return rows_for(db, org_id, members(db, org_id, kind), sort=sort, label=kind)
+
+
+def rows_for(db, org_id: str, ms: List[EvoSenseProperty], *, sort: str = "priority",
+             label: str = "properties") -> List[Dict[str, Any]]:
+    """The list row builder for ANY set of properties (an imported list, a
+    foreclosure month): same ranking, notice status, owner, tax and contacts."""
     from app.services.evosense import opportunity as OP
     from app.services.evosense import scoring as SC
     from app.services.evosense import signals as SIG
     out = []
-    ms = members(db, org_id, kind)
     checks = clerk_checks(db, org_id, [p.id for p in ms])
     pre = _prefetch(db, org_id, ms)
     try:
         opp = OP.build(db, org_id, ms, pre=pre, checks=checks)
     except Exception:  # noqa: BLE001 - the list still shows without the derived view
         db.rollback()
-        C.log.exception("opportunity view failed for list %s", kind)
+        C.log.exception("opportunity view failed for %s", label)
         opp = {}
     clerk_counties = _CLERK_COUNTIES()
     now = C.now()

@@ -1222,3 +1222,62 @@ class EvoSenseContactBatchItem(Base):
 
     __table_args__ = (UniqueConstraint("batch_id", "property_id", name="uq_es_cbatch_item"),
                       Index("ix_es_cbatch_item_batch_state", "batch_id", "state"))
+
+
+class EvoSenseAuctionCycle(Base):
+    """One monthly foreclosure-auction cycle of a workspace (foreclosure_cycles.py).
+
+    `month` is YYYY-MM. `sale_date` is the Texas trustee-sale day for that month
+    (Tex. Prop. Code 51.002(a): first Tuesday; first Wednesday when that Tuesday is
+    January 1 or July 4). Individual notices keep their OWN sale dates - this is
+    the cycle's default, never written onto a notice. One row per (workspace,
+    month); a cycle is never deleted, so every month stays available."""
+
+    __tablename__ = "evosense_auction_cycles"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    month = Column(String, nullable=False)                 # "2026-11"
+    sale_date = Column(DateTime, nullable=True)
+    sale_rule = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="active")   # active|completed
+    started_by_id = Column(String, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    last_synced_at = Column(DateTime, nullable=True)
+    sync_summary = Column(Text, nullable=True)             # JSON of the last refresh
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+    __table_args__ = (UniqueConstraint("organization_id", "month", name="uq_es_auction_cycle_org_month"),)
+
+
+class EvoSenseAuctionEvent(Base):
+    """A PROPERTY in one auction cycle - the auction event. The notices stay
+    where they are (one EvoSenseSignal per recorded document, with its own sale
+    date); this row only links them to the month and carries what a PERSON
+    recorded about the outcome (with evidence), so a later notice never
+    overwrites an earlier sale and a postponement keeps both months."""
+
+    __tablename__ = "evosense_auction_events"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    cycle_id = Column(String, ForeignKey("evosense_auction_cycles.id", ondelete="CASCADE"), nullable=False)
+    property_id = Column(String, ForeignKey("evosense_properties.id", ondelete="CASCADE"), nullable=False)
+    sale_date = Column(DateTime, nullable=True)            # earliest notice/claim sale date in the month
+    documents = Column(Text, nullable=True)                # JSON [{document, sale_date, source, signal_id}]
+    derived_status = Column(String, nullable=True)         # from the notices (see foreclosure_cycles.STATUS)
+    on_record = Column(Boolean, nullable=False, default=True)   # a notice/claim for this month is still active
+    manual_status = Column(String, nullable=True)          # what a person recorded (with evidence)
+    manual_evidence = Column(Text, nullable=True)
+    manual_source = Column(String, nullable=True)
+    reviewed_by_id = Column(String, nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    carried_from_event_id = Column(String, nullable=True)  # the earlier month's event for this property
+    carry_reason = Column(String, nullable=True)
+    is_test = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+    __table_args__ = (UniqueConstraint("cycle_id", "property_id", name="uq_es_auction_event_cycle_prop"),
+                      Index("ix_es_auction_event_org_prop", "organization_id", "property_id"))
