@@ -443,7 +443,7 @@ export default function EvoProperty() {
       </section>
 
       {/* THE OPPORTUNITY VIEW — priority, urgency, money, evidence, next action */}
-      <OpportunityCard o={d.opportunity} />
+      <OpportunityCard o={d.opportunity} q={d.qualification} />
       <CallOutcomePanel propertyId={propertyId} />
       <FirstContactPlan propertyId={propertyId} />
 

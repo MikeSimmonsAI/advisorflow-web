@@ -178,6 +178,8 @@ def property_detail(property_id: str, db: Session = Depends(get_db),
     out["follow_ups"] = FU.open_for(db, org_id, prop)
     out["permission"] = PM.status_for(db, org_id, prop, [c["value"] for c in out.get("contacts") or []
                                                          if c.get("kind") == "phone"])
+    from app.services.evosense import qualification as QF
+    out["qualification"] = QF.for_property(db, prop)
     # the universal opportunity view, assessed fresh for the page (read-only:
     # the cached columns are refreshed by the backfill, not by a page view)
     from app.services.evosense import opportunity as OP
