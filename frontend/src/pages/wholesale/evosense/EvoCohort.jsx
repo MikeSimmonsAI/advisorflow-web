@@ -23,6 +23,7 @@ import { api } from '../../../api/client'
 import { errText } from '../wsShared'
 import { Alert, Chips, Empty, EvoApp, Hero, Panel, Ring, Skeleton, Tag } from '../ds/ds'
 import '../ds/evo-pages.css'
+import { ContactBatchPanel } from './Acquire'
 import './evo-actions.css'
 
 const PRIORITY = { A: 'A — act now', B: 'B — strong', C: 'C — watch', REVIEW: 'Review', PARK: 'Park' }
@@ -255,6 +256,8 @@ export default function EvoCohort() {
           <p className="evo-small evo-muted" style={{ marginTop: 6 }}>{s.readiness.note}</p>
         </Panel>
       ) : null}
+
+      {data ? <ContactBatchPanel source={`list:${kind}`} /> : null}
 
       {s ? (
         <Panel title="Where the list stands">

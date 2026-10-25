@@ -298,6 +298,13 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
                          data={"is_test": "true"}))
     imp_row = imp["sample"][0]["id"]
 
+    # A contact-lookup batch of the VICTIM organization (a draft: nothing bought).
+    from app.models.evosense_models import EvoSenseContactBatch as _CBatch
+    cbatch = _CBatch(organization_id=sample_org.id, source="list:victim", status="draft", max_lookups=1,
+                     max_spend_cents=10, unit_cost_cents=10, is_test=True)
+    db_session.add(cbatch)
+    db_session.commit()
+
     return {
         **es_ids,
         "appointment_id": appt["id"],
@@ -326,6 +333,7 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
         "buyer_id": an_id(buyer, "buyer"),
         "import_batch_id": imp["id"],
         "import_row_id": imp_row,
+        "contact_batch_id": cbatch.id,
         "box_id": an_id(box, "buy_box", "box"),
         "outreach_id": (outreach_rows[0].get("outreach_id")
                         if outreach_rows else None),
@@ -401,6 +409,10 @@ def attacks(ids):
         ("delete", "/wholesale/buy-boxes/%s" % ids["box_id"], None),
         # buyer network imports
         ("get", "/wholesale/buyers/imports/%s" % ids["import_batch_id"], None),
+        ("get", "/wholesale/evosense/contact-batches/%s" % ids["contact_batch_id"], None),
+        ("post", "/wholesale/evosense/contact-batches/%s/approve" % ids["contact_batch_id"],
+         {"phrase": "APPROVE 1 LOOKUPS UP TO $0.10"}),
+        ("post", "/wholesale/evosense/contact-batches/%s/start" % ids["contact_batch_id"], {}),
         ("get", "/wholesale/buyers/imports/%s/rows" % ids["import_batch_id"], None),
         ("get", "/wholesale/buyers/imports/%s/errors.csv" % ids["import_batch_id"], None),
         ("put", "/wholesale/buyers/imports/%s/mapping" % ids["import_batch_id"], {"mapping": {}}),
@@ -594,6 +606,7 @@ def evosense_attacks(ids):
         ("post", "%s/properties/%s/enrich" % (base, ep), {"approved": True}),
         ("get", "%s/properties/%s/enrichment-status" % (base, ep), None),
         ("get", "%s/properties/%s/first-contact" % (base, ep), None),
+        ("post", "%s/properties/%s/call-outcome" % (base, ep), {"outcome": "no_answer"}),
         ("post", "%s/properties/%s/outreach" % (base, ep), None),
         ("post", "%s/properties/%s/reply" % (base, ep), {"text": "STOP", "delivery": "manual_entry"}),
         ("post", "%s/properties/%s/nurture" % (base, ep), {"choice": "30_days"}),
@@ -750,6 +763,7 @@ def test_every_id_bearing_wholesale_route_is_in_the_attack_list(theirs):
     # A document KIND is a path parameter too (contracts/{kind}/...); the attack
     # uses the purchase agreement, so that word squashes like an id.
     values.add("purchase_agreement")
+    values.add("start")              # contact-batches/{id}/{action}
 
     def template(path):
         return "/".join("{}" if part in values else part

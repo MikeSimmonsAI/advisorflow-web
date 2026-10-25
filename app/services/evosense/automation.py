@@ -147,6 +147,8 @@ def enrichment_queue(db, org_id: str, *, limit: int = 100) -> Dict[str, Any]:
         for cap in CAP.matrix(db, org_id):
             if C.CONTACT_ENRICHMENT in (cap.get("engine_capabilities") or []):
                 for r in cap["providers"]:
+                    if any(x.get("provider") == r.get("provider") for x in providers):
+                        continue            # one row per provider, whatever capabilities it serves
                     providers.append({k: r.get(k) for k in ("provider", "label", "state", "operational",
                                                             "evaluation_only", "connector_kind", "why",
                                                             "cost", "costs") if k in r})

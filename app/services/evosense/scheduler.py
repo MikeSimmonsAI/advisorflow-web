@@ -329,6 +329,21 @@ def run_due(db, *, org_id: Optional[str] = None, now=None) -> Dict[str, Any]:
         db.rollback()
         C.log.exception("evosense contactability backfill failed")
     try:
+        from app.services.evosense import contact_batch as CBATCH
+        report["contact_batch_steps"] = CBATCH.run_due(db)
+    except Exception:  # noqa: BLE001 - a batch never stops the hunt
+        db.rollback()
+        C.log.exception("evosense contact batch pass failed")
+    try:
+        from app.services.evosense import calling as CL
+        from app.models.evosense_models import EvoSenseControl
+        orgs = [org_id] if org_id else [o for (o,) in db.query(EvoSenseControl.organization_id).all()]
+        report["calls_queued"] = sum(CL.sweep(db, o) for o in orgs)
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        C.log.exception("evosense call-queue sweep failed")
+    try:
         from app.services.evosense import opportunity as OP
         report["opportunity_assessed"] = OP.backfill(db, org_id=org_id)
     except Exception:  # noqa: BLE001 - a derived view never stops the hunt or the replies

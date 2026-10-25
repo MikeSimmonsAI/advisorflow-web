@@ -1153,3 +1153,72 @@ class EvoSenseEvalGroundTruth(Base):
     source_note = Column(String, nullable=False)          # how it is lawfully known
     entered_by_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=_now)
+
+
+class EvoSenseContactBatch(Base):
+    """A contact-lookup batch over an existing list or queue (contact_batch.py).
+
+    Built and pre-flighted for free; NOTHING is bought until a person approves
+    it with a typed phrase naming the count and the dollar cap. Every lookup
+    still goes through the one per-property path (enrichment.run) with its
+    owner-match guard, ledger, budgets and duplicate-billing protection."""
+
+    __tablename__ = "evosense_contact_batches"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    source = Column(String, nullable=False)               # "list:top100-2010" | "queue:find_contact"
+    status = Column(String, nullable=False, default="draft")   # draft|approved|running|paused|stopped|completed
+    provider_key = Column(String, nullable=True)
+    unit_cost_cents = Column(Integer, nullable=True)      # per HIT, from the provider's own price
+    charge_on_miss = Column(Boolean, nullable=False, default=False)
+    max_spend_cents = Column(Integer, nullable=True)      # the batch's own ceiling
+    daily_spend_cents = Column(Integer, nullable=True)    # set on approval as the org's daily ceiling
+    max_lookups = Column(Integer, nullable=True)
+    preflight = Column(Text, nullable=True)               # JSON summary at creation
+    approval_phrase = Column(String, nullable=True)
+    approved_by_id = Column(String, nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+    activation = Column(Text, nullable=True)              # JSON: what approval changed (before / after)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    stopped_reason = Column(String, nullable=True)
+    looked_up = Column(Integer, nullable=False, default=0)
+    found = Column(Integer, nullable=False, default=0)
+    no_match = Column(Integer, nullable=False, default=0)
+    failed = Column(Integer, nullable=False, default=0)
+    spent_cents = Column(Integer, nullable=False, default=0)
+    lease_until = Column(DateTime, nullable=True)         # one worker at a time
+    created_by_id = Column(String, nullable=True)
+    is_test = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+    __table_args__ = (Index("ix_es_cbatch_org_status", "organization_id", "status"),)
+
+
+class EvoSenseContactBatchItem(Base):
+    """One property in a batch. ready -> processing -> found | no_match |
+    failed (retried up to the limit) | skipped | review | interrupted.
+    An item interrupted mid-call is NEVER retried automatically (the vendor
+    may already have billed): a person looks at it."""
+
+    __tablename__ = "evosense_contact_batch_items"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    batch_id = Column(String, ForeignKey("evosense_contact_batches.id", ondelete="CASCADE"), nullable=False)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    property_id = Column(String, ForeignKey("evosense_properties.id", ondelete="CASCADE"), nullable=False)
+    owner_id = Column(String, nullable=True)
+    position = Column(Integer, nullable=False, default=0)
+    state = Column(String, nullable=False, default="ready")
+    reason = Column(String, nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    decision_id = Column(String, nullable=True)
+    cost_cents = Column(Integer, nullable=False, default=0)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_now)
+
+    __table_args__ = (UniqueConstraint("batch_id", "property_id", name="uq_es_cbatch_item"),
+                      Index("ix_es_cbatch_item_batch_state", "batch_id", "state"))

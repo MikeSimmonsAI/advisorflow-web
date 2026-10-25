@@ -38,6 +38,7 @@ KIND_LABELS = {
     "missing_disposition_data": "Missing disposition data",
     "seller_callback_requested": "Seller callback requested", "ai_exception": "AI exception",
     "title_ownership_anomaly": "Title / ownership anomaly", "escalate_to_owner": "Escalated to owner",
+    "seller_first_call": "Call the owner (first contact)",
 }
 OUTCOME_STATUS = {"complete": "complete", "unable_to_verify": "unable_to_verify",
                   "needs_more_info": "needs_more_info", "escalate": "escalated"}
