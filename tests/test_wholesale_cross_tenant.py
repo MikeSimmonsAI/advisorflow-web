@@ -303,6 +303,10 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
     cbatch = _CBatch(organization_id=sample_org.id, source="list:victim", status="draft", max_lookups=1,
                      max_spend_cents=10, unit_cost_cents=10, is_test=True)
     db_session.add(cbatch)
+    # A list import of the VICTIM organization (the audit row an undo names).
+    from app.services.evosense import common as _ESC
+    imp_ev = _ESC.log_event(db_session, sample_org.id, "import.csv", summary="victim import",
+                            details={"created_ids": [], "filename": "victim.csv"})
     db_session.commit()
 
     return {
@@ -334,6 +338,7 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
         "import_batch_id": imp["id"],
         "import_row_id": imp_row,
         "contact_batch_id": cbatch.id,
+        "es_import_id": imp_ev.id,
         "box_id": an_id(box, "buy_box", "box"),
         "outreach_id": (outreach_rows[0].get("outreach_id")
                         if outreach_rows else None),
@@ -417,6 +422,8 @@ def attacks(ids):
         ("post", "/wholesale/evosense/contact-batches/%s/pause" % ids["contact_batch_id"], {}),
         ("post", "/wholesale/evosense/contact-batches/%s/stop" % ids["contact_batch_id"], {}),
         ("post", "/wholesale/evosense/contact-batches/%s/emergency_stop" % ids["contact_batch_id"], {}),
+        ("post", "/wholesale/evosense/import/%s/undo" % ids["es_import_id"], {}),
+        ("post", "/wholesale/evosense/import/%s/restore" % ids["es_import_id"], {}),
         ("get", "/wholesale/buyers/imports/%s/rows" % ids["import_batch_id"], None),
         ("get", "/wholesale/buyers/imports/%s/errors.csv" % ids["import_batch_id"], None),
         ("put", "/wholesale/buyers/imports/%s/mapping" % ids["import_batch_id"], {"mapping": {}}),

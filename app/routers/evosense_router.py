@@ -745,6 +745,31 @@ async def import_properties(file: UploadFile = File(...), strategy_id: Optional[
     return out
 
 
+@router.post("/import/{import_id}/undo")
+def import_undo(import_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                _g: User = Depends(require_not_observation)):
+    """Archive the properties this import created (reversible; nothing deleted)."""
+    org_id = svc.write_org_id(db, user)
+    try:
+        out = HU.undo_import(db, org_id, import_id, user=user)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Not found")
+    db.commit()
+    return out
+
+
+@router.post("/import/{import_id}/restore")
+def import_restore(import_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                   _g: User = Depends(require_not_observation)):
+    org_id = svc.write_org_id(db, user)
+    try:
+        out = HU.undo_import(db, org_id, import_id, user=user, restore=True)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Not found")
+    db.commit()
+    return out
+
+
 class EnrichIn(BaseModel):
     approved: bool = False
 

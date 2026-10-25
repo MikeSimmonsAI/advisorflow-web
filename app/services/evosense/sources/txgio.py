@@ -40,6 +40,14 @@ def _v(a: Dict[str, Any], k: str) -> Optional[str]:
     return None if not v or v.upper() in ("NULL", "NONE") else v
 
 
+def _num_int(v) -> Optional[int]:
+    try:
+        n = int(float(str(v).replace(",", "")))
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
 def _excel_date(v) -> Optional[str]:
     """DATE_ACQ is an Excel serial day (46235 -> 2026-08-01)."""
     try:
@@ -83,7 +91,7 @@ def same_parcel_address(target_street: str, situs: Optional[str], city: Optional
 
 
 class TxParcelReader:
-    adapter_version = "txgio_stratmap_parcels/2"     # /2 keeps LEGAL_DESC
+    adapter_version = "txgio_stratmap_parcels/3"     # /2 keeps LEGAL_DESC; /3 the roll's values + year built
 
     # (half-extent in degrees, tolerance in pixels of an 800 px map): the
     # first is the parcel under the point; the second reaches ~80 m, because
@@ -143,7 +151,21 @@ class TxParcelReader:
         county = (_v(a, "COUNTY") or county_name or target.get("county") or "").title() or None
         acq = _excel_date(a.get("DATE_ACQ"))
         prop_id = _v(a, "PROP_ID")
-        return {
+        extra: Dict[str, Any] = {}
+        built = _num_int(_v(a, "YEAR_BUILT"))
+        if built and 1800 < built <= datetime.utcnow().year:
+            extra["year_built"] = built
+        value = _num_int(_v(a, "MKT_VALUE"))
+        if value:
+            # the appraisal district's PROPERTY-TAX value, labelled so - never a
+            # market value, a sale price or an ARV
+            extra["appraisal"] = {"value": value, "land": _num_int(_v(a, "LAND_VALUE")),
+                                  "improvements": _num_int(_v(a, "IMP_VALUE")),
+                                  "year": _num_int(_v(a, "TAX_YEAR")),
+                                  "district": _v(a, "SOURCE") or "%s appraisal district" % (county or "county"),
+                                  "basis": "%s %s appraisal roll via TxGIO (property-tax value)"
+                                           % (_v(a, "SOURCE") or county or "county", _v(a, "TAX_YEAR") or "")}
+        return dict(extra, **{
             "source_reference": "TXGIO:%s:%s:%s" % (county or "", prop_id or target.get("id"), _v(a, "TAX_YEAR") or ""),
             "street_address": target.get("street_address"), "unit": target.get("unit"),
             "city": target.get("city"), "state": "TX", "zip_code": target.get("zip_code"),
@@ -155,10 +177,11 @@ class TxParcelReader:
             "_raw": {k: a.get(k) for k in ("PROP_ID", "GEO_ID", "LEGAL_DESC", "OWNER_NAME", "NAME_CARE", "SITUS_ADDR",
                                            "SITUS_CITY", "SITUS_ZIP", "MAIL_ADDR", "MAIL_LINE1", "MAIL_LINE2",
                                            "MAIL_CITY", "MAIL_STAT", "MAIL_ZIP", "COUNTY", "TAX_YEAR",
-                                           "DATE_ACQ", "SOURCE") if k in a},
+                                           "DATE_ACQ", "SOURCE", "LAND_VALUE", "IMP_VALUE", "MKT_VALUE",
+                                           "YEAR_BUILT") if k in a},
             "_source_url": SERVICE, "_source_updated_at": acq,
             "_adapter_version": self.adapter_version,
             "_evidence": {"situs": _v(a, "SITUS_ADDR"), "tax_year": _v(a, "TAX_YEAR"),
                           "data_acquired": acq, "county_account": prop_id,
                           "matched_by": "Census geocode + parcel at that point + same situs address"},
-        }
+        })

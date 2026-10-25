@@ -146,3 +146,27 @@ def test_a_point_on_the_street_reaches_the_house_a_little_wider(api):
 def test_the_tight_search_is_enough_when_it_matches(api):
     TX.TxParcelReader().lookup(T)
     assert api["tolerances"] == ["2"]
+
+
+def test_the_rolls_tax_value_and_year_built_come_along_labelled(api):
+    a = api["parcels"][0]["attributes"]
+    a.update({"MKT_VALUE": "157000", "LAND_VALUE": "37015", "IMP_VALUE": "119985", "YEAR_BUILT": "1957",
+              "SOURCE": "HCAD"})
+    rec = TX.TxParcelReader().lookup(T)
+    assert rec["year_built"] == 1957
+    assert rec["appraisal"]["value"] == 157000 and rec["appraisal"]["land"] == 37015
+    assert "property-tax value" in rec["appraisal"]["basis"] and rec["appraisal"]["year"] == 2026
+    assert rec["_raw"]["MKT_VALUE"] == "157000"
+
+
+def test_no_value_on_the_parcel_means_none_is_written(api):
+    a = api["parcels"][0]["attributes"]
+    a.update({"MKT_VALUE": "0", "YEAR_BUILT": "Null"})
+    rec = TX.TxParcelReader().lookup(T)
+    assert "appraisal" not in rec and "year_built" not in rec
+
+
+def test_older_records_are_refreshed_once_for_the_new_fields():
+    p = PV.PROVIDERS["txgio_parcels"]
+    assert "txgio_stratmap_parcels/2" in p.stale_adapter_versions
+    assert p.adapter_version == TX.TxParcelReader.adapter_version

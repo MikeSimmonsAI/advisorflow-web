@@ -754,9 +754,10 @@ class TexasParcelOwnerSource(PublicRecordSource):
     public_url = "https://geographic.texas.gov/"
     refresh = "Refreshed by TxGIO from each county's certified roll (tax year shown on each record)"
     freshness_days = 180
-    adapter_version = "txgio_stratmap_parcels/2"
-    # /1 did not keep LEGAL_DESC, which the foreclosure matcher reads (lot/block)
-    stale_adapter_versions = ("txgio_stratmap_parcels/1",)
+    adapter_version = "txgio_stratmap_parcels/3"
+    # /1 did not keep LEGAL_DESC, which the foreclosure matcher reads (lot/block);
+    # /2 did not keep the roll's tax values and year built (free, same answer)
+    stale_adapter_versions = ("txgio_stratmap_parcels/1", "txgio_stratmap_parcels/2")
     terms_note = "Public statewide parcel data published by the Texas Geographic Information Office."
 
     @staticmethod
