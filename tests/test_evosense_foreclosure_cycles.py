@@ -241,3 +241,20 @@ def test_api_reads_are_scoped_and_writes_need_a_manager(client, auth_headers, ad
     p = client.get("/wholesale/evosense/foreclosures/properties", headers=admin_auth_headers,
                    params={"month": "2026-11", "view": "top10"})
     assert p.status_code == 200 and "items" in p.json()
+
+
+def test_the_scheduler_prepares_refreshes_and_completes_months_safely(world, monkeypatch):
+    from app.models.evosense_models import EvoSenseControl
+    db, org = world["db"], world["org"]
+    db.add(EvoSenseControl(organization_id=org))
+    db.commit()
+    monkeypatch.setattr(F, "_today", lambda: TODAY)
+    first = F.auto(db, today=TODAY)
+    assert first.get("prepared") == 1 and F.get_cycle(db, org, "2026-11") is not None
+    second = F.auto(db, today=TODAY)                                  # restart / next pass: nothing doubles
+    assert not second.get("prepared") and not second.get("refreshed")
+    assert db.query(EvoSenseAuctionEvent).count() == 4
+    late = F.auto(db, today=date(2026, 12, 10))
+    assert late.get("completed") == 1                                 # stays readable, just not active
+    assert F.get_cycle(db, org, "2026-11").status == "completed"
+    assert db.query(EvoSenseAuctionEvent).count() >= 4                # history kept

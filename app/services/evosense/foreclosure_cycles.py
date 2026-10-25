@@ -738,3 +738,45 @@ def sources(db, org_id: str) -> List[Dict[str, Any]]:
                 o["manual_action"] = ("Johnson County appraisal file must be uploaded (Sources) for owner and "
                                       "lot details - %s" % (jstate.get("state") or "").lower())
     return out
+
+
+# ── automation (the EvoSense scheduler pass) ───────────────────────────────
+AUTO_REFRESH_MINUTES = 60
+COMPLETE_AFTER_DAYS = 30
+
+
+def auto(db, org_id: Optional[str] = None, *, today=None) -> Dict[str, int]:
+    """Safe, free, idempotent, every scheduler pass:
+      - PREPARE the next auction month when notices for it exist and nobody
+        has started it yet (same as a person pressing Start month; a second
+        pass finds it started);
+      - REFRESH each active month from the notices on record, at most hourly;
+      - mark a month COMPLETED a month after its sale day (it stays readable).
+    Reads only this platform's own records: no outside call, no purchase, no
+    message, no contract. One workspace failing never stops the others."""
+    from app.models.evosense_models import EvoSenseAuctionCycle, EvoSenseControl
+    today = today or _today()
+    counts = Counter()
+    orgs = [org_id] if org_id else [o for (o,) in db.query(EvoSenseControl.organization_id).all()]
+    nxt = next_month(today=today)
+    for o in orgs:
+        try:
+            if get_cycle(db, o, nxt) is None and any(nxt in ms for ms in months_by_property(_fc_signals(db, o)).values()):
+                start_month(db, o, nxt)
+                counts["prepared"] += 1
+            stale = C.now() - timedelta(minutes=AUTO_REFRESH_MINUTES)
+            for cyc in (db.query(EvoSenseAuctionCycle).filter(EvoSenseAuctionCycle.organization_id == o,
+                                                              EvoSenseAuctionCycle.status == "active").all()):
+                if cyc.sale_date and cyc.sale_date.date() < today - timedelta(days=COMPLETE_AFTER_DAYS):
+                    cyc.status = "completed"
+                    counts["completed"] += 1
+                    continue
+                if cyc.last_synced_at is None or cyc.last_synced_at < stale:
+                    sync(db, o, cyc.month, today=today)
+                    counts["refreshed"] += 1
+            db.commit()
+        except Exception:  # noqa: BLE001 - one workspace never stops the others
+            db.rollback()
+            counts["failed"] += 1
+            C.log.exception("foreclosure month automation failed for %s", o)
+    return dict(counts)

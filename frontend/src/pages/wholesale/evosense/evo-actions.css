@@ -47,3 +47,45 @@
   .evo-act__item { grid-template-columns: 1fr; }
 }
 @media (max-width: 520px) { .evo-act__summary { grid-template-columns: 1fr; } }
+
+/* ── Foreclosure Command Center ─────────────────────────────────────────── */
+.evo-fcc-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.evo-fcc-bar .evo-btn { min-height: 42px; }
+.evo-fcc-month { width: auto; min-width: 220px; font-weight: 600; }
+.evo-fcc-cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin: 12px 0 6px; }
+.evo-fcc-card { display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 14px 16px; border: 0; cursor: pointer;
+  border-radius: var(--evo-radius, 14px); background: #fff; box-shadow: inset 0 0 0 1px var(--evo-line, #e5e7eb);
+  font: inherit; color: inherit; min-height: 112px; }
+.evo-fcc-card:hover, .evo-fcc-card:focus-visible { box-shadow: inset 0 0 0 2px var(--evo-primary-fill, #4f46e5); outline: none; }
+.evo-fcc-card.is-attention { box-shadow: inset 3px 0 0 #f59e0b, inset 0 0 0 1px var(--evo-line, #e5e7eb); }
+.evo-fcc-card__title { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--evo-text-tertiary, #6b7280); }
+.evo-fcc-card__main { font-size: 28px; font-weight: 700; line-height: 1.1; }
+.evo-fcc-card__rows { display: flex; flex-direction: column; font-size: 12.5px; color: var(--evo-text-secondary, #4b5563); }
+.evo-fcc-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.evo-fcc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.evo-fcc-list li { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.evo-linkbtn { background: none; border: 0; padding: 0; font: inherit; color: var(--evo-primary-fill, #4f46e5); cursor: pointer;
+  text-align: left; min-height: 32px; }
+.evo-fcc-filters { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; align-items: center; }
+.evo-fcc-filters .evo-select { width: auto; }
+.evo-fcc-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.evo-fcc-actions .evo-btn { min-height: 36px; }
+.evo-fcc-flag { display: block; color: #b45309; }
+.evo-fcc-record { display: flex; flex-direction: column; gap: 6px; min-width: 220px; }
+.evo-fcc-table td, .evo-fcc-table .evo-prop__sub { white-space: normal; }
+.evo-fcc-table td.is-lead { min-width: 260px; }
+.evo-fcc-pager { display: flex; gap: 10px; align-items: center; justify-content: center; padding: 12px; }
+@media (max-width: 1100px) {
+  .evo-fcc-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .evo-fcc-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .evo-fcc-cards { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .evo-fcc-card { min-height: 0; padding: 10px 12px; }
+  .evo-fcc-card__main { font-size: 22px; }
+  .evo-fcc-month { min-width: 0; flex: 1 1 100%; }
+  .evo-fcc-bar .evo-btn { flex: 1 1 auto; }
+  .evo-fcc-filters .evo-select, .evo-fcc-filters .evo-search { width: 100%; }
+  .evo-fcc-actions .evo-btn { flex: 1 1 45%; min-height: 44px; }
+}
