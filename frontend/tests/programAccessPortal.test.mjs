@@ -101,3 +101,16 @@ test('preview name drops only an exact contact suffix', () => {
   assert.equal(previewName({ company_name: 'Acme — Sales', contact_name: 'Jo Smith' }), 'Acme — Sales')
   assert.equal(previewName({ company_name: 'Acme' }), 'Acme')
 })
+
+test('a business that opens as a workspace is not offered again as a preview', () => {
+  const c = {
+    workspace_contexts: [{ type: 'workspace', organization_id: 'ccb', organization_name: 'Commercial Cleaning Blueprint', organization_slug: 'ccb', industry: 'cleaning' }],
+    preview_contexts: [
+      { type: 'preview', opportunity_id: 'o2', company_name: 'Commercial Cleaning Blueprint — Daniel Almaguer', contact_name: 'Daniel Almaguer', url: 'https://x.test/demo/a' },
+      { type: 'preview', opportunity_id: 'o1', company_name: 'Countryside Land Partners', url: 'https://x.test/demo/b' },
+    ],
+  }
+  const { visible, previews } = programCards(c)
+  assert.deepEqual(visible.map(v => v.display), ['Commercial Cleaning Blueprint'])
+  assert.deepEqual(previews.map(p => p.display), ['Countryside Land Partners'])
+})

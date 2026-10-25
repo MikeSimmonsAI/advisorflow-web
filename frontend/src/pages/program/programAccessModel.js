@@ -113,7 +113,11 @@ export function programCards(ctx) {
                  summary: p.summary, orgLabel: ex.platform_name || null })
   }
   cards.sort((a, b) => a.rank - b.rank || String(a.display).localeCompare(String(b.display)))
-  return { visible: cards, others, previews: previewCards(ctx) }
+  // NO DUPLICATES: a business that already opens as a workspace for this login
+  // is not offered again as a preview (exact name match only).
+  const held = new Set(workspaces.map(w => String(w.organization_name || '').trim().toLowerCase()))
+  const previews = previewCards(ctx).filter(p => !held.has(String(p.display).trim().toLowerCase()))
+  return { visible: cards, others, previews }
 }
 
 /** "Commercial Cleaning Blueprint — Daniel Almaguer" -> the business name,
@@ -143,7 +147,7 @@ export function previewCards(ctx) {
     out.push({ ...p, organization_id: 'preview:' + p.opportunity_id, program: 'preview', variant: 'general',
                symbol: '◇', rank: 20, kind: 'PREVIEW · NOT A LIVE WORKSPACE',
                display, orgLabel: p.contact_name && display !== p.company_name ? p.contact_name : null,
-               summary: 'A mockup built for this prospect. Opens the demo link - no live data and no customer workspace yet.',
+               summary: 'A mockup built for this prospect. Opens the demo link. No live data and no customer workspace yet.',
                facts })
   }
   return out.sort((a, b) => String(a.display).localeCompare(String(b.display)))
