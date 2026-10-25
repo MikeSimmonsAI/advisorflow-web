@@ -233,3 +233,17 @@ def test_wrong_number_and_api(client, auth_headers, world):
     assert "Texas" in q["window"]["rule"]
     assert client.post("/wholesale/evosense/properties/%s/call-outcome" % world["a"].id, headers=auth_headers,
                        json={"outcome": "no_answer"}).status_code == 422          # no phone on file
+
+
+def test_a_second_batch_gets_room_on_top_of_what_the_first_used(world):
+    from app.models.wholesale_models import WholesaleEnrichmentRequest
+    from app.services import wholesale_service as WS
+    db, org = world["db"], world["org"]
+    for _ in range(25):                                   # 25 billable lookups already made this month
+        db.add(WholesaleEnrichmentRequest(organization_id=org, provider="tracerfy", status="succeeded",
+                                          billable=True, cost_cents=10))
+    db.commit()
+    b = CB.create(db, org, LIST)
+    ch = CB.approve(db, org, b, CB.approval_phrase(b), None)
+    settings = WS.resolve_settings(db, org, commit=False)
+    assert settings.enrichment_monthly_cap == 25 + b.max_lookups and ch["after"]["daily_cap"] == 25 + b.max_lookups
