@@ -492,7 +492,7 @@ def test_cadence_touches_use_the_location_aware_family(program, sample_advisor):
     t1 = render_cadence_message(db, lead, sample_advisor, 1, "")
     assert "Eastern Gate Memorial Gardens" in t1 and "Veteran Benefits Guide" in t1  # approved wording 2026-10-09
     t2 = render_cadence_message(db, lead, sample_advisor, 2, "")
-    assert "checking in" in t2 and "Eastern Gate Memorial Gardens" in t2
+    assert "I can meet you" in t2 and "Eastern Gate Memorial Gardens" in t2   # #378
     assert "call" not in (t1 + t2).lower()
 
 

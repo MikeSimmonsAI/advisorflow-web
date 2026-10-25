@@ -172,7 +172,8 @@ def flyer_for(db: Session, org_id: str, fam: CampaignFamily, location_id: str) -
 
 
 def render_touch(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof: LocationProfile,
-                 first_name: Optional[str], touch: str = "first", flyer_cache: Optional[Dict] = None) -> Dict:
+                 first_name: Optional[str], touch: str = "first", flyer_cache: Optional[Dict] = None,
+                 booking_url: str = "") -> Dict:
     """Subject, plain body, HTML body and attachment for one family/location/touch."""
     mode = fam.first_touch_email_mode if touch == "first" else fam.followup_email_mode
     # A hidden location gets only the general flyer, never its own branded one.
@@ -195,12 +196,20 @@ def render_touch(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof: 
         "first_name": name, "location_name": prof.official_name,
         "primary_contact_name": prog.primary_contact_name or "",
         "location_website": prof.website or "", "flyer_link": flyer_link,
+        # #378: ask for the appointment the ways THIS location offers, with the
+        # family's own pick-a-time link when there is one.
+        "appointment_options": identity.appointment_options(prof),
+        "booking_line": ("Pick a time that works for you here: %s\n\n" % booking_url) if booking_url else "",
     }
     subject = identity.render(fam.email_subject_template, fields)
     body = identity.render(fam.email_body_template,
                            dict(fields, reply_instructions=prog.reply_instructions_email or ""))
+    body_html = text_to_html(body, flyer_url)
+    if booking_url and booking_url != flyer_url:
+        _bu = html.escape(booking_url)
+        body_html = body_html.replace(_bu, '<a href="%s">%s</a>' % (_bu, _bu))
     return {"email_mode": mode, "flyer": flyer, "flyer_available": found is not None, "flyer_url": flyer_url, "attachment": attachment,
-            "subject": subject, "body": body, "body_html": text_to_html(body, flyer_url),
+            "subject": subject, "body": body, "body_html": body_html, "booking_url": booking_url,
             "fields": fields}
 
 
@@ -350,6 +359,14 @@ def _skip_reason(db: Session, lead: Lead, replied: bool, prog=None) -> Optional[
         return "lead status is '%s' - a person has it" % lead.status
     if replied:
         return "replied - a person has it"
+    # #378 (Kevin, Oct 23): a text and an email landed five minutes apart.
+    # The email waits until CROSS_CHANNEL_GAP after the last text that reached
+    # the family, so the two work as one conversation, not two at once.
+    from app.services.programs import spacing as _sp
+    _last = _sp.last_text_at(db, lead.id)
+    if _last is not None and datetime.utcnow() - _last < CROSS_CHANNEL_GAP:
+        return "a text went to them %d minutes ago - the email waits %d hours after a text" % (
+            (datetime.utcnow() - _last).total_seconds() // 60, CROSS_CHANNEL_GAP.total_seconds() // 3600)
     from app.models.models import BookingLink
     if db.query(BookingLink.id).filter(BookingLink.lead_id == lead.id,
                                        BookingLink.status.in_(("booked", "confirmed"))).first():
@@ -367,6 +384,7 @@ def _skip_reason(db: Session, lead: Lead, replied: bool, prog=None) -> Optional[
 
 
 DEFAULT_MAX_TOUCHES = 5
+CROSS_CHANNEL_GAP = timedelta(hours=4)
 
 
 def max_touches() -> int:
@@ -442,12 +460,14 @@ def build_message(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof:
                "strategy": brain.TOUCH_STRATEGY[1], "family": fam.key, "source": "family copy"}
     else:
         flyer_line = r["fields"].get("flyer_link") or ""
-        try:
-            from app.services.programs.identity import program_booking_url
-            booking_url = program_booking_url(db, lead) or ""
-        except Exception:                                # noqa: BLE001 - copy still goes, reply CTA stands
-            log.exception("booking link for email touch failed for lead %s", lead.id)
-            booking_url = ""
+        booking_url = r.get("booking_url")
+        if booking_url is None:
+            try:
+                from app.services.programs.identity import program_booking_url
+                booking_url = program_booking_url(db, lead) or ""
+            except Exception:                            # noqa: BLE001 - copy still goes, reply CTA stands
+                log.exception("booking link for email touch failed for lead %s", lead.id)
+                booking_url = ""
         msg = dict(brain.compose(packet, touch, "email", flyer_line=flyer_line, booking_url=booking_url),
                    source="playbook")
     prior = [html.unescape(re.sub(r"<[^>]+>", " ", m.body_html or "")) for m in
@@ -459,7 +479,7 @@ def build_message(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof:
     verdict = brain.quality(packet, msg, prior_bodies=prior, other_locations=others,
                             expected_display_name=packet.get("display_name"))
     msg["body_html"] = text_to_html(msg["body"], r.get("flyer_url") or "")
-    _bu = locals().get("booking_url") or ""
+    _bu = locals().get("booking_url") or r.get("booking_url") or ""
     if _bu and _bu != (r.get("flyer_url") or ""):
         _esc = html.escape(_bu)
         msg["body_html"] = msg["body_html"].replace(_esc, '<a href="%s">%s</a>' % (_esc, _esc))
@@ -621,8 +641,14 @@ def run(db: Session, organization_id: Optional[str] = None, *, dry_run: bool = F
                 report["skipped"] += 1
                 continue
             blind = bool(shared_email_peers(db, lead))
+            try:
+                booking_url = identity.program_booking_url(db, lead) or ""
+            except Exception:                         # noqa: BLE001 - the reply CTA still stands
+                log.exception("booking link for email touch failed for lead %s", lead.id)
+                booking_url = ""
             r = render_touch(db, prog, fam, prof, None if blind else lead.first_name,
-                             "first" if touch == 1 else "followup", flyer_cache=flyer_cache)
+                             "first" if touch == 1 else "followup", flyer_cache=flyer_cache,
+                             booking_url=booking_url)
             if r["email_mode"] in ("hosted", "attached") and r["flyer"] is None:
                 # The campaign is set to carry a flyer and no approved flyer is
                 # active for this location: an email promising a guide with no

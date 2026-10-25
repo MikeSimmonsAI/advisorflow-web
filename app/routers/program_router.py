@@ -1824,7 +1824,9 @@ def preview_campaign(family_id: str, location_id: Optional[str] = Query(None),
                          "first" if touch == "first" else "followup")
     fields = r["fields"]
     sms = identity.render(f.sms_template, dict(fields, reply_instructions=prog.reply_instructions_sms or "",
-                                                   call_line=identity._call_line(prof.facility_phone)))
+                                                   call_line=identity._call_line(prof.facility_phone),
+                                                   # preview: each family gets its own link here
+                                                   booking_line="Pick a time that works for you: (their booking link)"))
     sms = "%s %s" % (sms, identity.sms_signoff(prog, prof))
     return {
         "ok": True, "family": f.key, "location": prof.official_name, "email_mode": r["email_mode"],

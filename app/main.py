@@ -1913,6 +1913,20 @@ async def _program_sla_loop():
                         except Exception as exc:                 # noqa: BLE001
                             db.rollback()
                             _logger.error("stuck-visit check error: %s", exc, exc_info=True)
+                        # #378 appointment-first copy: replaces ONLY the exact
+                        # pre-#378 wording (edited copy is kept). Idempotent;
+                        # after the first pass it changes nothing.
+                        try:
+                            from app.services.programs import email_touches as _et_c378
+                            from app.services.programs import appointment_copy as _c378
+                            from datetime import timedelta as _td_c378
+                            if _et_c378.pass_due(key="copy378", every=_td_c378(days=3650)):   # once per start
+                                _c = _c378.apply_for_sci(db)
+                                if _c and _c.get("changed"):
+                                    out["copy378"] = _c["changed"]
+                        except Exception as exc:                 # noqa: BLE001
+                            db.rollback()
+                            _logger.error("appointment-first copy upgrade error: %s", exc, exc_info=True)
                         # Nightly practice run (about 6 AM Central): the setter
                         # answers the regression conversations in practice
                         # mode; the team is told only when one goes wrong.
