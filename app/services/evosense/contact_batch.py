@@ -266,8 +266,19 @@ def approve(db, org_id: str, b, phrase: Optional[str], user, *, daily_lookups: O
               "monthly_cap": settings.enrichment_monthly_cap, "per_run": settings.enrichment_max_records_per_run,
               "paused_paid_data": bool(ctl.paused_paid_data), "org_daily_budget_cents": ctl.org_daily_budget_cents}
     cfg.enabled = True
-    settings.enrichment_daily_cap = max(int(settings.enrichment_daily_cap or 0), daily)
-    settings.enrichment_monthly_cap = max(int(settings.enrichment_monthly_cap or 0), int(b.max_lookups))
+    # The Wholesale caps count BILLABLE lookups already made in their window, so
+    # the batch's room is added on top of what is already used - otherwise a
+    # second batch would be refused part-way by a cap its own approval set.
+    from app.models.wholesale_models import WholesaleEnrichmentRequest as _WER
+    now = datetime.utcnow()
+
+    def used(since):
+        return (db.query(_WER).filter(_WER.organization_id == org_id, _WER.billable.is_(True),
+                                      _WER.created_at >= since).count())
+    settings.enrichment_daily_cap = max(int(settings.enrichment_daily_cap or 0),
+                                        used(now - timedelta(days=1)) + daily)
+    settings.enrichment_monthly_cap = max(int(settings.enrichment_monthly_cap or 0),
+                                          used(now - timedelta(days=30)) + int(b.max_lookups))
     ctl.paused_paid_data = False
     ceiling = (b.unit_cost_cents or 0) * daily
     if ctl.org_daily_budget_cents is None or ctl.org_daily_budget_cents < ceiling:
