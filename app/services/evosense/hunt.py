@@ -771,6 +771,7 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
     counts = {"rows": 0, "created": 0, "merged": 0, "seen": 0, "review": 0, "rejected": 0,
               "sale_dates": 0, "sale_dates_declared": 0}
     rejected: List[Dict[str, Any]] = []
+    created_ids: List[str] = []
     for i, row in enumerate(reader, start=2):
         if counts["rows"] >= max_rows:
             break
@@ -866,18 +867,75 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
         outcome, prop = IN.ingest(db, org_id, provider, C.PROPERTY_SEARCH, rec,
                                   strategy_id=getattr(strategy, "id", None), user=user)
         counts[outcome] = counts.get(outcome, 0) + 1
+        if outcome == "created" and prop is not None:
+            created_ids.append(prop.id)
         if prop is not None and (row.get("phones") or row.get("emails")):
             _attach_list_contacts(db, prop, row, list_source or filename, counts)
         if prop is not None:
             if strategy is not None and not prop.best_strategy_id:
                 prop.best_strategy_id = strategy.id
             EV.rescore(db, prop, strategy)
-    C.log_event(db, org_id, "import.csv", user=user, actor_type=C.ACTOR_USER,
-                summary="Imported %s rows from %s%s: %s new, %s merged, %s for review, %s rejected"
-                % (counts["rows"], filename, (" as %s" % kind["label"]) if kind else "",
-                   counts["created"], counts["merged"], counts["review"], counts["rejected"]),
-                details=dict(counts, list_kind=list_kind, list_source=list_source))
-    return {"counts": counts, "rejected": rejected[:50], "list_kind": list_kind, "format": fmt}
+    ev = C.log_event(db, org_id, "import.csv", user=user, actor_type=C.ACTOR_USER,
+                     summary="Imported %s rows from %s%s: %s new, %s merged, %s for review, %s rejected"
+                     % (counts["rows"], filename, (" as %s" % kind["label"]) if kind else "",
+                        counts["created"], counts["merged"], counts["review"], counts["rejected"]),
+                     details=dict(counts, list_kind=list_kind, list_source=list_source, filename=filename,
+                                  created_ids=created_ids))
+    db.flush()
+    return {"counts": counts, "rejected": rejected[:50], "list_kind": list_kind, "format": fmt,
+            "import_id": getattr(ev, "id", None)}
+
+
+def _import_event(db, org_id: str, import_id: str):
+    from app.models.evosense_models import EvoSenseEvent
+    ev = (db.query(EvoSenseEvent).filter(EvoSenseEvent.organization_id == org_id, EvoSenseEvent.id == import_id,
+                                         EvoSenseEvent.action == "import.csv").first())
+    if ev is None:
+        raise LookupError("No such import in this workspace.")
+    return ev
+
+
+def undo_import(db, org_id: str, import_id: str, *, user=None, restore: bool = False) -> Dict[str, Any]:
+    """REVERSIBLE: the properties an import CREATED are archived (or, with
+    restore, brought back). Nothing is deleted - observations, signals, owners,
+    contacts and scores stay as evidence. A property that is promoted or has a
+    seller conversation / call is KEPT and reported. Properties the import merged into existing
+    records were never this file's to remove."""
+    from app.models.evosense_models import EvoSenseEngagement
+    ev = _import_event(db, org_id, import_id)
+    details = C.jload(ev.details, {}) or {}
+    ids = details.get("created_ids") or []
+    tag = "Import undone: %s (%s)" % ((details.get("filename") or "list")[:80], import_id[:8])
+    out = {"import_id": import_id, "created": len(ids), "archived": 0, "restored": 0, "kept": []}
+    if not ids:
+        out["note"] = "This import created no new properties (or predates undo support)."
+        return out
+    props = db.query(EvoSenseProperty).filter(EvoSenseProperty.organization_id == org_id,
+                                              EvoSenseProperty.id.in_(ids)).all()
+    for p in props:
+        if restore:
+            if p.archived_at is not None and (p.archive_reason or "") == tag:
+                p.archived_at, p.archive_reason = None, None
+                out["restored"] += 1
+            continue
+        if p.archived_at is not None:
+            continue
+        why = None
+        if p.promoted_deal_id:
+            why = "promoted into Wholesale"
+        elif (db.query(EvoSenseEngagement.id).filter(EvoSenseEngagement.organization_id == org_id,
+                                                     EvoSenseEngagement.property_id == p.id).first()):
+            why = "has a seller conversation or call"
+        if why:
+            out["kept"].append({"property_id": p.id, "address": p.street_address, "why": why})
+            continue
+        p.archived_at, p.archive_reason = C.now(), tag
+        out["archived"] += 1
+    C.log_event(db, org_id, "import.restored" if restore else "import.undone", user=user, actor_type=C.ACTOR_USER,
+                summary=("Import restored: %s properties back" % out["restored"]) if restore else
+                ("Import undone: %s new properties archived, %s kept" % (out["archived"], len(out["kept"]))),
+                details=dict(out, kept=len(out["kept"])))
+    return out
 
 
 def _attach_list_contacts(db, prop, row: Dict[str, Any], label: str, counts: Dict[str, Any]) -> None:

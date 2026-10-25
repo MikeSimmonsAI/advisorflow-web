@@ -96,3 +96,22 @@ def test_list_contacts_attach_only_to_the_owner_the_list_names(db_session, sampl
     HU._attach_list_contacts(db, p, {"phones": "2145550199|mobile", "owner_name": "PAT SAMPLE"}, "x", counts)
     assert counts == {"contacts_refused": 1}
     assert db.query(EvoSenseContactPoint).filter(EvoSenseContactPoint.owner_id == other.id).count() == 0
+
+
+def test_an_import_can_be_undone_and_restored_without_deleting_anything(db_session, sample_org):
+    from app.services.evosense import hunt as HU
+    db, org = db_session, sample_org.id
+    out = HU.import_csv(db, org, WITH_PHONES, user=None, filename="synthetic_propstream.csv")
+    assert out["import_id"] and out["counts"]["created"] == 2
+    p = db.query(EvoSenseProperty).filter(EvoSenseProperty.street_address == "5 Synth Ln").one()
+    p.promoted_deal_id = "deal-x"                                    # worked since: kept
+    db.flush()
+    u = HU.undo_import(db, org, out["import_id"])
+    assert u["archived"] == 1 and u["kept"][0]["why"] == "promoted into Wholesale"
+    assert db.query(EvoSenseProperty).count() == 2                  # archived, not deleted
+    r = HU.undo_import(db, org, out["import_id"], restore=True)
+    assert r["restored"] == 1
+    assert db.query(EvoSenseProperty).filter(EvoSenseProperty.archived_at.isnot(None)).count() == 0
+    import pytest as _pt
+    with _pt.raises(LookupError):
+        HU.undo_import(db, "another-org", out["import_id"])
