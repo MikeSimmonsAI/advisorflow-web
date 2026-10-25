@@ -258,3 +258,39 @@ def test_the_scheduler_prepares_refreshes_and_completes_months_safely(world, mon
     assert late.get("completed") == 1                                 # stays readable, just not active
     assert F.get_cycle(db, org, "2026-11").status == "completed"
     assert db.query(EvoSenseAuctionEvent).count() >= 4                # history kept
+
+
+def test_a_list_date_with_only_an_earlier_clerk_notice_is_a_conflict_to_review(db_session, sample_org, monkeypatch):
+    db, org = db_session, sample_org.id
+    monkeypatch.setattr(F, "_today", lambda: TODAY)
+    p = _prop(db, org, 9)
+    _notice(db, p, "2026-10-06", "OCT-ONLY")                                  # the clerk's notice
+    _notice(db, p, "2026-11-03", "LIST-NOV", source="csv_import", claim=True)  # the list's date
+    db.commit()
+    F.start_month(db, org, "2026-11")
+    db.commit()
+    F._CACHE.clear()
+    r = F.rows(db, org, "2026-11")[0]
+    assert any("October 2026, not this month - notice needs review" in f for f in r["auction"]["flags"])
+    assert F.summary(db, org, "2026-11")["cards"]["verified"]["conflict"] == 1
+
+
+def test_a_month_of_200_properties_builds_quickly(db_session, sample_org, monkeypatch):
+    import time
+    db, org = db_session, sample_org.id
+    monkeypatch.setattr(F, "_today", lambda: TODAY)
+    for n in range(200):
+        _notice(db, _prop(db, org, 100 + n), "2026-11-03", "PERF-%d" % n)
+    db.commit()
+    t = time.monotonic()
+    F.start_month(db, org, "2026-11")
+    db.commit()
+    F._CACHE.clear()
+    s = F.summary(db, org, "2026-11")
+    took = time.monotonic() - t
+    assert s["cards"]["found"]["total"] == 200
+    print("200-property month: start + summary %.2fs" % took)
+    assert took < 30
+    t = time.monotonic()
+    F.summary(db, org, "2026-11")                                            # served from the 1-minute cache
+    assert time.monotonic() - t < 1

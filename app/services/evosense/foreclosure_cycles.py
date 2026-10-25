@@ -515,12 +515,16 @@ def rows(db, org_id: str, month: str) -> List[Dict[str, Any]]:
     props = members(db, org_id, month)
     evs = {e.property_id: e for e in _events(db, org_id, cyc.id)}
     later = _later_months(db, org_id, [p.id for p in props], month)
+    earlier_notice: Dict[str, List[str]] = {}
     # a later NOTICE counts even before that month is started
     for pid, ms in months_by_property(_fc_signals(db, org_id, include_test=True,
                                                   property_ids=[p.id for p in props])).items():
         for m in ms:
             if m > month and m not in later.get(pid, []):
                 later.setdefault(pid, []).append(m)
+            if m < month and any(not ((C.jload(s.provenance, {}) or {}).get("claim") or s.source == "csv_import")
+                                 for s in ms[m]):
+                earlier_notice.setdefault(pid, []).append(m)
     out = CO.rows_for(db, org_id, props)
     by_id = {p.id: p for p in props}
     today = _today()
@@ -534,6 +538,10 @@ def rows(db, org_id: str, month: str) -> List[Dict[str, Any]]:
         if later.get(r["id"]) and st not in CLOSED:
             flags.append("Also posted for %s - possible reschedule, verify"
                          % ", ".join(label(m) for m in sorted(later[r["id"]])))
+        if earlier_notice.get(r["id"]) and st in ("claimed", "not_found"):
+            # the list says this month, but the recorded notice is for an earlier sale
+            flags.append("The clerk notice on record is for %s, not this month - notice needs review"
+                         % ", ".join(label(m) for m in sorted(earlier_notice[r["id"]])))
         if ev and ev.carried_from_event_id:
             flags.append(ev.carry_reason or "Carried forward from an earlier month")
         if (r.get("owner") or {}).get("status") == "CONFLICT" or (r.get("owner") or {}).get("flags"):
@@ -628,6 +636,8 @@ def summary(db, org_id: str, month: str) -> Dict[str, Any]:
     owner_flags = sum(1 for r in rs if (r.get("owner") or {}).get("status") == "CONFLICT"
                       or (r.get("owner") or {}).get("flags"))
     carried = sum(1 for r in rs if r["auction"]["carried"])
+    conflicts = sum(1 for r in rs if r["auction"]["status"] == "conflict"
+                    or any("notice needs review" in f for f in r["auction"]["flags"]))
     dates = Counter(r["auction"]["sale_date"] for r in rs if r["auction"]["sale_date"])
     urgent = [r for r in rs if r["needs_attention"]][:10]
     return {
@@ -638,11 +648,11 @@ def summary(db, org_id: str, month: str) -> Dict[str, Any]:
         "cards": {
             "found": {"total": len(rs), "new": len(rs) - carried, "carried": carried},
             "verified": {"verified": sum(st[s] for s in VERIFIED), "pending": sum(st[s] for s in PENDING),
-                         "conflict": st["conflict"], "outcome_unverified": st["outcome_unverified"]},
+                         "conflict": conflicts, "outcome_unverified": st["outcome_unverified"]},
             "contact": {"ready": cs["contact_found"] + cs["outreach_eligible"], "eligible": cs["outreach_eligible"],
                         "awaiting": cs["lookup_ready"],
                         "note": "A phone number is not permission to text."},
-            "attention": {"missing_owners": cs["missing_owner"], "conflicts": st["conflict"],
+            "attention": {"missing_owners": cs["missing_owner"], "conflicts": conflicts,
                           "postponed": st["postponed"], "ownership": owner_flags,
                           "urgent": sum(1 for r in rs if r["needs_attention"])},
             "deals": {"active": sum(acq[k] for k in ("responded", "interested", "follow_up", "appointment",
