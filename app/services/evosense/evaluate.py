@@ -69,6 +69,11 @@ def rescore(db, prop: EvoSenseProperty, strategy=None) -> Dict[str, Any]:
     from app.services import contactability as CB
     CB.refresh_evosense(db, prop, strategy)
     prop.last_evaluated_at = C.now()
+    try:
+        from app.services.evosense import property_class as PCL
+        PCL.classify_properties(db, prop.organization_id, [prop])
+    except Exception:  # noqa: BLE001 - a classification never blocks scoring
+        C.log.exception("property classification failed for %s", prop.id)
     refresh_status(db, prop, strategy)
     return {"opportunity": po, "data_confidence": dc, "contact": cc, "stacked": stacked}
 

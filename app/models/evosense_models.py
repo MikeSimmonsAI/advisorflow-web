@@ -325,6 +325,15 @@ class EvoSenseProperty(Base):
 
     promoted_property_id = Column(String, nullable=True)   # wholesale_properties.id
     promoted_deal_id = Column(String, nullable=True)       # wholesale_deals.id
+    # normalized property classification (property_class.py) - the county's own
+    # category code is the evidence; property_type above is left as it was
+    property_category = Column(String, nullable=True)      # residential|multifamily|...|unknown
+    property_subtype = Column(String, nullable=True)
+    property_class_confidence = Column(String, nullable=True)
+    property_class_source = Column(String, nullable=True)
+    property_class_code = Column(String, nullable=True)    # the original code / words
+    property_class_conflict = Column(String, nullable=True)
+    property_class_person = Column(Text, nullable=True)    # JSON: a person's stated type
     promoted_at = Column(DateTime, nullable=True)
 
     is_test = Column(Boolean, nullable=False, default=False)

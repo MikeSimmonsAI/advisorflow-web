@@ -611,6 +611,11 @@ def filter_rows(rs: List[Dict[str, Any]], f: Dict[str, Any]) -> List[Dict[str, A
         out = [r for r in out if r["financial"]["key"] in want]
     if f.get("min_score"):
         out = [r for r in out if (r.get("score") or 0) >= int(f["min_score"])]
+    if f.get("ptype"):
+        want = set(f["ptype"].split(","))
+        out = [r for r in out if ((r.get("property_class") or {}).get("category") or "unknown") in want]
+    if f.get("psubtype"):
+        out = [r for r in out if (r.get("property_class") or {}).get("subtype") == f["psubtype"]]
     if f.get("type"):
         out = [r for r in out if f["type"].lower() in ((r.get("foreclosure") or {}).get("foreclosure_type") or "").lower()]
     if f.get("attention") == "yes":
@@ -633,6 +638,7 @@ def summary(db, org_id: str, month: str) -> Dict[str, Any]:
     acq = Counter(r["acquisition"]["key"] for r in rs)
     fin = Counter(r["financial"]["key"] for r in rs)
     counties = Counter(r.get("county") or "Unknown" for r in rs)
+    ptypes = Counter(((r.get("property_class") or {}).get("category") or "unknown") for r in rs)
     owner_flags = sum(1 for r in rs if (r.get("owner") or {}).get("status") == "CONFLICT"
                       or (r.get("owner") or {}).get("flags"))
     carried = sum(1 for r in rs if r["auction"]["carried"])
@@ -660,6 +666,7 @@ def summary(db, org_id: str, month: str) -> Dict[str, Any]:
                       "supported": fin["supported"], "offers": acq["offer"], "contracts": acq["contract"]},
         },
         "counties": dict(counties.most_common()),
+        "property_types": dict(ptypes.most_common()),
         "statuses": {k: {"count": v, "label": STATUS.get(k, k)} for k, v in st.items()},
         "contact_states": {k: {"count": v, "label": CONTACT_LABELS[k]} for k, v in cs.items()},
         "acquisition": {k: {"count": v, "label": ACQ_LABELS[k]} for k, v in acq.items()},

@@ -531,10 +531,16 @@ def _appraisal_json(a) -> Optional[Dict[str, Any]]:
             "land": a.get("land"), "improvements": a.get("improvements"), "at": _iso(a.get("at"))}
 
 
+def _pclass(p) -> Dict[str, Any]:
+    from app.services.evosense import property_class as PCL
+    return PCL.view(p)
+
+
 def row(p, signals: Optional[List[str]] = None, strategy_name: Optional[str] = None) -> Dict[str, Any]:
     vals = VAL.view(p)
     return {"id": p.id, "address": p.street_address, "unit": p.unit, "city": p.city, "state": p.state,
             "zip_code": p.zip_code, "county": p.county, "property_type": p.property_type,
+            "property_class": _pclass(p),
             # A MARKET estimate only. An appraisal district tax value is its
             # own field, labelled as exactly that, and is never an ARV.
             "estimated_value": vals["market_value"],
@@ -771,6 +777,16 @@ def _apply_filters(db, org_id, base, fx: Dict[str, Any]):
         base = base.filter(or_(*[EvoSenseProperty.zip_code.like(z + "%") for z in zips]))
     if fx.get("property_type"):
         base = base.filter(EvoSenseProperty.property_type == fx["property_type"])
+    if fx.get("ptype"):
+        cats = [c.strip() for c in str(fx["ptype"]).split(",") if c.strip()]
+        if "unknown" in cats:
+            # never classified yet reads as "needs review" too - it stays visible
+            base = base.filter(or_(EvoSenseProperty.property_category.in_(cats),
+                                   EvoSenseProperty.property_category.is_(None)))
+        else:
+            base = base.filter(EvoSenseProperty.property_category.in_(cats))
+    if fx.get("psubtype"):
+        base = base.filter(EvoSenseProperty.property_subtype == fx["psubtype"])
     if fx.get("occupancy"):
         base = base.filter(EvoSenseProperty.occupancy == fx["occupancy"])
     if fx.get("street"):
