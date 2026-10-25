@@ -75,7 +75,7 @@ function writeUrl(tab, filters, open) {
 }
 
 /** Upload the publisher's own file for a source that refuses our servers
- *  (TAD serves it to a person's computer, not to the cloud). */
+ *  (TAD and JCAD serve it to a person's computer, not to the cloud). */
 function SourceUpload({ sourceKey, onDone, onError }) {
   const [st, setSt] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -87,6 +87,8 @@ function SourceUpload({ sourceKey, onDone, onError }) {
   if (!st || !st.uploadable) return null
   const cur = st.current
   const blocked = st.access && st.access.blocked
+  const pub = st.publisher || 'The publisher'
+  const county = st.county || 'County'
   async function send(e) {
     e.preventDefault()
     if (!file) return
@@ -97,20 +99,20 @@ function SourceUpload({ sourceKey, onDone, onError }) {
       const r = await api.upload(`/wholesale/evosense/sources/${sourceKey}/upload`, fd)
       setFile(null)
       load()
-      onDone(`${st.label}: uploaded (${Math.round((r.size || 0) / 1048576)} MB). Tarrant lookups run again on the next hunt.`)
+      onDone(`${st.label}: uploaded (${Math.round((r.size || 0) / 1048576)} MB). ${county} lookups run again on the next hunt or list re-check.`)
     } catch (err) { onError(errText(err)) } finally { setBusy(false) }
   }
   return (
-    <section className="pc-upload" id="tad-upload" aria-label="Tarrant Appraisal District file">
-      <h3 className="pc-h3">Tarrant Appraisal District file</h3>
-      <p className="pc-sub" style={{ margin: '0 0 8px' }}>TAD refuses our servers but gives the same free file to your own computer.</p>
+    <section className="pc-upload" id={`${sourceKey}-upload`} aria-label={st.label}>
+      <h3 className="pc-h3">{st.label}</h3>
+      <p className="pc-sub" style={{ margin: '0 0 8px' }}>{pub} refuses our servers but gives the same free file to your own computer.</p>
       <p className="pc-small">
-        {cur ? <>On file: uploaded {ago(cur.uploaded_at)}{cur.source_date ? ` · TAD published ${cur.source_date}` : ''} · {Math.round((cur.size || 0) / 1048576)} MB{cur.via === 'feed' ? ' · sent by the nightly job' : ''}.</>
-          : blocked ? <strong>No copy on file — Tarrant owner, size, year built and tax value are missing until one is uploaded.</strong>
+        {cur ? <>On file: uploaded {ago(cur.uploaded_at)}{cur.source_date ? ` · ${pub} published ${cur.source_date}` : ''} · {Math.round((cur.size || 0) / 1048576)} MB{cur.via === 'feed' ? ' · sent by the nightly job' : ''}.</>
+          : blocked ? <strong>No copy on file — {st.missing || 'this source'} {st.missing ? 'are' : 'is'} missing until one is uploaded.</strong>
           : 'No uploaded copy on file.'}
       </p>
       <ol className="pc-small" style={{ margin: '0 0 10px', paddingLeft: 18 }}>
-        <li>Download <strong>{st.file_name}</strong> from <a className="evo-link" href={st.download_page} target="_blank" rel="noreferrer">TAD data downloads ↗</a> (free, no login).</li>
+        <li>Download <strong>{st.file_name}</strong> from <a className="evo-link" href={st.download_page} target="_blank" rel="noreferrer">{pub} data downloads ↗</a> (free, no login).</li>
         <li>Upload it here exactly as downloaded — do not unzip it.</li>
       </ol>
       {st.can_upload ? (
@@ -651,7 +653,7 @@ export default function EvoControls() {
       {openProvider ? (
         <ProviderDrawer p={openProvider} isAdmin={isAdmin} busy={busy} onClose={() => setOpen(null)} controls={ctl}
                         onToggle={toggle} onVerify={verify}
-                        extra={openProvider.key === 'tad' ? <SourceUpload sourceKey="tad" onDone={(msg) => { setNotice(msg); load() }} onError={setError} /> : null} />
+                        extra={['tad', 'johnson_cad'].includes(openProvider.key) ? <SourceUpload sourceKey={openProvider.key} onDone={(msg) => { setNotice(msg); load() }} onError={setError} /> : null} />
       ) : null}
       {openCap ? (
         <CapabilityDrawer cap={openCap} providers={merged} counties={counties} onClose={() => setOpen(null)}

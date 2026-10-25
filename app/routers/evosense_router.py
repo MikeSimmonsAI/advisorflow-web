@@ -1898,15 +1898,25 @@ def verify_source(payload: VerifyIn, db: Session = Depends(get_db),
     return {**res, "registry": PV.source_registry(db, org_id)}
 
 
-@router.get("/sources/tad/upload")
-def source_upload_status(db: Session = Depends(get_db),
-                         user: User = Depends(require_tenant_or_observer)):
-    """Which file TAD takes, where to download it, and the copy on file. TAD is
-    the only source that takes an upload, so the path names it (no id in it)."""
-    source_key = "tad"
+def _upload_status(db, user, source_key: str):
     return {**PV.upload_status(source_key),
             "can_upload": getattr(user, "role", None) in PV.PLATFORM_ADMIN_ROLES,
             "access": PV.platform_access(db, source_key)}
+
+
+async def _admin_upload(db, user, source_key: str, file: UploadFile):
+    if getattr(user, "role", None) not in PV.PLATFORM_ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Only a platform admin can upload a public-record file.")
+    return await _save_source_upload(db, source_key, file.read, via="upload", by=user.email)
+
+
+# Each uploadable source has its own fixed path (no id in it), so the
+# cross-tenant guard has nothing to attack and old URLs keep working.
+@router.get("/sources/tad/upload")
+def source_upload_status(db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_or_observer)):
+    """Which file TAD takes, where to download it, and the copy on file."""
+    return _upload_status(db, user, "tad")
 
 
 @router.post("/sources/tad/upload")
@@ -1915,10 +1925,23 @@ async def source_upload(file: UploadFile = File(...), db: Session = Depends(get_
     """A platform admin uploads the publisher's own file (e.g. TAD's property
     data, which TAD serves to a person's computer but refuses to our servers).
     The file is shared by every workspace, so only a platform admin may do it."""
-    source_key = "tad"
-    if getattr(user, "role", None) not in PV.PLATFORM_ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Only a platform admin can upload a public-record file.")
-    return await _save_source_upload(db, source_key, file.read, via="upload", by=user.email)
+    return await _admin_upload(db, user, "tad", file)
+
+
+@router.get("/sources/johnson_cad/upload")
+def johnson_upload_status(db: Session = Depends(get_db),
+                          user: User = Depends(require_tenant_or_observer)):
+    """Which JCAD file to download, from where, and the copy on file."""
+    return _upload_status(db, user, "johnson_cad")
+
+
+@router.post("/sources/johnson_cad/upload")
+async def johnson_upload(file: UploadFile = File(...), db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """A platform admin uploads JCAD's certified-records zip. JCAD shows cloud
+    servers a browser check; we do not try to pass it - a person downloads the
+    free file and it is uploaded here."""
+    return await _admin_upload(db, user, "johnson_cad", file)
 
 
 async def _save_source_upload(db, source_key: str, read_chunk, *, via: str, by: Optional[str],

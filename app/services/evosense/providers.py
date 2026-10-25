@@ -1965,7 +1965,18 @@ def verify_source(db, org_id: str, key: str, *, platform_admin: bool = False) ->
 UPLOADABLE = {"tad": {"label": "TAD Property Data (Delimited) - Residential",
                       "file_name": "PropertyData(Delimited)_R.ZIP",
                       "download_page": "https://www.tad.org/resources/data-downloads",
-                      "max_bytes": 400 * 1024 * 1024}}
+                      "max_bytes": 400 * 1024 * 1024,
+                      "publisher": "TAD", "county": "Tarrant",
+                      "missing": "Tarrant owner, size, year built and tax value"},
+              # JCAD answers a person's browser but shows cloud servers a JavaScript
+              # bot check (403). We never try to get past it: a person downloads the
+              # free file and a platform admin uploads it here.
+              "johnson_cad": {"label": "Johnson County Appraisal District - Certified Records",
+                              "file_name": "the certified-records zip (e.g. BATCH_896.all_.zip)",
+                              "download_page": "https://johnsoncad.com/downloads",
+                              "max_bytes": 300 * 1024 * 1024,
+                              "publisher": "JCAD", "county": "Johnson",
+                              "missing": "Johnson owner, legal description and deed date"}}
 
 
 def validate_uploaded_zip(key: str, path: str) -> Dict[str, Any]:
@@ -1991,6 +2002,26 @@ def validate_uploaded_zip(key: str, path: str) -> Dict[str, Any]:
             raise ValueError("This is not the TAD residential property file (missing columns: %s)."
                              % ", ".join(missing[:6]))
         return {"member": member, "columns": len(header)}
+    if key == "johnson_cad":
+        from app.services.evosense.sources import johnson as J
+        try:
+            zf = zipfile.ZipFile(path)
+        except zipfile.BadZipFile:
+            raise ValueError("That is not a zip file. Upload the certified-records .zip exactly as JCAD publishes it.")
+        try:
+            names = set(zf.namelist())
+            missing_files = [m for m in (J.MEMBER, J.LEGAL_MEMBER) if m not in names]
+            if missing_files:
+                raise ValueError("This is not the JCAD certified-records zip (missing %s). Upload it "
+                                 "exactly as downloaded - do not unzip and re-zip it." % ", ".join(missing_files))
+            header = [c.strip() for c in next(SB_.text_lines(zf, J.MEMBER)).split("\t")]
+        finally:
+            zf.close()
+        missing = [c for c in J.REQUIRED if c not in header]
+        if missing:
+            raise ValueError("This is not the JCAD certified-records file (missing columns: %s)."
+                             % ", ".join(missing[:6]))
+        return {"member": J.MEMBER, "columns": len(header)}
     raise ValueError("This source does not take uploads.")
 
 
@@ -2008,6 +2039,9 @@ def accept_upload(db, key: str, tmp_path: str, *, source_date: Optional[str] = N
         "uploaded_at": C.now().isoformat() + "Z", "source_date": source_date or None,
         "by": by, "via": via, **detail})
     meta["durable"] = persist_upload(db, key, SB_.uploaded_path(key), meta)
+    if key == "johnson_cad":
+        from app.services.evosense.sources import johnson as J
+        J.forget_index()                                   # read the new copy, not the old one
     clear_platform_block(db, key)
     p = PROVIDERS.get(key)
     cap = getattr(p, "lookup_capability", None)
