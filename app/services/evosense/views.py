@@ -11,11 +11,12 @@ visible page only.
 """
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 
 from app.models.evosense_models import (EvoSenseContactPoint, EvoSenseCostEntry,
                                         EvoSenseEngagement, EvoSenseEnrichmentDecision,
@@ -28,6 +29,7 @@ from app.services.evosense import budget as B
 from app.services.evosense import common as C
 from app.services.evosense import contacts as CT
 from app.services.evosense import economics as ECO
+from app.services.evosense import opportunity as OP
 from app.services.evosense import eligibility as EL
 from app.services.evosense import providers as PV
 from app.services.evosense import scoring as SC
@@ -554,10 +556,31 @@ def row(p, signals: Optional[List[str]] = None, strategy_name: Optional[str] = N
             "ownership_years": p.ownership_years, "occupancy": p.occupancy,
             "last_observed_at": _iso(p.last_observed_at),
             "archived_at": _iso(getattr(p, "archived_at", None)),
-            "archive_reason": getattr(p, "archive_reason", None)}
+            "archive_reason": getattr(p, "archive_reason", None),
+            # the universal opportunity view (evosense/opportunity.py), cached
+            "opportunity": OP.compact(p)}
 
+
+_CONF_ORDER = case((EvoSenseProperty.evidence_confidence == "verified", 0),
+                   (EvoSenseProperty.evidence_confidence == "partial", 1),
+                   (EvoSenseProperty.evidence_confidence == "insufficient", 2), else_=3)
 
 SORTS = {"opportunity": (EvoSenseProperty.opportunity_score.desc().nullslast(),),
+         # the universal opportunity view (evosense/opportunity.py)
+         "priority": (EvoSenseProperty.priority_score.desc().nullslast(),
+                      EvoSenseProperty.urgency_score.desc().nullslast(),
+                      EvoSenseProperty.opportunity_score.desc().nullslast()),
+         "urgency": (EvoSenseProperty.urgency_score.desc().nullslast(),
+                     EvoSenseProperty.sale_deadline.asc().nullslast(),
+                     EvoSenseProperty.priority_score.desc().nullslast()),
+         "spread": (EvoSenseProperty.spread_base.desc().nullslast(),
+                    EvoSenseProperty.priority_score.desc().nullslast()),
+         "confidence": (_CONF_ORDER, EvoSenseProperty.priority_score.desc().nullslast()),
+         "engagement": (EvoSenseProperty.seller_intent.desc().nullslast(),
+                        EvoSenseProperty.priority_score.desc().nullslast()),
+         "last_activity": (EvoSenseProperty.last_observed_at.desc().nullslast(),),
+         "deadline": (EvoSenseProperty.sale_deadline.asc().nullslast(),
+                      EvoSenseProperty.priority_score.desc().nullslast()),
          "intent": (EvoSenseProperty.seller_intent.desc().nullslast(),
                     EvoSenseProperty.opportunity_score.desc().nullslast()),
          "newest": (EvoSenseProperty.discovered_at.desc(),),
@@ -587,7 +610,9 @@ def inbox(db, org_id: str, *, bucket: Optional[str] = None, strategy_id: Optiona
           q: Optional[str] = None, signal: Optional[str] = None, sort: str = "opportunity",
           limit: int = 50, offset: int = 0, county: Optional[str] = None,
           min_score: Optional[int] = None, source: Optional[str] = None,
-          archived: bool = False, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+          archived: bool = False, filters: Optional[Dict[str, Any]] = None,
+          category: Optional[str] = None, economics: Optional[str] = None,
+          confidence: Optional[str] = None) -> Dict[str, Any]:
     limit = max(1, min(int(limit or 50), 200))
     fx = {k: v for k, v in (filters or {}).items() if v not in (None, "")}
     base = db.query(EvoSenseProperty).filter(EvoSenseProperty.organization_id == org_id)
@@ -625,12 +650,42 @@ def inbox(db, org_id: str, *, bucket: Optional[str] = None, strategy_id: Optiona
                            EvoSenseSignal.active.is_(True)))
             base = base.filter(EvoSenseProperty.id.in_(sub))
     base = _apply_filters(db, org_id, base, fx)
+    # opportunity filters - every one reads a cached column of the same engine
+    cat_base = base
+    if category and category in OP.CATEGORY_LABELS:
+        base = base.filter(EvoSenseProperty.opportunity_categories.like("%%,%s,%%" % category))
+    if economics == "needs_underwriting":
+        base = base.filter(or_(EvoSenseProperty.economics_status.is_(None),
+                               EvoSenseProperty.economics_status != "supportable"))
+    elif economics in ("supportable", "partial", "not_supportable"):
+        base = base.filter(EvoSenseProperty.economics_status == economics)
+    if confidence in (OP.CONF_VERIFIED, OP.CONF_PARTIAL, OP.CONF_INSUFFICIENT):
+        base = base.filter(EvoSenseProperty.evidence_confidence == confidence)
     counts_q = base.with_entities(EvoSenseProperty.status, func.count(EvoSenseProperty.id)) \
         .group_by(EvoSenseProperty.status)
     counts = {s: int(n) for s, n in counts_q.all()}
     listq = base.filter(EvoSenseProperty.status == bucket) if bucket else base
     total = counts.get(bucket, 0) if bucket else sum(counts.values())
-    items = listq.order_by(*SORTS.get(sort, SORTS["opportunity"])).offset(max(0, offset)).limit(limit).all()
+    if sort == "next_due":
+        from app.models.evosense_models import EvoSenseFollowUp
+        due = (db.query(EvoSenseFollowUp.property_id, func.min(EvoSenseFollowUp.due_at).label("due"))
+               .filter(EvoSenseFollowUp.organization_id == org_id, EvoSenseFollowUp.status == "due")
+               .group_by(EvoSenseFollowUp.property_id).subquery())
+        items = (listq.outerjoin(due, due.c.property_id == EvoSenseProperty.id)
+                 .order_by(due.c.due.asc().nullslast(), EvoSenseProperty.priority_score.desc().nullslast())
+                 .offset(max(0, offset)).limit(limit).all())
+    else:
+        items = listq.order_by(*SORTS.get(sort, SORTS["opportunity"])).offset(max(0, offset)).limit(limit).all()
+    # a property not assessed yet (or re-scored since) is assessed for display
+    # now; the cached columns that sort the list catch up in the backfill
+    unassessed = [p for p in items if getattr(p, "opportunity_detail", None) is None]
+    fresh: Dict[str, Any] = {}
+    if unassessed:
+        try:
+            fresh = OP.build(db, org_id, unassessed)
+        except Exception:  # noqa: BLE001 - a derived view never breaks the list
+            db.rollback()
+            fresh = {}
     ids = [p.id for p in items] or ["-"]
     sig = defaultdict(set)
     for pid, stype in (db.query(EvoSenseSignal.property_id, EvoSenseSignal.signal_type)
@@ -643,9 +698,14 @@ def inbox(db, org_id: str, *, bucket: Optional[str] = None, strategy_id: Optiona
         EvoSenseStrategy.organization_id == org_id).all()}
     return {"total": total, "limit": limit, "offset": offset,
             "buckets": [{"key": k, "label": lbl, "count": counts.get(k, 0)} for k, lbl in C.BUCKETS],
-            "items": [row(p, [SIG.CATALOG[s]["label"] for s in sorted(sig[p.id], key=order.index)
-                              if s in SIG.CATALOG],
-                          names.get(p.best_strategy_id)) for p in items],
+            "items": [_with_fresh(row(p, [SIG.CATALOG[s]["label"] for s in sorted(sig[p.id], key=order.index)
+                                          if s in SIG.CATALOG],
+                                      names.get(p.best_strategy_id)), fresh.get(p.id)) for p in items],
+            "categories": _category_counts(cat_base),
+            "economics_counts": dict(base.with_entities(EvoSenseProperty.economics_status,
+                                                        func.count(EvoSenseProperty.id))
+                                     .group_by(EvoSenseProperty.economics_status).all()),
+            "weights": {"weights": OP.WEIGHTS, "notes": OP.WEIGHT_NOTES, "version": OP.VERSION},
             "strategies": [{"id": k, "name": v} for k, v in names.items()],
             "signal_types": [{"key": k, "label": v["label"]} for k, v in SIG.CATALOG.items()],
             "counties": sorted({c for (c,) in db.query(EvoSenseProperty.county.distinct())
@@ -659,6 +719,24 @@ def inbox(db, org_id: str, *, bucket: Optional[str] = None, strategy_id: Optiona
                                       .filter(EvoSenseProperty.organization_id == org_id).all() if c}),
             "filters": fx,
             "sandbox": sandbox_state(db, org_id)}
+
+
+def _with_fresh(r: Dict[str, Any], res: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if r.get("opportunity") is None and res is not None:
+        from types import SimpleNamespace
+        r["opportunity"] = OP.compact(SimpleNamespace(opportunity_detail=json.dumps(res, default=str)))
+        r["opportunity"]["computed_on_read"] = True
+    return r
+
+
+def _category_counts(base) -> List[Dict[str, Any]]:
+    """How many properties in the current view carry each category (one count each)."""
+    out = []
+    for key, label in OP.CATEGORY_LABELS.items():
+        n = base.filter(EvoSenseProperty.opportunity_categories.like("%%,%s,%%" % key)).count()
+        if n:
+            out.append({"key": key, "label": label, "count": n})
+    return out
 
 
 # Search filters for the Discovery Inbox. Each one reads a column the public

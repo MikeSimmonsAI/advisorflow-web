@@ -1486,6 +1486,19 @@ COLUMNS_TO_ADD = [
     ("evosense_observations", "processing_status", "VARCHAR"),
     ("evosense_observations", "processing_error", "VARCHAR"),
     ("evosense_properties", "archived_at", "TIMESTAMP"),
+    # the opportunity view (evosense/opportunity.py) - derived and cached
+    ("evosense_properties", "priority_score", "INTEGER"),
+    ("evosense_properties", "urgency_score", "INTEGER"),
+    ("evosense_properties", "economics_status", "VARCHAR"),
+    ("evosense_properties", "spread_base", "INTEGER"),
+    ("evosense_properties", "evidence_confidence", "VARCHAR"),
+    ("evosense_properties", "opportunity_categories", "VARCHAR"),
+    ("evosense_properties", "next_best_action", "VARCHAR"),
+    ("evosense_properties", "workflow_state", "VARCHAR"),
+    ("evosense_properties", "sale_deadline", "DATE"),
+    ("evosense_properties", "opportunity_detail", "TEXT"),
+    ("evosense_properties", "opportunity_hash", "VARCHAR"),
+    ("evosense_properties", "opportunity_at", "TIMESTAMP"),
     ("evosense_properties", "archive_reason", "VARCHAR"),
     ("evosense_controls", "score_weights", "TEXT"),
     ("evosense_provider_configs", "last_attempt_at", "TIMESTAMP"),
@@ -1702,6 +1715,10 @@ INDEXES_TO_CREATE = [
     # One organization per public seller-intake key. NULLs do not collide.
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_wholesale_settings_intake_key ON wholesale_settings(public_intake_key)",
     "CREATE INDEX IF NOT EXISTS ix_evosense_properties_archived ON evosense_properties(organization_id, archived_at)",
+    # the opportunity view: ranked lists sort by these; the backfill finds stale rows by the last
+    "CREATE INDEX IF NOT EXISTS ix_es_prop_org_priority ON evosense_properties(organization_id, priority_score)",
+    "CREATE INDEX IF NOT EXISTS ix_es_prop_org_urgency ON evosense_properties(organization_id, urgency_score)",
+    "CREATE INDEX IF NOT EXISTS ix_es_prop_opportunity_at ON evosense_properties(opportunity_at)",
     # DATA DEPTH: EvoSense properties read their sold comps by this pair.
     "CREATE INDEX IF NOT EXISTS ix_wscomp_org_esprop ON wholesale_comps(organization_id, evosense_property_id)",
     "CREATE INDEX IF NOT EXISTS ix_wsbuyer_org_contact ON wholesale_buyers(organization_id, org_contact_id)",
