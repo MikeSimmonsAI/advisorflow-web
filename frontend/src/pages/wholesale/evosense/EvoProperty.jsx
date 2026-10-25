@@ -32,6 +32,7 @@ import {
 import '../ds/evo-pages.css'
 import EvoActions from './EvoActions'
 import OpportunityCard from './OpportunityCard'
+import PropertyTypePanel from './PropertyTypePanel'
 import { CallOutcomePanel, FirstContactPlan } from './Acquire'
 import { ReadinessPanel } from './Readiness'
 import EvoPermission from './EvoPermission'
@@ -444,6 +445,7 @@ export default function EvoProperty() {
 
       {/* THE OPPORTUNITY VIEW — priority, urgency, money, evidence, next action */}
       <OpportunityCard o={d.opportunity} q={d.qualification} />
+      <PropertyTypePanel propertyId={propertyId} canEdit />
       <CallOutcomePanel propertyId={propertyId} />
       <FirstContactPlan propertyId={propertyId} />
 
@@ -454,7 +456,7 @@ export default function EvoProperty() {
       <ReadinessPanel propertyId={propertyId} refreshKey={JSON.stringify([p.status, p.contact_confidence, p.seller_intent])} />
 
       <nav className="evo-sec-nav" aria-label="Sections">
-        {[['readiness', 'Road to a deal'], ['record', 'Public record'], ['actions', 'What you can do'], ['intel', 'Intelligence'], ['conversation', 'Conversation'], ['facts', 'Seller facts'], ['deal', 'Deal intelligence'],
+        {[['readiness', 'Road to a deal'], ['ptype', 'Property type'], ['record', 'Public record'], ['actions', 'What you can do'], ['intel', 'Intelligence'], ['conversation', 'Conversation'], ['facts', 'Seller facts'], ['deal', 'Deal intelligence'],
           ['signals', 'Why found'], ['owner', 'Owner & contact'], ['data', 'Data intelligence'], ['timeline', 'Timeline']]
           .map(([id, label]) => <a key={id} href={`#${id}`}>{label}</a>)}
       </nav>

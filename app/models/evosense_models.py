@@ -334,6 +334,7 @@ class EvoSenseProperty(Base):
     property_class_code = Column(String, nullable=True)    # the original code / words
     property_class_conflict = Column(String, nullable=True)
     property_class_person = Column(Text, nullable=True)    # JSON: a person's stated type
+    type_facts = Column(Text, nullable=True)               # JSON: type-specific facts (type_details.py)
     promoted_at = Column(DateTime, nullable=True)
 
     is_test = Column(Boolean, nullable=False, default=False)

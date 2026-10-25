@@ -32,6 +32,7 @@ import './controls-tabs.css'
 import './controls/pc.css'
 import EvoEvaluation from './EvoEvaluation'
 import EvoLists from './EvoLists'
+import TypeCoverage from './TypeCoverage'
 import SkipTraceCostPanel from '../ops/SkipTraceCostPanel'
 import RollFixPanel from './RollFixPanel'
 import * as M from './controls/model'
@@ -49,7 +50,7 @@ const SWITCHES = [
   ['paused_ai_replies', 'AI reply reading', 'Replies are read by rules only when paused. Opt-outs are always honoured.'],
 ]
 
-const TABS = ['sources', 'providers', 'evaluation', 'skipcost', 'lists', 'capabilities', 'controls', 'usage']
+const TABS = ['sources', 'types', 'providers', 'evaluation', 'skipcost', 'lists', 'capabilities', 'controls', 'usage']
 const FILTER_KEYS = ['q', 'county', 'cap', 'status']
 
 const CAP_TONE = { OPERATIONAL: 'good', UNVERIFIED: 'info', DEGRADED: 'danger', BLOCKED: 'danger',
@@ -433,6 +434,7 @@ export default function EvoControls() {
       <TabBar label="Providers and controls" value={tab} onChange={setTab}
               items={[
                 { key: 'sources', label: 'Source Registry' },
+                { key: 'types', label: 'Coverage by property type' },
                 { key: 'providers', label: 'Service Providers', count: merged.length },
                 { key: 'evaluation', label: 'Provider Evaluation' },
                 { key: 'skipcost', label: 'Skip-trace Costs' },
@@ -510,6 +512,7 @@ export default function EvoControls() {
       </div>
       <div className="evo-stack" role="tabpanel" id="panel-lists" aria-labelledby="tab-lists" hidden={tab !== 'lists'}>
         {tab === 'lists' ? <EvoLists /> : null}
+        {tab === 'types' ? <TypeCoverage /> : null}
       </div>
 
       {/* ── CAPABILITY REGISTRY ─────────────────────────────────────────── */}

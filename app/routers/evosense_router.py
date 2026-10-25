@@ -2843,3 +2843,32 @@ def property_type_set(property_id: str, body: PropertyTypeIn, db: Session = Depe
         raise HTTPException(status_code=422, detail=str(exc))
     db.commit()
     return out
+
+
+@router.get("/properties/{property_id}/type-details")
+def property_type_details(property_id: str, db: Session = Depends(get_db),
+                          user: User = Depends(require_tenant_or_observer)):
+    """The fields that matter for this property's type (each with its source)
+    and the type's own analysis - or exactly what is missing for one."""
+    from app.services.evosense import type_details as TD
+    org_id = _read_org(db, user)
+    return TD.view(db, _prop(db, org_id, property_id))
+
+
+class TypeFactsIn(BaseModel):
+    values: Dict[str, Any] = {}
+    evidence: Dict[str, str] = {}
+
+
+@router.post("/properties/{property_id}/type-facts")
+def property_type_facts(property_id: str, body: TypeFactsIn, db: Session = Depends(get_db),
+                        user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    from app.services.evosense import type_details as TD
+    org_id = svc.write_org_id(db, user)
+    prop = _prop(db, org_id, property_id)
+    try:
+        TD.set_facts(db, prop, user, body.values, body.evidence)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    return TD.view(db, prop)

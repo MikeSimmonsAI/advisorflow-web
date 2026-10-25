@@ -62,6 +62,17 @@ ALIASES: Dict[str, Tuple[str, ...]] = {
     "estimated_equity": ("Est. Equity", "Estimated Equity", "Equity"),
     "last_sale_date": ("Last Sale Date", "Last Sale Recording Date", "Last Sold Date"),
     "record_id": ("PropStream ID", "Property ID", "Record ID"),
+    # beyond houses (kept as the export's claim)
+    "property_subtype": ("Property Subtype", "Sub Type", "Subtype", "Asset Subtype"),
+    "acreage": ("Lot Size Acres", "Lot Acres", "Acreage", "Acres", "Lot Size (Acres)", "Total Acres"),
+    "units": ("Units", "Number of Units", "# Units", "Unit Count", "Total Units"),
+    "zoning": ("Zoning", "Zoning Code"),
+    "ag_use": ("Agricultural Use", "Ag Use", "Land Use Description"),
+    "gross_income": ("Gross Income", "Annual Income", "Gross Rent", "Annual Gross Income"),
+    "operating_expenses": ("Operating Expenses", "Annual Expenses", "Expenses"),
+    "noi": ("NOI", "Net Operating Income"),
+    "cap_rate": ("Cap Rate", "Cap Rate (%)"),
+    "asking_price": ("Asking Price", "List Price", "Listing Price"),
 }
 
 # PropStream yes/no or status columns -> EvoSense signal
@@ -84,7 +95,9 @@ CANON_COLUMNS = ("street_address", "unit", "city", "state", "zip_code", "county"
                  "property_type", "owner_name", "mailing_street", "mailing_city", "mailing_state",
                  "mailing_zip", "estimated_value", "mortgage_balance", "last_sale_date", "signals",
                  "record_id", "bedrooms", "bathrooms", "square_feet", "year_built",
-                 "sale_date", "list_owner_name", "loan_type", "phones", "emails")
+                 "sale_date", "list_owner_name", "loan_type", "phones", "emails",
+                 "property_subtype", "acreage", "units", "zoning", "ag_use", "gross_income",
+                 "operating_expenses", "noi", "cap_rate", "asking_price")
 
 # Skip-trace columns an export may carry (several of each): "Phone 1",
 # "Mobile Phone 2", "Landline 1", "Email 1"... They become CONTACT CLAIMS of the

@@ -46,6 +46,9 @@ WEIGHTS = {
     "year_built": 4,
     "rehab": 8,
     "spread": 10,
+    "acres": 6,
+    "units": 6,
+    "building_sqft": 6,
 }
 
 # How much work a buyer will take on, as an ordered scale. A buyer who tolerates
@@ -194,18 +197,24 @@ def score_buy_box(deal: Any, prop: Any, box: Any,
             price_disqualified = True
 
     # ── Property type ───────────────────────────────────────────────────────
+    # A box may name a CATEGORY (commercial, land ...), a subtype (warehouse,
+    # ranch ...) or one of the older house types; the property answers with all
+    # three it knows. A property whose category is KNOWN and that the box does
+    # not buy is not this buyer's deal: a land investor is never matched to an
+    # apartment complex. An unknown type is a miss, never a disqualification.
     types = _list(getattr(box, "property_types", None))
-    ptype = _norm(getattr(prop, "property_type", None))
+    keys = _property_type_keys(prop)
+    category = _norm(getattr(prop, "property_category", None))
+    type_disqualified = False
     if not types:
         add("property_type", None, "This buy box names no property types.")
-    elif not ptype:
+    elif not keys:
         add("property_type", False, "The property has no type on file.")
     else:
-        # The old sentence dropped the verb on a match ("Property type
-        # single_family in the buy box") and printed the stored key.
-        add("property_type", ptype in types,
-            "Property type %s is%s in the buy box."
-            % (_label(ptype), "" if ptype in types else " not"))
+        hit = sorted(set(types) & keys)
+        label = _label(category or _norm(getattr(prop, "property_type", None)) or sorted(keys)[0])
+        add("property_type", bool(hit), "Property type %s is%s in the buy box." % (label, "" if hit else " not"))
+        type_disqualified = not hit and bool(category) and category != "unknown"
 
     # ── Strategy ────────────────────────────────────────────────────────────
     strategies = _list(getattr(box, "strategies", None))
@@ -227,6 +236,16 @@ def score_buy_box(deal: Any, prop: Any, box: Any,
     _range_factor(add, "year_built", getattr(box, "min_year_built", None),
                   getattr(box, "max_year_built", None),
                   getattr(prop, "year_built", None), "year built")
+
+    _range_factor(add, "acres", getattr(box, "min_acres", None), getattr(box, "max_acres", None),
+                  getattr(prop, "acreage", None), "acreage")
+    _range_factor(add, "units", getattr(box, "min_units", None), getattr(box, "max_units", None),
+                  getattr(prop, "unit_count", None), "units")
+    _range_factor(add, "building_sqft", getattr(box, "min_building_sqft", None),
+                  getattr(box, "max_building_sqft", None), getattr(prop, "building_sqft", None), "building area")
+    if getattr(box, "min_cap_rate", None) is not None:
+        add("property_type", None, "Wants a cap rate of %s%% or better - compare with the property's income "
+            "analysis (not scored: a deal carries no verified cap rate of its own)." % money(box.min_cap_rate))
 
     # ── Rehab tolerance ─────────────────────────────────────────────────────
     tolerance = _norm(getattr(box, "rehab_tolerance", None))
@@ -265,11 +284,33 @@ def score_buy_box(deal: Any, prop: Any, box: Any,
         disqualified_reason = "The property is outside this buyer's stated geography."
     elif price_disqualified:
         disqualified_reason = "The price is outside this buyer's stated range."
+    elif type_disqualified:
+        disqualified_reason = "This buyer does not buy this kind of property."
 
     return {"score": score, "factors": factors,
             "disqualified": disqualified_reason is not None,
             "disqualified_reason": disqualified_reason,
             "points_earned": earned, "points_available": available}
+
+
+def _property_type_keys(prop: Any) -> set:
+    """Every name the property answers to: its normalized category and subtype,
+    its older type, and the category that older type implies."""
+    from app.services.evosense.property_class import LEGACY_TYPES
+    keys = set()
+    for v in (getattr(prop, "property_category", None), getattr(prop, "property_subtype", None),
+              getattr(prop, "property_type", None)):
+        n = _norm(v)
+        if n and n != "unknown":
+            keys.add(n)
+    legacy = _norm(getattr(prop, "property_type", None))
+    if legacy in LEGACY_TYPES:
+        keys.add(LEGACY_TYPES[legacy][0])
+        if LEGACY_TYPES[legacy][1]:
+            keys.add(LEGACY_TYPES[legacy][1])
+    if legacy == "townhome":
+        keys |= {"residential", "townhouse"}
+    return keys
 
 
 def _range_factor(add, dimension: str, minimum: Any, maximum: Any,

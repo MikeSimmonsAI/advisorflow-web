@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../../api/client'
+import { CATEGORIES, subtypesOf, TypeLabel } from './ptypes'
 import { errText } from '../wsShared'
 import {
   Alert, Chips, Empty, EvoApp, Hero, Num, Panel, PropertyThumb, Ring, SandboxTag,
@@ -35,7 +36,9 @@ const EXTRA = [
   ['parcel', 'Parcel / account #', 'text', ''],
   ['city', 'City', 'city', ''],
   ['zip', 'ZIP code(s)', 'text', '75215, 76114'],
-  ['property_type', 'Property type', 'ptype', ''],
+  ['ptype', 'Property category', 'pcat', ''],
+  ['psubtype', 'Property subtype', 'psub', ''],
+  ['property_type', 'Older type field', 'ptype', ''],
   ['min_value', 'Tax value from ($)', 'number', '50000'],
   ['max_value', 'Tax value to ($)', 'number', '250000'],
   ['min_beds', 'Bedrooms at least', 'number', '3'],
@@ -72,6 +75,16 @@ function MoreFilters({ params, data, onApply, onClear }) {
               <select className="evo-select" value={draft[k]} onChange={(e) => setK(k, e.target.value)}>
                 <option value="">Any type</option>
                 {(data?.property_types || []).map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
+              </select>
+            ) : kind === 'pcat' ? (
+              <select className="evo-select" value={draft[k]} onChange={(e) => { setK(k, e.target.value); setK('psubtype', '') }}>
+                <option value="">All properties</option>
+                {CATEGORIES.map(([c, l]) => <option key={c} value={c}>{c === 'unknown' ? 'Unknown (needs review)' : l}</option>)}
+              </select>
+            ) : kind === 'psub' ? (
+              <select className="evo-select" value={draft[k]} onChange={(e) => setK(k, e.target.value)} disabled={!draft.ptype}>
+                <option value="">Any subtype</option>
+                {subtypesOf(draft.ptype).map(([c, l]) => <option key={c} value={c}>{l}</option>)}
               </select>
             ) : kind === 'occ' ? (
               <select className="evo-select" value={draft[k]} onChange={(e) => setK(k, e.target.value)}>
@@ -357,6 +370,7 @@ export default function EvoInbox() {
                               {p.appraisal ? ` · ${moneyK(p.appraisal.value)} tax value` : p.estimated_value ? ` · ${moneyK(p.estimated_value)} est.` : ''}
                               {p.equity_pct !== null && p.equity_pct !== undefined ? ` · ${p.equity_pct}% equity` : ''}
                             </span>
+                            <span className="evo-prop__sub"><TypeLabel pc={p.property_class} /></span>
                             {(p.bedrooms || p.square_feet || p.year_built || p.ownership_years != null) ? (
                               <span className="evo-prop__sub">
                                 {[p.bedrooms ? `${p.bedrooms} bd` : null, p.bathrooms ? `${p.bathrooms} ba` : null,
