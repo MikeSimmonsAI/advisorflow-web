@@ -866,6 +866,8 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
         outcome, prop = IN.ingest(db, org_id, provider, C.PROPERTY_SEARCH, rec,
                                   strategy_id=getattr(strategy, "id", None), user=user)
         counts[outcome] = counts.get(outcome, 0) + 1
+        if prop is not None and (row.get("phones") or row.get("emails")):
+            _attach_list_contacts(db, prop, row, list_source or filename, counts)
         if prop is not None:
             if strategy is not None and not prop.best_strategy_id:
                 prop.best_strategy_id = strategy.id
@@ -876,6 +878,40 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
                    counts["created"], counts["merged"], counts["review"], counts["rejected"]),
                 details=dict(counts, list_kind=list_kind, list_source=list_source))
     return {"counts": counts, "rejected": rejected[:50], "list_kind": list_kind, "format": fmt}
+
+
+def _attach_list_contacts(db, prop, row: Dict[str, Any], label: str, counts: Dict[str, Any]) -> None:
+    """Phones / emails a list carries (a PropStream skip trace, say) become the
+    LIST'S CONTACT CLAIM for the owner of record - only when the list names the
+    same person (contact_match_guard), never on an unrelated homeowner, and
+    never as permission to call or text. Free: the list was paid for elsewhere."""
+    from app.services import wholesale_enrichment as WE
+    from app.services.evosense import contacts as CT
+    owner = CT.primary_owner(db, prop)
+    if owner is None:
+        counts["contacts_no_owner"] = counts.get("contacts_no_owner", 0) + 1
+        return
+    phones = []
+    for item in (row.get("phones") or "").split(";"):
+        num, _, kind = item.partition("|")
+        if num:
+            phones.append(WE.EnrichmentPhone(number=num, phone_type=kind or "unknown",
+                                             source="list: %s" % label[:80]))
+    emails = [e for e in (row.get("emails") or "").split(";") if e]
+    res = WE.EnrichmentResult(status=WE.STATUS_SUCCEEDED, provider="list_import", phones=phones, emails=emails,
+                              owner_name=row.get("owner_name") or row.get("list_owner_name") or None,
+                              billable=False, cost_cents=0)
+    from app.services import contact_match_guard as G
+    if G.assess(owner.display_name, res)["verdict"] != G.MATCHED:
+        # a list naming nobody, or only a surname, is not enough to put a
+        # number on this owner - it waits for a person
+        counts["contacts_refused"] = counts.get("contacts_refused", 0) + 1
+        return
+    touched = CT.apply_result(db, owner, res, PV.PROVIDERS["csv_import"])
+    if touched:
+        counts["contacts_attached"] = counts.get("contacts_attached", 0) + len(touched)
+    else:
+        counts["contacts_refused"] = counts.get("contacts_refused", 0) + 1
 
 
 def preview_csv(db, org_id: str, content: str, *, filename: str = "upload.csv") -> Dict[str, Any]:
@@ -910,6 +946,8 @@ def preview_csv(db, org_id: str, content: str, *, filename: str = "upload.csv") 
         out["already_imported" if seen else "new"] += 1
         for sig in [x for x in (row.get("signals") or "").split(";") if x]:
             out["signals"][sig] = out["signals"].get(sig, 0) + 1
+        if row.get("phones") or row.get("emails"):
+            out["rows_with_contacts"] = out.get("rows_with_contacts", 0) + 1
         if len(out["sample"]) < 5:
             out["sample"].append({k: row.get(k) for k in ("street_address", "city", "zip_code", "owner_name",
                                                           "signals")})

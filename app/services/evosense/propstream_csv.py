@@ -84,7 +84,24 @@ CANON_COLUMNS = ("street_address", "unit", "city", "state", "zip_code", "county"
                  "property_type", "owner_name", "mailing_street", "mailing_city", "mailing_state",
                  "mailing_zip", "estimated_value", "mortgage_balance", "last_sale_date", "signals",
                  "record_id", "bedrooms", "bathrooms", "square_feet", "year_built",
-                 "sale_date", "list_owner_name", "loan_type")
+                 "sale_date", "list_owner_name", "loan_type", "phones", "emails")
+
+# Skip-trace columns an export may carry (several of each): "Phone 1",
+# "Mobile Phone 2", "Landline 1", "Email 1"... They become CONTACT CLAIMS of the
+# export - attached only when the export's owner name agrees with the owner of
+# record (contact_match_guard), never consent to call or text.
+_PHONE_HDR = re.compile(r"^(phone|phonenumber|mobile|mobilephone|cell|cellphone|wireless|wirelessphone|"
+                        r"landline|landlinephone|ownerphone|owner1phone)\d*(number)?$")
+_EMAIL_HDR = re.compile(r"^(email|emailaddress|owneremail|owner1email)\d*$")
+
+
+def phone_type_of(header: str) -> str:
+    n = norm(header)
+    if n.startswith(("mobile", "cell", "wireless")):
+        return "mobile"
+    if n.startswith("landline"):
+        return "landline"
+    return "unknown"
 
 _LOOKUP = {norm(a): c for c, al in ALIASES.items() for a in al}
 _FLAG_LOOKUP = {norm(a): s for s, al in FLAGS.items() for a in al}
@@ -98,6 +115,10 @@ def mapping(fieldnames: List[str]) -> Dict[str, Any]:
             cols[h] = _LOOKUP[n]
         elif n in _FLAG_LOOKUP:
             flags[h] = _FLAG_LOOKUP[n]
+        elif _PHONE_HDR.match(n):
+            cols[h] = "phone:" + phone_type_of(h)
+        elif _EMAIL_HDR.match(n):
+            cols[h] = "email"
         elif n:
             unknown.append(h)
     return {"columns": cols, "flags": flags, "unknown": unknown}
@@ -132,15 +153,32 @@ def convert(content: str) -> Tuple[str, Dict[str, Any]]:
     w = csv.DictWriter(out, fieldnames=list(CANON_COLUMNS))
     w.writeheader()
     flags_seen: Dict[str, int] = {}
+    contacts_seen = {"rows": 0, "phones": 0, "emails": 0}
     rows = 0
     for row in reader:
         rows += 1
         rec = {c: "" for c in CANON_COLUMNS}
+        phones, emails = [], []
         for h, c in m["columns"].items():
             v = (row.get(h) or "").strip()
             if c in ("owner_first", "owner_last", "estimated_equity"):
                 continue
+            if c.startswith("phone:"):
+                digits = re.sub(r"\D", "", v)[-10:]
+                if len(digits) == 10 and digits not in [x.split("|")[0] for x in phones]:
+                    phones.append("%s|%s" % (digits, c[6:]))
+                continue
+            if c == "email":
+                if "@" in v and v.lower() not in emails:
+                    emails.append(v.lower())
+                continue
             rec[c] = v
+        rec["phones"] = ";".join(phones)
+        rec["emails"] = ";".join(emails)
+        if phones or emails:
+            contacts_seen["rows"] += 1
+            contacts_seen["phones"] += len(phones)
+            contacts_seen["emails"] += len(emails)
         if not rec["owner_name"]:
             first = next((row.get(h, "").strip() for h, c in m["columns"].items() if c == "owner_first"), "")
             last = next((row.get(h, "").strip() for h, c in m["columns"].items() if c == "owner_last"), "")
@@ -159,5 +197,6 @@ def convert(content: str) -> Tuple[str, Dict[str, Any]]:
     report = {"format": "propstream", "rows": rows,
               "mapped": {h: c for h, c in m["columns"].items()},
               "signal_columns": m["flags"], "not_used": m["unknown"], "signals_found": flags_seen,
+              "contacts_found": contacts_seen,
               "note": "As stated by a PropStream export - imported as the list's claim, not verified."}
     return out.getvalue(), report

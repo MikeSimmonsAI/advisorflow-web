@@ -17,6 +17,7 @@ REASONS = {
     "WANTS_OFFER": "Seller asked for an offer",
     "APPOINTMENT": "Seller asked to meet or show the property",
     "CALLBACK": "Seller asked for a call",
+    "CALL_INTERESTED": "Owner said on a call they are interested - qualify, then promote into Wholesale",
     "ESTATE": "Estate / inherited property — decision makers to confirm",
     "TENANT_ISSUE": "Tenant situation needs judgment",
     "UNCLEAR": "EvoSense could not read the reply with confidence",

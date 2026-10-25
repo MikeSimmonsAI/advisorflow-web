@@ -184,6 +184,10 @@ def plan(db, org_id: str, *, name: str, provider_keys: List[str], property_ids: 
     lines = []
     for p, cfg in providers:
         unit = _unit(p, cfg, cap)
+        if _paid(p) and unit <= 0:
+            # A paid vendor with no price on file would show "$0 maximum" - untrue.
+            raise EvaluationRefused("%s has no price on file. %s" % (
+                p.label, getattr(p, "price_note", "") or "Set a cost override from the vendor's written quote."))
         lines.append({"provider": p.key, "label": p.label, "role": "provider", "max_calls": n,
                       "unit_cents": unit, "max_cents": unit * n, "paid": _paid(p),
                       "readiness": _readiness(db, org_id, p, cfg),

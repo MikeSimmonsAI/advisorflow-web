@@ -372,3 +372,58 @@ def derive(db, prop, owner=None) -> List[str]:
                effective_at=m.get("effective_at"), evidence_basis=m.get("evidence_basis"),
                rule_version=DERIVED_RULE_VERSION)
     return list(spec["make"])
+
+
+def recheck_absentee(db, org_id: Optional[str] = None, *, limit: int = 300) -> int:
+    """Re-check ACTIVE "absentee owner" signals against the current address rule
+    and re-score only the properties where the owner's mailing address is now
+    recognised as the house itself (e.g. "41 MAPLE GRN" = "41 MAPLE
+    GREEN"). The signal is deactivated by the ordinary derivation (with its
+    reason), never deleted; nothing else is touched. Idempotent - a fixed
+    property has no active absentee signal, so it is not picked up again."""
+    from app.models.evosense_models import EvoSenseOwner, EvoSenseOwnership, EvoSenseProperty, EvoSenseSignal
+    from app.services.evosense import contacts as CT
+    from app.services.evosense.identity import same_address
+    q = (db.query(EvoSenseProperty.id, EvoSenseProperty.street_address, EvoSenseProperty.zip_code,
+                  EvoSenseOwner.mailing_street, EvoSenseOwner.mailing_zip)
+         .join(EvoSenseSignal, (EvoSenseSignal.property_id == EvoSenseProperty.id)
+               & (EvoSenseSignal.organization_id == EvoSenseProperty.organization_id))
+         .join(EvoSenseOwnership, (EvoSenseOwnership.property_id == EvoSenseProperty.id)
+               & (EvoSenseOwnership.organization_id == EvoSenseProperty.organization_id)
+               & EvoSenseOwnership.is_current.is_(True))
+         .join(EvoSenseOwner, EvoSenseOwner.id == EvoSenseOwnership.owner_id)
+         .filter(EvoSenseSignal.signal_type == "ABSENTEE_OWNER", EvoSenseSignal.source == DERIVED_SOURCE,
+                 EvoSenseSignal.active.is_(True), EvoSenseOwner.mailing_street.isnot(None)))
+    if org_id:
+        q = q.filter(EvoSenseProperty.organization_id == org_id)
+    ids = []
+    for pid, street, zp, mail, mzip in q.all():
+        if pid not in ids and same_address(mail, street, mzip, zp) is True:
+            ids.append(pid)
+    fixed = 0
+    if not ids:
+        return 0
+    from app.services.evosense import evaluate as EV
+    for p in db.query(EvoSenseProperty).filter(EvoSenseProperty.id.in_(ids[:limit])).all():
+        owner = CT.primary_owner(db, p)
+        if owner is None or same_address(owner.mailing_street, p.street_address, owner.mailing_zip,
+                                         p.zip_code) is not True:
+            continue
+        EV.rescore(db, p)
+        C.log_event(db, p.organization_id, "signal.absentee_rechecked", property_id=p.id, is_test=bool(p.is_test),
+                    actor_type=C.ACTOR_AUTOMATION,
+                    summary="Absentee owner removed: the mailing address (%s) is the property itself" %
+                            (owner.mailing_street or "")[:80])
+        fixed += 1
+    if fixed:
+        db.flush()
+        try:
+            from app.services.evosense import opportunity as OP
+            by_org = {}
+            for p in db.query(EvoSenseProperty).filter(EvoSenseProperty.id.in_(ids[:limit])).all():
+                by_org.setdefault(p.organization_id, []).append(p)
+            for o, ps in by_org.items():
+                OP.refresh(db, o, ps)
+        except Exception:                                   # noqa: BLE001 - the view catches up on its own
+            C.log.exception("opportunity refresh after absentee recheck failed")
+    return fixed

@@ -210,8 +210,13 @@ def record_outcome(db, org_id: str, prop, user, *, outcome: str, note: Optional[
         eng.status, mapped = "responded", (C.O_APPOINTMENT if outcome == "appointment" else C.O_INTERESTED)
         fact("appointment_request" if outcome == "appointment" else "willing_to_sell", "yes")
         cp.positive_response = True
-        actions.append("Next: schedule the appointment" if outcome == "appointment" else
-                       "Next: qualify (timeline, condition, occupancy) and set an appointment")
+        HO.open_handoff(db, prop, ["APPOINTMENT" if outcome == "appointment" else "CALL_INTERESTED"],
+                        engagement=eng, priority=90 if outcome == "appointment" else 80,
+                        next_action=("Book the appointment - promote into Wholesale, then Appointments"
+                                     if outcome == "appointment" else
+                                     "Qualify (timeline, condition, occupancy), then promote into Wholesale"))
+        actions.append("Hand-off opened: book the appointment" if outcome == "appointment" else
+                       "Hand-off opened: qualify (timeline, condition, occupancy) and set an appointment")
     elif outcome == "deceased":
         fact("estate_context", "owner deceased (reported on a call)")
         HO.open_handoff(db, prop, ["ESTATE"], engagement=eng, priority=80,
@@ -260,15 +265,22 @@ def sweep(db, org_id: str, *, limit: int = 100) -> int:
     """Every callable owner is one open item in the existing VA queue."""
     from app.services import wholesale_exceptions as WX
     n = 0
+    now = datetime.utcnow()
     for r in call_queue(db, org_id, limit=limit)["rows"]:
         if r["workflow"] and r["workflow"].get("key") in ("RESPONDED", "HUMAN_HANDOFF", "APPOINTMENT"):
             continue
+        due = r.get("follow_up_due")
+        if due and datetime.fromisoformat(due.rstrip("Z")) > now:
+            continue                 # a promised call-back / retry is not due yet - no task before it is
+        promised = bool(due)
         detail = "; ".join(filter(None, [
             ("Sale %s" % r["sale_deadline"]) if r["sale_deadline"] else None,
             ", ".join(r["why"]) or None,
             "Open the property for the number, the script and the outcome buttons."]))
         WX.raise_exception(db, org_id, kind=VA_KIND, subject_type="evosense_property",
-                           subject_id=r["property_id"], title="Call the owner: %s" % r["address"],
+                           subject_id=r["property_id"],
+                           title=("Call back the owner (follow-up due): %s" if promised else
+                                  "Call the owner: %s") % r["address"],
                            detail=detail[:900], priority=10 if r["sale_deadline"] else 40,
                            source="evosense.calling", is_test=r["is_test"])
         n += 1
