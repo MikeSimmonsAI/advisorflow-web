@@ -2629,3 +2629,170 @@ def roll_fix_rollback(run_id: str, payload: ConfirmIn, db: Session = Depends(get
         raise HTTPException(status_code=409 if changed else 404, detail=str(exc))
     db.commit()
     return out
+
+
+# ── Foreclosure Command Center: monthly auction cycles ─────────────────────
+# The month travels as a QUERY value (it names no record of anyone's - every
+# read is this workspace's own); the one record-bearing route is the event.
+
+def _fc_month(db, org_id, month: Optional[str]) -> str:
+    from app.services.evosense import foreclosure_cycles as FCC
+    if not month:
+        return FCC.default_month(db, org_id)
+    try:
+        FCC.parse_month(month)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return month
+
+
+@router.get("/foreclosures")
+def foreclosures_month(month: Optional[str] = None, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_or_observer)):
+    """One month: the five cards, the overview, the county sources, the months worked."""
+    from app.services.evosense import foreclosure_cycles as FCC
+    org_id = _read_org(db, user)
+    m = _fc_month(db, org_id, month)
+    out = FCC.summary(db, org_id, m)
+    out.update({"previous": FCC.shift(m, -1), "next": FCC.shift(m, 1), "sources": FCC.sources(db, org_id),
+                "months": [{"month": h["month"], "label": h["label"], "properties": h["properties"]}
+                           for h in FCC.history(db, org_id)],
+                "can_manage": _fc_can_manage(db, user)})
+    return out
+
+
+def _fc_can_manage(db, user) -> bool:
+    from app.services import wholesale_exceptions as WX
+    try:
+        return bool(WX.is_manager(db, user))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+@router.get("/foreclosures/properties")
+def foreclosures_properties(month: Optional[str] = None, view: str = "all", page: int = 1, per_page: int = 50,
+                            county: Optional[str] = None, q: Optional[str] = None, status: Optional[str] = None,
+                            verified: Optional[str] = None, owner: Optional[str] = None,
+                            contact: Optional[str] = None, acquisition: Optional[str] = None,
+                            financial: Optional[str] = None, min_score: Optional[int] = None,
+                            type: Optional[str] = None, attention: Optional[str] = None,
+                            carried: Optional[str] = None, deals: Optional[str] = None,
+                            sort: str = "opportunity", db: Session = Depends(get_db),
+                            user: User = Depends(require_tenant_or_observer)):
+    """The month's working list - the existing ranking, filtered and paged on the server."""
+    from app.services.evosense import foreclosure_cycles as FCC
+    org_id = _read_org(db, user)
+    m = _fc_month(db, org_id, month)
+    rs = FCC.rows(db, org_id, m)
+    top = {"top10": 10, "top25": 25, "top100": 100}.get(view)
+    if top:
+        rs = [r for r in rs if (r.get("rank") or 9999) <= top]
+    rs = FCC.filter_rows(rs, {"county": county, "q": q, "status": status, "verified": verified, "owner": owner,
+                              "contact": contact, "acquisition": acquisition, "financial": financial,
+                              "min_score": min_score, "type": type, "attention": attention, "carried": carried,
+                              "deals": deals, "sort": sort})
+    per_page = max(1, min(int(per_page or 50), 200))
+    page = max(1, int(page or 1))
+    total = len(rs)
+    keep = ("id", "street_address", "city", "zip_code", "county", "owner", "foreclosure", "contacts", "score",
+            "rank", "next_action", "auction", "contact_state", "acquisition", "financial", "needs_attention",
+            "equity", "tax")
+    items = []
+    for r in rs[(page - 1) * per_page: page * per_page]:
+        x = {k: r.get(k) for k in keep}
+        o = r.get("opportunity") or {}
+        x["opportunity"] = {"priority": (o.get("priority") or {}).get("value"),
+                            "next_action": o.get("next_action"), "workflow_state": o.get("workflow_state"),
+                            "economics": o.get("economics"), "urgency": (o.get("urgency") or {}).get("value")}
+        items.append(x)
+    return {"month": m, "total": total, "page": page, "per_page": per_page, "items": items,
+            "statuses": FCC.STATUS, "contact_labels": FCC.CONTACT_LABELS, "acquisition_labels": FCC.ACQ_LABELS,
+            "financial_labels": FCC.FIN_LABELS}
+
+
+@router.get("/foreclosures/start-preview")
+def foreclosures_start_preview(month: Optional[str] = None, db: Session = Depends(get_db),
+                               user: User = Depends(require_tenant_or_observer)):
+    from app.services.evosense import foreclosure_cycles as FCC
+    org_id = _read_org(db, user)
+    m = month or FCC.next_month()
+    try:
+        return FCC.preview_start(db, org_id, m)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+class FcMonthIn(BaseModel):
+    month: str
+
+
+@router.post("/foreclosures/start")
+def foreclosures_start(body: FcMonthIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                       _g: User = Depends(require_not_observation)):
+    """START NEW MONTH: create (or return) the cycle, link the month's notices,
+    carry forward what a person marked postponed. Running it twice adds nothing."""
+    from app.services.evosense import foreclosure_cycles as FCC
+    if not _fc_can_manage(db, user):
+        raise HTTPException(status_code=403, detail="Only a workspace admin or manager can start a month.")
+    org_id = svc.write_org_id(db, user)
+    try:
+        out = FCC.start_month(db, org_id, body.month, user=user)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    return out
+
+
+@router.post("/foreclosures/refresh")
+def foreclosures_refresh(body: FcMonthIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                         _g: User = Depends(require_not_observation)):
+    """Re-read the month from the notices on record (free; reads nothing outside)."""
+    from app.services.evosense import foreclosure_cycles as FCC
+    org_id = svc.write_org_id(db, user)
+    try:
+        FCC.parse_month(body.month)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if FCC.get_cycle(db, org_id, body.month) is None:
+        raise HTTPException(status_code=409, detail="This month has not been started yet - use Start month.")
+    out = FCC.sync(db, org_id, body.month, user=user)
+    db.commit()
+    return out
+
+
+@router.get("/foreclosures/history")
+def foreclosures_history(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    from app.services.evosense import foreclosure_cycles as FCC
+    return {"months": FCC.history(db, _read_org(db, user))}
+
+
+class FcStatusIn(BaseModel):
+    status: str
+    evidence: str = ""
+    source: str = ""
+    new_month: Optional[str] = None
+
+
+@router.post("/foreclosure-events/{event_id}/status")
+def foreclosure_event_status(event_id: str, body: FcStatusIn, db: Session = Depends(get_db),
+                             user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """A person records what happened at (or to) the sale, with evidence. The
+    notices are never changed; the previous value stays in the audit log."""
+    from app.services.evosense import foreclosure_cycles as FCC
+    org_id = svc.write_org_id(db, user)
+    try:
+        if not _fc_can_manage(db, user):
+            # 404 for a stranger's id first, then 403 for a known one
+            from app.models.evosense_models import EvoSenseAuctionEvent
+            if db.query(EvoSenseAuctionEvent.id).filter(EvoSenseAuctionEvent.organization_id == org_id,
+                                                         EvoSenseAuctionEvent.id == event_id).first() is None:
+                raise LookupError()
+            raise HTTPException(status_code=403, detail="Only a workspace admin or manager records auction outcomes.")
+        out = FCC.record_status(db, org_id, event_id, body.status, evidence=body.evidence, source=body.source,
+                                user=user, new_month=body.new_month)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    return out

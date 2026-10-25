@@ -61,6 +61,10 @@ def members(db, org_id: str, source: str) -> List[Any]:
     from app.services.evosense import cohort as CO
     if source.startswith("list:"):
         return CO.members(db, org_id, source[5:])
+    if source.startswith("cycle:"):
+        from app.services.evosense import foreclosure_cycles as FCC
+        FCC.parse_month(source[6:])
+        return FCC.members(db, org_id, source[6:])
     if source == "queue:find_contact":
         return (db.query(EvoSenseProperty)
                 .filter(EvoSenseProperty.organization_id == org_id, EvoSenseProperty.archived_at.is_(None),

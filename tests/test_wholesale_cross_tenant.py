@@ -231,6 +231,16 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
     from app.services.evosense import cohort as _CO
     _CO._PREVIEWS["a0preview0001"] = {"status": "done", "org_id": sample_org.id, "result": {"results": []}}
     es_ids["es_preview_job"] = "a0preview0001"
+    # A foreclosure month and one auction event of the VICTIM organization.
+    from app.models.evosense_models import EvoSenseAuctionCycle as _Cyc, EvoSenseAuctionEvent as _AEv
+    _cyc = _Cyc(organization_id=sample_org.id, month="2026-11", status="active")
+    db_session.add(_cyc)
+    db_session.flush()
+    _aev = _AEv(organization_id=sample_org.id, cycle_id=_cyc.id, property_id=es_prop.id,
+                derived_status="notice_verified")
+    db_session.add(_aev)
+    db_session.flush()
+    es_ids["es_auction_event_id"] = _aev.id
     db_session.commit()
 
     # A seller fact of A's (seller intelligence verify route).
@@ -423,6 +433,8 @@ def attacks(ids):
         ("post", "/wholesale/evosense/contact-batches/%s/stop" % ids["contact_batch_id"], {}),
         ("post", "/wholesale/evosense/contact-batches/%s/emergency_stop" % ids["contact_batch_id"], {}),
         ("post", "/wholesale/evosense/import/%s/undo" % ids["es_import_id"], {}),
+        ("post", "/wholesale/evosense/foreclosure-events/%s/status" % ids["es_auction_event_id"],
+         {"status": "canceled", "evidence": "planted by an attacker"}),
         ("post", "/wholesale/evosense/import/%s/restore" % ids["es_import_id"], {}),
         ("get", "/wholesale/buyers/imports/%s/rows" % ids["import_batch_id"], None),
         ("get", "/wholesale/buyers/imports/%s/errors.csv" % ids["import_batch_id"], None),
