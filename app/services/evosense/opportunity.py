@@ -35,10 +35,13 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from app.services.evosense import common as C
 
-VERSION = "opportunity/v2"
+VERSION = "opportunity/v3"
 # v2 = v1 + a deadline-only hand-off is not a conversation; a test deal never
 # changes a real property. The version is part of the cache key, so a new
 # version re-assesses every property on the next backfill passes.
+# v3 = v2 + MEASURES: auction urgency, deal potential and data confidence kept
+# as three separate answers (HIGH / MEDIUM / LOW / UNKNOWN with a reason each),
+# the score explanation from the engine's own factors, and the missing inputs.
 
 # ── documented weights ──────────────────────────────────────────────────────
 # Priority = weighted average of the KNOWN dimensions (0-100 each).
@@ -669,8 +672,9 @@ def assess(*, prop, po: Dict[str, Any], fc: Dict[str, Any], tax: Dict[str, Any],
     if fmoney is not None:
         flags += ["unknown_liens", "unknown_payoff"]
     earned = [f for f in po.get("factors") or [] if (f.get("points") or 0) > 0][:4]
+    meas = measures(prop=prop, po=po, fc=fc, econ=econ, conf=conf, contacts=contacts, owner=owner, nxt=nxt, now=now)
     return {
-        "version": VERSION, "computed_at": _iso(now),
+        "version": VERSION, "computed_at": _iso(now), "measures": meas,
         "priority": pr,
         "seller_opportunity": {"value": po.get("value"), "label": po.get("label"), "version": po.get("version"),
                                "top_factors": [{"points": f["points"], "label": f["label"]} for f in earned]},
@@ -685,6 +689,201 @@ def assess(*, prop, po: Dict[str, Any], fc: Dict[str, Any], tax: Dict[str, Any],
         "note": "Priority is a rules-based blend with documented weights - not a probability of contract or "
                 "closing. Unknown dimensions are left out, never scored as zero.",
     }
+
+
+# ── MEASURES: three separate answers, never one number ─────────────────────
+# AUCTION URGENCY  how soon a foreclosure sale is scheduled, and how sure we are
+# DEAL POTENTIAL   what the SUPPORTED numbers say the deal is worth - unknown when
+#                  there are no numbers (unknown is not "bad", and never "good")
+# DATA CONFIDENCE  how much verified evidence the assessment rests on
+URGENT_DAYS = ESCALATE_DAYS          # a verified sale this close is HIGH urgency, whatever the numbers
+SOON_DAYS = 30
+NON_RESIDENTIAL = ("multifamily", "commercial", "industrial", "land", "agricultural", "mixed_use", "specialty")
+_COHORT_TO_EVENT = {"VERIFIED NOTICE": "notice_verified", "CLAIMED": "claimed", "NO NOTICE FOUND": "not_found",
+                    "CONFLICT": "conflict", "POSTPONED": "postponed", "CANCELED": "canceled",
+                    "RESOLVED": "reported_resolved", "SALE PASSED": "outcome_unverified"}
+
+
+def _day(v) -> Optional[date]:
+    if not v:
+        return None
+    try:
+        return datetime.strptime(str(v)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def auction_urgency(status: Optional[str], sale_date=None, *, today: Optional[date] = None) -> Dict[str, Any]:
+    """`status`: an auction-event status (foreclosure_cycles.STATUS keys) or a
+    notice status from the Top 100 view ("VERIFIED NOTICE" ...). Only a VERIFIED
+    clerk notice is ever HIGH; an imported date is never treated as one; a sale
+    date that passed is never called completed."""
+    today = today or C.now().date()
+    st = _COHORT_TO_EVENT.get(status or "", status or "")
+    d = _day(sale_date)
+    days = (d - today).days if d else None
+    when = d.isoformat() if d else "date not read"
+
+    def out(level, label, reason, urgent=False):
+        return {"level": level, "label": label, "reason": reason, "days": days,
+                "sale_date": d.isoformat() if d else None, "urgent": urgent, "status": st or None}
+    if st == "notice_verified":
+        if days is None:
+            return out("MEDIUM", "MEDIUM", "Verified clerk notice; the sale date could not be read", False)
+        if days < 0:
+            return out("PASSED", "SALE DATE PASSED - OUTCOME NOT VERIFIED",
+                       "The %s sale date has passed; sold, canceled or postponed is not yet verified" % when)
+        lvl = "HIGH" if days <= URGENT_DAYS else "MEDIUM" if days <= SOON_DAYS else "LOW"
+        return out(lvl, lvl, "Verified clerk notice: sale %s, %d day%s away" % (when, days, "" if days == 1 else "s"),
+                   lvl == "HIGH")
+    if st == "conflict":
+        soon = days is not None and 0 <= days <= SOON_DAYS
+        return out("VERIFY", "URGENT - VERIFY NOTICE" if soon else "VERIFY NOTICE",
+                   "The clerk notice and the list disagree about the sale (%s); check the notice before acting" % when,
+                   soon)
+    if st == "claimed":
+        return out("UNVERIFIED", "UNVERIFIED DATE - VERIFY THE NOTICE",
+                   "Only an imported list says %s; no clerk notice has confirmed it yet" % when)
+    if st == "not_found":
+        return out("UNVERIFIED", "NO CLERK NOTICE FOUND - VERIFY",
+                   "The list claims a sale (%s) but the clerk records read show no notice for it" % when)
+    if st == "postponed":
+        return out("POSTPONED", "POSTPONED - NOT SCHEDULED FOR %s" % when.upper(),
+                   "Recorded as postponed; watch for a new notice")
+    if st == "canceled":
+        return out("CANCELED", "CANCELED", "Sale recorded as canceled")
+    if st in ("sold_at_auction", "reverted_to_lender"):
+        return out("COMPLETED", "AUCTION HELD - %s" % st.replace("_", " ").upper(), "Outcome recorded with evidence")
+    if st == "outcome_unverified":
+        return out("PASSED", "SALE DATE PASSED - OUTCOME NOT VERIFIED",
+                   "The %s sale date has passed; what happened is not yet verified" % when)
+    if st == "reported_resolved":
+        return out("VERIFY", "REPORTED RESOLVED - VERIFY", "Reported resolved; not yet verified")
+    if st == "awaiting_notice":
+        return out("UNVERIFIED", "WAITING FOR A NEW NOTICE", "Carried forward; no new notice yet")
+    if st == "no_longer_on_record":
+        return out("VERIFY", "OFF THE NOTICE RECORD - REVIEW", "The notice is no longer on the clerk record")
+    return out("NONE", "NO SALE ON RECORD", "No foreclosure sale on record")
+
+
+def deal_potential(econ: Dict[str, Any], po: Dict[str, Any], category: Optional[str]) -> Dict[str, Any]:
+    """From SUPPORTED numbers only. The opportunity score's distress indicators
+    are shown beside it as indicators - they are not a profit estimate."""
+    v = po.get("value")
+    indicators = {"score": v, "reading": None if v is None else "strong" if v >= 65 else
+                  "moderate" if v >= 45 else "limited",
+                  "note": "Seller-distress and equity indicators from the opportunity score - not a profit estimate"}
+    score, needs = econ.get("score"), list(econ.get("needs") or [])
+    if score is not None:
+        lvl = "HIGH" if score >= 70 else "MEDIUM" if score >= 40 else "LOW"
+        return {"level": lvl, "label": lvl, "reason": econ.get("headline"), "assessed": True,
+                "needs": needs, "indicators": indicators}
+    if category in NON_RESIDENTIAL:
+        from app.services.evosense import property_class as PCL
+        kind = PCL.CATEGORY_LABELS.get(category, category)
+        return {"level": "INSUFFICIENT", "label": "INSUFFICIENTLY ASSESSED",
+                "reason": "No validated %s model: the house-style analysis is not used. Enter the %s numbers "
+                          "(Property type & details) to assess it." % (kind.lower(), kind.lower()),
+                "assessed": False, "needs": needs, "indicators": indicators}
+    if econ.get("status") == "supportable":
+        return {"level": "UNKNOWN", "label": "MAX OFFER KNOWN - NEEDS THE SELLER'S PRICE",
+                "reason": econ.get("headline"), "assessed": False, "needs": needs, "indicators": indicators}
+    return {"level": "UNKNOWN", "label": "POTENTIAL UNKNOWN - RESEARCH REQUIRED",
+            "reason": "No supportable profit estimate yet - unknown, not bad. Needs: %s"
+                      % ("; ".join(n.split(" (")[0] for n in needs) or "underwriting"),
+            "assessed": False, "needs": needs, "indicators": indicators}
+
+
+def data_confidence_measure(conf: Dict[str, Any]) -> Dict[str, Any]:
+    lvl = {CONF_VERIFIED: "HIGH", CONF_PARTIAL: "MEDIUM", CONF_INSUFFICIENT: "LOW"}.get(conf.get("label"), "LOW")
+    reasons = [f["label"] for f in conf.get("factors") or []][:3]
+    return {"level": lvl, "label": lvl, "reason": "; ".join(reasons)}
+
+
+_GROUPS = (("PRE_FORECLOSURE", "Verified foreclosure"), ("_SALE", "Auction proximity"),
+           ("ABSENTEE_OWNER", "Absentee owner"), ("OUT_OF_STATE_OWNER", "Absentee owner"),
+           ("_EQUITY", "Equity"), ("LONG_OWNERSHIP", "Ownership length"), ("_SOURCES", "Independent sources"))
+
+
+def _group_of(f: Dict[str, Any]) -> str:
+    ev = f.get("evidence") or {}
+    label = f.get("label") or ""
+    if (f.get("points") or 0) < 0:
+        return "Adjustments"
+    if ev.get("days") is not None or label.startswith("Foreclosure sale scheduled"):
+        return "Auction proximity"
+    if label.startswith("Estimated equity"):
+        return "Equity"
+    if label.startswith("Evidence from"):
+        return "Independent sources"
+    sig = ev.get("signal")
+    if sig == "PRE_FORECLOSURE":
+        return "Verified foreclosure" if "clerk / trustee notice" in label else "Foreclosure (claimed)"
+    for key, name in _GROUPS:
+        if sig == key:
+            return name
+    return "Other supported indicators"
+
+
+def explain(po: Dict[str, Any]) -> Dict[str, Any]:
+    """WHY THIS SCORE - the engine's own factors, grouped. Points are exactly
+    the engine's; nothing is added here."""
+    order = ["Verified foreclosure", "Foreclosure (claimed)", "Auction proximity", "Absentee owner", "Equity",
+             "Ownership length", "Independent sources", "Other supported indicators", "Adjustments"]
+    groups: Dict[str, Dict[str, Any]] = {}
+    not_scored = []
+    raw = 0
+    for f in po.get("factors") or []:
+        pts = int(f.get("points") or 0)
+        if pts == 0:
+            not_scored.append(f.get("label"))
+            continue
+        raw += pts
+        g = groups.setdefault(_group_of(f), {"points": 0, "items": []})
+        g["points"] += pts
+        g["items"].append({"points": pts, "label": f.get("label")})
+    lines = [{"group": k, **groups[k]} for k in order if k in groups]
+    total = po.get("value")
+    note = None
+    if total is not None and raw != total:
+        note = ("The factors add to %d; the score is %d (kept between 0 and 100, or capped by the strategy)"
+                % (raw, total))
+    return {"score": total, "label": po.get("label"), "version": po.get("version"), "lines": lines,
+            "not_scored": [x for x in not_scored if x][:8], "factor_total": raw, "note": note,
+            "scale": "0-100. 80+ hot, 65-79 high, 45-64 medium, under 45 low. A distress-and-evidence score - "
+                     "not a profit estimate."}
+
+
+def missing_inputs(*, econ: Dict[str, Any], contacts: Dict[str, Any], owner: Dict[str, Any], fc: Dict[str, Any],
+                   category: Optional[str]) -> List[str]:
+    out = []
+    if not (econ.get("arv") or {}).get("verified"):
+        out.append("Missing verified comparable sales")
+    if (econ.get("repairs") or {}).get("base") is None:
+        out.append("Missing repair estimate")
+    if (fc or {}).get("status") not in (None, "NO EVIDENCE"):
+        out.append("Missing payoff or arrears")
+    if not ((contacts or {}).get("phones") or (contacts or {}).get("emails")):
+        out.append("Owner contact unavailable")
+    if (owner or {}).get("status") in ("NO OWNER", "UNVERIFIED", "CONFLICT"):
+        out.append("Ownership requires review")
+    if not category or category == "unknown":
+        out.append("Property type needs review")
+    return out
+
+
+def measures(*, prop, po: Dict[str, Any], fc: Dict[str, Any], econ: Dict[str, Any], conf: Dict[str, Any],
+             contacts: Dict[str, Any], owner: Dict[str, Any], nxt: Dict[str, Any],
+             now: Optional[datetime] = None) -> Dict[str, Any]:
+    cat = getattr(prop, "property_category", None)
+    au = auction_urgency((fc or {}).get("status"), (fc or {}).get("sale_date") or (fc or {}).get("claimed_sale_date"),
+                         today=(now or C.now()).date())
+    return {"auction_urgency": au, "deal_potential": deal_potential(econ, po, cat),
+            "data_confidence": data_confidence_measure(conf),
+            "next_best_action": {"label": (nxt or {}).get("label"), "why": (nxt or {}).get("why"),
+                                 "key": (nxt or {}).get("key"), "link": (nxt or {}).get("link")},
+            "explanation": explain(po),
+            "missing": missing_inputs(econ=econ, contacts=contacts, owner=owner, fc=fc, category=cat)}
 
 
 # ── batch loading + cache ───────────────────────────────────────────────────
@@ -1031,4 +1230,5 @@ def compact(prop) -> Optional[Dict[str, Any]]:
             "confidence": d["confidence"]["label"], "engagement": d["engagement"]["label"],
             "categories": d["categories"], "next_action": d["next_action"],
             "workflow_state": d["workflow_state"], "flags": d.get("flags") or [],
-            "top_factors": d["seller_opportunity"].get("top_factors") or []}
+            "top_factors": d["seller_opportunity"].get("top_factors") or [],
+            "measures": {k: v for k, v in (d.get("measures") or {}).items() if k != "explanation"} or None}

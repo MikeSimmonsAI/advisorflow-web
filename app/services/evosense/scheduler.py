@@ -350,6 +350,13 @@ def run_due(db, *, org_id: Optional[str] = None, now=None) -> Dict[str, Any]:
         db.rollback()
         C.log.exception("evosense property classification backfill failed")
     try:
+        from app.services.evosense import evaluate as EVR
+        report["scores_refreshed"] = EVR.rescore_outdated(db, org_id)
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        C.log.exception("evosense score refresh failed")
+    try:
         from app.services.evosense import foreclosure_cycles as FCC
         report["foreclosure_months"] = FCC.auto(db, org_id)
     except Exception:  # noqa: BLE001

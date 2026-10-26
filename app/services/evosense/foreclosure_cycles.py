@@ -562,6 +562,13 @@ def rows(db, org_id: str, month: str) -> List[Dict[str, Any]]:
         r["needs_attention"] = bool(flags) or st in ("conflict", "not_found", "outcome_unverified",
                                                      "no_longer_on_record", "reported_resolved") \
             or cstate in ("missing_owner", "identity_review")
+        # the three separate answers; auction urgency from THIS month's event status
+        from app.services.evosense import opportunity as OP
+        m = dict(((r.get("opportunity") or {}).get("measures")) or {})
+        m["auction_urgency"] = OP.auction_urgency(st, r["auction"]["sale_date"], today=today)
+        if "Ownership needs review" in flags and "Ownership requires review" not in (m.get("missing") or []):
+            m["missing"] = list(m.get("missing") or []) + ["Ownership requires review"]
+        r["measures"] = m
     _CACHE[key] = (time.monotonic(), stamp, out)
     return out
 
@@ -575,7 +582,115 @@ SORTS = {
                                 r.get("rank") or 9999),
     "underwritten": lambda r: (0 if r["financial"]["key"] in ("supported", "contracted", "realized") else 1,
                                r.get("rank") or 9999),
+    # the three measures, each on its own; ties keep the score ranking
+    "urgency": lambda r: (_URG_ORDER.get(_m(r, "auction_urgency").get("level"), 9),
+                          _m(r, "auction_urgency").get("days") if _m(r, "auction_urgency").get("days") is not None
+                          else 9999, r.get("rank") or 9999),
+    "potential": lambda r: (_POT_ORDER.get(_m(r, "deal_potential").get("level"), 9),
+                            -((_m(r, "deal_potential").get("indicators") or {}).get("score") or 0), r.get("rank") or 9999),
+    "confidence": lambda r: (_CONF_ORDER.get(_m(r, "data_confidence").get("level"), 9), r.get("rank") or 9999),
+    "next_action": lambda r: (WORK_ORDER.get(work_bucket(r), 9), r.get("rank") or 9999),
 }
+_URG_ORDER = {"HIGH": 0, "VERIFY": 1, "MEDIUM": 2, "UNVERIFIED": 3, "LOW": 4, "PASSED": 5, "POSTPONED": 6,
+              "NONE": 7, "CANCELED": 8, "COMPLETED": 8}
+_POT_ORDER = {"HIGH": 0, "MEDIUM": 1, "UNKNOWN": 2, "INSUFFICIENT": 3, "LOW": 4}
+_CONF_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+
+
+def _m(r: Dict[str, Any], key: str) -> Dict[str, Any]:
+    return (r.get("measures") or {}).get(key) or {}
+
+
+# ── quick filters (all combine with county / month / type / foreclosure type) ──
+QUICK = {
+    "urgent_auctions": "Urgent auctions",
+    "high_potential": "High-potential deals",
+    "needs_financial": "Needs financial research",
+    "needs_owner": "Needs owner verification",
+    "notice_conflicts": "Notice conflicts",
+    "contact_ready": "Contact ready",
+}
+
+
+def quick_match(r: Dict[str, Any], key: str) -> bool:
+    au, dp = _m(r, "auction_urgency"), _m(r, "deal_potential")
+    if key == "urgent_auctions":
+        return bool(au.get("urgent"))
+    if key == "high_potential":
+        return dp.get("level") in ("HIGH", "MEDIUM") or (
+            not dp.get("assessed") and (dp.get("indicators") or {}).get("reading") == "strong")
+    if key == "needs_financial":
+        return not dp.get("assessed")
+    if key == "needs_owner":
+        return r["contact_state"]["key"] in ("missing_owner", "identity_review") or \
+            "Ownership requires review" in ((r.get("measures") or {}).get("missing") or [])
+    if key == "notice_conflicts":
+        return r["auction"]["status"] in ("conflict", "not_found", "no_longer_on_record") or any(
+            "notice needs review" in f for f in r["auction"]["flags"])
+    if key == "contact_ready":
+        return r["contact_state"]["key"] in ("contact_found", "outreach_eligible")
+    return True
+
+
+# ── WORK BEFORE AUCTION: one place per property, in this order ─────────────
+WORK = (
+    ("verified_with_contact", "Verified upcoming auction - contact ready"),
+    ("verified_no_contact", "Verified upcoming auction - contact information missing"),
+    ("needs_review", "Urgent notice or ownership conflict - a person reviews"),
+    ("research_financials", "Strong indicators - financial research needed"),
+    ("active_conversation", "Active seller conversation or appointment"),
+)
+WORK_ORDER = {k: i for i, (k, _l) in enumerate(WORK)}
+_ACTIVE = ("responded", "interested", "follow_up", "appointment", "offer")
+
+
+def work_bucket(r: Dict[str, Any]) -> Optional[str]:
+    """Which Work-Before-Auction group a row belongs to - the first that fits -
+    or None. Unknown profit never puts a property in a group by itself, and
+    never keeps an urgent one out."""
+    au, dp = _m(r, "auction_urgency"), _m(r, "deal_potential")
+    acq = r["acquisition"]["key"]
+    if acq in ("contract", "closed", "not_pursuing") or r["contact_state"]["key"] == "restricted":
+        return None
+    upcoming = au.get("level") in ("HIGH", "MEDIUM", "LOW") and au.get("days") is not None and au["days"] >= 0
+    if upcoming and acq not in _ACTIVE:
+        if r["contact_state"]["key"] in ("contact_found", "outreach_eligible"):
+            return "verified_with_contact"
+        if r["contact_state"]["key"] == "lookup_ready":
+            return "verified_no_contact"
+    owner_review = r["contact_state"]["key"] in ("missing_owner", "identity_review") or \
+        any("Ownership" in f for f in r["auction"]["flags"])
+    if au.get("level") == "VERIFY" or (owner_review and (upcoming or au.get("level") == "UNVERIFIED")):
+        return "needs_review"
+    if not dp.get("assessed") and (dp.get("indicators") or {}).get("reading") == "strong" and acq not in _ACTIVE:
+        return "research_financials"
+    if acq in _ACTIVE:
+        return "active_conversation"
+    return None
+
+
+def work_queue(rs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The groups, each sorted by days to the sale then score. A property is in
+    one group only. Nothing here sends, buys or creates a task - each row links
+    to the existing workflow (property page, hand-off, VA task)."""
+    groups: Dict[str, List[Dict[str, Any]]] = {k: [] for k, _l in WORK}
+    for r in rs:
+        b = work_bucket(r)
+        if b:
+            groups[b].append(r)
+    out = []
+    for k, label in WORK:
+        items = sorted(groups[k], key=lambda r: (_m(r, "auction_urgency").get("days")
+                                                 if _m(r, "auction_urgency").get("days") is not None else 9999,
+                                                 r.get("rank") or 9999))
+        out.append({"key": k, "label": label, "count": len(items), "items": [{
+            "id": r["id"], "street_address": r.get("street_address"), "city": r.get("city"), "county": r.get("county"),
+            "score": r.get("score"), "auction_urgency": _m(r, "auction_urgency"),
+            "deal_potential": {x: _m(r, "deal_potential").get(x) for x in ("level", "label")},
+            "data_confidence": {x: _m(r, "data_confidence").get(x) for x in ("level", "label")},
+            "next_best_action": _m(r, "next_best_action"), "contact": r["contact_state"]["label"],
+            "property_class": r.get("property_class")} for r in items]})
+    return out
 
 
 def _ts(v) -> float:
@@ -622,6 +737,9 @@ def filter_rows(rs: List[Dict[str, Any]], f: Dict[str, Any]) -> List[Dict[str, A
         out = [r for r in out if r["needs_attention"]]
     if f.get("carried") == "yes":
         out = [r for r in out if r["auction"]["carried"]]
+    if f.get("quick"):
+        for key in [k for k in f["quick"].split(",") if k in QUICK]:
+            out = [r for r in out if quick_match(r, key)]
     if f.get("deals") == "yes":
         out = [r for r in out if r["acquisition"]["key"] not in ("not_contacted", "attempted", "not_pursuing")
                or r["financial"]["key"] != "missing"]
@@ -667,6 +785,12 @@ def summary(db, org_id: str, month: str) -> Dict[str, Any]:
         },
         "counties": dict(counties.most_common()),
         "property_types": dict(ptypes.most_common()),
+        "measures": {
+            "auction_urgency": dict(Counter(_m(r, "auction_urgency").get("level") or "NONE" for r in rs).most_common()),
+            "deal_potential": dict(Counter(_m(r, "deal_potential").get("level") or "UNKNOWN" for r in rs).most_common()),
+            "data_confidence": dict(Counter(_m(r, "data_confidence").get("level") or "LOW" for r in rs).most_common()),
+            "quick": {k: {"label": v, "count": sum(1 for r in rs if quick_match(r, k))} for k, v in QUICK.items()},
+        },
         "statuses": {k: {"count": v, "label": STATUS.get(k, k)} for k, v in st.items()},
         "contact_states": {k: {"count": v, "label": CONTACT_LABELS[k]} for k, v in cs.items()},
         "acquisition": {k: {"count": v, "label": ACQ_LABELS[k]} for k, v in acq.items()},
