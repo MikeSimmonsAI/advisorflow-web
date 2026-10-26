@@ -75,6 +75,7 @@ One shared policy, `work_priority.py`, and every surface reads it:
 - **Foreclosure Command Center:** default sort, "Critical — act now" quick filter, work-priority filter, column.
 - **Top 100 and other lists:** default sort, work-priority filter and column, work queue.
 - **Property page:** Work priority tile first.
+- **Acquisition Command:** `/wholesale/evosense/command-center` Work first cards, Next opportunities to work table, and Needs You hero all use the authoritative deadline-first work priority. Numerical investment evidence scores remain separate and cannot reorder the urgent work list.
 - **Person / VA hand-off queue:** CRITICAL and REVIEW_URGENT properties open one hand-off per sale date; no
   outreach is ever sent.
 - **API:** `work` row on inbox, list and foreclosure items, plus `measures.work_priority`.
@@ -102,6 +103,6 @@ change needs `tests/test_foreclosure_priority_policy.py` changed, the change nee
 - Consumers: `opportunity.py` (`measures`, `escalate`, `refresh_auction_properties`), `evaluate.py`
   (`status_for`), `views.py` (inbox sort / filter / `work` row), `cohort.py` (`rows_for` sort / `work`),
   `foreclosure_cycles.py` (sorts, quick filters, work queue)
-- Screens: `EvoInbox.jsx`, `ForeclosureCenter.jsx`, `EvoCohort.jsx`, `OpportunityCard.jsx`, `Measures.jsx`
+- Screens: `EvoInbox.jsx`, `EvoCommand.jsx`, `ForeclosureCenter.jsx`, `EvoCohort.jsx`, `OpportunityCard.jsx`, `Measures.jsx`
   (`WorkCell`)
 - Tests: `tests/test_foreclosure_priority_policy.py`
