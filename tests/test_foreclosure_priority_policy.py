@@ -272,3 +272,38 @@ def test_O_another_workspace_never_sees_these_priorities(db_session, sample_org)
     db.commit()
     assert p.id not in {i["id"] for i in V.inbox(db, other.id, filters={"priority": "CRITICAL"})["items"]}
     assert OP.refresh_auction_properties(db, org_id=other.id) == 0
+
+
+# P — the dashboard shown in the owner's screenshot MUST also obey the policy.
+# Previous regressions checked the Inbox/Foreclosures/Top 100 but missed
+# GET /wholesale/evosense/command-center ("Recent opportunities" and hero).
+def test_acquisition_command_uses_deadline_first_not_the_green_investment_score(db_session, sample_org):
+    db, org = db_session, sample_org.id
+    urgent = _prop(db, org, 950)
+    routine = _prop(db, org, 951)
+    _notice(db, urgent, SALE, "ACQUISITION-COMMAND-NOV3")
+    db.commit()
+    OP.refresh(db, org, [urgent])
+    db.commit()
+
+    # An urgent sale with a low evidence score beats a routine property
+    # with a much higher evidence score, in BOTH dashboard panels.
+    urgent.opportunity_score = 38
+    routine.opportunity_score = 99
+    routine.status = C.S_HIGH
+    routine.work_priority = WP.W_NORMAL
+    routine.work_priority_rank = WP.WORK_ORDER[WP.W_NORMAL]
+    routine.sale_deadline = None
+    db.add(EvoSenseHandoff(organization_id=org, property_id=routine.id,
+                          reasons="[]", priority=999, next_action="Routine follow-up",
+                          status="open"))
+    db.commit()
+
+    body = V.command_center(db, org)
+    ids = [p["id"] for p in body["found"]]
+    assert ids.index(urgent.id) < ids.index(routine.id)
+    assert body["found"][0]["work"]["work_priority"] == WP.W_CRITICAL
+    assert body["found"][0]["work"]["auction_date"] == SALE
+    assert body["found"][0]["opportunity_score"] == 38
+    assert body["needs_you"][0]["property_id"] == urgent.id
+    assert body["needs_you"][0]["work"]["work_priority"] == WP.W_CRITICAL
