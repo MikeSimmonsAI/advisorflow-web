@@ -168,3 +168,69 @@ def test_outdated_scores_are_refreshed_once_and_old_scores_stay_as_history(db_se
                                                   EvoSenseScore.score_type == "property_opportunity").all()
     assert any(r.version == "property_opportunity/v3" for r in rows)        # history kept
     assert [r.version for r in rows if r.is_current] == [SC.version_for(None, None)]
+
+
+# Owner's October 26 score-calibration requirement: the original Nov 3 Top100
+# contains 99 documented imminent mortgage auctions, yet v5 scored only two
+# HIGH. The acquisition-distress evidence score must reflect the verified
+# foreclosure event itself, without treating a list claim as verified profit.
+def test_v6_imminent_documented_auction_is_strong_evidence(monkeypatch):
+    monkeypatch.setattr(WP, "today_ct", lambda: date(2026, 10, 26))
+    verified = _fc("2026-11-03")
+    long_owned = _stacked("LONG_OWNERSHIP")[0]
+    long_owned["sources"] = ["evosense_derived"]
+    long_owned["record_sources"] = ["dcad"]
+    po = SC.property_opportunity(_top100_like(), [verified, long_owned], None)
+    bonus = [f for f in po["factors"] if (f.get("evidence") or {}).get("type") == "imminent_distress_bonus"]
+    assert SC.PO_VERSION == "property_opportunity/v6"
+    assert len(bonus) == 1 and bonus[0]["points"] == 28
+    assert bonus[0]["evidence"]["not_profit"]
+    assert po["value"] >= 65 and po["label"] in ("high", "hot")
+    # The score stays evidence-based: imported equity remains a 10-point claim.
+    equity = [f for f in po["factors"] if f["label"].startswith("Estimated equity")][0]
+    assert equity["points"] == 10 and equity["evidence"]["claimed"] is True
+
+
+def test_v6_import_claims_unverified_manual_and_expired_sales_never_get_bonus(monkeypatch):
+    monkeypatch.setattr(WP, "today_ct", lambda: date(2026, 10, 26))
+    claim = _fc("2026-11-03", verified=False)
+    unsupported_manual = _fc("2026-11-03")
+    unsupported_manual["evidence"][0]["source"] = "operator"
+    unsupported_manual["sources"] = ["operator"]
+    unsupported_manual["evidence"][0]["provenance"] = {"sale_date": "2026-11-03"}
+    past = _fc("2026-10-20")
+    later = _fc("2026-12-01")
+    for signals in ([claim], [unsupported_manual], [past], [later]):
+        assert SC.documented_imminent_distress(signals) is None
+        score = SC.property_opportunity(_top100_like(), signals, None)
+        assert not any((f.get("evidence") or {}).get("type") == "imminent_distress_bonus"
+                       for f in score["factors"])
+
+
+def test_v6_manual_notice_needs_document_and_source(monkeypatch):
+    monkeypatch.setattr(WP, "today_ct", lambda: date(2026, 10, 26))
+    manual = _fc("2026-11-03")
+    manual["evidence"][0]["source"] = "operator"
+    manual["evidence"][0]["provenance"] = {
+        "sale_date": "2026-11-03", "document": "202600002182",
+        "document_url": "https://county.example/record/202600002182"}
+    assert SC.documented_imminent_distress([manual])["kind"] == "mortgage"
+
+
+def test_v6_official_tax_sale_is_recognized_once_with_or_without_mortgage(monkeypatch):
+    monkeypatch.setattr(WP, "today_ct", lambda: date(2026, 10, 26))
+    tax = {"signal_type": "TAX_SALE", "freshness": "current", "sources": ["lgbs_tax_sales"],
+           "record_sources": ["lgbs_tax_sales"], "observed_at": None,
+           "evidence": [{"source": "lgbs_tax_sales", "case_status": "scheduled",
+                         "provenance": {"sale_date": "2026-11-03", "claim": None}}]}
+    both = [tax, _fc("2026-11-03")]
+    bonus = SC.documented_imminent_distress(both)
+    assert bonus["sale_date"] == "2026-11-03" and bonus["kind"] in ("mortgage", "tax")
+    score = SC.property_opportunity(_top100_like(), both, None)
+    assert sum(1 for f in score["factors"] if (f.get("evidence") or {}).get("type")
+               == "imminent_distress_bonus") == 1
+    tax_only = SC.property_opportunity(_top100_like(), [tax], None)
+    assert any((f.get("evidence") or {}).get("type") == "imminent_distress_bonus"
+               for f in tax_only["factors"])
+    tax["evidence"][0]["case_status"] = "canceled"
+    assert SC.documented_imminent_distress([tax]) is None
