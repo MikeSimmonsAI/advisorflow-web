@@ -1,7 +1,7 @@
 """Travis County delinquent-tax file. The header is the LIVE file's header
 (TaxDelqOpenData.csv, checked 2026-10-22); the rows are synthetic.
 
-  * houses only: Property Type Code A1 (other A codes, land, commercial out);
+  * by the file's own Property Type Code: the types the strategy asks for (default residential);
   * Delinquent Total is the past-due balance - the current-year bill never
     qualifies a house; below the minimum, bankrupt or stale accounts are out;
   * a cause number is a tax lawsuit; the situs direction moves to the front;
@@ -44,14 +44,25 @@ CSV = "\r\n".join([HEADER,
                    ]) + "\r\n"
 
 
-def test_keeps_only_past_due_houses_and_counts_every_rejection():
+def test_keeps_only_past_due_residential_by_default_and_counts_every_rejection():
     res = TD.TravisDelinquentReader().discover(limit=10, today=TODAY, text=CSV)
     got = {r["parcel_apn"]: r for r in res["records"]}
-    assert set(got) == {"0001", "0002"}
+    assert set(got) == {"0001", "0002", "0005"}             # A4 is residential by its own code
     s = res["stats"]
-    assert s["rows"] == 11 and s["houses"] == 8 and s["not_residential"] == 2 and s["other_residential"] == 1
+    assert s["rows"] == 11 and s["houses"] == 8 and s["found_residential"] == 9
+    assert s["found_land"] == 1 and s["found_commercial"] == 1 and s["excluded_type"] == 2
     assert s["below_min_due"] == 2 and s["bankruptcy_skipped"] == 1 and s["stale_account"] == 1
-    assert s["no_owner"] == 1 and s["no_situs"] == 1 and s["delinquent_houses"] == 2 and s["with_lawsuit"] == 1
+    assert s["no_owner"] == 1 and s["no_situs"] == 1 and s["delinquent_kept"] == 3 and s["with_lawsuit"] == 1
+    assert got["0005"]["property_type"] is None and got["0005"]["_evidence"]["property_class"] == "A4"
+
+
+def test_a_strategy_asking_for_land_and_commercial_gets_them_with_their_own_code():
+    res = TD.TravisDelinquentReader().discover(limit=10, today=TODAY, text=CSV,
+                                               categories=("land", "commercial"))
+    got = {r["parcel_apn"]: r for r in res["records"]}
+    assert set(got) == {"0003", "0004"}
+    assert got["0003"]["property_type"] == "land" and got["0003"]["_evidence"]["property_class"] == "C1"
+    assert got["0004"]["property_type"] == "commercial" and res["stats"]["kept_commercial"] == 1
 
 
 def test_record_fields():
@@ -81,7 +92,12 @@ def test_source_answers_for_travis_tax_only(monkeypatch):
     src = PV.PROVIDERS["travis_delinquent"]
     assert src.discovery and not src.costs and src.counties == ("Travis",)
     assert len(src.search("TAX", {"states": ["TX"], "counties": ["Dallas"], "limit": 5})) == 0
-    assert len(src.search("TAX", {"states": ["TX"], "counties": ["Travis County"], "limit": 5})) == 2
+    # no type list: every target type the file carries; "houses only": residential codes only
+    assert len(src.search("TAX", {"states": ["TX"], "counties": ["Travis County"], "limit": 9})) == 5
+    assert len(src.search("TAX", {"states": ["TX"], "counties": ["Travis County"], "limit": 9,
+                                  "houses_only": True})) == 3
+    assert len(src.search("TAX", {"states": ["TX"], "counties": ["Travis County"], "limit": 9,
+                                  "property_types": ["single_family", "land"]})) == 4
     assert len(src.search("TAX", {"states": ["TX"], "counties": ["All Texas"], "limit": 1})) == 1
     assert len(src.search("PROPERTY_SEARCH", {"states": ["TX"], "counties": ["Travis"], "limit": 5})) == 0
 

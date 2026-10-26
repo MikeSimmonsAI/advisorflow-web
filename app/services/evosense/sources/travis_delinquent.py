@@ -18,9 +18,12 @@ City/State/Zip belong to the OWNER'S mailing address; the property itself
 has only Street Number, Street Name and Property Zip.
 
 KEPT (all must hold; every rejection is counted):
-  - Property Type Code A1 (single-family house) - the file's own state class,
-    so no outside lookup is needed to tell a house from a lot. Other A codes,
-    land, commercial and personal property are counted and left out;
+  - a Property Type Code (the file's own state class) that is a type the
+    hunting strategy asks for: residential (A, B2, M, O), multifamily (B1),
+    land (C, E), agricultural (D), commercial (F1), industrial (F2). Until
+    2026-10-25 only A1 houses were kept. Personal property, minerals and
+    utilities, and rows with no readable code, are counted and left out -
+    a missing code is never taken for a house;
   - Delinquent Total (past-due balance, NOT the current-year bill) at least
     `min_due`;
   - an account whose last tax roll year is current (stale accounts are left);
@@ -95,14 +98,23 @@ def situs(r: Dict[str, str]) -> Optional[str]:
     return "%s %s" % (num, name)
 
 
+def _legacy(code) -> Optional[str]:
+    from app.services.evosense import property_class as PCL
+    c = (code or "").strip().upper()
+    return None if c.startswith("A1") else PCL.legacy_type_for(c)
+
+
 class TravisDelinquentReader:
-    adapter_version = "travis_delinquent/2"
+    adapter_version = "travis_delinquent/3"
 
     def fetch(self) -> str:
         return B.get_text(FILE, max_bytes=20 * 1024 * 1024)
 
     def discover(self, *, limit: int, min_due: float = 250.0, skip: int = 0, zips=None,
-                 today: Optional[datetime] = None, text: Optional[str] = None) -> Dict[str, Any]:
+                 today: Optional[datetime] = None, text: Optional[str] = None,
+                 categories=None) -> Dict[str, Any]:
+        from app.services.evosense import property_class as PCL
+        categories = tuple(categories or ("residential",))
         today = today or datetime.utcnow()
         rows = rows_from_text(text if text is not None else self.fetch())
         newest = latest_roll_year(today)
@@ -112,10 +124,13 @@ class TravisDelinquentReader:
         for r in rows:
             stats["rows"] += 1
             cls = (r.get("Property Type Code") or "").upper()
-            if cls not in HOUSE_CLASSES:
-                stats["other_residential" if cls.startswith("A") else "not_residential"] += 1
+            cat, _sub, outcome = PCL.reader_category(cls)
+            PCL.count_category(stats, "found", cat, outcome)
+            if outcome != "target" or cat not in categories:
+                stats["excluded_type"] += 1
                 continue
-            stats["houses"] += 1
+            if cls in HOUSE_CLASSES:
+                stats["houses"] += 1
             yr = _year(r.get("Last Tax Roll Year"))
             if yr is None or yr < newest - 1:
                 stats["stale_account"] += 1
@@ -136,8 +151,9 @@ class TravisDelinquentReader:
             if zips and (r.get("Property Zip") or "")[:5] not in zips:
                 continue
             pool.append(r)
+            stats["kept_%s" % cat] += 1
         pool.sort(key=lambda r: r["Account #"])
-        stats["delinquent_houses"] = len(pool)
+        stats["delinquent_kept"] = len(pool)
         stats["with_lawsuit"] = sum(1 for r in pool if (r.get("Cause #") or "").strip())
         records = []
         if pool:
@@ -146,6 +162,9 @@ class TravisDelinquentReader:
             if start + take > len(pool):
                 stats["wrapped"] = start + take - len(pool)
             records = [self.record(pool[(start + i) % len(pool)], today) for i in range(take)]
+            for i in range(take):
+                c = PCL.reader_category(pool[(start + i) % len(pool)].get("Property Type Code"))[0]
+                stats["imported_%s" % (c or "unknown")] += 1
         stats["records"] = len(records)
         return {"records": records, "stats": dict(stats), "source_url": FILE}
 
@@ -188,7 +207,9 @@ class TravisDelinquentReader:
             "source_reference": "TRAVISDELQ:%s" % acct,
             "street_address": situs(r), "unit": None, "city": None, "state": "TX",
             "zip_code": re.sub(r"\D", "", r.get("Property Zip") or "")[:5] or None,
-            "county": "Travis", "parcel_apn": acct, "property_type": "single_family",
+            "county": "Travis", "parcel_apn": acct,
+            "property_type": "single_family" if (r.get("Property Type Code") or "").upper() in HOUSE_CLASSES
+            else _legacy(r.get("Property Type Code")),
             "owner": owner, "signals": sigs,
             "occupancy": "owner_occupied" if re.search(r"\bHS?\b", (r.get("Exemptions") or "").upper()) else None,
             "_raw": dict(r), "_source_url": FILE, "_source_updated_at": None,

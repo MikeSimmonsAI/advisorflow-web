@@ -78,6 +78,45 @@ def rescore(db, prop: EvoSenseProperty, strategy=None) -> Dict[str, Any]:
     return {"opportunity": po, "data_confidence": dc, "contact": cc, "stacked": stacked}
 
 
+RESCORE_BATCH = 600
+RESCORE_SECONDS = 90
+
+
+def rescore_outdated(db, org_id: Optional[str] = None, *, limit: int = RESCORE_BATCH,
+                     seconds: float = RESCORE_SECONDS) -> int:
+    """Re-score properties whose CURRENT Property Opportunity score was computed
+    under an older formula version, a bounded batch per scheduler pass:
+    properties on an auction calendar first, then the highest scores. Old scores
+    stay as history (a new row, never an edit). Idempotent."""
+    import time
+    from sqlalchemy import and_, exists
+    from app.models.evosense_models import EvoSenseAuctionEvent, EvoSenseControl, EvoSenseScore
+    orgs = [org_id] if org_id else [o for (o,) in db.query(EvoSenseControl.organization_id).all()]
+    done, t0 = 0, time.monotonic()
+    for o in orgs:
+        if done >= limit or time.monotonic() - t0 > seconds:
+            break
+        cur = SC.version_for(score_weights(db, o), score_options(db, o))
+        up_to_date = exists().where(and_(EvoSenseScore.property_id == EvoSenseProperty.id,
+                                         EvoSenseScore.score_type == "property_opportunity",
+                                         EvoSenseScore.is_current.is_(True), EvoSenseScore.version == cur))
+        on_calendar = exists().where(EvoSenseAuctionEvent.property_id == EvoSenseProperty.id)
+        props = (db.query(EvoSenseProperty)
+                 .filter(EvoSenseProperty.organization_id == o, EvoSenseProperty.archived_at.is_(None), ~up_to_date)
+                 .order_by(on_calendar.desc(), EvoSenseProperty.opportunity_score.desc().nullslast(),
+                           EvoSenseProperty.id)
+                 .limit(limit - done).all())
+        for p in props:
+            rescore(db, p, strategy_for(db, p))
+            done += 1
+            if done % 50 == 0:
+                db.commit()
+            if time.monotonic() - t0 > seconds:
+                break
+        db.commit()
+    return done
+
+
 def _latest(db, model, prop, *order):
     return (db.query(model)
             .filter(model.organization_id == prop.organization_id,

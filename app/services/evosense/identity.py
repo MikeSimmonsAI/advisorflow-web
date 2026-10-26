@@ -64,6 +64,32 @@ def normalize_street(street: Optional[str]) -> Tuple[str, Optional[str]]:
     return " ".join(toks), unit
 
 
+# Spellings seen in clerk / trustee notices that a county roll never uses.
+# ONLY for matching a notice's address against a county record (one exact,
+# unique account still required) - never for identity keys, so no stored
+# address_key changes and no two properties can merge because of this.
+_NOTICE_SPELLING = {
+    "FIRST": "1ST", "SECOND": "2ND", "THIRD": "3RD", "FOURTH": "4TH", "FIFTH": "5TH", "SIXTH": "6TH",
+    "SEVENTH": "7TH", "EIGHTH": "8TH", "NINTH": "9TH", "TENTH": "10TH", "ELEVENTH": "11TH", "TWELFTH": "12TH",
+    "NOTH": "N", "NROTH": "N", "SOTH": "S", "SOUHT": "S", "STSREET": "ST", "STRET": "ST", "STREE": "ST",
+    "PRWY": "PKWY", "PKY": "PKWY", "PARKWY": "PKWY", "DRIV": "DR", "AVNUE": "AVE", "AVENEU": "AVE",
+}
+
+
+def notice_spelling(street: Optional[str]) -> Optional[str]:
+    """The same address with a notice's spelled-out ordinals and common
+    misspellings put the way county rolls write them - or None when nothing
+    changes. '4815 SOUTH SECOND AVE' -> '4815 S 2ND AVE'."""
+    norm, unit = normalize_street(street)
+    if not norm:
+        return None
+    toks = [_NOTICE_SPELLING.get(t, t) for t in norm.split()]
+    fixed = " ".join(toks)
+    if fixed == norm:
+        return None
+    return fixed + ((" # " + unit) if unit else "")
+
+
 _SUFFIX_ABBR = set(_SUFFIX.values())
 
 

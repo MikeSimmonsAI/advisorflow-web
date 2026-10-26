@@ -8,6 +8,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Panel, Tag } from '../ds/ds'
+import { MeasurePanel, ScoreExplanation } from './Measures'
 
 const money = (v) => (v == null ? '—' : '$' + Number(v).toLocaleString())
 const DIM = { seller_opportunity: 'Seller opportunity', urgency: 'Urgency', economics: 'Economics', engagement: 'Engagement' }
@@ -35,6 +36,8 @@ export default function OpportunityCard({ o, q }) {
         <span className="evo-tag">Engagement: {o.engagement?.label}</span>
         <span className="evo-tag">Stage: {o.workflow_state?.label}</span>
       </div>
+      <MeasurePanel m={o.measures} />
+      <ScoreExplanation ex={o.measures?.explanation} missing={o.measures?.missing} />
 
       <div style={{ marginTop: 12 }}>
         <p className="evo-small" style={{ margin: 0 }}><b>Money:</b> {e.headline}</p>
