@@ -131,6 +131,11 @@ export default function CustomerDetail() {
             </div>
           </div>
           <div className="occ-head-actions">
+            {/* WHO CAN ENTER THIS BUSINESS: opens Manage Access with this
+                business already chosen; pick the person, review, confirm. */}
+            <button className="go-btn" onClick={() => nav('/god/access?org=' + encodeURIComponent(orgId))}>
+              Manage access
+            </button>
             <button className="go-btn" onClick={() => nav('/god/customers/' + orgId + '/360')}>
               Customer 360
             </button>
