@@ -28,7 +28,7 @@ from app.services.evosense import common as C
 from app.services.evosense import signals as SIG
 from app.services.evosense import strategy as ST
 
-PO_VERSION = "property_opportunity/v5"
+PO_VERSION = "property_opportunity/v6"
 # v2 = v1 + organization-configurable signal weights (fingerprinted into the
 # version string when present) + the DFW public-record signals; signals with
 # negative weight (active listing, recent sale) subtract and never count
@@ -48,6 +48,14 @@ PO_VERSION = "property_opportunity/v5"
 # PropStream export) is a claim, like the list's foreclosure claim: it counts at
 # CLAIM_SHARE until a market estimate and a mortgage from another source replace
 # it. A list's "unpaid balance" is not a payoff.
+
+# v6 = owner-directed evidence calibration (2026-10-26). An officially
+# documented, upcoming foreclosure or posted tax sale within 14 days earns
+# +28 additional ACQUISITION DISTRESS evidence points. The original 99 verified
+# Top100 auctions were all given just 16+12 for a confirmed imminent sale,
+# leaving virtually none HIGH. V6 makes that highly compelling seller-distress
+# evidence visible; it does NOT infer equity, profit, closing probability or
+# homeowner consent. Claims, unsupported manual notes and past sales get 0.
 DC_VERSION = "data_confidence/v2"
 CC_VERSION = "contact_confidence/v2"
 SI_VERSION = "seller_intent/v1"
@@ -130,6 +138,8 @@ def clean_options(raw: Any) -> Dict[str, Any]:
 CLAIM_SHARE = 0.75
 CLAIM_SOURCES = ("csv_import",)
 URGENCY = ((14, 12), (30, 9), (45, 6))       # days to the sale -> points (verified notice)
+VERIFIED_IMMINENT_DISTRESS_BONUS = 28        # documented distressed-acquisition evidence; not profit
+VERIFIED_IMMINENT_DAYS = 14
 
 
 def _sale_date(v):
@@ -145,8 +155,8 @@ def _sale_date(v):
 
 
 def foreclosure_terms(stacked_signal: Dict[str, Any], today=None) -> Dict[str, Any]:
-    from datetime import date
-    today = today or date.today()
+    from app.services.evosense.work_priority import today_ct
+    today = today or today_ct()
     ev = stacked_signal.get("evidence") or []
     def claimed(e):
         p = e.get("provenance") or {}
@@ -177,6 +187,53 @@ def foreclosure_terms(stacked_signal: Dict[str, Any], today=None) -> Dict[str, A
     out["urgency_label"] = "Foreclosure sale scheduled %s - %d day%s away (%s)" % (
         sale.isoformat(), days, "" if days == 1 else "s", "verified notice" if verified else "claimed, unverified")
     return out
+
+
+def documented_imminent_distress(stacked: List[Dict[str, Any]], *, today=None) -> Optional[Dict[str, Any]]:
+    """At most ONE extra evidence weight for an officially documented imminent auction.
+
+    A list's claim, an undocumented operator note, a past sale, or a canceled
+    sale never gets the bonus. The weight describes foreclosure seller-distress
+    evidence, not profitability or a probability of an assignable contract.
+    """
+    from app.services.evosense.work_priority import today_ct
+    today = today or today_ct()
+    candidates = []
+    for signal in stacked:
+        if signal.get("freshness") != SIG.CURRENT:
+            continue
+        kind = signal.get("signal_type")
+        if kind not in ("PRE_FORECLOSURE", "TAX_SALE"):
+            continue
+        for e in signal.get("evidence") or []:
+            if e.get("freshness") == SIG.STALE:
+                continue
+            if (e.get("case_status") or signal.get("case_status")) in (
+                "canceled", "postponed", "resolved", "sold", "sold_at_auction", "reverted_to_lender"
+            ):
+                continue
+            provenance = e.get("provenance") or {}
+            if provenance.get("claim") or e.get("source") == "csv_import":
+                continue
+            source = e.get("source")
+            if kind == "PRE_FORECLOSURE":
+                documented = source == "tx_clerk_foreclosure" or (
+                    source == "operator" and bool(provenance.get("document")) and
+                    bool(provenance.get("document_url") or provenance.get("matched_by"))
+                )
+                if not documented:
+                    continue
+            elif source != "lgbs_tax_sales":
+                continue
+            sale = _sale_date(provenance.get("sale_date"))
+            if sale is None:
+                continue
+            days = (sale - today).days
+            if not 0 <= days <= VERIFIED_IMMINENT_DAYS:
+                continue
+            candidates.append({"kind": "mortgage" if kind == "PRE_FORECLOSURE" else "tax",
+                               "sale_date": sale.isoformat(), "days": days, "source": source})
+    return sorted(candidates, key=lambda x: (x["days"], x["kind"]))[0] if candidates else None
 
 
 def version_for(weights: Optional[Dict[str, int]] = None, options: Optional[Dict[str, Any]] = None) -> str:
@@ -339,6 +396,17 @@ def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy,
         elif spec.get("points", 0) == 0 and stype not in ("OTHER",):
             factors.append(_f(0, "%s — 0 points under this configuration" % label, {"signal": stype}))
 
+    documented_sale = documented_imminent_distress(stacked)
+    if documented_sale:
+        total += VERIFIED_IMMINENT_DISTRESS_BONUS
+        factors.append(_f(
+            VERIFIED_IMMINENT_DISTRESS_BONUS,
+            "Documented imminent %s foreclosure sale (within 14 days) — strong acquisition distress evidence, NOT verified profit"
+            % ("tax" if documented_sale["kind"] == "tax" else "mortgage"),
+            {"signal": "TAX_SALE" if documented_sale["kind"] == "tax" else "PRE_FORECLOSURE",
+             "days": documented_sale["days"], "sale_date": documented_sale["sale_date"],
+             "source": documented_sale["source"], "verified": True,
+             "type": "imminent_distress_bonus", "not_profit": True}))
     eq_pts = _equity_points(prop.equity_pct)
     if prop.equity_pct is not None:
         if eq_pts:
