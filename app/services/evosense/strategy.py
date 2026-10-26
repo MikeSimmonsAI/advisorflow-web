@@ -16,7 +16,7 @@ from app.services.evosense.signals import CATALOG as SIGNALS
 
 STATUSES = ("draft", "active", "paused", "archived")
 PROPERTY_TYPES = ("single_family", "duplex", "triplex", "fourplex", "multifamily",
-                  "condo", "townhouse", "mobile_home", "land", "commercial")
+                  "condo", "townhouse", "mobile_home", "land", "commercial", "industrial", "agricultural")
 OCCUPANCY = ("vacant", "non_owner_occupied", "owner_occupied", "tenant", "any")
 OWNER_GEO = ("any", "absentee", "out_of_state")
 

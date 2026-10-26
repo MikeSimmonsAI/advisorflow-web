@@ -437,6 +437,13 @@ class TarrantTaxRollSource(PublicRecordSource):
         return {"url": url, "members": names, "mode": oz.meta.get("mode"), "size": oz.meta.get("size")}
 
 
+def _categories(query) -> tuple:
+    """The property categories this hunt's strategy asks for (houses only ->
+    residential), so a widened county reader never imports a type nobody hunts."""
+    from app.services.evosense import property_class as PCL
+    return PCL.query_categories(query or {})
+
+
 class DallasTrwSource(PublicRecordSource):
     scope, counties = "county", ("Dallas",)
     key = "dallas_trw"
@@ -450,7 +457,7 @@ class DallasTrwSource(PublicRecordSource):
     public_url = "https://www.dallascounty.org/departments/tax/tax-roll.php"
     refresh = "Published weekly"
     freshness_days = 30
-    adapter_version = "dallas_trw/2"
+    adapter_version = "dallas_trw/3"
 
     def search(self, capability, query):
         from app.services.evosense.sources.dallas_trw import TrwReader
@@ -463,7 +470,8 @@ class DallasTrwSource(PublicRecordSource):
         # through every delinquent account: day-of-year x window, wrapped there.
         res = TrwReader().discover(limit=limit,
                                    min_due_cents=int(float(query.get("min_tax_due") or 250) * 100),
-                                   skip=rotation_skip(limit, ROTATE_DALLAS_TRW_POOL))
+                                   skip=rotation_skip(limit, ROTATE_DALLAS_TRW_POOL),
+                                   categories=_categories(query))
         out.extend(res["records"])
         out.stats, out.source_url = res["stats"], res["source_url"]
         return out
@@ -547,7 +555,7 @@ class DcadSource(PublicRecordSource):
     public_url = "https://www.dallascad.org/DataProducts.aspx"
     refresh = "Certified roll, refreshed by DCAD through the year"
     freshness_days = 180
-    adapter_version = "dcad_certified/2"
+    adapter_version = "dcad_certified/3"
     lookup_capability = C.ASSESSOR
 
     def applies(self, target):
@@ -581,7 +589,8 @@ class DcadSource(PublicRecordSource):
             out.stats = {"skipped": "strategy does not include Dallas County"}
             return out
         limit = int(query.get("limit") or 25)
-        res = DcadReader().discover(limit=limit, skip=rotation_skip(limit * 3, ROTATE_DCAD_POOL))
+        res = DcadReader().discover(limit=limit, skip=rotation_skip(limit * 3, ROTATE_DCAD_POOL),
+                                    categories=_categories(query))
         out.extend(res["records"])
         out.stats, out.source_url = res["stats"], res["source_url"]
         return out
@@ -838,7 +847,7 @@ class TexasParcelRollSource(PublicRecordSource):
     public_url = "https://geographic.texas.gov/stratmap/land-parcels.html"
     refresh = "TxGIO 2026 collection (acquired 2026-09-25); each record carries its district's tax year"
     freshness_days = 180
-    adapter_version = "txgio_parcel_roll/1"
+    adapter_version = "txgio_parcel_roll/2"
     OWN_DISCOVERY = ("Dallas", "Collin", "Denton", "Harris")
     COUNTIES_PER_HUNT = 2
     terms_note = "Public statewide parcel data published by the Texas Geographic Information Office."
@@ -870,13 +879,17 @@ class TexasParcelRollSource(PublicRecordSource):
         picks = [pool[(start + i) % len(pool)] for i in range(k)]
         limit = int(query.get("limit") or 25)
         per = max(1, limit // k)
-        stats: Dict[str, Any] = {"counties": picks, "pool": len(pool)}
+        stats: Dict[str, Any] = {"counties": picks, "pool": len(pool), "counties_checked": ", ".join(picks)}
         reader = TxRollReader()
         for c in picks:
             res = reader.discover(c, limit=per, rotate=(day // max(1, len(pool) // k)) * per,
-                                  cities=query.get("cities"), zips=query.get("zips"))
+                                  cities=query.get("cities"), zips=query.get("zips"),
+                                  categories=_categories(query))
             out.extend(res["records"])
             stats[c] = res["stats"]
+            for key, v in res["stats"].items():     # the per-type counts, summed for the run record
+                if key.startswith(("found_", "kept_", "imported_")) and isinstance(v, int):
+                    stats[key] = stats.get(key, 0) + v
             out.source_url = res["source_url"]
         out.stats = stats
         return out
@@ -954,7 +967,7 @@ class TravisDelinquentSource(PublicRecordSource):
     public_url = "https://tax-office.traviscountytx.gov/about-us/reports-data/property-taxes"
     refresh = "Republished by the Tax Office (file dated in its Last-Modified header)"
     freshness_days = 30
-    adapter_version = "travis_delinquent/2"
+    adapter_version = "travis_delinquent/3"
     terms_note = "Open data the Travis County Tax Office publishes for download."
 
     def search(self, capability, query):
@@ -966,7 +979,8 @@ class TravisDelinquentSource(PublicRecordSource):
         limit = int(query.get("limit") or 25)
         res = TravisDelinquentReader().discover(
             limit=limit, min_due=float(query.get("min_tax_due") or 250),
-            skip=rotation_skip(limit, ROTATE_TRAVIS_POOL), zips=query.get("zips"))
+            skip=rotation_skip(limit, ROTATE_TRAVIS_POOL), zips=query.get("zips"),
+            categories=_categories(query))
         out.extend(res["records"])
         out.stats, out.source_url = res["stats"], res["source_url"]
         return out
