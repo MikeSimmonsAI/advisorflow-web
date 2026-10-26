@@ -1,7 +1,7 @@
 /* God Mode shared card kit (GodKit.jsx). God Mode tokens only (godTokens.css). */
 
-.gk-page { position: relative; z-index: 1; max-width: 1440px; margin: 0 auto; padding: 22px 24px 64px; }
-.gk-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+.gk-page { position: relative; z-index: 1; max-width: 1360px; margin: 0 auto; padding: 26px 28px 64px; }
+.gk-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
 .gk-eyebrow { font-size: 10px; letter-spacing: .16em; color: var(--gm-blue); font-weight: 800; text-transform: uppercase; margin-bottom: 6px; }
 .gk-title { margin: 0; color: var(--gm-head); font-size: 28px; letter-spacing: -.035em; line-height: 1.05; font-weight: 800; }
 .gk-sub { margin: 6px 0 0; color: var(--gm-dim); font-size: 13px; max-width: 760px; line-height: 1.5; }
@@ -22,9 +22,9 @@
 }
 
 .gk-card { background: var(--gm-card); border: 1px solid var(--gm-card-line); border-radius: var(--gm-radius, 12px);
-  box-shadow: var(--gm-shadow-card); padding: 16px 18px; min-width: 0; }
+  box-shadow: var(--gm-shadow-card); padding: 18px 20px; min-width: 0; }
 .gk-card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
-.gk-card-title { font-size: 14px; font-weight: 750; color: var(--gm-head); margin: 0; }
+.gk-card-title { font-size: 15px; font-weight: 750; color: var(--gm-head); margin: 0; letter-spacing: -.01em; }
 .gk-card-note { font-size: 12px; color: var(--gm-ghost); }
 .gk-link { background: none; border: 0; padding: 0; color: var(--gm-blue); font: inherit; font-size: 12px; font-weight: 650; cursor: pointer; text-decoration: none; }
 .gk-link:hover { text-decoration: underline; }
@@ -46,7 +46,7 @@ button.gk-kpi:hover { border-color: var(--gm-card-line-hover); }
 .gk-pill--info { background: var(--gm-pill-blue-bg); color: var(--gm-pill-blue-fg); border-color: var(--gm-pill-blue-bd); }
 .gk-pill--test { background: var(--gm-pill-purple-bg); color: var(--gm-pill-purple-fg); border-color: var(--gm-pill-purple-bd); }
 
-.gk-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 6px 12px; border-radius: 8px; font: inherit;
+.gk-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 6px 13px; border-radius: 10px; font: inherit;
   font-size: 12.5px; font-weight: 700; cursor: pointer; border: 1px solid var(--gm-btn-line); background: var(--gm-btn); color: var(--gm-btn-fg); text-decoration: none; }
 .gk-btn:hover { background: var(--gm-btn-hover); border-color: var(--gm-btn-hover-line); }
 .gk-btn--primary { background: var(--gm-btn-primary); border-color: var(--gm-btn-primary); color: var(--gm-btn-primary-fg); }
@@ -96,7 +96,71 @@ button.gk-kpi:hover { border-color: var(--gm-card-line-hover); }
 .gk-input:focus-visible { outline: 2px solid var(--gm-focus-ring, var(--gm-blue)); outline-offset: 1px; }
 
 /* Section tab bar (GodShell). */
-.gk-tabs { display: flex; gap: 2px; padding: 0 16px; border-bottom: 1px solid var(--gm-rail-line); background: var(--gm-card); overflow-x: auto; flex-shrink: 0; scrollbar-width: thin; }
+.gk-tabs { display: flex; gap: 2px; padding: 0 16px; border-bottom: 1px solid var(--gm-topbar-line); background: var(--gm-card); overflow-x: auto; flex-shrink: 0; scrollbar-width: thin; }
 .gk-tab { display: inline-flex; align-items: center; padding: 11px 12px 10px; font-size: 12.5px; font-weight: 650; color: var(--gm-dim); text-decoration: none; border-bottom: 2px solid transparent; white-space: nowrap; }
 .gk-tab:hover { color: var(--gm-head); }
 .gk-tab--on { color: var(--gm-blue); border-bottom-color: var(--gm-blue); }
+
+
+/* ── OWNER DESK building blocks (Oct 26 2026) ─────────────────────────────
+   Shared by the Owner Desk and the six section landing pages so every God
+   screen reads as one product: sections with a plain heading, tool cards,
+   program cards, quick actions and a compact summary strip. */
+.gk-section { margin-top: 26px; }
+.gk-section:first-child { margin-top: 0; }
+.gk-section-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.gk-section-title { margin: 0; font-size: 16px; font-weight: 780; color: var(--gm-head); letter-spacing: -.015em; }
+.gk-section-sub { margin: 3px 0 0; font-size: 12.5px; color: var(--gm-dim); line-height: 1.45; }
+
+.gk-strip { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.gk-strip .gk-kpi { padding: 14px 16px; }
+@media (max-width: 900px) { .gk-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.gk-desk { display: grid; gap: 16px; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); align-items: start; }
+.gk-stack { display: grid; gap: 16px; min-width: 0; }
+@media (max-width: 1080px) { .gk-desk { grid-template-columns: minmax(0, 1fr); } }
+
+.gk-tiles { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); }
+
+.gk-tool { position: relative; display: flex; gap: 14px; align-items: flex-start; text-decoration: none; color: inherit;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+.gk-tool:hover { border-color: var(--gm-card-line-hover); box-shadow: var(--gm-shadow-lift); transform: translateY(-1px); }
+.gk-tool:focus-visible { outline: 2px solid var(--gm-focus-ring); outline-offset: 2px; }
+.gk-tool-icon { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; flex: none;
+  background: var(--gm-blue-wash); color: var(--gm-blue); }
+.gk-tool-body { min-width: 0; flex: 1; }
+.gk-tool-title { font-size: 14px; font-weight: 750; color: var(--gm-head); line-height: 1.3; }
+.gk-tool-desc { font-size: 12.5px; color: var(--gm-dim); line-height: 1.45; margin-top: 3px; }
+.gk-tool-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.gk-tool-meta { font-size: 11.5px; color: var(--gm-ghost); }
+.gk-tool-arrow { color: var(--gm-ghost); flex: none; align-self: center; }
+
+.gk-program { display: flex; flex-direction: column; gap: 10px; padding: 0; overflow: hidden; }
+.gk-program-top { height: 4px; background: var(--acc, var(--gm-blue)); }
+.gk-program-body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+.gk-program-head { display: flex; gap: 11px; align-items: center; min-width: 0; }
+.gk-program-mark { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; flex: none;
+  background: var(--acc-wash, var(--gm-blue-wash)); color: var(--acc, var(--gm-blue)); font-weight: 800; font-size: 12px; letter-spacing: -.02em; }
+.gk-program-name { font-size: 14px; font-weight: 760; color: var(--gm-head); line-height: 1.25; overflow-wrap: anywhere; }
+.gk-program-kind { font-size: 10.5px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; color: var(--acc, var(--gm-blue)); margin-top: 2px; }
+.gk-program-facts { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--gm-dim); }
+.gk-program-facts b { color: var(--gm-head); font-weight: 750; font-variant-numeric: tabular-nums; }
+.gk-program-actions { display: flex; gap: 8px; margin-top: auto; flex-wrap: wrap; }
+
+.gk-quick { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.gk-quick .gk-btn { justify-content: flex-start; min-height: 40px; width: 100%; }
+@media (max-width: 420px) { .gk-quick { grid-template-columns: minmax(0, 1fr); } }
+
+.gk-activity { list-style: none; margin: 0; padding: 0; }
+.gk-activity li { display: flex; gap: 10px; padding: 9px 0; border-top: 1px solid var(--gm-row-line); font-size: 12.5px; color: var(--gm-text); }
+.gk-activity li:first-child { border-top: 0; }
+.gk-activity-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gm-blue); margin-top: 6px; flex: none; }
+.gk-activity-when { margin-left: auto; color: var(--gm-ghost); font-size: 11.5px; white-space: nowrap; padding-left: 8px; }
+
+@media (max-width: 640px) {
+  .gk-section { margin-top: 20px; }
+  .gk-strip { gap: 8px; }
+}
+.gk-tiles--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .gk-tiles--3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .gk-tiles--3 { grid-template-columns: minmax(0, 1fr); } }

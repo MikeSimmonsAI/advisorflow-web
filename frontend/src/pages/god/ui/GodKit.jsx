@@ -207,3 +207,144 @@ export function Steps ({ steps }) {
     </div>
   )
 }
+
+/* ── OWNER DESK building blocks (Oct 26 2026) ─────────────────────────────
+   Used by the Owner Desk and the six section landing pages. Same rule as the
+   rest of the kit: nothing here invents a number or a status. */
+
+const ICON_PATHS = {
+  building: 'M3 21h18M5 21V7l7-4 7 4v14M9 9h1M14 9h1M9 13h1M14 13h1M9 17h1M14 17h1',
+  cpu: 'M9 3v2M15 3v2M9 19v2M15 19v2M3 9h2M3 15h2M19 9h2M19 15h2M7 7h10v10H7zM10 10h4v4h-4z',
+  flag: 'M5 21V4M5 4h11l-2 4 2 4H5',
+  dollar: 'M12 3v18M16.5 7.5c0-1.9-2-3-4.5-3s-4.5 1.2-4.5 3 2 2.6 4.5 3.1 4.5 1.3 4.5 3.3-2 3.1-4.5 3.1-4.5-1.2-4.5-3',
+  settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z',
+  briefcase: 'M3 8h18v12H3zM8 8V5h8v3M3 13h18',
+  plus: 'M12 5v14M5 12h14',
+  login: 'M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3',
+  user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0',
+  stop: 'M8 3h8l5 5v8l-5 5H8l-5-5V8zM9 9l6 6M15 9l-6 6',
+  list: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+  shield: 'M12 3l8 3v6c0 4.5-3.3 7.6-8 9-4.7-1.4-8-4.5-8-9V6z',
+  arrow: 'M9 6l6 6-6 6',
+  check: 'M5 12l5 5 9-10',
+}
+
+export function Icon ({ name, size = 18 }) {
+  const d = ICON_PATHS[name]
+  if (!d) return null
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d={d} /></svg>
+  )
+}
+
+/** A titled group on a page — a heading, not another box around boxes. */
+export function Section ({ title, sub, action, children, id }) {
+  return (
+    <section className="gk-section" id={id} aria-label={typeof title === 'string' ? title : undefined}>
+      {(title || action) && (
+        <div className="gk-section-head">
+          <div>
+            {title ? <h2 className="gk-section-title">{title}</h2> : null}
+            {sub ? <p className="gk-section-sub">{sub}</p> : null}
+          </div>
+          {action || null}
+        </div>
+      )}
+      {children}
+    </section>
+  )
+}
+
+/** A compact row of summary numbers (2–4). Same "—" rule as Kpi. */
+export function Strip ({ items }) {
+  return (
+    <div className="gk-strip">
+      {items.map(k => <Kpi key={k.label} {...k} />)}
+    </div>
+  )
+}
+
+/** A destination card: icon, what it is for, and a live status if one is known. */
+export function ToolCard ({ icon, title, description, status, meta, to }) {
+  return (
+    <Link to={to} className="gk-card gk-tool">
+      <span className="gk-tool-icon"><Icon name={icon} /></span>
+      <span className="gk-tool-body">
+        <span className="gk-tool-title" style={{ display: 'block' }}>{title}</span>
+        {description ? <span className="gk-tool-desc" style={{ display: 'block' }}>{description}</span> : null}
+        {(status || meta) ? (
+          <span className="gk-tool-foot">
+            {status ? <Pill tone={status.tone}>{status.label}</Pill> : null}
+            {meta ? <span className="gk-tool-meta">{meta}</span> : null}
+          </span>
+        ) : null}
+      </span>
+      <span className="gk-tool-arrow"><Icon name="arrow" size={16} /></span>
+    </Link>
+  )
+}
+
+/** Which business an organization IS, from its own industry. Never from a
+ *  feature switch (see app/services/program_experience.py). */
+const BUSINESS = {
+  energy: { kind: 'Energy', acc: 'energy' },
+  roofing: { kind: 'Roofing', acc: 'roofing' },
+  funeral: { kind: 'Cemetery & funeral', acc: 'funeral' },
+  cemetery: { kind: 'Cemetery & funeral', acc: 'funeral' },
+  insurance: { kind: 'Insurance', acc: 'insurance' },
+  cleaning: { kind: 'Commercial cleaning', acc: 'cleaning' },
+  real_estate: { kind: 'Real estate', acc: 'wholesale' },
+}
+export function businessOf (industry) {
+  return BUSINESS[String(industry || '').trim().toLowerCase()] || { kind: 'Business', acc: 'general' }
+}
+export function initialsOf (name) {
+  const w = String(name || '').replace(/\(.*?\)/g, '').trim().split(/\s+/).filter(Boolean)
+  if (!w.length) return '?'
+  return (w[0][0] + (w.length > 1 ? w[w.length - 1][0] : '')).toUpperCase()
+}
+
+/** One organization the owner runs, with its own accent. */
+export function ProgramCard ({ name, industry, kind, pills, facts, actions }) {
+  const b = businessOf(industry)
+  const style = { '--acc': `var(--gm-acc-${b.acc})`, '--acc-wash': `var(--gm-acc-${b.acc}-wash)` }
+  return (
+    <article className="gk-card gk-program" style={style} aria-label={name}>
+      <div className="gk-program-top" />
+      <div className="gk-program-body">
+        <div className="gk-program-head">
+          <span className="gk-program-mark" aria-hidden="true">{initialsOf(name)}</span>
+          <div style={{ minWidth: 0 }}>
+            <div className="gk-program-name">{name}</div>
+            <div className="gk-program-kind">{kind || b.kind}</div>
+          </div>
+        </div>
+        {pills && pills.length ? <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{pills}</div> : null}
+        {facts && facts.length ? (
+          <div className="gk-program-facts">
+            {facts.map(f => <span key={f.label}><b>{f.value === null || f.value === undefined ? '—' : f.value}</b> {f.label}</span>)}
+          </div>
+        ) : null}
+        {actions ? <div className="gk-program-actions">{actions}</div> : null}
+      </div>
+    </article>
+  )
+}
+
+/** Buttons for the owner's most common moves. */
+export function QuickActions ({ items }) {
+  return (
+    <div className="gk-quick">
+      {items.map(q => (
+        <ActionLinkBig key={q.label} {...q} />
+      ))}
+    </div>
+  )
+}
+function ActionLinkBig ({ label, icon, to, onClick, primary, danger }) {
+  const cls = `gk-btn ${primary ? 'gk-btn--primary' : ''} ${danger ? 'gk-btn--danger' : ''}`
+  const inner = <>{icon ? <Icon name={icon} size={16} /> : null}<span>{label}</span></>
+  if (onClick) return <button type="button" className={cls} onClick={onClick}>{inner}</button>
+  return <Link className={cls} to={to}>{inner}</Link>
+}
