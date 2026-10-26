@@ -548,7 +548,33 @@ def program_appointments(when: str = Query("upcoming"), location_id: Optional[st
                       "phone": l.phone, "email": l.email, "location_id": loc, "location": names.get(loc),
                       "when": _bt.wire(db, b), "status": b.status,
                       "label": getattr(b, "appt_label", None), "minutes": getattr(b, "appt_duration", None)})
+    # #405: what happened at each visit, and whether it may be recorded yet.
+    from app.services.programs import visit_outcome
+    shown = {i["id"] for i in items}
+    extra = visit_outcome.for_bookings(db, [b for b, _l in rows if b.id in shown])
+    for i in items:
+        i.update(extra.get(i["id"], {}))
     return {"items": items, "when": when}
+
+
+class VisitOutcomeIn(BaseModel):
+    attendance: str
+    location_id: Optional[str] = None
+
+
+@router.post("/appointments/{booking_id}/outcome")
+def program_visit_outcome(booking_id: str, body: VisitOutcomeIn, db: Session = Depends(get_db),
+                          user: User = Depends(require_tenant_user)):
+    """#405: SCI staff record what happened at a visit (Completed / No-show /
+    Cancelled / Follow-up needed). Only Completed can lead to a survey, and
+    only after the visit has ended. The booking itself is not changed."""
+    prog = _program(db, user)
+    from app.services.programs import visit_outcome
+    try:
+        return visit_outcome.record(db, prog, booking_id, body.attendance, user,
+                                    expected_location_id=body.location_id)
+    except visit_outcome.OutcomeRefused as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
 
 
 @router.get("/reach/{lead_id}")

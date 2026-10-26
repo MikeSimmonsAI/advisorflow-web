@@ -173,26 +173,48 @@ def test_running_twice_sends_once(db_session, sample_org, sample_advisor, on):
     assert len(gw.texts) == 1 and db_session.query(BookingFollowup).count() == 1
 
 
-def test_simultaneous_workers_claim_once(db_session, sample_org, sample_advisor, on):
-    """Two runners with their own sessions race for one booking: one claim wins."""
+def test_simultaneous_workers_claim_once(tmp_path):
+    """Two runners with their OWN connections (a file database, real pooling)
+    race for one completed visit: exactly one claim wins."""
+    from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
-    _, bl = _visit(db_session, sample_org, sample_advisor)
-    engine = db_session.get_bind()
-    wins = []
-    barrier = threading.Barrier(2)
-
-    def runner():
+    from app.models.models import Base, Organization, User
+    engine = create_engine("sqlite:///%s" % (tmp_path / "race.db"), connect_args={"timeout": 30})
+    Base.metadata.create_all(engine)
+    with Session(engine) as s:
+        org = Organization(name="Race Org", slug="race", plan="standard", industry="funeral")
+        s.add(org)
+        s.flush()
+        u = User(organization_id=org.id, email="r@race.example", password_hash="x", full_name="R",
+                 role="advisor", must_change_password=False)
+        s.add(u)
+        s.flush()
+        lead, bl = _visit(s, org, u)
+        bid = bl.id
+    for _ in range(5):                                    # several races, same answer every time
         with Session(engine) as s:
-            b = s.query(BookingLink).filter_by(id=bl.id).one()
-            barrier.wait()
-            if SD.claim(s, b, datetime.utcnow()) is not None:
-                wins.append(1)
+            s.execute(__import__("sqlalchemy").text("DELETE FROM booking_followups"))
+            s.execute(__import__("sqlalchemy").text("UPDATE booking_links SET review_request_sent_at = NULL"))
+            s.commit()
+        wins, errors = [], []
+        barrier = threading.Barrier(2)
 
-    ts = [threading.Thread(target=runner) for _ in range(2)]
-    [t.start() for t in ts]
-    [t.join() for t in ts]
-    assert len(wins) == 1
-    assert db_session.query(BookingFollowup).filter_by(booking_link_id=bl.id).count() == 1
+        def runner():
+            try:
+                with Session(engine) as s:
+                    b = s.query(BookingLink).filter_by(id=bid).one()
+                    barrier.wait()
+                    if SD.claim(s, b, _utc(WALTER_LOCAL) + timedelta(hours=3)) is not None:
+                        wins.append(1)
+            except Exception as exc:                      # a lock timeout is a lost claim, never a second win
+                errors.append(type(exc).__name__)
+
+        ts = [threading.Thread(target=runner) for _ in range(2)]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        assert len(wins) == 1, (wins, errors)
+        with Session(engine) as s:
+            assert s.query(BookingFollowup).filter_by(booking_link_id=bid).count() == 1
 
 
 def test_the_retired_senders_send_nothing(db_session, sample_org, sample_advisor, on):

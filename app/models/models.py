@@ -1397,6 +1397,11 @@ class LeadOutcome(Base):
     # completed | no_show | cancelled | follow_up_needed. NULL on every row
     # recorded before it existed - never back-filled or guessed.
     attendance = Column(String, nullable=True)
+    # #405: the program location the visit belonged to (SCI), and when/by whom
+    # the attendance itself was last set (recorded_by_id is the first author).
+    location_id = Column(String, nullable=True)
+    attendance_set_by = Column(String, nullable=True)
+    attendance_set_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

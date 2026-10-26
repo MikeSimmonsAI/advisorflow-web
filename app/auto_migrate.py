@@ -165,6 +165,9 @@ COLUMNS_TO_ADD = [
     ("booking_followups", "attempts", "INTEGER DEFAULT 0"),
     ("booking_followups", "last_attempt_at", "TIMESTAMP"),
     ("location_profiles", "review_url", "VARCHAR"),
+    ("lead_outcomes", "location_id", "VARCHAR"),
+    ("lead_outcomes", "attendance_set_by", "VARCHAR"),
+    ("lead_outcomes", "attendance_set_at", "TIMESTAMP"),
     # Wholesale field app, works with bad signal (2026-10-11)
     ("wholesale_field_appointments", "outcome_ref", "VARCHAR"),
     ("wholesale_field_rules", "raise_limit_pct", "INTEGER DEFAULT 10"),

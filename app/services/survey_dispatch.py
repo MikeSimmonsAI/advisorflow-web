@@ -59,7 +59,7 @@ LOOKBACK = timedelta(days=7)            # never chase old visits
 DEFAULT_MINUTES = 60
 COMPLETED = "completed"
 NEVER = ("no_show", "cancelled")
-LIVE_STATUSES = ("booked", "confirmed")
+LIVE_STATUSES = ("booked", "confirmed", "completed")   # a "completed" booking is still surveyable
 
 TOKEN_ALPHABET = string.ascii_letters + string.digits
 TOKEN_LENGTH = 12                        # 62^12 ~ 3.2e21 (~71 bits)
@@ -100,14 +100,31 @@ def appointment_end_utc(db: Session, booking) -> Optional[datetime]:
     return start + timedelta(minutes=int(booking.appt_duration or DEFAULT_MINUTES))
 
 
+# THE one rule for "what happened at this visit", used by the sender, the claim,
+# the Appointments screen and the outcome writer alike: the newest LeadOutcome
+# row for the booking that carries an attendance, newest by when the attendance
+# was set (falling back to the row's own times). Checklist-only rows (no
+# attendance) never hide or override it.
+LATEST_ATTENDANCE_SQL = (
+    "(SELECT lo.attendance FROM lead_outcomes lo WHERE lo.booking_link_id = :id "
+    "AND lo.attendance IS NOT NULL "
+    "ORDER BY COALESCE(lo.attendance_set_at, lo.updated_at, lo.created_at) DESC, lo.id DESC LIMIT 1)")
+
+
+def latest_attendance_row(db: Session, booking_id: str):
+    from sqlalchemy import func as _f
+    from app.models.models import LeadOutcome
+    return (db.query(LeadOutcome)
+            .filter(LeadOutcome.booking_link_id == booking_id, LeadOutcome.attendance.isnot(None))
+            .order_by(_f.coalesce(LeadOutcome.attendance_set_at, LeadOutcome.updated_at,
+                                  LeadOutcome.created_at).desc(), LeadOutcome.id.desc())
+            .first())
+
+
 def attendance(db: Session, booking) -> Optional[str]:
     """The latest attendance a person recorded for this visit, or None."""
-    from app.models.models import LeadOutcome
-    row = (db.query(LeadOutcome.attendance)
-           .filter(LeadOutcome.booking_link_id == booking.id, LeadOutcome.attendance.isnot(None))
-           .order_by(LeadOutcome.updated_at.desc().nullslast(), LeadOutcome.created_at.desc().nullslast())
-           .first())
-    return row[0] if row else None
+    row = latest_attendance_row(db, booking.id)
+    return row.attendance if row is not None else None
 
 
 def ineligible_reason(db: Session, booking, now: Optional[datetime] = None) -> Optional[str]:
@@ -169,7 +186,10 @@ def claim(db: Session, booking, now: Optional[datetime] = None):
     won = db.execute(text(
         "UPDATE booking_links SET review_request_sent_at = :now "
         "WHERE id = :id AND review_request_sent_at IS NULL "
-        "AND NOT EXISTS (SELECT 1 FROM booking_followups f WHERE f.booking_link_id = :id)"),
+        "AND NOT EXISTS (SELECT 1 FROM booking_followups f WHERE f.booking_link_id = :id) "
+        # re-checked IN the claim: an outcome changed after this pass listed
+        # the visit (Completed -> No-show) can never be surveyed
+        "AND " + LATEST_ATTENDANCE_SQL + " = 'completed'"),
         {"id": booking.id, "now": now})
     if won.rowcount != 1:
         db.rollback()
@@ -242,6 +262,9 @@ def deliver(db: Session, fu, booking, lead, advisor, *, allow_text: bool = True,
     fu.attempts = int(fu.attempts or 0) + 1
     fu.last_attempt_at = datetime.utcnow()
     db.commit()
+    if attendance(db, booking) != COMPLETED:
+        _record(db, fu, state=STATE_HELD, reason="held: the visit is no longer marked completed")
+        return STATE_HELD
     place, held = place_for(db, lead)
     if held:
         _record(db, fu, state=STATE_HELD, reason=held)

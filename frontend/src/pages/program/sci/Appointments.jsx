@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../../api/client'
 import { Chip, Empty, ErrorLine, FilterChips, Kpi, Loading, PageHead, Panel, errText, num, when as ago } from './ui'
+import VisitOutcome from './VisitOutcome'
 
 const WHEN = [['upcoming', 'Upcoming'], ['past', 'Past'], ['all', 'All']]
 const STATUS = { booked: ['Booked', 'ok'], confirmed: ['Confirmed', 'ok'], cancelled: ['Cancelled', 'warn'], completed: ['Completed', ''] }
@@ -16,17 +17,27 @@ export default function Appointments({ locationId, openPerson }) {
   const [when, setWhen] = useState('upcoming')
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
+  const [tick, setTick] = useState(0)          // reload after an outcome is saved
+  // Refresh every minute so a visit that just ended becomes markable without a reload.
+  useEffect(() => { const t = setInterval(() => setTick(x => x + 1), 60000); return () => clearInterval(t) }, [])
+
+  const [lastKey, setLastKey] = useState('')
 
   useEffect(() => {
     let alive = true
-    setData(null); setErr('')
+    // A refresh after saving an outcome keeps the list (and its saved/failed
+    // message) on screen; only a new filter shows the loading state.
+    const key = `${when}|${locationId || ''}`
+    if (key !== lastKey) { setData(null); setLastKey(key) }
+    setErr('')
     const p = new URLSearchParams({ when })
     if (locationId) p.set('location_id', locationId)
     api.get(`/program/appointments?${p}`)
       .then(d => { if (alive) setData(d) })
-      .catch(e => { if (alive) { setErr(errText(e)); setData({ items: [] }) } })
+      // A failed refresh keeps what is on screen; only a failed first load is empty.
+      .catch(e => { if (alive) { setErr(errText(e)); setData(d => d || { items: [] }) } })
     return () => { alive = false }
-  }, [when, locationId])
+  }, [when, locationId, tick])
 
   const groups = []
   for (const a of data?.items || []) {
@@ -37,7 +48,7 @@ export default function Appointments({ locationId, openPerson }) {
 
   return (
     <>
-      <PageHead title="Appointments" sub="Visits families booked. Times show in your own time zone." />
+      <PageHead title="Appointments" sub="Visits families booked. After a visit, tap what happened - a survey goes only to families marked Completed." />
       <ErrorLine text={err} />
       <BookingActivity openPerson={openPerson} />
       <Panel title="Booked visits" labelledBy="sci-appts"
@@ -53,7 +64,7 @@ export default function Appointments({ locationId, openPerson }) {
             <div className="sci-tablewrap">
               <table className="sci-table compact">
                 <tbody>
-                  {g.items.map(a => (
+                  {g.items.map(a => [
                     <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => openPerson(a.lead_id)}>
                       <td style={{ width: 90, whiteSpace: 'nowrap' }}><b>{timeOf(a.when)}</b></td>
                       <td className="sci-cell-main">
@@ -62,8 +73,15 @@ export default function Appointments({ locationId, openPerson }) {
                       </td>
                       <td className="sci-small">{a.location || '—'}<span className="sci-micro sci-muted" style={{ display: 'block' }}>{a.label || 'Visit'}{a.minutes ? ` · ${a.minutes} min` : ''}</span></td>
                       <td style={{ textAlign: 'right' }}><Chip tone={(STATUS[a.status] || [])[1] || ''} plain>{(STATUS[a.status] || [a.status])[0]}</Chip></td>
-                    </tr>
-                  ))}
+                    </tr>,
+                    (a.started || a.attendance) ? (
+                      <tr key={`${a.id}-outcome`} onClick={e => e.stopPropagation()}>
+                        <td colSpan={4} style={{ paddingTop: 0, borderTop: 0 }}>
+                          <VisitOutcome appt={a} onSaved={() => setTick(t => t + 1)} />
+                        </td>
+                      </tr>
+                    ) : null,
+                  ])}
                 </tbody>
               </table>
             </div>
