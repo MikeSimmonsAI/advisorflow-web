@@ -7,18 +7,22 @@ PASS  A4. Atlantis (onboarding) has a workspace card and no preview
 PASS  A5. Commercial Cleaning Blueprint is a preview only (no workspace seat yet)
 PASS  A6. desktop: no sideways scroll
 PASS  A7. "SCI" opens its destination and survives refresh — /program/live -> /program/live
-PASS  A7. "Atlantis Light & Power" opens its destination and survives refresh — /workspace/dd6d2d51-637b-4e75-9133-3b6c7d27d662 -> /workspace/dd6d2d51-637b-4e75-9133-3b6c7d27d662
+PASS  A7. "Atlantis Light & Power" opens its destination and survives refresh — /workspace/55580c08-6e5d-4293-9595-b7d7b33c3250 -> /workspace/55580c08-6e5d-4293-9595-b7d7b33c3250
 PASS  A7. "Roofing" opens its destination and survives refresh — /program/roofing -> /program/roofing
 PASS  A7. "Wholesale" opens its destination and survives refresh — /wholesale/evosense -> /wholesale/evosense
-PASS  A7. "Restland Cemetery and Funeral Home" opens its destination and survives refresh — /workspace/d43bd052-5509-47f4-b335-4c47240cd397 -> /workspace/d43bd052-5509-47f4-b335-4c47240cd397
+PASS  A7. "Restland Cemetery and Funeral Home" opens its destination and survives refresh — /workspace/95cac0fb-7c01-4fe4-b125-f0bb12b52595 -> /workspace/95cac0fb-7c01-4fe4-b125-f0bb12b52595
 PASS  A7. "Insurance" opens its destination and survives refresh — /agency -> /agency
 PASS  A7. "Back Office" opens its destination and survives refresh — /sales -> /sales
 PASS  A7b. Back Office opens the real Sales Workspace
 PASS  A8. navigating back to Program Access works
-PASS  A9. preview "Building Equity Investments LLC" opens that prospect's demo page in a new tab; launcher stays put — http://127.0.0.1:4173/demo/…
-PASS  A9. preview "Commercial Cleaning Blueprint" opens that prospect's demo page in a new tab; launcher stays put — http://127.0.0.1:4173/demo/…
-PASS  A9. preview "Countryside Land Partners" opens that prospect's demo page in a new tab; launcher stays put — http://127.0.0.1:4173/demo/…
-PASS  A9. preview "VP Wraps Vehicle Protection" opens that prospect's demo page in a new tab; launcher stays put — http://127.0.0.1:4173/demo/…
+PASS  A9. preview "Building Equity Investments LLC" is a real link; a real click opens that prospect's demo — A http://127.0.0.1:4173/demo/…
+PASS  A9c. Back returns to Program Access from "Building Equity Investments LLC"
+PASS  A9. preview "Commercial Cleaning Blueprint" is a real link; a real click opens that prospect's demo — A http://127.0.0.1:4173/demo/…
+PASS  A9c. Back returns to Program Access from "Commercial Cleaning Blueprint"
+PASS  A9. preview "Countryside Land Partners" is a real link; a real click opens that prospect's demo — A http://127.0.0.1:4173/demo/…
+PASS  A9c. Back returns to Program Access from "Countryside Land Partners"
+PASS  A9. preview "VP Wraps Vehicle Protection" is a real link; a real click opens that prospect's demo — A http://127.0.0.1:4173/demo/…
+PASS  A9c. Back returns to Program Access from "VP Wraps Vehicle Protection"
 PASS  A9b. opening previews from Program Access did not count as prospect views — views=0
 PASS  A10. wholesale@ in Atlantis sees Atlantis data only — {"status":200,"slugs":["atlantis-light-power"]}
 PASS  A11. wholesale@ asking for Commercial Cleaning Blueprint gets none of its data (no seat) — {"status":403,"slugs":[]}
@@ -38,7 +42,7 @@ PASS  C1. multi manager: its 3 workspaces + Back Office — SCI | Atlantis Light
 PASS  C2. multi manager: brand previews (sales manager of that brand)
 PASS  C3. multi manager: no Roofing / Wholesale / Insurance cards
 PASS  C4. multi manager asking for Roofing gets none of its data — {"status":403,"slugs":[]}
-PASS  D1. single-workspace user goes straight into Commercial Cleaning Blueprint — /workspace/d18285bc-1e79-47eb-9935-14d686cb0f2d
+PASS  D1. single-workspace user goes straight into Commercial Cleaning Blueprint — /workspace/b7ef0a8d-19cf-415f-9be8-c5fa61b74a67
 PASS  D2. the workspace loads under its own name
 PASS  D3. refresh keeps the same workspace
 PASS  D4. cleaning owner sees only its own data, even when it names another company — [{"status":200,"slugs":["commercial-cleaning-blueprint"]},{"status":200,"slugs":["commercial-cleaning-blueprint"]}]
@@ -50,9 +54,10 @@ PASS  E3. a salesperson is refused the executive API — 403
 PASS  F1. owner lands in God Mode — /god
 PASS  F0. owner reaches the God API
 PASS  F2. owner has no preview or customer cards by default (God Mode has its own home)
-PASS  G1. approval script applies once (local database only) — DONE: workspace_membership_granted (membership e31147a2-4735-4218-8c89-210a5a162087)
+PASS  G1. approval script applies once (local database only) — DONE: workspace_membership_granted (membership da4df260-f3ce-4726-80a8-60994fff75fd)
 PASS  G2. re-running changes nothing
 PASS  G3. after approval: Commercial Cleaning Blueprint card (COMMERCIAL CLEANING), preview not duplicated — SCI | Atlantis Light & Power | Roofing | Wholesale | Restland Cemetery and Funeral Home | Insurance | Commercial Cleaning Blueprint | Back Office || Building Equity Investments LLC | Countryside Land Partners | VP Wraps Vehicle Protection
-PASS  G4. the card opens the Commercial Cleaning Blueprint workspace — /workspace/d18285bc-1e79-47eb-9935-14d686cb0f2d
+PASS  G3b. Commercial Cleaning has its own look (not the grey general one); previews have the preview look — {"ccb":"cleaning","pv":["preview","preview","preview"]}
+PASS  G4. the card opens the Commercial Cleaning Blueprint workspace — /workspace/b7ef0a8d-19cf-415f-9be8-c5fa61b74a67
 PASS  G5. inside it wholesale@ sees that company's data only — {"status":200,"slugs":["commercial-cleaning-blueprint"]}
 PASS  G6. rollback removes the seat again

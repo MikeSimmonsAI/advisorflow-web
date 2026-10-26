@@ -107,5 +107,3 @@
 
 /* Previews (mockups for open deals): visibly apart from live workspaces. */
 .pa-previews { margin-top: 40px; padding-top: 28px; border-top: 1px dashed var(--ev-line, #d9e2ec); }
-.pa-previews .ev-wcard { border-style: dashed; }
-.pa-previews .ev-wcard-kind { color: #8a5a00; }

@@ -18,6 +18,8 @@ const PALETTES = {
   funeral:   { sky: ['#f4f0fc', '#ddd2f5'], hill: '#cbbcee', hill2: '#b6a3e6', main: '#7357b8', deep: '#34216a', light: '#ffffff', warm: '#ffe9c9' },
   office:    { sky: ['#f2f5f9', '#dde4ee'], hill: '#cfd8e5', hill2: '#bcc8d9', main: '#475569', deep: '#1e293b', light: '#ffffff', warm: '#e8eef7' },
   general:   { sky: ['#f1f4f9', '#dae2ee'], hill: '#cbd5e3', hill2: '#b8c4d6', main: '#5b6b85', deep: '#27324a', light: '#ffffff', warm: '#eef2f8' },
+  cleaning:  { sky: ['#e9f7fe', '#c7ebfb'], hill: '#a9def6', hill2: '#86cff0', main: '#0e95d4', deep: '#0b4a6b', light: '#ffffff', warm: '#eafaff' },
+  preview:   { sky: ['#f0f1ff', '#dcdffd'], hill: '#c8cdfb', hill2: '#b1b8f7', main: '#5b5fe0', deep: '#2b2f86', light: '#ffffff', warm: '#eef0ff' },
 }
 
 function Frame({ p, id, children }) {
@@ -323,9 +325,73 @@ function GeneralScene({ p, id }) {
   )
 }
 
+// COMMERCIAL CLEANING: an office building with clean, sparkling windows, a
+// cleaner with a mop and a spray bottle - a business, not a generic network.
+function CleaningScene({ p, id }) {
+  const spark = (x, y, s = 1) => (
+    <path key={x + '-' + y} transform={`translate(${x} ${y}) scale(${s})`}
+          d="M0 -9 L2.2 -2.2 L9 0 L2.2 2.2 L0 9 L-2.2 2.2 L-9 0 L-2.2 -2.2Z" fill="#fff" />
+  )
+  return (
+    <Frame p={p} id={id}>
+      <Hills p={p} />
+      <g transform="translate(150 26)">
+        <rect width="110" height="122" rx="8" fill="#fff" />
+        <rect width="110" height="16" rx="8" fill={p.main} />
+        {[0, 1, 2].map(r => [0, 1, 2].map(c => (
+          <rect key={r + '-' + c} x={12 + c * 32} y={26 + r * 28} width="22" height="18" rx="3"
+                fill={(r + c) % 2 ? '#d9f1fc' : '#bfe6f8'} />
+        )))}
+        <rect x="43" y="100" width="24" height="22" rx="3" fill={p.deep} />
+      </g>
+      {spark(176, 38, 0.8)}{spark(240, 66, 1)}{spark(208, 94, 0.7)}
+      <g transform="translate(300 76)">
+        <rect x="-3" y="-22" width="6" height="66" rx="3" fill={p.deep} transform="rotate(14)" />
+        <rect x="-4" y="40" width="34" height="9" rx="4" fill={p.main} transform="rotate(14)" />
+      </g>
+      <Person x={318} y={98} s={0.95} body={p.main} hair={p.deep} />
+      <g transform="translate(86 92)">
+        <rect x="0" y="16" width="26" height="40" rx="7" fill={p.main} />
+        <rect x="6" y="4" width="14" height="14" rx="3" fill={p.deep} />
+        <path d="M20 8 L38 4 L38 12 Z" fill={p.deep} />
+        <circle cx="46" cy="4" r="2.5" fill="#fff" /><circle cx="52" cy="9" r="2" fill="#fff" /><circle cx="50" cy="-1" r="1.6" fill="#fff" />
+      </g>
+      {spark(60, 46, 0.9)}{spark(352, 40, 0.8)}
+    </Frame>
+  )
+}
+
+// PREVIEW: a browser window showing a mockup - something you can open and look
+// at, clearly not a live business.
+function PreviewScene({ p, id }) {
+  return (
+    <Frame p={p} id={id}>
+      <Hills p={p} />
+      <g transform="translate(92 28)">
+        <rect width="216" height="122" rx="12" fill="#fff" />
+        <rect width="216" height="20" rx="10" fill={p.deep} />
+        <circle cx="14" cy="10" r="3.5" fill="#ff8a8a" /><circle cx="26" cy="10" r="3.5" fill="#ffd36e" /><circle cx="38" cy="10" r="3.5" fill="#7ee0a1" />
+        <rect x="16" y="34" width="92" height="9" rx="4" fill={p.main} />
+        <rect x="16" y="50" width="120" height="5" rx="2.5" fill="#dfe2fb" />
+        <rect x="16" y="61" width="104" height="5" rx="2.5" fill="#dfe2fb" />
+        <rect x="16" y="78" width="54" height="16" rx="8" fill={p.main} />
+        <rect x="140" y="34" width="60" height="70" rx="8" fill="#eef0ff" />
+        <path d="M156 88 L170 66 L182 80 L190 72 L198 88 Z" fill={p.main} opacity=".55" />
+        <circle cx="186" cy="52" r="7" fill="#ffd36e" />
+      </g>
+      <g transform="translate(286 112)">
+        <circle r="20" fill={p.main} />
+        <path d="M-9 0 C -4 -8 4 -8 9 0 C 4 8 -4 8 -9 0 Z" fill="#fff" />
+        <circle r="3.5" fill={p.deep} />
+      </g>
+    </Frame>
+  )
+}
+
 const SCENES = {
   sci: SciScene, energy: EnergyScene, roofing: RoofingScene, wholesale: WholesaleScene,
   insurance: InsuranceScene, funeral: FuneralScene, office: OfficeScene, general: GeneralScene,
+  cleaning: CleaningScene, preview: PreviewScene,
 }
 
 export const ART_VARIANTS = Object.keys(SCENES)

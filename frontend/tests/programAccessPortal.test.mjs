@@ -114,3 +114,18 @@ test('a business that opens as a workspace is not offered again as a preview', (
   assert.deepEqual(visible.map(v => v.display), ['Commercial Cleaning Blueprint'])
   assert.deepEqual(previews.map(p => p.display), ['Countryside Land Partners'])
 })
+
+test('cleaning has its own identity; previews have their own look and a real link', () => {
+  const c = {
+    workspace_contexts: [{ type: 'workspace', organization_id: 'ccb', organization_name: 'Commercial Cleaning Blueprint', organization_slug: 'ccb', industry: 'cleaning' }],
+    preview_contexts: [{ type: 'preview', opportunity_id: 'o1', company_name: 'Countryside Land Partners', url: 'https://app.example.test/demo/abc?staff=1' }],
+  }
+  const { visible, previews } = programCards(c)
+  assert.equal(visible[0].variant, 'cleaning')
+  assert.equal(visible[0].kind, 'COMMERCIAL CLEANING')
+  assert.equal(visible[0].display, 'Commercial Cleaning Blueprint')
+  assert.notEqual(visible[0].variant, 'general')
+  assert.equal(previews[0].variant, 'preview')
+  assert.ok(previews[0].kind.startsWith('PREVIEW'))
+  assert.equal(previews[0].url, 'https://app.example.test/demo/abc?staff=1')
+})

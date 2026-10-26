@@ -30,7 +30,10 @@ const text = () => page.evaluate(() => document.body.innerText)
 const path = () => page.evaluate(() => location.pathname)
 const shot = (n, full = true) => page.screenshot({ path: `${OUT}/${n}.png`, fullPage: full })
 const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
-async function token(email) {
+async function token(email, tries = 2) {
+  try { return await tokenOnce(email) } catch (e) { if (tries > 1) { await sleep(500); return token(email, tries - 1) } throw e }
+}
+async function tokenOnce(email) {
   const r = await fetch(API + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: 'username=' + encodeURIComponent(email) + '&password=' + encodeURIComponent('LocalTest!1') })
   return (await r.json()).access_token
@@ -72,6 +75,7 @@ const namesA = await cardNames(WS)
 const expectA = ['SCI', 'Atlantis Light & Power', 'Roofing', 'Wholesale', 'Restland Cemetery and Funeral Home', 'Insurance', 'Back Office']
 ok('A2. wholesale@ sees exactly its 7 authorized cards, no duplicates', JSON.stringify([...namesA].sort()) === JSON.stringify([...expectA].sort()) && new Set(namesA).size === namesA.length, namesA.join(' | '))
 const pvA = await cardNames(PV); const pvKinds = await cardKinds(PV)
+const kindsA = await cardKinds(WS)
 ok('A3. 4 previews, separate and labelled (CCB, Countryside, VP Wraps, Building Equity)', JSON.stringify(pvA) === JSON.stringify(['Building Equity Investments LLC', 'Commercial Cleaning Blueprint', 'Countryside Land Partners', 'VP Wraps Vehicle Protection']) && pvKinds.every(k => k.startsWith('PREVIEW')), pvA.join(' | '))
 ok('A4. Atlantis (onboarding) has a workspace card and no preview', namesA.includes('Atlantis Light & Power') && !pvA.includes('Atlantis Light & Power'))
 ok('A5. Commercial Cleaning Blueprint is a preview only (no workspace seat yet)', !namesA.includes('Commercial Cleaning Blueprint') && pvA.includes('Commercial Cleaning Blueprint'))
@@ -90,18 +94,20 @@ for (const n of expectA) {
 }
 await page.goto(APP + '/workspaces', { waitUntil: 'networkidle2' }); await sleep(900)
 ok('A8. navigating back to Program Access works', (await path()) === '/workspaces' && (await cardNames(WS)).length === 7)
-// previews open their existing demo link in a new tab; the launcher stays
+// previews are REAL LINKS (same tab): a real click opens that prospect's demo,
+// Back returns to Program Access. No pop-up involved, so nothing can block it.
 for (const n of pvA) {
-  const before = (await browser.pages()).length
-  await openCard(PV, n); await sleep(1500)
-  const pages = await browser.pages(); const np = pages[pages.length - 1]
-  await sleep(1500)
-  const u = np.url()
+  await page.goto(APP + '/workspaces', { waitUntil: 'networkidle2' }); await sleep(900)
+  const tag = await page.evaluate((n) => { const li = [...document.querySelectorAll('[aria-label="Previews"] [role=listitem]')].find(x => x.querySelector('.ev-wcard-name')?.textContent.trim() === n); const a = li && li.querySelector('.ev-wcard-open'); return a ? a.tagName + '|' + (a.getAttribute('href') || '') : '' }, n)
+  const box = await page.evaluate((n) => { const li = [...document.querySelectorAll('[aria-label="Previews"] [role=listitem]')].find(x => x.querySelector('.ev-wcard-name')?.textContent.trim() === n); const a = li.querySelector('.ev-wcard-open'); a.scrollIntoView({ block: 'center' }); const r = a.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] }, n)
+  await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), page.mouse.click(box[0], box[1])]); await sleep(1800)
+  const u = page.url()
   let inner = ''
-  for (const f of np.frames()) inner += ' ' + (await f.evaluate(() => document.body ? document.body.innerText : '').catch(() => ''))
-  ok(`A9. preview "${n}" opens that prospect's demo page in a new tab; launcher stays put`, pages.length === before + 1 && /\/demo\//.test(u) && inner.includes(n) && inner.includes('LOCAL TEST PAGE') && !/not found/i.test(inner) && (await path()) === '/workspaces', u.replace(/demo\/.{12}.*/, 'demo/…'))
-  if (n === 'Countryside Land Partners' || n === 'Commercial Cleaning Blueprint') { await np.setViewport({ width: 1280, height: 800 }); await np.screenshot({ path: `${OUT}/preview-${n.split(' ')[0].toLowerCase()}.png` }) }
-  await np.close()
+  for (const f of page.frames()) inner += ' ' + (await f.evaluate(() => document.body ? document.body.innerText : '').catch(() => ''))
+  ok(`A9. preview "${n}" is a real link; a real click opens that prospect's demo`, tag.startsWith('A|') && /\/demo\//.test(u) && inner.includes(n) && !/not found/i.test(inner), tag.split('|')[0] + ' ' + u.replace(/demo\/.{12}.*/, 'demo/…'))
+  if (n === 'Countryside Land Partners') await page.screenshot({ path: `${OUT}/preview-countryside-local.png` })
+  await page.goBack({ waitUntil: 'networkidle2' }); await sleep(900)
+  ok(`A9c. Back returns to Program Access from "${n}"`, (await path()) === '/workspaces')
 }
 if (process.env.PA_DB) {
   const { execSync } = await import('node:child_process')
@@ -214,6 +220,10 @@ if (process.env.PA_GRANT_CMD) {
   await vp(1440, 900); await login('wholesale@evosyspro.live')
   const n2 = await cardNames(WS); const k2 = await cardKinds(WS); const p2 = await cardNames(PV)
   ok('G3. after approval: Commercial Cleaning Blueprint card (COMMERCIAL CLEANING), preview not duplicated', n2.includes('Commercial Cleaning Blueprint') && k2.includes('COMMERCIAL CLEANING') && !p2.includes('Commercial Cleaning Blueprint') && p2.length === 3, n2.join(' | ') + ' || ' + p2.join(' | '))
+  const looks = await page.evaluate(() => ({ ccb: [...document.querySelectorAll('[aria-label="Your programs"] .ev-wcard')].find(c => c.querySelector('.ev-wcard-name').textContent.trim() === 'Commercial Cleaning Blueprint')?.dataset.variant,
+    pv: [...document.querySelectorAll('[aria-label="Previews"] .ev-wcard')].map(c => c.dataset.variant) }))
+  ok('G3b. Commercial Cleaning has its own look (not the grey general one); previews have the preview look', looks.ccb === 'cleaning' && looks.pv.every(v => v === 'preview'), JSON.stringify(looks))
+  await page.evaluate(() => document.querySelector('[aria-label="Your programs"]').scrollIntoView({ block: 'start' })); await sleep(300)
   await shot('program-access-desktop-wholesale-after-ccb-approval')
   await openCard(WS, 'Commercial Cleaning Blueprint')
   const pg = await path()
