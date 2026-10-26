@@ -292,13 +292,17 @@ def test_acquisition_command_uses_deadline_first_not_the_green_investment_score(
     routine.opportunity_score = 99
     routine.status = C.S_HIGH
     routine.work_priority = WP.W_NORMAL
-    routine.work_priority_rank = WP.WORK_ORDER[WP.W_NORMAL]
+    routine.work_priority_rank = WP.work_priority(
+        WP.auction_urgency(None, None, today=TODAY),
+        workflow_state="DISCOVERED", contact_ready=False, owner_review=False,
+        deal_level="UNKNOWN", score=99, prop_id=routine.id)["rank"]
     routine.sale_deadline = None
     db.add(EvoSenseHandoff(organization_id=org, property_id=routine.id,
                           reasons="[]", priority=999, next_action="Routine follow-up",
                           status="open"))
     db.commit()
 
+    assert urgent.work_priority_rank < routine.work_priority_rank
     body = V.command_center(db, org)
     ids = [p["id"] for p in body["found"]]
     assert ids.index(urgent.id) < ids.index(routine.id)
