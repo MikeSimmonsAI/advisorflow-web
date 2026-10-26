@@ -273,6 +273,9 @@ def test_a_list_date_with_only_an_earlier_clerk_notice_is_a_conflict_to_review(d
     r = F.rows(db, org, "2026-11")[0]
     assert any("October 2026, not this month - notice needs review" in f for f in r["auction"]["flags"])
     assert F.summary(db, org, "2026-11")["cards"]["verified"]["conflict"] == 1
+    au = r["measures"]["auction_urgency"]
+    assert au["label"] == "URGENT - VERIFY NOTICE" and au["urgent"]          # never "scheduled", never hidden
+    assert F.filter_rows([r], {"quick": "notice_conflicts"}) == [r]
 
 
 def test_a_month_of_200_properties_builds_quickly(db_session, sample_org, monkeypatch):
