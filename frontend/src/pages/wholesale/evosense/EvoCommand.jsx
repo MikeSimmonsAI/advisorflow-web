@@ -26,6 +26,7 @@ import '../ds/evo-pages.css'
 import PropertyPhoto, { usePropertyPhoto } from './PropertyPhoto'
 import { ActFirst, FunnelPanel } from './Readiness'
 import { ReadyToRun } from './Acquire'
+import { WorkCell } from './Measures'
 
 const ACT_TONE = {
   'handoff.opened': 'attention', 'reply.read': 'info', 'reply.received': 'info', 'promoted': 'good',
@@ -104,8 +105,10 @@ export default function EvoCommand() {
   const [hero, ...moreNeeds] = cc.needs_you || []
 
   const found = cc.found || []
-  const top = [...found].sort((x, y) => (y.opportunity_score ?? -1) - (x.opportunity_score ?? -1))
-  const best = top[0]
+  // /command-center returns deadline-first work-priority order. Never resort
+  // imminent auctions by investment evidence in the browser.
+  const top = found
+  const best = found.reduce((b, p) => !b || (p.opportunity_score ?? -1) > (b.opportunity_score ?? -1) ? p : b, null)
   const spotlight = top.slice(0, 4)
   const hunting = paused ? { label: ev('EvoSense paused'), tone: 'paused' }
     : a.hunting === 'active' ? { label: 'Hunting automatically', tone: 'live' }
@@ -150,7 +153,7 @@ export default function EvoCommand() {
       ) : null}
 
       <Metrics label={ev('EvoSense totals')}>
-        <Metric label="Top opportunity" value={best ? best.opportunity_score : null} tone="success"
+        <Metric label="Highest investment evidence shown" value={best ? best.opportunity_score : null} tone="success"
                 sub={best ? best.address : 'nothing scored yet'} />
         <Metric label="Properties evaluated" value={t.properties_evaluated}
                 sub={`${t.hunts || 0} hunt${t.hunts === 1 ? '' : 's'} run`} />
@@ -191,9 +194,9 @@ export default function EvoCommand() {
       {/* ── ACT FIRST: passed the threshold, not yet worked, most advanced first ─ */}
       <ActFirst />
 
-      {/* ── TOP OPPORTUNITIES (the board's image-led cards) ─────────────────── */}
+      {/* ── WORK FIRST (auction deadline ahead of investment evidence) ──────── */}
       <h2 className="evo-section-title">
-        Top Opportunities
+        Work first — auction priority
         <Link className="evo-link" to="/wholesale/evosense/inbox">View all in Discovery Inbox →</Link>
       </h2>
       {!hero && !spotlight.length ? (
@@ -209,7 +212,7 @@ export default function EvoCommand() {
           {spotlight.map((p) => (
             <PhotoPropCard key={p.id} pid={p.id} test={p.is_test} href={`/wholesale/evosense/property/${p.id}`}
                       address={p.address} place={[[p.city, p.state].filter(Boolean).join(', '), p.zip_code].filter(Boolean).join(' ')}
-                      score={p.opportunity_score} status={<Status status={p.status} />}
+                      score={p.opportunity_score} status={<WorkCell w={p.work} compact />}
                       facts={[['Contact', p.contact_confidence ?? '—'], ['Intent', p.seller_intent ?? '—'],
                               ['Type', p.property_type ? humanize(p.property_type) : '—']]}
                       money={[p.appraisal
@@ -224,7 +227,7 @@ export default function EvoCommand() {
 
       <div className="evo-cols">
         <div className="evo-stack">
-          <Panel title="Recent opportunities" flush
+          <Panel title="Next opportunities to work" flush
                  action={<Link className="evo-link" to="/wholesale/evosense/inbox">Discovery Inbox →</Link>}>
             {!found.length ? (
               <Empty title="Nothing found yet">No property passes an active strategy yet.</Empty>
@@ -234,7 +237,8 @@ export default function EvoCommand() {
                   <thead>
                     <tr>
                       <th scope="col">Property</th>
-                      <th scope="col" className="is-num">Opportunity</th>
+                      <th scope="col">Work priority · auction</th>
+                      <th scope="col" className="is-num">Investment evidence</th>
                       <th scope="col" className="is-num">Contact</th>
                       <th scope="col" className="is-num">Intent</th>
                       <th scope="col">Signals</th>
@@ -255,7 +259,12 @@ export default function EvoCommand() {
                             </div>
                           </div>
                         </td>
-                        <td className="is-num" data-label="Opportunity"><Ring kind="opportunity" value={p.opportunity_score} /></td>
+                        <td data-label="Work priority"><WorkCell w={p.work} compact /></td>
+                        <td className="is-num" data-label="Investment evidence">
+                          <span className="evo-small" title="Investment evidence score — not auction urgency or guaranteed profit">
+                            <b>{p.opportunity_score ?? '—'}</b>
+                          </span>
+                        </td>
                         <td className="is-num" data-label="Contact"><Num kind="contact" value={p.contact_confidence} /></td>
                         <td className="is-num" data-label="Intent"><Num kind="intent" value={p.seller_intent} /></td>
                         <td data-label="Signals"><Chips items={p.signals} max={2} /></td>
@@ -327,6 +336,7 @@ function NeedsYouHero({ n, onOpen }) {
         <div className="evo-hero__top">
           <span className="evo-hero__kicker">Needs you</span>
           <Status status="needs_you" />
+          <WorkCell w={n.work} compact />
           {n.is_test ? <SandboxTag /> : null}
           <span className="evo-muted evo-hero__since">handed to you {ago(n.since)}</span>
         </div>
@@ -334,7 +344,10 @@ function NeedsYouHero({ n, onOpen }) {
         <p className="evo-hero__place">{place}{n.zip_code ? ` ${n.zip_code}` : ''}{n.property_type ? ` · ${humanize(n.property_type)}` : ''}</p>
         {n.signals && n.signals.length ? <div className="evo-hero__chips"><Chips items={n.signals} max={6} /></div> : null}
 
-        <Scores opportunity={n.opportunity_score} contact={n.contact_confidence} intent={n.seller_intent} />
+        <p className="evo-small evo-muted" style={{ margin: '6px 0' }}>
+          Investment evidence score: <b>{n.opportunity_score ?? '—'}</b> — not auction urgency or guaranteed profit
+        </p>
+        <Scores contact={n.contact_confidence} intent={n.seller_intent} />
 
         {n.seller_quote ? (
           <blockquote className="evo-quote evo-hero__quote">
