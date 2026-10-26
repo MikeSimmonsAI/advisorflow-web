@@ -2680,6 +2680,7 @@ def foreclosures_properties(month: Optional[str] = None, view: str = "all", page
                             type: Optional[str] = None, attention: Optional[str] = None,
                             carried: Optional[str] = None, deals: Optional[str] = None,
                             ptype: Optional[str] = None, psubtype: Optional[str] = None,
+                            quick: Optional[str] = None,
                             sort: str = "opportunity", db: Session = Depends(get_db),
                             user: User = Depends(require_tenant_or_observer)):
     """The month's working list - the existing ranking, filtered and paged on the server."""
@@ -2693,13 +2694,14 @@ def foreclosures_properties(month: Optional[str] = None, view: str = "all", page
     rs = FCC.filter_rows(rs, {"county": county, "q": q, "status": status, "verified": verified, "owner": owner,
                               "contact": contact, "acquisition": acquisition, "financial": financial,
                               "min_score": min_score, "type": type, "attention": attention, "carried": carried,
-                              "deals": deals, "ptype": ptype, "psubtype": psubtype, "sort": sort})
+                              "deals": deals, "ptype": ptype, "psubtype": psubtype, "quick": quick,
+                              "sort": sort})
     per_page = max(1, min(int(per_page or 50), 200))
     page = max(1, int(page or 1))
     total = len(rs)
     keep = ("id", "street_address", "city", "zip_code", "county", "owner", "foreclosure", "contacts", "score",
             "rank", "next_action", "auction", "contact_state", "acquisition", "financial", "needs_attention",
-            "equity", "tax", "property_class")
+            "equity", "tax", "property_class", "measures")
     items = []
     for r in rs[(page - 1) * per_page: page * per_page]:
         x = {k: r.get(k) for k in keep}
@@ -2710,7 +2712,22 @@ def foreclosures_properties(month: Optional[str] = None, view: str = "all", page
         items.append(x)
     return {"month": m, "total": total, "page": page, "per_page": per_page, "items": items,
             "statuses": FCC.STATUS, "contact_labels": FCC.CONTACT_LABELS, "acquisition_labels": FCC.ACQ_LABELS,
-            "financial_labels": FCC.FIN_LABELS}
+            "financial_labels": FCC.FIN_LABELS, "quick_filters": FCC.QUICK}
+
+
+@router.get("/foreclosures/work")
+def foreclosures_work(month: Optional[str] = None, county: Optional[str] = None, ptype: Optional[str] = None,
+                      type: Optional[str] = None, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_or_observer)):
+    """WORK BEFORE AUCTION: the month's properties in five groups, in order. A
+    view only - it sends nothing, buys nothing and creates no task; each row
+    links into the existing workflow."""
+    from app.services.evosense import foreclosure_cycles as FCC
+    org_id = _read_org(db, user)
+    m = _fc_month(db, org_id, month)
+    rs = FCC.filter_rows(FCC.rows(db, org_id, m), {"county": county, "ptype": ptype, "type": type})
+    return {"month": m, "label": FCC.label(m), "groups": FCC.work_queue(rs),
+            "note": "Unknown profit never hides an urgent auction, and is never counted as profit."}
 
 
 @router.get("/foreclosures/start-preview")

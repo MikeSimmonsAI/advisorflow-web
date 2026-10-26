@@ -24,7 +24,7 @@ from app.services.evosense import common as C
 from app.services.evosense import signals as SIG
 from app.services.evosense import strategy as ST
 
-PO_VERSION = "property_opportunity/v4"
+PO_VERSION = "property_opportunity/v5"
 # v2 = v1 + organization-configurable signal weights (fingerprinted into the
 # version string when present) + the DFW public-record signals; signals with
 # negative weight (active listing, recent sale) subtract and never count
@@ -40,6 +40,10 @@ PO_VERSION = "property_opportunity/v4"
 # elsewhere (absentee / out-of-state) is normal and is NOT scored, and for land
 # and agricultural a vacancy flag is not scored; the "Houses only" gate and the
 # strategy's type list read the county category when the old type field is empty.
+# v5 = v4 + equity computed from an IMPORTED LIST's value or loan balance (e.g. a
+# PropStream export) is a claim, like the list's foreclosure claim: it counts at
+# CLAIM_SHARE until a market estimate and a mortgage from another source replace
+# it. A list's "unpaid balance" is not a payoff.
 DC_VERSION = "data_confidence/v2"
 CC_VERSION = "contact_confidence/v2"
 SI_VERSION = "seller_intent/v1"
@@ -180,6 +184,13 @@ def version_for(weights: Optional[Dict[str, int]] = None, options: Optional[Dict
     fp = weights_fingerprint(weights)
     ofp = weights_fingerprint({k: int(v) for k, v in opts.items()}) if opts != DEFAULT_OPTIONS else None
     return globals()["PO_VERSION"] + ("+w" + fp if fp else "") + ("+o" + ofp if ofp else "")
+
+
+def equity_claimed(prop) -> bool:
+    """Is this property's equity figure built on an imported list's own numbers?"""
+    vs = (getattr(prop, "estimated_value_source", None) or "").lower()
+    ms = (getattr(prop, "mortgage_source", None) or "").lower()
+    return vs.startswith("csv_import") or ms.startswith("csv_import")
 
 
 def land_only_reason(prop) -> Optional[str]:
@@ -327,9 +338,15 @@ def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy,
     eq_pts = _equity_points(prop.equity_pct)
     if prop.equity_pct is not None:
         if eq_pts:
+            claimed = equity_claimed(prop)
+            if claimed:
+                eq_pts = int(round(eq_pts * CLAIM_SHARE))
             total += eq_pts
-            factors.append(_f(eq_pts, "Estimated equity %s%%" % prop.equity_pct,
-                              {"basis": prop.equity_basis, "value_source": prop.estimated_value_source}))
+            factors.append(_f(eq_pts, ("Estimated equity %s%% - from the imported list's value and loan balance, "
+                                       "not verified (counted at %d%%)" % (prop.equity_pct, int(CLAIM_SHARE * 100)))
+                              if claimed else "Estimated equity %s%%" % prop.equity_pct,
+                              {"basis": prop.equity_basis, "value_source": prop.estimated_value_source,
+                               "mortgage_source": getattr(prop, "mortgage_source", None), "claimed": claimed}))
         if strategy is not None and strategy.min_equity_pct and prop.equity_pct < strategy.min_equity_pct:
             total -= 15
             factors.append(_f(-15, "Equity below strategy minimum (%s%% < %s%%)" % (
