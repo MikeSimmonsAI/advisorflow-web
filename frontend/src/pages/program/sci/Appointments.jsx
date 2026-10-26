@@ -48,7 +48,7 @@ export default function Appointments({ locationId, openPerson }) {
 
   return (
     <>
-      <PageHead title="Appointments" sub="Visits families booked. After a visit, tap what happened - a survey goes only to families marked Completed." />
+      <PageHead title="Appointments" sub="Visits families booked. Each family gets one survey automatically 24 hours after their visit. Tap No-show or Cancelled to stop it." />
       <ErrorLine text={err} />
       <BookingActivity openPerson={openPerson} />
       <Panel title="Booked visits" labelledBy="sci-appts"

@@ -1,7 +1,7 @@
 /* What happened at a visit (#405): Completed / No-show / Cancelled / Follow-up
-   needed. One tap saves it (POST /program/appointments/{id}/outcome). Only
-   Completed can lead to a satisfaction survey, and only after the visit ends.
-   Used on Appointments and on a family's record. */
+   needed. One tap saves it (POST /program/appointments/{id}/outcome). Optional:
+   every visit gets one survey 24 hours after it ends automatically; No-show
+   and Cancelled stop it. Used on Appointments and on a family's record. */
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../../../api/client'
 import { Chip, errText } from './ui'

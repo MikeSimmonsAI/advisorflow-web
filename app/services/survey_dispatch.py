@@ -11,14 +11,17 @@ Restland family got TWO surveys, both before the visit, one at 5 AM. The
 Restland texts went straight to Twilio, so they are in no message history.
 Neither job asked whether the visit actually happened.
 
-THE RULE NOW. One family, one completed appointment, one survey:
+THE RULE NOW (owner decision, Oct 26). One appointment -> wait until 24 HOURS
+after it ENDS -> automatically send ONE survey. No staff action needed.
 
-  ELIGIBLE   the booking is booked/confirmed; its END (start + duration, in
-             the advisor's zone, converted to UTC) is at least BUFFER ago and
-             no more than LOOKBACK ago; a person marked the visit COMPLETED
-             (LeadOutcome.attendance == "completed"); it was never surveyed
-             (no review_request_sent_at, no BookingFollowup); nobody answered
-             a survey for it.
+  ELIGIBLE   the booking is still booked/confirmed/completed; its END (start +
+             duration; booked_time is wall time in the advisor's booking zone,
+             converted to UTC with daylight saving) is at least BUFFER (24 h)
+             ago and no more than LOOKBACK ago; nobody marked it no-show or
+             cancelled (attendance buttons are optional - they only ever STOP
+             a survey); it was not rescheduled (no newer live booking for the
+             family made before this visit's time); it was never surveyed (no
+             review_request_sent_at, no BookingFollowup).
   CLAIM      one conditional UPDATE wins the booking (review_request_sent_at
              IS NULL and no followup row), committed before any send, so two
              workers or two runs can never both send. A crash after the claim
@@ -54,8 +57,11 @@ from sqlalchemy.orm import Session
 
 log = logging.getLogger(__name__)
 
-BUFFER = timedelta(minutes=60)          # after the visit ENDS
-LOOKBACK = timedelta(days=7)            # never chase old visits
+BUFFER = timedelta(hours=24)            # after the visit ENDS (owner rule)
+# A survey goes between 24 and 72 hours after the visit ends (texting hours or
+# a short outage can delay it); older visits are never chased - turning
+# sending on does not survey last month's families.
+LOOKBACK = timedelta(days=3)
 DEFAULT_MINUTES = 60
 COMPLETED = "completed"
 NEVER = ("no_show", "cancelled")
@@ -127,6 +133,22 @@ def attendance(db: Session, booking) -> Optional[str]:
     return row.attendance if row is not None else None
 
 
+def rescheduled(db: Session, booking) -> bool:
+    """A newer live booking for the same family, made after this one and
+    before this visit's time, replaced it. (A reschedule that moves THIS
+    booking's time is already handled: its end time moves with it.)"""
+    from app.models.models import BookingLink
+    if booking.created_at is None or booking.booked_time is None:
+        return False
+    newer = (db.query(BookingLink.id)
+             .filter(BookingLink.lead_id == booking.lead_id, BookingLink.id != booking.id,
+                     BookingLink.status.in_(LIVE_STATUSES), BookingLink.booked_time.isnot(None),
+                     BookingLink.created_at > booking.created_at,
+                     BookingLink.created_at <= booking.booked_time + timedelta(hours=15))
+             .first())
+    return newer is not None
+
+
 def ineligible_reason(db: Session, booking, now: Optional[datetime] = None) -> Optional[str]:
     """None = this visit may be surveyed now; otherwise why not, in plain words."""
     from app.models.models import BookingFollowup, Lead
@@ -137,14 +159,14 @@ def ineligible_reason(db: Session, booking, now: Optional[datetime] = None) -> O
     if end is None:
         return "the appointment has no time"
     if end + BUFFER > now:
-        return "the visit is not over yet"
+        return "it is not yet 24 hours after the visit ended"
     if end < now - LOOKBACK:
-        return "the visit was more than %d days ago" % LOOKBACK.days
+        return "the visit ended more than %d days ago" % LOOKBACK.days
     att = attendance(db, booking)
     if att in NEVER:
         return "the appointment was marked %s" % att.replace("_", "-")
-    if att != COMPLETED:
-        return "nobody has marked the visit completed"
+    if rescheduled(db, booking):
+        return "the appointment was rescheduled"
     if booking.review_request_sent_at is not None or db.query(BookingFollowup.id).filter(
             BookingFollowup.booking_link_id == booking.id).first() is not None:
         return "a survey was already handled for this visit"
@@ -159,19 +181,15 @@ def ineligible_reason(db: Session, booking, now: Optional[datetime] = None) -> O
 def candidates(db: Session, now: Optional[datetime] = None) -> List:
     """Bookings that MAY be due. A coarse SQL window (booked_time is local, so
     +/- booking_time.WINDOW), then the exact per-row rule above."""
-    from app.models.models import BookingLink, LeadOutcome
+    from app.models.models import BookingLink
     from app.services import booking_time as bkt
     now = now or datetime.utcnow()
-    completed = (db.query(LeadOutcome.id)
-                 .filter(LeadOutcome.booking_link_id == BookingLink.id,
-                         LeadOutcome.attendance == COMPLETED).exists())
     rows = (db.query(BookingLink)
             .filter(BookingLink.status.in_(LIVE_STATUSES),
                     BookingLink.booked_time.isnot(None),
                     BookingLink.review_request_sent_at.is_(None),
-                    BookingLink.booked_time <= now + bkt.WINDOW,
-                    BookingLink.booked_time >= now - LOOKBACK - bkt.WINDOW - timedelta(days=1),
-                    completed)
+                    BookingLink.booked_time <= now - BUFFER + bkt.WINDOW,
+                    BookingLink.booked_time >= now - LOOKBACK - bkt.WINDOW - timedelta(days=1))
             .order_by(BookingLink.booked_time.desc()).limit(500).all())
     return [b for b in rows if ineligible_reason(db, b, now) is None]
 
@@ -187,9 +205,10 @@ def claim(db: Session, booking, now: Optional[datetime] = None):
         "UPDATE booking_links SET review_request_sent_at = :now "
         "WHERE id = :id AND review_request_sent_at IS NULL "
         "AND NOT EXISTS (SELECT 1 FROM booking_followups f WHERE f.booking_link_id = :id) "
-        # re-checked IN the claim: an outcome changed after this pass listed
-        # the visit (Completed -> No-show) can never be surveyed
-        "AND " + LATEST_ATTENDANCE_SQL + " = 'completed'"),
+        # re-checked IN the claim: the booking is still live, and a no-show /
+        # cancelled marked after this pass listed the visit stops it
+        "AND status IN ('booked', 'confirmed', 'completed') "
+        "AND COALESCE(" + LATEST_ATTENDANCE_SQL + ", '') NOT IN ('no_show', 'cancelled')"),
         {"id": booking.id, "now": now})
     if won.rowcount != 1:
         db.rollback()
@@ -262,8 +281,17 @@ def deliver(db: Session, fu, booking, lead, advisor, *, allow_text: bool = True,
     fu.attempts = int(fu.attempts or 0) + 1
     fu.last_attempt_at = datetime.utcnow()
     db.commit()
-    if attendance(db, booking) != COMPLETED:
-        _record(db, fu, state=STATE_HELD, reason="held: the visit is no longer marked completed")
+    # Last re-check right before sending: booking status, reschedule, attendance.
+    db.refresh(booking)
+    why_not = None
+    if (booking.status or "") not in LIVE_STATUSES:
+        why_not = "held: the appointment is now %s" % (booking.status or "not booked")
+    elif attendance(db, booking) in NEVER:
+        why_not = "held: the appointment was marked %s" % attendance(db, booking).replace("_", "-")
+    elif rescheduled(db, booking):
+        why_not = "held: the appointment was rescheduled"
+    if why_not:
+        _record(db, fu, state=STATE_HELD, reason=why_not)
         return STATE_HELD
     place, held = place_for(db, lead)
     if held:
@@ -456,7 +484,7 @@ def attention(db: Session, org_id: str, limit: int = 100) -> List[Dict]:
 def retry(db: Session, followup_id: str, org_id: str, now: Optional[datetime] = None) -> Dict:
     """A person's controlled recovery: re-attempt a held/failed survey, ONLY
     if nothing for it reached the family, nobody answered, the visit is still
-    a completed visit inside the window, and no other survey went to this
+    a visit (not no-show/cancelled/rescheduled) past its 24 hours, and no other survey went to this
     visit. The same link (token) is reused."""
     from app.models.models import BookingFollowup, BookingLink, Lead, SurveyResponse, User
     now = now or datetime.utcnow()
@@ -480,11 +508,15 @@ def retry(db: Session, followup_id: str, org_id: str, now: Optional[datetime] = 
                                                BookingFollowup.id != fu.id).all())
     if any(o.survey_link_sent or o.state == STATE_SENT for o in others):
         return {"ok": False, "reason": "another survey already went to this visit"}
-    if attendance(db, booking) != COMPLETED:
-        return {"ok": False, "reason": "nobody has marked the visit completed"}
+    if (booking.status or "") not in LIVE_STATUSES:
+        return {"ok": False, "reason": "the appointment is %s" % (booking.status or "not booked")}
+    if attendance(db, booking) in NEVER:
+        return {"ok": False, "reason": "the appointment was marked no-show or cancelled"}
+    if rescheduled(db, booking):
+        return {"ok": False, "reason": "the appointment was rescheduled"}
     end = appointment_end_utc(db, booking)
     if end is None or end + BUFFER > now:
-        return {"ok": False, "reason": "the visit is not over yet"}
+        return {"ok": False, "reason": "it is not yet 24 hours after the visit ended"}
     if not sending_enabled():
         return {"ok": False, "reason": "survey sending is switched off"}
     lead = db.query(Lead).filter(Lead.id == fu.lead_id).first()

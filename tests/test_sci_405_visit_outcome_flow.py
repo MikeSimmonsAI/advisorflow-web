@@ -1,7 +1,7 @@
-"""#405 end to end through the REAL SCI screens' API: Program > Appointments
-lists a past visit, staff tap Completed, the outcome is saved against that
-booking, the list shows it, and only then - after the visit and the buffer,
-with sending on - exactly ONE survey goes. Synthetic records; the gateways
+"""#405 end to end through the REAL SCI screens' API. Owner rule (Oct 26):
+every appointment gets ONE survey automatically 24 hours after it ENDS - no
+staff action. The Appointments buttons are optional: Completed / Follow-up
+needed are for reporting; No-show / Cancelled stop the survey. Synthetic records; the gateways
 are fakes, nothing reaches a provider."""
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -39,64 +39,68 @@ def _mark(client, db, user, booking_id, attendance, **extra):
                        json=dict(attendance=attendance, **extra))
 
 
-def test_mark_completed_on_appointments_then_one_survey_after_the_buffer(client, program, on):
+def test_appointment_surveys_itself_24_hours_after_it_ends_with_no_staff_action(client, program, on):
+    """Owner rule: ONE APPOINTMENT -> 24 HOURS AFTER IT ENDS -> ONE SURVEY."""
     db, org, admin = program["db"], program["org"], program["admin"]
     gw = FakeGateways(on, db)
     lead = _lead_for(db, org, admin, "L007", phone="2145550107", first="rosa", email="rd@example.com")
     lead.status = "booked"
     db.commit()
     bl = _visit(db, lead, admin, starts_ago=timedelta(minutes=80))       # ended 20 minutes ago
-    # A. open Appointments, B. the past visit is there and can be recorded
     row = _appts(client, db, admin)[bl.id]
-    assert row["started"] and row["ended"] and row["can_record"] and row["attendance"] is None
-    # C. mark it Completed
+    assert row["attendance"] is None and row["survey_note"] == "Survey 24 hours after the visit"
+    now = datetime.utcnow()
+    assert SD.run(db, now)["sent"] == 0                                    # 20 minutes after: no
+    assert SD.run(db, now + timedelta(hours=23, minutes=39))["sent"] == 0  # 23 h 59 m after the end: no
+    assert gw.texts == [] and gw.emails == []
+    assert SD.run(db, now + timedelta(hours=23, minutes=41))["sent"] == 1  # 24 h 1 m: yes, nobody touched it
+    assert SD.run(db, now + timedelta(hours=30))["sent"] == 0              # never again
+    assert len(gw.texts) + len(gw.emails) == 1
+    db.refresh(bl)
+    db.refresh(lead)
+    assert bl.status == "booked" and lead.status == "booked"               # booking and pipeline untouched
+    assert _appts(client, db, admin)[bl.id]["survey_note"] == "Survey sent"
+
+
+def test_optional_completed_button_is_saved_for_reporting(client, program, on):
+    db, org, admin = program["db"], program["org"], program["admin"]
+    gw = FakeGateways(on, db)
+    lead = _lead_for(db, org, admin, "L007", phone="2145550107", first="rosa", email="rd@example.com")
+    bl = _visit(db, lead, admin, starts_ago=timedelta(minutes=80))
+    row = _appts(client, db, admin)[bl.id]
+    assert row["started"] and row["ended"] and row["can_record"]
     r = _mark(client, db, admin, bl.id, "completed", location_id=row["location_id"])
     assert r.status_code == 200, r.text
-    assert r.json()["attendance"] == "completed" and r.json()["label"] == "Completed"
-    # D. saved against THIS booking, family, location and staff member
+    assert r.json()["label"] == "Completed" and r.json()["survey_note"] == "Survey 24 hours after the visit"
     out = db.query(LeadOutcome).filter_by(booking_link_id=bl.id).one()
     assert out.lead_id == lead.id and out.attendance == "completed" and out.attendance_set_by == admin.id
     assert out.location_id == row["location_id"] and out.location_id and out.attendance_set_at
-    db.refresh(bl)
-    assert bl.status == "booked"                                          # the booking itself is untouched
-    db.refresh(lead)
-    assert lead.status == "booked"                                        # pipeline status untouched
-    # E. the screen shows Completed
-    row = _appts(client, db, admin)[bl.id]
-    assert row["attendance"] == "completed" and row["attendance_label"] == "Completed"
-    assert row["survey_note"] == "Survey after the visit ends"
-    # F. no survey inside the buffer
-    assert SD.run(db, datetime.utcnow())["sent"] == 0 and gw.texts == [] and gw.emails == []
-    # G. exactly one after the buffer
-    later = datetime.utcnow() + timedelta(minutes=45)
-    assert SD.run(db, later)["sent"] == 1
-    assert len(gw.texts) + len(gw.emails) == 1
-    # H. another pass sends nothing more
-    assert SD.run(db, later + timedelta(hours=1))["sent"] == 0
-    assert len(gw.texts) + len(gw.emails) == 1
-    assert _appts(client, db, admin)[bl.id]["survey_note"] == "Survey sent"
-    # and the outcome is now locked
-    assert _mark(client, db, admin, bl.id, "no_show").status_code == 409
+    assert _appts(client, db, admin)[bl.id]["attendance_label"] == "Completed"
+    # Completed does not speed it up: still exactly 24 h after the end
+    assert SD.run(db, datetime.utcnow() + timedelta(hours=2))["sent"] == 0
+    assert SD.run(db, datetime.utcnow() + timedelta(hours=24))["sent"] == 1
+    assert _mark(client, db, admin, bl.id, "no_show").status_code == 409     # locked once surveyed
 
 
-@pytest.mark.parametrize("attendance", ["no_show", "cancelled", "follow_up_needed"])
-def test_other_outcomes_never_send_a_survey(client, program, on, attendance):
+@pytest.mark.parametrize("attendance", ["no_show", "cancelled"])
+def test_no_show_or_cancelled_stops_the_survey(client, program, on, attendance):
     db, org, admin = program["db"], program["org"], program["admin"]
     gw = FakeGateways(on, db)
     lead = _lead_for(db, org, admin, "L007", phone="2145550107", first="rosa", email="rd@example.com")
     bl = _visit(db, lead, admin)
     assert _mark(client, db, admin, bl.id, attendance).status_code == 200
-    assert SD.run(db, datetime.utcnow() + timedelta(hours=3))["sent"] == 0
+    assert SD.run(db, datetime.utcnow() + timedelta(hours=26))["sent"] == 0
     assert gw.texts == [] and gw.emails == [] and db.query(BookingFollowup).count() == 0
-    assert _appts(client, db, admin)[bl.id]["survey_note"] is None
+    assert _appts(client, db, admin)[bl.id]["survey_note"].startswith("No survey")
 
 
-def test_never_surveyed_just_because_the_time_passed(client, program, on):
+def test_follow_up_needed_still_gets_the_survey(client, program, on):
     db, org, admin = program["db"], program["org"], program["admin"]
     gw = FakeGateways(on, db)
     lead = _lead_for(db, org, admin, "L007", phone="2145550107", first="rosa", email="rd@example.com")
-    _visit(db, lead, admin, starts_ago=timedelta(days=1))
-    assert SD.run(db, datetime.utcnow())["sent"] == 0 and gw.texts == []
+    bl = _visit(db, lead, admin)
+    assert _mark(client, db, admin, bl.id, "follow_up_needed").status_code == 200
+    assert SD.run(db, datetime.utcnow() + timedelta(hours=23))["sent"] == 1
 
 
 def test_completed_is_refused_before_the_visit_is_over(client, program):
@@ -170,22 +174,22 @@ def test_a_plain_advisor_cannot_record(client, program):
     assert client.post("/program/appointments/%s/outcome" % bl.id, json={"attendance": "completed"}).status_code == 401
 
 
-def test_walter_2pm_completed_is_still_not_surveyed_at_1027am(program, on):
-    """Walter Johnson's exact day: a 2 PM CT visit, even marked Completed early
-    by mistake, never gets a survey at 10:27 AM CT."""
+def test_walter_2pm_visit_never_surveyed_early_then_once_at_24_hours(program, on):
+    """Walter Johnson's exact day: 2-3 PM CT Oct 22. Never at 10:27 AM; one
+    survey at 3 PM CT Oct 23, with no staff action."""
     db, org, admin = program["db"], program["org"], program["admin"]
     gw = FakeGateways(on, db)
     lead = _lead_for(db, org, admin, "L007", phone="2145550107", first="walter", email="wj@example.com")
     bl = BookingLink(lead_id=lead.id, user_id=admin.id, status="booked", booked_time=datetime(2026, 10, 22, 14, 0),
                      appt_duration=60)
     db.add(bl)
-    db.flush()
-    db.add(LeadOutcome(lead_id=lead.id, recorded_by_id=admin.id, booking_link_id=bl.id, attendance="completed"))
     db.commit()
-    assert SD.run(db, datetime(2026, 10, 22, 15, 27))["sent"] == 0             # 10:27 AM CT
-    assert SD.run(db, datetime(2026, 10, 22, 20, 30))["sent"] == 0             # 3:30 PM CT, inside the buffer
+    assert SD.run(db, datetime(2026, 10, 22, 15, 27))["sent"] == 0             # 10:27 AM CT Oct 22
+    assert SD.run(db, datetime(2026, 10, 22, 21, 1))["sent"] == 0              # 4:01 PM CT (old 1-hour rule)
+    assert SD.run(db, datetime(2026, 10, 23, 19, 59))["sent"] == 0             # 2:59 PM CT Oct 23
     assert gw.texts == [] and gw.emails == []
-    assert SD.run(db, datetime(2026, 10, 22, 21, 1))["sent"] == 1              # 4:01 PM CT
+    assert SD.run(db, datetime(2026, 10, 23, 20, 0))["sent"] == 1              # 3:00 PM CT Oct 23
+    assert SD.run(db, datetime(2026, 10, 23, 23, 0))["sent"] == 0
 
 
 def test_sending_switched_off_means_nothing_even_when_completed(client, program, monkeypatch):
@@ -195,20 +199,19 @@ def test_sending_switched_off_means_nothing_even_when_completed(client, program,
     lead = _lead_for(db, org, admin, "L007", phone="2145550107", first="rosa", email="rd@example.com")
     bl = _visit(db, lead, admin)
     assert _mark(client, db, admin, bl.id, "completed").json()["survey_note"] == "Surveys are switched off"
-    assert SD.run(db, datetime.utcnow() + timedelta(hours=3))["sent"] == 0 and gw.texts == []
+    assert SD.run(db, datetime.utcnow() + timedelta(hours=26))["sent"] == 0 and gw.texts == []
 
 
 # ── review follow-ups ───────────────────────────────────────────────────────
 
-def test_completed_changed_to_no_show_after_listing_is_never_surveyed(client, program, on):
-    """A pass lists the visit as Completed; staff change it to No-show before
-    the pass reaches it: the claim itself re-checks and sends nothing."""
+def test_no_show_marked_after_listing_is_never_surveyed(client, program, on):
+    """A pass lists the visit; staff mark it No-show before the pass reaches
+    it: the claim itself re-checks and sends nothing."""
     db, org, admin = program["db"], program["org"], program["admin"]
     gw = FakeGateways(on, db)
     lead = _lead_for(db, org, admin, "L007", phone="2145550107", first="rosa", email="rd@example.com")
     bl = _visit(db, lead, admin)
-    assert _mark(client, db, admin, bl.id, "completed").status_code == 200
-    later = datetime.utcnow() + timedelta(hours=1)
+    later = datetime.utcnow() + timedelta(hours=26)
     listed = SD.candidates(db, later)
     assert [b.id for b in listed] == [bl.id]
     assert _mark(client, db, admin, bl.id, "no_show").status_code == 200
@@ -236,18 +239,6 @@ def test_old_outcomes_api_cannot_mark_completed_early(client, program):
     assert r.status_code == 422 and "once the visit is over" in r.json()["detail"]
 
 
-def test_walter_cannot_be_marked_completed_at_1027am():
-    """Through the real writer: at 10:27 AM CT on Oct 22 his 2 PM visit cannot be
-    marked at all, so no survey can follow."""
-    from types import SimpleNamespace
-    from app.services.programs import visit_outcome as VO
-    booking = SimpleNamespace(id="b", booked_time=datetime(2026, 10, 22, 14, 0), appt_duration=60, user_id=None,
-                              status="booked")
-    from app.services import booking_time as bkt
-    start = bkt.to_utc(booking.booked_time, "America/Chicago")
-    assert start == datetime(2026, 10, 22, 19, 0) and start > datetime(2026, 10, 22, 15, 27)
-
-
 def test_survey_held_if_outcome_changes_after_the_claim(program, on):
     db, org, admin = program["db"], program["org"], program["admin"]
     gw = FakeGateways(on, db)
@@ -257,7 +248,7 @@ def test_survey_held_if_outcome_changes_after_the_claim(program, on):
                       attendance_set_at=datetime.utcnow() - timedelta(hours=1))
     db.add(row)
     db.commit()
-    later = datetime.utcnow() + timedelta(hours=1)
+    later = datetime.utcnow() + timedelta(hours=26)
     fu = SD.claim(db, bl, later)
     assert fu is not None
     row.attendance, row.attendance_set_at = "no_show", datetime.utcnow()

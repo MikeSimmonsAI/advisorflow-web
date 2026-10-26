@@ -62,7 +62,12 @@ class FakeGateways:
         mp.setattr(outbound_email_gate, "send_lead_email", send_email)
 
 
-def _visit(db, org, advisor, *, local=WALTER_LOCAL, attendance="completed", phone="12145550111",
+# Owner rule (Oct 26): one survey 24 hours after the visit ENDS, no staff action.
+# Walter's visit ends 3:00 PM CT Oct 22 (20:00 UTC); due 3:00 PM CT Oct 23.
+DUE = timedelta(hours=26)                  # from the visit's start: end + 24 h + 1 h
+
+
+def _visit(db, org, advisor, *, local=WALTER_LOCAL, attendance=None, phone="12145550111",
            email="fam@example.com", minutes=60, status="booked", first="walter"):
     lead = Lead(organization_id=org.id, first_name=first, last_name="Johnson", phone=phone, email=email,
                 status="booked", assigned_to_id=advisor.id)
@@ -83,15 +88,32 @@ def _utc(local_ct, offset_hours=5):
 
 # ── time ────────────────────────────────────────────────────────────────────
 
-def test_walters_2pm_visit_is_never_surveyed_at_1027am(db_session, sample_org, sample_advisor, on):
+def test_walters_2pm_visit_is_surveyed_once_exactly_24_hours_after_it_ends(db_session, sample_org, sample_advisor, on):
     gw = FakeGateways(on, db_session)
-    _, bl = _visit(db_session, sample_org, sample_advisor)
-    assert SD.run(db_session, WALTER_SURVEY_ARRIVED)["sent"] == 0
-    assert SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(minutes=30))["sent"] == 0      # 2:30 PM: still in it
-    assert SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(minutes=110))["sent"] == 0     # 3:50 PM: end + 50 min
+    _, bl = _visit(db_session, sample_org, sample_advisor)               # no staff action at all
+    assert SD.run(db_session, WALTER_SURVEY_ARRIVED)["sent"] == 0        # 10:27 AM CT Oct 22 - never again
+    assert SD.run(db_session, datetime(2026, 10, 22, 21, 1))["sent"] == 0   # 4:01 PM CT, 1 h after the end
+    assert SD.run(db_session, datetime(2026, 10, 23, 19, 59))["sent"] == 0  # 2:59 PM CT Oct 23: 23 h 59 m
     assert gw.texts == [] and db_session.query(BookingFollowup).count() == 0
-    assert SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(minutes=121))["sent"] == 1     # 4:01 PM CT
+    assert SD.run(db_session, datetime(2026, 10, 23, 20, 0))["sent"] == 1   # 3:00 PM CT Oct 23: exactly 24 h
+    assert SD.run(db_session, datetime(2026, 10, 23, 21, 0))["sent"] == 0   # and never again
     assert len(gw.texts) == 1
+
+
+def test_24_hours_counts_across_the_daylight_saving_change(db_session, sample_org, sample_advisor, on):
+    """A visit Sat Oct 31 2026 2:00-3:00 PM CDT ends 20:00 UTC; clocks fall
+    back Nov 1. 24 real hours later is 20:00 UTC Nov 1 = 2:00 PM CST."""
+    gw = FakeGateways(on, db_session)
+    _visit(db_session, sample_org, sample_advisor, local=datetime(2026, 10, 31, 14, 0))
+    assert SD.run(db_session, datetime(2026, 11, 1, 19, 59))["sent"] == 0
+    assert SD.run(db_session, datetime(2026, 11, 1, 20, 0))["sent"] == 1 and len(gw.texts) == 1
+
+
+def test_duration_sets_the_end(db_session, sample_org, sample_advisor, on):
+    gw = FakeGateways(on, db_session)
+    _visit(db_session, sample_org, sample_advisor, minutes=90)          # 2:00-3:30 PM CT
+    assert SD.run(db_session, datetime(2026, 10, 23, 20, 29))["sent"] == 0
+    assert SD.run(db_session, datetime(2026, 10, 23, 20, 30))["sent"] == 1
 
 
 def test_end_time_is_converted_with_daylight_saving(db_session, sample_org, sample_advisor):
@@ -111,27 +133,74 @@ def test_advisor_in_another_zone_uses_that_zone(db_session, sample_org, sample_a
     assert SD.appointment_end_utc(db_session, bl) == datetime(2026, 10, 22, 19, 0)
 
 
-# ── completion ──────────────────────────────────────────────────────────────
+# ── which visits ────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("att,why", [(None, "nobody has marked the visit completed"),
-                                     ("no_show", "marked no-show"), ("cancelled", "marked cancelled"),
-                                     ("follow_up_needed", "nobody has marked the visit completed")])
-def test_only_a_completed_visit_is_surveyed(db_session, sample_org, sample_advisor, on, att, why):
+@pytest.mark.parametrize("att", [None, "completed", "follow_up_needed"])
+def test_no_staff_action_needed_and_reporting_buttons_dont_block(db_session, sample_org, sample_advisor, on, att):
+    gw = FakeGateways(on, db_session)
+    _visit(db_session, sample_org, sample_advisor, attendance=att)
+    assert SD.run(db_session, _utc(WALTER_LOCAL) + DUE)["sent"] == 1 and len(gw.texts) == 1
+
+
+@pytest.mark.parametrize("att", ["no_show", "cancelled"])
+def test_no_show_or_cancelled_is_never_surveyed(db_session, sample_org, sample_advisor, on, att):
     gw = FakeGateways(on, db_session)
     _, bl = _visit(db_session, sample_org, sample_advisor, attendance=att)
-    later = _utc(WALTER_LOCAL) + timedelta(hours=5)
-    assert why in SD.ineligible_reason(db_session, bl, later)
+    later = _utc(WALTER_LOCAL) + DUE
+    assert att.replace("_", "-") in SD.ineligible_reason(db_session, bl, later)
     assert SD.run(db_session, later)["sent"] == 0 and gw.texts == []
     assert db_session.query(BookingFollowup).count() == 0                      # nothing claimed either
+
+
+@pytest.mark.parametrize("status", ["cancelled", "expired", "rescheduled", "pending"])
+def test_a_booking_that_is_no_longer_live_is_never_surveyed(db_session, sample_org, sample_advisor, on, status):
+    gw = FakeGateways(on, db_session)
+    _visit(db_session, sample_org, sample_advisor, status=status)
+    assert SD.run(db_session, _utc(WALTER_LOCAL) + DUE)["sent"] == 0 and gw.texts == []
+
+
+def test_rescheduled_visit_surveys_only_the_new_time(db_session, sample_org, sample_advisor, on):
+    gw = FakeGateways(on, db_session)
+    lead, old = _visit(db_session, sample_org, sample_advisor)
+    old.created_at = datetime(2026, 10, 15, 12, 0)
+    new = BookingLink(lead_id=lead.id, user_id=sample_advisor.id, status="booked",
+                      booked_time=datetime(2026, 10, 26, 10, 0), appt_duration=60,
+                      created_at=datetime(2026, 10, 21, 12, 0))                 # rebooked before the 22nd
+    db_session.add(new)
+    db_session.commit()
+    assert SD.rescheduled(db_session, old) and not SD.rescheduled(db_session, new)
+    assert SD.run(db_session, _utc(WALTER_LOCAL) + DUE)["sent"] == 0          # the old slot: nothing
+    assert SD.run(db_session, datetime(2026, 10, 27, 16, 0))["sent"] == 1     # 24 h after the new visit
+    assert len(gw.texts) == 1
+
+
+def test_moving_a_bookings_own_time_moves_the_survey(db_session, sample_org, sample_advisor, on):
+    gw = FakeGateways(on, db_session)
+    _, bl = _visit(db_session, sample_org, sample_advisor)
+    bl.booked_time = datetime(2026, 10, 24, 9, 0)                            # moved to Sat 9 AM
+    db_session.commit()
+    assert SD.run(db_session, _utc(WALTER_LOCAL) + DUE)["sent"] == 0
+    assert SD.run(db_session, datetime(2026, 10, 25, 15, 0))["sent"] == 1
+
+
+def test_status_changed_after_listing_is_rechecked(db_session, sample_org, sample_advisor, on):
+    gw = FakeGateways(on, db_session)
+    _, bl = _visit(db_session, sample_org, sample_advisor)
+    now = _utc(WALTER_LOCAL) + DUE
+    listed = SD.candidates(db_session, now)
+    assert [b.id for b in listed] == [bl.id]
+    bl.status = "cancelled"
+    db_session.commit()
+    assert SD.claim(db_session, listed[0], now) is None and gw.texts == []
 
 
 def test_cancelled_booking_and_old_visits_are_never_surveyed(db_session, sample_org, sample_advisor, on):
     FakeGateways(on, db_session)
     _, cancelled = _visit(db_session, sample_org, sample_advisor, status="cancelled")
     _, old = _visit(db_session, sample_org, sample_advisor, local=WALTER_LOCAL - timedelta(days=30))
-    now = _utc(WALTER_LOCAL) + timedelta(hours=3)
+    now = _utc(WALTER_LOCAL) + DUE
     assert "cancelled" in SD.ineligible_reason(db_session, cancelled, now)
-    assert "more than 7 days" in SD.ineligible_reason(db_session, old, now)
+    assert "more than 3 days" in SD.ineligible_reason(db_session, old, now)
     assert SD.run(db_session, now)["sent"] == 0
 
 
@@ -139,7 +208,7 @@ def test_switched_off_sends_and_claims_nothing(db_session, sample_org, sample_ad
     monkeypatch.delenv("SURVEY_SEND_ENABLED", raising=False)
     gw = FakeGateways(monkeypatch, db_session)
     _visit(db_session, sample_org, sample_advisor)
-    out = SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(hours=3))
+    out = SD.run(db_session, _utc(WALTER_LOCAL) + DUE)
     assert out["enabled"] is False and out["sent"] == 0 and gw.texts == []
     assert db_session.query(BookingFollowup).count() == 0
 
@@ -158,7 +227,7 @@ def test_an_existing_survey_is_never_resent(db_session, sample_org, sample_advis
     db_session.add(SurveyResponse(booking_followup_id=fu.id, lead_id=lead.id, advisor_id=sample_advisor.id, rating=5))
     db_session.commit()
     token = fu.survey_token
-    assert SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(hours=3))["sent"] == 0 and gw.texts == []
+    assert SD.run(db_session, _utc(WALTER_LOCAL) + DUE)["sent"] == 0 and gw.texts == []
     db_session.refresh(fu)
     assert fu.survey_token == token and fu.state is None                        # untouched
     assert db_session.query(SurveyResponse).count() == 1
@@ -167,7 +236,7 @@ def test_an_existing_survey_is_never_resent(db_session, sample_org, sample_advis
 def test_running_twice_sends_once(db_session, sample_org, sample_advisor, on):
     gw = FakeGateways(on, db_session)
     _visit(db_session, sample_org, sample_advisor)
-    now = _utc(WALTER_LOCAL) + timedelta(hours=3)
+    now = _utc(WALTER_LOCAL) + DUE
     assert SD.run(db_session, now)["sent"] == 1
     assert SD.run(db_session, now)["sent"] == 0
     assert len(gw.texts) == 1 and db_session.query(BookingFollowup).count() == 1
@@ -204,7 +273,7 @@ def test_simultaneous_workers_claim_once(tmp_path):
                 with Session(engine) as s:
                     b = s.query(BookingLink).filter_by(id=bid).one()
                     barrier.wait()
-                    if SD.claim(s, b, _utc(WALTER_LOCAL) + timedelta(hours=3)) is not None:
+                    if SD.claim(s, b, _utc(WALTER_LOCAL) + DUE) is not None:
                         wins.append(1)
             except Exception as exc:                      # a lock timeout is a lost claim, never a second win
                 errors.append(type(exc).__name__)
@@ -254,7 +323,7 @@ def test_legacy_uuid_links_still_open_and_submit(client, db_session, sample_org,
 def test_no_text_when_the_sender_may_not_carry_links_email_instead(db_session, sample_org, sample_advisor, on):
     gw = FakeGateways(on, db_session, links=False)
     _visit(db_session, sample_org, sample_advisor)
-    assert SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(hours=3))["sent"] == 1
+    assert SD.run(db_session, _utc(WALTER_LOCAL) + DUE)["sent"] == 1
     fu = db_session.query(BookingFollowup).one()
     assert gw.texts == [] and len(gw.emails) == 1                                # never both, never a link-less "survey"
     assert fu.channel == "email" and fu.state == "sent" and fu.email_message_id
@@ -263,7 +332,7 @@ def test_no_text_when_the_sender_may_not_carry_links_email_instead(db_session, s
 def test_no_link_and_no_email_is_held_with_a_reason(db_session, sample_org, sample_advisor, on):
     gw = FakeGateways(on, db_session, links=False)
     _visit(db_session, sample_org, sample_advisor, email=None)
-    out = SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(hours=3))
+    out = SD.run(db_session, _utc(WALTER_LOCAL) + DUE)
     fu = db_session.query(BookingFollowup).one()
     assert out["held"] == 1 and gw.texts == [] and gw.emails == []
     assert fu.state == "held" and "not approved to carry links" in fu.state_reason
@@ -273,7 +342,7 @@ def test_no_link_and_no_email_is_held_with_a_reason(db_session, sample_org, samp
 def test_email_only_family(db_session, sample_org, sample_advisor, on):
     gw = FakeGateways(on, db_session)
     _visit(db_session, sample_org, sample_advisor, phone=None)
-    assert SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(hours=3))["sent"] == 1
+    assert SD.run(db_session, _utc(WALTER_LOCAL) + DUE)["sent"] == 1
     assert gw.texts == [] and len(gw.emails) == 1
 
 
@@ -283,7 +352,7 @@ def test_stop_dnc_refusal_is_recorded_not_claimed_as_sent(db_session, sample_org
     gw = FakeGateways(on, db_session, sms_error="Lead x's phone number is on the suppression list - blocked",
                       email_error="This lead opted out of email")
     _visit(db_session, sample_org, sample_advisor)
-    out = SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(hours=3))
+    out = SD.run(db_session, _utc(WALTER_LOCAL) + DUE)
     fu = db_session.query(BookingFollowup).one()
     assert out["failed"] == 1 and fu.state == "failed" and fu.survey_link_sent is False
     assert "suppression list" in fu.state_reason and "opted out of email" in fu.state_reason
@@ -294,14 +363,14 @@ def test_dnc_family_is_not_even_claimed(db_session, sample_org, sample_advisor, 
     lead, bl = _visit(db_session, sample_org, sample_advisor)
     lead.status = "dnc"
     db_session.commit()
-    assert SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(hours=3))["sent"] == 0
+    assert SD.run(db_session, _utc(WALTER_LOCAL) + DUE)["sent"] == 0
     assert db_session.query(BookingFollowup).count() == 0
 
 
 def test_failed_send_is_surfaced_and_recovered_once(db_session, sample_org, sample_advisor, on):
     gw = FakeGateways(on, db_session, sms_error="Twilio 30007 carrier filtered", email_error="mail down")
     _visit(db_session, sample_org, sample_advisor)
-    now = _utc(WALTER_LOCAL) + timedelta(hours=3)
+    now = _utc(WALTER_LOCAL) + DUE
     SD.run(db_session, now)
     fu = db_session.query(BookingFollowup).one()
     items = SD.attention(db_session, sample_org.id)
@@ -319,7 +388,7 @@ def test_failed_send_is_surfaced_and_recovered_once(db_session, sample_org, samp
 def test_retry_refused_when_something_may_have_reached_them(db_session, sample_org, sample_advisor, on):
     FakeGateways(on, db_session)
     lead, bl = _visit(db_session, sample_org, sample_advisor)
-    now = _utc(WALTER_LOCAL) + timedelta(hours=3)
+    now = _utc(WALTER_LOCAL) + DUE
     fu = SD.claim(db_session, bl, now)                                        # a crash after the claim
     m = Message(lead_id=lead.id, sender_id=sample_advisor.id, body="x", delivery_status="delivered")
     db_session.add(m)
@@ -342,7 +411,7 @@ def test_a_text_accepted_without_its_link_is_not_called_a_survey(db_session, sam
         return m
     on.setattr(sms_service, "send_sms", sends_without_link)
     _visit(db_session, sample_org, sample_advisor)
-    SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(hours=3))
+    SD.run(db_session, _utc(WALTER_LOCAL) + DUE)
     fu = db_session.query(BookingFollowup).one()
     assert fu.state == "failed" and fu.survey_link_sent is False and "WITHOUT the survey link" in fu.state_reason
 
@@ -350,7 +419,7 @@ def test_a_text_accepted_without_its_link_is_not_called_a_survey(db_session, sam
 def test_undelivered_text_is_surfaced(db_session, sample_org, sample_advisor, on):
     FakeGateways(on, db_session)
     _visit(db_session, sample_org, sample_advisor)
-    SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(hours=3))
+    SD.run(db_session, _utc(WALTER_LOCAL) + DUE)
     fu = db_session.query(BookingFollowup).one()
     m = db_session.query(Message).filter_by(id=fu.message_id).one()
     assert fu.state == "sent"                                                   # accepted ...
@@ -364,7 +433,7 @@ def test_logs_carry_no_token_or_phone(db_session, sample_org, sample_advisor, on
     FakeGateways(on, db_session)
     lead, _ = _visit(db_session, sample_org, sample_advisor)
     with caplog.at_level("INFO"):
-        SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(hours=3))
+        SD.run(db_session, _utc(WALTER_LOCAL) + DUE)
     fu = db_session.query(BookingFollowup).one()
     assert fu.survey_token not in caplog.text and lead.phone not in caplog.text
 
@@ -374,7 +443,7 @@ def test_logs_carry_no_token_or_phone(db_session, sample_org, sample_advisor, on
 def test_message_is_short_and_names_the_business(db_session, sample_org, sample_advisor, on):
     gw = FakeGateways(on, db_session)
     _visit(db_session, sample_org, sample_advisor)
-    SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(hours=3))
+    SD.run(db_session, _utc(WALTER_LOCAL) + DUE)
     t = gw.texts[0]
     assert t.startswith("Hi Walter, thank you for visiting ") and "How did we do?" in t
     assert len(t) <= 160 + 20                                                  # about one segment
@@ -477,7 +546,7 @@ def test_the_real_gateways_are_not_reached(db_session, sample_org, sample_adviso
         raise AssertionError("a real Twilio client was built")
     monkeypatch.setattr(twilio.rest, "Client", boom)
     _visit(db_session, sample_org, sample_advisor, email=None)
-    SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(hours=3))
+    SD.run(db_session, _utc(WALTER_LOCAL) + DUE)
     fu = db_session.query(BookingFollowup).one()
     assert fu.state in ("held", "failed") and fu.survey_link_sent is False
 
@@ -502,7 +571,7 @@ def test_program_low_rating_pages_the_program_team_once(program, monkeypatch):
 def test_two_retries_at_once_send_once(db_session, sample_org, sample_advisor, on):
     FakeGateways(on, db_session, sms_error="carrier down", email_error="mail down")
     _visit(db_session, sample_org, sample_advisor)
-    now = _utc(WALTER_LOCAL) + timedelta(hours=3)
+    now = _utc(WALTER_LOCAL) + DUE
     SD.run(db_session, now)
     fu = db_session.query(BookingFollowup).one()
     gw = FakeGateways(on, db_session)
@@ -527,7 +596,7 @@ def test_bookkeeping_failure_after_a_text_never_adds_an_email(db_session, sample
         return real(db, fu, **k)
     on.setattr(SD, "_record", flaky)
     _visit(db_session, sample_org, sample_advisor)
-    now = _utc(WALTER_LOCAL) + timedelta(hours=3)
+    now = _utc(WALTER_LOCAL) + DUE
     SD.run(db_session, now)
     assert len(gw.texts) == 1 and gw.emails == []                                 # never both channels
     fu = db_session.query(BookingFollowup).one()
@@ -548,7 +617,7 @@ def test_one_bad_booking_does_not_stop_the_others(db_session, sample_org, sample
             raise RuntimeError("boom")
         return real(db, fu, booking, lead, advisor, **k)
     on.setattr(SD, "deliver", first_breaks)
-    out = SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(hours=3))
+    out = SD.run(db_session, _utc(WALTER_LOCAL) + DUE)
     assert out["sent"] == 1 and len(gw.texts) == 1
 
 
@@ -557,7 +626,7 @@ def test_unknown_time_zone_goes_to_email_not_skipped_forever(db_session, sample_
     on.setattr(contact_hours, "check", lambda lead, now=None: {"permitted": False, "code": contact_hours.ZONE_UNKNOWN})
     gw = FakeGateways(on, db_session)
     _visit(db_session, sample_org, sample_advisor)
-    assert SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(hours=3))["sent"] == 1
+    assert SD.run(db_session, _utc(WALTER_LOCAL) + DUE)["sent"] == 1
     assert gw.texts == [] and len(gw.emails) == 1
 
 
@@ -566,7 +635,7 @@ def test_outside_texting_hours_waits_and_retry_refuses(db_session, sample_org, s
     on.setattr(contact_hours, "check", lambda lead, now=None: {"permitted": False, "code": "outside_window"})
     gw = FakeGateways(on, db_session)
     _visit(db_session, sample_org, sample_advisor)
-    out = SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(hours=3))
+    out = SD.run(db_session, _utc(WALTER_LOCAL) + DUE)
     assert out["skipped_hours"] == 1 and gw.texts == [] and db_session.query(BookingFollowup).count() == 0
 
 
@@ -580,6 +649,6 @@ def test_survey_does_not_move_the_family_back_in_the_pipeline(db_session, sample
         lead.status = "sent"
         return real(db, advisor, lead, template, **k)
     on.setattr(sms_service, "send_sms", marks_sent)
-    SD.run(db_session, _utc(WALTER_LOCAL) + timedelta(hours=3))
+    SD.run(db_session, _utc(WALTER_LOCAL) + DUE)
     db_session.refresh(lead)
     assert lead.status == "booked"

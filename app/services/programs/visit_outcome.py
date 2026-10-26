@@ -1,12 +1,13 @@
 """What happened at a program family's visit (#405) - recorded by SCI staff on
-the Appointments screen, and the ONLY thing that makes a visit eligible for a
-satisfaction survey (app/services/survey_dispatch.py).
+the Appointments screen. OPTIONAL, for reporting (owner rule, Oct 26): every
+visit gets ONE survey automatically 24 hours after it ends
+(app/services/survey_dispatch.py) unless it is marked
 
-  completed          the family came; after the visit ENDS + the buffer, and
-                     with survey sending switched on, ONE survey may go
   no_show            never surveyed
   cancelled          never surveyed
-  follow_up_needed   never surveyed (a person is still working it)
+
+completed / follow_up_needed are recorded for reporting and change nothing
+about the survey.
 
 Stored on LeadOutcome (the existing outcome system), one row per visit,
 linked to the family, the booking, the program location, the staff member
@@ -17,7 +18,7 @@ status.
 RULES
   * the booking must belong to a family of THIS program's organization;
   * an outcome can be set only once the visit has STARTED, and "completed"
-    only once it has ENDED - nobody can mark a visit before it happens;
+    only once it has ENDED;
   * after a survey went out for the visit, the outcome is locked (changing it
     could not take the survey back).
 """
@@ -177,10 +178,10 @@ def _note(fu, booking, attendance, end, now) -> Optional[str]:
         if fu.state in (sd.STATE_HELD, sd.STATE_FAILED):
             return "Survey not sent - see Surveys"
         return "Survey in progress"
-    if attendance != "completed":
-        return None
+    if attendance in sd.NEVER:
+        return "No survey (%s)" % attendance.replace("_", "-")
     if not sd.sending_enabled():
         return "Surveys are switched off"
     if end is not None and end + sd.BUFFER > now:
-        return "Survey after the visit ends"
+        return "Survey 24 hours after the visit"
     return "Survey queued"
