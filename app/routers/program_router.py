@@ -1792,6 +1792,11 @@ def set_campaign_active(family_id: str, body: ActivationIn, db: Session = Depend
         raise HTTPException(status_code=404, detail="Campaign not found.")
     if body.active and (body.confirm or "").strip().lower() != f.name.strip().lower():
         raise HTTPException(status_code=422, detail="Type the campaign name to confirm switching it on.")
+    if body.active:
+        from app.services.programs.campaigns import activation_blocker
+        why = activation_blocker(f)
+        if why:
+            raise HTTPException(status_code=422, detail=why)
     f.is_active = bool(body.active)
     from app.routers.audit_log_router import log_action
     log_action(db, prog.organization_id, user.id, action="program.campaign_%s" % ("on" if f.is_active else "off"),
@@ -2011,7 +2016,7 @@ def _excel_to_csv(content: bytes, filename: Optional[str]) -> bytes:
     return frame.to_csv(index=False).encode("utf-8")
 
 
-def _master_keys(db: Session, org_id: str, lead_ids) -> set:
+def _master_keys(db: Session, org_id: str, lead_ids, campaign_family: Optional[str] = None) -> set:
     """The contact groups (masters) the given source Lead IDs belong to."""
     ids, keys = sorted(set(lead_ids or [])), set()
     for i in range(0, len(ids), 900):
@@ -2020,11 +2025,24 @@ def _master_keys(db: Session, org_id: str, lead_ids) -> set:
                 ProgramSourceRecord.organization_id == org_id,
                 ProgramSourceRecord.source_lead_id.in_(ids[i:i + 900])).all():
             keys.add(key or lid)
+    if campaign_family and keys:
+        # #385: a file loaded into one campaign never makes another campaign's
+        # family live - a row linked to a family that another campaign owns
+        # stays with that family, whose own campaign decides when it is worked.
+        kl, other = sorted(keys), set()
+        for i in range(0, len(kl), 900):
+            for lid, fam in db.query(ProgramSourceRecord.source_lead_id, ProgramSourceRecord.campaign_family).filter(
+                    ProgramSourceRecord.organization_id == org_id,
+                    ProgramSourceRecord.source_lead_id.in_(kl[i:i + 900])).all():
+                if fam and fam != campaign_family:
+                    other.add(lid)
+        keys -= other
     return keys
 
 
 def _load_source(db: Session, org, content: bytes, filename: Optional[str], apply: bool, actor: User,
-                 *, stage_only: bool = False, only_lead_ids: Optional[List[str]] = None) -> dict:
+                 *, stage_only: bool = False, only_lead_ids: Optional[List[str]] = None,
+                 campaign_family: Optional[str] = None) -> dict:
     """Check (apply=False) or load (apply=True) a lead file: stage every row,
     HOLD every record still in a review state, promote the clean contacts to
     live leads, then check each new number mobile vs landline. Never records
@@ -2040,11 +2058,19 @@ def _load_source(db: Session, org, content: bytes, filename: Optional[str], appl
     every staged contact, exactly as before."""
     from app.services.programs import holds, promote
     content = _excel_to_csv(content, filename)
-    staged = importer.stage(db, org, content, filename=filename, dry_run=not apply, actor_id=actor.id)
+    try:
+        staged = importer.stage(db, org, content, filename=filename, dry_run=not apply, actor_id=actor.id,
+                                campaign_family=campaign_family)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     out = {"apply": apply, "stage": staged["summary"], "run_id": staged["run_id"]}
+    if only_lead_ids is not None:
+        # The Lead IDs SCI actually used for this file (#385: generated ones,
+        # and earlier records the same rows were matched to) - not the file's.
+        only_lead_ids = staged.get("lead_ids") or only_lead_ids
     if stage_only and apply:
         out["stage_only"] = True
-        keys = _master_keys(db, org.id, only_lead_ids) if only_lead_ids is not None else None
+        keys = _master_keys(db, org.id, only_lead_ids, campaign_family) if only_lead_ids is not None else None
         out["promotion_plan"] = {k: v for k, v in promote.plan(db, org, keys).items() if k != "groups"}
         return out
     if not apply or staged["summary"].get("refused"):
@@ -2054,7 +2080,7 @@ def _load_source(db: Session, org, content: bytes, filename: Optional[str], appl
     db.commit()
     out["held"] = {k: v for k, v in held.items() if k != "source_lead_ids"}
     try:
-        only_keys = _master_keys(db, org.id, only_lead_ids) if only_lead_ids is not None else None
+        only_keys = _master_keys(db, org.id, only_lead_ids, campaign_family) if only_lead_ids is not None else None
         out["promotion"] = promote.promote(db, org, actor, apply=True, only_keys=only_keys,
                                            scope_counts=only_keys is not None)
     except HTTPException:
@@ -2157,19 +2183,9 @@ def _sci_blockers(b, built: dict, status: Optional[str] = None) -> List[str]:
         out.append("Analyze the file first (step 3).")
     for c in built["missing_columns"]:
         out.append("No column is mapped to '%s'. Map it on the Map Fields step." % c)
-    p = built["lead_id_problems"]
-    if p["blank"]:
-        out.append("%d row(s) have no Lead ID (rows %s). SCI needs one for every family - "
-                   "fix the file or skip those rows on Review."
-                   % (p["blank"], ", ".join(str(n) for n in p["blank_rows"][:20])))
-    for rep in p["repeated"][:20]:
-        out.append("Lead ID %s appears on rows %s. Skip the extra rows on Review."
-                   % (rep["lead_id"], ", ".join(str(n) for n in rep["rows"])))
-    und = built.get("undecided_duplicates") or {}
-    if und.get("count"):
-        out.append("%d possible duplicate(s) still need a decision on Review (rows %s): keep "
-                   "separate, merge or skip each one first."
-                   % (und["count"], ", ".join(str(n) for n in und["rows"][:20])))
+    # #385: blank Lead IDs (SCI generates them), repeated Lead IDs (kept and
+    # flagged) and undecided possible duplicates (SCI links or holds them for
+    # review) no longer block a file - they are reported, not refused.
     if not built["included_rows"]:
         out.append("No rows are left to load.")
     return out
@@ -2207,6 +2223,11 @@ def sci_import_preview(batch_id: str, db: Session = Depends(get_db),
         if res["stage"].get("errors"):
             blockers = blockers or ["SCI refuses this file: blank or repeated Lead IDs."]
     out["blockers"] = blockers
+    from app.services.programs import campaigns as _camp
+    _camp.ensure_central_alabama(db, org.id)
+    out["campaigns"] = [{"key": f.key, "name": f.name, "active": bool(f.is_active)}
+                        for f in db.query(CampaignFamily).filter(CampaignFamily.organization_id == org.id)
+                        .order_by(CampaignFamily.name).all()]
     out["can_load"] = not blockers and b.commit_mode != SCI_LOAD
     out["sends_nothing"] = True
     return out
@@ -2214,6 +2235,10 @@ def sci_import_preview(batch_id: str, db: Session = Depends(get_db),
 
 class SciLoadIn(BaseModel):
     mode: str = "stage"
+    # #385: the campaign THIS file belongs to (a family key). Every row gets it;
+    # without it a row takes only a campaign its own Primary Campaign names -
+    # never a fallback.
+    campaign_family: Optional[str] = None
 
 
 @router.post("/leads/import/batches/{batch_id}/load")
@@ -2232,11 +2257,15 @@ def sci_import_load(batch_id: str, body: Optional[SciLoadIn] = None, db: Session
         raise HTTPException(status_code=400, detail="mode must be 'stage' or 'load'.")
     prog, org = _sci_importer(db, user)
     b = _sci_batch(db, prog, batch_id)
+    from app.services.programs import campaigns as _camp
+    _camp.ensure_central_alabama(db, org.id)
     stored = json.loads(b.commit_report_json) if b.commit_report_json else None
     # IDEMPOTENT: a loaded batch is never loaded twice (a double click, a
     # retry); staging a staged batch again changes nothing either.
+    same_campaign = (stored or {}).get("campaign_family") == (body.campaign_family if body else None)
     if (b.commit_mode == SCI_LOAD and b.status == ImportBatchStatus.COMMITTED) or \
-            (mode == "stage" and b.commit_mode == SCI_STAGE and b.status == ImportBatchStatus.STAGED):
+            (mode == "stage" and b.commit_mode == SCI_STAGE and b.status == ImportBatchStatus.STAGED
+             and same_campaign):
         return {"batch": _sci_batch_json(b), "report": stored, "repeat": True}
     # A load that died mid-way (the process was killed) leaves the batch
     # 'committing'. After SCI_STALE_LOAD it may be retried: SCI's load is
@@ -2278,7 +2307,8 @@ def sci_import_load(batch_id: str, body: Optional[SciLoadIn] = None, db: Session
 
     try:
         res = _load_source(db, org, built["csv"], intake_bridge.sci_filename(b), True, user,
-                           stage_only=(mode == "stage"), only_lead_ids=built["lead_ids"])
+                           stage_only=(mode == "stage"), only_lead_ids=built["lead_ids"],
+                           campaign_family=(body.campaign_family if body else None))
     except Exception:
         _release()
         raise
@@ -2303,6 +2333,15 @@ def sci_import_load(batch_id: str, body: Optional[SciLoadIn] = None, db: Session
         "line_check": res.get("line_check"),
         "sci": {k: v for k, v in res.items() if k != "stage"} | {"stage": st},
         "texts_sent": 0, "emails_sent": 0, "enrolled": 0,
+        # #385
+        "campaign_family": (body.campaign_family if body else None),
+        "generated_lead_ids": st.get("generated_lead_ids", 0),
+        "linked_to_existing_families": st.get("linked_to_existing_families", 0),
+        "reused_earlier_records": st.get("reused_earlier_records", 0),
+        "superseded_duplicate_leads": st.get("superseded_duplicate_leads", 0),
+        "kept_in_other_campaign": st.get("kept_in_other_campaign", 0),
+        "email_only_candidates": st.get("email_only_candidates", 0),
+        "new_records": st.get("new_records", 0),
     }
     db.expire(b)
     b = db.query(ImportBatch).filter(ImportBatch.id == b.id).first()

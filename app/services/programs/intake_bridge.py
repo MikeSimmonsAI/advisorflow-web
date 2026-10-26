@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 from app.models.import_models import ImportBatch, ImportStagedRow
 from app.models.intake_models import DuplicateResolution, IntakeStatus
 from app.services.intake import fields as F
-from app.services.programs.importer import COL
+from app.services.programs.importer import COL, COLUMN_ALIASES, IMPORT_FLAG_COL
 
 # SCI column -> the mapping targets that feed it, in preference order.
 # ("*", key) matches a custom / vertical / source column with that key.
@@ -55,8 +55,10 @@ SCI_COLUMNS: List[Tuple[str, List[Tuple[str, str]]]] = [
 # Always written (blank when the file had none); the rest only when mapped.
 ALWAYS = (COL["lead_id"], COL["first"], COL["last"], COL["phone"], COL["email"],
           COL["location"], COL["campaign"], COL["status"], COL["last_activity_date"])
-# Without these SCI cannot place a family: the screen says so before loading.
-REQUIRED = (COL["lead_id"], COL["location"])
+# Without this SCI cannot place a family: the screen says so before loading.
+# (#385: a missing Lead ID no longer blocks - SCI generates one, marked as
+# generated, so a normal export loads without anyone inventing IDs.)
+REQUIRED = (COL["location"],)
 
 EXCLUDED_LABELS = {
     "skipped": "Skipped by the reviewer",
@@ -95,9 +97,15 @@ def resolve_columns(headers: List[str], mapping: Dict[str, dict]) -> Dict[str, s
                     break
             if hit:
                 break
-        if hit is None and sci_col in headers and sci_col not in used \
-                and (mapping.get(sci_col) or {}).get("kind") != F.KIND_IGNORE:
-            hit = sci_col              # the file already uses SCI's own header
+        if hit is None:
+            # The file already uses SCI's own header - or one of the names that
+            # column goes by in a normal export ("Nearest/Preferred Location").
+            key = next((k for k, v in COL.items() if v == sci_col), None)
+            for name in (sci_col,) + tuple(COLUMN_ALIASES.get(key, ())):
+                h = next((x for x in headers if x.strip().lower() == name.lower()), None)
+                if h and h not in used and (mapping.get(h) or {}).get("kind") != F.KIND_IGNORE:
+                    hit = h
+                    break
         if hit is not None:
             out[sci_col] = hit
             used.add(hit)
@@ -105,18 +113,29 @@ def resolve_columns(headers: List[str], mapping: Dict[str, dict]) -> Dict[str, s
 
 
 def exclusion_reason(r: ImportStagedRow) -> Optional[str]:
+    """Only what a PERSON chose to leave out, or a row that could not be read.
+    #385: every other source record goes to SCI and is kept - a match to a
+    do-not-contact family is held there (never contacted), a match to an
+    existing family is linked to that family by SCI itself, and a row with
+    nothing usable is held for review."""
     st = r.intake_status
-    if st == IntakeStatus.SKIPPED:
+    if st == IntakeStatus.SKIPPED and r.reviewed_at is not None:
         return "skipped"
     if r.duplicate_resolution == DuplicateResolution.SKIP_INCOMING:
-        return "skip_duplicate"
-    if st == IntakeStatus.INVALID:
-        return "invalid"
+        return "skip_duplicate"             # a person chose to skip this duplicate
     if st == IntakeStatus.FAILED:
         return "failed"
-    if st == IntakeStatus.BLOCKED:
-        return "blocked"
     return None
+
+
+def import_flag(r: ImportStagedRow) -> str:
+    """Why SCI must hold this row rather than work it ('' = nothing to hold)."""
+    st = r.intake_status
+    if st == IntakeStatus.BLOCKED:
+        return "do_not_contact_match"
+    if st == IntakeStatus.INVALID:
+        return "invalid"
+    return ""
 
 
 def build(db: Session, batch: ImportBatch) -> dict:
@@ -129,7 +148,7 @@ def build(db: Session, batch: ImportBatch) -> dict:
                     ImportStagedRow.organization_id == batch.organization_id)
             .order_by(ImportStagedRow.row_number).all())
 
-    sci_cols = [c for c, _ in SCI_COLUMNS if c in ALWAYS or c in cols]
+    sci_cols = [c for c, _ in SCI_COLUMNS if c in ALWAYS or c in cols] + [IMPORT_FLAG_COL]
     consumed = set(cols.values())
     extra = [h for h in headers if h not in consumed and h not in sci_cols
              and (mapping.get(h) or {}).get("kind") != F.KIND_IGNORE]
@@ -152,6 +171,9 @@ def build(db: Session, batch: ImportBatch) -> dict:
             continue
         line: "OrderedDict[str, str]" = OrderedDict()
         for c in sci_cols:
+            if c == IMPORT_FLAG_COL:
+                line[c] = import_flag(r)
+                continue
             h = cols.get(c)
             v = raw.get(h, "") if h else ""
             if not v and c == COL["first"] and not h:
@@ -163,6 +185,9 @@ def build(db: Session, batch: ImportBatch) -> dict:
             v = raw.get(h, "")
             line[h] = "" if v is None else str(v)
         included.append((r.row_number, line))
+        # #385: an undecided possible duplicate no longer blocks the file -
+        # SCI links the same person itself and holds a shared phone/email
+        # under a different name for review. Counted, not refused.
         if r.intake_status == IntakeStatus.NEEDS_REVIEW \
                 and r.duplicate_resolution == DuplicateResolution.REVIEW:
             undecided.append(r.row_number)

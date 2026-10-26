@@ -26,7 +26,7 @@ def test_kerry_can_check_then_load_leads(client, db_session, sample_org):
     r = client.post("/program/leads/import", headers=h,
                     files={"file": ("list.csv", CSV.encode(), "text/csv")}, data={"apply": "true"})
     assert r.status_code == 200, r.text
-    assert r.json()["promotion"]["created"] == 2
+    assert r.json()["promotion"]["created"] == 4          # #385: historic statuses are not held
     assert db_session.query(Lead).filter_by(organization_id=sample_org.id).filter(Lead.first_name == "Ann").count() == 1
 
 

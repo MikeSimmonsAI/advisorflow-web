@@ -154,6 +154,9 @@ def blocker(db: Session, lead: Lead) -> Optional[str]:
     r = identity.send_refusal(db, lead, _ss.MANUAL)
     if r:
         return r.split(":", 1)[0].capitalize()   # "ON HOLD: ..." -> "On hold"
+    rec = identity.source_record_for_lead(db, lead)
+    if rec is not None and not rec.campaign_family:
+        return "No campaign"                     # #385: never worked under another campaign's words
     return None
 
 
@@ -284,6 +287,20 @@ def approve(db: Session, prog: OutreachProgram, user: User, lead_ids: List[str],
         if b:
             skipped.append({"lead_id": lid, "reason": b})
             continue
+        fam_key = _master(recs).campaign_family
+        fam_row = (db.query(CampaignFamily).filter(CampaignFamily.organization_id == prog.organization_id,
+                                                   CampaignFamily.key == fam_key).first()) if fam_key else None
+        from app.services.programs import campaigns as _camp
+        if fam_row is None:
+            # #385: a record with no campaign is never worked under another
+            # campaign's words.
+            skipped.append({"lead_id": lid, "reason": "No campaign"})
+            continue
+        if not fam_row.is_active and _camp.activation_blocker(fam_row):
+            # #385: approving a family never switches on a campaign that has no
+            # approved copy (Central Alabama stays off until it does).
+            skipped.append({"lead_id": lid, "reason": "Campaign not approved yet"})
+            continue
         starts = (start_at + timedelta(minutes=max(0, spacing_minutes) * len(approved))) if start_at else None
         for r in recs:
             if r.approved_to_send_at is None:
@@ -294,7 +311,7 @@ def approve(db: Session, prog: OutreachProgram, user: User, lead_ids: List[str],
             sender = email_touches._sender(db, prog, lead)
             if sender is not None:
                 lead.assigned_to_id = sender.id
-        families.add(_master(recs).campaign_family or "re_engagement")
+        families.add(fam_key)
         approved.append(lead)
     switched_on = []
     for f in (db.query(CampaignFamily).filter(CampaignFamily.organization_id == prog.organization_id,
