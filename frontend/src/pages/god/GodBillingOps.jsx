@@ -429,7 +429,7 @@ export default function GodBillingOps() {
           return (
             <button key={key} onClick={() => setFilter(key)}
               style={{ background: on ? 'var(--gm-blue)' : 'var(--gm-pill-blue-bg)',
-                       color: on ? '#fff' : attention ? 'var(--gm-amber)' : 'var(--gm-text)',
+                       color: on ? 'var(--gm-ink-on-accent)' : attention ? 'var(--gm-amber)' : 'var(--gm-text)',
                        border: `1px solid ${on ? 'var(--gm-blue)' : attention ? 'var(--gm-pill-amber-bd)' : 'var(--gm-blue)'}`,
                        borderRadius: 20, padding: '7px 14px', fontSize: 13,
                        fontWeight: on ? 700 : 600, cursor: 'pointer' }}>
@@ -527,7 +527,7 @@ export default function GodBillingOps() {
                 onClick={previewAssistedChange}
                 disabled={!changeForm.planKey || Boolean(changing)}
                 style={{ background: changeForm.planKey ? 'var(--gm-blue)' : 'var(--gm-panel-3)',
-                         color: changeForm.planKey ? '#fff' : 'var(--gm-dim)',
+                         color: changeForm.planKey ? 'var(--gm-ink-on-accent)' : 'var(--gm-dim)',
                          border: 'none', borderRadius: 6, padding: '6px 14px',
                          fontSize: 12, fontWeight: 700,
                          cursor: changeForm.planKey && !changing ? 'pointer' : 'default' }}
@@ -587,7 +587,7 @@ export default function GodBillingOps() {
                 type="button"
                 onClick={applyAssistedChange}
                 disabled={Boolean(changing)}
-                style={{ background: 'var(--gm-teal)', color: '#fff', border: 'none',
+                style={{ background: 'var(--gm-teal)', color: 'var(--gm-ink-on-accent)', border: 'none',
                          borderRadius: 6, padding: '6px 14px', fontSize: 12,
                          fontWeight: 700,
                          cursor: changing ? 'default' : 'pointer' }}
@@ -648,7 +648,7 @@ export default function GodBillingOps() {
                 type="button"
                 onClick={applyResync}
                 disabled={Boolean(resyncing)}
-                style={{ background: 'var(--gm-teal)', color: '#fff', border: 'none',
+                style={{ background: 'var(--gm-teal)', color: 'var(--gm-ink-on-accent)', border: 'none',
                          borderRadius: 6, padding: '6px 14px', fontSize: 12,
                          fontWeight: 700,
                          cursor: resyncing ? 'default' : 'pointer' }}

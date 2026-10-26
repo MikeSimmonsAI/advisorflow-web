@@ -32,7 +32,7 @@ const STATUS_COLORS = {
   ledger_unavailable: { bg: 'var(--gm-pill-red-bg)', text: 'var(--gm-red)', border: 'var(--gm-pill-red-bd)' },
   // A last run that "succeeded" long ago is a stopped job (see the backend's
   // EXPECTED_INTERVAL_MINUTES). Amber, and the word says why.
-  stale:     { bg: 'var(--gm-pill-amber-bg, rgba(245,166,35,.12))', text: 'var(--gm-amber, #f5a623)', border: 'var(--gm-amber, #f5a623)' },
+  stale:     { bg: 'var(--gm-pill-amber-bg, rgba(245,166,35,.12))', text: 'var(--gm-amber)', border: 'var(--gm-amber)' },
 }
 
 function PulseCard({ jobName, info }) {
@@ -211,8 +211,8 @@ export default function GodJobRuns() {
         <div style={{
           ...cardStyle,
           marginBottom: 20,
-          borderColor: pulse.ledger.table_present ? 'var(--god-border, #e5e7eb)' : 'var(--gm-red)',
-          background: pulse.ledger.table_present ? 'var(--god-card, #fff)' : 'var(--gm-red)',
+          borderColor: pulse.ledger.table_present ? 'var(--gm-card-line)' : 'var(--gm-red)',
+          background: pulse.ledger.table_present ? 'var(--gm-ink-on-accent)' : 'var(--gm-red)',
         }}>
           {!pulse.ledger.table_present ? (
             <>

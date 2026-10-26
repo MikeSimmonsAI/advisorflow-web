@@ -34,7 +34,7 @@ function Pill ({ ok, children }) {
       display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 11,
       fontWeight: 700, letterSpacing: '.04em',
       color: ok ? T.teal : 'var(--gm-blue)',
-      border: `1px solid ${ok ? T.teal : 'var(--gm-border, #2a3550)'}`,
+      border: `1px solid ${ok ? T.teal : 'var(--gm-card-line)'}`,
     }}>{children}</span>
   )
 }

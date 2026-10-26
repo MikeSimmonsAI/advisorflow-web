@@ -273,9 +273,9 @@ export default function GodLaunches() {
           <button key={f.key} onClick={() => setFilter(f.key)} style={{
             fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 999,
             cursor: 'pointer',
-            border: '1px solid ' + (filter === f.key ? 'var(--gm-blue)' : 'var(--god-border, #e5e7eb)'),
-            background: filter === f.key ? 'var(--gm-blue)' : 'var(--god-card, #fff)',
-            color: filter === f.key ? '#fff' : 'var(--god-text, #1f2937)',
+            border: '1px solid ' + (filter === f.key ? 'var(--gm-blue)' : 'var(--gm-card-line)'),
+            background: filter === f.key ? 'var(--gm-blue)' : 'var(--gm-ink-on-accent)',
+            color: filter === f.key ? 'var(--gm-ink-on-accent)' : 'var(--gm-head)',
           }}>{f.label} {counts[f.key] ?? 0}</button>
         ))}
         <span style={{ flex: 1 }} />
@@ -307,8 +307,8 @@ export default function GodLaunches() {
         return (
           <div key={r.implementation_id} style={{
             ...card,
-            borderLeft: r.blockers?.length ? '3px solid #ef4444'
-              : r.intake_state === 'submitted' ? '3px solid #3b82f6' : card.border,
+            borderLeft: r.blockers?.length ? '3px solid var(--gm-red)'
+              : r.intake_state === 'submitted' ? '3px solid var(--gm-blue)' : card.border,
           }}>
             <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start',
                           flexWrap: 'wrap' }}>
@@ -434,7 +434,7 @@ export default function GodLaunches() {
                 because nothing observes the recipient's mailbox. */}
             {r.delivery ? (
               <div style={{ marginTop: 10, fontSize: 12,
-                            color: 'var(--gm-text, #64748b)' }}>
+                            color: 'var(--gm-text, var(--gm-ghost))' }}>
                 <Chip label={r.delivery.label}
                       tone={r.delivery.state === 'not_sent' ? 'warning' : 'ok'} />
                 {r.delivery.invited_email ? (
@@ -545,9 +545,9 @@ function LaunchReview({ detail, schema, busy, onReviewed }) {
             <button key={key} onClick={() => setTab(key)} style={{
               fontSize: 12, fontWeight: 700, padding: '6px 14px', borderRadius: 999,
               cursor: 'pointer',
-              border: '1px solid ' + (tab === key ? 'var(--gm-blue)' : 'var(--god-border, #e5e7eb)'),
-              background: tab === key ? 'var(--gm-blue)' : 'var(--god-card, #fff)',
-              color: tab === key ? '#fff' : 'var(--god-text, #1f2937)',
+              border: '1px solid ' + (tab === key ? 'var(--gm-blue)' : 'var(--gm-card-line)'),
+              background: tab === key ? 'var(--gm-blue)' : 'var(--gm-ink-on-accent)',
+              color: tab === key ? 'var(--gm-ink-on-accent)' : 'var(--gm-head)',
             }}>{text}</button>
           ))}
       </div>
