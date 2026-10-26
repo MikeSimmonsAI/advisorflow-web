@@ -1,5 +1,11 @@
 /**
- * GOD MODE › DASHBOARD — the owner's one-screen view of the business.
+ * GOD MODE › DASHBOARD — the OWNER DESK.
+ *
+ * Oct 26 2026 (UI-REDESIGN, issue #411): the approved Owner Desk layout —
+ * Your Programs · Needs Your Attention · Quick Actions · Platform Status ·
+ * Platform Tools · Recent Activity — on a light page with a navy rail. Same
+ * data, same confirmed actions; the activity charts moved into a closed
+ * "Activity trends" panel at the bottom instead of leading the page.
  *
  * Oct 22 2026 redesign: a card dashboard instead of five stacked bands.
  *
@@ -10,6 +16,7 @@
  *                     GET /god/ai-workforce/control
  *   Watchlist         lowest-health organizations, Enter / Open / Suspend
  *   Activity          GET /god/dashboard/trends — real and test counted apart
+ *   Recent activity   GET /god/ops/audit?limit=6 — the owner-action audit trail
  *
  * RULES KEPT FROM THE OLD PAGE. A value with no source renders "—", never a
  * plausible number. Entering an organization is confirmed and goes through the
@@ -30,9 +37,10 @@ import { buildRows } from './god/OrgCommandTable'
 import ConfirmDialog from './god/ConfirmDialog'
 import { enterCustomer } from './god/enterCustomer'
 import {
-  Page, Card, Kpi, Pill, Loading, ErrorState, Empty, ActionLink, ActionQueue,
-  HealthRow, Spark, ago,
+  Page, Card, Pill, Loading, ErrorState, Empty, ActionLink, ActionQueue,
+  HealthRow, Spark, ago, Expandable, Section, Strip, ToolCard, ProgramCard, QuickActions,
 } from './god/ui/GodKit'
+import { getCurrentUser } from '../api/client'
 
 const SEV_ORDER = { critical: 0, high: 1, medium: 2, info: 3 }
 const fmt = n => (n === null || n === undefined ? null : Number(n).toLocaleString('en-US'))
@@ -95,11 +103,12 @@ export default function GodCommandCenter () {
   const [busy, setBusy] = useState('')
   const [confirm, setConfirm] = useState(null)
   const [showAll, setShowAll] = useState(false)
+  const [audit, setAudit] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true); setErr(''); setHealthErr('')
     const opt = { noOrgContext: true }
-    const [s, h, o, c, b, t, a] = await Promise.allSettled([
+    const [s, h, o, c, b, t, a, au] = await Promise.allSettled([
       api.get('/god/stats', opt),
       api.get('/god/platform-health', opt),
       api.get('/god/orgs?limit=200', opt),
@@ -107,6 +116,7 @@ export default function GodCommandCenter () {
       api.get('/billing/all', opt),
       api.get('/god/dashboard/trends?days=14', opt),
       api.get('/god/ai-workforce/control', opt),
+      api.get('/god/ops/audit?limit=6', opt),
     ])
     if (s.status === 'fulfilled') setStats(s.value)
     if (h.status === 'fulfilled') setHealth(h.value)
@@ -116,6 +126,7 @@ export default function GodCommandCenter () {
     setBillingRows(b.status === 'fulfilled' && Array.isArray(b.value?.orgs) ? b.value.orgs : null)
     setTrends(t.status === 'fulfilled' ? t.value : { failed: true })
     setAi(a.status === 'fulfilled' ? a.value : null)
+    setAudit(au.status === 'fulfilled' && Array.isArray(au.value?.entries) ? au.value.entries : { failed: true })
     if (s.status === 'rejected' && o.status === 'rejected') {
       setErr('Could not reach the God Mode API. Check that the backend is awake.')
     }
@@ -141,13 +152,6 @@ export default function GodCommandCenter () {
   const decisions = exceptions.filter(x => x.sev === 'critical' || x.sev === 'high').length
 
   const rows = buildRows({ orgs, customers: realCustomers, billingRows })
-  const watch = rows
-    // Suspended accounts are switched off on purpose; they stay in the full
-    // Organizations table but do not crowd the watchlist.
-    .filter(r => !r.is_demo && !r._org?.is_demo && r.is_active !== false)
-    .slice()
-    .sort((x, y) => (x.health_score ?? 101) - (y.health_score ?? 101))
-    .slice(0, 6)
 
   const healthRows = [...(health?.sections || [])]
   const aiRow = aiHealth(ai)
@@ -207,138 +211,218 @@ export default function GodCommandCenter () {
   }
 
   const t = trends && !trends.failed ? trends : null
-  const realOrgsWithLeads = stats?.active_orgs
+
+  // ── Your Programs: every organization the owner runs, real ones first ──
+  const byId = Object.fromEntries(rows.map(r => [r.id, r]))
+  const programs = orgs.slice().sort((x, y) =>
+    (x.is_active === false) - (y.is_active === false) ||
+    (!!x.is_demo) - (!!y.is_demo) ||
+    String(x.name).localeCompare(String(y.name)))
+  const PROGRAM_LIMIT = 8
+  const orgName = Object.fromEntries(orgs.map(o => [o.id, o.name]))
+
+  const healthByKey = Object.fromEntries((health?.sections || []).map(x => [x.key, x]))
+  const toneOf = st => ({ ok: 'good', bad: 'bad', warn: 'warn', off: 'off' }[st] || 'off')
+  const statusFrom = sec => (sec ? { tone: toneOf(sec.status), label: sec.severity_label || sec.status } : null)
+  const first = (getCurrentUser()?.full_name || '').trim().split(/\s+/)[0]
 
   return (
     <>
       <GodStyles />
-      <Page eyebrow="Dashboard" title="Command center"
-        sub="What needs you, how the platform is running, and what the business did — real numbers only."
+      <Page eyebrow="God Mode · Owner Desk" title={first ? `Welcome back, ${first}` : 'Owner Desk'}
+        sub="Everything you run, what needs you, and where to go next — real numbers only."
         actions={<>
-          <ActionLink to="/god/customers/new" primary>+ New organization</ActionLink>
-          <ActionLink onClick={load} disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</ActionLink>
+          <ActionLink to="/god/customers/new" primary small={false}>+ New organization</ActionLink>
+          <ActionLink onClick={load} disabled={loading} small={false}>{loading ? 'Loading…' : 'Refresh'}</ActionLink>
         </>}>
 
         {err ? <ErrorState onRetry={load}>{err}</ErrorState> : null}
 
-        {/* ── KPIs ── */}
-        <div className="gk-kpis">
-          <Kpi label="Brands" value={fmt(stats?.total_platforms)} sub="platforms on the system"
-            onClick={() => navigate('/god/workspaces')} />
-          <Kpi label="Organizations" value={fmt(stats?.total_orgs)}
-            sub={realOrgsWithLeads !== undefined ? `${fmt(realOrgsWithLeads)} with leads · demos excluded` : 'demos excluded'}
-            onClick={() => navigate('/god/organizations')} />
-          <Kpi label="Users" value={fmt(stats?.total_users)} sub="all accounts"
-            onClick={() => navigate('/god/users-all')} />
-          <Kpi label="New leads" value={fmt(t?.leads?.real_total)} sub="real, last 14 days" />
-          <Kpi label="Appointments" value={fmt(t?.appointments_next_7_days)} sub="booked, next 7 days" />
-          <Kpi label="Needs your decision" value={loading ? null : decisions}
-            tone={decisions ? 'red' : undefined} sub="critical and high items"
-            onClick={() => document.getElementById('owner-action-queue')?.scrollIntoView({ behavior: 'smooth' })} />
+        <Strip items={[
+          { label: 'Organizations', value: fmt(stats?.total_orgs), onClick: () => navigate('/god/organizations'),
+            sub: stats?.active_orgs !== undefined ? `${fmt(stats.active_orgs)} with leads · demos excluded` : 'demos excluded' },
+          { label: 'People', value: fmt(stats?.total_users), sub: 'all accounts', onClick: () => navigate('/god/users-all') },
+          { label: 'New leads', value: fmt(t?.leads?.real_total), sub: 'real, last 14 days' },
+          { label: 'Needs your decision', value: loading ? null : decisions, tone: decisions ? 'red' : undefined,
+            sub: 'critical and high items',
+            onClick: () => document.getElementById('owner-action-queue')?.scrollIntoView({ behavior: 'smooth' }) },
+        ]} />
+
+        {/* ── Your Programs ── */}
+        <Section title="Your programs" sub="Every organization on the platform. Enter is audited and confirmed first."
+          action={<ActionLink to="/god/organizations">All organizations</ActionLink>}>
+          {loading && !orgs.length ? <Card><Loading /></Card>
+            : !programs.length ? <Card><Empty>No organizations yet.</Empty></Card> : (
+            <div className="gk-tiles">
+              {programs.slice(0, PROGRAM_LIMIT).map(o => {
+                const r = byId[o.id] || {}
+                const pills = []
+                if (o.is_active === false) pills.push(<Pill key="s" tone="bad">Suspended</Pill>)
+                if (o.is_demo) pills.push(<Pill key="d" tone="test">Demo</Pill>)
+                if (o.is_active !== false && !o.is_demo && r.health_score !== undefined && r.health_score !== null && r.health_score < 60) {
+                  pills.push(<Pill key="h" tone="warn" title="Health score, computed by the server">Needs attention</Pill>)
+                }
+                return (
+                  <ProgramCard key={o.id} name={o.name} industry={o.industry} pills={pills}
+                    facts={[{ label: 'people', value: fmt(o.user_count) }, { label: 'leads', value: fmt(o.lead_count) },
+                            { label: 'messages · 30d', value: fmt(o.messages_30d) }]}
+                    actions={<>
+                      <ActionLink to={`/god/customers/${o.id}`}>Open</ActionLink>
+                      {o.is_active === false
+                        ? <ActionLink onClick={() => askSuspend(o, 'reactivate')} disabled={busy === o.id}>Reactivate</ActionLink>
+                        : <ActionLink primary onClick={() => askEnter(o)} disabled={busy === o.id}>Enter</ActionLink>}
+                    </>} />
+                )
+              })}
+            </div>
+          )}
+          {programs.length > PROGRAM_LIMIT ? (
+            <p className="gk-row-sub" style={{ marginTop: 10 }}>
+              Showing {PROGRAM_LIMIT} of {programs.length}. <ActionLink to="/god/organizations">See all {programs.length}</ActionLink>
+            </p>
+          ) : null}
+        </Section>
+
+        {/* ── Platform Tools ── */}
+        <Section title="Platform tools" sub="The five God Mode areas and the sales back office.">
+          <div className="gk-tiles gk-tiles--3">
+            <ToolCard icon="building" title="Organizations" to="/god/organizations"
+              description="Customers, workspaces, people, access and features."
+              meta={stats ? `${fmt(stats.total_orgs)} organizations · ${fmt(stats.total_users)} people` : null}
+              status={statusFrom(healthByKey.customer_activity)} />
+            <ToolCard icon="cpu" title="AI Workforce" to="/god/ai"
+              description="AI workers, test mode, emergency stop and activity."
+              status={aiRow ? { tone: toneOf(aiRow.status), label: aiRow.statusLabel } : null} />
+            <ToolCard icon="flag" title="Launch Board" to="/god/launch-board"
+              description="What is built, merged, live and stuck — read from GitHub." />
+            <ToolCard icon="dollar" title="Revenue & Billing" to="/god/billing"
+              description="Billing, revenue history, pricing, sales pay and leads."
+              status={statusFrom(healthByKey.billing)} />
+            <ToolCard icon="settings" title="Settings & Security" to="/god/settings"
+              description="Access, audit log, background jobs, diagnostics and support."
+              status={statusFrom(healthByKey.security)} />
+            <ToolCard icon="briefcase" title="Back Office" to="/sales"
+              description="The EvoSys Pro sales workspace: My Day, follow-ups, pipeline." />
+          </div>
+        </Section>
+
+        <div className="gk-section">
+          <div className="gk-desk">
+            {/* ── Needs Your Attention ── */}
+            <div id="owner-action-queue">
+              <Card title="Needs your attention"
+                note={loading ? null : exceptions.length ? `${exceptions.length} open · most urgent first` : 'All clear'}
+                action={exceptions.length > 5
+                  ? <button type="button" className="gk-link" onClick={() => setShowAll(v => !v)}>
+                      {showAll ? 'Show top 5' : `View all ${exceptions.length}`}
+                    </button>
+                  : null}>
+                {loading ? <Loading />
+                  : <ActionQueue items={exceptions} limit={showAll ? 0 : 5} onAction={handleAttention}
+                      empty="Nothing needs you right now." />}
+              </Card>
+            </div>
+
+            <div className="gk-stack">
+              {/* ── Quick Actions ── */}
+              <Card title="Quick actions">
+                <QuickActions items={[
+                  { label: 'New organization', icon: 'plus', to: '/god/customers/new', primary: true },
+                  { label: 'Add a person', icon: 'user', to: '/god/access/new' },
+                  { label: 'Enter a customer', icon: 'login', to: '/god/customers' },
+                  { label: 'AI Workforce', icon: 'cpu', to: '/god/ai' },
+                  { label: 'Billing', icon: 'dollar', to: '/god/billing' },
+                  { label: 'Audit log', icon: 'list', to: '/god/audit' },
+                ]} />
+              </Card>
+            </div>
+          </div>
         </div>
 
-        <div className="gk-two" style={{ marginTop: 14 }}>
-          {/* ── Needs you ── */}
-          <div id="owner-action-queue">
-            <Card title="Needs you"
-              note={loading ? null : `${exceptions.length} open · most urgent first`}
-              action={exceptions.length > 5
-                ? <button type="button" className="gk-link" onClick={() => setShowAll(v => !v)}>
-                    {showAll ? 'Show top 5' : `View all ${exceptions.length}`}
-                  </button>
-                : null}>
-              {loading ? <Loading />
-                : <ActionQueue items={exceptions} limit={showAll ? 0 : 5} onAction={handleAttention}
-                    empty="Nothing needs you right now." />}
-            </Card>
-          </div>
+        <div className="gk-section">
+          <div className="gk-desk">
+            {/* ── Recent Activity ── */}
+            <div>
+              <Card title="Recent activity" note="Latest owner actions from the audit log"
+              action={<ActionLink to="/god/audit">Full audit log</ActionLink>}>
+            {audit === null ? <Loading />
+              : audit.failed ? <Empty>Recent activity is unavailable right now.</Empty>
+                : !audit.length ? <Empty>No owner actions recorded yet.</Empty> : (
+                  <ul className="gk-activity">
+                    {audit.map(e => (
+                      <li key={e.id}>
+                        <span className="gk-activity-dot" aria-hidden="true" />
+                        <span style={{ minWidth: 0 }}>
+                          <b>{String(e.action || '').replace(/[._]/g, ' ')}</b>
+                          {e.organization_id && orgName[e.organization_id] ? <> · {orgName[e.organization_id]}</> : null}
+                          {e.actor ? <span className="gk-row-meta"> · by {e.actor}</span> : null}
+                        </span>
+                        <span className="gk-activity-when">{ago(e.at)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+            </div>
 
-          {/* ── Platform health ── */}
-          <div id="platform-health">
-            <Card title="Platform health"
-              note={health?.overall ? `${health.overall.overall_label} · worst condition wins` : 'Checked by the server'}>
-              {healthErr && !healthRows.length ? <ErrorState onRetry={load}>Health could not be checked: {healthErr}</ErrorState>
-                : loading && !healthRows.length ? <Loading />
-                  : <ul className="gk-list">{healthRows.map(r => (
-                    <HealthRow key={r.key} label={r.label} status={r.status}
-                      statusLabel={r.statusLabel || r.severity_label} headline={r.headline} to={r.to} />))}</ul>}
-            </Card>
+            {/* ── Platform Status ── */}
+            <div id="platform-health">
+                <Card title="Platform status"
+                  note={health?.overall ? `${health.overall.overall_label} · worst condition wins` : 'Checked by the server'}>
+                  {healthErr && !healthRows.length ? <ErrorState onRetry={load}>Status could not be checked: {healthErr}</ErrorState>
+                    : loading && !healthRows.length ? <Loading />
+                      : <ul className="gk-list">{healthRows.map(r => (
+                        <HealthRow key={r.key} label={r.label} status={r.status}
+                          statusLabel={r.statusLabel || r.severity_label} headline={r.headline} to={r.to} />))}</ul>}
+                </Card>
+              </div>
           </div>
         </div>
 
-        {/* ── Watchlist ── */}
-        <div style={{ marginTop: 14 }}>
-          <Card title="Organization watchlist" note="active accounts, lowest health first · demo and suspended accounts left out"
-            action={<ActionLink to="/god/organizations">All organizations</ActionLink>}>
-            {loading ? <Loading /> : !watch.length ? <Empty>No organizations yet.</Empty> : (
-              <ul className="gk-list">
-                {watch.map(r => (
-                  <li key={r.id} className="gk-row">
-                    <div className="gk-row-main">
-                      <div className="gk-row-title">
-                        {r.name}{' '}
-                        {!r.is_active ? <Pill tone="bad">Suspended</Pill> : null}
-                        {r._orphan ? <Pill tone="warn">Not in customer list</Pill> : null}
-                      </div>
-                      <div className="gk-row-sub">
-                        {[r.platform_name, r.package_name || 'no package',
-                          `${fmt(r.lead_count) ?? '—'} leads`, `${fmt(r.messages_30d) ?? '—'} messages in 30 days`,
-                          r.last_activity ? `active ${ago(r.last_activity)}` : 'no recorded activity']
-                          .filter(Boolean).join(' · ')}
-                      </div>
-                    </div>
-                    {r.health_score !== undefined && r.health_score !== null ? (
-                      <Pill tone={r.health_score >= 80 ? 'good' : r.health_score >= 60 ? 'warn' : 'bad'}
-                        title="Health score, computed by the server">Health {r.health_score}</Pill>
-                    ) : null}
-                    <ActionLink to={`/god/customers/${r.id}`}>Open</ActionLink>
-                    {r.is_active
-                      ? <ActionLink primary onClick={() => askEnter(r._org)} disabled={busy === r.id}>Enter</ActionLink>
-                      : <ActionLink onClick={() => askSuspend(r._org, 'reactivate')} disabled={busy === r.id}>Reactivate</ActionLink>}
-                  </li>
-                ))}
-              </ul>
+        {/* ── Activity trends (kept, folded away) ── */}
+        <div className="gk-section">
+          <Expandable id="activity-trends" header={
+            <div>
+              <div className="gk-card-title">Activity trends</div>
+              <div className="gk-card-note">Leads, messages, replies, bookings and AI work — real accounts only, last 14 days</div>
+            </div>}>
+            {trends?.failed ? <ErrorState onRetry={load}>Activity could not be counted right now.</ErrorState> : (
+              <div className="gk-four">
+                <TrendCard title="New leads" series={t?.leads} color="var(--gm-blue)" />
+                <TrendCard title="Messages sent" series={t?.messages_sent} color="var(--gm-teal)" />
+                <TrendCard title="Replies" series={t?.replies} color="var(--gm-gold)" />
+                <TrendCard title="Appointments booked" series={t?.appointments_booked} color="var(--gm-teal)" />
+              </div>
             )}
-          </Card>
+            {t ? (
+              <div className="gk-two" style={{ marginTop: 14, marginBottom: 0 }}>
+                <Card title="Message delivery">
+                  {t.delivery_rate?.pct !== null && t.delivery_rate?.pct !== undefined ? (
+                    <>
+                      <span className="gk-kpi-value">{t.delivery_rate.pct}%</span>
+                      <div className="gk-row-sub">{fmt(t.delivery_rate.delivered)} delivered of {fmt(t.delivery_rate.sent)} sent (real, 14 days).</div>
+                    </>
+                  ) : (
+                    <Empty>Not enough to measure. {t.delivery_rate?.why} {fmt(t.delivery_rate?.sent) ?? 0} sent so far.</Empty>
+                  )}
+                </Card>
+                <Card title="AI work, last 14 days" action={<ActionLink to="/god/ai">AI Workforce</ActionLink>}>
+                  {t.ai_runs?.unavailable ? <Empty>Unable to count AI runs right now.</Empty> : (
+                    <ul className="gk-list">
+                      <li className="gk-row"><div className="gk-row-main"><div className="gk-row-title">Real customers</div>
+                        <div className="gk-row-sub">{t.ai_runs.real.completed} finished · {t.ai_runs.real.failed} failed</div></div>
+                        <Pill tone="info">Live</Pill></li>
+                      <li className="gk-row"><div className="gk-row-main"><div className="gk-row-title">Practice (test mode)</div>
+                        <div className="gk-row-sub">{t.ai_runs.practice.completed} finished · {t.ai_runs.practice.failed} failed · nothing sent</div></div>
+                        <Pill tone="test">Test</Pill></li>
+                    </ul>
+                  )}
+                </Card>
+              </div>
+            ) : null}
+            {t?.note ? <p className="gk-row-sub" style={{ marginTop: 10 }}>{t.note}</p> : null}
+          </Expandable>
         </div>
-
-        {/* ── Activity ── */}
-        <div className="gk-eyebrow" style={{ marginTop: 22 }}>Activity · real accounts only</div>
-        {trends?.failed ? <ErrorState onRetry={load}>Activity could not be counted right now.</ErrorState> : (
-          <div className="gk-four">
-            <TrendCard title="New leads" series={t?.leads} color="var(--gm-blue)" />
-            <TrendCard title="Messages sent" series={t?.messages_sent} color="var(--gm-teal)" />
-            <TrendCard title="Replies" series={t?.replies} color="var(--gm-gold)" />
-            <TrendCard title="Appointments booked" series={t?.appointments_booked} color="var(--gm-teal)" />
-          </div>
-        )}
-        {t ? (
-          <div className="gk-two" style={{ marginTop: 14 }}>
-            <Card title="Message delivery">
-              {t.delivery_rate?.pct !== null && t.delivery_rate?.pct !== undefined ? (
-                <>
-                  <span className="gk-kpi-value">{t.delivery_rate.pct}%</span>
-                  <div className="gk-row-sub">{fmt(t.delivery_rate.delivered)} delivered of {fmt(t.delivery_rate.sent)} sent (real, 14 days).</div>
-                </>
-              ) : (
-                <Empty>Not enough to measure. {t.delivery_rate?.why} {fmt(t.delivery_rate?.sent) ?? 0} sent so far.</Empty>
-              )}
-            </Card>
-            <Card title="AI work, last 14 days" action={<ActionLink to="/god/ai">AI Workforce</ActionLink>}>
-              {t.ai_runs?.unavailable ? <Empty>Unable to count AI runs right now.</Empty> : (
-                <ul className="gk-list">
-                  <li className="gk-row"><div className="gk-row-main"><div className="gk-row-title">Real customers</div>
-                    <div className="gk-row-sub">{t.ai_runs.real.completed} finished · {t.ai_runs.real.failed} failed</div></div>
-                    <Pill tone="info">Live</Pill></li>
-                  <li className="gk-row"><div className="gk-row-main"><div className="gk-row-title">Practice (test mode)</div>
-                    <div className="gk-row-sub">{t.ai_runs.practice.completed} finished · {t.ai_runs.practice.failed} failed · nothing sent</div></div>
-                    <Pill tone="test">Test</Pill></li>
-                </ul>
-              )}
-            </Card>
-          </div>
-        ) : null}
-        {t?.note ? <p className="gk-row-sub" style={{ marginTop: 10 }}>{t.note}</p> : null}
       </Page>
 
       {confirm && (
