@@ -316,19 +316,32 @@ def command_center(db, org_id: str, *, hours: int = 24,
     top_q = (db.query(EvoSenseProperty)
              .filter(EvoSenseProperty.organization_id == org_id,
                      EvoSenseProperty.archived_at.is_(None),
-                     EvoSenseProperty.status.in_((C.S_NEEDS_YOU, C.S_READY, C.S_HIGH, C.S_CONTACT_FOUND,
-                                                  C.S_OUTREACH, C.S_RESPONDED, C.S_WAITING_DATA,
-                                                  C.S_BUDGET_BLOCKED))))
+                     or_(
+                         EvoSenseProperty.status.in_((C.S_NEEDS_YOU, C.S_READY, C.S_HIGH, C.S_CONTACT_FOUND,
+                                                     C.S_OUTREACH, C.S_RESPONDED, C.S_WAITING_DATA,
+                                                     C.S_BUDGET_BLOCKED)),
+                         # A stale status cannot hide a critical upcoming sale.
+                         EvoSenseProperty.work_priority.in_(("CRITICAL", "REVIEW_URGENT")),
+                     )))
     if not include_test:
         top_q = top_q.filter(EvoSenseProperty.is_test.isnot(True))
-    top = (top_q.order_by(EvoSenseProperty.seller_intent.desc().nullslast(),
-                          EvoSenseProperty.opportunity_score.desc().nullslast())
+    # Acquisition Command must obey the same deadline-first ordering as the Inbox.
+    # Intent and investment evidence only break ties.
+    top = (top_q.order_by(EvoSenseProperty.work_priority_rank.asc().nullslast(),
+                          EvoSenseProperty.sale_deadline.asc().nullslast(),
+                          EvoSenseProperty.seller_intent.desc().nullslast(),
+                          EvoSenseProperty.opportunity_score.desc().nullslast(),
+                          EvoSenseProperty.id)
            .limit(8).all())
     needs_q = db.query(EvoSenseHandoff).filter(EvoSenseHandoff.organization_id == org_id,
                                                EvoSenseHandoff.status.in_(("open", "acknowledged")))
     if not include_test:
         needs_q = needs_q.filter(EvoSenseHandoff.is_test.isnot(True))
-    needs = (needs_q.order_by(EvoSenseHandoff.priority.desc(), EvoSenseHandoff.created_at.asc())
+    # The Needs You hero must not place routine hand-offs above imminent sales.
+    needs = (needs_q.join(EvoSenseProperty, EvoSenseHandoff.property_id == EvoSenseProperty.id)
+             .order_by(EvoSenseProperty.work_priority_rank.asc().nullslast(),
+                       EvoSenseProperty.sale_deadline.asc().nullslast(),
+                       EvoSenseHandoff.priority.desc(), EvoSenseHandoff.created_at.asc())
              .limit(20).all())
     hprops = {p.id: p for p in db.query(EvoSenseProperty).filter(
         EvoSenseProperty.organization_id == org_id,
@@ -408,6 +421,7 @@ def command_center(db, org_id: str, *, hours: int = 24,
                        "city": hprops[h.property_id].city if h.property_id in hprops else None,
                        "seller_intent": hprops[h.property_id].seller_intent if h.property_id in hprops else None,
                        "is_test": h.is_test, "priority": h.priority, "next_action": h.next_action,
+                       "work": _work(hprops[h.property_id]) if h.property_id in hprops else None,
                        "reasons": C.jload(h.reasons, []), "status": h.status,
                        "since": _iso(h.created_at)},
                       **_needs_detail(db, org_id, hprops.get(h.property_id), first=(i == 0)))
