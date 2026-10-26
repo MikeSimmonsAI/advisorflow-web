@@ -379,6 +379,7 @@ def run_due(db, *, org_id: Optional[str] = None, now=None) -> Dict[str, Any]:
         C.log.exception("evosense call-queue sweep failed")
     try:
         from app.services.evosense import opportunity as OP
+        report["auction_priority_refreshed"] = OP.refresh_auction_properties(db, org_id=org_id)
         report["opportunity_assessed"] = OP.backfill(db, org_id=org_id)
     except Exception:  # noqa: BLE001 - a derived view never stops the hunt or the replies
         db.rollback()

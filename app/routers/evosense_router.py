@@ -121,7 +121,7 @@ def command_center(hours: int = Query(24, ge=1, le=24 * 30), db: Session = Depen
 
 @router.get("/inbox")
 def inbox(bucket: Optional[str] = None, strategy_id: Optional[str] = None, q: Optional[str] = None,
-          signal: Optional[str] = None, sort: str = "opportunity",
+          signal: Optional[str] = None, sort: str = "work",
           limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
           county: Optional[str] = None, min_score: Optional[int] = Query(None, ge=0, le=100),
           source: Optional[str] = None, archived: bool = False,
@@ -135,11 +135,11 @@ def inbox(bucket: Optional[str] = None, strategy_id: Optional[str] = None, q: Op
           min_owned_years: Optional[str] = None, max_owned_years: Optional[str] = None,
           max_score: Optional[str] = None,
           category: Optional[str] = None, economics: Optional[str] = None, confidence: Optional[str] = None,
-          ptype: Optional[str] = None, psubtype: Optional[str] = None,
+          ptype: Optional[str] = None, psubtype: Optional[str] = None, priority: Optional[str] = None,
           db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     org_id = _read_org(db, user)
     filters = {"city": city, "zip": zip, "property_type": property_type, "occupancy": occupancy,
-               "ptype": ptype, "psubtype": psubtype,
+               "ptype": ptype, "psubtype": psubtype, "priority": priority,
                "owner": owner, "street": street, "parcel": parcel, "missing": missing,
                "min_value": min_value, "max_value": max_value,
                "min_year_built": min_year_built, "max_year_built": max_year_built,
@@ -2680,8 +2680,8 @@ def foreclosures_properties(month: Optional[str] = None, view: str = "all", page
                             type: Optional[str] = None, attention: Optional[str] = None,
                             carried: Optional[str] = None, deals: Optional[str] = None,
                             ptype: Optional[str] = None, psubtype: Optional[str] = None,
-                            quick: Optional[str] = None,
-                            sort: str = "opportunity", db: Session = Depends(get_db),
+                            quick: Optional[str] = None, priority: Optional[str] = None,
+                            sort: str = "work", db: Session = Depends(get_db),
                             user: User = Depends(require_tenant_or_observer)):
     """The month's working list - the existing ranking, filtered and paged on the server."""
     from app.services.evosense import foreclosure_cycles as FCC
@@ -2695,13 +2695,14 @@ def foreclosures_properties(month: Optional[str] = None, view: str = "all", page
                               "contact": contact, "acquisition": acquisition, "financial": financial,
                               "min_score": min_score, "type": type, "attention": attention, "carried": carried,
                               "deals": deals, "ptype": ptype, "psubtype": psubtype, "quick": quick,
+                              "priority": priority,
                               "sort": sort})
     per_page = max(1, min(int(per_page or 50), 200))
     page = max(1, int(page or 1))
     total = len(rs)
     keep = ("id", "street_address", "city", "zip_code", "county", "owner", "foreclosure", "contacts", "score",
             "rank", "next_action", "auction", "contact_state", "acquisition", "financial", "needs_attention",
-            "equity", "tax", "property_class", "measures")
+            "equity", "tax", "property_class", "measures", "work")
     items = []
     for r in rs[(page - 1) * per_page: page * per_page]:
         x = {k: r.get(k) for k in keep}

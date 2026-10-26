@@ -35,13 +35,17 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from app.services.evosense import common as C
 
-VERSION = "opportunity/v3"
+VERSION = "opportunity/v4"
 # v2 = v1 + a deadline-only hand-off is not a conversation; a test deal never
 # changes a real property. The version is part of the cache key, so a new
 # version re-assesses every property on the next backfill passes.
 # v3 = v2 + MEASURES: auction urgency, deal potential and data confidence kept
 # as three separate answers (HIGH / MEDIUM / LOW / UNKNOWN with a reason each),
 # the score explanation from the engine's own factors, and the missing inputs.
+# v4 = v3 + WORK PRIORITY (work_priority.py, the one policy): auction urgency
+# now covers posted TAX sales as well as mortgage notices, uses Central Time,
+# reads a person's recorded auction outcome, and a verified sale within 14 days
+# is CRITICAL - ACT NOW whatever the investment evidence score.
 
 # ── documented weights ──────────────────────────────────────────────────────
 # Priority = weighted average of the KNOWN dimensions (0-100 each).
@@ -619,7 +623,7 @@ def assess(*, prop, po: Dict[str, Any], fc: Dict[str, Any], tax: Dict[str, Any],
            asking=None, seller_quick: Optional[str] = None, eng: Optional[Dict[str, Any]] = None,
            has_handoff: bool = False, followup_due: Optional[datetime] = None,
            deal: Optional[Dict[str, Any]] = None, list_claims: Optional[Dict[str, Any]] = None,
-           now: Optional[datetime] = None) -> Dict[str, Any]:
+           now: Optional[datetime] = None, event: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     now = now or C.now()
     eng = eng or {}
     urg = urgency(fc, tax, followup_due=followup_due, seller_quick=seller_quick, now=now)
@@ -672,7 +676,8 @@ def assess(*, prop, po: Dict[str, Any], fc: Dict[str, Any], tax: Dict[str, Any],
     if fmoney is not None:
         flags += ["unknown_liens", "unknown_payoff"]
     earned = [f for f in po.get("factors") or [] if (f.get("points") or 0) > 0][:4]
-    meas = measures(prop=prop, po=po, fc=fc, econ=econ, conf=conf, contacts=contacts, owner=owner, nxt=nxt, now=now)
+    meas = measures(prop=prop, po=po, fc=fc, econ=econ, conf=conf, contacts=contacts, owner=owner, nxt=nxt, now=now,
+                    tax=tax, event=event, workflow_state=wstate)
     return {
         "version": VERSION, "computed_at": _iso(now), "measures": meas,
         "priority": pr,
@@ -713,57 +718,11 @@ def _day(v) -> Optional[date]:
         return None
 
 
-def auction_urgency(status: Optional[str], sale_date=None, *, today: Optional[date] = None) -> Dict[str, Any]:
-    """`status`: an auction-event status (foreclosure_cycles.STATUS keys) or a
-    notice status from the Top 100 view ("VERIFIED NOTICE" ...). Only a VERIFIED
-    clerk notice is ever HIGH; an imported date is never treated as one; a sale
-    date that passed is never called completed."""
-    today = today or C.now().date()
-    st = _COHORT_TO_EVENT.get(status or "", status or "")
-    d = _day(sale_date)
-    days = (d - today).days if d else None
-    when = d.isoformat() if d else "date not read"
-
-    def out(level, label, reason, urgent=False):
-        return {"level": level, "label": label, "reason": reason, "days": days,
-                "sale_date": d.isoformat() if d else None, "urgent": urgent, "status": st or None}
-    if st == "notice_verified":
-        if days is None:
-            return out("MEDIUM", "MEDIUM", "Verified clerk notice; the sale date could not be read", False)
-        if days < 0:
-            return out("PASSED", "SALE DATE PASSED - OUTCOME NOT VERIFIED",
-                       "The %s sale date has passed; sold, canceled or postponed is not yet verified" % when)
-        lvl = "HIGH" if days <= URGENT_DAYS else "MEDIUM" if days <= SOON_DAYS else "LOW"
-        return out(lvl, lvl, "Verified clerk notice: sale %s, %d day%s away" % (when, days, "" if days == 1 else "s"),
-                   lvl == "HIGH")
-    if st == "conflict":
-        soon = days is not None and 0 <= days <= SOON_DAYS
-        return out("VERIFY", "URGENT - VERIFY NOTICE" if soon else "VERIFY NOTICE",
-                   "The clerk notice and the list disagree about the sale (%s); check the notice before acting" % when,
-                   soon)
-    if st == "claimed":
-        return out("UNVERIFIED", "UNVERIFIED DATE - VERIFY THE NOTICE",
-                   "Only an imported list says %s; no clerk notice has confirmed it yet" % when)
-    if st == "not_found":
-        return out("UNVERIFIED", "NO CLERK NOTICE FOUND - VERIFY",
-                   "The list claims a sale (%s) but the clerk records read show no notice for it" % when)
-    if st == "postponed":
-        return out("POSTPONED", "POSTPONED - NOT SCHEDULED FOR %s" % when.upper(),
-                   "Recorded as postponed; watch for a new notice")
-    if st == "canceled":
-        return out("CANCELED", "CANCELED", "Sale recorded as canceled")
-    if st in ("sold_at_auction", "reverted_to_lender"):
-        return out("COMPLETED", "AUCTION HELD - %s" % st.replace("_", " ").upper(), "Outcome recorded with evidence")
-    if st == "outcome_unverified":
-        return out("PASSED", "SALE DATE PASSED - OUTCOME NOT VERIFIED",
-                   "The %s sale date has passed; what happened is not yet verified" % when)
-    if st == "reported_resolved":
-        return out("VERIFY", "REPORTED RESOLVED - VERIFY", "Reported resolved; not yet verified")
-    if st == "awaiting_notice":
-        return out("UNVERIFIED", "WAITING FOR A NEW NOTICE", "Carried forward; no new notice yet")
-    if st == "no_longer_on_record":
-        return out("VERIFY", "OFF THE NOTICE RECORD - REVIEW", "The notice is no longer on the clerk record")
-    return out("NONE", "NO SALE ON RECORD", "No foreclosure sale on record")
+def auction_urgency(status: Optional[str], sale_date=None, *, today: Optional[date] = None,
+                    kind: str = "mortgage") -> Dict[str, Any]:
+    """Delegates to THE policy (work_priority.auction_urgency) - one vocabulary everywhere."""
+    from app.services.evosense import work_priority as WP
+    return WP.auction_urgency(status, sale_date, kind=kind, today=today)
 
 
 def deal_potential(econ: Dict[str, Any], po: Dict[str, Any], category: Optional[str]) -> Dict[str, Any]:
@@ -874,19 +833,47 @@ def missing_inputs(*, econ: Dict[str, Any], contacts: Dict[str, Any], owner: Dic
 
 def measures(*, prop, po: Dict[str, Any], fc: Dict[str, Any], econ: Dict[str, Any], conf: Dict[str, Any],
              contacts: Dict[str, Any], owner: Dict[str, Any], nxt: Dict[str, Any],
-             now: Optional[datetime] = None) -> Dict[str, Any]:
+             now: Optional[datetime] = None, tax: Optional[Dict[str, Any]] = None,
+             event: Optional[Dict[str, Any]] = None, workflow_state: Optional[str] = None) -> Dict[str, Any]:
+    from app.services.evosense import work_priority as WP
     cat = getattr(prop, "property_category", None)
-    au = auction_urgency((fc or {}).get("status"), (fc or {}).get("sale_date") or (fc or {}).get("claimed_sale_date"),
-                         today=(now or C.now()).date())
-    return {"auction_urgency": au, "deal_potential": deal_potential(econ, po, cat),
+    au = WP.property_auctions(fc, tax, event, today=WP.today_ct())
+    dp = deal_potential(econ, po, cat)
+    contact_ready = bool((contacts or {}).get("phones") or (contacts or {}).get("emails"))
+    owner_review = (owner or {}).get("status") in ("NO OWNER", "CONFLICT")
+    wp = WP.work_priority(au, workflow_state=workflow_state, contact_ready=contact_ready, owner_review=owner_review,
+                          deal_level=dp.get("level"), score=po.get("value"), prop_id=getattr(prop, "id", "") or "")
+    return {"auction_urgency": au, "deal_potential": dp,
             "data_confidence": data_confidence_measure(conf),
+            "work_priority": wp, "row": WP.summary(au, wp),
             "next_best_action": {"label": (nxt or {}).get("label"), "why": (nxt or {}).get("why"),
-                                 "key": (nxt or {}).get("key"), "link": (nxt or {}).get("link")},
+                                 "key": (nxt or {}).get("key"), "link": (nxt or {}).get("link"),
+                                 "work": wp["next_action"]},
             "explanation": explain(po),
             "missing": missing_inputs(econ=econ, contacts=contacts, owner=owner, fc=fc, category=cat)}
 
 
 # ── batch loading + cache ───────────────────────────────────────────────────
+
+def _auction_events(db, org_id: str, ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Each property's CURRENT auction event on a Foreclosure Command Center
+    month (the latest sale date), with its displayed status - a person's
+    recorded postponement / cancellation / outcome wins over the notice."""
+    from app.models.evosense_models import EvoSenseAuctionCycle, EvoSenseAuctionEvent
+    from app.services.evosense import foreclosure_cycles as FCC
+    out: Dict[str, Dict[str, Any]] = {}
+    rows = (db.query(EvoSenseAuctionEvent, EvoSenseAuctionCycle.month, EvoSenseAuctionCycle.sale_date)
+            .join(EvoSenseAuctionCycle, EvoSenseAuctionCycle.id == EvoSenseAuctionEvent.cycle_id)
+            .filter(EvoSenseAuctionEvent.organization_id == org_id, EvoSenseAuctionEvent.property_id.in_(ids or ["-"]))
+            .order_by(EvoSenseAuctionCycle.month.asc()).all())
+    for ev, month, cyc_sale in rows:
+        # the LATEST month the property is on decides (a postponement moves it there);
+        # an event with no notice date of its own takes its month's sale day
+        sale = ev.sale_date or cyc_sale
+        out[ev.property_id] = {"status": FCC.display_status(ev), "sale_date": sale.date().isoformat()
+                               if sale else None, "event_id": ev.id, "month": month}
+    return out
+
 
 def _deal_view(db, org_id: str, deal_ids: List[str]) -> Dict[str, Dict[str, Any]]:
     """Promoted deals: the economics inputs and stage, in a fixed number of queries.
@@ -1002,13 +989,15 @@ def build(db, org_id: str, props: List[Any], *, now: Optional[datetime] = None,
     with_comps = {pid for (pid,) in db.query(WholesaleComp.evosense_property_id.distinct()).filter(
         WholesaleComp.organization_id == org_id, WholesaleComp.evosense_property_id.in_(ids)).all()}
     deals = _deal_view(db, org_id, sorted({p.promoted_deal_id for p in props if p.promoted_deal_id}))
+    events = _auction_events(db, org_id, ids)
+    from app.services.evosense import work_priority as WP
     out = {}
     for p in props:
         all_sigs = pre["signals"].get(p.id, [])
         sigs = [x for x in all_sigs if x.active]
         owner = CO._owner_status_pre(pre, p)
         tax = CO._tax_status_pre(pre, p, sigs)
-        fc = CO.foreclosure_status(sigs, today=now.date(), check=checks.get(p.id))
+        fc = CO.foreclosure_status(sigs, today=WP.today_ct(), check=checks.get(p.id))
         contacts = CO._contacts_pre(pre, owner.get("owner_id"))
         owners = CO._owners_of(pre, p)
         sid = p.best_strategy_id or p.first_strategy_id
@@ -1059,7 +1048,7 @@ def build(db, org_id: str, props: List[Any], *, now: Optional[datetime] = None,
                                in ("asap", "30_days", "immediately")) else None,
                            eng={"status": e.status, "outcome": e.last_outcome} if e is not None else None,
                            has_handoff=p.id in handoffs, followup_due=fus.get(p.id), deal=deal,
-                           list_claims=CO._list_claims_pre(pre, p), now=now)
+                           list_claims=CO._list_claims_pre(pre, p), now=now, event=events.get(p.id))
     return out
 
 
@@ -1091,6 +1080,14 @@ def cache(prop, res: Dict[str, Any], now: Optional[datetime] = None) -> bool:
     dl = res["urgency"].get("deadline")
     from app.services.evosense import scoring as SC
     prop.sale_deadline = SC._sale_date(dl) if dl else None
+    m = res.get("measures") or {}
+    wp, au = m.get("work_priority") or {}, m.get("auction_urgency") or {}
+    if wp:
+        prop.work_priority = wp.get("level")
+        prop.work_priority_rank = wp.get("rank")
+        prop.auction_level = au.get("level")
+        if au.get("sale_date"):
+            prop.sale_deadline = SC._sale_date(au["sale_date"])
     prop.opportunity_detail = json.dumps(res, default=str)
     return True
 
@@ -1118,8 +1115,16 @@ def refresh(db, org_id: str, props: List[Any], *, now: Optional[datetime] = None
         if res is None:
             continue
         stats["assessed"] += 1
+        before = (getattr(p, "work_priority", None), getattr(p, "status", None))
         if cache(p, res, now):
             stats["changed"] += 1
+            if getattr(p, "work_priority", None) != before[0]:
+                # the Inbox bucket follows the work priority (evaluate.status_for)
+                from app.services.evosense import evaluate as EV
+                try:
+                    EV.refresh_status(db, p)
+                except Exception:  # noqa: BLE001
+                    C.log.exception("opportunity: status refresh failed for %s", p.id)
     try:
         stats["escalated"] = escalate(db, props, results)
     except Exception:  # noqa: BLE001 - the view is cached even if a hand-off cannot be opened
@@ -1138,7 +1143,13 @@ def escalate(db, props: List[Any], results: Dict[str, Dict[str, Any]]) -> int:
     from app.models.evosense_models import EvoSenseHandoff
     from app.services.evosense import evaluate as EV
     from app.services.evosense import handoff as HO
-    due = [p for p in props if (results.get(p.id) or {}).get("urgency", {}).get("escalate")
+    from app.services.evosense import work_priority as WP
+
+    def wp(pid):
+        return (((results.get(pid) or {}).get("measures") or {}).get("work_priority") or {}).get("level")
+    # THE policy decides: a CRITICAL verified sale (mortgage OR tax) or an
+    # imminent notice a person must verify goes in front of a person.
+    due = [p for p in props if wp(p.id) in (WP.W_CRITICAL, WP.W_REVIEW_URGENT)
            and results[p.id]["workflow_state"]["key"] in ESCALATE_STATES and not p.promoted_deal_id]
     if not due:
         return 0
@@ -1150,12 +1161,13 @@ def escalate(db, props: List[Any], results: Dict[str, Dict[str, Any]]) -> int:
     n = 0
     for p in due:
         res = results[p.id]
-        sale = res["urgency"].get("deadline")
+        au = res["measures"]["auction_urgency"]
+        w = res["measures"]["work_priority"]
+        sale = au.get("sale_date")
         if sale in seen.get(p.id, set()):
             continue
-        h = HO.open_handoff(db, p, [DEADLINE_REASON], priority=90,
-                            next_action="Sale %s - decide how to reach the owner (%s)" % (
-                                sale, res["next_action"]["label"]))
+        h = HO.open_handoff(db, p, [DEADLINE_REASON], priority=95 if w["level"] == WP.W_CRITICAL else 90,
+                            next_action="%s %s - %s" % (au.get("kind_label"), sale, w["next_action"]))
         reasons = C.jload(h.reasons, []) or []
         for r in reasons:
             if r.get("code") == DEADLINE_REASON:
@@ -1163,7 +1175,8 @@ def escalate(db, props: List[Any], results: Dict[str, Dict[str, Any]]) -> int:
         h.reasons = C.jdump(reasons)
         C.log_event(db, p.organization_id, "opportunity.escalated", property_id=p.id, is_test=p.is_test,
                     actor_type=C.ACTOR_AUTOMATION,
-                    summary="Verified foreclosure sale %s within %s days - handed to a person" % (sale, ESCALATE_DAYS))
+                    summary="%s %s: %s - handed to a person (no outreach is sent)" % (
+                        au.get("kind_label"), sale, w["label"]))
         EV.refresh_status(db, p)
         n += 1
     return n
@@ -1205,6 +1218,51 @@ def backfill(db, *, org_id: Optional[str] = None, limit: int = BACKFILL_BATCH, n
             except Exception:  # noqa: BLE001
                 db.rollback()
                 C.log.exception("opportunity backfill failed for %s properties in %s", len(chunk), oid)
+    return n
+
+
+AUCTION_REFRESH_LIMIT = 1500
+
+
+def refresh_auction_properties(db, *, org_id: Optional[str] = None, limit: int = AUCTION_REFRESH_LIMIT,
+                               now: Optional[datetime] = None) -> int:
+    """Every property with a sale on record (a mortgage notice, a posted tax
+    sale, an auction-calendar event) is re-assessed at least once per Central
+    Time day and as soon as the policy version changes: its days-to-sale - and
+    so its work priority - move with the calendar. Idempotent; bounded."""
+    from sqlalchemy import or_
+    from zoneinfo import ZoneInfo
+    from app.models.evosense_models import EvoSenseAuctionEvent, EvoSenseProperty, EvoSenseSignal
+    now = now or C.now()
+    start_ct = datetime.now(ZoneInfo("America/Chicago")).replace(hour=0, minute=0, second=0, microsecond=0)
+    start_utc = start_ct.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+    with_sale = db.query(EvoSenseSignal.property_id).filter(
+        EvoSenseSignal.active.is_(True), EvoSenseSignal.signal_type.in_(("PRE_FORECLOSURE", "TAX_SALE")))
+    on_calendar = db.query(EvoSenseAuctionEvent.property_id)
+    q = (db.query(EvoSenseProperty.id, EvoSenseProperty.organization_id)
+         .filter(EvoSenseProperty.archived_at.is_(None),
+                 or_(EvoSenseProperty.id.in_(with_sale), EvoSenseProperty.id.in_(on_calendar)),
+                 or_(EvoSenseProperty.opportunity_hash.is_(None),
+                     ~EvoSenseProperty.opportunity_hash.like(VERSION + ":%"),
+                     EvoSenseProperty.opportunity_at.is_(None),
+                     EvoSenseProperty.opportunity_at < start_utc)))
+    if org_id:
+        q = q.filter(EvoSenseProperty.organization_id == org_id)
+    rows = q.order_by(EvoSenseProperty.sale_deadline.asc().nullslast(), EvoSenseProperty.id).limit(limit).all()
+    by_org: Dict[str, List[str]] = {}
+    for pid, oid in rows:
+        by_org.setdefault(oid, []).append(pid)
+    n = 0
+    for oid, group in by_org.items():
+        for i in range(0, len(group), 100):
+            chunk = db.query(EvoSenseProperty).filter(EvoSenseProperty.id.in_(group[i:i + 100])).all()
+            try:
+                refresh(db, oid, chunk, now=now)
+                db.commit()
+                n += len(chunk)
+            except Exception:  # noqa: BLE001
+                db.rollback()
+                C.log.exception("auction work-priority refresh failed for %s properties in %s", len(chunk), oid)
     return n
 
 

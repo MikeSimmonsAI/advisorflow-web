@@ -1496,6 +1496,9 @@ COLUMNS_TO_ADD = [
     ("evosense_properties", "next_best_action", "VARCHAR"),
     ("evosense_properties", "workflow_state", "VARCHAR"),
     ("evosense_properties", "sale_deadline", "DATE"),
+    ("evosense_properties", "work_priority", "VARCHAR"),
+    ("evosense_properties", "work_priority_rank", "INTEGER"),
+    ("evosense_properties", "auction_level", "VARCHAR"),
     ("evosense_properties", "opportunity_detail", "TEXT"),
     ("evosense_properties", "opportunity_hash", "VARCHAR"),
     ("evosense_properties", "opportunity_at", "TIMESTAMP"),
@@ -1741,6 +1744,7 @@ INDEXES_TO_CREATE = [
     # the opportunity view: ranked lists sort by these; the backfill finds stale rows by the last
     "CREATE INDEX IF NOT EXISTS ix_es_prop_org_priority ON evosense_properties(organization_id, priority_score)",
     "CREATE INDEX IF NOT EXISTS ix_es_prop_org_urgency ON evosense_properties(organization_id, urgency_score)",
+    "CREATE INDEX IF NOT EXISTS ix_es_prop_org_workrank ON evosense_properties(organization_id, work_priority_rank)",
     "CREATE INDEX IF NOT EXISTS ix_es_prop_opportunity_at ON evosense_properties(opportunity_at)",
     "CREATE INDEX IF NOT EXISTS ix_es_prop_org_category ON evosense_properties(organization_id, property_category)",
     # DATA DEPTH: EvoSense properties read their sold comps by this pair.

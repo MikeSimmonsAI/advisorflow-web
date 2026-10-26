@@ -564,14 +564,38 @@ def row(p, signals: Optional[List[str]] = None, strategy_name: Optional[str] = N
             "archived_at": _iso(getattr(p, "archived_at", None)),
             "archive_reason": getattr(p, "archive_reason", None),
             # the universal opportunity view (evosense/opportunity.py), cached
-            "opportunity": OP.compact(p)}
+            "opportunity": OP.compact(p),
+            # THE work-priority policy (work_priority.py) - the same answer every screen shows
+            "work": _work(p)}
+
+
+def _work(p) -> Dict[str, Any]:
+    from app.services.evosense import work_priority as WP
+    d = OP.detail(p) or {}
+    row = ((d.get("measures") or {}).get("row")) if (d.get("version") == OP.VERSION) else None
+    if row:
+        return row
+    lvl = getattr(p, "work_priority", None) or "NORMAL"
+    return {"auction_date": p.sale_deadline.isoformat() if getattr(p, "sale_deadline", None) else None,
+            "urgency": getattr(p, "auction_level", None), "urgency_label": None,
+            "work_priority": lvl, "work_priority_label": WP.WORK_LABELS.get(lvl, lvl), "next_action": None}
 
 
 _CONF_ORDER = case((EvoSenseProperty.evidence_confidence == "verified", 0),
                    (EvoSenseProperty.evidence_confidence == "partial", 1),
                    (EvoSenseProperty.evidence_confidence == "insufficient", 2), else_=3)
 
-SORTS = {"opportunity": (EvoSenseProperty.opportunity_score.desc().nullslast(),),
+SORTS = {
+         # DEFAULT - THE work-priority policy (work_priority.py): auction deadline
+         # first, then sale date, then the investment evidence score, then id
+         "work": (EvoSenseProperty.work_priority_rank.asc().nullslast(),
+                  EvoSenseProperty.sale_deadline.asc().nullslast(),
+                  EvoSenseProperty.opportunity_score.desc().nullslast(), EvoSenseProperty.id),
+         "county": (func.lower(EvoSenseProperty.county).asc().nullslast(),
+                    EvoSenseProperty.work_priority_rank.asc().nullslast()),
+         "property_category": (EvoSenseProperty.property_category.asc().nullslast(),
+                               EvoSenseProperty.work_priority_rank.asc().nullslast()),
+         "opportunity": (EvoSenseProperty.opportunity_score.desc().nullslast(),),
          # the universal opportunity view (evosense/opportunity.py)
          "priority": (EvoSenseProperty.priority_score.desc().nullslast(),
                       EvoSenseProperty.urgency_score.desc().nullslast(),
@@ -613,7 +637,7 @@ def _contactability(db, prop):
 
 
 def inbox(db, org_id: str, *, bucket: Optional[str] = None, strategy_id: Optional[str] = None,
-          q: Optional[str] = None, signal: Optional[str] = None, sort: str = "opportunity",
+          q: Optional[str] = None, signal: Optional[str] = None, sort: str = "work",
           limit: int = 50, offset: int = 0, county: Optional[str] = None,
           min_score: Optional[int] = None, source: Optional[str] = None,
           archived: bool = False, filters: Optional[Dict[str, Any]] = None,
@@ -681,10 +705,11 @@ def inbox(db, org_id: str, *, bucket: Optional[str] = None, strategy_id: Optiona
                  .order_by(due.c.due.asc().nullslast(), EvoSenseProperty.priority_score.desc().nullslast())
                  .offset(max(0, offset)).limit(limit).all())
     else:
-        items = listq.order_by(*SORTS.get(sort, SORTS["opportunity"])).offset(max(0, offset)).limit(limit).all()
+        items = listq.order_by(*SORTS.get(sort, SORTS["work"])).offset(max(0, offset)).limit(limit).all()
     # a property not assessed yet (or re-scored since) is assessed for display
     # now; the cached columns that sort the list catch up in the backfill
-    unassessed = [p for p in items if getattr(p, "opportunity_detail", None) is None]
+    unassessed = [p for p in items if getattr(p, "opportunity_detail", None) is None
+                  or not (getattr(p, "opportunity_hash", None) or "").startswith(OP.VERSION + ":")]
     fresh: Dict[str, Any] = {}
     if unassessed:
         try:
@@ -728,10 +753,16 @@ def inbox(db, org_id: str, *, bucket: Optional[str] = None, strategy_id: Optiona
 
 
 def _with_fresh(r: Dict[str, Any], res: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    if r.get("opportunity") is None and res is not None:
+    """A property whose cached view is missing or from an older version is shown
+    from a fresh assessment - so the displayed work priority is always the
+    policy's current answer (the cache catches up in the background)."""
+    if res is not None:
         from types import SimpleNamespace
         r["opportunity"] = OP.compact(SimpleNamespace(opportunity_detail=json.dumps(res, default=str)))
         r["opportunity"]["computed_on_read"] = True
+        row = (res.get("measures") or {}).get("row")
+        if row:
+            r["work"] = row
     return r
 
 
@@ -801,6 +832,12 @@ def _apply_filters(db, org_id, base, fx: Dict[str, Any]):
                        EvoSenseOwnership.is_current.is_(True),
                        EvoSenseOwner.display_name.ilike("%%%s%%" % str(fx["owner"]).strip())))
         base = base.filter(EvoSenseProperty.id.in_(own))
+    if fx.get("priority"):
+        want = [x.strip().upper() for x in str(fx["priority"]).split(",") if x.strip()]
+        if "NORMAL" in want:
+            base = base.filter(or_(EvoSenseProperty.work_priority.in_(want), EvoSenseProperty.work_priority.is_(None)))
+        else:
+            base = base.filter(EvoSenseProperty.work_priority.in_(want))
     if fx.get("missing") == "physical":
         base = base.filter(EvoSenseProperty.square_feet.is_(None))
     return base

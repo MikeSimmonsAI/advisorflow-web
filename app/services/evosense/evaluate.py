@@ -164,6 +164,17 @@ def status_for(db, prop, strategy) -> Tuple[str, str, Optional[str], Optional[st
                     "WRONG PARTY"
             return C.S_CLOSED_OUT, "Nothing", (eng.last_outcome or "stopped").replace("_", " ").lower(), None
 
+    # THE FORECLOSURE WORK-PRIORITY POLICY (work_priority.py): an imminent
+    # verified sale, or an imminent notice a person must verify, is never
+    # filed as "low opportunity" because its investment evidence score is low.
+    wpl = getattr(prop, "work_priority", None)
+    if wpl in ("CRITICAL", "REVIEW_URGENT"):
+        from app.services.evosense import work_priority as WP
+        when = prop.sale_deadline.isoformat() if getattr(prop, "sale_deadline", None) else "soon"
+        return C.S_NEEDS_YOU, ("Act now - sale %s" % when) if wpl == "CRITICAL" else ("Verify the notice - sale %s" % when), \
+            "Work priority %s - set by the auction deadline, not by the investment evidence score." % (
+                WP.WORK_LABELS[wpl]), None
+
     score = prop.opportunity_score
     threshold = getattr(strategy, "min_opportunity_score", 60) if strategy else 60
     if score is None:

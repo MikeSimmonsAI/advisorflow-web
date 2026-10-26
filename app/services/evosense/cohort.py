@@ -342,9 +342,9 @@ def foreclosure_status(sigs, today=None, check: Optional[Dict[str, Any]] = None)
     `sigs`: its active signals. `check`: the latest clerk check for it
     ({"checked", "source", "matched", ...}) or None when its county's clerk
     notices are not read automatically (or no check has run yet)."""
-    from datetime import date
     from app.services.evosense import scoring as SC
-    today = today or date.today()
+    from app.services.evosense import work_priority as WP
+    today = today or WP.today_ct()          # the sale calendar is Central Time, not the server's UTC
     fc = [x for x in sigs if x.signal_type in FORECLOSURE_TYPES]
     prov = {x.id: (C.jload(x.provenance, {}) or {}) for x in fc}
 
@@ -476,6 +476,19 @@ def foreclosure_status(sigs, today=None, check: Optional[Dict[str, Any]] = None)
                               "address. Not proof there is none.")
 
 
+def _tax_sale_date(sigs) -> Optional[str]:
+    """The soonest SCHEDULED tax-sale date on a posted sale list (a cancelled
+    or struck-off sale is never a date to work toward)."""
+    dates = []
+    for s in sigs:
+        if s.signal_type != "TAX_SALE" or (s.case_status or "scheduled") not in ("scheduled", "", None):
+            continue
+        d = ((C.jload(s.provenance, {}) or {}).get("sale_date") or "")[:10]
+        if d:
+            dates.append(d)
+    return min(dates) if dates else None
+
+
 def tax_status(db, prop, sigs) -> Dict[str, Any]:
     t = [s for s in sigs if s.signal_type in TAX_TYPES]
     if t:
@@ -484,7 +497,8 @@ def tax_status(db, prop, sigs) -> Dict[str, Any]:
             else "DELINQUENT"
         s = max(t, key=lambda x: x.observed_at or C.now())
         return {"status": best, "detail": s.normalized_value or s.raw_value, "source": s.source,
-                "date": s.observed_at.strftime("%Y-%m-%d") if s.observed_at else None}
+                "date": s.observed_at.strftime("%Y-%m-%d") if s.observed_at else None,
+                "sale_date": _tax_sale_date(t)}
     ev = (db.query(EvoSenseEvent)
           .filter(EvoSenseEvent.organization_id == prop.organization_id, EvoSenseEvent.property_id == prop.id,
                   EvoSenseEvent.action == TAX_CHECK_EVENT)
@@ -674,7 +688,8 @@ def _tax_status_pre(pre, prop, sigs) -> Dict[str, Any]:
             else "DELINQUENT"
         x = max(t, key=lambda y: y.observed_at or C.now())
         return {"status": best, "detail": x.normalized_value or x.raw_value, "source": x.source,
-                "date": x.observed_at.strftime("%Y-%m-%d") if x.observed_at else None}
+                "date": x.observed_at.strftime("%Y-%m-%d") if x.observed_at else None,
+                "sale_date": _tax_sale_date(t)}
     ev = pre["tax_event"].get(prop.id)
     if ev is not None:
         d = C.jload(ev.details, {}) or {}
@@ -712,7 +727,7 @@ def rows(db, org_id: str, kind: str, *, sort: str = "priority") -> List[Dict[str
     return rows_for(db, org_id, members(db, org_id, kind), sort=sort, label=kind)
 
 
-def rows_for(db, org_id: str, ms: List[EvoSenseProperty], *, sort: str = "priority",
+def rows_for(db, org_id: str, ms: List[EvoSenseProperty], *, sort: str = "work",
              label: str = "properties") -> List[Dict[str, Any]]:
     """The list row builder for ANY set of properties (an imported list, a
     foreclosure month): same ranking, notice status, owner, tax and contacts."""
@@ -773,9 +788,17 @@ def rows_for(db, org_id: str, ms: List[EvoSenseProperty], *, sort: str = "priori
             "list_claims": _list_claims_pre(pre, p),
             "property_class": _pclass_view(p),
             "opportunity": opp.get(p.id),
+            # THE work-priority policy (work_priority.py) - same answer as every other screen
+            "work": ((opp.get(p.id) or {}).get("measures") or {}).get("row"),
         })
     rank = {"A": 0, "B": 1, "C": 2, "REVIEW": 3, "PARK": 4}
-    if sort == "group":
+    if sort in ("work", "priority"):
+        # DEFAULT: work priority (auction deadline first) - never the investment score
+        def wk(r):
+            return tuple((((r.get("opportunity") or {}).get("measures") or {}).get("work_priority") or {})
+                         .get("sort_key") or [999999, 0, r["id"]])
+        out.sort(key=wk)
+    elif sort == "group":
         out.sort(key=lambda r: (rank[r["priority"]], -(r["score"] or 0),
                                 r["foreclosure"]["days"] if r["foreclosure"]["days"] is not None else 9999,
                                 r["street_address"] or ""))
@@ -849,6 +872,7 @@ def summary(rs: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"groups": groups, "sale_dates": sale_dates, "score_buckets": dict(sorted(buckets.items(), key=lambda kv: int(kv[0].split("-")[0]))),
             "properties": len(rs), "owner": c("owner"), "tax": c("tax"), "foreclosure": c("foreclosure"),
             "priority": dict(Counter(r["priority"] for r in rs)),
+            "work_priority": dict(Counter(((r.get("work") or {}).get("work_priority") or "NORMAL") for r in rs)),
             "score": {"scored": len(scores), "max": max(scores) if scores else None,
                       "median": sorted(scores)[len(scores) // 2] if scores else None},
             "with_contacts": sum(1 for r in rs if r["contacts"]["phones"] or r["contacts"]["emails"]),

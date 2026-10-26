@@ -101,8 +101,8 @@ def label(month: str) -> str:
 
 
 def _today() -> date:
-    from zoneinfo import ZoneInfo
-    return datetime.now(ZoneInfo("America/Chicago")).date()
+    from app.services.evosense import work_priority as WP
+    return WP.today_ct()               # ONE clock: the policy's Central Time day
 
 
 # ── notices -> months ───────────────────────────────────────────────────────
@@ -562,13 +562,10 @@ def rows(db, org_id: str, month: str) -> List[Dict[str, Any]]:
         r["needs_attention"] = bool(flags) or st in ("conflict", "not_found", "outcome_unverified",
                                                      "no_longer_on_record", "reported_resolved") \
             or cstate in ("missing_owner", "identity_review")
-        # the three separate answers; auction urgency from THIS month's event status
-        from app.services.evosense import opportunity as OP
+        # the separate answers come from THE policy (work_priority.py) through the
+        # opportunity view - the same object the Inbox, Top 100 and property page
+        # read, so one property shows one urgency and one work priority everywhere
         m = dict(((r.get("opportunity") or {}).get("measures")) or {})
-        # a list date whose only clerk notice is for an EARLIER sale is a notice
-        # conflict, and urgent to verify when the sale is close
-        ust = "conflict" if st in ("claimed", "not_found") and earlier_notice.get(r["id"]) else st
-        m["auction_urgency"] = OP.auction_urgency(ust, r["auction"]["sale_date"], today=today)
         if "Ownership needs review" in flags and "Ownership requires review" not in (m.get("missing") or []):
             m["missing"] = list(m.get("missing") or []) + ["Ownership requires review"]
         r["measures"] = m
@@ -577,7 +574,14 @@ def rows(db, org_id: str, month: str) -> List[Dict[str, Any]]:
 
 
 SORTS = {
+    # DEFAULT: the work priority (auction deadline first), then sale date, then
+    # who is ready, then the investment evidence score, then id - deterministic
+    "work": lambda r: tuple(_m(r, "work_priority").get("sort_key") or [999999, 0, r.get("id") or ""]),
     "opportunity": lambda r: (r.get("rank") or 9999,),
+    "investment": lambda r: (-(r.get("score") or 0), r.get("id") or ""),
+    "county": lambda r: ((r.get("county") or "~"), tuple(_m(r, "work_priority").get("sort_key") or [999999])),
+    "property_type": lambda r: (((r.get("property_class") or {}).get("category") or "~"),
+                                tuple(_m(r, "work_priority").get("sort_key") or [999999])),
     "auction_date": lambda r: ((r["auction"]["sale_date"] or "9999"), r.get("rank") or 9999),
     "urgent": lambda r: (-(((r.get("opportunity") or {}).get("urgency") or {}).get("value") or 0), r.get("rank") or 9999),
     "recently_verified": lambda r: (-(_ts((r.get("foreclosure") or {}).get("observed"))), r.get("rank") or 9999),
@@ -594,8 +598,8 @@ SORTS = {
     "confidence": lambda r: (_CONF_ORDER.get(_m(r, "data_confidence").get("level"), 9), r.get("rank") or 9999),
     "next_action": lambda r: (WORK_ORDER.get(work_bucket(r), 9), r.get("rank") or 9999),
 }
-_URG_ORDER = {"HIGH": 0, "VERIFY": 1, "MEDIUM": 2, "UNVERIFIED": 3, "LOW": 4, "PASSED": 5, "POSTPONED": 6,
-              "NONE": 7, "CANCELED": 8, "COMPLETED": 8}
+_URG_ORDER = {"CRITICAL": 0, "URGENT_VERIFY": 1, "UPCOMING": 2, "VERIFY": 3, "OUTCOME_UNVERIFIED": 4,
+              "POSTPONED": 5, "NONE": 6, "CANCELED": 7, "COMPLETED": 7}
 _POT_ORDER = {"HIGH": 0, "MEDIUM": 1, "UNKNOWN": 2, "INSUFFICIENT": 3, "LOW": 4}
 _CONF_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
 
@@ -606,6 +610,7 @@ def _m(r: Dict[str, Any], key: str) -> Dict[str, Any]:
 
 # ── quick filters (all combine with county / month / type / foreclosure type) ──
 QUICK = {
+    "critical": "Critical — act now",
     "urgent_auctions": "Urgent auctions",
     "high_potential": "High-potential deals",
     "needs_financial": "Needs financial research",
@@ -617,6 +622,8 @@ QUICK = {
 
 def quick_match(r: Dict[str, Any], key: str) -> bool:
     au, dp = _m(r, "auction_urgency"), _m(r, "deal_potential")
+    if key == "critical":
+        return _m(r, "work_priority").get("level") == "CRITICAL"
     if key == "urgent_auctions":
         return bool(au.get("urgent"))
     if key == "high_potential":
@@ -655,7 +662,7 @@ def work_bucket(r: Dict[str, Any]) -> Optional[str]:
     acq = r["acquisition"]["key"]
     if acq in ("contract", "closed", "not_pursuing") or r["contact_state"]["key"] == "restricted":
         return None
-    upcoming = au.get("level") in ("HIGH", "MEDIUM", "LOW") and au.get("days") is not None and au["days"] >= 0
+    upcoming = au.get("level") in ("CRITICAL", "UPCOMING") and au.get("days") is not None and au["days"] >= 0
     if upcoming and acq not in _ACTIVE:
         if r["contact_state"]["key"] in ("contact_found", "outreach_eligible"):
             return "verified_with_contact"
@@ -663,7 +670,7 @@ def work_bucket(r: Dict[str, Any]) -> Optional[str]:
             return "verified_no_contact"
     owner_review = r["contact_state"]["key"] in ("missing_owner", "identity_review") or \
         any("Ownership" in f for f in r["auction"]["flags"])
-    if au.get("level") == "VERIFY" or (owner_review and (upcoming or au.get("level") == "UNVERIFIED")):
+    if au.get("level") in ("URGENT_VERIFY", "VERIFY") or (owner_review and upcoming):
         return "needs_review"
     if not dp.get("assessed") and (dp.get("indicators") or {}).get("reading") == "strong" and acq not in _ACTIVE:
         return "research_financials"
@@ -740,13 +747,16 @@ def filter_rows(rs: List[Dict[str, Any]], f: Dict[str, Any]) -> List[Dict[str, A
         out = [r for r in out if r["needs_attention"]]
     if f.get("carried") == "yes":
         out = [r for r in out if r["auction"]["carried"]]
+    if f.get("priority"):
+        want = {x.strip().upper() for x in str(f["priority"]).split(",") if x.strip()}
+        out = [r for r in out if (_m(r, "work_priority").get("level") or "NORMAL") in want]
     if f.get("quick"):
         for key in [k for k in f["quick"].split(",") if k in QUICK]:
             out = [r for r in out if quick_match(r, key)]
     if f.get("deals") == "yes":
         out = [r for r in out if r["acquisition"]["key"] not in ("not_contacted", "attempted", "not_pursuing")
                or r["financial"]["key"] != "missing"]
-    out = sorted(out, key=SORTS.get(f.get("sort") or "opportunity", SORTS["opportunity"]))
+    out = sorted(out, key=SORTS.get(f.get("sort") or "work", SORTS["work"]))
     return out
 
 
@@ -792,6 +802,7 @@ def summary(db, org_id: str, month: str) -> Dict[str, Any]:
             "auction_urgency": dict(Counter(_m(r, "auction_urgency").get("level") or "NONE" for r in rs).most_common()),
             "deal_potential": dict(Counter(_m(r, "deal_potential").get("level") or "UNKNOWN" for r in rs).most_common()),
             "data_confidence": dict(Counter(_m(r, "data_confidence").get("level") or "LOW" for r in rs).most_common()),
+            "work_priority": dict(Counter(_m(r, "work_priority").get("level") or "NORMAL" for r in rs).most_common()),
             "quick": {k: {"label": v, "count": sum(1 for r in rs if quick_match(r, k))} for k, v in QUICK.items()},
         },
         "statuses": {k: {"count": v, "label": STATUS.get(k, k)} for k, v in st.items()},

@@ -25,6 +25,7 @@ import { Alert, Chips, Empty, EvoApp, Hero, Panel, Ring, Skeleton, Tag } from '.
 import '../ds/evo-pages.css'
 import { ContactBatchPanel } from './Acquire'
 import { PropertyTypeSelect, TypeLabel } from './ptypes'
+import { WorkCell, WORK_OPTIONS } from './Measures'
 import './evo-actions.css'
 
 const PRIORITY = { A: 'A — act now', B: 'B — strong', C: 'C — watch', REVIEW: 'Review', PARK: 'Park' }
@@ -39,7 +40,8 @@ const LABEL = { CLAIMED: 'Claimed — source supplied', 'VERIFIED NOTICE': 'Veri
   'NO NOTICE FOUND': 'No clerk notice found', 'NO EVIDENCE': 'No evidence on file', CONFLICT: 'Conflict' }
 const GROUPS = ['A', 'B', 'C', 'D', 'E']
 const FILTERS = [
-  ['priority', 'Priority', ['A', 'B', 'C', 'REVIEW', 'PARK']],
+  ['work', 'Work priority', WORK_OPTIONS.map(([k]) => k)],
+  ['priority', 'List group', ['A', 'B', 'C', 'REVIEW', 'PARK']],
   ['owner', 'Owner', ['VERIFIED', 'UNVERIFIED', 'CONFLICT', 'NO OWNER']],
   ['tax', 'Taxes', ['TAX SALE', 'TAX LAWSUIT', 'DELINQUENT', 'CURRENT', 'NOT CHECKED']],
   ['foreclosure', 'Foreclosure', ['VERIFIED NOTICE', 'CLAIMED', 'CONFLICT', 'POSTPONED', 'CANCELED', 'RESOLVED',
@@ -164,7 +166,7 @@ export default function EvoCohort() {
   const get = (k) => params.get(k) || ''
   const set = (k, v) => { const p = new URLSearchParams(params); if (v) p.set(k, v); else p.delete(k); setParams(p, { replace: true }) }
   const queue = get('queue') === '1'
-  const sort = get('sort') || 'priority'
+  const sort = get('sort') || 'work'
   const county = get('county')
   const topN = get('top')
 
@@ -172,6 +174,7 @@ export default function EvoCohort() {
     if (!data) return []
     let rs = data.rows.filter((r) =>
       (!get('priority') || r.priority === get('priority')) &&
+      (!get('work') || (r.work?.work_priority || 'NORMAL') === get('work')) &&
       (!get('owner') || r.owner.status === get('owner')) &&
       (!get('tax') || r.tax.status === get('tax')) &&
       (!get('foreclosure') || r.foreclosure.status === get('foreclosure')) &&
@@ -179,8 +182,8 @@ export default function EvoCohort() {
       (!county || r.county === county) &&
       (!get('ptype') || ((r.property_class?.category || 'unknown') === get('ptype'))) &&
       (!get('psubtype') || r.property_class?.subtype === get('psubtype')) &&
-      (!queue || (r.owner.status === 'VERIFIED' && ['A', 'B', 'C'].includes(r.priority))))
-    // "priority" keeps the server's order: the universal opportunity rank
+      (!queue || ['CRITICAL', 'REVIEW_URGENT', 'HIGH'].includes(r.work?.work_priority)))
+    // "work" keeps the server's order: THE work priority (auction deadline first)
     const grp = { A: 0, B: 1, C: 2, REVIEW: 3, PARK: 4 }
     if (sort === 'group') rs = rs.slice().sort((a, b) => (grp[a.priority] - grp[b.priority]) || ((b.score ?? -1) - (a.score ?? -1)))
     if (sort === 'urgency') rs = rs.slice().sort((a, b) => (b.opportunity?.urgency?.value ?? -1) - (a.opportunity?.urgency?.value ?? -1))
@@ -266,10 +269,10 @@ export default function EvoCohort() {
       {s ? (
         <Panel title="Where the list stands">
           <div className="evo-chips" style={{ flexWrap: 'wrap', gap: 8 }}>
-            {FILTERS.map(([k, label]) => Object.entries(k === 'priority' ? s.priority : s[k] || {}).map(([v, n]) => (
+            {FILTERS.map(([k, label]) => Object.entries(k === 'priority' ? s.priority : k === 'work' ? (s.work_priority || {}) : s[k] || {}).map(([v, n]) => (
               <button key={k + v} type="button" className="evo-bucketbtn" aria-pressed={get(k) === v}
                       onClick={() => set(k, get(k) === v ? '' : v)}>
-                {label}: {k === 'priority' ? PRIORITY[v] : (LABEL[v] || v)} <span className="evo-seg__n">({n})</span>
+                {label}: {k === 'priority' ? PRIORITY[v] : k === 'work' ? Object.fromEntries(WORK_OPTIONS)[v] : (LABEL[v] || v)} <span className="evo-seg__n">({n})</span>
               </button>
             )))}
           </div>
@@ -284,13 +287,13 @@ export default function EvoCohort() {
         <div className="evo-filterbar">
           <label className="evo-small" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <input type="checkbox" checked={queue} onChange={(e) => set('queue', e.target.checked ? '1' : '')} />
-            Work queue — verified owner, priority A–C
+            Work queue — critical, urgent review and high work priority
           </label>
           {FILTERS.map(([k, label, vals]) => (
             <label key={k}><span className="evo-sr">{label}</span>
               <select className="evo-select" value={get(k)} onChange={(e) => set(k, e.target.value)}>
                 <option value="">{label}: all</option>
-                {vals.map((v) => <option key={v} value={v}>{k === 'priority' ? PRIORITY[v] : (LABEL[v] || v)}</option>)}
+                {vals.map((v) => <option key={v} value={v}>{k === 'priority' ? PRIORITY[v] : k === 'work' ? Object.fromEntries(WORK_OPTIONS)[v] : (LABEL[v] || v)}</option>)}
               </select>
             </label>
           ))}
@@ -313,11 +316,11 @@ export default function EvoCohort() {
           </label>
           <label><span className="evo-sr">Sort</span>
             <select className="evo-select" value={sort} onChange={(e) => set('sort', e.target.value)}>
-              <option value="priority">Overall priority (rank)</option>
-              <option value="urgency">Most urgent</option>
+              <option value="work">Work priority — auction deadline first</option>
+              <option value="sale">Auction date</option>
+              <option value="score">Investment evidence score</option>
+              <option value="urgency">Most urgent (blend)</option>
               <option value="group">List groups A–C, then score</option>
-              <option value="score">Highest score</option>
-              <option value="sale">Soonest sale date</option>
               <option value="address">Address A–Z</option>
             </select>
           </label>
@@ -332,9 +335,9 @@ export default function EvoCohort() {
                 <tr>
                   <th scope="col" className="is-num">#</th>
                   <th scope="col">Property</th>
-                  <th scope="col" title="Documented blend of seller opportunity, urgency, economics and engagement - not a probability">Priority</th>
-                  <th scope="col" className="is-num">Score</th>
-                  <th scope="col">Urgency · money · evidence</th>
+                  <th scope="col" title="Auction deadline first - the foreclosure work-priority policy">Work priority</th>
+                  <th scope="col" className="is-num" title="Distress and evidence points - not the auction priority">Investment evidence score</th>
+                  <th scope="col">Deal potential · money · evidence</th>
                   <th scope="col">Owner now</th>
                   <th scope="col">Taxes</th>
                   <th scope="col">Foreclosure sale</th>
@@ -355,18 +358,16 @@ export default function EvoCohort() {
                       </span>
                       <span className="evo-prop__sub" style={{ display: 'block' }}><TypeLabel pc={r.property_class} /></span>
                     </td>
-                    <td data-label="Priority" title={r.opportunity?.priority?.why || ''}>
-                      {r.opportunity?.priority?.value != null ? <b>{r.opportunity.priority.value}</b> : <span className="evo-muted">—</span>}
-                      <span className="evo-prop__sub" style={{ display: 'block' }}>{PRIORITY[r.priority]}</span>
+                    <td data-label="Work priority"><WorkCell w={r.work} />
+                      <span className="evo-prop__sub" style={{ display: 'block' }}>List group: {PRIORITY[r.priority]}</span>
                     </td>
-                    <td className="is-num" data-label="Score" title={[...r.earned.map((f) => `+${f.points} ${f.label}`), ...r.held_back].join('\n')}>
+                    <td className="is-num" data-label="Investment evidence score" title={[...r.earned.map((f) => `+${f.points} ${f.label}`), ...r.held_back].join('\n')}>
                       <Ring kind="opportunity" value={r.score} />
                     </td>
-                    <td data-label="Urgency · money · evidence" className="is-stack">
+                    <td data-label="Deal potential · money · evidence" className="is-stack">
                       {r.opportunity ? (
                         <>
-                          <span className="evo-small" style={{ display: 'block' }}><b>Urgency {r.opportunity.urgency.label}</b>
-                            {r.opportunity.urgency.deadline ? ` · ${r.opportunity.urgency.deadline}` : ''}</span>
+                          <span className="evo-small" style={{ display: 'block' }}><b>{r.opportunity.measures?.deal_potential?.label || ''}</b></span>
                           <span className="evo-prop__sub" style={{ display: 'block', whiteSpace: 'normal' }}
                                 title={(r.opportunity.economics.needs || []).join(' · ')}>
                             {r.opportunity.economics.headline}</span>

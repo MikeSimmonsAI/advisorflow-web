@@ -9,6 +9,7 @@ from app.services.evosense import evaluate as EV
 from app.services.evosense import foreclosure_cycles as F
 from app.services.evosense import opportunity as OP
 from app.services.evosense import scoring as SC
+from app.services.evosense import work_priority as WP
 
 from tests.test_evosense_discovery_types import _P, _stacked
 from tests.test_evosense_foreclosure_cycles import TODAY, world  # noqa: F401 - fixture
@@ -61,20 +62,20 @@ def test_every_score_explains_itself_with_the_engines_points():
 
 def test_a_verified_imminent_auction_is_high_urgency_whatever_the_numbers():
     au = OP.auction_urgency("VERIFIED NOTICE", "2026-11-03", today=date(2026, 10, 25))
-    assert au["level"] == "HIGH" and au["urgent"] and au["days"] == 9
-    assert OP.auction_urgency("notice_verified", "2026-11-20", today=date(2026, 10, 25))["level"] == "MEDIUM"
+    assert au["level"] == "CRITICAL" and au["urgent"] and au["days"] == 9 and au["label"] == "CRITICAL — 9 DAYS"
+    assert OP.auction_urgency("notice_verified", "2026-11-20", today=date(2026, 10, 25))["level"] == "UPCOMING"
 
 
 def test_conflicts_postponements_claims_and_passed_dates_are_never_called_scheduled():
     t = date(2026, 10, 25)
     c = OP.auction_urgency("conflict", "2026-11-03", today=t)
-    assert c["label"] == "URGENT - VERIFY NOTICE" and c["urgent"]
+    assert c["label"].startswith("URGENT — VERIFY NOTICE") and c["urgent"]
     p = OP.auction_urgency("postponed", "2026-11-03", today=t)
-    assert p["level"] == "POSTPONED" and not p["urgent"] and "NOT SCHEDULED" in p["label"]
+    assert p["level"] == "POSTPONED" and not p["urgent"]
     claim = OP.auction_urgency("CLAIMED", "2026-11-03", today=t)
-    assert claim["level"] == "UNVERIFIED" and not claim["urgent"]           # a list date is not a verified notice
+    assert claim["level"] == "URGENT_VERIFY" and not claim["verified"]     # a list date is never a verified notice
     gone = OP.auction_urgency("notice_verified", "2026-10-06", today=t)
-    assert gone["level"] == "PASSED" and "NOT VERIFIED" in gone["label"]    # never "completed" by the calendar
+    assert gone["level"] == "OUTCOME_UNVERIFIED" and gone["label"] == "OUTCOME UNVERIFIED"   # never "completed" by the calendar
 
 
 def test_missing_financials_never_invent_profit_and_unknown_is_not_low():
@@ -105,6 +106,7 @@ def test_missing_inputs_are_listed_separately():
 def test_fcc_rows_carry_the_three_measures_and_urgent_unknown_potential_stays_in_the_queue(world, monkeypatch):  # noqa: F811
     db, org = world["db"], world["org"]
     monkeypatch.setattr(F, "_today", lambda: TODAY)
+    monkeypatch.setattr(WP, "today_ct", lambda: TODAY)
     F.start_month(db, org, "2026-11")
     db.commit()
     F._CACHE.clear()
@@ -112,11 +114,14 @@ def test_fcc_rows_carry_the_three_measures_and_urgent_unknown_potential_stays_in
     assert len(rs) == 4                                                     # nothing dropped
     a = {r["id"]: r for r in rs}[world["a"].id]
     m = a["measures"]
-    assert m["auction_urgency"]["level"] == "HIGH" and m["deal_potential"]["level"] == "UNKNOWN"
+    assert m["auction_urgency"]["level"] == "CRITICAL" and m["deal_potential"]["level"] == "UNKNOWN"
+    assert m["work_priority"]["level"] == "CRITICAL"
     assert m["data_confidence"]["level"] in ("HIGH", "MEDIUM", "LOW") and m["explanation"]["lines"]
     urgent = F.filter_rows(rs, {"quick": "urgent_auctions"})
     assert world["a"].id in {r["id"] for r in urgent}
-    assert world["c"].id not in {r["id"] for r in urgent}                   # the list's claim is not urgent-verified
+    c = {r["id"]: r for r in rs}[world["c"].id]["measures"]                 # the list's claim: verify, never "verified"
+    assert c["auction_urgency"]["level"] == "URGENT_VERIFY" and c["work_priority"]["level"] == "REVIEW_URGENT"
+    assert world["c"].id not in {r["id"] for r in F.filter_rows(rs, {"quick": "critical"})}
     assert {r["id"] for r in F.filter_rows(rs, {"quick": "needs_financial"})} == {r["id"] for r in rs}
     both = F.filter_rows(rs, {"quick": "urgent_auctions", "county": "Tarrant"})
     assert {r["id"] for r in both} == {world["b"].id}                       # quick filters combine with county
@@ -125,13 +130,14 @@ def test_fcc_rows_carry_the_three_measures_and_urgent_unknown_potential_stays_in
     assert len(placed) == len(set(placed))                                  # one group per property
     assert world["a"].id in placed                                          # unknown potential, still worked
     by_urg = F.filter_rows(rs, {"sort": "urgency"})
-    assert by_urg[0]["measures"]["auction_urgency"]["level"] in ("HIGH", "VERIFY")
+    assert by_urg[0]["measures"]["auction_urgency"]["level"] in ("CRITICAL", "URGENT_VERIFY")
     s = F.summary(db, org, "2026-11")
     assert sum(s["measures"]["auction_urgency"].values()) == 4 and "urgent_auctions" in s["measures"]["quick"]
 
 
 def test_the_work_view_and_list_api_expose_measures(client, auth_headers, world, monkeypatch):  # noqa: F811
     monkeypatch.setattr(F, "_today", lambda: TODAY)
+    monkeypatch.setattr(WP, "today_ct", lambda: TODAY)
     db, org = world["db"], world["org"]
     F.start_month(db, org, "2026-11")
     db.commit()
