@@ -322,13 +322,13 @@ export function ScoreWhy({ score }) {
 // ── status: one vocabulary for the whole product ────────────────────────────
 const STATUS = {
   // EvoSense buckets
-  needs_you: ['needs', 'Needs You'], new: ['quiet', 'New'], high_opportunity: ['info', 'High Opportunity'],
+  needs_you: ['needs', 'Needs You'], new: ['quiet', 'New'], high_opportunity: ['info', 'High Investment Evidence'],
   needs_enrichment: ['attention', 'Needs Approval'], budget_blocked: ['attention', 'Budget Blocked'],
   waiting_for_data: ['attention', 'Waiting for Data'], contact_found: ['info', 'Contact Found'],
   ready_for_outreach: ['good', 'Ready for Outreach'], outreach_active: ['active', 'Outreach Active'],
   responded: ['good', 'Seller Replied'], nurture: ['violet', 'Nurture'], suppressed: ['bad', 'Suppressed'],
   needs_review: ['attention', 'Needs Review'], promoted: ['good', 'In Deal Operations'],
-  low_opportunity: ['quiet', 'Below Threshold'], closed_out: ['quiet', 'Closed Out'],
+  low_opportunity: ['quiet', 'Below Investment Threshold'], closed_out: ['quiet', 'Closed Out'],
   // Wholesale deal stages
   new_property: ['quiet', 'New Property'], owner_identified: ['info', 'Owner Identified'],
   enrichment_needed: ['attention', 'Enrichment Needed'], seller_engaged: ['good', 'Seller Engaged'],

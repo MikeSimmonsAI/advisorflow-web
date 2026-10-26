@@ -13,6 +13,10 @@ Each function is pure (inputs in, result out) and returns:
      "inputs": {...}, "version": "..."}
 `value` is None when the honest answer is INSUFFICIENT EVIDENCE.
 
+The opportunity score is the INVESTMENT EVIDENCE score. It never decides the
+order foreclosures are worked in - see docs/wholesale/FORECLOSURE_PRIORITY_POLICY.md
+and work_priority.py (verified imminent auctions first, whatever this score).
+
 CHANGING A FORMULA: bump the version string. `record()` stores every result
 with its version and inputs, so history computed under v1 stays v1.
 """

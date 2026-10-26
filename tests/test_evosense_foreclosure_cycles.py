@@ -8,6 +8,7 @@ from app.models.evosense_models import (EvoSenseAuctionCycle, EvoSenseAuctionEve
                                         EvoSenseOwner, EvoSenseOwnership, EvoSenseProperty, EvoSenseSignal)
 from app.services.evosense import common as C
 from app.services.evosense import foreclosure_cycles as F
+from app.services.evosense import work_priority as WP
 
 TODAY = date(2026, 10, 25)
 
@@ -89,6 +90,7 @@ def test_start_month_is_idempotent_and_links_each_property_once(world):
 def test_statuses_come_from_the_notices_and_the_calendar_never_decides(world, monkeypatch):
     db, org = world["db"], world["org"]
     monkeypatch.setattr(F, "_today", lambda: TODAY)
+    monkeypatch.setattr(WP, "today_ct", lambda: TODAY)
     F.start_month(db, org, "2026-11", )
     F.start_month(db, org, "2026-10")
     db.commit()
@@ -103,6 +105,7 @@ def test_statuses_come_from_the_notices_and_the_calendar_never_decides(world, mo
 def test_a_property_in_two_months_keeps_both_notices_and_is_flagged(world, monkeypatch):
     db, org = world["db"], world["org"]
     monkeypatch.setattr(F, "_today", lambda: TODAY)
+    monkeypatch.setattr(WP, "today_ct", lambda: TODAY)
     F.start_month(db, org, "2026-11")
     F.start_month(db, org, "2026-12")
     db.commit()
@@ -120,6 +123,7 @@ def test_a_property_in_two_months_keeps_both_notices_and_is_flagged(world, monke
 def test_a_person_records_a_postponement_with_evidence_and_history_is_kept(world, monkeypatch, sample_advisor):
     db, org = world["db"], world["org"]
     monkeypatch.setattr(F, "_today", lambda: TODAY)
+    monkeypatch.setattr(WP, "today_ct", lambda: TODAY)
     F.start_month(db, org, "2026-11")
     db.commit()
     ev = db.query(EvoSenseAuctionEvent).filter(EvoSenseAuctionEvent.property_id == world["a"].id).one()
@@ -143,6 +147,7 @@ def test_a_person_records_a_postponement_with_evidence_and_history_is_kept(world
 def test_postponed_without_a_new_date_is_carried_into_the_next_month_once(world, monkeypatch, sample_advisor):
     db, org = world["db"], world["org"]
     monkeypatch.setattr(F, "_today", lambda: TODAY)
+    monkeypatch.setattr(WP, "today_ct", lambda: TODAY)
     F.start_month(db, org, "2026-11")
     ev = db.query(EvoSenseAuctionEvent).filter(EvoSenseAuctionEvent.property_id == world["d"].id).one()
     F.record_status(db, org, ev.id, "postponed", evidence="Clerk shows a rescission of the posting", user=sample_advisor)
@@ -160,6 +165,7 @@ def test_postponed_without_a_new_date_is_carried_into_the_next_month_once(world,
 def test_canceled_and_sold_need_evidence_and_never_touch_the_notice(world, monkeypatch, sample_advisor):
     db, org = world["db"], world["org"]
     monkeypatch.setattr(F, "_today", lambda: TODAY)
+    monkeypatch.setattr(WP, "today_ct", lambda: TODAY)
     F.start_month(db, org, "2026-11")
     ev = db.query(EvoSenseAuctionEvent).filter(EvoSenseAuctionEvent.property_id == world["b"].id).one()
     with pytest.raises(ValueError):
@@ -177,6 +183,7 @@ def test_canceled_and_sold_need_evidence_and_never_touch_the_notice(world, monke
 def test_summary_cards_count_the_real_rows(world, monkeypatch):
     db, org = world["db"], world["org"]
     monkeypatch.setattr(F, "_today", lambda: TODAY)
+    monkeypatch.setattr(WP, "today_ct", lambda: TODAY)
     F.start_month(db, org, "2026-11")
     db.commit()
     F._CACHE.clear()
@@ -193,6 +200,7 @@ def test_summary_cards_count_the_real_rows(world, monkeypatch):
 def test_list_filters_views_and_ranking_reuse_the_engine(world, monkeypatch):
     db, org = world["db"], world["org"]
     monkeypatch.setattr(F, "_today", lambda: TODAY)
+    monkeypatch.setattr(WP, "today_ct", lambda: TODAY)
     F.start_month(db, org, "2026-11")
     db.commit()
     F._CACHE.clear()
@@ -207,6 +215,7 @@ def test_list_filters_views_and_ranking_reuse_the_engine(world, monkeypatch):
 def test_history_keeps_every_month(world, monkeypatch):
     db, org = world["db"], world["org"]
     monkeypatch.setattr(F, "_today", lambda: TODAY)
+    monkeypatch.setattr(WP, "today_ct", lambda: TODAY)
     for m in ("2026-10", "2026-11", "2026-12"):
         F.start_month(db, org, m)
     db.commit()
@@ -221,6 +230,7 @@ def test_a_contact_batch_can_be_built_from_a_month(world, monkeypatch):
     from app.services.evosense import contact_batch as CB
     db, org = world["db"], world["org"]
     monkeypatch.setattr(F, "_today", lambda: TODAY)
+    monkeypatch.setattr(WP, "today_ct", lambda: TODAY)
     F.start_month(db, org, "2026-11")
     db.commit()
     pf = CB.preflight(db, org, "cycle:2026-11")
@@ -249,6 +259,7 @@ def test_the_scheduler_prepares_refreshes_and_completes_months_safely(world, mon
     db.add(EvoSenseControl(organization_id=org))
     db.commit()
     monkeypatch.setattr(F, "_today", lambda: TODAY)
+    monkeypatch.setattr(WP, "today_ct", lambda: TODAY)
     first = F.auto(db, today=TODAY)
     assert first.get("prepared") == 1 and F.get_cycle(db, org, "2026-11") is not None
     second = F.auto(db, today=TODAY)                                  # restart / next pass: nothing doubles
@@ -263,6 +274,7 @@ def test_the_scheduler_prepares_refreshes_and_completes_months_safely(world, mon
 def test_a_list_date_with_only_an_earlier_clerk_notice_is_a_conflict_to_review(db_session, sample_org, monkeypatch):
     db, org = db_session, sample_org.id
     monkeypatch.setattr(F, "_today", lambda: TODAY)
+    monkeypatch.setattr(WP, "today_ct", lambda: TODAY)
     p = _prop(db, org, 9)
     _notice(db, p, "2026-10-06", "OCT-ONLY")                                  # the clerk's notice
     _notice(db, p, "2026-11-03", "LIST-NOV", source="csv_import", claim=True)  # the list's date
@@ -274,7 +286,7 @@ def test_a_list_date_with_only_an_earlier_clerk_notice_is_a_conflict_to_review(d
     assert any("October 2026, not this month - notice needs review" in f for f in r["auction"]["flags"])
     assert F.summary(db, org, "2026-11")["cards"]["verified"]["conflict"] == 1
     au = r["measures"]["auction_urgency"]
-    assert au["label"] == "URGENT - VERIFY NOTICE" and au["urgent"]          # never "scheduled", never hidden
+    assert au["label"].startswith("URGENT — VERIFY NOTICE") and au["urgent"]   # never "scheduled", never hidden
     assert F.filter_rows([r], {"quick": "notice_conflicts"}) == [r]
 
 
@@ -282,6 +294,7 @@ def test_a_month_of_200_properties_builds_quickly(db_session, sample_org, monkey
     import time
     db, org = db_session, sample_org.id
     monkeypatch.setattr(F, "_today", lambda: TODAY)
+    monkeypatch.setattr(WP, "today_ct", lambda: TODAY)
     for n in range(200):
         _notice(db, _prop(db, org, 100 + n), "2026-11-03", "PERF-%d" % n)
     db.commit()
@@ -302,6 +315,7 @@ def test_a_month_of_200_properties_builds_quickly(db_session, sample_org, monkey
 def test_property_type_filters_combine_with_county_and_month(world, monkeypatch):
     db, org = world["db"], world["org"]
     monkeypatch.setattr(F, "_today", lambda: TODAY)
+    monkeypatch.setattr(WP, "today_ct", lambda: TODAY)
     world["a"].property_category, world["a"].property_subtype = "commercial", "office"
     world["b"].property_category = "land"
     db.commit()

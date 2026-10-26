@@ -372,7 +372,7 @@ export default function EvoProperty() {
           f.physical.bathrooms ? { label: `${f.physical.bathrooms} full bath${Number(f.physical.bathrooms) === 1 ? '' : 's'}${f.physical.half_bathrooms ? ` + ${f.physical.half_bathrooms} half` : ''}` } : null,
           f.physical.square_feet ? { label: `${Number(f.physical.square_feet).toLocaleString()} sq ft` } : null,
         ]}
-        score={<><Ring kind="opportunity" size="lg" value={p.opportunity_score} /><span>Opportunity score</span></>}
+        score={<><Ring kind="opportunity" size="lg" value={p.opportunity_score} /><span>Investment evidence score</span></>}
       />
 
       <section className="evo-phero" aria-label="Property snapshot">
@@ -968,7 +968,7 @@ function evidenceLine(e) {
 }
 
 function k2name(k) {
-  return { opportunity: 'Property Opportunity', contact: 'Contact Confidence', intent: 'Seller Intent' }[k]
+  return { opportunity: 'Investment evidence score', contact: 'Contact Confidence', intent: 'Seller Intent' }[k]
 }
 
 function FragmentKV({ k, v }) {

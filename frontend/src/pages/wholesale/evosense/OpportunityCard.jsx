@@ -26,12 +26,11 @@ export default function OpportunityCard({ o, q }) {
   const e = o.economics || {}
   const pr = o.priority || {}
   return (
-    <Panel title="Opportunity" id="opportunity" data-testid="opportunity-card"
+    <Panel title="Work priority & opportunity" id="opportunity" data-testid="opportunity-card"
            hint="Rules-based - not a probability of contract or closing">
       <div className="evo-chips" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-        <span className="evo-tag"><b>Priority {pr.value ?? '—'}</b>{pr.label ? ` · ${pr.label}` : ''}</span>
-        <span className="evo-tag">Seller opportunity <b>&nbsp;{o.seller_opportunity?.value ?? '—'}</b></span>
-        <span className="evo-tag">Urgency <b>&nbsp;{o.urgency?.label}</b>{o.urgency?.deadline ? ` · sale ${o.urgency.deadline}` : ''}</span>
+        <span className="evo-tag" title="Older evidence blend - the work priority above decides the order">Evidence blend {pr.value ?? '—'}</span>
+        <span className="evo-tag">Investment evidence score <b>&nbsp;{o.seller_opportunity?.value ?? '—'}</b></span>
         <Tag kind={CONF_TONE[o.confidence?.label]}>{o.confidence?.label} evidence</Tag>
         <span className="evo-tag">Engagement: {o.engagement?.label}</span>
         <span className="evo-tag">Stage: {o.workflow_state?.label}</span>
