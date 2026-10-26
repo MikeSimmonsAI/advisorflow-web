@@ -116,6 +116,91 @@ def from_state_code(code: Optional[str]) -> Optional[Tuple[str, Optional[str]]]:
     return None
 
 
+# ── what a county READER may bring into Discovery ──────────────────────────
+# The kinds of property EvoSense acquires. G/J/L/N/S/X accounts (minerals,
+# utilities, business personal property, exempt) are never imported.
+TARGET_CATEGORIES = ("residential", "multifamily", "commercial", "industrial", "land", "agricultural")
+# a strategy's legacy type words -> the category they ask for
+_TYPE_TO_CATEGORY = {"single_family": "residential", "duplex": "residential", "triplex": "residential",
+                     "fourplex": "residential", "condo": "residential", "townhouse": "residential",
+                     "mobile_home": "residential", "multifamily": "multifamily", "land": "land",
+                     "commercial": "commercial", "industrial": "industrial", "agricultural": "agricultural"}
+
+
+def reader_category(code: Optional[str]) -> Tuple[Optional[str], Optional[str], str]:
+    """A county row's own category code -> (category, subtype, outcome).
+    outcome: "target" (a kind EvoSense acquires), "not_target" (minerals,
+    utilities, personal property, exempt), or "no_code" (missing / unreadable -
+    never assumed to be a house)."""
+    m = from_state_code(code)
+    if m is None:
+        return None, None, "no_code"
+    if m[0] not in TARGET_CATEGORIES:
+        return None, None, "not_target"
+    return m[0], m[1], "target"
+
+
+def legacy_type_for(code: Optional[str]) -> Optional[str]:
+    """The older single `property_type` word a reader stores beside the code -
+    only where the code says it plainly (A1 a house, B1 apartments, C land, F1
+    commercial). Anything else is left empty; the code is the evidence."""
+    c = re.sub(r"[^A-Z0-9]", "", (code or "").upper())
+    if c[:2] == "A1" or c == "A":
+        return "single_family"
+    if c[:2] == "A2" or c[:1] == "M":
+        return "mobile_home"
+    if c[:2] == "B1":
+        return "multifamily"
+    if c[:1] in ("C", "E"):
+        return "land"
+    if c[:2] == "F1":
+        return "commercial"
+    if c[:2] == "F2":
+        return "industrial"
+    if c[:1] == "D":
+        return "agricultural"
+    return None
+
+
+def query_categories(query: Dict[str, Any]) -> Tuple[str, ...]:
+    """Which categories a hunt's strategy asks for. "Houses only" -> residential;
+    a type list -> the categories those types are; no list -> every target type."""
+    if query.get("houses_only"):
+        return ("residential",)
+    types = [t for t in (query.get("property_types") or []) if t]
+    if not types:
+        return TARGET_CATEGORIES
+    cats = {_TYPE_TO_CATEGORY[t] for t in types if t in _TYPE_TO_CATEGORY}
+    return tuple(c for c in TARGET_CATEGORIES if c in cats) or ("residential",)
+
+
+def strategy_type_key(prop) -> Optional[str]:
+    """The strategy-type word to test this property against: the stored type
+    when there is one, else the one its county category says (unknown -> None)."""
+    t = getattr(prop, "property_type", None)
+    if t:
+        return t
+    cat = getattr(prop, "property_category", None)
+    if cat in ("multifamily", "commercial", "industrial", "land", "agricultural"):
+        return cat
+    if cat == "residential":
+        sub = getattr(prop, "property_subtype", None)
+        return {"manufactured_home": "mobile_home", "condominium": "condo", "townhouse": "townhouse",
+                "duplex": "duplex", "triplex": "triplex", "fourplex": "fourplex",
+                "duplex_fourplex": "fourplex"}.get(sub, "single_family")
+    return None
+
+
+def count_category(stats, prefix: str, category: Optional[str], outcome: str) -> None:
+    """Per-category run counters a reader reports, e.g. found_commercial /
+    kept_commercial, plus found_not_target / found_no_code - the evidence the
+    coverage-by-type report reads (a category is "checked" only when a run counted it)."""
+    if outcome != "target":
+        stats["%s_%s" % (prefix, outcome)] += 1
+    else:
+        stats["%s_%s" % (prefix, category)] += 1
+
+
 def from_text(value: Optional[str]) -> Optional[Tuple[str, Optional[str]]]:
     """A person's or a list's words ("Commercial", "Office", "Ranch", "Mixed use",
     "Self storage", "Single Family") -> (category, subtype). Unclear -> None."""
@@ -322,9 +407,12 @@ def set_by_person(db, prop, category: str, subtype: Optional[str], *, user, note
 # source holds in general: a district file has every account, but an adapter
 # that keeps only single-family rows covers only single-family.
 COVERAGE = {
-    "dcad": {"types": ["residential"], "geo": "Dallas County",
+    "dcad": {"types": ["residential", "multifamily", "commercial", "industrial", "land", "agricultural"],
+             "geo": "Dallas County",
              "fields": "owner, mailing, tax value, beds/baths/area/year, deed date, state code",
-             "limit": "The reader keeps single-family accounts (SPTD A11) only; other types are not imported."},
+             "limit": "Discovery finds residential buildings rated poor condition (CDU) - every residential code "
+                      "since 2026-10-25, not only A11. Commercial, industrial and land have no condition rating, "
+                      "so DCAD only looks them up (owner, value, code) when the tax roll or a notice finds them."},
     "tad": {"types": ["residential", "multifamily", "land", "agricultural", "commercial", "industrial"],
             "geo": "Tarrant County", "fields": "owner, mailing, tax value, area/year, deed date, state use code",
             "limit": "Accounts matched to properties already found; the state use code says the type."},
@@ -333,15 +421,24 @@ COVERAGE = {
                    "limit": "Industrial (F2) is not separated from commercial by the older adapter type; the code is."},
     "denton_gis": {"types": ["residential", "multifamily", "land", "agricultural", "commercial", "industrial"],
                    "geo": "Denton County", "fields": "owner, mailing, tax value, state code", "limit": "Account lookup."},
-    "txgio_roll": {"types": ["residential"], "geo": "Texas counties (statewide file)",
+    "txgio_roll": {"types": ["residential", "multifamily", "commercial", "industrial", "land", "agricultural"],
+                   "geo": "Texas counties without their own discovery source (two per hunt)",
                    "fields": "owner, mailing, tax value, year built, state land code",
-                   "limit": "The reader keeps residential parcels only."},
+                   "limit": "Residential parcels with an absentee or estate owner; other types only when the owner "
+                            "is an estate (an owner mailing elsewhere is normal for land and commercial). "
+                            "No state code -> left out."},
     "txgio_parcels": {"types": ["residential", "multifamily", "commercial", "industrial", "land", "agricultural"],
                       "geo": "Texas (statewide parcel layer)", "fields": "owner, mailing, tax value, year built",
                       "limit": "One address at a time; the state land code is not kept by this lookup."},
     "dallas_trw": {"types": ["residential", "multifamily", "commercial", "industrial", "land", "agricultural"],
                    "geo": "Dallas County tax roll", "fields": "delinquent taxes, category code",
-                   "limit": "Tax delinquency only; matched to known accounts."},
+                   "limit": "Tax delinquency only. Every real-property category since 2026-10-25 (A1 houses "
+                            "only before); the hunt's strategy decides which types are imported."},
+    "travis_delinquent": {"types": ["residential", "multifamily", "commercial", "industrial", "land", "agricultural"],
+                          "geo": "Travis County delinquent-tax file", "fields": "delinquent taxes, lawsuit, "
+                          "appraised and ag values, property type code",
+                          "limit": "Tax delinquency only. Every real-property code since 2026-10-25 (A1 houses "
+                                   "only before); the hunt's strategy decides which types are imported."},
     "tarrant_tax_roll": {"types": ["residential", "multifamily", "commercial", "industrial", "land", "agricultural"],
                          "geo": "Tarrant County tax roll", "fields": "delinquent taxes", "limit": "Tax delinquency only."},
     "lgbs_tax_sales": {"types": ["residential", "commercial", "land", "agricultural"], "geo": "Texas counties served by Linebarger",
@@ -362,6 +459,66 @@ COVERAGE = {
     "csv_import": {"types": list(CATEGORIES), "geo": "Any (the file)", "fields": "whatever the file carries (PropStream export recognised)",
                    "limit": "The list's claims - unverified until a county record agrees."},
 }
+
+
+# What each widened DISCOVERY reader can bring in, by type, and its county.
+DISCOVERY_TYPES = {
+    "dcad": ("Dallas", ("residential",)),
+    "dallas_trw": ("Dallas", TARGET_CATEGORIES),
+    "travis_delinquent": ("Travis", TARGET_CATEGORIES),
+    "txgio_roll": (None, TARGET_CATEGORIES),
+}
+CHECK_NO_MATCH, CHECK_NOT_CHECKED, CHECK_BLOCKED, CHECK_UNSUPPORTED, CHECK_OK = (
+    "NO MATCHING RECORDS", "SOURCE NOT CHECKED", "SOURCE BLOCKED", "SOURCE DOES NOT SUPPORT TYPE",
+    "SOURCE SUCCESSFULLY CHECKED")
+
+
+def checked_coverage(db, org_id: str, *, runs: int = 60) -> List[Dict[str, Any]]:
+    """Coverage by source and property type FROM WHAT THE READERS ACTUALLY
+    COUNTED in this workspace's recent hunts - never from what a source could
+    in theory carry. One row per (discovery source, category)."""
+    from app.models.evosense_models import EvoSenseRun
+    from app.services.evosense import common as C
+    from app.services.evosense import providers as PV
+    latest: Dict[str, Dict[str, Any]] = {}
+    for started, counts in (db.query(EvoSenseRun.started_at, EvoSenseRun.counts)
+                            .filter(EvoSenseRun.organization_id == org_id, EvoSenseRun.counts.isnot(None))
+                            .order_by(EvoSenseRun.started_at.desc()).limit(runs).all()):
+        for key, st in ((C.jload(counts, {}) or {}).get("sources") or {}).items():
+            if key in DISCOVERY_TYPES and key not in latest and isinstance(st, dict) and \
+                    any(k.startswith(("found_", "excluded_rows_")) for k in st):
+                latest[key] = dict(st, _at=started)
+    out = []
+    for key, (county, supported) in DISCOVERY_TYPES.items():
+        st = latest.get(key)
+        p = PV.PROVIDERS.get(key)
+        cfg = PV.config(db, org_id, key) if p is not None else None
+        canon = PV.canonical(p, cfg, blocked=PV.platform_blocked(db, key, cfg)) if p is not None else {}
+        blocked = canon.get("state") in (PV.S_BLOCKED, PV.S_FAILED, PV.S_DISABLED, PV.S_RATE_LIMITED)
+        for cat in TARGET_CATEGORIES:
+            found = kept = imported = 0
+            if st:
+                found = int(st.get("found_%s" % cat) or 0) + int(st.get("excluded_rows_%s" % cat) or 0)
+                kept = int(st.get("kept_%s" % cat) or 0)
+                imported = int(st.get("imported_%s" % cat) or 0)
+            if cat not in supported:
+                status, why = CHECK_UNSUPPORTED, COVERAGE.get(key, {}).get("limit")
+            elif blocked:
+                status, why = CHECK_BLOCKED, canon.get("why") or "source switched off"
+            elif not st:
+                status, why = CHECK_NOT_CHECKED, "no hunt has read this source since the reader was widened"
+            elif found:
+                status, why = CHECK_OK, (None if kept else "found, but no hunting strategy asks for this type, "
+                                                          "or none passed the source's filters")
+            else:
+                status, why = CHECK_NO_MATCH, "the source was read; it held no record of this type that qualified"
+            out.append({"source": key, "county": county or (st or {}).get("counties_checked") or "statewide rotation",
+                        "category": cat, "category_label": CATEGORY_LABELS[cat], "status": status,
+                        "identified": found, "eligible": kept,
+                        "imported_last_run": imported,
+                        "excluded": max(0, found - kept), "reason": why,
+                        "last_checked": ((st or {}).get("_at").isoformat() + "Z") if st and st.get("_at") else None})
+    return out
 
 
 def coverage(db, org_id: str) -> List[Dict[str, Any]]:

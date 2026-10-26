@@ -31,9 +31,16 @@ export default function PeopleTab({ orgId, cc, reload, openAdd, onOpened }) {
               {ppl.length} {ppl.length === 1 ? 'person has' : 'people have'} access to this organization
             </p>
           </div>
-          <button className="go-btn go-btn-primary" onClick={() => setShowAdd(s => !s)}>
-            {showAdd ? 'Close' : 'Invite user'}
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {/* An EXISTING login (e.g. an EvoSys operator) is given access through
+                Manage Access, with this business already chosen. */}
+            <a className="go-btn" href={'/god/access?org=' + encodeURIComponent(orgId)}>
+              Give an existing login access
+            </a>
+            <button className="go-btn go-btn-primary" onClick={() => setShowAdd(s => !s)}>
+              {showAdd ? 'Close' : 'Invite a new person'}
+            </button>
+          </div>
         </div>
         {flash && <div className="go-note go-dismiss" onClick={() => setFlash('')}>{flash}</div>}
         {showAdd && (

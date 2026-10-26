@@ -30,8 +30,8 @@
  *   POST /god/access/users/{id}/apply
  *   GET  /god/access/users/{id}/audit
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, getCurrentUser } from '../../api/client'
 import GodStyles from './GodStyles'
 import { T } from './godTheme'
@@ -56,8 +56,28 @@ function when (iso) {
 }
 
 /* ── the person picker, for arriving here without a user id ──────────────── */
+// GIVE ACCESS TO ONE BUSINESS (from its customer page): /god/access?org=<id>.
+// The picker then says which business, and choosing a person opens their
+// access screen with that business and Workspace Admin already in the plan
+// and previewed - only CONFIRM AND APPLY is left. Same audited preview/apply
+// endpoints as always; nothing here writes.
+function grantLink (userId, orgId, role) {
+  const qs = orgId ? '?org=' + encodeURIComponent(orgId) + (role ? '&role=' + encodeURIComponent(role) : '') : ''
+  return '/god/access/' + userId + qs
+}
+
 function Picker () {
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const forOrg = params.get('org') || ''
+  const forRole = params.get('role') || ''
+  const [orgName, setOrgName] = useState('')
+  useEffect(() => {
+    if (!forOrg) return
+    api.get('/god/access/directory')
+      .then(d => setOrgName(((d.workspaces || []).find(w => w.id === forOrg) || {}).name || ''))
+      .catch(() => setOrgName(''))
+  }, [forOrg])
   const [q, setQ] = useState('')
   const [rows, setRows] = useState(null)
   const [err, setErr] = useState('')
@@ -101,6 +121,16 @@ function Picker () {
               + ADD PERSON
             </button>
           </div>
+          {forOrg && (
+            <div className="gm-card" role="status" style={{ margin: '12px 0 0', padding: '12px 16px', borderColor: 'var(--gm-blue)' }}>
+              <div style={{ color: 'var(--gm-head)', fontSize: 15, fontWeight: 700 }}>
+                Give someone access to {orgName || 'this business'}
+              </div>
+              <div style={{ color: T.dim, fontSize: 12, marginTop: 4 }}>
+                Search for the person below and press GIVE ACCESS. You will see exactly what changes before anything is saved.
+              </div>
+            </div>
+          )}
           <p style={{ margin: '9px 0 0', color: 'var(--gm-blue)', fontSize: 12, maxWidth: 760 }}>
             Choose a person. Their whole footprint — brands, sales
             organizations, customer workspaces, executive portfolio, Demo Suite
@@ -152,8 +182,8 @@ function Picker () {
                     <td>
                       <div className="gm-acts">
                         <button className="gm-act gm-primary"
-                                onClick={() => navigate('/god/access/' + u.id)}>
-                          MANAGE ACCESS
+                                onClick={() => navigate(grantLink(u.id, forOrg, forRole))}>
+                          {forOrg ? 'GIVE ACCESS' : 'MANAGE ACCESS'}
                         </button>
                       </div>
                     </td>
@@ -237,6 +267,11 @@ export default function GodAccess () {
   const { userId } = useParams()
   const navigate = useNavigate()
   const me = getCurrentUser()
+  const [params] = useSearchParams()
+  const wantOrg = params.get('org') || ''
+  const wantRole = params.get('role') || 'org_admin'
+  const prefilled = useRef('')
+  const previewBox = useRef(null)
 
   const [fp, setFp] = useState(null)
   const [dir, setDir] = useState(null)
@@ -428,6 +463,30 @@ export default function GodAccess () {
     } catch (e) { setErr(e?.message || 'The change could not be applied.') }
     finally { setBusy(false) }
   }
+
+  // ARRIVED FROM A BUSINESS (?org=): put "<role> in <business>" in the plan and
+  // preview it, once per person/business. The owner still reviews and presses
+  // CONFIRM AND APPLY - this only saves them the hunt for the builder.
+  useEffect(() => {
+    if (!userId || !wantOrg || !fp || !dir) return
+    const key = userId + '|' + wantOrg + '|' + wantRole
+    if (prefilled.current === key) return
+    prefilled.current = key
+    const ws = (dir.workspaces || []).find(w => w.id === wantOrg)
+    const role = (dir.workspace_roles || []).find(r => r.key === wantRole)
+    if (!ws || !role) { setErr('That business or role is not available here.'); return }
+    const held = (fp.workspaces || []).find(r =>
+      r.scope_id === wantOrg && (r.state || 'active') === 'active' && r.role === wantRole)
+    if (held) { setNotice(`${fp.identity?.email || 'This person'} already has ${role.label} in ${ws.name}. Nothing to change.`); return }
+    const ops = [{ label: 'ADD', describe: `${role.label} in ${ws.name}`,
+                   body: { op: 'add_membership', scope_type: SCOPE_WORKSPACE, scope_id: wantOrg, role: wantRole } }]
+    setPlan(ops)
+    setBusy(true); setErr('')
+    api.post('/god/access/users/' + userId + '/preview', { operations: ops.map(p => p.body) })
+      .then(pv => { setPreview(pv); setTimeout(() => previewBox.current && previewBox.current.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50) })
+      .catch(e => { setErr(e?.message || 'Could not preview that change.'); setPreview(null) })
+      .finally(() => setBusy(false))
+  }, [userId, wantOrg, wantRole, fp, dir])
 
   if (!userId) return <Picker />
 
@@ -739,7 +798,17 @@ export default function GodAccess () {
 
             {/* ── PREVIEW → CONFIRM ────────────────────────────────────── */}
             {preview && (
-              <>
+              <div ref={previewBox}>
+                {wantOrg && plan.length === 1 && (
+                  <div className="gm-card" role="status" style={{ marginBottom: 12, padding: '12px 16px', borderColor: 'var(--gm-blue)' }}>
+                    <div style={{ color: 'var(--gm-head)', fontSize: 15, fontWeight: 700 }}>
+                      Ready: {plan[0].describe} for {identity?.email || identity?.full_name || 'this person'}
+                    </div>
+                    <div style={{ color: T.dim, fontSize: 12, marginTop: 4 }}>
+                      Nothing has changed yet. Check the preview, then press CONFIRM AND APPLY.
+                    </div>
+                  </div>
+                )}
                 <SectionLabel note="read this before confirming">PREVIEW</SectionLabel>
                 <div className="gm-card" style={{ marginBottom: 18 }}>
                   <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))' }}>
@@ -802,7 +871,7 @@ export default function GodAccess () {
                       </span>}
                   </div>
                 </div>
-              </>
+              </div>
             )}
 
             {/* ── AUDIT ────────────────────────────────────────────────── */}

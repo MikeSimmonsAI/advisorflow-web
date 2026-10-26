@@ -24,7 +24,7 @@ from app.services.evosense import common as C
 from app.services.evosense import signals as SIG
 from app.services.evosense import strategy as ST
 
-PO_VERSION = "property_opportunity/v3"
+PO_VERSION = "property_opportunity/v5"
 # v2 = v1 + organization-configurable signal weights (fingerprinted into the
 # version string when present) + the DFW public-record signals; signals with
 # negative weight (active listing, recent sale) subtract and never count
@@ -35,6 +35,15 @@ PO_VERSION = "property_opportunity/v3"
 # INDEPENDENT SOURCES, not signal types (absentee + long ownership read from
 # one county row are one source); unknown facts are "not scored", never a
 # penalty; institutional owners are excluded by default (tenant option).
+# v4 = v3 + property-type rules: for land, agricultural, commercial, industrial
+# and multifamily properties (by the county's category code) an owner mailing
+# elsewhere (absentee / out-of-state) is normal and is NOT scored, and for land
+# and agricultural a vacancy flag is not scored; the "Houses only" gate and the
+# strategy's type list read the county category when the old type field is empty.
+# v5 = v4 + equity computed from an IMPORTED LIST's value or loan balance (e.g. a
+# PropStream export) is a claim, like the list's foreclosure claim: it counts at
+# CLAIM_SHARE until a market estimate and a mortgage from another source replace
+# it. A list's "unpaid balance" is not a payoff.
 DC_VERSION = "data_confidence/v2"
 CC_VERSION = "contact_confidence/v2"
 SI_VERSION = "seller_intent/v1"
@@ -177,18 +186,52 @@ def version_for(weights: Optional[Dict[str, int]] = None, options: Optional[Dict
     return globals()["PO_VERSION"] + ("+w" + fp if fp else "") + ("+o" + ofp if ofp else "")
 
 
+def equity_claimed(prop) -> bool:
+    """Is this property's equity figure built on an imported list's own numbers?"""
+    vs = (getattr(prop, "estimated_value_source", None) or "").lower()
+    ms = (getattr(prop, "mortgage_source", None) or "").lower()
+    return vs.startswith("csv_import") or ms.startswith("csv_import")
+
+
 def land_only_reason(prop) -> Optional[str]:
     """Why a property is NOT a house, from what the record actually says - or None.
     A MISSING building value is not evidence of a vacant lot; a documented $0 is,
     unless the record also carries building facts (living area / year built)."""
     t = (getattr(prop, "property_type", None) or "").strip().lower()
-    if t in ("land", "commercial"):
+    if t in ("land", "commercial", "industrial", "agricultural"):
         return "the record lists it as %s" % t
+    cat = getattr(prop, "property_category", None)
+    if cat in ("land", "commercial", "industrial", "agricultural", "multifamily", "mixed_use", "specialty"):
+        from app.services.evosense import property_class as PCL
+        return "the county's category code (%s) says %s" % (
+            getattr(prop, "property_class_code", None) or "on record", PCL.CATEGORY_LABELS[cat].lower())
     impr = getattr(prop, "appraisal_improvement_value", None)
     if impr is not None and int(impr) == 0 and not getattr(prop, "square_feet", None) \
             and not getattr(prop, "year_built", None):
         return "the appraisal district shows $0 for buildings (vacant lot / land-only account)"
     return None
+
+
+# Indicators that describe a HOUSE, and the property categories they say
+# nothing about. Scored 0 there, with the reason shown.
+NOT_FOR_TYPE = {
+    "ABSENTEE_OWNER": ("land", "agricultural", "commercial", "industrial", "multifamily"),
+    "OUT_OF_STATE_OWNER": ("land", "agricultural", "commercial", "industrial", "multifamily"),
+    "VACANT": ("land", "agricultural"),
+}
+NOT_FOR_TYPE_WHY = {
+    "ABSENTEE_OWNER": "an owner mailing elsewhere is normal for %s property",
+    "OUT_OF_STATE_OWNER": "an owner mailing from another state is normal for %s property",
+    "VACANT": "vacancy says nothing about %s",
+}
+
+
+def type_excluded(stype: str, category: Optional[str]) -> Optional[str]:
+    cats = NOT_FOR_TYPE.get(stype)
+    if not cats or category not in cats:
+        return None
+    from app.services.evosense import property_class as PCL
+    return NOT_FOR_TYPE_WHY[stype] % PCL.CATEGORY_LABELS.get(category, category).lower()
 
 
 def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy,
@@ -241,10 +284,16 @@ def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy,
                 "factors": [_f(0, "Insufficient evidence: no current signal, no value, no equity")]}
 
     total = 0
+    category = getattr(prop, "property_category", None)
     for s in stacked:
         stype = s["signal_type"]
         spec = SIG.CATALOG.get(stype, {})
         label = spec.get("label", stype)
+        not_here = type_excluded(stype, category)
+        if not_here:
+            factors.append(_f(0, "%s — not scored: %s" % (label, not_here),
+                              {"signal": stype, "category": category}))
+            continue
         if stype in SIG.NEVER_SCORED:
             factors.append(_f(0, "%s — shown, not scored" % label,
                               {"signal": stype, "sources": s["sources"], "evidence_date": s.get("evidence_date")}))
@@ -289,21 +338,28 @@ def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy,
     eq_pts = _equity_points(prop.equity_pct)
     if prop.equity_pct is not None:
         if eq_pts:
+            claimed = equity_claimed(prop)
+            if claimed:
+                eq_pts = int(round(eq_pts * CLAIM_SHARE))
             total += eq_pts
-            factors.append(_f(eq_pts, "Estimated equity %s%%" % prop.equity_pct,
-                              {"basis": prop.equity_basis, "value_source": prop.estimated_value_source}))
+            factors.append(_f(eq_pts, ("Estimated equity %s%% - from the imported list's value and loan balance, "
+                                       "not verified (counted at %d%%)" % (prop.equity_pct, int(CLAIM_SHARE * 100)))
+                              if claimed else "Estimated equity %s%%" % prop.equity_pct,
+                              {"basis": prop.equity_basis, "value_source": prop.estimated_value_source,
+                               "mortgage_source": getattr(prop, "mortgage_source", None), "claimed": claimed}))
         if strategy is not None and strategy.min_equity_pct and prop.equity_pct < strategy.min_equity_pct:
             total -= 15
             factors.append(_f(-15, "Equity below strategy minimum (%s%% < %s%%)" % (
                 prop.equity_pct, strategy.min_equity_pct)))
 
     if strategy is not None:
+        from app.services.evosense import property_class as PCL
         types = ST.lst(strategy, "property_types")
-        if types and prop.property_type and prop.property_type not in types:
+        tkey = PCL.strategy_type_key(prop)
+        if types and tkey and tkey not in types:
             total -= 25
-            factors.append(_f(-25, "Property type %s is not in this strategy" %
-                              prop.property_type.replace("_", "-")))
-        elif types and not prop.property_type:
+            factors.append(_f(-25, "Property type %s is not in this strategy" % tkey.replace("_", "-")))
+        elif types and not tkey:
             factors.append(_f(0, "Property type unknown — not scored"))
         if strategy.min_value is not None or strategy.max_value is not None:
             lo = strategy.min_value if strategy.min_value is not None else 0
@@ -351,6 +407,8 @@ def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy,
                                   % (prop.ownership_years, strategy.min_ownership_years)))
 
     def _positive(t):
+        if type_excluded(t, category):
+            return False
         return t not in SIG.NEVER_SCORED and t != "HIGH_EQUITY" and (
             weights.get(t, SIG.CATALOG.get(t, {}).get("points", 0)) > 0 or t == "LONG_OWNERSHIP")
     # INDEPENDENT SOURCES, not signal types. Absentee owner and long ownership

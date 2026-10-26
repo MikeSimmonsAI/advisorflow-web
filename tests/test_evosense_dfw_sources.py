@@ -12,6 +12,7 @@ that fails the test if anything tries to reach the internet.
 import csv
 import hashlib
 import io
+from app.services.evosense.scoring import PO_VERSION as SC_PO_VERSION
 import json
 import zipfile
 from datetime import datetime, timedelta
@@ -479,7 +480,7 @@ def test_pilot_discovers_joins_and_scores_real_shaped_records(client, db_session
     raw = ok(client.get("/wholesale/evosense/properties/%s/observations/%s/raw"
                         % (p.id, prov["tarrant_tax_roll"]["id"]), headers=h))
     assert raw["raw"] == dfw_files["lines"][0]
-    assert d["scores"]["property_opportunity"]["version"].startswith("property_opportunity/v3")
+    assert d["scores"]["property_opportunity"]["version"].startswith(SC_PO_VERSION)
 
 
 def test_pilot_record_cap_is_a_hard_cap(client, db_session, sample_org, dfw_files, fake_apis):

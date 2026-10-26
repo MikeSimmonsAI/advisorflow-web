@@ -1,5 +1,5 @@
-"""Dallas County Tax Office TRW file (layout TRW-02): delinquent residential
-accounts for the county taxing unit, added up across tax years. No network:
+"""Dallas County Tax Office TRW file (layout TRW-02): delinquent
+accounts (residential by default; the strategy's types when it names them) for the county taxing unit, added up across tax years. No network:
 a synthetic zip in the published layout is pointed to by the local override."""
 import zipfile
 from datetime import datetime
@@ -112,7 +112,9 @@ def test_provider_registered_and_scoped_to_dallas(trw):
     skipped = p.search(PV.C.TAX, {"counties": ["Tarrant"], "limit": 5})
     assert len(skipped) == 0 and "skipped" in skipped.stats
     got = p.search(PV.C.TAX, {"counties": ["Dallas County"], "limit": 5})
-    assert len(got) == 2
+    assert len(got) == 3                                  # no type list: the commercial account too
+    houses = p.search(PV.C.TAX, {"counties": ["Dallas County"], "limit": 5, "houses_only": True})
+    assert len(houses) == 2 and houses.stats["excluded_rows_commercial"] == 1
     v = p.verify()
     assert v["county_unit"] == "1002" and any("flat404" in n for n in v["members"])
 

@@ -21,6 +21,28 @@ export default function TypeCoverage() {
           {d.unclassified_yet ? <li><span className="evo-muted">Not classified yet (runs in the background)</span><b>{d.unclassified_yet}</b></li> : null}
         </ul>
       </Panel>
+      {d.checked?.length ? (
+        <Panel title="What discovery actually checked" hint="Counted by the county readers in this workspace's latest hunts" flush>
+          <div className="evo-table-wrap">
+            <table className="evo-table evo-table--cards evo-fcc-table">
+              <thead><tr><th>Source</th><th>County</th><th>Type</th><th>Result</th><th>Found</th><th>Eligible</th>
+                <th>Imported (last run)</th><th>Why</th></tr></thead>
+              <tbody>{d.checked.map((r) => (
+                <tr key={`${r.source}-${r.category}`}>
+                  <td className="is-lead" data-label=""><b>{r.source}</b>
+                    {r.last_checked ? <span className="evo-prop__sub" style={{ display: 'block' }}>Checked {new Date(r.last_checked).toLocaleString()}</span> : null}</td>
+                  <td data-label="County">{r.county}</td>
+                  <td data-label="Type">{r.category_label}</td>
+                  <td data-label="Result"><Tag kind={r.status === 'SOURCE SUCCESSFULLY CHECKED' ? 'live' : r.status === 'SOURCE BLOCKED' ? 'danger' : undefined}>{r.status}</Tag></td>
+                  <td data-label="Found">{r.identified}</td>
+                  <td data-label="Eligible">{r.eligible}</td>
+                  <td data-label="Imported (last run)">{r.imported_last_run}</td>
+                  <td data-label="Why" className="is-stack">{r.reason || ''}</td>
+                </tr>))}</tbody>
+            </table>
+          </div>
+        </Panel>
+      ) : null}
       <Panel title="Source coverage by property type" flush>
         <div className="evo-table-wrap">
           <table className="evo-table evo-table--cards evo-fcc-table">

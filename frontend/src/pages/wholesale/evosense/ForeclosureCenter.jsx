@@ -19,6 +19,7 @@ import { Alert, Empty, EvoApp, Metric, Metrics, PageHead, Panel, Ring, Search, S
 import '../ds/evo-pages.css'
 import { ContactBatchPanel } from './Acquire'
 import { CATEGORY_LABEL, PropertyTypeSelect, TypeLabel } from './ptypes'
+import { MeasureTags } from './Measures'
 import './evo-actions.css'
 
 const KEY = 'evo_fcc_month'
@@ -32,9 +33,13 @@ const TABS = [
 ]
 const VIEWS = [{ key: 'top10', label: 'Top 10' }, { key: 'top25', label: 'Top 25' }, { key: 'top100', label: 'Top 100' },
   { key: 'all', label: 'All' }]
-const SORTS = [['opportunity', 'Highest opportunity'], ['auction_date', 'Auction date'], ['urgent', 'Most urgent'],
-  ['recently_verified', 'Most recently verified'], ['contact_ready', 'Contact ready first'],
+const SORTS = [['opportunity', 'Highest opportunity'], ['urgency', 'Auction urgency'], ['potential', 'Deal potential'],
+  ['confidence', 'Data confidence'], ['next_action', 'Next required action'], ['auction_date', 'Auction date'],
+  ['urgent', 'Most urgent (blend)'], ['recently_verified', 'Most recently verified'], ['contact_ready', 'Contact ready first'],
   ['underwritten', 'Financially underwritten first']]
+const QUICK = [['urgent_auctions', 'Urgent auctions'], ['high_potential', 'High-potential deals'],
+  ['needs_financial', 'Needs financial research'], ['needs_owner', 'Needs owner verification'],
+  ['notice_conflicts', 'Notice conflicts'], ['contact_ready', 'Contact ready']]
 const TONE = { notice_verified: 'danger', claimed: 'estimate', not_found: 'estimate', conflict: 'danger',
   postponed: 'estimate', canceled: 'info', sold_at_auction: 'info', reverted_to_lender: 'info',
   outcome_unverified: 'estimate', reported_resolved: 'estimate', awaiting_notice: 'estimate', no_longer_on_record: 'estimate' }
@@ -133,6 +138,7 @@ const COLS = {
   owner: ['owner', 'Owner', (r) => r.owner?.status === 'VERIFIED' ? <Tag kind="live">Verified</Tag>
     : r.owner?.status === 'NO OWNER' ? <Tag kind="danger">Owner missing</Tag> : <Tag kind="estimate">Verify owner</Tag>],
   score: ['score', 'Opportunity', (r) => <Ring kind="opportunity" value={r.score} />],
+  measures: ['measures', 'Urgency · potential · confidence', (r) => <MeasureTags m={r.measures} compact />],
   contact: ['contact', 'Contact', (r) => r.contact_state.label],
   money: ['money', 'Financial', (r) => r.financial.label],
   stage: ['stage', 'Acquisition', (r) => r.acquisition.label],
@@ -173,6 +179,37 @@ function RecordOutcome({ r, month, onDone }) {
       ) : null}
       {err ? <Alert kind="warn">{err}</Alert> : null}
     </div>
+  )
+}
+
+function WorkBeforeAuction({ month }) {
+  const [w, setW] = useState(null)
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    api.get(`/wholesale/evosense/foreclosures/work?month=${month}`).then(setW).catch((e) => setErr(errText(e)))
+  }, [month])
+  if (err) return <Panel title="Work before auction"><Alert kind="warn">{err}</Alert></Panel>
+  if (!w) return <Panel title="Work before auction"><Skeleton rows={3} /></Panel>
+  return (
+    <Panel title="Work before auction" hint="Each property in one group - nothing is sent or bought from here">
+      {w.groups.map((g, i) => (
+        <div key={g.key} style={{ marginBottom: 10 }}>
+          <p className="evo-small" style={{ margin: '0 0 4px' }}><b>{i + 1}. {g.label}</b> · {g.count}</p>
+          {g.items.length ? (
+            <ul className="evo-fcc-list">{g.items.slice(0, 5).map((it) => (
+              <li key={it.id}>
+                <span><Link to={it.next_best_action?.link || `/wholesale/evosense/property/${it.id}`}>{it.street_address}</Link>
+                  <span className="evo-small evo-muted" style={{ display: 'block' }}>
+                    {it.auction_urgency?.label}{it.auction_urgency?.days != null && it.auction_urgency.days >= 0 ? ` · ${it.auction_urgency.days} days` : ''}
+                    {' · '}{it.deal_potential?.label}</span></span>
+                <span className="evo-small">{it.next_best_action?.label || it.contact}</span>
+              </li>))}</ul>
+          ) : <p className="evo-small evo-muted" style={{ margin: 0 }}>None.</p>}
+          {g.count > 5 ? <p className="evo-small evo-muted" style={{ margin: '2px 0 0' }}>+{g.count - 5} more in the list below</p> : null}
+        </div>
+      ))}
+      <p className="evo-small evo-muted" style={{ margin: 0 }}>{w.note}</p>
+    </Panel>
   )
 }
 
@@ -340,6 +377,15 @@ export default function ForeclosureCenter() {
                 <ul className="evo-fcc-list">{Object.entries(data.acquisition).map(([k, v]) => (
                   <li key={k}><button className="evo-linkbtn" onClick={() => drill({ acquisition: k }, 'contact')}>{v.label}</button><b>{v.count}</b></li>))}</ul>
               </Panel>
+              <div style={{ gridColumn: '1 / -1' }}><WorkBeforeAuction month={data.month} /></div>
+              <Panel title="Urgency · potential · confidence" hint="Three separate answers">
+                {['auction_urgency', 'deal_potential', 'data_confidence'].map((k) => (
+                  <p key={k} className="evo-small" style={{ margin: '0 0 6px' }}>
+                    <b>{{ auction_urgency: 'Auction urgency', deal_potential: 'Deal potential', data_confidence: 'Data confidence' }[k]}:</b>{' '}
+                    {Object.entries(data.measures?.[k] || {}).map(([lv, n]) => `${lv.toLowerCase()} ${n}`).join(' · ') || '—'}
+                  </p>))}
+                <p className="evo-small evo-muted" style={{ margin: 0 }}>Unknown potential is not bad - and never counted as profit.</p>
+              </Panel>
               <Panel title="Work these first" hint="Needs a person">
                 {data.urgent.length ? (
                   <ul className="evo-fcc-list">{data.urgent.map((u) => (
@@ -358,6 +404,19 @@ export default function ForeclosureCenter() {
 
           {['properties', 'contact', 'financial', 'auction'].includes(tab) ? (
             <Panel flush>
+              <div className="evo-fcc-quick" role="group" aria-label="Quick filters"
+                   style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '12px 16px 0' }}>
+                {QUICK.map(([k, l]) => {
+                  const on = (filter.quick || '') === k
+                  const n = data.measures?.quick?.[k]?.count
+                  return (
+                    <button key={k} type="button" aria-pressed={on}
+                            className={`evo-btn evo-btn--sm ${on ? 'evo-btn--primary' : 'evo-btn--secondary'}`}
+                            onClick={() => { setFilter({ ...filter, quick: on ? '' : k }); setPage(1) }}>
+                      {l}{n != null ? ` · ${n}` : ''}</button>
+                  )
+                })}
+              </div>
               <div className="evo-fcc-filters">
                 <Seg items={VIEWS} value={view} onChange={(v) => { setView(v); setPage(1) }} label="How many" />
                 <Search value={q} onChange={(v) => { setQ(v); setPage(1) }} placeholder="Search an address" />
@@ -403,7 +462,7 @@ export default function ForeclosureCenter() {
                           <span key={d.signal_id} className="evo-prop__sub" style={{ display: 'block' }}>
                             {d.url ? <a href={d.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{d.document}</a> : d.document}
                             {d.sale_date ? ` · sale ${d.sale_date}` : ''}{d.claim ? ' · list claim' : ''}</span>))]]
-                          : [COLS.sale, COLS.owner, COLS.score, COLS.work, COLS.next]}
+                          : [COLS.sale, COLS.measures, COLS.score, COLS.owner, COLS.work, COLS.next]}
                     extra={tab === 'auction' && data.can_manage ? (r) => <RecordOutcome r={r} month={data.month} onDone={() => { load(); loadList() }} /> : null} />
                   {list.total > list.per_page ? (
                     <div className="evo-fcc-pager">
