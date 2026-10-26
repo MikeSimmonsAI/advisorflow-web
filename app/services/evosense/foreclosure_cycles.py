@@ -565,7 +565,10 @@ def rows(db, org_id: str, month: str) -> List[Dict[str, Any]]:
         # the three separate answers; auction urgency from THIS month's event status
         from app.services.evosense import opportunity as OP
         m = dict(((r.get("opportunity") or {}).get("measures")) or {})
-        m["auction_urgency"] = OP.auction_urgency(st, r["auction"]["sale_date"], today=today)
+        # a list date whose only clerk notice is for an EARLIER sale is a notice
+        # conflict, and urgent to verify when the sale is close
+        ust = "conflict" if st in ("claimed", "not_found") and earlier_notice.get(r["id"]) else st
+        m["auction_urgency"] = OP.auction_urgency(ust, r["auction"]["sale_date"], today=today)
         if "Ownership needs review" in flags and "Ownership requires review" not in (m.get("missing") or []):
             m["missing"] = list(m.get("missing") or []) + ["Ownership requires review"]
         r["measures"] = m
