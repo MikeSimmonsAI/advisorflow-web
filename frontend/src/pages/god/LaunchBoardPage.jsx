@@ -115,7 +115,7 @@ export default function LaunchBoardPage () {
   const working = projects.filter(p => p.status === 'released').length
 
   return (
-    <Page eyebrow="Launch Board" title="Projects"
+    <Page eyebrow="Projects" title="Launch Board"
       sub="What is being built, what is merged, what is live and what is stuck — read from GitHub, not typed in."
       actions={<ActionLink onClick={() => load(true)} disabled={busy}>{busy ? 'Refreshing…' : 'Refresh from GitHub'}</ActionLink>}>
       {err ? <ErrorState onRetry={() => load()}>The Launch Board could not be loaded: {err}</ErrorState> : null}

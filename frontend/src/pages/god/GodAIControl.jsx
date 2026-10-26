@@ -17,23 +17,13 @@ import { api } from '../../api/client'
 import GodStyles from './GodStyles'
 import GodAISwitchboard from './GodAISwitchboard'
 import { T } from './godTheme'
-import { Pill } from './ui/GodKit'
+import { Pill, Page, Strip, Card, ErrorState, Loading, Section } from './ui/GodKit'
 
 function message (e, fallback) {
   const d = e?.data?.detail ?? e?.detail
   if (typeof d === 'string') return d
   if (d && typeof d.message === 'string') return d.message
   return fallback
-}
-
-function Box ({ label, value, sub, tone }) {
-  return (
-    <div className="gm-stat">
-      <div className="gm-k">{label}</div>
-      <div className="gm-v" style={tone ? { color: tone } : undefined}>{value}</div>
-      {sub ? <div className="gm-s">{sub}</div> : null}
-    </div>
-  )
 }
 
 function when (iso) {
@@ -74,68 +64,73 @@ export default function GodAIControl () {
   const w = data?.worker || {}
 
   return (
-    <div className="gm-scope" style={{ minHeight: '100%' }}>
+    <>
       <GodStyles />
-      <div className="gm-grid-overlay" />
-      <div style={{ position: 'relative', zIndex: 1, maxWidth: 1400, margin: '0 auto', padding: '24px 26px 60px' }}>
-        <div style={{ marginBottom: 16 }}>
-          <h1 style={{ margin: 0, color: 'var(--gm-head)', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>AI Workforce</h1>
-          <div style={{ color: T.dim, fontSize: 13, marginTop: 8 }}>
-            Turn AI workers on or off for any account, see what they are doing, and stop everything with one button.
-          </div>
-        </div>
+      {/* Owner Desk design language (#411): shared header with the emergency
+          stop beside the title, one status card, two plain rows of numbers.
+          The stop/release flow, its confirmation and every number are unchanged. */}
+      <Page eyebrow="AI Workforce" title="AI Workforce"
+        sub="Turn AI workers on or off for any account, see what they are doing, and stop everything with one button."
+        actions={data ? (data.stopped ? (
+          data.stopped_by_environment ? null : (
+            <button type="button" className="gk-btn gk-btn--primary" disabled={busy} onClick={() => stop(false)}>
+              {busy ? '…' : 'Release emergency stop'}
+            </button>)
+        ) : (
+          <button type="button" className="gk-btn gk-btn--danger" disabled={busy} onClick={() => stop(true)}
+            style={{ fontWeight: 800 }}>
+            {busy ? '…' : 'Emergency stop — all AI'}
+          </button>
+        )) : null}>
 
-        {err && <div className="gm-card" style={{ padding: '16px 18px', color: T.red, fontSize: 13, marginBottom: 14 }}>{err}</div>}
-        {!data && !err && <div className="gm-card"><div className="gm-empty">Loading…</div></div>}
+        {err ? <ErrorState onRetry={load}>{err}</ErrorState> : null}
+        {!data && !err ? <Card><Loading /></Card> : null}
 
         {data && (
           <>
-            <div className="gm-card" style={{ padding: '16px 18px', marginBottom: 14, borderColor: data.stopped ? T.red : undefined }}>
+            <Card style={data.stopped ? { borderColor: 'var(--gm-pill-red-bd)' } : undefined}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
-                <div style={{ fontSize: 17, fontWeight: 700, color: data.stopped ? T.red : T.head }}>
+                <div style={{ fontSize: 17, fontWeight: 750, color: data.stopped ? 'var(--gm-red)' : 'var(--gm-head)', letterSpacing: '-.01em' }}>
                   {data.headline}
                 </div>
-                {data.stopped ? (
-                  data.stopped_by_environment ? (
-                    <div style={{ fontSize: 12, color: T.red, maxWidth: 360 }}>
-                      Stopped by a server setting (AI_WORKFORCE_KILL or AI_OPERATIONS_KILL). Remove it in Render to release.
-                    </div>
-                  ) : (
-                    <button className="gm-btn gm-primary" disabled={busy} onClick={() => stop(false)}>
-                      {busy ? '…' : 'RELEASE EMERGENCY STOP'}
-                    </button>
-                  )
-                ) : (
-                  <button className="gm-btn" disabled={busy} onClick={() => stop(true)}
-                    style={{ borderColor: T.red, color: T.red, fontWeight: 800 }}>
-                    {busy ? '…' : 'EMERGENCY STOP — ALL AI'}
-                  </button>
-                )}
+                <Pill tone={data.stopped ? 'bad' : !w.running || data.problems.length ? 'warn' : data.accounts_on ? 'good' : 'off'}>
+                  {data.stopped ? 'Stopped' : !w.running || data.problems.length ? 'Needs attention' : data.accounts_on ? 'Working' : 'Off'}
+                </Pill>
               </div>
+              {data.stopped && data.stopped_by_environment ? (
+                <p className="gk-row-sub" style={{ color: 'var(--gm-red)', marginTop: 8 }}>
+                  Stopped by a server setting (AI_WORKFORCE_KILL or AI_OPERATIONS_KILL). Remove it in Render to release.
+                </p>
+              ) : null}
               {!!data.problems.length && (
-                <ul style={{ margin: '12px 0 0', paddingLeft: 18, fontSize: 13, color: T.amber, lineHeight: 1.6 }}>
+                <ul style={{ margin: '12px 0 0', paddingLeft: 18, fontSize: 13, color: 'var(--gm-amber)', lineHeight: 1.6 }}>
                   {data.problems.map((p, i) => <li key={i}>{p}</li>)}
                 </ul>
               )}
-            </div>
+            </Card>
 
-            <div className="gm-stats" style={{ marginBottom: 14 }}>
-              <Box label="Accounts on" value={`${data.accounts_on} / ${data.accounts_total}`} />
-              <Box label="Worker" value={w.running ? 'RUNNING' : 'NOT RUNNING'}
-                tone={w.running ? T.teal : T.red}
-                sub={w.last_success_at ? `last run ${when(w.last_success_at)}` : 'no run recorded yet'} />
-              <Box label="Real messages" value={data.real_messages ? 'ON' : 'OFF'}
-                tone={data.real_messages ? T.amber : T.teal}
-                sub={data.real_messages ? 'AI can contact real people' : 'practice only — nobody is contacted'} />
-              <Box label="AI workers" value={data.ai_workers} />
-              <Box label="Working now" value={data.work.working_now} sub="leads being worked" />
-              <Box label="Waiting" value={data.work.waiting} sub="for the lead to reply" />
-              <Box label="Need a person" value={data.work.needs_a_person + data.open_handoffs}
-                tone={(data.work.needs_a_person + data.open_handoffs) ? T.amber : undefined}
-                sub="leads passed to a person or stuck" />
-              <Box label="Finished" value={data.work.finished} sub="all-time" />
-            </div>
+            <Section title="Status">
+              <Strip items={[
+                { label: 'Accounts on', value: `${data.accounts_on} / ${data.accounts_total}`, sub: 'with AI workers turned on' },
+                { label: 'Worker', value: w.running ? 'Running' : 'Not running', tone: w.running ? 'teal' : 'red',
+                  sub: w.last_success_at ? `last run ${when(w.last_success_at)}` : 'no run recorded yet' },
+                { label: 'Real messages', value: data.real_messages ? 'On' : 'Off', tone: data.real_messages ? 'amber' : 'teal',
+                  sub: data.real_messages ? 'AI can contact real people' : 'practice only — nobody is contacted' },
+                { label: 'AI workers', value: data.ai_workers, sub: 'set up across accounts' },
+              ]} />
+            </Section>
 
+            <Section title="Work">
+              <Strip items={[
+                { label: 'Working now', value: data.work.working_now, sub: 'leads being worked' },
+                { label: 'Waiting', value: data.work.waiting, sub: 'for the lead to reply' },
+                { label: 'Need a person', value: data.work.needs_a_person + data.open_handoffs,
+                  tone: (data.work.needs_a_person + data.open_handoffs) ? 'amber' : undefined, sub: 'passed to a person or stuck' },
+                { label: 'Finished', value: data.work.finished, sub: 'all-time' },
+              ]} />
+            </Section>
+
+            <div className="gk-section" />
             {Array.isArray(data.jobs) && (
               <div className="gm-card" style={{ padding: '16px 18px', marginBottom: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
@@ -203,16 +198,20 @@ export default function GodAIControl () {
           </>
         )}
 
-        <div style={{ fontWeight: 700, margin: '6px 0 8px' }}>Turn AI workers on or off</div>
-        <GodAISwitchboard key={refreshKey} embedded onChange={load} />
+        <Section title="Turn AI workers on or off" sub="Per account. Changes take effect on the next worker run.">
+          <GodAISwitchboard key={refreshKey} embedded onChange={load} />
+        </Section>
 
-        <div className="gm-card" style={{ padding: '16px 18px', marginTop: 14, fontSize: 12, color: T.dim }}>
-          <strong>Advanced (technical):</strong>{' '}
-          <Link to="/god/workforce">engine &amp; job library</Link>{' · '}
-          <Link to="/god/ai-operations">messaging switches</Link>{' · '}
-          <Link to="/god/ai-deployment">brand terms &amp; deployments</Link>
-        </div>
-      </div>
-    </div>
+        <Section title="Advanced (technical)">
+          <Card>
+            <div className="gk-row-sub" style={{ marginTop: 0 }}>
+              <Link className="gk-link" to="/god/workforce">Engine &amp; job library</Link>{' · '}
+              <Link className="gk-link" to="/god/ai-operations">Messaging switches</Link>{' · '}
+              <Link className="gk-link" to="/god/ai-deployment">Brand terms &amp; deployments</Link>
+            </div>
+          </Card>
+        </Section>
+      </Page>
+    </>
   )
 }

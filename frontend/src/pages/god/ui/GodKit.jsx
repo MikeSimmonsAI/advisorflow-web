@@ -257,9 +257,9 @@ export function Section ({ title, sub, action, children, id }) {
 }
 
 /** A compact row of summary numbers (2–4). Same "—" rule as Kpi. */
-export function Strip ({ items }) {
+export function Strip ({ items, cols }) {
   return (
-    <div className="gk-strip">
+    <div className={`gk-strip ${cols === 5 ? 'gk-strip--5' : ''}`}>
       {items.map(k => <Kpi key={k.label} {...k} />)}
     </div>
   )
