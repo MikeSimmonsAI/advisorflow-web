@@ -26,7 +26,7 @@ import '../ds/evo-pages.css'
 import PropertyPhoto, { usePropertyPhoto } from './PropertyPhoto'
 import { ActFirst, FunnelPanel } from './Readiness'
 import { ReadyToRun } from './Acquire'
-import { WorkCell } from './Measures'
+import { WorkCell, WORK_TONE } from './Measures'
 
 const ACT_TONE = {
   'handoff.opened': 'attention', 'reply.read': 'info', 'reply.received': 'info', 'promoted': 'good',
@@ -212,15 +212,19 @@ export default function EvoCommand() {
           {spotlight.map((p) => (
             <PhotoPropCard key={p.id} pid={p.id} test={p.is_test} href={`/wholesale/evosense/property/${p.id}`}
                       address={p.address} place={[[p.city, p.state].filter(Boolean).join(', '), p.zip_code].filter(Boolean).join(' ')}
-                      score={p.opportunity_score} status={<WorkCell w={p.work} compact />}
+                      score={p.opportunity_score} scoreLabel="Investment evidence"
+                      status={p.work ? <Tag kind={WORK_TONE[p.work.work_priority]}>{p.work.work_priority_label || p.work.work_priority}</Tag> : null}
+                      lead={p.work ? <AuctionLead w={p.work} /> : null}
                       facts={[['Contact', p.contact_confidence ?? '—'], ['Intent', p.seller_intent ?? '—'],
-                              ['Type', p.property_type ? humanize(p.property_type) : '—']]}
+                              ['Type', p.property_type ? humanize(p.property_type)
+                                : (p.property_class && p.property_class.category !== 'unknown' ? p.property_class.category_label
+                                  : 'Needs review')]]}
                       money={[p.appraisal
                                 ? [p.appraisal.label || 'Appraisal district tax value', money(p.appraisal.value), '']
                                 : ['Market estimate', money(p.estimated_value, 'none on file'), p.estimated_value == null ? 'quiet' : ''],
                               ['ARV', (p.arv && p.arv.label) || 'Insufficient comparable sales', 'quiet'],
                               ['Equity', p.equity_pct != null ? `${Math.round(p.equity_pct)}%` : 'unknown', p.equity_pct == null ? 'quiet' : 'pos']]}
-                      foot={<>{p.is_test ? <SandboxTag /> : null}<span className="evo-next">{p.next_action || '—'}</span></>} />
+                      foot={<>{p.is_test ? <SandboxTag /> : null}<span className="evo-next">Next: {(p.work && p.work.next_action) || p.next_action || '—'}</span></>} />
           ))}
         </div>
       )}
@@ -313,6 +317,17 @@ export default function EvoCommand() {
         </aside>
       </div>
     </EvoApp>
+  )
+}
+
+/* the auction line on a card: urgency, sale date, kind and whether it is verified */
+function AuctionLead({ w }) {
+  const d = w.auction_date ? new Date(w.auction_date + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : null
+  return (
+    <>
+      <b>{w.urgency_label || 'No sale on record'}</b>
+      {d ? <span className="evo-muted">{w.auction_kind || 'Auction'} · {d}{w.auction_verified ? ' · verified' : w.auction_verified === false ? ' · not verified' : ''}</span> : null}
+    </>
   )
 }
 

@@ -142,17 +142,19 @@ export function Ring({ kind = 'opportunity', value, size, title }) {
  * dispositions). Image is a real photo of the property or "Property image
  * unavailable" - never a stand-in house.
  */
-export function PropCard({ onOpen, href, src, address, place, score, scoreKind = 'opportunity', status, facts, money: amounts, foot }) {
+export function PropCard({ onOpen, href, src, address, place, score, scoreKind = 'opportunity', scoreLabel, status, lead, facts, money: amounts, foot }) {
   const body = (
     <>
       <div className="evo-pcard__media">
         <PropertyThumb src={src} address={address} size="card" />
-        {score !== undefined ? <span className="evo-pcard__ring"><Ring kind={scoreKind} value={score} /></span> : null}
+        {score !== undefined ? <span className="evo-pcard__ring" title={scoreLabel || ''}><Ring kind={scoreKind} value={score} />
+          {scoreLabel ? <span className="evo-pcard__ringlabel">{scoreLabel}</span> : null}</span> : null}
         {status ? <span className="evo-pcard__status">{status}</span> : null}
       </div>
       <div className="evo-pcard__body">
         <div className="evo-pcard__addr">{address}</div>
         {place ? <div className="evo-pcard__place">{place}</div> : null}
+        {lead ? <div className="evo-pcard__lead">{lead}</div> : null}
         {facts && facts.length ? (
           <dl className="evo-pcard__facts">
             {facts.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v ?? '—'}</dd></div>)}
