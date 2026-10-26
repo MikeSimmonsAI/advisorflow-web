@@ -103,6 +103,11 @@ for (const n of pvA) {
   if (n === 'Countryside Land Partners' || n === 'Commercial Cleaning Blueprint') { await np.setViewport({ width: 1280, height: 800 }); await np.screenshot({ path: `${OUT}/preview-${n.split(' ')[0].toLowerCase()}.png` }) }
   await np.close()
 }
+if (process.env.PA_DB) {
+  const { execSync } = await import('node:child_process')
+  const views = execSync(`/home/claude/venv/bin/python -c "import sqlite3;print(sqlite3.connect('${process.env.PA_DB}').execute('select coalesce(sum(view_count),0) from demo_sites').fetchone()[0])"`).toString().trim()
+  ok('A9b. opening previews from Program Access did not count as prospect views', views === '0', 'views=' + views)
+}
 // cross-tenant / direct access with wholesale@'s token
 const ma = await markers(tokA, org('Atlantis Light & Power'))
 ok('A10. wholesale@ in Atlantis sees Atlantis data only', ma.status === 200 && JSON.stringify(ma.slugs) === '["atlantis-light-power"]', JSON.stringify(ma))
@@ -120,6 +125,29 @@ await vp(1440, 900); await page.goto(APP + '/workspaces', { waitUntil: 'networki
 const so = !!(await page.$('.pa-signout'))
 await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 8000 }).catch(() => {}), page.click('.pa-signout')]); await sleep(800)
 ok('A14. Sign out returns to login', so && /\/login/.test(await path()), await path())
+
+// ── A (Sales side): one Other Workspaces entry, no Switch View (#300) ─────
+await login('wholesale@evosyspro.live')
+await page.goto(APP + '/sales', { waitUntil: 'networkidle2' }); await sleep(1500)
+const side = await page.$$eval('.ss-otherws-side', e => e.map(x => x.innerText.replace(/\s+/g, ' ').trim()))
+ok('A15. Sales: one "Other Workspaces" entry, no Switch View / Switch program', side.length === 1 && side[0].includes('Other Workspaces') && !(await page.$('.ctx-switch-wrap')) && !(await page.$('.program-switch')), side.join(' | '))
+await page.click('.ss-otherws-side'); await sleep(1500)
+ok('A16. Other Workspaces opens Program Access', (await path()) === '/workspaces')
+await vp(390, 844); await page.goto(APP + '/sales', { waitUntil: 'networkidle2' }); await sleep(1200)
+await page.tap('.ss-mmorebtn'); await sleep(400)
+const mm = await page.$$eval('#ss-mmore-panel .ss-otherws-menu', e => e.length)
+ok('A17. phone: Other Workspaces is in the More menu', mm === 1)
+await shot('sales-phone-more-other-workspaces', false)
+await vp(1440, 900)
+
+// ── G: sales manager with no customer workspaces ────────────────────────
+await login('salesmgr@example.test')
+ok('G0. sales manager lands in Sales', (await path()) === '/sales', await path())
+await page.goto(APP + '/workspaces', { waitUntil: 'networkidle2' }); await sleep(900)
+const nG = await cardNames(WS)
+ok('G0b. sales manager: Back Office only + the brand previews, no client workspaces', JSON.stringify(nG) === '["Back Office"]' && (await cardNames(PV)).length === 4, nG.join(' | '))
+const xg = await markers(await token('salesmgr@example.test'), org('Restland Cemetery and Funeral Home'))
+ok('G0c. sales manager asking for Restland gets none of its data', xg.slugs.length === 0, JSON.stringify(xg))
 
 // ── B: normal salesperson ────────────────────────────────────────────────
 await login('rep@example.test')

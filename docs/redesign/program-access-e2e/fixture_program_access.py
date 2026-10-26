@@ -90,6 +90,10 @@ m(ex, "platform", plat.id, "brand_executive")
 for o in (atl, roof):
     m(ex, "customer_org", o.id, "org_admin")
 
+# G: sales manager with no customer workspaces
+sm = user("salesmgr@example.test", "Riley Salesmanager")
+m(sm, "brand_sales_org", brand.id, "sales_manager")
+
 # F: owner
 user("owner@example.test", "Owner Testgod", role="god_admin")
 

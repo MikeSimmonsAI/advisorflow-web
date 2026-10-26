@@ -26,4 +26,4 @@ For each account, the walkthrough checks:
 - data isolation, using one marker record per company (a login must never receive another company's marker, whatever header it sends);
 - that God Mode is limited to the owner.
 
-Result on 2026-10-25: **49/49 pass**, no console errors, only blocked host `fonts.googleapis.com` (see `RESULTS-2026-10-25.txt`).
+Result on 2026-10-25 (closeout run): **56/56 pass**, no console errors, only blocked host `fonts.googleapis.com` (see `RESULTS-2026-10-25.txt`).
