@@ -936,6 +936,36 @@ def _brand_for_host(db, request):
         return None
 
 
+def _is_brand_staff_preview(db, request, token) -> bool:
+    """True only for `?staff=1` from a signed-in sales member of the demo's own
+    brand (opened from Program Access). Anything else - no token, a bad
+    token, another brand, a customer login - is counted as an ordinary view,
+    so the flag cannot be used by anyone else to hide prospect activity."""
+    if request.query_params.get("staff") != "1":
+        return False
+    auth = request.headers.get("authorization") or ""
+    if not auth.lower().startswith("bearer "):
+        return False
+    try:
+        # Identity only (signature, expiry, active user). Deliberately NOT the
+        # full get_current_user: its per-screen program locks (e.g. a Wholesale
+        # home workspace) are about entering screens, and would wrongly treat
+        # this read-only page as off-limits. The flag grants nothing - it only
+        # decides whether a view is counted.
+        from app.services.auth_service import decode_access_token
+        from app.models.demo_site_models import DemoSite
+        payload = decode_access_token(auth.split(" ", 1)[1])
+        user = db.query(User).filter(User.id == payload.get("sub")).first()
+        if user is None or not user.is_active:
+            return False
+        row = db.query(DemoSite).filter(DemoSite.token == token).first()
+        if row is None:
+            row = db.query(DemoSite).filter(DemoSite.slug == token).first()
+        return row is not None and row.brand_sales_org_id in sales_org_ids(user, db)
+    except Exception:
+        return False
+
+
 @router.get("/public/demo/{token}")
 @limiter.limit("60/minute")
 def resolve_demo_site(request: Request, token: str, db: Session = Depends(get_db)):
@@ -948,7 +978,8 @@ def resolve_demo_site(request: Request, token: str, db: Session = Depends(get_db
     this becoming an oracle for finding live demos.
     """
     demo = _demos.resolve(db, token,
-                          brand_sales_org_id=_brand_for_host(db, request))
+                          brand_sales_org_id=_brand_for_host(db, request),
+                          record_view=not _is_brand_staff_preview(db, request, token))
     if demo is None:
         # One message for every failure mode. Distinguishing expired from
         # never-existed would let somebody probe for live tokens.

@@ -624,7 +624,95 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
         "demo_contexts": demo_contexts,
         "has_demo_access": bool(demo_contexts),
         "training": training,
+        # PREVIEWS ARE NOT WORKSPACES. A live demo of an open deal, offered on
+        # the launcher to that brand's sales managers so a mockup can be
+        # opened where the businesses are - clearly labelled, never a tenant,
+        # never a grant. A separate key, never in `contexts`, for the same
+        # reason as demo_contexts above.
+        "preview_contexts": preview_contexts(db, user),
     }
+
+
+# Stages before a deal is won. A deal that is won/onboarding/live is a customer
+# (or becoming one) and belongs on a workspace card once its workspace exists;
+# a lost deal shows nothing.
+_PREVIEW_STAGES = ("prospect", "contacted", "discovery", "demo_build",
+                   "demo_proposal", "closing")
+
+
+def preview_contexts(db: Session, user: User) -> List[Dict[str, Any]]:
+    """Live demo previews this person may open from the launcher.
+
+    WHO: sales managers of the brand that owns the deal - the people who can
+    already list and revoke that deal's demo links (/sales/opportunities/{id}/
+    demo-sites). A rep, a customer user or an unrelated login gets nothing.
+
+    WHAT: one entry per OPEN, pre-won deal that has no customer workspace and
+    at least one live demo link (active, not revoked, not expired). The
+    product walkthrough ("platform") is preferred over a website concept.
+    The link is the deal's existing public demo address on the brand's own
+    domain; nothing is created, provisioned or granted here.
+
+    Never raises: a launcher that fails here simply shows no previews.
+    """
+    out: List[Dict[str, Any]] = []
+    try:
+        from app.models.sales_models import Opportunity, ROLE_SALES_MANAGER, STAGE_LABELS
+        from app.models.demo_site_models import DemoSite
+        from app.services import demo_sites as _demos
+        from app.services.appointment_invites import brand_identity_for_brand, PUBLIC_BASE_URL
+
+        brands = sorted({m.scope_id for m in platform_memberships(user, db)
+                         if m.role == ROLE_SALES_MANAGER and m.is_active})
+        if not brands:
+            return out
+        opps = (db.query(Opportunity)
+                  .filter(Opportunity.brand_sales_org_id.in_(brands),
+                          Opportunity.stage.in_(_PREVIEW_STAGES),
+                          Opportunity.status == "open",
+                          Opportunity.customer_organization_id.is_(None))
+                  .all())
+        if not opps:
+            return out
+        demos = (db.query(DemoSite)
+                   .filter(DemoSite.opportunity_id.in_([o.id for o in opps]))
+                   .order_by(DemoSite.created_at.desc()).all())
+        now = datetime.utcnow()
+        best: Dict[str, Any] = {}
+        for d in demos:
+            if not d.is_live(now):
+                continue
+            cur = best.get(d.opportunity_id)
+            platform = (d.slot or _demos.DEFAULT_SLOT) == _demos.DEFAULT_SLOT
+            if cur is None or (platform and (cur.slot or _demos.DEFAULT_SLOT) != _demos.DEFAULT_SLOT):
+                best[d.opportunity_id] = d
+        bases: Dict[str, str] = {}
+        for o in opps:
+            d = best.get(o.id)
+            if d is None:
+                continue
+            if o.brand_sales_org_id not in bases:
+                ident = brand_identity_for_brand(db, o.brand_sales_org_id) or {}
+                bases[o.brand_sales_org_id] = ident.get("app_base_url") or PUBLIC_BASE_URL
+            out.append({
+                "type": "preview",
+                "opportunity_id": o.id,
+                "brand_sales_org_id": o.brand_sales_org_id,
+                "company_name": o.company_name,
+                "contact_name": o.contact_name,
+                "industry": (getattr(o, "industry", None) or "").strip().lower() or None,
+                "stage": o.stage,
+                "stage_label": STAGE_LABELS.get(o.stage, o.stage),
+                "proposal_sent": (o.proposal_status or "") == "sent",
+                "demo_slot": d.slot or _demos.DEFAULT_SLOT,
+                "url": _demos.public_url(bases[o.brand_sales_org_id], d.slug or d.token) + "?staff=1",
+            })
+        out.sort(key=lambda x: (x["company_name"] or "").lower())
+    except Exception:                                    # pragma: no cover
+        _log.warning("could not resolve launcher previews for %s",
+                     getattr(user, "id", None), exc_info=True)
+        return []
+    return out
 
 
 def _brand_sales_label(db: Session, brand_sales_org_id: str) -> str:

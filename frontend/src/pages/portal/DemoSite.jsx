@@ -27,7 +27,11 @@ export default function DemoSite() {
 
   useEffect(() => {
     if (!token) { setError('This link is missing its access key.'); return }
-    api.get(`/public/demo/${token}`)
+    // Opened from Program Access by the brand's own staff: ask the server not
+    // to count it as the prospect's view. The server only honours this for a
+    // signed-in sales member of that brand; everyone else is counted as usual.
+    const staff = new URLSearchParams(window.location.search).get('staff') === '1'
+    api.get(`/public/demo/${token}` + (staff ? '?staff=1' : ''))
       .then(d => {
         setDemo(d)
         if (d && d.title) document.title = d.title
