@@ -92,8 +92,22 @@
   --gm-grid-fade: none;
 
   /* ── shell furniture ──────────────────────────────────────────────────── */
-  --gm-rail: #ffffff;
-  --gm-rail-line: #e4e9f1;
+  /* OWNER DESK (Oct 26 2026): a compact NAVY rail on a light page. The rail
+     has its own ink because the page ink is dark-on-light; every rail colour
+     below is measured against --gm-rail (#0f1d36):
+       fg 11.6:1 · head 16.0:1 · dim 6.4:1 · gold 9.0:1 · active fg 16.0:1. */
+  --gm-rail: #0f1d36;
+  --gm-rail-line: rgba(255, 255, 255, .08);
+  --gm-rail-fg: #c8d3e4;
+  --gm-rail-head: #ffffff;
+  --gm-rail-dim: #8e9fba;
+  --gm-rail-hover: rgba(255, 255, 255, .06);
+  --gm-rail-active: rgba(108, 160, 255, .16);
+  --gm-rail-active-fg: #ffffff;
+  --gm-rail-accent: #6ca0ff;
+  --gm-rail-gold: #f2c968;
+  --gm-rail-card: rgba(255, 255, 255, .05);
+  --gm-rail-card-line: rgba(255, 255, 255, .10);
   --gm-topbar: #ffffff;
   --gm-topbar-line: #e4e9f1;
   --gm-scrim: rgba(15, 27, 45, .38);
@@ -109,8 +123,8 @@
   --gm-health: #ffffff;
   --gm-health-hover: #f6f9fd;
   --gm-health-line: #e4e9f1;
-  --gm-radius: 12px;
-  --gm-radius-sm: 8px;
+  --gm-radius: 16px;
+  --gm-radius-sm: 10px;
 
   /* ── rows and tables ──────────────────────────────────────────────────── */
   --gm-row-line: #eef2f7;
@@ -185,6 +199,22 @@
   --gm-purple: #6438bd;
   --gm-gold: #7a5a0c;
 
+  /* Business accents on the Owner Desk program cards — the signal hues the
+     page already uses, named for what they mark. */
+  --gm-acc-energy: var(--gm-amber);   --gm-acc-energy-wash: var(--gm-amber-wash);
+  --gm-acc-roofing: #b4480f;          --gm-acc-roofing-wash: rgba(180, 72, 15, .09);
+  --gm-acc-funeral: var(--gm-purple); --gm-acc-funeral-wash: var(--gm-purple-wash);
+  --gm-acc-insurance: #0d6f7d;        --gm-acc-insurance-wash: rgba(13, 111, 125, .09);
+  --gm-acc-cleaning: var(--gm-teal);  --gm-acc-cleaning-wash: var(--gm-teal-wash);
+  --gm-acc-wholesale: #137a4f;        --gm-acc-wholesale-wash: rgba(19, 122, 79, .09);
+  --gm-acc-general: #44526a;          --gm-acc-general-wash: rgba(68, 82, 106, .08);
+
+  /* Names some God screens already used without a declaration — an
+     undeclared var() paints NOTHING, so these alias real tokens. */
+  --gm-card-bg: var(--gm-card);
+  --gm-border: var(--gm-card-line);
+  --gm-idfixed: 1010px;   /* restated per breakpoint on .gm-idtable (GodStyles) */
+
   --gm-blue-wash: rgba(29, 99, 209, .07);
   --gm-blue-wash-2: rgba(29, 99, 209, .14);
   --gm-teal-wash: rgba(6, 122, 85, .09);
@@ -213,7 +243,7 @@
   --gm-pill-amber-fg: var(--gm-pill-gold-fg);
 
   /* ── depth ────────────────────────────────────────────────────────────── */
-  --gm-shadow-card: 0 1px 2px rgba(15, 27, 45, .05), 0 1px 3px rgba(15, 27, 45, .04);
+  --gm-shadow-card: 0 1px 2px rgba(15, 27, 45, .04), 0 6px 18px rgba(15, 27, 45, .05);
   --gm-shadow-lift: 0 2px 6px rgba(15, 27, 45, .07), 0 10px 26px rgba(15, 27, 45, .10);
   --gm-shadow-rail: 0 0 40px rgba(15, 27, 45, .16);
   --gm-shadow-modal: 0 24px 60px rgba(15, 27, 45, .24);

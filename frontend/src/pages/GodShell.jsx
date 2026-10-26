@@ -208,7 +208,9 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
   // 248, not 220. At 220 the label had ~93px left after the icon, the gap and
   // the NEEDS BUILD tag, so "Pipeline & Cadence", "Communications" and
   // "Audit & Security" were all being ellipsised.
-  const railW = isMobile ? 264 : (collapsed ? 62 : 248)
+  // Owner Desk: a compact rail (224). Six short section names fit without
+  // ellipsis; the jump/brand labels are the longest and still fit at 224.
+  const railW = isMobile ? 264 : (collapsed ? 62 : 224)
 
   // Which authority is in force on THIS screen. Everything the God shell is
   // allowed to claim about scope follows from this one answer.
@@ -252,7 +254,7 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
         <div onClick={() => setDrawer(false)}
              style={{ position: 'fixed', inset: 0, background: 'var(--gm-scrim)', zIndex: 40 }} />
       ) : null}
-      <aside style={{ width: railW, minWidth: railW, background: 'var(--gm-rail)',
+      <aside style={{ width: railW, minWidth: railW, background: 'var(--gm-rail)', color: 'var(--gm-rail-fg)',
                       borderRight: '1px solid var(--gm-rail-line)', display: 'flex', flexDirection: 'column',
                       flexShrink: 0, transition: 'transform .18s ease, width .16s ease',
                       ...(isMobile ? {
@@ -282,10 +284,10 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
         {/* Collapse toggle */}
         <button onClick={toggleRail}
           hidden={isMobile}
+          className="gm-rail-toggle"
           title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
           aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-          style={{ background: 'none', border: 'none', borderBottom: '1px solid var(--gm-rail-line)',
-            color: 'var(--gm-ghost)', cursor: 'pointer', padding: '7px 0', display: 'flex',
+          style={{ padding: '7px 0', display: 'flex',
             alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-end',
             paddingRight: collapsed ? 0 : 16, fontFamily: 'inherit' }}>
           <span style={{ display: 'inline-block', transform: collapsed ? 'none' : 'rotate(180deg)', transition: 'transform .16s ease' }}>
@@ -294,7 +296,7 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
         </button>
 
         {/* Nav */}
-        <nav style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 0' }}>
+        <nav aria-label="God Mode" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '10px 0' }}>
           {SECTIONS.map(({ key, label, path, icon, hint }) => {
             const active = here.section.key === key
             return (
@@ -445,17 +447,15 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
           <button
             onClick={() => navigate('/change-password')}
             title="Change your own password — asks for your current one first"
-            style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'none',
-              border: 'none', color: 'var(--gm-dim)', cursor: 'pointer', fontSize: '12.5px', padding: 0,
-              justifyContent: collapsed ? 'center' : 'flex-start', fontFamily: 'inherit' }}
+            className="gm-rail-btn"
+            style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
           >
             <Ico d={ICONS.settings} size={14} />
             {!collapsed && 'Change password'}
           </button>
           <button onClick={handleLogout} title="Sign out"
-            style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'none',
-              border: 'none', color: 'var(--gm-dim)', cursor: 'pointer', fontSize: '12.5px', padding: 0,
-              justifyContent: collapsed ? 'center' : 'flex-start', fontFamily: 'inherit' }}
+            className="gm-rail-btn"
+            style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
           >
             <Ico d={ICONS.logout} size={14} />
             {!collapsed && 'Sign out'}

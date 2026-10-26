@@ -153,61 +153,66 @@ const CSS = `
 .gm-btn.gm-sm{padding:6px 10px;font-size:11.5px}
 
 /* ── nav rail ──────────────────────────────────────────────────────────────
-   White rail, navy labels, and a selected state you cannot miss: a tinted pill
-   with a blue rule down its left edge, the label in blue and in weight. The
-   selection is carried by THREE things — fill, rule and weight — so it does not
-   depend on colour perception alone. */
+   OWNER DESK (Oct 26 2026): a compact navy rail. Selected state is still
+   carried by THREE things — a lighter fill, an accent rule on the left edge
+   and bold white text — so it never depends on colour alone. */
 .gm-nav-item{
   display:flex;align-items:center;gap:11px;padding:8px 12px;text-decoration:none;
   font-size:13.5px;letter-spacing:0;border-left:3px solid transparent;
-  border-radius:0 var(--gm-radius-sm) var(--gm-radius-sm) 0;
-  margin:1px 10px 1px 0;
-  color:var(--gm-text);transition:color .14s ease,background .14s ease;white-space:nowrap;
+  border-radius:var(--gm-radius-sm);
+  margin:2px 10px;
+  color:var(--gm-rail-fg);transition:color .14s ease,background .14s ease;white-space:nowrap;
   min-width:0;font-weight:500;
 }
-.gm-nav-item:hover{color:var(--gm-head);background:var(--gm-panel-2)}
+.gm-nav-item:hover{color:var(--gm-rail-head);background:var(--gm-rail-hover)}
+.gm-nav-item:focus-visible{outline:2px solid var(--gm-rail-accent);outline-offset:1px}
 .gm-nav-item.gm-active{
-  color:var(--gm-blue);background:var(--gm-pill-blue-bg);
-  border-left-color:var(--gm-blue);font-weight:650;
+  color:var(--gm-rail-active-fg);background:var(--gm-rail-active);
+  border-left-color:var(--gm-rail-accent);font-weight:650;
 }
-/* An unbuilt entry is quieter than a live one but still readable — it was
-   #3f556e on near-black, about 2.1:1. The NEEDS BUILD tag beside it is what
-   actually carries the distinction. */
-.gm-nav-item.gm-unbuilt{color:var(--gm-faint);font-weight:500}
-.gm-nav-item.gm-unbuilt:hover{color:var(--gm-head);background:var(--gm-panel-2)}
+.gm-nav-item.gm-unbuilt{color:var(--gm-rail-dim);font-weight:500}
+.gm-nav-item.gm-unbuilt:hover{color:var(--gm-rail-head);background:var(--gm-rail-hover)}
 .gm-nav-label{
   flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 .gm-nav-tag{
-  margin-left:6px;font-size:8px;letter-spacing:.06em;color:var(--gm-pill-off-fg);
-  background:var(--gm-pill-off-bg);
-  border:1px solid var(--gm-pill-off-bd);border-radius:4px;padding:1px 4px;flex:0 0 auto;
+  margin-left:6px;font-size:8px;letter-spacing:.06em;color:var(--gm-rail-fg);
+  background:var(--gm-rail-card);
+  border:1px solid var(--gm-rail-card-line);border-radius:4px;padding:1px 4px;flex:0 0 auto;
 }
-.gm-nav-item.gm-jump{color:var(--gm-dim);font-size:13px}
-.gm-nav-item.gm-jump:hover{color:var(--gm-head);background:var(--gm-panel-2)}
+.gm-nav-item.gm-jump{color:var(--gm-rail-fg);font-size:13px}
+.gm-nav-item.gm-jump:hover{color:var(--gm-rail-head);background:var(--gm-rail-hover)}
 .gm-nav-head{
-  font-size:10.5px;letter-spacing:.11em;font-weight:700;color:var(--gm-dim);
-  padding:16px 14px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  font-size:10.5px;letter-spacing:.11em;font-weight:700;color:var(--gm-rail-dim);
+  padding:14px 16px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   text-transform:uppercase;
 }
-.gm-nav-head.gm-next{color:var(--gm-dim)}
+.gm-nav-head.gm-next{color:var(--gm-rail-dim)}
 .gm-nav-rule{height:1px;background:var(--gm-rail-line);margin:8px 14px}
+.gm-rail-btn{
+  display:flex;align-items:center;gap:9px;background:none;border:none;color:var(--gm-rail-fg);
+  cursor:pointer;font-size:12.5px;padding:4px 0;font-family:inherit;border-radius:6px;
+}
+.gm-rail-btn:hover{color:var(--gm-rail-head)}
+.gm-rail-btn:focus-visible{outline:2px solid var(--gm-rail-accent);outline-offset:2px}
+.gm-rail-toggle{background:none;border:none;border-bottom:1px solid var(--gm-rail-line);color:var(--gm-rail-dim);cursor:pointer}
+.gm-rail-toggle:hover{color:var(--gm-rail-head)}
 
 /* The rail's identity block and its footer card. */
 .gm-brandmark{
-  width:34px;height:34px;border-radius:9px;display:grid;place-items:center;flex:none;
+  width:34px;height:34px;border-radius:10px;display:grid;place-items:center;flex:none;
   background:var(--gm-btn-primary);color:var(--gm-btn-primary-fg);
   font-weight:800;letter-spacing:-.04em;font-size:12px;box-shadow:var(--gm-logo-glow);
 }
-.gm-wordmark{font-size:16px;font-weight:750;color:var(--gm-head);letter-spacing:-.02em;line-height:1.1}
-.gm-wordmark-sub{font-size:9.5px;font-weight:700;letter-spacing:.16em;color:var(--gm-gold);margin-top:2px}
+.gm-wordmark{font-size:16px;font-weight:750;color:var(--gm-rail-head);letter-spacing:-.02em;line-height:1.1}
+.gm-wordmark-sub{font-size:9.5px;font-weight:700;letter-spacing:.16em;color:var(--gm-rail-gold);margin-top:2px}
 .gm-railcard{
-  margin:10px;padding:12px 13px;border-radius:var(--gm-radius);
-  background:var(--gm-btn-gold-soft);border:1px solid var(--gm-btn-gold-soft-line);
+  margin:10px;padding:11px 12px;border-radius:var(--gm-radius-sm);
+  background:var(--gm-rail-card);border:1px solid var(--gm-rail-card-line);
   display:flex;gap:10px;align-items:flex-start;
 }
-.gm-railcard b{display:block;font-size:13px;color:var(--gm-head);font-weight:700}
-.gm-railcard span{display:block;font-size:11px;color:var(--gm-dim);line-height:1.45}
+.gm-railcard b{display:block;font-size:13px;color:var(--gm-rail-head);font-weight:700}
+.gm-railcard span{display:block;font-size:11px;color:var(--gm-rail-fg);line-height:1.45}
 
 /* ── executive summary tiles ───────────────────────────────────────────── */
 .gm-stats{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:10px;margin-bottom:16px}
