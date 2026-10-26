@@ -13,11 +13,19 @@ same ranged reader the DCAD and TAD files use) - never the whole download,
 never the map geometry. A hunt reads a few counties; a strategy over "All
 Texas" rotates through every county over successive hunts.
 
-Kept: residential parcels (state code A*, or local code RES / A*) with a
-situs house number and a named owner whose MAILING address is somewhere else
-(absentee) or whose name is an estate. Nothing here is a distress claim: the
-engine derives absentee / out-of-state / estate signals from the owner record
-exactly as it does for the Collin and Denton rolls.
+Kept: parcels whose OWN state land code (STAT_LAND_) is a type the hunting
+strategy asks for, with a situs house number and a named owner, and:
+  * residential (A, B2, M, O; or, with no state code, a local code RES / A*):
+    the owner's MAILING address is somewhere else (absentee) or the owner is an
+    estate - as before;
+  * multifamily, commercial, industrial, land, agricultural: the owner is an
+    ESTATE. An owner mailing elsewhere is normal for these (nobody lives on a
+    lot or in a warehouse), so absentee alone never brings one in.
+Until 2026-10-25 only residential parcels were read. A parcel with no state
+code is never assumed to be a house unless its local code says residential;
+every type seen is counted (found_* / kept_*). Nothing here is a distress
+claim: the engine derives absentee / out-of-state / estate signals from the
+owner record exactly as it does for the Collin and Denton rolls.
 """
 from __future__ import annotations
 
@@ -110,13 +118,21 @@ def dbf_rows(fh) -> Iterator[Dict[str, str]]:
 
 
 def _residential(r: Dict[str, str]) -> bool:
+    return _category(r)[0] == "residential"
+
+
+def _category(r: Dict[str, str]):
+    """(category, outcome) from the parcel's own codes - the state code first;
+    with none, only a local code that plainly says residential counts."""
+    from app.services.evosense import property_class as PCL
     st = (r.get("STAT_LAND_") or "").upper()
-    loc = (r.get("LOC_LAND_U") or "").upper()
     if st:
-        return st.startswith("A")                            # A1/A2... single-family residential
-    if loc:
-        return loc.startswith("RES") or loc.startswith("A")
-    return False
+        cat, _sub, outcome = PCL.reader_category(st)
+        return cat, outcome
+    loc = (r.get("LOC_LAND_U") or "").upper()
+    if loc.startswith("RES") or loc.startswith("A"):
+        return "residential", "target"
+    return None, "no_code"
 
 
 def mail_state(r: Dict[str, str]) -> Optional[str]:
@@ -150,8 +166,19 @@ def absentee(r: Dict[str, str]) -> Optional[bool]:
     return not (n1 == n2 and (c1 == c2 or c1.startswith(c2) or c2.startswith(c1)))
 
 
+def _legacy(r: Dict[str, str]) -> Optional[str]:
+    """The older type word: a house only where the parcel's codes say A1 (or a
+    local residential code with no state code, as before); otherwise the word
+    its state code plainly means, or none."""
+    from app.services.evosense import property_class as PCL
+    st = (r.get("STAT_LAND_") or "").strip().upper()
+    if not st:
+        return "single_family" if _category(r)[0] == "residential" else None
+    return PCL.legacy_type_for(st)
+
+
 class TxRollReader:
-    adapter_version = "txgio_parcel_roll/1"
+    adapter_version = "txgio_parcel_roll/2"
 
     def county_rows(self, county: str) -> Iterator[Dict[str, str]]:
         oz = B.open_zip("txgio_roll_%03d" % fips(county), county_url(county), allow_download=False)
@@ -164,10 +191,13 @@ class TxRollReader:
         finally:
             oz.close()
 
-    def discover(self, county: str, *, limit: int, rotate: int = 0, cities=None, zips=None) -> Dict[str, Any]:
+    def discover(self, county: str, *, limit: int, rotate: int = 0, cities=None, zips=None,
+                 categories=None) -> Dict[str, Any]:
         """Up to `limit` absentee-owned or estate-owned houses in one county.
         `rotate` skips that many qualifying rows first, so successive hunts
         reach new owners instead of the same first page."""
+        from app.services.evosense import property_class as PCL
+        categories = tuple(categories or ("residential",))
         stats: Counter = Counter()
         cities = {c.strip().upper() for c in cities or [] if c}
         zips = {z[:5] for z in zips or [] if z}
@@ -179,9 +209,12 @@ class TxRollReader:
                 stats["scan_cap"] += 1
                 break
             stats["scanned"] += 1
-            if not _residential(r):
+            cat, outcome = _category(r)
+            PCL.count_category(stats, "found", cat, outcome)
+            if outcome != "target" or cat not in categories:
                 continue
-            stats["residential"] += 1
+            if cat == "residential":
+                stats["residential"] += 1
             if not (r.get("SITUS_NUM") or "").strip() or not (r.get("SITUS_ST_1") or "").strip():
                 stats["no_situs"] += 1
                 continue
@@ -193,23 +226,27 @@ class TxRollReader:
                 continue
             if zips and (r.get("SITUS_ZIP") or "")[:5] not in zips:
                 continue
-            away = absentee(r)
+            away = absentee(r) if cat == "residential" else None
             estate = bool(_ESTATE.search(owner.upper()))
             if not (away or estate):
                 continue
             stats["qualifying"] += 1
+            stats["kept_%s" % cat] += 1
             if skip:
                 skip -= 1
                 if len(head) < limit:
                     head.append(r)
                 continue
             recs.append(self.record(county, r))
+            stats["imported_%s" % cat] += 1
             if len(recs) >= limit:
                 break
         if len(recs) < limit and head:
             # The rotation ran past the end of this county's list: wrap to its start.
             stats["wrapped"] = 1
-            recs.extend(self.record(county, r) for r in head[:limit - len(recs)])
+            for r in head[:limit - len(recs)]:
+                recs.append(self.record(county, r))
+                stats["imported_%s" % (_category(r)[0] or "unknown")] += 1
         stats["records"] = len(recs)
         return {"records": recs, "stats": dict(stats), "source_url": county_url(county)}
 
@@ -234,7 +271,7 @@ class TxRollReader:
             "street_address": street, "unit": None, "city": city, "state": "TX",
             "zip_code": re.sub(r"\D", "", r.get("SITUS_ZIP") or "")[:5] or None,
             "county": county, "parcel_apn": None,             # each county's own sources own the APN format
-            "property_type": "single_family",
+            "property_type": _legacy(r),
             "year_built": built if built and 1800 < built <= datetime.utcnow().year else None,
             "owner": owner, "signals": [],
             "_raw": {k: r.get(k) for k in ("PROP_ID", "GEO_ID", "OWNER_NAME", "NAME_CARE", "STAT_LAND_",

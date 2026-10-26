@@ -39,6 +39,13 @@ DCAD_PATH = r"\\DCAD.ORG\WEB\WEBDATA\WEBFORMS\DATA PRODUCTS\DCAD{year}_CURRENT.Z
 DISTRESSED_CDU = {"POOR": 75, "VERY POOR": 85, "UNDESIRABLE": 80}   # the CDU ratings discovery reads
 CDU_SIGNAL = {"POOR": "CDU_POOR", "VERY POOR": "CDU_POOR", "UNDESIRABLE": "CDU_UNDESIRABLE"}
 SFR_SPTD = ("A11",)          # DCAD SPTD code for single-family residence
+# Discovery reads RES_DETAIL (the residential-building table: houses, condos,
+# townhomes, duplexes, manufactured homes). Until 2026-10-25 it then kept SPTD
+# A11 only; it now keeps every account whose OWN SPTD code is a type the
+# hunting strategy asks for, and counts each type it saw, kept or left out.
+# Commercial, industrial and land accounts have no RES_DETAIL row (no CDU
+# rating), so DCAD can't discover them by condition - they arrive through the
+# tax roll / clerk notices and DCAD then supplies their owner, value and code.
 
 
 def _csv_rows(zf, member):
@@ -61,13 +68,29 @@ def _d(v: str) -> Optional[datetime]:
         return None
 
 
+def _legacy_type(code) -> Optional[str]:
+    """DCAD's own SPTD code -> the older type word: A11 is a house; other A1x
+    codes (condo, townhome, half-duplex) are residential but not called a
+    house - the code itself is kept as the evidence."""
+    from app.services.evosense import property_class as PCL
+    c = (code or "").strip().upper()
+    if c in SFR_SPTD:
+        return "single_family"
+    if c.startswith("A1"):
+        return None
+    return PCL.legacy_type_for(c)
+
+
 class DcadReader:
-    adapter_version = "dcad_certified/2"
+    adapter_version = "dcad_certified/3"
 
     def locate(self, year: Optional[int] = None) -> str:
         return DCAD_BASE + urllib.parse.quote(DCAD_PATH.format(year=year or datetime.utcnow().year))
 
-    def discover(self, *, limit: int, candidate_factor: int = 3, skip: int = 0) -> Dict[str, Any]:
+    def discover(self, *, limit: int, candidate_factor: int = 3, skip: int = 0,
+                 categories=None) -> Dict[str, Any]:
+        from app.services.evosense import property_class as PCL
+        categories = tuple(categories or ("residential",))
         url = self.locate()
         oz = B.open_zip("dcad", url)
         stats: Counter = Counter()
@@ -96,11 +119,20 @@ class DcadReader:
                 cands.setdefault(a, c0)
             stats["condition_candidates"] = len(cands)
             self._join(oz.zip, "ACCOUNT_APPRL_YEAR.CSV", cands, "val", stats)
-            # single-family only, with a value
+            # the account's own SPTD code decides its type; no code -> left out, never "a house"
             for a in list(cands):
                 v = cands[a].get("val")
-                if not v or (v.get("SPTD_CODE") or "").strip() not in SFR_SPTD:
+                if not v:
+                    stats["no_value_row"] += 1
                     del cands[a]
+                    continue
+                cat, _sub, outcome = PCL.reader_category(v.get("SPTD_CODE"))
+                PCL.count_category(stats, "found", cat, outcome)
+                if outcome != "target" or cat not in categories:
+                    stats["excluded_type"] += 1
+                    del cands[a]
+                    continue
+                PCL.count_category(stats, "kept", cat, outcome)
             self._join(oz.zip, "ACCOUNT_INFO.CSV", cands, "info", stats)
             self._join(oz.zip, "APPLIED_STD_EXEMPT.CSV", cands, "exempt", stats)
         finally:
@@ -115,6 +147,7 @@ class DcadReader:
                 stats["government"] += 1
                 continue
             recs.append(self.record(c, url))
+            stats["imported_%s" % (PCL.reader_category((c.get("val") or {}).get("SPTD_CODE"))[0] or "unknown")] += 1
             if len(recs) >= limit:
                 break
         stats["records"] = len(recs)
@@ -144,7 +177,7 @@ class DcadReader:
         for a, c in cands.items():
             c.setdefault("res", {"ACCOUNT_NUM": a})   # land / non-residential: no building row
             rec = self.record(c, url)
-            if not c["res"].get("TOT_LIVING_AREA_SF"):
+            if not c["res"].get("TOT_LIVING_AREA_SF") and rec.get("property_type") == "single_family":
                 rec["property_type"] = None           # only RES_DETAIL says single-family
             recs[a] = rec
         stats["matched"] = len(recs)
@@ -257,7 +290,7 @@ class DcadReader:
             "source_reference": "DCAD:%s:%s" % (acct, yr or "na"),
             "street_address": street or None, "unit": unit, "city": city, "state": "TX",
             "zip_code": zip5, "county": "Dallas", "parcel_apn": acct,
-            "property_type": "single_family",
+            "property_type": _legacy_type(val.get("SPTD_CODE")),
             "bedrooms": i(res.get("NUM_BEDROOMS")) or None,
             "bathrooms": i(res.get("NUM_FULL_BATHS")) or None,          # FULL baths
             "half_bathrooms": i(res.get("NUM_HALF_BATHS")) or None,

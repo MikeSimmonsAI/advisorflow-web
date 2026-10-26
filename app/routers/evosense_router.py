@@ -2820,7 +2820,8 @@ def property_types(db: Session = Depends(get_db), user: User = Depends(require_t
                             "subtypes": [{"key": s, "label": PCL.SUBTYPE_LABELS.get(s, s)} for s in PCL.SUBTYPES[c]],
                             "count": counts.get(c, 0)} for c in PCL.CATEGORIES],
             "unclassified_yet": counts.get("unclassified", 0),
-            "coverage": PCL.coverage(db, org_id)}
+            "coverage": PCL.coverage(db, org_id),
+            "checked": PCL.checked_coverage(db, org_id)}
 
 
 class PropertyTypeIn(BaseModel):

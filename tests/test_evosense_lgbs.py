@@ -178,7 +178,8 @@ def test_dcad_lookup_by_account(tmp_path, monkeypatch, no_network):  # noqa: F81
     assert held["square_feet"] == 1120 and held["year_built"] == 1951 and held["bedrooms"] == 3
     assert held["appraisal"]["value"] == 120000 and held["property_type"] == "single_family"
     land = recs["00000555100000000"]
-    assert land["property_type"] is None and land["square_feet"] is None   # no building row: not guessed
+    # no building row: no house facts guessed; its own SPTD code (C11) says land
+    assert land["property_type"] == "land" and land["square_feet"] is None
     src = PV.PROVIDERS["dcad"]
     assert src.applies({"county": "Dallas", "parcel_apn": "x"}) and not src.applies({"county": "Tarrant",
                                                                                       "parcel_apn": "x"})

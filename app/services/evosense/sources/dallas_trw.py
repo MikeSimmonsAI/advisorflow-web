@@ -10,8 +10,12 @@ charge"; robots.txt allows all agents).
 The Tax Office's own definition: an account is delinquent when its DUE-DATE is
 in the past and a balance remains. EvoSense reads the DALLAS COUNTY taxing
 unit's rows (jurisdiction 1002 - every property in the county carries county
-tax), residential category A1*, real property, and adds the years up per
-account. The amount is the Tax Office's own "total amount due" (levy, penalty
+tax), real property, and adds the years up per account. Until 2026-10-25 only
+category A1* (houses) was read; now every row whose OWN category code is a
+type the hunting strategy asks for is (residential, multifamily, commercial,
+industrial, land, agricultural). Minerals, utilities and personal property
+(G/J/L/N/S/X) are never read, a row with no readable code is never assumed to
+be a house, and each type seen is counted (found_* / kept_* in the run stats). The amount is the Tax Office's own "total amount due" (levy, penalty
 and interest) for the county unit only - other units (city, school) usually
 owe more, so it is stated as "at least".
 
@@ -67,7 +71,7 @@ def _d(v: str) -> Optional[datetime]:
 
 
 class TrwReader:
-    adapter_version = "dallas_trw/2"
+    adapter_version = "dallas_trw/3"
 
     def locate(self) -> str:
         override = B.local_override("dallas_trw")
@@ -81,13 +85,17 @@ class TrwReader:
 
     def discover(self, *, limit: int, skip: int = 0, min_due_cents: int = 25000,
                  today: Optional[datetime] = None, max_rows: int = 3_000_000,
-                 accounts: Optional[set] = None) -> Dict[str, Any]:
+                 accounts: Optional[set] = None, categories=None) -> Dict[str, Any]:
         """The data member is sorted by jurisdiction, then tax year, then account,
         so one account's delinquent years are spread through the county block.
         The whole county block (~1M rows, ~60 MB of byte ranges) is read once,
         rows are added up per account, and `skip` rotates which accounts this
         run returns (wrapping to the top)."""
+        from app.services.evosense import property_class as PCL
         today = today or datetime.utcnow()
+        # A targeted check of named accounts (an imported list) reads every type:
+        # the list already chose them.
+        categories = tuple(PCL.TARGET_CATEGORIES if accounts is not None else (categories or ("residential",)))
         url = self.locate()
         oz = B.open_zip("dallas_trw", url, allow_download=False)
         stats: Counter = Counter()
@@ -121,7 +129,12 @@ class TrwReader:
                         continue
                     seen_county = True
                     stats["county_rows"] += 1
-                    if line[439:440] != "R" or line[221:223] != "A1":
+                    if line[439:440] != "R":
+                        continue
+                    cat, _sub, outcome = PCL.reader_category(line[221:225])
+                    if outcome != "target" or cat not in categories:
+                        if line[110:121].strip("0 ") and line[100:108] < today.strftime("%Y%m%d"):
+                            stats["excluded_rows_%s" % (cat or outcome)] += 1    # delinquent rows left out, by type
                         continue
                     r = parse(line)
                     if accounts is not None:
@@ -136,6 +149,7 @@ class TrwReader:
                     stats["delinquent_rows"] += 1
                     cur = accts.get(r["account"])
                     if cur is None:
+                        stats["found_%s" % cat] += 1
                         cur = accts[r["account"]] = {
                             "account": r["account"], "cad_account": r["cad_account"], "years": [],
                             "total_due": 0, "suit": None, "cause": None, "deferral": False,
@@ -164,6 +178,8 @@ class TrwReader:
                 stats["below_min_due"] += 1
             else:
                 pool.append(acc)
+                c = PCL.reader_category(acc["first"].get("category"))[0]
+                stats["kept_%s" % c] += 1
         pool.sort(key=lambda a: a["account"])
         stats["delinquent_accounts"] = len(pool)
         if accounts is not None:
@@ -175,7 +191,9 @@ class TrwReader:
             if start + take > len(pool):
                 stats["wrapped"] = start + take - len(pool)
             for i in range(take):
-                records.append(self.record(pool[(start + i) % len(pool)], url, as_of))
+                acc = pool[(start + i) % len(pool)]
+                records.append(self.record(acc, url, as_of))
+                stats["imported_%s" % (PCL.reader_category(acc["first"].get("category"))[0] or "unknown")] += 1
         stats["records"] = len(records)
         return {"records": records, "stats": dict(stats), "source_url": url, "source_updated_at": as_of}
 
