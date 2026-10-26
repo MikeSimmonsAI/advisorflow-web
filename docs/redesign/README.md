@@ -40,3 +40,6 @@ Future examples (**not authorized until assigned**): `redesign/sci-dashboard`, `
 | `art/PlatformArt.jsx` | "Many businesses, one secured platform" hero illustration. |
 
 To adopt on another screen: wrap it in `className="ev-ds"`, import `evTokens.css`, set `data-accent` for the business. Don't add global CSS; don't force one color scheme or dark-only.
+
+## Log
+- 2026-10-26 — God Mode Owner Desk design language across the six God Mode areas ([spec](GOD_MODE_OWNER_DESK_SPEC.md), issue #411). Draft PR, awaiting owner approval.
