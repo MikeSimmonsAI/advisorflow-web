@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../api/client';
 import StripeCatalogue from './StripeCatalogue';
+import { Page } from './ui/GodKit';
 // The brand's OTHER catalogue: recurring add-ons and one-time services. A
 // separate component from StripeCatalogue because they configure two different
 // commercial objects — that one is the subscription tiers, this one is
@@ -34,8 +35,8 @@ import BrandCatalogue from './BrandCatalogue';
 //   Brand B view.
 
 const CARD = {
-  background: 'var(--gm-pill-blue-bg)', border: '1px solid var(--gm-blue)',
-  borderRadius: '12px', padding: '20px',
+  background: 'var(--gm-card)', border: '1px solid var(--gm-card-line)',
+  borderRadius: 'var(--gm-radius)', padding: '18px 20px', boxShadow: 'var(--gm-shadow-card)',
 };
 
 const STATUS_COLORS = {
@@ -104,15 +105,14 @@ function NoSource({ reason }) {
   );
 }
 
-function Tile({ label, value, sub, reason }) {
+function Tile({ label, value, sub, reason, tone }) {
   return (
-    <div style={{ ...CARD, minWidth: 0 }}>
-      <div style={{ fontSize: 12, color: 'var(--gm-dim)', marginBottom: 6, textTransform: 'uppercase',
-                    letterSpacing: '0.04em' }}>{label}</div>
-      <div style={{ fontSize: 26, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
+    <div className="gk-card gk-kpi" style={{ minWidth: 0 }}>
+      <span className="gk-kpi-label">{label}</span>
+      <span className="gk-kpi-value" style={tone ? { color: `var(--gm-${tone})` } : undefined}>
         {value === null || value === undefined ? <NoSource reason={reason} /> : value}
-      </div>
-      {sub && <div style={{ fontSize: 12, color: 'var(--gm-dim)', marginTop: 6 }}>{sub}</div>}
+      </span>
+      {sub && <span className="gk-kpi-sub">{sub}</span>}
     </div>
   );
 }
@@ -333,32 +333,20 @@ export default function GodBillingOps() {
   const rows = roster?.customers || [];
 
   return (
-    <div style={{ padding: '28px', maxWidth: 1500, margin: '0 auto', color: 'var(--gm-blue)' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-                    flexWrap: 'wrap', gap: 16, marginBottom: 8 }}>
-        <div>
-          <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Billing &amp; Revenue Operations</h1>
-          <p style={{ color: 'var(--gm-dim)', margin: '6px 0 0', fontSize: 14 }}>
-            Every customer, what they pay, and what needs doing about it. Read from the local
-            mirror the Stripe webhook maintains — nothing on this page calls Stripe.
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select aria-label="Brand" value={platformId} onChange={e => setPlatformId(e.target.value)}
-            style={{ background: 'var(--gm-pill-blue-bg)', color: 'var(--gm-blue)', border: '1px solid var(--gm-blue)',
-                     borderRadius: 8, padding: '9px 12px', fontSize: 14 }}>
-            <option value="">All brands</option>
-            {brands.map(b => (
-              <option key={b.platform_id || b.id} value={b.platform_id || b.id}>
-                {b.name || b.brand_name}
-              </option>
-            ))}
-          </select>
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search customer…"
-            style={{ background: 'var(--gm-pill-blue-bg)', color: 'var(--gm-blue)', border: '1px solid var(--gm-blue)',
-                     borderRadius: 8, padding: '9px 12px', fontSize: 14, minWidth: 180 }} />
-        </div>
-      </div>
+    <Page eyebrow="Revenue & Billing" title="Billing & revenue"
+      sub="Every customer, what they pay, and what needs doing about it. Read from the local copy the Stripe webhook keeps — nothing on this page calls Stripe."
+      actions={<>
+        <select aria-label="Brand" className="gk-input" value={platformId} onChange={e => setPlatformId(e.target.value)}>
+          <option value="">All brands</option>
+          {brands.map(b => (
+            <option key={b.platform_id || b.id} value={b.platform_id || b.id}>
+              {b.name || b.brand_name}
+            </option>
+          ))}
+        </select>
+        <input className="gk-input" aria-label="Search customer" value={q} onChange={e => setQ(e.target.value)}
+          placeholder="Search customer…" style={{ minWidth: 180 }} />
+      </>}>
 
       {err && (
         <div style={{ background: 'var(--gm-pill-red-bg)', border: '1px solid var(--gm-red)', borderRadius: 8,
@@ -368,8 +356,8 @@ export default function GodBillingOps() {
       )}
 
       {/* ── Revenue band ─────────────────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
-                    gap: 16, margin: '24px 0' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                    gap: 14, margin: '4px 0 22px' }}>
         <Tile label="MRR" reason={mrr?.no_source}
           value={mrr && mrr.value_cents !== null && mrr.value_cents !== undefined
             ? money(mrr.value_cents, mrr.currency) : null}
@@ -383,7 +371,7 @@ export default function GodBillingOps() {
               ? ` · ${money(collected.refunded_cents, 'usd')} refunded` : ''}`} />
         <Tile label="Active" value={revenue?.active_count ?? 0} sub="subscriptions" />
         <Tile label="Trialing" value={revenue?.trialing_count ?? 0} sub="not counted in MRR" />
-        <Tile label="Past due" value={revenue?.past_due_count ?? 0}
+        <Tile label="Past due" value={revenue?.past_due_count ?? 0} tone={revenue?.past_due_count ? 'red' : undefined}
           sub={revenue?.past_due_count ? 'needs attention' : 'none'} />
         <Tile label="Invoices" value={revenue?.invoices_recorded ?? 0} sub="recorded locally" />
       </div>
@@ -428,9 +416,9 @@ export default function GodBillingOps() {
           const attention = ['payment_problem', 'no_payment_method'].includes(key) && n > 0;
           return (
             <button key={key} onClick={() => setFilter(key)}
-              style={{ background: on ? 'var(--gm-blue)' : 'var(--gm-pill-blue-bg)',
-                       color: on ? 'var(--gm-ink-on-accent)' : attention ? 'var(--gm-amber)' : 'var(--gm-text)',
-                       border: `1px solid ${on ? 'var(--gm-blue)' : attention ? 'var(--gm-pill-amber-bd)' : 'var(--gm-blue)'}`,
+              style={{ background: on ? 'var(--gm-btn-primary)' : 'var(--gm-card)',
+                       color: on ? 'var(--gm-btn-primary-fg)' : attention ? 'var(--gm-amber)' : 'var(--gm-text)',
+                       border: `1px solid ${on ? 'var(--gm-btn-primary)' : attention ? 'var(--gm-pill-amber-bd)' : 'var(--gm-card-line)'}`,
                        borderRadius: 20, padding: '7px 14px', fontSize: 13,
                        fontWeight: on ? 700 : 600, cursor: 'pointer' }}>
               {label}{n !== undefined ? ` · ${n}` : ''}
@@ -442,7 +430,7 @@ export default function GodBillingOps() {
       {/* ── The roster ───────────────────────────────────────────────────── */}
       <div style={{ ...CARD, padding: 0, overflow: 'hidden' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-                      padding: '16px 20px', borderBottom: '1px solid var(--gm-blue)', flexWrap: 'wrap', gap: 8 }}>
+                      padding: '16px 20px', borderBottom: '1px solid var(--gm-card-line)', flexWrap: 'wrap', gap: 8 }}>
           <div style={{ fontWeight: 700, fontSize: 15 }}>
             {roster?.shown ?? 0} customer{(roster?.shown ?? 0) === 1 ? '' : 's'}
             {roster?.total_in_scope !== undefined && filter !== 'all'
@@ -462,7 +450,7 @@ export default function GodBillingOps() {
         {resyncNote && (
           <div style={{ padding: '10px 20px', fontSize: 13, color: 'var(--gm-blue)',
                         background: 'var(--gm-pill-blue-bg)',
-                        borderBottom: '1px solid var(--gm-blue)' }}>
+                        borderBottom: '1px solid var(--gm-card-line)' }}>
             {resyncNote}
           </div>
         )}
@@ -470,7 +458,7 @@ export default function GodBillingOps() {
         {changeNote && (
           <div style={{ padding: '10px 20px', fontSize: 13, color: 'var(--gm-blue)',
                         background: 'var(--gm-pill-blue-bg)',
-                        borderBottom: '1px solid var(--gm-blue)' }}>
+                        borderBottom: '1px solid var(--gm-card-line)' }}>
             {changeNote}
           </div>
         )}
@@ -481,7 +469,7 @@ export default function GodBillingOps() {
             between rates by accident. */}
         {changeForm && (
           <div style={{ padding: '14px 20px', background: 'var(--gm-pill-blue-bg)',
-                        borderBottom: '1px solid var(--gm-blue)' }}>
+                        borderBottom: '1px solid var(--gm-card-line)' }}>
             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>
               Change plan — {changeForm.row.name}
             </div>
@@ -490,8 +478,8 @@ export default function GodBillingOps() {
               <select aria-label="New plan"
                 value={changeForm.planKey}
                 onChange={e => setChangeForm(f => ({ ...f, planKey: e.target.value }))}
-                style={{ background: 'var(--gm-pill-blue-bg)', color: 'var(--gm-blue)',
-                         border: '1px solid var(--gm-blue)', borderRadius: 6,
+                style={{ background: 'var(--gm-card)', color: 'var(--gm-text)',
+                         border: '1px solid var(--gm-card-line)', borderRadius: 6,
                          padding: '6px 10px', fontSize: 13 }}
               >
                 <option value="">Select a plan…</option>
@@ -502,8 +490,8 @@ export default function GodBillingOps() {
               <select aria-label="Commitment"
                 value={changeForm.commitmentKey}
                 onChange={e => setChangeForm(f => ({ ...f, commitmentKey: e.target.value }))}
-                style={{ background: 'var(--gm-pill-blue-bg)', color: 'var(--gm-blue)',
-                         border: '1px solid var(--gm-blue)', borderRadius: 6,
+                style={{ background: 'var(--gm-card)', color: 'var(--gm-text)',
+                         border: '1px solid var(--gm-card-line)', borderRadius: 6,
                          padding: '6px 10px', fontSize: 13 }}
               >
                 <option value="">Keep their commitment
@@ -538,7 +526,7 @@ export default function GodBillingOps() {
                 type="button"
                 onClick={() => setChangeForm(null)}
                 style={{ background: 'transparent', color: 'var(--gm-text)',
-                         border: '1px solid var(--gm-blue)', borderRadius: 6,
+                         border: '1px solid var(--gm-card-line)', borderRadius: 6,
                          padding: '6px 14px', fontSize: 12, cursor: 'pointer' }}
               >
                 Cancel
@@ -550,7 +538,7 @@ export default function GodBillingOps() {
         {/* STEP 2 — WHAT IT WOULD DO, from the brand's own configuration. */}
         {changePreview && (
           <div style={{ padding: '14px 20px', background: 'var(--gm-pill-amber-bg)',
-                        borderBottom: '1px solid var(--gm-blue)' }}>
+                        borderBottom: '1px solid var(--gm-card-line)' }}>
             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
               {changePreview.row.name} — {changePreview.preview.direction}
             </div>
@@ -599,7 +587,7 @@ export default function GodBillingOps() {
                 onClick={() => setChangePreview(null)}
                 disabled={Boolean(changing)}
                 style={{ background: 'transparent', color: 'var(--gm-text)',
-                         border: '1px solid var(--gm-blue)', borderRadius: 6,
+                         border: '1px solid var(--gm-card-line)', borderRadius: 6,
                          padding: '6px 14px', fontSize: 12,
                          cursor: changing ? 'default' : 'pointer' }}
               >
@@ -614,7 +602,7 @@ export default function GodBillingOps() {
             what they have actually read. */}
         {resyncPreview && (
           <div style={{ padding: '14px 20px', background: 'var(--gm-pill-amber-bg)',
-                        borderBottom: '1px solid var(--gm-blue)' }}>
+                        borderBottom: '1px solid var(--gm-card-line)' }}>
             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
               {resyncPreview.row.name} — {resyncPreview.changed.length} field(s)
               differ from Stripe
@@ -660,7 +648,7 @@ export default function GodBillingOps() {
                 onClick={() => setResyncPreview(null)}
                 disabled={Boolean(resyncing)}
                 style={{ background: 'transparent', color: 'var(--gm-text)',
-                         border: '1px solid var(--gm-blue)', borderRadius: 6,
+                         border: '1px solid var(--gm-card-line)', borderRadius: 6,
                          padding: '6px 14px', fontSize: 12,
                          cursor: resyncing ? 'default' : 'pointer' }}
               >
@@ -698,7 +686,7 @@ export default function GodBillingOps() {
                 {rows.map(c => {
                   const sc = STATUS_COLORS[c.billing_status] || 'var(--gm-dim)';
                   return (
-                    <tr key={c.organization_id} style={{ borderTop: '1px solid var(--gm-blue)' }}>
+                    <tr key={c.organization_id} style={{ borderTop: '1px solid var(--gm-card-line)' }}>
                       <td style={{ padding: '12px 16px', fontWeight: 600 }}>
                         {c.name}
                         {c.implementation_status && (
@@ -856,7 +844,7 @@ export default function GodBillingOps() {
                             disabled={changing === c.organization_id}
                             title="Move this customer to a different plan, through the same path their own Billing page uses."
                             style={{ background: 'transparent', color: 'var(--gm-dim)',
-                                     border: '1px solid var(--gm-blue)', borderRadius: 6,
+                                     border: '1px solid var(--gm-card-line)', borderRadius: 6,
                                      padding: '4px 10px', fontSize: 12,
                                      marginRight: 8,
                                      cursor: changing === c.organization_id
@@ -872,7 +860,7 @@ export default function GodBillingOps() {
                             disabled={resyncing === c.organization_id}
                             title="Re-read this subscription from Stripe and refresh this platform's copy. Nothing is written to Stripe."
                             style={{ background: 'transparent', color: 'var(--gm-dim)',
-                                     border: '1px solid var(--gm-blue)', borderRadius: 6,
+                                     border: '1px solid var(--gm-card-line)', borderRadius: 6,
                                      padding: '4px 10px', fontSize: 12,
                                      marginRight: 10,
                                      cursor: resyncing === c.organization_id
@@ -920,7 +908,7 @@ export default function GodBillingOps() {
               </thead>
               <tbody>
                 {events.events.map(e => (
-                  <tr key={e.id} style={{ borderTop: '1px solid var(--gm-blue)', color: 'var(--gm-text)' }}>
+                  <tr key={e.id} style={{ borderTop: '1px solid var(--gm-card-line)', color: 'var(--gm-text)' }}>
                     <td style={{ padding: '10px 12px 10px 0', whiteSpace: 'nowrap' }}>
                       {when(e.received_at) || '—'}
                     </td>
@@ -947,6 +935,6 @@ export default function GodBillingOps() {
           </div>
         )}
       </div>
-    </div>
+    </Page>
   );
 }

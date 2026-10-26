@@ -29,12 +29,12 @@ const money = (cents, currency) => {
 };
 
 const CARD = {
-  background: 'var(--gm-pill-blue-bg)', border: '1px solid var(--gm-blue)',
-  borderRadius: 12, padding: 24, marginBottom: 24,
+  background: 'var(--gm-card)', border: '1px solid var(--gm-card-line)', boxShadow: 'var(--gm-shadow-card)',
+  borderRadius: 'var(--gm-radius)', padding: 22, marginBottom: 22,
 };
 
 const INPUT = {
-  background: 'var(--gm-pill-blue-bg)', color: 'var(--gm-blue)', border: '1px solid var(--gm-blue)',
+  background: 'var(--gm-card)', color: 'var(--gm-text)', border: '1px solid var(--gm-btn-line)',
   borderRadius: 6, padding: '6px 10px', fontSize: 13, minWidth: 0,
 };
 
@@ -133,7 +133,7 @@ export default function BrandCatalogue({ platformId }) {
     return (
       <div style={CARD}>
         <h2 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>
-          PRODUCTS &amp; SERVICES
+          Products &amp; services
         </h2>
         <p style={{ color: 'var(--gm-dim)', margin: '8px 0 0', fontSize: 13,
                     maxWidth: 640 }}>
@@ -154,7 +154,7 @@ export default function BrandCatalogue({ platformId }) {
                     alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
         <div>
           <h2 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>
-            PRODUCTS &amp; SERVICES
+            Products &amp; services
           </h2>
           <p style={{ color: 'var(--gm-dim)', margin: '6px 0 0', fontSize: 13,
                       maxWidth: 640 }}>
@@ -184,7 +184,7 @@ export default function BrandCatalogue({ platformId }) {
 
       {adding && draft && (
         <div style={{ marginTop: 16, padding: 16, background: 'var(--gm-pill-blue-bg)',
-                      border: '1px solid var(--gm-blue)', borderRadius: 8 }}>
+                      border: '1px solid var(--gm-card-line)', borderRadius: 8 }}>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <input style={{ ...INPUT, flex: '1 1 150px' }} placeholder="key (extra_users)"
               value={draft.key}
@@ -272,7 +272,7 @@ export default function BrandCatalogue({ platformId }) {
               </thead>
               <tbody>
                 {items.map(it => (
-                  <tr key={it.id} style={{ borderTop: '1px solid var(--gm-blue)',
+                  <tr key={it.id} style={{ borderTop: '1px solid var(--gm-card-line)',
                                            opacity: it.is_active ? 1 : 0.55 }}>
                     <td style={{ padding: '10px 12px 10px 0' }}>
                       <div style={{ fontWeight: 600 }}>{it.name}</div>
@@ -327,7 +327,7 @@ export default function BrandCatalogue({ platformId }) {
       )}
 
       {/* ── Stripe provisioning, preview first ──────────────────────────── */}
-      <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--gm-blue)' }}>
+      <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--gm-card-line)' }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center',
                       flexWrap: 'wrap' }}>
           <button type="button" onClick={() => runProvision(false)}
@@ -345,7 +345,7 @@ export default function BrandCatalogue({ platformId }) {
 
         {provision && (
           <div style={{ marginTop: 14, padding: 14, background: 'var(--gm-pill-amber-bg)',
-                        border: '1px solid var(--gm-blue)', borderRadius: 8 }}>
+                        border: '1px solid var(--gm-card-line)', borderRadius: 8 }}>
             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
               Would create {provision.summary?.products_created} product(s) and{' '}
               {provision.summary?.prices_created} price(s) · reuse{' '}
@@ -380,7 +380,7 @@ export default function BrandCatalogue({ platformId }) {
               </button>
               <button type="button" onClick={() => setProvision(null)}
                 style={{ background: 'transparent', color: 'var(--gm-text)',
-                         border: '1px solid var(--gm-blue)', borderRadius: 6,
+                         border: '1px solid var(--gm-card-line)', borderRadius: 6,
                          padding: '6px 14px', fontSize: 12, cursor: 'pointer' }}>
                 Cancel
               </button>
