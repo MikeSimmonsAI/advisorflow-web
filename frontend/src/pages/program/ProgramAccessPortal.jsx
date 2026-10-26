@@ -148,13 +148,13 @@ export default function ProgramAccessPortal({ contexts, onChoose, user: userProp
               <div className="pa-toolbar">
                 <div>
                   <h2 id="pa-previews-title">Previews</h2>
-                  <p>Mockups for prospects who are not live customers yet. Each opens its demo link in a new tab.</p>
+                  <p>Demos built for prospects who are not customers yet. Open one to see exactly what that prospect was shown.</p>
                 </div>
               </div>
               <div className={'pa-grid pa-grid--' + view + ' pa-grid--n' + Math.min(previews.length, 5)} role="list" aria-label="Previews">
                 {previews.map(item => (
                   <div role="listitem" key={item.organization_id}>
-                    <WorkspaceCard item={item} onOpen={onChoose} layout={view} actionLabel="Open preview" />
+                    <WorkspaceCard item={item} onOpen={onChoose} layout={view} actionLabel="Open preview" href={item.url} />
                   </div>
                 ))}
               </div>

@@ -25,6 +25,9 @@ const PROGRAMS = {
   insurance: { rank: 6, variant: 'insurance', symbol: '⛨', kind: 'INSURANCE AGENCY',
                summary: 'Prospects, AI conversations, appointments, applications and policies',
                facts: ['Prospects', 'Applications', 'Policies'] },
+  cleaning: { rank: 7, variant: 'cleaning', symbol: '✦', kind: 'COMMERCIAL CLEANING',
+              summary: 'Prospects, follow-up, booked walkthroughs and reports',
+              facts: ['Prospects', 'Follow-up', 'Walkthroughs'] },
   business: { rank: 7, variant: 'general', symbol: '◈', kind: 'BUSINESS OPERATIONS',
               summary: 'Your dedicated business workspace',
               facts: ['Leads', 'Conversations', 'Calendar'] },
@@ -61,7 +64,7 @@ export function programOf(w) {
   if (w.experience === 'insurance' || w.industry === 'insurance') return 'insurance'
   if (w.experience === 'energy' || w.industry === 'energy') return 'energy'
   if (w.industry === 'funeral' || w.industry === 'cemetery') return 'funeral'
-  if (w.industry === 'cleaning') return 'business'
+  if (w.industry === 'cleaning') return 'cleaning'
   return null
 }
 
@@ -144,10 +147,10 @@ export function previewCards(ctx) {
     const display = previewName(p)
     const facts = [p.stage_label, p.proposal_sent ? 'Proposal sent' : null,
                    p.demo_slot === 'platform' ? 'Platform demo' : 'Website concept'].filter(Boolean)
-    out.push({ ...p, organization_id: 'preview:' + p.opportunity_id, program: 'preview', variant: 'general',
-               symbol: '◇', rank: 20, kind: 'PREVIEW · NOT A LIVE WORKSPACE',
+    out.push({ ...p, organization_id: 'preview:' + p.opportunity_id, program: 'preview', variant: 'preview',
+               symbol: '◇', rank: 20, kind: 'PREVIEW · PROSPECT DEMO',
                display, orgLabel: p.contact_name && display !== p.company_name ? p.contact_name : null,
-               summary: 'A mockup built for this prospect. Opens the demo link. No live data and no customer workspace yet.',
+               summary: 'The demo built for this prospect. Not a live workspace: no customer data, not a customer yet.',
                facts })
   }
   return out.sort((a, b) => String(a.display).localeCompare(String(b.display)))

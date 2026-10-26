@@ -51,6 +51,8 @@
 .ev-ds [data-accent="funeral"]   { --acc: #7357b8; --acc-strong: #5a3f9e; --acc-soft: #f1edfa; --acc-ink: #34216a; }
 .ev-ds [data-accent="office"]    { --acc: #475569; --acc-strong: #334155; --acc-soft: #eef1f5; --acc-ink: #1e293b; }
 .ev-ds [data-accent="general"]   { --acc: #5b6b85; --acc-strong: #44526a; --acc-soft: #eef1f6; --acc-ink: #27324a; }
+.ev-ds [data-accent="cleaning"]  { --acc: #0e95d4; --acc-strong: #0b6e9e; --acc-soft: #e6f6fd; --acc-ink: #0b4a6b; }
+.ev-ds [data-accent="preview"]   { --acc: #5b5fe0; --acc-strong: #4338ca; --acc-soft: #eef0ff; --acc-ink: #2b2f86; }
 
 /* ---- shared primitives ---- */
 .ev-container { width: 100%; max-width: var(--ev-max); margin: 0 auto; padding-left: var(--ev-gutter); padding-right: var(--ev-gutter); box-sizing: border-box; }
