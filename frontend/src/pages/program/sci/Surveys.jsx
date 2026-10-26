@@ -16,6 +16,7 @@ export default function Surveys({ locationId, navigate, isManager = true, compac
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
+  const [notice, setNotice] = useState('')
 
   const load = useCallback(() => {
     api.get(`/program/surveys${locationId ? `?location_id=${encodeURIComponent(locationId)}` : ''}`)
@@ -29,6 +30,15 @@ export default function Surveys({ locationId, navigate, isManager = true, compac
     try { await api.post(`/program/surveys/${id}/handled`); load() } catch (e) { setErr(errText(e)) } finally { setBusy('') }
   }
 
+  async function retry(id) {
+    setBusy(id)
+    try {
+      const r = await api.post(`/program/surveys/attention/${id}/retry`)
+      setNotice(r.ok ? 'Survey sent.' : `Not sent: ${r.reason}`)
+      load()
+    } catch (e) { setErr(errText(e)) } finally { setBusy('') }
+  }
+
   const s = data?.summary
   const open = rec => rec.lead_id && navigate && navigate(`/program?tab=leads&person=${rec.lead_id}`)
 
@@ -39,8 +49,34 @@ export default function Surveys({ locationId, navigate, isManager = true, compac
           {s.count ? <>Average <b>{s.average}</b> of 5 · {s.count} answered{s.share_ok ? ` · ${s.share_ok} OK to share` : ''}</> : 'No answers yet'}
         </span> : null}>
         {err && <div className="sci-alert" role="alert">{err}</div>}
+        {notice && <div className="sci-micro" role="status" style={{ marginBottom: 8 }}>{notice}</div>}
         {!data ? <p className="sci-loading">Loading…</p> : (
           <>
+            {(data.attention || []).length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <p className="sci-micro" style={{ fontWeight: 700, color: '#8a5a00', margin: '0 0 6px' }}>
+                  {data.attention.length} survey{data.attention.length === 1 ? '' : 's'} did not reach the family
+                </p>
+                <div className="sci-rows">
+                  {data.attention.map(a => (
+                    <div className="sci-kv" key={a.followup_id} style={{ alignItems: 'flex-start', background: '#fdf8ec', borderRadius: 10, padding: '10px 12px' }}>
+                      <span style={{ minWidth: 0 }}>
+                        <button type="button" onClick={() => open(a)}
+                          style={{ background: 'none', border: 0, padding: 0, font: 'inherit', fontWeight: 600, cursor: 'pointer' }}>
+                          {a.name || 'Contact'}
+                        </button>
+                        <span className="sci-micro sci-muted" style={{ display: 'block' }}>{a.reason} · {when(a.created_at)}</span>
+                      </span>
+                      {isManager && data.sending_enabled && (
+                        <button type="button" className="sci-btn sm" disabled={busy === a.followup_id} onClick={() => retry(a.followup_id)}>
+                          {busy === a.followup_id ? 'Checking…' : 'Try again'}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {data.alerts.length > 0 && (
               <div style={{ marginBottom: 14 }}>
                 <p className="sci-micro" style={{ fontWeight: 700, color: '#9b2c2c', margin: '0 0 6px' }}>

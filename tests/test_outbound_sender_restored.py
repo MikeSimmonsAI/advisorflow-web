@@ -283,32 +283,6 @@ def test_pipeline_email_provider_failure_advances_nothing(
 # Site E — post-appointment follow-up
 # ═══════════════════════════════════════════════════════════════════════════
 
-def test_post_appointment_email_sends_and_records_the_followup(
-        db_session, sample_org, sample_advisor, monkeypatch):
-    from app.services.post_appointment_service import check_and_send_followups
-    _both_on(monkeypatch, db_session, sample_org, send_source.APPOINTMENT_FOLLOWUP)
-    sample_advisor.microsoft_365_connected = True
-    lead = _lead(db_session, sample_org, sample_advisor)
-    booking = BookingLink(lead_id=lead.id, user_id=sample_advisor.id, status="booked",
-                          booked_time=datetime.utcnow() - timedelta(minutes=20))
-    db_session.add(booking)
-    db_session.commit()
-
-    with patch("app.services.email_service.send_email_via_provider",
-               return_value=_ok()) as provider:
-        sent = check_and_send_followups(db_session)
-
-    provider.assert_called_once()
-    assert sent == 1
-    followup = db_session.query(BookingFollowup).filter(
-        BookingFollowup.booking_link_id == booking.id).one()
-    assert followup.thank_you_sent is True
-    assert followup.channel == "email"
-
-    row = db_session.query(EmailMessage).filter(EmailMessage.lead_id == lead.id).one()
-    assert row.send_source == send_source.APPOINTMENT_FOLLOWUP
-
-
 def test_post_appointment_still_cannot_replay_history_when_enabled(
         db_session, sample_org, sample_advisor, monkeypatch):
     """Enabling the source must not turn the three-hour window into a backlog."""
@@ -328,31 +302,6 @@ def test_post_appointment_still_cannot_replay_history_when_enabled(
     assert sent == 0
     assert db_session.query(BookingFollowup).count() == 0
 
-
-def test_post_appointment_failure_records_not_sent(
-        db_session, sample_org, sample_advisor, monkeypatch):
-    from app.services.post_appointment_service import check_and_send_followups
-    _both_on(monkeypatch, db_session, sample_org, send_source.APPOINTMENT_FOLLOWUP)
-    sample_advisor.microsoft_365_connected = True
-    lead = _lead(db_session, sample_org, sample_advisor)
-    booking = BookingLink(lead_id=lead.id, user_id=sample_advisor.id, status="booked",
-                          booked_time=datetime.utcnow() - timedelta(minutes=20))
-    db_session.add(booking)
-    db_session.commit()
-
-    with patch("app.services.email_service.send_email_via_provider",
-               return_value=_rejected()):
-        check_and_send_followups(db_session)
-
-    followup = db_session.query(BookingFollowup).filter(
-        BookingFollowup.booking_link_id == booking.id).one()
-    assert followup.thank_you_sent is False
-    assert followup.error
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Site C — the staff alert
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_the_staff_alert_sends_when_its_own_switch_is_on(
         db_session, sample_org, sample_advisor, monkeypatch):
@@ -408,3 +357,8 @@ def test_with_the_shipped_posture_every_repaired_path_refuses(
                                      subject="S", body_html="<p>B</p>",
                                      send_source=source)
     provider.assert_not_called()
+
+
+# #405: review_request_cron and post_appointment_service no longer send their own
+# surveys; their isolation/claim tests moved to tests/test_sci_405_survey_repair.py
+# (one survey path: claim-once, failed send recorded, concurrent workers, retry).

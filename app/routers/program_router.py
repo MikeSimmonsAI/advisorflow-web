@@ -578,8 +578,26 @@ def program_surveys(location_id: Optional[str] = Query(None), db: Session = Depe
                     user: User = Depends(require_tenant_or_observer)):
     """Survey totals, the latest answers, and 1-3 star alerts not yet handled."""
     prog = _program(db, user)
-    from app.services import survey_results
-    return survey_results.for_org(db, prog.organization_id, location_id)
+    from app.services import survey_dispatch, survey_results
+    out = survey_results.for_org(db, prog.organization_id, location_id)
+    # #405: surveys that were held, failed or never delivered - for a person.
+    out["attention"] = survey_dispatch.attention(db, prog.organization_id)
+    out["sending_enabled"] = survey_dispatch.sending_enabled()
+    return out
+
+
+@router.post("/surveys/attention/{followup_id}/retry")
+def program_survey_retry(followup_id: str, db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_user)):
+    """#405: re-attempt a held/failed survey - only after confirming nothing
+    reached the family and nobody answered."""
+    prog = _program(db, user)
+    _require_manager(db, user)
+    from app.services import survey_dispatch
+    out = survey_dispatch.retry(db, followup_id, prog.organization_id)
+    if not out.get("ok") and out.get("reason") == "not found":
+        raise HTTPException(status_code=404, detail="Survey not found.")
+    return out
 
 
 @router.post("/surveys/{response_id}/handled")

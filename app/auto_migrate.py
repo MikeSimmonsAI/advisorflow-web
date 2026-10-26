@@ -157,6 +157,14 @@ def _is_lock_contention(exc) -> bool:
 # undo it on databases that already have the column, and a stale no-op
 # entry costs nothing to leave in place).
 COLUMNS_TO_ADD = [
+    # #405 - one survey path, real state, location review link
+    ("booking_followups", "state", "VARCHAR"),
+    ("booking_followups", "state_reason", "VARCHAR"),
+    ("booking_followups", "message_id", "VARCHAR"),
+    ("booking_followups", "email_message_id", "VARCHAR"),
+    ("booking_followups", "attempts", "INTEGER DEFAULT 0"),
+    ("booking_followups", "last_attempt_at", "TIMESTAMP"),
+    ("location_profiles", "review_url", "VARCHAR"),
     # Wholesale field app, works with bad signal (2026-10-11)
     ("wholesale_field_appointments", "outcome_ref", "VARCHAR"),
     ("wholesale_field_rules", "raise_limit_pct", "INTEGER DEFAULT 10"),
@@ -1672,6 +1680,7 @@ ENUM_VALUES_TO_ADD = [
     ("notificationtype", "WHOLESALE_INQUIRY"),
     ("notificationtype", "DEMO_REQUEST"),
     ("notificationtype", "WHOLESALE_OFFER"),
+    ("notificationtype", "SURVEY_LOW_RATING"),
     ("notificationtype", "WHOLESALE_APPOINTMENT"),
 ]
 

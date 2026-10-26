@@ -148,6 +148,8 @@ class NotificationType(str, enum.Enum):
     WHOLESALE_OFFER = "wholesale_offer"
     # A field appointment was booked for, moved for, or handed to a rep.
     WHOLESALE_APPOINTMENT = "wholesale_appointment"
+    # #405: a family rated a visit 1-3 stars. In-app, to the appointment's advisor.
+    SURVEY_LOW_RATING = "survey_low_rating"
 
 
 # ---------------------------------------------------------------------------
@@ -2182,6 +2184,21 @@ class BookingFollowup(Base):
     error           = Column(String, nullable=True)
 
     created_at      = Column(DateTime, default=datetime.utcnow)
+
+    # #405 - ONE survey path (app/services/survey_dispatch.py). NULL on rows
+    # written before it (legacy); never back-filled or guessed.
+    #   claimed  the booking is ours; nothing sent yet (a crash leaves it here,
+    #            never resent automatically - a person recovers it)
+    #   sent     the provider ACCEPTED it; delivery is the linked message's own
+    #            status (message_id / email_message_id), not this flag
+    #   held     deliberately not sent; state_reason says why
+    #   failed   the provider or a gate refused it; state_reason says why
+    state           = Column(String, nullable=True)
+    state_reason    = Column(String, nullable=True)
+    message_id      = Column(String, nullable=True)
+    email_message_id = Column(String, nullable=True)
+    attempts        = Column(Integer, nullable=True, default=0)
+    last_attempt_at = Column(DateTime, nullable=True)
 
 
 # ── SurveyResponse — lead's answers to the post-appointment survey ────────────
