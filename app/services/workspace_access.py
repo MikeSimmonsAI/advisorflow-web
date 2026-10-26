@@ -705,7 +705,7 @@ def preview_contexts(db: Session, user: User) -> List[Dict[str, Any]]:
                 "stage_label": STAGE_LABELS.get(o.stage, o.stage),
                 "proposal_sent": (o.proposal_status or "") == "sent",
                 "demo_slot": d.slot or _demos.DEFAULT_SLOT,
-                "url": _demos.public_url(bases[o.brand_sales_org_id], d.slug or d.token),
+                "url": _demos.public_url(bases[o.brand_sales_org_id], d.slug or d.token) + "?staff=1",
             })
         out.sort(key=lambda x: (x["company_name"] or "").lower())
     except Exception:                                    # pragma: no cover

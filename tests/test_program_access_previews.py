@@ -122,10 +122,10 @@ def test_manager_sees_one_preview_per_live_open_deal(client, w):
     cs = next(p for p in c["preview_contexts"] if p["opportunity_id"] == w["country"].id)
     # platform walkthrough preferred over the website concept; vanity name used
     assert cs["demo_slot"] == "platform"
-    assert cs["url"].endswith("/demo/countryside")
+    assert cs["url"].endswith("/demo/countryside?staff=1")
     assert cs["proposal_sent"] is False and cs["stage_label"] == "Demo / Proposal"
     cl = next(p for p in c["preview_contexts"] if p["opportunity_id"] == w["clean"].id)
-    assert cl["url"].endswith("/demo/" + w["clean_demo"].token)
+    assert cl["url"].endswith("/demo/" + w["clean_demo"].token + "?staff=1")
 
 
 def test_previews_are_never_contexts_or_workspaces(client, w):
@@ -162,3 +162,30 @@ def test_direct_workspace_access_is_refused_without_membership(client, w):
     for who in ("mgr", "rep", "other_mgr"):
         r = client.get("/leads/", headers=_h(db, w[who], ws=w["ccb"].id))
         assert r.status_code in (403, 404), (who, r.status_code)
+
+
+def _views(db, demo):
+    db.expire_all()
+    return db.query(DemoSite).filter(DemoSite.id == demo.id).first().view_count
+
+
+def test_staff_preview_open_is_not_counted_as_a_prospect_view(client, w):
+    db, d = w["db"], w["clean_demo"]
+    url = "/public/demo/" + d.token
+    base = _views(db, d)
+    # the prospect (no login) is counted, with or without the flag
+    assert client.get(url).status_code == 200
+    assert client.get(url + "?staff=1").status_code == 200
+    assert _views(db, d) == base + 2
+    # the brand's own manager and rep opening it from Program Access are not
+    assert client.get(url + "?staff=1", headers=_h(db, w["mgr"])).status_code == 200
+    assert client.get(url + "?staff=1", headers=_h(db, w["rep"])).status_code == 200
+    assert _views(db, d) == base + 2
+    # without the flag a signed-in manager is still counted (unchanged behaviour)
+    assert client.get(url, headers=_h(db, w["mgr"])).status_code == 200
+    assert _views(db, d) == base + 3
+    # another brand's manager, a customer user, or a bad token cannot hide a view
+    assert client.get(url + "?staff=1", headers=_h(db, w["other_mgr"])).status_code == 200
+    assert client.get(url + "?staff=1", headers=_h(db, w["cleaner"])).status_code == 200
+    assert client.get(url + "?staff=1", headers={"Authorization": "Bearer nonsense"}).status_code == 200
+    assert _views(db, d) == base + 6

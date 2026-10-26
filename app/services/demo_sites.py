@@ -246,7 +246,8 @@ def revoke(db: Session, demo: DemoSite, now=None) -> None:
     demo.slug = None
 
 
-def resolve(db: Session, token: str, now=None, brand_sales_org_id=None) -> Optional[DemoSite]:
+def resolve(db: Session, token: str, now=None, brand_sales_org_id=None,
+            record_view: bool = True) -> Optional[DemoSite]:
     """Token OR vanity slug -> demo, or None. Records the view as a side effect.
 
     THE TOKEN IS TRIED FIRST AND ITS BEHAVIOUR IS BYTE-FOR-BYTE UNCHANGED, so
@@ -279,6 +280,11 @@ def resolve(db: Session, token: str, now=None, brand_sales_org_id=None) -> Optio
             row = q.first()
     if row is None or not row.is_live(now):
         return None
+    # A brand's own staff opening the preview (Program Access) is not the
+    # prospect looking at it: the caller verifies that and passes False, so
+    # the deal's "viewed" signal stays the prospect's alone.
+    if not record_view:
+        return row
     row.view_count = int(row.view_count or 0) + 1
     if row.first_viewed_at is None:
         row.first_viewed_at = now
