@@ -190,7 +190,7 @@ class DcadReader:
         DCAD account whose situs is the same address (same house number and
         street, suffix spelled either way, ZIP not contradicting, same unit).
         Two or more candidates is AMBIGUOUS and gets no account - never a guess."""
-        from app.services.evosense.identity import normalize_street, _split_suffix, same_address
+        from app.services.evosense.identity import normalize_street, notice_spelling, _split_suffix, same_address
         stats: Counter = Counter()
         cores: Dict[str, List[str]] = {}
         for tid, t in targets.items():
@@ -199,7 +199,15 @@ class DcadReader:
                 stats["no_house_number"] += 1
                 continue
             t["_unit"] = (t.get("unit") or unit or "").strip().upper().lstrip("#") or None
+            t["_streets"] = [t.get("street_address")]
             cores.setdefault(_split_suffix(norm)[0], []).append(tid)
+            alt = notice_spelling(t.get("street_address"))      # "SOUTH SECOND AVE" -> "S 2ND AVE"
+            if alt:
+                t["_streets"].append(alt)
+                alt_core = _split_suffix(normalize_street(alt)[0])[0]
+                if tid not in cores.setdefault(alt_core, []):
+                    cores[alt_core].append(tid)
+                stats["notice_spelling_tried"] += 1
         hits: Dict[str, List[Dict[str, str]]] = {tid: [] for ids in cores.values() for tid in ids}
         if not cores:
             return {"accounts": {}, "stats": dict(stats)}
@@ -215,8 +223,8 @@ class DcadReader:
                 core = _split_suffix(normalize_street(street)[0])[0]
                 for tid in cores.get(core, ()):
                     t = targets[tid]
-                    if same_address(t.get("street_address"), street,
-                                    t.get("zip_code"), row.get("PROPERTY_ZIPCODE")) is not True:
+                    if not any(same_address(x, street, t.get("zip_code"), row.get("PROPERTY_ZIPCODE")) is True
+                               for x in t["_streets"]):
                         continue
                     unit = (row.get("UNIT_ID") or "").strip().upper() or None
                     if (t["_unit"] or None) != unit:
@@ -226,6 +234,7 @@ class DcadReader:
             oz.close()
         accounts = {}
         for tid, rows in hits.items():
+            # one row can be indexed under both spellings: count the account once
             accts = {(r.get("ACCOUNT_NUM") or "").strip() for r in rows}
             if len(accts) == 1:
                 accounts[tid] = accts.pop()

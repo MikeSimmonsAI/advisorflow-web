@@ -267,3 +267,16 @@ def test_imported_foreclosure_house_gets_its_owner_on_the_next_hunt(client, db_s
     sigs = {x.signal_type for x in db_session.query(EvoSenseSignal)
             .filter(EvoSenseSignal.property_id == p.id, EvoSenseSignal.active.is_(True)).all()}
     assert "PRE_FORECLOSURE" in sigs
+
+
+def test_a_notice_misspelling_still_finds_the_one_dcad_account(tmp_path, monkeypatch, no_network):  # noqa: F811
+    from app.services.evosense.identity import normalize_street, notice_spelling
+    monkeypatch.setenv("EVOSENSE_SRC_DCAD_PATH", _dcad_zip(tmp_path))
+    got = DcadReader().accounts_for_addresses({
+        "a": {"street_address": "100 HELD STSREET", "zip_code": "75210"},     # the notice's typo
+        "b": {"street_address": "100 HELD STSREET", "zip_code": "75999"},     # ZIP still contradicts
+    })
+    assert got["accounts"] == {"a": "00000555000000000"} and got["stats"]["notice_spelling_tried"] == 2
+    assert notice_spelling("4815 SOUTH SECOND AVE") == "4815 S 2ND AVE"
+    # identity keys are untouched: the spelling fix is for matching county records only
+    assert normalize_street("4815 SOUTH SECOND AVE")[0] == "4815 S SECOND AVE"
