@@ -274,6 +274,18 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
                 detail="Session expired. Please log in again.",
             )
 
+    # ── DEAL ROOM INVESTOR FENCE (#415) ──────────────────────────────────────
+    # An investor login is a platform user with role "investor" and NO
+    # workspace (users.organization_id is NULL). It may reach its own Deal Room
+    # API and the sign-in/session paths - nothing else, from any link. This runs
+    # before every other branch below, so no back-office rule ever sees it.
+    if user.role == "investor":
+        _p = request.url.path if request is not None else ""
+        if not (_p.startswith("/investor/") or _p in INVESTOR_AUTH_PATHS):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                detail="This login is for the Deal Room only.")
+        return user
+
     # Enforce must_change_password server-side
     if user.must_change_password:
         path = request.url.path
@@ -471,6 +483,10 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_refusal)
 
     return user
+
+
+INVESTOR_AUTH_PATHS = ("/auth/refresh", "/auth/logout", "/auth/logout-all", "/auth/change-password",
+                       "/auth/sessions")
 
 
 def require_not_observation(request: Request,

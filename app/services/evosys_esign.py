@@ -159,6 +159,26 @@ def _email_link(db: Session, env: EsignEnvelope, s: EsignSigner, *, reminder: bo
     return ok
 
 
+def session_link(db: Session, env: EsignEnvelope, s: EsignSigner, *, verified_by: str) -> str:
+    """A fresh signing link for a signer who is ALREADY authenticated in this
+    platform as the address the sender named (a Deal Room investor, or staff
+    signing their own part). Their identity is the signed-in session whose
+    email was verified, so the emailed one-time code is not needed again; the
+    event log records exactly that. Any older link stops working."""
+    _open_for_signing(env, s)
+    token = secrets.token_urlsafe(32)
+    s.token_hash = _sha(token)
+    s.status = "sent" if s.status == "waiting" else s.status
+    if not s.verified_at:
+        s.verified_at = datetime.utcnow()
+        if s.status in ("sent", "viewed"):
+            s.status = "verified"
+        _event(db, env, "verified", signer=s, detail={"method": "authenticated_session", "by": verified_by[:200]})
+    _event(db, env, "session_link", signer=s, detail={"by": verified_by[:200]})
+    db.flush()
+    return token
+
+
 def _current(env_signers: List[EsignSigner]) -> Optional[EsignSigner]:
     for s in sorted(env_signers, key=lambda x: x.sign_order):
         if s.status != "signed":

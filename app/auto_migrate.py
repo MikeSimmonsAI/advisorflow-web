@@ -1566,6 +1566,20 @@ COLUMNS_TO_ADD = [
     ("wholesale_buy_boxes", "source", "VARCHAR"),
     ("wholesale_buy_boxes", "confirmed_at", "TIMESTAMP"),
     ("wholesale_buy_boxes", "confirmed_by", "VARCHAR"),
+    # Private Buyer Deal Room (2026-10-27, #415): portal threads on buyer conversations; investor files.
+    ("wholesale_buyer_conversations", "kind", "VARCHAR"),
+    ("wholesale_buyer_conversations", "deal_id", "VARCHAR"),
+    ("wholesale_buyer_conversations", "account_id", "VARCHAR"),
+    ("wholesale_buyer_conversations", "ai_enabled", "BOOLEAN DEFAULT TRUE"),
+    ("wholesale_buyer_conversations", "assigned_user_id", "VARCHAR"),
+    ("wholesale_buyer_conversations", "buyer_unread", "INTEGER DEFAULT 0"),
+    ("wholesale_buyer_conversations", "staff_unread", "INTEGER DEFAULT 0"),
+    ("wholesale_buyer_conversations", "last_message_at", "TIMESTAMP"),
+    ("wholesale_files", "uploaded_by_investor_id", "VARCHAR"),
+    ("wholesale_files", "investor_visible", "BOOLEAN DEFAULT FALSE"),
+    ("wholesale_files", "review_status", "VARCHAR"),
+    ("wholesale_files", "scan_status", "VARCHAR"),
+    ("wholesale_files", "scan_detail", "VARCHAR"),
     ("evosense_owners", "name_truncated", "BOOLEAN DEFAULT FALSE"),
     ("evosense_owners", "review_flags", "TEXT"),
     ("evosense_signals", "evidence_basis", "VARCHAR"),
@@ -1695,6 +1709,7 @@ ENUM_VALUES_TO_ADD = [
     ("notificationtype", "DEMO_REQUEST"),
     ("notificationtype", "WHOLESALE_OFFER"),
     ("notificationtype", "WHOLESALE_APPOINTMENT"),
+    ("notificationtype", "DEAL_ROOM"),
 ]
 
 

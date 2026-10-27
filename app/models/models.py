@@ -148,6 +148,9 @@ class NotificationType(str, enum.Enum):
     WHOLESALE_OFFER = "wholesale_offer"
     # A field appointment was booked for, moved for, or handed to a rep.
     WHOLESALE_APPOINTMENT = "wholesale_appointment"
+    # An investor in the private Deal Room needs a person: a message, an
+    # exclusive-review request, an upload or an interest (wholesale_deal_room).
+    DEAL_ROOM = "deal_room"
 
 
 # ---------------------------------------------------------------------------

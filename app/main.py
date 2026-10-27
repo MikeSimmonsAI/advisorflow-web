@@ -1218,6 +1218,12 @@ from app.routers.wholesale_buyer_network_router import router as wholesale_buyer
 app.include_router(wholesale_buyer_network_router)   # /wholesale/buyers/imports, /wholesale/buyers/network
 from app.routers.wholesale_buyer_engine_router import router as wholesale_buyer_engine_router  # noqa: E402
 app.include_router(wholesale_buyer_engine_router)   # /wholesale/buyer-intel/* - Buyer Intelligence Engine (#413)
+from app.routers.deal_room_investor_router import public_router as deal_room_public_router  # noqa: E402
+from app.routers.deal_room_investor_router import router as deal_room_investor_router  # noqa: E402
+from app.routers.deal_room_staff_router import router as deal_room_staff_router  # noqa: E402
+app.include_router(deal_room_public_router)     # /investor/invite/*, /investor/auth/login - Deal Room (#415)
+app.include_router(deal_room_investor_router)   # /investor/* - investors only (fenced in deps)
+app.include_router(deal_room_staff_router)      # /wholesale/deal-room/* - staff
 from app.routers.wholesale_canvass_router import router as wholesale_canvass_router  # noqa: E402
 app.include_router(wholesale_canvass_router)   # /wholesale/canvass - door-knocking routes
 from app.routers.wholesale_team_router import router as wholesale_team_router  # noqa: E402
