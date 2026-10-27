@@ -28,8 +28,8 @@ import { api } from '../../api/client';
 // of it in the React bundle, which had already drifted apart.
 
 const CARD = {
-  background: 'var(--gm-pill-blue-bg)', border: '1px solid var(--gm-blue)',
-  borderRadius: '12px', padding: '20px',
+  background: 'var(--gm-card)', border: '1px solid var(--gm-card-line)', boxShadow: 'var(--gm-shadow-card)',
+  borderRadius: 'var(--gm-radius)', padding: '20px',
 };
 
 const COMMITMENTS = [
@@ -158,7 +158,7 @@ export default function StripeCatalogue({ platformId, brands }) {
                     gap: 16, flexWrap: 'wrap' }}>
         <div>
           <h2 style={{ fontSize: 16, fontWeight: 800, margin: 0, letterSpacing: '0.02em' }}>
-            STRIPE &amp; CATALOGUE
+            Stripe &amp; catalogue
           </h2>
           <p style={{ color: 'var(--gm-dim)', margin: '6px 0 0', fontSize: 13 }}>
             What this brand sells, and whether Stripe knows about it. Configuration —
@@ -297,11 +297,11 @@ export default function StripeCatalogue({ platformId, brands }) {
 
       {/* ── the action ─────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
-                    marginTop: 20, paddingTop: 20, borderTop: '1px solid var(--gm-blue)' }}>
+                    marginTop: 20, paddingTop: 20, borderTop: '1px solid var(--gm-card-line)' }}>
         <button
           onClick={() => provision(false)}
           disabled={busy || !brand?.platform_id}
-          style={{ background: 'transparent', color: 'var(--gm-blue)', border: '1px solid var(--gm-blue)',
+          style={{ background: 'transparent', color: 'var(--gm-blue)', border: '1px solid var(--gm-card-line)',
                    borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 600,
                    cursor: busy ? 'default' : 'pointer' }}>
           {busy ? 'Working…' : 'Preview'}
@@ -311,7 +311,7 @@ export default function StripeCatalogue({ platformId, brands }) {
           disabled={busy || !brand?.platform_id || !credentialsReady}
           title={!credentialsReady ? 'Stripe credentials are not configured.' : undefined}
           style={{ background: credentialsReady ? 'var(--gm-blue)' : 'var(--gm-panel-3)',
-                   color: credentialsReady ? '#fff' : 'var(--gm-dim)',
+                   color: credentialsReady ? 'var(--gm-ink-on-accent)' : 'var(--gm-dim)',
                    border: 'none', borderRadius: 8, padding: '9px 18px', fontSize: 13,
                    fontWeight: 800, cursor: busy || !credentialsReady ? 'default' : 'pointer' }}>
           Provision / sync Stripe TEST catalogue
@@ -323,7 +323,7 @@ export default function StripeCatalogue({ platformId, brands }) {
       </div>
 
       {result && (
-        <div style={{ marginTop: 16, background: 'var(--gm-pill-blue-bg)', border: '1px solid var(--gm-blue)',
+        <div style={{ marginTop: 16, background: 'var(--gm-pill-blue-bg)', border: '1px solid var(--gm-card-line)',
                       borderRadius: 8, padding: '14px 16px' }}>
           <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
             {result.dry_run ? 'Preview — nothing was created' : 'Provisioning complete'}

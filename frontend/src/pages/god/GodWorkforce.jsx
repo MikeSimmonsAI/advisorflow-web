@@ -479,7 +479,7 @@ export default function GodWorkforce () {
             <div className="gm-stats" style={{ marginBottom: 14 }}>
               <Stat k="QUEUE WORKER"
                     v={health?.queue_worker?.running ? 'RUNNING' : 'NOT RUNNING'}
-                    tone={health?.queue_worker?.running ? undefined : '#b26a00'}
+                    tone={health?.queue_worker?.running ? undefined : 'var(--gm-amber)'}
                     s={health?.queue_worker?.last_success_at
                       ? `last good pass ${new Date(health.queue_worker.last_success_at).toLocaleString()}`
                       : 'no successful pass recorded'} />

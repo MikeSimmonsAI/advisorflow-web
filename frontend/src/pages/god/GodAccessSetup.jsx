@@ -14,17 +14,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api/client'
 
-const box = { background: '#fff', border: '1px solid #e2e8e9', borderRadius: 14, padding: 20, marginBottom: 18 }
-const input = { border: '1px solid #cfd9db', borderRadius: 8, padding: '9px 12px', fontSize: 14, minWidth: 280 }
-const btn = { border: '1px solid #16455d', background: '#fff', color: '#16455d', borderRadius: 8, padding: '9px 14px', fontWeight: 600, cursor: 'pointer' }
-const primary = { ...btn, background: '#16455d', color: '#fff' }
+const box = { background: 'var(--gm-card)', border: '1px solid var(--gm-card-line)', borderRadius: 14, padding: 20, marginBottom: 18 }
+const input = { border: '1px solid var(--gm-card-line)', borderRadius: 8, padding: '9px 12px', fontSize: 14, minWidth: 280 }
+const btn = { border: '1px solid var(--gm-btn-primary)', background: 'var(--gm-card)', color: 'var(--gm-btn-primary)', borderRadius: 8, padding: '9px 14px', fontWeight: 600, cursor: 'pointer' }
+const primary = { ...btn, background: 'var(--gm-btn-primary)', color: 'var(--gm-ink-on-accent)' }
 const errText = e => e?.detail || e?.message || 'Request failed'
 
 export default function GodAccessSetup() {
   return (
     <div style={{ maxWidth: 980, padding: '8px 4px' }}>
       <h1 style={{ margin: '0 0 6px', fontSize: 24 }}>SCI & Wholesale access</h1>
-      <p style={{ margin: '0 0 20px', color: '#5b6b75' }}>Put SCI under a login, and decide who may use EvoSys Wholesale.</p>
+      <p style={{ margin: '0 0 20px', color: 'var(--gm-dim)' }}>Put SCI under a login, and decide who may use EvoSys Wholesale.</p>
       <SciSetup />
       <WholesaleAccess />
       <SciContacts />
@@ -51,7 +51,7 @@ function SciSetup() {
   return (
     <section style={box} aria-labelledby="sci-setup-h">
       <h2 id="sci-setup-h" style={{ margin: '0 0 6px', fontSize: 18 }}>1. SCI workspace under a login</h2>
-      <p style={{ margin: '0 0 14px', color: '#5b6b75', fontSize: 14 }}>
+      <p style={{ margin: '0 0 14px', color: 'var(--gm-dim)', fontSize: 14 }}>
         Creates "Service Corporation International" here if it doesn't exist yet: the 39 locations, Kerry Allan as the sender, every campaign off, the 844 line.
         Then adds the login. No contacts are created and nothing is sent.
       </p>
@@ -60,7 +60,7 @@ function SciSetup() {
         <input id="sci-email" style={input} value={email} onChange={e => setEmail(e.target.value)} placeholder="the login that opens Atlantis and the Wholesaler" />
         <button type="submit" style={btn} disabled={busy || !email.trim()}>Check (changes nothing)</button>
       </form>
-      {err && <p role="alert" style={{ color: '#a9423c', fontSize: 14 }}>{err}</p>}
+      {err && <p role="alert" style={{ color: 'var(--gm-red)', fontSize: 14 }}>{err}</p>}
       {plan && (
         <div style={{ marginTop: 16, fontSize: 14 }}>
           <p style={{ margin: '0 0 6px' }}><b>Login:</b> {plan.login.found ? plan.login.email : 'not found'}</p>
@@ -71,12 +71,12 @@ function SciSetup() {
           <p style={{ margin: '0 0 6px' }}><b>SCI workspace:</b> {plan.organization.exists ? 'already exists' : 'will be created'}{plan.login.already_in_sci ? ' · this login is already in it' : ''}</p>
           <p style={{ margin: '0 0 6px' }}><b>844 line:</b> {plan.toll_free.state === 'another organization' ? `owned by ${plan.toll_free.owner || 'another organization'} — left unchanged` : plan.toll_free.state === 'absent' ? 'will be added to SCI' : 'already on SCI'}</p>
           {plan.login.found && <p style={{ margin: '0 0 6px' }}><b>Role in SCI:</b> {plan.login.role_to_grant}</p>}
-          {plan.blockers.length > 0 && <p role="alert" style={{ color: '#a9423c' }}>{plan.blockers.join(' ')}</p>}
+          {plan.blockers.length > 0 && <p role="alert" style={{ color: 'var(--gm-red)' }}>{plan.blockers.join(' ')}</p>}
           {plan.ready && <button type="button" style={primary} disabled={busy} onClick={apply}>{busy ? 'Working…' : 'Set up SCI for this login'}</button>}
         </div>
       )}
       {result && (
-        <div role="status" style={{ marginTop: 14, padding: 12, borderRadius: 10, background: '#f0f8f3', border: '1px solid #cfe6da', fontSize: 14 }}>
+        <div role="status" style={{ marginTop: 14, padding: 12, borderRadius: 10, background: 'var(--gm-pill-teal-bg)', border: '1px solid var(--gm-pill-teal-bd)', fontSize: 14 }}>
           Done. {result.organization_created ? 'SCI workspace created' : 'SCI workspace already existed'} · {result.locations} locations · {result.campaigns_on} campaigns on.
           {' '}{result.login.email} now opens: {result.workspaces_now.map(w => w.name).join(', ')}.
         </div>
@@ -106,7 +106,7 @@ function WholesaleAccess() {
       <h2 id="wh-h" style={{ margin: '0 0 6px', fontSize: 18 }}>2. Who may use EvoSys Wholesale</h2>
       {!d ? <p>{err || 'Loading…'}</p> : (
         <>
-          <p style={{ margin: '0 0 12px', fontSize: 14, color: d.lock_on ? '#245e46' : '#8d6024' }}>
+          <p style={{ margin: '0 0 12px', fontSize: 14, color: d.lock_on ? 'var(--gm-pill-teal-fg)' : 'var(--gm-amber)' }}>
             {d.lock_on
               ? 'Locked: only the logins below, plus God mode.'
               : 'Not locked yet: any workspace entitled to Wholesale can still open it. Add the first login to lock it to named logins only.'}
@@ -126,7 +126,7 @@ function WholesaleAccess() {
             <input id="wh-email" style={input} value={email} onChange={e => setEmail(e.target.value)} placeholder="login email" />
             <button type="submit" style={primary} disabled={!email.trim()}>{d.lock_on ? 'Add' : 'Add and lock'}</button>
           </form>
-          {err && <p role="alert" style={{ color: '#a9423c', fontSize: 14 }}>{err}</p>}
+          {err && <p role="alert" style={{ color: 'var(--gm-red)', fontSize: 14 }}>{err}</p>}
         </>
       )}
     </section>
@@ -147,7 +147,7 @@ function Counts({ data }) {
     <table style={{ borderCollapse: 'collapse', fontSize: 14, margin: '6px 0 10px' }}>
       <tbody>
         {rows.map(([k, v]) => (
-          <tr key={k}><td style={{ padding: '2px 16px 2px 0', color: '#5b6b75' }}>{SUMMARY_LABELS[k] || k.replace(/_/g, ' ')}</td>
+          <tr key={k}><td style={{ padding: '2px 16px 2px 0', color: 'var(--gm-dim)' }}>{SUMMARY_LABELS[k] || k.replace(/_/g, ' ')}</td>
             <td style={{ padding: '2px 0', fontWeight: 600 }}>{String(v)}</td></tr>
         ))}
       </tbody>
@@ -184,7 +184,7 @@ function SciContacts() {
   return (
     <section style={box} aria-labelledby="sci-load-h">
       <h2 id="sci-load-h" style={{ margin: '0 0 6px', fontSize: 18 }}>3. SCI contacts: load the file</h2>
-      <p style={{ margin: '0 0 14px', color: '#5b6b75', fontSize: 14 }}>
+      <p style={{ margin: '0 0 14px', color: 'var(--gm-dim)', fontSize: 14 }}>
         Pick the SCI contact file (CSV, the same columns as the SCI export). Check it first; nothing is saved by the check.
         Loading saves every row, puts on hold anything that needs a person to look at it (unknown location, duplicates,
         Not Interested / Disqualified) and makes the clean contacts live. <b>Nothing is sent</b> - every campaign stays off.
@@ -196,19 +196,19 @@ function SciContacts() {
             <input id="sci-file" type="file" accept=".csv,text/csv" onChange={e => { setFile(e.target.files[0] || null); setPreview(null); setDone(null) }} />
             <button type="button" style={btn} disabled={busy || !file} onClick={check}>{busy && !preview ? 'Checking…' : 'Check (saves nothing)'}</button>
           </div>
-          {err && <p role="alert" style={{ color: '#a9423c', fontSize: 14 }}>{err}</p>}
+          {err && <p role="alert" style={{ color: 'var(--gm-red)', fontSize: 14 }}>{err}</p>}
           {preview && (
             <div style={{ marginTop: 14 }}>
               <h3 style={{ fontSize: 15, margin: '0 0 4px' }}>What loading would do</h3>
               <Counts data={preview.stage} />
               <Counts data={preview.promotion_plan} />
               {preview.stage?.refused
-                ? <p role="alert" style={{ color: '#a9423c', fontSize: 14 }}>{preview.stage.refused}</p>
+                ? <p role="alert" style={{ color: 'var(--gm-red)', fontSize: 14 }}>{preview.stage.refused}</p>
                 : <button type="button" style={primary} disabled={busy} onClick={load}>{busy ? 'Loading…' : 'Load into SCI (sends nothing)'}</button>}
             </div>
           )}
           {done && (
-            <div role="status" style={{ marginTop: 14, padding: 12, borderRadius: 10, background: '#f0f8f3', border: '1px solid #cfe6da', fontSize: 14 }}>
+            <div role="status" style={{ marginTop: 14, padding: 12, borderRadius: 10, background: 'var(--gm-pill-teal-bg)', border: '1px solid var(--gm-pill-teal-bd)', fontSize: 14 }}>
               <b>Loaded.</b> {done.stage?.staged} rows saved · {done.held?.held} put on hold for review · {done.promotion?.created} contacts now live.
               Nothing was sent.
               <Counts data={done.held?.by_reason} />

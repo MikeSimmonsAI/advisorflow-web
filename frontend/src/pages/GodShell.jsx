@@ -21,7 +21,7 @@ import { api, getCurrentUser, logout, clearBrandingCSS } from '../api/client'
 import { applyTheme, hostTheme, THEMES } from '../theme'
 import { classifyRoute, PLATFORM } from '../auth/routeAuthority'
 import GodStyles from './god/GodStyles'
-import { SECTIONS, locate } from './god/godNav'
+import { SECTIONS, locate, RAIL_SHORTCUTS, RAIL_ORDER, shortcutHere } from './god/godNav'
 import './god/ui/godKit.css'
 
 function Ico({ d, size = 16, children }) {
@@ -64,6 +64,9 @@ const ICONS = {
   toggle:    'M8 5h8a7 7 0 0 1 0 14H8A7 7 0 0 1 8 5zM8 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   target:    'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
   filter:    'M22 3H2l8 9.46V19l4 2v-8.54L22 3z',
+  file:      'M6 3h9l4 4v14H6zM14 3v5h5M9 13h6M9 17h6',
+  crown:     'M3 8l4 4 5-7 5 7 4-4-2 11H5z',
+  exit:      'M10 17l-5-5 5-5M5 12h12M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4',
   package:   'M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16zM3.27 6.96 12 12.01l8.73-5.05M12 22.08V12',
 }
 
@@ -103,6 +106,9 @@ const JUMP = [
   // organization, so it opens in the selected workspace, or asks for one first.
   { label: 'EvoSys Wholesale', action: 'wholesale', icon: 'briefcase',
     hint: 'EvoSysPro product: EvoSense acquisition and wholesale deal operations, in the selected workspace' },
+  // The EvoSys Pro sales workspace (My Day, follow-ups, pipeline).
+  { label: 'Back Office', path: '/sales', icon: 'briefcase',
+    hint: 'The EvoSys Pro sales back office: My Day, follow-ups, pipeline' },
 ]
 
 // THE PRIMARY NAVIGATION is SECTIONS in ./god/godNav.js — six entries, each
@@ -205,10 +211,13 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
   // One section is lit and one of its tabs is selected, from the URL alone.
   const here = locate(location.pathname)
   const current = here.section
+  const lit = shortcutHere(location.pathname, location.hash)
   // 248, not 220. At 220 the label had ~93px left after the icon, the gap and
   // the NEEDS BUILD tag, so "Pipeline & Cadence", "Communications" and
   // "Audit & Security" were all being ellipsised.
-  const railW = isMobile ? 264 : (collapsed ? 62 : 248)
+  // Owner Desk: a compact rail (224). Six short section names fit without
+  // ellipsis; the jump/brand labels are the longest and still fit at 224.
+  const railW = isMobile ? 264 : (collapsed ? 62 : 224)
 
   // Which authority is in force on THIS screen. Everything the God shell is
   // allowed to claim about scope follows from this one answer.
@@ -252,7 +261,7 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
         <div onClick={() => setDrawer(false)}
              style={{ position: 'fixed', inset: 0, background: 'var(--gm-scrim)', zIndex: 40 }} />
       ) : null}
-      <aside style={{ width: railW, minWidth: railW, background: 'var(--gm-rail)',
+      <aside style={{ width: railW, minWidth: railW, background: 'var(--gm-rail)', color: 'var(--gm-rail-fg)',
                       borderRight: '1px solid var(--gm-rail-line)', display: 'flex', flexDirection: 'column',
                       flexShrink: 0, transition: 'transform .18s ease, width .16s ease',
                       ...(isMobile ? {
@@ -270,22 +279,34 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
                       borderBottom: '1px solid var(--gm-rail-line)',
                       display: 'flex', alignItems: 'center',
                       justifyContent: collapsed ? 'center' : 'flex-start', gap: 11 }}>
-          <div className="gm-brandmark" title="AdvisorFlow God Mode">AF</div>
+          <div className="gm-brandmark" title="EvoSys Pro">E</div>
           {!collapsed && (
             <div style={{ minWidth: 0 }}>
-              <div className="gm-wordmark">AdvisorFlow</div>
-              <div className="gm-wordmark-sub">GOD MODE</div>
+              <div className="gm-wordmark">EvoSys <span className="gm-wordmark-pro">Pro</span></div>
             </div>
           )}
         </div>
 
+        {/* The room you are in, highlighted (approved mockup): God Mode,
+            Owner Desk. It is also the way home to the desk. */}
+        <NavLink to="/god" end className="gm-railhero" title="God Mode — Owner Desk"
+          style={collapsed ? { justifyContent: 'center', padding: '10px 0' } : undefined}>
+          <span className="gm-railhero-crown" aria-hidden="true"><Ico d={ICONS.crown} size={collapsed ? 18 : 22} /></span>
+          {!collapsed && (
+            <span style={{ minWidth: 0 }}>
+              <b>GOD MODE</b>
+              <span>Owner Desk</span>
+            </span>
+          )}
+        </NavLink>
+
         {/* Collapse toggle */}
         <button onClick={toggleRail}
           hidden={isMobile}
+          className="gm-rail-toggle"
           title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
           aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-          style={{ background: 'none', border: 'none', borderBottom: '1px solid var(--gm-rail-line)',
-            color: 'var(--gm-ghost)', cursor: 'pointer', padding: '7px 0', display: 'flex',
+          style={{ padding: '7px 0', display: 'flex',
             alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-end',
             paddingRight: collapsed ? 0 : 16, fontFamily: 'inherit' }}>
           <span style={{ display: 'inline-block', transform: collapsed ? 'none' : 'rotate(180deg)', transition: 'transform .16s ease' }}>
@@ -294,17 +315,22 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
         </button>
 
         {/* Nav */}
-        <nav style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 0' }}>
-          {SECTIONS.map(({ key, label, path, icon, hint }) => {
-            const active = here.section.key === key
+        <nav aria-label="God Mode" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '10px 0' }}>
+          {RAIL_ORDER.map(k => {
+            const sc = RAIL_SHORTCUTS[k]
+            const sec = sc ? null : SECTIONS.find(x => x.key === k)
+            if (!sc && !sec) return null
+            const { key, label, path, icon, hint } = sc || sec
+            const active = sc ? lit === key : (!lit && here.section.key === key)
+            const to = sc && sc.hash ? path + sc.hash : path
             return (
-              <NavLink key={key} to={path} end={path === '/god'}
+              <NavLink key={key} to={to} end={path === '/god'}
                 title={collapsed ? label : hint}
                 aria-current={active ? 'page' : undefined}
-                className={`gm-nav-item ${active ? 'gm-active' : ''}`}
+                className={() => `gm-nav-item ${active ? 'gm-active' : ''}`}
                 style={collapsed
                   ? { justifyContent: 'center', padding: '10px 0', margin: '1px 6px' }
-                  : { padding: '11px 14px' }}
+                  : { padding: '9px 14px' }}
               >
                 <Ico d={ICONS[icon]} size={17} />
                 {!collapsed && <span className="gm-nav-label">{label}</span>}
@@ -318,7 +344,7 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
             a god_admin so the trip is never one-way. The website opens in a new
             tab, which leaves this window sitting on God Mode. */}
         <div style={{ borderTop: '1px solid var(--gm-rail-line)', padding: '8px 0', flexShrink: 0 }}>
-          {!collapsed && <div className="gm-nav-head">JUMP TO</div>}
+          {!collapsed && <div className="gm-nav-head">QUICK LINKS</div>}
           {JUMP.map((item) => {
             const { label, path, icon, hint, action } = item
             // Customer App: dynamic — navigate to the selected workspace via the
@@ -420,15 +446,21 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
             state and itself — a control that does nothing is worse than no
             control. It remains in tenant Settings, where it still means
             something. */}
-        {!collapsed && (
-          <div className="gm-railcard">
-            <span style={{ fontSize: 15, lineHeight: 1 }} aria-hidden="true">👑</span>
-            <div style={{ minWidth: 0 }}>
-              <b>God Mode</b>
-              <span>AdvisorFlow Platform</span>
-            </div>
-          </div>
-        )}
+        {/* EXIT GOD MODE (approved mockup). Same destination as Customer App:
+            the selected customer's workspace, or the customer list to pick
+            one — never "/", which can route the owner to /executive. */}
+        <button type="button" className="gm-railcard gm-railexit"
+          title="Leave God Mode for the customer platform"
+          onClick={() => navigate(orgSession?.org_id ? '/god/customer-app' : '/god/customers')}
+          style={collapsed ? { justifyContent: 'center', padding: '10px 0' } : undefined}>
+          <Ico d={ICONS.exit} size={18} />
+          {!collapsed && (
+            <span style={{ minWidth: 0, textAlign: 'left' }}>
+              <b>Exit God Mode</b>
+              <span>Return to platform</span>
+            </span>
+          )}
+        </button>
         <div style={{ padding: collapsed ? '10px 0 12px' : '4px 16px 14px',
                       display: 'flex', flexDirection: 'column',
                       alignItems: collapsed ? 'center' : 'stretch', gap: 10 }}>
@@ -445,17 +477,15 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
           <button
             onClick={() => navigate('/change-password')}
             title="Change your own password — asks for your current one first"
-            style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'none',
-              border: 'none', color: 'var(--gm-dim)', cursor: 'pointer', fontSize: '12.5px', padding: 0,
-              justifyContent: collapsed ? 'center' : 'flex-start', fontFamily: 'inherit' }}
+            className="gm-rail-btn"
+            style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
           >
             <Ico d={ICONS.settings} size={14} />
             {!collapsed && 'Change password'}
           </button>
           <button onClick={handleLogout} title="Sign out"
-            style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'none',
-              border: 'none', color: 'var(--gm-dim)', cursor: 'pointer', fontSize: '12.5px', padding: 0,
-              justifyContent: collapsed ? 'center' : 'flex-start', fontFamily: 'inherit' }}
+            className="gm-rail-btn"
+            style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
           >
             <Ico d={ICONS.logout} size={14} />
             {!collapsed && 'Sign out'}
@@ -492,7 +522,7 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
                       className="gm-btn gm-sm" style={{ flexShrink: 0 }}>☰</button>
             ) : null}
             <span className="gm-crumb" style={{ minWidth: 0 }}>
-              {!isMobile ? <>AdvisorFlow <span style={{ color: 'var(--gm-ghost)' }}>/</span></> : null}
+              {!isMobile ? <>EvoSys Pro <span style={{ color: 'var(--gm-ghost)' }}>/</span></> : null}
               <b style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {current?.label || 'God Mode'}
               </b>
@@ -572,7 +602,7 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
                              letterSpacing: '0.1em' }}>PLATFORM</span>
               <span style={{ color: 'var(--gm-ghost)', fontSize: '11px' }}>—</span>
               <span style={{ color: 'var(--gm-text)', fontSize: '11px' }}>
-                AdvisorFlow Platform · estate-wide, not scoped to a customer
+                EvoSys Pro platform · estate-wide, not scoped to a customer
               </span>
               <div style={{ flex: 1 }} />
               {/* The remembered selection, offered as a way BACK rather than

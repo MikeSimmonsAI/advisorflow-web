@@ -16,22 +16,22 @@ const BOARD_STYLES = `
 
 /* ── tokens ── */
 .rm-board {
-  --rm-bg:       var(--god-card, #fff);
-  --rm-bg2:      var(--god-surface, #f9fafb);
-  --rm-border:   var(--god-border, #e5e7eb);
-  --rm-ink:      var(--god-text, #1f2937);
-  --rm-muted:    var(--god-muted, #6b7280);
-  --rm-faint:    var(--god-dim, #9ca3af);
-  --rm-row-sep:  var(--god-border, #f3f4f6);
-  --rm-input-bg: var(--god-field, #fff);
-  --rm-tab-sel:  var(--god-accent, #3b82f6);
+  --rm-bg:       var(--gm-ink-on-accent);
+  --rm-bg2:      var(--gm-panel-2);
+  --rm-border:   var(--gm-card-line);
+  --rm-ink:      var(--gm-head);
+  --rm-muted:    var(--gm-dim);
+  --rm-faint:    var(--gm-ghost);
+  --rm-row-sep:  var(--gm-panel-2);
+  --rm-input-bg: var(--gm-ink-on-accent);
+  --rm-tab-sel:  var(--gm-blue);
 }
 
 /* NO DARK BRANCH. This board used to carry its own data-appearance="dark"
    block and a prefers-color-scheme fallback, both inherited from when it was
    built as a standalone surface. God Mode is permanently light now, and the
    owner's TENANT preference is dark - so those two blocks were still firing and
-   painting #131c2b summary cards onto the Command Center and the Roadmap page.
+   painting var(--gm-head) summary cards onto the Command Center and the Roadmap page.
    A sweep of every God route found them; they were the only dark panels left.
 
    The light tokens above are the whole palette, and they read the shared
@@ -58,8 +58,8 @@ const BOARD_STYLES = `
 .rm-chevron { font-size:10px; color:var(--rm-faint); }
 .rm-detail { margin-top:8px; margin-left:78px; font-size:11px; line-height:1.6; color:var(--rm-muted); }
 .rm-alert { border-radius:6px; padding:6px 10px; margin-bottom:6px; }
-.rm-alert-warn { background:#fffbeb; border:1px solid #fcd34d; color:#92400e; }
-.rm-alert-err  { background:#fef2f2; border:1px solid #fca5a5; color:#991b1b; }
+.rm-alert-warn { background:var(--gm-pill-gold-bg); border:1px solid var(--gm-pill-gold-bd); color:var(--gm-amber); }
+.rm-alert-err  { background:var(--gm-pill-red-bg); border:1px solid var(--gm-pill-red-bd); color:var(--gm-red); }
 /* The dark counterparts of these two are gone with the rest of the dark branch. */
 
 /* ── filter tabs ── */
@@ -81,7 +81,7 @@ const BOARD_STYLES = `
 /* ── progress bar ── */
 .rm-prog { display:flex; align-items:center; gap:8px; }
 .rm-prog-track { flex:1; height:5px; background:var(--rm-border); border-radius:100px; overflow:hidden; }
-.rm-prog-fill  { height:100%; background:#22c55e; border-radius:100px; transition:width .3s; }
+.rm-prog-fill  { height:100%; background:var(--gm-teal); border-radius:100px; transition:width .3s; }
 .rm-prog-label { font-size:10px; color:var(--rm-faint); min-width:46px; text-align:right; }
 
 /* ── legend ── */

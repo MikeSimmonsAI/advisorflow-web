@@ -93,7 +93,7 @@ function AgentCard({ agent, onVersionSave, onAttemptPolicySave, onTestCall }) {
   }
   const btnStyle = (color = 'var(--gm-blue)') => ({
     fontSize: 12, padding: '4px 12px', borderRadius: 6, cursor: 'pointer',
-    background: color, color: '#fff', border: 'none', fontWeight: 600,
+    background: color, color: 'var(--gm-ink-on-accent)', border: 'none', fontWeight: 600,
   })
   const ghostBtn = {
     fontSize: 12, padding: '4px 12px', borderRadius: 6, cursor: 'pointer',
@@ -215,8 +215,8 @@ function AgentCard({ agent, onVersionSave, onAttemptPolicySave, onTestCall }) {
         {testResult && (
           <div style={{
             marginTop: 8, fontSize: 12, padding: '8px 12px', borderRadius: 6,
-            background: testResult.ok ? 'rgba(6, 122, 85, 0.10)' : 'rgba(211, 31, 75, 0.10)',
-            color: testResult.ok ? '#055c40' : '#a3112f',
+            background: testResult.ok ? 'var(--gm-teal-wash)' : 'var(--gm-red-wash)',
+            color: testResult.ok ? 'var(--gm-pill-teal-fg)' : 'var(--gm-pill-red-fg)',
             fontFamily: 'monospace', whiteSpace: 'pre-wrap',
           }}>
             {testResult.ok
@@ -300,7 +300,7 @@ function CreateAgentForm({ orgs, onCreated }) {
       </div>
       <button onClick={submit} disabled={saving} style={{
         fontSize: 13, padding: '7px 20px', borderRadius: 7, border: 'none',
-        background: 'var(--gm-blue)', color: '#fff', cursor: 'pointer', fontWeight: 600,
+        background: 'var(--gm-blue)', color: 'var(--gm-ink-on-accent)', cursor: 'pointer', fontWeight: 600,
       }}>
         {saving ? 'Creating…' : 'Create mapping'}
       </button>
@@ -369,7 +369,7 @@ export default function GodVoiceConfig() {
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setShowCreate(s => !s)} style={{
             fontSize: 12, padding: '6px 14px', borderRadius: 6,
-            border: 'none', background: 'var(--gm-blue)', color: '#fff', cursor: 'pointer',
+            border: 'none', background: 'var(--gm-blue)', color: 'var(--gm-ink-on-accent)', cursor: 'pointer',
           }}>
             {showCreate ? '✕ Cancel' : '+ Add mapping'}
           </button>
@@ -402,7 +402,7 @@ export default function GodVoiceConfig() {
           <br />
           <button onClick={() => setShowCreate(true)} style={{
             marginTop: 12, fontSize: 13, padding: '7px 18px', borderRadius: 7,
-            border: 'none', background: 'var(--gm-blue)', color: '#fff', cursor: 'pointer',
+            border: 'none', background: 'var(--gm-blue)', color: 'var(--gm-ink-on-accent)', cursor: 'pointer',
           }}>
             Add first mapping
           </button>

@@ -165,7 +165,7 @@ export default function GodLeadBrowser() {
     fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6,
     border: '1px solid var(--gm-card-line)', cursor: 'pointer',
     background: active ? 'var(--gm-blue)' : 'var(--gm-panel)',
-    color: active ? '#fff' : 'var(--gm-text)',
+    color: active ? 'var(--gm-ink-on-accent)' : 'var(--gm-text)',
   })
 
   return (

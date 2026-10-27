@@ -42,7 +42,7 @@ function Input({ value, onChange, placeholder, style = {} }) {
         padding: '8px 12px', borderRadius: 6,
         border: '1px solid var(--border, var(--gm-card-line))',
         background: 'var(--input-bg, var(--gm-panel))',
-        color: 'var(--text, #111)',
+        color: 'var(--gm-head)',
         fontSize: 13, fontFamily: 'monospace',
         ...style,
       }}
@@ -61,7 +61,7 @@ function Btn({ onClick, disabled, children, variant = 'default' }) {
       style={{
         padding: '8px 18px', borderRadius: 6, border: 'none',
         background: disabled ? 'var(--gm-panel-3)' : bg,
-        color: (!disabled && variant !== 'default') ? '#fff' : 'var(--gm-head)', fontSize: 13, fontWeight: 600,
+        color: (!disabled && variant !== 'default') ? 'var(--gm-ink-on-accent)' : 'var(--gm-head)', fontSize: 13, fontWeight: 600,
         cursor: disabled ? 'not-allowed' : 'pointer',
       }}
     >
@@ -74,11 +74,11 @@ function Well({ children, color = 'default' }) {
   const border = color === 'green'  ? 'var(--gm-teal)'
                : color === 'yellow' ? 'var(--gm-amber)'
                : color === 'red'    ? 'var(--gm-red)'
-               : 'var(--border, #d1d5db)'
+               : 'var(--gm-card-line)'
   const bg     = color === 'green'  ? 'var(--gm-teal-wash)'
                : color === 'yellow' ? 'var(--gm-amber-wash)'
                : color === 'red'    ? 'var(--gm-red-wash)'
-               : 'var(--surface-2, #f9fafb)'
+               : 'var(--gm-panel-2)'
   return (
     <div style={{
       border: `1px solid ${border}`, borderRadius: 8,
@@ -104,7 +104,7 @@ function JsonTree({ data }) {
     <pre style={{
       margin: 0, fontSize: 12, lineHeight: 1.5,
       whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-      color: 'var(--text, #111)',
+      color: 'var(--gm-head)',
     }}>
       {JSON.stringify(data, null, 2)}
     </pre>
@@ -156,7 +156,7 @@ function PhoneAuditTab() {
             padding: '8px 12px', borderRadius: 6,
             border: '1px solid var(--border, var(--gm-card-line))',
             background: 'var(--input-bg, var(--gm-panel))',
-            color: 'var(--text, #111)',
+            color: 'var(--gm-head)',
             fontSize: 13, fontFamily: 'monospace', resize: 'vertical',
           }}
         />
@@ -455,7 +455,7 @@ export default function GodMaintenanceOps() {
     <div style={{ padding: '28px 32px', maxWidth: 900 }}>
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700,
-                     color: 'var(--text, #111)' }}>
+                     color: 'var(--gm-head)' }}>
           Maintenance Ops
         </h1>
         <p style={{ margin: '6px 0 0', fontSize: 13,
@@ -477,8 +477,8 @@ export default function GodMaintenanceOps() {
             style={{
               padding: '8px 20px', border: 'none', background: 'none',
               fontSize: 13, fontWeight: 600, cursor: 'pointer',
-              color: tab === t.key ? 'var(--gm-blue)' : 'var(--text-muted, #888)',
-              borderBottom: tab === t.key ? '2px solid #2563eb' : '2px solid transparent',
+              color: tab === t.key ? 'var(--gm-blue)' : 'var(--gm-ghost)',
+              borderBottom: tab === t.key ? '2px solid var(--gm-blue)' : '2px solid transparent',
               marginBottom: -2,
             }}
           >

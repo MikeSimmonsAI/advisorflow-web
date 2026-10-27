@@ -128,25 +128,25 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
 
   const wrap = {
     position: 'fixed', inset: 0, zIndex: 200, display: 'grid',
-    placeItems: 'center', padding: 24, background: 'rgba(8,16,28,.6)',
+    placeItems: 'center', padding: 24, background: 'var(--gm-scrim)',
   }
   const card = {
     width: '100%', maxWidth: 540, borderRadius: 14, padding: 22,
-    background: 'var(--god-card, #fff)', color: 'var(--god-text, #0f172a)',
-    border: '1px solid var(--god-border, #e5e7eb)',
+    background: 'var(--gm-ink-on-accent)', color: 'var(--gm-head)',
+    border: '1px solid var(--gm-card-line)',
     boxShadow: '0 24px 60px rgba(0,0,0,.35)', maxHeight: '90vh',
     overflowY: 'auto',
   }
   const field = {
     width: '100%', padding: '9px 11px', borderRadius: 8, fontSize: 13,
-    border: '1px solid var(--god-border, #e5e7eb)', marginTop: 4,
-    background: 'var(--god-bg, #fff)', color: 'inherit',
+    border: '1px solid var(--gm-card-line)', marginTop: 4,
+    background: 'var(--gm-ink-on-accent)', color: 'inherit',
   }
   const label = { fontSize: 11, fontWeight: 700, letterSpacing: '.08em',
-                  textTransform: 'uppercase', color: 'var(--gm-text, #64748b)' }
+                  textTransform: 'uppercase', color: 'var(--gm-text, var(--gm-ghost))' }
   const btn = {
     fontSize: 13, fontWeight: 700, padding: '9px 16px', borderRadius: 9,
-    border: '1px solid var(--god-border, #e5e7eb)', cursor: 'pointer',
+    border: '1px solid var(--gm-card-line)', cursor: 'pointer',
     background: 'transparent', color: 'inherit',
   }
 
@@ -157,7 +157,7 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
       <div style={wrap} role="dialog" aria-modal="true">
         <div style={card}>
           <h3 style={{ margin: '0 0 4px', fontSize: 17 }}>{notice.heading}</h3>
-          <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--gm-text, #475569)' }}>
+          <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--gm-dim)' }}>
             <b>{sent.recipient.name || sent.recipient.email}</b> now has access to{' '}
             <b>{orgName}</b>&rsquo;s onboarding as <b>{sent.recipient.role}</b>
             {sent.identity_created ? ' (new account)' : ' (existing account reused)'}.
@@ -169,7 +169,7 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
               recoverable address as a secret, and to re-issue onboarding to
               get it back. */}
           {notice.existingLogin ? (
-            <div style={{ border: '1px solid var(--gm-teal, #0d9488)',
+            <div style={{ border: '1px solid var(--gm-teal)',
                           background: 'var(--gm-pill-teal-bg, rgba(13,148,136,.08))',
                           borderRadius: 10, padding: '10px 12px', margin: '12px 0',
                           fontSize: 12.5, lineHeight: 1.55 }}>
@@ -185,8 +185,8 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
                not on the existence of a link: this block used to appear under
                an "Invitation sent" heading for a message the provider had
                already accepted. */
-            <div style={{ border: '1px solid var(--gm-amber, #f59e0b)',
-                          background: 'rgba(245,158,11,.08)', borderRadius: 10,
+            <div style={{ border: '1px solid var(--gm-amber)',
+                          background: 'var(--gm-amber-wash)', borderRadius: 10,
                           padding: '10px 12px', margin: '12px 0', fontSize: 12.5 }}>
               <b>Nothing has been sent.</b> Copy this link and send it to them
               yourself, from {sent.brand.name || 'your brand'}. It is shown once
@@ -200,8 +200,8 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
                platform delivers it. Dropping both would lose the only warning
                about the link's shelf life at exactly the moment the operator
                relaxes. */
-            <div style={{ border: '1px solid var(--god-border, #e5e7eb)',
-                          background: 'var(--god-bg, #f8fafc)', borderRadius: 10,
+            <div style={{ border: '1px solid var(--gm-card-line)',
+                          background: 'var(--gm-panel-2)', borderRadius: 10,
                           padding: '10px 12px', margin: '12px 0', fontSize: 12.5,
                           lineHeight: 1.55 }}>
               <b>Keep this link if you need it.</b> It is shown once and cannot
@@ -216,10 +216,10 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
               then recorded as invited and is waiting for nothing. */}
           {notice.deliveryReport && (
             <div style={{ border: '1px solid ' + (sent.delivery.state === 'sent'
-                            ? 'var(--gm-teal, #0d9488)' : 'var(--gm-red, #dc2626)'),
+                            ? 'var(--gm-teal)' : 'var(--gm-red, var(--gm-red))'),
                           background: sent.delivery.state === 'sent'
                             ? 'var(--gm-pill-teal-bg, rgba(13,148,136,.08))'
-                            : 'rgba(220,38,38,.08)',
+                            : 'var(--gm-red-wash)',
                           borderRadius: 10, padding: '10px 12px', margin: '12px 0',
                           fontSize: 12.5, lineHeight: 1.55 }}>
               <b>{sent.delivery.label}</b>
@@ -264,16 +264,16 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
     <div style={wrap} role="dialog" aria-modal="true">
       <div style={card}>
         <h3 style={{ margin: '0 0 4px', fontSize: 17 }}>Send onboarding</h3>
-        <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--gm-text, #475569)' }}>
+        <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--gm-dim)' }}>
           Give someone at <b>{orgName}</b> access to their own onboarding.
         </p>
 
         {loadErr ? (
-          <p style={{ fontSize: 12.5, color: '#dc2626' }}>{loadErr}</p>
+          <p style={{ fontSize: 12.5, color: 'var(--gm-red)' }}>{loadErr}</p>
         ) : null}
 
         {ctx ? (
-          <div style={{ fontSize: 12.5, border: '1px solid var(--god-border, #e5e7eb)',
+          <div style={{ fontSize: 12.5, border: '1px solid var(--gm-card-line)',
                         borderRadius: 10, padding: '10px 12px', margin: '12px 0' }}>
             They will be invited as <b>{ctx.brand.name}</b>, into{' '}
             <b>{ctx.organization_name}</b>. "Send invitation email" emails them
@@ -316,13 +316,13 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
         <div style={{ marginBottom: 10 }}>
           <label style={label}>Confirm their email</label>
           <input style={{ ...field,
-                          borderColor: confirm && !matches ? '#dc2626'
-                            : 'var(--god-border, #e5e7eb)' }}
+                          borderColor: confirm && !matches ? 'var(--gm-red)'
+                            : 'var(--gm-card-line)' }}
                  value={confirm} type="email" autoComplete="off"
                  onPaste={e => e.preventDefault()}
                  onChange={e => setConfirm(e.target.value)} />
           {confirm && !matches ? (
-            <p style={{ fontSize: 11.5, color: '#dc2626', margin: '5px 0 0' }}>
+            <p style={{ fontSize: 11.5, color: 'var(--gm-red)', margin: '5px 0 0' }}>
               These do not match.
             </p>
           ) : null}
@@ -335,7 +335,7 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
               <option key={r} value={r}>{r}</option>
             ))}
           </select>
-          <p style={{ fontSize: 11.5, color: 'var(--gm-text, #64748b)', margin: '5px 0 0' }}>
+          <p style={{ fontSize: 11.5, color: 'var(--gm-text, var(--gm-ghost))', margin: '5px 0 0' }}>
             Access to their own workspace only. No platform or back-office
             authority can be granted here.
           </p>
@@ -345,7 +345,7 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
             Nobody using this screen should need to know that customer tenancy
             is a membership row rather than a column. */}
         {look && look.exists && look.can_add && look.action === 'add_context' ? (
-          <div style={{ border: '1px solid var(--gm-teal, #0d9488)',
+          <div style={{ border: '1px solid var(--gm-teal)',
                         background: 'var(--gm-pill-teal-bg, rgba(13,148,136,.08))',
                         borderRadius: 10, padding: '10px 12px', marginBottom: 12,
                         fontSize: 12.5, lineHeight: 1.55 }}>
@@ -365,7 +365,7 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
         ) : null}
 
         {look && look.exists && look.can_add && look.action === 'reuse' ? (
-          <div style={{ border: '1px solid var(--god-border, #e5e7eb)',
+          <div style={{ border: '1px solid var(--gm-card-line)',
                         borderRadius: 10, padding: '10px 12px', marginBottom: 12,
                         fontSize: 12.5 }}>
             Already at this customer. Their existing account is reused and
@@ -374,20 +374,20 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
         ) : null}
 
         {refused ? (
-          <div style={{ border: '1px solid #dc2626',
-                        background: 'rgba(220,38,38,.06)', borderRadius: 10,
+          <div style={{ border: '1px solid var(--gm-red)',
+                        background: 'var(--gm-red-wash)', borderRadius: 10,
                         padding: '10px 12px', marginBottom: 12, fontSize: 12.5 }}>
             {look.reason}
           </div>
         ) : null}
 
         {err ? (
-          <p style={{ fontSize: 12.5, color: '#dc2626' }}>{err}</p>
+          <p style={{ fontSize: 12.5, color: 'var(--gm-red)' }}>{err}</p>
         ) : null}
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {looking ? (
-            <span style={{ fontSize: 11.5, color: 'var(--gm-text, #94a3b8)' }}>
+            <span style={{ fontSize: 11.5, color: 'var(--gm-ghost)' }}>
               Checking this address…
             </span>
           ) : null}
@@ -398,7 +398,7 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
                   style={{ ...btn,
                            borderColor: valid ? 'var(--gm-teal)' : undefined,
                            background: valid ? 'var(--gm-pill-teal-bg)' : 'transparent',
-                           color: valid ? 'var(--gm-teal)' : 'var(--gm-text, #94a3b8)',
+                           color: valid ? 'var(--gm-teal)' : 'var(--gm-ghost)',
                            cursor: valid && !busy ? 'pointer' : 'default',
                            opacity: busy ? 0.6 : 1 }}>
             {busy ? 'Working…' : 'Send invitation email'}
@@ -407,7 +407,7 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
                   style={{ ...btn,
                            borderColor: valid ? 'var(--gm-teal)' : undefined,
                            background: valid ? 'var(--gm-pill-teal-bg)' : 'transparent',
-                           color: valid ? 'var(--gm-teal)' : 'var(--gm-text, #94a3b8)',
+                           color: valid ? 'var(--gm-teal)' : 'var(--gm-ghost)',
                            cursor: valid && !busy ? 'pointer' : 'default',
                            opacity: busy ? 0.6 : 1 }}>
             {busy ? 'Creating…' : 'Generate link only'}

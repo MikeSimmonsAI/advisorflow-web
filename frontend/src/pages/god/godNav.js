@@ -119,3 +119,32 @@ export function locate (pathname) {
   // Any other God page (and the /god/* catch-all) belongs to the Dashboard.
   return { section: SECTIONS[0], tab: SECTIONS[0].tabs[0] }
 }
+
+/**
+ * THE RAIL ORDER (approved Owner Desk mockup, Oct 27 2026). The six SECTIONS
+ * plus five shortcuts to pages that already live inside a section. A shortcut
+ * is a link, not a new section: it adds no route and no permission, and the
+ * tab bar still shows the section it belongs to. A shortcut is lit only when
+ * the URL is exactly its own page; otherwise its section is lit as before.
+ */
+export const RAIL_SHORTCUTS = {
+  programs:     { key: 'programs', label: 'Program Access', icon: 'layers', path: '/workspaces',
+                  hint: 'The program launcher — every workspace and product you can open' },
+  users:        { key: 'users', label: 'Users & Permissions', icon: 'users', path: '/god/access',
+                  hint: 'People & access (Organizations › People & access)' },
+  integrations: { key: 'integrations', label: 'Integrations', icon: 'link', path: '/god/settings', hash: '#connection-checks',
+                  hint: 'Texting, email, voice and lead-rule checks (Settings & Security)' },
+  health:       { key: 'health', label: 'System Health', icon: 'activity', path: '/god', hash: '#platform-health',
+                  hint: 'Platform status on the Owner Desk' },
+  audit:        { key: 'audit', label: 'Audit Log', icon: 'file', path: '/god/audit',
+                  hint: 'Every sensitive action (Settings & Security › Audit log)' },
+}
+export const RAIL_ORDER = ['dashboard', 'programs', 'orgs', 'ai', 'launch', 'revenue', 'users', 'settings', 'integrations', 'health', 'audit']
+
+/** Which shortcut, if any, the current URL is exactly. */
+export function shortcutHere (pathname, hash = '') {
+  for (const s of Object.values(RAIL_SHORTCUTS)) {
+    if (s.hash ? (pathname === s.path && hash === s.hash) : (pathname === s.path || pathname.startsWith(s.path + '/'))) return s.key
+  }
+  return null
+}

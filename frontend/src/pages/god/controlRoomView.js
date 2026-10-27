@@ -4,11 +4,11 @@ export const POLL_MS = 20000
 
 // Status -> visual tone. Four visibly different states; Needs Mike is the loudest.
 export const TONES = {
-  Working:           { key: 'working',  label: 'Working',         bg: '#eff6ff', fg: '#1d4ed8', bd: '#93c5fd' },
-  Complete:          { key: 'complete', label: 'Complete',        bg: '#ecfdf5', fg: '#047857', bd: '#6ee7b7' },
-  Blocked:           { key: 'blocked',  label: 'Blocked',         bg: '#fff7ed', fg: '#c2410c', bd: '#fdba74' },
-  'Approval Needed': { key: 'needs',    label: 'Approval Needed', bg: '#fef2f2', fg: '#b91c1c', bd: '#f87171' },
-  Idle:              { key: 'idle',     label: 'Idle',            bg: '#f3f4f6', fg: '#4b5563', bd: '#d1d5db' },
+  Working:           { key: 'working',  label: 'Working',         bg: 'var(--gm-pill-blue-bg)', fg: 'var(--gm-pill-blue-fg)', bd: 'var(--gm-pill-blue-bd)' },
+  Complete:          { key: 'complete', label: 'Complete',        bg: 'var(--gm-pill-teal-bg)', fg: 'var(--gm-pill-teal-fg)', bd: 'var(--gm-pill-teal-bd)' },
+  Blocked:           { key: 'blocked',  label: 'Blocked',         bg: 'var(--gm-pill-gold-bg)', fg: 'var(--gm-pill-gold-fg)', bd: 'var(--gm-pill-gold-bd)' },
+  'Approval Needed': { key: 'needs',    label: 'Approval Needed', bg: 'var(--gm-pill-red-bg)', fg: 'var(--gm-pill-red-fg)', bd: 'var(--gm-pill-red-bd)' },
+  Idle:              { key: 'idle',     label: 'Idle',            bg: 'var(--gm-pill-off-bg)', fg: 'var(--gm-pill-off-fg)', bd: 'var(--gm-pill-off-bd)' },
 }
 
 export const toneFor = (status) => TONES[status] || TONES.Idle

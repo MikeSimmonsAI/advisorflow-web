@@ -92,8 +92,22 @@
   --gm-grid-fade: none;
 
   /* ── shell furniture ──────────────────────────────────────────────────── */
-  --gm-rail: #ffffff;
-  --gm-rail-line: #e4e9f1;
+  /* OWNER DESK (Oct 26 2026): a compact NAVY rail on a light page. The rail
+     has its own ink because the page ink is dark-on-light; every rail colour
+     below is measured against --gm-rail (#0f1d36):
+       fg 11.6:1 · head 16.0:1 · dim 6.4:1 · gold 9.0:1 · active fg 16.0:1. */
+  --gm-rail: #0f1d36;
+  --gm-rail-line: rgba(255, 255, 255, .08);
+  --gm-rail-fg: #c8d3e4;
+  --gm-rail-head: #ffffff;
+  --gm-rail-dim: #8e9fba;
+  --gm-rail-hover: rgba(255, 255, 255, .06);
+  --gm-rail-active: rgba(108, 160, 255, .16);
+  --gm-rail-active-fg: #ffffff;
+  --gm-rail-accent: #6ca0ff;
+  --gm-rail-gold: #f2c968;
+  --gm-rail-card: rgba(255, 255, 255, .05);
+  --gm-rail-card-line: rgba(255, 255, 255, .10);
   --gm-topbar: #ffffff;
   --gm-topbar-line: #e4e9f1;
   --gm-scrim: rgba(15, 27, 45, .38);
@@ -109,8 +123,8 @@
   --gm-health: #ffffff;
   --gm-health-hover: #f6f9fd;
   --gm-health-line: #e4e9f1;
-  --gm-radius: 12px;
-  --gm-radius-sm: 8px;
+  --gm-radius: 16px;
+  --gm-radius-sm: 10px;
 
   /* ── rows and tables ──────────────────────────────────────────────────── */
   --gm-row-line: #eef2f7;
@@ -185,6 +199,39 @@
   --gm-purple: #6438bd;
   --gm-gold: #7a5a0c;
 
+  /* Owner Desk icon squares (approved mockup, Oct 27 2026): solid colour
+     tiles with a white glyph, each with a soft wash for buttons/pills. */
+  --gm-ic-blue: #1d6ff2;    --gm-ic-blue-wash: rgba(29, 111, 242, .10);
+  --gm-ic-green: #16a34a;   --gm-ic-green-wash: rgba(22, 163, 74, .10);
+  --gm-ic-purple: #7c3aed;  --gm-ic-purple-wash: rgba(124, 58, 237, .10);
+  --gm-ic-orange: #f97316;  --gm-ic-orange-wash: rgba(249, 115, 22, .11);
+  --gm-ic-red: #e11d48;     --gm-ic-red-wash: rgba(225, 29, 72, .09);
+  --gm-ic-teal: #0d9488;    --gm-ic-teal-wash: rgba(13, 148, 136, .10);
+  --gm-ic-pink: #db2777;    --gm-ic-pink-wash: rgba(219, 39, 119, .09);
+  --gm-ic-slate: #334155;   --gm-ic-slate-wash: rgba(51, 65, 85, .09);
+  --gm-ic-fg: #ffffff;
+  --gm-attn-wash: rgba(225, 29, 72, .045);
+
+  /* Business accents on the Owner Desk program cards. */
+  --gm-acc-energy: var(--gm-ic-orange);  --gm-acc-energy-wash: var(--gm-ic-orange-wash);
+  --gm-acc-roofing: var(--gm-ic-red);    --gm-acc-roofing-wash: var(--gm-ic-red-wash);
+  --gm-acc-funeral: var(--gm-ic-slate);  --gm-acc-funeral-wash: var(--gm-ic-slate-wash);
+  --gm-acc-insurance: var(--gm-ic-blue); --gm-acc-insurance-wash: var(--gm-ic-blue-wash);
+  --gm-acc-cleaning: var(--gm-ic-pink);  --gm-acc-cleaning-wash: var(--gm-ic-pink-wash);
+  --gm-acc-wholesale: var(--gm-ic-green); --gm-acc-wholesale-wash: var(--gm-ic-green-wash);
+  --gm-acc-general: var(--gm-ic-purple); --gm-acc-general-wash: var(--gm-ic-purple-wash);
+
+  /* Rail: the highlighted God Mode card at the top. */
+  --gm-rail-hero: linear-gradient(135deg, #1f5fd6 0%, #173f8f 100%);
+  --gm-rail-hero-line: rgba(140, 180, 255, .35);
+  --gm-brand-pro: #5b9dff;
+
+  /* Names some God screens already used without a declaration — an
+     undeclared var() paints NOTHING, so these alias real tokens. */
+  --gm-card-bg: var(--gm-card);
+  --gm-border: var(--gm-card-line);
+  --gm-idfixed: 1010px;   /* restated per breakpoint on .gm-idtable (GodStyles) */
+
   --gm-blue-wash: rgba(29, 99, 209, .07);
   --gm-blue-wash-2: rgba(29, 99, 209, .14);
   --gm-teal-wash: rgba(6, 122, 85, .09);
@@ -213,7 +260,7 @@
   --gm-pill-amber-fg: var(--gm-pill-gold-fg);
 
   /* ── depth ────────────────────────────────────────────────────────────── */
-  --gm-shadow-card: 0 1px 2px rgba(15, 27, 45, .05), 0 1px 3px rgba(15, 27, 45, .04);
+  --gm-shadow-card: 0 1px 2px rgba(15, 27, 45, .04), 0 6px 18px rgba(15, 27, 45, .05);
   --gm-shadow-lift: 0 2px 6px rgba(15, 27, 45, .07), 0 10px 26px rgba(15, 27, 45, .10);
   --gm-shadow-rail: 0 0 40px rgba(15, 27, 45, .16);
   --gm-shadow-modal: 0 24px 60px rgba(15, 27, 45, .24);

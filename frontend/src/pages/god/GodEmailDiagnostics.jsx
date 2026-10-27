@@ -12,11 +12,11 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
 
 const OUTCOME = {
-  matched: ['Attached to lead', '#15803d'],
-  no_lead: ['No matching lead', '#b45309'],
-  ambiguous: ['Ambiguous — not attached', '#b45309'],
-  own_mail: ['Own mail — skipped', '#64748b'],
-  error: ['Error — will retry', '#b91c1c'],
+  matched: ['Attached to lead', 'var(--gm-teal)'],
+  no_lead: ['No matching lead', 'var(--gm-amber)'],
+  ambiguous: ['Ambiguous — not attached', 'var(--gm-amber)'],
+  own_mail: ['Own mail — skipped', 'var(--gm-ghost)'],
+  error: ['Error — will retry', 'var(--gm-red)'],
 }
 
 function fmt(iso) {
@@ -25,7 +25,7 @@ function fmt(iso) {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
 }
 
-const card = { background: 'var(--surface-card, #fff)', border: '1px solid var(--border-subtle, #e5e7eb)',
+const card = { background: 'var(--gm-ink-on-accent)', border: '1px solid var(--gm-card-line)',
   borderRadius: 12, padding: 18, marginBottom: 16 }
 
 export default function GodEmailDiagnostics() {
@@ -95,15 +95,15 @@ export default function GodEmailDiagnostics() {
   return (
     <div style={{ padding: 24, maxWidth: 1100 }}>
       <h1 style={{ margin: '0 0 4px' }}>Email diagnostics</h1>
-      <p style={{ marginTop: 0, color: 'var(--text-secondary, #64748b)' }}>
+      <p style={{ marginTop: 0, color: 'var(--gm-ghost)' }}>
         Where workspace email is sent from, and whether replies to that address come back into EvoSys.
         {loadedAt ? <span data-testid="diag-as-of"> Status as of {loadedAt.toLocaleTimeString()} (refreshes every 30 s).</span> : null}
       </p>
       {note ? (
-        <div role="status" style={{ ...card, padding: 12, background: note.ok ? '#ecfdf5' : '#fef2f2',
-          borderColor: note.ok ? '#a7f3d0' : '#fecaca' }}>{note.text}</div>
+        <div role="status" style={{ ...card, padding: 12, background: note.ok ? 'var(--gm-pill-teal-bg)' : 'var(--gm-pill-red-bg)',
+          borderColor: note.ok ? 'var(--gm-pill-teal-bd)' : 'var(--gm-pill-red-bd)' }}>{note.text}</div>
       ) : null}
-      {err ? <div style={{ ...card, color: '#b91c1c' }}>{err}</div> : null}
+      {err ? <div style={{ ...card, color: 'var(--gm-red)' }}>{err}</div> : null}
 
       <div style={card}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -113,34 +113,34 @@ export default function GodEmailDiagnostics() {
             {busy === 'connect' ? 'Opening Microsoft…' : 'Connect a mailbox'}
           </button>
         </div>
-        <p style={{ color: 'var(--text-secondary, #64748b)', fontSize: 13 }}>
+        <p style={{ color: 'var(--gm-ghost)', fontSize: 13 }}>
           Connect the address workspaces send from (for example <b>support@evosyspro.live</b>). On Microsoft's page, pick
           that mailbox's account. EvoSys gets read and write access to that mailbox (Mail.ReadWrite): it reads replies
           from the Inbox and, only after a reply has been processed, files it into its location's Outlook folder. It
           never sends, deletes or creates folders from here.
         </p>
         {data && boxes.length === 0 ? (
-          <div style={{ padding: 12, background: '#fffbeb', borderRadius: 8 }}>
+          <div style={{ padding: 12, background: 'var(--gm-pill-gold-bg)', borderRadius: 8 }}>
             No reply mailbox is connected, so replies to provider-sent email are <b>not</b> reaching EvoSys.
           </div>
         ) : null}
         {boxes.map(b => (
-          <div key={b.id} style={{ borderTop: '1px solid var(--border-subtle, #e5e7eb)', paddingTop: 12, marginTop: 12 }}
+          <div key={b.id} style={{ borderTop: '1px solid var(--gm-card-line)', paddingTop: 12, marginTop: 12 }}
                data-testid="mailbox-row">
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
               <div>
                 <b>{b.address}</b>{' '}
-                <span style={{ color: b.last_status === 'ok' || b.last_status === 'connected' ? '#15803d' : '#b91c1c' }}>
+                <span style={{ color: b.last_status === 'ok' || b.last_status === 'connected' ? 'var(--gm-teal)' : 'var(--gm-red)' }}>
                   · {b.is_active ? (b.last_status || 'not polled yet') : 'disabled'}
                 </span>
-                <div style={{ fontSize: 13, color: 'var(--text-secondary, #64748b)' }}>
+                <div style={{ fontSize: 13, color: 'var(--gm-ghost)' }}>
                   Last checked {fmt(b.last_polled_at)} · read {b.last_checked ?? '—'} · attached {b.last_matched ?? '—'} ·
                   cursor {fmt(b.cursor_received_at)}
                 </div>
                 <div style={{ fontSize: 13 }}>
                   Routes replies for: {b.routes_to.length ? b.routes_to.map(o => o.name || o.id).join(', ') : <i>no workspace sends from this address</i>}
                 </div>
-                {b.last_error ? <div style={{ fontSize: 13, color: '#b91c1c' }}>{b.last_error}</div> : null}
+                {b.last_error ? <div style={{ fontSize: 13, color: 'var(--gm-red)' }}>{b.last_error}</div> : null}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="btn btn--secondary" onClick={() => pollNow(b.id)} disabled={!!busy}>
@@ -154,7 +154,7 @@ export default function GodEmailDiagnostics() {
 
       <div style={card}>
         <h2 style={{ margin: '0 0 8px', fontSize: 18 }}>Inbound log</h2>
-        {recent.length === 0 ? <div style={{ color: 'var(--text-secondary, #64748b)' }}>Nothing read yet.</div> : (
+        {recent.length === 0 ? <div style={{ color: 'var(--gm-ghost)' }}>Nothing read yet.</div> : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead><tr style={{ textAlign: 'left' }}>
@@ -162,9 +162,9 @@ export default function GodEmailDiagnostics() {
               </tr></thead>
               <tbody>
                 {recent.map(r => {
-                  const [label, color] = OUTCOME[r.outcome] || [r.outcome, '#334155']
+                  const [label, color] = OUTCOME[r.outcome] || [r.outcome, 'var(--gm-text)']
                   return (
-                    <tr key={r.id} style={{ borderTop: '1px solid var(--border-subtle, #e5e7eb)' }}>
+                    <tr key={r.id} style={{ borderTop: '1px solid var(--gm-card-line)' }}>
                       <td style={{ padding: '6px 8px 6px 0', whiteSpace: 'nowrap' }}>{fmt(r.received_at)}</td>
                       <td>{r.from || '—'}</td>
                       <td>{r.subject || '—'}</td>

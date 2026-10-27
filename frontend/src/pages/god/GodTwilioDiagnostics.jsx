@@ -15,7 +15,7 @@ function StatusDot({ ok }) {
   return (
     <span style={{
       display: 'inline-block', width: 10, height: 10, borderRadius: '50%',
-      background: ok ? 'var(--god-green, #22c55e)' : 'var(--god-red, #ef4444)',
+      background: ok ? 'var(--gm-teal)' : 'var(--gm-red)',
       marginRight: 6, flexShrink: 0,
     }} />
   )
@@ -28,7 +28,7 @@ function EnvRow({ name, present }) {
                   fontSize: 13, fontFamily: 'monospace' }}>
       <StatusDot ok={present} />
       <span style={{ flex: 1 }}>{name}</span>
-      <span style={{ color: present ? 'var(--god-green, #22c55e)' : 'var(--god-muted, #9ca3af)',
+      <span style={{ color: present ? 'var(--gm-teal)' : 'var(--gm-ghost)',
                      fontWeight: 500 }}>
         {present ? 'SET' : 'NOT SET'}
       </span>
