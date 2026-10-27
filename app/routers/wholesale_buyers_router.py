@@ -1412,7 +1412,8 @@ def buyer_finder_import(payload: FinderImportIn, db: Session = Depends(get_db),
         deeds += r.get("deeds_added", 0)
         if r["result"] == "attached":
             attached += 1
-            skipped.append({"key": key, "reason": "already in your buyer list - recorded deeds attached"})
+            skipped.append({"key": key, "reason": "already in your buyer list",
+                            "deeds_attached": r.get("deeds_added", 0)})
         else:
             created += 1
             review += 1 if r.get("needs_review") else 0
