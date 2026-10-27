@@ -38,7 +38,7 @@ export const WORLDS = {
     tabs: [
       ['/wholesale', 'Deal Operations', true],
       ['/wholesale/properties', 'Properties'],
-      ['/wholesale/buyers', 'Cash Buyers'],
+      ['/wholesale/buyers', 'Buyers'],
       ['/wholesale/funding', 'Funding Partners'],
       ['/wholesale/exceptions', 'Exceptions'],
       ['/wholesale/closing', 'Contracts & Closing'],

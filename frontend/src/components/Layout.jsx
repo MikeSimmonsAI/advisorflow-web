@@ -166,7 +166,7 @@ const NAV_GROUPS = [
       { to: '/wholesale/board', label: 'Team Board', icon: 'activity', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/canvass', label: 'Canvassing', icon: 'home', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/calculator', label: 'Deal Calculator', icon: 'calculator', featureKey: 'wholesale_real_estate' },
-      { to: '/wholesale/buyers', label: 'Cash Buyers', icon: 'users', featureKey: 'wholesale_real_estate' },
+      { to: '/wholesale/buyers', label: 'Buyers', icon: 'users', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/funding', label: 'Funding Partners', icon: 'credit-card', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/exceptions', label: 'Exceptions', icon: 'check-square', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/callbacks', label: 'Callback Center', icon: 'phone', featureKey: 'wholesale_real_estate' },
