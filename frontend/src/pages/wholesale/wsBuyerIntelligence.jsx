@@ -13,6 +13,7 @@ import { api } from '../../api/client'
 import { Alert, Drawer, Empty, Metric, Metrics, Panel, Ring, Search, Seg, Skeleton, Tag, TabBar } from './ds/ds'
 import { errText } from './wsShared'
 import { BuyerImportWizard, BuyerNetworkPanel } from './wsBuyerNetwork'
+import DealRoomTab from './wsDealRoom'
 import './wsBuyerIntelligence.css'
 
 const BI = '/wholesale/buyer-intel'
@@ -96,7 +97,7 @@ export default function BuyerIntelligence({ legacy, reloadKey }) {
       </Metrics>
       <div className="bi-tabs"><TabBar label="Buyer activities" value={tab} onChange={setTab}
               items={[{ key: 'find', label: 'Find buyers' }, { key: 'qualify', label: 'Qualify buyers' },
-                      { key: 'match', label: 'Match deals' }]}
+                      { key: 'match', label: 'Match deals' }, { key: 'dealroom', label: 'Deal Room' }]}
               actions={<label className="evo-btn evo-btn--ghost evo-btn--sm" style={{ cursor: 'pointer' }}>
                 <input type="checkbox" checked={includeTest} onChange={(e) => setIncludeTest(e.target.checked)}
                        style={{ margin: 0 }} /> Sandbox / practice records</label>} /></div>
@@ -105,6 +106,7 @@ export default function BuyerIntelligence({ legacy, reloadKey }) {
                                          onOpen={setOpenBuyer} /> : null}
         {tab === 'find' ? <FindTab legacy={legacy} includeTest={includeTest} bump={bump} onOpen={setOpenBuyer}
                                    onChanged={(msg) => { if (msg) setNotice(msg); refresh() }} /> : null}
+        {tab === 'dealroom' ? <DealRoomTab includeTest={includeTest} onOpenBuyer={setOpenBuyer} /> : null}
         {tab === 'match' ? <MatchTab includeTest={includeTest} onOpen={setOpenBuyer}
                                      onChanged={(msg) => { if (msg) setNotice(msg); refresh() }} /> : null}
       </div>

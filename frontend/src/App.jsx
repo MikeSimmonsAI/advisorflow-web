@@ -107,6 +107,8 @@ const SciImport = lazyPage(() => import('./pages/program/sci/SciImport'))
 const ProgramLive = lazyPage(() => import('./pages/program/command/Command'))
 // EvoSys Pro Roofing: its own shell (/program/roofing/*) and public page (/roofing).
 const RoofingShell = lazyPage(() => import('./pages/roofing/RoofingShell'))
+// Private Buyer Deal Room (#415): invited investors only; its own login and token slot.
+const InvestorPortal = lazyPage(() => import('./pages/investor/InvestorPortal'))
 const RoofingMission = lazyPage(() => import('./pages/roofing/MissionControl'))
 const RoofingQueue = lazyPage(() => import('./pages/roofing/WorkQueue'))
 const RoofingConversations = lazyPage(() => import('./pages/roofing/Conversations'))
@@ -1348,6 +1350,8 @@ export default function App() {
             server-side whitelist — see app/services/wholesale_publication.py.
             Neither page can widen from its token to anything else. */}
         <Route path="/investor/:token" element={<InvestorRoom />} />
+        {/* PRIVATE BUYER DEAL ROOM (#415) - signed-in investors, server-fenced to /investor/* APIs. */}
+        <Route path="/investors/*" element={<InvestorPortal />} />
         <Route path="/my-property/:token" element={<SellerTransaction />} />
         {/* ── CUSTOM COMMERCIAL AGREEMENTS ──
             NO ORGANIZATION ID ON THE CUSTOMER ROUTE, for the same reason the

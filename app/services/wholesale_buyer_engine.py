@@ -138,6 +138,18 @@ def _days(v: Any, today: date) -> Optional[int]:
     return (today - d).days if d else None
 
 
+def _dt(v: Any) -> Optional[datetime]:
+    """One comparable type: aggregate queries hand back text on some databases."""
+    if v is None or isinstance(v, datetime):
+        return v
+    if isinstance(v, date):
+        return datetime(v.year, v.month, v.day)
+    try:
+        return datetime.fromisoformat(str(v).replace("Z", "").split("+")[0])
+    except ValueError:
+        return None
+
+
 def _iso(v: Any) -> Optional[str]:
     if v is None:
         return None
@@ -666,9 +678,9 @@ def row(b, boxes, acqs, ents, convs, matches, activity, today: date) -> Dict[str
     last_conv = max(convs, key=lambda c: c.updated_at or c.created_at) if convs else None
     good = [m for m in matches if (m.score or 0) >= GOOD_MATCH]
     act = activity or {}
-    last_touch = max([d for d in (getattr(b, "last_interaction_at", None), act.get("last_response_at"),
-                                  act.get("last_contacted_at"),
-                                  getattr(last_conv, "updated_at", None) if last_conv else None) if d],
+    last_touch = max([d for d in (_dt(getattr(b, "last_interaction_at", None)), _dt(act.get("last_response_at")),
+                                  _dt(act.get("last_contacted_at")),
+                                  _dt(getattr(last_conv, "updated_at", None)) if last_conv else None) if d],
                      default=None)
     return {
         "buyer_id": b.id, "name": _name(b), "entity_type": b.entity_type, "is_test": bool(b.is_test),

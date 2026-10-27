@@ -64,3 +64,20 @@
 .bi-table td[data-label="Readiness"] { min-width: 110px; }
 .bi-table td[data-label="Missing"] { min-width: 180px; }
 @media (max-width: 760px) { .bi-tabs .evo-tabsbar { flex-wrap: wrap; row-gap: 8px; } .bi-tabs .evo-tabs { overflow-x: auto; max-width: 100%; } }
+/* Deal Room tab (#415) */
+.dr-bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 4px 0 14px; }
+.dr-row { flex-wrap: wrap; align-items: flex-start !important; }
+.dr-row > div:first-child { min-width: 0; flex: 1 1 260px; }
+.dr-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.dr .evo-input.dr-sel, .dr-sel { width: auto; min-height: 0; min-width: 0; padding: 4px 8px; font-size: 13px; height: 32px; }
+.dr-left { font-variant-numeric: tabular-nums; }
+.dr-clip { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dr-msgs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.dr-msg { padding: 8px 12px; border-radius: 10px; border: 1px solid var(--evo-line, #e5e7eb); background: #fff; max-width: 88%; font-size: 14px; }
+.dr-msg--buyer { align-self: flex-end; background: #eef3fb; border-color: #cfdcf2; }
+.dr-msg--internal { background: #fff8e6; border-style: dashed; border-color: #e3c36b; }
+.dr-msg--system { align-self: center; border: 0; background: transparent; font-size: 12px; }
+.dr-compose { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.dr-form { display: flex; flex-direction: column; gap: 10px; }
+.dr-link { margin-top: 14px; padding: 12px; border-radius: 10px; background: #f8fafc; border: 1px solid var(--evo-line, #e5e7eb); display: flex; flex-direction: column; gap: 6px; }
+.dr-link code { font-size: 12px; word-break: break-all; }

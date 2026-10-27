@@ -101,7 +101,7 @@ def _brand_name(db, org_id: str) -> str:
 
 def _send_invite_email(db, inv: InvestorInvite, token: str) -> str:
     from app.services import email_service
-    url = "%s/investor/invite/%s" % (public_base(), token)
+    url = "%s/investors/invite/%s" % (public_base(), token)   # /investor/:token is the Buyer Room link
     org = db.query(Organization).filter(Organization.id == inv.organization_id).first()
     if inv.is_test or inv.email.lower().rsplit(".", 1)[-1] in ("invalid", "test", "example", "localhost"):
         return "not_sent: practice address (link shown to staff only)"
@@ -859,9 +859,18 @@ def _is_wholesale_manager(db, user) -> bool:
         return False
 
 
+def _buyer_name(db, buyer_id):
+    b = db.query(WholesaleBuyer).filter(WholesaleBuyer.id == buyer_id).first()
+    return getattr(b, "company_name", None) or getattr(b, "contact_name", None)
+
+
 def hold_json(db, h: ExclusiveHold) -> Dict[str, Any]:
     b = db.query(WholesaleBuyer).filter(WholesaleBuyer.id == h.buyer_id).first()
+    from app.models.wholesale_models import WholesaleDeal, WholesaleProperty
+    prop = (db.query(WholesaleProperty).join(WholesaleDeal, WholesaleDeal.property_id == WholesaleProperty.id)
+            .filter(WholesaleDeal.id == h.deal_id).first())
     return {"id": h.id, "listing_id": h.listing_id, "deal_id": h.deal_id, "buyer_id": h.buyer_id,
+            "address": ", ".join(x for x in (getattr(prop, "street_address", None), getattr(prop, "city", None)) if x) or None,
             "buyer_name": getattr(b, "company_name", None) or getattr(b, "contact_name", None),
             "status": h.status, "request_note": h.request_note, "requested_at": _iso(h.requested_at),
             "decided_at": _iso(h.decided_at), "starts_at": _iso(h.starts_at), "ends_at": _iso(h.ends_at),
@@ -885,7 +894,7 @@ def listing_json(db, lst: DealListing) -> Dict[str, Any]:
             "address": ", ".join(x for x in (getattr(prop, "street_address", None), getattr(prop, "city", None),
                                              getattr(prop, "zip_code", None)) if x),
             "holds": [hold_json(db, h) for h in holds],
-            "submissions": [{"buyer_id": s.buyer_id, "status": s.status,
+            "submissions": [{"buyer_id": s.buyer_id, "status": s.status, "buyer_name": _buyer_name(db, s.buyer_id),
                              "offer": float(s.offer_amount) if s.offer_amount is not None else None,
                              "at": _iso(s.replied_at)} for s in subs],
             "is_test": bool(lst.is_test)}

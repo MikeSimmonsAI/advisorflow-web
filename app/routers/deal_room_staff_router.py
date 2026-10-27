@@ -73,7 +73,7 @@ def invite(payload: InviteIn, db: Session = Depends(get_db), user: User = Depend
                                   is_test=payload.is_test)
     db.commit()
     # The link is shown ONCE so the sender can deliver it themselves when email did not go out.
-    return {**DR.invite_json(inv), "link": "%s/investor/invite/%s" % (DR.public_base(), token)}
+    return {**DR.invite_json(inv), "link": "%s/investors/invite/%s" % (DR.public_base(), token)}
 
 
 @router.post("/invites/{invite_id}/resend")
@@ -82,7 +82,7 @@ def resend(invite_id: str, db: Session = Depends(get_db), user: User = Depends(r
     org_id = svc.write_org_id(db, user)
     inv, token = DR.resend_invite(db, org_id, invite_id, user)
     db.commit()
-    return {**DR.invite_json(inv), "link": "%s/investor/invite/%s" % (DR.public_base(), token)}
+    return {**DR.invite_json(inv), "link": "%s/investors/invite/%s" % (DR.public_base(), token)}
 
 
 @router.post("/invites/{invite_id}/revoke")
@@ -147,9 +147,20 @@ def listings(include_test: bool = False, db: Session = Depends(get_db), user: Us
     rows = db.query(DealListing).filter(DealListing.organization_id == org_id).order_by(
         DealListing.updated_at.desc()).limit(200).all()
     out = [DR.listing_json(db, x) for x in rows if include_test or not x.is_test]
+    # deals whose investor package is approved and published but not yet in the Deal Room
+    from app.models.wholesale_models import WholesaleDeal, WholesaleProperty
+    listed = {x.deal_id for x in rows}
+    ready = (db.query(WholesaleDeal, WholesaleProperty).outerjoin(WholesaleProperty, WholesaleProperty.id == WholesaleDeal.property_id)
+             .filter(WholesaleDeal.organization_id == org_id, WholesaleDeal.buyer_room_published.is_(True))
+             .order_by(WholesaleDeal.updated_at.desc()).limit(100).all())
+    available = [{"deal_id": d.id, "address": ", ".join(x for x in (getattr(p, "street_address", None), getattr(p, "city", None)) if x),
+                  "asking_price": float(d.buyer_room_asking_price) if d.buyer_room_asking_price is not None else None,
+                  "is_test": bool(getattr(d, "is_test", False) or getattr(p, "is_test", False))}
+                 for d, p in ready if d.id not in listed]
+    available = [a for a in available if include_test or not a["is_test"]]
     db.commit()
-    return {"listings": out, "states": list(DR.LISTING_STATES), "hold_presets": list(DR.HOLD_PRESETS),
-            "hold_notice": DR.HOLD_NOTICE}
+    return {"listings": out, "available": available, "states": list(DR.LISTING_STATES),
+            "hold_presets": list(DR.HOLD_PRESETS), "hold_notice": DR.HOLD_NOTICE}
 
 
 @router.post("/deals/{deal_id}/listing")
