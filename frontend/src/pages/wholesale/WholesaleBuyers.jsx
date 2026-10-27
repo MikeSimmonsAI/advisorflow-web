@@ -9,15 +9,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import '../../styles/shared.css'
 import './wholesale.css'
-import {
-  Empty, ErrorBox, errText, fmtDate, fmtLabel, fmtLabels, fmtMoney, fmtNum,
-  fmtWhen, Note, Standing, Why,
-} from './wsShared'
+import { Empty, ErrorBox, errText, fmtLabel, fmtLabels, fmtMoney, Note, Why } from './wsShared'
 import { ConfirmDelete } from './wsFiles'
 import ContactLookup from './wsContactLookup'
-import { BuyerImportWizard, BuyerNetworkPanel } from './wsBuyerNetwork'
+import BuyerIntelligence from './wsBuyerIntelligence'
 import './wsUnderwriting.css'
-import { Alert, Drawer, Empty as EvoEmpty, EvoApp, Hero, Metric, Metrics, Panel, Skeleton, Tag } from './ds/ds'
+import { Alert, Drawer, EvoApp, Hero } from './ds/ds'
 import './ds/evo-pages.css'
 
 const STRATEGIES = ['flip', 'rental', 'brrrr', 'land', 'other']
@@ -33,50 +30,31 @@ const SUBTYPE_TYPES = ['warehouse', 'office', 'retail', 'ranch', 'farm', 'undeve
                        'mobile_home_park', 'rv_park', 'hotel']
 
 export default function WholesaleBuyers() {
+  // The Buyers screen is Buyer Intelligence (Find / Qualify / Match). The
+  // drawers below are the existing buyer tools it opens - add, edit, buy boxes,
+  // county finder, paid phone/email lookup (approved first), delete - unchanged.
   const [buyers, setBuyers] = useState([])
-  const [verifiedOnly, setVerifiedOnly] = useState(false)
-  const [total, setTotal] = useState(0)
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [q, setQ] = useState('')
-  const [includeTest, setIncludeTest] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
-  const [showImport, setShowImport] = useState(false)
   const [showFind, setShowFind] = useState(false)
-  const [picked, setPicked] = useState({})
   const [lookupIds, setLookupIds] = useState(null)
   const [expanded, setExpanded] = useState(null)
   const [editing, setEditing] = useState(null)
   const [deleting, setDeleting] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
 
   const load = useCallback(async () => {
-    setLoading(true); setError(null)
     try {
-      const params = new URLSearchParams({ limit: '500', active_only: 'false', with_activity: 'true' })
-      if (q) params.set('q', q)
-      if (includeTest) params.set('include_test', 'true')
-      const data = await api.get('/wholesale/buyers?' + params.toString())
+      const data = await api.get('/wholesale/buyers?limit=500&active_only=false&with_activity=true&include_test=true')
       setBuyers(data.buyers)
-      setTotal(data.total)
     } catch (e) {
       setError(errText(e))
-    } finally {
-      setLoading(false)
     }
-  }, [q, includeTest])
-
+  }, [])
   useEffect(() => { load() }, [load])
-
-  const active = buyers.filter((b) => b.is_active && !b.do_not_contact).length
-  const verified = buyers.filter((b) => b.cash_verified).length
-  const pof = buyers.filter((b) => b.proof_of_funds_on_file).length
-  const boxes = buyers.reduce((n, b) => n + (b.buy_boxes || []).length, 0)
-  // Buyers not yet in the shared contact database (sandbox buyers never are).
-  const shown = buyers.filter((b) => !verifiedOnly || b.cash_verified || b.proof_of_funds_on_file)
-  const nPicked = Object.values(picked).filter(Boolean).length
-  const allPicked = shown.length > 0 && shown.every((b) => picked[b.id])
+  const changed = useCallback((msg) => { if (msg) setNotice(msg); setReloadKey((k) => k + 1); load() }, [load])
   const unlinked = buyers.filter((b) => !b.org_contact_id && !b.is_test && (b.email || b.phone)).length
 
   async function linkContacts() {
@@ -85,138 +63,32 @@ export default function WholesaleBuyers() {
       const r = await api.post('/wholesale/buyers/link-contacts?dry_run=false', {})
       const c = r.counts || {}
       const linked = (c.linked_new || 0) + (c.linked_existing || 0) + (c.linked_possible || 0)
-      setNotice(`${linked} buyer(s) linked to your contacts as partners (not leads)` +
-                (c.linked_existing ? ` - ${c.linked_existing} matched an existing contact` : '') +
-                (c.error ? ` - ${c.error} could not be linked and stay as they were` : '') + '.')
-      await load()
+      changed(`${linked} buyer(s) linked to your contacts as partners (not leads)` +
+              (c.linked_existing ? ` - ${c.linked_existing} matched an existing contact` : '') +
+              (c.error ? ` - ${c.error} could not be linked and stay as they were` : '') + '.')
     } catch (e) {
       setError(errText(e))
     } finally {
       setBusy(false)
     }
   }
+  const byId = (id) => buyers.find((b) => b.id === id)
+  const legacy = {
+    openAdd: () => setShowAdd(true), openFinder: () => setShowFind(true), unlinked, linkContacts,
+    edit: (id) => (byId(id) ? setEditing(id) : load().then(() => setEditing(id))),
+    boxes: (id) => (byId(id) ? setExpanded(id) : load().then(() => setExpanded(id))),
+    lookup: (ids) => setLookupIds(ids),
+    remove: (id, name) => setDeleting({ id, display_name: name }),
+  }
 
   return (
     <EvoApp world="operations">
-      <Hero scene="capital" eyebrow="Buyer Network" title="Cash Buyers"
-            sub="Ready capital. Real relationships. Every buyer with a structured buy box is matched to your deals automatically — with a score and its reasons."
-            quote="The right buyer turns opportunity into profit."
-            actions={<>
-              {unlinked ? (
-                <button type="button" className="evo-btn evo-btn--secondary" disabled={busy} onClick={linkContacts}
-                        title="Add these buyers to your shared contacts as partners. Buy boxes, standing and history stay exactly as they are. Admins only.">
-                  Link {unlinked} to contacts</button>
-              ) : null}
-              <button type="button" className="evo-btn evo-btn--secondary" onClick={() => setShowFind(true)}
-                      title="Local investors from the county records: owners of several houses who keep buying">Find cash buyers</button>
-              <button type="button" className="evo-btn evo-btn--secondary" disabled={!nPicked}
-                      onClick={() => setLookupIds(Object.keys(picked).filter((k) => picked[k]))}
-                      title={nPicked ? 'Look up phone numbers and emails for the buyers you ticked' : 'Tick the buyers to look up first'}>
-                Get phones &amp; emails{nPicked ? ` (${nPicked})` : ''}</button>
-              <button type="button" className="evo-btn evo-btn--secondary" onClick={() => setShowImport(true)}>Import buyers</button>
-              <button type="button" className="evo-btn evo-btn--primary" onClick={() => setShowAdd(true)}>+ Add buyer</button>
-            </>} />
+      <Hero scene="capital" eyebrow="Buyer Intelligence" title="Buyers"
+            sub="Find investors, qualify them, and match them to real deals - single-family, multifamily, land and commercial, in one buyer network."
+            quote="The right buyer turns opportunity into profit." />
       <Alert>{error}</Alert>
       <Alert kind="ok">{notice}</Alert>
-
-      <Metrics label="Buyer summary">
-        <Metric label="Total buyers" value={loading && !buyers.length ? null : total} tone="primary" />
-        <Metric label="Active" value={loading && !buyers.length ? null : active} tone="success" sub="not opted out" />
-        <Metric label="Verified cash" value={loading && !buyers.length ? null : verified} tone="success" />
-        <Metric label="POF on file" value={loading && !buyers.length ? null : pof} tone="info" />
-        <Metric label="Buy boxes" value={loading && !buyers.length ? null : boxes} tone="violet"
-                sub={buyers.some((b) => !(b.buy_boxes || []).length) ? 'some buyers have none' : null} />
-      </Metrics>
-
-      <BuyerNetworkPanel includeTest={includeTest} refreshKey={buyers.length} />
-      <Panel flush>
-        <div className="evo-filterbar">
-          <label className="evo-search">
-            <span className="evo-sr">Search buyers</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
-            <input className="evo-input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or email" />
-          </label>
-          <label className="evo-btn evo-btn--ghost" style={{ cursor: 'pointer' }}>
-            <input type="checkbox" checked={verifiedOnly} onChange={(e) => setVerifiedOnly(e.target.checked)} style={{ margin: 0 }} />
-            Verified only
-          </label>
-          <label className="evo-btn evo-btn--ghost" style={{ cursor: 'pointer' }}>
-            <input type="checkbox" checked={includeTest} onChange={(e) => setIncludeTest(e.target.checked)} style={{ margin: 0 }} />
-            Sandbox records
-          </label>
-        </div>
-
-        {loading && !buyers.length ? <div style={{ padding: 20 }}><Skeleton rows={4} height={30} /></div> : null}
-        {!loading && !buyers.length ? (
-          <EvoEmpty title={q ? 'No buyer matches' : 'No cash buyers yet'}
-                 action={!q ? <div className="evo-actionbar" style={{ justifyContent: 'center' }}>
-                   <button type="button" className="evo-btn evo-btn--primary" onClick={() => setShowAdd(true)}>+ Add buyer</button>
-                   <button type="button" className="evo-btn evo-btn--secondary" onClick={() => setShowImport(true)}>Import buyers</button></div> : null}>
-            {q ? 'Try a different name or email.' : 'Add your buyers and their buy boxes, and every deal is matched to them automatically.'}
-          </EvoEmpty>
-        ) : null}
-
-        {buyers.length ? (
-          <div className="evo-table-wrap">
-            <table className="evo-table evo-table--cards">
-              <caption className="evo-sr">{total} cash buyers</caption>
-              <thead>
-                <tr>
-                  <th scope="col" style={{ width: 32 }}>
-                    <input type="checkbox" aria-label="Select all buyers shown" checked={allPicked}
-                           onChange={(e) => setPicked(e.target.checked ? Object.fromEntries(shown.map((b) => [b.id, true])) : {})} />
-                  </th>
-                  <th scope="col">Buyer</th><th scope="col">Buys in</th><th scope="col">Funds</th>
-                  <th scope="col">Track record</th><th scope="col" className="is-num">Close</th>
-                  <th scope="col" className="is-num">Rating</th><th scope="col"><span className="evo-sr">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {shown.map((b) => (
-                  <tr key={b.id}>
-                    <td data-label="">
-                      <input type="checkbox" aria-label={`Select ${b.display_name}`} checked={!!picked[b.id]}
-                             onChange={(e) => setPicked((p) => ({ ...p, [b.id]: e.target.checked }))} />
-                    </td>
-                    <td className="is-lead" data-label="">
-                      <span className="evo-strong" style={{ fontSize: 14 }}>{b.display_name}</span>
-                      <span className="evo-prop__sub">{b.email || 'no email'} · {b.phone || 'no phone'}</span>
-                      {(b.do_not_contact || !b.is_active || b.org_contact_id) ? (
-                        <span className="evo-chips" style={{ marginTop: 5 }}>
-                          {b.do_not_contact ? <Tag kind="danger">Opted out</Tag> : null}
-                          {!b.is_active ? <Tag>Inactive</Tag> : null}
-                          {b.org_contact_id ? <Tag title="In your shared contacts as a partner - never a lead">In contacts</Tag> : null}
-                        </span>
-                      ) : null}
-                    </td>
-                    <td data-label="Buys in"><Geography boxes={b.buy_boxes} /></td>
-                    <td data-label="Funds">
-                      <span className="evo-buyer-flags">
-                        {b.cash_verified ? <Tag kind="live">Cash verified</Tag> : null}
-                        {b.proof_of_funds_on_file ? <Tag kind="live">POF on file</Tag> : null}
-                        {!b.cash_verified && !b.proof_of_funds_on_file ? <span className="evo-muted evo-small">not verified</span> : null}
-                      </span>
-                      {b.proof_of_funds_expires ? <span className="evo-prop__sub">POF expires {fmtDate(b.proof_of_funds_expires)}</span> : null}
-                    </td>
-                    <td data-label="Track record"><TrackRecord buyer={b} /></td>
-                    <td data-label="Close" className="is-num">{b.typical_close_days ? `${fmtNum(b.typical_close_days)}d` : '—'}</td>
-                    <td data-label="Rating" className="is-num">{b.reliability_rating ? `${b.reliability_rating}/5` : '—'}</td>
-                    <td data-label="" className="is-right">
-                      <span className="evo-actionbar" style={{ justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
-                        <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" onClick={() => setExpanded(b.id)}>
-                          Buy boxes ({b.buy_boxes.length})</button>
-                        <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => setEditing(b.id)}>Edit</button>
-                        <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" aria-label={`Delete ${b.display_name}`}
-                                onClick={() => setDeleting(b)}>Delete</button>
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-      </Panel>
+      <BuyerIntelligence legacy={legacy} reloadKey={reloadKey} />
 
       {deleting ? (
         <ConfirmDelete busy={busy}
@@ -226,22 +98,20 @@ export default function WholesaleBuyers() {
                          setBusy(true); setError(null)
                          try {
                            await api.delete(`/wholesale/buyers/${deleting.id}`)
-                           setNotice(`${deleting.display_name} deleted.`)
                            setDeleting(null)
-                           await load()
+                           changed(`${deleting.display_name} deleted.`)
                          } catch (e) {
                            setError(errText(e))
                          } finally { setBusy(false) }
                        }} />
       ) : null}
 
-      {showAdd ? <AddBuyer onClose={() => setShowAdd(false)} onDone={() => { setShowAdd(false); setNotice('Buyer added. Give them a buy box so they appear in matches.'); load() }} /> : null}
-      {showImport ? <BuyerImportWizard onClose={() => setShowImport(false)} onDone={(msg) => { setNotice(msg); load() }} /> : null}
-      {showFind ? <FindBuyers onClose={() => setShowFind(false)} onDone={(msg) => { setNotice(msg); load() }} /> : null}
+      {showAdd ? <AddBuyer onClose={() => setShowAdd(false)} onDone={() => { setShowAdd(false); changed('Buyer added. Give them a buy box so they appear in matches.') }} /> : null}
+      {showFind ? <FindBuyers onClose={() => setShowFind(false)} onDone={(msg) => changed(msg)} /> : null}
       {lookupIds ? <ContactLookup kind="buyer" what="buyer" ids={lookupIds} onClose={() => setLookupIds(null)}
-                                  onDone={(msg) => { setNotice(msg); setPicked({}); load() }} /> : null}
-      {editing ? <EditBuyer buyer={buyers.find((b) => b.id === editing)} onDone={() => { setEditing(null); load() }} /> : null}
-      {expanded ? <BuyBoxes buyer={buyers.find((b) => b.id === expanded)} onChanged={load} onClose={() => setExpanded(null)} /> : null}
+                                  onDone={(msg) => { setLookupIds(null); changed(msg) }} /> : null}
+      {editing && byId(editing) ? <EditBuyer buyer={byId(editing)} onDone={() => { setEditing(null); changed() }} /> : null}
+      {expanded && byId(expanded) ? <BuyBoxes buyer={byId(expanded)} onChanged={() => changed()} onClose={() => setExpanded(null)} /> : null}
     </EvoApp>
   )
 }
@@ -499,75 +369,6 @@ function BuyBoxes({ buyer, onChanged, onClose }) {
 }
 
 
-function BuyerImport({ onDone, onClose }) {
-  const [file, setFile] = useState(null)
-  const [isTest, setIsTest] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState(null)
-  const [result, setResult] = useState(null)
-
-  return (
-    <Drawer open onClose={onClose} title="Import buyers" sub="CSV file · buyers and their buy boxes">
-      <Note>
-        CSV. A row that carries buy-box columns builds the buy box at the same
-        time, so the list arrives matchable rather than as a pile of contacts.
-      </Note>
-      <Why label="Which columns are recognised">
-        <p className="ws-comp__sub">
-          Company, contact, email, phone, states, counties, cities, ZIPs,
-          property types, strategy, min and max price, min and max square feet,
-          and rehab.
-        </p>
-      </Why>
-      <ErrorBox error={error} />
-      <div className="ws-grid">
-        <div className="ws-field">
-          <label>File</label>
-          <input type="file" accept=".csv,text/csv"
-                 onChange={(e) => setFile(e.target.files[0])} />
-        </div>
-      </div>
-      <label className="ws-checkbox" style={{ marginTop: 10 }}>
-        <input type="checkbox" checked={isTest}
-               onChange={(e) => setIsTest(e.target.checked)} />
-        Import as sandbox records
-      </label>
-      <div className="ws-actions" style={{ marginTop: 12 }}>
-        <button className="btn btn--primary" disabled={!file || busy}
-                onClick={async () => {
-                  setBusy(true); setError(null); setResult(null)
-                  try {
-                    const fd = new FormData()
-                    fd.append('file', file)
-                    const data = await api.upload(
-                      '/wholesale/buyers/import' + (isTest ? '?is_test=true' : ''), fd)
-                    setResult(data)
-                    onDone(`${data.created} buyer(s) imported, `
-                           + `${data.buy_boxes_created} buy box(es) created.`)
-                  } catch (e) { setError(errText(e)) } finally { setBusy(false) }
-                }}>
-          {busy ? 'Importing…' : 'Import'}
-        </button>
-      </div>
-      {result && result.skipped && result.skipped.length ? (
-        <div className="ws-warn" style={{ marginTop: 12 }}>
-          <strong>{result.skipped.length} row(s) could not be used:</strong>
-          <ul style={{ margin: '6px 0 0 18px' }}>
-            {result.skipped.slice(0, 20).map((s, i) => (
-              <li key={i}>Row {s.row}: {s.reason}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-    </Drawer>
-  )
-}
-
-
-/* FIND CASH BUYERS: local investors from the county appraisal file - owners of
- * several houses who keep taking title. Pick the ones to add; each arrives with
- * a buy box built from where they already own, and with no phone or email
- * (the county file has none) until one is looked up. */
 function FindBuyers({ onClose, onDone }) {
   const [county, setCounty] = useState('dallas')
   const [data, setData] = useState(null)
@@ -608,7 +409,10 @@ function FindBuyers({ onClose, onDone }) {
       const r = await api.post('/wholesale/buyers/finder/import', { county, keys })
       setPicked({})
       onDone(`${r.created} investor(s) added from ${county === 'dallas' ? 'Dallas' : 'Tarrant'} County records`
-             + (r.skipped.length ? ` (${r.skipped.length} skipped)` : '') + '. Look up a phone for each before sending deals.')
+             + (r.attached ? ` · ${r.attached} already in your list (their recorded deeds were attached)` : '')
+             + (r.needs_review ? ` · ${r.needs_review} look related to a buyer you have - review them under Find buyers` : '')
+             + (r.deeds_recorded ? ` · ${r.deeds_recorded} recorded deed(s) saved` : '')
+             + '. Look up a phone for each before sending deals.')
       await load()
     } catch (e) { setError(errText(e)) } finally { setBusy(false) }
   }
@@ -684,106 +488,6 @@ function FindBuyers({ onClose, onDone }) {
  * the screen showing a person a database value. This capitalizes WITHOUT
  * translating: nothing is looked up or mapped, so a place this code has never
  * seen still reads correctly. */
-function place(value) {
-  const text = String(value || '').trim()
-  if (!text) return ''
-  // State codes and market acronyms are short and have no space in them.
-  if (text.length <= 4 && !text.includes(' ')) return text.toUpperCase()
-  return text.replace(/\b[a-z]/g, (c) => c.toUpperCase())
-}
-
-function Geography({ boxes }) {
-  if (!boxes || !boxes.length) {
-    return (
-      <span className="ws-blocked ws-comp__sub">
-        No buy box — cannot be matched
-      </span>
-    )
-  }
-  const parts = []
-  const seen = new Set()
-  for (const box of boxes) {
-    for (const key of ['markets', 'counties', 'cities', 'states']) {
-      for (const value of (box[key] || [])) {
-        const label = place(value)
-        if (label && !seen.has(label)) { seen.add(label); parts.push(label) }
-      }
-    }
-  }
-  const prices = boxes
-    .map((b) => b.max_price)
-    .filter((v) => v !== null && v !== undefined)
-  return (
-    <>
-      <div>{parts.length ? parts.slice(0, 4).join(', ') : 'anywhere'}
-        {parts.length > 4 ? ` +${parts.length - 4}` : ''}</div>
-      <div className="ws-comp__sub">
-        {prices.length ? `up to ${fmtMoney(Math.max(...prices))}` : 'no price ceiling set'}
-        {boxes.length > 1 ? ` · ${boxes.length} boxes` : ''}
-      </div>
-    </>
-  )
-}
-
-
-/* What this buyer has actually done HERE. Counts of rows that exist — not a
- * score, not a ranking, and never mixed up with the `past_deals_count` somebody
- * typed in when they added the buyer, which is shown separately and labelled as
- * what it is. */
-function TrackRecord({ buyer }) {
-  const a = buyer.activity
-  if (!a || !a.sheets_sent) {
-    return (
-      <>
-        {buyer.standing ? <div><Standing standing={buyer.standing} /></div> : null}
-        <span className="ws-muted">Nothing sent yet</span>
-        {buyer.past_deals_count ? (
-          <div className="ws-comp__sub">
-            {buyer.past_deals_count} past deal(s) — stated, not measured
-          </div>
-        ) : null}
-      </>
-    )
-  }
-  return (
-    <>
-      {buyer.standing ? (
-        <div title={buyer.standing.why}><Standing standing={buyer.standing} /></div>
-      ) : null}
-      <div>
-        {a.sheets_sent} sent · {a.responded} replied
-        {a.offers_made ? ` · ${a.offers_made} offered` : ''}
-      </div>
-      <div className="ws-comp__sub">
-        {a.selected_count
-          ? `chosen on ${a.selected_count} deal${a.selected_count === 1 ? '' : 's'}`
-          : 'never chosen'}
-        {a.deals_closed ? ` · closed ${a.deals_closed}` : ''}
-        {a.best_offer !== null && a.best_offer !== undefined
-          ? ` · best ${fmtMoney(a.best_offer)}` : ''}
-      </div>
-      {a.last_contacted_at ? (
-        <div className="ws-comp__sub">last sent {fmtDate(a.last_contacted_at)}</div>
-      ) : null}
-    </>
-  )
-}
-
-
-/* Editing a buyer. Same fields as adding one, so a field cannot exist in one
- * form and be missing from the other, with an explicit Save and Cancel and a
- * Save that stays disabled until something changed. */
-const EDIT_FIELDS = [
-  ['company_name', 'Company'],
-  ['contact_name', 'Contact'],
-  ['email', 'Email'],
-  ['phone', 'Phone'],
-  ['typical_close_days', 'Typical close (days)'],
-  ['reliability_rating', 'Rating out of 5'],
-  ['past_deals_count', 'Past deals (stated)'],
-  ['source', 'Where they came from'],
-]
-
 function EditBuyer({ buyer, onDone }) {
   const initial = () => EDIT_FIELDS.reduce(
     (acc, [k]) => ({ ...acc, [k]: buyer[k] ?? '' }),

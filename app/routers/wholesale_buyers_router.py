@@ -1394,49 +1394,33 @@ def buyer_finder_import(payload: FinderImportIn, db: Session = Depends(get_db),
     org_id = svc.write_org_id(db, user)
     res = finder.load(payload.county) or {}
     by_key = {b["key"]: b for b in res.get("buyers") or []}
-    have = _existing_names(db, org_id)
-    created, skipped = 0, []
+    # Buyer Intelligence (#413): one investor stays one record. An exact legal
+    # name already in the list gets this scan's recorded deeds attached instead
+    # of being skipped; a similar name or shared mailing address is created and
+    # sent to a person for review - never merged automatically.
+    from app.services import wholesale_buyer_evidence as EVD
+    index = EVD.Index(db, org_id)
+    months = (res.get("criteria") or {}).get("recent_months", 24)
+    created, attached, review, deeds, skipped = 0, 0, 0, 0, []
     for key in payload.keys[:500]:
         b = by_key.get(key)
         if not b:
             skipped.append({"key": key, "reason": "not in the last scan - run the finder again"})
             continue
-        if finder.norm_name(b["name"]) in have:
-            skipped.append({"key": key, "reason": "already in your buyer list"})
-            continue
-        m = b.get("mailing") or {}
-        mailing = ", ".join(x for x in (m.get("street"), m.get("city"),
-                                        " ".join(y for y in (m.get("state"), m.get("zip")) if y)) if x)
-        what = ", ".join(x for x in ("%d house%s" % (b["houses"], "" if b["houses"] == 1 else "s") if b["houses"] else None,
-                                     "%d multifamily" % b["multifamily"] if b["multifamily"] else None,
-                                     "%d lot%s" % (b["lots"], "" if b["lots"] == 1 else "s") if b["lots"] else None) if x)
-        detail = "%s County records: owns %s; %d deed(s) to them in the last %s months" % (
-            payload.county.title(), what or "%d parcels" % b["properties"], b["bought_recently"],
-            (res.get("criteria") or {}).get("recent_months", 24))
-        notes = "\n".join(x for x in (
-            "Mailing address (county record): %s" % mailing if mailing else None,
-            "Last deed to them: %s" % b["last_deed"] if b.get("last_deed") else None,
-            "Examples: %s" % "; ".join(b.get("samples") or []) if b.get("samples") else None,
-            "No phone or email yet - look one up or mail them before sending deals.") if x)
-        buyer = WholesaleBuyer(organization_id=org_id,
-                               entity_type="company" if b["kind"] == "company" else "person",
-                               company_name=b["name"] if b["kind"] == "company" else None,
-                               contact_name=b["name"] if b["kind"] != "company" else None,
-                               preferred_channel="phone", source="county_roll:%s" % payload.county,
-                               source_detail=detail[:250], notes=notes, past_deals_count=0)
-        db.add(buyer)
-        db.flush()
-        types = [t for t, n in (("single_family", b["houses"]), ("multifamily", b["multifamily"]),
-                                ("land", b["lots"])) if n]
-        box = WholesaleBuyBox(organization_id=org_id, buyer_id=buyer.id, label="From county records")
-        _apply_box(box, {"counties": [payload.county.title()],
-                         **({"zips": b["zips"]} if b.get("zips") else {}),
-                         **({"property_types": types} if types else {})})
-        db.add(box)
-        have.add(finder.norm_name(b["name"]))
-        created += 1
+        r = EVD.import_owner(db, org_id, payload.county, b, generated_at=res.get("generated_at"),
+                             recent_months=months, index=index, user=user)
+        deeds += r.get("deeds_added", 0)
+        if r["result"] == "attached":
+            attached += 1
+            skipped.append({"key": key, "reason": "already in your buyer list",
+                            "deeds_attached": r.get("deeds_added", 0)})
+        else:
+            created += 1
+            review += 1 if r.get("needs_review") else 0
     svc.log_event(db, org_id, "buyers.imported", actor_type=ACTOR_USER, actor_user_id=user.id,
                   summary="%d investor(s) added from %s County records" % (created, payload.county.title()),
-                  after={"source": "county_roll:%s" % payload.county, "skipped": len(skipped)})
+                  after={"source": "county_roll:%s" % payload.county, "skipped": len(skipped),
+                         "attached": attached, "needs_review": review, "deeds_recorded": deeds})
     db.commit()
-    return {"created": created, "skipped": skipped}
+    return {"created": created, "skipped": skipped, "attached": attached, "needs_review": review,
+            "deeds_recorded": deeds}

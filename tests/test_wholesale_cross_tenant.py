@@ -352,7 +352,20 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
         "box_id": an_id(box, "buy_box", "box"),
         "outreach_id": (outreach_rows[0].get("outreach_id")
                         if outreach_rows else None),
+        # Buyer Intelligence (#413): a recorded qualification conversation and
+        # an identity-review item on the victim's buyer.
+        "bi_conv_id": ok(client.post("/wholesale/buyer-intel/buyers/%s/qualify" % an_id(buyer, "buyer"),
+                                     headers=auth_headers, json={"mode": "recorded"}))["id"],
+        "bi_entity_id": _bi_entity(db_session, sample_org.id, an_id(buyer, "buyer")),
     }
+
+
+def _bi_entity(db_session, org_id, buyer_id):
+    from app.services import wholesale_buyer_evidence as EVD
+    e = EVD.ensure_entity(db_session, org_id, buyer_id, "Victim Capital II LLC", status="needs_review",
+                          source="identity_check", reason="cross-tenant fixture")
+    db_session.commit()
+    return e.id
 
 
 def attacks(ids):
@@ -485,6 +498,26 @@ def attacks(ids):
          {"status": "interested", "offer_amount": 1}),
         ("post", "/wholesale/outreach/%s/pof-status" % ids["outreach_id"],
          {"status": "verified"}),
+
+        # ── Buyer Intelligence (#413): the buyer network, its evidence and the
+        # qualification conversations. Every one is somebody else's investor.
+        ("get", "/wholesale/buyer-intel/buyers/%s" % ids["buyer_id"], None),
+        ("patch", "/wholesale/buyer-intel/buyers/%s/facts" % ids["buyer_id"], {"contact_verified": True}),
+        ("post", "/wholesale/buyer-intel/buyers/%s/buy-boxes/%s/confirm" % (ids["buyer_id"], ids["box_id"]), {}),
+        ("post", "/wholesale/buyer-intel/buyers/%s/evidence" % ids["buyer_id"],
+         {"evidence_class": "REPORTED_INVESTOR_PURCHASE", "street": "planted"}),
+        ("post", "/wholesale/buyer-intel/buyers/%s/opt-out" % ids["buyer_id"], {}),
+        ("post", "/wholesale/buyer-intel/buyers/%s/qualify" % ids["buyer_id"], {"mode": "recorded"}),
+        ("post", "/wholesale/buyer-intel/buyers/%s/request-qualification" % ids["buyer_id"], {}),
+        ("post", "/wholesale/buyer-intel/buyers/%s/unlink" % ids["buyer_id"], {}),
+        ("post", "/wholesale/buyer-intel/identity-review/%s" % ids["bi_entity_id"], {"decision": "same"}),
+        ("post", "/wholesale/buyer-intel/conversations/%s/reply" % ids["bi_conv_id"], {"text": "STOP"}),
+        ("post", "/wholesale/buyer-intel/conversations/%s/pause" % ids["bi_conv_id"], {}),
+        ("post", "/wholesale/buyer-intel/conversations/%s/resume" % ids["bi_conv_id"], {}),
+        ("post", "/wholesale/buyer-intel/conversations/%s/takeover" % ids["bi_conv_id"], {}),
+        ("post", "/wholesale/buyer-intel/conversations/%s/note" % ids["bi_conv_id"], {"text": "planted"}),
+        ("post", "/wholesale/buyer-intel/conversations/%s/followup" % ids["bi_conv_id"], {}),
+        ("post", "/wholesale/buyer-intel/conversations/%s/schedule" % ids["bi_conv_id"], {"kind": "call"}),
 
         # Deleting somebody else's buyer takes their disposition list with it.
         ("delete", "/wholesale/buyers/%s" % ids["buyer_id"], None),

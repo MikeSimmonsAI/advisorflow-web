@@ -37,6 +37,7 @@ import { CallOutcomePanel, FirstContactPlan } from './Acquire'
 import { ReadinessPanel } from './Readiness'
 import EvoPermission from './EvoPermission'
 import EvoFollowUp from './EvoFollowUp'
+import { MatchResults } from '../wsBuyerIntelligence'
 import PropertyPhoto from './PropertyPhoto'
 import DealCalculator from '../calc/DealCalculator'
 import { prefillFromProperty } from '../calc/prefill'
@@ -263,6 +264,7 @@ export default function EvoProperty() {
   const [nurtureDate, setNurtureDate] = useState('')
   const [explain, setExplain] = useState(null)
   const [promoteOpen, setPromoteOpen] = useState(false)
+  const [buyersOpen, setBuyersOpen] = useState(false)
   const [bookOpen, setBookOpen] = useState(false)
   const [raw, setRaw] = useState(null)
 
@@ -341,6 +343,10 @@ export default function EvoProperty() {
       ) : null}
       {!getBranding()?.wholesale_team?.field ? (
         <button type="button" className="evo-btn evo-btn--secondary" onClick={() => setBookOpen(true)}>Book appointment</button>
+      ) : null}
+      {!getBranding()?.wholesale_team?.field ? (
+        <button type="button" className="evo-btn evo-btn--secondary" onClick={() => setBuyersOpen(true)}
+                title="Score every buyer in your network against this property - nothing is sent">Find matching buyers</button>
       ) : null}
     </>
   )
@@ -834,6 +840,13 @@ export default function EvoProperty() {
       </div>
 
       {bookDrawer}
+      {buyersOpen ? (
+        <Drawer open wide onClose={() => setBuyersOpen(false)} title="Matching buyers"
+                sub="Match score, verification and readiness - shown separately. Nothing is sent from here.">
+          <MatchResults subjectType="evosense" subjectId={propertyId} compact
+                        onOpen={(id) => window.location.assign(`/wholesale/buyers?buyer=${id}`)} />
+        </Drawer>
+      ) : null}
       <Drawer open={promoteOpen} onClose={() => setPromoteOpen(false)} title="Promote to Deal Operations"
               sub={`${p.address}, ${place}`}
               footer={<>

@@ -1216,6 +1216,8 @@ from app.routers.wholesale_data_layer_router import router as wholesale_data_lay
 app.include_router(wholesale_data_layer_router)   # /wholesale/data-sources, /wholesale/deals/{id}/provenance
 from app.routers.wholesale_buyer_network_router import router as wholesale_buyer_network_router  # noqa: E402
 app.include_router(wholesale_buyer_network_router)   # /wholesale/buyers/imports, /wholesale/buyers/network
+from app.routers.wholesale_buyer_engine_router import router as wholesale_buyer_engine_router  # noqa: E402
+app.include_router(wholesale_buyer_engine_router)   # /wholesale/buyer-intel/* - Buyer Intelligence Engine (#413)
 from app.routers.wholesale_canvass_router import router as wholesale_canvass_router  # noqa: E402
 app.include_router(wholesale_canvass_router)   # /wholesale/canvass - door-knocking routes
 from app.routers.wholesale_team_router import router as wholesale_team_router  # noqa: E402

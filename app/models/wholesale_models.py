@@ -942,6 +942,28 @@ class WholesaleBuyer(Base):
     file_status = Column(String, nullable=True)            # active / inactive as their file said
     file_last_contact_at = Column(DateTime, nullable=True)
     file_last_response_at = Column(DateTime, nullable=True)
+    # ── Buyer Intelligence Engine (2026-10-27) ─────────────────────────────
+    # Separate facts, each with its own date, so verification can EXPIRE:
+    # who the buyer is, whether the contact works, what they SAY about buying
+    # and money (stated, never "verified"), and where qualification stands.
+    identity_status = Column(String, nullable=True)        # None, needs_review, confirmed, linked
+    linked_to_buyer_id = Column(String, nullable=True)     # this row is another LLC of that investor
+    contact_verified_at = Column(DateTime, nullable=True)  # a real two-way exchange or a person checked it
+    contact_verified_how = Column(String, nullable=True)
+    contact_bad_at = Column(DateTime, nullable=True)       # wrong number / bounced / disconnected
+    decision_maker_name = Column(String, nullable=True)
+    decision_maker_confirmed = Column(Boolean, nullable=True)
+    stated_buying_status = Column(String, nullable=True)   # buying, paused, not_buying (their words)
+    stated_buying_at = Column(DateTime, nullable=True)
+    stated_budget_min = Column(Numeric(14, 2), nullable=True)
+    stated_budget_max = Column(Numeric(14, 2), nullable=True)
+    stated_funding = Column(String, nullable=True)         # cash, hard_money, private, conventional, mixed
+    stated_close_days = Column(Integer, nullable=True)
+    stated_capacity = Column(String, nullable=True)        # "2 deals a month", as said
+    qualification_status = Column(String, nullable=True)   # in_progress, qualified, needs_human, declined
+    qualification_at = Column(DateTime, nullable=True)
+    last_interaction_at = Column(DateTime, nullable=True)
+    ai_paused = Column(Boolean, nullable=False, default=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -1011,6 +1033,13 @@ class WholesaleBuyBox(Base):
     value_add = Column(Boolean, nullable=True)
     distress_tolerance = Column(String, nullable=True)
     criteria = Column(Text, nullable=True)
+    # Where these criteria came from: stated (the buyer said), file (their
+    # list), county_records (inferred from what they own - not stated),
+    # ai_conversation (extracted with a quote), staff. A box is CONFIRMED only
+    # when the buyer stated it or a person confirmed it with them.
+    source = Column(String, nullable=True)
+    confirmed_at = Column(DateTime, nullable=True)
+    confirmed_by = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -1516,6 +1545,9 @@ EXCEPTION_KINDS = (
     "missing_photos_docs", "buyer_criteria_verification", "proof_of_funds_verification",
     "buyer_research", "missing_disposition_data", "seller_callback_requested",
     "ai_exception", "title_ownership_anomaly", "escalate_to_owner", "seller_first_call",
+    # Buyer Intelligence (#413): a buyer qualification handed to a person, and a
+    # follow-up / call the buyer asked for.
+    "buyer_handoff", "buyer_followup",
 )
 EXCEPTION_OUTCOMES = ("complete", "unable_to_verify", "needs_more_info", "escalate")
 EXCEPTION_OPEN_STATUSES = ("open", "assigned", "needs_more_info", "escalated")
