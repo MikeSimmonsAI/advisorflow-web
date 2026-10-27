@@ -39,6 +39,7 @@ KIND_LABELS = {
     "seller_callback_requested": "Seller callback requested", "ai_exception": "AI exception",
     "title_ownership_anomaly": "Title / ownership anomaly", "escalate_to_owner": "Escalated to owner",
     "seller_first_call": "Call the owner (first contact)",
+    "buyer_handoff": "Buyer conversation - a person takes over", "buyer_followup": "Buyer follow-up",
 }
 OUTCOME_STATUS = {"complete": "complete", "unable_to_verify": "unable_to_verify",
                   "needs_more_info": "needs_more_info", "escalate": "escalated"}

@@ -216,7 +216,7 @@ ORG_SETTINGS_READ = "/org-settings"          # read-only, the shell reads the br
 # hunts and strategies, paid lookups and skip tracing, sending, buyers,
 # funding, settings, provider controls, imports, team admin, exports.
 FIELD_BLOCKED_PREFIXES = (
-    "/wholesale/skip-trace", "/wholesale/contact-lookup", "/wholesale/buyers",
+    "/wholesale/skip-trace", "/wholesale/contact-lookup", "/wholesale/buyers", "/wholesale/buyer-intel",
     "/wholesale/funding", "/wholesale/settings", "/wholesale/sms", "/wholesale/ops/pilot",
     "/wholesale/evosense/strategies", "/wholesale/evosense/strategy-starters",
     "/wholesale/evosense/provider", "/wholesale/evosense/providers", "/wholesale/evosense/controls",

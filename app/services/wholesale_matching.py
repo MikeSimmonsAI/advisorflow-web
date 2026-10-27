@@ -33,6 +33,17 @@ from typing import Any, Dict, List, Optional, Sequence
 from app.services import wholesale_geo as geo_module
 from app.services.wholesale_analysis import money
 
+# The score is reproducible: the same deal, property and buy box always give
+# the same number, and every stored match carries this version so a change to
+# the rules is never mistaken for a change in the buyer.
+#   v1  unknown property facts counted as a miss
+#   v2  (2026-10-27, owner rule) an UNKNOWN property fact is neither a match nor
+#       a miss: it leaves the fraction and is listed as missing information.
+#       Strategy is shown, not scored (a property carries no strategy). New
+#       criteria: exclusions (a hard no), asset class, zoning, utilities,
+#       occupancy, cap rate and NOI - scored only when the property has the fact.
+VERSION = "buyer_match/v2"
+
 # Weights. Geography and price dominate because they are the two things a cash
 # buyer is actually strict about; the rest refine the ranking.
 WEIGHTS = {
@@ -49,6 +60,12 @@ WEIGHTS = {
     "acres": 6,
     "units": 6,
     "building_sqft": 6,
+    "asset_class": 4,
+    "zoning": 4,
+    "utilities": 3,
+    "occupancy": 4,
+    "cap_rate": 5,
+    "noi": 4,
 }
 
 # How much work a buyer will take on, as an ordered scale. A buyer who tolerates
@@ -116,15 +133,23 @@ def score_buy_box(deal: Any, prop: Any, box: Any,
     Returns {"score", "factors", "disqualified", "disqualified_reason"}.
     """
     factors: List[Dict[str, Any]] = []
+    missing: List[str] = []
     earned = 0
     available = 0
 
     def add(dimension: str, matched: Optional[bool], detail: str,
-            weight: Optional[int] = None, partial: float = 1.0):
-        """Record a dimension. `matched=None` means the box does not constrain
-        it, so it contributes to neither side of the fraction."""
+            weight: Optional[int] = None, partial: float = 1.0, unknown: bool = False):
+        """Record a dimension. `matched=None` means it contributes to neither
+        side of the fraction: either the box does not constrain it, or
+        (`unknown=True`) the box does but the property's fact is not on record -
+        then it is listed as missing information, never counted as a miss."""
         nonlocal earned, available
         w = WEIGHTS[dimension] if weight is None else weight
+        if unknown:
+            missing.append(detail)
+            factors.append({"dimension": dimension, "matched": None, "unknown": True,
+                            "weight": 0, "detail": detail})
+            return
         if matched is None:
             factors.append({"dimension": dimension, "matched": None,
                             "weight": 0, "detail": detail})
@@ -173,6 +198,8 @@ def score_buy_box(deal: Any, prop: Any, box: Any,
     }, prop)
     if geo["verdict"] == "unconstrained":
         add("geography", None, geo["detail"])
+    elif geo["verdict"] == "unknown":
+        add("geography", None, geo["detail"], unknown=True)
     else:
         add("geography", geo["verdict"] == "match", geo["detail"])
     geo_disqualified = geo["verdict"] == "outside"
@@ -184,8 +211,7 @@ def score_buy_box(deal: Any, prop: Any, box: Any,
     if min_price is None and max_price is None:
         add("price", None, "This buy box names no price range.")
     elif price is None:
-        add("price", False, "The buy box has a price range but this deal has no "
-                            "price yet, so it cannot be checked.")
+        add("price", None, "No price yet - the buy box price range cannot be checked.", unknown=True)
     else:
         below = min_price is not None and price < min_price
         above = max_price is not None and price > max_price
@@ -209,7 +235,7 @@ def score_buy_box(deal: Any, prop: Any, box: Any,
     if not types:
         add("property_type", None, "This buy box names no property types.")
     elif not keys:
-        add("property_type", False, "The property has no type on file.")
+        add("property_type", None, "The property has no type on file.", unknown=True)
     else:
         hit = sorted(set(types) & keys)
         label = _label(category or _norm(getattr(prop, "property_type", None)) or sorted(keys)[0])
@@ -221,10 +247,9 @@ def score_buy_box(deal: Any, prop: Any, box: Any,
     if not strategies:
         add("strategy", None, "This buy box names no strategy.")
     else:
-        add("strategy", True, "Buyer strategy: %s. Recorded for context — a deal "
-            "does not carry a strategy of its own."
-            % ", ".join(_label(s) for s in strategies),
-            weight=WEIGHTS["strategy"], partial=1.0)
+        add("strategy", None, "Buyer strategy: %s. Shown for context, not scored - a "
+            "property does not carry a strategy of its own."
+            % ", ".join(_label(s) for s in strategies))
 
     # ── Size and age ────────────────────────────────────────────────────────
     _range_factor(add, "beds", getattr(box, "min_beds", None), getattr(box, "max_beds", None),
@@ -243,9 +268,8 @@ def score_buy_box(deal: Any, prop: Any, box: Any,
                   getattr(prop, "unit_count", None), "units")
     _range_factor(add, "building_sqft", getattr(box, "min_building_sqft", None),
                   getattr(box, "max_building_sqft", None), getattr(prop, "building_sqft", None), "building area")
-    if getattr(box, "min_cap_rate", None) is not None:
-        add("property_type", None, "Wants a cap rate of %s%% or better - compare with the property's income "
-            "analysis (not scored: a deal carries no verified cap rate of its own)." % money(box.min_cap_rate))
+    crit = _criteria(box)
+    _income_and_land_factors(add, box, crit, prop)
 
     # ── Rehab tolerance ─────────────────────────────────────────────────────
     tolerance = _norm(getattr(box, "rehab_tolerance", None))
@@ -254,8 +278,8 @@ def score_buy_box(deal: Any, prop: Any, box: Any,
     if not tolerance:
         add("rehab", None, "This buy box names no rehab tolerance.")
     elif implied is None:
-        add("rehab", False, "The buy box tolerates %s work, but this deal has no "
-            "ARV and repair estimate to imply a rehab level." % tolerance)
+        add("rehab", None, "The buy box tolerates %s work; no ARV and repair estimate yet, so the "
+            "rehab level is unknown." % tolerance, unknown=True)
     else:
         ok = REHAB_SCALE.get(implied, 99) <= REHAB_SCALE.get(tolerance, 0)
         add("rehab", ok, "Repairs imply %s work; the buyer tolerates up to %s."
@@ -269,18 +293,21 @@ def score_buy_box(deal: Any, prop: Any, box: Any,
         arv = money(getattr(deal, "arv", None))
         repairs = money(getattr(deal, "repair_estimate", None)) or Decimal(0)
         if arv is None or price is None:
-            add("spread", False, "The buy box requires a %s spread, but this deal "
-                "has no ARV and price to measure one." % float(min_spread))
+            add("spread", None, "The buy box requires a %s spread; no ARV and price yet to "
+                "measure one." % float(min_spread), unknown=True)
         else:
             spread = arv - price - repairs
             add("spread", spread >= min_spread,
                 "Buyer spread at this price is %s against a %s minimum."
                 % (float(spread), float(min_spread)))
 
+    excluded = _exclusion(crit, prop)
     score = int(round(100 * earned / available)) if available else 0
 
     disqualified_reason = None
-    if geo_disqualified:
+    if excluded:
+        disqualified_reason = excluded
+    elif geo_disqualified:
         disqualified_reason = "The property is outside this buyer's stated geography."
     elif price_disqualified:
         disqualified_reason = "The price is outside this buyer's stated range."
@@ -290,7 +317,9 @@ def score_buy_box(deal: Any, prop: Any, box: Any,
     return {"score": score, "factors": factors,
             "disqualified": disqualified_reason is not None,
             "disqualified_reason": disqualified_reason,
-            "points_earned": earned, "points_available": available}
+            "points_earned": earned, "points_available": available,
+            "missing": missing, "checked": sum(1 for f in factors if f.get("matched") is not None),
+            "version": VERSION}
 
 
 def _property_type_keys(prop: Any) -> set:
@@ -323,8 +352,8 @@ def _range_factor(add, dimension: str, minimum: Any, maximum: Any,
         add(dimension, None, "This buy box names no %s range." % label)
         return
     if val is None:
-        add(dimension, False, "The buy box constrains %s but the property has none "
-            "on file." % label)
+        add(dimension, None, "The buy box constrains %s but the property has none "
+            "on file." % label, unknown=True)
         return
     below = lo is not None and val < lo
     above = hi is not None and val > hi
@@ -333,6 +362,106 @@ def _range_factor(add, dimension: str, minimum: Any, maximum: Any,
     else:
         add(dimension, False, "%s %s is %s the buy box range."
             % (label.title(), val, "below" if below else "above"))
+
+
+def _criteria(box: Any) -> Dict[str, Any]:
+    raw = getattr(box, "criteria", None)
+    if isinstance(raw, dict):
+        return raw
+    try:
+        v = json.loads(raw) if raw else {}
+    except (ValueError, TypeError):
+        return {}
+    return v if isinstance(v, dict) else {}
+
+
+def _fact(prop: Any, key: str) -> Any:
+    """A property fact from its column, or from its type-specific facts
+    (EvoSense `type_facts`: {key: {value, source}})."""
+    v = getattr(prop, key, None)
+    if v not in (None, ""):
+        return v
+    tf = getattr(prop, "type_facts", None)
+    if tf:
+        try:
+            d = json.loads(tf) if isinstance(tf, str) else tf
+            e = (d or {}).get(key)
+            if isinstance(e, dict):
+                return e.get("value")
+            return e
+        except (ValueError, TypeError, AttributeError):
+            return None
+    return None
+
+
+def _income_and_land_factors(add, box: Any, crit: Dict[str, Any], prop: Any) -> None:
+    """Multifamily / commercial / land criteria. Each is scored only when the
+    buy box asks for it AND the property has the fact; otherwise it is either
+    unconstrained or listed as missing."""
+    classes = _list(crit.get("asset_classes"))
+    if classes:
+        grade = _norm(_fact(prop, "property_class_grade") or _fact(prop, "asset_class"))[:1]
+        if not grade:
+            add("asset_class", None, "Wants class %s; the property's building class is not on record."
+                % "/".join(c.upper() for c in classes), unknown=True)
+        else:
+            add("asset_class", grade in [c[:1] for c in classes],
+                "Building class %s; the buyer wants %s." % (grade.upper(), "/".join(c.upper() for c in classes)))
+    zoning = _list(crit.get("zoning"))
+    if zoning:
+        z = _norm(_fact(prop, "zoning"))
+        if not z:
+            add("zoning", None, "Wants zoning %s; the property's zoning is not on record." % ", ".join(zoning),
+                unknown=True)
+        else:
+            add("zoning", any(w in z for w in zoning), "Zoning %s; the buyer wants %s." % (z, ", ".join(zoning)))
+    if crit.get("utilities_required"):
+        u = _norm(_fact(prop, "utilities"))
+        if not u:
+            add("utilities", None, "Needs utilities on site; not on record for this property.", unknown=True)
+        else:
+            ok = not any(w in u for w in ("none", "no ", "not available", "unavailable"))
+            add("utilities", ok, "Utilities: %s." % u)
+    occ = money(crit.get("min_occupancy"))
+    if occ is not None:
+        o = money(_fact(prop, "occupancy_pct"))
+        if o is None:
+            add("occupancy", None, "Wants %s%% occupancy or better; occupancy is not on record." % occ, unknown=True)
+        else:
+            add("occupancy", o >= occ, "Occupancy %s%% against a %s%% minimum." % (o, occ))
+    cap = money(getattr(box, "min_cap_rate", None))
+    if cap is not None:
+        c = money(_fact(prop, "cap_rate"))
+        if c is None:
+            add("cap_rate", None, "Wants a %s%% cap rate or better; no supported cap rate for this property."
+                % cap, unknown=True)
+        else:
+            add("cap_rate", c >= cap, "Cap rate %s%% against a %s%% minimum (as recorded on the property)." % (c, cap))
+    noi = money(crit.get("min_noi"))
+    if noi is not None:
+        n = money(_fact(prop, "noi"))
+        if n is None:
+            add("noi", None, "Wants NOI of %s or more; no supported NOI for this property." % float(noi), unknown=True)
+        else:
+            add("noi", n >= noi, "NOI %s against a %s minimum (as recorded)." % (float(n), float(noi)))
+
+
+def _exclusion(crit: Dict[str, Any], prop: Any) -> Optional[str]:
+    """A buyer's stated exclusions are a hard no, like a price range."""
+    ex = crit.get("exclusions") or {}
+    if not isinstance(ex, dict):
+        return None
+    z = (str(getattr(prop, "zip_code", "") or "").strip())[:5]
+    if z and z in [str(v)[:5] for v in (ex.get("zips") or [])]:
+        return "This buyer excludes ZIP %s." % z
+    cty = geo_module.normalize_place(getattr(prop, "county", None))[0]
+    if cty and cty in [geo_module.normalize_place(c)[0] for c in (ex.get("counties") or [])]:
+        return "This buyer excludes %s County." % _label(cty)
+    keys = _property_type_keys(prop)
+    hit = keys & set(_list(ex.get("property_types")))
+    if hit:
+        return "This buyer excludes %s properties." % _label(sorted(hit)[0])
+    return None
 
 
 def match_deal_to_buyers(deal: Any, prop: Any, buyers: Sequence[Any],
@@ -356,6 +485,10 @@ def match_deal_to_buyers(deal: Any, prop: Any, buyers: Sequence[Any],
         if not getattr(buyer, "is_active", True):
             continue
         if getattr(buyer, "do_not_contact", False):
+            continue
+        # Another LLC of an investor already in the list: the investor is
+        # matched once, on their own record (Buyer Intelligence, #413).
+        if getattr(buyer, "linked_to_buyer_id", None):
             continue
         boxes = [b for b in (getattr(buyer, "buy_boxes", None) or [])
                  if getattr(b, "is_active", True)]
