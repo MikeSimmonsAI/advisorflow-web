@@ -336,8 +336,6 @@ def match_candidates(q: Optional[str] = Query(None, max_length=80), include_test
                                  WholesaleProperty.city.ilike(like)))
         evo = evo.filter(or_(EvoSenseProperty.street_address.ilike(like), EvoSenseProperty.zip_code.ilike(like),
                              EvoSenseProperty.city.ilike(like)))
-    else:
-        evo = evo.filter(EvoSenseProperty.work_priority.in_(("CRITICAL", "REVIEW_URGENT", "HIGH")))
     evo = evo.order_by(EvoSenseProperty.work_priority_rank.asc().nullslast(),
                        EvoSenseProperty.opportunity_score.desc().nullslast()).limit(25).all()
     out = [{"type": "deal", "id": d.id, "label": ", ".join(x for x in (p.street_address, p.city, p.zip_code) if x),
