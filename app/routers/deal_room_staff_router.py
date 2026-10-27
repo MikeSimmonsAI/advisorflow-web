@@ -178,9 +178,7 @@ def edit_listing(listing_id: str, payload: Dict[str, Any] = Body(...), db: Sessi
     return DR.listing_json(db, lst)
 
 
-@router.post("/listings/{listing_id}/{action}")
-def listing_action(listing_id: str, action: str, db: Session = Depends(get_db),
-                   user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+def listing_action(listing_id: str, action: str, db: Session, user: User):
     org_id = svc.write_org_id(db, user)
     lst = DR.transition(db, org_id, _listing(db, org_id, listing_id), action, user)
     if action == "publish" and lst.notify_on_publish:
@@ -191,6 +189,18 @@ def listing_action(listing_id: str, action: str, db: Session = Depends(get_db),
                deal_id=lst.deal_id)
     db.commit()
     return DR.listing_json(db, lst)
+
+
+def _listing_route(action: str):
+    def handler(listing_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                _g: User = Depends(require_not_observation)):
+        return listing_action(listing_id, action, db, user)
+    handler.__name__ = "listing_%s" % action
+    router.add_api_route("/listings/{listing_id}/%s" % action, handler, methods=["POST"])
+
+
+for _action in DR.TRANSITIONS:          # approve / publish / withdraw / close / redraft - one route each
+    _listing_route(_action)
 
 
 @router.get("/listings/{listing_id}/audience")
@@ -312,6 +322,9 @@ def review(file_id: str, payload: Dict[str, Any] = Body(...), db: Session = Depe
 @router.get("/buyers/{buyer_id}/files")
 def buyer_files(buyer_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     org_id = _read(db, user)
+    if db.query(WholesaleBuyer.id).filter(WholesaleBuyer.id == buyer_id,
+                                          WholesaleBuyer.organization_id == org_id).first() is None:
+        raise HTTPException(status_code=404, detail="Buyer not found")
     rows = db.query(WholesaleFile).filter(WholesaleFile.organization_id == org_id, WholesaleFile.buyer_id == buyer_id
                                           ).order_by(WholesaleFile.created_at.desc()).all()
     return {"files": [DR.file_json(f) for f in rows]}

@@ -1224,6 +1224,8 @@ from app.routers.deal_room_staff_router import router as deal_room_staff_router 
 app.include_router(deal_room_public_router)     # /investor/invite/*, /investor/auth/login - Deal Room (#415)
 app.include_router(deal_room_investor_router)   # /investor/* - investors only (fenced in deps)
 app.include_router(deal_room_staff_router)      # /wholesale/deal-room/* - staff
+from app.routers.wholesale_intel_router import router as wholesale_intel_router  # noqa: E402
+app.include_router(wholesale_intel_router)       # /wholesale/intel/* - verification, underwriting, report (#415)
 from app.routers.wholesale_canvass_router import router as wholesale_canvass_router  # noqa: E402
 app.include_router(wholesale_canvass_router)   # /wholesale/canvass - door-knocking routes
 from app.routers.wholesale_team_router import router as wholesale_team_router  # noqa: E402

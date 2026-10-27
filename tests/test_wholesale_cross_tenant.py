@@ -357,7 +357,37 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
         "bi_conv_id": ok(client.post("/wholesale/buyer-intel/buyers/%s/qualify" % an_id(buyer, "buyer"),
                                      headers=auth_headers, json={"mode": "recorded"}))["id"],
         "bi_entity_id": _bi_entity(db_session, sample_org.id, an_id(buyer, "buyer")),
+        # Deal Room + Shared Intelligence (#415)
+        **_deal_room_ids(db_session, sample_org.id, deal_id, an_id(buyer, "buyer"), sample_advisor),
     }
+
+
+def _deal_room_ids(db, org_id, deal_id, buyer_id, advisor):
+    from datetime import datetime, timedelta
+
+    from app.models.esign_models import EsignEnvelope
+    from app.models.evosense_models import EvoSenseProperty
+    from app.models.wholesale_buyer_engine_models import WholesaleBuyerConversation
+    from app.models.wholesale_investor_models import DealListing, ExclusiveHold, InvestorAccount, InvestorInvite
+    inv = InvestorInvite(organization_id=org_id, name="Victim Investor", email="victim@practice.invalid",
+                         expires_at=datetime.utcnow() + timedelta(days=7), is_test=True)
+    acct = InvestorAccount(organization_id=org_id, user_id=advisor.id, buyer_id=buyer_id)
+    lst = DealListing(organization_id=org_id, deal_id=deal_id)
+    db.add_all([inv, acct, lst])
+    db.flush()
+    hold = ExclusiveHold(organization_id=org_id, listing_id=lst.id, deal_id=deal_id, buyer_id=buyer_id,
+                         status="requested")
+    conv = WholesaleBuyerConversation(organization_id=org_id, buyer_id=buyer_id, kind="concierge")
+    env = EsignEnvelope(organization_id=org_id, title="Victim envelope", document_html="<p>x</p>",
+                        document_sha256="0" * 64)
+    evo = EvoSenseProperty(organization_id=org_id, street_address="3 Victim Intel St", city="Dallas", state="TX",
+                           is_test=True, status="new")
+    db.add_all([hold, conv, env, evo])
+    db.flush()
+    db.commit()
+    return {"dr_invite_id": inv.id, "dr_account_id": acct.id, "dr_listing_id": lst.id, "dr_hold_id": hold.id,
+            "dr_thread_id": conv.id, "dr_envelope_id": env.id,
+            "intel_evo_id": evo.id}
 
 
 def _bi_entity(db_session, org_id, buyer_id):
@@ -518,6 +548,39 @@ def attacks(ids):
         ("post", "/wholesale/buyer-intel/conversations/%s/note" % ids["bi_conv_id"], {"text": "planted"}),
         ("post", "/wholesale/buyer-intel/conversations/%s/followup" % ids["bi_conv_id"], {}),
         ("post", "/wholesale/buyer-intel/conversations/%s/schedule" % ids["bi_conv_id"], {"kind": "call"}),
+
+        # ── Deal Room (#415): invites, accounts, listings, holds, threads, files, e-sign ──
+        ("post", "/wholesale/deal-room/invites/%s/resend" % ids["dr_invite_id"], {}),
+        ("post", "/wholesale/deal-room/invites/%s/revoke" % ids["dr_invite_id"], {}),
+        ("get", "/wholesale/deal-room/buyers/%s" % ids["buyer_id"], None),
+        ("post", "/wholesale/deal-room/accounts/%s/status" % ids["dr_account_id"], {"status": "suspended"}),
+        ("post", "/wholesale/deal-room/deals/%s/listing" % ids["deal_id"], {}),
+        ("patch", "/wholesale/deal-room/listings/%s" % ids["dr_listing_id"], {"audience": "all"}),
+        ("post", "/wholesale/deal-room/listings/%s/approve" % ids["dr_listing_id"], {}),
+        ("post", "/wholesale/deal-room/listings/%s/publish" % ids["dr_listing_id"], {}),
+        ("post", "/wholesale/deal-room/listings/%s/withdraw" % ids["dr_listing_id"], {}),
+        ("post", "/wholesale/deal-room/listings/%s/close" % ids["dr_listing_id"], {}),
+        ("post", "/wholesale/deal-room/listings/%s/redraft" % ids["dr_listing_id"], {}),
+        ("get", "/wholesale/deal-room/listings/%s/audience" % ids["dr_listing_id"], None),
+        ("post", "/wholesale/deal-room/holds/%s" % ids["dr_hold_id"], {"decision": "approve", "preset": "24h"}),
+        ("get", "/wholesale/deal-room/threads/%s" % ids["dr_thread_id"], None),
+        ("post", "/wholesale/deal-room/threads/%s/reply" % ids["dr_thread_id"], {"text": "planted"}),
+        ("post", "/wholesale/deal-room/threads/%s/note" % ids["dr_thread_id"], {"text": "planted"}),
+        ("post", "/wholesale/deal-room/threads/%s/takeover" % ids["dr_thread_id"], {}),
+        ("post", "/wholesale/deal-room/threads/%s/return-to-ai" % ids["dr_thread_id"], {}),
+        ("get", "/wholesale/deal-room/files/%s" % ids["file_id"], None),
+        ("post", "/wholesale/deal-room/files/%s/review" % ids["file_id"], {"status": "accepted"}),
+        ("get", "/wholesale/deal-room/buyers/%s/files" % ids["buyer_id"], None),
+        ("post", "/wholesale/deal-room/buyers/%s/files" % ids["buyer_id"], {"file_id": ids["file_id"]}),
+        ("post", "/wholesale/deal-room/envelopes/%s/staff-session" % ids["dr_envelope_id"], {}),
+        # ── Shared intelligence (#415): verification, underwriting, reports ──
+        ("get", "/wholesale/intel/property/%s/verification" % ids["intel_evo_id"], None),
+        ("get", "/wholesale/intel/buyer/%s/verification" % ids["buyer_id"], None),
+        ("get", "/wholesale/intel/evosense/%s/underwriting" % ids["intel_evo_id"], None),
+        ("get", "/wholesale/intel/deal/%s/underwriting" % ids["deal_id"], None),
+        ("get", "/wholesale/intel/evosense/%s/report" % ids["intel_evo_id"], None),
+        ("get", "/wholesale/intel/deal/%s/report" % ids["deal_id"], None),
+        ("get", "/wholesale/intel/deal/%s/investor-report" % ids["deal_id"], None),
 
         # Deleting somebody else's buyer takes their disposition list with it.
         ("delete", "/wholesale/buyers/%s" % ids["buyer_id"], None),

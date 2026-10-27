@@ -46,7 +46,7 @@ SEGMENTS = [("all", "All buyers"), ("single_family", "Single-family"), ("multifa
             ("land", "Land"), ("commercial", "Commercial"), ("industrial", "Industrial"),
             ("mixed_use", "Mixed-use"), ("portfolio", "Portfolio"), ("other", "Other")]
 SEGMENT_KEYS = [k for k, _ in SEGMENTS]
-UNIT_BANDS = [("u5_19", "5–19 units", 5, 19), ("u20_49", "20–49 units", 20, 49),
+UNIT_BANDS = [("u2_4", "2–4 units", 2, 4), ("u5_19", "5–19 units", 5, 19), ("u20_49", "20–49 units", 20, 49),
               ("u50_99", "50–99 units", 50, 99), ("u100_199", "100–199 units", 100, 199),
               ("u200_299", "200–299 units", 200, 299), ("u300p", "300+ units", 300, None)]
 SUBSEGMENTS: Dict[str, List[tuple]] = {
@@ -197,7 +197,8 @@ def box_segments(box: Any) -> Dict[str, set]:
     lo_u, hi_u = _num(getattr(box, "min_units", None)), _num(getattr(box, "max_units", None))
     if lo_u is not None or hi_u is not None:
         out.setdefault("multifamily", set())
-        lo_u = lo_u if lo_u is not None else 5
+        # an open minimum starts at 5 units, unless the box tops out below that (a 2-4 unit buyer)
+        lo_u = lo_u if lo_u is not None else (2 if hi_u is not None and hi_u < 5 else 5)
         hi_u = hi_u if hi_u is not None else float("inf")
         for key, _label, b_lo, b_hi in UNIT_BANDS:
             if lo_u <= (b_hi if b_hi is not None else float("inf")) and hi_u >= b_lo:
