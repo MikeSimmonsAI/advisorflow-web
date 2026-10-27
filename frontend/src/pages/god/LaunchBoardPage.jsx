@@ -126,12 +126,12 @@ export default function LaunchBoardPage () {
         </Card>
       ) : null}
       {data && data.available ? (
-        <div className="gk-kpis" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
-          <Kpi label="Working (released)" value={working} sub="projects whose latest merge is live" />
-          <Kpi label="Being built" value={s.being_built} sub="open pull requests" />
-          <Kpi label="Blocked" value={s.blocked} tone={s.blocked ? 'red' : undefined} sub="failing checks" />
-          <Kpi label="Needs your decision" value={s.needs_owner} tone={s.needs_owner ? 'amber' : undefined} sub="redesign drafts awaiting approval" />
-          <Kpi label="Released recently" value={s.released_recently} sub={`merged and live, last ${data.window_days} days`} />
+        <div className="gk-kpis" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 210px), 1fr))' }}>
+          <Kpi icon="check" color="green" label="Working (released)" value={working} sub="projects whose latest merge is live" />
+          <Kpi icon="rocket" color="blue" label="Being built" value={s.being_built} sub="open pull requests" />
+          <Kpi icon="stop" color="red" label="Blocked" value={s.blocked} tone={s.blocked ? 'red' : undefined} sub="failing checks" />
+          <Kpi icon="alert" color="orange" label="Needs your decision" value={s.needs_owner} tone={s.needs_owner ? 'amber' : undefined} sub="redesign drafts awaiting approval" />
+          <Kpi icon="flag" color="purple" label="Released recently" value={s.released_recently} sub={`merged and live, last ${data.window_days} days`} />
         </div>
       ) : null}
       {data ? (

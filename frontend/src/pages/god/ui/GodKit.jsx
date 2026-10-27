@@ -13,14 +13,14 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import './godKit.css'
 
-export function Page ({ eyebrow, title, sub, actions, children }) {
+export function Page ({ eyebrow, title, sub, actions, children, hero }) {
   return (
     <div className="gm-scope" style={{ minHeight: '100%' }}>
       <div className="gk-page">
         <div className="gk-head">
           <div>
-            {eyebrow ? <div className="gk-eyebrow">{eyebrow}</div> : null}
-            <h1 className="gk-title">{title}</h1>
+            {eyebrow ? <div className={`gk-eyebrow ${hero ? 'gk-eyebrow--god' : ''}`}>{eyebrow}</div> : null}
+            <h1 className={`gk-title ${hero ? 'gk-title--xl' : ''}`}>{title}</h1>
             {sub ? <p className="gk-sub">{sub}</p> : null}
           </div>
           {actions ? <div className="gk-actions">{actions}</div> : null}
@@ -48,19 +48,33 @@ export function Card ({ title, note, action, children, style, className = '' }) 
   )
 }
 
-export function Kpi ({ label, value, sub, onClick, tone }) {
-  const body = (
+export function Kpi ({ label, value, sub, onClick, tone, icon, color }) {
+  const wordy = typeof value === 'string' && !/^[\d$,.\s/+%-]+$/.test(value)
+  const val = (
+    <span className={`gk-kpi-value ${wordy ? 'gk-kpi-value--word' : ''}`} style={tone ? { color: `var(--gm-${tone})` } : undefined}>
+      {value === null || value === undefined || value === '' ? '—' : value}
+    </span>
+  )
+  const body = icon ? (
+    <>
+      <IconTile name={icon} color={color} />
+      <span className="gk-kpi-text">
+        <span className="gk-kpi-label gk-kpi-label--plain">{label}</span>
+        {val}
+        {sub ? <span className="gk-kpi-sub">{sub}</span> : null}
+      </span>
+    </>
+  ) : (
     <>
       <span className="gk-kpi-label">{label}</span>
-      <span className="gk-kpi-value" style={tone ? { color: `var(--gm-${tone})` } : undefined}>
-        {value === null || value === undefined || value === '' ? '—' : value}
-      </span>
+      {val}
       {sub ? <span className="gk-kpi-sub">{sub}</span> : null}
     </>
   )
+  const cls = `gk-card gk-kpi ${icon ? 'gk-kpi--icon' : ''}`
   return onClick
-    ? <button type="button" className="gk-card gk-kpi" onClick={onClick}>{body}</button>
-    : <div className="gk-card gk-kpi">{body}</div>
+    ? <button type="button" className={cls} onClick={onClick}>{body}</button>
+    : <div className={cls}>{body}</div>
 }
 
 const PILL = {
@@ -117,9 +131,31 @@ function ago (iso) {
 export { ago }
 
 /** A ranked list of things that need the owner, each with one action. */
-export function ActionQueue ({ items, limit, onAction, empty = 'Nothing needs you right now.' }) {
+export function ActionQueue ({ items, limit, onAction, empty = 'Nothing needs you right now.', compact }) {
   const shown = limit ? items.slice(0, limit) : items
   if (!shown.length) return <Empty>{empty}</Empty>
+  if (compact) {
+    return (
+      <ul className="gk-list gk-attn">
+        {shown.map(x => {
+          const href = x.to && !x.to.startsWith('#') && !x.org ? x.to : undefined
+          return (
+            <li key={x.id} className="gk-attn-row">
+              <span className={`gk-sev gk-sev--${x.sev || 'info'}`} aria-label={`Severity ${x.sev || 'info'}`} />
+              <div className="gk-row-main">
+                <div className="gk-attn-title">{x.title}</div>
+                {x.detail ? <div className="gk-attn-sub" title={x.detail}>{x.detail}</div> : null}
+              </div>
+              {href
+                ? <Link className="gk-viewlink" to={href} title={x.action || 'View'}>View <Icon name="arrowRight" size={14} /></Link>
+                : <button type="button" className="gk-viewlink" title={x.action || 'View'}
+                    onClick={onAction ? () => onAction(x) : undefined}>View <Icon name="arrowRight" size={14} /></button>}
+            </li>
+          )
+        })}
+      </ul>
+    )
+  }
   return (
     <ul className="gk-list">
       {shown.map(x => (
@@ -227,6 +263,23 @@ const ICON_PATHS = {
   shield: 'M12 3l8 3v6c0 4.5-3.3 7.6-8 9-4.7-1.4-8-4.5-8-9V6z',
   arrow: 'M9 6l6 6-6 6',
   check: 'M5 12l5 5 9-10',
+  arrowRight: 'M5 12h14M13 6l6 6-6 6',
+  chart: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
+  calendar: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
+  pulse: 'M3 12h4l3-7 4 14 3-7h4',
+  users: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M17 3.5a4 4 0 0 1 0 7.5M22 21a7 7 0 0 0-4-6.3',
+  rocket: 'M5 15c-1.5 1.5-2 5-2 5s3.5-.5 5-2M14 4c3-1 6-1 6-1s0 3-1 6l-6 6-5-5zM9 10l-4 1-2 3 4 1M14 15l-1 4-3 2-1-4M15 9h.01',
+  plug: 'M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5',
+  file: 'M6 3h9l4 4v14H6zM14 3v5h5M9 13h6M9 17h6',
+  bolt: 'M13 2 4 14h7l-1 8 9-12h-7z',
+  server: 'M4 4h16v6H4zM4 14h16v6H4zM8 7h.01M8 17h.01',
+  alert: 'M12 3 2 20h20zM12 10v4M12 17h.01',
+  clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2',
+  crown: 'M3 8l4 4 5-7 5 7 4-4-2 11H5z',
+  heart: 'M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z',
+  home: 'M3 11l9-7 9 7M5 10v10h14V10M10 20v-6h4v6',
+  exit: 'M10 17l-5-5 5-5M5 12h12M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4',
+  grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
 }
 
 export function Icon ({ name, size = 18 }) {
@@ -238,15 +291,29 @@ export function Icon ({ name, size = 18 }) {
   )
 }
 
+/** A solid colour square with a white glyph — the mockup's icon tile. */
+export function IconTile ({ name, color = 'blue', size = 'md' }) {
+  return (
+    <span className={`gk-ictile gk-ictile--${size}`} aria-hidden="true"
+      style={{ '--ic': `var(--gm-ic-${color})` }}>
+      <Icon name={name} size={size === 'lg' ? 24 : size === 'sm' ? 15 : 20} />
+    </span>
+  )
+}
+
 /** A titled group on a page — a heading, not another box around boxes. */
-export function Section ({ title, sub, action, children, id }) {
+export function Section ({ title, sub, action, children, id, icon }) {
   return (
     <section className="gk-section" id={id} aria-label={typeof title === 'string' ? title : undefined}>
       {(title || action) && (
         <div className="gk-section-head">
           <div>
-            {title ? <h2 className="gk-section-title">{title}</h2> : null}
-            {sub ? <p className="gk-section-sub">{sub}</p> : null}
+            {title ? <h2 className="gk-section-title">
+              {icon ? <span className="gk-section-icon"><Icon name={icon} size={18} /></span> : null}
+              {title}
+              {sub && icon ? <span className="gk-section-inline">{sub}</span> : null}
+            </h2> : null}
+            {sub && !icon ? <p className="gk-section-sub">{sub}</p> : null}
           </div>
           {action || null}
         </div>
@@ -259,17 +326,34 @@ export function Section ({ title, sub, action, children, id }) {
 /** A compact row of summary numbers (2–4). Same "—" rule as Kpi. */
 export function Strip ({ items, cols }) {
   return (
-    <div className={`gk-strip ${cols === 5 ? 'gk-strip--5' : ''}`}>
+    <div className={`gk-strip ${cols ? `gk-strip--${cols}` : ''}`}>
       {items.map(k => <Kpi key={k.label} {...k} />)}
     </div>
   )
 }
 
-/** A destination card: icon, what it is for, and a live status if one is known. */
-export function ToolCard ({ icon, title, description, status, meta, to }) {
+/** A destination card: icon, what it is for, and a live status if one is known.
+ *  With `cta`, the mockup's tile: icon square, name, one line, then a tinted
+ *  "Open …" button across the bottom. */
+export function ToolCard ({ icon, title, description, status, meta, to, color, cta }) {
+  if (cta) {
+    return (
+      <Link to={to} className="gk-card gk-tool gk-tool--tile" style={{ '--ic': `var(--gm-ic-${color || 'blue'})`, '--ic-wash': `var(--gm-ic-${color || 'blue'}-wash)` }}>
+        <span className="gk-tool-row">
+          <IconTile name={icon} color={color || 'blue'} />
+          <span className="gk-tool-body">
+            <span className="gk-tool-title" style={{ display: 'block' }}>{title}</span>
+            {description ? <span className="gk-tool-desc" style={{ display: 'block' }}>{description}</span> : null}
+          </span>
+        </span>
+        {status ? <span className="gk-tool-foot" style={{ marginTop: 0 }}><Pill tone={status.tone}>{status.label}</Pill></span> : null}
+        <span className="gk-tool-cta"><span>{cta}</span><Icon name="arrowRight" size={15} /></span>
+      </Link>
+    )
+  }
   return (
     <Link to={to} className="gk-card gk-tool">
-      <span className="gk-tool-icon"><Icon name={icon} /></span>
+      {color ? <IconTile name={icon} color={color} /> : <span className="gk-tool-icon"><Icon name={icon} /></span>}
       <span className="gk-tool-body">
         <span className="gk-tool-title" style={{ display: 'block' }}>{title}</span>
         {description ? <span className="gk-tool-desc" style={{ display: 'block' }}>{description}</span> : null}
@@ -288,16 +372,16 @@ export function ToolCard ({ icon, title, description, status, meta, to }) {
 /** Which business an organization IS, from its own industry. Never from a
  *  feature switch (see app/services/program_experience.py). */
 const BUSINESS = {
-  energy: { kind: 'Energy', acc: 'energy' },
-  roofing: { kind: 'Roofing', acc: 'roofing' },
-  funeral: { kind: 'Cemetery & funeral', acc: 'funeral' },
-  cemetery: { kind: 'Cemetery & funeral', acc: 'funeral' },
-  insurance: { kind: 'Insurance', acc: 'insurance' },
-  cleaning: { kind: 'Commercial cleaning', acc: 'cleaning' },
-  real_estate: { kind: 'Real estate', acc: 'wholesale' },
+  energy: { kind: 'Energy', acc: 'energy', icon: 'bolt' },
+  roofing: { kind: 'Roofing', acc: 'roofing', icon: 'shield' },
+  funeral: { kind: 'Cemetery & funeral', acc: 'funeral', icon: 'home' },
+  cemetery: { kind: 'Cemetery & funeral', acc: 'funeral', icon: 'home' },
+  insurance: { kind: 'Insurance', acc: 'insurance', icon: 'shield' },
+  cleaning: { kind: 'Commercial cleaning', acc: 'cleaning', icon: 'building' },
+  real_estate: { kind: 'Real estate', acc: 'wholesale', icon: 'home' },
 }
 export function businessOf (industry) {
-  return BUSINESS[String(industry || '').trim().toLowerCase()] || { kind: 'Business', acc: 'general' }
+  return BUSINESS[String(industry || '').trim().toLowerCase()] || { kind: 'Business', acc: 'general', icon: 'briefcase' }
 }
 export function initialsOf (name) {
   const w = String(name || '').replace(/\(.*?\)/g, '').trim().split(/\s+/).filter(Boolean)
@@ -332,6 +416,26 @@ export function ProgramCard ({ name, industry, kind, pills, facts, actions }) {
   )
 }
 
+/** The mockup's compact program tile: colour square, name, one line of
+ *  real counts, a status pill and a chevron. The whole tile opens the
+ *  organization; `extra` (e.g. the audited Enter button) sits above the
+ *  stretched link so it stays its own control. */
+export function ProgramTile ({ name, industry, line, pill, to, extra }) {
+  const b = businessOf(industry)
+  const style = { '--acc': `var(--gm-acc-${b.acc})`, '--acc-wash': `var(--gm-acc-${b.acc}-wash)` }
+  return (
+    <article className="gk-card gk-ptile" style={style} aria-label={name}>
+      <span className="gk-ptile-mark" aria-hidden="true"><Icon name={b.icon} size={22} /></span>
+      <div className="gk-ptile-body">
+        <Link to={to} className="gk-ptile-name gk-stretch">{name}</Link>
+        <div className="gk-ptile-line">{line || b.kind}</div>
+        <div className="gk-ptile-foot">{pill}{extra}</div>
+      </div>
+      <span className="gk-ptile-chev" aria-hidden="true"><Icon name="arrow" size={16} /></span>
+    </article>
+  )
+}
+
 /** Buttons for the owner's most common moves. */
 export function QuickActions ({ items }) {
   return (
@@ -342,9 +446,42 @@ export function QuickActions ({ items }) {
     </div>
   )
 }
-function ActionLinkBig ({ label, icon, to, onClick, primary, danger }) {
-  const cls = `gk-btn ${primary ? 'gk-btn--primary' : ''} ${danger ? 'gk-btn--danger' : ''}`
-  const inner = <>{icon ? <Icon name={icon} size={16} /> : null}<span>{label}</span></>
+function ActionLinkBig ({ label, icon, to, onClick, primary, danger, color }) {
+  const cls = `gk-btn gk-qbtn ${primary ? 'gk-btn--primary' : ''} ${danger ? 'gk-btn--danger' : ''}`
+  const inner = <>
+    {icon ? <span className="gk-qbtn-ic" style={color ? { color: `var(--gm-ic-${color})` } : undefined}><Icon name={icon} size={18} /></span> : null}
+    <span className="gk-qbtn-label">{label}</span>
+    <span className="gk-qbtn-chev"><Icon name="arrow" size={14} /></span>
+  </>
   if (onClick) return <button type="button" className={cls} onClick={onClick}>{inner}</button>
   return <Link className={cls} to={to}>{inner}</Link>
+}
+
+const STRIP_TONE = { ok: 'good', good: 'good', healthy: 'good', warn: 'warn', warning: 'warn', degraded: 'warn',
+  bad: 'bad', critical: 'bad', red: 'bad', off: 'off', unknown: 'off', no_source: 'off', not_configured: 'off' }
+/** One line of service chips: dot, name, plain status. Each opens its page. */
+export function StatusStrip ({ title, sub, items }) {
+  return (
+    <div className="gk-card gk-sstrip">
+      <div className="gk-sstrip-head">
+        <IconTile name="server" color="slate" size="lg" />
+        <div><div className="gk-card-title">{title}</div>{sub ? <div className="gk-card-note">{sub}</div> : null}</div>
+      </div>
+      <div className="gk-sstrip-items">
+        {items.map(r => {
+          const tone = STRIP_TONE[String(r.status || '').toLowerCase()] || 'off'
+          const body = <>
+            <span className={`gk-sdot gk-sdot--${tone}`} aria-hidden="true" />
+            <span style={{ minWidth: 0 }}>
+              <span className="gk-schip-name">{r.label}</span>
+              <span className={`gk-schip-state gk-schip-state--${tone}`}>{r.statusLabel || r.status || 'Unknown'}</span>
+            </span>
+          </>
+          return r.to
+            ? <Link key={r.key} to={r.to} className="gk-schip" title={r.headline || undefined}>{body}</Link>
+            : <div key={r.key} className="gk-schip" title={r.headline || undefined}>{body}</div>
+        })}
+      </div>
+    </div>
+  )
 }

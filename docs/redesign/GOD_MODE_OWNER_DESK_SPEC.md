@@ -2,6 +2,15 @@
 
 Tracking issue: #411 · Branch: `redesign/god-mode-owner-desk-v1` · Status: **draft, awaiting owner visual review**
 
+## Visual anchor
+The approved mockup is saved as `screenshots/god-mode-owner-desk/approved-mockup.png` (received Oct 27 2026).
+Matched: EvoSys Pro rail with the highlighted God Mode / Owner Desk card, rail shortcuts (Program Access,
+Users & Permissions, Integrations, System Health, Audit Log — links to existing pages, no new routes),
+Quick Links, Exit God Mode; six coloured summary cards; compact program tiles; six tool tiles with
+"Open …" buttons; Needs Your Attention / Quick Actions / Recent Activity side by side; Platform Status strip.
+Not copied on purpose: the search box and notification bell (no real platform-wide search or God
+notification source exists yet), and the mockup's sample numbers — every number is real or says it isn't tracked.
+
 ## What it is
 One look for every God Mode screen, taken from the approved Owner Desk direction:
 light page, compact navy side rail, rounded white cards with soft shadows,

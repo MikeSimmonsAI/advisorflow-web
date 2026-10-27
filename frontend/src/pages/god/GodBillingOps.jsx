@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../api/client';
 import StripeCatalogue from './StripeCatalogue';
-import { Page } from './ui/GodKit';
+import { Page, IconTile } from './ui/GodKit';
 // The brand's OTHER catalogue: recurring add-ons and one-time services. A
 // separate component from StripeCatalogue because they configure two different
 // commercial objects — that one is the subscription tiers, this one is
@@ -105,14 +105,17 @@ function NoSource({ reason }) {
   );
 }
 
-function Tile({ label, value, sub, reason, tone }) {
+function Tile({ label, value, sub, reason, tone, icon, color }) {
   return (
-    <div className="gk-card gk-kpi" style={{ minWidth: 0 }}>
-      <span className="gk-kpi-label">{label}</span>
-      <span className="gk-kpi-value" style={tone ? { color: `var(--gm-${tone})` } : undefined}>
-        {value === null || value === undefined ? <NoSource reason={reason} /> : value}
+    <div className="gk-card gk-kpi gk-kpi--icon" style={{ minWidth: 0 }}>
+      <IconTile name={icon} color={color} />
+      <span className="gk-kpi-text">
+        <span className="gk-kpi-label gk-kpi-label--plain">{label}</span>
+        <span className="gk-kpi-value" style={tone ? { color: `var(--gm-${tone})` } : undefined}>
+          {value === null || value === undefined ? <NoSource reason={reason} /> : value}
+        </span>
+        {sub && <span className="gk-kpi-sub">{sub}</span>}
       </span>
-      {sub && <span className="gk-kpi-sub">{sub}</span>}
     </div>
   );
 }
@@ -356,24 +359,23 @@ export default function GodBillingOps() {
       )}
 
       {/* ── Revenue band ─────────────────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
-                    gap: 14, margin: '4px 0 22px' }}>
-        <Tile label="MRR" reason={mrr?.no_source}
+      <div className="gk-strip gk-strip--6" style={{ margin: '4px 0 22px' }}>
+        <Tile icon="dollar" color="red" label="Monthly revenue (MRR)" reason={mrr?.no_source}
           value={mrr && mrr.value_cents !== null && mrr.value_cents !== undefined
             ? money(mrr.value_cents, mrr.currency) : null}
           sub={mrr?.no_source ? null
             : `${mrr?.priced_organizations ?? 0} of ${mrr?.active_organizations ?? 0} active priced`} />
-        <Tile label="Collected · 30d" reason={collected?.no_source}
+        <Tile icon="chart" color="green" label="Collected · 30 days" reason={collected?.no_source}
           value={collected && collected.value_cents !== null && collected.value_cents !== undefined
             ? money(collected.value_cents, 'usd') : null}
           sub={collected?.no_source ? null
             : `${collected?.payments_counted ?? 0} payments${collected?.refunded_cents
               ? ` · ${money(collected.refunded_cents, 'usd')} refunded` : ''}`} />
-        <Tile label="Active" value={revenue?.active_count ?? 0} sub="subscriptions" />
-        <Tile label="Trialing" value={revenue?.trialing_count ?? 0} sub="not counted in MRR" />
-        <Tile label="Past due" value={revenue?.past_due_count ?? 0} tone={revenue?.past_due_count ? 'red' : undefined}
+        <Tile icon="check" color="blue" label="Active" value={revenue?.active_count ?? 0} sub="subscriptions" />
+        <Tile icon="clock" color="purple" label="Trialing" value={revenue?.trialing_count ?? 0} sub="not counted in MRR" />
+        <Tile icon="alert" color="orange" label="Past due" value={revenue?.past_due_count ?? 0} tone={revenue?.past_due_count ? 'red' : undefined}
           sub={revenue?.past_due_count ? 'needs attention' : 'none'} />
-        <Tile label="Invoices" value={revenue?.invoices_recorded ?? 0} sub="recorded locally" />
+        <Tile icon="file" color="teal" label="Invoices" value={revenue?.invoices_recorded ?? 0} sub="recorded locally" />
       </div>
 
       {/* MRR that is understated because a plan would not price. Named next to

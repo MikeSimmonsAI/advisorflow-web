@@ -111,22 +111,22 @@ export default function GodAIControl () {
 
             <Section title="Status">
               <Strip items={[
-                { label: 'Accounts on', value: `${data.accounts_on} / ${data.accounts_total}`, sub: 'with AI workers turned on' },
-                { label: 'Worker', value: w.running ? 'Running' : 'Not running', tone: w.running ? 'teal' : 'red',
+                { label: 'Accounts on', icon: 'users', color: 'purple', value: `${data.accounts_on} / ${data.accounts_total}`, sub: 'with AI workers turned on' },
+                { label: 'Worker', icon: 'cpu', color: 'blue', value: w.running ? 'Running' : 'Not running', tone: w.running ? 'teal' : 'red',
                   sub: w.last_success_at ? `last run ${when(w.last_success_at)}` : 'no run recorded yet' },
-                { label: 'Real messages', value: data.real_messages ? 'On' : 'Off', tone: data.real_messages ? 'amber' : 'teal',
+                { label: 'Real messages', icon: 'bolt', color: 'orange', value: data.real_messages ? 'On' : 'Off', tone: data.real_messages ? 'amber' : 'teal',
                   sub: data.real_messages ? 'AI can contact real people' : 'practice only — nobody is contacted' },
-                { label: 'AI workers', value: data.ai_workers, sub: 'set up across accounts' },
+                { label: 'AI workers', icon: 'cpu', color: 'teal', value: data.ai_workers, sub: 'set up across accounts' },
               ]} />
             </Section>
 
             <Section title="Work">
               <Strip items={[
-                { label: 'Working now', value: data.work.working_now, sub: 'leads being worked' },
-                { label: 'Waiting', value: data.work.waiting, sub: 'for the lead to reply' },
-                { label: 'Need a person', value: data.work.needs_a_person + data.open_handoffs,
+                { label: 'Working now', icon: 'pulse', color: 'green', value: data.work.working_now, sub: 'leads being worked' },
+                { label: 'Waiting', icon: 'clock', color: 'orange', value: data.work.waiting, sub: 'for the lead to reply' },
+                { label: 'Need a person', icon: 'user', color: 'red', value: data.work.needs_a_person + data.open_handoffs,
                   tone: (data.work.needs_a_person + data.open_handoffs) ? 'amber' : undefined, sub: 'passed to a person or stuck' },
-                { label: 'Finished', value: data.work.finished, sub: 'all-time' },
+                { label: 'Finished', icon: 'check', color: 'blue', value: data.work.finished, sub: 'all-time' },
               ]} />
             </Section>
 

@@ -211,6 +211,19 @@ const CSS = `
   background:var(--gm-rail-card);border:1px solid var(--gm-rail-card-line);
   display:flex;gap:10px;align-items:flex-start;
 }
+.gm-wordmark-pro{color:var(--gm-brand-pro)}
+.gm-railhero{
+  display:flex;align-items:center;gap:12px;margin:12px 10px 4px;padding:12px 14px;border-radius:12px;
+  background:var(--gm-rail-hero);border:1px solid var(--gm-rail-hero-line);color:var(--gm-rail-head);text-decoration:none;
+  box-shadow:0 6px 16px -8px var(--gm-rail-accent);
+}
+.gm-railhero:focus-visible{outline:2px solid var(--gm-rail-accent);outline-offset:2px}
+.gm-railhero-crown{color:var(--gm-rail-gold);display:inline-grid;flex:none}
+.gm-railhero b{display:block;font-size:14px;font-weight:800;letter-spacing:.04em}
+.gm-railhero span span, .gm-railhero > span:last-child > span{display:block;font-size:12.5px;color:var(--gm-rail-fg);margin-top:1px}
+.gm-railexit{width:calc(100% - 20px);cursor:pointer;font-family:inherit;color:var(--gm-rail-head);align-items:center;text-align:left}
+.gm-railexit:hover{background:var(--gm-rail-hover)}
+.gm-railexit:focus-visible{outline:2px solid var(--gm-rail-accent);outline-offset:2px}
 .gm-railcard b{display:block;font-size:13px;color:var(--gm-rail-head);font-weight:700}
 .gm-railcard span{display:block;font-size:11px;color:var(--gm-rail-fg);line-height:1.45}
 

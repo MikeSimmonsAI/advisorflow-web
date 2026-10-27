@@ -151,11 +151,11 @@ export default function GodOrganizations() {
 
         <div style={{ marginBottom: 18 }}>
           <Strip cols={5} items={[
-            { label: 'Organizations', value: metrics.total, sub: 'all brands' },
-            { label: 'Active', value: metrics.active, sub: 'can sign in' },
-            { label: 'Onboarding', value: metrics.onboarding, sub: 'not live yet' },
-            { label: 'Suspended', value: metrics.suspended, sub: 'switched off on purpose', tone: metrics.suspended ? 'red' : undefined },
-            { label: 'Needs attention', value: metrics.attention,
+            { label: 'Organizations', icon: 'building', color: 'blue', value: metrics.total, sub: 'all brands' },
+            { label: 'Active', icon: 'check', color: 'green', value: metrics.active, sub: 'can sign in' },
+            { label: 'Onboarding', icon: 'rocket', color: 'orange', value: metrics.onboarding, sub: 'not live yet' },
+            { label: 'Suspended', icon: 'stop', color: 'red', value: metrics.suspended, sub: 'switched off on purpose', tone: metrics.suspended ? 'red' : undefined },
+            { label: 'Needs attention', icon: 'alert', color: 'purple', value: metrics.attention,
               sub: metrics.unscored ? metrics.unscored + ' not yet scored' : 'from the health score' },
           ]} />
         </div>
