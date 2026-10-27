@@ -83,6 +83,9 @@ def test_multifamily_segmentation_by_unit_bands():
     assert s["multifamily"] == {"u20_49", "u50_99", "u100_199"}
     open_top = ENG.box_segments(box(min_units=250))
     assert open_top["multifamily"] == {"u200_299", "u300p"}
+    small = ENG.box_segments(box(property_types='["multifamily"]', min_units=2, max_units=4))
+    assert small["multifamily"] == {"u2_4"}
+    assert ENG.box_segments(box(max_units=4))["multifamily"] == {"u2_4"}
 
 
 def test_land_segmentation():

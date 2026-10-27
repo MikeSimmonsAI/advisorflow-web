@@ -1298,6 +1298,15 @@ class WholesaleFile(Base):
     checksum = Column(String, nullable=True)       # sha256, so a re-upload is detectable
 
     caption = Column(String, nullable=True)
+    # Deal Room (#415): files an investor uploaded or that staff shared with ONE
+    # buyer. A file is visible to an investor only when buyer_id is theirs AND
+    # investor_visible is set (or they uploaded it). review/scan are statuses
+    # a person and the content checks set; nothing advances them silently.
+    uploaded_by_investor_id = Column(String, nullable=True)
+    investor_visible = Column(Boolean, nullable=False, default=False)
+    review_status = Column(String, nullable=True)      # pending | accepted | rejected
+    scan_status = Column(String, nullable=True)        # clean | blocked | not_scanned
+    scan_detail = Column(String, nullable=True)
     is_primary = Column(Boolean, nullable=False, default=False)
     sort_order = Column(Integer, nullable=False, default=0)
 
@@ -1548,6 +1557,9 @@ EXCEPTION_KINDS = (
     # Buyer Intelligence (#413): a buyer qualification handed to a person, and a
     # follow-up / call the buyer asked for.
     "buyer_handoff", "buyer_followup",
+    # Private Deal Room (#415): an investor asked for an exclusive review, or
+    # uploaded a document for a person to review.
+    "deal_room_hold_request", "deal_room_upload_review",
 )
 EXCEPTION_OUTCOMES = ("complete", "unable_to_verify", "needs_more_info", "escalate")
 EXCEPTION_OPEN_STATUSES = ("open", "assigned", "needs_more_info", "escalated")

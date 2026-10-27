@@ -135,6 +135,17 @@ class WholesaleBuyerConversation(Base):
     handoff_exception_id = Column(String, nullable=True)
     followup_exception_id = Column(String, nullable=True)
     started_by_id = Column(String, ForeignKey("users.id"), nullable=True)
+    # Deal Room (#415): the same conversation record carries the investor's
+    # portal threads. kind: qualification | concierge | relationship | deal.
+    # Turns with role "internal" are staff-only and never served to a buyer.
+    kind = Column(String, nullable=True)
+    deal_id = Column(String, nullable=True)
+    account_id = Column(String, nullable=True)
+    ai_enabled = Column(Boolean, nullable=False, default=True)
+    assigned_user_id = Column(String, nullable=True)
+    buyer_unread = Column(Integer, nullable=False, default=0)
+    staff_unread = Column(Integer, nullable=False, default=0)
+    last_message_at = Column(DateTime, nullable=True)
     is_test = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

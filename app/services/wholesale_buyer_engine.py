@@ -46,7 +46,7 @@ SEGMENTS = [("all", "All buyers"), ("single_family", "Single-family"), ("multifa
             ("land", "Land"), ("commercial", "Commercial"), ("industrial", "Industrial"),
             ("mixed_use", "Mixed-use"), ("portfolio", "Portfolio"), ("other", "Other")]
 SEGMENT_KEYS = [k for k, _ in SEGMENTS]
-UNIT_BANDS = [("u5_19", "5–19 units", 5, 19), ("u20_49", "20–49 units", 20, 49),
+UNIT_BANDS = [("u2_4", "2–4 units", 2, 4), ("u5_19", "5–19 units", 5, 19), ("u20_49", "20–49 units", 20, 49),
               ("u50_99", "50–99 units", 50, 99), ("u100_199", "100–199 units", 100, 199),
               ("u200_299", "200–299 units", 200, 299), ("u300p", "300+ units", 300, None)]
 SUBSEGMENTS: Dict[str, List[tuple]] = {
@@ -138,6 +138,18 @@ def _days(v: Any, today: date) -> Optional[int]:
     return (today - d).days if d else None
 
 
+def _dt(v: Any) -> Optional[datetime]:
+    """One comparable type: aggregate queries hand back text on some databases."""
+    if v is None or isinstance(v, datetime):
+        return v
+    if isinstance(v, date):
+        return datetime(v.year, v.month, v.day)
+    try:
+        return datetime.fromisoformat(str(v).replace("Z", "").split("+")[0])
+    except ValueError:
+        return None
+
+
 def _iso(v: Any) -> Optional[str]:
     if v is None:
         return None
@@ -197,7 +209,8 @@ def box_segments(box: Any) -> Dict[str, set]:
     lo_u, hi_u = _num(getattr(box, "min_units", None)), _num(getattr(box, "max_units", None))
     if lo_u is not None or hi_u is not None:
         out.setdefault("multifamily", set())
-        lo_u = lo_u if lo_u is not None else 5
+        # an open minimum starts at 5 units, unless the box tops out below that (a 2-4 unit buyer)
+        lo_u = lo_u if lo_u is not None else (2 if hi_u is not None and hi_u < 5 else 5)
         hi_u = hi_u if hi_u is not None else float("inf")
         for key, _label, b_lo, b_hi in UNIT_BANDS:
             if lo_u <= (b_hi if b_hi is not None else float("inf")) and hi_u >= b_lo:
@@ -665,9 +678,9 @@ def row(b, boxes, acqs, ents, convs, matches, activity, today: date) -> Dict[str
     last_conv = max(convs, key=lambda c: c.updated_at or c.created_at) if convs else None
     good = [m for m in matches if (m.score or 0) >= GOOD_MATCH]
     act = activity or {}
-    last_touch = max([d for d in (getattr(b, "last_interaction_at", None), act.get("last_response_at"),
-                                  act.get("last_contacted_at"),
-                                  getattr(last_conv, "updated_at", None) if last_conv else None) if d],
+    last_touch = max([d for d in (_dt(getattr(b, "last_interaction_at", None)), _dt(act.get("last_response_at")),
+                                  _dt(act.get("last_contacted_at")),
+                                  _dt(getattr(last_conv, "updated_at", None)) if last_conv else None) if d],
                      default=None)
     return {
         "buyer_id": b.id, "name": _name(b), "entity_type": b.entity_type, "is_test": bool(b.is_test),
