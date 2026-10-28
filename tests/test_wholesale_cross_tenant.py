@@ -920,3 +920,24 @@ def test_every_id_bearing_wholesale_route_is_in_the_attack_list(theirs):
     assert not missing, (
         "These wholesale endpoints name a record but are not attacked in this "
         "file:\n" + "\n".join(sorted(set(missing))))
+
+
+def test_list_and_identity_probes_are_refused_by_scope_not_by_absence(
+        client, theirs, auth_headers, other_headers, db_session):
+    """The owner half of the cohort / identity probes in the attack list: the
+    owner IS served for the same list and property, so the attacker's refusal
+    is the workspace scope at work, not a list that does not exist."""
+    base = "/wholesale/evosense"
+    kind = theirs["es_list_kind"]
+    assert client.get("%s/cohorts/%s" % (base, kind), headers=auth_headers).status_code == 200
+    assert kind in client.get("%s/cohorts" % base, headers=auth_headers).text
+    other = client.get("%s/cohorts" % base, headers=other_headers)
+    assert other.status_code >= 400 or kind not in other.text
+    assert client.get("%s/cohorts/%s" % (base, kind), headers=other_headers).status_code in (403, 404)
+    assert client.post("%s/cohorts/%s/recheck" % (base, kind), headers=other_headers).status_code in (403, 404)
+    url = "%s/properties/%s/identity" % (base, theirs["es_property_id"])
+    r = client.post(url, headers=other_headers, json={"city": "Stolen", "evidence_url": "https://example.com/r"})
+    assert r.status_code in (403, 404)
+    from app.models.evosense_models import EvoSenseProperty
+    db_session.expire_all()
+    assert db_session.query(EvoSenseProperty).get(theirs["es_property_id"]).city != "Stolen"
