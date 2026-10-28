@@ -76,15 +76,15 @@ with sync_playwright() as p:
     ok("A1 BookaBoost admin lands on Program Access", page.url.endswith("/workspaces"), page.url)
     page.wait_for_selector(".bbpa-card")
     page.wait_for_timeout(800)
-    ok("A2 BookaBoost browser title", page.title() == "BookaBoost · Program Access", page.title())
+    ok("A2 BookaBoost browser title", page.title() == "BookaBoost · Choose Your Business", page.title())
     txt = visible_text(page)
-    ok("A3 'Choose your business' welcome", "Choose your business." in txt)
+    ok("A3 'Choose Your Business' welcome", "Choose Your Business" in txt)
     ok("A4 no EvoSys/EvoSense text on BookaBoost Program Access", not FOREIGN.search(txt), FOREIGN.findall(txt))
-    names = page.eval_on_selector_all("[aria-label='Your businesses'] .bbpa-title", "e => e.map(x => x.textContent)")
+    names = page.eval_on_selector_all("[aria-label='Your workspaces'] .bbpa-card:not([data-program='preview']) .bbpa-title", "e => e.map(x => x.textContent)")
     ok("A5 operational cards are exactly Wholesale + Back Office", sorted(names) == ["Back Office", "Wholesale"], names)
-    pv = page.eval_on_selector_all("[aria-label='Authorized previews'] .bbpa-title", "e => e.map(x => x.textContent)")
+    pv = page.eval_on_selector_all("[aria-label='Your workspaces'] .bbpa-card[data-program='preview'] .bbpa-title", "e => e.map(x => x.textContent)")
     ok("A6 Countryside shows under Authorized preview", pv == ["Countryside Land Partners"], pv)
-    href = page.get_attribute("[aria-label='Authorized previews'] a.bbpa-card", "href") or ""
+    href = page.get_attribute("a.bbpa-card[data-program='preview']", "href") or ""
     ok("A7 preview card opens a signed-in path, not a demo link", href.startswith("/previews/") and "/demo/" not in href, href)
     html = page.content()
     ok("A8 no public demo address anywhere in the page", "/demo/" not in html)
@@ -106,10 +106,10 @@ with sync_playwright() as p:
     ok("A11 keyboard reaches a card and shows a gold focus ring", bool(focused) and focused[1] == "solid", focused)
     page.screenshot(path=str(OUT / "A-program-access-keyboard-focus.png"))
     # D. the Countryside tile as it appears
-    page.locator(".bbpa-previews").screenshot(path=str(OUT / "D-countryside-authorized-preview-tile.png"))
+    page.locator("a.bbpa-card[data-program='preview']").screenshot(path=str(OUT / "D-countryside-authorized-preview-tile.png"))
 
     # open the preview (same tab, signed in, sandboxed frame)
-    page.click("[aria-label='Authorized previews'] a.bbpa-card")
+    page.click("a.bbpa-card[data-program='preview']")
     page.wait_for_timeout(2000)
     ok("D1 preview opens inside the app at /previews/…", "/previews/" in page.url, page.url)
     frame = page.locator("iframe")
@@ -121,7 +121,7 @@ with sync_playwright() as p:
     page.wait_for_timeout(1500)
 
     # B. Back Office (empty state)
-    page.click("[aria-label='Your businesses'] button.bbpa-card[data-program='back_office']")
+    page.click("[aria-label='Your workspaces'] button.bbpa-card[data-program='back_office']")
     page.wait_for_timeout(2500)
     page.wait_for_load_state("networkidle")
     ok("B1 Back Office opens /sales", "/sales" in page.url, page.url)
@@ -139,7 +139,7 @@ with sync_playwright() as p:
     # C. Wholesale landing
     page.goto(APP + "/workspaces", wait_until="networkidle")
     page.wait_for_selector(".bbpa-card")
-    page.click("[aria-label='Your businesses'] button.bbpa-card[data-program='wholesale']")
+    page.click("[aria-label='Your workspaces'] button.bbpa-card[data-program='wholesale']")
     page.wait_for_timeout(4000)
     page.wait_for_load_state("networkidle")
     ws_url = page.url
@@ -161,8 +161,8 @@ with sync_playwright() as p:
 
     # sign out from Program Access
     page.goto(APP + "/workspaces", wait_until="networkidle")
-    page.wait_for_selector(".bbpa-signout")
-    page.click(".bbpa-signout")
+    page.wait_for_selector(".bbpa-avatar")
+    page.click(".bbpa-avatar"); page.click(".bbpa-menu-item")
     page.wait_for_timeout(2000)
     ok("A12 sign out returns to /login and clears the session",
        "/login" in page.url and page.evaluate("localStorage.getItem('af_token')") is None, page.url)
@@ -176,7 +176,7 @@ with sync_playwright() as p:
     pg.goto(APP + "/workspaces", wait_until="networkidle")
     pg.wait_for_timeout(1200)
     ok("S1 empty state in the BookaBoost look", pg.locator(".bbpa .bbpa-message").count() == 1
-       and "No businesses are assigned" in visible_text(pg))
+       and "No workspaces are assigned" in visible_text(pg))
     pg.screenshot(path=str(OUT / "S-program-access-empty-1600.png"))
     c.close()
     # A BookaBoost address, mapped to this machine; /auth/my-contexts is held
@@ -193,7 +193,7 @@ with sync_playwright() as p:
     pg.route("**/auth/my-contexts*", lambda r: hold.append(r))
     pg.goto(bb_app + "/workspaces", wait_until="domcontentloaded")
     pg.wait_for_timeout(1500)
-    ok("S2 loading state in the BookaBoost look", pg.locator(".bbpa .bbpa-skeleton").count() == 2)
+    ok("S2 loading state in the BookaBoost look", pg.locator(".bbpa .bbpa-skeleton").count() == 3)
     pg.screenshot(path=str(OUT / "S-program-access-loading-1600.png"))
     pg.unroute("**/auth/my-contexts*")
     for r in hold:
@@ -207,8 +207,8 @@ with sync_playwright() as p:
         pass
     pg.wait_for_timeout(2000)   # let the app's start-up splash finish fading
     ok("S3 error state in the BookaBoost look, with Try again",
-       pg.locator(".bbpa [role=alert]").count() == 1 and pg.locator(".bbpa-retry").count() == 1)
-    ok("S4 BookaBoost title while loading/error", pg.title() == "BookaBoost · Program Access", pg.title())
+       pg.locator(".bbpa [role=alert]").count() == 1 and pg.locator(".bbpa-button").count() == 1)
+    ok("S4 BookaBoost title while loading/error", pg.title() == "BookaBoost · Choose Your Business", pg.title())
     pg.screenshot(path=str(OUT / "S-program-access-error-1600.png"))
     b2.close()
 

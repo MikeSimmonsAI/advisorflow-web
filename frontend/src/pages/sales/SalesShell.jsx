@@ -14,12 +14,12 @@ import { createContext, useContext, useEffect, useRef, useState, useCallback } f
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { api, logout, fetchMyContexts, getCurrentUser } from '../../api/client'
 import GodReturnBar from '../../components/GodReturnBar'
+import { brandMarkUrl } from '../../theme'
 import SalesStyles from './SalesStyles'
 import SimpleStyles from './SimpleStyles'
 import { Icon } from './SimpleParts'
 import { followUpList, otherWorkspaceCount } from './simpleSales'
 import { initials, ErrorBar } from './parts'
-import { brandMarkUrl } from '../../theme'
 
 const SalesCtx = createContext(null)
 

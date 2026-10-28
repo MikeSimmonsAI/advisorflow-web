@@ -1,21 +1,17 @@
-BookaBoost Program Access - local run of the real built UI, 2026-10-28 3:13 PM CT
-Backend: this branch + feature/countryside-preview-grant merged locally (not pushed), throwaway SQLite, synthetic data (e2e/run_local.py).
-Frontend 'after' = that merge; 'before' = origin/main a03527eb. Script: e2e/mockups.py
-
 PASS  A1 BookaBoost admin lands on Program Access - http://localhost:5173/workspaces
-PASS  A2 BookaBoost browser title - BookaBoost · Program Access
-PASS  A3 'Choose your business' welcome
+PASS  A2 BookaBoost browser title - BookaBoost · Choose Your Business
+PASS  A3 'Choose Your Business' welcome
 PASS  A4 no EvoSys/EvoSense text on BookaBoost Program Access
 PASS  A5 operational cards are exactly Wholesale + Back Office - ['Wholesale', 'Back Office']
 PASS  A6 Countryside shows under Authorized preview - ['Countryside Land Partners']
-PASS  A7 preview card opens a signed-in path, not a demo link - /previews/57ba2a7598f3413d8f2d90653c8502bc
+PASS  A7 preview card opens a signed-in path, not a demo link - /previews/8d618b205dbf474ab890ab1dedb5e8cd
 PASS  A8 no public demo address anywhere in the page
 PASS  A9 logo is the real mark file
 PASS  A10 no horizontal overflow at desktop-1600
 PASS  A10 no horizontal overflow at tablet-820
 PASS  A10 no horizontal overflow at mobile-390
-PASS  A11 keyboard reaches a card and shows a gold focus ring - ['Open: Wholesale', 'solid', 'rgb(227, 197, 138)']
-PASS  D1 preview opens inside the app at /previews/… - http://localhost:5173/previews/57ba2a7598f3413d8f2d90653c8502bc
+PASS  A11 keyboard reaches a card and shows a gold focus ring - ['Open Wholesale', 'solid', 'rgb(226, 184, 102)']
+PASS  D1 preview opens inside the app at /previews/… - http://localhost:5173/previews/8d618b205dbf474ab890ab1dedb5e8cd
 PASS  D2 preview is in the sandboxed frame (allow-scripts only)
 PASS  D3 the stored demo shows unchanged (its own title) - Countryside Land Partners
 PASS  B1 Back Office opens /sales - http://localhost:5173/sales
@@ -26,21 +22,34 @@ PASS  B5 no horizontal overflow (Back Office)
 PASS  C1 Wholesale opens a /wholesale screen - http://localhost:5173/wholesale/evosense
 PASS  C2 Wholesale shows the BookaBoost logo
 PASS  C3 Wholesale navigation present - 26
-FAIL  C4 no EvoSys/EvoSense text visible on the BookaBoost Wholesale landing - ['EvoSense']
+PASS  C4 no EvoSys/EvoSense text visible on the BookaBoost Wholesale landing
 PASS  C5 no horizontal overflow (Wholesale)
 PASS  C6 refresh keeps the workspace and the screen - http://localhost:5173/wholesale/evosense
 PASS  A12 sign out returns to /login and clears the session - http://localhost:5173/login
 PASS  S1 empty state in the BookaBoost look
 PASS  S2 loading state in the BookaBoost look
 PASS  S3 error state in the BookaBoost look, with Try again
-PASS  S4 BookaBoost title while loading/error - BookaBoost · Program Access
+PASS  S4 BookaBoost title while loading/error - BookaBoost · Choose Your Business
 PASS  E1 EvoSys launcher (before) has no BookaBoost look
 PASS  E1 EvoSys launcher (after) has no BookaBoost look
 PASS  C7 BookaBoost Wholesale has exactly the EvoSys Wholesale navigation
 PASS  E2 EvoSys Program Access is pixel-identical before/after - ((1440, 1759), (1440, 1759))
 PASS  Z1 no console errors
-blocked hosts: []
-
-C4 note: the one EvoSys-family word on the BookaBoost Wholesale landing is a server message from the shared Wholesale engine
-(app/services/evosense/automation.py: 'Email outreach is not a channel EvoSense sends on...'). Not changed here: it is shared
-engine text (Wholesale wording lane). Wholesale navigation (C7): Acquisition Command|Foreclosures|Discovery Inbox|Strategies|Providers & Controls|Buyer Intelligence|Deal Room|Investor Outreach|Buy Boxes|Deal Operations|Properties|Appointments|Team Board|Canvassing|Deal Calculator|Funding Partners|Exceptions|Callback Center|Pilot Controls|Contracts & Closing|Dispositions|Team|Wholesale Settings|↗ Back to website|Controls|Budgets
+PASS  W1 BookaBoost Wholesale shows no EvoSys/EvoSense text
+PASS  C-wholesale-bookaboost no horizontal overflow at desktop-1600
+PASS  C-wholesale-bookaboost no horizontal overflow at tablet-820
+PASS  C-wholesale-bookaboost no horizontal overflow at mobile-390
+PASS  W2 phone navigation opens
+PASS  R1 back to Program Access - http://localhost:5173/workspaces
+PASS  B1 Back Office names BookaBoost, no EvoSys text
+PASS  B-back-office-bookaboost no horizontal overflow at desktop-1600
+PASS  B-back-office-bookaboost no horizontal overflow at tablet-820
+PASS  B-back-office-bookaboost no horizontal overflow at mobile-390
+PASS  B2 refresh keeps the Back Office - http://localhost:5173/sales
+PASS  D1 preview opens at /previews/ - http://localhost:5173/previews/8d618b205dbf474ab890ab1dedb5e8cd
+PASS  D2 no public demo link in the page
+PASS  D-countryside-preview-open no horizontal overflow at desktop-1600
+PASS  D-countryside-preview-open no horizontal overflow at tablet-820
+PASS  D-countryside-preview-open no horizontal overflow at mobile-390
+PASS  D3 refresh keeps the preview - http://localhost:5173/previews/8d618b205dbf474ab890ab1dedb5e8cd
+PASS  Z1 no page errors

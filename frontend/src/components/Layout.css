@@ -408,6 +408,21 @@ html:root[data-theme="bookaboost"] .layout--wholesale .sidebar .nav-item--active
   box-shadow: none;
 }
 
+/* BookaBoost Wholesale top bar on tablets and phones: the search box gets its
+   own full-width row instead of being squeezed to nothing, and nothing pushes
+   the page sideways (found by the #272 browser check). Scoped to BookaBoost so
+   EvoSys Wholesale is unchanged; EvoSys has the same squeeze on main and can
+   take this rule when the owner approves. */
+@media (max-width: 1024px) {
+  html:root[data-theme="bookaboost"] .layout--wholesale .top-bar { flex-wrap: wrap; row-gap: 10px; }
+  html:root[data-theme="bookaboost"] .layout--wholesale .top-bar-right { margin-left: auto; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
+  html:root[data-theme="bookaboost"] .layout--wholesale .wsx-search { order: 2; flex: 1 1 100%; max-width: none; }
+}
+@media (max-width: 480px) {
+  html:root[data-theme="bookaboost"] .layout--wholesale .top-bar-right { gap: 6px; }
+  html:root[data-theme="bookaboost"] .layout--wholesale .program-switch__label { display: none; }
+}
+
 /* IDENTITY MUST STAY READABLE ON THE BOOKABOOST WALNUT RAIL.
    The BookaBoost skin (index.css) paints EVERY .sidebar dark walnut, including
    the two rails the dark-token block above deliberately excludes (the

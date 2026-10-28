@@ -84,7 +84,7 @@
 .bbpa-grid--n4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .bbpa-grid li { min-width: 0; }
 .bbpa-card {
-  position: relative; display: flex; align-items: flex-end; width: 100%; min-height: 300px; height: 100%;
+  position: relative; display: flex; align-items: flex-end; width: 100%; min-height: 420px; height: 100%;
   border-radius: 12px; border: 1px solid var(--bb-gold-hair); overflow: hidden; padding: 0;
   background: var(--bb-charcoal); color: var(--bb-text); text-align: left; text-decoration: none; cursor: pointer;
   font: inherit; box-shadow: 0 22px 44px rgba(0, 0, 0, 0.45);
@@ -142,6 +142,7 @@ html:root .bbpa .bbpa-menu-item:focus-visible, html:root .bbpa .bbpa-button:focu
 /* tablet */
 @media (max-width: 1024px) {
   .bbpa-grid, .bbpa-grid--n4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bbpa-card { min-height: 360px; }
 }
 /* phone */
 @media (max-width: 640px) {
@@ -154,7 +155,7 @@ html:root .bbpa .bbpa-menu-item:focus-visible, html:root .bbpa .bbpa-button:focu
   .bbpa-hero-text p { font-size: 16px; }
   .bbpa-main { margin-top: -70px; padding-bottom: 40px; }
   .bbpa-grid, .bbpa-grid--n1, .bbpa-grid--n2, .bbpa-grid--n4 { grid-template-columns: minmax(0, 1fr); gap: 14px; }
-  .bbpa-card { min-height: 240px; }
+  .bbpa-card { min-height: 280px; }
   .bbpa-title { font-size: 26px; }
 }
 @media (prefers-reduced-motion: reduce) {
