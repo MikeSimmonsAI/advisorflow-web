@@ -63,6 +63,7 @@ def overview(db, org_id: str, include_test: bool = False) -> Dict[str, Any]:
     v = SET.view(db, org_id)
     return {
         "status": v["status"], "name": v["settings"].get("name"), "saved": v["saved"],
+        "markets": v["settings"].get("markets") or [],
         "activated_at": v["activated_at"],
         "counts": {
             "investors": accounts.count(),
@@ -287,3 +288,197 @@ def assign_thread(db, org_id: str, conv_id: str, user_id: Optional[str], by) -> 
         DR.notify_staff(db, org_id, "A Deal Room conversation was assigned to you",
                         "/wholesale/deal-room?view=messages&thread=%s" % c.id, assignee_id=user_id)
     return c
+
+
+# ── owner dashboard (the approved full-page composition) ───────────────────
+
+def _first_name(user) -> Optional[str]:
+    n = (getattr(user, "full_name", None) or "").strip()
+    return n.split(" ")[0] if n else None
+
+
+def _listing_card(db, org_id: str, lst: DealListing) -> Dict[str, Any]:
+    from app.services import wholesale_publication as P
+    deal = db.query(WholesaleDeal).filter(WholesaleDeal.id == lst.deal_id).first()
+    prop = db.query(WholesaleProperty).filter(WholesaleProperty.id == deal.property_id).first() if deal else None
+    photos = P.buyer_photos(db, deal) if deal is not None else []
+    hold = DR.active_hold(db, lst.id)
+    pend = db.query(ExclusiveHold).filter(ExclusiveHold.listing_id == lst.id, ExclusiveHold.status == "requested").count()
+    return {"id": lst.id, "deal_id": lst.deal_id, "state": lst.state, "audience": lst.audience,
+            "min_match_score": lst.min_match_score, "published_at": _iso(lst.published_at), "expires_at": _iso(lst.expires_at),
+            "address": getattr(prop, "street_address", None), "city": getattr(prop, "city", None),
+            "state_code": getattr(prop, "state", None), "zip_code": getattr(prop, "zip_code", None),
+            "county": getattr(prop, "county", None),
+            "category": getattr(prop, "property_category", None) or getattr(prop, "property_type", None),
+            "facts": {k: (float(getattr(prop, k)) if k in ("bedrooms", "bathrooms") and getattr(prop, k, None) is not None
+                          else getattr(prop, k, None))
+                      for k in ("bedrooms", "bathrooms", "square_feet", "unit_count")} if prop else {},
+            "asking_price": float(deal.buyer_room_asking_price) if deal is not None and deal.buyer_room_asking_price is not None else None,
+            "cover_photo": photos[0]["id"] if photos else None,
+            "serving": DR._serving(db, org_id, deal) if deal is not None else False,
+            "hold": DR.hold_json(db, hold) if hold is not None else None, "hold_requests": pend,
+            "is_test": bool(lst.is_test)}
+
+
+def dashboard(db, org_id: str, user, include_test: bool = False) -> Dict[str, Any]:
+    """Everything the owner's Deal Room dashboard shows, from real records only."""
+    from app.services import ai_gateway
+    from app.services import wholesale_deal_room_setup as SET
+    DR.sweep(db, org_id)
+    now = datetime.utcnow()
+
+    def t(q, model):
+        return q if include_test else q.filter(model.is_test.is_(False))
+    accts = t(db.query(InvestorAccount).filter(InvestorAccount.organization_id == org_id), InvestorAccount).all()
+    active = [a for a in accts if a.status == "active" and a.identity_completed_at]
+    lists = t(db.query(DealListing).filter(DealListing.organization_id == org_id), DealListing).all()
+    live = [x for x in lists if x.state in ("published", "exclusive_review")]
+    holds = t(db.query(ExclusiveHold).filter(ExclusiveHold.organization_id == org_id), ExclusiveHold)
+    active_holds = holds.filter(ExclusiveHold.status == "active").all()
+    expiring = [h for h in active_holds if h.ends_at and h.ends_at <= now + timedelta(hours=24)]
+    pending = holds.filter(ExclusiveHold.status == "requested").count()
+    # investor growth: registrations per month (cumulative), last 6 months - real rows only
+    months = []
+    y, m = now.year, now.month
+    for _ in range(6):
+        months.insert(0, (y, m))
+        y, m = (y, m - 1) if m > 1 else (y - 1, 12)
+    series = []
+    for (yy, mm) in months:
+        end = datetime(yy + (mm == 12), (mm % 12) + 1, 1)
+        series.append({"month": "%04d-%02d" % (yy, mm), "label": datetime(yy, mm, 1).strftime("%b"),
+                       "total": sum(1 for a in accts if a.created_at and a.created_at < end),
+                       "new": sum(1 for a in accts if a.created_at and a.created_at.year == yy and a.created_at.month == mm)})
+    growth_ok = sum(1 for s in series if s["new"]) >= 2
+    # deal room status - each line checked against the real setting
+    v = SET.view(db, org_id, user)
+    rd = SET.readiness(db, org_id, user)
+    s = v["settings"]
+    key = bool(__import__("os").environ.get("OPENAI_API_KEY"))
+    ai_on = bool(s.get("ai_concierge_enabled"))
+    manual = ai_gateway.manual_enabled()
+    status = [
+        {"key": "config", "label": "Room configuration",
+         "state": "ok" if v["saved"] and not rd["blockers"] else "warn",
+         "value": "Complete" if v["saved"] and not rd["blockers"] else
+         ("Not saved" if not v["saved"] else "%d item(s) missing" % len(rd["blockers"]))},
+        {"key": "portal", "label": "Investor portal", "state": "ok" if v["status"] == "active" else "warn",
+         "value": {"active": "Live", "paused": "Paused"}.get(v["status"], "Not activated")},
+        {"key": "publishing", "label": "Deal publishing", "state": "ok" if live else "off",
+         "value": ("%d live" % len(live)) if live else "No deals published"},
+        {"key": "ai", "label": "AI concierge",
+         "state": "ok" if ai_on and manual and key else ("warn" if ai_on else "off"),
+         "value": "Enabled" if ai_on and manual and key else
+         ("Automatic replies (AI key not configured)" if ai_on and manual else
+          ("Automatic replies (AI switched off platform-wide)" if ai_on else "Off"))},
+        {"key": "esign", "label": "Document signing", "state": "ok", "value": "In-app e-sign (approved templates)"},
+        {"key": "scan", "label": "Upload scanning", "state": "warn",
+         "value": "Built-in checks only (no antivirus engine)"},
+    ]
+    issues = [i["label"] + ": " + i["detail"] for i in rd["items"] if not i["ok"] and i["blocking"]]
+    hero = next((c for c in (_listing_card(db, org_id, x) for x in live) if c["cover_photo"]), None)
+    return {
+        "owner_first_name": _first_name(user), "room_name": s.get("name"), "status": v["status"],
+        "markets": s.get("markets") or [],
+        "metrics": {"total_investors": len(accts), "active_investors": len(active),
+                    "new_investors_30d": sum(1 for a in accts if a.created_at and a.created_at >= now - timedelta(days=30)),
+                    "active_listings": len(live), "listings_total": len(lists),
+                    "exclusive_reviews": len(active_holds), "expiring": len(expiring), "pending_reviews": pending},
+        "growth": {"series": series, "enough": growth_ok},
+        "status_items": status, "issues": issues,
+        "hero_photo": {"listing_id": hero["id"], "file_id": hero["cover_photo"]} if hero else None,
+        "listings": [_listing_card(db, org_id, x) for x in sorted(live, key=lambda z: z.published_at or now, reverse=True)][:8],
+    }
+
+
+def feed(db, org_id: str, kind: str = "activity", include_test: bool = False, limit: int = 12) -> List[Dict[str, Any]]:
+    """Recent Investor Activity rows: investor, company, activity, related deal, time, status, and what to open."""
+    from app.services import wholesale_deal_room_chat as CH
+
+    def investor_of(buyer_id):
+        b = db.query(WholesaleBuyer).filter(WholesaleBuyer.id == buyer_id).first() if buyer_id else None
+        a = (db.query(InvestorAccount).filter(InvestorAccount.buyer_id == buyer_id).first() if buyer_id else None)
+        name = (a.preferred_name or a.legal_name) if a and (a.preferred_name or a.legal_name) else \
+            (getattr(b, "contact_name", None) or getattr(b, "company_name", None))
+        company = (a.company_legal_name if a else None) or getattr(b, "company_name", None)
+        return name, company if company != name else None, bool(getattr(b, "is_test", False))
+
+    def deal_of(deal_id):
+        if not deal_id:
+            return None
+        lst = db.query(DealListing).filter(DealListing.deal_id == deal_id).first()
+        d = db.query(WholesaleDeal).filter(WholesaleDeal.id == deal_id).first()
+        p = db.query(WholesaleProperty).filter(WholesaleProperty.id == d.property_id).first() if d else None
+        photo = None
+        if d is not None:
+            from app.services import wholesale_publication as P
+            ph = P.buyer_photos(db, d)
+            photo = ph[0]["id"] if ph else None
+        return {"deal_id": deal_id, "listing_id": getattr(lst, "id", None), "address": getattr(p, "street_address", None),
+                "place": ", ".join(x for x in (getattr(p, "city", None), getattr(p, "state", None)) if x), "photo": photo}
+
+    rows: List[Dict[str, Any]] = []
+    if kind == "holds":
+        for h in (db.query(ExclusiveHold).filter(ExclusiveHold.organization_id == org_id)
+                  .order_by(ExclusiveHold.requested_at.desc()).limit(limit * 2).all()):
+            if h.is_test and not include_test:
+                continue
+            n, c, _t = investor_of(h.buyer_id)
+            rows.append({"investor": n, "company": c, "activity": "Requested exclusive review" + (
+                (" - " + h.request_note[:60]) if h.request_note else ""), "deal": deal_of(h.deal_id),
+                "at": _iso(h.requested_at), "status": {"requested": "Pending", "active": "Active", "declined": "Declined",
+                                                       "ended": "Ended"}.get(h.status, h.status),
+                "tone": {"requested": "warn", "active": "ok"}.get(h.status, "muted"), "open": {"view": "holds"}})
+    elif kind == "signups":
+        for a in (db.query(InvestorAccount).filter(InvestorAccount.organization_id == org_id)
+                  .order_by(InvestorAccount.created_at.desc()).limit(limit).all()):
+            if a.is_test and not include_test:
+                continue
+            rows.append({"investor": a.preferred_name or a.legal_name or "Investor", "company": a.company_legal_name,
+                         "activity": "Joined the Deal Room" + (" - identity complete" if a.identity_completed_at else ""),
+                         "deal": None, "at": _iso(a.created_at),
+                         "status": "Active" if a.status == "active" else a.status.capitalize(),
+                         "tone": "ok" if a.status == "active" else "muted",
+                         "open": {"view": "investors", "buyer_id": a.buyer_id}})
+    elif kind == "messages":
+        for t in CH.inbox(db, org_id, include_test=include_test)[:limit]:
+            n, c, _t = investor_of(t["buyer_id"])
+            rows.append({"investor": n or t["buyer_name"], "company": c, "activity": (t["last"] or "")[:90],
+                         "deal": deal_of(t["deal_id"]), "at": t["last_message_at"],
+                         "status": "Asked for a person" if t["status"] == "handed_off" else
+                         ("%d unread" % t["unread"] if t["unread"] else ("Concierge" if t["ai_enabled"] else "Team")),
+                         "tone": "warn" if t["status"] == "handed_off" or t["unread"] else "muted",
+                         "open": {"view": "messages", "thread": t["id"]}})
+    else:
+        evs = (db.query(WholesaleEvent).filter(WholesaleEvent.organization_id == org_id,
+                                               WholesaleEvent.action.like("deal_room.%"))
+               .order_by(WholesaleEvent.created_at.desc()).limit(limit * 4).all())
+        status_of = {"interested": ("Interested", "ok"), "offer": ("New offer", "ok"), "pass": ("Passed", "muted"),
+                     "hold_requested": ("Pending", "warn"), "hold_approve": ("Approved", "ok"),
+                     "hold_expired": ("Ended", "muted"), "file_uploaded": ("To review", "warn"),
+                     "invite_accepted": ("Joined", "ok"), "document_downloaded": ("Viewed", "muted"),
+                     "listing_publish": ("Published", "ok")}
+        for e in evs:
+            try:
+                det = json.loads(e.details) if e.details else {}
+            except (TypeError, ValueError):
+                det = {}
+            act = e.action.split(".", 1)[-1]
+            bid = det.get("buyer_id")
+            if not bid and det.get("account_id"):
+                a = db.query(InvestorAccount).filter(InvestorAccount.id == det["account_id"]).first()
+                bid = getattr(a, "buyer_id", None)
+            if not bid and act not in ("listing_publish", "invite_accepted"):
+                continue
+            n, c, is_test = investor_of(bid) if bid else (None, None, False)
+            if is_test and not include_test:
+                continue
+            st, tone = status_of.get(act, (act.replace("_", " ").capitalize(), "muted"))
+            rows.append({"investor": n or "Your team", "company": c if n else "Deal Room", "activity": e.summary, "deal": deal_of(e.deal_id),
+                         "at": _iso(e.created_at), "status": st, "tone": tone,
+                         "open": {"view": "holds"} if act.startswith("hold") else
+                         {"view": "documents"} if act == "file_uploaded" else
+                         {"view": "listings"} if e.deal_id else {"view": "investors", "buyer_id": bid}})
+            if len(rows) >= limit:
+                break
+    return rows[:limit]

@@ -254,3 +254,43 @@ def test_investor_cannot_reach_owner_management(client, admin_auth_headers, auth
                  "/wholesale/deal-room/portal-preview", "/wholesale/deal-room/candidates"):
         assert client.get(path, headers=I).status_code in (401, 403), path
     assert client.put(DRS + "/settings", headers=I, json={"name": "x"}).status_code in (401, 403)
+
+
+def test_owner_dashboard_and_activity_feed_use_real_records(client, admin_auth_headers, auth_headers, db_session):
+    A, H = admin_auth_headers, auth_headers
+    empty = ok(client.get(DRS + "/dashboard?include_test=true", headers=A))
+    assert empty["metrics"]["total_investors"] == 0 and empty["listings"] == []
+    assert empty["growth"]["enough"] is False                                         # no invented history
+    labels = {s["key"] if "key" in s else s["label"]: s for s in empty["status_items"]}
+    assert labels and all("value" in s or "detail" in s for s in empty["status_items"])
+    deal_id, lid, I = _room_with_investor(client, A, H, db_session, street="15 Feed Ave")
+    d = ok(client.get(DRS + "/dashboard?include_test=true", headers=A))
+    assert d["metrics"]["total_investors"] == 1 and d["metrics"]["active_listings"] == 1
+    assert d["owner_first_name"] and d["listings"][0]["id"] == lid
+    hidden = ok(client.get(DRS + "/dashboard", headers=A))                            # practice records excluded by default
+    assert hidden["metrics"]["total_investors"] == 0
+    ok(client.post("/investor/opportunities/%s/exclusive-review" % lid, headers=I, json={"note": "lender"}))
+    rows = ok(client.get(DRS + "/feed?kind=holds&include_test=true", headers=A))["rows"]
+    assert rows and rows[0]["status"] and rows[0]["deal"]["listing_id"] == lid and rows[0]["open"]["view"] == "holds"
+    act = ok(client.get(DRS + "/feed?kind=activity&include_test=true", headers=A))["rows"]
+    joined = [r for r in act if r["status"] == "Joined"]
+    assert joined and joined[0]["investor"] != "Your team" and joined[0]["open"].get("buyer_id")
+    assert ok(client.get(DRS + "/feed?kind=signups&include_test=true", headers=A))["rows"]
+    assert client.get(DRS + "/feed?kind=bogus", headers=A).status_code in (200, 400)
+    for path in ("/dashboard", "/feed?kind=activity"):
+        assert client.get(DRS + path, headers=I).status_code in (401, 403)
+
+
+def test_investor_criteria_extras_are_validated(client, admin_auth_headers, auth_headers, db_session):
+    A, H = admin_auth_headers, auth_headers
+    deal_id, lid, I = _room_with_investor(client, A, H, db_session, street="16 Criteria Rd")
+    boxes = ok(client.get("/investor/me", headers=I))["buy_boxes"]
+    box = boxes[0] if boxes else ok(client.post("/investor/me/buy-boxes", headers=I, json={"property_types": ["single_family"]}))
+    box = box.get("box", box)
+    ok(client.put("/investor/me/buy-boxes/%s" % box["id"], headers=I, json={
+        "criteria": {"min_cash_flow": "500", "timeline": "0_30", "preferences": "  Turnkey rentals  "}}))
+    box = ok(client.get("/investor/me", headers=I))["buy_boxes"][0]
+    assert box["criteria"]["min_cash_flow"] == 500.0 and box["criteria"]["timeline"] == "0_30"
+    assert box["criteria"]["preferences"] == "Turnkey rentals"
+    bad = client.put("/investor/me/buy-boxes/%s" % box["id"], headers=I, json={"criteria": {"timeline": "someday"}})
+    assert bad.status_code == 400
