@@ -1,128 +1,164 @@
-/* BookaBoost Program Access - black, charcoal and gold, photographic cards.
-   Everything is scoped under .bbpa so nothing here can touch the EvoSys
-   launcher or any other screen. Tokens are listed in
-   docs/redesign/bookaboost/DESIGN_SPEC.md. */
+/* BookaBoost Program Access - built to the owner-approved mockup (panel 1,
+   2026-10-28): black, charcoal and gold, photographic hero and cards.
+   Everything is scoped under .bbpa so nothing here can touch any other
+   screen. Tokens are listed in docs/redesign/bookaboost/DESIGN_SPEC.md. */
 .bbpa {
-  --bb-black: #0b0b0c;
-  --bb-charcoal: #151517;
-  --bb-charcoal-2: #1d1d20;
-  --bb-line: #2a2a2e;
-  --bb-gold: #c9a45c;
-  --bb-gold-bright: #e3c58a;
-  --bb-gold-hair: rgba(201, 164, 92, 0.45);
-  --bb-text: #f4efe6;
-  --bb-muted: #b3ad9f;
+  --bb-black: #0a0a0b;
+  --bb-charcoal: #141416;
+  --bb-charcoal-2: #1c1c1f;
+  --bb-gold: #c9973d;
+  --bb-gold-light: #e2b866;
+  --bb-gold-deep: #a07828;
+  --bb-gold-hair: rgba(201, 151, 61, 0.55);
+  --bb-green: #2f7a3a;
+  --bb-green-deep: #10301a;
+  --bb-text: #f6f1e7;
+  --bb-muted: #c9c1b1;
   --bb-font: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
-  --bb-display: 'Space Grotesk', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+  --bb-serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
   min-height: 100vh;
-  background: radial-gradient(1200px 520px at 85% -10%, rgba(201, 164, 92, 0.10), transparent 60%), var(--bb-black);
+  background: var(--bb-black);
   color: var(--bb-text);
   font-family: var(--bb-font);
   -webkit-font-smoothing: antialiased;
-  display: flex;
-  flex-direction: column;
 }
 .bbpa *, .bbpa *::before, .bbpa *::after { box-sizing: border-box; }
-.bbpa-wrap { width: 100%; max-width: 1240px; margin: 0 auto; padding-left: 32px; padding-right: 32px; }
+.bbpa-wrap { width: 100%; max-width: 1280px; margin: 0 auto; padding-left: 40px; padding-right: 40px; }
 .bbpa-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-/* header */
-.bbpa-top { border-bottom: 1px solid var(--bb-line); background: rgba(11, 11, 12, 0.92); }
-.bbpa-top-inner { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 72px; flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; }
-.bbpa-logo { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
-.bbpa-logo img { width: 36px; height: 36px; display: block; flex: 0 0 auto; }
-.bbpa-wordmark { font-family: var(--bb-display); font-size: 20px; font-weight: 700; letter-spacing: -0.02em; color: #ffffff; }
-.bbpa-wordmark span { color: #60a5fa; }
-.bbpa-logo-sub { margin-left: 6px; padding-left: 14px; border-left: 1px solid var(--bb-gold-hair); color: var(--bb-gold); font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; white-space: nowrap; }
-.bbpa-top-right { display: flex; align-items: center; gap: 18px; min-width: 0; }
-.bbpa-user { display: flex; flex-direction: column; align-items: flex-end; min-width: 0; line-height: 1.25; }
-.bbpa-user b { font-weight: 600; font-size: 14px; color: var(--bb-text); }
-.bbpa-user small { font-size: 12px; color: var(--bb-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
-.bbpa-signout {
-  font: 600 14px/1 var(--bb-font); color: var(--bb-gold-bright); background: transparent;
-  border: 1px solid var(--bb-gold-hair); border-radius: 8px; padding: 10px 16px; cursor: pointer; min-height: 40px;
+/* hero: the photo, the logo bar and the title */
+.bbpa-hero {
+  position: relative; min-height: 470px; padding-bottom: 150px;
+  background-color: var(--bb-charcoal); background-size: cover; background-position: center 38%;
 }
-.bbpa-signout:hover { background: rgba(201, 164, 92, 0.10); border-color: var(--bb-gold); }
-/* html:root prefix: beats the app-wide focus ring (styles/appearance.css) so the
-   ring is gold here; still only inside .bbpa. */
-html:root .bbpa .bbpa-signout:focus-visible, html:root .bbpa .bbpa-card:focus-visible { outline: 2px solid var(--bb-gold-bright); outline-offset: 3px; }
+.bbpa-hero-scrim {
+  position: absolute; inset: 0; pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(10, 10, 11, 0.92) 0%, rgba(10, 10, 11, 0.62) 42%, rgba(10, 10, 11, 0.18) 100%),
+    linear-gradient(180deg, rgba(10, 10, 11, 0.55) 0%, rgba(10, 10, 11, 0) 30%, rgba(10, 10, 11, 0) 62%, var(--bb-black) 100%);
+}
+.bbpa-top { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 26px; }
+.bbpa-logo { display: inline-flex; align-items: center; gap: 12px; min-width: 0; }
+.bbpa-logo img { width: 38px; height: 38px; display: block; flex: 0 0 auto; }
+.bbpa-wordmark { font-size: 21px; font-weight: 800; letter-spacing: -0.03em; color: #ffffff; }
+.bbpa-wordmark span { color: var(--bb-gold); }
+.bbpa-account { position: relative; display: flex; align-items: center; gap: 14px; min-width: 0; }
+.bbpa-welcome { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.25; min-width: 0; }
+.bbpa-welcome small { font-size: 12px; color: var(--bb-muted); }
+.bbpa-welcome b { font-size: 14px; font-weight: 600; color: #ffffff; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bbpa-avatar {
+  display: inline-flex; align-items: center; gap: 8px; background: transparent; border: 0; padding: 0;
+  color: var(--bb-text); cursor: pointer; min-height: 44px;
+}
+.bbpa-initials {
+  display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%;
+  border: 1.5px solid var(--bb-gold-hair); background: rgba(10, 10, 11, 0.55);
+  font: 600 14px/1 var(--bb-font); color: #ffffff; letter-spacing: 0.02em;
+}
+.bbpa-menu {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 5; min-width: 220px;
+  background: var(--bb-charcoal-2); border: 1px solid var(--bb-gold-hair); border-radius: 10px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5); padding: 6px;
+}
+.bbpa-menu-who { display: flex; flex-direction: column; padding: 10px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); margin-bottom: 4px; }
+.bbpa-menu-who b { font-size: 14px; color: #ffffff; }
+.bbpa-menu-who small { font-size: 12px; color: var(--bb-muted); overflow: hidden; text-overflow: ellipsis; }
+.bbpa-menu-item {
+  display: block; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 7px;
+  padding: 10px 12px; font: 600 14px/1.2 var(--bb-font); color: var(--bb-gold-light); cursor: pointer; min-height: 40px;
+}
+.bbpa-menu-item:hover { background: rgba(201, 151, 61, 0.12); }
+.bbpa-hero-text { position: relative; padding-top: 74px; }
+.bbpa-hero-text h1 {
+  margin: 0; font-family: var(--bb-serif); font-weight: 500; font-size: clamp(40px, 5.4vw, 66px);
+  line-height: 1.05; letter-spacing: 0.005em; color: #ffffff; text-shadow: 0 2px 18px rgba(0, 0, 0, 0.45);
+}
+.bbpa-hero-text h1 em { font-style: normal; color: var(--bb-gold-light); }
+.bbpa-hero-text p { margin: 14px 0 0; font-size: 19px; color: #ece6da; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.5); }
 
-/* hero */
-.bbpa-main { flex: 1 0 auto; padding-top: 48px; padding-bottom: 48px; }
-.bbpa-hero { margin-bottom: 40px; max-width: 720px; }
-.bbpa-eyebrow { margin: 0 0 12px; color: var(--bb-gold); font-size: 12px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; }
-.bbpa-hero h1 { margin: 0; font-family: var(--bb-display); font-weight: 700; font-size: 48px; line-height: 1.05; letter-spacing: -0.03em; color: var(--bb-text); }
-.bbpa-lead { margin: 14px 0 0; color: var(--bb-muted); font-size: 17px; line-height: 1.55; }
-
-/* sections */
-.bbpa-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-bottom: 12px; margin-bottom: 18px; border-bottom: 1px solid var(--bb-line); }
-.bbpa-section-head h2 { margin: 0; font-family: var(--bb-display); font-size: 20px; font-weight: 600; color: var(--bb-text); letter-spacing: -0.01em; }
-.bbpa-section-head span { color: var(--bb-muted); font-size: 14px; }
-.bbpa-previews { margin-top: 44px; }
-.bbpa-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
-.bbpa-grid > li { min-width: 0; }
-
-/* photographic card */
+/* the cards: one row that rises into the bottom of the hero */
+.bbpa-main { position: relative; margin-top: -130px; padding-bottom: 64px; }
+.bbpa-grid { list-style: none; margin: 0; padding: 0; display: grid; gap: 18px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.bbpa-grid--n1 { grid-template-columns: minmax(0, 420px); }
+.bbpa-grid--n2 { grid-template-columns: repeat(2, minmax(0, 420px)); }
+.bbpa-grid--n4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.bbpa-grid li { min-width: 0; }
 .bbpa-card {
-  position: relative; display: block; width: 100%; height: 260px; overflow: hidden; isolation: isolate;
-  border-radius: 14px; border: 1px solid var(--bb-gold-hair); background: var(--bb-charcoal);
-  color: var(--bb-text); text-decoration: none; text-align: left; font: inherit; padding: 0; cursor: pointer;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
-  transition: border-color .2s ease, transform .2s ease, box-shadow .2s ease;
+  position: relative; display: flex; align-items: flex-end; width: 100%; min-height: 300px; height: 100%;
+  border-radius: 12px; border: 1px solid var(--bb-gold-hair); overflow: hidden; padding: 0;
+  background: var(--bb-charcoal); color: var(--bb-text); text-align: left; text-decoration: none; cursor: pointer;
+  font: inherit; box-shadow: 0 22px 44px rgba(0, 0, 0, 0.45);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
-.bbpa-card:hover { border-color: var(--bb-gold); transform: translateY(-2px); box-shadow: 0 22px 48px rgba(0, 0, 0, 0.55); }
-.bbpa-photo { position: absolute; inset: 0; z-index: -2; background-size: cover; background-position: center; transform: scale(1.01); transition: transform .5s ease; }
-.bbpa-card:hover .bbpa-photo { transform: scale(1.05); }
-.bbpa-scrim { position: absolute; inset: 0; z-index: -1;
-  background: linear-gradient(90deg, rgba(8, 8, 9, 0.94) 0%, rgba(8, 8, 9, 0.80) 42%, rgba(8, 8, 9, 0.30) 78%, rgba(8, 8, 9, 0.12) 100%),
-              linear-gradient(0deg, rgba(8, 8, 9, 0.55) 0%, rgba(8, 8, 9, 0) 45%); }
-.bbpa-card::before { /* gold hairline across the top */
-  content: ''; position: absolute; left: 28px; top: 0; width: 64px; height: 2px; background: var(--bb-gold); }
-.bbpa-card-body { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; padding: 26px 28px; max-width: 78%; }
-.bbpa-kind { color: var(--bb-gold); font-size: 11.5px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; }
-.bbpa-title { font-family: var(--bb-display); font-size: 30px; font-weight: 700; line-height: 1.1; letter-spacing: -0.02em; color: #ffffff; overflow-wrap: anywhere; }
-.bbpa-org { color: var(--bb-muted); font-size: 13px; }
-.bbpa-line { color: #ded8cc; font-size: 15px; line-height: 1.45; }
-.bbpa-open { margin-top: 10px; display: inline-flex; align-items: center; gap: 8px; color: var(--bb-gold-bright); font-weight: 600; font-size: 15px; }
-.bbpa-arrow { transition: transform .2s ease; }
-.bbpa-card:hover .bbpa-arrow, .bbpa-card:focus-visible .bbpa-arrow { transform: translateX(3px); }
-.bbpa-card[data-program="preview"] { border-style: dashed; }
+.bbpa-card:hover { transform: translateY(-3px); border-color: var(--bb-gold); box-shadow: 0 26px 52px rgba(0, 0, 0, 0.55); }
+html:root .bbpa .bbpa-card:focus-visible, html:root .bbpa .bbpa-avatar:focus-visible,
+html:root .bbpa .bbpa-menu-item:focus-visible, html:root .bbpa .bbpa-button:focus-visible {
+  outline: 2px solid var(--bb-gold-light); outline-offset: 3px;
+}
+.bbpa-photo { position: absolute; inset: 0; background-size: cover; background-position: center; transition: transform 0.4s ease; }
+.bbpa-card:hover .bbpa-photo { transform: scale(1.03); }
+.bbpa-scrim {
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(10, 10, 11, 0.05) 0%, rgba(10, 10, 11, 0.35) 38%, rgba(10, 10, 11, 0.9) 72%, rgba(10, 10, 11, 0.97) 100%);
+}
+.bbpa-card[data-program='preview'] .bbpa-scrim {
+  background: linear-gradient(180deg, rgba(16, 48, 26, 0.0) 0%, rgba(16, 48, 26, 0.35) 38%, rgba(12, 36, 20, 0.9) 72%, rgba(10, 28, 16, 0.97) 100%);
+}
+.bbpa-tag {
+  position: absolute; top: 14px; right: 14px; z-index: 1; padding: 5px 10px; border-radius: 6px;
+  background: var(--bb-green); color: #ffffff; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+}
+.bbpa-card-body { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 22px 22px 22px; width: 100%; }
+.bbpa-badge {
+  display: inline-grid; place-items: center; width: 50px; height: 50px; border-radius: 50%; margin-bottom: 6px;
+  background: radial-gradient(circle at 35% 30%, var(--bb-gold-light), var(--bb-gold) 60%, var(--bb-gold-deep));
+  color: #ffffff; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+.bbpa-badge--green { background: radial-gradient(circle at 35% 30%, #5aa865, var(--bb-green) 60%, #1f5428); }
+.bbpa-title { font-family: var(--bb-serif); font-weight: 500; font-size: 30px; line-height: 1.12; color: #ffffff; }
+.bbpa-org { font-size: 13px; color: var(--bb-gold-light); }
+.bbpa-line { font-size: 14.5px; line-height: 1.5; color: #e7e1d6; }
+.bbpa-open { display: inline-flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 15px; font-weight: 600; color: #ffffff; }
+.bbpa-go {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  border: 1.5px solid var(--bb-gold); color: var(--bb-gold-light); flex: 0 0 auto;
+}
+.bbpa-card:hover .bbpa-go { background: var(--bb-gold); color: var(--bb-black); }
 
 /* states */
-.bbpa-message { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 28px; border: 1px solid var(--bb-line); border-radius: 14px; background: var(--bb-charcoal); }
-.bbpa-message b { font-size: 16px; color: var(--bb-text); }
-.bbpa-message span { color: var(--bb-muted); font-size: 14px; }
-.bbpa-retry { margin-top: 10px; }
-.bbpa-skeleton { cursor: default; background: linear-gradient(100deg, var(--bb-charcoal) 30%, var(--bb-charcoal-2) 50%, var(--bb-charcoal) 70%); background-size: 300% 100%; animation: bbpa-shimmer 1.4s ease-in-out infinite; box-shadow: none; }
-.bbpa-skeleton::before { display: none; }
-@keyframes bbpa-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
-
-.bbpa-foot { padding-top: 22px; padding-bottom: 28px; border-top: 1px solid var(--bb-line); color: var(--bb-muted); font-size: 13px; }
+.bbpa-skeleton { cursor: default; background: linear-gradient(110deg, var(--bb-charcoal) 30%, var(--bb-charcoal-2) 50%, var(--bb-charcoal) 70%); background-size: 200% 100%; animation: bbpa-shimmer 1.4s linear infinite; }
+@keyframes bbpa-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.bbpa-message {
+  display: flex; flex-direction: column; gap: 6px; align-items: flex-start; max-width: 560px;
+  background: var(--bb-charcoal); border: 1px solid var(--bb-gold-hair); border-radius: 12px; padding: 24px;
+}
+.bbpa-message b { font-size: 17px; color: #ffffff; }
+.bbpa-message span { color: var(--bb-muted); }
+.bbpa-button {
+  margin-top: 10px; font: 600 14px/1 var(--bb-font); color: var(--bb-black); background: var(--bb-gold);
+  border: 0; border-radius: 8px; padding: 12px 18px; cursor: pointer; min-height: 44px;
+}
 
 /* tablet */
-@media (max-width: 900px) {
-  .bbpa-wrap { padding-left: 24px; padding-right: 24px; }
-  .bbpa-grid { grid-template-columns: minmax(0, 1fr); }
-  .bbpa-hero h1 { font-size: 40px; }
+@media (max-width: 1024px) {
+  .bbpa-grid, .bbpa-grid--n4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 /* phone */
-@media (max-width: 560px) {
+@media (max-width: 640px) {
   .bbpa-wrap { padding-left: 16px; padding-right: 16px; }
-  .bbpa-top-inner { min-height: 64px; }
-  .bbpa-logo-sub { display: none; }
-  .bbpa-user { display: none; }
-  .bbpa-main { padding-top: 32px; }
-  .bbpa-hero { margin-bottom: 28px; }
-  .bbpa-hero h1 { font-size: 34px; }
-  .bbpa-lead { font-size: 16px; }
-  .bbpa-card { height: 230px; }
-  .bbpa-card-body { max-width: 100%; padding: 22px 20px; }
-  .bbpa-card::before { left: 20px; }
+  .bbpa-hero { min-height: 340px; padding-bottom: 90px; background-position: 60% 40%; }
+  .bbpa-top { padding-top: 16px; }
+  .bbpa-welcome { display: none; }
+  .bbpa-wordmark { font-size: 19px; }
+  .bbpa-hero-text { padding-top: 44px; }
+  .bbpa-hero-text p { font-size: 16px; }
+  .bbpa-main { margin-top: -70px; padding-bottom: 40px; }
+  .bbpa-grid, .bbpa-grid--n1, .bbpa-grid--n2, .bbpa-grid--n4 { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .bbpa-card { min-height: 240px; }
   .bbpa-title { font-size: 26px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .bbpa-card, .bbpa-photo, .bbpa-arrow { transition: none; }
-  .bbpa-card:hover { transform: none; }
-  .bbpa-card:hover .bbpa-photo { transform: scale(1.01); }
+  .bbpa-card, .bbpa-photo { transition: none; }
+  .bbpa-card:hover, .bbpa-card:hover .bbpa-photo { transform: none; }
   .bbpa-skeleton { animation: none; }
 }

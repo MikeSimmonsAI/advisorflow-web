@@ -1,9 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" width="36" height="36" fill="none" role="img" aria-label="BookaBoost">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 38 38" width="38" height="38" fill="none" role="img" aria-label="BookaBoost">
   <title>BookaBoost</title>
-  <rect width="36" height="36" rx="8" fill="#1d4ed8"/>
-  <rect x="6" y="8" width="24" height="22" rx="3" fill="white" fill-opacity="0.15" stroke="white" stroke-width="1.5"/>
-  <circle cx="12" cy="7" r="2.5" fill="white"/>
-  <circle cx="24" cy="7" r="2.5" fill="white"/>
-  <polyline points="9,24 14,19 18,22 27,13" stroke="#60a5fa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <polyline points="23,13 27,13 27,17" stroke="#60a5fa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Copied exactly from the live BookaBoost website header (bookaboost.live, .nav-logo-mark). -->
+  <rect width="38" height="38" rx="9" fill="#c9973d"/>
+  <rect x="9" y="10" width="13" height="5" rx="2.5" fill="white"/>
+  <rect x="9" y="17" width="10" height="5" rx="2.5" fill="white"/>
+  <rect x="9" y="24" width="13" height="4" rx="2" fill="white"/>
+  <circle cx="27" cy="26" r="6" fill="#1c1007"/>
+  <path d="M24.5 26l1.5 1.5 3-3" stroke="#c9973d" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

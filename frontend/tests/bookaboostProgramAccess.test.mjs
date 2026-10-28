@@ -42,18 +42,22 @@ test('BookaBoost screens never name another brand and every style is scoped', ()
   }
 })
 
-test('the logo files are the marketing page mark, exactly', () => {
-  const page = read('../../index.html')
-  const start = page.indexOf('<svg class="nav-brand-icon"')
-  const block = page.slice(start, page.indexOf('</svg>', start))
-  const shapes = block.split('\n').slice(1).map(l => l.trim()).filter(Boolean)
-  assert.equal(shapes.length, 6)
+test('the logo files are the live BookaBoost website mark, exactly', () => {
+  // Copied from the header of the live site (bookaboost.live, .nav-logo-mark).
+  const shapes = [
+    '<rect width="38" height="38" rx="9" fill="#c9973d"/>',
+    '<rect x="9" y="10" width="13" height="5" rx="2.5" fill="white"/>',
+    '<rect x="9" y="17" width="10" height="5" rx="2.5" fill="white"/>',
+    '<rect x="9" y="24" width="13" height="4" rx="2" fill="white"/>',
+    '<circle cx="27" cy="26" r="6" fill="#1c1007"/>',
+    '<path d="M24.5 26l1.5 1.5 3-3" stroke="#c9973d" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  ]
   for (const f of ['bookaboost-mark.svg', 'bookaboost-logo.svg', 'bookaboost-logo-light.svg']) {
     const svg = read('../public/brands/' + f)
     assert.ok(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"'), f)
-    for (const s of shapes) assert.ok(svg.includes(s), f + ' is missing ' + s)
+    for (const sh of shapes) assert.ok(svg.includes(sh), f + ' is missing ' + sh)
   }
   for (const f of ['bookaboost-logo.svg', 'bookaboost-logo-light.svg']) {
-    assert.match(read('../public/brands/' + f), />BOOKA<tspan fill="#60a5fa">BOOST<\/tspan><\/text>/)
+    assert.match(read('../public/brands/' + f), />Booka<tspan fill="#c9973d">Boost<\/tspan><\/text>/)
   }
 })

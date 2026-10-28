@@ -394,17 +394,18 @@
   .ws-location-select { max-width: 140px; }
 }
 
-/* BookaBoost Wholesale: the rail wears the BookaBoost black/charcoal with the
-   gold accents (owner decision, #272). Colour tokens only - same layout, same
-   navigation. EvoSys Wholesale and every other BookaBoost screen unchanged. */
+/* BookaBoost Wholesale: the rail wears the approved BookaBoost look (owner
+   mockup panel 2, #272): charcoal rail, gold active item. Colour tokens only -
+   same layout, same navigation, same features. EvoSys Wholesale and every
+   other screen unchanged. */
 html:root[data-theme="bookaboost"] .layout--wholesale .sidebar {
-  background: linear-gradient(180deg, #151517 0%, #0b0b0c 100%);
-  border-right: 1px solid rgba(201, 164, 92, 0.28);
+  background: linear-gradient(180deg, #1a1a1d 0%, #0e0e10 100%);
+  border-right: 1px solid rgba(201, 151, 61, 0.28);
 }
 html:root[data-theme="bookaboost"] .layout--wholesale .sidebar .nav-item--active {
-  background: rgba(201, 164, 92, 0.14);
-  color: #e3c58a;
-  box-shadow: inset 2px 0 0 #c9a45c;
+  background: linear-gradient(90deg, #a07828 0%, #c9973d 100%);
+  color: #ffffff;
+  box-shadow: none;
 }
 
 /* IDENTITY MUST STAY READABLE ON THE BOOKABOOST WALNUT RAIL.

@@ -1,12 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 36" width="180" height="36" fill="none" role="img" aria-label="BookaBoost">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 168 38" width="168" height="38" fill="none" role="img" aria-label="BookaBoost">
   <title>BookaBoost</title>
-  <!-- Mark: copied exactly from the marketing page (index.html, nav-brand-icon). -->
-  <rect width="36" height="36" rx="8" fill="#1d4ed8"/>
-  <rect x="6" y="8" width="24" height="22" rx="3" fill="white" fill-opacity="0.15" stroke="white" stroke-width="1.5"/>
-  <circle cx="12" cy="7" r="2.5" fill="white"/>
-  <circle cx="24" cy="7" r="2.5" fill="white"/>
-  <polyline points="9,24 14,19 18,22 27,13" stroke="#60a5fa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <polyline points="23,13 27,13 27,17" stroke="#60a5fa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <!-- Wordmark: "BOOKA" + "BOOST", Space Grotesk 700 20px, letter-spacing -0.02em, as on the marketing page. -->
-  <text x="46" y="25" font-family="'Space Grotesk', 'Inter', 'Segoe UI', Arial, sans-serif" font-size="20" font-weight="700" letter-spacing="-0.4" textLength="128" lengthAdjust="spacingAndGlyphs" fill="#0b0b0c">BOOKA<tspan fill="#60a5fa">BOOST</tspan></text>
+  <!-- Mark and wordmark as on the live BookaBoost website header (bookaboost.live):
+       .nav-logo-mark, then "Booka" + gold "Boost", 18px weight 800, letter-spacing -0.03em. -->
+  <rect width="38" height="38" rx="9" fill="#c9973d"/>
+  <rect x="9" y="10" width="13" height="5" rx="2.5" fill="white"/>
+  <rect x="9" y="17" width="10" height="5" rx="2.5" fill="white"/>
+  <rect x="9" y="24" width="13" height="4" rx="2" fill="white"/>
+  <circle cx="27" cy="26" r="6" fill="#1c1007"/>
+  <path d="M24.5 26l1.5 1.5 3-3" stroke="#c9973d" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="48" y="25.5" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-size="19" font-weight="800" letter-spacing="-0.57" fill="#1c1007">Booka<tspan fill="#c9973d">Boost</tspan></text>
 </svg>
