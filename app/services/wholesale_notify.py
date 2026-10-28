@@ -29,14 +29,16 @@ TENANT_ADMIN_ROLES = ("org_admin", "admin", "owner")
 
 def recipients(db, org_id: str, assignee_id: Optional[str] = None) -> List[str]:
     from app.models.models import User
+    from app.services import wholesale_team as T
+    # THIS workspace's people only (home org; for a second Wholesale tenant
+    # also its members, by their role there - #272).
     if assignee_id:
-        u = (db.query(User).filter(User.id == assignee_id, User.organization_id == org_id,
-                                   User.is_active.isnot(False)).first())
-        if u is not None:
+        u = (T.people_q(db, org_id).filter(User.id == assignee_id,
+                                           User.is_active.isnot(False)).first())
+        if u is not None and getattr(u, "role", None) not in ("god_admin", "super_admin"):
             return [u.id]
-    rows = (db.query(User.id).filter(User.organization_id == org_id,
-                                     User.role.in_(TENANT_ADMIN_ROLES),
-                                     User.is_active.isnot(False)).all())
+    rows = (T.admins_q(db, org_id, TENANT_ADMIN_ROLES).with_entities(User.id)
+            .filter(User.is_active.isnot(False)).all())
     return [r[0] for r in rows]
 
 

@@ -196,8 +196,40 @@ def _people_q(db: Session, org_id: str):
 
 
 def people_q(db: Session, org_id: str):
-    """Public: the people of this workspace for Wholesale screens (see _people_q)."""
+    """Public: the people of this workspace for Wholesale screens (see _people_q).
+    The ONE answer every Wholesale list or picker uses: team page, rep pickers,
+    settings assignees, callback owners, Deal Room staff, alert recipients."""
     return _people_q(db, org_id)
+
+
+def in_workspace(db: Session, org_id: str, user_id: Optional[str]) -> Optional[User]:
+    """The person, when they belong to this workspace (see `people_q`); else None."""
+    if not user_id or not org_id:
+        return None
+    return _people_q(db, org_id).filter(User.id == user_id).first()
+
+
+_PLATFORM_ROLES = ("god_admin", "super_admin")
+
+
+def admins_q(db: Session, org_id: str, roles):
+    """This workspace's people who hold one of `roles` HERE.
+
+    EvoSys and every legacy org: home-org users whose login role matches,
+    exactly as before. A second Wholesale tenant (#272): also people whose
+    active workspace membership there carries that role. A home-org admin
+    somewhere else who is only an advisor here is NOT an admin here, and
+    platform staff never count (their access is support access)."""
+    roles = tuple(roles)
+    q = db.query(User)
+    home = (User.organization_id == org_id) & User.role.in_(roles)
+    if _scope(db, org_id) == PA.WHOLESALE:
+        return q.filter(home)
+    from sqlalchemy import or_
+    member_ids = db.query(Membership.user_id).filter(
+        Membership.scope_type == "customer_org", Membership.scope_id == org_id,
+        Membership.role.in_(roles), Membership.is_active.is_(True))
+    return q.filter(or_(home, User.id.in_(member_ids) & ~User.role.in_(_PLATFORM_ROLES)))
 
 
 def _in_org(db: Session, org_id: str, user_id: str) -> User:

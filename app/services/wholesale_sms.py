@@ -489,9 +489,9 @@ def attribution_user_id(db, lead) -> Optional[str]:
     if getattr(lead, "assigned_to_id", None):
         return lead.assigned_to_id
     from app.models.models import User
-    row = (db.query(User.id)
-           .filter(User.organization_id == lead.organization_id,
-                   User.role == "org_admin", User.is_active.isnot(False))
+    from app.services import wholesale_team as T
+    row = (T.admins_q(db, lead.organization_id, ("org_admin",)).with_entities(User.id)
+           .filter(User.is_active.isnot(False))
            .order_by(User.created_at.asc()).first())
     return row[0] if row else None
 
