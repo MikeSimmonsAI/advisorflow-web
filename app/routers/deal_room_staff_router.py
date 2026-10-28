@@ -543,3 +543,20 @@ def listing_photo(listing_id: str, file_id: str, db: Session = Depends(get_db),
         raise HTTPException(status_code=404, detail="Photo not found")
     return Response(F.fetch(f.storage_backend, f.storage_key, db=db), media_type=f.content_type,
                     headers={"Cache-Control": "private, max-age=300"})
+
+
+@router.get("/dashboard")
+def owner_dashboard(include_test: bool = False, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_or_observer)):
+    org_id = _read(db, user)
+    out = MG.dashboard(db, org_id, user, include_test)
+    db.commit()
+    return out
+
+
+@router.get("/feed")
+def owner_feed(kind: str = Query("activity"), include_test: bool = False, limit: int = Query(12, ge=1, le=50),
+               db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    if kind not in ("activity", "holds", "signups", "messages"):
+        raise HTTPException(status_code=400, detail="kind must be activity, holds, signups or messages")
+    return {"rows": MG.feed(db, _read(db, user), kind, include_test, limit)}

@@ -149,9 +149,9 @@ function OppCard({ o, onSave, preview }) {
         ) : null}
       </div>
       <div className="ir-card__body">
-        <div className="ir-card__price">{usd(o.asking_price)}</div>
         <h3 className="ir-card__addr">{addr1(o.address)}</h3>
         <p className="ir-card__place">{addr2(o.address)}</p>
+        <div className="ir-card__price">{o.asking_price ? usd(o.asking_price) : 'Price on request'}</div>
         <FactsRow facts={o.facts} />
         <div className="ir-tags"><span className="ir-tag">{catOf(o)}</span>{o.you && o.you.status ? <span className="ir-tag ir-tag--blue">{cap(o.you.status)}</span> : null}</div>
         <div className="ir-card__stats">
@@ -310,8 +310,14 @@ function navItems(c) {
 }
 const PHONE_NAV = ['/investors', '/investors/deals', '/investors/messages', '/investors/documents', '/investors/account']
 
-function Sidebar({ room, counts, promo, preview }) {
+function Sidebar({ room, counts, me, preview }) {
   const items = navItems(counts)
+  const nav = useNavigate()
+  const name = me && me.account ? (me.account.preferred_name || me.account.legal_name) : (preview ? 'Investor preview' : '')
+  const help = async () => {
+    if (preview) return
+    try { const t = await inv.post('/investor/threads', { kind: 'relationship' }); nav(`/investors/messages/${t.id}`) } catch { nav('/investors/messages') }
+  }
   return (
     <aside className="ir-side" aria-label="Deal Room">
       <Brandmark name={room && (room.brand_name || room.name)} light />
@@ -325,12 +331,14 @@ function Sidebar({ room, counts, promo, preview }) {
           </NavLink>
         ))}
       </nav>
-      <div className="ir-promo">
-        {promo ? <Photo listingId={promo.id} fileId={promo.cover_photo} preview={preview} className="ir-promo__img" /> : <div className="ir-promo__img ir-promo__img--plain" />}
-        <div className="ir-promo__text">
-          <b>We Find. You Grow.</b>
-          <span>Exclusive real estate opportunities in {room && room.markets && room.markets.length ? listWords(room.markets) : 'Dallas - Fort Worth'}.</span>
-          <Link className="ir-btn ir-btn--primary ir-btn--sm" to={preview ? '/investors/preview' : '/investors/deals'}>View latest deals →</Link>
+      <div className="ir-side__foot">
+        <button type="button" className="ir-help" onClick={help} disabled={preview}>
+          <span className="ir-help__ic" aria-hidden="true">?</span>
+          <span><b>Need Help?</b><small>Contact Support</small></span>
+        </button>
+        <div className="ir-me">
+          <span className="ir-me__av" aria-hidden="true">{(name || '?').split(/\s+/).slice(0, 2).map((x) => x[0]).join('').toUpperCase()}</span>
+          <span className="ir-me__t"><b>{name || '…'}</b><small>{me && me.account ? (me.account.company_legal_name || 'Individual investor') : (room && room.name) || ''}</small></span>
         </div>
       </div>
     </aside>
@@ -388,13 +396,12 @@ function Shell() {
   const reload = useCallback(() => { reloadMe(); reloadDash() }, [reloadMe, reloadDash])
   const room = (dash && dash.room) || (me && me.room)
   const counts = dash && dash.counts
-  const promo = dash && (dash.opportunities || []).find((o) => o.cover_photo)
   useEffect(() => { if (document.getElementById('ir-main')) document.getElementById('ir-main').scrollTop = 0 }, [loc.pathname])
   const shared = { me, dash, reload, q, market, setQ }
   return (
     <div className="ir-app">
       <a className="ir-skip" href="#ir-main">Skip to content</a>
-      <Sidebar room={room} counts={counts} promo={promo} />
+      <Sidebar room={room} counts={counts} me={me} />
       <div className="ir-frame">
         <Topbar me={me} counts={counts} room={room} q={q} setQ={setQ} market={market} setMarket={setMarket} onSignOut={signOut} />
         <main className="ir-main" id="ir-main" tabIndex={-1}>
@@ -443,7 +450,7 @@ function greeting() {
   return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
 }
 
-export function DashboardView({ dash, me, q, market, preview, onSave, rail }) {
+export function DashboardView({ dash, me, q, market, preview, onSave, concierge, support }) {
   const [cat, setCat] = useState('all')
   const opps = (dash && dash.opportunities) || []
   const cats = useMemo(() => {
@@ -456,49 +463,94 @@ export function DashboardView({ dash, me, q, market, preview, onSave, rail }) {
   const room = (dash && dash.room) || {}
   const hero = opps.find((o) => o.cover_photo)
   const name = dash && dash.welcome ? dash.welcome.name : ''
-  const markets = room.markets && room.markets.length ? listWords(room.markets.slice(0, 4)) : 'Dallas - Fort Worth'
   return (
-    <div className="ir-dash">
-      <div className="ir-dash__main">
-        <section className="ir-hero" aria-labelledby="ir-welcome">
-          {hero ? <Photo listingId={hero.id} fileId={hero.cover_photo} preview={preview} className="ir-hero__bg" /> : <div className="ir-hero__bg ir-hero__bg--plain" />}
-          <div className="ir-hero__veil" />
-          <div className="ir-hero__content">
-            <h1 id="ir-welcome" className="ir-hero__h">{preview ? 'Welcome back, ' : `${greeting()}, `}<span className="ir-accent">{name || 'Investor'}</span></h1>
-            <p className="ir-hero__p">Here are your personalized investment opportunities and updates for {markets}.</p>
-            <ul className="ir-hero__stats">
-              {[['home', 'New deals this week', c.new_this_week], ['review', 'Exclusive reviews', c.in_review],
-                ['offers', 'Offers submitted', c.offers], ['heart', 'Saved properties', c.saved]].map(([ic, l, v]) => (
-                <li key={l}><span className="ir-hero__ic"><Ico n={ic} /></span><span><small>{l}</small><b>{v ?? 0}</b></span></li>
-              ))}
-            </ul>
-          </div>
-        </section>
-        {room.welcome_message ? <p className="ir-welcome-note">{room.welcome_message}</p> : null}
-        <div className="ir-tiles">
-          {[['deals', 'Properties match', c.matching ?? 0, 'Based on your criteria'],
-            ['spark', 'Average match', c.average_match !== null && c.average_match !== undefined ? `${c.average_match}%` : '—', 'Across your opportunities'],
-            ['units', 'Asking price range', c.price_min ? `${usdK(c.price_min)}${c.price_max !== c.price_min ? ' – ' + usdK(c.price_max) : ''}` : '—', 'Published asking prices'],
-            ['docs', 'Proof of funds', me && me.funding ? (me.funding.documented ? 'Accepted' : 'Not on file') : (preview ? '—' : '…'),
-              me && me.funding && me.funding.documented ? 'Reviewed by the team' : 'Upload it under Documents']].map(([ic, l, v, s]) => (
-            <div key={l} className="ir-tile"><span className="ir-tile__ic"><Ico n={ic} /></span>
-              <div><small>{l}</small><b>{v}</b><span>{s}</span></div></div>
-          ))}
+    <div className="ir-dash2">
+      <section className="ir-hero2" aria-labelledby="ir-welcome">
+        {hero ? <Photo listingId={hero.id} fileId={hero.cover_photo} preview={preview} className="ir-hero2__photo" /> : <div className="ir-hero2__photo ir-hero2__photo--plain" />}
+        <div className="ir-hero2__veil" />
+        <div className="ir-hero2__body">
+          <h1 id="ir-welcome" className="ir-hero2__h">Welcome Back, <span>{name || 'Investor'}</span></h1>
+          <p className="ir-hero2__p">Your personalized investment opportunities in Dallas–Fort Worth.</p>
+          <ul className="ir-hero2__stats">
+            {[['deals', 'Recommended Deals', c.matching], ['review', 'Exclusive Reviews', c.in_review],
+              ['offers', 'Active Offers', c.offers], ['spark', 'New This Week', c.new_this_week]].map(([ic, l, v]) => (
+              <li key={l}><span className="ir-hero2__ic"><Ico n={ic} size={20} /></span><span><b>{v ?? 0}</b><small>{l}</small></span></li>
+            ))}
+          </ul>
         </div>
-        {!preview && dash && dash.onboarding ? <NextSteps ob={dash.onboarding} toSign={c.to_sign} /> : null}
-        <section className="ir-panel ir-opps" aria-labelledby="ir-opps-h">
-          <div className="ir-panel__head"><h2 id="ir-opps-h" className="ir-h2">Available Investment Opportunities</h2>
-            {!preview ? <Link to="/investors/deals" className="ir-link">View all</Link> : null}</div>
-          <div className="ir-chips" role="tablist" aria-label="Property type">
-            <button type="button" role="tab" aria-selected={cat === 'all'} className={cat === 'all' ? 'is-on' : ''} onClick={() => setCat('all')}>All deals ({opps.length})</button>
-            {cats.map((k) => <button key={k} type="button" role="tab" aria-selected={cat === k} className={cat === k ? 'is-on' : ''} onClick={() => setCat(k)}>{k}</button>)}
-          </div>
-          {shown.length ? <div className="ir-grid">{shown.slice(0, 8).map((o) => <OppCard key={o.id} o={o} onSave={onSave} preview={preview} />)}</div>
-            : <div className="ir-empty">{opps.length ? 'Nothing matches this filter.' : 'No opportunities are published for you yet. When one matches your criteria it appears here first.'}</div>}
-        </section>
+      </section>
+      {!preview && dash && dash.onboarding ? <NextSteps ob={dash.onboarding} toSign={c.to_sign} /> : null}
+      <section className="ir-panel ir-opps" aria-labelledby="ir-opps-h">
+        <div className="ir-panel__head"><h2 id="ir-opps-h" className="ir-h2">Recommended Investment Opportunities</h2>
+          <span className="ir-row">{!preview ? <Link to="/investors/deals" className="ir-link">View All</Link> : null}
+            <span className="ir-gridtag" aria-hidden="true"><Ico n="deals" size={15} />Grid</span></span></div>
+        <div className="ir-chips" role="tablist" aria-label="Property type">
+          <button type="button" role="tab" aria-selected={cat === 'all'} className={cat === 'all' ? 'is-on' : ''} onClick={() => setCat('all')}>All Deals ({opps.length})</button>
+          {cats.map((k) => <button key={k} type="button" role="tab" aria-selected={cat === k} className={cat === k ? 'is-on' : ''} onClick={() => setCat(k)}>{k}</button>)}
+        </div>
+        {shown.length ? <div className="ir-grid4">{shown.slice(0, 8).map((o) => <OppCard key={o.id} o={o} onSave={onSave} preview={preview} />)}</div>
+          : <div className="ir-empty">{opps.length ? 'Nothing matches this filter.' : 'No opportunities are published for you yet. When one matches your criteria it appears here first.'}</div>}
+      </section>
+      <div className="ir-row2">
+        <CriteriaPanel me={me} preview={preview} />
+        <OpportunityChart opps={opps} counts={c} />
       </div>
-      <aside className="ir-rail" aria-label="Concierge, messages and criteria">{rail}</aside>
+      <div className="ir-row3">
+        {concierge}
+        {support}
+      </div>
     </div>
+  )
+}
+
+function OpportunityChart({ opps, counts }) {
+  const now = new Date()
+  const months = []
+  for (let i = 5; i >= 0; i -= 1) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    months.push({ key: `${d.getFullYear()}-${d.getMonth()}`, label: d.toLocaleDateString('en-US', { month: 'short' }), n: 0, m: 0 })
+  }
+  opps.forEach((o) => {
+    if (!o.published_at) return
+    const d = new Date(o.published_at); const k = `${d.getFullYear()}-${d.getMonth()}`
+    const x = months.find((y) => y.key === k)
+    if (x) { x.n += 1; if (o.match && o.match.score >= 60) x.m += 1 }
+  })
+  const enough = months.filter((x) => x.n).length >= 2
+  const cats = {}
+  opps.forEach((o) => { const k = catOf(o); cats[k] = (cats[k] || 0) + 1 })
+  return (
+    <section className="ir-panel ir-chartcard" aria-labelledby="ir-chart-h">
+      <div className="ir-panel__head"><h2 id="ir-chart-h" className="ir-h3"><Ico n="spark" />{enough ? 'Opportunities Over Time' : 'Opportunity Summary'}</h2>
+        {enough ? <span className="ir-sel">6 Months</span> : null}</div>
+      {enough ? (() => {
+        const W = 440; const H = 170; const pad = 24
+        const max = Math.max(1, ...months.map((x) => x.n))
+        const xy = (i, v) => [pad + (i * (W - pad * 2)) / 5, H - pad - ((H - pad * 2) * v) / max]
+        const path = (key) => months.map((x, i) => (i ? 'L' : 'M') + xy(i, x[key]).join(' ')).join(' ')
+        return (
+          <figure className="ir-chart">
+            <div className="ir-chart__legend"><span><i className="is-a" />New opportunities</span><span><i className="is-b" />Strong matches (60%+)</span></div>
+            <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={months.map((x) => `${x.label}: ${x.n} new, ${x.m} strong matches`).join('; ')}>
+              {[0, 1, 2, 3].map((i) => <line key={i} x1={pad} x2={W - pad} y1={pad + (i * (H - pad * 2)) / 3} y2={pad + (i * (H - pad * 2)) / 3} stroke="#e6ecf5" />)}
+              <path d={path('n') + ` L ${W - pad} ${H - pad} L ${pad} ${H - pad} Z`} fill="rgba(37,99,235,.12)" />
+              <path d={path('n')} fill="none" stroke="#2563eb" strokeWidth="2.5" />
+              <path d={path('m')} fill="none" stroke="#60a5fa" strokeWidth="2" strokeDasharray="5 4" />
+              {months.map((x, i) => <text key={x.key} x={xy(i, 0)[0]} y={H - 5} textAnchor="middle" fontSize="11" fill="#64748b">{x.label}</text>)}
+            </svg>
+          </figure>
+        )
+      })() : (
+        <div className="ir-sum">
+          <div><b>{counts.opportunities ?? opps.length}</b><span>Opportunities shared with you</span></div>
+          <div><b>{counts.average_match !== null && counts.average_match !== undefined ? `${counts.average_match}%` : '—'}</b><span>Average match</span></div>
+          <div><b>{counts.price_min ? `${usdK(counts.price_min)}${counts.price_max !== counts.price_min ? '–' + usdK(counts.price_max) : ''}` : '—'}</b><span>Asking price range</span></div>
+          <div><b>{counts.saved ?? 0}</b><span>Saved properties</span></div>
+          <ul className="ir-sum__cats">{Object.entries(cats).map(([k, v]) => <li key={k}><span>{k}</span><b>{v}</b></li>)}</ul>
+          <p className="ir-small ir-muted">A trend chart appears once opportunities have been shared with you in two or more months.</p>
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -511,19 +563,11 @@ function NextSteps({ ob, toSign }) {
   const left = steps.filter((s) => !ob[s.k])
   if (!left.length && !toSign) return null
   return (
-    <section className="ir-panel ir-next" aria-labelledby="ir-next-h">
-      <h2 id="ir-next-h" className="ir-h2">Your next steps</h2>
-      <ol className="ir-steps">
-        {steps.map((s) => (
-          <li key={s.k} className={ob[s.k] ? 'is-done' : ''}>
-            <span className="ir-steps__dot" aria-hidden="true">{ob[s.k] ? '✓' : ''}</span>
-            {ob[s.k] ? <span>{s.l}</span> : <Link to={s.to}>{s.l}</Link>}
-            <span className="ir-sr">{ob[s.k] ? 'done' : 'to do'}</span>
-          </li>
-        ))}
-        {toSign ? <li><span className="ir-steps__dot is-alert" aria-hidden="true">!</span><Link to="/investors/documents">{toSign} document{toSign === 1 ? '' : 's'} to sign</Link></li> : null}
-      </ol>
-    </section>
+    <div className="ir-nextstrip" role="region" aria-label="Your next steps">
+      <b>Next steps</b>
+      {left.map((s) => <Link key={s.k} to={s.to}>{s.l}</Link>)}
+      {toSign ? <Link to="/investors/documents">{toSign} document{toSign === 1 ? '' : 's'} to sign</Link> : null}
+    </div>
   )
 }
 
@@ -531,14 +575,13 @@ function Dashboard({ dash, me, q, market, reload }) {
   const save = async (o) => { try { await inv.post(`/investor/opportunities/${o.id}/save`, { saved: !o.saved }); reload() } catch { /* shown on retry */ } }
   if (!dash) return <Loading />
   return <DashboardView dash={dash} me={me} q={q} market={market} onSave={save}
-                        rail={<><ConciergePanel room={dash.room} /><SupportPanel room={dash.room} /><CriteriaPanel me={me} /></>} />
+                        concierge={<ConciergePanel room={dash.room} top={(dash.opportunities || [])[0]} />} support={<SupportPanel room={dash.room} />} />
 }
 
-// ── right rail ─────────────────────────────────────────────────────────────
-const QUICK = ['What deals are available for me?', 'What do you know about my criteria?', 'What should I do next?']
-
-function ConciergePanel({ room }) {
+// ── concierge, messages, criteria ──────────────────────────────────────────
+function ConciergePanel({ room, top }) {
   const [threads, , reloadT] = useLoad('/investor/threads')
+  const nav = useNavigate()
   const con = threads && (threads.threads || []).find((t) => t.kind === 'concierge')
   const [t, setT] = useState(null)
   const [text, setText] = useState('')
@@ -547,31 +590,45 @@ function ConciergePanel({ room }) {
   const end = useRef(null)
   useEffect(() => { if (con) setT(con) }, [con])
   useEffect(() => { if (end.current && end.current.parentElement) end.current.parentElement.scrollTop = end.current.parentElement.scrollHeight }, [t])
-  const send = async (msg) => {
+  const send = async (msg, threadId) => {
     const body = (msg || text).trim()
-    if (!body || !t) return
+    const id = threadId || (t && t.id)
+    if (!body || !id) return
     setBusy(true); setErr(null)
-    try { const r = await inv.post(`/investor/threads/${t.id}/messages`, { text: body }); setT(r.thread); setText(''); reloadT() }
-    catch (x) { setErr(x.message) } finally { setBusy(false) }
+    try { const r = await inv.post(`/investor/threads/${id}/messages`, { text: body }); if (!threadId) { setT(r.thread); setText('') } reloadT(); return r }
+    catch (x) { setErr(x.message); return null } finally { setBusy(false) }
   }
-  const msgs = t ? (t.messages || []).slice(-6) : []
+  const explain = async () => {
+    if (!top) { send('What deals are available for me?'); return }
+    try {
+      const th = await inv.post('/investor/threads', { kind: 'deal', listing_id: top.id })
+      await send('Can you give me an overview of this property?', th.id)
+      nav(`/investors/messages/${th.id}`)
+    } catch (x) { setErr(x.message) }
+  }
+  const msgs = t ? (t.messages || []).slice(-4) : []
   return (
     <section className="ir-panel ir-concierge" aria-labelledby="ir-con-h">
       <div className="ir-panel__head">
-        <h2 id="ir-con-h" className="ir-h3"><span className="ir-con__mark" aria-hidden="true"><Ico n="spark" size={16} /></span>AI Investment Concierge</h2>
-        <span className={`ir-online${room && room.ai_concierge === false ? ' is-off' : ''}`}>{room && room.ai_concierge === false ? 'Team replies' : 'Online'}</span>
+        <h2 id="ir-con-h" className="ir-h3"><span className="ir-con__mark" aria-hidden="true"><Ico n="spark" size={16} /></span>AI Investment Concierge
+          <span className={`ir-online${room && room.ai_concierge === false ? ' is-off' : ''}`}>{room && room.ai_concierge === false ? 'Team replies' : 'Online'}</span></h2>
+        {t ? <Link className="ir-link ir-small" to={`/investors/messages/${t.id}`}>Full conversation</Link> : null}
       </div>
       <ol className="ir-con__msgs" aria-live="polite">
         {!t ? <li><Loading /></li> : msgs.map((m, i) => (
           <li key={i} className={`ir-con__m ir-con__m--${m.role}`}>
-            <p>{m.text}</p>
-            <small>{m.role === 'ai' ? (m.engine === 'ai' ? 'Concierge (AI)' : 'Concierge (automatic reply)') : m.role === 'staff' ? (m.by || 'Team') : m.role === 'buyer' ? 'You' : ''} · {when(m.at)}</small>
+            {m.role === 'ai' ? <span className="ir-con__av" aria-hidden="true"><Ico n="spark" size={15} /></span> : null}
+            <div><p>{m.text}</p>
+              <small>{m.role === 'ai' ? (m.engine === 'ai' ? 'Concierge (AI)' : 'Concierge (automatic reply)') : m.role === 'staff' ? (m.by || 'Team') : m.role === 'buyer' ? 'You' : ''} · {when(m.at)}</small></div>
           </li>
         ))}
         <li ref={end} aria-hidden="true" />
       </ol>
       <div className="ir-con__quick">
-        {QUICK.map((x) => <button key={x} type="button" disabled={busy || !t} onClick={() => send(x)}>{x}</button>)}
+        <button type="button" disabled={busy || !t} onClick={() => send('What deals are available for me?')}>Find matching deals</button>
+        <button type="button" disabled={busy} onClick={explain}>Explain a property</button>
+        <button type="button" onClick={() => nav('/investors/criteria')}>Update my criteria</button>
+        <button type="button" disabled={busy || !t} onClick={() => send('I would like to talk to a person please.')}>Talk to a human</button>
       </div>
       <form className="ir-con__form" onSubmit={(e) => { e.preventDefault(); send() }}>
         <label className="ir-sr" htmlFor="ir-con-in">Message the concierge</label>
@@ -579,7 +636,6 @@ function ConciergePanel({ room }) {
         <button className="ir-sendbtn" disabled={busy || !text.trim()} aria-label="Send"><Ico n="send" /></button>
       </form>
       <Note kind="error">{err}</Note>
-      {t ? <Link className="ir-link ir-small" to={`/investors/messages/${t.id}`}>Open full conversation</Link> : null}
     </section>
   )
 }
@@ -594,7 +650,7 @@ function SupportPanel({ room }) {
   const count = (k) => all.filter((t) => k === 'all' || t.kind === k).length
   return (
     <section className="ir-panel" aria-labelledby="ir-sup-h">
-      <div className="ir-panel__head"><h2 id="ir-sup-h" className="ir-h3"><Ico n="msg" />Messages &amp; Support</h2><Link className="ir-link" to="/investors/messages">View all</Link></div>
+      <div className="ir-panel__head"><h2 id="ir-sup-h" className="ir-h3"><Ico n="msg" />Messages &amp; Support</h2><Link className="ir-link" to="/investors/messages">View All</Link></div>
       <div className="ir-chips ir-chips--sm" role="tablist" aria-label="Conversation type">
         {[['all', 'All'], ['concierge', 'AI Concierge'], ['relationship', 'Team'], ['deal', 'Deals']].map(([k, l]) => (
           <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'is-on' : ''} onClick={() => setTab(k)}>{l} ({count(k)})</button>))}
@@ -602,11 +658,12 @@ function SupportPanel({ room }) {
       <ul className="ir-sup">
         {list.slice(0, 4).map((t) => {
           const last = (t.messages || [])[t.messages.length - 1] || {}
+          const handoff = t.kind !== 'relationship' && !t.ai_active
           return (
             <li key={t.id}><Link to={`/investors/messages/${t.id}`}>
               <span className="ir-sup__av" aria-hidden="true"><Ico n={t.kind === 'concierge' ? 'spark' : t.kind === 'deal' ? 'home' : 'account'} size={16} /></span>
-              <span className="ir-sup__t"><b>{KIND[t.kind] || cap(t.kind)}</b><small>{last.text}</small></span>
-              <span className="ir-sup__r"><small>{when(t.last_message_at)}</small>{t.unread ? <i className="ir-dot" aria-label="unread" /> : null}</span>
+              <span className="ir-sup__t"><b>{KIND[t.kind] || cap(t.kind)}{handoff ? ' · with the team' : ''}</b><small>{last.text}</small></span>
+              <span className="ir-sup__r"><small>{when(t.last_message_at)}</small>{t.unread ? <i className="ir-dot" aria-label="unread" /> : <i className="ir-dot ir-dot--read" aria-label="read" />}</span>
             </Link></li>
           )
         })}
@@ -619,25 +676,29 @@ function SupportPanel({ room }) {
   )
 }
 
-function CriteriaPanel({ me }) {
+const TIMELINE = { '0_30': '0 – 30 days', '30_60': '30 – 60 days', '60_90': '60 – 90 days', '90_plus': '90+ days' }
+
+function CriteriaPanel({ me, preview }) {
   const box = me && (me.buy_boxes || [])[0]
   const f = box ? box.fields : {}
+  const cr = (box && box.criteria) || {}
   const v = (k) => (f[k] ? f[k].value : null)
   const rows = [
     ['review', 'Strategy', (v('strategies') || []).map(words).map(cap).join(', ')],
-    ['home', 'Property types', (v('property_types') || []).map(words).map(cap).join(', ')],
-    ['pin', 'Target counties', [...(v('counties') || []), ...(v('cities') || [])].join(', ')],
-    ['offers', 'Budget range', v('min_price') || v('max_price') ? `${v('min_price') ? usd(v('min_price')) : 'Any'} – ${v('max_price') ? usd(v('max_price')) : 'Any'}` : ''],
-    ['units', 'Units', v('min_units') || v('max_units') ? `${v('min_units') || 'Any'} – ${v('max_units') || 'Any'}` : ''],
-    ['docs', 'Rehab', v('rehab_tolerance') ? cap(v('rehab_tolerance')) : ''],
+    ['home', 'Property Types', (v('property_types') || []).map(words).map(cap).join(', ')],
+    ['pin', 'Target Counties', [...(v('counties') || []), ...(v('cities') || [])].join(', ')],
+    ['offers', 'Budget Range', v('min_price') || v('max_price') ? `${v('min_price') ? usd(v('min_price')) : 'Any'} – ${v('max_price') ? usd(v('max_price')) : 'Any'}` : ''],
+    ['docs', 'Minimum Cash Flow', cr.min_cash_flow ? `${usd(cr.min_cash_flow)} / month` : ''],
+    ['spark', 'Timeline', TIMELINE[cr.timeline] || ''],
   ]
   return (
     <section className="ir-panel" aria-labelledby="ir-crit-h">
-      <div className="ir-panel__head"><h2 id="ir-crit-h" className="ir-h3"><Ico n="criteria" />My Investment Criteria</h2><Link className="ir-link" to="/investors/criteria">Edit</Link></div>
-      {!me ? <Loading /> : box ? (
+      <div className="ir-panel__head"><h2 id="ir-crit-h" className="ir-h3"><Ico n="criteria" />My Investment Criteria</h2>{!preview ? <Link className="ir-link" to="/investors/criteria">Edit</Link> : null}</div>
+      {preview ? <p className="ir-small ir-muted">Each investor sees their own criteria here, labeled by source.</p> : !me ? <Loading /> : box ? (
         <>
           <dl className="ir-crit">{rows.map(([ic, l, val]) => (
-            <div key={l}><span className="ir-crit__ic"><Ico n={ic} size={16} /></span><div><dt>{l}</dt><dd>{val || <span className="ir-muted">Not set</span>}</dd></div></div>))}</dl>
+            <div key={l}><span className="ir-crit__ic"><Ico n={ic} size={17} /></span><div><dt>{l}</dt><dd>{val || <span className="ir-muted">Not set</span>}</dd></div></div>))}</dl>
+          {cr.preferences ? <p className="ir-small"><b>Buying preferences:</b> {cr.preferences}</p> : null}
           <p className="ir-small ir-muted">{box.confirmed_at ? 'Confirmed by you.' : 'Stated in conversation - please review and confirm.'}</p>
         </>
       ) : <p className="ir-small">Tell us what you buy so we only send what fits. <Link to="/investors/criteria">Set your criteria</Link></p>}
@@ -645,7 +706,6 @@ function CriteriaPanel({ me }) {
   )
 }
 
-// ── deals ──────────────────────────────────────────────────────────────────
 function Deals({ q, market, setQ }) {
   const [d, err, reload] = useLoad('/investor/opportunities')
   const [cat, setCat] = useState('all')
@@ -1183,12 +1243,17 @@ function BuyBox({ box, onSaved, onError }) {
   const [edit, setEdit] = useState(!box)
   const [f, setF] = useState(() => ({ property_types: v('property_types') || [], strategies: v('strategies') || [], counties: v('counties') || [],
     cities: (v('cities') || []).join(', '), zips: (v('zips') || []).join(', '), min_price: v('min_price') ?? '', max_price: v('max_price') ?? '',
-    min_units: v('min_units') ?? '', max_units: v('max_units') ?? '', rehab_tolerance: v('rehab_tolerance') || '' }))
+    min_units: v('min_units') ?? '', max_units: v('max_units') ?? '', rehab_tolerance: v('rehab_tolerance') || '',
+    min_cash_flow: (box && box.criteria && box.criteria.min_cash_flow) ?? '', timeline: (box && box.criteria && box.criteria.timeline) || '',
+    preferences: (box && box.criteria && box.criteria.preferences) || '' }))
   const [busy, setBusy] = useState(false)
   const toggle = (k, x) => setF({ ...f, [k]: f[k].includes(x) ? f[k].filter((y) => y !== x) : [...f[k], x] })
   const save = async (e) => {
     e.preventDefault(); setBusy(true)
-    const body = { ...f, cities: f.cities.split(',').map((s) => s.trim()).filter(Boolean), zips: f.zips.split(',').map((s) => s.trim()).filter(Boolean) }
+    const { min_cash_flow: mcf, timeline, preferences, ...rest } = f
+    const cash = String(mcf).replace(/[^0-9.]/g, '')
+    const body = { ...rest, cities: f.cities.split(',').map((s) => s.trim()).filter(Boolean), zips: f.zips.split(',').map((s) => s.trim()).filter(Boolean),
+      criteria: { min_cash_flow: cash ? Number(cash) : null, timeline: timeline || null, preferences: preferences.trim() || null } }
     try {
       if (box) await inv.put(`/investor/me/buy-boxes/${box.id}`, body); else await inv.post('/investor/me/buy-boxes', body)
       setEdit(false); onSaved('Criteria saved - that confirms them. New deals are matched against them.')
@@ -1229,7 +1294,14 @@ function BuyBox({ box, onSaved, onError }) {
               <select value={f.rehab_tolerance} onChange={(e) => setF({ ...f, rehab_tolerance: e.target.value })}>
                 <option value="">Not sure</option>{['light', 'moderate', 'heavy', 'full_gut'].map((k) => <option key={k} value={k}>{cap(k)}</option>)}
               </select></label>
+            <label className="ir-field"><span>Minimum monthly cash flow ($)</span><input inputMode="numeric" value={f.min_cash_flow} onChange={(e) => setF({ ...f, min_cash_flow: e.target.value })} /></label>
+            <label className="ir-field"><span>Timeline to buy</span>
+              <select value={f.timeline} onChange={(e) => setF({ ...f, timeline: e.target.value })}>
+                <option value="">Not sure</option>{Object.entries(TIMELINE).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </select></label>
           </div>
+          <label className="ir-field"><span>Buying preferences (anything else we should know)</span>
+            <textarea rows={2} maxLength={500} value={f.preferences} onChange={(e) => setF({ ...f, preferences: e.target.value })} /></label>
           <p className="ir-muted ir-small">{(box && box.note) || 'Funding is never part of a buy box.'}</p>
           <div className="ir-actions"><button className="ir-btn ir-btn--primary" disabled={busy}>Save and confirm</button>
             {box ? <button type="button" className="ir-btn ir-btn--quiet" onClick={() => setEdit(false)}>Cancel</button> : null}</div>
@@ -1261,22 +1333,19 @@ function Preview() {
   if (!dash) return <Loading label="Building the preview" />
   return (
     <div className="ir-app ir-app--preview">
-      <Sidebar room={dash.room} counts={dash.counts} promo={dash.opportunities.find((o) => o.cover_photo)} preview />
+      <Sidebar room={dash.room} counts={dash.counts} me={null} preview />
       <div className="ir-frame">
         <div className="ir-previewbar" role="status">Owner preview - this is what investors see. {d.notice}</div>
         <Topbar me={null} counts={dash.counts} room={dash.room} q={q} setQ={setQ} market={market} setMarket={setMarket} preview />
         <main className="ir-main" id="ir-main">
           <DashboardView dash={dash} me={null} q={q} market={market} preview
-                         rail={<>
-                           <section className="ir-panel ir-concierge"><div className="ir-panel__head"><h2 className="ir-h3"><span className="ir-con__mark" aria-hidden="true"><Ico n="spark" size={16} /></span>AI Investment Concierge</h2>
-                             <span className={`ir-online${dash.room.ai_concierge ? '' : ' is-off'}`}>{dash.room.ai_concierge ? 'Online' : 'Team replies'}</span></div>
-                             <ol className="ir-con__msgs"><li className="ir-con__m ir-con__m--ai"><p>{dash.room.welcome_title || 'Welcome to your Deal Room'}. I'm your investment concierge - I learn what you buy and answer questions from what the team publishes.</p><small>Concierge</small></li></ol>
-                             <div className="ir-con__quick">{QUICK.map((x) => <button key={x} type="button" disabled>{x}</button>)}</div></section>
-                           <section className="ir-panel"><div className="ir-panel__head"><h2 className="ir-h3"><Ico n="msg" />Messages &amp; Support</h2></div>
-                             <p className="ir-small ir-muted">Each investor sees their own conversations with the concierge and your team.</p>
-                             {dash.room.support_email || dash.room.support_phone ? <p className="ir-small">Support: {[dash.room.support_email, dash.room.support_phone].filter(Boolean).join(' · ')}</p> : null}</section>
-                           <section className="ir-panel"><div className="ir-panel__head"><h2 className="ir-h3"><Ico n="criteria" />My Investment Criteria</h2></div>
-                             <p className="ir-small ir-muted">Each investor's own buy box, labeled by source.</p></section></>} />
+                         concierge={<section className="ir-panel ir-concierge"><div className="ir-panel__head"><h2 className="ir-h3"><span className="ir-con__mark" aria-hidden="true"><Ico n="spark" size={16} /></span>AI Investment Concierge
+                           <span className={`ir-online${dash.room.ai_concierge ? '' : ' is-off'}`}>{dash.room.ai_concierge ? 'Online' : 'Team replies'}</span></h2></div>
+                           <ol className="ir-con__msgs"><li className="ir-con__m ir-con__m--ai"><span className="ir-con__av" aria-hidden="true"><Ico n="spark" size={15} /></span><div><p>{dash.room.welcome_title || 'Welcome to your Deal Room'}. I'm your investment concierge - I learn what you buy and answer questions from what the team publishes.</p><small>Concierge</small></div></li></ol>
+                           <div className="ir-con__quick">{['Find matching deals', 'Explain a property', 'Update my criteria', 'Talk to a human'].map((x) => <button key={x} type="button" disabled>{x}</button>)}</div></section>}
+                         support={<section className="ir-panel"><div className="ir-panel__head"><h2 className="ir-h3"><Ico n="msg" />Messages &amp; Support</h2></div>
+                           <p className="ir-small ir-muted">Each investor sees their own conversations with the concierge and your team, with read and unread status.</p>
+                           {dash.room.support_email || dash.room.support_phone ? <p className="ir-small">Support: {[dash.room.support_email, dash.room.support_phone].filter(Boolean).join(' · ')}</p> : null}</section>} />
         </main>
       </div>
     </div>

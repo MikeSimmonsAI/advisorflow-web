@@ -284,7 +284,8 @@ def accept_invite(db, token: str, *, password: str, full_name: Optional[str] = N
     inv.status, inv.token_hash, inv.accepted_at, inv.accepted_user_id = INVITE_ACCEPTED, None, _now(), user.id
     inv.buyer_id = buyer.id
     db.flush()
-    log(db, inv.organization_id, "deal_room.invite_accepted", "%s accepted the Deal Room invitation" % inv.name)
+    log(db, inv.organization_id, "deal_room.invite_accepted", "%s accepted the Deal Room invitation" % inv.name,
+        details={"buyer_id": buyer.id})
     notify_staff(db, inv.organization_id, "%s joined your Deal Room" % inv.name,
                  "/wholesale/deal-room?view=investors&buyer=%s" % buyer.id, assignee_id=inv.owner_user_id,
                  event="registered")
@@ -502,7 +503,17 @@ def save_box(db, acct: InvestorAccount, data: Dict[str, Any], box_id: Optional[s
     if "criteria" in data and isinstance(data["criteria"], dict):
         allowed = {k: data["criteria"][k] for k in ("asset_classes", "zoning", "utilities_required", "min_occupancy",
                                                     "min_noi", "sf_profile", "land_types", "commercial_types",
-                                                    "portfolio", "exclusions", "custom") if k in data["criteria"]}
+                                                    "portfolio", "exclusions", "custom", "min_cash_flow",
+                                                    "timeline", "preferences") if k in data["criteria"]}
+        if "min_cash_flow" in allowed and allowed["min_cash_flow"] not in (None, ""):
+            try:
+                allowed["min_cash_flow"] = max(0.0, float(allowed["min_cash_flow"]))
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="minimum cash flow must be a number")
+        if "timeline" in allowed and allowed["timeline"] not in (None, "", "0_30", "30_60", "60_90", "90_plus"):
+            raise HTTPException(status_code=400, detail="timeline must be 0_30, 30_60, 60_90 or 90_plus")
+        if isinstance(allowed.get("preferences"), str):
+            allowed["preferences"] = allowed["preferences"].strip()[:500] or None
         x.criteria = json.dumps({**_j(x.criteria, {}), **allowed})
     for lo, hi in (("min_price", "max_price"), ("min_units", "max_units"), ("min_acres", "max_acres")):
         a, c = getattr(x, lo), getattr(x, hi)

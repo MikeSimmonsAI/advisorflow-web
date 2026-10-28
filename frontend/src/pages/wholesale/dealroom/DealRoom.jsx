@@ -7,7 +7,7 @@
  * approval endpoints, the contract send). Counts are live records.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, fetchObjectUrl } from '../../../api/client'
 import { Alert, Drawer, Empty, EvoApp, Skeleton, Tag } from '../ds/ds'
 import '../ds/evo-pages.css'
@@ -15,6 +15,7 @@ import { errText } from '../wsShared'
 import { DealPackagePanel } from '../wsPackage'
 import { DRS, InviteDrawer, TimeLeft, cap, day, usd, when, words } from './shared'
 import SetupWizard from './Setup'
+import OwnerDashboard from './OwnerDashboard'
 import './dealroom.css'
 
 const VIEWS = [
@@ -28,67 +29,69 @@ const NEXT = { draft: ['approve', 'withdraw'], approved: ['publish', 'redraft', 
 const ACTION_LABEL = { approve: 'Approve', publish: 'Publish', withdraw: 'Withdraw', close: 'Mark closed', redraft: 'Back to draft' }
 
 export default function DealRoom() {
-  const [params, setParams] = useSearchParams()
-  const view = VIEWS.some(([k]) => k === params.get('view')) ? params.get('view') : 'overview'
+  const { view: pathView } = useParams()
+  const [params] = useSearchParams()
+  const nav = useNavigate()
+  const asked = pathView || params.get('view') || 'overview'
+  const view = VIEWS.some(([k]) => k === asked) ? asked : 'overview'
   const go = useCallback((v, extra = {}) => {
-    const p = new URLSearchParams({ view: v, ...extra })
-    setParams(p)
+    const q = new URLSearchParams(extra).toString()
+    nav(v === 'overview' ? '/wholesale/deal-room' : `/wholesale/deal-room/${v}${q ? '?' + q : ''}`)
     window.scrollTo && window.scrollTo({ top: 0 })
-  }, [setParams])
+  }, [nav])
   const [practice, setPractice] = useState(() => { try { return localStorage.getItem('drm.practice') !== '0' } catch { return true } })
   useEffect(() => { try { localStorage.setItem('drm.practice', practice ? '1' : '0') } catch { /* private */ } }, [practice])
+  const [market, setMarket] = useState('')
   const [ov, setOv] = useState(null)
   const [err, setErr] = useState(null)
   const [ok, setOk] = useState(null)
   const [bump, setBump] = useState(0)
   const [inviting, setInviting] = useState(false)
   const [adding, setAdding] = useState(false)
+  const [pv, setPv] = useState(null)
   const done = useCallback((m) => { setErr(null); if (m) setOk(m); setBump((x) => x + 1) }, [])
   const fail = useCallback((e) => { setOk(null); setErr(errText(e)) }, [])
   useEffect(() => {
     api.get(`${DRS}/overview?include_test=${practice}`).then(setOv).catch(fail)
   }, [practice, bump, fail])
   const active = ov && ov.status === 'active'
+  const preview = async (l) => { try { setPv({ l, d: await api.get(`${DRS}/listings/${l.id}/preview`) }) } catch (e) { fail(e) } }
   const p = { practice, bump, done, fail, go, ov, active }
+  const markets = (ov && ov.markets) || ['Dallas', 'Tarrant', 'Collin', 'Denton']
   return (
     <EvoApp world="operations">
-      <header className="drm-hero">
-        <div className="drm-hero__text">
-          <p className="drm-eyebrow">Deal Room</p>
-          <h1 className="drm-h1">{(ov && ov.name) || 'Deal Room'}</h1>
-          <p className="drm-hero__sub">
-            {!ov ? 'Loading…' : active ? `Active since ${day(ov.activated_at)} · investors sign in at /investors`
-              : ov.status === 'paused' ? 'Paused - no new real invitations or publications'
-                : 'Not activated yet - practice invitations and listings work while you set it up'}
-          </p>
-          <div className="drm-hero__status">
-            <span className={`drm-pill drm-pill--${ov ? ov.status : 'unknown'}`}>{ov ? (active ? 'Active' : cap(ov.status === 'setup' ? 'Setup' : ov.status)) : '…'}</span>
-            <label className="drm-switch"><input type="checkbox" checked={practice} onChange={(e) => setPractice(e.target.checked)} />
-              Include practice records</label>
-          </div>
+      <div className="od-pagehead">
+        <div>
+          <h1 className="od-title">{view === 'overview' ? 'Owner Deal Room' : <><button type="button" className="od-crumb" onClick={() => go('overview')}>Owner Deal Room</button> <span aria-hidden="true">›</span> {(VIEWS.find(([k]) => k === view) || [])[1]}</>}</h1>
+          <p className="od-sub">Manage Investors · Publish Deals · Track Activity{ov && ov.name ? ` · ${ov.name}` : ''}</p>
         </div>
-        <div className="drm-hero__actions">
-          <button type="button" className="drm-act drm-act--primary" onClick={() => setInviting(true)}>Invite investor</button>
-          <button type="button" className="drm-act" onClick={() => setAdding(true)}>Add deal</button>
-          <a className="drm-act" href="/investors/preview" target="_blank" rel="noopener noreferrer">View investor portal</a>
-          <button type="button" className="drm-act" onClick={() => go('settings')}>{ov && ov.saved ? 'Settings' : 'Set up Deal Room'}</button>
+        <div className="od-pagehead__side">
+          <label className="od-market"><span className="evo-sr">Market</span>
+            <select value={market} onChange={(e) => setMarket(e.target.value)}>
+              <option value="">Dallas - Fort Worth</option>
+              {markets.map((m) => <option key={m} value={m}>{m} County</option>)}
+            </select></label>
+          <label className="drm-switch drm-switch--dark"><input type="checkbox" checked={practice} onChange={(e) => setPractice(e.target.checked)} />Practice records</label>
+          <span className={`drm-pill drm-pill--${ov ? ov.status : 'unknown'}`}>{ov ? (active ? 'Active' : ov.status === 'paused' ? 'Paused' : 'Setup') : '…'}</span>
         </div>
-      </header>
-      <nav className="drm-tabs" aria-label="Deal Room sections">
-        {VIEWS.map(([k, l]) => {
-          const c = ov && ov.counts
-          const n = !c ? null : { investors: c.investors, listings: c.listings_live, holds: c.holds_pending,
-            messages: c.messages_unread, documents: c.files_to_review }[k]
-          return (
-            <button key={k} type="button" className={view === k ? 'is-on' : ''} aria-current={view === k ? 'page' : undefined}
-                    onClick={() => go(k)}>{l}{n ? <span className="drm-tabs__n">{n}</span> : null}</button>
-          )
-        })}
-      </nav>
+      </div>
+      {view !== 'overview' ? (
+        <nav className="drm-tabs" aria-label="Deal Room sections">
+          {VIEWS.map(([k, l]) => {
+            const c = ov && ov.counts
+            const n = !c ? null : { investors: c.investors, listings: c.listings_live, holds: c.holds_pending,
+              messages: c.messages_unread, documents: c.files_to_review }[k]
+            return (
+              <button key={k} type="button" className={view === k ? 'is-on' : ''} aria-current={view === k ? 'page' : undefined}
+                      onClick={() => go(k)}>{k === 'overview' ? 'Dashboard' : l}{n ? <span className="drm-tabs__n">{n}</span> : null}</button>
+            )
+          })}
+        </nav>
+      ) : null}
       <Alert>{err}</Alert>
       <Alert kind="ok">{ok}</Alert>
-      {view === 'overview' ? <Overview {...p} onInvite={() => setInviting(true)} onAdd={() => setAdding(true)} /> : null}
-      {view === 'investors' ? <Investors {...p} onInvite={() => setInviting(true)} /> : null}
+      {view === 'overview' ? <OwnerDashboard {...p} market={market} onInvite={() => setInviting(true)} onAdd={() => setAdding(true)} onPreview={preview} /> : null}
+      {view === 'investors' ? <Investors {...p} openBuyer={params.get('buyer')} onInvite={() => setInviting(true)} /> : null}
       {view === 'listings' ? <Listings {...p} onAdd={() => setAdding(true)} /> : null}
       {view === 'holds' ? <Holds {...p} /> : null}
       {view === 'messages' ? <Messages {...p} thread={params.get('thread')} /> : null}
@@ -97,93 +100,8 @@ export default function DealRoom() {
       {view === 'settings' ? <SetupWizard onSaved={(m) => done(m)} onFail={fail} status={ov && ov.status} /> : null}
       <InviteDrawer open={inviting} onClose={() => setInviting(false)} roomActive={active} onDone={done} />
       {adding ? <AddDeal {...p} onClose={() => setAdding(false)} /> : null}
+      {pv ? <PreviewDrawer pv={pv} onClose={() => setPv(null)} done={done} fail={fail} /> : null}
     </EvoApp>
-  )
-}
-
-// ── overview ───────────────────────────────────────────────────────────────
-function Overview({ ov, practice, bump, fail, go, onInvite, onAdd }) {
-  const [rd, setRd] = useState(null)
-  const [act, setAct] = useState(null)
-  const [holds, setHolds] = useState(null)
-  useEffect(() => {
-    api.get(`${DRS}/readiness`).then(setRd).catch(fail)
-    api.get(`${DRS}/activity?limit=8`).then((x) => setAct(x.events)).catch(fail)
-    api.get(`${DRS}/holds`).then((x) => setHolds(x.holds)).catch(fail)
-  }, [bump, fail])
-  if (!ov) return <Skeleton rows={4} />
-  const c = ov.counts
-  const tiles = [
-    ['Registered investors', c.investors, `${c.invites_pending} invitation(s) pending`, 'investors'],
-    ['Live listings', c.listings_live, `${c.listings_total} in the room`, 'listings'],
-    ['Exclusive reviews', c.holds_active, `${c.holds_pending} waiting · ${c.holds_expiring} ending within 24h`, 'holds'],
-    ['Unread messages', c.messages_unread, `${c.handoffs} asked for a person`, 'messages'],
-    ['Documents to review', c.files_to_review, 'Investor uploads waiting', 'documents'],
-    ['Interest & offers', c.interest, 'On live listings', 'listings'],
-  ]
-  const live = (holds || []).filter((h) => (practice || !h.is_test) && (h.status === 'requested' || h.status === 'active'))
-  return (
-    <>
-      {ov.status !== 'active' ? (
-        <section className="drm-setup-cta" aria-labelledby="setup-h">
-          <div>
-            <h2 id="setup-h" className="drm-h2">{ov.saved ? 'Finish and activate your Deal Room' : 'Set up your Deal Room'}</h2>
-            <p>Five short steps: details, investor experience, publishing rules, invitations, then review and activate.
-              Everything you already have (your company name, support contact, team) is filled in for you.</p>
-          </div>
-          <button type="button" className="drm-act drm-act--primary drm-act--lg" onClick={() => go('settings')}>
-            {ov.saved ? 'Manage Deal Room setup' : 'Set up Deal Room'}</button>
-        </section>
-      ) : null}
-      <div className="drm-tiles" role="list">
-        {tiles.map(([l, v, sub, to]) => (
-          <button type="button" role="listitem" key={l} className="drm-tile" onClick={() => go(to)}>
-            <span className="drm-tile__l">{l}</span><span className="drm-tile__v">{v}</span><span className="drm-tile__s">{sub}</span>
-          </button>
-        ))}
-      </div>
-      <div className="drm-cols">
-        <section className="drm-card" aria-labelledby="ready-h">
-          <div className="drm-card__head"><h2 id="ready-h" className="drm-h3">Setup checklist</h2>
-            <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => go('settings')}>Open settings</button></div>
-          {!rd ? <Skeleton rows={4} /> : (
-            <ul className="drm-checks">
-              {rd.items.map((i) => (
-                <li key={i.key} className={i.ok ? 'is-ok' : i.blocking ? 'is-block' : 'is-warn'}>
-                  <span className="drm-checks__dot" aria-hidden="true">{i.ok ? '✓' : i.blocking ? '!' : '·'}</span>
-                  <span><b>{i.label}</b><small>{i.detail}</small></span>
-                  <span className="evo-sr">{i.ok ? 'done' : i.blocking ? 'required' : 'optional'}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-        <section className="drm-card" aria-labelledby="now-h">
-          <div className="drm-card__head"><h2 id="now-h" className="drm-h3">Needs attention</h2></div>
-          {!holds ? <Skeleton rows={3} /> : live.length ? (
-            <ul className="drm-list">
-              {live.map((h) => (
-                <li key={h.id}>
-                  <span><b>{h.buyer_name}</b><small>{h.address} · {h.status === 'requested' ? 'asked for an exclusive review' : 'exclusive review running'}</small></span>
-                  {h.status === 'active' ? <TimeLeft endsAt={h.ends_at} short /> :
-                    <button type="button" className="evo-btn evo-btn--primary evo-btn--sm" onClick={() => go('holds')}>Decide</button>}
-                </li>
-              ))}
-            </ul>
-          ) : <p className="evo-small evo-muted">No exclusive reviews waiting.</p>}
-          <div className="drm-row drm-row--gap">
-            <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" onClick={onInvite}>Invite investor</button>
-            <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" onClick={onAdd}>Add deal</button>
-            <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" onClick={() => go('messages')}>Open messages</button>
-          </div>
-        </section>
-        <section className="drm-card" aria-labelledby="act-h">
-          <div className="drm-card__head"><h2 id="act-h" className="drm-h3">Recent activity</h2>
-            <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => go('activity')}>All activity</button></div>
-          {!act ? <Skeleton rows={3} /> : act.length ? <Feed events={act} /> : <p className="evo-small evo-muted">Nothing yet.</p>}
-        </section>
-      </div>
-    </>
   )
 }
 
@@ -199,7 +117,7 @@ function Feed({ events }) {
 }
 
 // ── investors ──────────────────────────────────────────────────────────────
-function Investors({ practice, bump, done, fail, go, onInvite }) {
+function Investors({ practice, bump, done, fail, go, onInvite, openBuyer }) {
   const [d, setD] = useState(null)
   const [inv, setInv] = useState(null)
   const [q, setQ] = useState('')
@@ -212,6 +130,7 @@ function Investors({ practice, bump, done, fail, go, onInvite }) {
     return () => clearTimeout(t)
   }, [practice, bump, q, fail])
   useEffect(() => { api.get(`${DRS}/invites?include_test=${practice}`).then((x) => setInv(x.invites)).catch(fail) }, [practice, bump, fail])
+  useEffect(() => { if (openBuyer && d && !open) { const x = d.find((y) => y.buyer_id === openBuyer); if (x) setOpen(x) } }, [openBuyer, d]) // eslint-disable-line react-hooks/exhaustive-deps
   const resend = async (i) => { try { setLink(await api.post(`${DRS}/invites/${i.id}/resend`, {})); done('New link issued; the old one no longer works.') } catch (x) { fail(x) } }
   const revoke = async (i) => { if (!window.confirm(`Revoke ${i.name}'s invitation?`)) return; try { await api.post(`${DRS}/invites/${i.id}/revoke`, {}); done('Invitation revoked.') } catch (x) { fail(x) } }
   const pending = (inv || []).filter((i) => i.status !== 'accepted')

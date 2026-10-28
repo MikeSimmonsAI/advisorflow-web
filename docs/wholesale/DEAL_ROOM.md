@@ -106,3 +106,15 @@ visibility rules. Every figure in an answer must appear in that context or the a
 the team is asked. Per-process ceilings: `DEAL_ROOM_AI_PER_HOUR` (default 30 per investor) and
 `DEAL_ROOM_AI_PER_ORG_DAY` (default 400). When the AI is off, capped or unavailable the rules answer and the
 turn is labelled `engine: automatic` ("automatic reply"); AI turns are labelled `engine: ai`.
+
+## Dashboards (Oct 28 visual correction)
+
+* **Owner dashboard** (`/wholesale/deal-room`) is served by `GET /wholesale/deal-room/dashboard` (metrics, growth
+  series, status checks, live listings) and `GET /wholesale/deal-room/feed?kind=activity|holds|signups|messages`. Sub-views
+  live at `/wholesale/deal-room/<view>` (`?view=` still works). Sidebar Buyers group: Buyer Intelligence, Deal Room,
+  Investor Outreach (`/wholesale/deal-room/investors`), Buy Boxes (`/wholesale/buyers/buy-boxes`, a read view over buyer
+  intelligence rows).
+* The growth chart and the investor "Opportunities Over Time" chart only render with two or more months of real data;
+  otherwise an empty state / opportunity summary is shown. Status items never say "enabled" without a server check.
+* Investor criteria add `min_cash_flow` (number), `timeline` (`0_30|30_60|60_90|90_plus`) and `preferences` (≤500 chars)
+  inside the buy box's `criteria` JSON - no new columns.

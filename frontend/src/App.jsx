@@ -128,6 +128,7 @@ const DealOperationsDispositions = lazyPage(() => import('./pages/wholesale/Whol
 const WholesaleProperties = lazyPage(() => import('./pages/wholesale/WholesaleProperties'))
 const WholesaleDeal = lazyPage(() => import('./pages/wholesale/WholesaleDeal'))
 const DealRoomManage = lazyPage(() => import('./pages/wholesale/dealroom/DealRoom'))
+const BuyBoxesPage = lazyPage(() => import('./pages/wholesale/dealroom/BuyBoxes'))
 const WholesaleBuyers = lazyPage(() => import('./pages/wholesale/WholesaleBuyers'))
 const WholesaleExceptions = lazyPage(() => import('./pages/wholesale/WholesaleExceptions'))
 const CallbackCenter = lazyPage(() => import('./pages/wholesale/ops/CallbackCenter'))
@@ -1571,6 +1572,8 @@ export default function App() {
         <Route path="/wholesale/dispositions" element={<ProtectedRoute feature="wholesale_real_estate"><DealOperationsDispositions /></ProtectedRoute>} />
         <Route path="/wholesale/buyers" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleBuyers /></ProtectedRoute>} />
         <Route path="/wholesale/deal-room" element={<ProtectedRoute feature="wholesale_real_estate"><DealRoomManage /></ProtectedRoute>} />
+        <Route path="/wholesale/deal-room/:view" element={<ProtectedRoute feature="wholesale_real_estate"><DealRoomManage /></ProtectedRoute>} />
+        <Route path="/wholesale/buyers/buy-boxes" element={<ProtectedRoute feature="wholesale_real_estate"><BuyBoxesPage /></ProtectedRoute>} />
         <Route path="/wholesale/exceptions" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleExceptions /></ProtectedRoute>} />
         <Route path="/wholesale/callbacks" element={<ProtectedRoute feature="wholesale_real_estate"><CallbackCenter /></ProtectedRoute>} />
             <Route path="/wholesale/team" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleTeam /></ProtectedRoute>} />

@@ -163,8 +163,10 @@ const NAV_GROUPS = [
   {
     label: 'Buyers',
     items: [
-      { to: '/wholesale/buyers', label: 'Buyers', icon: 'users', featureKey: 'wholesale_real_estate' },
-      { to: '/wholesale/deal-room', label: 'Deal Room', icon: 'briefcase', featureKey: 'wholesale_real_estate' },
+      { to: '/wholesale/buyers', label: 'Buyer Intelligence', icon: 'users', featureKey: 'wholesale_real_estate', end: true },
+      { to: '/wholesale/deal-room', label: 'Deal Room', icon: 'briefcase', featureKey: 'wholesale_real_estate', end: true },
+      { to: '/wholesale/deal-room/investors', label: 'Investor Outreach', icon: 'send', featureKey: 'wholesale_real_estate' },
+      { to: '/wholesale/buyers/buy-boxes', label: 'Buy Boxes', icon: 'layers', featureKey: 'wholesale_real_estate' },
     ],
   },
   {
