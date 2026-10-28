@@ -354,26 +354,33 @@ def dashboard(db, org_id: str, user, include_test: bool = False) -> Dict[str, An
     v = SET.view(db, org_id, user)
     rd = SET.readiness(db, org_id, user)
     s = v["settings"]
-    key = bool(__import__("os").environ.get("OPENAI_API_KEY"))
+    key = SET.ai_service_ready()
     ai_on = bool(s.get("ai_concierge_enabled"))
     manual = ai_gateway.manual_enabled()
     status = [
         {"key": "config", "label": "Room configuration",
          "state": "ok" if v["saved"] and not rd["blockers"] else "warn",
          "value": "Complete" if v["saved"] and not rd["blockers"] else
-         ("Not saved" if not v["saved"] else "%d item(s) missing" % len(rd["blockers"]))},
+         ("Not saved" if not v["saved"] else "%d missing" % len(rd["blockers"])),
+         "detail": "Settings saved and checked" if v["saved"] and not rd["blockers"] else "Finish setup to go live"},
         {"key": "portal", "label": "Investor portal", "state": "ok" if v["status"] == "active" else "warn",
-         "value": {"active": "Live", "paused": "Paused"}.get(v["status"], "Not activated")},
+         "value": {"active": "Live", "paused": "Paused"}.get(v["status"], "Not live"),
+         "detail": {"active": "Invited investors can sign in", "paused": "Investors cannot see listings while paused"}.get(
+             v["status"], "Practice invitations only until activated")},
         {"key": "publishing", "label": "Deal publishing", "state": "ok" if live else "off",
-         "value": ("%d live" % len(live)) if live else "No deals published"},
+         "value": ("%d live" % len(live)) if live else "None live",
+         "detail": "Listings investors can see right now" if live else "Add a deal to publish your first listing"},
         {"key": "ai", "label": "AI concierge",
          "state": "ok" if ai_on and manual and key else ("warn" if ai_on else "off"),
-         "value": "Enabled" if ai_on and manual and key else
-         ("Automatic replies (AI key not configured)" if ai_on and manual else
-          ("Automatic replies (AI switched off platform-wide)" if ai_on else "Off"))},
-        {"key": "esign", "label": "Document signing", "state": "ok", "value": "In-app e-sign (approved templates)"},
-        {"key": "scan", "label": "Upload scanning", "state": "warn",
-         "value": "Built-in checks only (no antivirus engine)"},
+         "value": "Enabled" if ai_on and manual and key else ("Automatic only" if ai_on else "Off"),
+         "detail": "AI answers from authorized records" if ai_on and manual and key else
+         ("AI key not configured - built-in replies, labelled automatic" if ai_on and manual else
+          ("AI switched off platform-wide - built-in replies, labelled automatic" if ai_on else
+           "Switched off in settings - your team replies"))},
+        {"key": "esign", "label": "Document signing", "state": "ok", "value": "Enabled",
+         "detail": "In-app e-sign with approved templates"},
+        {"key": "scan", "label": "Upload scanning", "state": "warn", "value": "Basic checks",
+         "detail": "Built-in file checks; no antivirus engine connected"},
     ]
     issues = [i["label"] + ": " + i["detail"] for i in rd["items"] if not i["ok"] and i["blocking"]]
     hero = next((c for c in (_listing_card(db, org_id, x) for x in live) if c["cover_photo"]), None)

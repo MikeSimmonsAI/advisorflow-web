@@ -294,3 +294,19 @@ def test_investor_criteria_extras_are_validated(client, admin_auth_headers, auth
     assert box["criteria"]["preferences"] == "Turnkey rentals"
     bad = client.put("/investor/me/buy-boxes/%s" % box["id"], headers=I, json={"criteria": {"timeline": "someday"}})
     assert bad.status_code == 400
+
+
+def test_ai_availability_is_truthful_and_match_reasons_are_criteria_names(client, admin_auth_headers, auth_headers,
+                                                                          db_session, monkeypatch):
+    A, H = admin_auth_headers, auth_headers
+    deal_id, lid, I = _room_with_investor(client, A, H, db_session, street="17 Truth Ln")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    room = ok(client.get("/investor/dashboard", headers=I))["room"]
+    assert room["ai_available"] is False                                  # setting on, but no key: never "online"
+    st = {s["key"]: s for s in ok(client.get(DRS + "/dashboard?include_test=true", headers=A))["status_items"]}
+    assert st["ai"]["value"] != "Enabled" and st["scan"]["value"] == "Basic checks" and st["ai"]["detail"]
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    assert ok(client.get("/investor/dashboard", headers=I))["room"]["ai_available"] is True
+    opp = [o for o in ok(client.get("/investor/dashboard", headers=I))["opportunities"] if o["id"] == lid][0]
+    from app.services.wholesale_matching import WEIGHTS
+    assert set(opp["match"]["why"]) <= set(WEIGHTS)                       # names of criteria only, no deal internals

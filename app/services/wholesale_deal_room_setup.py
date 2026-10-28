@@ -311,6 +311,14 @@ def ai_enabled(db, org_id: str) -> bool:
     return True if r is None else bool(r.ai_concierge_enabled)
 
 
+def ai_service_ready() -> bool:
+    """True only when the AI gateway may run investor (manual) actions AND a
+    model key is configured. The room setting alone is not proof the AI answers."""
+    import os
+    from app.services import ai_gateway
+    return bool(ai_gateway.manual_enabled() and os.environ.get("OPENAI_API_KEY"))
+
+
 def investor_view(db, org_id: str) -> Dict[str, Any]:
     """What the investor portal may show about the room (no internal settings)."""
     s = effective(db, org_id)
@@ -318,5 +326,6 @@ def investor_view(db, org_id: str) -> Dict[str, Any]:
             "welcome_title": s.get("welcome_title"), "welcome_message": s.get("welcome_message"),
             "support_email": s.get("support_email"), "support_phone": s.get("support_phone"),
             "categories": s.get("categories") or [], "markets": s.get("markets") or [],
-            "ai_concierge": bool(s.get("ai_concierge_enabled")), "design": s.get("design"),
+            "ai_concierge": bool(s.get("ai_concierge_enabled")),
+            "ai_available": bool(s.get("ai_concierge_enabled")) and ai_service_ready(), "design": s.get("design"),
             "hold_presets": s.get("hold_presets") or [], "hold_require_note": bool(s.get("hold_require_note"))}

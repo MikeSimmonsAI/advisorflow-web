@@ -33,7 +33,18 @@ const ICON = {
   bath: 'M4 12h16v3a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4zM6 12V6a2 2 0 0 1 4 0',
   area: 'M4 4h16v16H4zM9 4v16M4 9h16',
   units: 'M4 21V7l8-4 8 4v14M9 21v-6h6v6',
+  clock: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2',
+  join: 'M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3',
+  doc: 'M7 3h7l5 5v13H7zM14 3v5h5',
+  globe: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20',
+  chart: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
+  plus: 'M12 5v14M5 12h14',
 }
+const AV_TONES = ['blue', 'indigo', 'violet', 'teal', 'sky']
+const avTone = (n) => AV_TONES[[...(n || '?')].reduce((a, c) => a + c.charCodeAt(0), 0) % AV_TONES.length]
+const ACT_ICON = { Pending: ['clock', 'warn'], Approved: ['star', 'ok'], 'New offer': ['offer', 'ok'], Interested: ['eye', 'info'],
+  Viewed: ['eye', 'info'], Joined: ['join', 'ok'], Published: ['listing', 'info'], 'To review': ['doc', 'warn'], Ended: ['clock', 'muted'],
+  Passed: ['eye', 'muted'], Signed: ['sign', 'ok'] }
 export function Ico({ n, size = 18 }) {
   return (
     <svg className="od-ico" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
@@ -73,7 +84,7 @@ export default function OwnerDashboard({ practice, bump, fail, go, onInvite, onA
   useEffect(() => { api.get(`${DRS}/dashboard?include_test=${practice}`).then(setD).catch(fail) }, [practice, bump, fail])
   useEffect(() => {
     setRows(null)
-    api.get(`${DRS}/feed?kind=${tab}&include_test=${practice}&limit=8`).then((x) => setRows(x.rows)).catch(fail)
+    api.get(`${DRS}/feed?kind=${tab}&include_test=${practice}&limit=6`).then((x) => setRows(x.rows)).catch(fail)
   }, [tab, practice, bump, fail])
   const listings = useMemo(() => ((d && d.listings) || []).filter((l) => !market || (l.county || '').toLowerCase() === market.toLowerCase()), [d, market])
   if (!d) return <Skeleton rows={8} />
@@ -118,19 +129,21 @@ export default function OwnerDashboard({ practice, bump, fail, go, onInvite, onA
       {/* 3. growth | status | quick actions */}
       <div className="od-mid">
         <section className="od-card" aria-labelledby="od-growth-h">
-          <div className="od-card__head"><h2 id="od-growth-h" className="od-h2">Investor Growth</h2><span className="od-select">6 Months</span></div>
-          <GrowthChart growth={d.growth} total={m.total_investors} />
+          <div className="od-card__head"><h2 id="od-growth-h" className="od-h2">Investor Growth</h2><span className="od-select">Last 6 months</span></div>
+          <GrowthChart growth={d.growth} total={m.total_investors} onInvite={onInvite} />
         </section>
         <section className="od-card" aria-labelledby="od-status-h">
           <div className="od-card__head"><h2 id="od-status-h" className="od-h2">Deal Room Status</h2>
             <span className={`od-pill od-pill--${d.status === 'active' ? 'ok' : 'warn'}`}>{d.status === 'active' ? 'Active' : d.status === 'paused' ? 'Paused' : 'Setup'}</span></div>
           <ul className="od-status">
             {d.status_items.map((s) => (
-              <li key={s.key}><span className={`od-status__dot is-${s.state}`} aria-hidden="true">{s.state === 'ok' ? <Ico n="check" size={13} /> : s.state === 'warn' ? '!' : '·'}</span>
-                <span className="od-status__l">{s.label}</span><span className={`od-status__v is-${s.state}`}>{s.value}</span></li>
+              <li key={s.key} title={s.detail || undefined}>
+                <span className={`od-status__dot is-${s.state}`} aria-hidden="true">{s.state === 'ok' ? <Ico n="check" size={12} /> : s.state === 'warn' ? '!' : '–'}</span>
+                <span className="od-status__l">{s.label}{s.detail && s.state !== 'ok' ? <small>{s.detail}</small> : null}</span>
+                <span className={`od-status__v is-${s.state}`}>{s.value}</span></li>
             ))}
           </ul>
-          {d.issues.length ? <p className="od-issues">{d.issues.length} setup item(s) still open.</p> : null}
+          {d.issues.length ? <p className="od-issues">{d.issues.length} setup item{d.issues.length === 1 ? '' : 's'} still open</p> : null}
           <button type="button" className="od-btn od-btn--ghost od-btn--block" onClick={() => go('settings')}>View Setup Details</button>
         </section>
         <section className="od-card" aria-labelledby="od-qa-h">
@@ -159,14 +172,17 @@ export default function OwnerDashboard({ practice, bump, fail, go, onInvite, onA
               <thead><tr><th scope="col">Investor</th><th scope="col">Activity</th><th scope="col">Related Deal</th><th scope="col">Date</th><th scope="col">Status</th></tr></thead>
               <tbody>
                 {rows.map((r, i) => (
-                  <tr key={i} tabIndex={0} onClick={() => open(r)} onKeyDown={(e) => { if (e.key === 'Enter') open(r) }}>
-                    <td data-label="Investor"><span className="od-who"><span className="od-av" aria-hidden="true">{initials(r.investor)}</span>
+                  <tr key={i} tabIndex={0} onClick={() => open(r)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(r) } }}
+                      aria-label={`${r.investor}: ${r.activity}. Open`}>
+                    <td data-label="Investor"><span className="od-who"><span className={`od-av od-av--${avTone(r.investor)}`} aria-hidden="true">{initials(r.investor)}</span>
                       <span><b>{r.investor}</b>{r.company ? <small>{r.company}</small> : null}</span></span></td>
-                    <td data-label="Activity" className="od-table__act">{r.activity}</td>
+                    <td data-label="Activity" className="od-table__act"><span className="od-act">
+                      <span className={`od-act__ic is-${(ACT_ICON[r.status] || ['eye', 'info'])[1]}`} aria-hidden="true"><Ico n={(ACT_ICON[r.status] || ['eye'])[0]} size={15} /></span>
+                      <span>{r.activity}</span></span></td>
                     <td data-label="Related deal">{r.deal ? <span className="od-deal">
                       {r.deal.listing_id && r.deal.photo ? <ListingPhoto listingId={r.deal.listing_id} fileId={r.deal.photo} className="od-deal__img" /> : <span className="od-deal__img od-photo"><Ico n="add" size={14} /></span>}
-                      <span><b>{r.deal.address || 'Deal'}</b><small>{r.deal.place}</small></span></span> : <span className="od-muted">—</span>}</td>
-                    <td data-label="Date" className="od-muted">{ago(r.at)}</td>
+                      <span><b>{r.deal.address || 'Deal'}</b><small>{r.deal.place}</small></span></span> : <span className="od-muted od-small">No deal linked</span>}</td>
+                    <td data-label="Date" className="od-muted od-when"><time dateTime={r.at || undefined} title={r.at ? new Date(r.at).toLocaleString('en-US') : undefined}>{ago(r.at)}</time></td>
                     <td data-label="Status"><span className={`od-pill od-pill--${r.tone}`}>{r.status}</span></td>
                   </tr>
                 ))}
@@ -201,14 +217,27 @@ export default function OwnerDashboard({ practice, bump, fail, go, onInvite, onA
                       {f.square_feet ? <li><Ico n="area" size={14} />{Number(f.square_feet).toLocaleString('en-US')} sq ft</li> : null}
                     </ul>
                     <div className="od-tags"><span className="od-tag">{CAT[l.category] || cap(words(l.category || 'Property'))}</span><span className="od-tag od-tag--blue">{AUD[l.audience]}</span></div>
-                    <p className={`od-state is-${l.hold ? 'warn' : 'ok'}`}>● {l.hold ? `Under exclusive review · ${l.hold.buyer_name}` : 'Published'}
-                      {l.hold_requests ? ` · ${l.hold_requests} request(s)` : ''}</p>
-                    <p className="od-muted od-small">{l.expires_at ? `Open until ${new Date(l.expires_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : 'No closing date'}</p>
+                    <div className="od-lcard__meta">
+                      <span className={`od-state is-${l.hold ? 'warn' : 'ok'}`}><i aria-hidden="true" />{l.hold ? `Exclusive review · ${l.hold.buyer_name}` : 'Published'}</span>
+                      <span className="od-muted od-small">{l.expires_at ? `Open until ${new Date(l.expires_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : 'No closing date'}</span>
+                    </div>
+                    {l.hold_requests ? <p className="od-small od-warnline">{l.hold_requests} exclusive review request{l.hold_requests === 1 ? '' : 's'} waiting</p> : null}
                     <button type="button" className="od-btn od-btn--primary od-btn--block od-btn--sm" onClick={() => onPreview(l)}>View Details</button>
                   </div>
                 </article>
               )
             })}
+            {listings.length < 4 ? (
+              <div className={`od-lcta od-lcta--span${4 - listings.length}`}>
+                <span className="od-lcta__ic" aria-hidden="true"><Ico n="plus" size={22} /></span>
+                <h3>{listings.length === 1 ? 'One deal is live' : `${listings.length} deals are live`}</h3>
+                <p>Investors see new listings first in their portal. Publish another approved deal, or check who has matched these.</p>
+                <div className="od-lcta__btns">
+                  <button type="button" className="od-btn od-btn--primary od-btn--sm" onClick={onAdd}><Ico n="add" size={16} />Add Deal to Room</button>
+                  <button type="button" className="od-btn od-btn--ghost od-btn--sm" onClick={() => go('listings')}>Manage Listings</button>
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="od-emptybox"><p>No deals published yet.</p>
@@ -219,32 +248,54 @@ export default function OwnerDashboard({ practice, bump, fail, go, onInvite, onA
   )
 }
 
-function GrowthChart({ growth, total }) {
+function GrowthChart({ growth, total, onInvite }) {
   const s = growth.series
-  if (!growth.enough) {
+  if (!total) {
     return (
       <div className="od-chart-empty">
-        <b>{total}</b><span>investor{total === 1 ? '' : 's'} so far</span>
-        <p>A growth chart appears once investors have joined in at least two different months - no estimated history is shown.</p>
+        <span className="od-chart-empty__ic" aria-hidden="true"><Ico n="chart" size={22} /></span>
+        <b>No investors yet</b>
+        <p>Growth appears here as invited investors join - built from real join dates, never estimated.</p>
+        <button type="button" className="od-btn od-btn--primary od-btn--sm" onClick={onInvite}><Ico n="invite" size={16} />Invite Investor</button>
       </div>
     )
   }
-  const W = 420; const H = 170; const pad = 26
-  const max = Math.max(1, ...s.map((x) => x.total))
-  const pts = s.map((x, i) => [pad + (i * (W - pad * 2)) / (s.length - 1), H - pad - ((H - pad * 2) * x.total) / max])
-  const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ')
-  const area = line + ` L ${pts[pts.length - 1][0]} ${H - pad} L ${pts[0][0]} ${H - pad} Z`
+  const W = 460; const H = 230; const padX = 30; const padT = 18; const padB = 28
+  const key = growth.enough ? 'total' : 'new'
+  const max = Math.max(1, ...s.map((x) => x[key]))
+  const step = (W - padX * 2) / (s.length - 1)
+  const y = (v) => H - padB - ((H - padT - padB) * v) / max
   const last = s[s.length - 1]
+  const grid = [0, 1, 2, 3].map((i) => padT + (i * (H - padT - padB)) / 3)
   return (
     <figure className="od-chart">
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Investors over 6 months: ${s.map((x) => `${x.label} ${x.total}`).join(', ')}`}>
-        <defs><linearGradient id="odg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#2563eb" stopOpacity=".35" /><stop offset="1" stopColor="#2563eb" stopOpacity="0" /></linearGradient></defs>
-        {[0, 1, 2, 3].map((i) => <line key={i} x1={pad} x2={W - pad} y1={pad + (i * (H - pad * 2)) / 3} y2={pad + (i * (H - pad * 2)) / 3} stroke="#e5ebf5" />)}
-        <path d={area} fill="url(#odg)" /><path d={line} fill="none" stroke="#2563eb" strokeWidth="2.5" />
-        {pts.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r="3.5" fill="#fff" stroke="#2563eb" strokeWidth="2" />)}
-        {s.map((x, i) => <text key={i} x={pts[i][0]} y={H - 6} textAnchor="middle" fontSize="11" fill="#64748b">{x.label}</text>)}
+      <div className="od-chart__stats">
+        <div><b>{total}</b><span>Total investors</span></div>
+        <div><b>{last.new}</b><span>Joined this month</span></div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${growth.enough ? 'Total investors' : 'Investors joined'} by month: ${s.map((x) => `${x.label} ${x[key]}`).join(', ')}`}>
+        <defs><linearGradient id="odg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#2563eb" stopOpacity=".32" /><stop offset="1" stopColor="#2563eb" stopOpacity="0" /></linearGradient></defs>
+        {grid.map((gy, i) => <line key={i} x1={padX} x2={W - padX} y1={gy} y2={gy} stroke="#e8eef7" />)}
+        {growth.enough ? (() => {
+          const pts = s.map((x, i) => [padX + i * step, y(x.total)])
+          const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ')
+          return <>
+            <path d={line + ` L ${pts[pts.length - 1][0]} ${H - padB} L ${pts[0][0]} ${H - padB} Z`} fill="url(#odg)" />
+            <path d={line} fill="none" stroke="#2563eb" strokeWidth="2.5" strokeLinejoin="round" />
+            {pts.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r="3.5" fill="#fff" stroke="#2563eb" strokeWidth="2" />)}
+          </>
+        })() : s.map((x, i) => {
+          const bw = Math.min(34, step * 0.5); const cx = padX + i * step
+          return <g key={i}>
+            <rect x={cx - bw / 2} y={padT} width={bw} height={H - padT - padB} rx="7" fill="#f2f6fc" />
+            {x.new ? <rect x={cx - bw / 2} y={y(x.new)} width={bw} height={H - padB - y(x.new)} rx="7" fill="url(#odg)" stroke="#2563eb" strokeWidth="1.5" /> : null}
+            {x.new ? <text x={cx} y={y(x.new) - 6} textAnchor="middle" fontSize="12" fontWeight="700" fill="#1e3a8a">{x.new}</text> : null}
+          </g>
+        })}
+        {s.map((x, i) => <text key={i} x={padX + i * step} y={H - 8} textAnchor="middle" fontSize="11.5" fill="#64748b">{x.label}</text>)}
       </svg>
-      <figcaption className="od-chart__tip"><b>{last.total}</b> investors · {last.new} new this month</figcaption>
+      <figcaption className="od-chart__cap">{growth.enough ? 'Total investors at each month end, from real join dates.'
+        : 'Investors joined per month. The trend line starts once there are two months of history.'}</figcaption>
     </figure>
   )
 }

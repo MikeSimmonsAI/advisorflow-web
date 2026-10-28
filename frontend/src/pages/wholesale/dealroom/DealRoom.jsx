@@ -62,7 +62,8 @@ export default function DealRoom() {
     <EvoApp world="operations">
       <div className="od-pagehead">
         <div>
-          <h1 className="od-title">{view === 'overview' ? 'Owner Deal Room' : <><button type="button" className="od-crumb" onClick={() => go('overview')}>Owner Deal Room</button> <span aria-hidden="true">›</span> {(VIEWS.find(([k]) => k === view) || [])[1]}</>}</h1>
+          {view === 'overview' ? <p className="od-title">Owner Deal Room</p>
+            : <h1 className="od-title"><button type="button" className="od-crumb" onClick={() => go('overview')}>Owner Deal Room</button> <span aria-hidden="true">›</span> {(VIEWS.find(([k]) => k === view) || [])[1]}</h1>}
           <p className="od-sub">Manage Investors · Publish Deals · Track Activity{ov && ov.name ? ` · ${ov.name}` : ''}</p>
         </div>
         <div className="od-pagehead__side">

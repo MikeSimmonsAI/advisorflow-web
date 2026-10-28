@@ -501,6 +501,13 @@ export default function Layout({ children }) {
   // "EvoSys Platform". Nothing is removed: the same items, the same
   // visibility rules, one click further away. See WholesaleShell.jsx.
   const inWholesale = !vertical && isWholesalePath(location.pathname)
+  // THE BUYERS / DEAL ROOM SCREENS wear the approved navy rail (owner reference,
+  // Oct 28). Scoped by class to exactly these routes: every other Wholesale
+  // screen keeps its light rail. Groups that do not hold the current page fold
+  // behind a chevron here - nothing is removed, one click opens them.
+  const inDealRoom = inWholesale && /^\/wholesale\/(deal-room|buyers)(\/|$)/.test(location.pathname)
+  const [openGroups, setOpenGroups] = useState(() => new Set())
+  const toggleGroup = (label) => setOpenGroups((s) => { const n = new Set(s); if (n.has(label)) n.delete(label); else n.add(label); return n })
   // On the Wholesale side "Add to Home Screen" installs EvoSys Field (opens at
   // Appointments) instead of the advisor mobile workspace. Build list #26.
   useEffect(() => { applyFieldAppHead(inWholesale) }, [inWholesale])
@@ -734,7 +741,7 @@ export default function Layout({ children }) {
   useEffect(() => { setLogoFailed(false) }, [logoUrl])
 
   return (
-    <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}${inWholesale ? ' layout--wholesale' : ''}`}
+    <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}${inWholesale ? ' layout--wholesale' : ''}${inDealRoom ? ' layout--dealroom' : ''}`}
          data-brand-theme={shellResolution.theme} data-brand-source={shellResolution.source}
          data-brand-platform={branding?.platform?.slug || ''} data-org-id={branding?.organization_id || ''}
          data-product={inWholesale ? WHOLESALE_PRODUCT : undefined}>
@@ -1047,11 +1054,20 @@ export default function Layout({ children }) {
                   {wsGroups.map((group) => {
                     const items = group.items.filter(visible)
                     if (items.length === 0) return null
+                    const holdsCurrent = items.some((item) => item.end ? location.pathname === item.to : (location.pathname === item.to || location.pathname.startsWith(item.to + '/')))
+                    const foldable = inDealRoom && !sidebarCollapsed && !holdsCurrent
+                    const open = !foldable || openGroups.has(group.label)
+                    const gid = 'nav-grp-' + group.label.replace(/[^a-z]+/gi, '-').toLowerCase()
                     return (
-                      <div key={group.label} className="nav-section">
-                        {!sidebarCollapsed && <div className="nav-section-label">{navSectionLabel(group.label)}</div>}
+                      <div key={group.label} className={`nav-section${inDealRoom && holdsCurrent ? ' nav-section--current' : ''}`}>
+                        {foldable ? (
+                          <button type="button" className="nav-section-toggle" aria-expanded={open} aria-controls={gid} onClick={() => toggleGroup(group.label)}>
+                            <span>{navSectionLabel(group.label)}</span>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+                          </button>
+                        ) : (!sidebarCollapsed && <div className="nav-section-label">{navSectionLabel(group.label)}</div>)}
                         {sidebarCollapsed && <div className="nav-divider" />}
-                        {items.map(renderItem)}
+                        {open ? <div id={gid}>{items.map(renderItem)}</div> : null}
                       </div>
                     )
                   })}
