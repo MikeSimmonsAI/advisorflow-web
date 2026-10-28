@@ -17,6 +17,7 @@ export function neutralEngineText(text) {
     .replace(/should EvoSense /g, 'should the engine ')
     .replace(/may EvoSense /g, 'may the engine ')
     .replace(/Why EvoSense /g, 'Why the engine ')
+    .replace(/a channel EvoSense sends on/g, 'a channel this workspace sends on')
     .replace(/EvoSys Field/g, 'the field app')
     .replace(/\bEvoSense\b/g, 'Acquisition')
 }

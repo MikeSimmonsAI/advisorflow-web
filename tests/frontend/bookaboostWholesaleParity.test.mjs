@@ -24,6 +24,8 @@ const src = (p) => readFileSync(join(ROOT, p), 'utf8')
 
 test('server text naming the engine becomes neutral wording', () => {
   assert.equal(neutralEngineText('EvoSense is paused for this workspace.'), 'Acquisition is paused for this workspace.')
+  assert.equal(neutralEngineText("Email outreach is not a channel EvoSense sends on; first contact is a person's call."),
+               "Email outreach is not a channel this workspace sends on; first contact is a person's call.")
   assert.equal(neutralEngineText('Promoted from EvoSense discovery (1 Main St)'), 'Promoted from Acquisition discovery (1 Main St)')
   assert.equal(neutralEngineText('Tell EvoSense what to hunt'), 'Tell the engine what to hunt')
   assert.equal(neutralEngineText('Put EvoSys Field on your home screen'), 'Put the field app on your home screen')
