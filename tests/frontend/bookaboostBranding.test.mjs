@@ -46,7 +46,10 @@ check('Layout passes the engine to the product line and the section label', () =
   const s = read('frontend/src/components/Layout.jsx')
   if (!s.includes('const WHOLESALE_ENGINE = engineName(branding)')) throw new Error('no WHOLESALE_ENGINE')
   if ((s.match(/engine=\{WHOLESALE_ENGINE\}/g) || []).length !== 2) throw new Error('product line not wired twice')
-  if ((s.match(/navSectionLabel\(group\.label\)/g) || []).length !== 3) throw new Error('section labels not wired')
+  // Every section label goes through navSectionLabel (other lanes add groups,
+  // so count the raw uses instead of a fixed number of wired ones).
+  if ((s.match(/navSectionLabel\(group\.label\)/g) || []).length < 3) throw new Error('section labels not wired')
+  if (/>\{group\.label\}</.test(s)) throw new Error('a section label bypasses navSectionLabel')
 })
 check('WholesaleShell only says "Powered by" when there is an engine name', () => {
   const s = read('frontend/src/components/WholesaleShell.jsx')
