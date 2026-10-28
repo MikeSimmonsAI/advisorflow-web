@@ -46,6 +46,7 @@ from app.services.evosense import providers as PV
 from app.services.evosense import signals as SIG
 from app.services.evosense import strategy as ST
 from app.services.evosense import views as V
+from app.services import env_name_privacy as _ENV
 
 FEATURE = "wholesale_real_estate"
 from app.services.wholesale_team import require_hunt_rights  # noqa: E402
@@ -1968,7 +1969,7 @@ def providers(db: Session = Depends(get_db), user: User = Depends(require_tenant
     org_id = _read_org(db, user)
     out = PV.status_report(db, org_id)
     db.commit()
-    return out
+    return _ENV.for_viewer(user, out)
 
 
 class EvaluationIn(BaseModel):
@@ -2002,7 +2003,7 @@ def run_provider_evaluation(payload: EvaluationIn, db: Session = Depends(get_db)
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc))
     db.commit()
-    return PE.payload(ev)
+    return _ENV.for_viewer(user, PE.payload(ev))
 
 
 class ExecuteIn(BaseModel):
@@ -2030,7 +2031,7 @@ def execute_provider_evaluation(evaluation_id: str, payload: ExecuteIn, db: Sess
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc))
     db.commit()
-    return PE.payload(ev)
+    return _ENV.for_viewer(user, PE.payload(ev))
 
 
 class GroundTruthIn(BaseModel):
@@ -2133,9 +2134,11 @@ def provider_evaluation_setup(mode: str = "contact", db: Session = Depends(get_d
     if mode not in (PE.MODE_CONTACT, PE.MODE_COMPS):
         raise HTTPException(status_code=422, detail="Mode must be contact or comps.")
     org_id = _read_org(db, user)
-    return {"sample": PE.proposed_sample(db, org_id, mode), "providers": PE.candidates(db, org_id),
-            "confirmation_format": PE.PAID_CONFIRMATION + " <n>",
-            "referee_max_per_lookup": PE.REFEREE_MAX_PER_LOOKUP}
+    # Server setting names stay with platform admins (#272).
+    return _ENV.for_viewer(user, {
+        "sample": PE.proposed_sample(db, org_id, mode), "providers": PE.candidates(db, org_id),
+        "confirmation_format": PE.PAID_CONFIRMATION + " <n>",
+        "referee_max_per_lookup": PE.REFEREE_MAX_PER_LOOKUP})
 
 
 @router.post("/provider-evaluations/{evaluation_id}/purge")
@@ -2155,7 +2158,7 @@ def purge_provider_evaluation(evaluation_id: str, db: Session = Depends(get_db),
         raise HTTPException(status_code=404, detail="Evaluation not found")
     PE.purge(db, ev, user=user)
     db.commit()
-    return PE.payload(ev)
+    return _ENV.for_viewer(user, PE.payload(ev))
 
 
 @router.get("/provider-evaluations")
@@ -2167,7 +2170,7 @@ def list_provider_evaluations(db: Session = Depends(get_db),
     rows = (db.query(EvoSenseProviderEvaluation)
             .filter(EvoSenseProviderEvaluation.organization_id == org_id)
             .order_by(EvoSenseProviderEvaluation.created_at.desc()).limit(50).all())
-    return {"items": [PE.payload(r, with_records=False) for r in rows]}
+    return _ENV.for_viewer(user, {"items": [PE.payload(r, with_records=False) for r in rows]})
 
 
 @router.get("/provider-evaluations/{evaluation_id}")
@@ -2189,7 +2192,7 @@ def get_provider_evaluation(evaluation_id: str, db: Session = Depends(get_db),
         out["readiness"] = PE.plan_readiness(db, ev)
     if not _admin_here and out.get("report"):
         out["report"] = dict(out["report"], examples=[])
-    return out
+    return _ENV.for_viewer(user, out)
 
 
 @router.get("/capabilities")
@@ -2349,7 +2352,7 @@ def patch_provider(payload: ProviderPatch, db: Session = Depends(get_db),
     C.log_event(db, org_id, "provider.configured", user=user, actor_type=C.ACTOR_USER,
                 summary="%s: enabled=%s priority=%s" % (key, cfg.enabled, cfg.priority))
     db.commit()
-    return PV.status_report(db, org_id)
+    return _ENV.for_viewer(user, PV.status_report(db, org_id))
 
 
 @router.get("/controls")
