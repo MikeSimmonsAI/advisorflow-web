@@ -35,7 +35,7 @@ def recipients(db, org_id: str, assignee_id: Optional[str] = None) -> List[str]:
     if assignee_id:
         u = (T.people_q(db, org_id).filter(User.id == assignee_id,
                                            User.is_active.isnot(False)).first())
-        if u is not None and getattr(u, "role", None) not in ("god_admin", "super_admin"):
+        if u is not None:
             return [u.id]
     rows = (T.admins_q(db, org_id, TENANT_ADMIN_ROLES).with_entities(User.id)
             .filter(User.is_active.isnot(False)).all())

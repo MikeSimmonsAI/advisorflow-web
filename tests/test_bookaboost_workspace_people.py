@@ -194,15 +194,21 @@ def test_evaluator_and_settings_screens_show_no_setting_names_to_tenants(client,
     assert names, "no provider registry names found - the check below would prove nothing"
     for k in names:
         monkeypatch.delenv(k, raising=False)
-    for who, org in ((ppl["bab_admin"], ppl["bab"]), (ppl["evo_user"], ppl["evo"])):
-        h = _h(db_session, who, ws=org.id)
-        for path in ("/wholesale/evosense/provider-evaluations/setup",
-                     "/wholesale/evosense/providers", "/wholesale/settings",
-                     "/wholesale/enrichment/providers"):
-            r = client.get(path, headers=h)
-            assert r.status_code == 200, (path, r.status_code, r.text[:200])
-            leaked = [n for n in names if n in r.text]
-            assert not leaked, "%s shows setting names to a tenant admin: %s" % (path, leaked)
+    paths = ("/wholesale/evosense/provider-evaluations/setup",
+             "/wholesale/evosense/providers", "/wholesale/settings",
+             "/wholesale/enrichment/providers")
+    h = _h(db_session, ppl["bab_admin"], ws=ppl["bab"].id)
+    for path in paths:
+        r = client.get(path, headers=h)
+        assert r.status_code == 200, (path, r.status_code, r.text[:200])
+        leaked = [n for n in names if n in r.text]
+        assert not leaked, "%s shows setting names to a tenant admin: %s" % (path, leaked)
+    # EvoSys's own staff run the platform: their screens are unchanged.
+    h = _h(db_session, ppl["evo_user"], ws=ppl["evo"].id)
+    for path in paths:
+        r = client.get(path, headers=h)
+        assert r.status_code == 200, (path, r.status_code, r.text[:200])
+        assert ENV.HIDDEN not in r.text, path
 
 
 # ── the prepared seat conversion (dry-run default; never run in production) ──

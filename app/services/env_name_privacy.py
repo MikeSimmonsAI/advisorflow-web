@@ -89,5 +89,18 @@ def hide(payload: Any, extra: Iterable[str] = ()) -> Any:
     return walk(payload)
 
 
+def _evosys_staff(user) -> bool:
+    """EvoSys's own people run the platform; their screens stay exactly as they
+    were. Only other workspaces' people get the names hidden."""
+    try:
+        from app.services.program_experience import WHOLESALE_HOST_SLUG
+        org = getattr(user, "organization", None)
+        return (getattr(org, "slug", "") or "") == WHOLESALE_HOST_SLUG
+    except Exception:  # noqa: BLE001 - unknown: hide, the safe side
+        return False
+
+
 def for_viewer(user, payload: Any) -> Any:
-    return payload if is_platform_admin(user) else hide(payload)
+    if is_platform_admin(user) or _evosys_staff(user):
+        return payload
+    return hide(payload)
