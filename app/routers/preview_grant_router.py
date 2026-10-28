@@ -35,7 +35,7 @@ class GrantIn(BaseModel):
     # The person: by id, or by sign-in email (exact, case-insensitive).
     grantee_user_id: Optional[str] = None
     grantee_email: Optional[str] = None
-    # The brand they work under: by id, or by slug (e.g. "bookaboost").
+    # The brand they work under: by id, or by its platform slug.
     platform_id: Optional[str] = None
     platform_slug: Optional[str] = None
     reason: str = Field(..., min_length=1, max_length=2000)

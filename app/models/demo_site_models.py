@@ -143,9 +143,9 @@ class DealPreviewGrant(Base):
     demo through a signed-in route that re-checks this row on every open and
     returns the stored page - never the token, never the public address.
 
-    `grantee_platform_id` is the brand the grantee works under (e.g.
-    BookaBoost): the preview shows only in that brand's Program Access, and
-    only while the person still belongs to that brand.
+    `grantee_platform_id` is the brand the grantee works under (which may be
+    a different brand from the deal's): the preview shows only in that
+    brand's Program Access, and only while the person still belongs to it.
     """
     __tablename__ = "deal_preview_grants"
 
