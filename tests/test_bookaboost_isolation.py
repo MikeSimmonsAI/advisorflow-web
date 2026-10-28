@@ -224,6 +224,12 @@ LISTING_ROUTES = [
     "/wholesale/evosense/controls", "/intake/batches", "/intake/contacts", "/intake/contacts/summary",
     "/import-batches", "/leads/", "/notifications/", "/conversation-intel/queue",
     "/conversation-intel/search?q=Cedar",
+    # Deal Room, buyer network, contract kits, reports (#272 follow-up).
+    "/wholesale/deal-room/invites", "/wholesale/deal-room/listings", "/wholesale/deal-room/inbox",
+    "/wholesale/deal-room/investors", "/wholesale/deal-room/team", "/wholesale/deal-room/documents",
+    "/wholesale/deal-room/activity", "/wholesale/deal-room/dashboard", "/wholesale/deal-room/feed",
+    "/wholesale/buyers/imports", "/wholesale/buyers/network", "/wholesale/contract-kits",
+    "/wholesale/disposition/channels", "/reports/crm-summary", "/reports/by-client-list",
 ]
 
 
@@ -239,7 +245,8 @@ def test_no_list_report_or_search_screen_carries_the_victims_records(client, db_
             if r.status_code != 200:
                 continue                                # refused is fine; only answers can leak
             answered += 1
-            hit = [m for m in VICTIM_MARKERS if m in r.text]
+            # The victim's own login must not be listed either (people pickers).
+            hit = [m for m in VICTIM_MARKERS + (scenario["victim"].email,) if m in r.text]
             if hit:
                 leaks.append("%s as %s -> %s" % (path, who.email, hit))
     assert answered >= 8, "[%s] too few screens answered (%d) - the check would prove nothing" % (
