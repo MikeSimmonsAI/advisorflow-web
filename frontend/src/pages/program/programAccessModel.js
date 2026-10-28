@@ -169,3 +169,9 @@ export function previewCards(ctx) {
   }
   return out.sort((a, b) => String(a.display).localeCompare(String(b.display)))
 }
+
+/** The server says this login's Program Access wears the BookaBoost look
+ *  (/auth/my-contexts `brand`). Presentation only - it changes no card. */
+export function isBookaBoostBrand(ctx) {
+  return String(ctx?.brand?.theme || '').toLowerCase() === 'bookaboost'
+}

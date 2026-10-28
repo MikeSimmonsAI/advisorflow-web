@@ -1,1 +1,12 @@
-²ø1šYì
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 36" width="180" height="36" fill="none" role="img" aria-label="BookaBoost">
+  <title>BookaBoost</title>
+  <!-- Mark: copied exactly from the marketing page (index.html, nav-brand-icon). -->
+  <rect width="36" height="36" rx="8" fill="#1d4ed8"/>
+  <rect x="6" y="8" width="24" height="22" rx="3" fill="white" fill-opacity="0.15" stroke="white" stroke-width="1.5"/>
+  <circle cx="12" cy="7" r="2.5" fill="white"/>
+  <circle cx="24" cy="7" r="2.5" fill="white"/>
+  <polyline points="9,24 14,19 18,22 27,13" stroke="#60a5fa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="23,13 27,13 27,17" stroke="#60a5fa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Wordmark: "BOOKA" + "BOOST", Space Grotesk 700 20px, letter-spacing -0.02em, as on the marketing page. -->
+  <text x="46" y="25" font-family="'Space Grotesk', 'Inter', 'Segoe UI', Arial, sans-serif" font-size="20" font-weight="700" letter-spacing="-0.4" textLength="128" lengthAdjust="spacingAndGlyphs" fill="#ffffff">BOOKA<tspan fill="#60a5fa">BOOST</tspan></text>
+</svg>

@@ -394,6 +394,19 @@
   .ws-location-select { max-width: 140px; }
 }
 
+/* BookaBoost Wholesale: the rail wears the BookaBoost black/charcoal with the
+   gold accents (owner decision, #272). Colour tokens only - same layout, same
+   navigation. EvoSys Wholesale and every other BookaBoost screen unchanged. */
+html:root[data-theme="bookaboost"] .layout--wholesale .sidebar {
+  background: linear-gradient(180deg, #151517 0%, #0b0b0c 100%);
+  border-right: 1px solid rgba(201, 164, 92, 0.28);
+}
+html:root[data-theme="bookaboost"] .layout--wholesale .sidebar .nav-item--active {
+  background: rgba(201, 164, 92, 0.14);
+  color: #e3c58a;
+  box-shadow: inset 2px 0 0 #c9a45c;
+}
+
 /* IDENTITY MUST STAY READABLE ON THE BOOKABOOST WALNUT RAIL.
    The BookaBoost skin (index.css) paints EVERY .sidebar dark walnut, including
    the two rails the dark-token block above deliberately excludes (the

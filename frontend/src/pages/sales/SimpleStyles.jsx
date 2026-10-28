@@ -24,6 +24,7 @@ const CSS = `
   padding:24px 10px 20px;border-right:0;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#27455f transparent}
 .ss-shell .sw-brand{gap:11px;padding:0 10px 26px;color:#fff}
 .ss-shell .sw-brandmark{width:30px;height:30px;border-radius:7px;background:#09ab88;color:#002620;font-size:16px}
+.ss-shell .sw-brandmark--img{background:none;display:block;object-fit:contain}
 .ss-shell .sw-brand b{font-size:14px;font-weight:800}
 .ss-shell .sw-brand small{color:#a1b9c8;font-size:10px;margin-top:2px}
 .ss-shell .sw-profile{padding:12px 8px;border:1px solid #27455f;border-radius:10px;background:#102a41;margin:0 2px 23px}

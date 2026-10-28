@@ -19,6 +19,7 @@ import SimpleStyles from './SimpleStyles'
 import { Icon } from './SimpleParts'
 import { followUpList, otherWorkspaceCount } from './simpleSales'
 import { initials, ErrorBar } from './parts'
+import { brandMarkUrl } from '../../theme'
 
 const SalesCtx = createContext(null)
 
@@ -171,6 +172,8 @@ export default function SalesShell({ title, subtitle, actions, children }) {
 
   const brand = ctx?.brand_sales_org?.name || 'Sales'
   const platform = ctx?.platform?.name || ''
+  // The brand's own mark when it has one (BookaBoost); otherwise the letter.
+  const markUrl = brandMarkUrl(ctx?.platform?.slug)
   const person = ctx?.user?.full_name || ''
 
   // One source of truth for "is this person running a team", read from the
@@ -193,7 +196,9 @@ export default function SalesShell({ title, subtitle, actions, children }) {
       <div className="sw-app">
         <aside className="sw-sidebar" aria-label="Sales Workspace">
           <div className="sw-brand">
-            <div className="sw-brandmark">{(platform || brand).charAt(0).toUpperCase()}</div>
+            {markUrl
+              ? <img className="sw-brandmark sw-brandmark--img" src={markUrl} alt="" width="30" height="30" />
+              : <div className="sw-brandmark">{(platform || brand).charAt(0).toUpperCase()}</div>}
             <div>
               <b>{platform || brand}</b>
               <small>Sales Workspace</small>

@@ -297,7 +297,20 @@ def my_contexts(request: Request,
     arrangement where typing the URL fails too.
     """
     from app.services import workspace_access
-    return workspace_access.authorized_contexts(db, current_user)
+    return workspace_access.authorized_contexts(db, current_user,
+                                                host_slug=_brand_domain_slug(request))
+
+
+def _brand_domain_slug(request: Request) -> str | None:
+    """The brand a request's Origin/Referer explicitly names, or None.
+
+    Unlike _detect_platform_slug this never guesses: an unknown or local
+    address is None, so the login's own brand links decide the launcher look."""
+    origin = (request.headers.get("origin") or request.headers.get("referer") or "").lower()
+    for slug in ("bookaboost", "evosyspro", "harmonyhustle"):
+        if slug in origin:
+            return slug
+    return None
 
 
 @router.get("/workspace/{organization_id}")
