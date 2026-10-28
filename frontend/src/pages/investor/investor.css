@@ -480,3 +480,136 @@
 .ir-sendbtn .ir-ico { color: #fff; }
 .ir-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ir-blue); display: inline-block; }
 .ir-dot--read { background: transparent; border: 1.5px solid #cbd5e1; }
+
+/* ── Oct 28 polish: premium investor dashboard (owner reference) ─────────── */
+.ir-dash2 { gap: 22px; }
+.ir-dash2 .ir-panel { border-radius: 16px; padding: 20px 22px; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px -12px rgba(15,35,75,.12); border-color: #e3e9f3; }
+.ir-dash2 .ir-panel__head { margin-bottom: 14px; }
+.ir-dash2 .ir-h2 { font-size: 19px; letter-spacing: -.01em; }
+.ir-dash2 .ir-h3 { font-size: 17px; letter-spacing: -.005em; }
+.ir-hero2 { min-height: 268px; border-radius: 18px; box-shadow: 0 18px 40px -18px rgba(10,27,56,.55); }
+.ir-hero2__photo { width: 60%; }
+.ir-hero2__photo img { object-position: center 40%; }
+.ir-hero2__veil { background: linear-gradient(90deg, #0a1b38 0%, #0a1b38 40%, rgba(10,27,56,.86) 52%, rgba(10,27,56,.35) 78%, rgba(10,27,56,.1) 100%); }
+.ir-hero2__body { padding: 32px 34px; }
+.ir-hero2__h { font-size: clamp(28px, 3vw, 40px); }
+.ir-hero2__p { font-size: 16px; line-height: 1.5; margin-bottom: 24px; }
+.ir-hero2__stats { grid-template-columns: repeat(4, minmax(0, 200px)); gap: 14px; }
+.ir-hero2__stats li { padding: 14px 16px; gap: 12px; border-radius: 14px; background: rgba(15, 35, 75, .72); border-color: rgba(255,255,255,.14); }
+.ir-hero2__ic { width: 44px; height: 44px; border-radius: 12px; background: #2563eb; color: #fff; box-shadow: 0 8px 18px -8px rgba(37,99,235,.9); }
+.ir-hero2__ic .ir-ico { color: #fff; }
+.ir-hero2__stats b { font-size: 24px; }
+.ir-hero2__stats small { font-size: 12.5px; color: #cdd8ea; }
+.ir-nextstrip { border-radius: 14px; padding: 12px 18px; }
+
+/* opportunity cards */
+.ir-opps .ir-chips button { min-height: 38px; padding: 0 16px; }
+.ir-grid4 { gap: 18px; }
+.ir-card { border-radius: 14px; border-color: #e3e9f3; }
+.ir-card:hover { box-shadow: 0 18px 32px -18px rgba(15,35,75,.4); }
+.ir-card__media { aspect-ratio: 16 / 9.5; background: #e6edf7; }
+.ir-card__media img { object-fit: cover; }
+.ir-card__body { padding: 14px 16px 16px; gap: 6px; }
+.ir-card__addr { font-size: 15.5px; font-weight: 750; color: #0f172a; }
+.ir-card__price { font-size: 23px; margin-top: 2px; color: #0a1b38; }
+.ir-tag--green { background: #e7f8ee; color: #166534; border-color: #c7ecd6; }
+.ir-card__match { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 4px; font-size: 13px; }
+.ir-match { display: inline-flex; align-items: center; gap: 7px; font-weight: 750; color: #15803d; }
+.ir-match i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.ir-match.is-lo { color: #b45309; }
+.ir-card__avail { color: #64748b; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.ir-card__why { margin: 0; font-size: 12px; color: #64748b; line-height: 1.4; min-height: 2.8em; }
+.ir-card__btns { gap: 10px; padding-top: 8px; }
+.ir-card__btns .ir-btn--sm { min-height: 38px; font-weight: 700; }
+.ir-morecard { display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 10px; padding: 26px 28px; border-radius: 14px;
+  border: 1px dashed #c6d5ee; background: radial-gradient(520px 220px at 100% 0%, #e6efff, transparent 70%), #f8fbff; min-width: 0; }
+.ir-morecard--span1 { grid-column: span 1; } .ir-morecard--span2 { grid-column: span 2; } .ir-morecard--span3 { grid-column: span 3; }
+.ir-morecard__ic { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; background: #2563eb; color: #fff; box-shadow: 0 8px 18px -6px rgba(37,99,235,.6); }
+.ir-morecard__ic .ir-ico { color: #fff; }
+.ir-morecard h3 { margin: 0; font-size: 18px; color: #0a1b38; }
+.ir-morecard p { margin: 0; font-size: 14px; color: #475569; max-width: 46ch; line-height: 1.5; }
+.ir-morecard__btns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+@media (max-width: 1280px) { .ir-morecard--span3 { grid-column: span 2; } }
+@media (max-width: 1000px) { .ir-morecard--span2, .ir-morecard--span3 { grid-column: span 1; } }
+
+/* criteria */
+.ir-crit { gap: 18px 16px; }
+.ir-crit__ic { width: 46px; height: 46px; border-radius: 50%; background: linear-gradient(135deg, #eef4ff, #dce8ff); }
+.ir-crit dt { font-size: 12.5px; }
+.ir-crit dd { font-size: 14.5px; }
+.ir-dash2 .ir-panel__head .ir-link { font-weight: 700; }
+
+/* opportunity summary */
+.ir-sum > div { background: linear-gradient(180deg, #f7faff, #fff); border-color: #e3ebf7; border-radius: 14px; padding: 14px 16px; }
+.ir-sum > div b { font-size: 22px; color: #0a1b38; }
+
+/* concierge */
+.ir-concierge { gap: 12px; }
+.ir-concierge .ir-panel__head { margin-bottom: 4px; }
+.ir-con__note { margin: 0; font-size: 12.5px; color: #475569; background: #f6f9fd; border: 1px solid #e6edf7; border-radius: 10px; padding: 8px 12px; }
+.ir-con__msgs { gap: 14px; max-height: 320px; }
+.ir-con__m { display: flex; gap: 10px; align-items: flex-start; max-width: 94%; }
+.ir-con__m > div { min-width: 0; }
+.ir-con__m p { padding: 12px 15px; border-radius: 4px 16px 16px 16px; background: #f1f5fb; font-size: 14px; line-height: 1.5; }
+.ir-con__m--buyer { flex-direction: row-reverse; }
+.ir-con__m--buyer p { border-radius: 16px 4px 16px 16px; }
+.ir-con__m.is-ai p { background: #eef4ff; }
+.ir-con__m.is-team p { background: #f0fdf4; border-left: 0; box-shadow: inset 3px 0 0 #16a34a; }
+.ir-con__av { width: 38px; height: 38px; border-radius: 50%; background: linear-gradient(135deg, #3b82f6, #1d4ed8); box-shadow: 0 6px 14px -6px rgba(37,99,235,.7); }
+.ir-con__av.is-team { background: linear-gradient(135deg, #22c55e, #15803d); color: #fff; font-weight: 800; font-size: 14px; }
+.ir-con__who { display: inline-block; margin: 0 0 4px 2px; font-size: 11px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; }
+.ir-con__who.is-ai { background: #dbeafe; color: #1d4ed8; }
+.ir-con__who.is-auto { background: #eef2f7; color: #475569; }
+.ir-con__who.is-team { background: #dcfce7; color: #166534; }
+.ir-con__quick, .ir-row3 .ir-con__quick { flex-direction: row; flex-wrap: wrap; gap: 8px; }
+.ir-con__quick button { border-radius: 999px; padding: 8px 14px; background: #f5f9ff; border-color: #cddcf6; }
+.ir-con__quick button.is-human { background: #fff; border-color: #bbf7d0; color: #166534; }
+.ir-con__quick button.is-human:hover:not(:disabled) { background: #f0fdf4; border-color: #16a34a; }
+.ir-con__form { border-radius: 999px; padding: 5px 5px 5px 18px; border-color: #d6e0ef; background: #fff; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+.ir-con__form:focus-within { border-color: #2563eb; box-shadow: 0 0 0 3px #dbeafe; }
+.ir-sendbtn { width: 44px; height: 44px; border-radius: 50%; box-shadow: 0 8px 18px -8px rgba(37,99,235,.8); }
+
+/* messages & support */
+.ir-dash2 .ir-chips--sm button { border-radius: 999px; background: #f1f5fb; border-color: transparent; color: #475569; }
+.ir-dash2 .ir-chips--sm button.is-on { background: #dbeafe; color: #1d4ed8; border-color: transparent; }
+.ir-sup a { grid-template-columns: 42px minmax(0, 1fr) auto; gap: 12px; padding: 12px 4px; border-radius: 10px; }
+.ir-sup a:hover { background: #f7faff; }
+.ir-sup__av { width: 42px; height: 42px; }
+.ir-sup__av.is-concierge { background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: #fff; }
+.ir-sup__av.is-concierge .ir-ico { color: #fff; }
+.ir-sup__av.is-relationship { background: #dcfce7; color: #15803d; }
+.ir-sup__av.is-deal { background: #ffedd5; color: #c2410c; }
+.ir-sup__t b { font-size: 14px; color: #0f172a; }
+.ir-sup__t b em { font-style: normal; font-weight: 600; color: #15803d; }
+.ir-sup__t small { font-size: 13px; margin-top: 2px; }
+.ir-sup__from { font-weight: 650; color: #334155; }
+.ir-sup li.is-unread .ir-sup__t small { color: #1e293b; }
+.ir-dot { width: 10px; height: 10px; }
+.ir-card__btns .ir-btn--sm { white-space: nowrap; padding: 0 8px; font-size: 13px; }
+.ir-hero2__stats { grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: 880px; }
+.ir-hero2__p { max-width: 58ch; }
+.ir-dash2 .ir-row3 > .ir-panel:last-child { display: flex; flex-direction: column; }
+.ir-sup__help { margin-top: auto; display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 14px; background: #f6f9fd; border: 1px solid #e6edf7; }
+.ir-sup__helpic { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: #dcfce7; color: #15803d; flex: none; }
+.ir-sup__helpt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ir-sup__helpt b { font-size: 14px; color: #0f172a; }
+.ir-sup__helpt small { font-size: 12.5px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ir-sup { margin-bottom: 14px; }
+.ir-con__quick button { padding: 8px 12px; }
+@media (max-width: 520px) { .ir-sup__help { flex-wrap: wrap; } .ir-sup__help .ir-btn { width: 100%; } }
+@media (max-width: 1100px) {
+  .ir-hero2__stats { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 520px; }
+  .ir-hero2__photo { width: 100%; }
+  .ir-hero2__veil { background: linear-gradient(90deg, rgba(10,27,56,.95), rgba(10,27,56,.72)); }
+}
+@media (max-width: 520px) {
+  .ir-hero2__body { padding: 24px 18px; }
+  .ir-hero2__stats li { padding: 10px 12px; }
+  .ir-hero2__ic { display: grid; width: 34px; height: 34px; border-radius: 10px; }
+  .ir-hero2__stats small { white-space: normal; line-height: 1.25; }
+  .ir-crit { grid-template-columns: 1fr; }
+  .ir-sum > div b { font-size: 19px; }
+  .ir-dash2 .ir-panel { padding: 18px 16px; }
+}
+@media (max-width: 1000px) { .ir-morecard.ir-morecard--span1, .ir-morecard.ir-morecard--span2, .ir-morecard.ir-morecard--span3 { grid-column: 1 / -1; } }
+.ir-card__media { aspect-ratio: 16 / 9; }

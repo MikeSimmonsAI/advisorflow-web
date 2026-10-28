@@ -688,7 +688,8 @@ def _match_for(db, deal, b) -> Dict[str, Any]:
     missing = M.score_buy_box(deal, prop, box, deal.buyer_room_asking_price)["missing"] if box is not None else []
     return {"score": None if r["disqualified"] else r["score"], "disqualified": r["disqualified"],
             "reason": r["disqualified_reason"], "missing": missing,
-            "factors": [{"matched": f.get("matched"), "detail": f.get("detail")} for f in r["factors"]
+            "factors": [{"matched": f.get("matched"), "detail": f.get("detail"), "dimension": f.get("dimension")}
+                        for f in r["factors"]
                         if f.get("weight") or f.get("unknown")]}
 
 
@@ -745,7 +746,9 @@ def opportunity_card(db, acct, lst, deal, m, hold) -> Dict[str, Any]:
                                                           "unit_count", "acreage", "building_sqft")} if prop else {},
             "cover_photo": photos[0]["id"] if photos else None, "photo_count": len(photos),
             "asking_price": pay.get("asking_price"), "summary": pay.get("summary"),
-            "match": {"score": m["score"], "missing": m.get("missing", [])[:3]},
+            "match": {"score": m["score"], "missing": m.get("missing", [])[:3],
+                      # WHY it matches: the names of the investor's own criteria this listing meets (no deal internals)
+                      "why": [f["dimension"] for f in m.get("factors", []) if f.get("matched") and f.get("dimension")][:4]},
             "hold": _hold_view(hold, True) if hold is not None else None,
             "hold_requested": bool(req), "you": pay.get("you"), "expires_at": _iso(lst.expires_at),
             "published_at": _iso(lst.published_at), "is_test": bool(lst.is_test),

@@ -118,3 +118,15 @@ turn is labelled `engine: automatic` ("automatic reply"); AI turns are labelled 
   otherwise an empty state / opportunity summary is shown. Status items never say "enabled" without a server check.
 * Investor criteria add `min_cash_flow` (number), `timeline` (`0_30|30_60|60_90|90_plus`) and `preferences` (≤500 chars)
   inside the buy box's `criteria` JSON - no new columns.
+
+## Final visual polish (Oct 28, awaiting owner approval)
+
+* The navy rail is scoped by the `layout--dealroom` class (Layout.jsx) to `/wholesale/deal-room*` and
+  `/wholesale/buyers*`; groups not holding the current page fold behind a chevron there. Other Wholesale screens
+  are unchanged.
+* `investor_view().ai_available` = room setting AND `ai_service_ready()` (gateway manual actions on AND a model key).
+  The portal says "AI available" only then; otherwise "Automatic replies". Bubbles are labelled AI / Automatic
+  reply / Team.
+* Opportunity cards carry `match.why`: the names of the investor's own criteria the listing meets (matching
+  dimension keys only - no deal internals).
+* Owner status items have a short `value` plus a `detail` sentence.
