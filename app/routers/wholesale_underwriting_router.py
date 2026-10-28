@@ -351,7 +351,7 @@ def photo_ai_status(deal_id: str, db: Session = Depends(get_db), user: User = De
         raise HTTPException(status_code=409, detail="No customer organization selected.")
     deal = svc.get_deal(db, org_id, deal_id)
     return {**PR.provider_status(), "photos": len(PR._photos(db, org_id, deal)), "used_today": PR.used_today(db, org_id),
-            "daily_cap": PR.daily_cap(), "cost_source": PR.COST_SOURCE, "cost_as_of": PR.COST_AS_OF,
+            "daily_cap": PR.daily_cap(), "cost_source": PR.cost_source_for(db, org_id), "cost_as_of": PR.COST_AS_OF,
             "items": {k: {"category": v[0], "item": v[1], "unit": v[2], "low": v[3], "base": v[4], "high": v[5]}
                       for k, v in PR.DFW_COSTS.items()}}
 

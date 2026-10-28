@@ -80,9 +80,10 @@ class ResponseIn(BaseModel):
 
 
 @router.get("/products")
-def products(user: User = Depends(require_tenant_or_observer)):
+def products(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     return {"products": [{"key": k, "label": FD.PRODUCT_LABELS[k]} for k in FUNDING_PRODUCTS],
-            "submission_statuses": list(FUNDING_SUBMISSION_STATUSES), "disclaimer": FD.DISCLAIMER}
+            "submission_statuses": list(FUNDING_SUBMISSION_STATUSES),
+            "disclaimer": FD.disclaimer_for(db, svc.read_org_id(db, user))}
 
 
 @router.get("/partners")
@@ -94,7 +95,7 @@ def list_partners(include_inactive: bool = False, db: Session = Depends(get_db),
         q = q.filter(WholesaleFundingPartner.is_active.is_(True))
     rows = q.order_by(WholesaleFundingPartner.name).all()
     stats = FD.partner_stats(db, org_id, [p.id for p in rows])
-    return {"partners": [FD.partner_json(p, stats.get(p.id)) for p in rows], "disclaimer": FD.DISCLAIMER}
+    return {"partners": [FD.partner_json(p, stats.get(p.id)) for p in rows], "disclaimer": FD.disclaimer_for(db, org_id)}
 
 
 @router.post("/partners")
@@ -138,7 +139,7 @@ def funding_options(deal_id: str, product: Optional[str] = None, amount: Optiona
             "options": [{"partner": FD.partner_json(m["partner"], stats.get(m["partner"].id)),
                          "eligible": m["eligible"], "excluded_because": m["excluded_because"],
                          "reasons": m["reasons"]} for m in matches],
-            "disclaimer": FD.DISCLAIMER}
+            "disclaimer": FD.disclaimer_for(db, org_id)}
 
 
 @router.get("/deals/{deal_id}/submissions")

@@ -91,7 +91,7 @@ def handle(db: Session, org_id: str, user: User, appt_id: str, data: Dict[str, A
     values = _values(db, org_id, appt, offer, signer, data, prop=prop)
     miss = docs.missing(KIND, values) + docs.signer_problems(KIND, values)
     base = {"html": docs.render(KIND, values), "missing": miss, "price": offer.offer,
-            "company_signer": signer.full_name or signer.email, "notice": docs.STARTER_NOTICE}
+            "company_signer": signer.full_name or signer.email, "notice": docs.starter_notice_for(db, org_id)}
     if data.get("action") != "send":
         return {**base, "sent": False}
     if miss:

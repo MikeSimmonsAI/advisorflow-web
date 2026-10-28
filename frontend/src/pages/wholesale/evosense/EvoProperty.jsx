@@ -517,7 +517,7 @@ export default function EvoProperty() {
                         ) : null}
                         {m.pending ? (
                           <div className="evo-msg__extracted">
-                            <Tag kind="danger">{m.pending.startsWith('EvoSense is paused') ? 'Held while paused' : 'AI review pending'}</Tag>
+                            <Tag kind="danger">{(m.pending.startsWith('EvoSense is paused') || m.pending.startsWith('Acquisition is paused')) ? 'Held while paused' : 'AI review pending'}</Tag>
                             <span>{m.pending}</span>
                             <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" disabled={busy}
                                     onClick={() => act(() => api.post(`/wholesale/evosense/properties/${propertyId}/retry-reading`, {}),

@@ -25,6 +25,16 @@ from app.models.wholesale_investor_models import DealRoomSettings
 DESIGNS = [{"key": "evosys_investor_v1", "label": "EvoSys Pro Investor Portal",
             "detail": "Navy navigation, bright workspace, property cards, AI concierge, messages and criteria panels "
                       "(the approved combined design)."}]
+
+
+def designs_for(db, org_id) -> List[Dict[str, Any]]:
+    """DESIGNS as this workspace sees them: EvoSys organizations (and any org
+    without a brand) get DESIGNS exactly; another brand's workspace sees the
+    same design without the EvoSys name on it."""
+    from app.services.brand_config import brand_word
+    if brand_word(db, org_id) == "EvoSys":
+        return DESIGNS
+    return [dict(d, label=d["label"].replace("EvoSys Pro ", "", 1)) for d in DESIGNS]
 CATEGORIES = [("single_family", "Single-family"), ("multifamily", "Multifamily"), ("land", "Land"),
               ("commercial", "Commercial"), ("industrial", "Industrial"), ("mixed_use", "Mixed-use"),
               ("portfolio", "Portfolios")]
@@ -113,7 +123,7 @@ def view(db, org_id: str, user=None) -> Dict[str, Any]:
     return {"settings": s, "saved": r is not None, "status": r.status if r is not None else "setup",
             "activated_at": _iso(getattr(r, "activated_at", None)), "updated_at": _iso(getattr(r, "updated_at", None)),
             "prefilled": sorted(k for k in pre if k not in saved),
-            "options": {"designs": DESIGNS, "categories": [{"key": k, "label": v} for k, v in CATEGORIES],
+            "options": {"designs": designs_for(db, org_id), "categories": [{"key": k, "label": v} for k, v in CATEGORIES],
                         "markets": DFW_MARKETS, "notify": [{"key": k, "label": v} for k, v in NOTIFY_EVENTS],
                         "hold_presets": ALL_PRESETS, "team": team},
             "portal_url": "/investors"}

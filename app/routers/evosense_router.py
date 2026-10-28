@@ -1037,12 +1037,19 @@ class PermissionLinkIn(BaseModel):
     owner_name: Optional[str] = None
 
 
-def _link_base(request) -> str:
-    """Where the owner's page lives: the app the caller is using (its own
-    domain, e.g. app.evosyspro.live, which serves /permission/:token), else
-    this server's own page."""
+def _link_base(request, db=None, org_id=None) -> str:
+    """Where the owner's page lives: the workspace's own brand address first
+    (a BookaBoost workspace -> its BookaBoost app), then PERMISSION_LINK_BASE_URL,
+    then the app the caller is using (its own domain, e.g. app.evosyspro.live,
+    which serves /permission/:token), else this server's own page. EvoSys
+    workspaces have no brand address here, so they resolve exactly as before."""
     import os
     import re as _re
+    if db is not None and org_id:
+        from app.services.brand_config import org_app_base_url
+        own = org_app_base_url(db, org_id)
+        if own:
+            return own
     base = (os.environ.get("PERMISSION_LINK_BASE_URL") or "").strip().rstrip("/")
     if base:
         return base
@@ -1084,7 +1091,7 @@ def create_permission_link(property_id: str, payload: PermissionLinkIn, request:
                                       message="person:%s|owner" % payload.owner_name if payload.owner_name else None)
             CT.apply_result(db, owner, res, PV.PROVIDERS["manual"])
             contact_added = True
-    url = "%s/permission/%s" % (_link_base(request), made["token"])
+    url = "%s/permission/%s" % (_link_base(request, db, org_id), made["token"])
     C.log_event(db, org_id, "permission.link_created", property_id=prop.id, user=user, actor_type=C.ACTOR_USER,
                 is_test=prop.is_test, summary="Permission link created for the number ending %s"
                 % PM.last4(link.phone_normalized))

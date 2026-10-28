@@ -12,6 +12,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
+import { useSalesBrand } from './salesBrand'
 import {
   CALL_OUTCOMES, NOT_INTERESTED_CHOICES, outcomeByKey, buildOutcomeRequests, telHref, smsHref,
   ymdPlusDays, firstName, cleanPhone,
@@ -355,6 +356,7 @@ export function CallOutcomeModal({ opp, tz, onClose, onSaved, onBook }) {
  *                            EvoSys never claims delivery.
  */
 export function TextModal({ opp, me, onClose, onLogged }) {
+  const brand = useSalesBrand()
   const name = firstName(opp?.contact_name)
   const [msg, setMsg] = useState(
     'Hi' + (name ? ' ' + name : '') + ', this is ' + (firstName(me) || 'your sales contact') +
@@ -387,7 +389,7 @@ export function TextModal({ opp, me, onClose, onLogged }) {
   return (
     <Modal
       title={'Text ' + (opp?.contact_name || opp?.company_name || '')}
-      sub="Opens your phone’s messages app. EvoSys doesn’t send it and can’t see delivery."
+      sub={'Opens your phone’s messages app. ' + brand.short + ' doesn’t send it and can’t see delivery.'}
       onClose={onClose}
       footer={<>
         <button type="button" className="ss-btn ss-white" onClick={onClose}>Close</button>

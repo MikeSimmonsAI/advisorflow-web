@@ -59,7 +59,7 @@ check('every on-screen EvoSense / EvoSys Field string in the Wholesale pages goe
     const p = join(d, n)
     return statSync(p).isDirectory() ? walk(p) : (/\.(jsx|js)$/.test(n) ? [p] : [])
   })
-  const skip = [join(base, 'engine.js'), join(base, 'ds', 'ds.jsx')]   // the helper; WORLDS is never rendered
+  const skip = [join(base, 'engine.js'), join(base, 'engineText.js'), join(base, 'ds', 'ds.jsx')]   // the helpers; WORLDS is never rendered
   const bad = []
   for (const f of walk(base)) {
     if (skip.includes(f)) continue

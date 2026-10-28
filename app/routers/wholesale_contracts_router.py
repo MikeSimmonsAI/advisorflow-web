@@ -624,7 +624,7 @@ def contract_kits(db: Session = Depends(get_db), user: User = Depends(require_te
     org_id = svc.read_org_id(db, user)
     settings = svc.resolve_settings(db, org_id) if org_id else None
     provider = esign.active_provider(getattr(settings, "esign_provider", None))
-    return {"kits": docs.kits(), "notice": docs.STARTER_NOTICE,
+    return {"kits": docs.kits(), "notice": docs.starter_notice(_brand_word(db, org_id)),
             "fields": docs.LABELS, "overridable": list(docs.OVERRIDABLE),
             "signature": {"provider": provider.key, "label": provider.label,
                           "electronic": bool(provider.electronic and provider.is_configured()),
@@ -652,7 +652,7 @@ def contract_preview(deal_id: str, kind: str, payload: ContractIn,
     return {"kind": kind, "label": docs.KINDS[kind]["label"], "html": docs.render(kind, values),
             "values": values, "missing": miss, "signer_problems": docs.signer_problems(kind, values),
             "parties": docs.parties(kind, values), "ready": not miss,
-            "notice": docs.STARTER_NOTICE}
+            "notice": docs.starter_notice(_brand_word(db, org_id))}
 
 
 def _test_deal_outside_signers(db: Session, org_id: str, deal: WholesaleDeal, signers, user: User):

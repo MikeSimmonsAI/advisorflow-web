@@ -1387,6 +1387,9 @@ COLUMNS_TO_ADD = [
     ("wholesale_settings", "inquiry_email_enabled", "BOOLEAN DEFAULT FALSE"),
     ("wholesale_settings", "inquiry_email_recipients", "TEXT"),
     ("wholesale_settings", "cold_seller_email_confirmed", "BOOLEAN DEFAULT FALSE"),
+    # #272: this workspace's own switch for texting deal sheets to buyers. OFF
+    # for every existing workspace; the server switch is still required too.
+    ("wholesale_settings", "buyer_sms_enabled", "BOOLEAN DEFAULT FALSE"),
     ("wholesale_settings", "qualification_criteria", "TEXT"),
     ("wholesale_comps", "evosense_property_id", "VARCHAR"),
     ("wholesale_comps", "half_baths", "INTEGER"),

@@ -175,6 +175,42 @@ def brand_word(db, org) -> str:
     return (config_for_slug(db, slug) or {}).get("display_name") or "EvoSys"
 
 
+def org_app_base_url(db, org) -> Optional[str]:
+    """The web address of the app for this organization's OWN brand, for links
+    sent to people outside the team (investor invites, signing links, owner
+    permission pages), so they land on the brand that contacted them.
+
+    None for EvoSys Pro organizations and any organization whose brand cannot be
+    resolved: callers then keep exactly the address they used before (their
+    environment variable or default). Only https addresses are returned."""
+    slug = _org_platform_slug(db, org)
+    if not slug or slug == "evosyspro":
+        return None
+    url = (config_for_slug(db, slug) or {}).get("app_base_url") or ""
+    url = str(url).strip().rstrip("/")
+    return url if url.startswith("https://") else None
+
+
+def sales_brand_name(db, platform) -> str:
+    """The brand a Back Office is selling, as its screens and emails name it.
+    "EvoSys Pro" for EvoSys Pro and for anything unresolvable - exactly the
+    text those screens always carried; another brand's own display name."""
+    slug = (getattr(platform, "slug", None) or "").strip().lower()
+    if not slug or slug == "evosyspro":
+        return "EvoSys Pro"
+    return ((config_for_slug(db, slug) or {}).get("display_name")
+            or getattr(platform, "name", None) or "EvoSys Pro")
+
+
+def sales_brand_short(db, platform) -> str:
+    """The short form ("EvoSys doesn't send it"): "EvoSys" for EvoSys Pro and
+    anything unresolvable; another brand's own display name."""
+    slug = (getattr(platform, "slug", None) or "").strip().lower()
+    if not slug or slug == "evosyspro":
+        return "EvoSys"
+    return sales_brand_name(db, platform)
+
+
 def wholesale_product(db, org) -> str:
     """This workspace's Wholesale product name for notices. "EvoSys Wholesale"
     for EvoSys Pro organizations and any org without a brand (unchanged). A

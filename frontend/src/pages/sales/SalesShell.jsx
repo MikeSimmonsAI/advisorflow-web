@@ -19,6 +19,7 @@ import SimpleStyles from './SimpleStyles'
 import { Icon } from './SimpleParts'
 import { followUpList, otherWorkspaceCount } from './simpleSales'
 import { initials, ErrorBar } from './parts'
+import { setSalesBrand } from './salesBrand'
 
 const SalesCtx = createContext(null)
 
@@ -126,6 +127,7 @@ export default function SalesShell({ title, subtitle, actions, children }) {
     setError(null)
     try {
       const me = await api.get('/sales/me')
+      setSalesBrand(me)
       setCtx(me)
       await loadCounts(me?.brand_sales_org?.timezone)
     } catch (e) {

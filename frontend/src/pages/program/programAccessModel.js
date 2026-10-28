@@ -105,9 +105,21 @@ export function programCards(ctx) {
   // platform console (God Mode has its own home).
   if (ctx?.has_back_office && ctx.back_office_path && ctx.back_office_path !== '/god') {
     const p = PROGRAMS.back_office
-    cards.push({ type: 'back_office', organization_id: 'back-office', path: ctx.back_office_path,
-                 program: 'back_office', variant: p.variant, symbol: p.symbol, rank: p.rank, kind: p.kind, facts: p.facts,
-                 display: 'Back Office', summary: p.summary, orgLabel: null })
+    // ONE CARD PER BRAND (#272) for someone on more than one brand's sales
+    // team, each naming its brand and carrying it, so the Back Office opens on
+    // the brand they chose. One brand: the same single card as always.
+    const dests = ctx.back_office_destinations || []
+    const many = dests.length > 1
+    for (const d of (many ? dests : [dests[0] || null])) {
+      cards.push({ type: 'back_office', organization_id: many ? 'back-office:' + d.brand_sales_org_id : 'back-office',
+                   path: (d && d.path) || ctx.back_office_path,
+                   // Only when there is a choice to carry: a one-brand Back Office
+                   // opens exactly as it always has.
+                   platform_id: many ? d.platform_id : undefined, platform_name: many ? d.platform_name : undefined,
+                   brand_sales_org_id: many ? d.brand_sales_org_id : undefined,
+                   program: 'back_office', variant: p.variant, symbol: p.symbol, rank: p.rank, kind: p.kind, facts: p.facts,
+                   display: 'Back Office', summary: p.summary, orgLabel: many ? (d.platform_name || d.label || null) : null })
+    }
   }
   for (const ex of ctx?.executive_contexts || []) {
     const p = PROGRAMS.executive

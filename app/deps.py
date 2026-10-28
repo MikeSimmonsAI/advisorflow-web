@@ -403,6 +403,20 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
             # before any mutation, so nothing here is written back.
             user.organization_id = None
 
+    # THE BACK OFFICE A SALESPERSON CHOSE (#272). Someone on more than one
+    # brand's sales team picks which brand's Back Office they are in, and the
+    # client says so with the same X-Brand-Override header. For anyone who is
+    # not god it is only a REQUEST, read by sales_access.sales_org_ids, which
+    # honours it only when it names a brand they already hold a sales
+    # membership on - it narrows, it never widens. Nothing is read or written
+    # here; only /sales routes are affected.
+    elif (request is not None and str(getattr(request.url, "path", "")).startswith("/sales")
+          and request.headers.get("X-Brand-Override")):
+        try:
+            user._requested_sales_brand_id = request.headers.get("X-Brand-Override")
+        except Exception:  # noqa: BLE001 - a hint must never break sign-in
+            pass
+
     # ── EXECUTIVE OBSERVATION CONTEXT ────────────────────────────────────────
     # A brand_executive may send X-Executive-Observe to enter a customer org's
     # data in strict read-only mode.

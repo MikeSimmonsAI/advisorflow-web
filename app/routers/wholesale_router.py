@@ -492,6 +492,9 @@ class SettingsPatch(BaseModel):
     # The workspace's own compliance decision: may it email owners it FOUND
     # (not ones who wrote in)? Admin-only; off by default.
     cold_seller_email_confirmed: Optional[bool] = None
+    # This workspace's own switch for texting deal sheets to buyers. Admin-only;
+    # off by default, and the server switch is still required as well.
+    buyer_sms_enabled: Optional[bool] = None
     # Data depth: comp eligibility rules and the MAO gate policy (admin).
     comp_rules: Optional[Dict[str, Any]] = None
     mao_policy: Optional[Dict[str, Any]] = None
@@ -631,6 +634,7 @@ def settings_json(s: WholesaleSettings) -> Dict[str, Any]:
         "qualification_criteria_options": _intel_options(),
         "nurture_default_days": getattr(s, "nurture_default_days", None) or 60,
         "cold_seller_email_confirmed": bool(getattr(s, "cold_seller_email_confirmed", False)),
+        "buyer_sms_enabled": bool(getattr(s, "buyer_sms_enabled", False)),
         "comp_rules_effective": _comp_rules_view(s),
         "mao_policy_effective": _mao_policy_view(s),
     }
@@ -737,6 +741,11 @@ def patch_settings(payload: SettingsPatch, request: Request,
         data["inquiry_email_recipients"] = ", ".join(addrs) or None
     if "inquiry_email_enabled" in data:
         data["inquiry_email_enabled"] = bool(data["inquiry_email_enabled"])
+    if "buyer_sms_enabled" in data:
+        if not _is_admin_here(user, db):
+            raise HTTPException(status_code=403, detail="Only an administrator can turn "
+                                "texting deal sheets to buyers on or off.")
+        data["buyer_sms_enabled"] = bool(data["buyer_sms_enabled"])
     if any(k in data for k in _POLICY_FIELDS):
         if not _is_admin_here(user, db):
             raise HTTPException(status_code=403, detail="Only an administrator can change "
@@ -2366,7 +2375,7 @@ def deal_room(deal_id: str, db: Session = Depends(get_db),
         # Phase 2: whether a deal sheet can actually leave this deployment, so
         # the disposition tab can say so before somebody presses Send rather
         # than after.
-        "disposition_channels": _disposition_channels(),
+        "disposition_channels": _disposition_channels(db, org_id),
         # Phase 2: this module records the document SLOT — type, parties,
         # signature state and the file name as the operator stored it. It does
         # not host files, and it does not need to: the platform already has one
@@ -2471,9 +2480,9 @@ def _document_storage():
     }
 
 
-def _disposition_channels():
+def _disposition_channels(db=None, org_id=None):
     from app.services import wholesale_disposition as disp
-    return disp.channel_status()
+    return disp.channel_status(db, org_id)
 
 
 class StageIn(BaseModel):

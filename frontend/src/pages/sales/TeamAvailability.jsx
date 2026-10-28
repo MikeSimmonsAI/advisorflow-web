@@ -44,6 +44,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import SalesShell from './SalesShell'
+import { useSalesBrand } from './salesBrand'
 import FindTeamTime from './FindTeamTime'
 import BookAppointment from './BookAppointment'
 import { Card, Chip, Empty, ErrorBar, initials } from './parts'
@@ -57,6 +58,7 @@ const END_HOUR = 19
 const PX_PER_HOUR = 46
 
 export default function TeamAvailability() {
+  const brand = useSalesBrand()
   const nav = useNavigate()
   const [day, setDay] = useState(() => ymd(new Date()))
   const [data, setData] = useState(null)
@@ -434,7 +436,7 @@ export default function TeamAvailability() {
 
             {/* TEAM SYNC STATUS. State, reason, action — never a bare dot. */}
             <Card title="TEAM SYNC STATUS"
-                  sub="What EvoSys Pro can actually see"
+                  sub={'What ' + brand.name + ' can actually see'}
                   bodyless
                   right={<button className="sw-tiny"
                                  onClick={() => nav('/sales/availability')}>
@@ -502,9 +504,9 @@ export default function TeamAvailability() {
               <div className="sw-card-b sw-subtle"
                    style={{ borderTop: '1px solid var(--sw-line2)' }}>
                 Working hours, lunch and blocked time, time off, meeting
-                buffers, minimum notice, the booking horizon, EvoSys Pro
+                buffers, minimum notice, the booking horizon, {brand.name + ' '}
                 appointments, and busy time on connected calendars. Nobody is
-                called available just because EvoSys Pro happens to hold no
+                called available just because {brand.name} happens to hold no
                 appointment for them.
               </div>
             </Card>

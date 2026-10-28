@@ -34,6 +34,17 @@ STARTER_NOTICE = ("Starter template written for EvoSys, not by an attorney. Have
                   "estate attorney review it once before you rely on it - most charge a flat fee "
                   "to approve a wholesale contract set.")
 
+
+def starter_notice(brand: str = "EvoSys") -> str:
+    """STARTER_NOTICE in the workspace's own brand (brand_config.brand_word).
+    "EvoSys" gives back STARTER_NOTICE exactly."""
+    return STARTER_NOTICE.replace("written for EvoSys,", "written for %s," % (brand or "EvoSys"))
+
+
+def starter_notice_for(db, org_id) -> str:
+    from app.services.brand_config import brand_word
+    return starter_notice(brand_word(db, org_id))
+
 ROLE_SELLER, ROLE_BUYER = "Seller", "Buyer"
 ROLE_ASSIGNOR, ROLE_ASSIGNEE = "Assignor", "Assignee"
 

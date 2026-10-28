@@ -42,6 +42,17 @@ DEFAULT_DAILY_CAP = 20
 COST_SOURCE = ("EvoSys DFW starting assumptions, Oct 2026 - typical investor-grade unit costs for Dallas-Fort Worth. "
                "Not a contractor bid: replace with real quotes.")
 COST_AS_OF = "2026-10-24"
+
+
+def cost_source(brand: str = "EvoSys") -> str:
+    """COST_SOURCE in the workspace's own brand (brand_config.brand_word).
+    "EvoSys" gives back COST_SOURCE exactly."""
+    return COST_SOURCE.replace("EvoSys DFW", "%s DFW" % (brand or "EvoSys"), 1)
+
+
+def cost_source_for(db, org_id) -> str:
+    from app.services.brand_config import brand_word
+    return cost_source(brand_word(db, org_id))
 # item key -> (category, label, unit, low, base, high)
 DFW_COSTS: Dict[str, Tuple[str, str, str, float, float, float]] = {
     "roof_replace": ("Roof", "Roof replacement (asphalt shingle)", "square (100 sq ft)", 380, 450, 560),
@@ -192,7 +203,8 @@ def provider_status() -> Dict[str, Any]:
 
 # ── 3. price from the DFW table ─────────────────────────────────────────────
 
-def price_lines(suggested: List[Dict[str, Any]], living_area: Optional[float]) -> List[Dict[str, Any]]:
+def price_lines(suggested: List[Dict[str, Any]], living_area: Optional[float],
+                source: str = COST_SOURCE) -> List[Dict[str, Any]]:
     lines = []
     for s in suggested:
         key = s.get("item") if s.get("item") in DFW_COSTS else "other"
@@ -210,7 +222,7 @@ def price_lines(suggested: List[Dict[str, Any]], living_area: Optional[float]) -
                       "line_low": round(q * lo, 2), "line_base": round(q * base, 2), "line_high": round(q * hi, 2),
                       "confidence": s.get("confidence") or "low", "evidence": (s.get("evidence") or "")[:300],
                       "photo": s.get("photo"), "area": s.get("area"),
-                      "cost_source": COST_SOURCE, "cost_as_of": COST_AS_OF})
+                      "cost_source": source, "cost_as_of": COST_AS_OF})
     return lines
 
 
@@ -266,7 +278,7 @@ def analyze(db, org_id: str, deal, user, *, photo_ids: Optional[List[str]] = Non
     p = provider or PROVIDERS[0]
     ok, why = p.available()
     base = {"deal_id": deal.id, "photos": checked, "not_visible": [{"category": c, "what": w} for c, w in NOT_VISIBLE],
-            "cost_source": COST_SOURCE, "cost_as_of": COST_AS_OF, "draft": True,
+            "cost_source": cost_source_for(db, org_id), "cost_as_of": COST_AS_OF, "draft": True,
             "note": "A draft from photos. Nothing is saved until you review it and press Save. Photos cannot show "
                     "hidden damage - budget a contingency or get an inspection."}
     if not usable:
@@ -308,7 +320,7 @@ def analyze(db, org_id: str, deal, user, *, photo_ids: Optional[List[str]] = Non
         sqft = float(wp.square_feet) if wp is not None and wp.square_feet else None
     except Exception:  # noqa: BLE001
         sqft = None
-    lines = _merge(price_lines(suggested, sqft))
+    lines = _merge(price_lines(suggested, sqft, cost_source_for(db, org_id)))
     svc.log_event(db, org_id, "repairs.photo_analyzed", actor_type=svc.ACTOR_USER, actor_user_id=user.id,
                   deal_id=deal.id, summary="Photos analyzed for repairs: %d photo(s), %d suggested line(s) (draft)" % (
                       len(usable), len(lines)),
