@@ -23,7 +23,11 @@ Nothing here sends an SMS, email or call. In-app messages only.
 from __future__ import annotations
 
 import json
+import os
 import re
+import threading
+import time
+from collections import deque
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -74,7 +78,8 @@ def buyer_turns(c) -> List[Dict[str, Any]]:
         role = t.get("role")
         if role in ("ai", "buyer", "staff") or (role == "system" and t.get("public")):
             out.append({"role": role, "text": t.get("text"), "at": t.get("at"), "by": t.get("by_name"),
-                        "attachments": t.get("attachments") or []})
+                        "attachments": t.get("attachments") or [],
+                        "engine": t.get("engine") if role == "ai" else None})
     return out
 
 
@@ -186,15 +191,167 @@ def post(db, acct, conv_id: str, text: str, attachment_ids: Optional[List[str]] 
         reply = concierge(db, acct, c, text)
     else:
         DR.notify_staff(db, acct.organization_id, "Deal Room message from %s" % (b.company_name or b.contact_name),
-                        "/wholesale/buyers?tab=dealroom&thread=%s" % c.id, assignee_id=c.assigned_user_id)
+                        "/wholesale/deal-room?view=messages&thread=%s" % c.id, assignee_id=c.assigned_user_id,
+                        event="message")
     c.buyer_unread = 0
     db.flush()
     return {"thread": thread_json(db, c, for_buyer=True), "reply": reply}
 
 
-def _say(c, text: str, **extra) -> str:
-    _turn(c, "ai", text, **extra)
+def _say(c, text: str, engine: str = "automatic", **extra) -> str:
+    """An AI-side turn, labelled truthfully: engine "ai" when the model wrote or
+    read it, "automatic" when the rules answered (AI off, unavailable or capped)."""
+    _turn(c, "ai", text, engine=engine, **extra)
     return text
+
+
+# ── the AI path for investor-initiated conversations ───────────────────────
+#
+# AUTHORIZATION. The investor is an authenticated platform user (role investor,
+# fenced to /investor/*). Their in-app message is a MANUAL action they took, so
+# the gateway's manual switch (AI_MANUAL_ACTIONS_ENABLED) governs it and the
+# actor is named ("investor:<user id>") - the same rule every staff action
+# follows. Nothing here grants staff permissions: the model only ever sees the
+# CONTEXT built below, which is assembled through the investor's own visibility
+# rules (the same functions their opportunity pages use).
+#
+# SPEND. On top of the gateway's own switches, each investor account and each
+# workspace has a per-process ceiling (DEAL_ROOM_AI_PER_HOUR, default 30 per
+# account per hour; DEAL_ROOM_AI_PER_ORG_DAY, default 400 per workspace per day).
+# Past either ceiling the rules answer and say so.
+
+_AI_LOCK = threading.Lock()
+_AI_HITS: Dict[str, deque] = {}
+
+
+def _get_client():
+    """Test seam (returns None in production so the gateway's client is used)."""
+    return None
+
+
+def _ai_capacity(acct) -> Optional[str]:
+    per_hour = int(os.environ.get("DEAL_ROOM_AI_PER_HOUR", "30") or 30)
+    per_day = int(os.environ.get("DEAL_ROOM_AI_PER_ORG_DAY", "400") or 400)
+    now = time.time()
+    with _AI_LOCK:
+        a = _AI_HITS.setdefault("acct:" + acct.id, deque())
+        o = _AI_HITS.setdefault("org:" + acct.organization_id, deque())
+        while a and a[0] < now - 3600:
+            a.popleft()
+        while o and o[0] < now - 86400:
+            o.popleft()
+        if len(a) >= per_hour:
+            return "hourly limit for this investor"
+        if len(o) >= per_day:
+            return "daily limit for this Deal Room"
+        a.append(now)
+        o.append(now)
+    return None
+
+
+def _actor(acct) -> str:
+    return "investor:%s" % acct.user_id
+
+
+def authorized_context(db, acct, c) -> Dict[str, Any]:
+    """Everything the concierge may draw on - and nothing else."""
+    from app.services import wholesale_deal_room_setup as SET
+    from app.services import wholesale_publication as P
+    p = DR.profile(db, acct)
+    boxes = []
+    for bx in p["buy_boxes"]:
+        boxes.append({k: {"value": v["value"], "label": v["label"]} for k, v in bx["fields"].items()
+                      if v["value"] not in (None, [], "")})
+    opps = []
+    for lst, deal, m, hold in DR.visible_listings(db, acct):
+        pay = P.buyer_room_payload(db, deal)
+        hidden = set(DR._j(lst.hidden_document_ids, []))
+        a = pay.get("property") or {}
+        o = {"listing_id": lst.id, "address": ", ".join(x for x in (a.get("line1"), a.get("city"), a.get("state"))
+                                                         if x),
+             "county": a.get("county"), "property_type": a.get("property_type"),
+             "bedrooms": a.get("bedrooms"), "bathrooms": a.get("bathrooms"), "square_feet": a.get("square_feet"),
+             "year_built": a.get("year_built"), "lot_size_sqft": a.get("lot_size_sqft"),
+             "occupancy": a.get("occupancy_status"), "asking_price": pay.get("asking_price"),
+             "summary": pay.get("summary"), "condition": pay.get("condition_summary"),
+             "closing": pay.get("closing"), "match_score": m.get("score"),
+             "documents": [d.get("title") for d in pay.get("documents") or [] if d.get("id") not in hidden],
+             "listing_closes": DR._iso(lst.expires_at),
+             "your_exclusive_review_ends": DR._iso(hold.ends_at) if hold is not None else None}
+        if "arv" in pay:
+            o["estimated_after_repair_value"] = pay["arv"]
+        if "estimated_repairs" in pay:
+            o["estimated_repairs"] = pay["estimated_repairs"]
+        opps.append({k: v for k, v in o.items() if v not in (None, "", [], {})})
+    cur = None
+    if c.deal_id:
+        lst = db.query(DR.DealListing).filter(DR.DealListing.deal_id == c.deal_id).first()
+        cur = getattr(lst, "id", None)
+    sign = [d["title"] for d in DR.investor_documents(db, acct) if d["your_turn"]]
+    room = SET.investor_view(db, acct.organization_id)
+    return {"deal_room": {"name": room.get("name"), "support_email": room.get("support_email"),
+                          "support_phone": room.get("support_phone")},
+            "investor": {"name": p["account"].get("preferred_name") or p["account"].get("legal_name"),
+                         "company": p["account"].get("company_legal_name"), "buy_boxes": boxes,
+                         "funding": {"stated": p["funding"]["stated"], "documented": p["funding"]["documented"]}},
+            "opportunities_visible_to_you": opps, "this_conversation_is_about_listing": cur,
+            "documents_waiting_for_your_signature": sign,
+            "exclusive_review_rule": DR.HOLD_NOTICE}
+
+
+_SYSTEM_QA = (
+    "You are the investment concierge inside a private real-estate Deal Room. Answer the investor's question "
+    "using ONLY the JSON under CONTEXT. Never invent or estimate prices, values, rents, returns, cap rates, "
+    "availability, dates, legal rights or financing terms - if CONTEXT does not contain the answer, set grounded "
+    "to false and answer with an empty string. An exclusive review is a temporary visibility hold, never a "
+    "contract, option or right to purchase. Do not give legal, tax or financing advice. Keep the answer under "
+    "90 words, plain and friendly, and quote figures exactly as they appear in CONTEXT. Reply as JSON: "
+    '{"answer": string, "grounded": boolean, "wants_person": boolean}')
+
+_NUM = re.compile(r"\$?\d[\d,]*(?:\.\d+)?%?")
+
+
+def _numbers_supported(answer: str, ctx_text: str) -> bool:
+    """Every figure in the answer must appear in the context (digits compared)."""
+    digits_ctx = re.sub(r"[^0-9.]", " ", ctx_text)
+    pool = {x.rstrip(".").split(".")[0] for x in digits_ctx.split() if x.strip(".")}
+    for tok in _NUM.findall(answer or ""):
+        d = re.sub(r"[^0-9.]", "", tok).rstrip(".").split(".")[0]
+        if len(d) <= 1:
+            continue                      # "1 property", "3 bedrooms" style small counts are allowed
+        if d not in pool:
+            return False
+    return True
+
+
+def ai_answer(db, acct, c, text: str) -> Optional[Dict[str, Any]]:
+    """None when the AI could not be used (switched off, capped, unavailable)."""
+    from app.services import ai_gateway
+    from app.services import wholesale_deal_room_setup as SET
+    if not SET.ai_enabled(db, acct.organization_id):
+        return None
+    if _ai_capacity(acct):
+        return None
+    ctx = authorized_context(db, acct, c)
+    ctx_text = json.dumps(ctx, default=str)
+    try:
+        resp = ai_gateway.chat_completion(
+            feature="deal_room_concierge", capability="wholesale_buyer_qualify", mode="manual",
+            actor=_actor(acct), org_id=acct.organization_id, client=_get_client(), temperature=0,
+            response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": _SYSTEM_QA},
+                      {"role": "system", "content": "CONTEXT: " + ctx_text[:24000]},
+                      {"role": "user", "content": (text or "")[:2000]}])
+        out = json.loads(resp.choices[0].message.content or "{}")
+    except Exception as exc:  # noqa: BLE001 - refusal / provider error: the rules answer
+        import logging
+        logging.getLogger("deal_room").info("concierge AI unavailable (%s); rules answered", type(exc).__name__)
+        return None
+    if not isinstance(out, dict):
+        return None
+    answer = str(out.get("answer") or "").strip()[:1200]
+    grounded = bool(out.get("grounded")) and bool(answer) and _numbers_supported(answer, ctx_text)
+    return {"answer": answer if grounded else "", "grounded": grounded, "wants_person": bool(out.get("wants_person"))}
 
 
 def _handoff(db, acct, c, reason: str) -> str:
@@ -208,7 +365,8 @@ def _handoff(db, acct, c, reason: str) -> str:
     c.status, c.handoff_reason, c.handoff_exception_id = CONV_HANDOFF, reason[:250], ex.id
     _turn(c, "system", "Handed to the team: %s" % reason)
     DR.notify_staff(db, acct.organization_id, "Deal Room: %s asked for a person" % (b.company_name or b.contact_name),
-                    "/wholesale/buyers?tab=dealroom&thread=%s" % c.id, assignee_id=c.assigned_user_id)
+                    "/wholesale/deal-room?view=messages&thread=%s" % c.id, assignee_id=c.assigned_user_id,
+                    event="handoff")
     return _say(c, "I've asked the team to join this conversation - they'll reply right here. I'll stay quiet so "
                    "you don't get two answers.")
 
@@ -227,7 +385,7 @@ def _listings_answer(db, acct, c) -> str:
     for lst, deal, m, hold in rows[:6]:
         pay = P.buyer_room_payload(db, deal)
         a = pay.get("property") or {}
-        addr = ", ".join(x for x in (a.get("street_address") or a.get("street"), a.get("city")) if x) or "an opportunity"
+        addr = ", ".join(x for x in (a.get("line1"), a.get("city")) if x) or "an opportunity"
         parts.append("%s - asking %s%s%s" % (addr, _money(pay.get("asking_price")),
                                             (", match %d" % m["score"]) if m.get("score") is not None else "",
                                             " (in your exclusive review)" if hold is not None else ""))
@@ -337,6 +495,11 @@ def _fact_answer(db, acct, c, text: str) -> Optional[str]:
     return None
 
 
+def _ai_ok(db, acct) -> bool:
+    from app.services import wholesale_deal_room_setup as SET
+    return SET.ai_enabled(db, acct.organization_id) and _ai_capacity(acct) is None
+
+
 def concierge(db, acct, c, text: str) -> str:
     b = DR.buyer_of(db, acct)
     r = Q.rules_read(text, context=Q._last_field(c) if hasattr(Q, "_last_field") else None)
@@ -351,12 +514,23 @@ def concierge(db, acct, c, text: str) -> str:
     if _HUMAN.search(text):
         return _handoff(db, acct, c, "Asked for a person: \"%s\"" % text[:160])
     if _QUESTION.search(text):
+        r = ai_answer(db, acct, c, text)
+        if r is not None:
+            if r["wants_person"] and not r["grounded"]:
+                return _handoff(db, acct, c, "Asked for a person: \"%s\"" % text[:160])
+            if r["grounded"]:
+                return _say(c, r["answer"], engine="ai")
+            DR.notify_staff(db, acct.organization_id, "Deal Room question: %s" % text[:120],
+                            "/wholesale/deal-room?view=messages&thread=%s" % c.id, assignee_id=c.assigned_user_id,
+                            event="message")
+            return _say(c, "That isn't in the information I have for you, so I won't guess. I've passed your "
+                           "question to the team - they'll answer here.", engine="ai")
         if c.kind == "deal" and _FACT.search(text):
             a = _fact_answer(db, acct, c, text)
             if a:
                 return _say(c, a)
             DR.notify_staff(db, acct.organization_id, "Deal Room question: %s" % text[:120],
-                            "/wholesale/buyers?tab=dealroom&thread=%s" % c.id, assignee_id=c.assigned_user_id)
+                            "/wholesale/deal-room?view=messages&thread=%s" % c.id, assignee_id=c.assigned_user_id)
             return _say(c, "That isn't in the information published for this property, so I won't guess. I've "
                            "passed your question to the team - they'll answer here.")
         if _TIME.search(text):
@@ -370,12 +544,15 @@ def concierge(db, acct, c, text: str) -> str:
         if _DEALS.search(text):
             return _say(c, _listings_answer(db, acct, c))
         DR.notify_staff(db, acct.organization_id, "Deal Room question: %s" % text[:120],
-                        "/wholesale/buyers?tab=dealroom&thread=%s" % c.id, assignee_id=c.assigned_user_id)
+                        "/wholesale/deal-room?view=messages&thread=%s" % c.id, assignee_id=c.assigned_user_id)
         return _say(c, "I don't have that on record, so I won't guess. I've passed your question to the team - "
                        "they'll answer here.")
     # a statement: learn what they buy (stated, never verified)
     if c.kind == "concierge":
-        res = Q.read(text, org_id=acct.organization_id, actor=None, context=Q._last_field(c))
+        use_ai = _ai_ok(db, acct)
+        res = Q.read(text, org_id=acct.organization_id, actor=_actor(acct) if use_ai else None,
+                     context=Q._last_field(c))
+        engine = "ai" if res.get("source") == "ai" else "automatic"
         if res["facts"]:
             Q._apply(db, acct.organization_id, b, c, res["facts"], res["source"], text, None)
         if res.get("objections"):
@@ -386,10 +563,10 @@ def concierge(db, acct, c, text: str) -> str:
         learned = ", ".join(k.replace("_", " ") for k in res["facts"]) if res["facts"] else None
         lead = ("Got it - I've noted your %s (as you stated it). " % learned) if learned else ""
         if nq:
-            return _say(c, lead + nq[1], field=nq[0])
+            return _say(c, lead + nq[1], engine=engine, field=nq[0])
         acct.welcome_completed_at = acct.welcome_completed_at or _now()
-        return _say(c, lead + "That's everything I need for now. Please review your buy box under Profile and "
-                              "confirm it - then the team can match you precisely.")
+        return _say(c, lead + "That's everything I need for now. Please review your buy box under My Criteria "
+                              "and confirm it - then the team can match you precisely.", engine=engine)
     return _say(c, "Thanks - I've shared that with the team.")
 
 

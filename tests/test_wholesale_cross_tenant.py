@@ -573,6 +573,10 @@ def attacks(ids):
         ("get", "/wholesale/deal-room/buyers/%s/files" % ids["buyer_id"], None),
         ("post", "/wholesale/deal-room/buyers/%s/files" % ids["buyer_id"], {"file_id": ids["file_id"]}),
         ("post", "/wholesale/deal-room/envelopes/%s/staff-session" % ids["dr_envelope_id"], {}),
+        ("get", "/wholesale/deal-room/listings/%s/preview" % ids["dr_listing_id"], None),
+        ("put", "/wholesale/deal-room/listings/%s/documents" % ids["dr_listing_id"], {"visible_document_ids": []}),
+        ("get", "/wholesale/deal-room/listings/%s/photos/%s" % (ids["dr_listing_id"], ids["file_id"]), None),
+        ("post", "/wholesale/deal-room/threads/%s/assign" % ids["dr_thread_id"], {"user_id": None}),
         # ── Shared intelligence (#415): verification, underwriting, reports ──
         ("get", "/wholesale/intel/property/%s/verification" % ids["intel_evo_id"], None),
         ("get", "/wholesale/intel/buyer/%s/verification" % ids["buyer_id"], None),

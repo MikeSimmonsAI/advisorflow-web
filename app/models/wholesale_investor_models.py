@@ -133,6 +133,9 @@ class DealListing(Base):
     ended_at = Column(DateTime, nullable=True)
     end_reason = Column(String, nullable=True)
     notify_on_publish = Column(Boolean, nullable=False, default=True)
+    # JSON list of published document ids this listing does NOT show - a listing
+    # can only narrow what the approved package publishes, never add to it.
+    hidden_document_ids = Column(Text, nullable=True)
     is_test = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -177,3 +180,57 @@ class ExclusiveHold(Base):
         Index("uq_drhold_one_active", "listing_id", unique=True,
               postgresql_where=text("status = 'active'"), sqlite_where=text("status = 'active'")),
     )
+
+
+class DealRoomSettings(Base):
+    """The owner's Deal Room configuration - one row per workspace. Set up with
+    the guided setup and changed later without starting over. While the room is
+    not active only PRACTICE invitations and listings work; activation is the
+    owner's explicit decision and is recorded."""
+    __tablename__ = "deal_room_settings"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False, unique=True)
+    status = Column(String, nullable=False, default="setup")               # setup | active | paused
+    name = Column(String, nullable=True)
+    brand_name = Column(String, nullable=True)
+    tagline = Column(String, nullable=True)
+    owner_name = Column(String, nullable=True)
+    owner_email = Column(String, nullable=True)
+    owner_phone = Column(String, nullable=True)
+    support_email = Column(String, nullable=True)
+    support_phone = Column(String, nullable=True)
+    team_user_ids = Column(Text, nullable=True)                            # JSON
+    welcome_title = Column(String, nullable=True)
+    welcome_message = Column(Text, nullable=True)
+    design = Column(String, nullable=False, default="evosys_investor_v1")
+    categories = Column(Text, nullable=True)                               # JSON
+    markets = Column(Text, nullable=True)                                  # JSON county names
+    ai_concierge_enabled = Column(Boolean, nullable=False, default=True)
+    notify = Column(Text, nullable=True)                                   # JSON {event: bool}
+    default_audience = Column(String, nullable=False, default="matched")
+    default_min_match = Column(Integer, nullable=False, default=60)
+    default_publish_days = Column(Integer, nullable=True)
+    hold_presets = Column(Text, nullable=True)                             # JSON list of allowed presets
+    hold_allow_custom = Column(Boolean, nullable=False, default=True)
+    hold_max_per_investor = Column(Integer, nullable=False, default=1)
+    hold_require_note = Column(Boolean, nullable=False, default=False)
+    hold_require_pof = Column(Boolean, nullable=False, default=False)
+    activated_at = Column(DateTime, nullable=True)
+    activated_by_id = Column(String, ForeignKey("users.id"), nullable=True)
+    updated_by_id = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DealRoomSave(Base):
+    """An investor saved an opportunity to come back to (their own list only)."""
+    __tablename__ = "deal_room_saves"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    account_id = Column(String, ForeignKey("investor_accounts.id", ondelete="CASCADE"), nullable=False)
+    listing_id = Column(String, ForeignKey("deal_room_listings.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("account_id", "listing_id", name="uq_drsave_account_listing"),)

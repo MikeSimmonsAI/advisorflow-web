@@ -72,7 +72,37 @@ No antivirus engine is connected; the file record says so.
 
 ## Not connected / limits
 
-* The portal concierge uses the rules reader when the AI gateway refuses an
-  unauthenticated actor (investor sessions are not staff actors).
+* The concierge uses the AI gateway on an authorized investor path (below); the rules answer, labelled,
+  when the AI is off, capped or unavailable.
 * Real investor email delivery uses the existing email path; practice
   (`.invalid`) invitations are never sent.
+
+## Owner experience (Oct 27 follow-up)
+
+* **Sidebar:** Wholesale now has a **Buyers** group (Buyers, Deal Room) right after Acquisition.
+* **Buyers command center** (`/wholesale/buyers`): Buyer Intelligence header, live metrics, three primary
+  actions (Find buyers, Invite investor, Open Deal Room), always-visible quick filters.
+* **Deal Room** (`/wholesale/deal-room`): overview, investors, listings, exclusive reviews (pending / active /
+  expiring soon / completed), messages (assign to staff), documents & signatures, activity, settings.
+* **Setup** (`deal_room_settings`): five steps, prefilled from the workspace, saved server-side. Activation
+  re-checks requirements and returns the real result. While not active, only practice invitations and
+  listings work. Settings drive defaults (audience, match threshold, closing window), hold rules (allowed
+  lengths, custom, note / proof-of-funds requirements, open requests per investor), notifications and the
+  AI concierge switch.
+* **Add deal:** candidates with package status and the exact missing step; the package panel and package
+  approval are reachable from the same drawer; audience, availability window and visible documents are
+  chosen before publishing. A listing can only hide documents the package publishes, never add them.
+* **Preview:** `/investors/preview` renders the investor design from `/wholesale/deal-room/portal-preview`
+  (staff session, read-only).
+* **Package rule:** a listing is visible only while its investor package is published and unchanged since
+  approval (`wholesale_deal_package.serving`).
+
+## AI concierge (authorized path)
+
+Investor messages are manual actions by an authenticated user, so they go through the AI gateway in
+`manual` mode with `actor="investor:<user id>"` (subject to `AI_MANUAL_ACTIONS_ENABLED`). The model sees only
+`authorized_context()` - the investor's own profile and the listings visible to them through the same
+visibility rules. Every figure in an answer must appear in that context or the answer is discarded and
+the team is asked. Per-process ceilings: `DEAL_ROOM_AI_PER_HOUR` (default 30 per investor) and
+`DEAL_ROOM_AI_PER_ORG_DAY` (default 400). When the AI is off, capped or unavailable the rules answer and the
+turn is labelled `engine: automatic` ("automatic reply"); AI turns are labelled `engine: ai`.

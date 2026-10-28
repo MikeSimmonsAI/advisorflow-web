@@ -42,7 +42,7 @@ from app.models.models import Organization, User
 from app.models.wholesale_investor_models import (HOLD_ACTIVE, HOLD_DECLINED, HOLD_ENDED, HOLD_REQUESTED,
                                                   INVITE_ACCEPTED, INVITE_EXPIRED, INVITE_PENDING, INVITE_REVOKED,
                                                   LISTING_STATES, VISIBLE_STATES, DealListing, ExclusiveHold,
-                                                  InvestorAccount, InvestorEntityRole, InvestorInvite)
+                                                  DealRoomSave, InvestorAccount, InvestorEntityRole, InvestorInvite)
 from app.models.wholesale_models import (WholesaleBuyBox, WholesaleBuyer, WholesaleBuyerOutreach, WholesaleDeal,
                                          WholesaleDocument, WholesaleFile, WholesaleProperty)
 
@@ -85,9 +85,13 @@ def log(db, org_id, action, summary, user=None, deal_id=None, details=None):
                   deal_id=deal_id, summary=summary[:250], details=details or {})
 
 
-def notify_staff(db, org_id: str, message: str, link: str, assignee_id: Optional[str] = None) -> int:
+def notify_staff(db, org_id: str, message: str, link: str, assignee_id: Optional[str] = None,
+                 event: Optional[str] = None) -> int:
     from app.models.models import NotificationType
+    from app.services import wholesale_deal_room_setup as SET
     from app.services import wholesale_notify
+    if event and not SET.notify_on(db, org_id, event):
+        return 0
     return wholesale_notify.notify(db, org_id, kind=NotificationType.DEAL_ROOM, message=message, link=link,
                                    assignee_id=assignee_id)
 
@@ -154,6 +158,8 @@ def create_invite(db, org_id: str, user, *, name: str, email: str, company: Opti
         if buyer.do_not_contact:
             raise HTTPException(status_code=409, detail="This buyer asked not to be contacted.")
         is_test = bool(buyer.is_test)
+    from app.services import wholesale_deal_room_setup as SET
+    SET.require_active(db, org_id, bool(is_test), "sending a real invitation")
     staff = db.query(User).filter(User.email == email).first()
     if staff is not None and staff.role != "investor":
         raise HTTPException(status_code=409, detail="That email belongs to a staff login. Investors need their "
@@ -280,7 +286,8 @@ def accept_invite(db, token: str, *, password: str, full_name: Optional[str] = N
     db.flush()
     log(db, inv.organization_id, "deal_room.invite_accepted", "%s accepted the Deal Room invitation" % inv.name)
     notify_staff(db, inv.organization_id, "%s joined your Deal Room" % inv.name,
-                 "/wholesale/buyers?buyer=%s" % buyer.id, assignee_id=inv.owner_user_id)
+                 "/wholesale/deal-room?view=investors&buyer=%s" % buyer.id, assignee_id=inv.owner_user_id,
+                 event="registered")
     return user, acct
 
 
@@ -524,6 +531,9 @@ def sweep(db, org_id: str) -> int:
             lst.state = "published"
         log(db, org_id, "deal_room.hold_expired", "Exclusive review ended (time expired) - deal back on the board",
             deal_id=h.deal_id, details={"hold_id": h.id})
+        notify_staff(db, org_id, "Exclusive review ended for %s - the deal is visible to investors again"
+                     % (_buyer_name(db, h.buyer_id) or "an investor"), "/wholesale/deal-room?view=holds",
+                     event="hold_request")
         n += 1
     for lst in db.query(DealListing).filter(DealListing.organization_id == org_id,
                                             DealListing.state.in_(("published", "approved")),
@@ -541,7 +551,11 @@ def listing_for_deal(db, org_id: str, deal_id: str, create: bool = False, user=N
         deal = db.query(WholesaleDeal).filter(WholesaleDeal.id == deal_id, WholesaleDeal.organization_id == org_id).first()
         if deal is None:
             raise HTTPException(status_code=404, detail="Deal not found")
-        lst = DealListing(organization_id=org_id, deal_id=deal_id, state="draft", is_test=bool(deal.is_test))
+        from app.services import wholesale_deal_room_setup as SET
+        st = SET.effective(db, org_id)
+        lst = DealListing(organization_id=org_id, deal_id=deal_id, state="draft", is_test=bool(deal.is_test),
+                          audience=st.get("default_audience") or "matched",
+                          min_match_score=int(st.get("default_min_match") or 60))
         db.add(lst)
         db.flush()
         log(db, org_id, "deal_room.listing_created", "Deal Room listing drafted", user, deal_id=deal_id)
@@ -590,9 +604,16 @@ def transition(db, org_id: str, lst: DealListing, action: str, user) -> DealList
     if lst.state not in allowed:
         raise HTTPException(status_code=409, detail="A %s listing cannot be %s." % (lst.state, target))
     deal = db.query(WholesaleDeal).filter(WholesaleDeal.id == lst.deal_id).first()
-    if action in ("approve", "publish") and not deal.buyer_room_published:
-        raise HTTPException(status_code=409, detail="Approve what investors may see first (Publication on the deal: "
-                                                    "summary, photos, asking price), then publish to the Deal Room.")
+    if action in ("approve", "publish") and not _serving(db, org_id, deal):
+        raise HTTPException(status_code=409, detail="The investor package for this deal is not approved and "
+                                                    "published (or it changed after approval). Open the deal's "
+                                                    "Investor package, send it for approval and publish it first.")
+    if action == "publish":
+        from app.services import wholesale_deal_room_setup as SET
+        SET.require_active(db, org_id, bool(lst.is_test), "publishing a real deal")
+        days = SET.effective(db, org_id).get("default_publish_days")
+        if not lst.expires_at and days:
+            lst.expires_at = _now() + timedelta(days=int(days))
     if action == "publish" and lst.expires_at and lst.expires_at <= _now():
         raise HTTPException(status_code=409, detail="The expiry date has passed - set a new one first.")
     now = _now()
@@ -613,13 +634,25 @@ def transition(db, org_id: str, lst: DealListing, action: str, user) -> DealList
     return lst
 
 
+def _serving(db, org_id: str, deal) -> bool:
+    """The package rule every investor-facing route follows: published AND
+    exactly what was last approved (wholesale_deal_package.serving)."""
+    if not deal.buyer_room_published:
+        return False
+    try:
+        from app.services import wholesale_deal_package as PKG
+        return PKG.serving(db, org_id, deal)
+    except Exception:  # noqa: BLE001 - fail closed
+        return False
+
+
 def active_hold(db, listing_id: str) -> Optional[ExclusiveHold]:
     return db.query(ExclusiveHold).filter(ExclusiveHold.listing_id == listing_id,
                                           ExclusiveHold.status == HOLD_ACTIVE).first()
 
 
 def _eligible(db, lst: DealListing, deal: WholesaleDeal, b: WholesaleBuyer, *, match: Optional[int]) -> bool:
-    if lst.state not in VISIBLE_STATES or not deal.buyer_room_published:
+    if lst.state not in VISIBLE_STATES or not _serving(db, lst.organization_id, deal):
         return False
     now = _now()
     if lst.publish_at and lst.publish_at > now or (lst.expires_at and lst.expires_at <= now):
@@ -704,7 +737,63 @@ def opportunity_card(db, acct, lst, deal, m, hold) -> Dict[str, Any]:
             "match": {"score": m["score"], "missing": m.get("missing", [])[:3]},
             "hold": _hold_view(hold, True) if hold is not None else None,
             "hold_requested": bool(req), "you": pay.get("you"), "expires_at": _iso(lst.expires_at),
-            "published_at": _iso(lst.published_at), "is_test": bool(lst.is_test)}
+            "published_at": _iso(lst.published_at), "is_test": bool(lst.is_test),
+            "saved": db.query(DealRoomSave).filter(DealRoomSave.account_id == acct.id,
+                                                   DealRoomSave.listing_id == lst.id).first() is not None,
+            "arv": pay.get("arv"), "estimated_repairs": pay.get("estimated_repairs")}
+
+
+def save_listing(db, acct, listing_id: str, saved: bool) -> Dict[str, Any]:
+    lst, _deal, _m, _h = get_visible(db, acct, listing_id)
+    row = db.query(DealRoomSave).filter(DealRoomSave.account_id == acct.id, DealRoomSave.listing_id == lst.id).first()
+    if saved and row is None:
+        db.add(DealRoomSave(organization_id=acct.organization_id, account_id=acct.id, listing_id=lst.id))
+    elif not saved and row is not None:
+        db.delete(row)
+    db.flush()
+    return {"saved": saved}
+
+
+def my_offers(db, acct) -> List[Dict[str, Any]]:
+    """The investor's OWN responses (interest, offers, passes) - still-visible deals
+    link to their page; anything no longer shared shows only what they sent."""
+    b = buyer_of(db, acct)
+    visible = {deal.id: lst.id for lst, deal, _m, _h in visible_listings(db, acct)}
+    rows = (db.query(WholesaleBuyerOutreach, WholesaleProperty)
+            .join(WholesaleDeal, WholesaleDeal.id == WholesaleBuyerOutreach.deal_id)
+            .outerjoin(WholesaleProperty, WholesaleProperty.id == WholesaleDeal.property_id)
+            .filter(WholesaleBuyerOutreach.organization_id == acct.organization_id,
+                    WholesaleBuyerOutreach.buyer_id == b.id, WholesaleBuyerOutreach.channel == "deal_room")
+            .order_by(WholesaleBuyerOutreach.replied_at.desc()).all())
+    out = []
+    for o, p in rows:
+        lid = visible.get(o.deal_id)
+        out.append({"listing_id": lid, "still_available": lid is not None, "status": o.status,
+                    "offer": float(o.offer_amount) if o.offer_amount is not None else None,
+                    "financing": o.offer_financing, "note": o.response_note, "at": _iso(o.replied_at),
+                    "address": (", ".join(x for x in (getattr(p, "street_address", None), getattr(p, "city", None)) if x)
+                                if lid else "No longer shared")})
+    return out
+
+
+def my_holds(db, acct) -> List[Dict[str, Any]]:
+    sweep(db, acct.organization_id)
+    b = buyer_of(db, acct)
+    visible = {lst.id: deal for lst, deal, _m, _h in visible_listings(db, acct)}
+    out = []
+    for h in (db.query(ExclusiveHold).filter(ExclusiveHold.organization_id == acct.organization_id,
+                                             ExclusiveHold.buyer_id == b.id)
+              .order_by(ExclusiveHold.requested_at.desc()).all()):
+        deal = visible.get(h.listing_id)
+        prop = db.query(WholesaleProperty).filter(WholesaleProperty.id == deal.property_id).first() if deal else None
+        out.append({"id": h.id, "listing_id": h.listing_id if deal else None, "status": h.status,
+                    "requested_at": _iso(h.requested_at), "starts_at": _iso(h.starts_at), "ends_at": _iso(h.ends_at),
+                    "seconds_left": max(0, int((h.ends_at - _now()).total_seconds()))
+                    if h.ends_at and h.status == HOLD_ACTIVE else None,
+                    "end_reason": h.end_reason, "note": h.request_note,
+                    "address": ", ".join(x for x in (getattr(prop, "street_address", None), getattr(prop, "city", None))
+                                         if x) or ("No longer shared" if not deal else None)})
+    return out
 
 
 def opportunity_detail(db, acct, listing_id: str) -> Dict[str, Any]:
@@ -713,11 +802,14 @@ def opportunity_detail(db, acct, listing_id: str) -> Dict[str, Any]:
     b = buyer_of(db, acct)
     pay = P.buyer_room_payload(db, deal, outreach=_my_outreach(db, deal, b))
     pay.pop("deal_id", None)
+    hidden = set(_j(lst.hidden_document_ids, []))
+    pay["documents"] = [d for d in (pay.get("documents") or []) if d.get("id") not in hidden]
     card = opportunity_card(db, acct, lst, deal, m, hold)
     leak = P.leaked_keys(pay, P.FORBIDDEN_TO_BUYER)
     if leak:                                         # belt and braces: never serve a forbidden key
         raise HTTPException(status_code=500, detail="Withheld: publication boundary check failed.")
-    return {**card, "room": pay, "match": m, "hold_notice": HOLD_NOTICE,
+    sigs = [d for d in investor_documents(db, acct) if d.get("deal_id") == deal.id]
+    return {**card, "room": pay, "match": m, "hold_notice": HOLD_NOTICE, "signatures": sigs,
             "can_submit": hold is None or hold.buyer_id == b.id}
 
 
@@ -755,7 +847,7 @@ def submit_interest(db, acct, listing_id: str, data: Dict[str, Any]) -> Dict[str
         b.company_name or b.contact_name, kind, (" $%s" % format(int(amount), ",")) if amount else ""),
         deal_id=deal.id, details={"buyer_id": b.id, "outreach_id": row.id})
     notify_staff(db, acct.organization_id, "Deal Room: %s - %s" % (b.company_name or b.contact_name, kind),
-                 "/wholesale/deals/%s" % deal.id, assignee_id=acct.assigned_user_id)
+                 "/wholesale/deal-room?view=listings", assignee_id=acct.assigned_user_id, event="offer")
     return {"status": row.status, "offer": float(amount) if amount else None}
 
 
@@ -766,6 +858,19 @@ def request_hold(db, acct, listing_id: str, note: Optional[str]) -> Dict[str, An
     if hold is not None:
         raise HTTPException(status_code=409, detail="This opportunity is already in an exclusive review%s."
                                                     % (" for you" if hold.buyer_id == b.id else ""))
+    from app.services import wholesale_deal_room_setup as SET
+    rules = SET.hold_rules(db, acct.organization_id)
+    if rules["require_note"] and not (note or "").strip():
+        raise HTTPException(status_code=400, detail="Tell the team briefly why you need the exclusive review.")
+    if rules["require_pof"] and not profile(db, acct)["funding"]["documented"]:
+        raise HTTPException(status_code=409, detail="Upload a current proof of funds first - the team accepts it "
+                                                    "before approving exclusive reviews.")
+    mine = db.query(ExclusiveHold).filter(ExclusiveHold.organization_id == acct.organization_id,
+                                          ExclusiveHold.buyer_id == b.id, ExclusiveHold.listing_id != lst.id,
+                                          ExclusiveHold.status.in_((HOLD_ACTIVE, HOLD_REQUESTED))).count()
+    if mine >= rules["max_per_investor"]:
+        raise HTTPException(status_code=409, detail="You can have %d exclusive review%s open at a time."
+                                                    % (rules["max_per_investor"], "" if rules["max_per_investor"] == 1 else "s"))
     req = db.query(ExclusiveHold).filter(ExclusiveHold.listing_id == lst.id, ExclusiveHold.buyer_id == b.id,
                                          ExclusiveHold.status == HOLD_REQUESTED).first()
     if req is None:
@@ -778,7 +883,7 @@ def request_hold(db, acct, listing_id: str, note: Optional[str]) -> Dict[str, An
                        subject_id=deal.id, title="Exclusive review requested by %s" % (b.company_name or b.contact_name),
                        detail=note, priority=15, source="deal_room", is_test=bool(lst.is_test))
     notify_staff(db, acct.organization_id, "Exclusive review requested: %s" % (b.company_name or b.contact_name),
-                 "/wholesale/buyers?tab=dealroom", assignee_id=acct.assigned_user_id)
+                 "/wholesale/deal-room?view=holds", assignee_id=acct.assigned_user_id, event="hold_request")
     log(db, acct.organization_id, "deal_room.hold_requested", "Exclusive review requested", deal_id=deal.id,
         details={"hold_id": req.id, "buyer_id": b.id})
     return {"id": req.id, "status": req.status, "notice": HOLD_NOTICE}
@@ -797,6 +902,12 @@ def decide_hold(db, org_id: str, hold_id: str, user, *, decision: str, preset: O
     now = _now()
     lst = (db.query(DealListing).filter(DealListing.id == h.listing_id).with_for_update().first())
     if decision in ("approve", "extend"):
+        from app.services import wholesale_deal_room_setup as SET
+        rules = SET.hold_rules(db, org_id)
+        if preset and rules["presets"] and preset not in rules["presets"]:
+            raise HTTPException(status_code=400, detail="%s is not an allowed length in your Deal Room settings." % preset)
+        if not preset and minutes and not rules["allow_custom"]:
+            raise HTTPException(status_code=400, detail="Custom lengths are switched off in your Deal Room settings.")
         mins = HOLD_PRESETS.get(preset or "") or (int(minutes) if minutes else None)
         if not mins or mins <= 0 or mins > HOLD_MAX_MINUTES:
             raise HTTPException(status_code=400, detail="Choose 24h, 48h, 72h, 7d or a custom duration up to 30 days.")
@@ -847,8 +958,11 @@ def decide_hold(db, org_id: str, hold_id: str, user, *, decision: str, preset: O
 
 
 def _dur(mins: int) -> str:
-    return ("%d days" % (mins // 1440)) if mins % 1440 == 0 and mins >= 1440 else (
-        "%d hours" % (mins // 60) if mins % 60 == 0 else "%d minutes" % mins)
+    if mins % 1440 == 0 and mins >= 2880:
+        return "%d days" % (mins // 1440)
+    if mins % 60 == 0:
+        return "%d hours" % (mins // 60)
+    return "%d minutes" % mins
 
 
 def _is_wholesale_manager(db, user) -> bool:
@@ -875,6 +989,7 @@ def hold_json(db, h: ExclusiveHold) -> Dict[str, Any]:
             "status": h.status, "request_note": h.request_note, "requested_at": _iso(h.requested_at),
             "decided_at": _iso(h.decided_at), "starts_at": _iso(h.starts_at), "ends_at": _iso(h.ends_at),
             "duration_minutes": h.duration_minutes, "end_reason": h.end_reason, "extended_count": h.extended_count,
+            "is_test": bool(h.is_test),
             "seconds_left": max(0, int((h.ends_at - _now()).total_seconds())) if h.ends_at and h.status == HOLD_ACTIVE
             else None}
 

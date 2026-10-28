@@ -13,7 +13,6 @@ import { api } from '../../api/client'
 import { Alert, Drawer, Empty, Metric, Metrics, Panel, Ring, Search, Seg, Skeleton, Tag, TabBar } from './ds/ds'
 import { errText } from './wsShared'
 import { BuyerImportWizard, BuyerNetworkPanel } from './wsBuyerNetwork'
-import DealRoomTab from './wsDealRoom'
 import './wsBuyerIntelligence.css'
 
 const BI = '/wholesale/buyer-intel'
@@ -58,9 +57,9 @@ function SegmentChips({ segments }) {
 }
 
 // ── page ────────────────────────────────────────────────────────────────────
-export default function BuyerIntelligence({ legacy, reloadKey }) {
+export default function BuyerIntelligence({ legacy, reloadKey, requestTab }) {
   const [tab, setTab] = useState(() => {
-    try { return sessionStorage.getItem('bi.tab') || 'qualify' } catch { return 'qualify' }
+    try { const t = sessionStorage.getItem('bi.tab'); return ['find', 'qualify', 'match'].includes(t) ? t : 'qualify' } catch { return 'qualify' }
   })
   const [includeTest, setIncludeTest] = useState(false)
   const [summary, setSummary] = useState(null)
@@ -73,6 +72,7 @@ export default function BuyerIntelligence({ legacy, reloadKey }) {
   const [bump, setBump] = useState(0)
 
   useEffect(() => { try { sessionStorage.setItem('bi.tab', tab) } catch { /* private window */ } }, [tab])
+  useEffect(() => { if (requestTab && requestTab.tab) setTab(requestTab.tab) }, [requestTab])
   const refresh = useCallback(() => setBump((x) => x + 1), [])
   useEffect(() => {
     let alive = true
@@ -89,15 +89,15 @@ export default function BuyerIntelligence({ legacy, reloadKey }) {
       <Alert>{error}</Alert>
       <Alert kind="ok">{notice}</Alert>
       <Metrics label="Buyer intelligence summary">
-        {(cards.length ? cards : [{ key: 'a', label: 'Buyers discovered' }, { key: 'b', label: 'Verified active buyers' },
-          { key: 'c', label: 'Buyers to qualify' }, { key: 'd', label: 'Deals with buyer matches' }]).map((c, i) => (
+        {(cards.length ? cards : [{ key: 'a', label: 'Total buyers' }, { key: 'b', label: 'Verified active buyers' },
+          { key: 'c', label: 'Buyers to qualify' }, { key: 'd', label: 'Deals with matches' }]).map((c, i) => (
           <Metric key={c.key} label={c.label} value={summary ? c.value : null} sub={c.detail}
                   tone={['primary', 'success', 'info', 'violet'][i]} />
         ))}
       </Metrics>
       <div className="bi-tabs"><TabBar label="Buyer activities" value={tab} onChange={setTab}
               items={[{ key: 'find', label: 'Find buyers' }, { key: 'qualify', label: 'Qualify buyers' },
-                      { key: 'match', label: 'Match deals' }, { key: 'dealroom', label: 'Deal Room' }]}
+                      { key: 'match', label: 'Match deals' }]}
               actions={<label className="evo-btn evo-btn--ghost evo-btn--sm" style={{ cursor: 'pointer' }}>
                 <input type="checkbox" checked={includeTest} onChange={(e) => setIncludeTest(e.target.checked)}
                        style={{ margin: 0 }} /> Sandbox / practice records</label>} /></div>
@@ -106,7 +106,6 @@ export default function BuyerIntelligence({ legacy, reloadKey }) {
                                          onOpen={setOpenBuyer} /> : null}
         {tab === 'find' ? <FindTab legacy={legacy} includeTest={includeTest} bump={bump} onOpen={setOpenBuyer}
                                    onChanged={(msg) => { if (msg) setNotice(msg); refresh() }} /> : null}
-        {tab === 'dealroom' ? <DealRoomTab includeTest={includeTest} onOpenBuyer={setOpenBuyer} /> : null}
         {tab === 'match' ? <MatchTab includeTest={includeTest} onOpen={setOpenBuyer}
                                      onChanged={(msg) => { if (msg) setNotice(msg); refresh() }} /> : null}
       </div>
@@ -134,6 +133,7 @@ const MORE = [
   ['strategy', 'Strategy', [['', 'Any'], ['flip', 'Flip'], ['rental', 'Rental / hold'], ['brrrr', 'BRRRR'],
     ['value_add', 'Value-add'], ['development', 'Development'], ['land', 'Land']]],
 ]
+const QUICK = ['strategy', 'verification', 'readiness']
 const RANGE = [['state', 'State'], ['county', 'County'], ['city', 'City'], ['zip', 'ZIP'], ['price_min', 'Price from'],
   ['price_max', 'Price to'], ['units_min', 'Units from'], ['units_max', 'Units to'], ['acres_min', 'Acres from'],
   ['acres_max', 'Acres to']]
@@ -179,18 +179,32 @@ function QualifyTab({ tax, includeTest, bump, onOpen }) {
       <div className="evo-filterbar">
         <Search value={q} onChange={setQ} placeholder="Search buyer name or ZIP" label="Search buyers" />
         <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" aria-expanded={showMore}
-                onClick={() => setShowMore((x) => !x)}>Filters{active ? ` (${active})` : ''}</button>
+                onClick={() => setShowMore((x) => !x)}>More filters{active ? ` (${active} on)` : ''}</button>
         {active ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => setF({})}>Clear</button> : null}
+      </div>
+      <div className="bi-filters bi-filters--quick" aria-label="Quick filters">
+        {MORE.filter(([key]) => QUICK.includes(key)).map(([key, label, opts]) => (
+          <label key={key} className="bi-filter"><span>{label}</span>
+            <select className="evo-input" value={f[key] || ''} onChange={(e) => setF((x) => ({ ...x, [key]: e.target.value }))}>
+              {opts.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+            </select></label>
+        ))}
+        {[['county', 'County'], ['price_max', 'Budget up to']].map(([key, label]) => (
+          <label key={key} className="bi-filter"><span>{label}</span>
+            <input className="evo-input" value={f[key] || ''} inputMode={key === 'price_max' ? 'decimal' : 'text'}
+                   placeholder={key === 'county' ? 'e.g. Dallas' : 'e.g. 300000'}
+                   onChange={(e) => setF((x) => ({ ...x, [key]: e.target.value }))} /></label>
+        ))}
       </div>
       {showMore ? (
         <div className="bi-filters">
-          {MORE.map(([key, label, opts]) => (
+          {MORE.filter(([key]) => !QUICK.includes(key)).map(([key, label, opts]) => (
             <label key={key} className="bi-filter"><span>{label}</span>
               <select className="evo-input" value={f[key] || ''} onChange={(e) => setF((x) => ({ ...x, [key]: e.target.value }))}>
                 {opts.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
               </select></label>
           ))}
-          {RANGE.map(([key, label]) => (
+          {RANGE.filter(([key]) => !['county', 'price_max'].includes(key)).map(([key, label]) => (
             <label key={key} className="bi-filter"><span>{label}</span>
               <input className="evo-input" value={f[key] || ''} inputMode={/min|max/.test(key) ? 'decimal' : 'text'}
                      onChange={(e) => setF((x) => ({ ...x, [key]: e.target.value }))} /></label>

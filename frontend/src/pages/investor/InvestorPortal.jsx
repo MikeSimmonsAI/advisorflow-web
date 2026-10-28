@@ -1,22 +1,21 @@
-/* PRIVATE BUYER DEAL ROOM - the investor's portal (#415).
+/* PRIVATE BUYER DEAL ROOM - the investor portal (/investors).
  *
- * A restricted experience for invited investors only, on the SAME backend as
- * Wholesale: every opportunity, message, document and signature here is a row
- * the staff screens already own (buyer, buy box, outreach, file, envelope).
+ * Built to the owner-approved combined design (EvoSys Pro Investor Portal):
+ * premium navy sidebar, rich blue accents, bright workspace, photo hero with a
+ * personal welcome, clean metric tiles, property cards, and a right rail with
+ * the AI concierge, messages & support and the investor's criteria.
+ *
+ * EVERY NUMBER IS REAL. The mockup's illustrative portfolio value, ROI and cash
+ * flow have no source in this product, so they are not shown; the tiles carry
+ * counts and figures from the investor's own records and the published deals.
+ *
  * The server decides what an investor may see (/investor/*, fenced in
- * app/deps.py); this page never widens it.
- *
- * Routes (all under /investors - /investor/:token is the older Buyer Room link):
- *   /investors/invite/:token   accept an invitation (single use)
- *   /investors/login           sign in
- *   /investors                 dashboard
- *   /investors/opportunities[/:id]
- *   /investors/messages[/:id]
- *   /investors/documents
- *   /investors/profile
+ * app/deps.py). /investors/preview is the owner's read-only look at the same
+ * design, fed by /wholesale/deal-room/portal-preview with the staff session.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { api as staffApi, fetchObjectUrl } from '../../api/client'
 import { cap, fileSize, inv, investorToken, objectUrl, setInvestorToken, usd, when, words } from './investorApi'
 import './investor.css'
 
@@ -45,20 +44,49 @@ function Loading({ label = 'Loading' }) {
   return <div className="ir-loading" role="status" aria-live="polite"><span className="ir-spin" aria-hidden="true" />{label}…</div>
 }
 
-function Photo({ listingId, fileId, alt, className = '' }) {
+const I = {
+  home: 'M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
+  deals: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
+  criteria: 'M4 6h16M7 12h10M10 18h4',
+  review: 'M12 3l2.7 5.5 6 .9-4.4 4.2 1 6-5.3-2.8-5.3 2.8 1-6L3.3 9.4l6-.9z',
+  offers: 'M20 12V7H4v13h8M4 7l2-4h12l2 4M16 17l2 2 4-4',
+  msg: 'M4 5h16v11H8l-4 4z',
+  docs: 'M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6',
+  account: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0',
+  bell: 'M6 16V11a6 6 0 1 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0',
+  search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-5-5',
+  pin: 'M12 21s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12zM12 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
+  heart: 'M12 20s-7-4.5-9-9a5 5 0 0 1 9-3 5 5 0 0 1 9 3c-2 4.5-9 9-9 9z',
+  send: 'M4 12l16-8-6 16-2-7z',
+  spark: 'M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z',
+  bed: 'M3 18V7M3 13h18v5M7 13V9h6a3 3 0 0 1 3 3v1',
+  bath: 'M4 12h16v3a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4zM6 12V6a2 2 0 0 1 4 0',
+  area: 'M4 4h16v16H4zM9 4v16M4 9h16',
+  units: 'M4 21V7l8-4 8 4v14M9 21v-6h6v6',
+}
+function Ico({ n, size = 18 }) {
+  return (
+    <svg className="ir-ico" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={I[n]} /></svg>
+  )
+}
+
+/** Photo through the authorized route (an <img src> cannot carry the token). */
+function Photo({ listingId, fileId, alt, className = '', preview }) {
   const [src, setSrc] = useState(null)
   useEffect(() => {
     let url = null
     let alive = true
     if (listingId && fileId) {
-      objectUrl(`/investor/opportunities/${listingId}/photos/${fileId}`)
-        .then((u) => { url = u; if (alive) setSrc(u); else URL.revokeObjectURL(u) }).catch(() => {})
+      const p = preview ? fetchObjectUrl(`/wholesale/deal-room/listings/${listingId}/photos/${fileId}`)
+        : objectUrl(`/investor/opportunities/${listingId}/photos/${fileId}`)
+      p.then((u) => { url = u; if (alive) setSrc(u); else URL.revokeObjectURL(u) }).catch(() => {})
     }
     return () => { alive = false; if (url) URL.revokeObjectURL(url) }
-  }, [listingId, fileId])
+  }, [listingId, fileId, preview])
   return (
     <div className={`ir-photo ${className}`}>
-      {src ? <img src={src} alt={alt || ''} /> : <span className="ir-photo__ph" aria-hidden="true">◇</span>}
+      {src ? <img src={src} alt={alt || ''} /> : <span className="ir-photo__ph" aria-hidden="true"><Ico n="home" size={30} /></span>}
     </div>
   )
 }
@@ -81,77 +109,79 @@ function Countdown({ endsAt, compact }) {
   const c = useCountdown(endsAt)
   if (!c) return null
   return (
-    <span className={`ir-count${compact ? ' ir-count--sm' : ''}`} role="timer" aria-live="off"
-          aria-label={`Exclusive review ends ${new Date(endsAt).toLocaleString()}`}>
-      {c.left > 0 ? c.text : 'Ended'}
-    </span>
-  )
-}
-
-function Match({ score, size = 'md' }) {
-  if (score === null || score === undefined) return <span className="ir-match ir-match--none">No buy box yet</span>
-  const tone = score >= 80 ? 'hi' : score >= 60 ? 'mid' : 'lo'
-  return (
-    <span className={`ir-match ir-match--${tone} ir-match--${size}`} title="How well this property fits the buy box you gave us">
-      <b>{score}<i>%</i></b><small>match</small>
-    </span>
-  )
-}
-
-const FACT_LABEL = { bedrooms: 'Beds', bathrooms: 'Baths', square_feet: 'Sq ft', year_built: 'Built',
-  unit_count: 'Units', acreage: 'Acres', building_sqft: 'Building sq ft' }
-
-function Facts({ facts }) {
-  const items = Object.entries(facts || {}).filter(([, v]) => v !== null && v !== undefined && v !== '')
-  if (!items.length) return null
-  return (
-    <ul className="ir-facts">
-      {items.map(([k, v]) => <li key={k}><b>{typeof v === 'number' ? v.toLocaleString('en-US') : v}</b> {FACT_LABEL[k] || cap(k)}</li>)}
-    </ul>
+    <span className={`ir-count${compact ? ' ir-count--sm' : ''}`} role="timer"
+          aria-label={`Exclusive review ends ${new Date(endsAt).toLocaleString()}`}>{c.left > 0 ? c.text : 'Ended'}</span>
   )
 }
 
 const addr1 = (a) => (a && a.line1) || 'Address on request'
 const addr2 = (a) => [a && a.city, a && a.state, a && a.zip_code].filter(Boolean).join(', ')
+const CAT = { residential: 'Single family', single_family: 'Single family', multifamily: 'Multifamily', commercial: 'Commercial',
+  land: 'Land', industrial: 'Industrial', mixed_use: 'Mixed use', agricultural: 'Land', portfolio: 'Portfolio' }
+const catOf = (o) => CAT[o.category] || CAT[(o.address || {}).property_type] || cap(o.category || (o.address || {}).property_type || 'Property')
+const isNew = (o) => o.published_at && (Date.now() - new Date(o.published_at).getTime()) < 7 * 86400000
 
-function OppCard({ o }) {
+function FactsRow({ facts }) {
+  const f = facts || {}
+  const items = []
+  if (f.unit_count) items.push(['units', `${f.unit_count} units`])
+  if (f.bedrooms) items.push(['bed', `${Number(f.bedrooms)} bd`])
+  if (f.bathrooms) items.push(['bath', `${Number(f.bathrooms)} ba`])
+  if (f.square_feet) items.push(['area', `${Number(f.square_feet).toLocaleString('en-US')} sq ft`])
+  if (f.acreage) items.push(['area', `${f.acreage} acres`])
+  if (!items.length) return null
+  return <ul className="ir-facts">{items.map(([n, t]) => <li key={t}><Ico n={n} size={15} />{t}</li>)}</ul>
+}
+
+function OppCard({ o, onSave, preview }) {
+  const nav = useNavigate()
   const yourHold = o.hold && o.hold.yours && o.hold.status === 'active'
+  const badge = yourHold ? ['Exclusive review', 'gold'] : o.is_test ? ['Practice', 'practice'] : isNew(o) ? ['New', 'blue'] : null
+  const base = preview ? null : `/investors/deals/${o.id}`
   return (
-    <Link to={`/investors/opportunities/${o.id}`} className="ir-card" aria-label={`${addr1(o.address)}, ${addr2(o.address)}`}>
+    <article className="ir-card">
       <div className="ir-card__media">
-        <Photo listingId={o.id} fileId={o.cover_photo} alt="" />
-        <div className="ir-card__chips">
-          {o.is_test ? <span className="ir-chip ir-chip--practice">Practice</span> : null}
-          {yourHold ? <span className="ir-chip ir-chip--gold">Your exclusive review</span> : null}
-          {o.you && o.you.status ? <span className="ir-chip">{cap(o.you.status)}</span> : null}
-        </div>
+        <Photo listingId={o.id} fileId={o.cover_photo} alt={`Photo of ${addr1(o.address)}`} preview={preview} />
+        {badge ? <span className={`ir-badge-tag ir-badge-tag--${badge[1]}`}>{badge[0]}</span> : null}
+        {!preview ? (
+          <button type="button" className={`ir-heart${o.saved ? ' is-on' : ''}`} aria-pressed={!!o.saved}
+                  aria-label={o.saved ? 'Remove from saved' : 'Save this property'} onClick={() => onSave && onSave(o)}><Ico n="heart" size={17} /></button>
+        ) : null}
       </div>
       <div className="ir-card__body">
-        <div className="ir-card__top">
-          <div>
-            <h3 className="ir-card__addr">{addr1(o.address)}</h3>
-            <p className="ir-card__place">{addr2(o.address)}{o.address && o.address.county ? ` · ${o.address.county} County` : ''}</p>
+        <div className="ir-card__price">{usd(o.asking_price)}</div>
+        <h3 className="ir-card__addr">{addr1(o.address)}</h3>
+        <p className="ir-card__place">{addr2(o.address)}</p>
+        <FactsRow facts={o.facts} />
+        <div className="ir-tags"><span className="ir-tag">{catOf(o)}</span>{o.you && o.you.status ? <span className="ir-tag ir-tag--blue">{cap(o.you.status)}</span> : null}</div>
+        <div className="ir-card__stats">
+          <div><small>Match</small><b className={o.match && o.match.score >= 80 ? 'is-hi' : ''}>{o.match && o.match.score !== null && o.match.score !== undefined ? `${o.match.score}%` : '—'}</b></div>
+          <div><small>{o.arv ? 'Est. ARV' : yourHold ? 'Review ends' : 'Listed'}</small>
+            <b>{o.arv ? usd(o.arv) : yourHold ? <Countdown endsAt={o.hold.ends_at} compact /> : (o.published_at ? new Date(o.published_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—')}</b></div>
+        </div>
+        {base ? (
+          <div className="ir-card__btns">
+            <Link to={base} className="ir-btn ir-btn--primary ir-btn--sm">View details</Link>
+            <button type="button" className="ir-btn ir-btn--outline ir-btn--sm" onClick={() => nav(`${base}?offer=1`)}>Submit offer</button>
           </div>
-          <Match score={o.match && o.match.score} size="sm" />
-        </div>
-        <Facts facts={o.facts} />
-        <div className="ir-card__foot">
-          <span className="ir-price">{usd(o.asking_price)}</span>
-          {yourHold ? <Countdown endsAt={o.hold.ends_at} compact /> : <span className="ir-muted">{cap(o.category || o.address?.property_type)}</span>}
-        </div>
+        ) : null}
       </div>
-    </Link>
+    </article>
   )
 }
 
 // ── public: invitation and sign in ─────────────────────────────────────────
-function Brandmark({ org }) {
+function Brandmark({ name, light }) {
   return (
-    <div className="ir-brand">
-      <span className="ir-brand__mark" aria-hidden="true">◆</span>
-      <span><b>{org || 'Private'}</b><small>Deal Room</small></span>
+    <div className={`ir-brand${light ? ' ir-brand--light' : ''}`}>
+      <span className="ir-brand__mark" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30"><rect x="3" y="3" width="26" height="26" rx="7" fill="#2563eb" /><path d="M10 11h12M10 16h9M10 21h12" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" /></svg></span>
+      <span><b>{name || 'Deal Room'}</b><small>Investor portal</small></span>
     </div>
   )
+}
+
+function GateArt() {
+  return <div className="ir-gate__art" aria-hidden="true"><div className="ir-gate__glow" /><p className="ir-gate__quote">We find. You grow.</p></div>
 }
 
 function Invite() {
@@ -183,14 +213,14 @@ function Invite() {
   }
   return (
     <div className="ir-gate">
-      <div className="ir-gate__art" aria-hidden="true"><div className="ir-gate__glow" /></div>
+      <GateArt />
       <main className="ir-gate__panel">
-        <Brandmark org={p && p.organization} />
+        <Brandmark name={p && p.organization} />
         {!p && !err ? <Loading label="Checking your invitation" /> : null}
         {p ? (
           <form onSubmit={submit} className="ir-form">
             <p className="ir-eyebrow">Private invitation</p>
-            <h1 className="ir-h1">{p.name ? `Welcome, ${p.name.split(' ')[0]}.` : 'Welcome.'}</h1>
+            <h1 className="ir-h1">{p.name ? <>Welcome, <span className="ir-accent">{p.name.split(' ')[0]}</span>.</> : 'Welcome.'}</h1>
             <p className="ir-lead">{p.organization} has invited you to a private Deal Room: off-market opportunities
               matched to what you buy, with a direct line to the team.</p>
             <p className="ir-muted ir-small">Invitation for {p.email_masked}. The link works once.</p>
@@ -220,7 +250,7 @@ function Invite() {
                        onChange={(e) => setF({ ...f, password: e.target.value })} /></label>
             )}
             <Note kind="error">{err}</Note>
-            <button className="ir-btn ir-btn--gold ir-btn--block" disabled={busy}>{busy ? 'One moment…' : register ? 'Enter the Deal Room' : 'Accept invitation'}</button>
+            <button className="ir-btn ir-btn--primary ir-btn--block" disabled={busy}>{busy ? 'One moment…' : register ? 'Enter the Deal Room' : 'Accept invitation'}</button>
           </form>
         ) : <Note kind="error">{err}</Note>}
       </main>
@@ -246,7 +276,7 @@ function Login() {
   }
   return (
     <div className="ir-gate">
-      <div className="ir-gate__art" aria-hidden="true"><div className="ir-gate__glow" /></div>
+      <GateArt />
       <main className="ir-gate__panel">
         <Brandmark />
         <form onSubmit={submit} className="ir-form">
@@ -257,7 +287,7 @@ function Login() {
           <label className="ir-field"><span>Password</span>
             <input required type="password" autoComplete="current-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></label>
           <Note kind="error">{err}</Note>
-          <button className="ir-btn ir-btn--gold ir-btn--block" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+          <button className="ir-btn ir-btn--primary ir-btn--block" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
           <p className="ir-muted ir-small">Access is by invitation. If you need a new link, contact the team that invited you.</p>
         </form>
       </main>
@@ -266,148 +296,385 @@ function Login() {
 }
 
 // ── the signed-in shell ────────────────────────────────────────────────────
-const NAV = [
-  { to: '/investors', label: 'Overview', icon: '◈', end: true },
-  { to: '/investors/opportunities', label: 'Opportunities', short: 'Deals', icon: '▣' },
-  { to: '/investors/messages', label: 'Messages', icon: '✉' },
-  { to: '/investors/documents', label: 'Documents', icon: '▤' },
-  { to: '/investors/profile', label: 'Profile', icon: '◎' },
-]
+function navItems(c) {
+  return [
+    { to: '/investors', label: 'Dashboard', icon: 'home', end: true },
+    { to: '/investors/deals', label: 'Available Deals', short: 'Deals', icon: 'deals' },
+    { to: '/investors/criteria', label: 'My Criteria', short: 'Criteria', icon: 'criteria' },
+    { to: '/investors/reviews', label: 'Exclusive Reviews', short: 'Reviews', icon: 'review', n: c && c.in_review },
+    { to: '/investors/offers', label: 'My Offers', short: 'Offers', icon: 'offers', n: c && c.responses },
+    { to: '/investors/messages', label: 'Messages', icon: 'msg', n: c && c.unread, alert: true },
+    { to: '/investors/documents', label: 'Documents', short: 'Docs', icon: 'docs', n: c && c.to_sign, alert: true },
+    { to: '/investors/account', label: 'Account', icon: 'account' },
+  ]
+}
+const PHONE_NAV = ['/investors', '/investors/deals', '/investors/messages', '/investors/documents', '/investors/account']
+
+function Sidebar({ room, counts, promo, preview }) {
+  const items = navItems(counts)
+  return (
+    <aside className="ir-side" aria-label="Deal Room">
+      <Brandmark name={room && (room.brand_name || room.name)} light />
+      <nav className="ir-nav" aria-label="Deal Room sections">
+        {items.map((n) => (
+          <NavLink key={n.to} to={preview ? '/investors/preview' : n.to} end={n.end}
+                   className={({ isActive }) => `ir-nav__a${(preview ? n.to === '/investors' : isActive) ? ' is-on' : ''}${PHONE_NAV.includes(n.to) ? ' is-phone' : ''}`}
+                   onClick={preview ? (e) => e.preventDefault() : undefined}>
+            <Ico n={n.icon} /><span className="ir-nav__l"><span className="ir-long">{n.label}</span><span className="ir-short">{n.short || n.label}</span></span>
+            {n.n ? <span className={`ir-nbadge${n.alert ? ' is-alert' : ''}`} aria-label={`${n.n}`}>{n.n}</span> : null}
+          </NavLink>
+        ))}
+      </nav>
+      <div className="ir-promo">
+        {promo ? <Photo listingId={promo.id} fileId={promo.cover_photo} preview={preview} className="ir-promo__img" /> : <div className="ir-promo__img ir-promo__img--plain" />}
+        <div className="ir-promo__text">
+          <b>We Find. You Grow.</b>
+          <span>Exclusive real estate opportunities in {room && room.markets && room.markets.length ? listWords(room.markets) : 'Dallas - Fort Worth'}.</span>
+          <Link className="ir-btn ir-btn--primary ir-btn--sm" to={preview ? '/investors/preview' : '/investors/deals'}>View latest deals →</Link>
+        </div>
+      </div>
+    </aside>
+  )
+}
+const usdK = (v) => (v >= 1e6 ? '$' + (v / 1e6).toFixed(v % 1e6 ? 2 : 0) + 'M' : v >= 1e3 ? '$' + Math.round(v / 1e3) + 'K' : usd(v))
+const listWords = (a) => (a.length <= 1 ? a.join('') : a.slice(0, -1).join(', ') + ' & ' + a[a.length - 1])
+
+function Topbar({ me, counts, room, q, setQ, market, setMarket, onSignOut, preview }) {
+  const nav = useNavigate()
+  const name = me && me.account ? (me.account.preferred_name || me.account.legal_name) : (preview ? 'Investor preview' : '')
+  const [open, setOpen] = useState(false)
+  return (
+    <header className="ir-top">
+      <form className="ir-searchbox" role="search" onSubmit={(e) => { e.preventDefault(); if (!preview) nav(`/investors/deals?q=${encodeURIComponent(q)}`) }}>
+        <Ico n="search" /><label className="ir-sr" htmlFor="ir-q">Search deals</label>
+        <input id="ir-q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search deals, addresses, or cities…" />
+      </form>
+      <label className="ir-market"><Ico n="pin" /><span className="ir-sr">Market</span>
+        <select value={market} onChange={(e) => setMarket(e.target.value)}>
+          <option value="">{room && room.markets && room.markets.length ? 'Dallas - Fort Worth' : 'All markets'}</option>
+          {((room && room.markets) || []).map((m) => <option key={m} value={m}>{m} County</option>)}
+        </select></label>
+      <Link to={preview ? '/investors/preview' : '/investors/messages'} className="ir-bell" aria-label={`Messages${counts && counts.unread ? `, ${counts.unread} unread` : ''}`}>
+        <Ico n="bell" size={20} />{counts && counts.unread ? <span className="ir-bell__n">{counts.unread}</span> : null}</Link>
+      <div className="ir-user">
+        <button type="button" className="ir-user__btn" aria-expanded={open} onClick={() => setOpen((x) => !x)}>
+          <span className="ir-avatar" aria-hidden="true">{(name || '?').slice(0, 1)}</span>
+          <span className="ir-user__t"><b>{name || '…'}</b><small>{me && me.account ? (me.account.company_legal_name || 'Individual investor') : (room && room.name)}</small></span>
+          <span aria-hidden="true">▾</span>
+        </button>
+        {open && !preview ? (
+          <div className="ir-menu" role="menu">
+            <Link role="menuitem" to="/investors/account" onClick={() => setOpen(false)}>Account</Link>
+            <button role="menuitem" type="button" onClick={onSignOut}>Sign out</button>
+          </div>
+        ) : null}
+      </div>
+    </header>
+  )
+}
 
 function Shell() {
   const [me, meErr, reloadMe] = useLoad('/investor/me')
   const [dash, , reloadDash] = useLoad('/investor/dashboard')
   const nav = useNavigate()
+  const loc = useLocation()
+  const [q, setQ] = useState(() => new URLSearchParams(window.location.search).get('q') || '')
+  const [market, setMarket] = useState('')
   const signOut = async () => {
     try { await inv.post('/auth/logout', {}) } catch { /* already gone */ }
     setInvestorToken(null)
     nav('/investors/login', { replace: true })
   }
-  const unread = dash && dash.counts ? dash.counts.unread : 0
-  const name = me && me.account ? (me.account.preferred_name || me.account.legal_name) : ''
   const reload = useCallback(() => { reloadMe(); reloadDash() }, [reloadMe, reloadDash])
+  const room = (dash && dash.room) || (me && me.room)
+  const counts = dash && dash.counts
+  const promo = dash && (dash.opportunities || []).find((o) => o.cover_photo)
+  useEffect(() => { if (document.getElementById('ir-main')) document.getElementById('ir-main').scrollTop = 0 }, [loc.pathname])
+  const shared = { me, dash, reload, q, market, setQ }
   return (
     <div className="ir-app">
       <a className="ir-skip" href="#ir-main">Skip to content</a>
-      <aside className="ir-side" aria-label="Deal Room">
-        <Brandmark org={me && me.organization} />
-        <nav className="ir-nav" aria-label="Deal Room sections">
-          {NAV.map((n) => (
-            <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => `ir-nav__a${isActive ? ' is-on' : ''}`}>
-              <span className="ir-nav__i" aria-hidden="true">{n.icon}</span><span className="ir-nav__l">{n.short ? <><span className="ir-long">{n.label}</span><span className="ir-short">{n.short}</span></> : n.label}</span>
-              {n.label === 'Messages' && unread ? <span className="ir-badge" aria-label={`${unread} unread`}>{unread}</span> : null}
-            </NavLink>
-          ))}
-        </nav>
-        <div className="ir-side__foot">
-          {me && me.account && me.account.is_test ? <span className="ir-chip ir-chip--practice">Practice account</span> : null}
-          <div className="ir-who"><span className="ir-avatar" aria-hidden="true">{(name || '?').slice(0, 1)}</span>
-            <span><b>{name || '…'}</b><small>{me && me.account && me.account.company_legal_name}</small></span></div>
-          <button type="button" className="ir-link" onClick={signOut}>Sign out</button>
-        </div>
-      </aside>
-      <main className="ir-main" id="ir-main" tabIndex={-1}>
-        <div className="ir-mtop"><Brandmark org={me && me.organization} />
-          <button type="button" className="ir-link" onClick={signOut}>Sign out</button></div>
-        <Note kind="error">{meErr}</Note>
-        <Routes>
-          <Route index element={<Overview me={me} dash={dash} />} />
-          <Route path="opportunities" element={<Opportunities />} />
-          <Route path="opportunities/:id" element={<Opportunity onChange={reload} />} />
-          <Route path="messages" element={<Messages onChange={reloadDash} />} />
-          <Route path="messages/:id" element={<Messages onChange={reloadDash} />} />
-          <Route path="documents" element={<Documents onChange={reload} />} />
-          <Route path="profile" element={<Profile me={me} onChange={reload} />} />
-          <Route path="*" element={<Navigate to="/investors" replace />} />
-        </Routes>
-      </main>
+      <Sidebar room={room} counts={counts} promo={promo} />
+      <div className="ir-frame">
+        <Topbar me={me} counts={counts} room={room} q={q} setQ={setQ} market={market} setMarket={setMarket} onSignOut={signOut} />
+        <main className="ir-main" id="ir-main" tabIndex={-1}>
+          <Note kind="error">{meErr}</Note>
+          {me && me.account && me.account.is_test ? <div className="ir-practice">Practice account - opportunities and documents here are practice records, not real offers.</div> : null}
+          <Routes>
+            <Route index element={<Dashboard {...shared} />} />
+            <Route path="deals" element={<Deals {...shared} />} />
+            <Route path="deals/:id" element={<Opportunity onChange={reload} />} />
+            <Route path="opportunities/:id" element={<OldLink />} />
+            <Route path="criteria" element={<Criteria me={me} onChange={reload} />} />
+            <Route path="reviews" element={<Reviews />} />
+            <Route path="offers" element={<Offers />} />
+            <Route path="messages" element={<Messages onChange={reloadDash} />} />
+            <Route path="messages/:id" element={<Messages onChange={reloadDash} />} />
+            <Route path="documents" element={<Documents onChange={reload} />} />
+            <Route path="account" element={<Account me={me} onChange={reload} />} />
+            <Route path="profile" element={<Navigate to="/investors/account" replace />} />
+            <Route path="*" element={<Navigate to="/investors" replace />} />
+          </Routes>
+        </main>
+      </div>
     </div>
   )
 }
 
+function OldLink() {
+  const { id } = useParams()
+  return <Navigate to={`/investors/deals/${id}`} replace />
+}
+
+const filterOpps = (list, q, market, cat) => {
+  const needle = (q || '').trim().toLowerCase()
+  return (list || []).filter((o) => {
+    const a = o.address || {}
+    if (market && (a.county || '').toLowerCase() !== market.toLowerCase()) return false
+    if (cat && cat !== 'all' && catOf(o) !== cat) return false
+    if (needle && ![a.line1, a.city, a.zip_code, a.county, o.summary, catOf(o)].filter(Boolean).join(' ').toLowerCase().includes(needle)) return false
+    return true
+  })
+}
+
+// ── dashboard ──────────────────────────────────────────────────────────────
 function greeting() {
   const h = new Date().getHours()
   return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
 }
 
-function Overview({ me, dash }) {
-  if (!dash) return <Loading />
-  const ob = dash.onboarding || {}
-  const steps = [
-    { k: 'identity', l: 'Confirm who you buy as', to: '/investors/profile' },
-    { k: 'buy_box', l: 'Confirm your buy box', to: '/investors/profile#buy-box' },
-    { k: 'proof_of_funds', l: 'Upload proof of funds', to: '/investors/documents' },
-  ]
-  const left = steps.filter((s) => !ob[s.k])
-  const opps = dash.opportunities || []
+export function DashboardView({ dash, me, q, market, preview, onSave, rail }) {
+  const [cat, setCat] = useState('all')
+  const opps = (dash && dash.opportunities) || []
+  const cats = useMemo(() => {
+    const seen = []
+    opps.forEach((o) => { const c = catOf(o); if (!seen.includes(c)) seen.push(c) })
+    return seen
+  }, [opps])
+  const shown = filterOpps(opps, q, market, cat)
+  const c = (dash && dash.counts) || {}
+  const room = (dash && dash.room) || {}
+  const hero = opps.find((o) => o.cover_photo)
+  const name = dash && dash.welcome ? dash.welcome.name : ''
+  const markets = room.markets && room.markets.length ? listWords(room.markets.slice(0, 4)) : 'Dallas - Fort Worth'
   return (
-    <>
-      <header className="ir-hero">
-        <div>
-          <p className="ir-eyebrow">{dash.welcome && dash.welcome.organization} · Private Deal Room</p>
-          <h1 className="ir-h1">{greeting()}{dash.welcome && dash.welcome.name ? `, ${dash.welcome.name}` : ''}.</h1>
-          <p className="ir-lead">{opps.length
-            ? `${opps.length} opportunit${opps.length === 1 ? 'y' : 'ies'} selected for you. Ask your concierge anything - answers come only from what the team has published.`
-            : 'No opportunities match you right now. When one does, it appears here first.'}</p>
-        </div>
-        <div className="ir-stats" role="list">
-          {[['Opportunities', dash.counts.opportunities, '/investors/opportunities'],
-            ['In exclusive review', dash.counts.in_review, '/investors/opportunities'],
-            ['To sign', dash.counts.to_sign, '/investors/documents'],
-            ['Unread', dash.counts.unread, '/investors/messages']].map(([l, v, to]) => (
-            <Link role="listitem" key={l} to={to} className="ir-stat"><b>{v}</b><span>{l}</span></Link>
+    <div className="ir-dash">
+      <div className="ir-dash__main">
+        <section className="ir-hero" aria-labelledby="ir-welcome">
+          {hero ? <Photo listingId={hero.id} fileId={hero.cover_photo} preview={preview} className="ir-hero__bg" /> : <div className="ir-hero__bg ir-hero__bg--plain" />}
+          <div className="ir-hero__veil" />
+          <div className="ir-hero__content">
+            <h1 id="ir-welcome" className="ir-hero__h">{preview ? 'Welcome back, ' : `${greeting()}, `}<span className="ir-accent">{name || 'Investor'}</span></h1>
+            <p className="ir-hero__p">Here are your personalized investment opportunities and updates for {markets}.</p>
+            <ul className="ir-hero__stats">
+              {[['home', 'New deals this week', c.new_this_week], ['review', 'Exclusive reviews', c.in_review],
+                ['offers', 'Offers submitted', c.offers], ['heart', 'Saved properties', c.saved]].map(([ic, l, v]) => (
+                <li key={l}><span className="ir-hero__ic"><Ico n={ic} /></span><span><small>{l}</small><b>{v ?? 0}</b></span></li>
+              ))}
+            </ul>
+          </div>
+        </section>
+        {room.welcome_message ? <p className="ir-welcome-note">{room.welcome_message}</p> : null}
+        <div className="ir-tiles">
+          {[['deals', 'Properties match', c.matching ?? 0, 'Based on your criteria'],
+            ['spark', 'Average match', c.average_match !== null && c.average_match !== undefined ? `${c.average_match}%` : '—', 'Across your opportunities'],
+            ['units', 'Asking price range', c.price_min ? `${usdK(c.price_min)}${c.price_max !== c.price_min ? ' – ' + usdK(c.price_max) : ''}` : '—', 'Published asking prices'],
+            ['docs', 'Proof of funds', me && me.funding ? (me.funding.documented ? 'Accepted' : 'Not on file') : (preview ? '—' : '…'),
+              me && me.funding && me.funding.documented ? 'Reviewed by the team' : 'Upload it under Documents']].map(([ic, l, v, s]) => (
+            <div key={l} className="ir-tile"><span className="ir-tile__ic"><Ico n={ic} /></span>
+              <div><small>{l}</small><b>{v}</b><span>{s}</span></div></div>
           ))}
         </div>
-      </header>
-      {left.length ? (
-        <section className="ir-panel ir-onboard" aria-labelledby="ob-h">
-          <h2 id="ob-h" className="ir-h2">Finish setting up</h2>
-          <p className="ir-muted ir-small">So we only send you what fits - and so the team can move fast when one does.</p>
-          <ol className="ir-steps">
-            {steps.map((s) => (
-              <li key={s.k} className={ob[s.k] ? 'is-done' : ''}>
-                <span className="ir-steps__dot" aria-hidden="true">{ob[s.k] ? '✓' : ''}</span>
-                {ob[s.k] ? <span>{s.l}</span> : <Link to={s.to}>{s.l}</Link>}
-                <span className="ir-sr">{ob[s.k] ? 'done' : 'to do'}</span>
-              </li>
-            ))}
-          </ol>
+        {!preview && dash && dash.onboarding ? <NextSteps ob={dash.onboarding} toSign={c.to_sign} /> : null}
+        <section className="ir-panel ir-opps" aria-labelledby="ir-opps-h">
+          <div className="ir-panel__head"><h2 id="ir-opps-h" className="ir-h2">Available Investment Opportunities</h2>
+            {!preview ? <Link to="/investors/deals" className="ir-link">View all</Link> : null}</div>
+          <div className="ir-chips" role="tablist" aria-label="Property type">
+            <button type="button" role="tab" aria-selected={cat === 'all'} className={cat === 'all' ? 'is-on' : ''} onClick={() => setCat('all')}>All deals ({opps.length})</button>
+            {cats.map((k) => <button key={k} type="button" role="tab" aria-selected={cat === k} className={cat === k ? 'is-on' : ''} onClick={() => setCat(k)}>{k}</button>)}
+          </div>
+          {shown.length ? <div className="ir-grid">{shown.slice(0, 8).map((o) => <OppCard key={o.id} o={o} onSave={onSave} preview={preview} />)}</div>
+            : <div className="ir-empty">{opps.length ? 'Nothing matches this filter.' : 'No opportunities are published for you yet. When one matches your criteria it appears here first.'}</div>}
         </section>
-      ) : null}
-      <section aria-labelledby="ops-h">
-        <div className="ir-section-head"><h2 id="ops-h" className="ir-h2">Selected for you</h2>
-          {opps.length ? <Link to="/investors/opportunities" className="ir-link">View all</Link> : null}</div>
-        {opps.length ? <div className="ir-grid">{opps.slice(0, 6).map((o) => <OppCard key={o.id} o={o} />)}</div>
-          : <div className="ir-empty">Nothing published for you yet.</div>}
-      </section>
-      {me && me.funding && !me.funding.documented ? (
-        <p className="ir-muted ir-small ir-foot-note">A budget you tell us is never treated as verified funding. Proof of funds is reviewed by a person.</p>
-      ) : null}
-    </>
+      </div>
+      <aside className="ir-rail" aria-label="Concierge, messages and criteria">{rail}</aside>
+    </div>
   )
 }
 
-function Opportunities() {
-  const [d, err] = useLoad('/investor/opportunities')
-  const [filter, setFilter] = useState('all')
-  const items = useMemo(() => {
-    const all = (d && d.items) || []
-    if (filter === 'review') return all.filter((o) => o.hold && o.hold.yours)
-    if (filter === 'responded') return all.filter((o) => o.you && o.you.status)
-    return all
-  }, [d, filter])
+function NextSteps({ ob, toSign }) {
+  const steps = [
+    { k: 'identity', l: 'Confirm who you buy as', to: '/investors/account' },
+    { k: 'buy_box', l: 'Confirm your investment criteria', to: '/investors/criteria' },
+    { k: 'proof_of_funds', l: 'Upload proof of funds', to: '/investors/documents' },
+  ]
+  const left = steps.filter((s) => !ob[s.k])
+  if (!left.length && !toSign) return null
+  return (
+    <section className="ir-panel ir-next" aria-labelledby="ir-next-h">
+      <h2 id="ir-next-h" className="ir-h2">Your next steps</h2>
+      <ol className="ir-steps">
+        {steps.map((s) => (
+          <li key={s.k} className={ob[s.k] ? 'is-done' : ''}>
+            <span className="ir-steps__dot" aria-hidden="true">{ob[s.k] ? '✓' : ''}</span>
+            {ob[s.k] ? <span>{s.l}</span> : <Link to={s.to}>{s.l}</Link>}
+            <span className="ir-sr">{ob[s.k] ? 'done' : 'to do'}</span>
+          </li>
+        ))}
+        {toSign ? <li><span className="ir-steps__dot is-alert" aria-hidden="true">!</span><Link to="/investors/documents">{toSign} document{toSign === 1 ? '' : 's'} to sign</Link></li> : null}
+      </ol>
+    </section>
+  )
+}
+
+function Dashboard({ dash, me, q, market, reload }) {
+  const save = async (o) => { try { await inv.post(`/investor/opportunities/${o.id}/save`, { saved: !o.saved }); reload() } catch { /* shown on retry */ } }
+  if (!dash) return <Loading />
+  return <DashboardView dash={dash} me={me} q={q} market={market} onSave={save}
+                        rail={<><ConciergePanel room={dash.room} /><SupportPanel room={dash.room} /><CriteriaPanel me={me} /></>} />
+}
+
+// ── right rail ─────────────────────────────────────────────────────────────
+const QUICK = ['What deals are available for me?', 'What do you know about my criteria?', 'What should I do next?']
+
+function ConciergePanel({ room }) {
+  const [threads, , reloadT] = useLoad('/investor/threads')
+  const con = threads && (threads.threads || []).find((t) => t.kind === 'concierge')
+  const [t, setT] = useState(null)
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const end = useRef(null)
+  useEffect(() => { if (con) setT(con) }, [con])
+  useEffect(() => { if (end.current && end.current.parentElement) end.current.parentElement.scrollTop = end.current.parentElement.scrollHeight }, [t])
+  const send = async (msg) => {
+    const body = (msg || text).trim()
+    if (!body || !t) return
+    setBusy(true); setErr(null)
+    try { const r = await inv.post(`/investor/threads/${t.id}/messages`, { text: body }); setT(r.thread); setText(''); reloadT() }
+    catch (x) { setErr(x.message) } finally { setBusy(false) }
+  }
+  const msgs = t ? (t.messages || []).slice(-6) : []
+  return (
+    <section className="ir-panel ir-concierge" aria-labelledby="ir-con-h">
+      <div className="ir-panel__head">
+        <h2 id="ir-con-h" className="ir-h3"><span className="ir-con__mark" aria-hidden="true"><Ico n="spark" size={16} /></span>AI Investment Concierge</h2>
+        <span className={`ir-online${room && room.ai_concierge === false ? ' is-off' : ''}`}>{room && room.ai_concierge === false ? 'Team replies' : 'Online'}</span>
+      </div>
+      <ol className="ir-con__msgs" aria-live="polite">
+        {!t ? <li><Loading /></li> : msgs.map((m, i) => (
+          <li key={i} className={`ir-con__m ir-con__m--${m.role}`}>
+            <p>{m.text}</p>
+            <small>{m.role === 'ai' ? (m.engine === 'ai' ? 'Concierge (AI)' : 'Concierge (automatic reply)') : m.role === 'staff' ? (m.by || 'Team') : m.role === 'buyer' ? 'You' : ''} · {when(m.at)}</small>
+          </li>
+        ))}
+        <li ref={end} aria-hidden="true" />
+      </ol>
+      <div className="ir-con__quick">
+        {QUICK.map((x) => <button key={x} type="button" disabled={busy || !t} onClick={() => send(x)}>{x}</button>)}
+      </div>
+      <form className="ir-con__form" onSubmit={(e) => { e.preventDefault(); send() }}>
+        <label className="ir-sr" htmlFor="ir-con-in">Message the concierge</label>
+        <input id="ir-con-in" value={text} onChange={(e) => setText(e.target.value)} placeholder="Type your message…" maxLength={2000} />
+        <button className="ir-sendbtn" disabled={busy || !text.trim()} aria-label="Send"><Ico n="send" /></button>
+      </form>
+      <Note kind="error">{err}</Note>
+      {t ? <Link className="ir-link ir-small" to={`/investors/messages/${t.id}`}>Open full conversation</Link> : null}
+    </section>
+  )
+}
+
+const KIND = { concierge: 'AI Concierge', relationship: 'Team', deal: 'Deal questions' }
+
+function SupportPanel({ room }) {
+  const [d] = useLoad('/investor/threads')
+  const [tab, setTab] = useState('all')
+  const list = ((d && d.threads) || []).filter((t) => tab === 'all' || t.kind === tab)
+  const all = (d && d.threads) || []
+  const count = (k) => all.filter((t) => k === 'all' || t.kind === k).length
+  return (
+    <section className="ir-panel" aria-labelledby="ir-sup-h">
+      <div className="ir-panel__head"><h2 id="ir-sup-h" className="ir-h3"><Ico n="msg" />Messages &amp; Support</h2><Link className="ir-link" to="/investors/messages">View all</Link></div>
+      <div className="ir-chips ir-chips--sm" role="tablist" aria-label="Conversation type">
+        {[['all', 'All'], ['concierge', 'AI Concierge'], ['relationship', 'Team'], ['deal', 'Deals']].map(([k, l]) => (
+          <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'is-on' : ''} onClick={() => setTab(k)}>{l} ({count(k)})</button>))}
+      </div>
+      <ul className="ir-sup">
+        {list.slice(0, 4).map((t) => {
+          const last = (t.messages || [])[t.messages.length - 1] || {}
+          return (
+            <li key={t.id}><Link to={`/investors/messages/${t.id}`}>
+              <span className="ir-sup__av" aria-hidden="true"><Ico n={t.kind === 'concierge' ? 'spark' : t.kind === 'deal' ? 'home' : 'account'} size={16} /></span>
+              <span className="ir-sup__t"><b>{KIND[t.kind] || cap(t.kind)}</b><small>{last.text}</small></span>
+              <span className="ir-sup__r"><small>{when(t.last_message_at)}</small>{t.unread ? <i className="ir-dot" aria-label="unread" /> : null}</span>
+            </Link></li>
+          )
+        })}
+        {d && !list.length ? <li className="ir-muted ir-small">No conversations here yet.</li> : null}
+      </ul>
+      {room && (room.support_email || room.support_phone) ? (
+        <p className="ir-small ir-muted ir-sup__contact">Support: {[room.support_email, room.support_phone].filter(Boolean).join(' · ')}</p>
+      ) : null}
+    </section>
+  )
+}
+
+function CriteriaPanel({ me }) {
+  const box = me && (me.buy_boxes || [])[0]
+  const f = box ? box.fields : {}
+  const v = (k) => (f[k] ? f[k].value : null)
+  const rows = [
+    ['review', 'Strategy', (v('strategies') || []).map(words).map(cap).join(', ')],
+    ['home', 'Property types', (v('property_types') || []).map(words).map(cap).join(', ')],
+    ['pin', 'Target counties', [...(v('counties') || []), ...(v('cities') || [])].join(', ')],
+    ['offers', 'Budget range', v('min_price') || v('max_price') ? `${v('min_price') ? usd(v('min_price')) : 'Any'} – ${v('max_price') ? usd(v('max_price')) : 'Any'}` : ''],
+    ['units', 'Units', v('min_units') || v('max_units') ? `${v('min_units') || 'Any'} – ${v('max_units') || 'Any'}` : ''],
+    ['docs', 'Rehab', v('rehab_tolerance') ? cap(v('rehab_tolerance')) : ''],
+  ]
+  return (
+    <section className="ir-panel" aria-labelledby="ir-crit-h">
+      <div className="ir-panel__head"><h2 id="ir-crit-h" className="ir-h3"><Ico n="criteria" />My Investment Criteria</h2><Link className="ir-link" to="/investors/criteria">Edit</Link></div>
+      {!me ? <Loading /> : box ? (
+        <>
+          <dl className="ir-crit">{rows.map(([ic, l, val]) => (
+            <div key={l}><span className="ir-crit__ic"><Ico n={ic} size={16} /></span><div><dt>{l}</dt><dd>{val || <span className="ir-muted">Not set</span>}</dd></div></div>))}</dl>
+          <p className="ir-small ir-muted">{box.confirmed_at ? 'Confirmed by you.' : 'Stated in conversation - please review and confirm.'}</p>
+        </>
+      ) : <p className="ir-small">Tell us what you buy so we only send what fits. <Link to="/investors/criteria">Set your criteria</Link></p>}
+    </section>
+  )
+}
+
+// ── deals ──────────────────────────────────────────────────────────────────
+function Deals({ q, market, setQ }) {
+  const [d, err, reload] = useLoad('/investor/opportunities')
+  const [cat, setCat] = useState('all')
+  const [only, setOnly] = useState('all')
+  const loc = useLocation()
+  useEffect(() => { const x = new URLSearchParams(loc.search).get('q'); if (x !== null) setQ(x) }, [loc.search, setQ])
+  const all = (d && d.items) || []
+  const cats = [...new Set(all.map(catOf))]
+  let shown = filterOpps(all, q, market, cat)
+  if (only === 'saved') shown = shown.filter((o) => o.saved)
+  if (only === 'review') shown = shown.filter((o) => o.hold && o.hold.yours)
+  const save = async (o) => { try { await inv.post(`/investor/opportunities/${o.id}/save`, { saved: !o.saved }); reload() } catch { /* retry */ } }
   return (
     <>
-      <header className="ir-pagehead"><p className="ir-eyebrow">Opportunities</p>
-        <h1 className="ir-h1">Deals published to you</h1>
-        <p className="ir-lead">Only properties the team approved for investors - matched against your buy box.</p></header>
-      <div className="ir-tabs" role="tablist" aria-label="Filter opportunities">
-        {[['all', 'All'], ['review', 'My exclusive reviews'], ['responded', 'Responded']].map(([k, l]) => (
-          <button key={k} role="tab" aria-selected={filter === k} className={filter === k ? 'is-on' : ''} onClick={() => setFilter(k)}>{l}</button>
-        ))}
+      <header className="ir-pagehead"><h1 className="ir-h1">Available Deals</h1>
+        <p className="ir-lead">Only properties the team approved for investors, matched against your criteria.</p></header>
+      <div className="ir-toolbar">
+        <div className="ir-chips" role="tablist" aria-label="Property type">
+          <button type="button" role="tab" aria-selected={cat === 'all'} className={cat === 'all' ? 'is-on' : ''} onClick={() => setCat('all')}>All deals ({all.length})</button>
+          {cats.map((k) => <button key={k} type="button" role="tab" aria-selected={cat === k} className={cat === k ? 'is-on' : ''} onClick={() => setCat(k)}>{k}</button>)}
+        </div>
+        <div className="ir-chips" role="group" aria-label="Show">
+          {[['all', 'Everything'], ['saved', 'Saved'], ['review', 'My exclusive reviews']].map(([k, l]) => (
+            <button key={k} type="button" aria-pressed={only === k} className={only === k ? 'is-on' : ''} onClick={() => setOnly(k)}>{l}</button>))}
+        </div>
       </div>
+      {q ? <p className="ir-small">Searching for “{q}” · <button type="button" className="ir-link" onClick={() => setQ('')}>clear</button></p> : null}
       <Note kind="error">{err}</Note>
-      {!d ? <Loading /> : items.length ? <div className="ir-grid">{items.map((o) => <OppCard key={o.id} o={o} />)}</div>
+      {!d ? <Loading /> : shown.length ? <div className="ir-grid">{shown.map((o) => <OppCard key={o.id} o={o} onSave={save} />)}</div>
         : <div className="ir-empty">Nothing here yet.</div>}
     </>
   )
@@ -415,14 +682,15 @@ function Opportunities() {
 
 function Opportunity({ onChange }) {
   const { id } = useParams()
+  const loc = useLocation()
   const nav = useNavigate()
   const [o, err, reload] = useLoad(`/investor/opportunities/${id}`)
   const [photo, setPhoto] = useState(0)
-  const [mode, setMode] = useState(null)        // offer | review
+  const [mode, setMode] = useState(() => (new URLSearchParams(loc.search).get('offer') ? 'offer' : null))
   const [f, setF] = useState({ amount: '', financing: 'cash', note: '' })
   const [msg, setMsg] = useState(null)
   const [busy, setBusy] = useState(false)
-  if (err) return <><Link to="/investors/opportunities" className="ir-back">← Opportunities</Link><Note kind="error">{err}</Note></>
+  if (err) return <><Link to="/investors/deals" className="ir-back">← Available deals</Link><Note kind="error">{err}</Note></>
   if (!o) return <Loading />
   const room = o.room || {}
   const photos = room.photos || []
@@ -446,18 +714,17 @@ function Opportunity({ onChange }) {
     } catch (x) { setMsg({ kind: 'error', text: x.message }) } finally { setBusy(false) }
   }
   const ask = async () => {
-    try {
-      const t = await inv.post('/investor/threads', { kind: 'deal', listing_id: id })
-      nav(`/investors/messages/${t.id}`)
-    } catch (x) { setMsg({ kind: 'error', text: x.message }) }
+    try { const t = await inv.post('/investor/threads', { kind: 'deal', listing_id: id }); nav(`/investors/messages/${t.id}`) }
+    catch (x) { setMsg({ kind: 'error', text: x.message }) }
   }
+  const save = async () => { try { await inv.post(`/investor/opportunities/${id}/save`, { saved: !o.saved }); reload(); onChange && onChange() } catch { /* retry */ } }
   const status = o.you && o.you.status
   return (
     <>
-      <Link to="/investors/opportunities" className="ir-back">← Opportunities</Link>
+      <Link to="/investors/deals" className="ir-back">← Available deals</Link>
       {mine ? (
         <div className="ir-hold" role="region" aria-label="Your exclusive review">
-          <div><p className="ir-eyebrow">Your exclusive review</p>
+          <div><p className="ir-eyebrow ir-eyebrow--light">Your exclusive review</p>
             <p className="ir-hold__t">Hidden from other investors for</p>
             <Countdown endsAt={hold.ends_at} /></div>
           <p className="ir-hold__n">{o.hold_notice}</p>
@@ -469,7 +736,7 @@ function Opportunity({ onChange }) {
           {photos.length > 1 ? (
             <div className="ir-thumbs" role="list" aria-label="Photos">
               {photos.map((p, i) => (
-                <button key={p.id} role="listitem" className={i === photo ? 'is-on' : ''} onClick={() => setPhoto(i)}
+                <button key={p.id} type="button" role="listitem" className={i === photo ? 'is-on' : ''} onClick={() => setPhoto(i)}
                         aria-label={`Show photo ${i + 1}`} aria-pressed={i === photo}>
                   <Photo listingId={id} fileId={p.id} alt="" />
                 </button>
@@ -478,7 +745,12 @@ function Opportunity({ onChange }) {
           ) : null}
         </div>
         <div className="ir-detail__side">
-          {o.is_test ? <span className="ir-chip ir-chip--practice">Practice listing - not a real offer</span> : null}
+          <div className="ir-row">
+            <span className="ir-tag">{catOf(o)}</span>
+            {o.is_test ? <span className="ir-tag ir-tag--practice">Practice listing - not a real offer</span> : null}
+            <button type="button" className={`ir-heart ir-heart--inline${o.saved ? ' is-on' : ''}`} aria-pressed={!!o.saved} onClick={save}
+                    aria-label={o.saved ? 'Remove from saved' : 'Save this property'}><Ico n="heart" size={17} /></button>
+          </div>
           <h1 className="ir-h1 ir-h1--addr">{addr1(room.property)}</h1>
           <p className="ir-lead">{addr2(room.property)}{room.property && room.property.county ? ` · ${room.property.county} County` : ''}</p>
           <div className="ir-pricebox">
@@ -486,9 +758,9 @@ function Opportunity({ onChange }) {
             {'arv' in room ? <div><small>Est. after repair</small><b>{usd(room.arv)}</b></div> : null}
             {'estimated_repairs' in room ? <div><small>Est. repairs</small><b>{usd(room.estimated_repairs)}</b></div> : null}
           </div>
-          <Facts facts={o.facts} />
+          <FactsRow facts={o.facts} />
           <div className="ir-matchbox">
-            <Match score={o.match && o.match.score} />
+            <span className={`ir-matchring${o.match && o.match.score >= 80 ? ' is-hi' : ''}`}><b>{o.match && o.match.score !== null && o.match.score !== undefined ? o.match.score : '—'}</b><small>% match</small></span>
             <ul className="ir-why">
               {((o.match && o.match.factors) || []).slice(0, 5).map((x, i) => (
                 <li key={i} className={x.matched ? 'is-yes' : x.matched === false ? 'is-no' : ''}>{x.matched ? '✓' : x.matched === false ? '✕' : '·'} {x.detail}</li>
@@ -499,12 +771,12 @@ function Opportunity({ onChange }) {
           {status ? <p className="ir-status">Your response: <b>{cap(status)}</b>{o.you.your_offer ? ` · ${usd(o.you.your_offer)}` : ''}</p> : null}
           {o.can_submit !== false ? (
             <div className="ir-actions">
-              <button className="ir-btn ir-btn--gold" disabled={busy} onClick={() => setMode(mode === 'offer' ? null : 'offer')}>Make an offer</button>
-              <button className="ir-btn" disabled={busy} onClick={() => act('interested')}>I&apos;m interested</button>
-              <button className="ir-btn" onClick={ask}>Ask a question</button>
-              {!hold && !o.hold_requested ? <button className="ir-btn ir-btn--ghost" onClick={() => setMode(mode === 'review' ? null : 'review')}>Request exclusive review</button> : null}
+              <button type="button" className="ir-btn ir-btn--primary" disabled={busy} onClick={() => setMode(mode === 'offer' ? null : 'offer')}>Submit offer</button>
+              <button type="button" className="ir-btn ir-btn--outline" disabled={busy} onClick={() => act('interested')}>I&apos;m interested</button>
+              <button type="button" className="ir-btn ir-btn--outline" onClick={ask}>Ask a question</button>
+              {!hold && !o.hold_requested ? <button type="button" className="ir-btn ir-btn--outline" onClick={() => setMode(mode === 'review' ? null : 'review')}>Request exclusive review</button> : null}
               {o.hold_requested ? <span className="ir-muted ir-small">Exclusive review requested - waiting for a decision.</span> : null}
-              <button className="ir-btn ir-btn--quiet" disabled={busy} onClick={() => act('pass')}>Pass</button>
+              <button type="button" className="ir-btn ir-btn--quiet" disabled={busy} onClick={() => act('pass')}>Pass</button>
             </div>
           ) : null}
           {mode === 'offer' ? (
@@ -519,35 +791,45 @@ function Opportunity({ onChange }) {
               <label className="ir-field"><span>Note (closing timeline, conditions)</span>
                 <textarea rows={3} value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></label>
               <p className="ir-muted ir-small">An offer here tells the team your terms. It is not a contract; any agreement is signed separately.</p>
-              <button className="ir-btn ir-btn--gold" disabled={busy}>Send offer</button>
+              <button className="ir-btn ir-btn--primary" disabled={busy}>Send offer</button>
             </form>
           ) : null}
           {mode === 'review' ? (
             <div className="ir-panel ir-form ir-form--tight">
               <h2 className="ir-h3">Request exclusive review</h2>
               <p className="ir-small">{o.hold_notice}</p>
-              <label className="ir-field"><span>Why you need the time (optional)</span>
+              <label className="ir-field"><span>Why you need the time</span>
                 <textarea rows={2} value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></label>
-              <button className="ir-btn ir-btn--gold" disabled={busy} onClick={askReview}>Send request</button>
+              <button type="button" className="ir-btn ir-btn--primary" disabled={busy} onClick={askReview}>Send request</button>
             </div>
           ) : null}
         </div>
       </div>
-      <section className="ir-panel">
-        <h2 className="ir-h2">About this property</h2>
-        <p className="ir-prose">{room.summary || 'No summary published.'}</p>
-        {room.condition_summary ? <><h3 className="ir-h3">Condition</h3><p className="ir-prose">{room.condition_summary}</p></> : null}
-        {(room.documents || []).length ? (
-          <><h3 className="ir-h3">Documents</h3>
-            <ul className="ir-files">{room.documents.map((dc) => <li key={dc.id}><DocLink path={`/investor/opportunities/${id}/documents/${dc.id}`} name={dc.title || 'Document'} /></li>)}</ul></>
-        ) : null}
-        {room.closing && (room.closing.target_close || room.closing.title_company) ? (
-          <p className="ir-small ir-muted">Target close {room.closing.target_close || '—'}{room.closing.title_company ? ` · Title: ${room.closing.title_company}` : ''}</p>
-        ) : null}
-      </section>
+      <div className="ir-two">
+        <section className="ir-panel">
+          <h2 className="ir-h2">About this property</h2>
+          <p className="ir-prose">{room.summary || 'No summary published.'}</p>
+          {room.condition_summary ? <><h3 className="ir-h4">Condition</h3><p className="ir-prose">{room.condition_summary}</p></> : null}
+          {room.closing && (room.closing.target_close || room.closing.title_company) ? (
+            <p className="ir-small ir-muted">Target close {room.closing.target_close || '—'}{room.closing.title_company ? ` · Title: ${room.closing.title_company}` : ''}</p>
+          ) : null}
+        </section>
+        <section className="ir-panel">
+          <h2 className="ir-h2">Documents &amp; signatures</h2>
+          {(room.documents || []).length ? (
+            <ul className="ir-rows">{room.documents.map((dc) => <li key={dc.id}><div><DocLink path={`/investor/opportunities/${id}/documents/${dc.id}`} name={dc.title || 'Document'} /><small>Published by the team</small></div></li>)}</ul>
+          ) : <p className="ir-muted ir-small">No documents published for this property.</p>}
+          {(o.signatures || []).length ? (
+            <ul className="ir-rows">{o.signatures.map((s) => (
+              <li key={s.envelope_id}><div><b>{s.title}</b><small>{s.completed ? 'Signed by everyone' : s.your_turn ? 'Waiting for your signature' : s.your_status === 'signed' ? 'You signed - waiting for the other party' : 'Waiting for another signer'}</small></div>
+                {s.your_turn && !s.completed ? <Link className="ir-btn ir-btn--primary ir-btn--sm" to="/investors/documents">Review &amp; sign</Link>
+                  : <span className={`ir-pill${s.completed ? ' ir-pill--ok' : ''}`}>{s.completed ? 'Completed' : 'Pending'}</span>}</li>))}</ul>
+          ) : null}
+        </section>
+      </div>
       {room.disclosure ? (
         <section className="ir-disclosure" aria-label="Disclosure">
-          <h2 className="ir-h3">{room.disclosure.title}</h2>
+          <h2 className="ir-h4">{room.disclosure.title}</h2>
           <p>{room.disclosure.text}</p>
           <small>{room.disclosure.law}</small>
         </section>
@@ -566,22 +848,67 @@ function DocLink({ path, name }) {
   return <button type="button" className="ir-link" onClick={open} disabled={busy}>{busy ? 'Opening…' : name}</button>
 }
 
-// ── messages ───────────────────────────────────────────────────────────────
-const ROLE = { ai: 'Concierge', staff: 'Team', system: 'Deal Room', buyer: 'You' }
-const KIND = { concierge: 'Investment concierge', relationship: 'Your team', deal: 'Property questions' }
+// ── reviews / offers ───────────────────────────────────────────────────────
+function Reviews() {
+  const [d, err] = useLoad('/investor/holds')
+  const rows = (d && d.holds) || []
+  const label = { requested: 'Waiting for a decision', active: 'Active', declined: 'Declined', ended: 'Ended' }
+  return (
+    <>
+      <header className="ir-pagehead"><h1 className="ir-h1">Exclusive Reviews</h1>
+        <p className="ir-lead">{d ? d.notice : ''}</p></header>
+      <Note kind="error">{err}</Note>
+      {!d ? <Loading /> : rows.length ? (
+        <ul className="ir-list">{rows.map((h) => (
+          <li key={h.id} className={`ir-list__row${h.status === 'active' ? ' is-active' : ''}`}>
+            <div><b>{h.address || 'Property'}</b><small>Requested {when(h.requested_at)}{h.note ? ` · “${h.note}”` : ''}</small>
+              {h.status === 'ended' && h.end_reason ? <small>Ended: {words(h.end_reason)}</small> : null}</div>
+            <div className="ir-row">
+              {h.status === 'active' ? <Countdown endsAt={h.ends_at} compact /> : null}
+              <span className={`ir-pill${h.status === 'active' ? ' ir-pill--ok' : h.status === 'declined' ? ' ir-pill--bad' : ''}`}>{label[h.status] || cap(h.status)}</span>
+              {h.listing_id ? <Link className="ir-btn ir-btn--outline ir-btn--sm" to={`/investors/deals/${h.listing_id}`}>Open</Link> : null}
+            </div>
+          </li>))}</ul>
+      ) : <div className="ir-empty">You haven&apos;t requested an exclusive review. Request one from a property page when you need time to evaluate it.</div>}
+    </>
+  )
+}
 
+function Offers() {
+  const [d, err] = useLoad('/investor/offers')
+  const rows = (d && d.offers) || []
+  return (
+    <>
+      <header className="ir-pagehead"><h1 className="ir-h1">My Offers</h1>
+        <p className="ir-lead">Your interest, offers and passes. An offer tells the team your terms - it is not a contract.</p></header>
+      <Note kind="error">{err}</Note>
+      {!d ? <Loading /> : rows.length ? (
+        <ul className="ir-list">{rows.map((o, i) => (
+          <li key={i} className="ir-list__row">
+            <div><b>{o.address}</b><small>{when(o.at)}{o.financing ? ` · ${cap(o.financing)}` : ''}{o.note ? ` · ${o.note}` : ''}</small></div>
+            <div className="ir-row">
+              {o.offer ? <b className="ir-money">{usd(o.offer)}</b> : null}
+              <span className={`ir-pill${o.status === 'offer_submitted' ? ' ir-pill--blue' : ''}`}>{cap(o.status)}</span>
+              {o.listing_id ? <Link className="ir-btn ir-btn--outline ir-btn--sm" to={`/investors/deals/${o.listing_id}`}>Open</Link> : null}
+            </div>
+          </li>))}</ul>
+      ) : <div className="ir-empty">No offers yet. Open a deal and choose Submit offer.</div>}
+    </>
+  )
+}
+
+// ── messages ───────────────────────────────────────────────────────────────
 function Messages({ onChange }) {
   const { id } = useParams()
   const nav = useNavigate()
   const [d, err, reload] = useLoad('/investor/threads')
   const threads = (d && d.threads) || []
-  const current = id ? threads.find((t) => t.id === id) : null
   useEffect(() => {
     if (!id && threads.length && window.matchMedia('(min-width: 900px)').matches) nav(`/investors/messages/${threads[0].id}`, { replace: true })
   }, [id, threads, nav])
   return (
     <>
-      <header className="ir-pagehead"><p className="ir-eyebrow">Messages</p><h1 className="ir-h1">Your conversations</h1></header>
+      <header className="ir-pagehead"><h1 className="ir-h1">Messages</h1></header>
       <Note kind="error">{err}</Note>
       <div className={`ir-inbox${id ? ' has-thread' : ''}`}>
         <ul className="ir-threads" aria-label="Conversations">
@@ -590,7 +917,7 @@ function Messages({ onChange }) {
             return (
               <li key={t.id}>
                 <Link to={`/investors/messages/${t.id}`} className={t.id === id ? 'is-on' : ''} aria-current={t.id === id ? 'page' : undefined}>
-                  <span className="ir-threads__k">{KIND[t.kind] || cap(t.kind)}{t.unread ? <span className="ir-badge">{t.unread}</span> : null}</span>
+                  <span className="ir-threads__k">{KIND[t.kind] || cap(t.kind)}{t.unread ? <span className="ir-nbadge is-alert">{t.unread}</span> : null}</span>
                   <span className="ir-threads__l">{last ? last.text : ''}</span>
                   <small>{when(t.last_message_at)}</small>
                 </Link>
@@ -599,7 +926,7 @@ function Messages({ onChange }) {
           })}
           {!d ? <li><Loading /></li> : null}
         </ul>
-        {id ? <Thread key={id} id={id} summary={current} onChange={() => { reload(); onChange && onChange() }} /> : null}
+        {id ? <Thread key={id} id={id} onChange={() => { reload(); onChange && onChange() }} /> : null}
       </div>
     </>
   )
@@ -612,7 +939,7 @@ function Thread({ id, onChange }) {
   const [sendErr, setSendErr] = useState(null)
   const end = useRef(null)
   useEffect(() => { if (t) onChange && onChange() }, [t]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (end.current && end.current.scrollIntoView) end.current.scrollIntoView({ block: 'end' }) }, [t])
+  useEffect(() => { if (end.current && end.current.parentElement) end.current.parentElement.scrollTop = end.current.parentElement.scrollHeight }, [t])
   useEffect(() => { const x = setInterval(reload, 15000); return () => clearInterval(x) }, [reload])
   const send = async (e) => {
     e.preventDefault()
@@ -626,14 +953,14 @@ function Thread({ id, onChange }) {
   return (
     <section className="ir-thread" aria-label={KIND[t.kind] || 'Conversation'}>
       <header className="ir-thread__head">
-        <Link to="/investors/messages" className="ir-back ir-back--inline">←</Link>
+        <Link to="/investors/messages" className="ir-back ir-back--inline" aria-label="All conversations">←</Link>
         <div><b>{KIND[t.kind] || cap(t.kind)}</b>
-          <small>{t.ai_active ? 'Concierge answers from published information; ask for a person any time.' : 'A person from the team is handling this conversation.'}</small></div>
+          <small>{t.ai_active ? 'The concierge answers from published information; ask for a person any time.' : 'A person from the team is handling this conversation.'}</small></div>
       </header>
       <ol className="ir-msgs" aria-live="polite">
         {(t.messages || []).map((m, i) => (
           <li key={i} className={`ir-msg ir-msg--${m.role}`}>
-            <span className="ir-msg__who">{m.role === 'staff' && m.by ? m.by : ROLE[m.role] || cap(m.role)} · {when(m.at)}</span>
+            <span className="ir-msg__who">{m.role === 'staff' && m.by ? m.by : m.role === 'ai' ? (m.engine === 'ai' ? 'Concierge (AI)' : 'Concierge (automatic reply)') : m.role === 'buyer' ? 'You' : 'Deal Room'} · {when(m.at)}</span>
             <p>{m.text}</p>
           </li>
         ))}
@@ -644,10 +971,10 @@ function Thread({ id, onChange }) {
         <textarea id="ir-msg" rows={2} value={text} maxLength={4000} placeholder="Write a message…"
                   onChange={(e) => setText(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) send(e) }} />
-        <button className="ir-btn ir-btn--gold" disabled={busy || !text.trim()}>{busy ? 'Sending…' : 'Send'}</button>
+        <button className="ir-btn ir-btn--primary" disabled={busy || !text.trim()}>{busy ? 'Sending…' : 'Send'}</button>
       </form>
       <Note kind="error">{sendErr}</Note>
-      <p className="ir-muted ir-small ir-pad">Reply STOP to stop the concierge. Labels: BUYER STATED is what you told us; DOCUMENT VERIFIED was checked by a person.</p>
+      <p className="ir-muted ir-small ir-pad">Reply STOP to stop outreach. Ask for a person and the team joins this conversation.</p>
     </section>
   )
 }
@@ -684,17 +1011,18 @@ function Documents({ onChange }) {
   useEffect(() => { const x = setInterval(reloadSigs, 30000); return () => clearInterval(x) }, [reloadSigs])
   return (
     <>
-      <header className="ir-pagehead"><p className="ir-eyebrow">Documents</p><h1 className="ir-h1">Documents &amp; signatures</h1></header>
+      <header className="ir-pagehead"><h1 className="ir-h1">Documents</h1>
+        <p className="ir-lead">Signatures waiting for you, and the files you share with the team.</p></header>
       <Note kind="error">{err || sErr}</Note>
       <section className="ir-panel" aria-labelledby="sig-h">
         <h2 id="sig-h" className="ir-h2">To sign</h2>
         {!sigs ? <Loading /> : (sigs.documents || []).length ? (
           <ul className="ir-rows">
             {sigs.documents.map((s) => (
-              <li key={s.envelope_id || s.id}>
+              <li key={s.envelope_id}>
                 <div><b>{s.title}</b><small>{s.completed ? 'Completed by everyone' : s.your_turn ? `Your turn - you sign as ${s.your_role}` : (s.your_status === 'signed' ? 'You signed - waiting for the other party' : 'Waiting for another signer')}</small></div>
-                {s.your_turn && !s.completed ? <button className="ir-btn ir-btn--gold" onClick={() => sign(s.envelope_id || s.id)}>Review &amp; sign</button>
-                  : <span className={`ir-chip${s.completed ? ' ir-chip--ok' : ''}`}>{s.completed ? 'Signed' : 'Pending'}</span>}
+                {s.your_turn && !s.completed ? <button type="button" className="ir-btn ir-btn--primary ir-btn--sm" onClick={() => sign(s.envelope_id)}>Review &amp; sign</button>
+                  : <span className={`ir-pill${s.completed ? ' ir-pill--ok' : ''}`}>{s.completed ? 'Signed' : 'Pending'}</span>}
               </li>
             ))}
           </ul>
@@ -715,14 +1043,14 @@ function Documents({ onChange }) {
           </label>
         </div>
         <Note kind={msg && msg.kind}>{msg && msg.text}</Note>
-        <h3 className="ir-h3">Your files</h3>
+        <h3 className="ir-h4">Your files</h3>
         {!d ? <Loading /> : (d.files || []).length ? (
           <ul className="ir-rows">
             {d.files.map((x) => (
               <li key={x.id}>
                 <div><DocLink path={`/investor/files/${x.id}`} name={x.name} />
                   <small>{CATEGORY[x.category] || cap(x.category)} · {fileSize(x.size)} · {x.from_you ? 'from you' : 'from the team'} · {when(x.uploaded_at)}</small></div>
-                <span className={`ir-chip${x.review_status === 'accepted' ? ' ir-chip--ok' : x.review_status === 'rejected' || x.scan_status === 'blocked' ? ' ir-chip--bad' : ''}`}>
+                <span className={`ir-pill${x.review_status === 'accepted' ? ' ir-pill--ok' : x.review_status === 'rejected' || x.scan_status === 'blocked' ? ' ir-pill--bad' : ''}`}>
                   {x.from_you ? (REVIEW[x.review_status] || cap(x.review_status)) : 'Shared with you'}</span>
               </li>
             ))}
@@ -733,32 +1061,46 @@ function Documents({ onChange }) {
   )
 }
 
-// ── profile ────────────────────────────────────────────────────────────────
+// ── criteria & account ─────────────────────────────────────────────────────
 const LABEL_TONE = { 'BUYER STATED': 'stated', 'DOCUMENT VERIFIED': 'ok', 'SYSTEM INFERRED': 'inferred', UNKNOWN: 'unknown' }
 const BOX_LABEL = { property_types: 'Property types', strategies: 'Strategies', states: 'States', counties: 'Counties',
   cities: 'Cities', zips: 'ZIP codes', min_price: 'Min price', max_price: 'Max price', min_units: 'Min units',
   max_units: 'Max units', min_acres: 'Min acres', max_acres: 'Max acres', rehab_tolerance: 'Rehab tolerance', min_cap_rate: 'Min cap rate' }
 const ALWAYS = ['property_types', 'counties', 'max_price']
-const TYPES = ['single_family', 'multifamily', 'townhouse', 'condo', 'land', 'commercial', 'mixed_use', 'mobile_home']
+const TYPES = ['single_family', 'multifamily', 'townhouse', 'condo', 'land', 'commercial', 'industrial', 'mixed_use', 'mobile_home']
+const STRATS = ['flip', 'rental', 'brrrr', 'value_add', 'development', 'land']
 const COUNTIES = ['Dallas', 'Tarrant', 'Collin', 'Denton', 'Rockwall', 'Ellis', 'Johnson', 'Kaufman', 'Parker']
 
 function Label({ l }) { return <span className={`ir-lbl ir-lbl--${LABEL_TONE[l] || 'unknown'}`}>{l}</span> }
 
-function Profile({ me, onChange }) {
+function Criteria({ me, onChange }) {
   const [msg, setMsg] = useState(null)
   if (!me) return <Loading />
   return (
     <>
-      <header className="ir-pagehead"><p className="ir-eyebrow">Profile</p><h1 className="ir-h1">Who you are and what you buy</h1>
-        <p className="ir-lead">Everything here is labeled by where it came from. Nothing you tell us is treated as verified until a person checks a document.</p></header>
+      <header className="ir-pagehead"><h1 className="ir-h1">My Criteria</h1>
+        <p className="ir-lead">What you buy. Every value is labeled by where it came from; saving confirms it.</p></header>
       <Note kind={msg && msg.kind}>{msg && msg.text}</Note>
-      <Identity me={me} onSaved={(t) => { setMsg({ kind: 'ok', text: t }); onChange() }} onError={(t) => setMsg({ kind: 'error', text: t })} />
-      <section className="ir-panel" id="buy-box" aria-labelledby="bb-h">
-        <h2 id="bb-h" className="ir-h2">Your buy box</h2>
+      <section className="ir-panel" aria-labelledby="bb-h">
+        <h2 id="bb-h" className="ir-h2">Buy box</h2>
         {(me.buy_boxes || []).length ? me.buy_boxes.map((b) => <BuyBox key={b.id} box={b} onSaved={(t) => { setMsg({ kind: 'ok', text: t }); onChange() }}
                                                                    onError={(t) => setMsg({ kind: 'error', text: t })} />)
           : <BuyBox box={null} onSaved={(t) => { setMsg({ kind: 'ok', text: t }); onChange() }} onError={(t) => setMsg({ kind: 'error', text: t })} />}
+        <p className="ir-small ir-muted"><Label l="BUYER STATED" /> you told us · <Label l="DOCUMENT VERIFIED" /> a person checked a document · <Label l="SYSTEM INFERRED" /> from public records · <Label l="UNKNOWN" /> not given</p>
       </section>
+    </>
+  )
+}
+
+function Account({ me, onChange }) {
+  const [msg, setMsg] = useState(null)
+  if (!me) return <Loading />
+  return (
+    <>
+      <header className="ir-pagehead"><h1 className="ir-h1">Account</h1>
+        <p className="ir-lead">Who you are and the entities you buy through.</p></header>
+      <Note kind={msg && msg.kind}>{msg && msg.text}</Note>
+      <Identity me={me} onSaved={(t) => { setMsg({ kind: 'ok', text: t }); onChange() }} onError={(t) => setMsg({ kind: 'error', text: t })} />
       <section className="ir-panel" aria-labelledby="fund-h">
         <h2 id="fund-h" className="ir-h2">Funding</h2>
         <p>{me.funding && me.funding.documented
@@ -793,8 +1135,8 @@ function Identity({ me, onSaved, onError }) {
   )
   return (
     <section className="ir-panel" aria-labelledby="id-h">
-      <h2 id="id-h" className="ir-h2">Identity {a.identity_complete ? <span className="ir-chip ir-chip--ok">Complete</span> : null}
-        {a.email_verified ? <span className="ir-chip">Email verified</span> : null}</h2>
+      <h2 id="id-h" className="ir-h2">Identity {a.identity_complete ? <span className="ir-pill ir-pill--ok">Complete</span> : null}
+        {a.email_verified ? <span className="ir-pill">Email verified</span> : null}</h2>
       <form onSubmit={save} className="ir-form ir-form--grid">
         <fieldset className="ir-field ir-seg ir-span2"><legend>I buy as</legend>
           {[['individual', 'An individual'], ['business', 'A company or LLC']].map(([k, l]) => (
@@ -814,13 +1156,13 @@ function Identity({ me, onSaved, onError }) {
           {T('position', 'Your position')}
           {T('business_address', 'Business address', { autoComplete: 'street-address' })}
         </> : null}
-        <div className="ir-span2"><button className="ir-btn ir-btn--gold" disabled={busy}>Save identity</button></div>
+        <div className="ir-span2"><button className="ir-btn ir-btn--primary" disabled={busy}>Save identity</button></div>
       </form>
-      <h3 className="ir-h3">Entities you buy through</h3>
+      <h3 className="ir-h4">Entities you buy through</h3>
       <ul className="ir-rows">
         {(me.entities || []).map((x) => (
           <li key={x.id}><div><b>{x.name}</b><small>{[x.position, x.authority && cap(x.authority)].filter(Boolean).join(' · ')}</small></div>
-            <span className={`ir-chip${x.status === 'confirmed' ? ' ir-chip--ok' : ''}`}>{x.status === 'needs_review' ? 'Being reviewed' : cap(x.status)}</span></li>
+            <span className={`ir-pill${x.status === 'confirmed' ? ' ir-pill--ok' : ''}`}>{x.status === 'needs_review' ? 'Being reviewed' : cap(x.status)}</span></li>
         ))}
       </ul>
       <form onSubmit={addEnt} className="ir-form ir-form--inline">
@@ -830,7 +1172,7 @@ function Identity({ me, onSaved, onError }) {
           <select value={ent.authority} onChange={(e) => setEnt({ ...ent, authority: e.target.value })}>
             <option value="signer">Can sign</option><option value="representative">Representative</option><option value="viewer">Viewer</option>
           </select></label>
-        <button className="ir-btn" disabled={busy}>Add entity</button>
+        <button className="ir-btn ir-btn--outline" disabled={busy}>Add entity</button>
       </form>
     </section>
   )
@@ -839,7 +1181,7 @@ function Identity({ me, onSaved, onError }) {
 function BuyBox({ box, onSaved, onError }) {
   const v = (k) => (box && box.fields && box.fields[k] ? box.fields[k].value : null)
   const [edit, setEdit] = useState(!box)
-  const [f, setF] = useState(() => ({ property_types: v('property_types') || [], counties: v('counties') || [],
+  const [f, setF] = useState(() => ({ property_types: v('property_types') || [], strategies: v('strategies') || [], counties: v('counties') || [],
     cities: (v('cities') || []).join(', '), zips: (v('zips') || []).join(', '), min_price: v('min_price') ?? '', max_price: v('max_price') ?? '',
     min_units: v('min_units') ?? '', max_units: v('max_units') ?? '', rehab_tolerance: v('rehab_tolerance') || '' }))
   const [busy, setBusy] = useState(false)
@@ -849,15 +1191,15 @@ function BuyBox({ box, onSaved, onError }) {
     const body = { ...f, cities: f.cities.split(',').map((s) => s.trim()).filter(Boolean), zips: f.zips.split(',').map((s) => s.trim()).filter(Boolean) }
     try {
       if (box) await inv.put(`/investor/me/buy-boxes/${box.id}`, body); else await inv.post('/investor/me/buy-boxes', body)
-      setEdit(false); onSaved('Buy box saved - that confirms it. We will match new deals against it.')
+      setEdit(false); onSaved('Criteria saved - that confirms them. New deals are matched against them.')
     } catch (x) { onError(x.message) } finally { setBusy(false) }
   }
   return (
     <div className="ir-box">
       {box ? (
         <div className="ir-box__head"><b>{box.label}</b>
-          <span className={`ir-chip${box.confirmed_at ? ' ir-chip--ok' : ''}`}>{box.confirmed_at ? 'Confirmed by you' : 'Please review'}</span>
-          {!edit ? <button className="ir-btn ir-btn--sm" onClick={() => setEdit(true)}>{box.confirmed_at ? 'Edit' : 'Review & confirm'}</button> : null}</div>
+          <span className={`ir-pill${box.confirmed_at ? ' ir-pill--ok' : ''}`}>{box.confirmed_at ? 'Confirmed by you' : 'Please review'}</span>
+          {!edit ? <button type="button" className="ir-btn ir-btn--outline ir-btn--sm" onClick={() => setEdit(true)}>{box.confirmed_at ? 'Edit' : 'Review & confirm'}</button> : null}</div>
       ) : null}
       {box && !edit ? (
         <dl className="ir-dl">
@@ -870,10 +1212,12 @@ function BuyBox({ box, onSaved, onError }) {
         <form onSubmit={save} className="ir-form">
           <fieldset className="ir-field"><legend>Property types</legend>
             <div className="ir-pills">{TYPES.map((t) => <button type="button" key={t} aria-pressed={f.property_types.includes(t)} className={f.property_types.includes(t) ? 'is-on' : ''} onClick={() => toggle('property_types', t)}>{cap(t)}</button>)}</div></fieldset>
+          <fieldset className="ir-field"><legend>Strategies</legend>
+            <div className="ir-pills">{STRATS.map((t) => <button type="button" key={t} aria-pressed={f.strategies.includes(t)} className={f.strategies.includes(t) ? 'is-on' : ''} onClick={() => toggle('strategies', t)}>{cap(t)}</button>)}</div></fieldset>
           <fieldset className="ir-field"><legend>Counties</legend>
             <div className="ir-pills">{COUNTIES.map((t) => <button type="button" key={t} aria-pressed={f.counties.includes(t)} className={f.counties.includes(t) ? 'is-on' : ''} onClick={() => toggle('counties', t)}>{t}</button>)}</div></fieldset>
           <div className="ir-form--grid">
-            <label className="ir-field"><span>Cities (comma separated)</span><input value={f.cities} onChange={(e) => setF({ ...f, cities: e.target.value })} /></label>
+            <label className="ir-field"><span>Cities / neighborhoods (comma separated)</span><input value={f.cities} onChange={(e) => setF({ ...f, cities: e.target.value })} /></label>
             <label className="ir-field"><span>ZIP codes</span><input value={f.zips} onChange={(e) => setF({ ...f, zips: e.target.value })} /></label>
             <label className="ir-field"><span>Min price</span><input inputMode="numeric" value={f.min_price} onChange={(e) => setF({ ...f, min_price: e.target.value })} /></label>
             <label className="ir-field"><span>Max price</span><input inputMode="numeric" value={f.max_price} onChange={(e) => setF({ ...f, max_price: e.target.value })} /></label>
@@ -887,10 +1231,54 @@ function BuyBox({ box, onSaved, onError }) {
               </select></label>
           </div>
           <p className="ir-muted ir-small">{(box && box.note) || 'Funding is never part of a buy box.'}</p>
-          <div className="ir-actions"><button className="ir-btn ir-btn--gold" disabled={busy}>Save and confirm</button>
+          <div className="ir-actions"><button className="ir-btn ir-btn--primary" disabled={busy}>Save and confirm</button>
             {box ? <button type="button" className="ir-btn ir-btn--quiet" onClick={() => setEdit(false)}>Cancel</button> : null}</div>
         </form>
       )}
+    </div>
+  )
+}
+
+// ── owner preview (staff session, read-only) ───────────────────────────────
+function Preview() {
+  const [d, setD] = useState(null)
+  const [err, setErr] = useState(null)
+  const [q, setQ] = useState('')
+  const [market, setMarket] = useState('')
+  useEffect(() => {
+    staffApi.get('/wholesale/deal-room/portal-preview').then(setD).catch((e) => setErr(e.message || 'Sign in to EvoSys to preview your Deal Room.'))
+  }, [])
+  const dash = useMemo(() => {
+    if (!d) return null
+    const opps = d.opportunities.map((o) => ({ ...o, cover_photo: (o.photos || [])[0], match: { score: null }, hold: null, saved: false }))
+    const prices = opps.map((o) => o.asking_price).filter(Boolean)
+    const week = Date.now() - 7 * 86400000
+    return { room: d.room, welcome: { name: 'Investor' }, opportunities: opps,
+      counts: { new_this_week: opps.filter((o) => o.published_at && new Date(o.published_at).getTime() >= week).length, in_review: 0, offers: 0, saved: 0,
+        matching: opps.length, average_match: null, price_min: prices.length ? Math.min(...prices) : null, price_max: prices.length ? Math.max(...prices) : null } }
+  }, [d])
+  if (err) return <div className="ir-gate ir-gate--single"><main className="ir-gate__panel"><Brandmark /><Note kind="error">{err}</Note></main></div>
+  if (!dash) return <Loading label="Building the preview" />
+  return (
+    <div className="ir-app ir-app--preview">
+      <Sidebar room={dash.room} counts={dash.counts} promo={dash.opportunities.find((o) => o.cover_photo)} preview />
+      <div className="ir-frame">
+        <div className="ir-previewbar" role="status">Owner preview - this is what investors see. {d.notice}</div>
+        <Topbar me={null} counts={dash.counts} room={dash.room} q={q} setQ={setQ} market={market} setMarket={setMarket} preview />
+        <main className="ir-main" id="ir-main">
+          <DashboardView dash={dash} me={null} q={q} market={market} preview
+                         rail={<>
+                           <section className="ir-panel ir-concierge"><div className="ir-panel__head"><h2 className="ir-h3"><span className="ir-con__mark" aria-hidden="true"><Ico n="spark" size={16} /></span>AI Investment Concierge</h2>
+                             <span className={`ir-online${dash.room.ai_concierge ? '' : ' is-off'}`}>{dash.room.ai_concierge ? 'Online' : 'Team replies'}</span></div>
+                             <ol className="ir-con__msgs"><li className="ir-con__m ir-con__m--ai"><p>{dash.room.welcome_title || 'Welcome to your Deal Room'}. I'm your investment concierge - I learn what you buy and answer questions from what the team publishes.</p><small>Concierge</small></li></ol>
+                             <div className="ir-con__quick">{QUICK.map((x) => <button key={x} type="button" disabled>{x}</button>)}</div></section>
+                           <section className="ir-panel"><div className="ir-panel__head"><h2 className="ir-h3"><Ico n="msg" />Messages &amp; Support</h2></div>
+                             <p className="ir-small ir-muted">Each investor sees their own conversations with the concierge and your team.</p>
+                             {dash.room.support_email || dash.room.support_phone ? <p className="ir-small">Support: {[dash.room.support_email, dash.room.support_phone].filter(Boolean).join(' · ')}</p> : null}</section>
+                           <section className="ir-panel"><div className="ir-panel__head"><h2 className="ir-h3"><Ico n="criteria" />My Investment Criteria</h2></div>
+                             <p className="ir-small ir-muted">Each investor's own buy box, labeled by source.</p></section></>} />
+        </main>
+      </div>
     </div>
   )
 }
@@ -905,7 +1293,7 @@ function RequireInvestor({ children }) {
 export default function InvestorPortal() {
   useEffect(() => {
     const prev = document.title
-    document.title = 'Private Deal Room'
+    document.title = 'Investor Portal'
     return () => { document.title = prev }
   }, [])
   return (
@@ -913,6 +1301,7 @@ export default function InvestorPortal() {
       <Routes>
         <Route path="invite/:token" element={<Invite />} />
         <Route path="login" element={<Login />} />
+        <Route path="preview" element={<Preview />} />
         <Route path="*" element={<RequireInvestor><Shell /></RequireInvestor>} />
       </Routes>
     </div>

@@ -86,7 +86,9 @@ def investor(request: Request, user: User = Depends(get_current_user), db: Sessi
 
 @router.get("/me")
 def me(acct=Depends(investor), db: Session = Depends(get_db)):
+    from app.services import wholesale_deal_room_setup as SET
     out = DR.profile(db, acct)
+    out["room"] = SET.investor_view(db, acct.organization_id)
     db.commit()
     return out
 
@@ -122,18 +124,33 @@ def edit_box(box_id: str, payload: Dict[str, Any] = Body(...), acct=Depends(inve
 
 @router.get("/dashboard")
 def dashboard(acct=Depends(investor), db: Session = Depends(get_db)):
+    from datetime import datetime, timedelta
+    from app.services import wholesale_deal_room_setup as SET
     rows = DR.visible_listings(db, acct)
     cards = [DR.opportunity_card(db, acct, *r) for r in rows]
     cards.sort(key=lambda c: (c["hold"] is None, -(c["match"]["score"] or 0)))
     ths = CH.threads(db, acct)
     sigs = DR.investor_documents(db, acct)
     prof = DR.profile(db, acct)
+    offers = DR.my_offers(db, acct)
+    week = (datetime.utcnow() - timedelta(days=7)).isoformat()
+    scores = [c["match"]["score"] for c in cards if c["match"]["score"] is not None]
+    prices = [c["asking_price"] for c in cards if c["asking_price"]]
+    room = SET.investor_view(db, acct.organization_id)
     db.commit()
     return {"welcome": {"name": prof["account"]["preferred_name"] or (prof["account"]["legal_name"] or "").split(" ")[0],
-                        "organization": prof["organization"]},
+                        "organization": prof["organization"], "company": prof["account"].get("company_legal_name")},
+            "room": room,
             "counts": {"opportunities": len(cards), "in_review": sum(1 for c in cards if c["hold"]),
                        "to_sign": sum(1 for s in sigs if s["your_turn"]),
-                       "unread": sum(t.buyer_unread or 0 for t in ths)},
+                       "unread": sum(t.buyer_unread or 0 for t in ths),
+                       "new_this_week": sum(1 for c in cards if (c["published_at"] or "") >= week),
+                       "matching": sum(1 for x in scores if x >= 60),
+                       "saved": sum(1 for c in cards if c["saved"]),
+                       "offers": sum(1 for o in offers if o["status"] in ("offer_submitted",)),
+                       "responses": len(offers),
+                       "average_match": round(sum(scores) / len(scores)) if scores else None,
+                       "price_min": min(prices) if prices else None, "price_max": max(prices) if prices else None},
             "opportunities": cards,
             "onboarding": {"identity": prof["account"]["identity_complete"],
                            "buy_box": any(b["confirmed_at"] for b in prof["buy_boxes"]),
@@ -156,6 +173,29 @@ def opportunity(listing_id: str, acct=Depends(investor), db: Session = Depends(g
     return out
 
 
+@router.post("/opportunities/{listing_id}/save")
+def save_opportunity(listing_id: str, payload: Dict[str, Any] = Body(default={}), acct=Depends(investor),
+                     db: Session = Depends(get_db)):
+    r = DR.save_listing(db, acct, listing_id, bool(payload.get("saved", True)))
+    db.commit()
+    return r
+
+
+@router.get("/offers")
+def offers(acct=Depends(investor), db: Session = Depends(get_db)):
+    out = DR.my_offers(db, acct)
+    db.commit()
+    return {"offers": out}
+
+
+@router.get("/holds")
+def my_holds(acct=Depends(investor), db: Session = Depends(get_db)):
+    from app.services import wholesale_deal_room_setup as SET
+    out = DR.my_holds(db, acct)
+    db.commit()
+    return {"holds": out, "notice": DR.HOLD_NOTICE, "rules": SET.hold_rules(db, acct.organization_id)}
+
+
 @router.get("/opportunities/{listing_id}/photos/{file_id}")
 def opportunity_photo(listing_id: str, file_id: str, acct=Depends(investor), db: Session = Depends(get_db)):
     from app.models.wholesale_models import WholesaleFile
@@ -174,6 +214,8 @@ def opportunity_document(listing_id: str, doc_id: str, acct=Depends(investor), d
     from app.models.wholesale_models import WholesaleDocument, WholesaleFile
     from app.services import wholesale_files as F
     lst, deal, _m, _h = DR.get_visible(db, acct, listing_id)
+    if doc_id in set(DR._j(lst.hidden_document_ids, [])):
+        raise HTTPException(status_code=404, detail="Document not found")
     d = db.query(WholesaleDocument).filter(WholesaleDocument.id == doc_id, WholesaleDocument.deal_id == deal.id,
                                            WholesaleDocument.buyer_visible.is_(True)).first()
     f = db.query(WholesaleFile).filter(WholesaleFile.id == getattr(d, "file_id", None)).first() if d else None
@@ -276,7 +318,7 @@ async def upload(file: UploadFile = File(...), category: str = Form("other"), li
     DR.log(db, acct.organization_id, "deal_room.file_uploaded", "Investor uploaded %s (%s)" % (name, category),
            deal_id=deal_id, details={"file_id": f.id, "buyer_id": b.id, "bytes": len(data)})
     DR.notify_staff(db, acct.organization_id, "Deal Room upload from %s: %s" % (b.company_name or b.contact_name, name),
-                    "/wholesale/buyers?buyer=%s" % b.id, assignee_id=acct.assigned_user_id)
+                    "/wholesale/deal-room?view=documents", assignee_id=acct.assigned_user_id, event="upload")
     db.commit()
     return DR.file_json(f)
 
