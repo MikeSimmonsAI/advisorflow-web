@@ -142,12 +142,26 @@ export function previewCards(ctx) {
   const seen = new Set()
   const out = []
   for (const p of ctx?.preview_contexts || []) {
+    // A GOD-GRANTED PREVIEW (deal_preview_grants): one person may open one
+    // deal's existing demo. The server sends only the grant id, the title, the
+    // label and a signed-in path - never the demo's link - and re-checks the
+    // grant on every open.
+    if (p?.grant_id && p.path) {
+      if (seen.has('grant:' + p.grant_id)) continue
+      seen.add('grant:' + p.grant_id)
+      out.push({ ...p, organization_id: 'grant:' + p.grant_id, program: 'preview', variant: 'preview',
+                 symbol: '◇', rank: 20, kind: String(p.label || 'Authorized preview').toUpperCase(),
+                 display: p.title || 'Preview', orgLabel: null, href: p.path,
+                 summary: 'A demo you have been given permission to view. Not a live workspace.',
+                 facts: [p.label || 'Authorized preview'] })
+      continue
+    }
     if (!p?.url || !p.opportunity_id || seen.has(p.opportunity_id)) continue
     seen.add(p.opportunity_id)
     const display = previewName(p)
     const facts = [p.stage_label, p.proposal_sent ? 'Proposal sent' : null,
                    p.demo_slot === 'platform' ? 'Platform demo' : 'Website concept'].filter(Boolean)
-    out.push({ ...p, organization_id: 'preview:' + p.opportunity_id, program: 'preview', variant: 'preview',
+    out.push({ ...p, organization_id: 'preview:' + p.opportunity_id, program: 'preview', variant: 'preview', href: p.url,
                symbol: '◇', rank: 20, kind: 'PREVIEW · PROSPECT DEMO',
                display, orgLabel: p.contact_name && display !== p.company_name ? p.contact_name : null,
                summary: 'The demo built for this prospect. Not a live workspace: no customer data, not a customer yet.',
