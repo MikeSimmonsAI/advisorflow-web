@@ -629,8 +629,24 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
         # opened where the businesses are - clearly labelled, never a tenant,
         # never a grant. A separate key, never in `contexts`, for the same
         # reason as demo_contexts above.
-        "preview_contexts": preview_contexts(db, user),
+        "preview_contexts": _with_granted_previews(db, user, preview_contexts(db, user)),
     }
+
+
+def _with_granted_previews(db: Session, user: User, own: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Add God-granted previews (deal_preview_grants) after the brand's own.
+
+    A granted entry carries the grant id and a signed-in path only - NO token
+    and NO public demo address. It is never a context, a workspace, a sales
+    seat or a platform-login right. Never raises."""
+    try:
+        from app.services import preview_grants
+        held = {p.get("opportunity_id") for p in own}
+        return own + preview_grants.launcher_entries(db, user, skip_opportunity_ids=held)
+    except Exception:                                    # pragma: no cover
+        _log.warning("could not resolve granted previews for %s",
+                     getattr(user, "id", None), exc_info=True)
+        return own
 
 
 # Stages before a deal is won. A deal that is won/onboarding/live is a customer

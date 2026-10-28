@@ -125,3 +125,54 @@ class DemoSite(Base):
 
     def default_expiry(self, now=None) -> datetime:
         return (now or datetime.utcnow()) + timedelta(days=DEFAULT_TTL_DAYS)
+
+
+class DealPreviewGrant(Base):
+    """ONE PERSON MAY OPEN ONE DEAL'S EXISTING DEMO - granted by God, per person.
+
+    WHY A TABLE OF ITS OWN. A brand-sales Membership is read everywhere as
+    employment (sales_access, platform login, the back office). Giving a
+    second brand's admin a membership in the deal's brand to let them look at
+    one demo would hand them that brand's whole pipeline. And handing them the
+    demo's public link would hand them the bearer secret: reusable, shareable,
+    and impossible to take back from one person without killing it for the
+    prospect too.
+
+    So this row is the whole authorization and nothing else reads it: no
+    sales_access, no platform-login slug, no workspace. The grantee opens the
+    demo through a signed-in route that re-checks this row on every open and
+    returns the stored page - never the token, never the public address.
+
+    `grantee_platform_id` is the brand the grantee works under (e.g.
+    BookaBoost): the preview shows only in that brand's Program Access, and
+    only while the person still belongs to that brand.
+    """
+    __tablename__ = "deal_preview_grants"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    opportunity_id = Column(String, ForeignKey("opportunities.id", ondelete="CASCADE"),
+                            nullable=False)
+    grantee_user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"),
+                             nullable=False)
+    grantee_platform_id = Column(String, ForeignKey("platforms.id"), nullable=False)
+    granted_by = Column(String, ForeignKey("users.id"), nullable=True)
+    reason = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    # NULL means "until revoked or until the deal/demo closes" - the preview
+    # also disappears by itself when the deal is won/lost or its demo expires.
+    expires_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+    revoked_by = Column(String, ForeignKey("users.id"), nullable=True)
+
+    __table_args__ = (
+        Index("ix_deal_preview_grants_grantee", "grantee_user_id"),
+        Index("ix_deal_preview_grants_opportunity", "opportunity_id"),
+    )
+
+    def is_active(self, now=None) -> bool:
+        now = now or datetime.utcnow()
+        if self.revoked_at is not None and self.revoked_at <= now:
+            return False
+        if self.expires_at is not None and self.expires_at <= now:
+            return False
+        return True
