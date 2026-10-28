@@ -15,6 +15,9 @@ import ContactLookup from './wsContactLookup'
 import BuyerIntelligence from './wsBuyerIntelligence'
 import './wsUnderwriting.css'
 import { Alert, Drawer, EvoApp, Hero } from './ds/ds'
+import { Link } from 'react-router-dom'
+import { InviteDrawer, useRoomStatus } from './dealroom/shared'
+import './dealroom/dealroom.css'
 import './ds/evo-pages.css'
 
 const STRATEGIES = ['flip', 'rental', 'brrrr', 'land', 'other']
@@ -44,6 +47,9 @@ export default function WholesaleBuyers() {
   const [deleting, setDeleting] = useState(null)
   const [busy, setBusy] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
+  const [requestTab, setRequestTab] = useState(null)
+  const [inviting, setInviting] = useState(false)
+  const room = useRoomStatus(reloadKey)
 
   const load = useCallback(async () => {
     try {
@@ -83,12 +89,33 @@ export default function WholesaleBuyers() {
 
   return (
     <EvoApp world="operations">
-      <Hero scene="capital" eyebrow="Buyer Intelligence" title="Buyers"
-            sub="Find investors, qualify them, and match them to real deals - single-family, multifamily, land and commercial, in one buyer network."
+      <Hero scene="capital" eyebrow="Buyers" title="Buyer Intelligence"
+            sub="Find investors. Build relationships. Match deals."
             quote="The right buyer turns opportunity into profit." />
+      <nav className="bi-cmd" aria-label="Buyer actions">
+        <button type="button" className="bi-cmd__btn" onClick={() => {
+          setRequestTab({ tab: 'find', at: Date.now() })
+          setTimeout(() => { const el = document.querySelector('.bi-tabs'); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, 50)
+        }}>
+          <span className="bi-cmd__i" aria-hidden="true">⌕</span>
+          <span><span className="bi-cmd__t">Find buyers</span><span className="bi-cmd__s">County records, your lists, practice buyers</span></span>
+        </button>
+        <button type="button" className="bi-cmd__btn" onClick={() => setInviting(true)}>
+          <span className="bi-cmd__i" aria-hidden="true">✉</span>
+          <span><span className="bi-cmd__t">Invite investor</span><span className="bi-cmd__s">A private, single-use Deal Room link</span></span>
+        </button>
+        <Link to="/wholesale/deal-room" className="bi-cmd__btn bi-cmd__btn--primary">
+          <span className="bi-cmd__i" aria-hidden="true">◆</span>
+          <span><span className="bi-cmd__t">{room && room.status === 'active' ? 'Open Deal Room' : 'Open Deal Room'}</span>
+            <span className="bi-cmd__s">{!room ? 'Checking…' : room.status === 'active' ? `Live · ${room.counts.investors} investor(s), ${room.counts.listings_live} live deal(s)`
+              : room.status === 'paused' ? 'Paused - open to manage' : 'Not set up yet - open to set it up'}</span></span>
+        </Link>
+      </nav>
       <Alert>{error}</Alert>
       <Alert kind="ok">{notice}</Alert>
-      <BuyerIntelligence legacy={legacy} reloadKey={reloadKey} />
+      <BuyerIntelligence legacy={legacy} reloadKey={reloadKey} requestTab={requestTab} />
+      <InviteDrawer open={inviting} onClose={() => setInviting(false)} roomActive={room && room.status === 'active'}
+                    onDone={(m) => changed(m)} />
 
       {deleting ? (
         <ConfirmDelete busy={busy}

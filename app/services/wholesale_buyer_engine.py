@@ -837,13 +837,13 @@ def summary(db, org_id: str, *, include_test: bool = False, today: Optional[date
         dq = dq.filter(WholesaleDeal.is_test.is_(False))
     deals = {d for (d,) in dq.distinct().all()}
     return {"cards": [
-        {"key": "discovered", "label": "Buyers discovered", "value": len(rows),
+        {"key": "discovered", "label": "Total buyers", "value": len(rows),
          "detail": "Investors in your buyer network (other LLCs of the same investor counted once)"},
         {"key": "verified_active", "label": "Verified active buyers", "value": len(active),
          "detail": "Contact verified AND recent buying evidence or a current statement"},
         {"key": "to_qualify", "label": "Buyers to qualify", "value": len(to_qualify),
          "detail": "Not yet deal-ready, not inactive, not opted out"},
-        {"key": "deals_matched", "label": "Deals with buyer matches", "value": len(deals),
+        {"key": "deals_matched", "label": "Deals with matches", "value": len(deals),
          "detail": "Deals with at least one buyer scoring %d+ and not disqualified" % GOOD_MATCH},
     ], "include_test": include_test, "as_of": today.isoformat(), "version": VERSION}
 

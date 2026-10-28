@@ -1580,6 +1580,7 @@ COLUMNS_TO_ADD = [
     ("wholesale_files", "review_status", "VARCHAR"),
     ("wholesale_files", "scan_status", "VARCHAR"),
     ("wholesale_files", "scan_detail", "VARCHAR"),
+    ("deal_room_listings", "hidden_document_ids", "TEXT"),
     ("evosense_owners", "name_truncated", "BOOLEAN DEFAULT FALSE"),
     ("evosense_owners", "review_flags", "TEXT"),
     ("evosense_signals", "evidence_basis", "VARCHAR"),

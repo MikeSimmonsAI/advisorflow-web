@@ -157,6 +157,16 @@ const NAV_GROUPS = [
       { to: '/wholesale/evosense/controls', label: 'Providers & Controls', icon: 'shield-check', featureKey: 'wholesale_real_estate' },
     ],
   },
+  // BUYERS is a first-class destination (owner directive, Oct 27): its own
+  // group right after acquisition, never folded into Operations' long list.
+  // Buyer Intelligence (find / qualify / match) and the owner's Deal Room.
+  {
+    label: 'Buyers',
+    items: [
+      { to: '/wholesale/buyers', label: 'Buyers', icon: 'users', featureKey: 'wholesale_real_estate' },
+      { to: '/wholesale/deal-room', label: 'Deal Room', icon: 'briefcase', featureKey: 'wholesale_real_estate' },
+    ],
+  },
   {
     label: 'Wholesale Operations',
     items: [
@@ -166,7 +176,6 @@ const NAV_GROUPS = [
       { to: '/wholesale/board', label: 'Team Board', icon: 'activity', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/canvass', label: 'Canvassing', icon: 'home', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/calculator', label: 'Deal Calculator', icon: 'calculator', featureKey: 'wholesale_real_estate' },
-      { to: '/wholesale/buyers', label: 'Buyers', icon: 'users', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/funding', label: 'Funding Partners', icon: 'credit-card', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/exceptions', label: 'Exceptions', icon: 'check-square', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/callbacks', label: 'Callback Center', icon: 'phone', featureKey: 'wholesale_real_estate' },
@@ -259,6 +268,7 @@ const SUPER_ADMIN_NAV_ITEMS = [
 function Icon({ name }) {
   const paths = {
     grid: <path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" />,
+    briefcase: <path d="M3 7h18v13H3zM8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18" />,
     users: <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />,
     message: <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />,
     repeat: <path d="M17 1l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3" />,

@@ -27,6 +27,8 @@ from app.models.wholesale_investor_models import DealListing, ExclusiveHold, Inv
 from app.models.wholesale_models import WholesaleBuyer, WholesaleFile
 from app.services import wholesale_deal_room as DR
 from app.services import wholesale_deal_room_chat as CH
+from app.services import wholesale_deal_room_manage as MG
+from app.services import wholesale_deal_room_setup as SET
 from app.services import wholesale_service as svc
 from app.services.entitlements import require_feature
 
@@ -164,11 +166,19 @@ def listings(include_test: bool = False, db: Session = Depends(get_db), user: Us
 
 
 @router.post("/deals/{deal_id}/listing")
-def create_listing(deal_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
-                   _g: User = Depends(require_not_observation)):
+def create_listing(deal_id: str, payload: Dict[str, Any] = Body(default={}), db: Session = Depends(get_db),
+                   user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """Add a deal to the room. Optional in the same step: audience, selected
+    buyers, availability window and which published documents the listing shows."""
     org_id = svc.write_org_id(db, user)
     svc.get_deal(db, org_id, deal_id)
     lst = DR.listing_for_deal(db, org_id, deal_id, create=True, user=user)
+    opts = {k: payload[k] for k in ("audience", "buyer_ids", "min_match_score", "publish_at", "expires_at")
+            if k in payload}
+    if opts:
+        DR.update_listing(db, org_id, lst, opts, user)
+    if isinstance(payload.get("visible_document_ids"), list):
+        MG.set_hidden_documents(db, org_id, lst, payload["visible_document_ids"])
     db.commit()
     return DR.listing_json(db, lst)
 
@@ -378,3 +388,158 @@ def staff_signing_session(envelope_id: str, db: Session = Depends(get_db), user:
         raise HTTPException(status_code=exc.status, detail=exc.message)
     db.commit()
     return {"url": "/sign/%s" % token, "token": token}
+
+
+# ── setup and management (owner) ───────────────────────────────────────────
+
+@router.get("/settings")
+def get_settings(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    return SET.view(db, _read(db, user), user)
+
+
+@router.put("/settings")
+def put_settings(payload: Dict[str, Any] = Body(...), db: Session = Depends(get_db),
+                 user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    org_id = svc.write_org_id(db, user)
+    out = SET.save(db, org_id, payload, user)
+    db.commit()
+    return out
+
+
+@router.get("/readiness")
+def get_readiness(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    return SET.readiness(db, _read(db, user), user)
+
+
+@router.post("/activate")
+def activate(db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+             _g: User = Depends(require_not_observation)):
+    org_id = svc.write_org_id(db, user)
+    out = SET.activate(db, org_id, user)
+    db.commit()
+    return out
+
+
+@router.post("/pause")
+def pause(db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+          _g: User = Depends(require_not_observation)):
+    org_id = svc.write_org_id(db, user)
+    out = SET.pause(db, org_id, user)
+    db.commit()
+    return out
+
+
+@router.get("/overview")
+def overview(include_test: bool = False, db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    org_id = _read(db, user)
+    out = MG.overview(db, org_id, include_test)
+    db.commit()
+    return out
+
+
+@router.get("/investors")
+def investors(include_test: bool = False, q: Optional[str] = None, db: Session = Depends(get_db),
+              user: User = Depends(require_tenant_or_observer)):
+    return {"investors": MG.investors(db, _read(db, user), include_test, q)}
+
+
+@router.get("/team")
+def team(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    return {"people": SET.staff_people(db, _read(db, user))}
+
+
+@router.get("/candidates")
+def candidates(q: Optional[str] = None, include_test: bool = False, db: Session = Depends(get_db),
+               user: User = Depends(require_tenant_or_observer)):
+    return {"deals": MG.candidates(db, _read(db, user), q, include_test)}
+
+
+@router.get("/listings/{listing_id}/preview")
+def listing_preview(listing_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    org_id = _read(db, user)
+    return MG.preview(db, org_id, _listing(db, org_id, listing_id))
+
+
+class DocsIn(BaseModel):
+    visible_document_ids: list = []
+
+
+@router.put("/listings/{listing_id}/documents")
+def listing_documents(listing_id: str, payload: DocsIn, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    org_id = svc.write_org_id(db, user)
+    lst = MG.set_hidden_documents(db, org_id, _listing(db, org_id, listing_id), payload.visible_document_ids)
+    DR.log(db, org_id, "deal_room.listing_documents", "Listing documents updated", user, deal_id=lst.deal_id)
+    db.commit()
+    return MG.preview(db, org_id, lst)
+
+
+@router.get("/documents")
+def documents(include_test: bool = False, db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    return MG.documents(db, _read(db, user), include_test)
+
+
+@router.get("/activity")
+def activity(limit: int = Query(80, ge=1, le=300), db: Session = Depends(get_db),
+             user: User = Depends(require_tenant_or_observer)):
+    return {"events": MG.activity(db, _read(db, user), limit)}
+
+
+class AssignIn(BaseModel):
+    user_id: Optional[str] = None
+
+
+@router.post("/threads/{conv_id}/assign")
+def assign(conv_id: str, payload: AssignIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+           _g: User = Depends(require_not_observation)):
+    org_id = svc.write_org_id(db, user)
+    c = MG.assign_thread(db, org_id, conv_id, payload.user_id, user)
+    db.commit()
+    return CH.thread_json(db, c, for_buyer=False)
+
+
+@router.get("/portal-preview")
+def portal_preview(include_test: bool = True, db: Session = Depends(get_db),
+                   user: User = Depends(require_tenant_or_observer)):
+    """What an investor's portal shows, for the owner to look at (read-only):
+    the room's welcome and every live listing as the whitelist builds it."""
+    org_id = _read(db, user)
+    DR.sweep(db, org_id)
+    rows = (db.query(DealListing).filter(DealListing.organization_id == org_id,
+                                         DealListing.state.in_(("published", "exclusive_review")))
+            .order_by(DealListing.published_at.desc()).all())
+    cards = []
+    for lst in rows:
+        if lst.is_test and not include_test:
+            continue
+        pv = MG.preview(db, org_id, lst)
+        if not pv["serving"]:
+            continue
+        room = pv["room"]
+        cards.append({"id": lst.id, "state": lst.state, "address": room.get("property"), "category": pv["category"],
+                      "facts": pv["facts"], "asking_price": room.get("asking_price"), "summary": room.get("summary"),
+                      "arv": room.get("arv"), "estimated_repairs": room.get("estimated_repairs"),
+                      "photos": [p.get("id") for p in room.get("photos") or []],
+                      "published_at": DR._iso(lst.published_at), "is_test": bool(lst.is_test)})
+    db.commit()
+    return {"room": SET.investor_view(db, org_id), "opportunities": cards,
+            "notice": "Preview: what investors see. Match scores, saved deals and messages are per investor."}
+
+
+@router.get("/listings/{listing_id}/photos/{file_id}")
+def listing_photo(listing_id: str, file_id: str, db: Session = Depends(get_db),
+                  user: User = Depends(require_tenant_or_observer)):
+    """Staff preview of a listing's investor photo (only photos the package publishes)."""
+    from app.models.wholesale_models import WholesaleDeal
+    from app.services import wholesale_files as F
+    from app.services import wholesale_publication as P
+    org_id = _read(db, user)
+    lst = _listing(db, org_id, listing_id)
+    deal = db.query(WholesaleDeal).filter(WholesaleDeal.id == lst.deal_id).first()
+    if file_id not in {p["id"] for p in P.buyer_photos(db, deal)}:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    f = db.query(WholesaleFile).filter(WholesaleFile.id == file_id, WholesaleFile.organization_id == org_id).first()
+    if f is None:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return Response(F.fetch(f.storage_backend, f.storage_key, db=db), media_type=f.content_type,
+                    headers={"Cache-Control": "private, max-age=300"})
