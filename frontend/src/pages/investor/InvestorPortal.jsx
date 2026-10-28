@@ -336,6 +336,7 @@ function Sidebar({ room, counts, promo, preview }) {
     </aside>
   )
 }
+const usdK = (v) => (v >= 1e6 ? '$' + (v / 1e6).toFixed(v % 1e6 ? 2 : 0) + 'M' : v >= 1e3 ? '$' + Math.round(v / 1e3) + 'K' : usd(v))
 const listWords = (a) => (a.length <= 1 ? a.join('') : a.slice(0, -1).join(', ') + ' & ' + a[a.length - 1])
 
 function Topbar({ me, counts, room, q, setQ, market, setMarket, onSignOut, preview }) {
@@ -477,7 +478,7 @@ export function DashboardView({ dash, me, q, market, preview, onSave, rail }) {
         <div className="ir-tiles">
           {[['deals', 'Properties match', c.matching ?? 0, 'Based on your criteria'],
             ['spark', 'Average match', c.average_match !== null && c.average_match !== undefined ? `${c.average_match}%` : '—', 'Across your opportunities'],
-            ['units', 'Asking price range', c.price_min ? `${usd(c.price_min)}${c.price_max !== c.price_min ? ' – ' + usd(c.price_max) : ''}` : '—', 'Published asking prices'],
+            ['units', 'Asking price range', c.price_min ? `${usdK(c.price_min)}${c.price_max !== c.price_min ? ' – ' + usdK(c.price_max) : ''}` : '—', 'Published asking prices'],
             ['docs', 'Proof of funds', me && me.funding ? (me.funding.documented ? 'Accepted' : 'Not on file') : (preview ? '—' : '…'),
               me && me.funding && me.funding.documented ? 'Reviewed by the team' : 'Upload it under Documents']].map(([ic, l, v, s]) => (
             <div key={l} className="ir-tile"><span className="ir-tile__ic"><Ico n={ic} /></span>

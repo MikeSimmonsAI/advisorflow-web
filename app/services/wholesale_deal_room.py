@@ -958,8 +958,11 @@ def decide_hold(db, org_id: str, hold_id: str, user, *, decision: str, preset: O
 
 
 def _dur(mins: int) -> str:
-    return ("%d days" % (mins // 1440)) if mins % 1440 == 0 and mins >= 1440 else (
-        "%d hours" % (mins // 60) if mins % 60 == 0 else "%d minutes" % mins)
+    if mins % 1440 == 0 and mins >= 2880:
+        return "%d days" % (mins // 1440)
+    if mins % 60 == 0:
+        return "%d hours" % (mins // 60)
+    return "%d minutes" % mins
 
 
 def _is_wholesale_manager(db, user) -> bool:

@@ -456,7 +456,8 @@ function ESignStart({ deal, buyer, done, fail, test }) {
     setBusy(true)
     try {
       await api.post(`/wholesale/deals/${deal}/assign`, { buyer_id: buyer.buyer_id, buyer_price: buyer.offer || undefined })
-      const r = await api.post(`/wholesale/deals/${deal}/contracts/assignee_disclosure/send`, {})
+      const kind = 'assignee_disclosure'   // the approved assignee disclosure template
+      const r = await api.post(`/wholesale/deals/${deal}/contracts/${kind}/send`, {})
       done(r && r.sent ? 'Assignee disclosure sent for signature - the investor signs it in Documents.' : 'Not sent: ' + ((r && (r.reason || r.detail)) || 'see the deal'))
     } catch (e) { fail(e) } finally { setBusy(false) }
   }
