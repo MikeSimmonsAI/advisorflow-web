@@ -2237,9 +2237,20 @@ def verify_source(payload: VerifyIn, db: Session = Depends(get_db),
     return {**res, "registry": PV.source_registry(db, org_id)}
 
 
+# Keys of the stored upload record that name WHO uploaded it. The copy is
+# shared by every workspace; which platform person uploaded it is not a
+# tenant's business (#272). Tenants still see when, the data date and size.
+_UPLOADER_KEYS = ("by", "by_name", "by_email", "uploaded_by", "user_id", "email")
+
+
 def _upload_status(db, user, source_key: str):
-    return {**PV.upload_status(source_key),
-            "can_upload": getattr(user, "role", None) in PV.PLATFORM_ADMIN_ROLES,
+    is_platform_admin = getattr(user, "role", None) in PV.PLATFORM_ADMIN_ROLES
+    status = PV.upload_status(source_key)
+    cur = status.get("current")
+    if not is_platform_admin and isinstance(cur, dict):
+        status = {**status, "current": {k: v for k, v in cur.items() if k not in _UPLOADER_KEYS}}
+    return {**status,
+            "can_upload": is_platform_admin,
             "access": PV.platform_access(db, source_key)}
 
 
