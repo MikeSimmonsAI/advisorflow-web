@@ -186,3 +186,6 @@
   -webkit-box-shadow: 0 0 0 1000px #07142c inset !important;
   box-shadow: 0 0 0 1000px #07142c inset !important;
 }
+/* ...and give the field shell the same navy while the browser holds an autofilled
+   value, so the icon and show/hide areas match the filled text area (no inner box). */
+.evl .evl-input:has(input:-webkit-autofill) { background: #07142c; }

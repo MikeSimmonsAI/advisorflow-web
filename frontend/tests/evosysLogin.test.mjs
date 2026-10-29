@@ -71,3 +71,7 @@ test('Chrome autofill on email and password retains the dark field treatment', (
   assert.match(block, /box-shadow:\s*0 0 0 1000px #07142c inset !important/)
   assert.match(block, /-webkit-text-fill-color:\s*#f4f8ff !important/)
 })
+
+test('the field shell matches the autofilled text area (no two-tone box)', () => {
+  assert.match(css, /\.evl \.evl-input:has\(input:-webkit-autofill\)\s*\{\s*background:\s*#07142c;/)
+})

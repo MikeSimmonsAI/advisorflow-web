@@ -168,7 +168,6 @@ export default function EvosysLogin({ email, setEmail, password, setPassword, er
             <li key={x.key} className={`evl-card${x.featured ? ' evl-card--featured' : ''}`}>
               <div className="evl-card__media">
                 <img src={x.img} alt="" loading="lazy" decoding="async" width="640" height="300" onError={hideOnError} />
-                
               </div>
               <div className="evl-card__body">
                 <span className="evl-card__ic"><Ico n={x.icon} size={20} /></span>
