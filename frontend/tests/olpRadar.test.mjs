@@ -13,7 +13,8 @@ const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm,
 test('OLP is chosen by the product-brand switch, and the #428 look stays available', () => {
   assert.match(jsx, /const IS_OLP = bookaboostProductBrand\(\) === 'olp'/)
   assert.match(jsx, /IS_OLP\s*\?\s*<OlpCard[\s\S]*?:\s*<Card /)
-  assert.match(jsx, /\{BRAND\} · OPPORTUNITY INTELLIGENCE/)
+  // The default eyebrow is unchanged; a preset screen (Farm & Ranch) may name its own.
+  assert.match(jsx, /\{BRAND\} · \{preset\?\.eyebrow \|\| 'OPPORTUNITY INTELLIGENCE'\}/)
 })
 
 test('OLP cards: no save / bookmark control, one action button, every photo labelled representative', () => {

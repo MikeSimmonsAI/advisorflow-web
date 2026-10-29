@@ -31,7 +31,7 @@ test('the OLP rail keeps every Wholesale item exactly once - nothing added, remo
 test('three plain groups in the owner order; radar first; settings last', () => {
   const out = olpGroups(asGroups())
   assert.deepEqual(out.map((g) => g.label), ['Opportunity Intelligence', 'Market Operations', 'Account & Settings'])
-  assert.deepEqual(out[0].items.map((i) => i.to), ['/wholesale/evosense/overlooked', '/wholesale/buyers', '/wholesale/buyers/buy-boxes', '/wholesale/deal-room', '/wholesale/deal-room/investors'])
+  assert.deepEqual(out[0].items.map((i) => i.to), ['/wholesale/evosense/overlooked', '/wholesale/land-partners', '/wholesale/farm-ranch', '/wholesale/buyers', '/wholesale/buyers/buy-boxes', '/wholesale/deal-room', '/wholesale/deal-room/investors'])
   assert.deepEqual(out[2].items.map((i) => i.to), ['/wholesale/evosense/controls', '/wholesale/pilot', '/wholesale/team', '/wholesale/settings'])
 })
 
@@ -54,7 +54,7 @@ test('an item the map does not know still appears (under Market Operations), nev
 })
 
 test('header variants: hero for the major workspaces, detail for records, compact for the rest', () => {
-  for (const p of ['/wholesale/evosense/overlooked', '/wholesale/evosense', '/wholesale/buyers', '/wholesale/deal-room', '/wholesale']) assert.equal(olpHeaderFor(p), 'hero', p)
+  for (const p of ['/wholesale/evosense/overlooked', '/wholesale/land-partners', '/wholesale/farm-ranch', '/wholesale/evosense', '/wholesale/buyers', '/wholesale/deal-room', '/wholesale']) assert.equal(olpHeaderFor(p), 'hero', p)
   for (const p of ['/wholesale/evosense/property/abc', '/wholesale/deals/12', '/wholesale/deal-room/investors/9']) assert.equal(olpHeaderFor(p), 'detail', p)
   for (const p of ['/wholesale/buyers/buy-boxes', '/wholesale/settings', '/wholesale/foreclosures', '/wholesale/deal-room/investors']) assert.equal(olpHeaderFor(p), 'compact', p)
 })
