@@ -7,6 +7,7 @@ import SignalPulse from '../components/SignalPulse'
 import { detectTheme, THEMES, BRAND_CONFIG } from '../theme.js'
 import './Login.css'
 import EvosysLogin from './login-evosys/EvosysLogin'
+import BookaBoostLogin from './login-bookaboost/BookaBoostLogin'
 
 const theme = detectTheme()
 const brand = BRAND_CONFIG[theme]
@@ -14,30 +15,9 @@ const brand = BRAND_CONFIG[theme]
 // ── Per-platform left-panel content ──────────────────────────────────────────
 
 const PLATFORM_CONTENT = {
-  [THEMES.BOOKABOOST]: {
-    headline: 'BookaBoost',
-    tagline: 'Pre-need outreach built for families who plan ahead — and the advisors who serve them.',
-    accentColor: '#c9973d',
-    accentGlow: 'rgba(201,151,61,0.15)',
-    bgGradient: 'linear-gradient(135deg, #faf8f4 0%, #f5f0e8 100%)',
-    panelGradient: 'linear-gradient(160deg, #2c1f10 0%, #3d2b14 100%)',
-    lightRight: true,
-    poweredBy: 'BookaBoost',
-    stats: [
-      { value: '4.8×', label: 'avg reply rate vs cold outreach' },
-      { value: '72%', label: 'of pre-need leads go cold within 90 days' },
-      { value: '3 min', label: 'to launch your first AI cadence' },
-      { value: '100%', label: 'A2P 10DLC compliant messaging' },
-    ],
-    features: [
-      { icon: '📱', text: 'Automated SMS & email cadences' },
-      { icon: '🔥', text: 'Hot / Warm / Cold lead scoring' },
-      { icon: '📋', text: 'Funeral-industry CRM built in' },
-      { icon: '🔗', text: 'GoHighLevel & HubSpot sync' },
-    ],
-    badge: 'Pre-Need Edition',
-    badgeStyle: { background: 'rgba(201,151,61,0.18)', color: '#c9973d', border: '1px solid rgba(201,151,61,0.4)' },
-  },
+  // BookaBoost has its own page (./login-bookaboost/BookaBoostLogin.jsx). Its old
+  // left-panel copy (pre-need funeral wording, "4.8x reply rate", "72%"...) was
+  // removed: the owner directive allows only capabilities the product has.
   [THEMES.ADVISORFLOW]: {
     headline: '⚡ AdvisorFlow',
     tagline: 'God-level access. Authorized personnel only.',
@@ -178,8 +158,7 @@ export default function Login() {
       await fetchAndStoreBranding()
       startKeepAlive()
       startRefreshLoop()
-      // WHERE LOGIN LANDS - the server decides (/auth/my-contexts); shared with
-      // Sign in with Google so both land in the same place.
+      // Shared server-authorized destination for password and Google sign-in.
       const dest = await signInDestination(user, nextPath, priorWorkspace)
       navigate(dest)
     } catch (err) {
@@ -200,6 +179,16 @@ export default function Login() {
                    error={error} loading={loading} onSubmit={handleSubmit} expired={expired}
                    nextPath={nextPath} supportEmail={brand && brand.supportEmail}
                    googleHref={googleOn ? googleSigninStartUrl(nextPath) : null} googleError={googleError} />
+    )
+  }
+
+  // BOOKABOOST wears its own sign-in too (owner directive, Oct 29). Same state,
+  // same handleSubmit, same tokens and server-decided landing - presentation only.
+  if (theme === THEMES.BOOKABOOST) {
+    return (
+      <BookaBoostLogin email={email} setEmail={setEmail} password={password} setPassword={setPassword}
+                       error={error} loading={loading} onSubmit={handleSubmit} expired={expired}
+                       nextPath={nextPath} supportEmail={brand && brand.supportEmail} />
     )
   }
 
