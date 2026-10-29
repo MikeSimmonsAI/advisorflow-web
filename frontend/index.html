@@ -117,6 +117,14 @@
         // investor waiting a second and a half for the page to mount should
         // not be reading the name of the wholesaler's software supplier.
         if (/^\/(investor|my-property)\//.test(location.pathname)) name = ''
+        // OLP exploration (src/brand/productBrand.js): on a BookaBoost host the
+        // sign-in, password and Wholesale pages are OLP's, so their loading
+        // splash says OLP instead of flashing "BookaBoost" first. Every other
+        // BookaBoost page (Back Office ...) still says BookaBoost. The build
+        // setting VITE_BOOKABOOST_PRODUCT_BRAND=bookaboost turns this off.
+        var productBrand = '%VITE_BOOKABOOST_PRODUCT_BRAND%'
+        if (name === 'BookaBoost' && productBrand.toLowerCase() !== 'bookaboost' &&
+            /^\/(login|forgot-password|reset-password|wholesale)(\/|$)/.test(location.pathname)) name = 'OLP'
         var el = document.getElementById('bb-splash-name')
         if (el) el.textContent = name
         var pulse = document.querySelector('.bb-splash-pulse')

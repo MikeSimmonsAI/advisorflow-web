@@ -8,6 +8,8 @@ import { detectTheme, THEMES, BRAND_CONFIG } from '../theme.js'
 import './Login.css'
 import EvosysLogin from './login-evosys/EvosysLogin'
 import BookaBoostLogin from './login-bookaboost/BookaBoostLogin'
+import OLPLogin from './login-olp/OLPLogin'
+import { bookaboostProductBrand } from '../brand/productBrand'
 
 const theme = detectTheme()
 const brand = BRAND_CONFIG[theme]
@@ -184,6 +186,16 @@ export default function Login() {
 
   // BOOKABOOST wears its own sign-in too (owner directive, Oct 29). Same state,
   // same handleSubmit, same tokens and server-decided landing - presentation only.
+  // OLP (Overlooked Properties, powered by BookaBoost) is the BookaBoost
+  // product face being explored; the build can switch back to the plain
+  // BookaBoost page (src/brand/productBrand.js). Same props either way.
+  if (theme === THEMES.BOOKABOOST && bookaboostProductBrand() === 'olp') {
+    return (
+      <OLPLogin email={email} setEmail={setEmail} password={password} setPassword={setPassword}
+                error={error} loading={loading} onSubmit={handleSubmit} expired={expired}
+                nextPath={nextPath} supportEmail={brand && brand.supportEmail} />
+    )
+  }
   if (theme === THEMES.BOOKABOOST) {
     return (
       <BookaBoostLogin email={email} setEmail={setEmail} password={password} setPassword={setPassword}
