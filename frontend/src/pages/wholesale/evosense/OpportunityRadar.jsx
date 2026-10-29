@@ -1,4 +1,6 @@
-/* BookaBoost private professional workspace — Overlooked Properties.
+/* BookaBoost private professional workspace — Overlooked Properties
+ * (shown as OLP - Overlooked Properties, powered by BookaBoost, when the
+ * BookaBoost product brand is 'olp'; see src/brand/productBrand.js).
  * Built to the owner-approved interactive mockup (#427). Every number and
  * property on this screen comes from the signed-in workspace's own records
  * through authenticated APIs. Empty is empty: nothing is invented, nothing is
@@ -7,7 +9,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../../api/client'
+import { bookaboostProductBrand } from '../../../brand/productBrand'
+import heroPhoto from './img/olp-hero.webp'
+import photoResidential from '../ds/photos/house08.jpg'
+import photoWholesale from '../ds/photos/street.jpg'
+import photoLand from '../ds/photos/house09.jpg'
+import photoCommercial from '../ds/photos/invest.jpg'
 import './OpportunityRadar.css'
+
+// OLP - Overlooked Properties, powered by BookaBoost (brand exploration): the
+// product face of this screen. 'bookaboost' keeps the #428 look and wording.
+const IS_OLP = bookaboostProductBrand() === 'olp'
+const BRAND = IS_OLP ? 'OLP' : 'BOOKABOOST'
+// A record without its own photo shows a plain photo of its KIND, always
+// labelled "Representative photo" and never presented as the property
+// (same rule as ds/photos/CREDITS.md). An unknown type gets no photo.
+const KIND_PHOTO = { residential: photoResidential, wholesale: photoWholesale, land: photoLand, commercial: photoCommercial }
 
 const MARKETS = [
   ['all', 'All Opportunities'],
@@ -35,6 +52,7 @@ function dateText(value) {
 }
 function money(v) { return typeof v === 'number' ? '$' + v.toLocaleString() : null }
 function humane(v) { return String(v || '').replaceAll('_', ' ') }
+function sentence(v) { return v ? v.charAt(0).toUpperCase() + v.slice(1) : v }
 function place(p) {
   const city = [p.city, p.state].filter(Boolean).join(', ')
   return [city || null, p.county ? `${p.county} County` : null].filter(Boolean).join(' · ') || 'Location not verified'
@@ -47,20 +65,34 @@ function chipFor(p, market) {
   return [CHIP[c] || humane(c), THUMB[c] || 'residential']
 }
 
+const KPI_ICON = {
+  search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-4.6-4.6',
+  chart: 'M5 20V12M10 20V6M15 20V10M20 20V4M3 20h18',
+  users: 'M16 20v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 18.5V20M10 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM20 20v-1.5a3.5 3.5 0 0 0-2.5-3.35M15.5 4.2a3.5 3.5 0 0 1 0 6.6',
+  star: 'M12 3l2.7 5.6 6.1.8-4.4 4.3 1 6.1L12 17l-5.4 2.8 1-6.1-4.4-4.3 6.1-.8z',
+}
+function KpiIcon({ n }) {
+  return (
+    <span className={'bbr-kpi__ic bbr-kpi__ic--' + n} aria-hidden="true">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" focusable="false"><path d={KPI_ICON[n]} /></svg>
+    </span>
+  )
+}
+
 function Kpis({ data, loading }) {
   const s = data?.summary
   const pageMatches = (data?.items || []).reduce((n, p) => n + (p.buyer_matches?.confirmed || 0), 0)
-  const cell = (num, label, help, tone) => (
-    <article className="bbr-kpi"><div className={'bbr-kpi__num ' + (tone || '')}>{loading ? '…' : num}</div>
-      <div className="bbr-kpi__label">{label}</div><div className="bbr-kpi__help">{help}</div></article>
+  const cell = (num, label, help, tone, icon) => (
+    <article className="bbr-kpi">{IS_OLP ? <KpiIcon n={icon} /> : null}<div className="bbr-kpi__txt"><div className={'bbr-kpi__num ' + (tone || '')}>{loading ? '…' : num}</div>
+      <div className="bbr-kpi__label">{label}</div><div className="bbr-kpi__help">{help}</div></div></article>
   )
   return (
     <div className="bbr-kpis">
-      {cell((s?.total ?? 0).toLocaleString(), 'Opportunities in view', 'Your workspace records, current filters')}
-      {cell((s?.with_evidence ?? 0).toLocaleString(), 'With research signals', 'Current, sourced evidence on record', 'gold')}
-      {cell(pageMatches.toLocaleString(), 'Confirmed buyer matches', 'Properties on this page · Buyer Intelligence', 'green')}
+      {cell((s?.total ?? 0).toLocaleString(), 'Opportunities in view', 'Your workspace records, current filters', '', 'search')}
+      {cell((s?.with_evidence ?? 0).toLocaleString(), 'With research signals', 'Current, sourced evidence on record', 'gold', 'chart')}
+      {cell(pageMatches.toLocaleString(), 'Confirmed buyer matches', 'Properties on this page · Buyer Intelligence', 'green', 'users')}
       {cell(s?.average_score != null ? `${s.average_score}/100` : '—', 'Average opportunity score',
-        s?.scored ? `Across ${s.scored} scored ${s.scored === 1 ? 'record' : 'records'}` : 'No scored records yet')}
+        s?.scored ? `Across ${s.scored} scored ${s.scored === 1 ? 'record' : 'records'}` : 'No scored records yet', '', 'star')}
     </div>
   )
 }
@@ -100,6 +132,52 @@ function Card({ p, market, onOpen }) {
   )
 }
 
+// OLP card: photo header (the record's kind, labelled representative), the
+// score, then only facts the record actually holds. No save control: the
+// watchlist is on hold.
+function OlpCard({ p, market, onOpen }) {
+  const [chip, kind] = chipFor(p, market)
+  const photo = KIND_PHOTO[kind]
+  const reasons = p.why_review || []
+  const m = p.buyer_matches || {}
+  const f = p.facts || {}
+  const meta = [
+    p.property_subtype ? sentence(humane(p.property_subtype)) : (p.property_category && p.property_category !== 'unknown' ? sentence(humane(p.property_category)) : null),
+    f.bedrooms != null ? `${f.bedrooms} bd` : null,
+    f.bathrooms != null ? `${f.bathrooms} ba` : null,
+    f.square_feet ? `${Number(f.square_feet).toLocaleString()} sqft` : null,
+    f.year_built ? `Built ${f.year_built}` : null,
+    f.occupancy ? humane(f.occupancy) : null,
+  ].filter(Boolean)
+  return (
+    <article className="bbr-prop bbr-oc">
+      <div className={'bbr-oc__media bbr-oc__media--' + kind}>
+        {photo ? <img src={photo} alt="" loading="lazy" decoding="async" /> : <span className="bbr-oc__nophoto">No photo on file</span>}
+        <span className={'bbr-chip bbr-chip--' + kind}>{chip}</span>
+        <span className="bbr-oc__score"><b>{p.existing_opportunity_score ?? '—'}</b><small>Opportunity Score</small></span>
+        {photo ? <span className="bbr-oc__rep">Representative photo</span> : null}
+      </div>
+      <div className="bbr-oc__body">
+        {f.value != null ? <p className="bbr-oc__value">{money(f.value)}<small>{f.value_basis || 'Recorded value'}</small></p>
+          : <p className="bbr-oc__value bbr-oc__value--none">Value not on record</p>}
+        <h3 title={title(p)}>{title(p)}</h3>
+        <p className="bbr-sub">{place(p)}</p>
+        <div className="bbr-oc__tags">
+          {reasons.length ? reasons.slice(0, 2).map((r) => <span key={r.type}>{r.label}</span>)
+            : <span className="bbr-oc__tag--none">Evidence needed</span>}
+        </div>
+        {meta.length ? <p className="bbr-oc__meta">{meta.join(' · ')}</p> : null}
+        <p className="bbr-oc__facts">
+          <span>Buyer matches <b>{m.buyers_on_file ? m.confirmed : '—'}</b></span>
+          <span>Confidence <b>{p.data_confidence ? humane(p.data_confidence) : 'Unknown'}</b></span>
+          <span>Observed <b>{dateText(p.last_observed_at)}</b></span>
+        </p>
+        <button type="button" className="bbr-oc__go" onClick={() => onOpen(p)}>View opportunity <span aria-hidden="true">→</span></button>
+      </div>
+    </article>
+  )
+}
+
 function Drawer({ p, market, onClose }) {
   const [matches, setMatches] = useState(null)
   const [mErr, setMErr] = useState('')
@@ -123,7 +201,7 @@ function Drawer({ p, market, onClose }) {
     <div className="bbr-overlay" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <aside className="bbr-drawer" role="dialog" aria-modal="true" aria-labelledby="bbr-drawer-title">
         <div className="bbr-drawer__head">
-          <small>{showMatches ? 'BOOKABOOST · BUYER MATCHES' : 'BOOKABOOST · PROPERTY RESEARCH'}</small>
+          <small>{showMatches ? `${BRAND} · BUYER MATCHES` : `${BRAND} · PROPERTY RESEARCH`}</small>
           <button type="button" ref={closeRef} onClick={onClose} aria-label="Close">×</button>
         </div>
         <h2 id="bbr-drawer-title">{showMatches ? 'Buyer Matches' : title(p)}</h2>
@@ -243,12 +321,13 @@ export default function OpportunityRadar() {
   const covered = data?.available?.states || []
 
   return (
-    <main className="bbr">
+    <main className={'bbr' + (IS_OLP ? ' bbr--olp' : '')} data-product={IS_OLP ? 'olp' : undefined}>
       <section className="bbr-hero">
-        <div>
-          <div className="bbr-eyebrow">BOOKABOOST · OPPORTUNITY INTELLIGENCE</div>
-          <h1>Overlooked Properties</h1>
-          <p>Find What Others Miss. Discover, research, and match overlooked real estate opportunities across every market—without leaving your professional workspace.</p>
+        {IS_OLP ? <img className="bbr-hero__photo" src={heroPhoto} alt="" aria-hidden="true" decoding="async" /> : null}
+        <div className="bbr-hero__text">
+          <div className="bbr-eyebrow">{BRAND} · OPPORTUNITY INTELLIGENCE</div>
+          <h1>Overlooked {IS_OLP ? <span className="bbr-gold">Properties</span> : 'Properties'}</h1>
+          <p>Find What Others Miss. Discover, research, and match overlooked real estate opportunities{IS_OLP ? ' in residential, wholesale, land and commercial markets' : ' across every market'}—without leaving your professional workspace.</p>
         </div>
         <div className="bbr-hero__side"><div>OPPORTUNITY RADAR</div><span>Discover → Verify → Match → Deal</span></div>
       </section>
@@ -309,7 +388,9 @@ export default function OpportunityRadar() {
         {Array.from({ length: 4 }).map((_, i) => <div key={i} className="bbr-prop bbr-skeleton" />)}</div> : null}
       {!loading && !error ? (
         <section className="bbr-cards" aria-label="Property results">
-          {data?.items?.length ? data.items.map((p) => <Card key={p.id} p={p} market={market} onOpen={setOpen} />) : (
+          {data?.items?.length ? data.items.map((p) => (IS_OLP
+            ? <OlpCard key={p.id} p={p} market={market} onOpen={setOpen} />
+            : <Card key={p.id} p={p} market={market} onOpen={setOpen} />)) : (
             <div className="bbr-empty">
               <div className="bbr-empty__icon" aria-hidden="true">⌕</div>
               <h3>No matching opportunities in your workspace</h3>
