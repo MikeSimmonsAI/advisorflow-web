@@ -8,7 +8,7 @@ import pytest
 
 from app.models.models import CadenceState, EmailMessage, Lead, Message
 from app.models.program_models import CampaignFamily, ProgramSourceRecord
-from app.services.programs import campaigns as C, holds, identity, importer, promote
+from app.services.programs import campaigns as C, holds, identity, importer, promote, send_approval, setup
 from tests.test_outreach_program import _h, program  # noqa: F401
 
 HEAD = ("Lead Owner: Manager,Lead Owner,First Name,Last Name,Email,Lead Status,Last Activity,"
@@ -312,3 +312,88 @@ def test_follow_ups_use_only_the_campaigns_own_words(program, sample_advisor):
     for touch in (1, 3):
         txt = identity.cadence_text(db, lead, touch)
         assert txt is None or txt.startswith("APPROVED-CA-COPY")
+
+
+def test_owner_decisions_restaging_releases_status_holds_and_resolves_locations(program):
+    db, org, admin = program["db"], program["org"], program["admin"]
+    _ca(db, org)
+    setup.ensure_locations(db, org, admin, ["Southern Heritage Cemetery", "Southern Heritage Funeral Home"])
+    generic = C.ensure_kilgroe_for_sci(db, org.id)
+    assert generic.official_name == "Kilgroe Funeral Home"
+    assert generic.facility_phone == "+12053383341"
+    assert C.ensure_kilgroe_for_sci(db, org.id).id == generic.id
+
+    csv = ("Lead ID," + HEAD
+           + "SCI-CA-20261025-0052," + _r("JOYCE", "STRONG", "js@example.com", "2055550101",
+                                           "Southern Heritage Cemetery", status="Disqualified")
+           + "SCI-CA-20261025-0416," + _r("JOYCE", "STRONG", "js@example.com", "2055550102",
+                                           "Southern Heritage Funeral Home", status="Disqualified")
+           + "SCI-CA-20261025-0013," + _r("JIMMY", "GLOVER", "jg@example.com", "2055550103",
+                                           "Oakwood Memorial Gardens", status="Disqualified")
+           + "SCI-CA-20261025-0059," + _r("HOWARD", "THOMPSON", "ht@example.com", "2055550104",
+                                           "Southern Heritage Cemetery", status="Not Interested")
+           + "SCI-CA-20261025-0422," + _r("JANIS", "STOVALL", "st@example.com", "2055550105",
+                                           "Kilgroe Funeral Home")
+           + "SCI-CA-20261025-0421," + _r("BARBARA", "CHRISTIAN", "bc@example.com", "2055550106",
+                                           "OH MKT CENTRAL ALABAMA"))
+    # The real import ran before the new rules. Reproduce its persisted holds.
+    importer.stage(db, org, csv.encode(), dry_run=False, campaign_family=C.CENTRAL_ALABAMA_KEY)
+    records = {r.source_lead_id: r for r in _recs(db, org)}
+    for lid, reason in (
+        ("SCI-CA-20261025-0052", "LOCATION CONFLICT; SOURCE STATUS: Disqualified"),
+        ("SCI-CA-20261025-0416", "LOCATION CONFLICT; SOURCE STATUS: Disqualified"),
+        ("SCI-CA-20261025-0013", "SOURCE STATUS: Disqualified"),
+        ("SCI-CA-20261025-0059", "SOURCE STATUS: Not Interested"),
+        ("SCI-CA-20261025-0422", "LOCATION REVIEW"),
+        ("SCI-CA-20261025-0421", "LOCATION REVIEW"),
+    ):
+        records[lid].on_hold, records[lid].hold_reason = True, reason
+    db.commit()
+    importer.stage(db, org, csv.encode(), dry_run=False, campaign_family=C.CENTRAL_ALABAMA_KEY)
+    chosen = db.query(__import__("app.models.program_models", fromlist=["LocationProfile"]).LocationProfile).filter_by(
+        organization_id=org.id, official_name="Southern Heritage Funeral Home").one()
+    for lid in ("SCI-CA-20261025-0052", "SCI-CA-20261025-0416"):
+        db.refresh(records[lid])
+        assert records[lid].location_id == chosen.location_id
+        assert records[lid].location_assigned_manually is True
+        assert records[lid].on_hold is False
+    assert records["SCI-CA-20261025-0052"].contact_master_key == records["SCI-CA-20261025-0416"].contact_master_key
+    for lid in ("SCI-CA-20261025-0013", "SCI-CA-20261025-0059", "SCI-CA-20261025-0422"):
+        db.refresh(records[lid])
+        assert records[lid].on_hold is False
+        assert records[lid].source_status in ("Disqualified", "Not Interested", "Open")
+    db.refresh(records["SCI-CA-20261025-0421"])
+    assert records["SCI-CA-20261025-0421"].on_hold is True
+    assert records["SCI-CA-20261025-0421"].location_status == "location_review"
+
+
+def test_central_alabama_staging_approval_cannot_send_or_start_cadence(program):
+    db, org, admin, prog = (program["db"], program["org"], program["admin"], program["prog"])
+    _ca(db, org)
+    prog.require_send_approval = True
+    db.commit()
+    source = ("Lead ID," + HEAD + "SCI-CA-20261025-0450,"
+              + _r("NEWMAN", "CONTACT", "nc@example.com", "2145550199",
+                   "Eastern Gate Memorial Gardens"))
+    importer.stage(db, org, source.encode(), dry_run=False, campaign_family=C.CENTRAL_ALABAMA_KEY)
+    r = db.query(ProgramSourceRecord).filter_by(
+        organization_id=org.id, source_lead_id="SCI-CA-20261025-0450").one()
+    lead = Lead(organization_id=org.id, first_name="NEWMAN", last_name="CONTACT",
+                phone="12145550199", email="nc@example.com", status="new")
+    db.add(lead)
+    db.flush()
+    r.lead_id = lead.id
+    db.commit()
+    before = (db.query(Message).count(), db.query(EmailMessage).count(), db.query(CadenceState).count())
+    plan = send_approval.stage_central_alabama(db, prog, admin, apply=False)
+    assert plan["eligible_unique_leads"] == 1 and plan["newly_approved"] == 0
+    db.refresh(r)
+    assert r.approved_to_send_at is None
+    result = send_approval.stage_central_alabama(db, prog, admin, apply=True)
+    assert result["newly_approved"] == 1 and result["messages_sent"] == 0
+    db.refresh(r)
+    assert r.approved_to_send_at is not None
+    assert r.campaign_family == C.CENTRAL_ALABAMA_KEY
+    assert C.ensure_central_alabama(db, org.id).is_active is False
+    assert send_approval.stage_central_alabama(db, prog, admin, apply=True)["newly_approved"] == 0
+    assert (db.query(Message).count(), db.query(EmailMessage).count(), db.query(CadenceState).count()) == before
