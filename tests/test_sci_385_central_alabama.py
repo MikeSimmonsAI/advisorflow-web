@@ -317,7 +317,8 @@ def test_follow_ups_use_only_the_campaigns_own_words(program, sample_advisor):
 def test_owner_decisions_restaging_releases_status_holds_and_resolves_locations(program):
     db, org, admin = program["db"], program["org"], program["admin"]
     _ca(db, org)
-    setup.ensure_locations(db, org, admin, ["Southern Heritage Cemetery", "Southern Heritage Funeral Home"])
+    setup.ensure_locations(db, org, admin, ["Southern Heritage Cemetery", "Southern Heritage Funeral Home",
+                                                 "Oakwood Memorial Gardens"])
     generic = C.ensure_kilgroe_for_sci(db, org.id)
     assert generic.official_name == "Kilgroe Funeral Home"
     assert generic.facility_phone == "+12053383341"
