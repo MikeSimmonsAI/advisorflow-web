@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useLayoutEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { getCurrentUser, refreshCurrentUser, logout, getBranding, clearBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop, getWorkspaceLocation, setWorkspaceLocation, fetchMyContexts } from '../api/client'
 import { findSciWorkspace } from '../auth/sciDoor'
@@ -754,8 +754,10 @@ export default function Layout({ children }) {
 
   // The OLP theme is scoped to <html data-product-brand="olp"> so drawers and
   // dialogs rendered outside the layout (portals) wear it too; it is removed
-  // the moment the workspace is left or the brand is switched back.
-  useEffect(() => {
+  // the moment the workspace is left or the brand is switched back. A layout
+  // effect, so the attribute is in place before the first paint (no flash of
+  // the previous look when the workspace opens).
+  useLayoutEffect(() => {
     if (typeof document === 'undefined') return undefined
     const root = document.documentElement
     if (olpShell) {
