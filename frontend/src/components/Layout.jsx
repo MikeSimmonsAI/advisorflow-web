@@ -735,7 +735,10 @@ export default function Layout({ children }) {
     ? (branding?.brand_logo_url || null)
     : isElevated
       ? (PLATFORM_BRAND.logoUrl || null)
-      : (branding?.brand_logo_url || SHELL_BRAND.logoUrl || null)
+      : (branding?.brand_logo_url || SHELL_BRAND.logoUrl
+         // The Wholesale rail wears the brand's own logo when the brand
+         // has one set for it (BookaBoost); other brands are unchanged.
+         || (inWholesale ? SHELL_BRAND.wholesaleLogoUrl : null) || null)
 
   // Reset logo failure state when the URL changes (e.g. org switch)
   useEffect(() => { setLogoFailed(false) }, [logoUrl])

@@ -69,6 +69,8 @@ import Appointments from './pages/Appointments'
 import WorkspaceView from './pages/WorkspaceView'
 import WorkQueue from './pages/WorkQueue'
 import ProgramAccessPortal from './pages/program/ProgramAccessPortal'
+import { BookaBoostProgramAccessState } from './pages/program/BookaBoostProgramAccess'
+import { hostTheme } from './theme'
 import AutoSendQueue from './pages/AutoSendQueue'
 import Reports from './pages/Reports'
 import CampaignBuilder from './pages/CampaignBuilder'
@@ -1080,10 +1082,17 @@ function SciFrontDoor() {
  * office, so there is no header to hang a switcher on yet.
  */
 function WorkspaceSelector() {
-  const { ctx } = useAuthorizedContexts()
+  const { ctx, phase, retry } = useAuthorizedContexts()
   const navigate = useNavigate()
   if (!isAuthenticated()) return <Navigate to="/login" replace />
-  if (!ctx) return null
+  if (!ctx) {
+    // On a BookaBoost address the wait and a failed load are shown in the
+    // BookaBoost look; everywhere else this stays blank, exactly as before.
+    if (hostTheme() === 'bookaboost') {
+      return <BookaBoostProgramAccessState state={phase === 'error' ? 'error' : 'loading'} onRetry={retry} />
+    }
+    return null
+  }
   const workspaces = ctx.workspace_contexts || []
   const products = ctx.product_contexts || []
   const previews = ctx.preview_contexts || []

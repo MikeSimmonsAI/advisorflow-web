@@ -307,7 +307,63 @@ def _roofing_enabled(org) -> bool:
         return False
 
 
-def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
+def program_brand(db: Session, user: User, host_slug: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """The brand whose look this person's Program Access should wear, or None.
+
+    Decided by the server from real data, never per person:
+      * a brand domain (the request's Origin names a brand) wins when this
+        login belongs to that brand; a brand domain the login does not belong
+        to gives None;
+      * on any other address (localhost, a preview host) the login's EXPLICIT
+        brand links decide - organizations with a platform set, brand sales
+        teams, platform memberships - and only when they name exactly one brand.
+        The legacy "no platform means BookaBoost" default is NOT used here, so
+        an EvoSys operator never turns BookaBoost by accident;
+      * god and super admins get None (their launcher is unchanged).
+
+    None means "the existing look". Never raises.
+    """
+    try:
+        if getattr(user, "role", None) in ("god_admin", "super_admin"):
+            return None
+        host = (host_slug or "").strip().lower() or None
+        slug = None
+        if host:
+            slug = host if host in user_authorized_platform_slugs(user, db) else None
+        else:
+            from app.models.sales_models import BrandSalesOrg
+            pids = set()
+            org_ids = [m.scope_id for m in workspace_memberships(user, db)]
+            if getattr(user, "organization_id", None):
+                org_ids.append(user.organization_id)
+            if org_ids:
+                pids.update(r[0] for r in db.query(Organization.platform_id)
+                            .filter(Organization.id.in_(org_ids),
+                                    Organization.platform_id.isnot(None)).all())
+            bso_ids = [m.scope_id for m in platform_memberships(user, db)]
+            if bso_ids:
+                pids.update(r[0] for r in db.query(BrandSalesOrg.platform_id)
+                            .filter(BrandSalesOrg.id.in_(bso_ids)).all())
+            pids.update(r[0] for r in db.query(Membership.scope_id).filter(
+                Membership.user_id == user.id, Membership.scope_type == SCOPE_PLATFORM,
+                Membership.is_active.is_(True)).all())
+            pids.discard(None)
+            if len(pids) == 1:
+                row = db.query(Platform.slug).filter(Platform.id == next(iter(pids))).first()
+                slug = row[0] if row else None
+        if not slug:
+            return None
+        from app.services import brand_config
+        cfg = brand_config.config_for_slug(db, slug)
+        return {"slug": slug, "name": cfg.get("display_name") or slug,
+                "theme": cfg.get("theme_slug") or slug}
+    except Exception:                                    # pragma: no cover
+        _log.warning("could not resolve program brand for %s",
+                     getattr(user, "id", None), exc_info=True)
+        return None
+
+
+def authorized_contexts(db: Session, user: User, host_slug: Optional[str] = None) -> Dict[str, Any]:
     """Every context this caller may enter, and where they should land.
 
     THE SERVER BUILDS THIS. The browser renders it. A context that is not in
@@ -627,6 +683,10 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
         "back_office_destinations": back_office_destinations(db, platform),
         "workspace_count": len(workspaces),
         "default_context": default,
+        # WHICH BRAND'S LOOK the launcher wears (e.g. BookaBoost), decided
+        # here from the login's brand links - see program_brand. None keeps
+        # the existing look. Presentation only: it grants nothing.
+        "brand": program_brand(db, user, host_slug),
         # Entitlements and readiness. Not contexts, and deliberately named so.
         "demo_contexts": demo_contexts,
         "has_demo_access": bool(demo_contexts),
