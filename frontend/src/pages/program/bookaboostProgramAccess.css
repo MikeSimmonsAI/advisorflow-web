@@ -166,3 +166,6 @@ html:root .bbpa .bbpa-menu-item:focus-visible, html:root .bbpa .bbpa-button:focu
   .bbpa-card:hover, .bbpa-card:hover .bbpa-photo { transform: none; }
   .bbpa-skeleton { animation: none; }
 }
+
+/* OLP Land Partners card: show the field, not the sky. */
+.bbpa-card[data-program='land_partners'] .bbpa-photo { background-size: auto 175%; background-position: 58% 100%; }
