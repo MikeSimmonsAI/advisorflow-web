@@ -126,7 +126,13 @@ def test_a_second_lead_made_earlier_for_an_existing_family_is_superseded(program
     assert s["superseded_duplicate_leads"] == 1
     db.refresh(dup)
     rec = db.query(ProgramSourceRecord).filter_by(organization_id=org.id, source_lead_id="SCI-CA-0099").one()
-    assert rec.lead_id == old.id and dup.duplicate_of_lead_id == old.id and dup.status == "duplicate"
+    assert rec.lead_id == dup.id and dup.duplicate_of_lead_id == old.id and dup.status == "duplicate"
+    assert rec.on_hold is True
+    assert "EXCLUDED FROM CENTRAL ALABAMA" in rec.hold_reason
+    # The held new source must NEVER be attached to the old lead and freeze
+    # that family's existing campaign or active follow-up sequence.
+    assert l001.lead_id == old.id and l001.on_hold is False
+    assert old.status == "sent"
 
 
 def test_historic_statuses_do_not_hold_but_real_dnc_does(program):
