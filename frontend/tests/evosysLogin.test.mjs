@@ -55,3 +55,23 @@ test('every style is scoped to the EvoSys sign-in', () => {
   assert.ok(sels.length > 40)
   for (const s of sels) for (const part of s.split(',')) assert.match(part.trim(), /^\.evl/, `unscoped selector: ${part.trim()}`)
 })
+
+
+test('Wholesale stays first without a public Primary Focus badge', () => {
+  assert.ok(!/Primary focus/i.test(code), 'unapproved primary-focus marketing tag')
+  assert.match(code, /key: 'wholesale'[^}]*featured: true/, 'Wholesale remains visually emphasized')
+})
+
+test('Chrome autofill on email and password retains the dark field treatment', () => {
+  for (const id of ['evl-email', 'evl-password']) {
+    assert.ok(css.includes('#' + id + ':-webkit-autofill'), id + ' autofill rule missing')
+    assert.ok(css.includes('#' + id + ':-webkit-autofill:focus'), id + ' focused autofill rule missing')
+  }
+  const block = css.slice(css.lastIndexOf('/* Chrome/Edge autofill'))
+  assert.match(block, /box-shadow:\s*0 0 0 1000px #07142c inset !important/)
+  assert.match(block, /-webkit-text-fill-color:\s*#f4f8ff !important/)
+})
+
+test('the field shell matches the autofilled text area (no two-tone box)', () => {
+  assert.match(css, /\.evl \.evl-input:has\(input:-webkit-autofill\)\s*\{\s*background:\s*#07142c;/)
+})
