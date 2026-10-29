@@ -21,6 +21,9 @@ import { isWholesalePath, WholesaleSearch, WholesaleEnvironment, WholesaleUser, 
 // whose industry has one configured; null for everybody else, which is what
 // keeps this from being a global redesign. See verticals/workspaceVertical.js.
 import { verticalFor, navGroupsFor, brandLines } from '../verticals/workspaceVertical'
+import { bookaboostProductBrand, OLP } from '../brand/productBrand'
+import { olpGroups, olpHeaderFor } from '../brand/olpNav'
+import '../brand/olp-workspace.css'
 // The workspace's vocabulary cache, dropped alongside its branding cache.
 // They answer the same question and must not be allowed to disagree.
 import { clearTerminology } from '../terminology'
@@ -712,9 +715,17 @@ export default function Layout({ children }) {
   // layout root so every acceptance run can prove the authenticated workspace's
   // platform - not a hostname default - decided the brand (brand_gate.py).
   const shellResolution = shellThemeSource(branding)
+  // OLP - Overlooked Properties, powered by BookaBoost (owner decisions,
+  // Oct 29): the BookaBoost product face. `olpBrand` names the product
+  // anywhere on a BookaBoost shell; `olpShell` is the Wholesale workspace in
+  // OLP mode, which wears the scoped dark OLP theme (brand/olp-workspace.css)
+  // and the OLP rail. The build setting VITE_BOOKABOOST_PRODUCT_BRAND=bookaboost
+  // turns both off and leaves the approved BookaBoost look untouched.
+  const olpBrand = shellResolution.theme === THEMES.BOOKABOOST && bookaboostProductBrand() === 'olp'
+  const olpShell = olpBrand && inWholesale
   // The commercial product name this brand gives the Wholesale module
   // (EvoSysPro -> "EvoSys Wholesale"); the neutral module name otherwise.
-  const WHOLESALE_PRODUCT = productName(branding, 'wholesale') || 'Wholesale'
+  const WHOLESALE_PRODUCT = olpBrand ? `${OLP.short} · ${OLP.name}` : (productName(branding, 'wholesale') || 'Wholesale')
   // The acquisition engine's name for THIS workspace ("EvoSense"; null for a
   // second Wholesale tenant, which never shows another brand's name - #272).
   const WHOLESALE_ENGINE = engineName(branding)
@@ -741,14 +752,30 @@ export default function Layout({ children }) {
          // has one set for it (BookaBoost); other brands are unchanged.
          || (inWholesale ? SHELL_BRAND.wholesaleLogoUrl : null) || null)
 
+  // The OLP theme is scoped to <html data-product-brand="olp"> so drawers and
+  // dialogs rendered outside the layout (portals) wear it too; it is removed
+  // the moment the workspace is left or the brand is switched back.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined
+    const root = document.documentElement
+    if (olpShell) {
+      root.setAttribute('data-product-brand', 'olp')
+      root.setAttribute('data-olp-header', olpHeaderFor(location.pathname))
+    } else {
+      root.removeAttribute('data-product-brand'); root.removeAttribute('data-olp-header')
+    }
+    return () => { root.removeAttribute('data-product-brand'); root.removeAttribute('data-olp-header') }
+  }, [olpShell, location.pathname])
+
   // Reset logo failure state when the URL changes (e.g. org switch)
   useEffect(() => { setLogoFailed(false) }, [logoUrl])
 
   return (
-    <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}${inWholesale ? ' layout--wholesale' : ''}${inDealRoom ? ' layout--dealroom' : ''}`}
+    <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}${inWholesale ? ' layout--wholesale' : ''}${inDealRoom && !olpShell ? ' layout--dealroom' : ''}`}
          data-brand-theme={shellResolution.theme} data-brand-source={shellResolution.source}
          data-brand-platform={branding?.platform?.slug || ''} data-org-id={branding?.organization_id || ''}
-         data-product={inWholesale ? WHOLESALE_PRODUCT : undefined}>
+         data-product={inWholesale ? WHOLESALE_PRODUCT : undefined}
+         data-product-brand={olpShell ? 'olp' : undefined}>
       <button type="button" className="mobile-menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open navigation menu">
         <span /><span /><span />
       </button>
@@ -814,7 +841,8 @@ export default function Layout({ children }) {
                   style={{ height: 72, maxWidth: 180, objectFit: 'contain', borderRadius: 6, display: 'block', margin: '0 auto' }}
                   onError={() => setLogoFailed(true)}
                 />
-                {inWholesale ? <WholesaleProductLine name={WHOLESALE_PRODUCT} engine={WHOLESALE_ENGINE} /> : null}
+                {/* In OLP mode the logo already names the product. */}
+                {inWholesale && !olpShell ? <WholesaleProductLine name={WHOLESALE_PRODUCT} engine={WHOLESALE_ENGINE} /> : null}
               </span>
             )
           ) : (
@@ -1053,14 +1081,15 @@ export default function Layout({ children }) {
             )
             if (inWholesale) {
               const isWs = (group) => group.items.some((item) => isWholesalePath(item.to))
-              const wsGroups = groups.filter(isWs)
+              // OLP: the same items in three plain groups, one rail shape everywhere.
+              const wsGroups = olpShell ? olpGroups(groups.filter(isWs)) : groups.filter(isWs)
               return (
                 <>
                   {wsGroups.map((group) => {
                     const items = group.items.filter(visible)
                     if (items.length === 0) return null
                     const holdsCurrent = items.some((item) => item.end ? location.pathname === item.to : (location.pathname === item.to || location.pathname.startsWith(item.to + '/')))
-                    const foldable = inDealRoom && !sidebarCollapsed && !holdsCurrent
+                    const foldable = inDealRoom && !olpShell && !sidebarCollapsed && !holdsCurrent
                     const open = !foldable || openGroups.has(group.label)
                     const gid = 'nav-grp-' + group.label.replace(/[^a-z]+/gi, '-').toLowerCase()
                     return (
