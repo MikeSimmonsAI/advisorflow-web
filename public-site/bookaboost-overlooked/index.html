@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#101716">
+  <meta name="description" content="BookaBoost helps property professionals uncover overlooked opportunities in homes, investments, land, farms, ranches, and commercial real estate nationwide.">
+  <meta property="og:title" content="BookaBoost | Find What Others Miss">
+  <meta property="og:description" content="Overlooked property opportunities. Intelligent discovery. Real estate professionals who move things forward.">
+  <title>BookaBoost | Find What Others Miss</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://images.unsplash.com">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header" id="top">
+    <nav class="nav wrap" aria-label="Main navigation">
+      <a class="brand" href="#top" aria-label="BookaBoost home"><span class="brand-symbol" aria-hidden="true">B<span class="brand-spark">✦</span></span><span class="brand-name">BOOKA<span>BOOST</span><small>PROPERTY OPPORTUNITY PLATFORM</small></span></a>
+      <button class="mobile-toggle" type="button" aria-expanded="false" aria-controls="nav-menu" aria-label="Open navigation"><span></span><span></span><span></span></button>
+      <div class="nav-links" id="nav-menu">
+        <a href="#opportunities">Explore</a><a href="#how-it-works">How it works</a><a href="#radar">Opportunity Radar</a><a href="#professionals">For professionals</a>
+        <a href="https://app.bookaboost.live" class="mobile-login">Professional sign in</a>
+      </div>
+      <a class="nav-signin" href="https://app.bookaboost.live">Professional sign in <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-photo" role="img" aria-label="Modern residence with landscaped grounds"></div>
+      <div class="hero-shade"></div>
+      <div class="wrap hero-content">
+        <div class="eyebrow"><span class="eyebrow-line"></span> THE NEXT FRONTIER IN REAL ESTATE OPPORTUNITY</div>
+        <h1 id="hero-title">Find what<br><em>others miss.</em></h1>
+        <p class="hero-description">Overlooked homes. Untapped land. Undiscovered commercial potential. One intelligent platform built to turn opportunity into action.</p>
+        <div class="hero-actions"><a class="button button-gold" href="#opportunities">Explore opportunities <span aria-hidden="true">↗</span></a><a class="button button-glass" href="#professionals">I'm a real estate professional <span aria-hidden="true">→</span></a></div>
+        <div class="hero-bottom"><span><i class="small-dot" aria-hidden="true"></i> Built for nationwide opportunity discovery</span><span>RESIDENTIAL <b>·</b> LAND <b>·</b> INVESTMENT <b>·</b> COMMERCIAL</span></div>
+      </div>
+      <div class="hero-side-label" aria-hidden="true">LOOK BEYOND THE OBVIOUS &nbsp; — &nbsp; BOOKABOOST</div>
+    </section>
+
+    <section class="search-strip" aria-labelledby="search-title">
+      <div class="wrap search-grid">
+        <div><span class="kicker">YOUR NEXT OPPORTUNITY STARTS HERE</span><h2 id="search-title">What are you looking for?</h2></div>
+        <form id="request-search" class="search-form" novalidate>
+          <label class="field"><span>Property interest</span><select name="category" id="category" required><option value="">Select a category</option><option>Residential homes</option><option>Wholesale & investment</option><option>Land, farms & ranches</option><option>Commercial property</option></select></label>
+          <label class="field field-location"><span>Where are you looking?</span><input id="location" name="location" type="text" placeholder="City, county, state or ZIP" maxlength="100" autocomplete="address-level2" required></label>
+          <button type="submit" class="button button-gold search-submit">Request a search <span aria-hidden="true">↗</span></button>
+          <p class="form-note" id="search-note">Property searches are handled by our team while live nationwide discovery is being prepared.</p>
+        </form>
+      </div>
+    </section>
+
+    <section class="section opportunities" id="opportunities" aria-labelledby="opportunities-title">
+      <div class="wrap">
+        <div class="section-top"><div><div class="kicker gold-text">THE OVERLOOKED ADVANTAGE</div><h2 class="section-title" id="opportunities-title">Opportunity has <em>many forms.</em></h2></div><p class="section-intro">Not every valuable property is easy to find. We help you look beyond the obvious, across the markets that move you.</p></div>
+        <div class="category-grid">
+          <article class="category-card category-homes"><div class="card-photo"></div><div class="category-gradient"></div><div class="category-content"><span class="card-index">01 / RESIDENTIAL</span><h3>Hidden gems<br>&amp; new beginnings.</h3><p>Homes, overlooked listings, and properties with room for possibility.</p><a href="#request-access" data-category="Residential homes" class="category-link">Explore residential <span aria-hidden="true">↗</span></a></div></article>
+          <article class="category-card category-land"><div class="card-photo"></div><div class="category-gradient"></div><div class="category-content"><span class="card-index">02 / LAND &amp; AGRICULTURE</span><h3>Where potential<br>takes root.</h3><p>Farmland, ranches, acreage, recreational land, and development parcels.</p><a href="#request-access" data-category="Land, farms & ranches" class="category-link">Explore land &amp; farms <span aria-hidden="true">↗</span></a></div></article>
+          <article class="category-card category-invest"><div class="card-photo"></div><div class="category-gradient"></div><div class="category-content"><span class="card-index">03 / WHOLESALE &amp; INVESTMENT</span><h3>See value<br>others overlook.</h3><p>Distressed assets, underused properties, and investment possibilities.</p><a href="#request-access" data-category="Wholesale & investment" class="category-link">Explore investments <span aria-hidden="true">↗</span></a></div></article>
+          <article class="category-card category-commercial"><div class="card-photo"></div><div class="category-gradient"></div><div class="category-content"><span class="card-index">04 / COMMERCIAL</span><h3>Business<br>meets potential.</h3><p>Commercial land, retail, office, industrial, and redevelopment opportunities.</p><a href="#request-access" data-category="Commercial property" class="category-link">Explore commercial <span aria-hidden="true">↗</span></a></div></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="manifesto section" aria-labelledby="manifesto-title"><div class="wrap manifesto-grid"><div class="manifesto-symbol" aria-hidden="true">✦</div><div><div class="kicker gold-text">MORE THAN ANOTHER PROPERTY LIST</div><h2 class="section-title" id="manifesto-title">The best opportunity<br>isn't always <em>the obvious one.</em></h2><p>Some properties are hard to see. Others are hard to understand. The right information, the right questions, and the right connections can change everything.</p><p class="manifesto-quote">We're building BookaBoost to make that next move easier.</p></div></div></section>
+
+    <section class="section process" id="how-it-works" aria-labelledby="process-title"><div class="wrap"><div class="section-top"><div><div class="kicker gold-text">FROM DISCOVERY TO DECISION</div><h2 class="section-title" id="process-title">See more. <em>Move smarter.</em></h2></div><p class="section-intro">A connected process for the people who find, evaluate, and move real estate opportunities forward.</p></div><div class="process-grid"><article class="process-step"><span class="process-num">01</span><div class="process-icon" aria-hidden="true">⌕</div><h3>Discover</h3><p>Look across residential, investment, agricultural, and commercial categories—not just the usual listings.</p></article><article class="process-step"><span class="process-num">02</span><div class="process-icon" aria-hidden="true">◇</div><h3>Understand</h3><p>Bring property records, opportunity signals, and buyer criteria into a clearer picture as data becomes available.</p></article><article class="process-step"><span class="process-num">03</span><div class="process-icon" aria-hidden="true">↗</div><h3>Take action</h3><p>Connect with a professional, request a consultation, and move a promising opportunity into a real conversation.</p></article></div></div></section>
+
+    <section class="radar" id="radar" aria-labelledby="radar-title"><div class="wrap radar-grid"><div class="radar-copy"><div class="kicker gold-text">INTRODUCING THE VISION</div><h2 class="section-title" id="radar-title">Meet your<br><em>Opportunity Radar.</em></h2><p>Imagine knowing not just <em>where</em> an opportunity is—but why it's worth investigating, who it may suit, and what to do next.</p><div class="radar-points"><p><span aria-hidden="true">✦</span> Evidence-backed property signals</p><p><span aria-hidden="true">✦</span> Buyer and investment fit</p><p><span aria-hidden="true">✦</span> Guided next steps</p></div><span class="preview-pill">IN DEVELOPMENT · NOT A LIVE PROPERTY FEED</span></div><div class="radar-visual" role="img" aria-label="Conceptual interface of an opportunity insights dashboard; not live property data"><div class="mock-top"><span class="mock-wordmark">B<span>✦</span> <small>OPPORTUNITY RADAR</small></span><span class="mock-preview">CONCEPT PREVIEW</span></div><div class="mock-photo"></div><div class="mock-body"><div class="mock-label">SAMPLE OPPORTUNITY PROFILE</div><h3>See the potential.<br>Verify the details.</h3><div class="mock-bars"><span><i></i> PROPERTY SIGNALS</span><span><i></i> BUYER MATCHING</span><span><i></i> NEXT-STEP GUIDANCE</span></div><p>Illustrative product concept. No real scores or property records shown.</p></div></div></div></section>
+
+    <section class="section pros" id="professionals" aria-labelledby="pros-title"><div class="wrap pros-grid"><div><div class="kicker gold-text">BUILT FOR THE PEOPLE WHO MAKE IT HAPPEN</div><h2 class="section-title" id="pros-title">Your business deserves<br><em>a better advantage.</em></h2><p>BookaBoost is becoming a paid professional platform for real estate agents, brokers, wholesalers, land specialists, commercial teams, and investors—with intelligent tools designed around the work they actually do.</p><div class="pros-actions"><a class="button button-gold" href="mailto:support@bookaboost.live?subject=BookaBoost%20Professional%20Access%20Request">Request professional access <span aria-hidden="true">↗</span></a><a class="subtle-link" href="https://app.bookaboost.live">Already a member? Sign in <span aria-hidden="true">→</span></a></div><p class="small-disclaimer">Plans and availability vary. Pricing will be announced when services are ready; no credit card is collected on this website.</p></div><div class="pros-features"><div class="pros-feature"><span>01</span><div><h3>Opportunity discovery</h3><p>Property research and acquisition workflows tailored to your specialty.</p></div></div><div class="pros-feature"><span>02</span><div><h3>Client &amp; buyer relationships</h3><p>Organize leads, conversations, buyer criteria, and follow-up activity.</p></div></div><div class="pros-feature"><span>03</span><div><h3>Appointments &amp; deal workflows</h3><p>Make the next step clear, from first interest to a working opportunity.</p></div></div><div class="pros-feature"><span>04</span><div><h3>One connected workspace</h3><p>Shared infrastructure with permissions designed around each business and team.</p></div></div></div></div></section>
+
+    <section class="cta" id="request-access"><div class="wrap cta-inner"><div class="kicker">YOUR NEXT OPPORTUNITY IS OUT THERE</div><h2>Look closer.<br><em>Go further.</em></h2><p>Tell us which property markets you're interested in. We'll help you take the next step.</p><div class="cta-actions"><a class="button button-dark" id="contact-cta" href="mailto:support@bookaboost.live?subject=BookaBoost%20Property%20Opportunity%20Request">Request an opportunity search <span aria-hidden="true">↗</span></a><a class="button button-light-outline" href="https://app.bookaboost.live">Professional sign in <span aria-hidden="true">→</span></a></div></div></section>
+  </main>
+  <footer class="footer"><div class="wrap footer-main"><div class="footer-about"><a class="brand footer-brand" href="#top"><span class="brand-symbol" aria-hidden="true">B<span class="brand-spark">✦</span></span><span class="brand-name">BOOKA<span>BOOST</span><small>PROPERTY OPPORTUNITY PLATFORM</small></span></a><p>Find what others miss. Property discovery and professional tools, built for possibilities nationwide.</p></div><div class="footer-column"><h3>Explore</h3><a href="#opportunities">Residential</a><a href="#opportunities">Land &amp; farms</a><a href="#opportunities">Wholesale</a><a href="#opportunities">Commercial</a></div><div class="footer-column"><h3>Professionals</h3><a href="#professionals">Platform</a><a href="https://app.bookaboost.live">Sign in</a><a href="mailto:support@bookaboost.live?subject=BookaBoost%20Professional%20Inquiry">Contact us</a></div></div><div class="wrap footer-bottom"><span>© <span id="year">2026</span> BookaBoost. All rights reserved.</span><span>Property information and availability require independent verification. BookaBoost does not provide brokerage or legal advice.</span></div></footer>
+</body>
+</html>
