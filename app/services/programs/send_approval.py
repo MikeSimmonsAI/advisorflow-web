@@ -256,6 +256,135 @@ def _clean(ids: List[str]) -> List[str]:
     return list(dict.fromkeys(i for i in (ids or []) if i))
 
 
+
+def stage_central_alabama(db: Session, prog: OutreachProgram, user: User, *,
+                          apply: bool = False) -> Dict:
+    """One audited, SCI-scoped prepare action. NEVER starts, schedules or sends.
+
+    The existing /send/approve path also activates campaigns and starts
+    cadences; using that path to pre-approve the Central Alabama 293/349 would
+    begin outreach. Here the owner may stage every eligible *new* person in one
+    operation while the family remains OFF. Historical SCI people are skipped.
+    The importer's 97 source-row exclusions are never released here.
+    """
+    from collections import defaultdict
+    from app.services.programs import campaigns
+    from app.services.programs.normalize import email_key, person_key, phone_key
+    from app.services import test_records
+
+    if (prog.name or "").strip().lower() != "service corporation international":
+        raise ValueError("Central Alabama staging is available only to SCI")
+    if not prog.require_send_approval:
+        raise ValueError("SCI send-approval gate must be enabled before staging")
+    key = campaigns.CENTRAL_ALABAMA_KEY
+    fam = (campaigns.ensure_central_alabama(db, prog.organization_id) if apply else
+           db.query(CampaignFamily).filter(
+               CampaignFamily.organization_id == prog.organization_id,
+               CampaignFamily.key == key).first())
+    if fam is not None and fam.is_active:
+        raise ValueError("Central Alabama must stay OFF during staging")
+
+    prefix = "SCI-CA-20261025-%"
+    sources = (db.query(ProgramSourceRecord)
+               .filter(ProgramSourceRecord.organization_id == prog.organization_id,
+                       ProgramSourceRecord.source_lead_id.like(prefix)).all())
+    candidate_ids = {r.lead_id for r in sources if r.lead_id}
+    other_sources = (db.query(ProgramSourceRecord)
+                     .filter(ProgramSourceRecord.organization_id == prog.organization_id,
+                             ~ProgramSourceRecord.source_lead_id.like(prefix)).all())
+    def keys(first, last, phone, email):
+        p = person_key(first, last)
+        if not p:
+            return set()
+        return {(p, val) for val in (phone_key(phone), email_key(email)) if val}
+    # Compare to previous SCI source records AND historical leads without a
+    # program source. Never mistake a new row's own duplicate for an old family.
+    known = set()
+    for r in other_sources:
+        known.update(keys(r.first_name, r.last_name, r.phone, r.email))
+    org_leads = db.query(Lead).filter(Lead.organization_id == prog.organization_id).all()
+    by_id = {l.id: l for l in org_leads}
+    for l in org_leads:
+        if l.id not in candidate_ids:
+            known.update(keys(l.first_name, l.last_name, l.phone, l.email))
+
+    profiles = {p.location_id: p for p in db.query(LocationProfile).filter(
+        LocationProfile.organization_id == prog.organization_id).all()}
+    grouped = defaultdict(list)
+    for r in sources:
+        if r.lead_id is not None:
+            grouped[r.lead_id].append(r)
+    skipped = defaultdict(int)
+    accepted = []
+    source_ids = []
+    for lead_id, recs in sorted(grouped.items()):
+        lead = by_id.get(lead_id)
+        if lead is None or (lead.status or "").lower() in ("dnc", "duplicate") \
+                or not test_records.is_outreach_eligible(lead):
+            skipped["restricted_or_duplicate_lead"] += 1
+            continue
+        if any(keys(r.first_name, r.last_name, r.phone, r.email) & known for r in recs):
+            skipped["already_in_sci"] += 1
+            continue
+        if any(r.on_hold or r.needs_data_review or r.duplicate_review_reason for r in recs):
+            skipped["held_or_review"] += 1
+            continue
+        locs = {r.location_id for r in recs}
+        if len(locs) != 1 or any(
+                r.location_status != "mapped" or
+                r.location_id not in profiles or profiles[r.location_id].is_review_bucket
+                for r in recs):
+            skipped["location_review"] += 1
+            continue
+        if any(r.campaign_family not in (None, key) for r in recs):
+            skipped["other_campaign"] += 1
+            continue
+        if any(r.source_lead_id in {o.source_lead_id for o in other_sources} for r in recs):
+            skipped["ambiguous_source"] += 1
+            continue
+        if not (lead.phone or (lead.email or "").strip()):
+            skipped["no_contact_method"] += 1
+            continue
+        # No existing source from another campaign may share this lead. A held
+        # new source must never be used to freeze an original campaign lead.
+        if any(o.lead_id == lead_id for o in other_sources):
+            skipped["shared_legacy_lead"] += 1
+            continue
+        accepted.append((lead, recs))
+        source_ids.extend(r.source_lead_id for r in recs)
+
+    already = sum(1 for lead, rows in accepted if all(r.approved_to_send_at for r in rows))
+    changed = 0
+    if apply:
+        now = datetime.utcnow()
+        for lead, rows in accepted:
+            if all(r.approved_to_send_at for r in rows):
+                continue
+            for r in rows:
+                r.campaign_family = key
+                r.approved_to_send_at = r.approved_to_send_at or now
+                r.approved_to_send_by = r.approved_to_send_by or user.id
+                # NO scheduled_start_at; NO start_cadence(); NO activation.
+                if r.send_mode is None:
+                    r.send_mode = "text_email" if textable(lead) else "email_only"
+            changed += 1
+        from app.routers.audit_log_router import log_action
+        log_action(db, prog.organization_id, user.id, action="program.central_alabama_staged_approval",
+                   target_type="outreach_program", target_id=prog.id,
+                   details={"new_leads_staged": changed, "eligible": len(accepted),
+                            "eligible_source_records": len(source_ids),
+                            "source_ids": source_ids, "campaign": key,
+                            "campaign_activated": False, "messages_sent": 0})
+        db.commit()
+    return {"applied": apply, "campaign": key, "campaign_active": False,
+            "total_source_rows": len(sources), "eligible_unique_leads": len(accepted),
+            "eligible_source_rows": len(source_ids), "already_approved": already,
+            "newly_approved": changed, "skipped_lead_reasons": dict(skipped),
+            "campaign_exists": fam is not None, "messages_sent": 0,
+            "cadences_started": 0, "lead_ids": [l.id for l, _ in accepted]}
+
+
+
 def approve(db: Session, prog: OutreachProgram, user: User, lead_ids: List[str],
             mode: str = "text_email", start_at: Optional[datetime] = None,
             spacing_minutes: int = 0) -> Dict:
