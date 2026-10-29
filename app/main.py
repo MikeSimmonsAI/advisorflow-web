@@ -1930,6 +1930,16 @@ async def _program_sla_loop():
                         except Exception as exc:                 # noqa: BLE001
                             db.rollback()
                             _logger.error("stuck-visit check error: %s", exc, exc_info=True)
+                        # #385: the Central Alabama campaign exists (OFF, no copy).
+                        try:
+                            from app.services.programs import email_touches as _et_c385
+                            from app.services.programs import campaigns as _c385
+                            from datetime import timedelta as _td_c385
+                            if _et_c385.pass_due(key="campaigns385", every=_td_c385(hours=6)):   # idempotent; retries
+                                _c385.ensure_for_sci(db)
+                        except Exception as exc:                 # noqa: BLE001
+                            db.rollback()
+                            _logger.error("campaign setup error: %s", exc, exc_info=True)
                         # #378 appointment-first copy: replaces ONLY the exact
                         # pre-#378 wording (edited copy is kept). Idempotent;
                         # after the first pass it changes nothing.

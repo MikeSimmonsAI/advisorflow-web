@@ -68,13 +68,15 @@ def test_apply_stages_holds_and_promotes_only_the_clean(client, db_session, samp
     body = _post(client, h, sample_org.id, apply=True).json()
     recs = {r.source_lead_id: r for r in db_session.query(ProgramSourceRecord).filter_by(organization_id=sample_org.id)}
     assert set(recs) == {"P001", "P002", "P003", "P004", "P005"}
-    assert recs["P003"].on_hold and "SOURCE STATUS: Not Interested" in recs["P003"].hold_reason
-    assert recs["P004"].on_hold and "Disqualified" in recs["P004"].hold_reason
+    # #385: a historic Not Interested / Disqualified is shown, not held - only
+    # a real stop (DNC / do not call / deceased) holds a family.
+    assert not recs["P003"].on_hold and recs["P003"].source_status == "Not Interested"
+    assert not recs["P004"].on_hold and recs["P004"].source_status == "Disqualified"
     assert recs["P005"].on_hold and "LOCATION REVIEW" in recs["P005"].hold_reason
     assert not recs["P001"].on_hold and not recs["P002"].on_hold
-    assert body["promotion"]["created"] == 2
+    assert body["promotion"]["created"] == 4
     new = [lead for lead in db_session.query(Lead).filter_by(organization_id=sample_org.id) if lead.id not in before]
-    assert sorted(lead.first_name for lead in new) == ["Ann", "Bob"]
+    assert sorted(lead.first_name for lead in new) == ["Ann", "Bob", "Cat", "Kay"]
     assert all(lead.sms_consent is False for lead in new)          # never consents
     # A second load is idempotent: nothing new.
     again = _post(client, h, sample_org.id, apply=True).json()

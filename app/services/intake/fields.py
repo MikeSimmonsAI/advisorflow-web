@@ -256,7 +256,8 @@ _SCI_HEADER_MAP: Dict[str, tuple] = {
     compact(h): (kind, target) for hs, kind, target in (
         (("Lead ID", "LeadID", "Source Lead ID"), KIND_STANDARD, "source_record_id"),
         (("Location Friendly Name", "Location", "Location Name", "Funeral Home",
-          "Facility", "Campus"), KIND_SOURCE, "location_friendly_name"),
+          "Facility", "Campus", "Nearest/Preferred Location", "Preferred Location",
+          "Nearest Location"), KIND_SOURCE, "location_friendly_name"),
         (("Primary Campaign", "Campaign", "Campaign Name"), KIND_SOURCE, "primary_campaign"),
         # The customer's own status is SCI source data (SCI holds "Not
         # Interested" etc. itself); it is not a CRM record classification.
