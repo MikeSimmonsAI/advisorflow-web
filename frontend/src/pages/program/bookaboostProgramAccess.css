@@ -115,6 +115,9 @@ html:root .bbpa .bbpa-menu-item:focus-visible, html:root .bbpa .bbpa-button:focu
   color: #ffffff; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
 }
 .bbpa-badge--green { background: radial-gradient(circle at 35% 30%, #5aa865, var(--bb-green) 60%, #1f5428); }
+/* OLP exploration: the proposed OLP icon on a dark disc with a gold ring */
+.bbpa-badge--olp { width: 58px; height: 58px; background: #0a0f1a; border: 1.5px solid var(--bb-gold-hair); }
+.bbpa-badge--olp img { display: block; width: 40px; height: auto; }
 .bbpa-title { font-family: var(--bb-serif); font-weight: 500; font-size: 30px; line-height: 1.12; color: #ffffff; }
 .bbpa-org { font-size: 13px; color: var(--bb-gold-light); }
 .bbpa-line { font-size: 14.5px; line-height: 1.5; color: #e7e1d6; }

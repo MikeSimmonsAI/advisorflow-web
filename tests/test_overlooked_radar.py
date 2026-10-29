@@ -336,3 +336,18 @@ def test_sort_and_whole_set_summary(db_session):
     assert s == {"total": 3, "with_evidence": 1, "evidence_counted_over": 3, "scored": 2, "average_score": 70}
     with pytest.raises(ValueError):
         RADAR.search(db, a.id, sort="price")
+
+
+def test_card_facts_show_rooms_only_when_the_record_holds_them(db_session):
+    """The OLP card shows bedrooms / bathrooms only from the record itself."""
+    from decimal import Decimal
+    db = db_session
+    a = org(db, "Rooms")
+    p = property_record(db, a, "Rooms 1", "residential", state="GA")
+    q = property_record(db, a, "Rooms 2", "residential", state="GA")
+    p.bedrooms, p.bathrooms = Decimal("3"), Decimal("2.5")
+    db.commit()
+    items = {i["id"]: i for i in RADAR.search(db, a.id, market="all")["items"]}
+    assert items[p.id]["facts"]["bedrooms"] == 3 and items[p.id]["facts"]["bathrooms"] == 2.5
+    assert items[q.id]["facts"]["bedrooms"] is None and items[q.id]["facts"]["bathrooms"] is None
+    json.dumps(items[p.id]["facts"])        # plain JSON numbers, never Decimal

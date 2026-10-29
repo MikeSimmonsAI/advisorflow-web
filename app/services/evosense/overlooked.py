@@ -128,7 +128,16 @@ def _facts(p: EvoSenseProperty) -> Dict[str, Any]:
         "occupancy": p.occupancy if p.occupancy and p.occupancy != "unknown" else None,
         "occupancy_source": p.occupancy_source if p.occupancy and p.occupancy != "unknown" else None,
         "ownership_years": p.ownership_years,
+        # Shown on the OLP card only when the record holds them (never estimated).
+        "bedrooms": _num(p.bedrooms), "bathrooms": _num(p.bathrooms),
     }
+
+
+def _num(v):
+    if v is None:
+        return None
+    f = float(v)
+    return int(f) if f.is_integer() else f
 
 
 # ── Buyer matching (READ-ONLY) ──────────────────────────────────────────────
