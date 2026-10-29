@@ -90,13 +90,13 @@ S_NEEDS_YOU = "needs_you"
 S_PROMOTED = "promoted"
 S_CLOSED_OUT = "closed_out"
 BUCKETS = [
-    (S_NEW, "New"), (S_HIGH, "High opportunity"),
+    (S_NEW, "New"), (S_HIGH, "High investment evidence"),
     (S_NEEDS_ENRICHMENT, "Needs enrichment"), (S_BUDGET_BLOCKED, "Budget blocked"),
     (S_WAITING_DATA, "Waiting for data"), (S_CONTACT_FOUND, "Contact found"),
     (S_READY, "Ready for outreach"), (S_OUTREACH, "Outreach active"),
     (S_RESPONDED, "Responded"), (S_NEEDS_YOU, "Needs you"), (S_NURTURE, "Nurture"),
     (S_SUPPRESSED, "Suppressed"), (S_NEEDS_REVIEW, "Needs review"),
-    (S_PROMOTED, "Promoted"), (S_LOW, "Below threshold"), (S_CLOSED_OUT, "Closed out"),
+    (S_PROMOTED, "Promoted"), (S_LOW, "Below investment threshold"), (S_CLOSED_OUT, "Closed out"),
 ]
 
 # ── Seller response outcomes ────────────────────────────────────────────────

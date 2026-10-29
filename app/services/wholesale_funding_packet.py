@@ -32,7 +32,7 @@ from app.models.wholesale_models import (ACTOR_USER, WholesaleComp, WholesaleFil
                                          WholesaleFundingPartner, WholesaleFundingSubmission,
                                          WholesaleProperty, WholesaleSellerProfile)
 from app.services import wholesale_service as svc
-from app.services.wholesale_funding import DISCLAIMER, PRODUCT_LABELS
+from app.services.wholesale_funding import DISCLAIMER, PRODUCT_LABELS, disclaimer_for
 
 NOT_ON_FILE = "Not on file"
 
@@ -168,7 +168,7 @@ def build(db: Session, org_id: str, deal_id: str, *, partner_id: Optional[str] =
         "property": property_block, "condition": condition, "repairs": repairs_block,
         "valuation": valuation, "comps": comps_block, "terms": terms, "title": title,
         "attachments": attachments, "request": request,
-        "disclaimer": DISCLAIMER,
+        "disclaimer": disclaimer_for(db, deal.organization_id),
         "data_note": ("Every figure is what this workspace holds, with its basis. "
                       "'%s' means the system has no value; nothing was estimated to fill it." % NOT_ON_FILE),
     }

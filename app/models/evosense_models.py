@@ -307,6 +307,10 @@ class EvoSenseProperty(Base):
     next_best_action = Column(String, nullable=True)
     workflow_state = Column(String, nullable=True)
     sale_deadline = Column(Date, nullable=True)
+    # THE work-priority policy (work_priority.py), cached for sorting / filtering
+    work_priority = Column(String, nullable=True)      # CRITICAL|REVIEW_URGENT|HIGH|NORMAL|REVIEW|CLOSED
+    work_priority_rank = Column(Integer, nullable=True)
+    auction_level = Column(String, nullable=True)      # CRITICAL|UPCOMING|URGENT_VERIFY|...
     opportunity_detail = Column(Text, nullable=True)
     opportunity_hash = Column(String, nullable=True)
     opportunity_at = Column(DateTime, nullable=True)

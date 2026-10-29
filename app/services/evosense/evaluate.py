@@ -103,7 +103,10 @@ def rescore_outdated(db, org_id: Optional[str] = None, *, limit: int = RESCORE_B
         on_calendar = exists().where(EvoSenseAuctionEvent.property_id == EvoSenseProperty.id)
         props = (db.query(EvoSenseProperty)
                  .filter(EvoSenseProperty.organization_id == o, EvoSenseProperty.archived_at.is_(None), ~up_to_date)
-                 .order_by(on_calendar.desc(), EvoSenseProperty.opportunity_score.desc().nullslast(),
+                 .order_by(on_calendar.desc(),
+                           # A posted tax sale also gets refreshed before routine properties.
+                           EvoSenseProperty.sale_deadline.asc().nullslast(),
+                           EvoSenseProperty.opportunity_score.desc().nullslast(),
                            EvoSenseProperty.id)
                  .limit(limit - done).all())
         for p in props:
@@ -163,6 +166,17 @@ def status_for(db, prop, strategy) -> Tuple[str, str, Optional[str], Optional[st
                     "The number reached the wrong person. It is marked wrong-party and no strategy will use it again.", \
                     "WRONG PARTY"
             return C.S_CLOSED_OUT, "Nothing", (eng.last_outcome or "stopped").replace("_", " ").lower(), None
+
+    # THE FORECLOSURE WORK-PRIORITY POLICY (work_priority.py): an imminent
+    # verified sale, or an imminent notice a person must verify, is never
+    # filed as "low opportunity" because its investment evidence score is low.
+    wpl = getattr(prop, "work_priority", None)
+    if wpl in ("CRITICAL", "REVIEW_URGENT"):
+        from app.services.evosense import work_priority as WP
+        when = prop.sale_deadline.isoformat() if getattr(prop, "sale_deadline", None) else "soon"
+        return C.S_NEEDS_YOU, ("Act now - sale %s" % when) if wpl == "CRITICAL" else ("Verify the notice - sale %s" % when), \
+            "Work priority %s - set by the auction deadline, not by the investment evidence score." % (
+                WP.WORK_LABELS[wpl]), None
 
     score = prop.opportunity_score
     threshold = getattr(strategy, "min_opportunity_score", 60) if strategy else 60

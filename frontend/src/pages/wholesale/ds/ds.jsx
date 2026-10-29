@@ -38,7 +38,8 @@ export const WORLDS = {
     tabs: [
       ['/wholesale', 'Deal Operations', true],
       ['/wholesale/properties', 'Properties'],
-      ['/wholesale/buyers', 'Cash Buyers'],
+      ['/wholesale/buyers', 'Buyers'],
+      ['/wholesale/deal-room', 'Deal Room'],
       ['/wholesale/funding', 'Funding Partners'],
       ['/wholesale/exceptions', 'Exceptions'],
       ['/wholesale/closing', 'Contracts & Closing'],
@@ -142,17 +143,19 @@ export function Ring({ kind = 'opportunity', value, size, title }) {
  * dispositions). Image is a real photo of the property or "Property image
  * unavailable" - never a stand-in house.
  */
-export function PropCard({ onOpen, href, src, address, place, score, scoreKind = 'opportunity', status, facts, money: amounts, foot }) {
+export function PropCard({ onOpen, href, src, address, place, score, scoreKind = 'opportunity', scoreLabel, status, lead, facts, money: amounts, foot }) {
   const body = (
     <>
       <div className="evo-pcard__media">
         <PropertyThumb src={src} address={address} size="card" />
-        {score !== undefined ? <span className="evo-pcard__ring"><Ring kind={scoreKind} value={score} /></span> : null}
+        {score !== undefined ? <span className="evo-pcard__ring" title={scoreLabel || ''}><Ring kind={scoreKind} value={score} />
+          {scoreLabel ? <span className="evo-pcard__ringlabel">{scoreLabel}</span> : null}</span> : null}
         {status ? <span className="evo-pcard__status">{status}</span> : null}
       </div>
       <div className="evo-pcard__body">
         <div className="evo-pcard__addr">{address}</div>
         {place ? <div className="evo-pcard__place">{place}</div> : null}
+        {lead ? <div className="evo-pcard__lead">{lead}</div> : null}
         {facts && facts.length ? (
           <dl className="evo-pcard__facts">
             {facts.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v ?? '—'}</dd></div>)}
@@ -322,13 +325,13 @@ export function ScoreWhy({ score }) {
 // ── status: one vocabulary for the whole product ────────────────────────────
 const STATUS = {
   // EvoSense buckets
-  needs_you: ['needs', 'Needs You'], new: ['quiet', 'New'], high_opportunity: ['info', 'High Opportunity'],
+  needs_you: ['needs', 'Needs You'], new: ['quiet', 'New'], high_opportunity: ['info', 'High Investment Evidence'],
   needs_enrichment: ['attention', 'Needs Approval'], budget_blocked: ['attention', 'Budget Blocked'],
   waiting_for_data: ['attention', 'Waiting for Data'], contact_found: ['info', 'Contact Found'],
   ready_for_outreach: ['good', 'Ready for Outreach'], outreach_active: ['active', 'Outreach Active'],
   responded: ['good', 'Seller Replied'], nurture: ['violet', 'Nurture'], suppressed: ['bad', 'Suppressed'],
   needs_review: ['attention', 'Needs Review'], promoted: ['good', 'In Deal Operations'],
-  low_opportunity: ['quiet', 'Below Threshold'], closed_out: ['quiet', 'Closed Out'],
+  low_opportunity: ['quiet', 'Below Investment Threshold'], closed_out: ['quiet', 'Closed Out'],
   // Wholesale deal stages
   new_property: ['quiet', 'New Property'], owner_identified: ['info', 'Owner Identified'],
   enrichment_needed: ['attention', 'Enrichment Needed'], seller_engaged: ['good', 'Seller Engaged'],

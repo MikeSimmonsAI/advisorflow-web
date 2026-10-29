@@ -52,8 +52,12 @@ def test_industrial_by_category_or_subtype_and_multifamily_by_units():
     assert any(f["dimension"] == "units" and f["matched"] for f in r["factors"])
 
 
-def test_old_house_types_still_match_and_unknown_is_a_miss_not_a_disqualification():
+def test_old_house_types_still_match_and_unknown_is_missing_not_a_miss_or_disqualification():
+    """buyer_match/v2 (owner rule 2026-10-27): an unknown property fact is neither
+    a match nor a miss - it leaves the score and is listed as missing information."""
     assert not M.score_buy_box(DEAL, prop(property_type="single_family"), box(property_types=["single_family"]))["disqualified"]
     assert not M.score_buy_box(DEAL, prop(property_type="single_family"), box(property_types=["residential"]))["disqualified"]
     r = M.score_buy_box(DEAL, prop(), box(property_types=["agricultural"]))
-    assert not r["disqualified"] and any(f["dimension"] == "property_type" and f["matched"] is False for f in r["factors"])
+    assert not r["disqualified"] and any(f["dimension"] == "property_type" and f["matched"] is None
+                                         and f.get("unknown") for f in r["factors"])
+    assert "The property has no type on file." in r["missing"] and r["version"] == "buyer_match/v2"

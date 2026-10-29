@@ -46,6 +46,7 @@ from app.services.evosense import providers as PV
 from app.services.evosense import signals as SIG
 from app.services.evosense import strategy as ST
 from app.services.evosense import views as V
+from app.services import env_name_privacy as _ENV
 
 FEATURE = "wholesale_real_estate"
 from app.services.wholesale_team import require_hunt_rights  # noqa: E402
@@ -121,7 +122,7 @@ def command_center(hours: int = Query(24, ge=1, le=24 * 30), db: Session = Depen
 
 @router.get("/inbox")
 def inbox(bucket: Optional[str] = None, strategy_id: Optional[str] = None, q: Optional[str] = None,
-          signal: Optional[str] = None, sort: str = "opportunity",
+          signal: Optional[str] = None, sort: str = "work",
           limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
           county: Optional[str] = None, min_score: Optional[int] = Query(None, ge=0, le=100),
           source: Optional[str] = None, archived: bool = False,
@@ -135,11 +136,11 @@ def inbox(bucket: Optional[str] = None, strategy_id: Optional[str] = None, q: Op
           min_owned_years: Optional[str] = None, max_owned_years: Optional[str] = None,
           max_score: Optional[str] = None,
           category: Optional[str] = None, economics: Optional[str] = None, confidence: Optional[str] = None,
-          ptype: Optional[str] = None, psubtype: Optional[str] = None,
+          ptype: Optional[str] = None, psubtype: Optional[str] = None, priority: Optional[str] = None,
           db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     org_id = _read_org(db, user)
     filters = {"city": city, "zip": zip, "property_type": property_type, "occupancy": occupancy,
-               "ptype": ptype, "psubtype": psubtype,
+               "ptype": ptype, "psubtype": psubtype, "priority": priority,
                "owner": owner, "street": street, "parcel": parcel, "missing": missing,
                "min_value": min_value, "max_value": max_value,
                "min_year_built": min_year_built, "max_year_built": max_year_built,
@@ -1037,12 +1038,19 @@ class PermissionLinkIn(BaseModel):
     owner_name: Optional[str] = None
 
 
-def _link_base(request) -> str:
-    """Where the owner's page lives: the app the caller is using (its own
-    domain, e.g. app.evosyspro.live, which serves /permission/:token), else
-    this server's own page."""
+def _link_base(request, db=None, org_id=None) -> str:
+    """Where the owner's page lives: the workspace's own brand address first
+    (a BookaBoost workspace -> its BookaBoost app), then PERMISSION_LINK_BASE_URL,
+    then the app the caller is using (its own domain, e.g. app.evosyspro.live,
+    which serves /permission/:token), else this server's own page. EvoSys
+    workspaces have no brand address here, so they resolve exactly as before."""
     import os
     import re as _re
+    if db is not None and org_id:
+        from app.services.brand_config import org_app_base_url
+        own = org_app_base_url(db, org_id)
+        if own:
+            return own
     base = (os.environ.get("PERMISSION_LINK_BASE_URL") or "").strip().rstrip("/")
     if base:
         return base
@@ -1084,7 +1092,7 @@ def create_permission_link(property_id: str, payload: PermissionLinkIn, request:
                                       message="person:%s|owner" % payload.owner_name if payload.owner_name else None)
             CT.apply_result(db, owner, res, PV.PROVIDERS["manual"])
             contact_added = True
-    url = "%s/permission/%s" % (_link_base(request), made["token"])
+    url = "%s/permission/%s" % (_link_base(request, db, org_id), made["token"])
     C.log_event(db, org_id, "permission.link_created", property_id=prop.id, user=user, actor_type=C.ACTOR_USER,
                 is_test=prop.is_test, summary="Permission link created for the number ending %s"
                 % PM.last4(link.phone_normalized))
@@ -1968,7 +1976,7 @@ def providers(db: Session = Depends(get_db), user: User = Depends(require_tenant
     org_id = _read_org(db, user)
     out = PV.status_report(db, org_id)
     db.commit()
-    return out
+    return _ENV.for_viewer(user, out)
 
 
 class EvaluationIn(BaseModel):
@@ -2002,7 +2010,7 @@ def run_provider_evaluation(payload: EvaluationIn, db: Session = Depends(get_db)
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc))
     db.commit()
-    return PE.payload(ev)
+    return _ENV.for_viewer(user, PE.payload(ev))
 
 
 class ExecuteIn(BaseModel):
@@ -2030,7 +2038,7 @@ def execute_provider_evaluation(evaluation_id: str, payload: ExecuteIn, db: Sess
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc))
     db.commit()
-    return PE.payload(ev)
+    return _ENV.for_viewer(user, PE.payload(ev))
 
 
 class GroundTruthIn(BaseModel):
@@ -2133,9 +2141,11 @@ def provider_evaluation_setup(mode: str = "contact", db: Session = Depends(get_d
     if mode not in (PE.MODE_CONTACT, PE.MODE_COMPS):
         raise HTTPException(status_code=422, detail="Mode must be contact or comps.")
     org_id = _read_org(db, user)
-    return {"sample": PE.proposed_sample(db, org_id, mode), "providers": PE.candidates(db, org_id),
-            "confirmation_format": PE.PAID_CONFIRMATION + " <n>",
-            "referee_max_per_lookup": PE.REFEREE_MAX_PER_LOOKUP}
+    # Server setting names stay with platform admins (#272).
+    return _ENV.for_viewer(user, {
+        "sample": PE.proposed_sample(db, org_id, mode), "providers": PE.candidates(db, org_id),
+        "confirmation_format": PE.PAID_CONFIRMATION + " <n>",
+        "referee_max_per_lookup": PE.REFEREE_MAX_PER_LOOKUP})
 
 
 @router.post("/provider-evaluations/{evaluation_id}/purge")
@@ -2155,7 +2165,7 @@ def purge_provider_evaluation(evaluation_id: str, db: Session = Depends(get_db),
         raise HTTPException(status_code=404, detail="Evaluation not found")
     PE.purge(db, ev, user=user)
     db.commit()
-    return PE.payload(ev)
+    return _ENV.for_viewer(user, PE.payload(ev))
 
 
 @router.get("/provider-evaluations")
@@ -2167,7 +2177,7 @@ def list_provider_evaluations(db: Session = Depends(get_db),
     rows = (db.query(EvoSenseProviderEvaluation)
             .filter(EvoSenseProviderEvaluation.organization_id == org_id)
             .order_by(EvoSenseProviderEvaluation.created_at.desc()).limit(50).all())
-    return {"items": [PE.payload(r, with_records=False) for r in rows]}
+    return _ENV.for_viewer(user, {"items": [PE.payload(r, with_records=False) for r in rows]})
 
 
 @router.get("/provider-evaluations/{evaluation_id}")
@@ -2189,7 +2199,7 @@ def get_provider_evaluation(evaluation_id: str, db: Session = Depends(get_db),
         out["readiness"] = PE.plan_readiness(db, ev)
     if not _admin_here and out.get("report"):
         out["report"] = dict(out["report"], examples=[])
-    return out
+    return _ENV.for_viewer(user, out)
 
 
 @router.get("/capabilities")
@@ -2237,9 +2247,20 @@ def verify_source(payload: VerifyIn, db: Session = Depends(get_db),
     return {**res, "registry": PV.source_registry(db, org_id)}
 
 
+# Keys of the stored upload record that name WHO uploaded it. The copy is
+# shared by every workspace; which platform person uploaded it is not a
+# tenant's business (#272). Tenants still see when, the data date and size.
+_UPLOADER_KEYS = ("by", "by_name", "by_email", "uploaded_by", "user_id", "email")
+
+
 def _upload_status(db, user, source_key: str):
-    return {**PV.upload_status(source_key),
-            "can_upload": getattr(user, "role", None) in PV.PLATFORM_ADMIN_ROLES,
+    is_platform_admin = getattr(user, "role", None) in PV.PLATFORM_ADMIN_ROLES
+    status = PV.upload_status(source_key)
+    cur = status.get("current")
+    if not is_platform_admin and isinstance(cur, dict):
+        status = {**status, "current": {k: v for k, v in cur.items() if k not in _UPLOADER_KEYS}}
+    return {**status,
+            "can_upload": is_platform_admin,
             "access": PV.platform_access(db, source_key)}
 
 
@@ -2338,7 +2359,7 @@ def patch_provider(payload: ProviderPatch, db: Session = Depends(get_db),
     C.log_event(db, org_id, "provider.configured", user=user, actor_type=C.ACTOR_USER,
                 summary="%s: enabled=%s priority=%s" % (key, cfg.enabled, cfg.priority))
     db.commit()
-    return PV.status_report(db, org_id)
+    return _ENV.for_viewer(user, PV.status_report(db, org_id))
 
 
 @router.get("/controls")
@@ -2680,8 +2701,8 @@ def foreclosures_properties(month: Optional[str] = None, view: str = "all", page
                             type: Optional[str] = None, attention: Optional[str] = None,
                             carried: Optional[str] = None, deals: Optional[str] = None,
                             ptype: Optional[str] = None, psubtype: Optional[str] = None,
-                            quick: Optional[str] = None,
-                            sort: str = "opportunity", db: Session = Depends(get_db),
+                            quick: Optional[str] = None, priority: Optional[str] = None,
+                            sort: str = "work", db: Session = Depends(get_db),
                             user: User = Depends(require_tenant_or_observer)):
     """The month's working list - the existing ranking, filtered and paged on the server."""
     from app.services.evosense import foreclosure_cycles as FCC
@@ -2695,13 +2716,14 @@ def foreclosures_properties(month: Optional[str] = None, view: str = "all", page
                               "contact": contact, "acquisition": acquisition, "financial": financial,
                               "min_score": min_score, "type": type, "attention": attention, "carried": carried,
                               "deals": deals, "ptype": ptype, "psubtype": psubtype, "quick": quick,
+                              "priority": priority,
                               "sort": sort})
     per_page = max(1, min(int(per_page or 50), 200))
     page = max(1, int(page or 1))
     total = len(rs)
     keep = ("id", "street_address", "city", "zip_code", "county", "owner", "foreclosure", "contacts", "score",
             "rank", "next_action", "auction", "contact_state", "acquisition", "financial", "needs_attention",
-            "equity", "tax", "property_class", "measures")
+            "equity", "tax", "property_class", "measures", "work")
     items = []
     for r in rs[(page - 1) * per_page: page * per_page]:
         x = {k: r.get(k) for k in keep}

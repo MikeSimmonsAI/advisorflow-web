@@ -14,11 +14,13 @@ import { createContext, useContext, useEffect, useRef, useState, useCallback } f
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { api, logout, fetchMyContexts, getCurrentUser } from '../../api/client'
 import GodReturnBar from '../../components/GodReturnBar'
+import { brandMarkUrl } from '../../theme'
 import SalesStyles from './SalesStyles'
 import SimpleStyles from './SimpleStyles'
 import { Icon } from './SimpleParts'
 import { followUpList, otherWorkspaceCount } from './simpleSales'
 import { initials, ErrorBar } from './parts'
+import { setSalesBrand } from './salesBrand'
 
 const SalesCtx = createContext(null)
 
@@ -126,6 +128,7 @@ export default function SalesShell({ title, subtitle, actions, children }) {
     setError(null)
     try {
       const me = await api.get('/sales/me')
+      setSalesBrand(me)
       setCtx(me)
       await loadCounts(me?.brand_sales_org?.timezone)
     } catch (e) {
@@ -171,6 +174,8 @@ export default function SalesShell({ title, subtitle, actions, children }) {
 
   const brand = ctx?.brand_sales_org?.name || 'Sales'
   const platform = ctx?.platform?.name || ''
+  // The brand's own mark when it has one (BookaBoost); otherwise the letter.
+  const markUrl = brandMarkUrl(ctx?.platform?.slug)
   const person = ctx?.user?.full_name || ''
 
   // One source of truth for "is this person running a team", read from the
@@ -193,7 +198,9 @@ export default function SalesShell({ title, subtitle, actions, children }) {
       <div className="sw-app">
         <aside className="sw-sidebar" aria-label="Sales Workspace">
           <div className="sw-brand">
-            <div className="sw-brandmark">{(platform || brand).charAt(0).toUpperCase()}</div>
+            {markUrl
+              ? <img className="sw-brandmark sw-brandmark--img" src={markUrl} alt="" width="30" height="30" />
+              : <div className="sw-brandmark">{(platform || brand).charAt(0).toUpperCase()}</div>}
             <div>
               <b>{platform || brand}</b>
               <small>Sales Workspace</small>

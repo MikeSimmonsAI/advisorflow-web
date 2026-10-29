@@ -1216,6 +1216,16 @@ from app.routers.wholesale_data_layer_router import router as wholesale_data_lay
 app.include_router(wholesale_data_layer_router)   # /wholesale/data-sources, /wholesale/deals/{id}/provenance
 from app.routers.wholesale_buyer_network_router import router as wholesale_buyer_network_router  # noqa: E402
 app.include_router(wholesale_buyer_network_router)   # /wholesale/buyers/imports, /wholesale/buyers/network
+from app.routers.wholesale_buyer_engine_router import router as wholesale_buyer_engine_router  # noqa: E402
+app.include_router(wholesale_buyer_engine_router)   # /wholesale/buyer-intel/* - Buyer Intelligence Engine (#413)
+from app.routers.deal_room_investor_router import public_router as deal_room_public_router  # noqa: E402
+from app.routers.deal_room_investor_router import router as deal_room_investor_router  # noqa: E402
+from app.routers.deal_room_staff_router import router as deal_room_staff_router  # noqa: E402
+app.include_router(deal_room_public_router)     # /investor/invite/*, /investor/auth/login - Deal Room (#415)
+app.include_router(deal_room_investor_router)   # /investor/* - investors only (fenced in deps)
+app.include_router(deal_room_staff_router)      # /wholesale/deal-room/* - staff
+from app.routers.wholesale_intel_router import router as wholesale_intel_router  # noqa: E402
+app.include_router(wholesale_intel_router)       # /wholesale/intel/* - verification, underwriting, report (#415)
 from app.routers.wholesale_canvass_router import router as wholesale_canvass_router  # noqa: E402
 app.include_router(wholesale_canvass_router)   # /wholesale/canvass - door-knocking routes
 from app.routers.wholesale_team_router import router as wholesale_team_router  # noqa: E402
@@ -1258,6 +1268,10 @@ app.include_router(sci_intake_router)
 app.include_router(program_router)
 app.include_router(program_public_router)  # public - the token IS the authorization
 app.include_router(program_god_router)
+# God-granted demo previews (deal_preview_grants): /god/preview-grants (God only)
+# and /program-access/previews/{grant_id} (the grantee, re-checked every open).
+from app.routers.preview_grant_router import router as preview_grant_router  # noqa: E402
+app.include_router(preview_grant_router)
 # Resend delivery / bounce / complaint events (signed; inert until RESEND_WEBHOOK_SECRET is set).
 from app.routers.email_events_router import router as email_events_router, unsubscribe_router as email_unsubscribe_router
 app.include_router(email_events_router)

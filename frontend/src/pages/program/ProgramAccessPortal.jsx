@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import '../../design/evTokens.css'
 import './ProgramAccessPortal.css'
-import { programCards } from './programAccessModel'
+import { programCards, isBookaBoostBrand } from './programAccessModel'
+import BookaBoostProgramAccess from './BookaBoostProgramAccess'
 import WorkspaceCard from '../../design/WorkspaceCard'
 import PlatformArt from '../../design/art/PlatformArt'
 import { getCurrentUser, logout } from '../../api/client'
@@ -39,7 +40,17 @@ const POINTS = [
     icon: <path d="M12 3l8 3v6c0 4.5-3.3 7.6-8 9-4.7-1.4-8-4.5-8-9V6zM8.5 12l2.5 2.5 4.5-5" /> },
 ]
 
-export default function ProgramAccessPortal({ contexts, onChoose, user: userProp, onSignOut }) {
+/**
+ * Which launcher look to wear is the SERVER's answer (/auth/my-contexts
+ * `brand`). A BookaBoost login gets the BookaBoost launcher; everyone else
+ * gets the EvoSys launcher below, unchanged. Same cards either way.
+ */
+export default function ProgramAccessPortal(props) {
+  if (isBookaBoostBrand(props.contexts)) return <BookaBoostProgramAccess {...props} />
+  return <EvoSysProgramAccess {...props} />
+}
+
+function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) {
   const { visible, others, previews } = programCards(contexts)
   const [view, setView] = useState(readView)
   const user = userProp !== undefined ? userProp : getCurrentUser()
@@ -154,7 +165,7 @@ export default function ProgramAccessPortal({ contexts, onChoose, user: userProp
               <div className={'pa-grid pa-grid--' + view + ' pa-grid--n' + Math.min(previews.length, 5)} role="list" aria-label="Previews">
                 {previews.map(item => (
                   <div role="listitem" key={item.organization_id}>
-                    <WorkspaceCard item={item} onOpen={onChoose} layout={view} actionLabel="Open preview" href={item.url} />
+                    <WorkspaceCard item={item} onOpen={onChoose} layout={view} actionLabel="Open preview" href={item.href || item.url} />
                   </div>
                 ))}
               </div>

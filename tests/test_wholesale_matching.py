@@ -88,10 +88,12 @@ def test_a_property_outside_the_stated_geography_is_disqualified_with_a_reason()
 
 
 def test_unknown_geography_is_not_treated_as_outside_it():
-    """Missing is missing. Disqualifying on an absent county is a wrong answer."""
+    """Missing is missing. Disqualifying on an absent county is a wrong answer -
+    and (buyer_match/v2) so is counting it as a miss: it is listed as missing."""
     result = score_buy_box(deal(), prop(county=None), box(counties=["dallas"]))
     assert result["disqualified"] is False
-    assert dim(result, "geography")["matched"] is False
+    assert dim(result, "geography")["matched"] is None and dim(result, "geography")["unknown"]
+    assert result["missing"] and result["points_available"] == 0
 
 
 # ── Price ───────────────────────────────────────────────────────────────────

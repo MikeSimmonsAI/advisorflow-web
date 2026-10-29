@@ -74,6 +74,8 @@ CONTENT_TYPES = {
     "application/pdf": ".pdf",
     "application/msword": ".doc",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    # Deal Room (#415): investors send rent rolls and proof-of-funds statements as spreadsheets.
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
 }
 IMAGE_TYPES = tuple(k for k in CONTENT_TYPES if k.startswith("image/"))
 
@@ -171,8 +173,8 @@ def _sniff(data: bytes, declared: str) -> str:
     if data[:2] == b"PK":
         # A .docx is a zip. So is a lot else, so the DECLARED type decides
         # between them and anything not on the list is refused below.
-        if declared == ("application/vnd.openxmlformats-officedocument"
-                        ".wordprocessingml.document"):
+        if declared in ("application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"):
             return declared
         return "application/zip"
     return "application/octet-stream"

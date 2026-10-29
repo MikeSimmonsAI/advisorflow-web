@@ -11,6 +11,11 @@ last deed date. Grouping them by owner gives a list of local investors:
                  (a deed date - the record states no price, and Texas does not
                  publish one, so "bought" means "took title", nothing more)
 
+Since the Buyer Intelligence Engine (#413) the scan also reads commercial,
+industrial and land parcels (state codes C, D, E, F), and keeps each qualifying
+owner's RECENT deeds one by one - account, address, deed date, kind - so a
+buyer's purchase history is a list of public records, not just a count.
+
 Nothing here is a guess: every number is a count of rows in the county file,
 and the list says which file and when. It does NOT find phone numbers or
 emails (the roll has none) - an imported investor starts with a mailing
@@ -91,6 +96,33 @@ def excluded(name: str) -> bool:
         return False
 
 
+# The state property-type code -> the kind of parcel an investor holds. A, B and
+# C1 are what the finder always read; C2+, D, E and F were added for land,
+# commercial and industrial investors. Minerals, utilities, personal property
+# and exempt accounts are never read.
+KIND_SEGMENT = {"house": "single_family", "multifamily": "multifamily", "lot": "land", "land": "land",
+                "commercial": "commercial", "industrial": "industrial"}
+
+
+def kind_for(code: str) -> Optional[str]:
+    c = (code or "").strip().upper()
+    if not c:
+        return None
+    if c.startswith("A"):
+        return "house"
+    if c.startswith("B"):
+        return "multifamily"
+    if c.startswith("C1"):
+        return "lot"
+    if c[0] in ("C", "D", "E"):
+        return "land"
+    if c.startswith("F2"):
+        return "industrial"
+    if c.startswith("F"):
+        return "commercial"
+    return None
+
+
 def _date(v: str) -> Optional[datetime]:
     v = (v or "").strip()[:10]
     for fmt in ("%m/%d/%Y", "%Y-%m-%d"):
@@ -139,16 +171,13 @@ def _dallas_rows(zf, residential: Optional[Dict[int, str]]) -> Iterator[Row]:
 
 
 def _dallas_residential(zf) -> Dict[int, str]:
-    """hash(account) -> 'house' | 'multifamily' | 'lot' from the state
-    property-type (SPTD) code: A = single-family, B = multifamily,
-    C1 = vacant residential lot."""
+    """hash(account) -> parcel kind from the state property-type (SPTD) code
+    (see `kind_for`)."""
     from app.services.evosense.sources.dallas import _csv_rows
     out: Dict[int, str] = {}
     for header, vals in _csv_rows(zf, "ACCOUNT_APPRL_YEAR.CSV"):
         row = dict(zip(header, vals))
-        code = (row.get("SPTD_CODE") or "").strip().upper()
-        kind = "house" if code.startswith("A") else "multifamily" if code.startswith("B") \
-            else "lot" if code.startswith("C1") else None
+        kind = kind_for(row.get("SPTD_CODE") or "")
         if kind:
             out[hash((row.get("ACCOUNT_NUM") or "").strip())] = kind
     return out
@@ -168,9 +197,7 @@ def _tarrant_rows(zf) -> Iterator[Row]:
         if len(vals) < len(header):
             continue
         row = dict(zip(header, vals))
-        code = (row.get("State_Use_Code") or "").strip().upper()
-        kind = "house" if code.startswith("A") else "multifamily" if code.startswith("B") \
-            else "lot" if code.startswith("C1") else None
+        kind = kind_for(row.get("State_Use_Code") or "")
         if not kind:
             continue
         owner = (row.get("Owner_Name") or "").strip()
@@ -198,6 +225,9 @@ def _open(county: str):
 
 
 # ── the scan ───────────────────────────────────────────────────────────────
+
+MAX_DEEDS_KEPT = 40      # recent deeds kept per owner (most recent first)
+
 
 def scan(rows_factory, *, county: str, min_props: int = 3, max_props: int = 60,
          recent_months: int = 24, limit: int = 2000, today: Optional[datetime] = None) -> Dict[str, Any]:
@@ -228,7 +258,7 @@ def scan(rows_factory, *, county: str, min_props: int = 3, max_props: int = 60,
                 stats["owners_excluded"] += 1
                 continue
             a = agg[k] = {"name": owner.strip(), "kinds": Counter(), "zips": Counter(), "cities": Counter(),
-                          "mail": Counter(), "recent": 0, "last": None, "samples": []}
+                          "mail": Counter(), "recent": 0, "last": None, "samples": [], "deeds": []}
         a["kinds"][kind] += 1
         if zip5:
             a["zips"][zip5] += 1
@@ -239,6 +269,7 @@ def scan(rows_factory, *, county: str, min_props: int = 3, max_props: int = 60,
         if deed:
             if deed >= since:
                 a["recent"] += 1
+                a["deeds"].append((deed, acct, situs, city, zip5, kind))
             if a["last"] is None or deed > a["last"]:
                 a["last"] = deed
         if situs and len(a["samples"]) < 4:
@@ -259,6 +290,12 @@ def scan(rows_factory, *, county: str, min_props: int = 3, max_props: int = 60,
             "zips": [z for z, _ in a["zips"].most_common(8)],
             "cities": [c for c, _ in a["cities"].most_common(5)],
             "samples": a["samples"],
+            "acquisitions": [{"account": acct, "street": st, "city": c, "zip": z, "kind": kd,
+                              "deed_date": d.strftime("%Y-%m-%d")}
+                             for d, acct, st, c, z, kd in sorted(a["deeds"], key=lambda x: x[0],
+                                                                 reverse=True)[:MAX_DEEDS_KEPT]],
+            "commercial": a["kinds"]["commercial"], "industrial": a["kinds"]["industrial"],
+            "land": a["kinds"]["land"],
         })
     # Local, active operators first: a Texas mailing address, then the most
     # recent purchases, then the most held. A portfolio bought entirely in the
@@ -269,6 +306,7 @@ def scan(rows_factory, *, county: str, min_props: int = 3, max_props: int = 60,
                             -x["bought_recently"], -x["properties"], x["name"]))
     stats["qualifying"] = len(out)
     return {"county": county, "generated_at": today.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "format": 2,
             "criteria": {"min_props": min_props, "max_props": max_props, "recent_months": recent_months},
             "stats": dict(stats), "buyers": out[:limit]}
 

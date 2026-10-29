@@ -307,7 +307,63 @@ def _roofing_enabled(org) -> bool:
         return False
 
 
-def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
+def program_brand(db: Session, user: User, host_slug: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """The brand whose look this person's Program Access should wear, or None.
+
+    Decided by the server from real data, never per person:
+      * a brand domain (the request's Origin names a brand) wins when this
+        login belongs to that brand; a brand domain the login does not belong
+        to gives None;
+      * on any other address (localhost, a preview host) the login's EXPLICIT
+        brand links decide - organizations with a platform set, brand sales
+        teams, platform memberships - and only when they name exactly one brand.
+        The legacy "no platform means BookaBoost" default is NOT used here, so
+        an EvoSys operator never turns BookaBoost by accident;
+      * god and super admins get None (their launcher is unchanged).
+
+    None means "the existing look". Never raises.
+    """
+    try:
+        if getattr(user, "role", None) in ("god_admin", "super_admin"):
+            return None
+        host = (host_slug or "").strip().lower() or None
+        slug = None
+        if host:
+            slug = host if host in user_authorized_platform_slugs(user, db) else None
+        else:
+            from app.models.sales_models import BrandSalesOrg
+            pids = set()
+            org_ids = [m.scope_id for m in workspace_memberships(user, db)]
+            if getattr(user, "organization_id", None):
+                org_ids.append(user.organization_id)
+            if org_ids:
+                pids.update(r[0] for r in db.query(Organization.platform_id)
+                            .filter(Organization.id.in_(org_ids),
+                                    Organization.platform_id.isnot(None)).all())
+            bso_ids = [m.scope_id for m in platform_memberships(user, db)]
+            if bso_ids:
+                pids.update(r[0] for r in db.query(BrandSalesOrg.platform_id)
+                            .filter(BrandSalesOrg.id.in_(bso_ids)).all())
+            pids.update(r[0] for r in db.query(Membership.scope_id).filter(
+                Membership.user_id == user.id, Membership.scope_type == SCOPE_PLATFORM,
+                Membership.is_active.is_(True)).all())
+            pids.discard(None)
+            if len(pids) == 1:
+                row = db.query(Platform.slug).filter(Platform.id == next(iter(pids))).first()
+                slug = row[0] if row else None
+        if not slug:
+            return None
+        from app.services import brand_config
+        cfg = brand_config.config_for_slug(db, slug)
+        return {"slug": slug, "name": cfg.get("display_name") or slug,
+                "theme": cfg.get("theme_slug") or slug}
+    except Exception:                                    # pragma: no cover
+        _log.warning("could not resolve program brand for %s",
+                     getattr(user, "id", None), exc_info=True)
+        return None
+
+
+def authorized_contexts(db: Session, user: User, host_slug: Optional[str] = None) -> Dict[str, Any]:
     """Every context this caller may enter, and where they should land.
 
     THE SERVER BUILDS THIS. The browser renders it. A context that is not in
@@ -618,8 +674,19 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
         # The launcher's Back Office card: the established entry, only when the
         # server confirms a back office (never derived in the browser).
         "back_office_path": (platform[0].get("path") or "/sales") if platform else None,
+        # ONE BACK OFFICE PER BRAND (#272). Someone on more than one brand's
+        # sales team gets one destination per brand, each naming its brand, so
+        # they choose which Back Office to open. Entering one sends that brand
+        # with every /sales request and the server narrows to it - only within
+        # brands this person already sells for. Empty for anyone with no sales
+        # membership; `back_office_path` above is unchanged.
+        "back_office_destinations": back_office_destinations(db, platform),
         "workspace_count": len(workspaces),
         "default_context": default,
+        # WHICH BRAND'S LOOK the launcher wears (e.g. BookaBoost), decided
+        # here from the login's brand links - see program_brand. None keeps
+        # the existing look. Presentation only: it grants nothing.
+        "brand": program_brand(db, user, host_slug),
         # Entitlements and readiness. Not contexts, and deliberately named so.
         "demo_contexts": demo_contexts,
         "has_demo_access": bool(demo_contexts),
@@ -629,8 +696,24 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
         # opened where the businesses are - clearly labelled, never a tenant,
         # never a grant. A separate key, never in `contexts`, for the same
         # reason as demo_contexts above.
-        "preview_contexts": preview_contexts(db, user),
+        "preview_contexts": _with_granted_previews(db, user, preview_contexts(db, user)),
     }
+
+
+def _with_granted_previews(db: Session, user: User, own: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Add God-granted previews (deal_preview_grants) after the brand's own.
+
+    A granted entry carries the grant id and a signed-in path only - NO token
+    and NO public demo address. It is never a context, a workspace, a sales
+    seat or a platform-login right. Never raises."""
+    try:
+        from app.services import preview_grants
+        held = {p.get("opportunity_id") for p in own}
+        return own + preview_grants.launcher_entries(db, user, skip_opportunity_ids=held)
+    except Exception:                                    # pragma: no cover
+        _log.warning("could not resolve granted previews for %s",
+                     getattr(user, "id", None), exc_info=True)
+        return own
 
 
 # Stages before a deal is won. A deal that is won/onboarding/live is a customer
@@ -712,6 +795,31 @@ def preview_contexts(db: Session, user: User) -> List[Dict[str, Any]]:
         _log.warning("could not resolve launcher previews for %s",
                      getattr(user, "id", None), exc_info=True)
         return []
+    return out
+
+
+def back_office_destinations(db: Session, platform_contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """One Back Office destination per brand sales team in `platform_contexts`
+    (the caller's own active sales memberships), carrying the brand."""
+    from app.models.sales_models import BrandSalesOrg
+    ids = [c.get("brand_sales_org_id") for c in platform_contexts if c.get("brand_sales_org_id")]
+    if not ids:
+        return []
+    orgs = {o.id: o for o in db.query(BrandSalesOrg).filter(BrandSalesOrg.id.in_(ids)).all()}
+    plats = {p.id: p for p in db.query(Platform).filter(
+        Platform.id.in_([o.platform_id for o in orgs.values()])).all()} if orgs else {}
+    out, seen = [], set()
+    for c in platform_contexts:
+        o = orgs.get(c.get("brand_sales_org_id"))
+        if o is None or o.id in seen or o.is_active is False:
+            continue
+        seen.add(o.id)
+        p = plats.get(o.platform_id)
+        out.append({"type": "back_office", "brand_sales_org_id": o.id, "label": o.name,
+                    "platform_id": o.platform_id, "platform_name": getattr(p, "name", None),
+                    "platform_slug": getattr(p, "slug", None), "role": c.get("role"),
+                    "path": c.get("path") or "/sales"})
+    out.sort(key=lambda d: (str(d.get("platform_name") or ""), str(d.get("label") or "")))
     return out
 
 

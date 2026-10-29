@@ -8,6 +8,7 @@
  */
 import { getBranding } from '../../api/client'
 import { engineName } from '../../theme'
+import { neutralEngineText } from './engineText'
 
 export function engine() {
   return engineName(getBranding())
@@ -15,17 +16,5 @@ export function engine() {
 
 export function ev(text) {
   if (typeof text !== 'string' || engine()) return text
-  return text
-    .replace(/EvoSense Acquisition Command/g, 'Acquisition Command')
-    .replace(/EvoSense · /g, '')
-    .replace(/ · EvoSense/g, '')
-    .replace(/Let EvoSense /g, 'Let the engine ')
-    .replace(/let EvoSense /g, 'let the engine ')
-    .replace(/Tell EvoSense /g, 'Tell the engine ')
-    .replace(/tells EvoSense /g, 'tells the engine ')
-    .replace(/should EvoSense /g, 'should the engine ')
-    .replace(/may EvoSense /g, 'may the engine ')
-    .replace(/Why EvoSense /g, 'Why the engine ')
-    .replace(/EvoSys Field/g, 'the field app')
-    .replace(/\bEvoSense\b/g, 'Acquisition')
+  return neutralEngineText(text)
 }

@@ -216,6 +216,11 @@ export const BRAND_CONFIG = {
     supportEmail: 'support@bookaboost.live',
     accentColor: '#c9973d',
     websiteUrl: 'https://bookaboost.live',
+    // The real BookaBoost logo (recovered from the marketing page). Read only
+    // by the Wholesale rail (dark, so the white-wordmark file) and the Back
+    // Office brand mark; nothing else changes when these are set.
+    markUrl: '/brands/bookaboost-mark.svg',
+    wholesaleLogoUrl: '/brands/bookaboost-logo.svg',
   },
   [THEMES.EVOSYSPRO]: {
     displayName: 'EvoSys Pro',
@@ -337,4 +342,10 @@ export function resolveBrand(theme) {
     tagline:      cached.tagline      || boot.tagline || null,
     source:       cached.brand ? 'database' : 'bootstrap',
   }
+}
+
+/** The brand's square mark for a platform slug, or null (EvoSys and others
+ *  keep their letter mark). */
+export function brandMarkUrl(slug) {
+  return BRAND_CONFIG[String(slug || '').toLowerCase()]?.markUrl || null
 }

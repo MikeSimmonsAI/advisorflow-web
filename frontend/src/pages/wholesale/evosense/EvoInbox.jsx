@@ -21,6 +21,7 @@ import {
 import '../ds/evo-pages.css'
 import './evo-actions.css'
 import { ev } from '../engine'
+import { WorkCell, WORK_OPTIONS } from './Measures'
 
 const PAGE = 50
 // The order an operator scans the buckets in: what needs them first.
@@ -126,7 +127,8 @@ export default function EvoInbox() {
   const bucket = params.get('bucket') || ''
   const strategy = params.get('strategy') || ''
   const signal = params.get('signal') || ''
-  const sort = params.get('sort') || 'priority'
+  const sort = params.get('sort') || 'work'
+  const prio = params.get('priority') || ''
   const offset = Number(params.get('offset') || 0)
   // Top 10 / 25 / 100 are views of the SAME ranking, not separate lists
   const top = params.get('top') || ''
@@ -159,12 +161,13 @@ export default function EvoInbox() {
       if (county) p.set('county', county)
       if (source) p.set('source', source)
       if (minScore) p.set('min_score', minScore)
+      if (prio) p.set('priority', prio)
       if (archived) p.set('archived', 'true')
       if (params.get('q')) p.set('q', params.get('q'))
       EXTRA.forEach(([k]) => { if (params.get(k)) p.set(k, params.get(k)) })
       setData(await api.get('/wholesale/evosense/inbox?' + p.toString()))
     } catch (e) { setError(errText(e)) } finally { setLoading(false) }
-  }, [bucket, strategy, signal, sort, offset, params, county, source, minScore, archived, pageSize, top, category, econ, conf])
+  }, [bucket, strategy, signal, sort, offset, params, county, source, minScore, archived, pageSize, top, category, econ, conf, prio])
   useEffect(() => { load() }, [load])
 
   function set(k, v) {
@@ -287,6 +290,12 @@ export default function EvoInbox() {
               <option value="insufficient">Insufficient evidence</option>
             </select>
           </label>
+          <label><span className="evo-sr">Work priority</span>
+            <select className="evo-select" value={prio} onChange={(e) => set('priority', e.target.value)} data-testid="inbox-priority">
+              <option value="">Any work priority</option>
+              {WORK_OPTIONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </select>
+          </label>
           <label><span className="evo-sr">Show</span>
             <select className="evo-select" value={top} onChange={(e) => set('top', e.target.value)} data-testid="inbox-top">
               <option value="">All (paged)</option>
@@ -297,17 +306,21 @@ export default function EvoInbox() {
           </label>
           <label><span className="evo-sr">Sort</span>
             <select className="evo-select" value={sort} onChange={(e) => set('sort', e.target.value)}>
-              <option value="priority">Overall priority</option>
-              <option value="urgency">Most urgent</option>
+              <option value="work">Work priority — auction deadline first</option>
+              <option value="deadline">Auction date</option>
+              <option value="opportunity">Investment evidence score</option>
+              <option value="confidence">Data confidence</option>
+              <option value="county">County</option>
+              <option value="property_category">Property type</option>
+              <option value="contact">Contact readiness</option>
+              <option value="priority">Evidence blend (older)</option>
+              <option value="urgency">Most urgent (blend)</option>
               <option value="spread">Largest supported spread</option>
               <option value="confidence">Strongest evidence</option>
               <option value="engagement">Seller engagement</option>
-              <option value="deadline">Soonest sale date</option>
               <option value="next_due">Next follow-up due</option>
               <option value="last_activity">Latest activity</option>
-              <option value="opportunity">Highest seller opportunity</option>
               <option value="intent">Highest seller intent</option>
-              <option value="contact">Best contact</option>
               <option value="newest">Newest</option>
               <option value="value_low">Lowest tax value</option>
               <option value="value_high">Highest tax value</option>
@@ -341,11 +354,11 @@ export default function EvoInbox() {
                 <caption className="evo-sr">Discovered properties</caption>
                 <thead>
                   <tr>
-                    {sort === 'priority' ? <th scope="col" className="is-num">#</th> : null}
+                    {sort === 'work' ? <th scope="col" className="is-num">#</th> : null}
                     <th scope="col">Property</th>
-                    <th scope="col" className="is-num" title="Documented blend of seller opportunity, urgency, economics and engagement - not a probability">Priority</th>
-                    <th scope="col" className="is-num">Opportunity</th>
-                    <th scope="col">Urgency</th>
+                    <th scope="col" title="Auction deadline first - set by the foreclosure work-priority policy, never by the investment score">Work priority</th>
+                    <th scope="col" className="is-num" title="Distress and evidence points - not the auction priority and not a profit estimate">Investment evidence score</th>
+                    <th scope="col">Deal potential</th>
                     <th scope="col">Economics</th>
                     <th scope="col" className="is-num">Contact</th>
                     <th scope="col" className="is-num">Intent</th>
@@ -358,7 +371,7 @@ export default function EvoInbox() {
                   {data.items.map((p, idx) => (
                     <tr key={p.id} className={`is-link${p.status === 'needs_you' ? ' is-attention' : ''}`}
                         onClick={() => navigate(`/wholesale/evosense/property/${p.id}`)}>
-                      {sort === 'priority' ? <td className="is-num" data-label="Rank">{(top ? 0 : offset) + idx + 1}</td> : null}
+                      {sort === 'work' ? <td className="is-num" data-label="Rank">{(top ? 0 : offset) + idx + 1}</td> : null}
                       <td className="is-lead" data-label="">
                         <div className="evo-prop">
                           <PropertyThumb address={p.address} />
@@ -388,20 +401,17 @@ export default function EvoInbox() {
                           </div>
                         </div>
                       </td>
-                      <td className="is-num" data-label="Priority" title={p.opportunity?.priority_why || ''}>
-                        {p.opportunity?.priority != null ? <b>{p.opportunity.priority}</b> : <span className="evo-muted">—</span>}
+                      <td data-label="Work priority"><WorkCell w={p.work} /></td>
+                      <td className="is-num" data-label="Investment evidence score"><Ring kind="opportunity" value={p.opportunity_score} />
                         {p.opportunity?.confidence ? (
                           <span className="evo-small evo-muted" style={{ display: 'block' }}>{p.opportunity.confidence} evidence</span>
                         ) : null}
                       </td>
-                      <td className="is-num" data-label="Opportunity"><Ring kind="opportunity" value={p.opportunity_score} /></td>
-                      <td data-label="Urgency">
-                        {p.opportunity && p.opportunity.urgency ? (
-                          <span className="evo-small">
-                            <b>{p.opportunity.urgency_label}</b>
-                            {p.opportunity.deadline ? <span className="evo-muted" style={{ display: 'block' }}>sale {p.opportunity.deadline}</span> : null}
-                          </span>
-                        ) : <span className="evo-muted evo-small">none known</span>}
+                      <td data-label="Deal potential">
+                        <span className="evo-small">{p.opportunity?.measures?.deal_potential?.label || '—'}</span>
+                        {p.opportunity?.measures?.data_confidence ? (
+                          <span className="evo-small evo-muted" style={{ display: 'block' }}>Data confidence {p.opportunity.measures.data_confidence.label}</span>
+                        ) : null}
                       </td>
                       <td data-label="Economics" title={(p.opportunity?.economics_needs || []).join(' · ')}>
                         {p.opportunity?.economics_status === 'supportable' || p.opportunity?.economics_status === 'partial'
@@ -435,7 +445,7 @@ export default function EvoInbox() {
               </table>
             </div>
             {top ? (
-              <div className="evo-pager"><span>Top {data.items.length} of {data.total} by {sort === 'priority' ? 'overall priority' : 'this sort'}</span></div>
+              <div className="evo-pager"><span>Top {data.items.length} of {data.total} by {sort === 'work' ? 'work priority (auction deadline first)' : 'this sort'}</span></div>
             ) : (
             <div className="evo-pager">
               <span>{offset + 1}–{offset + data.items.length} of {data.total}</span>

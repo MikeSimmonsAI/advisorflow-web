@@ -105,9 +105,21 @@ export function programCards(ctx) {
   // platform console (God Mode has its own home).
   if (ctx?.has_back_office && ctx.back_office_path && ctx.back_office_path !== '/god') {
     const p = PROGRAMS.back_office
-    cards.push({ type: 'back_office', organization_id: 'back-office', path: ctx.back_office_path,
-                 program: 'back_office', variant: p.variant, symbol: p.symbol, rank: p.rank, kind: p.kind, facts: p.facts,
-                 display: 'Back Office', summary: p.summary, orgLabel: null })
+    // ONE CARD PER BRAND (#272) for someone on more than one brand's sales
+    // team, each naming its brand and carrying it, so the Back Office opens on
+    // the brand they chose. One brand: the same single card as always.
+    const dests = ctx.back_office_destinations || []
+    const many = dests.length > 1
+    for (const d of (many ? dests : [dests[0] || null])) {
+      cards.push({ type: 'back_office', organization_id: many ? 'back-office:' + d.brand_sales_org_id : 'back-office',
+                   path: (d && d.path) || ctx.back_office_path,
+                   // Only when there is a choice to carry: a one-brand Back Office
+                   // opens exactly as it always has.
+                   platform_id: many ? d.platform_id : undefined, platform_name: many ? d.platform_name : undefined,
+                   brand_sales_org_id: many ? d.brand_sales_org_id : undefined,
+                   program: 'back_office', variant: p.variant, symbol: p.symbol, rank: p.rank, kind: p.kind, facts: p.facts,
+                   display: 'Back Office', summary: p.summary, orgLabel: many ? (d.platform_name || d.label || null) : null })
+    }
   }
   for (const ex of ctx?.executive_contexts || []) {
     const p = PROGRAMS.executive
@@ -142,16 +154,36 @@ export function previewCards(ctx) {
   const seen = new Set()
   const out = []
   for (const p of ctx?.preview_contexts || []) {
+    // A GOD-GRANTED PREVIEW (deal_preview_grants): one person may open one
+    // deal's existing demo. The server sends only the grant id, the title, the
+    // label and a signed-in path - never the demo's link - and re-checks the
+    // grant on every open.
+    if (p?.grant_id && p.path) {
+      if (seen.has('grant:' + p.grant_id)) continue
+      seen.add('grant:' + p.grant_id)
+      out.push({ ...p, organization_id: 'grant:' + p.grant_id, program: 'preview', variant: 'preview',
+                 symbol: '◇', rank: 20, kind: String(p.label || 'Authorized preview').toUpperCase(),
+                 display: p.title || 'Preview', orgLabel: null, href: p.path,
+                 summary: 'A demo you have been given permission to view. Not a live workspace.',
+                 facts: [p.label || 'Authorized preview'] })
+      continue
+    }
     if (!p?.url || !p.opportunity_id || seen.has(p.opportunity_id)) continue
     seen.add(p.opportunity_id)
     const display = previewName(p)
     const facts = [p.stage_label, p.proposal_sent ? 'Proposal sent' : null,
                    p.demo_slot === 'platform' ? 'Platform demo' : 'Website concept'].filter(Boolean)
-    out.push({ ...p, organization_id: 'preview:' + p.opportunity_id, program: 'preview', variant: 'preview',
+    out.push({ ...p, organization_id: 'preview:' + p.opportunity_id, program: 'preview', variant: 'preview', href: p.url,
                symbol: '◇', rank: 20, kind: 'PREVIEW · PROSPECT DEMO',
                display, orgLabel: p.contact_name && display !== p.company_name ? p.contact_name : null,
                summary: 'The demo built for this prospect. Not a live workspace: no customer data, not a customer yet.',
                facts })
   }
   return out.sort((a, b) => String(a.display).localeCompare(String(b.display)))
+}
+
+/** The server says this login's Program Access wears the BookaBoost look
+ *  (/auth/my-contexts `brand`). Presentation only - it changes no card. */
+export function isBookaBoostBrand(ctx) {
+  return String(ctx?.brand?.theme || '').toLowerCase() === 'bookaboost'
 }

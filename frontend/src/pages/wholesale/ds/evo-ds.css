@@ -697,7 +697,13 @@ div.evo-pcard:hover { transform: none; }
 .evo-pcard__media { position: relative; }
 .evo-pcard__media .evo-thumb--card { height: 160px; }
 .evo-pcard__ring { position: absolute; left: 14px; top: 14px; }
-.evo-pcard__status { position: absolute; right: 12px; top: 12px; }
+.evo-pcard__status { position: absolute; right: 12px; top: 12px; max-width: calc(100% - 90px); }
+.evo-pcard__ring { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.evo-pcard__ringlabel { font-size: 9.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #fff;
+  background: rgba(15, 23, 42, .72); border-radius: 4px; padding: 1px 5px; white-space: nowrap; }
+.evo-pcard__lead { margin: 8px 0 2px; padding: 8px 10px; border-radius: 8px; background: var(--evo-surface-2, #f6f7fb);
+  border: 1px solid var(--evo-line, #e5e7eb); display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.evo-pcard__lead b { color: var(--evo-navy); }
 .evo-pcard__body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
 .evo-pcard__addr { font: 700 16px/1.25 var(--evo-font); color: var(--evo-navy); }
 .evo-pcard__place { font-size: 13px; color: var(--evo-text-tertiary); }

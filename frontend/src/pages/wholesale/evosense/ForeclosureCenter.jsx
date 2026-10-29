@@ -19,7 +19,7 @@ import { Alert, Empty, EvoApp, Metric, Metrics, PageHead, Panel, Ring, Search, S
 import '../ds/evo-pages.css'
 import { ContactBatchPanel } from './Acquire'
 import { CATEGORY_LABEL, PropertyTypeSelect, TypeLabel } from './ptypes'
-import { MeasureTags } from './Measures'
+import { MeasureTags, WorkCell, WORK_OPTIONS } from './Measures'
 import './evo-actions.css'
 
 const KEY = 'evo_fcc_month'
@@ -33,11 +33,12 @@ const TABS = [
 ]
 const VIEWS = [{ key: 'top10', label: 'Top 10' }, { key: 'top25', label: 'Top 25' }, { key: 'top100', label: 'Top 100' },
   { key: 'all', label: 'All' }]
-const SORTS = [['opportunity', 'Highest opportunity'], ['urgency', 'Auction urgency'], ['potential', 'Deal potential'],
+const SORTS = [['work', 'Work priority — auction deadline first'], ['urgency', 'Auction urgency'], ['investment', 'Investment evidence score'],
+  ['county', 'County'], ['property_type', 'Property type'], ['opportunity', 'Evidence blend (older)'], ['potential', 'Deal potential'],
   ['confidence', 'Data confidence'], ['next_action', 'Next required action'], ['auction_date', 'Auction date'],
   ['urgent', 'Most urgent (blend)'], ['recently_verified', 'Most recently verified'], ['contact_ready', 'Contact ready first'],
   ['underwritten', 'Financially underwritten first']]
-const QUICK = [['urgent_auctions', 'Urgent auctions'], ['high_potential', 'High-potential deals'],
+const QUICK = [['critical', 'Critical — act now'], ['urgent_auctions', 'Urgent auctions'], ['high_potential', 'High-potential deals'],
   ['needs_financial', 'Needs financial research'], ['needs_owner', 'Needs owner verification'],
   ['notice_conflicts', 'Notice conflicts'], ['contact_ready', 'Contact ready']]
 const TONE = { notice_verified: 'danger', claimed: 'estimate', not_found: 'estimate', conflict: 'danger',
@@ -137,7 +138,8 @@ const COLS = {
   notice: ['notice', 'Notice', (r) => <StatusTag a={r.auction} />],
   owner: ['owner', 'Owner', (r) => r.owner?.status === 'VERIFIED' ? <Tag kind="live">Verified</Tag>
     : r.owner?.status === 'NO OWNER' ? <Tag kind="danger">Owner missing</Tag> : <Tag kind="estimate">Verify owner</Tag>],
-  score: ['score', 'Opportunity', (r) => <Ring kind="opportunity" value={r.score} />],
+  score: ['score', 'Investment evidence score', (r) => <Ring kind="opportunity" value={r.score} />],
+  priority: ['priority', 'Work priority', (r) => <WorkCell w={r.work || r.measures?.row} />],
   measures: ['measures', 'Urgency · potential · confidence', (r) => <MeasureTags m={r.measures} compact />],
   contact: ['contact', 'Contact', (r) => r.contact_state.label],
   money: ['money', 'Financial', (r) => r.financial.label],
@@ -224,7 +226,7 @@ export default function ForeclosureCenter() {
   const [busy, setBusy] = useState(false)
   const [preview, setPreview] = useState(null)
   const [view, setView] = useState('top25')
-  const [sort, setSort] = useState('opportunity')
+  const [sort, setSort] = useState('work')
   const [county, setCounty] = useState('')
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState({})
@@ -437,6 +439,11 @@ export default function ForeclosureCenter() {
                   <option value="judicial">Judicial</option>
                   <option value="tax">Tax foreclosure</option>
                 </select>
+                <select className="evo-select" value={filter.priority || ''} aria-label="Work priority"
+                        onChange={(e) => { setFilter({ ...filter, priority: e.target.value }); setPage(1) }}>
+                  <option value="">Any work priority</option>
+                  {WORK_OPTIONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                </select>
                 <select className="evo-select" value={filter.status || ''} aria-label="Notice status"
                         onChange={(e) => { setFilter({ ...filter, status: e.target.value }); setPage(1) }}>
                   <option value="">Any notice status</option>
@@ -456,13 +463,13 @@ export default function ForeclosureCenter() {
                 <>
                   <p className="evo-small evo-muted" style={{ padding: '0 16px' }}>{list.total} properties</p>
                   <PropertyTable navigate={navigate} items={items}
-                    columns={tab === 'contact' ? [COLS.owner, COLS.contact, COLS.stage, COLS.next]
-                      : tab === 'financial' ? [COLS.score, COLS.money, ['needs', 'Missing evidence', (r) => (r.financial.needs || []).join(' · ') || '—'], COLS.stage]
+                    columns={tab === 'contact' ? [COLS.priority, COLS.owner, COLS.contact, COLS.stage]
+                      : tab === 'financial' ? [COLS.priority, COLS.score, COLS.money, ['needs', 'Missing evidence', (r) => (r.financial.needs || []).join(' · ') || '—'], COLS.stage]
                         : tab === 'auction' ? [COLS.date, COLS.notice, ['docs', 'Notices on record', (r) => (r.auction.documents || []).map((d) => (
                           <span key={d.signal_id} className="evo-prop__sub" style={{ display: 'block' }}>
                             {d.url ? <a href={d.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{d.document}</a> : d.document}
                             {d.sale_date ? ` · sale ${d.sale_date}` : ''}{d.claim ? ' · list claim' : ''}</span>))]]
-                          : [COLS.sale, COLS.measures, COLS.score, COLS.owner, COLS.work, COLS.next]}
+                          : [COLS.priority, COLS.sale, COLS.measures, COLS.score, COLS.owner, COLS.work]}
                     extra={tab === 'auction' && data.can_manage ? (r) => <RecordOutcome r={r} month={data.month} onDone={() => { load(); loadList() }} /> : null} />
                   {list.total > list.per_page ? (
                     <div className="evo-fcc-pager">

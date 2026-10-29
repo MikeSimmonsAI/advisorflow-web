@@ -57,6 +57,10 @@ WHOLESALE_ALLOWED_PREFIXES = (
     "/esign",
     "/health",
     "/demo/environment",
+    # A God-granted preview of one deal's demo (deal_preview_grants). The
+    # route re-checks the grant for the caller on every open; the grant row is
+    # the whole authorization, so the Wholesale lock has nothing to add.
+    "/program-access/previews/",
 )
 
 
@@ -149,12 +153,17 @@ def experience_for(db: Session, user, org, is_program: bool, named_wholesale: Op
     #    own org, or an org explicitly listed as a Wholesale workspace).
     if is_program:
         return "sci"
-    if named_wholesale is None:
-        named_wholesale = _named_wholesale_seat(db, user)
-    if named_wholesale and is_wholesale_host(org, user):
-        return "wholesale"
-    if _admin_of_second_tenant(db, user, org):
-        return "wholesale"
+    if is_wholesale_host(org, user):
+        if (getattr(org, "slug", "") or "") == WHOLESALE_HOST_SLUG:
+            # EvoSys's own Wholesale: the platform (legacy) named seat, as before.
+            if named_wholesale is None:
+                named_wholesale = _named_wholesale_seat(db, user)
+            if named_wholesale:
+                return "wholesale"
+        elif _second_tenant_access(db, user, org):
+            # A second tenant (#272): its admins, or a seat on ITS OWN team.
+            # An EvoSys (legacy) seat does not open it.
+            return "wholesale"
     # 2. Programs a capability can open - only where identity allows.
     if roofing_identity(org):
         return "roofing"
@@ -181,9 +190,10 @@ def locked_experience(db: Session, user, request: Optional[Request]) -> Optional
     if user is None or getattr(user, "role", None) in INTERNAL_ROLES:
         return None
     named = _named_wholesale_seat(db, user)
-    # Cheap gate first: only a named seat, or someone who is an admin of SOME
-    # workspace, can be locked - everyone else stops here with one query.
-    if not named and not _admin_anywhere(db, user):
+    # Cheap gate first: only a named seat, a second-tenant team seat, or an
+    # admin of a Wholesale-workspace org can be locked - everyone else stops
+    # here after at most three indexed lookups.
+    if not named and not _tenant_seat_anywhere(db, user) and not _admin_anywhere(db, user):
         return None
     from app.models.models import Organization
     from app.services import lead_scope
@@ -191,9 +201,29 @@ def locked_experience(db: Session, user, request: Optional[Request]) -> Optional
     if not org_id:
         return None
     org = db.query(Organization).filter(Organization.id == org_id).first()
-    if named and is_wholesale_host(org, user):
-        return WHOLESALE
-    return WHOLESALE if _admin_of_second_tenant(db, user, org) else None
+    if not is_wholesale_host(org, user):
+        return None
+    if (getattr(org, "slug", "") or "") == WHOLESALE_HOST_SLUG:
+        return WHOLESALE if named else None
+    return WHOLESALE if _second_tenant_access(db, user, org) else None
+
+
+def _tenant_seat_anywhere(db: Session, user) -> bool:
+    """An active seat on SOME second-tenant workspace's own team (#272)."""
+    from app.models.sales_models import SCOPE_PRODUCT, Membership
+    from app.services.product_access import TENANT_SEAT_PREFIX
+    return db.query(Membership.id).filter(
+        Membership.user_id == user.id, Membership.scope_type == SCOPE_PRODUCT,
+        Membership.scope_id.like(TENANT_SEAT_PREFIX + "%"), Membership.is_active.is_(True)).first() is not None
+
+
+def _second_tenant_access(db: Session, user, org) -> bool:
+    """A second-tenant Wholesale workspace opens for its org admins and above
+    and for the people on ITS OWN team (product_access tenant seat)."""
+    if user is None or getattr(user, "role", None) in INTERNAL_ROLES:
+        return False
+    from app.services.product_access import holds_tenant_seat
+    return _admin_of_second_tenant(db, user, org) or holds_tenant_seat(db, user, org)
 
 
 def _admin_anywhere(db: Session, user) -> bool:

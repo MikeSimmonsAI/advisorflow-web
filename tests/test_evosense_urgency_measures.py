@@ -9,6 +9,7 @@ from app.services.evosense import evaluate as EV
 from app.services.evosense import foreclosure_cycles as F
 from app.services.evosense import opportunity as OP
 from app.services.evosense import scoring as SC
+from app.services.evosense import work_priority as WP
 
 from tests.test_evosense_discovery_types import _P, _stacked
 from tests.test_evosense_foreclosure_cycles import TODAY, world  # noqa: F401 - fixture
@@ -61,20 +62,20 @@ def test_every_score_explains_itself_with_the_engines_points():
 
 def test_a_verified_imminent_auction_is_high_urgency_whatever_the_numbers():
     au = OP.auction_urgency("VERIFIED NOTICE", "2026-11-03", today=date(2026, 10, 25))
-    assert au["level"] == "HIGH" and au["urgent"] and au["days"] == 9
-    assert OP.auction_urgency("notice_verified", "2026-11-20", today=date(2026, 10, 25))["level"] == "MEDIUM"
+    assert au["level"] == "CRITICAL" and au["urgent"] and au["days"] == 9 and au["label"] == "CRITICAL — 9 DAYS"
+    assert OP.auction_urgency("notice_verified", "2026-11-20", today=date(2026, 10, 25))["level"] == "UPCOMING"
 
 
 def test_conflicts_postponements_claims_and_passed_dates_are_never_called_scheduled():
     t = date(2026, 10, 25)
     c = OP.auction_urgency("conflict", "2026-11-03", today=t)
-    assert c["label"] == "URGENT - VERIFY NOTICE" and c["urgent"]
+    assert c["label"].startswith("URGENT — VERIFY NOTICE") and c["urgent"]
     p = OP.auction_urgency("postponed", "2026-11-03", today=t)
-    assert p["level"] == "POSTPONED" and not p["urgent"] and "NOT SCHEDULED" in p["label"]
+    assert p["level"] == "POSTPONED" and not p["urgent"]
     claim = OP.auction_urgency("CLAIMED", "2026-11-03", today=t)
-    assert claim["level"] == "UNVERIFIED" and not claim["urgent"]           # a list date is not a verified notice
+    assert claim["level"] == "URGENT_VERIFY" and not claim["verified"]     # a list date is never a verified notice
     gone = OP.auction_urgency("notice_verified", "2026-10-06", today=t)
-    assert gone["level"] == "PASSED" and "NOT VERIFIED" in gone["label"]    # never "completed" by the calendar
+    assert gone["level"] == "OUTCOME_UNVERIFIED" and gone["label"] == "OUTCOME UNVERIFIED"   # never "completed" by the calendar
 
 
 def test_missing_financials_never_invent_profit_and_unknown_is_not_low():
@@ -105,6 +106,7 @@ def test_missing_inputs_are_listed_separately():
 def test_fcc_rows_carry_the_three_measures_and_urgent_unknown_potential_stays_in_the_queue(world, monkeypatch):  # noqa: F811
     db, org = world["db"], world["org"]
     monkeypatch.setattr(F, "_today", lambda: TODAY)
+    monkeypatch.setattr(WP, "today_ct", lambda: TODAY)
     F.start_month(db, org, "2026-11")
     db.commit()
     F._CACHE.clear()
@@ -112,11 +114,14 @@ def test_fcc_rows_carry_the_three_measures_and_urgent_unknown_potential_stays_in
     assert len(rs) == 4                                                     # nothing dropped
     a = {r["id"]: r for r in rs}[world["a"].id]
     m = a["measures"]
-    assert m["auction_urgency"]["level"] == "HIGH" and m["deal_potential"]["level"] == "UNKNOWN"
+    assert m["auction_urgency"]["level"] == "CRITICAL" and m["deal_potential"]["level"] == "UNKNOWN"
+    assert m["work_priority"]["level"] == "CRITICAL"
     assert m["data_confidence"]["level"] in ("HIGH", "MEDIUM", "LOW") and m["explanation"]["lines"]
     urgent = F.filter_rows(rs, {"quick": "urgent_auctions"})
     assert world["a"].id in {r["id"] for r in urgent}
-    assert world["c"].id not in {r["id"] for r in urgent}                   # the list's claim is not urgent-verified
+    c = {r["id"]: r for r in rs}[world["c"].id]["measures"]                 # the list's claim: verify, never "verified"
+    assert c["auction_urgency"]["level"] == "URGENT_VERIFY" and c["work_priority"]["level"] == "REVIEW_URGENT"
+    assert world["c"].id not in {r["id"] for r in F.filter_rows(rs, {"quick": "critical"})}
     assert {r["id"] for r in F.filter_rows(rs, {"quick": "needs_financial"})} == {r["id"] for r in rs}
     both = F.filter_rows(rs, {"quick": "urgent_auctions", "county": "Tarrant"})
     assert {r["id"] for r in both} == {world["b"].id}                       # quick filters combine with county
@@ -125,13 +130,14 @@ def test_fcc_rows_carry_the_three_measures_and_urgent_unknown_potential_stays_in
     assert len(placed) == len(set(placed))                                  # one group per property
     assert world["a"].id in placed                                          # unknown potential, still worked
     by_urg = F.filter_rows(rs, {"sort": "urgency"})
-    assert by_urg[0]["measures"]["auction_urgency"]["level"] in ("HIGH", "VERIFY")
+    assert by_urg[0]["measures"]["auction_urgency"]["level"] in ("CRITICAL", "URGENT_VERIFY")
     s = F.summary(db, org, "2026-11")
     assert sum(s["measures"]["auction_urgency"].values()) == 4 and "urgent_auctions" in s["measures"]["quick"]
 
 
 def test_the_work_view_and_list_api_expose_measures(client, auth_headers, world, monkeypatch):  # noqa: F811
     monkeypatch.setattr(F, "_today", lambda: TODAY)
+    monkeypatch.setattr(WP, "today_ct", lambda: TODAY)
     db, org = world["db"], world["org"]
     F.start_month(db, org, "2026-11")
     db.commit()
@@ -162,3 +168,69 @@ def test_outdated_scores_are_refreshed_once_and_old_scores_stay_as_history(db_se
                                                   EvoSenseScore.score_type == "property_opportunity").all()
     assert any(r.version == "property_opportunity/v3" for r in rows)        # history kept
     assert [r.version for r in rows if r.is_current] == [SC.version_for(None, None)]
+
+
+# Owner's October 26 score-calibration requirement: the original Nov 3 Top100
+# contains 99 documented imminent mortgage auctions, yet v5 scored only two
+# HIGH. The acquisition-distress evidence score must reflect the verified
+# foreclosure event itself, without treating a list claim as verified profit.
+def test_v6_imminent_documented_auction_is_strong_evidence(monkeypatch):
+    monkeypatch.setattr(WP, "today_ct", lambda: date(2026, 10, 26))
+    verified = _fc("2026-11-03")
+    long_owned = _stacked("LONG_OWNERSHIP")[0]
+    long_owned["sources"] = ["evosense_derived"]
+    long_owned["record_sources"] = ["dcad"]
+    po = SC.property_opportunity(_top100_like(), [verified, long_owned], None)
+    bonus = [f for f in po["factors"] if (f.get("evidence") or {}).get("type") == "imminent_distress_bonus"]
+    assert SC.PO_VERSION == "property_opportunity/v6"
+    assert len(bonus) == 1 and bonus[0]["points"] == 28
+    assert bonus[0]["evidence"]["not_profit"]
+    assert po["value"] >= 65 and po["label"] in ("high", "hot")
+    # The score stays evidence-based: imported equity remains a 10-point claim.
+    equity = [f for f in po["factors"] if f["label"].startswith("Estimated equity")][0]
+    assert equity["points"] == 10 and equity["evidence"]["claimed"] is True
+
+
+def test_v6_import_claims_unverified_manual_and_expired_sales_never_get_bonus(monkeypatch):
+    monkeypatch.setattr(WP, "today_ct", lambda: date(2026, 10, 26))
+    claim = _fc("2026-11-03", verified=False)
+    unsupported_manual = _fc("2026-11-03")
+    unsupported_manual["evidence"][0]["source"] = "operator"
+    unsupported_manual["sources"] = ["operator"]
+    unsupported_manual["evidence"][0]["provenance"] = {"sale_date": "2026-11-03"}
+    past = _fc("2026-10-20")
+    later = _fc("2026-12-01")
+    for signals in ([claim], [unsupported_manual], [past], [later]):
+        assert SC.documented_imminent_distress(signals) is None
+        score = SC.property_opportunity(_top100_like(), signals, None)
+        assert not any((f.get("evidence") or {}).get("type") == "imminent_distress_bonus"
+                       for f in score["factors"])
+
+
+def test_v6_manual_notice_needs_document_and_source(monkeypatch):
+    monkeypatch.setattr(WP, "today_ct", lambda: date(2026, 10, 26))
+    manual = _fc("2026-11-03")
+    manual["evidence"][0]["source"] = "operator"
+    manual["evidence"][0]["provenance"] = {
+        "sale_date": "2026-11-03", "document": "202600002182",
+        "document_url": "https://county.example/record/202600002182"}
+    assert SC.documented_imminent_distress([manual])["kind"] == "mortgage"
+
+
+def test_v6_official_tax_sale_is_recognized_once_with_or_without_mortgage(monkeypatch):
+    monkeypatch.setattr(WP, "today_ct", lambda: date(2026, 10, 26))
+    tax = {"signal_type": "TAX_SALE", "freshness": "current", "sources": ["lgbs_tax_sales"],
+           "record_sources": ["lgbs_tax_sales"], "observed_at": None,
+           "evidence": [{"source": "lgbs_tax_sales", "case_status": "scheduled",
+                         "provenance": {"sale_date": "2026-11-03", "claim": None}}]}
+    both = [tax, _fc("2026-11-03")]
+    bonus = SC.documented_imminent_distress(both)
+    assert bonus["sale_date"] == "2026-11-03" and bonus["kind"] in ("mortgage", "tax")
+    score = SC.property_opportunity(_top100_like(), both, None)
+    assert sum(1 for f in score["factors"] if (f.get("evidence") or {}).get("type")
+               == "imminent_distress_bonus") == 1
+    tax_only = SC.property_opportunity(_top100_like(), [tax], None)
+    assert any((f.get("evidence") or {}).get("type") == "imminent_distress_bonus"
+               for f in tax_only["factors"])
+    tax["evidence"][0]["case_status"] = "canceled"
+    assert SC.documented_imminent_distress([tax]) is None
