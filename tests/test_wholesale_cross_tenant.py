@@ -753,6 +753,8 @@ def evosense_attacks(ids):
         ("post", "%s/properties/%s/identity" % (base, ep),
          {"parcel_apn": "STOLEN", "evidence_url": "https://example.gov/x"}),
         ("post", "%s/properties/%s/merge" % (base, ep), {"duplicate_id": ep, "reason": "planted merge"}),
+        # Overlooked Properties: another workspace's property never reveals its buyer matches (#427)
+        ("get", "%s/opportunity-radar/%s/buyer-matches" % (base, ep), None),
         # an imported list is named by its kind; another workspace's list is absent here
         ("get", "%s/cohorts/%s" % (base, ids["es_list_kind"]), None),
         ("post", "%s/cohorts/%s/recheck" % (base, ids["es_list_kind"]), None),

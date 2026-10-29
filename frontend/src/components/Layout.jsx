@@ -153,6 +153,7 @@ const NAV_GROUPS = [
       { to: '/wholesale/evosense', label: 'Acquisition Command', icon: 'target', featureKey: 'wholesale_real_estate', end: true },
       { to: '/wholesale/foreclosures', label: 'Foreclosures', icon: 'calendar', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/evosense/inbox', label: 'Discovery Inbox', icon: 'search', featureKey: 'wholesale_real_estate' },
+      { to: '/wholesale/evosense/overlooked', label: 'Overlooked Properties', icon: 'search', featureKey: 'wholesale_real_estate', bookaboostOnly: true },
       { to: '/wholesale/evosense/strategies', label: 'Strategies', icon: 'zap', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/evosense/controls', label: 'Providers & Controls', icon: 'shield-check', featureKey: 'wholesale_real_estate' },
     ],
@@ -961,6 +962,7 @@ export default function Layout({ children }) {
             const isWorkspaceAdmin = isManagerRole(workspaceRole) || isGodAdmin
             const visible = (item) => {
               if (item.fiberOnly && !(branding && branding.industry === 'fiber')) return false
+              if (item.bookaboostOnly && shellResolution.theme !== THEMES.BOOKABOOST) return false
               // Only orgs with an open implementation see Launch. `null`
               // means the answer has not arrived yet, and the item stays
               // hidden until it does — a nav entry that appears a second late
