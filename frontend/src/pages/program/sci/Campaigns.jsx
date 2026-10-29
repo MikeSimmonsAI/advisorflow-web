@@ -57,6 +57,7 @@ export default function Campaigns({ isManager, locationId, locations, performanc
   useEffect(() => {
     setMessageDraft(messageFrom(cur))
     setMessageNotice('')
+    if (cur?.key === 'central_alabama_ms') setTouch('first')
   }, [cur?.id])
   useEffect(() => {
     if (!cur || !loc) { setPreview(null); return undefined }
@@ -158,7 +159,8 @@ export default function Campaigns({ isManager, locationId, locations, performanc
                 </select>
               </Field>
             </div>
-            <Tabs items={[['first', 'First touch'], ['followup', 'Follow-up']]} value={touch} onChange={setTouch} label="Touch" />
+            <Tabs items={cur.key === 'central_alabama_ms' ? [['first', 'First touch']] :
+              [['first', 'First touch'], ['followup', 'Follow-up']]} value={touch} onChange={setTouch} label="Touch" />
             {preview && !preview.ok && <div className="sci-alert"><Icon name="alert" />{preview.reason}</div>}
             {!preview && <Loading label="Rendering preview…" />}
             {preview?.ok && (
@@ -184,7 +186,8 @@ export default function Campaigns({ isManager, locationId, locations, performanc
             <p className="sci-micro sci-muted" style={{ marginTop: 0 }}>
               These templates belong only to Central Alabama 2025–2026 MS, not Veteran Guide,
               Survey or other SCI campaigns. Save a draft to refresh the location preview above.
-              Saving does not activate the campaign or send a message.
+              Saving does not activate the campaign or send a message. This editor covers
+              the first contact only; later Central Alabama touches need their own independent copy.
             </p>
             <div className="sci-form one">
               <Field label="First text (SMS)">
