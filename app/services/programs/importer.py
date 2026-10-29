@@ -479,7 +479,18 @@ def stage(db: Session, org: Organization, content: bytes, *, filename: Optional[
             new_notes = [f for f in d["notes"]] if not rec.data_review_cleared_at else []
             rec.needs_data_review = bool(rec.needs_data_review or new_notes)
             why = FLAG_HOLDS.get(d["import_flag"] or "")
-            if why and not rec.on_hold:
+            # A Central Alabama source row belonging to a person already in SCI
+            # is excluded from THIS NEW campaign, never from the old campaign.
+            # Keep its own lead_id: identity.send_refusal checks every row on a
+            # lead, so attaching a held new row to the existing lead would
+            # silently stop that person's original active follow-ups.
+            if d.get("existing_master") and d["family"] == "central_alabama_ms":
+                rec.on_hold = True
+                rec.hold_reason = ("EXCLUDED FROM CENTRAL ALABAMA: already in SCI "
+                                   "(original campaign continues)")
+                rec.held_at, rec.held_by = rec.held_at or datetime.utcnow(), actor_id
+                rec.approved_to_send_at, rec.approved_to_send_by = None, None
+            elif why and not rec.on_hold:
                 rec.on_hold, rec.hold_reason = True, why
                 rec.held_at, rec.held_by = datetime.utcnow(), actor_id
             staged += 1
@@ -533,9 +544,11 @@ def stage(db: Session, org: Organization, content: bytes, *, filename: Optional[
                                                        "two live leads for one person - a person decides") if x)
                 rec.duplicate_review_reason = d["dup_review"]
                 continue
+            # Keep the *new* source record attached to its own duplicate lead.
+            # Repointing it to keep would make its campaign-specific hold block
+            # the ORIGINAL SCI lead and all of its legitimate old cadences.
             dup.duplicate_of_lead_id = keep
             dup.status = "duplicate"
-            rec.lead_id = keep
             superseded += 1
         db.commit()
     summary["superseded_duplicate_leads"] = superseded
