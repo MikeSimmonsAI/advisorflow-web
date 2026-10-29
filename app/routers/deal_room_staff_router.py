@@ -67,7 +67,8 @@ def invite(payload: InviteIn, db: Session = Depends(get_db), user: User = Depend
            _g: User = Depends(require_not_observation)):
     org_id = svc.write_org_id(db, user)
     if payload.owner_user_id:
-        owner = db.query(User).filter(User.id == payload.owner_user_id, User.organization_id == org_id).first()
+        from app.services import wholesale_team as T
+        owner = T.in_workspace(db, org_id, payload.owner_user_id)
         if owner is None:
             raise HTTPException(status_code=400, detail="The invitation owner must be on this team.")
     inv, token = DR.create_invite(db, org_id, user, name=payload.name, email=payload.email, company=payload.company,

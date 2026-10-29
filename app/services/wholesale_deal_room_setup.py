@@ -59,16 +59,19 @@ def is_active(db, org_id: str) -> bool:
 
 def staff_people(db, org_id: str) -> List[Dict[str, Any]]:
     """People who may run the Deal Room: this workspace's staff logins (never investors)."""
-    people = (db.query(User).filter(User.organization_id == org_id, User.role != "investor")
+    from app.services import wholesale_team as T
+    people = (T.people_q(db, org_id).filter(User.role != "investor")
               .order_by(User.full_name.asc()).all())
     return [{"user_id": u.id, "name": u.full_name or u.email, "email": u.email, "role": u.role}
             for u in people if getattr(u, "is_active", True)]
 
 
 def _owner(db, org_id: str, user=None) -> Optional[User]:
-    if user is not None and getattr(user, "organization_id", None) == org_id:
+    from app.services import wholesale_team as T
+    if user is not None and (getattr(user, "organization_id", None) == org_id
+                             or T.in_workspace(db, org_id, getattr(user, "id", None)) is not None):
         return user
-    return (db.query(User).filter(User.organization_id == org_id, User.role.in_(("org_admin", "manager")))
+    return (T.admins_q(db, org_id, ("org_admin", "manager"))
             .order_by(User.created_at.asc()).first())
 
 

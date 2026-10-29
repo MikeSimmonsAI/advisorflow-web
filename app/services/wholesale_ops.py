@@ -67,10 +67,12 @@ def user_name(db, user_id: Optional[str]) -> Optional[str]:
 
 
 def assignable_user(db, org_id: str, user_id: Optional[str]) -> Optional[str]:
-    """An assignee must belong to THIS organization."""
+    """An assignee must belong to THIS workspace (home org; for a second
+    Wholesale tenant also its members - wholesale_team.people_q, #272)."""
     if not user_id:
         return None
-    u = db.query(User).filter(User.id == user_id, User.organization_id == org_id).first()
+    from app.services import wholesale_team as T
+    u = T.in_workspace(db, org_id, user_id)
     if u is None:
         raise HTTPException(status_code=400, detail="That person is not in this workspace.")
     return u.id

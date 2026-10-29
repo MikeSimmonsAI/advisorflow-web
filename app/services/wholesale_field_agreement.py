@@ -43,13 +43,16 @@ def _standing_offer(db: Session, org_id: str, appt_id: str) -> Optional[Wholesal
 
 
 def _signer(db: Session, org_id: str, appt, offer) -> Optional[User]:
+    # An administrator OF THIS WORKSPACE (home org; for a second tenant also
+    # by its membership role there, #272) - never another tenant's admin.
+    admins = T.admins_q(db, org_id, ("org_admin",))
     for uid in (getattr(offer, "decided_by_id", None), appt.created_by_id):
         if uid:
-            u = db.query(User).filter(User.id == uid, User.organization_id == org_id).first()
-            if u is not None and getattr(u, "role", None) == "org_admin":
+            u = admins.filter(User.id == uid).first()
+            if u is not None:
                 return u
-    return (db.query(User).filter(User.organization_id == org_id, User.role == "org_admin",
-                                  User.is_active.isnot(False)).order_by(User.created_at.asc()).first())
+    return (T.admins_q(db, org_id, ("org_admin",)).filter(User.is_active.isnot(False))
+            .order_by(User.created_at.asc()).first())
 
 
 def _evo_prop(db, org_id, appt):

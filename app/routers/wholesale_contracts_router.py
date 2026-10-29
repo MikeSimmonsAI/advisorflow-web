@@ -660,9 +660,10 @@ def _test_deal_outside_signers(db: Session, org_id: str, deal: WholesaleDeal, si
     workspace (or the person sending). Empty for a real deal."""
     if not getattr(deal, "is_test", False):
         return []
+    from app.services import wholesale_team as T
     inside = {(getattr(user, "email", "") or "").strip().lower()}
     inside |= {(e or "").strip().lower() for (e,) in
-               db.query(User.email).filter(User.organization_id == org_id).all()}
+               T.people_q(db, org_id).with_entities(User.email).all()}
     out = []
     for p in signers:
         e = (p.get("email") or "").strip().lower()

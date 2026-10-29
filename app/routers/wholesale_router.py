@@ -51,6 +51,7 @@ from app.services import wholesale_esign as esign
 from app.services import wholesale_ai
 from app.services import wholesale_pipeline as pipeline
 from app.services import wholesale_service as svc
+from app.services import env_name_privacy as _ENV
 from app.services.entitlements import require_feature
 from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
 
@@ -673,7 +674,8 @@ def get_settings(db: Session = Depends(get_db),
     org_id = svc.read_org_id(db, user)
     if not org_id:
         raise HTTPException(status_code=409, detail="No customer organization selected.")
-    return settings_json(svc.resolve_settings(db, org_id))
+    # Provider rows name server settings; those names stay with platform admins (#272).
+    return _ENV.for_viewer(user, settings_json(svc.resolve_settings(db, org_id)))
 
 
 @router.get("/settings/assignees")
@@ -683,7 +685,9 @@ def settings_assignees(db: Session = Depends(get_db),
     org_id = svc.read_org_id(db, user)
     if not org_id:
         raise HTTPException(status_code=409, detail="No customer organization selected.")
-    rows = (db.query(User).filter(User.organization_id == org_id, User.is_active.isnot(False))
+    from app.services import wholesale_team as T
+    # This workspace's people (home org; for a second tenant also its members, #272).
+    rows = (T.people_q(db, org_id).filter(User.is_active.isnot(False))
             .order_by(User.full_name.asc()).all())
     return {"items": [{"id": u.id, "name": u.full_name or u.email, "role": u.role} for u in rows]}
 
@@ -722,8 +726,9 @@ def patch_settings(payload: SettingsPatch, request: Request,
         _clean_sms_program(db, org_id, data)
     if "inquiry_assignee_id" in data:
         v = (data["inquiry_assignee_id"] or "").strip()
-        if v and (db.query(User.id).filter(User.id == v, User.organization_id == org_id,
-                                           User.is_active.isnot(False)).first() is None):
+        from app.services import wholesale_team as T
+        if v and (T.people_q(db, org_id).with_entities(User.id).filter(
+                User.id == v, User.is_active.isnot(False)).first() is None):
             # 404-shaped: an id from another workspace is not confirmed to exist.
             raise HTTPException(status_code=400, detail="That user is not in this workspace.")
         data["inquiry_assignee_id"] = v or None
@@ -779,7 +784,7 @@ def patch_settings(payload: SettingsPatch, request: Request,
                   before=before, after=settings_json(s))
     db.commit()
     db.refresh(s)
-    return settings_json(s)
+    return _ENV.for_viewer(user, settings_json(s))
 
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
@@ -1846,7 +1851,7 @@ class ManualContactIn(BaseModel):
 def enrichment_providers(db: Session = Depends(get_db),
                          user: User = Depends(require_tenant_or_observer)):
     """Which providers exist, and which can actually run right now."""
-    return {"providers": enrichment.provider_report()}
+    return _ENV.for_viewer(user, {"providers": enrichment.provider_report()})
 
 
 @router.post("/enrichment/run")

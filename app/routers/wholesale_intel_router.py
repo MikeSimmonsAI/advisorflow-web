@@ -48,9 +48,11 @@ def _assume(purchase_price, interest_rate, ltv, amortization_years, target_cap_r
 
 @router.get("/providers")
 def providers(user: User = Depends(require_tenant_or_observer)):
-    return {"providers": INTEL.provider_readiness(),
-            "note": "Nothing is activated or purchased here. Keys, enablement and budgets are owner-controlled "
-                    "on Providers & Controls."}
+    from app.services import env_name_privacy as _ENV
+    return _ENV.for_viewer(user, {
+        "providers": INTEL.provider_readiness(),
+        "note": "Nothing is activated or purchased here. Keys, enablement and budgets are owner-controlled "
+                "on Providers & Controls."})
 
 
 @router.get("/property/{evo_id}/verification")
