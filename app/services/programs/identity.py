@@ -342,6 +342,10 @@ def send_refusal(db: Session, lead: Lead, send_source: Optional[str] = None) -> 
     prog = program_for_org(db, lead.organization_id)
     if prog is None:
         return None
+    # #385: a lead marked a duplicate of the family's own lead is never worked -
+    # the family is reached through that one lead only.
+    if getattr(lead, "duplicate_of_lead_id", None) or (lead.status or "").lower() == "duplicate":
+        return DUPLICATE_REVIEW_REFUSAL
     recs = records_for_lead(db, lead)
     rec = source_record_for_lead(db, lead)
     if any(getattr(r, "on_hold", False) for r in recs):
@@ -361,7 +365,11 @@ def send_refusal(db: Session, lead: Lead, send_source: Optional[str] = None) -> 
             return _sa.NOT_APPROVED_REFUSAL
     if send_source != _ss.MANUAL and rec is not None:
         from app.models.program_models import CampaignFamily
-        key = rec.campaign_family or "re_engagement"
+        # #385: a record with NO campaign is never worked under another
+        # campaign's words (it used to fall back to re-engagement).
+        if not rec.campaign_family:
+            return CAMPAIGN_OFF_REFUSAL
+        key = rec.campaign_family
         fam = (db.query(CampaignFamily)
                .filter(CampaignFamily.organization_id == lead.organization_id,
                        CampaignFamily.key == key).first())
@@ -502,11 +510,16 @@ def cadence_text(db: Session, lead: Lead, touch_number: int) -> Optional[str]:
     # its own text, that text is used - rendered with the same location fields
     # and refused by send_sms exactly like the family text. Touch 1 always stays
     # the contact's own campaign family.
-    if touch_number > 1:
+    from app.services.programs.campaigns import OWN_COPY_KEYS
+    own_copy = bool(rec and rec.campaign_family in OWN_COPY_KEYS)
+    if touch_number > 1 and not own_copy:
         own = program_touch_text(db, lead.organization_id, touch_number)
         if own:
             return render(own, _with_booking(db, lead, own, ctx["fields"]))
-    key = (rec.campaign_family if (rec and touch_number <= 1) else "re_engagement") or "re_engagement"
+    if own_copy:
+        key = rec.campaign_family       # #385: only its own approved words, every touch
+    else:
+        key = (rec.campaign_family if (rec and touch_number <= 1) else "re_engagement") or "re_engagement"
     fam = (db.query(CampaignFamily)
            .filter(CampaignFamily.organization_id == lead.organization_id,
                    CampaignFamily.key == key).first())

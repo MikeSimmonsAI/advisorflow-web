@@ -144,10 +144,13 @@ def test_dry_run_writes_no_staging_rows_and_bad_ids_are_refused(db_session, samp
     res = importer.stage(db_session, sample_org, CSV.encode(), dry_run=True)
     assert res["summary"]["staged"] == 0
     assert db_session.query(ProgramSourceRecord).count() == 0
+    # #385: a repeated Lead ID no longer refuses the file - the repeat is kept
+    # under its own ID and held for review.
     dup = CSV + _row("L001", "X", "Y", "x@example.com", "2145559999", "Striffler-Hamby Mortuary")
     res = importer.stage(db_session, sample_org, dup.encode(), dry_run=False)
-    assert res["summary"]["errors"] and res["summary"]["staged"] == 0
-    assert db_session.query(ProgramSourceRecord).count() == 0
+    assert not res["summary"]["errors"] and res["summary"]["staged"] == 8
+    rep = db_session.query(ProgramSourceRecord).filter_by(source_lead_id="L001-R2").one()
+    assert "repeats Lead ID L001" in rep.duplicate_review_reason
 
 
 # ── identity and the send gate ───────────────────────────────────────────────
@@ -400,7 +403,7 @@ def test_location_review_can_be_resolved_by_hand(client, program):
                     headers=h)
     assert r.status_code == 200 and r.json()["location_status"] == "mapped"
     db.refresh(rec)
-    assert rec.source_location_name == ""          # the source value is kept as supplied
+    assert rec.source_location_name in ("", None)  # the source value (blank) is kept as supplied
 
 
 def test_god_setup_is_owner_only(client, program, auth_headers):

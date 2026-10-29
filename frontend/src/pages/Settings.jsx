@@ -3,6 +3,7 @@ import { api, getCurrentUser, getBranding } from '../api/client'
 import { workspaceRole } from '../auth/workspaceAuthority'
 import { getCachedBrand } from '../theme'
 import { getMemberLabel } from '../utils/labels'
+import GoogleSignInCard from '../components/GoogleSignInCard'
 import '../styles/shared.css'
 import './Settings.css'
 
@@ -610,6 +611,9 @@ export default function Settings() {
           </button>
         </form>
       </section>
+
+      {/* Sign in with Google (#430) - renders nothing unless the server has it on. */}
+      <GoogleSignInCard />
 
       {calendarMessage && (
         <div className={calendarMessage.type === 'success' ? 'settings-banner settings-banner--success' : 'settings-banner settings-banner--error'}>

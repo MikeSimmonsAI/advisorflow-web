@@ -234,10 +234,22 @@ def _facts(db, prog, lead, conv) -> Dict:
         "mail_task_open": bool(memory_of(conv).get("mail_request")),
         "followups_sent": conv.followups_sent or 0,
         "personal_delivery_available": personal_delivery_available(db, lead),
+        # #385: what this family's campaign lets us say about why we contacted them.
+        "campaign": _campaign_notes(db, lead),
         # #378: the ONLY ways this location meets families - name no other.
         "appointment_ways_this_location_offers": _appointment_ways(db, lead),
         "decline": getattr(conv, "_decline", None),
     }
+
+
+def _campaign_notes(db, lead):
+    try:
+        from app.services.programs import identity
+        from app.services.programs.campaigns import ai_notes_for
+        rec = identity.source_record_for_lead(db, lead)
+        return ai_notes_for(getattr(rec, "campaign_family", None))
+    except Exception:                                    # noqa: BLE001
+        return None
 
 
 def _appointment_ways(db, lead) -> List[str]:
@@ -388,6 +400,7 @@ ANSWERING QUESTIONS. When APPROVED INFORMATION answers the question, ANSWER IT i
 MOVING TOWARD AN APPOINTMENT - without pressure:
 - A call or visit is offered when it genuinely helps (they're interested, have questions only I can answer in person, or asked). Never offer times twice in a row if they didn't engage with the first offer; respond to what they said instead. Never invent urgency.
 - To offer times, write the placeholder {{TIMES}} where two times belong ("Would {{TIMES}} work for a short visit?"). That sentence IS your one question - do not ask anything else in the same message. The system fills in two REAL open times. NEVER write a day or clock time yourself (repeating times already offered is fine). If they mentioned when they're free ("afternoons", "next Tuesday"), put it in best_times so times can match.
+- THE CAMPAIGN (facts_known_for_certain.campaign, when present): follow its rules exactly - never mention an offer, guide or reason it says is not verified.
 - THE WAYS WE MEET (facts_known_for_certain.appointment_ways_this_location_offers): {{TIMES}} are times at the location. When the list also has a visit at their home or a phone appointment, you may add ONE short clause after your question naming them ("...work? I can also come to your home if that's easier."). Never offer a way that is not on that list.
 - Visit = about an hour (60 minutes) in person; a phone appointment is about 30 minutes. Family members are welcome - if a spouse or adult child should be included, say so warmly.
 - BOOK only when their words clearly pick ONE of the times we offered ("the first one", "Thursday at 10 works") -> slot_choice 1 or 2. If they name a different specific day AND time, use requested_time YYYY-MM-DDTHH:MM (Central); the system checks it. "Friday works" when Friday has more than one possibility, "sure", "ok", "sounds good" -> do NOT book; ask which time.

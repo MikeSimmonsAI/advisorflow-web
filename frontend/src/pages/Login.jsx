@@ -1,10 +1,15 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { login, fetchAndStoreBranding, startKeepAlive, startRefreshLoop, safeNextPath, getWorkspaceContext,
-         fetchMyContexts, setWorkspaceContext, clearWorkspaceContext } from '../api/client'
+         fetchGoogleSigninConfig, googleSigninStartUrl } from '../api/client'
+import { signInDestination } from '../auth/signInDestination'
 import SignalPulse from '../components/SignalPulse'
 import { detectTheme, THEMES, BRAND_CONFIG } from '../theme.js'
 import './Login.css'
+import EvosysLogin from './login-evosys/EvosysLogin'
+import BookaBoostLogin from './login-bookaboost/BookaBoostLogin'
+import OLPLogin from './login-olp/OLPLogin'
+import { bookaboostProductBrand } from '../brand/productBrand'
 
 const theme = detectTheme()
 const brand = BRAND_CONFIG[theme]
@@ -12,30 +17,9 @@ const brand = BRAND_CONFIG[theme]
 // ── Per-platform left-panel content ──────────────────────────────────────────
 
 const PLATFORM_CONTENT = {
-  [THEMES.BOOKABOOST]: {
-    headline: 'BookaBoost',
-    tagline: 'Pre-need outreach built for families who plan ahead — and the advisors who serve them.',
-    accentColor: '#c9973d',
-    accentGlow: 'rgba(201,151,61,0.15)',
-    bgGradient: 'linear-gradient(135deg, #faf8f4 0%, #f5f0e8 100%)',
-    panelGradient: 'linear-gradient(160deg, #2c1f10 0%, #3d2b14 100%)',
-    lightRight: true,
-    poweredBy: 'BookaBoost',
-    stats: [
-      { value: '4.8×', label: 'avg reply rate vs cold outreach' },
-      { value: '72%', label: 'of pre-need leads go cold within 90 days' },
-      { value: '3 min', label: 'to launch your first AI cadence' },
-      { value: '100%', label: 'A2P 10DLC compliant messaging' },
-    ],
-    features: [
-      { icon: '📱', text: 'Automated SMS & email cadences' },
-      { icon: '🔥', text: 'Hot / Warm / Cold lead scoring' },
-      { icon: '📋', text: 'Funeral-industry CRM built in' },
-      { icon: '🔗', text: 'GoHighLevel & HubSpot sync' },
-    ],
-    badge: 'Pre-Need Edition',
-    badgeStyle: { background: 'rgba(201,151,61,0.18)', color: '#c9973d', border: '1px solid rgba(201,151,61,0.4)' },
-  },
+  // BookaBoost has its own page (./login-bookaboost/BookaBoostLogin.jsx). Its old
+  // left-panel copy (pre-need funeral wording, "4.8x reply rate", "72%"...) was
+  // removed: the owner directive allows only capabilities the product has.
   [THEMES.ADVISORFLOW]: {
     headline: '⚡ AdvisorFlow',
     tagline: 'God-level access. Authorized personnel only.',
@@ -59,29 +43,9 @@ const PLATFORM_CONTENT = {
     badge: 'Restricted Access',
     badgeStyle: { background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.35)' },
   },
-  [THEMES.EVOSYSPRO]: {
-    headline: 'EvoSys Pro',
-    tagline: 'Enterprise outreach console.',
-    accentColor: '#087cff',
-    accentGlow: 'rgba(8,124,255,0.15)',
-    bgGradient: 'linear-gradient(135deg, #04101e 0%, #071828 50%, #040e1c 100%)',
-    panelGradient: 'linear-gradient(160deg, #071828 0%, #04101e 100%)',
-    poweredBy: 'EvoSys Pro',
-    stats: [
-      { value: '10×', label: 'outreach velocity vs manual' },
-      { value: '24/7', label: 'automated cadence running' },
-      { value: 'Multi', label: 'channel SMS, email, and voice' },
-      { value: 'Live', label: 'pipeline and conversion tracking' },
-    ],
-    features: [
-      { icon: '🚀', text: 'Enterprise-grade automation' },
-      { icon: '📈', text: 'Real-time conversion analytics' },
-      { icon: '🔗', text: 'Deep CRM integrations' },
-      { icon: '🛡️', text: 'SOC-2 ready data practices' },
-    ],
-    badge: 'Enterprise',
-    badgeStyle: { background: 'rgba(8,124,255,0.1)', color: '#087cff', border: '1px solid rgba(8,124,255,0.3)' },
-  },
+  // EvoSys Pro has its own page (./login-evosys/EvosysLogin.jsx). Its old
+  // left-panel copy ("10x outreach velocity", "SOC-2 ready") was removed: the
+  // owner directive forbids unverified statistics and certification claims.
   [THEMES.HARMONYHUSTLE]: {
     headline: 'Harmony Hustle',
     tagline: 'Real estate outreach, reimagined.',
@@ -173,6 +137,16 @@ export default function Login() {
   const params = new URLSearchParams(window.location.search)
   const expired = params.get('expired') === '1'
   const nextPath = safeNextPath(params.get('next'))
+  const googleError = params.get('google_error')
+  // SIGN IN WITH GOOGLE (#430) is offered only where the server says it is
+  // configured for this address - otherwise there is no button at all.
+  const [googleOn, setGoogleOn] = useState(false)
+  useEffect(() => {
+    if (theme !== THEMES.EVOSYSPRO) return undefined
+    let live = true
+    fetchGoogleSigninConfig().then((c) => { if (live) setGoogleOn(!!c.enabled) })
+    return () => { live = false }
+  }, [])
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -186,49 +160,8 @@ export default function Login() {
       await fetchAndStoreBranding()
       startKeepAlive()
       startRefreshLoop()
-      // WHERE LOGIN LANDS — the SERVER decides, not a role label.
-      //
-      // This used to be `role === 'god_admin' ? '/god' : '/'`, one branch for
-      // one column. It sent a workspace-only customer and a platform-only
-      // salesperson to the same tenant home, and the salesperson's version of
-      // that home is a screen belonging to the other domain.
-      //
-      // /auth/my-contexts returns a default_context built from real
-      // memberships: the back office when they have one, their single
-      // workspace when that is all they hold, a selector when they hold
-      // several. A failure falls back to the old behaviour rather than
-      // stranding somebody at a blank page.
-      let dest = user?.role === 'god_admin' ? '/god' : '/'
-      try {
-        const ctx = await fetchMyContexts()
-        const def = ctx && ctx.default_context
-        if (def && def.path) {
-          dest = def.path
-          // A product home (wholesale@ -> Wholesale) runs inside its host
-          // workspace, so that workspace is selected too.
-          if ((def.type === 'workspace' || def.type === 'product') && def.organization_id) {
-            setWorkspaceContext(def.organization_id)
-          } else {
-            clearWorkspaceContext()
-          }
-        }
-        // BACK TO WHERE THEY WERE after an expired session - into the same
-        // workspace when they still have it, otherwise the default above.
-        // Never return into the Roofing app for a workspace whose Roofing
-        // program is not switched on (the server's program_route says so):
-        // that was a dead "isn't turned on" screen after every re-login.
-        const priorEntry = (ctx?.workspace_contexts || []).find(w => w.organization_id === priorWorkspace)
-        const deadRoofing = nextPath && nextPath.startsWith('/program/roofing') &&
-          !(priorEntry && priorEntry.program_route === '/program/roofing')
-        if (nextPath && !deadRoofing) {
-          const still = priorWorkspace && (ctx?.contexts || []).some(c => c.type === 'workspace' && c.organization_id === priorWorkspace)
-          if (still) { setWorkspaceContext(priorWorkspace); dest = nextPath }
-          else if (!priorWorkspace) dest = nextPath
-        }
-      } catch (ctxErr) {
-        // Keep the legacy destination. A context lookup that fails must not
-        // turn a successful sign-in into an error screen.
-      }
+      // Shared server-authorized destination for password and Google sign-in.
+      const dest = await signInDestination(user, nextPath, priorWorkspace)
       navigate(dest)
     } catch (err) {
       setError(err.message)
@@ -238,6 +171,38 @@ export default function Login() {
   }
 
   const isAdvisorFlow = theme === THEMES.ADVISORFLOW
+
+  // EVOSYS PRO wears its own, owner-approved sign-in. Same state, same
+  // handleSubmit, same token handling and post-login routing as every brand -
+  // only the presentation differs. Every other brand renders the page below.
+  if (theme === THEMES.EVOSYSPRO) {
+    return (
+      <EvosysLogin email={email} setEmail={setEmail} password={password} setPassword={setPassword}
+                   error={error} loading={loading} onSubmit={handleSubmit} expired={expired}
+                   nextPath={nextPath} supportEmail={brand && brand.supportEmail}
+                   googleHref={googleOn ? googleSigninStartUrl(nextPath) : null} googleError={googleError} />
+    )
+  }
+
+  // BOOKABOOST wears its own sign-in too (owner directive, Oct 29). Same state,
+  // same handleSubmit, same tokens and server-decided landing - presentation only.
+  // OLP (Overlooked Properties, powered by BookaBoost) is the BookaBoost
+  // product face being explored; the build can switch back to the plain
+  // BookaBoost page (src/brand/productBrand.js). Same props either way.
+  if (theme === THEMES.BOOKABOOST && bookaboostProductBrand() === 'olp') {
+    return (
+      <OLPLogin email={email} setEmail={setEmail} password={password} setPassword={setPassword}
+                error={error} loading={loading} onSubmit={handleSubmit} expired={expired}
+                nextPath={nextPath} supportEmail={brand && brand.supportEmail} />
+    )
+  }
+  if (theme === THEMES.BOOKABOOST) {
+    return (
+      <BookaBoostLogin email={email} setEmail={setEmail} password={password} setPassword={setPassword}
+                       error={error} loading={loading} onSubmit={handleSubmit} expired={expired}
+                       nextPath={nextPath} supportEmail={brand && brand.supportEmail} />
+    )
+  }
 
   return (
     <div className={`login-page${content.lightRight ? ' login-page--light' : ''}`} style={{ background: content.bgGradient }}>

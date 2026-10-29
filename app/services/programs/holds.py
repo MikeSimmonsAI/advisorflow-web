@@ -25,10 +25,15 @@ from sqlalchemy.orm import Session
 
 from app.models.program_models import ProgramSourceRecord
 
-# The customer already said no (or the record was disqualified) in their
-# own system: never worked from here until a person releases it.
-DO_NOT_WORK_STATUSES = {"not interested", "disqualified", "do not contact", "dnc",
-                        "do not call", "deceased"}
+# A real do-not-contact in the customer's own system: never worked from here
+# until a person releases it.
+DO_NOT_WORK_STATUSES = {"do not contact", "dnc", "do not call", "deceased", "stop", "stopped",
+                        "opted out", "opt out", "opt-out", "opted-out", "unsubscribed", "do not text",
+                        "do not email", "do not mail"}
+# #385 (Mike): a HISTORIC "Not Interested" / "Disqualified" / "Unworked" is
+# kept on the record and shown, but does NOT hold an SCI-authorized POC
+# record out of intake. Real STOP / DNC / opt-outs are honoured everywhere.
+HISTORIC_STATUSES = {"not interested", "disqualified", "unworked"}
 
 
 def review_reasons(rec: ProgramSourceRecord, conflict: bool = False) -> List[str]:
