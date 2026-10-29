@@ -167,3 +167,22 @@
 .evl #evl-email, .evl #evl-password, .evl #evl-email:focus, .evl #evl-password:focus { box-shadow: none !important; border: 0 !important; background: transparent !important; outline: none !important; }
 /* fade the photo layer out instead of ending it on a solid colour (no seam against the page glow) */
 .evl-bg { -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 72%, transparent 100%); mask-image: linear-gradient(180deg, #000 0%, #000 72%, transparent 100%); }
+
+
+/* Chrome/Edge autofill paints its own light field background. The general
+   !important focus reset above previously suppressed our original inset
+   autofill shadow, leaving white inputs with white text. Keep the shell's
+   focus ring and force the actual input fill back to the login's dark navy. */
+.evl #evl-email,
+.evl #evl-password { color-scheme: dark; }
+.evl #evl-email:-webkit-autofill,
+.evl #evl-email:-webkit-autofill:hover,
+.evl #evl-email:-webkit-autofill:focus,
+.evl #evl-password:-webkit-autofill,
+.evl #evl-password:-webkit-autofill:hover,
+.evl #evl-password:-webkit-autofill:focus {
+  -webkit-text-fill-color: #f4f8ff !important;
+  caret-color: #f4f8ff !important;
+  -webkit-box-shadow: 0 0 0 1000px #07142c inset !important;
+  box-shadow: 0 0 0 1000px #07142c inset !important;
+}
