@@ -229,6 +229,9 @@ def test_queued_families_split_by_sms_consent_and_blocks_are_not_failures(progra
     a = client.get("/program/command/analytics?range=today", headers=h).json()
     sn = a["overview"]["scheduled_new"]
     assert sn["value"] == 2 and sn["sms_ready"] == 1 and sn["no_consent"] == 1   # a block is not a contact
+    # Phone coverage is a different question than consent: both families have
+    # numbers, even though only one has a usable consent record.
+    assert sn["with_phone"] == 2 and sn["no_phone"] == 0
     today = {r["key"]: r["value"] for r in a["overview"]["today"]}
     assert today["blocked"] == 1 and today["first"] == 0
     assert a["metrics"]["failed"]["value"] == 0 and a["metrics"]["attempts"]["value"] == 0
