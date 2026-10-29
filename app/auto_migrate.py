@@ -174,6 +174,7 @@ COLUMNS_TO_ADD = [
     ("program_source_records", "approved_to_send_at", "TIMESTAMP"),
     ("program_source_records", "approved_to_send_by", "VARCHAR"),
     ("program_source_records", "send_mode", "VARCHAR"),
+    ("program_source_records", "source_id_generated", "BOOLEAN DEFAULT FALSE"),
     ("program_source_records", "scheduled_start_at", "TIMESTAMP"),
     ("outreach_programs", "require_send_approval", "BOOLEAN DEFAULT FALSE"),
     ("outreach_programs", "send_via_mailbox", "VARCHAR"),

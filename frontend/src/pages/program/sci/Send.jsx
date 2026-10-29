@@ -368,10 +368,56 @@ export default function Send({ locations, isManager, locationId, goTab, automati
           )}
           <p className="sci-footnote">Good to go starts their texts right away (first text at the next allowed hour in their time zone). A reply or STOP ends them.</p>
           {isManager && <DailyBatch />}
+          {isManager && <CentralAlabamaPrepare />}
         </Panel>
       </div>
 
     </>
+  )
+}
+
+// CENTRAL ALABAMA 2025-2026 MS: one click re-processes the list under the
+// owner's rules, adds only new people, and records them Approved to Send for
+// that campaign. The campaign stays OFF; nothing is texted, emailed or
+// scheduled (POST /program/central-alabama/prepare).
+function CentralAlabamaPrepare() {
+  const [busy, setBusy] = useState(false)
+  const [res, setRes] = useState(null)
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    api.post('/program/central-alabama/prepare', { apply: false }).then(setRes).catch(() => {})
+  }, [])
+  const run = async () => {
+    if (busy) return
+    setBusy(true); setErr('')
+    try { setRes(await api.post('/program/central-alabama/prepare', { apply: true })) }
+    catch (e) { setErr(errText(e)) } finally { setBusy(false) }
+  }
+  const a = res?.after || res?.before
+  return (
+    <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
+      <div className="sci-row-gap" style={{ justifyContent: 'space-between' }}>
+        <b>Central Alabama 2025–2026 MS</b>
+        <Chip tone="">Campaign off</Chip>
+      </div>
+      <p className="sci-micro sci-muted" style={{ margin: '6px 0 10px' }}>
+        Gets the list ready: people already in SCI stay in their own campaign, only new people are added, and they are marked Approved to Send. Nothing is sent - the campaign stays off.
+      </p>
+      {a && (
+        <p className="sci-micro" style={{ margin: '0 0 10px' }}>
+          {num(a.source_records)} records · <b>{num(a.approved_people)}</b> people approved to send · {num(a.excluded_existing_people)} already in SCI · {num(a.location_review_records)} in location review
+        </p>
+      )}
+      <button type="button" className="sci-btn gold sm" disabled={busy} onClick={run}>
+        {busy ? 'Preparing…' : 'Prepare Central Alabama'}
+      </button>
+      {res?.applied && (
+        <p className="sci-micro" role="status" style={{ marginTop: 8 }}>
+          Done: {num(res.approved_to_send_people)} people approved to send ({num(res.newly_approved_people)} new this time). Nothing was sent.
+        </p>
+      )}
+      {err && <p className="sci-micro" role="alert" style={{ marginTop: 8, color: '#b42318' }}>Not prepared: {err}</p>}
+    </div>
   )
 }
 

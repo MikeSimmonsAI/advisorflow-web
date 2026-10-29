@@ -8,6 +8,7 @@ import StagingBanner from './components/StagingBanner'
 import ContextBanner from './components/ContextBanner'
 import DemoConsole from './pages/DemoConsole'
 import Login from './pages/Login'
+import GoogleSignInComplete from './pages/GoogleSignInComplete'
 import TeamPrices from './pages/TeamPrices'
 import Onboarding from './pages/Onboarding'
 // Public customer-facing surfaces. DealRoom is the Checkpoint 4 sales deal
@@ -153,6 +154,7 @@ import {
 // Wholesale Phase 7 — EvoSense acquisition engine. Same feature key.
 const EvoCommand = lazyPage(() => import('./pages/wholesale/evosense/EvoCommand'))
 const EvoInbox = lazyPage(() => import('./pages/wholesale/evosense/EvoInbox'))
+const OpportunityRadar = lazyPage(() => import('./pages/wholesale/evosense/OpportunityRadar'))
 const EvoProperty = lazyPage(() => import('./pages/wholesale/evosense/EvoProperty'))
 const EvoStrategies = lazyPage(() => import('./pages/wholesale/evosense/EvoStrategies').then(m => ({ default: m.EvoStrategies })))
 const EvoStrategyBuilder = lazyPage(() => import('./pages/wholesale/evosense/EvoStrategies').then(m => ({ default: m.EvoStrategyBuilder })))
@@ -1288,6 +1290,8 @@ export default function App() {
         {/* Public by necessity: the invited customer has no account yet. */}
         <Route path="/activate" element={<Activate />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
+        {/* Sign in with Google (#430): collects the session from a one-time ticket. */}
+        <Route path="/auth/google/complete" element={<GoogleSignInComplete />} />
         <Route path="/setup-integrations" element={<SetupIntegrations />} />
         {/* ── PUBLIC customer surfaces ── no ProtectedRoute, by design ──
             A customer has no account. The token in the URL is the whole
@@ -1608,6 +1612,7 @@ export default function App() {
         {/* Phase 7 EvoSense — discovery before a deal exists. */}
         <Route path="/wholesale/evosense" element={<ProtectedRoute feature="wholesale_real_estate"><EvoCommand /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/inbox" element={<ProtectedRoute feature="wholesale_real_estate"><EvoInbox /></ProtectedRoute>} />
+        <Route path="/wholesale/evosense/overlooked" element={<ProtectedRoute feature="wholesale_real_estate"><OpportunityRadar /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/property/:propertyId" element={<ProtectedRoute feature="wholesale_real_estate"><EvoProperty /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/strategies" element={<ProtectedRoute feature="wholesale_real_estate"><EvoStrategies /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/strategies/:strategyId" element={<ProtectedRoute feature="wholesale_real_estate"><EvoStrategyBuilder /></ProtectedRoute>} />

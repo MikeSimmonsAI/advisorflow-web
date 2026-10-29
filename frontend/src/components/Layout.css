@@ -402,6 +402,11 @@ html:root[data-theme="bookaboost"] .layout--wholesale .sidebar {
   background: linear-gradient(180deg, #1a1a1d 0%, #0e0e10 100%);
   border-right: 1px solid rgba(201, 151, 61, 0.28);
 }
+/* OLP exploration (src/brand/productBrand.js): the wide OLP logo gets the
+   rail's full width so its "Powered by BookaBoost" line stays readable. */
+html:root[data-theme="bookaboost"] .layout--wholesale .wsx-brand img[src*="/brands/olp/"] {
+  max-width: 214px !important; width: 214px; height: auto !important;
+}
 html:root[data-theme="bookaboost"] .layout--wholesale .sidebar .nav-item--active {
   background: linear-gradient(90deg, #a07828 0%, #c9973d 100%);
   color: #ffffff;

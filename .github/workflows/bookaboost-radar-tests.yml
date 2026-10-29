@@ -1,0 +1,63 @@
+# Non-deploying CI for the private BookaBoost Opportunity Radar PR (#428).
+# Does not access Render, production database, customer records, secrets,
+# messaging vendors, paid property data, or the public website.
+name: BookaBoost Opportunity Radar tests
+
+on:
+  push:
+    branches: [feature/bookaboost-overlooked-radar]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/services/evosense/overlooked.py'
+      - 'app/routers/evosense_router.py'
+      - 'tests/test_overlooked_radar.py'
+      - 'frontend/src/pages/wholesale/evosense/OpportunityRadar.*'
+      - 'frontend/src/App.jsx'
+      - 'frontend/src/components/Layout.jsx'
+      - '.github/workflows/bookaboost-radar-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Radar backend and isolation tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APP_ENV: test
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install test requirements
+        run: python -m pip install -r requirements-dev.txt
+      - name: Compile changed Python modules
+        run: |
+          python -m py_compile app/services/evosense/overlooked.py
+          python -m py_compile app/routers/evosense_router.py
+          python -m py_compile tests/test_overlooked_radar.py
+      - name: Test Radar and tenant security with synthetic fixtures
+        run: python -m pytest -q tests/test_overlooked_radar.py tests/test_bookaboost_isolation.py tests/test_bookaboost_wholesale_tenant.py
+
+  frontend:
+    name: Radar frontend build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+      - name: Compile frontend with new private Radar page
+        run: npm run build
+        working-directory: frontend

@@ -224,13 +224,16 @@ def test_full_flow_program_only_manager(client, sci, _no_line_check):
     assert r.status_code == 200, r.text
     p = r.json()
     assert p["can_load"] is True and p["blockers"] == []
-    assert p["rows_in_file"] == 9 and p["rows_to_sci"] == 7
+    # #385: every source record goes to SCI; only what a PERSON skipped stays
+    # out. The do-not-contact match (E001) is kept and held, never contacted.
+    assert p["rows_in_file"] == 9 and p["rows_to_sci"] == 8
     reasons = {x["reason"]: x["rows"] for x in p["excluded"]["by_reason"]}
-    assert reasons == {"blocked": 1, "skipped": 1} and p["excluded"]["total"] == 2
-    assert p["existing"] == {"lead_ids": 7, "already_in_sci": 2, "already_live": 1, "on_hold": 1, "new": 5}
+    assert reasons == {"skipped": 1} and p["excluded"]["total"] == 1
+    assert p["existing"] == {"lead_ids": 8, "already_in_sci": 3, "already_live": 2, "on_hold": 1, "new": 5}
     st = p["stage"]
-    assert st["source_rows"] == 7 and st["staged"] == 0
-    assert st["location_mapped"] == 5 and st["location_review"] == 2
+    assert st["source_rows"] == 8 and st["staged"] == 0
+    assert st["import_flags"] == {"do_not_contact_match": 1}
+    assert st["location_mapped"] == 6 and st["location_review"] == 2
     assert st["bad_phone_rows"] == 1 and st["bad_phones"][0]["row"] == 6     # the file's own row
     assert st["no_phone_rows"] == 1
     assert p["sends_nothing"] is True
@@ -240,7 +243,7 @@ def test_full_flow_program_only_manager(client, sci, _no_line_check):
     r = client.post("/program/leads/import/batches/%s/load" % bid, headers=h, json={})
     assert r.status_code == 200, r.text
     rep = r.json()["report"]
-    assert rep["mode"] == "stage" and rep["staged"] == 7 and rep["families_created"] == 0
+    assert rep["mode"] == "stage" and rep["staged"] == 8 and rep["families_created"] == 0
     assert r.json()["batch"]["status"] == "staged" and r.json()["batch"]["commit_mode"] == "program_stage"
     after_stage = _counts(db, org.id)
     assert after_stage["records"] == before["records"] + 5       # N001-N005; E002/E003 updated
@@ -254,11 +257,11 @@ def test_full_flow_program_only_manager(client, sci, _no_line_check):
     r = client.post("/program/leads/import/batches/%s/load" % bid, headers=h, json={"mode": "load"})
     assert r.status_code == 200, r.text
     rep = r.json()["report"]
-    assert rep["mode"] == "load" and rep["staged"] == 7
+    assert rep["mode"] == "load" and rep["staged"] == 8
     assert rep["families_created"] == 4                          # N001, N002, N004, N005
     assert rep["held"] == 1                                      # N003 (E002 was already held)
-    assert rep["already_live"] == 1 and rep["location_review"] == 2
-    assert rep["excluded"]["total"] == 2
+    assert rep["already_live"] == 2 and rep["location_review"] == 2
+    assert rep["excluded"]["total"] == 1
     assert rep["texts_sent"] == 0 and rep["emails_sent"] == 0 and rep["enrolled"] == 0
     assert rep["line_check"]["mocked"] is True
     b = db.query(ImportBatch).filter_by(id=bid).one()
@@ -273,6 +276,7 @@ def test_full_flow_program_only_manager(client, sci, _no_line_check):
     recs = {r.source_lead_id: r for r in db.query(ProgramSourceRecord).filter_by(organization_id=org.id)}
     assert recs["N003"].on_hold and "LOCATION REVIEW" in recs["N003"].hold_reason
     assert recs["E002"].on_hold and recs["E002"].lead_id is None   # still held, untouched
+    assert recs["E001"].on_hold and "do-not-contact" in recs["E001"].hold_reason   # kept, never contacted
     assert not any(r.approved_to_send_at for r in recs.values() if hasattr(r, "approved_to_send_at"))
     # ORIGINAL VALUES kept as supplied.
     raw = json.loads(recs["N005"].raw_json)
@@ -350,33 +354,26 @@ def test_variant_headers_map_and_load(client, sci):
     assert json.loads(rec.raw_json)["Location Friendly Name"] == SH
 
 
-def test_blank_and_repeated_lead_ids_are_listed_and_refused(client, sci):
+def test_blank_and_repeated_lead_ids_never_refuse_the_file(client, sci):
+    """#385: a normal export with no Lead IDs (or a repeated one) loads - SCI
+    generates an ID (marked as generated) and keeps + flags a repeat."""
     db, org, h = sci["db"], sci["org"], sci["mh"]
     rows = [_row("R001", "Rae", "One", "r1@example.com", "2145550601", EG),
             _row("R001", "Rob", "Two", "r2@example.com", "2145550602", EG),
             _row("", "Rex", "Blank", "r3@example.com", "2145550603", EG)]
-    before = _counts(db, org.id)
     bid, _pv, _rows = _through_review(client, h, _csv(rows), skip=())
     p = client.get("/program/leads/import/batches/%s/sci-preview" % bid, headers=h).json()
-    assert p["can_load"] is False
-    assert p["lead_id_problems"]["blank"] == 1 and p["lead_id_problems"]["blank_rows"] == [4]
-    assert p["lead_id_problems"]["repeated"] == [{"lead_id": "R001", "rows": [2, 3]}]
-    for mode in ("stage", "load"):
-        r = client.post("/program/leads/import/batches/%s/load" % bid, headers=h, json={"mode": mode})
-        assert r.status_code == 422, r.text
-    assert _counts(db, org.id) == before
-    b = db.query(ImportBatch).filter_by(id=bid).one()
-    assert b.status == "ready_for_review"
-    # Skipping the extra rows on Review clears it.
-    rows = client.get("/program/intake/batches/%s/rows" % bid, headers=h).json()["rows"]
-    for row in rows:
-        if row["row_number"] in (3, 4):
-            client.patch("/program/intake/batches/%s/rows/%s" % (bid, row["id"]), headers=h,
-                         json={"skip": True})
-    r = client.get("/program/leads/import/batches/%s/sci-preview" % bid, headers=h)
+    assert p["can_load"] is True and p["blockers"] == [] and p["rows_to_sci"] == 3
+    assert p["lead_id_problems"]["blank"] == 1 and p["lead_id_problems"]["repeated"] == [{"lead_id": "R001", "rows": [2, 3]}]
+    r = client.post("/program/leads/import/batches/%s/load" % bid, headers=h, json={"mode": "stage"})
     assert r.status_code == 200, r.text
-    p = r.json()
-    assert p["can_load"] is True and p["rows_to_sci"] == 1
+    recs = {x.source_lead_id: x for x in db.query(ProgramSourceRecord).filter_by(organization_id=org.id)
+            .filter(ProgramSourceRecord.first_name.in_(["Rae", "Rob", "Rex"]))}
+    assert set(recs) >= {"R001", "R001-R2"}
+    gen = [k for k in recs if k.startswith("GEN-")]
+    assert len(gen) == 1 and recs[gen[0]].source_id_generated is True
+    assert recs["R001"].source_id_generated in (False, None)
+    assert "repeats Lead ID R001" in (recs["R001-R2"].duplicate_review_reason or "")
 
 
 # ── who may ─────────────────────────────────────────────────────────────────
@@ -519,7 +516,10 @@ def test_crm_intake_routes_refuse_sci_batches(client, sci):
     assert r.json()["id"] in {b["id"] for b in client.get("/intake/batches", headers=ah).json()["batches"]}
 
 
-def test_undecided_duplicates_block_the_load(client, sci):
+def test_undecided_duplicates_no_longer_block_the_load(client, sci):
+    """#385: SCI links the same person itself and holds a shared phone/email
+    under a different name for review - an undecided possible duplicate is
+    reported, never a reason to refuse the whole list."""
     from app.models.import_models import ImportStagedRow
     db, org, h = sci["db"], sci["org"], sci["mh"]
     bid, _pv, rows = _through_review(client, h, _csv(NEW[:2]), skip=())
@@ -527,16 +527,9 @@ def test_undecided_duplicates_block_the_load(client, sci):
     row.intake_status, row.duplicate_resolution = "needs_review", "review"
     db.commit()
     p = client.get("/program/leads/import/batches/%s/sci-preview" % bid, headers=h).json()
-    assert p["can_load"] is False and any("possible duplicate" in x for x in p["blockers"])
-    for mode in ("stage", "load"):
-        r = client.post("/program/leads/import/batches/%s/load" % bid, headers=h, json={"mode": mode})
-        assert r.status_code == 422, r.text
-    r = client.patch("/program/intake/batches/%s/rows/%s" % (bid, row.id), headers=h,
-                     json={"duplicate_resolution": "keep_separate"})
+    assert p["can_load"] is True and p["rows_to_sci"] == 2
+    r = client.post("/program/leads/import/batches/%s/load" % bid, headers=h, json={"mode": "stage"})
     assert r.status_code == 200, r.text
-    p = client.get("/program/leads/import/batches/%s/sci-preview" % bid, headers=h).json()
-    assert p["can_load"] is True
-
 
 def test_sci_upload_capped_at_10mb(client, sci):
     big = _csv(NEW[:1]) + b"x" * (10 * 1024 * 1024)
@@ -644,12 +637,12 @@ def test_a_decided_duplicate_counts_as_decided(client, sci):
     assert b["analysis"]["status"].get("needs_review", 0) == 0
     assert client.get("/program/leads/import/batches/%s/sci-preview" % bid,
                       headers=h).json()["can_load"] is True
-    # "Decide later" again reopens it and blocks the load.
+    # "Decide later" again reopens it - reported, but no longer blocks the load (#385).
     r = client.patch("/program/intake/batches/%s/rows/%s" % (bid, row.id), headers=h,
                      json={"duplicate_resolution": "review"})
     assert r.json()["intake_status"] == "needs_review"
     assert client.get("/program/leads/import/batches/%s/sci-preview" % bid,
-                      headers=h).json()["can_load"] is False
+                      headers=h).json()["can_load"] is True
     # A row with another open question (an ambiguous date) stays in review.
     row.status_reasons = json.dumps([{"code": "possible_existing_match"}, {"code": "ambiguous_date"}])
     db.commit()

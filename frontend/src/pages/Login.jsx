@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { login, fetchAndStoreBranding, startKeepAlive, startRefreshLoop, safeNextPath, getWorkspaceContext,
-         fetchMyContexts, setWorkspaceContext, clearWorkspaceContext } from '../api/client'
+         fetchGoogleSigninConfig, googleSigninStartUrl } from '../api/client'
+import { signInDestination } from '../auth/signInDestination'
 import SignalPulse from '../components/SignalPulse'
 import { detectTheme, THEMES, BRAND_CONFIG } from '../theme.js'
 import './Login.css'
@@ -136,6 +137,16 @@ export default function Login() {
   const params = new URLSearchParams(window.location.search)
   const expired = params.get('expired') === '1'
   const nextPath = safeNextPath(params.get('next'))
+  const googleError = params.get('google_error')
+  // SIGN IN WITH GOOGLE (#430) is offered only where the server says it is
+  // configured for this address - otherwise there is no button at all.
+  const [googleOn, setGoogleOn] = useState(false)
+  useEffect(() => {
+    if (theme !== THEMES.EVOSYSPRO) return undefined
+    let live = true
+    fetchGoogleSigninConfig().then((c) => { if (live) setGoogleOn(!!c.enabled) })
+    return () => { live = false }
+  }, [])
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -149,49 +160,8 @@ export default function Login() {
       await fetchAndStoreBranding()
       startKeepAlive()
       startRefreshLoop()
-      // WHERE LOGIN LANDS — the SERVER decides, not a role label.
-      //
-      // This used to be `role === 'god_admin' ? '/god' : '/'`, one branch for
-      // one column. It sent a workspace-only customer and a platform-only
-      // salesperson to the same tenant home, and the salesperson's version of
-      // that home is a screen belonging to the other domain.
-      //
-      // /auth/my-contexts returns a default_context built from real
-      // memberships: the back office when they have one, their single
-      // workspace when that is all they hold, a selector when they hold
-      // several. A failure falls back to the old behaviour rather than
-      // stranding somebody at a blank page.
-      let dest = user?.role === 'god_admin' ? '/god' : '/'
-      try {
-        const ctx = await fetchMyContexts()
-        const def = ctx && ctx.default_context
-        if (def && def.path) {
-          dest = def.path
-          // A product home (wholesale@ -> Wholesale) runs inside its host
-          // workspace, so that workspace is selected too.
-          if ((def.type === 'workspace' || def.type === 'product') && def.organization_id) {
-            setWorkspaceContext(def.organization_id)
-          } else {
-            clearWorkspaceContext()
-          }
-        }
-        // BACK TO WHERE THEY WERE after an expired session - into the same
-        // workspace when they still have it, otherwise the default above.
-        // Never return into the Roofing app for a workspace whose Roofing
-        // program is not switched on (the server's program_route says so):
-        // that was a dead "isn't turned on" screen after every re-login.
-        const priorEntry = (ctx?.workspace_contexts || []).find(w => w.organization_id === priorWorkspace)
-        const deadRoofing = nextPath && nextPath.startsWith('/program/roofing') &&
-          !(priorEntry && priorEntry.program_route === '/program/roofing')
-        if (nextPath && !deadRoofing) {
-          const still = priorWorkspace && (ctx?.contexts || []).some(c => c.type === 'workspace' && c.organization_id === priorWorkspace)
-          if (still) { setWorkspaceContext(priorWorkspace); dest = nextPath }
-          else if (!priorWorkspace) dest = nextPath
-        }
-      } catch (ctxErr) {
-        // Keep the legacy destination. A context lookup that fails must not
-        // turn a successful sign-in into an error screen.
-      }
+      // Shared server-authorized destination for password and Google sign-in.
+      const dest = await signInDestination(user, nextPath, priorWorkspace)
       navigate(dest)
     } catch (err) {
       setError(err.message)
@@ -209,7 +179,8 @@ export default function Login() {
     return (
       <EvosysLogin email={email} setEmail={setEmail} password={password} setPassword={setPassword}
                    error={error} loading={loading} onSubmit={handleSubmit} expired={expired}
-                   nextPath={nextPath} supportEmail={brand && brand.supportEmail} />
+                   nextPath={nextPath} supportEmail={brand && brand.supportEmail}
+                   googleHref={googleOn ? googleSigninStartUrl(nextPath) : null} googleError={googleError} />
     )
   }
 

@@ -120,6 +120,47 @@ def command_center(hours: int = Query(24, ge=1, le=24 * 30), db: Session = Depen
     return V.command_center(db, org_id, hours=hours, include_test=V.sandbox_only(db, org_id))
 
 
+@router.get("/opportunity-radar")
+def opportunity_radar(
+    market: str = Query("all", max_length=20),
+    state: Optional[str] = Query(None, min_length=2, max_length=2),
+    county: Optional[str] = Query(None, max_length=128),
+    min_score: Optional[int] = Query(None, ge=0, le=100),
+    limit: int = Query(25, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+    include_test: bool = False,
+    sort: str = Query("score", max_length=10),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_tenant_or_observer),
+):
+    """Private, read-only, evidence-backed Radar. Never a public property feed.
+
+    Mounted under the EXISTING Wholesale feature, tenant access and team-rights
+    gates. No schema, account, SMS, paid provider or outbound side effects.
+    """
+    from app.services.evosense import overlooked as RADAR
+    if market not in RADAR.MARKETS:
+        raise HTTPException(status_code=422, detail="Unknown opportunity market.")
+    if sort not in RADAR.SORTS:
+        raise HTTPException(status_code=422, detail="Unknown sort.")
+    return RADAR.search(
+        db, _read_org(db, user), market=market, state=state, county=county,
+        min_score=min_score, limit=limit, offset=offset, include_test=include_test, sort=sort,
+    )
+
+
+@router.get("/opportunity-radar/{property_id}/buyer-matches")
+def opportunity_radar_buyer_matches(property_id: str, db: Session = Depends(get_db),
+                                    user: User = Depends(require_tenant_or_observer)):
+    """Confirmed buyer matches for one Radar property. Read-only: nothing is
+    saved, sent or notified. Another workspace's property answers 404."""
+    from app.services.evosense import overlooked as RADAR
+    out = RADAR.buyer_matches(db, _read_org(db, user), property_id)
+    if out is None:
+        raise HTTPException(status_code=404, detail="Property not found")
+    return out
+
+
 @router.get("/inbox")
 def inbox(bucket: Optional[str] = None, strategy_id: Optional[str] = None, q: Optional[str] = None,
           signal: Optional[str] = None, sort: str = "work",

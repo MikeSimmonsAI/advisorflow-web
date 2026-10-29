@@ -167,3 +167,33 @@
 .evl #evl-email, .evl #evl-password, .evl #evl-email:focus, .evl #evl-password:focus { box-shadow: none !important; border: 0 !important; background: transparent !important; outline: none !important; }
 /* fade the photo layer out instead of ending it on a solid colour (no seam against the page glow) */
 .evl-bg { -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 72%, transparent 100%); mask-image: linear-gradient(180deg, #000 0%, #000 72%, transparent 100%); }
+
+
+/* Chrome/Edge autofill paints its own light field background. The general
+   !important focus reset above previously suppressed our original inset
+   autofill shadow, leaving white inputs with white text. Keep the shell's
+   focus ring and force the actual input fill back to the login's dark navy. */
+.evl #evl-email,
+.evl #evl-password { color-scheme: dark; }
+.evl #evl-email:-webkit-autofill,
+.evl #evl-email:-webkit-autofill:hover,
+.evl #evl-email:-webkit-autofill:focus,
+.evl #evl-password:-webkit-autofill,
+.evl #evl-password:-webkit-autofill:hover,
+.evl #evl-password:-webkit-autofill:focus {
+  -webkit-text-fill-color: #f4f8ff !important;
+  caret-color: #f4f8ff !important;
+  -webkit-box-shadow: 0 0 0 1000px #07142c inset !important;
+  box-shadow: 0 0 0 1000px #07142c inset !important;
+}
+/* ...and give the field shell the same navy while the browser holds an autofilled
+   value, so the icon and show/hide areas match the filled text area (no inner box). */
+.evl .evl-input:has(input:-webkit-autofill) { background: #07142c; }
+
+/* Continue with Google (#430) - rendered only when the server reports it configured.
+   Dark variant of Google's sign-in button: #131314 fill, #8E918F outline, Google "G". */
+.evl-or { display: flex; align-items: center; gap: 12px; margin: 18px 0 14px; color: #7f93b5; font-size: 13px; }
+.evl-or::before, .evl-or::after { content: ''; flex: 1; height: 1px; background: rgba(125, 165, 225, .2); }
+.evl .evl-google { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 50px; border-radius: 12px;
+  background: #131314; border: 1px solid #8e918f; color: #e3e3e3; font: 500 15.5px 'Inter', 'Roboto', sans-serif; text-decoration: none; }
+.evl .evl-google:hover { background: #1f1f20; text-decoration: none; color: #fff; }

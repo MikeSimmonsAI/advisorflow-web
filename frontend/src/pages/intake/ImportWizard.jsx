@@ -979,6 +979,7 @@ function SciLoadStep({ batch, onReview, onDone }) {
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
   const [tick, setTick] = useState(0)
+  const [campaign, setCampaign] = useState('')   // #385: the campaign THIS file belongs to
   useEffect(() => {
     let live = true
     setPv(null); setErr('')
@@ -991,11 +992,11 @@ function SciLoadStep({ batch, onReview, onDone }) {
   async function run(mode) {
     if (mode === 'load' && !window.confirm(
       `Load ${fmt(pv?.rows_to_sci || 0)} rows into SCI families?\n\n` +
-      'Clean families are added to SCI Leads. Anyone with an unknown location, a possible duplicate or a "not interested" status is held for review.\n\n' +
+      'Clean families are added to SCI Leads. Anyone with an unknown location, a possible duplicate or a do-not-contact status is held for review (a past "not interested" is shown, not held).\n\n' +
       NOTHING_SENT)) return
     setBusy(mode); setErr('')
     try {
-      await api.post(`/program/leads/import/batches/${batch.id}/load`, { mode })
+      await api.post(`/program/leads/import/batches/${batch.id}/load`, { mode, campaign_family: campaign || null })
       onDone()
     } catch (e) { setErr(errorText(e)); setTick(t => t + 1) }
     finally { setBusy('') }
@@ -1044,12 +1045,19 @@ function SciLoadStep({ batch, onReview, onDone }) {
           <button className="btn btn--secondary btn--sm" style={{ marginLeft: 8 }} onClick={onReview}>Change on Review</button></div>
       )}
       {(ids.blank > 0 || (ids.repeated || []).length > 0) && (
-        <div className="ic-warn" data-testid="sci-lead-id-problems">
-          <b>SCI needs one Lead ID per family.</b>
-          {ids.blank > 0 && <div>No Lead ID on rows {ids.blank_rows.join(', ')}.</div>}
-          {(ids.repeated || []).map(r => <div key={r.lead_id}>Lead ID {r.lead_id} is on rows {r.rows.join(', ')}.</div>)}
+        <div className="ic-note" data-testid="sci-lead-id-problems">
+          {ids.blank > 0 && <div>{fmt(ids.blank)} row(s) have no Lead ID - SCI gives each one its own generated ID (marked as generated, never shown as a CRM ID).</div>}
+          {(ids.repeated || []).length > 0 && <div>{fmt(ids.repeated.length)} Lead ID(s) appear more than once - every row is kept and the repeats are held for review.</div>}
         </div>
       )}
+      <h3 className="ic-group">Campaign for this file</h3>
+      <div className="ic-note" data-testid="sci-campaign-pick">
+        <select value={campaign} onChange={e => setCampaign(e.target.value)} aria-label="Campaign for this file">
+          <option value="">Use each row's own campaign column (no guessing)</option>
+          {(pv.campaigns || []).map(c => <option key={c.key} value={c.key}>{c.name}{c.active ? '' : ' (off)'}</option>)}
+        </select>
+        <div className="ic-muted">Every row in this file is put in the campaign you pick. A row with no campaign is never sent anything.</div>
+      </div>
       {(st.bad_phones || []).length > 0 && (
         <div className="ic-note">Phone numbers that won't work: {st.bad_phones.slice(0, 10).map(b => `row ${b.row} (${b.phone})`).join(', ')}
           {st.bad_phones.length > 10 ? '…' : ''}</div>

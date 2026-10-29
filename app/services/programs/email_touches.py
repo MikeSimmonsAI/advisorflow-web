@@ -435,6 +435,9 @@ def _hold(db: Session, prog: OutreachProgram, item: Dict, prof: LocationProfile,
 
 
 def _family_copy_is_default(fam: CampaignFamily) -> bool:
+    from app.services.programs.campaigns import OWN_COPY_KEYS
+    if fam.key in OWN_COPY_KEYS:
+        return False                    # #385: its own approved copy, never a playbook
     from app.services.programs.setup import DEFAULT_FAMILIES
     d = next((f for f in DEFAULT_FAMILIES if f["key"] == fam.key), None)
     return d is None or ((fam.email_body_template or "") == d["body"]
