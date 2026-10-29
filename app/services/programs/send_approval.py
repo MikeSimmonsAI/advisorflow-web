@@ -385,6 +385,139 @@ def stage_central_alabama(db: Session, prog: OutreachProgram, user: User, *,
 
 
 
+CA_PREFIX = "SCI-CA-20261025-"
+
+
+def _ca_csv(records) -> bytes:
+    """The Central Alabama rows exactly as originally supplied (raw_json),
+    back into the CSV the importer reads - so the existing records are
+    re-processed under today's rules without anyone re-uploading a file."""
+    import csv
+    import io
+    import json as _json
+    rows, cols = [], []
+    for r in sorted(records, key=lambda x: x.source_lead_id):
+        raw = _json.loads(r.raw_json or "{}")
+        raw.setdefault("Lead ID", r.source_lead_id)
+        rows.append(raw)
+        for k in raw:
+            if k not in cols:
+                cols.append(k)
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+    w.writeheader()
+    for raw in rows:
+        w.writerow({k: ("" if raw.get(k) is None else str(raw.get(k))) for k in cols})
+    return buf.getvalue().encode("utf-8")
+
+
+def prepare_central_alabama(db: Session, prog: OutreachProgram, user: User, *, apply: bool = False) -> Dict:
+    """THE one-click Central Alabama preparation (owner directive, Oct 29).
+
+    apply=False: read-only counts as things stand now.
+    apply=True, in order, every step idempotent:
+      1. the campaign (OFF, no copy) and the owner-selected Kilgroe location exist;
+      2. the existing Central Alabama source records are re-processed under the
+         current rules (existing SCI people excluded from THIS campaign only,
+         owner hold releases, Joyce/Kilgroe routing) - from their stored
+         original rows, no file needed, nothing new created;
+      3. only genuinely new, eligible people without a live lead are promoted
+         to leads (no consent recorded, no cadence, nothing sent);
+      4. every eligible new person is recorded Approved to Send for this
+         campaign (stage_central_alabama) - no schedule, no cadence, no
+         activation, no message.
+    Previous SCI campaigns, cadences, replies and appointments are not touched.
+    """
+    from app.models.models import Message, EmailMessage, Organization
+    from app.services.programs import campaigns, importer, promote as _promote
+    if (prog.name or "").strip().lower() != "service corporation international":
+        raise ValueError("Central Alabama staging is available only to SCI")
+    key = campaigns.CENTRAL_ALABAMA_KEY
+
+    def ca_records():
+        return (db.query(ProgramSourceRecord)
+                .filter(ProgramSourceRecord.organization_id == prog.organization_id,
+                        ProgramSourceRecord.source_lead_id.like(CA_PREFIX + "%")).all())
+
+    def counts():
+        recs = ca_records()
+        excluded = [r for r in recs if (r.hold_reason or "").startswith("EXCLUDED FROM CENTRAL ALABAMA")]
+        locrev = [r for r in recs if r.location_status != "mapped"]
+        approved = [r for r in recs if r.approved_to_send_at is not None]
+        def people(rows):
+            return len({r.contact_master_key or r.source_lead_id for r in rows})
+        return {"source_records": len(recs),
+                "excluded_existing_records": len(excluded), "excluded_existing_people": people(excluded),
+                "location_review_records": len(locrev),
+                "held_records": sum(1 for r in recs if r.on_hold),
+                "records_with_lead": sum(1 for r in recs if r.lead_id),
+                "approved_records": len(approved),
+                "approved_people": len({r.lead_id for r in approved if r.lead_id})}
+
+    before = counts()
+    if not apply:
+        plan = stage_central_alabama(db, prog, user, apply=False)
+        return {"applied": False, "before": before, "would_approve_now": plan["eligible_unique_leads"],
+                "note": "Preview only. Prepare re-processes the records and promotes new people first, "
+                        "so the final number can be higher than would_approve_now.",
+                "campaign_active": False, "messages_sent": 0, "cadences_started": 0}
+
+    sent_before = (db.query(Message.id).count(), db.query(EmailMessage.id).count(), db.query(CadenceState.id).count())
+    fam = campaigns.ensure_central_alabama(db, prog.organization_id)
+    if fam.is_active:
+        raise ValueError("Central Alabama must stay OFF during staging")
+    campaigns.ensure_kilgroe_for_sci(db, prog.organization_id)
+    if not prog.require_send_approval:
+        # The gate that makes Approved to Send meaningful: no automated send to
+        # anyone nobody approved. Switching it ON only ever restricts sending.
+        prog.require_send_approval = True
+        db.commit()
+
+    # 2. re-process the existing records under today's rules
+    org = db.query(Organization).filter(Organization.id == prog.organization_id).first()
+    recs = ca_records()
+    if not recs:
+        raise ValueError("no Central Alabama source records found")
+    restage = importer.stage(db, org, _ca_csv(recs), filename="central-alabama-reprocess.csv",
+                             dry_run=False, actor_id=user.id, campaign_family=key)
+    s = restage["summary"]
+    if s.get("new_records"):
+        # Re-processing must never invent a record.
+        raise ValueError("re-processing created %d new records - stopped" % s["new_records"])
+
+    # 3. promote ONLY new Central Alabama people: groups made entirely of
+    #    Central Alabama rows (never a group that includes another campaign's
+    #    family) that have no live lead and nothing on hold.
+    groups = {}
+    for r in (db.query(ProgramSourceRecord)
+              .filter(ProgramSourceRecord.organization_id == prog.organization_id).all()):
+        groups.setdefault(r.contact_master_key or r.source_lead_id, []).append(r)
+    only_keys = {k for k, rows in groups.items()
+                 if rows and all((r.source_lead_id or "").startswith(CA_PREFIX) for r in rows)
+                 and not any(r.lead_id for r in rows) and not any(r.on_hold for r in rows)
+                 and all(r.location_status == "mapped" for r in rows)}
+    promoted = (_promote.promote(db, org, user, apply=True, only_keys=only_keys, scope_counts=True)
+                if only_keys else {"created": 0})
+
+    # 4. record Approved to Send (no send, no cadence, no activation)
+    staged = stage_central_alabama(db, prog, user, apply=True)
+    after = counts()
+    sent_after = (db.query(Message.id).count(), db.query(EmailMessage.id).count(), db.query(CadenceState.id).count())
+    db.refresh(fam)
+    return {"applied": True, "before": before, "after": after,
+            "reprocess": {k: s.get(k) for k in ("source_rows", "staged", "new_records", "linked_to_existing_families",
+                                                "superseded_duplicate_leads", "kept_in_other_campaign",
+                                                "location_review", "duplicate_review_rows")},
+            "promoted_new_people": promoted.get("created", 0),
+            "approved_to_send_people": staged["eligible_unique_leads"],
+            "newly_approved_people": staged["newly_approved"],
+            "approved_to_send_records": staged["eligible_source_rows"],
+            "not_approved_reasons": staged["skipped_lead_reasons"],
+            "campaign": key, "campaign_active": bool(fam.is_active),
+            "messages_sent": (sent_after[0] - sent_before[0]) + (sent_after[1] - sent_before[1]),
+            "cadences_started": sent_after[2] - sent_before[2]}
+
+
 def approve(db: Session, prog: OutreachProgram, user: User, lead_ids: List[str],
             mode: str = "text_email", start_at: Optional[datetime] = None,
             spacing_minutes: int = 0) -> Dict:
