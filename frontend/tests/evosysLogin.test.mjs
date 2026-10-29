@@ -18,7 +18,10 @@ test('the public page never names or links God Mode, the Executive Suite or admi
 
 test('no invented statistics, testimonials, certifications or provider sign-in buttons', () => {
   assert.ok(!/\d+(\.\d+)?\s?[MK]\b|\d+%|99\.9|10x|10×|SOC|HIPAA|ISO 27001|testimonial/i.test(code))
-  assert.ok(!/google|microsoft|apple|oauth|sso/i.test(code), 'a third-party sign-in control appeared')
+  assert.ok(!/microsoft|apple|sso\b|facebook/i.test(code), 'an unsupported third-party sign-in control appeared')
+  // Google (#430) is the one provider, and only as a link the SERVER enabled:
+  // rendered behind `googleHref`, which Login.jsx sets from /auth/google/config.
+  assert.match(code, /\{googleHref \? \(/)
 })
 
 test('no credentials are written into the page', () => {
@@ -74,4 +77,13 @@ test('Chrome autofill on email and password retains the dark field treatment', (
 
 test('the field shell matches the autofilled text area (no two-tone box)', () => {
   assert.match(css, /\.evl \.evl-input:has\(input:-webkit-autofill\)\s*\{\s*background:\s*#07142c;/)
+})
+
+test('the Google button is server-gated and the session never rides in a URL', () => {
+  assert.match(login, /fetchGoogleSigninConfig\(\)\.then\(\(c\) => \{ if \(live\) setGoogleOn\(!!c\.enabled\) \}\)/)
+  assert.match(login, /googleHref=\{googleOn \? googleSigninStartUrl\(nextPath\) : null\}/)
+  const done = R('../src/pages/GoogleSignInComplete.jsx').toString()
+  assert.match(done, /window\.history\.replaceState\(null, '', window\.location\.pathname\)/)
+  assert.match(done, /signInDestination\(user, nextPath, priorWorkspace\)/)
+  assert.ok(!/access_token/.test(done))
 })

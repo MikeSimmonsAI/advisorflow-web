@@ -578,3 +578,5 @@ import app.models.idempotency_models  # noqa: F401  (idempotency_keys - database
 import app.models.conversation_models  # noqa: F401  (conversation_memory_items, conversation_states)
 import app.models.program_models  # noqa: F401  (outreach programs: location profiles, source records, responses, assets)
 import app.models.esign_models  # noqa: F401  (esign_envelopes, esign_signers, esign_events - EvoSys e-signature)
+# Sign in with Google (#430): transactions, explicit account links, login tickets.
+import app.models.google_signin_models  # noqa: F401  (imported for side effects)

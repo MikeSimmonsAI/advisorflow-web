@@ -189,3 +189,11 @@
 /* ...and give the field shell the same navy while the browser holds an autofilled
    value, so the icon and show/hide areas match the filled text area (no inner box). */
 .evl .evl-input:has(input:-webkit-autofill) { background: #07142c; }
+
+/* Continue with Google (#430) - rendered only when the server reports it configured.
+   Dark variant of Google's sign-in button: #131314 fill, #8E918F outline, Google "G". */
+.evl-or { display: flex; align-items: center; gap: 12px; margin: 18px 0 14px; color: #7f93b5; font-size: 13px; }
+.evl-or::before, .evl-or::after { content: ''; flex: 1; height: 1px; background: rgba(125, 165, 225, .2); }
+.evl .evl-google { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 50px; border-radius: 12px;
+  background: #131314; border: 1px solid #8e918f; color: #e3e3e3; font: 500 15.5px 'Inter', 'Roboto', sans-serif; text-decoration: none; }
+.evl .evl-google:hover { background: #1f1f20; text-decoration: none; color: #fff; }
