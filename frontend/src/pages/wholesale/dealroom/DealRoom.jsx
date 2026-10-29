@@ -63,7 +63,7 @@ export default function DealRoom() {
       <div className="od-pagehead">
         <div>
           {view === 'overview' ? <p className="od-title">Owner Deal Room</p>
-            : <h1 className="od-title"><button type="button" className="od-crumb" onClick={() => go('overview')}>Owner Deal Room</button> <span aria-hidden="true">›</span> {(VIEWS.find(([k]) => k === view) || [])[1]}</h1>}
+            : <h1 className="od-title"><button type="button" className="od-crumb" onClick={() => go('overview')}>Owner Deal Room</button> <span aria-hidden="true">›</span> <span className="od-title__view">{(VIEWS.find(([k]) => k === view) || [])[1]}</span></h1>}
           <p className="od-sub">Manage Investors · Publish Deals · Track Activity{ov && ov.name ? ` · ${ov.name}` : ''}</p>
         </div>
         <div className="od-pagehead__side">

@@ -1,0 +1,470 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   OLP WORKSPACE THEME - Overlooked Properties, powered by BookaBoost
+   Owner decisions 2-5 (Oct 29): one cohesive dark platform, gold primary
+   actions, one header system, one sidebar.
+
+   SCOPE. Every selector below starts with html[data-product-brand="olp"].
+   Layout sets that attribute ONLY while a BookaBoost Wholesale screen is open
+   in OLP mode (src/brand/productBrand.js) and removes it on the way out, so:
+     - the BookaBoost rollback build never matches a rule here;
+     - EvoSys Pro, Harmony Hustle, AdvisorFlow and every other tenant shell
+       never match a rule here;
+     - drawers and dialogs rendered outside the layout (portals) are themed.
+   Nothing here is a blanket override: it re-points the Wholesale design
+   system's own tokens (evo-ds.css) and restyles named components. Each
+   screen is validated in the browser (scripts in docs/redesign/olp/).
+   Status colours keep their meaning: green success, amber warning, red error.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. TOKENS ───────────────────────────────────────────────────────────── */
+html[data-product-brand="olp"] {
+  --olp-bg: #070b13;
+  --olp-surface: #0d1422;
+  --olp-surface-2: #111a2b;
+  --olp-surface-3: #16213a;
+  --olp-inset: #0a101b;
+  --olp-line: #1f2a40;
+  --olp-line-strong: #2e3b57;
+  --olp-text: #eef1f6;
+  --olp-text-2: #c3cad6;
+  --olp-text-3: #9ba5b7;
+  --olp-gold: #d4a54c;
+  --olp-gold-light: #ecc879;
+  --olp-gold-deep: #b8862f;
+  --olp-gold-soft: rgba(212, 165, 76, 0.14);
+  --olp-gold-hair: rgba(212, 165, 76, 0.38);
+  --olp-gold-fill: linear-gradient(180deg, #ecc879 0%, #d4a54c 58%, #b8862f 100%);
+  --olp-on-gold: #15100a;
+  --olp-serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
+  background: var(--olp-bg);
+}
+
+/* The Wholesale design system's own tokens, re-pointed for OLP. Every
+   component that uses them (and the BRIDGE the older screens read) follows. */
+html[data-product-brand="olp"] .evo-app,
+html[data-product-brand="olp"] .evo-tokens,
+html[data-product-brand="olp"] .evo-drawer-root {
+  --evo-bg: var(--olp-bg);
+  --evo-surface: var(--olp-surface);
+  --evo-surface-elevated: var(--olp-surface-2);
+  --evo-surface-raised: var(--olp-surface-3);
+  --evo-surface-inset: var(--olp-inset);
+  --evo-line: var(--olp-line);
+  --evo-line-strong: var(--olp-line-strong);
+  --evo-text-primary: var(--olp-text);
+  --evo-text-secondary: var(--olp-text-2);
+  --evo-text-tertiary: var(--olp-text-3);
+  --evo-navy: var(--olp-text);
+  --evo-primary: var(--olp-gold);
+  --evo-primary-fill: var(--olp-gold);
+  --evo-primary-ink: var(--olp-gold-light);
+  --evo-primary-soft: var(--olp-gold-soft);
+  --evo-module: var(--olp-gold-light);
+  --evo-info: #4cc3e0;
+  --evo-success: #3fbf8a;
+  --evo-warning: #f0a83a;
+  --evo-danger: #ff6b78;
+  --evo-violet: #a58bff;
+  --evo-neutral: #8d98ab;
+  --evo-info-soft: rgba(76, 195, 224, 0.14);
+  --evo-success-soft: rgba(63, 191, 138, 0.15);
+  --evo-warning-soft: rgba(240, 168, 58, 0.15);
+  --evo-danger-soft: rgba(255, 107, 120, 0.15);
+  --evo-violet-soft: rgba(165, 139, 255, 0.15);
+  --evo-neutral-soft: rgba(141, 152, 171, 0.16);
+  --evo-success-ink: #6fdcaf;
+  --evo-warning-ink: #f6c56b;
+  --evo-danger-ink: #ff9aa5;
+  --evo-info-ink: #7fd6ec;
+  --evo-violet-ink: #c3b2ff;
+  --evo-score-opportunity: #3fbf8a;
+  --evo-score-contact: #6aa2ff;
+  --evo-score-intent: #f0a83a;
+  --evo-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 22px -10px rgba(0, 0, 0, 0.55);
+  --evo-shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.35), 0 20px 44px -18px rgba(0, 0, 0, 0.7);
+  --evo-focus: 0 0 0 2px var(--olp-bg), 0 0 0 4px var(--olp-gold);
+  /* bridge for the older module stylesheets */
+  --bg-field: var(--olp-inset);
+  --bg-field-soft: var(--olp-inset);
+  --bg-row: #0f1727;
+  --bg-row-hover: #152038;
+  --bg-glass: var(--olp-surface);
+  --text-inverse: var(--olp-on-gold);
+  /* Deal Room's own tokens (dealroom.css): navy text -> light, blue -> gold */
+  --drm-navy: var(--olp-text);
+  --drm-navy-2: var(--olp-text-2);
+  --drm-blue: var(--olp-gold);
+  --drm-blue-d: var(--olp-gold-light);
+  --drm-blue-soft: var(--olp-gold-soft);
+  --drm-line: var(--olp-line);
+  --drm-muted: var(--olp-text-3);
+  --drm-ink: var(--olp-text);
+  --drm-ok: #6fdcaf;
+  --drm-warn: #f6c56b;
+  --drm-bad: #ff9aa5;
+  color-scheme: dark;
+}
+
+/* ── 2. SHELL: canvas, sidebar, top navigation ───────────────────────────── */
+html[data-product-brand="olp"] .layout.layout--wholesale { background: var(--olp-bg); }
+@media (min-width: 769px) {
+  html[data-product-brand="olp"] .layout.layout--wholesale {
+    background: linear-gradient(90deg, #0a0f1a 0, #0a0f1a var(--sidebar-width), var(--olp-bg) var(--sidebar-width));
+  }
+}
+html[data-product-brand="olp"] .layout--wholesale .content-area,
+html[data-product-brand="olp"] .layout--wholesale .main-content { background: var(--olp-bg); color: var(--olp-text); }
+
+/* one rail, everywhere (no navy Buyers rail, no folding groups in OLP) */
+html[data-product-brand="olp"] .layout--wholesale .sidebar {
+  background: linear-gradient(180deg, #0c121f 0%, #090d17 100%);
+  border-right: 1px solid rgba(212, 165, 76, 0.22);
+  color: var(--olp-text-2);
+}
+html[data-product-brand="olp"] .layout--wholesale .sidebar .nav-section-label {
+  color: #a28a5c; letter-spacing: 0.16em; font-size: 10.5px; font-weight: 700;
+}
+html[data-product-brand="olp"] .layout--wholesale .sidebar .nav-item { color: #cdd3de; }
+html[data-product-brand="olp"] .layout--wholesale .sidebar .nav-item svg { color: #a6afbf; }
+html[data-product-brand="olp"] .layout--wholesale .sidebar .nav-item:hover { background: rgba(212, 165, 76, 0.08); color: #fff; }
+html[data-product-brand="olp"] .layout--wholesale .sidebar .nav-item--active,
+html[data-product-brand="olp"] .layout--wholesale .sidebar .nav-item--active:hover {
+  background: var(--olp-gold-fill); color: var(--olp-on-gold); box-shadow: 0 6px 16px rgba(212, 165, 76, 0.18);
+}
+html[data-product-brand="olp"] .layout--wholesale .sidebar .nav-item--active svg { color: var(--olp-on-gold); }
+html[data-product-brand="olp"] .layout--wholesale .sidebar-footer { border-top-color: var(--olp-line); }
+html[data-product-brand="olp"] .layout--wholesale .sidebar .user-chip { background: rgba(255, 255, 255, 0.05); border-color: var(--olp-gold-hair); }
+html[data-product-brand="olp"] .layout--wholesale .sidebar .logout-btn { background: transparent; border-color: var(--olp-line-strong); color: var(--olp-text); }
+html[data-product-brand="olp"] .layout--wholesale .sidebar .back-to-website-btn { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .layout--wholesale .sidebar .back-to-website-btn:hover { background: rgba(255, 255, 255, 0.05); color: #fff; }
+html[data-product-brand="olp"] .layout--wholesale .wsx-brand img[src*="/brands/olp/"] { max-width: 214px !important; width: 214px; height: auto !important; }
+
+html[data-product-brand="olp"] .layout--wholesale .top-bar {
+  background: rgba(7, 11, 19, 0.94); border-bottom: 1px solid rgba(212, 165, 76, 0.22);
+}
+html[data-product-brand="olp"] .layout--wholesale .top-bar button { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .layout--wholesale .wsx-search input { background: #0e1422; border-color: #273149; color: var(--olp-text); }
+html[data-product-brand="olp"] .layout--wholesale .wsx-search input::placeholder { color: #8a93a6; }
+html[data-product-brand="olp"] .layout--wholesale .wsx-search input:focus { background: #0e1422; border-color: var(--olp-gold); box-shadow: 0 0 0 3px rgba(212, 165, 76, 0.2); }
+html[data-product-brand="olp"] .layout--wholesale .wsx-search svg { color: #8a93a6; }
+html[data-product-brand="olp"] .layout--wholesale .wsx-env { color: #f0c870; background: rgba(212, 165, 76, 0.12); box-shadow: inset 0 0 0 1px rgba(212, 165, 76, 0.45); }
+html[data-product-brand="olp"] .layout--wholesale .program-switch,
+html[data-product-brand="olp"] .layout--wholesale .top-bar .ctx-switch-btn { background: transparent; color: var(--olp-text); border-color: #3a4560; }
+html[data-product-brand="olp"] .layout--wholesale .wsx-user { border-left-color: #273149; }
+html[data-product-brand="olp"] .layout--wholesale .wsx-user__name { color: #f4f6fa; }
+html[data-product-brand="olp"] .layout--wholesale .wsx-user__role { color: #a9b2c3; }
+html[data-product-brand="olp"] .layout--wholesale .wsx-user__avatar { background: var(--olp-gold-fill); color: var(--olp-on-gold); }
+@media (max-width: 768px) {
+  html[data-product-brand="olp"] .layout--wholesale .mobile-menu-btn { background: #0e1422; border-color: #3a4560; }
+  html[data-product-brand="olp"] .layout--wholesale .mobile-menu-btn span { background: var(--olp-text); }
+  html[data-product-brand="olp"] .layout--wholesale .sidebar-close-btn { background: #0e1422; border-color: #3a4560; color: var(--olp-text); }
+}
+
+/* ── 3. SHARED CONTROLS: gold primary, dark secondary ────────────────────── */
+html[data-product-brand="olp"] .evo-btn--primary,
+html[data-product-brand="olp"] .evo-btn--primary:hover:not(:disabled) {
+  background: var(--olp-gold-fill); color: var(--olp-on-gold); box-shadow: 0 6px 16px rgba(212, 165, 76, 0.2);
+}
+html[data-product-brand="olp"] .evo-btn--secondary,
+html[data-product-brand="olp"] .evo-herobox__actions .evo-btn--secondary {
+  background: rgba(255, 255, 255, 0.04); color: var(--olp-text); box-shadow: inset 0 0 0 1px var(--olp-line-strong);
+}
+html[data-product-brand="olp"] .evo-btn--secondary:hover:not(:disabled) { background: rgba(212, 165, 76, 0.1); }
+html[data-product-brand="olp"] .evo-app input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html[data-product-brand="olp"] .evo-app select,
+html[data-product-brand="olp"] .evo-app textarea,
+html[data-product-brand="olp"] .evo-drawer-root input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html[data-product-brand="olp"] .evo-drawer-root select,
+html[data-product-brand="olp"] .evo-drawer-root textarea {
+  background-color: var(--olp-inset); color: var(--olp-text); border-color: var(--olp-line-strong);
+}
+html[data-product-brand="olp"] .evo-app ::placeholder,
+html[data-product-brand="olp"] .evo-drawer-root ::placeholder { color: #7f899c; }
+
+/* ── 4. HEADER SYSTEM: one type scale, gold eyebrow, gold hairline ───────── */
+/* shared by every variant */
+html[data-product-brand="olp"] .evo-herobox,
+html[data-product-brand="olp"] .evo-head,
+html[data-product-brand="olp"] .drm-hero {
+  border: 1px solid var(--olp-gold-hair); border-radius: 16px; background-color: #0b1220;
+}
+html[data-product-brand="olp"] .evo-herobox__eyebrow,
+html[data-product-brand="olp"] .evo-head__eyebrow,
+html[data-product-brand="olp"] .evo-head__eyebrow--ops,
+html[data-product-brand="olp"] .evo-head__eyebrow--set,
+html[data-product-brand="olp"] .drm-eyebrow {
+  color: var(--olp-gold-light); font-size: 11.5px; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase;
+}
+html[data-product-brand="olp"] .evo-herobox__title,
+html[data-product-brand="olp"] .evo-head__title,
+html[data-product-brand="olp"] .drm-h1 {
+  font-family: var(--olp-serif); font-weight: 700; color: #fff; letter-spacing: -0.01em; line-height: 1.1; text-shadow: none;
+}
+html[data-product-brand="olp"] .evo-herobox__sub,
+html[data-product-brand="olp"] .evo-head__sub,
+html[data-product-brand="olp"] .drm-hero__sub { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .evo-herobox__chip { background: rgba(255, 255, 255, 0.06); color: var(--olp-text); box-shadow: inset 0 0 0 1px var(--olp-line-strong); }
+
+/* A. HERO - primary dashboards: photo kept, navy veil, 40 px title */
+html[data-product-brand="olp"][data-olp-header="hero"] .evo-herobox { min-height: 200px; }
+html[data-product-brand="olp"][data-olp-header="hero"] .evo-herobox::before {
+  background: linear-gradient(90deg, rgba(7, 11, 19, 0.94) 0%, rgba(7, 11, 19, 0.78) 40%, rgba(7, 11, 19, 0.3) 75%, rgba(7, 11, 19, 0.5) 100%);
+}
+html[data-product-brand="olp"][data-olp-header="hero"] .evo-herobox__title,
+html[data-product-brand="olp"][data-olp-header="hero"] .drm-h1 { font-size: clamp(30px, 3vw, 42px); }
+html[data-product-brand="olp"] .evo-herobox__quote { color: var(--olp-gold-light); }
+
+/* B. COMPACT - operations, tables, settings: no photo banner, 30 px title */
+html[data-product-brand="olp"][data-olp-header="compact"] .evo-herobox {
+  min-height: 0; background: linear-gradient(135deg, #0d1626 0%, #0b1220 100%); box-shadow: none;
+}
+html[data-product-brand="olp"][data-olp-header="compact"] .evo-herobox__art,
+html[data-product-brand="olp"][data-olp-header="compact"] .evo-herobox__quote { display: none; }
+html[data-product-brand="olp"][data-olp-header="compact"] .evo-herobox::before { display: none; }
+html[data-product-brand="olp"][data-olp-header="compact"] .evo-herobox__body { padding: 18px 22px; max-width: none; }
+html[data-product-brand="olp"][data-olp-header="compact"] .evo-herobox__title,
+html[data-product-brand="olp"][data-olp-header="compact"] .evo-head__title,
+html[data-product-brand="olp"][data-olp-header="compact"] .drm-h1 { font-size: clamp(24px, 2.2vw, 30px); }
+html[data-product-brand="olp"][data-olp-header="compact"] .evo-herobox__sub { font-size: 14.5px; }
+html[data-product-brand="olp"] .evo-head { padding: 18px 22px; align-items: center; }
+/* compact: the actions sit in the flow beside the words (below them under
+   1100 px, as the design system already does), so they can never cover the
+   title or the subtitle */
+html[data-product-brand="olp"][data-olp-header="compact"] .evo-herobox { flex-direction: row; align-items: center; flex-wrap: wrap; }
+html[data-product-brand="olp"][data-olp-header="compact"] .evo-herobox__body { flex: 1 1 420px; min-width: 0; }
+html[data-product-brand="olp"][data-olp-header="compact"] .evo-herobox__actions { position: static; padding: 0 22px 0 0; align-self: center; }
+@media (max-width: 1100px) {
+  html[data-product-brand="olp"][data-olp-header="compact"] .evo-herobox { flex-direction: column; align-items: stretch; }
+  html[data-product-brand="olp"][data-olp-header="compact"] .evo-herobox__body { flex: none; }
+  html[data-product-brand="olp"][data-olp-header="compact"] .evo-herobox__actions { padding: 0 22px 18px; align-self: auto; }
+}
+@media (max-width: 640px) {
+  html[data-product-brand="olp"][data-olp-header="compact"] .evo-herobox__body { padding: 18px 16px 12px; }
+  html[data-product-brand="olp"][data-olp-header="compact"] .evo-herobox__actions { padding: 0 16px 16px; }
+}
+
+/* C. DETAIL - one record: no photo banner, record title 32 px, score kept */
+html[data-product-brand="olp"][data-olp-header="detail"] .evo-herobox { min-height: 0; background: linear-gradient(135deg, #0e1729 0%, #0b1220 100%); }
+html[data-product-brand="olp"][data-olp-header="detail"] .evo-herobox__art { opacity: 0.18; }
+html[data-product-brand="olp"][data-olp-header="detail"] .evo-herobox::before { background: linear-gradient(90deg, rgba(11, 18, 32, 0.96), rgba(11, 18, 32, 0.7)); }
+html[data-product-brand="olp"][data-olp-header="detail"] .evo-herobox__title { font-size: clamp(26px, 2.6vw, 34px); }
+
+/* Deal Room hero: navy and gold, no blue */
+html[data-product-brand="olp"] .drm-hero {
+  background: radial-gradient(800px 280px at 100% 0%, rgba(212, 165, 76, 0.16), transparent 60%), linear-gradient(135deg, #0d1626 0%, #0b1220 100%);
+  color: var(--olp-text-2);
+}
+html[data-product-brand="olp"] .drm-hero::after { background: none; }
+html[data-product-brand="olp"] .drm-act { color: var(--olp-text); background: rgba(255, 255, 255, 0.05); border-color: var(--olp-line-strong); }
+html[data-product-brand="olp"] .drm-act:hover { background: rgba(212, 165, 76, 0.1); }
+html[data-product-brand="olp"] .drm-act--primary,
+html[data-product-brand="olp"] .drm-act--primary:hover { background: var(--olp-gold-fill); color: var(--olp-on-gold); border-color: var(--olp-gold); box-shadow: 0 6px 16px rgba(212, 165, 76, 0.22); }
+html[data-product-brand="olp"] .drm-act:focus-visible { outline-color: var(--olp-gold-light); }
+html[data-product-brand="olp"] .drm-switch { color: var(--olp-text-2); }
+
+/* ── 5. DEAL ROOM surfaces (dealroom.css paints these directly) ─────────── */
+html[data-product-brand="olp"] .drm-tabs { background: var(--olp-surface); border-color: var(--olp-line); }
+html[data-product-brand="olp"] .drm-tabs button { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .drm-tabs button:hover { background: rgba(212, 165, 76, 0.08); color: #fff; }
+html[data-product-brand="olp"] .drm-tabs button.is-on { background: var(--olp-gold-fill); color: var(--olp-on-gold); }
+html[data-product-brand="olp"] .drm-tabs button.is-on .drm-tabs__n { background: var(--olp-on-gold); color: var(--olp-gold-light); }
+html[data-product-brand="olp"] .drm-card { background: var(--olp-surface); border-color: var(--olp-line); box-shadow: none; color: var(--olp-text); }
+html[data-product-brand="olp"] .drm-note { background: var(--olp-gold-soft); color: #f3e2bd; }
+html[data-product-brand="olp"] .drm-setup-cta { background: linear-gradient(135deg, rgba(212, 165, 76, 0.1), var(--olp-surface)); border-color: var(--olp-gold-hair); }
+html[data-product-brand="olp"] .drm-pill--active { background: rgba(63, 191, 138, 0.16); color: #6fdcaf; }
+html[data-product-brand="olp"] .drm-pill--setup,
+html[data-product-brand="olp"] .drm-pill--unknown { background: rgba(240, 168, 58, 0.16); color: #f6c56b; }
+html[data-product-brand="olp"] .drm-pill--paused { background: rgba(255, 107, 120, 0.16); color: #ff9aa5; }
+
+/* ── 6. DESIGN-SYSTEM SURFACES that are painted white directly ───────────
+   evo-ds.css / evo-pages.css set these to #fff instead of a token; each is
+   given its OLP surface here, by name. */
+html[data-product-brand="olp"] :is(.evo-metric, .evo-score, .evo-bucket, .evo-needrow, .evo-signal-item, .evo-contact,
+  .evo-econ__cell, .evo-switch, .evo-cap, .evo-stage, .evo-closing li a, .evo-keynums, .evo-pcard, .evo-tile,
+  .evo-settings__rail--tabs, .evo-seg, .evo-x, .evo-drawer, .evo-table--cards tr) {
+  background: var(--olp-surface); color: var(--olp-text);
+}
+html[data-product-brand="olp"] :is(.evo-hero__eco > div, .evo-phero__facts > div, .evo-strat__results > div) { background: var(--olp-surface-2); }
+html[data-product-brand="olp"] :is(.evo-hero__eco, .evo-phero__facts, .evo-strat__results) { background: var(--olp-line); }
+html[data-product-brand="olp"] .evo-metric.is-attention { background: linear-gradient(180deg, rgba(240, 168, 58, 0.1), var(--olp-surface) 60%); box-shadow: inset 0 0 0 1px rgba(240, 168, 58, 0.45); }
+html[data-product-brand="olp"] .evo-metric__value,
+html[data-product-brand="olp"] .evo-metric.is-info .evo-metric__value { color: #fff; }
+html[data-product-brand="olp"] .evo-metric__label { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .evo-metric__sub { color: var(--olp-text-3); }
+html[data-product-brand="olp"] .evo-stage.is-empty,
+html[data-product-brand="olp"] .evo-pipewrap,
+html[data-product-brand="olp"] .evo-scoreexp { background: var(--olp-inset); }
+html[data-product-brand="olp"] .evo-stage__l { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .evo-needrow:hover,
+html[data-product-brand="olp"] .evo-table tbody tr.is-link:hover,
+html[data-product-brand="olp"] .evo-closing li a:hover { background: var(--olp-surface-3); }
+html[data-product-brand="olp"] .evo-hero { background: linear-gradient(90deg, rgba(240, 168, 58, 0.1) 0%, var(--olp-surface) 42%); box-shadow: inset 0 0 0 1px rgba(240, 168, 58, 0.35), inset 4px 0 0 #f0a83a, var(--evo-shadow-lg); }
+html[data-product-brand="olp"] .evo-hero__kicker { color: #f6c56b; }
+html[data-product-brand="olp"] :is(.evo-hero__addr, .evo-phero__addr, .evo-drawer__title) { color: #fff; }
+html[data-product-brand="olp"] .evo-nextcard { background: linear-gradient(90deg, var(--olp-gold-soft), var(--olp-surface) 70%); }
+html[data-product-brand="olp"] .evo-switch.is-paused { background: linear-gradient(180deg, rgba(240, 168, 58, 0.1), var(--olp-surface)); }
+html[data-product-brand="olp"] :is(.evo-msg--in, .evo-quote) { background: rgba(212, 165, 76, 0.1); color: var(--olp-text); }
+html[data-product-brand="olp"] .evo-toggle[aria-checked="false"]::before { background: #2e3b57; }
+html[data-product-brand="olp"] :is(.evo-toggle::after, .evo-toggle[aria-checked="false"]::after) { background: #eef1f6; }
+html[data-product-brand="olp"] .evo-progress span { background: var(--olp-line-strong); }
+html[data-product-brand="olp"] .evo-skel { background: linear-gradient(90deg, #111a2b 0%, #172338 50%, #111a2b 100%); background-size: 200% 100%; }
+html[data-product-brand="olp"] .evo-thumb { background: #111a2b; }
+html[data-product-brand="olp"] .evo-thumb.is-unavailable { background: repeating-linear-gradient(135deg, #0f1727 0 10px, #121c2e 10px 20px); color: var(--olp-text-3); }
+html[data-product-brand="olp"] .evo-ring.is-empty { background: var(--olp-surface); color: var(--olp-text-3); }
+html[data-product-brand="olp"] .evo-ring { color: color-mix(in srgb, var(--tone) 70%, white); background: color-mix(in srgb, var(--tone) 18%, #0d1422); }
+html[data-product-brand="olp"] .evo-chip { background: rgba(255, 255, 255, 0.04); color: var(--olp-text-2); box-shadow: inset 0 0 0 1px var(--olp-line-strong); }
+html[data-product-brand="olp"] .evo-chip--signal { background: var(--olp-gold-soft); color: var(--olp-gold-light); box-shadow: none; }
+html[data-product-brand="olp"] .evo-tag { color: var(--olp-text-2); background: rgba(255, 255, 255, 0.06); }
+html[data-product-brand="olp"] .evo-status.is-quiet { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .evo-status.is-needs { color: #f6c56b; background: rgba(240, 168, 58, 0.15); box-shadow: inset 0 0 0 1px rgba(240, 168, 58, 0.4); }
+html[data-product-brand="olp"] .evo-seg__btn { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .evo-seg__btn[aria-pressed="true"], html[data-product-brand="olp"] .evo-seg__btn.is-on,
+html[data-product-brand="olp"] .evo-seg__btn[aria-checked="true"] { background: var(--olp-gold-fill); color: var(--olp-on-gold); }
+html[data-product-brand="olp"] .evo-btn--ghost:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); color: #fff; }
+html[data-product-brand="olp"] .evo-drawer__scrim { background: rgba(3, 6, 12, 0.6); }
+html[data-product-brand="olp"] .evo-drawer__head { background: linear-gradient(180deg, #111a2b, var(--olp-surface)); }
+html[data-product-brand="olp"] .evo-drawer__foot { background: var(--olp-inset); }
+html[data-product-brand="olp"] :is(.evo-input, .evo-select, .evo-textarea, .evo-search .evo-input) { background: var(--olp-inset); color: var(--olp-text); }
+html[data-product-brand="olp"] .evo-settings__rail a.is-active { color: var(--olp-gold-light); }
+
+/* tables */
+html[data-product-brand="olp"] :is(.evo-table th, .evo-app .ws-table th, .evo-drawer-root .ws-table th) { background: #0f1727; color: var(--olp-text-2); }
+html[data-product-brand="olp"] .evo-app :is(.ws-table td, table td) { border-color: var(--olp-line); }
+
+/* the older bridged components */
+html[data-product-brand="olp"] .evo-app .panel { background: var(--olp-surface); box-shadow: inset 0 0 0 1px var(--olp-line), var(--evo-shadow); }
+html[data-product-brand="olp"] .evo-app .panel:hover { box-shadow: inset 0 0 0 1px var(--olp-line), var(--evo-shadow); }
+html[data-product-brand="olp"] .evo-app :is(.panel-title, .ws-panel-title) { color: #fff; }
+html[data-product-brand="olp"] :is(.evo-app, .evo-drawer-root) .btn--primary,
+html[data-product-brand="olp"] :is(.evo-app, .evo-drawer-root) .btn--primary:hover { background: var(--olp-gold-fill); color: var(--olp-on-gold); }
+html[data-product-brand="olp"] :is(.evo-app, .evo-drawer-root) .btn--secondary { background: rgba(255, 255, 255, 0.04); color: var(--olp-text); border-color: var(--olp-line-strong); }
+html[data-product-brand="olp"] :is(.evo-app, .evo-drawer-root) .btn--secondary:hover { background: rgba(212, 165, 76, 0.1); }
+html[data-product-brand="olp"] .evo-app .btn--danger { border-color: rgba(255, 107, 120, 0.45); }
+/* a link styled as a primary button keeps dark-on-gold */
+html[data-product-brand="olp"] .evo-app a.evo-btn--primary,
+html[data-product-brand="olp"] .evo-app a.btn--primary { color: var(--olp-on-gold); }
+
+/* ── 7. PAGE-SPECIFIC components with their own colours ──────────────── */
+/* Providers & Controls */
+html[data-product-brand="olp"] .pc-kind--real { background: var(--olp-gold-soft); color: var(--olp-gold-light); }
+/* Deal Calculator */
+html[data-product-brand="olp"] .dc-field__input { background: var(--olp-inset); border-color: var(--olp-line-strong); color: var(--olp-text); }
+html[data-product-brand="olp"] .dc-field__input input { color: var(--olp-text); }
+/* Team Board / Appointments / Canvassing / Team forms */
+html[data-product-brand="olp"] .tb-table { background: var(--olp-surface); border-color: var(--olp-line); }
+html[data-product-brand="olp"] .tb-table thead th { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .tb-table td::before { color: var(--olp-text-3); }
+html[data-product-brand="olp"] :is(.ap-lab, .wt-lab) { color: var(--olp-text-2); }
+
+/* Buyer Intelligence command buttons: gold, not blue */
+html[data-product-brand="olp"] .bi-cmd__btn { background: var(--olp-surface); border-color: var(--olp-line); color: var(--olp-text); }
+html[data-product-brand="olp"] .bi-cmd__btn:hover { border-color: var(--olp-gold); box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35); }
+html[data-product-brand="olp"] .bi-cmd__btn--primary { background: var(--olp-gold-fill); color: var(--olp-on-gold); border-color: var(--olp-gold); }
+html[data-product-brand="olp"] .bi-cmd__i { background: var(--olp-gold-soft); color: var(--olp-gold-light); }
+html[data-product-brand="olp"] .bi-cmd__btn--primary .bi-cmd__i { background: rgba(21, 16, 10, 0.12); color: var(--olp-on-gold); }
+
+/* Deal Room owner dashboard (od-*): navy and gold, status colours kept */
+html[data-product-brand="olp"] :is(.od-title, .od-crumb) { color: var(--olp-gold-light); }
+html[data-product-brand="olp"] .od-sub { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .od-market select { color: var(--olp-text); background-color: var(--olp-inset); border-color: var(--olp-line-strong); }
+html[data-product-brand="olp"] .drm-switch--dark { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .od-hero { background: #0b1220; border: 1px solid var(--olp-gold-hair); box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.7); }
+html[data-product-brand="olp"] .od-hero__photo--plain { background: radial-gradient(640px 280px at 82% 20%, rgba(212, 165, 76, 0.22), transparent 62%), linear-gradient(135deg, #0b1220, #121d33); }
+html[data-product-brand="olp"] .od-hero__veil { background: linear-gradient(90deg, #0b1220 0%, #0b1220 38%, rgba(11, 18, 32, 0.86) 52%, rgba(11, 18, 32, 0.35) 78%, rgba(11, 18, 32, 0.12) 100%); }
+html[data-product-brand="olp"] .od-hero__h { font-family: var(--olp-serif); font-weight: 700; letter-spacing: -0.01em; }
+html[data-product-brand="olp"] .od-hero__h span { color: var(--olp-gold); }
+html[data-product-brand="olp"] .od-hero__p { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .od-btn:focus-visible { outline-color: var(--olp-gold-light); }
+html[data-product-brand="olp"] .od-btn--primary,
+html[data-product-brand="olp"] .od-btn--primary:hover { background: var(--olp-gold-fill); color: var(--olp-on-gold) !important; box-shadow: 0 8px 18px -6px rgba(212, 165, 76, 0.45); }
+html[data-product-brand="olp"] .od-btn--white,
+html[data-product-brand="olp"] .od-btn--ghost { background: rgba(255, 255, 255, 0.04); color: var(--olp-text) !important; border-color: var(--olp-line-strong); box-shadow: none; }
+html[data-product-brand="olp"] .od-btn--white:hover,
+html[data-product-brand="olp"] .od-btn--ghost:hover { background: rgba(212, 165, 76, 0.1); border-color: var(--olp-gold); }
+html[data-product-brand="olp"] .od-link { color: var(--olp-gold-light); }
+html[data-product-brand="olp"] :is(.od-metric, .od-card, .od-qa button) { background: var(--olp-surface); border-color: var(--olp-line); box-shadow: none; color: var(--olp-text); }
+html[data-product-brand="olp"] .od-metric:hover { border-color: var(--olp-gold); }
+html[data-product-brand="olp"] .od-metric:focus-visible,
+html[data-product-brand="olp"] .od-qa button:focus-visible { outline-color: var(--olp-gold-light); }
+html[data-product-brand="olp"] :is(.od-metric__ic, .od-qa__ic, .od-chart-empty__ic) { background: var(--olp-gold-soft); color: var(--olp-gold-light); }
+html[data-product-brand="olp"] .od-metric__t small { color: var(--olp-text-2); }
+html[data-product-brand="olp"] :is(.od-metric__t b, .od-h2, .od-chart__stats b, .od-chart-empty b) { color: #fff; }
+html[data-product-brand="olp"] :is(.od-metric__t span, .od-chart__stats span, .od-chart__cap, .od-chart-empty p) { color: var(--olp-text-3); }
+html[data-product-brand="olp"] .od-metric__t span.is-warn { color: #f6c56b; }
+html[data-product-brand="olp"] .od-select { color: var(--olp-text-2); border-color: var(--olp-line-strong); background: var(--olp-inset); }
+html[data-product-brand="olp"] .od-chart-empty { background: radial-gradient(420px 160px at 50% 0%, rgba(212, 165, 76, 0.08), var(--olp-surface) 70%); border-color: var(--olp-line-strong); }
+html[data-product-brand="olp"] .od-pill--ok { background: rgba(63, 191, 138, 0.16); color: #6fdcaf; }
+html[data-product-brand="olp"] .od-pill--warn { background: rgba(240, 168, 58, 0.16); color: #f6c56b; }
+html[data-product-brand="olp"] .od-pill--info { background: var(--olp-gold-soft); color: var(--olp-gold-light); }
+html[data-product-brand="olp"] .od-pill--muted { background: rgba(255, 255, 255, 0.06); color: var(--olp-text-2); }
+html[data-product-brand="olp"] .od-status li { border-bottom-color: var(--olp-line); }
+html[data-product-brand="olp"] .od-status__dot.is-off { background: #2e3b57; color: var(--olp-text-2); }
+html[data-product-brand="olp"] .od-status__l { color: var(--olp-text); }
+html[data-product-brand="olp"] .od-status__l small,
+html[data-product-brand="olp"] .od-status__v.is-off { color: var(--olp-text-3); }
+html[data-product-brand="olp"] .od-status__v.is-ok { color: #6fdcaf; }
+html[data-product-brand="olp"] :is(.od-status__v.is-warn, .od-issues) { color: #f6c56b; }
+html[data-product-brand="olp"] .od-qa button::after { color: var(--olp-text-3); }
+html[data-product-brand="olp"] .od-qa button:hover { border-color: var(--olp-gold); background: rgba(212, 165, 76, 0.08); }
+html[data-product-brand="olp"] .od-qa button:hover::after { color: var(--olp-gold-light); }
+html[data-product-brand="olp"] .od-tabs { border-bottom-color: var(--olp-line); }
+html[data-product-brand="olp"] .od-tabs [role=tab] { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .od-tabs [role=tab]:hover { color: #fff; }
+html[data-product-brand="olp"] .od-tabs [role=tab].is-on { color: var(--olp-gold-light); border-bottom-color: var(--olp-gold); }
+html[data-product-brand="olp"] .drm-check { color: var(--olp-text); }
+html[data-product-brand="olp"] .drm-check input { accent-color: var(--olp-gold); }
+html[data-product-brand="olp"] :is(.drm-checks li, .drm-setup__foot) { border-color: var(--olp-line); }
+html[data-product-brand="olp"] .drm-checks .is-ok .drm-checks__dot,
+html[data-product-brand="olp"] .drm-stepper li.is-done .drm-stepper__n { background: rgba(63, 191, 138, 0.16); }
+html[data-product-brand="olp"] .drm-checks .is-block .drm-checks__dot { background: rgba(255, 107, 120, 0.16); }
+html[data-product-brand="olp"] .drm-checks .is-warn .drm-checks__dot { background: rgba(255, 255, 255, 0.06); }
+html[data-product-brand="olp"] .drm-stepper li.is-on .drm-stepper__n { color: var(--olp-on-gold); }
+html[data-product-brand="olp"] .drm-result.is-ok { background: rgba(63, 191, 138, 0.16); color: #6fdcaf; }
+html[data-product-brand="olp"] .drm-result.is-no { background: rgba(255, 107, 120, 0.16); color: #ff9aa5; }
+/* found by the screen-by-screen contrast check */
+html[data-product-brand="olp"] .bi-filter { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .od-emptybox { background: var(--olp-surface); border-color: var(--olp-line-strong); }
+html[data-product-brand="olp"] :is(.od-emptybox p, .od-empty) { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .evo-fcc-flag { color: #f6c56b; }
+html[data-product-brand="olp"] .dc-seg button { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .dc-seg button[aria-pressed="true"] { background: var(--olp-gold-fill); color: var(--olp-on-gold); box-shadow: none; }
+html[data-product-brand="olp"] :is(.dc-card, .dc-total, .dc-bottom) { background: var(--olp-surface); border-color: var(--olp-line); color: var(--olp-text); }
+html[data-product-brand="olp"] .stc-table a { color: var(--olp-gold-light); }
+html[data-product-brand="olp"] :is(.wt-h3, .wt-roles dd) { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .ws-page :is(.ws-formula__line, .ws-formula__line strong, .ws-formula__line b) { color: var(--olp-text); }
+
+/* Providers & Controls banner: navy and gold, not blue */
+html[data-product-brand="olp"] .pc-banner { background: linear-gradient(135deg, #0d1626 0%, #0b1220 100%); border: 1px solid var(--olp-gold-hair); box-shadow: none; }
+html[data-product-brand="olp"] :is(.pc-banner__eyebrow, .pc-banner__time) { color: var(--olp-gold-light); }
+html[data-product-brand="olp"] .pc-banner__eyebrow { letter-spacing: 0.22em; font-size: 11.5px; }
+html[data-product-brand="olp"] .pc-banner__title { font-size: clamp(24px, 2.2vw, 30px); }
+html[data-product-brand="olp"] .pc-banner__sub { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .pc-banner__refresh { border-color: var(--olp-line-strong); }
+
+/* Deal Room page head (every Deal Room view): the compact header pattern.
+   On a sub-view the view's name is the page title under the gold trail. */
+html[data-product-brand="olp"] .od-pagehead { padding: 18px 22px; border: 1px solid var(--olp-gold-hair); border-radius: 16px; background: linear-gradient(135deg, #0d1626 0%, #0b1220 100%); }
+html[data-product-brand="olp"] .od-title { font-size: 11.5px; letter-spacing: 0.22em; color: var(--olp-gold-light); }
+html[data-product-brand="olp"] .od-title__view { display: block; margin-top: 6px; font-family: var(--olp-serif); font-size: clamp(24px, 2.2vw, 30px); font-weight: 700; letter-spacing: -0.01em; line-height: 1.1; text-transform: none; color: #fff; }
+
+/* the "Complete your profile" reminder (inline-styled in ProfileOnboarding) */
+html[data-product-brand="olp"] button[title="Complete your profile"] {
+  background: #0d1422 !important; border-color: var(--olp-gold-hair) !important; color: var(--olp-text) !important; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45) !important;
+}
+
+/* property research (detail) */
+html[data-product-brand="olp"] .evo-sec-nav { background: rgba(13, 20, 34, 0.94); box-shadow: inset 0 0 0 1px var(--olp-line); }
+html[data-product-brand="olp"] .evo-sec-nav a { color: var(--olp-text-2); }
+html[data-product-brand="olp"] .evo-sec-nav a:hover { color: var(--olp-gold-light); background: var(--olp-gold-soft); }
+html[data-product-brand="olp"] .evo-enrich-status.is-ok { color: #6fdcaf !important; }
+html[data-product-brand="olp"] .evo-enrich-status.is-warn { color: #f6c56b !important; }
+html[data-product-brand="olp"] .evo-enrich-status.is-bad { color: #ff9aa5 !important; }
+html[data-product-brand="olp"] .evo-enrich-status.is-none { color: var(--olp-text-2) !important; }
+/* buyer detail */
+html[data-product-brand="olp"] .bi-head { background: var(--olp-inset); border-color: var(--olp-line); }
+html[data-product-brand="olp"] .bi-why .is-unknown { color: var(--olp-text-3); }
+/* a long tag wraps instead of pushing the page sideways (found on the
+   property research page at tablet and phone widths) */
+html[data-product-brand="olp"] .evo-tag { white-space: normal; height: auto; min-height: 21px; line-height: 1.3; padding-top: 2px; padding-bottom: 2px; max-width: 100%; }
+/* the radar drawer's score note */
+html[data-product-brand="olp"] .bbr--olp .bbr-dscore span { color: #d9c9a3; }
