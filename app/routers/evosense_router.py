@@ -129,6 +129,7 @@ def opportunity_radar(
     limit: int = Query(25, ge=1, le=50),
     offset: int = Query(0, ge=0),
     include_test: bool = False,
+    sort: str = Query("score", max_length=10),
     db: Session = Depends(get_db),
     user: User = Depends(require_tenant_or_observer),
 ):
@@ -140,10 +141,24 @@ def opportunity_radar(
     from app.services.evosense import overlooked as RADAR
     if market not in RADAR.MARKETS:
         raise HTTPException(status_code=422, detail="Unknown opportunity market.")
+    if sort not in RADAR.SORTS:
+        raise HTTPException(status_code=422, detail="Unknown sort.")
     return RADAR.search(
         db, _read_org(db, user), market=market, state=state, county=county,
-        min_score=min_score, limit=limit, offset=offset, include_test=include_test,
+        min_score=min_score, limit=limit, offset=offset, include_test=include_test, sort=sort,
     )
+
+
+@router.get("/opportunity-radar/{property_id}/buyer-matches")
+def opportunity_radar_buyer_matches(property_id: str, db: Session = Depends(get_db),
+                                    user: User = Depends(require_tenant_or_observer)):
+    """Confirmed buyer matches for one Radar property. Read-only: nothing is
+    saved, sent or notified. Another workspace's property answers 404."""
+    from app.services.evosense import overlooked as RADAR
+    out = RADAR.buyer_matches(db, _read_org(db, user), property_id)
+    if out is None:
+        raise HTTPException(status_code=404, detail="Property not found")
+    return out
 
 
 @router.get("/inbox")

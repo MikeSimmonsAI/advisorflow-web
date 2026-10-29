@@ -24,6 +24,8 @@ MARKET_CLASSES = {
     "commercial": ("commercial", "industrial", "mixed_use", "specialty"),
 }
 MARKETS = ("all", "residential", "wholesale", "land", "commercial")
+SORTS = ("score", "recent", "state")
+SUMMARY_CAP = 2000          # summary figures are computed over at most this many records
 # Only existing facts; "overlooked" is a research workflow, not a claim that
 # a property is for sale, off-market, distressed or available for acquisition.
 FRESHNESS_ORDER = {SIG.CURRENT: 2, SIG.AGING: 1, SIG.STALE: 0}
@@ -129,6 +131,105 @@ def _facts(p: EvoSenseProperty) -> Dict[str, Any]:
     }
 
 
+# ── Buyer matching (READ-ONLY) ──────────────────────────────────────────────
+# The same matcher Buyer Intelligence uses (wholesale_matching v2, best buy box
+# per buyer). Radar counts a buyer only when the match is CONFIRMED by known
+# facts: not disqualified, the property's location is positively inside the
+# buy box's stated geography, its type is one the box names, and the score
+# reaches Buyer Intelligence's own good-match mark. A dimension the box leaves
+# open, or a fact the record lacks, never counts as a match. Nothing is saved,
+# sent or notified.
+
+def _prop_like(p: EvoSenseProperty):
+    from types import SimpleNamespace
+    from app.services import wholesale_buyer_match as BM
+    f = BM._facts(p.type_facts)
+    return SimpleNamespace(
+        street_address=p.street_address, city=p.city, state=p.state, zip_code=p.zip_code, county=p.county,
+        property_type=p.property_type, property_category=p.property_category,
+        property_subtype=p.property_subtype, bedrooms=p.bedrooms, bathrooms=p.bathrooms,
+        square_feet=p.square_feet, year_built=p.year_built,
+        unit_count=BM._fact_value(f, "unit_count"),
+        acreage=BM._fact_value(f, "acreage") or BM._fact_value(f, "lot_acres"),
+        building_sqft=BM._fact_value(f, "building_sqft"), type_facts=p.type_facts, is_test=p.is_test)
+
+
+def _deal_like(db: Session, org_id: str, p: EvoSenseProperty):
+    from types import SimpleNamespace
+    from app.models.wholesale_models import WholesaleDeal
+    if p.promoted_deal_id:
+        d = (db.query(WholesaleDeal).filter(WholesaleDeal.id == p.promoted_deal_id,
+                                            WholesaleDeal.organization_id == org_id).first())
+        if d is not None:
+            return d, True
+    return SimpleNamespace(buyer_price=None, contract_price=None, proposed_offer=None, arv=None,
+                           repair_estimate=None), False
+
+
+def _confirmed(r: Dict[str, Any]) -> bool:
+    from app.services import wholesale_buyer_engine as ENG
+    if r.get("disqualified") or r.get("buy_box") is None or r.get("score", 0) < ENG.GOOD_MATCH:
+        return False
+    dims = {f.get("dimension"): f.get("matched") for f in r.get("factors") or []}
+    return dims.get("geography") is True and dims.get("property_type") is True
+
+
+def _buyers(db: Session, org_id: str, is_test: bool):
+    from app.models.wholesale_models import WholesaleBuyer
+    return [b for b in db.query(WholesaleBuyer).filter(WholesaleBuyer.organization_id == org_id).all()
+            if bool(b.is_test) == bool(is_test)]
+
+
+def match_counts(db: Session, org_id: str, props: List[EvoSenseProperty]) -> Dict[str, Dict[str, Any]]:
+    """{property id: {"confirmed": n, "budget_checked": bool}} for one page of properties."""
+    from app.services import wholesale_matching as M
+    pools: Dict[bool, list] = {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for p in props:
+        buyers = pools.setdefault(bool(p.is_test), _buyers(db, org_id, bool(p.is_test)))
+        if not buyers:
+            out[p.id] = {"confirmed": 0, "buyers_on_file": 0, "budget_checked": False}
+            continue
+        deal_like, has_deal = _deal_like(db, org_id, p)
+        ranked = M.match_deal_to_buyers(deal_like, _prop_like(p), buyers, include_disqualified=False)
+        out[p.id] = {"confirmed": sum(1 for r in ranked if _confirmed(r)),
+                     "buyers_on_file": len(buyers), "budget_checked": has_deal}
+    return out
+
+
+def buyer_matches(db: Session, org_id: str, property_id: str) -> Dict[str, Any]:
+    """The confirmed matches for ONE property, with the reasons and what is
+    still unknown - for the detail panel. Read-only."""
+    from app.services import wholesale_buyer_engine as ENG
+    from app.services import wholesale_matching as M
+    p = (db.query(EvoSenseProperty).filter(EvoSenseProperty.id == property_id,
+                                           EvoSenseProperty.organization_id == org_id,
+                                           EvoSenseProperty.archived_at.is_(None)).first())
+    if p is None:
+        return None
+    buyers = _buyers(db, org_id, bool(p.is_test))
+    deal_like, has_deal = _deal_like(db, org_id, p)
+    ranked = M.match_deal_to_buyers(deal_like, _prop_like(p), buyers, include_disqualified=False)
+    items = []
+    for r in ranked:
+        if not _confirmed(r):
+            continue
+        b, box = r["buyer"], r["buy_box"]
+        items.append({
+            "buyer_id": b.id, "name": ENG._name(b), "score": r["score"],
+            "buy_box": getattr(box, "label", None),
+            "why": [f["detail"] for f in r["factors"] if f.get("matched") is True],
+            "unknown": [f["detail"] for f in r["factors"] if f.get("unknown")],
+        })
+    return {"property_id": p.id, "confirmed": len(items), "buyers_on_file": len(buyers),
+            "budget_checked": has_deal,
+            "budget_note": None if has_deal else
+            "No asking price exists until a deal is opened, so budget fit is not checked yet.",
+            "rule": "Counted only when location and property type are confirmed by the record and the "
+                    "match reaches the good-match mark used in Buyer Intelligence. Nothing is sent.",
+            "items": items}
+
+
 def coverage(db: Session, org_id: str, *, market: str = "all", state: Optional[str] = None,
              include_test: bool = False) -> Dict[str, Any]:
     """Where this workspace ACTUALLY has records (never a claim of national data):
@@ -152,11 +253,32 @@ def coverage(db: Session, org_id: str, *, market: str = "all", state: Optional[s
     return {"states": states, "counties": counties}
 
 
+def _summary(db: Session, org_id: str, base, total: int) -> Dict[str, Any]:
+    """Figures for the whole filtered set (not one page): how many records carry
+    current supporting evidence, and the average of the scores that exist."""
+    avg = base.with_entities(func.avg(EvoSenseProperty.opportunity_score)).filter(
+        EvoSenseProperty.opportunity_score.isnot(None)).scalar()
+    scored = int(base.with_entities(func.count(EvoSenseProperty.id)).filter(
+        EvoSenseProperty.opportunity_score.isnot(None)).scalar() or 0)
+    props = base.limit(SUMMARY_CAP).all()
+    by_id = {p.id: p for p in props}
+    sigs = defaultdict(list)
+    if by_id:
+        for s in (db.query(EvoSenseSignal).filter(EvoSenseSignal.organization_id == org_id,
+                                                  EvoSenseSignal.property_id.in_(list(by_id)),
+                                                  EvoSenseSignal.active.is_(True)).all()):
+            sigs[s.property_id].append(s)
+    now = datetime.utcnow()
+    with_evidence = sum(1 for pid, p in by_id.items() if _evidence(sigs[pid], p, now=now))
+    return {"total": total, "with_evidence": with_evidence, "evidence_counted_over": len(by_id),
+            "scored": scored, "average_score": int(round(float(avg))) if avg is not None else None}
+
+
 def search(db: Session, org_id: str, *, market: str = "all",
            state: Optional[str] = None, county: Optional[str] = None,
            min_score: Optional[int] = None,
            limit: int = 25, offset: int = 0,
-           include_test: bool = False) -> Dict[str, Any]:
+           include_test: bool = False, sort: str = "score") -> Dict[str, Any]:
     """Bounded, stable and strictly tenant-scoped private read model.
 
     Unknown classifications stay visible in 'all' with review required.
@@ -168,6 +290,8 @@ def search(db: Session, org_id: str, *, market: str = "all",
         raise ValueError("Unsupported market.")
     if min_score is not None and not 0 <= min_score <= 100:
         raise ValueError("min_score must be between 0 and 100.")
+    if sort not in SORTS:
+        raise ValueError("Unsupported sort.")
     if not 1 <= limit <= 50 or not 0 <= offset:
         raise ValueError("Out-of-bounds pagination.")
     if state is not None:
@@ -198,9 +322,14 @@ def search(db: Session, org_id: str, *, market: str = "all",
         base = base.filter(EvoSenseProperty.opportunity_score >= min_score)
 
     total = int(base.with_entities(func.count(EvoSenseProperty.id)).scalar() or 0)
-    properties = (base.order_by(EvoSenseProperty.opportunity_score.desc().nullslast(),
-                                EvoSenseProperty.id.asc())
-                  .offset(offset).limit(limit).all())
+    order = {
+        "score": (EvoSenseProperty.opportunity_score.desc().nullslast(), EvoSenseProperty.id.asc()),
+        "recent": (EvoSenseProperty.last_observed_at.desc().nullslast(), EvoSenseProperty.id.asc()),
+        "state": (EvoSenseProperty.state.asc().nullslast(), EvoSenseProperty.street_address.asc().nullslast(),
+                  EvoSenseProperty.id.asc()),
+    }[sort]
+    properties = base.order_by(*order).offset(offset).limit(limit).all()
+    summary = _summary(db, org_id, base, total)
     ids = [p.id for p in properties]
     signals = defaultdict(list)
     if ids:
@@ -211,6 +340,7 @@ def search(db: Session, org_id: str, *, market: str = "all",
             signals[s.property_id].append(s)
 
     now = datetime.utcnow()
+    counts = match_counts(db, org_id, properties)
     items = []
     for p in properties:
         reasons = _evidence(signals[p.id], p, now=now)
@@ -236,6 +366,7 @@ def search(db: Session, org_id: str, *, market: str = "all",
             "recommended_next_action": _next_step(p, reasons),
             "missing_information": _missing(p, reasons),
             "facts": _facts(p),
+            "buyer_matches": counts.get(p.id, {"confirmed": 0, "buyers_on_file": 0, "budget_checked": False}),
         }
         if market == "wholesale" and not reasons:
             # Do not pretend that a historical/cached score is independently
@@ -251,5 +382,6 @@ def search(db: Session, org_id: str, *, market: str = "all",
         "coverage": "Only records actually present in this authorized workspace.",
         "markets": list(MARKETS),
         "available": coverage(db, org_id, market=market, state=state, include_test=include_test),
+        "sort": sort, "summary": summary,
         "items": items,
     }

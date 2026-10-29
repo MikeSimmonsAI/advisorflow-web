@@ -253,3 +253,86 @@ def test_coverage_next_step_and_missing_information_are_honest(db_session):
     land = RADAR.search(db, a.id, market="land")
     assert {s["state"] for s in land["available"]["states"]} == {"GA", "MT"}
     assert all("Year built" not in i["missing_information"] for i in land["items"])
+
+
+# ── Buyer matching (read-only, confirmed matches only) ──────────────────────
+
+def _buyer(db, o, name, *, states=None, counties=None, types=None, test=False):
+    from app.models.wholesale_models import WholesaleBuyBox, WholesaleBuyer
+    b = WholesaleBuyer(organization_id=o.id, company_name=name, is_test=test, email="b-%s@example.com" % uuid.uuid4().hex[:6])
+    db.add(b)
+    db.flush()
+    db.add(WholesaleBuyBox(organization_id=o.id, buyer_id=b.id, label=name + " box",
+                           states=json.dumps(states) if states is not None else None,
+                           counties=json.dumps(counties) if counties is not None else None,
+                           property_types=json.dumps(types) if types is not None else None))
+    db.flush()
+    return b
+
+
+def test_buyer_matches_are_confirmed_only_and_tenant_scoped(client, db_session):
+    from app.models.wholesale_models import WholesaleBuyerMatch
+    db = db_session
+    a = org(db, "Match A")
+    b = org(db, "Match B")
+    house = property_record(db, a, "Match House", "residential", state="TX")
+    land = property_record(db, a, "Match Land", "land", state="TX")
+    _buyer(db, a, "Confirmed TX Houses", states=["TX"], types=["residential"])
+    _buyer(db, a, "Open Box", states=None, types=None)                 # names nothing: never a confirmed match
+    _buyer(db, a, "Georgia Only", states=["GA"], types=["residential"])  # outside geography
+    _buyer(db, a, "Land Only", states=["TX"], types=["land"])           # wrong type for the house
+    _buyer(db, a, "Sandbox Buyer", states=["TX"], types=["residential"], test=True)
+    _buyer(db, b, "Other Tenant Buyer", states=["TX"], types=["residential", "land"])
+    db.commit()
+    before = db.query(WholesaleBuyerMatch).count()
+
+    res = RADAR.search(db, a.id, market="all")
+    counts = {i["address"]: i["buyer_matches"]["confirmed"] for i in res["items"]}
+    assert counts == {"Match House": 1, "Match Land": 1}, counts
+    house_item = next(i for i in res["items"] if i["id"] == house.id)
+    assert house_item["buyer_matches"]["budget_checked"] is False
+
+    detail = RADAR.buyer_matches(db, a.id, house.id)
+    assert [m["name"] for m in detail["items"]] == ["Confirmed TX Houses"]
+    assert detail["budget_note"] and "Other Tenant Buyer" not in json.dumps(detail)
+    assert RADAR.buyer_matches(db, b.id, house.id) is None            # another tenant's property: nothing
+    assert db.query(WholesaleBuyerMatch).count() == before            # read-only
+
+    user = _login(db, a)
+    other = _login(db, b)
+    r = client.get("/wholesale/evosense/opportunity-radar/%s/buyer-matches" % land.id, headers=_h(db, user, a))
+    assert r.status_code == 200 and [m["name"] for m in r.json()["items"]] == ["Land Only"], r.text[:300]
+    for hdr in (_h(db, other, b), _h(db, other, a)):
+        x = client.get("/wholesale/evosense/opportunity-radar/%s/buyer-matches" % house.id, headers=hdr)
+        assert x.status_code == 404 and "Confirmed TX Houses" not in x.text
+    assert client.get("/wholesale/evosense/opportunity-radar/%s/buyer-matches" % house.id).status_code in (401, 403)
+
+
+def test_unknown_property_facts_never_count_as_a_buyer_match(db_session):
+    db = db_session
+    a = org(db, "Unknowns")
+    p = property_record(db, a, "No Type", None, state="TX")
+    _buyer(db, a, "Wants Houses", states=["TX"], types=["residential"])
+    db.commit()
+    item = RADAR.search(db, a.id, market="all")["items"][0]
+    assert item["buyer_matches"]["confirmed"] == 0
+    assert RADAR.buyer_matches(db, a.id, p.id)["items"] == []
+
+
+def test_sort_and_whole_set_summary(db_session):
+    db = db_session
+    a = org(db, "Sorting")
+    p1 = property_record(db, a, "B Street", "residential", state="TX", score=50)
+    p2 = property_record(db, a, "A Street", "residential", state="GA", score=90)
+    property_record(db, a, "C Street", "residential", state="OK", score=None)
+    evidence(db, a, p1, "PRE_FORECLOSURE")
+    p1.last_observed_at = datetime.utcnow()
+    p2.last_observed_at = datetime.utcnow() - timedelta(days=40)
+    db.commit()
+    assert [i["address"] for i in RADAR.search(db, a.id, sort="score")["items"]][:2] == ["A Street", "B Street"]
+    assert RADAR.search(db, a.id, sort="recent")["items"][0]["address"] == "B Street"
+    assert [i["state"] for i in RADAR.search(db, a.id, sort="state")["items"]] == ["GA", "OK", "TX"]
+    s = RADAR.search(db, a.id, limit=1)["summary"]
+    assert s == {"total": 3, "with_evidence": 1, "evidence_counted_over": 3, "scored": 2, "average_score": 70}
+    with pytest.raises(ValueError):
+        RADAR.search(db, a.id, sort="price")
