@@ -454,7 +454,23 @@ def stage(db: Session, org: Organization, content: bytes, *, filename: Optional[
                 created += 1
             prof = d["location_profile"] or d["review_profile"]
             rec.import_run_id = run.id
-            if not rec.location_assigned_manually:
+            # Explicit Central Alabama owner decision: Joyce Strong's two
+            # different Southern Heritage source sites refer to ONE person,
+            # with the funeral home selected as her campaign location.
+            joyce_owner_override = (
+                d["family"] == "central_alabama_ms"
+                and rec.source_lead_id in ("SCI-CA-20261025-0052",
+                                           "SCI-CA-20261025-0416"))
+            if joyce_owner_override:
+                chosen = next((p for p in profiles.values()
+                               if p.official_name == "Southern Heritage Funeral Home"
+                               and not p.is_review_bucket), None)
+                if chosen is None:
+                    raise ValueError("owner-selected Southern Heritage Funeral Home profile missing")
+                rec.location_id = chosen.location_id
+                rec.location_status = "mapped"
+                rec.location_assigned_manually = True
+            elif not rec.location_assigned_manually:
                 rec.location_id = prof.location_id if prof else None
                 rec.location_status = d["location_status"]
             if rec.campaign_family and d["family"] and rec.campaign_family != d["family"] \
@@ -493,6 +509,29 @@ def stage(db: Session, org: Organization, content: bytes, *, filename: Optional[
             elif why and not rec.on_hold:
                 rec.on_hold, rec.hold_reason = True, why
                 rec.held_at, rec.held_by = datetime.utcnow(), actor_id
+            elif d["family"] == "central_alabama_ms" and rec.on_hold and not why:
+                # Owner explicitly cleared historic Disqualified/Not Interested
+                # labels, selected Joyce's funeral home, and selected the
+                # Kilgroe brand-only location. Release ONLY those old import
+                # holds once an actual mapped location is assigned. Never
+                # release DNC, data, duplicate or unmatched facility reviews.
+                reason = (rec.hold_reason or "").strip()
+                historical_only = (reason in ("SOURCE STATUS: Disqualified",
+                                              "SOURCE STATUS: Not Interested"))
+                kilgroe_resolved = (
+                    rec.source_location_name == "Kilgroe Funeral Home"
+                    and rec.location_status == "mapped"
+                    and reason in ("LOCATION REVIEW",
+                                   "LOCATION REVIEW; SOURCE STATUS: Disqualified"))
+                joyce_resolved = (
+                    joyce_owner_override and rec.location_status == "mapped"
+                    and reason == "LOCATION CONFLICT; SOURCE STATUS: Disqualified")
+                if historical_only or kilgroe_resolved or joyce_resolved:
+                    from app.services.programs.holds import DO_NOT_WORK_STATUSES
+                    if (rec.source_status or "").strip().lower() not in DO_NOT_WORK_STATUSES:
+                        rec.on_hold = False
+                        rec.hold_reason = "RELEASED: owner Central Alabama source correction"
+                        rec.held_at, rec.held_by = None, None
             staged += 1
     # ONE FAMILY, ONE LEAD (#385): a record linked to a family already in SCI
     # uses that family's live lead. A second lead an earlier load made for the
