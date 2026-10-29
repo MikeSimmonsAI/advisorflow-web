@@ -230,8 +230,7 @@ def sweep(db: Session, org_id: str, user=None, *, include_test: bool = True,
     # person, and nobody has picked it up in HANDOFF_STALE_HOURS. A fresh
     # handoff is already on the EvoSense "Needs you" list; this is the one
     # that slipped.
-    from app.models.evosense_models import (EvoSenseHandoff, EvoSenseOwner, EvoSenseOwnership,
-                                            EvoSenseProperty)
+    from app.models.evosense_models import EvoSenseHandoff, EvoSenseProperty
     stale = datetime.utcnow() - timedelta(hours=HANDOFF_STALE_HOURS)
     for h in (db.query(EvoSenseHandoff).filter(EvoSenseHandoff.organization_id == org_id,
                                                EvoSenseHandoff.status == "open",
@@ -280,32 +279,91 @@ def sweep(db: Session, org_id: str, user=None, *, include_test: bool = True,
              priority=25, source="sweep:disposition_missing", is_test=bool(d.is_test))
     # EvoSense owners of record whose title needs a person: estate, life
     # estate, ET AL, institutional, truncated name.
-    flagged = (db.query(EvoSenseOwner).filter(EvoSenseOwner.organization_id == org_id,
-                                              EvoSenseOwner.review_flags.isnot(None)).all())
-    for o in flagged:
+    _owner_flag_rule(db, org_id, want, fire, made, cap_per_kind)
+    return made
+
+
+# ── OWNER REVIEW FLAGS: BOUNDED MEMORY (P0, 2026-10-29) ──────────────────────
+#
+# This rule used to load EVERY owner whose review_flags column was not NULL as
+# a full ORM object, then each linked property as a full row. In production an
+# owner with nothing to review stores "[]", not NULL, so the filter matched all
+# 17,225 owners (1,570 actually flagged), and the 2,719 linked properties came
+# back with their ~4 KB of JSON detail columns each. Measured locally on data
+# of that shape: one sweep raised process RSS by ~62 MB at peak and kept ~44 MB
+# of it, on a 512 MiB instance that already idles near 450 MB. Every backend
+# OOM kill on Oct 28-29 followed a sweep start by one to five minutes.
+#
+# Same rule, same results, same order of evaluation per owner:
+#   * owners with an empty flag list are excluded in SQL (they were skipped in
+#     Python before - `flags` came out empty), and only the three columns the
+#     rule reads are fetched;
+#   * links and properties are fetched per chunk of owners in one query, with
+#     only the columns this rule and `worth_working` read (anything else is
+#     still loaded on access, so behaviour cannot change);
+#   * once the per-pass cap for this kind has been hit, the rest of the scan is
+#     skipped: `fire` would refuse every further candidate anyway, and the
+#     "capped" marker it records is already set.
+OWNER_FLAG_CHUNK = 200
+_EMPTY_FLAG_VALUES = ("", "[]", "null")
+
+
+def _owner_flag_rule(db: Session, org_id: str, want, fire, made: Dict[str, int],
+                     cap_per_kind: Optional[int]) -> None:
+    from sqlalchemy.orm import load_only
+    from app.models.evosense_models import EvoSenseOwner, EvoSenseOwnership, EvoSenseProperty
+    from app.services.evosense import readiness as RD
+    kind = "title_ownership_anomaly"
+    owners = []
+    for oid, name, raw in (db.query(EvoSenseOwner.id, EvoSenseOwner.display_name, EvoSenseOwner.review_flags)
+                           .filter(EvoSenseOwner.organization_id == org_id,
+                                   EvoSenseOwner.review_flags.isnot(None),
+                                   EvoSenseOwner.review_flags.notin_(_EMPTY_FLAG_VALUES))):
         try:
-            flags = [f for f in json.loads(o.review_flags or "[]") if f]
+            flags = [f for f in json.loads(raw or "[]") if f]
         except (TypeError, ValueError):
             flags = []
-        if not flags:
-            continue
-        for link in db.query(EvoSenseOwnership).filter(EvoSenseOwnership.organization_id == org_id,
-                                                        EvoSenseOwnership.owner_id == o.id,
-                                                        EvoSenseOwnership.is_current.is_(True)).all():
-            ep = db.query(EvoSenseProperty).filter(EvoSenseProperty.id == link.property_id,
-                                                   EvoSenseProperty.organization_id == org_id).first()
-            if ep is None or not want(ep.is_test):
-                continue
-            # Only properties worth working: a flag on a house that scored 20
-            # is noise in a person's queue (1,155 such items had piled up).
-            if not RD.worth_working(db, ep):
-                continue
-            fire("title_ownership_anomaly", subject_type="evosense_property",
-                 subject_id=ep.id, title="Check title / ownership: %s" % (ep.street_address or ""),
-                 detail="Owner of record %s is flagged: %s." % (o.display_name or "(unnamed)",
-                                                                ", ".join(sorted(flags))),
-                 priority=45, source="sweep:owner_review_flags", is_test=bool(ep.is_test))
-    return made
+        if flags:
+            owners.append((oid, name, flags))
+    prop_cols = (EvoSenseProperty.id, EvoSenseProperty.organization_id, EvoSenseProperty.status,
+                 EvoSenseProperty.opportunity_score, EvoSenseProperty.best_strategy_id,
+                 EvoSenseProperty.first_strategy_id, EvoSenseProperty.street_address,
+                 EvoSenseProperty.is_test)
+    for i in range(0, len(owners), OWNER_FLAG_CHUNK):
+        chunk = owners[i:i + OWNER_FLAG_CHUNK]
+        by_owner: Dict[str, list] = {}
+        loaded: list = []
+        for owner_id, ep in (db.query(EvoSenseOwnership.owner_id, EvoSenseProperty)
+                             .join(EvoSenseProperty, EvoSenseProperty.id == EvoSenseOwnership.property_id)
+                             .options(load_only(*prop_cols))
+                             .filter(EvoSenseOwnership.organization_id == org_id,
+                                     EvoSenseOwnership.owner_id.in_([o[0] for o in chunk]),
+                                     EvoSenseOwnership.is_current.is_(True),
+                                     EvoSenseProperty.organization_id == org_id)):
+            by_owner.setdefault(owner_id, []).append(ep)
+            loaded.append(ep)
+        for oid, name, flags in chunk:
+            for ep in by_owner.pop(oid, ()):
+                if not want(ep.is_test):
+                    continue
+                # Only properties worth working: a flag on a house that scored 20
+                # is noise in a person's queue (1,155 such items had piled up).
+                if not RD.worth_working(db, ep):
+                    continue
+                fire(kind, subject_type="evosense_property",
+                     subject_id=ep.id, title="Check title / ownership: %s" % (ep.street_address or ""),
+                     detail="Owner of record %s is flagged: %s." % (name or "(unnamed)",
+                                                                    ", ".join(sorted(flags))),
+                     priority=45, source="sweep:owner_review_flags", is_test=bool(ep.is_test))
+                if cap_per_kind is not None and made.get("capped:" + kind):
+                    return
+        # The chunk's property rows are done with; keep the session's identity
+        # map from carrying them into the next chunk. Only rows THIS rule
+        # loaded and did not change are released.
+        for obj in loaded:
+            if obj in db and obj not in db.dirty and obj not in db.new:
+                db.expunge(obj)
+        by_owner.clear()
 
 
 def _wholesale_org_ids(db: Session) -> List[str]:

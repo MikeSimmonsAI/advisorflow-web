@@ -9,6 +9,7 @@ Required env vars: DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY, BOOKING_BASE_URL
 """
 
 import asyncio
+import time
 import os
 
 import logging
@@ -1316,14 +1317,84 @@ async def _off_loop(fn, *args, **kwargs):
 
 
 async def _pass_claimed(job_name, interval_seconds) -> bool:
-    """True when THIS instance should run the loop's pass now. Fails open (runs,
-    as before) if the lease table cannot be reached."""
+    """True when THIS instance should run the loop's pass now. Fails CLOSED:
+    if the lease cannot be taken, the pass is skipped and retried at the next
+    interval (see job_run_service.claim_pass for why)."""
     try:
         from app.services.job_run_service import claim_pass
         from app.deps import SessionLocal
         return await asyncio.to_thread(claim_pass, job_name, interval_seconds, SessionLocal)
     except Exception:                                            # noqa: BLE001
-        return True
+        import logging as _log
+        _log.getLogger(__name__).error("pass claim for %s failed; skipping this pass",
+                                       job_name, exc_info=True)
+        return False
+
+
+# ── HEAVY PASSES TAKE TURNS (P0, 2026-10-29) ────────────────────────────────
+#
+# The EvoSense hunt (every 15 min), the Wholesale exception sweep (hourly) and
+# Support Intelligence (6-hourly) each load thousands of rows in a worker
+# thread. They are separate loops, so nothing stopped two of them running at
+# the same moment - and on Oct 28-29 they did: in every one of the backend's
+# eight OOM kills, a hunt and a sweep had both started one to five minutes
+# earlier (job_runs rows left 'running' by the killed process). Their memory
+# peaks add up on a 512 MiB instance that already idles near 450 MB.
+#
+# One process-wide lock makes them take turns. Nothing about what a pass does
+# changes, only that it never overlaps another heavy pass in this process. A
+# pass that cannot get its turn within HEAVY_PASS_WAIT_SECONDS is skipped for
+# this interval (logged) rather than run alongside - the loop tries again at
+# its next tick, and every one of these passes is idempotent.
+#
+# After each heavy pass, memory_hygiene.after_heavy_pass() collects garbage
+# and returns freed heap pages to the OS, so the next pass starts from the
+# idle floor instead of the previous pass's high-water mark.
+HEAVY_PASS_WAIT_SECONDS = 20 * 60
+_heavy_pass_lock = None
+
+
+def _get_heavy_pass_lock():
+    global _heavy_pass_lock
+    if _heavy_pass_lock is None:
+        _heavy_pass_lock = asyncio.Lock()
+    return _heavy_pass_lock
+
+
+async def _heavy_turn(label: str) -> bool:
+    """Wait for this process's heavy-pass turn. False = skip this interval.
+
+    Polls rather than `asyncio.wait_for(lock.acquire())`: on Python 3.11 a
+    timeout landing as the lock is granted can leave it held by nobody, which
+    would stop every heavy pass for good. Acquiring an unlocked asyncio.Lock
+    with no waiters completes without suspending, so check-then-acquire here
+    cannot race on the single event-loop thread."""
+    lock = _get_heavy_pass_lock()
+    deadline = time.monotonic() + HEAVY_PASS_WAIT_SECONDS
+    while True:
+        if not lock.locked():
+            await lock.acquire()
+            return True
+        if time.monotonic() >= deadline:
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "%s: another heavy background pass held the turn for over %ds; skipping this "
+                "interval rather than running both at once", label, HEAVY_PASS_WAIT_SECONDS)
+            return False
+        await asyncio.sleep(min(5.0, max(0.01, HEAVY_PASS_WAIT_SECONDS / 20.0)))
+
+
+async def _release_heavy_turn(label: str) -> None:
+    """Give memory back after a heavy pass, then hand the turn on. Never raises."""
+    try:
+        from app.services.memory_hygiene import after_heavy_pass
+        await _off_loop(after_heavy_pass, label)
+    except Exception:                                            # noqa: BLE001
+        pass
+    finally:
+        lock = _get_heavy_pass_lock()
+        if lock.locked():
+            lock.release()
 
 
 async def _support_intelligence_loop():
@@ -1357,6 +1428,9 @@ async def _support_intelligence_loop():
         if not await _pass_claimed(JobName.SUPPORT_INTELLIGENCE, 6 * 3600):
             await asyncio.sleep(6 * 3600)
             continue
+        if not await _heavy_turn(JobName.SUPPORT_INTELLIGENCE):
+            await asyncio.sleep(6 * 3600)
+            continue
         try:
             async with record_job_run(JobName.SUPPORT_INTELLIGENCE,
                                       db_factory=SessionLocal) as _m:
@@ -1379,6 +1453,8 @@ async def _support_intelligence_loop():
         except Exception as exc:                               # noqa: BLE001
             _logger.warning("support_intelligence loop error: %s", exc,
                             exc_info=True)
+        finally:
+            await _release_heavy_turn(JobName.SUPPORT_INTELLIGENCE)
         await asyncio.sleep(6 * 3600)
 
 
@@ -1675,6 +1751,9 @@ async def _evosense_hunt_loop():
         if not await _pass_claimed(JobName.EVOSENSE_HUNT, evosense_scheduler.TICK_SECONDS):
             await asyncio.sleep(evosense_scheduler.TICK_SECONDS)
             continue
+        if not await _heavy_turn(JobName.EVOSENSE_HUNT):
+            await asyncio.sleep(evosense_scheduler.TICK_SECONDS)
+            continue
         try:
             async with record_job_run(JobName.EVOSENSE_HUNT,
                                       db_factory=SessionLocal) as _m:
@@ -1693,6 +1772,8 @@ async def _evosense_hunt_loop():
         except Exception as exc:                               # noqa: BLE001
             # A hunt pass must never be the reason the web process dies.
             _logger.error("evosense_hunt error: %s", exc, exc_info=True)
+        finally:
+            await _release_heavy_turn(JobName.EVOSENSE_HUNT)
         await asyncio.sleep(evosense_scheduler.TICK_SECONDS)
 
 
@@ -1717,6 +1798,9 @@ async def _wholesale_exception_loop():
         if not await _pass_claimed(JobName.WHOLESALE_EXCEPTIONS, wholesale_ex.AUTO_INTERVAL_SECONDS):
             await asyncio.sleep(wholesale_ex.AUTO_INTERVAL_SECONDS)
             continue
+        if not await _heavy_turn(JobName.WHOLESALE_EXCEPTIONS):
+            await asyncio.sleep(wholesale_ex.AUTO_INTERVAL_SECONDS)
+            continue
         try:
             async with record_job_run(JobName.WHOLESALE_EXCEPTIONS,
                                       db_factory=SessionLocal) as _m:
@@ -1732,6 +1816,8 @@ async def _wholesale_exception_loop():
                     _logger.info("wholesale exception sweep: %s", report)
         except Exception as exc:                               # noqa: BLE001
             _logger.error("wholesale_exception error: %s", exc, exc_info=True)
+        finally:
+            await _release_heavy_turn(JobName.WHOLESALE_EXCEPTIONS)
         await asyncio.sleep(wholesale_ex.AUTO_INTERVAL_SECONDS)
 
 
@@ -2399,6 +2485,18 @@ async def on_startup():
         JobName.WEB_PUSH:             _web_push_loop,
         JobName.AI_WORKFORCE_WORKER:  _ai_workforce_worker_loop,
     }
+    # Rows left 'running' by a process that was killed mid-pass (OOM, deploy)
+    # are closed as errors with the reason, by the process that owns the loops,
+    # off the event loop. See job_run_service.close_abandoned_runs.
+    if _plan["start"]:
+        async def _close_abandoned():
+            try:
+                from app.services.job_run_service import close_abandoned_runs
+                from app.deps import SessionLocal as _SL
+                await asyncio.to_thread(close_abandoned_runs, _SL)
+            except Exception:                                    # noqa: BLE001
+                _logging.getLogger(__name__).warning("abandoned job-run close skipped", exc_info=True)
+        asyncio.create_task(_close_abandoned())
     for _job_name in _plan["start"]:
         _factory = _loop_factories.get(_job_name)
         if _factory is None:
