@@ -1011,8 +1011,13 @@ def overview(L: Ledger, db: Session, location_id: Optional[str] = None) -> Dict:
     approved_rows = rows(L, "approved", allw, f)
     approved_today = sum(1 for lid in {r["lead_id"] for r in approved_rows}
                          if L.families[lid]["approved_at"] and _in(L.families[lid]["approved_at"], today))
-    sched = [L.families[r["lead_id"]]["starts_at"] for r in rows(L, "scheduled_new", allw, f)
-             if L.families[r["lead_id"]]["starts_at"]]
+    pending_new_ids = {r["lead_id"] for r in rows(L, "scheduled_new", allw, f)}
+    sched = [L.families[lid]["starts_at"] for lid in pending_new_ids
+             if L.families[lid]["starts_at"]]
+    # Count actual contact-field coverage separately from SMS consent.
+    # Previous UI used sms_ready/no_consent to label families with *no phone*
+    # as missing consent. Those are different things and should not be conflated.
+    with_phone = sum(1 for lid in pending_new_ids if (L.families[lid].get("phone") or "").strip())
     from app.services.cadence_service import _get_org_cadence_schedule
     try:
         steps = _get_org_cadence_schedule(db, L.org)
@@ -1030,6 +1035,7 @@ def overview(L: Ledger, db: Session, location_id: Optional[str] = None) -> Dict:
         "in_followup": c("in_followup"),
         "scheduled_new": {"value": c("scheduled_new"), "sms_ready": c("scheduled_sms_ready"),
                           "no_consent": c("scheduled_no_consent"),
+                          "with_phone": with_phone, "no_phone": len(pending_new_ids) - with_phone,
                           "first_start": _iso(min(sched)) if sched else None,
                           "last_start": _iso(max(sched)) if sched else None},
         "replies_24h": {"value": count(L, "replies", d24, f), "repliers": count(L, "repliers", d24, f)},
