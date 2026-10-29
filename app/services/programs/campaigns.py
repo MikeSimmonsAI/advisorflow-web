@@ -81,11 +81,46 @@ def ensure_central_alabama(db: Session, organization_id: str):
     return fam
 
 
+def ensure_kilgroe_for_sci(db: Session, organization_id: str):
+    """Owner-selected brand-only Kilgroe routing for the Central Alabama POC.
+
+    The source says only 'Kilgroe Funeral Home', not Pell City vs Leeds. Use
+    the actual published Pell City telephone, but deliberately do NOT assert
+    that all families selected the Pell City physical branch or invent an
+    address, hours or an advisor. This is an idempotent program location.
+    """
+    from app.models.location_models import Location
+    from app.models.program_models import LocationProfile
+    profile = (db.query(LocationProfile)
+               .filter(LocationProfile.organization_id == organization_id,
+                       LocationProfile.official_name == "Kilgroe Funeral Home").first())
+    if profile is not None:
+        return profile
+    loc = (db.query(Location)
+           .filter(Location.organization_id == organization_id,
+                   Location.slug == "kilgroe-central-alabama").first())
+    if loc is None:
+        loc = Location(organization_id=organization_id, name="Kilgroe Funeral Home",
+                       slug="kilgroe-central-alabama", phone="+12053383341",
+                       state="AL", notes="Central Alabama POC: brand-only routing; physical branch unverified")
+        db.add(loc)
+        db.flush()
+    profile = LocationProfile(
+        organization_id=organization_id, location_id=loc.id,
+        official_name="Kilgroe Funeral Home",
+        source_names=json.dumps(["Kilgroe Funeral Home"]),
+        facility_phone="+12053383341", is_review_bucket=False)
+    db.add(profile)
+    db.commit()
+    return profile
+
+
 def ensure_for_sci(db: Session) -> Optional[str]:
     from app.services import sms_programs
     org_id = sms_programs.sci_org_id(db)
     if org_id:
         ensure_central_alabama(db, org_id)
+        ensure_kilgroe_for_sci(db, org_id)
     return org_id
 
 
