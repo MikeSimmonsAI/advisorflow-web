@@ -16,6 +16,7 @@ import Onboarding from './pages/Onboarding'
 import DealRoom from './pages/portal/DealRoom'
 import PortalAccess from './pages/portal/PortalAccess'
 import DemoSite from './pages/portal/DemoSite'
+import GrantedPreview from './pages/program/GrantedPreview'
 import PortalViewer from './pages/portal/PortalViewer'
 import SignDocument from './pages/portal/SignDocument'
 import PermissionPage from './pages/PermissionPage'
@@ -1094,6 +1095,8 @@ function WorkspaceSelector() {
     // context is set and nothing is entered. It opens in a new tab so the
     // launcher stays where it was.
     if (item.type === 'preview') {
+      // A God-granted preview opens inside this app (signed in, re-checked).
+      if (item.grant_id && item.path) { navigate(item.path); return }
       if (item.url) window.open(item.url, '_blank', 'noopener,noreferrer')
       return
     }
@@ -1269,6 +1272,8 @@ export default function App() {
             mechanisms, deliberately not merged. */}
         <Route path="/workspace/:organizationId" element={<WorkspaceRoute />} />
         <Route path="/workspaces" element={<WorkspaceSelector />} />
+        {/* A God-granted preview of one deal's demo - signed in; the server re-checks the grant every open. */}
+        <Route path="/previews/:grantId" element={isAuthenticated() ? <GrantedPreview /> : <Navigate to="/login" replace />} />
         <Route path="/sci" element={<SciFrontDoor />} />
         <Route path="/onboarding" element={<Onboarding />} />
         {/* Public by necessity: the invited customer has no account yet. */}

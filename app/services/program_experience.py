@@ -57,6 +57,10 @@ WHOLESALE_ALLOWED_PREFIXES = (
     "/esign",
     "/health",
     "/demo/environment",
+    # A God-granted preview of one deal's demo (deal_preview_grants). The
+    # route re-checks the grant for the caller on every open; the grant row is
+    # the whole authorization, so the Wholesale lock has nothing to add.
+    "/program-access/previews/",
 )
 
 

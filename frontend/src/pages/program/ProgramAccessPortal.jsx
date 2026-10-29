@@ -154,7 +154,7 @@ export default function ProgramAccessPortal({ contexts, onChoose, user: userProp
               <div className={'pa-grid pa-grid--' + view + ' pa-grid--n' + Math.min(previews.length, 5)} role="list" aria-label="Previews">
                 {previews.map(item => (
                   <div role="listitem" key={item.organization_id}>
-                    <WorkspaceCard item={item} onOpen={onChoose} layout={view} actionLabel="Open preview" href={item.url} />
+                    <WorkspaceCard item={item} onOpen={onChoose} layout={view} actionLabel="Open preview" href={item.href || item.url} />
                   </div>
                 ))}
               </div>

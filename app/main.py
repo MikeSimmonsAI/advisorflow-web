@@ -1268,6 +1268,10 @@ app.include_router(sci_intake_router)
 app.include_router(program_router)
 app.include_router(program_public_router)  # public - the token IS the authorization
 app.include_router(program_god_router)
+# God-granted demo previews (deal_preview_grants): /god/preview-grants (God only)
+# and /program-access/previews/{grant_id} (the grantee, re-checked every open).
+from app.routers.preview_grant_router import router as preview_grant_router  # noqa: E402
+app.include_router(preview_grant_router)
 # Resend delivery / bounce / complaint events (signed; inert until RESEND_WEBHOOK_SECRET is set).
 from app.routers.email_events_router import router as email_events_router, unsubscribe_router as email_unsubscribe_router
 app.include_router(email_events_router)
