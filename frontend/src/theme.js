@@ -15,6 +15,7 @@
  *   CSS in index.css uses [data-theme="evosyspro"] overrides.
  *   No JavaScript theme state to manage — pure CSS variable overrides.
  */
+import { bookaboostProductBrand, OLP } from './brand/productBrand.js'
 
 export const THEMES = {
   BOOKABOOST: 'bookaboost',
@@ -220,7 +221,10 @@ export const BRAND_CONFIG = {
     // by the Wholesale rail (dark, so the white-wordmark file) and the Back
     // Office brand mark; nothing else changes when these are set.
     markUrl: '/brands/bookaboost-mark.svg',
-    wholesaleLogoUrl: '/brands/bookaboost-logo.svg',
+    // OLP (Overlooked Properties, powered by BookaBoost) exploration: the
+    // Wholesale rail shows the proposed OLP horizontal logo unless the build
+    // chooses the plain BookaBoost face (src/brand/productBrand.js).
+    wholesaleLogoUrl: bookaboostProductBrand() === 'olp' ? OLP.horizontal : '/brands/bookaboost-logo.svg',
   },
   [THEMES.EVOSYSPRO]: {
     displayName: 'EvoSys Pro',

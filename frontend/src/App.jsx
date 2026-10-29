@@ -154,6 +154,7 @@ import {
 // Wholesale Phase 7 — EvoSense acquisition engine. Same feature key.
 const EvoCommand = lazyPage(() => import('./pages/wholesale/evosense/EvoCommand'))
 const EvoInbox = lazyPage(() => import('./pages/wholesale/evosense/EvoInbox'))
+const OpportunityRadar = lazyPage(() => import('./pages/wholesale/evosense/OpportunityRadar'))
 const EvoProperty = lazyPage(() => import('./pages/wholesale/evosense/EvoProperty'))
 const EvoStrategies = lazyPage(() => import('./pages/wholesale/evosense/EvoStrategies').then(m => ({ default: m.EvoStrategies })))
 const EvoStrategyBuilder = lazyPage(() => import('./pages/wholesale/evosense/EvoStrategies').then(m => ({ default: m.EvoStrategyBuilder })))
@@ -1611,6 +1612,7 @@ export default function App() {
         {/* Phase 7 EvoSense — discovery before a deal exists. */}
         <Route path="/wholesale/evosense" element={<ProtectedRoute feature="wholesale_real_estate"><EvoCommand /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/inbox" element={<ProtectedRoute feature="wholesale_real_estate"><EvoInbox /></ProtectedRoute>} />
+        <Route path="/wholesale/evosense/overlooked" element={<ProtectedRoute feature="wholesale_real_estate"><OpportunityRadar /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/property/:propertyId" element={<ProtectedRoute feature="wholesale_real_estate"><EvoProperty /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/strategies" element={<ProtectedRoute feature="wholesale_real_estate"><EvoStrategies /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/strategies/:strategyId" element={<ProtectedRoute feature="wholesale_real_estate"><EvoStrategyBuilder /></ProtectedRoute>} />

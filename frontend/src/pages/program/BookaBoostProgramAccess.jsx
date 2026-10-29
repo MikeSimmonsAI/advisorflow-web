@@ -3,6 +3,7 @@ import '@fontsource/playfair-display/500.css'
 import '@fontsource/playfair-display/600.css'
 import './bookaboostProgramAccess.css'
 import { programCards } from './programAccessModel'
+import { bookaboostProductBrand, OLP } from '../../brand/productBrand'
 import { getCurrentUser, logout } from '../../api/client'
 import photoHero from '../wholesale/ds/photos/estate.jpg'
 import photoWholesale from '../wholesale/ds/photos/aerial.jpg'
@@ -29,8 +30,13 @@ const PHOTOS = {
   executive: photoExecutive,
   preview: photoLand,
 }
+// OLP exploration: the Wholesale program is presented as OLP - Overlooked
+// Properties (its icon and one line). Which programs appear is unchanged.
+const IS_OLP = bookaboostProductBrand() === 'olp'
 const LINES = {
-  wholesale: 'Find, analyze, and close more deals with our full acquisition and disposition platform.',
+  wholesale: IS_OLP
+    ? 'Overlooked Properties: find, research and match opportunities, then move them to close.'
+    : 'Find, analyze, and close more deals with our full acquisition and disposition platform.',
   back_office: 'Manage leads, appointments and your sales pipeline.',
   executive: 'See how the whole business is performing.',
   preview: 'A preview you have been given permission to open.',
@@ -56,6 +62,13 @@ const ICONS = {
 }
 
 function Badge({ kind }) {
+  if (kind === 'wholesale' && IS_OLP) {
+    return (
+      <span className="bbpa-badge bbpa-badge--olp" aria-hidden="true">
+        <img src={OLP.icon} alt="" width="40" height="32" />
+      </span>
+    )
+  }
   return (
     <span className={'bbpa-badge' + (kind === 'preview' ? ' bbpa-badge--green' : '')} aria-hidden="true">
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"
