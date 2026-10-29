@@ -8,6 +8,7 @@ import StagingBanner from './components/StagingBanner'
 import ContextBanner from './components/ContextBanner'
 import DemoConsole from './pages/DemoConsole'
 import Login from './pages/Login'
+import GoogleSignInComplete from './pages/GoogleSignInComplete'
 import TeamPrices from './pages/TeamPrices'
 import Onboarding from './pages/Onboarding'
 // Public customer-facing surfaces. DealRoom is the Checkpoint 4 sales deal
@@ -1288,6 +1289,8 @@ export default function App() {
         {/* Public by necessity: the invited customer has no account yet. */}
         <Route path="/activate" element={<Activate />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
+        {/* Sign in with Google (#430): collects the session from a one-time ticket. */}
+        <Route path="/auth/google/complete" element={<GoogleSignInComplete />} />
         <Route path="/setup-integrations" element={<SetupIntegrations />} />
         {/* ── PUBLIC customer surfaces ── no ProtectedRoute, by design ──
             A customer has no account. The token in the URL is the whole

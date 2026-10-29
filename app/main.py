@@ -839,6 +839,9 @@ def demo_request_docs():
 
 # ── All app routers
 app.include_router(auth_router.router)
+# Sign in with Google (#430). Inert (404 / enabled:false) until GOOGLE_SIGNIN_* is configured.
+from app.routers.google_signin_router import router as google_signin_router  # noqa: E402
+app.include_router(google_signin_router)
 app.include_router(timeline_router)   # before leads_router — prevents /{lead_id} catch-all from shadowing /activity
 app.include_router(leads_router.router)
 app.include_router(sms_router.router)

@@ -467,6 +467,46 @@ export async function login(email, password) {
     throw new Error(data.detail || 'Login failed')
   }
   const data = await res.json()
+  _storeSession(data)
+  return data
+}
+
+// SIGN IN WITH GOOGLE (#430). The callback handed the browser a 2-minute,
+// single-use ticket in the URL fragment; the session token is collected here
+// with a POST and stored exactly as the password login stores it.
+export async function exchangeGoogleTicket(ticket) {
+  const res = await fetch(`${API_BASE}/auth/google/exchange`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ticket }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error((data && typeof data.detail === 'string' && data.detail) || 'Google sign-in could not be completed.')
+  }
+  const data = await res.json()
+  _storeSession(data)
+  return data
+}
+
+// Public and secret-free: may this page offer "Continue with Google"? Any
+// failure means no button - never a button that does nothing.
+export async function fetchGoogleSigninConfig() {
+  try {
+    const res = await fetch(`${API_BASE}/auth/google/config`)
+    if (!res.ok) return { enabled: false }
+    const d = await res.json()
+    return { enabled: !!(d && d.enabled) }
+  } catch { return { enabled: false } }
+}
+
+export function googleSigninStartUrl(nextPath) {
+  const q = new URLSearchParams({ origin: window.location.origin })
+  if (nextPath) q.set('next', nextPath)
+  return `${API_BASE}/auth/google/start?${q}`
+}
+
+function _storeSession(data) {
   setToken(data.access_token)
   // A NEW SESSION GETS A NEW ANSWER. The shared context list belongs to
   // whoever was signed in when it was fetched; carrying it across a sign-in
@@ -479,7 +519,6 @@ export async function login(email, password) {
     full_name: data.full_name, role: data.role, organization_id: data.organization_id,
     must_change_password: data.must_change_password,
   }))
-  return data
 }
 
 export function setMustChangePassword(value) {
