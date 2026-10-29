@@ -9,6 +9,7 @@
    POST /campaigns/{id}/activation) and is audit-logged. Nothing on this page
    switches anything on by itself. */
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../../../api/client'
 import {
   Banner, Chip, Empty, ErrorLine, Field, Icon, Kpi, Loading, PageHead, Panel, SearchBox, Tabs, TypedConfirm,
@@ -23,8 +24,12 @@ const PURPOSE = {
   veteran_spanish: 'Veteran benefits, Spanish callouts', web_lead: 'Website information requests',
 }
 const MODE_LABEL = { none: 'No flyer', hosted: 'Hosted / view flyer', attached: 'Attached PDF' }
+const MESSAGE_FIELDS = ['sms_template', 'email_subject_template', 'email_body_template']
+const messageFrom = f => Object.fromEntries(MESSAGE_FIELDS.map(k => [k, f?.[k] || '']))
 
 export default function Campaigns({ isManager, locationId, locations, performance, goTab }) {
+  const [searchParams] = useSearchParams()
+  const targetCampaign = searchParams.get('campaign') || ''
   const [rows, setRows] = useState(null)
   const [cur, setCur] = useState(null)
   const [q, setQ] = useState('')
@@ -36,12 +41,23 @@ export default function Campaigns({ isManager, locationId, locations, performanc
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [confirmOn, setConfirmOn] = useState(false)
+  const [messageDraft, setMessageDraft] = useState(() => messageFrom(null))
+  const [savingMessage, setSavingMessage] = useState(false)
+  const [messageNotice, setMessageNotice] = useState('')
+  const [previewVersion, setPreviewVersion] = useState(0)
 
   useEffect(() => {
-    api.get('/program/campaigns').then(d => { setRows(d); setCur(c => c || d[0] || null) }).catch(e => setErr(errText(e)))
+    api.get('/program/campaigns').then(d => {
+      setRows(d)
+      setCur(c => d.find(f => f.key === targetCampaign) || c || d[0] || null)
+    }).catch(e => setErr(errText(e)))
     api.get('/program/health').then(h => setSms(h.sms || null)).catch(() => setSms(null))
-  }, [])
+  }, []) // initial selection follows the deep link if provided
   useEffect(() => { if (locationId && homes.some(l => l.location_id === locationId)) setLoc(locationId) }, [locationId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setMessageDraft(messageFrom(cur))
+    setMessageNotice('')
+  }, [cur?.id])
   useEffect(() => {
     if (!cur || !loc) { setPreview(null); return undefined }
     let alive = true
@@ -49,7 +65,7 @@ export default function Campaigns({ isManager, locationId, locations, performanc
     api.get(`/program/campaigns/${cur.id}/preview?location_id=${encodeURIComponent(loc)}&touch=${touch}`)
       .then(p => { if (alive) { setPreview(p); setErr('') } }).catch(e => { if (alive) setErr(errText(e)) })
     return () => { alive = false }
-  }, [cur, loc, touch])
+  }, [cur, loc, touch, previewVersion])
 
   const perf = useMemo(() => Object.fromEntries((performance || []).map(p => [p.key, p])), [performance])
   const blocked = sms ? (sms.status === 'fail' || sms.approved === false) : false
@@ -57,6 +73,20 @@ export default function Campaigns({ isManager, locationId, locations, performanc
   const replace = f => { setCur(f); setRows(rs => rs.map(r => (r.id === f.id ? f : r))) }
   const setMode = async (key, value) => {
     try { replace(await api.patch(`/program/campaigns/${cur.id}`, { [key]: value })) } catch (e) { setErr(errText(e)) }
+  }
+  const messageChanged = !!cur && MESSAGE_FIELDS.some(k => messageDraft[k] !== (cur[k] || ''))
+  const saveMessaging = async () => {
+    if (!cur || !isManager || cur.key !== 'central_alabama_ms' || !messageChanged) return
+    setSavingMessage(true)
+    setMessageNotice('')
+    try {
+      const saved = await api.patch(`/program/campaigns/${cur.id}`, messageDraft)
+      replace(saved)
+      setMessageDraft(messageFrom(saved))
+      setMessageNotice('Saved. This campaign stays off; no families were contacted.')
+      setPreviewVersion(v => v + 1)
+      setErr('')
+    } catch (e) { setErr(errText(e)) } finally { setSavingMessage(false) }
   }
   const activate = async (active, confirm = null) => {
     setBusy(true)
@@ -148,6 +178,43 @@ export default function Campaigns({ isManager, locationId, locations, performanc
             <p className="sci-footnote"><Icon name="shield" />A preview does not establish anyone's opt-in. Every enrolled contact remains gated on the backend.</p>
           </Panel>
         ) : <Panel title="Campaign preview"><Empty icon="campaigns">Pick a campaign.</Empty></Panel>}
+
+        {cur?.key === 'central_alabama_ms' && (
+          <Panel title="Central Alabama — message editor" labelledBy="sci-ca-message-editor">
+            <p className="sci-micro sci-muted" style={{ marginTop: 0 }}>
+              These templates belong only to Central Alabama 2025–2026 MS, not Veteran Guide,
+              Survey or other SCI campaigns. Save a draft to refresh the location preview above.
+              Saving does not activate the campaign or send a message.
+            </p>
+            <div className="sci-form one">
+              <Field label="First text (SMS)">
+                <textarea rows={5} value={messageDraft.sms_template} disabled={!isManager || savingMessage}
+                  onChange={e => setMessageDraft(d => ({ ...d, sms_template: e.target.value }))}
+                  placeholder="Write Kerry's introduction and invite the family to reply to schedule." />
+              </Field>
+              <Field label="Email subject">
+                <input value={messageDraft.email_subject_template} disabled={!isManager || savingMessage}
+                  onChange={e => setMessageDraft(d => ({ ...d, email_subject_template: e.target.value }))}
+                  placeholder="A brief introduction from your local funeral home" />
+              </Field>
+              <Field label="Email body">
+                <textarea rows={8} value={messageDraft.email_body_template} disabled={!isManager || savingMessage}
+                  onChange={e => setMessageDraft(d => ({ ...d, email_body_template: e.target.value }))}
+                  placeholder="Write your campaign-specific email invitation and call to reply." />
+              </Field>
+            </div>
+            <p className="sci-micro sci-muted">
+              Available personalization: <code>{'{first_name}'}</code>, <code>{'{location_name}'}</code>,
+              <code>{'{primary_contact_name}'}</code>. Do not claim the family requested an offer
+              unless the source record supports it.
+            </p>
+            {isManager && <button type="button" className="sci-btn gold"
+              disabled={!messageChanged || savingMessage} onClick={saveMessaging}>
+              <Icon name="check" />{savingMessage ? 'Saving…' : 'Save Central Alabama messages'}
+            </button>}
+            {messageNotice && <p className="sci-micro" role="status">{messageNotice}</p>}
+          </Panel>
+        )}
 
         {cur && (
           <Panel title="Campaign controls" labelledBy="sci-controls">
