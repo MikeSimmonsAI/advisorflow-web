@@ -130,27 +130,126 @@ def test_private_radar_endpoint_rejects_anonymous(client):
     assert response.status_code in (401, 403), response.text[:200]
 
 
-def test_private_radar_endpoint_workspace_scoped(client, db_session):
-    db = db_session
-    a = org(db, "BookaBoost Radar")
-    b = org(db, "Other Radar")
-    property_record(db, a, "Our Only St", "land")
-    property_record(db, b, "Secret Other St", "land")
-    user = User(organization_id=a.id, email="radar-" + uuid.uuid4().hex[:8] + "@example.com",
-                full_name="Test Radar Admin", role="org_admin",
+def _login(db, o, *, role="org_admin", member_of=None):
+    user = User(organization_id=o.id if o else None,
+                email="radar-" + uuid.uuid4().hex[:8] + "@example.com",
+                full_name="Test Radar User", role=role,
                 password_hash=hash_password("Pass12345!"), is_active=True,
                 must_change_password=False)
     db.add(user)
     db.flush()
-    db.add(Membership(user_id=user.id, scope_type="customer_org", scope_id=a.id,
-                      role="org_admin", is_active=True))
+    for ws in ([o] if o else []) + list(member_of or []):
+        db.add(Membership(user_id=user.id, scope_type="customer_org", scope_id=ws.id,
+                          role=role, is_active=True))
     db.commit()
-    headers = {"Authorization": "Bearer " + create_access_token(user, db),
-               "X-Workspace-Id": a.id}
-    r = client.get("/wholesale/evosense/opportunity-radar", headers=headers)
+    return user
+
+
+def _h(db, user, ws=None):
+    h = {"Authorization": "Bearer " + create_access_token(user, db)}
+    if ws:
+        h["X-Workspace-Id"] = ws.id
+    return h
+
+
+def test_private_radar_endpoint_workspace_scoped(client, db_session):
+    """The platform contract for a forged X-Workspace-Id is: the server throws
+    the header away (and logs AUTHZ DENIED) and the caller stays in their OWN
+    workspace (workspace_access.selected_workspace_id). So the right proof is
+    not a particular status code but that NOTHING of the other tenant comes
+    back - with or without the forged header."""
+    db = db_session
+    a = org(db, "BookaBoost Radar")
+    b = org(db, "Other Radar")
+    ours = property_record(db, a, "Our Only St", "land")
+    theirs = property_record(db, b, "Secret Other St", "land")
+    evidence(db, b, theirs, "TAX_DELINQUENT", source="secret_county_feed")
+    user = _login(db, a)
+    other = _login(db, b)
+
+    r = client.get("/wholesale/evosense/opportunity-radar", headers=_h(db, user, a))
     assert r.status_code == 200, r.text[:300]
-    assert r.json()["total"] == 1
+    assert r.json()["total"] == 1 and r.json()["items"][0]["id"] == ours.id
     assert "Secret Other St" not in r.text
-    attack = client.get("/wholesale/evosense/opportunity-radar", headers={
-        **headers, "X-Workspace-Id": b.id})
-    assert attack.status_code in (403, 404), attack.text[:300]
+
+    # Forged header naming the other tenant: discarded, never honoured.
+    attack = client.get("/wholesale/evosense/opportunity-radar", headers=_h(db, user, b))
+    if attack.status_code == 200:
+        body = attack.json()
+        assert {i["id"] for i in body["items"]} <= {ours.id}, "another tenant's record was returned"
+    else:
+        assert attack.status_code in (403, 404), attack.text[:300]
+    for leaked in ("Secret Other St", theirs.id, "secret_county_feed"):
+        assert leaked not in attack.text
+
+    # Every filter combination stays inside the caller's own workspace.
+    for q in ("market=land", "market=wholesale", "state=TX", "county=Tarrant", "min_score=0",
+              "market=all&limit=50", "include_test=true"):
+        rr = client.get("/wholesale/evosense/opportunity-radar?" + q, headers=_h(db, user, b))
+        assert theirs.id not in rr.text and "Secret Other St" not in rr.text, q
+
+    # The other tenant's property id is refused on the research route Radar links to.
+    for path in ("/wholesale/evosense/properties/%s" % theirs.id,
+                 "/wholesale/evosense/properties/%s/readiness" % theirs.id):
+        for ws in (None, a, b):
+            assert client.get(path, headers=_h(db, user, ws)).status_code in (403, 404), (path, ws)
+
+    # And the reverse direction: the other tenant never sees ours.
+    back = client.get("/wholesale/evosense/opportunity-radar", headers=_h(db, other, a))
+    assert ours.id not in back.text and "Our Only St" not in back.text
+
+
+def test_private_radar_requires_the_wholesale_entitlement(client, db_session):
+    db = db_session
+    plain = Organization(name="No Wholesale", slug="radar-" + uuid.uuid4().hex[:12],
+                         plan="standard", industry="real_estate", is_active=True,
+                         enabled_features=json.dumps(["leads", "users", "reports"]))
+    db.add(plain)
+    db.flush()
+    property_record(db, plain, "Should Not Show", "land")
+    user = _login(db, plain)
+    r = client.get("/wholesale/evosense/opportunity-radar", headers=_h(db, user, plain))
+    assert r.status_code in (402, 403, 404), r.text[:300]
+    assert "Should Not Show" not in r.text
+
+
+def test_radar_reads_never_write(client, db_session):
+    """Opening Radar changes nothing: no property, signal or deal rows."""
+    from app.models.wholesale_models import WholesaleDeal
+    db = db_session
+    a = org(db, "Read Only")
+    p = property_record(db, a, "Read Only Ave", "residential")
+    evidence(db, a, p, "PRE_FORECLOSURE")
+    user = _login(db, a)
+    before = (db.query(EvoSenseProperty).count(), db.query(EvoSenseSignal).count(),
+              db.query(WholesaleDeal).count())
+    for q in ("", "?market=residential", "?market=wholesale&min_score=10"):
+        assert client.get("/wholesale/evosense/opportunity-radar" + q, headers=_h(db, user, a)).status_code == 200
+    db.expire_all()
+    after = (db.query(EvoSenseProperty).count(), db.query(EvoSenseSignal).count(),
+             db.query(WholesaleDeal).count())
+    assert before == after
+
+
+def test_coverage_next_step_and_missing_information_are_honest(db_session):
+    db = db_session
+    a = org(db, "Coverage")
+    b = org(db, "Coverage Other")
+    p = property_record(db, a, "Coverage 1", "residential", state="GA")
+    property_record(db, a, "Coverage 2", "land", state="GA")
+    property_record(db, a, "Coverage 3", "land", state="MT")
+    property_record(db, b, "Elsewhere", "land", state="WY")
+    db.commit()
+    res = RADAR.search(db, a.id, market="all", state="GA")
+    states = {s["state"]: s["count"] for s in res["available"]["states"]}
+    assert states == {"GA": 2, "MT": 1}, states            # never WY: that is another tenant
+    assert res["available"]["counties"] == [{"county": "Tarrant", "count": 2}]
+    item = next(i for i in res["items"] if i["id"] == p.id)
+    assert "Current supporting evidence" in item["missing_information"]
+    assert "Parcel number (APN)" in item["missing_information"]
+    assert "Year built" in item["missing_information"]
+    assert item["recommended_next_action"]["code"] == "research"
+    assert "EvoSense" not in json.dumps(res)                  # BookaBoost-facing text names no other brand
+    land = RADAR.search(db, a.id, market="land")
+    assert {s["state"] for s in land["available"]["states"]} == {"GA", "MT"}
+    assert all("Year built" not in i["missing_information"] for i in land["items"])

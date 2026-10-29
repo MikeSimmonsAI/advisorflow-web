@@ -8,12 +8,19 @@ import { api } from '../../../api/client'
 import './OpportunityRadar.css'
 
 const MARKETS = [
-  ['all', 'All opportunities'],
+  ['all', 'All Opportunities'],
   ['residential', 'Residential'],
-  ['wholesale', 'Wholesale'],
-  ['land', 'Land & Farms'],
+  ['wholesale', 'Wholesale / Distressed'],
+  ['land', 'Land, Farms & Ranches'],
   ['commercial', 'Commercial'],
 ]
+// Every US state and DC: the screen is nationwide; what each workspace
+// actually HAS is shown separately from the server's coverage answer.
+const US_STATES = ['AL','AK','AZ','AR','CA','CO','CT','DE','DC','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY']
+
+function money(v) {
+  return typeof v === 'number' ? '$' + v.toLocaleString() : null
+}
 const PAGE_SIZE = 20
 
 function dateText(value) {
@@ -52,7 +59,7 @@ function PropertyCard({ property: p }) {
         </div>
         <div className="bb-radar__score">
           <b>{p.existing_opportunity_score ?? '—'}</b>
-          <small>EvoSense score</small>
+          <small>Opportunity score</small>
         </div>
       </div>
       <div className="bb-radar__details">
@@ -63,11 +70,27 @@ function PropertyCard({ property: p }) {
         <div className="bb-radar__facts">
           <span>Data confidence: <strong>{p.data_confidence || 'Unknown'}</strong></span>
           <span>Last observed: <strong>{dateText(p.last_observed_at)}</strong></span>
+          {p.facts?.value != null ? <span>Value ({p.facts.value_basis}): <strong>{money(p.facts.value)}</strong></span> : null}
+          {p.facts?.year_built ? <span>Year built: <strong>{p.facts.year_built}</strong></span> : null}
+          {p.facts?.occupancy ? <span>Occupancy: <strong>{String(p.facts.occupancy).replaceAll('_', ' ')}</strong></span> : null}
         </div>
       </div>
+      {p.recommended_next_action ? (
+        <div className="bb-radar__next"><b>Recommended next step</b>{p.recommended_next_action.label}
+          {p.recommended_next_action.detail ? <> — {p.recommended_next_action.detail}</> : null}</div>
+      ) : null}
+      {p.missing_information?.length ? (
+        <>
+          <p className="bb-radar__gaps-title">Still missing</p>
+          <ul className="bb-radar__gaps" aria-label="Missing information">
+            {p.missing_information.map((m) => <li key={m}>{m}</li>)}
+          </ul>
+        </>
+      ) : null}
       <div className="bb-radar__property-actions">
         <Link to={`/wholesale/evosense/property/${encodeURIComponent(p.id)}`}>Open property research →</Link>
         {p.promoted_deal_id ? <Link to={`/wholesale/deals/${encodeURIComponent(p.promoted_deal_id)}`}>Open existing deal →</Link> : null}
+        {p.promoted_deal_id ? <Link to="/wholesale/deal-room">Deal Room →</Link> : null}
       </div>
     </article>
   )
@@ -122,6 +145,8 @@ export default function OpportunityRadar() {
   }
 
   const total = data?.total ?? 0
+  const haveState = Object.fromEntries((data?.available?.states || []).map((s) => [s.state, s.count]))
+  const coveredStates = data?.available?.states || []
   const start = applied.page * PAGE_SIZE
   return (
     <main className="bb-radar">
@@ -129,7 +154,8 @@ export default function OpportunityRadar() {
         <div>
           <p className="bb-radar__eyebrow">BOOKABOOST · PROFESSIONAL WORKSPACE</p>
           <h1>Overlooked Properties</h1>
-          <p className="bb-radar__subtitle">Find What Others Miss. Research evidence-backed opportunities in your workspace across the country.</p>
+          <p className="bb-radar__tagline">Find What Others Miss.</p>
+          <p className="bb-radar__subtitle">Research evidence-backed opportunities in your workspace, in any state.</p>
         </div>
         <div className="bb-radar__hero-side">
           <span>OPPORTUNITY RADAR</span>
@@ -146,12 +172,17 @@ export default function OpportunityRadar() {
 
       <form className="bb-radar__filters" onSubmit={apply}>
         <label>State (nationwide)
-          <input value={stateInput} onChange={(e) => setStateInput(e.target.value.toUpperCase())}
-                 maxLength={2} placeholder="All states" aria-label="State abbreviation" />
+          <select value={stateInput} onChange={(e) => { setStateInput(e.target.value); setCountyInput('') }} aria-label="State">
+            <option value="">All states</option>
+            {US_STATES.map((s) => <option key={s} value={s}>{s}{haveState[s] ? ` · ${haveState[s]} in your records` : ''}</option>)}
+          </select>
         </label>
         <label>County
           <input value={countyInput} onChange={(e) => setCountyInput(e.target.value)}
-                 maxLength={128} placeholder="Any county" />
+                 maxLength={128} placeholder="Any county" list="bb-radar-counties" aria-label="County" />
+          <datalist id="bb-radar-counties">
+            {(data?.available?.counties || []).map((c) => <option key={c.county} value={c.county}>{c.count} records</option>)}
+          </datalist>
         </label>
         <label>Minimum existing score
           <input value={scoreInput} onChange={(e) => setScoreInput(e.target.value)}
@@ -165,6 +196,13 @@ export default function OpportunityRadar() {
         <div>
           <h2>{loading ? 'Checking your property records…' : `${total.toLocaleString()} properties`}</h2>
           <p>Only properties available to your authorized workspace are included. Coverage varies by source and region.</p>
+          {!loading && !error ? (
+            <p className="bb-radar__coverage">
+              {coveredStates.length
+                ? <>Your records today cover <b>{coveredStates.length} {coveredStates.length === 1 ? 'state' : 'states'}</b>: {coveredStates.map((s) => `${s.state} (${s.count})`).join(', ')}.</>
+                : <>Your workspace has no property records for this market yet.</>}
+            </p>
+          ) : null}
         </div>
         <Link to="/wholesale/evosense/inbox">Discovery Inbox →</Link>
       </div>
@@ -194,7 +232,7 @@ export default function OpportunityRadar() {
                   onClick={() => setApplied((p) => ({ ...p, page: p.page + 1 }))}>Next</button>
         </div>
       )}
-      <p className="bb-radar__disclaimer">The existing EvoSense score is a research aid, not an appraisal, listing verification, indication of seller willingness, or guarantee of value. Confirm source records and applicable licensing before taking action.</p>
+      <p className="bb-radar__disclaimer">The opportunity score is a research aid, not an appraisal, listing verification, indication of seller willingness, or guarantee of value. Confirm source records and applicable licensing before taking action.</p>
     </main>
   )
 }

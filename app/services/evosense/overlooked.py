@@ -72,6 +72,86 @@ def _evidence(sig_rows: List[EvoSenseSignal], prop: EvoSenseProperty,
     return sorted(results, key=lambda v: (v["freshness"] != SIG.CURRENT, v["type"]))
 
 
+def _human(code: Optional[str]) -> Optional[str]:
+    if not code:
+        return None
+    return str(code).replace("_", " ").strip().capitalize()
+
+
+def _missing(p: EvoSenseProperty, reasons: List[Dict[str, Any]]) -> List[str]:
+    """What a professional still has to establish before relying on this record.
+    Only facts the record genuinely lacks; nothing is inferred."""
+    out = []
+    if not p.street_address:
+        out.append("Verified street address")
+    if not p.parcel_apn:
+        out.append("Parcel number (APN)")
+    if not p.county:
+        out.append("County")
+    if p.property_category in (None, "unknown") or p.property_class_conflict:
+        out.append("Confirmed property type")
+    if p.opportunity_score is None:
+        out.append("Opportunity score (not yet evaluated)")
+    if p.appraisal_value is None and p.estimated_value is None:
+        out.append("Assessed or estimated value")
+    if p.property_category in ("residential", "multifamily") and p.year_built is None:
+        out.append("Year built")
+    if not reasons:
+        out.append("Current supporting evidence")
+    return out
+
+
+def _next_step(p: EvoSenseProperty, reasons: List[Dict[str, Any]]) -> Dict[str, Optional[str]]:
+    """The engine's own recommendation when it has one; otherwise the honest
+    default for an unconfirmed record. Never an outreach or a purchase."""
+    if p.promoted_deal_id:
+        return {"code": "open_deal", "label": "Continue in the existing deal", "detail": None}
+    code = p.next_best_action or p.next_action
+    if code:
+        return {"code": code, "label": _human(code), "detail": p.next_action_detail}
+    if not reasons:
+        return {"code": "research", "label": "Confirm the source records in property research", "detail": None}
+    return {"code": "review", "label": "Review the evidence and decide whether to pursue", "detail": None}
+
+
+def _facts(p: EvoSenseProperty) -> Dict[str, Any]:
+    value = p.appraisal_value if p.appraisal_value is not None else p.estimated_value
+    value_basis = (("assessed %s" % p.appraisal_year if p.appraisal_year else "assessed")
+                   if p.appraisal_value is not None else
+                   ("estimate" if p.estimated_value is not None else None))
+    return {
+        "zip": p.zip_code, "year_built": p.year_built, "square_feet": p.square_feet,
+        "value": value, "value_basis": value_basis,
+        "value_source": p.appraisal_source if p.appraisal_value is not None else p.estimated_value_source,
+        "occupancy": p.occupancy if p.occupancy and p.occupancy != "unknown" else None,
+        "occupancy_source": p.occupancy_source if p.occupancy and p.occupancy != "unknown" else None,
+        "ownership_years": p.ownership_years,
+    }
+
+
+def coverage(db: Session, org_id: str, *, market: str = "all", state: Optional[str] = None,
+             include_test: bool = False) -> Dict[str, Any]:
+    """Where this workspace ACTUALLY has records (never a claim of national data):
+    record counts per state, and per county inside the chosen state."""
+    q = db.query(EvoSenseProperty).filter(EvoSenseProperty.organization_id == org_id,
+                                          EvoSenseProperty.archived_at.is_(None))
+    if not include_test:
+        q = q.filter(EvoSenseProperty.is_test.is_(False))
+    if market in MARKET_CLASSES:
+        q = q.filter(EvoSenseProperty.property_category.in_(MARKET_CLASSES[market]))
+    st = func.upper(EvoSenseProperty.state)
+    states = [{"state": s, "count": int(n)} for s, n in
+              q.with_entities(st, func.count(EvoSenseProperty.id)).filter(EvoSenseProperty.state.isnot(None))
+              .group_by(st).order_by(st).all() if s]
+    counties = []
+    if state:
+        counties = [{"county": c, "count": int(n)} for c, n in
+                    q.filter(st == state.upper(), EvoSenseProperty.county.isnot(None))
+                    .with_entities(EvoSenseProperty.county, func.count(EvoSenseProperty.id))
+                    .group_by(EvoSenseProperty.county).order_by(EvoSenseProperty.county).all() if c]
+    return {"states": states, "counties": counties}
+
+
 def search(db: Session, org_id: str, *, market: str = "all",
            state: Optional[str] = None, county: Optional[str] = None,
            min_score: Optional[int] = None,
@@ -146,13 +226,16 @@ def search(db: Session, org_id: str, *, market: str = "all",
                 p.property_category in (None, "unknown") or
                 bool(p.property_class_conflict) or p.identity_status == "review"),
             "existing_opportunity_score": p.opportunity_score,
-            "score_name": "EvoSense property opportunity",
+            "score_name": "Property opportunity score",
             "data_confidence": p.data_confidence,
             "last_observed_at": _iso(p.last_observed_at),
             "why_review": reasons,
             "evidence_status": "supported" if reasons else "needs_research",
             "promoted_deal_id": p.promoted_deal_id,
             "next_action": p.next_action,
+            "recommended_next_action": _next_step(p, reasons),
+            "missing_information": _missing(p, reasons),
+            "facts": _facts(p),
         }
         if market == "wholesale" and not reasons:
             # Do not pretend that a historical/cached score is independently
@@ -163,8 +246,10 @@ def search(db: Session, org_id: str, *, market: str = "all",
     return {
         "total": total, "offset": offset, "limit": limit,
         "market": market, "state": state, "county": county,
-        "score_definition": "Existing EvoSense property opportunity score; not an Overlooked score.",
+        "score_definition": ("The existing property opportunity score used across Acquisition; "
+                             "Radar adds no score of its own."),
         "coverage": "Only records actually present in this authorized workspace.",
         "markets": list(MARKETS),
+        "available": coverage(db, org_id, market=market, state=state, include_test=include_test),
         "items": items,
     }

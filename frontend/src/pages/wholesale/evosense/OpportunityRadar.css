@@ -1,13 +1,14 @@
 /* Scoped to private BookaBoost Opportunity Radar; no public-site selectors. */
 .bb-radar {
-  --bb-bg: #101b22;
-  --bb-deep: #0c151b;
-  --bb-panel: #17252d;
-  --bb-panel-2: #1e303a;
-  --bb-line: rgba(210,172,100,.26);
-  --bb-gold: #d2ac64;
-  --bb-text: #f5f2e8;
-  --bb-muted: #b9c3c8;
+  /* The approved BookaBoost tokens (docs/redesign/bookaboost/DESIGN_SPEC.md). */
+  --bb-bg: #0a0a0b;
+  --bb-deep: #0f0f11;
+  --bb-panel: #141416;
+  --bb-panel-2: #1c1c1f;
+  --bb-line: rgba(201,151,61,.32);
+  --bb-gold: #c9973d;
+  --bb-text: #f6f1e7;
+  --bb-muted: #c9c1b1;
   color: var(--bb-text);
   background: var(--bb-bg);
   padding: clamp(16px, 3vw, 34px);
@@ -18,15 +19,16 @@
 .bb-radar__hero {
   display: flex; align-items: center; justify-content: space-between;
   gap: 24px; padding: 30px 32px;
-  background: linear-gradient(110deg, #1b2c34, #101a20 72%);
+  background: linear-gradient(110deg, #1c1c1f, #0a0a0b 72%);
   border: 1px solid var(--bb-line); border-radius: 16px;
 }
 .bb-radar__eyebrow { color: var(--bb-gold); font-size: 11px; letter-spacing: .17em; font-weight: 800; }
 .bb-radar__hero h1 {
-  font-size: clamp(28px, 4vw, 44px); font-family: Georgia, 'Times New Roman', serif;
-  font-weight: 500; margin: 8px 0; line-height: 1.13;
+  font-size: clamp(28px, 4vw, 44px); font-family: 'Playfair Display', Georgia, 'Times New Roman', serif;
+  font-weight: 500; margin: 8px 0; line-height: 1.13; letter-spacing: .04em; text-transform: uppercase;
 }
 .bb-radar__subtitle { max-width: 680px; font-size: 14px; color: var(--bb-muted); line-height: 1.6; margin: 0; }
+.bb-radar__tagline { display: block; font-family: 'Playfair Display', Georgia, serif; font-size: clamp(17px, 2vw, 21px); color: #e2b866; margin: 0 0 6px; }
 .bb-radar__hero-side {
   border-left: 1px solid var(--bb-line); padding-left: 22px;
   min-width: 190px;
@@ -38,7 +40,7 @@
   border: 1px solid var(--bb-line); background: var(--bb-panel); color: var(--bb-text);
   border-radius: 30px; font: inherit; font-size: 13px; cursor: pointer; padding: 10px 17px;
 }
-.bb-radar__markets button.is-active { background: var(--bb-gold); border-color: var(--bb-gold); color: #121c22; font-weight: 800; }
+.bb-radar__markets button.is-active { background: var(--bb-gold); border-color: var(--bb-gold); color: #0a0a0b; font-weight: 800; }
 .bb-radar__markets button:hover:not(.is-active) { background: var(--bb-panel-2); }
 .bb-radar__filters {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
@@ -46,7 +48,7 @@
   border: 1px solid var(--bb-line); border-radius: 13px; background: var(--bb-deep);
 }
 .bb-radar__filters label { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 12px; color: var(--bb-muted); }
-.bb-radar__filters input {
+.bb-radar__filters input, .bb-radar__filters select {
   width: 100%; min-width: 0; background: var(--bb-panel); border: 1px solid #45545a;
   border-radius: 8px; color: var(--bb-text); padding: 12px 10px; font: inherit; font-size: 14px;
 }
@@ -115,3 +117,13 @@
   .bb-radar__results-heading { flex-direction: column; align-items: start; }
   .bb-radar__details { flex-direction: column; }
 }
+
+/* Next step, missing information and record facts on each card. */
+.bb-radar__next { margin-top: 14px; padding: 10px 12px; border-radius: 9px; background: rgba(201,151,61,.10); border: 1px solid var(--bb-line); font-size: 12px; color: var(--bb-text); }
+.bb-radar__next b { color: var(--bb-gold); display: block; font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 3px; }
+.bb-radar__gaps { margin: 10px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
+.bb-radar__gaps li { font-size: 11px; color: #ffd4a7; border: 1px solid rgba(255,212,167,.35); border-radius: 999px; padding: 3px 9px; }
+.bb-radar__gaps-title { margin: 12px 0 0; font-size: 11px; color: var(--bb-muted); }
+.bb-radar__coverage { margin: 14px 0 0; font-size: 12px; color: var(--bb-muted); line-height: 1.6; }
+.bb-radar__coverage b { color: var(--bb-text); }
+.bb-radar__filters select { appearance: auto; }
