@@ -1651,6 +1651,24 @@ def send_approve(body: PickIn, db: Session = Depends(get_db), user: User = Depen
                                  start_at=start, spacing_minutes=spacing)
 
 
+class CentralAlabamaPrepareIn(BaseModel):
+    # False: read-only preview. True: audited staging approval only.
+    apply: bool = False
+
+
+@router.post("/central-alabama/prepare")
+def central_alabama_prepare(body: CentralAlabamaPrepareIn, db: Session = Depends(get_db),
+                            user: User = Depends(require_tenant_user)):
+    """Owner-directed campaign preparation. No sends, cadence, or activation."""
+    from app.services.programs import send_approval
+    prog = _program(db, user)
+    _require_manager(db, user)
+    try:
+        return send_approval.stage_central_alabama(db, prog, user, apply=body.apply)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
 class DailyBatchIn(BaseModel):
     count: int
     spacing_minutes: Optional[int] = None
