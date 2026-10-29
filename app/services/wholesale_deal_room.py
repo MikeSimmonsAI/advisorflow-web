@@ -74,7 +74,15 @@ def _iso(v):
     return v.isoformat() + "Z" if isinstance(v, datetime) else (v.isoformat() if v else None)
 
 
-def public_base() -> str:
+def public_base(db=None, org_id: Optional[str] = None) -> str:
+    """Where an invited investor's link points. The organization's own brand
+    address first (a BookaBoost workspace -> its BookaBoost app), else exactly
+    what it was before: PUBLIC_APP_URL, FRONTEND_URL, the EvoSys default."""
+    if db is not None and org_id:
+        from app.services.brand_config import org_app_base_url
+        own = org_app_base_url(db, org_id)
+        if own:
+            return own
     return (os.environ.get("PUBLIC_APP_URL") or os.environ.get("FRONTEND_URL") or "https://app.evosyspro.live").rstrip("/")
 
 
@@ -105,7 +113,7 @@ def _brand_name(db, org_id: str) -> str:
 
 def _send_invite_email(db, inv: InvestorInvite, token: str) -> str:
     from app.services import email_service
-    url = "%s/investors/invite/%s" % (public_base(), token)   # /investor/:token is the Buyer Room link
+    url = "%s/investors/invite/%s" % (public_base(db, inv.organization_id), token)   # /investor/:token is the Buyer Room link
     org = db.query(Organization).filter(Organization.id == inv.organization_id).first()
     if inv.is_test or inv.email.lower().rsplit(".", 1)[-1] in ("invalid", "test", "example", "localhost"):
         return "not_sent: practice address (link shown to staff only)"

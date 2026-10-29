@@ -26,6 +26,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api/client'
 import { ErrorBar } from './parts'
+import { useSalesBrand } from './salesBrand'
 
 const FORMATS = [
   { key: 'video', label: 'Video' },
@@ -42,6 +43,7 @@ function todayYmd() {
 export default function BookAppointment({
   opportunity, presetStartsAt, presetRequired, onClose, onBooked, onFindTime,
 }) {
+  const brand = useSalesBrand()
   const [types, setTypes] = useState([])
   const [team, setTeam] = useState([])
   const [typeId, setTypeId] = useState('')
@@ -194,7 +196,7 @@ export default function BookAppointment({
               <b>THAT TIME IS NO LONGER FREE</b>
               <p>
                 The final check before saving found a conflict — either an
-                EvoSys Pro meeting or an event that appeared on a connected
+                {' ' + brand.name + ' '}meeting or an event that appeared on a connected
                 calendar. Nothing was booked. Pick another time, or let the
                 finder show you the ones that are genuinely open.
               </p>
@@ -402,7 +404,7 @@ export default function BookAppointment({
           </div>
 
           <div className="sw-subtle" style={{ marginTop: 10 }}>
-            Availability is re-checked against every participant's EvoSys Pro
+            Availability is re-checked against every participant's {brand.name + ' '}
             schedule and their connected calendars at the moment of saving, not
             when this form was opened.
           </div>

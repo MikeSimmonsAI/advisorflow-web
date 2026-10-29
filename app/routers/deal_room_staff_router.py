@@ -76,7 +76,7 @@ def invite(payload: InviteIn, db: Session = Depends(get_db), user: User = Depend
                                   is_test=payload.is_test)
     db.commit()
     # The link is shown ONCE so the sender can deliver it themselves when email did not go out.
-    return {**DR.invite_json(inv), "link": "%s/investors/invite/%s" % (DR.public_base(), token)}
+    return {**DR.invite_json(inv), "link": "%s/investors/invite/%s" % (DR.public_base(db, org_id), token)}
 
 
 @router.post("/invites/{invite_id}/resend")
@@ -85,7 +85,7 @@ def resend(invite_id: str, db: Session = Depends(get_db), user: User = Depends(r
     org_id = svc.write_org_id(db, user)
     inv, token = DR.resend_invite(db, org_id, invite_id, user)
     db.commit()
-    return {**DR.invite_json(inv), "link": "%s/investors/invite/%s" % (DR.public_base(), token)}
+    return {**DR.invite_json(inv), "link": "%s/investors/invite/%s" % (DR.public_base(db, org_id), token)}
 
 
 @router.post("/invites/{invite_id}/revoke")

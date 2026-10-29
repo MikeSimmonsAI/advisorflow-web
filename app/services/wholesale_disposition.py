@@ -82,40 +82,79 @@ def sms_enabled() -> bool:
     return (os.environ.get(SMS_ENV) or "").strip().lower() in _TRUE
 
 
-def channel_status() -> List[Dict[str, Any]]:
-    """What the Settings screen shows: can this deployment actually send?
+# ── TWO SWITCHES, BOTH REQUIRED (#272) ──────────────────────────────────────
+#
+# The server switch above covers the whole deployment, so on its own it could
+# not turn sending on for one workspace without turning it on for every other.
+# Each workspace now has its own switch as well, and a send needs BOTH. Both
+# start OFF for every workspace, so nothing is sent anywhere until the server
+# switch is on AND that workspace's own switch is on.
+#
+#   email -> the workspace's outbound email list (Organization.outbound_email_sources,
+#            the same audited per-customer list every other gated email uses;
+#            the platform owner sets it on the customer's page)
+#   text  -> WholesaleSettings.buyer_sms_enabled (an administrator of the
+#            workspace sets it in Wholesale Settings)
 
-    Computed from the environment every time rather than stored, so it cannot
-    go stale, and it names the variable so the answer is actionable.
+def workspace_email_enabled(db, org_id: Optional[str]) -> bool:
+    from app.services import outbound_email_gate as gate
+    if db is None or not org_id:
+        return False
+    return gate.org_source_enabled(_org(db, org_id), gate.WHOLESALE_BUYER_DISPOSITION)
+
+
+def workspace_sms_enabled(db, org_id: Optional[str]) -> bool:
+    if db is None or not org_id:
+        return False
+    from app.models.wholesale_models import WholesaleSettings
+    s = db.query(WholesaleSettings).filter(WholesaleSettings.organization_id == org_id).first()
+    return bool(getattr(s, "buyer_sms_enabled", False))
+
+
+def _channel(channel: str, env: str, server_on: bool, workspace_on: bool, *,
+             ready: str, noun: str, workspace_fix: str) -> Dict[str, Any]:
+    on = bool(server_on and workspace_on)
+    if on:
+        detail = ready
+    elif not server_on:
+        detail = ("%s is not switched on for this platform yet. The deal sheet is "
+                  "still written and saved — it just is not sent." % noun)
+    else:
+        detail = ("%s is turned off for this workspace. The deal sheet is still "
+                  "written and saved — it just is not sent. %s" % (noun, workspace_fix))
+    return {"channel": channel,
+            "enabled": on,
+            "env": env,
+            "status": "ready" if on else "not_enabled",
+            "server_enabled": bool(server_on),
+            "workspace_enabled": bool(workspace_on),
+            # Which switch is the one that is off: "server", "workspace" or None.
+            "off_at": None if on else ("server" if not server_on else "workspace"),
+            # `detail` is read by an acquisitions person on the deal screen.
+            # `technical` is read by whoever runs the deployment, on Settings.
+            "detail": detail,
+            "technical": (None if server_on else
+                          "Set %s=true in the server environment." % env)}
+
+
+def channel_status(db=None, org_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """What the Settings screen shows: can THIS workspace actually send?
+
+    Computed every time rather than stored, so it cannot go stale. It says
+    which switch is off - the server's or this workspace's - and names the
+    server variable so the answer is actionable.
     """
     from app.services import outbound_email_gate as gate
-
-    email_on = gate.source_enabled(gate.WHOLESALE_BUYER_DISPOSITION)
     return [
-        {"channel": "email",
-         "enabled": email_on,
-         "env": "OUTBOUND_EMAIL_WHOLESALE_BUYER_DISPOSITION",
-         "status": "ready" if email_on else "not_enabled",
-         # `detail` is read by an acquisitions person on the deal screen.
-         # `technical` is read by whoever runs the deployment, on Settings.
-         # Same fact, two audiences — see this module's Phase 5 note.
-         "detail": ("Buyer deal sheets can be emailed." if email_on else
-                    "Email to buyers is turned off for this workspace. The "
-                    "deal sheet is still written and saved — it just is not "
-                    "sent. An administrator can turn it on."),
-         "technical": (None if email_on else
-                       "Set OUTBOUND_EMAIL_WHOLESALE_BUYER_DISPOSITION=true "
-                       "in the server environment.")},
-        {"channel": "sms",
-         "enabled": sms_enabled(),
-         "env": SMS_ENV,
-         "status": "ready" if sms_enabled() else "not_enabled",
-         "detail": ("Buyer deal sheets can be texted from this organization's "
-                    "own Twilio number." if sms_enabled() else
-                    "Text messages to buyers are turned off for this "
-                    "workspace. An administrator can turn them on."),
-         "technical": (None if sms_enabled() else
-                       "Set %s=true in the server environment." % SMS_ENV)},
+        _channel("email", "OUTBOUND_EMAIL_WHOLESALE_BUYER_DISPOSITION",
+                 gate.source_enabled(gate.WHOLESALE_BUYER_DISPOSITION),
+                 workspace_email_enabled(db, org_id),
+                 ready="Buyer deal sheets can be emailed.", noun="Email to buyers",
+                 workspace_fix="The platform owner can turn it on for this workspace."),
+        _channel("sms", SMS_ENV, sms_enabled(), workspace_sms_enabled(db, org_id),
+                 ready="Buyer deal sheets can be texted from this organization's own Twilio number.",
+                 noun="Text messages to buyers",
+                 workspace_fix="An administrator can turn them on in Wholesale Settings."),
     ]
 
 
@@ -189,12 +228,20 @@ def preflight(db, org_id: str, deal: WholesaleDeal, buyer: WholesaleBuyer,
                 source=gate.WHOLESALE_BUYER_DISPOSITION)
         except gate.EmailSendDisabled as exc:
             raise SendRefused(str(exc), "not_enabled")
+        if not workspace_email_enabled(db, org_id):
+            raise SendRefused(
+                "Email to buyers is turned off for this workspace. The deal sheet "
+                "was composed and recorded; nothing was sent.", "not_enabled")
     elif channel == "sms":
         if not sms_enabled():
             raise SendRefused(
-                "Text messages to buyers are turned off for this workspace ""(%s). "
+                "Text messages to buyers are not switched on for this platform (%s). "
                 "The deal sheet was composed and recorded; nothing was sent."
                 % SMS_ENV, "not_enabled")
+        if not workspace_sms_enabled(db, org_id):
+            raise SendRefused(
+                "Text messages to buyers are turned off for this workspace. The deal "
+                "sheet was composed and recorded; nothing was sent.", "not_enabled")
     else:
         raise SendRefused("Only email and SMS can be sent from here.", "bad_channel")
 

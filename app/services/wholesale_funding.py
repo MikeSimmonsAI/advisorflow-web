@@ -39,6 +39,17 @@ PRODUCT_LABELS = {
 DISCLAIMER = ("Funding partners are independent third parties. EvoSys does not lend, approve, "
               "price or guarantee financing; criteria shown are what each partner stated.")
 
+
+def disclaimer(brand: str = "EvoSys") -> str:
+    """DISCLAIMER in the workspace's own brand (brand_config.brand_word).
+    "EvoSys" gives back DISCLAIMER exactly."""
+    return DISCLAIMER.replace("EvoSys does not lend", "%s does not lend" % (brand or "EvoSys"))
+
+
+def disclaimer_for(db, org_id) -> str:
+    from app.services.brand_config import brand_word
+    return disclaimer(brand_word(db, org_id))
+
 LIST_FIELDS = ("products", "states", "markets", "property_types")
 DECIDED = ("approved", "declined", "funded", "withdrawn")
 

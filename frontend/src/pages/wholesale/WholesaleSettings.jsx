@@ -138,6 +138,9 @@ export default function WholesaleSettings() {
       setSettings(await api.patch('/wholesale/settings', payload))
       setDraft({})
       setNotice('Settings saved.')
+      if ('buyer_sms_enabled' in payload) {
+        try { setChannels((await api.get('/wholesale/disposition/channels')).channels || []) } catch { /* keep the last answer */ }
+      }
     } catch (e) {
       setError(errText(e))
     } finally {
@@ -311,14 +314,15 @@ export default function WholesaleSettings() {
       <div className="panel ws-panel" id="set-outreach" hidden={tab !== 'outreach'}>
         <div className="panel-title ws-panel-title">Buyer outreach</div>
         <Note>
-          Whether a deal sheet can actually leave this deployment. Reported here,
-          not edited here.
+          Whether a deal sheet can actually leave for a buyer. Each channel needs
+          two switches on: the platform's and this workspace's own. Both start off.
         </Note>
-        <Why label="Why these cannot be changed from this screen">
+        <Why label="Why there are two switches">
           <p className="ws-comp__sub">
-            They are server switches rather than per-organization settings,
-            because turning on a new outbound channel is a decision about the
-            whole install.
+            The platform switch covers every workspace on this install. This
+            workspace's own switch means it is never turned on for you just
+            because another workspace asked for it. Email is turned on for a
+            workspace by the platform owner; texting by an administrator here.
           </p>
         </Why>
         {/* The explanation names an environment variable and runs to a couple
@@ -334,6 +338,13 @@ export default function WholesaleSettings() {
               </span>
             </div>
             <p className="ws-hint">{c.detail}</p>
+            {c.channel === 'sms' ? (
+              <label className="ws-checkbox">
+                <input type="checkbox" checked={!!value('buyer_sms_enabled')}
+                       onChange={(e) => set('buyer_sms_enabled', e.target.checked)} />
+                Allow texting deal sheets to buyers from this workspace
+              </label>
+            ) : null}
           </div>
         ))}
       </div>

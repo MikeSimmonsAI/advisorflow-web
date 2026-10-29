@@ -185,6 +185,11 @@ def _resolve_context(user: User, db: Session, brand_sales_org_id: Optional[str] 
     return org
 
 
+def _brand_names(db: Session, platform):
+    from app.services.brand_config import sales_brand_name, sales_brand_short
+    return sales_brand_name(db, platform), sales_brand_short(db, platform)
+
+
 def _may_present_demo(db: Session, user: User, platform) -> bool:
     """May this person present this brand's Demo Suite?
 
@@ -751,6 +756,11 @@ def sales_me(brand_sales_org_id: Optional[str] = Query(None),
                             "timezone": org.timezone},
         "platform": {"id": platform.id, "name": platform.name,
                      "slug": platform.slug} if platform else None,
+        # How the Back Office screens name the brand being sold (#272):
+        # "EvoSys Pro" / "EvoSys" for EvoSys Pro, exactly as they always read;
+        # another brand's own name for its Back Office.
+        "brand_display_name": _brand_names(db, platform)[0],
+        "brand_short_name": _brand_names(db, platform)[1],
         "role": ROLE_SALES_MANAGER if manager else ROLE_SALES_REP,
         "role_label": role_label,
         "is_god": is_god(user),

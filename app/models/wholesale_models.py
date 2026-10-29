@@ -241,6 +241,10 @@ class WholesaleSettings(Base):
     # here by an admin. OFF by default: until it is confirmed, email is only
     # ever eligible for sellers who reached out or said yes.
     cold_seller_email_confirmed = Column(Boolean, nullable=False, default=False)
+    # TEXTING DEAL SHEETS TO BUYERS, THIS WORKSPACE'S OWN SWITCH (#272). The
+    # server switch OUTBOUND_SMS_WHOLESALE_BUYER_DISPOSITION covers the whole
+    # deployment; a send needs it AND this. OFF by default for every workspace.
+    buyer_sms_enabled = Column(Boolean, nullable=False, default=False)
     # QUALIFICATION CRITERIA (wholesale_seller_intel.DEFAULT_CRITERIA): what a
     # seller must have told us before they are QUALIFIED. JSON; NULL = defaults.
     qualification_criteria = Column(Text, nullable=True)

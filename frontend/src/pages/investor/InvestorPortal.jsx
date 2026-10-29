@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { api as staffApi, fetchObjectUrl } from '../../api/client'
+import { engine } from '../wholesale/engine'
 import { cap, fileSize, inv, investorToken, objectUrl, setInvestorToken, usd, when, words } from './investorApi'
 import './investor.css'
 
@@ -1366,7 +1367,7 @@ function Preview() {
   const [q, setQ] = useState('')
   const [market, setMarket] = useState('')
   useEffect(() => {
-    staffApi.get('/wholesale/deal-room/portal-preview').then(setD).catch((e) => setErr(e.message || 'Sign in to EvoSys to preview your Deal Room.'))
+    staffApi.get('/wholesale/deal-room/portal-preview').then(setD).catch((e) => setErr(e.message || (engine() ? 'Sign in to EvoSys to preview your Deal Room.' : 'Sign in to preview your Deal Room.')))
   }, [])
   const dash = useMemo(() => {
     if (!d) return null

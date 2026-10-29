@@ -12,7 +12,8 @@ export const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://advisorflo
 
 import { shrinkFormData } from './shrinkImages'
 import { orgOverrideFor } from '../auth/routeAuthority'
-import { applyWorkspaceTheme } from '../theme.js'
+import { applyWorkspaceTheme, engineName } from '../theme.js'
+import { neutralEngineText, neutralizeDeep } from '../pages/wholesale/engineText.js'
 const KEY_TOKEN    = 'af_token'
 const KEY_USER     = 'af_user'
 const KEY_BRANDING = 'af_branding'
@@ -298,6 +299,7 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
     err.detail = detail
     err.status = res.status
     err.kind = _httpErrorKind(res.status)
+    if (_neutralEngineFor(path)) err.message = neutralEngineText(err.message)
     throw err
   }
 
@@ -305,8 +307,22 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
   // every other call (fetchObjectUrl sends only the token).
   if (options.asBlob) return res.blob()
   const contentType = res.headers.get('content-type') || ''
-  if (contentType.includes('application/json')) return res.json()
+  if (contentType.includes('application/json')) {
+    const data = await res.json()
+    return _neutralEngineFor(path) ? neutralizeDeep(data) : data
+  }
   return res.text()
+}
+
+// THE ENGINE'S NAME IN SERVER TEXT (#272). Wholesale screens run their own
+// wording through `ev()`, but messages written by the server ("EvoSense is
+// paused", event summaries) reached a second Wholesale tenant as-is. For a
+// workspace whose branding names no engine, the Wholesale and acquisition
+// answers get the same neutral wording. Every other workspace - EvoSys
+// included - receives the server's answer untouched.
+function _neutralEngineFor(path) {
+  if (!/^\/(wholesale|evosense)(\/|\?|$)/.test(String(path || ''))) return false
+  try { return !engineName(getBranding()) } catch { return false }
 }
 
 // ── ONE DASHBOARD LOAD, FORTY-FOUR ROUND TRIPS ─────────────────────────────

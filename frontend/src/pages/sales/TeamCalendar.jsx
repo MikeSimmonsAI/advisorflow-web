@@ -34,6 +34,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import SalesShell from './SalesShell'
+import { useSalesBrand } from './salesBrand'
 import { Card, Chip, Empty, ErrorBar, Metric, initials } from './parts'
 import FindTeamTime from './FindTeamTime'
 import BookAppointment from './BookAppointment'
@@ -81,6 +82,7 @@ function stepFor(view) {
 // ── a block on the grid ─────────────────────────────────────────────────────
 
 function EventBlock({ item, onOpen }) {
+  const brand = useSalesBrand()
   const { appt, kind, top, height, lane, lanes, label, sub, readOnly } = item
   const width = 100 / lanes
   const style = {
@@ -101,7 +103,7 @@ function EventBlock({ item, onOpen }) {
     sub,
     appt && appt.confirmation_status === 'pending' ? 'Prospect has not confirmed' : null,
     appt && appt.sync_needs_attention ? 'A calendar could not be written' : null,
-    appt && appt.sync_conflicts ? 'Changed outside EvoSys Pro' : null,
+    appt && appt.sync_conflicts ? 'Changed outside ' + brand.name : null,
     appt && appt.outcome_state?.needs_outcome ? 'No outcome recorded' : null,
   ].filter(Boolean).join(' · ')
 
@@ -393,6 +395,7 @@ function MiniMonth({ anchor, selected, appts, onPick }) {
 // ── the screen ──────────────────────────────────────────────────────────────
 
 export default function TeamCalendar() {
+  const brand = useSalesBrand()
   const nav = useNavigate()
   const [view, setView] = useState('week')
   const [anchor, setAnchor] = useState(() => new Date())
@@ -607,7 +610,7 @@ export default function TeamCalendar() {
                 sub={unconfirmed ? 'prospect has not confirmed' : 'all confirmed'} />
         <Metric label="Calendar sync" value={syncTrouble + conflicts}
                 attn={syncTrouble + conflicts > 0}
-                sub={conflicts ? conflicts + ' changed outside EvoSys Pro'
+                sub={conflicts ? conflicts + ' changed outside ' + brand.name
                   : syncTrouble ? 'need attention' : 'healthy'} />
         <Metric label="Outcome not recorded" value={outcomesDue}
                 attn={outcomesDue > 0}
@@ -802,7 +805,7 @@ export default function TeamCalendar() {
               action — a bare green dot beside a two-week-old sync is exactly
               what this panel is not allowed to be. */}
           <Card title="CALENDAR INTEGRATIONS"
-                sub="Free/busy in, EvoSys Pro appointments out" bodyless
+                sub={'Free/busy in, ' + brand.name + ' appointments out'} bodyless
                 right={<button className="sw-tiny"
                                onClick={() => nav('/sales/availability')}>Manage</button>}>
             <div className="cal-integ">
@@ -905,7 +908,7 @@ export default function TeamCalendar() {
       <p className="sw-subtle" style={{ marginTop: 14 }}>
         A dashed edge means the prospect has not confirmed. <b>⚠</b> means a
         participant's calendar could not be written; <b>◆</b> means the event
-        was changed outside EvoSys Pro; <b>●</b> means the meeting has happened
+        was changed outside {brand.name}; <b>●</b> means the meeting has happened
         and no outcome has been recorded. External calendars contribute
         free/busy only — never event details.
       </p>
@@ -984,6 +987,7 @@ function MobileCard({ a, onOpen, onOutcome }) {
  * and navigating back to the same week is four clicks for a one-click job.
  */
 function AppointmentDetail({ appt, isManager, onClose, onOutcome, onChanged, onOpenDeal }) {
+  const brand = useSalesBrand()
   const [busy, setBusy] = useState(null)
   const [error, setError] = useState(null)
   const [reason, setReason] = useState('')
@@ -1080,12 +1084,11 @@ function AppointmentDetail({ appt, isManager, onClose, onOutcome, onChanged, onO
 
           {conflicted.length > 0 && isManager && (
             <div className="sw-notbuilt sw-mt">
-              <b>CHANGED OUTSIDE EVOSYS PRO</b>
+              <b>{('Changed outside ' + brand.name).toUpperCase()}</b>
               <p>
                 Neither version was overwritten. If the new time was agreed with
                 the prospect, reschedule here so every calendar and the
-                prospect's confirmation follow it. Otherwise restore the EvoSys
-                Pro time.
+                prospect's confirmation follow it. Otherwise restore the {brand.name} time.
               </p>
               <div className="sw-flex" style={{ gap: 7, marginTop: 8 }}>
                 {conflicted.map(p => (

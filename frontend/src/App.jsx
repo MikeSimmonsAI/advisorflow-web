@@ -1099,7 +1099,13 @@ function WorkspaceSelector() {
     }
     // Back Office / Executive Suite: leave any program workspace first, so no
     // stale workspace header follows the person into the back office.
-    if (item.type === 'back_office') { clearWorkspaceContext(); navigate(item.path || '/sales'); return }
+    if (item.type === 'back_office') {
+      clearWorkspaceContext()
+      // The brand this Back Office sells travels with every /sales request; the
+      // server honours it only for a brand this person already sells for.
+      if (item.platform_id) setBrandContext(item.platform_id, item.platform_name || '')
+      navigate(item.path || '/sales'); return
+    }
     if (item.type === 'executive') {
       clearWorkspaceContext()
       if (item.platform_id) setBrandContext(item.platform_id, item.platform_name || '')

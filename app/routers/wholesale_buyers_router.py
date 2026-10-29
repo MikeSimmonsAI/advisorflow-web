@@ -802,7 +802,7 @@ def disposition_channels(db: Session = Depends(get_db),
     what to do about it.
     """
     from app.services import wholesale_disposition as disp
-    return {"channels": disp.channel_status()}
+    return {"channels": disp.channel_status(db, svc.read_org_id(db, user))}
 
 
 @router.post("/deals/{deal_id}/disposition")

@@ -1086,7 +1086,7 @@ export default function Layout({ children }) {
                 <NavLink to="/wholesale/evosense" data-product-entry="wholesale"
                   className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
                   onClick={closeSidebar}
-                  title={WHOLESALE_PRODUCT + ' — EvoSense acquisition and wholesale deal operations'}
+                  title={WHOLESALE_PRODUCT + (WHOLESALE_ENGINE ? ' — EvoSense acquisition and wholesale deal operations' : ' — acquisition and wholesale deal operations')}
                 >
                   <Icon name="home" />{!sidebarCollapsed && WHOLESALE_PRODUCT}
                 </NavLink>

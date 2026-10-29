@@ -618,6 +618,13 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
         # The launcher's Back Office card: the established entry, only when the
         # server confirms a back office (never derived in the browser).
         "back_office_path": (platform[0].get("path") or "/sales") if platform else None,
+        # ONE BACK OFFICE PER BRAND (#272). Someone on more than one brand's
+        # sales team gets one destination per brand, each naming its brand, so
+        # they choose which Back Office to open. Entering one sends that brand
+        # with every /sales request and the server narrows to it - only within
+        # brands this person already sells for. Empty for anyone with no sales
+        # membership; `back_office_path` above is unchanged.
+        "back_office_destinations": back_office_destinations(db, platform),
         "workspace_count": len(workspaces),
         "default_context": default,
         # Entitlements and readiness. Not contexts, and deliberately named so.
@@ -712,6 +719,31 @@ def preview_contexts(db: Session, user: User) -> List[Dict[str, Any]]:
         _log.warning("could not resolve launcher previews for %s",
                      getattr(user, "id", None), exc_info=True)
         return []
+    return out
+
+
+def back_office_destinations(db: Session, platform_contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """One Back Office destination per brand sales team in `platform_contexts`
+    (the caller's own active sales memberships), carrying the brand."""
+    from app.models.sales_models import BrandSalesOrg
+    ids = [c.get("brand_sales_org_id") for c in platform_contexts if c.get("brand_sales_org_id")]
+    if not ids:
+        return []
+    orgs = {o.id: o for o in db.query(BrandSalesOrg).filter(BrandSalesOrg.id.in_(ids)).all()}
+    plats = {p.id: p for p in db.query(Platform).filter(
+        Platform.id.in_([o.platform_id for o in orgs.values()])).all()} if orgs else {}
+    out, seen = [], set()
+    for c in platform_contexts:
+        o = orgs.get(c.get("brand_sales_org_id"))
+        if o is None or o.id in seen or o.is_active is False:
+            continue
+        seen.add(o.id)
+        p = plats.get(o.platform_id)
+        out.append({"type": "back_office", "brand_sales_org_id": o.id, "label": o.name,
+                    "platform_id": o.platform_id, "platform_name": getattr(p, "name", None),
+                    "platform_slug": getattr(p, "slug", None), "role": c.get("role"),
+                    "path": c.get("path") or "/sales"})
+    out.sort(key=lambda d: (str(d.get("platform_name") or ""), str(d.get("label") or "")))
     return out
 
 
