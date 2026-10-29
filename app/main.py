@@ -1336,10 +1336,12 @@ async def _pass_claimed(job_name, interval_seconds) -> bool:
 # The EvoSense hunt (every 15 min), the Wholesale exception sweep (hourly) and
 # Support Intelligence (6-hourly) each load thousands of rows in a worker
 # thread. They are separate loops, so nothing stopped two of them running at
-# the same moment - and on Oct 28-29 they did: in every one of the backend's
-# eight OOM kills, a hunt and a sweep had both started one to five minutes
-# earlier (job_runs rows left 'running' by the killed process). Their memory
-# peaks add up on a 512 MiB instance that already idles near 450 MB.
+# the same moment - and on Oct 28-29 they did. In all eight of the backend's
+# OOM kills an EvoSense hunt had started one to five minutes earlier and never
+# finished; in seven of the eight a Wholesale sweep had started within about
+# 30 seconds of that hunt (job_runs rows left 'running' by the killed
+# process). Their memory peaks add up on a 512 MiB instance that already
+# idles near 450 MB.
 #
 # One process-wide lock makes them take turns. Nothing about what a pass does
 # changes, only that it never overlaps another heavy pass in this process. A

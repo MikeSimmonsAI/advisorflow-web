@@ -291,8 +291,9 @@ def sweep(db: Session, org_id: str, user=None, *, include_test: bool = True,
 # 17,225 owners (1,570 actually flagged), and the 2,719 linked properties came
 # back with their ~4 KB of JSON detail columns each. Measured locally on data
 # of that shape: one sweep raised process RSS by ~62 MB at peak and kept ~44 MB
-# of it, on a 512 MiB instance that already idles near 450 MB. Every backend
-# OOM kill on Oct 28-29 followed a sweep start by one to five minutes.
+# of it, on a 512 MiB instance that already idles near 450 MB. Seven of the
+# eight backend OOM kills on Oct 28-29 came one to five minutes after a sweep
+# started (alongside an EvoSense hunt).
 #
 # Same rule, same results, same order of evaluation per owner:
 #   * owners with an empty flag list are excluded in SQL (they were skipped in
