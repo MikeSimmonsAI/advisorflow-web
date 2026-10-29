@@ -150,6 +150,9 @@ class NotificationType(str, enum.Enum):
     WHOLESALE_APPOINTMENT = "wholesale_appointment"
     # #405: a family rated a visit 1-3 stars. In-app, to the appointment's advisor.
     SURVEY_LOW_RATING = "survey_low_rating"
+    # An investor in the private Deal Room needs a person: a message, an
+    # exclusive-review request, an upload or an interest (wholesale_deal_room).
+    DEAL_ROOM = "deal_room"
 
 
 # ---------------------------------------------------------------------------

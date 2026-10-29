@@ -75,6 +75,7 @@ One shared policy, `work_priority.py`, and every surface reads it:
 - **Foreclosure Command Center:** default sort, "Critical — act now" quick filter, work-priority filter, column.
 - **Top 100 and other lists:** default sort, work-priority filter and column, work queue.
 - **Property page:** Work priority tile first.
+- **Acquisition Command:** `/wholesale/evosense/command-center` Work first cards, Next opportunities to work table, and Needs You hero all use the authoritative deadline-first work priority. Numerical investment evidence scores remain separate and cannot reorder the urgent work list.
 - **Person / VA hand-off queue:** CRITICAL and REVIEW_URGENT properties open one hand-off per sale date; no
   outreach is ever sent.
 - **API:** `work` row on inbox, list and foreclosure items, plus `measures.work_priority`.
@@ -102,6 +103,44 @@ change needs `tests/test_foreclosure_priority_policy.py` changed, the change nee
 - Consumers: `opportunity.py` (`measures`, `escalate`, `refresh_auction_properties`), `evaluate.py`
   (`status_for`), `views.py` (inbox sort / filter / `work` row), `cohort.py` (`rows_for` sort / `work`),
   `foreclosure_cycles.py` (sorts, quick filters, work queue)
-- Screens: `EvoInbox.jsx`, `ForeclosureCenter.jsx`, `EvoCohort.jsx`, `OpportunityCard.jsx`, `Measures.jsx`
+- Screens: `EvoInbox.jsx`, `EvoCommand.jsx`, `ForeclosureCenter.jsx`, `EvoCohort.jsx`, `OpportunityCard.jsx`, `Measures.jsx`
   (`WorkCell`)
 - Tests: `tests/test_foreclosure_priority_policy.py`
+
+
+## Scoring-calibration incident — October 26, 2026 (PR pending)
+
+The owner explicitly identified a *different* defect from the auction-priority ordering:
+a verified, imminent foreclosure was worth only 16 points for the filed notice
+plus 12 for the approaching sale date in `property_opportunity/v5`. The
+original 100 November 3 properties showed a maximum score of 70, an average
+of 50.1, **zero scores of 80 or greater and only two scores of 65 or greater**,
+despite 99 documented current notices. Changing the Inbox / Acquisition
+Command sorting did **not** fix this score-calibration defect.
+
+**Versioned fix:** `property_opportunity/v6` adds **28 points** for one
+documented, still-upcoming mortgage foreclosure or officially posted tax sale
+within 14 Central Time calendar days. This reflects a substantive
+confirmed compulsory-sale distress event; it is an acquisition evidence rubric,
+not a guarantee of profit, assignability, equity, ability to contact the owner,
+or eventual seller cooperation. The **28-point value is a transparent
+owner-directed rubric choice, not an empirically calibrated probability**.
+It is given at most once even if a property has both kinds of sales.
+
+Claims from imported lists, unsubstantiated operator notes, expired dates,
+postponed/canceled sales and unverifiable notices never receive the bonus.
+Imported-value equity continues to be discounted as a claim, and unsupported
+ARV/payoff/repair figures remain unknown. The separate `work_priority.py`
+deadline-first rule remains the operational authority and is never replaced
+by this score.
+
+Production read-only baseline before the change: Top100 score distribution
+`27:1, 41:37, 45:1, 51:1, 55:45, 57:8, 59:1, 60:4, 68:1, 70:1`.
+After deployment, compare *actual* score-version and factor history with
+a controlled dry-run and record the actual distribution. Re-score on the
+existing bounded, idempotent scheduler; preserve score history and do not
+trigger enrichment or outreach.
+
+**Permanent acceptance:** the `test_evosense_urgency_measures.py` suite covers
+documented vs claimed sales, manual-document validation, canceled/expired
+dates, tax sales, once-only bonus and truthful imported equity.

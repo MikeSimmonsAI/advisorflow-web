@@ -103,7 +103,10 @@ def rescore_outdated(db, org_id: Optional[str] = None, *, limit: int = RESCORE_B
         on_calendar = exists().where(EvoSenseAuctionEvent.property_id == EvoSenseProperty.id)
         props = (db.query(EvoSenseProperty)
                  .filter(EvoSenseProperty.organization_id == o, EvoSenseProperty.archived_at.is_(None), ~up_to_date)
-                 .order_by(on_calendar.desc(), EvoSenseProperty.opportunity_score.desc().nullslast(),
+                 .order_by(on_calendar.desc(),
+                           # A posted tax sale also gets refreshed before routine properties.
+                           EvoSenseProperty.sale_deadline.asc().nullslast(),
+                           EvoSenseProperty.opportunity_score.desc().nullslast(),
                            EvoSenseProperty.id)
                  .limit(limit - done).all())
         for p in props:

@@ -61,13 +61,22 @@ export default function DemoSite() {
     )
   }
 
+  return <DemoFrame title={demo.title} html={demo.html} />
+}
+
+/**
+ * The one sandboxed frame every demo is shown in (the public link here, and a
+ * God-granted preview in GrantedPreview.jsx). Kept in one place so the
+ * sandbox flags cannot drift between the two. `top` leaves room for a bar.
+ */
+export function DemoFrame({ title, html, top = 0 }) {
   return (
     <iframe
-      title={demo.title || 'Design concept'}
-      srcDoc={demo.html}
+      title={title || 'Design concept'}
+      srcDoc={html}
       sandbox="allow-scripts"
       style={{
-        position: 'fixed', inset: 0, width: '100%', height: '100%',
+        position: 'fixed', inset: 0, top, width: '100%', height: top ? `calc(100% - ${top}px)` : '100%',
         border: 'none', display: 'block',
       }}
     />

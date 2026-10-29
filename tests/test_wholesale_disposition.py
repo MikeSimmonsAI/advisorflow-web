@@ -22,11 +22,14 @@ def ok(response):
 
 
 @pytest.fixture()
-def enabled(monkeypatch):
-    """Turn the deployment switch on for the tests that are about what happens
-    AFTER it. Everything else runs with it off, which is the default and the
-    state a fresh deployment is in."""
+def enabled(monkeypatch, db_session, sample_org):
+    """Turn BOTH switches on for the tests that are about what happens AFTER
+    them: the deployment's, and this workspace's own (#272 - a send needs both).
+    Everything else runs with them off, which is the default and the state a
+    fresh deployment and every workspace are in."""
     monkeypatch.setenv("OUTBOUND_EMAIL_WHOLESALE_BUYER_DISPOSITION", "true")
+    sample_org.outbound_email_sources = json.dumps(["wholesale_buyer_disposition"])
+    db_session.commit()
 
 
 class FakeProvider:

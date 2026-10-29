@@ -241,6 +241,10 @@ class WholesaleSettings(Base):
     # here by an admin. OFF by default: until it is confirmed, email is only
     # ever eligible for sellers who reached out or said yes.
     cold_seller_email_confirmed = Column(Boolean, nullable=False, default=False)
+    # TEXTING DEAL SHEETS TO BUYERS, THIS WORKSPACE'S OWN SWITCH (#272). The
+    # server switch OUTBOUND_SMS_WHOLESALE_BUYER_DISPOSITION covers the whole
+    # deployment; a send needs it AND this. OFF by default for every workspace.
+    buyer_sms_enabled = Column(Boolean, nullable=False, default=False)
     # QUALIFICATION CRITERIA (wholesale_seller_intel.DEFAULT_CRITERIA): what a
     # seller must have told us before they are QUALIFIED. JSON; NULL = defaults.
     qualification_criteria = Column(Text, nullable=True)
@@ -942,6 +946,28 @@ class WholesaleBuyer(Base):
     file_status = Column(String, nullable=True)            # active / inactive as their file said
     file_last_contact_at = Column(DateTime, nullable=True)
     file_last_response_at = Column(DateTime, nullable=True)
+    # ── Buyer Intelligence Engine (2026-10-27) ─────────────────────────────
+    # Separate facts, each with its own date, so verification can EXPIRE:
+    # who the buyer is, whether the contact works, what they SAY about buying
+    # and money (stated, never "verified"), and where qualification stands.
+    identity_status = Column(String, nullable=True)        # None, needs_review, confirmed, linked
+    linked_to_buyer_id = Column(String, nullable=True)     # this row is another LLC of that investor
+    contact_verified_at = Column(DateTime, nullable=True)  # a real two-way exchange or a person checked it
+    contact_verified_how = Column(String, nullable=True)
+    contact_bad_at = Column(DateTime, nullable=True)       # wrong number / bounced / disconnected
+    decision_maker_name = Column(String, nullable=True)
+    decision_maker_confirmed = Column(Boolean, nullable=True)
+    stated_buying_status = Column(String, nullable=True)   # buying, paused, not_buying (their words)
+    stated_buying_at = Column(DateTime, nullable=True)
+    stated_budget_min = Column(Numeric(14, 2), nullable=True)
+    stated_budget_max = Column(Numeric(14, 2), nullable=True)
+    stated_funding = Column(String, nullable=True)         # cash, hard_money, private, conventional, mixed
+    stated_close_days = Column(Integer, nullable=True)
+    stated_capacity = Column(String, nullable=True)        # "2 deals a month", as said
+    qualification_status = Column(String, nullable=True)   # in_progress, qualified, needs_human, declined
+    qualification_at = Column(DateTime, nullable=True)
+    last_interaction_at = Column(DateTime, nullable=True)
+    ai_paused = Column(Boolean, nullable=False, default=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -1011,6 +1037,13 @@ class WholesaleBuyBox(Base):
     value_add = Column(Boolean, nullable=True)
     distress_tolerance = Column(String, nullable=True)
     criteria = Column(Text, nullable=True)
+    # Where these criteria came from: stated (the buyer said), file (their
+    # list), county_records (inferred from what they own - not stated),
+    # ai_conversation (extracted with a quote), staff. A box is CONFIRMED only
+    # when the buyer stated it or a person confirmed it with them.
+    source = Column(String, nullable=True)
+    confirmed_at = Column(DateTime, nullable=True)
+    confirmed_by = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -1269,6 +1302,15 @@ class WholesaleFile(Base):
     checksum = Column(String, nullable=True)       # sha256, so a re-upload is detectable
 
     caption = Column(String, nullable=True)
+    # Deal Room (#415): files an investor uploaded or that staff shared with ONE
+    # buyer. A file is visible to an investor only when buyer_id is theirs AND
+    # investor_visible is set (or they uploaded it). review/scan are statuses
+    # a person and the content checks set; nothing advances them silently.
+    uploaded_by_investor_id = Column(String, nullable=True)
+    investor_visible = Column(Boolean, nullable=False, default=False)
+    review_status = Column(String, nullable=True)      # pending | accepted | rejected
+    scan_status = Column(String, nullable=True)        # clean | blocked | not_scanned
+    scan_detail = Column(String, nullable=True)
     is_primary = Column(Boolean, nullable=False, default=False)
     sort_order = Column(Integer, nullable=False, default=0)
 
@@ -1516,6 +1558,12 @@ EXCEPTION_KINDS = (
     "missing_photos_docs", "buyer_criteria_verification", "proof_of_funds_verification",
     "buyer_research", "missing_disposition_data", "seller_callback_requested",
     "ai_exception", "title_ownership_anomaly", "escalate_to_owner", "seller_first_call",
+    # Buyer Intelligence (#413): a buyer qualification handed to a person, and a
+    # follow-up / call the buyer asked for.
+    "buyer_handoff", "buyer_followup",
+    # Private Deal Room (#415): an investor asked for an exclusive review, or
+    # uploaded a document for a person to review.
+    "deal_room_hold_request", "deal_room_upload_review",
 )
 EXCEPTION_OUTCOMES = ("complete", "unable_to_verify", "needs_more_info", "escalate")
 EXCEPTION_OPEN_STATUSES = ("open", "assigned", "needs_more_info", "escalated")

@@ -474,8 +474,14 @@ def program_brand(db, org_id: str) -> Dict[str, Optional[str]]:
         org = db.query(Organization).filter(Organization.id == org_id).first()
         plat = (db.query(Platform).filter(Platform.id == org.platform_id).first()
                 if org is not None and getattr(org, "platform_id", None) else None)
-        name = brand_config.product_name(getattr(plat, "slug", None), "wholesale")
-    except Exception:                                       # noqa: BLE001
+        slug = (getattr(plat, "slug", None) or "").strip().lower()
+        name = brand_config.product_name(slug, "wholesale")
+        if name is None and slug and slug != "evosyspro":
+            # Another brand's workspace (e.g. BookaBoost Wholesale): its own
+            # Wholesale product name, never a bare "Wholesale:". EvoSys Pro and
+            # unbranded organizations resolve exactly as before.
+            name = brand_config.wholesale_product(db, org)
+    except Exception:                                     # noqa: BLE001
         log.exception("wholesale_sms: product name lookup failed for org %s", org_id)
     s = settings_row(db, org_id)
     return {"brand": name or "Wholesale",
@@ -489,9 +495,9 @@ def attribution_user_id(db, lead) -> Optional[str]:
     if getattr(lead, "assigned_to_id", None):
         return lead.assigned_to_id
     from app.models.models import User
-    row = (db.query(User.id)
-           .filter(User.organization_id == lead.organization_id,
-                   User.role == "org_admin", User.is_active.isnot(False))
+    from app.services import wholesale_team as T
+    row = (T.admins_q(db, lead.organization_id, ("org_admin",)).with_entities(User.id)
+           .filter(User.is_active.isnot(False))
            .order_by(User.created_at.asc()).first())
     return row[0] if row else None
 

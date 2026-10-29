@@ -28,6 +28,15 @@ served (no .php, .py or .md is in the allow-list).
 
 NOTHING GOES OUT. Same contract as the PHP form: contact permission is
 required and is not SMS consent; nothing is texted, emailed or called.
+
+MORE THAN ONE WORKSPACE (#272). `WHOLESALE_SITE_HOSTS` is a comma list. A bare
+host (the default, wholesale.evosyspro.live) is served exactly as before: the
+EvoSys site files, and the buyer form lands in WHOLESALE_SITE_ORG_ID. An entry
+written `host=<organization slug or id>` belongs to THAT workspace: it serves
+the brand-neutral site in public-site/wholesale-tenant (the workspace's own
+public name filled in, never another brand's), and its buyer form lands in that
+workspace only, through the same intake key check. No database change: which
+host belongs to which workspace is deployment configuration, read per request.
 """
 import logging
 import os
@@ -47,6 +56,10 @@ log = logging.getLogger(__name__)
 
 PREFIX = "/_wholesale_site"
 SITE_DIR = Path(__file__).resolve().parents[2] / "public-site" / "wholesale"
+# The brand-neutral site a second workspace's host serves (see module notes).
+TENANT_SITE_DIR = Path(__file__).resolve().parents[2] / "public-site" / "wholesale-tenant"
+# Files of the EvoSys site that carry no brand and are shared with tenant hosts.
+TENANT_SHARED = ("assets/site.css", "assets/hero-house.svg", "assets/favicon.svg")
 DEFAULT_HOSTS = ("wholesale.evosyspro.live",)
 SERVED_EXT = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
               ".js": "application/javascript; charset=utf-8", ".svg": "image/svg+xml",
@@ -58,10 +71,26 @@ _SAFE_PATH = re.compile(r"^(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_.-]+$")
 router = APIRouter(prefix=PREFIX, include_in_schema=False)
 
 
-def site_hosts() -> set:
+def host_map() -> Dict[str, Optional[str]]:
+    """host -> the workspace it belongs to (slug or id), or None for a bare host
+    (served as the EvoSys site, organization from WHOLESALE_SITE_ORG_ID)."""
     raw = os.getenv("WHOLESALE_SITE_HOSTS")
-    hosts = [h.strip().lower() for h in (raw.split(",") if raw else DEFAULT_HOSTS)]
-    return {h for h in hosts if h}
+    out: Dict[str, Optional[str]] = {}
+    for entry in (raw.split(",") if raw else DEFAULT_HOSTS):
+        host, _, org = entry.partition("=")
+        host = host.strip().lower()
+        if host:
+            out[host] = org.strip() or None
+    return out
+
+
+def site_hosts() -> set:
+    return set(host_map())
+
+
+def tenant_of(host: str) -> Optional[str]:
+    """The workspace a tenant host names, or None (the EvoSys site)."""
+    return host_map().get((host or "").lower().split(":")[0])
 
 
 def _host_of(headers) -> str:
@@ -86,6 +115,7 @@ def _served_files() -> Dict[str, Path]:
 
 
 _FILES: Optional[Dict[str, Path]] = None
+_TENANT_FILES: Optional[Dict[str, Path]] = None
 
 
 def served_files() -> Dict[str, Path]:
@@ -93,6 +123,22 @@ def served_files() -> Dict[str, Path]:
     if _FILES is None:
         _FILES = _served_files()
     return _FILES
+
+
+def tenant_files() -> Dict[str, Path]:
+    """The neutral tenant site, plus the brand-free shared assets."""
+    global _TENANT_FILES
+    if _TENANT_FILES is None:
+        out: Dict[str, Path] = {}
+        if TENANT_SITE_DIR.is_dir():
+            for p in TENANT_SITE_DIR.rglob("*"):
+                if p.is_file() and p.suffix.lower() in SERVED_EXT:
+                    out[p.relative_to(TENANT_SITE_DIR).as_posix()] = p
+        for rel in TENANT_SHARED:
+            if rel not in out and (SITE_DIR / rel).is_file():
+                out[rel] = SITE_DIR / rel
+        _TENANT_FILES = out
+    return _TENANT_FILES
 
 
 class WholesaleSiteHostMiddleware:
@@ -123,7 +169,16 @@ def site_path(method: str, path: str) -> str:
     return PREFIX + "/not-found"
 
 
-def _not_found() -> HTMLResponse:
+def _not_found(request: Optional[Request] = None) -> HTMLResponse:
+    if request is not None and tenant_of(request.headers.get("host", "")):
+        body = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
+                '<meta name="viewport" content="width=device-width,initial-scale=1">'
+                '<title>Page not found</title>'
+                '<link rel="stylesheet" href="/assets/site.css"></head><body>'
+                '<main style="max-width:640px;margin:15vh auto;padding:0 20px;font-family:system-ui,sans-serif">'
+                '<h1>Page not found</h1><p>The page you were looking for is not here.</p>'
+                '<p><a href="/">Go to the home page</a></p></main></body></html>')
+        return HTMLResponse(body, status_code=404, headers={"Cache-Control": "no-store"})
     page = served_files().get("index.html")
     body = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
@@ -142,20 +197,48 @@ def _require_site_host(request: Request) -> None:
 
 
 @router.api_route("/page/{rel:path}", methods=["GET", "HEAD"])
-def page(rel: str, request: Request):
+def page(rel: str, request: Request, db: Session = Depends(get_db)):
     _require_site_host(request)
-    f = served_files().get(rel)
+    tenant = tenant_of(request.headers.get("host", ""))
+    f = (tenant_files() if tenant else served_files()).get(rel)
     if f is None:
-        return _not_found()
+        return _not_found(request)
     ctype = SERVED_EXT[f.suffix.lower()]
     cache = "public, max-age=300" if f.suffix.lower() in (".html", ".txt", ".xml") else "public, max-age=3600"
+    if tenant and f.suffix.lower() == ".html":
+        return HTMLResponse(_tenant_page(db, tenant, f), headers={"Cache-Control": cache})
     return FileResponse(f, media_type=ctype, headers={"Cache-Control": cache})
+
+
+def _tenant_names(db: Session, tenant: str) -> Dict[str, str]:
+    """The workspace's own public name and contact, for the neutral pages.
+    Nothing from another brand: an unconfigured contact is left out."""
+    import html as _h
+    from app.models.models import Organization
+    from app.models.wholesale_models import WholesaleSettings
+    org = (db.query(Organization).filter((Organization.slug == tenant) | (Organization.id == tenant)).first()
+           if tenant else None)
+    s = (db.query(WholesaleSettings).filter(WholesaleSettings.organization_id == org.id).first()
+         if org is not None else None)
+    name = (getattr(s, "public_business_name", None) or getattr(org, "brand_name", None)
+            or getattr(org, "name", None) or "Our team")
+    email = getattr(s, "public_contact_email", None)
+    contact = ('<p class="form-note">Questions? <a href="mailto:%s">%s</a></p>' % (_h.escape(email), _h.escape(email))
+               if email else "")
+    return {"{{BUSINESS_NAME}}": _h.escape(name), "{{CONTACT_LINE}}": contact}
+
+
+def _tenant_page(db: Session, tenant: str, f: Path) -> str:
+    text = f.read_text(encoding="utf-8")
+    for k, v in _tenant_names(db, tenant).items():
+        text = text.replace(k, v)
+    return text
 
 
 @router.api_route("/not-found", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 def not_found(request: Request):
     _require_site_host(request)
-    return _not_found()
+    return _not_found(request)
 
 
 def _reply(code: int, message: str, **extra) -> JSONResponse:
@@ -163,11 +246,20 @@ def _reply(code: int, message: str, **extra) -> JSONResponse:
                         headers={"Cache-Control": "no-store"})
 
 
-def _destination(db: Session):
-    """(org, settings) for WHOLESALE_SITE_ORG_ID, through the shared checks."""
+def _destination(db: Session, host: str = ""):
+    """(org, settings) for this host's workspace - a tenant host's own, else
+    WHOLESALE_SITE_ORG_ID exactly as before - through the shared checks."""
+    from app.models.models import Organization
     from app.models.wholesale_models import WholesaleSettings
     from app.services import wholesale_seller_intake as intake
-    org_id = (os.getenv("WHOLESALE_SITE_ORG_ID") or "").strip()
+    tenant = tenant_of(host)
+    if tenant:
+        org = (db.query(Organization).filter((Organization.slug == tenant) | (Organization.id == tenant)).first())
+        if org is None:
+            raise intake.IntakeRefused("site host names no known organization")
+        org_id = org.id
+    else:
+        org_id = (os.getenv("WHOLESALE_SITE_ORG_ID") or "").strip()
     if not org_id:
         raise intake.IntakeRefused("WHOLESALE_SITE_ORG_ID is not set")
     s = db.query(WholesaleSettings).filter(WholesaleSettings.organization_id == org_id).first()
@@ -202,7 +294,7 @@ async def site_intake(request: Request, db: Session = Depends(get_db)):
     if f.get("contact_permission") != "yes":
         return _reply(422, "Please confirm you agree to be contacted about this inquiry.")
     try:
-        org, _settings = _destination(db)
+        org, _settings = _destination(db, request.headers.get("host", ""))
     except intake.IntakeRefused as exc:
         log.error("wholesale site intake refused: %s", exc.reason)
         return _reply(503, "Registration is temporarily unavailable. Please try again later.")

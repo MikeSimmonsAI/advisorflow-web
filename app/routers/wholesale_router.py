@@ -51,6 +51,7 @@ from app.services import wholesale_esign as esign
 from app.services import wholesale_ai
 from app.services import wholesale_pipeline as pipeline
 from app.services import wholesale_service as svc
+from app.services import env_name_privacy as _ENV
 from app.services.entitlements import require_feature
 from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
 
@@ -492,6 +493,9 @@ class SettingsPatch(BaseModel):
     # The workspace's own compliance decision: may it email owners it FOUND
     # (not ones who wrote in)? Admin-only; off by default.
     cold_seller_email_confirmed: Optional[bool] = None
+    # This workspace's own switch for texting deal sheets to buyers. Admin-only;
+    # off by default, and the server switch is still required as well.
+    buyer_sms_enabled: Optional[bool] = None
     # Data depth: comp eligibility rules and the MAO gate policy (admin).
     comp_rules: Optional[Dict[str, Any]] = None
     mao_policy: Optional[Dict[str, Any]] = None
@@ -631,6 +635,7 @@ def settings_json(s: WholesaleSettings) -> Dict[str, Any]:
         "qualification_criteria_options": _intel_options(),
         "nurture_default_days": getattr(s, "nurture_default_days", None) or 60,
         "cold_seller_email_confirmed": bool(getattr(s, "cold_seller_email_confirmed", False)),
+        "buyer_sms_enabled": bool(getattr(s, "buyer_sms_enabled", False)),
         "comp_rules_effective": _comp_rules_view(s),
         "mao_policy_effective": _mao_policy_view(s),
     }
@@ -673,7 +678,8 @@ def get_settings(db: Session = Depends(get_db),
     org_id = svc.read_org_id(db, user)
     if not org_id:
         raise HTTPException(status_code=409, detail="No customer organization selected.")
-    return settings_json(svc.resolve_settings(db, org_id))
+    # Provider rows name server settings; those names stay with platform admins (#272).
+    return _ENV.for_viewer(user, settings_json(svc.resolve_settings(db, org_id)))
 
 
 @router.get("/settings/assignees")
@@ -683,7 +689,9 @@ def settings_assignees(db: Session = Depends(get_db),
     org_id = svc.read_org_id(db, user)
     if not org_id:
         raise HTTPException(status_code=409, detail="No customer organization selected.")
-    rows = (db.query(User).filter(User.organization_id == org_id, User.is_active.isnot(False))
+    from app.services import wholesale_team as T
+    # This workspace's people (home org; for a second tenant also its members, #272).
+    rows = (T.people_q(db, org_id).filter(User.is_active.isnot(False))
             .order_by(User.full_name.asc()).all())
     return {"items": [{"id": u.id, "name": u.full_name or u.email, "role": u.role} for u in rows]}
 
@@ -722,8 +730,9 @@ def patch_settings(payload: SettingsPatch, request: Request,
         _clean_sms_program(db, org_id, data)
     if "inquiry_assignee_id" in data:
         v = (data["inquiry_assignee_id"] or "").strip()
-        if v and (db.query(User.id).filter(User.id == v, User.organization_id == org_id,
-                                           User.is_active.isnot(False)).first() is None):
+        from app.services import wholesale_team as T
+        if v and (T.people_q(db, org_id).with_entities(User.id).filter(
+                User.id == v, User.is_active.isnot(False)).first() is None):
             # 404-shaped: an id from another workspace is not confirmed to exist.
             raise HTTPException(status_code=400, detail="That user is not in this workspace.")
         data["inquiry_assignee_id"] = v or None
@@ -737,6 +746,11 @@ def patch_settings(payload: SettingsPatch, request: Request,
         data["inquiry_email_recipients"] = ", ".join(addrs) or None
     if "inquiry_email_enabled" in data:
         data["inquiry_email_enabled"] = bool(data["inquiry_email_enabled"])
+    if "buyer_sms_enabled" in data:
+        if not _is_admin_here(user, db):
+            raise HTTPException(status_code=403, detail="Only an administrator can turn "
+                                "texting deal sheets to buyers on or off.")
+        data["buyer_sms_enabled"] = bool(data["buyer_sms_enabled"])
     if any(k in data for k in _POLICY_FIELDS):
         if not _is_admin_here(user, db):
             raise HTTPException(status_code=403, detail="Only an administrator can change "
@@ -779,7 +793,7 @@ def patch_settings(payload: SettingsPatch, request: Request,
                   before=before, after=settings_json(s))
     db.commit()
     db.refresh(s)
-    return settings_json(s)
+    return _ENV.for_viewer(user, settings_json(s))
 
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
@@ -1846,7 +1860,7 @@ class ManualContactIn(BaseModel):
 def enrichment_providers(db: Session = Depends(get_db),
                          user: User = Depends(require_tenant_or_observer)):
     """Which providers exist, and which can actually run right now."""
-    return {"providers": enrichment.provider_report()}
+    return _ENV.for_viewer(user, {"providers": enrichment.provider_report()})
 
 
 @router.post("/enrichment/run")
@@ -2366,7 +2380,7 @@ def deal_room(deal_id: str, db: Session = Depends(get_db),
         # Phase 2: whether a deal sheet can actually leave this deployment, so
         # the disposition tab can say so before somebody presses Send rather
         # than after.
-        "disposition_channels": _disposition_channels(),
+        "disposition_channels": _disposition_channels(db, org_id),
         # Phase 2: this module records the document SLOT — type, parties,
         # signature state and the file name as the operator stored it. It does
         # not host files, and it does not need to: the platform already has one
@@ -2471,9 +2485,9 @@ def _document_storage():
     }
 
 
-def _disposition_channels():
+def _disposition_channels(db=None, org_id=None):
     from app.services import wholesale_disposition as disp
-    return disp.channel_status()
+    return disp.channel_status(db, org_id)
 
 
 class StageIn(BaseModel):

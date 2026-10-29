@@ -98,7 +98,19 @@ def sales_org_ids(user: User, db: Session) -> List[str]:
                     .filter(BrandSalesOrg.platform_id == brand_platform_id).all())
             return [r[0] for r in rows]
         return [row[0] for row in db.query(BrandSalesOrg.id).all()]
-    return [m.scope_id for m in sales_memberships(user, db)]
+    mine = [m.scope_id for m in sales_memberships(user, db)]
+    # THE SAME RULE FOR A SALESPERSON ON MORE THAN ONE BRAND'S TEAM (#272): the
+    # Back Office they chose (deps: `_requested_sales_brand_id`, a platform id)
+    # narrows to that brand's sales team - only when they hold a membership on
+    # it. A brand they do not sell for is ignored, never granted.
+    wanted = getattr(user, "_requested_sales_brand_id", None)
+    if wanted and len(mine) > 1:
+        rows = (db.query(BrandSalesOrg.id)
+                .filter(BrandSalesOrg.id.in_(mine), BrandSalesOrg.platform_id == wanted).all())
+        narrowed = [r[0] for r in rows]
+        if narrowed:
+            return narrowed
+    return mine
 
 
 def is_sales_manager(user: User, db: Session, brand_sales_org_id: Optional[str] = None) -> bool:

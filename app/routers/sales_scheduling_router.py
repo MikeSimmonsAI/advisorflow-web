@@ -97,7 +97,7 @@ def _refresh_external(db: Session, users, start_utc: datetime, end_utc: datetime
     return extbusy.visibility_from_report(report)
 
 
-def _external_visibility_summary(vis: dict) -> dict:
+def _external_visibility_summary(vis: dict, brand: str = "EvoSys Pro") -> dict:
     """One sentence a screen can render about how complete the answer is."""
     total = len(vis or {})
     checked = len([v for v in (vis or {}).values() if v.get("external_checked")])
@@ -111,7 +111,7 @@ def _external_visibility_summary(vis: dict) -> dict:
                 "conflicts may be missing." % (degraded, total))
     elif not_connected:
         note = ("%d of %d people have no connected calendar, so conflicts outside "
-                "EvoSys Pro cannot be checked for them." % (not_connected, total))
+                "%s cannot be checked for them." % (not_connected, total, brand))
     else:
         note = None
     return {
@@ -126,6 +126,15 @@ def _external_visibility_summary(vis: dict) -> dict:
 
 
 # ── shared helpers ──────────────────────────────────────────────────────────
+
+def _brand_label(db: Session, org: BrandSalesOrg) -> str:
+    """The brand this Back Office sells, as these screens name it: "EvoSys Pro"
+    for EvoSys Pro (unchanged), another brand's own name (#272)."""
+    from app.models.models import Platform
+    from app.services.brand_config import sales_brand_name
+    plat = db.query(Platform).filter(Platform.id == org.platform_id).first() if org is not None else None
+    return sales_brand_name(db, plat)
+
 
 def _org(user: User, db: Session, brand_sales_org_id: Optional[str] = None) -> BrandSalesOrg:
     allowed = sales_org_ids(user, db)
@@ -784,7 +793,7 @@ def team_availability(day: Optional[date] = Query(None),
                   "start_local_date": start_local_day, "days": days},
         "is_manager": manager,
         "members": out,
-        "external_visibility": _external_visibility_summary(visibility),
+        "external_visibility": _external_visibility_summary(visibility, _brand_label(db, org)),
         "sync_status": _sync_status_for(db, members, viewer=user,
                                        is_manager=manager),
     }
@@ -878,7 +887,7 @@ def find_team_time(body: FindTimeIn,
     db.commit()
 
     names = {u.id: u.full_name for u in list(required) + list(optional)}
-    ext_summary = _external_visibility_summary(visibility)
+    ext_summary = _external_visibility_summary(visibility, _brand_label(db, org))
 
     # An honest caveat rather than a silent one. If somebody's outside calendar
     # could not be read, these slots are still the best available answer — but
@@ -1517,6 +1526,7 @@ def calendar_view(brand_sales_org_id: Optional[str] = Query(None),
     conflict check.
     """
     org = _org(user, db, brand_sales_org_id)
+    brand_label = _brand_label(db, org)
     tz = org.timezone or DEFAULT_TIMEZONE
     manager = is_sales_manager(user, db, org.id)
     now = datetime.utcnow()
@@ -1646,7 +1656,7 @@ def calendar_view(brand_sales_org_id: Optional[str] = Query(None),
         if a.get("sync_conflicts"):
             attention.append({"appointment_id": a["id"], "title": a["title"],
                               "kind": "conflict",
-                              "label": "Changed outside EvoSys Pro",
+                              "label": "Changed outside %s" % brand_label,
                               "action": "review_conflict",
                               "starts_at_local": a["starts_at_local"]})
         if a["outcome_state"]["needs_outcome"]:
@@ -1684,7 +1694,7 @@ def calendar_view(brand_sales_org_id: Optional[str] = Query(None),
                            "duration_minutes": t.duration_minutes,
                            "is_internal": bool(t.is_internal)} for t in types],
         "locations": locations,
-        "external_visibility": _external_visibility_summary(visibility),
+        "external_visibility": _external_visibility_summary(visibility, brand_label),
         "sync_status": _sync_status_for(db, members, viewer=user, is_manager=manager),
         # Stated so the client never has to infer whether the external band it
         # is not drawing was filtered out or simply unreadable.

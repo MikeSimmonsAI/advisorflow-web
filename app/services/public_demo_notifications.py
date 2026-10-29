@@ -159,9 +159,13 @@ def notify_demo_request(db: Session, *, platform: Platform, lead: Lead,
         return result
 
     rows = _submission_fields(payload, lead, platform)
+    # The brand being sold, in the two places that used to say "EvoSys Pro"
+    # whatever brand the request came in on (#272). EvoSys reads exactly as before.
+    from app.services.brand_config import sales_brand_name
+    sold = sales_brand_name(db, platform)
     internal_body = _shell(
         brand["name"] or "EvoSys Pro",
-        "New EvoSys Pro Demo Request",
+        "New %s Demo Request" % sold,
         "<table style='border-collapse:collapse;width:100%%;font-size:14px'>%s</table>"
         % _field_rows(rows),
     )
@@ -169,7 +173,7 @@ def notify_demo_request(db: Session, *, platform: Platform, lead: Lead,
     try:
         sent = _send(
             internal_to,
-            "New EvoSys Pro Demo Request — %s"
+            "New %s Demo Request — %%s" % sold
             % (" ".join(p for p in (lead.first_name, lead.last_name) if p)
                or payload.company or payload.email or "Website Lead"),
             internal_body,
@@ -200,7 +204,7 @@ def notify_demo_request(db: Session, *, platform: Platform, lead: Lead,
         )
         try:
             sent = _send(customer_to,
-                         "EvoSys Pro — We Received Your Demo Request",
+                         "%s — We Received Your Demo Request" % sold,
                          customer_body, identity)
             result.customer_sent = bool(sent and sent.get("success"))
             if not result.customer_sent:

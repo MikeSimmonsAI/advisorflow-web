@@ -69,13 +69,22 @@ def _sha(s) -> str:
     return hashlib.sha256(s).hexdigest()
 
 
-def public_base() -> str:
+def public_base(db=None, org_id: Optional[str] = None) -> str:
+    """Where a signer's link points. The sending organization's own brand
+    address first (a BookaBoost workspace -> its BookaBoost app, so the signing
+    page opens in that brand), else exactly what it was before:
+    WHOLESALE_ESIGN_PUBLIC_URL, FRONTEND_URL, the EvoSys default."""
+    if db is not None and org_id:
+        from app.services.brand_config import org_app_base_url
+        own = org_app_base_url(db, org_id)
+        if own:
+            return own
     return (os.environ.get("WHOLESALE_ESIGN_PUBLIC_URL") or os.environ.get("FRONTEND_URL")
             or "https://app.evosyspro.live").rstrip("/")
 
 
-def sign_url(token: str) -> str:
-    return "%s/sign/%s" % (public_base(), token)
+def sign_url(token: str, db=None, org_id: Optional[str] = None) -> str:
+    return "%s/sign/%s" % (public_base(db, org_id), token)
 
 
 def _event(db: Session, env: EsignEnvelope, action: str, *, signer: Optional[EsignSigner] = None,
@@ -152,11 +161,31 @@ def _email_link(db: Session, env: EsignEnvelope, s: EsignSigner, *, reminder: bo
             "this email address before signing.</p>" % (
                 _esc(s.name or ""), _esc(who), _esc(env.title),
                 ("<p>Message from %s: %s</p>" % (_esc(who), _esc(env.message))) if env.message else "",
-                _button(sign_url(token), "Review and sign")))
+                _button(sign_url(token, db, env.organization_id), "Review and sign")))
     subject = ("Reminder: please sign %s" if reminder else "Please sign: %s") % env.title
     ok = _send(db, env, s.email, subject, _wrap(body, _org_name(db, env), _brand(db, env)), kind="link")
     _event(db, env, "reminder" if reminder else "link_sent", signer=s, detail={"delivered": ok})
     return ok
+
+
+def session_link(db: Session, env: EsignEnvelope, s: EsignSigner, *, verified_by: str) -> str:
+    """A fresh signing link for a signer who is ALREADY authenticated in this
+    platform as the address the sender named (a Deal Room investor, or staff
+    signing their own part). Their identity is the signed-in session whose
+    email was verified, so the emailed one-time code is not needed again; the
+    event log records exactly that. Any older link stops working."""
+    _open_for_signing(env, s)
+    token = secrets.token_urlsafe(32)
+    s.token_hash = _sha(token)
+    s.status = "sent" if s.status == "waiting" else s.status
+    if not s.verified_at:
+        s.verified_at = datetime.utcnow()
+        if s.status in ("sent", "viewed"):
+            s.status = "verified"
+        _event(db, env, "verified", signer=s, detail={"method": "authenticated_session", "by": verified_by[:200]})
+    _event(db, env, "session_link", signer=s, detail={"by": verified_by[:200]})
+    db.flush()
+    return token
 
 
 def _current(env_signers: List[EsignSigner]) -> Optional[EsignSigner]:

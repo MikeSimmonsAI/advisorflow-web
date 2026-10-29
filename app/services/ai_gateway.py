@@ -158,6 +158,11 @@ CAPABILITY_MODELS: Dict[str, str] = {
     # deterministic fallback (app/services/wholesale_ai.py), so a refusal here
     # degrades the reading rather than stopping the module.
     "wholesale_seller_qualify": "gpt-4o-mini",
+    # Reads what an INVESTOR (buyer) said in a qualification conversation into
+    # structured buy-box and readiness answers, each with its quote. Extraction
+    # only - it writes nothing to anybody - with a deterministic fallback
+    # (app/services/wholesale_buyer_qualify.py). Buyer Intelligence, #413.
+    "wholesale_buyer_qualify": "gpt-4o-mini",
     # Looks at a deal's property photos and lists VISIBLE condition and repair
     # categories (no prices - those come from the DFW cost table). A manual action
     # a person clicks, capped per workspace per day (wholesale_photo_repairs.py).

@@ -78,17 +78,19 @@ def visible_user_ids(db: Session, org_id: str, user: User) -> Optional[Set[str]]
     appointments this person may see (always including themselves)."""
     if _is_admin_here(db, user):
         return None
-    role = T.role_of(db, user)
+    role = T.role_of(db, user, org_id)
     if role in (None, T.MEMBER):
         return None
     if role in T.FIELD_ROLES:
         return {user.id}
     # manager / team lead: themselves and everyone below them in the tree
+    # (THIS workspace's team rows - a second tenant has its own, #272).
     from app.models.sales_models import Membership, SCOPE_PRODUCT
+    in_ws = T.people_q(db, org_id).with_entities(User.id)
     rows = (db.query(Membership.user_id, Membership.reports_to_user_id)
-            .join(User, User.id == Membership.user_id)
-            .filter(Membership.scope_type == SCOPE_PRODUCT, Membership.scope_id == "wholesale",
-                    Membership.is_active.is_(True), User.organization_id == org_id).all())
+            .filter(Membership.scope_type == SCOPE_PRODUCT,
+                    Membership.scope_id == T.seat_key_for_org(db, org_id),
+                    Membership.is_active.is_(True), Membership.user_id.in_(in_ws)).all())
     kids: Dict[str, List[str]] = {}
     for uid, boss in rows:
         if boss:
@@ -112,7 +114,9 @@ def reps(db: Session, org_id: str, user: User) -> List[Dict[str, Any]]:
     from app.services import product_access as PA
     org = db.query(Organization).filter(Organization.id == org_id).first()
     visible = visible_user_ids(db, org_id, user)
-    people = (db.query(User).filter(User.organization_id == org_id, User.is_active.is_(True))
+    # Same "who is in this workspace" rule as the team page (home org; for a
+    # second Wholesale tenant also its members by membership - #272).
+    people = (T.people_q(db, org_id).filter(User.is_active.is_(True))
               .order_by(User.full_name.asc()).all())
     out = []
     for u in people:
@@ -120,7 +124,7 @@ def reps(db: Session, org_id: str, user: User) -> List[Dict[str, Any]]:
             continue
         if not PA.may_use_in(db, u, org, PA.WHOLESALE):     # #272: a second tenant's admins too
             continue
-        role = T.role_of(db, u)
+        role = T.role_of(db, u, org_id)
         out.append({"user_id": u.id, "name": u.full_name or u.email,
                     "role": role, "role_label": T.ROLE_LABELS.get(role) if role else None,
                     "field": role in T.FIELD_ROLES})

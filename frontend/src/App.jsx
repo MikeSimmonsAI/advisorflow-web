@@ -16,6 +16,7 @@ import Onboarding from './pages/Onboarding'
 import DealRoom from './pages/portal/DealRoom'
 import PortalAccess from './pages/portal/PortalAccess'
 import DemoSite from './pages/portal/DemoSite'
+import GrantedPreview from './pages/program/GrantedPreview'
 import PortalViewer from './pages/portal/PortalViewer'
 import SignDocument from './pages/portal/SignDocument'
 import PermissionPage from './pages/PermissionPage'
@@ -68,6 +69,8 @@ import Appointments from './pages/Appointments'
 import WorkspaceView from './pages/WorkspaceView'
 import WorkQueue from './pages/WorkQueue'
 import ProgramAccessPortal from './pages/program/ProgramAccessPortal'
+import { BookaBoostProgramAccessState } from './pages/program/BookaBoostProgramAccess'
+import { hostTheme } from './theme'
 import AutoSendQueue from './pages/AutoSendQueue'
 import Reports from './pages/Reports'
 import CampaignBuilder from './pages/CampaignBuilder'
@@ -107,6 +110,8 @@ const SciImport = lazyPage(() => import('./pages/program/sci/SciImport'))
 const ProgramLive = lazyPage(() => import('./pages/program/command/Command'))
 // EvoSys Pro Roofing: its own shell (/program/roofing/*) and public page (/roofing).
 const RoofingShell = lazyPage(() => import('./pages/roofing/RoofingShell'))
+// Private Buyer Deal Room (#415): invited investors only; its own login and token slot.
+const InvestorPortal = lazyPage(() => import('./pages/investor/InvestorPortal'))
 const RoofingMission = lazyPage(() => import('./pages/roofing/MissionControl'))
 const RoofingQueue = lazyPage(() => import('./pages/roofing/WorkQueue'))
 const RoofingConversations = lazyPage(() => import('./pages/roofing/Conversations'))
@@ -125,6 +130,8 @@ const DealOperationsClosing = lazyPage(() => import('./pages/wholesale/Wholesale
 const DealOperationsDispositions = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsDispositions })))
 const WholesaleProperties = lazyPage(() => import('./pages/wholesale/WholesaleProperties'))
 const WholesaleDeal = lazyPage(() => import('./pages/wholesale/WholesaleDeal'))
+const DealRoomManage = lazyPage(() => import('./pages/wholesale/dealroom/DealRoom'))
+const BuyBoxesPage = lazyPage(() => import('./pages/wholesale/dealroom/BuyBoxes'))
 const WholesaleBuyers = lazyPage(() => import('./pages/wholesale/WholesaleBuyers'))
 const WholesaleExceptions = lazyPage(() => import('./pages/wholesale/WholesaleExceptions'))
 const CallbackCenter = lazyPage(() => import('./pages/wholesale/ops/CallbackCenter'))
@@ -1075,10 +1082,17 @@ function SciFrontDoor() {
  * office, so there is no header to hang a switcher on yet.
  */
 function WorkspaceSelector() {
-  const { ctx } = useAuthorizedContexts()
+  const { ctx, phase, retry } = useAuthorizedContexts()
   const navigate = useNavigate()
   if (!isAuthenticated()) return <Navigate to="/login" replace />
-  if (!ctx) return null
+  if (!ctx) {
+    // On a BookaBoost address the wait and a failed load are shown in the
+    // BookaBoost look; everywhere else this stays blank, exactly as before.
+    if (hostTheme() === 'bookaboost') {
+      return <BookaBoostProgramAccessState state={phase === 'error' ? 'error' : 'loading'} onRetry={retry} />
+    }
+    return null
+  }
   const workspaces = ctx.workspace_contexts || []
   const products = ctx.product_contexts || []
   const previews = ctx.preview_contexts || []
@@ -1090,12 +1104,20 @@ function WorkspaceSelector() {
     // context is set and nothing is entered. It opens in a new tab so the
     // launcher stays where it was.
     if (item.type === 'preview') {
+      // A God-granted preview opens inside this app (signed in, re-checked).
+      if (item.grant_id && item.path) { navigate(item.path); return }
       if (item.url) window.open(item.url, '_blank', 'noopener,noreferrer')
       return
     }
     // Back Office / Executive Suite: leave any program workspace first, so no
     // stale workspace header follows the person into the back office.
-    if (item.type === 'back_office') { clearWorkspaceContext(); navigate(item.path || '/sales'); return }
+    if (item.type === 'back_office') {
+      clearWorkspaceContext()
+      // The brand this Back Office sells travels with every /sales request; the
+      // server honours it only for a brand this person already sells for.
+      if (item.platform_id) setBrandContext(item.platform_id, item.platform_name || '')
+      navigate(item.path || '/sales'); return
+    }
     if (item.type === 'executive') {
       clearWorkspaceContext()
       if (item.platform_id) setBrandContext(item.platform_id, item.platform_name || '')
@@ -1259,6 +1281,8 @@ export default function App() {
             mechanisms, deliberately not merged. */}
         <Route path="/workspace/:organizationId" element={<WorkspaceRoute />} />
         <Route path="/workspaces" element={<WorkspaceSelector />} />
+        {/* A God-granted preview of one deal's demo - signed in; the server re-checks the grant every open. */}
+        <Route path="/previews/:grantId" element={isAuthenticated() ? <GrantedPreview /> : <Navigate to="/login" replace />} />
         <Route path="/sci" element={<SciFrontDoor />} />
         <Route path="/onboarding" element={<Onboarding />} />
         {/* Public by necessity: the invited customer has no account yet. */}
@@ -1348,6 +1372,8 @@ export default function App() {
             server-side whitelist — see app/services/wholesale_publication.py.
             Neither page can widen from its token to anything else. */}
         <Route path="/investor/:token" element={<InvestorRoom />} />
+        {/* PRIVATE BUYER DEAL ROOM (#415) - signed-in investors, server-fenced to /investor/* APIs. */}
+        <Route path="/investors/*" element={<InvestorPortal />} />
         <Route path="/my-property/:token" element={<SellerTransaction />} />
         {/* ── CUSTOM COMMERCIAL AGREEMENTS ──
             NO ORGANIZATION ID ON THE CUSTOMER ROUTE, for the same reason the
@@ -1565,6 +1591,9 @@ export default function App() {
         <Route path="/wholesale/closing" element={<ProtectedRoute feature="wholesale_real_estate"><DealOperationsClosing /></ProtectedRoute>} />
         <Route path="/wholesale/dispositions" element={<ProtectedRoute feature="wholesale_real_estate"><DealOperationsDispositions /></ProtectedRoute>} />
         <Route path="/wholesale/buyers" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleBuyers /></ProtectedRoute>} />
+        <Route path="/wholesale/deal-room" element={<ProtectedRoute feature="wholesale_real_estate"><DealRoomManage /></ProtectedRoute>} />
+        <Route path="/wholesale/deal-room/:view" element={<ProtectedRoute feature="wholesale_real_estate"><DealRoomManage /></ProtectedRoute>} />
+        <Route path="/wholesale/buyers/buy-boxes" element={<ProtectedRoute feature="wholesale_real_estate"><BuyBoxesPage /></ProtectedRoute>} />
         <Route path="/wholesale/exceptions" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleExceptions /></ProtectedRoute>} />
         <Route path="/wholesale/callbacks" element={<ProtectedRoute feature="wholesale_real_estate"><CallbackCenter /></ProtectedRoute>} />
             <Route path="/wholesale/team" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleTeam /></ProtectedRoute>} />

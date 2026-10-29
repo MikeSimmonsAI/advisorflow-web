@@ -274,6 +274,18 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
                 detail="Session expired. Please log in again.",
             )
 
+    # ── DEAL ROOM INVESTOR FENCE (#415) ──────────────────────────────────────
+    # An investor login is a platform user with role "investor" and NO
+    # workspace (users.organization_id is NULL). It may reach its own Deal Room
+    # API and the sign-in/session paths - nothing else, from any link. This runs
+    # before every other branch below, so no back-office rule ever sees it.
+    if user.role == "investor":
+        _p = request.url.path if request is not None else ""
+        if not (_p.startswith("/investor/") or _p in INVESTOR_AUTH_PATHS):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                detail="This login is for the Deal Room only.")
+        return user
+
     # Enforce must_change_password server-side
     if user.must_change_password:
         path = request.url.path
@@ -391,6 +403,20 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
             # before any mutation, so nothing here is written back.
             user.organization_id = None
 
+    # THE BACK OFFICE A SALESPERSON CHOSE (#272). Someone on more than one
+    # brand's sales team picks which brand's Back Office they are in, and the
+    # client says so with the same X-Brand-Override header. For anyone who is
+    # not god it is only a REQUEST, read by sales_access.sales_org_ids, which
+    # honours it only when it names a brand they already hold a sales
+    # membership on - it narrows, it never widens. Nothing is read or written
+    # here; only /sales routes are affected.
+    elif (request is not None and str(getattr(request.url, "path", "")).startswith("/sales")
+          and request.headers.get("X-Brand-Override")):
+        try:
+            user._requested_sales_brand_id = request.headers.get("X-Brand-Override")
+        except Exception:  # noqa: BLE001 - a hint must never break sign-in
+            pass
+
     # ── EXECUTIVE OBSERVATION CONTEXT ────────────────────────────────────────
     # A brand_executive may send X-Executive-Observe to enter a customer org's
     # data in strict read-only mode.
@@ -471,6 +497,10 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_refusal)
 
     return user
+
+
+INVESTOR_AUTH_PATHS = ("/auth/refresh", "/auth/logout", "/auth/logout-all", "/auth/change-password",
+                       "/auth/sessions")
 
 
 def require_not_observation(request: Request,

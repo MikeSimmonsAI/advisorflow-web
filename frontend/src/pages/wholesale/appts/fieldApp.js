@@ -9,6 +9,13 @@
 import { engine } from '../engine'
 
 const FIELD = { manifest: '/manifest-field.webmanifest', icon: '/icons/field-apple-180.png', title: 'EvoSys Field' }
+// A workspace whose brand has no engine name (a second Wholesale tenant, e.g.
+// BookaBoost Wholesale) installs the same app under a neutral name, so Android
+// and desktop installs never show another brand's name (#272). EvoSys keeps
+// the manifest above, unchanged.
+const NEUTRAL_MANIFEST = '/manifest-field-neutral.webmanifest'
+
+export function fieldManifest() { return engine() ? FIELD.manifest : NEUTRAL_MANIFEST }
 let saved = null
 
 function link(rel) {
@@ -28,7 +35,8 @@ export function applyFieldAppHead(on) {
   const m = link('manifest'); const i = link('apple-touch-icon'); const t = meta('apple-mobile-web-app-title')
   if (on) {
     if (!saved) saved = { manifest: m.getAttribute('href'), icon: i.getAttribute('href'), title: t.getAttribute('content') }
-    if (m.getAttribute('href') !== FIELD.manifest) m.setAttribute('href', FIELD.manifest)
+    const manifest = fieldManifest()
+    if (m.getAttribute('href') !== manifest) m.setAttribute('href', manifest)
     if (i.getAttribute('href') !== FIELD.icon) i.setAttribute('href', FIELD.icon)
     // A second Wholesale tenant's field app is never titled with another
     // brand's name (#272 P4); EvoSys keeps "EvoSys Field".

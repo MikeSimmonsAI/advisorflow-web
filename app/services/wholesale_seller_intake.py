@@ -269,8 +269,8 @@ def _assignee(db: Session, org_id: str, settings: WholesaleSettings) -> Optional
     if not uid:
         return None
     from app.models.models import User
-    u = (db.query(User).filter(User.id == uid, User.organization_id == org_id,
-                               User.is_active.isnot(False)).first())
+    from app.services import wholesale_team as T
+    u = (T.people_q(db, org_id).filter(User.id == uid, User.is_active.isnot(False)).first())
     return u.id if u is not None else None
 
 
