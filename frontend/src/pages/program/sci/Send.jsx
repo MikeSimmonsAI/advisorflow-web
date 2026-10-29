@@ -7,6 +7,7 @@
    The per-approval maximum is the server's (max_per_approval), never a
    number baked into this page. */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../../../api/client'
 import {
   Chip, Empty, ErrorLine, FilterChips, Icon, Kpi, Loading, Notice, PageHead, Panel, SearchBox,
@@ -17,10 +18,12 @@ const SHOW = [['not_approved', 'Not sent yet'], ['approved', 'Approved'], ['all'
 const PAGE = 50
 
 export default function Send({ locations, isManager, locationId, goTab, automation, openPerson }) {
-  const [show, setShow] = useState('not_approved')
+  const [searchParams] = useSearchParams()
+  const requestedCampaign = searchParams.get('campaign') || ''
+  const [show, setShow] = useState(requestedCampaign ? 'approved' : 'not_approved')
   const [search, setSearch] = useState('')
   const [loc, setLoc] = useState(locationId || '')
-  const [fam, setFam] = useState('')
+  const [fam, setFam] = useState(requestedCampaign)
   const [fams, setFams] = useState([])
   const [offset, setOffset] = useState(0)
   const [data, setData] = useState(null)
