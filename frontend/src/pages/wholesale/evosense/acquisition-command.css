@@ -1,0 +1,87 @@
+/* PROJECT OVERDRIVE — Design B, the one-property Acquisition Command screen.
+ * EvoSys Pro navy / blue / white / light gray, on the existing --evo-* tokens.
+ * Every rule is scoped to an .acq-* class this screen alone renders. */
+
+.acq-head {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px 24px; align-items: start;
+  background: var(--evo-surface, #fff); border-radius: 18px; padding: 20px 24px; margin-bottom: var(--evo-gap, 16px);
+  box-shadow: inset 0 0 0 1px var(--evo-line, #e5e9f0), var(--evo-shadow);
+}
+.acq-head__eyebrow { margin: 0 0 4px; font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--evo-primary-ink, #1d4ed8); }
+.acq-head__title { margin: 0; font: 700 clamp(24px, 2.4vw, 34px)/1.1 var(--evo-font-serif, Georgia, serif); color: var(--evo-navy, #0b1d3d); overflow-wrap: anywhere; }
+.acq-head__sub { margin: 4px 0 10px; color: var(--evo-text-secondary, #4a5a75); }
+.acq-head__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.acq-head__measures { margin-top: 10px; }
+.acq-head__side { display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
+.acq-head__score { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.acq-head__scorelabel { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--evo-text-secondary, #4a5a75); }
+.acq-launch { min-width: 150px; min-height: 44px; font-size: 15px; }
+.acq-head__why { grid-column: 1 / -1; border-top: 1px solid var(--evo-line, #e5e9f0); padding-top: 12px; }
+
+.acq-overview {
+  display: grid; grid-template-columns: minmax(260px, 38%) minmax(0, 1fr); border-radius: 18px; overflow: hidden;
+  margin-bottom: var(--evo-gap, 16px); background: var(--evo-surface, #fff);
+  box-shadow: inset 0 0 0 1px var(--evo-line, #e5e9f0), var(--evo-shadow);
+}
+.acq-overview__media { padding: 14px 0 14px 14px; display: flex; flex-direction: column; min-width: 0; }
+.acq-overview__media .evo-thumb--hero { flex: 1 1 auto; height: auto; min-height: 230px; }
+.acq-overview__body { padding: 18px 22px; min-width: 0; }
+.acq-owner { padding: 8px 0 10px; border-bottom: 1px solid var(--evo-line, #e5e9f0); }
+.acq-owner__name { font-weight: 700; font-size: 16px; color: var(--evo-navy, #0b1d3d); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.acq-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 8px 0 0; font-size: 13.5px; }
+.acq-kv dt { color: var(--evo-text-secondary, #4a5a75); }
+.acq-kv dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.acq-subtitle { margin: 14px 0 6px; font-size: 13px; font-weight: 700; color: var(--evo-navy, #0b1d3d); }
+.acq-history { margin: 0; padding-left: 18px; font-size: 13.5px; line-height: 1.7; }
+
+.acq-actions {
+  background: var(--evo-surface, #fff); border-radius: 14px; padding: 12px 14px; margin-bottom: var(--evo-gap, 16px);
+  box-shadow: inset 0 0 0 1px var(--evo-line, #e5e9f0);
+}
+.acq-actions__row { display: flex; flex-wrap: wrap; gap: 8px; }
+.acq-actions__row .evo-btn { min-height: 40px; }
+.acq-actions__why { margin: 10px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--evo-text-secondary, #4a5a75); }
+
+.acq-tabs { position: sticky; top: 0; z-index: 3; background: var(--evo-bg, #f3f6fb); padding-top: 4px; scroll-margin-top: 8px; }
+.acq-tabs .evo-tabs { overflow-x: auto; scrollbar-width: thin; }
+.acq-tabpanel { padding-top: 14px; }
+.acq-tabpanel:focus-visible { outline: 2px solid var(--evo-focus, #93c5fd); outline-offset: 4px; border-radius: 8px; }
+
+.acq-fold { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--evo-gap, 16px); }
+.acq-fold--two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.acq-fold > .evo-panel { margin-bottom: 0; }
+
+.acq-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.acq-checks li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px; align-items: start; }
+.acq-checks li > span:first-child { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 800; }
+.acq-checks li.is-ok > span:first-child { background: var(--evo-success-soft, #dcfce7); color: var(--evo-success-ink, #166534); }
+.acq-checks li.is-open > span:first-child { background: var(--evo-danger-soft, #fee2e2); color: var(--evo-danger-ink, #991b1b); }
+
+.acq-uw__bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 12px; }
+.acq-uw .evo-panel { margin-bottom: var(--evo-gap, 16px); }
+
+.acq-launch-steps { margin: 0 0 14px; padding-left: 0; list-style: none; display: grid; gap: 8px; font-size: 13.5px; }
+.acq-launch-steps li { padding: 8px 10px; border-radius: 10px; background: var(--evo-surface-2, #f6f7f9); }
+.acq-launch-steps li.is-done { background: var(--evo-success-soft, #dcfce7); }
+.acq-launch-steps li.is-now { box-shadow: inset 0 0 0 2px var(--evo-primary, #2563eb); background: #fff; }
+
+tr.is-muted td { color: var(--evo-text-tertiary, #6b7a93); }
+
+@media (max-width: 1100px) {
+  .acq-fold { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 860px) {
+  .acq-overview { grid-template-columns: minmax(0, 1fr); }
+  .acq-overview__media { padding: 14px 14px 0; }
+  .acq-overview__media .evo-thumb--hero { flex: none; min-height: 0; height: 210px; }
+  .acq-fold--two { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .acq-head { grid-template-columns: minmax(0, 1fr); padding: 16px; }
+  .acq-head__side { flex-direction: row; align-items: center; justify-content: space-between; }
+  .acq-actions__row .evo-btn { flex: 1 1 calc(50% - 8px); min-height: 44px; }
+  .acq-overview__body { padding: 16px; }
+  /* wide tables from shared panels scroll inside their panel, never the page */
+  .acq-tabpanel table.evo-table { display: block; max-width: 100%; overflow-x: auto; }
+  .acq-tabpanel .evo-panel { min-width: 0; }
+}
