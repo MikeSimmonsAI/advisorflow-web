@@ -14,6 +14,7 @@ import photoBuyers from '../ds/photos/capital.jpg'
 import photoDeal from '../ds/photos/contract.jpg'
 import '../evosense/OpportunityRadar.css'
 import './landPartners.css'
+import { LandDealTools } from './landTools'
 
 const RADAR = '/wholesale/evosense/opportunity-radar?'
 const BUYERS = '/wholesale/buyer-intel/buyers?'
@@ -87,6 +88,8 @@ export default function LandPartners() {
         <Kpi n={(buyers.data?.total ?? 0).toLocaleString()} label="Land buyers & partners" help="Buy boxes asking for land" tone="green" loading={buyers.loading} />
         <Kpi n={(farmBuyers.data?.total ?? 0).toLocaleString()} label="Agricultural buyers" help="Buy boxes asking for farmland" loading={farmBuyers.loading} />
       </div>
+
+      <LandDealTools />
 
       <div className="lp-grid">
         <section className="lp-panel" aria-labelledby="lp-opps">
