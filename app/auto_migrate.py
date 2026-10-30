@@ -157,6 +157,8 @@ def _is_lock_contention(exc) -> bool:
 # undo it on databases that already have the column, and a stale no-op
 # entry costs nothing to leave in place).
 COLUMNS_TO_ADD = [
+    # #441 - per-touch campaign copy
+    ("program_campaign_families", "touch_copy_json", "TEXT"),
     # Wholesale field app, works with bad signal (2026-10-11)
     ("wholesale_field_appointments", "outcome_ref", "VARCHAR"),
     ("wholesale_field_rules", "raise_limit_pct", "INTEGER DEFAULT 10"),

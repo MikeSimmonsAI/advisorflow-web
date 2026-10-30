@@ -200,6 +200,8 @@ def render_touch(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof: 
         # family's own pick-a-time link when there is one.
         "appointment_options": identity.appointment_options(prof),
         "booking_line": ("Pick a time that works for you here: %s\n\n" % booking_url) if booking_url else "",
+        # #441: the location's own number for an email signature.
+        "location_phone": _pretty_phone(prof.facility_phone),
     }
     subject = identity.render(fam.email_subject_template, fields)
     body = identity.render(fam.email_body_template,
@@ -211,6 +213,24 @@ def render_touch(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof: 
     return {"email_mode": mode, "flyer": flyer, "flyer_available": found is not None, "flyer_url": flyer_url, "attachment": attachment,
             "subject": subject, "body": body, "body_html": body_html, "booking_url": booking_url,
             "fields": fields}
+
+
+def _pretty_phone(raw) -> str:
+    d = "".join(ch for ch in str(raw or "") if ch.isdigit())
+    if len(d) == 11 and d[0] == "1":
+        d = d[1:]
+    return "(%s) %s-%s" % (d[:3], d[3:6], d[6:]) if len(d) == 10 else ""
+
+
+def own_copy_email(fam: CampaignFamily, touch: int, fields: Dict, reply_instructions: str = "") -> Optional[Dict]:
+    """#441: an own-copy campaign's email for this touch, rendered with the
+    same fields delivery uses - or None when the step is blank (nothing goes)."""
+    from app.services.programs import campaigns as _camp
+    e = _camp.email_for(fam, touch)
+    if e is None:
+        return None
+    return {"subject": identity.render(e["subject"], fields),
+            "body": identity.render(e["body"], dict(fields, reply_instructions=reply_instructions))}
 
 
 def text_to_html(text: str, link_url: str = "") -> str:
@@ -458,7 +478,19 @@ def build_message(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof:
     if blind and packet is not None:
         # Shared inbox: no name - it may not be this person who reads it.
         packet = dict(packet, first_name=None, last_name=None)
-    if touch == 1 and not _family_copy_is_default(fam):
+    from app.services.programs.campaigns import OWN_COPY_KEYS
+    if fam.key in OWN_COPY_KEYS:
+        # #441: this campaign's own words for THIS touch - never a playbook.
+        own = own_copy_email(fam, touch, r["fields"], prog.reply_instructions_email or "")
+        if own is None:
+            msg = {"touch": touch, "channel": "email", "subject": "", "body": "",
+                   "strategy": brain.TOUCH_STRATEGY.get(touch), "family": fam.key, "source": "campaign copy"}
+            return {"message": dict(msg, body_html=""), "packet": packet,
+                    "quality": {"ok": False, "score": 0, "warnings": [],
+                                "failures": ["this campaign has no wording for email %s" % touch]}}
+        msg = {"touch": touch, "channel": "email", "subject": own["subject"], "body": own["body"],
+               "strategy": brain.TOUCH_STRATEGY.get(touch), "family": fam.key, "source": "campaign copy"}
+    elif touch == 1 and not _family_copy_is_default(fam):
         msg = {"touch": 1, "channel": "email", "subject": r["subject"], "body": r["body"],
                "strategy": brain.TOUCH_STRATEGY[1], "family": fam.key, "source": "family copy"}
     else:

@@ -1584,6 +1584,18 @@ def _family_json(f: CampaignFamily) -> dict:
             "email_body_template": f.email_body_template}
 
 
+def _family_full(db: Session, f: CampaignFamily) -> dict:
+    """_family_json plus, for a campaign with its own per-touch copy, every step."""
+    out = _family_json(f)
+    from app.services.programs import campaigns as _camp
+    if f.key in _camp.OWN_COPY_KEYS:
+        out["own_copy"] = True
+        out["steps"] = _camp.touch_copy(db, f)
+        out["missing_steps"] = _camp.missing_steps(db, f)
+        out["activation_blocker"] = _camp.activation_blocker(f, db)
+    return out
+
+
 # ── Choose & Send: a manager picks exactly who gets outreach ───────────────
 
 class PickIn(BaseModel):
@@ -1754,7 +1766,7 @@ def send_unapprove(body: PickIn, db: Session = Depends(get_db), user: User = Dep
 @router.get("/campaigns")
 def list_campaigns(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     prog = _program(db, user)
-    return [_family_json(f) for f in db.query(CampaignFamily)
+    return [_family_full(db, f) for f in db.query(CampaignFamily)
             .filter(CampaignFamily.organization_id == prog.organization_id)
             .order_by(CampaignFamily.name).all()]
 
@@ -1766,6 +1778,8 @@ class FamilyIn(BaseModel):
     email_subject_template: Optional[str] = None
     email_body_template: Optional[str] = None
     asset_category: Optional[str] = None
+    # #441: {"sms": {"2": "..."}, "email": {"2": {"subject": "...", "body": "..."}}}
+    steps: Optional[dict] = None
 
 
 @router.patch("/campaigns/{family_id}")
@@ -1785,10 +1799,36 @@ def update_campaign(family_id: str, body: FamilyIn, db: Session = Depends(get_db
     for k in ("email_body_template",):
         if k in data and data[k] and "call us" in data[k].lower():
             raise HTTPException(status_code=422, detail="Families are asked to reply, not to call.")
+    steps = data.pop("steps", None)
+    from app.services.programs import campaigns as _camp
     for k, v in data.items():
         setattr(f, k, v)
+    if steps is not None:
+        if f.key not in _camp.OWN_COPY_KEYS:
+            raise HTTPException(status_code=422, detail="Per-step copy is only for campaigns with their own sequence.")
+        if not isinstance(steps, dict) or not isinstance(steps.get("sms") or {}, dict) \
+                or not isinstance(steps.get("email") or {}, dict):
+            raise HTTPException(status_code=422, detail="steps must look like {sms: {2: text}, email: {2: {subject, body}}}.")
+        try:
+            _camp.set_touch_copy(f, sms=steps.get("sms") or {}, email=steps.get("email") or {})
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+    if f.key in _camp.OWN_COPY_KEYS:
+        problems = _camp.copy_problems(f)
+        if problems:
+            db.rollback()
+            raise HTTPException(status_code=422, detail="Not saved: " + "; ".join(problems))
+        if f.is_active and _camp.missing_steps(db, f):
+            db.rollback()
+            raise HTTPException(status_code=422, detail="This campaign is on - every step must keep its wording.")
+    if steps is not None:
+        from app.routers.audit_log_router import log_action
+        log_action(db, prog.organization_id, user.id, action="program.campaign_copy_saved",
+                   target_type="program_campaign_family", target_id=f.id,
+                   details={"key": f.key, "sms_steps": sorted((steps.get("sms") or {}).keys()),
+                            "email_steps": sorted((steps.get("email") or {}).keys()), "activated": False})
     db.commit()
-    return _family_json(f)
+    return _family_full(db, f)
 
 
 class ActivationIn(BaseModel):
@@ -1812,7 +1852,7 @@ def set_campaign_active(family_id: str, body: ActivationIn, db: Session = Depend
         raise HTTPException(status_code=422, detail="Type the campaign name to confirm switching it on.")
     if body.active:
         from app.services.programs.campaigns import activation_blocker
-        why = activation_blocker(f)
+        why = activation_blocker(f, db)
         if why:
             raise HTTPException(status_code=422, detail=why)
     f.is_active = bool(body.active)
@@ -1843,6 +1883,9 @@ def preview_campaign(family_id: str, location_id: Optional[str] = Query(None),
     if prof is None or prof.is_review_bucket:
         return {"ok": False, "reason": identity.LOCATION_REVIEW_REFUSAL}
     from app.services.programs import email_touches as _et
+    from app.services.programs import campaigns as _camp
+    if f.key in _camp.OWN_COPY_KEYS:
+        return _own_copy_preview(db, prog, f, prof, rec, touch)
     r = _et.render_touch(db, prog, f, prof, rec.first_name if rec else "Pat",
                          "first" if touch == "first" else "followup")
     fields = r["fields"]
@@ -1859,6 +1902,139 @@ def preview_campaign(family_id: str, location_id: Optional[str] = Query(None),
         "email_body": r["body"],
         "attachment": r["attachment"], "flyer_available": r["flyer_available"],
     }
+
+
+def _own_copy_preview(db: Session, prog, f: CampaignFamily, prof: LocationProfile, rec, touch: str) -> dict:
+    """#441: one step of an own-copy campaign, rendered by the SAME functions
+    delivery uses (campaigns.sms_for + identity.render + the content policy +
+    the sign-off; email_touches.own_copy_email). Sends nothing."""
+    from app.services.programs import campaigns as _camp, email_touches as _et
+    from app.services.sms_content_policy import enforce_sms_content_policy
+    channel, _, num_s = (touch or "sms:1").partition(":")
+    if touch == "first":
+        channel, num_s = "both", "1"
+    try:
+        n = max(1, int(num_s or 1))
+    except ValueError:
+        raise HTTPException(status_code=422, detail="touch must look like sms:2 or email:3")
+    r = _et.render_touch(db, prog, f, prof, rec.first_name if rec else "Pat", "first",
+                         booking_url="(their own booking link)")
+    # Texts: the SAME field builder delivery uses (identity.location_fields),
+    # and the SAME content allowance (this program's sender approval).
+    fields = identity.location_fields(db, prog, prof, rec.first_name if rec else "Pat",
+                                      prog.reply_instructions_sms or "", f.key)
+    fields["booking_line"] = "Pick a time that works for you: (their own booking link)"
+    from types import SimpleNamespace
+    from app.services import sms_programs as _sp
+    try:
+        allow = _sp.content_allowance(db, SimpleNamespace(id=None, organization_id=prog.organization_id,
+                                                          phone=None, email=None, is_test=False))
+    except Exception:                                     # noqa: BLE001 - strictest default
+        allow = {}
+    out = {"ok": True, "family": f.key, "location": prof.official_name, "touch": touch, "step": n,
+           "from_display_name": identity.display_name(prog, prof), "email_mode": r["email_mode"],
+           "attachment": None, "flyer_available": r["flyer_available"]}
+    if channel in ("sms", "both"):
+        tpl = _camp.sms_for(f, n)
+        if tpl:
+            body = enforce_sms_content_policy(identity.render(tpl, fields), **allow)
+            out["sms"] = identity.with_signoff(prog, prof, body)
+            out["sms_chars"] = len(out["sms"])
+        else:
+            out["sms"] = None
+    if channel in ("email", "both"):
+        e = _et.own_copy_email(f, n, r["fields"], prog.reply_instructions_email or "")
+        out["email_subject"] = e["subject"] if e else None
+        out["email_body"] = e["body"] if e else None
+    return out
+
+
+@router.get("/central-alabama/roster")
+def central_alabama_roster(location_id: Optional[str] = Query(None), db: Session = Depends(get_db),
+                           user: User = Depends(require_tenant_or_observer)):
+    """#441: the families approved for Central Alabama - one row per person, how
+    they can be reached, what has actually gone to them, replies and bookings.
+    Approved is not sent: counts come from real message records."""
+    from app.services.programs import campaigns as _camp
+    from app.models.models import BookingLink, EmailMessage, Message
+    from app.models.program_models import ProgramEmailTouch, ProgramResponse
+    prog = _program(db, user)
+    recs = (db.query(ProgramSourceRecord)
+            .filter(ProgramSourceRecord.organization_id == prog.organization_id,
+                    ProgramSourceRecord.campaign_family == _camp.CENTRAL_ALABAMA_KEY,
+                    ProgramSourceRecord.approved_to_send_at.isnot(None),
+                    ProgramSourceRecord.lead_id.isnot(None)).all())
+    by_lead = {}
+    for r in recs:
+        by_lead.setdefault(r.lead_id, r)
+    ids = list(by_lead)
+    leads, texts, emails, replied, booked, cad = {}, {}, {}, set(), set(), {}
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        for l in db.query(Lead).filter(Lead.id.in_(chunk)).all():
+            leads[l.id] = l
+        for lid, n in (db.query(Message.lead_id, func.count(Message.id))
+                       .filter(Message.lead_id.in_(chunk),
+                               Message.delivery_status.notin_(("failed", "undelivered")))
+                       .group_by(Message.lead_id).all()):
+            texts[lid] = n
+        for lid, n in (db.query(ProgramEmailTouch.lead_id, func.count(ProgramEmailTouch.id))
+                       .filter(ProgramEmailTouch.lead_id.in_(chunk), ProgramEmailTouch.status == "sent")
+                       .group_by(ProgramEmailTouch.lead_id).all()):
+            emails[lid] = n
+        replied.update(x for (x,) in db.query(ProgramResponse.lead_id).filter(ProgramResponse.lead_id.in_(chunk)).all())
+        booked.update(x for (x,) in db.query(BookingLink.lead_id).filter(
+            BookingLink.lead_id.in_(chunk), BookingLink.status.in_(("booked", "confirmed", "completed"))).all())
+        for c in db.query(CadenceState).filter(CadenceState.lead_id.in_(chunk)).all():
+            cad[c.lead_id] = c
+    names = {p.location_id: p.official_name for p in db.query(LocationProfile)
+             .filter(LocationProfile.organization_id == prog.organization_id).all()}
+    fam = db.query(CampaignFamily).filter(CampaignFamily.organization_id == prog.organization_id,
+                                          CampaignFamily.key == _camp.CENTRAL_ALABAMA_KEY).first()
+    on = bool(fam and fam.is_active)
+    rows = []
+    for lid, r in by_lead.items():
+        l = leads.get(lid)
+        if l is None or (location_id and r.location_id != location_id):
+            continue
+        from app.services.programs import send_approval as _sa
+        from app.services import test_records as _tr
+        mode = getattr(r, "send_mode", None) or "text_email"
+        has_phone = _sa.textable(l) and mode != "email_only"
+        has_email = bool((l.email or "").strip()) and l.allow_email is not False
+        reach = _sa.reaches(l, mode)
+        path = ("Email only (no phone on file)" if reach == "Email only" and not l.phone
+                else "Email only (phone can't take texts)" if reach == "Email only" else reach)
+        c = cad.get(lid)
+        if lid in booked:
+            status = "Booked"
+        elif lid in replied:
+            status = "Replied - a person follows up"
+        elif (l.status or "").lower() == "dnc" or not _tr.is_outreach_eligible(l) or any(
+                x.on_hold for x in recs if x.lead_id == lid):
+            status = "Do not contact / on hold"
+        elif not on:
+            status = "Ready - campaign off, nothing sent"
+        elif c is not None and c.status == "active":
+            status = "In sequence"
+        else:
+            status = "Approved, not started"
+        rows.append({"lead_id": lid, "name": ("%s %s" % (l.first_name or "", l.last_name or "")).strip().title(),
+                     "location_id": r.location_id, "location": names.get(r.location_id),
+                     "path": path, "has_phone": has_phone, "has_email": has_email,
+                     "texts_sent": texts.get(lid, 0), "emails_sent": emails.get(lid, 0),
+                     "next_touch_at": (c.next_touch_due_at.isoformat() + "Z")
+                     if (on and c is not None and c.status == "active" and c.next_touch_due_at) else None,
+                     "replied": lid in replied, "booked": lid in booked, "status": status})
+    rows.sort(key=lambda x: (x["location"] or "", x["name"]))
+    return {"campaign_active": on, "people": len(rows),
+            "with_phone": sum(1 for x in rows if x["has_phone"]),
+            "email_only": sum(1 for x in rows if not x["has_phone"] and x["has_email"]),
+            "no_phone_on_file": sum(1 for x in rows if x["path"] == "Email only (no phone on file)"),
+            "unreachable": sum(1 for x in rows if not x["has_phone"] and not x["has_email"]),
+            "texts_sent": sum(x["texts_sent"] for x in rows), "emails_sent": sum(x["emails_sent"] for x in rows),
+            "replied": sum(1 for x in rows if x["replied"]), "booked": sum(1 for x in rows if x["booked"]),
+            "rows": rows}
 
 
 @router.get("/email-touches")

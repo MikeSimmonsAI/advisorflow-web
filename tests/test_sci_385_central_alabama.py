@@ -176,22 +176,27 @@ def test_a_record_with_no_campaign_is_never_worked(program, sample_advisor):
 def test_the_campaign_is_its_own_off_and_cannot_be_switched_on_without_copy(program, client):
     db, org = program["db"], program["org"]
     fam = _ca(db, org)
-    assert fam.is_active is False and fam.sms_template is None and fam.email_body_template is None
+    # #441: created OFF with the owner's sequence as its draft copy
+    assert fam.is_active is False and fam.sms_template and fam.email_body_template
     assert fam.name == "Central Alabama 2025–2026 MS"
     pats = json.loads(fam.source_campaign_patterns)
     assert "Central Alabama 2025-2026 MS" in pats
     assert importer._family_for("Direct Mail> Veteran> Veteran Planning Guide", [fam]) is None
+    C.set_touch_copy(fam, sms={"2": ""})                                           # a blank step
+    db.commit()
     r = client.post("/program/campaigns/%s/activation" % fam.id, headers=_h(db, program["admin"]),
                     json={"active": True, "confirm": fam.name})
-    assert r.status_code == 422 and "no approved text and email copy" in r.json()["detail"]
+    assert r.status_code == 422 and "Text 2" in r.json()["detail"]
     db.refresh(fam)
     assert fam.is_active is False
 
 
 def test_the_ai_follows_the_campaigns_own_rules():
     notes = C.ai_notes_for(C.CENTRAL_ALABAMA_KEY)
-    assert "NOT verified" in notes["rules"] and "veteran" in notes["rules"].lower()
-    assert "MS" in notes["rules"]                                                # never expanded
+    # #441: the owner's brief - guide + certificate, no invented terms, MS never said
+    assert "pre-planning guide" in notes["what_we_know"] and "savings certificate" in notes["what_we_know"]
+    assert "Do NOT state a certificate value" in notes["rules"] and "veteran" in notes["rules"].lower()
+    assert "Never say or explain 'MS'" in notes["rules"]
     assert C.ai_notes_for("veteran_planning_guide") is None
 
 
@@ -229,9 +234,17 @@ def test_approving_a_family_never_switches_on_a_campaign_without_copy(program, s
     rec = [r for r in _recs(db, org) if r.first_name == "HANNAH"][0]
     lead = _lead_for(db, org, rec, sample_advisor)
     prog = db.query(OutreachProgram).filter_by(organization_id=org.id).one()
+    C.set_touch_copy(fam, sms={"2": ""})                     # blank step: blocked
+    db.commit()
     out = send_approval.approve(db, prog, program["admin"], [lead.id])
     db.refresh(fam)
     assert fam.is_active is False
+    # #441: even with every step written, approving a family never switches it on
+    C.set_touch_copy(fam, sms={"2": C.CA_SMS[2]})
+    db.commit()
+    out2 = send_approval.approve(db, prog, program["admin"], [lead.id])
+    db.refresh(fam)
+    assert fam.is_active is False and any("switch it on in Campaigns" in s["reason"] for s in out2["skipped"])
     assert db.query(CadenceState).filter_by(lead_id=lead.id).count() == 0
     assert any(s["lead_id"] == lead.id for s in out["skipped"])
 
@@ -304,14 +317,13 @@ def test_stop_status_holds():
 def test_follow_ups_use_only_the_campaigns_own_words(program, sample_advisor):
     db, org = program["db"], program["org"]
     fam = _ca(db, org)
-    fam.sms_template = "APPROVED-CA-COPY {location_name}"
+    C.set_touch_copy(fam, sms={"1": "APPROVED-CA-COPY {location_name}", "3": "APPROVED-CA-STEP-3 {location_name}"})
     db.commit()
     importer.stage(db, org, ORIGINAL.encode(), dry_run=False, campaign_family=C.CENTRAL_ALABAMA_KEY)
     rec = [r for r in _recs(db, org) if r.first_name == "HANNAH"][0]
     lead = _lead_for(db, org, rec, sample_advisor)
-    for touch in (1, 3):
-        txt = identity.cadence_text(db, lead, touch)
-        assert txt is None or txt.startswith("APPROVED-CA-COPY")
+    assert identity.cadence_text(db, lead, 1).startswith("APPROVED-CA-COPY")
+    assert identity.cadence_text(db, lead, 3).startswith("APPROVED-CA-STEP-3")      # #441: each step its own
 
 
 def test_owner_decisions_restaging_releases_status_holds_and_resolves_locations(program):
