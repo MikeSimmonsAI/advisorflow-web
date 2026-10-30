@@ -4,6 +4,8 @@
  * adds no data source and no permission. */
 import OpportunityRadar from '../evosense/OpportunityRadar'
 import photoFarm from '../ds/photos/farm-barn.jpg'
+import { FarmTools } from './landTools'
+import './landPartners.css'
 
 export const FARM_PRESET = {
   market: 'farm',
@@ -14,6 +16,7 @@ export const FARM_PRESET = {
   side: ['FARM & RANCH RADAR', 'Acreage → Verify → Match → Deal'],
   worktop: 'Farm & Ranch Radar',
   photo: photoFarm,
+  slot: <FarmTools />,
 }
 
 export default function FarmRanch() {
