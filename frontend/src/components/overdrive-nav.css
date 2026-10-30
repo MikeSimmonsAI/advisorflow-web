@@ -1,0 +1,87 @@
+/* PROJECT OVERDRIVE — Design A Wholesale rail (owner approved, #439).
+ *
+ * The approved navy EvoSys Pro rail, already used on the Buyers / Deal Room
+ * screens (wholesale-shell.css, .layout--dealroom), now on every Wholesale
+ * screen outside the OLP workspace. Scoped by .layout--wsnav, which Layout sets
+ * only inside /wholesale and never in OLP mode, so no other screen or tenant
+ * changes. The main canvas stays white / light gray. */
+
+html:root .layout--wsnav .sidebar {
+  background: linear-gradient(180deg, #0a1b38 0%, #0b1d3d 55%, #08162e 100%);
+  border-right: 0; box-shadow: 4px 0 24px rgba(10, 27, 56, .18); color: #cbd5e1;
+  scrollbar-color: rgba(255, 255, 255, .18) transparent;
+  overflow-x: hidden;
+}
+@media (min-width: 769px) {
+  .layout.layout--wholesale.layout--wsnav { background: linear-gradient(90deg, #0a1b38 0, #0a1b38 var(--sidebar-width), #f3f6fb var(--sidebar-width)); }
+  /* the collapsed icon rail is 60px wide (Layout.jsx), so the navy band is too */
+  .layout.layout--wholesale.layout--wsnav:has(.sidebar--collapsed) { background: linear-gradient(90deg, #0a1b38 0, #0a1b38 60px, #f3f6fb 60px); }
+}
+html:root .layout--wsnav .sidebar .brand-mark { color: #fff; -webkit-text-fill-color: #fff; }
+html:root .layout--wsnav .sidebar .wsx-brand-sub,
+html:root .layout--wsnav .sidebar .wsx-product__engine { color: #60a5fa; }
+html:root .layout--wsnav .sidebar .wsx-product__name { color: #e2e8f0; }
+html:root .layout--wsnav .sidebar .sidebar-brand button,
+html:root .layout--wsnav .sidebar .sidebar-brand svg { color: #9fb0c9; }
+html:root .layout--wsnav .sidebar-nav { overflow-x: hidden; }
+html:root .layout--wsnav .sidebar-nav::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .18); }
+
+/* pinned Acquisition Command */
+html:root .layout--wsnav .wsnav-pinned { margin: 0 0 10px; padding: 0 0 10px; border-bottom: 1px solid rgba(255, 255, 255, .09); }
+
+html:root .layout--wsnav .wsnav-pinned .nav-item { font-size: 13.5px; }
+
+/* groups */
+html:root .layout--wsnav .wsnav-group { margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid rgba(255, 255, 255, .07); }
+html:root .layout--wsnav .wsnav-group:last-child { border-bottom: 0; }
+html:root .layout--wsnav .sidebar .nav-section-toggle {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 40px; padding: 0 12px;
+  border: 0; border-radius: 10px; background: transparent; cursor: pointer; text-align: left;
+  font: 700 11.5px/1.2 'Inter', -apple-system, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: #8fa3c2;
+}
+html:root .layout--wsnav .sidebar .nav-section-toggle:hover { background: rgba(255, 255, 255, .06); color: #fff; }
+html:root .layout--wsnav .sidebar .nav-section-toggle svg { width: 15px; height: 15px; flex: none; transition: transform .15s ease; }
+html:root .layout--wsnav .sidebar .nav-section-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+html:root .layout--wsnav .sidebar .nav-section--current .nav-section-toggle { color: #bfdbfe; }
+
+/* items */
+html:root .layout--wsnav .sidebar .nav-item {
+  color: #cbd5e1; font-size: 14px; min-height: 40px; border-radius: 10px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+html:root .layout--wsnav .sidebar .nav-item svg { color: #8ea3c4; flex: none; }
+html:root .layout--wsnav .sidebar .nav-item:hover { background: rgba(255, 255, 255, .07); color: #fff; }
+html:root .layout--wsnav .sidebar .nav-item--active,
+html:root .layout--wsnav .sidebar .nav-item--active:hover {
+  background: #2563eb; color: #fff; box-shadow: 0 8px 20px -8px rgba(37, 99, 235, .8);
+}
+html:root .layout--wsnav .sidebar .nav-item--active svg { color: #fff; }
+
+/* keyboard focus is always visible on the dark rail */
+html:root .layout--wsnav .sidebar .nav-item:focus-visible,
+html:root .layout--wsnav .sidebar .nav-section-toggle:focus-visible {
+  outline: 2px solid #93c5fd; outline-offset: 2px;
+}
+
+/* collapsed desktop icon rail */
+html:root .layout--wsnav .sidebar--collapsed .nav-item { justify-content: center; padding-left: 0; padding-right: 0; }
+html:root .layout--wsnav .sidebar--collapsed .nav-divider { background: rgba(255, 255, 255, .1); }
+
+/* the rest of the dark rail */
+html:root .layout--wsnav .sidebar .wsx-platform { border-top-color: rgba(255, 255, 255, .08); }
+html:root .layout--wsnav .sidebar .wsx-platform__toggle { color: #9fb0c9; }
+html:root .layout--wsnav .sidebar .wsx-platform__toggle:hover { background: rgba(255, 255, 255, .06); color: #fff; }
+html:root .layout--wsnav .sidebar .wsx-platform__hint,
+html:root .layout--wsnav .sidebar .wsx-platform__group { color: #7f93b3; }
+html:root .layout--wsnav .sidebar .sidebar-footer { border-top-color: rgba(255, 255, 255, .08); }
+html:root .layout--wsnav .sidebar .user-chip { background: rgba(255, 255, 255, .06); border-color: rgba(255, 255, 255, .12); color: #e2e8f0; }
+html:root .layout--wsnav .sidebar .user-chip .user-line-label { color: #7f93b3; }
+html:root .layout--wsnav .sidebar .logout-btn,
+html:root .layout--wsnav .sidebar .back-to-website-btn { color: #cbd5e1; border-color: rgba(255, 255, 255, .16); background: transparent; }
+
+/* phones and tablets: the drawer, with finger-sized targets */
+@media (max-width: 768px) {
+  html:root .layout--wsnav .sidebar .nav-item,
+  html:root .layout--wsnav .sidebar .nav-section-toggle { min-height: 44px; }
+  html:root .layout--wsnav .sidebar .sidebar-close-btn { background: rgba(255, 255, 255, .08); border-color: rgba(255, 255, 255, .18); color: #e2e8f0; }
+}

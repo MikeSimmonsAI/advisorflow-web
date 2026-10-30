@@ -11,7 +11,7 @@
  * trust.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import '../../styles/shared.css'
 import './wholesale.css'
@@ -64,7 +64,10 @@ function KeyNum({ k, v, note, pos }) {
 export default function WholesaleDeal() {
   const { dealId } = useParams()
   const [room, setRoom] = useState(null)
-  const [tab, setTab] = useState('overview')
+  // ?tab= opens a tab directly (Launch Deal links to sharing / buyers). An
+  // unknown value is ignored.
+  const [params] = useSearchParams()
+  const [tab, setTab] = useState(() => (TABS.some(([k]) => k === params.get('tab')) ? params.get('tab') : 'overview'))
   const [flowKey, setFlowKey] = useState(0)
   const distribution = useDistribution()
   const [error, setError] = useState(null)
