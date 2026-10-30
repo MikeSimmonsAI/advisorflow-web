@@ -343,6 +343,7 @@ export default function OpportunityRadar({ preset } = {}) {
       </section>
 
       <Kpis data={data} loading={loading} />
+      {preset?.slot || null}
 
       <div className="bbr-worktop"><h2>{preset?.worktop || 'Opportunity Radar'}</h2><span>Nationwide-ready filters · Source-backed research</span></div>
       <section className="bbr-filters" aria-label="Search and filter property opportunities">

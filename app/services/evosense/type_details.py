@@ -71,7 +71,80 @@ FIELDS: Dict[str, Tuple[str, str, float, float]] = {
     "acquisition_expenses": ("Acquisition expenses ($)", "money", 0, 1e10),
     "purchase_price": ("Contract / purchase price ($)", "money", 0, 1e11),
     "buyer_price": ("Investor (buyer) price ($)", "money", 0, 1e11),
+    # OLP Farm & Ranch: how the acres are used and what they earn (entered by a person)
+    "cropland_acres": ("Cropland (acres)", "number", 0, 10_000_000),
+    "pasture_acres": ("Pasture (acres)", "number", 0, 10_000_000),
+    "timber_acres": ("Timber (acres)", "number", 0, 10_000_000),
+    "other_acres": ("Other / homesite / water (acres)", "number", 0, 10_000_000),
+    "cropland_rent_per_acre": ("Cropland rent per acre per year ($)", "money", 0, 1e6),
+    "pasture_rent_per_acre": ("Pasture / grazing rent per acre per year ($)", "money", 0, 1e6),
+    "hunting_lease_income": ("Hunting / recreation lease per year ($)", "money", 0, 1e9),
+    "other_ag_income": ("Other farm income per year ($)", "money", 0, 1e10),
+    "property_taxes": ("Property taxes per year ($)", "money", 0, 1e9),
+    "insurance_costs": ("Insurance per year ($)", "money", 0, 1e9),
+    "upkeep_costs": ("Upkeep per year - fences, roads, water ($)", "money", 0, 1e9),
+    "conservation_programs": ("Conservation programs / easements (CRP, etc.)", "text", 0, 0),
+    "ag_leases": ("Farm / grazing leases in place", "text", 0, 0),
+    "title_notes": ("Title and liens", "text", 0, 0),
+    "survey_notes": ("Survey", "text", 0, 0),
+    "septic_notes": ("Septic / perc test", "text", 0, 0),
+    "back_taxes": ("Back taxes owed ($)", "money", 0, 1e10),
+    "taxes_liens_notes": ("Back taxes and liens", "text", 0, 0),
+    # OLP Land Partners: the seller-financing terms a person is planning (their numbers)
+    "sf_down_payment": ("Seller financing - down payment ($)", "money", 0, 1e10),
+    "sf_rate": ("Seller financing - interest rate (%)", "pct", 0, 40),
+    "sf_term_years": ("Seller financing - term (years)", "number", 0.1, 40),
+    # OLP land and farm checklists: one status per item, set by a person
+    **{k: (label, "choice", 0, 0) for k, label in (
+        ("dd_access", "Road access - status"), ("dd_zoning", "Zoning - status"), ("dd_utilities", "Power and water - status"),
+        ("dd_septic", "Septic / perc - status"), ("dd_flood", "Flood zone - status"), ("dd_survey", "Survey - status"),
+        ("dd_taxes", "Back taxes and liens - status"), ("dd_restrictions", "Deed restrictions and easements - status"),
+        ("dd_title", "Title - status"),
+        ("fc_water", "Water and water rights - status"), ("fc_minerals", "Mineral rights - status"),
+        ("fc_ag_exemption", "Ag exemption and rollback taxes - status"), ("fc_leases", "Farm / grazing leases - status"),
+        ("fc_conservation", "Conservation programs - status"), ("fc_soil", "Soil - status"),
+        ("fc_improvements", "Fencing, barns and wells - status"), ("fc_access_survey", "Access and survey - status"),
+    )},
+    "exit_plan": ("Exit plan", "choice", 0, 0),
 }
+
+# Allowed answers for "choice" fields. Anything else is refused.
+CHECK_STATUS = ("ok", "missing", "problem")
+EXIT_PLANS = ("quick_resale", "seller_finance", "subdivide", "sell_to_builder", "hold")
+CHOICES: Dict[str, Tuple[str, ...]] = {k: CHECK_STATUS for k in FIELDS if k.startswith(("dd_", "fc_"))}
+CHOICES["exit_plan"] = EXIT_PLANS
+EXIT_LABELS = {"quick_resale": "Quick resale (cash)", "seller_finance": "Sell with seller financing",
+               "subdivide": "Split into smaller lots", "sell_to_builder": "Sell to a builder or developer",
+               "hold": "Hold"}
+
+# OLP checklists: (status key, notes key, item, what to check). The notes live in
+# the existing fact fields, so the property page and these lists show one record.
+LAND_CHECKLIST = [
+    ("dd_access", "legal_access", "Road access", "Recorded road frontage or a recorded easement - not just a dirt track."),
+    ("dd_zoning", "zoning", "Zoning", "What the county or city allows: homes, mobile homes, farming, commercial."),
+    ("dd_utilities", "utilities", "Power and water", "Is power at the road? City water, a co-op, or a well needed?"),
+    ("dd_septic", "septic_notes", "Septic / perc test", "Will the soil pass a perc test, or is sewer available?"),
+    ("dd_flood", "floodplain", "Flood zone", "How much of the parcel is in a flood zone, if any."),
+    ("dd_survey", "survey_notes", "Survey", "A current survey, and whether the acreage matches the record."),
+    ("dd_taxes", "taxes_liens_notes", "Back taxes and liens", "Taxes owed, judgments or liens that must be paid at closing."),
+    ("dd_restrictions", "restrictions", "Deed restrictions and easements", "HOA rules, building limits, pipelines or power lines."),
+    ("dd_title", "title_notes", "Title", "Who owns it, and can every owner sign? Estates and heirs take longer."),
+]
+FARM_CHECKLIST = [
+    ("fc_water", "water_rights", "Water and water rights", "Wells, ponds, creeks, irrigation and any recorded rights."),
+    ("fc_minerals", "mineral_rights", "Mineral rights", "Conveyed with the land, or reserved by a past owner?"),
+    ("fc_ag_exemption", "ag_exemption", "Ag exemption and rollback taxes", "Is it ag-valued, and who pays rollback taxes if use changes?"),
+    ("fc_leases", "ag_leases", "Farm / grazing leases", "Leases in place, their terms, and when they end."),
+    ("fc_conservation", "conservation_programs", "Conservation programs", "CRP contracts or easements that limit use."),
+    ("fc_soil", "soil", "Soil", "Soil type and quality for crops or grazing."),
+    ("fc_improvements", "improvements", "Fencing, barns and wells", "Condition of fences, barns, pens, wells and homes."),
+    ("fc_access_survey", "legal_access", "Access and survey", "Legal access and a survey that matches the acreage."),
+]
+FARM_INCOME = ["cropland_acres", "cropland_rent_per_acre", "pasture_acres", "pasture_rent_per_acre", "timber_acres",
+               "other_acres", "hunting_lease_income", "other_ag_income", "property_taxes", "insurance_costs",
+               "upkeep_costs", "cap_rate", "purchase_price"]
+LAND_DEAL = ["acreage", "comp_price_per_acre", "purchase_price", "buyer_price", "acquisition_expenses",
+             "sf_down_payment", "sf_rate", "sf_term_years"]
 
 SECTIONS = {
     "residential": ["bedrooms", "bathrooms", "square_feet", "lot_acres", "year_built", "condition", "repairs"],
@@ -161,6 +234,11 @@ def _clean(key: str, value):
         return None
     if kind in ("text",):
         return str(value).strip()[:500]
+    if kind == "choice":
+        v = str(value).strip().lower()
+        if v not in CHOICES.get(key, ()):
+            raise ValueError("%s must be one of: %s." % (label, ", ".join(CHOICES.get(key, ()))))
+        return v
     if kind == "bool":
         return bool(value)
     try:
@@ -308,6 +386,23 @@ def analysis(category: str, fs: Dict[str, Dict[str, Any]], *, appraisal: Optiona
                 line("Rollback-tax exposure", _num(fs, "rollback_tax"), "as recorded", ["rollback_tax"])
             else:
                 missing.append(FIELDS["rollback_tax"][0])
+            # Income side - only when a person entered the acres, rents or income it needs.
+            parts = [(a, r) for a, r in (("cropland_acres", "cropland_rent_per_acre"), ("pasture_acres", "pasture_rent_per_acre"))
+                     if _num(fs, a) is not None and _num(fs, r) is not None]
+            flat = [k for k in ("hunting_lease_income", "other_ag_income") if _num(fs, k) is not None]
+            if parts or flat:
+                income = sum(_num(fs, a) * _num(fs, r) for a, r in parts) + sum(_num(fs, k) for k in flat)
+                line("Farm income per year", income, "acres x rent per acre, plus lease and other income",
+                     [k for pair in parts for k in pair] + flat)
+                costs = [k for k in ("property_taxes", "insurance_costs", "upkeep_costs") if _num(fs, k) is not None]
+                net = income - sum(_num(fs, k) for k in costs)
+                if costs:
+                    line("Net farm income per year", net, "farm income - taxes, insurance and upkeep", costs)
+                if _num(fs, "cap_rate") is not None and net > 0:
+                    line("Income value", net / (_num(fs, "cap_rate") / 100.0), "net farm income / cap rate", ["cap_rate"])
+                if _num(fs, "purchase_price"):
+                    line("Return on purchase price (%)", round(net / _num(fs, "purchase_price") * 100.0, 2),
+                         "net farm income / purchase price", ["purchase_price"])
     else:
         out["method"] = "Property type needs review before an analysis method can be chosen"
         missing.append("Property type")
@@ -340,6 +435,8 @@ def view(db, prop) -> Dict[str, Any]:
         if k not in fs and k in mine:
             fs[k] = _field(prop, mine, k)
     appraisal = (VAL.view(prop) or {}).get("appraisal")
+    tool_keys = {k for row in LAND_CHECKLIST + FARM_CHECKLIST for k in row[:2]} | set(FARM_INCOME) | set(LAND_DEAL) | {"exit_plan"}
+    tools = {k: _field(prop, mine, k) for k in sorted(tool_keys)}
     return {"property_class": pc, "section": [f for f in fields if f["key"] not in DEAL_FIELDS],
             "deal": [f for f in fields if f["key"] in DEAL_FIELDS],
             "analysis": analysis(cat, fs, appraisal=appraisal),
@@ -347,4 +444,10 @@ def view(db, prop) -> Dict[str, Any]:
             "closing_checklist": CLOSING_CHECKLIST.get(cat, []),
             "contract_note": (CONTRACT_NOTE % pc["category_label"].lower()) if cat not in ("residential", "unknown") else None,
             "fields": {k: {"label": v[0], "kind": v[1]} for k, v in FIELDS.items()},
+            # OLP Land Partners / Farm & Ranch tools: the same record, read in one place.
+            "tools": {"values": tools,
+                      "land_checklist": [{"status": a, "notes": b, "item": c, "help": d} for a, b, c, d in LAND_CHECKLIST],
+                      "farm_checklist": [{"status": a, "notes": b, "item": c, "help": d} for a, b, c, d in FARM_CHECKLIST],
+                      "exit_plans": [{"key": k, "label": EXIT_LABELS[k]} for k in EXIT_PLANS],
+                      "statuses": list(CHECK_STATUS)},
             "note": "Each value shows where it came from. Missing values are shown as missing, never filled in."}
