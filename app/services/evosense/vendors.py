@@ -549,6 +549,7 @@ def attom_profile(raw: Dict[str, Any], state: str) -> Dict[str, Any]:
                             "year_built": _num(_g(d, "summary", "yearbuilt")),
                             "property_type": _ptype(_g(d, "summary", "proptype"))},
         "owner_name": _g(d, "owner", "owner1", "fullname"),
+        "owner_mailing": _g(d, "owner", "mailingaddressoneline"),
         "mortgage": {"amount": _num(_g(d, "mortgage", "amount")), "lender": _g(d, "mortgage", "lender", "lastname"),
                      "date": _g(d, "mortgage", "date"),
                      "truth": "ORIGINAL recorded loan amount - not today's payoff"},

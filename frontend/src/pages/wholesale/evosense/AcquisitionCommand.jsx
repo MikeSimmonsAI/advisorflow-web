@@ -65,8 +65,7 @@ export function AcqHeader({ d, onLaunch, canLaunchUi, explain, setExplain }) {
       </div>
       <div className="acq-head__side">
         <div className="acq-head__score">
-          <Score kind="opportunity" value={p.opportunity_score} expanded={explain} onExplain={() => setExplain(!explain)} />
-          <span className="acq-head__scorelabel">Distress score</span>
+          <Score kind="opportunity" name="Distress Score" value={p.opportunity_score} expanded={explain} onExplain={() => setExplain(!explain)} />
         </div>
         {canLaunchUi ? (
           <button type="button" className="evo-btn evo-btn--primary acq-launch" onClick={onLaunch} data-action="launch-deal">
@@ -75,7 +74,7 @@ export function AcqHeader({ d, onLaunch, canLaunchUi, explain, setExplain }) {
       </div>
       {explain ? (
         <div className="acq-head__why">
-          <p className="evo-scoreexp__t">Why the distress score is {p.opportunity_score ?? '—'}</p>
+          <p className="evo-scoreexp__t">Why the Distress Score is {p.opportunity_score ?? '—'}</p>
           <ScoreWhy score={scoreDetail} />
           <p className="evo-muted evo-small" style={{ margin: '6px 0 0' }}>Rules-based points from evidence on file. Not a probability of a deal.</p>
         </div>
@@ -131,7 +130,7 @@ export function AcqKpis({ d }) {
   const k = kpis(d)
   return (
     <Metrics label="Property key numbers">
-      <Metric label="Distress score" value={k.distress.value} sub={k.distress.sub} />
+      <Metric label="Distress Score" value={k.distress.value} sub={k.distress.sub} />
       <Metric label="Motivation signals" value={k.signals.value} sub={k.signals.sub} />
       <Metric label="Estimated equity" value={k.equity.value} sub={k.equity.sub} />
       <Metric label="After repair value" value={k.arv.value} sub={k.arv.sub} />

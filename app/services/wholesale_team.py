@@ -390,6 +390,8 @@ _ADMIN_ONLY_WRITES = [_re.compile(p) for p in (
     # (pause is left open to anyone: stopping spending is always safe)
     r"^/wholesale/evosense/strategy-starters/?$",
     r"^/wholesale/evosense/properties/[^/]+/enrich/?$",
+    r"^/wholesale/evosense/properties/[^/]+/attom/?$",           # paid property data (OVERDRIVE Phase B)
+    r"^/wholesale/evosense/provider-network/",                   # provider tests and settings
     r"^/wholesale/evosense/sources/",
     r"^/wholesale/contact-lookup/(address|run)/?$",
 )]

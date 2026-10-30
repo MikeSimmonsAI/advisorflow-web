@@ -92,7 +92,7 @@ test('no figures from the approved mockup are embedded: no dollar amounts or sam
 
 test('the header carries the approved fields and a prominent Launch Deal', () => {
   const head = parts.slice(parts.indexOf('export function AcqHeader'), parts.indexOf('export function AcqOverview'))
-  for (const needle of ['p.address', 'p.county', 'property_type', 'parcel', 'Distress score', 'ScoreWhy', 'readiness(d)', 'Launch Deal', 'MeasureTags'])
+  for (const needle of ['p.address', 'p.county', 'property_type', 'parcel', 'name="Distress Score"', 'ScoreWhy', 'readiness(d)', 'Launch Deal', 'MeasureTags'])
     assert.ok(head.includes(needle), needle)
 })
 
@@ -143,4 +143,13 @@ test('a deal opens on the tab Launch Deal links to (?tab=sharing / buyers), unkn
   assert.match(deal, /TABS\.some\(\(\[k\]\) => k === params\.get\('tab'\)\) \? params\.get\('tab'\) : 'overview'/)
   assert.match(deal, /\['sharing', 'Sharing'\]/)
   assert.match(deal, /\['buyers', 'Buyer matching'\]/)
+})
+
+test('Distress Score is the one label in the header score box (owner decision); the shared default is unchanged elsewhere', () => {
+  const head = parts.slice(parts.indexOf('export function AcqHeader'), parts.indexOf('export function AcqOverview'))
+  assert.match(head, /<Score kind="opportunity" name="Distress Score"/)
+  assert.doesNotMatch(head, /acq-head__scorelabel/)
+  const ds = R('../src/pages/wholesale/ds/ds.jsx')
+  assert.match(ds, /export function Score\(\{ kind, value, size, onExplain, expanded, name \}\)/)
+  assert.match(ds, /opportunity: \{ name: 'Property Opportunity'/)
 })

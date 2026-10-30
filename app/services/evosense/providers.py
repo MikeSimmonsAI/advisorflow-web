@@ -1325,13 +1325,44 @@ class RegridInterface(CommercialInterface):
     coverage = "National parcel boundaries and owners"
 
 
-class AttomInterface(CommercialInterface):
+class AttomPropertyData(AcquisitionProvider):
+    """ATTOM property data - Project OVERDRIVE Phase B (#439).
+
+    A REAL adapter, but PERSON-TRIGGERED ONLY: `route()` never returns it, so no
+    hunt, scheduler pass or background job can call ATTOM (memory-stability
+    gate, PR #437; and no paid call nobody asked for). It is called by
+    `provider_network.attom_lookup()` for ONE property, after that function has
+    checked what is already on file, the cache, an in-flight request, the
+    workspace's switch and its budget.
+
+    The HTTP work and the field mapping are the existing, documented
+    `vendors.AttomComps.profile()` / `attom_profile()` - one ATTOM integration,
+    not two. ATTOM's answer is a VENDOR CLAIM: `fact_rank` keeps it below county
+    records, so it can fill a blank but never replaces county evidence (a
+    different value is recorded as a conflict). Sale amounts in Texas stay
+    UNVERIFIED, the AVM is an estimate (never an ARV), and the recorded loan is
+    the ORIGINAL amount (never today's payoff, so it never becomes a balance).
+    ATTOM prices by contract, so a per-call cost must be set for the workspace
+    (0 for a flat-rate plan) before the first lookup."""
+    connector_kind = C.REAL
+    person_triggered_only = True
+    fact_rank = 40                       # ingest.RANK_FEED - below county records (60)
     key = "attom"
-    label = "ATTOM property data (not configured)"
-    capabilities = (C.ASSESSOR, C.FORECLOSURE, C.VALUATION, C.LISTING)
+    label = "ATTOM property data"
+    capabilities = (C.ASSESSOR, C.OWNERSHIP, C.VALUATION)
     required_env = ("ATTOM_API_KEY",)
-    public_url = "https://api.developer.attomdata.com/"
-    coverage = "Assessor, recorder, foreclosure, AVM"
+    costs: Dict[str, int] = {}           # contract pricing: the workspace sets cost_overrides
+    scope = "national"
+    coverage = "US property, owner, mortgage (original amount), assessment, AVM and sales history"
+    jurisdiction = "United States"
+    source_type = "Commercial property data (paid, contract pricing)"
+    access_method = "Vendor REST API (ATTOM_API_KEY)"
+    public_url = "https://api.developer.attomdata.com/docs"
+    terms_note = ("Paid vendor. Called only when a person asks, for one property. Results are the vendor's "
+                  "claim - county records outrank them.")
+    adapter_version = "attom/propertyapi-v1-profile"
+    PACKAGES = (("detail", "property/detailmortgageowner"), ("assessment", "assessment/detail"),
+                ("avm", "attomavm/detail"), ("history", "saleshistory/detail"))
 
 
 PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
@@ -1342,7 +1373,7 @@ PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
     FortWorthCodeSource(), FortWorthOpenCasesSource(), Dallas311Source(), LgbsTaxSaleSource(),
     ClerkForeclosureSource(),
     DallasForeclosureManual(), DallasTaxManual(),
-    RentCastInterface(), RegridInterface(), AttomInterface(), TracerfyContactSource(),
+    RentCastInterface(), RegridInterface(), AttomPropertyData(), TracerfyContactSource(),
 )}
 # Commercial vendor adapters: EVALUATION ONLY until Mike approves a vendor.
 from app.services.evosense.vendors import VENDOR_PROVIDERS  # noqa: E402
@@ -1572,6 +1603,8 @@ def route(db, org_id: str, capability: str, *, exclude: tuple = (),
             continue
         if getattr(p, "evaluation_only", False):
             continue                      # the evaluation harness only - never production
+        if getattr(p, "person_triggered_only", False):
+            continue                      # a person asks for ONE property (provider_network) - never a hunt
         if capability == C.COMPS and p.connector_kind == C.REAL:
             from app.services.evosense import truth_gate as TG
             if not TG.passes(db, org_id, key):
@@ -1734,6 +1767,8 @@ def _cost_text(p: AcquisitionProvider, overrides=None) -> str:
         return "simulated (sandbox)"
     if p.costs:
         return "paid"
+    if getattr(p, "person_triggered_only", False):
+        return "paid (contract pricing - set per workspace)"
     return "free" if p.connector_kind == C.REAL else "—"
 
 
