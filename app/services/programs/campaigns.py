@@ -73,54 +73,55 @@ OWN_COPY_KEYS = {CENTRAL_ALABAMA_KEY}
 
 DEFAULT_SMS_STEPS = [(1, 0, 10), (2, 1, 11), (3, 3, 14), (4, 5, 11), (5, 7, 15), (6, 9, 11)]
 
-# The owner's own wording is touch 1; the rest follow the same brief, each a
-# different angle, every one asking for a short visit. No value, expiry or
-# guarantee is ever stated.
+# The owner's own wording is touch 1; the rest follow the owner's themes, one
+# per step: 2 friendly follow-up, 3 how easy it is to meet, 4 the materials
+# they asked for, 5 a short personal check-in, 6 a courteous open door. Every
+# one asks for a short visit; none states a value, expiry or guarantee.
+CA_THEMES = {1: "First contact", 2: "Friendly follow-up", 3: "Easy to schedule",
+             4: "Your requested materials", 5: "Personal check-in", 6: "Courtesy follow-up"}
+CA_EMAIL_THEMES = {1: "First contact", 2: "Friendly follow-up", 3: "Easy to schedule",
+                   4: "Your requested materials", 5: "Courtesy follow-up"}
 CA_SMS = {
     1: ("Hi {first_name}, this is {primary_contact_name} with {location_name}. I'm reaching out because you "
         "filled out one of our surveys requesting a pre-planning guide and savings certificate. I'd like to get "
         "those to you and briefly go over everything together. What day works best for you?"),
-    2: ("Hi {first_name}, {primary_contact_name} again. I'd still like to get your pre-planning guide and "
-        "savings certificate to you. Would a short visit later this week work for you?"),
-    3: ("{first_name}, would mornings or afternoons be easier for you? I can meet with you {appointment_options} "
-        "to go over your pre-planning guide and savings certificate. It only takes a few minutes."),
-    4: ("Hi {first_name}, it's {primary_contact_name}. Many families tell me the guide makes planning ahead "
-        "feel a lot simpler. I'd be glad to walk you through it. Is there a day this week or next that suits you?"),
-    5: ("{first_name}, your pre-planning guide and savings certificate are still waiting for you at "
-        "{location_name}. Text me back a day and time and I'll set it up around your schedule."),
-    6: ("Hi {first_name}, {primary_contact_name} with {location_name} one more time. Whenever you're ready, "
-        "just reply with a good day and I'll get your pre-planning guide and savings certificate to you."),
+    2: ("Hi {first_name}, it's {primary_contact_name} again. Did you get a chance to see my earlier message "
+        "about your pre-planning guide and savings certificate? When might you be available for a short visit?"),
+    3: ("{first_name}, setting up a time is easy. I can meet with you {appointment_options}, whichever suits "
+        "you best, and it only takes a few minutes. Would mornings or afternoons work better?"),
+    4: ("Hi {first_name}, I still have the pre-planning guide and savings certificate you asked for on our "
+        "survey set aside for you. I'd be glad to go over them with you. Is there a day this week or next that works?"),
+    5: ("Hi {first_name}, {primary_contact_name} here. Would you like to set up a time to meet? "
+        "Just reply with a day that works for you."),
+    6: ("Hi {first_name}, no rush at all. Whenever the timing is right for you, just reply and I'll set up a "
+        "time to get your pre-planning guide and savings certificate to you. Thank you!"),
 }
 _SIG = "{primary_contact_name}\n{location_name}\n{location_phone}"
 CA_EMAIL = {
     1: ("Your Pre-Planning Guide and Savings Certificate",
         "Hi {first_name},\n\nThis is {primary_contact_name} with {location_name}.\n\n"
-        "I'm following up regarding the survey you completed requesting a pre-planning guide and savings "
+        "I'm reaching out because you filled out one of our surveys requesting a pre-planning guide and savings "
         "certificate.\n\nI'd like to get those materials to you and take a few minutes to go over everything "
         "together.\n\nWhat day would be convenient for you to meet? Just reply to this email and let me know."
         "\n\n{booking_line}I look forward to hearing from you.\n\n" + _SIG),
-    2: ("Following up on your planning guide",
-        "Hi {first_name},\n\nI wanted to follow up on the pre-planning guide and savings certificate you asked "
-        "for on our survey. Rather than simply mailing them, I like to sit down for a few minutes so you know "
-        "what's in them and can ask anything that comes to mind.\n\nI can meet with you {appointment_options}. "
-        "If you reply with a day that suits you, I'll take care of the rest.\n\n{booking_line}" + _SIG),
-    3: ("A quick question about your visit",
-        "Hi {first_name},\n\nA question I hear a lot is whether a planning visit means making decisions on the "
-        "spot. It doesn't. We simply go over your guide and savings certificate together, and you take "
-        "everything home to think about.\n\nWould a morning or an afternoon be better for you? Reply here and "
-        "I'll find a time.\n\n{booking_line}" + _SIG),
-    4: ("Saving a few minutes for you",
-        "Hi {first_name},\n\nI'm putting together my schedule at {location_name} and would be glad to save a "
-        "few minutes for you. That's all it takes to get your pre-planning guide and savings certificate into "
-        "your hands and answer your questions.\n\nReply with a day that works and I'll hold it for you."
+    2: ("Did you see my note, {first_name}?",
+        "Hi {first_name},\n\nI wrote a few days ago about the pre-planning guide and savings certificate you "
+        "requested, and I wanted to make sure my note reached you.\n\nWhen might you be available for a short "
+        "visit? Reply with a day or two that could work, and I'll fit around you.\n\n{booking_line}" + _SIG),
+    3: ("Setting up a time is easy",
+        "Hi {first_name},\n\nGetting together doesn't take much. I can meet with you {appointment_options}, "
+        "whichever is most comfortable, and it only takes a few minutes.\n\nWould a morning or an afternoon "
+        "suit you better? Reply here and I'll arrange it.\n\n{booking_line}" + _SIG),
+    4: ("Your guide and certificate are set aside for you",
+        "Hi {first_name},\n\nThe pre-planning guide and savings certificate you asked for on our survey are "
+        "set aside for you here at {location_name}. I'd like to put them in your hands and answer any questions "
+        "you have.\n\nIs there a day this week or next that works? Just respond with what suits you."
         "\n\n{booking_line}" + _SIG),
     5: ("Whenever you're ready, {first_name}",
-        "Hi {first_name},\n\nI don't want your pre-planning guide and savings certificate to sit here "
-        "unclaimed. Whenever the timing feels right, reply to this email with a day, and I'll meet with you "
-        "{appointment_options}.\n\nThank you for filling out our survey. I look forward to meeting you."
-        "\n\n{booking_line}" + _SIG),
+        "Hi {first_name},\n\nI don't want to crowd your inbox, so I'll leave this with you. Whenever the "
+        "timing feels right, reply to this email with a good day and I'll set up a time to get your pre-planning "
+        "guide and savings certificate to you.\n\nThank you for filling out our survey.\n\n{booking_line}" + _SIG),
 }
-
 
 def _copy_json(fam) -> Dict:
     try:
@@ -176,31 +177,60 @@ def email_for(fam, n: int) -> Optional[Dict[str, str]]:
     return {"subject": subj, "body": body}
 
 
+def step_label(channel: str, n: int) -> str:
+    """Plain names for the editor: First contact, Follow-up 1, Follow-up 2..."""
+    return "First contact" if n == 1 else "Follow-up %d" % (n - 1)
+
+
+def _meta(fam) -> Dict:
+    m = _copy_json(fam).get("meta") or {}
+    return m if isinstance(m, dict) else {}
+
+
 def touch_copy(db: Optional[Session], fam) -> Dict:
-    """Every step of this campaign with its schedule and copy (blank = "")."""
-    sms = [{"touch": n, "day_offset": d, "send_hour": h, "body": sms_for(fam, n) or ""}
+    """Every step of this campaign with its schedule, copy (blank = "") and who
+    last saved it."""
+    meta = _meta(fam)
+    themes = CA_THEMES if fam.key == CENTRAL_ALABAMA_KEY else {}
+    ethemes = CA_EMAIL_THEMES if fam.key == CENTRAL_ALABAMA_KEY else {}
+    def m(k):
+        x = meta.get(k) or {}
+        return {"updated_at": x.get("updated_at"), "updated_by": x.get("updated_by"),
+                "revision": int(x.get("revision") or 0)}
+    sms = [dict({"touch": n, "channel": "sms", "label": step_label("sms", n), "theme": themes.get(n),
+                 "day_offset": d, "send_hour": h, "body": sms_for(fam, n) or ""}, **m("sms:%d" % n))
            for n, d, h in sms_steps(db, fam.organization_id)]
     email = []
     for n, d in email_steps():
         e = email_for(fam, n) or {}
-        email.append({"touch": n, "day_offset": d, "subject": e.get("subject") or "", "body": e.get("body") or ""})
-    return {"sms": sms, "email": email}
+        email.append(dict({"touch": n, "channel": "email", "label": step_label("email", n),
+                           "theme": ethemes.get(n), "day_offset": d,
+                           "subject": e.get("subject") or "", "body": e.get("body") or ""}, **m("email:%d" % n)))
+    j = _copy_json(fam)
+    return {"sms": sms, "email": email, "last_saved_at": j.get("last_saved_at"),
+            "last_saved_by": j.get("last_saved_by")}
 
 
-def set_touch_copy(fam, sms: Optional[Dict] = None, email: Optional[Dict] = None) -> None:
-    """Save steps. Never activates anything. Keys are touch numbers."""
-    d = _copy_json(fam)
-    d.setdefault("sms", {})
-    d.setdefault("email", {})
+def set_touch_copy(fam, sms: Optional[Dict] = None, email: Optional[Dict] = None,
+                   editor: Optional[str] = None, now: Optional[str] = None) -> list:
+    """Save steps. Never activates anything. Keys are touch numbers. Each step
+    that actually changes gets a revision number, time and editor. Returns the
+    changed step keys ("sms:2", "email:3")."""
+    from datetime import datetime as _dt
+    now = now or (_dt.utcnow().replace(microsecond=0).isoformat() + "Z")
+    changed = []
     for k, v in (sms or {}).items():
         n = int(k)
         if n < 1 or n > 12:
             raise ValueError("text step %s is outside the cadence" % k)
         v = (v or "").strip()
+        if v != (sms_for(fam, n) or ""):
+            changed.append("sms:%d" % n)
         if n == 1:
             fam.sms_template = v or None
         else:
-            d["sms"][str(n)] = v
+            d = _copy_json(fam); d.setdefault("sms", {})[str(n)] = v
+            fam.touch_copy_json = json.dumps(d)
     for k, v in (email or {}).items():
         n = int(k)
         if n < 1 or n > 12:
@@ -209,10 +239,28 @@ def set_touch_copy(fam, sms: Optional[Dict] = None, email: Optional[Dict] = None
         if "call us" in body.lower():
             raise ValueError("Families are asked to reply, not to call.")
         if n == 1:
+            cur = {"subject": (fam.email_subject_template or "").strip(), "body": (fam.email_body_template or "").strip()}
+        else:
+            cur = (_copy_json(fam).get("email") or {}).get(str(n)) or {"subject": "", "body": ""}
+        if subj != (cur.get("subject") or "") or body != (cur.get("body") or ""):
+            changed.append("email:%d" % n)
+        if n == 1:
             fam.email_subject_template, fam.email_body_template = subj or None, body or None
         else:
-            d["email"][str(n)] = {"subject": subj, "body": body}
+            d = _copy_json(fam); d.setdefault("email", {})[str(n)] = {"subject": subj, "body": body}
+            fam.touch_copy_json = json.dumps(d)
+    d = _copy_json(fam)
+    d.setdefault("sms", {})
+    d.setdefault("email", {})
+    if changed:
+        meta = d.setdefault("meta", {})
+        for key in changed:
+            prev = meta.get(key) or {}
+            meta[key] = {"updated_at": now, "updated_by": editor or "system",
+                         "revision": int(prev.get("revision") or 0) + 1}
+        d["last_saved_at"], d["last_saved_by"] = now, editor or "system"
     fam.touch_copy_json = json.dumps(d)
+    return changed
 
 
 def copy_problems(fam) -> list:
@@ -256,18 +304,54 @@ def missing_steps(db: Optional[Session], fam) -> list:
     return out
 
 
+# Fingerprints of the FIRST seeded wording (#441, PR #445). Steps that still
+# hold exactly that wording are moved to the current themes once; anything a
+# person typed is never touched.
+_V1_SMS_FP = {1: "8f1b50723e5132bf", 2: "910934178c93695a", 3: "71f52d2f0595abf4", 4: "3eaefb652aaaf758",
+              5: "a7ded8909eb7c385", 6: "7b61eb95e8357a3d"}
+_V1_EMAIL_FP = {1: ("ccc3d664315079fd", "e67f807aeaa2931b"), 2: ("c2a55087f9b40855", "66b1372f70d30d8c"),
+                3: ("36fc1b096d0a794f", "338aea3624bfd4af"), 4: ("2760a88600bcf6e7", "2684d06f2f7dd397"),
+                5: ("0405b3dc898d3710", "ff8f9195e1b24853")}
+SEED_VERSION = 2
+
+
+def _fp(text: Optional[str]) -> str:
+    import hashlib
+    return hashlib.sha256((text or "").strip().encode()).hexdigest()[:16]
+
+
 def seed_central_alabama_copy(fam) -> bool:
     """Write the owner's campaign sequence ONCE into blank steps (as a draft:
     the campaign stays OFF). Edits are never overwritten, and a step a person
     later clears is not refilled."""
     d = _copy_json(fam)
     if d.get("seeded"):
-        return False
+        return upgrade_seeded_copy(fam)
     sms = {n: t for n, t in CA_SMS.items() if sms_for(fam, n) is None}
     email = {n: {"subject": su, "body": bo} for n, (su, bo) in CA_EMAIL.items() if email_for(fam, n) is None}
-    set_touch_copy(fam, sms=sms, email=email)
+    set_touch_copy(fam, sms=sms, email=email, editor="Owner's campaign brief")
     d = _copy_json(fam)
     d["seeded"] = True
+    d["seed_version"] = SEED_VERSION
+    fam.touch_copy_json = json.dumps(d)
+    return True
+
+
+def upgrade_seeded_copy(fam) -> bool:
+    """Once: a step still holding the first seeded wording word for word gets
+    the current wording. Edited steps are left exactly as they are."""
+    d = _copy_json(fam)
+    if int(d.get("seed_version") or 1) >= SEED_VERSION:
+        return False
+    sms = {n: CA_SMS[n] for n, fp in _V1_SMS_FP.items() if sms_for(fam, n) and _fp(sms_for(fam, n)) == fp}
+    email = {}
+    for n, (fs, fb) in _V1_EMAIL_FP.items():
+        e = email_for(fam, n)
+        if e and _fp(e["subject"]) == fs and _fp(e["body"]) == fb:
+            email[n] = {"subject": CA_EMAIL[n][0], "body": CA_EMAIL[n][1]}
+    set_touch_copy(fam, sms=sms, email=email, editor="Owner's campaign brief")
+    d = _copy_json(fam)
+    d["seed_version"] = SEED_VERSION
     fam.touch_copy_json = json.dumps(d)
     return True
 

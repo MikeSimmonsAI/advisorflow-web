@@ -8,12 +8,12 @@
    needs the campaign's exact name typed (enforced again on the server:
    POST /campaigns/{id}/activation) and is audit-logged. Nothing on this page
    switches anything on by itself. */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../../../api/client'
 import {
-  Banner, Chip, Empty, ErrorLine, Field, Icon, Kpi, Loading, PageHead, Panel, SearchBox, Tabs, TypedConfirm,
-  errText, num,
+  Banner, Chip, Empty, ErrorLine, Field, FilterChips, Icon, Kpi, Loading, PageHead, Panel, SearchBox, Tabs, TypedConfirm,
+  errText, num, when,
 } from './ui'
 
 const PURPOSE = {
@@ -40,6 +40,14 @@ export default function Campaigns({ isManager, locationId, locations, performanc
   const [busy, setBusy] = useState(false)
   const [confirmOn, setConfirmOn] = useState(false)
   const [previewVersion, setPreviewVersion] = useState(0)
+  // #441: unsaved step wording, kept here so the preview can show it and a
+  // campaign switch can warn before throwing it away.
+  const [draft, setDraft] = useState({})          // 'sms:2' -> text | 'email:3' -> {subject, body}
+  const [sample, setSample] = useState('Pat')     // made-up first name for previews
+  const [roster, setRoster] = useState(null)
+  const [rosterErr, setRosterErr] = useState('')
+  const previewRef = useRef(null)
+  const dirty = Object.keys(draft).length > 0
 
   useEffect(() => {
     api.get('/program/campaigns').then(d => {
@@ -50,17 +58,55 @@ export default function Campaigns({ isManager, locationId, locations, performanc
   }, []) // initial selection follows the deep link if provided
   useEffect(() => { if (locationId && homes.some(l => l.location_id === locationId)) setLoc(locationId) }, [locationId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
+    setDraft({})
     if (cur?.own_copy) setTouch('sms:1')
     else if (touch.includes(':')) setTouch('first')
   }, [cur?.id])
+  const loadRoster = () => {
+    setRosterErr('')
+    api.get('/program/central-alabama/roster').then(setRoster).catch(e => setRosterErr(errText(e)))
+  }
+  useEffect(() => { if (cur?.key === 'central_alabama_ms' && !roster) loadRoster() }, [cur?.key]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Leaving the page with unsaved wording asks first.
+  useEffect(() => {
+    if (!dirty) return undefined
+    const warn = e => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [dirty])
+  const stepDraft = cur?.own_copy ? draft[touch] : undefined
   useEffect(() => {
     if (!cur || !loc) { setPreview(null); return undefined }
     let alive = true
-    setPreview(null)
-    api.get(`/program/campaigns/${cur.id}/preview?location_id=${encodeURIComponent(loc)}&touch=${touch}`)
-      .then(p => { if (alive) { setPreview(p); setErr('') } }).catch(e => { if (alive) setErr(errText(e)) })
-    return () => { alive = false }
-  }, [cur, loc, touch, previewVersion])
+    const t = setTimeout(() => {
+      const name = (sample || '').trim()
+      const req = stepDraft !== undefined
+        // unsaved wording: rendered by the same server code, saved nowhere
+        ? api.post(`/program/campaigns/${cur.id}/preview-draft`, {
+          location_id: loc, touch, first_name: name || null,
+          ...(touch.startsWith('email') ? { subject: stepDraft.subject, body: stepDraft.body } : { sms: stepDraft }),
+        })
+        : api.get(`/program/campaigns/${cur.id}/preview?location_id=${encodeURIComponent(loc)}&touch=${touch}${cur.own_copy && name ? `&first_name=${encodeURIComponent(name)}` : ''}`)
+      req.then(p => { if (alive) { setPreview(p); setErr('') } }).catch(e => { if (alive) setErr(errText(e)) })
+    }, stepDraft !== undefined ? 450 : 0)
+    return () => { alive = false; clearTimeout(t) }
+  }, [cur, loc, touch, previewVersion, sample, stepDraft])
+  const pick = f => {
+    if (f.id === cur?.id) return
+    if (dirty && !window.confirm('You have unsaved message changes. Leave them without saving?')) return
+    setCur(f)
+  }
+  const showPreview = () => {
+    setPreviewVersion(v => v + 1)
+    previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  // Quick location picks for previews: Southern Heritage, Kilgroe, then the next home.
+  const quickHomes = useMemo(() => {
+    const find = word => homes.find(l => (l.name || '').toLowerCase().includes(word))
+    const picks = [find('southern heritage'), find('kilgroe')].filter(Boolean)
+    const other = homes.find(l => !picks.includes(l))
+    return other ? [...picks, other] : picks
+  }, [locations]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const perf = useMemo(() => Object.fromEntries((performance || []).map(p => [p.key, p])), [performance])
   const blocked = sms ? (sms.status === 'fail' || sms.approved === false) : false
@@ -107,6 +153,8 @@ export default function Campaigns({ isManager, locationId, locations, performanc
       )}
       <ErrorLine text={err} />
 
+      {cur?.own_copy && <CampaignHeader cur={cur} roster={roster} dirty={dirty} />}
+
       <div className="sci-grid-camp">
         <Panel title="Campaign catalog" labelledBy="sci-catalog" aside={<span className="sci-micro sci-muted">{(rows || []).length} families</span>}>
           <div style={{ marginBottom: 8 }}><SearchBox id="sci-camp-q" value={q} onChange={setQ} placeholder="Find a campaign" label="Find a campaign" width="100%" /></div>
@@ -116,7 +164,7 @@ export default function Campaigns({ isManager, locationId, locations, performanc
               const [label, tone] = statusOf(f)
               const p = perf[f.key]
               return (
-                <button key={f.id} type="button" className="sci-camp" aria-current={cur?.id === f.id} onClick={() => setCur(f)}>
+                <button key={f.id} type="button" className="sci-camp" aria-current={cur?.id === f.id} onClick={() => pick(f)}>
                   <span className="sci-camp-ico" aria-hidden="true"><Icon name="campaigns" /></span>
                   <span className="sci-camp-body">
                     <b>{f.name}</b>
@@ -130,20 +178,31 @@ export default function Campaigns({ isManager, locationId, locations, performanc
         </Panel>
 
         {cur ? (
+          <div ref={previewRef} style={{ minWidth: 0 }}>
           <Panel title="Campaign preview" labelledBy="sci-preview" aside={<span className="sci-micro sci-muted">Rendered by the server · sends nothing</span>}>
             <div className="sci-form" style={{ marginBottom: 6 }}>
-              <Field label="Selected campaign"><input value={cur.name} disabled /></Field>
+              {cur.own_copy
+                ? <Field label="Sample first name" hint="A made-up family, for the preview only"><input value={sample} maxLength={30} onChange={e => setSample(e.target.value)} /></Field>
+                : <Field label="Selected campaign"><input value={cur.name} disabled /></Field>}
               <Field label="Location">
                 <select value={loc} onChange={e => setLoc(e.target.value)}>
                   {homes.map(l => <option key={l.location_id} value={l.location_id}>{l.name}</option>)}
                 </select>
               </Field>
             </div>
-            {cur.own_copy ? (
+            {cur.own_copy ? (<>
+              {quickHomes.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '0 0 8px' }} role="group" aria-label="Quick location">
+                  {quickHomes.map(l => (
+                    <button key={l.location_id} type="button" className={`sci-btn sm${loc === l.location_id ? ' primary' : ''}`}
+                      aria-pressed={loc === l.location_id} onClick={() => setLoc(l.location_id)}>{l.name}</button>
+                  ))}
+                </div>
+              )}
               <p className="sci-micro sci-muted" style={{ margin: '0 0 8px' }}>
-                Showing <b>{touch.startsWith('email') ? 'Email' : 'Text'} {touch.split(':')[1] || 1}</b> - pick a step in the editor below.
+                Showing <b>{stepName(cur, touch)}</b>{stepDraft !== undefined ? <> · <b style={{ color: '#8a5a00' }}>unsaved draft</b></> : ' · saved wording'} - pick a step in the editor below.
               </p>
-            ) : (
+            </>) : (
               <Tabs items={[['first', 'First touch'], ['followup', 'Follow-up']]} value={touch} onChange={setTouch} label="Touch" />
             )}
             {preview && !preview.ok && <div className="sci-alert"><Icon name="alert" />{preview.reason}</div>}
@@ -158,6 +217,11 @@ export default function Campaigns({ isManager, locationId, locations, performanc
                   <p className="sci-preview-label"><Icon name="mail" size={12} />Email {preview.step} · {preview.email_subject || '(no subject yet)'}</p>
                   <div className="sci-preview-email">{preview.email_body || 'This step has no wording yet - nothing will be sent for it.'}</div>
                 </>)}
+                <p className="sci-micro sci-muted" style={{ marginTop: 6 }}>
+                  From <b>{preview.sender || '—'}</b> at <b>{preview.location}</b>
+                  {preview.appointment_options ? <> · meeting options on file: {preview.appointment_options}</> : null}
+                </p>
+                {preview.problems?.length > 0 && <div className="sci-alert" role="alert"><Icon name="alert" />{preview.problems.join('; ')}</div>}
               </div>
             )}
             {preview?.ok && !cur.own_copy && (
@@ -176,13 +240,15 @@ export default function Campaigns({ isManager, locationId, locations, performanc
             )}
             <p className="sci-footnote"><Icon name="shield" />A preview does not establish anyone's opt-in. Every enrolled contact remains gated on the backend.</p>
           </Panel>
+          </div>
         ) : <Panel title="Campaign preview"><Empty icon="campaigns">Pick a campaign.</Empty></Panel>}
 
         {cur?.own_copy && (
           <SequenceEditor cur={cur} isManager={isManager} touch={touch} setTouch={setTouch}
+            draft={draft} setDraft={setDraft} onPreview={showPreview}
             onSaved={f => { replace(f); setPreviewVersion(v => v + 1) }} onError={setErr} />
         )}
-        {cur?.key === 'central_alabama_ms' && <Roster locations={homes} />}
+        {cur?.key === 'central_alabama_ms' && <Roster locations={homes} d={roster} err={rosterErr} onReload={loadRoster} />}
 
         {cur && (
           <Panel title="Campaign controls" labelledBy="sci-controls">
@@ -254,15 +320,54 @@ function EmailRunner() {
 }
 
 
+/* #441: plain step names - "First contact" / "Follow-up 2", with the channel. */
+function stepName(cur, touch) {
+  const [c, n] = (touch || 'sms:1').split(':')
+  const list = (c === 'email' ? cur?.steps?.email : cur?.steps?.sms) || []
+  const x = list.find(y => String(y.touch) === String(n))
+  return `${c === 'email' ? 'Email' : 'Text'} · ${x?.label || (n === '1' ? 'First contact' : `Follow-up ${Number(n) - 1}`)}`
+}
+
+const hourText = h => (h == null ? '' : `${h > 12 ? h - 12 : h || 12}${h >= 12 ? ' PM' : ' AM'}`)
+
+/* #441: the campaign at a glance - on/off, who is in it, how they can be
+   reached, whether every step has its wording, and when it was last saved. */
+function CampaignHeader({ cur, roster, dirty }) {
+  const steps = cur.steps || { sms: [], email: [] }
+  const total = steps.sms.length + steps.email.length
+  const missing = cur.missing_steps || []
+  const problems = cur.copy_problems || []
+  const ready = !missing.length && !problems.length
+  return (
+    <Panel title={cur.name} labelledBy="sci-ca-head" style={{ marginBottom: 14 }}
+      aside={<Chip tone={cur.is_active ? 'ok' : ''}>{cur.is_active ? 'ON' : 'OFF'}</Chip>}>
+      <section className="sci-kpis four" aria-label="Campaign summary" style={{ margin: 0 }}>
+        <Kpi icon="users" tone="blue" value={roster ? roster.people : null} label="Approved families"
+          note={roster?.held?.location_review?.length ? `${roster.held.location_review.length} held for location review` : undefined} />
+        <Kpi icon="sms" tone="green" value={roster ? roster.with_phone : null} label="Text + email"
+          note={roster ? `${num(roster.email_only)} email only · ${num(roster.no_phone_on_file)} with no phone on file` : undefined} />
+        <Kpi icon="check" tone={ready ? 'green' : 'gold'} value={`${total - missing.length}/${total}`} label="Steps with wording"
+          note={dirty ? 'Unsaved changes' : ready ? 'Draft complete' : problems.length ? 'Needs a fix' : `Blank: ${missing.join(', ')}`} />
+        <Kpi icon="clock" tone="purple" value={cur.last_saved_at ? when(cur.last_saved_at) : '—'} label="Last saved"
+          note={cur.last_saved_by ? `by ${cur.last_saved_by}` : undefined} />
+      </section>
+      <p className="sci-micro sci-muted" style={{ margin: '10px 0 0' }}>
+        {cur.is_active ? 'Switched on: messages go to approved families after the server’s consent, STOP and do-not-call checks.'
+          : `Off - nothing is sent. Sent so far: ${num(roster?.texts_sent ?? 0)} texts, ${num(roster?.emails_sent ?? 0)} emails.`}
+        {' '}Saving or previewing never switches it on.
+      </p>
+    </Panel>
+  )
+}
+
 /* #441: every step of a campaign that speaks only its own words (Central
    Alabama). Text steps follow the SCI cadence days, email steps the email
    runner. Save keeps the campaign OFF and sends nothing. */
-function SequenceEditor({ cur, isManager, touch, setTouch, onSaved, onError }) {
+function SequenceEditor({ cur, isManager, touch, setTouch, draft, setDraft, onPreview, onSaved, onError }) {
   const steps = cur.steps || { sms: [], email: [] }
-  const [draft, setDraft] = useState({})          // 'sms:2' -> text | 'email:3' -> {subject, body}
   const [saving, setSaving] = useState(false)
   const [note, setNote] = useState('')
-  useEffect(() => { setDraft({}); setNote('') }, [cur.id])
+  useEffect(() => { setNote('') }, [cur.id])
   const [ch, n] = touch.includes(':') ? touch.split(':') : ['sms', '1']
   const step = (ch === 'email' ? steps.email : steps.sms).find(x => String(x.touch) === n) || {}
   const key = `${ch}:${n}`
@@ -283,8 +388,9 @@ function SequenceEditor({ cur, isManager, touch, setTouch, onSaved, onError }) {
   const isBlank = (c, x) => {
     const k = `${c}:${x.touch}`
     if (k in draft) return blank(k)
-    return c === 'email' ? !(x.subject && x.body) : !x.body
+    return c === 'email' ? !(x.subject?.trim() && x.body?.trim()) : !x.body?.trim()
   }
+  const problemsFor = (c, x) => (cur.copy_problems || []).filter(p => p.startsWith(`${c === 'email' ? 'Email' : 'Text'} ${x.touch} `))
   const save = async () => {
     if (!changed || saving) return
     setSaving(true); setNote('')
@@ -299,39 +405,67 @@ function SequenceEditor({ cur, isManager, touch, setTouch, onSaved, onError }) {
       setNote('Saved. The campaign is still off - no family was contacted.')
     } catch (e) { onError(errText(e)) } finally { setSaving(false) }
   }
-  const pill = (c, x, label) => {
+  const discard = () => { setDraft({}); setNote('Changes discarded.') }
+  const status = (c, x) => {
+    const k = `${c}:${x.touch}`
+    if (isBlank(c, x)) return ['Blank', 'bad']
+    if (k in draft) return ['Unsaved', 'warn']
+    if (problemsFor(c, x).length) return ['Needs a fix', 'bad']
+    return ['Ready', 'ok']
+  }
+  const row = (c, x) => {
     const k = `${c}:${x.touch}`
     const on = touch === k
+    const [label, tone] = status(c, x)
     return (
       <button key={k} type="button" onClick={() => setTouch(k)} aria-pressed={on}
-        className={`sci-btn sm${on ? ' primary' : ''}`} style={{ justifyContent: 'space-between', minWidth: 132 }}>
-        <span>{label} {x.touch}</span>
-        <span className="sci-micro" style={{ opacity: 0.8 }}>Day {x.day_offset}{isBlank(c, x) ? ' · blank' : ''}{k in draft ? ' · edited' : ''}</span>
+        className={`sci-btn sm${on ? ' primary' : ''}`}
+        style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 2, textAlign: 'left', minWidth: 0, width: '100%', padding: '6px 10px' }}>
+        <span><Icon name={c === 'email' ? 'mail' : 'sms'} size={12} /> <b>{x.label}</b></span>
+        <Chip tone={tone} plain>{label}</Chip>
+        <span className="sci-micro" style={{ opacity: 0.85, gridColumn: '1 / -1' }}>
+          {c === 'email' ? 'Email' : 'Text'} · day {x.day_offset}{c === 'sms' && x.send_hour != null ? `, about ${hourText(x.send_hour)}` : ''}{x.theme ? ` · ${x.theme}` : ''}
+        </span>
       </button>
     )
   }
+  const mine = problemsFor(ch, step)
   return (
-    <Panel title={`${cur.name} — message sequence`} labelledBy="sci-seq" style={{ gridColumn: '1 / -1' }}>
+    <Panel title={`${cur.name} — message sequence`} labelledBy="sci-seq" style={{ gridColumn: '1 / -1' }}
+      aside={changed ? <Chip tone="warn">{Object.keys(draft).length} unsaved</Chip> : <span className="sci-micro sci-muted">All changes saved</span>}>
       <p className="sci-micro sci-muted" style={{ marginTop: 0 }}>
         Every step belongs only to this campaign and has its own wording. Texts follow the SCI cadence days; emails follow
         the email runner. A blank step sends nothing, and the campaign can't be switched on while any step is blank.
         Saving never switches the campaign on.
       </p>
-      <div style={{ display: 'grid', gap: 10 }}>
-        <div><b className="sci-micro">Texts</b><div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>{steps.sms.map(x => pill('sms', x, 'Text'))}</div></div>
-        <div><b className="sci-micro">Emails</b><div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>{steps.email.map(x => pill('email', x, 'Email'))}</div></div>
+      {changed && (
+        <div className="sci-alert" role="status" style={{ marginBottom: 10 }}>
+          <Icon name="alert" />You have unsaved changes in {Object.keys(draft).map(k => stepName(cur, k)).join(', ')}. Save draft to keep them.
+        </div>
+      )}
+      <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
+        <div>
+          <b className="sci-micro">Texts ({steps.sms.length})</b>
+          <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>{steps.sms.map(x => row('sms', x))}</div>
+        </div>
+        <div>
+          <b className="sci-micro">Emails ({steps.email.length})</b>
+          <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>{steps.email.map(x => row('email', x))}</div>
+        </div>
       </div>
       <div className="sci-form one" style={{ marginTop: 12 }}>
         {ch === 'sms' ? (
-          <Field label={`Text ${n} · day ${step.day_offset ?? ''}${step.send_hour != null ? `, about ${step.send_hour > 12 ? step.send_hour - 12 : step.send_hour}${step.send_hour >= 12 ? ' PM' : ' AM'}` : ''}`}
+          <Field label={`Text · ${step.label || ''} · day ${step.day_offset ?? ''}${step.send_hour != null ? `, about ${hourText(step.send_hour)}` : ''}`}
+            error={!val.trim() ? 'This step is blank - nothing will be sent for it.' : mine.length ? mine.join('; ') : undefined}
             hint={`${val.length} characters before the sign-off and "Reply STOP to opt out."`}>
             <textarea rows={5} value={val} disabled={!isManager || saving} onChange={e => set(e.target.value)} />
           </Field>
         ) : (<>
-          <Field label={`Email ${n} subject · day ${step.day_offset ?? ''}`}>
+          <Field label={`Email · ${step.label || ''} · day ${step.day_offset ?? ''} · subject`}
+            error={!val.subject.trim() ? 'A subject is needed.' : undefined}>
             <input value={val.subject} disabled={!isManager || saving} onChange={e => set({ ...val, subject: e.target.value })} />
           </Field>
-          <Field label={`Email ${n} body`}>
+          <Field label="Email body" error={!val.body.trim() ? 'This step is blank - nothing will be sent for it.' : mine.length ? mine.join('; ') : undefined}>
             <textarea rows={11} value={val.body} disabled={!isManager || saving} onChange={e => set({ ...val, body: e.target.value })} />
           </Field>
         </>)}
@@ -340,42 +474,59 @@ function SequenceEditor({ cur, isManager, touch, setTouch, onSaved, onError }) {
         Personalization: <code>{'{first_name}'}</code> <code>{'{location_name}'}</code> <code>{'{primary_contact_name}'}</code>{' '}
         <code>{'{appointment_options}'}</code>{ch === 'email' ? <> <code>{'{location_phone}'}</code> <code>{'{booking_line}'}</code></> : null}.
         Don't add a certificate value, expiration date or guarantee - none is on file.
+        {step.revision ? <> Last saved {when(step.updated_at)}{step.updated_by ? ` by ${step.updated_by}` : ''} (version {step.revision}).</> : null}
       </p>
-      {cur.missing_steps?.length > 0 && <p className="sci-micro" style={{ color: '#8a5a00' }}>Blank steps: {cur.missing_steps.join(', ')}</p>}
-      {isManager && (
-        <button type="button" className="sci-btn gold" disabled={!changed || saving} onClick={save}>
-          <Icon name="check" />{saving ? 'Saving…' : 'Save draft'}
-        </button>
-      )}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {isManager && (
+          <button type="button" className="sci-btn gold" disabled={!changed || saving} onClick={save}>
+            <Icon name="check" />{saving ? 'Saving…' : 'Save draft'}
+          </button>
+        )}
+        <button type="button" className="sci-btn" onClick={onPreview}><Icon name="play" />Preview this step</button>
+        {isManager && changed && <button type="button" className="sci-btn" disabled={saving} onClick={discard}>Discard changes</button>}
+      </div>
       {note && <p className="sci-micro" role="status">{note}</p>}
     </Panel>
   )
 }
 
-/* #441: who is in Central Alabama and how each family can be reached. Counts
-   come from real message records - approved is not the same as sent. */
-function Roster({ locations }) {
+/* #441: who is in Central Alabama and how each family can be reached. Every
+   count comes from real message records - approved is not the same as sent. */
+const ROSTER_FILTERS = [
+  ['all', 'All approved', () => true],
+  ['phone', 'With phone', r => r.has_phone],
+  ['email_only', 'Email only', r => !r.has_phone && r.has_email],
+  ['awaiting', 'Awaiting contact', r => !r.contacted && !r.replied && !r.booked && !r.stop_dnc && !r.on_hold],
+  ['contacted', 'Contacted', r => r.contacted],
+  ['replied', 'Replied', r => r.replied],
+  ['booked', 'Appointment booked', r => r.booked],
+  ['hold', 'On hold', r => r.on_hold],
+  ['stop', 'STOP / DNC', r => !!r.stop_dnc],
+]
+
+function Roster({ locations, d, err, onReload }) {
   const [loc, setLoc] = useState('')
   const [q, setQ] = useState('')
-  const [d, setD] = useState(null)
-  const [err, setErr] = useState('')
-  useEffect(() => {
-    setD(null); setErr('')
-    api.get(`/program/central-alabama/roster${loc ? `?location_id=${encodeURIComponent(loc)}` : ''}`)
-      .then(setD).catch(e => setErr(errText(e)))
-  }, [loc])
-  const rows = (d?.rows || []).filter(r => !q.trim() || `${r.name} ${r.location}`.toLowerCase().includes(q.trim().toLowerCase()))
+  const [show, setShow] = useState('all')
+  const base = (d?.rows || []).filter(r => !loc || r.location_id === loc)
+  const counts = Object.fromEntries(ROSTER_FILTERS.map(([k, , f]) => [k, base.filter(f).length]))
+  const test = (ROSTER_FILTERS.find(x => x[0] === show) || ROSTER_FILTERS[0])[2]
+  const rows = base.filter(test).filter(r => !q.trim() || `${r.name} ${r.location}`.toLowerCase().includes(q.trim().toLowerCase()))
+  const held = d?.held
   return (
     <Panel title="Central Alabama families" labelledBy="sci-ca-roster" style={{ gridColumn: '1 / -1' }}
-      aside={d ? <span className="sci-micro sci-muted">{num(d.people)} people · {d.campaign_active ? 'campaign on' : 'campaign off'}</span> : null}>
+      aside={d ? <span className="sci-micro sci-muted">{num(d.people)} approved · {d.campaign_active ? 'campaign on' : 'campaign off'} · <button type="button" className="sci-btn sm" onClick={onReload}><Icon name="refresh" size={12} />Refresh</button></span> : null}>
       <ErrorLine text={err} />
-      {!d ? <Loading /> : (<>
+      {!d ? (!err && <Loading />) : (<>
         <p className="sci-micro" style={{ marginTop: 0 }}>
-          <b>{num(d.with_phone)}</b> can get texts and email · <b>{num(d.email_only)}</b> email only (no phone on file)
-          {d.unreachable ? <> · <b>{num(d.unreachable)}</b> no phone or email</> : null} · sent so far: {num(d.texts_sent)} texts, {num(d.emails_sent)} emails ·
-          {' '}{num(d.replied)} replied · {num(d.booked)} booked
+          <b>{num(d.with_phone)}</b> can get texts and email · <b>{num(d.email_only)}</b> email only
+          {d.no_phone_on_file ? <> ({num(d.no_phone_on_file)} have no phone on file)</> : null}
+          {d.unreachable ? <> · <b>{num(d.unreachable)}</b> no phone or email</> : null} · contacted: {num(d.contacted)} ·
+          sent: {num(d.texts_sent)} texts, {num(d.emails_sent)} emails · {num(d.replied)} replied · {num(d.booked)} booked
+          {d.stop_dnc ? <> · {num(d.stop_dnc)} STOP/DNC</> : null}
         </p>
-        <div className="sci-form" style={{ marginBottom: 8 }}>
+        <FilterChips label="Show" value={show} onChange={setShow} items={ROSTER_FILTERS.map(([k, l]) => [k, l, counts[k]])} />
+        <div className="sci-form" style={{ margin: '8px 0' }}>
           <Field label="Location">
             <select value={loc} onChange={e => setLoc(e.target.value)}>
               <option value="">All locations</option>
@@ -384,22 +535,43 @@ function Roster({ locations }) {
           </Field>
           <Field label="Find a family"><input value={q} onChange={e => setQ(e.target.value)} placeholder="Name or location" /></Field>
         </div>
-        <div className="sci-tablewrap" style={{ maxHeight: 420, overflow: 'auto' }}>
+        <div className="sci-tablewrap" style={{ maxHeight: 460, overflow: 'auto' }}>
           <table className="sci-table compact">
-            <thead><tr><th>Family</th><th>Location</th><th>Reached by</th><th>Sent</th><th>Status</th></tr></thead>
+            <thead><tr>
+              <th>Family</th><th>Location</th><th>Phone</th><th>Email</th><th>Reached by</th><th>Status</th>
+              <th>Last touch</th><th>Next touch</th><th>Reply</th><th>Appointment</th><th>STOP / DNC</th>
+            </tr></thead>
             <tbody>
               {rows.map(r => (
                 <tr key={r.lead_id}>
                   <td><a href={`/program?tab=leads&person=${r.lead_id}`}>{r.name || 'Contact'}</a></td>
                   <td className="sci-small">{r.location || '—'}</td>
+                  <td className="sci-small">{r.phone_on_file ? (r.has_phone ? 'Yes' : 'On file, can’t text') : 'None on file'}</td>
+                  <td className="sci-small">{r.email_on_file ? 'Yes' : 'None'}</td>
                   <td className="sci-small">{r.path}</td>
-                  <td className="sci-small">{r.texts_sent} texts · {r.emails_sent} emails</td>
                   <td className="sci-small">{r.status}</td>
+                  <td className="sci-small">{r.last_touch ? `${r.last_touch} · ${when(r.last_touch_at)}` : 'None yet'}</td>
+                  <td className="sci-small">{r.next_touch ? `${r.next_touch.label} · ${when(r.next_touch.at)}` : '—'}</td>
+                  <td className="sci-small">{r.replied ? 'Replied' : '—'}</td>
+                  <td className="sci-small">{r.booked ? 'Booked' : '—'}</td>
+                  <td className="sci-small">{r.stop_dnc || '—'}</td>
                 </tr>
               ))}
+              {rows.length === 0 && <tr><td colSpan={11} className="sci-small sci-muted">No family matches.</td></tr>}
             </tbody>
           </table>
         </div>
+        {held && (held.location_review?.length > 0 || held.excluded_people > 0) && (
+          <details className="sci-details" style={{ marginTop: 10 }}>
+            <summary>Held out of this campaign ({num((held.location_review || []).length + (held.excluded_people || 0))})</summary>
+            <div className="sci-details-body sci-micro">
+              {(held.location_review || []).map((h, i) => (
+                <p key={i} style={{ margin: '0 0 4px' }}><b>{h.name || 'Contact'}</b> - {h.reason}{h.source_location ? ` (file says "${h.source_location}")` : ''}. Not contacted.</p>
+              ))}
+              {held.excluded_people > 0 && <p style={{ margin: 0 }}><b>{num(held.excluded_people)}</b> families ({num(held.excluded_records)} records): {held.excluded_reason}</p>}
+            </div>
+          </details>
+        )}
       </>)}
     </Panel>
   )
