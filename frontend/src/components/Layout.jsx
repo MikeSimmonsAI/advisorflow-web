@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useLayoutEffect, useState } from 'react'
-import { NavLink, useNavigate, useLocation } from 'react-router-dom'
+import { Link, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { getCurrentUser, refreshCurrentUser, logout, getBranding, clearBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop, getWorkspaceLocation, setWorkspaceLocation, fetchMyContexts } from '../api/client'
 import { findSciWorkspace } from '../auth/sciDoor'
 import { isManagerRole, isWorkspaceManagerRole, roleOf, workspaceFeatures, canEnterProduct, WHOLESALE_FEATURE, workspaceLocationChoices, activeLocationId } from '../auth/workspaceAuthority'
@@ -23,6 +23,10 @@ import { isWholesalePath, WholesaleSearch, WholesaleEnvironment, WholesaleUser, 
 import { verticalFor, navGroupsFor, brandLines } from '../verticals/workspaceVertical'
 import { bookaboostProductBrand, OLP } from '../brand/productBrand'
 import { olpGroups, olpHeaderFor } from '../brand/olpNav'
+// PROJECT OVERDRIVE (#439): the owner-approved Wholesale rail - Acquisition
+// Command pinned over five collapsible groups. Rearranges Layout's own items.
+import { wholesaleRail, activeRoute, readClosedGroups, writeClosedGroups } from '../brand/wholesaleNav'
+import './overdrive-nav.css'
 import '../brand/olp-workspace.css'
 // The workspace's vocabulary cache, dropped alongside its branding cache.
 // They answer the same question and must not be allowed to disagree.
@@ -515,6 +519,15 @@ export default function Layout({ children }) {
   const inDealRoom = inWholesale && /^\/wholesale\/(deal-room|buyers)(\/|$)/.test(location.pathname)
   const [openGroups, setOpenGroups] = useState(() => new Set())
   const toggleGroup = (label) => setOpenGroups((s) => { const n = new Set(s); if (n.has(label)) n.delete(label); else n.add(label); return n })
+  // The Wholesale rail's closed groups, remembered on this device the same way
+  // the collapsed rail is (af_sidebar_collapsed). A group holding the current
+  // page is always open, whatever was stored.
+  const [wsClosed, setWsClosed] = useState(() => readClosedGroups(typeof localStorage === 'undefined' ? null : localStorage))
+  const toggleWsGroup = (key) => setWsClosed((s) => {
+    const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key)
+    writeClosedGroups(typeof localStorage === 'undefined' ? null : localStorage, n)
+    return n
+  })
   // On the Wholesale side "Add to Home Screen" installs EvoSys Field (opens at
   // Appointments) instead of the advisor mobile workspace. Build list #26.
   useEffect(() => { applyFieldAppHead(inWholesale) }, [inWholesale])
@@ -776,7 +789,7 @@ export default function Layout({ children }) {
   useEffect(() => { setLogoFailed(false) }, [logoUrl])
 
   return (
-    <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}${inWholesale ? ' layout--wholesale' : ''}${inDealRoom && !olpShell ? ' layout--dealroom' : ''}`}
+    <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}${inWholesale ? ' layout--wholesale' : ''}${inDealRoom && !olpShell ? ' layout--dealroom' : ''}${inWholesale && !olpShell ? ' layout--wsnav' : ''}`}
          data-brand-theme={shellResolution.theme} data-brand-source={shellResolution.source}
          data-brand-platform={branding?.platform?.slug || ''} data-org-id={branding?.organization_id || ''}
          data-product={inWholesale ? WHOLESALE_PRODUCT : undefined}
@@ -1085,6 +1098,50 @@ export default function Layout({ children }) {
                 <Icon name={item.icon} />{!sidebarCollapsed && item.label}
               </NavLink>
             )
+            if (inWholesale && !olpShell) {
+              // DESIGN A (owner approved, #439). Exactly one entry is highlighted:
+              // activeRoute() picks the most specific match (Multifamily over
+              // Discovery Inbox), so Link is used rather than NavLink, whose own
+              // matching would mark both.
+              const isWs = (group) => group.items.some((item) => isWholesalePath(item.to))
+              const rail = wholesaleRail(groups.filter(isWs))
+              const pinned = rail.pinned && visible(rail.pinned) ? rail.pinned : null
+              const shown = rail.groups.map((g) => ({ ...g, items: g.items.filter(visible) })).filter((g) => g.items.length)
+              const activeTo = activeRoute([pinned, ...shown.flatMap((g) => g.items)].filter(Boolean), location.pathname, location.search)
+              const renderWs = (item) => {
+                const on = item.to === activeTo
+                return (
+                  <Link key={item.to} to={item.to} className={`nav-item${on ? ' nav-item--active' : ''}`}
+                        aria-current={on ? 'page' : undefined} onClick={closeSidebar} title={item.label}
+                        data-nav-route={item.to}>
+                    <Icon name={item.icon} />{!sidebarCollapsed && item.label}
+                  </Link>
+                )
+              }
+              return (
+                <div className="wsnav" data-wsnav="overdrive">
+                  {pinned ? <div className="nav-section wsnav-pinned">{renderWs(pinned)}</div> : null}
+                  {shown.map((group) => {
+                    const holds = group.items.some((item) => item.to === activeTo)
+                    const open = sidebarCollapsed || holds || !wsClosed.has(group.key)
+                    const gid = 'wsnav-grp-' + group.key
+                    return (
+                      <div key={group.key} className={`nav-section wsnav-group${holds ? ' nav-section--current' : ''}`} data-nav-group={group.key}>
+                        {sidebarCollapsed ? <div className="nav-divider" title={group.label} /> : (
+                          <button type="button" className="nav-section-toggle" aria-expanded={open} aria-controls={gid}
+                                  onClick={() => toggleWsGroup(group.key)}
+                                  title={holds ? 'This group holds the page you are on' : undefined}>
+                            <span>{group.label}</span>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+                          </button>
+                        )}
+                        {open ? <div id={gid} role="group" aria-label={group.label}>{group.items.map(renderWs)}</div> : null}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            }
             if (inWholesale) {
               const isWs = (group) => group.items.some((item) => isWholesalePath(item.to))
               // OLP: the same items in three plain groups, one rail shape everywhere.

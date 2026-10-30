@@ -80,10 +80,12 @@ export function Home({ a, sched, consent, openMetric, openFamily }) {
   return <div className="sl-home-body">
     {sn.value ? (
       <section className="sl-hero2">
-        <div><strong>{sn.value} new families queued{sn.first_start ? ` for ${dayWord(sn.first_start)}` : ''}</strong>
-          <p>First touches start {sn.first_start ? clock(new Date(sn.first_start)) : 'when sending opens'}. Existing family follow-ups continue independently.</p>
-          <p className="sl-hero2-consent"><b>{n(sn.sms_ready)} of {n(sn.value)}</b> have SMS consent of record and will be texted.
-            {sn.no_consent ? <> <b>{n(sn.no_consent)}</b> have none: their texts are blocked by the consent gate (emails still go).</> : null}</p></div>
+        <div><strong>{sn.value} new families {sn.first_start ? `scheduled for ${dayWord(sn.first_start)}` : 'prepared'}</strong>
+          <p>{sn.first_start ? `First touches are scheduled from ${clock(new Date(sn.first_start))}.` :
+            'These families are approved for the new campaign, but their first messages have not been scheduled.'} Existing family follow-ups continue independently.</p>
+          <p className="sl-hero2-consent"><b>{n(sn.with_phone || 0)}</b> have a phone number; <b>{n(sn.no_phone || 0)}</b> are email-only (no phone supplied). This is contact coverage, not a claim of SMS consent.</p>
+          <p><Link className="sl-a" to="/program?tab=send&campaign=central_alabama_ms">View Central Alabama families →</Link>{' · '}
+             <Link className="sl-a" to="/program?tab=campaigns&campaign=central_alabama_ms">Edit Central Alabama messaging →</Link></p></div>
         {sn.first_start && <div className="sl-hero2-date"><b>{ctDate(sn.first_start, { weekday: 'long', month: 'short', day: 'numeric' })}</b>
           <span>{clock(new Date(sn.first_start))} — {clock(new Date(sn.last_start))} CT</span>
           <span>1 new first touch / {b.spacing_minutes || 10} min</span></div>}
@@ -101,7 +103,7 @@ export function Home({ a, sched, consent, openMetric, openFamily }) {
       <button className="sl-metric" onClick={() => go('approved')}><span>Approved total</span><b>{n(pipe.approved)}</b>
         <small>{n((pipe.approved || 0) - (sn.value || 0))} earlier + {n(sn.value)} queued</small></button>
       <button className="sl-metric" onClick={() => go('scheduled_new')}><span>New families queued</span><b className="blue">{n(sn.value)}</b>
-        <small>{n(sn.sms_ready)} SMS-eligible · {n(sn.no_consent)} no SMS consent</small></button>
+        <small>{n(sn.with_phone || 0)} have phone · {n(sn.no_phone || 0)} email-only</small></button>
       <button className="sl-metric" onClick={() => go('in_followup')}><span>Active follow-up cadence</span><b>{n(o.in_followup)}</b><small>Previously contacted families</small></button>
       <button className="sl-metric" onClick={() => openMetric({ metric: 'appointments', range: { preset: 'all' } })}><span>Confirmed new appointments</span>
         <b className="green">{a.metrics?.appointments?.all_time ? n(a.metrics.appointments.all_time) : <i className="sl-dash-line" />}</b>
@@ -115,7 +117,7 @@ export function Home({ a, sched, consent, openMetric, openFamily }) {
           <div><b>NEW family first touches</b><small>{sn.first_start ? `Next window · ${ctDate(sn.first_start, { weekday: 'long', month: 'short', day: 'numeric' })}`
             : nw ? `Most recent day · ${ctDate(nw.date, { month: 'short', day: 'numeric' })}` : 'None sent yet'}</small></div>
           <button className="sl-tag blue" onClick={() => go(sn.value ? 'scheduled_new' : 'new_families', { range: { preset: 'today' } })}>
-            {sn.value ? `${sn.value} queued · ${sn.sms_ready || 0} SMS-eligible` : `${firstToday} sent today`}</button>
+            {sn.value ? `${sn.value} prepared · ${sn.with_phone || 0} have a phone` : `${firstToday} sent today`}</button>
         </div>
         <div className="sl-prog"><i style={{ width: `${sentShare}%` }} /><span>{firstToday} of {firstToday + (sn.value || 0)} sent</span></div>
         <div className="sl-stream">
@@ -137,15 +139,13 @@ export function Home({ a, sched, consent, openMetric, openFamily }) {
         <div className="sl-row"><span>Quiet hours &amp; STOP / DNC</span><em className="sl-tag green">Gated</em></div>
         <Link className="sl-row cs-link" to="/program/live?s=consent&c=opted_in"><span>Families opted in</span><b>{consent ? n(consent.opted_in) : '…'}</b></Link>
         <Link className="sl-row cs-link" to="/program/live?s=consent&c=opted_out"><span>Families opted out</span><b>{consent ? n(consent.opted_out) : '…'}</b></Link>
-        <button className="sl-row" onClick={() => go(sn.no_consent ? 'scheduled_no_consent' : 'scheduled_sms_ready')}><span>SMS consent of record (queued families)</span>
-          <em className={`sl-tag ${sn.value && sn.sms_ready === sn.value ? 'green' : 'red'}`}>{n(sn.sms_ready)} of {n(sn.value)}</em></button>
-        <button className="sl-row" onClick={() => openMetric({ metric: 'consent_blocked', range: { preset: 'today' } })}><span>Texts blocked today - no consent</span>
-          <b>{n((o.today || []).find(r => r.key === 'blocked')?.value)}</b></button>
+        <div className="sl-row"><span>Queued families with a phone number</span><b>{n(sn.with_phone || 0)} of {n(sn.value)}</b></div>
+        <div className="sl-row"><span>Email-only families (no phone number)</span><b>{n(sn.no_phone || 0)}</b></div>
         <div className="sl-row"><span>SMS link retest (owner number)</span>
           <em className={`sl-tag ${retest.status === 'delivered' ? 'green' : 'orange'}`}>{retest.status === 'delivered' ? 'Delivered'
             : retest.at && isToday(retest.at) ? (retest.status || 'Sent') : '9:05 AM pending'}</em></div>
         <p className="sl-warn">Delivery confirmation comes from Twilio callbacks. A queued or submitted text is <b>not</b> counted as delivered.
-          A text is only sent with an SCI SMS consent of record; the daily batch only picks families that have one.</p>
+          Actual sending still checks recipient eligibility, STOP and DNC in the backend. Prepared families are not automatically contacted.</p>
       </section>
     </div>
 
@@ -160,7 +160,7 @@ export function Home({ a, sched, consent, openMetric, openFamily }) {
                 <td>{isToday(i.next_touch_at) ? '' : ctDate(i.next_touch_at, { weekday: 'short' }) + ' '}{clock(new Date(i.next_touch_at))}</td>
                 <td className="sl-ell">{titled(i.name)} · {i.location}</td>
                 <td>First touch</td>
-                <td>{(i.text || '').startsWith('No SMS consent') ? <em className="sl-tag orange">Text blocked: no consent</em> : <em className="sl-tag blue">Queued</em>}</td></tr>))}</tbody>
+                <td>{(i.text || '').startsWith('No SMS consent') ? <em className="sl-tag orange">Text unavailable</em> : <em className="sl-tag blue">Queued</em>}</td></tr>))}</tbody>
           </table>)}
       </section>
       <section className="sl-card">
