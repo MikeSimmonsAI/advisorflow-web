@@ -479,27 +479,7 @@ def test_post_appointment_sweep_cannot_replay_historical_appointments(
         "no historical booking may be picked up by the sweep"
 
 
-def test_a_genuinely_new_appointment_is_picked_up_but_still_not_emailed(
-        db_session, sample_org, sample_advisor):
-    """The other half of the same guarantee: the sweep is not simply broken.
 
-    A new in-window appointment IS selected - and the gate then refuses, so it
-    is recorded as not sent rather than delivered.
-    """
-    from app.services.post_appointment_service import check_and_send_followups
-    lead = _lead(db_session, sample_org, sample_advisor, phone=None,
-                 email="fresh@example.com")
-    booking = BookingLink(lead_id=lead.id, user_id=sample_advisor.id,
-                          status="booked",
-                          booked_time=datetime.utcnow() - timedelta(minutes=10))
-    db_session.add(booking)
-    db_session.commit()
-
-    with patch("app.services.email_service.send_email_via_provider") as provider:
-        check_and_send_followups(db_session)
-
-    provider.assert_not_called()
-    followup = db_session.query(BookingFollowup).filter(
-        BookingFollowup.booking_link_id == booking.id).one()
-    assert followup.thank_you_sent is False
-    assert followup.error
+# #405: review_request_cron and post_appointment_service no longer send their own
+# surveys; their isolation/claim tests moved to tests/test_sci_405_survey_repair.py
+# (one survey path: claim-once, failed send recorded, concurrent workers, retry).

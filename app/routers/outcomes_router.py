@@ -96,9 +96,23 @@ def record_outcome(
         # The appointment must be THIS contact's - an outcome is never filed
         # against somebody else's booking.
         from app.models.models import BookingLink
-        if not db.query(BookingLink).filter(BookingLink.id == req.booking_link_id,
-                                            BookingLink.lead_id == req.lead_id).first():
+        _bk = db.query(BookingLink).filter(BookingLink.id == req.booking_link_id,
+                                           BookingLink.lead_id == req.lead_id).first()
+        if not _bk:
             raise HTTPException(status_code=404, detail="Appointment not found for this contact.")
+        # #405: attendance means something only once the visit happened, and
+        # "completed" only once it is over - the same rule as the SCI screen,
+        # because "completed" is what makes a visit eligible for a survey.
+        if req.attendance is not None and _bk.booked_time is not None:
+            from datetime import timedelta as _td
+            from app.services import booking_time as _bt
+            _start = _bt.to_utc(_bk.booked_time, _bt.zone_of_user(db, _bk.user_id))
+            _end = _start + _td(minutes=int(_bk.appt_duration or 60))
+            _now = datetime.utcnow()
+            if _start > _now:
+                raise HTTPException(status_code=422, detail="This visit hasn't happened yet.")
+            if req.attendance == "completed" and _end > _now:
+                raise HTTPException(status_code=422, detail="You can mark it Completed once the visit is over.")
 
     outcome = LeadOutcome(
         lead_id=req.lead_id,
@@ -116,6 +130,9 @@ def record_outcome(
         notes=req.notes,
         attendance=req.attendance,
     )
+    if req.attendance is not None:
+        outcome.attendance_set_by = current_user.id
+        outcome.attendance_set_at = datetime.utcnow()
     db.add(outcome)
     db.commit()
     return outcome

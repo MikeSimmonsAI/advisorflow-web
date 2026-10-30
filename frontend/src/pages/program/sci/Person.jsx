@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../../api/client'
 import { Chip, Empty, ErrorLine, Field, Icon, Loading, Notice, PageHead, Panel, errText, when, apptWhen } from './ui'
+import VisitOutcome from './VisitOutcome'
 
 const EDIT_FIELDS = [
   ['first_name', 'First name'], ['last_name', 'Last name'], ['phone', 'Phone'], ['email', 'Email'],
@@ -174,7 +175,10 @@ export default function Person({ leadId, onBack, isManager }) {
 
           <Panel title="Appointments" labelledBy="sci-p-appts">
             {appts === null ? <Loading /> : !appts.length ? <p className="sci-micro sci-muted">No visit booked.</p> : appts.map(a => (
-              <div key={a.id} className="sci-kv"><span>{apptWhen(a.when)} · {a.location || 'Visit'}</span><span><Chip tone={a.status === 'cancelled' ? 'warn' : 'ok'} plain>{a.status}</Chip></span></div>
+              <div key={a.id} style={{ marginBottom: 10 }}>
+                <div className="sci-kv"><span>{apptWhen(a.when)} · {a.location || 'Visit'}</span><span><Chip tone={a.status === 'cancelled' ? 'warn' : 'ok'} plain>{a.status}</Chip></span></div>
+                {(a.started || a.attendance) && <VisitOutcome appt={a} />}
+              </div>
             ))}
           </Panel>
 

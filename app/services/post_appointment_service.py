@@ -78,21 +78,9 @@ Rules:
 
 
 def _send_sms(advisor: User, lead: Lead, body: str) -> bool:
-    """Send via Twilio. Returns True on success."""
-    try:
-        from twilio.rest import Client
-        from app.utils.crypto import decrypt_value
-        auth_token = decrypt_value(advisor.twilio_auth_token_encrypted)
-        client = Client(advisor.twilio_account_sid, auth_token)
-        client.messages.create(
-            body=body,
-            from_=advisor.twilio_phone_number,
-            to=lead.phone,
-        )
-        return True
-    except Exception as e:
-        logger.error("Post-appt SMS failed lead=%s: %s", lead.id, e)
-        return False
+    """RETIRED (#405). This called Twilio directly - no STOP/DNC/suppression
+    gate, no message history. Kept as a refusal so nothing can use it."""
+    raise RuntimeError("post_appointment_service._send_sms is retired - see survey_dispatch")
 
 
 def _send_email(db: Session, advisor: User, lead: Lead, body: str, org_name: str) -> bool:
@@ -277,63 +265,10 @@ def _send_followup(db: Session, booking: BookingLink, lead: Lead, advisor: User)
 
 
 def check_and_send_followups(db: Session) -> int:
-    """
-    Main entry point called by the email poller cron.
-    Finds bookings that:
-      - status == 'booked'
-      - booked_time is in the past (appointment has happened)
-      - booked_time is within the last 3 hours (don't chase super old ones)
-      - no BookingFollowup row yet
-
-    Returns the number of followups sent.
-
-    AN AI-PERSONALISED BACKGROUND SEND. With AI_BACKGROUND_AUTOMATION_ENABLED
-    off (the default) this returns 0 before it queries anything: no provider
-    request, no BookingFollowup row, no SMS, no email - and in particular not
-    the canned thank-you the AI-failure path would otherwise have sent.
-    """
-    if not ai_gateway.check_background("post_appointment_followup"):
-        return 0
-    now = datetime.utcnow()
-    window_start = now - timedelta(hours=3)
-
-    # Find eligible bookings
-    sent_booking_ids = {
-        row[0] for row in db.query(BookingFollowup.booking_link_id).all()
-    }
-
-    eligible = (
-        db.query(BookingLink)
-        .filter(
-            BookingLink.status == "booked",
-            BookingLink.booked_time <= now,
-            BookingLink.booked_time >= window_start,
-        )
-        .all()
-    )
-
-    count = 0
-    for booking in eligible:
-        if booking.id in sent_booking_ids:
-            continue
-
-        booking_id = booking.id
-        try:
-            lead = db.query(Lead).filter(Lead.id == booking.lead_id).first()
-            advisor = db.query(User).filter(User.id == booking.user_id).first()
-
-            if not lead or not advisor:
-                continue
-
-            # False means another runner already claimed this booking.
-            if _send_followup(db, booking, lead, advisor) is not False:
-                count += 1
-        except Exception as e:
-            # One bad booking must not poison the session for the rest.
-            db.rollback()
-            logger.error("Failed to send post-appt followup booking=%s: %s", booking_id, e)
-
-    if count:
-        logger.info("[post_appointment] Sent %d post-appointment followup(s).", count)
-
-    return count
+    """RETIRED (#405). This was the SECOND survey sender (every 2 minutes from
+    the email poller). It compared local booked_time with utcnow(), so it sent
+    up to five hours before the visit, and it sent a second survey to families
+    review_request_cron had already surveyed. Every survey now goes through
+    app/services/survey_dispatch.py, run by the review-request job.
+    Always 0; claims and sends nothing."""
+    return 0

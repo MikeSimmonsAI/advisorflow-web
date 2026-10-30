@@ -160,6 +160,9 @@ class LocationProfile(Base):
     link_key = Column(String, nullable=True)
     website = Column(String, nullable=True)
     facility_phone = Column(String, nullable=True)
+    # #405: THIS location's own public review page. None = no review link is
+    # offered (never the corporate one - it names the wrong place).
+    review_url = Column(String, nullable=True)
     manager_name = Column(String, nullable=True)
     advisor_names = Column(Text, nullable=True)              # JSON list
     email_display_name = Column(String, nullable=True)       # override; default "<contact> | <home>"

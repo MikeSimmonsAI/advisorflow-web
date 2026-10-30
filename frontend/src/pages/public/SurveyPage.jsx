@@ -14,7 +14,7 @@ import { API_BASE } from '../../api/client';
 
 const STARS = [1, 2, 3, 4, 5];
 const WORDS = { 1: 'Poor', 2: 'Fair', 3: 'Good', 4: 'Very good', 5: 'Excellent' };
-const HIGH_RATING = 4;   // 4-5 -> invite a public review; 1-3 -> private feedback
+const HIGH_RATING = 4;   // only changes the chips/prompts - every rating sees the same optional public links (#405)
 const GOOD_CHIPS = ['Caring staff', 'Clear answers', 'Beautiful grounds', 'Easy process', 'Felt no pressure'];
 const FIX_CHIPS = ['Wait time', 'Communication', 'Pricing', 'Follow-up', 'Something else'];
 
@@ -163,9 +163,9 @@ export default function SurveyPage() {
   }
 
   const reviewLinks = [
-    { url: ctx?.review_url, label: 'Share it on Google' },
-    { url: ctx?.facebook_url, label: 'Share it on Facebook' },
-    { url: ctx?.instagram_url, label: 'Find us on Instagram' },
+    { url: ctx?.review_url, label: 'Write a public review' },
+    { url: ctx?.facebook_url, label: 'Facebook' },
+    { url: ctx?.instagram_url, label: 'Instagram' },
   ].filter((l) => typeof l.url === 'string' && /^https?:\/\//i.test(l.url));
 
   const shown = hover || rating;
@@ -226,11 +226,10 @@ export default function SurveyPage() {
                 Your words go straight to our team{business ? ` at ${business}` : ''}. We read
                 every one.
               </p>
-              {high && reviewLinks.length > 0 ? (
+              {reviewLinks.length > 0 ? (
                 <>
                   <p style={{ ...S.p, marginTop: 18 }}>
-                    Would you be willing to share that with others? It helps families find us
-                    when they need us most.
+                    If you would like, you can also share your experience publicly.
                   </p>
                   <div style={S.linkStack}>
                     {reviewLinks.map((l) => (
@@ -294,7 +293,7 @@ export default function SurveyPage() {
                   </div>
                   <label htmlFor="survey-feedback" style={S.label}>
                     {high ? 'Anything else you would like to share? (optional)'
-                          : 'Tell us what happened, so we can make it right.'}
+                          : 'Tell us what happened. It goes straight to our team.'}
                   </label>
                   <textarea
                     id="survey-feedback"

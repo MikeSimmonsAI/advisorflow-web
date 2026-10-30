@@ -5,10 +5,11 @@ GET  /survey/{token}              → Branded HTML survey page (no auth)
 POST /survey/{token}              → Store rating + feedback
 GET  /survey/results/{lead_id}    → Survey results for a lead (auth required)
 
-Success page logic:
-  4-5 stars → "Thank you! Here's how to spread the word" + Google/social links
-  1-3 stars → "We're sorry — we'll reach out to make it right"
-  No rating → generic thank-you
+After an answer (#405):
+  every rating sees the SAME neutral, optional public-review invitation (no
+  review gating: a public review is never asked of happy families only);
+  1-3 stars also alert the responsible team (survey_dispatch.notify_low_rating);
+  the page never promises a follow-up the system does not create and track.
 """
 
 import html
@@ -20,7 +21,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from app.deps import get_db, get_current_user
+from app.deps import get_db, get_current_user, require_admin
 from app.models.models import (
     BookingFollowup, Lead, Organization, SurveyResponse, User, gen_uuid
 )
@@ -77,39 +78,61 @@ def _safe_color(color: str | None) -> str:
     return "#2fb6ff"
 
 
-def _review_links_html(org: Organization) -> str:
-    """High-rating: show Google + social links. All URLs are scheme-validated."""
-    if not org:
-        return ""
-    links = []
-    google_url = _safe_url(getattr(org, "google_review_url", None))
+def public_links(db: Session, org: Organization, lead) -> dict:
+    """The public review/social links for THIS family's business. A program
+    contact (SCI) sees only its own location's review page - never the
+    corporation's pages, which name the wrong place. Unvalidated -> absent."""
+    from app.services.survey_identity import location_identity
+    loc = location_identity(db, lead) if lead is not None else None
+    if loc is not None:
+        url = None
+        if loc.get("location_id"):
+            from app.models.program_models import LocationProfile
+            prof = (db.query(LocationProfile)
+                    .filter(LocationProfile.organization_id == lead.organization_id,
+                            LocationProfile.location_id == loc["location_id"]).first())
+            url = getattr(prof, "review_url", None) if prof is not None else None
+        return {"review_url": url if _safe_url(url) else None, "facebook_url": None, "instagram_url": None}
+    out = {}
+    for k, attr in (("review_url", "google_review_url"), ("facebook_url", "facebook_url"),
+                    ("instagram_url", "instagram_url")):
+        v = getattr(org, attr, None) if org else None
+        out[k] = v if _safe_url(v) else None
+    return out
+
+
+def _review_links_html(links: dict) -> str:
+    """Optional public links, shown the SAME way whatever the rating."""
+    links = links or {}
+    out = []
+    google_url = _safe_url(links.get("review_url"))
     if google_url:
-        links.append(
+        out.append(
             f'<a href="{google_url}" target="_blank" rel="noopener noreferrer" style="'
             'display:inline-block;margin:6px;padding:12px 22px;background:#ea4335;'
-            'color:#fff;text-decoration:none;border-radius:8px;font-size:15px;font-weight:600;">⭐ Leave a Google Review</a>'
+            'color:#fff;text-decoration:none;border-radius:8px;font-size:15px;font-weight:600;">Google</a>'
         )
-    facebook_url = _safe_url(getattr(org, "facebook_url", None))
+    facebook_url = _safe_url(links.get("facebook_url"))
     if facebook_url:
-        links.append(
+        out.append(
             f'<a href="{facebook_url}" target="_blank" rel="noopener noreferrer" style="'
             'display:inline-block;margin:6px;padding:12px 22px;background:#1877f2;'
             'color:#fff;text-decoration:none;border-radius:8px;font-size:15px;">👍 Facebook</a>'
         )
-    instagram_url = _safe_url(getattr(org, "instagram_url", None))
+    instagram_url = _safe_url(links.get("instagram_url"))
     if instagram_url:
-        links.append(
+        out.append(
             f'<a href="{instagram_url}" target="_blank" rel="noopener noreferrer" style="'
             'display:inline-block;margin:6px;padding:12px 22px;background:#e1306c;'
             'color:#fff;text-decoration:none;border-radius:8px;font-size:15px;">📸 Instagram</a>'
         )
-    if not links:
+    if not out:
         return ""
     return (
         '<div style="margin-top:20px;text-align:center;">'
         '<p style="color:#64748b;font-size:14px;margin-bottom:12px;">'
-        'Help others find us — it only takes a second:</p>'
-        + "".join(links) + "</div>"
+        'If you would like, you can also share your experience publicly:</p>'
+        + "".join(out) + "</div>"
     )
 
 
@@ -148,6 +171,36 @@ def get_survey_results(
             for r in responses
         ],
     }
+
+
+def _workspace_org(db: Session, user: User, request: Request) -> str:
+    from app.services.lead_scope import active_workspace_org_id
+    org_id = active_workspace_org_id(user, db, request) or user.organization_id
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Open a workspace first")
+    return org_id
+
+
+@router.get("/admin/attention")
+def surveys_needing_attention(request: Request, db: Session = Depends(get_db),
+                              user: User = Depends(require_admin)):
+    """#405: held, failed, stuck or undelivered surveys for a person to review."""
+    from app.services import survey_dispatch
+    org_id = _workspace_org(db, user, request)
+    return {"sending_enabled": survey_dispatch.sending_enabled(),
+            "surveys": survey_dispatch.attention(db, org_id)}
+
+
+@router.post("/admin/attention/{followup_id}/retry")
+def retry_survey(followup_id: str, request: Request, db: Session = Depends(get_db),
+                 user: User = Depends(require_admin)):
+    """#405: controlled recovery - only after checking nothing reached the family."""
+    from app.services import survey_dispatch
+    org_id = _workspace_org(db, user, request)
+    out = survey_dispatch.retry(db, followup_id, org_id)
+    if not out.get("ok") and out.get("reason") == "not found":
+        raise HTTPException(status_code=404, detail="Survey not found")
+    return out
 
 
 @limiter.limit("60/minute")
@@ -197,9 +250,9 @@ def get_survey_context_json(request: Request, token: str, db: Session = Depends(
         "branding": branding,
         "brand_color": _safe_color(branding["brand_color"]
                                    or (getattr(org, "brand_color_primary", None) if org else None)),
-        "review_url": getattr(org, "google_review_url", None) if org else None,
-        "facebook_url": getattr(org, "facebook_url", None) if org else None,
-        "instagram_url": getattr(org, "instagram_url", None) if org else None,
+        # Neutral and the same for every rating (#405); a program contact
+        # gets only its own location's review page.
+        **public_links(db, org, lead),
     }
 
 
@@ -224,15 +277,19 @@ def get_survey_page(request: Request, token: str, db: Session = Depends(get_db))
         if _to:
             return RedirectResponse(_to, status_code=302)
     except Exception as exc:   # the page below is still a working fallback
-        logger.warning("survey: branded redirect failed for token %s: %s", token, exc)
+        logger.warning("survey: branded redirect failed for followup %s: %s", followup.id, type(exc).__name__)
     already_done = _already_submitted(db, followup.id)
 
     # HTML-escape user-derived strings before interpolating into the page.
-    org_name = html.escape(org.name if org else "our team")
+    # A program contact (SCI): its own funeral home / cemetery, never the corporation.
+    from app.services.survey_identity import location_identity as _loc_ident
+    _loc = _loc_ident(db, lead) if lead is not None else None
+    org_name = html.escape((_loc or {}).get("name") or "our team") if _loc is not None \
+        else html.escape(org.name if org else "our team")
     first_name = html.escape(lead.first_name if lead else "there")
     # Validate hex color to prevent CSS injection via brand_color_primary.
     primary_color = _safe_color(getattr(org, "brand_color_primary", None) if org else None)
-    review_links = _review_links_html(org)
+    review_links = _review_links_html(public_links(db, org, lead))
 
     if already_done:
         body_content = f"""
@@ -276,22 +333,12 @@ def get_survey_page(request: Request, token: str, db: Session = Depends(get_db))
             Submit Feedback
           </button>
         </div>
-        <div id="success-high" style="display:none;text-align:center;padding:32px 0;">
-          <div style="font-size:48px;margin-bottom:12px;">🙏</div>
-          <h2 style="color:#1e293b;">Thank you, {first_name}!</h2>
-          <p style="color:#64748b;margin-bottom:8px;">We're so glad you had a great experience.</p>
-          {review_links}
-        </div>
-        <div id="success-low" style="display:none;text-align:center;padding:32px 0;">
-          <div style="font-size:48px;margin-bottom:12px;">😔</div>
-          <h2 style="color:#1e293b;">We're sorry to hear that, {first_name}.</h2>
-          <p style="color:#64748b;">Your feedback means a lot to us. A member of our team
-          will follow up with you shortly to make things right.</p>
-        </div>
+        <p id="survey-error" style="display:none;color:#b42318;margin-top:12px;"></p>
         <div id="success-any" style="display:none;text-align:center;padding:32px 0;">
           <div style="font-size:48px;margin-bottom:12px;">✅</div>
-          <h2 style="color:#1e293b;">Thanks, {first_name}!</h2>
-          <p style="color:#64748b;">Your feedback has been received. We appreciate you!</p>
+          <h2 style="color:#1e293b;">Thank you, {first_name}.</h2>
+          <p style="color:#64748b;">Your answer went straight to our team at {org_name}.</p>
+          {review_links}
         </div>"""
 
     html = f"""<!DOCTYPE html>
@@ -328,25 +375,32 @@ function setRating(n) {{
   const stars = document.querySelectorAll('#stars span');
   stars.forEach((s, i) => s.textContent = i < n ? '★' : '☆');
 }}
+let sending = false;
 async function submitSurvey() {{
+  if (sending) return;
   const rating = currentRating;
+  const err = document.getElementById('survey-error');
+  if (!rating) {{ err.textContent = 'Please choose 1 to 5 stars.'; err.style.display = 'block'; return; }}
   const feedback = document.getElementById('feedback-box')?.value || null;
-  const payload = {{ rating: rating || null, feedback: feedback || null }};
+  const payload = {{ rating: rating, feedback: feedback || null }};
+  sending = true;
+  err.style.display = 'none';
   try {{
-    await fetch('/survey/{token}', {{
+    const res = await fetch('/survey/{token}', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
       body: JSON.stringify(payload),
     }});
-  }} catch(e) {{}}
-  document.getElementById('survey-form').style.display = 'none';
-  if (rating >= 4) {{
-    document.getElementById('success-high').style.display = 'block';
-  }} else if (rating > 0) {{
-    document.getElementById('success-low').style.display = 'block';
-  }} else {{
-    document.getElementById('success-any').style.display = 'block';
+    if (!res.ok) throw new Error('save failed');
+  }} catch(e) {{
+    // Never show "thank you" for an answer that was not saved.
+    sending = false;
+    err.textContent = 'We could not save your answer. Please try again in a moment.';
+    err.style.display = 'block';
+    return;
   }}
+  document.getElementById('survey-form').style.display = 'none';
+  document.getElementById('success-any').style.display = 'block';
 }}
 </script>
 </body>
@@ -387,4 +441,11 @@ def submit_survey(request: Request, token: str, payload: SurveySubmission, db: S
     db.add(response)
     db.commit()
     logger.info("Survey submitted lead=%s rating=%s", followup.lead_id, payload.rating)
-    return {"success": True}
+    notified = False
+    try:
+        from app.services import survey_dispatch
+        notified = survey_dispatch.notify_low_rating(db, response)
+    except Exception as exc:   # the answer is saved; the alert failure is logged
+        db.rollback()
+        logger.error("survey: low-rating alert failed response=%s: %s", response.id, type(exc).__name__)
+    return {"success": True, "team_notified": notified}
