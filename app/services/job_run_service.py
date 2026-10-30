@@ -230,9 +230,15 @@ def claim_pass(job_name: str, interval_seconds, db_factory) -> bool:
     interval and is never released early; the others find it held and skip.
     If the holder dies the lease simply expires.
 
-    Fails OPEN: if the lease cannot be taken for any reason other than another
-    holder (table missing, database hiccup), the pass runs - exactly the
-    single-instance behaviour this replaced.
+    Fails CLOSED (P0, 2026-10-29): if the lease cannot be taken for any
+    reason - another holder, the table missing, the database unreachable or its
+    connection pool exhausted - this instance does NOT run the pass; the loop
+    tries again at its next interval. It used to fail open ("run anyway"),
+    which meant that exactly when the database was struggling every loop on
+    every instance ran unguarded and at once - the overlapping, memory-heavy
+    passes that preceded the Oct 28-29 OOM kills. A skipped pass is retried a
+    few minutes later; a doubled or overlapping one cannot be taken back. The
+    failure is logged at ERROR so a lease that keeps failing is visible.
     """
     try:
         ttl = max(30, int(float(interval_seconds) * 0.9))
@@ -240,13 +246,82 @@ def claim_pass(job_name: str, interval_seconds, db_factory) -> bool:
         ttl = 60
     try:
         db = db_factory()
-    except Exception:                                            # noqa: BLE001
-        return True
+    except Exception as exc:                                     # noqa: BLE001
+        log.error("claim_pass(%s): no database session (%s); skipping this pass",
+                  job_name, type(exc).__name__)
+        return False
     try:
         from app.services import action_lease
         return action_lease.acquire(db, "job.pass", job_name, ttl_seconds=ttl) is not None
     except Exception:                                            # noqa: BLE001
-        log.warning("claim_pass(%s): lease unavailable, running anyway", job_name, exc_info=True)
-        return True
+        log.error("claim_pass(%s): lease unavailable; skipping this pass", job_name, exc_info=True)
+        try:
+            db.rollback()
+        except Exception:                                        # noqa: BLE001
+            pass
+        return False
+    finally:
+        db.close()
+
+
+# ── ABANDONED RUN ROWS (P0, 2026-10-29) ─────────────────────────────────────
+#
+# record_job_run commits the 'running' row BEFORE the body and closes it in a
+# separate transaction AFTER. A process that is killed in between - an OOM
+# kill, a deploy's SIGTERM, a crash - never runs the close, and the row says
+# 'running' forever. Production had 33 such rows on 2026-10-29 (19 EvoSense
+# hunts, 7 Wholesale sweeps, 6 program SLA, 1 AI conversation), almost all
+# opened minutes before a Render `server_failed: oomKilled` event, while the
+# ledger reported zero errors.
+#
+# On backend startup, a loop row still 'running' long after any pass could
+# have finished is closed as an error with a plain reason. The cut-off is far
+# beyond the slowest pass ever recorded (an EvoSense hunt: 48 minutes) so a
+# pass that is genuinely still running on the other instance during a
+# zero-downtime deploy is never touched. Only rows of in-process LOOP jobs are
+# considered: Render cron jobs are separate processes this one knows nothing
+# about. Nothing is deleted; started_at and metrics are left as they were.
+ABANDONED_AFTER_SECONDS = 3 * 3600
+ABANDONED_SUMMARY = ("abandoned: the process stopped before this pass finished "
+                     "(restart, deploy or out-of-memory kill); closed at startup")
+
+
+def close_abandoned_runs(db_factory, *, older_than_seconds: int = ABANDONED_AFTER_SECONDS,
+                         now=None) -> int:
+    """Close loop-job rows left 'running' by a process that died. Returns how
+    many rows were closed. Never raises."""
+    from datetime import timedelta
+    from app.models.job_models import JobRun, LOOP_JOB_NAMES
+    now = now or datetime.now(timezone.utc)
+    # job_runs.started_at is a timezone-less column holding UTC (production
+    # session TimeZone is UTC). Compare with a naive UTC value so the cut-off
+    # means the same thing whatever the session time zone is.
+    cutoff = (now.astimezone(timezone.utc) if now.tzinfo else now).replace(tzinfo=None) \
+        - timedelta(seconds=older_than_seconds)
+    try:
+        db = db_factory()
+    except Exception as exc:                                     # noqa: BLE001
+        log.warning("close_abandoned_runs: no database session: %s", type(exc).__name__)
+        return 0
+    try:
+        n = (db.query(JobRun)
+             .filter(JobRun.status == "running",
+                     JobRun.finished_at.is_(None),
+                     JobRun.job_name.in_(LOOP_JOB_NAMES),
+                     JobRun.started_at < cutoff)
+             .update({"status": "error", "finished_at": now,
+                      "error_summary": ABANDONED_SUMMARY},
+                     synchronize_session=False))
+        db.commit()
+        if n:
+            log.warning("close_abandoned_runs: closed %d abandoned loop run row(s)", n)
+        return int(n or 0)
+    except Exception as exc:                                     # noqa: BLE001
+        try:
+            db.rollback()
+        except Exception:                                        # noqa: BLE001
+            pass
+        log.warning("close_abandoned_runs failed: %s", type(exc).__name__)
+        return 0
     finally:
         db.close()

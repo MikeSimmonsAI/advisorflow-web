@@ -173,9 +173,30 @@ def test_background_loop_pass_runs_on_exactly_one_instance(two_instances):
     assert claim_pass("review_request_loop", 1800, fb) is True
 
 
-def test_a_pass_claim_fails_open_when_the_database_is_unreachable():
+def test_a_pass_claim_fails_closed_when_the_database_is_unreachable():
+    """P0 2026-10-29: a pass whose lease cannot be taken is SKIPPED (retried at
+    the next interval), never run unguarded. Failing open let every loop run at
+    once exactly when the database was struggling."""
     from app.services.job_run_service import claim_pass
 
     def broken():
         raise RuntimeError("database down")
-    assert claim_pass("cadence_loop", 3600, broken) is True
+    assert claim_pass("cadence_loop", 3600, broken) is False
+
+
+def test_a_pass_claim_fails_closed_when_the_lease_query_errors(monkeypatch):
+    from app.services import action_lease
+    from app.services.job_run_service import claim_pass
+
+    class _S:
+        closed = rolled_back = False
+        def rollback(self):
+            _S.rolled_back = True
+        def close(self):
+            _S.closed = True
+
+    def boom(*a, **k):
+        raise RuntimeError("QueuePool limit reached")
+    monkeypatch.setattr(action_lease, "acquire", boom)
+    assert claim_pass("evosense_hunt_loop", 900, _S) is False
+    assert _S.closed and _S.rolled_back
