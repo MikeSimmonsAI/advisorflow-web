@@ -102,9 +102,15 @@ export default function Campaigns({ isManager, locationId, locations, performanc
   }
   // Quick location picks for previews: Southern Heritage, Kilgroe, then the next home.
   const quickHomes = useMemo(() => {
-    const find = word => homes.find(l => (l.name || '').toLowerCase().includes(word))
-    const picks = [find('southern heritage'), find('kilgroe')].filter(Boolean)
-    const other = homes.find(l => !picks.includes(l))
+    const find = (...words) => {
+      for (const w of words) {
+        const hit = homes.find(l => (l.name || '').toLowerCase().includes(w))
+        if (hit) return hit
+      }
+      return undefined
+    }
+    const picks = [find('southern heritage funeral home', 'southern heritage'), find('kilgroe')].filter(Boolean)
+    const other = homes.find(l => !picks.includes(l) && /funeral home/i.test(l.name || '')) || homes.find(l => !picks.includes(l))
     return other ? [...picks, other] : picks
   }, [locations]) // eslint-disable-line react-hooks/exhaustive-deps
 
