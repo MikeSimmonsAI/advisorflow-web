@@ -30,6 +30,10 @@ RANK_IMPORT = 30
 
 
 def source_rank(provider, capability: str) -> int:
+    # A provider may cap its own rank (ATTOM: a vendor claim never outranks a
+    # county record, whatever capability it answers for).
+    if getattr(provider, "fact_rank", None) is not None:
+        return int(provider.fact_rank)
     if provider.connector_kind == C.MANUAL:
         return RANK_HUMAN
     if provider.connector_kind == C.IMPORT:

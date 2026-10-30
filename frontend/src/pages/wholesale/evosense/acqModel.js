@@ -29,6 +29,7 @@ export const HASH_TO_TAB = {
   deal: 'underwriting', record: 'ownership', owner: 'contacts', signals: 'signals', timeline: 'activity',
   data: 'activity', conversation: 'contacts', facts: 'ai', intel: 'ai', value: 'comps', readiness: 'overview',
   actions: 'overview', ptype: 'ownership', opportunity: 'overview',
+  'intel-sources': 'ownership', 'contact-intel': 'contacts', verify: 'ownership',
 }
 
 /** The tab to open for a ?tab= value or a legacy #hash; Overview otherwise. */
@@ -55,7 +56,7 @@ export function kpis(d) {
   return {
     distress: {
       value: p.opportunity_score ?? null,
-      sub: p.opportunity_score == null ? 'not scored yet' : 'Investment evidence score · rules-based, not a probability',
+      sub: p.opportunity_score == null ? 'not scored yet' : 'rules-based points from evidence on file, not a probability',
     },
     signals: {
       value: signals.length ? scored.length : null,

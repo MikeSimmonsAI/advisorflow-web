@@ -753,6 +753,15 @@ def evosense_attacks(ids):
         ("post", "%s/properties/%s/identity" % (base, ep),
          {"parcel_apn": "STOLEN", "evidence_url": "https://example.gov/x"}),
         ("post", "%s/properties/%s/merge" % (base, ep), {"duplicate_id": ep, "reason": "planted merge"}),
+        # OVERDRIVE Phase B: another workspace's property never shows its provider
+        # intelligence and can never be the subject of a paid ATTOM lookup
+        ("get", "%s/properties/%s/intelligence" % (base, ep), None),
+        ("post", "%s/properties/%s/attom" % (base, ep), {"refresh": True}),
+        # The provider-network {key} is a provider NAME, not a record: a stranger
+        # naming anything of A's there is refused, and a real provider name only
+        # ever reaches the caller's own workspace (proved in the test below).
+        ("post", "%s/provider-network/%s/test" % (base, ep), None),
+        ("patch", "%s/provider-network/%s" % (base, ep), {"enabled": True, "unit_cents": 1}),
         # Overlooked Properties: another workspace's property never reveals its buyer matches (#427)
         ("get", "%s/opportunity-radar/%s/buyer-matches" % (base, ep), None),
         # an imported list is named by its kind; another workspace's list is absent here
@@ -943,3 +952,27 @@ def test_list_and_identity_probes_are_refused_by_scope_not_by_absence(
     from app.models.evosense_models import EvoSenseProperty
     db_session.expire_all()
     assert db_session.query(EvoSenseProperty).get(theirs["es_property_id"]).city != "Stolen"
+
+
+def test_provider_network_settings_and_tests_only_touch_the_callers_workspace(
+        client, theirs, other_headers, db_session, sample_org, other_org, monkeypatch):
+    """OVERDRIVE Phase B. A stranger who is admin of their OWN workspace can
+    switch ATTOM on and set its price there - and A's ATTOM row is untouched;
+    a Test Connection with no credential calls nothing and changes nothing of A's."""
+    from app.services.evosense import providers as PV
+    from app.services.evosense import common as C
+    monkeypatch.delenv("ATTOM_API_KEY", raising=False)
+    monkeypatch.delenv("TRACERFY_API_TOKEN", raising=False)
+    mine_before = PV.config(db_session, sample_org.id, "attom")
+    before = (mine_before.enabled, mine_before.cost_overrides, mine_before.last_attempt_at)
+    db_session.commit()
+    r = client.patch("/wholesale/evosense/provider-network/attom", headers=other_headers,
+                     json={"enabled": True, "unit_cents": 1})
+    assert r.status_code == 200, r.text
+    r = client.post("/wholesale/evosense/provider-network/tracerfy/test", headers=other_headers)
+    assert r.status_code == 200 and r.json()["status"] == "NOT CONFIGURED"
+    db_session.expire_all()
+    mine = PV.config(db_session, sample_org.id, "attom")
+    assert (mine.enabled, mine.cost_overrides, mine.last_attempt_at) == before
+    theirs_cfg = PV.config(db_session, other_org.id, "attom")
+    assert theirs_cfg.enabled is True and C.jload(theirs_cfg.cost_overrides, {})[C.ASSESSOR] == 1
