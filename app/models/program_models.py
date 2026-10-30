@@ -367,6 +367,8 @@ class CampaignFamily(Base):
     email_subject_template = Column(Text, nullable=True)
     email_body_template = Column(Text, nullable=True)
     cadence_template_id = Column(String, nullable=True)
+    # #441: a campaign's own per-touch copy beyond touch 1 (programs/campaigns.py).
+    touch_copy_json = Column(Text, nullable=True)
     # Inactive until a person switches it on: no enrollment happens by default.
     is_active = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)

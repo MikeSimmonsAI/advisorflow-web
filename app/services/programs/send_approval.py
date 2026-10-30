@@ -416,7 +416,7 @@ def prepare_central_alabama(db: Session, prog: OutreachProgram, user: User, *, a
 
     apply=False: read-only counts as things stand now.
     apply=True, in order, every step idempotent:
-      1. the campaign (OFF, no copy) and the owner-selected Kilgroe location exist;
+      1. the campaign (OFF) and the owner-selected Kilgroe location exist;
       2. the existing Central Alabama source records are re-processed under the
          current rules (existing SCI people excluded from THIS campaign only,
          owner hold releases, Joyce/Kilgroe routing) - from their stored
@@ -558,10 +558,16 @@ def approve(db: Session, prog: OutreachProgram, user: User, lead_ids: List[str],
             # campaign's words.
             skipped.append({"lead_id": lid, "reason": "No campaign"})
             continue
-        if not fam_row.is_active and _camp.activation_blocker(fam_row):
+        if not fam_row.is_active and _camp.activation_blocker(fam_row, db):
             # #385: approving a family never switches on a campaign that has no
             # approved copy (Central Alabama stays off until it does).
             skipped.append({"lead_id": lid, "reason": "Campaign not approved yet"})
+            continue
+        if not fam_row.is_active and fam_row.key in _camp.OWN_COPY_KEYS:
+            # #441: a campaign with its own sequence is switched on ONLY by a
+            # person typing its name in Campaigns - never as a side effect of
+            # approving one family here.
+            skipped.append({"lead_id": lid, "reason": "Campaign is off - switch it on in Campaigns"})
             continue
         starts = (start_at + timedelta(minutes=max(0, spacing_minutes) * len(approved))) if start_at else None
         for r in recs:

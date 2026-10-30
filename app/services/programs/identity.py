@@ -194,14 +194,23 @@ def context_for(db: Session, lead: Lead, channel: str = "sms",
         "ok": True, "program": prog, "profile": prof,
         "display_name": display_name(prog, prof),
         "sms_signoff": sms_signoff(prog, prof),
-        "fields": {
-            "first_name": (lead.first_name or "").strip().title() or "there",
+        "fields": location_fields(db, prog, prof, lead.first_name, reply,
+                                  rec.campaign_family if rec else None, flyer_link),
+    }
+
+
+def location_fields(db: Session, prog: OutreachProgram, prof, first_name, reply: str = "",
+                    family: Optional[str] = None, flyer_link: Optional[str] = None) -> Dict[str, str]:
+    """The fields a program message is rendered with - the ONE builder used by
+    sending and by the campaign preview (#441)."""
+    return {
+            "first_name": (first_name or "").strip().title() or "there",
             "location_name": prof.official_name,
             "primary_contact_name": prog.primary_contact_name or "",
             "reply_instructions": reply,
             "flyer_link": flyer_link or "",
             "location_website": prof.website or "",
-            "campaign": rec.campaign_family if rec else "",
+            "campaign": family or "",
             # Per-cemetery contact points for outbound templates. They reach
             # the family only if the SENDER is approved to carry them: the
             # content policy strips links / phone numbers otherwise.
@@ -210,8 +219,7 @@ def context_for(db: Session, lead: Lead, channel: str = "sms",
             # #378: the ways this location meets families, for "I can meet with you {appointment_options}."
             "appointment_options": appointment_options(prof),
             "booking_link": prof.appointment_link or "",
-            "planning_guide_link": planning_guide_link(prof, db=db, family=(rec.campaign_family if rec else None)),
-        },
+            "planning_guide_link": planning_guide_link(prof, db=db, family=family),
     }
 
 
@@ -402,14 +410,18 @@ def apply_sms_signoff(db: Session, lead: Lead, body: str) -> str:
     ctx = context_for(db, lead, channel="sms")
     if not ctx or not ctx.get("ok"):
         return body
-    signoff = ctx["sms_signoff"]
+    return with_signoff(ctx["program"], ctx.get("profile"), body)
+
+
+def with_signoff(prog: OutreachProgram, prof, body: str) -> str:
+    """The sign-off rule, shared by sending and the campaign preview."""
+    signoff = sms_signoff(prog, prof)
     text = (body or "").rstrip()
     if signoff in text:
         return body
     # The message already introduces the person AND the location ("this is
     # Kerry Allan with <Location>"): a trailing sign-off would only repeat it.
-    prof = ctx.get("profile")
-    person = (ctx["program"].primary_contact_name or "").strip()
+    person = (prog.primary_contact_name or "").strip()
     if prof is not None and prof.official_name in text and (not person or person in text):
         return body
     # The sign-off goes BEFORE the opt-out line, which stays last.
@@ -428,6 +440,15 @@ def channels(prog: OutreachProgram):
 
 
 PROGRAM_CADENCE_INDUSTRY = "program"
+
+
+def own_copy_campaign(db: Session, lead: Lead) -> Optional[str]:
+    """The campaign key when this lead's campaign speaks ONLY its own copy."""
+    if program_for_org(db, lead.organization_id) is None:
+        return None
+    rec = source_record_for_lead(db, lead)
+    from app.services.programs.campaigns import OWN_COPY_KEYS
+    return rec.campaign_family if (rec is not None and rec.campaign_family in OWN_COPY_KEYS) else None
 
 
 def program_touch_text(db: Session, organization_id: str, touch_number: int) -> Optional[str]:
@@ -517,7 +538,16 @@ def cadence_text(db: Session, lead: Lead, touch_number: int) -> Optional[str]:
         if own:
             return render(own, _with_booking(db, lead, own, ctx["fields"]))
     if own_copy:
-        key = rec.campaign_family       # #385: only its own approved words, every touch
+        # #441: THIS campaign's own words for THIS touch. A blank step is None
+        # here, and cadence_service refuses it - never another campaign's text.
+        from app.services.programs import campaigns as _camp
+        fam = (db.query(CampaignFamily)
+               .filter(CampaignFamily.organization_id == lead.organization_id,
+                       CampaignFamily.key == rec.campaign_family).first())
+        tpl = _camp.sms_for(fam, touch_number) if fam is not None else None
+        if not tpl:
+            return None
+        return render(tpl, _with_booking(db, lead, tpl, ctx["fields"]))
     else:
         key = (rec.campaign_family if (rec and touch_number <= 1) else "re_engagement") or "re_engagement"
     fam = (db.query(CampaignFamily)
