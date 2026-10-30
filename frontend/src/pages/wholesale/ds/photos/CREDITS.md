@@ -43,3 +43,5 @@ Representative property photos (shown ONLY where a property has no photo of its 
 - `house09.jpg` — https://images.unsplash.com/photo-1558036117-15d82a90b9b1
 - `house10.jpg` — https://images.unsplash.com/photo-1494526585095-c41746248156
 - `house11.jpg` — https://images.unsplash.com/photo-1512917774080-9991f1c4c750
+- `land-field.jpg` — https://images.unsplash.com/photo-1500382017468-9049fed747ef (open field at sunset; Land Partners)
+- `farm-barn.jpg` — https://images.unsplash.com/photo-1500076656116-558758c991c1 (barn and silo; Farm & Ranch)

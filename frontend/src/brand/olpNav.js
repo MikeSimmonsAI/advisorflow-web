@@ -15,8 +15,8 @@
 export const OLP_NAV = Object.freeze([
   {
     label: 'Opportunity Intelligence',
-    routes: ['/wholesale/evosense/overlooked', '/wholesale/buyers', '/wholesale/buyers/buy-boxes',
-      '/wholesale/deal-room', '/wholesale/deal-room/investors'],
+    routes: ['/wholesale/evosense/overlooked', '/wholesale/land-partners', '/wholesale/farm-ranch',
+      '/wholesale/buyers', '/wholesale/buyers/buy-boxes', '/wholesale/deal-room', '/wholesale/deal-room/investors'],
   },
   {
     label: 'Market Operations',
@@ -77,7 +77,7 @@ export function olpGroups(wsGroups) {
  * existing headers (.evo-herobox, .evo-head, .drm-hero, .bbr-hero) per
  * variant, so every screen shares one type scale, eyebrow, border and
  * action placement. */
-const HERO = new Set(['/wholesale/evosense/overlooked', '/wholesale/evosense', '/wholesale/buyers', '/wholesale/deal-room', '/wholesale'])
+const HERO = new Set(['/wholesale/evosense/overlooked', '/wholesale/land-partners', '/wholesale/farm-ranch', '/wholesale/evosense', '/wholesale/buyers', '/wholesale/deal-room', '/wholesale'])
 const DETAIL = [/^\/wholesale\/evosense\/property\//, /^\/wholesale\/deals\//, /^\/wholesale\/properties\/[^/]+/,
   /^\/wholesale\/deal-room\/investors\/[^/]+/, /^\/wholesale\/buyers\/(?!buy-boxes)[^/]+/]
 
@@ -86,4 +86,27 @@ export function olpHeaderFor(pathname) {
   if (HERO.has(p)) return 'hero'
   if (DETAIL.some((re) => re.test(p))) return 'detail'
   return 'compact'
+}
+
+/* OLP WORKSPACE CARDS (owner request, Oct 29): Land Partners and Farm & Ranch
+ * are workspaces on the SAME Wholesale product. Their Choose Your Business
+ * cards exist only next to a Wholesale card the server already gave this
+ * login, and they open a fixed screen inside it - so they add no permission.
+ * The view name is checked against this fixed list before it is used. */
+export const OLP_WORKSPACES = Object.freeze([
+  { view: 'land-partners', path: '/wholesale/land-partners', program: 'land_partners', display: 'Land Partners' },
+  { view: 'farm-ranch', path: '/wholesale/farm-ranch', program: 'farm_ranch', display: 'Farm & Ranch' },
+])
+
+/** The fixed screen for an OLP workspace card's view name, or null. */
+export function olpWorkspaceView(view) {
+  const hit = OLP_WORKSPACES.find((w) => w.view === view)
+  return hit ? hit.path : null
+}
+
+/** Cards for the OLP workspaces, derived from the server-given Wholesale card. */
+export function olpWorkspaceCards(cards) {
+  const ws = (cards || []).find((c) => c && c.type === 'product' && c.key === 'wholesale')
+  if (!ws) return []
+  return OLP_WORKSPACES.map((w) => ({ ...ws, program: w.program, display: w.display, view: w.view, orgLabel: null }))
 }

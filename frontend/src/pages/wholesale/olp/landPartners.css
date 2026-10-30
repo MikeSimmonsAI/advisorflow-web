@@ -1,0 +1,68 @@
+/* OLP Land Partners workspace home. Builds on the Radar's .bbr--olp tokens;
+ * every rule is scoped to .lp so nothing else on the platform changes. */
+.lp .bbr-hero__photo { object-position: 50% 60%; }
+
+.lp-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; margin: 4px 0 18px; }
+.lp-panel {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px 18px 8px;
+  box-shadow: var(--shadow); min-width: 0;
+}
+.lp-panel__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
+.lp-panel__head h2 { margin: 0; font-family: 'Playfair Display', Georgia, serif; font-size: 21px; font-weight: 600; color: #fff; }
+.lp-link { color: var(--gold2); font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.lp-link:hover, .lp-link:focus-visible { text-decoration: underline; }
+
+.lp-list { list-style: none; margin: 0; padding: 0; }
+.lp-row { display: flex; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--border); min-width: 0; }
+.lp-row:first-child { border-top: 0; }
+.lp-row__main { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.lp-row__main b { color: #f4f6fa; font-size: 14.5px; font-weight: 700; overflow-wrap: anywhere; }
+.lp-row__main small { color: var(--muted); font-size: 12.5px; line-height: 1.35; overflow-wrap: anywhere; }
+.lp-row__main .lp-row__why { color: var(--ink2); }
+.lp-row__side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: none; text-align: right; }
+.lp-row__side small { color: var(--muted); font-size: 12px; }
+.lp-row__side small b { color: #6fdcaf; }
+.lp-row__side a { color: var(--gold2); font-size: 13px; font-weight: 700; text-decoration: none; }
+.lp-row__side a:hover, .lp-row__side a:focus-visible { text-decoration: underline; }
+
+.lp-score {
+  flex: none; width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center;
+  font-weight: 800; font-size: 15px; color: var(--gold2);
+  background: radial-gradient(circle at 30% 30%, rgba(212, 165, 76, .26), rgba(212, 165, 76, .06));
+  border: 1px solid rgba(212, 165, 76, .45);
+}
+.lp-avatar {
+  flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
+  font-weight: 800; color: #15100a; background: linear-gradient(180deg, #e6be6a, #b8862f);
+}
+.lp-tag {
+  display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 700;
+  color: #6fdcaf; background: rgba(63, 191, 138, .12); border: 1px solid rgba(63, 191, 138, .4); white-space: nowrap;
+}
+.lp-empty { display: flex; flex-direction: column; gap: 6px; padding: 16px 2px 18px; color: var(--muted); font-size: 13.5px; margin: 0; }
+.lp-empty b { color: #eef1f6; font-size: 14.5px; }
+.lp-empty a { color: var(--gold2); font-weight: 700; text-decoration: none; }
+
+.lp-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 0 0 18px; }
+.lp-tile {
+  position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; gap: 3px;
+  min-height: 138px; padding: 16px; border-radius: 14px; text-decoration: none;
+  background-size: cover; background-position: center; border: 1px solid rgba(212, 165, 76, .35);
+}
+.lp-tile__scrim { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(7, 11, 19, .15) 0%, rgba(7, 11, 19, .88) 78%); }
+.lp-tile b, .lp-tile small { position: relative; }
+.lp-tile b { color: #fff; font-family: 'Playfair Display', Georgia, serif; font-size: 19px; font-weight: 600; }
+.lp-tile small { color: #dfe4ec; font-size: 12.5px; }
+.lp-tile:hover, .lp-tile:focus-visible { border-color: var(--gold2); outline: none; }
+.lp-tile:focus-visible { box-shadow: 0 0 0 3px rgba(236, 200, 121, .45); }
+
+@media (max-width: 1100px) {
+  .lp-grid { grid-template-columns: minmax(0, 1fr); }
+  .lp-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .lp-panel { padding: 14px 12px 4px; }
+  .lp-row { align-items: flex-start; }
+  .lp-tiles { grid-template-columns: minmax(0, 1fr); }
+  .lp-tile { min-height: 110px; }
+}

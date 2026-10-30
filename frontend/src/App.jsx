@@ -155,6 +155,8 @@ import {
 const EvoCommand = lazyPage(() => import('./pages/wholesale/evosense/EvoCommand'))
 const EvoInbox = lazyPage(() => import('./pages/wholesale/evosense/EvoInbox'))
 const OpportunityRadar = lazyPage(() => import('./pages/wholesale/evosense/OpportunityRadar'))
+const LandPartners = lazyPage(() => import('./pages/wholesale/olp/LandPartners'))
+const FarmRanch = lazyPage(() => import('./pages/wholesale/olp/FarmRanch'))
 const EvoProperty = lazyPage(() => import('./pages/wholesale/evosense/EvoProperty'))
 const EvoStrategies = lazyPage(() => import('./pages/wholesale/evosense/EvoStrategies').then(m => ({ default: m.EvoStrategies })))
 const EvoStrategyBuilder = lazyPage(() => import('./pages/wholesale/evosense/EvoStrategies').then(m => ({ default: m.EvoStrategyBuilder })))
@@ -371,6 +373,7 @@ import { decideWorkspaceAccess, contextsListWorkspace,
          VERIFYING, AUTHORIZED, DENIED, UNVERIFIED } from './auth/workspaceGuard'
 import { roleOf, routeFeatureDenied } from './auth/workspaceAuthority'
 import { enterCustomer, exitCustomer } from './pages/god/enterCustomer'
+import { olpWorkspaceView } from './brand/olpNav'
 
 function isAuthenticated() {
   // Check both keys: af_token is the current key, bookaboost_token is the legacy key.
@@ -843,7 +846,12 @@ function WorkspaceRoute() {
     ).get('product')
     if (requestedProduct) {
       const path = productWorkspaceDestination(ctx, organizationId, requestedProduct)
-      if (path) return <ProductWorkspaceLaunch organizationId={organizationId} destination={path} />
+      // An OLP workspace card (Land Partners, Farm & Ranch) opens a screen inside
+      // the SAME server-proven Wholesale product. Only these fixed screens are
+      // accepted, so the parameter can never send anyone anywhere else.
+      const view = requestedProduct === 'wholesale' && path ? olpWorkspaceView(
+        new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('view')) : null
+      if (path) return <ProductWorkspaceLaunch organizationId={organizationId} destination={view || path} />
       return <Navigate to="/workspaces" replace />
     }
     // ProtectedRoute already wraps its children in Layout + ContextBanner; the
@@ -1131,6 +1139,7 @@ function WorkspaceSelector() {
     setWorkspaceContext(item.organization_id)
     const target = item.type === 'product'
       ? '/workspace/' + item.organization_id + '?product=' + encodeURIComponent(item.key)
+        + (item.view ? '&view=' + encodeURIComponent(item.view) : '')
       : '/workspace/' + item.organization_id
     navigate(target)
   }} />
@@ -1613,6 +1622,8 @@ export default function App() {
         <Route path="/wholesale/evosense" element={<ProtectedRoute feature="wholesale_real_estate"><EvoCommand /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/inbox" element={<ProtectedRoute feature="wholesale_real_estate"><EvoInbox /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/overlooked" element={<ProtectedRoute feature="wholesale_real_estate"><OpportunityRadar /></ProtectedRoute>} />
+        <Route path="/wholesale/land-partners" element={<ProtectedRoute feature="wholesale_real_estate"><LandPartners /></ProtectedRoute>} />
+        <Route path="/wholesale/farm-ranch" element={<ProtectedRoute feature="wholesale_real_estate"><FarmRanch /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/property/:propertyId" element={<ProtectedRoute feature="wholesale_real_estate"><EvoProperty /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/strategies" element={<ProtectedRoute feature="wholesale_real_estate"><EvoStrategies /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/strategies/:strategyId" element={<ProtectedRoute feature="wholesale_real_estate"><EvoStrategyBuilder /></ProtectedRoute>} />
