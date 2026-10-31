@@ -473,3 +473,38 @@ def test_resume_after_an_owner_pause_respaces_every_unfinished_family(client, pr
     r = client.post("/program/campaigns/%s/journey/start" % fam.id, headers=h, json={"confirm": "RESUME", "spacing_minutes": 7})
     assert r.status_code == 200 and r.json()["resumed"] == 2 and r.json()["started"] == 0
     assert client.get("/program/campaigns/%s/journey" % fam.id, headers=h).json()["would_resume"] == 0
+
+
+# ── Oct 31, 4:32 PM: "2 people are past their start time" ───────────────────
+
+def test_email_only_family_behind_a_provider_hold_is_held_not_started(program):
+    db, org, admin = program["db"], program["org"], program["admin"]
+    fam = _on(db, org)
+    program["prog"].email_hold_providers = '["outlook", "yahoo"]'
+    aol = _ca(db, org, admin, source="L007", phone="", email="someone@aol.com")
+    for r in db.query(ProgramSourceRecord).filter_by(lead_id=aol.id):
+        r.send_mode = "email_only"
+    ok = _ca(db, org, admin, source="L001", phone="", email="someone@gmail.com", first="ollie")
+    db.commit()
+    rows = {r["lead_id"]: r for r in journey.impact(db, program["prog"], fam)["families"]}
+    assert rows[aol.id]["action"] == "hold" and "provider on hold" in rows[aol.id]["reason"]
+    assert rows[ok.id]["action"] == "start" and rows[ok.id]["reason"] == "Email only"
+    journey.start(db, program["prog"], fam, admin, spacing_minutes=0)
+    assert all(r.journey_started_at is None for r in db.query(ProgramSourceRecord).filter_by(lead_id=aol.id))
+
+
+def test_first_messages_check_does_not_page_for_a_family_held_on_purpose(program, monkeypatch):
+    from app.services import contact_hours
+    from app.services.programs import self_check
+    db, org, admin = program["db"], program["org"], program["admin"]
+    program["prog"].email_hold_providers = '["outlook", "yahoo"]'
+    held = _ca(db, org, admin, source="L007", phone="", email="someone@msn.com", first="james")
+    late = _ca(db, org, admin, source="L001", phone="", email="someone@gmail.com", first="ollie")
+    past = datetime.utcnow() - timedelta(minutes=40)
+    for lead in (held, late):
+        for r in db.query(ProgramSourceRecord).filter_by(lead_id=lead.id):
+            r.journey_started_at, r.scheduled_start_at, r.send_mode = past, past, "email_only"
+    db.commit()
+    monkeypatch.setattr(contact_hours, "is_permitted", lambda lead, now=None: True)
+    out = self_check.first_messages_late(db, org.id, datetime.utcnow())
+    assert out["people"] == ["Ollie Testcase"]                       # a real miss is still reported

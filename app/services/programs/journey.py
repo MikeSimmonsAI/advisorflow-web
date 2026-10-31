@@ -70,6 +70,13 @@ def _assess(db: Session, prog: OutreachProgram, lead: Lead, rows: List[ProgramSo
     textable = send_approval.textable(lead) and mode not in ("email_only", "call") and lead.allow_sms is not False \
         and not (lead.phone and is_phone_suppressed(db, lead.organization_id, lead.phone))
     email_ok = _email_usable(lead) and mode != "call"
+    # #449 (Oct 31, 4:32 PM): an address whose provider the program holds
+    # (Outlook / Yahoo / AOL ...) gets no email. A family with no textable
+    # phone and only such an address can't be reached - never "started".
+    from app.services.programs.email_touches import provider_hold_reason
+    email_hold = provider_hold_reason(prog, lead.email) if email_ok else None
+    if email_hold:
+        email_ok = False
     first_email = touches.get(1)
     out = {"lead_id": lead.id, "started": started, "textable": textable, "email_ok": email_ok,
            "email_1": first_email.status if first_email else None,
@@ -90,6 +97,8 @@ def _assess(db: Session, prog: OutreachProgram, lead: Lead, rows: List[ProgramSo
         return dict(out, action="hold", reason=review.split(":")[0].title())
     if any(t.status in UNRESOLVED_EMAIL for t in touches.values()):
         return dict(out, action="hold", reason="An email's outcome is unknown - check it before starting")
+    if not textable and email_hold:
+        return dict(out, action="hold", reason="Email provider on hold and no phone that takes texts")
     if not textable and not email_ok:
         return dict(out, action="hold", reason="No usable phone or email - correct the record first")
     channel = "Text + email" if textable and email_ok else "Text only" if textable else "Email only"
