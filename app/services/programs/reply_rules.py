@@ -118,7 +118,7 @@ _STOP_WORDS = r"^\s*(stop|stopall|unsubscribe|end|quit|cancel|optout|opt out|rem
 _OPT_OUT_PHRASES = (r"\b(remove me|take me off|unsubscribe me|opt me out|do not (contact|text|email|call) me|"
                     r"(don'?t|do not|never)( ever)? (contact|text|email|call)( or (text|call|email))? me|"
                     r"stop (texting|emailing|contacting) me|leave me alone|"
-                    r"not interested|no thank(s| you)|lose my number|"
+                    r"not interested|no longer interested|no thank(s| you)|lose my number|"
                     # Spanish (#11)
                     r"no gracias|no quiero (una )?cita|(no|nunca) me (manden|mande|env[ií]en|escriban|llame|llamen)|ya no (me )?(manden|escriban)|"
                     r"no (estoy|estamos) interesad[oa]s?|no (me|nos) interesa|b[oó]rr(a|e)me|"
@@ -250,7 +250,7 @@ def intents(body: str, cls: Optional[str] = None) -> List[str]:
     if APPOINTMENT not in found and not re.search(_BEREAVEMENT, text) \
             and cls not in (OPT_OUT, WRONG_PERSON, BAD_DATA) and (_names_a_time(text) or _picks_a_time(text)):
         found.insert(0, APPOINTMENT)                     # a day / time named is about a visit
-    if re.search(_OPT_OUT_PHRASES, text) and re.search(r"\b(not interested|no thank(s| you))\b", text):
+    if re.search(_OPT_OUT_PHRASES, text) and re.search(r"\b(not interested|no longer interested|no thank(s| you))\b", text):
         found.append(NOT_INTERESTED)
     implied = {OPT_OUT: I_OPT_OUT, WRONG_PERSON: I_WRONG_PERSON, BAD_DATA: I_BAD_DATA}.get(cls)
     if implied:
