@@ -100,8 +100,22 @@ def first_messages_late(db: Session, org_id: str, now: datetime) -> Dict:
     got = {i for (i,) in db.query(Message.lead_id).filter(Message.lead_id.in_(ids)).distinct().all()}
     got |= {i for (i,) in db.query(EmailMessage.lead_id).filter(EmailMessage.lead_id.in_(ids)).distinct().all()}
     leads = {l.id: l for l in db.query(Lead).filter(Lead.id.in_(ids)).all()}
+    # #449: a family whose only way in is an email the program holds on
+    # purpose (Outlook / Yahoo / AOL provider hold) and no phone that takes
+    # texts is not LATE - nothing is allowed to go to them. That is shown in
+    # Campaigns (held, with the reason), not paged as a missed start.
+    from app.services.programs import identity as _id
+    from app.services.programs.email_touches import provider_hold_reason
+    from app.services.programs.send_approval import textable
+    prog = _id.program_for_org(db, org_id)
+    mode = {r.lead_id: (r.send_mode or "text_email") for r in recs}
+
+    def held_on_purpose(l) -> bool:
+        can_text = textable(l) and mode.get(l.id) not in ("email_only", "call")
+        return not can_text and bool(provider_hold_reason(prog, l.email)) if prog is not None else False
     bad = [_name(leads[i]) for i in ids if i not in got and i in leads and not leads[i].is_test
-           and leads[i].status not in ("dnc", "booked") and contact_hours.is_permitted(leads[i], now)]
+           and leads[i].status not in ("dnc", "booked") and contact_hours.is_permitted(leads[i], now)
+           and not held_on_purpose(leads[i])]
     return _check("first_messages_late", "First messages on schedule", bad,
                   "Everyone scheduled for a first message got one.",
                   "%d people are past their start time and have not been texted or emailed.")
