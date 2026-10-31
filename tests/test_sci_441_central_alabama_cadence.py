@@ -152,6 +152,9 @@ def test_all_five_emails_go_with_their_own_words_and_pass_the_quality_gate(progr
     db, org, admin = program["db"], program["org"], program["admin"]
     et = _email_ready(db, org, monkeypatch)
     lead = _ca_lead(db, org, admin, phone="")                         # email-only family
+    for r in db.query(ProgramSourceRecord).filter_by(lead_id=lead.id):   # #449: journey started
+        r.journey_started_at = datetime.utcnow()
+    db.commit()
     sent = []
     now = datetime.utcnow()
     for n in range(5):
@@ -189,6 +192,8 @@ def test_a_reply_or_a_booking_ends_the_emails(program, monkeypatch):
     db, org, admin = program["db"], program["org"], program["admin"]
     et = _email_ready(db, org, monkeypatch)
     lead = _ca_lead(db, org, admin)
+    for r in db.query(ProgramSourceRecord).filter_by(lead_id=lead.id):   # #449: journey started
+        r.journey_started_at = datetime.utcnow()
     responses.on_inbound(db, lead, "Thursday works", "sms")
     db.commit()
     sent = []

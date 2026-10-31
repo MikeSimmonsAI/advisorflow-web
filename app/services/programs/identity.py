@@ -339,6 +339,14 @@ HOLD_REFUSAL = (
 CAMPAIGN_OFF_REFUSAL = (
     "CAMPAIGN OFF: this contact's campaign is not switched on, so no automated "
     "message goes out. A person can still reply by hand.")
+# #449: Oct 31 - switching Central Alabama on released its emails to every
+# approved family at once while no text journey existed. A campaign that
+# speaks only its own words now sends NOTHING, on any channel, to a family
+# whose journey a person has not started (Campaigns > Start / Resume Journey).
+JOURNEY_NOT_STARTED_REFUSAL = (
+    "JOURNEY NOT STARTED: this family is approved but their journey has not been "
+    "started, so nothing automated goes out yet. Start it in Campaigns.")
+JOURNEY_GATED_SOURCES = (None, "cadence", "campaign", "bulk", "bulk_ai", "auto_send")
 
 
 def send_refusal(db: Session, lead: Lead, send_source: Optional[str] = None) -> Optional[str]:
@@ -378,11 +386,20 @@ def send_refusal(db: Session, lead: Lead, send_source: Optional[str] = None) -> 
         if not rec.campaign_family:
             return CAMPAIGN_OFF_REFUSAL
         key = rec.campaign_family
-        fam = (db.query(CampaignFamily)
-               .filter(CampaignFamily.organization_id == lead.organization_id,
-                       CampaignFamily.key == key).first())
-        if fam is None or not fam.is_active:
+        # #449: read the switch from the database at THIS moment (not a copy
+        # the session already holds), so an owner's pause stops the very
+        # next provider call of a running batch.
+        active = (db.query(CampaignFamily.is_active)
+                  .filter(CampaignFamily.organization_id == lead.organization_id,
+                          CampaignFamily.key == key).scalar())
+        if not active:
             return CAMPAIGN_OFF_REFUSAL
+        from app.services.programs.campaigns import OWN_COPY_KEYS
+        # Cold outreach only: answering a family who wrote back or booked
+        # (setter replies, appointment follow-ups) is never held by this.
+        if key in OWN_COPY_KEYS and send_source in JOURNEY_GATED_SOURCES \
+                and not any(getattr(r, "journey_started_at", None) for r in recs):
+            return JOURNEY_NOT_STARTED_REFUSAL
     return None
 
 

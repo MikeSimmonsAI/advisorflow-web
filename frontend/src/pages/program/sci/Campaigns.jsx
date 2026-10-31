@@ -8,7 +8,7 @@
    needs the campaign's exact name typed (enforced again on the server:
    POST /campaigns/{id}/activation) and is audit-logged. Nothing on this page
    switches anything on by itself. */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../../../api/client'
 import {
@@ -47,6 +47,7 @@ export default function Campaigns({ isManager, locationId, locations, performanc
   const [roster, setRoster] = useState(null)
   const [rosterErr, setRosterErr] = useState('')
   const previewRef = useRef(null)
+  const [journeyVersion, setJourneyVersion] = useState(0)
   const dirty = Object.keys(draft).length > 0
 
   useEffect(() => {
@@ -254,7 +255,12 @@ export default function Campaigns({ isManager, locationId, locations, performanc
             draft={draft} setDraft={setDraft} onPreview={showPreview}
             onSaved={f => { replace(f); setPreviewVersion(v => v + 1) }} onError={setErr} />
         )}
-        {cur?.key === 'central_alabama_ms' && <Roster locations={homes} d={roster} err={rosterErr} onReload={loadRoster} />}
+        {cur?.key === 'central_alabama_ms' && <DeliveryPanel key={`d-${cur.is_active}-${journeyVersion}`} />}
+        {cur?.key === 'central_alabama_ms' && (
+          <JourneyPanel cur={cur} isManager={isManager} version={journeyVersion}
+            onDone={() => { setJourneyVersion(v => v + 1); loadRoster() }} />
+        )}
+        {cur?.key === 'central_alabama_ms' && <Roster locations={homes} d={roster} err={rosterErr} onReload={loadRoster} isManager={isManager} />}
 
         {cur && (
           <Panel title="Campaign controls" labelledBy="sci-controls">
@@ -290,7 +296,9 @@ export default function Campaigns({ isManager, locationId, locations, performanc
 
       <TypedConfirm open={confirmOn && !!cur} title={`Switch on "${cur?.name}"?`} phrase={cur?.name} actionLabel="Switch campaign on"
         tone="dangerfill" busy={busy} onCancel={() => setConfirmOn(false)} onConfirm={typed => activate(true, typed)}>
-        <p style={{ margin: 0 }}>Automated texts and emails may start going to contacts <b>already enrolled</b> in this campaign, after the server's consent, STOP, do-not-call and suppression checks. This is audit-logged.</p>
+        {cur?.own_copy
+          ? <p style={{ margin: 0 }}>Switching on <b>sends nothing by itself</b>. Messages go only to families whose journey you start next (Start / Resume Journey), after the server's consent, STOP, do-not-call and suppression checks. This is audit-logged.</p>
+          : <p style={{ margin: 0 }}>Automated texts and emails may start going to contacts <b>already enrolled</b> in this campaign, after the server's consent, STOP, do-not-call and suppression checks. This is audit-logged.</p>}
       </TypedConfirm>
     </>
   )
@@ -358,9 +366,9 @@ function CampaignHeader({ cur, roster, dirty }) {
           note={cur.last_saved_by ? `by ${cur.last_saved_by}` : undefined} />
       </section>
       <p className="sci-micro sci-muted" style={{ margin: '10px 0 0' }}>
-        {cur.is_active ? 'Switched on: messages go to approved families after the server’s consent, STOP and do-not-call checks.'
-          : `Off - nothing is sent. Sent so far: ${num(roster?.texts_sent ?? 0)} texts, ${num(roster?.emails_sent ?? 0)} emails.`}
-        {' '}Saving or previewing never switches it on.
+        {cur.is_active ? 'Switched on: messages go only to families whose journey has started, after the server’s consent, STOP and do-not-call checks.'
+          : 'Off - nothing automated goes out.'}
+        {' '}Switching it on sends nothing by itself: each family's journey is started below (Start / Resume Journey). Saving or previewing never switches it on.
       </p>
     </Panel>
   )
@@ -502,15 +510,18 @@ const ROSTER_FILTERS = [
   ['all', 'All approved', () => true],
   ['phone', 'With phone', r => r.has_phone],
   ['email_only', 'Email only', r => !r.has_phone && r.has_email],
+  ['not_started', 'Journey not started', r => r.journey === 'Not started'],
   ['awaiting', 'Awaiting contact', r => !r.contacted && !r.replied && !r.booked && !r.stop_dnc && !r.on_hold],
   ['contacted', 'Contacted', r => r.contacted],
   ['replied', 'Replied', r => r.replied],
   ['booked', 'Appointment booked', r => r.booked],
   ['hold', 'On hold', r => r.on_hold],
   ['stop', 'STOP / DNC', r => !!r.stop_dnc],
+  ['bounced', 'Email bounced', r => !!r.email_failure || r.email_flagged],
 ]
 
-function Roster({ locations, d, err, onReload }) {
+function Roster({ locations, d, err, onReload, isManager }) {
+  const [open, setOpen] = useState('')
   const [loc, setLoc] = useState('')
   const [q, setQ] = useState('')
   const [show, setShow] = useState('all')
@@ -528,7 +539,8 @@ function Roster({ locations, d, err, onReload }) {
           <b>{num(d.with_phone)}</b> can get texts and email · <b>{num(d.email_only)}</b> email only
           {d.no_phone_on_file ? <> ({num(d.no_phone_on_file)} have no phone on file)</> : null}
           {d.unreachable ? <> · <b>{num(d.unreachable)}</b> no phone or email</> : null} · contacted: {num(d.contacted)} ·
-          sent: {num(d.texts_sent)} texts, {num(d.emails_sent)} emails · {num(d.replied)} replied · {num(d.booked)} booked
+          reached: {num(d.texts_sent)} texts, {num(d.emails_sent)} emails{d.emails_bounced ? <> (plus {num(d.emails_bounced)} {d.emails_bounced === 1 ? 'family' : 'families'} whose email bounced)</> : null} · journeys started: {num(d.journey_started ?? 0)} ·
+          {' '}{num(d.replied)} replied · {num(d.booked)} booked
           {d.stop_dnc ? <> · {num(d.stop_dnc)} STOP/DNC</> : null}
         </p>
         <FilterChips label="Show" value={show} onChange={setShow} items={ROSTER_FILTERS.map(([k, l]) => [k, l, counts[k]])} />
@@ -544,26 +556,34 @@ function Roster({ locations, d, err, onReload }) {
         <div className="sci-tablewrap" style={{ maxHeight: 460, overflow: 'auto' }}>
           <table className="sci-table compact">
             <thead><tr>
-              <th>Family</th><th>Location</th><th>Phone</th><th>Email</th><th>Reached by</th><th>Status</th>
+              <th>Family</th><th>Location</th><th>Journey</th><th>Phone</th><th>Email</th><th>Reached by</th><th>Status</th><th>Email outcome</th>
               <th>Last touch</th><th>Next touch</th><th>Reply</th><th>Appointment</th><th>STOP / DNC</th>
             </tr></thead>
             <tbody>
-              {rows.map(r => (
-                <tr key={r.lead_id}>
-                  <td><a href={`/program?tab=leads&person=${r.lead_id}`}>{r.name || 'Contact'}</a></td>
+              {rows.map(r => (<Fragment key={r.lead_id}>
+                <tr>
+                  <td>
+                    <button type="button" className="sci-btn sm" aria-expanded={open === r.lead_id}
+                      onClick={() => setOpen(o => (o === r.lead_id ? '' : r.lead_id))}>{r.name || 'Contact'}</button>
+                  </td>
                   <td className="sci-small">{r.location || '—'}</td>
+                  <td className="sci-small">{r.journey}{r.journey_starts_at && r.journey === 'Scheduled' ? ` · ${when(r.journey_starts_at)}` : ''}</td>
                   <td className="sci-small">{r.phone_on_file ? (r.has_phone ? 'Yes' : 'On file, can’t text') : 'None on file'}</td>
                   <td className="sci-small">{r.email_on_file ? 'Yes' : 'None'}</td>
                   <td className="sci-small">{r.path}</td>
                   <td className="sci-small">{r.status}</td>
+                  <td className="sci-small" title={r.email_failure || undefined}>{r.email_outcome || '—'}{r.email_flagged ? ' · address flagged' : ''}</td>
                   <td className="sci-small">{r.last_touch ? `${r.last_touch} · ${when(r.last_touch_at)}` : 'None yet'}</td>
                   <td className="sci-small">{r.next_touch ? `${r.next_touch.label} · ${when(r.next_touch.at)}` : '—'}</td>
                   <td className="sci-small">{r.replied ? 'Replied' : '—'}</td>
                   <td className="sci-small">{r.booked ? 'Booked' : '—'}</td>
                   <td className="sci-small">{r.stop_dnc || '—'}</td>
                 </tr>
-              ))}
-              {rows.length === 0 && <tr><td colSpan={11} className="sci-small sci-muted">No family matches.</td></tr>}
+                {open === r.lead_id && (
+                  <tr><td colSpan={14}><FamilyHistory leadId={r.lead_id} isManager={isManager} onChanged={onReload} /></td></tr>
+                )}
+              </Fragment>))}
+              {rows.length === 0 && <tr><td colSpan={14} className="sci-small sci-muted">No family matches.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -580,5 +600,210 @@ function Roster({ locations, d, err, onReload }) {
         )}
       </>)}
     </Panel>
+  )
+}
+
+/* #449: what really happened in this campaign, per channel, from the
+   message records. Microsoft reports failures only - an email with no
+   failure notice is "accepted", never "delivered". */
+function DeliveryPanel() {
+  const [d, setD] = useState(null)
+  const [err, setErr] = useState('')
+  const load = () => { setErr(''); api.get('/program/central-alabama/delivery').then(setD).catch(e => setErr(errText(e))) }
+  useEffect(load, [])
+  const stat = (v, label, tone) => (
+    <div className="sci-stat"><b style={tone ? { color: tone } : undefined}>{v == null ? '—' : num(v)}</b><span>{label}</span></div>
+  )
+  const e = d?.email || {}
+  const s = d?.sms || {}
+  const j = d?.journey || {}
+  return (
+    <Panel title="What actually happened" labelledBy="sci-ca-delivery" style={{ gridColumn: '1 / -1' }}
+      aside={<button type="button" className="sci-btn sm" onClick={load}><Icon name="refresh" size={12} />Refresh</button>}>
+      <ErrorLine text={err} />
+      {!d ? (!err && <Loading />) : (<>
+        <p className="sci-micro" style={{ marginTop: 0 }}>
+          Campaign is <b>{d.campaign_active ? 'ON' : 'OFF'}</b>{d.owner_paused ? ' (paused by a person)' : ''}.
+          {d.last_on ? <> Last switched on {when(d.last_on.at)}{d.last_on.by ? ` by ${d.last_on.by}` : ''}.</> : null}
+          {d.last_off ? <> Last paused {when(d.last_off.at)}{d.last_off.by ? ` by ${d.last_off.by}` : ''}.</> : null}
+        </p>
+        <b className="sci-micro">Families</b>
+        <div className="sci-statstrip" style={{ margin: '4px 0 10px', flexWrap: 'wrap' }}>
+          {stat(j.approved, 'Approved')}{stat(j.awaiting_start, 'Journey not started')}{stat(j.scheduled, 'Scheduled')}
+          {stat(j.started, 'Started')}{stat(j.contacted, 'Reached at least once')}{stat(j.sms_in_progress, 'Texts in progress')}
+          {stat(j.email_in_progress, 'Emails in progress')}{stat(j.replied, 'Replied')}{stat(j.booked, 'Booked')}
+          {stat(j.on_hold, 'On hold')}{stat(j.completed, 'Completed')}
+        </div>
+        <b className="sci-micro">Email</b>
+        <div className="sci-statstrip" style={{ margin: '4px 0 4px', flexWrap: 'wrap' }}>
+          {stat(e.attempted, 'Attempted')}{stat(e.provider_accepted, 'Accepted by Microsoft')}
+          {stat(e.accepted_no_failure_reported, 'No failure reported')}
+          {stat(e.permanent_bounce, 'Address does not exist', 'var(--bad)')}{stat(e.rejected, 'Refused by their server', 'var(--bad)')}
+          {stat(e.expired, 'Never accepted (expired)', 'var(--bad)')}{stat(e.temporary_failure, 'Delayed')}
+          {stat(e.blocked, 'Blocked by their spam filter')}{stat(e.sender_config, 'Our setup refused')}{stat(e.unknown, 'Outcome unknown')}{stat(e.held, 'Held')}
+          {stat(e.not_attempted, 'Not attempted')}
+        </div>
+        <p className="sci-micro sci-muted" style={{ margin: '0 0 10px' }}>Delivered: not reported. {e.delivered_note}</p>
+        <b className="sci-micro">Text</b>
+        <div className="sci-statstrip" style={{ margin: '4px 0 10px', flexWrap: 'wrap' }}>
+          {stat(s.scheduled, 'Scheduled (first text)')}{stat(s.attempted, 'Attempted')}{stat(s.accepted, 'Accepted by carrier')}
+          {stat(s.delivered, 'Delivered')}{stat(s.failed, 'Failed', 'var(--bad)')}{stat(s.blocked, 'Blocked by checks')}
+          {stat(s.remaining, 'Texts remaining')}
+        </div>
+        {d.history?.length > 0 && (
+          <details className="sci-details">
+            <summary>On / off and journey history ({d.history.length})</summary>
+            <div className="sci-details-body sci-micro">
+              {d.history.map((h, i) => <p key={i} style={{ margin: '0 0 4px' }}>{when(h.at)} - {h.action}{h.by ? ` - ${h.by}` : ''}</p>)}
+            </div>
+          </details>
+        )}
+      </>)}
+    </Panel>
+  )
+}
+
+/* #449: Start / Resume Journey. A read-only preview first; starting only
+   SCHEDULES each family's first message, spaced out, and never starts anyone
+   twice. Typed confirmation. The runners send at the scheduled times, through
+   every existing check. */
+function JourneyPanel({ cur, isManager, version, onDone }) {
+  const [imp, setImp] = useState(null)
+  const [err, setErr] = useState('')
+  const [count, setCount] = useState('')
+  const [spacing, setSpacing] = useState(5)
+  const [startAt, setStartAt] = useState('')
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState(null)
+  const load = () => {
+    setErr('')
+    api.get(`/program/campaigns/${cur.id}/journey`).then(setImp).catch(e => setErr(errText(e)))
+  }
+  useEffect(load, [cur.id, cur.is_active, version]) // eslint-disable-line react-hooks/exhaustive-deps
+  const n = imp ? (count === '' ? imp.will_start : Math.max(0, Math.min(imp.will_start, parseInt(count, 10) || 0))) : 0
+  const phrase = n > 0 ? `START ${n}` : (imp?.would_resume ? 'RESUME' : '')
+  const go = async typed => {
+    setBusy(true); setErr('')
+    try {
+      const body = { confirm: typed, spacing_minutes: Number(spacing) || 0 }
+      if (count !== '') body.count = n
+      if (startAt) body.start_at = new Date(startAt).toISOString()
+      setResult(await api.post(`/program/campaigns/${cur.id}/journey/start`, body))
+      setConfirmOpen(false); onDone()
+    } catch (e) { setErr(errText(e)); setConfirmOpen(false) } finally { setBusy(false) }
+  }
+  const lastAt = imp && n > 0 ? new Date((startAt ? new Date(startAt) : new Date()).getTime() + (n - 1) * (Number(spacing) || 0) * 60000) : null
+  return (
+    <Panel title="Start / Resume Journey" labelledBy="sci-ca-journey" style={{ gridColumn: '1 / -1' }}>
+      <p className="sci-micro sci-muted" style={{ marginTop: 0 }}>
+        Approval and switching the campaign on send nothing. Starting a family's journey schedules their first message;
+        texts come first, emails follow. Nobody is started twice, a message that already went is never repeated,
+        and families who replied, booked, are on hold or on STOP/DNC are left alone.
+      </p>
+      <ErrorLine text={err} />
+      {!imp ? (!err && <Loading />) : (<>
+        <div className="sci-statstrip" style={{ flexWrap: 'wrap', marginBottom: 8 }}>
+          <div className="sci-stat"><b>{num(imp.approved)}</b><span>Approved</span></div>
+          <div className="sci-stat"><b>{num(imp.already_started)}</b><span>Already started (keep their place)</span></div>
+          <div className="sci-stat"><b>{num(imp.will_start)}</b><span>Ready to start</span></div>
+          <div className="sci-stat"><b>{num(imp.will_start_text)}</b><span>…with texts</span></div>
+          <div className="sci-stat"><b>{num(imp.will_start_email_only)}</b><span>…email only</span></div>
+          <div className="sci-stat"><b>{num(imp.would_resume)}</b><span>To resume after a pause</span></div>
+        </div>
+        {imp.email_1_already_sent > 0 && (
+          <p className="sci-micro" style={{ margin: '0 0 6px' }}>
+            {num(imp.email_1_already_sent)} of them already got Email 1 - it is not repeated; their emails continue at Email 2, and their first text is Text 1.
+          </p>
+        )}
+        {Object.keys(imp.held || {}).length > 0 && (
+          <p className="sci-micro" style={{ margin: '0 0 8px' }}>
+            Not started: {Object.entries(imp.held).map(([k, v]) => `${num(v)} ${k.toLowerCase()}`).join(' · ')}
+          </p>
+        )}
+        <div className="sci-form" style={{ marginBottom: 8 }}>
+          <Field label="How many to start now" hint={`Leave blank for all ${num(imp.will_start)}`}>
+            <input type="number" min={0} max={imp.will_start} value={count} onChange={e => setCount(e.target.value)} placeholder="All" />
+          </Field>
+          <Field label="Minutes between families" hint="Spreads the first messages out">
+            <input type="number" min={0} max={1440} value={spacing} onChange={e => setSpacing(e.target.value)} />
+          </Field>
+          <Field label="First one at" hint="Blank = now. Contact hours still apply.">
+            <input type="datetime-local" value={startAt} onChange={e => setStartAt(e.target.value)} />
+          </Field>
+        </div>
+        {lastAt && <p className="sci-micro sci-muted" style={{ margin: '0 0 8px' }}>The last of these {num(n)} would be scheduled around {when(lastAt.toISOString())}.</p>}
+        {isManager ? (
+          <button type="button" className="sci-btn gold" disabled={!cur.is_active || !phrase || busy}
+            title={!cur.is_active ? 'Switch the campaign on first - that alone sends nothing' : undefined}
+            onClick={() => setConfirmOpen(true)}>
+            <Icon name="play" />{n > 0 ? `Start ${num(n)} journeys…` : imp.would_resume ? 'Resume journeys…' : 'Nothing to start'}
+          </button>
+        ) : <p className="sci-micro sci-muted">Only a workspace manager can start journeys.</p>}
+        {!cur.is_active && <p className="sci-micro" style={{ marginTop: 6 }}>The campaign is off. Switch it on in Campaign controls first - that alone sends nothing.</p>}
+        {result && (
+          <p className="sci-micro" role="status" style={{ marginTop: 8 }}>
+            Started {num(result.started)} ({num(result.texting)} with texts, {num(result.email_only)} email only)
+            {result.resumed ? `, resumed ${num(result.resumed)}` : ''}. First at {when(result.first_at)}, last around {when(result.last_at)}. Nothing was sent by this button.
+          </p>
+        )}
+      </>)}
+      <TypedConfirm open={confirmOpen} title="Start these journeys?" phrase={phrase} actionLabel="Start journeys"
+        tone="dangerfill" busy={busy} onCancel={() => setConfirmOpen(false)} onConfirm={go}>
+        <p style={{ margin: 0 }}>
+          {n > 0 ? <>{num(n)} families get their first message scheduled, {Number(spacing) || 0} minutes apart. </> : null}
+          {imp?.would_resume ? <>{num(imp.would_resume)} paused families pick up where they left off, re-spaced. </> : null}
+          Messages go at the scheduled times through every check (contact hours, STOP, do-not-call, replies). This is audit-logged.
+        </p>
+      </TypedConfirm>
+    </Panel>
+  )
+}
+
+/* #449: one family's real history in this campaign, and - after a bounce -
+   a controlled correction. Correcting never resends anything. */
+function FamilyHistory({ leadId, isManager, onChanged }) {
+  const [d, setD] = useState(null)
+  const [err, setErr] = useState('')
+  const [email, setEmail] = useState('')
+  const [checked, setChecked] = useState(false)
+  const [note, setNote] = useState('')
+  const load = () => api.get(`/program/central-alabama/family/${leadId}/events`).then(setD).catch(e => setErr(errText(e)))
+  useEffect(() => { load() }, [leadId]) // eslint-disable-line react-hooks/exhaustive-deps
+  const recover = async () => {
+    setErr(''); setNote('')
+    try {
+      const r = await api.post(`/program/people/${leadId}/email-recovery`, email.trim() ? { email: email.trim() } : { confirm_address_is_right: checked })
+      setNote(r.note); setEmail(''); setChecked(false); load(); onChanged()
+    } catch (e) { setErr(errText(e)) }
+  }
+  if (err && !d) return <ErrorLine text={err} />
+  if (!d) return <Loading />
+  return (
+    <div className="sci-micro" style={{ padding: '6px 4px' }}>
+      <ul style={{ margin: '0 0 8px', paddingLeft: 18 }}>
+        {d.events.map((e, i) => (
+          <li key={i}>{when(e.at)} · {e.channel !== '-' ? `${e.channel} · ` : ''}<b>{e.what}</b>{e.detail ? ` - ${e.detail}` : ''}</li>
+        ))}
+        {d.events.length === 0 && <li>Nothing yet.</li>}
+      </ul>
+      {d.email_flagged && (
+        <div className="sci-alert" style={{ display: 'block' }}>
+          <p style={{ margin: '0 0 6px' }}><Icon name="alert" /> Email address flagged: {d.email_flag_reason || 'it bounced'}. No more email goes to it. Texts are not affected.</p>
+          {isManager && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Corrected email address" style={{ minWidth: 220 }} />
+              <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <input type="checkbox" checked={checked} disabled={!!email.trim()} onChange={e => setChecked(e.target.checked)} />I checked this address and it is right
+              </label>
+              <button type="button" className="sci-btn sm" disabled={!email.trim() && !checked} onClick={recover}>Save</button>
+            </div>
+          )}
+        </div>
+      )}
+      <ErrorLine text={err} />
+      {note && <p role="status">{note}</p>}
+      <a href={`/program?tab=leads&person=${leadId}`}>Open the full record</a>
+    </div>
   )
 }

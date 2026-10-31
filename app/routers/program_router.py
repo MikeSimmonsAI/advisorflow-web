@@ -1860,6 +1860,10 @@ def set_campaign_active(family_id: str, body: ActivationIn, db: Session = Depend
         if why:
             raise HTTPException(status_code=422, detail=why)
     f.is_active = bool(body.active)
+    if not f.is_active:
+        from app.services.programs import campaigns as _c449, journey as _j449
+        if f.key in _c449.OWN_COPY_KEYS:
+            _j449.mark(f, "paused_at")        # #449: Resume re-spaces everyone after this
     from app.routers.audit_log_router import log_action
     log_action(db, prog.organization_id, user.id, action="program.campaign_%s" % ("on" if f.is_active else "off"),
                target_type="program_campaign_family", target_id=f.id, details={"key": f.key, "name": f.name})
@@ -2041,6 +2045,7 @@ def central_alabama_roster(location_id: Optional[str] = Query(None), db: Session
         by_lead.setdefault(r.lead_id, r)
     ids = list(by_lead)
     leads, texts, emails, replied, booked, cad, last_email = {}, {}, {}, set(), set(), {}, {}
+    bounce_of, email_failed = {}, {}
     for i in range(0, len(ids), 500):
         chunk = ids[i:i + 500]
         for l in db.query(Lead).filter(Lead.id.in_(chunk), Lead.organization_id == org_id).all():
@@ -2050,9 +2055,18 @@ def central_alabama_roster(location_id: Optional[str] = Query(None), db: Session
                                Message.delivery_status.notin_(("failed", "undelivered")))
                        .group_by(Message.lead_id).all()):
             texts[lid] = n
-        for t in (db.query(ProgramEmailTouch)
-                  .filter(ProgramEmailTouch.lead_id.in_(chunk), ProgramEmailTouch.status == "sent").all()):
-            emails[t.lead_id] = emails.get(t.lead_id, 0) + 1
+        sent_touches = (db.query(ProgramEmailTouch)
+                        .filter(ProgramEmailTouch.lead_id.in_(chunk), ProgramEmailTouch.status == "sent").all())
+        from app.models.models import EmailMessage as _EM
+        _mids = [t.email_message_id for t in sent_touches if t.email_message_id]
+        for m in (db.query(_EM).filter(_EM.id.in_(_mids)).all() if _mids else []):
+            bounce_of[m.id] = (m.bounce_type, m.error)
+        for t in sent_touches:
+            bt = bounce_of.get(t.email_message_id, (None, None))[0]
+            if bt in ("permanent", "rejected", "expired"):
+                email_failed[t.lead_id] = bounce_of[t.email_message_id]
+            else:
+                emails[t.lead_id] = emails.get(t.lead_id, 0) + 1   # accepted, no failure reported
             prev = last_email.get(t.lead_id)
             if prev is None or (t.touch_number or 0) > (prev.touch_number or 0):
                 last_email[t.lead_id] = t
@@ -2115,16 +2129,33 @@ def central_alabama_roster(location_id: Optional[str] = Query(None), db: Session
             status = "On hold"
         elif contacted:
             status = "Contacted"
+        elif lid in email_failed:
+            status = "Email bounced - not reached"
         elif not on:
             status = "Approved - campaign off, nothing sent"
+        elif not any(x.journey_started_at for x in recs if x.lead_id == lid):
+            status = "Approved - journey not started"
         else:
             status = "Approved - awaiting first message"
         nxt = None
         if on and c is not None and c.status == "active" and c.next_touch_due_at and status in (
                 "Contacted", "Approved - awaiting first message"):
             nxt = {"label": "Text %d" % ((c.current_touch_number or 0) + 1), "at": iso(c.next_touch_due_at)}
+        from app.services.programs import bounces as _bn
+        mine = [x for x in recs if x.lead_id == lid]
+        j_started = any(x.journey_started_at for x in mine)
+        j_at = max((x.scheduled_start_at for x in mine if x.scheduled_start_at), default=None)
+        journey_state = ("Not started" if not j_started else
+                         "Scheduled" if j_at and j_at > datetime.utcnow() else "Started")
+        ef = email_failed.get(lid)
+        email_outcome = (_bn.describe(ef[0], None) if ef else
+                         ("Accepted, no failure reported" if emails.get(lid) else None))
         rows.append({"lead_id": lid, "name": ("%s %s" % (l.first_name or "", l.last_name or "")).strip().title(),
                      "location_id": r.location_id, "location": names.get(r.location_id),
+                     "journey": journey_state, "journey_starts_at": iso(j_at) if j_started else None,
+                     "email_outcome": email_outcome, "email_failure": ef[1] if ef else None,
+                     "email_flagged": (l.manual_flag or "") == "bad_email",
+                     "emails_bounced": 1 if ef else 0,
                      "path": path, "has_phone": has_phone, "has_email": has_email,
                      "phone_on_file": bool(l.phone), "email_on_file": bool((l.email or "").strip()),
                      "approved": True, "on_hold": on_hold, "contacted": contacted,
@@ -2151,10 +2182,304 @@ def central_alabama_roster(location_id: Optional[str] = Query(None), db: Session
             "unreachable": sum(1 for x in rows if not x["has_phone"] and not x["has_email"]),
             "contacted": sum(1 for x in rows if x["contacted"]),
             "texts_sent": sum(x["texts_sent"] for x in rows), "emails_sent": sum(x["emails_sent"] for x in rows),
+            "emails_bounced": sum(x["emails_bounced"] for x in rows),
+            "journey_started": sum(1 for x in rows if x["journey"] != "Not started"),
             "replied": sum(1 for x in rows if x["replied"]), "booked": sum(1 for x in rows if x["booked"]),
             "stop_dnc": sum(1 for x in rows if x["stop_dnc"] in ("STOP / do not contact", "Removed from all outreach")),
             "on_hold": sum(1 for x in rows if x["on_hold"]),
             "held": held, "rows": rows}
+
+
+# ── #449: Start / Resume Journey, delivery truth, family history, recovery ──
+
+from app.models.program_models import ProgramEmailTouch  # noqa: E402
+
+def _ca_family(db: Session, prog, family_id: Optional[str] = None) -> CampaignFamily:
+    from app.services.programs import campaigns as _camp
+    q = db.query(CampaignFamily).filter(CampaignFamily.organization_id == prog.organization_id)
+    f = (q.filter(CampaignFamily.id == family_id) if family_id else
+         q.filter(CampaignFamily.key == _camp.CENTRAL_ALABAMA_KEY)).first()
+    if f is None:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+    if f.key not in _camp.OWN_COPY_KEYS:
+        raise HTTPException(status_code=422, detail="Start / Resume Journey is for campaigns with their own sequence.")
+    return f
+
+
+@router.get("/campaigns/{family_id}/journey")
+def journey_impact(family_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """READ-ONLY preview of Start / Resume Journey: who would start, who keeps
+    their place, who is held and why. Sends nothing, changes nothing."""
+    from app.services.programs import journey
+    prog = _program(db, user)
+    f = _ca_family(db, prog, family_id)
+    out = journey.impact(db, prog, f)
+    out["confirm_phrase"] = _journey_phrase(out, None)
+    return out
+
+
+def _journey_phrase(imp: dict, count: Optional[int]) -> str:
+    n = imp["will_start"] if count is None else min(max(0, int(count)), imp["will_start"])
+    if n > 0:
+        return "START %d" % n
+    return "RESUME" if imp["would_resume"] else ""
+
+
+class JourneyIn(BaseModel):
+    confirm: str
+    count: Optional[int] = None              # a first batch; None = every eligible family
+    spacing_minutes: int = 5                 # between one family's start and the next
+    start_at: Optional[str] = None           # ISO time; default now
+
+
+@router.post("/campaigns/{family_id}/journey/start")
+def journey_start(family_id: str, body: JourneyIn, db: Session = Depends(get_db),
+                  user: User = Depends(require_tenant_user)):
+    """EXPLICIT OWNER ACTION. Schedules (never sends) each eligible family's
+    first message, spaced out, and re-spaces anyone overdue after a pause.
+    Typed confirmation; safe to repeat - nobody is ever started twice."""
+    from app.services.programs import journey
+    prog = _program(db, user)
+    _require_manager(db, user)
+    f = _ca_family(db, prog, family_id)
+    imp = journey.impact(db, prog, f)
+    phrase = _journey_phrase(imp, body.count)
+    if not phrase:
+        raise HTTPException(status_code=422, detail="Nobody to start or resume - every approved family has started or is held.")
+    if (body.confirm or "").strip().upper() != phrase:
+        raise HTTPException(status_code=422, detail="Type %s to confirm." % phrase)
+    start_at = None
+    if body.start_at:
+        try:
+            start_at = datetime.fromisoformat(body.start_at.replace("Z", "+00:00"))
+            if start_at.tzinfo is not None:
+                from datetime import timezone as _tz
+                start_at = start_at.astimezone(_tz.utc).replace(tzinfo=None)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="start_at must be an ISO date and time.")
+    if body.spacing_minutes < 0 or body.spacing_minutes > journey.MAX_SPACING_MINUTES:
+        raise HTTPException(status_code=422, detail="Spacing must be between 0 and 1440 minutes.")
+    try:
+        return journey.start(db, prog, f, user, count=body.count, spacing_minutes=body.spacing_minutes,
+                             start_at=start_at)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+def _ca_leads(db: Session, prog) -> dict:
+    from app.services.programs import campaigns as _camp
+    out = {}
+    for r in (db.query(ProgramSourceRecord)
+              .filter(ProgramSourceRecord.organization_id == prog.organization_id,
+                      ProgramSourceRecord.campaign_family == _camp.CENTRAL_ALABAMA_KEY,
+                      ProgramSourceRecord.approved_to_send_at.isnot(None),
+                      ProgramSourceRecord.lead_id.isnot(None)).all()):
+        out.setdefault(r.lead_id, []).append(r)
+    return out
+
+
+@router.get("/central-alabama/delivery")
+def central_alabama_delivery(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """#449: what really happened, per channel, from the message records - not
+    from approvals. Microsoft reports failures only, so an email with no
+    failure notice is "accepted, no failure reported", never "delivered"."""
+    from app.models.models import CadenceTouchLog, EmailMessage, Message
+    from app.services.programs import bounces as _b, campaigns as _camp
+    prog = _program(db, user)
+    f = _ca_family(db, prog)
+    people = _ca_leads(db, prog)
+    ids = list(people)
+    touches, msgs, texts, logs, states, leads = [], {}, [], [], [], {}
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        touches += (db.query(ProgramEmailTouch).filter(ProgramEmailTouch.organization_id == prog.organization_id,
+                                                       ProgramEmailTouch.lead_id.in_(chunk),
+                                                       ProgramEmailTouch.campaign_family == _camp.CENTRAL_ALABAMA_KEY).all())
+        # Campaign texts only - not a person's or the setter's replies.
+        texts += db.query(Message).filter(Message.lead_id.in_(chunk), Message.send_source == "cadence").all()
+        logs += db.query(CadenceTouchLog).filter(CadenceTouchLog.lead_id.in_(chunk)).all()
+        states += db.query(CadenceState).filter(CadenceState.lead_id.in_(chunk)).all()
+        for l in db.query(Lead).filter(Lead.id.in_(chunk)).all():
+            leads[l.id] = l
+    mids = [t.email_message_id for t in touches if t.email_message_id]
+    for i in range(0, len(mids), 500):
+        for m in db.query(EmailMessage).filter(EmailMessage.id.in_(mids[i:i + 500])).all():
+            msgs[m.id] = m
+    accepted = [t for t in touches if t.status == "sent"]
+    kinds = {k: 0 for k in _b.KINDS}
+    for t in accepted:
+        m = msgs.get(t.email_message_id)
+        if m is not None and m.bounce_type in kinds:
+            kinds[m.bounce_type] += 1
+    emailable = {lid for lid, l in leads.items() if (l.email or "").strip()}
+    attempted_people = {t.lead_id for t in touches if t.status not in ("blocked",)}
+    email = {
+        "attempted": sum(1 for t in touches if t.status in ("sent", "failed", "unknown", "claimed", "retry")),
+        "provider_accepted": len(accepted),
+        "delivered_confirmed": None,
+        "delivered_note": "Microsoft 365 does not report delivery - only failures. No failure notice is not proof of delivery.",
+        "accepted_no_failure_reported": sum(1 for t in accepted if not (msgs.get(t.email_message_id) and
+                                                                         msgs[t.email_message_id].bounce_type
+                                                                         and msgs[t.email_message_id].bounce_type != _b.TEMPORARY)),
+        "permanent_bounce": kinds[_b.PERMANENT], "rejected": kinds[_b.REJECTED], "expired": kinds[_b.EXPIRED],
+        "temporary_failure": kinds[_b.TEMPORARY], "sender_config": kinds[_b.SENDER_CONFIG],
+        "blocked": kinds[_b.BLOCKED],
+        "provider_refused": sum(1 for t in touches if t.status == "failed"),
+        "retrying": sum(1 for t in touches if t.status == "retry"),
+        "unknown": sum(1 for t in touches if t.status in ("unknown", "claimed")),
+        "held": sum(1 for t in touches if t.status == "blocked"),
+        "not_attempted": len(emailable - attempted_people),
+        "by_touch": {},
+    }
+    for t in touches:
+        email["by_touch"].setdefault(str(t.touch_number), 0)
+        if t.status == "sent":
+            email["by_touch"][str(t.touch_number)] += 1
+    from app.services.cadence_service import OUTCOME_BLOCKED, OUTCOME_SENT
+    n_texts = len(_camp.sms_steps(db, prog.organization_id))
+    delivered = sum(1 for m in texts if (m.delivery_status or "").lower() == "delivered")
+    failed = sum(1 for m in texts if (m.delivery_status or "").lower() in ("failed", "undelivered"))
+    active = [s for s in states if s.status == "active"]
+    sms = {
+        "scheduled": sum(1 for s in active if (s.current_touch_number or 0) == 0),
+        "in_progress": sum(1 for s in active if (s.current_touch_number or 0) > 0),
+        "attempted": sum(1 for g in logs if g.outcome in (OUTCOME_SENT, "failed")),
+        "accepted": sum(1 for m in texts if m.twilio_sid and (m.delivery_status or "").lower() not in ("failed", "undelivered")),
+        "delivered": delivered, "failed": failed,
+        "blocked": sum(1 for g in logs if g.outcome == OUTCOME_BLOCKED),
+        "remaining": sum(max(0, n_texts - (s.current_touch_number or 0)) for s in active),
+    }
+    started = {lid for lid, rows in people.items() if any(r.journey_started_at for r in rows)}
+    now = datetime.utcnow()
+    scheduled = {lid for lid in started if any(r.scheduled_start_at and r.scheduled_start_at > now
+                                               for r in people[lid])}
+    replied = {x for (x,) in db.query(ProgramResponse.lead_id).filter(ProgramResponse.lead_id.in_(ids or ["-"])).all()}
+    from app.models.models import BookingLink
+    booked = {x for (x,) in db.query(BookingLink.lead_id).filter(
+        BookingLink.lead_id.in_(ids or ["-"]), BookingLink.status.in_(("booked", "confirmed", "completed"))).all()}
+    touched = {t.lead_id for t in accepted} | {m.lead_id for m in texts}
+    journey_counts = {
+        "approved": len(people), "awaiting_start": len(set(people) - started),
+        "scheduled": len(scheduled), "started": len(started),
+        "contacted": len(touched),
+        "sms_in_progress": sms["in_progress"],
+        "email_in_progress": len({t.lead_id for t in accepted}),
+        "replied": len(replied), "booked": len(booked),
+        "on_hold": sum(1 for rows in people.values() if any(r.on_hold for r in rows)),
+        "completed": sum(1 for s in states if s.status == "completed"),
+    }
+    from app.models.models import AuditLogEntry
+    ev = (db.query(AuditLogEntry).filter(AuditLogEntry.organization_id == prog.organization_id,
+                                         AuditLogEntry.target_id == f.id,
+                                         AuditLogEntry.action.in_(("program.campaign_on", "program.campaign_off",
+                                                                   "program.journey_started")))
+          .order_by(AuditLogEntry.created_at.desc()).limit(20).all())
+    actors = {u.id: (u.full_name or u.email) for u in db.query(User).filter(
+        User.id.in_([e.actor_user_id for e in ev] or ["-"])).all()}
+    history = [{"at": e.created_at.isoformat() + "Z" if e.created_at else None,
+                "action": {"program.campaign_on": "Switched on", "program.campaign_off": "Paused (switched off)",
+                           "program.journey_started": "Journey started / resumed"}[e.action],
+                "by": actors.get(e.actor_user_id)} for e in ev]
+    last_on = next((h for h in history if h["action"] == "Switched on"), None)
+    last_off = next((h for h in history if h["action"].startswith("Paused")), None)
+    return {"campaign_active": bool(f.is_active),
+            "owner_paused": (not f.is_active) and last_off is not None,
+            "last_on": last_on, "last_off": last_off, "history": history,
+            "journey": journey_counts, "email": email, "sms": sms}
+
+
+@router.get("/central-alabama/family/{lead_id}/events")
+def central_alabama_family_events(lead_id: str, db: Session = Depends(get_db),
+                                  user: User = Depends(require_tenant_or_observer)):
+    """One family's real history in this campaign, oldest first."""
+    from app.models.models import CadenceTouchLog, EmailMessage, Message
+    from app.services.programs import bounces as _b
+    prog = _program(db, user)
+    people = _ca_leads(db, prog)
+    if lead_id not in people:
+        raise HTTPException(status_code=404, detail="Not a Central Alabama family.")
+    lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == prog.organization_id).first()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Not a Central Alabama family.")
+    ev = []
+    for r in people[lead_id]:
+        if r.approved_to_send_at:
+            ev.append({"at": r.approved_to_send_at, "channel": "-", "what": "Approved to send"})
+        if r.journey_started_at:
+            ev.append({"at": r.journey_started_at, "channel": "-",
+                       "what": "Journey started (first message scheduled for %s UTC)" % (
+                           r.scheduled_start_at.strftime("%b %d %H:%M") if r.scheduled_start_at else "now")})
+        break
+    for t in db.query(ProgramEmailTouch).filter(ProgramEmailTouch.lead_id == lead_id).all():
+        m = db.get(EmailMessage, t.email_message_id) if t.email_message_id else None
+        what = {"sent": "Email %d accepted by Microsoft", "failed": "Email %d refused by the provider",
+                "unknown": "Email %d outcome unknown", "claimed": "Email %d outcome unknown",
+                "retry": "Email %d waiting to retry", "blocked": "Email %d held"}.get(t.status, "Email %d " + t.status)
+        ev.append({"at": t.attempted_at or t.created_at, "channel": "email", "what": what % t.touch_number,
+                   "detail": (t.reason or None) if t.status != "sent" else (m.subject if m else None)})
+        if m is not None and m.bounce_type:
+            ev.append({"at": m.bounced_at or t.attempted_at, "channel": "email",
+                       "what": "Email %d: %s" % (t.touch_number, _b.LABELS.get(m.bounce_type, m.bounce_type)),
+                       "detail": m.error})
+    for g in db.query(CadenceTouchLog).filter(CadenceTouchLog.lead_id == lead_id).all():
+        ev.append({"at": g.attempted_at or g.created_at, "channel": "text",
+                   "what": "Text %d: %s" % (g.touch_number, g.outcome), "detail": g.reason or g.provider_error_message})
+    for m in db.query(Message).filter(Message.lead_id == lead_id).all():
+        if m.delivery_status:
+            ev.append({"at": m.delivery_status_at or m.sent_at, "channel": "text",
+                       "what": "Text delivery: %s" % m.delivery_status, "detail": None})
+    for x in db.query(ProgramResponse).filter(ProgramResponse.lead_id == lead_id).all():
+        ev.append({"at": x.created_at, "channel": x.channel if hasattr(x, "channel") else "-",
+                   "what": "Replied", "detail": None})
+    ev = [e for e in ev if e["at"] is not None]
+    ev.sort(key=lambda e: e["at"])
+    for e in ev:
+        e["at"] = e["at"].isoformat() + "Z"
+    return {"lead_id": lead_id, "name": ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title(),
+            "email_flagged": (lead.manual_flag or "") == "bad_email",
+            "email_flag_reason": lead.manual_flag_reason if (lead.manual_flag or "") == "bad_email" else None,
+            "events": ev}
+
+
+class EmailRecoveryIn(BaseModel):
+    email: Optional[str] = None              # a corrected address
+    confirm_address_is_right: bool = False   # or: a person checked the same address
+
+
+@router.post("/people/{lead_id}/email-recovery")
+def email_recovery(lead_id: str, body: EmailRecoveryIn, db: Session = Depends(get_db),
+                   user: User = Depends(require_tenant_user)):
+    """#449: after a bounce, a manager corrects the address (or confirms it was
+    checked). Clears the bad-address flag only. Nothing is resent: the family
+    continues at their next scheduled email. Audit-logged."""
+    import re as _re
+    prog = _program(db, user)
+    _require_manager(db, user)
+    lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == prog.organization_id).first()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Contact not found.")
+    if (lead.manual_flag or "") != "bad_email":
+        raise HTTPException(status_code=422, detail="This contact's email is not flagged.")
+    old = (lead.email or "").strip()
+    new = (body.email or "").strip()
+    if new:
+        if not _re.fullmatch(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}", new):
+            raise HTTPException(status_code=422, detail="That doesn't look like an email address.")
+        if new.lower() == old.lower():
+            raise HTTPException(status_code=422, detail="That is the address that bounced. Tick "
+                                                        "'I checked this address' instead if it really is right.")
+        lead.email = new
+    elif not body.confirm_address_is_right:
+        raise HTTPException(status_code=422, detail="Enter the corrected address, or confirm the current one was checked.")
+    reason = lead.manual_flag_reason
+    lead.manual_flag, lead.manual_flag_reason = None, None
+    from app.routers.audit_log_router import log_action
+    log_action(db, prog.organization_id, user.id, action="program.email_recovered", target_type="lead",
+               target_id=lead.id, details={"address_changed": bool(new), "previous_flag": (reason or "")[:200],
+                                           "resent": False})
+    db.commit()
+    return {"ok": True, "address_changed": bool(new), "resent": False,
+            "note": "The flag is cleared. Nothing was resent - the next scheduled email goes when it is due."}
 
 
 @router.get("/email-touches")

@@ -1668,6 +1668,11 @@ class EmailMessage(Base):
     idempotency_key = Column(String, nullable=True)
     response_id = Column(String, nullable=True)
     error = Column(Text, nullable=True)
+    # #449: what the receiving side said when it did not deliver:
+    # permanent | rejected | expired | temporary | sender_config (None = no
+    # delivery-failure notice). `error` holds the receiving server's own words.
+    bounce_type = Column(String, nullable=True)
+    bounced_at = Column(DateTime, nullable=True)
 
     sent_at = Column(DateTime, server_default=func.now())
 
