@@ -159,6 +159,10 @@ def _is_lock_contention(exc) -> bool:
 COLUMNS_TO_ADD = [
     # #441 - per-touch campaign copy
     ("program_campaign_families", "touch_copy_json", "TEXT"),
+    ("program_source_records", "journey_started_at", "TIMESTAMP"),
+    ("program_source_records", "journey_started_by", "VARCHAR"),
+    ("email_messages", "bounce_type", "VARCHAR"),
+    ("email_messages", "bounced_at", "TIMESTAMP"),
     # Wholesale field app, works with bad signal (2026-10-11)
     ("wholesale_field_appointments", "outcome_ref", "VARCHAR"),
     ("wholesale_field_rules", "raise_limit_pct", "INTEGER DEFAULT 10"),

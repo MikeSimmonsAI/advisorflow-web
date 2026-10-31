@@ -509,7 +509,15 @@ _NDR_SUBJECT = re.compile(r"(?i)^(undeliverable|undelivered mail|delivery status
                           r"|returned mail|delivery (has )?failed|failure notice|message not delivered)")
 _NDR_BODY = re.compile(r"(?i)(couldn'?t be delivered|could not be delivered|wasn'?t found at|does not exist|"
                        r"address not found|user unknown|no such user|recipient address rejected|5\.1\.1|"
-                       r"mailbox unavailable|delivery has failed)")
+                       r"mailbox unavailable|delivery has failed|"
+                       # #449: shapes that were missed and kept being mailed -
+                       # "X rejected your message to the following email
+                       # addresses" (Comcast "Not our Customer", GoDaddy
+                       # "Recipient not found", iCloud), relay refusals and
+                       # expired retries.
+                       r"rejected your message|recipient not found|not our customer|relay access denied|"
+                       r"not permitted to relay|wasn'?t delivered|despite repeated attempts|"
+                       r"\b[45]\.[1247]\.\d{1,3}\b)")
 _EMAIL = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _SOFT = re.compile(r"(?i)(mailbox (is )?full|over quota|temporar|try again later|4\.\d\.\d)")
 
@@ -536,30 +544,72 @@ def bounce_addresses(m: dict, own: Optional[set] = None) -> Optional[List[str]]:
 
 
 def record_bounce(db: Session, org_ids: List[str], addresses: List[str], received: datetime,
-                  soft: bool = False) -> Optional[str]:
-    """Mark the newest email we sent to one of these addresses bounced and,
-    for a permanent failure, flag the address bad so nothing mails it again.
+                  soft: bool = False, *, body: str = "", subject: str = "",
+                  reclassify: bool = False) -> Optional[str]:
+    """Record a delivery-failure notice against the email of ours it is about.
+
+    #449: the notice is CLASSIFIED (bounces.classify) and the receiving
+    server's own words are kept on the email. The family's ADDRESS is flagged
+    (manual_flag = bad_email: email only - texts are untouched, it is not a
+    DNC) when the address itself is the problem: permanent, rejected, or a
+    second expiry. A temporary delay or our own sending setup never flags it.
+    Recording the same notice twice changes nothing. Nothing is resent.
     Returns a short description, or None when no email of ours matches."""
     from sqlalchemy import func
     from app.models.models import EmailMessage, Lead
+    from app.services.programs import bounces as _b
     if not addresses:
         return None
+    verdict = _b.classify(body, subject) if (body or subject) else {
+        "kind": _b.TEMPORARY if soft else _b.PERMANENT, "code": None, "reason": None}
+    kind = verdict["kind"]
     q = db.query(EmailMessage, Lead).join(Lead, Lead.id == EmailMessage.lead_id).filter(
         func.lower(Lead.email).in_(addresses), EmailMessage.sent_at <= received + timedelta(minutes=5),
         EmailMessage.sent_at >= received - timedelta(days=14))
     if org_ids:
         q = q.filter(Lead.organization_id.in_(org_ids))
-    hit = q.order_by(EmailMessage.sent_at.desc()).first()
-    if hit is None:
+    hits = q.order_by(EmailMessage.sent_at.desc()).all()
+    if not hits:
         return None
-    msg, lead = hit
-    msg.status = "bounced"
-    if not soft and not lead.manual_flag:
+    # The notice names the subject it bounced ("Undeliverable: <subject>"):
+    # prefer that email over a newer one to the same address.
+    want = re.sub(r"(?i)^\s*(undeliverable|undelivered|delivery (status notification|has failed)[^:]*)\s*:\s*",
+                  "", subject or "").strip().lower()
+    msg, lead = next(((m, l) for m, l in hits if want and (m.subject or "").strip().lower() == want), hits[0])
+    if msg.bounce_type == kind and msg.status == _b.message_status(kind):
+        return "Bounce for %s already recorded (%s)." % (lead.email, _b.LABELS[kind])
+    # A later, final notice outranks an earlier delay notice - never the reverse.
+    if msg.bounce_type and msg.bounce_type != _b.TEMPORARY and kind == _b.TEMPORARY:
+        return "Delay notice for %s after a final notice - kept the final one." % lead.email
+    msg.status = _b.message_status(kind)
+    msg.bounce_type = kind
+    msg.bounced_at = received
+    msg.error = ("%s%s" % (_b.LABELS[kind], (": %s" % verdict["reason"]) if verdict.get("reason") else ""))[:1000]
+    flag = kind in _b.FLAG_ADDRESS
+    if kind == _b.EXPIRED:
+        prior = (db.query(func.count(EmailMessage.id))
+                 .filter(EmailMessage.lead_id == lead.id, EmailMessage.id != msg.id,
+                         EmailMessage.bounce_type == _b.EXPIRED,
+                         func.lower(func.coalesce(EmailMessage.to_email, lead.email)) == (lead.email or "").lower())
+                 .scalar() or 0)
+        flag = prior + 1 >= _b.EXPIRED_FLAG_AFTER
+    if flag and reclassify:
+        # Re-reading an old notice must not undo a person's correction.
+        from app.models.models import AuditLogEntry
+        if db.query(AuditLogEntry.id).filter(AuditLogEntry.target_id == lead.id,
+                                             AuditLogEntry.action == "program.email_recovered",
+                                             AuditLogEntry.created_at >= received - timedelta(minutes=5)).first():
+            flag = False
+    flagged = False
+    if flag and (not lead.manual_flag or lead.manual_flag == "bad_email"):
         lead.manual_flag = "bad_email"
-        lead.manual_flag_reason = "email bounced - address does not exist (%s)" % (lead.email or "")
+        lead.manual_flag_reason = ("email bounced - %s (%s)" % (
+            _b.describe(kind, verdict.get("reason")), lead.email or ""))[:500]
+        flagged = True
     db.commit()
-    return "Bounce for %s: email marked bounced%s." % (
-        lead.email, "" if soft else "; address flagged so it is not emailed again")
+    return "Bounce for %s: %s%s." % (
+        lead.email, _b.LABELS[kind].lower(),
+        "; address flagged so it is not emailed again (texts unaffected)" if flagged else "")
 
 
 _NDR_ROW_SUBJECT = re.compile(r"(?i)^(undeliverable|undelivered|delivery status notification|mail delivery|"
@@ -571,9 +621,15 @@ def catch_up_bounces(db: Session, box: InboundMailbox, org_ids: List[str], fetch
     """Bounce notices logged BEFORE bounce detection existed (outcome
     no_lead / unmatched) are read again and recorded as bounces. Runs every
     poll; a row it fixes becomes outcome 'bounce', so each is done once."""
+    from sqlalchemy import func, or_
     rows = (db.query(InboundMailboxMessage)
             .filter(InboundMailboxMessage.mailbox_id == box.id,
-                    InboundMailboxMessage.outcome.in_(("no_lead", "ambiguous", "unmatched")))
+                    or_(InboundMailboxMessage.outcome.in_(("no_lead", "ambiguous", "unmatched")),
+                        # #449: notices recorded before they were classified
+                        # are read once more to keep the server's words.
+                        (InboundMailboxMessage.outcome == "bounce")
+                        & ~func.coalesce(InboundMailboxMessage.detail, "").like("%[classified]%")
+                        & (InboundMailboxMessage.received_at >= datetime.utcnow() - timedelta(days=14))))
             .order_by(InboundMailboxMessage.received_at.desc()).limit(500).all())
     rows = [r for r in rows if _NDR_ROW_SUBJECT.match((r.subject or "").strip())][:limit]
     if not rows:
@@ -591,18 +647,21 @@ def catch_up_bounces(db: Session, box: InboundMailbox, org_ids: List[str], fetch
     fixed = 0
     for row in rows:
         try:
+            again = row.outcome == "bounce"
             m = fetch_one(row.graph_message_id)
-            if not m:
+            if not m or bounce_addresses(m, own={box.address}) is None:
+                if again:                               # #449: read once; never re-fetched forever
+                    row.detail = ((row.detail or "") + " [classified]")[:1000]
+                    db.commit()
                 continue
             addrs = bounce_addresses(m, own={box.address})
-            if addrs is None:
-                continue
             body_txt = (m.get("body") or {}).get("content") or m.get("bodyPreview") or ""
             done = record_bounce(db, org_ids, addrs, row.received_at or datetime.utcnow(),
-                                 soft=bool(_SOFT.search(body_txt)))
+                                 soft=bool(_SOFT.search(body_txt)), body=body_txt, subject=m.get("subject") or "",
+                                 reclassify=again)
             row.outcome = "bounce"
-            row.detail = (done or "Delivery-failure notice; no email of ours to %s found."
-                          % ", ".join(addrs[:3])) + " (caught up)"
+            row.detail = ((done or "Delivery-failure notice; no email of ours to %s found."
+                           % ", ".join(addrs[:3])) + " (caught up) [classified]")[:1000]
             db.commit()
             fixed += 1
         except Exception:  # noqa: BLE001 - one notice must not stop the rest
@@ -754,10 +813,11 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
             bounced = bounce_addresses(m, own={box.address})
             if bounced is not None:
                 body_txt = (m.get("body") or {}).get("content") or m.get("bodyPreview") or ""
-                done = record_bounce(db, org_ids, bounced, received, soft=bool(_SOFT.search(body_txt)))
+                done = record_bounce(db, org_ids, bounced, received, soft=bool(_SOFT.search(body_txt)),
+                                     body=body_txt, subject=m.get("subject") or "")
                 row.outcome = "bounce"
-                row.detail = done or ("Delivery-failure notice; no email of ours to %s found."
-                                      % (", ".join(bounced[:3]) or "an unknown address"))
+                row.detail = ((done or ("Delivery-failure notice; no email of ours to %s found."
+                                        % (", ".join(bounced[:3]) or "an unknown address"))) + " [classified]")[:1000]
             elif not sender or sender == box.address:
                 row.outcome, row.detail = "own_mail", "Sent by the mailbox itself."
             else:

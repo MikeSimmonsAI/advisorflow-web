@@ -391,6 +391,24 @@ def _skip_reason(db: Session, lead: Lead, replied: bool, prog=None) -> Optional[
     if db.query(BookingLink.id).filter(BookingLink.lead_id == lead.id,
                                        BookingLink.status.in_(("booked", "confirmed"))).first():
         return "an appointment is booked - the sequence stops"
+    # #449: one journey, texts first. In a started journey a family who can
+    # take texts gets the first TEXT before any email; the email then keeps
+    # the usual gap after it (above).
+    from app.models.models import CadenceState
+    st = db.query(CadenceState).filter(CadenceState.lead_id == lead.id).first()
+    if st is not None and st.status == "active" and (st.current_touch_number or 0) == 0:
+        from app.services.programs import identity as _id
+        from app.services.programs.send_approval import textable as _textable
+        rec = _id.source_record_for_lead(db, lead)
+        start = getattr(rec, "scheduled_start_at", None) or st.cadence_started_at
+        if start is not None and getattr(start, "tzinfo", None) is not None:
+            start = start.replace(tzinfo=None)
+        if rec is not None and rec.campaign_family in _own_copy_keys() and _textable(lead) \
+                and (rec.send_mode or "text_email") == "text_email" \
+                and (start is None or datetime.utcnow() - start < TEXT_FIRST_MAX_WAIT):
+            # Bounded: if the first text can't go (quiet hours, texting off,
+            # blocked), the email is not held forever.
+            return "waiting for the first text of the journey - the email follows it"
     # ONE INBOX, ONE EMAIL. When several contacts share an address, the first
     # to reach its email sends one UNADDRESSED email ("Hi there"); the others
     # never email that inbox. Their texts are unaffected.
@@ -405,6 +423,7 @@ def _skip_reason(db: Session, lead: Lead, replied: bool, prog=None) -> Optional[
 
 DEFAULT_MAX_TOUCHES = 5
 CROSS_CHANNEL_GAP = timedelta(hours=4)
+TEXT_FIRST_MAX_WAIT = timedelta(hours=24)   # #449
 
 
 def max_touches() -> int:
@@ -521,6 +540,11 @@ def build_message(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof:
     return {"message": msg, "quality": verdict, "packet": packet}
 
 
+def _own_copy_keys():
+    from app.services.programs.campaigns import OWN_COPY_KEYS
+    return OWN_COPY_KEYS
+
+
 def plan(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
          with_skip: bool = True, mark_stale: bool = False) -> List[Dict]:
     """Every contact due a touch right now, with the touch and why/why not.
@@ -566,6 +590,8 @@ def plan(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
             continue                                   # call list: a person calls, nothing automated
         if getattr(master, "scheduled_start_at", None) and now < master.scheduled_start_at:
             continue                                   # slow drip: not their start time yet
+        if fam.key in _own_copy_keys() and not any(getattr(r, "journey_started_at", None) for r in rows):
+            continue                                   # #449: journey not started - nothing goes
         mine = touches.get(lead_id, {})
         for t in (mine.values() if mark_stale else ()):   # surface claims that never resolved
             if t.status == "claimed" and t.attempted_at and now - t.attempted_at >= STALE_CLAIM_AFTER:

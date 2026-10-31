@@ -317,7 +317,8 @@ CADENCE_OUTCOMES = (
 MAX_ATTEMPTS_PER_TOUCH = 3
 RETRY_BACKOFF = timedelta(hours=1)
 # Refusals that wait on a person (hold / review / campaign off), by their tag.
-REVIEW_WAIT_TAGS = ("ON HOLD:", "DATA REVIEW:", "DUPLICATE REVIEW:", "LOCATION REVIEW:", "CAMPAIGN OFF:")
+REVIEW_WAIT_TAGS = ("ON HOLD:", "DATA REVIEW:", "DUPLICATE REVIEW:", "LOCATION REVIEW:", "CAMPAIGN OFF:",
+                    "JOURNEY NOT STARTED:")
 REVIEW_RECHECK = timedelta(hours=6)
 
 

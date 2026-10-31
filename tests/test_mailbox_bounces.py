@@ -31,7 +31,7 @@ def test_bounce_notice_marks_email_bounced_and_flags_address(db_session, world):
     db_session.refresh(world.lead)
     assert world.lead.manual_flag == "bad_email"
     row = db_session.query(InboundMailboxMessage).one()
-    assert row.outcome == "bounce" and "bounced" in row.detail
+    assert row.outcome == "bounce" and "Bounce for" in row.detail and "address does not exist" in row.detail
     # It is not treated as the person replying.
     assert db_session.query(Reply).filter(Reply.lead_id == world.lead.id).count() == 0
 
@@ -40,7 +40,7 @@ def test_mailbox_full_bounce_does_not_flag_the_address(db_session, world):
     body = "Delivery has failed to these recipients: josh@example.com. The mailbox is full; try again later."
     S.poll_mailbox(db_session, world.box, fetch=lambda since: [_ndr(body=body)])
     em = db_session.query(EmailMessage).filter(EmailMessage.lead_id == world.lead.id).one()
-    assert em.status == "bounced"
+    assert em.status == "soft_bounced" and em.bounce_type == "temporary"    # #449: a delay, not a failure
     db_session.refresh(world.lead)
     assert world.lead.manual_flag in (None, "")
 
