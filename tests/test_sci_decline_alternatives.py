@@ -160,9 +160,11 @@ def test_a_clear_no_that_reaches_the_ai_never_gets_an_alternative_pitch(setter, 
     _invited(db, lead, sample_advisor)
     fake = _Fake([_d("offer_times", "Understood - would a phone call work instead, {TIMES}?"),
                   _d("close", GOODBYE)])
-    _, conv = _run(db, lead, "That's not for me", fake)
-    assert len(fake.calls) == 2 and conv.state == "human" and _last_ai(db, conv).text == GOODBYE
-    assert _last_ai(db, conv).delivery == "blocked"                         # THE RULE: the goodbye never goes out
+    # #450: "That's not for me" is now a plain no for the rules (no AI at all);
+    # a no only the AI recognises is closed quietly - never "needs a human".
+    _, conv = _run(db, lead, "We're all set, thanks", fake)
+    assert len(fake.calls) == 2 and conv.state == "stopped"
+    assert not [t for t in _ai_turns(db, conv) if t.text and t.delivery != "blocked"]   # nothing goes out
 
 
 def test_dont_come_to_my_home_never_gets_a_home_offer(setter, sample_advisor):

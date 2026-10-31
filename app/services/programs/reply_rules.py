@@ -119,10 +119,49 @@ _OPT_OUT_PHRASES = (r"\b(remove me|take me off|unsubscribe me|opt me out|do not 
                     r"(don'?t|do not|never)( ever)? (contact|text|email|call)( or (text|call|email))? me|"
                     r"stop (texting|emailing|contacting) me|leave me alone|"
                     r"not interested|no longer interested|no thank(s| you)|lose my number|"
+                    r"(don'?t|do not) (wish|want) to be contacted|"
+                    r"(don'?t|do not) want (any )?more (emails?|texts?|messages?|calls?)|"
                     # Spanish (#11)
                     r"no gracias|no quiero (una )?cita|(no|nunca) me (manden|mande|env[ií]en|escriban|llame|llamen)|ya no (me )?(manden|escriban)|"
                     r"no (estoy|estamos) interesad[oa]s?|no (me|nos) interesa|b[oó]rr(a|e)me|"
                     r"dejen de (escribir|mandar))\b")
+
+# #450: other plain ways of saying no (George, Oct 31: "No longer interested."
+# went to the AI and came back "needs a human"). Only a PLAIN no counts: a
+# question, a day or time, or a "but ..." clause ("It's not for me but my
+# sister may want it", "We changed our minds about Thursday - Friday at 2?")
+# is a conversation, not a no.
+_PLAIN_NO = (r"\b((i'?ve |i have |we'?ve |we have )?changed (my|our) minds?|"
+             r"(this|it|that)('s| is) not for (me|us)|"
+             r"no longer (need|want) (it|this|that|them|the (guide|certificate|information|info))|"
+             r"(don'?t|do not) want (it|this|that|any of (it|this|that)|anything)( any ?more| anymore)?)\b")
+_NOT_PLAIN = r"\?|\b(but|except|however|though|although|unless|until|till|instead)\b"
+
+
+def plain_no(text: str) -> bool:
+    t = (text or "").strip().lower().replace("’", "'")
+    return bool(t) and len(t) <= 200 and bool(re.search(_PLAIN_NO, t)) \
+        and not re.search(_NOT_PLAIN, t) and not _names_a_time(t) and not _picks_a_time(t)
+
+
+_NO_TEXTS = r"\b((don'?t|do not|never|stop|quit|no (more )?)\s*(text|texting|sms|txt)(ing)?( me)?|no (more )?texts)\b"
+_NO_EMAIL = r"\b((don'?t|do not|never|stop|quit|no (more )?)\s*(e-?mail)(ing)?( me)?|no (more )?e-?mails)\b"
+_WANTS_EMAIL = r"(?<!don't )(?<!do not )(?<!never )(?<!stop )\b(e-?mail (me|it)|send (it|me|the \w+) (by|via|through|to my) e-?mail|by e-?mail)\b"
+_WANTS_TEXT = r"(?<!don't )(?<!do not )(?<!never )(?<!stop )\b(text me|send (it|me) by text|by text)\b"
+
+
+def opt_out_scope(body: str) -> str:
+    """#450: which channel an opt-out closes. "Please don't text me, but email
+    me the information" closes TEXTS only - the email stays open for the
+    information a person sends. Anything else closes the channel it came in on
+    (as before)."""
+    t = (body or "").strip().lower().replace("’", "'")
+    if re.search(_NO_TEXTS, t) and not re.search(_NO_EMAIL, t) and re.search(_WANTS_EMAIL, t):
+        return "sms"
+    if re.search(_NO_EMAIL, t) and not re.search(_NO_TEXTS, t) and re.search(_WANTS_TEXT, t):
+        return "email"
+    return "all"
+
 
 # AN OPT-OUT THAT ALSO ASKS FOR SOMETHING (#A). "Don't text me, call me",
 # "Not interested in the guide, can you just call me?", "Not right now",
@@ -212,6 +251,8 @@ def classify(body: str, reply_classification: Optional[str] = None) -> Dict:
         return {"class": HOT, "reasons": hot}
     if re.search(_OPT_OUT_PHRASES, text):
         return {"class": OPT_OUT, "reasons": ["opted out or not interested"]}
+    if not bereaved and plain_no(text):
+        return {"class": OPT_OUT, "reasons": ["said no - not interested"]}
     if bereaved:
         return {"class": HOT, "reasons": ["bereavement mentioned - needs a personal reply"]}
     upstream = _CLASS_FROM_REPLY.get((reply_classification or "").lower())
@@ -250,7 +291,8 @@ def intents(body: str, cls: Optional[str] = None) -> List[str]:
     if APPOINTMENT not in found and not re.search(_BEREAVEMENT, text) \
             and cls not in (OPT_OUT, WRONG_PERSON, BAD_DATA) and (_names_a_time(text) or _picks_a_time(text)):
         found.insert(0, APPOINTMENT)                     # a day / time named is about a visit
-    if re.search(_OPT_OUT_PHRASES, text) and re.search(r"\b(not interested|no longer interested|no thank(s| you))\b", text):
+    if (re.search(_OPT_OUT_PHRASES, text) and re.search(r"\b(not interested|no longer interested|no thank(s| you))\b", text)) \
+            or (cls == OPT_OUT and plain_no(text)):
         found.append(NOT_INTERESTED)
     implied = {OPT_OUT: I_OPT_OUT, WRONG_PERSON: I_WRONG_PERSON, BAD_DATA: I_BAD_DATA}.get(cls)
     if implied:
