@@ -64,6 +64,7 @@ export function programOf(w) {
   if (w.experience === 'insurance' || w.industry === 'insurance') return 'insurance'
   if (w.experience === 'energy' || w.industry === 'energy') return 'energy'
   if (w.industry === 'funeral' || w.industry === 'cemetery') return 'funeral'
+  if (w.program_route === '/program/acquisition' || w.experience === 'acquisition') return 'cleaning'
   if (w.industry === 'cleaning') return 'cleaning'
   return null
 }

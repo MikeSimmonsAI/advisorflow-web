@@ -83,6 +83,10 @@ FEATURES: Dict[str, str] = {
     # REQUIRES `leads`. Turns on only when listed EXPLICITLY - a NULL
     # allow-list is not a roofing company (app/services/roofing/common.py).
     "roofing_program": "Roofing program: lead import, AI follow-up, inspections, roofing pipeline",
+    # Managed client acquisition (Issue #452, single-company pilot). A prospect
+    # IS a Lead, so it REQUIRES `leads`. Explicit only, cleaning identity only,
+    # one organization at a time (app/services/acquisition/common.py).
+    "client_acquisition": "Managed client acquisition: researched prospects, booked walkthroughs, outcomes",
 
     # ── Admin features: sellable, and still only FEATURES ───────────────────
     #
@@ -150,6 +154,7 @@ REQUIRES = {
     "wholesale_workspace": ("wholesale_real_estate",),
     "insurance_agency": ("leads",),
     "roofing_program": ("leads",),
+    "client_acquisition": ("leads",),
 }
 
 

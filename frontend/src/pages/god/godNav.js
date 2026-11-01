@@ -45,6 +45,7 @@ export const SECTIONS = [
       { label: 'Onboarding', path: '/god/implementations', match: ['/god/implementations/', '/god/provision/'] },
       { label: 'Go-live checklist', path: '/god/launches' },
       { label: 'Demo suite', path: '/god/demo-suite' },
+      { label: 'Acquisition pilot', path: '/god/acquisition', hint: 'Managed client acquisition pilot (Issue #452)' },
       { label: 'Staff training', path: '/god/training' },
       { label: 'Website intake', path: '/god/public-intake' },
     ],

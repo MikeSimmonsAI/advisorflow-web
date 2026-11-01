@@ -126,6 +126,15 @@ const RoofingHomeowner = lazyPage(() => import('./pages/roofing/Homeowner'))
 const RoofingSettings = lazyPage(() => import('./pages/roofing/Settings'))
 const RoofingLanding = lazyPage(() => import('./pages/roofing/RoofingLanding'))
 const RoofingDemo = lazyPage(() => import('./pages/roofing/demo/DemoApp'))
+// Managed client acquisition (Issue #452): the client's portal (/program/acquisition/*).
+const AcquisitionShell = lazyPage(() => import('./pages/acquisition/AcquisitionShell'))
+const AcqHome = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Home })))
+const AcqProspects = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Prospects })))
+const AcqProspect = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Prospect })))
+const AcqAppointments = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Appointments })))
+const AcqResults = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Results })))
+const AcqSettings = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Settings })))
+const AcqFeedback = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Feedback })))
 const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
 const DealOperationsClosing = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsClosing })))
 const DealOperationsDispositions = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsDispositions })))
@@ -280,6 +289,7 @@ const GodEmailDiagnostics = lazyPage(() => import('./pages/god/GodEmailDiagnosti
 const GodJobRuns = lazyPage(() => import('./pages/god/GodJobRuns'))
 const GodLeadBrowser = lazyPage(() => import('./pages/god/GodLeadBrowser'))
 const LeadIntelligence = lazyPage(() => import('./pages/god/LeadIntelligence'))
+const GodAcquisition = lazyPage(() => import('./pages/god/GodAcquisition'))
 const FeatureEntitlements = lazyPage(() => import('./pages/god/FeatureEntitlements'))
 const GodVoiceConfig = lazyPage(() => import('./pages/god/GodVoiceConfig'))
 const GodRevenueHistory = lazyPage(() => import('./pages/god/GodRevenueHistory'))
@@ -1533,6 +1543,17 @@ export default function App() {
           <Route path="homeowners/:leadId" element={<RoofingHomeowner />} />
           <Route path="settings" element={<RoofingSettings />} />
         </Route>
+        {/* Managed client acquisition (Issue #452). /acquisition enforces membership,
+             explicit client_acquisition and cleaning identity server-side. */}
+        <Route path="/program/acquisition" element={<ProtectedRoute bare><AcquisitionShell /></ProtectedRoute>}>
+          <Route index element={<AcqHome />} />
+          <Route path="prospects" element={<AcqProspects />} />
+          <Route path="prospects/:id" element={<AcqProspect />} />
+          <Route path="appointments" element={<AcqAppointments />} />
+          <Route path="results" element={<AcqResults />} />
+          <Route path="settings" element={<AcqSettings />} />
+          <Route path="feedback" element={<AcqFeedback />} />
+        </Route>
         <Route path="/roofing" element={<RoofingLanding />} />
         {/* PUBLIC interactive demo - fictional data only, no login, no Roofing API. */}
         <Route path="/roofing/demo/*" element={<RoofingDemo />} />
@@ -1813,6 +1834,7 @@ export default function App() {
         {/* REPORT-02: platform revenue history — registered BEFORE /god/* catch-all */}
         <Route path="/god/revenue-history"       element={<GodRoute><GodModeLayout><GodRevenueHistory /></GodModeLayout></GodRoute>} />
         {/* GOD-09: cross-org lead browser */}
+        <Route path="/god/acquisition"           element={<GodRoute><GodModeLayout><GodAcquisition /></GodModeLayout></GodRoute>} />
         <Route path="/god/lead-browser"          element={<GodRoute><GodModeLayout><GodLeadBrowser /></GodModeLayout></GodRoute>} />
         <Route path="/god/lead-intelligence"     element={<GodRoute><GodModeLayout><LeadIntelligence /></GodModeLayout></GodRoute>} />
         {/* Control Room: relay status, timeline, Needs Mike, Give Direction */}

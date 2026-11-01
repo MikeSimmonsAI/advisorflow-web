@@ -307,6 +307,16 @@ def _roofing_enabled(org) -> bool:
         return False
 
 
+def _acquisition_enabled(org) -> bool:
+    """Opens the managed-acquisition client portal (Issue #452) - explicit
+    `client_acquisition` key and a cleaning identity, never by name or slug."""
+    try:
+        from app.services.program_experience import acquisition_identity
+        return acquisition_identity(org)
+    except Exception:  # pragma: no cover - never let a hint break login
+        return False
+
+
 def program_brand(db: Session, user: User, host_slug: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """The brand whose look this person's Program Access should wear, or None.
 
@@ -493,7 +503,8 @@ def authorized_contexts(db: Session, user: User, host_slug: Optional[str] = None
             # Never by industry or slug alone: a Roofing org whose program was
             # not set up opened a dead "isn't turned on" screen on every entry
             # (prod, 2026-10-20). /roofing-ops still enforces it server-side.
-            "program_route": "/program/roofing" if _roofing_enabled(org) else None,
+            "program_route": ("/program/roofing" if _roofing_enabled(org)
+                              else "/program/acquisition" if _acquisition_enabled(org) else None),
             # THE EXPERIENCE THIS WORKSPACE OPENS FOR THIS PERSON - the app
             # renders this shell and never the general platform for a program
             # workspace (program_experience enforces the Wholesale lock).

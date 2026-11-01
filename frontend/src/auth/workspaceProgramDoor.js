@@ -10,6 +10,8 @@ export function workspaceProgramDestination(entry) {
   // is switched on. Never route by slug or name: a Roofing org that was not
   // set up opened a dead "isn't turned on" screen on every entry.
   if (entry.program_route === '/program/roofing') return '/program/roofing'
+  // Set only for the managed-acquisition client (explicit client_acquisition).
+  if (entry.program_route === '/program/acquisition') return '/program/acquisition'
   if (entry.is_program) return '/program'
   return null
 }

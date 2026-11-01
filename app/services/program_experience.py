@@ -9,7 +9,7 @@ stopped the platform screens themselves. Hiding menu items is not isolation.
 This module is the single answer to "what experience is this workspace for
 this person", and the server enforces it:
 
-  experience_for(...)    'wholesale' | 'sci' | 'roofing' | 'insurance' | 'energy' | 'platform'
+  experience_for(...)    'wholesale' | 'sci' | 'roofing' | 'insurance' | 'acquisition' | 'energy' | 'platform'
                          per workspace, published in /auth/my-contexts so the
                          app opens the right shell and never the platform one
                          for a program workspace;
@@ -142,6 +142,18 @@ def roofing_identity(org) -> bool:
     return bool(enabled) and identity_allows(org, "roofing")
 
 
+def acquisition_identity(org) -> bool:
+    """This org IS the managed-acquisition client (Issue #452): explicit
+    `client_acquisition` key AND a cleaning (or neutral) identity."""
+    if org is None:
+        return False
+    try:
+        from app.services.acquisition.common import acquisition_identity as _ident
+        return bool(_ident(org))
+    except Exception:  # pragma: no cover - never let a hint break login
+        return False
+
+
 def insurance_identity(org) -> bool:
     """This org IS an insurance agency (Max Life Command shell)."""
     return org is not None and _explicit(org, INSURANCE_FEATURE) and identity_allows(org, "insurance")
@@ -169,6 +181,8 @@ def experience_for(db: Session, user, org, is_program: bool, named_wholesale: Op
         return "roofing"
     if insurance_identity(org):
         return "insurance"
+    if acquisition_identity(org):
+        return "acquisition"
     # 3. The business's own industry.
     if industry_of(org) == "energy":
         return "energy"
