@@ -144,6 +144,7 @@ const AcqOpsAppointments = lazyPage(() => import('./pages/acquisition/Acquisitio
 const AcqOpsPipeline = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Pipeline })))
 const AcqOpsHealth = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Health })))
 const AcqOpsSettings = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.OpsSettings })))
+const AcqOpsDiscovery = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Discovery })))
 const AcqOpsSoon = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Soon })))
 const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
 const DealOperationsClosing = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsClosing })))
@@ -1570,7 +1571,7 @@ export default function App() {
         </Route>
         <Route path="/acquisition-ops" element={<ProtectedRoute bare><AcqOps /></ProtectedRoute>}>
           <Route index element={<AcqOpsHome />} />
-          <Route path="discovery" element={<AcqOpsSoon title="Lead Discovery" phase="P2" text="Search DFW businesses by type and city, with source evidence, duplicate checks and cost tracking. Not built yet." />} />
+          <Route path="discovery" element={<AcqOpsDiscovery />} />
           <Route path="prospects" element={<AcqOpsProspects />} />
           <Route path="outreach" element={<AcqOpsSoon title="Outreach" phase="P3" text="Personal email drafts that pass every eligibility and suppression check before anything can send. Not built yet." />} />
           <Route path="responses" element={<AcqOpsSoon title="Responses" phase="P3" text="Reply reading, opt-out handling and human hand-off. Not built yet." />} />
