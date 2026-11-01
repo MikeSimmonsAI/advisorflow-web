@@ -7,13 +7,14 @@
  * saved, sent or bought from here.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../../../api/client'
 import { bookaboostProductBrand } from '../../../brand/productBrand'
 import heroPhoto from './img/olp-hero.webp'
 import photoResidential from '../ds/photos/house08.jpg'
 import photoWholesale from '../ds/photos/street.jpg'
-import photoLand from '../ds/photos/house09.jpg'
+// Land, farm and ranch records show open land, never a house (owner request, Oct 29).
+import photoLand from '../ds/photos/land-field.jpg'
 import photoCommercial from '../ds/photos/invest.jpg'
 import './OpportunityRadar.css'
 
@@ -273,8 +274,16 @@ function Drawer({ p, market, onClose }) {
   )
 }
 
-export default function OpportunityRadar() {
-  const [market, setMarket] = useState('all')
+// A workspace built on this screen (OLP Farm & Ranch) passes a preset: its own
+// market, hero words and photo. Without one the screen is exactly as before.
+// ?market=land opens a known market tab (links from Land Partners).
+const MARKET_KEYS = new Set(MARKETS.map(([k]) => k))
+
+export default function OpportunityRadar({ preset } = {}) {
+  const [params] = useSearchParams()
+  const asked = params.get('market')
+  const startMarket = preset?.market || (MARKET_KEYS.has(asked) ? asked : 'all')
+  const [market, setMarket] = useState(startMarket)
   const [form, setForm] = useState({ state: '', county: '', min: '' })
   const [applied, setApplied] = useState({ state: '', county: '', min: '' })
   const [sort, setSort] = useState('score')
@@ -311,7 +320,7 @@ export default function OpportunityRadar() {
   }, [form.state, market])
 
   const submit = (e) => { e.preventDefault(); setPage(0); setApplied({ ...form }) }
-  const reset = () => { const z = { state: '', county: '', min: '' }; setForm(z); setApplied(z); setMarket('all'); setSort('score'); setPage(0) }
+  const reset = () => { const z = { state: '', county: '', min: '' }; setForm(z); setApplied(z); setMarket(preset?.market || 'all'); setSort('score'); setPage(0) }
   const chooseMarket = (m) => { setMarket(m); setPage(0) }
   const closeDrawer = useCallback(() => setOpen(null), [])
 
@@ -323,25 +332,29 @@ export default function OpportunityRadar() {
   return (
     <main className={'bbr' + (IS_OLP ? ' bbr--olp' : '')} data-product={IS_OLP ? 'olp' : undefined}>
       <section className="bbr-hero">
-        {IS_OLP ? <img className="bbr-hero__photo" src={heroPhoto} alt="" aria-hidden="true" decoding="async" /> : null}
+        {IS_OLP ? <img className="bbr-hero__photo" src={preset?.photo || heroPhoto} alt="" aria-hidden="true" decoding="async" /> : null}
         <div className="bbr-hero__text">
-          <div className="bbr-eyebrow">{BRAND} · OPPORTUNITY INTELLIGENCE</div>
-          <h1>Overlooked {IS_OLP ? <span className="bbr-gold">Properties</span> : 'Properties'}</h1>
-          <p>Find What Others Miss. Discover, research, and match overlooked real estate opportunities{IS_OLP ? ' in residential, wholesale, land and commercial markets' : ' across every market'}—without leaving your professional workspace.</p>
+          <div className="bbr-eyebrow">{BRAND} · {preset?.eyebrow || 'OPPORTUNITY INTELLIGENCE'}</div>
+          {preset ? <h1>{preset.title[0]} <span className="bbr-gold">{preset.title[1]}</span></h1>
+            : <h1>Overlooked {IS_OLP ? <span className="bbr-gold">Properties</span> : 'Properties'}</h1>}
+          <p>{preset?.lede || <>Find What Others Miss. Discover, research, and match overlooked real estate opportunities{IS_OLP ? ' in residential, wholesale, land and commercial markets' : ' across every market'}—without leaving your professional workspace.</>}</p>
         </div>
-        <div className="bbr-hero__side"><div>OPPORTUNITY RADAR</div><span>Discover → Verify → Match → Deal</span></div>
+        <div className="bbr-hero__side"><div>{preset?.side?.[0] || 'OPPORTUNITY RADAR'}</div><span>{preset?.side?.[1] || 'Discover → Verify → Match → Deal'}</span></div>
       </section>
 
       <Kpis data={data} loading={loading} />
+      {preset?.slot || null}
 
-      <div className="bbr-worktop"><h2>Opportunity Radar</h2><span>Nationwide-ready filters · Source-backed research</span></div>
+      <div className="bbr-worktop"><h2>{preset?.worktop || 'Opportunity Radar'}</h2><span>Nationwide-ready filters · Source-backed research</span></div>
       <section className="bbr-filters" aria-label="Search and filter property opportunities">
-        <div className="bbr-tabs" role="group" aria-label="Property market">
-          {MARKETS.map(([k, label]) => (
-            <button key={k} type="button" className={'bbr-tab' + (market === k ? ' is-active' : '')}
-                    aria-pressed={market === k} onClick={() => chooseMarket(k)}>{label}</button>
-          ))}
-        </div>
+        {preset?.lockMarket ? null : (
+          <div className="bbr-tabs" role="group" aria-label="Property market">
+            {MARKETS.map(([k, label]) => (
+              <button key={k} type="button" className={'bbr-tab' + (market === k ? ' is-active' : '')}
+                      aria-pressed={market === k} onClick={() => chooseMarket(k)}>{label}</button>
+            ))}
+          </div>
+        )}
         <form className="bbr-row-filters" onSubmit={submit}>
           <label className="bbr-field"><span>State</span>
             <select value={form.state} aria-label="State" onChange={(e) => setForm({ ...form, state: e.target.value, county: '' })}>

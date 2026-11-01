@@ -435,6 +435,47 @@ def _pause_cadence(db: Session, lead: Lead) -> bool:
     return act["paused"]
 
 
+def close_terminal(db: Session, lead: Lead, resp: ProgramResponse, channel: str, body: str,
+                   now: Optional[datetime] = None) -> None:
+    """A family said no / stop: close this reply and every earlier open one,
+    END the cadence (paused or not), and record the opt-out for the channel
+    it applies to. Sends nothing, pages no one. #450: shared by the rules
+    (on_inbound) and by the appointment setter when the AI reads a plain no
+    the rules missed - so a no is never turned into a hand-off."""
+    now = now or datetime.utcnow()
+    from app.services.cadence_service import stop_cadence_for_lead
+    from app.models.models import CadenceStatus
+    try:
+        stop_cadence_for_lead(db, lead.id, CadenceStatus.STOPPED_DNC)
+    except Exception:
+        log.exception("cadence stop failed for lead %s", lead.id)
+    # stop_cadence_for_lead only acts on an ACTIVE cadence, and the reply
+    # has just paused it - an opt-out must END it, paused or not.
+    from app.models.models import CadenceState
+    st = db.query(CadenceState).filter(CadenceState.lead_id == lead.id).first()
+    if st is not None and str(getattr(st.status, "value", st.status)) in ("active", "paused"):
+        st.status = CadenceStatus.STOPPED_DNC.value
+        from datetime import timezone as _tz
+        st.completed_at = datetime.now(_tz.utc)
+    resp.closed_at = now
+    # Their earlier replies (new OR already opened/answered) are over too:
+    # no "still waiting" reminder or HOT line for a family who said stop.
+    for old in (db.query(ProgramResponse).filter(ProgramResponse.organization_id == lead.organization_id,
+                                                 ProgramResponse.lead_id == lead.id,
+                                                 ProgramResponse.handling_status != "closed").all()):
+        old.handling_status, old.sla_due_at, old.closed_at = "closed", None, now
+    from app.services.programs.reply_rules import opt_out_scope
+    scope = opt_out_scope(body)
+    if scope == "sms":
+        # #450: "don't text me, but email me the information" - texts end,
+        # the email they asked for stays possible (a person sends it).
+        lead.allow_sms = False
+    elif scope == "email":
+        lead.allow_email = False          # "don't email me" - said in a text
+    elif channel == "email":
+        lead.allow_email = False          # an email opt-out of record
+
+
 def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
                reply_id: Optional[str] = None, reply_classification: Optional[str] = None,
                now: Optional[datetime] = None, reply_to_alias: Optional[str] = None,
@@ -499,29 +540,7 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
     # reply (driving / away) is not a person: the spaced follow-up continues.
     resp.cadence_paused = False if cls == AUTO_REPLY else _pause_cadence(db, lead)
     if cls == OPT_OUT:
-        from app.services.cadence_service import stop_cadence_for_lead
-        from app.models.models import CadenceStatus
-        try:
-            stop_cadence_for_lead(db, lead.id, CadenceStatus.STOPPED_DNC)
-        except Exception:
-            log.exception("cadence stop failed for lead %s", lead.id)
-        # stop_cadence_for_lead only acts on an ACTIVE cadence, and the reply
-        # has just paused it - an opt-out must END it, paused or not.
-        from app.models.models import CadenceState
-        st = db.query(CadenceState).filter(CadenceState.lead_id == lead.id).first()
-        if st is not None and str(getattr(st.status, "value", st.status)) in ("active", "paused"):
-            st.status = CadenceStatus.STOPPED_DNC.value
-            from datetime import timezone as _tz
-            st.completed_at = datetime.now(_tz.utc)
-        resp.closed_at = now
-        # Their earlier replies (new OR already opened/answered) are over too:
-        # no "still waiting" reminder or HOT line for a family who said stop.
-        for old in (db.query(ProgramResponse).filter(ProgramResponse.organization_id == lead.organization_id,
-                                                     ProgramResponse.lead_id == lead.id,
-                                                     ProgramResponse.handling_status != "closed").all()):
-            old.handling_status, old.sla_due_at, old.closed_at = "closed", None, now
-        if channel == "email":
-            lead.allow_email = False          # an email opt-out of record
+        close_terminal(db, lead, resp, channel, body, now)
     opt_out_ask = cls == OPT_OUT and opt_out_needs_person(body)
     if opt_out_ask:
         resp.recommended_action = ("%s. Automation has been stopped and no automated texts will go to them."
@@ -602,6 +621,8 @@ def _page_for_reply(db: Session, prog: OutreachProgram, resp: ProgramResponse, l
     from app.services.programs import alert_ledger as _L
     booked = [e for e in events if e.get("type") == "booked"]
     handoff = [e for e in events if e.get("type") == "handoff"]
+    if any(e.get("type") == "closed" for e in events) and not booked and not handoff:
+        return []                                       # #450: they said no - no one is paged
     if booked:
         kind, event = "booked", booked[-1]
     elif handoff:

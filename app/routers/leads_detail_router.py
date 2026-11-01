@@ -418,7 +418,7 @@ def preview_messages_for_leads(
             from app.services.public_identity import booking_url as public_booking_url
             placeholder_booking_url = public_booking_url(
                 db, lead.organization_id, "preview")
-            draft = render_cadence_message(db, lead, current_user, touch_number=1, booking_url=placeholder_booking_url)
+            draft = render_cadence_message(db, lead, current_user, touch_number=1, booking_url=placeholder_booking_url) or ""
 
         results.append(MessagePreviewItem(
             lead_id=lead.id, lead_name=lead_name, phone=lead.phone,

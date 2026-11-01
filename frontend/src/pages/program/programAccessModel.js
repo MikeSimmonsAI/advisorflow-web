@@ -28,6 +28,13 @@ const PROGRAMS = {
   cleaning: { rank: 7, variant: 'cleaning', symbol: '✦', kind: 'COMMERCIAL CLEANING',
               summary: 'Prospects, follow-up, booked walkthroughs and reports',
               facts: ['Prospects', 'Follow-up', 'Walkthroughs'] },
+  // Managed client acquisition (Issue #452) - owner-approved purple theme.
+  acquisition: { rank: 7, variant: 'acquisition', symbol: '✦', kind: 'COMMERCIAL CLEANING · CLIENT PORTAL',
+                 summary: 'Interested businesses, booked walkthroughs, estimates and results',
+                 facts: ['Appointments', 'Estimates', 'Results'] },
+  acquisition_ops: { rank: 8, variant: 'acquisition', symbol: '◎', kind: 'ACQUISITION CONTROL CENTER',
+                     summary: 'Prospects, evidence, pipeline and pilot controls',
+                     facts: ['Prospects', 'Pipeline', 'Pilot controls'] },
   business: { rank: 7, variant: 'general', symbol: '◈', kind: 'BUSINESS OPERATIONS',
               summary: 'Your dedicated business workspace',
               facts: ['Leads', 'Conversations', 'Calendar'] },
@@ -64,6 +71,7 @@ export function programOf(w) {
   if (w.experience === 'insurance' || w.industry === 'insurance') return 'insurance'
   if (w.experience === 'energy' || w.industry === 'energy') return 'energy'
   if (w.industry === 'funeral' || w.industry === 'cemetery') return 'funeral'
+  if (w.program_route === '/program/acquisition' || w.experience === 'acquisition') return 'acquisition'
   if (w.industry === 'cleaning') return 'cleaning'
   return null
 }
@@ -99,6 +107,15 @@ export function programCards(ctx) {
     cards.push({ ...pr, program: pr.key, variant: p.variant, symbol: p.symbol, rank: p.rank, kind: p.kind, facts: p.facts,
                  display: pr.key === 'wholesale' ? 'Wholesale' : (pr.label || pr.key), summary: p.summary,
                  orgLabel: null })
+  }
+  // ACQUISITION OPERATIONS (Issue #452): only where the server granted this
+  // login operator access for that client - never God Mode.
+  for (const a of ctx?.acquisition_ops || []) {
+    const p = PROGRAMS.acquisition_ops
+    cards.push({ ...a, type: 'acquisition_ops', organization_id: 'acquisition-ops:' + a.organization_id,
+                 client_organization_id: a.organization_id, program: 'acquisition_ops', variant: p.variant,
+                 symbol: p.symbol, rank: p.rank, kind: p.kind, facts: p.facts, display: 'Acquisition Control Center',
+                 summary: p.summary, orgLabel: a.organization_name })
   }
   // BACK OFFICE AND EXECUTIVE SUITE are separate destinations on the same
   // launcher - only when the server says this person has them, never the

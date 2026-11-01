@@ -241,6 +241,11 @@ class ProgramSourceRecord(Base):
     source_id_generated = Column(Boolean, nullable=True, default=False)
     # Slow drip: approved now, nothing goes out before this time (UTC).
     scheduled_start_at = Column(DateTime, nullable=True)
+    # #449: when a person started this family's journey (Start / Resume
+    # Journey). For campaigns that speak only their own words, approval alone
+    # sends nothing on any channel until this is set.
+    journey_started_at = Column(DateTime, nullable=True)
+    journey_started_by = Column(String, nullable=True)
     # Set only when the staged row is later committed to a live contact/lead.
     org_contact_id = Column(String, nullable=True)
     lead_id = Column(String, ForeignKey("leads.id"), nullable=True)
@@ -367,6 +372,8 @@ class CampaignFamily(Base):
     email_subject_template = Column(Text, nullable=True)
     email_body_template = Column(Text, nullable=True)
     cadence_template_id = Column(String, nullable=True)
+    # #441: a campaign's own per-touch copy beyond touch 1 (programs/campaigns.py).
+    touch_copy_json = Column(Text, nullable=True)
     # Inactive until a person switches it on: no enrollment happens by default.
     is_active = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)

@@ -21,9 +21,11 @@ from app.services.evosense import signals as SIG
 MARKET_CLASSES = {
     "residential": ("residential", "multifamily"),
     "land": ("land", "agricultural"),
+    # OLP Farm & Ranch workspace: farm, ranch and agricultural acreage only.
+    "farm": ("agricultural",),
     "commercial": ("commercial", "industrial", "mixed_use", "specialty"),
 }
-MARKETS = ("all", "residential", "wholesale", "land", "commercial")
+MARKETS = ("all", "residential", "wholesale", "land", "farm", "commercial")
 SORTS = ("score", "recent", "state")
 SUMMARY_CAP = 2000          # summary figures are computed over at most this many records
 # Only existing facts; "overlooked" is a research workflow, not a claim that

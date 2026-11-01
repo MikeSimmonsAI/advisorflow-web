@@ -243,6 +243,10 @@ def render_cadence_message(db: Session, lead: Lead, advisor: User, touch_number:
     # this family's own location. None for every other organization.
     from app.services.programs import identity as _program_identity
     _program_text = _program_identity.cadence_text(db, lead, touch_number)
+    if not _program_text and _program_identity.own_copy_campaign(db, lead):
+        # #441: a campaign with its own copy and a blank step sends NOTHING -
+        # never the platform's generic template in its place. None = skip.
+        return None
     if _program_text:
         # SCI: links / phone numbers only if its own approved sender covers them.
         from app.services import sms_programs as _sp
@@ -313,7 +317,8 @@ CADENCE_OUTCOMES = (
 MAX_ATTEMPTS_PER_TOUCH = 3
 RETRY_BACKOFF = timedelta(hours=1)
 # Refusals that wait on a person (hold / review / campaign off), by their tag.
-REVIEW_WAIT_TAGS = ("ON HOLD:", "DATA REVIEW:", "DUPLICATE REVIEW:", "LOCATION REVIEW:", "CAMPAIGN OFF:")
+REVIEW_WAIT_TAGS = ("ON HOLD:", "DATA REVIEW:", "DUPLICATE REVIEW:", "LOCATION REVIEW:", "CAMPAIGN OFF:",
+                    "JOURNEY NOT STARTED:")
 REVIEW_RECHECK = timedelta(hours=6)
 
 
@@ -927,6 +932,19 @@ def run_due_cadences(db: Session, organization_id: str = None,
             body = render_cadence_message(
                 db, lead, advisor, touch_number, "",
                 touch_def.get("message_template"))
+            if body is None:
+                # #441: this campaign has no wording for this touch. Nothing is
+                # claimed or sent; it is looked at again later (a person may
+                # fill the step), never replaced with another campaign's words.
+                logger.warning("cadence: no campaign wording for touch %s, lead %s - not sent",
+                               touch_number, lead.id)
+                _log_touch(db, state, lead, touch_number=touch_number,
+                           attempt_seq=_next_attempt_seq(db, state, touch_number), outcome=OUTCOME_SKIPPED,
+                           reason="no campaign wording for this touch (or the location is unresolved) - nothing sent",
+                           scheduled_for=scheduled_for, attempted_at=now)
+                state.next_touch_due_at = now + REVIEW_RECHECK
+                db.commit()
+                continue
 
             claim = _log_touch(db, state, lead, touch_number=touch_number,
                                attempt_seq=attempt_seq, outcome=OUTCOME_SENT,

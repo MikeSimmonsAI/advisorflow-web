@@ -1,5 +1,5 @@
-import { Suspense, useEffect, useState } from 'react'
-import { NavLink, useNavigate, useLocation } from 'react-router-dom'
+import { Suspense, useEffect, useLayoutEffect, useState } from 'react'
+import { Link, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { getCurrentUser, refreshCurrentUser, logout, getBranding, clearBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop, getWorkspaceLocation, setWorkspaceLocation, fetchMyContexts } from '../api/client'
 import { findSciWorkspace } from '../auth/sciDoor'
 import { isManagerRole, isWorkspaceManagerRole, roleOf, workspaceFeatures, canEnterProduct, WHOLESALE_FEATURE, workspaceLocationChoices, activeLocationId } from '../auth/workspaceAuthority'
@@ -21,6 +21,13 @@ import { isWholesalePath, WholesaleSearch, WholesaleEnvironment, WholesaleUser, 
 // whose industry has one configured; null for everybody else, which is what
 // keeps this from being a global redesign. See verticals/workspaceVertical.js.
 import { verticalFor, navGroupsFor, brandLines } from '../verticals/workspaceVertical'
+import { bookaboostProductBrand, OLP } from '../brand/productBrand'
+import { olpGroups, olpHeaderFor } from '../brand/olpNav'
+// PROJECT OVERDRIVE (#439): the owner-approved Wholesale rail - Acquisition
+// Command pinned over five collapsible groups. Rearranges Layout's own items.
+import { wholesaleRail, activeRoute, readClosedGroups, writeClosedGroups } from '../brand/wholesaleNav'
+import './overdrive-nav.css'
+import '../brand/olp-workspace.css'
 // The workspace's vocabulary cache, dropped alongside its branding cache.
 // They answer the same question and must not be allowed to disagree.
 import { clearTerminology } from '../terminology'
@@ -154,6 +161,9 @@ const NAV_GROUPS = [
       { to: '/wholesale/foreclosures', label: 'Foreclosures', icon: 'calendar', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/evosense/inbox', label: 'Discovery Inbox', icon: 'search', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/evosense/overlooked', label: 'Overlooked Properties', icon: 'search', featureKey: 'wholesale_real_estate', bookaboostOnly: true },
+      // OLP workspaces on the same Wholesale engine and access (owner request, Oct 29).
+      { to: '/wholesale/land-partners', label: 'Land Partners', icon: 'layers', featureKey: 'wholesale_real_estate', bookaboostOnly: true, olpOnly: true },
+      { to: '/wholesale/farm-ranch', label: 'Farm & Ranch', icon: 'sun', featureKey: 'wholesale_real_estate', bookaboostOnly: true, olpOnly: true },
       { to: '/wholesale/evosense/strategies', label: 'Strategies', icon: 'zap', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/evosense/controls', label: 'Providers & Controls', icon: 'shield-check', featureKey: 'wholesale_real_estate' },
     ],
@@ -509,6 +519,15 @@ export default function Layout({ children }) {
   const inDealRoom = inWholesale && /^\/wholesale\/(deal-room|buyers)(\/|$)/.test(location.pathname)
   const [openGroups, setOpenGroups] = useState(() => new Set())
   const toggleGroup = (label) => setOpenGroups((s) => { const n = new Set(s); if (n.has(label)) n.delete(label); else n.add(label); return n })
+  // The Wholesale rail's closed groups, remembered on this device the same way
+  // the collapsed rail is (af_sidebar_collapsed). A group holding the current
+  // page is always open, whatever was stored.
+  const [wsClosed, setWsClosed] = useState(() => readClosedGroups(typeof localStorage === 'undefined' ? null : localStorage))
+  const toggleWsGroup = (key) => setWsClosed((s) => {
+    const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key)
+    writeClosedGroups(typeof localStorage === 'undefined' ? null : localStorage, n)
+    return n
+  })
   // On the Wholesale side "Add to Home Screen" installs EvoSys Field (opens at
   // Appointments) instead of the advisor mobile workspace. Build list #26.
   useEffect(() => { applyFieldAppHead(inWholesale) }, [inWholesale])
@@ -712,9 +731,17 @@ export default function Layout({ children }) {
   // layout root so every acceptance run can prove the authenticated workspace's
   // platform - not a hostname default - decided the brand (brand_gate.py).
   const shellResolution = shellThemeSource(branding)
+  // OLP - Overlooked Properties, powered by BookaBoost (owner decisions,
+  // Oct 29): the BookaBoost product face. `olpBrand` names the product
+  // anywhere on a BookaBoost shell; `olpShell` is the Wholesale workspace in
+  // OLP mode, which wears the scoped dark OLP theme (brand/olp-workspace.css)
+  // and the OLP rail. The build setting VITE_BOOKABOOST_PRODUCT_BRAND=bookaboost
+  // turns both off and leaves the approved BookaBoost look untouched.
+  const olpBrand = shellResolution.theme === THEMES.BOOKABOOST && bookaboostProductBrand() === 'olp'
+  const olpShell = olpBrand && inWholesale
   // The commercial product name this brand gives the Wholesale module
   // (EvoSysPro -> "EvoSys Wholesale"); the neutral module name otherwise.
-  const WHOLESALE_PRODUCT = productName(branding, 'wholesale') || 'Wholesale'
+  const WHOLESALE_PRODUCT = olpBrand ? `${OLP.short} · ${OLP.name}` : (productName(branding, 'wholesale') || 'Wholesale')
   // The acquisition engine's name for THIS workspace ("EvoSense"; null for a
   // second Wholesale tenant, which never shows another brand's name - #272).
   const WHOLESALE_ENGINE = engineName(branding)
@@ -741,14 +768,32 @@ export default function Layout({ children }) {
          // has one set for it (BookaBoost); other brands are unchanged.
          || (inWholesale ? SHELL_BRAND.wholesaleLogoUrl : null) || null)
 
+  // The OLP theme is scoped to <html data-product-brand="olp"> so drawers and
+  // dialogs rendered outside the layout (portals) wear it too; it is removed
+  // the moment the workspace is left or the brand is switched back. A layout
+  // effect, so the attribute is in place before the first paint (no flash of
+  // the previous look when the workspace opens).
+  useLayoutEffect(() => {
+    if (typeof document === 'undefined') return undefined
+    const root = document.documentElement
+    if (olpShell) {
+      root.setAttribute('data-product-brand', 'olp')
+      root.setAttribute('data-olp-header', olpHeaderFor(location.pathname))
+    } else {
+      root.removeAttribute('data-product-brand'); root.removeAttribute('data-olp-header')
+    }
+    return () => { root.removeAttribute('data-product-brand'); root.removeAttribute('data-olp-header') }
+  }, [olpShell, location.pathname])
+
   // Reset logo failure state when the URL changes (e.g. org switch)
   useEffect(() => { setLogoFailed(false) }, [logoUrl])
 
   return (
-    <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}${inWholesale ? ' layout--wholesale' : ''}${inDealRoom ? ' layout--dealroom' : ''}`}
+    <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}${inWholesale ? ' layout--wholesale' : ''}${inDealRoom && !olpShell ? ' layout--dealroom' : ''}${inWholesale && !olpShell ? ' layout--wsnav' : ''}`}
          data-brand-theme={shellResolution.theme} data-brand-source={shellResolution.source}
          data-brand-platform={branding?.platform?.slug || ''} data-org-id={branding?.organization_id || ''}
-         data-product={inWholesale ? WHOLESALE_PRODUCT : undefined}>
+         data-product={inWholesale ? WHOLESALE_PRODUCT : undefined}
+         data-product-brand={olpShell ? 'olp' : undefined}>
       <button type="button" className="mobile-menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open navigation menu">
         <span /><span /><span />
       </button>
@@ -814,7 +859,8 @@ export default function Layout({ children }) {
                   style={{ height: 72, maxWidth: 180, objectFit: 'contain', borderRadius: 6, display: 'block', margin: '0 auto' }}
                   onError={() => setLogoFailed(true)}
                 />
-                {inWholesale ? <WholesaleProductLine name={WHOLESALE_PRODUCT} engine={WHOLESALE_ENGINE} /> : null}
+                {/* In OLP mode the logo already names the product. */}
+                {inWholesale && !olpShell ? <WholesaleProductLine name={WHOLESALE_PRODUCT} engine={WHOLESALE_ENGINE} /> : null}
               </span>
             )
           ) : (
@@ -963,6 +1009,7 @@ export default function Layout({ children }) {
             const visible = (item) => {
               if (item.fiberOnly && !(branding && branding.industry === 'fiber')) return false
               if (item.bookaboostOnly && shellResolution.theme !== THEMES.BOOKABOOST) return false
+              if (item.olpOnly && !olpBrand) return false
               // Only orgs with an open implementation see Launch. `null`
               // means the answer has not arrived yet, and the item stays
               // hidden until it does — a nav entry that appears a second late
@@ -1051,16 +1098,61 @@ export default function Layout({ children }) {
                 <Icon name={item.icon} />{!sidebarCollapsed && item.label}
               </NavLink>
             )
+            if (inWholesale && !olpShell) {
+              // DESIGN A (owner approved, #439). Exactly one entry is highlighted:
+              // activeRoute() picks the most specific match (Multifamily over
+              // Discovery Inbox), so Link is used rather than NavLink, whose own
+              // matching would mark both.
+              const isWs = (group) => group.items.some((item) => isWholesalePath(item.to))
+              const rail = wholesaleRail(groups.filter(isWs))
+              const pinned = rail.pinned && visible(rail.pinned) ? rail.pinned : null
+              const shown = rail.groups.map((g) => ({ ...g, items: g.items.filter(visible) })).filter((g) => g.items.length)
+              const activeTo = activeRoute([pinned, ...shown.flatMap((g) => g.items)].filter(Boolean), location.pathname, location.search)
+              const renderWs = (item) => {
+                const on = item.to === activeTo
+                return (
+                  <Link key={item.to} to={item.to} className={`nav-item${on ? ' nav-item--active' : ''}`}
+                        aria-current={on ? 'page' : undefined} onClick={closeSidebar} title={item.label}
+                        data-nav-route={item.to}>
+                    <Icon name={item.icon} />{!sidebarCollapsed && item.label}
+                  </Link>
+                )
+              }
+              return (
+                <div className="wsnav" data-wsnav="overdrive">
+                  {pinned ? <div className="nav-section wsnav-pinned">{renderWs(pinned)}</div> : null}
+                  {shown.map((group) => {
+                    const holds = group.items.some((item) => item.to === activeTo)
+                    const open = sidebarCollapsed || holds || !wsClosed.has(group.key)
+                    const gid = 'wsnav-grp-' + group.key
+                    return (
+                      <div key={group.key} className={`nav-section wsnav-group${holds ? ' nav-section--current' : ''}`} data-nav-group={group.key}>
+                        {sidebarCollapsed ? <div className="nav-divider" title={group.label} /> : (
+                          <button type="button" className="nav-section-toggle" aria-expanded={open} aria-controls={gid}
+                                  onClick={() => toggleWsGroup(group.key)}
+                                  title={holds ? 'This group holds the page you are on' : undefined}>
+                            <span>{group.label}</span>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+                          </button>
+                        )}
+                        {open ? <div id={gid} role="group" aria-label={group.label}>{group.items.map(renderWs)}</div> : null}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            }
             if (inWholesale) {
               const isWs = (group) => group.items.some((item) => isWholesalePath(item.to))
-              const wsGroups = groups.filter(isWs)
+              // OLP: the same items in three plain groups, one rail shape everywhere.
+              const wsGroups = olpShell ? olpGroups(groups.filter(isWs)) : groups.filter(isWs)
               return (
                 <>
                   {wsGroups.map((group) => {
                     const items = group.items.filter(visible)
                     if (items.length === 0) return null
                     const holdsCurrent = items.some((item) => item.end ? location.pathname === item.to : (location.pathname === item.to || location.pathname.startsWith(item.to + '/')))
-                    const foldable = inDealRoom && !sidebarCollapsed && !holdsCurrent
+                    const foldable = inDealRoom && !olpShell && !sidebarCollapsed && !holdsCurrent
                     const open = !foldable || openGroups.has(group.label)
                     const gid = 'nav-grp-' + group.label.replace(/[^a-z]+/gi, '-').toLowerCase()
                     return (

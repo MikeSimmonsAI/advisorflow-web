@@ -351,3 +351,24 @@ def test_card_facts_show_rooms_only_when_the_record_holds_them(db_session):
     assert items[p.id]["facts"]["bedrooms"] == 3 and items[p.id]["facts"]["bathrooms"] == 2.5
     assert items[q.id]["facts"]["bedrooms"] is None and items[q.id]["facts"]["bathrooms"] is None
     json.dumps(items[p.id]["facts"])        # plain JSON numbers, never Decimal
+
+
+def test_farm_market_is_agricultural_only_and_stays_in_its_workspace(db_session):
+    """OLP Farm & Ranch: the 'farm' market shows only agricultural records of
+    the caller's own workspace - never plain land, homes, or another tenant's farms."""
+    db = db_session
+    a = org(db, "Farm Workspace")
+    b = org(db, "Other Workspace")
+    property_record(db, a, "Ranch Road 9", "agricultural", state="KS")
+    property_record(db, a, "Lot 4 Mesa Dr", "land", state="KS")
+    property_record(db, a, "12 Elm St", "residential", state="KS")
+    property_record(db, b, "Other Farm Rd", "agricultural", state="KS")
+    db.commit()
+    farm = RADAR.search(db, a.id, market="farm")
+    assert [v["address"] for v in farm["items"]] == ["Ranch Road 9"]
+    assert "farm" in farm["markets"]
+    assert sum(s["count"] for s in farm["available"]["states"]) == 1   # coverage counts farms only
+    assert RADAR.search(db, a.id, market="land")["total"] == 2      # land still includes farms
+    assert RADAR.search(db, b.id, market="farm")["total"] == 1
+    with pytest.raises(ValueError):
+        RADAR.search(db, a.id, market="ranches")

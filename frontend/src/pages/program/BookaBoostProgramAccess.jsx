@@ -10,6 +10,9 @@ import photoWholesale from '../wholesale/ds/photos/aerial.jpg'
 import photoBackOffice from '../wholesale/ds/photos/contract.jpg'
 import photoExecutive from '../wholesale/ds/photos/skyline.jpg'
 import photoLand from '../wholesale/ds/photos/home.jpg'
+import photoLandPartners from '../wholesale/ds/photos/land-field.jpg'
+import photoFarmRanch from '../wholesale/ds/photos/farm-barn.jpg'
+import { olpWorkspaceCards } from '../../brand/olpNav'
 
 /**
  * BookaBoost Program Access, built to the owner-approved 4-panel mockup
@@ -29,6 +32,8 @@ const PHOTOS = {
   back_office: photoBackOffice,
   executive: photoExecutive,
   preview: photoLand,
+  land_partners: photoLandPartners,
+  farm_ranch: photoFarmRanch,
 }
 // OLP exploration: the Wholesale program is presented as OLP - Overlooked
 // Properties (its icon and one line). Which programs appear is unchanged.
@@ -40,6 +45,8 @@ const LINES = {
   back_office: 'Manage leads, appointments and your sales pipeline.',
   executive: 'See how the whole business is performing.',
   preview: 'A preview you have been given permission to open.',
+  land_partners: 'Land deals and the partners who buy them: land opportunities, land buyers and deals in one place.',
+  farm_ranch: 'Farmland, ranches and acreage: research the evidence and match the right land buyers.',
 }
 
 export function bookaboostTitle(brandName) {
@@ -58,6 +65,8 @@ const ICONS = {
   back_office: <path d="M5 20V13M10 20V9M15 20v-5M20 20V5" />,
   executive: <path d="M4 20h16M6 16l4-5 3 3 5-7" />,
   preview: <path d="M5 19c0-8 5-13 14-14-1 9-6 14-14 14zm0 0 7-7" />,
+  land_partners: <path d="M3 18l6-9 4 6 3-4 5 7H3zM7 6a2 2 0 1 0 0-.01" />,
+  farm_ranch: <path d="M4 20V10l6-4 6 4v10M4 20h16M10 20v-5h4v5M16 12h4v8M18 8V5" />,
   business: <path d="M4 20V8l8-4 8 4v12M9 20v-5h6v5" />,
 }
 
@@ -229,8 +238,12 @@ export default function BookaBoostProgramAccess({ contexts, onChoose, user: user
   const signOut = onSignOut || defaultSignOut()
   // Operational destinations first (Wholesale, Back Office, any other
   // workspace), then authorized previews - one row, as in the mockup.
+  // OLP: Land Partners and Farm & Ranch sit right after the Wholesale card they
+  // belong to, and only when the server gave this login that Wholesale card.
+  const olpExtras = IS_OLP ? olpWorkspaceCards(visible) : []
+  const at = visible.findIndex(c => c.type === 'product' && c.key === 'wholesale')
   const cards = [
-    ...visible,
+    ...(at >= 0 ? [...visible.slice(0, at + 1), ...olpExtras, ...visible.slice(at + 1)] : visible),
     ...others.map(w => ({ ...w, program: 'business', display: w.organization_name })),
     ...previews,
   ]
@@ -242,7 +255,7 @@ export default function BookaBoostProgramAccess({ contexts, onChoose, user: user
         {cards.length > 0 ? (
           <ul className={'bbpa-grid bbpa-grid--n' + Math.min(cards.length, 4)} aria-label="Your workspaces">
             {cards.map(item => (
-              <li key={item.type + ':' + item.organization_id + ':' + (item.key || '')}>
+              <li key={item.type + ':' + item.organization_id + ':' + (item.key || '') + ':' + (item.view || '')}>
                 <PhotoCard item={item} onOpen={onChoose} />
               </li>
             ))}

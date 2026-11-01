@@ -196,6 +196,17 @@ PLAYBOOKS: Dict[str, Dict] = {
     # Seminar and Web Lead had no playbook and fell back to re-engagement, so a
     # first email that rightly said "you signed up for one of our seminars" was
     # HELD by the quality gate for not saying why we were writing.
+    "central_alabama_ms": _pb(
+        "central_alabama_ms", "Pre-Planning Guide and Savings Certificate",
+        "you filled out one of our surveys requesting a pre-planning guide and savings certificate",
+        "planning ahead",
+        "Families tell us the guide makes planning ahead feel simpler, and going over it together "
+        "takes only a few minutes.",
+        "A common question is whether a visit means deciding anything. It doesn't - we go over the "
+        "guide and certificate and you take everything home.",
+        ["the person filled out a survey requesting a pre-planning guide and savings certificate"],
+        # No offer terms are on file: never a value, expiry or benefit.
+        [r"\bworth\b", r"\bvalued at\b", r"\bexpir", r"\b\d+\s?%", r"\bvalid (until|through)\b"]),
     "seminar": _pb(
         "seminar", "Seminar",
         "you signed up for one of our planning seminars", "planning ahead",

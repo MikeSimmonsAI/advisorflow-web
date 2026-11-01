@@ -1069,6 +1069,51 @@ SOFT_NO_REASON = ("Soft no - they said \"%s\". Nothing was sent. Call them once 
                   "if it's still no, set a check-back date.")
 
 
+_ASKS_SOMETHING = re.compile(r"\?|\b(how much|price|cost|send|mail|email me|call me|text me|information|info|"
+                             r"brochure|guide|but|except|however|though|instead|maybe|later|next (week|month|year)|"
+                             r"right now|for now|at this time|yet|someday|my (husband|wife|son|daughter|sister|brother))\b",
+                             re.I)
+
+
+def is_plain_decline(body: str, understanding: Optional[Dict] = None) -> bool:
+    """A no with nothing else in it: no question, request, timing or
+    referral, and not upset or grieving. Those still go to a person."""
+    b = (body or "").strip()
+    mood = ((understanding or {}).get("mood") or "").lower()
+    # A bare "No" / "Nope" can answer a question we asked; that stays with
+    # the AI's clarifying question or a person.
+    bare = len(re.findall(r"[a-z']+", b.lower())) <= 2 and re.fullmatch(r"(?i)\s*(no+|nope|nah|pass)[\s.!]*", b)
+    return (bool(b) and not bare and len(b) <= 200 and bool(_DECLINE.search(b)) and not _ASKS_SOMETHING.search(b)
+            and not _SOFT_NO.search(b) and mood not in ("upset", "grieving"))
+
+
+def _close_declined(db: Session, prog, lead, conv, resp, body: str, draft: str, out: Dict, now) -> Dict:
+    from app.models.program_models import ProgramAlert
+    from app.services.programs import alert_ledger as _L
+    from app.services.programs import responses as _R
+    from app.services.programs.reply_rules import I_OPT_OUT, NOT_INTERESTED, OPT_OUT
+    conv.state = "stopped"
+    conv.next_followup_at = None
+    conv.followup_reason = None
+    merge_memory(conv, {"readiness": "closed", "next_step": "none - they said no"})
+    if resp is not None:
+        resp.response_class = OPT_OUT                    # the terminal response model
+        resp.handling_status = "closed"
+        resp.sla_due_at = None
+        resp.intents = json.dumps([NOT_INTERESTED, I_OPT_OUT])
+        resp.recommended_action = "They said no. Outreach is closed - nothing more goes to them."
+        _R.close_terminal(db, lead, resp, resp.channel or "sms", body, now)
+        # The reply's in-app notice was raised before the AI read it; a plain
+        # no needs no one's attention.
+        db.query(ProgramAlert).filter(ProgramAlert.response_id == resp.id,
+                                      ProgramAlert.channel == "in_app").delete(synchronize_session=False)
+    _turn(db, conv, "system", None, action="stop",
+          reason="they said no - outreach closed; nothing sent, no hand-off")
+    _L.defer({"type": "closed"})
+    db.commit()
+    return dict(out, action="close", state=conv.state, closed=True)
+
+
 def is_soft_no(body: str) -> bool:
     b = (body or "").strip()
     # "Not now, but I can come in next week" is a yes with a timing - not a soft no.
@@ -1424,6 +1469,9 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
     if not 0.0 <= confidence <= 1.0:
         confidence = max(0.0, min(1.0, confidence / 100.0 if confidence > 1 else confidence))
     out["confidence"] = confidence
+    if not left and action == "close" and is_plain_decline(body, und):
+        # #450: a plain no closes quietly however sure the AI was.
+        return _close_declined(db, prog, lead, conv, resp, body, text, out, now)
     if left or (confidence < LOW_CONFIDENCE and action not in ("wait", "handoff")):
         why = ("unsure (confidence %.2f)" % confidence) if not left else "; ".join(left)
         if resp is not None and text:
@@ -1753,6 +1801,12 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
     # a short "we'll be ready for you" - that IS an appointment being met.
     _moves_to_appt = bool(out.get("offered")) or bool(_REAL_TIME.search(text or ""))
     _arriving = action == "handoff" and bool(_ARRIVING_TODAY.search(body or "")) and bool(_COMING_IN.search(body or ""))
+    if not (_moves_to_appt or _arriving) and action == "close" and is_plain_decline(body, und):
+        # #450 (George, Oct 31): "No longer interested." - the AI read it as a
+        # no and closed, and THE RULE below turned the close into "needs a
+        # human". A plain no is the END of the outreach, not a job for staff:
+        # nothing is sent, nobody is paged, the cadence ends, the reply closes.
+        return _close_declined(db, prog, lead, conv, resp, body, text, out, now)
     if not (_moves_to_appt or _arriving):
         if resp is not None and text:
             resp.suggested_reply = text                  # the draft, for the person to use or ignore

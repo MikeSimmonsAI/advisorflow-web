@@ -200,6 +200,8 @@ def render_touch(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof: 
         # family's own pick-a-time link when there is one.
         "appointment_options": identity.appointment_options(prof),
         "booking_line": ("Pick a time that works for you here: %s\n\n" % booking_url) if booking_url else "",
+        # #441: the location's own number for an email signature.
+        "location_phone": _pretty_phone(prof.facility_phone),
     }
     subject = identity.render(fam.email_subject_template, fields)
     body = identity.render(fam.email_body_template,
@@ -211,6 +213,24 @@ def render_touch(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof: 
     return {"email_mode": mode, "flyer": flyer, "flyer_available": found is not None, "flyer_url": flyer_url, "attachment": attachment,
             "subject": subject, "body": body, "body_html": body_html, "booking_url": booking_url,
             "fields": fields}
+
+
+def _pretty_phone(raw) -> str:
+    d = "".join(ch for ch in str(raw or "") if ch.isdigit())
+    if len(d) == 11 and d[0] == "1":
+        d = d[1:]
+    return "(%s) %s-%s" % (d[:3], d[3:6], d[6:]) if len(d) == 10 else ""
+
+
+def own_copy_email(fam: CampaignFamily, touch: int, fields: Dict, reply_instructions: str = "") -> Optional[Dict]:
+    """#441: an own-copy campaign's email for this touch, rendered with the
+    same fields delivery uses - or None when the step is blank (nothing goes)."""
+    from app.services.programs import campaigns as _camp
+    e = _camp.email_for(fam, touch)
+    if e is None:
+        return None
+    return {"subject": identity.render(e["subject"], fields),
+            "body": identity.render(e["body"], dict(fields, reply_instructions=reply_instructions))}
 
 
 def text_to_html(text: str, link_url: str = "") -> str:
@@ -371,6 +391,24 @@ def _skip_reason(db: Session, lead: Lead, replied: bool, prog=None) -> Optional[
     if db.query(BookingLink.id).filter(BookingLink.lead_id == lead.id,
                                        BookingLink.status.in_(("booked", "confirmed"))).first():
         return "an appointment is booked - the sequence stops"
+    # #449: one journey, texts first. In a started journey a family who can
+    # take texts gets the first TEXT before any email; the email then keeps
+    # the usual gap after it (above).
+    from app.models.models import CadenceState
+    st = db.query(CadenceState).filter(CadenceState.lead_id == lead.id).first()
+    if st is not None and st.status == "active" and (st.current_touch_number or 0) == 0:
+        from app.services.programs import identity as _id
+        from app.services.programs.send_approval import textable as _textable
+        rec = _id.source_record_for_lead(db, lead)
+        start = getattr(rec, "scheduled_start_at", None) or st.cadence_started_at
+        if start is not None and getattr(start, "tzinfo", None) is not None:
+            start = start.replace(tzinfo=None)
+        if rec is not None and rec.campaign_family in _own_copy_keys() and _textable(lead) \
+                and (rec.send_mode or "text_email") == "text_email" \
+                and (start is None or datetime.utcnow() - start < TEXT_FIRST_MAX_WAIT):
+            # Bounded: if the first text can't go (quiet hours, texting off,
+            # blocked), the email is not held forever.
+            return "waiting for the first text of the journey - the email follows it"
     # ONE INBOX, ONE EMAIL. When several contacts share an address, the first
     # to reach its email sends one UNADDRESSED email ("Hi there"); the others
     # never email that inbox. Their texts are unaffected.
@@ -385,6 +423,7 @@ def _skip_reason(db: Session, lead: Lead, replied: bool, prog=None) -> Optional[
 
 DEFAULT_MAX_TOUCHES = 5
 CROSS_CHANNEL_GAP = timedelta(hours=4)
+TEXT_FIRST_MAX_WAIT = timedelta(hours=24)   # #449
 
 
 def max_touches() -> int:
@@ -458,7 +497,19 @@ def build_message(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof:
     if blind and packet is not None:
         # Shared inbox: no name - it may not be this person who reads it.
         packet = dict(packet, first_name=None, last_name=None)
-    if touch == 1 and not _family_copy_is_default(fam):
+    from app.services.programs.campaigns import OWN_COPY_KEYS
+    if fam.key in OWN_COPY_KEYS:
+        # #441: this campaign's own words for THIS touch - never a playbook.
+        own = own_copy_email(fam, touch, r["fields"], prog.reply_instructions_email or "")
+        if own is None:
+            msg = {"touch": touch, "channel": "email", "subject": "", "body": "",
+                   "strategy": brain.TOUCH_STRATEGY.get(touch), "family": fam.key, "source": "campaign copy"}
+            return {"message": dict(msg, body_html=""), "packet": packet,
+                    "quality": {"ok": False, "score": 0, "warnings": [],
+                                "failures": ["this campaign has no wording for email %s" % touch]}}
+        msg = {"touch": touch, "channel": "email", "subject": own["subject"], "body": own["body"],
+               "strategy": brain.TOUCH_STRATEGY.get(touch), "family": fam.key, "source": "campaign copy"}
+    elif touch == 1 and not _family_copy_is_default(fam):
         msg = {"touch": 1, "channel": "email", "subject": r["subject"], "body": r["body"],
                "strategy": brain.TOUCH_STRATEGY[1], "family": fam.key, "source": "family copy"}
     else:
@@ -487,6 +538,11 @@ def build_message(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof:
         _esc = html.escape(_bu)
         msg["body_html"] = msg["body_html"].replace(_esc, '<a href="%s">%s</a>' % (_esc, _esc))
     return {"message": msg, "quality": verdict, "packet": packet}
+
+
+def _own_copy_keys():
+    from app.services.programs.campaigns import OWN_COPY_KEYS
+    return OWN_COPY_KEYS
 
 
 def plan(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
@@ -534,6 +590,8 @@ def plan(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
             continue                                   # call list: a person calls, nothing automated
         if getattr(master, "scheduled_start_at", None) and now < master.scheduled_start_at:
             continue                                   # slow drip: not their start time yet
+        if fam.key in _own_copy_keys() and not any(getattr(r, "journey_started_at", None) for r in rows):
+            continue                                   # #449: journey not started - nothing goes
         mine = touches.get(lead_id, {})
         for t in (mine.values() if mark_stale else ()):   # surface claims that never resolved
             if t.status == "claimed" and t.attempted_at and now - t.attempted_at >= STALE_CLAIM_AFTER:
