@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models.acquisition_models import (AcquisitionEvent, AcquisitionEvidence, AcquisitionFeedback,
-                                           AcquisitionOpportunity, AcquisitionProfile)
+                                           AcquisitionOperator, AcquisitionOpportunity, AcquisitionProfile)
 from app.models.models import BookingLink, Lead, Organization, User
 from app.services.acquisition import common as C
 from app.services.acquisition import harvey_adapted as H
@@ -449,11 +449,32 @@ def funnel(db: Session, org_id: str, include_practice: bool) -> Dict[str, Any]:
     def reached(stamp):
         return sum(1 for o in real if getattr(o, stamp) is not None)
 
+    # Verified / contacted / replied are counted ONLY from recorded moves into
+    # those stages - never inferred from a later stage (a prospect moved to
+    # Interested by hand was not "contacted" and its contact was not verified).
+    real_ids = {o.id for o in real}
+
+    def ever(stage):
+        if not real_ids:
+            return 0
+        rows = (db.query(AcquisitionEvent.opportunity_id)
+                .filter(AcquisitionEvent.organization_id == org_id, AcquisitionEvent.kind == "stage",
+                        AcquisitionEvent.to_stage == stage).distinct().all())
+        return sum(1 for (oid,) in rows if oid in real_ids)
+
+    contacted = ever(C.CONTACTED)
+    replied = ever(C.REPLIED)
     won = [o for o in real if o.stage == C.WON]
     quoted = [o for o in real if o.quoted_at is not None]
     return {
         "by_stage": by_stage,
         "total": len(use),
+        "real": len(real),
+        "contacts_verified": ever(C.CONTACT_VERIFIED),
+        "contacted": contacted,
+        "replied": replied,
+        # None until something was actually sent - never a made-up rate.
+        "reply_rate": round(replied / contacted, 3) if contacted else None,
         "practice": len(rows) - len(real),
         # outcome counts are ALWAYS real prospects only
         "interested": reached("interested_at"),
@@ -474,3 +495,84 @@ def upcoming(db: Session, org_id: str, lead_ids=None) -> List[Dict[str, Any]]:
              if x["stage"] == C.BOOKED and x["appointment"] and x["appointment"]["time"]]
     items = [x for x in items if x["appointment"]["time"] >= C.iso(now)]
     return sorted(items, key=lambda x: x["appointment"]["time"])
+
+
+# ── operators (acquisition access without God Mode) ────────────────────────
+def operator_org_ids(db: Session, user) -> List[str]:
+    if user is None or not getattr(user, "id", None):
+        return []
+    rows = (db.query(AcquisitionOperator.organization_id)
+            .filter(AcquisitionOperator.user_id == user.id, AcquisitionOperator.is_active == True).all())  # noqa: E712
+    return [r[0] for r in rows]
+
+
+def is_operator(db: Session, user, org_id: Optional[str] = None) -> bool:
+    ids = operator_org_ids(db, user)
+    return bool(ids) if org_id is None else org_id in ids
+
+
+def grant_operator(db: Session, org: Organization, email: str, actor: User) -> Dict[str, Any]:
+    email = (email or "").strip().lower()
+    u = db.query(User).filter(User.email == email).first() if email else None
+    if u is None:
+        raise HTTPException(404, "No login with that email")
+    if not u.is_active:
+        raise HTTPException(409, "That login is not active")
+    row = (db.query(AcquisitionOperator)
+           .filter(AcquisitionOperator.organization_id == org.id, AcquisitionOperator.user_id == u.id).first())
+    if row is None:
+        row = AcquisitionOperator(organization_id=org.id, user_id=u.id, granted_by_id=actor.id, is_active=True)
+        db.add(row)
+    else:
+        row.is_active, row.granted_by_id = True, actor.id
+    _event(db, org.id, None, "operator_grant", actor.id, note=email)
+    db.commit()
+    return {"user_id": u.id, "email": u.email, "active": True}
+
+
+def revoke_operator(db: Session, org: Organization, user_id: str, actor: User) -> None:
+    row = (db.query(AcquisitionOperator)
+           .filter(AcquisitionOperator.organization_id == org.id, AcquisitionOperator.user_id == user_id).first())
+    if row is None:
+        raise HTTPException(404, "Not an operator")
+    row.is_active = False
+    _event(db, org.id, None, "operator_revoke", actor.id, note=user_id)
+    db.commit()
+
+
+def operators(db: Session, org_id: str) -> List[Dict[str, Any]]:
+    rows = (db.query(AcquisitionOperator, User).join(User, User.id == AcquisitionOperator.user_id)
+            .filter(AcquisitionOperator.organization_id == org_id, AcquisitionOperator.is_active == True).all())  # noqa: E712
+    return [{"user_id": u.id, "email": u.email, "name": u.full_name or u.email} for _, u in rows]
+
+
+# ── pilot progress (real timestamps only) ──────────────────────────────────
+def progress(db: Session, org_id: str, days: int = 30) -> Dict[str, Any]:
+    """Cumulative real (non-practice) counts per day since the pilot clock
+    started. Before it starts there is no series - nothing is projected."""
+    p = get_profile(db, org_id)
+    start = p.pilot_started_at if p else None
+    if start is None:
+        return {"started": False, "day": None, "series": []}
+    from datetime import timedelta
+    rows = (db.query(AcquisitionOpportunity).filter(AcquisitionOpportunity.organization_id == org_id,
+                                                    AcquisitionOpportunity.is_practice == False).all())  # noqa: E712
+    today = (datetime.utcnow() - start).days + 1
+    series = []
+    for d in range(1, min(today, days) + 1):
+        cut = start + timedelta(days=d)
+        series.append({"day": d,
+                       "researched": sum(1 for o in rows if o.created_at and o.created_at < cut),
+                       "interested": sum(1 for o in rows if o.interested_at and o.interested_at < cut),
+                       "booked": sum(1 for o in rows if o.booked_at and o.booked_at < cut)})
+    return {"started": True, "day": min(today, days), "series": series}
+
+
+def client_extra_counts(db: Session, org_id: str) -> Dict[str, int]:
+    """Counts the client may see without seeing the records themselves."""
+    early = (C.DISCOVERED, C.RESEARCHED, C.QUALIFIED, C.CONTACT_VERIFIED, C.OUTREACH_READY)
+    talking = (C.CONTACTED, C.REPLIED)
+    rows = (db.query(AcquisitionOpportunity.stage).filter(AcquisitionOpportunity.organization_id == org_id,
+                                                          AcquisitionOpportunity.is_practice == False).all())  # noqa: E712
+    return {"in_research": sum(1 for (s,) in rows if s in early),
+            "in_conversation": sum(1 for (s,) in rows if s in talking)}

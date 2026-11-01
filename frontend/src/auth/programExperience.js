@@ -22,7 +22,8 @@ export function programEntry(entry) {
   return (entry && PROGRAM_ENTRY[entry.experience]) || null
 }
 
-const SHARED_OK = ['/change-password', '/login', '/logout', '/workspaces']
+// /acquisition-ops answers 403 itself unless the owner granted operator access.
+const SHARED_OK = ['/change-password', '/login', '/logout', '/workspaces', '/acquisition-ops']
 
 export function activeWorkspaceEntry(ctx, selectedId, homeOrgId) {
   const list = ctx?.workspace_contexts || []

@@ -5,17 +5,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../../api/client'
-import { BASE, Loading, Pill, errText, money, useAcq, useToast, when } from './AcquisitionShell'
-
-function useLoad(path) {
-  const [data, setData] = useState(null)
-  const [error, setError] = useState(null)
-  const load = async () => {
-    try { setData(await api.get(path)); setError(null) } catch (e) { setError(e) }
-  }
-  useEffect(() => { load() }, [path])
-  return [data, error, load]
-}
+import { BASE, useAcq } from './AcquisitionShell'
+import { DateChip, Icon, Kpi, Loading, Pill, apptPill, clock, errText, money, useLoad, useToast, when } from './ui'
 
 function ProspectRow({ x }) {
   return (
@@ -24,54 +15,80 @@ function ProspectRow({ x }) {
         <b>{x.business_name}</b>
         <span>{[x.segment_label, x.city, x.contact_name].filter(Boolean).join(' · ') || '—'}</span>
       </div>
-      {x.appointment?.time && x.stage === 'appointment_booked' && <span className="aq-pill">{when(x.appointment.time)}</span>}
+      {x.monthly_value != null && <span className="aq-time">{money(x.monthly_value, '/mo')}</span>}
       <Pill stage={x.stage} label={x.stage_label} />
       <Link className="aq-btn aq-btn--sm" to={`${BASE}/prospects/${x.id}`}>Open</Link>
     </div>
   )
 }
 
-// ── Home ────────────────────────────────────────────────────────────────
+function ApptRow({ x }) {
+  const a = x.appointment || {}
+  return (
+    <div className="aq-row">
+      <DateChip iso={a.time} />
+      <div className="aq-row__main">
+        <b><Link to={`${BASE}/prospects/${x.id}`} style={{ color: 'inherit', textDecoration: 'none' }}>{x.business_name}</Link></b>
+        <span>{[x.segment_label, x.city].filter(Boolean).join(' • ') || (a.label || 'Walkthrough')}</span>
+      </div>
+      <span className="aq-time">🕒 {clock(a.time)}</span>
+      {apptPill(a)}
+    </div>
+  )
+}
+
+// ── Dashboard ───────────────────────────────────────────────────────────
 export function Home() {
   const { status } = useAcq()
   const [d, err] = useLoad('/acquisition/dashboard')
   if (err) return <div className="aq-page"><div className="aq-err">{errText(err)}</div></div>
   if (!d) return <div className="aq-page"><Loading /></div>
   const c = d.counts
+  const first = (status.me?.name || '').split(' ')[0]
+  const steps = [
+    { done: d.upcoming.length === 0, text: d.upcoming.length ? `Attend your ${d.upcoming.length} scheduled appointment${d.upcoming.length > 1 ? 's' : ''}` : 'Attend scheduled appointments' },
+    { done: d.needs_outcome.length === 0, text: d.needs_outcome.length ? `Add details after ${d.needs_outcome.length} meeting${d.needs_outcome.length > 1 ? 's' : ''}` : 'Add estimate details after each meeting' },
+    { done: false, text: 'Mark opportunities as Won or Lost' },
+    { done: false, text: 'Share feedback on lead quality', link: `${BASE}/feedback` },
+  ]
   return (
     <div className="aq-page">
-      <h1 className="aq-h1">Welcome{status.me?.name ? `, ${status.me.name.split(' ')[0]}` : ''}</h1>
-      <p className="aq-lede">Businesses that want to talk about cleaning, the walkthroughs on your calendar, and how each one turned out.</p>
+      <h1 className="aq-h1">Welcome{first ? `, ${first}` : ''}!</h1>
+      <p className="aq-lede">Here are your results, upcoming appointments, and next steps.</p>
       {!status.running && (
-        <div className="aq-note">
-          Your outreach hasn’t started yet. Your 30-day free pilot begins the day it goes live — you’ll see interested businesses here as soon as they reply.
-        </div>
+        <div className="aq-note">Your outreach hasn’t started yet. Your 30-day free pilot begins the day it goes live — interested businesses will appear here as soon as they reply.</div>
       )}
-      <div className="aq-grid aq-kpis">
-        <div className="aq-kpi"><b>{c.interested}</b><span>Interested businesses</span></div>
-        <div className="aq-kpi"><b>{c.booked}</b><span>Appointments booked</span></div>
-        <div className="aq-kpi"><b>{c.held}</b><span>Appointments held</span></div>
-        <div className="aq-kpi"><b>{c.quoted}</b><span>Quotes sent</span></div>
-        <div className="aq-kpi"><b>{c.won}</b><span>Contracts won</span></div>
-        <div className="aq-kpi"><b>{money(d.won_monthly_value)}</b><span>Won monthly value</span></div>
+      <div className="aq-grid aq-kpis aq-kpis--dark">
+        <Kpi icon="building" value={c.in_research} label="New Opportunities" sub="(In Research)" />
+        <Kpi icon="chat" value={c.interested} label="Interested Leads" sub="(In Conversation)" />
+        <Kpi icon="calendar" value={c.booked} label="Appointments" sub="(Booked)" />
+        <Kpi icon="handshake" value={c.won} label="Contracts Won" sub="(This Pilot)" />
       </div>
-      <div className="aq-grid aq-two">
+      <div className="aq-grid aq-split">
         <section className="aq-card">
-          <h2>Next appointments</h2>
-          {d.upcoming.length ? d.upcoming.map(x => <ProspectRow key={x.id} x={x} />)
+          <div className="aq-card__head"><h2>Upcoming Appointments</h2><Link to={`${BASE}/appointments`}>View All →</Link></div>
+          {d.upcoming.length ? d.upcoming.map(x => <ApptRow key={x.id} x={x} />)
             : <div className="aq-empty">No appointments booked yet.</div>}
         </section>
         <section className="aq-card">
-          <h2>Tell us how it went</h2>
-          {d.needs_outcome.length ? d.needs_outcome.map(x => <ProspectRow key={x.id} x={x} />)
-            : <div className="aq-empty">Nothing waiting on you.</div>}
+          <h2>Your Next Steps</h2>
+          <ul className="aq-checklist">
+            {steps.map(st => (
+              <li key={st.text}><span className={`aq-box`} style={st.done ? { background: '#15924a', borderColor: '#15924a' } : undefined} />
+                {st.link ? <Link to={st.link} style={{ color: 'inherit' }}>{st.text}</Link> : st.text}</li>
+            ))}
+          </ul>
         </section>
       </div>
-      {d.new_interest.length > 0 && (
-        <section className="aq-card" style={{ marginTop: 14 }}>
-          <h2>New interest</h2>
-          {d.new_interest.map(x => <ProspectRow key={x.id} x={x} />)}
-        </section>
+      {(d.needs_outcome.length > 0 || d.new_interest.length > 0) && (
+        <div className="aq-grid aq-two" style={{ marginTop: 14 }}>
+          <section className="aq-card"><h2>Tell us how it went</h2>
+            {d.needs_outcome.length ? d.needs_outcome.map(x => <ProspectRow key={x.id} x={x} />) : <div className="aq-empty">Nothing waiting on you.</div>}
+          </section>
+          <section className="aq-card"><h2>New interest</h2>
+            {d.new_interest.length ? d.new_interest.map(x => <ProspectRow key={x.id} x={x} />) : <div className="aq-empty">No new interest right now.</div>}
+          </section>
+        </div>
       )}
     </div>
   )
@@ -83,7 +100,7 @@ export function Prospects() {
   const [d, err] = useLoad('/acquisition/prospects' + (stage ? `?stage=${stage}` : ''))
   return (
     <div className="aq-page">
-      <h1 className="aq-h1">Interested businesses</h1>
+      <h1 className="aq-h1">Opportunities</h1>
       <p className="aq-lede">Every business here told us they want to hear about cleaning. Open one to see who they are and record what happened.</p>
       <div className="aq-tabs">
         <button className={!stage ? 'on' : ''} onClick={() => setStage('')}>All</button>
@@ -131,7 +148,7 @@ export function Prospect() {
   return (
     <div className="aq-page">
       {toast}
-      <Link to={`${BASE}/prospects`} className="aq-btn aq-btn--sm">← All businesses</Link>
+      <Link to={`${BASE}/prospects`} className="aq-btn aq-btn--sm">← All opportunities</Link>
       <h1 className="aq-h1" style={{ marginTop: 14 }}>{x.business_name}</h1>
       <p className="aq-lede"><Pill stage={x.stage} label={x.stage_label} /> {x.segment_label ? ` · ${x.segment_label}` : ''}</p>
       <div className="aq-grid aq-two">
@@ -193,26 +210,50 @@ export function Prospect() {
 // ── Appointments ────────────────────────────────────────────────────────
 export function Appointments() {
   const [d, err] = useLoad('/acquisition/appointments')
+  const [tab, setTab] = useState('upcoming')
+  const done = (d?.all || []).filter(x => ['appointment_held', 'quote_issued', 'won', 'lost'].includes(x.stage))
+  const noShow = (d?.all || []).filter(x => x.stage === 'no_show')
+  const lists = { upcoming: d?.upcoming || [], completed: done, no_show: noShow }
   return (
     <div className="aq-page">
       <h1 className="aq-h1">Appointments</h1>
       <p className="aq-lede">Walkthroughs and consultations we booked for you. They are also on your calendar.</p>
       {err && <div className="aq-err">{errText(err)}</div>}
-      {!d ? <Loading /> : (
-        <div className="aq-grid">
-          <section className="aq-card"><h2>Coming up</h2>
-            {d.upcoming.length ? d.upcoming.map(x => <ProspectRow key={x.id} x={x} />) : <div className="aq-empty">Nothing booked yet.</div>}
-          </section>
-          <section className="aq-card"><h2>All appointments</h2>
-            {d.all.length ? d.all.map(x => <ProspectRow key={x.id} x={x} />) : <div className="aq-empty">No appointments yet.</div>}
-          </section>
-        </div>
-      )}
+      <div className="aq-tabs">
+        {[['upcoming', `Upcoming (${lists.upcoming.length})`], ['completed', 'Completed'], ['no_show', 'No-Shows']].map(([k, l]) => (
+          <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
+        ))}
+      </div>
+      <section className="aq-card">
+        {!d ? <Loading /> : lists[tab].length ? lists[tab].map(x => <ApptRow key={x.id} x={x} />)
+          : <div className="aq-empty">Nothing here yet.</div>}
+      </section>
     </div>
   )
 }
 
-// ── Results ─────────────────────────────────────────────────────────────
+// ── Estimates ───────────────────────────────────────────────────────────
+export function Estimates() {
+  const [d, err] = useLoad('/acquisition/prospects?stage=quote_issued')
+  const total = (d?.items || []).reduce((a, x) => a + (x.monthly_value || 0), 0)
+  return (
+    <div className="aq-page">
+      <h1 className="aq-h1">Estimates</h1>
+      <p className="aq-lede">Quotes you’ve sent that are waiting on an answer. Mark each one Won or Lost when you hear back.</p>
+      {err && <div className="aq-err">{errText(err)}</div>}
+      <div className="aq-grid aq-kpis">
+        <Kpi icon="doc" value={d ? d.items.length : '—'} label="Open estimates" />
+        <Kpi icon="chart" value={d ? money(total, '/mo') : '—'} label="Monthly value quoted" />
+      </div>
+      <section className="aq-card">
+        {!d ? <Loading /> : d.items.length ? d.items.map(x => <ProspectRow key={x.id} x={x} />)
+          : <div className="aq-empty">No open estimates.</div>}
+      </section>
+    </div>
+  )
+}
+
+// ── Contracts ───────────────────────────────────────────────────────────
 export function Results() {
   const [d, err] = useLoad('/acquisition/dashboard')
   const [list] = useLoad('/acquisition/prospects')
@@ -220,21 +261,26 @@ export function Results() {
   if (!d) return <div className="aq-page"><Loading /></div>
   const c = d.counts
   const rate = (a, b) => (b ? Math.round((a / b) * 100) + '%' : '—')
-  const closed = (list?.items || []).filter(x => x.stage === 'won' || x.stage === 'lost')
+  const won = (list?.items || []).filter(x => x.stage === 'won')
+  const lost = (list?.items || []).filter(x => x.stage === 'lost')
   return (
     <div className="aq-page">
-      <h1 className="aq-h1">Results</h1>
+      <h1 className="aq-h1">Contracts</h1>
       <p className="aq-lede">Straight counts from your own records — nothing estimated.</p>
       <div className="aq-grid aq-kpis">
-        <div className="aq-kpi"><b>{rate(c.held, c.booked)}</b><span>Booked → held</span></div>
-        <div className="aq-kpi"><b>{rate(c.quoted, c.held)}</b><span>Held → quoted</span></div>
-        <div className="aq-kpi"><b>{rate(c.won, c.quoted)}</b><span>Quoted → won</span></div>
-        <div className="aq-kpi"><b>{c.no_show}</b><span>No-shows</span></div>
-        <div className="aq-kpi"><b>{money(d.won_monthly_value)}</b><span>Won monthly value</span></div>
+        <Kpi icon="handshake" value={c.won} label="Contracts won" />
+        <Kpi icon="chart" value={money(d.won_monthly_value, '/mo')} label="Recurring value won" />
+        <Kpi icon="calendar" value={rate(c.held, c.booked)} label="Booked → held" />
+        <Kpi icon="doc" value={rate(c.won, c.quoted)} label="Quoted → won" />
       </div>
-      <section className="aq-card"><h2>Closed</h2>
-        {closed.length ? closed.map(x => <ProspectRow key={x.id} x={x} />) : <div className="aq-empty">No closed deals yet.</div>}
-      </section>
+      <div className="aq-grid aq-two">
+        <section className="aq-card"><h2>Won</h2>
+          {won.length ? won.map(x => <ProspectRow key={x.id} x={x} />) : <div className="aq-empty">No contracts won yet.</div>}
+        </section>
+        <section className="aq-card"><h2>Lost</h2>
+          {lost.length ? lost.map(x => <ProspectRow key={x.id} x={x} />) : <div className="aq-empty">None.</div>}
+        </section>
+      </div>
     </div>
   )
 }

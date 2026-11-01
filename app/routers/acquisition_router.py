@@ -6,9 +6,11 @@
                       acting workspace lists it explicitly with a cleaning (or
                       neutral) identity. No discovery, scoring, evidence,
                       practice data or automation controls are exposed here.
-/god/acquisition/*    the PLATFORM OWNER's operations: setup, full pipeline
-                      with evidence, practice cohort, pause/resume, workers,
-                      audit trail. God only.
+/acquisition-ops/*    OPERATIONS: full pipeline with evidence, practice
+                      cohort, pause/resume, workers, audit trail. God, or a
+                      login the owner granted operator access for THAT client
+                      (AcquisitionOperator) - never God Mode itself.
+/god/acquisition/*    setup and operator grants. God only.
 
 SENDS NOTHING and calls no provider or AI model (P1).
 """
@@ -18,7 +20,7 @@ from typing import Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
-from app.deps import get_db, require_god, require_not_observation, require_tenant_user
+from app.deps import get_current_user, get_db, require_god, require_not_observation, require_tenant_user
 from app.models.models import Organization, User
 from app.routers.audit_log_router import log_action
 from app.services import lead_scope
@@ -30,6 +32,7 @@ from app.services.platform_owner import require_tenant_context
 router = APIRouter(prefix="/acquisition", tags=["acquisition"],
                    dependencies=[Depends(require_feature(C.FEATURE))])
 god_router = APIRouter(prefix="/god/acquisition", tags=["acquisition"])
+ops_router = APIRouter(prefix="/acquisition-ops", tags=["acquisition"])
 _WRITE = [Depends(require_not_observation)]
 
 
@@ -67,7 +70,8 @@ def _audit(db, org_id, user, action, ttype, tid, details=None):
 @router.get("/status")
 def status(ctx: C.Ctx = Depends(ctx_dep)):
     p = E.get_profile(ctx.db, ctx.org_id)
-    return {"organization_id": ctx.org_id, "organization_name": ctx.org.name,
+    prog = E.progress(ctx.db, ctx.org_id)
+    return {"organization_id": ctx.org_id, "pilot_day": prog["day"], "organization_name": ctx.org.name,
             "profile": E.profile_json(ctx.org, p, full=False),
             "running": bool(p and not p.paused and p.pilot_started_at),
             "pilot_started_at": C.iso(p.pilot_started_at) if p else None,
@@ -90,7 +94,8 @@ def dashboard(ctx: C.Ctx = Depends(ctx_dep)):
             return bool(t) and t < now
         return x["stage"] in (C.HELD, C.QUOTED)
     return {
-        "counts": {k: f[k] for k in ("interested", "booked", "held", "no_show", "quoted", "won", "lost")},
+        "counts": dict({k: f[k] for k in ("interested", "booked", "held", "no_show", "quoted", "won", "lost")},
+                       **E.client_extra_counts(ctx.db, ctx.org_id)),
         "won_monthly_value": f["won_monthly_value"],
         "upcoming": E.upcoming(ctx.db, ctx.org_id, ids)[:5],
         "needs_outcome": [x for x in items if waiting_on_outcome(x)][:10],
@@ -161,7 +166,7 @@ def post_feedback(payload: dict = Body(...), ctx: C.Ctx = Depends(ctx_dep)):
     return {"id": fb.id, "ok": True}
 
 
-# ════════════════════════════ OWNER OPERATIONS ═══════════════════════════
+# ═══════════════════════════ SETUP (GOD ONLY) ═══════════════════════════
 def _org(db: Session, org_id: str) -> Organization:
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if org is None:
@@ -176,16 +181,22 @@ def _client_org(db: Session, org_id: str) -> Organization:
     return org
 
 
-@god_router.get("/clients")
-def god_clients(db: Session = Depends(get_db), god: User = Depends(require_god)):
+def _clients(db: Session, org_ids=None):
     out = []
     for o in E.enabled_orgs(db):
+        if org_ids is not None and o.id not in org_ids:
+            continue
         p = E.get_profile(db, o.id)
         out.append({"organization_id": o.id, "name": o.name, "industry": o.industry,
                     "identity_ok": C.identity_ok(o), "configured": p is not None,
                     "paused": bool(p.paused) if p else True,
                     "pilot_started_at": C.iso(p.pilot_started_at) if p else None})
-    return {"items": out, "limit": C.PILOT_ORG_LIMIT}
+    return out
+
+
+@god_router.get("/clients")
+def god_clients(db: Session = Depends(get_db), god: User = Depends(require_god)):
+    return {"items": _clients(db), "limit": C.PILOT_ORG_LIMIT}
 
 
 @god_router.post("/{org_id}/enable")
@@ -196,16 +207,70 @@ def god_enable(org_id: str, db: Session = Depends(get_db), god: User = Depends(r
     return out
 
 
-@god_router.get("/{org_id}/overview")
-def god_overview(org_id: str, db: Session = Depends(get_db), god: User = Depends(require_god)):
+@god_router.get("/{org_id}/operators")
+def god_operators(org_id: str, db: Session = Depends(get_db), god: User = Depends(require_god)):
     org = _client_org(db, org_id)
+    return {"items": E.operators(db, org.id)}
+
+
+@god_router.post("/{org_id}/operators")
+def god_grant(org_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
+              god: User = Depends(require_god)):
+    org = _client_org(db, org_id)
+    out = E.grant_operator(db, org, payload.get("email"), god)
+    _audit(db, org.id, god, "acquisition_operator_grant", "user", out["user_id"])
+    return out
+
+
+@god_router.delete("/{org_id}/operators/{user_id}")
+def god_revoke(org_id: str, user_id: str, db: Session = Depends(get_db), god: User = Depends(require_god)):
+    org = _client_org(db, org_id)
+    E.revoke_operator(db, org, user_id, god)
+    _audit(db, org.id, god, "acquisition_operator_revoke", "user", user_id)
+    return {"ok": True}
+
+
+# ═══════════════════════ OPERATIONS (GOD OR OPERATOR) ════════════════════
+class Op:
+    def __init__(self, db, user, org, is_god):
+        self.db, self.user, self.org, self.org_id, self.is_god = db, user, org, org.id, is_god
+
+
+def _is_god(user) -> bool:
+    return getattr(user, "role", None) == "god_admin"
+
+
+def op_dep(org_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> Op:
+    god = _is_god(user)
+    if not god and not E.is_operator(db, user, org_id):
+        # Same answer for "no such org" and "not yours": ids are not probed.
+        raise HTTPException(403, "You don't have acquisition operator access for this client.")
+    return Op(db, user, _client_org(db, org_id), god)
+
+
+@ops_router.get("/clients")
+def ops_clients(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if _is_god(user):
+        return {"items": _clients(db), "is_god": True}
+    ids = E.operator_org_ids(db, user)
+    if not ids:
+        raise HTTPException(403, "You don't have acquisition operator access.")
+    return {"items": _clients(db, set(ids)), "is_god": False}
+
+
+@ops_router.get("/{org_id}/overview")
+def ops_overview(op: Op = Depends(op_dep)):
+    db, org = op.db, op.org
     p = E.get_profile(db, org.id)
     from app.services.cadence_service import org_sending_enabled
     return {
-        "organization_id": org.id, "organization_name": org.name,
+        "organization_id": org.id, "organization_name": org.name, "is_god": op.is_god,
+        "me": {"id": op.user.id, "name": op.user.full_name or op.user.email},
         "profile": E.profile_json(org, p, full=True),
         "funnel": E.funnel(db, org.id, include_practice=True),
         "client_funnel": E.funnel(db, org.id, include_practice=False),
+        "progress": E.progress(db, org.id),
+        "targets": {"appointments_low": 3, "appointments_high": 5, "pilot_days": 30},
         "stages": C.STAGES, "segments": C.SEGMENTS, "evidence_kinds": list(C.EVIDENCE_KINDS),
         "workers": [dict(w, state="not_built", runs=0, errors=0) for w in C.WORKERS],
         "sending": {"workspace_texts_on": org_sending_enabled(db, org.id),
@@ -214,75 +279,60 @@ def god_overview(org_id: str, db: Session = Depends(get_db), god: User = Depends
         "spend": {"provider_calls": 0, "ai_calls": 0, "usd": 0.0,
                   "note": "No provider or AI calls are made by this program yet."},
         "recent_events": E.events(db, org.id, 25),
-        "team": [{"id": u.id, "name": u.full_name or u.email, "role": u.role}
-                 for u in db.query(User).filter(User.organization_id == org.id, User.is_active == True).all()],  # noqa: E712
+        "operators": E.operators(db, org.id) if op.is_god else [],
     }
 
 
-@god_router.get("/{org_id}/prospects")
-def god_prospects(org_id: str, stage: Optional[str] = Query(None), practice: Optional[bool] = Query(None),
-                  db: Session = Depends(get_db), god: User = Depends(require_god)):
-    org = _client_org(db, org_id)
+@ops_router.get("/{org_id}/prospects")
+def ops_prospects(stage: Optional[str] = Query(None), practice: Optional[bool] = Query(None),
+                  op: Op = Depends(op_dep)):
     if stage and stage not in C.STAGE_KEYS:
         raise HTTPException(422, "Unknown stage")
-    return {"items": E.list_owner(db, org.id, stage, practice)}
+    return {"items": E.list_owner(op.db, op.org_id, stage, practice)}
 
 
-@god_router.post("/{org_id}/prospects")
-def god_add_prospect(org_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
-                     god: User = Depends(require_god)):
-    org = _client_org(db, org_id)
-    opp = E.add_prospect(db, org, god, payload)
-    _audit(db, org.id, god, "acquisition_prospect_add", "acquisition_opportunity", opp.id,
+@ops_router.post("/{org_id}/prospects", dependencies=_WRITE)
+def ops_add_prospect(payload: dict = Body(...), op: Op = Depends(op_dep)):
+    opp = E.add_prospect(op.db, op.org, op.user, payload)
+    _audit(op.db, op.org_id, op.user, "acquisition_prospect_add", "acquisition_opportunity", opp.id,
            {"practice": bool(opp.is_practice)})
     return {"id": opp.id}
 
 
-@god_router.post("/{org_id}/prospects/{opp_id}/stage")
-def god_move(org_id: str, opp_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
-             god: User = Depends(require_god)):
-    org = _client_org(db, org_id)
-    opp = E.load_opp(db, org.id, opp_id)
-    E.owner_move(db, opp, god, payload)
+@ops_router.post("/{org_id}/prospects/{opp_id}/stage", dependencies=_WRITE)
+def ops_move(opp_id: str, payload: dict = Body(...), op: Op = Depends(op_dep)):
+    opp = E.load_opp(op.db, op.org_id, opp_id)
+    E.owner_move(op.db, opp, op.user, payload)
     return {"id": opp.id, "stage": opp.stage}
 
 
-@god_router.post("/{org_id}/prospects/{opp_id}/evidence")
-def god_evidence(org_id: str, opp_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
-                 god: User = Depends(require_god)):
-    org = _client_org(db, org_id)
-    opp = E.load_opp(db, org.id, opp_id)
-    e = E.add_evidence(db, org.id, opp, god, payload)
+@ops_router.post("/{org_id}/prospects/{opp_id}/evidence", dependencies=_WRITE)
+def ops_evidence(opp_id: str, payload: dict = Body(...), op: Op = Depends(op_dep)):
+    opp = E.load_opp(op.db, op.org_id, opp_id)
+    e = E.add_evidence(op.db, op.org_id, opp, op.user, payload)
     return {"id": e.id}
 
 
-@god_router.put("/{org_id}/profile")
-def god_profile(org_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
-                god: User = Depends(require_god)):
-    org = _client_org(db, org_id)
-    p = E.update_profile(db, org.id, payload, owner=True)
-    return E.profile_json(org, p, full=True)
+@ops_router.put("/{org_id}/profile", dependencies=_WRITE)
+def ops_profile(payload: dict = Body(...), op: Op = Depends(op_dep)):
+    p = E.update_profile(op.db, op.org_id, payload, owner=True)
+    return E.profile_json(op.org, p, full=True)
 
 
-@god_router.post("/{org_id}/pause")
-def god_pause(org_id: str, payload: dict = Body(default={}), db: Session = Depends(get_db),
-              god: User = Depends(require_god)):
-    org = _client_org(db, org_id)
-    p = E.set_paused(db, org.id, god, True, payload.get("reason"))
-    _audit(db, org.id, god, "acquisition_pause", "acquisition_profile", p.id, {"reason": p.paused_reason})
+@ops_router.post("/{org_id}/pause", dependencies=_WRITE)
+def ops_pause(payload: dict = Body(default={}), op: Op = Depends(op_dep)):
+    p = E.set_paused(op.db, op.org_id, op.user, True, payload.get("reason"))
+    _audit(op.db, op.org_id, op.user, "acquisition_pause", "acquisition_profile", p.id, {"reason": p.paused_reason})
     return {"paused": True, "reason": p.paused_reason}
 
 
-@god_router.post("/{org_id}/resume")
-def god_resume(org_id: str, db: Session = Depends(get_db), god: User = Depends(require_god)):
-    org = _client_org(db, org_id)
-    p = E.set_paused(db, org.id, god, False, None)
-    _audit(db, org.id, god, "acquisition_resume", "acquisition_profile", p.id)
-    return {"paused": False,
-            "note": "Unpaused. No worker exists yet, so nothing runs and nothing is sent."}
+@ops_router.post("/{org_id}/resume", dependencies=_WRITE)
+def ops_resume(op: Op = Depends(op_dep)):
+    p = E.set_paused(op.db, op.org_id, op.user, False, None)
+    _audit(op.db, op.org_id, op.user, "acquisition_resume", "acquisition_profile", p.id)
+    return {"paused": False, "note": "Unpaused. No worker exists yet, so nothing runs and nothing is sent."}
 
 
-@god_router.get("/{org_id}/feedback")
-def god_feedback(org_id: str, db: Session = Depends(get_db), god: User = Depends(require_god)):
-    org = _client_org(db, org_id)
-    return {"items": E.feedback_list(db, org.id, 200)}
+@ops_router.get("/{org_id}/feedback")
+def ops_feedback(op: Op = Depends(op_dep)):
+    return {"items": E.feedback_list(op.db, op.org_id, 200)}

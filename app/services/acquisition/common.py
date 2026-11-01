@@ -64,6 +64,10 @@ STAGES: List[Dict[str, str]] = [
 ]
 STAGE_KEYS = [s["key"] for s in STAGES]
 STAGE_LABEL = {s["key"]: s["label"] for s in STAGES}
+# How far along each stage is (lost/no-show/disqualified count as the furthest
+# stage they must have passed), for "how many reached X" counts.
+RANK = {DISCOVERED: 0, RESEARCHED: 1, DISQUALIFIED: 1, QUALIFIED: 2, CONTACT_VERIFIED: 3, OUTREACH_READY: 4,
+        CONTACTED: 5, REPLIED: 6, INTERESTED: 7, LOST: 7, BOOKED: 8, NO_SHOW: 8, HELD: 9, QUOTED: 10, WON: 11}
 # What the client sees: real interest and everything after it.
 CLIENT_STAGES = (INTERESTED, BOOKED, HELD, NO_SHOW, QUOTED, WON, LOST)
 # What the client may record herself, from which stages.

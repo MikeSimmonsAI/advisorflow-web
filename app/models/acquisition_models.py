@@ -136,3 +136,19 @@ class AcquisitionFeedback(Base):
     rating = Column(String(20), nullable=True)            # good_fit / poor_fit / general
     body = Column(Text, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
+
+
+class AcquisitionOperator(Base):
+    """A login that may run ONE client's acquisition operations without God
+    Mode (owner decision 2026-10-31: wholesale@ operates the pilot). Granted
+    and revoked only by the platform owner; grants nothing else anywhere."""
+    __tablename__ = "acquisition_operators"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = _org_col()
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    granted_by_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("organization_id", "user_id", name="uq_acq_operator_org_user"),)

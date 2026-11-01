@@ -26,9 +26,31 @@ test('an SCI workspace does not treat the acquisition portal as its own', () => 
   assert.equal(experienceRedirect(ctx, '/program/acquisition', 'o1', 'o1', 'org_admin'), '/program')
 })
 
-test('the card is a cleaning card titled with the business name', () => {
-  assert.equal(programOf(ws), 'cleaning')
+test('the card is the purple acquisition card titled with the business name', () => {
+  assert.equal(programOf(ws), 'acquisition')
   const card = programCards({ workspace_contexts: [ws] }).visible[0]
   assert.equal(card.display, 'Shine Test Cleaning')
   assert.equal(card.program_route, '/program/acquisition')
+})
+
+test('the card wears the purple acquisition variant', () => {
+  const card = programCards({ workspace_contexts: [ws] }).visible[0]
+  assert.equal(card.variant, 'acquisition')
+})
+
+test('an operator grant adds the control center card, and only then', () => {
+  const ctx = { workspace_contexts: [], acquisition_ops: [{ type: 'acquisition_ops', organization_id: 'o1',
+                organization_name: 'Shine Test Cleaning', path: '/acquisition-ops' }] }
+  const cards = programCards(ctx).visible
+  assert.equal(cards.length, 1)
+  assert.equal(cards[0].type, 'acquisition_ops')
+  assert.equal(cards[0].display, 'Acquisition Control Center')
+  assert.equal(cards[0].variant, 'acquisition')
+  assert.equal(programCards({ workspace_contexts: [] }).visible.length, 0)
+})
+
+test('a Wholesale-locked operator is not bounced off the control center', () => {
+  const ctx = { workspace_contexts: [{ organization_id: 'evo', experience: 'wholesale' }] }
+  assert.equal(experienceRedirect(ctx, '/acquisition-ops/prospects', 'evo', 'evo', 'org_admin'), null)
+  assert.equal(experienceRedirect(ctx, '/dashboard', 'evo', 'evo', 'org_admin'), '/wholesale/evosense')
 })

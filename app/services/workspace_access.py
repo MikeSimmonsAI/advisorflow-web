@@ -307,6 +307,21 @@ def _roofing_enabled(org) -> bool:
         return False
 
 
+def _acquisition_ops(db: Session, user: User) -> List[Dict[str, Any]]:
+    try:
+        from app.services.acquisition.common import acquisition_identity
+        from app.services.acquisition.engine import operator_org_ids
+        ids = operator_org_ids(db, user)
+        if not ids:
+            return []
+        orgs = db.query(Organization).filter(Organization.id.in_(ids)).all()
+        return [{"type": "acquisition_ops", "organization_id": o.id, "organization_name": o.name,
+                 "path": "/acquisition-ops"} for o in orgs if acquisition_identity(o) and o.is_active is not False]
+    except Exception:  # pragma: no cover - never let a hint break login
+        _log.warning("could not resolve acquisition operator access", exc_info=True)
+        return []
+
+
 def _acquisition_enabled(org) -> bool:
     """Opens the managed-acquisition client portal (Issue #452) - explicit
     `client_acquisition` key and a cleaning identity, never by name or slug."""
@@ -692,6 +707,9 @@ def authorized_contexts(db: Session, user: User, host_slug: Optional[str] = None
         # brands this person already sells for. Empty for anyone with no sales
         # membership; `back_office_path` above is unchanged.
         "back_office_destinations": back_office_destinations(db, platform),
+        # ACQUISITION OPERATIONS (Issue #452): clients this login was granted
+        # operator access to by the platform owner. Never God Mode.
+        "acquisition_ops": _acquisition_ops(db, user),
         "workspace_count": len(workspaces),
         "default_context": default,
         # WHICH BRAND'S LOOK the launcher wears (e.g. BookaBoost), decided

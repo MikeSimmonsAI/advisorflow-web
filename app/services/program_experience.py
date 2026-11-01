@@ -36,6 +36,7 @@ WHOLESALE_HOST_SLUG = "evo-integrated-solutions-llc"
 # app/services/entitlements.py. Only an explicit listing counts.
 WHOLESALE_WORKSPACE_KEY = "wholesale_workspace"
 INTERNAL_ROLES = ("god_admin", "super_admin")
+ACQUISITION_OPS_PREFIXES = ("/acquisition-ops",)
 
 # What a Wholesale-locked request may reach. Everything Wholesale itself calls
 # (/wholesale/...) plus the shared core that any shell needs to render.
@@ -276,6 +277,15 @@ def enforce(db: Session, user, request: Request) -> None:
         from app.services import workspace_access
         if workspace_access.has_back_office(user, db):
             return
+    # The acquisition pilot's operations (Issue #452) are their own destination
+    # for a login the owner granted operator access - not a platform screen.
+    if path.startswith(ACQUISITION_OPS_PREFIXES):
+        try:
+            from app.services.acquisition.engine import is_operator
+            if is_operator(db, user):
+                return
+        except Exception:  # pragma: no cover - fall through to the normal lock
+            pass
     if locked_experience(db, user, request) == WHOLESALE:
         raise HTTPException(
             status_code=403,

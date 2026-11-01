@@ -75,13 +75,13 @@ def _add(p, **kw):
             "website": "https://oaklawn-%s.example" % uuid.uuid4().hex[:6], "is_practice": False,
             "source_url": "https://maps.example/listing/1", "city": "Dallas"}
     body.update(kw)
-    r = p["c"].post("/god/acquisition/%s/prospects" % p["shine"].id, json=body, headers=_h(p["db"], p["god"]))
+    r = p["c"].post("/acquisition-ops/%s/prospects" % p["shine"].id, json=body, headers=_h(p["db"], p["god"]))
     assert r.status_code == 200, r.text
     return r.json()["id"]
 
 
 def _move(p, opp, stage, **kw):
-    return p["c"].post("/god/acquisition/%s/prospects/%s/stage" % (p["shine"].id, opp),
+    return p["c"].post("/acquisition-ops/%s/prospects/%s/stage" % (p["shine"].id, opp),
                        json=dict(stage=stage, **kw), headers=_h(p["db"], p["god"]))
 
 
@@ -90,7 +90,7 @@ def test_enable_is_idempotent_and_starts_paused(pilot):
     p = pilot
     r = p["c"].post("/god/acquisition/%s/enable" % p["shine"].id, headers=_h(p["db"], p["god"]))
     assert r.status_code == 200 and r.json()["profile_created"] is False
-    ov = p["c"].get("/god/acquisition/%s/overview" % p["shine"].id, headers=_h(p["db"], p["god"])).json()
+    ov = p["c"].get("/acquisition-ops/%s/overview" % p["shine"].id, headers=_h(p["db"], p["god"])).json()
     assert ov["profile"]["paused"] is True and ov["profile"]["pilot_started_at"] is None
     assert all(w["state"] == "not_built" for w in ov["workers"])
     assert ov["spend"]["usd"] == 0.0
@@ -117,7 +117,7 @@ def test_owner_routes_are_god_only(pilot):
     p = pilot
     for u in (p["owner"], p["outsider"]):
         assert p["c"].get("/god/acquisition/clients", headers=_h(p["db"], u)).status_code == 403
-        assert p["c"].get("/god/acquisition/%s/overview" % p["shine"].id,
+        assert p["c"].get("/acquisition-ops/%s/overview" % p["shine"].id,
                           headers=_h(p["db"], u)).status_code == 403
 
 
@@ -153,7 +153,7 @@ def test_practice_prospects_stay_internal(pilot):
     assert _move(p, opp, "interested", note="test").status_code == 409
     items = p["c"].get("/acquisition/prospects", headers=_h(p["db"], p["owner"], p["shine"].id)).json()["items"]
     assert items == []
-    ov = p["c"].get("/god/acquisition/%s/overview" % p["shine"].id, headers=_h(p["db"], p["god"])).json()
+    ov = p["c"].get("/acquisition-ops/%s/overview" % p["shine"].id, headers=_h(p["db"], p["god"])).json()
     assert ov["funnel"]["practice"] == 1 and ov["client_funnel"]["total"] == 0
     assert p["c"].get("/acquisition/prospects/%s" % opp,
                       headers=_h(p["db"], p["owner"], p["shine"].id)).status_code == 404
@@ -237,11 +237,11 @@ def test_cross_org_ids_are_not_found(pilot, db_session):
 def test_dedupe_exclusions_and_junk(pilot):
     p = pilot
     h = _h(p["db"], p["god"])
-    url = "/god/acquisition/%s/prospects" % p["shine"].id
+    url = "/acquisition-ops/%s/prospects" % p["shine"].id
     _add(p, website="https://www.dupe-office.example/about")
     r = p["c"].post(url, json={"business_name": "Dupe", "website": "dupe-office.example"}, headers=h)
     assert r.status_code == 409
-    assert p["c"].put("/god/acquisition/%s/profile" % p["shine"].id,
+    assert p["c"].put("/acquisition-ops/%s/profile" % p["shine"].id,
                       json={"exclusions": "existing-client.example, boss@other.example"}, headers=h).status_code == 200
     r = p["c"].post(url, json={"business_name": "Existing", "website": "https://mail.existing-client.example"}, headers=h)
     assert r.status_code == 409 and "exclusion" in r.text
@@ -255,11 +255,11 @@ def test_dedupe_exclusions_and_junk(pilot):
 def test_pause_requires_reason_and_client_cannot_pause(pilot):
     p = pilot
     h = _h(p["db"], p["god"])
-    assert p["c"].post("/god/acquisition/%s/resume" % p["shine"].id, headers=h).json()["paused"] is False
-    assert p["c"].post("/god/acquisition/%s/pause" % p["shine"].id, json={}, headers=h).status_code == 422
-    assert p["c"].post("/god/acquisition/%s/pause" % p["shine"].id, json={"reason": "Bounce spike"},
+    assert p["c"].post("/acquisition-ops/%s/resume" % p["shine"].id, headers=h).json()["paused"] is False
+    assert p["c"].post("/acquisition-ops/%s/pause" % p["shine"].id, json={}, headers=h).status_code == 422
+    assert p["c"].post("/acquisition-ops/%s/pause" % p["shine"].id, json={"reason": "Bounce spike"},
                        headers=h).json()["paused"] is True
-    assert p["c"].post("/god/acquisition/%s/pause" % p["shine"].id, json={"reason": "x"},
+    assert p["c"].post("/acquisition-ops/%s/pause" % p["shine"].id, json={"reason": "x"},
                        headers=_h(p["db"], p["owner"])).status_code == 403
 
 
@@ -271,7 +271,7 @@ def test_client_profile_edit_cannot_touch_owner_fields(pilot):
                                                  "exclusions": "everyone.example"}, headers=h)
     assert r.status_code == 200 and r.json()["availability_note"] == "Tue/Thu mornings"
     assert "exclusions" not in r.json()
-    ov = p["c"].get("/god/acquisition/%s/overview" % p["shine"].id, headers=_h(p["db"], p["god"])).json()
+    ov = p["c"].get("/acquisition-ops/%s/overview" % p["shine"].id, headers=_h(p["db"], p["god"])).json()
     assert ov["profile"]["exclusions"] == []
     assert p["c"].put("/acquisition/profile", json={"segments": ["casinos"]}, headers=h).status_code == 422
 
@@ -282,7 +282,7 @@ def test_feedback_round_trip(pilot):
     assert p["c"].post("/acquisition/feedback", json={"body": ""}, headers=h).status_code == 422
     assert p["c"].post("/acquisition/feedback", json={"body": "Good leads so far", "rating": "good_fit"},
                        headers=h).status_code == 200
-    items = p["c"].get("/god/acquisition/%s/feedback" % p["shine"].id, headers=_h(p["db"], p["god"])).json()["items"]
+    items = p["c"].get("/acquisition-ops/%s/feedback" % p["shine"].id, headers=_h(p["db"], p["god"])).json()["items"]
     assert items[0]["body"] == "Good leads so far"
 
 
@@ -314,3 +314,102 @@ def test_do_not_contact_boundaries():
     assert H.do_not_contact_match("jane+news@beta.example", entries) == "jane@beta.example"
     assert H.do_not_contact_domain_match("beta.example", entries) == ""   # an address never bars a company
     assert H.dedupe_key("X", "https://WWW.Foo.example/a") == "d:foo.example"
+
+
+# ── operator access without God Mode (owner decision 2026-10-31) ──────────
+EVO_FEATURES = ["ai_assist", "availability", "booking", "branding_settings", "cadences", "calendar", "campaigns",
+                "compliance", "crm", "email", "imports", "leads", "master_dashboard", "reports", "sms", "users",
+                "wholesale_real_estate"]
+
+
+@pytest.fixture()
+def wholesale_login(pilot):
+    """The production shape of wholesale@: org_admin of EVO's own org with a
+    named Wholesale seat, so the Wholesale lock applies to it."""
+    db = pilot["db"]
+    evo = db.query(Organization).filter(Organization.slug == "evo-integrated-solutions-llc").first()
+    if evo is None:
+        evo = Organization(name="EVO Integrated Solutions LLC", slug="evo-integrated-solutions-llc", plan="trial",
+                           industry="generic", is_active=True, enabled_features=json.dumps(EVO_FEATURES))
+        db.add(evo)
+        db.commit()
+    u = _user(db, evo, "org_admin", "org_admin")
+    db.add(Membership(user_id=u.id, scope_type="product", scope_id="wholesale", role="member", is_active=True))
+    db.commit()
+    return u
+
+
+def test_operator_grant_gives_ops_access_but_not_god_mode(pilot, wholesale_login):
+    p, u = pilot, wholesale_login
+    db, c, org = p["db"], p["c"], p["shine"]
+    ops = "/acquisition-ops/%s/overview" % org.id
+    # before the grant: refused (and the Wholesale lock still applies elsewhere)
+    assert c.get(ops, headers=_h(db, u)).status_code == 403
+    assert c.get("/acquisition-ops/clients", headers=_h(db, u)).status_code == 403
+    # only God can grant
+    assert c.post("/god/acquisition/%s/operators" % org.id, json={"email": u.email},
+                  headers=_h(db, p["owner"])).status_code == 403
+    r = c.post("/god/acquisition/%s/operators" % org.id, json={"email": u.email}, headers=_h(db, p["god"]))
+    assert r.status_code == 200, r.text
+    # after: full operations for THAT client, from inside a Wholesale-locked login
+    ov = c.get(ops, headers=_h(db, u))
+    assert ov.status_code == 200, ov.text
+    assert ov.json()["is_god"] is False and ov.json()["operators"] == []
+    assert [x["organization_id"] for x in c.get("/acquisition-ops/clients", headers=_h(db, u)).json()["items"]] == [org.id]
+    assert c.post("/acquisition-ops/%s/prospects" % org.id, json={"business_name": "Op Test Office"},
+                  headers=_h(db, u)).status_code == 200
+    assert c.post("/acquisition-ops/%s/pause" % org.id, json={"reason": "operator test"},
+                  headers=_h(db, u)).status_code == 200
+    # never God Mode: setup, grants, client list and other god screens stay closed
+    db.refresh(u)
+    assert u.role != "god_admin"
+    for path in ("/god/acquisition/clients", "/god/acquisition/%s/operators" % org.id):
+        assert c.get(path, headers=_h(db, u)).status_code == 403
+    assert c.post("/god/acquisition/%s/enable" % org.id, headers=_h(db, u)).status_code == 403
+    # never Ciara's portal either (no membership in her workspace)
+    assert c.get("/acquisition/status", headers=_h(db, u, org.id)).status_code in (402, 403)
+    # the launcher offers the operations card
+    ctx = c.get("/auth/my-contexts", headers=_h(db, u)).json()
+    assert [x["organization_id"] for x in ctx["acquisition_ops"]] == [org.id]
+    # revoke closes it again
+    assert c.delete("/god/acquisition/%s/operators/%s" % (org.id, u.id), headers=_h(db, p["god"])).status_code == 200
+    assert c.get(ops, headers=_h(db, u)).status_code == 403
+    assert c.get("/auth/my-contexts", headers=_h(db, u)).json()["acquisition_ops"] == []
+
+
+def test_operator_of_one_client_cannot_reach_another(pilot, wholesale_login, db_session):
+    p, u = pilot, wholesale_login
+    db, c = p["db"], p["c"]
+    c.post("/god/acquisition/%s/operators" % p["shine"].id, json={"email": u.email}, headers=_h(db, p["god"]))
+    from app.services.acquisition import engine as E
+    p["other"].enabled_features = json.dumps(list(E.CLIENT_FEATURES))   # bypass the cap to prove scoping
+    db_session.commit()
+    assert c.get("/acquisition-ops/%s/overview" % p["other"].id, headers=_h(db, u)).status_code == 403
+    assert c.get("/acquisition-ops/%s/prospects" % p["other"].id, headers=_h(db, u)).status_code == 403
+
+
+def test_wholesale_lock_still_refuses_platform_apis_for_operators(pilot, wholesale_login):
+    p, u = pilot, wholesale_login
+    db, c = p["db"], p["c"]
+    c.post("/god/acquisition/%s/operators" % p["shine"].id, json={"email": u.email}, headers=_h(db, p["god"]))
+    r = c.get("/leads/status-funnel", headers=_h(db, u))
+    assert r.status_code == 403 and "Wholesale" in r.json()["detail"]
+
+
+def test_reply_rate_is_none_until_something_is_sent(pilot):
+    p = pilot
+    _add(p)
+    ov = p["c"].get("/acquisition-ops/%s/overview" % p["shine"].id, headers=_h(p["db"], p["god"])).json()
+    assert ov["client_funnel"]["reply_rate"] is None and ov["progress"]["started"] is False
+
+
+def test_verified_and_contacted_counts_are_never_inferred(pilot):
+    p = pilot
+    opp = _add(p)
+    _move(p, opp, "interested", note="Called us back")      # skipped every earlier stage by hand
+    f = p["c"].get("/acquisition-ops/%s/overview" % p["shine"].id, headers=_h(p["db"], p["god"])).json()["client_funnel"]
+    assert f["interested"] == 1
+    assert f["contacts_verified"] == 0 and f["contacted"] == 0 and f["reply_rate"] is None
+    _move(p, opp, "contact_verified")
+    f = p["c"].get("/acquisition-ops/%s/overview" % p["shine"].id, headers=_h(p["db"], p["god"])).json()["client_funnel"]
+    assert f["contacts_verified"] == 1
