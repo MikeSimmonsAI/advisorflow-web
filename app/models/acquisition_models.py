@@ -152,3 +152,30 @@ class AcquisitionOperator(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (UniqueConstraint("organization_id", "user_id", name="uq_acq_operator_org_user"),)
+
+
+class AcquisitionDiscoveryRun(Base):
+    """One metered discovery batch (P2). Every provider request is counted
+    here, so spend is never a guess. Planned-only runs record no requests."""
+    __tablename__ = "acquisition_discovery_runs"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = _org_col()
+    requested_by_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    provider = Column(String(40), nullable=False, default="google_places")
+    segment = Column(String(40), nullable=False)
+    city = Column(String(80), nullable=False)
+    query = Column(String(300), nullable=False)
+    max_results = Column(Integer, nullable=False)
+    is_practice = Column(Boolean, nullable=False, default=True)
+    status = Column(String(20), nullable=False, default="running")   # running / done / failed
+    search_requests = Column(Integer, nullable=False, default=0)
+    detail_requests = Column(Integer, nullable=False, default=0)
+    cost_usd = Column(Float, nullable=True)            # from configured unit prices, never invented
+    found = Column(Integer, nullable=False, default=0)
+    added = Column(Integer, nullable=False, default=0)
+    duplicates = Column(Integer, nullable=False, default=0)
+    excluded = Column(Integer, nullable=False, default=0)
+    junk = Column(Integer, nullable=False, default=0)
+    error = Column(String(500), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    finished_at = Column(DateTime, nullable=True)

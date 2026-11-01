@@ -19,7 +19,7 @@ const pct = v => (v == null ? '—' : Math.round(v * 100) + '%')
 
 const NAV = [
   { to: OPS, label: 'Control Center', icon: 'dashboard', end: true },
-  { to: `${OPS}/discovery`, label: 'Lead Discovery', icon: 'search', soon: 'P2' },
+  { to: `${OPS}/discovery`, label: 'Lead Discovery', icon: 'search' },
   { to: `${OPS}/prospects`, label: 'Prospects', icon: 'users' },
   { to: `${OPS}/outreach`, label: 'Outreach', icon: 'mail', soon: 'P3' },
   { to: `${OPS}/responses`, label: 'Responses', icon: 'reply', soon: 'P3' },
@@ -488,6 +488,82 @@ export function OpsSettings() {
             <button className="aq-btn aq-btn--primary aq-btn--sm" disabled={!email.trim()} onClick={() => run(() => api.post(`/god/acquisition/${orgId}/operators`, { email }), 'Operator access granted').then(() => setEmail(''))}>Grant operator access</button></div>
         </section>
       )}
+    </div>
+  )
+}
+
+// ── Lead Discovery (P2) ─────────────────────────────────────────────────
+export function Discovery() {
+  const { ov, orgId, reload } = useOps()
+  const [runs, rErr, reloadRuns] = useLoad(`/acquisition-ops/${orgId}/discovery/runs`)
+  const areas = ov.profile.service_area || []
+  const wanted = ov.segments.filter(s => (ov.profile.segments || []).includes(s.key))
+  const [f, setF] = useState({ segment: wanted[0]?.key || '', city: areas[0] || '', max_results: 10, is_practice: true })
+  const [plan, setPlan] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [fail, setFail] = useState(null)
+  const [toast, say] = useToast()
+  const set = k => e => { setPlan(null); setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }) }
+  const check = async () => {
+    setFail(null)
+    try { setPlan(await api.post(`/acquisition-ops/${orgId}/discovery/plan`, { ...f, max_results: Number(f.max_results) })) } catch (e) { setFail(errText(e)) }
+  }
+  const go = async () => {
+    setBusy(true); setFail(null)
+    try {
+      const r = await api.post(`/god/acquisition/${orgId}/discovery/run`, { ...f, max_results: Number(f.max_results) })
+      say(`Found ${r.found}, added ${r.added}`); setPlan(null); reloadRuns(); reload()
+    } catch (e) { setFail(errText(e)) } finally { setBusy(false) }
+  }
+  return (
+    <div className="aq-page">{toast}
+      <h1 className="aq-h1">Lead Discovery</h1>
+      <p className="aq-lede">Find DFW businesses of the types the client wants, in small metered batches. Every fact keeps its source; nobody is contacted.</p>
+      <div className="aq-grid aq-split">
+        <section className="aq-card"><h2>Plan a search</h2>
+          <div className="aq-grid aq-two">
+            <div className="aq-field"><label>Business type</label><select value={f.segment} onChange={set('segment')}>
+              {wanted.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}</select></div>
+            <div className="aq-field"><label>City</label><select value={f.city} onChange={set('city')}>
+              {areas.map(a => <option key={a}>{a}</option>)}</select></div>
+            <div className="aq-field"><label>How many (max {runs?.limits?.max_results_per_run || 20})</label>
+              <input inputMode="numeric" value={f.max_results} onChange={set('max_results')} /></div>
+            <div className="aq-field"><label>&nbsp;</label><div className="aq-checks"><label><input type="checkbox" checked={f.is_practice} onChange={set('is_practice')} />Practice cohort</label></div></div>
+          </div>
+          <div className="aq-actions"><button className="aq-btn aq-btn--primary" onClick={check}>Check plan &amp; cost</button>
+            {plan?.can_run && ov.is_god && <button className="aq-btn aq-btn--danger" disabled={busy} onClick={go}>{busy ? 'Searching…' : `Run search (up to $${plan.max_cost_usd})`}</button>}</div>
+          {fail && <div className="aq-err">{fail}</div>}
+          {plan && (
+            <div className="aq-detail" style={{ marginTop: 14 }}>
+              <dl className="aq-dl">
+                <dt>Search</dt><dd>{plan.query}</dd>
+                <dt>Requests</dt><dd>{plan.requests.search} search + up to {plan.requests.details_max} detail lookups</dd>
+                <dt>Most it can cost</dt><dd>{plan.max_cost_usd == null ? 'Unknown — prices not configured' : `$${plan.max_cost_usd}`}</dd>
+                <dt>Runs (24h)</dt><dd>{plan.runs_last_24h} of {plan.limits.max_runs_per_day}</dd>
+              </dl>
+              {plan.can_run ? <p className="aq-pill aq-pill--ok" style={{ marginTop: 10 }}>Ready{ov.is_god ? '' : ' — the platform owner runs paid searches'}</p>
+                : <ul className="aq-checklist" style={{ marginTop: 8 }}>{plan.refused_because.map(r => <li key={r}><span className="aq-tick" />{r}</li>)}</ul>}
+            </div>
+          )}
+        </section>
+        <section className="aq-card"><h2>How it works</h2>
+          <ul className="aq-checklist">
+            <li><span className="aq-tick on" />Reuses the existing Google Places search</li>
+            <li><span className="aq-tick on" />Duplicates, directories and never-contact entries are dropped</li>
+            <li><span className="aq-tick on" />Listing facts are verified at source; business type is marked as an inference</li>
+            <li><span className="aq-tick on" />Each business gets a score with its reasons</li>
+            <li><span className="aq-tick on" />Every request is counted and priced</li>
+          </ul>
+        </section>
+      </div>
+      <section className="aq-card" style={{ marginTop: 14 }}><h2>Runs</h2>
+        {rErr && <div className="aq-err">{errText(rErr)}</div>}
+        {!runs ? <Loading /> : runs.items.length ? runs.items.map(r => (
+          <div className="aq-row" key={r.id}><div className="aq-row__main"><b>{r.segment_label} · {r.city}{r.is_practice ? ' (practice)' : ''}</b>
+            <span>{when(r.at)} · found {r.found}, added {r.added}, duplicates {r.duplicates}, excluded {r.excluded}, junk {r.junk} · {r.search_requests + r.detail_requests} requests · {r.cost_usd == null ? 'cost unknown' : `$${r.cost_usd}`}{r.error ? ` · ${r.error}` : ''}</span></div>
+            <span className={`aq-pill ${r.status === 'done' ? 'aq-pill--ok' : ''}`}>{r.status}</span></div>
+        )) : <div className="aq-empty">No discovery runs yet.</div>}
+      </section>
     </div>
   )
 }

@@ -336,3 +336,32 @@ def ops_resume(op: Op = Depends(op_dep)):
 @ops_router.get("/{org_id}/feedback")
 def ops_feedback(op: Op = Depends(op_dep)):
     return {"items": E.feedback_list(op.db, op.org_id, 200)}
+
+
+# ═══════════════════════ P2 DISCOVERY (metered, gated) ═══════════════════
+@ops_router.post("/{org_id}/discovery/plan")
+def ops_discovery_plan(payload: dict = Body(...), op: Op = Depends(op_dep)):
+    """What a run would search, cost and be refused for. Makes no calls."""
+    from app.services.acquisition import discovery as D
+    return D.plan(op.db, op.org, payload.get("segment"), payload.get("city"),
+                  payload.get("max_results", D.MAX_RESULTS_PER_RUN), bool(payload.get("is_practice", True)))
+
+
+@ops_router.get("/{org_id}/discovery/runs")
+def ops_discovery_runs(op: Op = Depends(op_dep)):
+    from app.services.acquisition import discovery as D
+    return {"items": D.runs(op.db, op.org_id), "segments": [s for s in C.SEGMENTS],
+            "limits": {"max_results_per_run": D.MAX_RESULTS_PER_RUN, "max_runs_per_day": D.MAX_RUNS_PER_DAY}}
+
+
+@god_router.post("/{org_id}/discovery/run")
+async def god_discovery_run(org_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
+                            god: User = Depends(require_god)):
+    """Spends provider money, so platform owner only. Contacts nobody."""
+    from app.services.acquisition import discovery as D
+    org = _client_org(db, org_id)
+    out = await D.run(db, org, god, payload.get("segment"), payload.get("city"),
+                      payload.get("max_results", D.MAX_RESULTS_PER_RUN), bool(payload.get("is_practice", True)))
+    _audit(db, org.id, god, "acquisition_discovery_run", "acquisition_discovery_run", out["id"],
+           {"added": out["added"], "cost_usd": out["cost_usd"], "practice": out["is_practice"]})
+    return out
