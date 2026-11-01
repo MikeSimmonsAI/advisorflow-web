@@ -126,6 +126,25 @@ const RoofingHomeowner = lazyPage(() => import('./pages/roofing/Homeowner'))
 const RoofingSettings = lazyPage(() => import('./pages/roofing/Settings'))
 const RoofingLanding = lazyPage(() => import('./pages/roofing/RoofingLanding'))
 const RoofingDemo = lazyPage(() => import('./pages/roofing/demo/DemoApp'))
+// Managed client acquisition (Issue #452): the client's portal (/program/acquisition/*).
+const AcquisitionShell = lazyPage(() => import('./pages/acquisition/AcquisitionShell'))
+const AcqHome = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Home })))
+const AcqProspects = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Prospects })))
+const AcqProspect = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Prospect })))
+const AcqAppointments = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Appointments })))
+const AcqResults = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Results })))
+const AcqSettings = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Settings })))
+const AcqFeedback = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Feedback })))
+const AcqEstimates = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Estimates })))
+// Acquisition Control Center (/acquisition-ops/*): God, or a granted operator - never God Mode itself.
+const AcqOps = lazyPage(() => import('./pages/acquisition/AcquisitionOps'))
+const AcqOpsHome = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.ControlCenter })))
+const AcqOpsProspects = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Prospects })))
+const AcqOpsAppointments = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.OpsAppointments })))
+const AcqOpsPipeline = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Pipeline })))
+const AcqOpsHealth = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Health })))
+const AcqOpsSettings = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.OpsSettings })))
+const AcqOpsSoon = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Soon })))
 const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
 const DealOperationsClosing = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsClosing })))
 const DealOperationsDispositions = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsDispositions })))
@@ -1128,6 +1147,10 @@ function WorkspaceSelector() {
       if (item.platform_id) setBrandContext(item.platform_id, item.platform_name || '')
       navigate(item.path || '/sales'); return
     }
+    if (item.type === 'acquisition_ops') {
+      clearWorkspaceContext()
+      navigate('/acquisition-ops'); return
+    }
     if (item.type === 'executive') {
       clearWorkspaceContext()
       if (item.platform_id) setBrandContext(item.platform_id, item.platform_name || '')
@@ -1533,6 +1556,29 @@ export default function App() {
           <Route path="homeowners/:leadId" element={<RoofingHomeowner />} />
           <Route path="settings" element={<RoofingSettings />} />
         </Route>
+        {/* Managed client acquisition (Issue #452). /acquisition enforces membership,
+             explicit client_acquisition and cleaning identity server-side. */}
+        <Route path="/program/acquisition" element={<ProtectedRoute bare><AcquisitionShell /></ProtectedRoute>}>
+          <Route index element={<AcqHome />} />
+          <Route path="prospects" element={<AcqProspects />} />
+          <Route path="prospects/:id" element={<AcqProspect />} />
+          <Route path="appointments" element={<AcqAppointments />} />
+          <Route path="results" element={<AcqResults />} />
+          <Route path="settings" element={<AcqSettings />} />
+          <Route path="feedback" element={<AcqFeedback />} />
+          <Route path="estimates" element={<AcqEstimates />} />
+        </Route>
+        <Route path="/acquisition-ops" element={<ProtectedRoute bare><AcqOps /></ProtectedRoute>}>
+          <Route index element={<AcqOpsHome />} />
+          <Route path="discovery" element={<AcqOpsSoon title="Lead Discovery" phase="P2" text="Search DFW businesses by type and city, with source evidence, duplicate checks and cost tracking. Not built yet." />} />
+          <Route path="prospects" element={<AcqOpsProspects />} />
+          <Route path="outreach" element={<AcqOpsSoon title="Outreach" phase="P3" text="Personal email drafts that pass every eligibility and suppression check before anything can send. Not built yet." />} />
+          <Route path="responses" element={<AcqOpsSoon title="Responses" phase="P3" text="Reply reading, opt-out handling and human hand-off. Not built yet." />} />
+          <Route path="appointments" element={<AcqOpsAppointments />} />
+          <Route path="pipeline" element={<AcqOpsPipeline />} />
+          <Route path="health" element={<AcqOpsHealth />} />
+          <Route path="settings" element={<AcqOpsSettings />} />
+        </Route>
         <Route path="/roofing" element={<RoofingLanding />} />
         {/* PUBLIC interactive demo - fictional data only, no login, no Roofing API. */}
         <Route path="/roofing/demo/*" element={<RoofingDemo />} />
@@ -1813,6 +1859,7 @@ export default function App() {
         {/* REPORT-02: platform revenue history — registered BEFORE /god/* catch-all */}
         <Route path="/god/revenue-history"       element={<GodRoute><GodModeLayout><GodRevenueHistory /></GodModeLayout></GodRoute>} />
         {/* GOD-09: cross-org lead browser */}
+        <Route path="/god/acquisition"           element={<GodRoute><Navigate to="/acquisition-ops" replace /></GodRoute>} />
         <Route path="/god/lead-browser"          element={<GodRoute><GodModeLayout><GodLeadBrowser /></GodModeLayout></GodRoute>} />
         <Route path="/god/lead-intelligence"     element={<GodRoute><GodModeLayout><LeadIntelligence /></GodModeLayout></GodRoute>} />
         {/* Control Room: relay status, timeline, Needs Mike, Give Direction */}

@@ -19,6 +19,7 @@ const PALETTES = {
   office:    { sky: ['#f2f5f9', '#dde4ee'], hill: '#cfd8e5', hill2: '#bcc8d9', main: '#475569', deep: '#1e293b', light: '#ffffff', warm: '#e8eef7' },
   general:   { sky: ['#f1f4f9', '#dae2ee'], hill: '#cbd5e3', hill2: '#b8c4d6', main: '#5b6b85', deep: '#27324a', light: '#ffffff', warm: '#eef2f8' },
   cleaning:  { sky: ['#e9f7fe', '#c7ebfb'], hill: '#a9def6', hill2: '#86cff0', main: '#0e95d4', deep: '#0b4a6b', light: '#ffffff', warm: '#eafaff' },
+  acquisition: { sky: ['#f4effe', '#e2d6fb'], hill: '#d2c2f8', hill2: '#b9a1f2', main: '#6d3fd9', deep: '#2a1765', light: '#ffffff', warm: '#efe7ff' },
   preview:   { sky: ['#f0f1ff', '#dcdffd'], hill: '#c8cdfb', hill2: '#b1b8f7', main: '#5b5fe0', deep: '#2b2f86', light: '#ffffff', warm: '#eef0ff' },
 }
 
@@ -391,7 +392,7 @@ function PreviewScene({ p, id }) {
 const SCENES = {
   sci: SciScene, energy: EnergyScene, roofing: RoofingScene, wholesale: WholesaleScene,
   insurance: InsuranceScene, funeral: FuneralScene, office: OfficeScene, general: GeneralScene,
-  cleaning: CleaningScene, preview: PreviewScene,
+  cleaning: CleaningScene, acquisition: CleaningScene, preview: PreviewScene,
 }
 
 export const ART_VARIANTS = Object.keys(SCENES)

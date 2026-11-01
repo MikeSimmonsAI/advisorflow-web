@@ -9,7 +9,7 @@ stopped the platform screens themselves. Hiding menu items is not isolation.
 This module is the single answer to "what experience is this workspace for
 this person", and the server enforces it:
 
-  experience_for(...)    'wholesale' | 'sci' | 'roofing' | 'insurance' | 'energy' | 'platform'
+  experience_for(...)    'wholesale' | 'sci' | 'roofing' | 'insurance' | 'acquisition' | 'energy' | 'platform'
                          per workspace, published in /auth/my-contexts so the
                          app opens the right shell and never the platform one
                          for a program workspace;
@@ -36,6 +36,7 @@ WHOLESALE_HOST_SLUG = "evo-integrated-solutions-llc"
 # app/services/entitlements.py. Only an explicit listing counts.
 WHOLESALE_WORKSPACE_KEY = "wholesale_workspace"
 INTERNAL_ROLES = ("god_admin", "super_admin")
+ACQUISITION_OPS_PREFIXES = ("/acquisition-ops",)
 
 # What a Wholesale-locked request may reach. Everything Wholesale itself calls
 # (/wholesale/...) plus the shared core that any shell needs to render.
@@ -142,6 +143,18 @@ def roofing_identity(org) -> bool:
     return bool(enabled) and identity_allows(org, "roofing")
 
 
+def acquisition_identity(org) -> bool:
+    """This org IS the managed-acquisition client (Issue #452): explicit
+    `client_acquisition` key AND a cleaning (or neutral) identity."""
+    if org is None:
+        return False
+    try:
+        from app.services.acquisition.common import acquisition_identity as _ident
+        return bool(_ident(org))
+    except Exception:  # pragma: no cover - never let a hint break login
+        return False
+
+
 def insurance_identity(org) -> bool:
     """This org IS an insurance agency (Max Life Command shell)."""
     return org is not None and _explicit(org, INSURANCE_FEATURE) and identity_allows(org, "insurance")
@@ -169,6 +182,8 @@ def experience_for(db: Session, user, org, is_program: bool, named_wholesale: Op
         return "roofing"
     if insurance_identity(org):
         return "insurance"
+    if acquisition_identity(org):
+        return "acquisition"
     # 3. The business's own industry.
     if industry_of(org) == "energy":
         return "energy"
@@ -262,6 +277,15 @@ def enforce(db: Session, user, request: Request) -> None:
         from app.services import workspace_access
         if workspace_access.has_back_office(user, db):
             return
+    # The acquisition pilot's operations (Issue #452) are their own destination
+    # for a login the owner granted operator access - not a platform screen.
+    if path.startswith(ACQUISITION_OPS_PREFIXES):
+        try:
+            from app.services.acquisition.engine import is_operator
+            if is_operator(db, user):
+                return
+        except Exception:  # pragma: no cover - fall through to the normal lock
+            pass
     if locked_experience(db, user, request) == WHOLESALE:
         raise HTTPException(
             status_code=403,

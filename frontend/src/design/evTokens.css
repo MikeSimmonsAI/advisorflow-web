@@ -52,6 +52,7 @@
 .ev-ds [data-accent="office"]    { --acc: #475569; --acc-strong: #334155; --acc-soft: #eef1f5; --acc-ink: #1e293b; }
 .ev-ds [data-accent="general"]   { --acc: #5b6b85; --acc-strong: #44526a; --acc-soft: #eef1f6; --acc-ink: #27324a; }
 .ev-ds [data-accent="cleaning"]  { --acc: #0e95d4; --acc-strong: #0b6e9e; --acc-soft: #e6f6fd; --acc-ink: #0b4a6b; }
+.ev-ds [data-accent="acquisition"] { --acc: #6d3fd9; --acc-strong: #4f27b0; --acc-soft: #f1ebfe; --acc-ink: #2a1765; }
 .ev-ds [data-accent="preview"]   { --acc: #5b5fe0; --acc-strong: #4338ca; --acc-soft: #eef0ff; --acc-ink: #2b2f86; }
 
 /* ---- shared primitives ---- */

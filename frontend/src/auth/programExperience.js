@@ -12,6 +12,7 @@ export const PROGRAM_HOMES = {
   wholesale: '/wholesale/evosense',
   sci: '/program',
   roofing: '/program/roofing',
+  acquisition: '/program/acquisition',
 }
 /** Where ENTERING a workspace opens, for dedicated programs that are not
  * routed by program_route (SCI, Roofing) or the product hand-off (Wholesale).
@@ -21,7 +22,8 @@ export function programEntry(entry) {
   return (entry && PROGRAM_ENTRY[entry.experience]) || null
 }
 
-const SHARED_OK = ['/change-password', '/login', '/logout', '/workspaces']
+// /acquisition-ops answers 403 itself unless the owner granted operator access.
+const SHARED_OK = ['/change-password', '/login', '/logout', '/workspaces', '/acquisition-ops']
 
 export function activeWorkspaceEntry(ctx, selectedId, homeOrgId) {
   const list = ctx?.workspace_contexts || []
@@ -31,8 +33,9 @@ export function activeWorkspaceEntry(ctx, selectedId, homeOrgId) {
 
 function inside(experience, path) {
   if (experience === 'wholesale') return path === '/wholesale' || path.startsWith('/wholesale/')
-  if (experience === 'sci') return path === '/program' || (path.startsWith('/program/') && !path.startsWith('/program/roofing')) || path === '/sci' || path.startsWith('/sci/')
+  if (experience === 'sci') return path === '/program' || (path.startsWith('/program/') && !path.startsWith('/program/roofing') && !path.startsWith('/program/acquisition')) || path === '/sci' || path.startsWith('/sci/')
   if (experience === 'roofing') return path === '/program/roofing' || path.startsWith('/program/roofing/')
+  if (experience === 'acquisition') return path === '/program/acquisition' || path.startsWith('/program/acquisition/')
   return true
 }
 

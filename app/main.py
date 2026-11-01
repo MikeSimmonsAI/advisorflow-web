@@ -956,6 +956,11 @@ app.include_router(agency_router)   # /agency (Max Life Command; gated by `insur
 from app.routers import roofing_router  # noqa: E402
 app.include_router(roofing_router.router)       # /roofing-ops (EvoSys Pro Roofing; gated by `roofing_program`)
 app.include_router(roofing_router.god_router)   # /god/roofing/setup|demo (platform owner)
+# Managed client acquisition (Issue #452): client portal + platform-owner ops.
+from app.routers import acquisition_router
+app.include_router(acquisition_router.router)       # /acquisition
+app.include_router(acquisition_router.god_router)   # /god/acquisition (setup, operator grants)
+app.include_router(acquisition_router.ops_router)   # /acquisition-ops (god or granted operator)
 from app.routers.push_router import router as push_router  # noqa: E402
 app.include_router(push_router)   # /push/* web push subscriptions (configured:false until VAPID keys + pywebpush)
 from app.routers.god_demo_router import router as god_demo_router  # noqa: E402
