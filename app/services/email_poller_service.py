@@ -81,16 +81,48 @@ POLL_LOOKBACK_MINUTES = 15
 POLL_PAGE_SIZE = 200
 
 
+# ── ONE-TIME BACKFILL (Issue #459) ──────────────────────────────────────────
+# This poller has no cursor, so a stretch of failed runs loses every reply
+# that falls outside the 15-minute window. EMAIL_POLL_BACKFILL_SINCE (an ISO
+# UTC timestamp, set on the cron for ONE run, then cleared) widens the window
+# back to that moment. Bounded: ignored if unparseable, in the future, or more
+# than BACKFILL_MAX_HOURS ago. Re-reading is safe - processed messages carry
+# the bookaboost-processed category and replies are deduplicated by message id.
+BACKFILL_ENV = "EMAIL_POLL_BACKFILL_SINCE"
+BACKFILL_MAX_HOURS = 24
+BACKFILL_MAX_PAGES = 25
+
+
+def backfill_since(now: datetime = None):
+    raw = (os.environ.get(BACKFILL_ENV) or "").strip()
+    if not raw:
+        return None
+    now = now or datetime.now(timezone.utc)
+    try:
+        ts = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        logger.warning("%s ignored: not an ISO timestamp", BACKFILL_ENV)
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    if ts >= now or now - ts > timedelta(hours=BACKFILL_MAX_HOURS):
+        logger.warning("%s ignored: outside the last %d hours", BACKFILL_ENV, BACKFILL_MAX_HOURS)
+        return None
+    return ts
+
+
 def _fetch_recent_emails(access_token: str,
-                         since_minutes: int = POLL_LOOKBACK_MINUTES) -> list:
+                         since_minutes: int = POLL_LOOKBACK_MINUTES,
+                         since_at: datetime = None) -> list:
     """
-    Fetch emails received in the last N minutes from Microsoft Graph.
+    Fetch emails received in the last N minutes (or since `since_at` for a
+    bounded backfill) from Microsoft Graph, following every result page.
     Polls inbox; looks for any new message (not just Re: prefixed — leads
     often reply without keeping the subject line).
     """
     import httpx
 
-    since = (datetime.now(timezone.utc) - timedelta(minutes=since_minutes)).isoformat()
+    since = (since_at or (datetime.now(timezone.utc) - timedelta(minutes=since_minutes))).isoformat()
 
     response = httpx.get(
         "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages",
@@ -116,7 +148,23 @@ def _fetch_recent_emails(access_token: str,
         # exactly like one with no mail. None tells the caller it failed.
         logger.error("Graph inbox fetch failed: %s %s", response.status_code, response.text)
         return None
-    return response.json().get("value", [])
+    data = response.json()
+    emails = list(data.get("value", []))
+    # Every page, oldest first, so nothing in the window is silently cut off.
+    pages = 1
+    next_url = data.get("@odata.nextLink")
+    while next_url and pages < BACKFILL_MAX_PAGES:
+        r = httpx.get(next_url, headers={"Authorization": f"Bearer {access_token}"}, timeout=20)
+        if r.status_code != 200:
+            logger.error("Graph inbox page fetch failed: %s %s", r.status_code, r.text)
+            return None
+        d = r.json()
+        emails.extend(d.get("value", []))
+        next_url = d.get("@odata.nextLink")
+        pages += 1
+    if next_url:
+        logger.warning("Graph inbox fetch stopped at %d pages; later pages are left for the next run", pages)
+    return emails
 
 
 def _mark_email_processed(access_token: str, message_id: str, tag: str = "bookaboost-processed"):
@@ -171,19 +219,25 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
         logger.error("Failed to get access token for advisor %s: %s", advisor_id, e)
         return {"checked": 0, "matched": 0, "errors": 1, "error": str(e)}
 
-    emails = _fetch_recent_emails(access_token)
+    since_at = backfill_since()
+    if since_at is not None:
+        logger.warning("email poller BACKFILL for advisor %s since %s", advisor_id, since_at.isoformat())
+    emails = _fetch_recent_emails(access_token, since_at=since_at)
     if emails is None:
         return {"checked": 0, "matched": 0, "errors": 1,
                 "error": "Could not read the Microsoft 365 inbox (see logs; reconnect may be required)"}
     checked = len(emails)
     matched = 0
     errors = 0
+    already = 0
+    duplicates = 0
 
     for email in emails:
         try:
             # Skip emails already tagged as processed
             categories = email.get("categories", [])
             if "bookaboost-processed" in categories:
+                already += 1
                 continue
 
             sender_email = email.get("from", {}).get("emailAddress", {}).get("address", "").lower().strip()
@@ -247,6 +301,7 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
             imid = (email.get("internetMessageId") or "").strip()[:500] or None
             existing = find_duplicate_email_reply(db, lead.id, body_text, received_at, imid)
             if existing:
+                duplicates += 1
                 _mark_email_processed(access_token, email["id"])
                 continue
 
@@ -262,6 +317,7 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
             )
             if not insert_email_reply(db, reply):
                 # Another reader / overlapping run stored it a moment ago.
+                duplicates += 1
                 _mark_email_processed(access_token, email["id"])
                 continue
 
@@ -337,7 +393,12 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
             errors += 1
 
     db.commit()
-    return {"checked": checked, "matched": matched, "errors": errors}
+    out = {"checked": checked, "matched": matched, "errors": errors,
+           "already_processed": already, "duplicates": duplicates}
+    if since_at is not None:
+        out["backfill_since"] = since_at.isoformat()
+        logger.warning("email poller BACKFILL result for advisor %s: %s", advisor_id, out)
+    return out
 
 
 def poll_all_advisors(db: Session, organization_id: str) -> dict:
@@ -366,6 +427,8 @@ def poll_all_advisors(db: Session, organization_id: str) -> dict:
         total["matched"] += result.get("matched", 0)
         total["errors"] += result.get("errors", 0)
         total["auth_errors"] += result.get("auth_errors", 0)
+        total["already_processed"] = total.get("already_processed", 0) + result.get("already_processed", 0)
+        total["duplicates"] = total.get("duplicates", 0) + result.get("duplicates", 0)
 
     return {**total, "advisors_polled": len(advisors)}
 
@@ -394,6 +457,11 @@ def poll_all_orgs(db: Session) -> dict:
             total["errors"] += result.get("errors", 0)
             total["auth_errors"] += result.get("auth_errors", 0)
             total["advisors_polled"] += 1
+            # Issue #459: the run summary is the proof a backfill happened.
+            total["already_processed"] = total.get("already_processed", 0) + result.get("already_processed", 0)
+            total["duplicates"] = total.get("duplicates", 0) + result.get("duplicates", 0)
+            if result.get("backfill_since"):
+                total["backfill_since"] = result["backfill_since"]
         except Exception as e:
             db.rollback()
             logger.error("poll_all_orgs: error on advisor %s: %s", advisor_id, e)

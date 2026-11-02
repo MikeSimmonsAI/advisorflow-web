@@ -24,7 +24,7 @@ services:
   - type: web
     name: advisorflow-backend
     runtime: python
-    plan: starter
+    plan: 1c-2g
     buildCommand: "pip install -r requirements.txt"
     # ── THE MIGRATION GATE ──────────────────────────────────────────────────
     # MIGRATION STEP → MIGRATION SUCCESS → APP START.

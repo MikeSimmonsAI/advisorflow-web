@@ -360,24 +360,38 @@ def classify_properties(db, org_id: str, props) -> int:
 
 
 BACKFILL_BATCH = 3000
+# Rows held in memory at once. The pass used to load all BACKFILL_BATCH full
+# property rows (each carries several KB of JSON detail columns) in one list:
+# ~70 MB of RSS measured locally for 3,000 rows, kept after the pass, on a
+# 512 MiB backend that idles near 450 MB. Same rows, same classification, same
+# return value - just a bounded number in memory at a time. (P0, 2026-10-29)
+BACKFILL_CHUNK = 250
 
 
 def backfill(db, org_id: Optional[str] = None, *, limit: int = BACKFILL_BATCH) -> int:
     """Classify properties that have never been classified (NULL category),
     a batch per scheduler pass. Idempotent; never deletes or merges anything."""
     from app.models.evosense_models import EvoSenseProperty
-    q = db.query(EvoSenseProperty).filter(EvoSenseProperty.property_category.is_(None))
+    q = db.query(EvoSenseProperty.id, EvoSenseProperty.organization_id).filter(
+        EvoSenseProperty.property_category.is_(None))
     if org_id:
         q = q.filter(EvoSenseProperty.organization_id == org_id)
-    props = q.limit(limit).all()
     by_org: Dict[str, list] = {}
-    for p in props:
-        by_org.setdefault(p.organization_id, []).append(p)
-    n = 0
-    for o, ps in by_org.items():
-        n += classify_properties(db, o, ps)
-    db.flush()
-    return len(props)
+    total = 0
+    for pid, oid in q.limit(limit).all():
+        by_org.setdefault(oid, []).append(pid)
+        total += 1
+    for o, ids in by_org.items():
+        for i in range(0, len(ids), BACKFILL_CHUNK):
+            ps = db.query(EvoSenseProperty).filter(EvoSenseProperty.id.in_(ids[i:i + BACKFILL_CHUNK])).all()
+            classify_properties(db, o, ps)
+            db.flush()
+            # Flushed: the changes live in the transaction the caller commits.
+            # Release this chunk's rows before loading the next one.
+            for p in ps:
+                if p in db and p not in db.dirty:
+                    db.expunge(p)
+    return total
 
 
 def set_by_person(db, prop, category: str, subtype: Optional[str], *, user, note: str = "") -> Dict[str, Any]:
