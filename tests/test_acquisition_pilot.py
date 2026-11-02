@@ -92,7 +92,8 @@ def test_enable_is_idempotent_and_starts_paused(pilot):
     assert r.status_code == 200 and r.json()["profile_created"] is False
     ov = p["c"].get("/acquisition-ops/%s/overview" % p["shine"].id, headers=_h(p["db"], p["god"])).json()
     assert ov["profile"]["paused"] is True and ov["profile"]["pilot_started_at"] is None
-    assert all(w["state"] == "not_built" for w in ov["workers"])
+    assert {w["key"]: w["state"] for w in ov["workers"]}["discovery"] == "on_demand"
+    assert all(w["state"] == "not_built" for w in ov["workers"] if w["key"] != "discovery")
     assert ov["spend"]["usd"] == 0.0
 
 
