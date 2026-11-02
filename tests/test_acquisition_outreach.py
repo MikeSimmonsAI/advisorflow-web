@@ -169,3 +169,27 @@ def test_catch_up_applies_stored_replies_once(setup):
     db.refresh(a), db.refresh(b)
     assert a.stage == C.REPLIED and b.stage == C.DISQUALIFIED
     assert O.catch_up(db) == 0
+
+
+def test_stop_followed_by_signature_is_an_opt_out_and_caught_up(setup):
+    from datetime import datetime, timedelta
+    from app.models.models import Reply
+    from app.services.acquisition import harvey_adapted as H
+    sig = "STOP\nMike Simmons\n\u201cI am what I am today because of the choices I made yesterday.\u201c"
+    assert H.opt_out_reason(sig)["rule"] == "first_line"
+    assert H.opt_out_reason("Stop by our office Tuesday, we'd like a quote") is None
+    assert H.opt_out_reason("Alrighty now\nMike") is None
+    db, org, god = setup
+    b = _prospect(db, org, god, "owner2@example.com")
+    O.send(db, org, b, god, {}, mailer=Mailer())
+    lb = db.query(Lead).filter(Lead.id == b.lead_id).first()
+    O.on_reply(db, lb, "Alrighty now")
+    db.commit()
+    db.refresh(b)
+    assert b.stage == C.REPLIED
+    db.add(Reply(lead_id=b.lead_id, body=sig, source="email", received_at=datetime.utcnow() + timedelta(seconds=5)))
+    db.commit()
+    assert O.catch_up(db) == 1
+    db.refresh(b)
+    assert b.stage == C.DISQUALIFIED and lb.status == "dnc"
+    assert O.catch_up(db) == 0
