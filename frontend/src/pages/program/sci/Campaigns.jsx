@@ -634,6 +634,16 @@ function DeliveryPanel() {
           {stat(j.email_in_progress, 'Emails in progress')}{stat(j.replied, 'Replied')}{stat(j.booked, 'Booked')}
           {stat(j.on_hold, 'On hold')}{stat(j.completed, 'Completed')}
         </div>
+        {d.release && (<>
+          <b className="sci-micro">Release queue</b>
+          <div className="sci-statstrip" style={{ margin: '4px 0 4px', flexWrap: 'wrap' }}>
+            {stat(d.release.scheduled_today, 'First messages today')}{stat(d.release.scheduled_tomorrow, 'First messages tomorrow')}
+          </div>
+          <p className="sci-micro sci-muted" style={{ margin: '0 0 10px' }}>
+            {d.release.window}.{d.release.last_start ? <> Last family starts {when(d.release.last_start)}.</> : ' Nobody is waiting to start.'}
+            {d.release.by_day?.length > 0 && <> By day: {d.release.by_day.map(x => `${x.day}: ${x.families}`).join(' · ')}.</>}
+          </p>
+        </>)}
         <b className="sci-micro">Email</b>
         <div className="sci-statstrip" style={{ margin: '4px 0 4px', flexWrap: 'wrap' }}>
           {stat(e.attempted, 'Attempted')}{stat(e.provider_accepted, 'Accepted by Microsoft')}
@@ -732,7 +742,10 @@ function JourneyPanel({ cur, isManager, version, onDone }) {
             <input type="datetime-local" value={startAt} onChange={e => setStartAt(e.target.value)} />
           </Field>
         </div>
-        {lastAt && <p className="sci-micro sci-muted" style={{ margin: '0 0 8px' }}>The last of these {num(n)} would be scheduled around {when(lastAt.toISOString())}.</p>}
+        <p className="sci-micro sci-muted" style={{ margin: '0 0 8px' }}>
+          New families start only 9 AM–6 PM Central, Monday–Friday. Any that don't fit roll to the next weekday morning automatically.
+          {lastAt && n * (Number(spacing) || 0) <= 480 ? <> The last of these {num(n)} would start around {when(lastAt.toISOString())}.</> : null}
+        </p>
         {isManager ? (
           <button type="button" className="sci-btn gold" disabled={!cur.is_active || !phrase || busy}
             title={!cur.is_active ? 'Switch the campaign on first - that alone sends nothing' : undefined}

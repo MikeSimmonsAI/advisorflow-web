@@ -18,6 +18,17 @@ from app.services.programs import bounces as B, campaigns as C, identity, journe
 from tests.test_outreach_program import _addresses, _admin, _fake_provider, _h, program  # noqa: F401
 from tests.test_sci_441_central_alabama_cadence import _ca_lead, _fam
 
+@pytest.fixture(autouse=True)
+def _release_any_time(request, monkeypatch):
+    """Most tests here are about WHO starts, not WHEN: let the release window
+    cover the whole day so they don't depend on the wall clock. The window
+    tests below use the real window."""
+    if "window" not in request.node.name and "release_slots" not in request.node.name:
+        monkeypatch.setattr(journey, "RELEASE_START", (0, 0))
+        monkeypatch.setattr(journey, "RELEASE_END", (23, 59))
+        monkeypatch.setattr(journey, "RELEASE_WEEKDAYS_ONLY", False)
+
+
 # Notice bodies in the shapes Microsoft sent on Oct 31 (addresses synthetic).
 NDR_GMAIL = ("Your message to ghost@gmail.com couldn't be delivered. ghost wasn't found at gmail.com. "
              "Status code: 550 5.1.1 Remote server returned '550-5.1.1 The email account that you tried to "
@@ -508,3 +519,41 @@ def test_first_messages_check_does_not_page_for_a_family_held_on_purpose(program
     monkeypatch.setattr(contact_hours, "is_permitted", lambda lead, now=None: True)
     out = self_check.first_messages_late(db, org.id, datetime.utcnow())
     assert out["people"] == ["Ollie Testcase"]                       # a real miss is still reported
+
+
+# ── Nov 1: the full campaign releases itself inside a daily window ──────────
+
+def test_release_slots_stay_inside_weekday_window_and_roll_over():
+    from zoneinfo import ZoneInfo
+    z, u = ZoneInfo("America/Chicago"), ZoneInfo("UTC")
+    first = datetime(2026, 11, 2, 17, 5)                      # Mon 11:05 AM CST
+    slots = journey.release_slots(first, 245, timedelta(minutes=5))
+    local = [t.replace(tzinfo=u).astimezone(z) for t in slots]
+    assert len(set(slots)) == 245
+    assert local[0].hour == 11 and local[0].minute == 5
+    assert all(x.weekday() < 5 and (9, 0) <= (x.hour, x.minute) < (18, 0) for x in local)
+    gaps = [(b - a) for a, b in zip(slots, slots[1:])]
+    assert all(g == timedelta(minutes=5) or g >= timedelta(hours=14) for g in gaps)   # 5 min, or overnight
+    fri = journey.release_slots(datetime(2026, 11, 6, 23, 55), 2, timedelta(minutes=5))   # Fri 5:55 PM
+    nxt = fri[1].replace(tzinfo=u).astimezone(z)
+    assert (nxt.weekday(), nxt.hour, nxt.minute) == (0, 9, 0)                         # Monday 9:00
+    night = journey.release_slots(datetime(2026, 11, 3, 3, 0), 1, timedelta(minutes=5))  # Mon 9 PM
+    n0 = night[0].replace(tzinfo=u).astimezone(z)
+    assert (n0.day, n0.hour) == (3, 9)                                                # Tue 9:00
+
+
+def test_starting_everyone_never_schedules_outside_the_window(program):
+    from zoneinfo import ZoneInfo
+    db, org, admin = program["db"], program["org"], program["admin"]
+    fam = _on(db, org)
+    _ca(db, org, admin, source="L007")
+    _ca(db, org, admin, source="L001", phone="", email="ollie@example.com", first="ollie")
+    late = datetime(2026, 11, 3, 23, 58)                          # Tue 5:58 PM CST
+    out = journey.start(db, program["prog"], fam, admin, spacing_minutes=5, start_at=late,
+                        now=datetime(2026, 11, 3, 23, 0))
+    assert out["started"] == 2 and sum(out["by_day"].values()) == 2
+    z, u = ZoneInfo("America/Chicago"), ZoneInfo("UTC")
+    starts = sorted({r.scheduled_start_at for r in db.query(ProgramSourceRecord)
+                     .filter(ProgramSourceRecord.journey_started_at.isnot(None))})
+    loc = [t.replace(tzinfo=u).astimezone(z) for t in starts]
+    assert (loc[0].hour, loc[0].minute) == (17, 58) and (loc[1].day, loc[1].hour, loc[1].minute) == (4, 9, 0)
