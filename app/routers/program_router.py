@@ -2358,6 +2358,27 @@ def central_alabama_delivery(db: Session = Depends(get_db), user: User = Depends
     booked = {x for (x,) in db.query(BookingLink.lead_id).filter(
         BookingLink.lead_id.in_(ids or ["-"]), BookingLink.status.in_(("booked", "confirmed", "completed"))).all()}
     touched = {t.lead_id for t in accepted} | {m.lead_id for m in texts}
+    # #449: the release queue - families whose first message is still ahead,
+    # by Central-time day, and when the last one starts.
+    from zoneinfo import ZoneInfo as _Z
+    from app.services.programs import journey as _jr
+    _tz = _Z(_jr.RELEASE_TZ)
+    _today = datetime.utcnow().replace(tzinfo=_Z("UTC")).astimezone(_tz).date()
+    upcoming = {}
+    last_start = None
+    for lid in scheduled:
+        at = max(r.scheduled_start_at for r in people[lid] if r.scheduled_start_at)
+        d = at.replace(tzinfo=_Z("UTC")).astimezone(_tz).date()
+        upcoming[d] = upcoming.get(d, 0) + 1
+        last_start = at if last_start is None or at > last_start else last_start
+    release = {
+        "scheduled_today": upcoming.get(_today, 0),
+        "scheduled_tomorrow": upcoming.get(_today + timedelta(days=1), 0),
+        "by_day": [{"day": d.strftime("%a %b %d"), "families": n} for d, n in sorted(upcoming.items())],
+        "last_start": last_start.isoformat() + "Z" if last_start else None,
+        "window": "%02d:%02d-%02d:%02d Central, Mon-Fri, one new family every few minutes" % (
+            _jr.RELEASE_START + _jr.RELEASE_END),
+    }
     journey_counts = {
         "approved": len(people), "awaiting_start": len(set(people) - started),
         "scheduled": len(scheduled), "started": len(started),
@@ -2385,7 +2406,7 @@ def central_alabama_delivery(db: Session = Depends(get_db), user: User = Depends
     return {"campaign_active": bool(f.is_active),
             "owner_paused": (not f.is_active) and last_off is not None,
             "last_on": last_on, "last_off": last_off, "history": history,
-            "journey": journey_counts, "email": email, "sms": sms}
+            "journey": journey_counts, "release": release, "email": email, "sms": sms}
 
 
 @router.get("/central-alabama/family/{lead_id}/events")

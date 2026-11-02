@@ -36,6 +36,57 @@ from app.models.program_models import (CampaignFamily, LocationProfile, Outreach
                                        ProgramResponse, ProgramSourceRecord)
 
 DEFAULT_SPACING_MINUTES = 5
+# #449 (Nov 1): the full campaign is released on its own, one family every
+# few minutes, ONLY inside a daily window on business days. A start that would
+# fall after the window rolls to the next business morning - never into the
+# night, where the senders would hold it and then release a pile at once.
+RELEASE_TZ = "America/Chicago"
+RELEASE_START = (9, 0)          # first new start of a day, local
+RELEASE_END = (18, 0)           # no new start at or after this, local
+RELEASE_WEEKDAYS_ONLY = True
+# (Texts and emails are allowed 8:30 AM - 7:45 PM Eastern = 7:30 AM - 6:45 PM
+# Central; the window sits inside that with room for a sender pass.)
+
+
+def release_slots(first: datetime, n: int, spacing: timedelta, *, tz: Optional[str] = None,
+                  day_start=None, day_end=None, weekdays_only: Optional[bool] = None) -> List[datetime]:
+    """n start times (naive UTC) from `first`, `spacing` apart, every one
+    inside [day_start, day_end) local on an allowed day; the next one after the
+    window closes is the next allowed day's opening time."""
+    from datetime import time as _t, timezone as _tzu
+    from zoneinfo import ZoneInfo
+    tz = tz or RELEASE_TZ
+    day_start = day_start or RELEASE_START
+    day_end = day_end or RELEASE_END
+    weekdays_only = RELEASE_WEEKDAYS_ONLY if weekdays_only is None else weekdays_only
+    z = ZoneInfo(tz)
+    open_t, close_t = _t(*day_start), _t(*day_end)
+
+    def ok_day(d) -> bool:
+        return not weekdays_only or d.weekday() < 5
+
+    def opening(d):                                      # local date -> aware local datetime
+        return datetime.combine(d, open_t).replace(tzinfo=z)
+
+    def first_ok(local):
+        while True:
+            if ok_day(local.date()) and open_t <= local.timetz().replace(tzinfo=None) < close_t:
+                return local
+            if ok_day(local.date()) and local.timetz().replace(tzinfo=None) < open_t:
+                return opening(local.date())
+            nxt = local.date() + timedelta(days=1)
+            while not ok_day(nxt):
+                nxt += timedelta(days=1)
+            local = opening(nxt)
+
+    out = []
+    cur = first_ok(first.replace(tzinfo=_tzu.utc).astimezone(z))
+    for i in range(max(0, n)):
+        if i:
+            # step in real (UTC) time so a clock change never shifts the gap
+            cur = first_ok((cur.astimezone(_tzu.utc) + spacing).astimezone(z))
+        out.append(cur.astimezone(_tzu.utc).replace(tzinfo=None))
+    return out
 MAX_SPACING_MINUTES = 24 * 60
 UNRESOLVED_EMAIL = ("unknown", "claimed")
 
@@ -255,10 +306,12 @@ def start(db: Session, prog: OutreachProgram, fam: CampaignFamily, user, *, coun
     eligible = [r for r in rows if r["action"] == "start"]
     if count is not None:
         eligible = eligible[:max(0, int(count))]
+    overdue = _overdue(db, prog, fam, rows, now)
+    slots = release_slots(first, len(eligible) + len(overdue), spacing)
     slot = 0
     started, texting, email_only, raced = 0, 0, 0, 0
     for r in eligible:
-        at = first + spacing * slot
+        at = slots[slot]
         res = db.execute(update(ProgramSourceRecord)
                          .where(ProgramSourceRecord.organization_id == prog.organization_id,
                                 ProgramSourceRecord.lead_id == r["lead_id"],
@@ -297,8 +350,8 @@ def start(db: Session, prog: OutreachProgram, fam: CampaignFamily, user, *, coun
     # RESUME: anyone already started whose next text or email fell due while
     # the campaign was off is re-spaced from now - same place, no burst.
     resumed = 0
-    for lid in _overdue(db, prog, fam, rows, now):
-        at = first + spacing * slot
+    for lid in overdue:
+        at = slots[slot]
         slot += 1
         st = db.query(CadenceState).filter(CadenceState.lead_id == lid).first()
         if st is not None and st.status == "active":
@@ -312,7 +365,8 @@ def start(db: Session, prog: OutreachProgram, fam: CampaignFamily, user, *, coun
     mark(fam, "started_at", datetime.utcnow())
     db.commit()
     from app.routers.audit_log_router import log_action
-    last = first + spacing * max(0, slot - 1)
+    last = slots[slot - 1] if slot else first
+    first = slots[0] if slots else first
     log_action(db, prog.organization_id, user.id, action="program.journey_started",
                target_type="program_campaign_family", target_id=fam.id,
                details={"key": fam.key, "started": started, "texting": texting, "email_only": email_only,
@@ -320,7 +374,12 @@ def start(db: Session, prog: OutreachProgram, fam: CampaignFamily, user, *, coun
                         "first_at": first.isoformat() + "Z", "last_at": last.isoformat() + "Z",
                         "already_started_by_another_click": raced, "sent_now": 0})
     db.commit()
-    return {"started": started, "texting": texting, "email_only": email_only, "resumed": resumed,
+    from zoneinfo import ZoneInfo as _Z
+    by_day: Dict[str, int] = {}
+    for t in slots[:slot]:
+        d = t.replace(tzinfo=_Z("UTC")).astimezone(_Z(RELEASE_TZ)).strftime("%a %b %d")
+        by_day[d] = by_day.get(d, 0) + 1
+    return {"by_day": by_day, "started": started, "texting": texting, "email_only": email_only, "resumed": resumed,
             "already_started_by_another_click": raced, "first_at": first.isoformat() + "Z",
             "last_at": last.isoformat() + "Z", "spacing_minutes": int(spacing.total_seconds() // 60),
             "sent_now": 0}
