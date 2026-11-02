@@ -237,7 +237,7 @@ function ProspectDetail({ x }) {
         <div><h2 style={{ margin: 0 }}>{x.business_name}</h2><span style={{ color: 'var(--aq-sub)', fontSize: 13 }}>{[x.segment_label, x.city].filter(Boolean).join(' • ')}</span></div>
         <span style={{ marginLeft: 'auto' }}>{x.score != null ? <span className="aq-score">Score: {x.score}</span> : <span className="aq-pill">Not scored</span>}</span>
       </div>
-      <div className="aq-tabs">{[['overview', 'Overview'], ['signals', `Signals (${x.evidence.length})`], ['contacts', 'Contacts'], ['actions', 'Actions']].map(([k, l]) => (
+      <div className="aq-tabs">{[['overview', 'Overview'], ['signals', `Signals (${x.evidence.length})`], ['contacts', 'Contacts'], ['email', 'Email'], ['actions', 'Actions']].map(([k, l]) => (
         <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>))}</div>
       {tab === 'overview' && (
         <div className="aq-grid aq-two">
@@ -278,6 +278,7 @@ function ProspectDetail({ x }) {
           <dt>Email</dt><dd>{x.email || '—'}</dd><dt>Phone</dt><dd>{x.phone || '—'}</dd><dt>Address</dt><dd>{x.address || '—'}</dd>
         </dl>
       )}
+      {tab === 'email' && <EmailTab x={x} />}
       {tab === 'actions' && (
         <div className="aq-actions">
           <select value={stage} onChange={e => setStage(e.target.value)}><option value="">Move to stage…</option>
@@ -287,6 +288,48 @@ function ProspectDetail({ x }) {
           <small style={{ color: 'var(--aq-sub)', width: '100%' }}>Contacted and Replied are recorded from real messages only.</small>
         </div>
       )}
+      {fail && <div className="aq-err">{fail}</div>}
+    </div>
+  )
+}
+
+function EmailTab({ x }) {
+  const { orgId, reload } = useOps()
+  const [pv, setPv] = useState(null)
+  const [subject, setSubject] = useState('')
+  const [body, setBody] = useState('')
+  const [sure, setSure] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const [fail, setFail] = useState(null)
+  const base = `/acquisition-ops/${orgId}/prospects/${x.id}/email`
+  useEffect(() => {
+    let live = true
+    api.post(`${base}/preview`, {}).then(r => { if (live) { setPv(r); setSubject(r.subject); setBody(r.body) } }).catch(e => live && setFail(errText(e)))
+    return () => { live = false }
+  }, [base, x.stage])
+  const send = async () => {
+    setBusy(true); setFail(null); setMsg(null)
+    try {
+      const r = await api.post(`${base}/send`, { subject, body })
+      setMsg(r.pilot_started ? 'Sent. The 30-day pilot clock has started.' : 'Sent.'); setSure(false); reload()
+    } catch (e) { setFail(errText(e)) } finally { setBusy(false) }
+  }
+  if (!pv) return fail ? <div className="aq-err">{fail}</div> : <div className="aq-empty">Loading…</div>
+  const blocked = pv.refused_because || []
+  return (
+    <div>
+      <dl className="aq-dl"><dt>From</dt><dd>{pv.from}</dd><dt>To</dt><dd>{pv.to || '—'}</dd>
+        <dt>Sent today</dt><dd>{pv.sent_last_24h} of {pv.daily_cap}</dd></dl>
+      <label className="aq-field">Subject<input value={subject} onChange={e => setSubject(e.target.value)} /></label>
+      <label className="aq-field">Message<textarea rows={9} value={body} onChange={e => setBody(e.target.value)} /></label>
+      <p style={{ color: 'var(--aq-sub)', fontSize: 12, whiteSpace: 'pre-line' }}>Added at the bottom: {pv.footer}</p>
+      {blocked.length > 0 && <div className="aq-err">Can't send yet:<ul>{blocked.map(b => <li key={b}>{b}</li>)}</ul></div>}
+      <div className="aq-actions">
+        <label className="aq-checks"><label><input type="checkbox" checked={sure} disabled={blocked.length > 0} onChange={e => setSure(e.target.checked)} />I've read this email and want it sent to {pv.to}</label></label>
+        <button className="aq-btn aq-btn--sm aq-btn--primary" disabled={!sure || busy || blocked.length > 0} onClick={send}>{busy ? 'Sending…' : 'Send email'}</button>
+      </div>
+      {msg && <div className="aq-ok">{msg}</div>}
       {fail && <div className="aq-err">{fail}</div>}
     </div>
   )
@@ -428,8 +471,8 @@ export function Health() {
         <section className="aq-card"><h2>Workers</h2>
           {ov.workers.map(w => (
             <div className="aq-row" key={w.key}><div className="aq-row__main"><b>{w.label}</b>
-              <span>{w.state === 'on_demand' ? `Runs on demand · ${w.runs} runs · ${w.errors} failed${w.last_run ? ' · last ' + when(w.last_run) : ''}` : `Planned in ${w.phase}`}</span></div>
-              <span className={`aq-pill ${w.state === 'on_demand' ? 'aq-pill--ok' : ''}`}>{w.state === 'on_demand' ? 'Working' : 'Not built'}</span></div>))}
+              <span>{w.state === 'on_demand' ? `Runs on demand · ${w.runs} runs · ${w.errors} failed${w.last_run ? ' · last ' + when(w.last_run) : ''}` : w.state === 'off' ? 'Built; switched off on the server' : `Planned in ${w.phase}`}</span></div>
+              <span className={`aq-pill ${w.state === 'on_demand' ? 'aq-pill--ok' : ''}`}>{w.state === 'on_demand' ? 'Working' : w.state === 'off' ? 'Off' : 'Not built'}</span></div>))}
         </section>
         <section className="aq-card"><h2>Sending &amp; spend</h2>
           <dl className="aq-dl">
@@ -457,6 +500,7 @@ export function OpsSettings() {
   const [reason, setReason] = useState('')
   const [excl, setExcl] = useState((p.exclusions || []).join(', '))
   const [email, setEmail] = useState('')
+  const [addr, setAddr] = useState(p.mailing_address || '')
   const [fail, setFail] = useState(null)
   const [toast, say] = useToast()
   const run = async (fn, ok) => { setFail(null); try { await fn(); say(ok); reload() } catch (e) { setFail(errText(e)) } }
@@ -467,7 +511,7 @@ export function OpsSettings() {
       {fail && <div className="aq-err">{fail}</div>}
       <div className="aq-grid aq-two">
         <section className="aq-card"><h2>Emergency pause</h2>
-          <p className="aq-lede" style={{ marginBottom: 10 }}>{p.paused ? `Paused ${when(p.paused_at)}: ${p.paused_reason || ''}.` : 'Not paused. No worker exists yet, so nothing runs.'} Pilot clock: {p.pilot_started_at ? `started ${when(p.pilot_started_at)}` : 'not started — it starts only when live operations are verified.'}</p>
+          <p className="aq-lede" style={{ marginBottom: 10 }}>{p.paused ? `Paused ${when(p.paused_at)}: ${p.paused_reason || ''}.` : 'Not paused. Real prospects can be emailed (one at a time, by a person pressing Send).'} Pilot clock: {p.pilot_started_at ? `started ${when(p.pilot_started_at)}` : 'not started — it starts only when live operations are verified.'}</p>
           {p.paused ? <button className="aq-btn" onClick={() => run(() => api.post(`/acquisition-ops/${orgId}/resume`, {}), 'Unpaused')}>Unpause</button> : (
             <div className="aq-actions"><input placeholder="Why pause? (required)" value={reason} onChange={e => setReason(e.target.value)} style={{ flex: 1, minWidth: 200 }} />
               <button className="aq-btn aq-btn--danger" onClick={() => run(() => api.post(`/acquisition-ops/${orgId}/pause`, { reason }), 'Paused')}>Emergency pause</button></div>)}
@@ -476,6 +520,15 @@ export function OpsSettings() {
           <div className="aq-field"><textarea value={excl} onChange={e => setExcl(e.target.value)} placeholder="existing-client.com, name@company.com" />
             <small>The client’s existing accounts and anyone who asked not to be contacted. Domains cover their sub-domains.</small></div>
           <button className="aq-btn aq-btn--primary aq-btn--sm" onClick={() => run(() => api.put(`/acquisition-ops/${orgId}/profile`, { exclusions: excl }), 'Saved')}>Save list</button>
+        </section>
+        <section className="aq-card"><h2>Business mailing address</h2>
+          <div className="aq-field"><input value={addr} onChange={e => setAddr(e.target.value)} placeholder="Street, city, state, ZIP" />
+            <small>Printed at the bottom of every outreach email (the law requires it). Real prospects can't be emailed without it.</small></div>
+          <button className="aq-btn aq-btn--primary aq-btn--sm" onClick={() => run(() => api.put(`/acquisition-ops/${orgId}/profile`, { mailing_address: addr }), 'Saved')}>Save address</button>
+        </section>
+        <section className="aq-card"><h2>Email sending</h2>
+          <p className="aq-lede">{ov.sending.email_enabled ? `On. From ${ov.sending.from}, up to ${ov.sending.daily_cap} a day (${ov.sending.sent_last_24h} in the last 24 hours).` : 'Off on the server. Nothing can be sent.'}</p>
+          <small style={{ color: 'var(--aq-sub)' }}>Practice prospects can only be emailed at: {(ov.sending.test_recipients || []).join(', ') || 'none set'}</small>
         </section>
       </div>
       {ov.is_god && (

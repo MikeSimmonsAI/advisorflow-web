@@ -93,7 +93,9 @@ def test_enable_is_idempotent_and_starts_paused(pilot):
     ov = p["c"].get("/acquisition-ops/%s/overview" % p["shine"].id, headers=_h(p["db"], p["god"])).json()
     assert ov["profile"]["paused"] is True and ov["profile"]["pilot_started_at"] is None
     assert {w["key"]: w["state"] for w in ov["workers"]}["discovery"] == "on_demand"
-    assert all(w["state"] == "not_built" for w in ov["workers"] if w["key"] != "discovery")
+    st = {w["key"]: w["state"] for w in ov["workers"]}
+    assert st["outreach"] == st["replies"] == "off"          # P3 email is off unless the server switch is on
+    assert st["research"] == st["contacts"] == st["booking"] == "not_built"
     assert ov["spend"]["usd"] == 0.0
 
 
@@ -151,7 +153,9 @@ def test_practice_prospects_stay_internal(pilot):
     p = pilot
     opp = _add(p, is_practice=True)
     assert _move(p, opp, "qualified").status_code == 200
-    assert _move(p, opp, "interested", note="test").status_code == 409
+    # practice may move through the client stages so the loop can be tested,
+    # but it never reaches the client's screens or counts
+    assert _move(p, opp, "interested", note="test").status_code == 200
     items = p["c"].get("/acquisition/prospects", headers=_h(p["db"], p["owner"], p["shine"].id)).json()["items"]
     assert items == []
     ov = p["c"].get("/acquisition-ops/%s/overview" % p["shine"].id, headers=_h(p["db"], p["god"])).json()

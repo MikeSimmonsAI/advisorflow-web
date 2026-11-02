@@ -42,6 +42,9 @@ class AcquisitionProfile(Base):
     insurance_note = Column(Text, nullable=True)        # only what the client has verified
     certifications_note = Column(Text, nullable=True)
     availability_note = Column(Text, nullable=True)     # e.g. "Tue/Thu mornings"
+    # The client's postal address, printed in every outreach email (required
+    # by law in commercial email). Outreach to real prospects refuses without it.
+    mailing_address = Column(Text, nullable=True)
     appointment_minutes = Column(Integer, nullable=False, default=45)
     notify_user_ids = Column(Text, nullable=True)       # JSON list of user ids, checked on read
     # EMERGENCY PAUSE - starts paused. Every future worker checks this first.

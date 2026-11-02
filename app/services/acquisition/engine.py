@@ -79,6 +79,7 @@ def profile_json(org: Organization, p: Optional[AcquisitionProfile], full: bool)
         "insurance_note": p.insurance_note if p else None,
         "certifications_note": p.certifications_note if p else None,
         "availability_note": p.availability_note if p else None,
+        "mailing_address": p.mailing_address if p else None,
         "appointment_minutes": (p.appointment_minutes if p else None) or C.DEFAULT_APPOINTMENT_MINUTES,
         "configured": p is not None,
     }
@@ -295,6 +296,11 @@ def add_evidence(db: Session, org_id: str, opp: AcquisitionOpportunity, actor: O
                             verified=bool(data.get("verified")) and bool(url),
                             recorded_by_id=actor.id if actor else None)
     db.add(e)
+    if kind == "contact_email" and e.verified and e.value:
+        # A verified address becomes the prospect's email (what outreach sends to).
+        lead = db.query(Lead).filter(Lead.id == opp.lead_id, Lead.organization_id == org_id).first()
+        if lead is not None:
+            lead.email = e.value.strip().lower()[:200]
     if commit:
         db.commit()
     return e
@@ -311,8 +317,8 @@ def owner_move(db: Session, opp: AcquisitionOpportunity, actor: User, data: Dict
         # Those stages are set by the outreach/reply workers from real message
         # records (P3) - never by hand, so "contacted" is always evidence-backed.
         raise HTTPException(409, "Contacted and Replied are recorded from real messages, not set by hand")
-    if to in C.CLIENT_STAGES and opp.is_practice:
-        raise HTTPException(409, "Practice prospects cannot reach the client's stages")
+    # Practice prospects may move through every stage so the loop can be tested
+    # end to end; they never appear in the client's portal or in any count.
     if to == C.INTERESTED:
         note = (data.get("note") or "").strip()[:500]
         if not note:
@@ -373,7 +379,7 @@ def update_profile(db: Session, org_id: str, data: Dict[str, Any], owner: bool) 
     if p is None:
         raise HTTPException(409, "This program has not been set up yet")
     text = {"business_name": 200, "owner_name": 120, "contact_phone": 40, "contact_email": 200,
-            "insurance_note": 1000, "certifications_note": 1000, "availability_note": 1000}
+            "insurance_note": 1000, "certifications_note": 1000, "availability_note": 1000, "mailing_address": 300}
     for k, w in text.items():
         if k in data:
             setattr(p, k, (str(data[k] or "").strip()[:w]) or None)
