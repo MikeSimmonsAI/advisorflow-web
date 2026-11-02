@@ -372,6 +372,12 @@ def ops_booking_link(opp_id: str, op: Op = Depends(op_dep)):
     return B.make_link(op.db, op.org, opp, op.user)
 
 
+@ops_router.post("/{org_id}/prospects/{opp_id}/booking-link/cancel", dependencies=_WRITE)
+def ops_booking_link_cancel(opp_id: str, op: Op = Depends(op_dep)):
+    opp = E.load_opp(op.db, op.org_id, opp_id)
+    return {"cancelled": B.cancel_links(op.db, op.org, opp, op.user)}
+
+
 @public_router.get("/walkthrough/{token}")
 @limiter.limit("60/minute")
 def public_walkthrough(request: Request, token: str, db: Session = Depends(get_db)):

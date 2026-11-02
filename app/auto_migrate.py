@@ -1637,6 +1637,7 @@ COLUMNS_TO_ADD = [
     # Divine Shine acquisition pilot P3 (#452): the client's postal address for the email footer
     ("acquisition_profiles", "mailing_address", "TEXT"),
     ("acquisition_profiles", "booking_user_id", "VARCHAR"),
+    ("acquisition_profiles", "test_booking_user_id", "VARCHAR"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

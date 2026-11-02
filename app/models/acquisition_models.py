@@ -47,6 +47,8 @@ class AcquisitionProfile(Base):
     mailing_address = Column(Text, nullable=True)
     # The client's user whose connected calendar real walkthroughs are booked on.
     booking_user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Owner-chosen calendar that PRACTICE walkthroughs are booked on (testing only).
+    test_booking_user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     appointment_minutes = Column(Integer, nullable=False, default=45)
     notify_user_ids = Column(Text, nullable=True)       # JSON list of user ids, checked on read
     # EMERGENCY PAUSE - starts paused. Every future worker checks this first.

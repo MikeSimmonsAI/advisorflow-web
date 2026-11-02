@@ -16,8 +16,8 @@ offered is re-checked against the slot engine when it is picked.
 WHO IS THE BOOKER:
   * real prospects - the client's booking user (profile.booking_user_id), a
     user of the client's own organization;
-  * practice prospects - the operator who made the link (the owner's own
-    calendar, for testing).
+  * practice prospects - the test calendar the owner picked
+    (profile.test_booking_user_id).
 """
 from __future__ import annotations
 
@@ -54,7 +54,13 @@ def calendar_connected(db: Session, user: Optional[User]) -> bool:
 
 def booker_for(db: Session, org: Organization, opp: AcquisitionOpportunity, actor: User) -> User:
     if opp.is_practice:
-        user = actor
+        # The owner chooses which test calendar practice walkthroughs land on;
+        # never whoever happens to be signed in.
+        p = _profile(db, org.id)
+        uid = getattr(p, "test_booking_user_id", None) if p else None
+        user = db.query(User).filter(User.id == uid, User.is_active.isnot(False)).first() if uid else None
+        if user is None:
+            raise HTTPException(409, "No test calendar is set for practice walkthroughs yet")
     else:
         p = _profile(db, org.id)
         uid = getattr(p, "booking_user_id", None) if p else None
@@ -163,6 +169,8 @@ def book(db: Session, token: str, slot: str) -> Dict[str, Any]:
     link, opp, org, booker, lead = _load(db, token)
     if link.status in ("booked", "confirmed"):
         raise HTTPException(409, "This walkthrough is already booked")
+    if opp.stage != C.INTERESTED:
+        raise HTTPException(409, "This link is no longer active")
     if link.status != "pending" or (link.expires_at and link.expires_at < datetime.utcnow()):
         raise HTTPException(409, "This link has expired")
     if lead is None or lead.status == "dnc":
@@ -192,3 +200,16 @@ def book(db: Session, token: str, slot: str) -> Dict[str, Any]:
     db.commit()
     return {"status": "booked", "booked_time": start.strftime("%Y-%m-%dT%H:%M:00"), "minutes": minutes,
             "company": _client_name(db, org)}
+
+
+def cancel_links(db: Session, org: Organization, opp: AcquisitionOpportunity, actor: User) -> int:
+    """Withdraw every open walkthrough link for this prospect."""
+    from app.services.acquisition import engine as E
+    rows = (db.query(BookingLink).filter(BookingLink.lead_id == opp.lead_id, BookingLink.status == "pending")
+            .all())
+    for r in rows:
+        r.status = "cancelled"
+    if rows:
+        E._event(db, org.id, opp.id, "booking_link_cancelled", actor.id, note="%d open link(s) withdrawn" % len(rows))
+    db.commit()
+    return len(rows)
