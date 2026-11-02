@@ -221,7 +221,7 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
 
     since_at = backfill_since()
     if since_at is not None:
-        logger.info("email poller BACKFILL for advisor %s since %s", advisor_id, since_at.isoformat())
+        logger.warning("email poller BACKFILL for advisor %s since %s", advisor_id, since_at.isoformat())
     emails = _fetch_recent_emails(access_token, since_at=since_at)
     if emails is None:
         return {"checked": 0, "matched": 0, "errors": 1,
@@ -397,7 +397,7 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
            "already_processed": already, "duplicates": duplicates}
     if since_at is not None:
         out["backfill_since"] = since_at.isoformat()
-        logger.info("email poller BACKFILL result for advisor %s: %s", advisor_id, out)
+        logger.warning("email poller BACKFILL result for advisor %s: %s", advisor_id, out)
     return out
 
 
@@ -457,6 +457,11 @@ def poll_all_orgs(db: Session) -> dict:
             total["errors"] += result.get("errors", 0)
             total["auth_errors"] += result.get("auth_errors", 0)
             total["advisors_polled"] += 1
+            # Issue #459: the run summary is the proof a backfill happened.
+            total["already_processed"] = total.get("already_processed", 0) + result.get("already_processed", 0)
+            total["duplicates"] = total.get("duplicates", 0) + result.get("duplicates", 0)
+            if result.get("backfill_since"):
+                total["backfill_since"] = result["backfill_since"]
         except Exception as e:
             db.rollback()
             logger.error("poll_all_orgs: error on advisor %s: %s", advisor_id, e)
