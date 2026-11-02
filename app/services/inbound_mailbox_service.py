@@ -971,4 +971,10 @@ def poll_all_mailboxes(db: Session) -> Dict:
         totals["mailbox_matched"] += res.get("matched", 0)
         totals["mailbox_errors"] += res.get("errors", 0)
         totals["mailbox_results"].append(res)
+    try:
+        from app.services.acquisition import outreach as _acq_outreach
+        totals["acquisition_replies_applied"] = _acq_outreach.catch_up(db)
+    except Exception:  # noqa: BLE001 - never stop the poller
+        db.rollback()
+        log.exception("acquisition reply catch-up failed")
     return totals

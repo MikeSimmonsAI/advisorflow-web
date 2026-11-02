@@ -151,3 +151,21 @@ def test_practice_can_reach_interested_but_never_client(setup):
     assert opp.stage == C.INTERESTED
     assert E.list_client(db, org.id) == []
     assert E.funnel(db, org.id, include_practice=False)["interested"] == 0
+
+
+def test_catch_up_applies_stored_replies_once(setup):
+    from datetime import datetime, timedelta
+    from app.models.models import Reply
+    db, org, god = setup
+    a = _prospect(db, org, god, "owner@example.com")
+    b = _prospect(db, org, god, "owner2@example.com")
+    O.send(db, org, a, god, {}, mailer=Mailer())
+    O.send(db, org, b, god, {}, mailer=Mailer())
+    later = datetime.utcnow() + timedelta(seconds=5)
+    db.add(Reply(lead_id=a.lead_id, body="Yes, let's do it", source="email", received_at=later))
+    db.add(Reply(lead_id=b.lead_id, body="stop", source="email", received_at=later))
+    db.commit()
+    assert O.catch_up(db) == 2
+    db.refresh(a), db.refresh(b)
+    assert a.stage == C.REPLIED and b.stage == C.DISQUALIFIED
+    assert O.catch_up(db) == 0

@@ -252,3 +252,25 @@ def on_reply(db: Session, lead: Lead, body: str) -> Optional[str]:
     else:
         E._event(db, opp.organization_id, opp.id, "reply", None, note=("NEEDS A HUMAN (%s): " % esc if esc else "") + note)
     return "escalated" if esc else "replied"
+
+
+def catch_up(db: Session) -> int:
+    """Replies already stored on a pilot lead but not yet applied to its
+    prospect (a poller build that predates the hook, or a hook that failed).
+    Any prospect still at Contacted with a reply received after it was
+    contacted gets that reply applied. Idempotent: once applied the prospect
+    has left Contacted. Returns how many were applied."""
+    from app.models.models import Reply
+    n = 0
+    opps = db.query(AcquisitionOpportunity).filter(AcquisitionOpportunity.stage == C.CONTACTED).all()
+    for opp in opps:
+        r = (db.query(Reply).filter(Reply.lead_id == opp.lead_id, Reply.source == "email",
+                                     Reply.received_at >= opp.stage_entered_at)
+             .order_by(Reply.received_at.desc()).first()) if opp.stage_entered_at else None
+        if r is None:
+            continue
+        lead = db.query(Lead).filter(Lead.id == opp.lead_id).first()
+        if lead is not None and on_reply(db, lead, r.body):
+            db.commit()
+            n += 1
+    return n
