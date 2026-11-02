@@ -323,11 +323,12 @@ function EmailTab({ x }) {
         <dt>Sent today</dt><dd>{pv.sent_last_24h} of {pv.daily_cap}</dd></dl>
       <label className="aq-field">Subject<input value={subject} onChange={e => setSubject(e.target.value)} /></label>
       <label className="aq-field">Message<textarea rows={9} value={body} onChange={e => setBody(e.target.value)} /></label>
+      {pv.kind === 'booking' && <p style={{ color: 'var(--aq-sub)', fontSize: 12 }}>The walkthrough link replaces [walkthrough link] when it's sent. It only offers times the calendar shows as free.</p>}
       <p style={{ color: 'var(--aq-sub)', fontSize: 12, whiteSpace: 'pre-line' }}>Added at the bottom: {pv.footer}</p>
       {blocked.length > 0 && <div className="aq-err">Can't send yet:<ul>{blocked.map(b => <li key={b}>{b}</li>)}</ul></div>}
       <div className="aq-actions">
         <label className="aq-checks"><label><input type="checkbox" checked={sure} disabled={blocked.length > 0} onChange={e => setSure(e.target.checked)} />I've read this email and want it sent to {pv.to}</label></label>
-        <button className="aq-btn aq-btn--sm aq-btn--primary" disabled={!sure || busy || blocked.length > 0} onClick={send}>{busy ? 'Sending…' : 'Send email'}</button>
+        <button className="aq-btn aq-btn--sm aq-btn--primary" disabled={!sure || busy || blocked.length > 0} onClick={send}>{busy ? 'Sending…' : pv.kind === 'booking' ? 'Send walkthrough link' : 'Send email'}</button>
       </div>
       {msg && <div className="aq-ok">{msg}</div>}
       {fail && <div className="aq-err">{fail}</div>}

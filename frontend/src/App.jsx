@@ -41,6 +41,7 @@ import CommercialConsole from './pages/commercial/CommercialConsole'
 // public-identity resolver emits https://<branded-host>/book/:token and
 // /survey/:token; without these two routes those links 404.
 import BookingPage from './pages/public/BookingPage'
+import WalkthroughPage from './pages/public/WalkthroughPage'
 import SurveyPage from './pages/public/SurveyPage'
 import AppointmentConfirmPage from './pages/public/AppointmentConfirmPage'
 // Wholesale Phase 5. The only two wholesale screens an outsider ever sees.
@@ -1397,6 +1398,8 @@ export default function App() {
             has been emitting; they reuse the existing booking/survey
             endpoints rather than introducing a second system. */}
         <Route path="/book/:token" element={<BookingPage />} />
+        {/* #452: a prospect business books a cleaning walkthrough (acquisition pilot). */}
+        <Route path="/walkthrough/:token" element={<WalkthroughPage />} />
         <Route path="/survey/:token" element={<SurveyPage />} />
         {/* Brand-sales meeting confirmation. Same token, same redeem logic as
             the backend HTML page — this one just lives on the brand's host so

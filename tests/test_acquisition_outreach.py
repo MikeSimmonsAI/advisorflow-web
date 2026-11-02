@@ -193,3 +193,99 @@ def test_stop_followed_by_signature_is_an_opt_out_and_caught_up(setup):
     db.refresh(b)
     assert b.stage == C.DISQUALIFIED and lb.status == "dnc"
     assert O.catch_up(db) == 0
+
+
+# ── P4 walkthrough booking ─────────────────────────────────────────────────
+@pytest.fixture()
+def cal(monkeypatch):
+    from app.routers import calendar_router
+    from app.services import tenant_scheduling
+    from app.services.acquisition import booking as B
+    state = {"connected": True, "slots": ["2026-11-10T10:00:00", "2026-11-10T11:00:00"], "pushed": []}
+    monkeypatch.setattr(B, "calendar_connected", lambda db, u: state["connected"])
+    monkeypatch.setattr(calendar_router, "compute_day_slots",
+                        lambda db, adv, d, program_visit, minutes=60, today=None: {"date": d.isoformat(), "slots": [
+                            s for s in state["slots"] if s.startswith(d.isoformat())]})
+
+    def push(db, advisor, org, booking, lead, label, start, duration, tz, notes):
+        state["pushed"].append((advisor.id, start, duration))
+        booking.calendar_event_id = "evt-1"
+        return {"ok": True}
+    monkeypatch.setattr(tenant_scheduling, "_push_to_calendar", push)
+    return state
+
+
+def _interested(db, org, god):
+    opp = _prospect(db, org, god, "owner@example.com")
+    O.send(db, org, opp, god, {}, mailer=Mailer())
+    O.on_reply(db, db.query(Lead).filter(Lead.id == opp.lead_id).first(), "Yes please")
+    db.commit()
+    E.owner_move(db, opp, god, {"stage": C.INTERESTED, "note": "Wants a quote"})
+    return opp
+
+
+def test_booking_link_email_and_book(setup, cal):
+    from app.models.models import BookingLink
+    from app.services.acquisition import booking as B
+    db, org, god = setup
+    opp = _interested(db, org, god)
+    m = Mailer()
+    res = O.send(db, org, opp, god, {}, mailer=m)
+    assert res["stage"] == C.INTERESTED
+    link = db.query(BookingLink).filter(BookingLink.lead_id == opp.lead_id).one()
+    assert link.token in m.sent[0][2] and "/walkthrough/" in m.sent[0][2] and link.user_id == god.id
+    assert link.confirmation_sent and link.reminder_24hr_sent         # never the funeral-home texts
+    assert B.page(db, link.token)["status"] == "pending"
+    assert B.slots(db, link.token, "2026-11-10")["slots"] == cal["slots"]
+    with pytest.raises(HTTPException):
+        B.book(db, link.token, "2026-11-10T14:00:00")                  # not an offered time
+    out = B.book(db, link.token, "2026-11-10T10:00:00")
+    db.refresh(opp)
+    assert out["status"] == "booked" and opp.stage == C.BOOKED and opp.booking_link_id == link.id
+    assert link.review_request_sent_at is not None and cal["pushed"][0][0] == god.id
+    with pytest.raises(HTTPException):
+        B.book(db, link.token, "2026-11-10T11:00:00")                  # once only
+    # practice: never in the client's view
+    assert E.list_client(db, org.id) == []
+
+
+def test_booking_needs_a_real_calendar(setup, cal):
+    from app.services.acquisition import booking as B
+    db, org, god = setup
+    opp = _interested(db, org, god)
+    cal["connected"] = False
+    with pytest.raises(HTTPException) as e:
+        B.make_link(db, org, opp, god)
+    assert "calendar" in e.value.detail
+    # real prospect: needs the client's own booking user
+    real = _prospect(db, org, god, None, practice=False)
+    E.owner_move(db, real, god, {"stage": C.INTERESTED, "note": "x"})
+    cal["connected"] = True
+    with pytest.raises(HTTPException) as e:
+        B.make_link(db, org, real, god)
+    assert "booking calendar" in e.value.detail
+
+
+def test_failed_calendar_write_books_nothing(setup, cal, monkeypatch):
+    from app.models.models import BookingLink
+    from app.services import tenant_scheduling
+    from app.services.acquisition import booking as B
+    db, org, god = setup
+    opp = _interested(db, org, god)
+    link = B.make_link(db, org, opp, god)
+    monkeypatch.setattr(tenant_scheduling, "_push_to_calendar", lambda *a, **k: {"ok": False, "error": "x"})
+    with pytest.raises(HTTPException):
+        B.book(db, link["token"], "2026-11-10T10:00:00")
+    db.refresh(opp)
+    assert opp.stage == C.INTERESTED
+    assert db.query(BookingLink).filter(BookingLink.token == link["token"]).one().status == "pending"
+
+
+def test_booking_email_placeholder_becomes_link(setup, cal):
+    db, org, god = setup
+    opp = _interested(db, org, god)
+    pv = O.preview(db, org, opp, {})
+    assert pv["kind"] == "booking" and "[walkthrough link]" in pv["body"] and pv["refused_because"] == []
+    m = Mailer()
+    O.send(db, org, opp, god, {"subject": pv["subject"], "body": pv["body"]}, mailer=m)
+    assert "[walkthrough link]" not in m.sent[0][2] and m.sent[0][2].count("/walkthrough/aq") == 1

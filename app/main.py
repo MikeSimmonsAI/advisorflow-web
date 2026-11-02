@@ -962,6 +962,7 @@ from app.routers import acquisition_router
 app.include_router(acquisition_router.router)       # /acquisition
 app.include_router(acquisition_router.god_router)   # /god/acquisition (setup, operator grants)
 app.include_router(acquisition_router.ops_router)   # /acquisition-ops (god or granted operator)
+app.include_router(acquisition_router.public_router)  # /acquisition-public (prospect walkthrough page)
 from app.routers.push_router import router as push_router  # noqa: E402
 app.include_router(push_router)   # /push/* web push subscriptions (configured:false until VAPID keys + pywebpush)
 from app.routers.god_demo_router import router as god_demo_router  # noqa: E402

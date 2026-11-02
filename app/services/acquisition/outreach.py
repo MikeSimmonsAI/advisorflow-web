@@ -100,6 +100,22 @@ def draft(org: Organization, p: Optional[AcquisitionProfile], lead: Lead, opp: A
     return {"subject": subj, "body": text}
 
 
+def booking_draft(org: Organization, p: Optional[AcquisitionProfile], lead: Lead, url: str,
+                  subject: Optional[str] = None, body: Optional[str] = None) -> Dict[str, str]:
+    company = _facts(lead).get("company") or "your office"
+    who = client_name(org, p)
+    subj = (subject or "").strip()[:150] or ("Walkthrough for %s" % company)
+    if body and body.strip():
+        text = body.strip()[:4000].replace("[walkthrough link]", url)
+        if url not in text:
+            text += "\n\n" + url
+    else:
+        text = ("Hi %s,\n\nThank you for getting back to us. Here's a link to pick a time for a free walkthrough "
+                "of your office - it only shows times we're actually free:\n\n%s\n\nThank you,\n%s") % (
+            (lead.first_name or "").strip() or "there", url, (p.owner_name if p and p.owner_name else who))
+    return {"subject": subj, "body": text}
+
+
 def footer(org: Organization, p: Optional[AcquisitionProfile]) -> str:
     addr = (p.mailing_address if p else None) or ""
     return ("%s%s\nIf you'd rather not hear from us, just reply STOP and we won't email you again."
@@ -131,7 +147,7 @@ def sent_today(db: Session, org_id: str, now: Optional[datetime] = None) -> int:
 
 
 def refusals(db: Session, org: Organization, opp: AcquisitionOpportunity, lead: Lead,
-             now: Optional[datetime] = None) -> List[str]:
+             now: Optional[datetime] = None, kind: str = "first") -> List[str]:
     """Every reason this prospect can't be emailed right now (empty = OK)."""
     out: List[str] = []
     p = _profile(db, org.id)
@@ -150,14 +166,20 @@ def refusals(db: Session, org: Organization, opp: AcquisitionOpportunity, lead: 
     if opp.is_practice:
         if email and email not in test_recipients():
             out.append("Practice prospects can only be emailed at the owner's test inboxes")
-        if opp.stage not in SENDABLE_PRACTICE:
+        if kind == "booking":
+            if opp.stage != C.INTERESTED:
+                out.append("A walkthrough link goes only to a prospect marked Interested")
+        elif opp.stage not in SENDABLE_PRACTICE:
             out.append("Already contacted - wait for a reply")
     else:
         if p is None or p.paused:
             out.append("The pilot is paused")
         if p is None or not (p.mailing_address or "").strip():
             out.append("The client's business mailing address is missing (required in every email)")
-        if opp.stage not in SENDABLE_REAL:
+        if kind == "booking":
+            if opp.stage != C.INTERESTED:
+                out.append("A walkthrough link goes only to a prospect marked Interested")
+        elif opp.stage not in SENDABLE_REAL:
             out.append("The prospect must be at Contact verified or Outreach ready")
         if email and not _verified_email(db, opp, email):
             out.append("The contact email has no verified evidence with a source")
@@ -170,9 +192,14 @@ def refusals(db: Session, org: Organization, opp: AcquisitionOpportunity, lead: 
 def preview(db: Session, org: Organization, opp: AcquisitionOpportunity, data: Dict[str, Any]) -> Dict[str, Any]:
     lead = db.query(Lead).filter(Lead.id == opp.lead_id, Lead.organization_id == org.id).first()
     p = _profile(db, org.id)
-    d = draft(org, p, lead, opp, data.get("subject"), data.get("body"))
-    return {"from": SEND_FROM, "to": lead.email, "subject": d["subject"], "body": d["body"],
-            "footer": footer(org, p), "refused_because": refusals(db, org, opp, lead),
+    kind = "booking" if opp.stage == C.INTERESTED else "first"
+    why = refusals(db, org, opp, lead, kind=kind)
+    if kind == "booking":
+        d = booking_draft(org, p, lead, "[walkthrough link]", data.get("subject"), data.get("body"))
+    else:
+        d = draft(org, p, lead, opp, data.get("subject"), data.get("body"))
+    return {"kind": kind, "from": SEND_FROM, "to": lead.email, "subject": d["subject"], "body": d["body"],
+            "footer": footer(org, p), "refused_because": why,
             "sent_last_24h": sent_today(db, org.id), "daily_cap": daily_cap()}
 
 
@@ -182,11 +209,17 @@ def send(db: Session, org: Organization, opp: AcquisitionOpportunity, actor: Use
     lead = db.query(Lead).filter(Lead.id == opp.lead_id, Lead.organization_id == org.id).first()
     if lead is None:
         raise HTTPException(404, "Prospect not found")
-    why = refusals(db, org, opp, lead)
+    kind = "booking" if opp.stage == C.INTERESTED else "first"
+    why = refusals(db, org, opp, lead, kind=kind)
     if why:
         raise HTTPException(409, "Not sent: " + "; ".join(why))
     p = _profile(db, org.id)
-    d = draft(org, p, lead, opp, data.get("subject"), data.get("body"))
+    if kind == "booking":
+        from app.services.acquisition import booking as B
+        link = B.make_link(db, org, opp, actor)
+        d = booking_draft(org, p, lead, link["url"], data.get("subject"), data.get("body"))
+    else:
+        d = draft(org, p, lead, opp, data.get("subject"), data.get("body"))
     body_html = to_html(d["body"], footer(org, p))
     if mailer is None:
         from app.services import inbound_mailbox_service as _ims
@@ -208,6 +241,10 @@ def send(db: Session, org: Organization, opp: AcquisitionOpportunity, actor: Use
         E._event(db, org.id, opp.id, "outreach_failed", actor.id, note=(res.get("error") or "")[:300])
         db.commit()
         raise HTTPException(502, "Not sent: %s" % (res.get("error") or "Microsoft 365 refused the send"))
+    if kind == "booking":
+        E._event(db, org.id, opp.id, "booking_email", actor.id, note="Walkthrough link emailed: %s" % d["subject"])
+        db.commit()
+        return {"id": msg.id, "stage": opp.stage, "pilot_started": False}
     E._move(db, opp, C.CONTACTED, actor.id, "Email sent from %s: %s" % (SEND_FROM, d["subject"]))
     if lead.status in (None, "", "new"):
         lead.status = "sent"
