@@ -262,7 +262,8 @@ def catch_up(db: Session) -> int:
     has left Contacted. Returns how many were applied."""
     from app.models.models import Reply
     n = 0
-    opps = db.query(AcquisitionOpportunity).filter(AcquisitionOpportunity.stage == C.CONTACTED).all()
+    opps = (db.query(AcquisitionOpportunity)
+            .filter(AcquisitionOpportunity.stage.in_((C.CONTACTED, C.REPLIED))).all())
     for opp in opps:
         r = (db.query(Reply).filter(Reply.lead_id == opp.lead_id, Reply.source == "email",
                                      Reply.received_at >= opp.stage_entered_at)
@@ -270,7 +271,12 @@ def catch_up(db: Session) -> int:
         if r is None:
             continue
         lead = db.query(Lead).filter(Lead.id == opp.lead_id).first()
-        if lead is not None and on_reply(db, lead, r.body):
+        if lead is None:
+            continue
+        # Already at Replied: only an opt-out that was missed still needs acting on.
+        if opp.stage == C.REPLIED and (lead.status == "dnc" or not H.opt_out_reason(r.body)):
+            continue
+        if on_reply(db, lead, r.body):
             db.commit()
             n += 1
     return n

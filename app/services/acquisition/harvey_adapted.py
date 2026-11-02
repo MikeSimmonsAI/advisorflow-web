@@ -113,6 +113,16 @@ def opt_out_reason(reply_text: str) -> Optional[dict]:
     trimmed = " ".join(w for w in bare.split() if w not in _BARE_COURTESIES)
     if bare in BARE_OPT_OUTS or trimmed in BARE_OPT_OUTS:
         return {"rule": "only_words", "matched": bare, "why": 'The reply was only "%s".' % bare}
+    # "STOP" on its own first line, followed by the sender's email signature
+    # (2026-11-02 live test: "STOP\nMike Simmons\n<quote>" was missed).
+    for line in (reply_text or "").split("\n"):
+        first = re.sub(r"[^\w\s-]", "", _flat(line)).strip()
+        if not first:
+            continue
+        ftrim = " ".join(w for w in first.split() if w not in _BARE_COURTESIES)
+        if first in BARE_OPT_OUTS or ftrim in BARE_OPT_OUTS:
+            return {"rule": "first_line", "matched": first, "why": 'The reply starts with only "%s".' % first}
+        break
     return None
 
 
