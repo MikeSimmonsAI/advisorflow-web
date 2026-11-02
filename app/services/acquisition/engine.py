@@ -80,6 +80,7 @@ def profile_json(org: Organization, p: Optional[AcquisitionProfile], full: bool)
         "certifications_note": p.certifications_note if p else None,
         "availability_note": p.availability_note if p else None,
         "mailing_address": p.mailing_address if p else None,
+        "booking_user_id": p.booking_user_id if p else None,
         "appointment_minutes": (p.appointment_minutes if p else None) or C.DEFAULT_APPOINTMENT_MINUTES,
         "configured": p is not None,
     }
@@ -402,6 +403,11 @@ def update_profile(db: Session, org_id: str, data: Dict[str, Any], owner: bool) 
     if owner and "exclusions" in data:
         raw = data["exclusions"]
         p.exclusions = C.jdump(H.split_entries(" ".join(raw) if isinstance(raw, list) else raw))
+    if owner and "booking_user_id" in data:
+        uid = (data.get("booking_user_id") or "").strip()
+        if uid and db.query(User).filter(User.id == uid, User.organization_id == org_id).first() is None:
+            raise HTTPException(422, "The booking calendar must belong to a user of this client")
+        p.booking_user_id = uid or None
     if owner and "notify_user_ids" in data:
         ids = C.clean_list(data["notify_user_ids"], limit=10, width=64)
         valid = {u.id for u in db.query(User).filter(User.organization_id == org_id, User.id.in_(ids)).all()} if ids else set()

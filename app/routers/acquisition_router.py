@@ -26,7 +26,9 @@ from app.routers.audit_log_router import log_action
 from app.services import lead_scope
 from app.services.acquisition import common as C
 from app.services.acquisition import engine as E
+from app.services.acquisition import booking as B
 from app.services.acquisition import outreach as O
+from app.limiter import limiter
 from app.services.entitlements import require_feature
 from app.services.platform_owner import require_tenant_context
 
@@ -34,6 +36,8 @@ router = APIRouter(prefix="/acquisition", tags=["acquisition"],
                    dependencies=[Depends(require_feature(C.FEATURE))])
 god_router = APIRouter(prefix="/god/acquisition", tags=["acquisition"])
 ops_router = APIRouter(prefix="/acquisition-ops", tags=["acquisition"])
+# The prospect's walkthrough page: no login, the unguessable link is the authorization.
+public_router = APIRouter(prefix="/acquisition-public", tags=["acquisition"])
 _WRITE = [Depends(require_not_observation)]
 
 
@@ -360,6 +364,30 @@ def ops_email_send(opp_id: str, payload: dict = Body(default={}), op: Op = Depen
     _audit(op.db, op.org_id, op.user, "acquisition_email_send", "acquisition_opportunity", opp.id,
            {"practice": bool(opp.is_practice), "pilot_started": res.get("pilot_started")})
     return res
+
+
+@ops_router.post("/{org_id}/prospects/{opp_id}/booking-link", dependencies=_WRITE)
+def ops_booking_link(opp_id: str, op: Op = Depends(op_dep)):
+    opp = E.load_opp(op.db, op.org_id, opp_id)
+    return B.make_link(op.db, op.org, opp, op.user)
+
+
+@public_router.get("/walkthrough/{token}")
+@limiter.limit("60/minute")
+def public_walkthrough(request: Request, token: str, db: Session = Depends(get_db)):
+    return B.page(db, token)
+
+
+@public_router.get("/walkthrough/{token}/slots")
+@limiter.limit("60/minute")
+def public_walkthrough_slots(request: Request, token: str, date: str = Query(...), db: Session = Depends(get_db)):
+    return B.slots(db, token, date)
+
+
+@public_router.post("/walkthrough/{token}/book")
+@limiter.limit("10/minute")
+def public_walkthrough_book(request: Request, token: str, payload: dict = Body(...), db: Session = Depends(get_db)):
+    return B.book(db, token, payload.get("slot") or "")
 
 
 @ops_router.put("/{org_id}/profile", dependencies=_WRITE)
