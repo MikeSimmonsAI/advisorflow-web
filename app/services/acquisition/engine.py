@@ -408,6 +408,12 @@ def update_profile(db: Session, org_id: str, data: Dict[str, Any], owner: bool) 
         if uid and db.query(User).filter(User.id == uid, User.organization_id == org_id).first() is None:
             raise HTTPException(422, "The booking calendar must belong to a user of this client")
         p.booking_user_id = uid or None
+    if owner and "test_booking_email" in data:
+        em = (data.get("test_booking_email") or "").strip().lower()
+        u = db.query(User).filter(User.email == em, User.is_active.isnot(False)).first() if em else None
+        if em and u is None:
+            raise HTTPException(422, "No active user with that email")
+        p.test_booking_user_id = u.id if u else None
     if owner and "notify_user_ids" in data:
         ids = C.clean_list(data["notify_user_ids"], limit=10, width=64)
         valid = {u.id for u in db.query(User).filter(User.organization_id == org_id, User.id.in_(ids)).all()} if ids else set()

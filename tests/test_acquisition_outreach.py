@@ -216,6 +216,7 @@ def cal(monkeypatch):
 
 
 def _interested(db, org, god):
+    E.update_profile(db, org.id, {"test_booking_email": god.email}, owner=True)
     opp = _prospect(db, org, god, "owner@example.com")
     O.send(db, org, opp, god, {}, mailer=Mailer())
     O.on_reply(db, db.query(Lead).filter(Lead.id == opp.lead_id).first(), "Yes please")
@@ -289,3 +290,21 @@ def test_booking_email_placeholder_becomes_link(setup, cal):
     m = Mailer()
     O.send(db, org, opp, god, {"subject": pv["subject"], "body": pv["body"]}, mailer=m)
     assert "[walkthrough link]" not in m.sent[0][2] and m.sent[0][2].count("/walkthrough/aq") == 1
+
+
+def test_practice_booker_is_the_chosen_test_calendar_and_cancel(setup, cal):
+    from app.services.acquisition import booking as B
+    db, org, god = setup
+    opp = _interested(db, org, god)
+    other = _god(db)
+    E.update_profile(db, org.id, {"test_booking_email": None}, owner=True)
+    with pytest.raises(HTTPException) as e:
+        B.make_link(db, org, opp, god)
+    assert "test calendar" in e.value.detail
+    E.update_profile(db, org.id, {"test_booking_email": other.email}, owner=True)
+    link = B.make_link(db, org, opp, god)
+    assert link["booker"] == other.full_name
+    assert B.cancel_links(db, org, opp, god) == 1
+    assert B.page(db, link["token"])["status"] == "cancelled"
+    with pytest.raises(HTTPException):
+        B.book(db, link["token"], "2026-11-10T10:00:00")
