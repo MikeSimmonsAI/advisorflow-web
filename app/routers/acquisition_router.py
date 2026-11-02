@@ -26,6 +26,7 @@ from app.routers.audit_log_router import log_action
 from app.services import lead_scope
 from app.services.acquisition import common as C
 from app.services.acquisition import engine as E
+from app.services.acquisition import outreach as O
 from app.services.entitlements import require_feature
 from app.services.platform_owner import require_tenant_context
 
@@ -273,6 +274,8 @@ def _workers(db: Session, org_id: str):
             last = max((r.created_at for r in runs if r.created_at), default=None)
             out.append(dict(w, state="on_demand", runs=len(runs), errors=sum(1 for r in runs if r.status == "failed"),
                             last_run=C.iso(last)))
+        elif w["key"] in ("outreach", "replies"):
+            out.append(dict(w, state="on_demand" if O.enabled() else "off", runs=0, errors=0))
         else:
             out.append(dict(w, state="not_built", runs=0, errors=0))
     return out
@@ -303,8 +306,11 @@ def ops_overview(op: Op = Depends(op_dep)):
         "stages": C.STAGES, "segments": C.SEGMENTS, "evidence_kinds": list(C.EVIDENCE_KINDS),
         "workers": _workers(db, org.id),
         "sending": {"workspace_texts_on": org_sending_enabled(db, org.id),
-                    "outbound_email_source_registered": False,
-                    "note": "No outbound path exists for this program yet (P3). Nothing can be sent."},
+                    "outbound_email_source_registered": True, "email_enabled": O.enabled(),
+                    "from": O.SEND_FROM, "daily_cap": O.daily_cap(), "sent_last_24h": O.sent_today(db, org.id),
+                    "test_recipients": O.test_recipients(),
+                    "note": ("Email only, one prospect at a time, sent by a person pressing Send. "
+                             "No texts or calls.")},
         "spend": _spend(db, org.id),
         "recent_events": E.events(db, org.id, 25),
         "operators": E.operators(db, org.id) if op.is_god else [],
@@ -339,6 +345,21 @@ def ops_evidence(opp_id: str, payload: dict = Body(...), op: Op = Depends(op_dep
     opp = E.load_opp(op.db, op.org_id, opp_id)
     e = E.add_evidence(op.db, op.org_id, opp, op.user, payload)
     return {"id": e.id}
+
+
+@ops_router.post("/{org_id}/prospects/{opp_id}/email/preview")
+def ops_email_preview(opp_id: str, payload: dict = Body(default={}), op: Op = Depends(op_dep)):
+    opp = E.load_opp(op.db, op.org_id, opp_id)
+    return O.preview(op.db, op.org, opp, payload or {})
+
+
+@ops_router.post("/{org_id}/prospects/{opp_id}/email/send", dependencies=_WRITE)
+def ops_email_send(opp_id: str, payload: dict = Body(default={}), op: Op = Depends(op_dep)):
+    opp = E.load_opp(op.db, op.org_id, opp_id)
+    res = O.send(op.db, op.org, opp, op.user, payload or {})
+    _audit(op.db, op.org_id, op.user, "acquisition_email_send", "acquisition_opportunity", opp.id,
+           {"practice": bool(opp.is_practice), "pilot_started": res.get("pilot_started")})
+    return res
 
 
 @ops_router.put("/{org_id}/profile", dependencies=_WRITE)

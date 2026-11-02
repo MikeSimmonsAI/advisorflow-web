@@ -1634,6 +1634,8 @@ COLUMNS_TO_ADD = [
     ("leads", "pipeline_lost_at", "TIMESTAMP"),
     ("leads", "pipeline_lost_reason", "VARCHAR"),
     ("leads", "enrolled_at", "TIMESTAMP"),
+    # Divine Shine acquisition pilot P3 (#452): the client's postal address for the email footer
+    ("acquisition_profiles", "mailing_address", "TEXT"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

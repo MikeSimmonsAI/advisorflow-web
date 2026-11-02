@@ -866,6 +866,14 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
                             alias_location_id=alias_prof.location_id if alias_prof is not None else None)
                         _maybe_hand_to_ai(db, lead, reply)
                         db.commit()
+                        # Managed acquisition pilot (#452 P3): opt-outs and stage moves.
+                        try:
+                            from app.services.acquisition import outreach as _acq_outreach
+                            if _acq_outreach.on_reply(db, lead, body):
+                                db.commit()
+                        except Exception:  # noqa: BLE001 - never stop the poller
+                            db.rollback()
+                            log.exception("acquisition reply handling failed for lead %s", lead.id)
                     if alias_prof is not None:
                         # Processed first, filed second: only now is the
                         # original moved to its location folder.
