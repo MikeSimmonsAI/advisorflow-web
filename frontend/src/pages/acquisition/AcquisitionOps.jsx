@@ -427,8 +427,9 @@ export function Health() {
       <div className="aq-grid aq-two">
         <section className="aq-card"><h2>Workers</h2>
           {ov.workers.map(w => (
-            <div className="aq-row" key={w.key}><div className="aq-row__main"><b>{w.label}</b><span>Planned in {w.phase} · {w.runs} runs · {w.errors} errors</span></div>
-              <span className="aq-pill">Not built</span></div>))}
+            <div className="aq-row" key={w.key}><div className="aq-row__main"><b>{w.label}</b>
+              <span>{w.state === 'on_demand' ? `Runs on demand · ${w.runs} runs · ${w.errors} failed${w.last_run ? ' · last ' + when(w.last_run) : ''}` : `Planned in ${w.phase}`}</span></div>
+              <span className={`aq-pill ${w.state === 'on_demand' ? 'aq-pill--ok' : ''}`}>{w.state === 'on_demand' ? 'Working' : 'Not built'}</span></div>))}
         </section>
         <section className="aq-card"><h2>Sending &amp; spend</h2>
           <dl className="aq-dl">
@@ -498,7 +499,7 @@ export function Discovery() {
   const [runs, rErr, reloadRuns] = useLoad(`/acquisition-ops/${orgId}/discovery/runs`)
   const areas = ov.profile.service_area || []
   const wanted = ov.segments.filter(s => (ov.profile.segments || []).includes(s.key))
-  const [f, setF] = useState({ segment: wanted[0]?.key || '', city: areas[0] || '', max_results: 10, is_practice: true })
+  const [f, setF] = useState({ segment: wanted[0]?.key || '', city: areas[0] || '', max_results: 10, is_practice: false })
   const [plan, setPlan] = useState(null)
   const [busy, setBusy] = useState(false)
   const [fail, setFail] = useState(null)

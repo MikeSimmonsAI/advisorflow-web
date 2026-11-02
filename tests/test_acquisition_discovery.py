@@ -77,8 +77,9 @@ def test_plan_states_cost_and_refusals_without_calls(setup, monkeypatch):
     p = D.plan(db, org, "medical_dental", "Dallas", 20, practice=True)
     assert p["can_run"] and p["query"] == "dental office in Dallas, TX"
     assert p["requests"] == {"search": 1, "details_max": 20} and p["max_cost_usd"] == 0.43
-    # paused pilot: real (non-practice) discovery is refused
-    assert "paused" in " ".join(D.plan(db, org, "medical_dental", "Dallas", 5, practice=False)["refused_because"])
+    # research contacts nobody, so a paused pilot may still discover real businesses
+    real = D.plan(db, org, "medical_dental", "Dallas", 5, practice=False)
+    assert real["can_run"] and real["pilot_paused"] is True
     # outside the service area / unwanted type
     assert not D.plan(db, org, "office", "Houston", 5, practice=True)["can_run"]
     E.update_profile(db, org.id, {"segments": ["office"]}, owner=False)

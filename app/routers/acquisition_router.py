@@ -258,6 +258,35 @@ def ops_clients(db: Session = Depends(get_db), user: User = Depends(get_current_
     return {"items": _clients(db, set(ids)), "is_god": False}
 
 
+def _discovery_runs(db: Session, org_id: str):
+    from app.models.acquisition_models import AcquisitionDiscoveryRun
+    return db.query(AcquisitionDiscoveryRun).filter(AcquisitionDiscoveryRun.organization_id == org_id).all()
+
+
+def _workers(db: Session, org_id: str):
+    """Truthful worker states: discovery is real (on demand, metered); the
+    rest are stated as not built."""
+    runs = _discovery_runs(db, org_id)
+    out = []
+    for w in C.WORKERS:
+        if w["key"] == "discovery":
+            last = max((r.created_at for r in runs if r.created_at), default=None)
+            out.append(dict(w, state="on_demand", runs=len(runs), errors=sum(1 for r in runs if r.status == "failed"),
+                            last_run=C.iso(last)))
+        else:
+            out.append(dict(w, state="not_built", runs=0, errors=0))
+    return out
+
+
+def _spend(db: Session, org_id: str):
+    runs = _discovery_runs(db, org_id)
+    calls = sum((r.search_requests or 0) + (r.detail_requests or 0) for r in runs)
+    known = [r.cost_usd for r in runs if r.cost_usd is not None]
+    return {"provider_calls": calls, "ai_calls": 0, "usd": round(sum(known), 4),
+            "unpriced_runs": sum(1 for r in runs if r.cost_usd is None and ((r.search_requests or 0) + (r.detail_requests or 0))),
+            "note": "Metered Google Places requests from discovery runs. No AI calls are made by this program yet."}
+
+
 @ops_router.get("/{org_id}/overview")
 def ops_overview(op: Op = Depends(op_dep)):
     db, org = op.db, op.org
@@ -272,12 +301,11 @@ def ops_overview(op: Op = Depends(op_dep)):
         "progress": E.progress(db, org.id),
         "targets": {"appointments_low": 3, "appointments_high": 5, "pilot_days": 30},
         "stages": C.STAGES, "segments": C.SEGMENTS, "evidence_kinds": list(C.EVIDENCE_KINDS),
-        "workers": [dict(w, state="not_built", runs=0, errors=0) for w in C.WORKERS],
+        "workers": _workers(db, org.id),
         "sending": {"workspace_texts_on": org_sending_enabled(db, org.id),
                     "outbound_email_source_registered": False,
                     "note": "No outbound path exists for this program yet (P3). Nothing can be sent."},
-        "spend": {"provider_calls": 0, "ai_calls": 0, "usd": 0.0,
-                  "note": "No provider or AI calls are made by this program yet."},
+        "spend": _spend(db, org.id),
         "recent_events": E.events(db, org.id, 25),
         "operators": E.operators(db, org.id) if op.is_god else [],
     }

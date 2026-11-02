@@ -10,8 +10,9 @@ Every run is:
   * SMALL: at most MAX_RESULTS_PER_RUN businesses, MAX_RUNS_PER_DAY runs;
   * SCOPED: the client's own business types and cities only, one org only;
   * GATED: ACQUISITION_DISCOVERY_ENABLED=1, a Places key and both unit prices
-    must be configured, and while the pilot is paused only PRACTICE discovery
-    runs (practice rows can never be contacted or shown to the client);
+    must be configured. Discovery is RESEARCH: it contacts nobody, so it runs
+    while the pilot is paused (owner directive 2026-11-02, #452). The pause
+    keeps blocking everything that contacts a business (outreach, booking);
   * METERED: every search and details request is counted on the run row.
 
 Facts are kept apart from inferences: what the listing itself says is
@@ -111,8 +112,6 @@ def plan(db: Session, org: Organization, segment: str, city: str, max_results: i
         reasons.append("Discovery is switched off on this server (ACQUISITION_DISCOVERY_ENABLED)")
     if not os.getenv("GOOGLE_PLACES_API_KEY"):
         reasons.append("No Google Places key is configured")
-    if bool(p.paused) and not practice:
-        reasons.append("The pilot is paused: only a practice run is allowed")
     used = _runs_today(db, org.id)
     if used >= MAX_RUNS_PER_DAY:
         reasons.append("Daily limit reached (%d runs in 24 hours)" % MAX_RUNS_PER_DAY)
@@ -120,7 +119,9 @@ def plan(db: Session, org: Organization, segment: str, city: str, max_results: i
             "is_practice": bool(practice), "requests": {"search": search_req, "details_max": details_req},
             "unit_prices_usd": prices, "max_cost_usd": cost, "runs_last_24h": used,
             "limits": {"max_results_per_run": MAX_RESULTS_PER_RUN, "max_runs_per_day": MAX_RUNS_PER_DAY},
-            "can_run": not reasons, "refused_because": reasons}
+            "can_run": not reasons, "refused_because": reasons,
+            "pilot_paused": bool(p.paused),
+            "note": "Research only - nobody is contacted. The pause still blocks outreach and booking."}
 
 
 # ── scoring: deterministic, explainable, no AI ─────────────────────────────
