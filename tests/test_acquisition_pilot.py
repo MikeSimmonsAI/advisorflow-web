@@ -210,7 +210,8 @@ def test_outcome_flow_and_counts(pilot):
     from app.models.acquisition_models import AcquisitionOpportunity
     o = db.query(AcquisitionOpportunity).get(opp)
     bl = BookingLink(lead_id=o.lead_id, user_id=p["owner"].id, status="booked",
-                     booked_time=datetime.utcnow() - timedelta(hours=2), appt_label="Walkthrough", appt_duration=45)
+                     booked_time=datetime.utcnow() - timedelta(hours=2), appt_label="Walkthrough", appt_duration=45,
+                     calendar_event_id="evt-test")
     db.add(bl)
     db.commit()
     o.booking_link_id = bl.id

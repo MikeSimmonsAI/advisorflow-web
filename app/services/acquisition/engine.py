@@ -426,6 +426,12 @@ def owner_move(db: Session, opp: AcquisitionOpportunity, actor: User, data: Dict
         # Those stages are set by the outreach/reply workers from real message
         # records (P3) - never by hand, so "contacted" is always evidence-backed.
         raise HTTPException(409, "Contacted and Replied are recorded from real messages, not set by hand")
+    if to == C.BOOKED and not opp.is_practice:
+        # No appointment is "booked" unless the client's calendar confirmed it
+        # (owner rule 2026-11-03). Book through the Schedule tab instead.
+        bl = db.query(BookingLink).filter(BookingLink.id == opp.booking_link_id).first() if opp.booking_link_id else None
+        if bl is None or bl.status not in ("booked", "confirmed") or not getattr(bl, "calendar_event_id", None):
+            raise HTTPException(409, "Book the appointment on the client's calendar - it can't be marked booked by hand")
     # Practice prospects may move through every stage so the loop can be tested
     # end to end; they never appear in the client's portal or in any count.
     if to == C.INTERESTED:
