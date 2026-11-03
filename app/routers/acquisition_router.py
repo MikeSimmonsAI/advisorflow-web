@@ -29,6 +29,7 @@ from app.services.acquisition import common as C
 from app.services.acquisition import engine as E
 from app.services.acquisition import booking as B
 from app.services.acquisition import outreach as O
+from app.services.acquisition import outcomes as OC
 from app.limiter import limiter
 from app.services.entitlements import require_feature
 from app.services.platform_owner import require_tenant_context
@@ -132,7 +133,9 @@ def client_prospect(opp_id: str, ctx: C.Ctx = Depends(ctx_dep)):
     items = [x for x in E.list_client(ctx.db, ctx.org_id, _visible_lead_ids(ctx)) if x["id"] == opp.id]
     if not items:
         raise HTTPException(404, "Appointment not found")
-    return items[0]
+    return dict(items[0], history=OC.customer_history(ctx.db, opp), contract=OC.contract_json(opp),
+                open_followups=[f for f in OC.list_followups(ctx.db, [ctx.org_id], "open")
+                                if f["opportunity_id"] == opp.id])
 
 
 @router.get("/appointments")
@@ -152,6 +155,29 @@ def client_outcome(opp_id: str, payload: dict = Body(...), ctx: C.Ctx = Depends(
     _audit(ctx.db, ctx.org_id, ctx.user, "acquisition_outcome", "acquisition_opportunity", opp.id,
            {"outcome": payload.get("outcome")})
     return client_prospect(opp_id, ctx)
+
+
+@router.get("/report")
+def client_report(period: str = Query("month"), start: Optional[str] = Query(None), end: Optional[str] = Query(None),
+                  ctx: C.Ctx = Depends(ctx_dep)):
+    a, b = OC.period_range(period, start, end)
+    return dict(OC.client_report(ctx.db, ctx.org_id, a, b), period=period, period_label=OC.PERIODS.get(period),
+                start=C.iso(a), end=C.iso(b))
+
+
+@router.get("/followups")
+def client_followups(ctx: C.Ctx = Depends(ctx_dep)):
+    return {"items": OC.list_followups(ctx.db, [ctx.org_id]),
+            "reasons": [{"key": k, "label": l} for k, l in OC.FOLLOWUP_REASONS]}
+
+
+@router.post("/followups", dependencies=_WRITE)
+def client_request_followup(payload: dict = Body(...), ctx: C.Ctx = Depends(ctx_dep)):
+    f, created = OC.request_followup(ctx.db, ctx.org_id, ctx.user, payload)
+    _audit(ctx.db, ctx.org_id, ctx.user, "acquisition_followup_request", "acquisition_followup", f.id,
+           {"reason": f.reason, "created": created})
+    return {"id": f.id, "created": created, "status": f.status,
+            "message": "EvoSys has your request." if created else "You already asked about this - we added your note."}
 
 
 @router.get("/profile")
@@ -367,6 +393,20 @@ def provision_clients_batch(request: Request, payload: dict = Body(...), db: Ses
     return out
 
 
+@god_router.get("/followups")
+def god_followups(status: Optional[str] = Query("open"), db: Session = Depends(get_db),
+                  user: User = Depends(require_god)):
+    return {"items": OC.list_followups(db, None, status or None)}
+
+
+@god_router.get("/report")
+def god_report(period: str = Query("month"), start: Optional[str] = Query(None), end: Optional[str] = Query(None),
+               db: Session = Depends(get_db), user: User = Depends(require_god)):
+    a, b = OC.period_range(period, start, end)
+    return dict(OC.all_clients_report(db, a, b), period=period, period_label=OC.PERIODS.get(period),
+                start=C.iso(a), end=C.iso(b))
+
+
 @god_router.get("/directory")
 def client_directory(db: Session = Depends(get_db), god: User = Depends(require_god)):
     from app.services.acquisition import onboarding as OB
@@ -501,6 +541,32 @@ def ops_prospects(stage: Optional[str] = Query(None), practice: Optional[bool] =
     if stage and stage not in C.STAGE_KEYS:
         raise HTTPException(422, "Unknown stage")
     return {"items": E.list_owner(op.db, op.org_id, stage, practice)}
+
+
+@ops_router.get("/{org_id}/followups")
+def ops_followups(status: Optional[str] = Query(None), op: Op = Depends(op_dep)):
+    return {"items": OC.list_followups(op.db, [op.org_id], status)}
+
+
+@ops_router.post("/{org_id}/followups/{fid}", dependencies=_WRITE)
+def ops_update_followup(fid: str, payload: dict = Body(...), op: Op = Depends(op_dep)):
+    f = OC.update_followup(op.db, op.org_id, fid, op.user, payload)
+    _audit(op.db, op.org_id, op.user, "acquisition_followup_update", "acquisition_followup", f.id, {"status": f.status})
+    return next(x for x in OC.list_followups(op.db, [op.org_id]) if x["id"] == f.id)
+
+
+@ops_router.post("/{org_id}/prospects/{opp_id}/confirm-won", dependencies=_WRITE)
+def ops_confirm_won(opp_id: str, op: Op = Depends(op_dep)):
+    opp = OC.confirm_won(op.db, op.org_id, opp_id, op.user)
+    _audit(op.db, op.org_id, op.user, "acquisition_won_confirmed", "acquisition_opportunity", opp.id)
+    return OC.contract_json(opp)
+
+
+@ops_router.get("/{org_id}/report")
+def ops_report(period: str = Query("month"), start: Optional[str] = Query(None), end: Optional[str] = Query(None),
+               op: Op = Depends(op_dep)):
+    a, b = OC.period_range(period, start, end)
+    return dict(OC.client_report(op.db, op.org_id, a, b), period=period, start=C.iso(a), end=C.iso(b))
 
 
 @ops_router.post("/{org_id}/prospects", dependencies=_WRITE)

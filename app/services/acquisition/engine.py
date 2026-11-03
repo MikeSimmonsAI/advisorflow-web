@@ -454,6 +454,8 @@ def client_outcome(db: Session, opp: AcquisitionOpportunity, actor: User, data: 
         mv = C.money(data.get("monthly_value"))
         if mv is not None:
             opp.monthly_value = mv
+        from app.services.acquisition.outcomes import apply_contract
+        apply_contract(opp, data)
     if to == C.LOST:
         opp.lost_reason = (data.get("reason") or "").strip()[:300] or None
     note = (data.get("note") or "").strip()[:2000]
