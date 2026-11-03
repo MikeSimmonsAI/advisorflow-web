@@ -208,3 +208,27 @@ def money(v: Any) -> Optional[float]:
     if f < 0 or f > 10_000_000:
         raise HTTPException(422, "Amount out of range")
     return f
+
+
+# ── #452 Phase 5: delegated worker permissions (per client grant) ───────────
+WORKER_PERMISSIONS = [
+    ("view_queue", "See this client's work queue", "Prospects allocated to this client and their stages"),
+    ("research", "Research & qualify", "Add prospects, record evidence and contacts, move research stages"),
+    ("draft_outreach", "Draft outreach", "Preview emails"),
+    ("send_outreach", "Send authorized outreach", "Send one approved email at a time (email only)"),
+    ("review_replies", "Review replies", "Read responses and move prospects to Interested"),
+    ("schedule", "Schedule appointments", "Book and reschedule on the client's real calendar"),
+    ("followups", "Handle client follow-ups", "Work this client's follow-up requests"),
+    ("view_results", "See client results", "Appointment outcomes, feedback and reports"),
+    ("client_setup", "Client setup", "Edit the client's business profile and pause/resume (owner usually keeps this)"),
+]
+WORKER_PERMISSION_KEYS = [k for k, _, _ in WORKER_PERMISSIONS]
+# Typical roles, offered as presets in the owner's UI. Nothing is granted by default.
+WORKER_PRESETS = {
+    "researcher": ["view_queue", "research"],
+    "outreach": ["view_queue", "draft_outreach", "send_outreach"],
+    "responder": ["view_queue", "review_replies", "followups"],
+    "setter": ["view_queue", "review_replies", "schedule", "followups"],
+    "general": ["view_queue", "research", "draft_outreach", "send_outreach", "review_replies", "schedule",
+                "followups", "view_results"],
+}

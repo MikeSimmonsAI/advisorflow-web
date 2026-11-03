@@ -1666,6 +1666,8 @@ COLUMNS_TO_ADD = [
     ("acquisition_profiles", "offer_type", "VARCHAR"),
     ("acquisition_profiles", "offer_terms", "TEXT"),
     ("acquisition_profiles", "sales_opportunity_id", "VARCHAR"),
+    # #452 Phase 5: per-grant worker permissions (NULL = legacy full operator).
+    ("acquisition_operators", "permissions", "TEXT"),
     # #452 Phase 3: client calendar / booking configuration.
     ("acquisition_profiles", "min_notice_hours", "INTEGER"),
     ("acquisition_profiles", "buffer_minutes", "INTEGER"),

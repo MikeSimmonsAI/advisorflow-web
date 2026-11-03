@@ -267,9 +267,24 @@ def god_operators(org_id: str, db: Session = Depends(get_db), god: User = Depend
 def god_grant(org_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
               god: User = Depends(require_god)):
     org = _client_org(db, org_id)
-    out = E.grant_operator(db, org, payload.get("email"), god)
+    out = E.grant_operator(db, org, payload.get("email"), god, payload.get("permissions"))
     _audit(db, org.id, god, "acquisition_operator_grant", "user", out["user_id"])
     return out
+
+
+@god_router.put("/{org_id}/operators/{user_id}")
+def god_operator_permissions(org_id: str, user_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
+                             god: User = Depends(require_god)):
+    org = _client_org(db, org_id)
+    out = E.set_operator_permissions(db, org, user_id, payload.get("permissions"), god)
+    _audit(db, org.id, god, "acquisition_operator_permissions", "user", user_id, {"permissions": out["permissions"]})
+    return out
+
+
+@god_router.get("/worker-permissions")
+def god_worker_permissions(god: User = Depends(require_god)):
+    return {"permissions": [{"key": k, "label": l, "hint": h} for k, l, h in C.WORKER_PERMISSIONS],
+            "presets": C.WORKER_PRESETS}
 
 
 @god_router.delete("/{org_id}/operators/{user_id}")
@@ -462,20 +477,76 @@ def master_release(prospect_id: str, payload: dict = Body(...), db: Session = De
 
 # ═══════════════════════ OPERATIONS (GOD OR OPERATOR) ════════════════════
 class Op:
-    def __init__(self, db, user, org, is_god):
+    def __init__(self, db, user, org, is_god, perms=None):
         self.db, self.user, self.org, self.org_id, self.is_god = db, user, org, org.id, is_god
+        self.perms = set(C.WORKER_PERMISSION_KEYS) if is_god else set(perms or ())
+
+    def can(self, key: str) -> bool:
+        return self.is_god or key in self.perms
 
 
 def _is_god(user) -> bool:
     return getattr(user, "role", None) == "god_admin"
 
 
-def op_dep(org_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> Op:
+# ── #452 Phase 5: what each operations call needs ─────────────────────────────
+# One table, checked for EVERY /acquisition-ops/{org}/... call by a non-owner.
+# A call missing from this table is refused (fails closed).
+import re as _re  # noqa: E402
+OWNER = "__owner__"
+_PERM_RULES = [
+    ("POST", r"/prospects/[^/]+/confirm-won$", OWNER),
+    ("PUT", r"/calendar$", OWNER),
+    ("GET", r"/(overview|prospects|calendar|discovery/runs)$", "view_queue"),
+    ("GET", r"/followups$", "followups"),
+    ("POST", r"/followups/[^/]+$", "followups"),
+    ("GET", r"/(report|feedback)$", "view_results"),
+    ("POST", r"/prospects$", "research"),
+    ("POST", r"/prospects/[^/]+/stage$", "__stage__"),
+    ("POST", r"/prospects/[^/]+/evidence$", "research"),
+    ("PUT", r"/prospects/[^/]+/location$", "research"),
+    ("POST", r"/discovery/plan$", "research"),
+    ("POST", r"/prospects/[^/]+/email/preview$", "draft_outreach"),
+    ("POST", r"/prospects/[^/]+/email/send$", "send_outreach"),
+    ("POST", r"/prospects/[^/]+/(booking-link|booking-link/cancel|book|reschedule)$", "schedule"),
+    ("GET", r"/prospects/[^/]+/slots$", "schedule"),
+    ("PUT", r"/profile$", "client_setup"),
+    ("POST", r"/(pause|resume)$", "client_setup"),
+]
+
+
+def _needed(method: str, path: str, org_id: str) -> Optional[str]:
+    tail = path.split("/acquisition-ops/" + org_id, 1)[-1]
+    for m, pat, perm in _PERM_RULES:
+        if m == method and _re.search(pat, tail):
+            return perm
+    return None
+
+
+def op_dep(org_id: str, request: Request, db: Session = Depends(get_db),
+           user: User = Depends(get_current_user)) -> Op:
     god = _is_god(user)
     if not god and not E.is_operator(db, user, org_id):
         # Same answer for "no such org" and "not yours": ids are not probed.
         raise HTTPException(403, "You don't have acquisition operator access for this client.")
-    return Op(db, user, _client_org(db, org_id), god)
+    org = _client_org(db, org_id)
+    if god:
+        return Op(db, user, org, True)
+    perms = E.operator_perms(db, user, org_id)
+    need = _needed(request.method, request.url.path, org_id)
+    if need is None or need == OWNER:
+        raise HTTPException(403, "Only the EvoSys owner can do that.")
+    if need == "__stage__":
+        if not ({"research", "review_replies"} & perms):
+            raise HTTPException(403, "Your access for this client doesn't include moving prospects.")
+    elif need not in perms:
+        label = dict((k, l) for k, l, _ in C.WORKER_PERMISSIONS).get(need, need)
+        raise HTTPException(403, "Your access for this client doesn't include: %s." % label)
+    if request.method != "GET":
+        # Every worker action is on the audit trail.
+        _audit(db, org_id, user, "acquisition_operator_action", "acquisition_ops", org_id,
+               {"method": request.method, "path": request.url.path[-120:]})
+    return Op(db, user, org, False, perms)
 
 
 @ops_router.get("/clients")
@@ -486,6 +557,39 @@ def ops_clients(db: Session = Depends(get_db), user: User = Depends(get_current_
     if not ids:
         raise HTTPException(403, "You don't have acquisition operator access.")
     return {"items": _clients(db, set(ids)), "is_god": False}
+
+
+@ops_router.get("/my-queue")
+def ops_my_queue(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """The worker's own queue across ONLY the clients they're authorized for,
+    filtered by what they may do there. Never the master pool."""
+    god = _is_god(user)
+    ids = [o.id for o in E.enabled_orgs(db)] if god else E.operator_org_ids(db, user)
+    if not ids:
+        raise HTTPException(403, "You don't have acquisition operator access.")
+    from app.models.acquisition_models import AcquisitionOpportunity as AO
+    research = (C.DISCOVERED, C.RESEARCHED, C.QUALIFIED, C.CONTACT_VERIFIED)
+    out = []
+    for org in db.query(Organization).filter(Organization.id.in_(ids)).all():
+        perms = set(C.WORKER_PERMISSION_KEYS) if god else E.operator_perms(db, user, org.id)
+        if "view_queue" not in perms:
+            continue
+        rows = E.list_owner(db, org.id)
+        pick = lambda st: [{"id": x["id"], "business_name": x["business_name"], "segment_label": x["segment_label"],  # noqa: E731
+                            "city": x["city"], "stage": x["stage"], "stage_label": x["stage_label"],
+                            "is_practice": x["is_practice"]} for x in rows if x["stage"] in st]
+        item = {"organization_id": org.id, "name": org.name, "permissions": sorted(perms),
+                "to_research": pick(research) if "research" in perms else None,
+                "outreach_ready": pick((C.OUTREACH_READY,)) if ({"draft_outreach", "send_outreach"} & perms) else None,
+                "replies": pick((C.REPLIED,)) if "review_replies" in perms else None,
+                "to_schedule": pick((C.INTERESTED,)) if "schedule" in perms else None,
+                "followups": (OC.list_followups(db, [org.id], "open") if "followups" in perms else None)}
+        out.append(item)
+    tot = lambda k: sum(len(i[k]) for i in out if i[k] is not None)  # noqa: E731
+    return {"is_god": god, "clients": out,
+            "totals": {"to_research": tot("to_research"), "outreach_ready": tot("outreach_ready"),
+                       "replies": tot("replies"), "to_schedule": tot("to_schedule"), "followups": tot("followups"),
+                       "authorized_clients": len(out)}}
 
 
 def _discovery_runs(db: Session, org_id: str):
@@ -626,6 +730,9 @@ def ops_add_prospect(payload: dict = Body(...), op: Op = Depends(op_dep)):
 
 @ops_router.post("/{org_id}/prospects/{opp_id}/stage", dependencies=_WRITE)
 def ops_move(opp_id: str, payload: dict = Body(...), op: Op = Depends(op_dep)):
+    need = "review_replies" if payload.get("stage") == C.INTERESTED else "research"
+    if not op.can(need):
+        raise HTTPException(403, "Your access for this client doesn't include that move.")
     opp = E.load_opp(op.db, op.org_id, opp_id)
     E.owner_move(op.db, opp, op.user, payload)
     return {"id": opp.id, "stage": opp.stage}

@@ -369,9 +369,11 @@ def test_operator_grant_gives_ops_access_but_not_god_mode(pilot, wholesale_login
     # only God can grant
     assert c.post("/god/acquisition/%s/operators" % org.id, json={"email": u.email},
                   headers=_h(db, p["owner"])).status_code == 403
-    r = c.post("/god/acquisition/%s/operators" % org.id, json={"email": u.email}, headers=_h(db, p["god"]))
+    # Phase 5: nothing beyond viewing is granted unless the owner says so.
+    r = c.post("/god/acquisition/%s/operators" % org.id,
+               json={"email": u.email, "permissions": ["research", "client_setup"]}, headers=_h(db, p["god"]))
     assert r.status_code == 200, r.text
-    # after: full operations for THAT client, from inside a Wholesale-locked login
+    # after: the granted operations for THAT client, from inside a Wholesale-locked login
     ov = c.get(ops, headers=_h(db, u))
     assert ov.status_code == 200, ov.text
     assert ov.json()["is_god"] is False and ov.json()["operators"] == []
