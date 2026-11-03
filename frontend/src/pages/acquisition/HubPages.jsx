@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import { OPS, useOps } from './opsContext'
+import { HarveyWorkforcePanel } from './HarveyWorkforce'
 import { Confirm, Dot, Drawer, Empty, Feed, Funnel, Icon, Loading, PageHeader, Stat, Stepper, Toolbar,
          errText, money, useLoad, useToast, when } from './ui'
 
@@ -51,6 +52,7 @@ export function MasterOverview() {
         <Stat icon="dollar" tone="green" label="Monthly value won" value={money(r.monthly_value_won)} sub="From contracts marked won" to={`${OPS}/reporting`} />
         <Stat icon="chart" tone="blue" label="Research spend" value={'$' + Number(h.spend.usd || 0).toFixed(2)} sub={`${h.spend.provider_calls} metered provider calls`} to={`${OPS}/reporting`} />
       </div>
+      <HarveyWorkforcePanel compact />
       <section className="aq-card" style={{ marginBottom: 14 }}>
         <div className="aq-card__head"><h2>Operating funnel (all clients, real records only)</h2><a href={`${OPS}/reporting`}>Reporting →</a></div>
         <Funnel steps={h.funnel} />
@@ -666,14 +668,14 @@ export function OutreachPage() {
 export function ResponsesPage() {
   const { list, ov } = useOps()
   const items = (list?.items || []).filter(x => ['replied', 'interested', 'appointment_booked'].includes(x.stage))
-  const replies = (ov.recent_events || []).filter(e => e.to === 'replied' || e.kind === 'reply')
+  const replies = (ov.recent_events || []).filter(e => e.to === 'replied' || e.kind === 'reply' || e.kind === 'reply_classified')
   return (
     <div className="aq-page">
       <PageHeader eyebrow="Client Operations" title="Responses" sub="Replies to support@ are matched every 5 minutes. STOP goes on the never-contact list; complaints and legal threats are flagged for a person." />
       <section className="aq-card" style={{ marginBottom: 14 }}><h2>Prospects who replied</h2>
         {items.length ? items.map(x => <div className="aq-row" key={x.id}><div className="aq-row__main"><b>{x.business_name}</b><span>{x.stage_label}{x.interest_note ? ' · ' + x.interest_note : ''}</span></div><a className="aq-btn aq-btn--sm" href={`${OPS}/prospects`}>Open</a></div>)
           : <Empty icon="reply" title="No replies yet" text="Replies appear here once outreach has gone out and someone answers." />}</section>
-      <section className="aq-card"><h2>Recent reply events</h2><Feed items={replies.map(e => ({ icon: 'reply', tone: 'blue', title: e.note || 'Reply received', at: e.at }))} empty="No reply events recorded." /></section>
+      <section className="aq-card"><h2>Recent reply events</h2><Feed items={replies.map(e => ({ icon: e.kind === 'reply_classified' ? 'spark' : 'reply', tone: e.kind === 'reply_classified' ? 'violet' : 'blue', title: (e.kind === 'reply_classified' ? 'AI read the reply: ' : '') + (e.note || 'Reply received'), at: e.at }))} empty="No reply events recorded." /></section>
     </div>
   )
 }

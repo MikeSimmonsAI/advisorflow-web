@@ -16,6 +16,7 @@ import './hub.css'
 
 import { OPS, OpsCtx as Ctx, useOps } from './opsContext'
 import { MasterOverview, OperatorQueue } from './HubPages'
+import { HarveyWorkforcePanel } from './HarveyWorkforce'
 export { OPS, useOps }
 const pct = v => (v == null ? '—' : Math.round(v * 100) + '%')
 
@@ -562,16 +563,27 @@ function EmailTab({ x }) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
   const [fail, setFail] = useState(null)
+  const [draft, setDraft] = useState(null)
   const base = `/acquisition-ops/${orgId}/prospects/${x.id}/email`
   useEffect(() => {
     let live = true
-    api.post(`${base}/preview`, {}).then(r => { if (live) { setPv(r); setSubject(r.subject); setBody(r.body) } }).catch(e => live && setFail(errText(e)))
+    Promise.all([api.post(`${base}/preview`, {}), api.get(`/acquisition-ops/${orgId}/drafts?opp_id=${x.id}`).catch(() => ({ items: [] }))])
+      .then(([r, d]) => {
+        if (!live) return
+        const want = r.kind === 'booking' ? 'booking' : 'first'
+        const dr = (d.items || []).find(i => i.kind === want) || null
+        setPv(r); setDraft(dr); setSubject(dr ? dr.subject : r.subject); setBody(dr ? dr.body : r.body)
+      }).catch(e => live && setFail(errText(e)))
     return () => { live = false }
-  }, [base, x.stage])
+  }, [base, orgId, x.id, x.stage])
+  const reject = async () => {
+    try { await api.post(`/acquisition-ops/${orgId}/drafts/${draft.id}/reject`, {}); setDraft(null); setMsg('Draft rejected (recorded).') }
+    catch (e) { setFail(errText(e)) }
+  }
   const send = async () => {
     setBusy(true); setFail(null); setMsg(null)
     try {
-      const r = await api.post(`${base}/send`, { subject, body })
+      const r = await api.post(`${base}/send`, draft ? { subject, body, draft_id: draft.id } : { subject, body })
       setMsg(r.pilot_started ? 'Sent. The 30-day pilot clock has started.' : 'Sent.'); setSure(false); reload()
     } catch (e) { setFail(errText(e)) } finally { setBusy(false) }
   }
@@ -581,6 +593,10 @@ function EmailTab({ x }) {
     <div>
       <dl className="aq-dl"><dt>From</dt><dd>{pv.from}</dd><dt>To</dt><dd>{pv.to || '—'}</dd>
         <dt>Sent today</dt><dd>{pv.sent_last_24h} of {pv.daily_cap}</dd></dl>
+      {draft && <div className="aq-note" style={{ marginBottom: 8 }}><b>Drafted by the Harvey AI workforce</b> ({draft.generated_by.replace('template:', 'template · ')}), waiting for your approval. Sending it is the approval.
+        {draft.evidence?.length > 0 && <> Based on: {draft.evidence.filter(e => e.source_url).slice(0, 3).map(e => <a key={e.source_url + e.kind} href={e.source_url} target="_blank" rel="noreferrer" style={{ marginRight: 6 }}>{e.kind.replace('_', ' ')}</a>)}</>}
+        {draft.followups?.length > 0 && <div style={{ fontSize: 12, marginTop: 4 }}>Planned follow-ups (each drafted for approval): {draft.followups.map(f => `day ${f.day}: ${f.purpose}`).join(' · ')}</div>}
+        <button className="aq-btn aq-btn--sm" style={{ marginTop: 6 }} onClick={reject}>Reject draft</button></div>}
       <label className="aq-field">Subject<input value={subject} onChange={e => setSubject(e.target.value)} /></label>
       <label className="aq-field">Message<textarea rows={9} value={body} onChange={e => setBody(e.target.value)} /></label>
       {pv.kind === 'booking' && <p style={{ color: 'var(--aq-sub)', fontSize: 12 }}>The walkthrough link replaces [walkthrough link] when it's sent. It only offers times the calendar shows as free.</p>}
@@ -728,12 +744,14 @@ export function Health() {
     <div className="aq-page">
       <h1 className="aq-h1">Worker Health</h1>
       <p className="aq-lede">What runs, what it costs and what failed — stated as it is.</p>
+      {ov.master && <HarveyWorkforcePanel />}
       <div className="aq-grid aq-two">
-        <section className="aq-card"><h2>Workers</h2>
+        <section className="aq-card"><h2>Workers for this client</h2>
           {ov.workers.map(w => (
             <div className="aq-row" key={w.key}><div className="aq-row__main"><b>{w.label}</b>
-              <span>{w.state === 'on_demand' ? `Runs on demand · ${w.runs} runs · ${w.errors} failed${w.last_run ? ' · last ' + when(w.last_run) : ''}` : w.state === 'off' ? 'Built; switched off on the server' : `Planned in ${w.phase}`}</span></div>
-              <span className={`aq-pill ${w.state === 'on_demand' ? 'aq-pill--ok' : ''}`}>{w.state === 'on_demand' ? 'Working' : w.state === 'off' ? 'Off' : 'Not built'}</span></div>))}
+              <span>{w.runs} done · {w.queued ?? 0} queued · {w.blocked ?? 0} blocked · {w.errors} failed{w.last_run ? ' · last ' + when(w.last_run) : ''}</span>
+              {(w.blockers || []).length > 0 && <small style={{ color: 'var(--aq-sub)', display: 'block' }}>{w.blockers.join(' · ')}</small>}</div>
+              <span className={`aq-pill ${w.state === 'running' ? 'aq-pill--ok' : ''}`}>{w.state === 'running' ? 'Running' : w.state === 'client_off' ? 'Off for this client' : 'Workforce stopped'}</span></div>))}
         </section>
         <section className="aq-card"><h2>Sending &amp; spend</h2>
           <dl className="aq-dl">
