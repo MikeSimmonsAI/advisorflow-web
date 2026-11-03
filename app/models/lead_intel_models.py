@@ -96,6 +96,17 @@ class LeadIntelProspect(Base):
     routed_by_id = Column(String, nullable=True)
     routed_rule_id = Column(String, nullable=True)
 
+    # Platform master-pool import provenance (#470 Stage B). Additive, nullable.
+    import_batch_id = Column(String, nullable=True, index=True)   # import_batches.id (pipeline platform_pool)
+    source_record_id = Column(String, nullable=True)               # the source system's own id, as given
+    source_url = Column(String, nullable=True)
+    researched_at = Column(DateTime, nullable=True)
+    contact_name = Column(String, nullable=True)
+    contact_title = Column(String, nullable=True)
+    email_verified = Column(Boolean, nullable=True)                # True only when the file says it was verified
+    evidence_json = Column(Text, nullable=True)                    # qualification evidence / notes / confidence
+    raw_json = Column(Text, nullable=True)                         # every original column, mapped or not
+
     created_at = Column(DateTime, server_default=func.now(), index=True)
 
     __table_args__ = (

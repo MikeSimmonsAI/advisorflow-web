@@ -1634,6 +1634,16 @@ COLUMNS_TO_ADD = [
     ("leads", "pipeline_lost_at", "TIMESTAMP"),
     ("leads", "pipeline_lost_reason", "VARCHAR"),
     ("leads", "enrolled_at", "TIMESTAMP"),
+    # #470 Stage B: platform master-pool import provenance on lead_intel_prospects
+    ("lead_intel_prospects", "import_batch_id", "VARCHAR"),
+    ("lead_intel_prospects", "source_record_id", "VARCHAR"),
+    ("lead_intel_prospects", "source_url", "VARCHAR"),
+    ("lead_intel_prospects", "researched_at", "TIMESTAMP"),
+    ("lead_intel_prospects", "contact_name", "VARCHAR"),
+    ("lead_intel_prospects", "contact_title", "VARCHAR"),
+    ("lead_intel_prospects", "email_verified", "BOOLEAN"),
+    ("lead_intel_prospects", "evidence_json", "TEXT"),
+    ("lead_intel_prospects", "raw_json", "TEXT"),
     # Divine Shine acquisition pilot P3 (#452): the client's postal address for the email footer
     ("acquisition_profiles", "mailing_address", "TEXT"),
     ("acquisition_profiles", "booking_user_id", "VARCHAR"),
