@@ -68,15 +68,19 @@ STAGE_LABEL = {s["key"]: s["label"] for s in STAGES}
 # stage they must have passed), for "how many reached X" counts.
 RANK = {DISCOVERED: 0, RESEARCHED: 1, DISQUALIFIED: 1, QUALIFIED: 2, CONTACT_VERIFIED: 3, OUTREACH_READY: 4,
         CONTACTED: 5, REPLIED: 6, INTERESTED: 7, LOST: 7, BOOKED: 8, NO_SHOW: 8, HELD: 9, QUOTED: 10, WON: 11}
-# What the client sees: real interest and everything after it.
-CLIENT_STAGES = (INTERESTED, BOOKED, HELD, NO_SHOW, QUOTED, WON, LOST)
+# WHAT THE CLEANING CUSTOMER SEES (owner decision 2026-11-03, #452):
+# EvoSys sells BOOKED APPOINTMENTS, not leads. A prospect EvoSys has allocated
+# internally to a client is EvoSys's working record; the customer sees it only
+# once a real appointment was booked for them (booked_at is set) and from then
+# on through its outcome. Interest, research and conversations stay internal.
+CLIENT_STAGES = (BOOKED, HELD, NO_SHOW, QUOTED, WON, LOST)
 # What the client may record herself, from which stages.
 CLIENT_OUTCOMES = {
     HELD: (BOOKED, NO_SHOW),
     NO_SHOW: (BOOKED,),
     QUOTED: (BOOKED, HELD),
     WON: (HELD, QUOTED),
-    LOST: (INTERESTED, BOOKED, HELD, NO_SHOW, QUOTED),
+    LOST: (BOOKED, HELD, NO_SHOW, QUOTED),
 }
 
 SEGMENTS: List[Dict[str, str]] = [

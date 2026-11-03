@@ -67,6 +67,52 @@ WHOLESALE_ALLOWED_PREFIXES = (
 
 BACK_OFFICE_PREFIXES = ("/sales",)
 
+# ── CLEANING CUSTOMER LOCK (owner decision 2026-11-03, Issue #452) ──────────
+# A cleaning company's own login works ONLY its booked-appointment portal.
+# EvoSys's working records (internally allocated prospects) live in the
+# client's workspace as leads, so every general lead, CRM, report, campaign or
+# pipeline API must refuse a customer login - not just hide the menu.
+ACQUISITION = "acquisition"
+ACQUISITION_FEATURE_KEY = "client_acquisition"
+ACQUISITION_CLIENT_ALLOWED_PREFIXES = (
+    "/acquisition/",
+    "/auth/",
+    "/branding",
+    "/notifications",
+    "/push",
+    "/settings/profile",
+    "/settings/my-capabilities",
+    "/workspace-views",
+    "/program/status",
+    "/launch/me",
+    "/org-settings",
+    "/health",
+)
+
+
+def acquisition_customer_locked(db: Session, user, request: Optional[Request]) -> bool:
+    """This request comes from a cleaning customer's own login working in its
+    acquisition workspace. EvoSys staff (owner/internal roles, granted
+    operators on /acquisition-ops) are never customers."""
+    if user is None or getattr(user, "role", None) in INTERNAL_ROLES:
+        return False
+    from app.models.models import Organization
+    from app.models.sales_models import Membership
+    like = '%"' + ACQUISITION_FEATURE_KEY + '"%'
+    # Cheap gate: home org or an active customer membership on an acquisition org.
+    home = (db.query(Organization.id).filter(Organization.id == getattr(user, "organization_id", None),
+                                             Organization.enabled_features.like(like)).first())
+    if home is None and db.query(Membership.id).join(Organization, Organization.id == Membership.scope_id).filter(
+            Membership.user_id == user.id, Membership.scope_type == "customer_org", Membership.is_active.is_(True),
+            Organization.enabled_features.like(like)).first() is None:
+        return False
+    from app.services import lead_scope
+    org_id = lead_scope.active_workspace_org_id(user, db, request)
+    if not org_id:
+        return False
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    return acquisition_identity(org)
+
 
 def _named_wholesale_seat(db: Session, user) -> bool:
     from app.models.sales_models import SCOPE_PRODUCT, Membership
@@ -268,6 +314,12 @@ def _admin_of_second_tenant(db: Session, user, org) -> bool:
 
 def enforce(db: Session, user, request: Request) -> None:
     path = request.url.path or "/"
+    # Cleaning customers first: their lock is narrower than every allow-list below.
+    if acquisition_customer_locked(db, user, request):
+        if path.startswith(ACQUISITION_CLIENT_ALLOWED_PREFIXES):
+            return
+        raise HTTPException(status_code=403,
+                            detail="This login is for your EvoSys appointment portal. That screen is not part of it.")
     if path.startswith(WHOLESALE_ALLOWED_PREFIXES):
         return
     # The sales Back Office is its own destination on the launcher, not a
