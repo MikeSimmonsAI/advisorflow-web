@@ -531,25 +531,87 @@ export function ClientDirectory() {
 }
 
 // ── 10. ALL-CLIENTS REPORTING ───────────────────────────────────────────
+const PERIODS = [['7d', 'Last 7 days'], ['month', 'This month'], ['last_month', 'Last month'], ['90d', 'Last 90 days'], ['all', 'All time']]
+
 export function Reporting() {
   const god = useGodOnly()
+  const [period, setPeriod] = useState('month')
   const [h, err] = useLoad(god ? '/god/acquisition/hub' : null)
+  const [r, rErr] = useLoad(god ? `/god/acquisition/report?period=${period}` : null)
   if (!god) return <OwnerOnly />
-  if (err) return <div className="aq-page"><div className="aq-err">{errText(err)}</div></div>
+  if (err || rErr) return <div className="aq-page"><div className="aq-err">{errText(err || rErr)}</div></div>
   if (!h) return <div className="aq-page"><Loading /></div>
+  const t = r?.totals
+  const pct = v => (v == null ? '—' : Math.round(v * 100) + '%')
   return (
     <div className="aq-page">
-      <PageHeader eyebrow="EvoSys Master Acquisition" title="All-Clients Reporting" sub="Platform totals first, then each client. Practice records never count. Revenue is only what clients marked won." />
-      <section className="aq-card" style={{ marginBottom: 14 }}><h2>Platform funnel</h2><Funnel steps={h.funnel} /></section>
-      <div className="hb-stats">
-        <Stat icon="reply" tone="blue" label="Replies" value={h.results.replied} /><Stat icon="users" tone="violet" label="Interested" value={h.results.interested} />
-        <Stat icon="calendar" tone="amber" label="Booked" value={h.results.booked} /><Stat icon="check" tone="green" label="Won" value={h.results.won} />
-        <Stat icon="dollar" tone="green" label="Monthly value won" value={money(h.results.monthly_value_won)} /><Stat icon="chart" tone="blue" label="Real spend" value={'$' + Number(h.spend.usd).toFixed(2)} sub={h.spend.source} />
-      </div>
-      <section className="aq-card"><h2>By client</h2>
-        <div className="hb-table-wrap"><table className="aq-table"><thead><tr><th>Client</th><th>Assigned</th><th>Verified contacts</th><th>Contacted</th><th>Replied</th><th>Interested</th><th>Booked</th><th>Won</th><th>Monthly won</th><th>Status</th></tr></thead>
-          <tbody>{h.clients.map(c => <tr key={c.organization_id}><td><b>{c.name}</b></td><td>{c.assigned}</td><td>{c.contacts_verified}</td><td>{c.contacted}</td><td>{c.replied}</td><td>{c.interested}</td><td>{c.booked}</td><td>{c.won}</td><td>{money(c.monthly_value_won)}</td>
-            <td><Dot tone={c.paused ? 'amber' : 'green'}>{c.paused ? 'Paused' : 'Running'}</Dot></td></tr>)}</tbody></table></div></section>
+      <PageHeader eyebrow="Master Control" title="All-Clients Reporting"
+        sub="Each number is a different step: appointments delivered, visits held, estimates, contracts won. TEST workspaces are listed but never counted. Reported value is the client's word; confirmed value is what EvoSys confirmed." />
+      <section className="aq-card" style={{ marginBottom: 14 }}><h2>Acquisition funnel (all time, real records)</h2><Funnel steps={h.funnel} /></section>
+      <Toolbar><div className="aq-tabs" style={{ marginBottom: 0 }}>{PERIODS.map(([k, l]) => <button key={k} className={period === k ? 'on' : ''} onClick={() => setPeriod(k)}>{l}</button>)}</div></Toolbar>
+      {!t ? <Loading /> : <>
+        <div className="hb-stats">
+          <Stat icon="calendar" label="Appointments delivered" value={t.appointments_booked} sub={`${t.upcoming_now} upcoming now`} />
+          <Stat icon="check" tone="green" label="Visits held" value={t.visits_held} sub={`${t.no_shows} no-shows`} />
+          <Stat icon="doc" tone="blue" label="Estimates sent" value={t.estimates_sent} />
+          <Stat icon="handshake" tone="green" label="Contracts won" value={t.contracts_won} sub={`Close rate ${pct(t.close_rate)}`} />
+          <Stat icon="dollar" tone="violet" label="Reported monthly value" value={money(t.reported_monthly_value)} sub={`${money(t.confirmed_monthly_value)} confirmed`} />
+          <Stat icon="chart" tone="amber" label="Forecast (open estimates)" value={money(t.forecast_monthly_value)} sub="Not won yet" />
+        </div>
+        <section className="aq-card"><h2>By client · {r.period_label}</h2>
+          <div className="hb-table-wrap"><table className="aq-table"><thead><tr><th>Client</th><th>Delivered</th><th>Held</th><th>No-shows</th><th>Estimates</th><th>Won</th><th>Close rate</th><th>Reported /mo</th><th>Confirmed /mo</th><th>Days to appt</th></tr></thead>
+            <tbody>{r.clients.map(c => <tr key={c.organization_id}><td><b>{c.name}</b>{c.is_test && <> <Dot tone="amber">TEST</Dot></>}</td>
+              <td>{c.appointments_booked}</td><td>{c.visits_held}</td><td>{c.no_shows}</td><td>{c.estimates_sent}</td><td>{c.contracts_won}</td>
+              <td>{pct(c.close_rate)}</td><td>{money(c.reported_monthly_value)}</td><td>{money(c.confirmed_monthly_value)}</td><td>{c.avg_days_to_appointment ?? '—'}</td></tr>)}</tbody></table></div>
+          <p className="hb-muted" style={{ marginBottom: 0 }}>{r.note}</p></section>
+      </>}
+    </div>
+  )
+}
+
+// ── FOLLOW-UP QUEUE (owner, all clients) ────────────────────────────────
+export function FollowUpsPage() {
+  const god = useGodOnly()
+  const [status, setStatus] = useState('open')
+  const [d, err, reload] = useLoad(god ? `/god/acquisition/followups?status=${status}` : null)
+  const [open, setOpen] = useState(null)
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [fail, setFail] = useState(null)
+  if (!god) return <OwnerOnly />
+  const act = async (f, body) => {
+    setBusy(true); setFail(null)
+    try { await api.post(`/acquisition-ops/${f.organization_id}/followups/${f.id}`, body); setOpen(null); setNote(''); reload() }
+    catch (e) { setFail(errText(e)) } finally { setBusy(false) }
+  }
+  const items = d?.items || []
+  return (
+    <div className="aq-page">
+      <PageHeader eyebrow="Acquisition Operations" title="Follow-up Queue"
+        sub="Requests from cleaning clients about their appointments. Handle each through the normal EvoSys channel — nothing here sends a message by itself." />
+      <Toolbar><div className="aq-tabs" style={{ marginBottom: 0 }}>{[['open', 'Open'], ['done', 'Done'], ['closed', 'Closed'], ['', 'All']].map(([k, l]) => (
+        <button key={k || 'all'} className={status === k ? 'on' : ''} onClick={() => setStatus(k)}>{l}</button>))}</div>
+        <span className="aq-pill">{d ? items.length : '…'}</span></Toolbar>
+      {err && <div className="aq-err">{errText(err)}</div>}
+      {fail && <div className="aq-err">{fail}</div>}
+      <section className="aq-card">
+        {!d ? <Loading /> : items.length ? items.map(f => (
+          <div className="aq-row" key={f.id} style={{ flexWrap: 'wrap' }}>
+            <div className="aq-row__main"><b>{f.reason_label}{f.business_name ? ` · ${f.business_name}` : ''}</b>
+              <span>{f.client}{f.client && /^test\s/i.test(f.client) ? ' (TEST)' : ''} · {when(f.created_at)}{f.requested_by ? ` · from ${f.requested_by}` : ''}{f.assigned_to ? ` · ${f.assigned_to} has it` : ''}</span>
+              {f.note && <span style={{ whiteSpace: 'pre-wrap' }}>“{f.note}”</span>}
+              {f.resolution_note && <span>Resolution: {f.resolution_note}</span>}</div>
+            <Dot tone={f.status === 'done' ? 'green' : f.status === 'closed' ? 'gray' : f.status === 'in_progress' ? 'violet' : 'amber'}>{f.status.replace('_', ' ')}</Dot>
+            {['open', 'in_progress'].includes(f.status) && (open === f.id
+              ? <div style={{ flexBasis: '100%', marginTop: 8 }}><textarea placeholder="What was done (the client sees this)" value={note} onChange={e => setNote(e.target.value)} style={{ width: '100%' }} />
+                  <div className="aq-actions"><button className="aq-btn aq-btn--primary aq-btn--sm" disabled={busy || !note.trim()} onClick={() => act(f, { status: 'done', resolution_note: note })}>Mark done</button>
+                    <button className="aq-btn aq-btn--sm" disabled={busy || !note.trim()} onClick={() => act(f, { status: 'closed', resolution_note: note })}>Close</button>
+                    <button className="aq-btn aq-btn--sm" onClick={() => setOpen(null)}>Cancel</button></div></div>
+              : <div className="aq-actions" style={{ marginTop: 0 }}>
+                  {f.status === 'open' && <button className="aq-btn aq-btn--sm" disabled={busy} onClick={() => act(f, { status: 'in_progress', assign_to_me: true })}>Take it</button>}
+                  <button className="aq-btn aq-btn--sm aq-btn--primary" onClick={() => { setOpen(f.id); setNote('') }}>Resolve</button></div>)}
+          </div>)) : <Empty icon="check" title={status === 'open' ? 'No open follow-ups' : 'Nothing here'} text="Client requests from their appointment portal land here." />}
+      </section>
     </div>
   )
 }

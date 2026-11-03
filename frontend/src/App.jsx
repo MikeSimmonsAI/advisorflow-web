@@ -158,6 +158,7 @@ const AcqOpsClients = lazyPage(() => import('./pages/acquisition/HubPages').then
 const AcqOpsReporting = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.Reporting })))
 const AcqOpsActivity = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.Activity })))
 const AcqOpsOutreach = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.OutreachPage })))
+const AcqOpsFollowUps = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.FollowUpsPage })))
 const AcqOpsResponses = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.ResponsesPage })))
 const AcqOpsSoon = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Soon })))
 const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
@@ -1585,6 +1586,7 @@ export default function App() {
           <Route path="prospects" element={<AcqProspects />} />
           <Route path="prospects/:id" element={<AcqProspect />} />
           <Route path="appointments" element={<AcqAppointments />} />
+          <Route path="appointments/:id" element={<AcqProspect />} />
           <Route path="results" element={<AcqResults />} />
           <Route path="settings" element={<AcqSettings />} />
           <Route path="feedback" element={<AcqFeedback />} />
@@ -1609,6 +1611,7 @@ export default function App() {
           <Route path="clients" element={<AcqOpsClients />} />
           <Route path="reporting" element={<AcqOpsReporting />} />
           <Route path="activity" element={<AcqOpsActivity />} />
+          <Route path="followups" element={<AcqOpsFollowUps />} />
         </Route>
         <Route path="/roofing" element={<RoofingLanding />} />
         {/* PUBLIC interactive demo - fictional data only, no login, no Roofing API. */}

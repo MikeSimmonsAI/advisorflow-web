@@ -33,6 +33,10 @@ const MASTER_NAV = [
 ]
 // Client-scoped operating tools: EvoSys staff work these for the client chosen
 // in the selector. Nothing here is the customer's own portal.
+// Owner-level operating pages that span every client (no client selection needed).
+const OPS_NAV = [
+  { to: `${OPS}/followups`, label: 'Follow-up Queue', icon: 'reply' },
+]
 const CLIENT_NAV = [
   { to: `${OPS}/client-dashboard`, label: 'Client Operations', icon: 'dashboard' },
   { to: `${OPS}/prospects`, label: 'Prospect Queue', icon: 'users' },
@@ -48,16 +52,18 @@ const SUPPORT_NAV = [
   { to: `${OPS}/settings`, label: 'Pause, Exclusions & Operators', icon: 'settings' },
   { to: `${OPS}/activity`, label: 'Audit History', icon: 'clock' },
 ]
-const MASTER_PATHS = [OPS, ...MASTER_NAV.slice(1).map(x => x.to), `${OPS}/activity`]
+const MASTER_PATHS = [OPS, ...MASTER_NAV.slice(1).map(x => x.to), ...OPS_NAV.map(x => x.to), `${OPS}/activity`]
 // Pages that need a chosen client. The owner is never dropped into one by default.
 const CLIENT_PATHS = [...CLIENT_NAV.map(x => x.to), `${OPS}/onboarding`, `${OPS}/settings`]
-const TITLES = Object.fromEntries([...MASTER_NAV, ...CLIENT_NAV, ...SUPPORT_NAV].map(x => [x.to, x.label]))
+const TITLES = Object.fromEntries([...MASTER_NAV, ...OPS_NAV, ...CLIENT_NAV, ...SUPPORT_NAV].map(x => [x.to, x.label]))
 
-function NavGroup({ title, items, children, startOpen = true }) {
+function NavGroup({ title, items, children, pre = [], startOpen = true }) {
   const [open, setOpen] = useState(startOpen)
   return (
     <div className={`hb-group ${open ? '' : 'closed'}`}>
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}>{title}<i>▾</i></button>
+      {pre.length > 0 && <nav className="aq-nav">{pre.map(it => (
+        <NavLink key={it.to} to={it.to} end={it.end}><Icon name={it.icon} />{it.label}</NavLink>))}</nav>}
       {children}
       <nav className="aq-nav">{items.map(it => (
         <NavLink key={it.to} to={it.to} end={it.end}><Icon name={it.icon} />{it.label}</NavLink>))}</nav>
@@ -142,7 +148,7 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg, reloadClients }) {
           <div className="aq-logo"><span className="aq-logo__mark"><Icon name="spark" size={16} /></span>
             <span>EvoSys Pro<small>Acquisition Control Center</small></span></div>
           {ov.is_god && <NavGroup title="Master Control" items={MASTER_NAV} />}
-          <NavGroup title="Acquisition Operations" items={ov.is_god || clients.items.length > 1 ? CLIENT_NAV : CLIENT_NAV.map(x => x.to === `${OPS}/client-dashboard` ? { ...x, to: OPS, end: true } : x)}>
+          <NavGroup title="Acquisition Operations" pre={ov.is_god ? OPS_NAV : []} items={ov.is_god || clients.items.length > 1 ? CLIENT_NAV : CLIENT_NAV.map(x => x.to === `${OPS}/client-dashboard` ? { ...x, to: OPS, end: true } : x)}>
             {(clients.is_god || clients.items.length > 1) && <div className="hb-client">
               <label htmlFor="hb-client">Cleaning company</label>
               <select id="hb-client" aria-label="Acquisition client workspace" value={orgId || ''} onChange={e => onSelectOrg(e.target.value)}>
