@@ -201,3 +201,19 @@ a.hb-stat:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(0,0,0
   .aq-dark .aq-btn { min-height: 42px; }
 }
 @media (max-width: 420px) { .hb-stats { grid-template-columns: 1fr; } }
+
+/* QA fixes: dark form fields (selects were white-on-white) and a full-height sidebar */
+.aq.aq-dark input:not([type=checkbox]):not([type=radio]),
+.aq.aq-dark select,
+.aq.aq-dark textarea {
+  background: #0f1430; color: #e8e9f5; border: 1px solid #2c3366; border-radius: 10px;
+  padding: 9px 12px; font: inherit; min-height: 40px;
+}
+.aq.aq-dark input::placeholder, .aq.aq-dark textarea::placeholder { color: #7d83ab; }
+.aq.aq-dark select option { background: #0f1430; color: #e8e9f5; }
+.aq.aq-dark input:focus, .aq.aq-dark select:focus, .aq.aq-dark textarea:focus {
+  outline: 2px solid #8b5cf6; outline-offset: 1px; border-color: #8b5cf6;
+}
+@media (min-width: 901px) {
+  .aq.aq-dark .aq-side { position: sticky; top: 0; height: 100vh; overflow-y: auto; align-self: flex-start; }
+}
