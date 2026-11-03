@@ -87,25 +87,32 @@ def status(ctx: C.Ctx = Depends(ctx_dep)):
 
 @router.get("/dashboard")
 def dashboard(ctx: C.Ctx = Depends(ctx_dep)):
+    """Booked appointments only. Nothing about research, outreach or interest
+    that has not become an appointment (owner decision 2026-11-03)."""
     ids = _visible_lead_ids(ctx)
     items = E.list_client(ctx.db, ctx.org_id, ids)
-    f = E.funnel(ctx.db, ctx.org_id, include_practice=False)
+    counts = E.customer_counts(ctx.db, ctx.org_id)
     now = C.iso(datetime.utcnow())
 
     def waiting_on_outcome(x):
-        # A booked appointment needs an outcome once its time has passed;
-        # held and quoted prospects always wait on the client's next step.
         if x["stage"] == C.BOOKED:
             t = (x["appointment"] or {}).get("time")
             return bool(t) and t < now
         return x["stage"] in (C.HELD, C.QUOTED)
+    by_segment: dict = {}
+    for x in items:
+        k = x.get("segment") or "other"
+        by_segment[k] = by_segment.get(k, 0) + 1
     return {
-        "counts": dict({k: f[k] for k in ("interested", "booked", "held", "no_show", "quoted", "won", "lost")},
-                       **E.client_extra_counts(ctx.db, ctx.org_id)),
-        "won_monthly_value": f["won_monthly_value"],
+        "counts": counts,
+        "won_monthly_value": counts["won_monthly_value"],
         "upcoming": E.upcoming(ctx.db, ctx.org_id, ids)[:5],
         "needs_outcome": [x for x in items if waiting_on_outcome(x)][:10],
-        "new_interest": [x for x in items if x["stage"] == C.INTERESTED][:10],
+        # Kept EMPTY for the portal build still in production until #474 ships;
+        # pre-booking interest is never sent to the customer.
+        "new_interest": [],
+        "by_segment": [{"segment": k, "label": C.SEGMENT_LABEL.get(k, "Other"), "count": v}
+                       for k, v in sorted(by_segment.items(), key=lambda kv: -kv[1])],
     }
 
 
@@ -124,7 +131,7 @@ def client_prospect(opp_id: str, ctx: C.Ctx = Depends(ctx_dep)):
     opp = E.load_opp(ctx.db, ctx.org_id, opp_id, client=True)
     items = [x for x in E.list_client(ctx.db, ctx.org_id, _visible_lead_ids(ctx)) if x["id"] == opp.id]
     if not items:
-        raise HTTPException(404, "Prospect not found")
+        raise HTTPException(404, "Appointment not found")
     return items[0]
 
 

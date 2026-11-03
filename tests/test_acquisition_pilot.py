@@ -178,19 +178,18 @@ def test_practice_prospects_stay_internal(pilot):
                       headers=_h(p["db"], p["owner"], p["shine"].id)).status_code == 404
 
 
-def test_client_sees_only_interested_and_later(pilot):
+def test_client_sees_only_booked_appointments(pilot):
+    # Owner decision 2026-11-03 (#452): interest is EvoSys-internal; the client
+    # sees an opportunity only once an appointment is booked for them.
     p = pilot
     early = _add(p)
     hot = _add(p)
     assert _move(p, hot, "interested").status_code == 422          # needs what they said
     assert _move(p, hot, "interested", note="Asked for a quote for 3 nights/week").status_code == 200
-    items = p["c"].get("/acquisition/prospects", headers=_h(p["db"], p["owner"], p["shine"].id)).json()["items"]
-    assert [x["id"] for x in items] == [hot]
-    assert items[0]["interest_note"].startswith("Asked for a quote")
-    # the client view carries no evidence, scores or sources
-    assert "evidence" not in items[0] and "score" not in items[0] and "source_url" not in items[0]
-    assert p["c"].get("/acquisition/prospects/%s" % early,
-                      headers=_h(p["db"], p["owner"], p["shine"].id)).status_code == 404
+    h = _h(p["db"], p["owner"], p["shine"].id)
+    assert p["c"].get("/acquisition/prospects", headers=h).json()["items"] == []
+    assert p["c"].get("/acquisition/prospects/%s" % hot, headers=h).status_code == 404
+    assert p["c"].get("/acquisition/prospects/%s" % early, headers=h).status_code == 404
 
 
 def test_contacted_and_replied_cannot_be_set_by_hand(pilot):
@@ -233,7 +232,8 @@ def test_outcome_flow_and_counts(pilot):
                     headers=h)
     assert r.status_code == 200 and r.json()["stage"] == "won" and r.json()["monthly_value"] == 1650
     c = p["c"].get("/acquisition/dashboard", headers=h).json()
-    assert c["counts"]["interested"] == 1 and c["counts"]["booked"] == 1 and c["counts"]["held"] == 1
+    assert "interested" not in c["counts"]                          # pre-booking interest is EvoSys-internal
+    assert c["counts"]["booked"] == 1 and c["counts"]["held"] == 1
     assert c["counts"]["quoted"] == 1 and c["counts"]["won"] == 1 and c["won_monthly_value"] == 1650
 
 
