@@ -15,7 +15,7 @@ import './acquisition.css'
 import './hub.css'
 
 import { OPS, OpsCtx as Ctx, useOps } from './opsContext'
-import { MasterOverview } from './HubPages'
+import { MasterOverview, OperatorQueue } from './HubPages'
 export { OPS, useOps }
 const pct = v => (v == null ? '—' : Math.round(v * 100) + '%')
 
@@ -140,7 +140,7 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg, reloadClients }) {
   const me = ov.me?.name || ''
   const onMaster = ov.is_god && MASTER_PATHS.includes(loc.pathname)
   const needsClient = !orgId && !onMaster
-  const page = TITLES[loc.pathname] || (ov.is_god ? 'Control Center' : 'Client Operations')
+  const page = (!ov.is_god && loc.pathname === OPS) ? 'Operator Workspace' : TITLES[loc.pathname] || (ov.is_god ? 'Control Center' : 'Client Operations')
   return (
     <Ctx.Provider value={{ ov, list, listErr: lErr, reload, orgId, clients, onSelectOrg, reloadClients }}>
       <div className="aq aq-app aq-dark">
@@ -149,7 +149,7 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg, reloadClients }) {
           <div className="aq-logo"><span className="aq-logo__mark"><Icon name="spark" size={16} /></span>
             <span>EvoSys Pro<small>Acquisition Control Center</small></span></div>
           {ov.is_god && <NavGroup title="Master Control" items={MASTER_NAV} />}
-          <NavGroup title="Acquisition Operations" pre={ov.is_god ? OPS_NAV : []} items={ov.is_god || clients.items.length > 1 ? CLIENT_NAV : CLIENT_NAV.map(x => x.to === `${OPS}/client-dashboard` ? { ...x, to: OPS, end: true } : x)}>
+          <NavGroup title="Acquisition Operations" pre={ov.is_god ? OPS_NAV : [{ to: OPS, label: 'My Queue', icon: 'list', end: true }]} items={CLIENT_NAV}>
             {(clients.is_god || clients.items.length > 1) && <div className="hb-client">
               <label htmlFor="hb-client">Cleaning company</label>
               <select id="hb-client" aria-label="Acquisition client workspace" value={orgId || ''} onChange={e => onSelectOrg(e.target.value)}>
@@ -172,7 +172,9 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg, reloadClients }) {
                 <div><b>{me.split(' ')[0] || me}</b><span>EvoSys Pro</span></div></span>
             </div>
           </header>
-          {!onMaster && orgId && <div className="aq-page" style={{ paddingBottom: 0 }}>
+          {!ov.is_god && <div className="aq-page" style={{ paddingBottom: 0 }}><div className="aq-note aq-note--warn" style={{ marginBottom: 0 }}>
+            <b>Restricted workspace:</b> you work only on the clients and tasks the EvoSys owner assigned you. The master prospect pool, client setup and other clients aren’t available here.</div></div>}
+          {!onMaster && orgId && loc.pathname !== OPS && <div className="aq-page" style={{ paddingBottom: 0 }}>
             <div className="hb-strip"><span className="hb-strip__mark">{initials(ov.organization_name)}</span>
               <div><b>{ov.organization_name} — Acquisition Operations</b>
                 <span>{p.offer_label || 'Cleaning client'} · {(p.service_area || []).slice(0, 4).join(', ') || 'No service area yet'}</span></div>
@@ -245,7 +247,8 @@ function TargetRing({ booked, high }) {
 export function ControlCenter() {
   const { ov } = useOps()
   const loc = useLocation()
-  return ov.is_god && loc.pathname === OPS ? <MasterOverview /> : <ClientControlCenter />
+  if (loc.pathname === OPS) return ov.is_god ? <MasterOverview /> : <OperatorQueue />
+  return <ClientControlCenter />
 }
 
 function ClientControlCenter() {
@@ -784,18 +787,54 @@ export function OpsSettings() {
           <small style={{ color: 'var(--aq-sub)' }}>Practice prospects can only be emailed at: {(ov.sending.test_recipients || []).join(', ') || 'none set'}</small>
         </section>
       </div>
-      {ov.is_god && (
-        <section className="aq-card" style={{ marginTop: 14 }}><h2>Operators (owner only)</h2>
-          <p className="aq-lede" style={{ marginBottom: 8 }}>Operators run this pilot’s screens. It is not God Mode and opens nothing else.</p>
-          {ov.operators.length ? ov.operators.map(o => (
-            <div className="aq-row" key={o.user_id}><div className="aq-row__main"><b>{o.name}</b><span>{o.email}</span></div>
-              <button className="aq-btn aq-btn--sm" onClick={() => run(() => api.delete(`/god/acquisition/${orgId}/operators/${o.user_id}`), 'Access removed')}>Remove</button></div>
-          )) : <div className="aq-empty">No operators yet.</div>}
-          <div className="aq-actions"><input placeholder="Login email" value={email} onChange={e => setEmail(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
-            <button className="aq-btn aq-btn--primary aq-btn--sm" disabled={!email.trim()} onClick={() => run(() => api.post(`/god/acquisition/${orgId}/operators`, { email }), 'Operator access granted').then(() => setEmail(''))}>Grant operator access</button></div>
-        </section>
-      )}
+      {ov.is_god && <WorkerAccess />}
     </div>
+  )
+}
+
+// Owner: who works this client's acquisition, and exactly what each may do.
+function WorkerAccess() {
+  const { ov, orgId, reload } = useOps()
+  const [meta] = useLoad('/god/acquisition/worker-permissions')
+  const [email, setEmail] = useState('')
+  const [preset, setPreset] = useState('researcher')
+  const [edit, setEdit] = useState({})
+  const [fail, setFail] = useState(null)
+  const [toast, say] = useToast()
+  const run = async (fn, ok) => { setFail(null); try { await fn(); say(ok); reload() } catch (e) { setFail(errText(e)) } }
+  const perms = meta?.permissions || []
+  const toggle = (uid, cur, k) => {
+    const now = edit[uid] || cur
+    setEdit({ ...edit, [uid]: now.includes(k) ? now.filter(x => x !== k) : [...now, k] })
+  }
+  return (
+    <section className="aq-card" style={{ marginTop: 14 }}>{toast}
+      <h2>Team &amp; VA access for {ov.organization_name} (owner only)</h2>
+      <p className="hb-muted" style={{ marginTop: 0 }}>Each worker signs in with their own login and sees only this client’s work, limited to what you tick. They never see the master pool, other clients, onboarding or God Mode. Every action they take is logged.</p>
+      {fail && <div className="aq-err">{fail}</div>}
+      {ov.operators.length ? ov.operators.map(o => {
+        const cur = edit[o.user_id] || o.permissions
+        const dirty = !!edit[o.user_id]
+        return (
+          <div key={o.user_id} style={{ borderTop: '1px solid var(--aq-line)', padding: '12px 0' }}>
+            <div className="aq-row" style={{ border: 0, padding: 0 }}><div className="aq-row__main"><b>{o.name}</b><span>{o.email}{o.legacy_full_access ? ' · full access (granted before permissions existed)' : ''}</span></div>
+              <button className="aq-btn aq-btn--sm" onClick={() => run(() => api.delete(`/god/acquisition/${orgId}/operators/${o.user_id}`), 'Access removed')}>Remove access</button></div>
+            <div className="aq-checks" style={{ marginTop: 8 }}>{perms.map(pm => (
+              <label key={pm.key} title={pm.hint}><input type="checkbox" checked={cur.includes(pm.key)} disabled={pm.key === 'view_queue'} onChange={() => toggle(o.user_id, cur, pm.key)} />{pm.label}</label>))}</div>
+            {dirty && <div className="aq-actions"><button className="aq-btn aq-btn--primary aq-btn--sm" onClick={() => run(async () => { await api.put(`/god/acquisition/${orgId}/operators/${o.user_id}`, { permissions: cur }); setEdit({ ...edit, [o.user_id]: undefined }) }, 'Permissions saved')}>Save permissions</button>
+              <button className="aq-btn aq-btn--sm" onClick={() => setEdit({ ...edit, [o.user_id]: undefined })}>Cancel</button></div>}
+          </div>)
+      }) : <div className="aq-empty">No workers on this client yet. You run everything yourself.</div>}
+      <div className="hb-section-title">Add a worker</div>
+      <div className="aq-actions">
+        <input placeholder="Their EvoSys login email" value={email} onChange={e => setEmail(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
+        <select aria-label="Role" value={preset} onChange={e => setPreset(e.target.value)}>
+          {[['researcher', 'Prospect researcher'], ['outreach', 'Outreach operator'], ['responder', 'Response / follow-up operator'], ['setter', 'Appointment setter'], ['general', 'General acquisition operator']].map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+        <button className="aq-btn aq-btn--primary aq-btn--sm" disabled={!email.trim() || !meta}
+          onClick={() => run(async () => { await api.post(`/god/acquisition/${orgId}/operators`, { email, permissions: meta.presets[preset] }); setEmail('') }, 'Worker added')}>Grant access</button>
+      </div>
+      <small className="hb-muted">The person needs an existing EvoSys login that isn’t this client’s own. Adjust the ticks afterwards.</small>
+    </section>
   )
 }
 

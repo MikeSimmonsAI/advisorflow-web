@@ -667,3 +667,61 @@ export function ResponsesPage() {
     </div>
   )
 }
+
+// ── OPERATOR / VA WORKSPACE (restricted) ────────────────────────────────
+export function OperatorQueue() {
+  const { onSelectOrg } = useOps()
+  const nav = useNavigate()
+  const [q, err, reload] = useLoad('/acquisition-ops/my-queue')
+  const [client, setClient] = useState('')
+  if (err) return <div className="aq-page"><div className="aq-err">{errText(err)}</div></div>
+  if (!q) return <div className="aq-page"><Loading label="Loading your queue…" /></div>
+  const clients = q.clients.filter(c => !client || c.organization_id === client)
+  const go = (c, path) => { onSelectOrg(c.organization_id); nav(`${OPS}/${path}`) }
+  const work = clients.flatMap(c => [
+    c.to_research && c.to_research.length ? { c, icon: 'search', title: 'Research new prospects', sub: 'Find and verify published contacts', n: c.to_research.length, unit: 'prospects', path: 'prospects' } : null,
+    c.outreach_ready && c.outreach_ready.length ? { c, icon: 'mail', title: 'Send approved outreach', sub: 'One email at a time, email only', n: c.outreach_ready.length, unit: 'ready', path: 'prospects' } : null,
+    c.replies && c.replies.length ? { c, icon: 'reply', title: 'Follow up on responses', sub: 'Review and qualify replies', n: c.replies.length, unit: 'responses', path: 'prospects' } : null,
+    c.to_schedule && c.to_schedule.length ? { c, icon: 'calendar', title: 'Schedule appointments', sub: 'Book on the client’s real calendar', n: c.to_schedule.length, unit: 'to schedule', path: 'prospects' } : null,
+  ].filter(Boolean))
+  const replies = clients.flatMap(c => (c.replies || []).map(x => ({ ...x, c })))
+  const sched = clients.flatMap(c => (c.to_schedule || []).map(x => ({ ...x, c })))
+  return (
+    <div className="aq-page">
+      <PageHeader eyebrow="Acquisition Operations" title="Acquisition Operator Workspace"
+        sub="Research, follow up on responses and schedule appointments for your authorized clients."
+        actions={<button className="aq-btn" onClick={reload}>Sync queue</button>} />
+      <div className="hb-stats">
+        <Stat icon="search" label="Prospects to research" value={q.totals.to_research} sub={`Across ${q.totals.authorized_clients} authorized client${q.totals.authorized_clients === 1 ? '' : 's'}`} />
+        <Stat icon="reply" tone="blue" label="Responses to review" value={q.totals.replies} sub="Awaiting your follow-up" />
+        <Stat icon="calendar" tone="amber" label="Appointments to schedule" value={q.totals.to_schedule} sub="Interested and ready to book" />
+        <Stat icon="store" tone="green" label="Authorized clients" value={q.totals.authorized_clients} sub="In your operations queue" />
+      </div>
+      <div className="aq-grid aq-split">
+        <section className="aq-card">
+          <div className="aq-card__head"><h2>Today’s work</h2>
+            <select aria-label="Client filter" value={client} onChange={e => setClient(e.target.value)}><option value="">All authorized clients ({q.clients.length})</option>
+              {q.clients.map(c => <option key={c.organization_id} value={c.organization_id}>{c.name}</option>)}</select></div>
+          {work.length ? work.map((w, i) => (
+            <button key={i} className="aq-row hb-click" style={{ width: '100%', background: 'none', border: 0, borderBottom: '1px solid var(--aq-line)', color: 'inherit', font: 'inherit', textAlign: 'left' }} onClick={() => go(w.c, w.path)}>
+              <span className="hb-stat__icon hb-tone--violet" style={{ width: 36, height: 36 }}><Icon name={w.icon} size={16} /></span>
+              <div className="aq-row__main"><b>{w.title}</b><span>{w.sub}</span></div>
+              <span className="aq-pill">{w.c.name}</span><span className="aq-pill aq-pill--appointment_booked">{w.n} {w.unit}</span></button>))
+            : <Empty icon="check" title="Nothing waiting" text="New work appears here when it’s assigned to your clients." />}
+        </section>
+        <div>
+          <section className="aq-card" style={{ marginBottom: 14 }}><h2>Response follow-ups</h2>
+            {replies.length ? replies.slice(0, 8).map(x => <div className="aq-row" key={x.id}><div className="aq-row__main"><b>{x.business_name}</b><span>{x.c.name} · {x.segment_label || ''}</span></div>
+              <Dot tone="amber">Reply needed</Dot><button className="aq-btn aq-btn--sm" onClick={() => go(x.c, 'prospects')}>Open</button></div>)
+              : <p className="hb-muted">{clients.some(c => c.replies !== null) ? 'No replies waiting.' : 'Your access doesn’t include reviewing replies.'}</p>}
+          </section>
+          <section className="aq-card"><h2>Appointment scheduling</h2>
+            {sched.length ? sched.slice(0, 8).map(x => <div className="aq-row" key={x.id}><div className="aq-row__main"><b>{x.business_name}</b><span>{x.c.name} · {[x.segment_label, x.city].filter(Boolean).join(' · ')}</span></div>
+              <button className="aq-btn aq-btn--sm aq-btn--primary" onClick={() => go(x.c, 'prospects')}>Schedule</button></div>)
+              : <p className="hb-muted">{clients.some(c => c.to_schedule !== null) ? 'Nobody waiting to be booked.' : 'Your access doesn’t include scheduling.'}</p>}
+          </section>
+        </div>
+      </div>
+    </div>
+  )
+}
