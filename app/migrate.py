@@ -163,6 +163,32 @@ def main(argv=None) -> int:
     except Exception as e:                                   # noqa: BLE001
         log.error("SCI staging demo errored (deploy continues): %s", type(e).__name__)
 
+    # ── 3d. INSURANCE RETENTION DEMO (#499) - inert unless switched on ──
+    # VINCENT_GREENE_DEMO=1 creates the isolated, synthetic Vincent Greene
+    # demo workspace once and seeds it if it has no renewals. It never touches
+    # another organization, sends nothing, and creates no usable login.
+    # VINCENT_GREENE_DEMO_ADMIN_EMAILS lists EXISTING users to make agency
+    # admins of that demo workspace (never God, never a new account).
+    # Never changes the exit code.
+    if os.environ.get("VINCENT_GREENE_DEMO", "").strip() == "1":
+        try:
+            from app.deps import SessionLocal
+            from app.services.agency import retention_demo
+            _db = SessionLocal()
+            try:
+                emails = os.environ.get("VINCENT_GREENE_DEMO_ADMIN_EMAILS", "").split(",")
+                res = retention_demo.ensure_demo(_db, emails)
+                _db.commit()
+                log.info("retention demo: org=%s created=%s seeded=%s granted=%d",
+                         res["organization_id"], res["created"], bool(res["seeded"]), len(res["granted"]))
+            except Exception:
+                _db.rollback()
+                raise
+            finally:
+                _db.close()
+        except Exception as e:                               # noqa: BLE001
+            log.error("Retention demo errored (deploy continues): %s: %s", type(e).__name__, str(e)[:200])
+
     # ── 4. SAY WHAT HAPPENED ──────────────────────────────────────────────
     log.info("migration outcome=%s elapsed=%ss columns_checked=%s",
              LAST_RUN["outcome"], LAST_RUN["elapsed_seconds"],

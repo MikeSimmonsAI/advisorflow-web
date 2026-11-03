@@ -96,3 +96,42 @@ def maxlife_provision(body: MaxLifeIn = Body(default=MaxLifeIn()), db: Session =
     db.refresh(org)
     report["status"] = _status(db, org)
     return report
+
+
+# ── VINCENT GREENE RETENTION DEMO (Issue #499) ───────────────────────────────
+# Same contract as /maxlife: platform owner only, an isolated is_demo org found
+# by its stable slug, synthetic data only, nothing sent, no usable logins.
+
+class RetentionDemoIn(BaseModel):
+    admin_emails: list = []     # EXISTING users to make agency admins of the demo
+    reset: bool = False
+
+
+@router.get("/vincent-greene")
+def vg_status(db: Session = Depends(get_db), god: User = Depends(require_god)):
+    from app.models.agency_retention_models import AgencyRenewal
+    from app.services.agency import retention_demo as vg
+    org = vg.find_org(db)
+    if org is None:
+        return {"exists": False, "slug": vg.SLUG}
+    return {"exists": True, "organization_id": org.id, "organization_name": org.name, "is_demo": bool(org.is_demo),
+            "renewals": db.query(AgencyRenewal).filter(AgencyRenewal.organization_id == org.id).count(),
+            "enter_path": "/god/platform/context/customer/%s" % org.id}
+
+
+@router.post("/vincent-greene")
+def vg_provision(body: RetentionDemoIn = Body(default=RetentionDemoIn()), db: Session = Depends(get_db),
+                 god: User = Depends(require_god)):
+    from app.services.agency import retention_demo as vg
+    try:
+        res = vg.ensure_demo(db, [str(e) for e in body.admin_emails])
+        org = vg.find_org(db)
+        if body.reset:
+            res["reset"] = vg.reset_demo(db, org)
+    except vg.DemoError as e:
+        db.rollback()
+        raise HTTPException(409, str(e))
+    log_action(db, res["organization_id"], god.id, "god.demo.vincent_greene.seeded", "organization",
+               res["organization_id"], details={"created": res["created"], "granted": res["granted"]}, commit=False)
+    db.commit()
+    return res
