@@ -253,9 +253,15 @@ def note_prevented(db: Session, item: SmsRecoveryItem, touch_number: int) -> Non
 def email_fallback(db: Session, lead) -> Dict:
     """Can this family's ALREADY-PERMITTED email sequence carry on? It is its
     own schedule (5 emails, Email 1 never twice); this only says whether it
-    may, and why not. Nothing here sends."""
-    from app.models.models import EmailMessage
-    out = {"eligible": False, "reason": None, "emails_sent": 0, "remaining": None, "provider": None}
+    may, why not, and where the sequence stands. Nothing here sends.
+
+    Phase 2 (Nov 3): "permitted" is not enough - a touch the email quality
+    check is holding (e.g. the location has no postal address, which
+    commercial email must carry) is NOT continuing, and is reported with that
+    reason instead of as eligible. An accepted email is not "delivered"."""
+    from app.models.models import BookingLink, EmailMessage, Reply
+    out = {"eligible": False, "reason": None, "emails_sent": 0, "remaining": None, "provider": None,
+           "sequence": None, "blocked_by_check": False}
     addr = (lead.email or "").strip()
     try:
         from app.services.programs import email_touches as ET, identity
@@ -277,14 +283,66 @@ def email_fallback(db: Session, lead) -> Dict:
         reason = "an email to this address bounced"
     elif prog is not None and ET is not None and ET.provider_hold_reason(prog, addr):
         reason = ET.provider_hold_reason(prog, addr)
+    elif db.query(BookingLink.id).filter(BookingLink.lead_id == lead.id,
+                                         BookingLink.status.in_(("booked", "confirmed"))).first():
+        reason = "an appointment is booked - the sequence has stopped"
+    elif db.query(Reply.id).filter(Reply.lead_id == lead.id).first():
+        reason = "the family replied - a person has it"
     if prog is not None and ET is not None:
-        from app.models.program_models import ProgramEmailTouch
-        sent = db.query(ProgramEmailTouch.id).filter(ProgramEmailTouch.lead_id == lead.id,
-                                                     ProgramEmailTouch.status == "sent").count()
-        out["emails_sent"], out["remaining"] = sent, max(0, ET.max_touches() - sent)
-        if reason is None and out["remaining"] == 0:
-            reason = "all %d emails already sent" % ET.max_touches()
+        seq = _email_sequence(db, lead, ET)
+        out["sequence"] = seq
+        out["emails_sent"], out["remaining"] = seq["sent"], max(0, seq["max"] - seq["sent"])
+        if reason is None and seq["status"] == "finished":
+            reason = "all %d emails already sent" % seq["max"]
+        elif reason is None and seq["status"] == "blocked":
+            reason = "email held by a check: %s" % (seq["detail"] or "see the email touch")
+            out["blocked_by_check"] = True
+        elif reason is None and seq["status"] == "stopped":
+            reason = "email sequence stopped for a person to look: %s" % (seq["detail"] or "unknown result")
     out["reason"], out["eligible"] = reason, reason is None
+    return out
+
+
+def _email_sequence(db: Session, lead, ET) -> Dict:
+    """Where this family's email sequence stands: emails sent, the next
+    touch, when it is due by the sequence's own rule (follow-ups
+    `followup_days` after the last one SENT; a held touch is re-checked
+    BLOCKED_RETRY_AFTER later) and why it is waiting, if it is."""
+    from app.models.program_models import ProgramEmailTouch
+    rows = (db.query(ProgramEmailTouch).filter(ProgramEmailTouch.lead_id == lead.id)
+            .order_by(ProgramEmailTouch.touch_number).all())
+    touches = {r.touch_number: r for r in rows}
+    mx = ET.max_touches()
+    sent = [r for r in rows if r.status == "sent"]
+    out = {"sent": len(sent), "max": mx, "next_touch": None, "next_due_at": None, "status": "continuing",
+           "detail": None, "last_sent_at": max((r.attempted_at for r in sent if r.attempted_at), default=None)}
+    for n in range(1, mx + 1):
+        t = touches.get(n)
+        if t is not None and t.status == "sent":
+            continue
+        out["next_touch"] = n
+        if t is None:
+            prev = touches.get(n - 1)
+            if prev is not None and prev.attempted_at:
+                out["next_due_at"] = _naive(prev.attempted_at) + timedelta(days=ET.followup_days())
+            else:
+                out["detail"] = "Email 1 goes with the family's journey"
+        elif t.status == "blocked":
+            out["status"], out["detail"] = "blocked", (t.reason or "")[:300]
+            if t.attempted_at:
+                out["next_due_at"] = _naive(t.attempted_at) + ET.BLOCKED_RETRY_AFTER
+        elif t.status == "retry":
+            out["next_due_at"] = _naive(t.next_attempt_at) if t.next_attempt_at else None
+            out["detail"] = "a temporary provider error - retried on its backoff"
+        else:                                            # claimed / failed / unknown
+            out["status"], out["detail"] = "stopped", "%s: %s" % (t.status, (t.reason or "")[:200])
+        break
+    else:
+        out["status"] = "finished"
+    if out["next_due_at"] is not None:
+        out["next_due_at"] = out["next_due_at"].isoformat() + "Z"
+    if out["last_sent_at"] is not None:
+        out["last_sent_at"] = _naive(out["last_sent_at"]).isoformat() + "Z"
     return out
 
 

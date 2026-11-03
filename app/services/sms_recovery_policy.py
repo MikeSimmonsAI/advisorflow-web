@@ -73,7 +73,41 @@ def validate(rules) -> Dict[str, Dict]:
             if not isinstance(hours, (int, float)) or not 1 <= hours <= 24 * 30:
                 raise ValueError("code %s: a temporary hold needs hours between 1 and 720" % c)
             r["hours"] = hours
+        if rule.get("retry") is not None:
+            r["retry"] = _validate_retry(c, rule["retry"])
+        if rule.get("evidence"):
+            r["evidence"] = str(rule["evidence"])[:500]      # e.g. "Twilio ticket #29953372 reply, <date>"
         out[c] = r
+    return out
+
+
+# FUTURE CARRIER GUIDANCE (#482 Phase 2). When Twilio answers ticket
+# #29953372 a code's rule may carry the guidance it gives as a `retry` block.
+# It is RECORDED and SHOWN, never acted on by itself: no code path here
+# resends a failed text, and a policy change never touches an existing hold
+# or a past failure. Any future retry feature must ALSO pass every send gate
+# (consent, STOP/DNC, suppression, contact hours, campaign switch, spacing,
+# duplicate claim) - these fields can only narrow what is allowed, never
+# widen it.
+RETRY_FIELDS = {"max_attempts": (1, 10), "cooldown_hours": (1, 24 * 30)}
+
+
+def _validate_retry(code: str, retry) -> Dict:
+    if not isinstance(retry, dict):
+        raise ValueError("code %s: retry must be an object" % code)
+    out = {}
+    for k, (lo, hi) in RETRY_FIELDS.items():
+        v = retry.get(k)
+        if v is None:
+            raise ValueError("code %s: retry.%s is required (%d-%d)" % (code, k, lo, hi))
+        if not isinstance(v, (int, float)) or not lo <= v <= hi:
+            raise ValueError("code %s: retry.%s must be between %d and %d" % (code, k, lo, hi))
+        out[k] = v
+    out["requires_verified_capability"] = bool(retry.get("requires_verified_capability", True))
+    out["enabled"] = False            # recorded guidance only - see above
+    unknown = set(retry) - set(RETRY_FIELDS) - {"requires_verified_capability", "enabled"}
+    if unknown:
+        raise ValueError("code %s: unknown retry fields %s" % (code, ", ".join(sorted(unknown))))
     return out
 
 

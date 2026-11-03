@@ -37,6 +37,16 @@ const OUTCOME = {
 
 const nice = s => (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 
+/** "2 of 5 sent · next Nov 5, 9:00 AM" / "held: no postal address..." */
+function emailLine(fb) {
+  const q = fb?.sequence
+  if (!q) return fb?.eligible ? 'Email can carry on' : (fb?.reason || '—')
+  const pos = `${q.sent} of ${q.max} sent`
+  if (q.status === 'finished') return `${pos} - finished`
+  if (!fb.eligible) return `${pos} - ${fb.reason}`
+  return q.next_due_at ? `${pos} · next ${when(q.next_due_at)}` : `${pos}${q.detail ? ` · ${q.detail}` : ''}`
+}
+
 export default function SmsRecoveryQueue({ title = 'SMS Recovery Queue', openPerson }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
@@ -82,11 +92,22 @@ export default function SmsRecoveryQueue({ title = 'SMS Recovery Queue', openPer
       <Notice text={msg} onClose={() => setMsg('')} />
 
       <section className="sci-kpis four" aria-label="Delivery recovery summary">
-        <Kpi icon="users" tone="red" value={m.families_affected} label="Families with a failed text" note={`since ${when(m.since)}`} />
-        <Kpi icon="pause" tone="gold" value={m.holds_open} label="Texts on hold" note={`${m.holds_resolved} resolved`}
-          onClick={() => set('kind', 'held')} />
-        <Kpi icon="ban" tone="blue" value={m.repeat_attempts_prevented} label="Repeat texts prevented" note="scheduled texts held back" />
-        <Kpi icon="mail" tone="green" value={m.email_fallback_used} label="Reached by email instead" note="held families emailed since" />
+        <Kpi icon="users" tone="red" value={m.families_affected} label="Families with a failed text"
+          note={`${m.messages_failed} failed texts since ${when(m.since)}`} onClick={() => set('kind', 'all')} />
+        <Kpi icon="pause" tone="gold" value={m.holds_open} label="Texts on hold"
+          note={`${m.awaiting_verification} waiting for a number check`} onClick={() => set('kind', 'held')} />
+        <Kpi icon="mail" tone="green" value={m.email_eligible} label="Held - email carries on"
+          note={`${m.email_blocked_by_check} email held by a check`} onClick={() => setF(x => ({ ...x, kind: 'held', fallback: 'eligible' }))} />
+        <Kpi icon="ban" tone="slate" value={m.no_channel} label="Held - no channel" note="no email allowed either"
+          onClick={() => setF(x => ({ ...x, kind: 'held', fallback: 'none' }))} />
+      </section>
+      <section className="sci-kpis four" aria-label="Outcomes">
+        <Kpi icon="check" tone="green" value={m.holds_resolved} label="Holds resolved" note={`${m.recovered_families} families delivered later`}
+          onClick={() => set('kind', 'resolved')} />
+        <Kpi icon="refresh" tone="blue" value={m.repeat_attempts_prevented} label="Repeat texts prevented" note="scheduled texts held back" />
+        <Kpi icon="alert" tone="gold" value={m.needs_carrier_evidence} label="Need carrier evidence" note="every text failed - for the Twilio ticket"
+          onClick={() => set('kind', 'watch')} />
+        <Kpi icon="users" tone="slate" value={m.repeated_families} label="Failed more than once" note={`${m.one_time_families} failed once`} />
       </section>
 
       <Panel title="Texts in this period" labelledBy="smsr-totals">
@@ -96,13 +117,14 @@ export default function SmsRecoveryQueue({ title = 'SMS Recovery Queue', openPer
           ['Delivered (carrier confirmed)', m.delivered],
           ['Not delivered', m.failed],
           ['No final result yet', m.pending],
-          ['Failed by code', Object.entries(m.failed_by_code).map(([c, n]) => `${c}: ${n}`).join(' · ') || '—'],
+          ['Failed by code', Object.entries(m.families_by_code || {}).sort().map(([c, n]) => `${c}: ${n} famil${n === 1 ? 'y' : 'ies'} (${m.failed_by_code[c]} texts)`).join(' · ') || '—'],
           ['Outcomes', Object.entries(m.outcomes).map(([k, n]) => `${OUTCOME[k] || nice(k)}: ${n}`).join(' · ') || '—'],
         ]} />
         {(m.bottlenecks.waiting_review_over_a_day > 0 || m.bottlenecks.held_with_no_email_fallback > 0 || m.bottlenecks.verified_ready_to_release > 0) && (
           <Banner tone="warn" icon="alert" title="Waiting on a person">
             {m.bottlenecks.waiting_review_over_a_day} held over a day without review · {m.bottlenecks.held_with_no_email_fallback} held
-            with no email to fall back on · {m.bottlenecks.verified_ready_to_release} verified and ready to release.
+            with no email going out ({m.email_blocked_by_check} held by an email check, {m.email_provider_held} on an email provider hold)
+            · {m.bottlenecks.verified_ready_to_release} verified and ready to release.
           </Banner>
         )}
       </Panel>
@@ -144,7 +166,7 @@ export default function SmsRecoveryQueue({ title = 'SMS Recovery Queue', openPer
         {d.rows.length === 0 ? <Empty icon="check" title="Nothing here">No family matches these filters.</Empty> : (
           <div className="sci-tablewrap scroll">
             <table className="sci-table compact">
-              <thead><tr><th>Family</th><th>Campaign · location</th><th>Latest error</th><th>Texts</th><th>Phone type</th><th>Email fallback</th><th>Status</th></tr></thead>
+              <thead><tr><th>Family</th><th>Campaign · location</th><th>Latest error</th><th>Texts</th><th>Phone type</th><th>Email</th><th>Status</th><th>Next step</th></tr></thead>
               <tbody>
                 {d.rows.map(r => (
                   <tr key={r.lead_id} style={{ cursor: 'pointer' }} onClick={() => setOpen(r)}>
@@ -154,12 +176,14 @@ export default function SmsRecoveryQueue({ title = 'SMS Recovery Queue', openPer
                       <div className="sci-micro sci-muted">{when(r.latest_error.at)} · {r.latest_error.provider_status}</div></td>
                     <td className="sci-small">{r.attempts} sent · {r.delivered} delivered · {r.failed} failed</td>
                     <td className="sci-small">{r.phone_type}</td>
-                    <td className="sci-small">{r.fallback.eligible ? <Chip tone="ok">Email continues</Chip> : <span title={r.fallback.reason}>{r.fallback.reason}</span>}</td>
+                    <td className="sci-small">{r.fallback.eligible && <Chip tone="ok">Carries on</Chip>}
+                      <div className={r.fallback.eligible ? 'sci-micro sci-muted' : ''}>{emailLine(r.fallback)}</div></td>
                     <td>
                       <Chip tone={KIND[r.kind]?.[1]}>{KIND[r.kind]?.[0] || r.kind}</Chip>
                       {r.hold && <div className="sci-micro sci-muted">{r.hold.disposition ? (OUTCOME[r.hold.disposition] || nice(r.hold.disposition)) : (REVIEW[r.hold.review_status] || r.hold.review_status)}</div>}
                       {r.opted_out && <div className="sci-micro">Opted out</div>}
                     </td>
+                    <td className="sci-small">{r.next_step}</td>
                   </tr>
                 ))}
               </tbody>
@@ -208,11 +232,14 @@ function FamilyDrawer({ row, canAct, onClose, onDone, openPerson }) {
           {' '}Held {when(hold.opened_at)} under policy {hold.policy}; {hold.prevented} scheduled text{hold.prevented === 1 ? '' : 's'} held back so far.
         </Banner>
       )}
+      <Banner tone="info" icon="info" title="Next step">{row.next_step}</Banner>
       <KV rows={[
         ['Latest error', `${row.latest_error.code || '—'} - ${row.latest_error.label || ''}`],
+        row.hold_reason ? ['Why texts are held', row.hold_reason] : null,
+        ['Texts', `${row.attempts} sent · ${row.delivered} delivered · ${row.failed} failed${row.repeated ? ' (failed more than once)' : ''}`],
         ['What happens', row.latest_error.note || '—'],
         ['Message ID (tail)', row.latest_error.sid || '—'],
-        ['Email', row.fallback.eligible ? `Can carry on (${row.fallback.emails_sent} sent, ${row.fallback.remaining ?? '—'} left)` : row.fallback.reason],
+        ['Email', emailLine(row.fallback)],
         ['Review', hold ? (REVIEW[hold.review_status] || hold.review_status) : (row.hold ? OUTCOME[row.hold.disposition] || nice(row.hold.disposition) : 'No hold')],
         row.hold?.evidence ? ['Evidence', row.hold.evidence] : null,
         h ? ['Texts from the family', h.texts_from_family] : null,

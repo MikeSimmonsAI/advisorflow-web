@@ -161,8 +161,46 @@ def _queue(db: Session, org_id: str, *, start, end, manager: bool):
                 "action": it.policy_action, "prevented": it.prevented or 0, "failures": it.failures or 0,
                 "evidence": it.evidence if manager else None, "email_fallback": it.email_fallback},
             "opted_out": R.opted_out(db, lead),
+            "repeated": len(ms) > 1,
+            "delivered_after_failure": bool(last is not None and _delivered_after(db, lid, last.sent_at)),
         })
+        r = rows[-1]
+        r["hold_reason"] = (("%s. %s" % (rule.get("label") or "", rule.get("note") or "")).strip()
+                            if r["kind"] == "held" else None)
+        r["next_step"] = _next_step(r)
     return rows, fails, items
+
+
+def _delivered_after(db: Session, lead_id: str, at) -> bool:
+    return db.query(Message.id).filter(Message.lead_id == lead_id, Message.sent_at > at,
+                                       func.lower(Message.delivery_status) == "delivered").first() is not None
+
+
+def _next_step(r: dict) -> str:
+    """What a person should do next for this family, in plain words. Never
+    "retry the text": nothing here resends a failed message."""
+    h, fb = r["hold"], r["fallback"]
+    if r["opted_out"]:
+        return "Nothing - the family opted out (STOP / do not contact)."
+    if r["kind"] == "held":
+        if h["state"] == "sms_verified_unreachable":
+            return ("Texts stay stopped. Email carries on." if fb["eligible"]
+                    else "No channel left: %s. A person decides how to reach this family." % fb["reason"])
+        if h["review_status"] == "verified_capable":
+            return "Release the hold - the next text goes on its normal day."
+        if fb.get("blocked_by_check"):
+            return "Fix what holds the email (%s), and verify the number." % (fb["sequence"] or {}).get("detail", "")
+        return ("Verify the number (ask the family or run a line check). Email carries on meanwhile."
+                if fb["eligible"] else "Verify the number - no email can go: %s." % fb["reason"])
+    if r["kind"] == "resolved":
+        return "Nothing - resolved (%s)." % (h["disposition"] or "closed").replace("_", " ")
+    if r["delivered_after_failure"]:
+        return "Nothing - a later text was delivered."
+    if r["kind"] == "investigate":
+        return "Carrier filtering - part of the Twilio ticket; not the family's phone."
+    if r["failed"] >= 3 and r["delivered"] == 0:
+        return "Needs carrier evidence: every text failed. Include in the Twilio ticket."
+    return "Nothing yet - the next text keeps its normal day (policy for %s)." % (r["latest_error"]["code"] or "this error")
 
 
 def _metrics(db: Session, org_id: str, rows, fails, items, start, end) -> dict:
@@ -178,10 +216,27 @@ def _metrics(db: Session, org_id: str, rows, fails, items, start, end) -> dict:
                                             EmailMessage.status.notin_(("failed", "bounced"))).first():
             fallback_used += 1
     now = datetime.utcnow()
+    fam_codes = defaultdict(set)
+    for m in fails:
+        fam_codes[m.error_code or "none"].add(m.lead_id)
+    held_rows = [r for r in rows if r["kind"] == "held"]
     return {
         "since": _iso(start),
         "families_affected": len({m.lead_id for m in fails}),
+        "messages_failed": len(fails),
         "failed_by_code": dict(Counter(m.error_code or "none" for m in fails)),
+        "families_by_code": {c: len(v) for c, v in fam_codes.items()},
+        "one_time_families": len([r for r in rows if r["failed"] == 1]),
+        "repeated_families": len([r for r in rows if r["failed"] > 1]),
+        "recovered_families": len([r for r in rows if r["delivered_after_failure"]]),
+        "needs_carrier_evidence": len([r for r in rows if r["kind"] in ("watch", "investigate")
+                                       and r["failed"] >= 3 and r["delivered"] == 0]),
+        "email_eligible": len([r for r in held_rows if r["fallback"]["eligible"]]),
+        "email_blocked_by_check": len([r for r in held_rows if r["fallback"].get("blocked_by_check")]),
+        "email_provider_held": len([r for r in held_rows if "on hold" in (r["fallback"]["reason"] or "")]),
+        "no_channel": len([r for r in held_rows if not r["fallback"]["eligible"]
+                           and not r["fallback"].get("blocked_by_check")]),
+        "awaiting_verification": len([r for r in held_rows if r["hold"]["review_status"] in ("open", "review_requested")]),
         "attempted": sum(by.values()),
         "accepted_by_provider": sum(n for _s, _n, n in sent),
         "delivered": by.get("delivered", 0),
@@ -220,7 +275,7 @@ def queue(code: Optional[str] = None, kind: Optional[str] = Query(None, descript
                "outcomes": sorted({r["hold"]["disposition"] for r in rows if r["hold"] and r["hold"]["disposition"]})}
     if code:
         rows = [r for r in rows if code in r["codes"] or r["latest_error"]["code"] == code]
-    if kind:
+    if kind and kind != "all":
         rows = [r for r in rows if r["kind"] == kind]
     if campaign:
         rows = [r for r in rows if r["campaign"] == campaign]
