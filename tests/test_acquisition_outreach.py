@@ -31,6 +31,16 @@ def _god(db):
     return u
 
 
+def _complete_onboarding(db, org, god):
+    E.update_profile(db, org.id, {
+        "owner_name": "Test Owner", "contact_email": "owner@cleaning.example", "contact_phone": "555-0100",
+        "services": ["Office cleaning"], "service_states": ["TX"], "mailing_address": "1 Test St, Dallas, TX 75201",
+        "approved_offer": "Free walkthrough and quote", "appointment_attendee": "Test Owner"}, owner=True)
+    p = E.get_profile(db, org.id)
+    p.booking_user_id = god.id
+    db.commit()
+
+
 class Mailer:
     def __init__(self, ok=True):
         self.ok, self.sent = ok, []
@@ -54,7 +64,8 @@ def setup(db_session, monkeypatch):
 def _prospect(db, org, god, email, practice=True, name=None):
     o = E.add_prospect(db, org, god, {"business_name": name or "Biz %s" % uuid.uuid4().hex[:6],
                                       "website": "https://%s.example" % uuid.uuid4().hex[:8],
-                                      "email": email, "segment": "medical_dental", "is_practice": practice})
+                                      "email": email, "segment": "medical_dental", "is_practice": practice,
+                                      "city": "Dallas", "state": "TX"})
     return o
 
 
@@ -96,6 +107,8 @@ def test_real_send_gates_and_pilot_clock(setup):
     assert any("paused" in w for w in why) and any("mailing address" in w for w in why)
     assert any("verified" in w for w in why) and any("Contact verified" in w for w in why)
     E.update_profile(db, org.id, {"mailing_address": "1 Test St, Dallas, TX 75201"}, owner=True)
+    assert any("Onboarding isn't complete" in w for w in O.refusals(db, org, opp, lead))
+    _complete_onboarding(db, org, god)
     E.set_paused(db, org.id, god, False, None)
     E.add_evidence(db, org.id, opp, god, {"kind": "contact_email", "value": "office@realdental.example",
                                           "source_url": "https://realdental.example/contact", "verified": True})

@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import { BASE, useAcq } from './AcquisitionShell'
+import { BusinessForm, Readiness } from './BusinessForm'
 import { DateChip, Icon, Kpi, Loading, Pill, apptPill, clock, errText, money, useLoad, useToast, when } from './ui'
 
 function ProspectRow({ x }) {
@@ -289,74 +290,19 @@ export function Results() {
 export function Settings() {
   const { status, reloadStatus } = useAcq()
   const [p, err, reload] = useLoad('/acquisition/profile')
-  const [f, setF] = useState(null)
-  const [busy, setBusy] = useState(false)
-  const [fail, setFail] = useState(null)
   const [toast, say] = useToast()
-  useEffect(() => {
-    if (p) setF({ ...p, service_area: (p.service_area || []).join(', '), services: (p.services || []).join(', ') })
-  }, [p])
   if (err) return <div className="aq-page"><div className="aq-err">{errText(err)}</div></div>
-  if (!f) return <div className="aq-page"><Loading /></div>
-  const can = status.can_manage
-  const set = k => e => setF({ ...f, [k]: e.target.value })
-  const toggle = k => setF({ ...f, segments: f.segments.includes(k) ? f.segments.filter(s => s !== k) : [...f.segments, k] })
-  const save = async () => {
-    setBusy(true); setFail(null)
-    const split = s => String(s || '').split(',').map(x => x.trim()).filter(Boolean)
-    try {
-      await api.put('/acquisition/profile', {
-        business_name: f.business_name, owner_name: f.owner_name, contact_phone: f.contact_phone,
-        contact_email: f.contact_email, service_area: split(f.service_area), services: split(f.services),
-        segments: f.segments, min_job_value: f.min_job_value === '' ? null : f.min_job_value,
-        insurance_note: f.insurance_note, certifications_note: f.certifications_note,
-        availability_note: f.availability_note, appointment_minutes: Number(f.appointment_minutes),
-      })
-      say('Saved'); await reload(); reloadStatus()
-    } catch (e) { setFail(errText(e)) } finally { setBusy(false) }
-  }
-  const field = (k, label, help, multi) => (
-    <div className="aq-field"><label htmlFor={`aq-${k}`}>{label}</label>
-      {multi ? <textarea id={`aq-${k}`} value={f[k] || ''} onChange={set(k)} disabled={!can} />
-        : <input id={`aq-${k}`} value={f[k] ?? ''} onChange={set(k)} disabled={!can} />}
-      {help && <small>{help}</small>}</div>
-  )
+  if (!p) return <div className="aq-page"><Loading /></div>
   return (
     <div className="aq-page">
       {toast}
       <h1 className="aq-h1">My business</h1>
-      <p className="aq-lede">This is how we describe you and which businesses we look for. Only write what’s true today — we never claim anything you haven’t confirmed.</p>
-      <div className="aq-grid aq-two">
-        <section className="aq-card">
-          <h2>About you</h2>
-          {field('business_name', 'Business name')}
-          {field('owner_name', 'Your name')}
-          {field('contact_phone', 'Best phone for appointments')}
-          {field('contact_email', 'Best email for appointment alerts')}
-          {field('services', 'Services you offer', 'Separate with commas, e.g. office cleaning, floor care, move-out cleaning')}
-          {field('insurance_note', 'Insurance', 'Only what you can show proof of', true)}
-          {field('certifications_note', 'Certifications', 'Only what you actually hold', true)}
-        </section>
-        <section className="aq-card">
-          <h2>Who you want</h2>
-          <div className="aq-field"><label>Kinds of businesses</label>
-            <div className="aq-checks">
-              {status.segments.map(s => (
-                <label key={s.key}><input type="checkbox" checked={f.segments.includes(s.key)} onChange={() => toggle(s.key)} disabled={!can} />{s.label}</label>
-              ))}
-            </div></div>
-          {field('service_area', 'Cities you cover', 'Separate with commas')}
-          {field('min_job_value', 'Smallest monthly contract you’ll take ($)')}
-          <h2 style={{ marginTop: 20 }}>When you can meet</h2>
-          {field('availability_note', 'Your usual availability', 'For example: Tue & Thu 9–12, Fri afternoons. Your calendar is always checked before a time is offered.', true)}
-          <div className="aq-field"><label htmlFor="aq-mins">Appointment length</label>
-            <select id="aq-mins" value={f.appointment_minutes} onChange={set('appointment_minutes')} disabled={!can}>
-              {[15, 30, 45, 60, 90, 120].map(m => <option key={m} value={m}>{m} minutes</option>)}
-            </select></div>
-        </section>
+      <p className="aq-lede">This is how we describe you and which businesses we look for. Only write what’s true today. We never claim anything you haven’t confirmed.</p>
+      <Readiness r={p.readiness} />
+      <div style={{ marginTop: 14 }}>
+        <BusinessForm profile={p} segments={status.segments} canEdit={status.can_manage}
+          onSave={async body => { await api.put('/acquisition/profile', body); say('Saved'); await reload(); reloadStatus() }} />
       </div>
-      {fail && <div className="aq-err">{fail}</div>}
-      {can && <div className="aq-actions"><button className="aq-btn aq-btn--primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save changes'}</button></div>}
     </div>
   )
 }

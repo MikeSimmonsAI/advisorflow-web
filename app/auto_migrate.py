@@ -1638,6 +1638,20 @@ COLUMNS_TO_ADD = [
     ("acquisition_profiles", "mailing_address", "TEXT"),
     ("acquisition_profiles", "booking_user_id", "VARCHAR"),
     ("acquisition_profiles", "test_booking_user_id", "VARCHAR"),
+    ("acquisition_profiles", "website", "VARCHAR"),
+    ("acquisition_profiles", "service_zips", "TEXT"),
+    ("acquisition_profiles", "service_radius_miles", "INTEGER"),
+    ("acquisition_profiles", "service_states", "TEXT"),
+    ("acquisition_profiles", "timezone", "VARCHAR"),
+    ("acquisition_profiles", "recurring_pref", "VARCHAR"),
+    ("acquisition_profiles", "capacity_note", "TEXT"),
+    ("acquisition_profiles", "appointment_attendee", "VARCHAR"),
+    ("acquisition_profiles", "business_description", "TEXT"),
+    ("acquisition_profiles", "approved_offer", "TEXT"),
+    ("acquisition_profiles", "qualification_questions", "TEXT"),
+    ("acquisition_profiles", "offer_type", "VARCHAR"),
+    ("acquisition_opportunities", "geo_status", "VARCHAR"),
+    ("acquisition_opportunities", "geo_note", "VARCHAR"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

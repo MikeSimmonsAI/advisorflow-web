@@ -163,6 +163,10 @@ def refusals(db: Session, org: Organization, opp: AcquisitionOpportunity, lead: 
         out.append("This address is on the do-not-contact list")
     elif opp.domain and H.do_not_contact_domain_match(opp.domain, excl):
         out.append("This business is on the do-not-contact list")
+    from app.services.acquisition import engine as E
+    g = E.opp_geo(opp, lead)
+    if g["status"] != "eligible":
+        out.append("Location: %s" % (g["note"] or g["status"]))
     if opp.is_practice:
         if email and email not in test_recipients():
             out.append("Practice prospects can only be emailed at the owner's test inboxes")
@@ -176,6 +180,9 @@ def refusals(db: Session, org: Organization, opp: AcquisitionOpportunity, lead: 
             out.append("The pilot is paused")
         if p is None or not (p.mailing_address or "").strip():
             out.append("The client's business mailing address is missing (required in every email)")
+        ready = E.readiness(org, p)
+        if not ready["launch_ready"]:
+            out.append("Onboarding isn't complete: " + ", ".join(ready["missing"]))
         if kind == "booking":
             if opp.stage != C.INTERESTED:
                 out.append("A walkthrough link goes only to a prospect marked Interested")

@@ -49,6 +49,20 @@ class AcquisitionProfile(Base):
     booking_user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     # Owner-chosen calendar that PRACTICE walkthroughs are booked on (testing only).
     test_booking_user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Onboarding (#452 stage 2). Lists are JSON text.
+    website = Column(String, nullable=True)
+    service_zips = Column(Text, nullable=True)            # JSON list of 5-digit ZIPs
+    service_radius_miles = Column(Integer, nullable=True)
+    service_states = Column(Text, nullable=True)          # JSON list of 2-letter states (supported territory only)
+    timezone = Column(String, nullable=True)              # IANA, e.g. America/Chicago
+    recurring_pref = Column(String(20), nullable=True)    # recurring | one_time | both
+    capacity_note = Column(Text, nullable=True)
+    appointment_attendee = Column(String, nullable=True)  # who meets prospects and closes
+    business_description = Column(Text, nullable=True)
+    approved_offer = Column(Text, nullable=True)          # what outreach may offer, in the client's words
+    qualification_questions = Column(Text, nullable=True) # JSON list of strings
+    # free_pilot (Divine Shine) | growth_pilot_250 - a business decision, set by the owner only.
+    offer_type = Column(String(30), nullable=True)
     appointment_minutes = Column(Integer, nullable=False, default=45)
     notify_user_ids = Column(Text, nullable=True)       # JSON list of user ids, checked on read
     # EMERGENCY PAUSE - starts paused. Every future worker checks this first.
@@ -78,6 +92,9 @@ class AcquisitionOpportunity(Base):
     source = Column(String(60), nullable=True)          # manual / places / import ...
     source_url = Column(String, nullable=True)
     is_practice = Column(Boolean, nullable=False, default=False)
+    # Supported territory (geo.py): eligible | review | excluded, with the reason.
+    geo_status = Column(String(12), nullable=True)
+    geo_note = Column(String(200), nullable=True)
     score = Column(Integer, nullable=True)
     score_reasons = Column(Text, nullable=True)          # JSON list of strings
     disqualified_reason = Column(String(300), nullable=True)

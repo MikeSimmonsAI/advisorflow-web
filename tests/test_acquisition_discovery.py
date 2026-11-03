@@ -139,3 +139,21 @@ def test_run_is_god_only_and_plan_is_operator_ok(client, setup):
     assert r.status_code == 200 and r.json()["can_run"] is True
     assert client.post("/god/acquisition/%s/discovery/run" % org.id, json={"segment": "office", "city": "Dallas"},
                        headers=h).status_code == 403
+
+
+def test_run_reads_real_state_and_drops_excluded_territory(setup):
+    db, org, god = setup
+    places = [{"place_id": "c1", "name": "Venice Dental", "formatted_address": "9 Ocean Ave, Los Angeles, CA 90001, USA"},
+              {"place_id": "t1", "name": "Plano Dental", "formatted_address": "5 Elm St, Plano, TX 75074, USA"}]
+
+    async def search(query, n):
+        return places[:n]
+
+    async def details(pid):
+        return {"website": "https://%s.example" % pid}
+    out = asyncio.get_event_loop().run_until_complete(
+        D.run(db, org, god, "medical_dental", "Dallas", 2, True, search=search, details=details))
+    assert out["added"] == 1 and out["excluded"] == 1
+    opp = db.query(AcquisitionOpportunity).filter(AcquisitionOpportunity.organization_id == org.id).one()
+    lead = db.query(Lead).get(opp.lead_id)
+    assert lead.state == "TX" and lead.zip_code == "75074" and opp.geo_status == "eligible"

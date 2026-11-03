@@ -9,6 +9,7 @@
 import { createContext, Suspense, useContext, useEffect, useMemo, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { api } from '../../api/client'
+import { BusinessForm, Readiness } from './BusinessForm'
 import { DateChip, Icon, Kpi, Loading, Logo, Pill, apptPill, clock, errText, initials, money, useFont, useLoad, useToast, when } from './ui'
 import './acquisition.css'
 
@@ -19,10 +20,11 @@ const pct = v => (v == null ? '—' : Math.round(v * 100) + '%')
 
 const NAV = [
   { to: OPS, label: 'Control Center', icon: 'dashboard', end: true },
+  { to: `${OPS}/onboarding`, label: 'Onboarding', icon: 'building' },
   { to: `${OPS}/discovery`, label: 'Lead Discovery', icon: 'search' },
   { to: `${OPS}/prospects`, label: 'Prospects', icon: 'users' },
-  { to: `${OPS}/outreach`, label: 'Outreach', icon: 'mail', soon: 'P3' },
-  { to: `${OPS}/responses`, label: 'Responses', icon: 'reply', soon: 'P3' },
+  { to: `${OPS}/outreach`, label: 'Outreach', icon: 'mail' },
+  { to: `${OPS}/responses`, label: 'Responses', icon: 'reply' },
   { to: `${OPS}/appointments`, label: 'Appointments', icon: 'calendar' },
   { to: `${OPS}/pipeline`, label: 'Pipeline', icon: 'pipeline' },
   { to: `${OPS}/health`, label: 'Worker Health', icon: 'heart' },
@@ -165,6 +167,8 @@ export function ControlCenter() {
   return (
     <div className="aq-page">
       {ov.profile.paused && <div className="aq-note aq-note--warn"><b>Paused</b> {ov.profile.paused_at ? `since ${when(ov.profile.paused_at)}` : ''} — {ov.profile.paused_reason}</div>}
+      {!ov.profile.readiness?.launch_ready && <div className="aq-note aq-note--warn"><b>Onboarding is a draft.</b> Real businesses can't be emailed until it has: {(ov.profile.readiness?.missing || []).join(', ')}. <a href={`${OPS}/onboarding`}>Finish onboarding</a></div>}
+      <div className="aq-note">{ov.profile.offer_label} · {(ov.profile.service_states || []).join(', ') || 'no states set'} · {(ov.profile.service_area || []).slice(0, 6).join(', ')}{(ov.profile.service_area || []).length > 6 ? '…' : ''} · {ov.profile.timezone}</div>
       <div className="aq-grid aq-kpis aq-kpis--dark">
         <Kpi icon="search" value={f.real} label="Businesses Found" sub={`(DFW target) · ${all.practice} practice`} />
         <Kpi icon="users" value={f.contacts_verified} label="Contacts Verified" sub="(Decision-makers)" />
@@ -193,11 +197,27 @@ export function ControlCenter() {
   )
 }
 
+export function OpsOnboarding() {
+  const { ov, orgId, reload } = useOps()
+  const [toast, say] = useToast()
+  return (
+    <div className="aq-page">{toast}
+      <h1 className="aq-h1">Onboarding</h1>
+      <p className="aq-lede">The client's business facts. Fill in only what the client has confirmed; nothing here is guessed.</p>
+      <Readiness r={ov.profile.readiness} />
+      <div style={{ marginTop: 14 }}>
+        <BusinessForm profile={ov.profile} segments={ov.segments} canEdit ownerControls={ov.is_god}
+          onSave={async body => { await api.put(`/acquisition-ops/${orgId}/profile`, body); say('Saved'); reload() }} />
+      </div>
+    </div>
+  )
+}
+
 export function Soon({ title, phase, text }) {
   return (
     <div className="aq-page"><section className="aq-card aq-soon">
       <b>{title}</b><p className="aq-lede" style={{ margin: '0 auto' }}>{text}</p>
-      <p style={{ marginTop: 12 }}><span className="aq-pill">Planned in {phase}</span></p>
+      {phase && <p style={{ marginTop: 12 }}><span className="aq-pill">Planned in {phase}</span></p>}
     </section></div>
   )
 }
@@ -276,8 +296,10 @@ function ProspectDetail({ x }) {
         <dl className="aq-dl">
           <dt>Name</dt><dd>{x.contact_name || '—'}</dd><dt>Title</dt><dd>{x.contact_title || '—'}</dd>
           <dt>Email</dt><dd>{x.email || '—'}</dd><dt>Phone</dt><dd>{x.phone || '—'}</dd><dt>Address</dt><dd>{x.address || '—'}</dd>
+          <dt>Territory</dt><dd>{x.geo ? <><span className={`aq-pill ${x.geo.status === 'eligible' ? 'aq-pill--ok' : ''}`}>{x.geo.status}</span> {x.geo.note}</> : '—'}</dd>
         </dl>
       )}
+      {tab === 'contacts' && <LocationForm x={x} />}
       {tab === 'email' && <EmailTab x={x} />}
       {tab === 'actions' && (
         <div className="aq-actions">
@@ -288,6 +310,27 @@ function ProspectDetail({ x }) {
           <small style={{ color: 'var(--aq-sub)', width: '100%' }}>Contacted and Replied are recorded from real messages only.</small>
         </div>
       )}
+      {fail && <div className="aq-err">{fail}</div>}
+    </div>
+  )
+}
+
+function LocationForm({ x }) {
+  const { orgId, reload } = useOps()
+  const [f, setF] = useState({ city: x.city || '', state: '', zip_code: '', note: '' })
+  const [fail, setFail] = useState(null)
+  const save = async () => {
+    setFail(null)
+    try { await api.put(`/acquisition-ops/${orgId}/prospects/${x.id}/location`, f); reload() } catch (e) { setFail(errText(e)) }
+  }
+  return (
+    <div className="aq-actions" style={{ marginTop: 8 }}>
+      <input placeholder="City" value={f.city} onChange={e => setF({ ...f, city: e.target.value })} />
+      <input placeholder="State (TX)" style={{ width: 90 }} value={f.state} onChange={e => setF({ ...f, state: e.target.value })} />
+      <input placeholder="ZIP" style={{ width: 90 }} value={f.zip_code} onChange={e => setF({ ...f, zip_code: e.target.value })} />
+      <input placeholder="How you confirmed it" style={{ flex: 1, minWidth: 180 }} value={f.note} onChange={e => setF({ ...f, note: e.target.value })} />
+      <button className="aq-btn aq-btn--sm aq-btn--primary" disabled={!f.state.trim()} onClick={save}>Confirm location</button>
+      <small style={{ color: 'var(--aq-sub)', width: '100%' }}>Contiguous US except California. A phone area code isn't proof of location.</small>
       {fail && <div className="aq-err">{fail}</div>}
     </div>
   )
@@ -338,7 +381,7 @@ function EmailTab({ x }) {
 
 function AddProspect() {
   const { ov, orgId, reload } = useOps()
-  const blank = { business_name: '', segment: '', website: '', source_url: '', city: '', phone: '', contact_first_name: '',
+  const blank = { business_name: '', segment: '', website: '', source_url: '', city: '', state: '', zip_code: '', phone: '', contact_first_name: '',
                   contact_last_name: '', contact_title: '', email: '', is_practice: true }
   const [f, setF] = useState(blank)
   const [busy, setBusy] = useState(false)
@@ -358,7 +401,7 @@ function AddProspect() {
         <div>{input('business_name', 'Business name *')}
           <div className="aq-field"><label>Business type</label><select value={f.segment} onChange={set('segment')}><option value="">—</option>
             {ov.segments.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}</select></div>
-          {input('website', 'Website')}{input('source_url', 'Where it was found (URL)')}{input('city', 'City')}</div>
+          {input('website', 'Website')}{input('source_url', 'Where it was found (URL)')}{input('city', 'City')}{input('state', 'State (from the address)')}{input('zip_code', 'ZIP')}</div>
         <div>{input('contact_first_name', 'Contact first name')}{input('contact_last_name', 'Contact last name')}
           {input('contact_title', 'Contact title')}{input('email', 'Contact email')}{input('phone', 'Phone')}</div>
       </div>
@@ -395,7 +438,7 @@ export function Prospects() {
             <div className="aq-row">
               <span className="aq-kpi__icon" style={{ margin: 0, width: 32, height: 32 }}><Icon name="building" size={16} /></span>
               <div className="aq-row__main"><b>{x.business_name} {x.is_practice && <span className="aq-pill">practice</span>}</b>
-                <span>{[x.segment_label, x.city, x.domain].filter(Boolean).join(' · ')} · {x.evidence.length} evidence</span></div>
+                <span>{[x.segment_label, x.city, x.domain].filter(Boolean).join(' · ')} · {x.evidence.length} evidence{x.geo && x.geo.status !== 'eligible' ? <> · <span className="aq-pill">{x.geo.status === 'review' ? 'Location needs review' : 'Outside territory'}</span></> : null}</span></div>
               {x.score != null && <span className="aq-score">{x.score}</span>}
               <Pill stage={x.stage} label={x.stage_label} />
               <button className="aq-btn aq-btn--sm" onClick={() => setOpen(open === x.id ? null : x.id)}>{open === x.id ? 'Close' : 'Open'}</button>
