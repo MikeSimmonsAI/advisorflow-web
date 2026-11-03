@@ -33,17 +33,17 @@ from app.services.acquisition import common as C
 from app.services.acquisition import engine as E
 
 PLATFORM_SLUG = "evosyspro"
-SERVICES = [
-    ("office", "Commercial office cleaning", "office"),
-    ("medical", "Medical / dental cleaning", "medical_dental"),
-    ("apartment_turnover", "Apartment turnover cleaning", "apartments"),
-    ("property_management", "Property management cleaning", "property_management"),
-    ("str_turnover", "Short-term rental turnover", "short_term_rental"),
-    ("janitorial", "Janitorial contracts", "office"),
-    ("move_in_out", "Move-in / move-out cleaning", "apartments"),
-]
-SERVICE_LABEL = {k: l for k, l, _ in SERVICES}
-SERVICE_SEGMENT = {k: s for k, _, s in SERVICES}
+# Cleaning stays the default category; every category shares one engine (#452).
+SERVICES = C.services_for("cleaning")
+SERVICE_LABEL = {k: l for _, _, svcs in C.SERVICE_CATEGORIES for k, l, _ in svcs}
+SERVICE_SEGMENT = {k: s for _, _, svcs in C.SERVICE_CATEGORIES for k, _, s in svcs}
+
+
+def category_of(data: Dict[str, Any]) -> str:
+    cat = (data.get("service_category") or "cleaning").strip()
+    if cat not in C.SERVICE_CATEGORY_KEYS:
+        raise HTTPException(422, "Unknown service category")
+    return cat
 
 
 def _clean_list(raw, width=80, limit=60) -> List[str]:
@@ -64,12 +64,13 @@ def _platform(db: Session) -> Platform:
 
 
 def find_existing(db: Session, name: str) -> Optional[Organization]:
-    """A cleaning workspace with this exact name already on EvoSys Pro."""
+    """A service-company workspace with this exact name already on EvoSys Pro
+    (any service category - a rename of category never creates a twin)."""
     nm = (name or "").strip().lower()
     if not nm:
         return None
     return (db.query(Organization).filter(func.lower(Organization.name) == nm,
-                                          Organization.industry == "cleaning").first())
+                                          Organization.industry.in_(C.SERVICE_CATEGORY_KEYS)).first())
 
 
 def _profile_from(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -77,14 +78,16 @@ def _profile_from(data: Dict[str, Any]) -> Dict[str, Any]:
     svc_keys = [s for s in _clean_list(data.get("services")) if s in SERVICE_LABEL]
     custom = _clean_list(data.get("custom_services"), width=120, limit=10)
     services = [SERVICE_LABEL[k] for k in svc_keys] + custom
-    segments = sorted({SERVICE_SEGMENT[k] for k in svc_keys})
+    chosen = [x for x in _clean_list(data.get("segments")) if x in C.SEGMENT_KEYS]
+    segments = sorted({SERVICE_SEGMENT[k] for k in svc_keys} | set(chosen))
+    counties = ["%s County" % c.replace(" County", "").replace(" county", "") for c in _clean_list(data.get("counties"))]
     out: Dict[str, Any] = {
         "business_name": data.get("name"), "owner_name": data.get("contact_name"),
         "contact_email": data.get("contact_email"), "contact_phone": data.get("contact_phone"),
         "website": data.get("website"),
         "services": services, "segments": segments,
         # NEVER the DFW default: an unconfirmed territory is empty.
-        "service_area": _clean_list(data.get("cities")),
+        "service_area": _clean_list(data.get("cities")) + counties,
         "service_zips": _clean_list(data.get("zips"), width=5, limit=300),
         "exclusions": " ".join(_clean_list(data.get("exclusions"), width=200)),
     }
@@ -144,6 +147,7 @@ def onboard(db: Session, actor: User, data: Dict[str, Any], base_url: Optional[s
     Sales opportunity or the same company name never makes a second workspace."""
     name = (data.get("name") or "").strip()[:150]
     opp_id = data.get("sales_opportunity_id") or None
+    category = category_of(data)
     created, source = False, "direct"
     org: Optional[Organization] = None
     if opp_id:
@@ -158,11 +162,11 @@ def onboard(db: Session, actor: User, data: Dict[str, Any], base_url: Optional[s
             org = db.query(Organization).filter(Organization.id == opp.customer_organization_id).first()
         if org is None:
             if len(name) < 2:
-                raise HTTPException(422, "Give the cleaning company's name")
+                raise HTTPException(422, "Give the company's name")
             same = find_existing(db, name)
             if same is not None and not data.get("create_anyway"):
                 return {"status": "duplicate", "name": name, "organization_id": same.id,
-                        "message": "A cleaning workspace named %s already exists." % same.name}
+                        "message": "A service-company workspace named %s already exists." % same.name}
             if opp.status != "won" and opp.stage != STAGE_WON:
                 # The owner converting a recruited company IS the win.
                 opp.status, opp.stage = "won", STAGE_WON
@@ -170,26 +174,28 @@ def onboard(db: Session, actor: User, data: Dict[str, Any], base_url: Optional[s
                 opp.stage_changed_at = datetime.utcnow()
                 db.flush()
             impl, created = PROV.provision_customer(
-                db, opp, actor, org_name=name, industry="cleaning", plan="trial",
+                db, opp, actor, org_name=name, industry=category, plan="trial",
                 timezone=data.get("timezone") or None, org_phone=data.get("contact_phone") or None,
                 notes="Converted to an Acquisition client")
             org = db.query(Organization).filter(Organization.id == impl.organization_id).first()
     else:
         if len(name) < 2:
-            raise HTTPException(422, "Give the cleaning company's name")
+            raise HTTPException(422, "Give the company's name")
         org = find_existing(db, name)
         if org is None:
             plat = _platform(db)
             from app.services.provisioning import unique_slug
             org = Organization(name=name, slug=unique_slug(db, name), plan="trial", platform_id=plat.id,
-                               is_active=True, industry="cleaning",
+                               is_active=True, industry=category,
                                org_phone=(data.get("contact_phone") or None))
             db.add(org)
             db.commit()
             db.refresh(org)
             created = True
-    if org.industry != "cleaning":
-        org.industry = "cleaning"
+    # The category is set on creation, or when the owner explicitly states it;
+    # a retry with no category never re-labels an existing company.
+    if org.industry != category and (created or data.get("service_category")):
+        org.industry = category
         db.commit()
     had_profile = E.get_profile(db, org.id) is not None
     E.enable(db, org, actor)

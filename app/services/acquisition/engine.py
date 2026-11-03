@@ -43,13 +43,13 @@ def enable(db: Session, org: Organization, actor: User) -> dict:
                                  "one company until the pilot is evaluated." % others[0].name)
     if not C.identity_ok(org):
         raise HTTPException(409, "This workspace is recorded as a %s business. The acquisition pilot "
-                                 "is for a cleaning company." % (org.industry or "different"))
+                                 "is for a service business." % (org.industry or "different"))
     keys = C.jload(org.enabled_features, None)
     keys = list(keys) if isinstance(keys, list) else []
     added = [k for k in CLIENT_FEATURES if k not in keys]
     org.enabled_features = C.jdump(keys + added)
     if (org.industry or "").strip().lower() in ("", "generic", "other", "none", "unknown"):
-        org.industry = C.IDENTITY
+        org.industry = C.IDENTITY          # neutral org: first supported category
     p = get_profile(db, org.id)
     created = p is None
     if created:
