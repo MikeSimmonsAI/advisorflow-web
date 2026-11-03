@@ -17,7 +17,8 @@ def _book(p, opp_id):
     db = p["db"]
     o = db.query(AcquisitionOpportunity).get(opp_id)
     bl = BookingLink(lead_id=o.lead_id, user_id=p["god"].id, status="booked",
-                     booked_time=datetime.utcnow() + timedelta(days=2), appt_label="Walkthrough", appt_duration=45)
+                     booked_time=datetime.utcnow() + timedelta(days=2), appt_label="Walkthrough", appt_duration=45,
+                     calendar_event_id="evt-test")
     db.add(bl)
     db.commit()
     o.booking_link_id = bl.id
@@ -96,3 +97,13 @@ def test_owner_still_sees_the_internal_allocation(pilot):
     g = _h(p["db"], p["god"])
     items = p["c"].get("/acquisition-ops/%s/prospects" % p["shine"].id, headers=g).json()["items"]
     assert opp in [x["id"] for x in items]
+
+
+def test_a_real_appointment_cannot_be_marked_booked_by_hand(pilot):
+    p = pilot
+    opp = _add(p)
+    _move(p, opp, "interested", note="Wants a walkthrough")
+    r = _move(p, opp, "appointment_booked")
+    assert r.status_code == 409 and "calendar" in r.text
+    h = _h(p["db"], p["owner"], p["shine"].id)
+    assert p["c"].get("/acquisition/prospects", headers=h).json()["items"] == []
