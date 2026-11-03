@@ -217,3 +217,19 @@ a.hb-stat:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(0,0,0
 @media (min-width: 901px) {
   .aq.aq-dark .aq-side { position: sticky; top: 0; height: 100vh; overflow-y: auto; align-self: flex-start; }
 }
+
+/* Mobile prospect cards (#474 review): tables become stacked cards under 720px */
+.hb-mcards { display: none; }
+@media (max-width: 720px) {
+  .aq.aq-dark .hb-desk { display: none; }
+  .aq.aq-dark .hb-mcards { display: grid; gap: 10px; }
+  .aq.aq-dark .hb-mcards--pick { max-height: 460px; overflow-y: auto; }
+  .aq.aq-dark .hb-toolbar > select, .aq.aq-dark .hb-toolbar > input[type=search] { flex: 1 1 100%; width: 100%; }
+}
+.aq.aq-dark .hb-mcard { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid #2c3366;
+  border-radius: 14px; background: #141a3a; min-width: 0; }
+.aq.aq-dark .hb-mcard__top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.aq.aq-dark .hb-mcard__top b { overflow-wrap: anywhere; }
+.aq.aq-dark .hb-mcard__dots { display: flex; flex-wrap: wrap; gap: 8px; }
+.aq.aq-dark .hb-mcard__foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 2px; }
+.aq.aq-dark .hb-mcard__foot a { color: #a78bfa; }

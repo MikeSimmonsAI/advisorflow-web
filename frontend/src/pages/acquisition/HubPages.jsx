@@ -160,9 +160,27 @@ function ProspectDrawer({ x, onClose, onChanged }) {
   )
 }
 
-function ProspectTable({ items, onOpen, select, chosen, toggle }) {
+function ProspectCards({ items, onOpen }) {
   return (
-    <div className="hb-table-wrap"><table className="aq-table"><thead><tr>
+    <div className="hb-mcards">{items.map(x => (
+      <article className="hb-mcard" key={x.id}>
+        <div className="hb-mcard__top"><b>{x.name}</b>
+          {x.assigned_to ? <span className="aq-pill aq-pill--appointment_booked">Assigned</span> : <span className="aq-pill aq-pill--ok">Unassigned</span>}</div>
+        <div className="hb-muted">{SEG[x.segment] || x.industry || 'Category not set'} · {[x.city, x.state].filter(Boolean).join(', ') || 'Location not set'}</div>
+        {x.assigned_to && <div className="hb-muted">Client: <b>{x.assigned_to}</b></div>}
+        <div className="hb-mcard__dots"><Dot tone={QUEUE_TONE[x.queue]}>{x.queue_label}</Dot>
+          <Dot tone={x.email_ready ? 'green' : 'rose'}>{x.email_ready ? 'Email ready' : 'Not email ready'}</Dot></div>
+        <div className="hb-mcard__foot">
+          {x.source_url ? <a href={x.source_url} target="_blank" rel="noreferrer">Source page ↗</a> : <span className="hb-muted">No source link</span>}
+          <button className="aq-btn aq-btn--sm aq-btn--primary" onClick={() => onOpen(x)}>Details</button></div>
+      </article>))}</div>
+  )
+}
+
+function ProspectTable({ items, onOpen, select, chosen, toggle }) {
+  return (<>
+    <ProspectCards items={items} onOpen={onOpen} />
+    <div className="hb-table-wrap hb-desk"><table className="aq-table"><thead><tr>
       {select && <th />}<th>Business</th><th>Category</th><th>City / State</th><th>Source</th><th>Researched</th><th>Email</th><th>Readiness</th><th>Assignment</th></tr></thead>
       <tbody>{items.map(x => (
         <tr key={x.id} className="hb-click" onClick={() => onOpen(x)}>
@@ -176,7 +194,7 @@ function ProspectTable({ items, onOpen, select, chosen, toggle }) {
           <td><Dot tone={QUEUE_TONE[x.queue]}>{x.email_ready ? 'Email ready' : 'Not email ready'}</Dot></td>
           <td>{x.assigned_to ? <span className="aq-pill aq-pill--appointment_booked">{x.assigned_to}</span> : <span className="aq-pill aq-pill--ok">Available</span>}</td>
         </tr>))}</tbody></table></div>
-  )
+  </>)
 }
 
 // ── 3. MASTER PROSPECT POOL ──────────────────────────────────────────────
@@ -288,11 +306,16 @@ export function AssignmentsPage() {
         <section className="aq-card">
           <div className="aq-card__head"><h2>1 · Available businesses ({items.length})</h2><span className="aq-pill">{chosen.length} selected (max 20)</span></div>
           {pErr && <div className="aq-err">{errText(pErr)}</div>}
-          {!pool ? <Loading /> : items.length ? <div className="hb-table-wrap" style={{ maxHeight: 430 }}><table className="aq-table"><thead><tr><th /><th>Business</th><th>Type</th><th>City</th><th>Email</th></tr></thead>
+          {!pool ? <Loading /> : items.length ? <><div className="hb-mcards hb-mcards--pick">{items.map(x => (
+            <label className="hb-mcard" key={x.id}><div className="hb-mcard__top"><b>{x.name}</b>
+              <input type="checkbox" aria-label={`Select ${x.name}`} checked={chosen.includes(x.id)} onChange={() => toggle(x.id)} /></div>
+              <div className="hb-muted">{SEG[x.segment] || '—'} · {[x.city, x.state].filter(Boolean).join(', ')}</div>
+              <div className="hb-mcard__dots"><Dot tone={x.email_ready ? 'green' : 'rose'}>{x.email_ready ? 'Email ready' : 'Not email ready'}</Dot></div></label>))}</div>
+            <div className="hb-table-wrap hb-desk" style={{ maxHeight: 430 }}><table className="aq-table"><thead><tr><th /><th>Business</th><th>Type</th><th>City</th><th>Email</th></tr></thead>
             <tbody>{items.map(x => <tr key={x.id} className="hb-click" onClick={() => toggle(x.id)}>
               <td><input type="checkbox" aria-label={`Select ${x.name}`} checked={chosen.includes(x.id)} readOnly /></td><td><b>{x.name}</b></td>
               <td>{SEG[x.segment] || '—'}</td><td>{[x.city, x.state].filter(Boolean).join(', ')}</td>
-              <td><Dot tone={x.email_ready ? 'green' : 'rose'}>{x.email_ready ? 'Ready' : 'Not ready'}</Dot></td></tr>)}</tbody></table></div>
+              <td><Dot tone={x.email_ready ? 'green' : 'rose'}>{x.email_ready ? 'Ready' : 'Not ready'}</Dot></td></tr>)}</tbody></table></div></>
             : <Empty icon="database" title="No available businesses" action={<a className="aq-btn" href={`${OPS}/import`}>Import</a>} />}
         </section>
         <section className="aq-card">
@@ -320,16 +343,17 @@ export function AssignmentsPage() {
 }
 
 // ── 6. CLEANING CLIENT DIRECTORY + ONBOARDING ───────────────────────────
-const STATUS_LABEL = { workspace_created: 'Workspace created', invitation_pending: 'Invitation pending', onboarding_incomplete: 'Onboarding incomplete',
-                       ready_for_assignment: 'Ready for prospect assignment', outreach_ready: 'Outreach ready', pilot_active: 'Pilot active' }
-const STATUS_TONE = { onboarding_incomplete: 'amber', invitation_pending: 'blue', ready_for_assignment: 'violet', outreach_ready: 'green', pilot_active: 'green', workspace_created: 'gray' }
+const STATUS_LABEL = { workspace_created: 'Workspace created', onboarding_incomplete: 'Workspace created · onboarding incomplete',
+                       ready_for_assignment: 'Ready for prospect assignment', outreach_ready: 'Outreach ready', pilot_active: 'Pilot running' }
+const STATUS_TONE = { onboarding_incomplete: 'amber', ready_for_assignment: 'violet', outreach_ready: 'green', pilot_active: 'green', workspace_created: 'gray' }
+const INVITE_TONE = { not_sent: 'gray', sent: 'blue', accepted: 'violet', active: 'green', expired: 'amber' }
 const split = s => String(s || '').split(/[,\n]/).map(x => x.trim()).filter(Boolean)
 
 function ResultRows({ results }) {
   return (results || []).map((r, i) => (
     <div className="aq-row" key={r.organization_id || i}><div className="aq-row__main"><b>{r.name}</b>
-      <span>{r.status === 'created' ? 'Workspace created · paused · no pilot clock' : r.status === 'existing' ? 'Already existed — nothing duplicated' : r.status === 'duplicate' ? r.message : `Failed: ${r.error}`}
-        {r.invitation?.status === 'invitation_pending' && <> · invitation link ready</>}{r.invitation?.status === 'failed' && <> · invitation failed: {r.invitation.error}</>}</span>
+      <span>{r.status === 'created' ? `Workspace created · paused · no pilot clock${r.invitation ? '' : ' · no client login yet'}` : r.status === 'existing' ? 'Already existed — nothing duplicated' : r.status === 'duplicate' ? r.message : `Failed: ${r.error}`}
+        {r.invitation?.status === 'invitation_pending' && <> · invitation link issued (not accepted yet)</>}{r.invitation?.status === 'failed' && <> · invitation failed: {r.invitation.error}</>}</span>
       {r.invitation?.setup_url && <div className="hb-muted" style={{ marginTop: 4 }}>One-time setup link (send it to {r.invitation.email}; shown once): <input readOnly value={new URL(r.invitation.setup_url, window.location.origin).href} onFocus={e => e.target.select()} style={{ width: '100%', marginTop: 4 }} /></div>}</div>
       <Dot tone={r.status === 'failed' ? 'rose' : r.status === 'duplicate' ? 'amber' : 'green'}>{r.status}</Dot></div>))
 }
@@ -487,7 +511,9 @@ export function ClientDirectory() {
           <div className="hb-ccard__top"><span className="hb-strip__mark" style={{ width: 36, height: 36 }}>{c.name.split(/\s+/).map(w => w[0]).slice(0, 2).join('')}</span>
             <div style={{ minWidth: 0 }}><b>{c.name}</b><div className="hb-muted">{c.contact || 'No contact yet'} · added {c.created_at ? new Date(c.created_at).toLocaleDateString() : '—'}</div></div></div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><Dot tone={STATUS_TONE[c.status]}>{STATUS_LABEL[c.status]}</Dot>
-            <Dot tone={c.paused ? 'amber' : 'green'}>{c.paused ? 'Paused' : 'Running'}</Dot><Dot tone={c.invitation.status === 'accepted' ? 'green' : c.invitation.status === 'pending' ? 'blue' : 'gray'}>{c.invitation.label}</Dot></div>
+            <Dot tone={c.paused ? 'amber' : 'green'}>{c.paused ? 'Paused' : 'Running'}</Dot></div>
+          <div className="hb-muted">Client login: <Dot tone={INVITE_TONE[c.invitation.status]}>{c.invitation.label}</Dot>
+            {c.invitation.status !== 'active' && <span> — the workspace exists, but the client can't sign in until they accept an invitation.</span>}</div>
           <div><div className="hb-muted" style={{ marginBottom: 4 }}>Onboarding {c.onboarding.done}/{c.onboarding.total}</div><div className="hb-bar"><i style={{ width: `${(c.onboarding.done / c.onboarding.total) * 100}%` }} /></div></div>
           <div className="hb-muted">Territory: {c.territory_confirmed ? c.territory.join(', ') : <b style={{ color: '#fbbf24' }}>not confirmed</b>} · {c.offer_label}{c.pilot_started_at ? ' · pilot active' : ' · pilot not started'}</div>
           <dl><div><dt>Assigned</dt><dd>{c.assigned}</dd></div><div><dt>Verified contacts</dt><dd>{c.contacts_verified}</dd></div><div><dt>Contacted</dt><dd>{c.contacted}</dd></div>
@@ -495,7 +521,7 @@ export function ClientDirectory() {
           <div className="aq-actions" style={{ marginTop: 0 }}>
             <button className="aq-btn aq-btn--sm aq-btn--primary" onClick={() => openOps(c)}>Open Client Operations</button>
             <button className="aq-btn aq-btn--sm" onClick={() => { onSelectOrg(c.organization_id); nav(`${OPS}/onboarding`) }}>Edit Business Setup</button>
-            <button className="aq-btn aq-btn--sm" onClick={() => setInv({ organization_id: c.organization_id, org: c.name, email: c.contact_email || '', name: c.contact || '' })}>{c.invitation.status === 'no_users' ? 'Invite client' : 'Resend invitation'}</button>
+            <button className="aq-btn aq-btn--sm" onClick={() => setInv({ organization_id: c.organization_id, org: c.name, email: c.contact_email || '', name: c.contact || '' })}>{c.invitation.status === 'not_sent' ? 'Invite client' : c.invitation.status === 'active' ? 'Add client login' : 'Resend invitation'}</button>
             <button className="aq-btn aq-btn--sm" onClick={() => openPortal(c)}>Open Client Portal</button>
             <button className="aq-btn aq-btn--sm" onClick={() => { onSelectOrg(c.organization_id); nav(`${OPS}/settings`) }}>Pause · Operators</button>
           </div>
