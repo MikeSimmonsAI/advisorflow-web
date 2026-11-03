@@ -83,7 +83,9 @@ def admins(db: Session) -> List[Dict[str, Any]]:
             for m, u in rows]
 
 
-def grant(db: Session, email: str, granted_by: str) -> Dict[str, Any]:
+def grant(db: Session, email: str, granted_by: Optional[str]) -> Dict[str, Any]:
+    """`granted_by` is a users.id (foreign key) or None for the owner's written
+    instruction (ACQUISITION_ADMIN_EMAILS) - the audit log records the source."""
     e = (email or "").strip().lower()
     u = db.query(User).filter(User.email.ilike(e)).first() if e else None
     if u is None:
@@ -125,7 +127,7 @@ def bootstrap(db: Session) -> List[Dict[str, Any]]:
                 continue
             if _rows(db).filter(Membership.user_id == u.id).first() is not None:
                 continue
-            r = grant(db, e, granted_by="owner-instruction:%s" % ENV)
+            r = grant(db, e, granted_by=None)
             log.warning("AUDIT: acquisition program_admin %s for %s (from %s)", r["action"], e, ENV)
             try:
                 from app.routers.audit_log_router import log_action
