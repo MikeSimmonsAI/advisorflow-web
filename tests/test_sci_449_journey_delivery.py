@@ -468,22 +468,96 @@ def test_the_email_waits_for_the_first_text_at_most_a_day(program, sample_adviso
     assert len(sent) == 1
 
 
-def test_resume_after_an_owner_pause_respaces_every_unfinished_family(client, program):
+def test_a_quick_off_on_does_not_move_anyone_and_refused_texts_resume_first(client, program):
+    """Nov 1, 11:56 PM: off for 16 seconds, on, then START 270 moved all 50
+    started families behind the 270. Now only texts actually held back by the
+    pause are re-spaced - and first."""
+    from app.models.models import CadenceTouchLog
     db, org, admin = program["db"], program["org"], program["admin"]
     fam = _on(db, org)
-    _ca(db, org, admin, source="L007")
+    a = _ca(db, org, admin, source="L007")
     _ca(db, org, admin, source="L001", phone="", email="ollie@example.com", first="ollie")
     h = _h(db, admin)
-    assert client.post("/program/campaigns/%s/journey/start" % fam.id, headers=h, json={"confirm": "START 2"}).status_code == 200
-    assert journey.impact(db, program["prog"], fam)["would_resume"] == 0            # just started: nothing to resume
+    later = (datetime.utcnow() + timedelta(days=1)).isoformat()
+    assert client.post("/program/campaigns/%s/journey/start" % fam.id, headers=h,
+                       json={"confirm": "START 2", "start_at": later}).status_code == 200
+    st = db.query(CadenceState).filter_by(lead_id=a.id).one()
+    due_before = st.next_touch_due_at
     client.post("/program/campaigns/%s/activation" % fam.id, headers=h, json={"active": False})
     client.post("/program/campaigns/%s/activation" % fam.id, headers=h, json={"active": True, "confirm": fam.name})
     db.expire_all()
+    assert journey.impact(db, program["prog"], fam)["would_resume"] == 0          # nothing was held back
+    db.refresh(st)
+    assert st.next_touch_due_at == due_before
+    # a text the sender refused while the campaign was off IS resumed
+    db.add(CadenceTouchLog(cadence_state_id=st.id, lead_id=a.id, organization_id=org.id, touch_number=1,
+                           attempt_seq=1, outcome="skipped", reason="Lead x: CAMPAIGN OFF: switched off"))
+    st.next_touch_due_at = datetime.utcnow() + timedelta(hours=6)
+    db.commit()
     imp = client.get("/program/campaigns/%s/journey" % fam.id, headers=h).json()
-    assert imp["would_resume"] == 2 and imp["confirm_phrase"] == "RESUME"           # texts AND email-only
+    assert imp["would_resume"] == 1 and imp["confirm_phrase"] == "RESUME"
     r = client.post("/program/campaigns/%s/journey/start" % fam.id, headers=h, json={"confirm": "RESUME", "spacing_minutes": 7})
-    assert r.status_code == 200 and r.json()["resumed"] == 2 and r.json()["started"] == 0
-    assert client.get("/program/campaigns/%s/journey" % fam.id, headers=h).json()["would_resume"] == 0
+    assert r.status_code == 200 and r.json()["resumed"] == 1 and r.json()["started"] == 0
+    db.refresh(st)
+    assert st.next_touch_due_at <= datetime.utcnow() + timedelta(minutes=1)        # first in line, not pushed
+
+
+def test_repair_puts_pushed_first_texts_back_in_front_once(program):
+    """The Nov 1 damage, rebuilt: Batch A started (first texts never went,
+    moved past a later batch). The repair puts A first, re-spaces the later
+    batch behind it, restores a texted family's own next-text time, and only
+    ever runs once. Nothing is sent."""
+    db, org, admin = program["db"], program["org"], program["admin"]
+    fam = _on(db, org)
+    now = datetime.utcnow()
+    early = _ca(db, org, admin, source="L007")                                   # Batch A, never texted
+    texted = _ca(db, org, admin, source="L001", phone="2145550101", email="ollie@example.com", first="ollie")
+    later = _ca(db, org, admin, source="L003", phone="2145550103", email="p@example.com", first="pat")
+    t0 = now - timedelta(days=2)
+    for lead, began, start, due in ((early, t0, now - timedelta(days=1), now + timedelta(days=2)),
+                                    (texted, t0 - timedelta(days=1), now - timedelta(days=6), now + timedelta(days=3)),
+                                    (later, now - timedelta(days=1), now + timedelta(hours=3), now + timedelta(hours=3))):
+        for r in db.query(ProgramSourceRecord).filter_by(lead_id=lead.id):
+            r.journey_started_at, r.scheduled_start_at = began, due
+        db.add(CadenceState(lead_id=lead.id, status="active", current_touch_number=0,
+                            cadence_started_at=start, next_touch_due_at=due))
+    db.commit()
+    st_t = db.query(CadenceState).filter_by(lead_id=texted.id).one()
+    st_t.current_touch_number, st_t.last_touch_sent_at = 2, now - timedelta(days=5)
+    db.add(Message(lead_id=texted.id, sender_id=admin.id, body="hi", delivery_status="delivered"))
+    db.commit()
+    sends = (db.query(Message).count(), db.query(EmailMessage).count())
+    out = journey.repair_pushed_starts(db, program["prog"], fam, now=now)
+    assert out["pushed"] == 1 and out["respaced"] == 2 and out["followups"] == 1
+    se = db.query(CadenceState).filter_by(lead_id=early.id).one()
+    sl = db.query(CadenceState).filter_by(lead_id=later.id).one()
+    assert se.next_touch_due_at < sl.next_touch_due_at                          # Batch A first
+    assert sl.next_touch_due_at - se.next_touch_due_at == timedelta(minutes=5)
+    assert se.next_touch_due_at <= now + timedelta(minutes=11)
+    db.refresh(st_t)
+    assert st_t.next_touch_due_at <= now + timedelta(days=1, minutes=1)        # its own next-text time back (day 7)
+    assert (db.query(Message).count(), db.query(EmailMessage).count()) == sends
+    assert journey.repair_pushed_starts(db, program["prog"], fam, now=now) == {"skipped": "already done"}
+
+
+def test_never_started_check_tells_scheduled_from_late(program):
+    from app.services.programs import self_check
+    db, org, admin = program["db"], program["org"], program["admin"]
+    now = datetime.utcnow()
+    future = _ca(db, org, admin, source="L007")                                 # starts tomorrow: fine
+    moved = _ca(db, org, admin, source="L001", phone="2145550101", email="o@example.com", first="ollie")
+    overdue = _ca(db, org, admin, source="L003", phone="2145550103", email="p@example.com", first="pat")
+    for lead, start, due in ((future, now + timedelta(days=1), now + timedelta(days=1)),
+                             (moved, now - timedelta(days=1), now + timedelta(days=2)),
+                             (overdue, now - timedelta(hours=5), now - timedelta(hours=3))):
+        db.add(CadenceState(lead_id=lead.id, status="active", current_touch_number=0,
+                            cadence_started_at=start, next_touch_due_at=due))
+    db.commit()
+    out = self_check.texts_never_started(db, org.id, now)
+    names = " | ".join(out["people"])
+    assert out["ok"] is False and len(out["people"]) == 2
+    assert "Ollie Testcase (first text moved" in names and "Pat Testcase (first text due since" in names
+    assert "Rosa" not in names
 
 
 # ── Oct 31, 4:32 PM: "2 people are past their start time" ───────────────────

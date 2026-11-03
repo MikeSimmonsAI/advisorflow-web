@@ -68,19 +68,37 @@ def texts_overdue(db: Session, org_id: str, now: datetime) -> Dict:
 
 
 def texts_never_started(db: Session, org_id: str, now: datetime) -> Dict:
-    """An approved person on an active text sequence for a day with NOT ONE
-    text attempted. Whatever the reason, the plan is not running for them.
-    (Oct 14: 15 families at "0 of 6 texts" for two days, nothing flagged.)"""
+    """A person on an active text sequence who has had NOT ONE text attempted,
+    although their first text should have gone by now. (Oct 14: 15 families
+    at "0 of 6 texts" for two days, nothing flagged.)
+
+    #449 (Nov 3): "approved / enrolled a day ago" is not "late" - a family
+    scheduled for tomorrow is fine. A family is reported when its first text
+    is DUE and not attempted for over an hour, or when its first text has been
+    moved more than a day past its own start (Nov 1: Batch 2's first texts
+    were pushed from Monday to Wednesday - that is a real problem)."""
     from app.models.models import CadenceState, Lead, Message
     rows = (db.query(CadenceState, Lead).join(Lead, Lead.id == CadenceState.lead_id)
             .filter(Lead.organization_id == org_id, Lead.is_test.isnot(True), CadenceState.status == "active",
-                    CadenceState.cadence_started_at < now - timedelta(hours=24)).all())
+                    CadenceState.current_touch_number == 0,
+                    CadenceState.cadence_started_at < now - timedelta(hours=1)).all())
     ids = [l.id for _s, l in rows]
     tried = {i for (i,) in db.query(Message.lead_id).filter(Message.lead_id.in_(ids or ["-"])).distinct().all()}
-    bad = [_name(l) for _s, l in rows if l.id not in tried and l.status not in ("dnc", "booked")]
-    return _check("texts_never_started", "Every approved person's texts started", bad,
-                  "Everyone approved more than a day ago has had their first text attempted.",
-                  "%d people were approved over a day ago and not one text has been attempted.")
+    bad = []
+    for s, l in rows:
+        if l.id in tried or l.status in ("dnc", "booked"):
+            continue
+        start = s.cadence_started_at.replace(tzinfo=None) if s.cadence_started_at else None
+        due = s.next_touch_due_at.replace(tzinfo=None) if s.next_touch_due_at else None
+        if due is not None and due <= now - timedelta(hours=1):
+            bad.append("%s (first text due since %s UTC, not attempted)" % (_name(l), due.strftime("%b %d %H:%M")))
+        elif start is not None and due is not None and due > start + timedelta(hours=24):
+            bad.append("%s (first text moved from %s to %s UTC)" % (
+                _name(l), start.strftime("%b %d %H:%M"), due.strftime("%b %d %H:%M")))
+    return _check("texts_never_started", "Every started person's first text on time", bad,
+                  "Everyone whose first text is due has had it attempted, and no first text has been moved "
+                  "more than a day past its start.",
+                  "%d people's first text is overdue or was moved more than a day past its start.")
 
 
 def first_messages_late(db: Session, org_id: str, now: datetime) -> Dict:

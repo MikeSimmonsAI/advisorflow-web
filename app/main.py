@@ -2040,6 +2040,9 @@ async def _program_sla_loop():
                             from datetime import timedelta as _td_c385
                             if _et_c385.pass_due(key="campaigns385", every=_td_c385(hours=6)):   # idempotent; retries
                                 _c385.ensure_for_sci(db)
+                                # #449: one-time undo of the Nov 1 resume (schedules only; runs once)
+                                from app.services.programs import journey as _j449
+                                _j449.repair_for_sci(db)
                         except Exception as exc:                 # noqa: BLE001
                             db.rollback()
                             _logger.error("campaign setup error: %s", exc, exc_info=True)
