@@ -165,6 +165,82 @@ function TargetRing({ booked, high }) {
   )
 }
 
+// God-only distribution from the EXISTING platform Lead Intelligence pool.
+// No duplicate importer: canonical /intake owns file ingestion (#470).
+function MasterAssignments() {
+  const { ov, orgId, reload } = useOps()
+  const [pool, poolError, reloadPool] = useLoad(ov.is_god ? '/god/lead-intelligence/prospects?stage=qualified&routed=false&limit=50' : null)
+  const [chosen, setChosen] = useState([])
+  const [segment, setSegment] = useState('')
+  const [plan, setPlan] = useState(null)
+  const [result, setResult] = useState(null)
+  const [working, setWorking] = useState(false)
+  const [fail, setFail] = useState('')
+  if (!ov.is_god) return null
+  const choices = (ov.segments || []).filter(x => (ov.profile.segments || []).includes(x.key))
+  const selectedSegment = choices.some(x => x.key === segment) ? segment : choices[0]?.key || ''
+  const available = (pool?.rows || []).filter(x => x.routable && !x.routed_org_id)
+  const payload = { destination_org_id: orgId, segment: selectedSegment, prospect_ids: chosen }
+  const toggle = id => {
+    setChosen(v => v.includes(id) ? v.filter(x => x !== id) : v.length >= 20 ? v : [...v, id])
+    setPlan(null); setResult(null); setFail('')
+  }
+  const preview = async () => {
+    setWorking(true); setFail(''); setPlan(null)
+    try { setPlan(await api.post('/god/acquisition/master/assign/preview', payload)) }
+    catch (e) { setFail(errText(e)) }
+    finally { setWorking(false) }
+  }
+  const assign = async () => {
+    setWorking(true); setFail('')
+    try {
+      const r = await api.post('/god/acquisition/master/assign', payload)
+      setResult(r); setPlan(null); setChosen([])
+      reloadPool(); reload()
+    } catch (e) { setFail(errText(e)) }
+    finally { setWorking(false) }
+  }
+  const eligible = plan?.decisions?.length === chosen.length && chosen.length > 0 &&
+    plan.decisions.every(x => x.eligible && x.destination_org_id === orgId && x.segment === selectedSegment)
+  return (
+    <section className="aq-card" style={{ marginTop: 14 }}>
+      <h2>Master Acquisition → Assign to {ov.organization_name}</h2>
+      <p className="aq-lede">One central research pool; each company receives only explicitly assigned businesses. Assigning does not send an email or start the pilot.</p>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+        <a className="aq-btn aq-btn--sm" href="/god/lead-intelligence">Open master prospect pool</a>
+        <a className="aq-btn aq-btn--sm" href="/imports/new">Open unified Import Center</a>
+        <button className="aq-btn aq-btn--sm" onClick={reloadPool}>Refresh pool</button>
+      </div>
+      {!pool && !poolError && <Loading label="Loading master prospects…" />}
+      {poolError && <div className="aq-err">{errText(poolError)}</div>}
+      {pool && <p className="aq-lede">{pool.total} qualified master prospects · {available.length} unassigned candidates shown. The importer’s master-pool destination is being connected in #470.</p>}
+      {!!available.length && <>
+        <div className="aq-field"><label htmlFor="aq-distribution-segment">Assign under cleaning segment</label>
+          <select id="aq-distribution-segment" value={selectedSegment} onChange={e => { setSegment(e.target.value); setPlan(null) }}>
+            {choices.map(x => <option key={x.key} value={x.key}>{x.label}</option>)}
+          </select>
+        </div>
+        <div style={{ maxHeight: 230, overflowY: 'auto', marginBottom: 12 }}>
+          {available.map(x => <label key={x.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: 8, borderBottom: '1px solid #eee8fa' }}>
+            <input type="checkbox" checked={chosen.includes(x.id)} onChange={() => toggle(x.id)} />
+            <span><b>{x.name || 'Unknown business'}</b><span style={{ display: 'block', fontSize: 12 }}>{[x.city, x.state, x.industry].filter(Boolean).join(' · ')} · {x.bucket || 'Review'}</span></span>
+          </label>)}
+        </div>
+        <button className="aq-btn" disabled={!chosen.length || !selectedSegment || working} onClick={preview}>Preview assignment ({chosen.length})</button>
+        {plan && <div style={{ marginTop: 12 }}>
+          {plan.decisions.map(x => <div className="aq-row" key={x.prospect_id}>
+            <span>{x.eligible ? 'Ready for client pipeline' : 'Held for review'} · {x.refused_because?.join(', ') || x.geography_note}</span>
+          </div>)}
+          <button className="aq-btn aq-btn--primary" disabled={!eligible || working} onClick={assign}>Assign eligible businesses — no sends</button>
+        </div>}
+      </>}
+      {pool && !available.length && <div className="aq-empty">No unassigned qualified master prospects yet. Use Lead Intelligence discovery or the canonical importer when its master-pool destination is ready.</div>}
+      {fail && <div role="alert" className="aq-err">{fail}</div>}
+      {result && <div role="status" className="aq-note">Assigned: {result.assigned} · Held: {result.refused} · Messages sent: {result.sent}</div>}
+    </section>
+  )
+}
+
 export function ControlCenter() {
   const { ov } = useOps()
   const f = ov.client_funnel, all = ov.funnel, t = ov.targets
@@ -197,6 +273,7 @@ export function ControlCenter() {
           <ul className="aq-checklist">{checks.map(c => <li key={c.text}><span className={`aq-tick ${c.on ? 'on' : ''}`} />{c.text}</li>)}</ul>
         </section>
       </div>
+      {ov.is_god && <MasterAssignments />}
       <section className="aq-card" style={{ marginTop: 14 }}>
         <h2>Recent activity</h2>
         {ov.recent_events.length ? ov.recent_events.slice(0, 8).map((e, i) => (
