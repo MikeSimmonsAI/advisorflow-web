@@ -81,8 +81,13 @@ def _refuse_guided(b) -> None:
     """The guided importer (/intake, pipeline "universal") and the SCI importer
     keep their batches in this same table. Those batches have their own review,
     commit and rollback rules; editing rows, advancing, archiving or deleting
-    them from here would bypass all of that. Reading them is harmless."""
-    if getattr(b, "pipeline", None) == "universal" or getattr(b, "source_system", None) == "program":
+    them from here would bypass all of that. Reading them is harmless.
+
+    Any batch with a pipeline is someone else's: the guided importer
+    ("universal"), the master pool ("platform_pool"), EvoSys Sales
+    ("evosys_sales") and customer Acquisition ("acquisition_import"). Only
+    the old importer creates batches with no pipeline."""
+    if getattr(b, "pipeline", None) or getattr(b, "source_system", None) == "program":
         raise HTTPException(409, "This batch belongs to the guided importer; open it in Import Center.")
 
 

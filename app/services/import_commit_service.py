@@ -112,10 +112,10 @@ def commit_batch(batch_id: str, org_id: str, db: Session, committer_id: str) -> 
     ).first()
     if not batch:
         raise ValueError(f"Batch {batch_id} not found")
-    if getattr(batch, "pipeline", None) == "universal":
-        # A universal-intake batch is committed only by app/services/intake,
-        # which knows contacts from leads. This service would turn every
-        # accepted row into a lead.
+    if getattr(batch, "pipeline", None):
+        # A batch with a pipeline (universal intake, master pool, EvoSys Sales,
+        # customer Acquisition) is committed only by its own importer. This
+        # service would turn every accepted row into a lead.
         raise UniversalBatchError(
             "This batch belongs to the guided importer; commit it there.")
 
