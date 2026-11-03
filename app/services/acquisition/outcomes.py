@@ -174,7 +174,7 @@ def contract_json(opp: AcquisitionOpportunity) -> Dict[str, Any]:
 
 
 # ── customer-safe history ──────────────────────────────────────────────────
-CUSTOMER_EVENT_KINDS = ("stage", "followup_requested", "followup_in_progress", "followup_done",
+CUSTOMER_EVENT_KINDS = ("stage", "rescheduled", "followup_requested", "followup_in_progress", "followup_done",
                         "followup_closed", "won_confirmed")
 
 
@@ -192,7 +192,7 @@ def customer_history(db: Session, opp: AcquisitionOpportunity) -> List[Dict[str,
         if e.kind == "stage" and e.to_stage not in C.CLIENT_STAGES:
             continue
         label = (C.STAGE_LABEL.get(e.to_stage, e.to_stage) if e.kind == "stage"
-                 else {"followup_requested": "Follow-up requested", "followup_in_progress": "EvoSys is following up",
+                 else {"rescheduled": "Appointment rescheduled", "followup_requested": "Follow-up requested", "followup_in_progress": "EvoSys is following up",
                        "followup_done": "Follow-up completed", "followup_closed": "Follow-up closed",
                        "won_confirmed": "Contract confirmed by EvoSys"}[e.kind])
         out.append({"kind": e.kind, "label": label, "at": C.iso(e.created_at),

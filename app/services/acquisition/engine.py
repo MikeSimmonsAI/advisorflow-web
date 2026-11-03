@@ -140,7 +140,9 @@ def opp_json(opp: AcquisitionOpportunity, lead: Lead, booking: Optional[BookingL
         "stage_entered_at": C.iso(opp.stage_entered_at),
         "interest_note": f.get("interest_note"),
         "appointment": ({"id": booking.id, "status": booking.status, "time": C.iso(booking.booked_time),
-                         "label": booking.appt_label, "minutes": booking.appt_duration} if booking else None),
+                         "label": booking.appt_label, "minutes": booking.appt_duration,
+                         # Provider-confirmed only: an event id exists once the calendar accepted it.
+                         "calendar_synced": bool(getattr(booking, "calendar_event_id", None))} if booking else None),
         "quote_amount": opp.quote_amount,
         "monthly_value": opp.monthly_value,
         "lost_reason": opp.lost_reason,

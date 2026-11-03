@@ -158,7 +158,9 @@ def slots(db: Session, token: str, day: str) -> Dict[str, Any]:
     from app.routers.calendar_router import compute_day_slots
     # Hour-long holds on the hour, the whole hour free (program_visit rules).
     out = compute_day_slots(db, booker, target, program_visit=True, minutes=60)
-    res = {"date": day, "slots": out.get("slots", [])}
+    from app.services.acquisition.calendar_setup import filter_slots
+    prof = _profile(db, org.id)
+    res = {"date": day, "slots": filter_slots(prof, out.get("slots", [])) if prof else out.get("slots", [])}
     if out.get("reason"):
         res["reason"] = out["reason"]
     return res
@@ -186,7 +188,8 @@ def book(db: Session, token: str, slot: str) -> Dict[str, Any]:
     from app.services import tenant_scheduling as TS
     f = C.jload(lead.custom_fields, {}) or {}
     company = f.get("company") or "Prospect"
-    lead_view = Lead(first_name=company, last_name="", phone=lead.phone, email=lead.email)
+    # Phone only on the client's calendar - the prospect's email stays with EvoSys.
+    lead_view = Lead(first_name=company, last_name="", phone=lead.phone, email=None)
     sync = TS._push_to_calendar(db, booker, org, link, lead_view, LABEL, start, minutes, "America/Chicago",
                                 "Booked from the acquisition pilot (%s)." % ("practice" if opp.is_practice else "real"))
     if not sync.get("ok"):
