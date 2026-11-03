@@ -567,7 +567,7 @@ def plan(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
     if not by_lead:
         return []
     ids = list(by_lead)
-    leads, touches, replied = {}, {}, set()
+    leads, touches, replied, underway = {}, {}, set(), set()
     for chunk in (ids[i:i + 500] for i in range(0, len(ids), 500)):
         for l in db.query(Lead).filter(Lead.organization_id == org_id, Lead.id.in_(chunk)).all():
             leads[l.id] = l
@@ -576,6 +576,9 @@ def plan(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
             touches.setdefault(t.lead_id, {})[t.touch_number] = t
         replied.update(x for (x,) in db.query(ProgramResponse.lead_id).filter(
             ProgramResponse.organization_id == org_id, ProgramResponse.lead_id.in_(chunk)).all())
+        from app.models.models import CadenceState as _CS
+        underway.update(x for (x,) in db.query(_CS.lead_id).filter(
+            _CS.lead_id.in_(chunk), _CS.current_touch_number >= 1).all())
     out = []
     for lead_id, rows in by_lead.items():
         lead = leads.get(lead_id)
@@ -588,8 +591,13 @@ def plan(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
             continue
         if getattr(master, "send_mode", None) == "call":
             continue                                   # call list: a person calls, nothing automated
-        if getattr(master, "scheduled_start_at", None) and now < master.scheduled_start_at:
-            continue                                   # slow drip: not their start time yet
+        # Slow drip: not their start time yet. #482 Phase 2 (Nov 3): a family
+        # whose journey has already texted them is past its start whatever
+        # the record says - two Batch 1 families texted Oct 31 kept a Nov 4
+        # start from the Nov 1 resume and their Email 2 (due Nov 2) waited.
+        if getattr(master, "scheduled_start_at", None) and now < master.scheduled_start_at \
+                and lead_id not in underway:
+            continue
         if fam.key in _own_copy_keys() and not any(getattr(r, "journey_started_at", None) for r in rows):
             continue                                   # #449: journey not started - nothing goes
         mine = touches.get(lead_id, {})

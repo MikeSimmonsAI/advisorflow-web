@@ -27,3 +27,29 @@ def test_drip_staggers_texts_and_holds_email(program):
     assert len(later) == 1
     item = sa.list_contacts(db, prog, search="Rosa")["items"][0]
     assert item["starts_at"]
+
+
+def test_a_family_already_texted_is_past_its_start_for_email(program):
+    """#482 Phase 2 (Nov 3): two Batch 1 families texted Oct 31 kept a Nov 4
+    start date from the Nov 1 resume, so their Email 2 (due Nov 2) waited.
+    Once a text of the journey has gone, the start is past - the follow-up
+    goes on its own rule. A family not yet texted still waits (above)."""
+    from app.models.program_models import ProgramEmailTouch
+    db, org, admin, prog = program["db"], program["org"], program["admin"], program["prog"]
+    a = _lead_for(db, org, admin, "L007", phone="2145550107", first="Rosa", email="rd@example.com")
+    db.query(CadenceState).filter_by(lead_id=a.id).delete()
+    db.commit()
+    start = datetime.utcnow() + timedelta(days=1)
+    sa.approve(db, prog, admin, [a.id], mode="text_email", start_at=start, spacing_minutes=20)
+    sent = datetime.utcnow() - timedelta(days=email_touches.followup_days(), hours=1)
+    rec = db.query(ProgramSourceRecord).filter_by(lead_id=a.id).first()
+    db.add(ProgramEmailTouch(organization_id=org.id, lead_id=a.id, source_record_id=rec.id,
+                             campaign_family=rec.campaign_family, touch_number=1, status="sent",
+                             attempted_at=sent))
+    db.commit()
+    assert [i for i in email_touches.plan(db, prog) if i["lead"].id == a.id] == []   # not texted: waits
+    st = db.query(CadenceState).filter_by(lead_id=a.id).first()
+    st.current_touch_number = 1                       # text 1 of the journey went
+    db.commit()
+    due = [i for i in email_touches.plan(db, prog) if i["lead"].id == a.id]
+    assert len(due) == 1 and due[0]["touch"] == 2     # Email 2, never Email 1 again
