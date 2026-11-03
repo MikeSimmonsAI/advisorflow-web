@@ -704,23 +704,65 @@ def is_operator(db: Session, user, org_id: Optional[str] = None) -> bool:
     return bool(ids) if org_id is None else org_id in ids
 
 
-def grant_operator(db: Session, org: Organization, email: str, actor: User) -> Dict[str, Any]:
+def operator_perms(db: Session, user, org_id: str) -> set:
+    """What this (non-owner) worker may do for this client. Legacy grants with no
+    recorded permissions keep full operator access."""
+    row = (db.query(AcquisitionOperator)
+           .filter(AcquisitionOperator.organization_id == org_id, AcquisitionOperator.user_id == user.id,
+                   AcquisitionOperator.is_active == True).first())  # noqa: E712
+    if row is None:
+        return set()
+    if row.permissions is None:
+        return set(C.WORKER_PERMISSION_KEYS)
+    return {k for k in C.jload(row.permissions, []) if k in C.WORKER_PERMISSION_KEYS}
+
+
+def _clean_perms(perms) -> List[str]:
+    if not isinstance(perms, list) or any(k not in C.WORKER_PERMISSION_KEYS for k in perms):
+        raise HTTPException(422, "Unknown permission")
+    out = sorted(set(perms))
+    if out and "view_queue" not in out:
+        out = sorted(set(out) | {"view_queue"})
+    return out
+
+
+def set_operator_permissions(db: Session, org: Organization, user_id: str, perms, actor: User) -> Dict[str, Any]:
+    row = (db.query(AcquisitionOperator)
+           .filter(AcquisitionOperator.organization_id == org.id, AcquisitionOperator.user_id == user_id,
+                   AcquisitionOperator.is_active == True).first())  # noqa: E712
+    if row is None:
+        raise HTTPException(404, "Not an operator for this client")
+    row.permissions = C.jdump(_clean_perms(perms))
+    _event(db, org.id, None, "operator_permissions", actor.id, note=", ".join(C.jload(row.permissions, [])) or "none")
+    db.commit()
+    return {"user_id": user_id, "permissions": C.jload(row.permissions, [])}
+
+
+def grant_operator(db: Session, org: Organization, email: str, actor: User, permissions=None) -> Dict[str, Any]:
     email = (email or "").strip().lower()
     u = db.query(User).filter(User.email == email).first() if email else None
     if u is None:
         raise HTTPException(404, "No login with that email")
     if not u.is_active:
         raise HTTPException(409, "That login is not active")
+    if u.role in ("god_admin", "super_admin"):
+        raise HTTPException(409, "The owner already has full access - no operator grant needed")
+    if u.organization_id == org.id:
+        raise HTTPException(409, "That login belongs to the client itself; client logins use the appointment portal")
+    perms = _clean_perms(permissions if permissions is not None else ["view_queue"])
     row = (db.query(AcquisitionOperator)
            .filter(AcquisitionOperator.organization_id == org.id, AcquisitionOperator.user_id == u.id).first())
     if row is None:
-        row = AcquisitionOperator(organization_id=org.id, user_id=u.id, granted_by_id=actor.id, is_active=True)
+        row = AcquisitionOperator(organization_id=org.id, user_id=u.id, granted_by_id=actor.id, is_active=True,
+                                  permissions=C.jdump(perms))
         db.add(row)
     else:
         row.is_active, row.granted_by_id = True, actor.id
-    _event(db, org.id, None, "operator_grant", actor.id, note=email)
+        if permissions is not None:
+            row.permissions = C.jdump(perms)
+    _event(db, org.id, None, "operator_grant", actor.id, note="%s (%s)" % (email, ", ".join(perms)))
     db.commit()
-    return {"user_id": u.id, "email": u.email, "active": True}
+    return {"user_id": u.id, "email": u.email, "active": True, "permissions": C.jload(row.permissions, None)}
 
 
 def revoke_operator(db: Session, org: Organization, user_id: str, actor: User) -> None:
@@ -736,7 +778,9 @@ def revoke_operator(db: Session, org: Organization, user_id: str, actor: User) -
 def operators(db: Session, org_id: str) -> List[Dict[str, Any]]:
     rows = (db.query(AcquisitionOperator, User).join(User, User.id == AcquisitionOperator.user_id)
             .filter(AcquisitionOperator.organization_id == org_id, AcquisitionOperator.is_active == True).all())  # noqa: E712
-    return [{"user_id": u.id, "email": u.email, "name": u.full_name or u.email} for _, u in rows]
+    return [{"user_id": u.id, "email": u.email, "name": u.full_name or u.email,
+             "permissions": (C.jload(r.permissions, []) if r.permissions is not None else list(C.WORKER_PERMISSION_KEYS)),
+             "legacy_full_access": r.permissions is None} for r, u in rows]
 
 
 # ── pilot progress (real timestamps only) ──────────────────────────────────

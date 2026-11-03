@@ -133,7 +133,7 @@ def test_run_is_god_only_and_plan_is_operator_ok(client, setup):
                        headers=h).status_code == 403
     assert client.post("/acquisition-ops/%s/discovery/plan" % org.id, json={"segment": "office", "city": "Dallas"},
                        headers=h).status_code == 403
-    E.grant_operator(db, org, w.email, god)
+    E.grant_operator(db, org, w.email, god, ["research"])
     r = client.post("/acquisition-ops/%s/discovery/plan" % org.id,
                     json={"segment": "office", "city": "Dallas", "max_results": 5}, headers=h)
     assert r.status_code == 200 and r.json()["can_run"] is True

@@ -213,6 +213,10 @@ class AcquisitionOperator(Base):
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     is_active = Column(Boolean, nullable=False, default=True)
     granted_by_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # #452 Phase 5: what this worker may do for THIS client (JSON list of
+    # permission keys). NULL = a grant made before permissions existed: full
+    # operator access, exactly as before.
+    permissions = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
