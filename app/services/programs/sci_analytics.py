@@ -33,6 +33,8 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
+from app.services.programs import campaign_attribution as CA
+
 CT = ZoneInfo("America/Chicago")
 UTC = ZoneInfo("UTC")
 
@@ -185,6 +187,18 @@ class Ledger:
         self.active_campaigns = {k for (k,) in db.query(CampaignFamily.key).filter(
             CampaignFamily.organization_id == org_id, CampaignFamily.is_active.is_(True)).all()}
         ids = list(self.families) or ["-"]
+        # CAMPAIGN ATTRIBUTION (campaign_attribution.py): every event row below
+        # carries the campaign it belongs to and the evidence for it.
+        self.memberships = CA.Memberships(db, org_id)
+        for lid, fam in self.families.items():
+            fam["campaign_keys"] = self.memberships.keys_of(lid)
+            fam["campaign_runs"] = self.memberships.runs_of(lid)
+        M = self.memberships
+
+        def stamp(row, explicit=None):
+            k, run, ev = M.attribute(row["lead_id"], row.get("at"), explicit)
+            row["campaign"], row["campaign_run"], row["campaign_evidence"] = k, run, ev
+            return row
         lap("families")
 
         self.states = {s.lead_id: s for s in db.query(CadenceState).filter(CadenceState.lead_id.in_(ids)).all()}
@@ -229,11 +243,15 @@ class Ledger:
                 if e is not None:
                     body = (e.subject or "") + (" — " if e.subject and body else "") + (body or "")
             f = self.families.get(l.lead_id) or {}
-            self.attempts.append({
+            code = None
+            if ch == "sms" and result == "failed":
+                m = msgs.get(l.message_id)
+                code = str((m.error_code if m else None) or l.provider_error_code or "") or None
+            self.attempts.append(stamp({
                 "kind": "attempt", "id": l.id, "lead_id": l.lead_id, "touch": l.touch_number or 0,
                 "channel": ch, "at": at, "result": result, "error": err, "text": (body or "")[:400],
-                "location_id": f.get("location_id"),
-            })
+                "location_id": f.get("location_id"), "code": code,
+            }))
         # outreach EMAILS are recorded in their own table (program_email_touches)
         from app.models.program_models import ProgramEmailTouch
         etouch = (db.query(ProgramEmailTouch).filter(ProgramEmailTouch.organization_id == org_id,
@@ -253,13 +271,13 @@ class Ledger:
             else:
                 result, err = "delivered", None
             f = self.families.get(t.lead_id) or {}
-            self.attempts.append({
+            self.attempts.append(stamp({
                 "kind": "attempt", "id": t.id, "lead_id": t.lead_id, "touch": t.touch_number or 0,
                 "channel": "email", "at": t.attempted_at or t.created_at, "result": result, "error": err,
                 "text": ((e.subject or "") if e is not None else "Email touch %s" % t.touch_number)[:400]
                         or "Email touch %s" % t.touch_number,
                 "location_id": f.get("location_id"), "email_message_id": t.email_message_id,
-            })
+            }, t.campaign_family))
         self.attempts.sort(key=lambda a: a["at"] or datetime.min)
         # SMS refused by the consent gate: never handed to a provider, so never
         # an attempt or a failure - counted on their own.
@@ -271,10 +289,10 @@ class Ledger:
                                           "SUPPRESSED", "INVALID_NUMBER")):
                 continue
             f = self.families.get(l.lead_id) or {}
-            self.blocked.append({"kind": "attempt", "id": l.id, "lead_id": l.lead_id, "touch": l.touch_number or 0,
-                                 "channel": "sms", "at": l.attempted_at or l.created_at, "result": "blocked",
-                                 "error": "No SMS consent of record" if "NO_SMS_CONSENT" in why else why[:120],
-                                 "text": l.body_preview or "", "location_id": f.get("location_id")})
+            self.blocked.append(stamp({"kind": "attempt", "id": l.id, "lead_id": l.lead_id, "touch": l.touch_number or 0,
+                                       "channel": "sms", "at": l.attempted_at or l.created_at, "result": "blocked",
+                                       "error": "No SMS consent of record" if "NO_SMS_CONSENT" in why else why[:120],
+                                       "text": l.body_preview or "", "location_id": f.get("location_id")}))
         try:
             from app.services import sms_programs, wholesale_sms
             ok = sms_programs.consented_numbers(db, org_id)
@@ -312,6 +330,7 @@ class Ledger:
                    "text": (r.body_excerpt or r.summary or "")[:400], "class": r.response_class,
                    "result": r.handling_status, "touch": touch_before(r.lead_id, r.received_at),
                    "location_id": f["location_id"]}
+            stamp(row, r.campaign_family)
             if r.response_class == "opt_out":
                 self.opt_outs.append(dict(row, kind="opt_out"))
             elif r.response_class not in NOT_GENUINE_REPLY:
@@ -330,6 +349,7 @@ class Ledger:
                    "error": ERR.get(str(m.error_code or ""), m.error_message) if st in FAILED else None,
                    "touch": touch_before(m.lead_id, m.sent_at),
                    "location_id": self.families[m.lead_id]["location_id"]}
+            stamp(row)
             (self.ai_msgs if m.send_source == ss.SCI_SETTER else self.staff_msgs).append(row)
         from app.services.programs import email_reply as _er
         for e in (db.query(EmailMessage).filter(EmailMessage.lead_id.in_(ids),
@@ -339,6 +359,7 @@ class Ledger:
                    "result": "failed" if (e.status or "") in FAILED else ("opened" if e.opened_at else "delivered"),
                    "error": getattr(e, "error", None), "touch": touch_before(e.lead_id, e.sent_at),
                    "location_id": self.families[e.lead_id]["location_id"]}
+            stamp(row)
             (self.ai_msgs if e.send_source == ss.SCI_SETTER else self.staff_msgs).append(row)
 
         # appointment offers (two real calendar times offered)
@@ -357,10 +378,10 @@ class Ledger:
                 times = [A.describe(s) for s in A.offered(c)]
             except Exception:                             # noqa: BLE001
                 times = []
-            self.offers.append({"kind": "offer", "id": c.id, "lead_id": lid, "at": c.offered_at, "channel": None,
-                                "text": "Offered " + (" or ".join(times) if times else "visit times"),
-                                "result": c.state, "touch": touch_before(lid, c.offered_at),
-                                "location_id": self.families[lid]["location_id"]})
+            self.offers.append(stamp({"kind": "offer", "id": c.id, "lead_id": lid, "at": c.offered_at, "channel": None,
+                                      "text": "Offered " + (" or ".join(times) if times else "visit times"),
+                                      "result": c.state, "touch": touch_before(lid, c.offered_at),
+                                      "location_id": self.families[lid]["location_id"]}))
 
         # confirmed appointments: on the calendar, real family, not opted out
         lap("offers")
@@ -371,7 +392,7 @@ class Ledger:
             if b.lead_id in self.opted_out_ids:
                 continue
             at = b.confirmed_at or b.created_at
-            self.bookings.append({"kind": "appointment", "id": b.id, "lead_id": b.lead_id, "at": at,
+            self.bookings.append(stamp({"kind": "appointment", "id": b.id, "lead_id": b.lead_id, "at": at,
                                   "channel": None,
                                   # booked_time is the advisor's LOCAL wall time (booking_time.py):
                                   # sent with its real offset, never stamped as UTC
@@ -380,7 +401,7 @@ class Ledger:
                                                        _booked_ct(b)
                                                        .strftime("%a %b %-d, %-I:%M %p CT")),
                                   "result": b.status, "touch": touch_before(b.lead_id, at),
-                                  "location_id": self.families[b.lead_id]["location_id"]})
+                                  "location_id": self.families[b.lead_id]["location_id"]}))
 
         lap("bookings")
         ever_texted = {i for (i,) in db.query(Message.lead_id).filter(Message.lead_id.in_(ids)).distinct()}
@@ -433,6 +454,8 @@ METRICS = {
     "engaged_families": ("Families engaged", "family",
                          "Unique families who responded, including an opt-out, counted once per period."),
     "repliers": ("Families who replied", "family", "Unique families with a genuine reply."),
+    "interested": ("Interested replies", "reply",
+                   "Replies classified HOT (wants a visit, a time or the materials). Same reply records as Replies."),
     "ai_messages": ("AI replies sent", "message", "Messages the SCI AI sent while talking with a family."),
     "staff_messages": ("Staff replies sent", "message", "Messages a person sent from SCI Live."),
     "offers": ("Appointment times offered", "offer", "Families offered two real calendar times."),
@@ -475,7 +498,28 @@ def _excluded_reason(L: "Ledger", fam: Dict) -> Optional[str]:
     return None
 
 
+def _campaign_ok(row: Dict, f: Dict) -> bool:
+    c = f.get("campaign")
+    if not c or c == "all":
+        return True
+    return CA.in_scope(c, row.get("campaign"), row.get("campaign_run"), row.get("campaign_evidence") or "unattributed")
+
+
+def _family_in_campaign(fam: Dict, f: Dict) -> bool:
+    """Snapshot metrics: a family is in a campaign scope when it is a member."""
+    c = f.get("campaign")
+    if not c or c == "all":
+        return True
+    if c == CA.UNATTRIBUTED:
+        return not fam.get("campaign_keys")
+    if c.startswith(CA.IMPORT_PREFIX):
+        return c[len(CA.IMPORT_PREFIX):] in (fam.get("campaign_runs") or ())
+    return c in (fam.get("campaign_keys") or ())
+
+
 def _filters_ok(row: Dict, f: Dict) -> bool:
+    if not _campaign_ok(row, f):
+        return False
     if f.get("location_id") and row.get("location_id") != f["location_id"]:
         return False
     if f.get("channel") and row.get("channel") is not None and row.get("channel") != f["channel"]:
@@ -537,6 +581,8 @@ def rows(L: Ledger, metric: str, w: Dict, f: Optional[Dict] = None) -> List[Dict
            "offers": L.offers, "appointments": L.bookings, "opt_outs": L.opt_outs}
     if metric in src:
         return [r for r in src[metric] if inw(r) and _filters_ok(r, f)]
+    if metric == "interested":
+        return [r for r in L.replies if r.get("class") == "hot" and inw(r) and _filters_ok(r, f)]
     if metric == "repliers":
         return _families_from(L, [r for r in L.replies if inw(r) and _filters_ok(r, f)], "replies")
     if metric == "engaged_families":
@@ -546,6 +592,8 @@ def rows(L: Ledger, metric: str, w: Dict, f: Optional[Dict] = None) -> List[Dict
         out = []
         for lid, fam in L.families.items():
             if f.get("location_id") and fam["location_id"] != f["location_id"]:
+                continue
+            if not _family_in_campaign(fam, f):
                 continue
             st = L.states.get(lid)
             if metric == "not_contacted" and lid in L.contacted_ever:
@@ -599,8 +647,11 @@ def _pct(a: int, b: int) -> Optional[float]:
     return round(100.0 * a / b, 1) if b else None
 
 
-def summary(L: Ledger, w: Dict, location_id: Optional[str] = None, daily_batch: Optional[Dict] = None) -> Dict:
+def summary(L: Ledger, w: Dict, location_id: Optional[str] = None, daily_batch: Optional[Dict] = None,
+            campaign: Optional[str] = None) -> Dict:
     f = {"location_id": location_id} if location_id else {}
+    if campaign and campaign != "all":
+        f["campaign"] = campaign
     allw = window("all")
     counts = {k: count(L, k, w, f) for k in METRICS}
     all_time = {k: count(L, k, allw, f) for k in METRICS if k not in SNAPSHOT}
@@ -647,13 +698,16 @@ def summary(L: Ledger, w: Dict, location_id: Optional[str] = None, daily_batch: 
 
     # failure reasons
     reasons: Dict[str, int] = defaultdict(int)
+    codes: Dict[str, int] = defaultdict(int)
     for a in rows(L, "failed", w, f):
         reasons[a["error"] or "Not delivered"] += 1
+        if a.get("channel") == "sms":
+            codes[a.get("code") or "none"] += 1
 
     # location performance
     locs = []
     for lid_loc, name in sorted(L.locs.items(), key=lambda kv: kv[1] or ""):
-        lf = {"location_id": lid_loc}
+        lf = {"location_id": lid_loc, **({"campaign": f["campaign"]} if f.get("campaign") else {})}
         fam = count(L, "families_contacted", w, lf)
         att = count(L, "attempts", w, lf)
         rep = count(L, "repliers", w, lf)
@@ -688,11 +742,109 @@ def summary(L: Ledger, w: Dict, location_id: Optional[str] = None, daily_batch: 
         "touches": touches,
         "funnel": funnel,
         "failure_reasons": sorted(({"reason": k, "count": v} for k, v in reasons.items()), key=lambda r: -r["count"]),
+        # SMS failures by the carrier's own error code ("none" = refused before
+        # the carrier gave a code). Email bounces are in failure_reasons.
+        "sms_error_codes": sorted(({"code": k, "label": ERR.get(k, "No carrier code" if k == "none" else "Error %s" % k),
+                                    "count": v} for k, v in codes.items()), key=lambda r: -r["count"]),
+        "campaign": f.get("campaign") or "all",
         "locations": locs,
+        "reply_classes": reply_classes(L, w, f),
         "trend": trend(L, w, f),
         "projections": projections(L, f, daily_batch),
         "updated_at": _iso(datetime.utcnow()),
     }
+
+
+# ── campaigns: breakdown, reconciliation, comparison ────────────────────────
+REPLY_CLASS_WORDS = {"hot": "Interested", "active": "Engaged / asked a question", "low": "Low interest",
+                     "bad_data": "Wrong number / bad data", "wrong_person": "Wrong person"}
+EVENT_METRICS = ("attempts", "delivered", "failed", "pending", "replies", "interested", "opt_outs",
+                 "offers", "appointments", "ai_messages", "staff_messages", "consent_blocked")
+FAMILY_METRICS = ("families_contacted", "families_delivered", "repliers", "engaged_families")
+
+
+def reply_classes(L: Ledger, w: Dict, f: Dict) -> List[Dict]:
+    """Genuine replies by the classification recorded on them."""
+    by: Dict[str, int] = defaultdict(int)
+    for r in rows(L, "replies", w, f):
+        by[r.get("class") or "unclassified"] += 1
+    return [{"class": k, "label": REPLY_CLASS_WORDS.get(k, k.replace("_", " ").title()), "count": v}
+            for k, v in sorted(by.items(), key=lambda kv: -kv[1])]
+
+
+def campaign_rows(L: Ledger, w: Dict, location_id: Optional[str] = None) -> Dict:
+    """Every campaign side by side over ONE window and ONE set of metric
+    definitions, plus the unattributed / ambiguous remainder, and the proof
+    that the parts add up to All campaigns.
+
+    Event counts reconcile by addition (every event has exactly one
+    attribution). Unique families do NOT: one family can appear in two
+    campaigns, so the All-campaigns family count is a distinct count."""
+    base = {"location_id": location_id} if location_id else {}
+    M = L.memberships
+    real = set(L.families)
+    cat = CA.catalog(M, real)
+
+    def block(scope_filter, ev_pred=None):
+        ff = dict(base, **scope_filter)
+        out = {}
+        ev_rows = {}
+        for k in EVENT_METRICS + ("responses_total",):
+            rs = rows(L, k, w, ff)
+            if ev_pred is not None:
+                rs = [r for r in rs if ev_pred(r)]
+            ev_rows[k] = rs
+            if k in EVENT_METRICS:
+                out[k] = len(rs)
+        # Unique families, from the same event rows (so a remainder bucket
+        # counts its families from its own events).
+        out["families_contacted"] = len({r["lead_id"] for r in ev_rows["attempts"]})
+        out["families_delivered"] = len({r["lead_id"] for r in ev_rows["delivered"]})
+        out["repliers"] = len({r["lead_id"] for r in ev_rows["replies"]})
+        out["engaged_families"] = len({r["lead_id"] for r in ev_rows["responses_total"]})
+        contacted = out["families_contacted"]
+        sent = out["delivered"] + out["failed"]
+        out["delivery_rate"] = _pct(out["delivered"], sent)
+        out["delivery_denominator"] = sent
+        out["reply_rate"] = _pct(out["repliers"], contacted)
+        out["booking_rate"] = _pct(out["appointments"], contacted)
+        out["rate_denominator"] = contacted
+        out["loaded"] = count(L, "loaded", w, ff) if ev_pred is None else None
+        return out
+
+    rows_ = []
+    for c in cat["campaigns"]:
+        if not c["families"]:
+            continue
+        b = block({"campaign": c["key"]})
+        rows_.append({"scope": c["key"], "name": c["name"], "status": c["status"], "kind": "campaign", **b,
+                      "no_activity": b["attempts"] == 0 and b["replies"] == 0 and b["appointments"] == 0})
+    groups = []
+    for g in cat["groups"]:
+        b = block({"campaign": g["value"]})
+        groups.append({"scope": g["value"], "name": g["name"], "kind": "group", "campaign_keys": g["campaign_keys"],
+                       **b, "no_activity": b["attempts"] == 0 and b["replies"] == 0})
+    unattr = block({}, lambda r: r.get("campaign_evidence") == "unattributed")
+    ambig = block({}, lambda r: r.get("campaign_evidence") == "ambiguous")
+    total = block({})
+    recon = []
+    for k in EVENT_METRICS:
+        parts = sum(r[k] for r in rows_) + unattr[k] + ambig[k]
+        recon.append({"metric": k, "label": METRICS[k][0], "all": total[k], "campaigns": sum(r[k] for r in rows_),
+                      "unattributed": unattr[k], "ambiguous": ambig[k], "balanced": parts == total[k]})
+    fam_note = []
+    for k in FAMILY_METRICS:
+        fam_note.append({"metric": k, "label": METRICS[k][0], "all_distinct": total[k],
+                         "sum_of_campaigns": sum(r[k] for r in rows_) + unattr[k] + ambig[k]})
+    evidence = defaultdict(int)
+    for src in (L.attempts, L.replies, L.opt_outs, L.ai_msgs, L.staff_msgs, L.offers, L.bookings, L.blocked):
+        for r in src:
+            if (not location_id or r.get("location_id") == location_id) and _in(r.get("at"), w):
+                evidence[r.get("campaign_evidence") or "unattributed"] += 1
+    return {"campaigns": rows_, "groups": groups, "unattributed": unattr, "ambiguous": ambig, "all": total,
+            "reconciliation": recon, "families_distinct": fam_note,
+            "evidence": [{"evidence": e, "label": CA.EVIDENCE_WORDS[e], "count": evidence.get(e, 0)} for e in CA.EVIDENCE],
+            "balanced": all(r["balanced"] for r in recon)}
 
 
 def trend(L: Ledger, w: Dict, f: Dict) -> Dict:
@@ -772,8 +924,21 @@ def present(L: Ledger, rows_: List[Dict], limit: int = 1000) -> Tuple[List[Dict]
                     "touch": r.get("touch") or None, "channel": r.get("channel"), "result": r.get("result"),
                     "error": r.get("error"), "text": r.get("text"), "count": r.get("count"),
                     "count_label": r.get("count_label"), "appt_at": r.get("appt_at"),
-                    "next_touch_at": _iso(r.get("next_touch_at"))})
+                    "next_touch_at": _iso(r.get("next_touch_at")),
+                    "campaign": _stamp_of(L, r)})
     return out, len(rows_) > limit
+
+
+def _stamp_of(L: Ledger, r: Dict) -> Dict:
+    """The campaign a drill-down row belongs to. Family rows (one per family)
+    show the family's campaign(s)."""
+    M = L.memberships
+    if "campaign_evidence" in r:
+        return M.stamp(r.get("campaign"), r["campaign_evidence"])
+    keys = (L.families.get(r["lead_id"]) or {}).get("campaign_keys") or []
+    if len(keys) == 1:
+        return M.stamp(keys[0], "membership")
+    return M.stamp(None, "ambiguous" if keys else "unattributed")
 
 
 # ── one family's complete recorded history ──────────────────────────────────

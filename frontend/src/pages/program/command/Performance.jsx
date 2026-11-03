@@ -25,17 +25,50 @@ const pct = v => (v === null || v === undefined ? '—' : `${v}%`)
 const RESULT = { delivered: 'Delivered', opened: 'Opened', failed: 'Failed', pending: 'Awaiting result', blocked: 'Blocked (no consent)' }
 const CHANNEL = { sms: 'Text', email: 'Email', voicemail: 'Voicemail' }
 
-export function rangeQuery(range, loc) {
+export function rangeQuery(range, loc, campaign) {
   const p = new URLSearchParams({ range: range.preset })
   if (range.preset === 'custom') { if (range.start) p.set('start', range.start); if (range.end) p.set('end', range.end) }
   if (loc) p.set('location_id', loc)
+  if (campaign && campaign !== 'all') p.set('campaign', campaign)
   return p
 }
 
-export function RangeBar({ range, setRange, loc, setLoc, locations }) {
+/* CAMPAIGN SELECTOR - the workspace's own campaigns (real names, real on/off
+ * state), each import file that brought in several campaigns as one group,
+ * and the honest remainder. The value lives in the URL (?c=) so a view can be
+ * bookmarked or shared with another authorized user. */
+export function CampaignSelect({ value, onChange, options, compact }) {
+  const o = options || { campaigns: [], groups: [] }
+  const used = (o.campaigns || []).filter(c => c.families > 0)
+  const empty = (o.campaigns || []).filter(c => !c.families)
+  const known = value === 'all' || value === 'unattributed' || used.concat(empty).some(c => c.value === value)
+    || (o.groups || []).some(g => g.value === value)
+  return (
+    <label className={`pf-campaign ${compact ? 'compact' : ''}`}>
+      <span>Campaign</span>
+      <select value={value || 'all'} onChange={e => onChange(e.target.value)} aria-label="Campaign">
+        <option value="all">All campaigns</option>
+        {(o.groups || []).length > 0 && <optgroup label="Whole import">
+          {o.groups.map(g => <option key={g.value} value={g.value}>{g.name} · {n(g.families)} families</option>)}
+        </optgroup>}
+        {used.length > 0 && <optgroup label="Campaigns">
+          {used.map(c => <option key={c.value} value={c.value}>{c.name} · {c.status} · {n(c.families)}</option>)}
+        </optgroup>}
+        {empty.length > 0 && <optgroup label="No families loaded">
+          {empty.map(c => <option key={c.value} value={c.value}>{c.name} · {c.status}</option>)}
+        </optgroup>}
+        <option value="unattributed">Unattributed</option>
+        {!known && value && <option value={value}>Loading…</option>}
+      </select>
+    </label>
+  )
+}
+
+export function RangeBar({ range, setRange, loc, setLoc, locations, campaign, setCampaign, campaignOptions }) {
   const today = new Date().toLocaleDateString('en-CA', CT)
   return (
     <div className="pf-filters">
+      {setCampaign && <CampaignSelect value={campaign} onChange={setCampaign} options={campaignOptions} />}
       <div className="pf-seg" role="tablist" aria-label="Date range">
         {RANGES.map(([k, l]) => (
           <button key={k} role="tab" aria-selected={range.preset === k} className={range.preset === k ? 'on' : ''}
@@ -67,31 +100,35 @@ const HERO = [
   ['appointments', 'Appointments', 'confirmed on the calendar'],
 ]
 const SECOND = [
-  ['failed', 'Failed'], ['pending', 'Awaiting result'], ['ai_messages', 'AI replies sent'],
+  ['interested', 'Interested'], ['failed', 'Failed'], ['pending', 'Awaiting result'], ['ai_messages', 'AI replies sent'],
   ['staff_messages', 'Staff replies sent'], ['opt_outs', 'Opt-outs'], ['repliers', 'Families who replied'],
 ]
 
-export function PerformanceHome({ range, setRange, loc, setLoc, openMetric }) {
+export function PerformanceHome({ range, setRange, loc, setLoc, openMetric, campaign = 'all', setCampaign }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   const seq = useRef(0)
-  const q = rangeQuery(range, loc).toString()
+  const q = rangeQuery(range, loc, campaign).toString()
   useEffect(() => {
     const k = ++seq.current
     const go = () => api.get(`/program/command/analytics?${q}`)
       .then(r => { if (k === seq.current) { setD(r); setErr('') } })
-      .catch(e => { if (k === seq.current) setErr(e.message || 'Could not load performance.') })
+      .catch(e => { if (k === seq.current) { setErr(e.message || 'Could not load performance.'); if (/campaign not found/i.test(e.message || '')) setCampaign?.('all') } })
     go()
     const t = setInterval(() => { if (document.visibilityState === 'visible') go() }, 60000)
     return () => clearInterval(t)
   }, [q])
   const m = d?.metrics || {}
-  const open = (metric, extra) => openMetric({ metric, ...(extra || {}) })
-  const loading = !d || d.window?.preset !== range.preset
+  // A drill-down carries the SAME campaign and dates it was opened from.
+  const open = (metric, extra) => openMetric({ metric, campaign, range, ...(extra || {}) })
+  const loading = !d || d.window?.preset !== range.preset || (d.campaign || 'all') !== campaign
   return <>
-    <RangeBar range={range} setRange={setRange} loc={loc} setLoc={setLoc} locations={d?.locations_all} />
+    <RangeBar range={range} setRange={setRange} loc={loc} setLoc={setLoc} locations={d?.locations_all}
+              campaign={campaign} setCampaign={setCampaign} campaignOptions={d?.campaign_options} />
     {err && <p className="cmd-err">{err}</p>}
     {!d ? <p className="cmd-muted">Loading performance…</p> : <div className={`pf-home ${loading ? 'pf-stale' : ''}`}>
+      <p className="pf-scope"><b>{d.campaign_name || 'All campaigns'}</b>{campaign !== 'all' && setCampaign
+        ? <button className="link" onClick={() => setCampaign('all')}>Show all campaigns</button> : null}</p>
       <p className="pf-period">{d.window.label}{d.window.start_date && d.window.preset !== 'today' ? ` · ${fmtDay(d.window.start_date)} – ${fmtDay(d.window.end_date)}` : ''}
         {' '}· Central Time · real families only · STOP replies are engagement, never appointment wins · tests and demos excluded</p>
       <div className="pf-kpis">
@@ -161,6 +198,18 @@ export function PerformanceHome({ range, setRange, loc, setLoc, openMetric }) {
             {d.failure_reasons.map(r => (
               <button key={r.reason} className="pf-row" onClick={() => open('failed')}><span>{r.reason}</span><b>{r.count}</b></button>))}
           </>}
+          {(d.sms_error_codes || []).length > 0 && <>
+            <h4>Text failures by carrier code</h4>
+            {d.sms_error_codes.map(r => (
+              <button key={r.code} className="pf-row" onClick={() => open('failed', { channel: 'sms' })}>
+                <span>{r.code === 'none' ? r.label : `${r.code} · ${r.label}`}</span><b>{r.count}</b></button>))}
+          </>}
+          {(d.reply_classes || []).length > 0 && <>
+            <h4>What families said</h4>
+            {d.reply_classes.map(r => (
+              <button key={r.class} className="pf-row" onClick={() => open(r.class === 'hot' ? 'interested' : 'replies')}>
+                <span>{r.label}</span><b>{r.count}</b></button>))}
+          </>}
         </section>
 
         <section className="cmd-card pf-card pf-proj">
@@ -169,6 +218,8 @@ export function PerformanceHome({ range, setRange, loc, setLoc, openMetric }) {
         </section>
       </div>
 
+      <CampaignCompare range={range} loc={loc} campaign={campaign} setCampaign={setCampaign} />
+
       <section className="cmd-card pf-card">
         <h3>Location performance <small>{d.window.label}</small></h3>
         <LocationTable rows={d.locations} open={open} setLoc={setLoc} />
@@ -176,6 +227,64 @@ export function PerformanceHome({ range, setRange, loc, setLoc, openMetric }) {
       <p className="cmd-foot">Every number opens the exact records behind it. Updated {fmtWhen(d.updated_at)}.</p>
     </div>}
   </>
+}
+
+/* COMPARE CAMPAIGNS: every campaign over the same dates and the same metric
+ * definitions, with denominators beside every percentage, the unattributed
+ * remainder, and the check that the parts add up to All campaigns. */
+const CMP = [['loaded', 'Families'], ['families_contacted', 'Contacted'], ['attempts', 'Messages'],
+  ['delivered', 'Delivered'], ['failed', 'Failed'], ['repliers', 'Replied'], ['interested', 'Interested'],
+  ['appointments', 'Appts'], ['opt_outs', 'Opt-outs']]
+export function CampaignCompare({ range, loc, campaign, setCampaign }) {
+  const [c, setC] = useState(null)
+  const [err, setErr] = useState('')
+  const q = rangeQuery(range, loc).toString()
+  useEffect(() => {
+    let live = true
+    setC(null)
+    api.get(`/program/command/analytics/campaigns?${q}`).then(x => { if (live) { setC(x); setErr('') } })
+      .catch(e => { if (live) setErr(e.message || 'Could not load the comparison.') })
+    return () => { live = false }
+  }, [q])
+  const rowsOf = c ? [...(c.groups || []), ...(c.campaigns || [])] : []
+  const rate = (v, num, den) => (v === null || v === undefined ? '—' : `${v}%`) + (den ? ` (${n(num)}/${n(den)})` : '')
+  return (
+    <section className="cmd-card pf-card pf-compare" aria-label="Compare campaigns">
+      <h3>Compare campaigns <small>{c?.window?.label || ''} · same dates and definitions for every row</small></h3>
+      {err && <p className="cmd-err">{err}</p>}
+      {!c ? <p className="cmd-muted">Loading…</p> : <>
+        <div className="pf-cmpwrap"><table className="pf-cmp">
+          <thead><tr><th>Campaign</th>{CMP.map(([k, l]) => <th key={k}>{l}</th>)}<th>Delivery rate</th><th>Reply rate</th><th>Booked / contacted</th></tr></thead>
+          <tbody>
+            {rowsOf.map(r => (
+              <tr key={r.scope} className={`${r.kind === 'group' ? 'grp' : ''} ${campaign === r.scope ? 'on' : ''}`}
+                  onClick={() => setCampaign?.(r.scope)} title="Show this campaign">
+                <td><b>{r.name}</b>{r.status ? <em className={`pf-st ${r.status === 'Active' ? 'on' : ''}`}>{r.status}</em> : null}
+                  {r.kind === 'group' ? <small>whole import · {r.campaign_keys.length} campaigns</small> : null}
+                  {r.no_activity ? <small>No activity in this period</small> : null}</td>
+                {CMP.map(([k]) => <td key={k}>{n(r[k])}</td>)}
+                <td>{rate(r.delivery_rate, r.delivered, r.delivery_denominator)}</td>
+                <td>{rate(r.reply_rate, r.repliers, r.rate_denominator)}</td>
+                <td>{rate(r.booking_rate, r.appointments, r.rate_denominator)}</td>
+              </tr>))}
+            {[['Unattributed', c.unattributed, 'unattributed'], ['Ambiguous (more than one campaign)', c.ambiguous, null]]
+              .filter(([, b]) => b && (b.attempts || b.replies || b.appointments)).map(([l, b, sc]) => (
+                <tr key={l} className="rem" onClick={() => sc && setCampaign?.(sc)}><td><b>{l}</b></td>
+                  {CMP.map(([k]) => <td key={k}>{k === 'loaded' ? '—' : n(b[k])}</td>)}
+                  <td>{rate(b.delivery_rate, b.delivered, b.delivery_denominator)}</td><td>—</td><td>—</td></tr>))}
+            <tr className="tot"><td><b>All campaigns</b></td>{CMP.map(([k]) => <td key={k}>{n(c.all[k])}</td>)}
+              <td>{rate(c.all.delivery_rate, c.all.delivered, c.all.delivery_denominator)}</td>
+              <td>{rate(c.all.reply_rate, c.all.repliers, c.all.rate_denominator)}</td>
+              <td>{rate(c.all.booking_rate, c.all.appointments, c.all.rate_denominator)}</td></tr>
+          </tbody>
+        </table></div>
+        <p className={`pf-note ${c.balanced ? '' : 'bad'}`}>
+          {c.balanced ? 'Reconciled: ' : 'Does not reconcile: '}every message, reply, opt-out and appointment is counted under exactly one campaign
+          or the remainder, so the campaign rows plus Unattributed add up to All campaigns. Family counts are distinct:
+          a family in two campaigns appears in both rows and once in All campaigns. Whole-import rows overlap the campaigns they contain.</p>
+      </>}
+    </section>
+  )
 }
 
 /* Engagement is unique families who answered including STOP; touch 4+
@@ -367,8 +476,10 @@ function Projection({ p }) {
 
 /* ── Metric drill-down ────────────────────────────────────────────────────── */
 const STATUS = [['', 'Any result'], ['delivered', 'Delivered'], ['opened', 'Opened (email)'], ['failed', 'Failed'], ['pending', 'Awaiting result']]
-export function MetricDrill({ spec, range: range0, loc: loc0, onBack, openFamily }) {
-  const [range, setRange] = useState(range0)
+export function MetricDrill({ spec, range: range0, loc: loc0, onBack, openFamily, campaign: campaign0 = 'all', onCampaign }) {
+  const [range, setRange] = useState(spec.range || range0)
+  const [campaign, setCampaignLocal] = useState(spec.campaign || campaign0 || 'all')
+  const setCampaign = v => { setCampaignLocal(v); onCampaign?.(v) }
   const [metric, setMetric] = useState(spec.metric)
   const [sum, setSum] = useState(null)
   const [loc, setLoc] = useState(spec.location_id ?? loc0 ?? '')
@@ -380,14 +491,14 @@ export function MetricDrill({ spec, range: range0, loc: loc0, onBack, openFamily
   const [shown, setShown] = useState(50)
   const seq = useRef(0)
   const q = useMemo(() => {
-    const p = rangeQuery(range, loc)
+    const p = rangeQuery(range, loc, campaign)
     p.set('metric', metric)
     if (touch) p.set('touch', touch)
     if (channel) p.set('channel', channel)
     if (status) p.set('status', status)
     return p.toString()
-  }, [range, loc, touch, channel, status, metric])
-  const sq = rangeQuery(range, loc).toString()
+  }, [range, loc, touch, channel, status, metric, campaign])
+  const sq = rangeQuery(range, loc, campaign).toString()
   useEffect(() => { api.get(`/program/command/analytics?${sq}`).then(setSum).catch(() => {}) }, [sq])
   const seg = (m, t = '', c = '') => { setMetric(m); setTouch(t); setChannel(c); setStatus('') }
   const segOn = (m, t = '', c = '') => metric === m && touch === t && channel === c
@@ -408,12 +519,14 @@ export function MetricDrill({ spec, range: range0, loc: loc0, onBack, openFamily
       </header>
       <div className="dr-segs" role="tablist" aria-label="View">
         {[['All outbound', 'attempts'], ['New families', 'new_families'], ['Follow-ups', 'attempts', '2+'], ['SMS', 'attempts', '', 'sms'],
-          ['Email', 'attempts', '', 'email'], ['SMS blocked', 'consent_blocked'], ['Replies', 'replies'], ['Appointments', 'appointments']].map(([l, m, t, c]) => (
+          ['Email', 'attempts', '', 'email'], ['Failed', 'failed'], ['SMS blocked', 'consent_blocked'], ['Replies', 'replies'],
+          ['Interested', 'interested'], ['Appointments', 'appointments']].map(([l, m, t, c]) => (
           <button key={l} className={segOn(m, t, c) ? 'on' : ''} onClick={() => seg(m, t, c)}>{l}</button>))}
       </div>
       {r && !r.snapshot && <RangeBar range={range} setRange={setRange} />}
       {sum && <DrillSummary s={sum} pick={t => seg('attempts', t)} pickQueue={() => seg('scheduled_new')} />}
       <div className="pf-dfilters">
+        <CampaignSelect value={campaign} onChange={setCampaign} options={sum?.campaign_options} compact />
         <select className="pf-select" value={loc} onChange={e => setLoc(e.target.value)} aria-label="Location">
           <option value="">All locations</option>
           {(r?.locations_all || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
@@ -435,14 +548,14 @@ export function MetricDrill({ spec, range: range0, loc: loc0, onBack, openFamily
       {!r ? <p className="cmd-muted">Loading…</p> : <>
         <div className="pf-count"><b>{n(r.count)}</b> {r.count === 1 ? 'record' : 'records'}
           {r.row_kind !== 'family' && <> · {n(r.families)} {r.families === 1 ? 'family' : 'families'}</>}
-          <span>{r.snapshot ? 'Right now' : r.window.label}</span></div>
+          <span>{r.campaign_name || 'All campaigns'} · {r.snapshot ? 'Right now' : r.window.label}</span></div>
         {!r.items.length ? <p className="cmd-card cmd-muted pad">No records match these filters.</p>
           : <>
             <div className="dr-tablewrap"><table className="dr-table">
-              <thead><tr><th>Family</th><th>Location</th><th>Touch</th><th>Channel</th><th>When (CT)</th><th>Result</th><th>Message / reason</th></tr></thead>
+              <thead><tr><th>Family</th><th>Campaign</th><th>Location</th><th>Touch</th><th>Channel</th><th>When (CT)</th><th>Result</th><th>Message / reason</th></tr></thead>
               <tbody>{r.items.slice(0, shown).map(i => (
                 <tr key={`${i.kind}-${i.id || i.lead_id}`} onClick={() => openFamily(i.lead_id, 'journey')}>
-                  <td><b>{i.name}</b></td><td>{i.location || '—'}</td><td>{i.touch ? ordinal(i.touch) : '—'}</td>
+                  <td><b>{i.name}</b></td><td><CampaignTag c={i.campaign} /></td><td>{i.location || '—'}</td><td>{i.touch ? ordinal(i.touch) : '—'}</td>
                   <td>{CHANNEL[i.channel] || '—'}</td><td>{fmtWhen(i.next_touch_at && r.metric === 'scheduled_new' ? i.next_touch_at : i.at)}</td>
                   <td>{i.result ? <em className={`tag r-${i.result}`}>{RESULT[i.result] || i.result.replace(/_/g, ' ')}</em> : '—'}</td>
                   <td className={i.error ? 'err' : ''}>{i.error ? `Reason: ${i.error}` : i.text}</td></tr>))}</tbody>
@@ -456,6 +569,16 @@ export function MetricDrill({ spec, range: range0, loc: loc0, onBack, openFamily
   )
 }
 
+/* The campaign stamp: the real campaign name, or an honest "Unattributed" /
+ * "Ambiguous" - never the latest campaign pretended onto older messages. */
+export function CampaignTag({ c, small }) {
+  if (!c) return null
+  const cls = c.key ? 'known' : c.evidence
+  return <em className={`cmp-tag ${cls} ${small ? 'small' : ''}`} title={c.key ? (c.evidence === 'explicit'
+    ? 'Campaign recorded on this message' : 'Family belonged to this campaign at the time') : (c.evidence === 'ambiguous'
+    ? 'Family was in more than one campaign at the time - not guessed' : 'No campaign on record')}>{c.name}</em>
+}
+
 function Record({ i, open }) {
   const res = i.result && (RESULT[i.result] || i.result.replace(/_/g, ' '))
   return (
@@ -467,6 +590,7 @@ function Record({ i, open }) {
           {i.channel && <em className={`tag ${i.channel}`}>{CHANNEL[i.channel] || i.channel}</em>}
           {res && i.kind !== 'reply' && <em className={`tag r-${i.result}`}>{res}</em>}
           {i.kind === 'family' && i.count ? <em className="tag">{i.count} {i.count_label}</em> : null}
+          <CampaignTag c={i.campaign} small />
         </span>
         <small className="pf-rec-loc">{i.location || 'Location not set'}</small>
         {i.text && <span className="pf-rec-text">{i.text}</span>}
