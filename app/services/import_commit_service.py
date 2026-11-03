@@ -38,6 +38,9 @@ TIER_TO_TRACK = {
     "imminent": "imminent_support", "contract_sold": "upsell_existing",
     "email_only": "email_only_nurture", "partial": "needs_review",
     "addr_only": "needs_review",
+    # Same track import_service gives an inbound enquiry. It was missing here,
+    # so force_new_inquiry leads landed on "needs_review" in this path only.
+    "new_inquiry": "new_inquiry_intro",
 }
 
 def _blank_fill(lead: Lead, row: ImportStagedRow) -> bool:
@@ -180,7 +183,12 @@ def commit_batch(batch_id: str, org_id: str, db: Session, committer_id: str) -> 
                     _apply_more_restrictive_consent(lead, row)
                     db.flush()
             else:
-                tier = row.tier or "pre_need"
+                # NO INVENTED TIER. This used to be `row.tier or "pre_need"`, so a
+                # file with no tier column made every row a funeral Pre-Need
+                # lead whatever the organization's industry. Unknown stays
+                # unknown: tier None lands in Needs Review (message track
+                # "needs_review"), exactly as the guided importer creates leads.
+                tier = row.tier or None
                 # The uploader's batch-level choice beats what was inferred
                 # from the file. force_new_inquiry exists precisely for the
                 # case where the operator knows the whole list is inbound
@@ -198,6 +206,9 @@ def commit_batch(batch_id: str, org_id: str, db: Session, committer_id: str) -> 
                     source_category=row.source_category or "import",
                     tier=tier, message_track=TIER_TO_TRACK.get(tier, "needs_review"),
                     status="new",
+                    # A row with no phone cannot be texted; the column default
+                    # ("sms") routed email-only rows into the SMS queue.
+                    contact_channel="sms" if row.phone_normalized else "email_only",
                     # Batch-level provenance, carried from the upload form.
                     # These were being accepted by the endpoint and silently
                     # dropped here; a lead whose source_year is None because

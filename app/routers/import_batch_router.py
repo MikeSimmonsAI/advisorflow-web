@@ -77,6 +77,15 @@ def _row_dict(r: ImportStagedRow) -> dict:
         "committed_at": iso_utc(r.committed_at),
     }
 
+def _refuse_guided(b) -> None:
+    """The guided importer (/intake, pipeline "universal") and the SCI importer
+    keep their batches in this same table. Those batches have their own review,
+    commit and rollback rules; editing rows, advancing, archiving or deleting
+    them from here would bypass all of that. Reading them is harmless."""
+    if getattr(b, "pipeline", None) == "universal" or getattr(b, "source_system", None) == "program":
+        raise HTTPException(409, "This batch belongs to the guided importer; open it in Import Center.")
+
+
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
 @router.get("")
@@ -173,6 +182,7 @@ def update_row(
     b = db.query(ImportBatch).filter(ImportBatch.id == batch_id,
                                      ImportBatch.organization_id == user.organization_id).first()
     if not b: raise HTTPException(404, "Batch not found")
+    _refuse_guided(b)
     row = db.query(ImportStagedRow).filter(ImportStagedRow.id == row_id,
                                             ImportStagedRow.batch_id == batch_id).first()
     if not row: raise HTTPException(404, "Row not found")
@@ -201,6 +211,7 @@ def bulk_review(
     b = db.query(ImportBatch).filter(ImportBatch.id == batch_id,
                                      ImportBatch.organization_id == user.organization_id).first()
     if not b: raise HTTPException(404, "Batch not found")
+    _refuse_guided(b)
     new_status = body.get("review_status")
     if new_status not in {"accepted", "merged", "rejected", "pending"}:
         raise HTTPException(400, "Invalid review_status")
@@ -226,6 +237,7 @@ def mark_ready(batch_id: str, db: Session = Depends(get_db), user=Depends(requir
     b = db.query(ImportBatch).filter(ImportBatch.id == batch_id,
                                      ImportBatch.organization_id == user.organization_id).first()
     if not b: raise HTTPException(404, "Batch not found")
+    _refuse_guided(b)
     if b.status not in (ImportBatchStatus.READY_FOR_REVIEW, ImportBatchStatus.REVIEWING):
         raise HTTPException(409, f"Cannot advance from status '{b.status}'")
     b.status = ImportBatchStatus.READY_TO_COMMIT
@@ -242,9 +254,7 @@ def commit_batch_route(batch_id: str, db: Session = Depends(get_db), user=Depend
         raise HTTPException(409, f"Batch is already {b.status}")
     if b.status == ImportBatchStatus.ARCHIVED:
         raise HTTPException(409, "Cannot commit an archived batch")
-    if getattr(b, "pipeline", None) == "universal":
-        raise HTTPException(409, "This batch belongs to the guided importer "
-                                 "(/intake); commit it there.")
+    _refuse_guided(b)
     result = _commit_batch(batch_id, user.organization_id, db, user.id)
     return _batch_dict(result)
 
@@ -254,6 +264,7 @@ def archive_batch(batch_id: str, db: Session = Depends(get_db), user=Depends(req
     b = db.query(ImportBatch).filter(ImportBatch.id == batch_id,
                                      ImportBatch.organization_id == user.organization_id).first()
     if not b: raise HTTPException(404, "Batch not found")
+    _refuse_guided(b)
     if b.status == ImportBatchStatus.COMMITTING:
         raise HTTPException(409, "Cannot archive a batch that is currently committing")
     b.status = ImportBatchStatus.ARCHIVED
@@ -266,6 +277,7 @@ def delete_batch(batch_id: str, db: Session = Depends(get_db), user=Depends(requ
     b = db.query(ImportBatch).filter(ImportBatch.id == batch_id,
                                      ImportBatch.organization_id == user.organization_id).first()
     if not b: raise HTTPException(404, "Batch not found")
+    _refuse_guided(b)
     if b.status in (ImportBatchStatus.COMMITTING, ImportBatchStatus.COMMITTED,
                     ImportBatchStatus.PARTIALLY_COMMITTED):
         raise HTTPException(409, "Cannot delete a committed or in-progress batch")
