@@ -106,6 +106,15 @@ class AcquisitionOpportunity(Base):
     monthly_value = Column(Float, nullable=True)         # recurring contract value
     lost_reason = Column(String(300), nullable=True)
     outcome_note = Column(Text, nullable=True)
+    # A won contract as the CLIENT reports it (#452 Phase 4). Reported is not
+    # confirmed: EvoSys confirms separately (won_confirmed_at) before it counts
+    # as confirmed value. Nothing here is collected revenue.
+    contract_type = Column(String(40), nullable=True)      # recurring / one_time / trial
+    service_frequency = Column(String(40), nullable=True)  # e.g. 3x weekly
+    contract_value = Column(Float, nullable=True)          # total contract value, as reported
+    contract_start = Column(DateTime, nullable=True)
+    won_confirmed_at = Column(DateTime, nullable=True)
+    won_confirmed_by_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     interested_at = Column(DateTime, nullable=True)
     booked_at = Column(DateTime, nullable=True)
     held_at = Column(DateTime, nullable=True)
@@ -163,6 +172,27 @@ class AcquisitionFeedback(Base):
     rating = Column(String(20), nullable=True)            # good_fit / poor_fit / general
     body = Column(Text, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
+
+
+class AcquisitionFollowUp(Base):
+    """A cleaning client asks EvoSys to follow up (#452 Phase 4). It becomes a
+    task in the Acquisition Control Center - it never triggers an email, text
+    or call by itself."""
+    __tablename__ = "acquisition_followups"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = _org_col()
+    opportunity_id = Column(String, ForeignKey("acquisition_opportunities.id", ondelete="SET NULL"),
+                            nullable=True, index=True)
+    reason = Column(String(40), nullable=False)
+    note = Column(Text, nullable=True)
+    status = Column(String(20), nullable=False, default="open")      # open / in_progress / done / closed
+    requested_by_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    assigned_to_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolution_note = Column(Text, nullable=True)
+    resolved_by_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class AcquisitionOperator(Base):

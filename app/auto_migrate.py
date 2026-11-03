@@ -1666,6 +1666,13 @@ COLUMNS_TO_ADD = [
     ("acquisition_profiles", "offer_type", "VARCHAR"),
     ("acquisition_profiles", "offer_terms", "TEXT"),
     ("acquisition_profiles", "sales_opportunity_id", "VARCHAR"),
+    # #452 Phase 4: won contracts as reported by the client, confirmed by EvoSys.
+    ("acquisition_opportunities", "contract_type", "VARCHAR(40)"),
+    ("acquisition_opportunities", "service_frequency", "VARCHAR(40)"),
+    ("acquisition_opportunities", "contract_value", "DOUBLE PRECISION"),
+    ("acquisition_opportunities", "contract_start", "TIMESTAMP"),
+    ("acquisition_opportunities", "won_confirmed_at", "TIMESTAMP"),
+    ("acquisition_opportunities", "won_confirmed_by_id", "VARCHAR"),
     ("acquisition_opportunities", "geo_status", "VARCHAR"),
     ("acquisition_opportunities", "geo_note", "VARCHAR"),
 ]
