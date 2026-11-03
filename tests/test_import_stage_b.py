@@ -195,7 +195,7 @@ def test_report_csv_is_spreadsheet_safe_and_has_every_row(sales):
     r = p["c"].get("/intake/sales/%s/batches/%s/report.csv" % (p["brand"].id, b["id"]), headers=_h(p["db"], p["manager"]))
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
     lines = r.text.strip().splitlines()
-    assert len(lines) == 8 and lines[0].startswith("row,outcome,company")
+    assert len(lines) == 8 and lines[0].startswith("row,outcome,next_step,company")
     assert "8135550104" not in r.text                                          # no contact details in the report
 
 
@@ -263,13 +263,24 @@ def test_destinations_list_only_what_the_person_may_write(sales):
     assert "platform_acquisition_pool" not in keys(p["manager"])
 
 
-def test_a_business_already_sourced_for_a_cleaning_customer_is_refused_by_sales(sales):
+def test_purpose_not_industry_a_business_elsewhere_is_never_blocked_and_only_the_owner_is_told(sales):
     p = sales
-    p["db"].add(LeadIntelProspect(source="maps", name="Pool Office", phone_e164="+14805550105", stage="qualified"))
+    pool = LeadIntelProspect(source="maps", name="Pool Office", phone_e164="+14805550105", stage="qualified")
+    p["db"].add(pool)
     p["db"].commit()
+    # A sales manager isn't told what other areas hold, and isn't blocked.
     b = _analyzed(p, p["manager"])
     row = _rows(p, p["manager"], b)["TEST-CLEAN-005"]
-    assert row["outcome"] == "invalid" and "master pool" in " ".join(row["business"]["errors"])
+    assert row["outcome"] == "ready" and row["related"] == [] and b["counts"]["also_elsewhere"] == 0
+    # The platform owner sees a note - still not blocked.
+    b2 = _analyzed(p, p["god"])
+    row2 = _rows(p, p["god"], b2)["TEST-CLEAN-005"]
+    assert row2["outcome"] == "ready" and "master pool" in row2["related"][0]
+    assert _commit(p, p["god"], b2).json()["created"] == 2
+    # Nothing was copied or moved between areas.
+    p["db"].refresh(pool)
+    assert pool.stage == "qualified" and pool.routed_org_id is None
+    assert p["db"].query(LeadIntelProspect).count() == 1
 
 
 # ── retries ─────────────────────────────────────────────────────────────────
@@ -346,11 +357,13 @@ def test_acquisition_import_goes_to_one_customer_only_and_sends_nothing(pilot):
     b = r.json()
     base = "/intake/acquisition/%s/batches/%s" % (p["shine"].id, b["id"])
     a = p["c"].post(base + "/analyze", headers=_h(db, p["god"])).json()["counts"]
-    assert a["ready"] == 1 and a["held_for_review"] == 1 and a["excluded"] == 1 and a["invalid"] == 1
+    assert a["ready"] == 2 and a["held_for_review"] == 1 and a["excluded"] == 1 and a["invalid"] == 0
     rows = {r["business"]["source_record_id"]: r for r in p["c"].get(base + "/rows", headers=_h(db, p["god"])).json()["items"]}
-    assert "EvoSys Sales prospect" in " ".join(rows["ACQ-4"]["business"]["errors"])
+    # Also an EvoSys Sales prospect: a note for the owner, not a refusal.
+    assert rows["ACQ-4"]["outcome"] == "ready" and "EvoSys Sales" in rows["ACQ-4"]["related"][0]
     rep = p["c"].post(base + "/commit", json={"confirm_target_id": p["shine"].id}, headers=_h(db, p["god"])).json()
-    assert rep["created"] == 1 and rep["messages_sent"] == 0
+    assert rep["created"] == 2 and rep["messages_sent"] == 0
+    assert db.query(Opportunity).filter(Opportunity.phone == "813-555-0299").count() == 1     # Sales record untouched
     opp = db.query(AcquisitionOpportunity).filter(AcquisitionOpportunity.id == rep["record_ids"][0]).first()
     assert opp.organization_id == p["shine"].id and opp.stage == "discovered" and opp.is_practice is False
     assert opp.geo_status == "eligible"
@@ -365,10 +378,10 @@ def test_acquisition_import_goes_to_one_customer_only_and_sends_nothing(pilot):
     b2 = _acq(p, p["god"]).json()
     a2 = p["c"].post("/intake/acquisition/%s/batches/%s/analyze" % (p["shine"].id, b2["id"]),
                      headers=_h(db, p["god"])).json()["counts"]
-    assert a2["ready"] == 0 and a2["matched_existing"] == 1
-    # Undo removes the untouched prospect.
+    assert a2["ready"] == 0 and a2["matched_existing"] == 2
+    # Undo removes the untouched prospects.
     out = p["c"].post(base + "/rollback", headers=_h(db, p["god"])).json()
-    assert out["removed"] == 1
+    assert out["removed"] == 2
     assert db.query(AcquisitionOpportunity).filter(AcquisitionOpportunity.id == opp.id).count() == 0
 
 
@@ -389,3 +402,52 @@ def test_tenant_upload_must_name_the_customer_shown_on_screen(db_session, client
     r = client.post("/intake/batches", headers=hdr, files=f(), data={"source": "csv", "expected_org_id": org_a.id})
     assert r.status_code == 200, r.text
     assert r.json()["organization_id"] == org_a.id
+
+
+# ── Stage C: results you can act on ─────────────────────────────────────────
+def test_next_actions_and_downloadable_held_and_excluded_lists(sales):
+    p = sales
+    b = _analyzed(p, p["manager"])
+    keys = {a["key"]: a for a in b["next_actions"]}
+    assert keys["create"]["text"].startswith("2 ready to create in EvoSys Sales")
+    assert keys["held"]["download"] == "held_for_review" and keys["excluded"]["download"] == "excluded"
+    assert b["destination"]["target_name"] == "EvoSys Sales"
+    url = "/intake/sales/%s/batches/%s/report.csv" % (p["brand"].id, b["id"])
+    held = p["c"].get(url + "?outcome=held_for_review", headers=_h(p["db"], p["manager"]))
+    lines = held.text.strip().splitlines()
+    assert held.status_code == 200 and len(lines) == 2 and "TEST-CLEAN-006" in lines[1] and "Confirm where" in lines[1]
+    assert 'held_for_review.csv' in held.headers["content-disposition"]
+    exc = p["c"].get(url + "?outcome=excluded", headers=_h(p["db"], p["manager"])).text.strip().splitlines()
+    assert len(exc) == 3
+    assert p["c"].get(url + "?outcome=nonsense", headers=_h(p["db"], p["manager"])).status_code == 422
+    rows = _rows(p, p["manager"], b)
+    assert rows["TEST-CLEAN-004"]["next_step"].startswith("Already in this destination")
+    done = _commit(p, p["manager"], b).json()
+    after = p["c"].get("/intake/sales/%s/batches/%s" % (p["brand"].id, b["id"]), headers=_h(p["db"], p["manager"])).json()
+    assert {a["key"] for a in after["next_actions"]} >= {"done", "held", "excluded"} and "Messages sent: 0" in after["next_actions"][0]["text"]
+    assert done["created"] == 2
+
+
+def test_guided_import_report_lists_rows_needing_attention_safely(db_session, client):
+    db = db_session
+    org = Organization(name="Tenant R", slug="tr-%d" % next(_SEQ), plan="enterprise", is_active=True)
+    other = Organization(name="Tenant S", slug="ts-%d" % next(_SEQ), plan="enterprise", is_active=True)
+    db.add_all([org, other])
+    db.commit()
+    god = _user(db, None, "god_admin")
+    h = _h(db, god, **{"X-Org-Override": org.id})
+    csv_body = b"First,Last,Company,Phone,Email\nAna,Row,=SUM(A1),2145550401,ana@example.test\nBo,Row,Plain Co,,\n"
+    r = client.post("/intake/batches", headers=h, data={"source": "csv", "expected_org_id": org.id},
+                    files={"file": ("c.csv", io.BytesIO(csv_body), "text/csv")})
+    assert r.status_code == 200, r.text
+    bid = r.json()["id"]
+    assert client.post("/intake/batches/%s/analyze" % bid, headers=h).status_code in (200, 202)
+    rep = client.get("/intake/batches/%s/report.csv" % bid, headers=h)
+    assert rep.status_code == 200 and rep.text.splitlines()[0].startswith("row,status,next_step")
+    assert "'=SUM(A1)" in rep.text and "2145550401" not in rep.text and "ana@example.test" not in rep.text
+    prob = client.get("/intake/batches/%s/report.csv?status=problems" % bid, headers=h)
+    assert prob.status_code == 200
+    assert client.get("/intake/batches/%s/report.csv?status=bogus" % bid, headers=h).status_code == 422
+    # Another customer can't read it.
+    h2 = _h(db, god, **{"X-Org-Override": other.id})
+    assert client.get("/intake/batches/%s/report.csv" % bid, headers=h2).status_code == 404

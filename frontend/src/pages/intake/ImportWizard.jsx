@@ -9,7 +9,7 @@
 // what will happen.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { api } from '../../api/client'
+import { api, fetchObjectUrl } from '../../api/client'
 import '../../styles/shared.css'
 import './intake.css'
 import { EMAIL_LABEL, OrgBanner, Pill, RowTable, SMS_LABEL, STATUS_LABEL, STATUS_TONE, Tile,
@@ -783,6 +783,16 @@ function ReviewStep({ batch, reload, catalog, onNext, initialTab, apiBase = '/in
       <div className="panel-header"><h2 className="panel-title">{title || 'Step 5 — Review Problems'}</h2></div>
       <p className="ic-muted">Uncertain matches are never merged automatically. Decide here, or leave them staged —
         they will not be imported until someone does.</p>
+      {!sci && (
+        <p>
+          <button type="button" className="btn btn--ghost" onClick={async () => {
+            try {
+              const url = await fetchObjectUrl(`${apiBase}/batches/${batch.id}/report.csv?status=problems`)
+              const a = document.createElement('a'); a.href = url; a.download = `${batch.batch_code || 'import'}-needs-attention.csv`; a.click()
+            } catch (e) { setMsg(errorText(e)) }
+          }}>Download rows that need attention (CSV)</button>
+        </p>
+      )}
       <div className="ic-tabs">
         {REVIEW_TABS.map(([k, l]) => (
           <button key={k} className={`ic-tab ${tab === k ? 'ic-tab--on' : ''}`} onClick={() => setTab(k)}>

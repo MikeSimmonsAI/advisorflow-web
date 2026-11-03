@@ -137,7 +137,7 @@ def _routes(prefix: str, adapter: BI.Adapter, can_import, target_name, batch_org
     def analyze(target: str, batch_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
         b = load(db, user, target, batch_id)
         try:
-            counts = BI.analyze(db, b, adapter)
+            counts = BI.analyze(db, b, adapter, user)
         except BI.BusinessImportError as exc:
             raise HTTPException(409, str(exc))
         _audit(db, batch_org(target), user, adapter.pipeline + ".analyzed", b.id, counts)
@@ -193,10 +193,14 @@ def _routes(prefix: str, adapter: BI.Adapter, can_import, target_name, batch_org
         return report
 
     @router.get(prefix + "/batches/{batch_id}/report.csv")
-    def report(target: str, batch_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    def report(target: str, batch_id: str, outcome: Optional[str] = Query(None),
+               db: Session = Depends(get_db), user: User = Depends(get_current_user)):
         b = load(db, user, target, batch_id)
-        return Response(BI.report_csv(db, b), media_type="text/csv",
-                        headers={"Content-Disposition": 'attachment; filename="%s-results.csv"' % (b.batch_code or "import")})
+        if outcome and outcome not in BI.NEXT_STEP:
+            raise HTTPException(422, "Unknown result type")
+        name = "%s-%s.csv" % (b.batch_code or "import", outcome or "results")
+        return Response(BI.report_csv(db, b, outcome), media_type="text/csv",
+                        headers={"Content-Disposition": 'attachment; filename="%s"' % name})
 
     return load
 

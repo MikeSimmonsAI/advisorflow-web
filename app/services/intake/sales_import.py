@@ -5,8 +5,10 @@ for the $250 Growth Pilot - land as `Opportunity` rows in one brand sales
 organization, stage Prospect, owned by the person importing.
 
   * Who: God, or a sales MANAGER of that brand sales org. Checked on every call.
-  * Never a commercial prospect sourced FOR a cleaning customer: a row that is
-    already in a customer's Acquisition pipeline or the master pool is refused.
+  * Purpose, not industry: an EvoSys Sales prospect is a company EvoSys sells
+    its own software to. The same business may separately be in a cleaning
+    customer's pipeline (as someone who might buy cleaning); that never blocks
+    the row and nothing is copied or moved - the platform owner just sees a note.
   * Match before create, inside the chosen brand sales org only: source record
     id -> the id quoted in an existing prospect's source text (the 15 FB-CLEAN
     prospects entered by hand) -> phone -> website -> company name.
@@ -91,20 +93,22 @@ def find_existing(db: Session, b, n: Dict[str, Any]) -> Optional[Tuple[str, str]
     return None
 
 
-def conflicts(db: Session, b, n: Dict[str, Any]) -> List[str]:
-    """A business already sourced FOR a cleaning customer is not an EvoSys
-    Sales prospect - keep the two populations apart."""
+def related(db: Session, b, n: Dict[str, Any]) -> List[str]:
+    """The same business elsewhere, for the platform owner's information only.
+    Never blocks the row; never copies or moves anything."""
     from app.models.lead_intel_models import LeadIntelProspect
     from app.models.acquisition_models import AcquisitionOpportunity
-    from app.models.models import Lead
+    from app.models.models import Lead, Organization
     out = []
-    if n.get("phone10"):
-        e164 = "+1" + n["phone10"]
-        if db.query(LeadIntelProspect.id).filter(LeadIntelProspect.phone_e164 == e164).first():
-            out.append("Already in the master pool of businesses that buy cleaning - not an EvoSys Sales prospect")
-        elif (db.query(AcquisitionOpportunity.id).join(Lead, Lead.id == AcquisitionOpportunity.lead_id)
-              .filter(or_(Lead.phone == n["phone10"], Lead.phone == e164, Lead.phone == n.get("phone_raw"))).first()):
-            out.append("Already a prospect in a cleaning customer's Acquisition pipeline - not an EvoSys Sales prospect")
+    if not n.get("phone10"):
+        return out
+    e164 = "+1" + n["phone10"]
+    if db.query(LeadIntelProspect.id).filter(LeadIntelProspect.phone_e164 == e164).first():
+        out.append("Also in the master pool (as a business that might buy cleaning)")
+    for (name,) in (db.query(Organization.name).join(AcquisitionOpportunity, AcquisitionOpportunity.organization_id == Organization.id)
+                    .join(Lead, Lead.id == AcquisitionOpportunity.lead_id)
+                    .filter(Lead.phone.in_([n["phone10"], e164, n.get("phone_raw") or ""])).distinct().limit(5).all()):
+        out.append("Also a prospect in %s's Acquisition pipeline" % name)
     return out
 
 
@@ -223,7 +227,7 @@ PROFILES: Dict[str, Dict[str, Any]] = {
 }
 
 ADAPTER = BI.Adapter(pipeline=PIPELINE, destination=DESTINATION, label="EvoSys Sales",
-                     find_existing=find_existing, write=write, conflicts=conflicts, undo=undo)
+                     find_existing=find_existing, write=write, related=related, undo=undo)
 
 
 # ── backfill: give the hand-entered prospects their source record id ──────

@@ -69,16 +69,36 @@ Dead code (no live callers): `import_service.import_leads_from_excel(dry_run=Fal
 * **C:** guided UI steps (destination → upload → map → review counts → commit selected → results), shown destination throughout, downloadable spreadsheet-safe review and error reports, intro drafts kept as drafts.
 * **D:** legacy retirement (410 with migration path, or routed through the engine), dead-code removal, docs.
 
-## Stage A production verification (kept open on purpose)
+## Stage A production verification
 
-Stage A (PR #471) is deployed and healthy (Render deploy `dep-dbkmgr4s728c738rs7e0`, health checks 200). Its two new guards, the 409 on old batch routes and the `imports` gate on `/google-contacts/import`, are covered by tests, but **they have not been exercised against production yet**. The build session's shell cannot reach the production host. Verify through an authorized browser session: an old `/import-batches/{id}` write on a guided batch should return 409. Do not use real data to test.
+Stage A (PR #471) is deployed and healthy (Render deploy `dep-dbkmgr4s728c738rs7e0`, health checks 200). Its two new guards, the 409 on old batch routes and the `imports` gate on `/google-contacts/import`, are covered by tests, and the 409 was confirmed in production on Nov 3 through the owner's browser session (see #470). The `/google-contacts/import` gate is covered by tests only, because a working call would create a batch.
 
 ## Stage B (this PR): explicit destinations, Sales and Acquisition imports
 
 * `GET /intake/destinations` lists only where the signed-in person may write, decided on the server: a customer's contacts and leads, EvoSys Sales (managers of that brand sales org), one cleaning customer's Acquisition pipeline (God or that customer's operator), the master pool (God, PR #473) and SCI (its managers).
 * **The tenant importer now names its destination.** A platform owner's upload must send `expected_org_id` and it must equal the customer the request resolves to. Otherwise it's refused, never written to the remembered customer. Import Center's "New import" opens the destination step (`/imports/start`).
 * `app/services/intake/business_import.py` is the shared core: same `import_batches` / `import_staged_rows` ledger and `engine.read_table`. It runs map → normalize → geography (`acquisition/geo.py`, PR #469) → match → review → commit (per row, retryable) → report CSV (spreadsheet-safe) → rollback. Location-pending rows are held and excluded rows are refused; neither is created. Phone line type is never upgraded to mobile and nothing grants consent. Intro messages are kept as **drafts**. Nothing is sent or enrolled, and next action stays empty.
-* `sales_import.py` writes `Opportunity` rows in the chosen brand sales org. It matches by source record ID, then the ID quoted in an existing prospect's source text, then phone, website and company name. Matches are never overwritten. Optionally the file's notes and draft are appended to the matched prospect's timeline, once. It refuses businesses already in the master pool or a cleaning customer's pipeline. New columns: `opportunities.source_system`, `source_record_id` and `import_batch_id` (additive, nullable, indexed). There is a preview-first backfill that fills only blank IDs from the prospect's own source text; an ID used by more than one prospect is left alone.
-* `acquisition_import.py` writes through `acquisition/engine.add_prospect`, unchanged and shared with #452, so dedupe, the junk filter, client exclusions and geography still apply. It refuses rows that are EvoSys Sales prospects.
+* `sales_import.py` writes `Opportunity` rows in the chosen brand sales org. It matches by source record ID, then the ID quoted in an existing prospect's source text, then phone, website and company name. Matches are never overwritten. Optionally the file's notes and draft are appended to the matched prospect's timeline, once. New columns: `opportunities.source_system`, `source_record_id` and `import_batch_id` (additive, nullable, indexed). There is a preview-first backfill that fills only blank IDs from the prospect's own source text; an ID used by more than one prospect is left alone.
+* `acquisition_import.py` writes through `acquisition/engine.add_prospect`, unchanged and shared with #452, so dedupe, the junk filter, client exclusions and geography still apply.
 
 Real package check (local test database only, never production): `All_43_Contacts.csv` gives 15 matched (each by its FB-CLEAN ID in the hand-entered source text), 23 held for location review (exactly `Location_Review_23.csv`), 5 excluded (exactly `Excluded_5_Do_Not_Import.csv`) and **0 created**. All 43 intro drafts are kept, all phones are "unknown", consent is false for every row and no messages are sent.
+
+## Sales and Acquisition: purpose, not industry (Stage C)
+
+Stage B refused a Sales row if the business was in a cleaning customer's pipeline or the master pool, and refused an Acquisition row if the business was an EvoSys Sales prospect. That was too broad: a cleaning company can legitimately be a company EvoSys sells software to **and** a business a cleaning customer wants as a client, for different reasons. Now:
+
+* **Destination and ownership are enforced; industry is not.** Matching and duplicates are checked only inside the chosen destination (one brand sales org, or one customer's pipeline).
+* **The same business in another area is a note, not a refusal.** Only the platform owner sees it, because a sales manager or an Acquisition operator must not learn what another team or customer holds.
+* **Nothing is ever copied or moved between areas** by an import.
+
+## Stage C: results you can act on
+
+* Every Sales and Acquisition import shows its destination, plain-words **next steps** worked out from its counts (create N, M held: download and confirm state, K excluded, J already there, retry failed), and a next step on every row.
+* Downloadable, spreadsheet-safe lists by result: `report.csv?outcome=held_for_review|excluded|invalid|failed|matched_existing|...`. They contain company and source ID only, with no phones or emails.
+* The tenant importer gets `GET /intake/batches/{id}/report.csv?status=problems` (or a single status) and a "Download rows that need attention" button on Review.
+
+## Production data, Nov 3
+
+* The 15 FB-CLEAN Sales prospects now have `source_record_id` filled from their own source text: 15 filled, 0 conflicts, all other fields unchanged.
+* Their notes and intro drafts were attached from the package's `Eligible_15_Contacts.csv` (import EVOSYSSA-20261103-093240): 15 matched, 0 created, one draft each. A second run added nothing.
+* The 23 location-pending and 5 excluded businesses were not staged in production. No messages were sent and no one was enrolled.
