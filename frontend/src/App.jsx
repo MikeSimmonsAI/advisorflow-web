@@ -158,6 +158,7 @@ const AcqOpsClients = lazyPage(() => import('./pages/acquisition/HubPages').then
 const AcqOpsReporting = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.Reporting })))
 const AcqOpsActivity = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.Activity })))
 const AcqOpsOutreach = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.OutreachPage })))
+const AcqOpsCalendar = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.CalendarSetup })))
 const AcqOpsFollowUps = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.FollowUpsPage })))
 const AcqOpsResponses = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.ResponsesPage })))
 const AcqOpsSoon = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Soon })))
@@ -1612,6 +1613,7 @@ export default function App() {
           <Route path="reporting" element={<AcqOpsReporting />} />
           <Route path="activity" element={<AcqOpsActivity />} />
           <Route path="followups" element={<AcqOpsFollowUps />} />
+          <Route path="calendar" element={<AcqOpsCalendar />} />
         </Route>
         <Route path="/roofing" element={<RoofingLanding />} />
         {/* PUBLIC interactive demo - fictional data only, no login, no Roofing API. */}

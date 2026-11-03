@@ -267,6 +267,33 @@ export function Estimates() {
   )
 }
 
+// The client connects THEIR OWN calendar so EvoSys can book onto it.
+function CalendarPanel() {
+  const [c, err] = useLoad('/acquisition/calendar')
+  const [fail, setFail] = useState(null)
+  const connect = async path => {
+    setFail(null)
+    try { const r = await api.get(path); window.location.href = r.authorization_url } catch (e) { setFail(errText(e)) }
+  }
+  if (err || !c) return null
+  return (
+    <section className="aq-card" style={{ marginBottom: 14 }}>
+      <h2>Your appointment calendar</h2>
+      <p className="hb-muted" style={{ marginTop: 0 }}>EvoSys books appointments straight onto this calendar, only into times it shows as free.</p>
+      <dl className="aq-dl">
+        <dt>Appointments go to</dt><dd>{c.booking_user ? c.booking_user.name : 'Not chosen yet — EvoSys sets this up with you'}</dd>
+        <dt>Calendar</dt><dd><Dot tone={c.ready ? 'green' : 'amber'}>{c.ready ? 'Connected' : 'Not connected'}</Dot></dd>
+        <dt>Meeting length</dt><dd>{c.appointment_minutes} minutes</dd>
+        {c.meeting_location && <><dt>Location</dt><dd>{c.meeting_location}</dd></>}
+      </dl>
+      {c.is_my_calendar && !c.ready && <div className="aq-actions">
+        <button className="aq-btn aq-btn--primary" onClick={() => connect('/calendar/connect')}>Connect Google Calendar</button>
+        <button className="aq-btn" onClick={() => connect('/microsoft/connect')}>Connect Microsoft 365</button></div>}
+      {fail && <div className="aq-err">{fail}</div>}
+    </section>
+  )
+}
+
 // ── My business ─────────────────────────────────────────────────────────
 export function Settings() {
   const { status, reloadStatus } = useAcq()
@@ -277,6 +304,7 @@ export function Settings() {
   return (
     <div className="aq-page">{toast}
       <PageHeader eyebrow="Client Portal" title="My Business" sub="How EvoSys describes you and which businesses we book for you. Only what’s true today — we never claim anything you haven’t confirmed." />
+      <CalendarPanel />
       <Readiness r={p.readiness} />
       <div style={{ marginTop: 14 }}>
         <BusinessForm profile={p} segments={status.segments} canEdit={status.can_manage}

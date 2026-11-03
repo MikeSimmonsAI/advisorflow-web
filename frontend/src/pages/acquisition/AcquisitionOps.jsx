@@ -49,6 +49,7 @@ const CLIENT_NAV = [
 ]
 const SUPPORT_NAV = [
   { to: `${OPS}/onboarding`, label: 'Client Configuration', icon: 'building' },
+  { to: `${OPS}/calendar`, label: 'Booking & Calendar', icon: 'calendar' },
   { to: `${OPS}/settings`, label: 'Pause, Exclusions & Operators', icon: 'settings' },
   { to: `${OPS}/activity`, label: 'Audit History', icon: 'clock' },
 ]
@@ -349,7 +350,7 @@ function ProspectDetail({ x }) {
         <div><h2 style={{ margin: 0 }}>{x.business_name}</h2><span style={{ color: 'var(--aq-sub)', fontSize: 13 }}>{[x.segment_label, x.city].filter(Boolean).join(' • ')}</span></div>
         <span style={{ marginLeft: 'auto' }}>{x.score != null ? <span className="aq-score">Score: {x.score}</span> : <span className="aq-pill">Not scored</span>}</span>
       </div>
-      <div className="aq-tabs">{[['overview', 'Overview'], ['signals', `Signals (${x.evidence.length})`], ['contacts', 'Contacts'], ['email', 'Email'], ['actions', 'Actions']].map(([k, l]) => (
+      <div className="aq-tabs">{[['overview', 'Overview'], ['signals', `Signals (${x.evidence.length})`], ['contacts', 'Contacts'], ['email', 'Email'], ['schedule', 'Schedule'], ['actions', 'Actions']].map(([k, l]) => (
         <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>))}</div>
       {tab === 'overview' && (
         <div className="aq-grid aq-two">
@@ -393,16 +394,132 @@ function ProspectDetail({ x }) {
       )}
       {tab === 'contacts' && <LocationForm x={x} />}
       {tab === 'email' && <EmailTab x={x} />}
+      {tab === 'schedule' && <ScheduleTab x={x} />}
       {tab === 'actions' && (
         <div className="aq-actions">
           <select value={stage} onChange={e => setStage(e.target.value)}><option value="">Move to stage…</option>
-            {ov.stages.filter(s => !['contacted', 'replied'].includes(s.key)).map(s => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
+            {ov.stages.filter(s => !['contacted', 'replied', 'appointment_booked'].includes(s.key)).map(s => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
           <input placeholder="Note / reason (required for Interested and Not a fit)" style={{ flex: 1, minWidth: 220 }} value={note} onChange={e => setNote(e.target.value)} />
           <button className="aq-btn aq-btn--sm aq-btn--primary" disabled={!stage} onClick={move}>Move</button>
-          <small style={{ color: 'var(--aq-sub)', width: '100%' }}>Contacted and Replied are recorded from real messages only.</small>
+          <small style={{ color: 'var(--aq-sub)', width: '100%' }}>Contacted and Replied are recorded from real messages only. Appointments are booked on the Schedule tab, onto the client’s real calendar.</small>
         </div>
       )}
       {fail && <div className="aq-err">{fail}</div>}
+    </div>
+  )
+}
+
+// Book (or move) a real appointment on the CLIENT's connected calendar.
+function ScheduleTab({ x }) {
+  const { orgId, reload } = useOps()
+  const [cal] = useLoad(`/acquisition-ops/${orgId}/calendar`)
+  const today = new Date()
+  const iso = d => d.toISOString().slice(0, 10)
+  const [day, setDay] = useState(iso(new Date(today.getTime() + 864e5)))
+  const [slots, setSlots] = useState(null)
+  const [slot, setSlot] = useState('')
+  const [agreed, setAgreed] = useState(false)
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [fail, setFail] = useState(null)
+  const [done, setDone] = useState(null)
+  const booked = x.stage === 'appointment_booked'
+  const canBook = x.stage === 'interested'
+  const look = async () => {
+    setFail(null); setSlots(null); setSlot('')
+    try { setSlots(await api.get(`/acquisition-ops/${orgId}/prospects/${x.id}/slots?day=${day}`)) } catch (e) { setFail(errText(e)) }
+  }
+  const go = async () => {
+    setBusy(true); setFail(null)
+    try {
+      const r = booked ? await api.post(`/acquisition-ops/${orgId}/prospects/${x.id}/reschedule`, { slot, note })
+        : await api.post(`/acquisition-ops/${orgId}/prospects/${x.id}/book`, { slot, note, confirmed_with_prospect: agreed })
+      setDone(r); setSlots(null); reload()
+    } catch (e) { setFail(errText(e)) } finally { setBusy(false) }
+  }
+  if (!canBook && !booked) return <div className="aq-empty">Appointments are booked once the prospect is <b>Interested</b>. Current stage: {x.stage_label}.</div>
+  return (
+    <div>
+      {cal && !cal.ready && <div className="aq-note aq-note--warn">{cal.status_label}. <a href={`${OPS}/calendar`}>Open booking setup →</a></div>}
+      {booked && x.appointment && <div className="aq-note">Booked for <b>{when(x.appointment.time)}</b> · {x.appointment.calendar_synced ? 'on the client’s calendar' : 'calendar not confirmed'}. Pick a new time to reschedule the same appointment.</div>}
+      {done && <div className="aq-ok">{done.status === 'booked' ? 'Booked and on the client’s calendar' : 'Rescheduled'} — {when(done.booked_time)}. Nothing was emailed.</div>}
+      <div className="aq-actions">
+        <input type="date" aria-label="Day" value={day} min={iso(today)} onChange={e => setDay(e.target.value)} />
+        <button className="aq-btn aq-btn--sm" disabled={!cal?.ready} onClick={look}>Show real free times</button>
+      </div>
+      {slots && (slots.slots.length ? <div className="aq-actions">{slots.slots.map(t => (
+        <button key={t} className={`aq-btn aq-btn--sm ${slot === t ? 'aq-btn--primary' : ''}`} onClick={() => setSlot(t)}>{clock(t)}</button>))}</div>
+        : <p className="hb-muted">No free times that day{slots.reason ? ` — ${slots.reason}` : ''}.</p>)}
+      {slots && <p className="hb-muted">From {slots.calendar_of}’s connected calendar ({slots.timezone}), within the client’s booking windows.</p>}
+      {slot && <div style={{ marginTop: 10 }}>
+        {!booked && <label className="aq-checks"><label><input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} />The prospect agreed to {when(slot)}</label></label>}
+        <div className="aq-field"><input placeholder="Note for the record (optional)" value={note} onChange={e => setNote(e.target.value)} /></div>
+        <button className="aq-btn aq-btn--primary" disabled={busy || (!booked && !agreed)} onClick={go}>{busy ? 'Writing to the calendar…' : booked ? 'Move appointment' : 'Book on the client’s calendar'}</button>
+      </div>}
+      {fail && <div className="aq-err">{fail}</div>}
+    </div>
+  )
+}
+
+// Owner: where EvoSys books this client's appointments.
+export function CalendarSetup() {
+  const { ov, orgId } = useOps()
+  const [cfg, err, reload] = useLoad(`/acquisition-ops/${orgId}/calendar`)
+  const [f, setF] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [fail, setFail] = useState(null)
+  const [toast, say] = useToast()
+  useEffect(() => { if (cfg && !f) setF({ ...cfg, booking_user_id: cfg.booking_user?.id || '', windows: Object.fromEntries(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map(d => [d, (cfg.booking_windows[d] || [])[0] || ['', '']])) }) }, [cfg])
+  if (err) return <div className="aq-page"><div className="aq-err">{errText(err)}</div></div>
+  if (!cfg || !f) return <div className="aq-page"><Loading /></div>
+  const set = k => e => setF({ ...f, [k]: e.target.value })
+  const save = async () => {
+    setBusy(true); setFail(null)
+    const windows = Object.fromEntries(Object.entries(f.windows).filter(([, r]) => r[0] && r[1]).map(([d, r]) => [d, [r]]))
+    try {
+      await api.put(`/acquisition-ops/${orgId}/calendar`, { booking_user_id: f.booking_user_id || null, timezone: f.timezone, appointment_minutes: f.appointment_minutes,
+        min_notice_hours: f.min_notice_hours ?? '', buffer_minutes: f.buffer_minutes ?? '', booking_windows: windows, meeting_location: f.meeting_location || '',
+        booking_contact: f.booking_contact || '', reschedule_rules: f.reschedule_rules || '', confirmation_pref: f.confirmation_pref })
+      say('Saved'); reload()
+    } catch (e) { setFail(errText(e)) } finally { setBusy(false) }
+  }
+  const DAYS = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']]
+  return (
+    <div className="aq-page">{toast}
+      <PageHeader eyebrow="Administration" title="Booking & Calendar" sub={`Where EvoSys books ${ov.organization_name}’s appointments. Only real free times on the client’s connected calendar are ever offered.`} />
+      <div className={`aq-note ${cfg.ready ? '' : 'aq-note--warn'}`}><b>{cfg.ready ? 'Ready.' : 'Not ready.'}</b> {cfg.status_label}</div>
+      <div className="aq-grid aq-two">
+        <section className="aq-card"><h2>Appointment destination</h2>
+          <div className="aq-field"><label htmlFor="c-u">Client login that receives appointments</label>
+            <select id="c-u" value={f.booking_user_id} onChange={set('booking_user_id')} disabled={!ov.is_god}><option value="">Choose…</option>
+              {cfg.candidates.map(u => <option key={u.id} value={u.id}>{u.name} — {u.calendar_connected ? 'calendar connected' : 'no calendar yet'}</option>)}</select></div>
+          {!cfg.candidates.length && <p className="hb-muted">This client has no login yet. Invite one from the Cleaning Client Directory; they connect their Google or Microsoft calendar after signing in.</p>}
+          <div className="aq-grid aq-two">
+            <div className="aq-field"><label htmlFor="c-tz">Time zone</label><input id="c-tz" value={f.timezone || ''} onChange={set('timezone')} /></div>
+            <div className="aq-field"><label htmlFor="c-m">Meeting length (min)</label><input id="c-m" inputMode="numeric" value={f.appointment_minutes || ''} onChange={set('appointment_minutes')} /></div>
+            <div className="aq-field"><label htmlFor="c-n">Minimum notice (hours)</label><input id="c-n" inputMode="numeric" value={f.min_notice_hours ?? ''} onChange={set('min_notice_hours')} /></div>
+            <div className="aq-field"><label htmlFor="c-b">Buffer between visits (min)</label><input id="c-b" inputMode="numeric" value={f.buffer_minutes ?? ''} onChange={set('buffer_minutes')} /></div>
+          </div>
+          <p className="hb-muted">Bookings are placed in {cfg.slot_engine_timezone} (the platform scheduler’s working zone).</p>
+        </section>
+        <section className="aq-card"><h2>Booking windows</h2>
+          <p className="hb-muted">Leave a day blank to allow any free time the calendar shows.</p>
+          {DAYS.map(([d, l]) => <div className="aq-actions" key={d} style={{ marginTop: 6 }}><b style={{ width: 40 }}>{l}</b>
+            <input type="time" aria-label={`${l} from`} value={f.windows[d][0]} onChange={e => setF({ ...f, windows: { ...f.windows, [d]: [e.target.value, f.windows[d][1]] } })} />
+            <span>to</span><input type="time" aria-label={`${l} to`} value={f.windows[d][1]} onChange={e => setF({ ...f, windows: { ...f.windows, [d]: [f.windows[d][0], e.target.value] } })} /></div>)}
+        </section>
+      </div>
+      <section className="aq-card" style={{ marginTop: 14 }}><h2>Meeting details</h2>
+        <div className="aq-grid aq-two">
+          <div className="aq-field"><label htmlFor="c-l">Meeting location</label><input id="c-l" placeholder="e.g. At the prospect's property" value={f.meeting_location || ''} onChange={set('meeting_location')} /></div>
+          <div className="aq-field"><label htmlFor="c-c">Booking contact at the client</label><input id="c-c" value={f.booking_contact || ''} onChange={set('booking_contact')} /></div>
+          <div className="aq-field"><label htmlFor="c-r">Rescheduling rules</label><textarea id="c-r" value={f.reschedule_rules || ''} onChange={set('reschedule_rules')} /></div>
+          <div className="aq-field"><label htmlFor="c-p">Confirmation</label><select id="c-p" value={f.confirmation_pref} onChange={set('confirmation_pref')}>
+            <option value="calendar_only">Calendar event only</option><option value="calendar_and_email">Calendar event + EvoSys email</option></select></div>
+        </div>
+        {fail && <div className="aq-err">{fail}</div>}
+        {ov.is_god ? <button className="aq-btn aq-btn--primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save booking setup'}</button> : <p className="hb-muted">Only the EvoSys owner changes booking setup.</p>}
+      </section>
     </div>
   )
 }
