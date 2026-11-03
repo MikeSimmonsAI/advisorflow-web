@@ -2,7 +2,7 @@
 """Issue #452 - managed client acquisition pilot (P1).
 
 Shapes only, no real customer data. Proves:
-  * the program is explicit, cleaning-only and limited to ONE organization;
+  * the program is explicitly enabled, cleaning-only, per organization;
   * the client portal is closed to other workspaces, legacy NULL allow-lists
     and non-god users of the owner routes;
   * practice (test-cohort) prospects never reach the client or client counts;
@@ -85,7 +85,7 @@ def _move(p, opp, stage, **kw):
                        json=dict(stage=stage, **kw), headers=_h(p["db"], p["god"]))
 
 
-# ── enabling is explicit, cleaning-only, one company ──────────────────────
+# ── enabling is explicit, cleaning-only, independently scoped ────────────────
 def test_enable_is_idempotent_and_starts_paused(pilot):
     p = pilot
     r = p["c"].post("/god/acquisition/%s/enable" % p["shine"].id, headers=_h(p["db"], p["god"]))
@@ -99,17 +99,28 @@ def test_enable_is_idempotent_and_starts_paused(pilot):
     assert ov["spend"]["usd"] == 0.0
 
 
-def test_second_organization_is_refused(pilot):
+def test_second_cleaning_client_gets_its_own_paused_workspace(pilot):
     p = pilot
     r = p["c"].post("/god/acquisition/%s/enable" % p["other"].id, headers=_h(p["db"], p["god"]))
-    assert r.status_code == 409
+    assert r.status_code == 200, r.text
     p["db"].refresh(p["other"])
-    assert "client_acquisition" not in (p["other"].enabled_features or "")
+    assert "client_acquisition" in (p["other"].enabled_features or "")
+    first = p["c"].get("/acquisition-ops/%s/overview" % p["shine"].id,
+                       headers=_h(p["db"], p["god"])).json()
+    second = p["c"].get("/acquisition-ops/%s/overview" % p["other"].id,
+                        headers=_h(p["db"], p["god"])).json()
+    assert first["profile"]["paused"] is second["profile"]["paused"] is True
+    assert first["organization_id"] != second["organization_id"]
+    assert first["profile"]["pilot_started_at"] is None
+    assert second["profile"]["pilot_started_at"] is None
+    assert p["c"].get("/acquisition/status", headers=_h(p["db"], p["outsider"], p["shine"].id)).status_code in (402, 403)
+    own = p["c"].get("/acquisition/status", headers=_h(p["db"], p["outsider"], p["other"].id))
+    assert own.status_code == 200
 
 
 def test_non_cleaning_business_is_refused(pilot, db_session):
     p = pilot
-    # free the single slot first so only the identity rule can refuse
+    # The cleaning-only identity rule still refuses funeral workspaces.
     p["shine"].enabled_features = json.dumps(["leads"])
     db_session.commit()
     r = p["c"].post("/god/acquisition/%s/enable" % p["funeral"].id, headers=_h(p["db"], p["god"]))
