@@ -20,8 +20,9 @@ const pct = v => (v == null ? '—' : Math.round(v * 100) + '%')
 
 // Owner-only: EvoSys's own master pool and its import (never shown to operators).
 const GOD_NAV = [
-  { to: `${OPS}/master`, label: 'Master pool', icon: 'search' },
-  { to: `${OPS}/import`, label: 'Import to pool', icon: 'building' },
+  { to: OPS, label: 'Master Overview', icon: 'dashboard', end: true },
+  { to: `${OPS}/master`, label: 'Master Prospect Pool', icon: 'search' },
+  { to: `${OPS}/import`, label: 'Unified Importer', icon: 'building' },
 ]
 const NAV = [
   { to: OPS, label: 'Control Center', icon: 'dashboard', end: true },
@@ -103,7 +104,16 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg }) {
           <Logo />
           <div className="aq-side__label">Operations</div>
           <nav className="aq-nav">
-            {(ov.is_god ? [...NAV, ...GOD_NAV] : NAV).map(it => (
+            {ov.is_god && <>
+              <div className="aq-side__label">EVOSYS MASTER ACQUISITION</div>
+              {GOD_NAV.map(it => <NavLink key={it.to} to={it.to} end={it.end}>
+                <Icon name={it.icon} />{it.label}
+              </NavLink>)}
+              <div className="aq-side__label" style={{ marginTop: 20 }}>CLIENT OPERATIONS</div>
+            </>}
+            {(ov.is_god
+              ? [{ to: `${OPS}/client-dashboard`, label: 'Client Dashboard', icon: 'dashboard' }, ...NAV.filter(it => it.to !== OPS)]
+              : NAV).map(it => (
               <NavLink key={it.to} to={it.to} end={it.end}>
                 <Icon name={it.icon} />{it.label}{it.soon && <span className="aq-nav__soon">{it.soon}</span>}
               </NavLink>
@@ -114,7 +124,7 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg }) {
         <div className="aq-main">
           <header className="aq-top">
             <button className="aq-btn aq-btn--sm aq-top__menu" onClick={() => setOpen(true)} aria-label="Open navigation"><Icon name="menu" /></button>
-            <span className="aq-top__title">Acquisition Control Center</span>
+            <span className="aq-top__title">{ov.is_god && (loc.pathname === OPS || loc.pathname === `${OPS}/master` || loc.pathname === `${OPS}/import`) ? 'EvoSys Pro · Master Acquisition' : 'Acquisition Control Center'}</span>
             <div className="aq-top__right">
               {(clients.is_god || clients.items.length > 1) && <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700 }}>
                 Client
@@ -130,10 +140,14 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg }) {
             </div>
           </header>
           <div className="aq-band">
-            <div><h1>Acquisition Control Center</h1><p>{ov.organization_name} • Lead Generation &amp; Appointment Setting</p></div>
+            <div>{ov.is_god && (loc.pathname === OPS || loc.pathname === `${OPS}/master` || loc.pathname === `${OPS}/import`)
+              ? <><h1>EvoSys Master Acquisition</h1><p>Platform Headquarters · Research, Import, Qualify &amp; Distribute</p></>
+              : <><h1>Acquisition Control Center</h1><p>{ov.organization_name} · Lead Generation &amp; Appointment Setting</p></>}</div>
             <div className="aq-band__right">
-              <span className={`aq-badge ${p.paused ? 'aq-badge--paused' : ''}`}><Icon name={p.paused ? 'pause' : 'calendar'} size={15} />
-                {p.paused ? 'Paused' : ov.progress.started ? `Pilot day ${ov.progress.day} of 30` : 'Pilot not started'}</span>
+              {ov.is_god && (loc.pathname === OPS || loc.pathname === `${OPS}/master` || loc.pathname === `${OPS}/import`)
+                ? <span className="aq-badge">Platform Overview</span>
+                : <span className={`aq-badge ${p.paused ? 'aq-badge--paused' : ''}`}><Icon name={p.paused ? 'pause' : 'calendar'} size={15} />
+                    {p.paused ? 'Paused' : ov.progress.started ? `Pilot day ${ov.progress.day} of 30` : 'Pilot not started'}</span>}
             </div>
           </div>
           <Suspense fallback={<Loading />}><Outlet /></Suspense>
@@ -257,7 +271,56 @@ export function MasterPool() {
   )
 }
 
+// Program Access owns this page. Role checks stay on the server:
+ // God sees the platform-wide overview, never the first client's metrics.
+function OwnerAcquisitionHome() {
+  const [master, err, reload] = useLoad('/god/acquisition/master')
+  if (err) return <div className="aq-page"><div className="aq-err">{errText(err)}</div></div>
+  if (!master) return <div className="aq-page"><Loading label="Opening EvoSys Master Acquisition…" /></div>
+  const assigned = master.prospects_total == null || master.unassigned_qualified == null
+    ? null : Math.max(0, master.prospects_total - master.unassigned_qualified)
+  return <div className="aq-page">
+    <h1 className="aq-h1">Master Acquisition Headquarters</h1>
+    <p className="aq-lede">One EvoSys-owned prospect inventory. Research and import once, qualify centrally, then deliberately assign eligible businesses to your cleaning company clients. Client portals stay separate.</p>
+    <div className="aq-grid aq-kpis aq-kpis--dark">
+      <Kpi icon="building" label="Master Businesses" value={master.prospects_total ?? '—'} sub="Real records in the master prospect pool"/>
+      <Kpi icon="users" label="Available Qualified" value={master.unassigned_qualified ?? '—'} sub="Ready for manual allocation review"/>
+      <Kpi icon="handshake" label="Assigned / Other" value={assigned ?? '—'} sub="Includes any other non-available inventory"/>
+      <Kpi icon="store" label="Cleaning Clients" value={master.clients?.length ?? '—'} sub="Independently enabled tenants"/>
+    </div>
+    <div className="aq-grid aq-split" style={{ marginTop: 18 }}>
+      <section className="aq-card">
+        <h2>Master operating desk</h2>
+        <p className="aq-lede">These are platform-owned activities, not Divine Shine operations.</p>
+        <div className="aq-actions">
+          <a className="aq-btn aq-btn--primary" href={`${OPS}/master`}>Open Master Prospect Pool</a>
+          <a className="aq-btn" href={`${OPS}/import`}>Import Businesses</a>
+          <a className="aq-btn" href="/god/lead-intelligence">Research &amp; Qualification</a>
+        </div>
+      </section>
+      <section className="aq-card">
+        <h2>Client workspaces</h2>
+        <p className="aq-lede">Each cleaning company receives its own private pipeline and dashboard.</p>
+        {(master.clients || []).map(x => <div className="aq-row" key={x.organization_id}>
+          <div className="aq-row__main"><b>{x.name}</b>
+            <span>{x.paused ? 'Paused' : 'Enabled'} · {x.pilot_started_at ? 'Pilot started' : 'Pilot not started'}</span></div>
+          <span className="aq-pill">Private workspace</span>
+        </div>)}
+        <p className="aq-lede">Select a client using the top-right company selector, then open Client Dashboard, Prospects or Appointments.</p>
+      </section>
+    </div>
+    <div className="aq-note" style={{ marginTop: 16 }}>No company is contacted and no pilot starts when a business is imported or assigned. Researched prospects remain email-only.</div>
+    <button className="aq-btn aq-btn--sm" onClick={reload}>Refresh master totals</button>
+  </div>
+}
+
 export function ControlCenter() {
+  const { ov } = useOps()
+  const loc = useLocation()
+  return ov.is_god && loc.pathname === OPS ? <OwnerAcquisitionHome /> : <ClientControlCenter />
+}
+
+function ClientControlCenter() {
   const { ov } = useOps()
   const f = ov.client_funnel, all = ov.funnel, t = ov.targets
   const checks = [
