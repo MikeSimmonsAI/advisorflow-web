@@ -8,9 +8,9 @@
  */
 import { createContext, Suspense, useContext, useEffect, useMemo, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { api } from '../../api/client'
+import { api, getCurrentUser } from '../../api/client'
 import { BusinessForm, Readiness } from './BusinessForm'
-import { DateChip, Icon, Kpi, Loading, Logo, Pill, apptPill, clock, errText, initials, money, useFont, useLoad, useToast, when } from './ui'
+import { DateChip, Icon, Kpi, Loading, Logo, PageHeader, Pill, apptPill, clock, errText, initials, money, useFont, useLoad, useToast, when } from './ui'
 import './acquisition.css'
 import './hub.css'
 
@@ -23,7 +23,7 @@ const pct = v => (v == null ? '—' : Math.round(v * 100) + '%')
 // Owner-only groups are hidden from operators AND refused by the server
 // (every /god/acquisition/* endpoint is God-checked); hiding is not security.
 const MASTER_NAV = [
-  { to: OPS, label: 'Master Overview', icon: 'dashboard', end: true },
+  { to: OPS, label: 'Control Center', icon: 'dashboard', end: true },
   { to: `${OPS}/import`, label: 'Import Center', icon: 'upload' },
   { to: `${OPS}/master`, label: 'Master Prospect Pool', icon: 'database' },
   { to: `${OPS}/research`, label: 'Research & Qualification', icon: 'flask' },
@@ -31,22 +31,26 @@ const MASTER_NAV = [
   { to: `${OPS}/clients`, label: 'Cleaning Client Directory', icon: 'store' },
   { to: `${OPS}/reporting`, label: 'All-Clients Reporting', icon: 'chart' },
 ]
+// Client-scoped operating tools: EvoSys staff work these for the client chosen
+// in the selector. Nothing here is the customer's own portal.
 const CLIENT_NAV = [
-  { to: `${OPS}/client-dashboard`, label: 'Client Dashboard', icon: 'dashboard' },
-  { to: `${OPS}/prospects`, label: 'Prospects', icon: 'users' },
+  { to: `${OPS}/client-dashboard`, label: 'Client Operations', icon: 'dashboard' },
+  { to: `${OPS}/prospects`, label: 'Prospect Queue', icon: 'users' },
   { to: `${OPS}/outreach`, label: 'Outreach', icon: 'mail' },
   { to: `${OPS}/responses`, label: 'Responses', icon: 'reply' },
   { to: `${OPS}/appointments`, label: 'Appointments', icon: 'calendar' },
   { to: `${OPS}/pipeline`, label: 'Pipeline & Contracts', icon: 'pipeline' },
   { to: `${OPS}/discovery`, label: 'Lead Discovery', icon: 'search' },
   { to: `${OPS}/health`, label: 'Worker Health', icon: 'heart' },
-  { to: `${OPS}/onboarding`, label: 'Client Settings', icon: 'building' },
 ]
 const SUPPORT_NAV = [
+  { to: `${OPS}/onboarding`, label: 'Client Configuration', icon: 'building' },
   { to: `${OPS}/settings`, label: 'Pause, Exclusions & Operators', icon: 'settings' },
-  { to: `${OPS}/activity`, label: 'Activity History', icon: 'clock' },
+  { to: `${OPS}/activity`, label: 'Audit History', icon: 'clock' },
 ]
 const MASTER_PATHS = [OPS, ...MASTER_NAV.slice(1).map(x => x.to), `${OPS}/activity`]
+// Pages that need a chosen client. The owner is never dropped into one by default.
+const CLIENT_PATHS = [...CLIENT_NAV.map(x => x.to), `${OPS}/onboarding`, `${OPS}/settings`]
 const TITLES = Object.fromEntries([...MASTER_NAV, ...CLIENT_NAV, ...SUPPORT_NAV].map(x => [x.to, x.label]))
 
 function NavGroup({ title, items, children, startOpen = true }) {
@@ -87,9 +91,13 @@ function Enable({ onDone }) {
 export default function AcquisitionOps() {
   useFont()
   const [clients, cErr, reloadClients] = useLoad('/acquisition-ops/clients')
-  const [selectedOrg, setSelectedOrg] = useState('')
-  const orgId = clients?.items?.some(c => c.organization_id === selectedOrg)
-    ? selectedOrg : clients?.items?.[0]?.organization_id
+  const [selectedOrg, setSelectedOrgState] = useState(() => {
+    try { return sessionStorage.getItem('aq_client') || '' } catch { return '' } })
+  const setSelectedOrg = id => { setSelectedOrgState(id); try { sessionStorage.setItem('aq_client', id || '') } catch { /* private mode */ } }
+  const valid = clients?.items?.some(c => c.organization_id === selectedOrg)
+  // OWNER: no client until one is chosen (never Divine Shine, never a TEST company).
+  // OPERATOR: their first authorized client - they have nothing else.
+  const orgId = valid ? selectedOrg : (clients?.is_god ? null : clients?.items?.[0]?.organization_id)
   if (cErr) {
     return <div className="aq aq-gate"><div className="aq-card">
       <h1 className="aq-h1">{cErr.status === 403 ? 'No acquisition access' : 'This page couldn’t load'}</h1>
@@ -98,13 +106,16 @@ export default function AcquisitionOps() {
     </div></div>
   }
   if (!clients) return <div className="aq"><Loading label="Opening the control center…" /></div>
-  if (!clients.items.length) return clients.is_god ? <Enable onDone={reloadClients} /> : <div className="aq"><Loading /></div>
-  return <TenantAcquisitionOps key={orgId} orgId={orgId} clients={clients} onSelectOrg={setSelectedOrg} reloadClients={reloadClients} />
+  if (!clients.items.length && !clients.is_god) return <div className="aq"><Loading /></div>
+  return <TenantAcquisitionOps key={orgId || 'master'} orgId={orgId} clients={clients} onSelectOrg={setSelectedOrg} reloadClients={reloadClients} />
 }
 
 function TenantAcquisitionOps({ orgId, clients, onSelectOrg, reloadClients }) {
-  const [ov, oErr, reloadOv] = useLoad(`/acquisition-ops/${orgId}/overview`)
-  const [list, lErr, reloadList] = useLoad(`/acquisition-ops/${orgId}/prospects`)
+  const [ovLoaded, oErr, reloadOv] = useLoad(orgId ? `/acquisition-ops/${orgId}/overview` : null)
+  const [list, lErr, reloadList] = useLoad(orgId ? `/acquisition-ops/${orgId}/prospects` : null)
+  // The owner's master shell runs with no client loaded at all.
+  const ov = orgId ? ovLoaded : { is_god: true, organization_id: null, organization_name: null, me: { name: getCurrentUser()?.name || '' },
+                                   recent_events: [], profile: {} }
   const [open, setOpen] = useState(false)
   const loc = useLocation()
   useEffect(() => { setOpen(false) }, [loc.pathname])
@@ -116,28 +127,30 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg, reloadClients }) {
       <a className="aq-btn" href="/workspaces">Back to programs</a>
     </div></div>
   }
-  if (!ov || ov.organization_id !== orgId) return <div className="aq"><Loading label="Opening selected client…" /></div>
+  if (orgId && (!ov || ov.organization_id !== orgId)) return <div className="aq"><Loading label="Opening selected client…" /></div>
   const reload = () => { reloadOv(); reloadList() }
   const p = ov.profile
   const me = ov.me?.name || ''
   const onMaster = ov.is_god && MASTER_PATHS.includes(loc.pathname)
-  const page = TITLES[loc.pathname] || (ov.is_god ? 'Master Overview' : 'Client Dashboard')
+  const needsClient = !orgId && !onMaster
+  const page = TITLES[loc.pathname] || (ov.is_god ? 'Control Center' : 'Client Operations')
   return (
     <Ctx.Provider value={{ ov, list, listErr: lErr, reload, orgId, clients, onSelectOrg, reloadClients }}>
       <div className="aq aq-app aq-dark">
         {open && <div className="aq-scrim" onClick={() => setOpen(false)} />}
-        <aside className={`aq-side ${open ? 'open' : ''}`} aria-label="Acquisition Hub navigation">
+        <aside className={`aq-side ${open ? 'open' : ''}`} aria-label="Acquisition Control Center navigation">
           <div className="aq-logo"><span className="aq-logo__mark"><Icon name="spark" size={16} /></span>
-            <span>EvoSys Pro<small>Acquisition Hub</small></span></div>
-          {ov.is_god && <NavGroup title="EvoSys Master Acquisition" items={MASTER_NAV} />}
-          <NavGroup title="Client Operations" items={ov.is_god || clients.items.length > 1 ? CLIENT_NAV : CLIENT_NAV.map(x => x.to === `${OPS}/client-dashboard` ? { ...x, to: OPS, end: true } : x)}>
+            <span>EvoSys Pro<small>Acquisition Control Center</small></span></div>
+          {ov.is_god && <NavGroup title="Master Control" items={MASTER_NAV} />}
+          <NavGroup title="Acquisition Operations" items={ov.is_god || clients.items.length > 1 ? CLIENT_NAV : CLIENT_NAV.map(x => x.to === `${OPS}/client-dashboard` ? { ...x, to: OPS, end: true } : x)}>
             {(clients.is_god || clients.items.length > 1) && <div className="hb-client">
               <label htmlFor="hb-client">Cleaning company</label>
-              <select id="hb-client" aria-label="Acquisition client workspace" value={orgId} onChange={e => onSelectOrg(e.target.value)}>
+              <select id="hb-client" aria-label="Acquisition client workspace" value={orgId || ''} onChange={e => onSelectOrg(e.target.value)}>
+                {!orgId && <option value="">Choose a client…</option>}
                 {clients.items.map(c => <option key={c.organization_id} value={c.organization_id}>{c.name}</option>)}
               </select></div>}
           </NavGroup>
-          <NavGroup title="Actions & Support" items={ov.is_god ? SUPPORT_NAV : SUPPORT_NAV.filter(x => x.to !== `${OPS}/activity`)} startOpen={false}>
+          <NavGroup title="Administration" items={ov.is_god ? SUPPORT_NAV : SUPPORT_NAV.filter(x => x.to !== `${OPS}/activity`)} startOpen={false}>
           </NavGroup>
           <nav className="aq-nav" style={{ marginTop: 'auto' }}><a href="/workspaces"><Icon name="back" />Return to Program Access</a></nav>
         </aside>
@@ -145,14 +158,14 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg, reloadClients }) {
           <header className="aq-top">
             <button className="aq-btn aq-btn--sm aq-top__menu" onClick={() => setOpen(true)} aria-label="Open navigation"><Icon name="menu" /></button>
             <nav className="hb-crumbs" aria-label="Breadcrumb"><a href="/workspaces">Program Access</a><span>›</span>
-              <span className="hb-crumb-mid">Acquisition Hub</span><span className="hb-crumb-mid">›</span><b>{page}</b></nav>
+              <span className="hb-crumb-mid">Acquisition Control Center</span><span className="hb-crumb-mid">›</span><b>{page}</b></nav>
             <div className="aq-top__right">
               <span className={`hb-role ${ov.is_god ? '' : 'hb-role--op'}`}><Icon name={ov.is_god ? 'shield' : 'key'} size={14} />{ov.is_god ? 'Owner' : 'Operator'}</span>
               <span className="aq-me"><span className="aq-avatar">{initials(me)}</span>
                 <div><b>{me.split(' ')[0] || me}</b><span>EvoSys Pro</span></div></span>
             </div>
           </header>
-          {!onMaster && <div className="aq-page" style={{ paddingBottom: 0 }}>
+          {!onMaster && orgId && <div className="aq-page" style={{ paddingBottom: 0 }}>
             <div className="hb-strip"><span className="hb-strip__mark">{initials(ov.organization_name)}</span>
               <div><b>{ov.organization_name} — Acquisition Operations</b>
                 <span>{p.offer_label || 'Cleaning client'} · {(p.service_area || []).slice(0, 4).join(', ') || 'No service area yet'}</span></div>
@@ -161,10 +174,27 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg, reloadClients }) {
                   {p.paused ? 'Paused' : ov.progress.started ? `Pilot day ${ov.progress.day} of 30` : 'Pilot not started'}</span>
                 <span className={`aq-badge ${p.readiness?.launch_ready ? '' : 'aq-badge--off'}`}>{p.readiness?.launch_ready ? 'Onboarding complete' : 'Onboarding draft'}</span>
               </div></div></div>}
-          <Suspense fallback={<Loading />}><Outlet /></Suspense>
+          {needsClient ? <ChooseClient clients={clients} onSelectOrg={onSelectOrg} page={page} />
+            : <Suspense fallback={<Loading />}><Outlet /></Suspense>}
         </div>
       </div>
     </Ctx.Provider>
+  )
+}
+
+// The owner picks a client on purpose; nothing is pre-selected for them.
+function ChooseClient({ clients, onSelectOrg, page }) {
+  const items = clients.items || []
+  return (
+    <div className="aq-page">
+      <PageHeader eyebrow="Acquisition Operations" title={page} sub="Choose which cleaning client to work on. Nothing is opened until you pick one." />
+      {items.length ? <div className="hb-cards">{items.map(c => (
+        <button key={c.organization_id} className="hb-ccard" style={{ textAlign: 'left', cursor: 'pointer', font: 'inherit', color: 'inherit' }} onClick={() => onSelectOrg(c.organization_id)}>
+          <div className="hb-ccard__top"><span className="hb-strip__mark" style={{ width: 36, height: 36 }}>{initials(c.name)}</span>
+            <div><b>{c.name}</b>{/^test\s/i.test(c.name || '') && <div className="hb-muted">TEST workspace — not counted in results</div>}</div></div>
+        </button>))}</div>
+        : <div className="aq-card"><p>No cleaning clients yet.</p><a className="aq-btn aq-btn--primary" href={`${OPS}/clients?add=1`}>Add Cleaning Company</a></div>}
+    </div>
   )
 }
 

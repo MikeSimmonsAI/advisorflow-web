@@ -114,9 +114,9 @@ export function programCards(ctx) {
     const p = PROGRAMS.acquisition_ops
     cards.push({ ...a, type: 'acquisition_ops', organization_id: 'acquisition-ops:' + a.organization_id,
                  client_organization_id: a.organization_id, program: 'acquisition_ops', variant: p.variant,
-                 symbol: p.symbol, rank: p.rank, kind: a.hub ? 'EVOSYS PRO · ACQUISITION HUB' : p.kind,
+                 symbol: p.symbol, rank: p.rank, kind: a.hub ? 'EVOSYS PRO · ACQUISITION CONTROL CENTER' : p.kind,
                  facts: a.hub ? ['Import', 'Qualify', 'Assign', 'Cleaning clients'] : p.facts,
-                 display: a.hub ? 'Acquisition Hub' : 'Acquisition Control Center',
+                 display: 'Acquisition Control Center',
                  summary: a.hub ? 'Master prospects, research, distribution and every cleaning client' : p.summary,
                  orgLabel: a.hub ? 'EvoSys Pro' : a.organization_name })
   }

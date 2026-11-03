@@ -30,13 +30,13 @@ function OwnerOnly() {
 export function MasterOverview() {
   const [h, err, reload] = useLoad('/god/acquisition/hub')
   if (err) return <div className="aq-page"><div className="aq-err">{errText(err)}</div></div>
-  if (!h) return <div className="aq-page"><Loading label="Loading the Acquisition Hub…" /></div>
+  if (!h) return <div className="aq-page"><Loading label="Loading the Acquisition Control Center…" /></div>
   const p = h.pool, r = h.results
   const setup = h.clients.filter(c => !c.launch_ready).length
   return (
     <div className="aq-page">
-      <PageHeader eyebrow="Program Access · Acquisition" title="EvoSys Pro — Acquisition Hub"
-        sub="Master prospect acquisition, qualification and distribution for commercial cleaning clients."
+      <PageHeader eyebrow="Program Access · Acquisition" title="EvoSys Pro — Acquisition Control Center"
+        sub="Commercial Cleaning Prospecting, Outreach, Appointment Acquisition & Client Delivery"
         actions={<>
           <a className="aq-btn aq-btn--primary" href={`${OPS}/clients?add=1`}><Icon name="store" size={16} />Add Cleaning Company</a>
           <a className="aq-btn" href={`${OPS}/import`}><Icon name="upload" size={16} />Import Businesses</a>
@@ -563,10 +563,10 @@ export function Activity() {
   const items = [
     ...((h?.recent_imports) || []).map(b => ({ icon: 'upload', tone: 'green', title: `Master import: ${b.committed} added, ${b.duplicates} duplicates, ${b.invalid} invalid`, sub: `${b.name} · ${b.source}`, at: b.at })),
     ...((h?.recent_assignments) || []).map(a => ({ icon: 'share', title: `${a.name} assigned to ${a.client}`, sub: 'No message sent', at: a.at })),
-    ...(ov.recent_events || []).map(e => ({ icon: 'clock', tone: 'blue', title: `${ov.organization_name}: ${e.kind.replace(/_/g, ' ')}${e.to ? ' → ' + e.to.replace(/_/g, ' ') : ''}`, sub: e.note, at: e.at })),
+    ...(ov.organization_id ? ov.recent_events || [] : []).map(e => ({ icon: 'clock', tone: 'blue', title: `${ov.organization_name}: ${e.kind.replace(/_/g, ' ')}${e.to ? ' → ' + e.to.replace(/_/g, ' ') : ''}`, sub: e.note, at: e.at })),
   ].sort((a, b) => String(b.at).localeCompare(String(a.at)))
   return (
-    <div className="aq-page"><PageHeader eyebrow="Actions & Support" title="Activity History" sub="Master imports and assignments, plus the selected client's recorded events." />
+    <div className="aq-page"><PageHeader eyebrow="Administration" title="Audit History" sub="Master imports and assignments, plus the selected client's recorded events." />
       <section className="aq-card">{h ? <Feed items={items} /> : <Loading />}</section></div>
   )
 }

@@ -25,6 +25,14 @@ export const THEMES = {
 }
 
 /**
+ * EvoSys staging builds on Render (e.g. evosys-acq-hub-staging.onrender.com).
+ * Exact pattern only, so no other tenant's host can pick up EvoSys branding.
+ */
+export function isEvoSysStagingHost(host) {
+  return /^evosys-[a-z0-9-]*staging\.onrender\.com$/.test(String(host || '').toLowerCase())
+}
+
+/**
  * Detect which brand theme to use based on the current hostname.
  * Safe to call in SSR/test environments where window may not exist.
  */
@@ -34,7 +42,7 @@ export function detectTheme() {
   const host = window.location.hostname.toLowerCase()
 
   if (host.includes('advisorflow')) return THEMES.ADVISORFLOW
-  if (host.includes('evosyspro')) return THEMES.EVOSYSPRO
+  if (host.includes('evosyspro') || isEvoSysStagingHost(host)) return THEMES.EVOSYSPRO
   if (host.includes('harmonyhustle')) return THEMES.HARMONYHUSTLE
 
   return THEMES.BOOKABOOST
@@ -50,7 +58,7 @@ export function hostTheme() {
   if (typeof window === 'undefined') return null
   const host = window.location.hostname.toLowerCase()
   if (host.includes('advisorflow') && !host.includes('onrender')) return THEMES.ADVISORFLOW
-  if (host.includes('evosyspro')) return THEMES.EVOSYSPRO
+  if (host.includes('evosyspro') || isEvoSysStagingHost(host)) return THEMES.EVOSYSPRO
   if (host.includes('harmonyhustle')) return THEMES.HARMONYHUSTLE
   if (host.includes('bookaboost')) return THEMES.BOOKABOOST
   return null
