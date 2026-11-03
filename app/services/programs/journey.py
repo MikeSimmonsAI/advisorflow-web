@@ -227,31 +227,37 @@ def _paused_since_last_start(db: Session, prog: OutreachProgram, fam: CampaignFa
 
 
 def _overdue(db: Session, prog: OutreachProgram, fam: CampaignFamily, rows: List[Dict], now: datetime) -> List[str]:
-    """Started families to re-space: after a pause, EVERY started family that
-    is not finished (its texts were pushed back hours at a time while the
-    campaign was off, and its emails fell due - left alone they would all go
-    together when it comes back on); otherwise any whose next text is
-    simply long past due."""
+    """Started families whose next TEXT was actually held back: it is past due,
+    or the sender refused it because the campaign was off (it then re-checks
+    every few hours, which would bunch everyone together when it comes back).
+
+    #449 (Nov 1, 11:56 PM): an off/on toggle of 16 seconds used to count as a
+    pause that re-spaced EVERY started family - and put them after 270 new
+    starts, pushing Batch 2's first texts from Monday 9 AM to Wednesday
+    evening. A family whose next text is still ahead and was never refused is
+    left exactly where it is; emails are never re-spaced here (their sender
+    paces itself)."""
+    from app.models.models import CadenceTouchLog
     ids = [r["lead_id"] for r in rows if r["action"] == "already_started"]
     if not ids:
         return []
-    paused = _paused_since_last_start(db, prog, fam)
+    paused_at = _marks(fam).get("paused_at")
+    paused_at = datetime.fromisoformat(paused_at) if paused_at else None
     late = []
     for i in range(0, len(ids), 500):
         chunk = ids[i:i + 500]
-        states = {s.lead_id: s for s in db.query(CadenceState).filter(CadenceState.lead_id.in_(chunk)).all()}
-        emails = {}
-        for t in db.query(ProgramEmailTouch).filter(ProgramEmailTouch.organization_id == prog.organization_id,
-                                                    ProgramEmailTouch.lead_id.in_(chunk)).all():
-            emails[t.lead_id] = max(emails.get(t.lead_id, 0), t.touch_number if t.status == "sent" else 0)
-        from app.services.programs import email_touches as _et
+        states = {s.lead_id: s for s in db.query(CadenceState).filter(CadenceState.lead_id.in_(chunk),
+                                                                     CadenceState.status == "active").all()}
+        refused = set()
+        if paused_at is not None and states:
+            refused = {g.lead_id for g in db.query(CadenceTouchLog).filter(
+                CadenceTouchLog.lead_id.in_(list(states)), CadenceTouchLog.created_at >= paused_at,
+                CadenceTouchLog.reason.like("%CAMPAIGN OFF%")).all()}
         for lid in chunk:
             s = states.get(lid)
-            texting = s is not None and s.status == "active"
-            emailing = emails.get(lid, 0) < _et.max_touches()
-            if paused and (texting or emailing):
-                late.append(lid)
-            elif texting and s.next_touch_due_at and s.next_touch_due_at < now - RESUME_GRACE:
+            if s is None:
+                continue
+            if lid in refused or (s.next_touch_due_at and s.next_touch_due_at < now - RESUME_GRACE):
                 late.append(lid)
     return late
 
@@ -310,6 +316,21 @@ def start(db: Session, prog: OutreachProgram, fam: CampaignFamily, user, *, coun
     slots = release_slots(first, len(eligible) + len(overdue), spacing)
     slot = 0
     started, texting, email_only, raced = 0, 0, 0, 0
+    # RESUME FIRST: anyone already started whose next text was held back is
+    # re-spaced from now, ahead of new starts - same place, no burst, and
+    # never later than a time it already had that is still ahead.
+    resumed = 0
+    for lid in overdue:
+        st = db.query(CadenceState).filter(CadenceState.lead_id == lid).first()
+        if st is None or st.status != "active":
+            continue
+        at = slots[slot]
+        if st.next_touch_due_at and st.next_touch_due_at >= now and st.next_touch_due_at < at:
+            continue                                    # its own time is sooner: keep it
+        slot += 1
+        st.next_touch_due_at = at
+        resumed += 1
+    db.commit()
     for r in eligible:
         at = slots[slot]
         res = db.execute(update(ProgramSourceRecord)
@@ -347,21 +368,6 @@ def start(db: Session, prog: OutreachProgram, fam: CampaignFamily, user, *, coun
             texting += 1
         else:
             email_only += 1
-    # RESUME: anyone already started whose next text or email fell due while
-    # the campaign was off is re-spaced from now - same place, no burst.
-    resumed = 0
-    for lid in overdue:
-        at = slots[slot]
-        slot += 1
-        st = db.query(CadenceState).filter(CadenceState.lead_id == lid).first()
-        if st is not None and st.status == "active":
-            st.next_touch_due_at = at
-        for rec in db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == prog.organization_id,
-                                                        ProgramSourceRecord.lead_id == lid,
-                                                        ProgramSourceRecord.campaign_family == fam.key).all():
-            if rec.scheduled_start_at is None or rec.scheduled_start_at < at:
-                rec.scheduled_start_at = at
-        resumed += 1
     mark(fam, "started_at", datetime.utcnow())
     db.commit()
     from app.routers.audit_log_router import log_action
@@ -383,3 +389,130 @@ def start(db: Session, prog: OutreachProgram, fam: CampaignFamily, user, *, coun
             "already_started_by_another_click": raced, "first_at": first.isoformat() + "Z",
             "last_at": last.isoformat() + "Z", "spacing_minutes": int(spacing.total_seconds() // 60),
             "sent_now": 0}
+
+
+# ── #449 repair: the Nov 1 11:58 PM resume ──────────────────────────────────
+
+REPAIR_KEY = "repair_resume_1101"
+
+
+def repair_pushed_starts(db: Session, prog: OutreachProgram, fam: CampaignFamily,
+                         now: Optional[datetime] = None) -> Dict:
+    """Undo what the old Resume did on Nov 1 (16-second off/on, then START 270):
+    it moved every already-started family to the END of the queue.
+
+    * A family whose FIRST text never went and whose text is now set more than
+      a day after its own start (Batch 2: due Mon 9-11 AM, moved to Wed/Thu)
+      goes back to the FRONT; every family still waiting for its first
+      message is re-spaced behind it, 5 minutes apart, inside the weekday
+      window - so nothing doubles up and nothing is sent at once.
+    * A family already texted gets back the next-text time its own schedule
+      gives (never earlier than now), and its emails are no longer held
+      behind the moved start time.
+    Changes schedules only: nothing is sent, nothing in anyone's history is
+    touched, nobody is restarted. Runs once (marked on the campaign)."""
+    from app.models.models import CadenceTouchLog, Message
+    from app.services import cadence_service as cs
+    import json as _json
+    now = now or datetime.utcnow()
+    try:
+        d = _json.loads(fam.touch_copy_json or "{}")
+    except ValueError:
+        d = {}
+    if (d.get("repairs") or {}).get(REPAIR_KEY):
+        return {"skipped": "already done"}
+    recs: Dict[str, List[ProgramSourceRecord]] = {}
+    for r in (db.query(ProgramSourceRecord)
+              .filter(ProgramSourceRecord.organization_id == prog.organization_id,
+                      ProgramSourceRecord.campaign_family == fam.key,
+                      ProgramSourceRecord.journey_started_at.isnot(None)).all()):
+        recs.setdefault(r.lead_id, []).append(r)
+    ids = list(recs)
+    states = {s.lead_id: s for s in db.query(CadenceState).filter(CadenceState.lead_id.in_(ids or ["-"])).all()}
+    texted = {x for (x,) in db.query(Message.lead_id).filter(Message.lead_id.in_(ids or ["-"])).distinct().all()}
+    began = {lid: min(x.journey_started_at for x in v) for lid, v in recs.items()}
+    emailed = set()
+    for t in db.query(ProgramEmailTouch).filter(ProgramEmailTouch.lead_id.in_(ids or ["-"]),
+                                                ProgramEmailTouch.status == "sent").all():
+        if t.created_at and t.created_at >= began[t.lead_id]:
+            emailed.add(t.lead_id)                       # an email of THIS journey went
+    latest = max(began.values(), default=now)            # the last Start / Resume click
+
+    def start_of(lid):
+        v = [x.scheduled_start_at for x in recs[lid] if x.scheduled_start_at]
+        return min(v) if v else None
+
+    pushed, waiting = [], []
+    for lid in ids:
+        st = states.get(lid)
+        first_pending = lid not in texted and lid not in emailed and (
+            st is None or (st.status == "active" and (st.current_touch_number or 0) == 0))
+        sched = start_of(lid)
+        if not first_pending or sched is None or sched <= now:
+            continue
+        if began[lid] < latest - timedelta(minutes=1):
+            pushed.append(lid)                           # started earlier, put behind the last batch
+        else:
+            waiting.append(lid)                          # the last batch, still waiting its turn
+    if not pushed:
+        d.setdefault("repairs", {})[REPAIR_KEY] = {"at": now.isoformat(), "pushed": 0}
+        fam.touch_copy_json = _json.dumps(d)
+        db.commit()
+        return {"pushed": 0, "respaced": 0, "followups": 0}
+    pushed.sort(key=lambda x: (began[x], start_of(x), x))
+    waiting.sort(key=lambda x: (start_of(x), x))
+    order = pushed + waiting
+    slots = release_slots(max(now, now.replace(second=0, microsecond=0) + timedelta(minutes=5)),
+                          len(order), timedelta(minutes=DEFAULT_SPACING_MINUTES))
+    for lid, at in zip(order, slots):
+        st = states.get(lid)
+        if st is not None and st.status == "active" and (st.current_touch_number or 0) == 0:
+            st.next_touch_due_at = at
+            st.cadence_started_at = at
+        for r in recs[lid]:
+            r.scheduled_start_at = at
+    # Families already texted: their own next-text time back, emails freed.
+    schedule = cs._get_org_cadence_schedule(db, prog.organization_id)
+    fixed = 0
+    for lid in ids:
+        st = states.get(lid)
+        if st is None or st.status != "active" or (st.current_touch_number or 0) < 1 or lid not in texted:
+            continue
+        nxt = (st.current_touch_number or 0) + 1
+        nd = next((t for t in schedule if t["touch_number"] == nxt), None)
+        if nd is None or not st.cadence_started_at:
+            continue
+        base = st.cadence_started_at.replace(tzinfo=None)
+        last = st.last_touch_sent_at.replace(tzinfo=None) if st.last_touch_sent_at else base
+        natural = max(base + timedelta(days=nd["day_offset"]), last + cs._touch_gap(schedule, nxt))
+        if st.next_touch_due_at and st.next_touch_due_at > natural + timedelta(minutes=30):
+            st.next_touch_due_at = max(natural, now + timedelta(minutes=5 + fixed))
+            fixed += 1
+            for r in recs[lid]:
+                if r.scheduled_start_at and r.scheduled_start_at > now:
+                    r.scheduled_start_at = r.journey_started_at
+    d.setdefault("repairs", {})[REPAIR_KEY] = {"at": now.isoformat(), "pushed": len(pushed),
+                                               "respaced": len(order), "followups": fixed}
+    fam.touch_copy_json = _json.dumps(d)
+    db.commit()
+    log_payload = {"pushed": len(pushed), "respaced": len(order), "followups": fixed,
+                   "first_at": slots[0].isoformat() + "Z" if slots else None,
+                   "last_at": slots[len(order) - 1].isoformat() + "Z" if order else None}
+    import logging
+    logging.getLogger(__name__).warning("journey repair %s: %s", REPAIR_KEY, log_payload)
+    return log_payload
+
+
+def repair_for_sci(db: Session) -> Optional[Dict]:
+    from app.services import sms_programs
+    from app.services.programs import campaigns as _camp
+    from app.services.programs import identity
+    org_id = sms_programs.sci_org_id(db)
+    if not org_id:
+        return None
+    prog = identity.program_for_org(db, org_id)
+    fam = (db.query(CampaignFamily).filter(CampaignFamily.organization_id == org_id,
+                                           CampaignFamily.key == _camp.CENTRAL_ALABAMA_KEY).first())
+    if prog is None or fam is None:
+        return None
+    return repair_pushed_starts(db, prog, fam)
