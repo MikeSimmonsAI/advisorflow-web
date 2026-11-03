@@ -28,7 +28,7 @@ const MASTER_NAV = [
   { to: `${OPS}/master`, label: 'Master Prospect Pool', icon: 'database' },
   { to: `${OPS}/research`, label: 'Research & Qualification', icon: 'flask' },
   { to: `${OPS}/assignments`, label: 'Assignments & Distribution', icon: 'share' },
-  { to: `${OPS}/clients`, label: 'Cleaning Client Directory', icon: 'store' },
+  { to: `${OPS}/clients`, label: 'Service Companies', icon: 'store' },
   { to: `${OPS}/reporting`, label: 'All-Clients Reporting', icon: 'chart' },
 ]
 // Client-scoped operating tools: EvoSys staff work these for the client chosen
@@ -83,8 +83,8 @@ function Enable({ onDone }) {
   return (
     <div className="aq aq-gate"><div className="aq-card">
       <Logo />
-      <h1 className="aq-h1">Enable a cleaning client workspace</h1>
-      <p className="aq-lede">Use an existing cleaning company's organization ID. Every client receives its own private Acquisition portal and starts paused. Nothing is sent.</p>
+      <h1 className="aq-h1">Enable a service-company workspace</h1>
+      <p className="aq-lede">Use an existing service company's organization ID. Every client receives its own private Acquisition portal and starts paused. Nothing is sent.</p>
       <div className="aq-field"><label htmlFor="aq-org">Organization ID</label><input id="aq-org" value={orgId} onChange={e => setOrgId(e.target.value)} /></div>
       {fail && <div className="aq-err">{fail}</div>}
       <button className="aq-btn aq-btn--primary" disabled={busy || !orgId.trim()} onClick={go}>{busy ? 'Setting up…' : 'Enable acquisition pilot'}</button>
@@ -154,7 +154,7 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg, reloadClients }) {
           {ov.is_god && <NavGroup title="Master Control" items={MASTER_NAV} />}
           <NavGroup title="Acquisition Operations" pre={ov.is_god ? OPS_NAV : [{ to: OPS, label: 'My Queue', icon: 'list', end: true }]} items={CLIENT_NAV}>
             {(clients.is_god || clients.items.length > 1) && <div className="hb-client">
-              <label htmlFor="hb-client">Cleaning company</label>
+              <label htmlFor="hb-client">Service company</label>
               <select id="hb-client" aria-label="Acquisition client workspace" value={orgId || ''} onChange={e => onSelectOrg(e.target.value)}>
                 {!orgId && <option value="">Choose a client…</option>}
                 {clients.items.map(c => <option key={c.organization_id} value={c.organization_id}>{c.name}</option>)}
@@ -170,7 +170,7 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg, reloadClients }) {
             <nav className="hb-crumbs" aria-label="Breadcrumb"><a href="/workspaces">Program Access</a><span>›</span>
               <span className="hb-crumb-mid">Acquisition Control Center</span><span className="hb-crumb-mid">›</span><b>{page}</b></nav>
             <div className="aq-top__right">
-              <span className={`hb-role ${ov.is_god ? '' : 'hb-role--op'}`}><Icon name={ov.is_god ? 'shield' : 'key'} size={14} />{ov.is_god ? 'Owner' : 'Operator'}</span>
+              <span className={`hb-role ${ov.is_god ? '' : 'hb-role--op'}`}><Icon name={ov.is_god ? 'shield' : 'key'} size={14} />{{ owner: 'Owner', admin: 'EvoSys Admin', operator: 'Operator' }[clients.me?.access] || (ov.is_god ? 'Owner' : 'Operator')}</span>
               {/* WHO IS SIGNED IN, exactly as the server reports it - never a first name alone. */}
               <span className="aq-me" title={`Signed in as ${clients.me?.email || me}`}><span className="aq-avatar">{initials(clients.me?.name || me)}</span>
                 <div><b>{clients.me?.name || me}</b><span>{clients.me?.email || ''}</span></div></span>
@@ -182,7 +182,7 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg, reloadClients }) {
           {!onMaster && orgId && loc.pathname !== OPS && <div className="aq-page" style={{ paddingBottom: 0 }}>
             <div className="hb-strip"><span className="hb-strip__mark">{initials(ov.organization_name)}</span>
               <div><b>{ov.organization_name} — Acquisition Operations</b>
-                <span>{p.offer_label || 'Cleaning client'} · {(p.service_area || []).slice(0, 4).join(', ') || 'No service area yet'}</span></div>
+                <span>{p.offer_label || 'Service company'} · {(p.service_area || []).slice(0, 4).join(', ') || 'No service area yet'}</span></div>
               <div className="hb-strip__right">
                 <span className={`aq-badge ${p.paused ? 'aq-badge--paused' : ''}`}><Icon name={p.paused ? 'pause' : 'calendar'} size={15} />
                   {p.paused ? 'Paused' : ov.progress.started ? `Pilot day ${ov.progress.day} of 30` : 'Pilot not started'}</span>
@@ -201,13 +201,13 @@ function ChooseClient({ clients, onSelectOrg, page }) {
   const items = clients.items || []
   return (
     <div className="aq-page">
-      <PageHeader eyebrow="Acquisition Operations" title={page} sub="Choose which cleaning client to work on. Nothing is opened until you pick one." />
+      <PageHeader eyebrow="Acquisition Operations" title={page} sub="Choose which service company to work on. Nothing is opened until you pick one." />
       {items.length ? <div className="hb-cards">{items.map(c => (
         <button key={c.organization_id} className="hb-ccard" style={{ textAlign: 'left', cursor: 'pointer', font: 'inherit', color: 'inherit' }} onClick={() => onSelectOrg(c.organization_id)}>
           <div className="hb-ccard__top"><span className="hb-strip__mark" style={{ width: 36, height: 36 }}>{initials(c.name)}</span>
             <div><b>{c.name}</b>{/^test\s/i.test(c.name || '') && <div className="hb-muted">TEST workspace — not counted in results</div>}</div></div>
         </button>))}</div>
-        : <div className="aq-card"><p>No cleaning clients yet.</p><a className="aq-btn aq-btn--primary" href={`${OPS}/clients?add=1`}>Add Cleaning Company</a></div>}
+        : <div className="aq-card"><p>No service companies yet.</p><a className="aq-btn aq-btn--primary" href={`${OPS}/clients?add=1`}>Add Service Company</a></div>}
     </div>
   )
 }
@@ -501,7 +501,7 @@ export function CalendarSetup() {
           <div className="aq-field"><label htmlFor="c-u">Client login that receives appointments</label>
             <select id="c-u" value={f.booking_user_id} onChange={set('booking_user_id')} disabled={!ov.is_god}><option value="">Choose…</option>
               {cfg.candidates.map(u => <option key={u.id} value={u.id}>{u.name} — {u.calendar_connected ? 'calendar connected' : 'no calendar yet'}</option>)}</select></div>
-          {!cfg.candidates.length && <p className="hb-muted">This client has no login yet. Invite one from the Cleaning Client Directory; they connect their Google or Microsoft calendar after signing in.</p>}
+          {!cfg.candidates.length && <p className="hb-muted">This client has no login yet. Invite one from the Service Companies Directory; they connect their Google or Microsoft calendar after signing in.</p>}
           <div className="aq-grid aq-two">
             <div className="aq-field"><label htmlFor="c-tz">Time zone</label><input id="c-tz" value={f.timezone || ''} onChange={set('timezone')} /></div>
             <div className="aq-field"><label htmlFor="c-m">Meeting length (min)</label><input id="c-m" inputMode="numeric" value={f.appointment_minutes || ''} onChange={set('appointment_minutes')} /></div>

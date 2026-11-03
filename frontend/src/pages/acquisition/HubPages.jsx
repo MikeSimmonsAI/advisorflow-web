@@ -36,17 +36,17 @@ export function MasterOverview() {
   return (
     <div className="aq-page">
       <PageHeader eyebrow="Program Access · Acquisition" title="EvoSys Pro — Acquisition Control Center"
-        sub="Commercial Cleaning Prospecting, Outreach, Appointment Acquisition & Client Delivery"
+        sub="Service-Business Prospecting, Outreach, Appointment Acquisition & Client Delivery"
         actions={<>
-          <a className="aq-btn aq-btn--primary" href={`${OPS}/clients?add=1`}><Icon name="store" size={16} />Add Cleaning Company</a>
+          <a className="aq-btn aq-btn--primary" href={`${OPS}/clients?add=1`}><Icon name="store" size={16} />Add Service Company</a>
           <a className="aq-btn" href={`${OPS}/import`}><Icon name="upload" size={16} />Import Businesses</a>
           <button className="aq-btn" onClick={reload}>Refresh</button></>} />
       <div className="hb-stats">
         <Stat icon="database" label="Master prospects" value={p.total} sub={`${p.qualified} qualified`} to={`${OPS}/master`} />
         <Stat icon="check" tone="green" label="Available" value={p.available} sub="Unassigned, ready to review" to={`${OPS}/assignments`} />
-        <Stat icon="share" tone="blue" label="Assigned" value={p.assigned} sub="To cleaning clients" to={`${OPS}/master?status=assigned`} />
+        <Stat icon="share" tone="blue" label="Assigned" value={p.assigned} sub="To service companies" to={`${OPS}/master?status=assigned`} />
         <Stat icon="mail" tone={p.email_verified ? 'green' : 'rose'} label="Verified emails" value={p.email_verified} sub={`${p.needs_email} need contact research`} to={`${OPS}/research`} />
-        <Stat icon="store" tone="violet" label="Cleaning clients" value={h.clients.length} sub={`${setup} still setting up`} to={`${OPS}/clients`} />
+        <Stat icon="store" tone="violet" label="Service companies" value={h.clients.length} sub={`${setup} still setting up`} to={`${OPS}/clients`} />
         <Stat icon="calendar" tone="amber" label="Appointments" value={r.booked} sub={`${r.interested} interested · ${r.won} won`} to={`${OPS}/reporting`} />
         <Stat icon="dollar" tone="green" label="Monthly value won" value={money(r.monthly_value_won)} sub="From contracts marked won" to={`${OPS}/reporting`} />
         <Stat icon="chart" tone="blue" label="Research spend" value={'$' + Number(h.spend.usd || 0).toFixed(2)} sub={`${h.spend.provider_calls} metered provider calls`} to={`${OPS}/reporting`} />
@@ -66,14 +66,14 @@ export function MasterOverview() {
           ].sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 8)} empty="No imports or assignments yet." />
         </section>
         <section className="aq-card">
-          <div className="aq-card__head"><h2>Cleaning clients</h2><a href={`${OPS}/clients`}>Directory →</a></div>
+          <div className="aq-card__head"><h2>Service companies</h2><a href={`${OPS}/clients`}>Directory →</a></div>
           {h.clients.length ? h.clients.map(c => {
             const max = Math.max(1, ...h.clients.map(x => x.assigned))
             return <div className="aq-row" key={c.organization_id}><div className="aq-row__main"><b>{c.name}</b>{c.is_test && <> <Dot tone="amber">TEST</Dot></>}
               <span>{c.assigned} assigned · {c.contacts_verified} verified contacts · {c.booked} appointments</span>
               <div className="hb-bar" style={{ marginTop: 6 }}><i style={{ width: `${(c.assigned / max) * 100}%` }} /></div></div>
               <Dot tone={c.paused ? 'amber' : 'green'}>{c.paused ? 'Paused' : 'Running'}</Dot></div>
-          }) : <Empty icon="store" title="No cleaning clients yet" action={<a className="aq-btn aq-btn--primary" href={`${OPS}/clients?add=1`}>Add Cleaning Company</a>} />}
+          }) : <Empty icon="store" title="No service companies yet" action={<a className="aq-btn aq-btn--primary" href={`${OPS}/clients?add=1`}>Add Service Company</a>} />}
         </section>
       </div>
       <section className="aq-card" style={{ marginTop: 14 }}>
@@ -82,7 +82,7 @@ export function MasterOverview() {
           <a className="aq-btn" href={`${OPS}/import`}><Icon name="upload" size={16} />Import Businesses</a>
           <a className="aq-btn" href={`${OPS}/research`}><Icon name="flask" size={16} />Research Contacts</a>
           <a className="aq-btn" href={`${OPS}/assignments`}><Icon name="share" size={16} />Assign Prospects</a>
-          <a className="aq-btn" href={`${OPS}/clients?add=1`}><Icon name="store" size={16} />Add Cleaning Company</a>
+          <a className="aq-btn" href={`${OPS}/clients?add=1`}><Icon name="store" size={16} />Add Service Company</a>
           <a className="aq-btn" href={`${OPS}/clients?convert=1`}><Icon name="users" size={16} />Convert Sales Prospects</a>
           <a className="aq-btn" href={`${OPS}/client-dashboard`}><Icon name="dashboard" size={16} />Open Client Workspace</a>
         </div>
@@ -214,7 +214,7 @@ export function MasterPoolPage() {
   return (
     <div className="aq-page">
       <PageHeader eyebrow="EvoSys Master Acquisition" title="Master Prospect Pool"
-        sub="EvoSys-owned commercial businesses that might buy cleaning. Each goes to one client only, when you assign it."
+        sub="EvoSys-owned businesses that might buy a client’s service. Each goes to one client only, when you assign it."
         actions={<><a className="aq-btn" href={`${OPS}/import`}><Icon name="upload" size={16} />Import</a>
           <a className="aq-btn aq-btn--primary" href={`${OPS}/assignments`}><Icon name="share" size={16} />Assign</a></>} />
       <Toolbar>
@@ -294,7 +294,7 @@ export function AssignmentsPage() {
   return (
     <div className="aq-page">
       <PageHeader eyebrow="EvoSys Master Acquisition" title="Assignments & Distribution"
-        sub="Choose businesses, choose ONE cleaning client, check the fit, then confirm. Assigning sends nothing and starts no pilot." />
+        sub="Choose businesses, choose ONE service company, check the fit, then confirm. Assigning sends nothing and starts no pilot." />
       <Stepper steps={['Select prospects', 'Select client', 'Review fit', 'Confirm', 'Results']} current={step} />
       {fail && <div className="aq-err">{fail}</div>}
       {result && <section className="aq-card" style={{ marginBottom: 14 }}><h2>Results</h2>
@@ -319,10 +319,10 @@ export function AssignmentsPage() {
             : <Empty icon="database" title="No available businesses" action={<a className="aq-btn" href={`${OPS}/import`}>Import</a>} />}
         </section>
         <section className="aq-card">
-          <h2>2 · Cleaning client</h2>
-          <div className="aq-field"><select aria-label="Cleaning client" value={client} onChange={e => { setClient(e.target.value); setPlan(null) }}>
+          <h2>2 · Service company</h2>
+          <div className="aq-field"><select aria-label="Service company" value={client} onChange={e => { setClient(e.target.value); setPlan(null) }}>
             <option value="">Choose a company…</option>{(dir?.items || []).map(c => <option key={c.organization_id} value={c.organization_id}>{c.name}{c.territory_confirmed ? '' : ' (territory not set)'}</option>)}</select></div>
-          <div className="aq-field"><label htmlFor="hb-seg">Cleaning segment</label><select id="hb-seg" value={segment} onChange={e => { setSegment(e.target.value); setPlan(null) }}>
+          <div className="aq-field"><label htmlFor="hb-seg">Target customer type</label><select id="hb-seg" value={segment} onChange={e => { setSegment(e.target.value); setPlan(null) }}>
             <option value="">Use each business's own type</option>{Object.entries(SEG).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
           <button className="aq-btn aq-btn--primary" disabled={!client || !chosen.length || busy} onClick={preview}>3 · Check fit ({chosen.length})</button>
           {plan && <>
@@ -360,8 +360,11 @@ function ResultRows({ results }) {
 
 function AddCompanyWizard({ opts, prefill, onDone, onCancel }) {
   const [step, setStep] = useState(0)
-  const [f, setF] = useState({ name: '', contact_name: '', contact_email: '', contact_phone: '', website: '', cities: '', states: '', zips: '', exclusions: '',
-    services: [], custom_services: '', offer_type: 'free_pilot', offer_terms: '', invite: false, operator_email: '', ...(prefill || {}) })
+  const [f, setF] = useState({ name: '', contact_name: '', contact_email: '', contact_phone: '', website: '', service_category: 'cleaning', cities: '', counties: '', states: '', zips: '', exclusions: '',
+    services: [], segments: [], custom_services: '', offer_type: 'free_pilot', offer_terms: '', invite: false, operator_email: '', ...(prefill || {}) })
+  const cat = (opts?.categories || []).find(c => c.key === f.service_category)
+  const catServices = cat ? cat.services : (opts?.services || [])
+  const toggleSeg = k => setF({ ...f, segments: f.segments.includes(k) ? f.segments.filter(x => x !== k) : [...f.segments, k] })
   const [busy, setBusy] = useState(false)
   const [fail, setFail] = useState(null)
   const [out, setOut] = useState(null)
@@ -371,7 +374,7 @@ function AddCompanyWizard({ opts, prefill, onDone, onCancel }) {
     setBusy(true); setFail(null)
     try {
       const r = await api.post('/god/acquisition/clients', { ...f, cities: split(f.cities), states: split(f.states), zips: split(f.zips), exclusions: split(f.exclusions),
-        custom_services: split(f.custom_services), invite_email: f.invite ? f.contact_email : null, operator_email: f.operator_email || null })
+        custom_services: split(f.custom_services), counties: split(f.counties), invite_email: f.invite ? f.contact_email : null, operator_email: f.operator_email || null })
       setOut(r); onDone && onDone(r)
     } catch (e) { setFail(errText(e)) } finally { setBusy(false) }
   }
@@ -380,20 +383,27 @@ function AddCompanyWizard({ opts, prefill, onDone, onCancel }) {
     <div className="aq-actions"><button className="aq-btn" onClick={onCancel}>Close</button></div></section>
   return (
     <section className="aq-card">
-      <div className="aq-card__head"><h2>Add Cleaning Company{f.sales_opportunity_id ? ' (from EvoSys Sales)' : ''}</h2><button className="aq-btn aq-btn--sm" onClick={onCancel}>Cancel</button></div>
+      <div className="aq-card__head"><h2>Add Service Company{f.sales_opportunity_id ? ' (from EvoSys Sales)' : ''}</h2><button className="aq-btn aq-btn--sm" onClick={onCancel}>Cancel</button></div>
       <Stepper steps={STEPS} current={step} />
       {step === 0 && <div className="aq-grid aq-two">
-        <div className="aq-field"><label htmlFor="w-name">Cleaning company name *</label><input id="w-name" value={f.name} onChange={set('name')} autoFocus /></div>
+        <div className="aq-field"><label htmlFor="w-name">Company name *</label><input id="w-name" value={f.name} onChange={set('name')} autoFocus /></div>
         <div className="aq-field"><label htmlFor="w-contact">Primary contact</label><input id="w-contact" value={f.contact_name} onChange={set('contact_name')} /></div>
         <div className="aq-field"><label htmlFor="w-email">Contact email</label><input id="w-email" value={f.contact_email} onChange={set('contact_email')} /></div>
         <div className="aq-field"><label htmlFor="w-phone">Contact phone</label><input id="w-phone" value={f.contact_phone} onChange={set('contact_phone')} /></div>
         <div className="aq-field"><label htmlFor="w-web">Website (optional)</label><input id="w-web" value={f.website} onChange={set('website')} /></div>
+        <div className="aq-field"><label htmlFor="w-cat">Service industry *</label><select id="w-cat" value={f.service_category} onChange={e => setF({ ...f, service_category: e.target.value, services: [] })}>
+          {(opts?.categories || [{ key: 'cleaning', label: 'Commercial cleaning' }]).map(c => <option key={c.key} value={c.key}>{c.label}</option>)}</select></div>
       </div>}
-      {step === 1 && <><div className="aq-checks">{(opts?.services || []).map(s => <label key={s.key}><input type="checkbox" checked={f.services.includes(s.key)} onChange={() => toggle(s.key)} />{s.label}</label>)}</div>
+      {step === 1 && <><div className="hb-section-title" style={{ marginTop: 0 }}>{cat?.label || 'Services'} — services provided</div>
+        {catServices.length ? <div className="aq-checks">{catServices.map(s => <label key={s.key}><input type="checkbox" checked={f.services.includes(s.key)} onChange={() => toggle(s.key)} />{s.label}</label>)}</div>
+          : <p className="hb-muted">Describe the services below.</p>}
+        <div className="hb-section-title">Target customer types</div>
+        <div className="aq-checks">{(opts?.segments || []).map(sg => <label key={sg.key}><input type="checkbox" checked={f.segments.includes(sg.key)} onChange={() => toggleSeg(sg.key)} />{sg.label}</label>)}</div>
         <div className="aq-field" style={{ marginTop: 12 }}><label htmlFor="w-custom">Other services (comma separated)</label><input id="w-custom" value={f.custom_services} onChange={set('custom_services')} /></div>
         <p className="hb-muted">Skip it if you don't know yet — you can finish later.</p></>}
       {step === 2 && <><div className="aq-grid aq-two">
         <div className="aq-field"><label htmlFor="w-cities">Service cities</label><input id="w-cities" placeholder="e.g. Irving, Plano" value={f.cities} onChange={set('cities')} /></div>
+        <div className="aq-field"><label htmlFor="w-counties">Counties</label><input id="w-counties" placeholder="e.g. Dallas, Collin" value={f.counties} onChange={set('counties')} /></div>
         <div className="aq-field"><label htmlFor="w-states">State(s)</label><input id="w-states" placeholder="e.g. TX" value={f.states} onChange={set('states')} /></div>
         <div className="aq-field"><label htmlFor="w-zips">ZIP codes</label><input id="w-zips" value={f.zips} onChange={set('zips')} /></div>
         <div className="aq-field"><label htmlFor="w-excl">Never contact (existing customers, domains)</label><input id="w-excl" value={f.exclusions} onChange={set('exclusions')} /></div></div>
@@ -406,9 +416,9 @@ function AddCompanyWizard({ opts, prefill, onDone, onCancel }) {
         <p className="hb-muted">You get a one-time setup link to send them. No password is created or shown, and nothing is emailed automatically.</p>
         <div className="aq-field"><label htmlFor="w-op">EvoSys operator email (optional)</label><input id="w-op" placeholder="an existing EvoSys login" value={f.operator_email} onChange={set('operator_email')} /></div></>}
       {step === 5 && <dl className="aq-dl">
-        <dt>Company</dt><dd><b>{f.name || '—'}</b></dd><dt>Contact</dt><dd>{[f.contact_name, f.contact_email, f.contact_phone].filter(Boolean).join(' · ') || 'Not yet'}</dd>
-        <dt>Services</dt><dd>{[...f.services.map(k => (opts?.services || []).find(s => s.key === k)?.label), ...split(f.custom_services)].filter(Boolean).join(', ') || 'Not yet'}</dd>
-        <dt>Territory</dt><dd>{[f.cities, f.states, f.zips].filter(Boolean).join(' · ') || 'Not confirmed'}</dd>
+        <dt>Company</dt><dd><b>{f.name || '—'}</b> · {cat?.label || f.service_category}</dd><dt>Contact</dt><dd>{[f.contact_name, f.contact_email, f.contact_phone].filter(Boolean).join(' · ') || 'Not yet'}</dd>
+        <dt>Services</dt><dd>{[...f.services.map(k => catServices.find(s => s.key === k)?.label), ...split(f.custom_services)].filter(Boolean).join(', ') || 'Not yet'}</dd>
+        <dt>Territory</dt><dd>{[f.cities, f.counties && `${f.counties} (counties)`, f.states, f.zips].filter(Boolean).join(' · ') || 'Not confirmed'}</dd>
         <dt>Offer</dt><dd>{(opts?.offers || []).find(o => o.key === f.offer_type)?.label}</dd>
         <dt>Access</dt><dd>{f.invite ? `Admin login for ${f.contact_email}` : 'No client login yet'}{f.operator_email ? ` · operator ${f.operator_email}` : ''}</dd>
         <dt>Starts</dt><dd>Paused · no pilot clock · nothing sent</dd></dl>}
@@ -417,7 +427,7 @@ function AddCompanyWizard({ opts, prefill, onDone, onCancel }) {
         {step > 0 && <button className="aq-btn" onClick={() => setStep(step - 1)}>Back</button>}
         {step < 5 && <button className="aq-btn" disabled={f.name.trim().length < 2} onClick={() => setStep(5)}>Skip to review</button>}
         {step < 5 && <button className="aq-btn aq-btn--primary" disabled={step === 0 && f.name.trim().length < 2} onClick={() => setStep(step + 1)}>Next</button>}
-        {step === 5 && <button className="aq-btn aq-btn--primary" disabled={busy || f.name.trim().length < 2} onClick={create}>{busy ? 'Creating…' : 'Create Cleaning Company Workspace'}</button>}
+        {step === 5 && <button className="aq-btn aq-btn--primary" disabled={busy || f.name.trim().length < 2} onClick={create}>{busy ? 'Creating…' : 'Create Service Company Workspace'}</button>}
       </div>
     </section>
   )
@@ -451,7 +461,7 @@ function BulkConvert({ opts, onDone, onCancel }) {
   return (
     <section className="aq-card">
       <div className="aq-card__head"><h2>Convert Sales prospects → client workspaces</h2><button className="aq-btn aq-btn--sm" onClick={onCancel}>Cancel</button></div>
-      <p className="hb-muted">Cleaning companies from EvoSys Sales. Choose the ones that agreed; each gets its own private, paused workspace. Their Sales record is kept and linked.</p>
+      <p className="hb-muted">Service companies from EvoSys Sales. Choose the ones that agreed; each gets its own private, paused workspace. Their Sales record is kept and linked.</p>
       {err && <div className="aq-err">{errText(err)}</div>}
       {!cands ? <Loading /> : <div className="hb-table-wrap" style={{ maxHeight: 380 }}><table className="aq-table"><thead><tr><th /><th>Company</th><th>Contact</th><th>Source</th><th>Status</th><th>City (optional)</th></tr></thead>
         <tbody>{items.map(c => <tr key={c.id}>
@@ -495,9 +505,9 @@ export function ClientDirectory() {
   }
   return (
     <div className="aq-page">{toast}
-      <PageHeader eyebrow="EvoSys Master Acquisition" title="Cleaning Client Directory"
-        sub="Every cleaning company EvoSys serves. Create first, finish details later. Every new company starts paused."
-        actions={<><button className="aq-btn aq-btn--primary" onClick={() => setMode('add')}><Icon name="store" size={16} />+ Add Cleaning Company</button>
+      <PageHeader eyebrow="EvoSys Master Acquisition" title="Service Companies"
+        sub="Every service company EvoSys serves — cleaning, window washing, pest control and more. Create first, finish details later. Every new company starts paused."
+        actions={<><button className="aq-btn aq-btn--primary" onClick={() => setMode('add')}><Icon name="store" size={16} />+ Add Service Company</button>
           <button className="aq-btn" onClick={() => setMode('convert')}><Icon name="users" size={16} />Convert Sales Prospects</button></>} />
       {mode === 'add' && <div style={{ marginBottom: 14 }}><AddCompanyWizard opts={opts} onDone={done} onCancel={() => setMode('')} /></div>}
       {mode === 'convert' && <div style={{ marginBottom: 14 }}><BulkConvert opts={opts} onDone={done} onCancel={() => setMode('')} /></div>}
@@ -510,7 +520,7 @@ export function ClientDirectory() {
         <div className="hb-ccard" key={c.organization_id}>
           <div className="hb-ccard__top"><span className="hb-strip__mark" style={{ width: 36, height: 36 }}>{c.name.split(/\s+/).map(w => w[0]).slice(0, 2).join('')}</span>
             <div style={{ minWidth: 0 }}><b>{c.name}</b>{c.is_test && <> <Dot tone="amber">TEST — not counted in results</Dot></>}<div className="hb-muted">{c.contact || 'No contact yet'} · added {c.created_at ? new Date(c.created_at).toLocaleDateString() : '—'}</div></div></div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><Dot tone={STATUS_TONE[c.status]}>{STATUS_LABEL[c.status]}</Dot>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{c.service_category_label && <span className="aq-pill">{c.service_category_label}</span>}<Dot tone={STATUS_TONE[c.status]}>{STATUS_LABEL[c.status]}</Dot>
             <Dot tone={c.paused ? 'amber' : 'green'}>{c.paused ? 'Paused' : 'Running'}</Dot></div>
           <div className="hb-muted">Client login: <Dot tone={INVITE_TONE[c.invitation.status]}>{c.invitation.label}</Dot>
             {c.invitation.status !== 'active' && <span> — the workspace exists, but the client can't sign in until they accept an invitation.</span>}</div>
@@ -525,7 +535,7 @@ export function ClientDirectory() {
             <button className="aq-btn aq-btn--sm" onClick={() => openPortal(c)}>Open Client Portal</button>
             <button className="aq-btn aq-btn--sm" onClick={() => { onSelectOrg(c.organization_id); nav(`${OPS}/settings`) }}>Pause · Operators</button>
           </div>
-        </div>))}</div> : <Empty icon="store" title="No cleaning clients yet" action={<button className="aq-btn aq-btn--primary" onClick={() => setMode('add')}>Add Cleaning Company</button>} />}
+        </div>))}</div> : <Empty icon="store" title="No service companies yet" action={<button className="aq-btn aq-btn--primary" onClick={() => setMode('add')}>Add Service Company</button>} />}
     </div>
   )
 }
@@ -588,7 +598,7 @@ export function FollowUpsPage() {
   return (
     <div className="aq-page">
       <PageHeader eyebrow="Acquisition Operations" title="Follow-up Queue"
-        sub="Requests from cleaning clients about their appointments. Handle each through the normal EvoSys channel — nothing here sends a message by itself." />
+        sub="Requests from service companies about their appointments. Handle each through the normal EvoSys channel — nothing here sends a message by itself." />
       <Toolbar><div className="aq-tabs" style={{ marginBottom: 0 }}>{[['open', 'Open'], ['done', 'Done'], ['closed', 'Closed'], ['', 'All']].map(([k, l]) => (
         <button key={k || 'all'} className={status === k ? 'on' : ''} onClick={() => setStatus(k)}>{l}</button>))}</div>
         <span className="aq-pill">{d ? items.length : '…'}</span></Toolbar>
