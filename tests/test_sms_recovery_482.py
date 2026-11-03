@@ -79,7 +79,9 @@ def test_other_codes_keep_their_own_rules_and_hold_nobody(client, db_session, sa
     ev = db_session.query(SmsRecoveryEvent).filter_by(lead_id=lead.id, kind="failure").one()
     assert ev.error_code == code                        # recorded with the provider's own code
     assert R.send_refusal(db_session, lead) is None
-    assert P.rule_for(P.DEFAULT_RULES, code)["action"] == (P.INVESTIGATE if code == "30007" else P.CONTINUE_SCHEDULE)
+    assert P.rule_for(P.DEFAULT_RULES, code)["action"] == ({"30003": P.CONTINUE_SCHEDULE,
+                                                        "30005": P.HOLD_FOR_REVIEW,
+                                                        "30007": P.INVESTIGATE}[code])
 
 
 def test_a_late_sent_receipt_never_overwrites_the_final_one(client, db_session, sample_org, sample_advisor):
