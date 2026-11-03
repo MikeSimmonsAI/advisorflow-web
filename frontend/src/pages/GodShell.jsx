@@ -504,6 +504,18 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
               ) : null}
             </span>
           </div>
+          {/* THE WAY OUT TO THE OWNER'S PROGRAMS (#452, 2026-11-03). God Mode had
+              no link to Program Access, so the owner's only visible exit to the
+              Acquisition Control Center was "Sign out" - and the next sign-in in
+              that browser was a different login. Same session, no context set. */}
+          {!isMobile && (
+            <>
+              <button type="button" className="gm-btn gm-sm" onClick={() => navigate('/acquisition-ops')}
+                      title="EvoSys Pro Acquisition Control Center (as the owner)">Acquisition Control Center</button>
+              <button type="button" className="gm-btn gm-sm" onClick={() => navigate('/workspaces')}
+                      title="Every program this login can open">Program Access</button>
+            </>
+          )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: 'var(--gm-dim)', fontSize: '12px' }}>
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--gm-teal)' }} />
             LIVE

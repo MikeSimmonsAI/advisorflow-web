@@ -98,9 +98,12 @@ function Enable({ onDone }) {
 export default function AcquisitionOps() {
   useFont()
   const [clients, cErr, reloadClients] = useLoad('/acquisition-ops/clients')
+  // The remembered client belongs to THIS login. Keyed by user id, so a client
+  // chosen under one login is never pre-selected for the next one in the tab.
+  const selKey = 'aq_client:' + (getCurrentUser()?.id || 'anon')
   const [selectedOrg, setSelectedOrgState] = useState(() => {
-    try { return sessionStorage.getItem('aq_client') || '' } catch { return '' } })
-  const setSelectedOrg = id => { setSelectedOrgState(id); try { sessionStorage.setItem('aq_client', id || '') } catch { /* private mode */ } }
+    try { sessionStorage.removeItem('aq_client'); return sessionStorage.getItem(selKey) || '' } catch { return '' } })
+  const setSelectedOrg = id => { setSelectedOrgState(id); try { sessionStorage.setItem(selKey, id || '') } catch { /* private mode */ } }
   const valid = clients?.items?.some(c => c.organization_id === selectedOrg)
   // OWNER: no client until one is chosen (never Divine Shine, never a TEST company).
   // OPERATOR: their first authorized client - they have nothing else.
@@ -168,12 +171,14 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg, reloadClients }) {
               <span className="hb-crumb-mid">Acquisition Control Center</span><span className="hb-crumb-mid">›</span><b>{page}</b></nav>
             <div className="aq-top__right">
               <span className={`hb-role ${ov.is_god ? '' : 'hb-role--op'}`}><Icon name={ov.is_god ? 'shield' : 'key'} size={14} />{ov.is_god ? 'Owner' : 'Operator'}</span>
-              <span className="aq-me"><span className="aq-avatar">{initials(me)}</span>
-                <div><b>{me.split(' ')[0] || me}</b><span>EvoSys Pro</span></div></span>
+              {/* WHO IS SIGNED IN, exactly as the server reports it - never a first name alone. */}
+              <span className="aq-me" title={`Signed in as ${clients.me?.email || me}`}><span className="aq-avatar">{initials(clients.me?.name || me)}</span>
+                <div><b>{clients.me?.name || me}</b><span>{clients.me?.email || ''}</span></div></span>
             </div>
           </header>
           {!ov.is_god && <div className="aq-page" style={{ paddingBottom: 0 }}><div className="aq-note aq-note--warn" style={{ marginBottom: 0 }}>
-            <b>Restricted workspace:</b> you work only on the clients and tasks the EvoSys owner assigned you. The master prospect pool, client setup and other clients aren’t available here.</div></div>}
+            <b>Restricted workspace — signed in as {clients.me?.email || me}.</b> This login works only on the clients and tasks the EvoSys owner assigned it. The master prospect pool, client setup and other clients aren’t available here.
+            {' '}If you are the owner, <button type="button" className="aq-btn aq-btn--sm" onClick={async () => { const { logout } = await import('../../api/client'); await logout(); window.location.href = '/login?next=/acquisition-ops' }}>sign out of this login</button> and sign in with the owner account.</div></div>}
           {!onMaster && orgId && loc.pathname !== OPS && <div className="aq-page" style={{ paddingBottom: 0 }}>
             <div className="hb-strip"><span className="hb-strip__mark">{initials(ov.organization_name)}</span>
               <div><b>{ov.organization_name} — Acquisition Operations</b>
