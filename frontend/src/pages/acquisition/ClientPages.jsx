@@ -57,7 +57,7 @@ export function Home() {
       <h1 className="aq-h1">Welcome{first ? `, ${first}` : ''}!</h1>
       <p className="aq-lede">Here are your results, upcoming appointments, and next steps.</p>
       {!status.running && (
-        <div className="aq-note">Your outreach hasn’t started yet. Your 30-day free pilot begins the day it goes live — interested businesses will appear here as soon as they reply.</div>
+        <div className="aq-note">Your outreach hasn’t started yet. Your {status.profile?.offer_label || '30-day pilot'} begins when real operations go live — interested businesses will appear here after they reply.</div>
       )}
       <div className="aq-grid aq-kpis aq-kpis--dark">
         <Kpi icon="building" value={c.in_research} label="New Opportunities" sub="(In Research)" />

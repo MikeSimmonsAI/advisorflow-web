@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.deps import get_current_user, get_db, require_god, require_not_observation, require_tenant_user
@@ -233,6 +234,87 @@ def god_revoke(org_id: str, user_id: str, db: Session = Depends(get_db), god: Us
     E.revoke_operator(db, org, user_id, god)
     _audit(db, org.id, god, "acquisition_operator_revoke", "user", user_id)
     return {"ok": True}
+
+
+# ═══════════════════ MASTER ACQUISITION / OWNER DISTRIBUTION ═══════════════════
+# Reuses Lead Intelligence master pool. These are NOT file-import endpoints:
+# the canonical /intake importer (#470) owns upload, map, review and commit.
+# Assigning a qualified master-owned prospect creates a tenant-scoped Lead and
+# AcquisitionOpportunity using the EXISTING acquisition engine; sends nothing.
+class MasterAssignmentIn(BaseModel):
+    prospect_ids: list[str] = Field(..., min_length=1, max_length=20)
+    destination_org_id: str
+    segment: Optional[str] = None      # empty = each prospect's own segment
+
+
+@god_router.get("/master")
+def master_overview(db: Session = Depends(get_db), god: User = Depends(require_god)):
+    from app.models.lead_intel_models import LeadIntelProspect
+    from app.services import qualification as Q
+    base = db.query(LeadIntelProspect)
+    return {
+        "clients": _clients(db),
+        "template": "cleaning_acquisition",
+        "max_clients": C.PILOT_ORG_LIMIT,
+        "prospects_total": base.count(),
+        "unassigned_qualified": base.filter(
+            LeadIntelProspect.routed_org_id.is_(None),
+            LeadIntelProspect.stage == "qualified",
+            LeadIntelProspect.bucket.in_((Q.READY, Q.REVIEW))).count(),
+        "importer": "/intake",
+        "prospect_source": "/god/lead-intelligence/prospects",
+        "assignment_mode": "exclusive_owner_decision",
+        "outreach_channels": ["email"],
+        "note": "No other tenant's customer records enter the master prospect pool.",
+    }
+
+
+@god_router.post("/master/assign/preview")
+def master_assignment_preview(body: MasterAssignmentIn, db: Session = Depends(get_db),
+                              god: User = Depends(require_god)):
+    from app.models.lead_intel_models import LeadIntelProspect
+    from app.services.acquisition import distribution as D
+    org = _client_org(db, body.destination_org_id)
+    rows = {p.id: p for p in db.query(LeadIntelProspect).filter(
+        LeadIntelProspect.id.in_(body.prospect_ids)).all()}
+    decisions = [
+        D.assess(db, rows[pid], org, body.segment or "") if pid in rows else
+        {"prospect_id": pid, "eligible": False, "refused_because": ["not_found"]}
+        for pid in dict.fromkeys(body.prospect_ids)
+    ]
+    return {"destination_org_id": org.id, "decisions": decisions,
+            "assigned": 0, "sent": 0, "preview_only": True}
+
+
+@god_router.post("/master/assign")
+def master_assignment(body: MasterAssignmentIn, db: Session = Depends(get_db),
+                      god: User = Depends(require_god)):
+    from app.services.acquisition import distribution as D
+    org = _client_org(db, body.destination_org_id)
+    out = D.assign_many(db, body.prospect_ids, org, god, body.segment or "")
+    _audit(db, org.id, god, "acquisition_master_assignment", "organization", org.id,
+           {"assigned": out["assigned"], "refused": out["refused"]})
+    return out
+
+
+@god_router.get("/master/prospects")
+def master_prospects(status: str = Query("available"), limit: int = Query(200, ge=1, le=500),
+                     db: Session = Depends(get_db), god: User = Depends(require_god)):
+    from app.services.acquisition import distribution as D
+    if status not in ("available", "assigned", "all"):
+        raise HTTPException(422, "status is available, assigned or all")
+    return D.master_rows(db, status, limit)
+
+
+@god_router.post("/master/{prospect_id}/release")
+def master_release(prospect_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
+                   god: User = Depends(require_god)):
+    from app.services.acquisition import distribution as D
+    out = D.release(db, prospect_id, god, payload.get("reason") or "")
+    if out.get("released_from"):
+        _audit(db, out["released_from"], god, "acquisition_master_release", "lead_intel_prospect", prospect_id,
+               {"reason": (payload.get("reason") or "")[:200]})
+    return out
 
 
 # ═══════════════════════ OPERATIONS (GOD OR OPERATOR) ════════════════════

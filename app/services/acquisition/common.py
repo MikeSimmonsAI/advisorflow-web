@@ -18,10 +18,10 @@ from fastapi import HTTPException
 
 FEATURE = "client_acquisition"
 IDENTITY = "cleaning"
-# Single-company proof of concept: the owner cannot switch this on for a
-# second organization without a code change (Issue #452, "do not expand the
-# pilot prematurely").
-PILOT_ORG_LIMIT = 1
+# Client-ready product template: each cleaning organization is explicitly
+# enabled by God, starts PAUSED and keeps its own CRM, profile and portal.
+# The cap prevents accidental unbounded provisioning; it is not a shared tenant.
+PILOT_ORG_LIMIT = 25
 
 # Practice rows are a controlled test cohort: they never reach the client,
 # never count in client metrics, and are never eligible for outreach.

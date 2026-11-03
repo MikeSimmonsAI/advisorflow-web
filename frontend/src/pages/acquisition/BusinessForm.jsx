@@ -101,7 +101,7 @@ export function BusinessForm({ profile, segments, canEdit, ownerControls, onSave
           {ownerControls && <div className="aq-field"><label htmlFor="aqb-offer">Offer (owner only)</label>
             <select id="aqb-offer" value={f.offer_type} onChange={set('offer_type')}>
               <option value="free_pilot">Free 30-day pilot</option><option value="growth_pilot_250">$250 / 30-day Growth Pilot</option></select>
-            <small>A business decision. Divine Shine's pilot is free.</small></div>}
+            <small>Choose the offer arranged for this client. No billing action happens here.</small></div>}
         </section>
       </div>
       {fail && <div className="aq-err">{fail}</div>}
