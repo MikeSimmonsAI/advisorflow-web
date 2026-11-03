@@ -1,6 +1,6 @@
 # Import system audit - November 2026 (Phase 1)
 
-Scope: every way a file or list of people/businesses gets into EvoSys, traced from route to table on `main` at `3869ad2`.
+Scope: every way a file or list of people/businesses gets into EvoSys, traced from route to table on `main` at `3869ad2`, rechecked against `e5239e3a`.
 Read-only findings with file:line references. Stage A fixes are in the PR that adds this file.
 
 ## The domains that must stay apart
@@ -48,14 +48,14 @@ Dead code (no live callers): `import_service.import_leads_from_excel(dry_run=Fal
 | 🔧 repaired (A) | Old commit invented `pre_need`; routed email-only to SMS; missing `new_inquiry` track | `import_commit_service.py` |
 | 🔧 repaired (A) | Old batch routes could edit/advance/archive/delete guided and SCI batches | `import_batch_router.py` `_refuse_guided` |
 | 🔧 repaired (A) | `/google-contacts/import` reached the importer without the `imports` gate | `main.py` |
-| 🔧 repaired (A) | Acquisition hand entry stored state "TX" when none was given | `acquisition/engine.py` |
+| ✅ works | Acquisition hand entry keeps unknown state empty (fixed on main by PR #469, so Stage A's change was dropped in the rebase) | `acquisition/engine.py:330` |
 | 🔧 repaired (A) | Import error report cells could run as spreadsheet formulas | `app/utils/csv_safe.py`, `wholesale_buyer_network.error_report_csv` |
 | 🔧 needs repair (B) | Destination comes from whichever customer/workspace was last stored in the browser (`client.js:858-890`); only the typed name confirms it | needs an explicit destination step shown throughout |
 | 🔧 needs repair (B) | A number in a column *named* "mobile" is treated as a known mobile line | `eligibility.py:38-51`. It is still never SMS-ready without explicit consent, but the label should read "listed as mobile by the source", not verified |
 | 🔧 needs repair (B) | Funeral words in generic column hints | `fields.py:199-207` |
 | ➕ missing (B) | An explicit destination on every batch, with adapters for **EvoSys Sales** and **customer Acquisition** (today only tenant contacts/leads and SCI) | grep: no Opportunity / add_prospect in `app/services/intake` |
 | ➕ missing (B) | Industry/workflow profile beyond `sci` | `fields.py` has only `SCI_PROFILE` |
-| ➕ missing (B) | Geographic eligibility (allowed/excluded states and countries) | no implementation in `app/` |
+| ✅ works / ➕ extend (B) | Geographic eligibility exists for **Acquisition** since PR #469: contiguous US minus California; unknown state → review, never emailed; area code is not evidence | `app/services/acquisition/geo.py`. Not yet applied to imports or Sales; Stage B reuses this module, no second copy |
 | ➕ missing (B) | Sales `Opportunity` source-record ID, needed to match the 15 FB-CLEAN rows without parsing text | `Opportunity` columns |
 | ➕ missing (C) | Downloadable review/error reports for guided imports; saved mapping per source; request idempotency key | JSON only today |
 | ➕ missing (D) | Retire #3, #4, #6, #7 or route them through the guided engine; delete dead code; update docs | above |
@@ -65,6 +65,6 @@ Dead code (no live callers): `import_service.import_leads_from_excel(dry_run=Fal
 ## Stage plan
 
 * **A (this PR):** the confirmed defects above. No schema change.
-* **B:** a `destination` and `profile` on every guided batch, validated server-side against what the actor may write to. Commit adapters: tenant contacts/leads (existing), EvoSys Sales (`Opportunity`), customer Acquisition (`add_prospect` rules), SCI (existing). Profiles: general, SCI, cleaning-services prospect. Geographic rules (contiguous US minus California for the cleaning list). Additive nullable `opportunities.source_record_id`, filled for the 15 existing rows from their `source` text so they match and are never duplicated.
+* **B:** a `destination` and `profile` on every guided batch, validated server-side against what the actor may write to. Commit adapters: tenant contacts/leads (existing), EvoSys Sales (`Opportunity`), customer Acquisition (`add_prospect` rules), SCI (existing). Profiles: general, SCI, cleaning-services prospect. Geographic rules from `acquisition/geo.py` applied at review and commit. Additive nullable `opportunities.source_record_id`, filled for the 15 existing rows from their `source` text so they match and are never duplicated.
 * **C:** guided UI steps (destination → upload → map → review counts → commit selected → results), shown destination throughout, downloadable spreadsheet-safe review and error reports, intro drafts kept as drafts.
 * **D:** legacy retirement (410 with migration path, or routed through the engine), dead-code removal, docs.
