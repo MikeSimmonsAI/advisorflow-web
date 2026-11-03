@@ -75,6 +75,9 @@ def test_bootstrap_grants_only_named_non_god_logins(pilot, wholesale_login, monk
     monkeypatch.setenv(AD.ENV, "%s, nobody@nowhere.example, %s" % (u.email.upper(), p["god"].email))
     out = AD.bootstrap(p["db"])
     assert [r["email"] for r in out] == [u.email] and AD.is_admin_grant(p["db"], u)
+    from app.models.models import User
+    row = AD._rows(p["db"]).filter_by(user_id=u.id).one()
+    assert row.granted_by is None or p["db"].query(User).get(row.granted_by) is not None   # FK-safe
     assert AD.bootstrap(p["db"]) == []                                     # idempotent
     assert not AD.is_admin_grant(p["db"], p["god"])                        # God untouched
 
