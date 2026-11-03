@@ -122,7 +122,10 @@ def test_legacy_commit_sends_nothing_and_starts_no_journey(db_session, monkeypat
 
 # ── legacy batch routes cannot change guided / SCI batches ──────────────────
 
-@pytest.mark.parametrize("pipeline,source_system", [("universal", "file"), ("universal", "program")])
+@pytest.mark.parametrize("pipeline,source_system", [
+    ("universal", "file"), ("universal", "program"), (None, "program"),
+    # Stage B and PR #473 pipelines are just as off-limits to the old routes.
+    ("platform_pool", "manual_research"), ("evosys_sales", "facebook_ads"), ("acquisition_import", "manual_research")])
 def test_legacy_routes_refuse_to_change_guided_batches(client, db_session, pipeline, source_system):
     org = _org(db_session, "cleaning")
     u = _user(db_session, org)
