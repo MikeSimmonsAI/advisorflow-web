@@ -286,8 +286,10 @@ async def upload(file: UploadFile = File(...),
                  campaign_purpose: Optional[str] = Form(None),
                  offer_hook: Optional[str] = Form(None),
                  tags: Optional[str] = Form(None),
+                 expected_org_id: Optional[str] = Form(None),
                  db: Session = Depends(get_db), user=Depends(require_import_stage)):
     ctx = CTX.resolve(db, user)
+    CTX.confirm_destination(ctx, expected_org_id)
     content = await file.read(ENG.MAX_UPLOAD_BYTES + 1)
     try:
         b = ENG.create_batch(

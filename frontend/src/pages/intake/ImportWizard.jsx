@@ -227,6 +227,8 @@ function UploadStep({ ctx, onCreated, sci = false, apiBase = '/intake' }) {
     // SCI: the server marks the batch as an SCI file; only the list name travels.
     const sent = sci ? { list_name: form.list_name } : form
     Object.entries(sent).forEach(([k, v]) => { if (String(v).trim()) fd.append(k, String(v).trim()) })
+    // The organization shown in the banner is the one the server must write to (#470).
+    if (!sci && ctx?.organization_id) fd.append('expected_org_id', ctx.organization_id)
     try { onCreated(await api.upload(`${apiBase}/batches`, fd)) }
     catch (e) { setErr(errorText(e)) }
     finally { setBusy(false) }

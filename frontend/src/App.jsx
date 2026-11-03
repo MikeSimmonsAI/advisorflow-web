@@ -149,6 +149,8 @@ const AcqOpsDiscovery = lazyPage(() => import('./pages/acquisition/AcquisitionOp
 const AcqOpsOnboarding = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.OpsOnboarding })))
 // #470 Stage B: God-only import into the master service-prospect pool (rendered in the Ops shell).
 const PlatformPoolImport = lazyPage(() => import('./pages/intake/PlatformPoolImport'))
+const ImportDestinations = lazyPage(() => import('./pages/intake/ImportDestinations'))
+const BusinessImport = lazyPage(() => import('./pages/intake/BusinessImport'))
 const AcqOpsMaster = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.MasterPool })))
 const AcqOpsSoon = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Soon })))
 const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
@@ -1525,6 +1527,10 @@ export default function App() {
         <Route path="/import-batches" element={<ProtectedRoute feature="imports" requireAdmin><ImportBatches /></ProtectedRoute>} />
         <Route path="/import-batches/:batchId" element={<ProtectedRoute requireAdmin><ImportBatchReview /></ProtectedRoute>} />
         <Route path="/imports" element={<ProtectedRoute feature="imports" requireAdmin><ImportLedger /></ProtectedRoute>} />
+        {/* #470 Stage B: choose the destination first; Sales and Acquisition business imports. Server checks access. */}
+        <Route path="/imports/start" element={<ProtectedRoute bare><ImportDestinations /></ProtectedRoute>} />
+        <Route path="/imports/sales" element={<ProtectedRoute bare><BusinessImport mode="sales" /></ProtectedRoute>} />
+        <Route path="/imports/acquisition" element={<ProtectedRoute bare><BusinessImport mode="acquisition" /></ProtectedRoute>} />
         <Route path="/imports/new" element={<ProtectedRoute feature="imports" requireAdmin><ImportWizard /></ProtectedRoute>} />
         <Route path="/imports/:batchId" element={<ProtectedRoute feature="imports" requireAdmin><ImportWizard /></ProtectedRoute>} />
         <Route path="/replies" element={<ProtectedRoute><Replies /></ProtectedRoute>} />
