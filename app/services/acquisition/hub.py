@@ -243,30 +243,3 @@ def overview(db: Session) -> Dict[str, Any]:
         "recent_assignments": [{"prospect_id": p.id, "name": p.name, "client": names.get(p.routed_org_id, "Another client"),
                                 "at": C.iso(p.routed_at)} for p in recent_assign],
     }
-
-
-def provision(db: Session, actor: User, name: str) -> Dict[str, Any]:
-    """Add a cleaning company: a new organization on the EvoSys Pro platform
-    with the acquisition template switched on. Starts PAUSED, no users, no
-    onboarding facts, nothing sent."""
-    import re as _re
-    from app.models.models import Platform
-    nm = (name or "").strip()[:150]
-    if len(nm) < 2:
-        raise HTTPException(422, "Give the cleaning company's name")
-    if db.query(Organization).filter(Organization.name == nm).first() is not None:
-        raise HTTPException(409, "A workspace with that name already exists")
-    platform = db.query(Platform).filter(Platform.slug == "evosyspro").first()
-    if platform is None:
-        raise HTTPException(409, "The EvoSys Pro platform record is missing")
-    slug = _re.sub(r"[^a-z0-9]+", "-", nm.lower()).strip("-")[:50] or "cleaning-client"
-    base, n = slug, 1
-    while db.query(Organization).filter(Organization.slug == slug).first() is not None:
-        slug = "%s-%d" % (base, n)
-        n += 1
-    org = Organization(name=nm, slug=slug, plan="trial", platform_id=platform.id, is_active=True, industry="cleaning")
-    db.add(org)
-    db.commit()
-    db.refresh(org)
-    out = E.enable(db, org, actor)
-    return {"organization_id": org.id, "name": org.name, "paused": out["paused"], "users_created": 0, "sent": 0}

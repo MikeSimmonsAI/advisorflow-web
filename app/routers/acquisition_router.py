@@ -330,12 +330,64 @@ def master_contact(prospect_id: str, payload: dict = Body(...), db: Session = De
     return out
 
 
+def _base_url(request: Request) -> str:
+    origin = request.headers.get("origin") or ""
+    return origin if origin.startswith("https://") or origin.startswith("http://localhost") else ""
+
+
 @god_router.post("/clients")
-def provision_client(payload: dict = Body(...), db: Session = Depends(get_db), god: User = Depends(require_god)):
-    from app.services.acquisition import hub as HUB
-    out = HUB.provision(db, god, payload.get("name") or "")
-    _audit(db, out["organization_id"], god, "acquisition_client_provisioned", "organization", out["organization_id"],
-           {"name": out["name"]})
+def provision_client(request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
+                     god: User = Depends(require_god)):
+    """Add ONE cleaning company (direct, or converting a Sales opportunity)."""
+    from app.services.acquisition import onboarding as OB
+    out = OB.onboard(db, god, payload or {}, _base_url(request))
+    if out.get("organization_id") and out["status"] in ("created", "existing"):
+        _audit(db, out["organization_id"], god, "acquisition_client_onboarded", "organization", out["organization_id"],
+               {"status": out["status"], "source": out.get("source"),
+                "invited": bool(out.get("invitation") and out["invitation"].get("status") == "invitation_pending")})
+    return out
+
+
+@god_router.post("/clients/batch")
+def provision_clients_batch(request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
+                            god: User = Depends(require_god)):
+    from app.services.acquisition import onboarding as OB
+    out = OB.batch(db, god, payload.get("items") or [], payload.get("defaults") or {}, _base_url(request))
+    for r in out["results"]:
+        if r.get("status") == "created":
+            _audit(db, r["organization_id"], god, "acquisition_client_onboarded", "organization",
+                   r["organization_id"], {"status": "created", "source": r.get("source"), "batch": True})
+    return out
+
+
+@god_router.get("/directory")
+def client_directory(db: Session = Depends(get_db), god: User = Depends(require_god)):
+    from app.services.acquisition import onboarding as OB
+    return OB.directory(db)
+
+
+@god_router.get("/sales-candidates")
+def sales_candidates(db: Session = Depends(get_db), god: User = Depends(require_god)):
+    from app.services.acquisition import onboarding as OB
+    return OB.sales_candidates(db)
+
+
+@god_router.get("/onboarding-options")
+def onboarding_options(god: User = Depends(require_god)):
+    from app.services.acquisition import onboarding as OB
+    return {"services": [{"key": k, "label": l} for k, l, _ in OB.SERVICES],
+            "offers": [{"key": k, "label": l} for k, l in C.OFFER_LABEL.items()]}
+
+
+@god_router.post("/clients/{org_id}/invite")
+def invite_client_admin(org_id: str, request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
+                        god: User = Depends(require_god)):
+    from app.services.acquisition import onboarding as OB
+    org = _client_org(db, org_id)
+    out = OB.invite(db, org, god, payload.get("email") or "", payload.get("name"), _base_url(request))
+    db.commit()
+    _audit(db, org.id, god, "acquisition_client_invited", "user", out.get("user_id"),
+           {"status": out["status"], "resent": out.get("resent")})
     return out
 
 

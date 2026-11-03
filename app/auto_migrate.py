@@ -1660,6 +1660,8 @@ COLUMNS_TO_ADD = [
     ("acquisition_profiles", "approved_offer", "TEXT"),
     ("acquisition_profiles", "qualification_questions", "TEXT"),
     ("acquisition_profiles", "offer_type", "VARCHAR"),
+    ("acquisition_profiles", "offer_terms", "TEXT"),
+    ("acquisition_profiles", "sales_opportunity_id", "VARCHAR"),
     ("acquisition_opportunities", "geo_status", "VARCHAR"),
     ("acquisition_opportunities", "geo_note", "VARCHAR"),
 ]

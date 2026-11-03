@@ -75,13 +75,13 @@ def test_add_cleaning_company_starts_paused_with_no_users(pilot):
     r = p["c"].post("/god/acquisition/clients", json={"name": "Lucy Test Cleaning"}, headers=_h(p["db"], p["god"]))
     assert r.status_code == 200, r.text
     out = r.json()
-    assert out["paused"] is True and out["users_created"] == 0 and out["sent"] == 0
+    assert out["paused"] is True and out["invitation"] is None and out["sent"] == 0 and out["status"] == "created"
     org = p["db"].query(Organization).filter(Organization.id == out["organization_id"]).one()
     assert org.industry == "cleaning" and "client_acquisition" in org.enabled_features
     ov = p["c"].get("/acquisition-ops/%s/overview" % org.id, headers=_h(p["db"], p["god"])).json()
     assert ov["profile"]["paused"] is True and ov["profile"]["pilot_started_at"] is None
     dup = p["c"].post("/god/acquisition/clients", json={"name": "Lucy Test Cleaning"}, headers=_h(p["db"], p["god"]))
-    assert dup.status_code == 409
+    assert dup.json()["status"] == "existing" and dup.json()["organization_id"] == org.id
 
 
 def test_queue_filter_and_search(pilot):

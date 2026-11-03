@@ -98,7 +98,10 @@ RECURRING_PREFS = ("recurring", "one_time", "both")
 # cleaning businesses may be offered the paid Growth Pilot. Owner sets it.
 FREE_PILOT = "free_pilot"
 GROWTH_PILOT = "growth_pilot_250"
-OFFER_LABEL = {FREE_PILOT: "Free 30-day pilot", GROWTH_PILOT: "$250 / 30-day Growth Pilot"}
+OFFER_LABEL = {FREE_PILOT: "Free 30-day pilot", GROWTH_PILOT: "$250 / 30-day Growth Pilot",
+               "paid_trial": "Paid trial", "monthly_subscription": "Monthly subscription",
+               "appointment_package": "Appointment-based package", "custom": "Custom offer"}
+# Recorded terms only - choosing an offer never creates billing or a subscription.
 APPOINTMENT_TYPES = ["Walkthrough", "Consultation"]
 
 # Evidence kinds - every fact the engine states about a business carries one
