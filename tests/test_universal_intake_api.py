@@ -72,7 +72,10 @@ def test_god_admin_acting_for_an_org_imports_into_that_org_only(client, db_sessi
     ctx = client.get("/intake/context", headers=h).json()
     assert ctx["organization_name"] == "Atlantis Test Energy"
     assert ctx["acting_as_platform_owner"] is True
-    r = _upload(client, h)
+    # #470 Stage B: the owner's upload must name the customer shown on screen.
+    assert _upload(client, h).status_code == 409
+    assert _upload(client, h, expected_org_id=b.id).status_code == 409
+    r = _upload(client, h, expected_org_id=ctx["organization_id"])
     assert r.status_code == 200, r.text
     batch = r.json()
     assert batch["organization_id"] == a.id and batch["acted_as_platform_owner"] is True

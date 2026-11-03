@@ -409,6 +409,12 @@ class Opportunity(Base):
     stage        = Column(String, default=STAGE_PROSPECT, nullable=False)
     status       = Column(String, default="open", nullable=False)  # open | won | lost
     source       = Column(String, nullable=True)
+    # #470 Stage B: where an imported prospect came from. `source` stays the
+    # human-readable text; these two are the stable matching key (a re-import
+    # of the same record never creates a second prospect).
+    source_system    = Column(String, nullable=True)
+    source_record_id = Column(String, nullable=True, index=True)
+    import_batch_id  = Column(String, nullable=True, index=True)
 
     # Packages / value — decision #9. deal_value derives from the package unless
     # explicitly overridden, and the override is recorded and audited rather than

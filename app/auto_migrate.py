@@ -1634,6 +1634,10 @@ COLUMNS_TO_ADD = [
     ("leads", "pipeline_lost_at", "TIMESTAMP"),
     ("leads", "pipeline_lost_reason", "VARCHAR"),
     ("leads", "enrolled_at", "TIMESTAMP"),
+    # #470 Stage B: EvoSys Sales import provenance on opportunities
+    ("opportunities", "source_system", "VARCHAR"),
+    ("opportunities", "source_record_id", "VARCHAR"),
+    ("opportunities", "import_batch_id", "VARCHAR"),
     # #470 Stage B: platform master-pool import provenance on lead_intel_prospects
     ("lead_intel_prospects", "import_batch_id", "VARCHAR"),
     ("lead_intel_prospects", "source_record_id", "VARCHAR"),
@@ -1783,6 +1787,9 @@ ENUM_COLUMNS_TO_CONVERT_TO_STRING = [
 # table scans on messages and email_messages (potentially millions of rows)
 # because neither table had any indexes on lead_id, sent_at, or sender_id.
 INDEXES_TO_CREATE = [
+    # #470 Stage B: imported Sales prospects are matched by source record id
+    "CREATE INDEX IF NOT EXISTS ix_opportunities_source_record_id ON opportunities(source_record_id)",
+    "CREATE INDEX IF NOT EXISTS ix_opportunities_import_batch_id ON opportunities(import_batch_id)",
     # One Reply per inbound email per lead, whichever reader or run saw it.
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_replies_lead_source_message ON replies(lead_id, source_message_id) WHERE source_message_id IS NOT NULL",
     # One stored reply per Twilio MessageSid, on every instance (2026-10-02).

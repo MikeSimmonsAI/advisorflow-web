@@ -79,3 +79,26 @@ def resolve(db: Session, user: User) -> IntakeContext:
         role=getattr(user, "role", None) or "user",
         acting_as_platform_owner=is_platform_owner(user),
     )
+
+
+def confirm_destination(ctx: IntakeContext, expected_org_id: Optional[str]) -> None:
+    """#470 Stage B: the organization the person SAW and chose must be the one
+    this request writes to.
+
+    A platform owner's customer comes from a header the browser remembers from
+    whatever was open last, so the upload must also name the organization
+    shown on screen; a mismatch (or none) is refused rather than written to
+    the remembered customer. A customer user always imports into their own
+    workspace; if they name one, it must match too.
+    """
+    from fastapi import HTTPException
+    if expected_org_id:
+        if expected_org_id != ctx.org_id:
+            raise HTTPException(status_code=409, detail=(
+                "The customer shown on screen is not the one this request would import into. "
+                "Reload the page and choose the destination again."))
+        return
+    if ctx.acting_as_platform_owner:
+        raise HTTPException(status_code=409, detail=(
+            "Choose the destination customer in Import Center first - the import must name the "
+            "organization it goes to."))

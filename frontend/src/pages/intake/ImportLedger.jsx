@@ -34,7 +34,7 @@ export default function ImportLedger() {
           <p className="page-subtitle">Every import into this organization, what it did, and how to undo it safely.</p>
         </div>
         <div className="ic-header-actions">
-          <button className="btn btn--primary" onClick={() => navigate('/imports/new')}>+ New import</button>
+          <button className="btn btn--primary" onClick={() => navigate('/imports/start')}>+ New import</button>
         </div>
       </header>
       {err && <div className="ic-blocker"><div className="ic-blocker-title">Select an organization first</div><p>{err}</p></div>}

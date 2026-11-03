@@ -1131,6 +1131,9 @@ app.include_router(intake_router,
 # #470 Stage B: God-only master prospect pool destination (platform_acquisition_pool)
 from app.routers import platform_pool_intake_router  # noqa: E402
 app.include_router(platform_pool_intake_router.router)
+# #470 Stage B: explicit import destinations; EvoSys Sales and customer Acquisition imports
+from app.routers import business_intake_router  # noqa: E402
+app.include_router(business_intake_router.router)
 # RESTORED alongside it. Deliberately NOT behind require_feature: qualification
 # is how the platform decides who may be contacted, and a customer whose plan
 # does not include a feature flag must not thereby lose the guard that keeps
