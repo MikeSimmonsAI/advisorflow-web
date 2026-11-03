@@ -37,6 +37,7 @@ const P = {
   img: <><rect x="3" y="4" width="18" height="16" rx="1.5" /><circle cx="9" cy="10" r="1.8" /><path d="M21 16l-5-5-8 9" /></>,
   rocket: <><path d="M12 15l-3-3c1.5-5 4.5-8 10-9-1 5.5-4 8.5-9 10z" /><path d="M9 12H5l2-3h4M12 15v4l3-2v-4" /></>,
   pulse: <path d="M3 12h4l2-6 4 12 2-6h6" />,
+  pause: <><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></>,
   more: <><circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" /></>,
   x: <path d="M6 6l12 12M18 6 6 18" />,
   inbox: <><path d="M3 13l3-8h12l3 8v6H3z" /><path d="M3 13h5l1 3h6l1-3h5" /></>,
@@ -69,6 +70,7 @@ export const TOOLS = [
   ['assets', 'img', 'Assets & Flyers', '/program?tab=assets'],
   ['launch', 'rocket', 'Launch Readiness', '/program?tab=launch'],
   ['health', 'pulse', 'Health', '/program?tab=health'],
+  ['sms-recovery', 'pause', 'SMS Recovery', '/program?tab=sms-recovery'],
 ]
 const PC_TABS = new Set([...NAV, ...TOOLS].filter(i => i[3].startsWith('/program?')).map(i => i[0]))
 export const LIVE_SCREENS = new Set(['search', 'inbox', 'appts', 'reports', 'consent'])

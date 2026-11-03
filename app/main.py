@@ -1280,6 +1280,8 @@ from app.routers.program_router import (router as program_router,
                                         god_router as program_god_router)
 from app.routers.sci_command_router import router as sci_command_router
 app.include_router(sci_command_router)   # /program/command - SCI Command phone screens
+from app.routers.sms_recovery_router import router as sms_recovery_router
+app.include_router(sms_recovery_router)  # /sms-recovery - SMS Delivery Recovery Queue (#482)
 # /program/intake - the Intelligent Lead Importer's steps for an SCI workspace
 # (SCI managers only, SCI batches only); the final write is SCI's own loader.
 from app.routers.sci_intake_router import router as sci_intake_router  # noqa: E402
@@ -2043,6 +2045,10 @@ async def _program_sla_loop():
                                 # #449: one-time undo of the Nov 1 resume (schedules only; runs once)
                                 from app.services.programs import journey as _j449
                                 _j449.repair_for_sci(db)
+                                # #482: carrier failures recorded before the SMS
+                                # recovery queue become reviewable holds (idempotent)
+                                from app.services import sms_recovery as _rec482
+                                _rec482.backfill_for_sci(db)
                         except Exception as exc:                 # noqa: BLE001
                             db.rollback()
                             _logger.error("campaign setup error: %s", exc, exc_info=True)
