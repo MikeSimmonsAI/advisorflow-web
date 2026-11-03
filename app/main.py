@@ -2245,6 +2245,20 @@ async def on_startup():
     except Exception:
         import logging as _logging
         _logging.getLogger(__name__).warning("acquisition admin bootstrap skipped", exc_info=True)
+    # 2a-acq-wf. HARVEY WORKFORCE first start (#452). ACQUISITION_WORKFORCE_AUTOSTART=practice
+    #         starts the workforce in PRACTICE mode only if nobody has ever touched
+    #         its controls; once anyone presses a button, the owner's choice stands.
+    try:
+        if _SL is not None:
+            from app.services.acquisition.workforce import autostart as _wf_autostart
+            _s = _SL()
+            try:
+                _wf_autostart(_s)
+            finally:
+                _s.close()
+    except Exception:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("acquisition workforce autostart skipped", exc_info=True)
 
     # 2a-pre. CRM CONNECTION SECRETS — encrypt any plaintext api_key_encrypted /
     #         webhook_secret rows left over from before crm_secrets.py existed.

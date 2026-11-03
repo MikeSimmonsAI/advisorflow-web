@@ -88,11 +88,18 @@ def state(db: Session) -> AcquisitionWorkforceState:
 
 
 def _audit(db: Session, actor, action: str, detail: Dict[str, Any]) -> None:
+    """Audit-log a control change. A change with no signed-in person (the
+    server's own first start) is written to the application log instead,
+    because the audit table requires an actor."""
+    if getattr(actor, "id", None) is None:
+        log.info("acquisition workforce %s by the server: %s", action, detail)
+        return
     try:
         from app.routers.audit_log_router import log_action
-        log_action(db, None, getattr(actor, "id", None), "acquisition_workforce_" + action,
+        log_action(db, None, actor.id, "acquisition_workforce_" + action,
                    "acquisition_workforce", "global", details=detail)
     except Exception:                                            # noqa: BLE001
+        db.rollback()
         log.exception("workforce audit failed (%s)", action)
 
 
@@ -137,6 +144,24 @@ def control(db: Session, actor, action: str, reason: Optional[str] = None,
     db.commit()
     _audit(db, actor, action, {"from": before, "to": s.status, "mode": s.mode, "reason": s.reason})
     return s
+
+
+def autostart(db: Session) -> Optional[str]:
+    """ACQUISITION_WORKFORCE_AUTOSTART=practice: first start in PRACTICE mode,
+    only while the controls have never been used (changed_at is NULL). Live
+    mode can never be switched on from the environment."""
+    import os
+    if (os.getenv("ACQUISITION_WORKFORCE_AUTOSTART") or "").strip().lower() != "practice":
+        return None
+    s = state(db)
+    if s.changed_at is not None or s.status != "stopped":
+        return None
+    s.status, s.mode, s.changed_at = "running", "practice", datetime.utcnow()
+    s.reason = "Started in practice mode by the server setting ACQUISITION_WORKFORCE_AUTOSTART"
+    s.next_pass_at = s.changed_at
+    db.commit()
+    _audit(db, None, "start", {"from": "stopped", "to": "running", "mode": "practice", "reason": s.reason})
+    return "running"
 
 
 def set_limits(db: Session, actor, data: Dict[str, Any]) -> AcquisitionWorkforceState:

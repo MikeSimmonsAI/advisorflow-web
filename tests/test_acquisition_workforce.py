@@ -396,3 +396,16 @@ def test_practice_test_runs_a_real_bounded_pass(pilot):
     assert r.status_code == 200, r.text
     assert r.json()["summary"]["ran"] >= 1
     assert p["db"].query(EmailMessage).count() == 0
+
+
+def test_autostart_is_practice_only_and_never_overrides_the_owner(pilot, monkeypatch):
+    p = pilot
+    db = p["db"]
+    monkeypatch.setenv("ACQUISITION_WORKFORCE_AUTOSTART", "live")
+    assert WF.autostart(db) is None and WF.state(db).status == "stopped"
+    monkeypatch.setenv("ACQUISITION_WORKFORCE_AUTOSTART", "practice")
+    assert WF.autostart(db) == "running"
+    s = WF.state(db)
+    assert s.mode == "practice"
+    WF.control(db, p["god"], "stop")
+    assert WF.autostart(db) is None and WF.state(db).status == "stopped"     # the owner's Stop stands
