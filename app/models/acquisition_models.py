@@ -63,6 +63,9 @@ class AcquisitionProfile(Base):
     qualification_questions = Column(Text, nullable=True) # JSON list of strings
     # free_pilot (Divine Shine) | growth_pilot_250 - a business decision, set by the owner only.
     offer_type = Column(String(30), nullable=True)
+    offer_terms = Column(Text, nullable=True)            # what was agreed, in words; no billing is created
+    # The EvoSys Sales opportunity this client was converted from (rapid onboarding).
+    sales_opportunity_id = Column(String, nullable=True, index=True)
     appointment_minutes = Column(Integer, nullable=False, default=45)
     notify_user_ids = Column(Text, nullable=True)       # JSON list of user ids, checked on read
     # EMERGENCY PAUSE - starts paused. Every future worker checks this first.

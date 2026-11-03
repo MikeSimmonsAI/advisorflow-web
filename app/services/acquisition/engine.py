@@ -96,6 +96,7 @@ def profile_json(org: Organization, p: Optional[AcquisitionProfile], full: bool)
         "qualification_questions": C.jload(p.qualification_questions, []) if p else [],
         "offer_type": (p.offer_type if p else None) or C.FREE_PILOT,
         "offer_label": C.OFFER_LABEL.get((p.offer_type if p else None) or C.FREE_PILOT),
+        "offer_terms": getattr(p, "offer_terms", None) if p else None,
         "readiness": readiness(org, p),
         "configured": p is not None,
     }

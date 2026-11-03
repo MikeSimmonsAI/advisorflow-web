@@ -299,11 +299,96 @@ def master_assignment(body: MasterAssignmentIn, db: Session = Depends(get_db),
 
 @god_router.get("/master/prospects")
 def master_prospects(status: str = Query("available"), limit: int = Query(200, ge=1, le=500),
+                     queue: str = Query(""), search: str = Query(""),
                      db: Session = Depends(get_db), god: User = Depends(require_god)):
     from app.services.acquisition import distribution as D
+    from app.services.acquisition import hub as HUB
     if status not in ("available", "assigned", "all"):
         raise HTTPException(422, "status is available, assigned or all")
-    return D.master_rows(db, status, limit)
+    if queue and queue not in HUB.QUEUE_LABEL:
+        raise HTTPException(422, "Unknown research queue")
+    return D.master_rows(db, status, limit, queue, search)
+
+
+@god_router.get("/hub")
+def hub_overview(db: Session = Depends(get_db), god: User = Depends(require_god)):
+    from app.services.acquisition import hub as HUB
+    return HUB.overview(db)
+
+
+@god_router.post("/master/{prospect_id}/contact")
+def master_contact(prospect_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
+                   god: User = Depends(require_god)):
+    from app.models.lead_intel_models import LeadIntelProspect
+    from app.services.acquisition import hub as HUB
+    p = db.query(LeadIntelProspect).filter(LeadIntelProspect.id == prospect_id).first()
+    if p is None:
+        raise HTTPException(404, "Prospect not found")
+    out = HUB.record_contact(db, p, god, payload or {})
+    _audit(db, p.routed_org_id or "org-god-platform", god, "acquisition_contact_research", "lead_intel_prospect",
+           p.id, {"verified": out["readiness"]["email_status"] == "verified", "pushed": out["pushed_to_client"]})
+    return out
+
+
+def _base_url(request: Request) -> str:
+    origin = request.headers.get("origin") or ""
+    return origin if origin.startswith("https://") or origin.startswith("http://localhost") else ""
+
+
+@god_router.post("/clients")
+def provision_client(request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
+                     god: User = Depends(require_god)):
+    """Add ONE cleaning company (direct, or converting a Sales opportunity)."""
+    from app.services.acquisition import onboarding as OB
+    out = OB.onboard(db, god, payload or {}, _base_url(request))
+    if out.get("organization_id") and out["status"] in ("created", "existing"):
+        _audit(db, out["organization_id"], god, "acquisition_client_onboarded", "organization", out["organization_id"],
+               {"status": out["status"], "source": out.get("source"),
+                "invited": bool(out.get("invitation") and out["invitation"].get("status") == "invitation_pending")})
+    return out
+
+
+@god_router.post("/clients/batch")
+def provision_clients_batch(request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
+                            god: User = Depends(require_god)):
+    from app.services.acquisition import onboarding as OB
+    out = OB.batch(db, god, payload.get("items") or [], payload.get("defaults") or {}, _base_url(request))
+    for r in out["results"]:
+        if r.get("status") == "created":
+            _audit(db, r["organization_id"], god, "acquisition_client_onboarded", "organization",
+                   r["organization_id"], {"status": "created", "source": r.get("source"), "batch": True})
+    return out
+
+
+@god_router.get("/directory")
+def client_directory(db: Session = Depends(get_db), god: User = Depends(require_god)):
+    from app.services.acquisition import onboarding as OB
+    return OB.directory(db)
+
+
+@god_router.get("/sales-candidates")
+def sales_candidates(db: Session = Depends(get_db), god: User = Depends(require_god)):
+    from app.services.acquisition import onboarding as OB
+    return OB.sales_candidates(db)
+
+
+@god_router.get("/onboarding-options")
+def onboarding_options(god: User = Depends(require_god)):
+    from app.services.acquisition import onboarding as OB
+    return {"services": [{"key": k, "label": l} for k, l, _ in OB.SERVICES],
+            "offers": [{"key": k, "label": l} for k, l in C.OFFER_LABEL.items()]}
+
+
+@god_router.post("/clients/{org_id}/invite")
+def invite_client_admin(org_id: str, request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
+                        god: User = Depends(require_god)):
+    from app.services.acquisition import onboarding as OB
+    org = _client_org(db, org_id)
+    out = OB.invite(db, org, god, payload.get("email") or "", payload.get("name"), _base_url(request))
+    db.commit()
+    _audit(db, org.id, god, "acquisition_client_invited", "user", out.get("user_id"),
+           {"status": out["status"], "resent": out.get("resent")})
+    return out
 
 
 @god_router.post("/master/{prospect_id}/release")

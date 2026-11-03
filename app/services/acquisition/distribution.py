@@ -194,15 +194,26 @@ def _outcomes(db: Session, ids: List[str]) -> Dict[str, Dict[str, Any]]:
     return out
 
 
-def master_rows(db: Session, status: str = "available", limit: int = 200) -> Dict[str, Any]:
+def master_rows(db: Session, status: str = "available", limit: int = 200, queue: str = "",
+                search: str = "") -> Dict[str, Any]:
     from app.services.lead_routing import prospect_dict
+    from app.services.acquisition import hub as HUB
     q = db.query(LeadIntelProspect)
+    if search:
+        like = "%" + search.strip().lower().replace("%", "") + "%"
+        from sqlalchemy import func, or_
+        q = q.filter(or_(func.lower(func.coalesce(LeadIntelProspect.name, "")).like(like),
+                         func.lower(func.coalesce(LeadIntelProspect.city, "")).like(like),
+                         func.lower(func.coalesce(LeadIntelProspect.website, "")).like(like)))
     if status == "available":
         q = q.filter(LeadIntelProspect.routed_org_id.is_(None), LeadIntelProspect.stage == "qualified")
     elif status == "assigned":
         q = q.filter(LeadIntelProspect.routed_org_id.isnot(None))
-    total = q.count()
-    rows = q.order_by(LeadIntelProspect.created_at.desc(), LeadIntelProspect.id.desc()).limit(limit).all()
+    rows = q.order_by(LeadIntelProspect.created_at.desc(), LeadIntelProspect.id.desc()).all()
+    if queue:
+        rows = [p for p in rows if HUB.readiness(p)["queue"] == queue]
+    total = len(rows)
+    rows = rows[:limit]
     org_ids = {p.routed_org_id for p in rows if p.routed_org_id}
     names = {o.id: o.name for o in db.query(Organization).filter(Organization.id.in_(org_ids)).all()} if org_ids else {}
     users = {p.routed_by_id for p in rows if p.routed_by_id}
@@ -223,7 +234,11 @@ def master_rows(db: Session, status: str = "available", limit: int = 200) -> Dic
                   "segment": p.industry if p.industry in C.SEGMENT_KEYS else None,
                   "geo": G.status(p.state)[0], "assigned_to": names.get(p.routed_org_id),
                   "assigned_by": who.get(p.routed_by_id), "assigned_at": C.iso(p.routed_at),
-                  "client_outcome": outcomes.get(p.id)})
+                  "client_outcome": outcomes.get(p.id), "research_log": HUB._research_log(p)})
+        d.update(HUB.readiness(p))
+        # The shared engine scores SMS/voice too; this workflow is email-only, so
+        # a phone-only business must never read as "ready to send".
+        d["channel_bucket"] = d.pop("bucket", None)
         items.append(d)
     return {"status": status, "total": total, "items": items}
 
