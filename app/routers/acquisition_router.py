@@ -551,12 +551,16 @@ def op_dep(org_id: str, request: Request, db: Session = Depends(get_db),
 
 @ops_router.get("/clients")
 def ops_clients(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    # WHO IS SIGNED IN, stated by the server (#452 owner-access fix): the shell
+    # shows this verbatim so an operator session can never pass for the owner's.
+    me = {"email": user.email, "name": user.full_name or user.email,
+          "access": "owner" if _is_god(user) else "operator"}
     if _is_god(user):
-        return {"items": _clients(db), "is_god": True}
+        return {"items": _clients(db), "is_god": True, "me": me}
     ids = E.operator_org_ids(db, user)
     if not ids:
         raise HTTPException(403, "You don't have acquisition operator access.")
-    return {"items": _clients(db, set(ids)), "is_god": False}
+    return {"items": _clients(db, set(ids)), "is_god": False, "me": me}
 
 
 @ops_router.get("/my-queue")
