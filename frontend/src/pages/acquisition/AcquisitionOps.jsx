@@ -51,32 +51,42 @@ function Enable({ onDone }) {
   )
 }
 
+// Parent only manages authorized tenant identities. The keyed child remounts
+// every data-fetching hook when the selection changes, so rows from one
+// client's Prospects list can NEVER flash on another client's dashboard.
 export default function AcquisitionOps() {
   useFont()
   const [clients, cErr, reloadClients] = useLoad('/acquisition-ops/clients')
   const [selectedOrg, setSelectedOrg] = useState('')
   const orgId = clients?.items?.some(c => c.organization_id === selectedOrg)
     ? selectedOrg : clients?.items?.[0]?.organization_id
-  const [ov, oErr, reloadOv] = useLoad(orgId ? `/acquisition-ops/${orgId}/overview` : null)
-  const [list, lErr, reloadList] = useLoad(orgId ? `/acquisition-ops/${orgId}/prospects` : null)
+  if (cErr) {
+    return <div className="aq aq-gate"><div className="aq-card">
+      <h1 className="aq-h1">{cErr.status === 403 ? 'No acquisition access' : 'This page couldn’t load'}</h1>
+      <p className="aq-lede">{cErr.status === 403 ? 'This login has not been given acquisition operator access.' : errText(cErr)}</p>
+      <a className="aq-btn" href="/workspaces">Back to programs</a>
+    </div></div>
+  }
+  if (!clients) return <div className="aq"><Loading label="Opening the control center…" /></div>
+  if (!clients.items.length) return clients.is_god ? <Enable onDone={reloadClients} /> : <div className="aq"><Loading /></div>
+  return <TenantAcquisitionOps key={orgId} orgId={orgId} clients={clients} onSelectOrg={setSelectedOrg} />
+}
+
+function TenantAcquisitionOps({ orgId, clients, onSelectOrg }) {
+  const [ov, oErr, reloadOv] = useLoad(`/acquisition-ops/${orgId}/overview`)
+  const [list, lErr, reloadList] = useLoad(`/acquisition-ops/${orgId}/prospects`)
   const [open, setOpen] = useState(false)
   const loc = useLocation()
   useEffect(() => { setOpen(false) }, [loc.pathname])
 
-  const err = cErr || oErr
-  if (err) {
-    return (
-      <div className="aq aq-gate"><div className="aq-card">
-        <h1 className="aq-h1">{err.status === 403 ? 'No acquisition access' : 'This page couldn’t load'}</h1>
-        <p className="aq-lede">{err.status === 403 ? 'This login has not been given acquisition operator access. The platform owner grants it.' : errText(err)}</p>
-        <a className="aq-btn" href="/workspaces">Back to programs</a>
-      </div></div>
-    )
+  if (oErr) {
+    return <div className="aq aq-gate"><div className="aq-card">
+      <h1 className="aq-h1">{oErr.status === 403 ? 'No acquisition access' : 'This page couldn’t load'}</h1>
+      <p className="aq-lede">{errText(oErr)}</p>
+      <a className="aq-btn" href="/workspaces">Back to programs</a>
+    </div></div>
   }
-  if (!clients) return <div className="aq"><Loading label="Opening the control center…" /></div>
-  if (!clients.items.length) return clients.is_god ? <Enable onDone={reloadClients} /> : <div className="aq"><Loading /></div>
-  if (!ov || ov.organization_id !== orgId) return <div className="aq"><Loading label="Opening the selected client…" /></div>
-
+  if (!ov || ov.organization_id !== orgId) return <div className="aq"><Loading label="Opening selected client…" /></div>
   const reload = () => { reloadOv(); reloadList() }
   const p = ov.profile
   const me = ov.me?.name || ''
@@ -103,19 +113,19 @@ export default function AcquisitionOps() {
             <div className="aq-top__right">
               {(clients.is_god || clients.items.length > 1) && <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700 }}>
                 Client
-                <select aria-label="Acquisition client workspace" value={orgId} onChange={e => setSelectedOrg(e.target.value)}
+                <select aria-label="Acquisition client workspace" value={orgId} onChange={e => onSelectOrg(e.target.value)}
                   style={{ maxWidth: 240, padding: '8px 10px', border: '1px solid #c7b4ed', borderRadius: 8, background: '#fff', color: '#241444' }}>
                   {clients.items.map(c => <option key={c.organization_id} value={c.organization_id}>{c.name}</option>)}
                 </select>
               </label>}
               {ov.is_god && <a className="aq-btn aq-btn--sm" href="/god/lead-intelligence">Master prospect pool</a>}
-              {!ov.is_god && <a className="aq-btn aq-btn--sm" href="/workspaces">Switch program</a>
+              {!ov.is_god && <a className="aq-btn aq-btn--sm" href="/workspaces">Switch program</a>}
               <span className="aq-me"><span className="aq-avatar">{initials(me)}</span>
                 <div><b>{me.split(' ')[0] || me}</b><span>{ov.is_god ? 'Owner' : 'Operator'}</span></div></span>
             </div>
           </header>
           <div className="aq-band">
-            <div><h1>Acquisition Control Center</h1><p>{ov.organization_name} Pilot • Lead Generation &amp; Appointment Setting</p></div>
+            <div><h1>Acquisition Control Center</h1><p>{ov.organization_name} • Lead Generation &amp; Appointment Setting</p></div>
             <div className="aq-band__right">
               <span className={`aq-badge ${p.paused ? 'aq-badge--paused' : ''}`}><Icon name={p.paused ? 'pause' : 'calendar'} size={15} />
                 {p.paused ? 'Paused' : ov.progress.started ? `Pilot day ${ov.progress.day} of 30` : 'Pilot not started'}</span>
