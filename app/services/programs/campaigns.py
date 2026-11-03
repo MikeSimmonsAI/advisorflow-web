@@ -28,7 +28,7 @@ blank step never falls back to another campaign's words, and the campaign
 cannot be switched on while any step is blank (activation_blocker).
 """
 import json
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 
@@ -419,12 +419,92 @@ def ensure_kilgroe_for_sci(db: Session, organization_id: str):
     return profile
 
 
+# ── Kilgroe is TWO branches (owner decision, Nov 3 2026) ────────────────────
+# SCI's own upload ("Nearest/Preferred Location") names the branch by its SCI
+# location number: 7008 = Kilgroe Funeral Home, Pell City; 7901 = Kilgroe
+# Funeral Home, Leeds. Addresses and phones verified Nov 3 2026 on SCI's
+# Dignity Memorial pages (/funeral-homes/pell-city-al/kilgroe-funeral-home/7008
+# and /funeral-homes/leeds-al/kilgroe-funeral-home/7901). The existing
+# "Kilgroe Funeral Home" location already carried the Pell City phone; it
+# becomes the Pell City branch with its address, and Leeds gets its own
+# location. Nothing here is guessed: unknown fields stay empty.
+KILGROE_PELL_CITY = {"branch": "7008", "address_line1": "2219 2nd Ave North", "city": "Pell City",
+                     "state": "AL", "postal_code": "35125-1705", "phone": "+12053383341"}
+KILGROE_LEEDS = {"branch": "7901", "name": "Kilgroe Funeral Home - Leeds", "slug": "kilgroe-leeds",
+                 "address_line1": "1750 Ashville Rd", "city": "Leeds", "state": "AL",
+                 "postal_code": "35094", "phone": "+12056993181"}
+# The Oct 25 Central Alabama import kept only the name ("Kilgroe Funeral
+# Home"). These are the records whose row in SCI's upload read
+# "7901 - Kilgroe Funeral Home" (matched one-to-one by email/phone, Nov 3).
+# New imports carry the number and map by it (importer, source_names).
+KILGROE_LEEDS_SOURCE_IDS = frozenset("SCI-CA-20261025-%04d" % n for n in range(430, 437))
+
+
+def ensure_kilgroe_branches(db: Session, organization_id: str) -> Dict[str, Any]:
+    """Pell City address on the existing Kilgroe location, a Kilgroe - Leeds
+    location, and the Leeds families on it. Idempotent; never overwrites an
+    address a person already entered; never moves a record a person placed
+    by hand; sends nothing and leaves every schedule and history alone."""
+    from app.models.location_models import Location
+    from app.models.program_models import LocationProfile, ProgramSourceRecord
+    out = {"pell_city_address_set": False, "leeds_created": False, "moved": 0}
+    pell = ensure_kilgroe_for_sci(db, organization_id)
+    ploc = db.query(Location).filter(Location.id == pell.location_id).first()
+    if ploc is not None and not (ploc.address_line1 or "").strip():
+        for k in ("address_line1", "city", "state", "postal_code"):
+            setattr(ploc, k, KILGROE_PELL_CITY[k])
+        ploc.notes = ("Kilgroe Funeral Home, Pell City (SCI %s). Address verified on Dignity Memorial, "
+                      "Nov 3 2026." % KILGROE_PELL_CITY["branch"])
+        out["pell_city_address_set"] = True
+    names = json.loads(pell.source_names or "[]")
+    numbered = "%s - Kilgroe Funeral Home" % KILGROE_PELL_CITY["branch"]
+    if numbered not in names:
+        pell.source_names = json.dumps(names + [numbered])
+
+    lloc = (db.query(Location).filter(Location.organization_id == organization_id,
+                                      Location.slug == KILGROE_LEEDS["slug"]).first())
+    if lloc is None:
+        lloc = Location(organization_id=organization_id, name=KILGROE_LEEDS["name"], slug=KILGROE_LEEDS["slug"],
+                        address_line1=KILGROE_LEEDS["address_line1"], city=KILGROE_LEEDS["city"],
+                        state=KILGROE_LEEDS["state"], postal_code=KILGROE_LEEDS["postal_code"],
+                        phone=KILGROE_LEEDS["phone"],
+                        notes="Kilgroe Funeral Home, Leeds (SCI %s). Address and phone verified on Dignity "
+                              "Memorial, Nov 3 2026." % KILGROE_LEEDS["branch"])
+        db.add(lloc)
+        db.flush()
+        out["leeds_created"] = True
+    leeds = (db.query(LocationProfile).filter(LocationProfile.organization_id == organization_id,
+                                              LocationProfile.location_id == lloc.id).first())
+    if leeds is None:
+        leeds = LocationProfile(organization_id=organization_id, location_id=lloc.id,
+                                official_name=KILGROE_LEEDS["name"],
+                                source_names=json.dumps(["%s - Kilgroe Funeral Home" % KILGROE_LEEDS["branch"],
+                                                         KILGROE_LEEDS["name"]]),
+                                facility_phone=KILGROE_LEEDS["phone"], is_review_bucket=False)
+        db.add(leeds)
+        db.flush()
+    for rec in (db.query(ProgramSourceRecord)
+                .filter(ProgramSourceRecord.organization_id == organization_id,
+                        ProgramSourceRecord.source_lead_id.in_(list(KILGROE_LEEDS_SOURCE_IDS)),
+                        ProgramSourceRecord.location_id == pell.location_id).all()):
+        if rec.location_assigned_manually:
+            continue                         # a person placed it - their call stands
+        rec.location_id, rec.location_status = lloc.id, "mapped"
+        out["moved"] += 1
+    db.commit()
+    if out["pell_city_address_set"] or out["leeds_created"] or out["moved"]:
+        import logging
+        logging.getLogger(__name__).warning("kilgroe branches: %s", out)
+    return out
+
+
 def ensure_for_sci(db: Session) -> Optional[str]:
     from app.services import sms_programs
     org_id = sms_programs.sci_org_id(db)
     if org_id:
         ensure_central_alabama(db, org_id)
         ensure_kilgroe_for_sci(db, org_id)
+        ensure_kilgroe_branches(db, org_id)
     return org_id
 
 

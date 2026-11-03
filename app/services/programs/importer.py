@@ -182,7 +182,15 @@ def analyze(rows: List[Dict[str, str]], profiles: Dict[str, LocationProfile],
             continue
         for n in json.loads(prof.source_names or "[]") + [prof.official_name]:
             by_name[location_key(n)] = prof
-            by_name[location_key(strip_location_number(n))] = prof
+    # The name without its SCI location number is a fallback only. It never
+    # overrides an exact spelling, so two branches of one brand ("7008 -
+    # Kilgroe Funeral Home" Pell City, "7901 - Kilgroe Funeral Home" Leeds)
+    # each keep their own number and neither steals the other's families.
+    for prof in profiles.values():
+        if prof.is_review_bucket:
+            continue
+        for n in [prof.official_name] + json.loads(prof.source_names or "[]"):
+            by_name.setdefault(location_key(strip_location_number(n)), prof)
 
     fam_keys = {f.key for f in families}
     decisions = []
