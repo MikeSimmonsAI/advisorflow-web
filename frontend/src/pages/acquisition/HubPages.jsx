@@ -69,7 +69,7 @@ export function MasterOverview() {
           <div className="aq-card__head"><h2>Cleaning clients</h2><a href={`${OPS}/clients`}>Directory →</a></div>
           {h.clients.length ? h.clients.map(c => {
             const max = Math.max(1, ...h.clients.map(x => x.assigned))
-            return <div className="aq-row" key={c.organization_id}><div className="aq-row__main"><b>{c.name}</b>
+            return <div className="aq-row" key={c.organization_id}><div className="aq-row__main"><b>{c.name}</b>{c.is_test && <> <Dot tone="amber">TEST</Dot></>}
               <span>{c.assigned} assigned · {c.contacts_verified} verified contacts · {c.booked} appointments</span>
               <div className="hb-bar" style={{ marginTop: 6 }}><i style={{ width: `${(c.assigned / max) * 100}%` }} /></div></div>
               <Dot tone={c.paused ? 'amber' : 'green'}>{c.paused ? 'Paused' : 'Running'}</Dot></div>
@@ -509,7 +509,7 @@ export function ClientDirectory() {
       {!dir ? <Loading /> : dir.items.length ? <div className="hb-cards">{dir.items.map(c => (
         <div className="hb-ccard" key={c.organization_id}>
           <div className="hb-ccard__top"><span className="hb-strip__mark" style={{ width: 36, height: 36 }}>{c.name.split(/\s+/).map(w => w[0]).slice(0, 2).join('')}</span>
-            <div style={{ minWidth: 0 }}><b>{c.name}</b><div className="hb-muted">{c.contact || 'No contact yet'} · added {c.created_at ? new Date(c.created_at).toLocaleDateString() : '—'}</div></div></div>
+            <div style={{ minWidth: 0 }}><b>{c.name}</b>{c.is_test && <> <Dot tone="amber">TEST — not counted in results</Dot></>}<div className="hb-muted">{c.contact || 'No contact yet'} · added {c.created_at ? new Date(c.created_at).toLocaleDateString() : '—'}</div></div></div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><Dot tone={STATUS_TONE[c.status]}>{STATUS_LABEL[c.status]}</Dot>
             <Dot tone={c.paused ? 'amber' : 'green'}>{c.paused ? 'Paused' : 'Running'}</Dot></div>
           <div className="hb-muted">Client login: <Dot tone={INVITE_TONE[c.invitation.status]}>{c.invitation.label}</Dot>
