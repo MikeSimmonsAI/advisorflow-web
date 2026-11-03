@@ -425,6 +425,33 @@ def _log_inbound(db: Session, *, org_id: str, cred, mode: str,
             "crm inbound: could not write request log for org %s", org_id)
 
 
+def _stage_inbound(db, org, records: list) -> dict:
+    import csv
+    import io
+    from app.services.intake import engine as ENG
+    from app.services.intake.context import IntakeContext
+    keys: list = []
+    for r in records:
+        for k, v in r.items():
+            if k not in keys and v not in (None, "", [], {}):
+                keys.append(k)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(keys)
+    for r in records:
+        w.writerow(["" if r.get(k) is None else str(r.get(k)) for k in keys])
+    ctx = IntakeContext(org_id=org.id, org_name=org.name or getattr(org, "brand_name", None) or org.id,
+                        org_slug=getattr(org, "slug", None), actor_id=None, actor_name="CRM inbound integration",
+                        actor_email=None, role="integration", acting_as_platform_owner=False)
+    b = ENG.create_batch(db, ctx, content=buf.getvalue().encode("utf-8"),
+                         filename="crm-inbound-%s.csv" % datetime.utcnow().strftime("%Y%m%d-%H%M%S"),
+                         source="api", source_detail="CRM inbound", list_name="CRM inbound")
+    db.commit()
+    return {"created": 0, "staged": len(records), "skipped": 0, "total": len(records),
+            "batch_id": b.id, "batch_code": b.batch_code,
+            "review": "Staged in Import Center for review. Nothing was added as a lead and nothing was sent."}
+
+
 @router.post("/inbound/{org_id}")
 def inbound_leads(
     org_id: str,
@@ -518,15 +545,19 @@ def inbound_leads(
             records = [root]
 
     if not records:
-        result = {"created": 0, "skipped": 0, "total": 0}
+        result = {"created": 0, "staged": 0, "skipped": 0, "total": 0}
     else:
-        result = crm_service.import_inbound_leads(db, org_id, records)
+        # #470 Stage D: a CRM push goes through the canonical importer like any
+        # other source. The records are STAGED as an Import Center batch for
+        # this organization - matched, deduplicated and reviewed there - and
+        # nothing becomes a lead until a person commits it. Same URL, same
+        # credentials, same response keys ("created" is 0 by design).
+        result = _stage_inbound(db, org, records)
 
     _log_inbound(
         db, org_id=org_id, cred=cred, mode=mode, success=True, status_code=200,
-        detail="created=%s skipped=%s held=%s total=%s" % (
-            result.get("created"), result.get("skipped"),
-            result.get("held_over_capacity"), result.get("total")),
+        detail="staged=%s batch=%s total=%s" % (
+            result.get("staged"), result.get("batch_id"), result.get("total")),
     )
 
     result = dict(result)

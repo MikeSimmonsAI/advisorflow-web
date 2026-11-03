@@ -190,17 +190,6 @@ def test_the_scraper_is_not_in_the_customer_sidebar():
         "a platform acquisition tool is advertised in the customer's own nav")
 
 
-def test_the_scraper_destination_has_no_stale_default(  # frontend contract
-):
-    """The selector must start EMPTY and the import must be blocked without it.
-
-    A destination pre-filled from remembered context is precisely how a scrape
-    lands in the wrong customer.
-    """
-    src = _read(os.path.join(FE, "pages", "LeadScraper.jsx"))
-    assert re.search(r"useState\(''\)", src), "targetOrgId has a default value"
-    assert "if (!targetOrgId)" in src, "import is not blocked without a destination"
-    assert "target_org_id" in src, "the destination is not sent explicitly"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -234,66 +223,14 @@ def two_orgs(db_session):
     return p, a, b
 
 
-def test_the_scraper_refuses_to_import_with_no_organization_selected(
-        client, db_session, two_orgs):
-    """THE accidental-import guard, reachable now that platform routes send no
-    override. Without an explicit destination it must refuse, not guess."""
-    _p, _a, _b = two_orgs
-    r = client.post("/scraper/import",
-                    json={"leads": [{"place_id": "pl_biz", "name": "Biz", "phone": "+12145550001"}]},
-                    headers=_headers(db_session, _god(db_session)))
-    assert r.status_code == 400, r.text
-    assert "organization" in r.text.lower()
 
 
-def test_the_scraper_imports_into_the_organization_it_was_given(
-        client, db_session, two_orgs):
-    from app.models.models import Lead
-    _p, a, b = two_orgs
-    r = client.post("/scraper/import", json={
-        "leads": [{"place_id": "pl_target_biz", "name": "Target Biz", "phone": "+12145550002"}],
-        "target_org_id": b.id,
-    }, headers=_headers(db_session, _god(db_session)))
-    assert r.status_code in (200, 201), r.text
-
-    assert db_session.query(Lead).filter(Lead.organization_id == b.id).count() == 1
-    assert db_session.query(Lead).filter(Lead.organization_id == a.id).count() == 0, (
-        "leads landed in an organization that was never chosen")
 
 
-def test_an_explicit_destination_beats_any_override(client, db_session, two_orgs):
-    """Even if an override somehow arrives, the STATED destination wins.
-
-    Belt and braces: the client no longer sends one from a platform route, and
-    the server would not defer to it here anyway.
-    """
-    from app.models.models import Lead
-    _p, a, b = two_orgs
-    r = client.post("/scraper/import", json={
-        "leads": [{"place_id": "pl_explicit_biz", "name": "Explicit Biz", "phone": "+12145550003"}],
-        "target_org_id": b.id,
-    }, headers=_headers(db_session, _god(db_session), org_override=a.id))
-    assert r.status_code in (200, 201), r.text
-    assert db_session.query(Lead).filter(Lead.organization_id == b.id).count() == 1
-    assert db_session.query(Lead).filter(Lead.organization_id == a.id).count() == 0
 
 
-def test_an_unknown_destination_organization_is_refused(client, db_session, two_orgs):
-    r = client.post("/scraper/import", json={
-        "leads": [{"place_id": "pl_nowhere", "name": "Nowhere", "phone": "+12145550004"}],
-        "target_org_id": "org-does-not-exist",
-    }, headers=_headers(db_session, _god(db_session)))
-    assert r.status_code in (400, 404), r.text
 
 
-def test_the_platform_pseudo_org_can_never_be_a_destination(
-        client, db_session, two_orgs):
-    """Leads landing in the platform's own org look like they vanished."""
-    r = client.post("/scraper/import", json={
-        "leads": [{"place_id": "pl_platform", "name": "Platform", "phone": "+12145550005"}],
-        "target_org_id": "org-god-platform",
-    }, headers=_headers(db_session, _god(db_session)))
-    assert r.status_code in (400, 404), r.text
 
 
 def test_a_non_god_cannot_use_the_scraper_at_all(client, db_session, two_orgs):
@@ -312,34 +249,6 @@ def test_a_non_god_cannot_use_the_scraper_at_all(client, db_session, two_orgs):
     assert r.status_code in (401, 403, 404)
 
 
-def test_scraped_imports_respect_the_capacity_hold(client, db_session, two_orgs):
-    """The held-lead policy must survive the relocation untouched."""
-    from app.models.billing_models import BrandBillingPlan
-    from app.models.models import Lead
-    from app.services import lead_capacity
-
-    p, _a, b = two_orgs
-    db_session.add(BrandBillingPlan(
-        platform_id=p.id, key="tiny", name="Tiny", monthly_cents=1000,
-        currency="usd", is_purchasable=True, is_active=True, sort_order=10,
-        max_leads=1))
-    b.billing_plan_key = "tiny"
-    b.plan = "tiny"
-    db_session.commit()
-
-    r = client.post("/scraper/import", json={
-        "leads": [{"place_id": "pl_one", "name": "One", "phone": "+12145550011"},
-                  {"place_id": "pl_two", "name": "Two", "phone": "+12145550012"}],
-        "target_org_id": b.id,
-    }, headers=_headers(db_session, _god(db_session)))
-    assert r.status_code in (200, 201), r.text
-
-    leads = db_session.query(Lead).filter(Lead.organization_id == b.id).all()
-    assert len(leads) == 2, "a prospect was DROPPED rather than held"
-    held = [l for l in leads if lead_capacity.is_held(l)]
-    assert len(held) == 1, (
-        "the capacity hold did not apply to a scraped import: %d held of %d"
-        % (len(held), len(leads)))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -452,3 +361,24 @@ def test_god_mode_does_not_consult_the_appearance_preference():
     assert "color-scheme: dark" not in tokens
 
 
+def test_direct_scraper_import_is_retired(client, db_session):
+    """#470 Stage D: the scraper no longer writes leads into an organization
+    directly - results are staged (POST /scraper/stage) and routed from Lead
+    Intelligence. The retired route answers 410 to the owner and 403 to anyone else."""
+    from app.models.models import Lead, Organization, User
+    from app.services.auth_service import create_access_token, hash_password
+    god = User(organization_id=None, email="cb-god-retired@example.test", full_name="Owner",
+               password_hash=hash_password("Pass12345!"), role="god_admin", is_active=True, must_change_password=False)
+    org = Organization(name="CB Retired Org", slug="cb-retired-org", plan="enterprise", is_active=True)
+    db_session.add_all([god, org])
+    db_session.commit()
+    admin = User(organization_id=org.id, email="cb-admin-retired@example.test", full_name="Admin",
+                 password_hash=hash_password("Pass12345!"), role="org_admin", is_active=True, must_change_password=False)
+    db_session.add(admin)
+    db_session.commit()
+    body = {"target_org_id": org.id, "leads": [{"place_id": "p-retired-2", "name": "Any Co", "phone": "+12145550998"}]}
+    r = client.post("/scraper/import", json=body, headers={"Authorization": "Bearer " + create_access_token(god, db_session)})
+    assert r.status_code == 410
+    r = client.post("/scraper/import", json=body, headers={"Authorization": "Bearer " + create_access_token(admin, db_session)})
+    assert r.status_code == 403
+    assert db_session.query(Lead).filter(Lead.organization_id == org.id).count() == 0

@@ -261,50 +261,18 @@ class TestGate2PermissionMatrix:
 # GATE 3 — Legacy endpoints emit Deprecation headers
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TestGate3LegacyDeprecationHeaders:
+class TestGate3LegacyUploadRetired:
+    """The Deprecation/Sunset headers announced this; #470 Stage D carried it
+    out. The old preview now answers 410 and names Import Center."""
 
-    def test_preview_upload_has_deprecation_header(self, client, admin_auth_headers):
+    def test_preview_upload_is_gone_and_names_the_successor(self, client, admin_auth_headers):
         csv_path = _csv_tempfile([_standard_row()])
         try:
             with open(csv_path, "rb") as f:
-                r = client.post(
-                    "/leads/upload/preview",
-                    headers=admin_auth_headers,
-                    files={"file": ("test.csv", f, "text/csv")},
-                )
-            # Any response (200, 400, 422) is fine as long as the header is there
-            assert "Deprecation" in r.headers, (
-                "Deprecation header missing from /leads/upload/preview"
-            )
-            assert r.headers["Deprecation"].lower() in ("true", "1")
-        finally:
-            os.unlink(csv_path)
-
-    def test_preview_upload_has_sunset_header(self, client, admin_auth_headers):
-        csv_path = _csv_tempfile([_standard_row()])
-        try:
-            with open(csv_path, "rb") as f:
-                r = client.post(
-                    "/leads/upload/preview",
-                    headers=admin_auth_headers,
-                    files={"file": ("test.csv", f, "text/csv")},
-                )
-            assert "Sunset" in r.headers
-        finally:
-            os.unlink(csv_path)
-
-    def test_preview_upload_has_successor_link(self, client, admin_auth_headers):
-        csv_path = _csv_tempfile([_standard_row()])
-        try:
-            with open(csv_path, "rb") as f:
-                r = client.post(
-                    "/leads/upload/preview",
-                    headers=admin_auth_headers,
-                    files={"file": ("test.csv", f, "text/csv")},
-                )
-            link = r.headers.get("Link", "")
-            assert "import-batches" in link
-            assert 'rel="successor-version"' in link
+                r = client.post("/leads/upload/preview", headers=admin_auth_headers,
+                                files={"file": ("test.csv", f, "text/csv")})
+            assert r.status_code == 410
+            assert "/imports/start" in r.json()["detail"]
         finally:
             os.unlink(csv_path)
 

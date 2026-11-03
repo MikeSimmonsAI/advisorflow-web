@@ -149,7 +149,13 @@ def test_inbound_accepts_a_correct_credential_for_its_own_org(
                     headers=_bearer(key))
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["created"] == 1
+    # #470 Stage D: staged in the canonical importer for review, never a lead directly.
+    assert body["created"] == 0 and body["staged"] == 1 and body["batch_id"]
+    from app.models.import_models import ImportBatch
+    from app.models.models import Lead
+    b = db_session.query(ImportBatch).filter(ImportBatch.id == body["batch_id"]).first()
+    assert b.organization_id == sample_org.id and b.pipeline == "universal"
+    assert db_session.query(Lead).filter(Lead.phone.like("%2145550001")).count() == 0
     assert body["auth_mode"] == "secure"
     # A secure call is never advertised as deprecated.
     assert "deprecation" not in body
@@ -246,13 +252,13 @@ def test_a_new_organization_is_secure_by_default(client, db_session, sample_org,
 
 def test_legacy_is_accepted_but_marked_deprecated(
         client, db_session, sample_org, crm_table):
-    """The migration window. Existing customers keep delivering leads."""
+    """The migration window. Existing customers keep delivering records (staged for review)."""
     _open_legacy(db_session, sample_org)
     r = client.post("/crm/inbound/%s" % sample_org.id,
                     json={"first_name": "Ada", "phone": "+12145550008"})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["created"] == 1
+    assert body["created"] == 0 and body["staged"] == 1          # staged for review (#470 Stage D)
     assert body["auth_mode"] == "legacy"
     assert "deprecation" in body
     assert r.headers.get("Deprecation") == "true"

@@ -119,9 +119,9 @@ def test_legacy_endpoint_no_longer_writes_leads(client, db_session, orgs, fake_g
     a, _ = orgs
     admin = _user(db_session, a, "org_admin", "gadmin3@a.test")
     r = client.post("/google-contacts/import", headers=_h(db_session, admin), json={})
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["staged"] is True and body["imported"] == 0 and body["next"] == f"/imports/{body['batch_id']}"
+    # #470 Stage D: retired; Import Center has the Google Contacts source.
+    assert r.status_code == 410 and "Import Center" in r.json()["detail"]
+    assert fake_google == []                                  # Google isn't even read
     assert db_session.query(Lead).filter(Lead.organization_id == a.id).count() == 0
     assert db_session.query(OrgContact).count() == 0
 

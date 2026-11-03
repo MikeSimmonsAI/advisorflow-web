@@ -1039,28 +1039,3 @@ def import_leads_from_excel(
     }
 
 
-def import_leads_from_rows(
-    db,
-    rows: list[dict],
-    organization_id: str,
-    uploading_user_id: str,
-    source_filename: str = "API import",
-    source_year: int = None,
-    dry_run: bool = False,
-) -> dict:
-    """
-    Same import logic as import_leads_from_excel but takes pre-parsed rows
-    directly instead of a file path. Used by Google Contacts import and
-    any other source that produces rows programmatically rather than from
-    a file upload.
-    """
-    return import_leads_from_excel(
-        db=db,
-        file_path=None,
-        organization_id=organization_id,
-        uploading_user_id=uploading_user_id,
-        source_year=source_year,
-        source_filename=source_filename,
-        dry_run=dry_run,
-        _preloaded_rows=rows,
-    )
