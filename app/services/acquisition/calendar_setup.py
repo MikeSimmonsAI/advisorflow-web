@@ -190,7 +190,10 @@ def _write(db: Session, booker: User, org: Organization, link: BookingLink, lead
     f = C.jload(lead.custom_fields, {}) or {}
     company = f.get("company") or "Prospect"
     # Phone only - the prospect's email stays with EvoSys.
-    lead_view = Lead(first_name=company, last_name="", phone=lead.phone, email=None)
+    # A display-only stand-in for the calendar entry, never saved: a plain
+    # object, not a Lead row, so it can never be added or counted as a lead.
+    from types import SimpleNamespace
+    lead_view = SimpleNamespace(first_name=company, last_name="", phone=lead.phone, email=None)
     p = E.get_profile(db, org.id)
     where = (getattr(p, "meeting_location", None) if p else None)
     body = "Booked by EvoSys Pro. %s%s" % (note or "", (" Location: %s" % where) if where else "")

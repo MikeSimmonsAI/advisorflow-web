@@ -73,6 +73,7 @@ FIXTURE_PATHS = {
     "services/programs/setter_eval.py": "owner-only AI evaluation; is_test SIM-EVAL contacts, no phone/email, never messaged",
     "services/sci_staging_demo.py": "SCI staging demo families; fails closed outside the SCI staging database",
     "routers/program_router.py": "owner-only booking_test_link: one is_test preview contact per location, never contacted",
+    "services/workforce/practice.py": "AI worker safe test mode: is_test fictional practice leads, unroutable, hidden from the CRM",
 }
 
 

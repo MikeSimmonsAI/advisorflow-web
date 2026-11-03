@@ -353,6 +353,13 @@ def add_prospect(db: Session, org: Organization, actor: User, data: Dict[str, An
     if geo_status == G.EXCLUDED:
         raise HTTPException(409, "Not added: %s" % geo_why)
     practice = bool(data.get("is_practice", True))
+    if not practice:
+        # A real prospect is a lead in the client's workspace and counts
+        # against its plan. A person is adding it, so refuse cleanly (402)
+        # rather than hold. Practice prospects are the pilot's own rehearsal
+        # data and are not the client's business.
+        from app.services import lead_capacity
+        lead_capacity.require_capacity_user_initiated(db, org)
     facts = {"company": name, "website": website, "segment": segment,
              "contact_title": (data.get("contact_title") or "").strip()[:120] or None}
     lead = Lead(organization_id=org.id, first_name=(data.get("contact_first_name") or "").strip()[:80] or None,

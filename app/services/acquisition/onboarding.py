@@ -126,6 +126,9 @@ def invite(db: Session, org: Organization, actor: User, email: str, full_name: O
         row, raw = SA.issue(db, u, actor, purpose=PURPOSE_SETUP)
         return {"status": "invitation_pending", "user_id": u.id, "email": u.email,
                 "setup_url": SA.activation_url(base_url, raw), "resent": True, "expires_at": C.iso(row.expires_at)}
+    # A new login in the client's workspace is a seat on its plan.
+    from app.services import plan_limits
+    plan_limits.require_capacity_for_org_id(db, org.id, plan_limits.LIMIT_USERS)
     u = User(organization_id=org.id, email=em, full_name=(full_name or em.split("@")[0]).strip()[:120],
              password_hash=hash_password(_unknowable_password()), role="org_admin",
              must_change_password=True, is_active=True)

@@ -189,7 +189,10 @@ def book(db: Session, token: str, slot: str) -> Dict[str, Any]:
     f = C.jload(lead.custom_fields, {}) or {}
     company = f.get("company") or "Prospect"
     # Phone only on the client's calendar - the prospect's email stays with EvoSys.
-    lead_view = Lead(first_name=company, last_name="", phone=lead.phone, email=None)
+    # A display-only stand-in for the calendar entry, never saved: a plain
+    # object, not a Lead row, so it can never be added or counted as a lead.
+    from types import SimpleNamespace
+    lead_view = SimpleNamespace(first_name=company, last_name="", phone=lead.phone, email=None)
     sync = TS._push_to_calendar(db, booker, org, link, lead_view, LABEL, start, minutes, "America/Chicago",
                                 "Booked from the acquisition pilot (%s)." % ("practice" if opp.is_practice else "real"))
     if not sync.get("ok"):
