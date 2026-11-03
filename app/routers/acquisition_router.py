@@ -244,7 +244,7 @@ def god_revoke(org_id: str, user_id: str, db: Session = Depends(get_db), god: Us
 class MasterAssignmentIn(BaseModel):
     prospect_ids: list[str] = Field(..., min_length=1, max_length=20)
     destination_org_id: str
-    segment: str
+    segment: Optional[str] = None      # empty = each prospect's own segment
 
 
 @god_router.get("/master")
@@ -278,7 +278,7 @@ def master_assignment_preview(body: MasterAssignmentIn, db: Session = Depends(ge
     rows = {p.id: p for p in db.query(LeadIntelProspect).filter(
         LeadIntelProspect.id.in_(body.prospect_ids)).all()}
     decisions = [
-        D.assess(db, rows[pid], org, body.segment) if pid in rows else
+        D.assess(db, rows[pid], org, body.segment or "") if pid in rows else
         {"prospect_id": pid, "eligible": False, "refused_because": ["not_found"]}
         for pid in dict.fromkeys(body.prospect_ids)
     ]
@@ -291,9 +291,29 @@ def master_assignment(body: MasterAssignmentIn, db: Session = Depends(get_db),
                       god: User = Depends(require_god)):
     from app.services.acquisition import distribution as D
     org = _client_org(db, body.destination_org_id)
-    out = D.assign_many(db, body.prospect_ids, org, god, body.segment)
+    out = D.assign_many(db, body.prospect_ids, org, god, body.segment or "")
     _audit(db, org.id, god, "acquisition_master_assignment", "organization", org.id,
            {"assigned": out["assigned"], "refused": out["refused"]})
+    return out
+
+
+@god_router.get("/master/prospects")
+def master_prospects(status: str = Query("available"), limit: int = Query(200, ge=1, le=500),
+                     db: Session = Depends(get_db), god: User = Depends(require_god)):
+    from app.services.acquisition import distribution as D
+    if status not in ("available", "assigned", "all"):
+        raise HTTPException(422, "status is available, assigned or all")
+    return D.master_rows(db, status, limit)
+
+
+@god_router.post("/master/{prospect_id}/release")
+def master_release(prospect_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
+                   god: User = Depends(require_god)):
+    from app.services.acquisition import distribution as D
+    out = D.release(db, prospect_id, god, payload.get("reason") or "")
+    if out.get("released_from"):
+        _audit(db, out["released_from"], god, "acquisition_master_release", "lead_intel_prospect", prospect_id,
+               {"reason": (payload.get("reason") or "")[:200]})
     return out
 
 

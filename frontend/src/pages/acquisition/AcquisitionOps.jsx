@@ -18,6 +18,11 @@ const useOps = () => useContext(Ctx)
 export const OPS = '/acquisition-ops'
 const pct = v => (v == null ? '—' : Math.round(v * 100) + '%')
 
+// Owner-only: EvoSys's own master pool and its import (never shown to operators).
+const GOD_NAV = [
+  { to: `${OPS}/master`, label: 'Master pool', icon: 'search' },
+  { to: `${OPS}/import`, label: 'Import to pool', icon: 'building' },
+]
 const NAV = [
   { to: OPS, label: 'Control Center', icon: 'dashboard', end: true },
   { to: `${OPS}/onboarding`, label: 'Onboarding', icon: 'building' },
@@ -98,7 +103,7 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg }) {
           <Logo />
           <div className="aq-side__label">Operations</div>
           <nav className="aq-nav">
-            {NAV.map(it => (
+            {(ov.is_god ? [...NAV, ...GOD_NAV] : NAV).map(it => (
               <NavLink key={it.to} to={it.to} end={it.end}>
                 <Icon name={it.icon} />{it.label}{it.soon && <span className="aq-nav__soon">{it.soon}</span>}
               </NavLink>
@@ -118,7 +123,7 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg }) {
                   {clients.items.map(c => <option key={c.organization_id} value={c.organization_id}>{c.name}</option>)}
                 </select>
               </label>}
-              {ov.is_god && <a className="aq-btn aq-btn--sm" href="/god/lead-intelligence">Master prospect pool</a>}
+              {ov.is_god && <a className="aq-btn aq-btn--sm" href={`${OPS}/master`}>Master prospect pool</a>}
               {!ov.is_god && <a className="aq-btn aq-btn--sm" href="/workspaces">Switch program</a>}
               <span className="aq-me"><span className="aq-avatar">{initials(me)}</span>
                 <div><b>{me.split(' ')[0] || me}</b><span>{ov.is_god ? 'Owner' : 'Operator'}</span></div></span>
@@ -175,79 +180,80 @@ function TargetRing({ booked, high }) {
   )
 }
 
-// God-only distribution from the EXISTING platform Lead Intelligence pool.
-// No duplicate importer: canonical /intake owns file ingestion (#470).
-function MasterAssignments() {
+// God-only: EvoSys's master service-prospect pool and its hand-off to ONE
+// cleaning client at a time. Assigning never sends anything or starts a pilot.
+export function MasterPool() {
   const { ov, orgId, reload } = useOps()
-  const [pool, poolError, reloadPool] = useLoad(ov.is_god ? '/god/lead-intelligence/prospects?stage=qualified&routed=false&limit=50' : null)
+  const [tab, setTab] = useState('available')
+  const [data, dErr, reloadData] = useLoad(ov.is_god ? `/god/acquisition/master/prospects?status=${tab}` : null)
   const [chosen, setChosen] = useState([])
   const [segment, setSegment] = useState('')
   const [plan, setPlan] = useState(null)
   const [result, setResult] = useState(null)
-  const [working, setWorking] = useState(false)
+  const [busy, setBusy] = useState(false)
   const [fail, setFail] = useState('')
-  if (!ov.is_god) return null
-  const choices = (ov.segments || []).filter(x => (ov.profile.segments || []).includes(x.key))
-  const selectedSegment = choices.some(x => x.key === segment) ? segment : choices[0]?.key || ''
-  const available = (pool?.rows || []).filter(x => x.routable && !x.routed_org_id)
-  const payload = { destination_org_id: orgId, segment: selectedSegment, prospect_ids: chosen }
-  const toggle = id => {
-    setChosen(v => v.includes(id) ? v.filter(x => x !== id) : v.length >= 20 ? v : [...v, id])
-    setPlan(null); setResult(null); setFail('')
+  if (!ov.is_god) return <div className="aq-page"><div className="aq-err">Only the platform owner can open the master pool.</div></div>
+  const items = data?.items || []
+  const payload = { destination_org_id: orgId, segment: segment || null, prospect_ids: chosen }
+  const toggle = id => { setChosen(v => v.includes(id) ? v.filter(x => x !== id) : v.length >= 20 ? v : [...v, id]); setPlan(null); setResult(null) }
+  const run = async fn => { setBusy(true); setFail(''); try { await fn() } catch (e) { setFail(errText(e)) } finally { setBusy(false) } }
+  const preview = () => run(async () => setPlan(await api.post('/god/acquisition/master/assign/preview', payload)))
+  const assign = () => run(async () => { const r = await api.post('/god/acquisition/master/assign', payload); setResult(r); setPlan(null); setChosen([]); reloadData(); reload() })
+  const release = id => {
+    const reason = window.prompt('Why give this business back to the master pool?')
+    if (!reason) return
+    run(async () => { await api.post(`/god/acquisition/master/${id}/release`, { reason }); reloadData(); reload() })
   }
-  const preview = async () => {
-    setWorking(true); setFail(''); setPlan(null)
-    try { setPlan(await api.post('/god/acquisition/master/assign/preview', payload)) }
-    catch (e) { setFail(errText(e)) }
-    finally { setWorking(false) }
-  }
-  const assign = async () => {
-    setWorking(true); setFail('')
-    try {
-      const r = await api.post('/god/acquisition/master/assign', payload)
-      setResult(r); setPlan(null); setChosen([])
-      reloadPool(); reload()
-    } catch (e) { setFail(errText(e)) }
-    finally { setWorking(false) }
-  }
-  const eligible = plan?.decisions?.length === chosen.length && chosen.length > 0 &&
-    plan.decisions.every(x => x.eligible && x.destination_org_id === orgId && x.segment === selectedSegment)
+  const ready = plan && plan.decisions.length === chosen.length && plan.decisions.some(x => x.eligible)
+  const names = Object.fromEntries(items.map(x => [x.id, x.name]))
   return (
-    <section className="aq-card" style={{ marginTop: 14 }}>
-      <h2>Master Acquisition → Assign to {ov.organization_name}</h2>
-      <p className="aq-lede">One central research pool; each company receives only explicitly assigned businesses. Assigning does not send an email or start the pilot.</p>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
-        <a className="aq-btn aq-btn--sm" href="/god/lead-intelligence">Open master prospect pool</a>
-        <a className="aq-btn aq-btn--sm" href="/imports/new">Open unified Import Center</a>
-        <button className="aq-btn aq-btn--sm" onClick={reloadPool}>Refresh pool</button>
+    <div className="aq-page">
+      <h1 className="aq-h1">Master prospect pool</h1>
+      <p className="aq-lede">EvoSys's own researched businesses. Each one goes to one cleaning client only, when you assign it. Assigning sends nothing and starts no pilot.</p>
+      <div className="aq-actions">
+        <div className="aq-tabs">{[['available', 'Available'], ['assigned', 'Assigned'], ['all', 'All']].map(([k, l]) => (
+          <button key={k} className={tab === k ? 'on' : ''} onClick={() => { setTab(k); setChosen([]); setPlan(null) }}>{l}</button>))}</div>
+        <a className="aq-btn aq-btn--sm" href={`${OPS}/import`}>Import a file</a>
+        <span className="aq-pill">{data ? `${data.total} ${tab === 'all' ? 'total' : tab}` : '…'}</span>
       </div>
-      {!pool && !poolError && <Loading label="Loading master prospects…" />}
-      {poolError && <div className="aq-err">{errText(poolError)}</div>}
-      {pool && <p className="aq-lede">{pool.total} qualified master prospects · {available.length} unassigned candidates shown. The importer’s master-pool destination is being connected in #470.</p>}
-      {!!available.length && <>
-        <div className="aq-field"><label htmlFor="aq-distribution-segment">Assign under cleaning segment</label>
-          <select id="aq-distribution-segment" value={selectedSegment} onChange={e => { setSegment(e.target.value); setPlan(null) }}>
-            {choices.map(x => <option key={x.key} value={x.key}>{x.label}</option>)}
-          </select>
-        </div>
-        <div style={{ maxHeight: 230, overflowY: 'auto', marginBottom: 12 }}>
-          {available.map(x => <label key={x.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: 8, borderBottom: '1px solid #eee8fa' }}>
-            <input type="checkbox" checked={chosen.includes(x.id)} onChange={() => toggle(x.id)} />
-            <span><b>{x.name || 'Unknown business'}</b><span style={{ display: 'block', fontSize: 12 }}>{[x.city, x.state, x.industry].filter(Boolean).join(' · ')} · {x.bucket || 'Review'}</span></span>
-          </label>)}
-        </div>
-        <button className="aq-btn" disabled={!chosen.length || !selectedSegment || working} onClick={preview}>Preview assignment ({chosen.length})</button>
-        {plan && <div style={{ marginTop: 12 }}>
-          {plan.decisions.map(x => <div className="aq-row" key={x.prospect_id}>
-            <span>{x.eligible ? 'Ready for client pipeline' : 'Held for review'} · {x.refused_because?.join(', ') || x.geography_note}</span>
-          </div>)}
-          <button className="aq-btn aq-btn--primary" disabled={!eligible || working} onClick={assign}>Assign eligible businesses — no sends</button>
-        </div>}
-      </>}
-      {pool && !available.length && <div className="aq-empty">No unassigned qualified master prospects yet. Use Lead Intelligence discovery or the canonical importer when its master-pool destination is ready.</div>}
+      {dErr && <div className="aq-err">{errText(dErr)}</div>}
       {fail && <div role="alert" className="aq-err">{fail}</div>}
-      {result && <div role="status" className="aq-note">Assigned: {result.assigned} · Held: {result.refused} · Messages sent: {result.sent}</div>}
-    </section>
+      {result && <div role="status" className="aq-ok">Assigned {result.assigned} to {ov.organization_name} · held back {result.refused} · emails sent {result.sent}</div>}
+      <section className="aq-card">
+        {!data ? <Loading /> : items.length ? (
+          <div style={{ maxHeight: 460, overflow: 'auto' }}>
+            <table className="aq-table"><thead><tr>{tab === 'available' && <th />}<th>Business</th><th>Type</th><th>Location</th><th>Contact</th><th>Source</th>{tab !== 'available' && <th>Client and result</th>}</tr></thead>
+              <tbody>{items.map(x => (
+                <tr key={x.id}>
+                  {tab === 'available' && <td><input type="checkbox" checked={chosen.includes(x.id)} onChange={() => toggle(x.id)} /></td>}
+                  <td><b>{x.name}</b><br /><small>{x.website || ''}</small></td>
+                  <td><small>{x.segment || x.industry || '—'}</small></td>
+                  <td><small>{[x.city, x.state].filter(Boolean).join(', ') || '—'}{x.geo !== 'eligible' ? ` (${x.geo})` : ''}</small></td>
+                  <td><small>{x.contact_name ? `${x.contact_name}${x.contact_title ? ', ' + x.contact_title : ''}` : ''}{x.email ? <><br />{x.email} {x.email_verified ? '(verified)' : '(not verified)'}</> : ''}{x.phone ? <><br />{x.phone}</> : ''}</small></td>
+                  <td><small>{x.source}{x.source_url ? <> · <a href={x.source_url} target="_blank" rel="noreferrer">link</a></> : ''}{x.researched_at ? <><br />{when(x.researched_at)}</> : ''}</small></td>
+                  {tab !== 'available' && <td><small>{x.assigned_to ? <>
+                    <b>{x.assigned_to}</b> by {x.assigned_by || '—'} {x.assigned_at ? when(x.assigned_at) : ''}<br />
+                    {x.client_outcome ? `${x.client_outcome.stage_label}${x.client_outcome.outreach_started ? ' · contacted' : ' · not contacted'}${x.client_outcome.appointment ? ' · appointment' : ''}${x.client_outcome.won ? ' · won' : ''}` : ''}
+                    {x.client_outcome && !x.client_outcome.outreach_started && <><br /><button className="aq-btn aq-btn--sm" disabled={busy} onClick={() => release(x.id)}>Release</button></>}
+                  </> : 'Available'}</small></td>}
+                </tr>))}</tbody></table>
+          </div>) : <div className="aq-empty">{tab === 'available' ? 'No available businesses. Import a researched file to fill the pool.' : 'Nothing here yet.'}</div>}
+      </section>
+      {tab === 'available' && !!items.length && (
+        <section className="aq-card" style={{ marginTop: 14 }}>
+          <h2>Assign {chosen.length} to {ov.organization_name}</h2>
+          <p className="aq-lede">Switch the client at the top to assign to a different company.</p>
+          <div className="aq-field"><label htmlFor="aq-mseg">Cleaning segment</label>
+            <select id="aq-mseg" value={segment} onChange={e => { setSegment(e.target.value); setPlan(null) }}>
+              <option value="">Use each business's own type</option>
+              {(ov.segments || []).map(x => <option key={x.key} value={x.key}>{x.label}</option>)}</select></div>
+          <div className="aq-actions"><button className="aq-btn" disabled={!chosen.length || busy} onClick={preview}>Check fit ({chosen.length})</button>
+            {plan && <button className="aq-btn aq-btn--primary" disabled={!ready || busy} onClick={assign}>Assign the ones that fit. Nothing is sent.</button>}</div>
+          {plan && plan.decisions.map(x => (
+            <div className="aq-row" key={x.prospect_id}><div className="aq-row__main"><b>{names[x.prospect_id] || x.prospect_id}</b>
+              <span>{x.eligible ? 'Fits' : 'Held back: ' + (x.refused_because || []).join(', ').replace(/_/g, ' ')}{(x.warnings || []).length ? ' · note: ' + x.warnings.join(', ').replace(/_/g, ' ') : ''}</span></div></div>))}
+        </section>)}
+    </div>
   )
 }
 
@@ -283,7 +289,6 @@ export function ControlCenter() {
           <ul className="aq-checklist">{checks.map(c => <li key={c.text}><span className={`aq-tick ${c.on ? 'on' : ''}`} />{c.text}</li>)}</ul>
         </section>
       </div>
-      {ov.is_god && <MasterAssignments />}
       <section className="aq-card" style={{ marginTop: 14 }}>
         <h2>Recent activity</h2>
         {ov.recent_events.length ? ov.recent_events.slice(0, 8).map((e, i) => (

@@ -113,7 +113,10 @@ def test_second_cleaning_client_gets_its_own_paused_workspace(pilot):
     assert first["organization_id"] != second["organization_id"]
     assert first["profile"]["pilot_started_at"] is None
     assert second["profile"]["pilot_started_at"] is None
-    assert p["c"].get("/acquisition/status", headers=_h(p["db"], p["outsider"], p["shine"].id)).status_code in (402, 403)
+    # Asking for another company's workspace never opens it: the header is
+    # ignored for a non-member and the user lands in their own company.
+    cross = p["c"].get("/acquisition/status", headers=_h(p["db"], p["outsider"], p["shine"].id))
+    assert cross.status_code in (402, 403) or cross.json()["organization_id"] == p["other"].id
     own = p["c"].get("/acquisition/status", headers=_h(p["db"], p["outsider"], p["other"].id))
     assert own.status_code == 200
 
