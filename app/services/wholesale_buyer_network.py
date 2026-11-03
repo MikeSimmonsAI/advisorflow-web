@@ -755,7 +755,8 @@ def error_report_csv(db, batch) -> str:
     buf = io.StringIO()
     headers = _l(batch.headers, [])
     w = csv.writer(buf)
-    w.writerow(["row", "state", "problems"] + headers)
+    from app.utils.csv_safe import row as _safe   # a person opens this file in a spreadsheet
+    w.writerow(_safe(["row", "state", "problems"] + headers))
     for r in _rows(db, batch).all():
         if r.state not in ("error", "conflict", "duplicate_in_file", "skipped"):
             continue
@@ -763,7 +764,7 @@ def error_report_csv(db, batch) -> str:
                                             for x in c.get("reasons", [])]
         probs += (_l(r.match, {}) or {}).get("reasons") or []
         raw = _l(r.raw, {})
-        w.writerow([r.row_number, r.state, "; ".join(probs)] + [raw.get(h, "") for h in headers])
+        w.writerow(_safe([r.row_number, r.state, "; ".join(probs)] + [raw.get(h, "") for h in headers]))
     return buf.getvalue()
 
 

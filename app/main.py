@@ -973,7 +973,10 @@ from app.routers import conversation_intel_router  # noqa: E402
 app.include_router(conversation_intel_router.router)   # /conversation-intel/* (memory, takeover, composer)
 from app.routers.telephony_router import router as telephony_router  # noqa: E402
 app.include_router(telephony_router)   # /voicemails, /calls/*, /telephony/*, /god/telephony/*, /voice/inbound/*, /voice/amd, /voice/human/*
-app.include_router(google_contacts_router.router)
+# Same `imports` gate as /intake: this route stages a guided-intake batch, and
+# without the gate it was a way into the importer for a plan that has none.
+app.include_router(google_contacts_router.router,
+                   dependencies=[Depends(require_feature("imports"))])
 app.include_router(objection_router)
 app.include_router(onboarding_router.router)
 app.include_router(ai_conversation_router.router)
