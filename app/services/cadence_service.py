@@ -318,7 +318,7 @@ MAX_ATTEMPTS_PER_TOUCH = 3
 RETRY_BACKOFF = timedelta(hours=1)
 # Refusals that wait on a person (hold / review / campaign off), by their tag.
 REVIEW_WAIT_TAGS = ("ON HOLD:", "DATA REVIEW:", "DUPLICATE REVIEW:", "LOCATION REVIEW:", "CAMPAIGN OFF:",
-                    "JOURNEY NOT STARTED:")
+                    "JOURNEY NOT STARTED:", "SMS HOLD:")
 REVIEW_RECHECK = timedelta(hours=6)
 
 
@@ -451,27 +451,18 @@ def _spacing_hold_until(db: Session, state, lead, schedule, touch_number: int, n
     return earliest if n < earliest else None
 
 
-# Oct 16 (owner's decision): only a number that CANNOT take a text at all - a
-# landline / not a mobile - stops the text schedule. "Phone unreachable"
-# (30003: off, no signal, out of service area) and "unknown / inactive"
-# (30005: often a phone that is off or between plans, or a VoIP line) keep
-# their schedule: the next text is tried on its normal day. Emails always
-# continue - nothing here puts the family in Data Review.
-UNREACHABLE_ONCE = {"30006", "21614"}            # landline, not a mobile
-UNREACHABLE_TWICE: set = set()                   # nothing temporary stops the schedule
-
-
+# #482 (Nov 3): what a carrier error does is decided by the SMS recovery
+# policy (app/services/sms_recovery_policy.py), not here. By default 30006 /
+# 21614 put the family's TEXTS on a reviewable hold (not DNC, not proof of a
+# landline - the old code ended the schedule for good); 30003 / 30005 keep
+# the schedule (owner, Oct 16); 30007 is investigated, not blamed on the
+# phone. Emails are separate and keep going.
 def _unreachable_reason(db: Session, lead) -> Optional[str]:
-    from app.models.models import Message
-    rows = (db.query(Message.delivery_status, Message.error_code).filter(Message.lead_id == lead.id)
-            .order_by(Message.sent_at.desc()).limit(2).all())
-    codes = [str(e) for (st, e) in rows if (st or "").lower() in ("undelivered", "failed") and e]
-    hit = [c for c in codes if c in UNREACHABLE_ONCE]
-    if hit:
-        return "phone cannot receive texts (carrier error %s) - check the number" % hit[0]
-    if UNREACHABLE_TWICE and len(rows) == 2 and len(codes) == 2 and all(c in UNREACHABLE_TWICE for c in codes):
-        return "phone unreachable twice in a row (carrier error 30003) - check the number"
-    return None
+    """Why this family's texts are held right now (opening the hold from the
+    latest failed text if the callback missed it), else None."""
+    from app.services import sms_recovery
+    item = sms_recovery.ensure_hold_from_history(db, lead)
+    return sms_recovery.hold_text(item) if item is not None else None
 
 
 def _flag_bad_number(db: Session, lead, reason: str) -> None:
@@ -801,20 +792,25 @@ def run_due_cadences(db: Session, organization_id: str = None,
                 db.commit()
                 continue
 
-            # ── A NUMBER THAT CANNOT BE REACHED IS NOT TEXTED AGAIN ────────────
+            # ── A NUMBER ON AN SMS HOLD IS NOT TEXTED (#482) ──────────────────
             #
-            # Oct 14: two texts to one family both came back 30003 (handset
-            # unreachable) and the schedule would have kept sending. A number
-            # the carrier calls unknown / a landline once, or unreachable twice
-            # in a row, stops the text schedule and goes to Data Review - a
-            # person checks the number; nothing is retried blind.
-            bad = _unreachable_reason(db, lead)
-            if bad:
+            # A carrier failure the recovery policy holds (30006 by default)
+            # keeps this family's texts waiting for a person - the schedule is
+            # NOT ended, nothing is resent, nothing is spent. The skip is
+            # recorded (once per touch it holds back) and looked at again a day
+            # later; a person releasing the hold lets the next text go on its
+            # normal day. STOP/DNC above always wins over this.
+            from app.services import sms_recovery as _recovery
+            held = _recovery.ensure_hold_from_history(db, lead)
+            if held is not None:
                 _log_touch(db, state, lead, touch_number=touch_number,
                            attempt_seq=_next_attempt_seq(db, state, touch_number), claim=True,
-                           outcome=OUTCOME_STOPPED, reason=bad, scheduled_for=scheduled_for)
-                # Texts stop; emails keep going (no Data Review hold).
-                stop_cadence_for_lead(db, lead.id, "stopped_bad_number")
+                           outcome=OUTCOME_SKIPPED, reason=_recovery.hold_text(held)[:500],
+                           scheduled_for=scheduled_for)
+                _recovery.note_prevented(db, held, touch_number)
+                state.next_touch_due_at = now + _recovery.HOLD_RECHECK
+                skipped_count += 1
+                db.commit()
                 continue
 
             # ── SPACING FROM THE LAST TEXT ACTUALLY SENT ──────────────────────

@@ -48,6 +48,15 @@ def texts_too_close(db: Session, org_id: str, now: datetime) -> Dict:
                   "%d people got two unsolicited texts less than 20 hours apart in the last day.")
 
 
+def _sms_held(db: Session, org_id: str) -> set:
+    """#482: families whose texts are on an SMS recovery hold - not late, not
+    stuck: held on purpose until a person reviews them (SMS Recovery Queue)."""
+    from app.models.sms_recovery_models import HELD_STATES, SmsRecoveryItem
+    return {i for (i,) in db.query(SmsRecoveryItem.lead_id).filter(
+        SmsRecoveryItem.organization_id == org_id, SmsRecoveryItem.open_lead_id.isnot(None),
+        SmsRecoveryItem.state.in_(HELD_STATES)).all()}
+
+
 def texts_overdue(db: Session, org_id: str, now: datetime) -> Dict:
     from app.models.models import CadenceState, Lead
     from app.services import contact_hours
@@ -55,7 +64,10 @@ def texts_overdue(db: Session, org_id: str, now: datetime) -> Dict:
             .filter(Lead.organization_id == org_id, Lead.is_test.isnot(True), CadenceState.status == "active",
                     CadenceState.next_touch_due_at < now - OVERDUE).all())
     bad = []
+    held = _sms_held(db, org_id)
     for s, l in rows:
+        if l.id in held:
+            continue            # #482: held on purpose - it is in the SMS Recovery Queue
         c = contact_hours.check(l, now)
         if c["permitted"]:
             bad.append(_name(l))
@@ -84,9 +96,10 @@ def texts_never_started(db: Session, org_id: str, now: datetime) -> Dict:
                     CadenceState.cadence_started_at < now - timedelta(hours=1)).all())
     ids = [l.id for _s, l in rows]
     tried = {i for (i,) in db.query(Message.lead_id).filter(Message.lead_id.in_(ids or ["-"])).distinct().all()}
+    held = _sms_held(db, org_id)
     bad = []
     for s, l in rows:
-        if l.id in tried or l.status in ("dnc", "booked"):
+        if l.id in tried or l.status in ("dnc", "booked") or l.id in held:
             continue
         start = s.cadence_started_at.replace(tzinfo=None) if s.cadence_started_at else None
         due = s.next_touch_due_at.replace(tzinfo=None) if s.next_touch_due_at else None

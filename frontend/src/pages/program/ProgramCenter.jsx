@@ -40,6 +40,7 @@ import Leads from './sci/Leads'
 import Appointments from './sci/Appointments'
 import Outbox from './sci/Outbox'
 import Person from './sci/Person'
+import SmsRecoveryQueue from '../../components/smsRecovery/SmsRecoveryQueue'
 import { TopBar } from './command/Dashboard'
 import { MobileNav, NAV, SideNav, TOOLS } from './command/SciNav'
 import './ProgramCenter.css'
@@ -59,6 +60,7 @@ const TABS = [
   { key: 'assets', label: 'Assets & Flyers', icon: 'assets' },
   { key: 'launch', label: 'Launch Readiness', icon: 'launch' },
   { key: 'health', label: 'Health', icon: 'health' },
+  { key: 'sms-recovery', label: 'SMS Recovery', icon: 'health' },
   { key: 'settings', label: 'Settings', icon: 'settings' },
 ]
 
@@ -246,6 +248,7 @@ export default function ProgramCenter() {
           {!personId && tab === 'launch' && <Launch isManager={isManager} onChange={load} goTab={goTab} />}
           {!personId && tab === 'send' && <Send locations={data.locations} isManager={isManager} locationId={locationId} goTab={goTab} automation={data.automation} openPerson={openPerson} />}
           {!personId && tab === 'health' && <Health goTab={goTab} />}
+          {!personId && tab === 'sms-recovery' && <SmsRecoveryQueue openPerson={openPerson} />}
           {!personId && tab === 'settings' && <Settings isManager={isManager} program={prog} readiness={data.readiness}
             locations={realLocations} onChange={load} goTab={goTab} automation={data.automation} />}
     </main>

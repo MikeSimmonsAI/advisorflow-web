@@ -617,6 +617,14 @@ def send_sms(
     if _loc_refusal:
         raise ValueError(f"Lead {lead.id}: {_loc_refusal}")
 
+    # #482: a family whose texts are on an SMS recovery hold (a carrier
+    # failure a person has not reviewed yet) is not texted by ANY path. Not
+    # DNC - a release after review lifts it; replies to their own text pass.
+    from app.services import sms_recovery as _sms_recovery
+    _sms_hold = _sms_recovery.send_refusal(db, lead, send_source)
+    if _sms_hold:
+        raise ValueError(f"Lead {lead.id}: {_sms_hold}")
+
     if lead.status == "dnc":
         raise ValueError(f"Lead {lead.id} is marked DNC (likely a duplicate) - blocked from sending.")
 
@@ -792,6 +800,14 @@ def send_mms(
     _loc_refusal = _program_identity.send_refusal(db, lead, send_source)
     if _loc_refusal:
         raise ValueError(f"Lead {lead.id}: {_loc_refusal}")
+
+    # #482: a family whose texts are on an SMS recovery hold (a carrier
+    # failure a person has not reviewed yet) is not texted by ANY path. Not
+    # DNC - a release after review lifts it; replies to their own text pass.
+    from app.services import sms_recovery as _sms_recovery
+    _sms_hold = _sms_recovery.send_refusal(db, lead, send_source)
+    if _sms_hold:
+        raise ValueError(f"Lead {lead.id}: {_sms_hold}")
 
     if lead.status == "dnc":
         raise ValueError(f"Lead {lead.id} is marked DNC - blocked from sending.")

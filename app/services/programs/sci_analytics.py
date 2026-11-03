@@ -977,6 +977,8 @@ def journey(db: Session, org_id: str, lead_id: str) -> Optional[Dict]:
         "current_touch": st.current_touch_number if st is not None else None,
         "cadence_status": st.status if st is not None else None,
         "next_touch_at": _iso(st.next_touch_due_at) if (st is not None and st.status == "active") else None,
+        # #482: texts held for review after a carrier failure (not DNC).
+        "sms_hold": _sms_hold_view(db, lead.id),
         "replies": replies,
         "handling": ("human" if (conv is not None and conv.state in ("human", "stopped")) else "ai"),
         # The owner holds a consent form for every SCI family, so a schedule
@@ -1079,3 +1081,17 @@ def streams(L: Ledger, location_id: Optional[str] = None) -> Dict:
                 "touch2": sum(1 for a in rows_ if a["touch"] == 2),
                 "touch3plus": sum(1 for a in rows_ if a["touch"] >= 3)}
     return {"new": last_day(lambda a: a["touch"] == 1), "existing": last_day(lambda a: a["touch"] >= 2)}
+
+
+def _sms_hold_view(db, lead_id):
+    """#482: the open SMS recovery hold on this family's texts, or None."""
+    try:
+        from app.models.sms_recovery_models import SmsRecoveryItem
+        it = db.query(SmsRecoveryItem).filter(SmsRecoveryItem.open_lead_id == lead_id).first()
+    except Exception:                                     # noqa: BLE001
+        return None
+    if it is None:
+        return None
+    return {"id": it.id, "state": it.state, "review_status": it.review_status, "error_code": it.error_code,
+            "opened_at": _iso(it.opened_at), "label": "Texts held for review (carrier error %s) - not DNC"
+            % (it.error_code or "unknown")}

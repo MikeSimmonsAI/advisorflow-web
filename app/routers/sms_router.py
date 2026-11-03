@@ -214,6 +214,16 @@ def send_batch_endpoint(req: BatchSendRequest, db: Session = Depends(get_db), cu
     return merged
 
 
+# Twilio receipt order: a lower rank never overwrites a higher one.
+_RANKS = {"accepted": 1, "scheduled": 1, "queued": 1, "sending": 2, "sent": 3,
+          "receiving": 3, "received": 4, "delivered": 4, "undelivered": 4, "failed": 4, "read": 5,
+          "canceled": 4}
+
+
+def _receipt_rank(status) -> int:
+    return _RANKS.get((status or "").lower(), 0)
+
+
 @router.post("/webhook/status-callback")
 async def sms_status_callback(
     request: Request,
@@ -252,14 +262,23 @@ async def sms_status_callback(
         # Twilio may re-POST for messages sent before this feature existed — that's OK
         return _twiml_ack()
 
-    msg.twilio_status = MessageStatus
-    msg.delivery_status = MessageStatus  # keep both columns in sync
-    msg.delivery_status_at = datetime.utcnow()
+    # #482: OUT-OF-ORDER RECEIPTS. Twilio does not promise order: a late
+    # "sent" arriving after "delivered" / "undelivered" used to overwrite the
+    # final outcome. A receipt never moves a message backwards; a final one
+    # (delivered / undelivered / failed) always applies, so a failure that is
+    # later reported delivered is reconciled to delivered.
+    if _receipt_rank(MessageStatus) >= _receipt_rank(msg.delivery_status):
+        msg.twilio_status = MessageStatus
+        msg.delivery_status = MessageStatus  # keep both columns in sync
+        msg.delivery_status_at = datetime.utcnow()
 
-    # Explicit outcome, written from the provider's own receipt. The transcript
-    # reads THIS, not the presence of a row — see app/services/message_state.py.
-    from app.services.message_state import normalize_provider_status
-    msg.send_state = normalize_provider_status(MessageStatus)
+        # Explicit outcome, written from the provider's own receipt. The transcript
+        # reads THIS, not the presence of a row — see app/services/message_state.py.
+        from app.services.message_state import normalize_provider_status
+        msg.send_state = normalize_provider_status(MessageStatus)
+    else:
+        logger.info("twilio status callback: late '%s' after '%s' for message %s - kept '%s'",
+                    MessageStatus, msg.delivery_status, msg.id, msg.delivery_status)
 
     # Twilio only sends ErrorCode on a failure receipt. Never clear a code we
     # already have: 'sent' then 'undelivered' then a retry's 'sent' must not
@@ -270,6 +289,19 @@ async def sms_status_callback(
         msg.error_message = str(ErrorMessage)[:500]
 
     db.commit()
+
+    # #482 SMS DELIVERY RECOVERY: a failure the policy holds (30006 by
+    # default) puts this family's TEXTS on a reviewable hold - never DNC; a
+    # delivered receipt for a held message closes it. Idempotent, so Twilio
+    # re-posting the same receipt changes nothing. Isolated: a fault here
+    # never turns the receipt into a 500 that Twilio would retry.
+    try:
+        from app.services import sms_recovery as _sms_recovery
+        _sms_recovery.on_receipt(db, msg, msg.delivery_status)
+        db.commit()
+    except Exception:                                       # noqa: BLE001
+        db.rollback()
+        logger.exception("sms recovery: receipt not applied for %s", MessageSid)
 
     # AI OPERATIONS (T7): the same receipt, applied to the AI's own record of
     # the message. Additive and dark — `delivery_status` matches on the
