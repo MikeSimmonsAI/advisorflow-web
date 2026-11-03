@@ -429,3 +429,118 @@ def test_verified_and_contacted_counts_are_never_inferred(pilot):
     _move(p, opp, "contact_verified")
     f = p["c"].get("/acquisition-ops/%s/overview" % p["shine"].id, headers=_h(p["db"], p["god"])).json()["client_funnel"]
     assert f["contacts_verified"] == 1
+
+
+# ── Master prospect pool -> explicit tenant assignment (no sends) ──────────
+def _pool_business(db, **kw):
+    from app.models.lead_intel_models import LeadIntelProspect
+    args = {
+        "name": "Maplecrest Dental Group",
+        "source": "owner_research",
+        "external_id": "master-%s" % uuid.uuid4().hex[:8],
+        "industry": "dental_office",
+        "stage": "qualified",
+        "bucket": "READY_TO_SEND",
+        "website": "https://maplecrest-%s.example" % uuid.uuid4().hex[:6],
+        "city": "Dallas",
+        "state": "TX",
+    }
+    args.update(kw)
+    rec = LeadIntelProspect(**args)
+    db.add(rec)
+    db.commit()
+    return rec
+
+
+def test_god_master_assignment_is_just_a_scoped_crm_copy_no_send(pilot):
+    from app.models.acquisition_models import AcquisitionOpportunity
+    from app.models.models import EmailMessage, Lead
+    p = pilot
+    item = _pool_business(p["db"])
+    body = {"destination_org_id": p["shine"].id,
+            "prospect_ids": [item.id], "segment": "medical_dental"}
+    overview = p["c"].get("/god/acquisition/master", headers=_h(p["db"], p["god"]))
+    assert overview.status_code == 200
+    assert overview.json()["unassigned_qualified"] >= 1
+    assert overview.json()["outreach_channels"] == ["email"]
+
+    plan = p["c"].post("/god/acquisition/master/assign/preview", json=body,
+                       headers=_h(p["db"], p["god"]))
+    assert plan.status_code == 200, plan.text
+    assert plan.json()["decisions"][0]["eligible"] is True
+    assert plan.json()["sent"] == 0
+    assert item.routed_org_id is None
+
+    sent_before = p["db"].query(EmailMessage).join(Lead, EmailMessage.lead_id == Lead.id).filter(
+        Lead.organization_id == p["shine"].id).count()
+    result = p["c"].post("/god/acquisition/master/assign", json=body, headers=_h(p["db"], p["god"]))
+    assert result.status_code == 200, result.text
+    out = result.json()
+    assert out["assigned"] == 1 and out["sent"] == 0
+    p["db"].refresh(item)
+    assert item.routed_org_id == p["shine"].id
+    opportunity = p["db"].query(AcquisitionOpportunity).filter(
+        AcquisitionOpportunity.id == out["results"][0]["opportunity_id"]).one()
+    lead = p["db"].query(Lead).filter(Lead.id == opportunity.lead_id).one()
+    assert lead.organization_id == p["shine"].id
+    assert opportunity.organization_id == p["shine"].id
+    assert lead.contact_channel == "email_only"
+    assert opportunity.source == "master_pool:" + item.id
+    assert not opportunity.is_practice
+    assert p["db"].query(EmailMessage).join(Lead, EmailMessage.lead_id == Lead.id).filter(
+        Lead.organization_id == p["shine"].id).count() == sent_before
+    assert p["c"].get("/acquisition-ops/%s/overview" % p["shine"].id,
+                      headers=_h(p["db"], p["god"])).json()["progress"]["started"] is False
+
+    retry = p["c"].post("/god/acquisition/master/assign", json=body, headers=_h(p["db"], p["god"]))
+    assert retry.status_code == 200 and retry.json()["assigned"] == 0
+    assert retry.json()["results"][0]["status"] == "refused"
+    assert p["db"].query(AcquisitionOpportunity).filter(
+        AcquisitionOpportunity.organization_id == p["shine"].id).count() == 1
+
+
+def test_master_assignment_checks_client_territory_and_is_god_only(pilot):
+    p = pilot
+    outside = _pool_business(p["db"], city="Houston")
+    california = _pool_business(p["db"], city="Dallas", state="CA")
+    body = {"destination_org_id": p["shine"].id,
+            "prospect_ids": [outside.id, california.id], "segment": "medical_dental"}
+    for user in (p["owner"], p["outsider"]):
+        assert p["c"].get("/god/acquisition/master", headers=_h(p["db"], user)).status_code == 403
+        assert p["c"].post("/god/acquisition/master/assign", json=body,
+                           headers=_h(p["db"], user)).status_code == 403
+    preview = p["c"].post("/god/acquisition/master/assign/preview", json=body,
+                          headers=_h(p["db"], p["god"]))
+    assert preview.status_code == 200, preview.text
+    items = preview.json()["decisions"]
+    assert "outside_client_service_area" in items[0]["refused_because"]
+    assert "location_excluded" in items[1]["refused_because"]
+    result = p["c"].post("/god/acquisition/master/assign", json=body,
+                         headers=_h(p["db"], p["god"]))
+    assert result.status_code == 200 and result.json()["assigned"] == 0
+    p["db"].refresh(outside)
+    p["db"].refresh(california)
+    assert outside.routed_org_id is california.routed_org_id is None
+
+
+def test_master_assignment_refuses_disabled_destination_and_keeps_sales_separate(pilot):
+    p = pilot
+    item = _pool_business(p["db"])
+    body = {"destination_org_id": p["other"].id,
+            "prospect_ids": [item.id], "segment": "medical_dental"}
+    r = p["c"].post("/god/acquisition/master/assign", json=body,
+                     headers=_h(p["db"], p["god"]))
+    assert r.status_code == 409
+    p["db"].refresh(item)
+    assert item.routed_org_id is None
+    assert p["c"].post("/god/acquisition/%s/enable" % p["other"].id,
+                        headers=_h(p["db"], p["god"])).status_code == 200
+    r = p["c"].post("/god/acquisition/master/assign", json=body,
+                     headers=_h(p["db"], p["god"]))
+    assert r.status_code == 200 and r.json()["assigned"] == 1
+    p["db"].refresh(item)
+    assert item.routed_org_id == p["other"].id
+    # Divine Shine must not see the other client's assigned company.
+    shine = p["c"].get("/acquisition-ops/%s/prospects" % p["shine"].id,
+                      headers=_h(p["db"], p["god"]))
+    assert shine.status_code == 200 and shine.json()["items"] == []
