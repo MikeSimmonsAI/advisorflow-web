@@ -103,3 +103,12 @@ def test_owner_program_access_has_one_acquisition_hub_card(pilot):
     assert len(cards) == 1 and cards[0]["hub"] is True and cards[0]["path"] == "/acquisition-ops"
     # a client's own staff never get the hub card
     assert p["c"].get("/auth/my-contexts", headers=_h(p["db"], p["owner"])).json()["acquisition_ops"] == []
+
+
+def test_test_workspaces_are_labelled_and_never_counted():
+    from app.services.acquisition import hub as HUB
+    assert HUB.is_test_org("TEST QA Onboarding 1 (synthetic)")
+    assert HUB.is_test_org("test second cleaning co")
+    assert not HUB.is_test_org("Divine Shine Elite Cleaning")
+    assert not HUB.is_test_org("Testament Cleaning LLC")
+    assert not HUB.is_test_org(None)

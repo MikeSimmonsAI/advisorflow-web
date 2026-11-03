@@ -1,3 +1,4 @@
+from datetime import datetime
 # -*- coding: utf-8 -*-
 """Rapid cleaning-company onboarding: the five-of-fifteen scenario, idempotency,
 recovery, invitations, isolation. Synthetic companies on example.test only."""
@@ -166,7 +167,20 @@ def test_invitations_new_resend_and_other_workspace(sales):
                             json={"email": s["god"].email}, headers=g)
     assert god_clash.status_code == 409
     d = s["c"].get("/god/acquisition/directory", headers=g).json()["items"]
-    assert next(x for x in d if x["organization_id"] == r["organization_id"])["invitation"]["status"] == "pending"
+    assert next(x for x in d if x["organization_id"] == r["organization_id"])["invitation"]["status"] == "sent"
+    # Resending never leaves two working links for one person.
+    from app.models.staff_models import StaffActivation
+    from app.services import staff_activation as SA
+    rows = db.query(StaffActivation).filter(StaffActivation.user_id == u.id).all()
+    assert sum(1 for x in rows if x.is_usable()) == 1
+    # Accepted link, never signed in -> "accepted"; first sign-in -> "active".
+    live = next(x for x in rows if x.is_usable())
+    live.accepted_at = datetime.utcnow(); db.commit()
+    st = lambda: next(x for x in s["c"].get("/god/acquisition/directory", headers=g).json()["items"]
+                      if x["organization_id"] == r["organization_id"])["invitation"]["status"]
+    assert st() == "accepted"
+    u.last_login_at = datetime.utcnow(); db.commit()
+    assert st() == "active"
     assert db.query(EmailMessage).count() == 0
 
 
