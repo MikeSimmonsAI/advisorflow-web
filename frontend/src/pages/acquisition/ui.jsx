@@ -25,6 +25,15 @@ const PATHS = {
   pause: 'M8 5v14M16 5v14',
   shield: 'M12 3l8 3v6c0 4.5-3.3 7.6-8 9-4.7-1.4-8-4.5-8-9V6z',
   spark: 'M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z',
+  upload: 'M12 16V4M7 9l5-5 5 5M4 16v4h16v-4',
+  database: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
+  flask: 'M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3',
+  share: 'M18 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM8.6 13.5l6.8 4M15.4 6.5l-6.8 4',
+  dollar: 'M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
+  clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2',
+  list: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+  back: 'M15 18l-6-6 6-6',
+  key: 'M14 10a4 4 0 1 0-4 4l1 1h2v2h2v2h3v-3l-4-4z',
 }
 
 export function Icon({ name, size = 18 }) {
@@ -128,4 +137,97 @@ export function useFont() {
     l.href = 'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'
     document.head.appendChild(l)
   }, [])
+}
+
+// ── Acquisition Hub design system (#474) ──────────────────────────────────
+// Shared by every Hub page so the product reads as one system.
+export function PageHeader({ eyebrow, title, sub, actions }) {
+  return (
+    <div className="hb-head">
+      <div>{eyebrow && <div className="hb-eyebrow">{eyebrow}</div>}
+        <h1 className="hb-title">{title}</h1>{sub && <p className="hb-sub">{sub}</p>}</div>
+      {actions && <div className="hb-head__actions">{actions}</div>}
+    </div>
+  )
+}
+
+export function Stat({ icon, label, value, sub, tone = 'violet', to }) {
+  const body = (<>
+    <span className={`hb-stat__icon hb-tone--${tone}`}><Icon name={icon} size={20} /></span>
+    <span className="hb-stat__txt"><span className="hb-stat__label">{label}</span><b>{value ?? '—'}</b>{sub && <small>{sub}</small>}</span>
+  </>)
+  return to ? <a className={`hb-stat hb-stat--${tone}`} href={to}>{body}</a> : <div className={`hb-stat hb-stat--${tone}`}>{body}</div>
+}
+
+export function Funnel({ steps }) {
+  return (
+    <div className="hb-funnel" role="list">
+      {steps.map(s => (
+        <div key={s.key} className="hb-funnel__step" role="listitem"><b>{s.value}</b><span>{s.label}</span></div>
+      ))}
+    </div>
+  )
+}
+
+export function Stepper({ steps, current }) {
+  return (
+    <ol className="hb-steps">
+      {steps.map((s, i) => (
+        <li key={s} className={i < current ? 'done' : i === current ? 'on' : ''}>
+          <span className="hb-steps__dot">{i < current ? <Icon name="check" size={14} /> : i + 1}</span><span>{s}</span>
+        </li>))}
+    </ol>
+  )
+}
+
+export function Dot({ tone = 'gray', children }) {
+  return <span className={`hb-dot hb-dot--${tone}`}><i />{children}</span>
+}
+
+export function Empty({ icon = 'spark', title, text, action }) {
+  return (
+    <div className="hb-empty"><span className="hb-empty__icon"><Icon name={icon} size={22} /></span>
+      <b>{title}</b>{text && <p>{text}</p>}{action}</div>
+  )
+}
+
+export function Toolbar({ children }) {
+  return <div className="hb-toolbar">{children}</div>
+}
+
+export function Drawer({ title, onClose, children }) {
+  useEffect(() => {
+    const k = e => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  }, [onClose])
+  return (
+    <div className="hb-drawer" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="hb-drawer__scrim" onClick={onClose} />
+      <aside className="hb-drawer__panel">
+        <div className="hb-drawer__head"><b>{title}</b><button className="aq-btn aq-btn--sm" onClick={onClose} aria-label="Close">Close</button></div>
+        <div className="hb-drawer__body">{children}</div>
+      </aside>
+    </div>
+  )
+}
+
+// An in-page confirmation (never a browser dialog).
+export function Confirm({ text, confirmLabel = 'Confirm', danger, busy, onConfirm, onCancel, children }) {
+  return (
+    <div className={`hb-confirm ${danger ? 'hb-confirm--danger' : ''}`} role="alertdialog">
+      <div><b>{text}</b>{children}</div>
+      <div className="hb-confirm__btns"><button className="aq-btn aq-btn--sm" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button className={`aq-btn aq-btn--sm ${danger ? 'aq-btn--danger' : 'aq-btn--primary'}`} onClick={onConfirm} disabled={busy}>{busy ? 'Working…' : confirmLabel}</button></div>
+    </div>
+  )
+}
+
+export function Feed({ items, empty = 'Nothing yet.' }) {
+  if (!items?.length) return <div className="aq-empty">{empty}</div>
+  return (
+    <ul className="hb-feed">{items.map((x, i) => (
+      <li key={i}><span className={`hb-feed__icon hb-tone--${x.tone || 'violet'}`}><Icon name={x.icon || 'spark'} size={16} /></span>
+        <div><b>{x.title}</b>{x.sub && <span>{x.sub}</span>}</div><time>{x.at ? when(x.at) : ''}</time></li>))}</ul>
+  )
 }

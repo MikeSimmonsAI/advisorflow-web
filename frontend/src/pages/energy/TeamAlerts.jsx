@@ -87,6 +87,8 @@ export default function TeamAlerts() {
         <p className="eo-note">{t.default_advisor_note} This does not change the website.</p>
       </section>
 
+      {t.can_invite && <AccountsAccess />}
+
       {t.can_invite ? <AddTeammate onDone={load} /> : (
         <section className="eo-panel eo-intake"><p className="eo-note">To add a teammate, ask a workspace admin.</p></section>
       )}
@@ -106,6 +108,52 @@ export default function TeamAlerts() {
         </section>
       )}
     </div>
+  )
+}
+
+// ACCOUNTS & ACCESS (#452, 2026-11-03): this workspace's own admin manages its
+// people without God Mode, using the existing user model - list, one-time
+// setup links (never a password, never an email), deactivate, reactivate.
+function AccountsAccess() {
+  const [users, setUsers] = useState(null)
+  const [msg, setMsg] = useState(null)
+  const [busy, setBusy] = useState('')
+  const load = useCallback(() => { api.get('/admin/users').then(setUsers).catch(e => setMsg({ ok: false, text: e.message || 'Could not load accounts' })) }, [])
+  useEffect(() => { load() }, [load])
+  const act = (u, what) => {
+    setBusy(u.id + what); setMsg(null)
+    const call = what === 'link' ? api.post(`/admin/users/${u.id}/setup-link`, {})
+      : api.patch(`/admin/users/${u.id}/${what}`)
+    call.then(r => {
+      if (what === 'link') setMsg({ ok: true, text: `New setup link for ${u.full_name || u.email} (the previous one no longer works). Send it yourself — nothing is emailed:`, link: new URL(r.setup_url, window.location.origin).toString() })
+      else setMsg({ ok: true, text: `${u.full_name || u.email} ${what === 'deactivate' ? 'can no longer sign in. Their history is kept.' : 'can sign in again.'}` })
+      load()
+    }).catch(e => setMsg({ ok: false, text: e.message || 'Not done' })).finally(() => setBusy(''))
+  }
+  return (
+    <section className="eo-panel eo-intake" data-testid="accounts-access">
+      <h2 className="eo-sec" style={{ marginTop: 0 }}>Accounts &amp; access</h2>
+      <p className="eo-note">People with a login to this workspace only. Adding someone here never opens another workspace or program.</p>
+      {!users ? <div className="eo-empty">Loading…</div> : (
+        <table className="eo-table">
+          <thead><tr><th>Person</th><th>Status</th><th></th></tr></thead>
+          <tbody>{users.map(u => {
+            const pending = u.must_change_password
+            return (
+              <tr key={u.id}>
+                <td><strong>{u.full_name || u.email}</strong><div className="eo-sub">{u.email} · {ROLE[u.role] || u.role}</div></td>
+                <td>{!u.is_active ? 'Deactivated' : pending ? 'Invitation not accepted yet' : 'Active'}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  {u.is_active && pending && <button className="eo-btn" disabled={!!busy} onClick={() => act(u, 'link')}>New setup link</button>}{' '}
+                  {u.is_active ? <button className="eo-btn" disabled={!!busy} onClick={() => act(u, 'deactivate')}>Deactivate</button>
+                    : <button className="eo-btn" disabled={!!busy} onClick={() => act(u, 'reactivate')}>Reactivate</button>}
+                </td>
+              </tr>)
+          })}</tbody>
+        </table>)}
+      {msg && <div className={msg.ok ? 'eo-note' : 'eo-banner eo-banner--error'} role="status">{msg.text}
+        {msg.link && <input readOnly value={msg.link} onFocus={e => e.target.select()} aria-label="Setup link" style={{ width: '100%', marginTop: 6 }} />}</div>}
+    </section>
   )
 }
 

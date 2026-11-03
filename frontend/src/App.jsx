@@ -151,7 +151,16 @@ const AcqOpsOnboarding = lazyPage(() => import('./pages/acquisition/AcquisitionO
 const PlatformPoolImport = lazyPage(() => import('./pages/intake/PlatformPoolImport'))
 const ImportDestinations = lazyPage(() => import('./pages/intake/ImportDestinations'))
 const BusinessImport = lazyPage(() => import('./pages/intake/BusinessImport'))
-const AcqOpsMaster = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.MasterPool })))
+const AcqOpsMaster = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.MasterPoolPage })))
+const AcqOpsResearch = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.ResearchPage })))
+const AcqOpsAssign = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.AssignmentsPage })))
+const AcqOpsClients = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.ClientDirectory })))
+const AcqOpsReporting = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.Reporting })))
+const AcqOpsActivity = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.Activity })))
+const AcqOpsOutreach = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.OutreachPage })))
+const AcqOpsCalendar = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.CalendarSetup })))
+const AcqOpsFollowUps = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.FollowUpsPage })))
+const AcqOpsResponses = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.ResponsesPage })))
 const AcqOpsSoon = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Soon })))
 const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
 const DealOperationsClosing = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsClosing })))
@@ -1578,6 +1587,7 @@ export default function App() {
           <Route path="prospects" element={<AcqProspects />} />
           <Route path="prospects/:id" element={<AcqProspect />} />
           <Route path="appointments" element={<AcqAppointments />} />
+          <Route path="appointments/:id" element={<AcqProspect />} />
           <Route path="results" element={<AcqResults />} />
           <Route path="settings" element={<AcqSettings />} />
           <Route path="feedback" element={<AcqFeedback />} />
@@ -1585,17 +1595,25 @@ export default function App() {
         </Route>
         <Route path="/acquisition-ops" element={<ProtectedRoute bare><AcqOps /></ProtectedRoute>}>
           <Route index element={<AcqOpsHome />} />
+          <Route path="client-dashboard" element={<AcqOpsHome />} />
           <Route path="onboarding" element={<AcqOpsOnboarding />} />
           <Route path="discovery" element={<AcqOpsDiscovery />} />
           <Route path="prospects" element={<AcqOpsProspects />} />
-          <Route path="outreach" element={<AcqOpsSoon title="Outreach" text="Email goes out one prospect at a time: open a prospect and use its Email tab. Every send is checked against onboarding, location, the do-not-contact list and the daily limit first. Email only - no texts or calls." />} />
-          <Route path="responses" element={<AcqOpsSoon title="Responses" text="Replies to support@ are matched to their prospect every 5 minutes. STOP adds the address to the do-not-contact list; complaints and legal threats are flagged for a person. Replies show in each prospect's activity and on the Control Center." />} />
+          <Route path="outreach" element={<AcqOpsOutreach />} />
+          <Route path="responses" element={<AcqOpsResponses />} />
           <Route path="appointments" element={<AcqOpsAppointments />} />
           <Route path="pipeline" element={<AcqOpsPipeline />} />
           <Route path="health" element={<AcqOpsHealth />} />
           <Route path="settings" element={<AcqOpsSettings />} />
           <Route path="import" element={<PlatformPoolImport />} />
           <Route path="master" element={<AcqOpsMaster />} />
+          <Route path="research" element={<AcqOpsResearch />} />
+          <Route path="assignments" element={<AcqOpsAssign />} />
+          <Route path="clients" element={<AcqOpsClients />} />
+          <Route path="reporting" element={<AcqOpsReporting />} />
+          <Route path="activity" element={<AcqOpsActivity />} />
+          <Route path="followups" element={<AcqOpsFollowUps />} />
+          <Route path="calendar" element={<AcqOpsCalendar />} />
         </Route>
         <Route path="/roofing" element={<RoofingLanding />} />
         {/* PUBLIC interactive demo - fictional data only, no login, no Roofing API. */}

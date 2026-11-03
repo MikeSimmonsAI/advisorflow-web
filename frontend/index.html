@@ -17,7 +17,7 @@
         var color = '%23c9973d'
         var letter = 'BB'
         var fsize  = '13'
-        if (h.includes('evosyspro'))     { name = 'EvoSys Pro';    color = '%23087cff'; letter = 'E';  fsize = '18' }
+        if (h.includes('evosyspro') || /^evosys-[a-z0-9-]*staging\.onrender\.com$/.test(h)) { name = 'EvoSys Pro';    color = '%23087cff'; letter = 'E';  fsize = '18' }
         if (h.includes('advisorflow'))   { name = 'AdvisorFlow';   color = '%23f59e0b'; letter = 'AF'; fsize = '14' }
         if (h.includes('harmonyhustle')) { name = 'Harmony Hustle';color = '%2310b981'; letter = 'HH'; fsize = '13' }
         // THE EXTERNAL WHOLESALE PAGES ARE NOT OURS TO BRAND.
@@ -109,7 +109,7 @@
       (function () {
         var h = location.hostname.toLowerCase()
         var name  = 'BookaBoost', color = '#c9973d'
-        if (h.includes('evosyspro'))     { name = 'EvoSys Pro';    color = '#087cff' }
+        if (h.includes('evosyspro') || /^evosys-[a-z0-9-]*staging\.onrender\.com$/.test(h)) { name = 'EvoSys Pro';    color = '#087cff' }
         if (h.includes('advisorflow'))   { name = 'AdvisorFlow';   color = '#f59e0b' }
         if (h.includes('harmonyhustle')) { name = 'Harmony Hustle';color = '#10b981' }
         // Same rule as the title block above: on the external wholesale pages

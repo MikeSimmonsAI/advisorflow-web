@@ -8,33 +8,69 @@
  */
 import { createContext, Suspense, useContext, useEffect, useMemo, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { api } from '../../api/client'
+import { api, getCurrentUser } from '../../api/client'
 import { BusinessForm, Readiness } from './BusinessForm'
-import { DateChip, Icon, Kpi, Loading, Logo, Pill, apptPill, clock, errText, initials, money, useFont, useLoad, useToast, when } from './ui'
+import { DateChip, Icon, Kpi, Loading, Logo, PageHeader, Pill, apptPill, clock, errText, initials, money, useFont, useLoad, useToast, when } from './ui'
 import './acquisition.css'
+import './hub.css'
 
-const Ctx = createContext(null)
-const useOps = () => useContext(Ctx)
-export const OPS = '/acquisition-ops'
+import { OPS, OpsCtx as Ctx, useOps } from './opsContext'
+import { MasterOverview, OperatorQueue } from './HubPages'
+export { OPS, useOps }
 const pct = v => (v == null ? '—' : Math.round(v * 100) + '%')
 
-// Owner-only: EvoSys's own master pool and its import (never shown to operators).
-const GOD_NAV = [
-  { to: `${OPS}/master`, label: 'Master pool', icon: 'search' },
-  { to: `${OPS}/import`, label: 'Import to pool', icon: 'building' },
-]
-const NAV = [
+// THE ACQUISITION HUB NAVIGATION (#474). Program Access -> Acquisition.
+// Owner-only groups are hidden from operators AND refused by the server
+// (every /god/acquisition/* endpoint is God-checked); hiding is not security.
+const MASTER_NAV = [
   { to: OPS, label: 'Control Center', icon: 'dashboard', end: true },
-  { to: `${OPS}/onboarding`, label: 'Onboarding', icon: 'building' },
-  { to: `${OPS}/discovery`, label: 'Lead Discovery', icon: 'search' },
-  { to: `${OPS}/prospects`, label: 'Prospects', icon: 'users' },
+  { to: `${OPS}/import`, label: 'Import Center', icon: 'upload' },
+  { to: `${OPS}/master`, label: 'Master Prospect Pool', icon: 'database' },
+  { to: `${OPS}/research`, label: 'Research & Qualification', icon: 'flask' },
+  { to: `${OPS}/assignments`, label: 'Assignments & Distribution', icon: 'share' },
+  { to: `${OPS}/clients`, label: 'Service Companies', icon: 'store' },
+  { to: `${OPS}/reporting`, label: 'All-Clients Reporting', icon: 'chart' },
+]
+// Client-scoped operating tools: EvoSys staff work these for the client chosen
+// in the selector. Nothing here is the customer's own portal.
+// Owner-level operating pages that span every client (no client selection needed).
+const OPS_NAV = [
+  { to: `${OPS}/followups`, label: 'Follow-up Queue', icon: 'reply' },
+]
+const CLIENT_NAV = [
+  { to: `${OPS}/client-dashboard`, label: 'Client Operations', icon: 'dashboard' },
+  { to: `${OPS}/prospects`, label: 'Prospect Queue', icon: 'users' },
   { to: `${OPS}/outreach`, label: 'Outreach', icon: 'mail' },
   { to: `${OPS}/responses`, label: 'Responses', icon: 'reply' },
   { to: `${OPS}/appointments`, label: 'Appointments', icon: 'calendar' },
-  { to: `${OPS}/pipeline`, label: 'Pipeline', icon: 'pipeline' },
+  { to: `${OPS}/pipeline`, label: 'Pipeline & Contracts', icon: 'pipeline' },
+  { to: `${OPS}/discovery`, label: 'Lead Discovery', icon: 'search' },
   { to: `${OPS}/health`, label: 'Worker Health', icon: 'heart' },
-  { to: `${OPS}/settings`, label: 'Settings', icon: 'settings' },
 ]
+const SUPPORT_NAV = [
+  { to: `${OPS}/onboarding`, label: 'Client Configuration', icon: 'building' },
+  { to: `${OPS}/calendar`, label: 'Booking & Calendar', icon: 'calendar' },
+  { to: `${OPS}/settings`, label: 'Pause, Exclusions & Operators', icon: 'settings' },
+  { to: `${OPS}/activity`, label: 'Audit History', icon: 'clock' },
+]
+const MASTER_PATHS = [OPS, ...MASTER_NAV.slice(1).map(x => x.to), ...OPS_NAV.map(x => x.to), `${OPS}/activity`]
+// Pages that need a chosen client. The owner is never dropped into one by default.
+const CLIENT_PATHS = [...CLIENT_NAV.map(x => x.to), `${OPS}/onboarding`, `${OPS}/settings`]
+const TITLES = Object.fromEntries([...MASTER_NAV, ...OPS_NAV, ...CLIENT_NAV, ...SUPPORT_NAV].map(x => [x.to, x.label]))
+
+function NavGroup({ title, items, children, pre = [], startOpen = true }) {
+  const [open, setOpen] = useState(startOpen)
+  return (
+    <div className={`hb-group ${open ? '' : 'closed'}`}>
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}>{title}<i>▾</i></button>
+      {pre.length > 0 && <nav className="aq-nav">{pre.map(it => (
+        <NavLink key={it.to} to={it.to} end={it.end}><Icon name={it.icon} />{it.label}</NavLink>))}</nav>}
+      {children}
+      <nav className="aq-nav">{items.map(it => (
+        <NavLink key={it.to} to={it.to} end={it.end}><Icon name={it.icon} />{it.label}</NavLink>))}</nav>
+    </div>
+  )
+}
 
 function Enable({ onDone }) {
   const [orgId, setOrgId] = useState('')
@@ -47,8 +83,8 @@ function Enable({ onDone }) {
   return (
     <div className="aq aq-gate"><div className="aq-card">
       <Logo />
-      <h1 className="aq-h1">Enable a cleaning client workspace</h1>
-      <p className="aq-lede">Use an existing cleaning company's organization ID. Every client receives its own private Acquisition portal and starts paused. Nothing is sent.</p>
+      <h1 className="aq-h1">Enable a service-company workspace</h1>
+      <p className="aq-lede">Use an existing service company's organization ID. Every client receives its own private Acquisition portal and starts paused. Nothing is sent.</p>
       <div className="aq-field"><label htmlFor="aq-org">Organization ID</label><input id="aq-org" value={orgId} onChange={e => setOrgId(e.target.value)} /></div>
       {fail && <div className="aq-err">{fail}</div>}
       <button className="aq-btn aq-btn--primary" disabled={busy || !orgId.trim()} onClick={go}>{busy ? 'Setting up…' : 'Enable acquisition pilot'}</button>
@@ -62,9 +98,16 @@ function Enable({ onDone }) {
 export default function AcquisitionOps() {
   useFont()
   const [clients, cErr, reloadClients] = useLoad('/acquisition-ops/clients')
-  const [selectedOrg, setSelectedOrg] = useState('')
-  const orgId = clients?.items?.some(c => c.organization_id === selectedOrg)
-    ? selectedOrg : clients?.items?.[0]?.organization_id
+  // The remembered client belongs to THIS login. Keyed by user id, so a client
+  // chosen under one login is never pre-selected for the next one in the tab.
+  const selKey = 'aq_client:' + (getCurrentUser()?.id || 'anon')
+  const [selectedOrg, setSelectedOrgState] = useState(() => {
+    try { sessionStorage.removeItem('aq_client'); return sessionStorage.getItem(selKey) || '' } catch { return '' } })
+  const setSelectedOrg = id => { setSelectedOrgState(id); try { sessionStorage.setItem(selKey, id || '') } catch { /* private mode */ } }
+  const valid = clients?.items?.some(c => c.organization_id === selectedOrg)
+  // OWNER: no client until one is chosen (never Divine Shine, never a TEST company).
+  // OPERATOR: their first authorized client - they have nothing else.
+  const orgId = valid ? selectedOrg : (clients?.is_god ? null : clients?.items?.[0]?.organization_id)
   if (cErr) {
     return <div className="aq aq-gate"><div className="aq-card">
       <h1 className="aq-h1">{cErr.status === 403 ? 'No acquisition access' : 'This page couldn’t load'}</h1>
@@ -73,13 +116,16 @@ export default function AcquisitionOps() {
     </div></div>
   }
   if (!clients) return <div className="aq"><Loading label="Opening the control center…" /></div>
-  if (!clients.items.length) return clients.is_god ? <Enable onDone={reloadClients} /> : <div className="aq"><Loading /></div>
-  return <TenantAcquisitionOps key={orgId} orgId={orgId} clients={clients} onSelectOrg={setSelectedOrg} />
+  if (!clients.items.length && !clients.is_god) return <div className="aq"><Loading /></div>
+  return <TenantAcquisitionOps key={orgId || 'master'} orgId={orgId} clients={clients} onSelectOrg={setSelectedOrg} reloadClients={reloadClients} />
 }
 
-function TenantAcquisitionOps({ orgId, clients, onSelectOrg }) {
-  const [ov, oErr, reloadOv] = useLoad(`/acquisition-ops/${orgId}/overview`)
-  const [list, lErr, reloadList] = useLoad(`/acquisition-ops/${orgId}/prospects`)
+function TenantAcquisitionOps({ orgId, clients, onSelectOrg, reloadClients }) {
+  const [ovLoaded, oErr, reloadOv] = useLoad(orgId ? `/acquisition-ops/${orgId}/overview` : null)
+  const [list, lErr, reloadList] = useLoad(orgId ? `/acquisition-ops/${orgId}/prospects` : null)
+  // The owner's master shell runs with no client loaded at all.
+  const ov = orgId ? ovLoaded : { is_god: true, organization_id: null, organization_name: null, me: { name: getCurrentUser()?.name || '' },
+                                   recent_events: [], profile: {} }
   const [open, setOpen] = useState(false)
   const loc = useLocation()
   useEffect(() => { setOpen(false) }, [loc.pathname])
@@ -91,55 +137,78 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg }) {
       <a className="aq-btn" href="/workspaces">Back to programs</a>
     </div></div>
   }
-  if (!ov || ov.organization_id !== orgId) return <div className="aq"><Loading label="Opening selected client…" /></div>
+  if (orgId && (!ov || ov.organization_id !== orgId)) return <div className="aq"><Loading label="Opening selected client…" /></div>
   const reload = () => { reloadOv(); reloadList() }
   const p = ov.profile
   const me = ov.me?.name || ''
+  const onMaster = ov.is_god && MASTER_PATHS.includes(loc.pathname)
+  const needsClient = !orgId && !onMaster
+  const page = (!ov.is_god && loc.pathname === OPS) ? 'Operator Workspace' : TITLES[loc.pathname] || (ov.is_god ? 'Control Center' : 'Client Operations')
   return (
-    <Ctx.Provider value={{ ov, list, listErr: lErr, reload, orgId }}>
-      <div className="aq aq-app">
+    <Ctx.Provider value={{ ov, list, listErr: lErr, reload, orgId, clients, onSelectOrg, reloadClients }}>
+      <div className="aq aq-app aq-dark">
         {open && <div className="aq-scrim" onClick={() => setOpen(false)} />}
-        <aside className={`aq-side ${open ? 'open' : ''}`} aria-label="Operations navigation">
-          <Logo />
-          <div className="aq-side__label">Operations</div>
-          <nav className="aq-nav">
-            {(ov.is_god ? [...NAV, ...GOD_NAV] : NAV).map(it => (
-              <NavLink key={it.to} to={it.to} end={it.end}>
-                <Icon name={it.icon} />{it.label}{it.soon && <span className="aq-nav__soon">{it.soon}</span>}
-              </NavLink>
-            ))}
-          </nav>
-          <div className="aq-help"><b>Client-scoped operations</b>Each company has a separate pipeline. Use the Master prospect pool to research businesses; only approved assignments appear here.</div>
+        <aside className={`aq-side ${open ? 'open' : ''}`} aria-label="Acquisition Control Center navigation">
+          <div className="aq-logo"><span className="aq-logo__mark"><Icon name="spark" size={16} /></span>
+            <span>EvoSys Pro<small>Acquisition Control Center</small></span></div>
+          {ov.is_god && <NavGroup title="Master Control" items={MASTER_NAV} />}
+          <NavGroup title="Acquisition Operations" pre={ov.is_god ? OPS_NAV : [{ to: OPS, label: 'My Queue', icon: 'list', end: true }]} items={CLIENT_NAV}>
+            {(clients.is_god || clients.items.length > 1) && <div className="hb-client">
+              <label htmlFor="hb-client">Service company</label>
+              <select id="hb-client" aria-label="Acquisition client workspace" value={orgId || ''} onChange={e => onSelectOrg(e.target.value)}>
+                {!orgId && <option value="">Choose a client…</option>}
+                {clients.items.map(c => <option key={c.organization_id} value={c.organization_id}>{c.name}</option>)}
+              </select></div>}
+          </NavGroup>
+          <NavGroup title="Administration" items={ov.is_god ? SUPPORT_NAV : SUPPORT_NAV.filter(x => x.to !== `${OPS}/activity`)} startOpen={false}>
+          </NavGroup>
+          <nav className="aq-nav" style={{ marginTop: 'auto' }}><a href="/workspaces"><Icon name="back" />Return to Program Access</a></nav>
         </aside>
         <div className="aq-main">
           <header className="aq-top">
             <button className="aq-btn aq-btn--sm aq-top__menu" onClick={() => setOpen(true)} aria-label="Open navigation"><Icon name="menu" /></button>
-            <span className="aq-top__title">Acquisition Control Center</span>
+            <nav className="hb-crumbs" aria-label="Breadcrumb"><a href="/workspaces">Program Access</a><span>›</span>
+              <span className="hb-crumb-mid">Acquisition Control Center</span><span className="hb-crumb-mid">›</span><b>{page}</b></nav>
             <div className="aq-top__right">
-              {(clients.is_god || clients.items.length > 1) && <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700 }}>
-                Client
-                <select aria-label="Acquisition client workspace" value={orgId} onChange={e => onSelectOrg(e.target.value)}
-                  style={{ maxWidth: 240, padding: '8px 10px', border: '1px solid #c7b4ed', borderRadius: 8, background: '#fff', color: '#241444' }}>
-                  {clients.items.map(c => <option key={c.organization_id} value={c.organization_id}>{c.name}</option>)}
-                </select>
-              </label>}
-              {ov.is_god && <a className="aq-btn aq-btn--sm" href={`${OPS}/master`}>Master prospect pool</a>}
-              {!ov.is_god && <a className="aq-btn aq-btn--sm" href="/workspaces">Switch program</a>}
-              <span className="aq-me"><span className="aq-avatar">{initials(me)}</span>
-                <div><b>{me.split(' ')[0] || me}</b><span>{ov.is_god ? 'Owner' : 'Operator'}</span></div></span>
+              <span className={`hb-role ${ov.is_god ? '' : 'hb-role--op'}`}><Icon name={ov.is_god ? 'shield' : 'key'} size={14} />{{ owner: 'Owner', admin: 'EvoSys Admin', operator: 'Operator' }[clients.me?.access] || (ov.is_god ? 'Owner' : 'Operator')}</span>
+              {/* WHO IS SIGNED IN, exactly as the server reports it - never a first name alone. */}
+              <span className="aq-me" title={`Signed in as ${clients.me?.email || me}`}><span className="aq-avatar">{initials(clients.me?.name || me)}</span>
+                <div><b>{clients.me?.name || me}</b><span>{clients.me?.email || ''}</span></div></span>
             </div>
           </header>
-          <div className="aq-band">
-            <div><h1>Acquisition Control Center</h1><p>{ov.organization_name} • Lead Generation &amp; Appointment Setting</p></div>
-            <div className="aq-band__right">
-              <span className={`aq-badge ${p.paused ? 'aq-badge--paused' : ''}`}><Icon name={p.paused ? 'pause' : 'calendar'} size={15} />
-                {p.paused ? 'Paused' : ov.progress.started ? `Pilot day ${ov.progress.day} of 30` : 'Pilot not started'}</span>
-            </div>
-          </div>
-          <Suspense fallback={<Loading />}><Outlet /></Suspense>
+          {!ov.is_god && <div className="aq-page" style={{ paddingBottom: 0 }}><div className="aq-note aq-note--warn" style={{ marginBottom: 0 }}>
+            <b>Restricted workspace — signed in as {clients.me?.email || me}.</b> This login works only on the clients and tasks the EvoSys owner assigned it. The master prospect pool, client setup and other clients aren’t available here.
+            {' '}If you are the owner, <button type="button" className="aq-btn aq-btn--sm" onClick={async () => { const { logout } = await import('../../api/client'); await logout(); window.location.href = '/login?next=/acquisition-ops' }}>sign out of this login</button> and sign in with the owner account.</div></div>}
+          {!onMaster && orgId && loc.pathname !== OPS && <div className="aq-page" style={{ paddingBottom: 0 }}>
+            <div className="hb-strip"><span className="hb-strip__mark">{initials(ov.organization_name)}</span>
+              <div><b>{ov.organization_name} — Acquisition Operations</b>
+                <span>{p.offer_label || 'Service company'} · {(p.service_area || []).slice(0, 4).join(', ') || 'No service area yet'}</span></div>
+              <div className="hb-strip__right">
+                <span className={`aq-badge ${p.paused ? 'aq-badge--paused' : ''}`}><Icon name={p.paused ? 'pause' : 'calendar'} size={15} />
+                  {p.paused ? 'Paused' : ov.progress.started ? `Pilot day ${ov.progress.day} of 30` : 'Pilot not started'}</span>
+                <span className={`aq-badge ${p.readiness?.launch_ready ? '' : 'aq-badge--off'}`}>{p.readiness?.launch_ready ? 'Onboarding complete' : 'Onboarding draft'}</span>
+              </div></div></div>}
+          {needsClient ? <ChooseClient clients={clients} onSelectOrg={onSelectOrg} page={page} />
+            : <Suspense fallback={<Loading />}><Outlet /></Suspense>}
         </div>
       </div>
     </Ctx.Provider>
+  )
+}
+
+// The owner picks a client on purpose; nothing is pre-selected for them.
+function ChooseClient({ clients, onSelectOrg, page }) {
+  const items = clients.items || []
+  return (
+    <div className="aq-page">
+      <PageHeader eyebrow="Acquisition Operations" title={page} sub="Choose which service company to work on. Nothing is opened until you pick one." />
+      {items.length ? <div className="hb-cards">{items.map(c => (
+        <button key={c.organization_id} className="hb-ccard" style={{ textAlign: 'left', cursor: 'pointer', font: 'inherit', color: 'inherit' }} onClick={() => onSelectOrg(c.organization_id)}>
+          <div className="hb-ccard__top"><span className="hb-strip__mark" style={{ width: 36, height: 36 }}>{initials(c.name)}</span>
+            <div><b>{c.name}</b>{/^test\s/i.test(c.name || '') && <div className="hb-muted">TEST workspace — not counted in results</div>}</div></div>
+        </button>))}</div>
+        : <div className="aq-card"><p>No service companies yet.</p><a className="aq-btn aq-btn--primary" href={`${OPS}/clients?add=1`}>Add Service Company</a></div>}
+    </div>
   )
 }
 
@@ -180,84 +249,14 @@ function TargetRing({ booked, high }) {
   )
 }
 
-// God-only: EvoSys's master service-prospect pool and its hand-off to ONE
-// cleaning client at a time. Assigning never sends anything or starts a pilot.
-export function MasterPool() {
-  const { ov, orgId, reload } = useOps()
-  const [tab, setTab] = useState('available')
-  const [data, dErr, reloadData] = useLoad(ov.is_god ? `/god/acquisition/master/prospects?status=${tab}` : null)
-  const [chosen, setChosen] = useState([])
-  const [segment, setSegment] = useState('')
-  const [plan, setPlan] = useState(null)
-  const [result, setResult] = useState(null)
-  const [busy, setBusy] = useState(false)
-  const [fail, setFail] = useState('')
-  if (!ov.is_god) return <div className="aq-page"><div className="aq-err">Only the platform owner can open the master pool.</div></div>
-  const items = data?.items || []
-  const payload = { destination_org_id: orgId, segment: segment || null, prospect_ids: chosen }
-  const toggle = id => { setChosen(v => v.includes(id) ? v.filter(x => x !== id) : v.length >= 20 ? v : [...v, id]); setPlan(null); setResult(null) }
-  const run = async fn => { setBusy(true); setFail(''); try { await fn() } catch (e) { setFail(errText(e)) } finally { setBusy(false) } }
-  const preview = () => run(async () => setPlan(await api.post('/god/acquisition/master/assign/preview', payload)))
-  const assign = () => run(async () => { const r = await api.post('/god/acquisition/master/assign', payload); setResult(r); setPlan(null); setChosen([]); reloadData(); reload() })
-  const release = id => {
-    const reason = window.prompt('Why give this business back to the master pool?')
-    if (!reason) return
-    run(async () => { await api.post(`/god/acquisition/master/${id}/release`, { reason }); reloadData(); reload() })
-  }
-  const ready = plan && plan.decisions.length === chosen.length && plan.decisions.some(x => x.eligible)
-  const names = Object.fromEntries(items.map(x => [x.id, x.name]))
-  return (
-    <div className="aq-page">
-      <h1 className="aq-h1">Master prospect pool</h1>
-      <p className="aq-lede">EvoSys's own researched businesses. Each one goes to one cleaning client only, when you assign it. Assigning sends nothing and starts no pilot.</p>
-      <div className="aq-actions">
-        <div className="aq-tabs">{[['available', 'Available'], ['assigned', 'Assigned'], ['all', 'All']].map(([k, l]) => (
-          <button key={k} className={tab === k ? 'on' : ''} onClick={() => { setTab(k); setChosen([]); setPlan(null) }}>{l}</button>))}</div>
-        <a className="aq-btn aq-btn--sm" href={`${OPS}/import`}>Import a file</a>
-        <span className="aq-pill">{data ? `${data.total} ${tab === 'all' ? 'total' : tab}` : '…'}</span>
-      </div>
-      {dErr && <div className="aq-err">{errText(dErr)}</div>}
-      {fail && <div role="alert" className="aq-err">{fail}</div>}
-      {result && <div role="status" className="aq-ok">Assigned {result.assigned} to {ov.organization_name} · held back {result.refused} · emails sent {result.sent}</div>}
-      <section className="aq-card">
-        {!data ? <Loading /> : items.length ? (
-          <div style={{ maxHeight: 460, overflow: 'auto' }}>
-            <table className="aq-table"><thead><tr>{tab === 'available' && <th />}<th>Business</th><th>Type</th><th>Location</th><th>Contact</th><th>Source</th>{tab !== 'available' && <th>Client and result</th>}</tr></thead>
-              <tbody>{items.map(x => (
-                <tr key={x.id}>
-                  {tab === 'available' && <td><input type="checkbox" checked={chosen.includes(x.id)} onChange={() => toggle(x.id)} /></td>}
-                  <td><b>{x.name}</b><br /><small>{x.website || ''}</small></td>
-                  <td><small>{x.segment || x.industry || '—'}</small></td>
-                  <td><small>{[x.city, x.state].filter(Boolean).join(', ') || '—'}{x.geo !== 'eligible' ? ` (${x.geo})` : ''}</small></td>
-                  <td><small>{x.contact_name ? `${x.contact_name}${x.contact_title ? ', ' + x.contact_title : ''}` : ''}{x.email ? <><br />{x.email} {x.email_verified ? '(verified)' : '(not verified)'}</> : ''}{x.phone ? <><br />{x.phone}</> : ''}</small></td>
-                  <td><small>{x.source}{x.source_url ? <> · <a href={x.source_url} target="_blank" rel="noreferrer">link</a></> : ''}{x.researched_at ? <><br />{when(x.researched_at)}</> : ''}</small></td>
-                  {tab !== 'available' && <td><small>{x.assigned_to ? <>
-                    <b>{x.assigned_to}</b> by {x.assigned_by || '—'} {x.assigned_at ? when(x.assigned_at) : ''}<br />
-                    {x.client_outcome ? `${x.client_outcome.stage_label}${x.client_outcome.outreach_started ? ' · contacted' : ' · not contacted'}${x.client_outcome.appointment ? ' · appointment' : ''}${x.client_outcome.won ? ' · won' : ''}` : ''}
-                    {x.client_outcome && !x.client_outcome.outreach_started && <><br /><button className="aq-btn aq-btn--sm" disabled={busy} onClick={() => release(x.id)}>Release</button></>}
-                  </> : 'Available'}</small></td>}
-                </tr>))}</tbody></table>
-          </div>) : <div className="aq-empty">{tab === 'available' ? 'No available businesses. Import a researched file to fill the pool.' : 'Nothing here yet.'}</div>}
-      </section>
-      {tab === 'available' && !!items.length && (
-        <section className="aq-card" style={{ marginTop: 14 }}>
-          <h2>Assign {chosen.length} to {ov.organization_name}</h2>
-          <p className="aq-lede">Switch the client at the top to assign to a different company.</p>
-          <div className="aq-field"><label htmlFor="aq-mseg">Cleaning segment</label>
-            <select id="aq-mseg" value={segment} onChange={e => { setSegment(e.target.value); setPlan(null) }}>
-              <option value="">Use each business's own type</option>
-              {(ov.segments || []).map(x => <option key={x.key} value={x.key}>{x.label}</option>)}</select></div>
-          <div className="aq-actions"><button className="aq-btn" disabled={!chosen.length || busy} onClick={preview}>Check fit ({chosen.length})</button>
-            {plan && <button className="aq-btn aq-btn--primary" disabled={!ready || busy} onClick={assign}>Assign the ones that fit. Nothing is sent.</button>}</div>
-          {plan && plan.decisions.map(x => (
-            <div className="aq-row" key={x.prospect_id}><div className="aq-row__main"><b>{names[x.prospect_id] || x.prospect_id}</b>
-              <span>{x.eligible ? 'Fits' : 'Held back: ' + (x.refused_because || []).join(', ').replace(/_/g, ' ')}{(x.warnings || []).length ? ' · note: ' + x.warnings.join(', ').replace(/_/g, ' ') : ''}</span></div></div>))}
-        </section>)}
-    </div>
-  )
+export function ControlCenter() {
+  const { ov } = useOps()
+  const loc = useLocation()
+  if (loc.pathname === OPS) return ov.is_god ? <MasterOverview /> : <OperatorQueue />
+  return <ClientControlCenter />
 }
 
-export function ControlCenter() {
+function ClientControlCenter() {
   const { ov } = useOps()
   const f = ov.client_funnel, all = ov.funnel, t = ov.targets
   const checks = [
@@ -359,7 +358,7 @@ function ProspectDetail({ x }) {
         <div><h2 style={{ margin: 0 }}>{x.business_name}</h2><span style={{ color: 'var(--aq-sub)', fontSize: 13 }}>{[x.segment_label, x.city].filter(Boolean).join(' • ')}</span></div>
         <span style={{ marginLeft: 'auto' }}>{x.score != null ? <span className="aq-score">Score: {x.score}</span> : <span className="aq-pill">Not scored</span>}</span>
       </div>
-      <div className="aq-tabs">{[['overview', 'Overview'], ['signals', `Signals (${x.evidence.length})`], ['contacts', 'Contacts'], ['email', 'Email'], ['actions', 'Actions']].map(([k, l]) => (
+      <div className="aq-tabs">{[['overview', 'Overview'], ['signals', `Signals (${x.evidence.length})`], ['contacts', 'Contacts'], ['email', 'Email'], ['schedule', 'Schedule'], ['actions', 'Actions']].map(([k, l]) => (
         <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>))}</div>
       {tab === 'overview' && (
         <div className="aq-grid aq-two">
@@ -403,16 +402,132 @@ function ProspectDetail({ x }) {
       )}
       {tab === 'contacts' && <LocationForm x={x} />}
       {tab === 'email' && <EmailTab x={x} />}
+      {tab === 'schedule' && <ScheduleTab x={x} />}
       {tab === 'actions' && (
         <div className="aq-actions">
           <select value={stage} onChange={e => setStage(e.target.value)}><option value="">Move to stage…</option>
-            {ov.stages.filter(s => !['contacted', 'replied'].includes(s.key)).map(s => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
+            {ov.stages.filter(s => !['contacted', 'replied', 'appointment_booked'].includes(s.key)).map(s => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
           <input placeholder="Note / reason (required for Interested and Not a fit)" style={{ flex: 1, minWidth: 220 }} value={note} onChange={e => setNote(e.target.value)} />
           <button className="aq-btn aq-btn--sm aq-btn--primary" disabled={!stage} onClick={move}>Move</button>
-          <small style={{ color: 'var(--aq-sub)', width: '100%' }}>Contacted and Replied are recorded from real messages only.</small>
+          <small style={{ color: 'var(--aq-sub)', width: '100%' }}>Contacted and Replied are recorded from real messages only. Appointments are booked on the Schedule tab, onto the client’s real calendar.</small>
         </div>
       )}
       {fail && <div className="aq-err">{fail}</div>}
+    </div>
+  )
+}
+
+// Book (or move) a real appointment on the CLIENT's connected calendar.
+function ScheduleTab({ x }) {
+  const { orgId, reload } = useOps()
+  const [cal] = useLoad(`/acquisition-ops/${orgId}/calendar`)
+  const today = new Date()
+  const iso = d => d.toISOString().slice(0, 10)
+  const [day, setDay] = useState(iso(new Date(today.getTime() + 864e5)))
+  const [slots, setSlots] = useState(null)
+  const [slot, setSlot] = useState('')
+  const [agreed, setAgreed] = useState(false)
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [fail, setFail] = useState(null)
+  const [done, setDone] = useState(null)
+  const booked = x.stage === 'appointment_booked'
+  const canBook = x.stage === 'interested'
+  const look = async () => {
+    setFail(null); setSlots(null); setSlot('')
+    try { setSlots(await api.get(`/acquisition-ops/${orgId}/prospects/${x.id}/slots?day=${day}`)) } catch (e) { setFail(errText(e)) }
+  }
+  const go = async () => {
+    setBusy(true); setFail(null)
+    try {
+      const r = booked ? await api.post(`/acquisition-ops/${orgId}/prospects/${x.id}/reschedule`, { slot, note })
+        : await api.post(`/acquisition-ops/${orgId}/prospects/${x.id}/book`, { slot, note, confirmed_with_prospect: agreed })
+      setDone(r); setSlots(null); reload()
+    } catch (e) { setFail(errText(e)) } finally { setBusy(false) }
+  }
+  if (!canBook && !booked) return <div className="aq-empty">Appointments are booked once the prospect is <b>Interested</b>. Current stage: {x.stage_label}.</div>
+  return (
+    <div>
+      {cal && !cal.ready && <div className="aq-note aq-note--warn">{cal.status_label}. <a href={`${OPS}/calendar`}>Open booking setup →</a></div>}
+      {booked && x.appointment && <div className="aq-note">Booked for <b>{when(x.appointment.time)}</b> · {x.appointment.calendar_synced ? 'on the client’s calendar' : 'calendar not confirmed'}. Pick a new time to reschedule the same appointment.</div>}
+      {done && <div className="aq-ok">{done.status === 'booked' ? 'Booked and on the client’s calendar' : 'Rescheduled'} — {when(done.booked_time)}. Nothing was emailed.</div>}
+      <div className="aq-actions">
+        <input type="date" aria-label="Day" value={day} min={iso(today)} onChange={e => setDay(e.target.value)} />
+        <button className="aq-btn aq-btn--sm" disabled={!cal?.ready} onClick={look}>Show real free times</button>
+      </div>
+      {slots && (slots.slots.length ? <div className="aq-actions">{slots.slots.map(t => (
+        <button key={t} className={`aq-btn aq-btn--sm ${slot === t ? 'aq-btn--primary' : ''}`} onClick={() => setSlot(t)}>{clock(t)}</button>))}</div>
+        : <p className="hb-muted">No free times that day{slots.reason ? ` — ${slots.reason}` : ''}.</p>)}
+      {slots && <p className="hb-muted">From {slots.calendar_of}’s connected calendar ({slots.timezone}), within the client’s booking windows.</p>}
+      {slot && <div style={{ marginTop: 10 }}>
+        {!booked && <label className="aq-checks"><label><input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} />The prospect agreed to {when(slot)}</label></label>}
+        <div className="aq-field"><input placeholder="Note for the record (optional)" value={note} onChange={e => setNote(e.target.value)} /></div>
+        <button className="aq-btn aq-btn--primary" disabled={busy || (!booked && !agreed)} onClick={go}>{busy ? 'Writing to the calendar…' : booked ? 'Move appointment' : 'Book on the client’s calendar'}</button>
+      </div>}
+      {fail && <div className="aq-err">{fail}</div>}
+    </div>
+  )
+}
+
+// Owner: where EvoSys books this client's appointments.
+export function CalendarSetup() {
+  const { ov, orgId } = useOps()
+  const [cfg, err, reload] = useLoad(`/acquisition-ops/${orgId}/calendar`)
+  const [f, setF] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [fail, setFail] = useState(null)
+  const [toast, say] = useToast()
+  useEffect(() => { if (cfg && !f) setF({ ...cfg, booking_user_id: cfg.booking_user?.id || '', windows: Object.fromEntries(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map(d => [d, (cfg.booking_windows[d] || [])[0] || ['', '']])) }) }, [cfg])
+  if (err) return <div className="aq-page"><div className="aq-err">{errText(err)}</div></div>
+  if (!cfg || !f) return <div className="aq-page"><Loading /></div>
+  const set = k => e => setF({ ...f, [k]: e.target.value })
+  const save = async () => {
+    setBusy(true); setFail(null)
+    const windows = Object.fromEntries(Object.entries(f.windows).filter(([, r]) => r[0] && r[1]).map(([d, r]) => [d, [r]]))
+    try {
+      await api.put(`/acquisition-ops/${orgId}/calendar`, { booking_user_id: f.booking_user_id || null, timezone: f.timezone, appointment_minutes: f.appointment_minutes,
+        min_notice_hours: f.min_notice_hours ?? '', buffer_minutes: f.buffer_minutes ?? '', booking_windows: windows, meeting_location: f.meeting_location || '',
+        booking_contact: f.booking_contact || '', reschedule_rules: f.reschedule_rules || '', confirmation_pref: f.confirmation_pref })
+      say('Saved'); reload()
+    } catch (e) { setFail(errText(e)) } finally { setBusy(false) }
+  }
+  const DAYS = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']]
+  return (
+    <div className="aq-page">{toast}
+      <PageHeader eyebrow="Administration" title="Booking & Calendar" sub={`Where EvoSys books ${ov.organization_name}’s appointments. Only real free times on the client’s connected calendar are ever offered.`} />
+      <div className={`aq-note ${cfg.ready ? '' : 'aq-note--warn'}`}><b>{cfg.ready ? 'Ready.' : 'Not ready.'}</b> {cfg.status_label}</div>
+      <div className="aq-grid aq-two">
+        <section className="aq-card"><h2>Appointment destination</h2>
+          <div className="aq-field"><label htmlFor="c-u">Client login that receives appointments</label>
+            <select id="c-u" value={f.booking_user_id} onChange={set('booking_user_id')} disabled={!ov.is_god}><option value="">Choose…</option>
+              {cfg.candidates.map(u => <option key={u.id} value={u.id}>{u.name} — {u.calendar_connected ? 'calendar connected' : 'no calendar yet'}</option>)}</select></div>
+          {!cfg.candidates.length && <p className="hb-muted">This client has no login yet. Invite one from the Service Companies Directory; they connect their Google or Microsoft calendar after signing in.</p>}
+          <div className="aq-grid aq-two">
+            <div className="aq-field"><label htmlFor="c-tz">Time zone</label><input id="c-tz" value={f.timezone || ''} onChange={set('timezone')} /></div>
+            <div className="aq-field"><label htmlFor="c-m">Meeting length (min)</label><input id="c-m" inputMode="numeric" value={f.appointment_minutes || ''} onChange={set('appointment_minutes')} /></div>
+            <div className="aq-field"><label htmlFor="c-n">Minimum notice (hours)</label><input id="c-n" inputMode="numeric" value={f.min_notice_hours ?? ''} onChange={set('min_notice_hours')} /></div>
+            <div className="aq-field"><label htmlFor="c-b">Buffer between visits (min)</label><input id="c-b" inputMode="numeric" value={f.buffer_minutes ?? ''} onChange={set('buffer_minutes')} /></div>
+          </div>
+          <p className="hb-muted">Bookings are placed in {cfg.slot_engine_timezone} (the platform scheduler’s working zone).</p>
+        </section>
+        <section className="aq-card"><h2>Booking windows</h2>
+          <p className="hb-muted">Leave a day blank to allow any free time the calendar shows.</p>
+          {DAYS.map(([d, l]) => <div className="aq-actions" key={d} style={{ marginTop: 6 }}><b style={{ width: 40 }}>{l}</b>
+            <input type="time" aria-label={`${l} from`} value={f.windows[d][0]} onChange={e => setF({ ...f, windows: { ...f.windows, [d]: [e.target.value, f.windows[d][1]] } })} />
+            <span>to</span><input type="time" aria-label={`${l} to`} value={f.windows[d][1]} onChange={e => setF({ ...f, windows: { ...f.windows, [d]: [f.windows[d][0], e.target.value] } })} /></div>)}
+        </section>
+      </div>
+      <section className="aq-card" style={{ marginTop: 14 }}><h2>Meeting details</h2>
+        <div className="aq-grid aq-two">
+          <div className="aq-field"><label htmlFor="c-l">Meeting location</label><input id="c-l" placeholder="e.g. At the prospect's property" value={f.meeting_location || ''} onChange={set('meeting_location')} /></div>
+          <div className="aq-field"><label htmlFor="c-c">Booking contact at the client</label><input id="c-c" value={f.booking_contact || ''} onChange={set('booking_contact')} /></div>
+          <div className="aq-field"><label htmlFor="c-r">Rescheduling rules</label><textarea id="c-r" value={f.reschedule_rules || ''} onChange={set('reschedule_rules')} /></div>
+          <div className="aq-field"><label htmlFor="c-p">Confirmation</label><select id="c-p" value={f.confirmation_pref} onChange={set('confirmation_pref')}>
+            <option value="calendar_only">Calendar event only</option><option value="calendar_and_email">Calendar event + EvoSys email</option></select></div>
+        </div>
+        {fail && <div className="aq-err">{fail}</div>}
+        {ov.is_god ? <button className="aq-btn aq-btn--primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save booking setup'}</button> : <p className="hb-muted">Only the EvoSys owner changes booking setup.</p>}
+      </section>
     </div>
   )
 }
@@ -677,18 +792,54 @@ export function OpsSettings() {
           <small style={{ color: 'var(--aq-sub)' }}>Practice prospects can only be emailed at: {(ov.sending.test_recipients || []).join(', ') || 'none set'}</small>
         </section>
       </div>
-      {ov.is_god && (
-        <section className="aq-card" style={{ marginTop: 14 }}><h2>Operators (owner only)</h2>
-          <p className="aq-lede" style={{ marginBottom: 8 }}>Operators run this pilot’s screens. It is not God Mode and opens nothing else.</p>
-          {ov.operators.length ? ov.operators.map(o => (
-            <div className="aq-row" key={o.user_id}><div className="aq-row__main"><b>{o.name}</b><span>{o.email}</span></div>
-              <button className="aq-btn aq-btn--sm" onClick={() => run(() => api.delete(`/god/acquisition/${orgId}/operators/${o.user_id}`), 'Access removed')}>Remove</button></div>
-          )) : <div className="aq-empty">No operators yet.</div>}
-          <div className="aq-actions"><input placeholder="Login email" value={email} onChange={e => setEmail(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
-            <button className="aq-btn aq-btn--primary aq-btn--sm" disabled={!email.trim()} onClick={() => run(() => api.post(`/god/acquisition/${orgId}/operators`, { email }), 'Operator access granted').then(() => setEmail(''))}>Grant operator access</button></div>
-        </section>
-      )}
+      {ov.is_god && <WorkerAccess />}
     </div>
+  )
+}
+
+// Owner: who works this client's acquisition, and exactly what each may do.
+function WorkerAccess() {
+  const { ov, orgId, reload } = useOps()
+  const [meta] = useLoad('/god/acquisition/worker-permissions')
+  const [email, setEmail] = useState('')
+  const [preset, setPreset] = useState('researcher')
+  const [edit, setEdit] = useState({})
+  const [fail, setFail] = useState(null)
+  const [toast, say] = useToast()
+  const run = async (fn, ok) => { setFail(null); try { await fn(); say(ok); reload() } catch (e) { setFail(errText(e)) } }
+  const perms = meta?.permissions || []
+  const toggle = (uid, cur, k) => {
+    const now = edit[uid] || cur
+    setEdit({ ...edit, [uid]: now.includes(k) ? now.filter(x => x !== k) : [...now, k] })
+  }
+  return (
+    <section className="aq-card" style={{ marginTop: 14 }}>{toast}
+      <h2>Team &amp; VA access for {ov.organization_name} (owner only)</h2>
+      <p className="hb-muted" style={{ marginTop: 0 }}>Each worker signs in with their own login and sees only this client’s work, limited to what you tick. They never see the master pool, other clients, onboarding or God Mode. Every action they take is logged.</p>
+      {fail && <div className="aq-err">{fail}</div>}
+      {ov.operators.length ? ov.operators.map(o => {
+        const cur = edit[o.user_id] || o.permissions
+        const dirty = !!edit[o.user_id]
+        return (
+          <div key={o.user_id} style={{ borderTop: '1px solid var(--aq-line)', padding: '12px 0' }}>
+            <div className="aq-row" style={{ border: 0, padding: 0 }}><div className="aq-row__main"><b>{o.name}</b><span>{o.email}{o.legacy_full_access ? ' · full access (granted before permissions existed)' : ''}</span></div>
+              <button className="aq-btn aq-btn--sm" onClick={() => run(() => api.delete(`/god/acquisition/${orgId}/operators/${o.user_id}`), 'Access removed')}>Remove access</button></div>
+            <div className="aq-checks" style={{ marginTop: 8 }}>{perms.map(pm => (
+              <label key={pm.key} title={pm.hint}><input type="checkbox" checked={cur.includes(pm.key)} disabled={pm.key === 'view_queue'} onChange={() => toggle(o.user_id, cur, pm.key)} />{pm.label}</label>))}</div>
+            {dirty && <div className="aq-actions"><button className="aq-btn aq-btn--primary aq-btn--sm" onClick={() => run(async () => { await api.put(`/god/acquisition/${orgId}/operators/${o.user_id}`, { permissions: cur }); setEdit({ ...edit, [o.user_id]: undefined }) }, 'Permissions saved')}>Save permissions</button>
+              <button className="aq-btn aq-btn--sm" onClick={() => setEdit({ ...edit, [o.user_id]: undefined })}>Cancel</button></div>}
+          </div>)
+      }) : <div className="aq-empty">No workers on this client yet. You run everything yourself.</div>}
+      <div className="hb-section-title">Add a worker</div>
+      <div className="aq-actions">
+        <input placeholder="Their EvoSys login email" value={email} onChange={e => setEmail(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
+        <select aria-label="Role" value={preset} onChange={e => setPreset(e.target.value)}>
+          {[['researcher', 'Prospect researcher'], ['outreach', 'Outreach operator'], ['responder', 'Response / follow-up operator'], ['setter', 'Appointment setter'], ['general', 'General acquisition operator']].map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+        <button className="aq-btn aq-btn--primary aq-btn--sm" disabled={!email.trim() || !meta}
+          onClick={() => run(async () => { await api.post(`/god/acquisition/${orgId}/operators`, { email, permissions: meta.presets[preset] }); setEmail('') }, 'Worker added')}>Grant access</button>
+      </div>
+      <small className="hb-muted">The person needs an existing EvoSys login that isn’t this client’s own. Adjust the ticks afterwards.</small>
+    </section>
   )
 }
 
