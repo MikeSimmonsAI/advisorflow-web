@@ -150,17 +150,23 @@ export default function LeadScraper() {
     const leads = results.filter((_, i) => sel.has(i))
     setImporting(true); setErr('')
     try {
-      const data = await api.post('/scraper/import', {
-        leads,
-        list_name: listName || 'Lead Scraper Import',
-        // Org ids are strings (e.g. "org-god-platform"); parseInt turned them into
-        // NaN, which serialized to null and lost the target org entirely.
-        target_org_id: String(targetOrgId),
-        job_id: searchMeta?.job_id || undefined,
-      })
+      // #470 Stage D: results are STAGED in Lead Intelligence (the canonical
+      // path) with the chosen organization recorded as the intended destination.
+      // Nothing is written to that organization until it is routed there.
+      const counts = {}
+      let jobId = searchMeta?.job_id || undefined
+      for (let i = 0; i < leads.length; i += 60) {
+        const r = await api.post('/scraper/stage', {
+          results: leads.slice(i, i + 60), job_id: jobId,
+          destination_org_id: String(targetOrgId),
+        })
+        jobId = r.job_id || jobId
+        Object.entries(r.counts || {}).forEach(([k, v]) => { counts[k] = (counts[k] || 0) + (typeof v === 'number' ? v : 0) })
+      }
+      const data = { staged: true, counts, list_name: listName || 'Lead Scraper Import' }
       setImportResult(data)
       setSel(new Set())
-    } catch (ex) { setErr(ex?.detail || 'Import failed.') }
+    } catch (ex) { setErr(ex?.detail || 'Staging failed.') }
     finally { setImporting(false) }
   }
 
@@ -347,23 +353,17 @@ export default function LeadScraper() {
 
           {/* Import panel */}
           <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 10, padding: 20 }}>
-            <h3 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 700 }}>Import to Leads</h3>
+            <h3 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 700 }}>Stage for review</h3>
             <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--text-muted)' }}>
               {sel.size} selected · duplicates skipped automatically
             </p>
 
             {importResult && (
               <div style={{ background: 'rgba(34,197,94,.1)', border: '1px solid rgba(34,197,94,.3)', borderRadius: 8, padding: '10px 16px', marginBottom: 14, fontSize: 14, color: '#22c55e' }}>
-                ✅ Imported <strong>{importResult.imported}</strong> leads to <em>"{importResult.list_name}"</em>.
-                {importResult.skipped > 0 && <> {importResult.skipped} duplicate{importResult.skipped !== 1 ? 's' : ''} skipped.</>}
-                {importResult.suppressed > 0 && <> {importResult.suppressed} on the organization's suppression / DNC list skipped.</>}
-                {importResult.qualification && (
-                  <div style={{ fontSize: 12, marginTop: 4 }}>
-                    Qualification ({importResult.qualification.channel}):{' '}
-                    {Object.entries(importResult.qualification.buckets || {}).map(([b, c]) => `${b.replace(/_/g, ' ').toLowerCase()} ${c}`).join(' · ')}
-                  </div>
-                )}
-                <a href="/leads" style={{ color: '#22c55e', marginLeft: 10, fontWeight: 600 }}>View Leads →</a>
+                ✅ Staged for review in Lead Intelligence:{' '}
+                {Object.entries(importResult.counts || {}).filter(([, v]) => v).map(([k, v]) => `${k.replace(/_/g, ' ')} ${v}`).join(' · ') || 'nothing new'}.
+                {' '}Nothing was added to the organization or sent.
+                <a href="/god/lead-intelligence?tab=scraper" style={{ color: '#22c55e', marginLeft: 10, fontWeight: 600 }}>Review and route →</a>
               </div>
             )}
 
@@ -387,7 +387,7 @@ export default function LeadScraper() {
               </div>
               <button onClick={handleImport} disabled={importing || !sel.size || !targetOrgId}
                 style={{ ...BTN('#22c55e', { opacity: importing || !sel.size || !targetOrgId ? .6 : 1, padding: '8px 22px', alignSelf: 'flex-end' }) }}>
-                {importing ? 'Importing...' : `Import ${sel.size} Lead${sel.size !== 1 ? 's' : ''}`}
+                {importing ? 'Staging...' : `Stage ${sel.size} for review`}
               </button>
             </div>
           </div>

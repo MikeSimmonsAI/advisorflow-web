@@ -44,27 +44,5 @@ def import_from_google_contacts(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_import_stage),
 ):
-    """
-    Kept for old clients. Google Contacts no longer writes leads directly: it
-    stages ONE Universal Intake batch (the canonical importer) and returns it,
-    so matching, dedupe, review and rollback are the same as for any file.
-    """
-    from app.services import google_contacts_service as GC
-    from app.services.intake import audit
-    from app.services.intake import context as CTX
-    from app.services.intake import engine as ENG
-    ctx = CTX.resolve(db, current_user)
-    try:
-        b = GC.create_intake_batch_from_google(db, current_user, ctx)
-    except (ValueError, ENG.IntakeError) as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-    audit.record(db, ctx, "intake.file_uploaded", b.id,
-                 {"filename": b.source_filename, "rows": b.original_row_count,
-                  "source": b.source_label, "source_detail": b.source_detail,
-                  "batch_code": b.batch_code})
-    db.commit()
-    return {"staged": True, "imported": 0, "batch_id": b.id, "batch_code": b.batch_code,
-            "rows": b.original_row_count, "next": "/imports/%s" % b.id,
-            "message": "Google Contacts staged for review in the Import Center. Nothing has been "
-                       "imported yet."}
+    """RETIRED (#470 Stage D). Kept so old clients get a clear answer instead of a 404."""
+    raise HTTPException(status_code=410, detail='Import Google Contacts from Import Center (/imports/start, then Google Contacts). Nothing was imported.')

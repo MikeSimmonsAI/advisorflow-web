@@ -260,7 +260,7 @@ import SalesImplementations from './pages/SalesImplementations'
 import Activate from './pages/Activate'
 import ForgotPassword from './pages/ForgotPassword'
 import LeadScraper from './pages/LeadScraper'
-import ImportBatches from './pages/ImportBatches'
+// ImportBatches page retired (#470 Stage D): /import-batches redirects to /imports
 import ImportBatchReview from './pages/ImportBatchReview'
 // UNIVERSAL INTAKE: the guided importer and its batch ledger. The legacy
 // /import-batches screens stay reachable for batches created before it.
@@ -1524,7 +1524,8 @@ export default function App() {
         <Route path="/leads" element={<ProtectedRoute feature="leads"><Leads /></ProtectedRoute>} />
         <Route path="/leads/:leadId" element={<ProtectedRoute><LeadDetail /></ProtectedRoute>} />
         <Route path="/contacts" element={<ProtectedRoute feature="imports" requireAdmin><Contacts /></ProtectedRoute>} />
-        <Route path="/import-batches" element={<ProtectedRoute feature="imports" requireAdmin><ImportBatches /></ProtectedRoute>} />
+        {/* #470 Stage D: the old batch list is retired; Import Center lists every import. */}
+        <Route path="/import-batches" element={<Navigate to="/imports" replace />} />
         <Route path="/import-batches/:batchId" element={<ProtectedRoute requireAdmin><ImportBatchReview /></ProtectedRoute>} />
         <Route path="/imports" element={<ProtectedRoute feature="imports" requireAdmin><ImportLedger /></ProtectedRoute>} />
         {/* #470 Stage B: choose the destination first; Sales and Acquisition business imports. Server checks access. */}

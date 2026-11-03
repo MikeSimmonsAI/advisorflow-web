@@ -102,3 +102,19 @@ Stage B refused a Sales row if the business was in a cleaning customer's pipelin
 * The 15 FB-CLEAN Sales prospects now have `source_record_id` filled from their own source text: 15 filled, 0 conflicts, all other fields unchanged.
 * Their notes and intro drafts were attached from the package's `Eligible_15_Contacts.csv` (import EVOSYSSA-20261103-093240): 15 matched, 0 created, one draft each. A second run added nothing.
 * The 23 location-pending and 5 excluded businesses were not staged in production. No messages were sent and no one was enrolled.
+
+## Stage D: old entry points retired
+
+How usage was checked: the code that calls each path, the production request logs (Render keeps about 7 days, from Oct 27) and the production database (which shows whether a path ever produced anything).
+
+| Entry point | Evidence | Now |
+|---|---|---|
+| `POST /leads/upload/preview`, `/confirm` | caller is a hidden panel in `Leads.jsx` that never opens; no old-style batch has ever existed in production | **410**, pointing to Import Center (`/imports/start`). The permission check still runs first. |
+| `POST /import-batches` (start an import) | the old list page is reachable by URL only; 0 old-style batches in production | **410**. Viewing, rows, archive and delete remain for any existing batch, behind #477's guard. `/import-batches` in the app redirects to `/imports`. |
+| `POST /google-contacts/import` | only the hidden panel; Import Center has its own Google source (`/intake/batches/google-contacts`) | **410**. Google isn't read. |
+| `POST /scraper/import` (wrote leads straight into an organization) | the owner's Classic Scraper; has never created a lead in production | **410**. Classic Scraper now **stages** through `POST /scraper/stage` (the canonical Lead Intelligence path), with the chosen organization recorded as the intended destination. |
+| `POST /crm/inbound/{org_id}` | 1 credential, on an inactive test organization | **Kept for compatibility, now through the canonical engine.** Same URL, credentials and response keys, but records are **staged** as an Import Center batch for that organization (`created: 0`, `staged: N`, `batch_id`). Nothing becomes a lead until a person commits it. |
+
+Dead code removed: the repo-root `leads_router.py` (not mounted) and `import_service.import_leads_from_rows` (no callers). `import_leads_from_excel` stays as tested library code. It no longer has a live caller: its only route was the retired preview.
+
+SCI is unchanged (`/program/intake/*`, SCI profile, its own loader). So is the cleaning task's Acquisition and Program Access work (#452 / #474).

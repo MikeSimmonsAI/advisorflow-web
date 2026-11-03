@@ -435,25 +435,6 @@ def test_scraper_search_maps_industry_records_destination_and_never_calls_out(
     assert client.post("/scraper/search", json={}, headers=gh).status_code == 422
 
 
-def test_scraper_import_normalizes_dedupes_suppresses_and_qualifies(client, db_session, gh):
-    org = _org(db_session, "Import Co")
-    _suppress(db_session, org, "+12145550105")
-    db_session.add(Lead(organization_id=org.id, first_name="Existing", phone="12145550102"))
-    db_session.commit()
-    r = client.post("/scraper/import", headers=gh, json={"target_org_id": org.id, "leads": [
-        {"place_id": "a", "name": "Acme Roofing", "phone": "(214) 555-0101"},
-        {"place_id": "b", "name": "Acme Again", "phone": "214.555.0101"},     # in-request dup
-        {"place_id": "c", "name": "Beta", "phone": "214-555-0102"},          # existing (E.164)
-        {"place_id": "d", "name": "Suppressed", "phone": "2145550105"},      # suppression list
-    ]})
-    assert r.status_code == 201, r.text
-    out = r.json()
-    assert out["imported"] == 1 and out["skipped"] == 2 and out["suppressed"] == 1
-    lead = db_session.query(Lead).filter(Lead.first_name == "Acme").one()
-    assert lead.phone == "(214) 555-0101"      # stored as before: as given
-    assert lead.sms_consent in (False, None)
-    assert out["qualification"]["channel"] == "voice"
-    assert sum(out["qualification"]["buckets"].values()) == 1
 
 
 # ═══ nav contract (static) ══════════════════════════════════════════════════
@@ -538,14 +519,6 @@ def test_email_suppression_blocks_routing(client, db_session, gh):
     assert LR.suppression_reason(db_session, dest.id, None, "owner@mail.test") == "email_suppressed"
 
 
-def test_scraper_import_honours_real_suppression_format(client, db_session, gh):
-    org = _org(db_session, "Import Co")
-    _suppress(db_session, org, "214-555-0188")
-    r = client.post("/scraper/import", headers=gh, json={"target_org_id": org.id, "leads": [
-        {"place_id": "s", "name": "Stopped", "phone": "(214) 555-0188"}]})
-    assert r.status_code == 201, r.text
-    assert r.json()["suppressed"] == 1 and r.json()["imported"] == 0
-    assert db_session.query(Lead).filter(Lead.organization_id == org.id).count() == 0
 
 
 def test_search_escapes_like_wildcards(client, db_session, gh):
@@ -583,3 +556,14 @@ def test_route_analysis_failure_rolls_back_and_retry_makes_one_batch(
                     json={"prospect_ids": [pid], "destination_org_id": dest.id})
     assert r.status_code == 400                           # already routed, no second batch
     assert db_session.query(ImportBatch).count() == 1
+
+
+def test_direct_scraper_import_is_retired_and_writes_nothing(client, db_session, gh):
+    """#470 Stage D: /scraper/import wrote leads straight into an organization.
+    Results now go through /scraper/stage (the Lead Intelligence pool)."""
+    from app.models.models import Lead
+    before = db_session.query(Lead).count()
+    r = client.post("/scraper/import", headers=gh, json={"target_org_id": "anything", "leads": [
+        {"place_id": "p-retired-1", "name": "Retired Path Co", "phone": "+12145550999"}]})
+    assert r.status_code == 410 and "/scraper/stage" in r.json()["detail"]
+    assert db_session.query(Lead).count() == before

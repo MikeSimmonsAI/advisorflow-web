@@ -116,30 +116,8 @@ async def upload_batch(
     db: Session = Depends(get_db),
     user=Depends(require_import_leads),
 ):
-    ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in ALLOWED_EXT:
-        raise HTTPException(400, f"Unsupported file type '{ext}'. Allowed: {', '.join(ALLOWED_EXT)}")
-    batch_id = gen_uuid()
-    tmp_path = None
-    try:
-        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-            shutil.copyfileobj(file.file, tmp)
-            tmp_path = tmp.name
-        batch = ImportBatch(
-            id=batch_id, organization_id=user.organization_id,
-            display_name=display_name, source_type=ext.lstrip("."),
-            source_filename=file.filename,
-            status=ImportBatchStatus.UPLOADING,
-            created_by_id=user.id, created_at=datetime.now(timezone.utc),
-        )
-        db.add(batch)
-        db.commit()
-        stage_batch(batch_id, user.organization_id, tmp_path, ext.lstrip("."), db)
-        db.refresh(batch)
-        return _batch_dict(batch)
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
+    """RETIRED (#470 Stage D). Kept so old clients get a clear answer instead of a 404."""
+    raise HTTPException(status_code=410, detail='Starting an import here is retired. Use Import Center (/imports/start). Existing batches here can still be viewed.')
 
 
 @router.get("/{batch_id}")
