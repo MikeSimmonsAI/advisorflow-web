@@ -67,6 +67,10 @@ class JobName:
     # Every 2 minutes in the backend. Real messages stay off unless
     # AI_OPERATIONS_LIVE_SEND is set (app/jobs/run_ai_workforce_worker.py).
     AI_WORKFORCE_WORKER = "ai_workforce_worker"
+    # #452 Harvey AI workforce for Acquisition: one bounded pass every 5
+    # minutes, only while the owner has it Running. Drafts, research and
+    # classification only - it never sends, texts or calls anyone.
+    ACQUISITION_WORKFORCE = "acquisition_workforce_loop"
 
     # Render cron SERVICES. Separate names on purpose, even where the work
     # overlaps a loop above: cadence runs hourly in the web dyno AND daily as a
@@ -114,6 +118,7 @@ LOOP_JOB_NAMES = (
     JobName.PROGRAM_SLA,
     JobName.WEB_PUSH,
     JobName.AI_WORKFORCE_WORKER,
+    JobName.ACQUISITION_WORKFORCE,
 )
 
 ALL_JOB_NAMES = LOOP_JOB_NAMES + CRON_JOB_NAMES
@@ -135,6 +140,7 @@ EXPECTED_INTERVAL_MINUTES = {
     JobName.PROGRAM_SLA: 2,
     JobName.WEB_PUSH: 60,                 # checks in hourly when idle; sends every 20s when busy
     JobName.AI_WORKFORCE_WORKER: 2,
+    JobName.ACQUISITION_WORKFORCE: 5,
     JobName.CADENCE_CRON: 24 * 60,        # render.yaml: "0 14 * * *"
     JobName.EMAIL_POLLER: 5,              # render.yaml: "*/5 * * * *"
     # ai_conversation_cron is RETIRED (see RETIRED_JOB_NAMES): no interval, so

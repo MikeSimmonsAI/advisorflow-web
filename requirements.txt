@@ -44,3 +44,4 @@ pywebpush==2.0.3
 py-vapid==1.9.2
 http-ece==1.2.1
 phonenumbers>=8.13,<9
+dnspython==2.7.0

@@ -248,3 +248,96 @@ class AcquisitionDiscoveryRun(Base):
     error = Column(String(500), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     finished_at = Column(DateTime, nullable=True)
+
+
+# ── HARVEY AI WORKFORCE (#452, 2026-11-03) ──────────────────────────────────
+# One central workforce serves every enabled Acquisition client. The control
+# state, per-client switches and the durable job queue are new tables only
+# (Base.metadata.create_all) - prospects, evidence, drafts, replies and
+# bookings stay in the existing records above.
+
+class AcquisitionWorkforceState(Base):
+    """The single control row (id='global'): what the owner told the workforce to do."""
+    __tablename__ = "acquisition_workforce_state"
+    id = Column(String, primary_key=True, default="global")
+    # stopped | running | paused | emergency_stopped
+    status = Column(String(20), nullable=False, default="stopped")
+    # practice: only practice prospects and owner test inboxes. live: still needs
+    # every outreach gate (server switch, approval, suppression, limits).
+    mode = Column(String(10), nullable=False, default="practice")
+    reason = Column(String(300), nullable=True)
+    changed_by_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    changed_at = Column(DateTime, nullable=True)
+    last_pass_at = Column(DateTime, nullable=True)
+    last_pass_summary = Column(Text, nullable=True)        # JSON
+    next_pass_at = Column(DateTime, nullable=True)
+    daily_job_limit = Column(Integer, nullable=False, default=200)
+    max_jobs_per_pass = Column(Integer, nullable=False, default=10)
+    # Metered AI drafting/classification calls the owner allows per day. 0 = none:
+    # the workers use the deterministic, evidence-only templates and rules instead.
+    daily_ai_call_limit = Column(Integer, nullable=False, default=0)
+    # Paid discovery (Google Places) is never run by the workforce until the owner
+    # approves it here; it is metered and counted per run (AcquisitionDiscoveryRun).
+    paid_discovery_approved = Column(Boolean, nullable=False, default=False)
+
+
+class AcquisitionWorkforceClient(Base):
+    """Per-client switch: the workforce only works for companies switched on here."""
+    __tablename__ = "acquisition_workforce_clients"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = _org_col(unique=True)
+    enabled = Column(Boolean, nullable=False, default=False)
+    daily_job_limit = Column(Integer, nullable=False, default=40)
+    changed_by_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    changed_at = Column(DateTime, nullable=True)
+
+
+class AcquisitionWorkerJob(Base):
+    """One durable unit of worker labour. Survives restarts and deploys:
+    a job whose lease expired is picked up again; one that keeps failing goes
+    to the failed queue ('dead') with its last error, never silently away."""
+    __tablename__ = "acquisition_worker_jobs"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    # NULL organization_id = master-pool work (EvoSys-owned, before assignment).
+    organization_id = Column(String, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    worker = Column(String(20), nullable=False)        # discovery/research/contacts/outreach/replies/booking
+    target_type = Column(String(20), nullable=True)    # pool_prospect / opportunity / reply
+    target_id = Column(String, nullable=True)
+    dedupe_key = Column(String(300), nullable=False, unique=True)
+    status = Column(String(12), nullable=False, default="queued")  # queued/running/done/blocked/failed/dead/cancelled
+    is_practice = Column(Boolean, nullable=False, default=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=3)
+    run_after = Column(DateTime, nullable=True)
+    lease_until = Column(DateTime, nullable=True)
+    result = Column(Text, nullable=True)               # JSON, plain words
+    error = Column(String(500), nullable=True)
+    cost_usd = Column(Float, nullable=False, default=0.0)
+    created_at = Column(DateTime, server_default=func.now())
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (Index("ix_acq_job_status_run", "status", "run_after"),)
+
+
+class AcquisitionDraft(Base):
+    """A message the workforce prepared. Nothing is sent from here: a person
+    approves it by sending it through the existing outreach gates."""
+    __tablename__ = "acquisition_drafts"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = _org_col()
+    opportunity_id = Column(String, ForeignKey("acquisition_opportunities.id", ondelete="CASCADE"),
+                            nullable=False, index=True)
+    kind = Column(String(12), nullable=False)          # first / booking / reply / followup
+    status = Column(String(12), nullable=False, default="pending")   # pending / sent / rejected / superseded
+    subject = Column(String(200), nullable=False)
+    body = Column(Text, nullable=False)
+    generated_by = Column(String(40), nullable=False)  # template:<category> / ai:<capability>
+    evidence_refs = Column(Text, nullable=True)        # JSON list of {kind, value, source_url}
+    followups = Column(Text, nullable=True)            # JSON list of planned follow-ups (days, purpose)
+    revisions = Column(Text, nullable=True)            # JSON list of {at, by, action}
+    is_practice = Column(Boolean, nullable=False, default=False)
+    job_id = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    decided_at = Column(DateTime, nullable=True)
+    decided_by_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

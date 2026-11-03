@@ -38,6 +38,12 @@ LABEL = "Cleaning walkthrough"
 BOOKABLE = (C.INTERESTED,)
 
 
+def _label(org) -> str:
+    """The appointment name for THIS client's trade (multi-industry, #452)."""
+    from app.services.acquisition import messaging as M
+    return M.visit_label(org)
+
+
 def _profile(db: Session, org_id: str) -> Optional[AcquisitionProfile]:
     return db.query(AcquisitionProfile).filter(AcquisitionProfile.organization_id == org_id).first()
 
@@ -103,7 +109,7 @@ def make_link(db: Session, org: Organization, opp: AcquisitionOpportunity, actor
             .order_by(BookingLink.created_at.desc()).first())
     if link is None:
         link = BookingLink(lead_id=lead.id, user_id=booker.id, status="pending",
-                           token="aq" + secrets.token_urlsafe(18), appt_label=LABEL, appt_duration=minutes,
+                           token="aq" + secrets.token_urlsafe(18), appt_label=_label(org), appt_duration=minutes,
                            expires_at=now + timedelta(days=LINK_DAYS),
                            # The funeral-home appointment flow never texts a prospect business.
                            confirmation_sent=True, reminder_24hr_sent=True, reminder_1hr_sent=True)
@@ -193,7 +199,7 @@ def book(db: Session, token: str, slot: str) -> Dict[str, Any]:
     # object, not a Lead row, so it can never be added or counted as a lead.
     from types import SimpleNamespace
     lead_view = SimpleNamespace(first_name=company, last_name="", phone=lead.phone, email=None)
-    sync = TS._push_to_calendar(db, booker, org, link, lead_view, LABEL, start, minutes, "America/Chicago",
+    sync = TS._push_to_calendar(db, booker, org, link, lead_view, link.appt_label or _label(org), start, minutes, "America/Chicago",
                                 "Booked from the acquisition pilot (%s)." % ("practice" if opp.is_practice else "real"))
     if not sync.get("ok"):
         db.rollback()
