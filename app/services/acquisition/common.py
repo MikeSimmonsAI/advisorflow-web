@@ -174,8 +174,9 @@ APPOINTMENT_TYPES = ["Walkthrough", "Consultation"]
 EVIDENCE_KINDS = ("listing", "website", "segment", "size", "decision_maker", "contact_email",
                   "contact_phone", "buying_signal", "exclusion", "note")
 
-# The automated workers, stated truthfully. Nothing here runs yet; the owner
-# screen shows exactly this rather than an invented health light.
+# The automated workers. Since #452 (2026-11-03) they run as the Harvey AI
+# workforce (workforce.py, the source of truth for their names and state);
+# this list is kept for older readers of the vocabulary.
 WORKERS: List[Dict[str, str]] = [
     {"key": "discovery", "label": "Business discovery", "phase": "P2"},
     {"key": "research", "label": "Website research & evidence", "phase": "P2"},

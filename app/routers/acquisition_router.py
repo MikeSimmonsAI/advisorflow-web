@@ -306,6 +306,43 @@ def acq_admin_revoke(user_id: str, db: Session = Depends(get_db), god: User = De
     return out
 
 
+# ── HARVEY AI WORKFORCE (#452) ───────────────────────────────────────────────
+@god_router.get("/workforce")
+def workforce_status(db: Session = Depends(get_db), me: User = Depends(require_acq_master)):
+    from app.services.acquisition import workforce as WF
+    out = WF.health(db)
+    out["recent_jobs"] = WF.recent_jobs(db)
+    return out
+
+
+@god_router.post("/workforce/{action}")
+def workforce_control(action: str, payload: dict = Body(default={}), db: Session = Depends(get_db),
+                      me: User = Depends(require_acq_master)):
+    """start / pause / resume / stop / emergency-stop / practice-test - each a real action."""
+    from app.services.acquisition import workforce as WF
+    action = action.replace("-", "_")
+    if action == "practice_test":
+        s = WF.state(db)
+        if s.status == "emergency_stopped":
+            raise HTTPException(409, "The workforce is emergency-stopped; Start it first")
+        summary = WF.run_pass(db, practice_only=True, force=True)
+        _audit(db, None, me, "acquisition_workforce_practice_test", "acquisition_workforce", "global", summary)
+        return {"summary": summary, "health": WF.health(db)}
+    if action == "limits":
+        WF.set_limits(db, me, payload or {})
+        return WF.health(db)
+    WF.control(db, me, action, (payload or {}).get("reason"), (payload or {}).get("mode"))
+    return WF.health(db)
+
+
+@god_router.put("/workforce/clients/{org_id}")
+def workforce_client(org_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
+                     me: User = Depends(require_acq_master)):
+    from app.services.acquisition import workforce as WF
+    row = WF.set_client(db, me, org_id, bool(payload.get("enabled")), payload.get("daily_job_limit"))
+    return {"organization_id": row.organization_id, "enabled": row.enabled, "daily_job_limit": row.daily_job_limit}
+
+
 @god_router.get("/worker-permissions")
 def god_worker_permissions(god: User = Depends(require_acq_master)):
     return {"permissions": [{"key": k, "label": l, "hint": h} for k, l, h in C.WORKER_PERMISSIONS],
@@ -537,6 +574,8 @@ _PERM_RULES = [
     ("POST", r"/discovery/plan$", "research"),
     ("POST", r"/prospects/[^/]+/email/preview$", "draft_outreach"),
     ("POST", r"/prospects/[^/]+/email/send$", "send_outreach"),
+    ("GET", r"/drafts$", "draft_outreach"),
+    ("POST", r"/drafts/[^/]+/reject$", "draft_outreach"),
     ("POST", r"/prospects/[^/]+/(booking-link|booking-link/cancel|book|reschedule)$", "schedule"),
     ("GET", r"/prospects/[^/]+/slots$", "schedule"),
     ("PUT", r"/profile$", "client_setup"),
@@ -636,19 +675,29 @@ def _discovery_runs(db: Session, org_id: str):
 
 
 def _workers(db: Session, org_id: str):
-    """Truthful worker states: discovery is real (on demand, metered); the
-    rest are stated as not built."""
-    runs = _discovery_runs(db, org_id)
+    """The Harvey workforce's real state for THIS client (#452): every value
+    comes from the durable job queue; nothing is a decorative health light."""
+    from app.models.acquisition_models import AcquisitionWorkerJob as J, AcquisitionWorkforceClient as WC
+    from app.services.acquisition import workforce as WF
+    st = WF.state(db)
+    row = db.query(WC).filter(WC.organization_id == org_id).first()
+    on = bool(row and row.enabled)
+    bl = WF.blockers(db)
     out = []
-    for w in C.WORKERS:
-        if w["key"] == "discovery":
-            last = max((r.created_at for r in runs if r.created_at), default=None)
-            out.append(dict(w, state="on_demand", runs=len(runs), errors=sum(1 for r in runs if r.status == "failed"),
-                            last_run=C.iso(last)))
-        elif w["key"] in ("outreach", "replies"):
-            out.append(dict(w, state="on_demand" if O.enabled() else "off", runs=0, errors=0))
+    for w in WF.WORKERS:
+        q = db.query(J).filter(J.worker == w["key"], J.organization_id == org_id)
+        last = q.filter(J.status == "done").order_by(J.finished_at.desc()).first()
+        if st.status != "running":
+            state = "stopped"
+        elif not on:
+            state = "client_off"
         else:
-            out.append(dict(w, state="not_built", runs=0, errors=0))
+            state = "running"
+        out.append({"key": w["key"], "label": w["label"], "state": state,
+                    "runs": q.filter(J.status == "done").count(), "errors": q.filter(J.status == "dead").count(),
+                    "blocked": q.filter(J.status == "blocked").count(), "queued": q.filter(J.status == "queued").count(),
+                    "last_run": C.iso(last.finished_at) if last else None, "blockers": bl.get(w["key"], [])[:3],
+                    "workforce": st.status, "mode": st.mode})
     return out
 
 
@@ -802,7 +851,27 @@ def ops_email_send(opp_id: str, payload: dict = Body(default={}), op: Op = Depen
     res = O.send(op.db, op.org, opp, op.user, payload or {})
     _audit(op.db, op.org_id, op.user, "acquisition_email_send", "acquisition_opportunity", opp.id,
            {"practice": bool(opp.is_practice), "pilot_started": res.get("pilot_started")})
+    if (payload or {}).get("draft_id"):
+        # The person who pressed Send approved the workforce's draft (approval history).
+        from app.services.acquisition import workforce as WF
+        try:
+            res["draft"] = WF.decide_draft(op.db, op.org_id, payload["draft_id"], op.user, "sent")
+        except HTTPException:
+            pass
     return res
+
+
+@ops_router.get("/{org_id}/drafts")
+def ops_drafts(opp_id: Optional[str] = None, status: str = "pending", op: Op = Depends(op_dep)):
+    """Messages the AI workforce prepared, waiting for a person."""
+    from app.services.acquisition import workforce as WF
+    return {"items": WF.drafts_for(op.db, op.org_id, opp_id, status)}
+
+
+@ops_router.post("/{org_id}/drafts/{draft_id}/reject", dependencies=_WRITE)
+def ops_draft_reject(draft_id: str, op: Op = Depends(op_dep)):
+    from app.services.acquisition import workforce as WF
+    return WF.decide_draft(op.db, op.org_id, draft_id, op.user, "rejected")
 
 
 @ops_router.post("/{org_id}/prospects/{opp_id}/booking-link", dependencies=_WRITE)

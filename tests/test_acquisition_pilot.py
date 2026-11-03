@@ -92,10 +92,13 @@ def test_enable_is_idempotent_and_starts_paused(pilot):
     assert r.status_code == 200 and r.json()["profile_created"] is False
     ov = p["c"].get("/acquisition-ops/%s/overview" % p["shine"].id, headers=_h(p["db"], p["god"])).json()
     assert ov["profile"]["paused"] is True and ov["profile"]["pilot_started_at"] is None
-    assert {w["key"]: w["state"] for w in ov["workers"]}["discovery"] == "on_demand"
+    # #452 Harvey workforce: every worker exists and reports the real state -
+    # stopped until EvoSys presses Start, with the reasons it is blocked.
     st = {w["key"]: w["state"] for w in ov["workers"]}
-    assert st["outreach"] == st["replies"] == "off"          # P3 email is off unless the server switch is on
-    assert st["research"] == st["contacts"] == st["booking"] == "not_built"
+    assert set(st) == {"discovery", "research", "contacts", "outreach", "replies", "booking"}
+    assert set(st.values()) == {"stopped"}
+    out = next(w for w in ov["workers"] if w["key"] == "outreach")
+    assert any("switched off on the server" in b or "workforce is stopped" in b for b in out["blockers"])
     assert ov["spend"]["usd"] == 0.0
 
 

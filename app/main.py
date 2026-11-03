@@ -1944,6 +1944,42 @@ async def _ai_workforce_worker_loop():
         await asyncio.sleep(interval)
 
 
+async def _acquisition_workforce_loop():
+    """#452 Harvey AI workforce: one bounded pass every 5 minutes.
+
+    Does nothing unless the owner pressed Start in the Acquisition Control
+    Center (state lives in acquisition_workforce_state, so a deploy or restart
+    resumes exactly where the owner left it). One instance per pass
+    (_pass_claimed); jobs cut off by a restart are recovered by their lease.
+    The workers research, verify, draft and classify - they never send.
+    """
+    from app.services.job_run_service import record_job_run
+    from app.models.job_models import JobName
+    from app.deps import SessionLocal
+    import logging as _log
+    _logger = _log.getLogger("acquisition_workforce_loop")
+    interval = 300
+    await asyncio.sleep(95)  # startup delay - offset from the other loops
+    while True:
+        if not await _pass_claimed(JobName.ACQUISITION_WORKFORCE, interval):
+            await asyncio.sleep(interval)
+            continue
+        try:
+            async with record_job_run(JobName.ACQUISITION_WORKFORCE, db_factory=SessionLocal) as _m:
+                def _one_pass():
+                    from app.services.acquisition import workforce as WF
+                    db = SessionLocal()
+                    try:
+                        return WF.run_pass(db)
+                    finally:
+                        db.close()
+                summary = await _off_loop(_one_pass)
+                _m.update({k: v for k, v in (summary or {}).items() if k in ("ran", "recovered", "skipped")})
+        except Exception:                                    # noqa: BLE001
+            _logger.exception("Acquisition workforce pass failed")
+        await asyncio.sleep(interval)
+
+
 async def _program_sla_loop():
     """Location outreach programs: re-alert HOT replies past their SLA, and
     (only when PROGRAM_EMAIL_TOUCHES_SENDING is on) send due campaign emails.
@@ -2209,6 +2245,20 @@ async def on_startup():
     except Exception:
         import logging as _logging
         _logging.getLogger(__name__).warning("acquisition admin bootstrap skipped", exc_info=True)
+    # 2a-acq-wf. HARVEY WORKFORCE first start (#452). ACQUISITION_WORKFORCE_AUTOSTART=practice
+    #         starts the workforce in PRACTICE mode only if nobody has ever touched
+    #         its controls; once anyone presses a button, the owner's choice stands.
+    try:
+        if _SL is not None:
+            from app.services.acquisition.workforce import autostart as _wf_autostart
+            _s = _SL()
+            try:
+                _wf_autostart(_s)
+            finally:
+                _s.close()
+    except Exception:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("acquisition workforce autostart skipped", exc_info=True)
 
     # 2a-pre. CRM CONNECTION SECRETS — encrypt any plaintext api_key_encrypted /
     #         webhook_secret rows left over from before crm_secrets.py existed.
@@ -2528,6 +2578,7 @@ async def on_startup():
         JobName.PROGRAM_SLA:          _program_sla_loop,
         JobName.WEB_PUSH:             _web_push_loop,
         JobName.AI_WORKFORCE_WORKER:  _ai_workforce_worker_loop,
+        JobName.ACQUISITION_WORKFORCE: _acquisition_workforce_loop,
     }
     # Rows left 'running' by a process that was killed mid-pass (OOM, deploy)
     # are closed as errors with the reason, by the process that owns the loops,

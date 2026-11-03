@@ -78,41 +78,37 @@ def _facts(lead: Lead) -> Dict[str, Any]:
 
 
 def client_name(org: Organization, p: Optional[AcquisitionProfile]) -> str:
-    return ((p.business_name if p else None) or org.name or "our cleaning team").strip()
+    return ((p.business_name if p else None) or org.name or "our team").strip()
 
 
 def draft(org: Organization, p: Optional[AcquisitionProfile], lead: Lead, opp: AcquisitionOpportunity,
           subject: Optional[str] = None, body: Optional[str] = None) -> Dict[str, str]:
-    """The default first-touch email. Plain, short, no claims we can't back
-    (no prices, no insurance claims unless the client verified them)."""
-    company = _facts(lead).get("company") or "your office"
+    """The default first-touch email, worded for the client's own service
+    category (a window washer never sends a cleaning pitch). Plain, short, no
+    claims we can't back (no prices, no insurance claims unless verified)."""
+    from app.services.acquisition import messaging as M
+    company = _facts(lead).get("company") or "your business"
     who = client_name(org, p)
     first = (lead.first_name or "").strip()
-    subj = (subject or "").strip()[:150] or ("Cleaning for %s" % company)
-    if body and body.strip():
-        text = body.strip()[:4000]
-    else:
-        text = ("Hi %s,\n\n"
-                "I'm reaching out for %s, a commercial cleaning company here in Dallas-Fort Worth. "
-                "We clean offices like %s on a schedule that works around your patients and staff.\n\n"
-                "Would you be open to a short walkthrough so we can give you a free quote?\n\n"
-                "Thank you,\n%s") % (first or "there", who, company, (p.owner_name if p and p.owner_name else who))
+    base = M.first_touch(org, p, company, first, (p.owner_name if p and p.owner_name else who))
+    subj = (subject or "").strip()[:150] or base["subject"]
+    text = body.strip()[:4000] if body and body.strip() else base["body"]
     return {"subject": subj, "body": text}
 
 
 def booking_draft(org: Organization, p: Optional[AcquisitionProfile], lead: Lead, url: str,
                   subject: Optional[str] = None, body: Optional[str] = None) -> Dict[str, str]:
-    company = _facts(lead).get("company") or "your office"
+    from app.services.acquisition import messaging as M
     who = client_name(org, p)
-    subj = (subject or "").strip()[:150] or ("Walkthrough for %s" % company)
+    base = M.booking_reply(org, p, (lead.first_name or "").strip(), url,
+                           (p.owner_name if p and p.owner_name else who))
+    subj = (subject or "").strip()[:150] or base["subject"]
     if body and body.strip():
         text = body.strip()[:4000].replace("[walkthrough link]", url)
         if url not in text:
             text += "\n\n" + url
     else:
-        text = ("Hi %s,\n\nThank you for getting back to us. Here's a link to pick a time for a free walkthrough "
-                "of your office - it only shows times we're actually free:\n\n%s\n\nThank you,\n%s") % (
-            (lead.first_name or "").strip() or "there", url, (p.owner_name if p and p.owner_name else who))
+        text = base["body"]
     return {"subject": subj, "body": text}
 
 
