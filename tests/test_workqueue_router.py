@@ -193,4 +193,13 @@ def test_workqueue_totals_are_real_past_the_bucket_cap(db_session, sample_org, s
     assert set(data["totals"]) == {"needs_text", "needs_reply", "cadence_due", "outcomes_needed"}
     src = open("frontend/src/pages/WorkQueue.jsx", encoding="utf-8").read()
     assert "queue.totals" in src
-    assert "wq?.totals" in open("frontend/src/pages/sales/MyDay.jsx", encoding="utf-8").read()
+    # EVERY screen that reads /workqueue/today must show the real totals, not
+    # the length of a capped list. (My Day used to; its redesign stopped
+    # reading the work queue at all, so the check now covers every reader
+    # instead of naming one file.)
+    import glob
+    readers = [p for p in glob.glob("frontend/src/**/*.jsx", recursive=True)
+               if "/workqueue/today" in open(p, encoding="utf-8").read()]
+    assert readers, "nothing reads /workqueue/today any more - update this test"
+    for p in readers:
+        assert "totals" in open(p, encoding="utf-8").read(), "%s shows capped list lengths" % p

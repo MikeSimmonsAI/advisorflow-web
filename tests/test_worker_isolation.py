@@ -291,7 +291,8 @@ def test_email_poller_one_bad_email_does_not_lose_the_others(
               for i, lead in ((1, l1), (2, l2))]
     tagged = []
     monkeypatch.setattr(ep, "_get_fresh_access_token", lambda adv: "tok")
-    monkeypatch.setattr(ep, "_fetch_recent_emails", lambda tok: emails)
+    # #459 added the backfill window (since_at); the fake takes it too.
+    monkeypatch.setattr(ep, "_fetch_recent_emails", lambda tok, since_at=None, **k: emails)
     monkeypatch.setattr(ep, "_mark_email_processed",
                         lambda tok, mid, tag="x": tagged.append(mid))
     monkeypatch.setattr(pipeline_service, "process_inbound_reply",

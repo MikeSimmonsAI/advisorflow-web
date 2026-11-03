@@ -153,6 +153,18 @@ EXEMPT = {
     # excluding only this module for this reason.
     "services/workforce_intelligence/proof.py": "synthetic management proof; writes only Leads, only into the is_demo tenants T8's simulation creates, with unroutable addresses, behind require_god",
 
+    # AI WORKFORCE SAFE TEST MODE. `create_practice_lead` makes one fictional
+    # person flagged is_test, with a 555-01xx number and an example.invalid
+    # address, hidden from the customer's CRM. Not a prospect anybody can
+    # reach, so not a lead the plan should count.
+    "services/workforce/practice.py": "is_test practice leads for AI worker test mode; fictional, unroutable, hidden from the CRM",
+
+    # WHOLESALE DEAL ROOM investors. `accept_invite` creates an investor login
+    # with organization_id=None: an outside buyer viewing deals, tied to the
+    # wholesaler by an InvestorAccount row - not a seat in any customer's plan
+    # (plan seats are users homed in, or a member of, the customer's org).
+    "services/wholesale_deal_room.py": "investor logins with organization_id NULL; outside buyers, not seats in a customer plan",
+
     # Brand-sales staff live at SCOPE_BRAND_SALES_ORG with organization_id
     # NULL. They are not seats in any customer's plan.
     "services/sales_staff.py": "brand sales-org staff; organization_id is NULL, not a customer seat",
@@ -280,10 +292,26 @@ def test_seat_usage_counts_memberships_not_just_homed_users():
 # a decision somebody has to make here, in the open.
 INBOUND_PATHS = {
     "routers/social_webhooks_router.py",
-    "routers/lead_scraper_router.py",
     "services/crm_service.py",
     "services/tenant_scheduling.py",
 }
+
+# Paths that USED to write arriving leads and now only STAGE them for a person
+# to review in the Import Center (#470, Nov 3): nothing becomes a lead there,
+# so there is nothing to hold. The import commit is where capacity applies.
+# Asserted below to stay that way - if one of them starts writing leads again,
+# it must come back to INBOUND_PATHS and hold.
+STAGING_ONLY_PATHS = {
+    "routers/lead_scraper_router.py",
+}
+
+
+def test_staging_only_paths_still_create_no_leads():
+    for rel in sorted(STAGING_ONLY_PATHS):
+        src = open(os.path.join(APP, rel.replace("/", os.sep)), encoding="utf-8").read()
+        assert not CONSTRUCTS.search(src), (
+            f"{rel} creates a User or Lead again. Put it back in INBOUND_PATHS "
+            "and hold arriving leads over capacity instead of refusing them.")
 
 
 def test_every_inbound_arrival_path_holds_rather_than_refuses():
