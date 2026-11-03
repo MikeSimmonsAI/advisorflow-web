@@ -628,6 +628,7 @@ def _claim(db: Session, prog: OutreachProgram, item: Dict, prof: LocationProfile
                                 ProgramEmailTouch.status.in_(("blocked", "retry")),
                                 ProgramEmailTouch.attempted_at == existing.attempted_at)
                          .values(status="claimed", attempted_at=now, reason=None,
+                                 location_id=prof.location_id,      # the record's location now (Kilgroe split)
                                  email_mode=r["email_mode"],
                                  flyer_asset_id=r["flyer"].id if r["flyer"] is not None else None))
         db.commit()
