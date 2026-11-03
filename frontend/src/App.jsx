@@ -147,6 +147,8 @@ const AcqOpsHealth = lazyPage(() => import('./pages/acquisition/AcquisitionOps')
 const AcqOpsSettings = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.OpsSettings })))
 const AcqOpsDiscovery = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Discovery })))
 const AcqOpsOnboarding = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.OpsOnboarding })))
+// #470 Stage B: God-only import into the master service-prospect pool (rendered in the Ops shell).
+const PlatformPoolImport = lazyPage(() => import('./pages/intake/PlatformPoolImport'))
 const AcqOpsSoon = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Soon })))
 const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
 const DealOperationsClosing = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsClosing })))
@@ -1584,6 +1586,7 @@ export default function App() {
           <Route path="pipeline" element={<AcqOpsPipeline />} />
           <Route path="health" element={<AcqOpsHealth />} />
           <Route path="settings" element={<AcqOpsSettings />} />
+          <Route path="import" element={<PlatformPoolImport />} />
         </Route>
         <Route path="/roofing" element={<RoofingLanding />} />
         {/* PUBLIC interactive demo - fictional data only, no login, no Roofing API. */}

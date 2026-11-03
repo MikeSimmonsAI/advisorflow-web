@@ -1128,6 +1128,9 @@ app.include_router(import_batch_router,
 # Same feature gate as the batch router it supersedes.
 app.include_router(intake_router,
                    dependencies=[Depends(require_feature("imports"))])
+# #470 Stage B: God-only master prospect pool destination (platform_acquisition_pool)
+from app.routers import platform_pool_intake_router  # noqa: E402
+app.include_router(platform_pool_intake_router.router)
 # RESTORED alongside it. Deliberately NOT behind require_feature: qualification
 # is how the platform decides who may be contacted, and a customer whose plan
 # does not include a feature flag must not thereby lose the guard that keeps
