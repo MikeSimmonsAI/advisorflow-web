@@ -127,7 +127,7 @@ def test_carrier_guidance_is_recorded_per_code_and_never_retries(client, db_sess
     assert ok.status_code == 200
     rules = P.effective(db_session, sample_org.id)[1]
     assert rules["30003"]["retry"]["enabled"] is False and rules["30006"]["retry"]["max_attempts"] == 1
-    assert rules["30005"]["action"] == P.CONTINUE_SCHEDULE and rules["30007"]["action"] == P.INVESTIGATE
+    assert rules["30005"]["action"] == P.HOLD_FOR_REVIEW and rules["30007"]["action"] == P.INVESTIGATE
     db_session.refresh(item)
     assert item.open_lead_id == lead.id                                   # the hold is untouched
     assert db_session.query(Message).count() == texts_before             # nothing sent
