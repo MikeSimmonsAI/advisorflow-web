@@ -1585,6 +1585,7 @@ export default function App() {
         </Route>
         <Route path="/acquisition-ops" element={<ProtectedRoute bare><AcqOps /></ProtectedRoute>}>
           <Route index element={<AcqOpsHome />} />
+          <Route path="client-dashboard" element={<AcqOpsHome />} />
           <Route path="onboarding" element={<AcqOpsOnboarding />} />
           <Route path="discovery" element={<AcqOpsDiscovery />} />
           <Route path="prospects" element={<AcqOpsProspects />} />
