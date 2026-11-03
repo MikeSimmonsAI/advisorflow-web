@@ -1666,6 +1666,14 @@ COLUMNS_TO_ADD = [
     ("acquisition_profiles", "offer_type", "VARCHAR"),
     ("acquisition_profiles", "offer_terms", "TEXT"),
     ("acquisition_profiles", "sales_opportunity_id", "VARCHAR"),
+    # #452 Phase 3: client calendar / booking configuration.
+    ("acquisition_profiles", "min_notice_hours", "INTEGER"),
+    ("acquisition_profiles", "buffer_minutes", "INTEGER"),
+    ("acquisition_profiles", "booking_windows", "TEXT"),
+    ("acquisition_profiles", "meeting_location", "TEXT"),
+    ("acquisition_profiles", "booking_contact", "VARCHAR"),
+    ("acquisition_profiles", "reschedule_rules", "TEXT"),
+    ("acquisition_profiles", "confirmation_pref", "VARCHAR(40)"),
     # #452 Phase 4: won contracts as reported by the client, confirmed by EvoSys.
     ("acquisition_opportunities", "contract_type", "VARCHAR(40)"),
     ("acquisition_opportunities", "service_frequency", "VARCHAR(40)"),

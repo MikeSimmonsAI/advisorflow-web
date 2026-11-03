@@ -67,6 +67,14 @@ class AcquisitionProfile(Base):
     # The EvoSys Sales opportunity this client was converted from (rapid onboarding).
     sales_opportunity_id = Column(String, nullable=True, index=True)
     appointment_minutes = Column(Integer, nullable=False, default=45)
+    # #452 Phase 3: where and how EvoSys books this client's appointments.
+    min_notice_hours = Column(Integer, nullable=True)       # earliest bookable time from now
+    buffer_minutes = Column(Integer, nullable=True)         # recorded for the operator; slot engine owns overlap
+    booking_windows = Column(Text, nullable=True)           # JSON {"mon": [["09:00","17:00"]], ...}
+    meeting_location = Column(Text, nullable=True)          # default: at the prospect's property
+    booking_contact = Column(String, nullable=True)         # who at the client attends / is told
+    reschedule_rules = Column(Text, nullable=True)
+    confirmation_pref = Column(String(40), nullable=True)   # calendar_only / calendar_and_email
     notify_user_ids = Column(Text, nullable=True)       # JSON list of user ids, checked on read
     # EMERGENCY PAUSE - starts paused. Every future worker checks this first.
     paused = Column(Boolean, nullable=False, default=True)

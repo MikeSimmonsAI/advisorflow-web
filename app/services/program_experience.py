@@ -87,6 +87,10 @@ ACQUISITION_CLIENT_ALLOWED_PREFIXES = (
     "/launch/me",
     "/org-settings",
     "/health",
+    # The client connects ITS OWN calendar so EvoSys can book onto it.
+    "/calendar/connect",
+    "/microsoft/connect",
+    "/me/calendar",
 )
 
 

@@ -30,6 +30,7 @@ from app.services.acquisition import engine as E
 from app.services.acquisition import booking as B
 from app.services.acquisition import outreach as O
 from app.services.acquisition import outcomes as OC
+from app.services.acquisition import calendar_setup as CAL
 from app.limiter import limiter
 from app.services.entitlements import require_feature
 from app.services.platform_owner import require_tenant_context
@@ -163,6 +164,16 @@ def client_report(period: str = Query("month"), start: Optional[str] = Query(Non
     a, b = OC.period_range(period, start, end)
     return dict(OC.client_report(ctx.db, ctx.org_id, a, b), period=period, period_label=OC.PERIODS.get(period),
                 start=C.iso(a), end=C.iso(b))
+
+
+@router.get("/calendar")
+def client_calendar(ctx: C.Ctx = Depends(ctx_dep)):
+    """Where EvoSys books this client's appointments - read-only for the client,
+    plus whether the signed-in person is that calendar and has connected it."""
+    cfg = CAL.config(ctx.db, ctx.org)
+    mine = bool(cfg["booking_user"] and cfg["booking_user"]["id"] == ctx.user.id)
+    cfg.pop("candidates", None)
+    return dict(cfg, is_my_calendar=mine)
 
 
 @router.get("/followups")
@@ -560,6 +571,42 @@ def ops_confirm_won(opp_id: str, op: Op = Depends(op_dep)):
     opp = OC.confirm_won(op.db, op.org_id, opp_id, op.user)
     _audit(op.db, op.org_id, op.user, "acquisition_won_confirmed", "acquisition_opportunity", opp.id)
     return OC.contract_json(opp)
+
+
+@ops_router.get("/{org_id}/calendar")
+def ops_calendar(op: Op = Depends(op_dep)):
+    return CAL.config(op.db, op.org)
+
+
+@ops_router.put("/{org_id}/calendar", dependencies=_WRITE)
+def ops_calendar_update(payload: dict = Body(...), op: Op = Depends(op_dep)):
+    if not op.is_god:
+        raise HTTPException(403, "Only the EvoSys owner changes a client's booking setup")
+    out = CAL.update(op.db, op.org, op.user, payload)
+    _audit(op.db, op.org_id, op.user, "acquisition_calendar_setup", "acquisition_profile", op.org_id,
+           {"fields": sorted(payload.keys())})
+    return out
+
+
+@ops_router.get("/{org_id}/prospects/{opp_id}/slots")
+def ops_slots(opp_id: str, day: str = Query(...), op: Op = Depends(op_dep)):
+    return CAL.available(op.db, op.org, E.load_opp(op.db, op.org_id, opp_id), op.user, day)
+
+
+@ops_router.post("/{org_id}/prospects/{opp_id}/book", dependencies=_WRITE)
+def ops_book(opp_id: str, payload: dict = Body(...), op: Op = Depends(op_dep)):
+    out = CAL.book(op.db, op.org, E.load_opp(op.db, op.org_id, opp_id), op.user, payload)
+    _audit(op.db, op.org_id, op.user, "acquisition_booked", "acquisition_opportunity", opp_id,
+           {"time": out["booked_time"]})
+    return out
+
+
+@ops_router.post("/{org_id}/prospects/{opp_id}/reschedule", dependencies=_WRITE)
+def ops_reschedule(opp_id: str, payload: dict = Body(...), op: Op = Depends(op_dep)):
+    out = CAL.reschedule(op.db, op.org, E.load_opp(op.db, op.org_id, opp_id), op.user, payload)
+    _audit(op.db, op.org_id, op.user, "acquisition_rescheduled", "acquisition_opportunity", opp_id,
+           {"time": out["booked_time"]})
+    return out
 
 
 @ops_router.get("/{org_id}/report")
