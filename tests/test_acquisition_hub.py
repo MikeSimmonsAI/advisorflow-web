@@ -94,3 +94,12 @@ def test_queue_filter_and_search(pilot):
     s = p["c"].get("/god/acquisition/master/prospects?status=all&search=alpha", headers=g).json()
     assert [x["name"] for x in s["items"]] == ["Alpha Dental"]
     assert p["c"].get("/god/acquisition/master/prospects?queue=bogus", headers=g).status_code == 422
+
+
+def test_owner_program_access_has_one_acquisition_hub_card(pilot):
+    p = pilot
+    ctx = p["c"].get("/auth/my-contexts", headers=_h(p["db"], p["god"])).json()
+    cards = ctx["acquisition_ops"]
+    assert len(cards) == 1 and cards[0]["hub"] is True and cards[0]["path"] == "/acquisition-ops"
+    # a client's own staff never get the hub card
+    assert p["c"].get("/auth/my-contexts", headers=_h(p["db"], p["owner"])).json()["acquisition_ops"] == []
