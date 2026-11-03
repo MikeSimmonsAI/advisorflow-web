@@ -37,6 +37,10 @@ WHOLESALE_HOST_SLUG = "evo-integrated-solutions-llc"
 WHOLESALE_WORKSPACE_KEY = "wholesale_workspace"
 INTERNAL_ROLES = ("god_admin", "super_admin")
 ACQUISITION_OPS_PREFIXES = ("/acquisition-ops",)
+# The Acquisition master workspace, for an EvoSys Acquisition admin (program
+# grant, #452). A named Wholesale seat that ALSO holds this grant may reach it;
+# the grant opens nothing else.
+ACQUISITION_ADMIN_PREFIXES = ("/god/acquisition", "/acquisition-ops", "/intake/platform-pool")
 
 # What a Wholesale-locked request may reach. Everything Wholesale itself calls
 # (/wholesale/...) plus the shared core that any shell needs to render.
@@ -333,6 +337,13 @@ def enforce(db: Session, user, request: Request) -> None:
         from app.services import workspace_access
         if workspace_access.has_back_office(user, db):
             return
+    if path.startswith(ACQUISITION_ADMIN_PREFIXES):
+        try:
+            from app.services.acquisition.admins import is_admin_grant
+            if is_admin_grant(db, user):
+                return
+        except Exception:  # pragma: no cover - fall through to the normal lock
+            pass
     # The acquisition pilot's operations (Issue #452) are their own destination
     # for a login the owner granted operator access - not a platform screen.
     if path.startswith(ACQUISITION_OPS_PREFIXES):

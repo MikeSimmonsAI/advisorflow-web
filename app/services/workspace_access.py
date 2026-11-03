@@ -311,7 +311,8 @@ def _acquisition_ops(db: Session, user: User) -> List[Dict[str, Any]]:
     try:
         from app.services.acquisition.common import acquisition_identity
         from app.services.acquisition.engine import operator_org_ids
-        if getattr(user, "role", None) == "god_admin":
+        from app.services.acquisition.admins import is_master
+        if is_master(db, user):
             # The platform owner gets ONE Program Access card: the EvoSys Acquisition
             # Hub (master pool + every client's operations). God-level rights are
             # still checked on every owner-only endpoint, not by this card.

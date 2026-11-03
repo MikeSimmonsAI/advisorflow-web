@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
+from app.services.acquisition.admins import require_acq_master
 from app.deps import get_db, require_god
 from app.models.import_models import ImportBatch, ImportStagedRow
 from app.models.models import User
@@ -33,7 +34,7 @@ def _load(db, batch_id):
 
 
 @router.get("/batches")
-def list_batches(db: Session = Depends(get_db), god: User = Depends(require_god)):
+def list_batches(db: Session = Depends(get_db), god: User = Depends(require_acq_master)):
     rows = (db.query(ImportBatch).filter(ImportBatch.pipeline == PP.PIPELINE,
                                          ImportBatch.organization_id == PP.PLATFORM_ORG_ID)
             .order_by(ImportBatch.created_at.desc()).limit(50).all())
@@ -43,7 +44,7 @@ def list_batches(db: Session = Depends(get_db), god: User = Depends(require_god)
 @router.post("/batches")
 async def upload(file: UploadFile = File(...), source_system: str = Form(...),
                  display_name: Optional[str] = Form(None),
-                 db: Session = Depends(get_db), god: User = Depends(require_god)):
+                 db: Session = Depends(get_db), god: User = Depends(require_acq_master)):
     from app.services.intake.engine import MAX_UPLOAD_BYTES
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(content) > MAX_UPLOAD_BYTES:
@@ -60,13 +61,13 @@ async def upload(file: UploadFile = File(...), source_system: str = Form(...),
 
 
 @router.get("/batches/{batch_id}")
-def get_batch(batch_id: str, db: Session = Depends(get_db), god: User = Depends(require_god)):
+def get_batch(batch_id: str, db: Session = Depends(get_db), god: User = Depends(require_acq_master)):
     return PP.batch_payload(db, _load(db, batch_id))
 
 
 @router.put("/batches/{batch_id}/mapping")
 def put_mapping(batch_id: str, mapping: Dict[str, Optional[str]] = Body(...),
-                db: Session = Depends(get_db), god: User = Depends(require_god)):
+                db: Session = Depends(get_db), god: User = Depends(require_acq_master)):
     b = _load(db, batch_id)
     try:
         PP.save_mapping(db, b, mapping)
@@ -76,7 +77,7 @@ def put_mapping(batch_id: str, mapping: Dict[str, Optional[str]] = Body(...),
 
 
 @router.post("/batches/{batch_id}/analyze")
-def analyze(batch_id: str, db: Session = Depends(get_db), god: User = Depends(require_god)):
+def analyze(batch_id: str, db: Session = Depends(get_db), god: User = Depends(require_acq_master)):
     b = _load(db, batch_id)
     try:
         counts = PP.analyze(db, b)
@@ -89,7 +90,7 @@ def analyze(batch_id: str, db: Session = Depends(get_db), god: User = Depends(re
 
 @router.get("/batches/{batch_id}/rows")
 def rows(batch_id: str, filter: Optional[str] = Query(None), limit: int = Query(200, le=1000),
-         offset: int = Query(0, ge=0), db: Session = Depends(get_db), god: User = Depends(require_god)):
+         offset: int = Query(0, ge=0), db: Session = Depends(get_db), god: User = Depends(require_acq_master)):
     b = _load(db, batch_id)
     q = db.query(ImportStagedRow).filter(ImportStagedRow.batch_id == b.id)
     if filter == "invalid":
@@ -105,7 +106,7 @@ def rows(batch_id: str, filter: Optional[str] = Query(None), limit: int = Query(
 
 @router.post("/batches/{batch_id}/review")
 def review(batch_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
-           god: User = Depends(require_god)):
+           god: User = Depends(require_acq_master)):
     b = _load(db, batch_id)
     try:
         n = PP.review(db, b, god, payload.get("row_ids") or [], payload.get("decision") or "", payload.get("note"))
@@ -117,7 +118,7 @@ def review(batch_id: str, payload: dict = Body(...), db: Session = Depends(get_d
 
 
 @router.post("/batches/{batch_id}/commit")
-def commit(batch_id: str, db: Session = Depends(get_db), god: User = Depends(require_god)):
+def commit(batch_id: str, db: Session = Depends(get_db), god: User = Depends(require_acq_master)):
     b = _load(db, batch_id)
     try:
         report = PP.commit(db, b, god)
@@ -131,7 +132,7 @@ def commit(batch_id: str, db: Session = Depends(get_db), god: User = Depends(req
 
 
 @router.post("/batches/{batch_id}/rollback")
-def rollback(batch_id: str, db: Session = Depends(get_db), god: User = Depends(require_god)):
+def rollback(batch_id: str, db: Session = Depends(get_db), god: User = Depends(require_acq_master)):
     b = _load(db, batch_id)
     try:
         report = PP.rollback(db, b, god)

@@ -43,6 +43,8 @@ ops_router = APIRouter(prefix="/acquisition-ops", tags=["acquisition"])
 public_router = APIRouter(prefix="/acquisition-public", tags=["acquisition"])
 _WRITE = [Depends(require_not_observation)]
 
+from app.services.acquisition.admins import require_acq_master  # noqa: E402,F401  God or EvoSys Acquisition admin
+
 
 def ctx_dep(request: Request, db: Session = Depends(get_db),
             user: User = Depends(require_tenant_context),
@@ -245,12 +247,12 @@ def _clients(db: Session, org_ids=None):
 
 
 @god_router.get("/clients")
-def god_clients(db: Session = Depends(get_db), god: User = Depends(require_god)):
+def god_clients(db: Session = Depends(get_db), god: User = Depends(require_acq_master)):
     return {"items": _clients(db), "limit": C.PILOT_ORG_LIMIT}
 
 
 @god_router.post("/{org_id}/enable")
-def god_enable(org_id: str, db: Session = Depends(get_db), god: User = Depends(require_god)):
+def god_enable(org_id: str, db: Session = Depends(get_db), god: User = Depends(require_acq_master)):
     org = _org(db, org_id)
     out = E.enable(db, org, god)
     _audit(db, org.id, god, "acquisition_enable", "organization", org.id, out)
@@ -258,14 +260,14 @@ def god_enable(org_id: str, db: Session = Depends(get_db), god: User = Depends(r
 
 
 @god_router.get("/{org_id}/operators")
-def god_operators(org_id: str, db: Session = Depends(get_db), god: User = Depends(require_god)):
+def god_operators(org_id: str, db: Session = Depends(get_db), god: User = Depends(require_acq_master)):
     org = _client_org(db, org_id)
     return {"items": E.operators(db, org.id)}
 
 
 @god_router.post("/{org_id}/operators")
 def god_grant(org_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
-              god: User = Depends(require_god)):
+              god: User = Depends(require_acq_master)):
     org = _client_org(db, org_id)
     out = E.grant_operator(db, org, payload.get("email"), god, payload.get("permissions"))
     _audit(db, org.id, god, "acquisition_operator_grant", "user", out["user_id"])
@@ -274,21 +276,44 @@ def god_grant(org_id: str, payload: dict = Body(...), db: Session = Depends(get_
 
 @god_router.put("/{org_id}/operators/{user_id}")
 def god_operator_permissions(org_id: str, user_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
-                             god: User = Depends(require_god)):
+                             god: User = Depends(require_acq_master)):
     org = _client_org(db, org_id)
     out = E.set_operator_permissions(db, org, user_id, payload.get("permissions"), god)
     _audit(db, org.id, god, "acquisition_operator_permissions", "user", user_id, {"permissions": out["permissions"]})
     return out
 
 
+@god_router.get("/admins")
+def acq_admins(db: Session = Depends(get_db), god: User = Depends(require_god)):
+    from app.services.acquisition import admins as AD
+    return {"items": AD.admins(db)}
+
+
+@god_router.post("/admins")
+def acq_admin_grant(payload: dict = Body(...), db: Session = Depends(get_db), god: User = Depends(require_god)):
+    """Global delegation: only God makes an EvoSys Acquisition admin."""
+    from app.services.acquisition import admins as AD
+    out = AD.grant(db, payload.get("email"), granted_by=god.id)
+    _audit(db, None, god, "acquisition_admin_" + out["action"], "user", out.get("user_id") or "", {"email": out["email"]})
+    return out
+
+
+@god_router.delete("/admins/{user_id}")
+def acq_admin_revoke(user_id: str, db: Session = Depends(get_db), god: User = Depends(require_god)):
+    from app.services.acquisition import admins as AD
+    out = AD.revoke(db, user_id)
+    _audit(db, None, god, "acquisition_admin_revoked", "user", user_id)
+    return out
+
+
 @god_router.get("/worker-permissions")
-def god_worker_permissions(god: User = Depends(require_god)):
+def god_worker_permissions(god: User = Depends(require_acq_master)):
     return {"permissions": [{"key": k, "label": l, "hint": h} for k, l, h in C.WORKER_PERMISSIONS],
             "presets": C.WORKER_PRESETS}
 
 
 @god_router.delete("/{org_id}/operators/{user_id}")
-def god_revoke(org_id: str, user_id: str, db: Session = Depends(get_db), god: User = Depends(require_god)):
+def god_revoke(org_id: str, user_id: str, db: Session = Depends(get_db), god: User = Depends(require_acq_master)):
     org = _client_org(db, org_id)
     E.revoke_operator(db, org, user_id, god)
     _audit(db, org.id, god, "acquisition_operator_revoke", "user", user_id)
@@ -307,7 +332,7 @@ class MasterAssignmentIn(BaseModel):
 
 
 @god_router.get("/master")
-def master_overview(db: Session = Depends(get_db), god: User = Depends(require_god)):
+def master_overview(db: Session = Depends(get_db), god: User = Depends(require_acq_master)):
     from app.models.lead_intel_models import LeadIntelProspect
     from app.services import qualification as Q
     base = db.query(LeadIntelProspect)
@@ -330,7 +355,7 @@ def master_overview(db: Session = Depends(get_db), god: User = Depends(require_g
 
 @god_router.post("/master/assign/preview")
 def master_assignment_preview(body: MasterAssignmentIn, db: Session = Depends(get_db),
-                              god: User = Depends(require_god)):
+                              god: User = Depends(require_acq_master)):
     from app.models.lead_intel_models import LeadIntelProspect
     from app.services.acquisition import distribution as D
     org = _client_org(db, body.destination_org_id)
@@ -347,7 +372,7 @@ def master_assignment_preview(body: MasterAssignmentIn, db: Session = Depends(ge
 
 @god_router.post("/master/assign")
 def master_assignment(body: MasterAssignmentIn, db: Session = Depends(get_db),
-                      god: User = Depends(require_god)):
+                      god: User = Depends(require_acq_master)):
     from app.services.acquisition import distribution as D
     org = _client_org(db, body.destination_org_id)
     out = D.assign_many(db, body.prospect_ids, org, god, body.segment or "")
@@ -359,7 +384,7 @@ def master_assignment(body: MasterAssignmentIn, db: Session = Depends(get_db),
 @god_router.get("/master/prospects")
 def master_prospects(status: str = Query("available"), limit: int = Query(200, ge=1, le=500),
                      queue: str = Query(""), search: str = Query(""),
-                     db: Session = Depends(get_db), god: User = Depends(require_god)):
+                     db: Session = Depends(get_db), god: User = Depends(require_acq_master)):
     from app.services.acquisition import distribution as D
     from app.services.acquisition import hub as HUB
     if status not in ("available", "assigned", "all"):
@@ -370,14 +395,14 @@ def master_prospects(status: str = Query("available"), limit: int = Query(200, g
 
 
 @god_router.get("/hub")
-def hub_overview(db: Session = Depends(get_db), god: User = Depends(require_god)):
+def hub_overview(db: Session = Depends(get_db), god: User = Depends(require_acq_master)):
     from app.services.acquisition import hub as HUB
     return HUB.overview(db)
 
 
 @god_router.post("/master/{prospect_id}/contact")
 def master_contact(prospect_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
-                   god: User = Depends(require_god)):
+                   god: User = Depends(require_acq_master)):
     from app.models.lead_intel_models import LeadIntelProspect
     from app.services.acquisition import hub as HUB
     p = db.query(LeadIntelProspect).filter(LeadIntelProspect.id == prospect_id).first()
@@ -396,7 +421,7 @@ def _base_url(request: Request) -> str:
 
 @god_router.post("/clients")
 def provision_client(request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
-                     god: User = Depends(require_god)):
+                     god: User = Depends(require_acq_master)):
     """Add ONE cleaning company (direct, or converting a Sales opportunity)."""
     from app.services.acquisition import onboarding as OB
     out = OB.onboard(db, god, payload or {}, _base_url(request))
@@ -409,7 +434,7 @@ def provision_client(request: Request, payload: dict = Body(...), db: Session = 
 
 @god_router.post("/clients/batch")
 def provision_clients_batch(request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
-                            god: User = Depends(require_god)):
+                            god: User = Depends(require_acq_master)):
     from app.services.acquisition import onboarding as OB
     out = OB.batch(db, god, payload.get("items") or [], payload.get("defaults") or {}, _base_url(request))
     for r in out["results"]:
@@ -421,40 +446,43 @@ def provision_clients_batch(request: Request, payload: dict = Body(...), db: Ses
 
 @god_router.get("/followups")
 def god_followups(status: Optional[str] = Query("open"), db: Session = Depends(get_db),
-                  user: User = Depends(require_god)):
+                  user: User = Depends(require_acq_master)):
     return {"items": OC.list_followups(db, None, status or None)}
 
 
 @god_router.get("/report")
 def god_report(period: str = Query("month"), start: Optional[str] = Query(None), end: Optional[str] = Query(None),
-               db: Session = Depends(get_db), user: User = Depends(require_god)):
+               db: Session = Depends(get_db), user: User = Depends(require_acq_master)):
     a, b = OC.period_range(period, start, end)
     return dict(OC.all_clients_report(db, a, b), period=period, period_label=OC.PERIODS.get(period),
                 start=C.iso(a), end=C.iso(b))
 
 
 @god_router.get("/directory")
-def client_directory(db: Session = Depends(get_db), god: User = Depends(require_god)):
+def client_directory(db: Session = Depends(get_db), god: User = Depends(require_acq_master)):
     from app.services.acquisition import onboarding as OB
     return OB.directory(db)
 
 
 @god_router.get("/sales-candidates")
-def sales_candidates(db: Session = Depends(get_db), god: User = Depends(require_god)):
+def sales_candidates(db: Session = Depends(get_db), god: User = Depends(require_acq_master)):
     from app.services.acquisition import onboarding as OB
     return OB.sales_candidates(db)
 
 
 @god_router.get("/onboarding-options")
-def onboarding_options(god: User = Depends(require_god)):
+def onboarding_options(god: User = Depends(require_acq_master)):
     from app.services.acquisition import onboarding as OB
     return {"services": [{"key": k, "label": l} for k, l, _ in OB.SERVICES],
+            "categories": [{"key": k, "label": l, "services": [{"key": sk, "label": sl, "segment": sg} for sk, sl, sg in svcs]}
+                           for k, l, svcs in C.SERVICE_CATEGORIES],
+            "segments": C.SEGMENTS,
             "offers": [{"key": k, "label": l} for k, l in C.OFFER_LABEL.items()]}
 
 
 @god_router.post("/clients/{org_id}/invite")
 def invite_client_admin(org_id: str, request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
-                        god: User = Depends(require_god)):
+                        god: User = Depends(require_acq_master)):
     from app.services.acquisition import onboarding as OB
     org = _client_org(db, org_id)
     out = OB.invite(db, org, god, payload.get("email") or "", payload.get("name"), _base_url(request))
@@ -466,7 +494,7 @@ def invite_client_admin(org_id: str, request: Request, payload: dict = Body(...)
 
 @god_router.post("/master/{prospect_id}/release")
 def master_release(prospect_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
-                   god: User = Depends(require_god)):
+                   god: User = Depends(require_acq_master)):
     from app.services.acquisition import distribution as D
     out = D.release(db, prospect_id, god, payload.get("reason") or "")
     if out.get("released_from"):
@@ -487,6 +515,7 @@ class Op:
 
 def _is_god(user) -> bool:
     return getattr(user, "role", None) == "god_admin"
+
 
 
 # ── #452 Phase 5: what each operations call needs ─────────────────────────────
@@ -525,7 +554,9 @@ def _needed(method: str, path: str, org_id: str) -> Optional[str]:
 
 def op_dep(org_id: str, request: Request, db: Session = Depends(get_db),
            user: User = Depends(get_current_user)) -> Op:
-    god = _is_god(user)
+    from app.services.acquisition import admins as AD
+    # Master = the global owner OR an EvoSys Acquisition admin (program grant).
+    god = AD.is_master(db, user)
     if not god and not E.is_operator(db, user, org_id):
         # Same answer for "no such org" and "not yours": ids are not probed.
         raise HTTPException(403, "You don't have acquisition operator access for this client.")
@@ -553,21 +584,24 @@ def op_dep(org_id: str, request: Request, db: Session = Depends(get_db),
 def ops_clients(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     # WHO IS SIGNED IN, stated by the server (#452 owner-access fix): the shell
     # shows this verbatim so an operator session can never pass for the owner's.
-    me = {"email": user.email, "name": user.full_name or user.email,
-          "access": "owner" if _is_god(user) else "operator"}
-    if _is_god(user):
-        return {"items": _clients(db), "is_god": True, "me": me}
+    from app.services.acquisition import admins as AD
+    access = AD.access_label(db, user)
+    me = {"email": user.email, "name": user.full_name or user.email, "access": access}
+    if access in ("owner", "admin"):
+        # `is_god` keeps its old meaning for the shell: MASTER workspace access.
+        return {"items": _clients(db), "is_god": True, "master": True, "global_owner": access == "owner", "me": me}
     ids = E.operator_org_ids(db, user)
     if not ids:
         raise HTTPException(403, "You don't have acquisition operator access.")
-    return {"items": _clients(db, set(ids)), "is_god": False, "me": me}
+    return {"items": _clients(db, set(ids)), "is_god": False, "master": False, "global_owner": False, "me": me}
 
 
 @ops_router.get("/my-queue")
 def ops_my_queue(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """The worker's own queue across ONLY the clients they're authorized for,
     filtered by what they may do there. Never the master pool."""
-    god = _is_god(user)
+    from app.services.acquisition import admins as AD
+    god = AD.is_master(db, user)
     ids = [o.id for o in E.enabled_orgs(db)] if god else E.operator_org_ids(db, user)
     if not ids:
         raise HTTPException(403, "You don't have acquisition operator access.")
@@ -633,7 +667,8 @@ def ops_overview(op: Op = Depends(op_dep)):
     p = E.get_profile(db, org.id)
     from app.services.cadence_service import org_sending_enabled
     return {
-        "organization_id": org.id, "organization_name": org.name, "is_god": op.is_god,
+        "organization_id": org.id, "organization_name": org.name, "is_god": op.is_god, "master": op.is_god,
+        "service_category": org.industry, "service_category_label": C.SERVICE_CATEGORY_LABEL.get(org.industry or "", org.industry),
         "me": {"id": op.user.id, "name": op.user.full_name or op.user.email},
         "profile": E.profile_json(org, p, full=True),
         "funnel": E.funnel(db, org.id, include_practice=True),

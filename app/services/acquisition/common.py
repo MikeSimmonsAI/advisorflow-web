@@ -89,7 +89,68 @@ SEGMENTS: List[Dict[str, str]] = [
     {"key": "apartments", "label": "Apartment complexes"},
     {"key": "property_management", "label": "Property management companies"},
     {"key": "short_term_rental", "label": "Short-term rental managers"},
+    # #452 multi-industry (2026-11-03): buyer types other service businesses sell to.
+    {"key": "retail", "label": "Retail & storefronts"},
+    {"key": "restaurants", "label": "Restaurants & hospitality"},
+    {"key": "hoa", "label": "HOAs & communities"},
+    {"key": "industrial", "label": "Warehouses & industrial"},
+    {"key": "homeowners", "label": "Homeowners (residential)"},
 ]
+
+# ── SERVICE CATEGORIES (#452, owner decision 2026-11-03) ─────────────────────
+# Acquisition is a service-business appointment engine, not a cleaning app.
+# A customer's category is its organization industry; cleaning was the first.
+# Each category: (key, label, [(service key, service label, buyer segment)]).
+SERVICE_CATEGORIES = [
+    ("cleaning", "Commercial cleaning", [
+        ("office", "Commercial office cleaning", "office"),
+        ("medical", "Medical / dental cleaning", "medical_dental"),
+        ("apartment_turnover", "Apartment turnover cleaning", "apartments"),
+        ("property_management", "Property management cleaning", "property_management"),
+        ("str_turnover", "Short-term rental turnover", "short_term_rental"),
+        ("janitorial", "Janitorial contracts", "office"),
+        ("move_in_out", "Move-in / move-out cleaning", "apartments")]),
+    ("residential_cleaning", "Residential cleaning", [
+        ("recurring_home", "Recurring home cleaning", "homeowners"),
+        ("deep_clean", "Deep cleaning", "homeowners"),
+        ("move_in_out", "Move-in / move-out cleaning", "apartments"),
+        ("str_turnover", "Short-term rental turnover", "short_term_rental")]),
+    ("window_washing", "Window washing", [
+        ("storefront_windows", "Storefront windows", "retail"),
+        ("office_windows", "Office building windows", "office"),
+        ("high_rise", "High-rise / multi-story", "property_management"),
+        ("residential_windows", "Residential windows", "homeowners")]),
+    ("pest_control", "Pest control", [
+        ("commercial_pest", "Commercial pest service", "office"),
+        ("restaurant_pest", "Restaurant & food service", "restaurants"),
+        ("multifamily_pest", "Apartment / multifamily", "apartments"),
+        ("warehouse_pest", "Warehouse & industrial", "industrial"),
+        ("residential_pest", "Residential pest service", "homeowners")]),
+    ("landscaping", "Landscaping", [
+        ("commercial_grounds", "Commercial grounds maintenance", "office"),
+        ("hoa_grounds", "HOA & community grounds", "hoa"),
+        ("multifamily_grounds", "Apartment grounds", "apartments"),
+        ("residential_lawn", "Residential lawn care", "homeowners")]),
+    ("pressure_washing", "Pressure washing", [
+        ("storefront_wash", "Storefronts & sidewalks", "retail"),
+        ("parking_wash", "Parking lots & garages", "property_management"),
+        ("building_wash", "Building exteriors", "office"),
+        ("residential_wash", "Residential exteriors", "homeowners")]),
+    ("property_maintenance", "Property maintenance", [
+        ("make_ready", "Make-ready / turnover", "apartments"),
+        ("facility_repairs", "Facility repairs", "office"),
+        ("hoa_maintenance", "HOA maintenance", "hoa")]),
+    ("service_other", "Other service business", []),
+]
+SERVICE_CATEGORY_KEYS = [k for k, _, _ in SERVICE_CATEGORIES]
+SERVICE_CATEGORY_LABEL = {k: l for k, l, _ in SERVICE_CATEGORIES}
+
+
+def services_for(category: str):
+    for k, _, svcs in SERVICE_CATEGORIES:
+        if k == category:
+            return svcs
+    return []
 SEGMENT_KEYS = [s["key"] for s in SEGMENTS]
 SEGMENT_LABEL = {s["key"]: s["label"] for s in SEGMENTS}
 
@@ -157,10 +218,12 @@ def explicitly_enabled(org) -> bool:
 
 
 def identity_ok(org) -> bool:
-    """A capability never renames a business: only a cleaning company (or an
-    org that records no industry) presents as the acquisition client."""
-    from app.services.program_experience import identity_allows
-    return identity_allows(org, IDENTITY)
+    """A capability never renames a business: only a SERVICE business (any
+    supported service category) or an org that records no industry presents as
+    an acquisition client. A funeral home, an energy company... never does."""
+    from app.services.program_experience import NEUTRAL_INDUSTRIES, industry_of
+    ind = industry_of(org)
+    return ind in SERVICE_CATEGORY_KEYS or ind in NEUTRAL_INDUSTRIES
 
 
 def acquisition_identity(org) -> bool:

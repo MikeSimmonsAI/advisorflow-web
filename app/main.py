@@ -2192,6 +2192,24 @@ async def on_startup():
             _logging.getLogger(__name__).critical("%s", _schema_error)
             raise
 
+    # 2a-acq. EVOSYS ACQUISITION ADMINS the owner named (ACQUISITION_ADMIN_EMAILS).
+    #         Adds program_admin grants only; never revokes; never God. #452.
+    try:
+        from app.deps import SessionLocal as _SL
+    except Exception:  # pragma: no cover
+        _SL = None
+    try:
+        if _SL is not None:
+            from app.services.acquisition.admins import bootstrap as _acq_bootstrap
+            _s = _SL()
+            try:
+                _acq_bootstrap(_s)
+            finally:
+                _s.close()
+    except Exception:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("acquisition admin bootstrap skipped", exc_info=True)
+
     # 2a-pre. CRM CONNECTION SECRETS — encrypt any plaintext api_key_encrypted /
     #         webhook_secret rows left over from before crm_secrets.py existed.
     #         Idempotent: already-encrypted rows are detected and skipped. Fails
