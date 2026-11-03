@@ -12,30 +12,54 @@ import { api } from '../../api/client'
 import { BusinessForm, Readiness } from './BusinessForm'
 import { DateChip, Icon, Kpi, Loading, Logo, Pill, apptPill, clock, errText, initials, money, useFont, useLoad, useToast, when } from './ui'
 import './acquisition.css'
+import './hub.css'
 
-const Ctx = createContext(null)
-const useOps = () => useContext(Ctx)
-export const OPS = '/acquisition-ops'
+import { OPS, OpsCtx as Ctx, useOps } from './opsContext'
+import { MasterOverview } from './HubPages'
+export { OPS, useOps }
 const pct = v => (v == null ? '—' : Math.round(v * 100) + '%')
 
-// Owner-only: EvoSys's own master pool and its import (never shown to operators).
-const GOD_NAV = [
+// THE ACQUISITION HUB NAVIGATION (#474). Program Access -> Acquisition.
+// Owner-only groups are hidden from operators AND refused by the server
+// (every /god/acquisition/* endpoint is God-checked); hiding is not security.
+const MASTER_NAV = [
   { to: OPS, label: 'Master Overview', icon: 'dashboard', end: true },
-  { to: `${OPS}/master`, label: 'Master Prospect Pool', icon: 'search' },
-  { to: `${OPS}/import`, label: 'Unified Importer', icon: 'building' },
+  { to: `${OPS}/import`, label: 'Import Center', icon: 'upload' },
+  { to: `${OPS}/master`, label: 'Master Prospect Pool', icon: 'database' },
+  { to: `${OPS}/research`, label: 'Research & Qualification', icon: 'flask' },
+  { to: `${OPS}/assignments`, label: 'Assignments & Distribution', icon: 'share' },
+  { to: `${OPS}/clients`, label: 'Cleaning Client Directory', icon: 'store' },
+  { to: `${OPS}/reporting`, label: 'All-Clients Reporting', icon: 'chart' },
 ]
-const NAV = [
-  { to: OPS, label: 'Control Center', icon: 'dashboard', end: true },
-  { to: `${OPS}/onboarding`, label: 'Onboarding', icon: 'building' },
-  { to: `${OPS}/discovery`, label: 'Lead Discovery', icon: 'search' },
+const CLIENT_NAV = [
+  { to: `${OPS}/client-dashboard`, label: 'Client Dashboard', icon: 'dashboard' },
   { to: `${OPS}/prospects`, label: 'Prospects', icon: 'users' },
   { to: `${OPS}/outreach`, label: 'Outreach', icon: 'mail' },
   { to: `${OPS}/responses`, label: 'Responses', icon: 'reply' },
   { to: `${OPS}/appointments`, label: 'Appointments', icon: 'calendar' },
-  { to: `${OPS}/pipeline`, label: 'Pipeline', icon: 'pipeline' },
+  { to: `${OPS}/pipeline`, label: 'Pipeline & Contracts', icon: 'pipeline' },
+  { to: `${OPS}/discovery`, label: 'Lead Discovery', icon: 'search' },
   { to: `${OPS}/health`, label: 'Worker Health', icon: 'heart' },
-  { to: `${OPS}/settings`, label: 'Settings', icon: 'settings' },
+  { to: `${OPS}/onboarding`, label: 'Client Settings', icon: 'building' },
 ]
+const SUPPORT_NAV = [
+  { to: `${OPS}/settings`, label: 'Pause, Exclusions & Operators', icon: 'settings' },
+  { to: `${OPS}/activity`, label: 'Activity History', icon: 'clock' },
+]
+const MASTER_PATHS = [OPS, ...MASTER_NAV.slice(1).map(x => x.to), `${OPS}/activity`]
+const TITLES = Object.fromEntries([...MASTER_NAV, ...CLIENT_NAV, ...SUPPORT_NAV].map(x => [x.to, x.label]))
+
+function NavGroup({ title, items, children, startOpen = true }) {
+  const [open, setOpen] = useState(startOpen)
+  return (
+    <div className={`hb-group ${open ? '' : 'closed'}`}>
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}>{title}<i>▾</i></button>
+      {children}
+      <nav className="aq-nav">{items.map(it => (
+        <NavLink key={it.to} to={it.to} end={it.end}><Icon name={it.icon} />{it.label}</NavLink>))}</nav>
+    </div>
+  )
+}
 
 function Enable({ onDone }) {
   const [orgId, setOrgId] = useState('')
@@ -75,10 +99,10 @@ export default function AcquisitionOps() {
   }
   if (!clients) return <div className="aq"><Loading label="Opening the control center…" /></div>
   if (!clients.items.length) return clients.is_god ? <Enable onDone={reloadClients} /> : <div className="aq"><Loading /></div>
-  return <TenantAcquisitionOps key={orgId} orgId={orgId} clients={clients} onSelectOrg={setSelectedOrg} />
+  return <TenantAcquisitionOps key={orgId} orgId={orgId} clients={clients} onSelectOrg={setSelectedOrg} reloadClients={reloadClients} />
 }
 
-function TenantAcquisitionOps({ orgId, clients, onSelectOrg }) {
+function TenantAcquisitionOps({ orgId, clients, onSelectOrg, reloadClients }) {
   const [ov, oErr, reloadOv] = useLoad(`/acquisition-ops/${orgId}/overview`)
   const [list, lErr, reloadList] = useLoad(`/acquisition-ops/${orgId}/prospects`)
   const [open, setOpen] = useState(false)
@@ -96,60 +120,47 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg }) {
   const reload = () => { reloadOv(); reloadList() }
   const p = ov.profile
   const me = ov.me?.name || ''
+  const onMaster = ov.is_god && MASTER_PATHS.includes(loc.pathname)
+  const page = TITLES[loc.pathname] || (ov.is_god ? 'Master Overview' : 'Client Dashboard')
   return (
-    <Ctx.Provider value={{ ov, list, listErr: lErr, reload, orgId }}>
-      <div className="aq aq-app">
+    <Ctx.Provider value={{ ov, list, listErr: lErr, reload, orgId, clients, onSelectOrg, reloadClients }}>
+      <div className="aq aq-app aq-dark">
         {open && <div className="aq-scrim" onClick={() => setOpen(false)} />}
-        <aside className={`aq-side ${open ? 'open' : ''}`} aria-label="Operations navigation">
-          <Logo />
-          <div className="aq-side__label">Operations</div>
-          <nav className="aq-nav">
-            {ov.is_god && <>
-              <div className="aq-side__label">EVOSYS MASTER ACQUISITION</div>
-              {GOD_NAV.map(it => <NavLink key={it.to} to={it.to} end={it.end}>
-                <Icon name={it.icon} />{it.label}
-              </NavLink>)}
-              <div className="aq-side__label" style={{ marginTop: 20 }}>CLIENT OPERATIONS</div>
-            </>}
-            {(ov.is_god
-              ? [{ to: `${OPS}/client-dashboard`, label: 'Client Dashboard', icon: 'dashboard' }, ...NAV.filter(it => it.to !== OPS)]
-              : NAV).map(it => (
-              <NavLink key={it.to} to={it.to} end={it.end}>
-                <Icon name={it.icon} />{it.label}{it.soon && <span className="aq-nav__soon">{it.soon}</span>}
-              </NavLink>
-            ))}
-          </nav>
-          <div className="aq-help"><b>Client-scoped operations</b>Each company has a separate pipeline. Use the Master prospect pool to research businesses; only approved assignments appear here.</div>
+        <aside className={`aq-side ${open ? 'open' : ''}`} aria-label="Acquisition Hub navigation">
+          <div className="aq-logo"><span className="aq-logo__mark"><Icon name="spark" size={16} /></span>
+            <span>EvoSys Pro<small>Acquisition Hub</small></span></div>
+          {ov.is_god && <NavGroup title="EvoSys Master Acquisition" items={MASTER_NAV} />}
+          <NavGroup title="Client Operations" items={ov.is_god || clients.items.length > 1 ? CLIENT_NAV : CLIENT_NAV.map(x => x.to === `${OPS}/client-dashboard` ? { ...x, to: OPS, end: true } : x)}>
+            {(clients.is_god || clients.items.length > 1) && <div className="hb-client">
+              <label htmlFor="hb-client">Cleaning company</label>
+              <select id="hb-client" aria-label="Acquisition client workspace" value={orgId} onChange={e => onSelectOrg(e.target.value)}>
+                {clients.items.map(c => <option key={c.organization_id} value={c.organization_id}>{c.name}</option>)}
+              </select></div>}
+          </NavGroup>
+          <NavGroup title="Actions & Support" items={ov.is_god ? SUPPORT_NAV : SUPPORT_NAV.filter(x => x.to !== `${OPS}/activity`)} startOpen={false}>
+          </NavGroup>
+          <nav className="aq-nav" style={{ marginTop: 'auto' }}><a href="/workspaces"><Icon name="back" />Return to Program Access</a></nav>
         </aside>
         <div className="aq-main">
           <header className="aq-top">
             <button className="aq-btn aq-btn--sm aq-top__menu" onClick={() => setOpen(true)} aria-label="Open navigation"><Icon name="menu" /></button>
-            <span className="aq-top__title">{ov.is_god && (loc.pathname === OPS || loc.pathname === `${OPS}/master` || loc.pathname === `${OPS}/import`) ? 'EvoSys Pro · Master Acquisition' : 'Acquisition Control Center'}</span>
+            <nav className="hb-crumbs" aria-label="Breadcrumb"><a href="/workspaces">Program Access</a><span>›</span>
+              <span className="hb-crumb-mid">Acquisition Hub</span><span className="hb-crumb-mid">›</span><b>{page}</b></nav>
             <div className="aq-top__right">
-              {(clients.is_god || clients.items.length > 1) && <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700 }}>
-                Client
-                <select aria-label="Acquisition client workspace" value={orgId} onChange={e => onSelectOrg(e.target.value)}
-                  style={{ maxWidth: 240, padding: '8px 10px', border: '1px solid #c7b4ed', borderRadius: 8, background: '#fff', color: '#241444' }}>
-                  {clients.items.map(c => <option key={c.organization_id} value={c.organization_id}>{c.name}</option>)}
-                </select>
-              </label>}
-              {ov.is_god && <a className="aq-btn aq-btn--sm" href={`${OPS}/master`}>Master prospect pool</a>}
-              {!ov.is_god && <a className="aq-btn aq-btn--sm" href="/workspaces">Switch program</a>}
+              <span className={`hb-role ${ov.is_god ? '' : 'hb-role--op'}`}><Icon name={ov.is_god ? 'shield' : 'key'} size={14} />{ov.is_god ? 'Owner' : 'Operator'}</span>
               <span className="aq-me"><span className="aq-avatar">{initials(me)}</span>
-                <div><b>{me.split(' ')[0] || me}</b><span>{ov.is_god ? 'Owner' : 'Operator'}</span></div></span>
+                <div><b>{me.split(' ')[0] || me}</b><span>EvoSys Pro</span></div></span>
             </div>
           </header>
-          <div className="aq-band">
-            <div>{ov.is_god && (loc.pathname === OPS || loc.pathname === `${OPS}/master` || loc.pathname === `${OPS}/import`)
-              ? <><h1>EvoSys Master Acquisition</h1><p>Platform Headquarters · Research, Import, Qualify &amp; Distribute</p></>
-              : <><h1>Acquisition Control Center</h1><p>{ov.organization_name} · Lead Generation &amp; Appointment Setting</p></>}</div>
-            <div className="aq-band__right">
-              {ov.is_god && (loc.pathname === OPS || loc.pathname === `${OPS}/master` || loc.pathname === `${OPS}/import`)
-                ? <span className="aq-badge">Platform Overview</span>
-                : <span className={`aq-badge ${p.paused ? 'aq-badge--paused' : ''}`}><Icon name={p.paused ? 'pause' : 'calendar'} size={15} />
-                    {p.paused ? 'Paused' : ov.progress.started ? `Pilot day ${ov.progress.day} of 30` : 'Pilot not started'}</span>}
-            </div>
-          </div>
+          {!onMaster && <div className="aq-page" style={{ paddingBottom: 0 }}>
+            <div className="hb-strip"><span className="hb-strip__mark">{initials(ov.organization_name)}</span>
+              <div><b>{ov.organization_name} — Acquisition Operations</b>
+                <span>{p.offer_label || 'Cleaning client'} · {(p.service_area || []).slice(0, 4).join(', ') || 'No service area yet'}</span></div>
+              <div className="hb-strip__right">
+                <span className={`aq-badge ${p.paused ? 'aq-badge--paused' : ''}`}><Icon name={p.paused ? 'pause' : 'calendar'} size={15} />
+                  {p.paused ? 'Paused' : ov.progress.started ? `Pilot day ${ov.progress.day} of 30` : 'Pilot not started'}</span>
+                <span className={`aq-badge ${p.readiness?.launch_ready ? '' : 'aq-badge--off'}`}>{p.readiness?.launch_ready ? 'Onboarding complete' : 'Onboarding draft'}</span>
+              </div></div></div>}
           <Suspense fallback={<Loading />}><Outlet /></Suspense>
         </div>
       </div>
@@ -194,130 +205,10 @@ function TargetRing({ booked, high }) {
   )
 }
 
-// God-only: EvoSys's master service-prospect pool and its hand-off to ONE
-// cleaning client at a time. Assigning never sends anything or starts a pilot.
-export function MasterPool() {
-  const { ov, orgId, reload } = useOps()
-  const [tab, setTab] = useState('available')
-  const [data, dErr, reloadData] = useLoad(ov.is_god ? `/god/acquisition/master/prospects?status=${tab}` : null)
-  const [chosen, setChosen] = useState([])
-  const [segment, setSegment] = useState('')
-  const [plan, setPlan] = useState(null)
-  const [result, setResult] = useState(null)
-  const [busy, setBusy] = useState(false)
-  const [fail, setFail] = useState('')
-  if (!ov.is_god) return <div className="aq-page"><div className="aq-err">Only the platform owner can open the master pool.</div></div>
-  const items = data?.items || []
-  const payload = { destination_org_id: orgId, segment: segment || null, prospect_ids: chosen }
-  const toggle = id => { setChosen(v => v.includes(id) ? v.filter(x => x !== id) : v.length >= 20 ? v : [...v, id]); setPlan(null); setResult(null) }
-  const run = async fn => { setBusy(true); setFail(''); try { await fn() } catch (e) { setFail(errText(e)) } finally { setBusy(false) } }
-  const preview = () => run(async () => setPlan(await api.post('/god/acquisition/master/assign/preview', payload)))
-  const assign = () => run(async () => { const r = await api.post('/god/acquisition/master/assign', payload); setResult(r); setPlan(null); setChosen([]); reloadData(); reload() })
-  const release = id => {
-    const reason = window.prompt('Why give this business back to the master pool?')
-    if (!reason) return
-    run(async () => { await api.post(`/god/acquisition/master/${id}/release`, { reason }); reloadData(); reload() })
-  }
-  const ready = plan && plan.decisions.length === chosen.length && plan.decisions.some(x => x.eligible)
-  const names = Object.fromEntries(items.map(x => [x.id, x.name]))
-  return (
-    <div className="aq-page">
-      <h1 className="aq-h1">Master prospect pool</h1>
-      <p className="aq-lede">EvoSys's own researched businesses. Each one goes to one cleaning client only, when you assign it. Assigning sends nothing and starts no pilot.</p>
-      <div className="aq-actions">
-        <div className="aq-tabs">{[['available', 'Available'], ['assigned', 'Assigned'], ['all', 'All']].map(([k, l]) => (
-          <button key={k} className={tab === k ? 'on' : ''} onClick={() => { setTab(k); setChosen([]); setPlan(null) }}>{l}</button>))}</div>
-        <a className="aq-btn aq-btn--sm" href={`${OPS}/import`}>Import a file</a>
-        <span className="aq-pill">{data ? `${data.total} ${tab === 'all' ? 'total' : tab}` : '…'}</span>
-      </div>
-      {dErr && <div className="aq-err">{errText(dErr)}</div>}
-      {fail && <div role="alert" className="aq-err">{fail}</div>}
-      {result && <div role="status" className="aq-ok">Assigned {result.assigned} to {ov.organization_name} · held back {result.refused} · emails sent {result.sent}</div>}
-      <section className="aq-card">
-        {!data ? <Loading /> : items.length ? (
-          <div style={{ maxHeight: 460, overflow: 'auto' }}>
-            <table className="aq-table"><thead><tr>{tab === 'available' && <th />}<th>Business</th><th>Type</th><th>Location</th><th>Contact</th><th>Source</th>{tab !== 'available' && <th>Client and result</th>}</tr></thead>
-              <tbody>{items.map(x => (
-                <tr key={x.id}>
-                  {tab === 'available' && <td><input type="checkbox" checked={chosen.includes(x.id)} onChange={() => toggle(x.id)} /></td>}
-                  <td><b>{x.name}</b><br /><small>{x.website || ''}</small></td>
-                  <td><small>{x.segment || x.industry || '—'}</small></td>
-                  <td><small>{[x.city, x.state].filter(Boolean).join(', ') || '—'}{x.geo !== 'eligible' ? ` (${x.geo})` : ''}</small></td>
-                  <td><small>{x.contact_name ? `${x.contact_name}${x.contact_title ? ', ' + x.contact_title : ''}` : ''}{x.email ? <><br />{x.email} {x.email_verified ? '(verified)' : '(not verified)'}</> : ''}{x.phone ? <><br />{x.phone}</> : ''}</small></td>
-                  <td><small>{x.source}{x.source_url ? <> · <a href={x.source_url} target="_blank" rel="noreferrer">link</a></> : ''}{x.researched_at ? <><br />{when(x.researched_at)}</> : ''}</small></td>
-                  {tab !== 'available' && <td><small>{x.assigned_to ? <>
-                    <b>{x.assigned_to}</b> by {x.assigned_by || '—'} {x.assigned_at ? when(x.assigned_at) : ''}<br />
-                    {x.client_outcome ? `${x.client_outcome.stage_label}${x.client_outcome.outreach_started ? ' · contacted' : ' · not contacted'}${x.client_outcome.appointment ? ' · appointment' : ''}${x.client_outcome.won ? ' · won' : ''}` : ''}
-                    {x.client_outcome && !x.client_outcome.outreach_started && <><br /><button className="aq-btn aq-btn--sm" disabled={busy} onClick={() => release(x.id)}>Release</button></>}
-                  </> : 'Available'}</small></td>}
-                </tr>))}</tbody></table>
-          </div>) : <div className="aq-empty">{tab === 'available' ? 'No available businesses. Import a researched file to fill the pool.' : 'Nothing here yet.'}</div>}
-      </section>
-      {tab === 'available' && !!items.length && (
-        <section className="aq-card" style={{ marginTop: 14 }}>
-          <h2>Assign {chosen.length} to {ov.organization_name}</h2>
-          <p className="aq-lede">Switch the client at the top to assign to a different company.</p>
-          <div className="aq-field"><label htmlFor="aq-mseg">Cleaning segment</label>
-            <select id="aq-mseg" value={segment} onChange={e => { setSegment(e.target.value); setPlan(null) }}>
-              <option value="">Use each business's own type</option>
-              {(ov.segments || []).map(x => <option key={x.key} value={x.key}>{x.label}</option>)}</select></div>
-          <div className="aq-actions"><button className="aq-btn" disabled={!chosen.length || busy} onClick={preview}>Check fit ({chosen.length})</button>
-            {plan && <button className="aq-btn aq-btn--primary" disabled={!ready || busy} onClick={assign}>Assign the ones that fit. Nothing is sent.</button>}</div>
-          {plan && plan.decisions.map(x => (
-            <div className="aq-row" key={x.prospect_id}><div className="aq-row__main"><b>{names[x.prospect_id] || x.prospect_id}</b>
-              <span>{x.eligible ? 'Fits' : 'Held back: ' + (x.refused_because || []).join(', ').replace(/_/g, ' ')}{(x.warnings || []).length ? ' · note: ' + x.warnings.join(', ').replace(/_/g, ' ') : ''}</span></div></div>))}
-        </section>)}
-    </div>
-  )
-}
-
-// Program Access owns this page. Role checks stay on the server:
- // God sees the platform-wide overview, never the first client's metrics.
-function OwnerAcquisitionHome() {
-  const [master, err, reload] = useLoad('/god/acquisition/master')
-  if (err) return <div className="aq-page"><div className="aq-err">{errText(err)}</div></div>
-  if (!master) return <div className="aq-page"><Loading label="Opening EvoSys Master Acquisition…" /></div>
-  const assigned = master.prospects_total == null || master.unassigned_qualified == null
-    ? null : Math.max(0, master.prospects_total - master.unassigned_qualified)
-  return <div className="aq-page">
-    <h1 className="aq-h1">Master Acquisition Headquarters</h1>
-    <p className="aq-lede">One EvoSys-owned prospect inventory. Research and import once, qualify centrally, then deliberately assign eligible businesses to your cleaning company clients. Client portals stay separate.</p>
-    <div className="aq-grid aq-kpis aq-kpis--dark">
-      <Kpi icon="building" label="Master Businesses" value={master.prospects_total ?? '—'} sub="Real records in the master prospect pool"/>
-      <Kpi icon="users" label="Available Qualified" value={master.unassigned_qualified ?? '—'} sub="Ready for manual allocation review"/>
-      <Kpi icon="handshake" label="Assigned / Other" value={assigned ?? '—'} sub="Includes any other non-available inventory"/>
-      <Kpi icon="store" label="Cleaning Clients" value={master.clients?.length ?? '—'} sub="Independently enabled tenants"/>
-    </div>
-    <div className="aq-grid aq-split" style={{ marginTop: 18 }}>
-      <section className="aq-card">
-        <h2>Master operating desk</h2>
-        <p className="aq-lede">These are platform-owned activities, not Divine Shine operations.</p>
-        <div className="aq-actions">
-          <a className="aq-btn aq-btn--primary" href={`${OPS}/master`}>Open Master Prospect Pool</a>
-          <a className="aq-btn" href={`${OPS}/import`}>Import Businesses</a>
-          <a className="aq-btn" href="/god/lead-intelligence">Research &amp; Qualification</a>
-        </div>
-      </section>
-      <section className="aq-card">
-        <h2>Client workspaces</h2>
-        <p className="aq-lede">Each cleaning company receives its own private pipeline and dashboard.</p>
-        {(master.clients || []).map(x => <div className="aq-row" key={x.organization_id}>
-          <div className="aq-row__main"><b>{x.name}</b>
-            <span>{x.paused ? 'Paused' : 'Enabled'} · {x.pilot_started_at ? 'Pilot started' : 'Pilot not started'}</span></div>
-          <span className="aq-pill">Private workspace</span>
-        </div>)}
-        <p className="aq-lede">Select a client using the top-right company selector, then open Client Dashboard, Prospects or Appointments.</p>
-      </section>
-    </div>
-    <div className="aq-note" style={{ marginTop: 16 }}>No company is contacted and no pilot starts when a business is imported or assigned. Researched prospects remain email-only.</div>
-    <button className="aq-btn aq-btn--sm" onClick={reload}>Refresh master totals</button>
-  </div>
-}
-
 export function ControlCenter() {
   const { ov } = useOps()
   const loc = useLocation()
-  return ov.is_god && loc.pathname === OPS ? <OwnerAcquisitionHome /> : <ClientControlCenter />
+  return ov.is_god && loc.pathname === OPS ? <MasterOverview /> : <ClientControlCenter />
 }
 
 function ClientControlCenter() {
