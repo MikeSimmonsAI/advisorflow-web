@@ -9,8 +9,11 @@ modified here).
 
   * Who: God, or an operator the owner granted for THAT customer. Re-checked
     on every call. The customer is chosen explicitly when the import starts.
-  * Never an EvoSys Sales prospect (a business EvoSys sells software to, like
-    the Facebook cleaning companies): a row that matches one is refused.
+  * Purpose, not industry: a prospect here is a business that might buy
+    cleaning from THIS customer. The same business may also be an EvoSys Sales
+    prospect for a different reason; that never blocks the row and nothing is
+    copied or moved - the platform owner just sees a note. An operator is never
+    told what EvoSys Sales or another customer holds.
   * Nothing is emailed, assigned elsewhere or started. Notes and intro drafts
     become evidence notes on the prospect.
 """
@@ -85,21 +88,19 @@ def find_existing(db: Session, b, n: Dict[str, Any]) -> Optional[Tuple[str, str]
     return None
 
 
-def conflicts(db: Session, b, n: Dict[str, Any]) -> List[str]:
+def related(db: Session, b, n: Dict[str, Any]) -> List[str]:
+    """The same business elsewhere, for the platform owner's information only."""
     from app.models.sales_models import Opportunity
     q = db.query(Opportunity)
     sid = n.get("source_record_id")
-    if sid and q.filter(func.lower(Opportunity.source_record_id) == sid.lower()).first():
-        return ["This is an EvoSys Sales prospect (a company EvoSys sells to), not a customer for a cleaning company"]
-    if sid:
-        for o in q.filter(Opportunity.source.ilike("%" + sid + "%")).limit(20).all():
-            if BI.id_in_text(sid, o.source):
-                return ["This is an EvoSys Sales prospect (a company EvoSys sells to), not a customer for a cleaning company"]
+    if sid and (q.filter(func.lower(Opportunity.source_record_id) == sid.lower()).first()
+                or any(BI.id_in_text(sid, o.source) for o in q.filter(Opportunity.source.ilike("%" + sid + "%")).limit(20).all())):
+        return ["Also an EvoSys Sales prospect (a company EvoSys sells to)"]
     if n.get("phone10"):
         for (phone,) in q.with_entities(Opportunity.phone).filter(
                 Opportunity.phone.ilike("%" + n["phone10"][-4:] + "%")).limit(200).all():
             if BI.digits10(phone) == n["phone10"]:
-                return ["Same phone as an EvoSys Sales prospect - not a customer for a cleaning company"]
+                return ["Same phone as an EvoSys Sales prospect"]
     return []
 
 
@@ -159,5 +160,5 @@ def undo(db: Session, b, record_id: str) -> bool:
 
 
 ADAPTER = BI.Adapter(pipeline=PIPELINE, destination=DESTINATION, label="Customer Acquisition",
-                     find_existing=find_existing, write=write, conflicts=conflicts, undo=undo,
+                     find_existing=find_existing, write=write, related=related, undo=undo,
                      commits_per_row=True)

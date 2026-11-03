@@ -476,6 +476,61 @@ def list_rows(batch_id: str, category: Optional[str] = Query(None),
             "rows": [ENG.row_payload(r) for r in rows]}
 
 
+_GUIDED_NEXT = {
+    "ready": "Will be imported when you approve the import.",
+    "approved": "Approved - will be imported.",
+    "imported": "Imported. Nothing was sent.",
+    "needs_review": "Needs a decision before it can be imported.",
+    "duplicate": "Repeats an earlier row in this file.",
+    "existing_match": "Already in this customer's records - choose skip, update or keep both.",
+    "blocked": "On a do-not-contact or suppression list - not imported for outreach.",
+    "needs_enrichment": "Missing a way to reach this person - add a phone or email and upload again.",
+    "invalid": "Fix the problem shown and upload again.",
+    "failed": "Didn't save - commit again to retry.",
+    "skipped": "Skipped.",
+    "parsed": "Check rows to see what will happen.",
+}
+_GUIDED_PROBLEMS = ("needs_review", "duplicate", "existing_match", "blocked", "needs_enrichment", "invalid", "failed")
+
+
+@router.get("/batches/{batch_id}/report.csv")
+def batch_report_csv(batch_id: str, status: Optional[str] = Query(None),
+                     db: Session = Depends(get_db), user=Depends(require_import_review)):
+    """#470 Stage C: per-row results as a spreadsheet-safe CSV. `status=problems`
+    gives every row that needs attention; any single import status works too.
+    Names, company and source id identify a row; phones and emails are left out."""
+    import csv
+    import io
+    from fastapi.responses import Response
+    from app.utils.csv_safe import row as safe
+    ctx = CTX.resolve(db, user)
+    b = _batch_or_404(db, ctx, batch_id)
+    if status and status != "problems" and status not in _GUIDED_NEXT:
+        raise HTTPException(422, "Unknown status")
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["row", "status", "next_step", "name", "company", "source_record_id", "state",
+                "classification", "duplicate_resolution", "reasons"])
+    q = db.query(ImportStagedRow).filter(ImportStagedRow.batch_id == b.id,
+                                         ImportStagedRow.organization_id == ctx.org_id)
+    if status == "problems":
+        q = q.filter(ImportStagedRow.intake_status.in_(_GUIDED_PROBLEMS))
+    elif status:
+        q = q.filter(ImportStagedRow.intake_status == status)
+    for r in q.order_by(ImportStagedRow.row_number).all():
+        try:
+            reasons = json.loads(r.status_reasons) if r.status_reasons else []
+        except Exception:  # noqa: BLE001
+            reasons = [str(r.status_reasons)]
+        name = r.full_name or " ".join(x for x in (r.first_name, r.last_name) if x)
+        w.writerow(safe([r.row_number, r.intake_status, _GUIDED_NEXT.get(r.intake_status or ""), name, r.company,
+                         r.source_record_id, r.state, r.classification, r.duplicate_resolution,
+                         "; ".join(str(x) for x in reasons)]))
+    fname = "%s-%s.csv" % (b.batch_code or "import", status or "results")
+    return Response(buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": 'attachment; filename="%s"' % fname})
+
+
 class RowOverride(BaseModel):
     classification: Optional[str] = None
     duplicate_resolution: Optional[str] = None

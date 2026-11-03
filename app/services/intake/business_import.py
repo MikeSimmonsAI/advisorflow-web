@@ -92,17 +92,23 @@ class BusinessImportError(ValueError):
 class Adapter:
     """What one destination plugs in.
 
-    find_existing(db, batch, n) -> (record_id, why) | None
+    find_existing(db, batch, n) -> (record_id, why) | None   - inside THIS destination only
     write(db, batch, user, n, row) -> record_id         (raises BusinessImportError to refuse a row)
-    conflicts(db, batch, n) -> [error strings]          (records that belong to a DIFFERENT domain)
+    related(db, batch, n) -> [notes]                    the same business in ANOTHER area, for information
     undo(db, batch, record_id) -> True if removed, False if kept (worked on since import)
+
+    A business can legitimately be an EvoSys Sales prospect and, separately, a
+    prospect in a cleaning customer's pipeline - for different reasons. So a
+    record elsewhere never blocks a row, is never copied or moved, and is only
+    shown to the platform owner (who may see every area); a sales manager or an
+    Acquisition operator is never told what another area or customer holds.
     """
     pipeline: str
     destination: str
     label: str
     find_existing: Callable[..., Optional[Tuple[str, str]]]
     write: Callable[..., str]
-    conflicts: Callable[..., List[str]] = field(default=lambda db, b, n: [])
+    related: Callable[..., List[str]] = field(default=lambda db, b, n: [])
     undo: Optional[Callable[..., bool]] = None
     commits_per_row: bool = False   # the writer commits itself (Acquisition's add_prospect does)
 
@@ -300,7 +306,7 @@ def normalize_row(raw: Dict[str, Any], mapping: Dict[str, Optional[str]]) -> Dic
     return n
 
 
-def analyze(db: Session, b: ImportBatch, adapter: Adapter) -> Dict[str, Any]:
+def analyze(db: Session, b: ImportBatch, adapter: Adapter, user=None) -> Dict[str, Any]:
     """Normalize, validate, apply geography and find matches. Writes nothing
     to the destination. Re-runnable; keeps the user's reject decisions."""
     if b.status in (ImportBatchStatus.COMMITTED, ImportBatchStatus.COMMITTING):
@@ -310,13 +316,16 @@ def analyze(db: Session, b: ImportBatch, adapter: Adapter) -> Dict[str, Any]:
         raise BusinessImportError("Map the company / business name column first")
     seen: Dict[str, str] = {}
     counts = {"rows": 0, "ready": 0, "invalid": 0, "matched_existing": 0, "duplicate_in_file": 0,
-              "held_for_review": 0, "excluded": 0, "warnings": 0, "with_intro_draft": 0}
+              "held_for_review": 0, "excluded": 0, "warnings": 0, "with_intro_draft": 0, "also_elsewhere": 0}
+    owner_view = getattr(user, "role", None) == "god_admin"
     rows = (db.query(ImportStagedRow).filter(ImportStagedRow.batch_id == b.id)
             .order_by(ImportStagedRow.row_number).all())
     for r in rows:
         counts["rows"] += 1
         n = normalize_row(json.loads(r.raw_data or "{}"), mapping)
-        n["errors"] += adapter.conflicts(db, b, n) if not n["errors"] else []
+        n["related"] = adapter.related(db, b, n) if (owner_view and not n["errors"]) else []
+        if n["related"]:
+            counts["also_elsewhere"] += 1
         r.street_address, r.city, r.state, r.zip_code = n["address"], n["city"], n["state"], n["zip_code"]
         r.email_raw = r.email_normalized = n["email"]
         r.phone_raw, r.phone_normalized = n["phone_raw"], n["phone10"] or None
@@ -423,12 +432,58 @@ def outcome(r: ImportStagedRow) -> str:
     return "ready" if committable(r) else "pending"
 
 
+NEXT_STEP = {
+    "ready": "Will be created when you press Create.",
+    "created": "Created. Nothing was sent.",
+    "matched_existing": "Already in this destination - nothing created. Open the existing record.",
+    "duplicate_in_file": "Repeats an earlier row in this file - not created.",
+    "held_for_review": "Confirm where this business is (a state in the contiguous US, not California), fix it in your file and upload again.",
+    "excluded": "Outside the supported territory (California, Alaska, Hawaii, territories or another country). Not imported.",
+    "invalid": "Fix the problem shown and upload again.",
+    "rejected": "You rejected this row. Restore it to include it.",
+    "failed": "Didn't save. Press Create again - only the missing rows are retried.",
+    "pending": "Check rows to see what will happen.",
+}
+
+
+def next_actions(b: ImportBatch) -> List[Dict[str, Any]]:
+    """What the person should do now, in plain words, from the counts."""
+    c = (json.loads(b.analysis_json or "{}") or {}).get("counts") or {}
+    rep = json.loads(b.commit_report_json or "null") or {}
+    dest = destination_of(b)
+    where = dest.get("target_name") or dest.get("label") or "this destination"
+    out: List[Dict[str, Any]] = []
+    if not c:
+        return [{"key": "analyze", "text": "Match the columns, then press Check rows. Nothing is added before you press Create."}]
+    committed = b.status == ImportBatchStatus.COMMITTED
+    if b.stage == "partially_committed":
+        out.append({"key": "retry", "text": "%d rows didn't save. Press Create again to retry only those." % rep.get("failed", 0),
+                    "download": "failed"})
+    if not committed and c.get("ready"):
+        out.append({"key": "create", "text": "%d ready to create in %s. Nothing is sent and nobody is put in a campaign." % (c["ready"], where)})
+    if committed:
+        out.append({"key": "done", "text": "%d created in %s. Messages sent: 0." % (rep.get("created", 0) + rep.get("already_created", 0), where)})
+    if c.get("held_for_review"):
+        out.append({"key": "held", "text": "%d held because their location isn't confirmed. Download the list, confirm each state, and upload those rows again." % c["held_for_review"],
+                    "download": "held_for_review"})
+    if c.get("invalid"):
+        out.append({"key": "invalid", "text": "%d can't be imported as they are. Download the list to see why." % c["invalid"], "download": "invalid"})
+    if c.get("excluded"):
+        out.append({"key": "excluded", "text": "%d are outside the supported territory and won't be imported. The list is kept for reference." % c["excluded"],
+                    "download": "excluded"})
+    if c.get("matched_existing"):
+        out.append({"key": "matched", "text": "%d are already in %s - nothing will be created for them." % (c["matched_existing"], where),
+                    "download": "matched_existing"})
+    return out
+
+
 def row_payload(r: ImportStagedRow) -> Dict[str, Any]:
     n = _biz(r)
     return {"id": r.id, "row": r.row_number, "business": n, "validation": r.validation_status,
             "duplicate": r.duplicate_status, "match_reason": r.match_reason, "review": r.review_status,
             "review_note": r.review_note, "committable": committable(r), "outcome": outcome(r),
-            "record_id": n.get("record_id"), "existing_id": n.get("existing_id")}
+            "record_id": n.get("record_id"), "existing_id": n.get("existing_id"),
+            "next_step": NEXT_STEP.get(outcome(r)), "related": n.get("related") or []}
 
 
 def commit(db: Session, b: ImportBatch, user, adapter: Adapter) -> Dict[str, Any]:
@@ -542,18 +597,22 @@ def batch_payload(b: ImportBatch) -> Dict[str, Any]:
             "stage": b.stage, "rows": b.total_rows, "headers": json.loads(b.headers_json or "[]"),
             "mapping": json.loads(b.mapping_json or "{}"), "fields": [{"key": k, "label": l} for k, l in FIELDS],
             "counts": (json.loads(b.analysis_json or "{}") or {}).get("counts"),
+            "next_actions": next_actions(b),
             "commit_report": json.loads(b.commit_report_json or "null"),
             "rollback_report": json.loads(b.rollback_report_json or "null"), "created_by": b.created_by_name,
             "created_at": b.created_at.isoformat() if b.created_at else None,
             "committed_at": b.committed_at.isoformat() if b.committed_at else None}
 
 
-REPORT_COLUMNS = ["row", "outcome", "company", "source_record_id", "state", "territory", "territory_note",
-                  "match_reason", "existing_id", "record_id", "problems"]
+REPORT_COLUMNS = ["row", "outcome", "next_step", "company", "source_record_id", "state", "country",
+                  "file_location_status", "territory_note", "match_reason", "existing_id", "record_id", "problems",
+                  "also_elsewhere"]
 
 
-def report_csv(db: Session, b: ImportBatch) -> str:
-    """Spreadsheet-safe per-row results (no contact details beyond the company)."""
+def report_csv(db: Session, b: ImportBatch, outcome_filter: Optional[str] = None) -> str:
+    """Spreadsheet-safe per-row results; `outcome_filter` gives just the held,
+    excluded, invalid, failed (...) rows. Company and source id identify each
+    row; no phone numbers or emails are written."""
     import csv
     import io
     from app.utils.csv_safe import row as safe
@@ -562,9 +621,13 @@ def report_csv(db: Session, b: ImportBatch) -> str:
     w.writerow(REPORT_COLUMNS)
     for r in (db.query(ImportStagedRow).filter(ImportStagedRow.batch_id == b.id)
               .order_by(ImportStagedRow.row_number).all()):
+        o = outcome(r)
+        if outcome_filter and o != outcome_filter:
+            continue
         n = _biz(r)
         probs = json.loads(r.validation_errors or "[]") + ([n["write_error"]] if n.get("write_error") else [])
-        w.writerow(safe([r.row_number, outcome(r), n.get("business_name"), n.get("source_record_id"), n.get("state"),
-                         n.get("territory"), n.get("territory_note"), r.match_reason, n.get("existing_id"),
-                         n.get("record_id"), "; ".join(probs)]))
+        w.writerow(safe([r.row_number, o, NEXT_STEP.get(o), n.get("business_name"), n.get("source_record_id"),
+                         n.get("state"), n.get("country"), n.get("file_location_status"), n.get("territory_note"),
+                         r.match_reason, n.get("existing_id"), n.get("record_id"), "; ".join(probs),
+                         "; ".join(n.get("related") or [])]))
     return buf.getvalue()

@@ -71,9 +71,9 @@ export default function BusinessImport({ mode }) {
     r => `Removed ${r.removed}. Kept ${r.kept_worked_on} that have been worked on since.`)
   const attach = () => run(() => api.post(`${BASE}/batches/${b.id}/attach-matched`, {}),
     r => `Added notes and drafts to ${r.notes_added} matched prospects (${r.already_attached} already had them). Filled ${r.source_id_filled} blank source IDs. Nothing else changed.`)
-  const download = () => run(async () => {
-    const url = await fetchObjectUrl(`${BASE}/batches/${b.id}/report.csv`)
-    const a = document.createElement('a'); a.href = url; a.download = `${b.code || 'import'}-results.csv`; a.click()
+  const download = (outcome = '') => run(async () => {
+    const url = await fetchObjectUrl(`${BASE}/batches/${b.id}/report.csv${outcome ? `?outcome=${outcome}` : ''}`)
+    const a = document.createElement('a'); a.href = url; a.download = `${b.code || 'import'}-${outcome || 'results'}.csv`; a.click()
   })
   const previewBackfill = () => run(async () => setBackfill(await api.get(`${BASE}/source-ids/preview`)))
   const applyBackfill = () => run(async () => { const r = await api.post(`${BASE}/source-ids/apply`, {}); setBackfill(r); return r },
@@ -139,6 +139,25 @@ export default function BusinessImport({ mode }) {
         </section>
       )}
 
+      {b?.next_actions?.length > 0 && (
+        <section className="aq-card">
+          <h2>What to do next</h2>
+          <ul>
+            {b.next_actions.map(a => (
+              <li key={a.key} style={{ margin: '6px 0' }}>
+                {a.text}{' '}
+                {a.download && <button className="btn btn-link" disabled={busy} onClick={() => download(a.download)}>Download list</button>}
+              </li>
+            ))}
+          </ul>
+          {b.commit_report && (
+            <p>Result: created {b.commit_report.created + (b.commit_report.already_created || 0)}, already there {b.commit_report.matched_existing},
+              {' '}held {b.commit_report.held_for_review}, excluded {b.commit_report.excluded}, invalid {b.commit_report.invalid},
+              {' '}failed {b.commit_report.failed}. Messages sent: {b.commit_report.messages_sent}. Put in a campaign: {b.commit_report.enrolled}.</p>
+          )}
+        </section>
+      )}
+
       {c && (
         <section className="aq-card">
           <h2>3. Review</h2>
@@ -147,14 +166,16 @@ export default function BusinessImport({ mode }) {
           <select value={filter} onChange={e => setFilter(e.target.value)}>{OUTCOMES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>{' '}
           <button className="btn" disabled={busy} onClick={() => review('reject')}>Reject selected</button>{' '}
           <button className="btn" disabled={busy} onClick={() => review('restore')}>Restore selected</button>{' '}
-          <button className="btn" disabled={busy} onClick={download}>Download results (CSV)</button>
-          <table className="aq-table"><thead><tr><th></th><th>#</th><th>Company</th><th>Source ID</th><th>State</th><th>Result</th><th>Why</th></tr></thead>
+          <button className="btn" disabled={busy} onClick={() => download()}>Download all results (CSV)</button>
+          <table className="aq-table"><thead><tr><th></th><th>#</th><th>Company</th><th>Source ID</th><th>State</th><th>Result</th><th>Why / next step</th></tr></thead>
             <tbody>{(rows || []).map(r => (
               <tr key={r.id}>
                 <td><input type="checkbox" checked={!!pick[r.id]} onChange={e => setPick({ ...pick, [r.id]: e.target.checked })} /></td>
                 <td>{r.row}</td><td>{r.business.business_name}</td><td>{r.business.source_record_id}</td><td>{r.business.state}</td>
                 <td>{r.outcome.replace(/_/g, ' ')}</td>
-                <td>{r.match_reason || r.business.territory_note || (r.business.errors || []).join('; ')}</td>
+                <td>{r.match_reason || r.business.territory_note || (r.business.errors || []).join('; ')}
+                  {r.next_step && <div className="aq-muted">{r.next_step}</div>}
+                  {r.related?.length > 0 && <div className="aq-muted">Note: {r.related.join('; ')} - nothing is copied or moved.</div>}</td>
               </tr>))}</tbody></table>
           {b.status !== 'committed' ? (
             <div style={{ marginTop: 12 }}>
