@@ -42,8 +42,8 @@ function Enable({ onDone }) {
   return (
     <div className="aq aq-gate"><div className="aq-card">
       <Logo />
-      <h1 className="aq-h1">Set up the pilot client</h1>
-      <p className="aq-lede">Paste the organization ID of the client’s workspace. The pilot is limited to one cleaning company and starts paused. Nothing is sent.</p>
+      <h1 className="aq-h1">Enable a cleaning client workspace</h1>
+      <p className="aq-lede">Use an existing cleaning company's organization ID. Every client receives its own private Acquisition portal and starts paused. Nothing is sent.</p>
       <div className="aq-field"><label htmlFor="aq-org">Organization ID</label><input id="aq-org" value={orgId} onChange={e => setOrgId(e.target.value)} /></div>
       {fail && <div className="aq-err">{fail}</div>}
       <button className="aq-btn aq-btn--primary" disabled={busy || !orgId.trim()} onClick={go}>{busy ? 'Setting up…' : 'Enable acquisition pilot'}</button>
@@ -54,7 +54,9 @@ function Enable({ onDone }) {
 export default function AcquisitionOps() {
   useFont()
   const [clients, cErr, reloadClients] = useLoad('/acquisition-ops/clients')
-  const orgId = clients?.items?.[0]?.organization_id
+  const [selectedOrg, setSelectedOrg] = useState('')
+  const orgId = clients?.items?.some(c => c.organization_id === selectedOrg)
+    ? selectedOrg : clients?.items?.[0]?.organization_id
   const [ov, oErr, reloadOv] = useLoad(orgId ? `/acquisition-ops/${orgId}/overview` : null)
   const [list, lErr, reloadList] = useLoad(orgId ? `/acquisition-ops/${orgId}/prospects` : null)
   const [open, setOpen] = useState(false)
@@ -73,7 +75,7 @@ export default function AcquisitionOps() {
   }
   if (!clients) return <div className="aq"><Loading label="Opening the control center…" /></div>
   if (!clients.items.length) return clients.is_god ? <Enable onDone={reloadClients} /> : <div className="aq"><Loading /></div>
-  if (!ov) return <div className="aq"><Loading label="Opening the control center…" /></div>
+  if (!ov || ov.organization_id !== orgId) return <div className="aq"><Loading label="Opening the selected client…" /></div>
 
   const reload = () => { reloadOv(); reloadList() }
   const p = ov.profile
@@ -92,14 +94,22 @@ export default function AcquisitionOps() {
               </NavLink>
             ))}
           </nav>
-          <div className="aq-help"><b>Development stage</b>No discovery, outreach or booking worker runs. Nothing can be sent.</div>
+          <div className="aq-help"><b>Client-scoped operations</b>Each company has a separate pipeline. Use the Master prospect pool to research businesses; only approved assignments appear here.</div>
         </aside>
         <div className="aq-main">
           <header className="aq-top">
             <button className="aq-btn aq-btn--sm aq-top__menu" onClick={() => setOpen(true)} aria-label="Open navigation"><Icon name="menu" /></button>
             <span className="aq-top__title">Acquisition Control Center</span>
             <div className="aq-top__right">
-              {!ov.is_god && <a className="aq-btn aq-btn--sm" href="/workspaces">Switch program</a>}
+              {(clients.is_god || clients.items.length > 1) && <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700 }}>
+                Client
+                <select aria-label="Acquisition client workspace" value={orgId} onChange={e => setSelectedOrg(e.target.value)}
+                  style={{ maxWidth: 240, padding: '8px 10px', border: '1px solid #c7b4ed', borderRadius: 8, background: '#fff', color: '#241444' }}>
+                  {clients.items.map(c => <option key={c.organization_id} value={c.organization_id}>{c.name}</option>)}
+                </select>
+              </label>}
+              {ov.is_god && <a className="aq-btn aq-btn--sm" href="/god/lead-intelligence">Master prospect pool</a>}
+              {!ov.is_god && <a className="aq-btn aq-btn--sm" href="/workspaces">Switch program</a>
               <span className="aq-me"><span className="aq-avatar">{initials(me)}</span>
                 <div><b>{me.split(' ')[0] || me}</b><span>{ov.is_god ? 'Owner' : 'Operator'}</span></div></span>
             </div>
