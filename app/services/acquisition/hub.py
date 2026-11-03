@@ -183,6 +183,11 @@ def client_stats(db: Session, org_ids: List[str]) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def is_test_org(name: Optional[str]) -> bool:
+    """Synthetic workspaces are named 'TEST ...' (owner's convention)."""
+    return bool(name) and name.strip().upper().startswith("TEST ")
+
+
 def overview(db: Session) -> Dict[str, Any]:
     """Platform-wide totals. Practice records never count as results."""
     pool = db.query(LeadIntelProspect).all()
@@ -195,10 +200,13 @@ def overview(db: Session) -> Dict[str, Any]:
     clients = E.enabled_orgs(db)
     ids = [o.id for o in clients]
     stats = client_stats(db, ids)
+    names_of = {o.id: o.name for o in clients}
     profiles = {p.organization_id: p for p in db.query(AcquisitionProfile)
                 .filter(AcquisitionProfile.organization_id.in_(ids)).all()} if ids else {}
-    tot = {k: sum(s[k] for s in stats.values()) for k in ("contacted", "replied", "interested", "booked", "won")}
-    mrr = round(sum(s["monthly_value_won"] for s in stats.values()), 2)
+    # TEST workspaces stay visible (labelled) but never count toward client results.
+    real = [s for oid, s in stats.items() if not is_test_org(names_of.get(oid))]
+    tot = {k: sum(s[k] for s in real) for k in ("contacted", "replied", "interested", "booked", "won")}
+    mrr = round(sum(s["monthly_value_won"] for s in real), 2)
     runs = db.query(AcquisitionDiscoveryRun).all()
     spend = round(sum(r.cost_usd or 0 for r in runs), 4)
     calls = sum((r.search_requests or 0) + (r.detail_requests or 0) for r in runs)
@@ -228,7 +236,7 @@ def overview(db: Session) -> Dict[str, Any]:
         ],
         "results": dict(tot, monthly_value_won=mrr),
         "spend": {"usd": spend, "provider_calls": calls, "source": "Metered Google Places discovery runs"},
-        "clients": [{"organization_id": o.id, "name": o.name,
+        "clients": [{"organization_id": o.id, "name": o.name, "is_test": is_test_org(o.name),
                      "paused": bool(profiles[o.id].paused) if o.id in profiles else True,
                      "pilot_started_at": C.iso(profiles[o.id].pilot_started_at) if o.id in profiles else None,
                      "service_area": C.jload(profiles[o.id].service_area, [])[:8] if o.id in profiles else [],

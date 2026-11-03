@@ -254,16 +254,19 @@ def batch(db: Session, actor: User, items: List[Dict[str, Any]], defaults: Dict[
 
 # ── the owner's views ───────────────────────────────────────────────────────
 def _invitation_state(db: Session, org_id: str) -> Dict[str, Any]:
+    """Where the client's own login really stands. Creating a workspace never
+    creates a working login: that needs an invitation link the client accepts."""
     from app.services import staff_activation as SA
     users = db.query(User).filter(User.organization_id == org_id, User.is_active.isnot(False)).all()
     if not users:
-        return {"status": "no_users", "label": "No client login yet", "users": 0}
-    signed = [u for u in users if u.last_login_at is not None]
-    if signed:
-        return {"status": "accepted", "label": "Invitation accepted", "users": len(users)}
+        return {"status": "not_sent", "label": "Invitation not sent", "users": 0}
+    if any(u.last_login_at is not None for u in users):
+        return {"status": "active", "label": "Client login active", "users": len(users)}
     rows = [SA.latest_for_user(db, u.id) for u in users]
+    if any(r is not None and r.accepted_at is not None for r in rows):
+        return {"status": "accepted", "label": "Invitation accepted - not signed in yet", "users": len(users)}
     if any(r is not None and r.is_usable() for r in rows):
-        return {"status": "pending", "label": "Invitation pending", "users": len(users)}
+        return {"status": "sent", "label": "Invitation link issued - not accepted", "users": len(users)}
     return {"status": "expired", "label": "Invitation expired - resend", "users": len(users)}
 
 
@@ -290,11 +293,9 @@ def directory(db: Session) -> Dict[str, Any]:
             stage = "outreach_ready"
         elif territory and C.jload(p.segments, []):
             stage = "ready_for_assignment"
-        elif inv["status"] == "pending":
-            stage = "invitation_pending"
         else:
             stage = "onboarding_incomplete"
-        items.append({"organization_id": o.id, "name": o.name, "created_at": C.iso(o.created_at),
+        items.append({"organization_id": o.id, "name": o.name, "is_test": HUB.is_test_org(o.name), "created_at": C.iso(o.created_at),
                       "contact": (p.owner_name if p else None), "contact_email": (p.contact_email if p else None),
                       "onboarding": {"done": done, "total": len(r["required"]), "missing": r["missing"]},
                       "status": stage, "invitation": inv, "paused": bool(p.paused) if p else True,
