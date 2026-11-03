@@ -146,6 +146,7 @@ const AcqOpsPipeline = lazyPage(() => import('./pages/acquisition/AcquisitionOps
 const AcqOpsHealth = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Health })))
 const AcqOpsSettings = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.OpsSettings })))
 const AcqOpsDiscovery = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Discovery })))
+const AcqOpsOnboarding = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.OpsOnboarding })))
 const AcqOpsSoon = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Soon })))
 const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
 const DealOperationsClosing = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsClosing })))
@@ -1574,10 +1575,11 @@ export default function App() {
         </Route>
         <Route path="/acquisition-ops" element={<ProtectedRoute bare><AcqOps /></ProtectedRoute>}>
           <Route index element={<AcqOpsHome />} />
+          <Route path="onboarding" element={<AcqOpsOnboarding />} />
           <Route path="discovery" element={<AcqOpsDiscovery />} />
           <Route path="prospects" element={<AcqOpsProspects />} />
-          <Route path="outreach" element={<AcqOpsSoon title="Outreach" phase="P3" text="Personal email drafts that pass every eligibility and suppression check before anything can send. Not built yet." />} />
-          <Route path="responses" element={<AcqOpsSoon title="Responses" phase="P3" text="Reply reading, opt-out handling and human hand-off. Not built yet." />} />
+          <Route path="outreach" element={<AcqOpsSoon title="Outreach" text="Email goes out one prospect at a time: open a prospect and use its Email tab. Every send is checked against onboarding, location, the do-not-contact list and the daily limit first. Email only - no texts or calls." />} />
+          <Route path="responses" element={<AcqOpsSoon title="Responses" text="Replies to support@ are matched to their prospect every 5 minutes. STOP adds the address to the do-not-contact list; complaints and legal threats are flagged for a person. Replies show in each prospect's activity and on the Control Center." />} />
           <Route path="appointments" element={<AcqOpsAppointments />} />
           <Route path="pipeline" element={<AcqOpsPipeline />} />
           <Route path="health" element={<AcqOpsHealth />} />

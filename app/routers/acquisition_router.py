@@ -351,6 +351,12 @@ def ops_evidence(opp_id: str, payload: dict = Body(...), op: Op = Depends(op_dep
     return {"id": e.id}
 
 
+@ops_router.put("/{org_id}/prospects/{opp_id}/location", dependencies=_WRITE)
+def ops_location(opp_id: str, payload: dict = Body(...), op: Op = Depends(op_dep)):
+    opp = E.load_opp(op.db, op.org_id, opp_id)
+    return E.set_location(op.db, op.org_id, opp, op.user, payload)
+
+
 @ops_router.post("/{org_id}/prospects/{opp_id}/email/preview")
 def ops_email_preview(opp_id: str, payload: dict = Body(default={}), op: Op = Depends(op_dep)):
     opp = E.load_opp(op.db, op.org_id, opp_id)

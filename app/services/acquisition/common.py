@@ -92,6 +92,13 @@ SEGMENT_LABEL = {s["key"]: s["label"] for s in SEGMENTS}
 DEFAULT_SERVICE_AREA = ["Dallas", "Fort Worth", "Arlington", "Plano", "Irving", "Garland",
                         "Frisco", "McKinney", "Grand Prairie", "Denton", "Richardson", "Carrollton"]
 DEFAULT_APPOINTMENT_MINUTES = 45
+DEFAULT_TIMEZONE = "America/Chicago"
+RECURRING_PREFS = ("recurring", "one_time", "both")
+# Two different offers, never mixed: Divine Shine's pilot is free; other
+# cleaning businesses may be offered the paid Growth Pilot. Owner sets it.
+FREE_PILOT = "free_pilot"
+GROWTH_PILOT = "growth_pilot_250"
+OFFER_LABEL = {FREE_PILOT: "Free 30-day pilot", GROWTH_PILOT: "$250 / 30-day Growth Pilot"}
 APPOINTMENT_TYPES = ["Walkthrough", "Consultation"]
 
 # Evidence kinds - every fact the engine states about a business carries one

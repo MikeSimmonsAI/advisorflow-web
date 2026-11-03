@@ -214,10 +214,15 @@ async def run(db: Session, org: Organization, actor: User, segment: str, city: s
                 continue
             addr = place.get("formatted_address") or ""
             pcity = _city_from_address(addr)
+            from app.services.acquisition import geo as G
+            pstate, pzip, pcountry = G.from_address(addr)
+            if G.status(pstate, pcountry)[0] == G.EXCLUDED:
+                r.excluded += 1
+                continue
             listing_url = "https://www.google.com/maps/place/?q=place_id:%s" % pid if pid else None
             opp = E.add_prospect(db, org, actor, {
                 "business_name": name, "segment": segment, "website": website, "phone": phone,
-                "street_address": addr.split(",")[0] if addr else None, "city": pcity, "state": "TX",
+                "street_address": addr.split(",")[0] if addr else None, "city": pcity, "state": pstate, "zip_code": pzip, "country": pcountry,
                 "source": "google_places", "source_url": listing_url, "is_practice": bool(practice)})
             reviews = det.get("user_ratings_total") or place.get("user_ratings_total")
             sc = score(True, bool(pcity and pcity.lower() in areas), bool(website), bool(phone), reviews)

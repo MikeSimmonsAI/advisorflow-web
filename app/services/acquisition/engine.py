@@ -14,6 +14,7 @@ from app.models.acquisition_models import (AcquisitionEvent, AcquisitionEvidence
                                            AcquisitionOperator, AcquisitionOpportunity, AcquisitionProfile)
 from app.models.models import BookingLink, Lead, Organization, User
 from app.services.acquisition import common as C
+from app.services.acquisition import geo as G
 from app.services.acquisition import harvey_adapted as H
 
 CLIENT_FEATURES = ("leads", "booking", "calendar", "availability", "reports", "users", C.FEATURE)
@@ -82,6 +83,20 @@ def profile_json(org: Organization, p: Optional[AcquisitionProfile], full: bool)
         "mailing_address": p.mailing_address if p else None,
         "booking_user_id": p.booking_user_id if p else None,
         "appointment_minutes": (p.appointment_minutes if p else None) or C.DEFAULT_APPOINTMENT_MINUTES,
+        "website": p.website if p else None,
+        "service_zips": C.jload(p.service_zips, []) if p else [],
+        "service_radius_miles": p.service_radius_miles if p else None,
+        "service_states": C.jload(p.service_states, []) if p else [],
+        "timezone": (p.timezone if p else None) or C.DEFAULT_TIMEZONE,
+        "recurring_pref": p.recurring_pref if p else None,
+        "capacity_note": p.capacity_note if p else None,
+        "appointment_attendee": p.appointment_attendee if p else None,
+        "business_description": p.business_description if p else None,
+        "approved_offer": p.approved_offer if p else None,
+        "qualification_questions": C.jload(p.qualification_questions, []) if p else [],
+        "offer_type": (p.offer_type if p else None) or C.FREE_PILOT,
+        "offer_label": C.OFFER_LABEL.get((p.offer_type if p else None) or C.FREE_PILOT),
+        "readiness": readiness(org, p),
         "configured": p is not None,
     }
     if full:
@@ -133,7 +148,7 @@ def opp_json(opp: AcquisitionOpportunity, lead: Lead, booking: Optional[BookingL
     if full:
         out.update({
             "domain": opp.domain, "source": opp.source, "source_url": opp.source_url,
-            "is_practice": bool(opp.is_practice), "score": opp.score,
+            "is_practice": bool(opp.is_practice), "score": opp.score, "geo": opp_geo(opp, lead),
             "score_reasons": C.jload(opp.score_reasons, []),
             "disqualified_reason": opp.disqualified_reason, "created_at": C.iso(opp.created_at),
             "evidence": [{"id": e.id, "kind": e.kind, "value": e.value, "source_url": e.source_url,
@@ -216,6 +231,74 @@ def _move(db, opp: AcquisitionOpportunity, to_stage: str, actor_id: Optional[str
         setattr(opp, stamp, now)
 
 
+def readiness(org: Organization, p: Optional[AcquisitionProfile]) -> Dict[str, Any]:
+    """What onboarding still needs. Draft is fine; outreach to real prospects
+    waits for every REQUIRED item. Nothing here is guessed or defaulted."""
+    def has(v):
+        return bool(v) and v not in ("[]", "")
+    j = (lambda v: C.jload(v, [])) if p else (lambda v: [])
+    req = [
+        ("business_name", "Business name", has(p and (p.business_name or org.name))),
+        ("owner_name", "Contact name", has(p and p.owner_name)),
+        ("contact_email", "Contact email", has(p and p.contact_email)),
+        ("contact_phone", "Contact phone", has(p and p.contact_phone)),
+        ("services", "Services offered", bool(p and j(p.services))),
+        ("segments", "Customer types wanted", bool(p and j(p.segments))),
+        ("service_area", "Service area (cities or ZIPs)", bool(p and (j(p.service_area) or j(p.service_zips)))),
+        ("service_states", "Service states", bool(p and j(p.service_states))),
+        ("mailing_address", "Business mailing address (printed in every email)", has(p and p.mailing_address)),
+        ("approved_offer", "Approved offer for outreach", has(p and p.approved_offer)),
+        ("appointment_attendee", "Who meets prospects and closes", has(p and p.appointment_attendee)),
+        ("booking_user", "Booking calendar", has(p and p.booking_user_id)),
+    ]
+    opt = [
+        ("website", "Website", has(p and p.website)),
+        ("timezone", "Time zone", has(p and p.timezone)),
+        ("recurring_pref", "Recurring or one-time", has(p and p.recurring_pref)),
+        ("min_job_value", "Minimum job size", bool(p and p.min_job_value)),
+        ("capacity_note", "Capacity", has(p and p.capacity_note)),
+        ("availability_note", "Usual availability", has(p and p.availability_note)),
+        ("qualification_questions", "Qualification questions", bool(p and j(p.qualification_questions))),
+        ("insurance_note", "Insurance", has(p and p.insurance_note)),
+        ("business_description", "Business description", has(p and p.business_description)),
+    ]
+    missing = [label for _, label, ok in req if not ok]
+    return {"launch_ready": not missing, "missing": missing,
+            "required": [{"key": k, "label": l, "ok": ok} for k, l, ok in req],
+            "optional": [{"key": k, "label": l, "ok": ok} for k, l, ok in opt]}
+
+
+def opp_geo(opp: AcquisitionOpportunity, lead: Optional[Lead]) -> Dict[str, Optional[str]]:
+    """The stored territory decision, or (older rows) one worked out from the
+    state on the lead - never a guess."""
+    if opp.geo_status:
+        return {"status": opp.geo_status, "note": opp.geo_note}
+    st, why = G.status(lead.state if lead else None)
+    return {"status": st, "note": why}
+
+
+def set_location(db: Session, org_id: str, opp: AcquisitionOpportunity, actor: User,
+                 data: Dict[str, Any]) -> Dict[str, Any]:
+    """Operator confirms or corrects where a prospect is."""
+    lead = db.query(Lead).filter(Lead.id == opp.lead_id, Lead.organization_id == org_id).first()
+    if lead is None:
+        raise HTTPException(404, "Prospect not found")
+    for k, w in (("street_address", 200), ("city", 80), ("zip_code", 20)):
+        if k in data:
+            setattr(lead, k, (str(data[k] or "").strip()[:w]) or None)
+    if "state" in data:
+        lead.state = G.normalize_state(data.get("state")) or ((data.get("state") or "").strip()[:20] or None)
+    gs, why = G.status(lead.state, data.get("country"))
+    note = (data.get("note") or "").strip()[:150]
+    opp.geo_status, opp.geo_note = gs, (why + (" - " + note if note else ""))[:200]
+    _event(db, org_id, opp.id, "location", actor.id, note="Location set: %s" % opp.geo_note)
+    if gs == G.EXCLUDED and opp.stage not in (C.DISQUALIFIED, C.LOST, C.WON):
+        opp.disqualified_reason = why
+        _move(db, opp, C.DISQUALIFIED, actor.id, why)
+    db.commit()
+    return {"geo_status": gs, "geo_note": opp.geo_note, "stage": opp.stage}
+
+
 def add_prospect(db: Session, org: Organization, actor: User, data: Dict[str, Any]) -> AcquisitionOpportunity:
     """Owner adds one business with its evidence (the controlled test cohort,
     and the hand-entry path). Dedupe + exclusions are deterministic."""
@@ -244,6 +327,10 @@ def add_prospect(db: Session, org: Organization, actor: User, data: Dict[str, An
           (H.do_not_contact_match(email, excl) if email else "")
     if hit:
         raise HTTPException(409, "Not added: matches the client's exclusion list (%s)" % hit)
+    state = G.normalize_state(data.get("state")) or ((data.get("state") or "").strip()[:20] or None)
+    geo_status, geo_why = G.status(state, data.get("country"))
+    if geo_status == G.EXCLUDED:
+        raise HTTPException(409, "Not added: %s" % geo_why)
     practice = bool(data.get("is_practice", True))
     facts = {"company": name, "website": website, "segment": segment,
              "contact_title": (data.get("contact_title") or "").strip()[:120] or None}
@@ -251,7 +338,7 @@ def add_prospect(db: Session, org: Organization, actor: User, data: Dict[str, An
                 last_name=(data.get("contact_last_name") or "").strip()[:80] or None, email=email,
                 phone=(data.get("phone") or "").strip()[:40] or None,
                 street_address=(data.get("street_address") or "").strip()[:200] or None,
-                city=(data.get("city") or "").strip()[:80] or None, state=(data.get("state") or "TX")[:20],
+                city=(data.get("city") or "").strip()[:80] or None, state=state,
                 zip_code=(data.get("zip_code") or "").strip()[:20] or None,
                 source=C.PRACTICE_SOURCE if practice else C.LEAD_SOURCE, contact_channel="email_only",
                 custom_fields=C.jdump({k: v for k, v in facts.items() if v}))
@@ -262,7 +349,7 @@ def add_prospect(db: Session, org: Organization, actor: User, data: Dict[str, An
                                  segment=segment, dedupe_key=key, domain=domain or None,
                                  source=(data.get("source") or "manual")[:60],
                                  source_url=(data.get("source_url") or "").strip()[:500] or None,
-                                 is_practice=practice)
+                                 is_practice=practice, geo_status=geo_status, geo_note=geo_why[:200])
     db.add(opp)
     db.flush()
     _event(db, org.id, opp.id, "stage", actor.id, None, C.DISCOVERED,
@@ -392,6 +479,65 @@ def update_profile(db: Session, org_id: str, data: Dict[str, Any], owner: bool) 
         p.services = C.jdump(C.clean_list(data["services"], limit=30, width=120))
     if "min_job_value" in data:
         p.min_job_value = C.money(data["min_job_value"])
+    more = {"website": 300, "capacity_note": 1000, "appointment_attendee": 200,
+            "business_description": 2000, "approved_offer": 2000}
+    for k, w in more.items():
+        if k in data:
+            setattr(p, k, (str(data[k] or "").strip()[:w]) or None)
+    if "service_zips" in data:
+        raw = data["service_zips"]
+        items = raw if isinstance(raw, list) else str(raw or "").replace(",", " ").split()
+        zips = [z.strip() for z in items if str(z).strip()]
+        bad = [z for z in zips if not (len(z) == 5 and z.isdigit())]
+        if bad:
+            raise HTTPException(422, "ZIP codes must be 5 digits: %s" % ", ".join(bad[:5]))
+        p.service_zips = C.jdump(sorted(set(zips))[:300])
+    if "service_radius_miles" in data:
+        v = data["service_radius_miles"]
+        if v in (None, ""):
+            p.service_radius_miles = None
+        else:
+            try:
+                r = int(v)
+            except (TypeError, ValueError):
+                raise HTTPException(422, "Radius must be whole miles")
+            if not 1 <= r <= 250:
+                raise HTTPException(422, "Radius must be 1-250 miles")
+            p.service_radius_miles = r
+    if "service_states" in data:
+        raw = data["service_states"]
+        items = raw if isinstance(raw, list) else str(raw or "").replace(",", " ").split()
+        states = []
+        for x in items:
+            st = G.normalize_state(str(x))
+            gs, why = G.status(st)
+            if gs != G.ELIGIBLE:
+                raise HTTPException(422, "Service area: %s" % why if st else "Unknown state %r" % x)
+            states.append(st)
+        p.service_states = C.jdump(sorted(set(states)))
+    if "timezone" in data:
+        tz = (data.get("timezone") or "").strip()
+        if tz:
+            try:
+                from zoneinfo import ZoneInfo
+                ZoneInfo(tz)
+            except Exception:  # noqa: BLE001
+                raise HTTPException(422, "Unknown time zone")
+        p.timezone = tz or None
+    if "recurring_pref" in data:
+        rp = data.get("recurring_pref") or None
+        if rp and rp not in C.RECURRING_PREFS:
+            raise HTTPException(422, "Choose recurring, one-time or both")
+        p.recurring_pref = rp
+    if "qualification_questions" in data:
+        raw = data["qualification_questions"]
+        items = raw if isinstance(raw, list) else str(raw or "").split("\n")
+        p.qualification_questions = C.jdump([q.strip()[:300] for q in items if str(q).strip()][:12])
+    if owner and "offer_type" in data:
+        ot = data.get("offer_type") or C.FREE_PILOT
+        if ot not in C.OFFER_LABEL:
+            raise HTTPException(422, "Unknown offer")
+        p.offer_type = ot
     if "appointment_minutes" in data:
         try:
             m = int(data["appointment_minutes"])
