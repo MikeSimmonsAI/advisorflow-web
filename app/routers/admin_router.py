@@ -1353,6 +1353,37 @@ class ResetPasswordRequest(BaseModel):
     must_change_password: bool | None = None
 
 
+class SetupLinkRequest(BaseModel):
+    base_url: str | None = None
+
+
+@router.post("/users/{user_id}/setup-link", dependencies=_USERS)
+def issue_setup_link(user_id: str, req: SetupLinkRequest = SetupLinkRequest(), db: Session = Depends(get_db),
+                     current_user: User = Depends(require_org_admin)):
+    """A NEW one-time setup link for a teammate who has not finished setting up
+    (program team screens, e.g. Atlantis "Accounts & Access", #452 2026-11-03).
+
+    Workspace admins only, for people homed in the workspace being worked in
+    (same scope as deactivate). Never for an account that already signs in -
+    that is a password reset, which stays super-admin only. Issuing revokes the
+    previous pending link, so there is only ever one. Nothing is emailed; no
+    password is created, returned or logged.
+    """
+    from fastapi import HTTPException
+    target = _get_target_user_for_admin(user_id, current_user, db)
+    if not target.is_active:
+        raise HTTPException(status_code=409, detail="This login is deactivated. Reactivate it first.")
+    if target.last_login_at is not None and not target.must_change_password:
+        raise HTTPException(status_code=409, detail="This person already signs in. A password reset is a separate, administrator-only action.")
+    _row, raw = _activation.issue(db, target, current_user, purpose=_PURPOSE_SETUP)
+    url = _activation.activation_url(req.base_url, raw)
+    db.commit()
+    log_action(db, target.organization_id or current_user.organization_id, current_user.id,
+               action="user.setup_link_issued", target_type="user", target_id=target.id,
+               details={"email": target.email})
+    return {"user_id": target.id, "email": target.email, "setup_url": url}
+
+
 @router.post("/users/{user_id}/reset-password", response_model=ResetPasswordResponse, dependencies=_USERS)
 def reset_user_password(
     user_id: str,
