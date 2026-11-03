@@ -181,20 +181,66 @@ def _sender(db, r, lead) -> dict:
             "sender_name": m.get("sender_name"), "subject": m.get("subject")}
 
 
+def _campaign_scope(M, campaign: Optional[str]) -> str:
+    """The selected campaign scope, or 404 - another workspace's campaign is
+    answered exactly like one that does not exist."""
+    from app.services.programs import campaign_attribution as CA
+    try:
+        return M.check_scope(campaign)
+    except CA.CampaignNotFound:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+
+
+def _campaign_filter(query, lead_col, org: str, scope: str):
+    """Limit a query to families in the campaign scope, in SQL (indexed on the
+    organization; never by loading every conversation into the browser)."""
+    from app.services.programs import campaign_attribution as CA
+    R = ProgramSourceRecord
+    if scope == CA.ALL:
+        return query
+    if scope == CA.UNATTRIBUTED:
+        keyed = (R.organization_id == org) & R.campaign_family.isnot(None) & R.lead_id.isnot(None)
+        from sqlalchemy import select
+        return query.filter(lead_col.notin_(select(R.lead_id).where(keyed)))
+    from sqlalchemy import select
+    cond = (R.import_run_id == scope[len(CA.IMPORT_PREFIX):]) if scope.startswith(CA.IMPORT_PREFIX) \
+        else (R.campaign_family == scope)
+    return query.filter(lead_col.in_(select(R.lead_id).where((R.organization_id == org) & cond
+                                                              & R.lead_id.isnot(None))))
+
+
+def _campaign_stamp(M, lead_id: str, latest=None) -> dict:
+    """The campaign shown on an inbox card: the campaign of the family's newest
+    attributable activity (the reply on the card), and every campaign the
+    family has been in, so earlier participation is never hidden."""
+    at = getattr(latest, "received_at", None) if latest is not None else None
+    explicit = getattr(latest, "campaign_family", None) if latest is not None else None
+    k, _run, ev = M.attribute(lead_id, at or datetime.utcnow(), explicit)
+    keys = M.keys_of(lead_id)
+    return {"campaign": M.stamp(k, ev),
+            "campaigns": [{"key": x, "name": M.families[x].name if x in M.families else x} for x in keys]}
+
+
 @router.get("")
 def command_home(location_id: Optional[str] = None, q: Optional[str] = None, limit: int = Query(40, le=200),
-                 view: str = Query("all", alias="filter"),
+                 view: str = Query("all", alias="filter"), campaign: Optional[str] = None,
                  db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     from app.models.models import BookingLink
     from app.services.programs import engagement as _eng
+    from app.services.programs import campaign_attribution as CA
     prog = _program(db, user, managers_only=False)
     org = prog.organization_id
     locs = _locations(db, org)
     start = _central_day_start_utc()
+    M = CA.Memberships(db, org)
+    scope = _campaign_scope(M, campaign)
 
     rq = _tr.exclude_test_responses(db.query(ProgramResponse).filter(ProgramResponse.organization_id == org))
     if location_id:
         rq = rq.filter(ProgramResponse.location_id == location_id)
+    # CAMPAIGN FILTER, on the server: the conversations of families who are in
+    # the selected campaign (one canonical thread per family - never split).
+    rq = _campaign_filter(rq, ProgramResponse.lead_id, org, scope)
     open_rows = rq.filter(ProgramResponse.handling_status != "closed").all()
     owner_test_ids = set()
     if False:  # test conversations are never shown in SCI Live (owner, Oct 15)
@@ -263,7 +309,8 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                       "home_visit": _home_visit_waiting(conv),
                       "human_handoff": _human_handoff(r, conv),
                       "handoff_reason": (conv.handoff_reason or "")[:200] if _human_handoff(r, conv) else None,
-                      "advisor": advisors.get(getattr(lead, "assigned_to_id", None))})
+                      "advisor": advisors.get(getattr(lead, "assigned_to_id", None)),
+                      **_campaign_stamp(M, lid, r)})
     # NEWEST FIRST, always (Oct 22, Mike): what came in today is at the top - an
     # older hot or overdue reply never pushes today's messages down the list.
     # Hot / overdue / home-visit still show as badges and in their own filters.
@@ -324,6 +371,10 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
         "counts": {"needs_attention": needs, "human_handoff": filter_counts["handoff"], "replies_today": today_rows, "visits_booked": booked,
                    "contacted_today": contacted},
         "filter": flt, "filter_counts": filter_counts,
+        "campaign": scope, "campaign_name": M.name_of(scope),
+        # family counts in the selector: real families only, as on Analytics
+        "campaign_options": CA.catalog(M, {i for (i,) in db.query(Lead.id).filter(Lead.organization_id == org,
+                                                                                Lead.is_test.isnot(True))}),
         "owner_alert": owner_alert,
         "inbox": items[:limit],
         "tasks": _open_tasks(db, org, location_id),
@@ -580,6 +631,24 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
             thread.append({"who": "ai", "text": t.text, "channel": "sms", "delivery": t.delivery,
                            "at": t.created_at.isoformat() + "Z" if t.created_at else None})
     thread = sorted([t for t in thread if t["at"]], key=lambda t: t["at"])
+    # Each message's campaign, from the evidence (campaign_attribution.py).
+    from app.services.programs import campaign_attribution as CA
+    M = CA.Memberships(db, prog.organization_id)
+    explicit = {r.id: r.campaign_family for r in resps}
+    for t in thread:
+        try:
+            at_ = datetime.fromisoformat(t["at"].rstrip("Z"))
+        except (TypeError, ValueError):
+            at_ = None
+        k, _run, ev = M.attribute(lead.id, at_, explicit.get(t.get("response_id")))
+        t["campaign"] = M.stamp(k, ev)
+    history = []
+    for m_ in M.by_lead.get(lead.id, ()):
+        run = M.runs.get(m_["run"]) if m_["run"] else None
+        history.append({"key": m_["key"], "name": (M.families[m_["key"]].name if m_["key"] in M.families
+                                                    else m_["key"]) if m_["key"] else "No campaign on record",
+                        "joined_at": m_["at"].isoformat() + "Z" if m_["at"] else None,
+                        "import_file": run.filename if run is not None else None})
     assigned = db.query(User).filter(User.id == lead.assigned_to_id).first() if lead.assigned_to_id else None
     last = thread[-1] if thread else None
     booking = (db.query(BookingLink).filter(BookingLink.lead_id == lead.id,
@@ -592,6 +661,8 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
         "phone": lead.phone, "email": lead.email,
         "location": locs.get(rec.location_id) if rec else None,
         "campaign": (rec.campaign_family or "").replace("_", " ").title() if rec else None,
+        "campaign_history": history,
+        **_campaign_stamp(M, lead.id, latest),
         "assigned_to": {"id": assigned.id, "name": assigned.full_name or assigned.email} if assigned else None,
         "team": team,
         "status": latest.handling_status if latest else None,
@@ -1236,7 +1307,7 @@ def _link_retest(db, prog) -> dict:
 
 @router.get("/analytics")
 def command_analytics(range_: str = Query("today", alias="range"), start: Optional[str] = None,
-                      end: Optional[str] = None, location_id: Optional[str] = None,
+                      end: Optional[str] = None, location_id: Optional[str] = None, campaign: Optional[str] = None,
                       db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     """Performance Home: recorded totals for the period (and all time), touch
     analytics, funnel, failure reasons, location performance, trend and the
@@ -1244,7 +1315,12 @@ def command_analytics(range_: str = Query("today", alias="range"), start: Option
     from app.services.programs import daily_batch, sci_analytics as SA
     prog = _program(db, user, managers_only=False)
     L = SA.ledger(db, prog.organization_id)
-    out = SA.summary(L, _analytics_window(range_, start, end), location_id or None, daily_batch.status(prog))
+    from app.services.programs import campaign_attribution as CA
+    scope = _campaign_scope(L.memberships, campaign)
+    out = SA.summary(L, _analytics_window(range_, start, end), location_id or None, daily_batch.status(prog),
+                     campaign=scope)
+    out["campaign_name"] = L.memberships.name_of(scope)
+    out["campaign_options"] = CA.catalog(L.memberships, set(L.families))
     out["daily_batch"] = daily_batch.status(prog)
     out["overview"] = SA.overview(L, db, location_id or None)
     out["streams"] = SA.streams(L, location_id or None)
@@ -1261,6 +1337,7 @@ def command_analytics_records(metric: str, range_: str = Query("today", alias="r
                               end: Optional[str] = None, location_id: Optional[str] = None,
                               channel: Optional[str] = None, touch: Optional[str] = None,
                               status: Optional[str] = None, limit: int = Query(1000, le=5000),
+                              campaign: Optional[str] = None,
                               db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     """Metric drill-down: the exact records behind a number, with the same
     filters. `count` is the full number; `items` the newest `limit` rows."""
@@ -1274,8 +1351,9 @@ def command_analytics_records(metric: str, range_: str = Query("today", alias="r
     prog = _program(db, user, managers_only=False)
     L = SA.ledger(db, prog.organization_id)
     w = _analytics_window(range_, start, end)
+    scope = _campaign_scope(L.memberships, campaign)
     f = {k: v for k, v in (("location_id", location_id), ("channel", channel), ("touch", touch),
-                           ("status", status)) if v}
+                           ("status", status), ("campaign", scope if scope != "all" else None)) if v}
     rows = SA.rows(L, metric, w, f)
     items, truncated = SA.present(L, rows, limit)
     label, kind, help_ = SA.METRICS[metric]
@@ -1283,7 +1361,25 @@ def command_analytics_records(metric: str, range_: str = Query("today", alias="r
             "window": {k: w[k] for k in ("preset", "label", "start_date", "end_date")}, "filters": f,
             "count": len(rows), "families": len({r["lead_id"] for r in rows}),
             "items": items, "truncated": truncated, "data_as_of": L.built_at.isoformat() + "Z",
+            "campaign": scope, "campaign_name": L.memberships.name_of(scope),
             "locations_all": [{"id": k, "name": v} for k, v in sorted(L.locs.items(), key=lambda kv: kv[1] or "")]}
+
+
+@router.get("/analytics/campaigns")
+def command_analytics_campaigns(range_: str = Query("today", alias="range"), start: Optional[str] = None,
+                                end: Optional[str] = None, location_id: Optional[str] = None,
+                                db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """COMPARE CAMPAIGNS + RECONCILIATION: every campaign over the same window
+    and the same metric definitions, the unattributed / ambiguous remainder,
+    and the check that the parts add up to All campaigns. Real families only."""
+    from app.services.programs import sci_analytics as SA
+    prog = _program(db, user, managers_only=False)
+    L = SA.ledger(db, prog.organization_id)
+    w = _analytics_window(range_, start, end)
+    out = SA.campaign_rows(L, w, location_id or None)
+    out["window"] = {k: w[k] for k in ("preset", "label", "start_date", "end_date")}
+    out["data_as_of"] = L.built_at.isoformat() + "Z"
+    return out
 
 
 @router.get("/analytics/journey/{lead_id}")

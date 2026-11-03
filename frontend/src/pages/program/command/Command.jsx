@@ -17,7 +17,7 @@ import { api } from '../../../api/client'
 import EngagementGauge, { useEngagement } from '../EngagementGauge'
 import SelfCheck from '../SelfCheck'
 import VoicemailPlayer from '../../../components/telephony/VoicemailPlayer'
-import { Journey, MetricDrill, PerformanceHome, ResendBar } from './Performance'
+import { CampaignSelect, CampaignTag, Journey, MetricDrill, PerformanceHome, ResendBar } from './Performance'
 import { Home, ScreenTabs, TopBar, useHomeData } from './Dashboard'
 import { LIVE_SCREENS, MobileNav, SideNav } from './SciNav'
 import Consent from './Consent'
@@ -119,7 +119,18 @@ export default function Command() {
   const [at, setAt] = useState(null)
   const engagement = useEngagement()
   const [err, setErr] = useState('')
-  const [range, setRange] = useState({ preset: 'today' })
+  // CAMPAIGN AND DATES LIVE IN THE URL (?c= campaign, ?r= range, ?rs/?re
+  // custom dates): Analytics, its drill-downs, the inbox and a family's page
+  // all read the same selection, and Back / a shared link restore it.
+  const campaign = sp.get('c') || 'all'
+  const setCampaign = v => nav({ c: v && v !== 'all' ? v : null }, true)
+  const RANGE_KEYS = ['today', '24h', '7d', '30d', 'all', 'custom']
+  const range = useMemo(() => {
+    const p = RANGE_KEYS.includes(sp.get('r')) ? sp.get('r') : 'today'
+    return p === 'custom' ? { preset: p, start: sp.get('rs') || '', end: sp.get('re') || '' } : { preset: p }
+  }, [sp]) // eslint-disable-line react-hooks/exhaustive-deps
+  const setRange = r => nav({ r: r.preset === 'today' ? null : r.preset, rs: r.preset === 'custom' ? r.start : null,
+    re: r.preset === 'custom' ? r.end : null }, true)
   const [lastFamily, setLastFamily] = useState(null)
   const [inboxSel, setInboxSel] = useState(null)
   const wide = useWide()
@@ -224,7 +235,8 @@ export default function Command() {
       onBack={() => { setStartReply(false); back({ f: null, v: null }); load() }} toast={setToast} toastText={null} />)
   }
   if (drill) {
-    return frame(<MetricDrill key={JSON.stringify(drill)} spec={drill} range={drill.range || range} loc={loc} onBack={() => back({ m: null })} openFamily={openFamily} />, 'wide')
+    return frame(<MetricDrill key={JSON.stringify(drill)} spec={drill} range={drill.range || range} loc={loc} campaign={campaign}
+      onCampaign={setCampaign} onBack={() => back({ m: null })} openFamily={openFamily} />, 'wide')
   }
   return frame(<div className={`cmd ${tab === 'home' || tab === 'reports' || tab === 'consent' || (tab === 'inbox' && wide) ? 'cmd-wide' : ''}`}>
       {tab === 'home' && <>
@@ -271,12 +283,13 @@ export default function Command() {
       </>}
       {tab === 'inbox' && (wide
         ? <div className="sl-inbox">
-          <div className="sl-inbox-list"><InboxTab loc={loc} act={act} open={id => { setStartReply(false); setInboxSel(id); setLastFamily(id) }} selected={inboxSel} /></div>
+          <div className="sl-inbox-list"><InboxTab loc={loc} act={act} open={id => { setStartReply(false); setInboxSel(id); setLastFamily(id) }} selected={inboxSel}
+            campaign={campaign} setCampaign={setCampaign} /></div>
           <div className="sl-inbox-pane">{inboxSel
             ? <Family key={inboxSel} id={inboxSel} embedded startReply={startReply} onBack={() => setInboxSel(null)} toast={setToast} toastText={null} />
             : <p className="sl-pick">Choose a conversation on the left. The family's messages, context, handling and scheduling open here.</p>}</div>
         </div>
-        : <InboxTab loc={loc} act={act} open={openFamily} />)}
+        : <InboxTab loc={loc} act={act} open={openFamily} campaign={campaign} setCampaign={setCampaign} />)}
       {tab === 'search' && <>
         <header className="cmd-top"><h1>Search</h1></header>
         <SearchBox q={q} setQ={setQ} autoFocus />
@@ -286,7 +299,8 @@ export default function Command() {
       {tab === 'consent' && <Consent />}
       {tab === 'reports' && <section id="sl-reports" className="sl-reports">
         <SectionHead title="Analytics · performance & reports" />
-        <PerformanceHome range={range} setRange={setRange} loc={loc} setLoc={setLoc} openMetric={setDrill} />
+        <PerformanceHome range={range} setRange={setRange} loc={loc} setLoc={setLoc} openMetric={setDrill}
+          campaign={campaign} setCampaign={setCampaign} />
       </section>}
     </div>, tab === 'home' || tab === 'inbox' || tab === 'reports' || tab === 'consent' ? 'wide' : '')
 }
@@ -339,16 +353,19 @@ function SearchResults({ q, loc, open }) {
 const FILTERS = [['all', 'All'], ['handoff', 'Human handoff'], ['needs_reply', 'Needs reply'], ['unread', 'Unread'], ['ai', 'AI handling'], ['human', 'Human attention'],
   ['appointments', 'Appointments'], ['home_visits', 'Home visits'], ['text', 'Text'], ['email', 'Email'], ['handled', 'Handled']]
 
-function InboxTab({ loc, act, open, selected }) {
+function InboxTab({ loc, act, open, selected, campaign = 'all', setCampaign }) {
   const [flt, setFlt] = useState('all')
   const [r, setR] = useState(null)
+  const [opts, setOpts] = useState(null)
   const seq = useRef(0)
   const load = useCallback(() => {
     const n = ++seq.current
     const p = new URLSearchParams({ filter: flt, limit: '200' })
     if (loc) p.set('location_id', loc)
-    api.get(`/program/command?${p}`).then(x => { if (n === seq.current) setR(x) }).catch(() => { if (n === seq.current) setR({ inbox: [] }) })
-  }, [flt, loc])
+    if (campaign && campaign !== 'all') p.set('campaign', campaign)
+    api.get(`/program/command?${p}`).then(x => { if (n === seq.current) { setR(x); if (x.campaign_options) setOpts(x.campaign_options) } })
+      .catch(e => { if (n === seq.current) { setR({ inbox: [] }); if (/campaign not found/i.test(e?.message || '')) setCampaign?.('all') } })
+  }, [flt, loc, campaign]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     load()
     const t = setInterval(() => { if (document.visibilityState === 'visible') load() }, REFRESH_MS)
@@ -357,6 +374,10 @@ function InboxTab({ loc, act, open, selected }) {
   const c = r?.filter_counts || {}
   return <>
     <header className="cmd-top"><h1>Inbox</h1>{c.unread ? <p className="cmd-sub">{c.unread} new</p> : null}</header>
+    {setCampaign && <div className="cmd-campaignbar">
+      <CampaignSelect value={campaign} onChange={setCampaign} options={opts} compact />
+      {campaign !== 'all' && <button className="link" onClick={() => setCampaign('all')}>All campaigns</button>}
+    </div>}
     {c.handoff > 0 && flt !== 'handoff' && <button className="cmd-handoff-bar" onClick={() => setFlt('handoff')}>
       <b>HUMAN HANDOFF</b> {c.handoff === 1 ? '1 family needs' : `${c.handoff} families need`} a person - the AI sent them nothing. Tap to see them ›</button>}
     <div className="cmd-chips" role="tablist">
@@ -447,6 +468,9 @@ function Inbox({ items, act, open, empty, selected }) {
               {i.is_test && <em className="chan human">TEST</em>}
               <em className={`badge ${BADGE[i.badge] || 'low'}`}>{i.badge}</em>
             </span>
+            <span className="cmd-row3"><CampaignTag c={i.campaign} small />
+              {(i.campaigns || []).length > 1 && <small className="cmd-multi" title={i.campaigns.map(x => x.name).join(' · ')}>+{i.campaigns.length - 1} earlier campaign{i.campaigns.length > 2 ? 's' : ''}</small>}
+              {i.advisor && <small className="cmd-adv">· {i.advisor}</small>}</span>
             {email && i.sender_email && <small className="cmd-from" title={i.sender_email}>{i.sender_email}</small>}
             <small className="cmd-locline">{email ? `Family: ${i.name}${i.location ? ` · ${i.location}` : ''}` : (i.location || 'Location not set')}</small>
             {email && i.subject && <small className="cmd-subjline">{i.subject}</small>}
@@ -701,7 +725,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
             {t.channel === 'email' && t.who === 'us' && (t.to || t.subject) && <small className="cmd-bhead">{t.to ? `To ${t.to}` : ''}{t.to && t.subject ? ' · ' : ''}{t.subject || ''}</small>}
             <p>{t.text}</p>
             {t.audio_path && <VoicemailPlayer path={t.audio_path} label={`Play voicemail${t.duration ? ` (${t.duration}s)` : ''}`} />}
-            <small>{time(t.at)}{t.channel === 'email' ? ' · EMAIL' : t.channel === 'voicemail' ? ' · VOICEMAIL' : ' · TEXT'}{t.source === 'sci_appointment_setter' ? ' · AI' : ''}{t.delivery === 'simulated' && t.who === 'us' ? ' · simulated' : ''}{t.who === 'us' && ['failed', 'undelivered', 'bounced'].includes(t.delivery) ? ` · NOT SENT${t.error ? `: ${t.error}` : ''}` : ''}{t.who === 'ai' ? ` · AI ${t.delivery === 'draft' ? 'draft' : t.delivery}` : ''}</small>
+            <small>{t.campaign && <CampaignTag c={t.campaign} small />}{time(t.at)}{t.channel === 'email' ? ' · EMAIL' : t.channel === 'voicemail' ? ' · VOICEMAIL' : ' · TEXT'}{t.source === 'sci_appointment_setter' ? ' · AI' : ''}{t.delivery === 'simulated' && t.who === 'us' ? ' · simulated' : ''}{t.who === 'us' && ['failed', 'undelivered', 'bounced'].includes(t.delivery) ? ` · NOT SENT${t.error ? `: ${t.error}` : ''}` : ''}{t.who === 'ai' ? ` · AI ${t.delivery === 'draft' ? 'draft' : t.delivery}` : ''}</small>
           </div></Fragment>)) : <p className="cmd-muted">No messages yet.</p>}
       </section>}
 
@@ -711,7 +735,11 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
           <dt><Icon n="call" />Phone</dt><dd>{fmtPhone(f.phone) || '—'}{f.phone && <a href={`tel:${f.phone}`}>Call</a>}</dd>
           {f.email && <><dt><Icon n="mail" />Email</dt><dd>{f.email}</dd></>}
           <dt><Icon n="pin" />Location</dt><dd>{f.location || '—'}</dd>
-          <dt><Icon n="flag" />Campaign</dt><dd>{f.campaign || '—'}</dd>
+          <dt><Icon n="flag" />Campaign</dt><dd>{f.campaign_history?.length
+            ? <span className="cmd-camphist">{f.campaign_history.map((h, k) => (
+              <span key={k}><CampaignTag c={{ key: h.key, name: h.name, evidence: h.key ? 'membership' : 'unattributed' }} small />
+                <small>{h.joined_at ? `since ${dayLabel(h.joined_at)}` : ''}{h.import_file ? ` · ${h.import_file}` : ''}</small></span>))}</span>
+            : (f.campaign || '—')}</dd>
           <dt><Icon n="person" />Assigned to</dt>
           <dd>{f.assigned_to?.name || 'Unassigned'}<button className="link" onClick={() => setPicking(!picking)}>{f.assigned_to ? 'Change' : 'Assign'}</button></dd>
           {picking && <div className="cmd-assign">
