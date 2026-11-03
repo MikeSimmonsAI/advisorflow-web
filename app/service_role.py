@@ -121,6 +121,9 @@ SCHEDULER_OWNER: Dict[str, str] = {
     # AI Workforce queue worker. Once, so a work item is claimed by one
     # process (the claim is also a row-level lease, as a second lock).
     JobName.AI_WORKFORCE_WORKER: ROLE_BACKEND,
+    # #452 Harvey AI workforce for Acquisition. Once: its jobs are leased rows,
+    # and one owner keeps two processes from planning the same pass.
+    JobName.ACQUISITION_WORKFORCE: ROLE_BACKEND,
 }
 
 # A guard rather than a comment: a loop added to JobName without an owner here
