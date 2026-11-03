@@ -305,6 +305,8 @@ def directory(db: Session) -> Dict[str, Any]:
         else:
             stage = "onboarding_incomplete"
         items.append({"organization_id": o.id, "name": o.name, "is_test": HUB.is_test_org(o.name), "created_at": C.iso(o.created_at),
+                      "service_category": o.industry,
+                      "service_category_label": C.SERVICE_CATEGORY_LABEL.get(o.industry or "", o.industry),
                       "contact": (p.owner_name if p else None), "contact_email": (p.contact_email if p else None),
                       "onboarding": {"done": done, "total": len(r["required"]), "missing": r["missing"]},
                       "status": stage, "invitation": inv, "paused": bool(p.paused) if p else True,
