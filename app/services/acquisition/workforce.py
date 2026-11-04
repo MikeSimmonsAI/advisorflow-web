@@ -270,8 +270,8 @@ def plan(db: Session, now: Optional[datetime] = None) -> Dict[str, int]:
         # Keyed by the website's domain: when a person (or website discovery)
         # adds a website, research runs again for that site - exactly once.
         dom = H.normalize_domain(p.website or "") or "none"
-        # ':v2' = re-run once under the stricter website/contact rules (#506).
-        if enqueue(db, "research", "pool:%s:%s:v2" % (p.id, dom), target_type="pool_prospect", target_id=p.id):
+        # ":v3" = re-run once under the stricter website/contact rules (#506).
+        if enqueue(db, "research", "pool:%s:%s:v3" % (p.id, dom), target_type="pool_prospect", target_id=p.id):
             out["research"] += 1
     clients = enabled_client_ids(db)
     day = now.strftime("%Y-%m-%d")
@@ -630,7 +630,8 @@ _STOP = {"the", "and", "of", "llc", "inc", "co", "company", "group", "center", "
          "north", "south", "east", "west", "primary", "medical", "medicine", "health", "healthcare", "pediatric",
          "pediatrics", "kids", "children", "childrens", "medspa", "spa", "associates", "partners", "practice",
          "physicians", "physician", "doctors", "office", "offices", "smile", "smiles", "apartments", "residential",
-         "management", "property", "properties", "dfw", "metro", "city", "first", "plus", "pllc", "ltd", "corp"}
+         "management", "property", "properties", "dfw", "metro", "city", "first", "plus", "pllc", "ltd", "corp",
+         "com", "net", "org", "www", "http", "https", "biz", "info", "inc"}
 # Pages that list MANY businesses under one domain (a health system's provider
 # finder, a franchise locator). Their homepage is the network's, never the clinic's.
 DIRECTORY_PATH_RE = re.compile(r"/(find-a-|providers?/|locations?/|directory|doctors?/|physicians?/|staff/|"
@@ -1384,7 +1385,7 @@ def set_pool_website(db: Session, actor, prospect_id: str, url: str, fetch=None)
                        "website": base, "source_url": u, "confidence": conf,
                        "match": match or ("site could not be read yet" if final is None else "homepage does not name the business")})
     db.commit()
-    job = enqueue(db, "research", "pool:%s:%s:v2" % (p.id, H.normalize_domain(base) or "none"),
+    job = enqueue(db, "research", "pool:%s:%s:v3" % (p.id, H.normalize_domain(base) or "none"),
                   target_type="pool_prospect", target_id=p.id)
     return {"id": p.id, "website": base, "confidence": conf, "match": match, "research_queued": bool(job),
             "readable": final is not None}

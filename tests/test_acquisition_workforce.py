@@ -768,3 +768,14 @@ def test_recheck_undoes_an_earlier_wrong_website_and_email(pilot):
     log = json.loads(bad.evidence_json)["research_log"]
     assert any(e.get("by") == "Harvey re-check" and any("removed" in u for u in e["undone"]) for e in log)
     assert person.website == "https://typed-synthetic.example"     # never touched: not the worker's finding
+
+
+def test_domain_words_in_a_name_never_match_a_directory_site(pilot):
+    p = pilot
+    db = p["db"]
+    row = _pool(db, name="DFW Property Management.com", website=None, source_url="https://ipm-synthetic.example")
+    _start(p)
+    WF.run_pass(db, fetch=_fetcher({"https://ipm-synthetic.example": "<title>iPropertyManagement.com | Reviews</title>"}),
+                mx=_mx_yes)
+    db.refresh(row)
+    assert row.website is None
