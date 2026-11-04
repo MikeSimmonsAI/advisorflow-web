@@ -93,7 +93,7 @@ def background_enabled() -> bool:
 # setter checks the program's OFF/DRAFT/AUTO mode and its emergency switch).
 # The grant lives in a ContextVar for the duration of one call, names the
 # organization, and every budget cap and the provider breaker still apply.
-SCOPED_FEATURES = frozenset({"sci_appointment_setter"})
+SCOPED_FEATURES = frozenset({"sci_appointment_setter", "acquisition_workforce"})
 _GRANT: contextvars.ContextVar = contextvars.ContextVar("ai_scoped_grant", default=None)
 
 
@@ -167,6 +167,11 @@ CAPABILITY_MODELS: Dict[str, str] = {
     # categories (no prices - those come from the DFW cost table). A manual action
     # a person clicks, capped per workspace per day (wholesale_photo_repairs.py).
     "wholesale_photo_repairs": "gpt-4o-mini",
+    # #452 Harvey acquisition workforce: a first business email drafted from
+    # verified evidence only, and a second reading of an unclear reply. Both
+    # are returned as JSON and checked by deterministic rules before use.
+    "acquisition_draft":      "gpt-4o-mini",
+    "acquisition_reply_assist": "gpt-4o-mini",
     "voice_call":             "gpt-4o-realtime-preview",
 }
 

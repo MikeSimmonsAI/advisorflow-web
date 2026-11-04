@@ -341,3 +341,47 @@ class AcquisitionDraft(Base):
     created_at = Column(DateTime, server_default=func.now())
     decided_at = Column(DateTime, nullable=True)
     decided_by_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+class AcquisitionAIPolicy(Base):
+    """The owner's AI spending policy for the workforce (id='global'). The
+    daily call limit lives on AcquisitionWorkforceState.daily_ai_call_limit;
+    0 there means no model call is ever made. New table: no migration."""
+    __tablename__ = "acquisition_ai_policy"
+    id = Column(String, primary_key=True, default="global")
+    per_client_daily_calls = Column(Integer, nullable=False, default=20)
+    max_tokens_per_call = Column(Integer, nullable=False, default=600)
+    max_calls_per_pass = Column(Integer, nullable=False, default=5)
+    # Dollar ceiling per day. Enforced only with configured unit prices; a
+    # ceiling with no prices blocks calls rather than guessing the spend.
+    daily_cost_ceiling_usd = Column(Float, nullable=True)
+    retry_limit = Column(Integer, nullable=False, default=1)
+    breaker_threshold = Column(Integer, nullable=False, default=3)
+    consecutive_failures = Column(Integer, nullable=False, default=0)
+    breaker_open_until = Column(DateTime, nullable=True)
+    updated_by_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+
+
+class AcquisitionAICall(Base):
+    """Every model invocation the workforce attempted - made, refused or
+    failed - with provider, model, tokens and cost provenance."""
+    __tablename__ = "acquisition_ai_calls"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    job_id = Column(String, nullable=True, index=True)
+    purpose = Column(String(30), nullable=False)          # draft / reply_assist
+    dedupe_key = Column(String(300), nullable=True, unique=True)
+    provider = Column(String(30), nullable=False, default="openai")
+    model = Column(String(60), nullable=True)
+    capability = Column(String(60), nullable=True)
+    status = Column(String(12), nullable=False)           # ok / refused / error / rejected (grounding)
+    tokens_in = Column(Integer, nullable=True)
+    tokens_out = Column(Integer, nullable=True)
+    cost_usd = Column(Float, nullable=True)               # NULL = not tracked (no unit prices)
+    cost_basis = Column(String(20), nullable=True)        # estimate:configured_prices / none
+    attempts = Column(Integer, nullable=False, default=1)
+    latency_ms = Column(Integer, nullable=True)
+    error = Column(String(500), nullable=True)
+    output = Column(Text, nullable=True)                  # the model's JSON, for provenance
+    created_at = Column(DateTime, server_default=func.now(), index=True)

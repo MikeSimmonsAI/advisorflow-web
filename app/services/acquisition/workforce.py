@@ -41,7 +41,7 @@ import re
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -267,7 +267,10 @@ def plan(db: Session, now: Optional[datetime] = None) -> Dict[str, int]:
             .filter(LeadIntelProspect.suppressed_reason.is_(None), LeadIntelProspect.duplicate_of_id.is_(None))
             .order_by(LeadIntelProspect.routed_org_id.is_(None), LeadIntelProspect.created_at).limit(500).all())
     for p in pool:
-        if enqueue(db, "research", "pool:" + p.id, target_type="pool_prospect", target_id=p.id):
+        # Keyed by the website's domain: when a person (or website discovery)
+        # adds a website, research runs again for that site - exactly once.
+        dom = H.normalize_domain(p.website or "") or "none"
+        if enqueue(db, "research", "pool:%s:%s" % (p.id, dom), target_type="pool_prospect", target_id=p.id):
             out["research"] += 1
     clients = enabled_client_ids(db)
     day = now.strftime("%Y-%m-%d")
@@ -322,7 +325,7 @@ def handlers() -> Dict[str, Callable]:
 
 
 def run_pass(db: Session, now: Optional[datetime] = None, *, practice_only: bool = False,
-             fetch=None, mx=None, force: bool = False) -> Dict[str, Any]:
+             fetch=None, mx=None, force: bool = False, osm=None) -> Dict[str, Any]:
     """One bounded pass. Does nothing unless the workforce is Running (or a
     practice test was asked for and nothing is emergency-stopped)."""
     now = now or datetime.utcnow()
@@ -331,6 +334,7 @@ def run_pass(db: Session, now: Optional[datetime] = None, *, practice_only: bool
         return {"ran": 0, "skipped": "workforce is %s" % s.status}
     recovered = recover_leases(db, now)
     planned = plan(db, now)
+    _PASS_AI["n"] = 0
     ran, results = 0, {}
     clients = set(enabled_client_ids(db))
     limit = s.max_jobs_per_pass
@@ -356,7 +360,7 @@ def run_pass(db: Session, now: Optional[datetime] = None, *, practice_only: bool
                 continue
         if (practice_only or s.mode == "practice") and job.organization_id is not None and not job.is_practice:
             continue
-        _execute(db, job, now, fetch=fetch, mx=mx)
+        _execute(db, job, now, fetch=fetch, mx=mx, osm=osm)
         ran += 1
         results[job.worker] = results.get(job.worker, 0) + 1
     s = state(db)
@@ -368,13 +372,13 @@ def run_pass(db: Session, now: Optional[datetime] = None, *, practice_only: bool
     return summary
 
 
-def _execute(db: Session, job: AcquisitionWorkerJob, now: datetime, fetch=None, mx=None) -> None:
+def _execute(db: Session, job: AcquisitionWorkerJob, now: datetime, fetch=None, mx=None, osm=None) -> None:
     job.status, job.attempts = "running", job.attempts + 1
     job.started_at, job.lease_until = now, now + timedelta(seconds=LEASE_SECONDS)
     db.commit()
     try:
         fn = handlers()[job.worker]
-        status, result = fn(db, job, fetch=fetch, mx=mx)
+        status, result = fn(db, job, fetch=fetch, mx=mx, osm=osm)
         job.status, job.result, job.error = status, json.dumps(result, default=str)[:8000], None
         job.finished_at, job.lease_until = datetime.utcnow(), None
         db.commit()
@@ -595,7 +599,101 @@ def verify_contacts(site: Dict[str, Any], mx=None) -> Dict[str, Any]:
     return {"status": status, "best": best, "emails": published, "phones": phones}
 
 
-def run_research(db: Session, job, fetch=None, mx=None, **_):
+LISTING_HOSTS = ("google.", "goo.gl", "maps.", "yelp.", "facebook.", "fb.com", "instagram.", "linkedin.",
+                 "bbb.org", "yellowpages.", "mapquest.", "nextdoor.", "angi.", "homeadvisor.", "thumbtack.",
+                 "apartments.com", "zillow.", "healthgrades.", "zocdoc.", "vitals.com", "webmd.", "npiregistry",
+                 "opencorporates.", "sos.state", "manta.com", "chamberofcommerce.", "bing.com", "apple.com")
+_STOP = {"the", "and", "of", "llc", "inc", "co", "company", "group", "center", "services", "service", "dallas",
+         "texas", "tx", "plano", "frisco", "richardson", "family", "care", "clinic", "dental", "dentistry"}
+
+
+def _name_tokens(name: str) -> List[str]:
+    return [w for w in re.findall(r"[a-z0-9]+", (name or "").lower()) if len(w) >= 4 and w not in _STOP]
+
+
+OSM_UA = "EvoSysPro-Acquisition/1.0 (business website lookup; +https://evosyspro.live)"
+_OSM_LAST = {"t": 0.0}
+
+
+def _default_osm(name: str, city: Optional[str], state_: Optional[str]) -> Dict[str, Any]:
+    """ONE OpenStreetMap (Nominatim) place lookup - free, no account, ODbL
+    data - at most one request per second, as Nominatim's usage policy asks
+    (Harvey uses the same service the same way). Returns the website tag of
+    the best-matching place, if the place carries one."""
+    import time as _t
+    import httpx
+    wait = 1.1 - (_t.monotonic() - _OSM_LAST["t"])
+    if wait > 0:
+        _t.sleep(wait)
+    _OSM_LAST["t"] = _t.monotonic()
+    q = ", ".join(x for x in (name, city, state_ or "TX", "USA") if x)
+    try:
+        r = httpx.get("https://nominatim.openstreetmap.org/search", timeout=12,
+                      params={"q": q, "format": "jsonv2", "limit": 3, "extratags": 1, "countrycodes": "us"},
+                      headers={"User-Agent": OSM_UA})
+        if r.status_code != 200:
+            return {"error": "OpenStreetMap HTTP %d" % r.status_code}
+        rows = r.json() or []
+    except Exception as exc:                                     # noqa: BLE001
+        return {"error": "OpenStreetMap unavailable (%s)" % type(exc).__name__}
+    tokens = _name_tokens(name)
+    for row in rows:
+        tags = row.get("extratags") or {}
+        site = tags.get("website") or tags.get("contact:website") or tags.get("url")
+        label = (row.get("name") or row.get("display_name") or "").lower()
+        if site and tokens and sum(1 for t in tokens if t in label) >= max(1, (len(tokens) + 1) // 2):
+            return {"website": site, "osm": "%s/%s" % (row.get("osm_type"), row.get("osm_id"))}
+    return {"none": True}
+
+
+def find_website(p, fetch=None, osm=None) -> Dict[str, Any]:
+    """Source-based website discovery - NO guessing, NO paid lookup. Candidates
+    come only from (1) the business's own source link when that isn't a
+    listing site, (2) a website/url field from its import, or (3) the website
+    tag of the matching place in OpenStreetMap (free, public). A candidate is
+    accepted only when that site's homepage names the business."""
+    cands = []
+    src = (getattr(p, "source_url", None) or "").strip()
+    if src.lower().startswith(("http://", "https://")) and not any(h in src.lower() for h in LISTING_HOSTS):
+        cands.append(("source link", src))
+    try:
+        ev = json.loads(p.evidence_json) if p.evidence_json else {}
+    except ValueError:
+        ev = {}
+    if isinstance(ev, dict):
+        for k in ("website", "url", "site", "web", "homepage"):
+            v = ev.get(k)
+            if isinstance(v, str) and v.strip() and not any(h in v.lower() for h in LISTING_HOSTS):
+                cands.append(("import field '%s'" % k, v.strip()))
+    osm_note = None
+    if not cands and (osm is not False):
+        o = (osm or _default_osm)(p.name or "", getattr(p, "city", None), getattr(p, "state", None))
+        if o.get("website"):
+            cands.append(("OpenStreetMap %s" % o.get("osm", ""), o["website"]))
+        else:
+            osm_note = o.get("error") or "not listed with a website in OpenStreetMap"
+    if not cands:
+        why = "its source link is a listing page" if src else "no source link"
+        return {"note": "%s; %s" % (why, osm_note) if osm_note else why,
+                "provider_unavailable": bool(osm_note and "unavailable" in osm_note)}
+    tokens = _name_tokens(p.name or "")
+    fetch = fetch or _default_fetch
+    for where, url in cands:
+        u = url if url.lower().startswith(("http://", "https://")) else "https://" + url
+        final, html = fetch(u)
+        if final is None:
+            continue
+        pg = parse_page(html)
+        hay = (pg["title"] + " " + pg["description"] + " " + pg["text_fenced"][:4000]).lower()
+        hits = [t for t in tokens if t in hay]
+        if tokens and len(hits) >= max(1, (len(tokens) + 1) // 2):
+            base = "%s://%s" % (urlparse(final).scheme, urlparse(final).netloc)
+            return {"website": base, "source": where, "confidence": 0.8 if len(hits) == len(tokens) else 0.6,
+                    "match": "homepage names %s" % ", ".join(hits)}
+    return {"note": "a candidate site did not name the business"}
+
+
+def run_research(db: Session, job, fetch=None, mx=None, osm=None, **_):
     now = datetime.utcnow()
     if job.target_type == "pool_prospect":
         from app.models.lead_intel_models import LeadIntelProspect
@@ -603,15 +701,25 @@ def run_research(db: Session, job, fetch=None, mx=None, **_):
         if p is None:
             return "blocked", {"reason": "The business is no longer in the master pool"}
         if p.suppressed_reason:
-            return "blocked", {"reason": "Suppressed: %s" % p.suppressed_reason}
+            return "blocked", {"reason_code": "suppressed", "reason": "Excluded or suppressed: %s" % p.suppressed_reason}
         if not (p.website or "").strip():
-            return "blocked", {"status": "research_incomplete",
-                               "reason": "No official website is on file, and no free search source is approved "
-                                         "to find one. A person can add the website, then research re-runs."}
+            found = find_website(p, fetch, osm)
+            if found.get("website"):
+                p.website = found["website"]
+                _pool_evidence(p, {"at": now.isoformat(), "by": "Harvey website discovery", "website": found["website"],
+                                   "source_url": found["source"], "confidence": found["confidence"],
+                                   "match": found["match"]})
+                db.commit()
+            else:
+                return "blocked", {"status": "research_incomplete",
+                                   "reason_code": "provider_unavailable" if found.get("provider_unavailable") else "no_website",
+                                   "reason": "No website available: none on file, none in the business's own "
+                                             "source records or OpenStreetMap%s. Add the website and research re-runs."
+                                             % ((" (%s)" % found["note"]) if found.get("note") else "")}
         site = read_site(p.website, fetch)
         if not site["pages"]:
-            return "blocked", {"status": "research_incomplete", "reason": "Website could not be read (%s)"
-                               % site.get("error")}
+            return "blocked", {"status": "research_incomplete", "reason_code": "website_failed",
+                               "reason": "Website request failed (%s)" % site.get("error")}
         v = verify_contacts(site, mx)
         home_url, home = site["pages"][0]
         entry = {"at": now.isoformat(), "by": "Harvey research worker", "source_url": home_url,
@@ -629,6 +737,7 @@ def run_research(db: Session, job, fetch=None, mx=None, **_):
             p.email, p.email_verified = v["emails"][0]["email"], False
         db.commit()
         return "done", {"status": v["status"], "pages": len(site["pages"]),
+                        "reason_code": None if v["best"] else ("no_email" if not v["emails"] else "email_unvalidated"),
                         "verified_email": (v["best"] or {}).get("email"), "source": home_url}
     # A client's own prospect.
     opp = db.query(AcquisitionOpportunity).filter(AcquisitionOpportunity.id == job.target_id,
@@ -736,8 +845,12 @@ def run_outreach(db: Session, job, **_):
     who = O.client_name(org, prof)
     d = M.first_touch(org, prof, company, (lead.first_name or "").strip(),
                       (prof.owner_name if prof and prof.owner_name else who), ev)
-    ai_note = ai_status(db)
     gen = "template:%s" % M.category(org)
+    ai = draft_with_model(db, job, org, prof, lead, company, who, ev)
+    qualification = None
+    if ai.get("draft"):
+        d, gen, qualification = ai["draft"], ai["generated_by"], ai.get("qualification")
+    ai_note = {"used": bool(ai.get("draft")), "reason": ai.get("reason")}
     row = AcquisitionDraft(organization_id=opp.organization_id, opportunity_id=opp.id, kind="first",
                            subject=d["subject"], body=d["body"], generated_by=gen,
                            evidence_refs=json.dumps(ev[:10]), followups=json.dumps(M.followup_plan(org)),
@@ -749,25 +862,59 @@ def run_outreach(db: Session, job, **_):
         from app.services.acquisition import engine as E
         E._move(db, opp, C.OUTREACH_READY, None, "Workforce drafted a first email - waiting for approval")
     db.commit()
-    return "done", {"draft_id": row.id, "generated_by": gen, "ai": ai_note, "needs_approval": True,
-                    "sent": 0}
+    return "done", {"draft_id": row.id, "generated_by": gen, "ai": ai_note, "qualification": qualification,
+                    "needs_approval": True, "sent": 0}
+
+
+_PASS_AI = {"n": 0}
+
+
+def draft_with_model(db, job, org, prof, lead, company, who, ev, client=None) -> Dict[str, Any]:
+    """A real model draft through the AI gateway, or a plain reason why not.
+    Deterministic grounding rules decide whether the model's text is used."""
+    from app.services.acquisition import ai_worker as AI
+    from app.services.acquisition import messaging as M
+    r = AI.readiness(db, org.id)
+    if r["state"] != "connected":
+        return {"reason": r["reason"] if r["state"] == "disabled" else "%s %s" % (AI.UNAVAILABLE_FALLBACK, r["reason"])}
+    pol = AI.policy(db)
+    if _PASS_AI["n"] >= pol.max_calls_per_pass:
+        return {"reason": "This pass already used its %d AI calls; template used" % pol.max_calls_per_pass}
+    facts = {"business_name": who, "category": M.category(org),
+             "category_label": C.SERVICE_CATEGORY_LABEL.get(M.category(org), "service business"),
+             "services": (C.jload(prof.services, []) if prof else [])[:6],
+             "service_area": (C.jload(prof.service_area, []) if prof else [])[:4],
+             "approved_offer": (prof.approved_offer if prof else None) or None,
+             "signer": (prof.owner_name if prof and prof.owner_name else who)}
+    prospect = {"company": company, "first_name": (lead.first_name or "").strip() or None}
+    _PASS_AI["n"] += 1
+    res = AI.invoke(db, purpose="draft", capability="acquisition_draft", org_id=org.id, job_id=job.id,
+                    messages=AI.draft_messages(facts, prospect, ev), client=client)
+    if not res["ok"]:
+        return {"reason": "%s %s" % (AI.UNAVAILABLE_FALLBACK, res["reason"])}
+    data = res["data"]
+    probs = AI.grounding_problems(data, facts, prospect)
+    if probs:
+        call = res.get("call")
+        if call is not None and call.status == "ok":
+            call.status, call.error = "rejected", ("Grounding check: " + "; ".join(probs))[:500]
+            db.commit()
+        return {"reason": "The model's draft failed the grounding check (%s); template used" % "; ".join(probs)}
+    model = (res.get("call").model if res.get("call") is not None else None) or "unknown"
+    qual = {"fit": data.get("fit") if data.get("fit") in ("good", "unclear", "poor") else "unclear",
+            "reasons": [str(x)[:200] for x in (data.get("fit_reasons") or [])][:4],
+            "needs_human": bool(data.get("needs_human")), "human_reason": str(data.get("human_reason") or "")[:200]}
+    return {"draft": {"subject": str(data["subject"]).strip()[:150], "body": str(data["body"]).strip()[:2000]},
+            "generated_by": "model:%s/%s" % (AI.PROVIDER, model), "qualification": qual}
 
 
 def ai_status(db: Optional[Session] = None) -> Dict[str, Any]:
-    """Whether model-written drafting could be used, in plain words. The
-    workforce uses evidence-only templates unless the owner allows AI calls."""
-    try:
-        s_limit = state(db).daily_ai_call_limit if db is not None else 0
-    except Exception:                                            # noqa: BLE001
-        s_limit = 0
-    if not s_limit:
-        return {"available": False, "reason": "AI drafting is off: the owner has allowed 0 AI calls per day. "
-                                              "Drafts use the category template and verified facts only."}
-    from app.services import ai_gateway as G
-    if not G.background_enabled():
-        return {"available": False, "reason": "AI drafting is allowed here but background AI is switched off "
-                                              "on the server (AI_BACKGROUND_AUTOMATION_ENABLED)."}
-    return {"available": True, "reason": "AI drafting allowed, capped at %d calls/day" % s_limit}
+    """The AI model's real readiness (ai_worker.readiness), in plain words."""
+    if db is None:
+        return {"available": False, "state": "unknown", "reason": "Not checked"}
+    from app.services.acquisition import ai_worker as AI
+    r = AI.readiness(db)
+    return dict(r, available=r["state"] == "connected")
 
 
 # ── worker: replies ─────────────────────────────────────────────────────────
@@ -854,11 +1001,45 @@ def run_replies(db: Session, job, **_):
         if opp.stage != C.REPLIED:
             E._move(db, opp, C.REPLIED, None, "Replied: " + (r.body or "")[:200])
         E._move(db, opp, C.LOST, None, "Workforce read the reply as not interested")
+    assist = None
+    if c["label"] in AI_ASSIST_LABELS:
+        # A second reading by the model for replies the rules can't settle. It
+        # SUGGESTS only: the opt-out and complaint rules above already ran, and
+        # no stage moves on the model's word - a person decides.
+        assist = reply_assist(db, job, r.body or "")
+        if assist.get("label"):
+            action += " · AI reading: %s (%.0f%%)%s - %s" % (
+                assist["label"].replace("_", " "), assist["confidence"] * 100,
+                ", wants an appointment" if assist["appointment_intent"] else "",
+                assist["suggested_next_action"] or "needs a person")
     E._event(db, opp.organization_id, opp.id, "reply_classified", None,
              note=("%s (%.0f%%) - %s" % (c["label"], c["confidence"] * 100, action))[:300])
     db.commit()
     return "done", {"reply_id": r.id, "classification": c["label"], "confidence": c["confidence"],
-                    "evidence": c["evidence"], "next": action, "human": c["label"] in HUMAN_REVIEW}
+                    "evidence": c["evidence"], "next": action, "human": c["label"] in HUMAN_REVIEW,
+                    "ai_assist": assist}
+
+
+AI_ASSIST_LABELS = ("ambiguous", "question", "request_for_information", "objection")
+
+
+def reply_assist(db, job, text: str, client=None) -> Dict[str, Any]:
+    from app.services.acquisition import ai_worker as AI
+    r = AI.readiness(db, job.organization_id)
+    if r["state"] != "connected":
+        return {"used": False, "reason": r["reason"]}
+    pol = AI.policy(db)
+    if _PASS_AI["n"] >= pol.max_calls_per_pass:
+        return {"used": False, "reason": "Pass AI limit reached"}
+    _PASS_AI["n"] += 1
+    res = AI.invoke(db, purpose="reply_assist", capability="acquisition_reply_assist", org_id=job.organization_id,
+                    job_id=job.id, messages=AI.reply_messages(text), client=client)
+    if not res["ok"]:
+        return {"used": False, "reason": "%s %s" % (AI.UNAVAILABLE_FALLBACK, res["reason"])}
+    out = AI.clean_reply_assist(res["data"])
+    out["used"] = True
+    out["model"] = "model:%s/%s" % (AI.PROVIDER, res["call"].model if res.get("call") is not None else "unknown")
+    return out
 
 
 # ── worker: appointment setter ──────────────────────────────────────────────
@@ -978,6 +1159,245 @@ def blockers(db: Session) -> Dict[str, List[str]]:
     return out
 
 
+RESEARCH_REASON_LABEL = {
+    "no_website": "No website available",
+    "website_failed": "Website request failed",
+    "suppressed": "Excluded or suppressed",
+    "no_email": "No published email found",
+    "email_unvalidated": "Email found but its domain failed validation (or wasn't the business's own)",
+    "provider_unavailable": "Provider unavailable",
+    "failed": "Worker failed (moved to the failed queue)",
+    "other": "Other",
+}
+
+
+def _reason_code(job) -> Optional[str]:
+    res = C.jload(job.result, {}) or {}
+    code = res.get("reason_code")
+    if code:
+        return code
+    why = (res.get("reason") or "").lower()
+    if "no official website" in why or "no website" in why:
+        return "no_website"
+    if "could not be read" in why or "request failed" in why:
+        return "website_failed"
+    if "suppress" in why or "excluded" in why:
+        return "suppressed"
+    st = res.get("status")
+    if st == "contact_identified" or st == "business_found":
+        return "no_email"
+    if st == "email_published":
+        return "email_unvalidated"
+    return "other" if job.status == "blocked" else None
+
+
+def research_breakdown(db: Session, with_rows: bool = False) -> Dict[str, Any]:
+    """Master-pool research from what the research worker ACTUALLY did - the
+    latest research job for each business - never from an imported
+    researched_at timestamp. Attempted is not the same as succeeded."""
+    from app.models.lead_intel_models import LeadIntelProspect
+    from app.services.acquisition import hub as HB
+    pool = db.query(LeadIntelProspect).all()
+    jobs = (db.query(AcquisitionWorkerJob).filter(AcquisitionWorkerJob.worker == "research",
+                                                  AcquisitionWorkerJob.target_type == "pool_prospect")
+            .order_by(AcquisitionWorkerJob.created_at).all())
+    latest: Dict[str, AcquisitionWorkerJob] = {}
+    attempted_ids = set()
+    for j in jobs:
+        latest[j.target_id] = j
+        if j.attempts:
+            attempted_ids.add(j.target_id)
+    c = {"imported": len(pool), "research_queued": 0, "research_attempted": 0, "website_read": 0,
+         "research_incomplete": 0, "research_blocked": 0, "research_failed": 0, "contact_identified": 0,
+         "email_verified": 0, "outreach_ready": 0, "not_started": 0}
+    reasons: Dict[str, int] = {}
+    rows = []
+    for p in pool:
+        j = latest.get(p.id)
+        bucket, code = "not_started", None
+        if p.id in attempted_ids:
+            c["research_attempted"] += 1
+        if j is None:
+            c["not_started"] += 1
+        elif j.status in ("queued", "running"):
+            c["research_queued"] += 1
+            bucket = "queued"
+        elif j.status == "done":
+            c["website_read"] += 1
+            bucket, code = "website_read", _reason_code(j)
+            st = (C.jload(j.result, {}) or {}).get("status")
+            if st in ("contact_identified", "email_published", "outreach_eligible"):
+                c["contact_identified"] += 1
+        elif j.status == "blocked":
+            code = _reason_code(j) or "other"
+            if code in ("no_website", "website_failed"):
+                c["research_incomplete"] += 1
+                bucket = "incomplete"
+            else:
+                c["research_blocked"] += 1
+                bucket = "blocked"
+        elif j.status in ("dead", "failed"):
+            c["research_failed"] += 1
+            bucket, code = "failed", "failed"
+        elif j.status == "cancelled":
+            c["not_started"] += 1
+            bucket = "cancelled"
+        if p.email_verified:
+            c["email_verified"] += 1
+        if HB.readiness(p)["email_ready"]:
+            c["outreach_ready"] += 1
+        if code and bucket != "website_read":
+            reasons[code] = reasons.get(code, 0) + 1
+        if with_rows:
+            rows.append({"id": p.id, "name": p.name, "city": p.city, "website": p.website, "bucket": bucket,
+                         "reason_code": code, "reason": RESEARCH_REASON_LABEL.get(code) if code else None,
+                         "detail": (C.jload(j.result, {}) or {}).get("reason") if j else None,
+                         "email_verified": bool(p.email_verified), "job_status": j.status if j else None,
+                         "last_attempt": C.iso(j.finished_at) if j else None})
+    out = {"counts": c, "blocked_reasons": [{"code": k, "label": RESEARCH_REASON_LABEL.get(k, k), "count": v}
+                                            for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])]}
+    if with_rows:
+        out["rows"] = rows
+    return out
+
+
+def set_pool_website(db: Session, actor, prospect_id: str, url: str, fetch=None) -> Dict[str, Any]:
+    """A person supplies a business's website. It is checked (public site,
+    homepage names the business) and then research re-runs for it."""
+    from fastapi import HTTPException
+    from app.models.lead_intel_models import LeadIntelProspect
+    p = db.query(LeadIntelProspect).filter(LeadIntelProspect.id == prospect_id).first()
+    if p is None:
+        raise HTTPException(404, "Business not found")
+    u = (url or "").strip()
+    if not u:
+        raise HTTPException(422, "Give the business's website")
+    if not u.lower().startswith(("http://", "https://")):
+        u = "https://" + u
+    if any(h in u.lower() for h in LISTING_HOSTS):
+        raise HTTPException(422, "That's a listing or directory page - give the business's own website")
+    final, html = (fetch or _default_fetch)(u)
+    match, conf = None, 0.5
+    if final is not None:
+        pg = parse_page(html)
+        hay = (pg["title"] + " " + pg["text_fenced"][:4000]).lower()
+        hits = [t for t in _name_tokens(p.name or "") if t in hay]
+        if hits:
+            match, conf = "homepage names %s" % ", ".join(hits), 0.9
+    base = ("%s://%s" % (urlparse(final or u).scheme, urlparse(final or u).netloc))
+    p.website = base
+    _pool_evidence(p, {"at": datetime.utcnow().isoformat(), "by": getattr(actor, "email", None) or "user",
+                       "website": base, "source_url": u, "confidence": conf,
+                       "match": match or ("site could not be read yet" if final is None else "homepage does not name the business")})
+    db.commit()
+    job = enqueue(db, "research", "pool:%s:%s" % (p.id, H.normalize_domain(base) or "none"),
+                  target_type="pool_prospect", target_id=p.id)
+    return {"id": p.id, "website": base, "confidence": conf, "match": match, "research_queued": bool(job),
+            "readable": final is not None}
+
+
+def capabilities(db: Session) -> Dict[str, Dict[str, str]]:
+    """Each capability's REAL state, from configuration and recent results -
+    never one green light for everything."""
+    import os
+    from app.services.acquisition import ai_worker as AI
+    from app.services.acquisition import booking as B
+    from app.services.acquisition import outreach as O
+    s = state(db)
+    sched = {"running": "Running", "paused": "Paused", "stopped": "Stopped",
+             "emergency_stopped": "Stopped (emergency)"}[s.status]
+    recent = (db.query(AcquisitionWorkerJob).filter(AcquisitionWorkerJob.worker == "research",
+                                                    AcquisitionWorkerJob.status.in_(("done", "blocked", "dead")))
+              .order_by(AcquisitionWorkerJob.finished_at.desc()).limit(20).all())
+    failed = sum(1 for j in recent if _reason_code(j) == "website_failed" or j.status == "dead")
+    if s.status != "running":
+        research = ("Blocked", "The scheduler is not running")
+    elif recent and failed * 2 > len(recent):
+        research = ("Degraded", "%d of the last %d website reads failed" % (failed, len(recent)))
+    else:
+        research = ("Available", "Reads public business websites (no paid lookup)")
+    ai = AI.readiness(db)
+    ai_label = {"connected": "Connected", "disabled": "Disabled", "unavailable": "Unavailable",
+                "blocked": "Blocked"}[ai["state"]]
+    box = None
+    try:
+        from app.services import inbound_mailbox_service as IMS
+        box = IMS.sending_mailbox(db, O.SEND_FROM)
+    except Exception:                                            # noqa: BLE001
+        box = None
+    if not O.enabled():
+        email = ("Disabled", "Sending is switched off on the server; drafts wait and nothing is sent")
+    elif box is None:
+        email = ("Configured", "Switched on, but the %s mailbox is not connected" % O.SEND_FROM)
+    else:
+        email = ("Ready", "Sends one approved email at a time from %s" % O.SEND_FROM)
+    cal_ok, cal_err, cal_cfg = 0, 0, 0
+    for org_id in enabled_client_ids(db):
+        p = db.query(AcquisitionProfile).filter(AcquisitionProfile.organization_id == org_id).first()
+        uid = (p.test_booking_user_id if s.mode == "practice" else p.booking_user_id) if p else None
+        if not uid:
+            continue
+        cal_cfg += 1
+        from app.models.models import User
+        u = db.query(User).filter(User.id == uid).first()
+        if B.calendar_connected(db, u):
+            cal_ok += 1
+        else:
+            cal_err += 1
+    if cal_ok:
+        calendar = ("Connected", "%d company calendar(s) connected" % cal_ok)
+    elif cal_err:
+        calendar = ("Error", "A booking calendar is chosen but not connected to Microsoft or Google")
+    else:
+        calendar = ("Not configured", "No switched-on company has a booking calendar chosen")
+    campaign = ("Paused" if s.status in ("paused", "stopped", "emergency_stopped")
+                else "Live" if s.mode == "live" else "Practice")
+    discovery = ("Enabled" if s.paid_discovery_approved and (os.getenv("ACQUISITION_DISCOVERY_ENABLED") or "").strip()
+                 in ("1", "true", "yes", "on") else "Disabled")
+    return {"scheduler": {"state": sched}, "website_research": {"state": research[0], "detail": research[1]},
+            "ai_model": {"state": ai_label, "detail": ai["reason"]},
+            "email": {"state": email[0], "detail": email[1]},
+            "calendar": {"state": calendar[0], "detail": calendar[1]},
+            "campaign": {"state": campaign, "detail": "Practice uses only practice prospects and test inboxes"
+                         if campaign == "Practice" else ""},
+            "paid_discovery": {"state": discovery, "detail": "Google Places is metered; off until approved"}}
+
+
+def costs(db: Session, now: Optional[datetime] = None) -> Dict[str, Any]:
+    """What is free, what is already paid, what would cost extra, what is off."""
+    from app.models.acquisition_models import AcquisitionDiscoveryRun
+    from app.services.acquisition import ai_worker as AI
+    now = now or datetime.utcnow()
+    s = state(db)
+    ai = AI.readiness(db, now=now)
+    u = AI.usage(db, now)
+    runs = db.query(AcquisitionDiscoveryRun).filter(AcquisitionDiscoveryRun.created_at >= now - timedelta(hours=24)).all()
+    calls = sum((r.search_requests or 0) + (r.detail_requests or 0) for r in runs)
+    unpriced = any(r.cost_usd is None and ((r.search_requests or 0) + (r.detail_requests or 0)) for r in runs)
+    return {
+        "period": "last 24 hours",
+        "harvey_software": {"label": "Harvey software", "value": "$0", "detail": "Open-source (MIT) code adapted into EvoSys - no license fee"},
+        "ai_model": {"label": "AI model", "provider": AI.PROVIDER, "model": ai.get("model"),
+                     "calls_used": u["calls_made"], "calls_allowed": s.daily_ai_call_limit,
+                     "tokens": u["tokens_in"] + u["tokens_out"],
+                     "spend": ("$%.4f" % u["cost_usd"]) if isinstance(u["cost_usd"], float) and u["calls_made"] else
+                              ("$0 (no calls made)" if not u["calls_made"] else "Not tracked"),
+                     "spend_basis": u["cost_basis"],
+                     "detail": "OpenAI API usage is billed per token by OpenAI on the existing EvoSys account. "
+                               "Calls allowed: %d per day%s." % (s.daily_ai_call_limit,
+                                                                 " (AI drafting is off)" if not s.daily_ai_call_limit else "")},
+        "discovery": {"label": "Discovery provider (Google Places)",
+                      "enabled": bool(s.paid_discovery_approved), "search_calls": calls,
+                      "spend": "Not tracked" if unpriced else ("$%.2f" % sum(r.cost_usd or 0 for r in runs)),
+                      "detail": "Metered per request by Google; off until you approve it"},
+        "website_research": {"label": "Website research", "value": "No usage fee",
+                             "detail": "Reads public websites and checks mail servers (DNS) on the existing server"},
+        "other_operating_costs": {"label": "Other operating costs", "value": "Not tracked here",
+                                  "detail": "Render hosting, Microsoft 365, the database and other existing subscriptions "
+                                            "are already paid separately and are NOT in these figures."},
+    }
+
+
 def health(db: Session) -> Dict[str, Any]:
     s = state(db)
     now = datetime.utcnow()
@@ -988,87 +1408,90 @@ def health(db: Session) -> Dict[str, Any]:
         last_ok = q.filter(AcquisitionWorkerJob.status == "done").order_by(AcquisitionWorkerJob.finished_at.desc()).first()
         last_bad = (q.filter(AcquisitionWorkerJob.status.in_(("dead", "failed")))
                     .order_by(AcquisitionWorkerJob.finished_at.desc()).first())
-        retrying = q.filter(AcquisitionWorkerJob.status == "queued", AcquisitionWorkerJob.error.isnot(None)).first()
         counts = {st: q.filter(AcquisitionWorkerJob.status == st).count()
                   for st in ("queued", "running", "done", "blocked", "dead", "cancelled")}
-        if s.status == "emergency_stopped" or s.status == "stopped":
-            st = "configured"
-        elif s.status == "paused":
-            st = "paused"
-        elif counts["running"]:
-            st = "running"
-        elif retrying is not None:
-            st = "recovering"
-        elif last_bad is not None and (last_ok is None or (last_bad.finished_at or now) > (last_ok.finished_at or now)):
-            st = "failed"
-        elif counts["queued"] == 0 and counts["blocked"] and not counts["done"]:
-            st = "blocked"
-        elif counts["queued"] == 0 and counts["done"]:
-            st = "completed"
-        else:
-            st = "ready"
-        workers.append({"key": w["key"], "label": w["label"], "state": st, "counts": counts,
+        workers.append({"key": w["key"], "label": w["label"], "counts": counts,
                         "last_success": C.iso(last_ok.finished_at) if last_ok else None,
                         "last_failure": C.iso(last_bad.finished_at) if last_bad else None,
                         "last_error": last_bad.error if last_bad else None, "blockers": bl[w["key"]]})
+    from app.services.acquisition import ai_worker as AI
+    from app.services.acquisition import hub as HB
     clients = []
     for p in db.query(AcquisitionProfile).all():
         org = db.query(Organization).filter(Organization.id == p.organization_id).first()
         row = db.query(AcquisitionWorkforceClient).filter(
             AcquisitionWorkforceClient.organization_id == p.organization_id).first()
-        clients.append({"organization_id": p.organization_id, "name": (p.business_name or (org.name if org else "")),
+        name = (p.business_name or (org.name if org else ""))
+        clients.append({"organization_id": p.organization_id, "name": name,
+                        "is_test": HB.is_test_org(org.name if org else name),
                         "category": (org.industry if org else None), "enabled": bool(row and row.enabled),
                         "daily_job_limit": row.daily_job_limit if row else 40, "client_paused": bool(p.paused)})
-    pending = db.query(AcquisitionDraft).filter(AcquisitionDraft.status == "pending").count()
-    return {"status": s.status, "mode": s.mode, "reason": s.reason, "changed_at": C.iso(s.changed_at),
+    last_ok = (db.query(AcquisitionWorkerJob).filter(AcquisitionWorkerJob.status == "done")
+               .order_by(AcquisitionWorkerJob.finished_at.desc()).first())
+    pol = AI.policy(db)
+    return {"scope": "All service companies (master view)",
+            "status": s.status, "mode": s.mode, "reason": s.reason, "changed_at": C.iso(s.changed_at),
             "last_pass_at": C.iso(s.last_pass_at), "next_pass_at": C.iso(s.next_pass_at),
+            "last_success_at": C.iso(last_ok.finished_at) if last_ok else None,
             "last_pass": C.jload(s.last_pass_summary, None),
             "limits": {"daily_job_limit": s.daily_job_limit, "max_jobs_per_pass": s.max_jobs_per_pass,
                        "daily_ai_call_limit": s.daily_ai_call_limit,
                        "paid_discovery_approved": s.paid_discovery_approved},
+            "ai_policy": {"per_client_daily_calls": pol.per_client_daily_calls,
+                          "max_tokens_per_call": pol.max_tokens_per_call, "max_calls_per_pass": pol.max_calls_per_pass,
+                          "daily_cost_ceiling_usd": pol.daily_cost_ceiling_usd, "retry_limit": pol.retry_limit,
+                          "breaker_threshold": pol.breaker_threshold, "breaker_open_until": C.iso(pol.breaker_open_until)},
             "jobs_last_24h": _started_today(db, now=now),
             "queue_depth": db.query(AcquisitionWorkerJob).filter(AcquisitionWorkerJob.status == "queued").count(),
             "failed_jobs": db.query(AcquisitionWorkerJob).filter(AcquisitionWorkerJob.status == "dead").count(),
-            "pending_approvals": pending, "workers": workers, "clients": clients,
-            "usage": {"ai_calls_today": 0, "metered_cost_usd_today": round(sum(
-                j.cost_usd or 0 for j in db.query(AcquisitionWorkerJob)
-                .filter(AcquisitionWorkerJob.started_at >= now - timedelta(hours=24)).all()), 2),
-                "note": "No metered AI or discovery calls are made while their limits are 0 / not approved."},
-            "results": report(db), "ai": ai_status(db)}
+            "pending_approvals": db.query(AcquisitionDraft).filter(AcquisitionDraft.status == "pending").count(),
+            "workers": workers, "clients": clients, "capabilities": capabilities(db),
+            "research": research_breakdown(db), "costs": costs(db, now), "ai": ai_status(db),
+            "results": report(db)}
 
 
 def report(db: Session) -> Dict[str, Any]:
-    """Truthful counts, real and practice kept apart. Drafts are never bookings."""
+    """Truthful counts. Real business = not practice AND not a TEST company;
+    practice prospects and TEST companies are reported apart. Drafts are never bookings."""
     from app.models.lead_intel_models import LeadIntelProspect
     from app.models.models import EmailMessage, Reply
+    from app.services.acquisition import hub as HB
+    test_ids = [o.id for o in db.query(Organization).all() if HB.is_test_org(o.name)]
     out = {}
-    for label, practice in (("real", False), ("practice", True)):
-        opps = db.query(AcquisitionOpportunity).filter(AcquisitionOpportunity.is_practice.is_(practice))
-        ids = [o.id for o in opps.all()]
-        lead_ids = [o.lead_id for o in opps.all()]
-        r = lambda st: opps.filter(AcquisitionOpportunity.stage.in_(st)).count()  # noqa: E731
+    from sqlalchemy import false, true
+    base = db.query(AcquisitionOpportunity)
+    in_test = AcquisitionOpportunity.organization_id.in_(test_ids) if test_ids else false()
+    buckets = {
+        "real": base.filter(AcquisitionOpportunity.is_practice.is_(False), ~in_test if test_ids else true()),
+        "practice": base.filter((AcquisitionOpportunity.is_practice.is_(True)) | in_test),
+    }
+    for label, opps in buckets.items():
+        rows = opps.all()
+        ids, lead_ids = [o.id for o in rows], [o.lead_id for o in rows]
         out[label] = {
-            "verified_contacts": (db.query(AcquisitionEvidence)
-                                  .filter(AcquisitionEvidence.opportunity_id.in_(ids),
-                                          AcquisitionEvidence.kind == "contact_email",
-                                          AcquisitionEvidence.verified.is_(True)).count() if ids else 0),
-            "drafts_prepared": db.query(AcquisitionDraft).filter(AcquisitionDraft.is_practice.is_(practice)).count(),
+            "verified_contacts": (db.query(AcquisitionEvidence).filter(AcquisitionEvidence.opportunity_id.in_(ids),
+                                                                       AcquisitionEvidence.kind == "contact_email",
+                                                                       AcquisitionEvidence.verified.is_(True)).count()
+                                  if ids else 0),
+            "drafts_prepared": (db.query(AcquisitionDraft).filter(AcquisitionDraft.opportunity_id.in_(ids)).count()
+                                if ids else 0),
+            "drafts_pending": (db.query(AcquisitionDraft).filter(AcquisitionDraft.opportunity_id.in_(ids),
+                                                                 AcquisitionDraft.status == "pending").count()
+                               if ids else 0),
             "messages_sent": (db.query(EmailMessage).filter(EmailMessage.lead_id.in_(lead_ids),
                                                             EmailMessage.send_source == "acquisition_outreach",
                                                             EmailMessage.status == "sent").count() if lead_ids else 0),
             "replies": (db.query(Reply).filter(Reply.lead_id.in_(lead_ids), Reply.source == "email").count()
                         if lead_ids else 0),
-            "interested": opps.filter(AcquisitionOpportunity.interested_at.isnot(None)).count(),
-            "appointments_confirmed": opps.filter(AcquisitionOpportunity.booked_at.isnot(None)).count(),
-            "appointments_held": r((C.HELD, C.QUOTED, C.WON)),
-            "estimates": opps.filter(AcquisitionOpportunity.quoted_at.isnot(None)).count(),
-            "won": r((C.WON,)),
-            "monthly_value": round(sum(o.monthly_value or 0 for o in opps.filter(
-                AcquisitionOpportunity.stage == C.WON).all()), 2),
+            "interested": sum(1 for o in rows if o.interested_at is not None),
+            "appointments_confirmed": sum(1 for o in rows if o.booked_at is not None),
+            "appointments_held": sum(1 for o in rows if o.stage in (C.HELD, C.QUOTED, C.WON)),
+            "estimates": sum(1 for o in rows if o.quoted_at is not None),
+            "won": sum(1 for o in rows if o.stage == C.WON),
+            "monthly_value": round(sum(o.monthly_value or 0 for o in rows if o.stage == C.WON), 2),
         }
     out["master_pool"] = {
         "businesses": db.query(LeadIntelProspect).count(),
-        "researched": db.query(LeadIntelProspect).filter(LeadIntelProspect.researched_at.isnot(None)).count(),
         "verified_emails": db.query(LeadIntelProspect).filter(LeadIntelProspect.email_verified.is_(True)).count(),
     }
     return out
