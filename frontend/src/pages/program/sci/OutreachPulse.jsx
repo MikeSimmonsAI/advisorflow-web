@@ -2,6 +2,7 @@
  * /program/command/analytics endpoint; never synthesize counts. */
 import { useEffect, useState } from 'react'
 import { api } from '../../../api/client'
+import { useProgramProfile } from '../useProgramProfile'
 import { integerValue } from './inboxModel'
 import { percentText } from '../command/rateModel'
 
@@ -19,6 +20,7 @@ function MiniTrend({ data }) {
   </div>
 }
 export default function OutreachPulse({ locationId, navigate }) {
+  const prof = useProgramProfile()
   const [data, setData] = useState(null)
   const [today, setToday] = useState(null)
   const [error, setError] = useState('')
@@ -49,7 +51,7 @@ export default function OutreachPulse({ locationId, navigate }) {
   ]
   return <section className="sci-pulse sci-panel" aria-label="Real outreach performance">
     <header className="sci-pulse-head">
-      <div><span className="sci-pulse-eyebrow">LIVE SCI ACTIVITY</span>
+      <div><span className="sci-pulse-eyebrow">LIVE {prof.short_name.toUpperCase()} ACTIVITY</span>
         <h2>Outreach is happening</h2>
         <p>Last 7 days · Real records · {locationId ? 'Selected location' : 'All locations'}</p>
       </div>
@@ -78,7 +80,7 @@ export default function OutreachPulse({ locationId, navigate }) {
             <small>{desc}</small></div>)}
         </div>
         <div className="sci-pulse-chart"><h3>Delivered touches over time</h3><MiniTrend data={data} />
-          <p className="sci-micro">Confirmed deliveries only · source: SCI Analytics</p></div>
+          <p className="sci-micro">Confirmed deliveries only · source: {prof.short_name} Analytics</p></div>
       </div>
       <div className="sci-pulse-bottom">
         <span><b>{fmt(integerValue(m, 'opt_outs'))}</b> opt-outs recorded and respected</span>

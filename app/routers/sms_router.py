@@ -669,7 +669,7 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
         # (responses.on_inbound and its appointment setter), never by the
         # generic pipeline / concierge auto-reply below.
         from app.services import sms_programs as _sci_route
-        _sci_family = _sci_route.is_sci_org(db, lead.organization_id)
+        _sci_family = _sci_route.is_program_org(db, lead.organization_id)
         if _reply_advisor and not _evosense_owned and not _wholesale_seller and not _sci_family:
             if lead.status == "booked":
                 from app.services.ai_conversation_service import handle_inbound_reply

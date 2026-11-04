@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import ProgramSwitchLink from '../../../components/ProgramSwitchLink'
 import { Link } from 'react-router-dom'
 import { api, getCurrentUser } from '../../../api/client'
+import { useProgramProfile } from '../useProgramProfile'
 
 const CT = { timeZone: 'America/Chicago' }
 const n = v => (v === null || v === undefined ? '—' : Number(v).toLocaleString())
@@ -41,10 +42,11 @@ export function TopBar({ batch }) {
   const [now, setNow] = useState(new Date())
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(t) }, [])
   const u = getCurrentUser() || {}
+  const prof = useProgramProfile()
   const role = u.role === 'god_admin' ? 'Owner' : u.role === 'admin' ? 'Workspace admin' : 'Workspace advisor'
   return (
     <header className="sl-top">
-      <div><h1>SCI Live <span>/ Outreach Operations</span></h1>
+      <div><h1>{prof.live_label} <span>/ {prof.single_location ? prof.display_name : 'Outreach Operations'}</span></h1>
         <p>Family communication · AI conversations · In-person appointments</p></div>
       <div className="sl-top-r">
         <span className="sl-top-st"><b className={batch?.on ? 'ok' : 'off'}>● Automated intake {batch?.on ? 'ON' : 'OFF'}</b>
@@ -65,6 +67,7 @@ export function ScreenTabs({ screen, go }) {
 }
 
 export function Home({ a, sched, consent, openMetric, openFamily }) {
+  const prof = useProgramProfile()
   if (!a) return <p className="cmd-muted">Loading live numbers…</p>
   const o = a.overview || {}
   const pipe = Object.fromEntries((o.pipeline || []).map(p => [p.key, p.value]))
@@ -84,8 +87,10 @@ export function Home({ a, sched, consent, openMetric, openFamily }) {
           <p>{sn.first_start ? `First touches are scheduled from ${clock(new Date(sn.first_start))}.` :
             'These families are approved for the new campaign, but their first messages have not been scheduled.'} Existing family follow-ups continue independently.</p>
           <p className="sl-hero2-consent"><b>{n(sn.with_phone || 0)}</b> have a phone number; <b>{n(sn.no_phone || 0)}</b> are email-only (no phone supplied). This is contact coverage, not a claim of SMS consent.</p>
-          <p><Link className="sl-a" to="/program?tab=send&campaign=central_alabama_ms">View Central Alabama families →</Link>{' · '}
-             <Link className="sl-a" to="/program?tab=campaigns&campaign=central_alabama_ms">Edit Central Alabama messaging →</Link></p></div>
+          {prof.sci_only_panels ? <p><Link className="sl-a" to="/program?tab=send&campaign=central_alabama_ms">View Central Alabama families →</Link>{' · '}
+             <Link className="sl-a" to="/program?tab=campaigns&campaign=central_alabama_ms">Edit Central Alabama messaging →</Link></p>
+            : <p><Link className="sl-a" to="/program?tab=send">View queued families →</Link>{' · '}
+             <Link className="sl-a" to="/program?tab=campaigns">Edit messaging →</Link></p>}</div>
         {sn.first_start && <div className="sl-hero2-date"><b>{ctDate(sn.first_start, { weekday: 'long', month: 'short', day: 'numeric' })}</b>
           <span>{clock(new Date(sn.first_start))} — {clock(new Date(sn.last_start))} CT</span>
           <span>1 new first touch / {b.spacing_minutes || 10} min</span></div>}
@@ -141,9 +146,9 @@ export function Home({ a, sched, consent, openMetric, openFamily }) {
         <Link className="sl-row cs-link" to="/program/live?s=consent&c=opted_out"><span>Families opted out</span><b>{consent ? n(consent.opted_out) : '…'}</b></Link>
         <div className="sl-row"><span>Queued families with a phone number</span><b>{n(sn.with_phone || 0)} of {n(sn.value)}</b></div>
         <div className="sl-row"><span>Email-only families (no phone number)</span><b>{n(sn.no_phone || 0)}</b></div>
-        <div className="sl-row"><span>SMS link retest (owner number)</span>
+        {prof.sci_only_panels && <div className="sl-row"><span>SMS link retest (owner number)</span>
           <em className={`sl-tag ${retest.status === 'delivered' ? 'green' : 'orange'}`}>{retest.status === 'delivered' ? 'Delivered'
-            : retest.at && isToday(retest.at) ? (retest.status || 'Sent') : '9:05 AM pending'}</em></div>
+            : retest.at && isToday(retest.at) ? (retest.status || 'Sent') : '9:05 AM pending'}</em></div>}
         <p className="sl-warn">Delivery confirmation comes from Twilio callbacks. A queued or submitted text is <b>not</b> counted as delivered.
           Actual sending still checks recipient eligibility, STOP and DNC in the backend. Prepared families are not automatically contacted.</p>
       </section>
@@ -158,7 +163,7 @@ export function Home({ a, sched, consent, openMetric, openFamily }) {
             <tbody>{upcoming.slice(0, 6).map(i => (
               <tr key={i.lead_id} onClick={() => openFamily(i.lead_id, 'journey')}>
                 <td>{isToday(i.next_touch_at) ? '' : ctDate(i.next_touch_at, { weekday: 'short' }) + ' '}{clock(new Date(i.next_touch_at))}</td>
-                <td className="sl-ell">{titled(i.name)} · {i.location}</td>
+                <td className="sl-ell">{titled(i.name)}{prof.single_location ? '' : ` · ${i.location}`}</td>
                 <td>First touch</td>
                 <td>{(i.text || '').startsWith('No SMS consent') ? <em className="sl-tag orange">Text unavailable</em> : <em className="sl-tag blue">Queued</em>}</td></tr>))}</tbody>
           </table>)}
@@ -166,7 +171,7 @@ export function Home({ a, sched, consent, openMetric, openFamily }) {
       <section className="sl-card">
         <h3>Sending schedule <Link className="sl-a" to="/program?tab=health">Operations log →</Link></h3>
         {[
-          retest.status !== 'delivered' ? ['9:05 AM', 'Owner-number SMS link retest (Twilio ticket)'] : null,
+          prof.sci_only_panels && retest.status !== 'delivered' ? ['9:05 AM', 'Owner-number SMS link retest (Twilio ticket)'] : null,
           sn.first_start ? [clock(new Date(sn.first_start)), `First new-family text · ${ctDate(sn.first_start, { weekday: 'short', month: 'short', day: 'numeric' })}`] : null,
           sn.last_start ? [clock(new Date(sn.last_start)), 'Last new-family text of this batch'] : null,
           a.next_batch ? [b.start || '9:00', `Next automatic batch · ${ctDate(a.next_batch, { weekday: 'short', month: 'short', day: 'numeric' })}`] : null,

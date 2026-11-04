@@ -57,7 +57,11 @@ export default function Dashboard({ data, goTab, setParam }) {
   const open = actions.filter(a => a.n > 0)
   const shown = allActions ? open : open.slice(0, 4)
   const rt = data.readiness_test
-  const scopeText = sel ? sel.official_name : `all ${num(m.locations)} locations`
+  // ONE LOCATION (Issue #507): the workspace IS that location - no "all 1
+  // locations", no location leaderboard.
+  const single = Number(m.locations) === 1
+  const onlyName = single ? ((data.locations || []).find(l => !l.is_review_bucket)?.name || '') : ''
+  const scopeText = sel ? sel.official_name : single ? onlyName : `all ${num(m.locations)} locations`
 
   return (
     <>
@@ -78,8 +82,10 @@ export default function Dashboard({ data, goTab, setParam }) {
           onClick={() => navigate('/availability')} title="Open appointments" />
         <Kpi icon="responses" tone="teal" value={m.new_responses} label="New replies" note={m.hot_responses ? `${num(m.hot_responses)} HOT open` : 'Not yet handled'}
           onClick={() => goTab('responses')} />
-        <Kpi icon="pin" tone="green" value={m.locations} label={sel ? 'Location selected' : 'Locations'} note={sel ? sel.official_name : 'Mapped facilities'}
-          onClick={() => goTab('locations')} />
+        {single
+          ? <Kpi icon="pin" tone="green" value={m.leads} label="Families here" note={onlyName} onClick={() => goTab('locations')} title="Location profile" />
+          : <Kpi icon="pin" tone="green" value={m.locations} label={sel ? 'Location selected' : 'Locations'} note={sel ? sel.official_name : 'Mapped facilities'}
+          onClick={() => goTab('locations')} />}
       </section>
 
       <Panel title="Engagement" labelledBy="sci-engagement"
@@ -143,7 +149,7 @@ export default function Dashboard({ data, goTab, setParam }) {
       </div>
 
       <div className="sci-grid-dash-b">
-        <LocationPerformance rows={data.location_performance} sel={sel} pick={id => setParam('location', id)} goTab={goTab} />
+        {!single && <LocationPerformance rows={data.location_performance} sel={sel} pick={id => setParam('location', id)} goTab={goTab} />}
         <CampaignPerformance rows={data.campaign_performance} goTab={goTab} />
         <RecentActivity recent={data.recent_conversations} locationId={sel?.location_id} goTab={goTab} />
       </div>

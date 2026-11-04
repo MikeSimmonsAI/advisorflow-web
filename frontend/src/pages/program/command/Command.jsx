@@ -21,6 +21,7 @@ import { CampaignSelect, CampaignTag, Journey, MetricDrill, PerformanceHome, Res
 import { Home, ScreenTabs, TopBar, useHomeData } from './Dashboard'
 import { LIVE_SCREENS, MobileNav, SideNav } from './SciNav'
 import Consent from './Consent'
+import { loadProgramProfile } from '../useProgramProfile'
 import './Dashboard.css'
 import './Command.css'
 import './Performance.css'
@@ -213,8 +214,8 @@ export default function Command() {
   // their own), so coming back here never leaves "Settings" in the title.
   useEffect(() => {
     const name = family ? (familyView === 'journey' ? 'Family Journey' : 'Conversation') : drill ? 'Metric Drill-down'
-      : { search: 'Families', inbox: 'Conversations', appts: 'Appointments', reports: 'Analytics', consent: 'Opt-ins & Opt-outs' }[tab] || 'SCI Live'
-    document.title = `${name} · SCI · EvoSys Pro`
+      : { search: 'Families', inbox: 'Conversations', appts: 'Appointments', reports: 'Analytics', consent: 'Opt-ins & Opt-outs' }[tab] || null
+    loadProgramProfile().then(p => { document.title = `${name || p.live_label} · ${p.short_name} · EvoSys Pro` })
   }, [tab, family, familyView, drill])
   // Clicking the menu item of the screen already open: back to its top.
   const onSame = () => window.scrollTo({ top: 0, behavior: 'smooth' })

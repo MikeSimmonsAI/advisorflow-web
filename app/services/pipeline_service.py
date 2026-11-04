@@ -395,7 +395,7 @@ def process_inbound_reply(
     # SCI families are answered only by the SCI program's own appointment
     # setter - never by this generic auto-reply.
     from app.services import sms_programs as _sci
-    if _sci.is_sci_org(db, lead.organization_id):
+    if _sci.is_program_org(db, lead.organization_id):
         return {"action": "sci_program"}
     # Defense in depth: the webhook routes a Wholesale seller elsewhere; if a
     # seller's reply ever reaches here, nothing is auto-sent to them.

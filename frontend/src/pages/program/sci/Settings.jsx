@@ -265,7 +265,7 @@ function AliasSettings({ isManager, form, set, onChange }) {
           </select>
         </Field>
         <Field label="Outlook folder for processed replies" hint="Each location's folder sits inside it; blank = don't file">
-          <input disabled={!isManager} value={form.mailbox_folder_path} placeholder="Inbox/Customers Folder/SCI" onChange={e => set('mailbox_folder_path', e.target.value)} />
+          <input disabled={!isManager} value={form.mailbox_folder_path} placeholder="Inbox/Customers Folder/<program>" onChange={e => set('mailbox_folder_path', e.target.value)} />
         </Field>
       </div>
       {isManager && (

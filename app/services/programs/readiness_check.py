@@ -231,6 +231,11 @@ def live_gates(db, org_id: Optional[str]) -> List[Dict]:
     saying "Kerry has no login" and "contacts are not loaded" after both were
     done. Each one is now answered from the database; anything that cannot be
     answered stays exactly as it was (open)."""
+    if db is not None and org_id and not _is_sci(db, org_id):
+        # Any program other than SCI (Restland, Issue #507) gets its OWN
+        # checklist, read from its workspace - never SCI's sentences about the
+        # 844 line, Kerry Allan or Oaklawn.
+        return program_gates(db, org_id)
     gates = [dict(g) for g in LAUNCH_GATES]
     if db is None or not org_id:
         return gates
@@ -315,3 +320,119 @@ def console(last: Optional[Dict], db=None, org_id: Optional[str] = None) -> Dict
             "stages": STAGES,
             "persisted": False,
             "note": "Synthetic data only. Nothing is sent. Results are kept in memory on this server and reset on restart."}
+
+
+def _is_sci(db, org_id) -> bool:
+    try:
+        from app.services import sms_programs
+        return sms_programs.is_sci_org(db, org_id)
+    except Exception:                                    # noqa: BLE001
+        return True   # unknown: keep the existing (SCI) checklist
+
+
+def program_gates(db, org_id: str) -> List[Dict]:
+    """LAUNCH CHECKLIST FOR A NON-SCI PROGRAM, answered from its workspace.
+
+    Every line is a fact read now, never a promise: a configured toggle is not
+    reported as a working integration, and a Twilio verification this server
+    cannot see stays open for a person to confirm. Read-only."""
+    gates: List[Dict] = []
+
+    def add(group, stage, key, text):
+        gates.append({"group": group, "stage": stage, "key": key, "text": text})
+
+    try:
+        from app.models.models import Lead, Organization
+        from app.models.program_models import (CampaignFamily, OutreachProgram, ProgramSourceRecord,
+                                               WorkspaceSwitch)
+        from app.services.programs.program_profile import real_locations
+        org = db.query(Organization).filter(Organization.id == org_id).first()
+        prog = db.query(OutreachProgram).filter(OutreachProgram.organization_id == org_id).first()
+        locs = real_locations(db, org_id)
+        # L1 - the location.
+        if len(locs) == 1:
+            add("verified", "A", "L1", "One location set up: %s." % locs[0].official_name)
+        elif locs:
+            add("verified", "A", "L1", "%d locations set up." % len(locs))
+        else:
+            add("external", "A", "L1", "No location is set up for this program yet.")
+        # L2 - families linked to it.
+        families = db.query(Lead.id).filter(Lead.organization_id == org_id, Lead.is_test.isnot(True)).count()
+        linked = (db.query(ProgramSourceRecord.lead_id)
+                  .filter(ProgramSourceRecord.organization_id == org_id,
+                          ProgramSourceRecord.lead_id.isnot(None)).distinct().count())
+        review = (db.query(ProgramSourceRecord.id)
+                  .filter(ProgramSourceRecord.organization_id == org_id,
+                          ProgramSourceRecord.location_status == "location_review").count())
+        if families and linked >= families:
+            add("verified", "A", "L2", "All %d families are linked to the program." % families)
+        else:
+            add("external", "A", "L2", "%d of %d families are linked to the program; the rest are not visible "
+                "on the program screens and are refused on every send." % (linked, families))
+        if review:
+            add("external", "A", "L3", "%d records are waiting in Location Review." % review)
+        # S1 - texting sender. Only what the database shows; Twilio approval is
+        # confirmed by a person.
+        num = (getattr(org, "org_twilio_phone_number", None) or "").strip()
+        kind = (getattr(org, "org_twilio_number_type", None) or "").strip().lower()
+        if not num:
+            add("external", "D", "S1", "No texting number is assigned to this workspace.")
+        elif kind != "toll_free":
+            add("external", "D", "S1", "The workspace's texting number (ending %s) is a %s number, not the "
+                "toll-free sender. Texts stay off until the toll-free number is assigned and verified."
+                % (num[-4:], (kind or "unknown-type").upper()))
+        else:
+            add("approval", "D", "S1", "Toll-free number ending %s is assigned. Confirm its Twilio toll-free "
+                "verification is approved before any text goes out." % num[-4:])
+        # S2 - this workspace's own automated-text switch.
+        sw = db.query(WorkspaceSwitch).filter(WorkspaceSwitch.organization_id == org_id).first()
+        if sw is not None and sw.texts_on:
+            add("verified", "D", "S2", "Automated texts are switched ON for this workspace.")
+        else:
+            add("approval", "D", "S2", "Automated texts are OFF for this workspace (owner switch).")
+        # M1 - email replies.
+        try:
+            from app.models.inbound_mailbox_models import InboundMailbox
+            boxes = db.query(InboundMailbox.id).filter(InboundMailbox.organization_id == org_id).count()
+        except Exception:                                # noqa: BLE001
+            db.rollback()
+            boxes = 0
+        if boxes:
+            add("verified", "B", "M1", "%d mailbox(es) connected for email replies." % boxes)
+        else:
+            add("external", "B", "M1", "No mailbox is connected, so email replies are not read into the program.")
+        if prog is not None:
+            # B1 - bookings.
+            if getattr(prog, "booking_user_id", None):
+                add("verified", "B", "B1", "Bookings land on a chosen staff calendar.")
+            else:
+                add("external", "B", "B1", "No booking calendar is chosen, so texts carry no booking link.")
+            # A1 - staff alerts.
+            if prog.staff_sms_alerts_enabled and (prog.alert_email or prog.alert_phone):
+                add("verified", "C", "A1", "Staff reply alerts are on.")
+            else:
+                add("external", "C", "A1", "Staff reply alerts are off (in-app alerts still appear).")
+            add("verified", "C", "A2", "AI appointment setter: %s." % ((prog.ai_setter_mode or "off").upper()))
+        # D2 / G1 - campaigns and the owner's GO.
+        on = [f.name for f in db.query(CampaignFamily).filter(CampaignFamily.organization_id == org_id,
+                                                               CampaignFamily.is_active.is_(True)).all()]
+        if on:
+            add("verified", "D", "D2", "Campaigns on: %s." % ", ".join(sorted(on)))
+        else:
+            add("approval", "D", "D2", "Owner: choose which campaigns to switch on (all are off).")
+        approved = (db.query(ProgramSourceRecord.lead_id)
+                    .filter(ProgramSourceRecord.organization_id == org_id,
+                            ProgramSourceRecord.approved_to_send_at.isnot(None),
+                            ProgramSourceRecord.lead_id.isnot(None)).distinct().count())
+        if approved:
+            add("verified", "G", "G1", "GO given: %d families approved on Choose & Send." % approved)
+        else:
+            add("approval", "G", "G1", "Owner: GO for the first real message to a family.")
+        add("test_now", "A", "T1", "Run the controlled readiness test: synthetic checks, no sends.")
+    except Exception:                                    # noqa: BLE001
+        try:
+            db.rollback()
+        except Exception:                                # noqa: BLE001
+            pass
+        add("external", "A", "X1", "The checklist could not be read from this workspace.")
+    return gates
