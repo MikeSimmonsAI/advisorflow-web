@@ -239,7 +239,9 @@ def _clients(db: Session, org_ids=None):
         if org_ids is not None and o.id not in org_ids:
             continue
         p = E.get_profile(db, o.id)
+        from app.services.acquisition import hub as _HB
         out.append({"organization_id": o.id, "name": o.name, "industry": o.industry,
+                    "is_test": _HB.is_test_org(o.name),
                     "identity_ok": C.identity_ok(o), "configured": p is not None,
                     "paused": bool(p.paused) if p else True,
                     "pilot_started_at": C.iso(p.pilot_started_at) if p else None})
@@ -331,8 +333,39 @@ def workforce_control(action: str, payload: dict = Body(default={}), db: Session
     if action == "limits":
         WF.set_limits(db, me, payload or {})
         return WF.health(db)
+    if action == "ai_policy":
+        from app.services.acquisition import ai_worker as AI
+        AI.set_policy(db, me, payload or {})
+        _audit(db, None, me, "acquisition_workforce_ai_policy", "acquisition_workforce", "global",
+               {k: v for k, v in (payload or {}).items() if k != "reset_breaker"})
+        return WF.health(db)
     WF.control(db, me, action, (payload or {}).get("reason"), (payload or {}).get("mode"))
     return WF.health(db)
+
+
+@god_router.get("/workforce/research")
+def workforce_research(bucket: Optional[str] = None, reason: Optional[str] = None,
+                       db: Session = Depends(get_db), me: User = Depends(require_acq_master)):
+    """The exact master-pool records behind each research count, with reasons."""
+    from app.services.acquisition import workforce as WF
+    out = WF.research_breakdown(db, with_rows=True)
+    rows = out["rows"]
+    if bucket:
+        rows = [r for r in rows if r["bucket"] == bucket]
+    if reason:
+        rows = [r for r in rows if r["reason_code"] == reason]
+    out["rows"] = rows
+    return out
+
+
+@god_router.post("/workforce/research/{prospect_id}/website")
+def workforce_set_website(prospect_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
+                          me: User = Depends(require_acq_master)):
+    from app.services.acquisition import workforce as WF
+    out = WF.set_pool_website(db, me, prospect_id, payload.get("website") or "")
+    _audit(db, None, me, "acquisition_pool_website_set", "lead_intel_prospect", prospect_id,
+           {"website": out["website"], "confidence": out["confidence"]})
+    return out
 
 
 @god_router.put("/workforce/clients/{org_id}")
