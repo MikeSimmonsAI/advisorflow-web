@@ -59,7 +59,7 @@ export function TodayPage() {
           <p className="ins-hero__tag">{s.tagline}</p>
           <p className="ins-muted">
             {s.display_name}
-            {s.is_demo && <> · Demo scenario: {c.locations.length} location{c.locations.length === 1 ? '' : 's'}{c.agents.length ? ` · ${c.agents.length} staff` : ''}</>}
+            {s.is_demo && <> · Sample agency network: {c.locations.length} office{c.locations.length === 1 ? '' : 's'}{c.agents.length ? ` · ${c.agents.length} staff` : ''}</>}
             {c.viewer.kind === 'agent' && <> · Your assigned work and your locations’ shared queue</>}
           </p>
         </div>
@@ -106,7 +106,7 @@ export function TodayPage() {
                 <thead><tr><th>Location</th><th>Open renewals (60 days)</th><th aria-label="Load" /></tr></thead>
                 <tbody>{data.workload.map(w => (
                   <tr key={w.location_id}>
-                    <td><b>{w.location}</b>{!w.verified && <span className="ins-tag">illustrative</span>}</td>
+                    <td><b>{w.location}</b></td>
                     <td>{w.capacity ? `${w.open} of ${w.capacity} (${w.pct}%)` : `${w.open} open`}</td>
                     <td className="ins-bar-cell">{w.capacity ? <span className="ins-bar"><span style={{ width: `${Math.min(100, w.pct)}%` }} className={w.pct > 90 ? 'hot' : ''} /></span> : null}</td>
                   </tr>))}</tbody>
@@ -620,24 +620,46 @@ export function AppointmentsPage() {
 
 export function TeamPage() {
   const c = useIns()
+  const nav = useNavigate()
   const { data, error, reload } = useData(() => c.q('/agency/retention/team'), [c.tick, c.q])
   const [toast, say] = useToast()
+  const [teamOf, setTeamOf] = useState('')
   const toggle = async p => { try { await api.patch(c.q(`/agency/retention/team/${p.user_id}`), { available: !p.available }); say(`${p.name} marked ${p.available ? 'unavailable' : 'available'} for new work.`); reload() } catch (e) { say(errText(e), 'err') } }
+  const sample = data && data.locations.some(l => !l.verified)
+  const people = data ? data.people.filter(p => !teamOf || p.location_ids.includes(teamOf)) : []
+  const teamName = teamOf && data ? data.locations.find(l => l.id === teamOf)?.name : null
   return (
     <div>
       <div className="ins-pagehead"><h1>Team & Locations</h1></div>
+      {sample && c.isDemo && <p className="ins-muted ins-note">Sample agency network for demonstration. Mesquite is the verified office.</p>}
       <Err error={error} onRetry={reload} />
       {!data ? <div className="ins-loading">Loading…</div> : (<>
-        <section className="ins-locs">{data.locations.map(l => (
-          <div className="ins-card ins-loc" key={l.id}>
-            <h2><Icon name="pin" /> {l.name} {l.is_primary && <span className="ins-tag ins-tag--blue">primary</span>}</h2>
-            {l.verified && l.address ? <p>{l.address}, {l.city}, {l.state}<br />{l.phone}</p> : <p className="ins-muted">Illustrative location — no real address.</p>}
-            <p className="ins-fine">{l.staff} staff · {l.timezone || c.settings.timezone}</p>
-          </div>))}</section>
-        <section className="ins-card"><h2>People</h2>
+        <section className="ins-locs" aria-label="Offices">{data.locations.map(l => (
+          <article className={`ins-card ins-loc ${teamOf === l.id ? 'is-on' : ''}`} key={l.id}>
+            <div className="ins-loc__head">
+              <span className="ins-loc__mark" aria-hidden="true"><Icon name="pin" size={18} /></span>
+              <div><h2>{l.name}</h2>
+                <p className="ins-loc__sub">{l.is_primary ? 'Primary office' : 'Branch office'}</p></div>
+              {l.is_primary && <span className="ins-pill ins-pill--navy">Primary</span>}
+            </div>
+            {l.verified && l.address && <p className="ins-loc__addr">{l.address}, {l.city}, {l.state}{l.phone ? ` · ${l.phone}` : ''}</p>}
+            <dl className="ins-loc__stats">
+              <div><dt>Team</dt><dd>{l.staff}</dd></div>
+              <div><dt>Open renewals</dt><dd>{l.open_renewals}</dd></div>
+              <div><dt>Reviews booked</dt><dd>{l.reviews_booked}</dd></div>
+              <div><dt>Need attention</dt><dd className={l.needs_attention ? 'hot' : ''}>{l.needs_attention}</dd></div>
+            </dl>
+            <div className="ins-row ins-loc__actions">
+              <button className="ins-btn ins-btn--sm" aria-pressed={teamOf === l.id} onClick={() => setTeamOf(teamOf === l.id ? '' : l.id)}>
+                <Icon name="users" size={15} /> {teamOf === l.id ? 'Show all teams' : 'View team'}</button>
+              <button className="ins-btn ins-btn--sm ins-btn--navy" onClick={() => { c.setLocation(l.id); nav({ pathname: BASE, search: `?loc=${l.id}` }) }}>
+                Open location <Icon name="arrow" size={14} /></button>
+            </div>
+          </article>))}</section>
+        <section className="ins-card" aria-labelledby="ins-people-h"><h2 id="ins-people-h">{teamName ? `${teamName} team` : 'People'}</h2>
           <div className="ins-table-wrap"><table className="ins-table">
             <thead><tr><th>Name</th><th>Role</th><th>Languages</th><th>Open renewals</th><th>Reviews (14 d)</th><th>Overdue</th><th>Available</th></tr></thead>
-            <tbody>{data.people.map(p => (
+            <tbody>{people.map(p => (
               <tr key={p.user_id}>
                 <td><span className="ins-person"><span className="ins-avatar ins-avatar--sm">{initials(p.name)}</span>{p.name}</span><small>{data.locations.filter(l => p.location_ids.includes(l.id)).map(l => l.name).join(', ')}</small></td>
                 <td>{p.title || '—'}</td><td>{p.languages.map(x => x.toUpperCase()).join(' · ')}</td>
@@ -646,7 +668,7 @@ export function TeamPage() {
                 <td>{p.overdue > 0 ? <span className="ins-pill ins-pill--purple">{p.overdue}</span> : 0}</td>
                 <td>{c.canManage ? <button className="ins-btn ins-btn--sm" onClick={() => toggle(p)} aria-pressed={p.available}>{p.available ? 'Yes' : 'No'}</button> : (p.available ? 'Yes' : 'No')}</td>
               </tr>))}</tbody></table></div>
-          {c.isDemo && <p className="ins-fine">All staff shown are synthetic demo accounts. None can sign in.</p>}
+          {c.isDemo && <p className="ins-fine">Staff shown are sample accounts and cannot sign in.</p>}
         </section>
       </>)}
       {toast}

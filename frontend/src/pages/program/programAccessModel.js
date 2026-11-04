@@ -22,6 +22,11 @@ const PROGRAMS = {
   funeral: { rank: 5, variant: 'funeral', symbol: '❖', kind: 'CEMETERY & FUNERAL SERVICES',
              summary: 'Families, pre-need planning, calendar and records',
              facts: ['Families', 'Pre-need', 'Records'] },
+  // An insurance agency running the renewal & retention workspace (#499).
+  // Its words come from the server (`presentation`); these are fallbacks.
+  insurance_retention: { rank: 6, variant: 'retention', symbol: '↻', kind: 'INSURANCE AGENCY',
+                         summary: 'Renewals, client reviews, appointments and team service',
+                         facts: ['Renewals', 'Client care', 'Team & locations'] },
   insurance: { rank: 6, variant: 'insurance', symbol: '⛨', kind: 'INSURANCE AGENCY',
                summary: 'Prospects, AI conversations, appointments, applications and policies',
                facts: ['Prospects', 'Applications', 'Policies'] },
@@ -68,12 +73,17 @@ export function programOf(w) {
   if (!w) return null
   if (w.is_program || w.experience === 'sci') return 'sci'
   if (w.program_route === '/program/roofing' || w.experience === 'roofing') return 'roofing'
+  if (w.program_route === '/program/insurance' || w.presentation?.kind === 'insurance_retention') return 'insurance_retention'
   if (w.experience === 'insurance' || w.industry === 'insurance') return 'insurance'
   if (w.experience === 'energy' || w.industry === 'energy') return 'energy'
   if (w.industry === 'funeral' || w.industry === 'cemetery') return 'funeral'
   if (w.program_route === '/program/acquisition' || w.experience === 'acquisition') return 'acquisition'
   if (w.industry === 'cleaning') return 'cleaning'
   return null
+}
+
+function initialsOf(name) {
+  return String(name || '').split(/\s+/).filter(w => /^[A-Za-z]/.test(w)).slice(0, 2).map(w => w[0]).join('').toUpperCase()
 }
 
 function displayName(program, w) {
@@ -97,6 +107,17 @@ export function programCards(ctx) {
     // destination are exactly what the server listed.
     const program = programOf(w) || 'business'
     const p = PROGRAMS[program]
+    if (program === 'insurance_retention') {
+      // The agency's own identity, as the server configured it - presentation only.
+      const pr = w.presentation || {}
+      const title = pr.title || w.organization_name
+      cards.push({ ...w, program, variant: p.variant, symbol: initialsOf(title) || p.symbol, rank: p.rank,
+                   kind: pr.eyebrow || p.kind, facts: pr.chips || p.facts, display: title,
+                   subtitle: pr.subtitle || null, summary: pr.description || p.summary,
+                   actionLabel: pr.button || null, badge: pr.sample ? 'Sample data' : null,
+                   orgLabel: null })
+      continue
+    }
     const kind = program === 'business' ? businessKind(w.industry) : p.kind
     cards.push({ ...w, program, variant: p.variant, symbol: p.symbol, rank: p.rank, kind, facts: p.facts,
                  display: displayName(program, w), summary: p.summary,

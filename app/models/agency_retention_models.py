@@ -55,6 +55,10 @@ class AgencyRetentionSettings(Base):
     review_minutes = Column(Integer, nullable=False, default=30)
     data_mode = Column(String, nullable=False, default="demo")   # demo | csv_import | integration
     reference = Column(Text, nullable=True)             # JSON: verified public facts + their source
+    # JSON: how this agency's workspace presents itself (Program Access card,
+    # header, sidebar) - eyebrow, subtitle, description, chips, button, theme.
+    # Presentation only: it never changes ids, slugs, permissions or routing.
+    presentation = Column(Text, nullable=True)
     is_demo = Column(Boolean, nullable=False, default=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

@@ -120,8 +120,32 @@ def get_settings(db: Session, org_id: str) -> Optional[AgencyRetentionSettings]:
     return db.query(AgencyRetentionSettings).filter(AgencyRetentionSettings.organization_id == org_id).first()
 
 
+DEFAULT_PRESENTATION = {
+    "eyebrow": "Insurance agency", "subtitle": "Renewal & Retention",
+    "description": "Proactive renewal follow-up, client reviews, appointments, and coordinated service across your agency.",
+    "chips": ["Renewals", "Client care", "Team & locations"], "button": "Open agency", "theme": "royal",
+}
+
+
+def presentation_for(s: AgencyRetentionSettings, org: Organization) -> Dict[str, Any]:
+    """How the workspace presents itself. Stored per agency; defaults are
+    neutral (no carrier name). Never used for access or routing decisions."""
+    p = dict(DEFAULT_PRESENTATION)
+    p.update({k: v for k, v in (jl(getattr(s, "presentation", None), {}) or {}).items() if v not in (None, "")})
+    p["title"] = s.display_name or org.name
+    p["sample"] = bool(s.is_demo or getattr(org, "is_demo", False))
+    return p
+
+
+def location_verified(loc: Location) -> bool:
+    """A location is shown as a verified office only when its record says so.
+    Sample offices carry no invented address or phone."""
+    return (loc.notes or "").lower().startswith("verified")
+
+
 def settings_dict(s: AgencyRetentionSettings, org: Organization) -> Dict[str, Any]:
     return {
+        "presentation": presentation_for(s, org),
         "enabled": bool(s.enabled),
         "display_name": s.display_name or org.name,
         "tagline": s.tagline or "Keep every renewal moving.",
@@ -561,7 +585,7 @@ def workload(ctx: RCtx, location_id=None) -> List[Dict[str, Any]]:
         locs = locs.filter(Location.id == location_id)
     out = []
     today = ctx.today()
-    for loc in locs.order_by(Location.is_primary.desc(), Location.name).all():
+    for loc in locs.order_by(Location.is_primary.desc(), Location.slug, Location.name).all():
         q = renewals_q(ctx).filter(AgencyRenewal.location_id == loc.id, AgencyRenewal.outcome.is_(None),
                                    AgencyRenewal.renewal_date <= today + timedelta(days=60))
         open_n = q.count()
@@ -571,7 +595,7 @@ def workload(ctx: RCtx, location_id=None) -> List[Dict[str, Any]]:
             AgencyRetentionStaff.available.is_(True)).all())
         out.append({"location_id": loc.id, "location": loc.name, "open": open_n, "capacity": cap or None,
                     "staff": len(staff_ids), "pct": round(100 * open_n / cap) if cap else None,
-                    "verified": not ((loc.notes or "").lower().startswith("illustrative"))})
+                    "verified": location_verified(loc)})
     return out
 
 
@@ -1215,7 +1239,7 @@ def team(ctx: RCtx) -> Dict[str, Any]:
     locs = db.query(Location).filter(Location.organization_id == ctx.org_id)
     if allowed is not None:
         locs = locs.filter(Location.id.in_(allowed or ["-"]))
-    locs = locs.order_by(Location.is_primary.desc(), Location.name).all()
+    locs = locs.order_by(Location.is_primary.desc(), Location.slug, Location.name).all()
     links = db.query(UserLocation).filter(UserLocation.organization_id == ctx.org_id,
                                           UserLocation.location_id.in_([l.id for l in locs] or ["-"])).all()
     staff_ids = {l.user_id for l in links}
@@ -1250,9 +1274,29 @@ def team(ctx: RCtx) -> Dict[str, Any]:
                        "location_ids": [l.location_id for l in links if l.user_id == uid],
                        "is_demo": bool(s.is_demo) if s else False})
     people.sort(key=lambda p: (p["title"] != "owner", p["title"] != "manager", p["name"]))
+    # Operational counts per office, from the records the viewer may see.
+    horizon = today + timedelta(days=60)
+    open_loc = dict(renewals_q(ctx).with_entities(AgencyRenewal.location_id, func.count(AgencyRenewal.id)).filter(
+        AgencyRenewal.outcome.is_(None), AgencyRenewal.renewal_date <= horizon).group_by(AgencyRenewal.location_id).all())
+    booked_rows = renewals_q(ctx).filter(AgencyRenewal.outcome.is_(None),
+                                         AgencyRenewal.review_appointment_id.isnot(None)).all()
+    appt_ok = {a.id for a in db.query(AgencyAppointment).filter(
+        AgencyAppointment.id.in_([r.review_appointment_id for r in booked_rows] or ["-"]),
+        AgencyAppointment.status.in_(OPEN_APPT)).all()}
+    booked_loc: Dict[str, int] = {}
+    for r in booked_rows:
+        if r.review_appointment_id in appt_ok:
+            booked_loc[r.location_id] = booked_loc.get(r.location_id, 0) + 1
+    att_loc: Dict[str, int] = {}
+    for row in renewal_rows(ctx, renewals_q(ctx).filter(AgencyRenewal.outcome.is_(None),
+                                                        AgencyRenewal.renewal_date <= horizon).all()):
+        if row["attention"]:
+            att_loc[row["location_id"]] = att_loc.get(row["location_id"], 0) + 1
     return {"locations": [{"id": l.id, "name": l.name, "city": l.city, "state": l.state, "address": l.address_line1,
+                           "open_renewals": open_loc.get(l.id, 0), "reviews_booked": booked_loc.get(l.id, 0),
+                           "needs_attention": att_loc.get(l.id, 0),
                            "phone": l.phone, "is_primary": bool(l.is_primary), "timezone": l.timezone,
-                           "verified": not ((l.notes or "").lower().startswith("illustrative")), "notes": l.notes,
+                           "verified": location_verified(l), "notes": l.notes,
                            "staff": sum(1 for x in links if x.location_id == l.id)} for l in locs],
             "people": people}
 

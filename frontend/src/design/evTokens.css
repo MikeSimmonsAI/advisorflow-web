@@ -48,6 +48,7 @@
 .ev-ds [data-accent="roofing"]   { --acc: #ee6a24; --acc-strong: #b5470f; --acc-soft: #fff0e6; --acc-ink: #7a2f08; }
 .ev-ds [data-accent="wholesale"] { --acc: #22a06b; --acc-strong: #137a4f; --acc-soft: #e5f7ee; --acc-ink: #0b4d31; }
 .ev-ds [data-accent="insurance"] { --acc: #1595a6; --acc-strong: #0d6f7d; --acc-soft: #e2f5f7; --acc-ink: #07434c; }
+.ev-ds [data-accent="retention"] { --acc: #1d4ed8; --acc-strong: #1e3a8a; --acc-soft: #e8eefd; --acc-ink: #0f2a6b; }
 .ev-ds [data-accent="funeral"]   { --acc: #7357b8; --acc-strong: #5a3f9e; --acc-soft: #f1edfa; --acc-ink: #34216a; }
 .ev-ds [data-accent="office"]    { --acc: #475569; --acc-strong: #334155; --acc-soft: #eef1f5; --acc-ink: #1e293b; }
 .ev-ds [data-accent="general"]   { --acc: #5b6b85; --acc-strong: #44526a; --acc-soft: #eef1f6; --acc-ink: #27324a; }
