@@ -89,16 +89,15 @@ def _dt(v: Optional[str], field: str) -> Optional[datetime]:
 @router.get("/workspace")
 def workspace(ctx: R.RCtx = Depends(ctx_dep)):
     s = R.settings_dict(ctx.settings, ctx.org)
+    t = R.team(ctx)   # computed once
     staff = []
     if ctx.owner and not ctx.preview and ctx.is_demo:
-        t = R.team(ctx)
         staff = [{"user_id": p["user_id"], "name": p["name"], "title": p["title"]} for p in t["people"]
                  if p["title"] in ("manager", "producer", "service", "retention")]
-    locs = R.team(ctx)["locations"]
+    locs = t["locations"]
     agents = []
     if ctx.manager_plus:
-        agents = [{"user_id": p["user_id"], "name": p["name"]} for p in R.team(ctx)["people"]
-                  if p["title"] not in ("owner",)]
+        agents = [{"user_id": p["user_id"], "name": p["name"]} for p in t["people"] if p["title"] not in ("owner",)]
     return {"settings": s, "organization": {"id": ctx.org.id, "name": ctx.org.name},
             "viewer": R.viewer_dict(ctx), "locations": locs, "agents": agents, "preview_options": staff,
             "products": [{"key": k, "label": R.PRODUCT_LABELS[k]} for k in R.PRODUCTS]}

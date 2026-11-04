@@ -1225,19 +1225,23 @@ def team(ctx: RCtx) -> Dict[str, Any]:
     st = {s.user_id: s for s in db.query(AgencyRetentionStaff).filter(AgencyRetentionStaff.organization_id == ctx.org_id).all()}
     today = ctx.today()
     two_weeks = datetime.combine(today + timedelta(days=14), time.min)
+    ids = list(users) or ["-"]
+    now = utcnow()
+    # One grouped query per measure instead of three per person.
+    open_by = dict(db.query(AgencyRenewal.assigned_user_id, func.count(AgencyRenewal.id)).filter(
+        AgencyRenewal.organization_id == ctx.org_id, AgencyRenewal.assigned_user_id.in_(ids),
+        AgencyRenewal.outcome.is_(None)).group_by(AgencyRenewal.assigned_user_id).all())
+    over_by = dict(db.query(AgencyRenewal.assigned_user_id, func.count(AgencyRenewal.id)).filter(
+        AgencyRenewal.organization_id == ctx.org_id, AgencyRenewal.assigned_user_id.in_(ids),
+        AgencyRenewal.outcome.is_(None), AgencyRenewal.next_action_at < now).group_by(AgencyRenewal.assigned_user_id).all())
+    rev_by = dict(db.query(AgencyAppointment.agent_user_id, func.count(AgencyAppointment.id)).filter(
+        AgencyAppointment.organization_id == ctx.org_id, AgencyAppointment.agent_user_id.in_(ids),
+        AgencyAppointment.status.in_(OPEN_APPT), AgencyAppointment.starts_at >= now,
+        AgencyAppointment.starts_at < two_weeks).group_by(AgencyAppointment.agent_user_id).all())
     people = []
     for uid, u in users.items():
         s = st.get(uid)
-        open_n = db.query(AgencyRenewal).filter(AgencyRenewal.organization_id == ctx.org_id,
-                                                AgencyRenewal.assigned_user_id == uid, AgencyRenewal.outcome.is_(None)).count()
-        reviews = db.query(AgencyAppointment).filter(AgencyAppointment.organization_id == ctx.org_id,
-                                                     AgencyAppointment.agent_user_id == uid,
-                                                     AgencyAppointment.status.in_(OPEN_APPT),
-                                                     AgencyAppointment.starts_at >= utcnow(),
-                                                     AgencyAppointment.starts_at < two_weeks).count()
-        overdue = db.query(AgencyRenewal).filter(AgencyRenewal.organization_id == ctx.org_id,
-                                                 AgencyRenewal.assigned_user_id == uid, AgencyRenewal.outcome.is_(None),
-                                                 AgencyRenewal.next_action_at < utcnow()).count()
+        open_n, reviews, overdue = open_by.get(uid, 0), rev_by.get(uid, 0), over_by.get(uid, 0)
         people.append({"user_id": uid, "name": u.full_name or u.email, "title": s.title if s else None,
                        "languages": jl(s.languages, ["en"]) if s else ["en"],
                        "available": s.available if s else True, "review_capacity": s.review_capacity if s else None,

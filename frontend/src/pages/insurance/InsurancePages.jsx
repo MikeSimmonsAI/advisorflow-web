@@ -203,7 +203,7 @@ function AssistantPanel({ a, onChange }) {
             <span className="ins-feed__icon"><Icon name={ev.kind === 'reply' ? 'msg' : ev.kind === 'review_booked' ? 'calcheck' : ev.kind === 'outreach' ? 'bell' : 'check'} size={16} /></span>
             <span className="ins-feed__time">{sameDay(ev.at, c.settings.timezone) ? fmtTime(ev.at, c.settings.timezone) : fmtDate(localDay(ev.at, c.settings.timezone))}</span>
             <span className="ins-feed__text"><b>{ev.summary}</b>
-              {ev.delivery_status && <small>{ev.delivery_status === 'simulated' ? 'Simulated — not sent' : ev.delivery_status === 'failed' ? 'Delivery failed' : ev.delivery_status}</small>}</span>
+              {ev.delivery_status && <small>{ev.direction === 'in' ? (ev.delivery_status === 'simulated' ? 'Simulated reply' : 'Received') : ev.delivery_status === 'simulated' ? 'Simulated — not sent' : ev.delivery_status === 'failed' ? 'Delivery failed' : ev.delivery_status}</small>}</span>
           </li>))}
       </ul>
       <dl className="ins-ai__facts">
@@ -213,7 +213,7 @@ function AssistantPanel({ a, onChange }) {
       </dl>
       <div className="ins-ai__next">
         <Icon name="calendar" />
-        <div><b>Next action:</b> {a.next_scheduled_at ? fmtDateTime(a.next_scheduled_at, c.settings.timezone) : 'Nothing scheduled'}
+        <div><b>Next action:</b> {!a.next_scheduled_at ? 'Nothing scheduled' : new Date(a.next_scheduled_at) <= new Date() ? 'Due now — waiting for the next run' : fmtDateTime(a.next_scheduled_at, c.settings.timezone)}
           <small>{a.next_scheduled_at ? `Next renewal reminder${a.delivery_note ? ' (simulated)' : ''}, inside the ${c.settings.send_window_start}–${c.settings.send_window_end} send window.` : ''}</small></div>
         {c.canManage && wf && <button className="ins-btn ins-btn--sm ins-btn--outline" disabled={busy} onClick={toggle}>
           <Icon name={a.state === 'running' ? 'pause' : 'play'} size={14} /> {a.state === 'running' ? 'Pause' : 'Resume'}</button>}
@@ -277,8 +277,8 @@ function AssignDialog({ row, onClose, onDone }) {
 
 function BookDialog({ row, onClose, onDone }) {
   const c = useIns()
-  const tomorrow = new Date(Date.now() + 86400000)
-  const [day, setDay] = useState(tomorrow.toISOString().slice(0, 10))
+  // Tomorrow in the AGENCY's time zone, not UTC (after 6 PM Central, UTC is already tomorrow).
+  const [day, setDay] = useState(localDay(new Date(Date.now() + 86400000).toISOString(), c.settings.timezone))
   const [time, setTime] = useState('10:00')
   const [medium, setMedium] = useState('in_person')
   const [agent, setAgent] = useState(row.assigned_user_id || '')
