@@ -236,6 +236,9 @@ def _policy(db, org, lead, product, agent, rd: date, idx: int, status="in_force"
                      effective_date=rd - timedelta(days=365), annual_review_date=annual, is_demo=True)
     db.add(p)
     db.flush()
+    prof = db.query(AgencyClientProfile).filter(AgencyClientProfile.lead_id == lead.id).first()
+    if prof is not None and prof.servicing_user_id is None and agent is not None:
+        prof.servicing_user_id = agent.id
     return p
 
 

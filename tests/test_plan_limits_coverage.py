@@ -46,6 +46,7 @@ EXEMPT = {
     "services/demo_scenarios/brand_sales.py": "demo fixture builder; creates platform-scope users with organization_id=None",
     "services/demo_scenarios/customer_reactivation.py": "demo fixture builder",
     "services/agency/demo_seed.py": "Max Life DEMO seeder; refuses any org that is not the is_demo org it created",
+    "services/agency/retention_demo.py": "Vincent Greene retention DEMO seeder (#499); refuses any org that is not its own is_demo org; synthetic is_test clients and example.com staff with unusable passwords",
     "services/roofing/demo_seed.py": "Roofing SAMPLE seeder (god only); is_test homeowners and example.com sample reps in a workspace it flags is_demo",
 
     # THE DEMO SUITE'S SEEDER. Same category as the two fixture builders above,

@@ -342,7 +342,7 @@ def attention_for(ctx: RCtx, r: AgencyRenewal, policy: Optional[AgencyPolicy], h
         return r.attention_reason, REASONS[r.attention_reason]
     if r.assigned_user_id is None:
         return "unassigned", REASONS["unassigned"]
-    if r.next_action_at and r.next_action_at < now:
+    if r.next_action_at and r.next_action_at < now and not has_review:
         return "follow_up_overdue", REASONS["follow_up_overdue"]
     if not has_review and r.renewal_date <= today + timedelta(days=14):
         return "review_not_booked", REASONS["review_not_booked"]
@@ -396,7 +396,9 @@ def renewal_rows(ctx: RCtx, renewals: List[AgencyRenewal]) -> List[Dict[str, Any
             "assigned_at": iso(r.assigned_at), "assignment_reason": r.assignment_reason,
             "version": r.version,
             "location_id": r.location_id, "location_name": loc.name if loc else None,
-            "next_action": r.next_action or ("Book renewal review" if att and att[0] == "review_not_booked" else None),
+            "next_action": (("Mark review held, then record the outcome" if appt is not None and appt.status in OPEN_APPT
+                             and appt.starts_at < now and not r.outcome else None)
+                            or r.next_action or ("Book renewal review" if att and att[0] == "review_not_booked" else None)),
             "next_action_at": iso(r.next_action_at),
             "review": ({"id": appt.id, "starts_at": iso(appt.starts_at), "status": appt.status}
                        if appt else None),
@@ -1490,6 +1492,10 @@ def import_commit(ctx: RCtx, text: str, mapping=None, filename="import.csv") -> 
         raise HTTPException(422, "Map the required columns first: %s" % ", ".join(pv["missing_required_mapping"]))
     now = utcnow()
     created = updated = skipped = 0
+    # Plan limits: one count up front, decremented per created client (no
+    # retroactive enforcement - rows that fit before the ceiling are kept).
+    from app.services import plan_limits
+    capacity = plan_limits.counter_for_org_id(ctx.db, ctx.org_id, plan_limits.LIMIT_LEADS)
     for row in pv["rows"]:
         if row["action"] == "error":
             skipped += 1
@@ -1504,6 +1510,7 @@ def import_commit(ctx: RCtx, text: str, mapping=None, filename="import.csv") -> 
         if row["match"]:
             lead = ctx.db.query(Lead).filter(Lead.id == row["match"]["lead_id"], Lead.organization_id == ctx.org_id).first()
         if lead is None:
+            capacity.take(1)
             lead = Lead(organization_id=ctx.org_id, first_name=v["first_name"] or None, last_name=v["last_name"],
                         email=v["email"], phone=v["phone"], status="client", source="csv_import",
                         source_file=filename, relationship_type="client", is_test=ctx.is_demo)

@@ -26,6 +26,8 @@ def vg(db_session):
     owner = user(db, o, "org_admin", "vgowner")
     staff = {k: db.query(User).filter(User.email == "demo.vg.%s@example.com" % k).first()
              for k in ("kturner", "bcole", "mrios", "jlopez", "mbrooks", "rortega", "asingh", "creed")}
+    staff_locked = all(u.must_change_password for u in db.query(User).filter(
+        User.organization_id == o.id, User.email.like("demo.vg.%")).all())
     # The seeded staff have unusable passwords and must change them before use;
     # here they stand for staff who have activated their logins.
     for u in db.query(User).filter(User.organization_id == o.id).all():
@@ -34,7 +36,7 @@ def vg(db_session):
     db.add(AgencyRetentionSettings(organization_id=other.id, enabled=True, display_name="Second Agency"))
     other_admin = user(db, other, "org_admin", "otheradmin")
     db.commit()
-    return dict(db=db, org=o, owner=owner, other=other, other_admin=other_admin, res=res, **staff)
+    return dict(db=db, org=o, owner=owner, other=other, other_admin=other_admin, res=res, staff_locked=staff_locked, **staff)
 
 
 def _by_household(client, hdr, name, view="all"):
@@ -44,13 +46,13 @@ def _by_household(client, hdr, name, view="all"):
 
 # ───────────────────────────── demo seed ─────────────────────────────
 
-def test_demo_seed_shape_and_safety(vg):
+def test_demo_seed_shape_and_safety(vg):  # noqa: C901
     db, o = vg["db"], vg["org"]
     assert o.is_demo and vg["res"]["seeded"]["locations"] == 5 and vg["res"]["seeded"]["staff"] == 30
     leads = db.query(Lead).filter(Lead.organization_id == o.id).all()
     assert len(leads) == 60 and all(l.is_test and l.email.endswith("@example.com") for l in leads)
     staff = db.query(User).filter(User.organization_id == o.id, User.email.like("demo.vg.%")).all()
-    assert len(staff) == 30 and all(u.must_change_password for u in staff)
+    assert len(staff) == 30 and vg["staff_locked"]   # seeded locked; the fixture then activates them
     assert all(r.is_demo for r in db.query(AgencyRenewal).filter(AgencyRenewal.organization_id == o.id))
     wf = db.query(AgencyRenewalWorkflow).filter(AgencyRenewalWorkflow.organization_id == o.id).one()
     assert wf.delivery_mode == "simulated"
