@@ -1251,6 +1251,8 @@ from app.routers.wholesale_canvass_router import router as wholesale_canvass_rou
 app.include_router(wholesale_canvass_router)   # /wholesale/canvass - door-knocking routes
 from app.routers.wholesale_team_router import router as wholesale_team_router  # noqa: E402
 app.include_router(wholesale_team_router)   # /wholesale/team - team roles and who reports to whom
+from app.routers.wholesale_team_router import accept_router as wholesale_invite_accept_router  # noqa: E402
+app.include_router(wholesale_invite_accept_router)   # #439 /wholesale-invites/accept
 from app.routers.wholesale_ops_router import router as wholesale_ops_router  # noqa: E402
 app.include_router(wholesale_ops_router)   # /wholesale/ops — callbacks, temperature overrides, conversation control, pilot
 from app.routers.skiptrace_cost_router import router as skiptrace_cost_router  # noqa: E402

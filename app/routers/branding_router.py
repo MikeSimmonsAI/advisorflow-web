@@ -173,8 +173,17 @@ def _wholesale_team(db, user):
     wholesale-only, and the app shell keeps them on the Wholesale side."""
     try:
         from app.services import wholesale_team as _wt
-        return {"role": _wt.role_of(db, user), "wholesale_only": _wt.is_wholesale_only(db, user),
-                "field": _wt.is_field(db, user)}
+        role = _wt.role_of(db, user)
+        out = {"role": role, "wholesale_only": _wt.is_wholesale_only(db, user),
+               "field": _wt.is_field(db, user)}
+        if role == _wt.CUSTOM:
+            # #439: which modules this custom-access login may open, so the
+            # rail shows only those. The server fence refuses the rest anyway.
+            from app.services import wholesale_access as _wa
+            from app.services.lead_scope import active_workspace_org_id
+            eff = _wa.effective(db, user, active_workspace_org_id(user, db))
+            out.update({"custom": True, "modules": sorted(m for m, a in (eff.get("permissions") or {}).items() if "view" in a)})
+        return out
     except Exception:  # noqa: BLE001 - branding must not break a login
         return {"role": None, "wholesale_only": False, "field": False}
 

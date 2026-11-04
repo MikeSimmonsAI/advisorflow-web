@@ -40,3 +40,33 @@
   .wt-table td[data-label]:not([data-label=""])::before { content: attr(data-label); display: block; font-size: 12px; color: #475569; margin-bottom: 2px; }
   .wt-actions { text-align: left; white-space: normal; }
 }
+
+/* #439 custom access (wa-) */
+.wa-panel { margin-top: 16px; }
+.wa-two { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.wa-span { grid-column: 1 / -1; }
+.wa-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 12px; }
+.wa-row--between { justify-content: space-between; align-items: center; }
+.wa-row--between .wt-h2 { margin: 0; }
+.wa-builder { display: grid; gap: 12px; }
+.wa-group { border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 12px 4px; margin: 0; min-width: 0; }
+.wa-legend { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #475569; padding: 0 4px; }
+.wa-mod { padding: 10px 0; border-bottom: 1px solid #eef2f7; }
+.wa-mod:last-child { border-bottom: 0; }
+.wa-mod__head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.wa-mod__name { font-weight: 600; font-size: 14px; }
+.wa-acts { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; }
+.wa-act { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; min-height: 32px; cursor: pointer; }
+.wa-act.is-off { color: #94a3b8; cursor: not-allowed; }
+.wa-act input { width: 18px; height: 18px; }
+.wa-preview { border: 1px solid #c7d2fe; background: #f8faff; border-radius: 10px; padding: 10px 14px; }
+.wa-preview .wt-h3 { margin-top: 4px; }
+.wa-preview__list { margin: 0 0 8px; padding-left: 18px; font-size: 14px; display: grid; gap: 4px; }
+.wa-editor { display: grid; gap: 14px; }
+.wa-foot { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.wa-details { border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 12px; }
+.wa-details > summary { cursor: pointer; font-weight: 600; min-height: 32px; display: flex; align-items: center; }
+.wa-plain { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+@media (max-width: 1000px) {
+  .wa-two { grid-template-columns: 1fr; }
+}

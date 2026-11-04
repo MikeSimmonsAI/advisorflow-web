@@ -81,6 +81,9 @@ def visible_user_ids(db: Session, org_id: str, user: User) -> Optional[Set[str]]
     role = T.role_of(db, user, org_id)
     if role in (None, T.MEMBER):
         return None
+    if role == T.CUSTOM:
+        from app.services import wholesale_access as _A     # record visibility from their access (#439)
+        return _A.visible_user_ids(db, org_id, user)
     if role in T.FIELD_ROLES:
         return {user.id}
     # manager / team lead: themselves and everyone below them in the tree

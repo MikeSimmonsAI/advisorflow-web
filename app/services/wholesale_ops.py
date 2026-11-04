@@ -276,6 +276,9 @@ def callback_center(db, org_id: str, *, user=None, mine: bool = False, include_t
         q = q.filter(WholesaleSellerCallback.is_test.is_(False))
     if mine and user is not None:
         q = q.filter(WholesaleSellerCallback.assigned_to_id == user.id)
+    if user is not None:
+        from app.services import wholesale_access as _access   # #439 record visibility
+        q = _access.scope_query(q, WholesaleSellerCallback.assigned_to_id, db, org_id, user)
     open_rows = (q.filter(WholesaleSellerCallback.status == "due")
                  .order_by(WholesaleSellerCallback.due_at.asc()).limit(1000).all())
     done_rows = (q.filter(WholesaleSellerCallback.status == "completed")

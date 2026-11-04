@@ -941,6 +941,8 @@ def list_properties(db: Session = Depends(get_db),
     settings = svc.resolve_settings(db, org_id)
     query = db.query(WholesaleProperty).filter(
         WholesaleProperty.organization_id == org_id)
+    from app.services import wholesale_access as _access   # #439 record visibility
+    query = _access.scope_query(query, WholesaleProperty.assigned_to_id, db, org_id, user)
     if not include_test:
         query = query.filter(WholesaleProperty.is_test.isnot(True))
     for field, value in (("state", state), ("city", city),
@@ -2124,6 +2126,9 @@ def list_deals(db: Session = Depends(get_db),
         raise HTTPException(status_code=409, detail="No customer organization selected.")
     settings = svc.resolve_settings(db, org_id)
     query = db.query(WholesaleDeal).filter(WholesaleDeal.organization_id == org_id)
+    # #439: a custom-access login sees only the deals its record visibility allows.
+    from app.services import wholesale_access as _access
+    query = _access.scope_query(query, WholesaleDeal.assigned_to_id, db, org_id, user)
     if not include_test:
         query = query.filter(WholesaleDeal.is_test.isnot(True))
     if stage:
