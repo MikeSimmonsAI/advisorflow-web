@@ -450,8 +450,8 @@ def test_website_discovery_uses_only_own_source_records(pilot):
     own = _pool(db, name="Cedar Pediatrics (synthetic)", website=None,
                 source_url="https://cedarpeds-synthetic.example/about")
     wrong = _pool(db, name="Birch Clinic (synthetic)", website=None, source_url="https://other-synthetic.example")
-    fetch = _fetcher({"https://cedarpeds-synthetic.example/about": "<title>Cedar Pediatrics</title>",
-                      "https://cedarpeds-synthetic.example": "<p>info@cedarpeds-synthetic.example</p>",
+    fetch = _fetcher({"https://cedarpeds-synthetic.example": "<title>Cedar Pediatrics (synthetic)</title>"
+                                                             "<p>info@cedarpeds-synthetic.example</p>",
                       "https://other-synthetic.example": "<title>Unrelated Plumbing</title>"})
     _start(p)
     WF.run_pass(db, fetch=fetch, mx=_mx_yes)
@@ -470,7 +470,7 @@ def test_person_adds_a_website_and_research_reruns(pilot):
     _start(p)
     WF.run_pass(db, fetch=_fetcher({}), mx=_mx_yes)
     out = WF.set_pool_website(db, p["god"], row.id, "willow-synthetic.example",
-                              fetch=_fetcher({"https://willow-synthetic.example": "<title>Willow Dental</title>"}))
+                              fetch=_fetcher({"https://willow-synthetic.example": "<title>Willow Dental (synthetic)</title>"}))
     assert out["research_queued"] and out["confidence"] == 0.9
     WF.run_pass(db, fetch=_fetcher({"https://willow-synthetic.example": "<p>hi@willow-synthetic.example</p>"}),
                 mx=_mx_yes)
@@ -698,15 +698,73 @@ def test_openstreetmap_website_is_used_only_when_the_site_names_the_business(pil
     def osm(name, city, st):
         asked.append(name)
         return next(v for k, v in osm_sites.items() if k in name)
-    fetch = _fetcher({"https://aspen-synthetic.example": "<title>Aspen Pediatric Dentistry</title><p>hi@aspen-synthetic.example</p>",
+    fetch = _fetcher({"https://aspen-synthetic.example": "<title>Aspen Pediatric Dentistry (synthetic)</title><p>hi@aspen-synthetic.example</p>",
                       "https://unrelated-synthetic.example": "<title>Bob's Tires</title>"})
     _start(p)
     WF.run_pass(db, fetch=fetch, mx=_mx_yes, osm=osm)
     for r in (good, bad, down):
         db.refresh(r)
     assert good.website == "https://aspen-synthetic.example" and good.email_verified is True
-    assert any("OpenStreetMap" in (e.get("source_url") or "") for e in json.loads(good.evidence_json)["research_log"])
+    assert any("OpenStreetMap" in (e.get("found_via") or "") for e in json.loads(good.evidence_json)["research_log"])
     assert bad.website is None                                # OSM site didn't name the business
     rb = {r["id"]: r for r in WF.research_breakdown(db, with_rows=True)["rows"]}
     assert rb[down.id]["reason_code"] == "provider_unavailable"
     assert len(asked) == 3                                    # one lookup per business, no bulk enumeration
+
+
+
+# ── #506 production defect: a network's directory page is not the clinic's site ─
+NETWORK = "https://www.bighealth-synthetic.example"
+NET_HOME = "<title>BHR Home | Big Health Resources</title><p>Primary care, medspa and family clinics across North Texas.</p>"
+
+
+def test_directory_pages_and_body_text_never_make_a_website(pilot):
+    p = pilot
+    db = p["db"]
+    a = _pool(db, name="A2Z Primary Care and MedSpa", website=None,
+              source_url=NETWORK + "/find-a-provider/location/a2z-primary-care-and-medspa/001")
+    b = _pool(db, name="North Richardson Family Clinic", website=None, source_url=NETWORK + "/our-clinics/nrfc")
+    fetch = _fetcher({NETWORK: NET_HOME + "<a href='/contact-us'>c</a>",
+                      NETWORK + "/contact-us": "<p>media@bighealth-synthetic.example</p>"})
+    _start(p)
+    WF.run_pass(db, fetch=fetch, mx=_mx_yes)
+    for r in (a, b):
+        db.refresh(r)
+    assert a.website is None                      # directory path refused outright
+    assert b.website is None                      # homepage title names the network, not the clinic
+    assert not a.email_verified and not b.email_verified
+
+
+def test_role_and_shared_addresses_are_never_verified(pilot):
+    p = pilot
+    db = p["db"]
+    assert WF.role_address("media@x.example") and WF.role_address("careers@x.example")
+    assert WF.role_address("no-reply@x.example") and not WF.role_address("info@x.example")
+    one = _pool(db, name="Oak Dental (synthetic)")
+    two = _pool(db, name="Elm Dental (synthetic)", website=SITE)
+    _start(p)
+    WF.run_pass(db, fetch=_fetcher({SITE: "<p>press@oakdental-synthetic.example office@oakdental-synthetic.example</p>"}),
+                mx=_mx_yes)
+    for r in (one, two):
+        db.refresh(r)
+    verified = [r for r in (one, two) if r.email_verified]
+    assert len(verified) == 1 and verified[0].email == "office@oakdental-synthetic.example"   # never press@, never twice
+
+
+def test_recheck_undoes_an_earlier_wrong_website_and_email(pilot):
+    p = pilot
+    db = p["db"]
+    bad = _pool(db, name="A2Z Primary Care and MedSpa", website=NETWORK, email="media@bighealth-synthetic.example",
+                email_verified=True, evidence_json=json.dumps({"research_log": [
+                    {"by": "Harvey website discovery", "website": NETWORK},
+                    {"by": "Harvey research worker", "emails_published": [{"email": "media@bighealth-synthetic.example"}]}]}))
+    person = _pool(db, name="Typed By Hand Clinic", website="https://typed-synthetic.example")   # a person's entry
+    _start(p)
+    WF.run_pass(db, fetch=_fetcher({NETWORK: NET_HOME, "https://typed-synthetic.example": "<title>Other</title>"}),
+                mx=_mx_yes)
+    db.refresh(bad)
+    db.refresh(person)
+    assert bad.website is None and bad.email is None and not bad.email_verified
+    log = json.loads(bad.evidence_json)["research_log"]
+    assert any(e.get("by") == "Harvey re-check" and any("removed" in u for u in e["undone"]) for e in log)
+    assert person.website == "https://typed-synthetic.example"     # never touched: not the worker's finding

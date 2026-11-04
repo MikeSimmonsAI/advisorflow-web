@@ -270,7 +270,8 @@ def plan(db: Session, now: Optional[datetime] = None) -> Dict[str, int]:
         # Keyed by the website's domain: when a person (or website discovery)
         # adds a website, research runs again for that site - exactly once.
         dom = H.normalize_domain(p.website or "") or "none"
-        if enqueue(db, "research", "pool:%s:%s" % (p.id, dom), target_type="pool_prospect", target_id=p.id):
+        # ':v2' = re-run once under the stricter website/contact rules (#506).
+        if enqueue(db, "research", "pool:%s:%s:v2" % (p.id, dom), target_type="pool_prospect", target_id=p.id):
             out["research"] += 1
     clients = enabled_client_ids(db)
     day = now.strftime("%Y-%m-%d")
@@ -443,6 +444,7 @@ class _Page(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.title, self.desc, self._in_title, self.links, self.mailto, self.text = "", "", False, [], [], []
+        self.site_name = ""
         self._skip = 0
 
     def handle_starttag(self, tag, attrs):
@@ -453,6 +455,8 @@ class _Page(HTMLParser):
             self._in_title = True
         if tag == "meta" and (a.get("name") or "").lower() == "description":
             self.desc = (a.get("content") or "")[:300]
+        if tag == "meta" and (a.get("property") or a.get("name") or "").lower() in ("og:site_name", "application-name"):
+            self.site_name = (a.get("content") or "")[:200]
         if tag == "a" and a.get("href"):
             href = a["href"].strip()
             if href.lower().startswith("mailto:"):
@@ -488,6 +492,7 @@ def parse_page(html: str) -> Dict[str, Any]:
             emails.append(e)
     phones = list(dict.fromkeys(_PHONE_RE.findall(" ".join(p.text))))[:3]
     return {"title": " ".join(p.title.split())[:200], "description": " ".join(p.desc.split()),
+            "site_name": " ".join(p.site_name.split()),
             "emails": emails[:10], "phones": phones, "links": p.links[:200], "text_fenced": text}
 
 
@@ -559,6 +564,20 @@ def _pool_evidence(p, entry: Dict[str, Any]) -> None:
     p.evidence_json = json.dumps(ev, default=str)
 
 
+# Published addresses that are NOT a way to reach the business about buying a
+# service: press, jobs, privacy, system mail. Never counted as a verified contact.
+ROLE_LOCALS = ("media", "press", "pr", "news", "newsroom", "communications", "careers", "career", "jobs", "job",
+               "hr", "recruiting", "recruitment", "talent", "privacy", "legal", "compliance", "dpo", "abuse",
+               "webmaster", "postmaster", "hostmaster", "noreply", "no-reply", "donotreply", "do-not-reply",
+               "mailer-daemon", "investors", "ir", "security", "accessibility", "ethics", "foundation", "giving",
+               "donate", "volunteer", "medicalrecords", "records", "billing")
+
+
+def role_address(email: str) -> bool:
+    local = (email or "").split("@", 1)[0].lower()
+    return local in ROLE_LOCALS or any(local.startswith(r + ".") or local.startswith(r + "-") for r in ROLE_LOCALS)
+
+
 def verify_contacts(site: Dict[str, Any], mx=None) -> Dict[str, Any]:
     """Contact statuses, strictly from what the site published."""
     mx = mx or _default_mx
@@ -576,7 +595,9 @@ def verify_contacts(site: Dict[str, Any], mx=None) -> Dict[str, Any]:
         own = _same_site(c["email"], dom)
         c["own_domain"] = own
         c["mx"] = mx(c["email"].split("@", 1)[1]) if own else None
-        if own and c["mx"] is True:
+        if role_address(c["email"]):
+            c["status"] = "role_address"             # press / jobs / privacy etc. - not a sales contact
+        elif own and c["mx"] is True:
             c["status"] = "email_validated"
         elif own and c["mx"] is None:
             c["status"] = "email_published"          # couldn't check mail routing
@@ -603,12 +624,34 @@ LISTING_HOSTS = ("google.", "goo.gl", "maps.", "yelp.", "facebook.", "fb.com", "
                  "bbb.org", "yellowpages.", "mapquest.", "nextdoor.", "angi.", "homeadvisor.", "thumbtack.",
                  "apartments.com", "zillow.", "healthgrades.", "zocdoc.", "vitals.com", "webmd.", "npiregistry",
                  "opencorporates.", "sos.state", "manta.com", "chamberofcommerce.", "bing.com", "apple.com")
-_STOP = {"the", "and", "of", "llc", "inc", "co", "company", "group", "center", "services", "service", "dallas",
-         "texas", "tx", "plano", "frisco", "richardson", "family", "care", "clinic", "dental", "dentistry"}
+_STOP = {"the", "and", "of", "llc", "inc", "co", "company", "group", "center", "centre", "services", "service",
+         "dallas", "texas", "tx", "plano", "frisco", "richardson", "mckinney", "allen", "irving", "arlington",
+         "garland", "denton", "fort", "worth", "family", "care", "clinic", "clinics", "dental", "dentistry",
+         "north", "south", "east", "west", "primary", "medical", "medicine", "health", "healthcare", "pediatric",
+         "pediatrics", "kids", "children", "childrens", "medspa", "spa", "associates", "partners", "practice",
+         "physicians", "physician", "doctors", "office", "offices", "smile", "smiles", "apartments", "residential",
+         "management", "property", "properties", "dfw", "metro", "city", "first", "plus", "pllc", "ltd", "corp"}
+# Pages that list MANY businesses under one domain (a health system's provider
+# finder, a franchise locator). Their homepage is the network's, never the clinic's.
+DIRECTORY_PATH_RE = re.compile(r"/(find-a-|providers?/|locations?/|directory|doctors?/|physicians?/|staff/|"
+                               r"medical-staff|listing|members?/|our-offices|office-locator|store-locator)", re.I)
 
 
 def _name_tokens(name: str) -> List[str]:
-    return [w for w in re.findall(r"[a-z0-9]+", (name or "").lower()) if len(w) >= 4 and w not in _STOP]
+    return [w for w in re.findall(r"[a-z0-9]+", (name or "").lower()) if len(w) >= 3 and w not in _STOP]
+
+
+def site_names_business(pg: Dict[str, Any], name: str) -> Optional[str]:
+    """The site's OWN title (or og:site_name) must carry every distinctive word
+    of the business name; a name made only of generic words must appear whole.
+    Body text never counts - a health system's homepage mentions 'primary care'."""
+    label = (" ".join([pg.get("title") or "", pg.get("site_name") or ""])).lower()
+    words = re.findall(r"[a-z0-9]+", label)
+    tokens = _name_tokens(name)
+    if tokens:
+        return ("site title names %s" % ", ".join(tokens)) if all(t in words for t in tokens) else None
+    whole = " ".join(re.findall(r"[a-z0-9]+", (name or "").lower()))
+    return ("site title is the business name" if whole and whole in " ".join(words) else None)
 
 
 OSM_UA = "EvoSysPro-Acquisition/1.0 (business website lookup; +https://evosyspro.live)"
@@ -654,7 +697,8 @@ def find_website(p, fetch=None, osm=None) -> Dict[str, Any]:
     accepted only when that site's homepage names the business."""
     cands = []
     src = (getattr(p, "source_url", None) or "").strip()
-    if src.lower().startswith(("http://", "https://")) and not any(h in src.lower() for h in LISTING_HOSTS):
+    if (src.lower().startswith(("http://", "https://")) and not any(h in src.lower() for h in LISTING_HOSTS)
+            and not DIRECTORY_PATH_RE.search(urlparse(src).path or "")):
         cands.append(("source link", src))
     try:
         ev = json.loads(p.evidence_json) if p.evidence_json else {}
@@ -676,21 +720,67 @@ def find_website(p, fetch=None, osm=None) -> Dict[str, Any]:
         why = "its source link is a listing page" if src else "no source link"
         return {"note": "%s; %s" % (why, osm_note) if osm_note else why,
                 "provider_unavailable": bool(osm_note and "unavailable" in osm_note)}
-    tokens = _name_tokens(p.name or "")
     fetch = fetch or _default_fetch
     for where, url in cands:
         u = url if url.lower().startswith(("http://", "https://")) else "https://" + url
-        final, html = fetch(u)
+        home = "%s://%s" % (urlparse(u).scheme, urlparse(u).netloc)
+        final, html = fetch(home)
+        if final is None:
+            final, html = fetch(u)
         if final is None:
             continue
-        pg = parse_page(html)
-        hay = (pg["title"] + " " + pg["description"] + " " + pg["text_fenced"][:4000]).lower()
-        hits = [t for t in tokens if t in hay]
-        if tokens and len(hits) >= max(1, (len(tokens) + 1) // 2):
+        match = site_names_business(parse_page(html), p.name or "")
+        if match:
             base = "%s://%s" % (urlparse(final).scheme, urlparse(final).netloc)
-            return {"website": base, "source": where, "confidence": 0.8 if len(hits) == len(tokens) else 0.6,
-                    "match": "homepage names %s" % ", ".join(hits)}
+            return {"website": base, "source": where, "source_url": u, "confidence": 0.8, "match": match}
     return {"note": "a candidate site did not name the business"}
+
+
+def _shared_with_others(db: Session, p, email: str) -> bool:
+    """One address published for several different businesses (a network's or
+    franchisor's inbox) is not this business's contact."""
+    from app.models.lead_intel_models import LeadIntelProspect
+    return db.query(LeadIntelProspect.id).filter(LeadIntelProspect.id != p.id,
+                                                 LeadIntelProspect.email == email).first() is not None
+
+
+def recheck_worker_findings(db: Session, p, fetch=None) -> List[str]:
+    """Re-test what an EARLIER worker version decided, against today's rules:
+    a website it discovered must still be named by its own site title; an email
+    it verified must not be a press/jobs/system address or shared with another
+    business. Only the worker's own findings are touched - never a person's.
+    Returns what was undone (recorded in the business's research log)."""
+    try:
+        ev = json.loads(p.evidence_json) if p.evidence_json else {}
+    except ValueError:
+        ev = {}
+    log_ = ev.get("research_log") if isinstance(ev, dict) else None
+    log_ = log_ if isinstance(log_, list) else []
+    undone: List[str] = []
+    found_by_worker = any(e.get("by") == "Harvey website discovery" and e.get("website") == p.website for e in log_)
+    if p.website and found_by_worker:
+        final, html = (fetch or _default_fetch)(p.website)
+        if final is None or not site_names_business(parse_page(html), p.name or ""):
+            undone.append("website %s removed: its site title does not name %s" % (p.website, p.name))
+            dom = H.normalize_domain(p.website)
+            if p.email and dom and _same_site(p.email, dom):
+                undone.append("email %s removed: it came from that website" % p.email)
+                p.email, p.email_verified = None, None
+            p.website = None
+    verified_by_worker = any(e.get("by") == "Harvey research worker" and p.email and
+                             any(x.get("email") == p.email for x in (e.get("emails_published") or []))
+                             for e in log_)
+    if p.email and p.email_verified and verified_by_worker:
+        if role_address(p.email):
+            undone.append("%s is a press/jobs/system address, not a sales contact - no longer verified" % p.email)
+            p.email_verified = False
+        elif _shared_with_others(db, p, p.email):
+            undone.append("%s is shared with another business - no longer verified" % p.email)
+            p.email_verified = False
+    if undone:
+        _pool_evidence(p, {"at": datetime.utcnow().isoformat(), "by": "Harvey re-check", "undone": undone})
+        db.commit()
+    return undone
 
 
 def run_research(db: Session, job, fetch=None, mx=None, osm=None, **_):
@@ -702,13 +792,14 @@ def run_research(db: Session, job, fetch=None, mx=None, osm=None, **_):
             return "blocked", {"reason": "The business is no longer in the master pool"}
         if p.suppressed_reason:
             return "blocked", {"reason_code": "suppressed", "reason": "Excluded or suppressed: %s" % p.suppressed_reason}
+        undone = recheck_worker_findings(db, p, fetch)
         if not (p.website or "").strip():
             found = find_website(p, fetch, osm)
             if found.get("website"):
                 p.website = found["website"]
                 _pool_evidence(p, {"at": now.isoformat(), "by": "Harvey website discovery", "website": found["website"],
-                                   "source_url": found["source"], "confidence": found["confidence"],
-                                   "match": found["match"]})
+                                   "found_via": found["source"], "source_url": found.get("source_url"),
+                                   "confidence": found["confidence"], "match": found["match"]})
                 db.commit()
             else:
                 return "blocked", {"status": "research_incomplete",
@@ -730,13 +821,18 @@ def run_research(db: Session, job, fetch=None, mx=None, osm=None, **_):
         p.researched_at = now
         if not p.source_url:
             p.source_url = home_url
+        if v["best"] and _shared_with_others(db, p, v["best"]["email"]):
+            v["best"]["status"] = "shared_address"
+            v["status"], v["best"] = "email_published", None
         if v["best"] and not p.email_verified:
             p.email, p.email_verified = v["best"]["email"], True
             _push_pool_contact(db, p, v["best"])
         elif v["emails"] and not p.email:
-            p.email, p.email_verified = v["emails"][0]["email"], False
+            first = next((e for e in v["emails"] if e.get("status") != "role_address"), None)
+            if first:
+                p.email, p.email_verified = first["email"], False
         db.commit()
-        return "done", {"status": v["status"], "pages": len(site["pages"]),
+        return "done", {"status": v["status"], "pages": len(site["pages"]), "rechecked": undone or None,
                         "reason_code": None if v["best"] else ("no_email" if not v["emails"] else "email_unvalidated"),
                         "verified_email": (v["best"] or {}).get("email"), "source": home_url}
     # A client's own prospect.
@@ -1279,18 +1375,16 @@ def set_pool_website(db: Session, actor, prospect_id: str, url: str, fetch=None)
     final, html = (fetch or _default_fetch)(u)
     match, conf = None, 0.5
     if final is not None:
-        pg = parse_page(html)
-        hay = (pg["title"] + " " + pg["text_fenced"][:4000]).lower()
-        hits = [t for t in _name_tokens(p.name or "") if t in hay]
-        if hits:
-            match, conf = "homepage names %s" % ", ".join(hits), 0.9
+        match = site_names_business(parse_page(html), p.name or "")
+        if match:
+            conf = 0.9
     base = ("%s://%s" % (urlparse(final or u).scheme, urlparse(final or u).netloc))
     p.website = base
     _pool_evidence(p, {"at": datetime.utcnow().isoformat(), "by": getattr(actor, "email", None) or "user",
                        "website": base, "source_url": u, "confidence": conf,
                        "match": match or ("site could not be read yet" if final is None else "homepage does not name the business")})
     db.commit()
-    job = enqueue(db, "research", "pool:%s:%s" % (p.id, H.normalize_domain(base) or "none"),
+    job = enqueue(db, "research", "pool:%s:%s:v2" % (p.id, H.normalize_domain(base) or "none"),
                   target_type="pool_prospect", target_id=p.id)
     return {"id": p.id, "website": base, "confidence": conf, "match": match, "research_queued": bool(job),
             "readable": final is not None}
