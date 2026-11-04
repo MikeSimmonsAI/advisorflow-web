@@ -339,6 +339,22 @@ def _acquisition_enabled(org) -> bool:
         return False
 
 
+def _retention_enabled(db: Session, org) -> bool:
+    """Opens the insurance retention workspace (#499): an insurance agency
+    (explicit `insurance_agency`) whose agency_retention_settings row is
+    enabled. Max Life and every other agency keep their existing door."""
+    try:
+        from app.services.program_experience import insurance_identity
+        if not insurance_identity(org):
+            return False
+        from app.models.agency_retention_models import AgencyRetentionSettings
+        row = db.query(AgencyRetentionSettings.enabled).filter(
+            AgencyRetentionSettings.organization_id == org.id).first()
+        return bool(row and row[0])
+    except Exception:  # pragma: no cover - never let a hint break login
+        return False
+
+
 def program_brand(db: Session, user: User, host_slug: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """The brand whose look this person's Program Access should wear, or None.
 
@@ -526,7 +542,8 @@ def authorized_contexts(db: Session, user: User, host_slug: Optional[str] = None
             # not set up opened a dead "isn't turned on" screen on every entry
             # (prod, 2026-10-20). /roofing-ops still enforces it server-side.
             "program_route": ("/program/roofing" if _roofing_enabled(org)
-                              else "/program/acquisition" if _acquisition_enabled(org) else None),
+                              else "/program/acquisition" if _acquisition_enabled(org)
+                              else "/program/insurance" if _retention_enabled(db, org) else None),
             # THE EXPERIENCE THIS WORKSPACE OPENS FOR THIS PERSON - the app
             # renders this shell and never the general platform for a program
             # workspace (program_experience enforces the Wholesale lock).

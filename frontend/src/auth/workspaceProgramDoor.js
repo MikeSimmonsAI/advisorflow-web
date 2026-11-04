@@ -12,6 +12,8 @@ export function workspaceProgramDestination(entry) {
   if (entry.program_route === '/program/roofing') return '/program/roofing'
   // Set only for the managed-acquisition client (explicit client_acquisition).
   if (entry.program_route === '/program/acquisition') return '/program/acquisition'
+  // Set only for an insurance workspace whose retention workspace is switched on (#499).
+  if (entry.program_route === '/program/insurance') return '/program/insurance'
   if (entry.is_program) return '/program'
   return null
 }

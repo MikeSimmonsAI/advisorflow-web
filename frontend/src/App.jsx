@@ -127,6 +127,19 @@ const RoofingHomeowner = lazyPage(() => import('./pages/roofing/Homeowner'))
 const RoofingSettings = lazyPage(() => import('./pages/roofing/Settings'))
 const RoofingLanding = lazyPage(() => import('./pages/roofing/RoofingLanding'))
 const RoofingDemo = lazyPage(() => import('./pages/roofing/demo/DemoApp'))
+// Insurance retention workspace (Issue #499): /program/insurance/*.
+const InsuranceShell = lazyPage(() => import('./pages/insurance/InsuranceShell'))
+const insPage = name => lazyPage(() => import('./pages/insurance/InsurancePages').then(m => ({ default: m[name] })))
+const InsToday = insPage('TodayPage')
+const InsRenewals = insPage('RenewalsPage')
+const InsClients = insPage('ClientsPage')
+const InsConversations = insPage('ConversationsPage')
+const InsAppointments = insPage('AppointmentsPage')
+const InsTeam = insPage('TeamPage')
+const InsReports = insPage('ReportsPage')
+const InsAutomation = insPage('AutomationPage')
+const InsImport = insPage('ImportPage')
+const InsSettings = insPage('SettingsPage')
 // Managed client acquisition (Issue #452): the client's portal (/program/acquisition/*).
 const AcquisitionShell = lazyPage(() => import('./pages/acquisition/AcquisitionShell'))
 const AcqHome = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Home })))
@@ -1579,6 +1592,20 @@ export default function App() {
           <Route path="leads" element={<RoofingLeads />} />
           <Route path="homeowners/:leadId" element={<RoofingHomeowner />} />
           <Route path="settings" element={<RoofingSettings />} />
+        </Route>
+        {/* Insurance retention workspace (Issue #499). /agency/retention enforces the
+             `insurance_agency` feature, the workspace's retention setting and every scope. */}
+        <Route path="/program/insurance" element={<ProtectedRoute bare><InsuranceShell /></ProtectedRoute>}>
+          <Route index element={<InsToday />} />
+          <Route path="renewals" element={<InsRenewals />} />
+          <Route path="clients" element={<InsClients />} />
+          <Route path="conversations" element={<InsConversations />} />
+          <Route path="appointments" element={<InsAppointments />} />
+          <Route path="team" element={<InsTeam />} />
+          <Route path="reports" element={<InsReports />} />
+          <Route path="automation" element={<InsAutomation />} />
+          <Route path="import" element={<InsImport />} />
+          <Route path="settings" element={<InsSettings />} />
         </Route>
         {/* Managed client acquisition (Issue #452). /acquisition enforces membership,
              explicit client_acquisition and cleaning identity server-side. */}
