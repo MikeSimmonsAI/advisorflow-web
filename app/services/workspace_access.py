@@ -286,6 +286,14 @@ def user_authorized_platform_slugs(user: User, db: Session) -> set:
 # THE AUTHORIZED CONTEXT LIST — built by the server, never by the browser
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _is_sci_org(db, org_id) -> bool:
+    try:
+        from app.services import sms_programs
+        return sms_programs.is_sci_org(db, org_id)
+    except Exception:                                    # pragma: no cover
+        return False
+
+
 def _experience(db, user, org, is_program) -> str:
     try:
         from app.services.program_experience import experience_for
@@ -549,6 +557,10 @@ def authorized_contexts(db: Session, user: User, host_slug: Optional[str] = None
             "role": m.role,
             "path": "/workspace/%s" % org.id,
             "is_program": org.id in program_orgs,
+            # Which program it is (Issue #507): SCI keeps its SCI card; any
+            # other program workspace (Restland, one location) keeps its own
+            # identity on the launcher while opening the same program shell.
+            "program_is_sci": (org.id in program_orgs) and _is_sci_org(db, org.id),
             # Only a workspace whose Roofing program is actually switched on
             # (explicit `roofing_program` entitlement) opens the Roofing app.
             # Never by industry or slug alone: a Roofing org whose program was

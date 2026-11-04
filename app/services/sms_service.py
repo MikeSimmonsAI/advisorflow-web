@@ -535,6 +535,13 @@ def _final_send_guards(db: Session, lead: Lead, body: str, *, from_number=None,
                                             messaging_service_sid=messaging_service_sid)
     if reasons:
         raise SciSmsBlocked(reasons)
+    # ANY OTHER OUTREACH PROGRAM (Restland, Issue #507) has none of SCI's
+    # texting checks (consent ledger, toll-free-only sender). Until its owner
+    # switches texts on for that workspace - after its own sender is ready - no
+    # text goes out to its families on ANY path, manual included.
+    program_hold = sms_programs.program_text_refusal(db, lead)
+    if program_hold:
+        raise ValueError("Lead %s: %s" % (getattr(lead, "id", None), program_hold))
     sms_campaigns.assert_content_allowed(body, from_number=from_number,
                                          messaging_service_sid=messaging_service_sid,
                                          path=path)

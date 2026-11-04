@@ -191,14 +191,14 @@ export default function Campaigns({ isManager, locationId, locations, performanc
               {cur.own_copy
                 ? <Field label="Sample first name" hint="A made-up family, for the preview only"><input value={sample} maxLength={30} onChange={e => setSample(e.target.value)} /></Field>
                 : <Field label="Selected campaign"><input value={cur.name} disabled /></Field>}
-              <Field label="Location">
+{homes.length > 1 && <Field label="Location">
                 <select value={loc} onChange={e => setLoc(e.target.value)}>
                   {homes.map(l => <option key={l.location_id} value={l.location_id}>{l.name}</option>)}
                 </select>
-              </Field>
+              </Field>}
             </div>
             {cur.own_copy ? (<>
-              {quickHomes.length > 0 && (
+              {homes.length > 1 && quickHomes.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '0 0 8px' }} role="group" aria-label="Quick location">
                   {quickHomes.map(l => (
                     <button key={l.location_id} type="button" className={`sci-btn sm${loc === l.location_id ? ' primary' : ''}`}
@@ -448,7 +448,7 @@ function SequenceEditor({ cur, isManager, touch, setTouch, draft, setDraft, onPr
     <Panel title={`${cur.name} — message sequence`} labelledBy="sci-seq" style={{ gridColumn: '1 / -1' }}
       aside={changed ? <Chip tone="warn">{Object.keys(draft).length} unsaved</Chip> : <span className="sci-micro sci-muted">All changes saved</span>}>
       <p className="sci-micro sci-muted" style={{ marginTop: 0 }}>
-        Every step belongs only to this campaign and has its own wording. Texts follow the SCI cadence days; emails follow
+        Every step belongs only to this campaign and has its own wording. Texts follow the program's cadence days; emails follow
         the email runner. A blank step sends nothing, and the campaign can't be switched on while any step is blank.
         Saving never switches the campaign on.
       </p>

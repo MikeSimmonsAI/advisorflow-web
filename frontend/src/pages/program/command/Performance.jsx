@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { percentText, barWidth } from './rateModel'
 import { Link } from 'react-router-dom'
 import { api } from '../../../api/client'
+import { useProgramProfile } from '../useProgramProfile'
 
 export const RANGES = [['today', 'Today'], ['7d', '7 Days'], ['30d', '30 Days'], ['all', 'All Time'], ['custom', 'Custom']]
 const CT = { timeZone: 'America/Chicago' }
@@ -79,7 +80,7 @@ export function RangeBar({ range, setRange, loc, setLoc, locations, campaign, se
           <label>From<input type="date" value={range.start || ''} max={today} onChange={e => setRange({ ...range, start: e.target.value })} /></label>
           <label>To<input type="date" value={range.end || ''} max={today} onChange={e => setRange({ ...range, end: e.target.value })} /></label>
         </div>)}
-      {setLoc && (
+      {setLoc && (locations || []).length > 1 && (
         <select className="pf-select" value={loc} onChange={e => setLoc(e.target.value)} aria-label="Location">
           <option value="">All locations</option>
           {(locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
@@ -220,10 +221,10 @@ export function PerformanceHome({ range, setRange, loc, setLoc, openMetric, camp
 
       <CampaignCompare range={range} loc={loc} campaign={campaign} setCampaign={setCampaign} />
 
-      <section className="cmd-card pf-card">
+      {(d.locations_all || []).length > 1 && <section className="cmd-card pf-card">
         <h3>Location performance <small>{d.window.label}</small></h3>
         <LocationTable rows={d.locations} open={open} setLoc={setLoc} />
-      </section>
+      </section>}
       <p className="cmd-foot">Every number opens the exact records behind it. Updated {fmtWhen(d.updated_at)}.</p>
     </div>}
   </>
@@ -527,10 +528,10 @@ export function MetricDrill({ spec, range: range0, loc: loc0, onBack, openFamily
       {sum && <DrillSummary s={sum} pick={t => seg('attempts', t)} pickQueue={() => seg('scheduled_new')} />}
       <div className="pf-dfilters">
         <CampaignSelect value={campaign} onChange={setCampaign} options={sum?.campaign_options} compact />
-        <select className="pf-select" value={loc} onChange={e => setLoc(e.target.value)} aria-label="Location">
+        {(r?.locations_all || []).length > 1 && <select className="pf-select" value={loc} onChange={e => setLoc(e.target.value)} aria-label="Location">
           <option value="">All locations</option>
           {(r?.locations_all || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-        </select>
+        </select>}
         {r && !r.snapshot && <>
           <select className="pf-select" value={channel} onChange={e => setChannel(e.target.value)} aria-label="Channel">
             <option value="">Text + email</option><option value="sms">Text</option><option value="email">Email</option>
@@ -611,6 +612,7 @@ function Record({ i, open }) {
 const KIND = { imported: 'Imported', approved: 'Approved', hold: 'On hold', cadence: 'Schedule', touch: 'Outreach',
   skipped: 'Not sent', message: 'Message', reply: 'Reply', opt_out: 'Opt-out', ai: 'AI', staff: 'Staff', offer: 'Offer', handling: 'Handling', booked: 'Appointment' }
 export function Journey({ id }) {
+  const prof = useProgramProfile()
   const [j, setJ] = useState(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -636,7 +638,7 @@ export function Journey({ id }) {
   return (
     <section className="pf-journey" aria-label="Family journey">
       <div className="jr-banner">
-        <div><b>{j.name}</b><span>{[j.location, j.advisor ? `Advisor ${j.advisor}` : null, j.campaign, 'Program: SCI Live'].filter(Boolean).join(' · ')}</span></div>
+        <div><b>{j.name}</b><span>{[j.location, j.advisor ? `Advisor ${j.advisor}` : null, j.campaign, `Program: ${prof.live_label}`].filter(Boolean).join(' · ')}</span></div>
         <div className="jr-next"><small>Next scheduled action</small>
           {j.opted_out ? <b>None - opted out</b> : j.next_touch_at
             ? <><b>{fmtWhen(j.next_touch_at)} CT</b><span>Touch {nextTouch}{nextStep ? ` · ${nextStep.channel === 'email' ? 'Email' : 'Text'}` : ''} · scheduled</span></>
@@ -684,7 +686,7 @@ export function Journey({ id }) {
           <div className="jr-card">
             <h3>Appointment conversion</h3>
             <div className="sl-row"><span>Appointment calendar</span><b>EvoSys Appointment Booking</b></div>
-            <div className="sl-row"><span>Meeting type</span><b>In-person visit (60 min)</b></div>
+            <div className="sl-row"><span>Meeting type</span><b>{prof.visit_label}</b></div>
             <div className="sl-row"><span>Booking outcome</span><em className={`tag ${appt.state === 'confirmed' ? 'r-delivered' : 'r-pending'}`}>{appt.state === 'confirmed' ? 'Confirmed' : appt.state === 'offered' ? 'Offered' : 'Pending'}</em></div>
             <p className="jr-warn">{j.sms_links_on ? 'Booking links can go in texts.' : 'Booking links stay out of texts for now.'} An offer of times is not a confirmed appointment.</p>
           </div>

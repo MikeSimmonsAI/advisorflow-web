@@ -109,8 +109,9 @@ export default function Locations({ isManager, selected, onChange, setParam, per
 
   return (
     <>
-      <PageHead title="Locations" sub={`Manage identity, readiness and messaging across ${real.length} facilities.`}>
-        <Chip tone="info">{real.length} mapped locations</Chip>
+      <PageHead title={real.length === 1 ? 'Location' : 'Locations'}
+        sub={real.length === 1 ? `Identity, readiness and messaging for ${real[0].official_name || real[0].name || 'this location'}.` : `Manage identity, readiness and messaging across ${real.length} facilities.`}>
+        <Chip tone="info">{real.length === 1 ? 'Single location' : `${real.length} mapped locations`}</Chip>
         {held.length > 0 && <Chip tone="bad">{held.length} held</Chip>}
       </PageHead>
 
@@ -186,7 +187,7 @@ export default function Locations({ isManager, selected, onChange, setParam, per
                 <>
                   {cur.verification_held && (
                     <div className="sci-banner bad"><span className="sci-banner-icon" aria-hidden="true"><Icon name="lock" /></span>
-                      <div className="sci-banner-body"><strong>Held — pending verification</strong>This location's identity is not confirmed with SCI, so nothing is sent for its contacts.</div></div>
+                      <div className="sci-banner-body"><strong>Held — pending verification</strong>This location's identity is not confirmed with the customer, so nothing is sent for its contacts.</div></div>
                   )}
                   {pc && (
                     <div className="sci-statstrip" style={{ marginBottom: 12 }}>

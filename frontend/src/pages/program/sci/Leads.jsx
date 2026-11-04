@@ -56,11 +56,11 @@ export default function Leads({ locations, locationId, openPerson, initialQuery 
         aside={<span className="sci-micro sci-muted">{data ? `${num(data.total)} found` : 'Loading…'}</span>}>
         <div className="sci-toolbar">
           <div className="sci-grow"><SearchBox id="sci-leads-search" value={search} onChange={setSearch} placeholder="Name, phone, email or Lead ID" label="Search families" width="100%" /></div>
-          <label className="sci-sr" htmlFor="sci-leads-loc">Location</label>
+          {homes.length > 1 && <><label className="sci-sr" htmlFor="sci-leads-loc">Location</label>
           <select id="sci-leads-loc" className="sci-input sm" value={loc} onChange={e => setLoc(e.target.value)}>
             <option value="">All locations</option>
             {homes.map(l => <option key={l.location_id} value={l.location_id}>{l.name}</option>)}
-          </select>
+          </select></>}
         </div>
         <div style={{ marginBottom: 10 }}><FilterChips items={SHOW} value={show} onChange={setShow} label="Show" /></div>
         {!data ? <Loading /> : !data.items.length ? (

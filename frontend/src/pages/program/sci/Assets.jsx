@@ -149,11 +149,11 @@ export default function Assets({ isManager, locations }) {
             <select id="sci-a-cat" className="sci-input sm" value={filter.category} onChange={e => setFilter(f => ({ ...f, category: e.target.value }))}>
               <option value="">All campaigns</option>{Object.entries(cats).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
-            <label className="sci-sr" htmlFor="sci-a-loc">Location</label>
+            {homes.length > 1 && <><label className="sci-sr" htmlFor="sci-a-loc">Location</label>
             <select id="sci-a-loc" className="sci-input sm" style={{ maxWidth: 200 }} value={filter.location} onChange={e => setFilter(f => ({ ...f, location: e.target.value }))}>
               <option value="">All locations</option><option value="shared">Shared (every location)</option>
               {homes.map(l => <option key={l.location_id} value={l.location_id}>{l.name}</option>)}
-            </select>
+            </select></>}
           </div>
           <div className="sci-row-gap" style={{ marginBottom: 12, justifyContent: 'space-between' }}>
             <FilterChips items={[['', 'All assets'], ['flyer', 'Flyers'], ['logo', 'Logos'], ['facility_image', 'Facility images']]} value={kind} onChange={setKind} label="Asset type" />
@@ -213,12 +213,12 @@ export default function Assets({ isManager, locations }) {
                   </select>
                 </Field>
               )}
-              <Field label="Assign location" hint="A location's own file is used first, then the shared one">
+{homes.length > 1 &&               <Field label="Assign location" hint="A location's own file is used first, then the shared one">
                 <select value={form.location_id} onChange={e => setForm(f => ({ ...f, location_id: e.target.value }))}>
                   <option value="">Shared to all locations</option>
                   {homes.map(l => <option key={l.location_id} value={l.location_id}>{l.name}</option>)}
                 </select>
-              </Field>
+              </Field>}
               <label className="sci-check"><input type="checkbox" checked={form.activate} onChange={e => setForm(f => ({ ...f, activate: e.target.checked }))} /> Make this the active version</label>
               <div className="sci-banner" style={{ margin: 0 }}>
                 <span className="sci-banner-icon" aria-hidden="true"><Icon name="info" /></span>

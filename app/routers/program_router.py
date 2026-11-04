@@ -20,6 +20,7 @@ from sqlalchemy import func
 
 from app.utils.content_disposition import content_disposition
 from app.services.programs import aliases as _aliases
+from app.services.programs import program_profile as _profile
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_god, require_tenant_or_observer, require_tenant_user
@@ -180,6 +181,9 @@ def _program_json(db: Session, prog: OutreachProgram) -> dict:
         "aliases": _aliases.status(db, prog),
         "aliases_receiving_confirmed_at": _iso(prog.aliases_receiving_confirmed_at),
         "logo_url": _asset_url(logo),
+        # Who this program is and how many locations it has (Issue #507):
+        # the shell draws its own name and hides location controls for one.
+        "profile": _profile.profile(db, prog),
     }
 
 
@@ -190,7 +194,8 @@ def program_status(db: Session = Depends(get_db), user: User = Depends(require_t
     """Whether this workspace runs a program - a 200 either way, for the nav."""
     prog = identity.program_for_org(db, lead_scope.active_workspace_org_id(user, db) or user.organization_id)
     manager = bool(prog) and _sees_program(db, user, prog.organization_id)
-    return {"active": prog is not None and manager, "name": prog.name if prog else None}
+    return {"active": prog is not None and manager, "name": prog.name if prog else None,
+            "profile": _profile.profile(db, prog) if (prog is not None and manager) else None}
 
 
 @router.get("/me")

@@ -289,6 +289,43 @@ def sci_org_id(db) -> Optional[str]:
     return rows[0][0] if len(rows) == 1 else None
 
 
+def is_program_org(db, org_id: Optional[str]) -> bool:
+    """SCI, or any other workspace that runs an active outreach program
+    (Restland, Issue #507). Such families are answered only by the program's
+    own reply handling - never ALSO by the generic pipeline/concierge
+    auto-reply, which would answer the same text twice."""
+    if is_sci_org(db, org_id):
+        return True
+    if not org_id:
+        return False
+    try:
+        from app.models.program_models import OutreachProgram
+        return db.query(OutreachProgram.id).filter(OutreachProgram.organization_id == org_id,
+                                                   OutreachProgram.is_active.is_(True)).first() is not None
+    except Exception:                                    # pragma: no cover
+        return False
+
+
+PROGRAM_TEXTS_OFF_REFUSAL = (
+    "PROGRAM TEXTS OFF: this program's texts are off until its own sender is ready "
+    "and the owner switches texts on for this workspace. Email and in-app work continue.")
+
+
+def program_text_refusal(db, lead) -> Optional[str]:
+    """For a family of a NON-SCI outreach program: the reason no text may go
+    out, or None. SCI has its own, stricter gate (sci_send_refusal); every
+    organization without a program returns None and behaves as before."""
+    org_id = getattr(lead, "organization_id", None)
+    if not org_id or is_sci_org(db, org_id) or not is_program_org(db, org_id):
+        return None
+    try:
+        from app.models.program_models import WorkspaceSwitch
+        sw = db.query(WorkspaceSwitch).filter(WorkspaceSwitch.organization_id == org_id).first()
+    except Exception:                                    # pragma: no cover - fail closed
+        return PROGRAM_TEXTS_OFF_REFUSAL
+    return None if (sw is not None and sw.texts_on) else PROGRAM_TEXTS_OFF_REFUSAL
+
+
 def is_sci_org(db, org_id: Optional[str]) -> bool:
     if not org_id:
         return False

@@ -71,6 +71,10 @@ export function businessKind(industry) {
 /** Which program a server-listed workspace runs, or null (shown under "Other"). */
 export function programOf(w) {
   if (!w) return null
+  // A program workspace that is NOT SCI (Restland, Issue #507) opens the same
+  // program shell but keeps its own business identity on its card.
+  if (w.is_program && w.program_is_sci === false && (w.industry === 'funeral' || w.industry === 'cemetery')) return 'funeral'
+  if (w.is_program && w.program_is_sci === false) return 'business'
   if (w.is_program || w.experience === 'sci') return 'sci'
   if (w.program_route === '/program/roofing' || w.experience === 'roofing') return 'roofing'
   if (w.program_route === '/program/insurance' || w.presentation?.kind === 'insurance_retention') return 'insurance_retention'

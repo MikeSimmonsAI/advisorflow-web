@@ -43,6 +43,7 @@ import Person from './sci/Person'
 import SmsRecoveryQueue from '../../components/smsRecovery/SmsRecoveryQueue'
 import { TopBar } from './command/Dashboard'
 import { MobileNav, NAV, SideNav, TOOLS } from './command/SciNav'
+import { loadProgramProfile } from './useProgramProfile'
 import './ProgramCenter.css'
 import './command/Dashboard.css'
 import './command/Command.css'
@@ -160,7 +161,7 @@ export default function ProgramCenter() {
 
   useEffect(() => {
     const label = [...NAV, ...TOOLS].find(t => t[0] === tab)?.[2] || 'Program Overview'
-    document.title = `${label} · SCI · EvoSys Pro`
+    loadProgramProfile().then(p => { document.title = `${label} · ${p.short_name} · EvoSys Pro` })
   }, [tab])
   useEffect(() => { setSearch(params.get('q') || '') }, [params])
 
@@ -211,7 +212,12 @@ export default function ProgramCenter() {
         <SearchBox id="sci-search" value={search} onChange={setSearch} label="Search contacts or Lead IDs"
           placeholder="Search contacts, Lead IDs, phone or email…" />
       </form>
-      <div className="sci-topselect-wrap">
+      {realLocations.length === 1 && !(bucket && locationId === bucket.location_id)
+        // ONE LOCATION (Restland, Issue #507): no location filter - the
+        // workspace IS that location. Families waiting in Location Review are
+        // still reached from Review.
+        ? <span className="sci-chip" title="This program has one location"><Icon name="pin" />{realLocations[0].name}</span>
+        : <div className="sci-topselect-wrap">
         <Icon name="pin" />
         <label htmlFor="sci-location" className="sci-sr">Location filter</label>
         <select id="sci-location" className="sci-topselect" value={locationId} onChange={e => setParam('location', e.target.value)}>
@@ -219,7 +225,7 @@ export default function ProgramCenter() {
           {realLocations.map(l => <option key={l.location_id} value={l.location_id}>{l.name}</option>)}
           {bucket && <option value={bucket.location_id}>{bucket.name} — not a facility</option>}
         </select>
-      </div>
+      </div>}
       <span className={`sci-chip ${sendingOn ? 'ok' : 'warn'}`}
         title={sendingOn ? `${data.automation.active_campaign_families} campaign(s) switched on` : 'All campaigns off — nothing sends automatically'}>
         {sendingOn ? `${data.automation.active_campaign_families} campaign(s) on` : 'All campaigns off'}</span>

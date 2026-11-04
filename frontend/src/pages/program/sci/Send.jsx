@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../../../api/client'
+import { useProgramProfile } from '../useProgramProfile'
 import {
   Chip, Empty, ErrorLine, FilterChips, Icon, Kpi, Loading, Notice, PageHead, Panel, SearchBox,
   errText, num, when,
@@ -18,6 +19,7 @@ const SHOW = [['not_approved', 'Not sent yet'], ['approved', 'Approved'], ['all'
 const PAGE = 50
 
 export default function Send({ locations, isManager, locationId, goTab, automation, openPerson }) {
+  const prof = useProgramProfile()
   const [searchParams] = useSearchParams()
   const requestedCampaign = searchParams.get('campaign') || ''
   const [show, setShow] = useState(requestedCampaign ? 'approved' : 'not_approved')
@@ -84,7 +86,7 @@ export default function Send({ locations, isManager, locationId, goTab, automati
         if (!any) break
       }
       setPicked(p => { const n = { ...p }; out.forEach(r => { n[r.lead_id] = r.name }); return n })
-      setMsg(out.length ? `Ticked ${out.length} people across ${new Set(out.map(r => r.location_id)).size} locations. Nothing is sent until you press Good to go.`
+      setMsg(out.length ? `Ticked ${out.length} people${new Set(out.map(r => r.location_id)).size > 1 ? ` across ${new Set(out.map(r => r.location_id)).size} locations` : ''}. Nothing is sent until you press Good to go.`
         : 'Nobody left who has not been contacted on a cell phone in an active campaign.')
     } catch (e) { setErr(errText(e)) } finally { setBusy(false) }
   }
@@ -215,11 +217,11 @@ export default function Send({ locations, isManager, locationId, goTab, automati
           aside={<span className="sci-micro sci-muted">{data ? `${num(data.total)} · ${showLabel}` : 'Loading…'}</span>}>
           <div className="sci-toolbar">
             <div className="sci-grow"><SearchBox id="sci-send-search" value={search} onChange={setSearch} placeholder="Name, phone, email or Lead ID" label="Search contacts" width="100%" /></div>
-            <label className="sci-sr" htmlFor="sci-send-loc">Location</label>
+            {homes.length > 1 && <><label className="sci-sr" htmlFor="sci-send-loc">Location</label>
             <select id="sci-send-loc" className="sci-input sm" value={loc} onChange={e => setLoc(e.target.value)}>
               <option value="">All locations</option>
               {homes.map(l => <option key={l.location_id} value={l.location_id}>{l.name}</option>)}
-            </select>
+            </select></>}
             <label className="sci-sr" htmlFor="sci-send-fam">Campaign</label>
             <select id="sci-send-fam" className="sci-input sm" value={fam} onChange={e => setFam(e.target.value)}>
               <option value="">All campaigns</option>
@@ -371,7 +373,7 @@ export default function Send({ locations, isManager, locationId, goTab, automati
           )}
           <p className="sci-footnote">Good to go starts their texts right away (first text at the next allowed hour in their time zone). A reply or STOP ends them.</p>
           {isManager && <DailyBatch />}
-          {isManager && <CentralAlabamaPrepare />}
+          {isManager && prof.sci_only_panels && <CentralAlabamaPrepare />}
         </Panel>
       </div>
 
@@ -428,6 +430,7 @@ function CentralAlabamaPrepare() {
 // on, each sending day the program approves the next N people itself (same
 // people "Pick 25 for me" would tick), spread out from the start time.
 function DailyBatch() {
+  const prof = useProgramProfile()
   const [d, setD] = useState(null)
   const [count, setCount] = useState(66)
   const [spacing, setSpacing] = useState(8)
@@ -463,7 +466,7 @@ function DailyBatch() {
         <Chip tone={d?.on ? 'ok' : ''}>{d?.on ? `On · ${d.count}/day` : 'Off'}</Chip>
       </div>
       <p className="sci-micro sci-muted" style={{ margin: '6px 0 10px' }}>
-        Sends the next new people (cell phones, active campaigns, never contacted) every sending day, spread across locations. No taps needed after this.
+        Sends the next new people (cell phones, active campaigns, never contacted) every sending day, {prof.single_location ? '' : 'spread across locations. '}No taps needed after this.
       </p>
       <div className="sci-row-gap" style={{ flexWrap: 'wrap' }}>
         <label className="sci-micro">People a day <input type="number" min="1" max="200" value={count} onChange={e => setCount(e.target.value)} className="sci-input sm" style={{ width: 70 }} /></label>
