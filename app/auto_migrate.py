@@ -198,6 +198,8 @@ COLUMNS_TO_ADD = [
     ("program_conversations", "memory", "TEXT"),
     ("program_conversations", "followups_sent", "INTEGER DEFAULT 0"),
     ("program_conversations", "followup_reason", "VARCHAR"),
+    # Insurance retention workspace presentation (#499 follow-up)
+    ("agency_retention_settings", "presentation", "TEXT"),
     ("program_conversations", "owner_changed_at", "TIMESTAMP"),
     ("program_conversations", "owner_changed_by", "VARCHAR"),
     ("program_conversations", "owner_note", "VARCHAR"),

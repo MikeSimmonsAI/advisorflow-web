@@ -96,9 +96,9 @@ def test_today_four_metrics_and_household_counting(client, vg):
 def test_location_filter(client, vg):
     hdr = h(vg["db"], vg["owner"])
     ws = client.get(BASE + "/workspace", headers=hdr).json()
-    loc2 = next(l for l in ws["locations"] if l["name"] == "Demo location 2")
+    loc2 = next(l for l in ws["locations"] if l["name"] == "Dallas")
     items = client.get(BASE + "/renewals?location_id=%s" % loc2["id"], headers=hdr).json()["items"]
-    assert items and all(r["location_name"] == "Demo location 2" for r in items)
+    assert items and all(r["location_name"] == "Dallas" for r in items)
 
 
 # ───────────────────────────── isolation and scope ─────────────────────────────
@@ -126,11 +126,11 @@ def test_second_tenant_cannot_reach_any_record(client, vg):
 def test_manager_sees_only_their_locations(client, vg):
     hm = h(vg["db"], vg["kturner"])
     items = client.get(BASE + "/renewals", headers=hm).json()["items"]
-    assert items and {r["location_name"] for r in items} == {"Demo location 2"}
+    assert items and {r["location_name"] for r in items} == {"Dallas"}
     miller = vg["db"].query(Lead).filter(Lead.organization_id == vg["org"].id, Lead.last_name == "Miller").one()
     assert client.get(BASE + "/clients/%s" % miller.id, headers=hm).status_code == 404
     team = client.get(BASE + "/team", headers=hm).json()
-    assert [l["name"] for l in team["locations"]] == ["Demo location 2"]
+    assert [l["name"] for l in team["locations"]] == ["Dallas"]
 
 
 def test_agent_sees_own_and_claimable_only(client, vg):
@@ -139,7 +139,7 @@ def test_agent_sees_own_and_claimable_only(client, vg):
     assert items
     for r in items:
         assert r["assigned_user_id"] in (cole.id, None)
-        assert r["location_name"] == "Demo location 2"
+        assert r["location_name"] == "Dallas"
     # Agent cannot reassign or run workflows.
     rid = items[0]["id"]
     assert client.post(BASE + "/renewals/%s/assign" % rid, headers=h(db, cole),
@@ -341,9 +341,9 @@ def test_reassign_atomic_preserves_history_and_appointment(client, vg):
 
 def test_claim_is_atomic(client, vg):
     db = vg["db"]
-    # Nguyen (Demo location 4) is unassigned; add a second agent there to race.
+    # Nguyen (Rockwall) is unassigned; add a second agent there to race.
     from app.models.location_models import Location, UserLocation
-    loc4 = db.query(Location).filter(Location.organization_id == vg["org"].id, Location.name == "Demo location 4").one()
+    loc4 = db.query(Location).filter(Location.organization_id == vg["org"].id, Location.name == "Rockwall").one()
     a1 = db.query(User).filter(User.email == "demo.vg.skim@example.com").one()
     a2 = db.query(User).filter(User.email == "demo.vg.nshaw@example.com").one()
     a1.must_change_password = a2.must_change_password = False
@@ -463,3 +463,78 @@ def test_feature_required(client, db_session):
     o = org(db_session, "No Insurance", features=("leads",))
     u = user(db_session, o, "org_admin", "noins")
     assert client.get(BASE + "/today", headers=h(db_session, u)).status_code in (402, 403)
+
+
+# ───────────────────────────── presentation & named offices (#499 follow-up) ─────────────────────────────
+
+def test_offices_named_in_place_ids_and_records_preserved(client, vg):
+    from app.models.location_models import Location, UserLocation
+    db, o = vg["db"], vg["org"]
+    # Simulate a workspace seeded before this change: numbered placeholder names.
+    old = {}
+    for i, slug in enumerate(("demo-2", "demo-3", "demo-4", "demo-5"), start=2):
+        loc = db.query(Location).filter(Location.organization_id == o.id, Location.slug == slug).one()
+        loc.name = "Demo location %d" % i
+        old[slug] = loc.id
+    o.name = "Vincent Greene Agency (DEMO)"
+    db.commit()
+    before = (db.query(AgencyRenewal).count(), db.query(UserLocation).count())
+    D.ensure_demo(db)
+    db.commit()
+    locs = {l.slug: l for l in db.query(Location).filter(Location.organization_id == o.id)}
+    assert {s: locs[s].name for s in old} == {"demo-2": "Dallas", "demo-3": "Garland", "demo-4": "Rockwall", "demo-5": "Forney"}
+    assert {s: locs[s].id for s in old} == old                               # same records
+    assert (db.query(AgencyRenewal).count(), db.query(UserLocation).count()) == before
+    assert all(locs[s].address_line1 is None and locs[s].phone is None for s in old)   # nothing invented
+    assert locs["mesquite"].phone == "(972) 288-2288"
+    assert o.name == "Vincent Greene Agency" and o.is_demo
+
+
+def test_team_shows_named_offices_with_counts_and_no_placeholders(client, vg):
+    hdr = h(vg["db"], vg["owner"])
+    t = client.get(BASE + "/team", headers=hdr).json()
+    assert [l["name"] for l in t["locations"]] == ["Mesquite", "Dallas", "Garland", "Rockwall", "Forney"]
+    assert [l["verified"] for l in t["locations"]] == [True, False, False, False, False]
+    assert sum(l["open_renewals"] for l in t["locations"]) > 0 and sum(l["reviews_booked"] for l in t["locations"]) > 0
+    for path in ("/workspace", "/team", "/today", "/renewals", "/clients", "/reports", "/appointments?days=30"):
+        assert "Demo location" not in client.get(BASE + path, headers=hdr).text, path
+
+
+def test_reset_keeps_named_offices_and_presentation(client, vg):
+    hdr = h(vg["db"], vg["owner"])
+    assert client.post(BASE + "/demo/reset", headers=hdr).status_code == 200
+    ws = client.get(BASE + "/workspace", headers=hdr).json()
+    assert [l["name"] for l in ws["locations"]] == ["Mesquite", "Dallas", "Garland", "Rockwall", "Forney"]
+    p = ws["settings"]["presentation"]
+    assert p["title"] == "Vincent Greene Agency" and p["subtitle"] == "Renewal & Retention"
+    assert p["button"] == "Open agency" and p["sample"] is True
+
+
+def test_other_tenant_locations_never_renamed(vg):
+    from app.models.location_models import Location
+    db = vg["db"]
+    other = Location(organization_id=vg["other"].id, slug="demo-2", name="Demo location 2")
+    db.add(other)
+    db.commit()
+    D.ensure_demo(db)
+    db.commit()
+    db.refresh(other)
+    assert other.name == "Demo location 2"
+
+
+def test_launcher_presentation_only_for_retention_workspace(client, vg, db_session):
+    from app.services import workspace_access
+    from app.services.agency import demo_seed as ml
+    db = vg["db"]
+    ml.seed_maxlife_demo(db, commit=True)
+    mlo = ml.find_demo_org(db)
+    for oid in (mlo.id, vg["org"].id):
+        workspace_access.grant_workspace_membership(db, vg["owner"].id, oid, role="org_admin", commit=True,
+                                                    check_capacity=False)
+    ctx = client.get("/auth/my-contexts", headers=h(db, vg["owner"])).json()
+    by_org = {w["organization_id"]: w for w in ctx["workspace_contexts"]}
+    v = by_org[vg["org"].id]
+    assert v["program_route"] == "/program/insurance"
+    assert v["presentation"]["kind"] == "insurance_retention" and v["presentation"]["eyebrow"] == "Allstate agency project"
+    m = by_org[mlo.id]
+    assert m["presentation"] is None and m["program_route"] is None

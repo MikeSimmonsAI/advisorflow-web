@@ -241,9 +241,27 @@
 .ins-threads__last { display: block; color: var(--ins-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ins-threads__side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 12px; color: var(--ins-muted); }
 
-.ins-locs { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-bottom: 4px; }
-.ins-loc h2 { font-size: 17px; }
-.ins-loc p { margin: 0; }
+.ins-note { margin: -6px 0 14px; font-size: 13px; }
+.ins-locs { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; margin-bottom: 16px; }
+.ins-loc { margin-bottom: 0; display: flex; flex-direction: column; gap: 14px; border-top: 4px solid var(--ins-navy-2); }
+.ins-loc.is-on { box-shadow: 0 0 0 2px var(--ins-blue); }
+.ins-loc__head { display: flex; gap: 12px; align-items: flex-start; }
+.ins-loc__head > div { flex: 1; min-width: 0; }
+.ins-loc__mark { width: 38px; height: 38px; border-radius: 10px; background: #e6ecf8; color: var(--ins-navy-2); display: grid; place-items: center; flex: none; }
+.ins-loc h2 { font-size: 18px; margin: 0; }
+.ins-loc__sub { margin: 2px 0 0; color: var(--ins-muted); font-size: 12.5px; }
+.ins-loc__stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 0; }
+.ins-loc__stats div { background: var(--ins-bg); border-radius: 10px; padding: 8px 6px; text-align: center; }
+.ins-loc__stats dt { font-size: 11px; color: var(--ins-muted); line-height: 1.2; }
+.ins-loc__stats dd { margin: 2px 0 0; font-weight: 800; font-size: 20px; color: var(--ins-navy); }
+.ins-loc__stats dd.hot { color: var(--ins-red); }
+.ins-loc__actions { justify-content: space-between; margin-top: auto; }
+.ins-loc__actions .ins-btn { white-space: nowrap; }
+.ins-loc__addr { margin: -4px 0 0; color: var(--ins-ink-2); font-size: 13px; }
+@media (max-width: 400px) { .ins-locs { grid-template-columns: 1fr; } }
+.ins-btn--navy { background: var(--ins-navy-2); border-color: var(--ins-navy-2); color: #fff; }
+.ins-btn--navy:hover { background: var(--ins-navy); }
+.ins-pill--navy { background: #e6ecf8; color: var(--ins-navy-2); }
 .ins-wf p { margin: 4px 0; }
 
 .ins-toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ins-navy); color: #fff; padding: 12px 18px; border-radius: 12px; z-index: 80; box-shadow: 0 10px 30px rgba(0,0,0,.25); max-width: min(560px, 92vw); }

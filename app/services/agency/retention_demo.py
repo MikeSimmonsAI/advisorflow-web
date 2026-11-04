@@ -39,7 +39,7 @@ from app.models.models import Lead, Organization, User
 from app.services.agency import retention as R
 
 SLUG = "vincent-greene-agency-demo"
-ORG_NAME = "Vincent Greene Agency (DEMO)"
+ORG_NAME = "Vincent Greene Agency"   # demo status lives in is_demo + a small badge, not the name
 DISPLAY_NAME = "Vincent Greene Agency"
 TZ = "America/Chicago"
 FEATURES = ("leads", "insurance_agency", "booking", "calendar", "availability", "reports", "users",
@@ -50,16 +50,28 @@ REFERENCE = {
     "phone": "(972) 288-2288",
     "languages": ["English", "Spanish"],
     "source": "https://agents.allstate.com/vincent-greene-mesquite-tx.html (supplied by Mike; public listings agree)",
-    "note": "Display name is configurable for the proof of concept. Other locations, staff counts and all "
-            "customer data are illustrative.",
+    "note": "Display name is configurable for the proof of concept. Sample agency network for demonstration; "
+            "Mesquite is the verified office. Staff and customer data are synthetic.",
+}
+# Card / header presentation. Mike's wording (2026-11-03). Describes the
+# agency's carrier relationship; it does not claim this software is an
+# Allstate product or integration.
+PRESENTATION = {
+    "eyebrow": "Allstate agency project", "subtitle": "Renewal & Retention",
+    "description": "Proactive renewal follow-up, client reviews, appointments, and coordinated service across your agency.",
+    "chips": ["Renewals", "Client care", "Team & locations"], "button": "Open agency", "theme": "royal",
 }
 
+# Slugs are the stable keys and never change, so renaming keeps every location
+# id, staff membership, client, renewal and appointment attached. Only
+# Mesquite is a verified office; the other four are sample branches for the
+# presentation and carry no invented address or phone.
 LOCATIONS = [  # slug, name, verified
     ("mesquite", "Mesquite", True),
-    ("demo-2", "Demo location 2", False),
-    ("demo-3", "Demo location 3", False),
-    ("demo-4", "Demo location 4", False),
-    ("demo-5", "Demo location 5", False),
+    ("demo-2", "Dallas", False),
+    ("demo-3", "Garland", False),
+    ("demo-4", "Rockwall", False),
+    ("demo-5", "Forney", False),
 ]
 # 30 synthetic staff: (key, full name, role, title, location slug, languages, capacity)
 STAFF = [
@@ -135,6 +147,7 @@ def ensure_org(db: Session) -> Tuple[Organization, bool]:
         created = True
     elif not bool(org.is_demo):
         raise DemoError("Organization holding slug %s is not flagged is_demo; refusing to touch it." % SLUG)
+    _ensure_locations(db, org)
     stored = ent.legacy_enabled_for(org)
     cur = set(stored) if stored is not None else set()
     if not cur >= set(FEATURES):
@@ -146,6 +159,9 @@ def ensure_org(db: Session) -> Tuple[Organization, bool]:
     s.enabled, s.display_name, s.tagline, s.timezone = True, DISPLAY_NAME, "Keep every renewal moving.", TZ
     s.default_offsets, s.data_mode, s.is_demo = json.dumps(R.DEFAULT_OFFSETS), "demo", True
     s.reference = json.dumps(REFERENCE)
+    s.presentation = json.dumps(PRESENTATION)
+    if org.name != ORG_NAME:
+        org.name = ORG_NAME
     db.flush()
     return org, created
 
@@ -158,12 +174,14 @@ def _ensure_locations(db: Session, org: Organization) -> Dict[str, Location]:
             loc = Location(organization_id=org.id, slug=slug, name=name, is_primary=(slug == "mesquite"),
                            timezone=TZ, state="TX")
             db.add(loc)
+        loc.name, loc.city = name, name     # in place: same id, same memberships and records
         if verified:
             loc.address_line1, loc.city, loc.postal_code = "18601 LBJ Fwy, Suite 420", "Mesquite", "75150"
             loc.phone = "(972) 288-2288"
             loc.notes = "Verified office from the supplied public reference."
         else:
-            loc.notes = "Illustrative demo location - not a real office. No address is shown on purpose."
+            loc.address_line1, loc.postal_code, loc.phone = None, None, None
+            loc.notes = "Sample office for demonstration - not a verified Vincent Greene office."
         out[slug] = loc
     db.flush()
     return out

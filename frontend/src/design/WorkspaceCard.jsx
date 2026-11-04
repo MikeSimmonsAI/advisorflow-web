@@ -12,8 +12,10 @@ import './workspaceCard.css'
  * business; its hit area is stretched over the whole card so the card is
  * clickable without nesting interactive elements or adding extra tab stops.
  */
-export default function WorkspaceCard({ item, onOpen, layout = 'grid', actionLabel = 'Open workspace', href }) {
+export default function WorkspaceCard({ item, onOpen, layout = 'grid', actionLabel: defaultLabel = 'Open workspace', href }) {
   const variant = item.variant || 'general'
+  // A workspace may name its own action ("Open agency"); the default stays.
+  const actionLabel = item.actionLabel || defaultLabel
   const facts = item.facts || []
   const name = item.display
   return (
@@ -21,10 +23,12 @@ export default function WorkspaceCard({ item, onOpen, layout = 'grid', actionLab
       <div className="ev-wcard-art">
         <WorkspaceArt variant={variant} />
         <span className="ev-wcard-badge" aria-hidden="true">{item.symbol}</span>
+        {item.badge && <span className="ev-wcard-tag">{item.badge}</span>}
       </div>
       <div className="ev-wcard-body">
         <p className="ev-wcard-kind">{item.kind}</p>
         <h3 className="ev-wcard-name">{name}</h3>
+        {item.subtitle && <p className="ev-wcard-sub">{item.subtitle}</p>}
         {item.orgLabel && <p className="ev-wcard-org">{item.orgLabel}</p>}
         <p className="ev-wcard-summary">{item.summary}</p>
         {facts.length > 0 && (

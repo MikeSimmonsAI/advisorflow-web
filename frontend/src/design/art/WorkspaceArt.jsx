@@ -14,6 +14,7 @@ const PALETTES = {
   energy:    { sky: ['#fff8e6', '#ffe6a8'], hill: '#f8d58a', hill2: '#f3c463', main: '#f2a516', deep: '#6b4300', light: '#ffffff', warm: '#fff1b8' },
   roofing:   { sky: ['#fff3ea', '#ffd9c2'], hill: '#ffc9a6', hill2: '#ffb284', main: '#ee6a24', deep: '#7a2f08', light: '#ffffff', warm: '#ffe3cf' },
   wholesale: { sky: ['#ebfaf2', '#c6efd9'], hill: '#a8e3c4', hill2: '#86d6ac', main: '#22a06b', deep: '#0b4d31', light: '#ffffff', warm: '#fff4cc' },
+  retention: { sky: ['#e9effe', '#c9d7fb'], hill: '#b3c6f7', hill2: '#93acf1', main: '#1d4ed8', deep: '#0f2a6b', light: '#ffffff', warm: '#fde68a' },
   insurance: { sky: ['#e8f8fa', '#c2ebf0'], hill: '#a3dfe7', hill2: '#82d0db', main: '#1595a6', deep: '#07434c', light: '#ffffff', warm: '#e9fbfd' },
   funeral:   { sky: ['#f4f0fc', '#ddd2f5'], hill: '#cbbcee', hill2: '#b6a3e6', main: '#7357b8', deep: '#34216a', light: '#ffffff', warm: '#ffe9c9' },
   office:    { sky: ['#f2f5f9', '#dde4ee'], hill: '#cfd8e5', hill2: '#bcc8d9', main: '#475569', deep: '#1e293b', light: '#ffffff', warm: '#e8eef7' },
@@ -389,9 +390,48 @@ function PreviewScene({ p, id }) {
   )
 }
 
+// Insurance renewal & retention (#499): a renewal calendar, the renewal loop
+// around a protected home, and an agent with a client - navy / royal blue.
+function RetentionScene({ p, id }) {
+  return (
+    <Frame p={p} id={id}>
+      <Hills p={p} />
+      {/* renewal calendar */}
+      <g transform="translate(56 40)">
+        <rect x="8" y="-6" width="86" height="90" rx="10" fill="#fff" opacity=".55" />
+        <rect width="86" height="90" rx="10" fill="#fff" />
+        <rect width="86" height="22" rx="10" fill={p.deep} />
+        <rect y="12" width="86" height="10" fill={p.deep} />
+        <rect x="18" y="-6" width="6" height="14" rx="3" fill={p.main} />
+        <rect x="62" y="-6" width="6" height="14" rx="3" fill={p.main} />
+        {[0, 1, 2, 3].map(r => [0, 1, 2, 3].map(c => (
+          <rect key={r + '-' + c} x={10 + c * 18} y={30 + r * 14} width="12" height="9" rx="2"
+                fill={r === 2 && c === 2 ? p.main : '#dbe5fb'} />
+        )))}
+        <path d="M62 60 l4 4 l8 -9" stroke="#fff" strokeWidth="2.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      </g>
+      {/* renewal loop around a protected home */}
+      <g transform="translate(232 92)">
+        <circle r="50" fill="#fff" opacity=".35" />
+        <path d="M-40 -18 A 44 44 0 0 1 34 -28" stroke={p.main} strokeWidth="7" fill="none" strokeLinecap="round" />
+        <path d="M26 -40 L40 -26 L20 -20 Z" fill={p.main} />
+        <path d="M40 18 A 44 44 0 0 1 -34 28" stroke={p.deep} strokeWidth="7" fill="none" strokeLinecap="round" />
+        <path d="M-26 40 L-40 26 L-20 20 Z" fill={p.deep} />
+        <path d="M-20 8 L0 -10 L20 8 V26 H-20 Z" fill="#fff" />
+        <path d="M-24 10 L0 -14 L24 10" stroke={p.deep} strokeWidth="5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+        <rect x="-5" y="12" width="10" height="14" rx="2" fill={p.main} />
+      </g>
+      {/* agent and client */}
+      <Person x={322} y={124} s={0.9} body={p.deep} head="#e7b48d" hair="#2b1d14" />
+      <Person x={354} y={128} s={0.82} body={p.main} head="#c98e65" hair="#1b1b1b" />
+      <circle cx="372" cy="40" r="14" fill={p.warm} />
+    </Frame>
+  )
+}
+
 const SCENES = {
   sci: SciScene, energy: EnergyScene, roofing: RoofingScene, wholesale: WholesaleScene,
-  insurance: InsuranceScene, funeral: FuneralScene, office: OfficeScene, general: GeneralScene,
+  retention: RetentionScene, insurance: InsuranceScene, funeral: FuneralScene, office: OfficeScene, general: GeneralScene,
   cleaning: CleaningScene, acquisition: CleaningScene, preview: PreviewScene,
 }
 

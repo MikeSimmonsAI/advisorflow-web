@@ -355,6 +355,19 @@ def _retention_enabled(db: Session, org) -> bool:
         return False
 
 
+def _retention_presentation(db: Session, org) -> Optional[Dict[str, Any]]:
+    if not _retention_enabled(db, org):
+        return None
+    try:
+        from app.services.agency import retention
+        settings = retention.get_settings(db, org.id)
+        p = retention.presentation_for(settings, org)
+        p["kind"] = "insurance_retention"
+        return p
+    except Exception:  # pragma: no cover - never let a hint break login
+        return None
+
+
 def program_brand(db: Session, user: User, host_slug: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """The brand whose look this person's Program Access should wear, or None.
 
@@ -548,6 +561,9 @@ def authorized_contexts(db: Session, user: User, host_slug: Optional[str] = None
             # renders this shell and never the general platform for a program
             # workspace (program_experience enforces the Wholesale lock).
             "experience": _experience(db, user, org, org.id in program_orgs),
+            # How a retention-enabled insurance workspace presents itself on
+            # the launcher (#499). Presentation only; None everywhere else.
+            "presentation": _retention_presentation(db, org),
         })
 
     platform = [c for c in contexts if c["type"] == "platform"]

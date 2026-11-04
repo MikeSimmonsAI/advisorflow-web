@@ -115,7 +115,7 @@ export default function InsuranceShell() {
         <aside className={`ins-side ${open ? 'open' : ''}`} aria-label="Insurance workspace navigation">
           <div className="ins-brand">
             <span className="ins-brand__mark" aria-hidden="true">{initials(s.display_name)}</span>
-            <div><b>{s.display_name}</b><small>Insurance Workspace</small></div>
+            <div><b>{s.display_name}</b><small>{s.presentation?.subtitle || 'Insurance Workspace'}</small></div>
           </div>
           <nav className="ins-nav">
             {NAV.map(it => (
@@ -135,7 +135,7 @@ export default function InsuranceShell() {
         <div className="ins-main">
           <header className="ins-top">
             <button className="ins-btn ins-btn--icon ins-top__menu" onClick={() => setOpen(true)} aria-label="Open navigation"><Icon name="menu" /></button>
-            <nav className="ins-crumbs" aria-label="Breadcrumb"><a href="/workspaces">Insurance</a><span aria-hidden="true">/</span><b>{crumb}</b></nav>
+            <nav className="ins-crumbs" aria-label="Breadcrumb"><a href="/workspaces">{s.presentation?.subtitle || 'Insurance'}</a><span aria-hidden="true">/</span><b>{crumb}</b></nav>
             <div className="ins-top__right">
               {value.viewer.kind !== 'agent' && (
                 <label className="ins-select">
@@ -148,7 +148,7 @@ export default function InsuranceShell() {
                 </label>
               )}
               <span className={`ins-mode ${s.is_demo ? 'ins-mode--demo' : 'ins-mode--live'}`} title={s.is_demo ? 'Synthetic customer data. Simulated delivery — no messages are sent.' : `Data source: ${s.data_mode}`}>
-                {s.is_demo ? 'Demo scenario' : `Live · ${s.data_mode.replace('_', ' ')}`}
+                {s.is_demo ? 'Sample data' : `Live · ${s.data_mode.replace('_', ' ')}`}
               </span>
               <ProgramSwitchLink />
               <span className="ins-me" title={value.viewer.preview ? `Previewing as ${value.viewer.name}` : value.viewer.name}>
@@ -169,7 +169,7 @@ export default function InsuranceShell() {
           <main id="ins-main" className="ins-content" tabIndex={-1}>
             <Suspense fallback={<div className="ins-loading">Loading…</div>}><Outlet /></Suspense>
           </main>
-          {s.is_demo && <footer className="ins-foot">Synthetic customer data · Simulated delivery — no live messages sent. Locations other than Mesquite, staff and customers are illustrative.</footer>}
+          {s.is_demo && <footer className="ins-foot">Sample data · Simulated delivery — no live messages are sent.</footer>}
         </div>
         {clientId && <ClientDrawer leadId={clientId} onClose={value.closeClient} />}
       </div>
