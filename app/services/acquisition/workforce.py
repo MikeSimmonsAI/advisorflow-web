@@ -325,7 +325,7 @@ def handlers() -> Dict[str, Callable]:
 
 
 def run_pass(db: Session, now: Optional[datetime] = None, *, practice_only: bool = False,
-             fetch=None, mx=None, force: bool = False) -> Dict[str, Any]:
+             fetch=None, mx=None, force: bool = False, osm=None) -> Dict[str, Any]:
     """One bounded pass. Does nothing unless the workforce is Running (or a
     practice test was asked for and nothing is emergency-stopped)."""
     now = now or datetime.utcnow()
@@ -360,7 +360,7 @@ def run_pass(db: Session, now: Optional[datetime] = None, *, practice_only: bool
                 continue
         if (practice_only or s.mode == "practice") and job.organization_id is not None and not job.is_practice:
             continue
-        _execute(db, job, now, fetch=fetch, mx=mx)
+        _execute(db, job, now, fetch=fetch, mx=mx, osm=osm)
         ran += 1
         results[job.worker] = results.get(job.worker, 0) + 1
     s = state(db)
@@ -372,13 +372,13 @@ def run_pass(db: Session, now: Optional[datetime] = None, *, practice_only: bool
     return summary
 
 
-def _execute(db: Session, job: AcquisitionWorkerJob, now: datetime, fetch=None, mx=None) -> None:
+def _execute(db: Session, job: AcquisitionWorkerJob, now: datetime, fetch=None, mx=None, osm=None) -> None:
     job.status, job.attempts = "running", job.attempts + 1
     job.started_at, job.lease_until = now, now + timedelta(seconds=LEASE_SECONDS)
     db.commit()
     try:
         fn = handlers()[job.worker]
-        status, result = fn(db, job, fetch=fetch, mx=mx)
+        status, result = fn(db, job, fetch=fetch, mx=mx, osm=osm)
         job.status, job.result, job.error = status, json.dumps(result, default=str)[:8000], None
         job.finished_at, job.lease_until = datetime.utcnow(), None
         db.commit()
@@ -611,11 +611,47 @@ def _name_tokens(name: str) -> List[str]:
     return [w for w in re.findall(r"[a-z0-9]+", (name or "").lower()) if len(w) >= 4 and w not in _STOP]
 
 
-def find_website(p, fetch=None) -> Dict[str, Any]:
-    """Source-based website discovery - NO guessing, NO paid lookup. Only an
-    address already in the business's own records (its source link when that
-    is not a listing site, or a website/url field from its import), and only
-    accepted when that site's homepage names the business."""
+OSM_UA = "EvoSysPro-Acquisition/1.0 (business website lookup; +https://evosyspro.live)"
+_OSM_LAST = {"t": 0.0}
+
+
+def _default_osm(name: str, city: Optional[str], state_: Optional[str]) -> Dict[str, Any]:
+    """ONE OpenStreetMap (Nominatim) place lookup - free, no account, ODbL
+    data - at most one request per second, as Nominatim's usage policy asks
+    (Harvey uses the same service the same way). Returns the website tag of
+    the best-matching place, if the place carries one."""
+    import time as _t
+    import httpx
+    wait = 1.1 - (_t.monotonic() - _OSM_LAST["t"])
+    if wait > 0:
+        _t.sleep(wait)
+    _OSM_LAST["t"] = _t.monotonic()
+    q = ", ".join(x for x in (name, city, state_ or "TX", "USA") if x)
+    try:
+        r = httpx.get("https://nominatim.openstreetmap.org/search", timeout=12,
+                      params={"q": q, "format": "jsonv2", "limit": 3, "extratags": 1, "countrycodes": "us"},
+                      headers={"User-Agent": OSM_UA})
+        if r.status_code != 200:
+            return {"error": "OpenStreetMap HTTP %d" % r.status_code}
+        rows = r.json() or []
+    except Exception as exc:                                     # noqa: BLE001
+        return {"error": "OpenStreetMap unavailable (%s)" % type(exc).__name__}
+    tokens = _name_tokens(name)
+    for row in rows:
+        tags = row.get("extratags") or {}
+        site = tags.get("website") or tags.get("contact:website") or tags.get("url")
+        label = (row.get("name") or row.get("display_name") or "").lower()
+        if site and tokens and sum(1 for t in tokens if t in label) >= max(1, (len(tokens) + 1) // 2):
+            return {"website": site, "osm": "%s/%s" % (row.get("osm_type"), row.get("osm_id"))}
+    return {"none": True}
+
+
+def find_website(p, fetch=None, osm=None) -> Dict[str, Any]:
+    """Source-based website discovery - NO guessing, NO paid lookup. Candidates
+    come only from (1) the business's own source link when that isn't a
+    listing site, (2) a website/url field from its import, or (3) the website
+    tag of the matching place in OpenStreetMap (free, public). A candidate is
+    accepted only when that site's homepage names the business."""
     cands = []
     src = (getattr(p, "source_url", None) or "").strip()
     if src.lower().startswith(("http://", "https://")) and not any(h in src.lower() for h in LISTING_HOSTS):
@@ -629,8 +665,17 @@ def find_website(p, fetch=None) -> Dict[str, Any]:
             v = ev.get(k)
             if isinstance(v, str) and v.strip() and not any(h in v.lower() for h in LISTING_HOSTS):
                 cands.append(("import field '%s'" % k, v.strip()))
+    osm_note = None
+    if not cands and (osm is not False):
+        o = (osm or _default_osm)(p.name or "", getattr(p, "city", None), getattr(p, "state", None))
+        if o.get("website"):
+            cands.append(("OpenStreetMap %s" % o.get("osm", ""), o["website"]))
+        else:
+            osm_note = o.get("error") or "not listed with a website in OpenStreetMap"
     if not cands:
-        return {"note": "its source link is a listing page" if src else "no source link"}
+        why = "its source link is a listing page" if src else "no source link"
+        return {"note": "%s; %s" % (why, osm_note) if osm_note else why,
+                "provider_unavailable": bool(osm_note and "unavailable" in osm_note)}
     tokens = _name_tokens(p.name or "")
     fetch = fetch or _default_fetch
     for where, url in cands:
@@ -648,7 +693,7 @@ def find_website(p, fetch=None) -> Dict[str, Any]:
     return {"note": "a candidate site did not name the business"}
 
 
-def run_research(db: Session, job, fetch=None, mx=None, **_):
+def run_research(db: Session, job, fetch=None, mx=None, osm=None, **_):
     now = datetime.utcnow()
     if job.target_type == "pool_prospect":
         from app.models.lead_intel_models import LeadIntelProspect
@@ -658,7 +703,7 @@ def run_research(db: Session, job, fetch=None, mx=None, **_):
         if p.suppressed_reason:
             return "blocked", {"reason_code": "suppressed", "reason": "Excluded or suppressed: %s" % p.suppressed_reason}
         if not (p.website or "").strip():
-            found = find_website(p, fetch)
+            found = find_website(p, fetch, osm)
             if found.get("website"):
                 p.website = found["website"]
                 _pool_evidence(p, {"at": now.isoformat(), "by": "Harvey website discovery", "website": found["website"],
@@ -666,9 +711,10 @@ def run_research(db: Session, job, fetch=None, mx=None, **_):
                                    "match": found["match"]})
                 db.commit()
             else:
-                return "blocked", {"status": "research_incomplete", "reason_code": "no_website",
-                                   "reason": "No website available: none on file, and none in the business's own "
-                                             "source records%s. Add the website and research re-runs."
+                return "blocked", {"status": "research_incomplete",
+                                   "reason_code": "provider_unavailable" if found.get("provider_unavailable") else "no_website",
+                                   "reason": "No website available: none on file, none in the business's own "
+                                             "source records or OpenStreetMap%s. Add the website and research re-runs."
                                              % ((" (%s)" % found["note"]) if found.get("note") else "")}
         site = read_site(p.website, fetch)
         if not site["pages"]:

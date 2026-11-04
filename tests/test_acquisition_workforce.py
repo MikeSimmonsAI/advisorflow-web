@@ -19,6 +19,12 @@ from tests.test_acquisition_pilot import _add, _h, _org, pilot, wholesale_login 
 SITE = "https://oakdental-synthetic.example"
 
 
+@pytest.fixture(autouse=True)
+def _no_network_osm(monkeypatch):
+    """No test reaches OpenStreetMap: the lookup is injected per test."""
+    monkeypatch.setattr(WF, "_default_osm", lambda name, city, st: {"none": True})
+
+
 def _fetcher(pages):
     def fetch(url):
         for k, html in pages.items():
@@ -676,3 +682,31 @@ def test_test_companies_never_count_as_real_business(pilot):
     assert rep["real"]["appointments_confirmed"] == 0 and rep["practice"]["appointments_confirmed"] == 1
     h = WF.health(db)
     assert next(c for c in h["clients"] if c["organization_id"] == test_org.id)["is_test"] is True
+
+
+def test_openstreetmap_website_is_used_only_when_the_site_names_the_business(pilot):
+    p = pilot
+    db = p["db"]
+    good = _pool(db, name="Aspen Pediatric Dentistry (synthetic)", website=None)
+    bad = _pool(db, name="Spruce Family Clinic (synthetic)", website=None)
+    down = _pool(db, name="Juniper Dental (synthetic)", website=None)
+    osm_sites = {"Aspen": {"website": "https://aspen-synthetic.example", "osm": "node/1"},
+                 "Spruce": {"website": "https://unrelated-synthetic.example", "osm": "node/2"},
+                 "Juniper": {"error": "OpenStreetMap unavailable (ConnectError)"}}
+    asked = []
+
+    def osm(name, city, st):
+        asked.append(name)
+        return next(v for k, v in osm_sites.items() if k in name)
+    fetch = _fetcher({"https://aspen-synthetic.example": "<title>Aspen Pediatric Dentistry</title><p>hi@aspen-synthetic.example</p>",
+                      "https://unrelated-synthetic.example": "<title>Bob's Tires</title>"})
+    _start(p)
+    WF.run_pass(db, fetch=fetch, mx=_mx_yes, osm=osm)
+    for r in (good, bad, down):
+        db.refresh(r)
+    assert good.website == "https://aspen-synthetic.example" and good.email_verified is True
+    assert any("OpenStreetMap" in (e.get("source_url") or "") for e in json.loads(good.evidence_json)["research_log"])
+    assert bad.website is None                                # OSM site didn't name the business
+    rb = {r["id"]: r for r in WF.research_breakdown(db, with_rows=True)["rows"]}
+    assert rb[down.id]["reason_code"] == "provider_unavailable"
+    assert len(asked) == 3                                    # one lookup per business, no bulk enumeration
