@@ -7,7 +7,7 @@
  * here can send a message or call a data provider.
  */
 import { createContext, Suspense, useContext, useEffect, useMemo, useState } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { api, getCurrentUser } from '../../api/client'
 import { BusinessForm, Readiness } from './BusinessForm'
 import { DateChip, Icon, Kpi, Loading, Logo, PageHeader, Pill, apptPill, clock, errText, initials, money, useFont, useLoad, useToast, when } from './ui'
@@ -98,6 +98,7 @@ function Enable({ onDone }) {
 // client's Prospects list can NEVER flash on another client's dashboard.
 export default function AcquisitionOps() {
   useFont()
+  const loc = useLocation()
   const [clients, cErr, reloadClients] = useLoad('/acquisition-ops/clients')
   // The remembered client belongs to THIS login. Keyed by user id, so a client
   // chosen under one login is never pre-selected for the next one in the tab.
@@ -108,7 +109,10 @@ export default function AcquisitionOps() {
   const valid = clients?.items?.some(c => c.organization_id === selectedOrg)
   // OWNER: no client until one is chosen (never Divine Shine, never a TEST company).
   // OPERATOR: their first authorized client - they have nothing else.
-  const orgId = valid ? selectedOrg : (clients?.is_god ? null : clients?.items?.[0]?.organization_id)
+  // MASTER CONTROL (#506): a master login on a master page works across ALL
+  // service companies - no client context, never a remembered TEST company.
+  const onMasterPage = clients?.is_god && MASTER_PATHS.includes(loc.pathname)
+  const orgId = onMasterPage ? null : valid ? selectedOrg : (clients?.is_god ? null : clients?.items?.[0]?.organization_id)
   if (cErr) {
     return <div className="aq aq-gate"><div className="aq-card">
       <h1 className="aq-h1">{cErr.status === 403 ? 'No acquisition access' : 'This page couldn’t load'}</h1>
@@ -129,6 +133,7 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg, reloadClients }) {
                                    recent_events: [], profile: {} }
   const [open, setOpen] = useState(false)
   const loc = useLocation()
+  const nav = useNavigate()
   useEffect(() => { setOpen(false) }, [loc.pathname])
 
   if (oErr) {
@@ -156,10 +161,11 @@ function TenantAcquisitionOps({ orgId, clients, onSelectOrg, reloadClients }) {
           <NavGroup title="Acquisition Operations" pre={ov.is_god ? OPS_NAV : [{ to: OPS, label: 'My Queue', icon: 'list', end: true }]} items={CLIENT_NAV}>
             {(clients.is_god || clients.items.length > 1) && <div className="hb-client">
               <label htmlFor="hb-client">Service company</label>
-              <select id="hb-client" aria-label="Acquisition client workspace" value={orgId || ''} onChange={e => onSelectOrg(e.target.value)}>
-                {!orgId && <option value="">Choose a client…</option>}
-                {clients.items.map(c => <option key={c.organization_id} value={c.organization_id}>{c.name}</option>)}
-              </select></div>}
+              <select id="hb-client" aria-label="Acquisition client workspace" value={orgId || ''} onChange={e => { const id = e.target.value; onSelectOrg(id); if (id && onMaster) nav(`${OPS}/client-dashboard`) }}>
+                <option value="">{onMaster ? 'All service companies (master view)' : 'Choose a client…'}</option>
+                {clients.items.map(c => <option key={c.organization_id} value={c.organization_id}>{c.name}{c.is_test && !/^test\b/i.test(c.name) ? ' (TEST)' : ''}</option>)}
+              </select>
+              {onMaster && <small className="hb-client__note">Master view covers every company. Pick one to work inside it.</small>}</div>}
           </NavGroup>
           <NavGroup title="Administration" items={ov.is_god ? SUPPORT_NAV : SUPPORT_NAV.filter(x => x.to !== `${OPS}/activity`)} startOpen={false}>
           </NavGroup>
