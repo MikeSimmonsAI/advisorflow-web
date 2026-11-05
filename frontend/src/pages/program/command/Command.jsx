@@ -352,29 +352,54 @@ function SearchResults({ q, loc, open }) {
 // ONE inbox for texts and emails, with its own filters. Reads the same
 // endpoint as Home; "Handled" brings back what was answered or closed.
 const FILTERS = [['all', 'All'], ['handoff', 'Human handoff'], ['needs_reply', 'Needs reply'], ['unread', 'Unread'], ['ai', 'AI handling'], ['human', 'Human attention'],
-  ['appointments', 'Appointments'], ['home_visits', 'Home visits'], ['text', 'Text'], ['email', 'Email'], ['handled', 'Handled']]
+  ['appointments', 'Appointments'], ['home_visits', 'Home visits'], ['text', 'Text'], ['email', 'Email'], ['opted_out', 'Opted out'], ['handled', 'Handled']]
+const CLOSED_VIEWS = ['handled', 'opted_out']
+const EMPTY = { handled: 'Nothing handled in the last two weeks.', opted_out: 'Nobody opted out in the last two weeks.' }
 
 function InboxTab({ loc, act, open, selected, campaign = 'all', setCampaign }) {
   const [flt, setFlt] = useState('all')
   const [r, setR] = useState(null)
   const [opts, setOpts] = useState(null)
+  // #515: a failed refresh is SHOWN (with the time of the data still on
+  // screen), never turned into an empty "Nobody is waiting" list.
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
   const seq = useRef(0)
   const load = useCallback(() => {
     const n = ++seq.current
     const p = new URLSearchParams({ filter: flt, limit: '200' })
     if (loc) p.set('location_id', loc)
     if (campaign && campaign !== 'all') p.set('campaign', campaign)
-    api.get(`/program/command?${p}`).then(x => { if (n === seq.current) { setR(x); if (x.campaign_options) setOpts(x.campaign_options) } })
-      .catch(e => { if (n === seq.current) { setR({ inbox: [] }); if (/campaign not found/i.test(e?.message || '')) setCampaign?.('all') } })
+    setBusy(true)
+    api.get(`/program/command?${p}`).then(x => { if (n === seq.current) { setR(x); setErr(''); if (x.campaign_options) setOpts(x.campaign_options) } })
+      .catch(e => {
+        if (n !== seq.current) return
+        if (/campaign not found/i.test(e?.message || '')) { setCampaign?.('all'); return }
+        setErr(e?.detail || e?.message || 'Could not reach the server')
+      })
+      .finally(() => { if (n === seq.current) setBusy(false) })
   }, [flt, loc, campaign]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     load()
     const t = setInterval(() => { if (document.visibilityState === 'visible') load() }, REFRESH_MS)
-    return () => clearInterval(t)
+    // Coming back to the tab (or the window) refreshes at once.
+    const back = () => { if (document.visibilityState === 'visible') load() }
+    document.addEventListener('visibilitychange', back)
+    window.addEventListener('focus', back)
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', back); window.removeEventListener('focus', back) }
   }, [load])
   const c = r?.filter_counts || {}
+  const latest = r?.latest_activity
   return <>
-    <header className="cmd-top"><h1>Inbox</h1>{c.unread ? <p className="cmd-sub">{c.unread} new</p> : null}</header>
+    <header className="cmd-top"><div><h1>Inbox</h1>{c.unread ? <p className="cmd-sub">{c.unread} new</p> : null}</div>
+      <div className="cmd-inbox-sync">
+        <small>{r?.updated_at ? `Updated ${time(r.updated_at)}` : ''}</small>
+        <button className="link" disabled={busy} onClick={load}>{busy ? 'Refreshing…' : 'Refresh'}</button>
+      </div></header>
+    {err && <p className="cmd-err" role="alert">Couldn't refresh: {err}.{r?.updated_at ? ` Showing what was on screen at ${time(r.updated_at)}.` : ''} <button className="link" onClick={load}>Try again</button></p>}
+    {latest && <p className="cmd-muted small cmd-latest">Latest reply: <b>{latest.name}</b>{latest.location ? ` · ${latest.location}` : ''} · {latest.channel_label} · {time(latest.received_at)}
+      {latest.where !== 'all' && <> - <button className="link" onClick={() => setFlt(latest.where)}>{latest.where === 'opted_out' ? 'opted out' : 'handled'} ›</button></>}
+      {latest.where === 'all' && ' - open'}</p>}
     {setCampaign && <div className="cmd-campaignbar">
       <CampaignSelect value={campaign} onChange={setCampaign} options={opts} compact />
       {campaign !== 'all' && <button className="link" onClick={() => setCampaign('all')}>All campaigns</button>}
@@ -386,9 +411,12 @@ function InboxTab({ loc, act, open, selected, campaign = 'all', setCampaign }) {
         <button key={k} role="tab" aria-selected={flt === k} className={`${flt === k ? 'on' : ''} ${k === 'handoff' && c.handoff ? 'red' : ''}`} onClick={() => setFlt(k)}>
           {l}{k !== 'handled' && c[k] !== undefined ? <i>{c[k]}</i> : null}</button>))}
     </div>
-    {r && flt !== 'handled' && <Unknown items={(r.unknown || []).filter(u => ['all', 'needs_reply', 'unread', 'human'].includes(flt) || (flt === 'email' && u.channel_label === 'EMAIL') || (flt === 'text' && u.channel_label !== 'EMAIL'))} reload={load} />}
-    {r === null ? <p className="cmd-muted">Loading…</p>
-      : <Inbox items={r.inbox} act={act} open={open} selected={selected} empty={flt === 'handled' ? 'Nothing handled in the last two weeks.' : 'Nobody is waiting. Nice work.'} />}
+    {r && !CLOSED_VIEWS.includes(flt) && <Unknown items={(r.unknown || []).filter(u => ['all', 'needs_reply', 'unread', 'human'].includes(flt) || (flt === 'email' && u.channel_label === 'EMAIL') || (flt === 'text' && u.channel_label !== 'EMAIL'))} reload={load} />}
+    {r === null ? (err ? null : <p className="cmd-muted">Loading…</p>)
+      : <>
+        <Inbox items={r.inbox} act={act} open={open} selected={selected} empty={EMPTY[flt] || 'Nobody is waiting. Nice work.'} />
+        {r.total > r.shown && <p className="cmd-muted small">Showing the newest {r.shown} of {r.total}. Use the filters to narrow the list.</p>}
+      </>}
   </>
 }
 
