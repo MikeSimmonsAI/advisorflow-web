@@ -1018,3 +1018,18 @@ def test_discovery_worker_runs_free_osm_for_an_enabled_client(pilot, monkeypatch
     from app.models.acquisition_models import AcquisitionDiscoveryRun
     run = db.query(AcquisitionDiscoveryRun).filter_by(organization_id=org.id).one()
     assert run.provider == "openstreetmap" and run.cost_usd == 0.0 and run.added == 2
+
+
+def test_discover_endpoint_is_reachable_and_contacts_nobody(pilot, monkeypatch):
+    from app.services.acquisition import discovery_osm as OSM
+    p = pilot
+    db = p["db"]
+    org, _ = _window_client(p)
+    monkeypatch.setattr(OSM, "default_geocode", lambda c, s: (1, 2, 3, 4))
+    monkeypatch.setattr(OSM, "default_overpass", lambda q: OSM_ELEMENTS[:2])
+    r = p["c"].post("/god/acquisition/workforce/discover", json={"organization_id": org.id, "city": "Arlington",
+                                                                 "state": "TX", "max_new": 25},
+                    headers=_h(db, p["god"]))
+    assert r.status_code == 200, r.text
+    assert r.json()["added"] == 2
+    assert db.query(EmailMessage).count() == 0
