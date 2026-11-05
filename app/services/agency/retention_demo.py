@@ -215,6 +215,55 @@ def _ensure_staff(db: Session, org: Organization, locs: Dict[str, Location]) -> 
     return users
 
 
+TITLE_PROFILE = {"manager": "location_manager", "producer": "producer", "retention": "retention",
+                 "service": "retention"}
+
+
+def ensure_access(db: Session, org: Organization) -> Dict[str, int]:
+    """Starter access profiles, sample teams, and access rows for the 30 SAMPLE
+    staff (is_sample=True). Sample staff still cannot sign in - this only lets
+    the directory, previews and dashboards show coherent roles. Idempotent:
+    a row a person already has is never changed."""
+    from app.models.agency_access_models import AgencyAccessProfile, AgencyMemberAccess, AgencyTeam, AgencyTeamMember
+    from app.services.agency import team_access as TA
+    TA.ensure_starters(db, org.id, is_demo=True)
+    profs = {p.template_key: p for p in db.query(AgencyAccessProfile).filter(
+        AgencyAccessProfile.organization_id == org.id, AgencyAccessProfile.template_key.isnot(None)).all()}
+    locs = {l.slug: l for l in db.query(Location).filter(Location.organization_id == org.id).all()}
+    added = {"rows": 0, "teams": 0}
+    by_loc: Dict[str, List[Tuple[str, User, str]]] = {}
+    for key, _name, _role, title, loc_slug, _langs, _cap in STAFF:
+        u = db.query(User).filter(User.email == "demo.vg.%s@example.com" % key).first()
+        if u is None:
+            continue
+        by_loc.setdefault(loc_slug, []).append((key, u, title))
+        if db.query(AgencyMemberAccess.id).filter(AgencyMemberAccess.organization_id == org.id,
+                                                  AgencyMemberAccess.user_id == u.id).first() is None:
+            db.add(AgencyMemberAccess(organization_id=org.id, user_id=u.id, profile_id=profs[TITLE_PROFILE[title]].id,
+                                      status="active", is_sample=True))
+            added["rows"] += 1
+    db.flush()
+    for slug, people in by_loc.items():
+        loc = locs.get(slug)
+        if loc is None:
+            continue
+        name = "Renewal Care - %s" % loc.name
+        t = db.query(AgencyTeam).filter(AgencyTeam.organization_id == org.id, AgencyTeam.name == name).first()
+        if t is None:
+            lead = next((u for _k, u, title in people if title == "manager"), None)
+            t = AgencyTeam(organization_id=org.id, name=name, lead_user_id=lead.id if lead else None,
+                           location_ids_json=json.dumps([loc.id]), is_demo=True,
+                           description="Renewal follow-up and client service for %s." % loc.name)
+            db.add(t)
+            db.flush()
+            for _k, u, title in people:
+                if title in ("manager", "retention", "service"):
+                    db.add(AgencyTeamMember(organization_id=org.id, team_id=t.id, user_id=u.id))
+            added["teams"] += 1
+    db.flush()
+    return added
+
+
 def grant_admins(db: Session, org: Organization, emails: List[str]) -> List[str]:
     """Give EXISTING platform users (Mike's own admin login) agency-admin access
     to the demo workspace. Never creates a user, never grants God access."""
@@ -513,6 +562,7 @@ def wipe(db: Session, org: Organization) -> Dict[str, int]:
 def reset_demo(db: Session, org: Organization) -> Dict[str, Any]:
     removed = wipe(db, org)
     added = seed(db, org)
+    ensure_access(db, org)
     return {"removed": removed, "seeded": added}
 
 
@@ -523,5 +573,6 @@ def ensure_demo(db: Session, admin_emails: Optional[List[str]] = None) -> Dict[s
         seeded = seed(db, org)
     else:
         _ensure_staff(db, org, _ensure_locations(db, org))
+    access = ensure_access(db, org)
     granted = grant_admins(db, org, admin_emails or [])
-    return {"organization_id": org.id, "created": created, "seeded": seeded, "granted": granted}
+    return {"organization_id": org.id, "created": created, "seeded": seeded, "granted": granted, "access": access}

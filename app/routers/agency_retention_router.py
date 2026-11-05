@@ -47,7 +47,7 @@ def ctx_dep(request: Request, preview_as: Optional[str] = Query(None), db: Sessi
     if preview_as and preview_as != user.id:
         # Owner-only, demo-only, read-only. The server computes the previewed
         # person's real scope; it never widens the caller's.
-        if not ctx.owner or not ctx.is_demo:
+        if not ctx.is_owner or not ctx.is_demo:
             raise HTTPException(403, "Preview as a staff member is available to agency owners in a demo workspace.")
         target = db.query(User).filter(User.id == preview_as).first()
         if target is None or not R.is_org_staff(db, org_id, target):
@@ -84,6 +84,25 @@ def _dt(v: Optional[str], field: str) -> Optional[datetime]:
     return d
 
 
+def route_guard(request: Request, ctx: R.RCtx = Depends(ctx_dep)) -> None:
+    """EVERY retention route: the (module, action) it needs, from one map
+    (app/services/agency/access.ROUTES), checked against the viewer's effective
+    access. A route missing from the map is refused for everyone - new routes
+    cannot slip in unguarded. Writes are refused in preview."""
+    from app.services.agency import access as AX
+    matched, mod, act = AX.route_permission(request.url.path, request.method)
+    if not matched:
+        raise HTTPException(403, "This action isn't mapped to a permission.")
+    if request.method.upper() not in ("GET", "HEAD") and ctx.preview:
+        raise HTTPException(403, "Preview is read-only. Return to your own view to make changes.")
+    if mod is not None and not ctx.can(mod, act):
+        raise HTTPException(403, "Your access doesn't include %s: %s." % (
+            AX.MODULE_LABELS.get(mod, mod), AX.ACTION_LABELS.get((mod, act), act)))
+
+
+router.dependencies.append(Depends(route_guard))
+
+
 # ───────────────────────────── workspace / today ─────────────────────────────
 
 @router.get("/workspace")
@@ -91,7 +110,7 @@ def workspace(ctx: R.RCtx = Depends(ctx_dep)):
     s = R.settings_dict(ctx.settings, ctx.org)
     t = R.team(ctx)   # computed once
     staff = []
-    if ctx.owner and not ctx.preview and ctx.is_demo:
+    if ctx.is_owner and not ctx.preview and ctx.is_demo:
         staff = [{"user_id": p["user_id"], "name": p["name"], "title": p["title"]} for p in t["people"]
                  if p["title"] in ("manager", "producer", "service", "retention")]
     locs = t["locations"]
@@ -134,7 +153,7 @@ class AssignIn(BaseModel):
 
 @router.post("/renewals/{renewal_id}/assign", dependencies=_W)
 def assign(renewal_id: str, body: AssignIn, ctx: R.RCtx = Depends(ctx_dep)):
-    ctx.require_manager()
+    ctx.require_write()   # module/action enforced by route_guard
     r = R.get_renewal(ctx, renewal_id)
     kind = "assigned" if r.assigned_user_id is None else "reassigned"
     R.assign(ctx, r, body.agent_id, body.reason, body.expected_version, kind=kind, move_review=body.move_review)
@@ -151,7 +170,7 @@ class BulkAssignIn(BaseModel):
 
 @router.post("/renewals/bulk-assign", dependencies=_W)
 def bulk_assign(body: BulkAssignIn, ctx: R.RCtx = Depends(ctx_dep)):
-    ctx.require_manager()
+    ctx.require_write()   # module/action enforced by route_guard
     done, conflicts = [], []
     for rid in body.renewal_ids[:500]:
         r = R.get_renewal(ctx, rid)
@@ -292,7 +311,7 @@ def simulate_reply(renewal_id: str, body: ReplyIn, ctx: R.RCtx = Depends(ctx_dep
 @router.post("/renewals/{renewal_id}/run-next-step", dependencies=_W)
 def run_next_step(renewal_id: str, ctx: R.RCtx = Depends(ctx_dep)):
     _demo_only(ctx)
-    ctx.require_manager()
+    ctx.require_write()   # module/action enforced by route_guard
     r = R.get_renewal(ctx, renewal_id)
     stats = R.run_due(ctx.db, ctx.org_id, ctx.settings, renewal_ids=[r.id], force_now=True, actor_id=ctx.actor.id)
     ctx.db.commit()
@@ -353,7 +372,7 @@ def workflows(ctx: R.RCtx = Depends(ctx_dep)):
 
 @router.post("/workflows", dependencies=_W, status_code=201)
 def create_workflow(body: WorkflowIn, ctx: R.RCtx = Depends(ctx_dep)):
-    ctx.require_manager()
+    ctx.require_write()   # module/action enforced by route_guard
     _validate_wf(body, ctx)
     w = AgencyRenewalWorkflow(organization_id=ctx.org_id, name=body.name, kind=body.kind,
                               offsets=R.jd(sorted(set(body.offsets), reverse=True)), channel=body.channel,
@@ -370,7 +389,7 @@ def create_workflow(body: WorkflowIn, ctx: R.RCtx = Depends(ctx_dep)):
 
 @router.patch("/workflows/{wid}", dependencies=_W)
 def update_workflow(wid: str, body: WorkflowIn, ctx: R.RCtx = Depends(ctx_dep)):
-    ctx.require_manager()
+    ctx.require_write()   # module/action enforced by route_guard
     _validate_wf(body, ctx)
     w = _wf(ctx, wid)
     before = _wf_dict(w, ctx)
@@ -392,7 +411,7 @@ def preview(wid: str, ctx: R.RCtx = Depends(ctx_dep)):
 
 @router.post("/workflows/{wid}/start", dependencies=_W)
 def start(wid: str, ctx: R.RCtx = Depends(ctx_dep)):
-    ctx.require_manager()
+    ctx.require_write()   # module/action enforced by route_guard
     w = _wf(ctx, wid)
     res = R.start_workflow(ctx, w)
     _audit(ctx, "agency.retention.workflow_started", "agency_renewal_workflow", w.id, res)
@@ -402,7 +421,7 @@ def start(wid: str, ctx: R.RCtx = Depends(ctx_dep)):
 
 @router.post("/workflows/{wid}/pause", dependencies=_W)
 def pause(wid: str, ctx: R.RCtx = Depends(ctx_dep)):
-    ctx.require_manager()
+    ctx.require_write()   # module/action enforced by route_guard
     w = _wf(ctx, wid)
     w.state = "paused"
     _audit(ctx, "agency.retention.workflow_paused", "agency_renewal_workflow", w.id)
@@ -412,7 +431,7 @@ def pause(wid: str, ctx: R.RCtx = Depends(ctx_dep)):
 
 @router.post("/workflows/{wid}/resume", dependencies=_W)
 def resume(wid: str, ctx: R.RCtx = Depends(ctx_dep)):
-    ctx.require_manager()
+    ctx.require_write()   # module/action enforced by route_guard
     w = _wf(ctx, wid)
     if w.state == "draft":
         raise HTTPException(409, "Start the workflow first")
@@ -425,7 +444,7 @@ def resume(wid: str, ctx: R.RCtx = Depends(ctx_dep)):
 @router.post("/workflows/{wid}/run-due", dependencies=_W)
 def run_due(wid: str, ctx: R.RCtx = Depends(ctx_dep)):
     """Process steps that are due now (quiet hours respected). Idempotent."""
-    ctx.require_manager()
+    ctx.require_write()   # module/action enforced by route_guard
     w = _wf(ctx, wid)
     vis = [x.id for x in R.renewals_q(ctx).all()]
     stats = R.run_due(ctx.db, ctx.org_id, ctx.settings, workflow_id=w.id, renewal_ids=vis, actor_id=ctx.actor.id)
@@ -512,7 +531,7 @@ class StaffIn(BaseModel):
 
 @router.patch("/team/{user_id}", dependencies=_W)
 def update_staff(user_id: str, body: StaffIn, ctx: R.RCtx = Depends(ctx_dep)):
-    ctx.require_manager()
+    ctx.require_write()   # module/action enforced by route_guard
     u = R.org_user(ctx, user_id)
     if ctx.kind == "manager":
         mine = set(ctx.loc_ids)
@@ -590,7 +609,7 @@ class SettingsIn(BaseModel):
 
 @router.patch("/settings", dependencies=_W)
 def update_settings(body: SettingsIn, ctx: R.RCtx = Depends(ctx_dep)):
-    ctx.require_owner()
+    ctx.require_write()   # settings:manage enforced by route_guard
     s = ctx.settings
     import re
     for f in ("send_window_start", "send_window_end"):
@@ -620,3 +639,380 @@ def demo_reset(ctx: R.RCtx = Depends(ctx_dep)):
     _audit(ctx, "agency.retention.demo_reset", "organization", ctx.org_id, report)
     ctx.db.commit()
     return report
+
+
+# ═════════════════════════════ ME / DASHBOARD (#523) ═════════════════════════════
+
+@router.get("/me")
+def me(ctx: R.RCtx = Depends(ctx_dep)):
+    """Who I am here: profile, scope, permissions, landing dashboard, visible
+    navigation. A new login's first signed-in visit records acceptance."""
+    from app.services.agency import team_access as TA
+    if ctx.configured and not ctx.preview:
+        TA.confirm_new_login(ctx.db, ctx.org_id, ctx.user)
+        ctx = R.RCtx(ctx.db, ctx.actor, ctx.user, ctx.role_name, ctx.org, ctx.settings, ctx.request)
+    v = R.viewer_dict(ctx)
+    locs = {l["id"]: l["name"] for l in R.team(ctx)["locations"]} if ctx.can("today", "view") or ctx.can("reports", "view") else {}
+    v["location_names"] = [locs.get(i) for i in (v["location_ids"] or []) if locs.get(i)]
+    v["prefs"] = R.jl(ctx.member.prefs_json, {}) if ctx.member is not None else {}
+    v["nav"] = R.nav_for(ctx)
+    return v
+
+
+class PrefsIn(BaseModel):
+    landing: Optional[str] = None
+    compact: Optional[bool] = None
+
+
+@router.patch("/me/prefs", dependencies=_W)
+def my_prefs(body: PrefsIn, ctx: R.RCtx = Depends(ctx_dep)):
+    ctx.require_write()
+    if ctx.member is None:
+        raise HTTPException(409, "Preferences are saved for invited members. Owners use their account settings.")
+    prefs = R.jl(ctx.member.prefs_json, {}) or {}
+    allowed = {n["key"] for n in R.nav_for(ctx)}
+    if body.landing is not None:
+        if body.landing and body.landing not in allowed:
+            raise HTTPException(422, "Pick a page you have access to.")
+        prefs["landing"] = body.landing or None
+    if body.compact is not None:
+        prefs["compact"] = bool(body.compact)
+    ctx.member.prefs_json = R.jd(prefs)
+    ctx.db.commit()
+    return {"prefs": prefs}
+
+
+@router.get("/dashboard")
+def dashboard(location_id: Optional[str] = None, ctx: R.RCtx = Depends(ctx_dep)):
+    return R.dashboard_for(ctx, location_id)
+
+
+class EscalateIn(BaseModel):
+    to_user_id: Optional[str] = None
+    note: str = Field(..., min_length=1, max_length=1000)
+
+
+@router.post("/renewals/{renewal_id}/escalate", dependencies=_W)
+def escalate(renewal_id: str, body: EscalateIn, ctx: R.RCtx = Depends(ctx_dep)):
+    """Hand a client question to an authorized producer. Records the request;
+    reassigns only if the caller may assign."""
+    ctx.require_write()
+    r = R.get_renewal(ctx, renewal_id)
+    row = R.escalate(ctx, r, body.to_user_id, body.note)
+    _audit(ctx, "agency.retention.escalated", "agency_renewal", r.id, {"to": body.to_user_id})
+    ctx.db.commit()
+    return row
+
+
+@router.get("/renewals/{renewal_id}/availability")
+def availability(renewal_id: str, day: Optional[str] = None, agent_id: Optional[str] = None,
+                 ctx: R.RCtx = Depends(ctx_dep)):
+    r = R.get_renewal(ctx, renewal_id)
+    return R.availability(ctx, r, day, agent_id)
+
+
+# ═════════════════════════════ TEAM & ACCESS (#523) ═════════════════════════════
+
+def _ta():
+    from app.services.agency import team_access as TA
+    return TA
+
+
+def _run(fn, *a, **kw):
+    TA = _ta()
+    try:
+        return fn(*a, **kw)
+    except TA.AccessError as e:
+        detail = {"message": str(e), **e.extra} if e.extra else str(e)
+        raise HTTPException(e.status, detail)
+
+
+def _base_url(request: Request) -> str:
+    import os
+    origin = (request.headers.get("origin") or "").rstrip("/")
+    from app.main import ALLOWED_ORIGINS
+    if origin and origin in ALLOWED_ORIGINS:
+        return origin
+    return (os.environ.get("APP_BASE_URL") or "").rstrip("/")
+
+
+def _people_scope(ctx: R.RCtx):
+    """People a viewer may list: agency-wide, or those sharing a location or team."""
+    if ctx.scope == "agency":
+        return None
+    from app.models.location_models import UserLocation
+    ids = {r[0] for r in ctx.db.query(UserLocation.user_id).filter(
+        UserLocation.organization_id == ctx.org_id, UserLocation.location_id.in_(ctx.loc_ids or ["-"])).all()}
+    return ids | set(ctx.team_mates) | {ctx.user.id}
+
+
+@router.get("/access/catalog")
+def access_catalog(ctx: R.RCtx = Depends(ctx_dep)):
+    from app.services.agency import access as AX
+    c = AX.ceiling(ctx.db, ctx.actor, ctx.org_id)
+    return {"modules": AX.catalog_json(), "scopes": [{"key": k, "label": AX.SCOPE_LABELS[k]} for k in AX.SCOPES],
+            "dashboards": list(AX.DASHBOARDS), "ceiling": {"permissions": c["permissions"],
+                                                           "record_scope": c["record_scope"],
+                                                           "location_ids": c["location_ids"], "owner": c["owner"]}}
+
+
+@router.get("/access/people")
+def access_people(ctx: R.RCtx = Depends(ctx_dep)):
+    TA = _ta()
+    TA.ensure_starters(ctx.db, ctx.org_id, ctx.is_demo)
+    ctx.db.commit()
+    return {"items": TA.people(ctx.db, ctx.org_id, ctx.actor, _people_scope(ctx)),
+            "can_manage_access": ctx.can("access", "manage") and not ctx.preview,
+            "can_manage_team": ctx.can("team", "manage") and not ctx.preview,
+            "can_manage_locations": ctx.can("locations", "manage") and not ctx.preview}
+
+
+@router.get("/access/people/{user_id}")
+def access_person(user_id: str, ctx: R.RCtx = Depends(ctx_dep)):
+    scope = _people_scope(ctx)
+    if scope is not None and user_id not in scope:
+        raise HTTPException(404, "Person not found.")
+    return _run(_ta().member_detail, ctx.db, ctx.org_id, ctx.actor, user_id)
+
+
+@router.get("/access/people/{user_id}/owned-work")
+def access_owned(user_id: str, ctx: R.RCtx = Depends(ctx_dep)):
+    return _ta().owned_work(ctx.db, ctx.org_id, user_id)
+
+
+class AccessIn(BaseModel):
+    profile_id: Optional[str] = None
+    grants: Optional[Dict[str, List[str]]] = None
+    denies: Optional[Dict[str, List[str]]] = None
+    record_scope: Optional[str] = None
+    reports_to_user_id: Optional[str] = None
+    location_ids: Optional[List[str]] = None
+    team_ids: Optional[List[str]] = None
+
+
+@router.patch("/access/people/{user_id}", dependencies=_W)
+def access_set(user_id: str, body: AccessIn, ctx: R.RCtx = Depends(ctx_dep)):
+    ctx.require_write()
+    return _run(_ta().set_access, ctx.db, ctx.org_id, ctx.actor, user_id, **body.dict())
+
+
+class LocsIn(BaseModel):
+    location_ids: List[str]
+
+
+@router.post("/access/people/{user_id}/locations", dependencies=_W)
+def access_locations(user_id: str, body: LocsIn, ctx: R.RCtx = Depends(ctx_dep)):
+    ctx.require_write()
+    return _run(_ta().set_locations, ctx.db, ctx.org_id, ctx.actor, user_id, body.location_ids)
+
+
+class StatusIn(BaseModel):
+    reassign_to: Optional[str] = None
+    release_to_queue: bool = False
+
+
+@router.post("/access/people/{user_id}/{action}", dependencies=_W)
+def access_status(user_id: str, action: str, body: StatusIn = Body(default=StatusIn()), ctx: R.RCtx = Depends(ctx_dep)):
+    if action not in ("suspend", "reactivate", "remove"):
+        raise HTTPException(404, "Not found")
+    ctx.require_write()
+    return _run(_ta().change_status, ctx.db, ctx.org_id, ctx.actor, user_id, action, body.reassign_to,
+                body.release_to_queue)
+
+
+@router.get("/access/profiles")
+def access_profiles(include_archived: bool = False, ctx: R.RCtx = Depends(ctx_dep)):
+    TA = _ta()
+    TA.ensure_starters(ctx.db, ctx.org_id, ctx.is_demo)
+    ctx.db.commit()
+    return {"items": TA.profiles(ctx.db, ctx.org_id, include_archived)}
+
+
+class ProfileIn(BaseModel):
+    name: Optional[str] = Field(None, max_length=80)
+    description: Optional[str] = Field(None, max_length=600)
+    template_key: Optional[str] = None
+    permissions: Optional[Dict[str, List[str]]] = None
+    record_scope: Optional[str] = None
+    dashboard: Optional[str] = None
+    aggregate_only: Optional[bool] = None
+    apply: Optional[str] = None
+
+
+@router.post("/access/profiles", dependencies=_W, status_code=201)
+def access_profile_create(body: ProfileIn, ctx: R.RCtx = Depends(ctx_dep)):
+    ctx.require_write()
+    return _run(_ta().create_profile, ctx.db, ctx.org_id, ctx.actor, name=body.name or "",
+                description=body.description, template_key=body.template_key, permissions=body.permissions,
+                record_scope=body.record_scope or "assigned", dashboard=body.dashboard or "auto",
+                aggregate_only=bool(body.aggregate_only))
+
+
+@router.patch("/access/profiles/{pid}", dependencies=_W)
+def access_profile_update(pid: str, body: ProfileIn, ctx: R.RCtx = Depends(ctx_dep)):
+    ctx.require_write()
+    return _run(_ta().update_profile, ctx.db, ctx.org_id, ctx.actor, pid, name=body.name,
+                description=body.description, permissions=body.permissions, record_scope=body.record_scope,
+                dashboard=body.dashboard, aggregate_only=body.aggregate_only, apply=body.apply)
+
+
+class NameIn(BaseModel):
+    name: Optional[str] = None
+    move_to: Optional[str] = None
+
+
+@router.post("/access/profiles/{pid}/duplicate", dependencies=_W, status_code=201)
+def access_profile_dup(pid: str, body: NameIn = Body(default=NameIn()), ctx: R.RCtx = Depends(ctx_dep)):
+    ctx.require_write()
+    return _run(_ta().duplicate_profile, ctx.db, ctx.org_id, ctx.actor, pid, body.name)
+
+
+@router.post("/access/profiles/{pid}/retire", dependencies=_W)
+def access_profile_retire(pid: str, body: NameIn = Body(default=NameIn()), ctx: R.RCtx = Depends(ctx_dep)):
+    ctx.require_write()
+    return _run(_ta().retire_profile, ctx.db, ctx.org_id, ctx.actor, pid, body.move_to)
+
+
+class PreviewIn(BaseModel):
+    profile_id: Optional[str] = None
+    grants: Optional[Dict[str, List[str]]] = None
+    denies: Optional[Dict[str, List[str]]] = None
+    record_scope: Optional[str] = None
+    location_ids: Optional[List[str]] = None
+
+
+@router.post("/access/preview")
+def access_preview(body: PreviewIn, ctx: R.RCtx = Depends(ctx_dep)):
+    return _run(_ta().preview, ctx.db, ctx.org_id, **body.dict())
+
+
+@router.get("/access/invitations")
+def access_invites(ctx: R.RCtx = Depends(ctx_dep)):
+    return {"items": _ta().invites(ctx.db, ctx.org_id)}
+
+
+class InviteIn(BaseModel):
+    email: str = Field(..., max_length=254)
+    full_name: Optional[str] = Field(None, max_length=120)
+    profile_id: Optional[str] = None
+    grants: Optional[Dict[str, List[str]]] = None
+    denies: Optional[Dict[str, List[str]]] = None
+    record_scope: Optional[str] = None
+    location_ids: Optional[List[str]] = None
+    team_ids: Optional[List[str]] = None
+    reports_to_user_id: Optional[str] = None
+    send: bool = False
+
+
+@router.post("/access/invitations", dependencies=_W, status_code=201)
+def access_invite(body: InviteIn, request: Request, ctx: R.RCtx = Depends(ctx_dep)):
+    ctx.require_write()
+    data = body.dict()
+    send = data.pop("send")
+    return _run(_ta().invite, ctx.db, ctx.org_id, ctx.actor, base_url=_base_url(request), send=send, **data)
+
+
+class SendIn(BaseModel):
+    send: bool = False
+
+
+@router.post("/access/invitations/{iid}/resend", dependencies=_W)
+def access_resend(iid: str, request: Request, body: SendIn = Body(default=SendIn()), ctx: R.RCtx = Depends(ctx_dep)):
+    ctx.require_write()
+    return _run(_ta().resend, ctx.db, ctx.org_id, ctx.actor, iid, _base_url(request), body.send)
+
+
+@router.post("/access/invitations/{iid}/revoke", dependencies=_W)
+def access_revoke(iid: str, ctx: R.RCtx = Depends(ctx_dep)):
+    ctx.require_write()
+    return _run(_ta().revoke, ctx.db, ctx.org_id, ctx.actor, iid)
+
+
+@router.get("/access/teams")
+def access_teams(include_archived: bool = False, ctx: R.RCtx = Depends(ctx_dep)):
+    return {"items": _ta().teams(ctx.db, ctx.org_id, include_archived)}
+
+
+class TeamIn(BaseModel):
+    name: Optional[str] = Field(None, max_length=80)
+    description: Optional[str] = Field(None, max_length=400)
+    lead_user_id: Optional[str] = None
+    location_ids: Optional[List[str]] = None
+    shared_queue: Optional[bool] = None
+    routing_eligible: Optional[bool] = None
+    member_ids: Optional[List[str]] = None
+    add_member_ids: Optional[List[str]] = None
+    remove_member_ids: Optional[List[str]] = None
+    archive: bool = False
+    restore: bool = False
+
+
+@router.post("/access/teams", dependencies=_W, status_code=201)
+def access_team_create(body: TeamIn, ctx: R.RCtx = Depends(ctx_dep)):
+    ctx.require_write()
+    return _run(_ta().create_team, ctx.db, ctx.org_id, ctx.actor, body.dict(exclude_none=True))
+
+
+@router.patch("/access/teams/{tid}", dependencies=_W)
+def access_team_update(tid: str, body: TeamIn, ctx: R.RCtx = Depends(ctx_dep)):
+    ctx.require_write()
+    return _run(_ta().update_team, ctx.db, ctx.org_id, ctx.actor, tid, body.dict(exclude_unset=True))
+
+
+@router.get("/access/locations")
+def access_locs(ctx: R.RCtx = Depends(ctx_dep)):
+    items = _ta().locations(ctx.db, ctx.org_id)
+    allowed = R.permitted_location_ids(ctx)
+    if allowed is not None:
+        items = [l for l in items if l["id"] in allowed]
+    return {"items": items}
+
+
+class LocationIn(BaseModel):
+    name: Optional[str] = Field(None, max_length=80)
+    city: Optional[str] = None
+    state: Optional[str] = None
+    address: Optional[str] = None
+    phone: Optional[str] = None
+    timezone: Optional[str] = None
+    staff_user_ids: Optional[List[str]] = None
+    archive: bool = False
+    restore: bool = False
+    move_work_to: Optional[str] = None
+
+
+@router.post("/access/locations", dependencies=_W, status_code=201)
+def access_loc_create(body: LocationIn, ctx: R.RCtx = Depends(ctx_dep)):
+    ctx.require_write()
+    if ctx.scope != "agency":
+        raise HTTPException(403, "Only someone with entire-agency access can add a location.")
+    return _run(_ta().create_location, ctx.db, ctx.org_id, ctx.actor, body.dict(exclude_none=True))
+
+
+@router.patch("/access/locations/{lid}", dependencies=_W)
+def access_loc_update(lid: str, body: LocationIn, ctx: R.RCtx = Depends(ctx_dep)):
+    ctx.require_write()
+    return _run(_ta().update_location, ctx.db, ctx.org_id, ctx.actor, lid, body.dict(exclude_unset=True))
+
+
+@router.get("/access/history")
+def access_history(ctx: R.RCtx = Depends(ctx_dep)):
+    return {"items": _ta().history(ctx.db, ctx.org_id)}
+
+
+# ═════════════════════════════ INVITATION ACCEPTANCE (signed-in) ═════════════════════════════
+invites_router = APIRouter(prefix="/agency-invites", tags=["agency-invites"])
+
+
+class TokenIn(BaseModel):
+    token: str = Field(..., min_length=8, max_length=200)
+
+
+@invites_router.post("/preview")
+def invite_preview(body: TokenIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    return _run(_ta().invite_preview, db, body.token)
+
+
+@invites_router.post("/accept")
+def invite_accept(body: TokenIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    return _run(_ta().accept, db, user, body.token)
