@@ -240,8 +240,9 @@ def client_report(db: Session, org_id: str, a: Optional[datetime], b: Optional[d
     """Each number counts a DIFFERENT event in the period: appointments booked,
     visits held, estimates sent, contracts won. A reschedule moves the same
     appointment; it is never a second delivered appointment."""
+    test = E.is_test_company(db, org_id)
     rows = [o for o in db.query(AcquisitionOpportunity).filter(AcquisitionOpportunity.organization_id == org_id).all()
-            if E.delivered(o)]
+            if E.delivered(o, test)]
     booked = [o for o in rows if _in(o.booked_at, a, b)]
     held = [o for o in rows if _in(o.held_at, a, b)]
     quoted = [o for o in rows if _in(o.quoted_at, a, b)]

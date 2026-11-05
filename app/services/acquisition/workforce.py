@@ -273,6 +273,14 @@ def plan(db: Session, now: Optional[datetime] = None) -> Dict[str, int]:
         # ":v3" = re-run once under the stricter website/contact rules (#506).
         if enqueue(db, "research", "pool:%s:%s:v3" % (p.id, dom), target_type="pool_prospect", target_id=p.id):
             out["research"] += 1
+        elif dom != "none" and _retry_due(db, p.id, now):
+            # A website that timed out or refused gets up to two controlled
+            # retries, an hour apart - never a tight loop.
+            n = db.query(AcquisitionWorkerJob).filter(AcquisitionWorkerJob.target_id == p.id,
+                                                      AcquisitionWorkerJob.dedupe_key.like("research:pool:%:retry%")).count()
+            if n < 2 and enqueue(db, "research", "pool:%s:%s:v3:retry%d" % (p.id, dom, n + 1),
+                                 target_type="pool_prospect", target_id=p.id):
+                out["research"] += 1
     clients = enabled_client_ids(db)
     day = now.strftime("%Y-%m-%d")
     for org_id in clients:
@@ -301,6 +309,17 @@ def plan(db: Session, now: Optional[datetime] = None) -> Dict[str, int]:
                     out["booking"] += 1
         out["replies"] += _plan_replies(db, org_id, s.mode)
     return out
+
+
+def _retry_due(db: Session, prospect_id: str, now: datetime) -> bool:
+    last = (db.query(AcquisitionWorkerJob).filter(AcquisitionWorkerJob.target_id == prospect_id,
+                                                  AcquisitionWorkerJob.worker == "research")
+            .order_by(AcquisitionWorkerJob.created_at.desc()).first())
+    if last is None or last.status != "blocked" or not last.finished_at:
+        return False
+    if (C.jload(last.result, {}) or {}).get("reason_code") != "website_failed":
+        return False
+    return last.finished_at <= now - timedelta(hours=1)
 
 
 def _plan_replies(db: Session, org_id: str, mode: str) -> int:
@@ -1426,6 +1445,19 @@ def capabilities(db: Session) -> Dict[str, Dict[str, str]]:
         email = ("Configured", "Switched on, but the %s mailbox is not connected" % O.SEND_FROM)
     else:
         email = ("Ready", "Sends one approved email at a time from %s" % O.SEND_FROM)
+    # The single "email" answer above, broken into the separate gates it is
+    # made of - so a connected mailbox is never read as "outreach is on".
+    tests = O.test_recipients()
+    sending_split = {
+        "outreach_drafting": {"state": "Available" if s.status == "running" else "Stopped",
+                              "detail": "Workers prepare drafts; a person approves every send"},
+        "server_sending": {"state": "Permitted" if O.enabled() else "Off",
+                           "detail": "Server switch ACQUISITION_OUTREACH_ENABLED"},
+        "sending_provider": {"state": "Connected" if box is not None else "Not connected",
+                             "detail": "Microsoft 365 mailbox %s" % O.SEND_FROM},
+        "practice_recipients": {"state": "%d approved" % len(tests) if tests else "None set",
+                                "detail": "Owner test inboxes that practice emails may go to"},
+    }
     cal_ok, cal_err, cal_cfg = 0, 0, 0
     for org_id in enabled_client_ids(db):
         p = db.query(AcquisitionProfile).filter(AcquisitionProfile.organization_id == org_id).first()
@@ -1455,7 +1487,8 @@ def capabilities(db: Session) -> Dict[str, Dict[str, str]]:
             "calendar": {"state": calendar[0], "detail": calendar[1]},
             "campaign": {"state": campaign, "detail": "Practice uses only practice prospects and test inboxes"
                          if campaign == "Practice" else ""},
-            "paid_discovery": {"state": discovery, "detail": "Google Places is metered; off until approved"}}
+            "paid_discovery": {"state": discovery, "detail": "Google Places is metered; off until approved"},
+            **sending_split}
 
 
 def costs(db: Session, now: Optional[datetime] = None) -> Dict[str, Any]:
