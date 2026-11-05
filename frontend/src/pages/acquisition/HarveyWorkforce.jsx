@@ -10,7 +10,7 @@ import { Fragment, useState } from 'react'
 import { api } from '../../api/client'
 import { Confirm, Empty, Icon, Loading, errText, useLoad, useToast } from './ui'
 
-const TONE = { Running: 'green', Connected: 'green', Ready: 'green', Available: 'green', Live: 'violet', Practice: 'blue',
+const TONE = { Permitted: 'green', Off: 'gray', 'Not connected': 'amber', 'None set': 'amber', Running: 'green', Connected: 'green', Ready: 'green', Available: 'green', Live: 'violet', Practice: 'blue',
                Paused: 'amber', Disabled: 'gray', 'Not configured': 'gray', Configured: 'amber', Stopped: 'gray',
                Blocked: 'amber', Degraded: 'amber', Unavailable: 'rose', Error: 'rose', 'Stopped (emergency)': 'rose', Enabled: 'violet' }
 
@@ -62,7 +62,9 @@ export function HarveyWorkforcePanel({ compact = false }) {
         <Chip label="Scheduler" value={sched} title={h.reason || ''} />
         <Chip label="Mode" value={h.mode === 'live' ? 'Live' : 'Practice'} title={cap.campaign.detail} />
         <Chip label="AI model" value={cap.ai_model.state} title={cap.ai_model.detail} />
-        <Chip label="Outreach" value={cap.email.state === 'Ready' ? 'Enabled' : 'Disabled'} title={cap.email.detail} />
+        <Chip label="Email sending" value={!cap.server_sending ? (cap.email.state === 'Ready' ? 'Enabled' : 'Disabled')
+          : cap.server_sending.state === 'Permitted' && cap.sending_provider?.state === 'Connected' ? 'Permitted' : 'Off'}
+          title={cap.server_sending ? `Server switch: ${cap.server_sending.state} · Mailbox: ${cap.sending_provider?.state} · Practice inboxes: ${cap.practice_recipients?.state}. A person approves every send.` : cap.email.detail} />
         <span className="hw-chip hw-chip--plain" title={fullTime(h.last_pass_at)}><small>Last pass</small><b>{shortTime(h.last_pass_at)}</b>
           {running && h.next_pass_at && <em>Next: {shortTime(h.next_pass_at)}</em>}</span>
         <span className="hw-chip hw-chip--plain" title={fullTime(h.last_success_at)}><small>Last successful job</small><b>{shortTime(h.last_success_at)}</b></span>
@@ -109,7 +111,8 @@ export function HarveyWorkforcePanel({ compact = false }) {
 
         <h3 className="hw-h3">Capabilities</h3>
         <div className="hw-caps">
-          {[['Scheduler', cap.scheduler], ['Website research', cap.website_research], ['AI model', cap.ai_model], ['Email', cap.email],
+          {[['Scheduler', cap.scheduler], ['Website research', cap.website_research], ['AI model', cap.ai_model],
+            ...(cap.server_sending ? [['Drafting', cap.outreach_drafting], ['Server sending', cap.server_sending], ['Mailbox', cap.sending_provider], ['Practice inboxes', cap.practice_recipients]] : [['Email', cap.email]]),
             ['Calendar', cap.calendar], ['Campaign', cap.campaign], ['Paid discovery', cap.paid_discovery]].map(([l, c]) =>
             <div className="hw-cap" key={l}><span>{l}</span><Chip label="" value={c.state} /><small>{c.detail || ''}</small></div>)}
         </div>

@@ -27,7 +27,7 @@ test('timestamps are short; the big Stat card is not used for times', () => {
 
 test('scheduler, AI model and outreach are separate chips; template fallback is stated', () => {
   const s = src('HarveyWorkforce.jsx')
-  for (const l of ['label="Scheduler"', 'label="Mode"', 'label="AI model"', 'label="Outreach"']) assert.ok(s.includes(l), l)
+  for (const l of ['label="Scheduler"', 'label="Mode"', 'label="AI model"', 'label="Email sending"']) assert.ok(s.includes(l), l)
   assert.ok(s.includes('AI model unavailable — using deterministic template fallback.'))
 })
 
