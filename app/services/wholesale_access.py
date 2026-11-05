@@ -82,6 +82,9 @@ SCOPED_MODULES = {m[0] for m in MODULES if m[3]}
 _RULES: List[Tuple[str, str]] = [
     # team administration
     (r"^/wholesale/team/me$", "_self"),
+    # Your own home dashboard: always open; every panel inside it is checked
+    # against your access on the server (app.services.wholesale_home).
+    (r"^/wholesale/home$", "_self"),
     (r"^/wholesale/team(/|$)", "team_admin"),
     # paid lookups before the areas that host them
     (r"^/wholesale/(skip-trace|contact-lookup|enrichment)(/|$)", "paid_lookups"),
@@ -276,10 +279,15 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
                         "deal_room": ["view", "create", "edit", "publish"], "investor_outreach": ["view", "create", "edit"],
                         "dispositions": ["view", "create", "edit", "publish"], "deals": ["view"], "underwriting": ["view"]}},
     "research_assistant": {
-        "name": "Research Assistant / VA", "record_scope": WORKSPACE,
+        "name": "Research Assistant", "record_scope": WORKSPACE,
         "description": "Researches properties and owners. No sending, no paid lookups, no exports.",
         "permissions": {"properties": ["view", "edit"], "foreclosures": ["view"], "sellers": ["view", "edit"],
                         "buyer_intel": ["view", "edit"]}},
+    "virtual_assistant": {
+        "name": "Virtual Assistant", "record_scope": ASSIGNED,
+        "description": "Works an assigned task queue: calls to return, appointments, record updates. No sending, no paid lookups, no exports, no settings.",
+        "permissions": {"acquisition": ["view"], "appointments": ["view", "edit"], "sellers": ["view", "edit"],
+                        "team_board": ["view"], "properties": ["view"]}},
     "investor_restricted": {
         "name": "Investor - restricted deal access", "record_scope": ASSIGNED,
         "description": "View-only deals they are assigned and the deal room. Investors who buy through the private Deal Room keep using their own investor login instead.",
@@ -378,7 +386,7 @@ def effective(db: Session, user: User, org_id: str) -> Dict[str, Any]:
     perms = combine(_load(prof.permissions_json) if prof else {}, _load(row.grants_json), _load(row.denies_json))
     rs = row.record_scope or (prof.record_scope if prof else ASSIGNED)
     return {"mode": "custom", "permissions": perms, "record_scope": rs if rs in SCOPES else ASSIGNED,
-            "profile": {"id": prof.id, "name": prof.name} if prof else None}
+            "profile": {"id": prof.id, "name": prof.name, "template_key": prof.template_key} if prof else None}
 
 
 def allows(eff: Dict[str, Any], module: str, action: str) -> bool:

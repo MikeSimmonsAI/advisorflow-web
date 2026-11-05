@@ -176,6 +176,8 @@ const AcqOpsFollowUps = lazyPage(() => import('./pages/acquisition/HubPages').th
 const AcqOpsResponses = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.ResponsesPage })))
 const AcqOpsSoon = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Soon })))
 const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
+// #439: one dashboard for every kind of Wholesale person, composed from their access.
+const WholesaleHome = lazyPage(() => import('./pages/wholesale/home/WholesaleHome'))
 const DealOperationsClosing = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsClosing })))
 const DealOperationsDispositions = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsDispositions })))
 const WholesaleProperties = lazyPage(() => import('./pages/wholesale/WholesaleProperties'))
@@ -1708,6 +1710,7 @@ export default function App() {
         <Route path="/agency/agents/:agentId" element={<ProtectedRoute feature="insurance_agency"><AgencyAgents /></ProtectedRoute>} />
         <Route path="/agency/intelligence" element={<ProtectedRoute feature="insurance_agency"><AgencyIntelligence /></ProtectedRoute>} />
         <Route path="/wholesale" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleCommand /></ProtectedRoute>} />
+        <Route path="/wholesale/home" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleHome /></ProtectedRoute>} />
         <Route path="/wholesale/properties" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleProperties /></ProtectedRoute>} />
         {/* Phase 7.2: focused views of Deal Operations - the same real deals, filtered to where they are. */}
         <Route path="/wholesale/closing" element={<ProtectedRoute feature="wholesale_real_estate"><DealOperationsClosing /></ProtectedRoute>} />
