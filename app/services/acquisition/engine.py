@@ -117,6 +117,15 @@ def _lead_facts(lead: Lead) -> Dict[str, Any]:
     return cf if isinstance(cf, dict) else {}
 
 
+def _appt_iso(stored: Optional[datetime]) -> Optional[str]:
+    """booked_time is shared-engine (Chicago) wall time; send the true instant
+    in UTC, so every browser shows it correctly in its own zone, DST included."""
+    if stored is None:
+        return None
+    from app.services.acquisition import acq_time as T
+    return C.iso(T.utc_of(stored.replace(tzinfo=None), T.ENGINE_TZ))
+
+
 def opp_json(opp: AcquisitionOpportunity, lead: Lead, booking: Optional[BookingLink],
              full: bool, evidence: Optional[List[AcquisitionEvidence]] = None) -> Dict[str, Any]:
     f = _lead_facts(lead)
@@ -139,7 +148,7 @@ def opp_json(opp: AcquisitionOpportunity, lead: Lead, booking: Optional[BookingL
         "stage_label": C.STAGE_LABEL.get(opp.stage, opp.stage),
         "stage_entered_at": C.iso(opp.stage_entered_at),
         "interest_note": f.get("interest_note"),
-        "appointment": ({"id": booking.id, "status": booking.status, "time": C.iso(booking.booked_time),
+        "appointment": ({"id": booking.id, "status": booking.status, "time": _appt_iso(booking.booked_time),
                          "label": booking.appt_label, "minutes": booking.appt_duration,
                          # Provider-confirmed only: an event id exists once the calendar accepted it.
                          "calendar_synced": bool(getattr(booking, "calendar_event_id", None))} if booking else None),

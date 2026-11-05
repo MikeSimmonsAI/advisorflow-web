@@ -23,8 +23,13 @@ const S = {
   ok: { background: '#e6f6ec', color: '#17633a', borderRadius: 10, padding: '14px', marginTop: 8 },
 }
 
-function centralToday() {
-  const s = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })
+const ZONE_NAME = { 'America/Chicago': 'Central Time', 'America/New_York': 'Eastern Time', 'America/Denver': 'Mountain Time',
+  'America/Phoenix': 'Arizona Time', 'America/Los_Angeles': 'Pacific Time', 'America/Anchorage': 'Alaska Time', 'Pacific/Honolulu': 'Hawaii Time' }
+export const zoneName = tz => ZONE_NAME[tz] || (tz ? tz.replace(/_/g, ' ') + ' time' : 'Central Time')
+
+// "Today" in the COMPANY's time zone - the days offered are its days.
+function companyToday(tz) {
+  const s = new Date().toLocaleDateString('en-CA', { timeZone: tz || 'America/Chicago' })
   const [y, m, d] = s.split('-').map(Number)
   return new Date(Date.UTC(y, m - 1, d))
 }
@@ -47,7 +52,7 @@ export default function WalkthroughPage() {
   const [tick, setTick] = useState(0)
 
   const days = useMemo(() => {
-    const out = []; const t = centralToday()
+    const out = []; const t = companyToday(info?.timezone)
     for (let i = 0; i <= (info?.days || 14); i++) {
       const d = new Date(t.getTime() + i * 86400000)
       if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) out.push(d)
@@ -80,8 +85,8 @@ export default function WalkthroughPage() {
   if (fail && !info) return <div style={S.page}><div style={S.card}><h1 style={S.h1}>Walkthrough</h1><div style={S.err}>{fail}</div></div></div>
   if (!info) return <div style={S.page}><div style={S.card}>Loading…</div></div>
   const header = (
-    <><h1 style={S.h1}>{info.company}: free cleaning walkthrough</h1>
-      <p style={S.sub}>{info.for ? `For ${info.for} · ` : ''}about {info.minutes} minutes · Central Time</p></>)
+    <><h1 style={S.h1}>{info.company}: free walkthrough</h1>
+      <p style={S.sub}>{info.for ? `For ${info.for} · ` : ''}about {info.minutes} minutes · times in {zoneName(info.timezone)}</p></>)
   if (done || info.status === 'booked' || info.status === 'confirmed') {
     const t = done?.booked_time || info.booked_time
     return <div style={S.page}><div style={S.card}>{header}<div style={S.ok}><b>You're booked.</b><br />{t ? whenLabel(t) : ''}. We'll see you then. Just reply to our email if anything changes.</div></div></div>

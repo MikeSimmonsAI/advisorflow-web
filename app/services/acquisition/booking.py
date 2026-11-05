@@ -142,13 +142,16 @@ def _client_name(db: Session, org: Organization) -> str:
 
 
 def page(db: Session, token: str) -> Dict[str, Any]:
+    from app.services.acquisition import acq_time as T
     link, opp, org, booker, lead = _load(db, token)
+    tz = T.company_tz(_profile(db, org.id))
     f = C.jload(lead.custom_fields, {}) if lead else {}
     expired = link.expires_at is not None and link.expires_at < datetime.utcnow()
     return {"company": _client_name(db, org), "for": (f or {}).get("company"), "label": link.appt_label or LABEL,
             "minutes": link.appt_duration, "status": "expired" if (expired and link.status == "pending") else link.status,
-            "booked_time": link.booked_time.strftime("%Y-%m-%dT%H:%M:00") if link.booked_time else None,
-            "days": LINK_DAYS, "timezone": "America/Chicago"}
+            "booked_time": (T.from_engine(link.booked_time, tz).strftime("%Y-%m-%dT%H:%M:00")
+                            if link.booked_time else None),
+            "days": LINK_DAYS, "timezone": tz}
 
 
 def slots(db: Session, token: str, day: str) -> Dict[str, Any]:
@@ -161,14 +164,10 @@ def slots(db: Session, token: str, day: str) -> Dict[str, Any]:
         raise HTTPException(400, "Use a YYYY-MM-DD date")
     if not calendar_connected(db, booker):
         return {"date": day, "slots": [], "reason": "The calendar can't be read right now. Please try again later."}
-    from app.routers.calendar_router import compute_day_slots
-    # Hour-long holds on the hour, the whole hour free (program_visit rules).
-    out = compute_day_slots(db, booker, target, program_visit=True, minutes=60)
-    from app.services.acquisition.calendar_setup import filter_slots
-    prof = _profile(db, org.id)
-    res = {"date": day, "slots": filter_slots(prof, out.get("slots", [])) if prof else out.get("slots", [])}
-    if out.get("reason"):
-        res["reason"] = out["reason"]
+    # Hour-long holds on the hour, the whole hour free, in the company's zone.
+    from app.services.acquisition import acq_time as T
+    res = T.slots_for(db, booker, _profile(db, org.id), target, minutes=60)
+    res.pop("calendar_error", None)
     return res
 
 
@@ -199,18 +198,20 @@ def book(db: Session, token: str, slot: str) -> Dict[str, Any]:
     # object, not a Lead row, so it can never be added or counted as a lead.
     from types import SimpleNamespace
     lead_view = SimpleNamespace(first_name=company, last_name="", phone=lead.phone, email=None)
-    sync = TS._push_to_calendar(db, booker, org, link, lead_view, link.appt_label or _label(org), start, minutes, "America/Chicago",
+    from app.services.acquisition import acq_time as T
+    tz = T.company_tz(_profile(db, org.id))
+    sync = TS._push_to_calendar(db, booker, org, link, lead_view, link.appt_label or _label(org), start, minutes, tz,
                                 "Booked from the acquisition pilot (%s)." % ("practice" if opp.is_practice else "real"))
     if not sync.get("ok"):
         db.rollback()
         raise HTTPException(502, "The calendar couldn't be updated, so nothing was booked. Please try again.")
     link.status = "booked"
-    link.booked_time = start
+    link.booked_time = T.to_engine(start, tz)          # stored in the shared engine's wall time
     link.review_request_sent_at = datetime.utcnow()   # no review-request text to a prospect business
     opp.booking_link_id = link.id
-    E._move(db, opp, C.BOOKED, None, "Walkthrough booked for %s" % start.strftime("%a %b %d, %I:%M %p"))
+    E._move(db, opp, C.BOOKED, None, "Walkthrough booked for %s" % T.label(start, tz))
     db.commit()
-    return {"status": "booked", "booked_time": start.strftime("%Y-%m-%dT%H:%M:00"), "minutes": minutes,
+    return {"status": "booked", "booked_time": start.strftime("%Y-%m-%dT%H:%M:00"), "timezone": tz, "minutes": minutes,
             "company": _client_name(db, org)}
 
 

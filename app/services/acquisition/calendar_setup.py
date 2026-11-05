@@ -146,10 +146,11 @@ def update(db: Session, org: Organization, actor: User, data: Dict[str, Any]) ->
 
 
 # ── availability ───────────────────────────────────────────────────────────
-def filter_slots(p, slots: List[str], now: Optional[datetime] = None) -> List[str]:
-    """Narrow the slot engine's real free times by the client's own rules."""
+def filter_slots(p, slots: List[str], now: Optional[datetime] = None, tz: str = WORK_TZ) -> List[str]:
+    """Narrow the free times by the client's own rules (slots and windows are
+    wall time in `tz`, the company's zone)."""
     from zoneinfo import ZoneInfo
-    now_local = (now or datetime.utcnow()).replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(WORK_TZ)).replace(tzinfo=None)
+    now_local = (now or datetime.utcnow()).replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(tz)).replace(tzinfo=None)
     notice = getattr(p, "min_notice_hours", None)
     windows = _windows(p)
     out = []
@@ -167,19 +168,18 @@ def filter_slots(p, slots: List[str], now: Optional[datetime] = None) -> List[st
 
 
 def available(db: Session, org: Organization, opp: AcquisitionOpportunity, actor: User, day: str) -> Dict[str, Any]:
+    """Free times on a COMPANY-local day, in the company's own time zone."""
     from datetime import date as date_cls
+    from app.services.acquisition import acq_time as T
     booker = B.booker_for(db, org, opp, actor)
     try:
         target = date_cls.fromisoformat(day)
     except ValueError:
         raise HTTPException(400, "Use a YYYY-MM-DD date")
-    from app.routers.calendar_router import compute_day_slots
-    raw = compute_day_slots(db, booker, target, program_visit=True, minutes=60)
     p = _p(db, org.id)
-    res = {"date": day, "slots": filter_slots(p, raw.get("slots", [])), "timezone": WORK_TZ,
-           "calendar_of": booker.full_name or booker.email}
-    if raw.get("reason"):
-        res["reason"] = raw["reason"]
+    res = T.slots_for(db, booker, p, target, minutes=60)
+    res["calendar_of"] = booker.full_name or booker.email
+    res.pop("calendar_error", None)
     return res
 
 
@@ -197,7 +197,8 @@ def _write(db: Session, booker: User, org: Organization, link: BookingLink, lead
     p = E.get_profile(db, org.id)
     where = (getattr(p, "meeting_location", None) if p else None)
     body = "Booked by EvoSys Pro. %s%s" % (note or "", (" Location: %s" % where) if where else "")
-    return TS._push_to_calendar(db, booker, org, link, lead_view, B.LABEL, start, minutes, WORK_TZ, body)
+    from app.services.acquisition import acq_time as T
+    return TS._push_to_calendar(db, booker, org, link, lead_view, B.LABEL, start, minutes, T.company_tz(p), body)
 
 
 def book(db: Session, org: Organization, opp: AcquisitionOpportunity, actor: User, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -239,17 +240,19 @@ def book(db: Session, org: Organization, opp: AcquisitionOpportunity, actor: Use
         db.commit()
         raise HTTPException(502, "The client's calendar didn't accept the event (%s). Nothing was booked - "
                                  "retry or pick another time." % str(sync.get("error"))[:120])
+    from app.services.acquisition import acq_time as T
+    tz = T.company_tz(p)
     link.status = "booked"
-    link.booked_time = start
+    link.booked_time = T.to_engine(start, tz)          # stored in the shared engine's wall time
     link.review_request_sent_at = datetime.utcnow()
     opp.booking_link_id = link.id
-    E._move(db, opp, C.BOOKED, actor.id, "Booked by EvoSys for %s" % start.strftime("%a %b %d, %I:%M %p"))
+    E._move(db, opp, C.BOOKED, actor.id, "Booked by EvoSys for %s" % T.label(start, tz))
     # Any open self-booking links for this prospect are withdrawn - one appointment only.
     for other in db.query(BookingLink).filter(BookingLink.lead_id == lead.id, BookingLink.status == "pending",
                                               BookingLink.id != link.id).all():
         other.status = "cancelled"
     db.commit()
-    return {"status": "booked", "booked_time": start.strftime("%Y-%m-%dT%H:%M:00"), "minutes": minutes,
+    return {"status": "booked", "booked_time": start.strftime("%Y-%m-%dT%H:%M:00"), "timezone": tz, "minutes": minutes,
             "calendar_synced": True, "calendar_event_id": bool(link.calendar_event_id)}
 
 
@@ -271,12 +274,14 @@ def reschedule(db: Session, org: Organization, opp: AcquisitionOpportunity, acto
     from app.services import calendar_providers as reg
     from app.services.calendar_providers.base import EventPayload
     from app.services.tenant_scheduling import _to_utc
+    from app.services.acquisition import acq_time as T
+    tz = T.company_tz(_p(db, org.id))
     minutes = int(link.appt_duration or C.DEFAULT_APPOINTMENT_MINUTES)
     f = C.jload(lead.custom_fields, {}) or {}
-    st = _to_utc(start, WORK_TZ)
+    st = _to_utc(start, tz)
     payload = EventPayload(subject="%s — %s" % (B.LABEL, f.get("company") or "Prospect"),
                            body_text="Rescheduled by EvoSys Pro. Phone: %s" % (lead.phone or "n/a"),
-                           starts_at=st, ends_at=st + timedelta(minutes=minutes), timezone=WORK_TZ,
+                           starts_at=st, ends_at=st + timedelta(minutes=minutes), timezone=tz,
                            location=org.org_address or None, attendees=[])
     try:
         result = reg.get_provider(db, booker, org).update_event(link.calendar_event_id, payload)
@@ -287,14 +292,13 @@ def reschedule(db: Session, org: Organization, opp: AcquisitionOpportunity, acto
         E._event(db, org.id, opp.id, "calendar_failed", actor.id, note="Reschedule not accepted by the calendar (%s)" % err)
         db.commit()
         raise HTTPException(502, "The calendar didn't accept the new time (%s). The appointment is unchanged." % err)
-    old = link.booked_time
-    link.booked_time = start
+    old = T.from_engine(link.booked_time, tz)
+    link.booked_time = T.to_engine(start, tz)
     E._event(db, org.id, opp.id, "rescheduled", actor.id,
-             note="Moved from %s to %s%s" % (old.strftime("%a %b %d %I:%M %p") if old else "?",
-                                             start.strftime("%a %b %d %I:%M %p"),
+             note="Moved from %s to %s%s" % (T.label(old, tz) if old else "?", T.label(start, tz),
                                              (" - " + data["note"].strip()[:200]) if data.get("note") else ""))
     db.commit()
-    return {"status": "rescheduled", "booked_time": start.strftime("%Y-%m-%dT%H:%M:00")}
+    return {"status": "rescheduled", "booked_time": start.strftime("%Y-%m-%dT%H:%M:00"), "timezone": tz}
 
 
 def cancel_booked(db: Session, org: Organization, opp: AcquisitionOpportunity, actor: User,
@@ -325,11 +329,13 @@ def cancel_booked(db: Session, org: Organization, opp: AcquisitionOpportunity, a
             db.commit()
             raise HTTPException(502, "The calendar didn't confirm the cancellation (%s). The appointment is "
                                      "unchanged." % err)
-    when = link.booked_time
+    from app.services.acquisition import acq_time as T
+    tz = T.company_tz(_p(db, org.id))
+    when = T.from_engine(link.booked_time, tz)
     link.status = "cancelled"
     opp.booked_at = None
     opp.booking_link_id = None
     E._move(db, opp, C.INTERESTED, actor.id, "Appointment %scancelled: %s"
-            % (("for %s " % when.strftime("%a %b %d %I:%M %p")) if when else "", reason))
+            % (("for %s " % T.label(when, tz)) if when else "", reason))
     db.commit()
     return {"status": "cancelled", "calendar_event_removed": bool(link.calendar_event_id)}
