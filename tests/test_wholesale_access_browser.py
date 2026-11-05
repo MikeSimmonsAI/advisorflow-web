@@ -176,7 +176,7 @@ def test_restricted_wholesaler_cannot_reach_team_admin_in_the_browser(client, ws
         b = _launch(pwr)
         page = _page(b, client, db, field, 1366, 900)
         page.goto(ORIGIN + "/wholesale/team")                         # typed straight into the address bar
-        page.wait_for_function("location.pathname === '/wholesale/appointments'", timeout=30000)
+        page.wait_for_function("location.pathname === '/wholesale/home'", timeout=30000)   # their own dashboard (#439)
         assert page.get_by_role("tab", name="Access profiles").count() == 0
         _shot(page, "08-restricted-user-sent-to-their-screen-desktop")
         codes = page.evaluate("""async () => {
@@ -189,9 +189,10 @@ def test_restricted_wholesaler_cannot_reach_team_admin_in_the_browser(client, ws
         # The rail shows only what their access includes (#439), and Wholesale's
         # home sends them to a screen they can open.
         page.goto(ORIGIN + "/wholesale")
-        page.wait_for_function("location.pathname === '/wholesale/appointments'", timeout=30000)
+        page.wait_for_function("location.pathname === '/wholesale/home'", timeout=30000)   # their own dashboard (#439)
         rail = page.locator("nav").first.inner_text()
-        for hidden in ("Buyer Intelligence", "Deal Room", "Funding", "Strategies"):
+        # Strategies is readable with Properties view, so a field rep may see it.
+        for hidden in ("Buyer Intelligence", "Deal Room", "Funding", "Investor Outreach", "Wholesale Settings"):
             assert hidden not in rail, hidden
         _shot(page, "10-restricted-user-rail-desktop")
         b.close()

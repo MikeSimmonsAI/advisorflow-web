@@ -3,6 +3,7 @@
  * able to do, and see every change. Every rule is enforced by the server
  * (/wholesale/team/access/*); this screen only shows and asks. */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../../api/client'
 import { Drawer, Search, Tabs } from '../ds/ds'
 
@@ -291,6 +292,8 @@ export function ProfilesTab({ catalog, dir, reload }) {
                 <td data-label="Records">{(catalog.scopes.find((s) => s.key === p.record_scope) || {}).label}</td>
                 <td data-label="" className="wt-actions">
                   <button className="evo-btn evo-btn--secondary evo-btn--sm" onClick={() => setEditing({ ...p })}>Edit</button>
+                  {/* #439: see the dashboard this profile gets, before giving it to anyone */}
+                  <Link className="evo-btn evo-btn--ghost evo-btn--sm" to={`/wholesale/home?preview=${p.id}`}>Preview dashboard</Link>
                   <button className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => dup(p)}>Duplicate</button>
                   <button className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => setRetiring(p)}>Retire</button>
                 </td>
