@@ -42,9 +42,8 @@ MAX_NEW_PER_RUN = 25
 # Which OSM tags mark a BUYER of each segment. (tag, value regex or None).
 SEGMENT_TAGS: Dict[str, List[Tuple[str, Optional[str]]]] = {
     "office": [("office", "^(company|it|lawyer|accountant|insurance|financial|consulting|architect|engineer|"
-                         "advertising_agency|employment_agency|tax_advisor|telecommunication|coworking)$"),
-               ("building", "^(office|commercial)$")],
-    "property_management": [("office", "^(property_management|estate_agent)$")],
+                         "advertising_agency|employment_agency|tax_advisor|telecommunication|coworking)$")],
+    "property_management": [("office", "^property_management$")],
     "retail": [("shop", "^(mall|department_store|supermarket|furniture|car|electronics|clothes|hardware|"
                        "doityourself|sports|jewelry|optician|beauty|hairdresser|bakery|gift|books|pet)$"),
                ("landuse", "^retail$")],
@@ -56,6 +55,18 @@ SEGMENT_TAGS: Dict[str, List[Tuple[str, Optional[str]]]] = {
     "hoa": [],
     "short_term_rental": [],
 }
+# Tagged like a business but never a buyer of building services: agents
+# selling other people's buildings, service desks inside a venue.
+NOT_A_BUYER = {"office": {"estate_agent", "guest_relations", "government"}}
+
+
+def not_a_buyer(tags: Dict[str, str]) -> Optional[str]:
+    for k, bad in NOT_A_BUYER.items():
+        if tags.get(k) in bad:
+            return "%s=%s is not a buyer of building services" % (k, tags[k])
+    return None
+
+
 SEGMENT_REASON = {
     "office": "Office / commercial business premises",
     "property_management": "Property manager - buys services for the buildings it runs",
@@ -94,6 +105,32 @@ def build_query(bbox: Tuple[float, float, float, float], segments: List[str]) ->
             cond = '["%s"~"%s"]' % (tag, rx) if rx else '["%s"]' % tag
             parts.append('nwr["name"]%s(%.5f,%.5f,%.5f,%.5f);' % (cond, s, w, n, e))
     return '[out:json][timeout:25];(%s);out center tags 200;' % "".join(parts)
+
+
+def build_tag_query(bbox: Tuple[float, float, float, float], tag: str, rx: Optional[str]) -> str:
+    """ONE tag condition per request - small enough for the free servers."""
+    s, w, n, e = bbox
+    cond = '["%s"~"%s"]' % (tag, rx) if rx else '["%s"]' % tag
+    return '[out:json][timeout:25];nwr["name"]%s(%.5f,%.5f,%.5f,%.5f);out center tags 150;' % (cond, s, w, n, e)
+
+
+def requalify(db: Session) -> int:
+    """Take earlier OpenStreetMap finds that today's rules say are not
+    buyers out of the pool (suppressed, with the reason; never deleted)."""
+    from app.models.lead_intel_models import LeadIntelProspect
+    n = 0
+    for p in (db.query(LeadIntelProspect).filter(LeadIntelProspect.source == PROVIDER,
+                                                 LeadIntelProspect.suppressed_reason.is_(None)).all()):
+        q = ((C.jload(p.evidence_json, {}) or {}).get("discovery") or {}).get("qualification") or ""
+        for k, bad in NOT_A_BUYER.items():
+            hit = next((v for v in bad if ("%s=%s" % (k, v)) in q), None)
+            if hit:
+                p.suppressed_reason = "Not a buyer: %s=%s (discovery re-check)" % (k, hit)
+                n += 1
+                break
+    if n:
+        db.commit()
+    return n
 
 
 def classify(tags: Dict[str, str], segments: List[str]) -> Optional[str]:
@@ -186,14 +223,17 @@ def run(db: Session, org, profile, *, city: str, state: str = "TX", max_new: int
         bbox = (geocode or default_geocode)(city, state)
         if not bbox:
             raise ValueError("OpenStreetMap could not locate %s, %s" % (city, state))
-        groups, seg_errors = [], []
-        for seg in segments:                     # one small query per buyer type
-            try:
-                groups.append((overpass or default_overpass)(build_query(bbox, [seg])) or [])
-            except Exception as exc:              # noqa: BLE001
-                seg_errors.append("%s: %s" % (seg, str(exc)[:120]))
-        runrow.search_requests = 1 + len(segments)
-        if seg_errors and len(seg_errors) == len(segments):
+        out["requalified"] = requalify(db)
+        groups, seg_errors, asked = [], [], 0
+        for seg in segments:                     # one small query per buyer-type tag
+            for tag, rx in SEGMENT_TAGS.get(seg, []):
+                asked += 1
+                try:
+                    groups.append((overpass or default_overpass)(build_tag_query(bbox, tag, rx)) or [])
+                except Exception as exc:          # noqa: BLE001
+                    seg_errors.append("%s/%s: %s" % (seg, tag, str(exc)[:120]))
+        runrow.search_requests = 1 + asked
+        if seg_errors and len(seg_errors) == asked:
             raise RuntimeError("; ".join(seg_errors))
         if seg_errors:
             out["segment_errors"] = seg_errors
@@ -212,8 +252,12 @@ def run(db: Session, org, profile, *, city: str, state: str = "TX", max_new: int
             this_run.add(oid)
             out["found"] += 1
             seg = classify(tags, segments)
-            if seg is None:
+            if seg is None or not_a_buyer(tags):
                 out["unqualified"] += 1
+                continue
+            tag_city = (tags.get("addr:city") or "").strip()
+            if tag_city and tag_city.lower() != city.strip().lower():
+                out["outside_city"] = out.get("outside_city", 0) + 1     # found again when that city is run
                 continue
             low = name.lower()
             site = (tags.get("website") or tags.get("contact:website") or tags.get("url") or "").strip()

@@ -455,7 +455,7 @@ def run_discovery(db: Session, job, **_):
         r = OSM.run(db, org, prof, city=cities[0], state=st, is_practice=job.is_practice or s.mode == "practice",
                     geocode=kw_geocode(_), overpass=kw_overpass(_))
         result["free_discovery"] = {k: r.get(k) for k in ("batch", "segments", "found", "added", "duplicates",
-                                                          "excluded", "unqualified", "error", "provider")}
+                                                          "excluded", "unqualified", "outside_city", "segment_errors", "error", "provider")}
         result["new_businesses_added"] = r.get("added", 0)
         if r.get("error"):
             return "blocked", dict(result, blocked="OpenStreetMap discovery failed: %s" % r["error"])
