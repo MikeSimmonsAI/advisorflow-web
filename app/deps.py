@@ -486,6 +486,17 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
         if _refusal:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_refusal)
 
+    # ── INSURANCE TEAM FENCE (#523) ─────────────────────────────────────────
+    # A person configured in an agency's Team & Access (agency_member_access row
+    # in the ACTIVE workspace) may use only the retention workspace, and only
+    # what their effective access allows - default deny, every route. Suspended
+    # or removed members keep the sign-in shell only. Nobody else is affected.
+    if user.role in ("advisor", "viewer"):
+        from app.services.agency import access as _agency_access
+        _refusal = _agency_access.fence_user(db, user, request.url.path, request.method)
+        if _refusal:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_refusal)
+
     # ── SPECTATOR FENCE (Oct 19) ─────────────────────────────────────────────
     # A view-only login (every workspace membership "spectator") may read, never
     # write - refused here for EVERY route, so no endpoint can forget to check.

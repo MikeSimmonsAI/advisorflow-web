@@ -44,6 +44,8 @@ export function experienceRedirect(ctx, path, selectedId, homeOrgId, role) {
   if (!ctx || role === 'god_admin' || role === 'super_admin') return null
   if (SHARED_OK.some(p => path === p || path.startsWith(p + '/'))) return null
   const entry = activeWorkspaceEntry(ctx, selectedId, homeOrgId)
+  // An invited insurance team member (#523) has one place to work.
+  if (entry?.agency_member) return path === '/program/insurance' || path.startsWith('/program/insurance/') ? null : '/program/insurance'
   const exp = entry?.experience
   const home = PROGRAM_HOMES[exp]
   if (!home || inside(exp, path)) return null

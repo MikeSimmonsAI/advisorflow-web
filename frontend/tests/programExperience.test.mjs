@@ -31,3 +31,13 @@ test('internal administration is never redirected', () => {
   assert.equal(experienceRedirect(ctx, '/leads', evo, evo, 'super_admin'), null)
   assert.equal(experienceRedirect(null, '/leads', evo, evo, 'org_admin'), null)
 })
+
+test('an invited insurance team member (#523) only opens the agency workspace', () => {
+  const ctx = { workspace_contexts: [{ organization_id: 'vg', experience: 'insurance', agency_member: true }] }
+  assert.equal(experienceRedirect(ctx, '/leads', 'vg', 'vg', 'advisor'), '/program/insurance')
+  assert.equal(experienceRedirect(ctx, '/agency', 'vg', 'vg', 'advisor'), '/program/insurance')
+  assert.equal(experienceRedirect(ctx, '/program/insurance/team', 'vg', 'vg', 'advisor'), null)
+  assert.equal(experienceRedirect(ctx, '/change-password', 'vg', 'vg', 'advisor'), null)
+  const owner = { workspace_contexts: [{ organization_id: 'vg', experience: 'insurance', agency_member: false }] }
+  assert.equal(experienceRedirect(owner, '/agency', 'vg', 'vg', 'org_admin'), null)
+})

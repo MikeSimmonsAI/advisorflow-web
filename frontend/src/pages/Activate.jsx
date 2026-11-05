@@ -115,6 +115,10 @@ export default function Activate() {
           {invite.purpose === 'reset' ? (
             <>Welcome back, {invite.full_name}. Choose a new password for your{' '}
               <strong>{invite.workspace || invite.organization_name}</strong> access.</>
+          ) : invite.agency ? (
+            <>Welcome, {invite.full_name}. You've been invited to join the{' '}
+              <strong>{invite.agency}</strong> team. Choose a password — nobody
+              else has ever had one for this account.</>
           ) : invite.workspace ? (
             <>Welcome, {invite.full_name}. You're being set up in the{' '}
               <strong>{invite.workspace}</strong> sales workspace. Choose a password —

@@ -420,7 +420,16 @@ def test_csv_import_preview_and_non_destructive_commit(client, vg):
     db.refresh(lead)
     assert lead.email == "ivy@example.com"
     # A manager cannot import into a location outside their scope.
-    pm = client.post(BASE + "/import/preview", headers=h(db, vg["kturner"]), json={"csv_text": csv_text}).json()
+    # The sample Location Manager profile has no import permission at all (#523)...
+    assert client.post(BASE + "/import/preview", headers=h(db, vg["kturner"]),
+                       json={"csv_text": csv_text}).status_code == 403
+    # ...and a legacy manager login (no access profile) is limited to their locations.
+    from app.models.location_models import Location, UserLocation
+    legacy_mgr = user(db, vg["org"], "manager", "legacymgr")
+    dallas = db.query(Location).filter(Location.organization_id == vg["org"].id, Location.name == "Dallas").one()
+    db.add(UserLocation(user_id=legacy_mgr.id, location_id=dallas.id, organization_id=vg["org"].id))
+    db.commit()
+    pm = client.post(BASE + "/import/preview", headers=h(db, legacy_mgr), json={"csv_text": csv_text}).json()
     assert any("outside your permitted locations" in e for e in pm["rows"][0]["errors"])
 
 

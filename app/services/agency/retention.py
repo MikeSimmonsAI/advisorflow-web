@@ -63,8 +63,10 @@ REASONS = {
     "follow_up_overdue": "Follow-up overdue",
     "review_not_booked": "Renewal approaching - review not booked",
     "annual_review_overdue": "Annual review overdue",
+    "escalated": "Escalated to a producer",
 }
-REASON_ORDER = list(REASONS.keys())
+REASON_ORDER = ["reply_premium", "reply_cancel", "escalated", "reply_review", "reply_question", "outreach_failed",
+                "unassigned", "follow_up_overdue", "review_not_booked", "annual_review_overdue"]
 REPLY_REASONS = ("reply_premium", "reply_cancel", "reply_review", "reply_question")
 
 
@@ -162,27 +164,49 @@ def settings_dict(s: AgencyRetentionSettings, org: Organization) -> Dict[str, An
 class RCtx:
     """The VIEWER whose scope applies. In a demo workspace an owner may preview
     as one of their staff (read-only): `actor` stays the real person, `user`
-    becomes the previewed staff member, and every write is refused."""
+    becomes the previewed staff member, and every write is refused.
+
+    ACCESS (#523). `access` is the viewer's effective access: a configured
+    member's (agency_member_access) or, for everyone else, the behaviour they
+    had before written as permissions (access.legacy). Every capability check
+    is `can(module, action)`; record visibility is `scope`."""
 
     def __init__(self, db: Session, actor: User, user: User, role: str, org: Organization,
                  settings: AgencyRetentionSettings, request=None, preview: bool = False):
+        from app.services.agency import access as AX
         self.db, self.actor, self.user, self.org, self.request = db, actor, user, org, request
         self.org_id = org.id
         self.settings = settings
         self.role_name = role
-        self.kind = "owner" if role in OWNER_ROLES else "manager" if role in MANAGER_ROLES else "agent"
         self.preview = preview
         self.tz = tzinfo_for(settings.timezone)
         self.is_demo = bool(settings.is_demo or getattr(org, "is_demo", False))
         self._locs = None
+        self.member = AX.member_row(db, org.id, user.id)
+        if self.member is not None and not (AX.is_owner_role(role) and role == "god_admin"):
+            self.access = AX.effective(db, user, org.id, self.member)
+            if self.member.status != "active":
+                self.access["permissions"] = {}
+        else:
+            self.access = AX.legacy(role)
+        self.configured = self.access.get("configured", False)
+        self.scope = self.access["record_scope"]
+        self.is_owner = (not self.configured) and AX.is_owner_role(role)
+        self.kind = ("owner" if self.is_owner else "admin" if self.scope == AX.AGENCY
+                     else "manager" if self.scope == AX.LOCATIONS else "agent")
+        self.dashboard = AX.resolve_dashboard(self.access)
 
+    # Kept for readability at call sites: agency-wide visibility.
     @property
     def owner(self) -> bool:
-        return self.kind == "owner"
+        return self.scope == "agency"
 
     @property
     def manager_plus(self) -> bool:
-        return self.kind in ("owner", "manager")
+        return self.can("renewals", "assign")
+
+    def can(self, module: str, action: str) -> bool:
+        return action in (self.access.get("permissions") or {}).get(module, [])
 
     @property
     def loc_ids(self) -> List[str]:
@@ -191,6 +215,14 @@ class RCtx:
                 UserLocation.organization_id == self.org_id, UserLocation.user_id == self.user.id).all()]
         return self._locs
 
+    @property
+    def team_mates(self) -> set:
+        from app.services.agency import access as AX
+        if not hasattr(self, "_mates"):
+            self._mates = AX.team_mate_ids(self.db, self.org_id, self.access.get("team_ids") or [])
+            self._mates.add(self.user.id)
+        return self._mates
+
     def today(self) -> date:
         return datetime.now(self.tz).date()
 
@@ -198,50 +230,62 @@ class RCtx:
         if self.preview:
             raise HTTPException(403, "Preview is read-only. Return to your own view to make changes.")
 
-    def require_manager(self):
+    def require(self, module: str, action: str):
         self.require_write()
-        if not self.manager_plus:
-            raise HTTPException(403, "Manager access required")
+        if not self.can(module, action):
+            from app.services.agency import access as AX
+            raise HTTPException(403, "Your access doesn't include %s: %s." % (
+                AX.MODULE_LABELS.get(module, module), AX.ACTION_LABELS.get((module, action), action)))
+
+    def require_manager(self):
+        self.require("renewals", "assign")
 
     def require_owner(self):
+        """The protected agency owner (org_admin and above), never a grantable profile."""
         self.require_write()
-        if not self.owner:
-            raise HTTPException(403, "Agency owner or admin access required")
+        if not self.is_owner:
+            raise HTTPException(403, "Only the agency owner can do this.")
 
 
 # ─────────────────────────────── scoped queries ───────────────────────────────
 
 def permitted_location_ids(ctx: RCtx) -> Optional[List[str]]:
-    """None = every location of the agency (owner)."""
-    return None if ctx.owner else list(ctx.loc_ids)
+    """None = every location of the agency (entire-agency visibility)."""
+    return None if ctx.scope == "agency" else list(ctx.loc_ids)
 
 
 def renewals_q(ctx: RCtx):
+    """Record visibility, in one place: assigned < team < locations < agency.
+    Team visibility never reaches outside the viewer's own locations."""
     q = ctx.db.query(AgencyRenewal).filter(AgencyRenewal.organization_id == ctx.org_id)
-    if ctx.owner:
+    if ctx.scope == "agency":
         return q
     me = ctx.user.id
     locs = ctx.loc_ids
-    if ctx.kind == "manager":
-        cond = [AgencyRenewal.assigned_user_id == me]
+    cond = [AgencyRenewal.assigned_user_id == me]
+    if ctx.scope == "locations":
         if locs:
             cond.append(AgencyRenewal.location_id.in_(locs))
         return q.filter(or_(*cond))
-    cond = [AgencyRenewal.assigned_user_id == me]
-    if ctx.settings.shared_queue and locs:
+    if ctx.scope == "team":
+        mates = list(ctx.team_mates - {me})
+        if mates:
+            c = AgencyRenewal.assigned_user_id.in_(mates)
+            cond.append(and_(c, AgencyRenewal.location_id.in_(locs)) if locs else c)
+    if ctx.can("renewals", "claim") and ctx.settings.shared_queue and locs:
         cond.append(and_(AgencyRenewal.assigned_user_id.is_(None), AgencyRenewal.location_id.in_(locs)))
     return q.filter(or_(*cond))
 
 
 def visible_lead_ids_q(ctx: RCtx):
-    """Households the viewer may open: any visible renewal, or (manager+) a client
-    profile at a permitted location, or a client they service."""
+    """Households the viewer may open: any visible renewal, a client they service,
+    or (permitted-locations visibility) a client at one of their locations."""
     sub = renewals_q(ctx).with_entities(AgencyRenewal.lead_id)
     q = ctx.db.query(AgencyClientProfile.lead_id).filter(AgencyClientProfile.organization_id == ctx.org_id)
-    if ctx.owner:
+    if ctx.scope == "agency":
         return q
     cond = [AgencyClientProfile.lead_id.in_(sub), AgencyClientProfile.servicing_user_id == ctx.user.id]
-    if ctx.kind == "manager" and ctx.loc_ids:
+    if ctx.scope == "locations" and ctx.loc_ids:
         cond.append(AgencyClientProfile.location_id.in_(ctx.loc_ids))
     return q.filter(or_(*cond))
 
@@ -275,6 +319,10 @@ def org_user(ctx: RCtx, user_id: str) -> User:
 def is_org_staff(db: Session, org_id: str, u: User) -> bool:
     if u.organization_id == org_id:
         return True
+    from app.services.agency import access as AX
+    row = AX.member_row(db, org_id, u.id)
+    if row is not None:
+        return row.status == "active"
     st = db.query(AgencyRetentionStaff.id).filter(AgencyRetentionStaff.organization_id == org_id,
                                                    AgencyRetentionStaff.user_id == u.id).first()
     return st is not None
@@ -513,9 +561,18 @@ def today_view(ctx: RCtx, location_id=None, agent_id=None, days: int = 30) -> Di
 
 
 def viewer_dict(ctx: RCtx) -> Dict[str, Any]:
-    return {"user_id": ctx.user.id, "name": ctx.user.full_name or ctx.user.email, "kind": ctx.kind,
-            "role": ctx.role_name, "location_ids": permitted_location_ids(ctx), "preview": ctx.preview,
-            "actor_name": ctx.actor.full_name or ctx.actor.email}
+    from app.services.agency import access as AX
+    return {"user_id": ctx.user.id, "name": ctx.user.full_name or ctx.user.email, "email": ctx.user.email,
+            "kind": ctx.kind, "role": ctx.role_name, "location_ids": permitted_location_ids(ctx),
+            "preview": ctx.preview, "actor_name": ctx.actor.full_name or ctx.actor.email,
+            "is_owner": ctx.is_owner, "configured": ctx.configured, "dashboard": ctx.dashboard,
+            "record_scope": ctx.scope, "scope_label": AX.SCOPE_LABELS.get(ctx.scope, ctx.scope),
+            "permissions": ctx.access.get("permissions") or {},
+            "profile": (ctx.access.get("profile") or {}).get("name") if ctx.configured else
+                       ("Agency owner" if ctx.is_owner else None),
+            "aggregate_only": bool(ctx.access.get("aggregate_only")),
+            "status": ctx.access.get("status", "active"),
+            "team_ids": ctx.access.get("team_ids") or []}
 
 
 def assistant_status(ctx: RCtx, location_id=None, agent_id=None) -> Dict[str, Any]:
@@ -1072,7 +1129,7 @@ def eligible_staff(ctx: RCtx, r: AgencyRenewal, lang: Optional[str]) -> List[Tup
 
 
 def auto_route(ctx: RCtx, renewal_ids: Optional[List[str]] = None) -> Dict[str, Any]:
-    ctx.require_manager()
+    ctx.require("renewals", "assign")
     q = renewals_q(ctx).filter(AgencyRenewal.assigned_user_id.is_(None), AgencyRenewal.outcome.is_(None))
     if renewal_ids:
         q = q.filter(AgencyRenewal.id.in_(renewal_ids))
@@ -1243,8 +1300,8 @@ def team(ctx: RCtx) -> Dict[str, Any]:
     links = db.query(UserLocation).filter(UserLocation.organization_id == ctx.org_id,
                                           UserLocation.location_id.in_([l.id for l in locs] or ["-"])).all()
     staff_ids = {l.user_id for l in links}
-    if ctx.kind == "agent":
-        staff_ids = {ctx.user.id}
+    if ctx.scope in ("assigned", "team"):
+        staff_ids = set(ctx.team_mates) if ctx.scope == "team" else {ctx.user.id}
     users = {u.id: u for u in db.query(User).filter(User.id.in_(staff_ids or {"-"})).all()}
     st = {s.user_id: s for s in db.query(AgencyRetentionStaff).filter(AgencyRetentionStaff.organization_id == ctx.org_id).all()}
     today = ctx.today()
@@ -1459,7 +1516,7 @@ def _norm_phone(v: str) -> Optional[str]:
 
 
 def import_preview(ctx: RCtx, text: str, mapping: Optional[Dict[str, str]] = None, filename: str = "import.csv"):
-    ctx.require_manager()
+    ctx.require("imports", "import")
     reader = csv.DictReader(io.StringIO(text or ""))
     headers = reader.fieldnames or []
     if mapping is None:
@@ -1605,3 +1662,250 @@ def import_commit(ctx: RCtx, text: str, mapping=None, filename="import.csv") -> 
         r.source_updated_at = now
     return {"created": created, "updated": updated, "skipped_rows_with_errors": skipped,
             "summary": pv["summary"], "source": "csv_import", "imported_at": iso(now)}
+
+
+# ═════════════════════════════ ROLE DASHBOARDS & NAVIGATION (#523) ═════════════════════════════
+
+NAV = [  # key, label, path, (module, action)
+    ("today", "Today", "", ("today", "view")),
+    ("renewals", "Renewals", "/renewals", ("renewals", "view")),
+    ("clients", "Clients & Policies", "/clients", ("clients", "view")),
+    ("conversations", "Conversations", "/conversations", ("conversations", "view")),
+    ("appointments", "Appointments", "/appointments", ("appointments", "view")),
+    ("team", "Team & Access", "/team", ("team", "view")),
+    ("reports", "Reports", "/reports", ("reports", "view")),
+    ("automation", "Automation", "/automation", ("automation", "view")),
+    ("import", "Imports", "/import", ("imports", "import")),
+    ("settings", "Settings", "/settings", ("settings", "view")),
+]
+DASH_LABELS = {"admin": "Today", "manager": "Today", "producer": "My Day", "retention": "My Day",
+               "scheduler": "My Day", "analyst": "Overview"}
+
+
+def nav_for(ctx: RCtx) -> List[Dict[str, Any]]:
+    """Only pages the viewer can actually use - built from effective access."""
+    out = []
+    for key, label, path, (mod, act) in NAV:
+        if key == "today":
+            if ctx.dashboard == "analyst" and ctx.can("reports", "view"):
+                out.append({"key": "today", "label": "Overview", "path": "", "primary": True})
+                continue
+            if not ctx.can(mod, act):
+                continue
+            label = DASH_LABELS.get(ctx.dashboard, "Today")
+        elif not ctx.can(mod, act):
+            continue
+        if key == "clients" and ctx.scope == "assigned":
+            label = "My Clients"
+        if key == "appointments" and ctx.dashboard == "scheduler":
+            label = "Calendar"
+        out.append({"key": key, "label": label, "path": path,
+                    "primary": key in ("today", "renewals", "clients", "conversations", "appointments", "team")})
+    out.append({"key": "me", "label": "My Settings", "path": "/me", "primary": False})
+    return out
+
+
+def _local_bounds(ctx: RCtx, day: date):
+    start = datetime.combine(day, time.min, tzinfo=ctx.tz).astimezone(timezone.utc).replace(tzinfo=None)
+    return start, start + timedelta(days=1)
+
+
+def _unhandled_replies(ctx: RCtx, renewal_ids: List[str]) -> Dict[str, AgencyRenewalEvent]:
+    out: Dict[str, AgencyRenewalEvent] = {}
+    for e in ctx.db.query(AgencyRenewalEvent).filter(AgencyRenewalEvent.renewal_id.in_(renewal_ids or ["-"]),
+                                                     AgencyRenewalEvent.kind == "reply",
+                                                     AgencyRenewalEvent.handled.is_(False)).order_by(
+                                                         AgencyRenewalEvent.at.asc()).all():
+        out[e.renewal_id] = e
+    return out
+
+
+def _location_performance(ctx: RCtx, rows_open, today) -> List[Dict[str, Any]]:
+    locs = [l for l in workload(ctx)]
+    since = utcnow() - timedelta(days=90)
+    decided = renewals_q(ctx).filter(AgencyRenewal.outcome.isnot(None), AgencyRenewal.outcome_at >= since).all()
+    out = []
+    for l in locs:
+        lid = l["location_id"]
+        mine = [r for r in rows_open if r["location_id"] == lid]
+        conf = sum(1 for r in decided if r.location_id == lid and r.outcome == "confirmed")
+        lost = sum(1 for r in decided if r.location_id == lid and r.outcome == "lost")
+        out.append({"location_id": lid, "location": l["location"],
+                    "due": sum(1 for r in mine if 0 <= r["days_to_renewal"] <= 30),
+                    "attention": sum(1 for r in mine if r["attention"]),
+                    "booked": sum(1 for r in mine if r["review"] and r["review"]["status"] in OPEN_APPT),
+                    "confirmed": conf, "decided": conf + lost,
+                    "renewal_rate": round(100.0 * conf / (conf + lost), 1) if conf + lost else None})
+    return out
+
+
+def _people_load(ctx: RCtx, rows_open) -> List[Dict[str, Any]]:
+    t = team(ctx)
+    loads: Dict[str, int] = {}
+    for r in rows_open:
+        if r["assigned_user_id"]:
+            loads[r["assigned_user_id"]] = loads.get(r["assigned_user_id"], 0) + 1
+    return sorted([{"user_id": p["user_id"], "name": p["name"], "items": loads.get(p["user_id"], 0),
+                    "available": p["available"], "title": p["title"]} for p in t["people"]
+                   if p["title"] not in ("owner",)], key=lambda x: -x["items"])
+
+
+def dashboard_for(ctx: RCtx, location_id: Optional[str] = None) -> Dict[str, Any]:
+    """One endpoint, one server-filtered payload per landing dashboard. Every
+    number comes from the same scoped queries as the rest of the workspace."""
+    key = ctx.dashboard
+    today = ctx.today()
+    now = utcnow()
+    day_start, day_end = _local_bounds(ctx, today)
+    out: Dict[str, Any] = {"dashboard": key, "today": today.isoformat(), "viewer": viewer_dict(ctx)}
+    if key == "analyst" or not ctx.can("today", "view"):
+        if not ctx.can("reports", "view"):
+            out["dashboard"] = "empty"
+            return out
+        rep = report(ctx, today - timedelta(days=30), today + timedelta(days=60), location_id)
+        f = {x["key"]: x for x in rep["funnel"]}
+        out["dashboard"] = "analyst"
+        out["metrics"] = [
+            {"key": "cohort", "label": "Renewal cohort", "value": f["due"]["count"]},
+            {"key": "completed", "label": "Reviews completed", "value": f["reviews_completed"]["count"]},
+            {"key": "confirmed", "label": "Confirmed renewals", "value": f["confirmed"]["count"]},
+            {"key": "unresolved", "label": "Unresolved", "value": f["unresolved"]["count"]},
+        ]
+        out["report"] = rep
+        appts = {a.id: a for a in ctx.db.query(AgencyAppointment).filter(AgencyAppointment.organization_id == ctx.org_id,
+                                                                          AgencyAppointment.status == "completed").all()}
+        by_loc: Dict[str, int] = {}
+        locn = {l["location_id"]: l["location"] for l in workload(ctx)}
+        for r in renewals_q(ctx).filter(AgencyRenewal.review_appointment_id.isnot(None)).all():
+            if r.review_appointment_id in appts:
+                by_loc[locn.get(r.location_id, "Other")] = by_loc.get(locn.get(r.location_id, "Other"), 0) + 1
+        out["reviews_completed_by_location"] = [{"location": n, "count": by_loc.get(n, 0)} for n in locn.values()]
+        out["aggregate_only"] = bool(ctx.access.get("aggregate_only"))
+        return out
+
+    base = apply_filters(ctx, renewals_q(ctx), location_id)
+    rows_open = renewal_rows(ctx, base.filter(AgencyRenewal.outcome.is_(None)).all())
+    mine = [r for r in rows_open if r["assigned_user_id"] == ctx.user.id]
+    replies = _unhandled_replies(ctx, [r["id"] for r in rows_open])
+    appts_today = list_appointments(ctx, day_start, day_end, location_id,
+                                    ctx.user.id if key in ("producer",) else None)
+    follow_due = [r for r in rows_open if r["next_action_at"] and r["next_action_at"] <= iso(day_end)]
+    overdue = [r for r in rows_open if r["next_action_at"] and r["next_action_at"] < iso(now)]
+    out["appointments"] = appts_today
+    if key == "admin":
+        tv = today_view(ctx, location_id)
+        out.update({"metrics": tv["metrics"], "queue": tv["queue"], "assistant": tv["assistant"],
+                    "locations": _location_performance(ctx, rows_open, today)})
+        ppl = _people_load(ctx, rows_open)
+        out["capacity"] = {"members": len(ppl), "available": sum(1 for p in ppl if p["available"]),
+                           "open_items": sum(p["items"] for p in ppl)}
+        if ctx.can("access", "view"):
+            from app.services.agency import team_access as TA
+            out["invitations"] = [i for i in TA.invites(ctx.db, ctx.org_id) if i["status"] == "pending"][:6]
+    elif key == "manager":
+        out["metrics"] = [
+            {"key": "reviews_today", "label": "Reviews today", "value": len(appts_today)},
+            {"key": "followups", "label": "Follow-ups due", "value": len(follow_due)},
+            {"key": "unassigned", "label": "Unassigned", "value": sum(1 for r in rows_open if not r["assigned_user_id"])},
+            {"key": "overdue", "label": "Overdue", "value": len(overdue)},
+        ]
+        out["queue"] = sorted([r for r in rows_open if r["attention"]], key=_priority)[:10]
+        out["workload"] = _people_load(ctx, rows_open)[:12]
+    elif key == "producer":
+        out["metrics"] = [
+            {"key": "my_renewals", "label": "My renewals", "value": sum(1 for r in mine if r["days_to_renewal"] <= 30)},
+            {"key": "reviews_today", "label": "Reviews today", "value": len(appts_today)},
+            {"key": "replies", "label": "Replies waiting", "value": sum(1 for r in mine if r["id"] in replies)},
+            {"key": "followups", "label": "Follow-ups due", "value": sum(1 for r in follow_due if r["assigned_user_id"] == ctx.user.id)},
+        ]
+        q = sorted(mine, key=lambda r: (r["days_to_renewal"], _priority(r)))[:12]
+        claim = [r for r in rows_open if not r["assigned_user_id"]] if ctx.can("renewals", "claim") else []
+        out["queue"], out["claimable"] = q, claim[:6]
+        upcoming = list_appointments(ctx, day_start, day_start + timedelta(days=7), location_id, ctx.user.id)
+        out["appointments"] = upcoming
+    elif key == "retention":
+        svc = [r for r in rows_open if r["attention"] and r["attention"]["code"] in
+               ("reply_premium", "reply_cancel", "reply_question", "reply_review", "outreach_failed",
+                "follow_up_overdue", "escalated", "review_not_booked")]
+        out["metrics"] = [
+            {"key": "followups", "label": "Follow-ups due", "value": len(follow_due)},
+            {"key": "replies", "label": "Replies waiting", "value": len(replies)},
+            {"key": "premium", "label": "Premium concerns",
+             "value": sum(1 for r in rows_open if r["attention"] and r["attention"]["code"] == "reply_premium")},
+            {"key": "booked", "label": "Reviews booked",
+             "value": sum(1 for r in rows_open if r["review"] and r["review"]["status"] in OPEN_APPT)},
+        ]
+        out["queue"] = sorted(svc, key=_priority)[:12]
+        first = next((r for r in out["queue"] if r["id"] in replies), None)
+        if first is not None:
+            ev = replies[first["id"]]
+            wf = ctx.db.query(AgencyRenewalWorkflow).filter(AgencyRenewalWorkflow.organization_id == ctx.org_id).first()
+            out["conversation"] = {"renewal_id": first["id"], "lead_id": first["lead_id"], "household": first["household"],
+                                   "message": ev.body, "at": iso(ev.at),
+                                   "draft": render_template(wf or AgencyRenewalWorkflow(template=DEFAULT_TEMPLATE,
+                                                                                        template_es=DEFAULT_TEMPLATE_ES),
+                                                            first, ctx)}
+        out["producers"] = [p for p in _people_load(ctx, rows_open) if p["title"] in ("producer", "manager", "member")][:10]
+    elif key == "scheduler":
+        to_book = [r for r in rows_open if not r["review"] and 0 <= r["days_to_renewal"] <= 30]
+        callbacks = [r for r in follow_due]
+        booked_today = ctx.db.query(AgencyAppointment).filter(
+            AgencyAppointment.organization_id == ctx.org_id, AgencyAppointment.lead_id.in_(visible_lead_ids_q(ctx)),
+            AgencyAppointment.created_at >= day_start).count()
+        confirm = list_appointments(ctx, now, now + timedelta(days=2), location_id)
+        confirm = [a for a in confirm if a["status"] == "booked"]
+        out["metrics"] = [
+            {"key": "to_book", "label": "Reviews to book", "value": len(to_book)},
+            {"key": "callbacks", "label": "Callbacks due", "value": len(callbacks)},
+            {"key": "booked_today", "label": "Booked today", "value": booked_today},
+            {"key": "confirmations", "label": "Confirmations due", "value": len(confirm)},
+        ]
+        q = []
+        for r in sorted(to_book + [c for c in callbacks if c not in to_book], key=lambda r: (r["next_action_at"] or "9", r["days_to_renewal"]))[:12]:
+            q.append({"id": r["id"], "lead_id": r["lead_id"], "household": r["household"],
+                      "task": "Return callback" if r in callbacks and r not in to_book else "Book renewal review",
+                      "when": r["next_action_at"], "producer": r["assigned_name"], "producer_id": r["assigned_user_id"],
+                      "product_label": r["product_label"], "renewal_date": r["renewal_date"],
+                      "location_name": r["location_name"]})
+        out["queue"], out["confirmations"] = q, confirm[:8]
+        out["notice"] = "Appointment coordination only. No policy changes."
+    return out
+
+
+def escalate(ctx: RCtx, r: AgencyRenewal, to_user_id: Optional[str], note: str) -> Dict[str, Any]:
+    to = org_user(ctx, to_user_id) if to_user_id else None
+    add_event(ctx, ctx.org_id, r.lead_id, "escalated", renewal_id=r.id, body=note, actor=ctx.actor.id,
+              is_demo=r.is_demo, detail={"to": to.id if to else None, "to_name": (to.full_name or to.email) if to else None})
+    r.attention_reason, r.attention_detail = "escalated", note[:280]
+    r.workflow_status = "needs_attention"
+    r.next_action, r.next_action_at = "Producer follow-up", utcnow() + timedelta(hours=4)
+    if to is not None and ctx.can("renewals", "assign") and r.assigned_user_id != to.id:
+        assign(ctx, r, to.id, "Escalated: " + note[:120], None, kind="reassigned")
+    r.last_activity_at = utcnow()
+    return renewal_rows(ctx, [r])[0]
+
+
+def availability(ctx: RCtx, r: AgencyRenewal, day: Optional[str], agent_id: Optional[str]) -> Dict[str, Any]:
+    """Open 30-minute review slots for the producer on a day, in the agency's
+    time zone, skipping booked appointments and times already past."""
+    agent = org_user(ctx, agent_id) if agent_id else None
+    agent_id = agent.id if agent else r.assigned_user_id
+    if not agent_id:
+        return {"agent_id": None, "slots": [], "note": "Assign this renewal to a producer first."}
+    d = date.fromisoformat(day[:10]) if day else ctx.today()
+    dur = timedelta(minutes=ctx.settings.review_minutes or 30)
+    start, end = _local_bounds(ctx, d)
+    busy = [a.starts_at for a in ctx.db.query(AgencyAppointment).filter(
+        AgencyAppointment.organization_id == ctx.org_id, AgencyAppointment.agent_user_id == agent_id,
+        AgencyAppointment.status.in_(OPEN_APPT), AgencyAppointment.starts_at >= start - dur,
+        AgencyAppointment.starts_at < end).all()]
+    slots = []
+    now = utcnow()
+    for h in range(9, 17):
+        for m in (0, 30):
+            t = datetime.combine(d, time(h, m), tzinfo=ctx.tz).astimezone(timezone.utc).replace(tzinfo=None)
+            if t <= now or any(abs((t - b).total_seconds()) < dur.total_seconds() for b in busy):
+                continue
+            slots.append({"starts_at": iso(t), "label": datetime.combine(d, time(h, m)).strftime("%-I:%M %p")})
+    names = user_names(ctx.db, [agent_id])
+    return {"agent_id": agent_id, "agent_name": names.get(agent_id), "day": d.isoformat(), "slots": slots}

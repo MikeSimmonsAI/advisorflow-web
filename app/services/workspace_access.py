@@ -363,6 +363,15 @@ def _retention_enabled(db: Session, org) -> bool:
         return False
 
 
+def _agency_member(db: Session, user, org) -> bool:
+    try:
+        from app.models.agency_access_models import AgencyMemberAccess
+        return db.query(AgencyMemberAccess.id).filter(AgencyMemberAccess.organization_id == org.id,
+                                                      AgencyMemberAccess.user_id == user.id).first() is not None
+    except Exception:  # noqa: BLE001 - presentation only
+        return False
+
+
 def _retention_presentation(db: Session, org) -> Optional[Dict[str, Any]]:
     if not _retention_enabled(db, org):
         return None
@@ -576,6 +585,10 @@ def authorized_contexts(db: Session, user: User, host_slug: Optional[str] = None
             # How a retention-enabled insurance workspace presents itself on
             # the launcher (#499). Presentation only; None everywhere else.
             "presentation": _retention_presentation(db, org),
+            # An invited insurance team member (#523): this workspace opens only
+            # the agency workspace for them. Presentation only - the server
+            # fence (agency.access.refusal) refuses everything else anyway.
+            "agency_member": _agency_member(db, user, org),
         })
 
     platform = [c for c in contexts if c["type"] == "platform"]
