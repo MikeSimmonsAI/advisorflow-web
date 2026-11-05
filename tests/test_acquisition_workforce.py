@@ -779,3 +779,82 @@ def test_domain_words_in_a_name_never_match_a_directory_site(pilot):
                 mx=_mx_yes)
     db.refresh(row)
     assert row.website is None
+
+
+# ── #452 activation: retries, sending gates, TEST portal, cancellation ──────
+def test_timed_out_website_is_retried_twice_an_hour_apart(pilot):
+    p = pilot
+    db = p["db"]
+    row = _pool(db, name="Slow Site Dental (synthetic)", website="https://slow-synthetic.example")
+    _start(p)
+    t0 = datetime.utcnow()
+    WF.run_pass(db, t0, fetch=lambda u: (None, "ReadTimeout"), mx=_mx_yes)
+    assert WF.plan(db, t0 + timedelta(minutes=30))["research"] == 0          # not before an hour
+    for k in (1, 2, 3):
+        later = t0 + timedelta(hours=2 * k)
+        for j in db.query(AcquisitionWorkerJob).filter_by(target_id=row.id).all():
+            j.finished_at = j.finished_at and (later - timedelta(hours=1, minutes=5))
+        db.commit()
+        WF.run_pass(db, later, fetch=lambda u: (None, "ReadTimeout"), mx=_mx_yes)
+    keys = [j.dedupe_key for j in db.query(AcquisitionWorkerJob).filter_by(target_id=row.id).all()]
+    assert sum(1 for k in keys if ":retry" in k) == 2                      # capped at two
+
+
+def test_sending_gates_are_reported_separately(pilot, monkeypatch):
+    p = pilot
+    monkeypatch.setenv("ACQUISITION_TEST_RECIPIENTS", "owner-test@example.com")
+    cap = WF.capabilities(p["db"])
+    assert cap["server_sending"]["state"] == "Off"
+    assert cap["sending_provider"]["state"] == "Not connected"
+    assert cap["practice_recipients"]["state"] == "1 approved"
+    assert cap["email"]["state"] == "Disabled"
+
+
+def _booked_practice(p, org):
+    from app.models.models import BookingLink
+    db = p["db"]
+    lead = Lead(organization_id=org.id, first_name="Pat", status="new",
+                custom_fields=json.dumps({"company": "TEST Office (synthetic)"}))
+    db.add(lead)
+    db.commit()
+    link = BookingLink(lead_id=lead.id, user_id=p["god"].id, status="booked", token="aqtest" + lead.id[:8],
+                       booked_time=datetime.utcnow() + timedelta(days=2), calendar_event_id=None,
+                       expires_at=datetime.utcnow() + timedelta(days=9))
+    db.add(link)
+    db.commit()
+    opp = AcquisitionOpportunity(organization_id=org.id, lead_id=lead.id, stage="appointment_booked",
+                                 dedupe_key="tp-" + lead.id[:8], is_practice=True, booked_at=datetime.utcnow(),
+                                 booking_link_id=link.id)
+    db.add(opp)
+    db.commit()
+    return opp
+
+
+def test_practice_booking_reaches_only_a_test_companys_portal(pilot):
+    from app.services.acquisition import engine as E
+    p = pilot
+    db = p["db"]
+    test_org = _org(db, "TEST Portal Co (synthetic)")
+    assert p["c"].post("/god/acquisition/%s/enable" % test_org.id, headers=_h(db, p["god"])).status_code == 200
+    t = _booked_practice(p, test_org)
+    real = _booked_practice(p, p["shine"])                                  # a real customer's org
+    assert [x["id"] for x in E.list_client(db, test_org.id)] == [t.id]
+    assert E.list_client(db, test_org.id)[0]["practice"] is True
+    assert E.list_client(db, p["shine"].id) == []                            # never in a real portal
+    assert real.id not in [x["id"] for x in E.list_client(db, p["shine"].id)]
+    assert WF.report(db)["real"]["appointments_confirmed"] == 0             # never a real booking
+
+
+def test_cancellation_needs_a_reason_and_unbooks(pilot):
+    from app.services.acquisition import calendar_setup as CAL
+    from fastapi import HTTPException
+    p = pilot
+    db = p["db"]
+    opp = _booked_practice(p, p["shine"])
+    with pytest.raises(HTTPException):
+        CAL.cancel_booked(db, p["shine"], opp, p["god"], {})
+    out = CAL.cancel_booked(db, p["shine"], opp, p["god"], {"reason": "TEST acceptance clean-up"})
+    db.refresh(opp)
+    assert out["status"] == "cancelled" and opp.stage == "interested" and opp.booked_at is None
+    with pytest.raises(HTTPException):                                       # not twice
+        CAL.cancel_booked(db, p["shine"], opp, p["god"], {"reason": "again"})

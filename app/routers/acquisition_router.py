@@ -609,7 +609,7 @@ _PERM_RULES = [
     ("POST", r"/prospects/[^/]+/email/send$", "send_outreach"),
     ("GET", r"/drafts$", "draft_outreach"),
     ("POST", r"/drafts/[^/]+/reject$", "draft_outreach"),
-    ("POST", r"/prospects/[^/]+/(booking-link|booking-link/cancel|book|reschedule)$", "schedule"),
+    ("POST", r"/prospects/[^/]+/(booking-link|booking-link/cancel|book|reschedule|cancel-appointment)$", "schedule"),
     ("GET", r"/prospects/[^/]+/slots$", "schedule"),
     ("PUT", r"/profile$", "client_setup"),
     ("POST", r"/(pause|resume)$", "client_setup"),
@@ -911,6 +911,15 @@ def ops_draft_reject(draft_id: str, op: Op = Depends(op_dep)):
 def ops_booking_link(opp_id: str, op: Op = Depends(op_dep)):
     opp = E.load_opp(op.db, op.org_id, opp_id)
     return B.make_link(op.db, op.org, opp, op.user)
+
+
+@ops_router.post("/{org_id}/prospects/{opp_id}/cancel-appointment", dependencies=_WRITE)
+def ops_cancel_appointment(opp_id: str, payload: dict = Body(default={}), op: Op = Depends(op_dep)):
+    opp = E.load_opp(op.db, op.org_id, opp_id)
+    out = CAL.cancel_booked(op.db, op.org, opp, op.user, payload or {})
+    _audit(op.db, op.org_id, op.user, "acquisition_appointment_cancelled", "acquisition_opportunity", opp.id,
+           {"reason": (payload or {}).get("reason"), "practice": bool(opp.is_practice)})
+    return out
 
 
 @ops_router.post("/{org_id}/prospects/{opp_id}/booking-link/cancel", dependencies=_WRITE)

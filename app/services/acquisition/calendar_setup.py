@@ -295,3 +295,41 @@ def reschedule(db: Session, org: Organization, opp: AcquisitionOpportunity, acto
                                              (" - " + data["note"].strip()[:200]) if data.get("note") else ""))
     db.commit()
     return {"status": "rescheduled", "booked_time": start.strftime("%Y-%m-%dT%H:%M:00")}
+
+
+def cancel_booked(db: Session, org: Organization, opp: AcquisitionOpportunity, actor: User,
+                  data: Dict[str, Any]) -> Dict[str, Any]:
+    """Cancel a booked appointment (#452). The calendar provider must confirm
+    the deletion first; only then is the booking cancelled in EvoSys. The
+    prospect goes back to Interested (no longer counted as booked) and the
+    reason is recorded. Nothing is sent to the prospect from here."""
+    if opp.stage != C.BOOKED or not opp.booking_link_id:
+        raise HTTPException(409, "Only an upcoming booked appointment can be cancelled")
+    reason = (data.get("reason") or "").strip()[:300]
+    if not reason:
+        raise HTTPException(422, "Give a reason for the cancellation")
+    link = db.query(BookingLink).filter(BookingLink.id == opp.booking_link_id).first()
+    if link is None:
+        raise HTTPException(409, "This appointment has no booking record")
+    if link.calendar_event_id:
+        booker = db.query(User).filter(User.id == link.user_id).first()
+        from app.services import calendar_providers as reg
+        try:
+            result = reg.get_provider(db, booker, org).cancel_event(link.calendar_event_id)
+            ok, err = bool(getattr(result, "ok", False)), getattr(result, "error_code", None)
+        except Exception as e:  # noqa: BLE001
+            ok, err = False, str(e)[:120]
+        if not ok:
+            E._event(db, org.id, opp.id, "calendar_failed", actor.id,
+                     note="Cancellation not accepted by the calendar (%s)" % err)
+            db.commit()
+            raise HTTPException(502, "The calendar didn't confirm the cancellation (%s). The appointment is "
+                                     "unchanged." % err)
+    when = link.booked_time
+    link.status = "cancelled"
+    opp.booked_at = None
+    opp.booking_link_id = None
+    E._move(db, opp, C.INTERESTED, actor.id, "Appointment %scancelled: %s"
+            % (("for %s " % when.strftime("%a %b %d %I:%M %p")) if when else "", reason))
+    db.commit()
+    return {"status": "cancelled", "calendar_event_removed": bool(link.calendar_event_id)}

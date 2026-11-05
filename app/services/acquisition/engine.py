@@ -182,16 +182,25 @@ def _bookings(db: Session, ids) -> Dict[str, BookingLink]:
     return {b.id: b for b in db.query(BookingLink).filter(BookingLink.id.in_(ids)).all()}
 
 
-def delivered(opp: AcquisitionOpportunity) -> bool:
+def delivered(opp: AcquisitionOpportunity, test_org: bool = False) -> bool:
     """Handed to the customer: a real appointment was booked for them. Internal
-    allocation alone never qualifies; neither does a practice record."""
-    return (not opp.is_practice) and opp.booked_at is not None and opp.stage in C.CLIENT_STAGES
+    allocation alone never qualifies; neither does a practice record - except
+    in a synthetic TEST company, whose portal exists to show practice bookings
+    end to end (#452 acceptance). A real customer never sees a practice row."""
+    return ((not opp.is_practice) or test_org) and opp.booked_at is not None and opp.stage in C.CLIENT_STAGES
+
+
+def is_test_company(db: Session, org_id: str) -> bool:
+    from app.services.acquisition import hub as HB
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    return bool(org is not None and HB.is_test_org(org.name))
 
 
 def list_client(db: Session, org_id: str, lead_ids=None) -> List[Dict[str, Any]]:
     """The customer's view: booked appointments delivered to them, and their outcomes."""
-    rows = [(o, l) for o, l in _rows(db, org_id, C.CLIENT_STAGES, include_practice=False, lead_ids=lead_ids)
-            if delivered(o)]
+    test = is_test_company(db, org_id)
+    rows = [(o, l) for o, l in _rows(db, org_id, C.CLIENT_STAGES, include_practice=test, lead_ids=lead_ids)
+            if delivered(o, test)]
     bk = _bookings(db, [o.booking_link_id for o, _ in rows])
     return [customer_json(o, l, bk.get(o.booking_link_id)) for o, l in rows]
 
@@ -204,6 +213,8 @@ def customer_json(opp: AcquisitionOpportunity, lead: Lead, booking: Optional[Boo
     for k in ("email", "interest_note", "lead_id"):
         out.pop(k, None)
     out["booked_at"] = C.iso(opp.booked_at)
+    if opp.is_practice:
+        out["practice"] = True          # only ever reaches a TEST company's portal
     return out
 
 
@@ -226,7 +237,7 @@ def list_owner(db: Session, org_id: str, stage: Optional[str] = None,
 def load_opp(db: Session, org_id: str, opp_id: str, client: bool = False) -> AcquisitionOpportunity:
     opp = (db.query(AcquisitionOpportunity)
            .filter(AcquisitionOpportunity.id == opp_id, AcquisitionOpportunity.organization_id == org_id).first())
-    if opp is None or (client and not delivered(opp)):
+    if opp is None or (client and not delivered(opp, is_test_company(db, org_id))):
         raise HTTPException(404, "Appointment not found")
     return opp
 
@@ -815,8 +826,9 @@ def progress(db: Session, org_id: str, days: int = 30) -> Dict[str, Any]:
 def customer_counts(db: Session, org_id: str) -> Dict[str, Any]:
     """The customer's numbers, from delivered appointments only. Each is a
     different funnel stage - booked, held, quoted, won are NOT the same count."""
+    test = is_test_company(db, org_id)
     rows = [o for o in db.query(AcquisitionOpportunity).filter(AcquisitionOpportunity.organization_id == org_id).all()
-            if delivered(o)]
+            if delivered(o, test)]
     by = lambda st: sum(1 for o in rows if o.stage == st)  # noqa: E731
     won = [o for o in rows if o.stage == C.WON]
     return {"delivered": len(rows), "booked": len(rows), "upcoming": by(C.BOOKED),
