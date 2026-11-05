@@ -186,7 +186,15 @@ class Ledger:
         from app.models.program_models import CampaignFamily
         self.active_campaigns = {k for (k,) in db.query(CampaignFamily.key).filter(
             CampaignFamily.organization_id == org_id, CampaignFamily.is_active.is_(True)).all()}
-        ids = list(self.families) or ["-"]
+        # THE POPULATION AS SQL, not a list (Issue #507): Restland has 10,500+
+        # families, and every query below used to carry them as 10,500 bind
+        # parameters (11.6 s cold build measured in production). Each query
+        # now narrows by this cheap org-scoped subquery, and every row is then
+        # kept only if its family is in self.families (exact same population
+        # as before: non-test, non-demo, with a program record).
+        from sqlalchemy import select
+        ids = select(Lead.id).where(Lead.organization_id == org_id)
+        fam_ids = self.families
         # CAMPAIGN ATTRIBUTION (campaign_attribution.py): every event row below
         # carries the campaign it belongs to and the evidence for it.
         self.memberships = CA.Memberships(db, org_id)
@@ -201,13 +209,15 @@ class Ledger:
             return row
         lap("families")
 
-        self.states = {s.lead_id: s for s in db.query(CadenceState).filter(CadenceState.lead_id.in_(ids)).all()}
+        self.states = {s.lead_id: s for s in db.query(CadenceState).filter(CadenceState.lead_id.in_(ids)).all()
+                       if s.lead_id in fam_ids}
         lap("states")
 
         # outreach attempts (the cadence log)
         logs = (db.query(CadenceTouchLog).filter(CadenceTouchLog.lead_id.in_(ids),
                                                  CadenceTouchLog.outcome.in_(ATTEMPT_OUTCOMES))
                 .order_by(CadenceTouchLog.attempted_at).all())
+        logs = [l for l in logs if l.lead_id in fam_ids]
         msg_ids = [l.message_id for l in logs if l.message_id]
         em_ids = [l.email_message_id for l in logs if l.email_message_id]
         msgs = {m.id: m for m in db.query(Message).filter(Message.id.in_(msg_ids or ["-"])).all()}
@@ -257,6 +267,7 @@ class Ledger:
         etouch = (db.query(ProgramEmailTouch).filter(ProgramEmailTouch.organization_id == org_id,
                                                      ProgramEmailTouch.lead_id.in_(ids),
                                                      ProgramEmailTouch.status.in_(EMAIL_ATTEMPTS)).all())
+        etouch = [t for t in etouch if t.lead_id in fam_ids]
         ems2 = {e.id: e for e in db.query(EmailMessage).filter(
             EmailMessage.id.in_([t.email_message_id for t in etouch if t.email_message_id] or ["-"])).all()}
         for t in etouch:
@@ -284,6 +295,8 @@ class Ledger:
         self.blocked = []
         for l in (db.query(CadenceTouchLog).filter(CadenceTouchLog.lead_id.in_(ids),
                                                    CadenceTouchLog.outcome == "blocked").all()):
+            if l.lead_id not in fam_ids:
+                continue
             why = l.reason or ""
             if not any(c in why for c in ("NO_SMS_CONSENT", "OPTED_OUT", "CONSENT_WORDING_UNREGISTERED",
                                           "SUPPRESSED", "INVALID_NUMBER")):
@@ -322,6 +335,7 @@ class Ledger:
         resp = (db.query(ProgramResponse).filter(ProgramResponse.organization_id == org_id,
                                                  ProgramResponse.lead_id.in_(ids))
                 .order_by(ProgramResponse.received_at).all())
+        resp = [r for r in resp if r.lead_id in fam_ids]
         self.replies, self.opt_outs = [], []
         for r in resp:
             f = self.families[r.lead_id]
@@ -342,6 +356,8 @@ class Ledger:
         self.ai_msgs, self.staff_msgs = [], []
         for m in (db.query(Message).filter(Message.lead_id.in_(ids),
                                            Message.send_source.in_((ss.SCI_SETTER, ss.MANUAL))).all()):
+            if m.lead_id not in fam_ids:
+                continue
             st = m.delivery_status or m.twilio_status or ""
             row = {"kind": "message", "id": m.id, "lead_id": m.lead_id, "at": m.sent_at, "channel": "sms",
                    "text": (m.body or "")[:400],
@@ -354,6 +370,8 @@ class Ledger:
         from app.services.programs import email_reply as _er
         for e in (db.query(EmailMessage).filter(EmailMessage.lead_id.in_(ids),
                                                 EmailMessage.send_source.in_((ss.SCI_SETTER, ss.MANUAL))).all()):
+            if e.lead_id not in fam_ids:
+                continue
             row = {"kind": "message", "id": e.id, "lead_id": e.lead_id, "at": e.sent_at, "channel": "email",
                    "text": ((e.subject or "") + " — " + _er.plain_text(e.body_html or ""))[:400],
                    "result": "failed" if (e.status or "") in FAILED else ("opened" if e.opened_at else "delivered"),
@@ -369,6 +387,8 @@ class Ledger:
         for c in (db.query(ProgramConversation).filter(ProgramConversation.lead_id.in_(ids),
                                                        ProgramConversation.is_test.isnot(True))
                   .order_by(ProgramConversation.created_at).all()):
+            if c.lead_id not in fam_ids:
+                continue
             self.convs[c.lead_id] = c
         self.offers = []
         for lid, c in self.convs.items():
@@ -389,7 +409,7 @@ class Ledger:
         for b in (db.query(BookingLink).filter(BookingLink.lead_id.in_(ids), BookingLink.status.in_(BOOKED),
                                                BookingLink.booked_time.isnot(None),
                                                BookingLink.calendar_event_id.isnot(None)).all()):
-            if b.lead_id in self.opted_out_ids:
+            if b.lead_id not in fam_ids or b.lead_id in self.opted_out_ids:
                 continue
             at = b.confirmed_at or b.created_at
             self.bookings.append(stamp({"kind": "appointment", "id": b.id, "lead_id": b.lead_id, "at": at,
@@ -407,13 +427,22 @@ class Ledger:
         ever_texted = {i for (i,) in db.query(Message.lead_id).filter(Message.lead_id.in_(ids)).distinct()}
         ever_emailed = {i for (i,) in db.query(EmailMessage.lead_id).filter(EmailMessage.lead_id.in_(ids),
                                                                             EmailMessage.status == "sent").distinct()}
-        self.contacted_ever = ever_texted | ever_emailed | set(self.attempts_by_lead)
+        self.contacted_ever = ((ever_texted | ever_emailed) & set(fam_ids)) | set(self.attempts_by_lead)
         lap("contacted")
 
 
 _CACHE: Dict[str, "Ledger"] = {}
-_LOCK = threading.Lock()
+_LOCK = threading.Lock()                    # guards _LOCKS only
+_LOCKS: Dict[str, threading.Lock] = {}      # ONE builder per workspace
 CACHE_SECONDS = 30
+
+
+def _org_lock(org_id: str) -> threading.Lock:
+    with _LOCK:
+        lk = _LOCKS.get(org_id)
+        if lk is None:
+            lk = _LOCKS[org_id] = threading.Lock()
+        return lk
 
 
 def ledger(db: Session, org_id: str, fresh: bool = False) -> "Ledger":
@@ -421,7 +450,12 @@ def ledger(db: Session, org_id: str, fresh: bool = False) -> "Ledger":
     screen, its four ranges and every drill-down read the SAME snapshot (the
     counts then match by construction, even while new replies arrive)."""
     def stale(x):
-        return x is None or (datetime.utcnow() - x.built_at).total_seconds() > CACHE_SECONDS
+        # Freshness counts from when the build FINISHED (a 10 s build no longer
+        # arrives already 10 s old); built_at stays the snapshot's start.
+        if x is None:
+            return True
+        done = getattr(x, "ready_at", None) or x.built_at
+        return (datetime.utcnow() - done).total_seconds() > CACHE_SECONDS
 
     L = _CACHE.get(org_id)
     if not fresh and not stale(L):
@@ -429,10 +463,12 @@ def ledger(db: Session, org_id: str, fresh: bool = False) -> "Ledger":
     # ONE builder at a time: requests that arrive while the snapshot is being
     # rebuilt wait for it instead of each rebuilding it (a burst of screens
     # opening at once must never tie up every database connection).
-    with _LOCK:
+    # Per workspace: Restland's build never makes SCI wait (Issue #507).
+    with _org_lock(org_id):
         L = _CACHE.get(org_id)
         if fresh or stale(L):
             L = Ledger(db, org_id)
+            L.ready_at = datetime.utcnow()
             _CACHE[org_id] = L
     return L
 

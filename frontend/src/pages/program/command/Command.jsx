@@ -21,7 +21,8 @@ import { CampaignSelect, CampaignTag, Journey, MetricDrill, PerformanceHome, Res
 import { Home, ScreenTabs, TopBar, useHomeData } from './Dashboard'
 import { LIVE_SCREENS, MobileNav, SideNav } from './SciNav'
 import Consent from './Consent'
-import { loadProgramProfile } from '../useProgramProfile'
+import { loadProgramProfile, useProgramProfile } from '../useProgramProfile'
+import '../RestlandTheme.css'
 import './Dashboard.css'
 import './Command.css'
 import './Performance.css'
@@ -88,6 +89,7 @@ const Icon = ({ n, s = 18 }) => (
 )
 
 export default function Command() {
+  const profile = useProgramProfile()
   // EVERY SCREEN HAS A URL (Oct 16 navigation repair): ?s= screen, ?f= family,
   // ?v= family view, ?m= metric drill. Refresh, Back/Forward, a shared link and
   // the side menu all land on the same screen; nothing lives only in memory.
@@ -220,7 +222,7 @@ export default function Command() {
   // Clicking the menu item of the screen already open: back to its top.
   const onSame = () => window.scrollTo({ top: 0, behavior: 'smooth' })
   const frame = (body, cls = '') => (
-    <div className="sl-shell">
+    <div className="sl-shell" data-program-theme={profile.theme || undefined}>
       <SideNav badges={{ inbox: d?.counts?.needs_attention }} onSame={onSame} />
       <div className="sl-main">
         <TopBar batch={home.a?.daily_batch} />
@@ -291,8 +293,9 @@ export default function Command() {
             : <p className="sl-pick">Choose a conversation on the left. The family's messages, context, handling and scheduling open here.</p>}</div>
         </div>
         : <InboxTab loc={loc} act={act} open={openFamily} campaign={campaign} setCampaign={setCampaign} />)}
+      {tab === 'inbox' && <EarlierConversations open={openFamily} />}
       {tab === 'search' && <>
-        <header className="cmd-top"><h1>Search</h1></header>
+        <header className="cmd-top"><h1>Families</h1></header>
         <SearchBox q={q} setQ={setQ} autoFocus />
         <SearchResults q={q} loc={loc} open={openFamily} />
       </>}
@@ -319,34 +322,87 @@ function useWide() {
   return !!w
 }
 
-// Every SCI family, not only those who replied. The newest query always wins:
-// a slower answer to an older query is ignored rather than shown.
-function SearchResults({ q, loc, open }) {
+// EVERY FAMILY (Issue #507). With no search term the screen BROWSES every
+// family, paged, with the server's accurate total - it used to stay empty
+// until something was typed. The newest request always wins: a slower answer
+// to an older query or page is ignored. A failed load says so; it is never
+// shown as "no families".
+const FAMILY_SHOW = [['all', 'All'], ['replied', 'Has replied'], ['booked', 'Booked'], ['needs_review', 'Needs review'],
+  ['not_contacted', 'Never contacted'], ['dnc', 'Do not contact']]
+const PAGE = 25
+export function SearchResults({ q, loc, open }) {
   const [res, setRes] = useState(null)
+  const [err, setErr] = useState('')
+  const [page, setPage] = useState(0)
+  const [show, setShow] = useState('all')
   const seq = useRef(0)
+  const term = q.trim()
+  useEffect(() => { setPage(0) }, [term, loc, show])
   useEffect(() => {
-    const term = q.trim()
-    if (term.length < 2) { setRes(null); return }
+    if (term.length === 1) { setRes(null); setErr(''); return undefined }
     const n = ++seq.current
+    setErr('')
     const t = setTimeout(() => {
-      const p = new URLSearchParams({ q: term })
+      const p = new URLSearchParams({ q: term, offset: String(page * PAGE), limit: String(PAGE), show })
       if (loc) p.set('location_id', loc)
       api.get(`/program/command/search?${p}`)
-        .then(r => { if (n === seq.current) setRes(r.items || []) })
-        .catch(() => { if (n === seq.current) setRes([]) })
-    }, 250)
+        .then(r => { if (n === seq.current) setRes(r) })
+        .catch(e => { if (n === seq.current) { setRes(null); setErr(e?.message || 'Could not load families.') } })
+    }, term ? 250 : 0)
     return () => clearTimeout(t)
-  }, [q, loc])
-  if (q.trim().length < 2) return <p className="cmd-muted">Search by family name, phone, email or location.</p>
-  if (res === null) return <p className="cmd-muted">Searching…</p>
-  if (!res.length) return <p className="cmd-muted">No family matches.</p>
-  return (
-    <div className="cmd-card cmd-actions">
-      {res.map(f => (
-        <button key={f.lead_id} onClick={() => open(f.lead_id)}><Icon n="people" />
-          <span><b>{f.name}</b><br /><small>{[f.location, f.phone, f.replied ? 'Has replied' : null].filter(Boolean).join(' · ')}</small></span>›</button>))}
-    </div>
-  )
+  }, [term, loc, show, page])
+  if (term.length === 1) return <p className="cmd-muted">Type at least two letters to search, or clear the box to browse every family.</p>
+  const total = res?.total || 0
+  const from = total ? page * PAGE + 1 : 0
+  const to = Math.min(total, (page + 1) * PAGE)
+  return <>
+    <div className="rl-chips" role="group" aria-label="Show">{FAMILY_SHOW.map(([k, l]) => (
+      <button key={k} className={show === k ? 'on' : ''} aria-pressed={show === k} onClick={() => setShow(k)}>{l}</button>))}</div>
+    {err ? <p className="cmd-err" role="alert">Could not load families: {err}</p>
+      : res === null ? <p className="cmd-muted">{term ? 'Searching…' : 'Loading families…'}</p>
+        : !res.items.length ? <p className="cmd-muted">{term ? 'No family matches.' : 'No families in this view.'}</p>
+          : <>
+            <div className="rl-pager" aria-live="polite">
+              <span>{term ? 'Matches' : 'Families'} {from.toLocaleString()}–{to.toLocaleString()} of <b>{total.toLocaleString()}</b></span>
+              <span><button disabled={page === 0} onClick={() => setPage(page - 1)}>‹ Previous</button>{' '}
+                <button disabled={to >= total} onClick={() => setPage(page + 1)}>Next ›</button></span>
+            </div>
+            <div className="cmd-card cmd-actions">
+              {res.items.map(f => (
+                <button key={f.lead_id} onClick={() => open(f.lead_id)}><Icon n="people" />
+                  <span><b>{f.name}</b><br /><small>{[f.phone, f.email, STATUS_WORD[f.status] || null,
+                    f.replied ? 'Has replied' : f.earlier_replies ? 'Earlier replies' : null].filter(Boolean).join(' · ')}</small></span>›</button>))}
+            </div>
+          </>}
+  </>
+}
+const STATUS_WORD = { needs_tier_review: 'Needs review', dnc: 'Do not contact', booked: 'Booked', replied: 'Replied', sent: 'Contacted' }
+
+// EARLIER CONVERSATIONS (Issue #507): replies received before this workspace
+// ran the program, read in place. Historical - never unread, never a hand-off.
+function EarlierConversations({ open }) {
+  const [d, setD] = useState(null)
+  const [err, setErr] = useState('')
+  const [page, setPage] = useState(0)
+  useEffect(() => {
+    let alive = true
+    setErr('')
+    api.get(`/program/command/earlier-conversations?offset=${page * 10}&limit=10`)
+      .then(r => { if (alive) setD(r) }).catch(e => { if (alive) setErr(e?.message || 'Could not load.') })
+    return () => { alive = false }
+  }, [page])
+  if (err) return <p className="cmd-err" role="alert">Earlier conversations could not load: {err}</p>
+  if (!d || !d.total) return null
+  return <section className="rl-section" aria-label="Earlier conversations">
+    <h3>Earlier conversations <span className="rl-hist">History</span></h3>
+    <p className="cmd-muted small">Replies received before this program started. Shown for reference; they are not new work.</p>
+    <div className="cmd-card cmd-actions">{d.items.map(i => (
+      <button key={i.lead_id} onClick={() => open(i.lead_id)}><Icon n={i.channel === 'email' ? 'mail' : 'chat'} />
+        <span><b>{i.name}</b><br /><small>{i.replies} {i.replies === 1 ? 'reply' : 'replies'} · last {i.last_at ? new Date(i.last_at).toLocaleDateString([], { timeZone: 'America/Chicago', month: 'short', day: 'numeric', year: 'numeric' }) : '—'}{i.last_text ? ` · "${i.last_text.slice(0, 90)}"` : ''}</small></span>›</button>))}</div>
+    {d.total > 10 && <div className="rl-pager"><span>{d.total} families</span><span>
+      <button disabled={page === 0} onClick={() => setPage(page - 1)}>‹ Previous</button>{' '}
+      <button disabled={(page + 1) * 10 >= d.total} onClick={() => setPage(page + 1)}>Next ›</button></span></div>}
+  </section>
 }
 
 // ONE inbox for texts and emails, with its own filters. Reads the same
@@ -521,19 +577,72 @@ function Inbox({ items, act, open, empty, selected }) {
   })
 }
 
+// WHAT ALREADY HAPPENED WITH THIS FAMILY (Issue #507), read in place:
+// booking history, appointment case files and the earlier follow-up record.
+// Read-only; nothing here starts, resumes or changes anything.
+function FamilyHistory({ f }) {
+  const d = iso => (iso ? new Date(iso).toLocaleString([], { timeZone: 'America/Chicago', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : '—')
+  const day = iso => (iso ? new Date(iso).toLocaleDateString([], { timeZone: 'America/Chicago', month: 'short', day: 'numeric', year: 'numeric' }) : '—')
+  const er = f.earlier_record
+  return <>
+    {f.bookings?.length > 0 && <section className="cmd-card rl-section" aria-label="Appointment history">
+      <h3><Icon n="cal" /> Appointment history</h3>
+      {f.bookings.map(b => <p key={b.id} className="small"><b>{d(b.when)}</b> · {b.status === 'cancelled' ? 'Cancelled' : b.status === 'completed' ? 'Completed' : b.status === 'confirmed' ? 'Confirmed' : 'Booked'}{b.label ? ` · ${b.label}` : ''}{b.staff ? ` · with ${b.staff}` : ''}</p>)}
+    </section>}
+    {f.case_files?.length > 0 && <section className="cmd-card rl-section" aria-label="Case files">
+      <h3><Icon n="flag" /> Appointment case files</h3>
+      {f.case_files.map(c => <div key={c.id} className="small" style={{ marginBottom: 10 }}>
+        <dl className="rl-kv">
+          <dt>Appointment</dt><dd>{d(c.appointment_date)}{c.appointment_type ? ` · ${c.appointment_type}` : ''}{c.booking_status ? ` · booking ${c.booking_status}` : c.booking_missing ? ' · booking record not found' : ''}</dd>
+          <dt>Case status</dt><dd>{(c.case_status || '—').replace(/_/g, ' ')}{c.outcome_type ? ` · ${c.outcome_type.replace(/_/g, ' ')}` : ''}</dd>
+          {c.next_action && <><dt>Next action</dt><dd>{c.next_action}{c.next_action_date ? ` · ${day(c.next_action_date)}` : ''}</dd></>}
+          {c.advisor_notes && <><dt>Notes</dt><dd>{c.advisor_notes}</dd></>}
+          {c.client_concerns && <><dt>Concerns</dt><dd>{c.client_concerns}</dd></>}
+        </dl></div>)}
+    </section>}
+    {er && <section className="cmd-card rl-section" aria-label="Earlier follow-up record">
+      <h3><Icon n="clock" /> Earlier follow-up <span className="rl-hist">History</span></h3>
+      <dl className="rl-kv small">
+        <dt>Stage</dt><dd>{(er.stage || '—').replace(/_/g, ' ')}{er.paused ? ' · paused' : ''}{er.flagged ? ` · flagged${er.flag_reason ? `: ${er.flag_reason}` : ''}` : ''}</dd>
+        <dt>Touches</dt><dd>{er.touch_number ?? 0} · {er.messages_sent ?? 0} sent · {er.replies_received ?? 0} replies</dd>
+        <dt>Last activity</dt><dd>{d(er.last_inbound_at || er.last_outbound_at || er.updated_at)}</dd>
+        {er.booked_at && <><dt>Booked</dt><dd>{d(er.booked_at)}</dd></>}
+      </dl>
+      <p className="cmd-muted small">From the system Restland used before this program. Kept for reference; it is not running.</p>
+    </section>}
+  </>
+}
+
+const APPT_WHEN = [['upcoming', 'Upcoming'], ['past', 'Past'], ['all', 'All']]
 function Appointments({ open }) {
+  const [when, setWhen] = useState('upcoming')
   const [rows, setRows] = useState(null)
-  useEffect(() => { api.get('/program/appointments?when=upcoming').then(r => setRows(r.items || [])).catch(() => setRows([])) }, [])
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    let alive = true
+    setRows(null); setErr('')
+    api.get(`/program/appointments?when=${when}`).then(r => { if (alive) setRows(r.items || []) })
+      .catch(e => { if (alive) setErr(e?.message || 'Could not load appointments.') })
+    return () => { alive = false }
+  }, [when])
+  const fmt = iso => {
+    const d = new Date(iso)
+    const thisYear = d.getFullYear() === new Date().getFullYear()
+    return d.toLocaleString([], { timeZone: 'America/Chicago', weekday: 'short', month: 'short', day: 'numeric', ...(thisYear ? {} : { year: 'numeric' }), hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
+  }
   return <>
     <header className="cmd-top"><h1>Appointments</h1></header>
-    {rows === null ? <p className="cmd-muted">Loading…</p> : !rows.length
-      ? <p className="cmd-card cmd-muted pad">No appointments scheduled yet.</p>
-      : rows.map(a => (
-        <button key={a.id} className="cmd-card cmd-appt" onClick={() => open(a.lead_id)}>
-          <Icon n="cal" /><span><b>{a.name}</b><small>{a.location || ''}</small></span>
-          <span className="cmd-item-meta"><b>{new Date(a.when).toLocaleString([], { timeZone: 'America/Chicago', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}</b>
-            <small>{a.label || 'Visit'}</small></span>
-        </button>))}
+    <div className="rl-chips" role="group" aria-label="Which appointments">{APPT_WHEN.map(([k, l]) => (
+      <button key={k} className={when === k ? 'on' : ''} aria-pressed={when === k} onClick={() => setWhen(k)}>{l}</button>))}</div>
+    {err ? <p className="cmd-err" role="alert">Could not load appointments: {err}</p>
+      : rows === null ? <p className="cmd-muted">Loading…</p> : !rows.length
+        ? <p className="cmd-card cmd-muted pad">{when === 'upcoming' ? 'No upcoming appointments. Earlier ones are under Past.' : when === 'past' ? 'No past appointments.' : 'No appointments recorded.'}</p>
+        : rows.map(a => (
+          <button key={a.id} className="cmd-card cmd-appt" onClick={() => open(a.lead_id)}>
+            <Icon n="cal" /><span><b>{a.name}</b><small>{[a.staff ? `With ${a.staff}` : null, a.has_case_file ? 'Case file' : null].filter(Boolean).join(' · ') || a.location || ''}</small></span>
+            <span className="cmd-item-meta"><b>{fmt(a.when)}</b>
+              <small>{a.status === 'cancelled' ? 'Cancelled' : a.status === 'completed' ? 'Completed' : a.label || 'Visit'}</small></span>
+          </button>))}
   </>
 }
 
@@ -560,9 +669,10 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
   const composer = useRef(null)
   const schedRef = useRef(null)
 
+  const [histN, setHistN] = useState(40)
   const load = useCallback(() => {
-    api.get(`/program/command/family/${id}`).then(r => { setF(r); setErr('') }).catch(e => setErr(e.message || 'Could not load.'))
-  }, [id])
+    api.get(`/program/command/family/${id}?history=${histN}`).then(r => { setF(r); setErr('') }).catch(e => setErr(e.message || 'Could not load.'))
+  }, [id, histN])
   useEffect(() => { load() }, [load])
   // Reply on an inbox card: straight to the right composer - Email (in the
   // thread) for an email, Text for a text - focused, no extra tap.
@@ -752,12 +862,13 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
         <h3><Icon n="person" /> Conversation handling</h3>
         <div className="cmd-seg two">
           <button className={f.handling?.owner === 'ai' ? 'on' : ''} disabled={busy || f.handling?.opted_out} onClick={() => f.handling?.owner !== 'ai' && setOwner('ai')}>
-            AI Handling{f.handling?.owner === 'ai' ? ' — ON' : ''}</button>
+            AI Handling{f.handling?.owner === 'ai' && f.program_ai_mode !== 'off' ? ' — ON' : ''}</button>
           <button className={f.handling?.owner === 'human' ? 'on' : ''} disabled={busy} onClick={() => f.handling?.owner !== 'human' && setOwner('human')}>
             Human Handling{f.handling?.owner === 'human' ? ' — ON' : ''}</button>
         </div>
         <p className="cmd-muted small">
           {f.handling?.opted_out ? 'This family opted out. Nobody texts or emails them.'
+            : f.program_ai_mode === 'off' ? 'The AI appointment setter is OFF for this program: a person answers every reply. Nothing is sent automatically.'
             : f.handling?.owner === 'ai' ? 'The AI answers this family\'s next text or email, knowing everything sent so far.'
               : `A person has this conversation. The AI reads it but does not reply.${f.handling?.reason ? ` (${f.handling.reason})` : ''}`}
           {f.handling?.changed_at ? ` Last change: ${dayLabel(f.handling.changed_at)} ${time(f.handling.changed_at)}${f.handling.changed_by ? ` by ${f.handling.changed_by}` : ''}.` : ''}
@@ -772,9 +883,11 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
             {t.channel === 'email' && t.who === 'us' && (t.to || t.subject) && <small className="cmd-bhead">{t.to ? `To ${t.to}` : ''}{t.to && t.subject ? ' · ' : ''}{t.subject || ''}</small>}
             <p>{t.text}</p>
             {t.audio_path && <VoicemailPlayer path={t.audio_path} label={`Play voicemail${t.duration ? ` (${t.duration}s)` : ''}`} />}
-            <small>{t.campaign && <CampaignTag c={t.campaign} small />}{time(t.at)}{t.channel === 'email' ? ' · EMAIL' : t.channel === 'voicemail' ? ' · VOICEMAIL' : ' · TEXT'}{t.source === 'sci_appointment_setter' ? ' · AI' : ''}{t.delivery === 'simulated' && t.who === 'us' ? ' · simulated' : ''}{t.who === 'us' && ['failed', 'undelivered', 'bounced'].includes(t.delivery) ? ` · NOT SENT${t.error ? `: ${t.error}` : ''}` : ''}{t.who === 'ai' ? ` · AI ${t.delivery === 'draft' ? 'draft' : t.delivery}` : ''}</small>
+            <small>{t.campaign && <CampaignTag c={t.campaign} small />}{time(t.at)}{t.channel === 'email' ? ' · EMAIL' : t.channel === 'voicemail' ? ' · VOICEMAIL' : ' · TEXT'}{t.source === 'sci_appointment_setter' ? ' · AI' : ''}{t.delivery === 'simulated' && t.who === 'us' ? ' · simulated' : ''}{t.who === 'us' && ['failed', 'undelivered', 'bounced'].includes(t.delivery) ? ` · NOT SENT${t.error ? `: ${t.error}` : ''}` : ''}{t.who === 'ai' ? ` · AI ${t.delivery === 'draft' ? 'draft' : t.delivery}` : ''}{t.historical ? ' · EARLIER REPLY' : ''}</small>
           </div></Fragment>)) : <p className="cmd-muted">No messages yet.</p>}
+        {f.thread_total > f.thread.length && <p className="cmd-muted small">Showing the latest {f.thread.length} of {f.thread_total} messages. <button className="link" onClick={() => setHistN(500)}>Show all</button></p>}
       </section>}
+      {view === 'conversation' && <FamilyHistory f={f} />}
 
       <section className="cmd-card cmd-ctx">
         <h3><Icon n="person" /> Family context <Link className="cmd-edit" to={`/program?tab=leads&person=${id}`}>Edit</Link></h3>

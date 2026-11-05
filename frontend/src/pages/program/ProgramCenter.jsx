@@ -43,7 +43,8 @@ import Person from './sci/Person'
 import SmsRecoveryQueue from '../../components/smsRecovery/SmsRecoveryQueue'
 import { TopBar } from './command/Dashboard'
 import { MobileNav, NAV, SideNav, TOOLS } from './command/SciNav'
-import { loadProgramProfile } from './useProgramProfile'
+import { loadProgramProfile, useProgramProfile } from './useProgramProfile'
+import './RestlandTheme.css'
 import './ProgramCenter.css'
 import './command/Dashboard.css'
 import './command/Command.css'
@@ -73,6 +74,7 @@ function firstOpenQueue(att) {
 
 
 export default function ProgramCenter() {
+  const profile = useProgramProfile()
   const [params, setParams] = useSearchParams()
   const tab = TABS.some(t => t.key === params.get('tab')) ? params.get('tab') : 'dashboard'
   const locationId = params.get('location') || ''
@@ -178,7 +180,7 @@ export default function ProgramCenter() {
     review: (data.attention?.data_review || 0) + (data.attention?.location_review || 0) + (data.attention?.duplicate_review || 0),
   } : {}
   const shell = body => (
-    <div className="sl-shell sl-pc">
+    <div className="sl-shell sl-pc" data-program-theme={profile.theme || undefined}>
       <SideNav badges={badges} onSame={() => window.scrollTo?.({ top: 0, behavior: 'smooth' })} />
       <div className="sl-main">
         <TopBar batch={batch} />
