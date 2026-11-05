@@ -351,9 +351,21 @@ def grounding_problems(data: Dict[str, Any], client_facts: Dict[str, Any], prosp
     for m in _CLAIM_RE.findall(text):
         if m.lower() not in allowed:
             probs.append("makes an unsupported claim (%s)" % m)
-    other = [lab for key, lab in (("cleaning", "clean"), ("pest_control", "pest"), ("window_washing", "window"),
-                                  ("landscaping", "lawn"), ("pressure_washing", "pressure wash"))
-             if key != client_facts.get("category") and lab in text.lower() and lab not in allowed]
+    # Another trade's SERVICE, not a shared word: a window washer does "window
+    # cleaning" and a pressure washer "cleans" - only a pitch for janitorial
+    # work, pest control, lawns etc. counts as the wrong trade.
+    trades = {"cleaning": ("janitorial", "office cleaning", "commercial cleaning", "cleaning service", "maid"),
+              "residential_cleaning": ("house cleaning", "home cleaning", "maid service"),
+              "window_washing": ("window washing",), "pest_control": ("pest", "exterminat"),
+              "landscaping": ("lawn", "landscap", "mowing"), "pressure_washing": ("pressure wash", "power wash"),
+              "property_maintenance": ("make-ready", "make ready")}
+    mine = client_facts.get("category")
+    own_words = trades.get(mine, ())
+    if mine in ("cleaning", "residential_cleaning"):        # one trade, two buyer types
+        own_words = trades["cleaning"] + trades["residential_cleaning"]
+    low = text.lower()
+    other = sorted({w for key, words in trades.items() if key != mine for w in words
+                    if w in low and w not in allowed and not any(w in o for o in own_words)})
     if other:
         probs.append("mentions another trade (%s)" % ", ".join(other))
     if H.opt_out_reason(body):
