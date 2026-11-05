@@ -242,9 +242,23 @@ def preview(db: Session, raw_token: str) -> dict:
         b = (db.query(BrandSalesOrg)
                .filter(BrandSalesOrg.id == row.brand_sales_org_id).first())
         brand = b.name if b else None
+    agency = None
+    if brand is None:
+        # An insurance agency member invited from Team & Access (#523): name the
+        # agency so the page doesn't call them an administrator.
+        try:
+            from app.models.agency_access_models import AgencyMemberAccess
+            from app.models.models import Organization
+            from app.services.agency.retention import get_settings
+            if db.query(AgencyMemberAccess).filter(AgencyMemberAccess.user_id == user.id).first() is not None:
+                org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+                s = get_settings(db, user.organization_id) if org is not None else None
+                agency = (s.display_name if s is not None and s.display_name else (org.name if org else None))
+        except Exception:  # noqa: BLE001 - wording only; never blocks activation
+            agency = None
     return {"full_name": user.full_name, "email": user.email,
             "workspace": brand, "purpose": row.purpose,
-            "expires_at": row.expires_at}
+            "agency": agency, "expires_at": row.expires_at}
 
 
 def accept(db: Session, raw_token: str, new_password: str) -> User:

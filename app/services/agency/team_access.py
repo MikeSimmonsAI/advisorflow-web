@@ -980,7 +980,7 @@ def invite(db: Session, org_id: str, actor: User, *, email: str, full_name: Opti
                                    check_capacity=False)
         _install_access(db, org_id, actor, u, inv)
         _row, raw = SA.issue(db, u, actor, purpose=SA.PURPOSE_SETUP)   # commits; rotates older links
-        link = SA.activation_url(base_url, raw)
+        link = SA.activation_url(base_url, raw) + "&next=%2Fprogram%2Finsurance"
     _audit(db, org_id, actor, "invited", "agency_invite", inv.id,
            {"email": email, "kind": inv.kind, "profile": prof.name if prof else None, "record_scope": scope,
             "locations": locs})
@@ -1062,7 +1062,7 @@ def resend(db: Session, org_id: str, actor: User, invite_id: str, base_url: Opti
         if u is None or not u.must_change_password:
             raise AccessError("They have already set up their login.")
         _row, raw = SA.issue(db, u, actor, purpose=SA.PURPOSE_SETUP)
-        link = SA.activation_url(base_url, raw)
+        link = SA.activation_url(base_url, raw) + "&next=%2Fprogram%2Finsurance"
     _audit(db, org_id, actor, "invite_resent", "agency_invite", inv.id, {"email": inv.email})
     org = db.query(Organization).filter(Organization.id == org_id).first()
     delivery = _send(db, org, inv, link, actor) if send else None

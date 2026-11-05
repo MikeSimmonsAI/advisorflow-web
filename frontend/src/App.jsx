@@ -130,12 +130,16 @@ const RoofingDemo = lazyPage(() => import('./pages/roofing/demo/DemoApp'))
 // Insurance retention workspace (Issue #499): /program/insurance/*.
 const InsuranceShell = lazyPage(() => import('./pages/insurance/InsuranceShell'))
 const insPage = name => lazyPage(() => import('./pages/insurance/InsurancePages').then(m => ({ default: m[name] })))
-const InsToday = insPage('TodayPage')
+// Team access, role dashboards, My Settings, invitation acceptance (Issue #523).
+const insAccess = name => lazyPage(() => import('./pages/insurance/InsuranceAccess').then(m => ({ default: m[name] })))
+const InsDashboard = insAccess('DashboardPage')
+const InsTeamAccess = insAccess('TeamAccessPage')
+const InsMySettings = insAccess('MySettingsPage')
+const InsAcceptInvite = insAccess('AcceptInvitePage')
 const InsRenewals = insPage('RenewalsPage')
 const InsClients = insPage('ClientsPage')
 const InsConversations = insPage('ConversationsPage')
 const InsAppointments = insPage('AppointmentsPage')
-const InsTeam = insPage('TeamPage')
 const InsReports = insPage('ReportsPage')
 const InsAutomation = insPage('AutomationPage')
 const InsImport = insPage('ImportPage')
@@ -1595,13 +1599,15 @@ export default function App() {
         </Route>
         {/* Insurance retention workspace (Issue #499). /agency/retention enforces the
              `insurance_agency` feature, the workspace's retention setting and every scope. */}
+        <Route path="/agency-invite" element={<InsAcceptInvite />} />
         <Route path="/program/insurance" element={<ProtectedRoute bare><InsuranceShell /></ProtectedRoute>}>
-          <Route index element={<InsToday />} />
+          <Route index element={<InsDashboard />} />
           <Route path="renewals" element={<InsRenewals />} />
           <Route path="clients" element={<InsClients />} />
           <Route path="conversations" element={<InsConversations />} />
           <Route path="appointments" element={<InsAppointments />} />
-          <Route path="team" element={<InsTeam />} />
+          <Route path="team" element={<InsTeamAccess />} />
+          <Route path="me" element={<InsMySettings />} />
           <Route path="reports" element={<InsReports />} />
           <Route path="automation" element={<InsAutomation />} />
           <Route path="import" element={<InsImport />} />

@@ -102,8 +102,9 @@ STARTERS: List[Dict[str, Any]] = [
                     "to an authorized producer. No coverage changes or renewal outcomes by default.",
      "permissions": _p(today=["view"], clients=["view"], policies=["view"], renewals=["view", "edit", "claim"],
                        conversations=["view", "reply"], appointments=["view", "schedule", "edit"], team=["view"])},
-    {"key": "scheduler", "name": "Appointment Setter / VA", "dashboard": "scheduler", "record_scope": ASSIGNED,
-     "description": "Books and confirms review appointments with the minimum client context needed. No policy "
+    {"key": "scheduler", "name": "Appointment Setter / VA", "dashboard": "scheduler", "record_scope": LOCATIONS,
+     "description": "Books and confirms review appointments for producers at their locations, with the minimum "
+                    "client context needed. No policy "
                     "changes, outcomes, exports, automation or team administration.",
      "permissions": _p(today=["view"], clients=["view"], renewals=["view"], conversations=["view"],
                        appointments=["view", "schedule", "edit"])},

@@ -5,7 +5,7 @@ import { api } from '../../api/client'
 import { BASE, useIns } from './InsuranceShell'
 import { Empty, Icon, Modal, StatusPill, agoText, errText, fmtDate, fmtDateTime, fmtTime, initials, productIcon, shortReason, useToast } from './insuranceUi'
 
-function useData(pathFn, deps) {
+export function useData(pathFn, deps) {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const load = useCallback(async () => {
@@ -15,23 +15,23 @@ function useData(pathFn, deps) {
   return { data, error, reload: load }
 }
 
-function Err({ error, onRetry }) {
+export function Err({ error, onRetry }) {
   if (!error) return null
   return <div className="ins-alert" role="alert">{errText(error)} {onRetry && <button className="ins-btn ins-btn--sm" onClick={onRetry}>Retry</button>}</div>
 }
 
-function localDay(iso, tz) {
+export function localDay(iso, tz) {
   try { return new Date(iso).toLocaleDateString('en-CA', { timeZone: tz }) } catch { return String(iso).slice(0, 10) }
 }
-function sameDay(iso, tz) { return localDay(iso, tz) === localDay(new Date().toISOString(), tz) }
+export function sameDay(iso, tz) { return localDay(iso, tz) === localDay(new Date().toISOString(), tz) }
 
-function greeting(tz) {
+export function greeting(tz) {
   let h = 9
   try { h = Number(new Date().toLocaleString('en-US', { timeZone: tz, hour: 'numeric', hour12: false })) } catch { /* default */ }
   return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
 }
 
-const KPI = {
+export const KPI = {
   due: { icon: 'calendar', tone: 'blue', view: 'due' },
   attention: { icon: 'alert', tone: 'red', view: 'attention' },
   booked: { icon: 'calcheck', tone: 'green', view: 'booked' },
@@ -137,7 +137,7 @@ export function TodayPage() {
   )
 }
 
-function QueueTable({ rows, onAssign, onBook, selectable, selected, setSelected }) {
+export function QueueTable({ rows, onAssign, onBook, selectable, selected, setSelected }) {
   const c = useIns()
   if (!rows.length) return <Empty>Nothing needs attention right now.</Empty>
   return (
@@ -170,7 +170,7 @@ function QueueTable({ rows, onAssign, onBook, selectable, selected, setSelected 
   )
 }
 
-function AssistantPanel({ a, onChange }) {
+export function AssistantPanel({ a, onChange }) {
   const c = useIns()
   const [busy, setBusy] = useState(false)
   const [question, setQuestion] = useState('')
@@ -242,7 +242,7 @@ function AssistantPanel({ a, onChange }) {
 
 // ───────────────────────────── DIALOGS ─────────────────────────────
 
-function AssignDialog({ row, onClose, onDone }) {
+export function AssignDialog({ row, onClose, onDone }) {
   const c = useIns()
   const [agent, setAgent] = useState(row.assigned_user_id || '')
   const [reason, setReason] = useState(row.assigned_user_id ? 'Manager reassignment' : 'Assigned by manager')
@@ -275,7 +275,7 @@ function AssignDialog({ row, onClose, onDone }) {
   )
 }
 
-function BookDialog({ row, onClose, onDone }) {
+export function BookDialog({ row, onClose, onDone }) {
   const c = useIns()
   // Tomorrow in the AGENCY's time zone, not UTC (after 6 PM Central, UTC is already tomorrow).
   const [day, setDay] = useState(localDay(new Date(Date.now() + 86400000).toISOString(), c.settings.timezone))
@@ -618,7 +618,7 @@ export function AppointmentsPage() {
 
 // ───────────────────────────── TEAM & LOCATIONS ─────────────────────────────
 
-export function TeamPage() {
+export function TeamPage({ embedded = false }) {
   const c = useIns()
   const nav = useNavigate()
   const { data, error, reload } = useData(() => c.q('/agency/retention/team'), [c.tick, c.q])
@@ -630,7 +630,7 @@ export function TeamPage() {
   const teamName = teamOf && data ? data.locations.find(l => l.id === teamOf)?.name : null
   return (
     <div>
-      <div className="ins-pagehead"><h1>Team & Locations</h1></div>
+      {!embedded && <div className="ins-pagehead"><h1>Team & Locations</h1></div>}
       {sample && c.isDemo && <p className="ins-muted ins-note">Sample agency network for demonstration. Mesquite is the verified office.</p>}
       <Err error={error} onRetry={reload} />
       {!data ? <div className="ins-loading">Loading…</div> : (<>
