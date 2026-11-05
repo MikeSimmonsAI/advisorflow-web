@@ -204,7 +204,8 @@ def test_send_and_let_ai_continue(setter, sample_advisor, client, monkeypatch):
     conv = db.query(ProgramConversation).filter_by(lead_id=lead.id).one()
     assert not ai_setter._human_took_over(db, lead, conv)
     r = client.post("/program/command/reply", headers=h,
-                    json={"lead_id": lead.id, "channel": "sms", "text": "One more thing.", "idempotency_key": "s2"})
+                    json={"lead_id": lead.id, "channel": "sms", "text": "One more thing.", "idempotency_key": "s2",
+                          "then": "human"})                             # Keep Human Control, chosen on purpose
     assert r.json()["handling"]["owner"] == "human"
 
 

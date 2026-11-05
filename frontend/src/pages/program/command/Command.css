@@ -272,3 +272,10 @@ body:has(.cmd)::before { display: none; }
 .cmd-latest .link, .cmd-err .link { padding: 0; }
 .cmd-inbox-sync .link, .cmd-latest .link, .cmd-err .link { background: none; border: 0; color: var(--c-blue); font-weight: 600; cursor: pointer; font-size: 13px; }
 .cmd-inbox-sync .link:disabled { color: var(--c-muted); cursor: default; }
+/* Handoff auto-resume + AI learning */
+.cmd-sendhint { margin: -6px 0 10px; }
+.cmd-learn { border-top: 1px solid var(--c-line); padding: 10px 0; display: grid; gap: 6px; }
+.cmd-learn label { display: grid; gap: 4px; }
+.cmd-learn textarea, .cmd-learn select { width: 100%; border: 1px solid var(--c-line); border-radius: 10px; padding: 8px 10px; font: inherit; }
+.cmd-compose h3 .link { float: right; background: none; border: 0; color: var(--c-blue); font-weight: 600; cursor: pointer; font-size: 13px; }
+.cmd-learn .link { background: none; border: 0; color: var(--c-blue); font-weight: 600; cursor: pointer; padding: 0; justify-self: start; }

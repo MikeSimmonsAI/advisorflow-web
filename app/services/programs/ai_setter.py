@@ -1214,6 +1214,24 @@ def decide(db, prog, lead, conv, resp, *, actor: Optional[str] = None, note: Opt
     ctx = _context(db, prog, lead, conv, resp, follow_up=follow_up)
     if note:
         ctx["correction"] = note
+    # Human-assisted learning: ACTIVE staff-approved answers for similar
+    # questions, in this organization and location only. Retrieval into the
+    # context - not retraining - and never above the approved facts or rules.
+    learned = []
+    try:
+        from app.services.programs import handoff_learning as _hl
+        if resp is not None and not follow_up:
+            learned = _hl.retrieve(db, prog.organization_id, getattr(resp, "location_id", None),
+                                   resp.body_excerpt or resp.summary or "")
+        if learned:
+            ctx["approved_staff_answers"] = {
+                "how_to_use": ("Answers our staff approved for questions like this one. Use one only when it "
+                               "truly fits this family's message, in your own words. Never use it over "
+                               "APPROVED INFORMATION or the rules above, never as a promise about this family, "
+                               "and still hand off when the rules say a person is needed."),
+                "answers": [{"question": x["question"], "answer": x["answer"]} for x in learned]}
+    except Exception:                                    # noqa: BLE001
+        learned = []
     from contextlib import nullcontext
     # A family's reply runs as BACKGROUND AI. It no longer needs the platform-
     # wide background switch: the gateway grants THIS feature for THIS
@@ -1235,6 +1253,12 @@ def decide(db, prog, lead, conv, resp, *, actor: Optional[str] = None, note: Opt
     d = json.loads(raw)
     if d.get("action") not in ACTIONS:
         raise ValueError("unknown action %r" % d.get("action"))
+    if learned:
+        try:
+            _hl.record_use(db, prog.organization_id, [x["id"] for x in learned], getattr(resp, "id", None),
+                           d.get("action"))
+        except Exception:                                # noqa: BLE001
+            log.exception("learning use not recorded")
     return d
 
 
