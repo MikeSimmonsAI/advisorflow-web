@@ -368,6 +368,29 @@ def workforce_set_website(prospect_id: str, payload: dict = Body(...), db: Sessi
     return out
 
 
+@god_router.post("/workforce/discover")
+def workforce_discover(payload: dict = Body(...), db: Session = Depends(get_db), me: User = Depends(require_acq_master)):
+    """Run ONE free OpenStreetMap discovery batch for a service company's
+    buyers in a city. Adds new businesses to the master pool, unassigned;
+    contacts nobody; costs nothing."""
+    from app.models.acquisition_models import AcquisitionProfile
+    from app.services.acquisition import discovery_osm as OSM
+    org = _client_org(db, payload.get("organization_id") or "")
+    prof = db.query(AcquisitionProfile).filter(AcquisitionProfile.organization_id == org.id).first()
+    city = (payload.get("city") or "").strip()
+    if not city:
+        raise HTTPException(422, "Give a city")
+    try:
+        max_new = max(1, min(int(payload.get("max_new") or OSM.MAX_NEW_PER_RUN), 50))
+    except (TypeError, ValueError):
+        raise HTTPException(422, "max_new must be a number")
+    out = OSM.run(db, org, prof, city=city, state=(payload.get("state") or "TX").strip().upper()[:2],
+                  max_new=max_new, is_practice=True, actor_id=me.id)
+    _audit(db, None, me, "acquisition_free_discovery", "organization", org.id,
+           {k: out.get(k) for k in ("batch", "found", "added", "duplicates", "error")})
+    return out
+
+
 @god_router.put("/workforce/clients/{org_id}")
 def workforce_client(org_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
                      me: User = Depends(require_acq_master)):

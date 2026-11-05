@@ -926,3 +926,95 @@ def test_interest_plus_a_visit_request_is_one_clear_appointment_request():
     assert c["label"] == "appointment_request" and c["confidence"] >= 0.85
     assert WF.classify("Interested, but please remove me from your list")["label"] == "unsubscribe"
     assert WF.classify("Not interested, don't come by")["label"] == "not_interested"
+
+
+# ── #452 free discovery: NEW buyers from OpenStreetMap ──────────────────────
+OSM_ELEMENTS = [
+    {"type": "node", "id": 1, "lat": 32.7, "lon": -97.1, "tags": {"name": "Arlington Tower Offices", "office": "company",
+     "website": "https://arlingtontower-synthetic.example", "addr:street": "Main St", "addr:housenumber": "100",
+     "addr:city": "Arlington", "addr:state": "TX"}},
+    {"type": "way", "id": 2, "center": {"lat": 32.7, "lon": -97.1}, "tags": {"name": "Parks Mall Synthetic", "shop": "mall",
+     "addr:city": "Arlington"}},
+    {"type": "node", "id": 3, "tags": {"name": "Sparkle Window Cleaning", "office": "company", "addr:city": "Arlington"}},
+    {"type": "node", "id": 4, "tags": {"name": "Hilton Synthetic Arlington", "tourism": "hotel", "addr:city": "Arlington",
+     "website": "https://hiltonsyn.example"}},
+    {"type": "node", "id": 5, "tags": {"name": "Random Park", "leisure": "park"}},
+    {"type": "node", "id": 6, "tags": {"name": "Oak Dental (synthetic)", "amenity": "dentist"}},
+]
+
+
+def _window_client(p):
+    db = p["db"]
+    org = _org(db, "TEST Discovery Window Co (synthetic)", industry="window_washing")
+    assert p["c"].post("/god/acquisition/%s/enable" % org.id, headers=_h(db, p["god"])).status_code == 200
+    prof = db.query(AcquisitionProfile).filter_by(organization_id=org.id).one()
+    prof.segments = json.dumps(["office", "retail", "restaurants", "property_management"])
+    prof.service_area = json.dumps(["Arlington"])
+    db.commit()
+    return org, prof
+
+
+def test_free_discovery_adds_new_buyers_with_provenance_and_no_competitors(pilot):
+    from app.services.acquisition import discovery_osm as OSM
+    p = pilot
+    db = p["db"]
+    org, prof = _window_client(p)
+    _pool(db, name="Hilton Synthetic Arlington", website="https://hiltonsyn.example")      # already in the pool
+    asked = {}
+    out = OSM.run(db, org, prof, city="Arlington", state="TX",
+                  geocode=lambda c, s: (32.58, -97.23, 32.81, -97.03),
+                  overpass=lambda q: asked.setdefault("q", q) and OSM_ELEMENTS)
+    assert out["added"] == 2 and out["duplicates"] == 1 and out["excluded"] == 1 and out["unqualified"] >= 1
+    assert '"office"~' in asked["q"] and '"shop"~' in asked["q"] and "32.58000,-97.23000" in asked["q"]
+    rows = {r.name: r for r in db.query(LeadIntelProspect).filter_by(source="openstreetmap").all()}
+    assert set(rows) == {"Arlington Tower Offices", "Parks Mall Synthetic"}
+    t = rows["Arlington Tower Offices"]
+    ev = json.loads(t.evidence_json)["discovery"]
+    assert t.source_url == "https://www.openstreetmap.org/node/1" and t.routed_org_id is None
+    assert ev["collected_at"] and ev["fingerprint"] and ev["qualification"].startswith("Office")
+    assert ev["website_verified"] is False and t.industry == "office" and rows["Parks Mall Synthetic"].industry == "retail"
+    # A second run finds nothing new (duplicate fingerprints), and nobody was contacted.
+    again = OSM.run(db, org, prof, city="Arlington", state="TX", geocode=lambda c, s: (1, 2, 3, 4),
+                    overpass=lambda q: OSM_ELEMENTS)
+    assert again["added"] == 0
+    assert db.query(EmailMessage).count() == 0
+
+
+def test_discovered_website_counts_only_when_its_title_names_the_business(pilot):
+    from app.services.acquisition import discovery_osm as OSM
+    p = pilot
+    db = p["db"]
+    org, prof = _window_client(p)
+    OSM.run(db, org, prof, city="Arlington", state="TX", geocode=lambda c, s: (1, 2, 3, 4),
+            overpass=lambda q: [OSM_ELEMENTS[0], {"type": "node", "id": 9, "tags": {
+                "name": "Brightline Offices", "office": "company", "website": "https://wrong-synthetic.example"}}])
+    _start(p)
+    WF.run_pass(db, fetch=_fetcher({"https://arlingtontower-synthetic.example":
+                                    "<title>Arlington Tower Offices</title><p>leasing@arlingtontower-synthetic.example</p>",
+                                    "https://wrong-synthetic.example": "<title>Some Other Company</title>"}), mx=_mx_yes)
+    good = db.query(LeadIntelProspect).filter_by(name="Arlington Tower Offices").one()
+    bad = db.query(LeadIntelProspect).filter_by(name="Brightline Offices").one()
+    assert good.email == "leasing@arlingtontower-synthetic.example" and good.email_verified is True
+    assert json.loads(good.evidence_json)["discovery"]["website_verified"] is True
+    assert bad.website is None and not bad.email_verified
+    codes = {r["code"] for r in WF.research_breakdown(db)["blocked_reasons"]}
+    assert "website_mismatch" in codes
+
+
+def test_discovery_worker_runs_free_osm_for_an_enabled_client(pilot, monkeypatch):
+    from app.services.acquisition import discovery_osm as OSM
+    p = pilot
+    db = p["db"]
+    org, prof = _window_client(p)
+    monkeypatch.setattr(OSM, "default_geocode", lambda c, s: (1, 2, 3, 4))
+    monkeypatch.setattr(OSM, "default_overpass", lambda q: OSM_ELEMENTS[:2])
+    _enable(p, org)
+    _start(p)
+    out = WF.run_pass(db, fetch=_fetcher({}), mx=_mx_yes)
+    job = db.query(AcquisitionWorkerJob).filter_by(worker="discovery", organization_id=org.id).one()
+    assert job.status == "done", (job.error, job.is_practice, out, WF.state(db).mode, WF.enabled_client_ids(db))
+    res = json.loads(job.result)
+    assert res["new_businesses_added"] == 2 and res["free_discovery"]["provider"] == "openstreetmap"
+    from app.models.acquisition_models import AcquisitionDiscoveryRun
+    run = db.query(AcquisitionDiscoveryRun).filter_by(organization_id=org.id).one()
+    assert run.provider == "openstreetmap" and run.cost_usd == 0.0 and run.added == 2
