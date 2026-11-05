@@ -246,8 +246,10 @@ export function Results() {
 
 // ── Estimates & contracts ───────────────────────────────────────────────
 export function Estimates() {
-  const [d, err] = useLoad('/acquisition/appointments')
-  const all = d?.all || []
+  // Every delivered prospect, not only those with a calendar booking: a quote
+  // or contract still counts when the visit was booked by phone or moved.
+  const [d, err] = useLoad('/acquisition/prospects')
+  const all = d?.items || []
   const open = all.filter(x => x.stage === 'quote_issued')
   const won = all.filter(x => x.stage === 'won')
   const total = open.reduce((a, x) => a + (x.monthly_value || 0), 0)

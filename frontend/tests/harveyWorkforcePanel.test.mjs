@@ -77,3 +77,9 @@ test('public walkthrough page uses the company time zone, not a fixed Central la
   assert.ok(s.includes('companyToday(info?.timezone)') && s.includes('zoneName(info.timezone)'))
   assert.ok(!s.includes('free cleaning walkthrough'), 'trade-neutral wording')
 })
+
+test('estimates & contracts list every delivered prospect, booked by calendar or not', () => {
+  const s = src('ClientPages.jsx')
+  const est = s.slice(s.indexOf('export function Estimates'), s.indexOf('function CalendarPanel'))
+  assert.ok(est.includes("useLoad('/acquisition/prospects')") && est.includes('d?.items'))
+})
