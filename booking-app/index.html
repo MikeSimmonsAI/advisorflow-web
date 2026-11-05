@@ -182,7 +182,9 @@ function todayStr() { return dateStr(new Date()); }
 function maxStr() { const d=new Date(); d.setDate(d.getDate()+14); return dateStr(d); }
 
 function fmt12(iso) {
-  const [,,, h, m] = iso.match(/(\d+)-(\d+)-(\d+)T(\d+):(\d+)/);
+  // match = [whole, year, month, day, hour, minute]: skip FOUR to reach the hour
+  // (skipping three showed the day as the hour - 9:00 AM on the 5th read "5:09 AM").
+  const [,,,, h, m] = iso.match(/(\d+)-(\d+)-(\d+)T(\d+):(\d+)/);
   const hr = +h, ap = hr<12?'AM':'PM', h12 = hr%12||12;
   return `${h12}:${m} ${ap}`;
 }
