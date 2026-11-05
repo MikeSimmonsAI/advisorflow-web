@@ -71,3 +71,9 @@ test('launch readiness shows YES/NO with reasons; authorizing is gated and confi
   assert.ok(s.includes('confirm: true') && s.includes('<Confirm'), 'explicit confirmation')
   assert.ok(s.includes('/revoke'))
 })
+
+test('public walkthrough page uses the company time zone, not a fixed Central label', () => {
+  const s = readFileSync(new URL('../src/pages/public/WalkthroughPage.jsx', import.meta.url), 'utf8')
+  assert.ok(s.includes('companyToday(info?.timezone)') && s.includes('zoneName(info.timezone)'))
+  assert.ok(!s.includes('free cleaning walkthrough'), 'trade-neutral wording')
+})

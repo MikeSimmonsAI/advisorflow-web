@@ -25,6 +25,12 @@ from app.services.auth_service import create_access_token, hash_password
 _SEQ = itertools.count(1)
 
 
+def _chicago_now():
+    """booked_time is stored in the shared slot engine's Chicago wall time."""
+    from app.services.acquisition import acq_time as T
+    return T.convert(datetime.utcnow(), "UTC", T.ENGINE_TZ)
+
+
 def _org(db, name, industry="cleaning", features=("leads",)):
     o = Organization(name=name, slug="aq-%s" % uuid.uuid4().hex[:8], plan="enterprise", industry=industry,
                      is_active=True, enabled_features=json.dumps(list(features)) if features is not None else None)
@@ -213,7 +219,7 @@ def test_outcome_flow_and_counts(pilot):
     from app.models.acquisition_models import AcquisitionOpportunity
     o = db.query(AcquisitionOpportunity).get(opp)
     bl = BookingLink(lead_id=o.lead_id, user_id=p["owner"].id, status="booked",
-                     booked_time=datetime.utcnow() - timedelta(hours=2), appt_label="Walkthrough", appt_duration=45,
+                     booked_time=_chicago_now() - timedelta(hours=2), appt_label="Walkthrough", appt_duration=45,
                      calendar_event_id="evt-test")
     db.add(bl)
     db.commit()
