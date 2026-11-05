@@ -858,3 +858,45 @@ def test_cancellation_needs_a_reason_and_unbooks(pilot):
     assert out["status"] == "cancelled" and opp.stage == "interested" and opp.booked_at is None
     with pytest.raises(HTTPException):                                       # not twice
         CAL.cancel_booked(db, p["shine"], opp, p["god"], {"reason": "again"})
+
+
+def test_every_value_written_to_an_ai_call_fits_its_column(pilot, monkeypatch):
+    """Production (Postgres) enforces column lengths that SQLite ignores: a
+    too-long cost_basis once dropped the record of a real, paid call."""
+    from app.models.acquisition_models import AcquisitionAICall
+    from app.services.acquisition import ai_worker as AI
+    import inspect
+    src = inspect.getsource(AI)
+    for col, values in (("cost_basis", ["estimate", "none"]),
+                        ("status", ["ok", "refused", "error", "rejected", "pending"]),
+                        ("purpose", ["draft", "reply_assist"]), ("provider", [AI.PROVIDER])):
+        limit = AcquisitionAICall.__table__.c[col].type.length
+        for v in values:
+            assert len(v) <= limit, (col, v)
+    assert "estimate:configured_prices" not in src
+
+
+def test_a_call_is_reserved_before_the_provider_is_asked(pilot, monkeypatch):
+    from app.models.acquisition_models import AcquisitionAICall
+    from app.services.acquisition import ai_worker as AI
+    p = pilot
+    db = p["db"]
+    _ai_on(p, monkeypatch, limit=5)
+    seen = {}
+
+    class _Peek:
+        def __init__(self):
+            outer = self
+
+            class _C:
+                def create(self, **kw):
+                    seen["rows"] = [(r.status, r.dedupe_key) for r in db.query(AcquisitionAICall).all()]
+                    return _FakeResp(GOOD)
+            self.chat = type("Ch", (), {"completions": _C()})()
+    res = AI.invoke(db, purpose="draft", capability="acquisition_draft", org_id=p["shine"].id, job_id="res1",
+                    messages=AI.draft_messages({}, {}, []), client=_Peek())
+    assert seen["rows"] == [("pending", "draft:res1")]                 # counted before the provider call
+    assert res["ok"] and db.query(AcquisitionAICall).one().status == "ok"
+    again = AI.invoke(db, purpose="draft", capability="acquisition_draft", org_id=p["shine"].id, job_id="res1",
+                      messages=AI.draft_messages({}, {}, []), client=_Peek())
+    assert again.get("reused") and db.query(AcquisitionAICall).count() == 1
