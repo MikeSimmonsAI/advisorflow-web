@@ -186,8 +186,13 @@ def refusals(db: Session, org: Organization, opp: AcquisitionOpportunity, lead: 
             out.append("The prospect must be at Contact verified or Outreach ready")
         if email and not _verified_email(db, opp, email):
             out.append("The contact email has no verified evidence with a source")
-        if sent_today(db, org.id, now) >= daily_cap():
-            out.append("Today's sending limit (%d) is reached" % daily_cap())
+        from app.services.acquisition import campaigns as CAMP
+        auth = CAMP.active(db, org.id, now)
+        cap = min(daily_cap(), auth.max_sends_per_day) if auth else daily_cap()
+        if auth is None:
+            out.append("The owner has not authorized a real outreach campaign for this company")
+        if sent_today(db, org.id, now) >= cap:
+            out.append("Today's sending limit (%d) is reached" % cap)
     return out
 
 

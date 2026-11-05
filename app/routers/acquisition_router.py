@@ -317,6 +317,32 @@ def workforce_status(db: Session = Depends(get_db), me: User = Depends(require_a
     return out
 
 
+@god_router.get("/workforce/launch-readiness")
+def workforce_launch_readiness(db: Session = Depends(get_db), me: User = Depends(require_acq_master)):
+    """Per company: ready for a REAL launch - YES or NO, with every reason."""
+    from app.services.acquisition import campaigns as CAMP
+    return {"companies": CAMP.all_readiness(db)}
+
+
+@god_router.post("/workforce/campaigns/{org_id}/authorize")
+def workforce_campaign_authorize(org_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
+                                 me: User = Depends(require_acq_master)):
+    """The owner's explicit go-ahead for real outreach for ONE company.
+    Refused unless every launch check is YES; time-boxed; revocable."""
+    from app.services.acquisition import campaigns as CAMP
+    row = CAMP.authorize(db, me, org_id, payload or {})
+    _audit(db, None, me, "acquisition_campaign_authorized", "organization", org_id, row)
+    return row
+
+
+@god_router.post("/workforce/campaigns/{org_id}/revoke")
+def workforce_campaign_revoke(org_id: str, db: Session = Depends(get_db), me: User = Depends(require_acq_master)):
+    from app.services.acquisition import campaigns as CAMP
+    n = CAMP.revoke(db, me, org_id)
+    _audit(db, None, me, "acquisition_campaign_revoked", "organization", org_id, {"revoked": n})
+    return {"revoked": n}
+
+
 @god_router.post("/workforce/discover")
 def workforce_discover(payload: dict = Body(...), db: Session = Depends(get_db), me: User = Depends(require_acq_master)):
     """Run ONE free OpenStreetMap discovery batch for a service company's

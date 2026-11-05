@@ -113,6 +113,12 @@ def test_real_send_gates_and_pilot_clock(setup):
     E.add_evidence(db, org.id, opp, god, {"kind": "contact_email", "value": "office@realdental.example",
                                           "source_url": "https://realdental.example/contact", "verified": True})
     E.owner_move(db, opp, god, {"stage": C.CONTACT_VERIFIED})
+    # Everything else passes - a real email still waits for the owner's campaign go-ahead.
+    assert O.refusals(db, org, opp, lead) == [
+        "The owner has not authorized a real outreach campaign for this company"]
+    from app.models.acquisition_models import AcquisitionCampaignAuthorization
+    db.add(AcquisitionCampaignAuthorization(organization_id=org.id, max_sends_per_day=5, authorized_by_id=god.id))
+    db.commit()
     assert O.refusals(db, org, opp, lead) == []
     m = Mailer()
     res = O.send(db, org, opp, god, {}, mailer=m)
