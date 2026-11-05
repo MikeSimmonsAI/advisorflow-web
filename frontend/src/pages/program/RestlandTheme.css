@@ -1,0 +1,138 @@
+/* RESTLAND THEME (Issue #507) - forest green, warm ivory, muted brass.
+   Applied ONLY where the server's program profile says theme "restland"
+   (data-program-theme on the shell root). SCI and every other program never
+   match these selectors. Warning / error / success keep their own clear
+   colours; only the brand surfaces change. Layout is untouched. */
+
+[data-program-theme="restland"] {
+  --rl-deep: #193c32;  --rl-green2: #285347; --rl-action: #35694f;
+  --rl-canvas: #f7f5ed; --rl-card: #fffefa;  --rl-brass: #c3a66a; --rl-brass-deep: #8a6f33;
+  --rl-text: #24392f;  --rl-muted: #5f6f66; --rl-line: #e4dfcf; --rl-soft: #eef0e6;
+}
+
+/* ── token overrides in each scope that defines its own tokens ── */
+.sl-shell[data-program-theme="restland"],
+[data-program-theme="restland"] .sl-shell {
+  --navy: var(--rl-deep); --navy2: var(--rl-green2); --ink: var(--rl-text); --muted: var(--rl-muted);
+  --canvas: var(--rl-canvas); --blue: var(--rl-action); --lightblue: var(--rl-soft); --teal: var(--rl-action);
+  --mint: #e6efe8; --line: var(--rl-line);
+  --c-bg: var(--rl-canvas); --c-card: var(--rl-card); --c-ink: var(--rl-text); --c-muted: var(--rl-muted);
+  --c-line: var(--rl-line); --c-navy: var(--rl-deep); --c-blue: var(--rl-action); --c-teal: var(--rl-action);
+  --c-chip: var(--rl-soft);
+  background: var(--rl-canvas); color: var(--rl-text);
+}
+body:has([data-program-theme="restland"]) { background: #f7f5ed !important; }
+
+[data-program-theme="restland"] .sci-app {
+  --navy: var(--rl-deep); --navy-2: var(--rl-green2); --navy-3: var(--rl-action); --top: var(--rl-deep);
+  --gold: var(--rl-brass); --gold-deep: var(--rl-brass-deep); --gold-soft: #f4ecd9; --gold-ink: #6b5324;
+  --teal: var(--rl-action); --teal-soft: #e3eee6; --blue: var(--rl-action); --blue-soft: #e6efe8;
+  --bg: var(--rl-canvas); --white: var(--rl-card); --line: var(--rl-line); --line-2: #d6cfba;
+  --ink: var(--rl-text); --sub: var(--rl-muted); --muted: var(--rl-muted); --slate-soft: var(--rl-soft);
+  --info: var(--rl-action);
+  background: var(--rl-canvas); color: var(--rl-text);
+}
+[data-program-theme="restland"] .cmd {
+  --c-bg: var(--rl-canvas); --c-card: var(--rl-card); --c-ink: var(--rl-text); --c-muted: var(--rl-muted);
+  --c-line: var(--rl-line); --c-navy: var(--rl-deep); --c-blue: var(--rl-action); --c-teal: var(--rl-action);
+  --c-chip: var(--rl-soft);
+}
+
+/* ── side menu (desktop) and the phone "More" sheet ── */
+[data-program-theme="restland"] .sl-side,
+[data-program-theme="restland"] .sl-sheet-body {
+  background: linear-gradient(172deg, #163a30 0%, #193c32 55%, #22493d 100%); color: #e9e6d8;
+}
+[data-program-theme="restland"] .sl-brand em { color: var(--rl-brass); }
+[data-program-theme="restland"] .sl-mark { background: var(--rl-brass); color: #1b2f27; }
+[data-program-theme="restland"] .sl-side nav a,
+[data-program-theme="restland"] .sl-side nav button,
+[data-program-theme="restland"] .sl-sheet-body nav a { color: #d7dccf; }
+[data-program-theme="restland"] .sl-side nav a:hover,
+[data-program-theme="restland"] .sl-side nav button:hover { background: #ffffff10; color: #fff; }
+[data-program-theme="restland"] .sl-side nav .on,
+[data-program-theme="restland"] .sl-sheet-body nav .on {
+  background: #c3a66a1f; box-shadow: inset 3px 0 var(--rl-brass); color: #fffdf4;
+}
+[data-program-theme="restland"] .sl-side nav i { color: var(--rl-brass); }
+[data-program-theme="restland"] .sl-navgroup { color: #b9b394; }
+[data-program-theme="restland"] .sl-sidebot { border-top-color: #ffffff22; }
+[data-program-theme="restland"] .sl-pilot { background: #c3a66a2b; color: #ecd9a8; }
+[data-program-theme="restland"] .sl-sidebot p { color: #c9ccbd; }
+
+/* ── top bar, screen tabs, phone tabs ── */
+[data-program-theme="restland"] .sl-top { background: var(--rl-card); border-bottom-color: var(--rl-line); }
+[data-program-theme="restland"] .sl-top h1 span { color: #7c8a6f; }
+[data-program-theme="restland"] .sl-av { background: #e6efe8; color: var(--rl-deep); }
+[data-program-theme="restland"] .sl-tabs button { background: var(--rl-card); border-color: var(--rl-line); color: var(--rl-text); }
+[data-program-theme="restland"] .sl-tabs button.on { background: var(--rl-deep); border-color: var(--rl-deep); color: #fffdf4; }
+[data-program-theme="restland"] .sl-tabs-note { color: #7c8a6f; }
+[data-program-theme="restland"] .cmd-tabs { background: var(--rl-card); border-top-color: var(--rl-line); }
+[data-program-theme="restland"] .cmd-tabs a.on,
+[data-program-theme="restland"] .cmd-tabs button.on { color: var(--rl-deep); }
+[data-program-theme="restland"] .cmd-tabs i { background: var(--rl-brass); color: #1b2f27; }
+
+/* ── hero panels ── */
+[data-program-theme="restland"] .sl-hero2,
+[data-program-theme="restland"] .jr-banner,
+[data-program-theme="restland"] .sci-head {
+  background: linear-gradient(100deg, #193c32 0%, #285347 62%, #2f5b4a 100%); box-shadow: 0 9px 18px #193c3214;
+}
+[data-program-theme="restland"] .sl-hero2 p,
+[data-program-theme="restland"] .sci-head-sub { color: #dfe4d6; }
+[data-program-theme="restland"] .sci-eyebrow { color: #e3cb92; }
+[data-program-theme="restland"] .sci-head::after { border-color: #c3a66a33; }
+
+/* ── cards, panels, tables ── */
+[data-program-theme="restland"] .sl-card,
+[data-program-theme="restland"] .sl-metric,
+[data-program-theme="restland"] .cmd-card,
+[data-program-theme="restland"] .sci-panel,
+[data-program-theme="restland"] .sci-kpi,
+[data-program-theme="restland"] .pf-card,
+[data-program-theme="restland"] .jr-card { background: var(--rl-card); border-color: var(--rl-line); }
+[data-program-theme="restland"] .sl-table th,
+[data-program-theme="restland"] .sci-table th { background: #f1eee2; color: #4f5f55; }
+[data-program-theme="restland"] .sl-a,
+[data-program-theme="restland"] .sci-link { color: var(--rl-action); }
+[data-program-theme="restland"] .sl-metric > b.blue { color: var(--rl-action); }
+
+/* ── buttons, chips, forms ── */
+[data-program-theme="restland"] .sci-btn.primary,
+[data-program-theme="restland"] .cmd .primary,
+[data-program-theme="restland"] .cmd-reply button.primary { background: var(--rl-action); border-color: var(--rl-action); color: #fff; }
+[data-program-theme="restland"] .sci-btn.primary:hover { background: #2c5a43; }
+[data-program-theme="restland"] .sci-btn.gold {
+  border-color: #a98c4f; background: linear-gradient(#d8c08a, #c3a66a); color: #2a2412; box-shadow: 0 2px 6px #c3a66a33;
+}
+[data-program-theme="restland"] .sci-btn.gold:hover { background: linear-gradient(#d2b77b, #b89a5c); }
+[data-program-theme="restland"] .sci-btn,
+[data-program-theme="restland"] .sci-input,
+[data-program-theme="restland"] .sci-topselect,
+[data-program-theme="restland"] .pf-select,
+[data-program-theme="restland"] .cmd-search,
+[data-program-theme="restland"] .cmd input,
+[data-program-theme="restland"] .cmd select,
+[data-program-theme="restland"] .cmd textarea { background-color: var(--rl-card); border-color: #d9d2bd; }
+[data-program-theme="restland"] .pf-seg button.on,
+[data-program-theme="restland"] .dr-segs button.on,
+[data-program-theme="restland"] .cmd-filters button.on,
+[data-program-theme="restland"] .sci-filterchips button[aria-pressed="true"] { background: var(--rl-deep); border-color: var(--rl-deep); color: #fffdf4; }
+[data-program-theme="restland"] .sci-app :focus-visible,
+[data-program-theme="restland"] .cmd :focus-visible { outline-color: var(--rl-brass); }
+[data-program-theme="restland"] .sci-skip { background: var(--rl-brass); color: var(--rl-deep); }
+
+/* ── Restland-only additions (families pager, earlier conversations, history) ── */
+.rl-pager { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 10px 0; font-size: 13px; }
+.rl-pager button { border: 1px solid var(--c-line, #e2e8ef); background: var(--c-card, #fff); border-radius: 10px; padding: 7px 14px; font-weight: 650; cursor: pointer; }
+.rl-pager button:disabled { opacity: .45; cursor: not-allowed; }
+.rl-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.rl-chips button { border: 1px solid var(--c-line, #e2e8ef); background: var(--c-card, #fff); border-radius: 99px; padding: 5px 12px; font-size: 12.5px; cursor: pointer; }
+.rl-chips button.on { background: var(--c-navy, #0b3a5b); color: #fff; border-color: var(--c-navy, #0b3a5b); }
+.rl-hist { font-size: 11px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: #8a6f33; background: #f4ecd9; border-radius: 99px; padding: 1px 8px; margin-left: 6px; }
+.rl-section { margin-top: 18px; }
+.rl-section.cmd-card { padding: 14px 16px; }
+.rl-section h3 { font-size: 15px; margin: 0 0 8px; }
+.rl-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13px; }
+.rl-kv dt { color: var(--c-muted, #5b6878); }
+.rl-kv dd { margin: 0; overflow-wrap: anywhere; }

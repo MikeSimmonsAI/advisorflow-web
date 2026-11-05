@@ -18,7 +18,7 @@ export const SCI_PROFILE = Object.freeze({
   live_label: 'SCI Live', menu_label: 'SCI menu', pilot_label: 'PILOT WORKSPACE',
   footer: 'SCI outreach proof of concept · EvoSys Pro-operated · Not corporate implementation',
   location_count: null, single_location: false, location: null, timezone: 'America/Chicago',
-  sci_only_panels: true, visit_label: 'In-person visit (60 min)',
+  sci_only_panels: true, visit_label: 'In-person visit (60 min)', theme: null,
 })
 
 const cache = new Map()   // workspace id -> profile

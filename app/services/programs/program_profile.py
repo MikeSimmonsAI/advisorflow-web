@@ -21,6 +21,16 @@ from sqlalchemy.orm import Session
 from app.models.program_models import LocationProfile, OutreachProgram
 
 SCI_SHORT = "SCI"
+
+# PROGRAM COLOR THEMES (Issue #507). Presentation only, chosen from the
+# server's own record of which workspace this is - never from the browser, a
+# slug typed in a URL, or the industry (another funeral home must not turn
+# Restland green). A location profile may also name its theme in
+# brand_settings {"program_theme": "..."}; the id map is the default.
+THEMES = ("restland",)
+THEME_BY_ORG = {
+    "01fed629-9a95-412b-895a-c8b09f37a98c": "restland",   # Restland Cemetery and Funeral Home
+}
 SCI_FOOTER = "SCI outreach proof of concept · EvoSys Pro-operated · Not corporate implementation"
 
 
@@ -66,6 +76,7 @@ def profile(db: Session, prog: Optional[OutreachProgram]) -> Optional[dict]:
         footer = "%s · EvoSys Pro-operated" % org_name if org_name else "EvoSys Pro-operated"
         pilot = "SINGLE LOCATION" if one else "PROGRAM WORKSPACE"
     tz = (getattr(org, "timezone", None) or "America/Chicago")
+    theme = None if sci else _theme(prog.organization_id, one)
     return {
         "is_sci": sci,
         "display_name": org_name or prog.name,
@@ -79,6 +90,7 @@ def profile(db: Session, prog: Optional[OutreachProgram]) -> Optional[dict]:
         "location": ({"location_id": one.location_id, "profile_id": one.id, "name": one.official_name}
                      if one else None),
         "timezone": tz,
+        "theme": theme,
         # Panels built only for SCI's own campaigns (Central Alabama roster and
         # delivery, its prepare card) are not part of any other program.
         "sci_only_panels": sci,
@@ -86,3 +98,13 @@ def profile(db: Session, prog: Optional[OutreachProgram]) -> Optional[dict]:
         # program states only what is true for every visit (no invented length).
         "visit_label": "In-person visit (60 min)" if sci else "In-person visit",
     }
+
+
+def _theme(org_id: str, one) -> Optional[str]:
+    import json
+    try:
+        named = (json.loads(getattr(one, "brand_settings", None) or "{}") or {}).get("program_theme") if one else None
+    except (TypeError, ValueError):
+        named = None
+    t = named or THEME_BY_ORG.get(org_id)
+    return t if t in THEMES else None

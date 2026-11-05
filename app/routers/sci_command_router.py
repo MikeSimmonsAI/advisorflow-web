@@ -23,7 +23,7 @@ from app.deps import get_db, require_tenant_or_observer, require_tenant_user
 from app.models.models import Lead, Message, User
 from app.models.program_models import (LocationProfile, ProgramConversation, ProgramResponse,
                                        ProgramSourceRecord)
-from app.routers.program_router import _program, _require_manager
+from app.routers.program_router import _program, _require_manager, _sees_program
 from app.services import booking_time as _booking_time
 from app.services import test_records as _tr
 
@@ -564,53 +564,109 @@ def command_pipeline(db: Session = Depends(get_db), user: User = Depends(require
     }
 
 
+SEARCH_SHOW = ("all", "replied", "booked", "needs_review", "dnc", "not_contacted")
+
+
 @router.get("/search")
 def command_search(q: str = Query("", max_length=80), location_id: Optional[str] = None,
-                   limit: int = Query(25, le=50), db: Session = Depends(get_db),
+                   limit: int = Query(25, ge=1, le=50), offset: int = Query(0, ge=0, le=200000),
+                   show: str = Query("all"), db: Session = Depends(get_db),
                    user: User = Depends(require_tenant_or_observer)):
-    """Every SCI family - not just the ones who replied - by name, phone,
-    email or location. Read-only."""
+    """Every family - not just the ones who replied - by name, phone, email
+    or location. Read-only.
+
+    No search term BROWSES every family (Issue #507: the screen used to stay
+    empty until something was typed, and Restland looked like it had no
+    families). Paged, with an accurate total and a stable order (last name,
+    first name, id). One character is still too short to search and returns
+    nothing, as before. Test records are never listed."""
     from sqlalchemy import func, or_
     prog = _program(db, user, managers_only=False)
     org = prog.organization_id
     needle = (q or "").strip()
-    if len(needle) < 2:
-        return {"items": []}
+    if len(needle) == 1:
+        return {"items": [], "total": 0, "offset": 0, "limit": limit, "browse": False}
+    if show not in SEARCH_SHOW:
+        raise HTTPException(status_code=400, detail="Unknown filter.")
     locs = _locations(db, org)
-    low = needle.lower()
-    digits = "".join(ch for ch in needle if ch.isdigit())
-    like = "%" + low + "%"
-    conds = [func.lower(Lead.first_name).like(like), func.lower(Lead.last_name).like(like),
-             func.lower(Lead.email).like(like),
-             func.lower(func.coalesce(Lead.first_name, "") + " " + func.coalesce(Lead.last_name, "")).like(like)]
-    if len(digits) >= 4:
-        conds.append(Lead.phone.like("%" + digits + "%"))
-    loc_ids = [k for k, v in locs.items() if low in (v or "").lower()]
-    if loc_ids:
-        conds.append(Lead.id.in_(db.query(ProgramSourceRecord.lead_id)
-                                 .filter(ProgramSourceRecord.organization_id == org,
-                                         ProgramSourceRecord.location_id.in_(loc_ids))))
-    qry = db.query(Lead).filter(Lead.organization_id == org, Lead.is_test.isnot(True), or_(*conds))
+    qry = db.query(Lead).filter(Lead.organization_id == org, Lead.is_test.isnot(True))
+    if needle:
+        low = needle.lower()
+        digits = "".join(ch for ch in needle if ch.isdigit())
+        like = "%" + low + "%"
+        conds = [func.lower(Lead.first_name).like(like), func.lower(Lead.last_name).like(like),
+                 func.lower(Lead.email).like(like),
+                 func.lower(func.coalesce(Lead.first_name, "") + " " + func.coalesce(Lead.last_name, "")).like(like)]
+        if len(digits) >= 4:
+            conds.append(Lead.phone.like("%" + digits + "%"))
+        loc_ids = [k for k, v in locs.items() if low in (v or "").lower()]
+        if loc_ids:
+            conds.append(Lead.id.in_(db.query(ProgramSourceRecord.lead_id)
+                                     .filter(ProgramSourceRecord.organization_id == org,
+                                             ProgramSourceRecord.location_id.in_(loc_ids))))
+        qry = qry.filter(or_(*conds))
     if location_id:
         qry = qry.filter(Lead.id.in_(db.query(ProgramSourceRecord.lead_id)
                                      .filter(ProgramSourceRecord.organization_id == org,
                                              ProgramSourceRecord.location_id == location_id)))
-    leads = qry.order_by(Lead.last_name, Lead.first_name).limit(limit).all()
+    from app.models.models import BookingLink, EmailMessage, Reply
+    if show == "replied":
+        qry = qry.filter(or_(Lead.id.in_(db.query(ProgramResponse.lead_id)
+                                         .filter(ProgramResponse.organization_id == org)),
+                             Lead.id.in_(db.query(Reply.lead_id))))
+    elif show == "booked":
+        qry = qry.filter(Lead.id.in_(db.query(BookingLink.lead_id)
+                                     .filter(BookingLink.booked_time.isnot(None),
+                                             BookingLink.status.in_(("booked", "confirmed", "completed")))))
+    elif show == "needs_review":
+        qry = qry.filter(Lead.status == "needs_tier_review")
+    elif show == "dnc":
+        qry = qry.filter(Lead.status == "dnc")
+    elif show == "not_contacted":
+        qry = qry.filter(~Lead.id.in_(db.query(Message.lead_id)), ~Lead.id.in_(db.query(EmailMessage.lead_id)))
+    total = qry.count()
+    leads = (qry.order_by(func.lower(func.coalesce(Lead.last_name, "")), func.lower(func.coalesce(Lead.first_name, "")),
+                          Lead.id).offset(offset).limit(limit).all())
     ids = [l.id for l in leads]
     recs = {r.lead_id: r for r in db.query(ProgramSourceRecord)
             .filter(ProgramSourceRecord.organization_id == org, ProgramSourceRecord.lead_id.in_(ids or ["-"]))}
     replied = {i for (i,) in db.query(ProgramResponse.lead_id).filter(ProgramResponse.lead_id.in_(ids or ["-"]))}
+    earlier = {i for (i,) in db.query(Reply.lead_id).filter(Reply.lead_id.in_(ids or ["-"]))}
     return {"items": [{
         "lead_id": l.id,
         "name": ("%s %s" % (l.first_name or "", l.last_name or "")).strip().title() or "Family",
         "phone": l.phone,
+        "email": l.email,
+        "status": l.status,
         "location": locs.get(recs[l.id].location_id) if l.id in recs else None,
         "replied": l.id in replied,
-    } for l in leads]}
+        "earlier_replies": l.id in earlier,
+    } for l in leads], "total": total, "offset": offset, "limit": limit, "browse": not needle}
+
+
+@router.get("/earlier-conversations")
+def command_earlier_conversations(offset: int = Query(0, ge=0, le=100000), limit: int = Query(25, ge=1, le=100),
+                                  db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Original replies received before this workspace ran the program, read
+    in place (Issue #507). Historical correspondence: never unread, never a
+    hand-off, never replayed through inbound handling."""
+    from app.services.programs import family_history as FH
+    prog = _program(db, user, managers_only=False)
+    return FH.earlier_conversations(db, prog.organization_id, offset=offset, limit=limit)
+
+
+@router.get("/case-files")
+def command_case_files(lead_id: Optional[str] = None, offset: int = Query(0, ge=0, le=100000),
+                       limit: int = Query(50, ge=1, le=100), db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_or_observer)):
+    """Appointment case files recorded in this workspace, read-only (#507)."""
+    from app.services.programs import family_history as FH
+    prog = _program(db, user)                      # managers: these carry outcomes and notes
+    return FH.case_files(db, prog.organization_id, lead_id=lead_id, offset=offset, limit=limit)
 
 
 @router.get("/family/{lead_id}")
-def command_family(lead_id: str, db: Session = Depends(get_db),
+def command_family(lead_id: str, history_n: int = Query(40, ge=1, le=500, alias="history"), db: Session = Depends(get_db),
                    user: User = Depends(require_tenant_or_observer)):
     from app.models.models import BookingLink, EmailMessage
     from app.services.programs import appointments as A
@@ -670,6 +726,10 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
                                                             ProgramConversationTurn.delivery.in_(("draft", "simulated", "held")))):
             thread.append({"who": "ai", "text": t.text, "channel": "sms", "delivery": t.delivery,
                            "at": t.created_at.isoformat() + "Z" if t.created_at else None})
+    # Original replies from before the program (Issue #507), read in place and
+    # marked historical: they are shown, never replayed or counted as unread.
+    from app.services.programs import family_history as _FH
+    thread.extend(_FH.earlier_replies(db, lead))
     thread = sorted([t for t in thread if t["at"]], key=lambda t: t["at"])
     # Each message's campaign, from the evidence (campaign_attribution.py).
     from app.services.programs import campaign_attribution as CA
@@ -718,7 +778,15 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
         "suggested_reply": (_er.strip_signature(db, lead, latest.suggested_reply)
                             if latest and latest.suggested_reply else None),
         "last_touch": {"at": last["at"], "channel": last["channel"]} if last else None,
-        "thread": thread[-40:],
+        "thread": thread[-history_n:],
+        "thread_total": len(thread),
+        "earlier_record": _FH.earlier_record(db, lead),
+        # The program's own AI setter switch: when it is OFF nobody's reply is
+        # answered by the AI, whatever this conversation's owner says.
+        "program_ai_mode": (getattr(prog, "ai_setter_mode", None) or "off"),
+        "bookings": _FH.bookings(db, lead),
+        "case_files": (_FH.case_files(db, prog.organization_id, lead_id=lead.id)["items"]
+                       if _sees_program(db, user, prog.organization_id) else None),
         "setter": {"state": conv.state, "offered": [A.describe(s) for s in A.offered(conv)],
                    "callback_window": conv.callback_window, "handoff_reason": conv.handoff_reason}
         if conv else None,

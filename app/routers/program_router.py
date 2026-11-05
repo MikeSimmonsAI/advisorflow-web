@@ -195,7 +195,10 @@ def program_status(db: Session = Depends(get_db), user: User = Depends(require_t
     prog = identity.program_for_org(db, lead_scope.active_workspace_org_id(user, db) or user.organization_id)
     manager = bool(prog) and _sees_program(db, user, prog.organization_id)
     return {"active": prog is not None and manager, "name": prog.name if prog else None,
-            "profile": _profile.profile(db, prog) if (prog is not None and manager) else None}
+            # Every seat in the workspace gets the program's name and theme
+            # (Issue #507: staff saw "SCI Live" in Restland). Presentation only;
+            # `active` and every program screen stay manager-scoped.
+            "profile": _profile.profile(db, prog) if prog is not None else None}
 
 
 @router.get("/me")
@@ -543,6 +546,19 @@ def program_appointments(when: str = Query("upcoming"), location_id: Optional[st
             loc_of.setdefault(r.lead_id, r.location_id)
     names = {p.location_id: p.official_name for p in db.query(LocationProfile)
              .filter(LocationProfile.organization_id == prog.organization_id).all()}
+    from app.models.models import User as _U
+    staff = {u.id: (u.full_name or u.email) for u in db.query(_U)
+             .filter(_U.id.in_(list({b.user_id for b, _l in rows}) or ["-"])).all()}
+    # Case files recorded against these bookings (read in place, Issue #507).
+    try:
+        from sqlalchemy import text as _text
+        _bids = [b.id for b, _l in rows]
+        cased = {r[0] for r in db.execute(_text(
+            "SELECT booking_link_id FROM appointment_case_files WHERE organization_id = :o "
+            "AND booking_link_id IS NOT NULL"), {"o": prog.organization_id}).fetchall()} if _bids else set()
+    except Exception:                                    # noqa: BLE001 - table absent on a fresh DB
+        db.rollback()
+        cased = set()
     items = []
     for b, l in rows:
         loc = loc_of.get(l.id)
@@ -552,7 +568,8 @@ def program_appointments(when: str = Query("upcoming"), location_id: Optional[st
                       "name": " ".join(x for x in (l.first_name, l.last_name) if x) or "(no name)",
                       "phone": l.phone, "email": l.email, "location_id": loc, "location": names.get(loc),
                       "when": _bt.wire(db, b), "status": b.status,
-                      "label": getattr(b, "appt_label", None), "minutes": getattr(b, "appt_duration", None)})
+                      "label": getattr(b, "appt_label", None), "minutes": getattr(b, "appt_duration", None),
+                      "staff": staff.get(b.user_id), "has_case_file": b.id in cased})
     return {"items": items, "when": when}
 
 
