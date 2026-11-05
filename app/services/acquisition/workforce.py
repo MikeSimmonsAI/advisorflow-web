@@ -281,13 +281,17 @@ def plan(db: Session, now: Optional[datetime] = None) -> Dict[str, int]:
             if n < 2 and enqueue(db, "research", "pool:%s:%s:v3:retry%d" % (p.id, dom, n + 1),
                                  target_type="pool_prospect", target_id=p.id):
                 out["research"] += 1
+    from app.services.acquisition import engine as _E
     clients = enabled_client_ids(db)
     day = now.strftime("%Y-%m-%d")
     for org_id in clients:
         prof = db.query(AcquisitionProfile).filter(AcquisitionProfile.organization_id == org_id).first()
         if prof is None:
             continue
-        if enqueue(db, "discovery", "%s:%s" % (org_id, day), org_id=org_id, target_type="client", target_id=org_id):
+        # Discovery only adds unassigned businesses to the pool (nobody is
+        # contacted), so a TEST company's discovery counts as practice work.
+        if enqueue(db, "discovery", "%s:%s" % (org_id, day), org_id=org_id, target_type="client", target_id=org_id,
+                   is_practice=_E.is_test_company(db, org_id)):
             out["discovery"] += 1
         opps = (db.query(AcquisitionOpportunity).filter(AcquisitionOpportunity.organization_id == org_id).all())
         for o in opps:
@@ -418,6 +422,7 @@ def _execute(db: Session, job: AcquisitionWorkerJob, now: datetime, fetch=None, 
 
 # ── worker: discovery ───────────────────────────────────────────────────────
 def run_discovery(db: Session, job, **_):
+    """Free OpenStreetMap discovery for the client's territory, every day it is due."""
     from app.models.lead_intel_models import LeadIntelProspect
     s = state(db)
     org_id = job.organization_id
@@ -438,19 +443,35 @@ def run_discovery(db: Session, job, **_):
             continue
         fits.append({"id": p.id, "name": p.name, "segment": p.industry, "city": p.city})
     result = {"pool_matches": len(fits), "examples": fits[:10], "new_businesses_added": 0,
-              "note": "Matching master-pool businesses are listed for assignment; assignment stays a "
-                      "person's decision so two clients never compete for one business."}
+              "note": "New businesses go to the master pool unassigned; assignment stays a person's "
+                      "decision so two clients never compete for one business."}
+    # FREE discovery first: OpenStreetMap buyers in the client's territory.
+    from app.models.models import Organization as _Org
+    from app.services.acquisition import discovery_osm as OSM
+    org = db.query(_Org).filter(_Org.id == org_id).first()
+    cities = C.jload(prof.service_area, []) if prof else []
+    if org is not None and cities:
+        st = sorted(states)[0] if states else "TX"
+        r = OSM.run(db, org, prof, city=cities[0], state=st, is_practice=job.is_practice or s.mode == "practice",
+                    geocode=kw_geocode(_), overpass=kw_overpass(_))
+        result["free_discovery"] = {k: r.get(k) for k in ("batch", "segments", "found", "added", "duplicates",
+                                                          "excluded", "unqualified", "error", "provider")}
+        result["new_businesses_added"] = r.get("added", 0)
+        if r.get("error"):
+            return "blocked", dict(result, blocked="OpenStreetMap discovery failed: %s" % r["error"])
+    elif not cities:
+        result["free_discovery"] = {"skipped": "No service area is set for this company"}
     if not s.paid_discovery_approved:
-        result["blocked"] = ("No new businesses were searched for: paid discovery (Google Places, metered) "
-                             "is not approved, and no free business source is configured.")
-        return "blocked", result
-    from app.services.acquisition import discovery as D
-    if not D._flag("ACQUISITION_DISCOVERY_ENABLED"):
-        result["blocked"] = "Paid discovery is approved here but switched off on the server (ACQUISITION_DISCOVERY_ENABLED)."
-        return "blocked", result
-    result["blocked"] = ("Paid discovery is approved, but an automatic run needs a search plan with a priced "
-                         "budget; run it from Discovery so the cost is shown before it runs.")
-    return "blocked", result
+        result["paid_discovery"] = "Not approved - Google Places is never called"
+    return "done", result
+
+
+def kw_geocode(kw):
+    return (kw or {}).get("geocode")
+
+
+def kw_overpass(kw):
+    return (kw or {}).get("overpass")
 
 
 # ── worker: research (and contact verification) ─────────────────────────────
@@ -764,6 +785,25 @@ def _shared_with_others(db: Session, p, email: str) -> bool:
                                                  LeadIntelProspect.email == email).first() is not None
 
 
+def _discovery_claim(p) -> Optional[str]:
+    try:
+        ev = json.loads(p.evidence_json) if p.evidence_json else {}
+    except ValueError:
+        return None
+    d = ev.get("discovery") if isinstance(ev, dict) else None
+    return (d or {}).get("website_claimed") if isinstance(d, dict) else None
+
+
+def _set_discovery(p, **kw) -> None:
+    try:
+        ev = json.loads(p.evidence_json) if p.evidence_json else {}
+    except ValueError:
+        ev = {}
+    if isinstance(ev, dict) and isinstance(ev.get("discovery"), dict):
+        ev["discovery"].update(kw)
+        p.evidence_json = json.dumps(ev, default=str)
+
+
 def recheck_worker_findings(db: Session, p, fetch=None) -> List[str]:
     """Re-test what an EARLIER worker version decided, against today's rules:
     a website it discovered must still be named by its own site title; an email
@@ -831,6 +871,19 @@ def run_research(db: Session, job, fetch=None, mx=None, osm=None, **_):
         if not site["pages"]:
             return "blocked", {"status": "research_incomplete", "reason_code": "website_failed",
                                "reason": "Website request failed (%s)" % site.get("error")}
+        claimed = _discovery_claim(p)
+        if claimed and H.normalize_domain(claimed) == H.normalize_domain(p.website):
+            # A website from a discovery source is only a claim until the
+            # site's own title names the business (the #512/#513 rule).
+            match = site_names_business(site["pages"][0][1], p.name or "")
+            if not match:
+                _pool_evidence(p, {"at": now.isoformat(), "by": "Harvey research worker",
+                                   "website_rejected": p.website, "why": "site title does not name the business"})
+                p.website = None
+                db.commit()
+                return "blocked", {"status": "research_incomplete", "reason_code": "website_mismatch",
+                                   "reason": "The website listed for this business does not name it - not used"}
+            _set_discovery(p, website_verified=True, website_match=match)
         v = verify_contacts(site, mx)
         home_url, home = site["pages"][0]
         entry = {"at": now.isoformat(), "by": "Harvey research worker", "source_url": home_url,
@@ -1288,6 +1341,7 @@ RESEARCH_REASON_LABEL = {
     "no_email": "No published email found",
     "email_unvalidated": "Email found but its domain failed validation (or wasn't the business's own)",
     "provider_unavailable": "Provider unavailable",
+    "website_mismatch": "Listed website does not name the business",
     "failed": "Worker failed (moved to the failed queue)",
     "other": "Other",
 }
@@ -1352,7 +1406,7 @@ def research_breakdown(db: Session, with_rows: bool = False) -> Dict[str, Any]:
                 c["contact_identified"] += 1
         elif j.status == "blocked":
             code = _reason_code(j) or "other"
-            if code in ("no_website", "website_failed"):
+            if code in ("no_website", "website_failed", "website_mismatch"):
                 c["research_incomplete"] += 1
                 bucket = "incomplete"
             else:
