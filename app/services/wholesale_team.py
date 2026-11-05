@@ -426,11 +426,24 @@ def fence_user(db: Session, user: User, path: str, method: str) -> Optional[str]
     if getattr(user, "role", None) not in ("advisor", "viewer"):
         return None
     org_id = _active_org_id(db, user)
-    role = role_of(db, user, org_id)                 # this workspace's role (#272)
+    # One seat lookup (active or not) per request: this workspace's role
+    # (#272), and whether an ended seat here was a custom-access one (#439).
+    seats = (db.query(Membership.role, Membership.is_active)
+             .filter(Membership.scope_type == SCOPE_PRODUCT, Membership.scope_id == _scope(db, org_id),
+                     Membership.user_id == user.id).all())
+    live = next((r for r, active in seats if active), None)
+    role = (live if live in ROLES else MEMBER) if live is not None else None
     if role == CUSTOM:
         # #439: an access profile decides, per module and action, default deny.
         from app.services import wholesale_access as _A
         return _A.refusal(db, user, org_id, path or "/", method or "GET")
+    if role is None:
+        # #439: a custom-access seat that was suspended or removed must not
+        # fall back to an ordinary advisor login (the CRM side). It keeps only
+        # sign-in and the app shell, read-only, until someone restores it.
+        if any(r == CUSTOM for r, _active in seats):
+            from app.services import wholesale_access as _A
+            return _A.ended_refusal(path or "/", method or "GET")
     refusal = fence(path, method, role)
     if refusal or role not in FIELD_ROLES:
         return refusal

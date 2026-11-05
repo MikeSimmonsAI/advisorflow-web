@@ -179,15 +179,15 @@ def directory(db: Session = Depends(get_db), user: User = Depends(require_tenant
     people = []
     for m in base["members"]:
         u = T.in_workspace(db, org_id, m["user_id"])
-        acc = TA.member_access(db, org_id, m["user_id"])
-        people.append({**m, "access": acc, "owned_work": TA.owned_work(db, org_id, m["user_id"]),
+        acc = TA.member_access(db, org_id, m["user_id"], user)
+        people.append({**m, "access": acc, "protected": acc.get("protected"), "owned_work": TA.owned_work(db, org_id, m["user_id"]),
                        "last_active_at": (u.last_login_at.isoformat() + "Z") if u is not None and u.last_login_at else None})
     suspended = []
     for o in base["not_on_team"]:
         if o.get("was_member"):
-            acc = TA.member_access(db, org_id, o["user_id"])
+            acc = TA.member_access(db, org_id, o["user_id"], user)
             if acc["status"] == "suspended":
-                suspended.append({**o, "access": acc})
+                suspended.append({**o, "access": acc, "protected": acc.get("protected")})
     return {"members": people, "suspended": suspended, "not_on_team": [o for o in base["not_on_team"]
                                                                        if o["user_id"] not in {s["user_id"] for s in suspended}],
             "invites": TA.invites(db, org_id), "profiles": TA.profiles(db, org_id),
@@ -237,7 +237,7 @@ def preview(body: Dict[str, Any] = Body(...), db: Session = Depends(get_db), use
 @router.get("/members/{user_id}/access")
 def get_member_access(user_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     org_id = _ws(db, user)
-    out = _run(TA.member_access, db, org_id, user_id)
+    out = _run(TA.member_access, db, org_id, user_id, user)
     out["owned_work"] = TA.owned_work(db, org_id, user_id)
     return out
 
@@ -309,5 +309,5 @@ def accept_invite(body: Dict[str, Any] = Body(...), db: Session = Depends(get_db
                   user: User = Depends(require_tenant_user)):
     try:
         return TA.accept(db, user, (body or {}).get("token"))
-    except TA.AccessError as exc:
+    except (TA.AccessError, LookupError) as exc:
         raise HTTPException(400, str(exc))

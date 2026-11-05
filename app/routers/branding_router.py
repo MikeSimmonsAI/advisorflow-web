@@ -183,6 +183,17 @@ def _wholesale_team(db, user):
             from app.services.lead_scope import active_workspace_org_id
             eff = _wa.effective(db, user, active_workspace_org_id(user, db))
             out.update({"custom": True, "modules": sorted(m for m, a in (eff.get("permissions") or {}).items() if "view" in a)})
+        elif role is None and getattr(user, "role", None) in ("advisor", "viewer"):
+            # #439: custom access here was suspended or removed. The shell
+            # shows nothing but their profile (the server refuses the rest).
+            from app.models.sales_models import Membership, SCOPE_PRODUCT
+            from app.services.lead_scope import active_workspace_org_id
+            ended = (db.query(Membership.id).filter(
+                Membership.scope_type == SCOPE_PRODUCT,
+                Membership.scope_id == _wt._scope(db, active_workspace_org_id(user, db)),
+                Membership.user_id == user.id, Membership.role == _wt.CUSTOM).first())
+            if ended is not None:
+                out.update({"custom": True, "modules": [], "ended": True, "wholesale_only": True})
         return out
     except Exception:  # noqa: BLE001 - branding must not break a login
         return {"role": None, "wholesale_only": False, "field": False}

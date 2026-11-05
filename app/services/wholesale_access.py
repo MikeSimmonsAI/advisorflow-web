@@ -88,6 +88,11 @@ _RULES: List[Tuple[str, str]] = [
     (r"^/wholesale/ops/skip-trace(/|$)", "paid_lookups"),
     (r"^/wholesale/evosense/(enrichment|providers|provider-evaluations)(/|$)", "paid_lookups"),
     (r"^/wholesale/evosense/properties/\*/enrich$", "paid_lookups"),
+    # Contact-lookup batches buy lookups (each has a lookup and spend cap) and
+    # a valuation request draws on the RentCast budget: paid, not "sellers".
+    (r"^/wholesale/evosense/contact-batches(/|$)", "paid_lookups"),
+    (r"^/wholesale/evosense/properties/\*/valuation$", "paid_lookups"),
+    (r"^/wholesale/evosense/valuation(/|$)", "paid_lookups"),
     (r"^/wholesale/intel/providers$", "paid_lookups"),
     # imports
     (r"^/wholesale/evosense/import(/|$)", "imports"),
@@ -107,14 +112,14 @@ _RULES: List[Tuple[str, str]] = [
     # sellers
     (r"^/wholesale/(sellers|outreach-seller)(/|$)", "sellers"),
     (r"^/wholesale/ops/(leads|notes|callbacks)(/|$)", "sellers"),
-    (r"^/wholesale/evosense/(call-queue|first-contact|follow-ups|contact-batches|permission-links|owner-names)(/|$)", "sellers"),
+    (r"^/wholesale/evosense/(call-queue|first-contact|follow-ups|permission-links|owner-names)(/|$)", "sellers"),
     (r"^/wholesale/deals/\*/seller-reply$", "sellers"),
     # contacting a property's owner is seller work, not property research
     (r"^/wholesale/evosense/properties/\*/(outreach|nurture|reply|permission-link|follow-up|call-outcome|owner|contacts)(/|$)", "sellers"),
     # canvassing and appointments
     (r"^/wholesale/canvass(/|$)", "canvassing"),
     (r"^/wholesale/appointments(/|$)", "appointments"),
-    (r"^/wholesale/offers(/|$)", "appointments"),
+    (r"^/wholesale/offers(/|$)", "deals"),          # a deal's offers (WholesaleOffer), not field offers
     # buyers
     (r"^/wholesale/buy-boxes(/|$)", "buy_boxes"),
     (r"^/wholesale/(buyer-intel|buyers)(/|$)", "buyer_intel"),
@@ -401,6 +406,7 @@ def check_delegation(db: Session, actor: User, org_id: str, perms: Dict[str, Lis
 
 
 # ── the server fence for custom-access logins ───────────────────────────────
+_SETTINGS_WRITABLE = ("/settings/profile", "/settings/profile-photo", "/settings/notifications")
 _SHELL = ("/auth/", "/branding", "/notifications", "/settings", "/program/status", "/launch/me",
           "/workspace-views", "/work/identity", "/me", "/health", "/push", "/site-intake/wholesale",
           "/wholesale-invites")
@@ -418,6 +424,15 @@ def refusal(db: Session, user: User, org_id: str, path: str, method: str) -> Opt
     """None when this custom-access request may go ahead, else why not.
     Only called for a person whose seat here has an access row."""
     path = path or "/"
+    if _under(path, ("/settings",)):
+        # The CRM side's own settings (Twilio numbers, products, booking page,
+        # appointment types, social links) are not Wholesale. A custom login may
+        # read its settings and change only its own profile, photo and alerts.
+        if _under(path, ("/settings/admin",)):
+            return "This login is for the Wholesale side only."
+        if method.upper() in ("GET", "HEAD") or _under(path, _SETTINGS_WRITABLE):
+            return None
+        return "This login is for the Wholesale side only."
     if _under(path, _SHELL) or (method.upper() == "GET" and _under(path, ("/org-settings",))):
         return None
     if not path.startswith("/wholesale/"):
@@ -433,6 +448,15 @@ def refusal(db: Session, user: User, org_id: str, path: str, method: str) -> Opt
         label = dict((m[0], m[1]) for m in MODULES).get(mod, mod)
         return "Your access doesn't include %s: %s. Ask the workspace owner." % (label, ACTION_LABELS.get(act, act))
     return _record_refusal(db, user, org_id, eff, mod, path)
+
+
+def ended_refusal(path: str, method: str) -> Optional[str]:
+    """For a login whose custom access here was suspended or removed."""
+    if _under(path, ("/auth/", "/branding", "/health", "/wholesale-invites")):
+        return None
+    if method.upper() in ("GET", "HEAD") and _under(path, _SHELL) and not _under(path, ("/settings",)):
+        return None
+    return "Your access to this workspace's Wholesale team has been suspended or removed. Ask the workspace owner."
 
 
 # Direct record addresses whose record carries an assignee.
@@ -458,8 +482,98 @@ def _record_owner(db: Session, kind: str, org_id: str, rid: str):
     return (row is not None, row[0] if row is not None else None)
 
 
+# Records that have no assignee of their own but belong to one that does
+# (a deal's approvals, offers, documents...). They are visible exactly when
+# their owning deal / property / route is.
+_CHILD_PATHS = [
+    (re.compile(r"^/wholesale/approvals/([^/]+)"), "approval"),
+    (re.compile(r"^/wholesale/offers/([^/]+)"), "offer"),
+    (re.compile(r"^/wholesale/comps/([^/]+)"), "comp"),
+    (re.compile(r"^/wholesale/documents/([^/]+)"), "document"),
+    (re.compile(r"^/wholesale/outreach/([^/]+)"), "outreach"),
+    (re.compile(r"^/wholesale/share-links/([^/]+)"), "share_link"),
+    (re.compile(r"^/wholesale/files/([^/]+)"), "file"),
+    (re.compile(r"^/wholesale/sellers/([^/]+)"), "seller"),
+    (re.compile(r"^/wholesale/canvass/doors/([^/]+)"), "door"),
+    (re.compile(r"^/wholesale/ops/notes/([^/]+)"), "note"),
+    (re.compile(r"^/wholesale/ops/leads/([^/]+)"), "lead"),
+    (re.compile(r"^/wholesale/evosense/follow-ups/([^/]+)"), "followup"),
+]
+
+
+def _child_owners(db: Session, kind: str, org_id: str, rid: str):
+    """(found, [owner of each assigned parent]) for a child record in THIS
+    workspace. An empty list means it hangs off nothing that has an owner."""
+    from app.models.wholesale_models import (WholesaleApproval, WholesaleBuyerOutreach, WholesaleComp, WholesaleDeal,
+                                             WholesaleDocument, WholesaleFile, WholesaleOffer, WholesaleProperty,
+                                             WholesaleSellerProfile)
+    from app.models.wholesale_ops_models import (WholesaleCanvassDoor, WholesaleCanvassRoute, WholesaleDealNote,
+                                                 WholesaleSellerCallback)
+    from app.models.wholesale_share_models import WholesaleShareLink
+    from app.models.evosense_models import EvoSenseFollowUp
+
+    def owners(model, ids):
+        ids = [i for i in ids if i]
+        if not ids:
+            return []
+        return [r[0] for r in db.query(model.assigned_to_id).filter(model.id.in_(ids), model.organization_id == org_id)]
+
+    if kind == "followup":
+        row = db.query(EvoSenseFollowUp.assigned_to_id).filter(EvoSenseFollowUp.id == rid,
+                                                               EvoSenseFollowUp.organization_id == org_id).first()
+        return (row is not None, [row[0]] if row is not None and row[0] else [])
+    if kind == "lead":
+        deals = [r[0] for r in db.query(WholesaleDeal.assigned_to_id).filter(WholesaleDeal.organization_id == org_id,
+                                                                             WholesaleDeal.seller_lead_id == rid)]
+        cbs = [r[0] for r in db.query(WholesaleSellerCallback.assigned_to_id).filter(
+            WholesaleSellerCallback.organization_id == org_id, WholesaleSellerCallback.lead_id == rid)]
+        return (True, deals + [c for c in cbs if c])
+    model, deal_col, prop_col, route_col = {
+        "approval": (WholesaleApproval, "deal_id", None, None),
+        "offer": (WholesaleOffer, "deal_id", None, None),
+        "comp": (WholesaleComp, "deal_id", None, None),
+        "document": (WholesaleDocument, "deal_id", None, None),
+        "outreach": (WholesaleBuyerOutreach, "deal_id", None, None),
+        "share_link": (WholesaleShareLink, "deal_id", None, None),
+        "file": (WholesaleFile, "deal_id", "property_id", None),
+        "seller": (WholesaleSellerProfile, None, "property_id", None),
+        "door": (WholesaleCanvassDoor, None, None, "route_id"),
+        "note": (WholesaleDealNote, "deal_id", "property_id", None),
+    }[kind]
+    row = db.query(model).filter(model.id == rid, model.organization_id == org_id).first()
+    if row is None:
+        return (False, [])
+    out = []
+    if deal_col:
+        out += owners(WholesaleDeal, [getattr(row, deal_col, None)])
+    if prop_col:
+        out += owners(WholesaleProperty, [getattr(row, prop_col, None)])
+    if route_col:
+        out += owners(WholesaleCanvassRoute, [getattr(row, route_col, None)])
+    return (True, out)
+
+
 def _record_refusal(db, user, org_id, eff, mod, path) -> Optional[str]:
     if eff.get("record_scope") == WORKSPACE or mod not in SCOPED_MODULES:
+        return None
+    for rx, kind in _CHILD_PATHS:
+        m = rx.match(path)
+        if not m:
+            continue
+        rid = m.group(1)
+        if not _ID_SEG.match(rid):
+            break                              # a named sub-collection, not a record id
+        found, parent_owners = _child_owners(db, kind, org_id, rid)
+        if not found:
+            return None                        # the route answers its own 404
+        # A child of an assigned record is visible when ANY owning record is;
+        # one that has a parent but no visible parent is refused (an unassigned
+        # deal is as closed to an assigned-only login as it is directly).
+        if not parent_owners:
+            return None                        # hangs off nothing with an owner
+        visible = visible_user_ids(db, org_id, user, eff)
+        if visible is not None and not any(o in visible for o in parent_owners):
+            return "This record isn't assigned to you or your team."
         return None
     for rx, kind in _RECORD_PATHS:
         m = rx.match(path)

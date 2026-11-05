@@ -385,6 +385,27 @@ function RetireProfile({ p, profiles, onClose, onDone }) {
 }
 
 // ── one person ──────────────────────────────────────────────────────────────
+// Read-only view of someone's access, for logins nobody can edit here (your
+// own, an owner/admin, or someone above a delegated team admin). No controls:
+// the server refuses every change to these people, so none are offered.
+export function ReadOnlyAccess({ catalog, acc }) {
+  const perms = acc.permissions || {}
+  const rows = catalog.modules.filter((m) => (perms[m.key] || []).length)
+  const scope = (catalog.scopes.find((s) => s.key === acc.record_scope) || {}).label
+  return (
+    <div className="wa-editor" data-testid="wa-readonly">
+      <div className="wt-warn" role="note"><strong>{acc.protected.kind === 'owner' ? 'Protected owner access' : 'View only'}</strong>
+        <p>{acc.protected.reason}</p></div>
+      <p className="evo-small"><strong>Records:</strong> {acc.mode === 'admin' ? 'Everything in this workspace' : (scope || '—')}</p>
+      {rows.length ? (
+        <ul className="wa-preview__list">{rows.map((m) => (
+          <li key={m.key}><strong>{m.label}</strong>
+            <span className="evo-muted evo-small"> {(perms[m.key] || []).filter((a) => m.action_labels[a]).map((a) => m.action_labels[a]).join(', ')}</span></li>))}</ul>
+      ) : <p className="evo-muted">No Wholesale access right now.</p>}
+    </div>
+  )
+}
+
 export function MemberAccess({ catalog, dir, member, onClose, onSaved }) {
   const [acc, setAcc] = useState(null)
   const [profileId, setProfileId] = useState('')
@@ -417,7 +438,7 @@ export function MemberAccess({ catalog, dir, member, onClose, onSaved }) {
   const work = acc ? acc.owned_work || {} : {}
   return (
     <Drawer open wide title={member.name} sub={member.email} onClose={onClose}
-            footer={acc && !confirm ? (
+            footer={acc && !confirm && !acc.protected ? (
               <div className="wa-foot">
                 <button type="button" className="evo-btn evo-btn--ghost" onClick={() => setConfirm('remove')}>Remove from team</button>
                 {acc.status === 'active'
@@ -425,7 +446,9 @@ export function MemberAccess({ catalog, dir, member, onClose, onSaved }) {
                   : <button type="button" className="evo-btn evo-btn--secondary" disabled={busy} onClick={() => act('reactivate')}>Reactivate</button>}
                 <button type="button" className="evo-btn evo-btn--primary" disabled={busy || (!profileId && !Object.keys(grants).length)} onClick={save}>{busy ? 'Saving…' : 'Save access'}</button>
               </div>) : null}>
-      {!acc ? (err ? <p className="wt-err">{err}</p> : <p className="evo-muted">Loading…</p>) : confirm ? (
+      {!acc ? (err ? <p className="wt-err">{err}</p> : <p className="evo-muted">Loading…</p>) : acc.protected ? (
+        <ReadOnlyAccess catalog={catalog} acc={acc} />
+      ) : confirm ? (
         <div className="wt-warn" role="alert">
           {confirm === 'suspend'
             ? <p><strong>Suspend {member.name}?</strong> They lose Wholesale on their next click. Their access settings and work are kept.</p>
@@ -523,7 +546,9 @@ export function Directory({ catalog, dir, reload }) {
           <tbody>{people.map((m) => (
             <tr key={m.user_id}>
               <td data-label="Person"><div className="wt-who">{m.name}</div><div className="evo-muted evo-small">{m.email}</div></td>
-              <td data-label="Access">{m.access.mode === 'custom'
+              <td data-label="Access">{m.protected && m.protected.kind === 'owner'
+                ? <span className="evo-tag evo-tag--info">Protected owner access</span>
+                : m.access.mode === 'custom'
                 ? <><span className="evo-tag evo-tag--info">{m.access.profile ? m.access.profile.name : 'Individual'}</span>
                   {Object.keys(m.access.grants || {}).length || Object.keys(m.access.denies || {}).length ? <span className="evo-muted evo-small"> + changes</span> : null}</>
                 : <span className="evo-tag">{m.role_label}</span>}</td>
@@ -531,7 +556,9 @@ export function Directory({ catalog, dir, reload }) {
               <td data-label="Assigned work">{total(m.owned_work)}</td>
               <td data-label="Last active">{m.last_active_at ? new Date(m.last_active_at).toLocaleDateString() : 'Never signed in'}</td>
               <td data-label="" className="wt-actions">
-                <button className="evo-btn evo-btn--secondary evo-btn--sm" onClick={() => setOpen(m)}>Manage access</button>
+                {m.protected
+                  ? <button className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => setOpen(m)}>View access</button>
+                  : <button className="evo-btn evo-btn--secondary evo-btn--sm" onClick={() => setOpen(m)}>Manage access</button>}
               </td>
             </tr>))}</tbody>
         </table>
@@ -541,7 +568,7 @@ export function Directory({ catalog, dir, reload }) {
           <h3 className="wt-h3">Suspended ({dir.suspended.length})</h3>
           <ul className="wa-plain">{dir.suspended.map((s) => (
             <li key={s.user_id}><strong>{s.name}</strong> <span className="evo-muted evo-small">{s.email}</span>{' '}
-              <button className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => setOpen({ ...s, role_label: 'Suspended' })}>Manage</button></li>))}</ul>
+              <button className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => setOpen({ ...s, role_label: 'Suspended' })}>{s.protected ? 'View' : 'Manage'}</button></li>))}</ul>
         </>
       ) : null}
       {open ? <MemberAccess catalog={catalog} dir={dir} member={open} onClose={() => setOpen(null)} onSaved={() => { setOpen(null); reload() }} /> : null}

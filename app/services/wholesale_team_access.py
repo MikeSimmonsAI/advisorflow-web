@@ -270,6 +270,63 @@ def preview(db: Session, org_id: str, *, profile_id: Optional[str] = None, permi
                       "The advisor / CRM side"]}
 
 
+def protection(db: Session, org_id: str, actor: User, u: User) -> Optional[Dict[str, str]]:
+    """Why `actor` may not change, suspend or remove `u` here, or None.
+
+    One rule behind every member action and the directory, so the screen
+    never offers a control the server will refuse:
+      - your own login (nobody edits their own access);
+      - owner / admin / platform logins (owner authority and God Mode are not
+        managed from Wholesale Team);
+      - for a delegated team admin: anyone holding access they don't hold.
+    """
+    if getattr(u, "role", None) not in ("advisor", "viewer"):
+        return {"kind": "owner",
+                "reason": ("This is a protected owner or admin login. It has full authority over this workspace. "
+                           "God Mode, owner authority and billing are not managed from Wholesale Team and can't be "
+                           "changed here.")}
+    if u.id == actor.id:
+        return {"kind": "self", "reason": "This is your own login. Nobody can change, suspend or remove their own access."}
+    eff = A.effective(db, actor, org_id)
+    if eff["mode"] != "admin":
+        cap, cap_scope = A.ceiling(db, actor, org_id)
+        theirs = _configured_access(db, org_id, u)
+        if theirs["mode"] in ("legacy", "custom") and (
+                A.subset(theirs.get("permissions") or {}, cap)
+                or A._SCOPE_RANK.get(theirs.get("record_scope"), 0) > A._SCOPE_RANK.get(cap_scope, 0)):
+            return {"kind": "above_you",
+                    "reason": "They have access you don't have, so only the owner or an admin can change it."}
+    return None
+
+
+def _configured_access(db, org_id, u) -> Dict[str, Any]:
+    """The access this person HAS ON FILE here, active or suspended (a
+    suspended seat is still checked, so reactivating can't sneak past)."""
+    scope = _scope(db, org_id)
+    seat = _seat(db, scope, u.id)
+    if seat is None:
+        return {"mode": "none", "permissions": {}, "record_scope": A.ASSIGNED}
+    row = A.access_row(db, u.id, scope)
+    if row is None or seat.role != T.CUSTOM:
+        return {"mode": "legacy", "permissions": A.FULL, "record_scope": A.WORKSPACE}
+    prof = db.query(WholesaleAccessProfile).filter(WholesaleAccessProfile.id == row.profile_id,
+                                                   WholesaleAccessProfile.seat_scope == scope).first() if row.profile_id else None
+    perms = A.combine(json.loads(prof.permissions_json or "{}") if prof else {},
+                      json.loads(row.grants_json or "{}"), json.loads(row.denies_json or "{}"))
+    return {"mode": "custom", "permissions": perms,
+            "record_scope": row.record_scope or (prof.record_scope if prof else A.ASSIGNED)}
+
+
+def _refuse_if_protected(db, org_id, actor, u, what):
+    p = protection(db, org_id, actor, u)
+    if p is None:
+        return
+    if p["kind"] != "self":
+        _audit(db, org_id, actor, "escalation_denied", "user", u.id, after={"tried": what}, note=p["reason"])
+        db.commit()
+    raise AccessError(p["reason"])
+
+
 def _member_user(db, org_id, user_id) -> User:
     u = T.in_workspace(db, org_id, user_id)
     if u is None:
@@ -283,11 +340,7 @@ def set_access(db: Session, org_id: str, actor: User, user_id: str, *, profile_i
     """Put a person on custom access (or change it). Their seat becomes a
     Wholesale-only, default-deny login with exactly this access."""
     u = _member_user(db, org_id, user_id)
-    if u.id == actor.id:
-        raise AccessError("You can't change your own access.")
-    if getattr(u, "role", None) not in ("advisor", "viewer"):
-        raise AccessError("Admin logins already have full access to their workspace and can't be given a custom profile. "
-                          "Use a separate non-admin login.")
+    _refuse_if_protected(db, org_id, actor, u, "change_access")
     prof = _profile(db, org_id, profile_id) if profile_id else None
     if prof is not None and prof.is_archived:
         raise AccessError("That profile is retired.")
@@ -335,19 +388,22 @@ def _access_json(db: Session, org_id: str, u: User) -> Dict[str, Any]:
             "grants": json.loads(row.grants_json or "{}") if row else {},
             "denies": json.loads(row.denies_json or "{}") if row else {},
             "record_scope": eff.get("record_scope"), "record_scope_override": row.record_scope if row else None,
-            "permissions": eff.get("permissions") if eff["mode"] == "custom" else None,
+            "permissions": eff.get("permissions") if eff["mode"] in ("custom", "legacy", "admin") else None,
             "reports_to_user_id": seat.reports_to_user_id if seat is not None else None}
 
 
-def member_access(db: Session, org_id: str, user_id: str) -> Dict[str, Any]:
-    return _access_json(db, org_id, _member_user(db, org_id, user_id))
+def member_access(db: Session, org_id: str, user_id: str, actor: Optional[User] = None) -> Dict[str, Any]:
+    u = _member_user(db, org_id, user_id)
+    out = _access_json(db, org_id, u)
+    if actor is not None:
+        out["protected"] = protection(db, org_id, actor, u)
+    return out
 
 
 def set_status(db: Session, org_id: str, actor: User, user_id: str, active: bool) -> Dict[str, Any]:
     """Suspend (keep everything, stop access now) or reactivate."""
     u = _member_user(db, org_id, user_id)
-    if u.id == actor.id:
-        raise AccessError("You can't suspend yourself.")
+    _refuse_if_protected(db, org_id, actor, u, "reactivate" if active else "suspend")
     seat = _seat(db, _scope(db, org_id), u.id)
     if seat is None:
         raise AccessError("They aren't on the Wholesale team.")
@@ -374,8 +430,7 @@ def remove(db: Session, org_id: str, actor: User, user_id: str, reassign_to: Opt
     """Take someone off the team. Their login stays (it may belong to other
     workspaces); their work here moves to `reassign_to` when given."""
     u = _member_user(db, org_id, user_id)
-    if u.id == actor.id:
-        raise AccessError("You can't remove yourself.")
+    _refuse_if_protected(db, org_id, actor, u, "remove")
     work = owned_work(db, org_id, u.id)
     moved = {}
     if reassign_to:
@@ -611,6 +666,22 @@ def accept(db: Session, user: User, raw_token: str) -> Dict[str, Any]:
     if getattr(user, "role", None) not in ("advisor", "viewer"):
         raise AccessError("Admin logins can't accept a custom-access invitation.")
     org_id = inv.organization_id
+    # Re-check at acceptance: the invitation may not hand out more than its
+    # sender holds NOW (their access may have shrunk since they sent it, or the
+    # profile it uses may have been retired).
+    inviter_now = db.query(User).filter(User.id == inv.invited_by_id).first()
+    prof = _profile(db, org_id, inv.profile_id) if inv.profile_id else None
+    if inviter_now is None or (prof is not None and prof.is_archived):
+        raise AccessError("This invitation is no longer valid. Ask the workspace owner to send a new one.")
+    eff = A.combine(json.loads(prof.permissions_json or "{}") if prof else {},
+                    json.loads(inv.grants_json or "{}"), json.loads(inv.denies_json or "{}"))
+    try:
+        A.check_delegation(db, inviter_now, org_id, eff, inv.record_scope or (prof.record_scope if prof else A.ASSIGNED))
+    except PermissionError:
+        _audit(db, org_id, user, "escalation_denied", "team_invite", inv.id,
+               note="Invitation gives more than its sender now holds; not accepted.")
+        db.commit()
+        raise AccessError("This invitation is no longer valid. Ask the workspace owner to send a new one.")
     if user.organization_id != org_id:
         from app.services.workspace_access import grant_workspace_membership
         grant_workspace_membership(db, user.id, org_id, role="advisor", granted_by=inv.invited_by_id, commit=False)
