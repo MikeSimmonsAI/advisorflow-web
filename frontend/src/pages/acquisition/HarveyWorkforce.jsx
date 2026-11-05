@@ -140,9 +140,45 @@ export function HarveyWorkforcePanel({ compact = false }) {
           <button className={`aq-btn aq-btn--sm ${c.enabled ? '' : 'aq-btn--primary'}`} onClick={async () => {
             setFail(null); try { await api.put(`/god/acquisition/workforce/clients/${c.organization_id}`, { enabled: !c.enabled }); say(c.enabled ? 'Switched off' : 'Switched on'); reload() } catch (e) { setFail(errText(e)) } }}>{c.enabled ? 'Switch off' : 'Switch on'}</button></div>)
           : <Empty icon="store" title="No service companies yet" />}
+
+        <h3 className="hw-h3">Ready for a real launch?</h3>
+        <LaunchReadiness />
       </>}
     </section>
   )
+}
+
+// Per company: YES/NO for a REAL launch with every reason. Authorizing real
+// outreach is offered only when every check is YES, and it is time-boxed.
+export function LaunchReadiness() {
+  const [d, err, reload] = useLoad('/god/acquisition/workforce/launch-readiness')
+  const [msg, setMsg] = useState(null)
+  const [sure, setSure] = useState(null)
+  if (err) return <div className="aq-err">{errText(err)}</div>
+  if (!d) return <Loading />
+  const go = async (id, what) => {
+    setMsg(null); setSure(null)
+    try {
+      if (what === 'authorize') await api.post(`/god/acquisition/workforce/campaigns/${id}/authorize`, { confirm: true, days: 30, max_sends_per_day: 10 })
+      else await api.post(`/god/acquisition/workforce/campaigns/${id}/revoke`, {})
+      setMsg(what === 'authorize' ? 'Real outreach authorized for 30 days, up to 10 emails a day.' : 'Authorization revoked — no real emails will be sent.'); reload()
+    } catch (e) { setMsg(errText(e)) }
+  }
+  return <div className="hw-rows hw-launch">
+    {msg && <div className="aq-note">{msg}</div>}
+    {d.companies.map(c => <div className="aq-row" key={c.organization_id}><div className="aq-row__main">
+      <b>{c.company}{c.is_test && <span className="hw-test">TEST</span>} <span className={`hw-yn hw-yn--${c.ready_to_launch === 'YES' ? 'yes' : 'no'}`}>{c.ready_to_launch}</span>
+        {c.live && <span className="hw-yn hw-yn--yes">AUTHORIZED</span>}</b>
+      {c.reasons.length > 0 ? <ul className="hw-reasons">{c.reasons.map(r => <li key={r}>{r}</li>)}</ul>
+        : <span>Every launch check passes{c.authorized ? '' : ' — waiting for your go-ahead'}.</span>}
+    </div>
+      {c.ready_to_launch === 'YES' && !c.authorized && <button className="aq-btn aq-btn--sm aq-btn--primary" onClick={() => setSure(c)}>Authorize real outreach</button>}
+      {c.authorized && <button className="aq-btn aq-btn--sm" onClick={() => go(c.organization_id, 'revoke')}>Revoke</button>}
+    </div>)}
+    {sure && <Confirm text={`Authorize real outreach for ${sure.company}?`} confirmLabel="Authorize"
+      onConfirm={() => go(sure.organization_id, 'authorize')} onCancel={() => setSure(null)}>
+      <span> Harvey may email verified prospects for this company for 30 days, at most 10 a day. You can revoke it any time.</span></Confirm>}
+  </div>
 }
 
 function ResearchRows({ filter, onChanged }) {

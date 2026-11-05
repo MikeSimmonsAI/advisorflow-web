@@ -34,6 +34,7 @@ from app.services.acquisition import harvey_adapted as H
 log = logging.getLogger("acquisition.discovery_osm")
 PROVIDER = "openstreetmap"
 UA = "EvoSysPro-Acquisition/1.0 (business discovery; +https://evosyspro.live)"
+OVERPASS_MIRROR = "https://overpass.kumi.systems/api/interpreter"
 OVERPASS = "https://overpass-api.de/api/interpreter"
 NOMINATIM = "https://nominatim.openstreetmap.org/search"
 MAX_NEW_PER_RUN = 25
@@ -92,7 +93,7 @@ def build_query(bbox: Tuple[float, float, float, float], segments: List[str]) ->
         for tag, rx in SEGMENT_TAGS.get(seg, []):
             cond = '["%s"~"%s"]' % (tag, rx) if rx else '["%s"]' % tag
             parts.append('nwr["name"]%s(%.5f,%.5f,%.5f,%.5f);' % (cond, s, w, n, e))
-    return '[out:json][timeout:60];(%s);out center tags 400;' % "".join(parts)
+    return '[out:json][timeout:25];(%s);out center tags 200;' % "".join(parts)
 
 
 def classify(tags: Dict[str, str], segments: List[str]) -> Optional[str]:
@@ -135,11 +136,33 @@ def default_geocode(city: str, state: str) -> Optional[Tuple[float, float, float
 
 
 def default_overpass(query: str) -> List[Dict[str, Any]]:
+    """One small Overpass query. The main public server first; if it is busy
+    (429/5xx/timeout) ONE try at the public mirror - both free, no key."""
     import httpx
-    time.sleep(1.1)                       # never back-to-back with the geocode
-    r = httpx.post(OVERPASS, data={"data": query}, timeout=90, headers={"User-Agent": UA})
-    r.raise_for_status()
-    return (r.json() or {}).get("elements") or []
+    last = None
+    for url in (OVERPASS, OVERPASS_MIRROR):
+        time.sleep(1.1)                   # never back-to-back requests
+        try:
+            r = httpx.post(url, data={"data": query}, timeout=45, headers={"User-Agent": UA})
+            if r.status_code == 429 or r.status_code >= 500:
+                last = "%s answered %d" % (url.split("/")[2], r.status_code)
+                continue
+            r.raise_for_status()
+            return (r.json() or {}).get("elements") or []
+        except httpx.HTTPError as exc:
+            last = "%s: %s" % (url.split("/")[2], type(exc).__name__)
+    raise RuntimeError("OpenStreetMap search servers are busy (%s)" % last)
+
+
+def _interleave(groups: List[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """Take one from each buyer type in turn, so one big type can't crowd out the rest."""
+    out, i = [], 0
+    while any(i < len(g) for g in groups):
+        for g in groups:
+            if i < len(g):
+                out.append(g[i])
+        i += 1
+    return out
 
 
 def run(db: Session, org, profile, *, city: str, state: str = "TX", max_new: int = MAX_NEW_PER_RUN,
@@ -163,17 +186,30 @@ def run(db: Session, org, profile, *, city: str, state: str = "TX", max_new: int
         bbox = (geocode or default_geocode)(city, state)
         if not bbox:
             raise ValueError("OpenStreetMap could not locate %s, %s" % (city, state))
-        elements = (overpass or default_overpass)(build_query(bbox, segments))
-        runrow.search_requests = 2
+        groups, seg_errors = [], []
+        for seg in segments:                     # one small query per buyer type
+            try:
+                groups.append((overpass or default_overpass)(build_query(bbox, [seg])) or [])
+            except Exception as exc:              # noqa: BLE001
+                seg_errors.append("%s: %s" % (seg, str(exc)[:120]))
+        runrow.search_requests = 1 + len(segments)
+        if seg_errors and len(seg_errors) == len(segments):
+            raise RuntimeError("; ".join(seg_errors))
+        if seg_errors:
+            out["segment_errors"] = seg_errors
+        elements = _interleave(groups)
         seen = _existing_keys(db)
         comp = COMPETITOR_WORDS.get((getattr(org, "industry", None) or "").lower(), ())
         excl = C.jload(getattr(profile, "exclusions", None), []) or []
         now = datetime.utcnow()
+        this_run = set()
         for el in elements:
             tags = el.get("tags") or {}
             name = (tags.get("name") or "").strip()
-            if not name:
+            oid = "%s/%s" % (el.get("type"), el.get("id"))
+            if not name or oid in this_run:       # same place matched two buyer types
                 continue
+            this_run.add(oid)
             out["found"] += 1
             seg = classify(tags, segments)
             if seg is None:

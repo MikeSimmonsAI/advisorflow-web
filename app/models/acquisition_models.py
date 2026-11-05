@@ -292,6 +292,25 @@ class AcquisitionWorkforceClient(Base):
     changed_at = Column(DateTime, nullable=True)
 
 
+class AcquisitionCampaignAuthorization(Base):
+    """The owner's explicit go-ahead for REAL outreach for one company. No
+    row (or a revoked/expired one) means real emails are never sent for it,
+    whatever else is switched on. Practice work never needs one."""
+    __tablename__ = "acquisition_campaign_authorizations"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = _org_col()
+    status = Column(String(12), nullable=False, default="authorized")   # authorized / revoked
+    max_sends_per_day = Column(Integer, nullable=False, default=10)
+    starts_at = Column(DateTime, nullable=True)
+    ends_at = Column(DateTime, nullable=True)
+    note = Column(String(300), nullable=True)
+    readiness_snapshot = Column(Text, nullable=True)                     # JSON: the checks that passed
+    authorized_by_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    authorized_at = Column(DateTime, server_default=func.now())
+    revoked_by_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+
+
 class AcquisitionWorkerJob(Base):
     """One durable unit of worker labour. Survives restarts and deploys:
     a job whose lease expired is picked up again; one that keeps failing goes

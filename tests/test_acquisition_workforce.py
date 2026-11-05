@@ -960,12 +960,14 @@ def test_free_discovery_adds_new_buyers_with_provenance_and_no_competitors(pilot
     db = p["db"]
     org, prof = _window_client(p)
     _pool(db, name="Hilton Synthetic Arlington", website="https://hiltonsyn.example")      # already in the pool
-    asked = {}
+    asked = []
     out = OSM.run(db, org, prof, city="Arlington", state="TX",
                   geocode=lambda c, s: (32.58, -97.23, 32.81, -97.03),
-                  overpass=lambda q: asked.setdefault("q", q) and OSM_ELEMENTS)
+                  overpass=lambda q: asked.append(q) or OSM_ELEMENTS)
     assert out["added"] == 2 and out["duplicates"] == 1 and out["excluded"] == 1 and out["unqualified"] >= 1
-    assert '"office"~' in asked["q"] and '"shop"~' in asked["q"] and "32.58000,-97.23000" in asked["q"]
+    assert len(asked) == 4, "one small query per buyer type"
+    assert any('"office"~' in q for q in asked) and any('"shop"~' in q for q in asked)
+    assert all("32.58000,-97.23000" in q and "timeout:25" in q for q in asked)
     rows = {r.name: r for r in db.query(LeadIntelProspect).filter_by(source="openstreetmap").all()}
     assert set(rows) == {"Arlington Tower Offices", "Parks Mall Synthetic"}
     t = rows["Arlington Tower Offices"]
@@ -1033,3 +1035,67 @@ def test_discover_endpoint_is_reachable_and_contacts_nobody(pilot, monkeypatch):
     assert r.status_code == 200, r.text
     assert r.json()["added"] == 2
     assert db.query(EmailMessage).count() == 0
+
+
+# ── #452 launch readiness + owner campaign authorization ────────────────────
+def test_launch_readiness_says_no_with_reasons_and_refuses_authorization(pilot):
+    p = pilot
+    db = p["db"]
+    r = p["c"].get("/god/acquisition/workforce/launch-readiness", headers=_h(db, p["god"]))
+    assert r.status_code == 200, r.text
+    rows = {c["organization_id"]: c for c in r.json()["companies"]}
+    shine = rows[p["shine"].id]
+    assert shine["ready_to_launch"] == "NO" and shine["reasons"] and shine["live"] is False
+    keys = {c["key"]: c["ok"] for c in shine["checks"]}
+    assert keys["eligible_prospects"] is False and keys["workforce_on"] is False
+    a = p["c"].post("/god/acquisition/workforce/campaigns/%s/authorize" % p["shine"].id, json={"confirm": True},
+                    headers=_h(db, p["god"]))
+    assert a.status_code == 409 and "Not ready to launch" in a.json()["detail"]
+    from app.models.acquisition_models import AcquisitionCampaignAuthorization
+    assert db.query(AcquisitionCampaignAuthorization).count() == 0
+
+
+def test_test_company_is_never_ready_for_a_real_launch(pilot):
+    from app.services.acquisition import campaigns as CAMP
+    p = pilot
+    org, _ = _window_client(p)
+    lr = CAMP.launch_readiness(p["db"], org.id)
+    assert lr["is_test"] and lr["ready_to_launch"] == "NO"
+    assert any("TEST" in x for x in lr["reasons"])
+
+
+def test_authorization_is_time_boxed_and_revocable(pilot, monkeypatch):
+    from app.services.acquisition import campaigns as CAMP
+    p = pilot
+    db = p["db"]
+    monkeypatch.setattr(CAMP, "launch_readiness", lambda db_, org_id, now=None: {
+        "ready_to_launch": "YES", "reasons": [], "checks": []})
+    no = p["c"].post("/god/acquisition/workforce/campaigns/%s/authorize" % p["shine"].id, json={},
+                     headers=_h(db, p["god"]))
+    assert no.status_code == 422
+    ok = p["c"].post("/god/acquisition/workforce/campaigns/%s/authorize" % p["shine"].id,
+                     json={"confirm": True, "days": 400, "max_sends_per_day": 99}, headers=_h(db, p["god"]))
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["max_sends_per_day"] == CAMP.MAX_SENDS
+    assert CAMP.active(db, p["shine"].id) is not None
+    from datetime import datetime, timedelta
+    assert CAMP.active(db, p["shine"].id, datetime.utcnow() + timedelta(days=CAMP.MAX_DAYS + 1)) is None
+    rv = p["c"].post("/god/acquisition/workforce/campaigns/%s/revoke" % p["shine"].id, headers=_h(db, p["god"]))
+    assert rv.json()["revoked"] == 1 and CAMP.active(db, p["shine"].id) is None
+
+
+def test_discovery_keeps_going_when_one_buyer_type_query_fails(pilot):
+    from app.services.acquisition import discovery_osm as OSM
+    p = pilot
+    db = p["db"]
+    org, prof = _window_client(p)
+
+    def flaky(q):
+        if '"shop"~' in q:
+            raise RuntimeError("OpenStreetMap search servers are busy (504)")
+        return OSM_ELEMENTS[:1]
+    out = OSM.run(db, org, prof, city="Arlington", state="TX", geocode=lambda c, s: (1, 2, 3, 4), overpass=flaky)
+    assert out["added"] == 1 and out.get("segment_errors") and not out.get("error")
+    allfail = OSM.run(db, org, prof, city="Arlington", state="TX", geocode=lambda c, s: (1, 2, 3, 4),
+                      overpass=lambda q: (_ for _ in ()).throw(RuntimeError("busy")))
+    assert allfail["added"] == 0 and "busy" in (allfail.get("error") or "")

@@ -63,3 +63,11 @@ test('a workforce draft is approved by the existing Send, with its id', () => {
   assert.ok(s.includes('draft_id: draft.id'))
   assert.ok(s.includes('/drafts/${draft.id}/reject'))
 })
+
+test('launch readiness shows YES/NO with reasons; authorizing is gated and confirmed', () => {
+  const s = src('HarveyWorkforce.jsx')
+  assert.ok(s.includes('/god/acquisition/workforce/launch-readiness'))
+  assert.ok(s.includes("c.ready_to_launch === 'YES' && !c.authorized"), 'authorize only offered when YES')
+  assert.ok(s.includes('confirm: true') && s.includes('<Confirm'), 'explicit confirmation')
+  assert.ok(s.includes('/revoke'))
+})
