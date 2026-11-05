@@ -965,7 +965,7 @@ def test_free_discovery_adds_new_buyers_with_provenance_and_no_competitors(pilot
                   geocode=lambda c, s: (32.58, -97.23, 32.81, -97.03),
                   overpass=lambda q: asked.append(q) or OSM_ELEMENTS)
     assert out["added"] == 2 and out["duplicates"] == 1 and out["excluded"] == 1 and out["unqualified"] >= 1
-    assert len(asked) == 4, "one small query per buyer type"
+    assert len(asked) == 6, "one small query per buyer-type tag"
     assert any('"office"~' in q for q in asked) and any('"shop"~' in q for q in asked)
     assert all("32.58000,-97.23000" in q and "timeout:25" in q for q in asked)
     rows = {r.name: r for r in db.query(LeadIntelProspect).filter_by(source="openstreetmap").all()}
@@ -1091,7 +1091,7 @@ def test_discovery_keeps_going_when_one_buyer_type_query_fails(pilot):
     org, prof = _window_client(p)
 
     def flaky(q):
-        if '"shop"~' in q:
+        if '"shop"~' in q or '"landuse"~' in q:
             raise RuntimeError("OpenStreetMap search servers are busy (504)")
         return OSM_ELEMENTS[:1]
     out = OSM.run(db, org, prof, city="Arlington", state="TX", geocode=lambda c, s: (1, 2, 3, 4), overpass=flaky)
@@ -1099,3 +1099,26 @@ def test_discovery_keeps_going_when_one_buyer_type_query_fails(pilot):
     allfail = OSM.run(db, org, prof, city="Arlington", state="TX", geocode=lambda c, s: (1, 2, 3, 4),
                       overpass=lambda q: (_ for _ in ()).throw(RuntimeError("busy")))
     assert allfail["added"] == 0 and "busy" in (allfail.get("error") or "")
+
+
+def test_realtors_desks_and_other_cities_are_not_counted_and_old_finds_are_requalified(pilot):
+    from app.services.acquisition import discovery_osm as OSM
+    p = pilot
+    db = p["db"]
+    org, prof = _window_client(p)
+    els = [
+        {"type": "node", "id": 21, "tags": {"name": "Arlington Park Realtors", "office": "estate_agent", "addr:city": "Arlington"}},
+        {"type": "node", "id": 22, "tags": {"name": "Guest Relations", "office": "guest_relations", "amenity": "restaurant"}},
+        {"type": "node", "id": 23, "tags": {"name": "FW Property Co", "office": "property_management", "addr:city": "Fort Worth"}},
+        {"type": "node", "id": 24, "tags": {"name": "Arlington Property Co", "office": "property_management", "addr:city": "Arlington"}},
+    ]
+    out = OSM.run(db, org, prof, city="Arlington", state="TX", geocode=lambda c, s: (1, 2, 3, 4), overpass=lambda q: els)
+    assert out["added"] == 1 and out["unqualified"] == 2 and out["outside_city"] == 1
+    # An earlier, looser run's realtor is taken out of the pool (kept, with the reason).
+    old = _pool(db, name="Old Realtor (synthetic)")
+    old.source = "openstreetmap"
+    old.evidence_json = json.dumps({"discovery": {"qualification": "Property manager in Arlington (OpenStreetMap: office=estate_agent)"}})
+    db.commit()
+    assert OSM.requalify(db) == 1
+    db.refresh(old)
+    assert old.suppressed_reason.startswith("Not a buyer: office=estate_agent")
