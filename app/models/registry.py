@@ -281,6 +281,8 @@ import app.models.sms_consent_models  # noqa: F401  (imported for side effects)
 # SMS Delivery Recovery (#482): sms_recovery_items / _events / _policies.
 # Added to BOTH blocks in this file.
 import app.models.sms_recovery_models  # noqa: F401  (imported for side effects)
+# Human-assisted AI learning (SCI handoff auto-resume): program_handoff_learnings / _learning_uses.
+import app.models.handoff_learning_models  # noqa: F401  (imported for side effects)
 # Universal intake (org_contacts / import_batch_files / import_record_versions /
 # intake_classifications). Contacts that are NOT leads live here. Added to BOTH
 # blocks in this file, per the merge-artefact note above.
@@ -569,6 +571,8 @@ import app.models.sms_consent_models  # noqa: F401  (imported for side effects)
 # SMS Delivery Recovery (#482): sms_recovery_items / _events / _policies.
 # Added to BOTH blocks in this file.
 import app.models.sms_recovery_models  # noqa: F401  (imported for side effects)
+# Human-assisted AI learning (SCI handoff auto-resume): program_handoff_learnings / _learning_uses.
+import app.models.handoff_learning_models  # noqa: F401  (imported for side effects)
 # Universal intake (org_contacts / import_batch_files / import_record_versions /
 # intake_classifications). Contacts that are NOT leads live here. Added to BOTH
 # blocks in this file, per the merge-artefact note above.

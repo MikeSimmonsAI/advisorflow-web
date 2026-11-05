@@ -364,6 +364,7 @@ function InboxTab({ loc, act, open, selected, campaign = 'all', setCampaign }) {
   // screen), never turned into an empty "Nobody is waiting" list.
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [learning, setLearning] = useState(false)
   const seq = useRef(0)
   const load = useCallback(() => {
     const n = ++seq.current
@@ -395,7 +396,9 @@ function InboxTab({ loc, act, open, selected, campaign = 'all', setCampaign }) {
       <div className="cmd-inbox-sync">
         <small>{r?.updated_at ? `Updated ${time(r.updated_at)}` : ''}</small>
         <button className="link" disabled={busy} onClick={load}>{busy ? 'Refreshing…' : 'Refresh'}</button>
+        <button className="link" onClick={() => setLearning(v => !v)}>AI learning</button>
       </div></header>
+    {learning && <LearningPanel onClose={() => setLearning(false)} />}
     {err && <p className="cmd-err" role="alert">Couldn't refresh: {err}.{r?.updated_at ? ` Showing what was on screen at ${time(r.updated_at)}.` : ''} <button className="link" onClick={load}>Try again</button></p>}
     {latest && <p className="cmd-muted small cmd-latest">Latest reply: <b>{latest.name}</b>{latest.location ? ` · ${latest.location}` : ''} · {latest.channel_label} · {time(latest.received_at)}
       {latest.where !== 'all' && <> - <button className="link" onClick={() => setFlt(latest.where)}>{latest.where === 'opted_out' ? 'opted out' : 'handled'} ›</button></>}
@@ -545,6 +548,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
   const [subject, setSubject] = useState('')
   const [slots, setSlots] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [learnId, setLearnId] = useState(null)   // a just-captured AI learning candidate
   const [done, setDone] = useState({})
   const [pick, setPick] = useState(null)        // slot tapped, waiting for "Book it"
   const [booked, setBooked] = useState(null)    // what happened, shown on the card
@@ -598,11 +602,22 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
           response_id: mode === 'email' ? f.reply_to?.response_id : (f.reply_to?.channel === 'sms' ? f.reply_to?.response_id : null),
         })
         const where = mode === 'email' ? `Email sent to ${r.email?.to || 'the sender'} in the same thread` : 'Text sent'
-        toast(r.duplicate ? 'Already sent - not sent again.' : `${where}.${then === 'ai' ? ' AI will answer their next reply.' : ''}`)
+        // Handoff is temporary: after the provider accepts a person's reply
+        // the AI takes the NEXT message, unless Keep Human Control was chosen.
+        const h = r.handoff || {}
+        const after = h.race ? ' The family wrote again while it was sending - still with you.'
+          : h.ai_resumed ? ' Human replied - AI resumed: the AI answers their next message.'
+            : h.kept_human ? ' You keep this conversation - the AI will not reply.' : ''
+        toast(r.duplicate ? 'Already sent - not sent again.' : `${where}.${after}`)
+        if (r.learning_candidate_id) setLearnId(r.learning_candidate_id)
       }
       sendKey.current = null
       setText(''); setSubject(''); load()
-    } catch (e) { toast(e.message || 'Not sent.') } finally { setBusy(false) }
+    } catch (e) {
+      // NOT SENT: the draft stays in the box, the handoff stays open, and the
+      // same send key is reused so a retry can never send twice.
+      toast(`Human reply not sent: ${e.message || 'the provider refused it'}. Your draft is kept.`)
+    } finally { setBusy(false) }
   }
   const setOwner = async owner => {
     setBusy(true)
@@ -718,8 +733,11 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
       {f.handling?.opted_out && <section className="cmd-handoff-banner" role="status"><b>DO NOT CONTACT</b>
         <p>This family opted out or was marked Do Not Contact. Nothing goes to them.</p></section>}
       {f.human_handoff && <section className="cmd-handoff-banner" role="alert">
-        <b>HUMAN HANDOFF</b>
-        <p>The AI sent this family nothing. A person needs to contact them.{f.handoff_reason ? ` Why: ${f.handoff_reason}` : ''}</p>
+        <b>HUMAN RESPONSE NEEDED</b>
+        <p>The AI sent this family nothing.{f.handoff_reason ? ` Why: ${f.handoff_reason}` : ''}</p>
+        {f.handoff_message?.text && <p className="small">They wrote ({f.handoff_message.channel === 'email' ? 'email' : 'text'}{f.handoff_message.received_at ? `, ${dayLabel(f.handoff_message.received_at)} ${time(f.handoff_message.received_at)}` : ''}): <i>"{f.handoff_message.text}"</i></p>}
+        {f.handling?.changed_by && <p className="small">Assigned: {f.handling.changed_by}</p>}
+        <p className="small">Reply below and send - the AI takes their next message. Choose "Send & keep human control" to keep it.</p>
         {f.suggested_reply && <p className="small">The AI's draft is saved: tap Reply, then "Use suggested reply" - or write your own.</p>}
         {f.response_id && <button onClick={markHandled}>Mark handled</button>}
       </section>}
@@ -857,11 +875,15 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
           {mode !== 'note' && f.suggested_reply && text !== f.suggested_reply && <button className="link" onClick={() => setText(f.suggested_reply)}>Use suggested reply</button>}
           {mode === 'email' && !f.is_demo && !text.includes('{GUIDE}') && <button className="link" onClick={() => setText(t => `${t.trim()}${t.trim() ? ' ' : ''}{GUIDE}`)}>Add guide link</button>}
           {mode === 'text' && !f.is_demo && !text.includes('{BOOKING}') && <button className="link" onClick={() => setText(t => `${t.trim()}${t.trim() ? ' ' : ''}Pick a time that works for you here: {BOOKING}`)}>Add booking link</button>}
-          {mode !== 'note' && !f.is_demo && <button disabled={busy || !text.trim() || !canSend} onClick={() => send('ai')}>Send &amp; let AI continue</button>}
-          <button className="primary" disabled={busy || !text.trim() || (mode !== 'note' && !f.is_demo && !canSend)} onClick={() => send('human')}>
+          {mode !== 'note' && !f.is_demo && <button disabled={busy || !text.trim() || !canSend} onClick={() => send('human')}
+            title="The AI will not reply until someone switches AI Handling back on.">Send &amp; keep human control</button>}
+          <button className="primary" disabled={busy || !text.trim() || (mode !== 'note' && !f.is_demo && !canSend)} onClick={() => send('ai')}
+            title={mode === 'note' ? undefined : 'After it is sent, the AI answers their next message.'}>
             {mode === 'note' ? 'Save note' : mode === 'text' ? 'Send text' : 'Send email'}</button>
         </div>
       </section>
+      {mode !== 'note' && !f.is_demo && <p className="cmd-muted small cmd-sendhint">After you send, the AI answers this family's next message.</p>}
+      {learnId && <LearningReview id={learnId} onClose={() => setLearnId(null)} toast={toast} />}
       {toastText && <div className="cmd-toast" role="status">{toastText}</div>}
     </div>
   )
@@ -895,4 +917,84 @@ function TodayActivity({ live, engagement, open }) {
       </button>))}</div>
       : <p className="cmd-card cmd-muted pad">Nothing sent yet today.</p>}
   </>
+}
+
+
+// ── AI LEARNING (owner, Nov 4) ───────────────────────────────────────────────
+// A person's answer to a handed-off question is kept as a CANDIDATE, with the
+// family's name, number, email and address removed. It reaches the AI only
+// after a manager writes the general version and approves it - for this
+// location, or on purpose for every location. Nothing is retrained: approved
+// answers are offered to the AI for similar questions, and every use is
+// counted with what the AI then did.
+function LearningCard({ item, onDone, toast }) {
+  const [q, setQ] = useState(item.approved_question || item.question || '')
+  const [a, setA] = useState(item.approved_answer || item.human_answer || '')
+  const [scope, setScope] = useState(item.location_id ? 'location' : 'program')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const go = async (path, body, msg) => {
+    setBusy(true); setErr('')
+    try { await api.post(`/program/command/learning/${item.id}/${path}`, body); toast?.(msg); onDone?.() }
+    catch (e) { setErr(e.message || 'Not saved.') } finally { setBusy(false) }
+  }
+  if (item.status === 'active') return (
+    <div className="cmd-learn">
+      <p className="small"><b>Q:</b> {item.approved_question}</p><p className="small"><b>A:</b> {item.approved_answer}</p>
+      <p className="cmd-muted small">{item.scope === 'program' ? 'All locations' : (item.location || 'This location')} · used {item.uses} time{item.uses === 1 ? '' : 's'}</p>
+      <button className="link" disabled={busy} onClick={() => go('status', { status: 'retired' }, 'Retired - the AI will not use it.')}>Retire</button>
+      {err && <p className="cmd-err">{err}</p>}
+    </div>)
+  return (
+    <div className="cmd-learn">
+      <p className="cmd-muted small">{item.location || 'No location'} · {item.channel === 'email' ? 'Email' : 'Text'}{item.escalation_reason ? ` · AI asked for help: ${item.escalation_reason}` : ''}</p>
+      <p className="small"><b>Family asked:</b> {item.question}</p>
+      <p className="small"><b>Our person answered:</b> {item.human_answer}</p>
+      <label className="small">General question<textarea rows={2} value={q} onChange={e => setQ(e.target.value)} /></label>
+      <label className="small">Answer the AI may give<textarea rows={3} value={a} onChange={e => setA(e.target.value)} /></label>
+      <label className="small">Use for <select value={scope} onChange={e => setScope(e.target.value)}>
+        {item.location_id && <option value="location">{item.location || 'this location'} only</option>}
+        <option value="program">every location</option></select></label>
+      <div className="cmd-send">
+        <button className="link" disabled={busy} onClick={() => go('status', { status: 'rejected' }, 'Not used for learning.')}>Don't use</button>
+        <button className="primary" disabled={busy || !q.trim() || !a.trim()} onClick={() => go('approve', { question: q, answer: a, scope, activate: true }, 'Approved - the AI can use this answer for similar questions.')}>Approve for AI</button>
+      </div>
+      {err && <p className="cmd-err">{err}</p>}
+    </div>)
+}
+
+function LearningReview({ id, onClose, toast }) {
+  const [item, setItem] = useState(null)
+  useEffect(() => {
+    api.get('/program/command/learning?status=candidate').then(r => setItem((r.items || []).find(x => x.id === id) || false)).catch(() => setItem(false))
+  }, [id])
+  if (item === null) return null
+  if (item === false) return null
+  return (
+    <section className="cmd-card cmd-compose" aria-label="Review for AI learning">
+      <h3>Review for AI learning <button className="link" onClick={onClose}>Later</button></h3>
+      <LearningCard item={item} toast={toast} onDone={onClose} />
+    </section>)
+}
+
+function LearningPanel({ onClose }) {
+  const [tab, setTab] = useState('candidate')
+  const [r, setR] = useState(null)
+  const [note, setNote] = useState('')
+  const load = useCallback(() => { api.get(`/program/command/learning?status=${tab}`).then(setR).catch(e => setR({ items: [], error: e.message })) }, [tab])
+  useEffect(() => { load() }, [load])
+  const c = r?.counts || {}
+  return (
+    <section className="cmd-card cmd-compose" aria-label="AI learning">
+      <h3>AI learning <button className="link" onClick={onClose}>Close</button></h3>
+      <p className="cmd-muted small">Answers our people gave when the AI asked for help. The AI uses an answer only after it is approved. {c.uses ? `Approved answers were used ${c.uses} times; ${c.uses_without_handoff} of those needed no person.` : ''}</p>
+      <div className="cmd-chips" role="tablist">
+        {[['candidate', 'To review'], ['active', 'In use'], ['retired', 'Retired']].map(([k, l]) => (
+          <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}{c[k] !== undefined ? <i>{c[k]}</i> : null}</button>))}
+      </div>
+      {note && <p className="cmd-muted small">{note}</p>}
+      {r === null ? <p className="cmd-muted">Loading…</p> : r.error ? <p className="cmd-err">{r.error}</p>
+        : !r.items.length ? <p className="cmd-muted">Nothing here.</p>
+          : r.items.map(i => <LearningCard key={i.id} item={i} toast={setNote} onDone={load} />)}
+    </section>)
 }

@@ -709,6 +709,11 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
         "badge": _badge(latest, conv) if latest else None,
         "human_handoff": _human_handoff(latest, conv),
         "handoff_reason": conv.handoff_reason if conv is not None and _human_handoff(latest, conv) else None,
+        # The family message that needs the person (the handoff's trigger).
+        "handoff_message": ({"text": (latest.body_excerpt or latest.summary or "")[:500],
+                             "channel": latest.channel,
+                             "received_at": latest.received_at.isoformat() + "Z" if latest.received_at else None}
+                            if conv is not None and _human_handoff(latest, conv) else None),
         "response_id": latest.id if latest else None,
         "suggested_reply": (_er.strip_signature(db, lead, latest.suggested_reply)
                             if latest and latest.suggested_reply else None),
@@ -743,7 +748,31 @@ def _handling(db, conv, lead=None, latest=None) -> dict:
             "changed_at": conv.owner_changed_at.isoformat() + "Z"
             if conv is not None and getattr(conv, "owner_changed_at", None) else None,
             "changed_by": by,
-            "note": getattr(conv, "owner_note", None) if conv is not None else None}
+            "note": getattr(conv, "owner_note", None) if conv is not None else None,
+            "ownership": ownership_state(conv, opted_out)}
+
+
+def ownership_state(conv, opted_out: bool = False) -> str:
+    """The conversation's ownership, named (owner, Nov 4), derived from the
+    canonical conversation state - no second source of truth:
+    AI_ACTIVE, HUMAN_REQUIRED, AI_RESUMED, HUMAN_RETAINED, CLOSED.
+    (HUMAN_RESPONDING / HUMAN_REPLY_PENDING exist only inside one reply
+    request: the send claim and idempotency key hold them, and ownership
+    changes only after the provider accepts the message.)"""
+    if opted_out or (conv is not None and conv.state in ("stopped", "closed")):
+        return "CLOSED"
+    if conv is None:
+        return "AI_ACTIVE"
+    note = getattr(conv, "owner_note", None) or ""
+    if conv.state in _HANDOFF_STATES:
+        return "HUMAN_RETAINED" if (conv.owner_changed_by and note in (KEPT_NOTE, "Owner replied by hand",
+                                                                       "Human handling on")) else "HUMAN_REQUIRED"
+    # The resume is stamped one second after the provider accepted the reply,
+    # so an AI turn later than (stamp - 1 s) came after the human's answer.
+    if note == RESUMED_NOTE and not (conv.last_ai_at and conv.owner_changed_at
+                                     and conv.last_ai_at >= conv.owner_changed_at - timedelta(seconds=1)):
+        return "AI_RESUMED"
+    return "AI_ACTIVE"
 
 
 def _reply_target(db, latest, lead) -> dict:
@@ -768,7 +797,10 @@ class ReplyIn(BaseModel):
     text: str
     idempotency_key: str
     response_id: Optional[str] = None
-    then: str = "human"               # who owns the conversation after this send: human | ai
+    # Who owns the conversation after this send. Handoff is TEMPORARY by
+    # default (owner, Nov 4): "ai" - the AI takes the NEXT reply. "human" =
+    # Keep Human Control, chosen on purpose.
+    then: str = "ai"
 
 
 @router.post("/reply")
@@ -816,6 +848,12 @@ def command_reply(body: ReplyIn, db: Session = Depends(get_db), user: User = Dep
         if resp is None:
             raise HTTPException(status_code=404, detail="That message is not in this family's conversation.")
     out: dict = {"channel": body.channel}
+    # Who had it before this send, and when the send began: a family message
+    # that arrives while the reply is going out must not be left with nobody.
+    conv_before = db.query(ProgramConversation).filter(ProgramConversation.lead_id == lead.id).first()
+    prior_state = conv_before.state if conv_before is not None else None
+    prior_reason = conv_before.handoff_reason if conv_before is not None else None
+    send_started = datetime.utcnow()
     if body.channel == "email":
         if resp is None or resp.channel != "email":
             raise HTTPException(status_code=422, detail="Choose the email you are answering.")
@@ -848,17 +886,71 @@ def command_reply(body: ReplyIn, db: Session = Depends(get_db), user: User = Dep
     else:
         raise HTTPException(status_code=422, detail="channel must be sms or email")
     out["response_status"] = resp.handling_status if resp is not None else None
-    # Ownership AFTER the send, stamped after it, so the AI never reads this
-    # manual message as "a person took over" when it was told to continue.
+    # Ownership AFTER the provider accepted the send (a failure raised above,
+    # leaving the handoff open and nothing claimed), stamped after it, so the
+    # AI never reads this manual message as "a person took over".
+    after = _ownership_after_reply(db, lead, resp, body.then, send_started)
     try:
-        conv = ai_setter.set_owner(db, lead, body.then, actor=user.id,
-                                   note=("Owner replied and let AI continue" if body.then == "ai"
-                                         else "Owner replied by hand"),
+        conv = ai_setter.set_owner(db, lead, after["owner"], actor=user.id, note=after["note"],
                                    at=sent_at + timedelta(seconds=1))
+        # A family message that landed between that check and this commit:
+        # it was processed while a person owned the conversation, so the AI
+        # never answered it - give it back to a person rather than let it sit.
+        if after["owner"] == ai_setter.AI_OWNER and _newer_family_message(db, lead, resp, send_started):
+            after = {"owner": ai_setter.HUMAN_OWNER, "note": RACE_NOTE, "race": True}
+            conv = ai_setter.set_owner(db, lead, after["owner"], actor=user.id, note=after["note"],
+                                       at=sent_at + timedelta(seconds=2))
         out["handling"] = _handling(db, conv)
     except ValueError as exc:
         out["handling_error"] = str(exc)
+        conv = conv_before
+    was_handoff = prior_state in _HANDOFF_STATES
+    out["handoff"] = {"was_handoff": was_handoff, "ai_resumed": after["owner"] == ai_setter.AI_OWNER
+                      and "handling_error" not in out,
+                      "kept_human": after["owner"] == ai_setter.HUMAN_OWNER, "race": bool(after.get("race")),
+                      "note": after["note"]}
+    # Human-assisted learning: the answer to a handed-off question becomes a
+    # CANDIDATE (redacted; never used by the AI until a manager approves it).
+    if was_handoff and resp is not None:
+        try:
+            from app.services.programs import handoff_learning as HL
+            c = HL.capture_candidate(db, prog, lead, conv, resp, text, channel=body.channel,
+                                     outcome="ai_resumed" if out["handoff"]["ai_resumed"] else "human_retained",
+                                     user_id=user.id, reason=prior_reason)
+            db.commit()
+            out["learning_candidate_id"] = getattr(c, "id", None)
+        except Exception:                                # noqa: BLE001
+            db.rollback()
+            import logging
+            logging.getLogger(__name__).exception("learning candidate not captured for lead %s", lead.id)
     return out
+
+
+RESUMED_NOTE = "Human replied - AI resumed"
+KEPT_NOTE = "Human replied - kept by a person"
+RACE_NOTE = "The family wrote again while the reply was sending - still with a person"
+
+
+def _newer_family_message(db, lead, resp, since) -> bool:
+    """An open family message newer than the one answered (or than the start
+    of the send, when no message was chosen)."""
+    q = db.query(ProgramResponse.id).filter(ProgramResponse.organization_id == lead.organization_id,
+                                            ProgramResponse.lead_id == lead.id,
+                                            ProgramResponse.handling_status.in_(_NEEDS_REPLY))
+    if resp is not None:
+        q = q.filter(ProgramResponse.id != resp.id, ProgramResponse.received_at > resp.received_at)
+    else:
+        q = q.filter(ProgramResponse.received_at >= since)
+    return q.first() is not None
+
+
+def _ownership_after_reply(db, lead, resp, then: str, since) -> dict:
+    from app.services.programs import ai_setter
+    if then == "human":
+        return {"owner": ai_setter.HUMAN_OWNER, "note": KEPT_NOTE}
+    if _newer_family_message(db, lead, resp, since):
+        return {"owner": ai_setter.HUMAN_OWNER, "note": RACE_NOTE, "race": True}
+    return {"owner": ai_setter.AI_OWNER, "note": RESUMED_NOTE}
 
 
 class FollowUpIn(BaseModel):
@@ -1459,3 +1551,70 @@ def _latest_activity(db, r, locs) -> Optional[dict]:
             "channel_label": "EMAIL" if r.channel == "email" else ("VOICEMAIL" if r.channel == "voicemail" else "TEXT"),
             "received_at": r.received_at.isoformat() + "Z" if r.received_at else None,
             "open": r.handling_status != "closed", "class": r.response_class, "where": where}
+
+
+# ── Human-assisted AI learning (review queue) ───────────────────────────────
+
+@router.get("/learning")
+def learning_list(status: str = Query("candidate"), db: Session = Depends(get_db),
+                  user: User = Depends(require_tenant_or_observer)):
+    """Answers people gave to handed-off questions, for review. Candidates are
+    redacted and never reach the AI; only ACTIVE answers do."""
+    from app.models.handoff_learning_models import STATUSES, ProgramHandoffLearning
+    from app.services.programs import handoff_learning as HL
+    prog = _program(db, user, managers_only=False)
+    org = prog.organization_id
+    q = db.query(ProgramHandoffLearning).filter(ProgramHandoffLearning.organization_id == org)
+    if status in STATUSES:
+        q = q.filter(ProgramHandoffLearning.status == status)
+    rows = q.order_by(ProgramHandoffLearning.created_at.desc()).limit(200).all()
+    locs = _locations(db, org)
+    return {"items": [HL.view(r, locs.get(r.location_id)) for r in rows], "counts": HL.counts(db, org)}
+
+
+class LearningApproveIn(BaseModel):
+    question: str
+    answer: str
+    scope: str = "location"
+    activate: bool = True
+
+
+@router.post("/learning/{learning_id}/approve")
+def learning_approve(learning_id: str, body: LearningApproveIn, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_user)):
+    from app.services.programs import handoff_learning as HL
+    from app.routers.audit_log_router import log_action
+    prog = _program(db, user)                            # managers only
+    try:
+        row = HL.approve(db, prog.organization_id, learning_id, user.id, question=body.question,
+                         answer=body.answer, scope=body.scope, activate=body.activate)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Not found.")
+    except HL.Refused as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    log_action(db, prog.organization_id, user.id, action="sci.learning.approve", target_type="handoff_learning",
+               target_id=row.id, details={"status": row.status, "scope": row.scope}, commit=False)
+    db.commit()
+    return HL.view(row)
+
+
+class LearningStatusIn(BaseModel):
+    status: str                          # active | retired | rejected
+
+
+@router.post("/learning/{learning_id}/status")
+def learning_status(learning_id: str, body: LearningStatusIn, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user)):
+    from app.services.programs import handoff_learning as HL
+    from app.routers.audit_log_router import log_action
+    prog = _program(db, user)                            # managers only
+    try:
+        row = HL.set_status(db, prog.organization_id, learning_id, user.id, body.status)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Not found.")
+    except HL.Refused as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    log_action(db, prog.organization_id, user.id, action="sci.learning." + body.status,
+               target_type="handoff_learning", target_id=row.id, commit=False)
+    db.commit()
+    return HL.view(row)
