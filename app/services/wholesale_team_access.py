@@ -714,8 +714,8 @@ def history(db: Session, org_id: str, limit: int = 200) -> List[Dict[str, Any]]:
     labels = {"profile_created": "Created a profile", "profile_updated": "Changed a profile",
               "profile_retired": "Retired a profile", "member_access_set": "Changed someone's access",
               "member_suspended": "Suspended someone", "member_reactivated": "Reactivated someone",
-              "member_removed": "Removed someone from the team", "invited": "Sent an invitation",
-              "invite_sent": "Emailed an invitation", "invite_resent": "Resent an invitation",
+              "member_removed": "Removed someone from the team", "invited": "Created an invitation",
+              "invite_sent": "Emailed an invitation", "invite_resent": "Made a new invitation link",
               "invite_cancelled": "Cancelled an invitation", "invite_accepted": "Accepted an invitation",
               "escalation_denied": "Tried to give more access than they hold (refused)"}
     out = []
