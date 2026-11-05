@@ -941,6 +941,8 @@ def list_properties(db: Session = Depends(get_db),
     settings = svc.resolve_settings(db, org_id)
     query = db.query(WholesaleProperty).filter(
         WholesaleProperty.organization_id == org_id)
+    from app.services import wholesale_access as _access   # #439 record visibility
+    query = _access.scope_query(query, WholesaleProperty.assigned_to_id, db, org_id, user)
     if not include_test:
         query = query.filter(WholesaleProperty.is_test.isnot(True))
     for field, value in (("state", state), ("city", city),
@@ -2124,6 +2126,9 @@ def list_deals(db: Session = Depends(get_db),
         raise HTTPException(status_code=409, detail="No customer organization selected.")
     settings = svc.resolve_settings(db, org_id)
     query = db.query(WholesaleDeal).filter(WholesaleDeal.organization_id == org_id)
+    # #439: a custom-access login sees only the deals its record visibility allows.
+    from app.services import wholesale_access as _access
+    query = _access.scope_query(query, WholesaleDeal.assigned_to_id, db, org_id, user)
     if not include_test:
         query = query.filter(WholesaleDeal.is_test.isnot(True))
     if stage:
@@ -2925,6 +2930,12 @@ def list_approvals(db: Session = Depends(get_db),
         WholesaleApproval.organization_id == org_id)
     if status_filter:
         query = query.filter(WholesaleApproval.status == status_filter)
+    # #439: a custom-access login sees approvals only on deals it may see.
+    from app.services import wholesale_access as _access
+    if _access.visible_user_ids(db, org_id, user) is not None:
+        seen_deals = _access.scope_query(db.query(WholesaleDeal.id).filter(WholesaleDeal.organization_id == org_id),
+                                         WholesaleDeal.assigned_to_id, db, org_id, user)
+        query = query.filter(WholesaleApproval.deal_id.in_(seen_deals.subquery()))
     rows = query.order_by(WholesaleApproval.created_at.desc()).limit(limit).all()
 
     deals = {d.id: d for d in db.query(WholesaleDeal).filter(

@@ -81,6 +81,9 @@ def visible_user_ids(db: Session, org_id: str, user: User) -> Optional[Set[str]]
     role = T.role_of(db, user, org_id)
     if role in (None, T.MEMBER):
         return None
+    if role == T.CUSTOM:
+        from app.services import wholesale_access as _A     # record visibility from their access (#439)
+        return _A.visible_user_ids(db, org_id, user)
     if role in T.FIELD_ROLES:
         return {user.id}
     # manager / team lead: themselves and everyone below them in the tree
@@ -443,8 +446,16 @@ def listing(db: Session, org_id: str, user: User, *, when: str = "today", day: O
     else:
         q = q.order_by(WholesaleFieldAppointment.starts_at.desc())
     items = [appt_json(db, a) for a in q.limit(300).all()]
+    # The screen offers exactly what this person is allowed (#439): the rep
+    # filter's choices follow their record visibility, and Book only shows when
+    # the server would accept the booking.
+    can_book = may_book(db, user)
+    if can_book and T.role_of(db, user, org_id) == T.CUSTOM:
+        from app.services import wholesale_access as _A
+        can_book = _A.allows(_A.effective(db, user, org_id), "appointments", "create")
+    visibility = ("workspace" if visible is None else "assigned" if set(visible) <= {user.id} else "team")
     return {"when": when, "day": the_day.isoformat(), "items": items,
-            "can_book": may_book(db, user), "is_field": T.is_field(db, user)}
+            "can_book": can_book, "is_field": T.is_field(db, user), "visibility": visibility}
 
 
 def change(db: Session, org_id: str, user: User, appt_id: str, data: Dict[str, Any]) -> WholesaleFieldAppointment:

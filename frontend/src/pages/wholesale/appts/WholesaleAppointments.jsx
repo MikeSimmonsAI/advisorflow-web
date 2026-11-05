@@ -160,6 +160,7 @@ export default function WholesaleAppointments() {
   }, [])
 
   const isField = !!data?.is_field
+  const visibility = data?.visibility || 'workspace'
   const items = data?.items || []
   const replace = (a) => setData((d) => ({ ...d, items: d.items.map((x) => (x.id === a.id ? a : x)) }))
   const groups = when === 'today' ? [[day, items]] : Object.entries(items.reduce((g, a) => {
@@ -181,11 +182,14 @@ export default function WholesaleAppointments() {
             {!isToday ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => setDay(todayCentral())}>Today</button> : null}
           </>
         ) : null}
-        {!isField ? (
+        {/* The choices follow what the server lets this person see: everyone,
+            their team, or only their own appointments (#439). */}
+        {!isField && visibility === 'assigned' ? <span className="evo-muted evo-small" data-testid="ap-only-mine">Only your appointments</span> : null}
+        {!isField && visibility !== 'assigned' ? (
           <select className="ap-input" value={rep} onChange={(e) => setRep(e.target.value)} aria-label="Rep">
-            <option value="">Everyone</option>
+            <option value="">{visibility === 'team' ? 'My team' : 'Everyone'}</option>
             <option value="me">Mine</option>
-            <option value="unassigned">No rep yet</option>
+            {visibility === 'workspace' ? <option value="unassigned">No rep yet</option> : null}
             {reps.map((r) => <option key={r.user_id} value={r.user_id}>{r.name}</option>)}
           </select>
         ) : null}

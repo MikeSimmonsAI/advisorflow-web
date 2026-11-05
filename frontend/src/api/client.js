@@ -702,6 +702,11 @@ export async function fetchAndStoreBranding({ applyTheme = true,
       // WHICH LOCATION (workspace) THIS ANSWER WAS COMPUTED FOR, the locations
       // this person may select, and whether a stored selection was rejected.
       workspace_location: data.workspace_location ?? null,
+      // WHO THIS PERSON IS ON THE WHOLESALE TEAM (#439). The server has sent
+      // this for months; it was missing from this whitelist, so the rail and
+      // redirects written for wholesale-only, field and custom-access logins
+      // never saw it. The server fence refused their requests regardless.
+      wholesale_team: data.wholesale_team ?? null,
     }
     // A selection the server refused (unassigned, inactive, another tenant's)
     // is dropped so it is not sent again.

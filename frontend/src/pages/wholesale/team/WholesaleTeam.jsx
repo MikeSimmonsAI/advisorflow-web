@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../../api/client'
 import { EvoApp, PageHead } from '../ds/ds'
+import { ACCESS_TABS, Directory, HistoryTab, InviteTab, ProfilesTab, Tabs, useAccess } from './AccessBuilder'
 import '../ds/evo-pages.css'
 import './team.css'
 
@@ -223,41 +224,54 @@ function FieldRules() {
 }
 
 export default function WholesaleTeam() {
+  // #439: Team is now tabs - the directory with each person's access, Invite,
+  // reusable Access profiles and the History of every access change. The
+  // reporting tree and the field offer rules stay where they were.
   const [data, setData] = useState(null)
   const [err, setErr] = useState(null)
+  const [tab, setTab] = useState('team')
+  const acc = useAccess()
+  const reloadAll = () => {
+    acc.reload()
+    api.get('/wholesale/team').then(setData).catch(() => {})
+  }
   useEffect(() => {
     api.get('/wholesale/team').then(setData).catch((ex) => setErr(ex.status === 403
       ? 'Only an admin can manage the Wholesale team.' : (ex.message || 'The team could not be loaded.')))
   }, [])
+  const ready = acc.catalog && acc.dir
   return (
     <EvoApp world="operations">
       <PageHead world="operations" eyebrow="Wholesale" title="Team"
-                sub="Who can open Wholesale, what kind of login they have, and who they report to." />
-      {err ? <p className="wt-err">{err}</p> : null}
-      {!data && !err ? <p className="evo-muted">Loading the team…</p> : null}
-      {data ? (
-        <div className="wt-layout">
-          <div className="wt-main">
-            <section className="evo-panel">
-              <h2 className="wt-h2">The team ({data.members.length})</h2>
-              {data.members.length ? (
-                <table className="wt-table">
-                  <thead><tr><th>Person</th><th>Kind of login</th><th>Reports to</th><th><span className="evo-sr">Actions</span></th></tr></thead>
-                  <tbody>{data.members.map((m) => <MemberRow key={m.user_id} m={m} data={data} onSaved={setData} />)}</tbody>
-                </table>
-              ) : <p className="evo-muted">Nobody is on the team yet. Until the first person is added, everyone in the workspace can open Wholesale, the same as today.</p>}
-              <p className="evo-muted evo-small">Taking someone off the team keeps their login and their work; they just can no longer open Wholesale. Anyone who reported to them moves up a level.</p>
-            </section>
-            <AddPerson data={data} onSaved={setData} />
-            <FieldRules />
+                sub="Who can open Wholesale, exactly what each person can see and do, and who they report to." />
+      {err && !ready ? <p className="wt-err">{err}</p> : null}
+      {acc.err && !err ? <p className="wt-err">{acc.err}</p> : null}
+      {!ready && !err && !acc.err ? <p className="evo-muted">Loading the team…</p> : null}
+      {ready ? (
+        <>
+          <Tabs items={ACCESS_TABS.map((t) => ({ ...t, label: t.key === 'invite' && acc.dir.invites.some((i) => i.status === 'pending')
+            ? `${t.label} (${acc.dir.invites.filter((i) => i.status === 'pending').length})` : t.label }))}
+                value={tab} onChange={setTab} label="Team sections" />
+          <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="wa-panel">
+            {tab === 'team' ? (
+              <div className="wt-layout">
+                <div className="wt-main">
+                  <Directory catalog={acc.catalog} dir={acc.dir} reload={reloadAll} />
+                  <FieldRules />
+                </div>
+                {data ? (
+                  <aside className="evo-panel wt-side">
+                    <h2 className="wt-h2">Who reports to whom</h2>
+                    <Tree members={data.members} />
+                  </aside>
+                ) : null}
+              </div>
+            ) : null}
+            {tab === 'invite' ? <InviteTab catalog={acc.catalog} dir={acc.dir} reload={reloadAll} /> : null}
+            {tab === 'profiles' ? <ProfilesTab catalog={acc.catalog} dir={acc.dir} reload={reloadAll} /> : null}
+            {tab === 'history' ? <HistoryTab /> : null}
           </div>
-          <aside className="evo-panel wt-side">
-            <h2 className="wt-h2">Who reports to whom</h2>
-            <Tree members={data.members} />
-            <h3 className="wt-h3">Kinds of login</h3>
-            <dl className="wt-roles">{data.roles.map((r) => <div key={r.key}><dt>{r.label}</dt><dd>{r.help}</dd></div>)}</dl>
-          </aside>
-        </div>
+        </>
       ) : null}
     </EvoApp>
   )

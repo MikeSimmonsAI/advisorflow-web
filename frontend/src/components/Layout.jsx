@@ -73,6 +73,35 @@ const FIELD_NAV = new Set(['/wholesale/appointments', '/wholesale/canvass', '/se
 const FIELD_PAGES = ['/wholesale/appointments', '/wholesale/canvass', '/wholesale/evosense/property/', '/settings']
 const fieldMayOpen = (p) => FIELD_PAGES.some((x) => p === x.replace(/\/$/, '') || p.startsWith(x.endsWith('/') ? x : x + '/'))
 
+// #439 custom-access logins: which access module each Wholesale screen needs
+// (app/services/wholesale_access.py). Longest prefix wins; a screen not listed
+// is hidden (default deny). The server refuses the data behind it either way.
+const WS_SCREEN_MODULE = [
+  ['/wholesale/buyers/buy-boxes', 'buy_boxes'], ['/wholesale/evosense/controls', 'settings'],
+  ['/wholesale/evosense/inbox', 'acquisition'], ['/wholesale/evosense/overlooked', 'properties'],
+  ['/wholesale/evosense/strategies', 'properties'], ['/wholesale/evosense/property', 'properties'],
+  ['/wholesale/deal-room', 'deal_room'], ['/wholesale/appointments', 'appointments'], ['/wholesale/board', 'team_board'],
+  ['/wholesale/buyers', 'buyer_intel'], ['/wholesale/calculator', 'underwriting'], ['/wholesale/callbacks', 'sellers'],
+  ['/wholesale/canvass', 'canvassing'], ['/wholesale/closing', 'contracts'], ['/wholesale/dispositions', 'dispositions'],
+  ['/wholesale/exceptions', 'team_board'], ['/wholesale/farm-ranch', 'properties'], ['/wholesale/foreclosures', 'foreclosures'],
+  ['/wholesale/funding', 'funding'], ['/wholesale/land-partners', 'buyer_intel'], ['/wholesale/pilot', 'settings'],
+  ['/wholesale/properties', 'properties'], ['/wholesale/settings', 'settings'], ['/wholesale/team', 'team_admin'],
+  ['/wholesale/deals', 'deals'], ['/wholesale/evosense', 'acquisition'], ['/wholesale', 'acquisition'],
+]
+function wsScreenModule(path) {
+  const p = (path || '').split('?')[0]
+  for (const [prefix, mod] of WS_SCREEN_MODULE) if (p === prefix || p.startsWith(prefix + '/')) return mod
+  return null
+}
+// Where a custom-access login lands, in this order, when a page is not theirs.
+const WS_LANDING = ['/wholesale', '/wholesale/appointments', '/wholesale/properties', '/wholesale/callbacks',
+  '/wholesale/canvass', '/wholesale/buyers', '/wholesale/dispositions', '/wholesale/deal-room', '/wholesale/foreclosures',
+  '/wholesale/closing', '/wholesale/funding', '/wholesale/board', '/wholesale/calculator', '/wholesale/team']
+const customMayOpen = (team, path) => {
+  const mod = wsScreenModule(path)
+  return !!mod && (team.modules || []).includes(mod)
+}
+
 const NAV_GROUPS = [
   {
     label: 'Workspace',
@@ -542,6 +571,14 @@ export default function Layout({ children }) {
     const p = location.pathname
     if (wsTeam.field) {
       if (!fieldMayOpen(p)) navigate('/wholesale/appointments', { replace: true })
+      return
+    }
+    if (wsTeam.custom) {
+      if (p === '/settings' || p.startsWith('/settings/')) return
+      if (isWholesalePath(p) && customMayOpen(wsTeam, p)) return
+      // Land on the first screen their access includes, else My Settings.
+      const first = WS_LANDING.find((route) => customMayOpen(wsTeam, route))
+      navigate(first || '/settings', { replace: true })
       return
     }
     if (isWholesalePath(p) || p === '/settings' || p.startsWith('/settings/')) return
@@ -1027,6 +1064,7 @@ export default function Layout({ children }) {
               if (wsOnly) {
                 if (!(isWholesalePath(item.to) || item.to === '/settings')) return false
                 if (wsTeam.field && !FIELD_NAV.has(item.to)) return false
+                if (wsTeam.custom && item.to !== '/settings' && !customMayOpen(wsTeam, item.to)) return false
               }
               if (item.capability) return hasCapability(item.capability)
               if (item.adminOnly && !isOrgAdmin) return false

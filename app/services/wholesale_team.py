@@ -42,14 +42,18 @@ MANAGER = "manager"
 TEAM_LEAD = "team_lead"
 FIELD_SPECIALIST = "field_specialist"
 CANVASSER = "canvasser"
+# #439: a login whose access is set by an access profile and individual
+# permissions (app/services/wholesale_access.py). Wholesale only, default deny.
+CUSTOM = "custom"
 
-ROLES = (MEMBER, MANAGER, TEAM_LEAD, FIELD_SPECIALIST, CANVASSER)
+ROLES = (MEMBER, MANAGER, TEAM_LEAD, FIELD_SPECIALIST, CANVASSER, CUSTOM)
 ROLE_LABELS = {
     MEMBER: "Full access",
     MANAGER: "Manager",
     TEAM_LEAD: "Team lead",
     FIELD_SPECIALIST: "Field specialist",
     CANVASSER: "Canvasser",
+    CUSTOM: "Custom access",
 }
 ROLE_HELP = {
     MEMBER: "Everything they can see today, including the advisor side.",
@@ -57,9 +61,10 @@ ROLE_HELP = {
     TEAM_LEAD: "Wholesale side only. Runs a small crew.",
     FIELD_SPECIALIST: "Wholesale side only. Appointments, walkthroughs and offers in the field.",
     CANVASSER: "Wholesale side only. Knocks doors and passes hot leads up.",
+    CUSTOM: "Wholesale side only. Exactly the permissions in their access profile and overrides.",
 }
 # Logins that never see the advisor / CRM side of the app.
-WHOLESALE_ONLY = (MANAGER, TEAM_LEAD, FIELD_SPECIALIST, CANVASSER)
+WHOLESALE_ONLY = (MANAGER, TEAM_LEAD, FIELD_SPECIALIST, CANVASSER, CUSTOM)
 # Logins that get the locked-down field kit.
 FIELD_ROLES = (FIELD_SPECIALIST, CANVASSER)
 
@@ -188,7 +193,20 @@ def _people_q(db: Session, org_id: str):
     anywhere else."""
     q = db.query(User)
     if _scope(db, org_id) == PA.WHOLESALE:
-        return q.filter(User.organization_id == org_id)
+        # #439: plus anyone who ACCEPTED a Wholesale invitation into this
+        # workspace from another login (and still holds the workspace
+        # membership it gave them). EvoSys operators with a plain membership
+        # stay off the page, exactly as before.
+        from sqlalchemy import or_
+        from app.models.wholesale_access_models import WholesaleTeamInvite
+        invited = (db.query(WholesaleTeamInvite.user_id)
+                   .filter(WholesaleTeamInvite.organization_id == org_id, WholesaleTeamInvite.status == "accepted",
+                           WholesaleTeamInvite.kind == "existing_login",
+                           WholesaleTeamInvite.user_id.in_(
+                               db.query(Membership.user_id).filter(Membership.scope_type == "customer_org",
+                                                                   Membership.scope_id == org_id,
+                                                                   Membership.is_active.is_(True)))))
+        return q.filter(or_(User.organization_id == org_id, User.id.in_(invited)))
     from sqlalchemy import or_
     member_ids = db.query(Membership.user_id).filter(
         Membership.scope_type == "customer_org", Membership.scope_id == org_id, Membership.is_active.is_(True))
@@ -303,6 +321,7 @@ WHOLESALE_ONLY_ALLOWED = (
     "/launch/me", "/workspace-views", "/work/identity", "/me",
     "/wholesale", "/wholesale-rooms", "/site-intake/wholesale", "/health",
     "/push",          # phone alerts for this login's own phone (web_push_service)
+    "/wholesale-invites",   # accepting an invitation into another workspace (#439)
 )
 ORG_SETTINGS_READ = "/org-settings"          # read-only, the shell reads the brand from it
 
@@ -407,7 +426,24 @@ def fence_user(db: Session, user: User, path: str, method: str) -> Optional[str]
     if getattr(user, "role", None) not in ("advisor", "viewer"):
         return None
     org_id = _active_org_id(db, user)
-    role = role_of(db, user, org_id)                 # this workspace's role (#272)
+    # One seat lookup (active or not) per request: this workspace's role
+    # (#272), and whether an ended seat here was a custom-access one (#439).
+    seats = (db.query(Membership.role, Membership.is_active)
+             .filter(Membership.scope_type == SCOPE_PRODUCT, Membership.scope_id == _scope(db, org_id),
+                     Membership.user_id == user.id).all())
+    live = next((r for r, active in seats if active), None)
+    role = (live if live in ROLES else MEMBER) if live is not None else None
+    if role == CUSTOM:
+        # #439: an access profile decides, per module and action, default deny.
+        from app.services import wholesale_access as _A
+        return _A.refusal(db, user, org_id, path or "/", method or "GET")
+    if role is None:
+        # #439: a custom-access seat that was suspended or removed must not
+        # fall back to an ordinary advisor login (the CRM side). It keeps only
+        # sign-in and the app shell, read-only, until someone restores it.
+        if any(r == CUSTOM for r, _active in seats):
+            from app.services import wholesale_access as _A
+            return _A.ended_refusal(path or "/", method or "GET")
     refusal = fence(path, method, role)
     if refusal or role not in FIELD_ROLES:
         return refusal
@@ -433,7 +469,12 @@ def hunt_refusal(db: Session, user: User, path: str, method: str) -> Optional[st
         return None
     if (effective_role(user, db) or "").lower() in ("org_admin", "super_admin", "god_admin"):
         return None
-    if role_of(db, user) == MANAGER:
+    role = role_of(db, user)
+    if role == MANAGER:
+        return None
+    if role == CUSTOM:
+        # The fence already checked this request against their profile; a
+        # profile that grants it (e.g. Properties: Manage) is the owner's choice.
         return None
     return ADMIN_ONLY_REFUSAL
 

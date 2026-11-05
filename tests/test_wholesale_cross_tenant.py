@@ -319,8 +319,24 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
                             details={"created_ids": [], "filename": "victim.csv"})
     db_session.commit()
 
+    # A custom access profile and a pending (unsent) team invitation of the
+    # VICTIM workspace (#439). Synthetic recipient; nothing is emailed.
+    from app.models.wholesale_access_models import WholesaleAccessProfile, WholesaleTeamInvite
+    wa_profile = WholesaleAccessProfile(organization_id=sample_org.id, seat_scope="wholesale",
+                                        name="Victim field profile", template_key="field_representative",
+                                        permissions_json='{"appointments": ["view"]}', record_scope="assigned")
+    db_session.add(wa_profile)
+    db_session.flush()
+    wa_invite = WholesaleTeamInvite(organization_id=sample_org.id, seat_scope="wholesale",
+                                    email="victim.invitee@example.com", full_name="Victim Invitee",
+                                    kind="new_login", profile_id=wa_profile.id, status="pending")
+    db_session.add(wa_invite)
+    db_session.commit()
+
     return {
         **es_ids,
+        "access_profile_id": wa_profile.id,
+        "team_invite_id": wa_invite.id,
         "appointment_id": appt["id"],
         "visit_photo_id": vphoto["id"],
         "field_offer_id": voffer["id"],
@@ -674,6 +690,18 @@ def ops_attacks(ids):
         ("patch", "/wholesale/ops/notes/%s" % ids["ops_note_id"], {"body": "stolen"}),
         ("delete", "/wholesale/ops/notes/%s" % ids["ops_note_id"], None),
         ("delete", "/wholesale/team/members/%s" % ids["team_user_id"], None),
+        # Custom access builder (#439): another workspace's people, profiles
+        # and invitations are not there at all.
+        ("get", "/wholesale/team/members/%s/access" % ids["team_user_id"], None),
+        ("put", "/wholesale/team/members/%s/access" % ids["team_user_id"], {"grants": {"deals": ["view"]}}),
+        ("post", "/wholesale/team/members/%s/suspend" % ids["team_user_id"], {}),
+        ("post", "/wholesale/team/members/%s/reactivate" % ids["team_user_id"], {}),
+        ("post", "/wholesale/team/members/%s/remove" % ids["team_user_id"], {}),
+        ("put", "/wholesale/team/access/profiles/%s" % ids["access_profile_id"], {"name": "stolen"}),
+        ("post", "/wholesale/team/access/profiles/%s/duplicate" % ids["access_profile_id"], {}),
+        ("post", "/wholesale/team/access/profiles/%s/retire" % ids["access_profile_id"], {}),
+        ("post", "/wholesale/team/invites/%s/resend" % ids["team_invite_id"], {}),
+        ("post", "/wholesale/team/invites/%s/cancel" % ids["team_invite_id"], {}),
         ("patch", "/wholesale/appointments/%s" % ids["appointment_id"], {"notes": "stolen"}),
         ("get", "/wholesale/appointments/%s/visit" % ids["appointment_id"], None),
         ("put", "/wholesale/appointments/%s/visit" % ids["appointment_id"], {"interview": {"notes": "planted"}}),
