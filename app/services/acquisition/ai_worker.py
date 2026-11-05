@@ -117,7 +117,7 @@ def calls_today(db: Session, org_id: Optional[str] = None, now: Optional[datetim
     """Provider requests actually made (ok or provider error) in 24h."""
     now = now or datetime.utcnow()
     q = db.query(AcquisitionAICall).filter(AcquisitionAICall.created_at >= _since(now),
-                                           AcquisitionAICall.status.in_(("ok", "error", "rejected")))
+                                           AcquisitionAICall.status.in_(("ok", "error", "rejected", "pending")))
     if org_id is not None:
         q = q.filter(AcquisitionAICall.organization_id == org_id)
     return q.count()
@@ -126,7 +126,7 @@ def calls_today(db: Session, org_id: Optional[str] = None, now: Optional[datetim
 def usage(db: Session, now: Optional[datetime] = None) -> Dict[str, Any]:
     now = now or datetime.utcnow()
     rows = db.query(AcquisitionAICall).filter(AcquisitionAICall.created_at >= _since(now)).all()
-    made = [r for r in rows if r.status in ("ok", "error", "rejected")]
+    made = [r for r in rows if r.status in ("ok", "error", "rejected", "pending")]
     priced = [r.cost_usd for r in made if r.cost_usd is not None]
     unpriced = [r for r in made if r.cost_usd is None and (r.tokens_in or r.tokens_out)]
     return {"calls_made": len(made), "calls_refused": sum(1 for r in rows if r.status == "refused"),
@@ -200,6 +200,27 @@ def _record(db, **kw) -> AcquisitionAICall:
     return row
 
 
+def _finish(db: Session, row: AcquisitionAICall, **fields) -> AcquisitionAICall:
+    """Complete a reserved call row. If the full record can't be saved, the
+    essentials (status, tokens, cost) are saved anyway - a call that was made
+    is never left uncounted."""
+    for k, v in fields.items():
+        setattr(row, k, v)
+    try:
+        db.commit()
+        return row
+    except Exception:                                            # noqa: BLE001
+        db.rollback()
+        log.exception("AI call record %s could not be saved in full", row.id)
+        row = db.query(AcquisitionAICall).filter(AcquisitionAICall.id == row.id).one()
+        for k in ("status", "tokens_in", "tokens_out", "cost_usd", "attempts"):
+            if k in fields:
+                setattr(row, k, fields[k])
+        row.error = "Full record could not be saved"
+        db.commit()
+        return row
+
+
 def invoke(db: Session, *, purpose: str, capability: str, org_id: Optional[str], job_id: Optional[str],
            messages: List[Dict[str, str]], client=None, now: Optional[datetime] = None) -> Dict[str, Any]:
     """Returns {"ok": True, "data": dict, "call": row} or {"ok": False, "reason": str, "call": row|None}."""
@@ -225,6 +246,16 @@ def invoke(db: Session, *, purpose: str, capability: str, org_id: Optional[str],
                       capability=capability, status="refused", error="Per-client daily AI limit reached")
         return {"ok": False, "reason": "This company's daily AI limit (%d) is reached" % p.per_client_daily_calls,
                 "call": row}
+    # RESERVE the call before the provider is asked, so a call is counted
+    # against every limit even if the process dies or the record fails later.
+    row = AcquisitionAICall(organization_id=org_id, job_id=job_id, purpose=purpose, dedupe_key=key, model=model,
+                            capability=capability, status="pending")
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:          # another process reserved this job's call first
+        db.rollback()
+        return {"ok": False, "reason": "Already attempted for this job", "call": None}
     attempts, last_err, t0 = 0, None, time.monotonic()
     pin, pout = unit_prices()
     while attempts <= p.retry_limit:
@@ -236,8 +267,8 @@ def invoke(db: Session, *, purpose: str, capability: str, org_id: Optional[str],
                                          max_tokens=p.max_tokens_per_call, temperature=0.2,
                                          response_format={"type": "json_object"})
         except G.AIRefused as exc:
-            row = _record(db, organization_id=org_id, job_id=job_id, purpose=purpose, dedupe_key=key, model=model,
-                          capability=capability, status="refused", error=("%s: %s" % (type(exc).__name__, exc))[:500])
+            row = _finish(db, row, status="refused", attempts=attempts,
+                          error=("%s: %s" % (type(exc).__name__, exc))[:500])
             return {"ok": False, "reason": "The AI gateway refused the call (%s)" % exc, "call": row}
         except Exception as exc:                                 # noqa: BLE001 - provider error
             last_err = "%s: %s" % (type(exc).__name__, str(exc)[:300])
@@ -246,6 +277,7 @@ def invoke(db: Session, *, purpose: str, capability: str, org_id: Optional[str],
         tin, tout = getattr(usage_, "prompt_tokens", None), getattr(usage_, "completion_tokens", None)
         cost = (round((tin or 0) / 1e6 * pin + (tout or 0) / 1e6 * pout, 6)
                 if pin is not None and pout is not None and (tin is not None or tout is not None) else None)
+        basis = "estimate" if cost is not None else "none"
         text = ""
         try:
             text = resp.choices[0].message.content or ""
@@ -253,24 +285,20 @@ def invoke(db: Session, *, purpose: str, capability: str, org_id: Optional[str],
             if not isinstance(data, dict):
                 raise ValueError("not an object")
         except (ValueError, AttributeError, IndexError, TypeError) as exc:
-            row = _record(db, organization_id=org_id, job_id=job_id, purpose=purpose, dedupe_key=key, model=model,
-                          capability=capability, status="error", tokens_in=tin, tokens_out=tout, cost_usd=cost,
-                          cost_basis="estimate:configured_prices" if cost is not None else "none", attempts=attempts,
-                          latency_ms=int((time.monotonic() - t0) * 1000), error="Unreadable model output: %s" % exc,
-                          output=text[:4000])
+            row = _finish(db, row, status="error", tokens_in=tin, tokens_out=tout, cost_usd=cost, cost_basis=basis,
+                          attempts=attempts, latency_ms=int((time.monotonic() - t0) * 1000),
+                          error=("Unreadable model output: %s" % exc)[:500], output=text[:4000])
             return {"ok": False, "reason": "The model's answer couldn't be read", "call": row}
         p.consecutive_failures, p.breaker_open_until = 0, None
-        row = _record(db, organization_id=org_id, job_id=job_id, purpose=purpose, dedupe_key=key, model=model,
-                      capability=capability, status="ok", tokens_in=tin, tokens_out=tout, cost_usd=cost,
-                      cost_basis="estimate:configured_prices" if cost is not None else "none", attempts=attempts,
-                      latency_ms=int((time.monotonic() - t0) * 1000), output=json.dumps(data)[:4000])
+        row = _finish(db, row, status="ok", tokens_in=tin, tokens_out=tout, cost_usd=cost, cost_basis=basis,
+                      attempts=attempts, latency_ms=int((time.monotonic() - t0) * 1000),
+                      output=json.dumps(data)[:4000])
         return {"ok": True, "data": data, "call": row}
     p.consecutive_failures = (p.consecutive_failures or 0) + 1
     if p.consecutive_failures >= p.breaker_threshold:
         p.breaker_open_until = now + timedelta(minutes=BREAKER_MINUTES)
-    row = _record(db, organization_id=org_id, job_id=job_id, purpose=purpose, dedupe_key=key, model=model,
-                  capability=capability, status="error", attempts=attempts,
-                  latency_ms=int((time.monotonic() - t0) * 1000), error=(last_err or "provider error")[:500])
+    row = _finish(db, row, status="error", attempts=attempts, latency_ms=int((time.monotonic() - t0) * 1000),
+                  error=(last_err or "provider error")[:500])
     return {"ok": False, "reason": "The AI provider failed (%s)" % last_err, "call": row}
 
 
