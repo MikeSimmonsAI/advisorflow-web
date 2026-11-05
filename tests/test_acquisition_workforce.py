@@ -900,3 +900,29 @@ def test_a_call_is_reserved_before_the_provider_is_asked(pilot, monkeypatch):
     again = AI.invoke(db, purpose="draft", capability="acquisition_draft", org_id=p["shine"].id, job_id="res1",
                       messages=AI.draft_messages({}, {}, []), client=_Peek())
     assert again.get("reused") and db.query(AcquisitionAICall).count() == 1
+
+
+def test_grounding_allows_a_window_washer_to_say_window_cleaning(pilot):
+    """Production: a correct window-washing draft ('window cleaning',
+    'cleanliness') was rejected as 'another trade'. Only another trade's
+    SERVICE counts - a pest-control pitch for janitorial work still fails."""
+    from app.services.acquisition import ai_worker as AI
+    ok = {"subject": "Window washing for your storefront",
+          "body": "We provide professional window cleaning that keeps storefront windows clean and clear."}
+    assert AI.grounding_problems(ok, {"category": "window_washing"}, {"company": "Plaza"}) == []
+    bad = {"subject": "Pest control", "body": "We also offer janitorial and commercial cleaning for your bistro."}
+    assert any("another trade" in x for x in AI.grounding_problems(bad, {"category": "pest_control"}, {"company": "B"}))
+    lawn = {"subject": "Pest control", "body": "Our pest team also handles lawn care."}
+    assert any("lawn" in x for x in AI.grounding_problems(lawn, {"category": "pest_control"}, {"company": "B"}))
+    res = {"subject": "Home cleaning", "body": "Our cleaning service keeps homes tidy."}
+    assert AI.grounding_problems(res, {"category": "residential_cleaning"}, {"company": "H"}) == []
+
+
+def test_interest_plus_a_visit_request_is_one_clear_appointment_request():
+    """Production practice reply: 'Yes, we're interested. Can someone come by
+    for a walkthrough? Thursday afternoon would work.' must move the prospect
+    toward booking, not stall as two 'conflicting' signals."""
+    c = WF.classify("TEST - Yes, we're interested. Can someone come by for a walkthrough? Thursday afternoon would work.")
+    assert c["label"] == "appointment_request" and c["confidence"] >= 0.85
+    assert WF.classify("Interested, but please remove me from your list")["label"] == "unsubscribe"
+    assert WF.classify("Not interested, don't come by")["label"] == "not_interested"

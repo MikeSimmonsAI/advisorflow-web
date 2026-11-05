@@ -1063,6 +1063,12 @@ def classify(text: str) -> Dict[str, Any]:
     labels = [h[0] for h in hits]
     if "not_interested" in labels:
         return {"label": "not_interested", "confidence": 0.9, "evidence": dict(hits)["not_interested"], "rule": "phrase"}
+    positive = {"interested", "appointment_request", "question"}
+    if "appointment_request" in labels and set(labels) <= positive:
+        # "Yes, interested - can someone come by Thursday?" is ONE clear
+        # message: they want an appointment. Agreement, not a conflict.
+        return {"label": "appointment_request", "confidence": 0.9,
+                "evidence": dict(hits)["appointment_request"], "rule": "phrase"}
     for lab in ("out_of_office", "reschedule_request", "appointment_request", "request_for_information",
                 "objection", "interested", "question"):
         if lab in labels:
