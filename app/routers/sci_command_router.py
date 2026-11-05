@@ -166,7 +166,12 @@ def _human_handoff(r, conv) -> bool:
     return bool(conv is not None and conv.state in _HANDOFF_STATES and conv.booked_time is None
                 and r is not None and r.handling_status in _NEEDS_REPLY)
 _APPT_STATES = ("offered", "booked", "callback_requested")
-FILTERS = ("all", "handoff", "needs_reply", "text", "email", "handled", "unread", "ai", "human", "appointments", "home_visits")
+FILTERS = ("all", "handoff", "needs_reply", "text", "email", "handled", "unread", "ai", "human", "appointments",
+           "home_visits", "opted_out")
+# #515: closed conversations a person may still want to see. They are never
+# counted as open work, and they never change the open-work counts.
+CLOSED_VIEWS = ("handled", "opted_out")
+CLOSED_VIEW_DAYS = 14
 
 
 def _sender(db, r, lead) -> dict:
@@ -259,15 +264,36 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
             owner_test_ids = {r.lead_id for r in mine}
             open_rows = open_rows + mine
     flt = view if view in FILTERS else "all"
+    # #515: the open-work counts always come from the OPEN conversations. A
+    # closed view (Handled / Opted out) lists its own rows but never replaces
+    # the counts - on Nov 4 the chips showed the Handled set's numbers.
+    since_closed = datetime.utcnow() - timedelta(days=CLOSED_VIEW_DAYS)
+    view_rows = None
     if flt == "handled":
         # Handled = answered or closed in the last 14 days.
-        open_rows = (rq.filter(ProgramResponse.handling_status.in_(("responded", "active", "closed")),
-                               ProgramResponse.received_at >= datetime.utcnow() - timedelta(days=14)).all())
+        view_rows = (rq.filter(ProgramResponse.handling_status.in_(("responded", "active", "closed")),
+                               ProgramResponse.received_at >= since_closed).all())
+    elif flt == "opted_out":
+        view_rows = (rq.filter(ProgramResponse.response_class == "opt_out",
+                               ProgramResponse.received_at >= since_closed).all())
+    opted_out_families = (rq.filter(ProgramResponse.response_class == "opt_out",
+                                    ProgramResponse.received_at >= since_closed)
+                          .with_entities(ProgramResponse.lead_id).distinct().count())
+    # The newest reply recorded in this scope, open or not - so a quiet list
+    # never hides that something came in (Nov 4: 15 opt-outs after 2:11 PM).
+    latest_any = rq.order_by(ProgramResponse.received_at.desc()).first()
     today_rows = rq.filter(ProgramResponse.received_at >= start,
                            ProgramResponse.response_class.notin_(("auto_reply",))).count()
-    # one inbox line per family: their newest open reply
+    items = _inbox_items(db, org, open_rows, locs, M, q, owner_test_ids)
+    view_items = _inbox_items(db, org, view_rows, locs, M, q, owner_test_ids) if view_rows is not None else None
+    return _command_response(db, user, prog, org, location_id, items, view_items, flt, limit, today_rows, start,
+                             scope, M, opted_out_families, latest_any, locs)
+
+
+def _inbox_items(db, org, rows, locs, M, q, owner_test_ids) -> list:
+    """One inbox line per family - their newest reply in `rows` - newest first."""
     newest = {}
-    for r in sorted(open_rows, key=lambda r: r.received_at or datetime.min, reverse=True):
+    for r in sorted(rows, key=lambda r: r.received_at or datetime.min, reverse=True):
         newest.setdefault(r.lead_id, r)
     leads = {l.id: l for l in db.query(Lead).filter(Lead.id.in_(list(newest))).all()} if newest else {}
     convs = {c.lead_id: c for c in db.query(ProgramConversation)
@@ -316,6 +342,14 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
     # Hot / overdue / home-visit still show as badges and in their own filters.
     items.sort(key=lambda i: -(datetime.fromisoformat(i["received_at"][:-1]).timestamp()
                                if i["received_at"] else 0))
+    return items
+
+
+def _command_response(db, user, prog, org, location_id, items, view_items, flt, limit, today_rows, start,
+                      scope, M, opted_out_families, latest_any, locs) -> dict:
+    from app.models.models import BookingLink
+    from app.services.programs import engagement as _eng
+    from app.services.programs import campaign_attribution as CA
     needs = sum(1 for i in items if i["class"] in ("hot", "active", "bad_data", "wrong_person")
                 and i["handling_status"] in _NEEDS_REPLY and not i["is_test"] and not i["ai_answered"])
     filter_counts = {"all": len(items),
@@ -328,8 +362,11 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                      "ai": sum(1 for i in items if i["owner"] == "ai"),
                      "human": sum(1 for i in items if i["owner"] == "human"),
                      "appointments": sum(1 for i in items if i["setter_state"] in _APPT_STATES),
-                     "home_visits": sum(1 for i in items if i["home_visit"])}
-    if flt == "handoff":
+                     "home_visits": sum(1 for i in items if i["home_visit"]),
+                     "opted_out": opted_out_families}
+    if view_items is not None:
+        items = view_items
+    elif flt == "handoff":
         items = [i for i in items if i["human_handoff"]]
     elif flt == "needs_reply":
         items = [i for i in items if i["handling_status"] in _NEEDS_REPLY and i["class"] != "auto_reply"
@@ -377,6 +414,9 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                                                                                 Lead.is_test.isnot(True))}),
         "owner_alert": owner_alert,
         "inbox": items[:limit],
+        # #515: how many lines this view really has, so a cut-off list says so
+        "total": len(items), "shown": min(len(items), limit),
+        "latest_activity": _latest_activity(db, latest_any, locs),
         "tasks": _open_tasks(db, org, location_id),
         "unknown": _unknown_senders(db, org, location_id),
         "upcoming": {"follow_up": len(items), "new": sum(1 for i in items if i["badge"] == "New"),
@@ -1404,3 +1444,18 @@ def command_pipeline_health(hours: int = Query(24, ge=1, le=336), db: Session = 
     from app.services.programs import pipeline_health
     prog = _program(db, user)
     return pipeline_health.report(db, prog, hours=hours)
+
+
+def _latest_activity(db, r, locs) -> Optional[dict]:
+    """The newest reply recorded in this scope, open or closed, and where to
+    find it - "Opted out", "Handled" or the open inbox."""
+    if r is None:
+        return None
+    lead = db.query(Lead).filter(Lead.id == r.lead_id).first()
+    name = ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title() if lead else "Family"
+    where = ("opted_out" if r.response_class == "opt_out"
+             else "handled" if r.handling_status in ("responded", "active", "closed") else "all")
+    return {"lead_id": r.lead_id, "name": name, "location": locs.get(r.location_id),
+            "channel_label": "EMAIL" if r.channel == "email" else ("VOICEMAIL" if r.channel == "voicemail" else "TEXT"),
+            "received_at": r.received_at.isoformat() + "Z" if r.received_at else None,
+            "open": r.handling_status != "closed", "class": r.response_class, "where": where}
