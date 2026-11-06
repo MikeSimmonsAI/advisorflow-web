@@ -1,0 +1,13 @@
+{
+  "titles": {
+    "01-login": "AdvisorFlow",
+    "02-evosys-deal-operations": "EvoSys Wholesale",
+    "03-evosys-team": "EvoSys Wholesale",
+    "04-evosys-buyers": "EvoSys Wholesale",
+    "05-evosys-mobile": "EvoSys Wholesale",
+    "06-bookaboost-deal-operations": "OLP \u00b7 Overlooked Properties",
+    "07-bookaboost-team": "OLP \u00b7 Overlooked Properties"
+  },
+  "public_404": "{\"detail\":\"Not Found\"}",
+  "field_manifest_name": "EvoSys Wholesale"
+}

@@ -1,0 +1,13 @@
+{
+  "titles": {
+    "01-login": "AdvisorFlow",
+    "02-evosys-deal-operations": "My Deal Room",
+    "03-evosys-team": "My Deal Room",
+    "04-evosys-buyers": "My Deal Room",
+    "05-evosys-mobile": "My Deal Room",
+    "06-bookaboost-deal-operations": "OLP \u00b7 Overlooked Properties",
+    "07-bookaboost-team": "OLP \u00b7 Overlooked Properties"
+  },
+  "public_404": "{\"detail\":\"Not Found\"}",
+  "field_manifest_name": "My Deal Room"
+}
