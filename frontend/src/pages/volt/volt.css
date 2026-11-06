@@ -139,5 +139,9 @@
   .v-grid2, .v-split { grid-template-columns: 1fr; }
   .v-word { font-size: 26px; }
   .v-head .v-wrap { min-height: 58px; }
+  .v-head nav { flex-wrap: nowrap; gap: 6px; }
+  .v-head nav .v-btn--sm { padding: 5px 9px; font-size: 13px; min-height: 32px; }
+  .v-word-sub { font-size: 13px; }
+  .v-word { font-size: 23px; }
   .v-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

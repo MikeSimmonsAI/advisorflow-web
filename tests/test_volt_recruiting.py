@@ -527,7 +527,13 @@ def test_purge_test_records_owner_only(volt):
     org = volt["org"].id
     _, tok, out = volt["register"]()
     _upload(c, tok, out["application_id"])
-    assert c.post("/volt/ops/%s/test-records/purge" % org, headers=H(db, volt["staff"])).status_code == 403
+    sh = H(db, volt["staff"])
+    sess = c.post("/volt/ops/%s/sessions" % org, headers=sh, json={
+        "kind": "interview", "project_id": volt["project"]("aca").id, "starts_local": "2026-12-01T10:00",
+        "timezone": "America/Chicago", "join_url": "https://zoom.us/j/12345678901", "rep_ids": [out["rep"]["rep_id"]]}).json()
+    assert c.post("/volt/ops/%s/test-records/purge" % org, headers=sh).status_code == 403
     r = c.post("/volt/ops/%s/test-records/purge" % org, headers=H(db, volt["god"]))
-    assert r.status_code == 200 and r.json()["reps"] >= 1 and r.json()["documents"] >= 1
+    assert r.status_code == 200 and r.json()["reps"] >= 1 and r.json()["documents"] >= 1 and r.json()["sessions"] == 1
+    from app.models.volt_models import VoltSession
+    assert db.get(VoltSession, sess["id"]) is None
     assert db.query(VoltRep).filter(VoltRep.organization_id == org, VoltRep.is_test.is_(True)).count() == 0

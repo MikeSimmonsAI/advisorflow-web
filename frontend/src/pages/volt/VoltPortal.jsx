@@ -348,8 +348,13 @@ function Apply({ portal, me, reload }) {
         : <p className="v-muted">One profile for every VOLT project. You will get a permanent rep ID.</p>}
       <form className="v-form v-panel" onSubmit={submit} noValidate style={{ marginTop: 14 }}>
         {!hasProfile && <ProfileFields v={v} set={setV} errs={errs} withEmail={!signedIn} withPassword={!signedIn} />}
-        <ReferralPicker value={referrer} onChange={(r) => { setReferrer(r); setErrs((x) => ({ ...x, referrer: undefined })) }}
-                        onTextChange={setRefText} signedIn={signedIn} testMode={testMode} invite={invite} error={errs.referrer} />
+        <ReferralPicker value={referrer} onChange={(r) => {
+          setReferrer(r)
+          // A resolved referral problem takes its banner with it.
+          setErrs((x) => { const n = { ...x }; delete n.referrer; return n })
+          setErr('')
+        }}
+                        onTextChange={(t) => { setRefText(t); if (!t.trim()) setErrs((x) => { const n = { ...x }; delete n.referrer; return n }) }} signedIn={signedIn} testMode={testMode} invite={invite} error={errs.referrer} />
         {exists ? (
           <Alert>This email already has an account. <Link to={`/volt/sign-in?next=/volt/apply/${projectKey}`}>Sign in to continue</Link> or <Link to="/forgot-password">reset your password</Link>.</Alert>
         ) : <Alert>{err && !Object.keys(errs).length ? err : (Object.keys(errs).length ? 'Please fix the highlighted fields.' : '')}</Alert>}
