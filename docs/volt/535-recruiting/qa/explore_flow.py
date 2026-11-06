@@ -45,11 +45,10 @@ with sync_playwright() as p:
         t_nav = time.time()
         pg.goto(FE + "/volt"); pg.wait_for_selector("[data-apply=hero]")
         loaded = time.time() - t_nav
-        hero = pg.inner_text(".v-hero")
-        check(f"{name}: hero eyebrow is the VOLT words", "VISION · OWNERSHIP · LEADERSHIP · TENACITY" in hero.upper(), hero[:200])
-        check(f"{name}: hero says 'Your next move. Make it VOLT.'", "Your next move." in hero and "Make it VOLT." in hero, hero[:200])
-        cards = pg.inner_text("#projects ~ .v-grid2")
-        check(f"{name}: cards have Explore and Apply buttons", pg.locator("[data-explore]").count() == 2 and "Apply for ACA" in cards and "Apply for Fiber" in cards, cards[:300])
+        hero = pg.inner_text(".v-phero")
+        check(f"{name}: hero values strip is the VOLT words", all(w in hero.upper() for w in ("VISION", "OWNERSHIP", "LEADERSHIP", "TENACITY")), hero[:200])
+        check(f"{name}: hero says 'Good people. Big ambition. Your next move.'", all(x in hero for x in ("Good people.", "Big ambition.", "Your next move.")), hero[:200])
+        check(f"{name}: cards have Explore and Apply buttons", pg.locator("[data-explore]").count() == 2 and pg.locator("[data-apply-card]").count() == 2)
         check(f"{name}: no popup at 5 seconds", (pg.wait_for_timeout(5000) or True) and dialog_title(pg) is None)
         pg.screenshot(path=f"{SHOTS}/{name}-01-home-volt-meaning.png", full_page=(name == "phone"))
         # ── Auto popup at ~10 s ──
@@ -66,7 +65,7 @@ with sync_playwright() as p:
         pg.locator("a", has_text="All opportunities").click(); pg.wait_for_selector("[data-apply=hero]")
         pg.wait_for_timeout(12000)
         check(f"{name}: not shown again in the same page load", dialog_title(pg) is None)
-        check(f"{name}: manual Get Future Opportunities still works", (pg.locator("[data-talent=hero]").click() or True) and dialog_title(pg) == "Get Future Opportunities")
+        check(f"{name}: manual Get Future Opportunities still works", (pg.locator("[data-talent=section]").click() or True) and dialog_title(pg) == "Get Future Opportunities")
         pg.locator("[role=dialog] button[aria-label=Close]").click()
         # ── deferred behind Apply Now ──
         pg.reload(); pg.wait_for_selector("[data-apply=hero]")

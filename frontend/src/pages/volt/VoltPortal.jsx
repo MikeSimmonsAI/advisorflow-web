@@ -1,4 +1,5 @@
 import { VOLT_PUBLIC_ORIGIN, VOLT_SUPPORT_EMAIL } from '../../utils/voltDomain'
+import { VOLT_IMAGES } from './voltImages'
 /* VOLT MARKETING - public applicant portal and rep dashboard (#535).
  *
  * /volt                      open opportunities, Register & Apply, Sign In
@@ -46,7 +47,8 @@ function Shell({ children, signedIn, onSignOut, onApply, showApply, onTalent }) 
         <div className="v-wrap">
           <Wordmark />
           <nav aria-label="Applicant">
-            {showApply && <button type="button" className="v-btn v-btn--red v-btn--sm v-apply-head" onClick={onApply} data-apply="header">Apply Now</button>}
+            {showApply && <Link className="v-navlink" to="/volt#projects">Opportunities</Link>}
+            {showApply && <Link className="v-navlink" to="/volt#why">Why VOLT</Link>}
             {signedIn ? (
               <>
                 <Link className="v-btn v-btn--ghost v-btn--sm" to="/volt/me">My dashboard</Link>
@@ -55,12 +57,13 @@ function Shell({ children, signedIn, onSignOut, onApply, showApply, onTalent }) 
             ) : (
               <Link className="v-btn v-btn--ghost v-btn--sm" to="/volt/sign-in">Sign In</Link>
             )}
+            {showApply && <button type="button" className="v-btn v-btn--red v-btn--sm v-apply-head" onClick={onApply} data-apply="header">Apply Now</button>}
           </nav>
         </div>
       </header>
       <main className="v-wrap" style={{ flex: 1 }}>{children}</main>
       <footer className="v-foot">
-        <div className="v-wrap"><span>VOLT Marketing · Vision · Ownership · Leadership · Tenacity</span>
+        <div className="v-wrap"><span>VOLT Marketing · Vision · Ownership · Leadership · Tenacity<br /><span className="v-foot-note">Photos on this site are illustrative.</span></span>
           <span>{onTalent && <button type="button" className="v-btn v-btn--link v-foot-link" onClick={onTalent}>Get Future Opportunities</button>} Need help? <a href={`mailto:${VOLT_SUPPORT_EMAIL}`}>{VOLT_SUPPORT_EMAIL}</a></span></div>
       </footer>
       {showApply && (
@@ -212,6 +215,11 @@ function Home({ portal, signedIn, onApply, onTalent }) {
   const invite = readInvite()
   const navigate = useNavigate()
   useEffect(() => {
+    // Header "Opportunities" / "Why VOLT" and hero "Explore Opportunities".
+    const id = (loc.hash || '').slice(1)
+    if (id) setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30)
+  }, [loc.hash])
+  useEffect(() => {
     // A project invite lands on that project.
     const q = new URLSearchParams(loc.search)
     const p = q.get('project')
@@ -219,44 +227,64 @@ function Home({ portal, signedIn, onApply, onTalent }) {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
-      <section className="v-hero">
-        <article>
-          <span className="v-eyebrow">Vision · Ownership · Leadership · Tenacity</span>
-          <h1>Your next move.<br /><span className="v-red">Make it VOLT.</span></h1>
-          <p>Find your place in health insurance or hit the road with a traveling door-to-door fiber sales team.</p>
-          <div className="v-row" style={{ justifyContent: 'flex-start' }}>
-            <button type="button" className="v-btn v-btn--red v-btn--lg" onClick={onApply} data-apply="hero">Apply Now →</button>
-            <button type="button" className="v-btn v-btn--ghost" onClick={onTalent} data-talent="hero">Get Future Opportunities ↗</button>
-          </div>
-          <p className="v-small" style={{ marginTop: 12 }}>
-            {signedIn ? <Link to="/volt/me">Go to my dashboard →</Link> : <>Already applied? <Link to="/volt/sign-in">Sign In</Link> to resume.</>}
-          </p>
-          {invite?.ref && <p className="v-small" style={{ marginTop: 6 }}>Invite code {invite.ref} saved for your application.</p>}
-        </article>
-        <HeroArt />
-      </section>
-      <div className="v-section-head" id="projects">
-        <h2>Choose your opportunity.</h2>
-        <span className="v-mono">{portal.open_projects.length} open project{portal.open_projects.length === 1 ? '' : 's'}</span>
-      </div>
-      <div className="v-grid2">
-        {portal.open_projects.map((p) => (
-          <article className="v-card v-card--project" key={p.key} data-project={p.key}>
-            <div className="v-row"><span className="v-icon" aria-hidden="true">{p.icon}</span><span className="v-tag">● Recruiting</span></div>
-            <h3>{p.name}</h3>
-            <p className="v-muted">{CARD[p.key]?.text || p.summary}</p>
-            {CARD[p.key] && <div className="v-facts">{CARD[p.key].facts.map((f) => <span key={f}>{f}</span>)}</div>}
-            <div className="v-card-actions">
-              <Link className="v-btn v-btn--red" to={`/volt/projects/${p.key}`} data-explore={p.key}>Explore the Opportunity →</Link>
-              <Link className="v-btn v-btn--line" to={`/volt/apply/${p.key}`} data-apply-card={p.key}>{signedIn ? 'Apply / resume' : `Apply for ${CARD[p.key]?.short || p.short_name || p.name}`} →</Link>
+      <section className="v-bleed v-phero" aria-labelledby="v-home-title">
+        <div className="v-phero-in">
+          <article>
+            <h1 id="v-home-title">Good people.<br />Big ambition.<br /><span className="v-red">Your next move.</span></h1>
+            <p>Build your skills. Meet your people. Explore what’s next with VOLT.</p>
+            <div className="v-row" style={{ justifyContent: 'flex-start' }}>
+              <button type="button" className="v-btn v-btn--red v-btn--lg" onClick={onApply} data-apply="hero">Apply Now</button>
+              <Link className="v-btn v-btn--ghost v-btn--lg" to="/volt#projects" data-explore-all>Explore Opportunities</Link>
             </div>
+            <p className="v-small" style={{ marginTop: 14 }}>
+              {signedIn ? <Link to="/volt/me">Go to my dashboard →</Link> : <>Already applied? <Link to="/volt/sign-in">Sign In</Link> to resume.</>}
+            </p>
+            {invite?.ref && <p className="v-small" style={{ marginTop: 6 }}>Invite code {invite.ref} saved for your application.</p>}
           </article>
-        ))}
+          <Photo img={VOLT_IMAGES.hero} className="v-phero-photo" eager data-photo="hero" />
+        </div>
+        <p className="v-values-strip" aria-label="VOLT values: Vision, Ownership, Leadership, Tenacity">
+          <span>Vision</span><i aria-hidden="true">/</i><span>Ownership</span><i aria-hidden="true">/</i><span>Leadership</span><i aria-hidden="true">/</i><span>Tenacity</span>
+        </p>
+      </section>
+
+      <div className="v-section-head v-section-head--center" id="projects">
+        <h2>Find your <span className="v-red">opportunity.</span></h2>
       </div>
+      <div className="v-grid2 v-pcards">
+        {orderedProjects(portal.open_projects).map((p) => {
+          const pic = VOLT_IMAGES.cards[p.key]
+          return (
+            <article className={`v-pcard${pic ? '' : ' v-pcard--plain'}`} key={p.key} data-project={p.key}>
+              {pic && <Photo img={pic} className="v-pcard-photo" data-photo={`card-${p.key}`} />}
+              <div className="v-pcard-body">
+                <span className="v-tag">● Recruiting</span>
+                <h3>{p.name}</h3>
+                <p>{CARD[p.key]?.line || CARD[p.key]?.text || p.summary}</p>
+                <div className="v-row" style={{ justifyContent: 'flex-start' }}>
+                  <Link className="v-btn v-btn--red" to={`/volt/apply/${p.key}`} data-apply-card={p.key}>{signedIn ? 'Apply / resume' : 'Apply Now'}</Link>
+                  <Link className="v-btn v-btn--ghost" to={`/volt/projects/${p.key}`} data-explore={p.key}>Explore</Link>
+                </div>
+              </div>
+            </article>
+          )
+        })}
+      </div>
+
       <WhyVolt />
-      <section className="v-talent-band">
-        <div><h2>Your next opportunity starts here.</h2><p>Leave your name and email to hear about future projects.</p></div>
-        <button type="button" className="v-btn v-btn--red" onClick={onTalent} data-talent="section">Keep Me Updated →</button>
+
+      <section className="v-bleed v-pbanner" aria-label="Work hard. Grow together. Enjoy the journey.">
+        <Photo img={VOLT_IMAGES.banner} className="v-pbanner-photo" data-photo="banner" />
+        <div className="v-pbanner-text">
+          <p>Work hard.<br />Grow together.<br /><span className="v-red">Enjoy the journey.</span></p>
+        </div>
+      </section>
+      <section className="v-bleed v-pcta" data-closing>
+        <h2>Your next chapter starts here.</h2>
+        <div className="v-row" style={{ justifyContent: 'center' }}>
+          <button type="button" className="v-btn v-btn--white v-btn--lg" onClick={onApply} data-apply="closing">Apply Now</button>
+          <button type="button" className="v-btn v-btn--outline-white v-btn--lg" onClick={onTalent} data-talent="section">Get Future Opportunities</button>
+        </div>
       </section>
       {portal.past_projects.map((p) => (
         <section className="v-card v-past" key={p.key} data-project={p.key}>
@@ -270,10 +298,30 @@ function Home({ portal, signedIn, onApply, onTalent }) {
 
 // ── Homepage project cards (approved demo copy) ─────────────────────────────
 const CARD = {
-  aca: { short: 'ACA', text: 'Bring your sales, enrollment, or customer service experience to a health insurance opportunity.',
+  aca: { short: 'ACA', line: 'Connect with people. Build your skills.', text: 'Bring your sales, enrollment, or customer service experience to a health insurance opportunity.',
     facts: ['Health insurance', 'Experience welcome'] },
-  fiber: { short: 'Fiber', text: 'A traveling door-to-door fiber sales opportunity. Tell us where you’re based and when you can travel.',
+  fiber: { short: 'Fiber', line: 'Door-to-door. On the road. Room to grow.', text: 'A traveling door-to-door fiber sales opportunity. Tell us where you’re based and when you can travel.',
     facts: ['Door-to-door sales', 'Traveling gig'] },
+}
+
+// ── People imagery (src/pages/volt/voltImages.js) ──────────────────────────
+// Intrinsic width/height reserve the space; only the hero loads eagerly.
+function Photo({ img, className, eager = false, ...rest }) {
+  if (!img) return null
+  return (
+    <img className={className} src={img.src} srcSet={img.srcSet} sizes={img.sizes} width={img.width} height={img.height}
+         alt={img.alt} loading={eager ? 'eager' : 'lazy'} decoding="async" fetchpriority={eager ? 'high' : undefined}
+         style={{ objectPosition: img.position }} {...rest} />
+  )
+}
+
+// The approved mockup leads with Traveling Fiber Sales, then ACA.
+const CARD_ORDER = ['fiber', 'aca']
+function orderedProjects(list) {
+  return [...list].sort((a, b) => {
+    const ia = CARD_ORDER.indexOf(a.key), ib = CARD_ORDER.indexOf(b.key)
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib)
+  })
 }
 
 // ── Why build your future with VOLT? (homepage, Mike 2026-11-06) ───────────
@@ -289,7 +337,8 @@ const WHY_VOLT = [
 
 function WhyVolt() {
   return (
-    <section className="v-why" data-why-volt aria-labelledby="v-why-title">
+    <section className="v-why v-bleed" id="why" data-why-volt aria-labelledby="v-why-title">
+      <div className="v-why-in">
       <h2 id="v-why-title">Why build your future with <span className="v-red">VOLT?</span></h2>
       <ol className="v-why-grid">
         {WHY_VOLT.map(([n, t, d]) => (
@@ -298,6 +347,10 @@ function WhyVolt() {
       </ol>
       <p className="v-why-values"><span>Vision</span> / <span>Ownership</span> / <span>Leadership</span> / <span>Tenacity</span></p>
       <p className="v-why-own">Ownership means freedom, independence and control over your future.</p>
+      <div className="v-why-photos">
+        {VOLT_IMAGES.reasons.map((r, i) => <Photo key={r.src} img={r} className="v-why-photo" data-photo={`reason-${i + 1}`} />)}
+      </div>
+      </div>
     </section>
   )
 }
