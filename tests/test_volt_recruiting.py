@@ -537,3 +537,92 @@ def test_purge_test_records_owner_only(volt):
     from app.models.volt_models import VoltSession
     assert db.get(VoltSession, sess["id"]) is None
     assert db.query(VoltRep).filter(VoltRep.organization_id == org, VoltRep.is_test.is_(True)).count() == 0
+
+
+def test_purge_one_run_at_a_time_exact_counts_then_zeros(volt):
+    """The 2026-11-05 production case: a second cleanup started while the first
+    was still running. It must be refused, not report stale counts."""
+    from app.services.volt import cleanup
+    c, db = volt["c"], volt["db"]
+    org = volt["org"].id
+    god = H(db, volt["god"])
+    _, tok, out = volt["register"]()
+    _upload(c, tok, out["application_id"])
+    c.post("/volt/rep/%s/applications" % SLUG, headers=tok, json={"project_key": "fiber"})
+    _, _, out2 = volt["register"]()
+    # A first run is in progress: it holds the tenant's cleanup lock.
+    held = cleanup._try_lock(db, org)
+    assert held is not None
+    try:
+        r = c.post("/volt/ops/%s/test-records/purge" % org, headers=god)
+        assert r.status_code == 409 and r.json()["detail"]["code"] == "cleanup_running"
+        assert db.query(VoltRep).filter(VoltRep.organization_id == org, VoltRep.is_test.is_(True)).count() == 2
+    finally:
+        held()
+    # The run that holds the lock completes with the real counts.
+    r = c.post("/volt/ops/%s/test-records/purge" % org, headers=god)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"reps": 2, "applications": 3, "documents": 1, "sessions": 0, "logins": 2,
+                        "logins_deactivated": 0}
+    # Repeating it reports what it did: nothing.
+    again = c.post("/volt/ops/%s/test-records/purge" % org, headers=god).json()
+    assert again == {"reps": 0, "applications": 0, "documents": 0, "sessions": 0, "logins": 0, "logins_deactivated": 0}
+    # Another tenant's cleanup is never blocked by this one.
+    other_lock = cleanup._try_lock(db, org)
+    assert other_lock is not None
+    try:
+        assert c.post("/volt/ops/%s/test-records/purge" % volt["other"].id, headers=god).status_code == 200
+    finally:
+        other_lock()
+
+
+def test_wholesale_seat_admin_reaches_volt_through_program_access(volt):
+    """platform@evosyspro.live's shape (production, 2026-11-05): home org is the
+    EvoSys Wholesale host, a named Wholesale product seat, org_admin in several
+    workspaces - and now VOLT Marketing. The Wholesale screen lock used to refuse
+    every /volt/ops request for this login. VOLT must open; the lock must still
+    hold everywhere else; another tenant's VOLT must still be refused."""
+    c, db = volt["c"], volt["db"]
+    org = volt["org"].id
+    host = db.query(Organization).filter(Organization.slug == "evo-integrated-solutions-llc").first()
+    if host is None:
+        host = Organization(name="EVO Integrated Solutions LLC", slug="evo-integrated-solutions-llc", plan="enterprise",
+                            is_active=True, enabled_features=json.dumps(["leads", "campaigns", "wholesale_real_estate"]))
+        db.add(host)
+        db.commit()
+    u = User(organization_id=host.id, email="volt-wholesale-admin-%d@example.com" % next(_SEQ), full_name="Platform Admin",
+             password_hash=hash_password("Pass12345!"), role="org_admin", is_active=True, must_change_password=False)
+    db.add(u)
+    db.commit()
+    for scope_type, scope_id, role in (("customer_org", host.id, "org_admin"), ("product", "wholesale", "member")):
+        db.add(Membership(user_id=u.id, scope_type=scope_type, scope_id=scope_id, role=role, is_active=True))
+    db.commit()
+    h = H(db, u)
+    # Without VOLT membership: no card, and VOLT Operations refused.
+    assert c.get("/auth/my-contexts", headers=h).json()["volt_contexts"] == []
+    assert c.get("/volt/ops/%s" % org, headers=h).status_code == 403
+    # Granted VOLT Workspace Admin (the Manage Access add_membership op).
+    db.add(Membership(user_id=u.id, scope_type="customer_org", scope_id=org, role="org_admin", is_active=True))
+    db.commit()
+    # The test client shares ONE session across requests, so the per-request
+    # membership memo on this User instance would survive; production opens a
+    # fresh session per request. Drop it to match production.
+    for k in [k for k in vars(u) if k.endswith("_memo")]:
+        delattr(u, k)
+    h = H(db, u)
+    ctx = c.get("/auth/my-contexts", headers=h).json()
+    cards = [v for v in ctx["volt_contexts"] if v["organization_id"] == org]
+    assert cards and cards[0]["access"] == "staff" and cards[0]["path"] == "/volt-ops/%s" % org
+    # The card's destination works with no workspace selected (the launcher clears it).
+    r = c.get("/volt/ops/%s" % org, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["access"] == "staff"
+    assert c.get("/volt/ops/%s/applications" % org, headers=h).status_code == 200
+    assert c.get("/volt/ops/%s/sessions" % org, headers=h).status_code == 200
+    # Still confined to Wholesale everywhere else.
+    blocked = c.get("/campaigns", headers=h)
+    assert blocked.status_code == 403 and "Wholesale" in blocked.json()["detail"]
+    # Another tenant's VOLT stays closed.
+    assert c.get("/volt/ops/%s" % volt["other"].id, headers=h).status_code == 403
+    # Not owner: may not run the owner-only cleanup.
+    assert c.post("/volt/ops/%s/test-records/purge" % org, headers=h).status_code == 403

@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, fetchObjectUrl } from '../../api/client'
 import { Bolt } from './VoltPortal'
-import { fmtDate, sessionTime } from './voltApi'
+import { fmtDate, sessionTime, useVoltTitle } from './voltApi'
 import './volt.css'
 
 const STAGES = [['draft', 'Draft'], ['submitted', 'Submitted'], ['needs_update', 'Needs update'], ['approved', 'Approved'], ['started', 'Started']]
@@ -429,15 +429,35 @@ function Reps({ orgId, ops }) {
   async function toggle(r, field) {
     try { await api.patch(`/volt/ops/${orgId}/reps/${r.rep_id}`, { [field]: !r[field] }); load() } catch (e) { setErr(msg(e)) }
   }
+  const [purging, setPurging] = useState(false)
+  const purgingRef = useRef(false)
   async function purgeTests() {
-    try { const r = await api.post(`/volt/ops/${orgId}/test-records/purge`, {}); setPurge(`Removed ${r.reps} test reps, ${r.applications} applications, ${r.documents} documents.`); load() } catch (e) { setErr(msg(e)) }
+    if (purgingRef.current) return                 // one click, one request
+    purgingRef.current = true
+    setPurging(true); setPurge(''); setErr('')
+    try {
+      const r = await api.post(`/volt/ops/${orgId}/test-records/purge`, {})
+      const n = (k, one, many) => `${r[k] || 0} ${(r[k] || 0) === 1 ? one : many}`
+      setPurge(`Removed ${n('reps', 'test rep', 'test reps')}, ${n('applications', 'application', 'applications')}, `
+        + `${n('documents', 'document', 'documents')}, ${n('sessions', 'session', 'sessions')} and `
+        + `${n('logins', 'applicant login', 'applicant logins')}${r.logins_deactivated ? ` (${r.logins_deactivated} switched off)` : ''}.`)
+    } catch (e) {
+      setErr(e?.detail?.code === 'cleanup_running' ? 'A cleanup is already running. This list refreshes when it finishes.' : msg(e))
+    } finally {
+      await load()
+      ops.load()
+      purgingRef.current = false
+      setPurging(false)
+    }
   }
   return (
     <>
       <div className="v-row"><h2 style={{ fontSize: 30, letterSpacing: '-.04em' }}>Reps & recruiter directory</h2>
-        {ops.home?.access === 'owner' && <button type="button" className="v-btn v-btn--line v-btn--sm" onClick={purgeTests}>Remove test records</button>}</div>
+        {ops.home?.access === 'owner' && <button type="button" className="v-btn v-btn--line v-btn--sm" onClick={purgeTests}
+            disabled={purging} aria-busy={purging} data-action="purge-tests">{purging ? 'Removing test records…' : 'Remove test records'}</button>}</div>
       <p className="v-small v-muted">Every person keeps one permanent rep ID. A rep in the directory can be selected as a recruiter by applicants.</p>
-      <Err>{err}</Err>{purge && <div className="v-alert v-alert--ok">{purge}</div>}
+      <Err>{err}</Err>{purging && <div className="v-alert v-alert--info" role="status">Removing test records. This can take up to a minute; the list refreshes when it is done.</div>}
+      {purge && <div className="v-alert v-alert--ok" role="status" data-purge-result>{purge}</div>}
       <input placeholder="Search by name or REP code" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search reps" style={{ maxWidth: 420 }} />
       <div className="v-panel v-scroll" style={{ marginTop: 10 }}>
         <table className="v-table"><thead><tr><th>Rep</th><th>Joined</th><th>In recruiter directory</th><th>Test record</th></tr></thead>
@@ -501,7 +521,7 @@ function Projects({ orgId, ops }) {
 export default function VoltOps() {
   const { orgId } = useParams()
   const ops = useOps(orgId)
-  useEffect(() => { document.title = 'VOLT Operations' }, [])
+  useVoltTitle()
   useEffect(() => { ops.load() }, [orgId]) // eslint-disable-line react-hooks/exhaustive-deps
   if (ops.err && !ops.home) {
     return (
