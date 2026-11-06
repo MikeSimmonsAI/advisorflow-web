@@ -461,6 +461,8 @@ ALLOWED_ORIGINS = [
     "https://evosyspro.live",
     "https://www.evosyspro.live",
     "https://app.evosyspro.live",
+    "https://voltmarketing.live",
+    "https://www.voltmarketing.live",
     "http://localhost:5173",
     "http://localhost:5174",
     "http://localhost:3000",
