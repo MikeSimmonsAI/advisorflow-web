@@ -57,7 +57,7 @@ PROJECT_QUESTIONS: Dict[str, List[Dict[str, Any]]] = {
          "required": True},
         {"key": "licensed_states", "type": "text", "required": False, "required_if": ["license_status", "licensed"],
          "label": "States where you are licensed"},
-        {"key": "license_number", "type": "text", "required": False, "label": "License number (optional)"},
+        {"key": "license_number", "type": "text", "required": False, "label": "License number"},
     ],
 }
 
