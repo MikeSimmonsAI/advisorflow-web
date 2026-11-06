@@ -257,7 +257,8 @@
 .v-msg-body { white-space: pre-wrap; word-break: break-word; margin-top: 8px; font-size: 15px; line-height: 1.5; }
 
 /* Why build your future with VOLT? (homepage) */
-.v-why { background: var(--v-black); color: var(--v-white); border-radius: 16px; padding: clamp(22px, 4vw, 40px); margin: 26px 0; }
+.v-why { background: var(--v-black); color: var(--v-white); padding: clamp(30px, 5vw, 56px) 0; margin: 34px 0 0; }
+.v-why-in { max-width: 1180px; margin: 0 auto; padding: 0 20px; }
 .v-why h2 { font-size: clamp(28px, 4.4vw, 44px); letter-spacing: -.045em; line-height: 1.05; margin: 0 0 20px; }
 .v-why-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); }
 .v-why-grid li { display: flex; gap: 12px; padding: 4px 22px; border-left: 2px solid var(--v-red); }
@@ -272,4 +273,61 @@
   .v-why-grid { grid-template-columns: 1fr; gap: 16px; }
   .v-why-grid li, .v-why-grid li:first-child { border-left: 0; border-top: 2px solid var(--v-red); padding: 14px 0 0; }
   .v-why-grid li:first-child { border-top: 0; padding-top: 0; }
+}
+
+
+/* ── People-focused homepage (approved mockup, Nov 6) ─────────────────────── */
+.volt { overflow-x: clip; }
+.v-bleed { width: 100vw; margin-left: calc(50% - 50vw); margin-right: calc(50% - 50vw); }
+.v-navlink { color: var(--v-white); text-decoration: none; font-weight: 600; font-size: 15px; padding: 6px 10px; }
+.v-navlink:hover { color: var(--v-red-hot); }
+.v-foot-note { opacity: .65; font-size: 12px; }
+/* hero */
+.v-phero { background: var(--v-black); color: var(--v-white); }
+.v-phero-in { max-width: 1180px; margin: 0 auto; padding: clamp(28px, 5vw, 56px) 20px clamp(18px, 3vw, 30px);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: clamp(20px, 3.5vw, 44px); align-items: center; }
+.v-phero h1 { font-size: clamp(40px, 4.3vw, 60px); line-height: .98; letter-spacing: -.055em; font-weight: 900; margin: 0 0 18px; }
+.v-phero article > p { color: #e6e1e3; font-size: clamp(17px, 1.6vw, 20px); max-width: 430px; margin-bottom: 22px; }
+.v-phero-photo { display: block; width: 100%; height: auto; aspect-ratio: 1200 / 866; object-fit: cover; border-radius: 16px; background: #1a1a1c; }
+.v-values-strip { margin: 0; padding: 12px 20px 18px; text-align: center; font: 700 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .34em; text-transform: uppercase; color: var(--v-white); font-size: 13px; }
+.v-values-strip i { color: var(--v-red-hot); font-style: normal; margin: 0 .9em; }
+.v-section-head--center { justify-content: center; margin-top: 30px; }
+.v-section-head--center h2 { font-size: clamp(32px, 4.6vw, 52px); font-weight: 900; letter-spacing: -.05em; }
+/* opportunity cards */
+.v-pcards { gap: 18px; }
+.v-pcard { position: relative; border-radius: 14px; overflow: hidden; background: var(--v-black); color: var(--v-white); display: flex; flex-direction: column; }
+.v-pcard-photo { display: block; width: 100%; height: auto; aspect-ratio: 2.6 / 1; object-fit: cover; }
+.v-pcard::after { content: ""; position: absolute; left: 0; right: 0; top: 0; aspect-ratio: 2.6 / 1;
+  background: linear-gradient(180deg, rgba(11,11,12,0) 55%, rgba(11,11,12,.85) 92%, var(--v-black) 100%); pointer-events: none; }
+.v-pcard-body { position: relative; z-index: 1; margin-top: -34px; padding: 0 22px 22px; display: grid; gap: 8px; width: 100%; }
+.v-pcard-body .v-tag { justify-self: start; }
+.v-pcard h3 { font-size: clamp(24px, 2.6vw, 30px); letter-spacing: -.03em; line-height: 1.1; }
+.v-pcard p { color: #ece6e8; }
+.v-pcard--plain .v-pcard-body { margin-top: 0; padding-top: 22px; }
+/* reasons photos */
+.v-why-photos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 28px; }
+.v-why-photo { display: block; width: 100%; height: auto; aspect-ratio: 2 / 1; object-fit: cover; border-radius: 10px; background: #1a1a1c; }
+/* closing banner */
+.v-pbanner { position: relative; background: var(--v-black); color: var(--v-white); overflow: hidden; min-height: clamp(220px, 26vw, 360px); display: flex; align-items: center; }
+.v-pbanner-photo { position: absolute; top: 0; bottom: 0; right: 0; left: 30%; width: 70%; height: 100%; object-fit: cover; }
+.v-pbanner::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, var(--v-black) 0%, var(--v-black) 30%, rgba(11,11,12,.55) 42%, rgba(11,11,12,0) 60%); }
+.v-pbanner-text { position: relative; z-index: 1; width: 100%; max-width: 1180px; margin: 0 auto; padding: 28px 20px; }
+.v-pbanner-text p { font-size: clamp(32px, 4.8vw, 58px); line-height: 1.02; font-weight: 900; letter-spacing: -.045em; }
+.v-pcta { background: var(--v-red); color: var(--v-white); text-align: center; padding: clamp(28px, 4vw, 44px) 20px; display: grid; gap: 18px; }
+.v-pcta h2 { font-size: clamp(28px, 4.2vw, 46px); font-weight: 900; letter-spacing: -.045em; }
+.volt .v-btn--white { background: var(--v-white); color: var(--v-red); border-color: var(--v-white); }
+.volt .v-btn--outline-white { background: transparent; color: var(--v-white); border-color: var(--v-white); }
+@media (max-width: 760px) {
+  .v-navlink { display: none; }
+  .v-phero-in { grid-template-columns: 1fr; }
+  .v-phero-photo { aspect-ratio: 4 / 3; }
+  .v-values-strip { letter-spacing: .18em; font-size: 11px; }
+  .v-values-strip i { margin: 0 .45em; }
+  .v-why-photos { grid-template-columns: 1fr; }
+  .v-why-photo { aspect-ratio: 16 / 9; }
+  .v-pbanner { min-height: 320px; align-items: flex-end; }
+  .v-pbanner-photo { left: 0; width: 100%; }
+  .v-pbanner::after { background: linear-gradient(180deg, rgba(0,0,0,0) 30%, rgba(0,0,0,.85) 100%); }
+  .v-pcta .v-row .v-btn { width: 100%; }
 }
