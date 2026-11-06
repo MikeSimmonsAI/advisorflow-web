@@ -1055,7 +1055,7 @@ function openCustomer(id, fromRoute) {
 }
 function closeDrawer(fromRoute) {
   $('#drawer').classList.remove('show'); $('#drawer').setAttribute('aria-hidden', 'true'); $('#scrim').classList.remove('show'); S.openCust = null;
-  if (!fromRoute && location.hash.startsWith('#customers/')) history.replaceState(null, '', '#customers');
+  if (!fromRoute && location.hash.startsWith('#customers/')) { try { history.replaceState(null, '', '#customers'); } catch (e) { /* sandboxed frame */ } }
 }
 function renderDrawer() {
   const c = custById(S.openCust); if (!c) return;
@@ -1424,13 +1424,17 @@ function renderPosters() {
   $('#flow').innerHTML = FLOW.map((f, i) => `<div class="fnode ${i === FLOW.length - 1 ? 'last' : ''}"><div class="n">${String(i + 1).padStart(2, '0')}</div><h3>${esc(f[0])}</h3><p>${esc(f[1])}</p></div>`).join('');
   $('#phases').innerHTML = PHASES.map((p, i) => `<div class="phase ${i === 0 ? 'first' : ''}"><div class="ph">${p[0]}</div><h3>${esc(p[1])}</h3><ul>${p[2].map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('');
 }
+const FRAMED = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
+const DIRECT_LINK = 'app.evosyspro.live/demo/blue-ridge/';
 function printPoster(kind) {
+  if (FRAMED) { toast('To print or save a PDF, open the direct link in its own tab: ' + DIRECT_LINK, '⎙'); return; }
   const v = $('#v-' + kind); document.body.classList.add('poster-print'); v.classList.add('print-me');
   const done = () => { document.body.classList.remove('poster-print'); v.classList.remove('print-me'); window.removeEventListener('afterprint', done); };
   window.addEventListener('afterprint', done); window.print(); setTimeout(done, 1500);
 }
 function presentPoster(id) {
   const el = $('#' + id);
+  if (FRAMED) { toast('Full screen works from the direct link: ' + DIRECT_LINK, '⛶'); return; }
   if (el.requestFullscreen) el.requestFullscreen().catch(() => toast('Full screen isn\'t available in this browser — use Print / Save PDF instead.', '!'));
   else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
   else toast('Full screen isn\'t available in this browser — use Print / Save PDF instead.', '!');
