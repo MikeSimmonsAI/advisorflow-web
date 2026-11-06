@@ -519,76 +519,11 @@ def ops_session_attendance(org_id: str, sid: str, body: Dict[str, Any] = Body(..
 
 @ops_router.post("/{org_id}/test-records/purge")
 def ops_purge_tests(org_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """Removes ONLY reps flagged is_test, their applications, documents, session
-    assignments, audit rows - and their logins when the login is an applicant-only
-    (volt_rep) account. Owner only."""
+    """Removes ONLY reps flagged is_test, with their applications, documents,
+    test-only sessions, audit rows and applicant-only logins. Owner only; one
+    run at a time per tenant (app/services/volt/cleanup.py)."""
     if C.staff_access(db, user, org_id) != "owner":
         raise HTTPException(status_code=403, detail="Only the platform owner can remove test records.")
     C.program_for_org(db, org_id)
-    from app.models.volt_models import VoltAuditEvent
-    from app.services import wholesale_files as storage
-    reps = db.query(VoltRep).filter(VoltRep.organization_id == org_id, VoltRep.is_test.is_(True)).all()
-    serials = [r.serial for r in reps]
-    removed = {"reps": len(reps), "applications": 0, "documents": 0, "logins": 0}
-    if serials:
-        # Real reps never keep a pointer to a test rep.
-        db.query(VoltRep).filter(VoltRep.original_recruiter_serial.in_(serials)).update(
-            {VoltRep.original_recruiter_serial: None}, synchronize_session=False)
-        db.query(VoltApplication).filter(VoltApplication.referrer_serial.in_(serials)).update(
-            {VoltApplication.referrer_serial: None}, synchronize_session=False)
-        ds = db.query(VoltDocument).filter(VoltDocument.rep_serial.in_(serials)).all()
-        for d in ds:
-            try:
-                storage.remove(d.storage_backend, d.storage_key, db=db)
-            except Exception:  # pragma: no cover - a missing blob is not a reason to keep the row
-                pass
-            db.delete(d)
-        removed["documents"] = len(ds)
-        apps = db.query(VoltApplication).filter(VoltApplication.rep_serial.in_(serials)).all()
-        ids = [a.id for a in apps]
-        removed["applications"] = len(apps)
-        # Sessions whose ONLY attendees were test reps are test sessions: remove
-        # them too. A session with any real attendee keeps everyone but the test rep.
-        touched = {sid for (sid,) in db.query(VoltSessionAttendee.session_id)
-                   .filter(VoltSessionAttendee.rep_serial.in_(serials)).distinct().all()}
-        db.query(VoltSessionAttendee).filter(VoltSessionAttendee.rep_serial.in_(serials)).delete(synchronize_session=False)
-        removed["sessions"] = 0
-        for sid in touched:
-            if db.query(VoltSessionAttendee).filter(VoltSessionAttendee.session_id == sid).count() == 0:
-                sess = db.get(VoltSession, sid)
-                if sess is not None and sess.organization_id == org_id:
-                    db.query(VoltAuditEvent).filter(VoltAuditEvent.organization_id == org_id,
-                                                    VoltAuditEvent.entity_type == "session",
-                                                    VoltAuditEvent.entity_id == sid).delete(synchronize_session=False)
-                    db.delete(sess)
-                    removed["sessions"] += 1
-        db.query(VoltAuditEvent).filter(VoltAuditEvent.organization_id == org_id,
-                                        ((VoltAuditEvent.entity_type == "rep") & VoltAuditEvent.entity_id.in_([str(s) for s in serials]))
-                                        | ((VoltAuditEvent.entity_type == "application") & VoltAuditEvent.entity_id.in_(ids or ["-"]))
-                                        | ((VoltAuditEvent.entity_type == "document") & VoltAuditEvent.entity_id.in_([d.id for d in ds] or ["-"]))
-                                        ).delete(synchronize_session=False)
-        for a in apps:
-            db.delete(a)
-        user_ids = [r.user_id for r in reps]
-        db.flush()
-        for r in reps:
-            db.delete(r)
-        db.flush()
-        from app.models.session_models import UserSession
-        for u in db.query(User).filter(User.id.in_(user_ids), User.role == "volt_rep").all():
-            db.query(UserSession).filter(UserSession.user_id == u.id).delete(synchronize_session=False)
-            try:
-                with db.begin_nested():
-                    db.delete(u)
-                    db.flush()
-                removed["logins"] += 1
-            except Exception:
-                # Some other table still points at this login: keep the row,
-                # switch it off. It can no longer sign in to anything.
-                u = db.get(User, u.id)
-                if u is not None:
-                    u.is_active = False
-                    removed.setdefault("logins_deactivated", 0)
-                    removed["logins_deactivated"] += 1
-    db.commit()
-    return removed
+    from app.services.volt import cleanup
+    return cleanup.purge(db, org_id)

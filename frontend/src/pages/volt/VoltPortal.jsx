@@ -14,7 +14,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { fmtDate, sessionTime, setVoltToken, uploadKey, volt, voltToken } from './voltApi'
+import { fmtDate, sessionTime, setVoltToken, uploadKey, useVoltTitle, volt, voltToken } from './voltApi'
 import './volt.css'
 
 const INVITE_KEY = 'af_volt_invite'
@@ -701,7 +701,7 @@ export default function VoltPortal() {
   useEffect(() => {
     Promise.all([volt.portal().then(setPortal), reload()]).catch((x) => setErr(x.message)).finally(() => setReady(true))
   }, [reload])
-  useEffect(() => { document.title = 'VOLT Marketing | Recruiting' }, [])
+  useVoltTitle()
   // Returning reps land in their dashboard.
   useEffect(() => {
     if (ready && me?.has_profile && loc.pathname === '/volt' && !loc.search) navigate('/volt/me', { replace: true })

@@ -70,6 +70,9 @@ WHOLESALE_ALLOWED_PREFIXES = (
 
 
 BACK_OFFICE_PREFIXES = ("/sales",)
+# VOLT Marketing (#535): staff operations and the applicant's own API.
+VOLT_OPS_PREFIX = "/volt/ops/"
+VOLT_APPLICANT_PREFIX = "/volt/rep/"
 
 # ── CLEANING CUSTOMER LOCK (owner decision 2026-11-03, Issue #452) ──────────
 # A cleaning company's own login works ONLY its booked-appointment portal.
@@ -367,6 +370,21 @@ def enforce(db: Session, user, request: Request) -> None:
                 return
         except Exception:  # pragma: no cover - fall through to the normal lock
             pass
+    # VOLT MARKETING (#535) is its own destination on the launcher, not a
+    # platform screen. Its operations open for a login the server confirms as
+    # VOLT staff for THAT organization (the org id in the path is re-checked
+    # against a real membership here and again by every /volt/ops handler).
+    # The applicant API serves only the caller's own VOLT profile.
+    if path.startswith(VOLT_OPS_PREFIX):
+        try:
+            from app.services.volt.common import staff_access
+            org_id = path[len(VOLT_OPS_PREFIX):].split("/", 1)[0]
+            if org_id and staff_access(db, user, org_id):
+                return
+        except Exception:  # pragma: no cover - fall through to the normal lock
+            pass
+    if path.startswith(VOLT_APPLICANT_PREFIX):
+        return
     if locked_experience(db, user, request) == WHOLESALE:
         raise HTTPException(
             status_code=403,

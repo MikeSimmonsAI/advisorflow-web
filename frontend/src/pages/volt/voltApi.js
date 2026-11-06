@@ -3,7 +3,31 @@
 // Separate from api/client.js on purpose: an applicant login (role volt_rep) is
 // fenced on the server to /volt/rep/* and must never share a token slot, a
 // workspace header or a redirect with a staff session in the same browser.
+import { useEffect } from 'react'
 import { API_BASE } from '../../api/client'
+
+export const VOLT_TITLE = 'VOLT Marketing'
+
+/**
+ * The browser tab reads "VOLT Marketing" on every VOLT screen (portal, sign-in,
+ * dashboard, applications, operations). The app shell applies brand/theme
+ * titles after its own requests return, sometimes after this screen mounted,
+ * so the title is watched and put back while VOLT is showing, and the previous
+ * title is restored when the person leaves VOLT for another program.
+ */
+export function useVoltTitle() {
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined
+    const previous = document.title === VOLT_TITLE ? '' : document.title
+    const apply = () => { if (document.title !== VOLT_TITLE) document.title = VOLT_TITLE }
+    apply()
+    let el = document.querySelector('title')
+    if (!el) { el = document.createElement('title'); document.head.appendChild(el); apply() }
+    const obs = typeof MutationObserver !== 'undefined' ? new MutationObserver(apply) : null
+    if (obs) obs.observe(el, { childList: true, characterData: true, subtree: true })
+    return () => { if (obs) obs.disconnect(); if (previous) document.title = previous }
+  }, [])
+}
 
 export const SLUG = 'volt-marketing'
 const KEY = 'af_volt_token'
