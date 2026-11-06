@@ -1,59 +1,1493 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light">
-<title>Blue Ridge Gold & Jewelry | EvoSys Business Ecosystem • Interactive Concept</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<!--
+  Blue Ridge Gold & Jewelry — Business Command Center (Powered by EvoSys)
+  INTERACTIVE SALES DEMO — SAMPLE DATA ONLY.
+
+  This page is fully self-contained. The Content-Security-Policy below blocks
+  every network request except Google Fonts (connect-src 'none', form-action
+  'none'), so nothing on this page can reach an EvoSys API, Twilio, an email
+  provider or any customer data. All "sends", "bookings" and edits change an
+  in-memory object only; nothing is written to localStorage or cookies, and a
+  page refresh (or the Reset Demo button) restores the original sample data.
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'">
+<title>Blue Ridge Gold &amp; Jewelry — Business Command Center | Interactive Demo · Powered by EvoSys</title>
+<meta name="description" content="Interactive demo with sample data: what a Blue Ridge Gold & Jewelry business command center powered by EvoSys could look like.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a1a33'/%3E%3Cpath d='M4 24 13 13l4 4 4-7 7 14' fill='none' stroke='%23d8b45a' stroke-width='2.6' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
-:root{--navy:#07152a;--navy2:#0e2441;--navy3:#163452;--gold:#e5b74d;--gold2:#f6d780;--ink:#17253a;--muted:#6a778a;--line:#e5eaf0;--canvas:#f5f7fb;--white:#fff;--green:#117953;--red:#a84949;--blue:#2758a9}
-*{box-sizing:border-box}body{margin:0;background:var(--canvas);color:var(--ink);font:14px/1.5 'DM Sans',Arial,sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--gold);outline-offset:3px}h1,h2,h3,p{margin-top:0}h1,h2,h3,.brandname{font-family:Manrope,Arial,sans-serif}h1{font-size:27px;letter-spacing:-.8px;margin-bottom:5px}h2{font-size:20px;letter-spacing:-.4px}h3{font-size:15px;margin-bottom:10px}.tiny{font-size:11px}.small{font-size:12px}.muted{color:var(--muted)}.strong{font-weight:700}.right{text-align:right}.demo-ribbon{height:30px;background:#e4ae3d;color:#182a42;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;letter-spacing:1.6px;text-align:center;position:relative;z-index:5}.layout{display:grid;grid-template-columns:245px minmax(0,1fr);min-height:calc(100vh - 30px)}.sidebar{background:linear-gradient(175deg,#06182e,#0b2543 57%,#0a1a32);color:#d7e1f0;padding:25px 17px;display:flex;flex-direction:column;min-height:calc(100vh - 30px)}.brand{display:flex;align-items:center;gap:11px;padding:7px 6px 20px;border-bottom:1px solid #28415e}.mark{width:50px;height:43px;flex:none}.brandname{font-size:15px;line-height:1.14;font-weight:800;color:white}.brandname span{color:var(--gold);font-size:12px;letter-spacing:1.6px}.sidecap{margin:23px 10px 10px;color:#7894b5;letter-spacing:1.6px;font-size:10px;font-weight:800}.nav{display:flex;flex-direction:column;gap:5px}.nav button{border:0;background:transparent;color:#c5d3e4;padding:12px 13px;border-radius:10px;text-align:left;display:flex;gap:12px;align-items:center;font-weight:600;transition:.15s}.nav button:hover{background:#183959;color:#fff}.nav button.active{background:linear-gradient(100deg,#f1cb71,#d99b25);color:#172944;box-shadow:0 6px 15px #0004}.nav svg{width:17px;height:17px;stroke-width:2}.sidebar-foot{margin-top:auto;padding:25px 8px 4px;color:#8fa4be}.sidebar-foot strong{color:#eed193}.main{min-width:0}.topbar{height:74px;display:flex;align-items:center;justify-content:space-between;gap:15px;background:#fff;border-bottom:1px solid var(--line);padding:0 32px}.topbar-left{font-size:12px;font-weight:800;color:#425c7b;letter-spacing:1.6px}.topbar-right{display:flex;align-items:center;gap:12px}.pill{display:inline-flex;align-items:center;gap:6px;border:1px solid #e8d7a8;border-radius:999px;background:#fffaf0;color:#77581f;padding:6px 11px;font-size:11px;font-weight:800}.btn{display:inline-flex;align-items:center;gap:7px;border:1px solid #d8e0ea;padding:10px 14px;border-radius:9px;background:white;color:#233752;font-weight:700;line-height:1.2;box-shadow:0 2px 6px #0e27300a}.btn:hover{border-color:#dcb45d;background:#fffcf5}.btn.gold{background:linear-gradient(125deg,#f3d583,#d9a333);color:#182a40;border-color:#dba841;box-shadow:0 2px 9px #b68a2e2b}.btn.navy{background:var(--navy2);color:white;border-color:var(--navy2)}.btn.sm{padding:8px 10px;font-size:12px}.btn:disabled{opacity:.55;cursor:not-allowed}.content{max-width:1480px;margin:auto;padding:29px 34px 80px}.view{display:none;animation:fade .2s ease}.view.active{display:block}@keyframes fade{from{opacity:.5;transform:translateY(4px)}to{opacity:1;transform:none}}.section-head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:22px}.section-head p{margin:0;color:var(--muted)}.eyebrow{color:#ad822b;text-transform:uppercase;font-size:11px;letter-spacing:2px;font-weight:800;margin-bottom:8px}.grid{display:grid;gap:18px}.cols4{grid-template-columns:repeat(4,minmax(0,1fr))}.cols3{grid-template-columns:repeat(3,minmax(0,1fr))}.cols2{grid-template-columns:repeat(2,minmax(0,1fr))}.card{background:#fff;border:1px solid var(--line);border-radius:15px;box-shadow:0 4px 22px #0b254309;padding:21px;min-width:0}.card-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px}.card-title h3{margin:0}.metric{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.number{font-family:Manrope,sans-serif;font-size:29px;letter-spacing:-1px;font-weight:800;margin:10px 0 2px}.delta{font-size:11px;color:var(--green);font-weight:700}.ico{background:#fff5d9;border-radius:12px;color:#ab7a13;width:39px;height:39px;display:grid;place-items:center;font-size:20px}.hero{background:radial-gradient(ellipse at 100% 0,#235078,transparent 44%),linear-gradient(115deg,#07182f,#133456);color:#fff;overflow:hidden;position:relative;display:flex;justify-content:space-between;align-items:center;gap:15px;padding:26px 30px;border-radius:16px;margin-bottom:20px}.hero h2{font-size:24px;margin:4px 0 9px}.hero p{max-width:600px;color:#c6d5e7;margin:0}.hero .ridge{font-size:92px;color:#e4b64c;opacity:.3;position:absolute;right:12%;top:-16px}.hero .btn{flex:none;position:relative}.bars{height:214px;display:flex;align-items:end;gap:16px;padding:18px 9px 28px;border-bottom:1px solid #dbe2ec;position:relative}.bar{background:linear-gradient(0deg,#ba8b26,#f1ce76);border-radius:5px 5px 0 0;flex:1;position:relative;min-width:12px;transition:.2s}.bar:hover{filter:brightness(1.08)}.bar span{font-size:11px;color:#8995a8;position:absolute;bottom:-25px;left:50%;transform:translateX(-50%)}.activity{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid #edf0f5}.activity:last-child{border:0}.dot{width:9px;height:9px;border-radius:50%;background:var(--gold);margin-top:7px;flex:none}.activity p{margin:0}.activity .muted{font-size:11px}.segments{display:flex;flex-wrap:wrap;gap:7px}.tag{display:inline-block;font-size:11px;font-weight:700;border-radius:999px;padding:4px 9px;background:#e5eefc;color:#3261a2}.tag.gold{background:#fff0c7;color:#986a0f}.tag.purple{background:#f1e8ff;color:#6c489c}.tag.green{background:#e7f5ed;color:#227650}.tag.red{background:#ffeded;color:#9e4141}.table-wrap{overflow-x:auto}.table{border-collapse:collapse;width:100%;white-space:nowrap;font-size:12px}.table th{background:#f5f7fa;text-align:left;color:#7a899a;font-weight:800;font-size:11px;letter-spacing:.3px}.table th,.table td{padding:13px 12px;border-bottom:1px solid #e9edf3}.table tr:hover td{background:#fbfcfe}.table tr:last-child td{border-bottom:0}.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px}.tab{border:1px solid #dde4ec;background:white;color:#526479;border-radius:999px;padding:8px 14px;font-size:12px;font-weight:700}.tab.active{background:#102c4e;border-color:#102c4e;color:white}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.field{display:flex;flex-direction:column;gap:7px;margin-bottom:13px}.field label{font-size:12px;font-weight:800;color:#526276}.field input,.field select,.field textarea{width:100%;border-radius:9px;border:1px solid #dce3eb;padding:11px 12px;background:#fff;color:#243952;outline:none}.field textarea{min-height:95px;resize:vertical}.field input:focus,.field select:focus,.field textarea:focus{border-color:#b99852;box-shadow:0 0 0 3px #f8edc9}.preview{border:1px solid #dec997;border-radius:14px;overflow:hidden;background:#fffaf0}.preview-head{background:#0b2340;color:#f6d780;padding:18px 20px;font:700 18px Manrope,sans-serif}.preview-body{padding:17px 19px;color:#243952}.preview-body p{margin-bottom:10px}.sms{max-width:320px;background:#e8eef5;border-radius:17px 17px 17px 4px;padding:14px 16px;color:#243447;font-size:13px}.list-items{display:grid;gap:9px}.list-item{display:flex;align-items:center;justify-content:space-between;border:1px solid #e6ecf1;border-radius:10px;padding:12px 15px;gap:10px}.list-item:hover{border-color:#e5c77f}.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.step{background:#fff;border:1px solid #e8edf3;border-radius:16px;padding:22px;position:relative}.step-num{display:grid;place-items:center;background:#112b49;color:var(--gold2);border-radius:12px;width:39px;height:39px;font:800 20px Manrope;margin-bottom:16px}.step h3{font-size:15px;margin-bottom:7px}.step p{font-size:13px;color:#66778b;margin:0}.phase{border:1px solid #e7ebf0;border-radius:14px;padding:19px;background:white}.phase.featured{border:2px solid #d6a93c;background:linear-gradient(165deg,#fffdf7,#fff)}.phase .num{color:#c08e2a;font-weight:800;font-size:11px;letter-spacing:1.2px}.phase h3{margin:8px 0 9px}.phase ul{padding-left:18px;color:#5d6f83;line-height:1.8;font-size:12px;margin-bottom:0}.poster{padding:33px;border:2px solid #c69c48;border-radius:19px;background:linear-gradient(120deg,#0a1c34,#13375c);color:white;overflow:hidden;margin-bottom:23px}.poster .eyebrow{color:#f5cf72}.poster h1{font-size:32px}.poster p{color:#c5d5e6}.poster .step{border-color:#35506a;background:#173251}.poster .step p{color:#cbd8e5}.poster .step-num{background:linear-gradient(140deg,#f3d17d,#c8922b);color:#142b46}.poster .phase{background:#fff;color:#182a44}.poster .phase p{color:#5d6f83}.callout{border-left:3px solid #d7a53b;background:#fffaee;padding:14px 16px;border-radius:5px;margin-top:14px}.fade{opacity:.6}.demo-foot{margin-top:36px;color:#91a1b3;font-size:11px;text-align:center}.ai-chat{height:290px;overflow:auto;background:#f7f9fc;border-radius:11px;padding:15px;display:flex;flex-direction:column;gap:12px}.bubble{max-width:83%;border-radius:14px;padding:12px 14px;background:#e6eef6;color:#21354b;align-self:flex-start}.bubble.user{align-self:flex-end;background:#123351;color:white}.inventory-thumb{height:120px;background:linear-gradient(135deg,#09213f,#173759);color:#eccc79;display:grid;place-items:center;font-size:50px;border-radius:12px;margin-bottom:12px}.progress{background:#e9eef4;height:8px;border-radius:999px;overflow:hidden}.progress span{display:block;background:linear-gradient(90deg,#b88b2f,#e4bd5f);height:100%;border-radius:999px}.tour-mask{position:fixed;inset:0;background:#07162dcf;z-index:19;display:none;align-items:center;justify-content:center;padding:20px}.tour-mask.show{display:flex}.tour-panel{background:white;border-radius:19px;max-width:510px;width:100%;padding:26px 28px;box-shadow:0 30px 100px #0007}.tour-panel h2{font-size:23px;margin-bottom:8px}.tour-controls{display:flex;justify-content:space-between;gap:8px;margin-top:22px}.notice{position:fixed;bottom:25px;right:25px;z-index:30;background:#142f50;color:white;border:1px solid #a78a4c;border-radius:10px;box-shadow:0 12px 30px #0003;padding:16px 20px;max-width:390px;display:none}.notice.show{display:block}.mobile-menu{display:none}.filters{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.filters select,.filters input{border:1px solid #dce3eb;border-radius:9px;padding:10px 12px;max-width:260px;background:white}.empty{padding:28px;text-align:center;color:#738298}.mini-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.mini-stat{background:#f7f9fc;border-radius:12px;padding:13px}.mini-stat b{font-size:19px;display:block;color:#173a59}.checkrow{display:flex;align-items:center;gap:9px;font-size:12px;margin:10px 0}.checkrow input{accent-color:#bd8d2c}.hidden{display:none!important}.desk-only{}@media(max-width:1050px){.cols4{grid-template-columns:repeat(2,1fr)}.cols3,.steps{grid-template-columns:repeat(2,1fr)}.content{padding:24px}.sidebar{width:205px}.layout{grid-template-columns:205px 1fr}}@media(max-width:760px){.layout{display:block}.sidebar{display:none;position:absolute;z-index:10;width:260px;top:30px;bottom:0;min-height:0;box-shadow:10px 30px 70px #0008}.sidebar.open{display:flex}.mobile-menu{display:inline-flex}.topbar{padding:0 15px;height:64px}.topbar-left{font-size:10px}.topbar-right{gap:4px}.topbar .pill{display:none}.content{padding:19px 13px 50px}.section-head{display:block}.section-head .btn{margin-top:15px}.cols3,.cols2,.steps,.form-grid{grid-template-columns:1fr}.cols4{grid-template-columns:repeat(2,1fr);gap:10px}.card{padding:17px}.number{font-size:23px}.hero{padding:23px;display:block}.hero .btn{margin-top:17px}.poster{padding:22px 15px}.poster h1{font-size:25px}.mini-grid{grid-template-columns:1fr}.bars{gap:8px}.topbar-right .btn.sm{font-size:11px}.desk-only{display:none}}@media print{.demo-ribbon,.sidebar,.topbar,.btn,.notice,.tour-mask,.demo-foot{display:none!important}.layout{display:block}.view{display:none!important}.view.print-active{display:block!important}.content{padding:0;max-width:none}.poster{background:#071d38!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.poster .step-num{print-color-adjust:exact}.poster .phase{print-color-adjust:exact}body{background:white}.card{break-inside:avoid}}
+:root{
+  --navy:#0a1a33;--navy-2:#10264a;--navy-3:#1b365f;--navy-4:#2a4a78;
+  --gold:#c9a24a;--gold-2:#dfbf6e;--gold-3:#f3e2b3;--gold-ink:#8a6a1f;
+  --ivory:#faf7ef;--ivory-2:#f3ecdc;--white:#fff;
+  --ink:#14223a;--ink-2:#2e3d55;--muted:#647085;--line:#e7e0cf;--line-2:#efe9db;
+  --green:#1f7a55;--green-bg:#e5f3ec;--red:#a8433f;--red-bg:#f8e7e5;--blue:#2a5ea8;--blue-bg:#e6eef9;--amber:#a86b12;--amber-bg:#fbf0dc;--purple:#6b4fa8;--purple-bg:#eee8f8;
+  --r:14px;--shadow:0 1px 2px rgba(10,26,51,.05),0 6px 22px rgba(10,26,51,.06);
+  --display:'Cormorant Garamond',Georgia,'Times New Roman',serif;
+  --ui:'Manrope',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--ivory);color:var(--ink);font:14px/1.5 var(--ui)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--gold-2);outline-offset:2px}
+h1,h2,h3,h4,p{margin:0}
+.hidden{display:none!important}
+
+/* ---------- demo ribbon ---------- */
+.ribbon{position:sticky;top:0;z-index:60;background:linear-gradient(90deg,#6b4f12,var(--gold) 30%,var(--gold-2) 50%,var(--gold) 70%,#6b4f12);color:#1c1405;text-align:center;font-weight:800;font-size:11.5px;letter-spacing:.9px;padding:6px 12px;line-height:1.35}
+.ribbon b{letter-spacing:1.4px}
+.ribbon .sep{opacity:.55;margin:0 8px}
+
+/* ---------- layout ---------- */
+.app{display:grid;grid-template-columns:256px 1fr;min-height:calc(100vh - 29px)}
+.sidebar{background:var(--navy);color:#dfe6f2;position:sticky;top:29px;height:calc(100vh - 29px);overflow:auto;display:flex;flex-direction:column;padding:20px 14px 0;z-index:40}
+.brand{display:flex;gap:11px;align-items:center;padding:4px 8px 18px;border-bottom:1px solid rgba(255,255,255,.08)}
+.brand svg{flex:none}
+.brand-name{font-family:var(--display);font-weight:700;font-size:21px;line-height:1;color:#fff;letter-spacing:.4px}
+.brand-name small{display:block;font-family:var(--ui);font-size:9.5px;font-weight:800;letter-spacing:2.6px;color:var(--gold-2);margin-top:5px}
+.side-cap{font-size:10px;font-weight:800;letter-spacing:1.8px;color:#7f8fab;margin:18px 10px 8px}
+.nav button{display:flex;align-items:center;gap:11px;width:100%;border:0;background:none;color:#c9d3e4;padding:9px 11px;border-radius:10px;font-weight:600;font-size:13.5px;text-align:left;margin-bottom:2px}
+.nav button svg{flex:none;opacity:.8}
+.nav button:hover{background:rgba(255,255,255,.06);color:#fff}
+.nav button.active{background:linear-gradient(90deg,rgba(201,162,74,.24),rgba(201,162,74,.06));color:#fff;box-shadow:inset 3px 0 0 var(--gold-2)}
+.nav button.active svg{opacity:1;color:var(--gold-2)}
+.side-foot{margin-top:auto;padding:16px 10px 18px;position:relative}
+.side-foot .mtn{position:absolute;left:-14px;right:-14px;bottom:0;opacity:.5;pointer-events:none}
+.powered{position:relative;font-size:10.5px;letter-spacing:1.6px;font-weight:800;color:#8d9cb6}
+.powered b{color:#fff;letter-spacing:.6px;font-size:13px}
+.side-note{position:relative;margin-top:8px;font-size:11.5px;color:#9aa8bf;line-height:1.45}
+
+.main{min-width:0;display:flex;flex-direction:column}
+.topbar{position:sticky;top:29px;z-index:30;background:rgba(250,247,239,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 26px}
+.crumb{font-size:11px;font-weight:800;letter-spacing:1.4px;color:var(--muted)}
+.crumb b{color:var(--ink)}
+.top-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.topbar .menu-btn{display:none}
+.content{padding:26px 26px 40px;max-width:1380px;width:100%}
+.view{display:none;animation:fade .25s ease}
+.view.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.page-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:20px;flex-wrap:wrap}
+.eyebrow{font-size:11px;font-weight:800;letter-spacing:1.6px;color:var(--gold-ink);text-transform:uppercase;margin-bottom:5px}
+.page-head h1{font-family:var(--display);font-size:36px;line-height:1.05;font-weight:700;letter-spacing:-.2px}
+.page-head p{color:var(--muted);margin-top:6px;max-width:640px}
+.site-foot{margin-top:30px;padding:16px 0 0;border-top:1px solid var(--line);color:var(--muted);font-size:11.5px;line-height:1.6}
+
+/* ---------- primitives ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid var(--line);background:var(--white);color:var(--ink);padding:9px 14px;border-radius:10px;font-weight:700;font-size:13px;white-space:nowrap;transition:transform .08s,box-shadow .15s,background .15s}
+.btn:hover{box-shadow:0 2px 10px rgba(10,26,51,.08)}
+.btn:active{transform:translateY(1px)}
+.btn.gold{background:linear-gradient(180deg,var(--gold-2),var(--gold));border-color:#b8913c;color:#1d1505}
+.btn.navy{background:var(--navy);border-color:var(--navy);color:#fff}
+.btn.ghost{background:transparent}
+.btn.sm{padding:6px 10px;font-size:12px;border-radius:8px}
+.btn.lg{padding:12px 18px;font-size:14px}
+.btn[disabled]{opacity:.45;cursor:not-allowed;transform:none}
+.btn.tour-cta{letter-spacing:.6px;font-weight:800}
+.m-tour{display:none}
+#reportTiles{grid-template-columns:repeat(3,minmax(0,1fr))}
+.card{background:var(--white);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:18px}
+.card h3{font-size:15px;font-weight:800;letter-spacing:-.1px}
+.card-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.card-head .sub{font-size:12px;color:var(--muted);font-weight:500}
+.grid{display:grid;gap:16px}
+.grid>*,.kpis>*{min-width:0}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.g-main{grid-template-columns:minmax(0,1.65fr) minmax(0,1fr)}
+.g-side{grid-template-columns:minmax(300px,.85fr) minmax(0,1.6fr)}
+.mt{margin-top:16px}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+.tiny{font-size:11px}
+.strong{font-weight:800}
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:4px 10px;font-size:11px;font-weight:800;letter-spacing:.5px;background:var(--ivory-2);color:var(--ink-2);border:1px solid var(--line);white-space:nowrap}
+.page-head .pill{white-space:normal;line-height:1.35}
+.pill.sim{background:var(--amber-bg);border-color:#efd9a8;color:var(--amber)}
+.pill.ok{background:var(--green-bg);border-color:#cbe6d8;color:var(--green)}
+.pill.navy{background:var(--navy);border-color:var(--navy);color:var(--gold-3)}
+.tag{display:inline-block;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;background:var(--ivory-2);color:var(--ink-2);margin:0 4px 4px 0;white-space:nowrap}
+.tag.gold{background:#f7ecd0;color:#7a5a12}
+.tag.jewelry{background:var(--purple-bg);color:var(--purple)}
+.tag.coins{background:var(--blue-bg);color:var(--blue)}
+.tag.previous{background:#eef1f5;color:#435167}
+.tag.vip{background:var(--navy);color:var(--gold-3)}
+.tag.inactive{background:var(--red-bg);color:var(--red)}
+.status{display:inline-block;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.s-green{background:var(--green-bg);color:var(--green)}
+.s-amber{background:var(--amber-bg);color:var(--amber)}
+.s-blue{background:var(--blue-bg);color:var(--blue)}
+.s-red{background:var(--red-bg);color:var(--red)}
+.s-gray{background:#eef0f4;color:#566175}
+.s-purple{background:var(--purple-bg);color:var(--purple)}
+label.lbl{display:block;font-size:11.5px;font-weight:800;letter-spacing:.3px;color:var(--ink-2);margin-bottom:6px}
+.field{margin-bottom:13px}
+.input,select.input,textarea.input{width:100%;border:1px solid #ddd4bf;background:#fffdf8;border-radius:10px;padding:9px 11px;font-size:13.5px}
+textarea.input{resize:vertical;min-height:84px;line-height:1.45}
+.input:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px rgba(201,162,74,.2)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.row.between{justify-content:space-between}
+.form-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.seg-ctl{display:inline-flex;background:var(--white);border:1px solid var(--line);border-radius:11px;padding:3px;gap:2px}
+.seg-ctl button{border:0;background:none;padding:6px 12px;border-radius:8px;font-weight:700;font-size:12.5px;color:var(--muted)}
+.seg-ctl button.on{background:var(--navy);color:#fff}
+.hero-ctl.seg-ctl{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.16)}
+.hero-ctl.seg-ctl button{color:#cdd6e6}
+.hero-ctl.seg-ctl button.on{background:var(--gold-2);color:#1d1505}
+.chip{border:1px solid var(--line);background:var(--white);border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:700;color:var(--ink-2);display:inline-flex;align-items:center;gap:7px}
+.chip .n{font-size:11px;color:var(--muted);font-weight:700}
+.chip.on{background:var(--navy);border-color:var(--navy);color:#fff}
+.chip.on .n{color:var(--gold-3)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.note{border:1px dashed #d8c99f;background:#fffaf0;border-radius:12px;padding:12px 14px;font-size:12.5px;color:#5d4b20;line-height:1.5}
+.note b{color:#4a3a10}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+
+/* ---------- dashboard ---------- */
+.hero{position:relative;overflow:hidden;border-radius:18px;background:radial-gradient(1200px 300px at 85% -40%,rgba(223,191,110,.22),transparent 60%),linear-gradient(135deg,var(--navy) 0%,var(--navy-2) 60%,var(--navy-3) 100%);color:#fff;padding:26px 28px 30px;margin-bottom:18px}
+.hero .mtn-art{position:absolute;right:0;bottom:0;width:62%;max-width:720px;opacity:.9;pointer-events:none}
+.hero-top{position:relative;display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.hero h1{font-family:var(--display);font-size:40px;line-height:1.02;font-weight:700;margin:4px 0 8px}
+.hero p{color:#c6d0e2;max-width:520px}
+.hero .eyebrow{color:var(--gold-2)}
+.hero-actions{position:relative;margin-top:20px;display:flex;gap:10px;flex-wrap:wrap}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.kpi{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:15px 16px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.kpi .k-label{font-size:12px;color:var(--muted);font-weight:700;display:flex;justify-content:space-between;gap:6px}
+.kpi .k-val{font-size:27px;font-weight:800;letter-spacing:-.8px;margin-top:6px;line-height:1.1}
+.kpi .k-foot{font-size:11.5px;margin-top:5px;color:var(--muted)}
+.up{color:var(--green);font-weight:800}
+.down{color:var(--red);font-weight:800}
+.kpi.featured{background:linear-gradient(160deg,#fffaf0,#fff);border-color:#e9d6a6}
+.feed{list-style:none;margin:0;padding:0}
+.feed li{display:flex;gap:11px;padding:10px 0;border-bottom:1px solid var(--line-2)}
+.feed li:last-child{border-bottom:0}
+.feed .dot{flex:none;width:30px;height:30px;border-radius:9px;display:grid;place-items:center;font-size:14px;background:var(--ivory-2)}
+.feed .t{font-size:13px;font-weight:600}
+.feed .w{font-size:11.5px;color:var(--muted)}
+.feed li.fresh .t::after{content:'NEW';margin-left:7px;font-size:9.5px;font-weight:800;background:var(--gold-2);color:#1d1505;border-radius:4px;padding:1px 5px;vertical-align:1px}
+.suggest{display:flex;gap:12px;align-items:flex-start;padding:12px;border:1px solid var(--line);border-radius:12px;background:#fffdf7;margin-bottom:10px}
+.suggest .ic{flex:none;width:34px;height:34px;border-radius:10px;background:var(--navy);color:var(--gold-2);display:grid;place-items:center;font-weight:800}
+.suggest .tx{flex:1;font-size:13px}
+.suggest .tx b{display:block;margin-bottom:2px}
+.chart-wrap svg{display:block;width:100%;height:auto}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.mini-bar{display:grid;grid-template-columns:130px 1fr 50px;align-items:center;gap:10px;font-size:12.5px;margin:9px 0}
+.bar{height:9px;background:var(--ivory-2);border-radius:99px;overflow:hidden}
+.bar span{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--gold),var(--gold-2));transition:width .5s}
+.bar.navy span{background:linear-gradient(90deg,var(--navy-3),var(--navy-4))}
+.appt-mini{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line-2);font-size:13px}
+.appt-mini:last-child{border-bottom:0}
+
+/* ---------- tables ---------- */
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:12px;border:1px solid var(--line)}
+table{width:100%;border-collapse:collapse;background:var(--white);font-size:13px}
+th{text-align:left;font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);font-weight:800;padding:11px 12px;background:#fbf8f1;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:11px 12px;border-bottom:1px solid var(--line-2);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+tbody tr.click{cursor:pointer}
+tbody tr.click:hover td{background:#fffaf0}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+tfoot td{font-weight:800;background:#fbf8f1;border-top:1px solid var(--line)}
+.who{display:flex;align-items:center;gap:10px}
+.avatar{flex:none;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:800;color:#fff;background:var(--navy-3)}
+.who b{display:block;font-size:13px}
+.who span{font-size:11.5px;color:var(--muted)}
+select.mini{border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12px;font-weight:700;background:#fff}
+
+/* ---------- drawer & modal ---------- */
+.scrim{position:fixed;inset:0;background:rgba(10,26,51,.42);z-index:80;opacity:0;pointer-events:none;transition:opacity .2s}
+.scrim.show{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(560px,100%);background:var(--ivory);z-index:90;transform:translateX(105%);transition:transform .25s ease;display:flex;flex-direction:column;box-shadow:-20px 0 50px rgba(10,26,51,.2)}
+.drawer.show{transform:none}
+.drawer-head{background:var(--navy);color:#fff;padding:22px 22px 18px;position:relative}
+.drawer-head h2{font-family:var(--display);font-size:30px;line-height:1.05}
+.drawer-body{padding:18px 22px 30px;overflow:auto;flex:1}
+.x{position:absolute;top:14px;right:14px;border:0;background:rgba(255,255,255,.1);color:#fff;width:34px;height:34px;border-radius:10px;font-size:18px;line-height:1}
+.kv{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0 4px}
+.kv div{background:rgba(255,255,255,.07);border-radius:10px;padding:9px 10px}
+.kv span{display:block;font-size:10.5px;color:#a9b6cc;font-weight:700;letter-spacing:.4px}
+.kv b{font-size:14px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:4px 0 12px}
+.tabs button{border:0;background:none;padding:9px 12px;font-weight:700;font-size:13px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs button.on{color:var(--ink);border-color:var(--gold)}
+.timeline{list-style:none;margin:0;padding:0}
+.timeline li{display:grid;grid-template-columns:86px 1fr;gap:10px;padding:9px 0;border-bottom:1px solid var(--line-2);font-size:13px}
+.timeline li:last-child{border:0}
+.timeline .d{font-size:11.5px;color:var(--muted);font-weight:700}
+.modal{position:fixed;inset:0;z-index:95;display:none;align-items:center;justify-content:center;padding:16px}
+.modal.show{display:flex}
+.modal .panel{background:var(--ivory);border-radius:18px;width:min(560px,100%);max-height:calc(100vh - 40px);overflow:auto;box-shadow:0 30px 80px rgba(10,26,51,.35);position:relative;z-index:96}
+.modal .panel-head{padding:20px 22px 0}
+.modal .panel-head h2{font-family:var(--display);font-size:28px}
+.modal .panel-body{padding:16px 22px 22px}
+.modal .modal-scrim{position:absolute;inset:0;background:rgba(10,26,51,.45)}
+.check{display:flex;gap:9px;align-items:flex-start;font-size:13px;margin:8px 0}
+.check input{margin-top:3px;accent-color:var(--navy)}
+
+/* ---------- campaigns ---------- */
+.camp-list{display:flex;flex-direction:column;gap:10px}
+.camp{border:1px solid var(--line);background:var(--white);border-radius:13px;padding:13px 14px;text-align:left;width:100%;display:block;transition:border-color .15s,box-shadow .15s}
+.camp:hover{border-color:#e2cf9c}
+.camp.on{border-color:var(--gold);box-shadow:0 0 0 3px rgba(201,162,74,.18)}
+.camp .nm{font-weight:800;font-size:14px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+.camp .ds{font-size:12px;color:var(--muted);margin-top:4px}
+.aud{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:4px 0 12px}
+.aud div{background:var(--ivory);border:1px solid var(--line);border-radius:11px;padding:10px}
+.aud span{display:block;font-size:10.5px;font-weight:800;color:var(--muted);letter-spacing:.4px;text-transform:uppercase}
+.aud b{font-size:19px;letter-spacing:-.4px}
+.aud .elig{background:var(--navy);border-color:var(--navy);color:#fff}
+.aud .elig span{color:var(--gold-3)}
+.phone{width:min(290px,100%);margin:0 auto;background:#111;border-radius:34px;padding:12px;box-shadow:0 18px 40px rgba(0,0,0,.18)}
+.phone .scr{background:#f2f2f6;border-radius:24px;min-height:330px;padding:14px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+.phone .from{text-align:center;font-size:11px;color:#7a7a85;margin-bottom:10px}
+.phone .from b{display:block;color:#111;font-size:12.5px}
+.sms{background:#e5e5ea;border-radius:18px 18px 18px 5px;padding:9px 12px;font-size:13px;line-height:1.38;max-width:88%;white-space:pre-wrap;word-wrap:break-word}
+.sms.me{background:#0a84ff;color:#fff;border-radius:18px 18px 5px 18px;margin-left:auto;margin-top:8px;max-width:60%}
+.email{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff}
+.email .eh{background:var(--navy);color:#fff;padding:16px 18px;position:relative;overflow:hidden}
+.email .eh .t{font-family:var(--display);font-size:22px;font-weight:700}
+.email .eh .s{font-size:10px;letter-spacing:2.2px;color:var(--gold-2);font-weight:800}
+.email .meta{font-size:12px;color:var(--muted);padding:10px 18px;border-bottom:1px solid var(--line-2)}
+.email .eb{padding:16px 18px;font-size:13.5px;white-space:pre-wrap;line-height:1.55}
+.email .ef{padding:12px 18px;font-size:11px;color:var(--muted);background:#fbf8f1;border-top:1px solid var(--line-2)}
+.email .cta{display:inline-block;margin-top:12px;background:var(--gold);color:#1d1505;font-weight:800;padding:9px 16px;border-radius:9px;font-size:13px}
+.progress-steps{list-style:none;padding:0;margin:10px 0 0}
+.progress-steps li{font-size:13px;padding:5px 0;color:var(--muted);display:flex;gap:9px;align-items:center}
+.progress-steps li.done{color:var(--green);font-weight:700}
+.progress-steps li.doing{color:var(--ink);font-weight:700}
+.big-bar{height:10px;background:var(--ivory-2);border-radius:99px;overflow:hidden}
+.big-bar span{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--gold),var(--gold-2));transition:width .35s}
+.res-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}
+.res-grid div{border:1px solid var(--line);border-radius:11px;padding:10px;background:#fff}
+.res-grid span{display:block;font-size:10.5px;font-weight:800;color:var(--muted);letter-spacing:.4px;text-transform:uppercase}
+.res-grid b{font-size:18px}
+.reply{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--line-2);font-size:13px}
+.reply:last-child{border:0}
+
+/* ---------- appointments ---------- */
+.week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+.day{border:1px solid var(--line);background:#fff;border-radius:12px;padding:9px;min-height:132px;text-align:left;display:flex;flex-direction:column;gap:5px}
+.day.today{border-color:var(--gold);box-shadow:inset 0 3px 0 var(--gold)}
+.day.sel{background:#fffaf0;border-color:var(--gold)}
+.day .dn{font-size:11px;font-weight:800;color:var(--muted);letter-spacing:.5px}
+.day .dd{font-size:20px;font-weight:800;line-height:1}
+.ev{font-size:11px;border-radius:6px;padding:3px 6px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ev.t-gold{background:#f7ecd0;color:#6b4f12}
+.ev.t-jewelry{background:var(--purple-bg);color:var(--purple)}
+.ev.t-coins{background:var(--blue-bg);color:var(--blue)}
+.ev.t-follow{background:#eef1f5;color:#435167}
+.ev.cancel{text-decoration:line-through;opacity:.6}
+
+/* ---------- AI ---------- */
+.chat{height:420px;overflow:auto;background:linear-gradient(180deg,#fbf8f1,#fff);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:82%;padding:10px 13px;border-radius:14px;font-size:13.5px;line-height:1.45}
+.msg.bot{background:#fff;border:1px solid var(--line);border-bottom-left-radius:4px}
+.msg.bot .who-l{font-size:10.5px;font-weight:800;letter-spacing:.8px;color:var(--gold-ink);margin-bottom:3px}
+.msg.user{background:var(--navy);color:#fff;margin-left:auto;border-bottom-right-radius:4px}
+.msg.sys{align-self:center;background:var(--amber-bg);color:var(--amber);font-size:11.5px;font-weight:700;border-radius:999px;padding:5px 12px;max-width:none}
+.typing{display:inline-flex;gap:4px}
+.typing i{width:6px;height:6px;border-radius:50%;background:#b9a57a;animation:bl 1s infinite}
+.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}
+@keyframes bl{0%,100%{opacity:.25}50%{opacity:1}}
+.capture dl{display:grid;grid-template-columns:120px 1fr;gap:8px 10px;margin:0;font-size:13px}
+.capture dt{color:var(--muted);font-weight:700;font-size:12px}
+.capture dd{margin:0;font-weight:600}
+.guard{list-style:none;padding:0;margin:0;font-size:12.5px}
+.guard li{padding:6px 0 6px 24px;position:relative}
+.guard li::before{content:'✓';position:absolute;left:2px;color:var(--green);font-weight:800}
+.guard li.no::before{content:'✕';color:var(--red)}
+
+/* ---------- inventory ---------- */
+.cat{border:1px solid var(--line);border-radius:14px;background:#fff;padding:14px;display:flex;gap:12px;align-items:center}
+.cat .ci{flex:none;width:46px;height:46px;border-radius:12px;background:var(--navy);display:grid;place-items:center}
+.item{border:1px solid var(--line);border-radius:14px;background:#fff;overflow:hidden;display:flex;flex-direction:column}
+.item .art{height:118px;background:linear-gradient(135deg,var(--navy),var(--navy-3));display:grid;place-items:center;position:relative}
+.item .art .badge{position:absolute;top:10px;left:10px}
+.item .bd{padding:13px 14px;flex:1;display:flex;flex-direction:column;gap:6px}
+.item .bd h4{font-size:14px}
+.toggle{position:relative;width:40px;height:23px;flex:none;border-radius:99px;border:0;background:#d6d0c1;transition:background .15s}
+.toggle::after{content:'';position:absolute;top:3px;left:3px;width:17px;height:17px;border-radius:50%;background:#fff;transition:left .15s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.toggle.on{background:var(--green)}
+.toggle.on::after{left:20px}
+
+/* ---------- reports ---------- */
+.funnel{display:flex;flex-direction:column;gap:8px}
+.fstep{display:grid;grid-template-columns:150px 1fr 70px;gap:10px;align-items:center;font-size:12.5px}
+.fstep .fb{height:26px;border-radius:7px;background:linear-gradient(90deg,var(--navy-2),var(--navy-4));min-width:4px;transition:width .5s}
+.fstep:nth-child(n+4) .fb{background:linear-gradient(90deg,var(--gold),var(--gold-2))}
+
+/* ---------- posters ---------- */
+.poster{position:relative;overflow:hidden;border-radius:20px;background:radial-gradient(900px 300px at 100% 0,rgba(223,191,110,.18),transparent 60%),linear-gradient(160deg,var(--navy),var(--navy-2) 55%,var(--navy-3));color:#fff;padding:38px 40px 46px}
+.poster .p-mtn{position:absolute;left:0;right:0;bottom:0;width:100%;opacity:.55;pointer-events:none}
+.poster-head{position:relative;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.poster .eyebrow{color:var(--gold-2)}
+.poster h1{font-family:var(--display);font-size:54px;line-height:.98;font-weight:700;letter-spacing:.5px;margin:6px 0 10px}
+.poster h1 em{font-style:normal;color:var(--gold-2)}
+.poster p.lead{color:#c9d3e4;max-width:640px;font-size:15px}
+.flow{position:relative;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px 30px;margin-top:30px}
+.fnode{position:relative;background:rgba(255,255,255,.06);border:1px solid rgba(223,191,110,.32);border-radius:16px;padding:16px 16px 18px;backdrop-filter:blur(2px)}
+.fnode .n{font-family:var(--display);font-size:30px;color:var(--gold-2);font-weight:700;line-height:1}
+.fnode h3{font-size:15px;margin:8px 0 5px}
+.fnode p{font-size:12.5px;color:#c3cde0;line-height:1.45}
+.fnode:not(.last)::after{content:'→';position:absolute;right:-24px;top:50%;transform:translateY(-50%);color:var(--gold-2);font-size:20px;font-weight:800}
+.flow .fnode:nth-child(4)::after{content:'↓';right:50%;top:auto;bottom:-24px;transform:translateX(50%)}
+.flow .fnode:nth-child(n+5){order:0}
+.phases{position:relative;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-top:30px}
+.phase{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:18px}
+.phase.first{background:linear-gradient(180deg,rgba(223,191,110,.22),rgba(223,191,110,.06));border-color:rgba(223,191,110,.6)}
+.phase .ph{font-size:11px;font-weight:800;letter-spacing:1.6px;color:var(--gold-2)}
+.phase h3{font-family:var(--display);font-size:24px;line-height:1.05;margin:6px 0 10px}
+.phase ul{margin:0;padding-left:17px;font-size:12.5px;color:#d3dbea;line-height:1.6}
+.poster-foot{position:relative;margin-top:28px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:11px;letter-spacing:1px;color:#9fb0cb;font-weight:700}
+
+/* ---------- tour ---------- */
+.tour{position:fixed;right:22px;bottom:22px;width:min(400px,calc(100% - 24px));background:var(--navy);color:#fff;border-radius:18px;box-shadow:0 24px 60px rgba(10,26,51,.4);z-index:85;padding:18px 18px 16px;display:none;border:1px solid rgba(223,191,110,.4)}
+.tour.show{display:block;animation:fade .25s}
+.tour .tx{position:absolute;top:10px;right:10px}
+.tour .eyebrow{color:var(--gold-2)}
+.tour h2{font-family:var(--display);font-size:28px;line-height:1.05;margin:2px 0 8px}
+.tour p{font-size:13.5px;color:#d0d9e8;line-height:1.5}
+.tour .try{margin-top:10px;font-size:12.5px;background:rgba(255,255,255,.07);border-radius:10px;padding:9px 11px;color:#f3e2b3}
+.tour-dots{display:flex;gap:5px;margin:14px 0 12px}
+.tour-dots i{flex:1;height:4px;border-radius:9px;background:rgba(255,255,255,.18)}
+.tour-dots i.on{background:var(--gold-2)}
+.tour .ctrl{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.tour .btn.ghost{color:#c9d3e4;border-color:rgba(255,255,255,.2)}
+.tour-focus{outline:3px solid var(--gold-2)!important;outline-offset:4px;border-radius:14px;transition:outline-color .2s}
+
+/* ---------- toast ---------- */
+.toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,30px);background:var(--ink);color:#fff;border-radius:12px;padding:11px 16px;font-size:13px;font-weight:600;z-index:99;opacity:0;pointer-events:none;transition:all .25s;max-width:min(560px,calc(100% - 24px));box-shadow:0 12px 30px rgba(0,0,0,.25);display:flex;gap:10px;align-items:flex-start}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast .ti{color:var(--gold-2);font-weight:800}
+
+/* ---------- responsive ---------- */
+@media (max-width:1180px){
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .g-main,.g-side{grid-template-columns:1fr}
+  .flow,.phases{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .flow .fnode::after{display:none}
+}
+@media (max-width:900px){
+  .app{grid-template-columns:1fr}
+  .sidebar{position:fixed;left:0;top:0;bottom:0;height:100%;width:280px;transform:translateX(-102%);transition:transform .25s;padding-top:20px;z-index:92;box-shadow:20px 0 50px rgba(0,0,0,.25)}
+  .sidebar.open{transform:none}
+  .topbar .menu-btn{display:inline-flex}
+  .topbar{padding:10px 14px}
+  .content{padding:18px 14px 34px}
+  .g2,.g3,.g4{grid-template-columns:1fr}
+  #reportTiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .week{grid-template-columns:repeat(7,minmax(108px,1fr));overflow-x:auto;padding-bottom:6px}
+  .hero{padding:22px 18px 24px}
+  .hero h1{font-size:32px}
+  .hero .mtn-art{width:100%;opacity:.45}
+  .page-head h1{font-size:30px}
+  .poster{padding:26px 20px 34px}
+  .poster h1{font-size:38px}
+  .crumb .hide-m{display:none}
+  .desk-only{display:none}
+  .m-tour{display:inline}
+  .aud,.res-grid{grid-template-columns:repeat(2,1fr)}
+  .kv{grid-template-columns:repeat(2,1fr)}
+  .tour{right:12px;bottom:12px;left:12px;width:auto}
+}
+@media (max-width:560px){
+  .kpis,#reportTiles{grid-template-columns:1fr 1fr;gap:10px}
+  .kpi .k-val{font-size:22px}
+  .flow,.phases{grid-template-columns:1fr}
+  .form-2{grid-template-columns:1fr}
+  .mini-bar{grid-template-columns:100px 1fr 44px}
+  .fstep{grid-template-columns:105px 1fr 58px}
+  .ribbon{font-size:10px;letter-spacing:.4px}
+  .ribbon .opt{display:none}
+  .top-actions .btn{padding:7px 10px}
+  .chat{height:360px}
+}
+
+/* ---------- print (posters) ---------- */
+@media print{
+  @page{size:landscape;margin:10mm}
+  body{background:#fff}
+  .ribbon,.sidebar,.topbar,.tour,.toast,.drawer,.scrim,.modal,.no-print,.site-foot{display:none!important}
+  .app{display:block}
+  .content{padding:0;max-width:none}
+  body.poster-print .view{display:none!important}
+  body.poster-print .view.print-me{display:block!important}
+  .poster{-webkit-print-color-adjust:exact;print-color-adjust:exact;border-radius:0}
+  .card,.kpi{box-shadow:none}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
-<div class="demo-ribbon">INTERACTIVE SALES DEMO&nbsp; • &nbsp;ALL CUSTOMERS, REVENUE & ACTIVITY ARE FICTIONAL&nbsp; • &nbsp;NO LIVE MESSAGES OR BOOKINGS</div>
-<div class="layout">
-<aside class="sidebar" id="sidebar"><div class="brand"><svg class="mark" viewBox="0 0 90 65" fill="none" aria-hidden="true"><path d="M3 49 33 18 47 28 59 7 87 49 66 42 57 29 46 39 34 29 22 47Z" stroke="#f2d17b" stroke-width="5" stroke-linejoin="round"/><path d="M8 55H84" stroke="#fff" stroke-width="3"/></svg><div class="brandname">BLUE RIDGE<br><span>GOLD & JEWELRY</span></div></div><div class="sidecap">SAAS CONCEPT TOUR</div><nav class="nav" id="nav"></nav><div class="sidebar-foot"><div class="tiny">POWERED BY <strong>EvoSys</strong></div><div class="small" style="margin-top:7px">Isolated prospect demonstration.<br>No production access.</div></div></aside>
-<main class="main"><header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="btn sm mobile-menu" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button><div class="topbar-left">BLUE RIDGE / BUSINESS COMMAND CENTER</div></div><div class="topbar-right"><span class="pill">✦ DEMO MODE</span><button class="btn sm" onclick="resetDemo()">↻ <span class="desk-only">Reset sample</span></button><button class="btn gold sm" onclick="startTour()">▶ Guided tour</button></div></header><div class="content">
-<section class="view active" id="v-dashboard"><div class="section-head"><div><div class="eyebrow">EvoSys vertical business ecosystem</div><h1>Good afternoon, Blue Ridge.</h1><p>Your gold & jewelry business — all in one place.</p></div><button class="btn gold" onclick="go('campaigns')">✦ Create promotion</button></div><div class="hero"><div><div class="small" style="color:#f3c969;font-weight:800;letter-spacing:1.4px">ONE PLATFORM. EVERY CUSTOMER OPPORTUNITY.</div><h2>Turn past customers into your next sale.</h2><p>Track relationships, run gold-buying promotions, book evaluations, and see which activities bring people back into the store.</p></div><button class="btn gold" onclick="go('how')">See how it works →</button><span class="ridge">◆</span></div><div class="grid cols4" id="kpis"></div><div class="grid cols2" style="margin-top:19px"><div class="card"><div class="card-title"><h3>Sample revenue activity</h3><span class="muted small">Last 8 weeks</span></div><div class="bars" id="chart"></div><div class="small muted" style="margin-top:38px">Illustrative reporting data, not actual sales.</div></div><div class="card"><div class="card-title"><h3>Recent activity</h3><span class="tag green">Demo activity</span></div><div id="activity"></div></div></div><div class="grid cols3" style="margin-top:18px"><div class="card"><div class="card-title"><h3>Reactivation</h3><span class="ico">↻</span></div><p class="muted">Bring previous gold sellers back with relevant offers.</p><button class="btn sm" onclick="go('campaigns')">Preview a campaign →</button></div><div class="card"><div class="card-title"><h3>Customer Vault</h3><span class="ico">♧</span></div><p class="muted">Segment coin collectors, jewelry buyers and gold sellers.</p><button class="btn sm" onclick="go('customers')">Explore contacts →</button></div><div class="card"><div class="card-title"><h3>Appointments</h3><span class="ico">▦</span></div><p class="muted">Capture and follow up on evaluation requests.</p><button class="btn sm" onclick="go('appointments')">See the calendar →</button></div></div></section>
-<section class="view" id="v-customers"><div class="section-head"><div><div class="eyebrow">Customer Vault</div><h1>Know who to reach — and why.</h1><p>Each customer has interests, history, and contact preferences.</p></div><button class="btn gold" onclick="toast('Demo only: imports would map and deduplicate your real CSV before approval.')">+ Import customer list</button></div><div class="grid cols4"><div class="card"><div class="muted small">All customers</div><div class="number">2,487</div></div><div class="card"><div class="muted small">Gold sellers</div><div class="number">842</div></div><div class="card"><div class="muted small">Coin collectors</div><div class="number">481</div></div><div class="card"><div class="muted small">Jewelry buyers</div><div class="number">1,164</div></div></div><div class="card" style="margin-top:18px"><div class="section-head" style="margin-bottom:15px"><div><h3>Sample customer records</h3><p class="small">Fictional people. Use filters to experience the CRM.</p></div><div class="filters"><input id="searchCustomer" placeholder="Search sample customers" oninput="renderCustomers()" aria-label="Search customers"><select id="customerFilter" onchange="renderCustomers()" aria-label="Filter customer interest"><option value="">All segments</option><option>Gold Seller</option><option>Coin Collector</option><option>Jewelry Buyer</option></select></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Name</th><th>Segment</th><th>Last activity</th><th>Contact preference</th><th>Status</th><th></th></tr></thead><tbody id="customerRows"></tbody></table></div></div><div class="callout"><b>Real implementation:</b> Customer lists would be imported with consent/source fields, deduplication, suppression controls, history, and permitted-channel checks before any marketing outreach.</div></section>
-<section class="view" id="v-campaigns"><div class="section-head"><div><div class="eyebrow">Campaign Studio</div><h1>Run a promotion in minutes.</h1><p>Build targeted offers, preview messages, and simulate results.</p></div><span class="pill">NO LIVE SENDS</span></div><div class="grid cols2"><div class="card"><h3>Create a sample campaign</h3><div class="field"><label for="campaignName">Promotion name</label><input id="campaignName" value="Gold Buying Weekend"></div><div class="form-grid"><div class="field"><label for="campaignAudience">Customer audience</label><select id="campaignAudience" onchange="updatePreview()"><option>Past Gold Sellers</option><option>Coin Collectors</option><option>Jewelry Buyers</option><option>All eligible customers</option></select></div><div class="field"><label for="campaignChannel">Channel</label><select id="campaignChannel" onchange="updatePreview()"><option>SMS + Email</option><option>SMS</option><option>Email</option></select></div></div><div class="field"><label for="campaignOffer">Promotion message</label><textarea id="campaignOffer" oninput="updatePreview()">Have gold, coins or jewelry you are thinking about selling? Visit Blue Ridge Gold & Jewelry for an in-store evaluation. Reply to ask a question or request a visit.</textarea></div><div class="checkrow"><input type="checkbox" checked disabled> Contact permissions and opt-outs checked in real campaigns</div><div style="display:flex;gap:9px;flex-wrap:wrap"><button class="btn" onclick="toast('Sample campaign saved in this demo session only.')">Save demo draft</button><button class="btn gold" onclick="simulateCampaign()">▶ Simulate campaign</button></div><div class="small muted" style="margin-top:13px">Simulated actions do not send texts, emails or create real campaigns.</div></div><div class="card"><div class="card-title"><h3>Live preview</h3><span class="tag gold">Sample only</span></div><div class="tabs"><button class="tab active" id="tabEmail" onclick="setPreviewType('email')">Email</button><button class="tab" id="tabSMS" onclick="setPreviewType('sms')">SMS</button></div><div id="campaignPreview"></div><div class="mini-grid" style="margin-top:18px"><div class="mini-stat"><span class="muted small">Estimated audience*</span><b id="audienceCount">642</b></div><div class="mini-stat"><span class="muted small">Sample opens</span><b>—</b></div><div class="mini-stat"><span class="muted small">Demo bookings</span><b id="campaignBookings">0</b></div></div><div class="tiny muted" style="margin-top:10px">*Illustrative audience, not deliverability or consent-qualified counts.</div></div></div><div class="card" style="margin-top:18px"><div class="card-title"><h3>Campaign examples</h3><span class="small muted">Choose to load a sample</span></div><div class="grid cols3"><button class="btn" onclick="loadCampaign('gold')">✦ Gold buying weekend</button><button class="btn" onclick="loadCampaign('coins')">◉ New coin arrival</button><button class="btn" onclick="loadCampaign('jewelry')">◆ Jewelry showcase</button></div></div></section>
-<section class="view" id="v-ai"><div class="section-head"><div><div class="eyebrow">AI Receptionist</div><h1>Never lose an interested customer.</h1><p>See how the assistant can handle common questions and help schedule visits.</p></div><span class="pill">SIMULATED CONVERSATION</span></div><div class="grid cols2"><div class="card"><h3>Try an example question</h3><div class="ai-chat" id="aiChat"><div class="bubble">Hello! Welcome to Blue Ridge Gold & Jewelry. I'm the demo assistant. Are you interested in selling gold, shopping for jewelry, or looking at collectible coins?</div></div><div class="field" style="margin-top:15px"><label for="aiPrompt">Choose an example</label><select id="aiPrompt"><option value="gold">Do you buy old gold jewelry?</option><option value="coins">Do you buy collectible coins?</option><option value="hours">What are your store hours?</option><option value="book">Can I schedule an evaluation?</option></select></div><button class="btn gold" onclick="aiRespond()">Send sample question →</button></div><div class="card"><h3>What the assistant would do</h3><div class="list-items"><div class="list-item"><span>✓ Answers common buying questions</span><span class="tag green">24/7 concept</span></div><div class="list-item"><span>✓ Captures customer interests</span><span class="tag green">Lead intake</span></div><div class="list-item"><span>✓ Suggests an in-store appointment</span><span class="tag green">Conversion</span></div><div class="list-item"><span>✓ Creates an owner follow-up task</span><span class="tag gold">Human review</span></div><div class="list-item"><span>✓ Escalates pricing and complex requests</span><span class="tag gold">Owner control</span></div></div><div class="callout">A production assistant would use approved store policies and real availability. It must never invent metal prices, valuations or guaranteed payouts.</div></div></div></section>
-<section class="view" id="v-appointments"><div class="section-head"><div><div class="eyebrow">Appointment Manager</div><h1>From inquiry to in-store visit.</h1><p>Manage gold evaluations, coin appointments, and shopping consultations.</p></div><button class="btn gold" onclick="addAppointment()">+ Add sample appointment</button></div><div class="grid cols4"><div class="card"><div class="muted small">Upcoming evaluations</div><div class="number" id="apCount">8</div></div><div class="card"><div class="muted small">Today</div><div class="number">3</div></div><div class="card"><div class="muted small">Sample show rate</div><div class="number">82%</div></div><div class="card"><div class="muted small">Follow-up needed</div><div class="number">2</div></div></div><div class="card" style="margin-top:18px"><div class="card-title"><h3>Sample upcoming appointments</h3><span class="tag gold">Illustrative schedule</span></div><div id="appointmentList" class="list-items"></div></div></section>
-<section class="view" id="v-inventory"><div class="section-head"><div><div class="eyebrow">Inventory & Collector Alerts</div><h1>When inventory comes in, interest goes out.</h1><p>Match new jewelry, coins and valuables to customers who want them.</p></div><span class="pill">CATALOG EXAMPLES ONLY</span></div><div class="grid cols3" id="inventoryGrid"></div></section>
-<section class="view" id="v-reports"><div class="section-head"><div><div class="eyebrow">Business intelligence</div><h1>See what's generating store visits.</h1><p>Clear, owner-friendly reporting that connects campaigns to outcomes.</p></div><span class="pill">ILLUSTRATIVE METRICS</span></div><div class="grid cols4"><div class="card"><div class="muted small">Sample outreach</div><div class="number">1,240</div><div class="delta">Messages in example period</div></div><div class="card"><div class="muted small">Example responses</div><div class="number">184</div><div class="delta">14.8% example rate</div></div><div class="card"><div class="muted small">Example visits</div><div class="number">52</div><div class="delta">Attributable in concept</div></div><div class="card"><div class="muted small">Attributed revenue</div><div class="number">$24,800</div><div class="delta">Fictional sales data</div></div></div><div class="grid cols2" style="margin-top:18px"><div class="card"><h3>Where sample visits come from</h3><div id="reportBars" style="display:grid;gap:18px;margin-top:27px"></div></div><div class="card"><h3>What can be measured in production</h3><div class="list-items" style="margin-top:23px"><div class="list-item">Campaign cost and delivery outcomes</div><div class="list-item">Responses and booked visits</div><div class="list-item">Completed store visits</div><div class="list-item">Recorded purchases and payouts</div><div class="list-item">Repeat transaction rate</div><div class="list-item">Attributable return on marketing spend</div></div></div></div></section>
-<section class="view" id="v-how"><div class="poster" id="posterHow"><div class="eyebrow">Blue Ridge Gold & Jewelry × EvoSys</div><h1>HOW THE SYSTEM WORKS</h1><p>The complete customer journey, from first contact through repeat business.</p><div class="steps" style="margin-top:26px"><div class="step"><span class="step-num">01</span><h3>Bring customers in</h3><p>Existing customer imports, referrals, social inquiries and other eligible lead sources.</p></div><div class="step"><span class="step-num">02</span><h3>Organize the Customer Vault</h3><p>Separate gold sellers, coin collectors, jewelry buyers and customer interests.</p></div><div class="step"><span class="step-num">03</span><h3>Launch relevant promotions</h3><p>Build approved text and email campaigns for audiences permitted to receive them.</p></div><div class="step"><span class="step-num">04</span><h3>Answer and book</h3><p>AI assists with questions, handoffs, and appointment requests.</p></div><div class="step"><span class="step-num">05</span><h3>Serve customers in store</h3><p>Employees manage evaluations, visits, purchases and follow-up opportunities.</p></div><div class="step"><span class="step-num">06</span><h3>Measure and reactivate</h3><p>Track meaningful results and bring interested customers back again.</p></div></div><div style="margin-top:24px;font-weight:800;color:#efd18e;letter-spacing:1px">CAPTURE → SEGMENT → PROMOTE → RESPOND → BOOK → MEASURE</div></div><div class="section-head"><div><h2>Experience the workflow</h2><p>Use these links to explore each stage.</p></div><button class="btn" onclick="printPoster('how')">⎙ Print this poster</button></div><div class="grid cols3"><button class="btn" onclick="go('customers')">1. Explore Customer Vault →</button><button class="btn" onclick="go('campaigns')">2. Build a promotion →</button><button class="btn" onclick="go('ai')">3. Try the AI assistant →</button></div></section>
-<section class="view" id="v-roadmap"><div class="poster" id="posterRoadmap"><div class="eyebrow">Blue Ridge Gold & Jewelry × EvoSys</div><h1>WHAT WE WOULD BUILD FIRST</h1><p>A realistic staged rollout, prioritizing the owner's immediate goal: reconnecting with customers and running promotions.</p><div class="grid cols2" style="margin-top:23px"><div class="phase featured"><span class="num">PHASE 01 • FIRST PRIORITY</span><h3>Customer Vault + Reactivation</h3><ul><li>Clean and import eligible customer records</li><li>Deduplicate and segment by buying interests</li><li>Set opt-outs and channel permissions</li><li>Launch first reviewed reactivation campaign</li></ul></div><div class="phase"><span class="num">PHASE 02</span><h3>Campaigns + Appointments + AI</h3><ul><li>Promotion creator and reusable templates</li><li>Reply handling and appointment calendar</li><li>AI FAQ and assisted follow-up</li><li>Staff handoff and owner approvals</li></ul></div><div class="phase"><span class="num">PHASE 03</span><h3>Inventory + Collector Alerts</h3><ul><li>New arrivals and jewelry showcases</li><li>Interest-based alerts</li><li>Sales and transaction integration options</li><li>Review and referral workflows</li></ul></div><div class="phase"><span class="num">PHASE 04</span><h3>Reports + Optimization</h3><ul><li>Campaign response and visit reporting</li><li>Attribution and repeat-customer insights</li><li>Conversion and campaign cost analysis</li><li>Refine and scale successful offers</li></ul></div></div><div style="margin-top:23px;font-weight:800;color:#efd18e">FIRST VALUE: turn an existing customer list into relevant, trackable follow-up.</div></div><div class="section-head"><div><h2>Recommended implementation</h2><p>This is a rollout concept, not a commitment of timeline, price or functionality already in production.</p></div><button class="btn" onclick="printPoster('roadmap')">⎙ Print this poster</button></div><div class="grid cols2"><div class="card"><h3>Built for EvoSys, not a separate website</h3><p class="muted">Production would be a tenant-isolated business vertical within the EvoSys platform, with approved roles, permissions, integrations and owner access.</p></div><div class="card"><h3>This shareable simulation</h3><p class="muted">The demo is entirely sample-driven, needs no login, makes no API calls, and cannot access the actual Blue Ridge business or EvoSys production systems.</p></div></div></section>
-<div class="demo-foot">BLUE RIDGE GOLD & JEWELRY — EVO SYS BUSINESS ECOSYSTEM CONCEPT • DEMONSTRATION ONLY • NOT AFFILIATED WITH OR ENDORSED BY THE BUSINESS</div>
-</div></main></div>
-<div class="tour-mask" id="tourMask"><div class="tour-panel"><div class="eyebrow" id="tourStepLabel"></div><h2 id="tourTitle"></h2><p class="muted" id="tourText"></p><div class="tour-controls"><button class="btn" onclick="stopTour()">Close tour</button><div style="display:flex;gap:7px"><button class="btn" id="tourPrev" onclick="tourMove(-1)">← Back</button><button class="btn gold" onclick="tourMove(1)" id="tourNext">Next →</button></div></div></div></div><div class="notice" id="notice"></div>
+<div class="ribbon" role="note"><b>INTERACTIVE DEMO — SAMPLE DATA</b><span class="opt"><span class="sep">•</span>Fictional customers &amp; figures<span class="sep">•</span>No messages are sent<span class="sep">•</span>No real bookings</span></div>
+
+<div class="app">
+  <aside class="sidebar" id="sidebar" aria-label="Main navigation">
+    <div class="brand">
+      <svg width="44" height="34" viewBox="0 0 90 68" fill="none" aria-hidden="true"><path d="M3 52 30 20l14 12 15-24 28 44-20-7-11-14-12 11-12-10-12 20Z" stroke="#dfbf6e" stroke-width="4.5" stroke-linejoin="round"/><path d="M8 60h76" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg>
+      <div class="brand-name">Blue Ridge<small>GOLD &amp; JEWELRY</small></div>
+    </div>
+    <div class="side-cap">BUSINESS COMMAND CENTER</div>
+    <nav class="nav" id="nav"></nav>
+    <div class="side-cap">SALES PRESENTATION</div>
+    <nav class="nav" id="nav2"></nav>
+    <div class="side-foot">
+      <svg class="mtn" viewBox="0 0 300 90" preserveAspectRatio="none" aria-hidden="true"><path d="M0 90V58l40-26 30 18 46-38 38 30 34-20 50 34 30-14 32 18v30Z" fill="#10264a"/><path d="M0 90V70l52-22 34 14 44-26 46 24 40-16 46 22 38-8v32Z" fill="#1b365f"/></svg>
+      <div class="powered">POWERED BY <b>EvoSys</b></div>
+      <div class="side-note">Demo environment with sample data. Not connected to any live system.</div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="row" style="gap:10px;min-width:0">
+        <button class="btn sm menu-btn" onclick="toggleMenu(true)" aria-label="Open menu">☰</button>
+        <div class="crumb"><span class="hide-m">BLUE RIDGE GOLD &amp; JEWELRY&nbsp;/&nbsp;</span><b id="crumb">DASHBOARD</b></div>
+      </div>
+      <div class="top-actions">
+        <span class="pill sim desk-only">● DEMO MODE</span>
+        <button class="btn sm" onclick="resetDemo()" title="Restore all sample records">↺ <span class="desk-only">Reset Demo</span></button>
+        <button class="btn gold sm tour-cta" onclick="startTour()">▶ <span class="desk-only">TAKE THE INTERACTIVE TOUR</span><span class="m-tour">Tour</span></button>
+      </div>
+    </header>
+
+    <div class="content">
+      <!-- DASHBOARD -->
+      <section class="view" id="v-dashboard" aria-label="Owner dashboard">
+        <div class="hero" id="heroCard">
+          <svg class="mtn-art" viewBox="0 0 720 200" preserveAspectRatio="xMaxYMax meet" aria-hidden="true"><defs><linearGradient id="hg1" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#2a4a78"/><stop offset="1" stop-color="#10264a"/></linearGradient><linearGradient id="hg2" x1="0" x2="1"><stop offset="0" stop-color="#c9a24a" stop-opacity="0"/><stop offset=".5" stop-color="#dfbf6e"/><stop offset="1" stop-color="#c9a24a" stop-opacity="0"/></linearGradient></defs><path d="M0 200V120l90-50 70 34 110-80 90 60 80-40 110 66 70-30 100 40v80Z" fill="url(#hg1)" opacity=".55"/><path d="M0 200V150l120-44 80 26 100-52 110 50 90-34 110 40 110-20v84Z" fill="#0a1a33" opacity=".85"/><path d="M90 70l70 34 110-80 90 60 80-40 110 66 70-30 100 40" fill="none" stroke="url(#hg2)" stroke-width="2"/></svg>
+          <div class="hero-top">
+            <div>
+              <div class="eyebrow" id="heroDate">BUSINESS COMMAND CENTER</div>
+              <h1 id="heroGreeting">Good afternoon, Blue Ridge.</h1>
+              <p>Here's what's happening at Blue Ridge Gold &amp; Jewelry — customers, promotions, appointments and results in one place.</p>
+            </div>
+            <div class="seg-ctl hero-ctl" id="periodCtl" role="group" aria-label="Time period"></div>
+          </div>
+          <div class="hero-actions">
+            <button class="btn gold lg tour-cta" onclick="startTour()">▶ TAKE THE INTERACTIVE TOUR</button>
+            <button class="btn lg" style="background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.2);color:#fff" onclick="go('campaigns')">✦ Create a promotion</button>
+          </div>
+        </div>
+        <div class="kpis" id="kpiGrid"></div>
+        <div class="grid g-main mt">
+          <div class="card"><div class="card-head"><div><h3>Sales activity</h3><div class="sub" id="salesSub"></div></div><span class="pill">SAMPLE DATA</span></div><div class="chart-wrap" id="salesChart"></div><div class="legend"><span><i style="background:#c9a24a"></i>Recorded store sales</span><span><i style="background:#2a4a78"></i>Sales attributed to campaigns</span></div></div>
+          <div class="card"><div class="card-head"><div><h3>Campaign engagement</h3><div class="sub">Share of contacted customers who opened, clicked or replied</div></div></div><div id="engageBox"></div></div>
+        </div>
+        <div class="grid g3 mt">
+          <div class="card"><div class="card-head"><h3>Recent activity</h3><span class="sub">Updates as you use the demo</span></div><ul class="feed" id="activityFeed"></ul></div>
+          <div class="card"><div class="card-head"><h3>Upcoming appointments</h3><button class="btn sm" onclick="go('appointments')">Open calendar</button></div><div id="dashAppts"></div></div>
+          <div class="card"><div class="card-head"><h3>Suggested next steps</h3><span class="pill navy">EVOSYS INSIGHTS</span></div><div id="suggestions"></div></div>
+        </div>
+      </section>
+
+      <!-- CUSTOMERS -->
+      <section class="view" id="v-customers" aria-label="Customer vault">
+        <div class="page-head"><div><div class="eyebrow">Customer Vault</div><h1>Every customer relationship, organized.</h1><p>Search, segment and open any customer to see what they bought, sold, asked about and how they prefer to be contacted.</p></div><div class="row"><button class="btn" onclick="toast('Demo only — in production your existing customer list is imported, cleaned and de-duplicated before anything is used.')">⇪ Import list</button><button class="btn gold" onclick="openAddCustomer()">+ Add customer</button></div></div>
+        <div class="chips" id="segChips"></div>
+        <div class="card mt" id="custCard">
+          <div class="card-head"><div class="row" style="flex:1;min-width:240px"><input class="input" id="custSearch" type="search" placeholder="Search name, city, interest or phone…" oninput="S.custSearch=this.value;renderCustomers()" style="max-width:380px" aria-label="Search customers"><select class="input" id="statusFilter" style="max-width:200px" onchange="S.statusFilter=this.value;renderCustomers()" aria-label="Filter by follow-up status"></select></div><span class="sub" id="custCount"></span></div>
+          <div class="table-wrap" id="custTable"></div>
+          <p class="tiny muted" style="margin-top:10px">Showing sample records only. Segment counts reflect a fictional 2,487-customer database. All names, phone numbers (555-01xx) and emails (example.com) are fictional.</p>
+        </div>
+      </section>
+
+      <!-- CAMPAIGNS -->
+      <section class="view" id="v-campaigns" aria-label="Campaign studio">
+        <div class="page-head"><div><div class="eyebrow">Campaign Studio</div><h1>Bring customers back with targeted promotions.</h1><p>Pick a promotion, choose who should hear about it, edit the message, preview it and run a simulation to see what results could look like.</p></div><span class="pill sim">⚠ SIMULATION — NOTHING IS SENT</span></div>
+        <div class="grid g-side">
+          <div>
+            <div class="card"><div class="card-head"><h3>Promotions</h3><span class="sub">5 sample campaigns</span></div><div class="camp-list" id="campList"></div></div>
+            <div class="note mt"><b>Before any real campaign goes out:</b> only customers with verified marketing permission are included, STOP / unsubscribe requests are honored automatically, quiet hours are applied and SMS sender registration is completed. This demo never contacts anyone.</div>
+          </div>
+          <div class="card" id="campEditor"></div>
+        </div>
+      </section>
+
+      <!-- APPOINTMENTS -->
+      <section class="view" id="v-appointments" aria-label="Appointment center">
+        <div class="page-head"><div><div class="eyebrow">Appointment Center</div><h1>From interested customer to in-store visit.</h1><p>Gold evaluations, jewelry consultations, coin appointments and follow-ups — scheduled, confirmed and tracked in one calendar.</p></div><span class="pill sim">⚠ SAMPLE CALENDAR — NO REAL BOOKINGS</span></div>
+        <div class="kpis" id="apptKpis"></div>
+        <div class="grid g-side mt">
+          <div class="card" id="apptForm">
+            <div class="card-head"><h3>Book a sample appointment</h3><span class="pill sim">SIMULATION</span></div>
+            <div class="field"><label class="lbl" for="apType">Appointment type</label><select class="input" id="apType"></select></div>
+            <div class="field"><label class="lbl" for="apCust">Customer (fictional)</label><select class="input" id="apCust"></select></div>
+            <div class="form-2"><div class="field"><label class="lbl" for="apDate">Date</label><input class="input" type="date" id="apDate"></div><div class="field"><label class="lbl" for="apTime">Time</label><select class="input" id="apTime"></select></div></div>
+            <div class="field"><label class="lbl" for="apNotes">Notes</label><input class="input" id="apNotes" placeholder="e.g. Bringing grandmother's gold chain and two rings" maxlength="140"></div>
+            <button class="btn gold lg" style="width:100%" onclick="bookAppointment()">Book appointment — Simulation</button>
+            <p class="tiny muted" style="margin-top:9px">Adds the visit to this demo calendar only. No confirmation text or email is sent and no real appointment is created. Times shown are sample availability — actual store hours would be set by the owner.</p>
+          </div>
+          <div>
+            <div class="card"><div class="card-head"><div><h3>Next 7 days</h3><div class="sub">Click a day to filter the list</div></div><div class="row"><select class="input" style="width:auto" id="apFilter" onchange="S.apptType=this.value;renderAppointments()" aria-label="Filter by type"></select><button class="btn sm" onclick="S.apptDay=null;renderAppointments()">Show all</button></div></div><div class="week" id="weekGrid"></div></div>
+            <div class="card mt"><div class="card-head"><h3 id="apListTitle">Appointment list</h3><span class="sub">Change a status to see the calendar update</span></div><div class="table-wrap" id="apptTable"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- AI -->
+      <section class="view" id="v-ai" aria-label="AI receptionist">
+        <div class="page-head"><div><div class="eyebrow">AI Receptionist</div><h1>Answer questions. Capture interest. Book the visit.</h1><p>Try the questions customers ask every day. The assistant answers only from store-approved information and hands anything about prices or offers to your team.</p></div><span class="pill sim">⚠ AI WORKFLOW SIMULATION — SCRIPTED, NOT A LIVE AI AGENT</span></div>
+        <div class="grid g-main">
+          <div class="card" id="aiCard">
+            <div class="card-head"><div><h3>Customer conversation</h3><div class="sub">Website chat / text message preview</div></div><button class="btn sm" onclick="resetChat()">↺ New conversation</button></div>
+            <div class="chat" id="chat" aria-live="polite"></div>
+            <div class="chips mt" id="aiChips"></div>
+            <div class="row mt"><input class="input" id="aiInput" placeholder="Type a customer question…" style="flex:1;min-width:180px" maxlength="200" onkeydown="if(event.key==='Enter')askAI()" aria-label="Type a customer question"><button class="btn navy" onclick="askAI()">Send</button></div>
+          </div>
+          <div>
+            <div class="card capture" id="captureCard"></div>
+            <div class="card mt"><div class="card-head"><h3>Guardrails</h3><span class="sub">What the assistant may and may not do</span></div>
+              <ul class="guard"><li>Answers store-approved questions (services, location, how visits work)</li><li>Captures name, interest and what the customer wants to bring in</li><li>Offers to request an appointment</li><li>Flags pricing, offers and anything unusual for a team member</li><li class="no">Never quotes valuations, payouts or binding offers</li><li class="no">Never invents hours, policies or promotions</li></ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- INVENTORY -->
+      <section class="view" id="v-inventory" aria-label="Inventory and promotions">
+        <div class="page-head"><div><div class="eyebrow">Inventory &amp; Promotions</div><h1>New arrivals, matched to the customers who want them.</h1><p>An internal marketing tool — not an online store. Feature items, see who is interested and send collectors a heads-up in one click.</p></div><span class="pill">INTERNAL TOOL · SAMPLE ITEMS</span></div>
+        <div class="grid g3" id="catGrid"></div>
+        <div class="card mt"><div class="card-head"><div><h3>Featured items</h3><div class="sub">Toggle what's featured; target the customers interested in each category</div></div></div><div class="grid g3" id="itemGrid"></div></div>
+        <div class="grid g2 mt">
+          <div class="card"><div class="card-head"><h3>Promotional announcements</h3><span class="sub">Shown to staff and used in campaigns</span></div><div id="promoList"></div></div>
+          <div class="card"><div class="card-head"><h3>Collector interest lists</h3><span class="sub">Who is waiting for what</span></div><div id="interestLists"></div></div>
+        </div>
+      </section>
+
+      <!-- REPORTS -->
+      <section class="view" id="v-reports" aria-label="Reporting and revenue">
+        <div class="page-head"><div><div class="eyebrow">Reporting &amp; Revenue</div><h1>Know which promotions bring in business.</h1><p>Every message, reply, appointment, visit and sale connected back to the promotion that produced it.</p></div><span class="pill sim">ILLUSTRATIVE FIGURES — NOT ACTUAL STORE RESULTS</span></div>
+        <div class="kpis" id="reportTiles"></div>
+        <div class="grid g-main mt">
+          <div class="card"><div class="card-head"><h3>Campaign performance</h3><span class="sub" id="runCount"></span></div><div class="table-wrap" id="reportTable"></div></div>
+          <div class="card"><div class="card-head"><h3>Customer journey funnel</h3><span class="sub">All campaigns combined</span></div><div class="funnel" id="funnel"></div></div>
+        </div>
+        <div class="grid g2 mt">
+          <div class="card"><div class="card-head"><h3>Revenue vs. promotional cost</h3><span class="sub">By campaign</span></div><div id="roiBars"></div></div>
+          <div class="card"><div class="card-head"><h3>How these numbers are calculated</h3></div><div class="small" style="line-height:1.7">
+            <b>Reach</b> — customers with marketing permission who received the message. <b>Replies</b> — texts or emails answered. <b>Appointments</b> — visits booked from those replies. <b>Store visits</b> — appointments kept plus walk-ins who mentioned the promotion. <b>Recorded sales</b> — visits that ended in a sale. <b>Attributed revenue</b> — recorded sales × average sale value for that promotion. <b>Promotional cost</b> — message costs plus the promotion budget. <b>ROI</b> = (attributed revenue − cost) ÷ cost.
+            <div class="note mt">All figures on this page are generated from sample assumptions so you can see how reporting works. They are not projections or guarantees of results for Blue Ridge Gold &amp; Jewelry.</div></div></div>
+        </div>
+      </section>
+
+      <!-- POSTER A -->
+      <section class="view" id="v-how" aria-label="How the system works">
+        <div class="row between no-print" style="margin-bottom:14px"><div class="eyebrow" style="margin:0">Concept poster A</div><div class="row"><button class="btn" onclick="presentPoster('posterHow')">⛶ Present full screen</button><button class="btn gold" onclick="printPoster('how')">⎙ Print / Save PDF</button></div></div>
+        <div class="poster" id="posterHow">
+          <svg class="p-mtn" viewBox="0 0 1200 220" preserveAspectRatio="none" aria-hidden="true"><path d="M0 220V140l140-70 120 50 170-110 150 90 130-60 170 100 120-50 200 70v60Z" fill="#2a4a78" opacity=".35"/><path d="M0 220V175l180-60 130 36 160-70 170 70 150-50 170 56 240-30v93Z" fill="#0a1a33" opacity=".9"/></svg>
+          <div class="poster-head"><div><div class="eyebrow">Blue Ridge Gold &amp; Jewelry · Powered by EvoSys</div><h1>HOW THE <em>SYSTEM</em> WORKS</h1><p class="lead">One connected business system — from knowing your customers to seeing exactly which promotions bring them back through the door.</p></div><span class="pill navy">CONCEPT</span></div>
+          <div class="flow" id="flow"></div>
+          <div class="poster-foot"><span>BLUE RIDGE GOLD &amp; JEWELRY · ABINGDON, VA</span><span>POWERED BY EVOSYS · CONCEPT FOR DISCUSSION</span></div>
+        </div>
+      </section>
+
+      <!-- POSTER B -->
+      <section class="view" id="v-roadmap" aria-label="What we would build first">
+        <div class="row between no-print" style="margin-bottom:14px"><div class="eyebrow" style="margin:0">Concept poster B</div><div class="row"><button class="btn" onclick="presentPoster('posterRoadmap')">⛶ Present full screen</button><button class="btn gold" onclick="printPoster('roadmap')">⎙ Print / Save PDF</button></div></div>
+        <div class="poster" id="posterRoadmap">
+          <svg class="p-mtn" viewBox="0 0 1200 220" preserveAspectRatio="none" aria-hidden="true"><path d="M0 220V150l160-60 140 46 150-96 170 84 120-50 180 90 140-40 140 50v46Z" fill="#2a4a78" opacity=".35"/><path d="M0 220V182l170-50 150 30 170-60 150 60 170-40 150 46 240-26v78Z" fill="#0a1a33" opacity=".9"/></svg>
+          <div class="poster-head"><div><div class="eyebrow">Blue Ridge Gold &amp; Jewelry · Powered by EvoSys</div><h1>WHAT WE WOULD <em>BUILD FIRST</em></h1><p class="lead">A staged rollout that starts with the fastest win — reconnecting with the customers you already have — and builds toward full revenue reporting.</p></div><span class="pill navy">PROPOSED ROADMAP</span></div>
+          <div class="phases" id="phases"></div>
+          <div class="poster-foot"><span>BLUE RIDGE GOLD &amp; JEWELRY · ABINGDON, VA</span><span>POWERED BY EVOSYS · SEQUENCE FOR DISCUSSION — TIMING CONFIRMED IN PROPOSAL</span></div>
+        </div>
+      </section>
+
+      <footer class="site-foot">Blue Ridge Gold &amp; Jewelry · 16011 Porterfield Highway, Abingdon, VA 24210 — <b>Business Command Center, Powered by EvoSys.</b> Interactive sales demonstration with sample data. This is a concept prepared by EvoSys; it is not an approved or operational Blue Ridge Gold &amp; Jewelry system, and it is not affiliated with or endorsed by the business. All customers, messages, appointments and figures are fictional. No messages are sent, no bookings are made and no data leaves your browser.</footer>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="scrim" onclick="closeAll()"></div>
+<aside class="drawer" id="drawer" aria-label="Customer profile" aria-hidden="true"></aside>
+<div class="modal" id="modal" role="dialog" aria-modal="true"><div class="modal-scrim" onclick="closeModal()"></div><div class="panel" id="modalPanel"></div></div>
+
+<div class="tour" id="tour" role="dialog" aria-label="Interactive tour">
+  <button class="btn sm ghost tx" onclick="endTour(false)" aria-label="Exit tour">✕ Exit</button>
+  <div class="eyebrow" id="tourStep"></div>
+  <h2 id="tourTitle"></h2>
+  <p id="tourText"></p>
+  <div class="try" id="tourTry"></div>
+  <div class="tour-dots" id="tourDots"></div>
+  <div class="ctrl"><button class="btn sm ghost" onclick="endTour(true)">Skip tour</button><div class="row" style="gap:6px"><button class="btn sm ghost" id="tourBack" onclick="tourMove(-1)">← Back</button><button class="btn sm gold" id="tourNext" onclick="tourMove(1)">Next →</button></div></div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"><span class="ti">✓</span><span id="toastText"></span></div>
+
 <script>
-const screens=[['dashboard','▦','Dashboard'],['customers','♧','Customer Vault'],['campaigns','✉','Campaign Studio'],['ai','✦','AI Receptionist'],['appointments','▣','Appointments'],['inventory','◆','Inventory Alerts'],['reports','▥','Revenue Reports'],['how','↪','How It Works'],['roadmap','☷','Build Roadmap']];
-let page='dashboard', previewType='email',sent=0,bookings=0,tourStep=0;
-let customers=[{name:'Jordan Ellis',segment:'Gold Seller',last:'Oct 28, 2026',contact:'Email',status:'Follow-up ready'},{name:'Taylor Brooks',segment:'Jewelry Buyer',last:'Oct 24, 2026',contact:'SMS',status:'Appointment booked'},{name:'Alex Morgan',segment:'Coin Collector',last:'Oct 20, 2026',contact:'Email',status:'Interested'},{name:'Riley Parker',segment:'Gold Seller',last:'Oct 18, 2026',contact:'Email',status:'Reactivated'},{name:'Casey Rivera',segment:'Coin Collector',last:'Oct 10, 2026',contact:'SMS',status:'Interested'},{name:'Morgan Hayes',segment:'Jewelry Buyer',last:'Sep 29, 2026',contact:'Email',status:'Follow-up ready'}];
-let appointments=[{who:'Taylor Brooks',type:'Jewelry consultation',when:'Fri, Nov 6 • 10:00 AM',status:'Confirmed'},{who:'Jordan Ellis',type:'Gold evaluation',when:'Fri, Nov 6 • 1:30 PM',status:'Pending'},{who:'Alex Morgan',type:'Coin consultation',when:'Sat, Nov 7 • 11:00 AM',status:'Confirmed'}];
-let activities=['Example customer reactivation audience prepared','Sample appointment booked — Taylor B.','New coin interest captured — Alex M.','New sample inquiry recorded'];
-const icon={dashboard:'◫',customers:'♧',campaigns:'✉',ai:'✦',appointments:'▦',inventory:'◆',reports:'▥',how:'↪',roadmap:'☷'};
-const nav=document.getElementById('nav');nav.innerHTML=screens.map(s=>`<button type="button" data-go="${s[0]}" onclick="go('${s[0]}')"><span aria-hidden="true" style="width:17px;text-align:center;font-size:18px">${s[1]}</span>${s[2]}</button>`).join('');
-function go(id){page=id;document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id==='v-'+id));document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.go===id));document.getElementById('sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});}
-function toast(msg){let n=document.getElementById('notice');n.textContent=msg;n.classList.add('show');clearTimeout(window.__noticeTimer);window.__noticeTimer=setTimeout(()=>n.classList.remove('show'),5000)}
-function renderKPIs(){const metrics=[['Sample customers','2,487','♧','Illustrative total'],['Example appointments',String(96+bookings),'▦','Illustrative total'],['Campaign responses',String(184+sent*7),'✉','Illustrative engagement'],['Sample sales','$124,750','＄','Not actual store revenue']];document.getElementById('kpis').innerHTML=metrics.map(m=>`<div class="card"><div class="metric"><div class="small muted">${m[0]}</div><div class="ico">${m[2]}</div></div><div class="number">${m[1]}</div><div class="tiny muted">${m[3]}</div></div>`).join('');document.getElementById('chart').innerHTML=[33,45,41,60,69,75,86,95].map((h,i)=>`<div class="bar" style="height:${h}%" title="Week ${i+1}: illustrative sample"><span>W${i+1}</span></div>`).join('');document.getElementById('activity').innerHTML=activities.slice(0,4).map((a,i)=>`<div class="activity"><span class="dot"></span><div><p class="strong small">${a}</p><span class="muted">${i===0?'Just now':i+'h ago'} • sample activity</span></div></div>`).join('')}
-function safe(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function renderCustomers(){let search=document.getElementById('searchCustomer').value.toLowerCase(),f=document.getElementById('customerFilter').value;let arr=customers.filter(c=>(!f||c.segment===f)&&(!search||c.name.toLowerCase().includes(search)||c.segment.toLowerCase().includes(search)));document.getElementById('customerRows').innerHTML=arr.length?arr.map((c,i)=>`<tr><td><b>${safe(c.name)}</b></td><td><span class="tag ${c.segment==='Gold Seller'?'gold':c.segment==='Jewelry Buyer'?'purple':''}">${safe(c.segment)}</span></td><td>${c.last}</td><td>${c.contact}</td><td><span class="tag ${c.status==='Reactivated'?'green':''}">${c.status}</span></td><td><button class="btn sm" onclick="customerDetails('${c.name}')">View</button></td></tr>`).join(''):'<tr><td colspan="6" class="empty">No sample customers match your filters.</td></tr>'}
-function customerDetails(name){const c=customers.find(x=>x.name===name);toast(`${c.name} • ${c.segment} • Prefers ${c.contact} • ${c.status}. Production would include verified marketing permissions and purchase/visit history.`)}
-function updatePreview(){let aud=document.getElementById('campaignAudience').value;document.getElementById('audienceCount').textContent=({'Past Gold Sellers':'642','Coin Collectors':'371','Jewelry Buyers':'809','All eligible customers':'1,386'})[aud];let m=safe(document.getElementById('campaignOffer').value),name=safe(document.getElementById('campaignName').value||'Blue Ridge Promotion'),channel=document.getElementById('campaignChannel').value;document.getElementById('campaignPreview').innerHTML=previewType==='email'?`<div class="preview"><div class="preview-head">BLUE RIDGE <span style="color:white">GOLD & JEWELRY</span></div><div class="preview-body"><div class="small muted">Subject: ${name}</div><h3 style="margin-top:16px">A special message for our customers</h3><p>${m.replace(/\n/g,'<br>')}</p><button class="btn gold sm" type="button" onclick="toast('Preview only. No public booking page is connected.')">Request an evaluation</button><p class="tiny muted" style="margin-top:18px">Concept preview • Permission-based marketing only • Unsubscribe controls required</p></div></div>`:`<div style="background:#f8fafc;border-radius:14px;padding:23px"><div class="small muted" style="margin-bottom:15px">Blue Ridge Gold & Jewelry • SMS mockup</div><div class="sms">${m}<br><br>Reply STOP to opt out (example)</div></div>`;document.getElementById('tabSMS').classList.toggle('active',previewType==='sms');document.getElementById('tabEmail').classList.toggle('active',previewType==='email')}
-function setPreviewType(t){previewType=t;updatePreview()}
-function loadCampaign(t){let cases={gold:['Gold Buying Weekend','Past Gold Sellers','Have gold, coins or jewelry you are thinking about selling? Visit Blue Ridge Gold & Jewelry for an in-store evaluation. Reply to ask a question or request a visit.'],coins:['Collector First Look','Coin Collectors','Interested in collectible coins? We have a new arrival showcase planned. Contact us to learn more about the items available.'],jewelry:['Jewelry Showcase','Jewelry Buyers','Discover what is new at Blue Ridge Gold & Jewelry. Ask our team about featured pieces or request a jewelry consultation.']};let d=cases[t];document.getElementById('campaignName').value=d[0];document.getElementById('campaignAudience').value=d[1];document.getElementById('campaignOffer').value=d[2];updatePreview();toast('Sample template loaded. You can edit the message and simulate a campaign.')}
-function simulateCampaign(){sent++;bookings+=2;activities.unshift('Simulated campaign: '+(document.getElementById('campaignName').value||'New promotion'));document.getElementById('campaignBookings').textContent=bookings;renderKPIs();toast('Simulation complete: example responses and appointments updated. Nothing was sent.');}
-function renderAppointments(){document.getElementById('apCount').textContent=8+bookings+appointments.length-3;document.getElementById('appointmentList').innerHTML=appointments.map((a,i)=>`<div class="list-item"><div><b>${safe(a.who)}</b><div class="muted small">${safe(a.type)} • ${safe(a.when)}</div></div><div style="display:flex;gap:9px;align-items:center"><span class="tag ${a.status==='Confirmed'?'green':'gold'}">${a.status}</span><button class="btn sm" onclick="toggleAppointment(${i})">${a.status==='Confirmed'?'Mark pending':'Confirm'}</button></div></div>`).join('')}
-function addAppointment(){let n=appointments.length+1;appointments.push({who:'Sample visitor '+n,type:'Gold evaluation',when:'Next week • 11:00 AM',status:'Pending'});bookings++;renderAppointments();renderKPIs();activities.unshift('Sample appointment added');toast('Fictional appointment added within this demo session only.')}
-function toggleAppointment(i){appointments[i].status=appointments[i].status==='Confirmed'?'Pending':'Confirmed';renderAppointments();toast('Sample appointment status updated locally.')}
-function aiRespond(){let q=document.getElementById('aiPrompt'),k=q.value,answers={gold:'Yes, the store advertises gold buying. An exact offer would require an in-person evaluation by the team. Would you like help requesting a visit?',coins:'The store advertises coins and collectibles. I can capture what kind of coin you have and flag it for a team member to review.',hours:'The Facebook page advertises seven-day availability. Store hours should be verified with the owner before this assistant is activated.',book:'I can help request an in-store evaluation. In this demo, please open the Appointments section to see how staff would track the request.'};let box=document.getElementById('aiChat');box.insertAdjacentHTML('beforeend',`<div class="bubble user">${safe(q.options[q.selectedIndex].text)}</div><div class="bubble">${answers[k]}</div>`);box.scrollTop=box.scrollHeight;toast('Simulated AI response only. No outside service contacted.')}
-function renderInventory(){let items=[['◉','Collectible coin assortment','Coin Collectors','New Arrival'],['◆','Featured jewelry selection','Jewelry Buyers','Showcase'],['✦','Gold buying promotion','Gold Sellers','Promotion']];document.getElementById('inventoryGrid').innerHTML=items.map((a,i)=>`<div class="card"><div class="inventory-thumb">${a[0]}</div><span class="tag gold">${a[3]}</span><h3 style="font-size:17px;margin:13px 0 6px">${a[1]}</h3><p class="muted small">Match this category to customers interested in ${a[2].toLowerCase()}.</p><button class="btn gold sm" onclick="go('campaigns');document.getElementById('campaignAudience').value='${a[2]==='Gold Sellers'?'Past Gold Sellers':a[2]}';updatePreview();toast('Matching customer segment selected for a sample campaign.')">Create interest alert →</button></div>`).join('')}
-function renderReports(){let x=[['Gold seller campaigns',74],['Collector alerts',52],['Jewelry promotions',40],['Referral follow-ups',29]];document.getElementById('reportBars').innerHTML=x.map(a=>`<div><div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;margin-bottom:8px"><span>${a[0]}</span><span>${a[1]} sample actions</span></div><div class="progress"><span style="width:${a[1]}%"></span></div></div>`).join('')}
-const tour=[['dashboard','One control center','This is the owner’s home screen: simple business metrics, recent activity, and direct access to what matters.'],['customers','Know your customers','Explore the Customer Vault. Filter by gold sellers, coin collectors, and jewelry buyers.'],['campaigns','Build targeted promotions','Choose an audience, edit the offer, preview SMS/email, and click Simulate Campaign to see mock results.'],['ai','Let AI handle common questions','Try a sample question. The real system would use store-approved policies and hand off pricing questions.'],['appointments','Turn interest into visits','Add and confirm a sample evaluation. Nothing connects to a real calendar.'],['reports','Understand what works','See the reporting categories an owner would use to measure campaigns and visits.'],['roadmap','Start with the revenue opportunity','The first implementation priority is the Customer Vault and reactivation, followed by campaigns, appointments, and reports.']];
-function startTour(){tourStep=0;showTour()};function stopTour(){document.getElementById('tourMask').classList.remove('show')};function showTour(){let t=tour[tourStep];go(t[0]);document.getElementById('tourStepLabel').textContent=`GUIDED PRODUCT TOUR • ${tourStep+1} / ${tour.length}`;document.getElementById('tourTitle').textContent=t[1];document.getElementById('tourText').textContent=t[2];document.getElementById('tourPrev').disabled=tourStep===0;document.getElementById('tourNext').textContent=tourStep===tour.length-1?'Finish tour ✓':'Next →';document.getElementById('tourMask').classList.add('show')};function tourMove(delta){if(tourStep===tour.length-1&&delta===1){stopTour();return}tourStep=Math.max(0,Math.min(tour.length-1,tourStep+delta));showTour()}
-function printPoster(kind){let id=kind==='how'?'v-how':'v-roadmap';document.querySelectorAll('.view').forEach(v=>v.classList.toggle('print-active',v.id===id));window.print();setTimeout(()=>document.querySelectorAll('.view').forEach(v=>v.classList.remove('print-active')),500)}
-function resetDemo(){sent=0;bookings=0;activities=['Example customer reactivation audience prepared','Sample appointment booked — Taylor B.','New coin interest captured — Alex M.','New sample inquiry recorded'];appointments=appointments.slice(0,3);document.getElementById('campaignBookings').textContent='0';loadCampaign('gold');renderAppointments();renderKPIs();toast('Sample data restored. No production information was changed.')}
-renderKPIs();renderCustomers();updatePreview();renderAppointments();renderInventory();renderReports();go('dashboard');
+'use strict';
+/* =====================================================================
+   Helpers
+   ===================================================================== */
+const $ = s => document.querySelector(s);
+const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = n => Math.round(n).toLocaleString('en-US');
+const money = n => '$' + Math.round(n).toLocaleString('en-US');
+const moneyK = n => n >= 10000 ? '$' + (n/1000).toFixed(n >= 100000 ? 0 : 1) + 'K' : money(n);
+const pct = (n, d = 1) => (n * 100).toFixed(d) + '%';
+const TODAY = (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
+const addDays = n => { const d = new Date(TODAY); d.setDate(d.getDate() + n); return d; };
+const iso = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+const fromIso = s => { const p = s.split('-').map(Number); return new Date(p[0], p[1]-1, p[2]); };
+const fmtDate = d => (typeof d === 'string' ? fromIso(d) : d).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+const fmtDay = d => (typeof d === 'string' ? fromIso(d) : d).toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'});
+const fmtTime = t => { let [h, m] = t.split(':').map(Number); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return h + ':' + String(m).padStart(2,'0') + ' ' + ap; };
+const shortTime = t => { let [h, m] = t.split(':').map(Number); const ap = h >= 12 ? 'p' : 'a'; h = h % 12 || 12; return h + (m ? ':' + String(m).padStart(2,'0') : '') + ap; };
+const daysFrom = s => Math.round((fromIso(s) - TODAY) / 86400000);
+const ago = s => { const n = -daysFrom(s); return n <= 0 ? 'Today' : n === 1 ? 'Yesterday' : n < 30 ? n + ' days ago' : n < 365 ? Math.round(n/30) + ' mo ago' : Math.floor(n/365) + ' yr ago'; };
+const initials = n => n.split(' ').map(x => x[0]).join('').slice(0,2).toUpperCase();
+function seeded(str) { let h = 2166136261; for (const ch of str) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return () => { h = Math.imul(h ^ (h >>> 15), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); h ^= h >>> 16; return (h >>> 0) / 4294967296; }; }
+const AV_COLORS = ['#1b365f','#2a4a78','#6b4f12','#3f5b46','#5b3f6b','#7a4a2a','#2f5866'];
+const avColor = id => AV_COLORS[[...id].reduce((a,c) => a + c.charCodeAt(0), 0) % AV_COLORS.length];
+
+const ICON = {
+  dashboard:'<path d="M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z"/>',
+  customers:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5M16 4.5a3.3 3.3 0 0 1 0 6.6M18 14.6c1.9.7 3.1 2.5 3.5 5.4"/>',
+  campaigns:'<path d="M3 10v4l11 5V5L3 10z"/><path d="M14 8a4 4 0 0 1 0 8M7 15l1.5 5h3l-1-4"/>',
+  appointments:'<rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4M7.5 13.5h3v3h-3z"/>',
+  ai:'<path d="M12 3l1.8 4.7L18.5 9.5 13.8 11.3 12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M18.5 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>',
+  inventory:'<path d="M6 3h12l3 5-9 13L3 8z"/><path d="M3 8h18M9 3l3 18M15 3l-3 18"/>',
+  reports:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  how:'<circle cx="5" cy="6" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M7.5 6h9M6.3 8.2l4.4 7.6M17.7 8.2l-4.4 7.6"/>',
+  roadmap:'<path d="M4 20V4M4 5h11l-2 3.5L15 12H4"/>'
+};
+const svgI = (k, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k]}</svg>`;
+
+/* =====================================================================
+   Static sample definitions (fictional)
+   ===================================================================== */
+const BIZ = { name:'Blue Ridge Gold & Jewelry', street:'16011 Porterfield Highway', city:'Abingdon, VA 24210' };
+const TOTAL_BASE = 2487;
+const SEG = {
+  gold:     { label:'Gold sellers',       count:842 },
+  jewelry:  { label:'Jewelry buyers',     count:917 },
+  coins:    { label:'Coin collectors',    count:388 },
+  previous: { label:'Previous customers', count:1604 },
+  vip:      { label:'VIP customers',      count:126 },
+  inactive: { label:'Inactive customers', count:611 }
+};
+const SEG_IDS = Object.keys(SEG);
+const STATUSES = ['New','Follow-up due','Contacted','Appointment set','Not interested','Do not contact'];
+const STATUS_CLS = {'New':'s-blue','Follow-up due':'s-amber','Contacted':'s-gray','Appointment set':'s-green','Not interested':'s-purple','Do not contact':'s-red'};
+
+// id, name, city, segments, interests, follow-up status, days since last visit, lifetime $ activity, visits, prefs (sms,email)
+const RAW_CUSTOMERS = [
+  ['c01','Jordan Ellis','Abingdon, VA','gold previous','Gold jewelry|Scrap gold','Follow-up due',38,2140,3,'11'],
+  ['c02','Taylor Brooks','Bristol, VA','jewelry vip','Engagement rings|Diamonds','Appointment set',6,8650,7,'11'],
+  ['c03','Alex Morgan','Marion, VA','coins','Morgan dollars|Proof sets','Contacted',21,1320,4,'01'],
+  ['c04','Riley Parker','Glade Spring, VA','gold previous inactive','Gold coins|Class rings','New',212,960,1,'11'],
+  ['c05','Casey Rivera','Bristol, TN','coins vip','Gold Eagles|Silver bullion','Follow-up due',15,6420,9,'11'],
+  ['c06','Morgan Hayes','Abingdon, VA','jewelry previous','Anniversary bands|Pearls','Contacted',64,1875,2,'10'],
+  ['c07','Jamie Whitaker','Damascus, VA','gold previous','Estate jewelry|Gold chains','Not interested',133,740,2,'11'],
+  ['c08','Avery Collins','Meadowview, VA','jewelry inactive','Watches|Gold bracelets','New',298,520,1,'11'],
+  ['c09','Quinn Holloway','Kingsport, TN','coins previous','Silver dollars|Graded coins','Follow-up due',89,2280,5,'11'],
+  ['c10','Drew Sutton','Abingdon, VA','vip jewelry gold','Custom jewelry|Gold trade-ins','Appointment set',3,12400,14,'11'],
+  ['c11','Parker Lane','Saltville, VA','gold inactive','Dental gold|Scrap gold','Do not contact',401,310,1,'00'],
+  ['c12','Reese Calloway','Bristol, VA','jewelry previous','Birthstone jewelry','Contacted',47,690,2,'11'],
+  ['c13','Sydney Tate','Chilhowie, VA','coins inactive','Wheat pennies|Mint sets','New',260,180,1,'10'],
+  ['c14','Blake Ferrell','Abingdon, VA','gold vip','Gold bullion|Estate pieces','Contacted',11,9870,11,'11'],
+  ['c15','Harper Quillen','Lebanon, VA','jewelry previous','Diamond studs|Gold hoops','Follow-up due',102,1430,3,'11'],
+  ['c16','Emerson Dale','Bristol, TN','gold previous','Broken jewelry|Silver flatware','New',155,410,1,'11'],
+  ['c17','Rowan Pierce','Marion, VA','coins vip','Rare dates|Gold coins','Appointment set',9,7310,8,'11'],
+  ['c18','Logan Mabry','Abingdon, VA','jewelry inactive','Wedding sets','New',344,2950,1,'11'],
+  ['c19','Finley Odom','Glade Spring, VA','gold jewelry previous','Gold trade-ins|Bracelets','Contacted',28,1680,4,'11'],
+  ['c20','Skyler Varner','Damascus, VA','coins previous','Silver rounds|Half dollars','Follow-up due',73,860,3,'01']
+];
+const TXN_KIND = {
+  gold:    { type:'Sold gold to store',  items:['14K chain & ring lot','Broken gold jewelry','10K class ring','Gold coin','Gold bracelet & earrings'], min:120, max:900 },
+  jewelry: { type:'Jewelry purchase',    items:['Diamond stud earrings','Gold rope bracelet','Anniversary band','Pendant necklace','Ring sizing & cleaning'], min:90, max:1800 },
+  coins:   { type:'Coin purchase',       items:['Morgan silver dollar','Proof set','Silver rounds (10)','1/10 oz Gold Eagle','Walking Liberty half'], min:45, max:700 }
+};
+function buildCustomer(r, i) {
+  const [id, name, city, tags, ints, status, days, spend, visits, prefs] = r;
+  const rnd = seeded(id);
+  const [first, last] = name.toLowerCase().split(' ');
+  const area = city.endsWith('TN') ? '423' : '276';
+  const c = { id, name, city, tags: tags.split(' '), interests: ints.split('|'), status,
+    lastVisit: iso(addDays(-days)), spend, visits,
+    phone: '(' + area + ') 555-01' + String(i + 10).padStart(2,'0'),
+    email: first + '.' + last + '@example.com',
+    prefs: { sms: prefs[0] === '1', email: prefs[1] === '1' },
+    since: iso(addDays(-(days + 180 + Math.floor(rnd() * 1100)))), comms: [], txns: [] };
+  const kinds = c.tags.filter(t => TXN_KIND[t]); if (!kinds.length) kinds.push('jewelry');
+  let d = days;
+  for (let k = 0; k < Math.min(visits, 4); k++) {
+    const K = TXN_KIND[kinds[k % kinds.length]];
+    c.txns.push({ date: iso(addDays(-d)), type: K.type, desc: K.items[Math.floor(rnd() * K.items.length)], amount: Math.round((K.min + rnd() * (K.max - K.min)) / 5) * 5 });
+    d += 30 + Math.floor(rnd() * 70);
+  }
+  const k0 = kinds[0];
+  const promo = k0 === 'gold' ? 'We Buy Gold Weekend invitation' : k0 === 'coins' ? 'Coin Collector Alert — new arrivals' : 'Jewelry showcase announcement';
+  const ch = c.prefs.sms ? 'SMS' : 'Email';
+  if (status === 'Do not contact') {
+    c.comms.push({ date: iso(addDays(-days + 2)), ch:'System', dir:'sys', text:'Customer asked not to be contacted — all marketing turned off and contact locked.' });
+  } else {
+    c.comms.push({ date: iso(addDays(-Math.min(days, 26))), ch, dir:'out', text: promo + ' (sample message)' });
+    if (['Contacted','Appointment set','Follow-up due'].includes(status)) {
+      const q = k0 === 'gold' ? 'Do I need an appointment or can I just walk in with my rings?' : k0 === 'coins' ? 'Do you have any Morgan dollars in right now?' : 'Can I come in this week to look at rings?';
+      c.comms.push({ date: iso(addDays(-Math.min(days, 25))), ch, dir:'in', text: q });
+      c.comms.push({ date: iso(addDays(-Math.min(days, 24))), ch:'Staff note', dir:'note', text: status === 'Follow-up due' ? 'Left voicemail — try again later this week.' : status === 'Appointment set' ? 'Booked a visit — see Appointments.' : 'Answered question; customer will stop by.' });
+    }
+    if (!c.prefs.sms) c.comms.push({ date: iso(addDays(-Math.min(days, 40) - 5)), ch:'SMS', dir:'sys', text:'Replied STOP — text marketing turned off automatically.' });
+    if (!c.prefs.email) c.comms.push({ date: iso(addDays(-Math.min(days, 40) - 7)), ch:'Email', dir:'sys', text:'Unsubscribed from marketing email — honored automatically.' });
+  }
+  c.comms.sort((a, b) => b.date.localeCompare(a.date));
+  return c;
+}
+
+const APPT_TYPES = { gold:'Gold evaluation', jewelry:'Jewelry consultation', coins:'Coin collection appointment', follow:'Customer follow-up' };
+const APPT_STATUSES = ['Scheduled','Confirmed','Checked in','Completed','No-show','Cancelled'];
+const APPT_CLS = {'Scheduled':'s-blue','Confirmed':'s-green','Checked in':'s-purple','Completed':'s-gray','No-show':'s-red','Cancelled':'s-red'};
+const INIT_APPTS = [
+  ['a1','c10','jewelry',0,'15:00','Checked in','Custom design review'],
+  ['a2','c02','jewelry',1,'10:00','Confirmed','Engagement ring options'],
+  ['a3','c01','gold',1,'13:30','Scheduled','Bringing a chain and two rings'],
+  ['a4','c17','coins',2,'11:00','Confirmed','Collection of 1880s Morgan dollars'],
+  ['a5','c05','coins',3,'14:00','Scheduled','Gold Eagles — wants to add to collection'],
+  ['a6','c09','follow',4,'10:30','Scheduled','Follow up on graded coin interest'],
+  ['a7','c14','gold',5,'12:00','Confirmed','Estate pieces from family'],
+  ['a8','c04','gold',6,'11:30','Scheduled','Reactivation campaign response'],
+  ['a9','c15','follow',-1,'16:00','Completed','Picked up repaired hoops']
+];
+const TIME_SLOTS = (() => { const a = []; for (let h = 10; h < 18; h++) for (const m of [0, 30]) a.push(String(h).padStart(2,'0') + ':' + (m ? '30' : '00')); return a; })();
+
+const CAMPAIGNS = [
+  { id:'gold', name:'We Buy Gold Weekend', segs:['gold','previous'], channel:'both', budget:1800, avgSale:420,
+    rates:{ engage:.38, reply:.052, appt:.46, show:.82, walkin:.008, close:.66, react:.34 },
+    sms:'Blue Ridge Gold & Jewelry: Our We Buy Gold Weekend is this Fri–Sun. Bring gold jewelry, coins or broken pieces for a free in-store evaluation. Reply BOOK to reserve a time.',
+    subject:'You\'re invited: We Buy Gold Weekend', body:'Hi {first},\n\nThinking about selling gold jewelry, coins or broken pieces? Our We Buy Gold Weekend is this Friday through Sunday.\n\nBring your items in for a free, no-obligation in-store evaluation. Our team will walk you through the process in person.\n\nReserve a time below, or simply reply to this email.' },
+  { id:'reactivation', name:'Previous Customer Reactivation', segs:['previous','inactive'], channel:'both', budget:600, avgSale:310,
+    rates:{ engage:.31, reply:.041, appt:.38, show:.8, walkin:.006, close:.55, react:.92 },
+    sms:'Hi {first}, it\'s been a while! Blue Ridge Gold & Jewelry would love to see you again. Stop in this month for a free jewelry cleaning & inspection. Reply VISIT to set a time.',
+    subject:'We\'ve missed you at Blue Ridge', body:'Hi {first},\n\nIt\'s been a while since your last visit and we wanted to say thank you for being a customer.\n\nStop in this month for a complimentary jewelry cleaning and inspection — and see what\'s new in the store.\n\nReply to this email or pick a time below.' },
+  { id:'holiday', name:'Jewelry Holiday Specials', segs:['jewelry','vip'], channel:'email', budget:2400, avgSale:690,
+    rates:{ engage:.44, reply:.031, appt:.41, show:.85, walkin:.016, close:.61, react:.18 },
+    sms:'Blue Ridge Gold & Jewelry: Holiday jewelry specials start this week. Ask about our gift selection or book a private shopping consultation. Reply GIFT.',
+    subject:'Holiday gifts, hand-picked at Blue Ridge', body:'Hi {first},\n\nThe holidays are almost here. Our holiday jewelry selection is in — gold, diamonds and timeless gifts for everyone on your list.\n\nBook a private shopping consultation and we\'ll have pieces ready to show you when you arrive.' },
+  { id:'coins', name:'Coin Collector Alerts', segs:['coins'], channel:'sms', budget:150, avgSale:380,
+    rates:{ engage:.52, reply:.098, appt:.5, show:.86, walkin:.014, close:.62, react:.3 },
+    sms:'Collector alert from Blue Ridge Gold & Jewelry: new coin arrivals are in, including silver dollars and proof sets. Reply COINS to hear first or set a viewing time.',
+    subject:'Collector alert: new coin arrivals', body:'Hi {first},\n\nNew coin arrivals just came in, including silver dollars and proof sets.\n\nAs one of our collectors, you hear about them first. Reply to set a viewing time.' },
+  { id:'vip', name:'VIP Customer Offers', segs:['vip'], channel:'both', budget:900, avgSale:1150,
+    rates:{ engage:.6, reply:.12, appt:.55, show:.9, walkin:.03, close:.7, react:.15 },
+    sms:'{first}, as one of our VIP customers you\'re invited to an after-hours preview at Blue Ridge Gold & Jewelry. Reply VIP to reserve your spot.',
+    subject:'Your private VIP preview invitation', body:'Hi {first},\n\nThank you for being one of our most valued customers. You\'re invited to a private after-hours preview of new arrivals before they go in the case.\n\nSpaces are limited — reply to reserve yours.' }
+];
+const INIT_CAMP_STATE = { gold:{status:'Completed', when:-26}, reactivation:{status:'Completed', when:-12}, holiday:{status:'Scheduled', when:15, time:'09:00'}, coins:{status:'Completed', when:-5}, vip:{status:'Draft'} };
+const CHANNEL_LABEL = { sms:'Text message', email:'Email', both:'Text + Email' };
+const SMS_COST = 0.012, EMAIL_COST = 0.0015;
+
+// Dashboard periods — store-wide sample totals (consistent with each other).
+const PERIODS = {
+  '7d':  { label:'7 days',   long:'Last 7 days',   newC:18,  returning:64,   engagement:.214, sales:18420,  txns:71,   reactivated:9,   campRev:4380,   chg:{c:'+1%', r:'+6%', s:'+9%', e:'+2.1 pts', x:'+3'} },
+  '30d': { label:'30 days',  long:'Last 30 days',  newC:74,  returning:286,  engagement:.189, sales:76850,  txns:302,  reactivated:41,  campRev:21650,  chg:{c:'+3%', r:'+11%', s:'+14%', e:'+3.4 pts', x:'+12'} },
+  '90d': { label:'90 days',  long:'Last 90 days',  newC:211, returning:812,  engagement:.176, sales:224300, txns:905,  reactivated:118, campRev:58900,  chg:{c:'+9%', r:'+8%', s:'+12%', e:'+2.8 pts', x:'+31'} },
+  '12m': { label:'12 months',long:'Last 12 months',newC:846, returning:2940, engagement:.162, sales:912400, txns:3610, reactivated:402, campRev:203500, chg:{c:'+34%', r:'+19%', s:'+17%', e:'+4.0 pts', x:'+148'} }
+};
+
+const INVENTORY_CATS = [
+  { id:'goldj',  name:'Gold jewelry',          seg:'gold',    base:214, glyph:'ring' },
+  { id:'fine',   name:'Diamond & fine jewelry',seg:'jewelry', base:309, glyph:'gem' },
+  { id:'coinsC', name:'Collectible coins',     seg:'coins',   base:176, glyph:'coin' },
+  { id:'bull',   name:'Gold & silver bullion', seg:'coins',   base:132, glyph:'bar' },
+  { id:'estate', name:'Estate & vintage pieces',seg:'jewelry',base:148, glyph:'gem' },
+  { id:'buy',    name:'Gold buying (we buy)',  seg:'gold',    base:842, glyph:'scale' }
+];
+const ITEMS = [
+  { id:'i1', name:'14K yellow gold rope chain', cat:'goldj', tag:'New arrival', glyph:'ring', featured:true },
+  { id:'i2', name:'Estate diamond solitaire ring', cat:'estate', tag:'Estate piece', glyph:'gem', featured:true },
+  { id:'i3', name:'1921 Morgan silver dollar', cat:'coinsC', tag:'Collector', glyph:'coin', featured:true },
+  { id:'i4', name:'1/10 oz American Gold Eagle', cat:'bull', tag:'Bullion', glyph:'coin', featured:false },
+  { id:'i5', name:'Sapphire & diamond pendant', cat:'fine', tag:'Holiday pick', glyph:'gem', featured:false },
+  { id:'i6', name:'Vintage gold cameo brooch', cat:'estate', tag:'Estate piece', glyph:'ring', featured:false }
+];
+const GLYPH = {
+  ring:'<circle cx="24" cy="29" r="12" stroke="#dfbf6e" stroke-width="3"/><path d="M18 13l6-6 6 6-6 4z" stroke="#f3e2b3" stroke-width="2" stroke-linejoin="round"/>',
+  gem:'<path d="M12 18l6-8h12l6 8-12 20z" stroke="#dfbf6e" stroke-width="2.6" stroke-linejoin="round"/><path d="M12 18h24M20 10l4 28M28 10l-4 28" stroke="#f3e2b3" stroke-width="1.5"/>',
+  coin:'<circle cx="24" cy="24" r="15" stroke="#dfbf6e" stroke-width="3"/><circle cx="24" cy="24" r="10" stroke="#f3e2b3" stroke-width="1.5"/><path d="M24 17v14M20.5 20.5c0-1.6 1.6-2.5 3.5-2.5s3.5.9 3.5 2.5-1.6 2.3-3.5 2.6-3.5 1.1-3.5 2.7 1.6 2.4 3.5 2.4 3.5-.8 3.5-2.4" stroke="#f3e2b3" stroke-width="1.5"/>',
+  bar:'<path d="M8 32l6-12h20l6 12z" stroke="#dfbf6e" stroke-width="2.6" stroke-linejoin="round"/><path d="M14 20l4-6h12l4 6" stroke="#f3e2b3" stroke-width="1.8" stroke-linejoin="round"/>',
+  scale:'<path d="M24 9v29M15 38h18M10 15h28" stroke="#dfbf6e" stroke-width="2.6" stroke-linecap="round"/><path d="M10 15l-5 11h10zM38 15l-5 11h10z" stroke="#f3e2b3" stroke-width="1.8" stroke-linejoin="round"/>'
+};
+const glyph = (k, s = 48) => `<svg width="${s}" height="${s}" viewBox="0 0 48 48" fill="none" aria-hidden="true">${GLYPH[k]}</svg>`;
+const INIT_PROMOS = [
+  { id:'p1', title:'We Buy Gold Weekend — free in-store evaluations', audience:'Gold sellers, previous customers', active:true },
+  { id:'p2', title:'Free jewelry cleaning & inspection this month', audience:'Previous & inactive customers', active:true },
+  { id:'p3', title:'New coin arrivals — collectors hear first', audience:'Coin collectors', active:true },
+  { id:'p4', title:'Holiday gift consultations', audience:'Jewelry buyers, VIP', active:false }
+];
+
+/* =====================================================================
+   State — in memory only. Never written to localStorage/cookies.
+   ===================================================================== */
+let S;
+function initState() {
+  const st = {
+    customers: RAW_CUSTOMERS.map(buildCustomer),
+    appts: INIT_APPTS.map(a => ({ id:a[0], cust:a[1], type:a[2], date: iso(addDays(a[3])), time:a[4], status:a[5], notes:a[6] })),
+    campaigns: CAMPAIGNS.map(c => Object.assign({}, c, { segs:[...c.segs], rates:Object.assign({}, c.rates) }, INIT_CAMP_STATE[c.id], { scheduledFor: INIT_CAMP_STATE[c.id].when > 0 ? iso(addDays(INIT_CAMP_STATE[c.id].when)) : null })),
+    runs: [], activity: [], period:'30d', selCamp:'gold', preview:'sms', lastResult:null,
+    custSeg:'all', custSearch:'', statusFilter:'all', openCust:null, drawerTab:'txns',
+    apptDay:null, apptType:'all', chat:[], inquiry:null, promos: INIT_PROMOS.map(p => Object.assign({}, p)),
+    featured: Object.fromEntries(ITEMS.map(i => [i.id, i.featured])), added:0, nextId:100,
+    sim: { campaigns:0, replies:0, appts:0, visits:0, sales:0, revenue:0, reactivated:0, reached:0, engaged:0 }
+  };
+  st.campaigns.forEach(c => { if (c.status === 'Completed') st.runs.push(makeRun(c, iso(addDays(c.when)), false)); });
+  st.activity = [
+    { ic:'▣', t:'Drew S. checked in for a jewelry consultation', w:'Today' },
+    { ic:'✉', t:'Coin Collector Alerts — 18 replies, 9 appointments', w:'5 days ago' },
+    { ic:'✦', t:'AI receptionist captured a coin inquiry and flagged it for staff', w:'Yesterday' },
+    { ic:'♺', t:'Riley P. reactivated after 7 months — gold evaluation booked', w:'2 days ago' },
+    { ic:'＄', t:'Previous Customer Reactivation completed — results in Reports', w:'12 days ago' }
+  ];
+  return st;
+}
+
+/* ---------- campaign math ---------- */
+function audienceFor(segs, channel) {
+  if (!segs.length) return { matched:0, eligible:0, excluded:0, sms:0, email:0 };
+  const counts = segs.map(s => SEG[s].count).sort((a, b) => b - a);
+  const matched = Math.min(TOTAL_BASE, Math.round(counts[0] + counts.slice(1).reduce((a, b) => a + b, 0) * 0.45));
+  const smsOk = Math.round(matched * 0.58), emailOk = Math.round(matched * 0.71);
+  const eligible = channel === 'sms' ? smsOk : channel === 'email' ? emailOk : Math.round(matched * 0.84);
+  return { matched, eligible, excluded: matched - eligible, sms: channel === 'email' ? 0 : smsOk, email: channel === 'sms' ? 0 : emailOk };
+}
+function computeResults(c, aud) {
+  const r = c.rates;
+  const reached = Math.round(aud.eligible * 0.97);
+  const engaged = Math.round(reached * r.engage);
+  const replies = Math.round(reached * r.reply);
+  const appts = Math.round(replies * r.appt);
+  const visits = Math.round(appts * r.show) + Math.round(reached * r.walkin);
+  const sales = Math.round(visits * r.close);
+  const revenue = sales * c.avgSale;
+  const reactivated = Math.round(visits * r.react);
+  const cost = Math.round(aud.sms * SMS_COST + aud.email * EMAIL_COST + c.budget);
+  const optouts = Math.round(aud.sms * 0.004 + aud.email * 0.002);
+  return { reached, engaged, replies, appts, visits, sales, revenue, reactivated, cost, roi: (revenue - cost) / cost, optouts };
+}
+function makeRun(c, date, simulated) {
+  const aud = audienceFor(c.segs, c.channel);
+  return Object.assign({ id:'r' + Math.random().toString(36).slice(2, 8), camp:c.id, name:c.name, date, simulated, channel:c.channel }, computeResults(c, aud));
+}
+
+/* =====================================================================
+   Navigation & routing (hash based: refresh + deep links work)
+   ===================================================================== */
+const SCREENS = [
+  ['dashboard','Dashboard'],['customers','Customer Vault'],['campaigns','Campaign Studio'],['appointments','Appointments'],
+  ['ai','AI Receptionist'],['inventory','Inventory & Promotions'],['reports','Reports & Revenue']
+];
+const SCREENS2 = [['how','How the System Works'],['roadmap','What We Would Build First']];
+const ALL_SCREENS = Object.fromEntries([...SCREENS, ...SCREENS2]);
+let page = 'dashboard';
+function buildNav() {
+  const b = s => `<button type="button" data-go="${s[0]}" onclick="go('${s[0]}')">${svgI(s[0])}<span>${esc(s[1])}</span></button>`;
+  $('#nav').innerHTML = SCREENS.map(b).join('');
+  $('#nav2').innerHTML = SCREENS2.map(b).join('');
+}
+function go(id, sub) {
+  const h = '#' + id + (sub ? '/' + sub : '');
+  if (location.hash !== h) location.hash = h; else route();
+}
+function route() {
+  const [id, sub] = decodeURIComponent(location.hash.replace(/^#\/?/, '')).split('/');
+  const target = ALL_SCREENS[id] ? id : 'dashboard';
+  const changed = target !== page;
+  page = target;
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'v-' + page));
+  document.querySelectorAll('.nav button').forEach(b => b.classList.toggle('active', b.dataset.go === page));
+  $('#crumb').textContent = ALL_SCREENS[page].toUpperCase();
+  document.title = ALL_SCREENS[page] + ' — Blue Ridge Gold & Jewelry | Interactive Demo · Powered by EvoSys';
+  toggleMenu(false);
+  if (page === 'customers' && sub && S.customers.some(c => c.id === sub)) openCustomer(sub, true);
+  else if ($('#drawer').classList.contains('show')) closeDrawer(true);
+  if (changed && !tourOn) window.scrollTo({ top:0 });
+}
+function toggleMenu(open) {
+  $('#sidebar').classList.toggle('open', open);
+  if (open) $('#scrim').classList.add('show');
+  else if (!$('#drawer').classList.contains('show')) $('#scrim').classList.remove('show');
+}
+function closeAll() { toggleMenu(false); closeDrawer(); }
+
+/* ---------- toast & activity ---------- */
+let toastTimer;
+function toast(msg, icon = '✓') {
+  $('#toastText').textContent = msg; $('#toast .ti').textContent = icon;
+  $('#toast').classList.add('show'); clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $('#toast').classList.remove('show'), 4800);
+}
+function logActivity(ic, t) { S.activity.unshift({ ic, t, w:'Just now', fresh:true }); S.activity = S.activity.slice(0, 12); renderFeed(); }
+
+/* =====================================================================
+   DASHBOARD
+   ===================================================================== */
+function renderPeriodCtl() {
+  $('#periodCtl').innerHTML = Object.entries(PERIODS).map(([k, p]) => `<button type="button" class="${S.period === k ? 'on' : ''}" onclick="setPeriod('${k}')">${p.label}</button>`).join('');
+}
+function setPeriod(k) { S.period = k; renderDashboard(); toast('Showing ' + PERIODS[k].long.toLowerCase() + ' — every card and chart updated.', '◷'); }
+function activeCampaigns() { return S.campaigns.filter(c => c.status === 'Scheduled' || c.status === 'Sending').length + S.promos.filter(p => p.active).length; }
+function upcomingAppts() { return S.appts.filter(a => daysFrom(a.date) >= 0 && ['Scheduled','Confirmed','Checked in'].includes(a.status)); }
+function renderDashboard() {
+  renderPeriodCtl();
+  const P = PERIODS[S.period], sim = S.sim;
+  const h = new Date().getHours();
+  $('#heroGreeting').textContent = (h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening') + ', Blue Ridge.';
+  $('#heroDate').textContent = TODAY.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' }).toUpperCase() + ' · ' + P.long.toUpperCase();
+  const totalCust = TOTAL_BASE + S.added;
+  const eng = (P.engagement * 1000 + sim.engaged) / (1000 + sim.reached);
+  const tiles = [
+    ['Total customers', fmt(totalCust), `<span class="up">+${fmt(P.newC + S.added)}</span> new in ${P.label}`, 'customers'],
+    ['Returning customers', fmt(P.returning + sim.visits), `<span class="up">${P.chg.r}</span> vs. prior ${P.label}`, 'customers'],
+    ['Active campaigns', fmt(activeCampaigns()), 'Scheduled + running promotions', 'campaigns'],
+    ['Upcoming appointments', fmt(upcomingAppts().length), 'Next 7 days · see calendar', 'appointments'],
+    ['Campaign engagement', pct(eng), `<span class="up">${P.chg.e}</span> vs. prior ${P.label}`, 'campaigns'],
+    ['Sales activity', moneyK(P.sales + sim.revenue), `${fmt(P.txns + sim.sales)} transactions · <span class="up">${P.chg.s}</span>`, 'reports'],
+    ['Customers reactivated', fmt(P.reactivated + sim.reactivated), `Back after 6+ months · <span class="up">${P.chg.x}</span>`, 'reports'],
+    ['Campaign-attributed sales', moneyK(P.campRev + sim.revenue), 'From promotions & follow-ups', 'reports']
+  ];
+  $('#kpiGrid').innerHTML = tiles.map((t, i) => `<button type="button" class="kpi ${i === 7 ? 'featured' : ''}" style="text-align:left;font:inherit;cursor:pointer" onclick="go('${t[3]}')"><div class="k-label"><span>${t[0]}</span><span style="color:var(--gold)">›</span></div><div class="k-val">${t[1]}</div><div class="k-foot">${t[2]}</div></button>`).join('');
+  renderSalesChart();
+  renderEngagement();
+  renderFeed();
+  renderDashAppts();
+  renderSuggestions();
+}
+function chartBuckets() {
+  const P = PERIODS[S.period], labels = [], n = S.period === '7d' ? 7 : S.period === '30d' ? 6 : S.period === '90d' ? 13 : 12;
+  for (let i = n - 1; i >= 0; i--) {
+    if (S.period === '7d') labels.push(addDays(-i).toLocaleDateString('en-US', { weekday:'short' }));
+    else if (S.period === '30d') labels.push(addDays(-i * 5).toLocaleDateString('en-US', { month:'short', day:'numeric' }));
+    else if (S.period === '90d') labels.push(addDays(-i * 7).toLocaleDateString('en-US', { month:'numeric', day:'numeric' }));
+    else { const d = new Date(TODAY); d.setMonth(d.getMonth() - i); labels.push(d.toLocaleDateString('en-US', { month:'short' })); }
+  }
+  const split = (total, key) => {
+    const rnd = seeded(S.period + key); const w = labels.map((_, i) => 0.75 + rnd() * 0.5 + (key === 'c' ? 0 : i / n * 0.25));
+    const sw = w.reduce((a, b) => a + b, 0); const v = w.map(x => Math.round(total * x / sw));
+    v[v.length - 1] += total - v.reduce((a, b) => a + b, 0); return v;
+  };
+  const sales = split(P.sales, 's'), camp = split(P.campRev, 'c');
+  sales[sales.length - 1] += S.sim.revenue; camp[camp.length - 1] += S.sim.revenue;
+  return { labels, sales, camp };
+}
+function renderSalesChart() {
+  const { labels, sales, camp } = chartBuckets(), P = PERIODS[S.period];
+  const W = 640, H = 230, pl = 46, pb = 26, pt = 10, n = labels.length;
+  const max = Math.max(...sales) * 1.12, step = (W - pl - 6) / n, bw = Math.min(34, step * 0.62);
+  const y = v => pt + (H - pt - pb) * (1 - v / max);
+  let g = '';
+  for (let i = 0; i <= 4; i++) { const v = max * i / 4, yy = y(v); g += `<line x1="${pl}" x2="${W}" y1="${yy}" y2="${yy}" stroke="#efe9db"/><text x="${pl - 8}" y="${yy + 4}" text-anchor="end" font-size="10.5" fill="#647085">${moneyK(v)}</text>`; }
+  labels.forEach((l, i) => {
+    const x = pl + step * i + (step - bw) / 2;
+    g += `<rect x="${x}" y="${y(sales[i])}" width="${bw}" height="${H - pb - y(sales[i])}" rx="5" fill="#c9a24a" opacity=".9"><title>${esc(l)}: ${money(sales[i])} store sales</title></rect>`;
+    g += `<rect x="${x + bw * 0.2}" y="${y(camp[i])}" width="${bw * 0.6}" height="${H - pb - y(camp[i])}" rx="4" fill="#2a4a78"><title>${esc(l)}: ${money(camp[i])} from campaigns</title></rect>`;
+    if (n <= 12 || i % 2 === 0) g += `<text x="${x + bw / 2}" y="${H - 8}" text-anchor="middle" font-size="10.5" fill="#647085">${esc(l)}</text>`;
+  });
+  $('#salesChart').innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Sales activity chart">${g}</svg>`;
+  $('#salesSub').textContent = P.long + ' · ' + money(P.sales + S.sim.revenue) + ' recorded (sample)';
+}
+function renderEngagement() {
+  const runs = S.runs.slice(-5).reverse();
+  const P = PERIODS[S.period], eng = (P.engagement * 1000 + S.sim.engaged) / (1000 + S.sim.reached);
+  const C = 2 * Math.PI * 46, off = C * (1 - Math.min(eng * 2.2, 1));
+  $('#engageBox').innerHTML = `<div class="row" style="gap:18px;align-items:center;flex-wrap:nowrap"><svg width="120" height="120" style="flex:none" viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="46" fill="none" stroke="#f3ecdc" stroke-width="13"/><circle cx="60" cy="60" r="46" fill="none" stroke="url(#eg)" stroke-width="13" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${off}" transform="rotate(-90 60 60)"/><defs><linearGradient id="eg"><stop offset="0" stop-color="#c9a24a"/><stop offset="1" stop-color="#dfbf6e"/></linearGradient></defs><text x="60" y="58" text-anchor="middle" font-size="22" font-weight="800" fill="#14223a">${pct(eng)}</text><text x="60" y="76" text-anchor="middle" font-size="10" fill="#647085">engaged</text></svg><div class="small muted">Engagement for the ${P.long.toLowerCase()} across all promotions. Industry email engagement is often lower — targeting by interest is what moves this number.</div></div>
+  <div style="margin-top:8px">${runs.map(r => `<div class="mini-bar"><span title="${esc(r.name)}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.name)}</span><div class="bar"><span style="width:${Math.min(100, r.engaged / r.reached * 160)}%"></span></div><b style="text-align:right">${pct(r.engaged / r.reached, 0)}</b></div>`).join('')}</div>`;
+}
+function renderFeed() {
+  $('#activityFeed').innerHTML = S.activity.slice(0, 6).map(a => `<li class="${a.fresh ? 'fresh' : ''}"><div class="dot">${a.ic}</div><div><div class="t">${esc(a.t)}</div><div class="w">${esc(a.w)}</div></div></li>`).join('');
+}
+function custById(id) { return S.customers.find(c => c.id === id); }
+function renderDashAppts() {
+  const list = upcomingAppts().sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time)).slice(0, 5);
+  $('#dashAppts').innerHTML = list.length ? list.map(a => { const c = custById(a.cust); return `<div class="appt-mini"><div><b>${esc(c ? c.name : 'Customer')}</b><div class="tiny muted">${esc(APPT_TYPES[a.type])} · ${daysFrom(a.date) === 0 ? 'Today' : fmtDay(a.date)} ${fmtTime(a.time)}</div></div><span class="status ${APPT_CLS[a.status]}">${esc(a.status)}</span></div>`; }).join('') : '<div class="empty">No upcoming appointments</div>';
+}
+function renderSuggestions() {
+  const dueC = S.customers.filter(c => c.status === 'Follow-up due').length;
+  const inactiveGold = Math.round(SEG.gold.count * 0.27);
+  const items = [
+    ['♺', `${fmt(inactiveGold)} past gold sellers haven't visited in 6+ months`, 'A reactivation message typically brings some of them back.', 'Start reactivation', "openCampaign('reactivation')"],
+    ['◆', 'New coin arrivals match 176 collector interests', 'Send a collector alert before the items hit the case.', 'Notify collectors', "openCampaign('coins')"],
+    ['☎', `${dueC} customers are due for a follow-up`, 'Work the list from the Customer Vault.', 'View list', "filterStatus('Follow-up due')"]
+  ];
+  $('#suggestions').innerHTML = items.map(s => `<div class="suggest"><div class="ic">${s[0]}</div><div class="tx"><b>${esc(s[1])}</b><span class="muted small">${esc(s[2])}</span><div style="margin-top:8px"><button class="btn sm" onclick="${s[4]}">${esc(s[3])} →</button></div></div></div>`).join('');
+}
+
+/* =====================================================================
+   CUSTOMER VAULT
+   ===================================================================== */
+function segCount(id) { return id === 'all' ? TOTAL_BASE + S.added : SEG[id].count + S.customers.filter(c => c.added && c.tags.includes(id)).length; }
+function renderSegChips() {
+  const chips = [['all', 'All customers'], ...SEG_IDS.map(id => [id, SEG[id].label])];
+  $('#segChips').innerHTML = chips.map(([id, l]) => `<button type="button" class="chip ${S.custSeg === id ? 'on' : ''}" onclick="S.custSeg='${id}';renderCustomers()">${esc(l)} <span class="n">${fmt(segCount(id))}</span></button>`).join('');
+}
+function filterStatus(st) { S.statusFilter = st; S.custSeg = 'all'; S.custSearch = ''; $('#custSearch').value = ''; go('customers'); renderCustomers(); }
+function filteredCustomers() {
+  const q = S.custSearch.trim().toLowerCase();
+  return S.customers.filter(c => (S.custSeg === 'all' || c.tags.includes(S.custSeg)) && (S.statusFilter === 'all' || c.status === S.statusFilter) &&
+    (!q || [c.name, c.city, c.phone, c.email, ...c.interests, ...c.tags.map(t => SEG[t].label)].join(' ').toLowerCase().includes(q)));
+}
+function tagHtml(t) { return `<span class="tag ${t}">${esc(SEG[t].label.replace(/s$/, '').replace('Previous customer','Previous').replace('Inactive customer','Inactive').replace('VIP customer','VIP'))}</span>`; }
+function renderCustomers() {
+  renderSegChips();
+  $('#statusFilter').innerHTML = `<option value="all">All follow-up statuses</option>` + STATUSES.map(s => `<option ${S.statusFilter === s ? 'selected' : ''}>${s}</option>`).join('');
+  const arr = filteredCustomers();
+  $('#custCount').textContent = arr.length + ' sample record' + (arr.length === 1 ? '' : 's') + ' shown';
+  $('#custTable').innerHTML = `<table><thead><tr><th>Customer</th><th>Segments</th><th>Interests</th><th>Last visit</th><th class="num">Lifetime activity</th><th>Follow-up status</th></tr></thead><tbody>${arr.length ? arr.map(c => `<tr class="click" onclick="go('customers','${c.id}')" tabindex="0" onkeydown="if(event.key==='Enter')go('customers','${c.id}')"><td><div class="who"><div class="avatar" style="background:${avColor(c.id)}">${esc(initials(c.name))}</div><div><b>${esc(c.name)}</b><span>${esc(c.city)}</span></div></div></td><td>${c.tags.map(tagHtml).join('')}</td><td class="small">${esc(c.interests.join(', '))}</td><td class="small">${ago(c.lastVisit)}</td><td class="num">${money(c.spend)}</td><td><span class="status ${STATUS_CLS[c.status]}">${esc(c.status)}</span></td></tr>`).join('') : `<tr><td colspan="6"><div class="empty">No sample customers match. <button class="btn sm" onclick="clearCustFilters()">Clear filters</button></div></td></tr>`}</tbody></table>`;
+}
+function clearCustFilters() { S.custSeg = 'all'; S.statusFilter = 'all'; S.custSearch = ''; $('#custSearch').value = ''; renderCustomers(); }
+function openCustomer(id, fromRoute) {
+  if (!fromRoute) { go('customers', id); return; }
+  S.openCust = id; renderDrawer();
+  $('#drawer').classList.add('show'); $('#drawer').setAttribute('aria-hidden', 'false'); $('#scrim').classList.add('show');
+}
+function closeDrawer(fromRoute) {
+  $('#drawer').classList.remove('show'); $('#drawer').setAttribute('aria-hidden', 'true'); $('#scrim').classList.remove('show'); S.openCust = null;
+  if (!fromRoute && location.hash.startsWith('#customers/')) history.replaceState(null, '', '#customers');
+}
+function renderDrawer() {
+  const c = custById(S.openCust); if (!c) return;
+  const locked = c.status === 'Do not contact';
+  const tx = c.txns.length ? `<ul class="timeline">${c.txns.map(t => `<li><span class="d">${fmtDate(t.date)}</span><div><b>${esc(t.type)}</b> — ${esc(t.desc)}<div class="tiny muted">${money(t.amount)} · sample transaction</div></div></li>`).join('')}</ul>` : '<div class="empty">No transactions yet</div>';
+  const cm = `<ul class="timeline">${c.comms.map(m => `<li><span class="d">${fmtDate(m.date)}</span><div><span class="status ${m.dir === 'in' ? 's-green' : m.dir === 'out' ? 's-blue' : m.dir === 'sys' ? 's-red' : 's-gray'}" style="font-size:10.5px">${esc(m.ch)} · ${m.dir === 'in' ? 'Received' : m.dir === 'out' ? 'Sent' : m.dir === 'sys' ? 'Compliance' : 'Note'}</span><div style="margin-top:4px">${esc(m.text)}</div></div></li>`).join('')}</ul>
+    <div class="row mt"><input class="input" id="noteInput" placeholder="Add a staff note…" maxlength="160" style="flex:1" onkeydown="if(event.key==='Enter')addNote()"><button class="btn sm navy" onclick="addNote()">Add note</button></div>`;
+  $('#drawer').innerHTML = `<div class="drawer-head"><button class="x" onclick="closeDrawer()" aria-label="Close profile">✕</button>
+    <div class="row" style="gap:12px;flex-wrap:nowrap"><div class="avatar" style="width:52px;height:52px;font-size:17px;background:${avColor(c.id)};border:2px solid var(--gold-2)">${esc(initials(c.name))}</div><div><div class="eyebrow" style="color:var(--gold-2);margin:0">CUSTOMER PROFILE · SAMPLE</div><h2>${esc(c.name)}</h2><div class="small" style="color:#b8c4d8">${esc(c.city)} · ${esc(c.phone)} · ${esc(c.email)}</div></div></div>
+    <div style="margin-top:12px">${c.tags.map(tagHtml).join('')}</div>
+    <div class="kv"><div><span>CUSTOMER SINCE</span><b>${fromIso(c.since).getFullYear()}</b></div><div><span>LAST VISIT</span><b>${ago(c.lastVisit)}</b></div><div><span>VISITS</span><b>${c.visits}</b></div><div><span>LIFETIME</span><b>${money(c.spend)}</b></div></div></div>
+    <div class="drawer-body">
+      <div class="grid g2" style="gap:12px">
+        <div class="card" style="padding:14px"><label class="lbl" for="fuStatus">Follow-up status</label><select class="input" id="fuStatus" onchange="setStatus('${c.id}',this.value)">${STATUSES.map(s => `<option ${s === c.status ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
+        <div class="card" style="padding:14px"><div class="lbl">Marketing preferences</div>
+          <div class="row between small"><span>Text messages</span><span class="status ${c.prefs.sms ? 's-green' : 's-red'}">${c.prefs.sms ? 'Opted in' : 'Opted out'}</span></div>
+          <div class="row between small" style="margin-top:6px"><span>Email</span><span class="status ${c.prefs.email ? 's-green' : 's-red'}">${c.prefs.email ? 'Opted in' : 'Unsubscribed'}</span></div>
+          <div class="tiny muted" style="margin-top:6px">Opt-outs are honored automatically and can't be overridden by a campaign.</div></div>
+      </div>
+      <div class="card mt" style="padding:14px"><div class="lbl">Interests</div><div class="chips">${c.interests.map(i => `<span class="tag gold" style="font-size:12px;padding:4px 10px">${esc(i)}</span>`).join('')}</div></div>
+      <div class="row mt" style="gap:8px">
+        <button class="btn gold sm" ${locked ? 'disabled' : ''} onclick="bookFor('${c.id}')">▣ Book appointment</button>
+        <button class="btn sm" ${locked ? 'disabled' : ''} onclick="campaignFor('${c.tags.find(t => ['gold','jewelry','coins','vip'].includes(t)) || 'previous'}')">✉ Add to a campaign</button>
+      </div>
+      ${locked ? '<div class="note mt">This customer asked not to be contacted. The system blocks campaigns and booking outreach automatically.</div>' : ''}
+      <div class="tabs mt" role="tablist"><button class="${S.drawerTab === 'txns' ? 'on' : ''}" onclick="S.drawerTab='txns';renderDrawer()">Transaction history</button><button class="${S.drawerTab === 'comms' ? 'on' : ''}" onclick="S.drawerTab='comms';renderDrawer()">Communication history</button></div>
+      ${S.drawerTab === 'txns' ? tx : cm}
+      <p class="tiny muted" style="margin-top:14px">Fictional customer. Production profiles are built from your own records, with verified marketing permissions.</p>
+    </div>`;
+}
+function setStatus(id, st) {
+  const c = custById(id); const old = c.status; c.status = st;
+  c.comms.unshift({ date: iso(TODAY), ch:'Staff note', dir:'note', text:'Follow-up status changed: ' + old + ' → ' + st });
+  logActivity('☑', c.name.split(' ')[0] + ' ' + c.name.split(' ')[1][0] + '. moved to "' + st + '"');
+  renderDrawer(); renderCustomers(); renderSuggestions();
+  toast('Follow-up status updated to "' + st + '" (sample record only).');
+}
+function addNote() {
+  const v = ($('#noteInput').value || '').trim(); if (!v) return;
+  const c = custById(S.openCust); c.comms.unshift({ date: iso(TODAY), ch:'Staff note', dir:'note', text:v });
+  renderDrawer(); toast('Note added to the sample profile.');
+}
+function bookFor(id) { closeDrawer(); go('appointments'); setTimeout(() => { $('#apCust').value = id; $('#apType').focus(); flash('#apptForm'); }, 60); }
+function campaignFor(seg) { closeDrawer(); const c = S.campaigns.find(x => x.segs.includes(seg)) || S.campaigns[0]; openCampaign(c.id); }
+function flash(sel) { const el = $(sel); if (!el) return; el.classList.add('tour-focus'); setTimeout(() => { if (!tourOn) el.classList.remove('tour-focus'); }, 1400); }
+
+function openAddCustomer() {
+  $('#modalPanel').innerHTML = `<div class="panel-head"><div class="eyebrow">Customer Vault · Sample entry</div><h2>Add a fictional customer</h2><p class="small muted" style="margin-top:4px">Please use made-up details — this demo never stores or sends anything.</p></div>
+  <div class="panel-body">
+    <div class="form-2"><div class="field"><label class="lbl" for="nName">Full name *</label><input class="input" id="nName" maxlength="40" placeholder="e.g. Sam Example"></div><div class="field"><label class="lbl" for="nCity">City</label><input class="input" id="nCity" maxlength="30" value="Abingdon, VA"></div></div>
+    <div class="form-2"><div class="field"><label class="lbl" for="nSeg">Primary segment</label><select class="input" id="nSeg">${['gold','jewelry','coins','vip'].map(s => `<option value="${s}">${SEG[s].label}</option>`).join('')}</select></div><div class="field"><label class="lbl" for="nInt">Interest</label><input class="input" id="nInt" maxlength="40" placeholder="e.g. Gold chains"></div></div>
+    <label class="check"><input type="checkbox" id="nSms"> Customer gave permission for marketing texts (sample)</label>
+    <label class="check"><input type="checkbox" id="nEmail"> Customer gave permission for marketing email (sample)</label>
+    <p class="tiny muted">A fictional 555-01xx phone number and example.com email are assigned automatically.</p>
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn gold" onclick="saveCustomer()">Add to sample vault</button></div>
+  </div>`;
+  $('#modal').classList.add('show'); setTimeout(() => $('#nName').focus(), 50);
+}
+function closeModal() { $('#modal').classList.remove('show'); }
+function saveCustomer() {
+  const name = $('#nName').value.trim().replace(/\s+/g, ' ');
+  if (name.length < 3 || !name.includes(' ')) { toast('Please enter a first and last name (fictional).', '!'); $('#nName').focus(); return; }
+  const seg = $('#nSeg').value, n = ++S.nextId, id = 'n' + n;
+  const [first, ...rest] = name.split(' ');
+  const c = { id, name, city: $('#nCity').value.trim() || 'Abingdon, VA', tags:[seg], interests:[$('#nInt').value.trim() || SEG[seg].label], status:'New', lastVisit: iso(TODAY), spend:0, visits:0,
+    phone:'(276) 555-01' + String(30 + (n % 70)).padStart(2,'0'), email:(first + '.' + rest.join('')).toLowerCase().replace(/[^a-z.]/g, '') + '@example.com',
+    prefs:{ sms:$('#nSms').checked, email:$('#nEmail').checked }, since: iso(TODAY), txns:[], added:true,
+    comms:[{ date: iso(TODAY), ch:'System', dir:'note', text:'Customer added to the vault (sample entry).' }] };
+  S.customers.unshift(c); S.added++;
+  closeModal(); S.custSeg = 'all'; S.statusFilter = 'all'; S.custSearch = ''; $('#custSearch').value = '';
+  logActivity('＋', 'New customer added — ' + first + ' ' + (rest.join(' ')[0] || '') + '.');
+  renderCustomers(); renderDashboard(); renderApptForm();
+  toast(name + ' added to the sample Customer Vault. Nothing was saved outside this page.');
+  go('customers', id);
+}
+
+/* =====================================================================
+   CAMPAIGN STUDIO
+   ===================================================================== */
+const CAMP_STATUS_CLS = { Draft:'s-gray', Scheduled:'s-blue', Sending:'s-amber', Completed:'s-green' };
+function curCamp() { return S.campaigns.find(c => c.id === S.selCamp); }
+function openCampaign(id) { S.selCamp = id; S.lastResult = null; go('campaigns'); renderCampaigns(); }
+function renderCampaigns() { renderCampList(); renderCampEditor(); }
+function renderCampList() {
+  $('#campList').innerHTML = S.campaigns.map((c, i) => {
+    const last = [...S.runs].reverse().find(r => r.camp === c.id);
+    const meta = c.status === 'Scheduled' ? 'Scheduled for ' + fmtDay(c.scheduledFor) + (c.time ? ' · ' + fmtTime(c.time) : '') : last ? fmt(last.reached) + ' reached · ' + last.appts + ' appointments' : 'Not sent yet';
+    return `<button type="button" class="camp ${S.selCamp === c.id ? 'on' : ''}" onclick="S.selCamp='${c.id}';S.lastResult=null;renderCampaigns()"><div class="nm"><span>${i + 1}. ${esc(c.name)}</span><span class="status ${CAMP_STATUS_CLS[c.status]}">${c.status}${last && last.simulated && c.status === 'Completed' ? ' · sim' : ''}</span></div><div class="ds">${esc(c.segs.map(s => SEG[s].label).join(' + ') || 'No audience')} · ${CHANNEL_LABEL[c.channel]}</div><div class="ds">${esc(meta)}</div></button>`;
+  }).join('');
+}
+function mergeFirst(t) { return t.replace(/\{first\}/g, 'Jordan'); }
+function renderCampEditor() {
+  const c = curCamp(), aud = audienceFor(c.segs, c.channel), est = computeResults(c, aud);
+  const smsLen = (c.sms + ' Reply STOP to opt out.').length, segs = Math.ceil(smsLen / 160);
+  const minDate = iso(addDays(1));
+  $('#campEditor').innerHTML = `
+    <div class="card-head"><div><div class="eyebrow" style="margin:0">Editing promotion</div><h3 style="font-size:19px">${esc(c.name)}</h3></div><span class="status ${CAMP_STATUS_CLS[c.status]}">${c.status}</span></div>
+    <div class="form-2"><div class="field"><label class="lbl" for="cName">Promotion name</label><input class="input" id="cName" value="${esc(c.name)}" maxlength="50" oninput="curCamp().name=this.value||'Untitled promotion';renderCampList()"></div>
+      <div class="field"><label class="lbl" for="cChan">Channel</label><select class="input" id="cChan" onchange="curCamp().channel=this.value;S.preview=this.value==='email'?'email':this.value==='sms'?'sms':S.preview;renderCampaigns()">${Object.entries(CHANNEL_LABEL).map(([k, l]) => `<option value="${k}" ${c.channel === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+    <div class="field"><div class="lbl">Customer segments</div><div class="chips">${SEG_IDS.map(s => `<button type="button" class="chip ${c.segs.includes(s) ? 'on' : ''}" onclick="toggleSeg('${s}')">${c.segs.includes(s) ? '✓ ' : ''}${esc(SEG[s].label)} <span class="n">${fmt(SEG[s].count)}</span></button>`).join('')}</div></div>
+    <div class="aud"><div><span>Matched</span><b>${fmt(aud.matched)}</b></div><div><span>Excluded</span><b>${fmt(aud.excluded)}</b></div><div class="elig"><span>Est. audience</span><b>${fmt(aud.eligible)}</b></div><div><span>Est. cost</span><b>${money(est.cost)}</b></div></div>
+    <p class="tiny muted" style="margin:-4px 0 12px">Excluded = no marketing permission for this channel, opted out, or marked do-not-contact. Overlapping segments are counted once. Cost = message costs (sample rates) + ${money(c.budget)} promotion budget.</p>
+    <div class="grid g2" style="gap:14px">
+      <div>
+        ${c.channel !== 'email' ? `<div class="field"><label class="lbl" for="cSms">Text message <span class="muted" style="font-weight:600">· ${smsLen} chars · ${segs} segment${segs > 1 ? 's' : ''}</span></label><textarea class="input" id="cSms" maxlength="320" oninput="curCamp().sms=this.value;S.preview='sms';updatePreviewOnly()">${esc(c.sms)}</textarea><div class="tiny muted">"Reply STOP to opt out." is added automatically. {first} = customer's first name.</div></div>` : ''}
+        ${c.channel !== 'sms' ? `<div class="field"><label class="lbl" for="cSubj">Email subject</label><input class="input" id="cSubj" maxlength="80" value="${esc(c.subject)}" oninput="curCamp().subject=this.value;S.preview='email';updatePreviewOnly()"></div><div class="field"><label class="lbl" for="cBody">Email message</label><textarea class="input" id="cBody" rows="6" maxlength="900" oninput="curCamp().body=this.value;S.preview='email';updatePreviewOnly()">${esc(c.body)}</textarea></div>` : ''}
+      </div>
+      <div>
+        <div class="row between" style="margin-bottom:10px"><div class="lbl" style="margin:0">Preview</div><div class="seg-ctl">${c.channel !== 'email' ? `<button type="button" class="${S.preview === 'sms' ? 'on' : ''}" onclick="S.preview='sms';updatePreviewOnly()">Text</button>` : ''}${c.channel !== 'sms' ? `<button type="button" class="${S.preview === 'email' ? 'on' : ''}" onclick="S.preview='email';updatePreviewOnly()">Email</button>` : ''}</div></div>
+        <div id="campPreview"></div>
+      </div>
+    </div>
+    <div class="card mt" style="background:#fbf8f1;box-shadow:none;padding:14px">
+      <div class="row between"><div><b>Send or schedule</b><div class="tiny muted">Both buttons run a simulation. No texts or emails are sent to anyone.</div></div></div>
+      <div class="row mt" style="align-items:flex-end">
+        <div><label class="lbl" for="cDate">Date</label><input class="input" type="date" id="cDate" min="${minDate}" value="${c.scheduledFor || minDate}" style="width:auto"></div>
+        <div><label class="lbl" for="cTime">Time</label><select class="input" id="cTime" style="width:auto">${['09:00','10:00','11:00','12:00','13:00','14:00','16:00','17:00'].map(t => `<option value="${t}" ${c.time === t ? 'selected' : ''}>${fmtTime(t)}</option>`).join('')}</select></div>
+        <button class="btn" onclick="scheduleCampaign()" ${!c.segs.length ? 'disabled' : ''}>◷ Schedule — Simulation</button>
+        <button class="btn gold" id="sendBtn" onclick="simulateSend()" ${!c.segs.length ? 'disabled' : ''}>▶ Simulate Send Now</button>
+      </div>
+    </div>
+    <div id="campResult"></div>`;
+  updatePreviewOnly();
+  if (S.lastResult && S.lastResult.camp === c.id) renderResult(S.lastResult);
+}
+function updatePreviewOnly() {
+  const c = curCamp(); if (!c) return;
+  let mode = S.preview; if (c.channel === 'sms') mode = 'sms'; if (c.channel === 'email') mode = 'email';
+  document.querySelectorAll('#campEditor .seg-ctl button').forEach(b => b.classList.toggle('on', b.textContent.toLowerCase().startsWith(mode === 'sms' ? 'text' : 'email')));
+  const lbl = $('#campEditor label[for="cSms"] span'); if (lbl) { const l = (c.sms + ' Reply STOP to opt out.').length, sg = Math.ceil(l / 160); lbl.textContent = '· ' + l + ' chars · ' + sg + ' segment' + (sg > 1 ? 's' : ''); }
+  $('#campPreview').innerHTML = mode === 'sms'
+    ? `<div class="phone"><div class="scr"><div class="from"><b>Blue Ridge Gold &amp; Jewelry</b>Text message · Today</div><div class="sms">${esc(mergeFirst(c.sms))}\n\nReply STOP to opt out.</div><div class="sms me">${esc(c.id === 'coins' ? 'COINS' : c.id === 'vip' ? 'VIP' : c.id === 'holiday' ? 'GIFT' : c.id === 'reactivation' ? 'VISIT' : 'BOOK')}</div><div class="tiny" style="text-align:center;color:#8a8a96;margin-top:10px">Sample preview — not sent</div></div></div>`
+    : `<div class="email"><div class="eh"><div class="s">BLUE RIDGE</div><div class="t">Gold &amp; Jewelry</div></div><div class="meta"><b>Subject:</b> ${esc(mergeFirst(c.subject))}<br>To: jordan.ellis@example.com (sample)</div><div class="eb">${esc(mergeFirst(c.body))}<br><span class="cta">Reserve a time</span></div><div class="ef">${esc(BIZ.name)} · ${esc(BIZ.street)}, ${esc(BIZ.city)} · Unsubscribe · Sample preview — not sent</div></div>`;
+}
+function toggleSeg(s) { const c = curCamp(); c.segs = c.segs.includes(s) ? c.segs.filter(x => x !== s) : [...c.segs, s]; renderCampaigns(); }
+function scheduleCampaign() {
+  const c = curCamp(), d = $('#cDate').value, t = $('#cTime').value;
+  if (!d || daysFrom(d) < 1) { toast('Pick a date from tomorrow onward.', '!'); return; }
+  c.status = 'Scheduled'; c.scheduledFor = d; c.time = t;
+  logActivity('◷', '"' + c.name + '" scheduled for ' + fmtDay(d) + ' (simulation)');
+  renderCampaigns(); renderDashboard();
+  toast('Simulation: "' + c.name + '" scheduled for ' + fmtDay(d) + ' at ' + fmtTime(t) + '. Nothing will actually be sent.', '◷');
+}
+let sending = false;
+function simulateSend() {
+  if (sending) return; const c = curCamp(); if (!c.segs.length) return;
+  sending = true; const aud = audienceFor(c.segs, c.channel);
+  const steps = ['Building audience (' + fmt(aud.matched) + ' matched)', 'Removing opt-outs & do-not-contact (' + fmt(aud.excluded) + ' excluded)', 'Simulating delivery to ' + fmt(aud.eligible) + ' customers', 'Collecting sample replies & bookings'];
+  $('#campResult').innerHTML = `<div class="card mt" id="sendProgress" style="box-shadow:none"><div class="row between"><b>Running simulation…</b><span class="pill sim">NO MESSAGES SENT</span></div><div class="big-bar mt"><span id="pbar"></span></div><ul class="progress-steps" id="psteps">${steps.map(s => `<li>○ ${esc(s)}</li>`).join('')}</ul></div>`;
+  $('#sendBtn').disabled = true; $('#sendProgress').scrollIntoView({ behavior:'smooth', block:'nearest' });
+  let i = 0;
+  const tick = () => {
+    const lis = document.querySelectorAll('#psteps li');
+    lis.forEach((li, k) => { li.className = k < i ? 'done' : k === i ? 'doing' : ''; li.textContent = (k < i ? '✓ ' : k === i ? '◌ ' : '○ ') + steps[k]; });
+    $('#pbar').style.width = (i / steps.length * 100) + '%';
+    if (i++ < steps.length) setTimeout(tick, 480); else finishSend(c);
+  };
+  tick();
+}
+function finishSend(c) {
+  sending = false;
+  const run = makeRun(c, iso(TODAY), true);
+  S.runs.push(run); c.status = 'Completed'; c.scheduledFor = null;
+  const sm = S.sim; sm.campaigns++; sm.reached += run.reached; sm.engaged += run.engaged; sm.replies += run.replies; sm.appts += run.appts; sm.visits += run.visits; sm.sales += run.sales; sm.revenue += run.revenue; sm.reactivated += run.reactivated;
+  // add a few of the simulated bookings to the calendar so it visibly changes
+  const pool = S.customers.filter(x => x.status !== 'Do not contact' && x.tags.some(t => c.segs.includes(t)));
+  const type = c.id === 'coins' ? 'coins' : (c.id === 'holiday' || c.id === 'vip') ? 'jewelry' : 'gold';
+  const replies = [];
+  for (let k = 0; k < Math.min(3, pool.length); k++) {
+    const cu = pool[(k * 3 + S.runs.length) % pool.length], day = 2 + k * 2, slot = TIME_SLOTS[(k * 5 + 3) % TIME_SLOTS.length];
+    S.appts.push({ id:'a' + (++S.nextId), cust:cu.id, type, date: iso(addDays(day)), time:slot, status:'Scheduled', notes:'Booked from "' + c.name + '" (simulation)', fromSim:true });
+    replies.push({ who:cu.name, text: c.id === 'coins' ? 'COINS — what dates do you have in?' : c.id === 'vip' ? 'VIP — count me in, my wife too.' : c.id === 'holiday' ? 'Can I come look at necklaces next week?' : 'BOOK — Saturday morning works for me.', out:'Appointment booked ' + fmtDay(addDays(day)) + ' ' + fmtTime(slot), cls:'s-green' });
+  }
+  replies.push({ who:'Customer (sample)', text:'Do you pay more for 18K than 14K?', out:'Pricing question → flagged for staff (AI does not quote prices)', cls:'s-amber' });
+  replies.push({ who:'Customer (sample)', text:'STOP', out:'Opted out automatically — never messaged again', cls:'s-red' });
+  run.replyList = replies; S.lastResult = run;
+  logActivity('✉', 'Simulated "' + c.name + '": ' + run.replies + ' replies, ' + run.appts + ' appointments');
+  renderCampList(); renderResult(run); $('#sendBtn').disabled = false;
+  renderDashboard(); renderAppointments(); renderReports();
+  toast('Simulation complete — nothing was sent. Results added to Dashboard, Appointments and Reports.', '▶');
+}
+function renderResult(r) {
+  if (!$('#campResult')) return;
+  $('#campResult').innerHTML = `<div class="card mt" style="box-shadow:none;border-color:#cbe6d8;background:#fbfefc"><div class="row between"><div><b>Simulated results — ${esc(r.name)}</b><div class="tiny muted">Illustrative outcome based on sample response rates. No real customers were contacted.</div></div><span class="pill ok">✓ SIMULATION COMPLETE</span></div>
+    <div class="res-grid mt"><div><span>Reached</span><b>${fmt(r.reached)}</b></div><div><span>Engaged</span><b>${fmt(r.engaged)}</b></div><div><span>Replies</span><b>${fmt(r.replies)}</b></div><div><span>Appointments</span><b>${fmt(r.appts)}</b></div><div><span>Store visits</span><b>${fmt(r.visits)}</b></div><div><span>Sales</span><b>${fmt(r.sales)}</b></div><div><span>Attrib. revenue</span><b>${moneyK(r.revenue)}</b></div><div><span>Est. ROI</span><b>${r.roi.toFixed(1)}×</b></div></div>
+    <div class="mt"><div class="lbl">Sample responses &amp; what the system did</div>${(r.replyList || []).map(x => `<div class="reply"><div class="avatar" style="width:28px;height:28px;font-size:10px;background:${avColor(x.who)}">${esc(initials(x.who))}</div><div style="flex:1"><b>${esc(x.who)}</b>: “${esc(x.text)}”<div style="margin-top:4px"><span class="status ${x.cls}">${esc(x.out)}</span></div></div></div>`).join('')}</div>
+    <div class="row mt"><button class="btn sm" onclick="go('appointments')">View new appointments →</button><button class="btn sm" onclick="go('reports')">View in Reports →</button></div></div>`;
+}
+
+/* =====================================================================
+   APPOINTMENTS
+   ===================================================================== */
+function renderApptForm() {
+  const keepC = $('#apCust').value, keepT = $('#apType').value;
+  $('#apType').innerHTML = Object.entries(APPT_TYPES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
+  $('#apCust').innerHTML = [...S.customers].sort((a, b) => a.name.localeCompare(b.name)).map(c => `<option value="${c.id}" ${c.status === 'Do not contact' ? 'disabled' : ''}>${esc(c.name)} — ${esc(c.city)}${c.status === 'Do not contact' ? ' (do not contact)' : ''}</option>`).join('');
+  if (keepC && custById(keepC)) $('#apCust').value = keepC; if (keepT) $('#apType').value = keepT;
+  $('#apDate').min = iso(TODAY); if (!$('#apDate').value) $('#apDate').value = iso(addDays(1));
+  $('#apTime').innerHTML = TIME_SLOTS.map(t => `<option value="${t}" ${t === '11:00' ? 'selected' : ''}>${fmtTime(t)}</option>`).join('');
+  $('#apFilter').innerHTML = `<option value="all">All types</option>` + Object.entries(APPT_TYPES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
+}
+function bookAppointment() {
+  const cust = $('#apCust').value, type = $('#apType').value, date = $('#apDate').value, time = $('#apTime').value, notes = $('#apNotes').value.trim();
+  if (!date || daysFrom(date) < 0) { toast('Choose today or a future date.', '!'); return; }
+  if (daysFrom(date) > 120) { toast('For the demo, pick a date within the next few months.', '!'); return; }
+  const clash = S.appts.find(a => a.date === date && a.time === time && a.status !== 'Cancelled');
+  if (clash) { toast('That time is already taken on the sample calendar — pick another slot.', '!'); return; }
+  const c = custById(cust);
+  S.appts.push({ id:'a' + (++S.nextId), cust, type, date, time, status:'Scheduled', notes: notes || 'Booked in demo', fresh:true });
+  if (c && c.status !== 'Do not contact') { c.status = 'Appointment set'; c.comms.unshift({ date: iso(TODAY), ch:'Staff note', dir:'note', text:APPT_TYPES[type] + ' booked for ' + fmtDay(date) + ' ' + fmtTime(time) + ' (simulation)' }); }
+  $('#apNotes').value = '';
+  S.apptDay = daysFrom(date) <= 6 ? date : null;
+  logActivity('▣', APPT_TYPES[type] + ' booked — ' + (c ? c.name : 'customer') + ', ' + fmtDay(date));
+  renderAppointments(); renderDashboard(); renderCustomers();
+  toast('Simulation: ' + APPT_TYPES[type].toLowerCase() + ' booked for ' + fmtDay(date) + ' at ' + fmtTime(time) + '. No confirmation was sent.', '▣');
+}
+function setApptStatus(id, st) {
+  const a = S.appts.find(x => x.id === id); a.status = st;
+  const c = custById(a.cust);
+  logActivity('▣', (c ? c.name : 'Appointment') + ' — ' + st.toLowerCase());
+  renderAppointments(); renderDashboard();
+  toast('Appointment marked "' + st + '" (sample calendar only).');
+}
+function renderAppointments() {
+  const up = upcomingAppts(), todayN = S.appts.filter(a => daysFrom(a.date) === 0 && a.status !== 'Cancelled').length;
+  const wk = S.appts.filter(a => daysFrom(a.date) >= 0 && daysFrom(a.date) <= 6 && a.status !== 'Cancelled');
+  const conf = wk.filter(a => ['Confirmed','Checked in','Completed'].includes(a.status)).length;
+  $('#apptKpis').innerHTML = [['Upcoming', up.length, 'Scheduled, confirmed or checked in'], ['Today', todayN, TODAY.toLocaleDateString('en-US', { weekday:'long' })], ['Next 7 days', wk.length, 'All appointment types'], ['Confirmed', wk.length ? pct(conf / wk.length, 0) : '—', 'Of this week\'s appointments']].map(k => `<div class="kpi"><div class="k-label">${k[0]}</div><div class="k-val">${k[1]}</div><div class="k-foot">${k[2]}</div></div>`).join('');
+  const typeKey = t => t === 'gold' ? 't-gold' : t === 'jewelry' ? 't-jewelry' : t === 'coins' ? 't-coins' : 't-follow';
+  let wg = '';
+  for (let i = 0; i < 7; i++) {
+    const d = iso(addDays(i)), list = S.appts.filter(a => a.date === d && (S.apptType === 'all' || a.type === S.apptType)).sort((a, b) => a.time.localeCompare(b.time));
+    wg += `<button type="button" class="day ${i === 0 ? 'today' : ''} ${S.apptDay === d ? 'sel' : ''}" onclick="S.apptDay='${d}';renderAppointments()"><span class="dn">${i === 0 ? 'TODAY' : addDays(i).toLocaleDateString('en-US', { weekday:'short' }).toUpperCase()}</span><span class="dd">${addDays(i).getDate()}</span>${list.slice(0, 4).map(a => { const c = custById(a.cust); return `<span class="ev ${typeKey(a.type)} ${a.status === 'Cancelled' ? 'cancel' : ''}" title="${esc(APPT_TYPES[a.type])}">${shortTime(a.time)} ${esc(c ? c.name.split(' ')[0] : '')}</span>`; }).join('')}${list.length > 4 ? `<span class="tiny muted">+${list.length - 4} more</span>` : ''}${!list.length ? '<span class="tiny muted">Open</span>' : ''}</button>`;
+  }
+  $('#weekGrid').innerHTML = wg;
+  $('#apFilter').value = S.apptType;
+  let rows = S.appts.filter(a => (S.apptType === 'all' || a.type === S.apptType) && (S.apptDay ? a.date === S.apptDay : daysFrom(a.date) >= -3)).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  $('#apListTitle').textContent = S.apptDay ? 'Appointments — ' + fmtDay(S.apptDay) : 'All appointments';
+  $('#apptTable').innerHTML = `<table><thead><tr><th>When</th><th>Customer</th><th>Type</th><th>Notes</th><th>Status</th></tr></thead><tbody>${rows.length ? rows.map(a => { const c = custById(a.cust); return `<tr><td class="small"><b>${daysFrom(a.date) === 0 ? 'Today' : fmtDay(a.date)}</b><br>${fmtTime(a.time)}${a.fresh || a.fromSim ? ' <span class="status s-amber" style="font-size:10px">NEW · SIM</span>' : ''}</td><td>${c ? `<a href="#customers/${c.id}" style="color:inherit;font-weight:700">${esc(c.name)}</a>` : '—'}</td><td class="small">${esc(APPT_TYPES[a.type])}</td><td class="small muted">${esc(a.notes || '')}</td><td><select class="mini" aria-label="Appointment status" onchange="setApptStatus('${a.id}',this.value)">${APPT_STATUSES.map(s => `<option ${s === a.status ? 'selected' : ''}>${s}</option>`).join('')}</select></td></tr>`; }).join('') : '<tr><td colspan="5"><div class="empty">No appointments for this day — use the form to book one.</div></td></tr>'}</tbody></table>`;
+}
+
+/* =====================================================================
+   AI RECEPTIONIST (scripted simulation — no AI service is called)
+   ===================================================================== */
+const AI_PROMPTS = ['Do you buy gold jewelry?', 'Can I bring in coins?', 'How do I schedule an evaluation?', 'Are you open seven days a week?', 'How much will you pay for my ring?', 'Where are you located?', 'Do you sell engagement rings?'];
+const AI_RULES = [
+  { re:/(how much|price|pay|worth|value|offer|quote|per gram|spot)/i, a:'Great question. Every item is different — gold value depends on weight, purity and condition, so our team evaluates it in person and explains any offer face to face. I can\'t quote prices or valuations here, but I can set up a free evaluation or have a team member call you. Which would you prefer?', interest:'Gold seller', intent:'Pricing / valuation question', next:'Human follow-up — team member to call back', handoff:true },
+  { re:/(open|hours|seven days|7 days|sunday|saturday|close|closing)/i, a:'I want to make sure you get the correct hours, so I\'ve asked a team member to confirm today\'s hours with you. You can also call the store directly. Would you like me to request an appointment time while I have you?', interest:'General', intent:'Store hours', next:'Owner-approved hours are loaded before launch; staff confirms meanwhile', handoff:true },
+  { re:/(schedul|appointment|book|evaluation|come in|visit)/i, a:'Happy to help! Evaluations are done in the store and there\'s no obligation. Tell me what you plan to bring (for example: rings, chains, coins) and a day that works, and I\'ll request a time for you. A team member confirms every request.', interest:'Gold seller', intent:'Wants an evaluation appointment', next:'Offer appointment — gold evaluation', handoff:false, book:'gold' },
+  { re:/(coin|silver dollar|proof|bullion|eagle|morgan|collect)/i, a:'Yes — you\'re welcome to bring coins in. A team member will look at them with you in person. Is it a few coins or a larger collection? If you\'d like, I can set up a coin appointment so someone is ready for you.', interest:'Coin collector', intent:'Bringing coins in', next:'Offer appointment — coin collection', handoff:false, book:'coins' },
+  { re:/(buy gold|sell gold|gold jewelry|scrap|broken|sell my|gold chain|do you buy)/i, a:'Yes, Blue Ridge Gold & Jewelry buys gold jewelry — including broken or unwanted pieces. Everything is evaluated in person, so I can\'t quote an amount here. Would you like me to request a free in-store evaluation?', interest:'Gold seller', intent:'Selling gold jewelry', next:'Offer appointment — gold evaluation', handoff:false, book:'gold' },
+  { re:/(engagement|ring|diamond|necklace|bracelet|earring|gift|jewelry)/i, a:'We\'d love to help you find the right piece. I can set up a jewelry consultation so a team member can show you options in person. Is this for a special occasion?', interest:'Jewelry buyer', intent:'Shopping for jewelry', next:'Offer appointment — jewelry consultation', handoff:false, book:'jewelry' },
+  { re:/(where|located|address|directions|location)/i, a:'We\'re at ' + BIZ.street + ', ' + BIZ.city + '. Would you like me to set up a time to stop by?', interest:'General', intent:'Location / directions', next:'Offer appointment', handoff:false }
+];
+const AI_FALLBACK = { a:'Thanks for asking — I want to make sure you get the right answer, so I\'ve passed this to a team member who will follow up with you. Is a text to this number okay?', interest:'General', intent:'Unrecognized question', next:'Human follow-up', handoff:true };
+function resetChat(silent) {
+  S.chat = [{ who:'bot', t:'Hi! Thanks for contacting Blue Ridge Gold & Jewelry. I\'m the virtual assistant. Are you looking to sell gold, shop for jewelry, or ask about coins?' }];
+  S.inquiry = null; renderChat(); renderCapture(); if (!silent) toast('New sample conversation started.');
+}
+function renderChat() {
+  $('#chat').innerHTML = `<div class="msg sys">Simulation · scripted responses · no AI service or customer is connected</div>` + S.chat.map(m => m.who === 'typing' ? `<div class="msg bot"><span class="typing"><i></i><i></i><i></i></span></div>` : `<div class="msg ${m.who}">${m.who === 'bot' ? '<div class="who-l">BLUE RIDGE ASSISTANT · DEMO</div>' : ''}${esc(m.t)}</div>`).join('');
+  $('#chat').scrollTop = $('#chat').scrollHeight;
+  $('#aiChips').innerHTML = AI_PROMPTS.map((p, i) => `<button type="button" class="chip" onclick="askAI(AI_PROMPTS[${i}])">${esc(p)}</button>`).join('');
+}
+let aiBusy = false;
+function askAI(text) {
+  if (aiBusy) return;
+  const q = (text || $('#aiInput').value).trim(); if (!q) return;
+  $('#aiInput').value = ''; aiBusy = true;
+  S.chat.push({ who:'user', t:q }); S.chat.push({ who:'typing' }); renderChat();
+  const rule = AI_RULES.find(r => r.re.test(q)) || AI_FALLBACK;
+  setTimeout(() => {
+    S.chat = S.chat.filter(m => m.who !== 'typing'); S.chat.push({ who:'bot', t:rule.a });
+    const prev = S.inquiry || { interests:[], questions:0 };
+    const interests = [...new Set([...prev.interests, rule.interest].filter(x => x !== 'General'))];
+    S.inquiry = { interests, intent:rule.intent, next:rule.next, handoff:rule.handoff || prev.handoff, book:rule.book || prev.book, questions:prev.questions + 1, last:q };
+    aiBusy = false; renderChat(); renderCapture();
+  }, 750);
+}
+function renderCapture() {
+  const i = S.inquiry;
+  $('#captureCard').innerHTML = `<div class="card-head"><h3>Inquiry captured automatically</h3><span class="pill sim">SAMPLE</span></div>` + (i ? `<dl>
+    <dt>Contact</dt><dd>Web chat visitor (sample)</dd>
+    <dt>Interest</dt><dd>${i.interests.length ? i.interests.map(x => `<span class="tag ${x === 'Gold seller' ? 'gold' : x === 'Coin collector' ? 'coins' : 'jewelry'}">${esc(x)}</span>`).join('') : '<span class="muted">Not yet identified</span>'}</dd>
+    <dt>Latest intent</dt><dd>${esc(i.intent)}</dd>
+    <dt>Recommended</dt><dd>${esc(i.next)}</dd>
+    <dt>Human follow-up</dt><dd>${i.handoff ? '<span class="status s-amber">Yes — flagged for staff</span>' : '<span class="status s-green">Not needed yet</span>'}</dd>
+    <dt>Questions</dt><dd>${i.questions}</dd></dl>
+    <div class="row mt"><button class="btn gold sm" onclick="aiOfferAppt()">▣ Offer appointment</button><button class="btn sm" onclick="aiFlag()">⚑ Flag for staff follow-up</button></div>`
+    : `<p class="small muted">Ask a question on the left. The assistant identifies what the customer is interested in, what they want to do next and whether a person should follow up — and logs it to the Customer Vault.</p>`);
+}
+function aiOfferAppt() {
+  const type = (S.inquiry && S.inquiry.book) || 'gold';
+  S.chat.push({ who:'bot', t:'I can request a ' + APPT_TYPES[type].toLowerCase() + ' for you. A team member will confirm the time. (Demo: continuing in the Appointment Center.)' }); renderChat();
+  logActivity('✦', 'AI receptionist offered a ' + APPT_TYPES[type].toLowerCase());
+  setTimeout(() => { go('appointments'); $('#apType').value = type; $('#apNotes').value = 'Requested via AI receptionist (sample)'; flash('#apptForm'); toast('Appointment form pre-filled from the conversation — choose a customer, date and time.', '✦'); }, 500);
+}
+function aiFlag() {
+  if (S.inquiry) S.inquiry.handoff = true; renderCapture();
+  logActivity('⚑', 'AI conversation flagged for staff follow-up');
+  toast('Simulation: flagged for a team member. In production, staff get an alert — no alert was sent from this demo.', '⚑');
+}
+
+/* =====================================================================
+   INVENTORY & PROMOTIONS
+   ===================================================================== */
+function catInterest(cat) { return cat.base + S.customers.filter(c => c.added && c.tags.includes(cat.seg)).length; }
+function renderInventory() {
+  $('#catGrid').innerHTML = INVENTORY_CATS.map(c => `<div class="cat"><div class="ci">${glyph(c.glyph, 30)}</div><div style="flex:1"><b>${esc(c.name)}</b><div class="tiny muted">${fmt(catInterest(c))} interested customers · ${ITEMS.filter(i => i.cat === c.id).length} featured sample items</div></div><button class="btn sm" onclick="targetSeg('${c.seg}')">Target →</button></div>`).join('');
+  $('#itemGrid').innerHTML = ITEMS.map(it => { const cat = INVENTORY_CATS.find(c => c.id === it.cat); return `<div class="item"><div class="art"><span class="badge tag gold">${esc(it.tag)}</span>${glyph(it.glyph, 64)}</div><div class="bd"><h4>${esc(it.name)}</h4><div class="tiny muted">${esc(cat.name)} · sample item · pricing managed in store</div><div class="row between" style="margin-top:auto;padding-top:8px"><label class="row small" style="gap:8px;cursor:pointer"><button type="button" class="toggle ${S.featured[it.id] ? 'on' : ''}" onclick="toggleFeatured('${it.id}')" aria-label="Featured"></button>${S.featured[it.id] ? 'Featured' : 'Not featured'}</label><button class="btn sm gold" onclick="notifyItem('${it.id}')">Notify ${fmt(catInterest(cat))}</button></div></div></div>`; }).join('');
+  $('#promoList').innerHTML = S.promos.map(p => `<div class="row between" style="padding:11px 0;border-bottom:1px solid var(--line-2);flex-wrap:nowrap"><div><b class="small">${esc(p.title)}</b><div class="tiny muted">Audience: ${esc(p.audience)}</div></div><div class="row" style="flex-wrap:nowrap"><span class="status ${p.active ? 's-green' : 's-gray'}">${p.active ? 'Active' : 'Paused'}</span><button type="button" class="toggle ${p.active ? 'on' : ''}" onclick="togglePromo('${p.id}')" aria-label="Toggle promotion"></button></div></div>`).join('');
+  const lists = [['Morgan & Peace dollar collectors', 96, 'coins'], ['Gold coin & bullion buyers', 132, 'coins'], ['Engagement & bridal shoppers', 118, 'jewelry'], ['Estate jewelry fans', 148, 'jewelry'], ['Gold sellers waiting on a bonus event', 214, 'gold']];
+  const max = Math.max(...lists.map(l => l[1]));
+  $('#interestLists').innerHTML = lists.map(l => `<div class="mini-bar" style="grid-template-columns:minmax(0,1.3fr) 1fr 40px"><span>${esc(l[0])}</span><div class="bar ${l[2] === 'gold' ? '' : 'navy'}"><span style="width:${l[1] / max * 100}%"></span></div><b style="text-align:right">${l[1]}</b></div>`).join('') + '<p class="tiny muted" style="margin-top:8px">Built automatically from what customers buy, sell and ask about. Sample counts.</p>';
+}
+function toggleFeatured(id) { S.featured[id] = !S.featured[id]; renderInventory(); toast(ITEMS.find(i => i.id === id).name + (S.featured[id] ? ' is now featured (sample).' : ' removed from featured (sample).')); }
+function togglePromo(id) { const p = S.promos.find(x => x.id === id); p.active = !p.active; logActivity('✦', 'Promotion ' + (p.active ? 'activated' : 'paused') + ': ' + p.title); renderInventory(); renderDashboard(); toast('Promotion ' + (p.active ? 'activated' : 'paused') + ' (sample only).'); }
+function targetSeg(seg) { const c = S.campaigns.find(x => x.segs.includes(seg) && x.segs.length === 1) || S.campaigns.find(x => x.segs.includes(seg)); openCampaign(c.id); toast('Opened a matching campaign for ' + SEG[seg].label.toLowerCase() + '.', '✉'); }
+function notifyItem(id) {
+  const it = ITEMS.find(i => i.id === id), cat = INVENTORY_CATS.find(c => c.id === it.cat);
+  const c = S.campaigns.find(x => x.id === (cat.seg === 'coins' ? 'coins' : cat.seg === 'gold' ? 'gold' : 'holiday'));
+  if (cat.seg === 'coins') c.sms = 'Collector alert from Blue Ridge Gold & Jewelry: just in — ' + it.name + '. Reply COINS to set a viewing time before it goes in the case.';
+  else { c.subject = 'Just arrived: ' + it.name; c.body = 'Hi {first},\n\nYou told us you\'re interested in ' + cat.name.toLowerCase() + ', so you\'re hearing about this first: ' + it.name + ' just arrived at Blue Ridge Gold & Jewelry.\n\nReply or book a time to see it in person.'; }
+  openCampaign(c.id); toast('Campaign pre-filled for "' + it.name + '" — review it and run the simulation.', '✉');
+}
+
+/* =====================================================================
+   REPORTS
+   ===================================================================== */
+function renderReports() {
+  const R = S.runs, sum = k => R.reduce((a, r) => a + r[k], 0);
+  const T = { reached:sum('reached'), replies:sum('replies'), appts:sum('appts'), visits:sum('visits'), reactivated:sum('reactivated'), sales:sum('sales'), revenue:sum('revenue'), cost:sum('cost') };
+  T.roi = T.cost ? (T.revenue - T.cost) / T.cost : 0;
+  const tiles = [['Campaign reach', fmt(T.reached), 'Customers who received a message'], ['Replies', fmt(T.replies), pct(T.replies / (T.reached || 1)) + ' reply rate'], ['Appointments', fmt(T.appts), pct(T.appts / (T.replies || 1), 0) + ' of replies booked'], ['Store visits', fmt(T.visits), 'Kept appointments + walk-ins'], ['Reactivated customers', fmt(T.reactivated), 'Back after 6+ months'], ['Recorded sales', fmt(T.sales), pct(T.sales / (T.visits || 1), 0) + ' of visits'], ['Attributed revenue', money(T.revenue), 'Sales × avg. sale value'], ['Promotional cost', money(T.cost), 'Messaging + promotion budgets'], ['Estimated ROI', T.roi.toFixed(1) + '×', '(Revenue − cost) ÷ cost']];
+  $('#reportTiles').innerHTML = tiles.map((t, i) => `<div class="kpi ${i === 8 ? 'featured' : ''}"><div class="k-label">${t[0]}</div><div class="k-val">${t[1]}</div><div class="k-foot">${t[2]}</div></div>`).join('');
+  $('#runCount').textContent = R.length + ' campaign run' + (R.length === 1 ? '' : 's') + (S.sim.campaigns ? ' · includes ' + S.sim.campaigns + ' you simulated' : '');
+  const sorted = [...R].sort((a, b) => b.date.localeCompare(a.date));
+  $('#reportTable').innerHTML = `<table><thead><tr><th>Campaign</th><th>Date</th><th class="num">Reach</th><th class="num">Replies</th><th class="num">Appts</th><th class="num">Visits</th><th class="num">Reactiv.</th><th class="num">Sales</th><th class="num">Revenue</th><th class="num">Cost</th><th class="num">ROI</th></tr></thead><tbody>${sorted.map(r => `<tr><td><b>${esc(r.name)}</b>${r.simulated ? ' <span class="status s-amber" style="font-size:10px">SIM</span>' : ''}<div class="tiny muted">${CHANNEL_LABEL[r.channel]}</div></td><td class="small">${fmtDate(r.date)}</td><td class="num">${fmt(r.reached)}</td><td class="num">${fmt(r.replies)}</td><td class="num">${fmt(r.appts)}</td><td class="num">${fmt(r.visits)}</td><td class="num">${fmt(r.reactivated)}</td><td class="num">${fmt(r.sales)}</td><td class="num">${money(r.revenue)}</td><td class="num">${money(r.cost)}</td><td class="num"><b>${r.roi.toFixed(1)}×</b></td></tr>`).join('')}</tbody><tfoot><tr><td>Total</td><td></td><td class="num">${fmt(T.reached)}</td><td class="num">${fmt(T.replies)}</td><td class="num">${fmt(T.appts)}</td><td class="num">${fmt(T.visits)}</td><td class="num">${fmt(T.reactivated)}</td><td class="num">${fmt(T.sales)}</td><td class="num">${money(T.revenue)}</td><td class="num">${money(T.cost)}</td><td class="num">${T.roi.toFixed(1)}×</td></tr></tfoot></table>`;
+  const steps = [['Reached', T.reached], ['Engaged', sum('engaged')], ['Replied', T.replies], ['Booked', T.appts], ['Visited store', T.visits], ['Purchased / sold', T.sales]];
+  $('#funnel').innerHTML = steps.map(s => `<div class="fstep"><span class="strong">${s[0]}</span><div><div class="fb" style="width:${Math.max(1.5, s[1] / (T.reached || 1) * 100)}%"></div></div><b style="text-align:right">${fmt(s[1])}</b></div>`).join('') + `<p class="tiny muted" style="margin-top:6px">Each step is a count of customers; bars are scaled to reach.</p>`;
+  const byC = {}; R.forEach(r => { byC[r.name] = byC[r.name] || { rev:0, cost:0 }; byC[r.name].rev += r.revenue; byC[r.name].cost += r.cost; });
+  const mx = Math.max(1, ...Object.values(byC).map(x => x.rev));
+  $('#roiBars').innerHTML = Object.entries(byC).map(([n, v]) => `<div style="margin:10px 0"><div class="row between small"><b>${esc(n)}</b><span class="muted">${money(v.rev)} revenue · ${money(v.cost)} cost</span></div><div class="bar" style="margin-top:6px;height:10px"><span style="width:${v.rev / mx * 100}%"></span></div><div class="bar navy" style="margin-top:4px;height:6px"><span style="width:${Math.max(1, v.cost / mx * 100)}%"></span></div></div>`).join('') + '<div class="legend"><span><i style="background:#c9a24a"></i>Attributed revenue</span><span><i style="background:#2a4a78"></i>Promotional cost</span></div>';
+}
+
+/* =====================================================================
+   POSTERS
+   ===================================================================== */
+const FLOW = [
+  ['Customer information', 'Import your existing customer list, receipts and contact details into one secure vault.'],
+  ['Customer segmentation', 'Group customers automatically: gold sellers, jewelry buyers, coin collectors, VIP, inactive.'],
+  ['Promotional campaigns', 'Send the right promotion to the right group by text or email — with permission built in.'],
+  ['Customer responses', 'Replies are answered or routed instantly; the AI handles common questions.'],
+  ['Appointments', 'Interested customers book gold evaluations, consultations and coin appointments.'],
+  ['Store visits', 'Check-ins are tracked so you know who actually came through the door.'],
+  ['Follow-up', 'Automatic reminders, thank-yous and next-visit nudges keep relationships warm.'],
+  ['Revenue reporting', 'See which promotions produced visits, sales and return on investment.']
+];
+const PHASES = [
+  ['PHASE 1 · FIRST PRIORITY', 'Customer Vault & Reactivation', ['Import and clean your existing customer data', 'De-duplicate and verify marketing permissions', 'Segment by gold, jewelry, coins, VIP, inactive', 'Launch the first previous-customer reactivation']],
+  ['PHASE 2', 'Campaign Studio, AI & Appointments', ['Ready-to-use promotion templates', 'AI receptionist for common questions', 'Appointment booking and reminders', 'Human hand-off for pricing and offers']],
+  ['PHASE 3', 'Inventory Alerts & Referrals', ['New-arrival alerts to interested collectors', 'Referral tracking and thank-yous', 'Ongoing seasonal promotions calendar', 'Featured item management']],
+  ['PHASE 4', 'Revenue Attribution & Optimization', ['Connect sales to the promotions that drove them', 'Owner reporting and ROI by campaign', 'Test and improve message performance', 'Monthly review and optimization']]
+];
+function renderPosters() {
+  $('#flow').innerHTML = FLOW.map((f, i) => `<div class="fnode ${i === FLOW.length - 1 ? 'last' : ''}"><div class="n">${String(i + 1).padStart(2, '0')}</div><h3>${esc(f[0])}</h3><p>${esc(f[1])}</p></div>`).join('');
+  $('#phases').innerHTML = PHASES.map((p, i) => `<div class="phase ${i === 0 ? 'first' : ''}"><div class="ph">${p[0]}</div><h3>${esc(p[1])}</h3><ul>${p[2].map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('');
+}
+function printPoster(kind) {
+  const v = $('#v-' + kind); document.body.classList.add('poster-print'); v.classList.add('print-me');
+  const done = () => { document.body.classList.remove('poster-print'); v.classList.remove('print-me'); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done); window.print(); setTimeout(done, 1500);
+}
+function presentPoster(id) {
+  const el = $('#' + id);
+  if (el.requestFullscreen) el.requestFullscreen().catch(() => toast('Full screen isn\'t available in this browser — use Print / Save PDF instead.', '!'));
+  else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  else toast('Full screen isn\'t available in this browser — use Print / Save PDF instead.', '!');
+}
+
+/* =====================================================================
+   GUIDED TOUR
+   ===================================================================== */
+const TOUR = [
+  ['dashboard', '#kpiGrid', 'Your Business Dashboard', 'See what\'s happening in your store — customers, returning visitors, active promotions, appointments and sales, all on one screen.', 'Try it: switch between 7 days, 30 days, 90 days and 12 months at the top and watch every number and chart change.'],
+  ['customers', '#custCard', 'Your Customer Vault', 'Keep customer relationships organized. Every customer is grouped by what they buy, sell or collect, with history and contact preferences.', 'Try it: click "Coin collectors", search a name, or open a customer to see their transactions and change their follow-up status.'],
+  ['campaigns', '#campEditor', 'Bring Customers Back', 'Create targeted promotions for previous customers. Choose who should hear about it, edit the message and preview the text or email.', 'Try it: pick "Previous Customer Reactivation", then press "Simulate Send Now" to see replies and appointments roll in. Nothing is actually sent.'],
+  ['ai', '#aiCard', 'Automate Communication', 'An AI assistant answers common questions, captures what the customer wants and recommends when a person should follow up — it never quotes prices.', 'Try it: tap "Do you buy gold jewelry?" or "Can I bring in coins?" and watch the inquiry get captured on the right.'],
+  ['appointments', '#apptForm', 'Schedule Visits', 'Gold evaluations, jewelry consultations and coin appointments in one calendar, with confirmations and status tracking.', 'Try it: choose a customer, a date and a time, then press "Book appointment — Simulation".'],
+  ['reports', '#reportTiles', 'Track Results', 'Understand which promotions generate business: reach, replies, appointments, store visits, sales, revenue, cost and return on investment.', 'Every simulated campaign you ran is already included here.']
+];
+let tourOn = false, tourI = 0;
+function startTour() { tourOn = true; tourI = 0; showTour(); }
+function showTour() {
+  document.querySelectorAll('.tour-focus').forEach(e => e.classList.remove('tour-focus'));
+  const [scr, sel, title, text, tryIt] = TOUR[tourI];
+  go(scr);
+  $('#tourStep').textContent = 'STEP ' + (tourI + 1) + ' OF ' + TOUR.length;
+  $('#tourTitle').textContent = title; $('#tourText').textContent = text; $('#tourTry').textContent = tryIt;
+  $('#tourDots').innerHTML = TOUR.map((_, i) => `<i class="${i <= tourI ? 'on' : ''}"></i>`).join('');
+  $('#tourBack').disabled = tourI === 0;
+  $('#tourNext').textContent = tourI === TOUR.length - 1 ? 'Finish ✓' : 'Next →';
+  $('#tour').classList.add('show');
+  setTimeout(() => { const el = $(sel); if (el) { el.classList.add('tour-focus'); el.scrollIntoView({ behavior:'smooth', block: window.innerWidth < 900 ? 'start' : 'center' }); } }, 80);
+}
+function tourMove(d) {
+  if (d > 0 && tourI === TOUR.length - 1) { endTour(false, true); return; }
+  tourI = Math.max(0, Math.min(TOUR.length - 1, tourI + d)); showTour();
+}
+function endTour(skipped, finished) {
+  tourOn = false; $('#tour').classList.remove('show');
+  document.querySelectorAll('.tour-focus').forEach(e => e.classList.remove('tour-focus'));
+  if (skipped) { go('dashboard'); toast('Tour skipped — restart it any time with "Take the Interactive Tour".', '▶'); }
+  else if (finished) toast('That\'s the tour! Explore any screen from the menu — everything is clickable.', '✓');
+}
+
+/* =====================================================================
+   RESET & BOOT
+   ===================================================================== */
+function renderAll() { renderDashboard(); renderCustomers(); renderCampaigns(); renderApptForm(); renderAppointments(); renderChat(); renderCapture(); renderInventory(); renderReports(); }
+function resetDemo() {
+  if (sending) return;
+  closeDrawer(true); closeModal();
+  S = initState(); resetChat(true);
+  $('#custSearch').value = ''; $('#apDate').value = ''; $('#apNotes').value = '';
+  renderAll(); route();
+  toast('Demo reset — all sample records restored. Nothing outside this page was ever changed.', '↺');
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); closeDrawer(); toggleMenu(false); } });
+window.addEventListener('hashchange', route);
+buildNav(); renderPosters();
+S = initState(); resetChat(true); renderAll(); route();
 </script>
-</body></html>
+</body>
+</html>
