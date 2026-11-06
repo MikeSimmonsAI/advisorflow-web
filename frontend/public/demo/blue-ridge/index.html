@@ -436,7 +436,7 @@ select.mini{border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-
 
 <div class="app">
   <aside class="sidebar" id="sidebar" aria-label="Main navigation">
-    <div class="brand">
+    <div class="brand" role="link" tabindex="0" title="Back to the dashboard" style="cursor:pointer" onclick="go('dashboard')" onkeydown="if(event.key==='Enter')go('dashboard')">
       <svg width="44" height="34" viewBox="0 0 90 68" fill="none" aria-hidden="true"><path d="M3 52 30 20l14 12 15-24 28 44-20-7-11-14-12 11-12-10-12 20Z" stroke="#dfbf6e" stroke-width="4.5" stroke-linejoin="round"/><path d="M8 60h76" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg>
       <div class="brand-name">Blue Ridge<small>GOLD &amp; JEWELRY</small></div>
     </div>
@@ -455,6 +455,7 @@ select.mini{border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-
     <header class="topbar">
       <div class="row" style="gap:10px;min-width:0">
         <button class="btn sm menu-btn" onclick="toggleMenu(true)" aria-label="Open menu">☰</button>
+        <button class="btn sm" id="homeBtn" onclick="go('dashboard')" aria-label="Back to dashboard" title="Back to the dashboard">⌂</button>
         <div class="crumb"><span class="hide-m">BLUE RIDGE GOLD &amp; JEWELRY&nbsp;/&nbsp;</span><b id="crumb">DASHBOARD</b></div>
       </div>
       <div class="top-actions">
