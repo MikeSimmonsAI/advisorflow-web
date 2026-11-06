@@ -1247,6 +1247,12 @@ from app.routers.deal_room_staff_router import router as deal_room_staff_router 
 app.include_router(deal_room_public_router)     # /investor/invite/*, /investor/auth/login - Deal Room (#415)
 app.include_router(deal_room_investor_router)   # /investor/* - investors only (fenced in deps)
 app.include_router(deal_room_staff_router)      # /wholesale/deal-room/* - staff
+from app.routers.volt_router import ops_router as volt_ops_router  # noqa: E402
+from app.routers.volt_router import public_router as volt_public_router  # noqa: E402
+from app.routers.volt_router import rep_router as volt_rep_router  # noqa: E402
+app.include_router(volt_public_router)   # /volt/public/{slug}/* - VOLT Marketing applicant portal (#535)
+app.include_router(volt_rep_router)      # /volt/rep/{slug}/* - VOLT applicants (volt_rep fenced in deps)
+app.include_router(volt_ops_router)      # /volt/ops/{org_id}/* - VOLT recruiting staff + owner
 from app.routers.wholesale_intel_router import router as wholesale_intel_router  # noqa: E402
 app.include_router(wholesale_intel_router)       # /wholesale/intel/* - verification, underwriting, report (#415)
 from app.routers.wholesale_canvass_router import router as wholesale_canvass_router  # noqa: E402
