@@ -92,16 +92,21 @@ test('accent button colours meet WCAG AA (4.5:1) against white text', () => {
   for (const [, v, hex] of strong) assert.ok(ratio(hex, '#ffffff') >= 4.5, v + ' ' + hex + ' ' + ratio(hex, '#ffffff').toFixed(2))
 })
 
-test('a new kind of business gets a full neutral card, under its own name, only if the server listed it', () => {
-  const c = { workspace_contexts: [...all.workspace_contexts, W('solar', 'Bright Solar Co', { industry: 'solar' })],
+test('a new kind of business gets a full card, under its own name, only if the server listed it', () => {
+  // Owner direction (2026-11-05): cards show artwork for the business's own
+  // industry where one exists (solar -> energy); an industry with no artwork
+  // yet keeps the neutral EvoSys look (2026-10-21).
+  const c = { workspace_contexts: [...all.workspace_contexts, W('solar', 'Bright Solar Co', { industry: 'solar' }),
+                                   W('dent', 'Smile Dental', { industry: 'dental' })],
               product_contexts: all.product_contexts }
   const { visible, others } = programCards(c)
   const card = visible.find(x => x.organization_id === 'solar')
   assert.ok(card, 'new business shown as a card')
-  assert.equal(card.variant, 'general')
+  assert.equal(card.variant, 'energy')
+  assert.equal(visible.find(x => x.organization_id === 'dent').variant, 'general')
   assert.equal(card.display, 'Bright Solar Co')
   assert.ok(card.kind && card.summary && card.facts.length)
   assert.deepEqual(others, [])
-  assert.equal(visible.at(-1).organization_id, 'solar', 'sorts after the named programs')
+  assert.ok(['solar', 'dent'].includes(visible.at(-1).organization_id), 'sorts after the named programs')
   assert.equal(programCards(all).visible.some(x => x.organization_id === 'solar'), false)
 })

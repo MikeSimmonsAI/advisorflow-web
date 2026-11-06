@@ -6,6 +6,8 @@
  * never becomes a card. Each authorized workspace is shown as the program it
  * runs (server `experience`, then its program route / industry).
  */
+import { variantForIndustry } from '../../design/art/industryVariant.js'
+
 const PROGRAMS = {
   sci: { rank: 1, variant: 'sci', symbol: '✦', kind: 'SCI · FAMILY SERVICES',
          summary: 'Families, conversations, appointments and outreach',
@@ -45,9 +47,8 @@ const PROGRAMS = {
           summary: 'Applicants, reviews, referrals, Zoom sessions and reports',
           facts: ['Applicants', 'Referrals', 'Zoom Sessions'] },
   // EvoSys Gold & Jewelry (gold buyers, jewelry stores, coin dealers). The
-  // card keeps the business's own name; its artwork is the neutral EvoSys look
-  // until the industry artwork is approved through the redesign lane.
-  jewelry: { rank: 6, variant: 'general', symbol: '◇', kind: 'GOLD & JEWELRY · BUSINESS WORKSPACE',
+  // card keeps the business's own name; navy & gold artwork (redesign lane).
+  jewelry: { rank: 6, variant: 'gold', symbol: '◇', kind: 'GOLD & JEWELRY · BUSINESS WORKSPACE',
              summary: 'Customers, appointments, promotions, inventory and results',
              facts: ['Customer Vault', 'Appointments', 'Promotions'] },
   business: { rank: 7, variant: 'general', symbol: '◈', kind: 'BUSINESS OPERATIONS',
@@ -136,7 +137,10 @@ export function programCards(ctx) {
       continue
     }
     const kind = program === 'business' ? businessKind(w.industry) : p.kind
-    cards.push({ ...w, program, variant: p.variant, symbol: p.symbol, rank: p.rank, kind, facts: p.facts,
+    // A general business shows artwork for the industry the server recorded
+    // (organizations.industry) - never chosen by the business's name.
+    const variant = program === 'business' ? variantForIndustry(w.industry, p.variant) : p.variant
+    cards.push({ ...w, program, variant, symbol: p.symbol, rank: p.rank, kind, facts: p.facts,
                  display: displayName(program, w), summary: p.summary,
                  orgLabel: displayName(program, w) === w.organization_name ? null : w.organization_name })
   }
@@ -240,7 +244,8 @@ export function previewCards(ctx) {
     const display = previewName(p)
     const facts = [p.stage_label, p.proposal_sent ? 'Proposal sent' : null,
                    p.demo_slot === 'platform' ? 'Platform demo' : 'Website concept'].filter(Boolean)
-    out.push({ ...p, organization_id: 'preview:' + p.opportunity_id, program: 'preview', variant: 'preview', href: p.url,
+    out.push({ ...p, organization_id: 'preview:' + p.opportunity_id, program: 'preview',
+               variant: variantForIndustry(p.industry, 'preview'), href: p.url,
                symbol: '◇', rank: 20, kind: 'PREVIEW · PROSPECT DEMO',
                display, orgLabel: p.contact_name && display !== p.company_name ? p.contact_name : null,
                summary: 'The demo built for this prospect. Not a live workspace: no customer data, not a customer yet.',
