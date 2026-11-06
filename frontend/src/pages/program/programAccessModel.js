@@ -44,6 +44,12 @@ const PROGRAMS = {
   volt: { rank: 7, variant: 'volt', symbol: 'ϟ', kind: 'VOLT MARKETING · RECRUITING',
           summary: 'Applicants, reviews, referrals, Zoom sessions and reports',
           facts: ['Applicants', 'Referrals', 'Zoom Sessions'] },
+  // EvoSys Gold & Jewelry (gold buyers, jewelry stores, coin dealers). The
+  // card keeps the business's own name; its artwork is the neutral EvoSys look
+  // until the industry artwork is approved through the redesign lane.
+  jewelry: { rank: 6, variant: 'general', symbol: '◇', kind: 'GOLD & JEWELRY · BUSINESS WORKSPACE',
+             summary: 'Customers, appointments, promotions, inventory and results',
+             facts: ['Customer Vault', 'Appointments', 'Promotions'] },
   business: { rank: 7, variant: 'general', symbol: '◈', kind: 'BUSINESS OPERATIONS',
               summary: 'Your dedicated business workspace',
               facts: ['Leads', 'Conversations', 'Calendar'] },
@@ -81,6 +87,7 @@ export function programOf(w) {
   if (w.is_program && w.program_is_sci === false) return 'business'
   if (w.is_program || w.experience === 'sci') return 'sci'
   if (w.program_route === '/program/roofing' || w.experience === 'roofing') return 'roofing'
+  if (w.program_route === '/program/jewelry' || w.experience === 'jewelry') return 'jewelry'
   if (w.program_route === '/program/insurance' || w.presentation?.kind === 'insurance_retention') return 'insurance_retention'
   if (w.experience === 'insurance' || w.industry === 'insurance') return 'insurance'
   if (w.experience === 'energy' || w.industry === 'energy') return 'energy'

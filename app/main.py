@@ -961,6 +961,9 @@ app.include_router(agency_invites_router)   # /agency-invites (accept an insuran
 from app.routers import roofing_router  # noqa: E402
 app.include_router(roofing_router.router)       # /roofing-ops (EvoSys Pro Roofing; gated by `roofing_program`)
 app.include_router(roofing_router.god_router)   # /god/roofing/setup|demo (platform owner)
+from app.routers import jewelry_router  # noqa: E402
+app.include_router(jewelry_router.router)       # /jewelry-ops (EvoSys Gold & Jewelry; gated by `jewelry_program`)
+app.include_router(jewelry_router.god_router)   # /god/jewelry/setup (platform owner)
 # Managed client acquisition (Issue #452): client portal + platform-owner ops.
 from app.routers import acquisition_router
 app.include_router(acquisition_router.router)       # /acquisition

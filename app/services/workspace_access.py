@@ -315,6 +315,16 @@ def _roofing_enabled(org) -> bool:
         return False
 
 
+def _jewelry_enabled(org) -> bool:
+    """Opens the Gold & Jewelry app: explicit `jewelry_program` key and a
+    jewelry (or neutral) identity - never by name or slug."""
+    try:
+        from app.services.program_experience import jewelry_identity
+        return jewelry_identity(org)
+    except Exception:  # pragma: no cover - never let a hint break login
+        return False
+
+
 def _acquisition_ops(db: Session, user: User) -> List[Dict[str, Any]]:
     try:
         from app.services.acquisition.common import acquisition_identity
@@ -585,6 +595,7 @@ def authorized_contexts(db: Session, user: User, host_slug: Optional[str] = None
             # not set up opened a dead "isn't turned on" screen on every entry
             # (prod, 2026-10-20). /roofing-ops still enforces it server-side.
             "program_route": ("/program/roofing" if _roofing_enabled(org)
+                              else "/program/jewelry" if _jewelry_enabled(org)
                               else "/program/acquisition" if _acquisition_enabled(org)
                               else "/program/insurance" if _retention_enabled(db, org) else None),
             # THE EXPERIENCE THIS WORKSPACE OPENS FOR THIS PERSON - the app

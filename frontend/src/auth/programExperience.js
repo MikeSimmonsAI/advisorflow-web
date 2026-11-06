@@ -12,6 +12,7 @@ export const PROGRAM_HOMES = {
   wholesale: '/wholesale/evosense',
   sci: '/program',
   roofing: '/program/roofing',
+  jewelry: '/program/jewelry',
   acquisition: '/program/acquisition',
 }
 /** Where ENTERING a workspace opens, for dedicated programs that are not
@@ -33,8 +34,9 @@ export function activeWorkspaceEntry(ctx, selectedId, homeOrgId) {
 
 function inside(experience, path) {
   if (experience === 'wholesale') return path === '/wholesale' || path.startsWith('/wholesale/')
-  if (experience === 'sci') return path === '/program' || (path.startsWith('/program/') && !path.startsWith('/program/roofing') && !path.startsWith('/program/acquisition')) || path === '/sci' || path.startsWith('/sci/')
+  if (experience === 'sci') return path === '/program' || (path.startsWith('/program/') && !path.startsWith('/program/roofing') && !path.startsWith('/program/acquisition') && !path.startsWith('/program/jewelry')) || path === '/sci' || path.startsWith('/sci/')
   if (experience === 'roofing') return path === '/program/roofing' || path.startsWith('/program/roofing/')
+  if (experience === 'jewelry') return path === '/program/jewelry' || path.startsWith('/program/jewelry/')
   if (experience === 'acquisition') return path === '/program/acquisition' || path.startsWith('/program/acquisition/')
   return true
 }

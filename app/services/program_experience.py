@@ -209,6 +209,18 @@ def acquisition_identity(org) -> bool:
         return False
 
 
+def jewelry_identity(org) -> bool:
+    """This org IS a gold & jewelry business running that program: explicit
+    `jewelry_program` key AND a jewelry (or neutral) identity."""
+    if org is None:
+        return False
+    try:
+        from app.services.jewelry.common import FEATURE, INDUSTRY
+    except Exception:  # pragma: no cover - never let a hint break login
+        return False
+    return _explicit(org, FEATURE) and identity_allows(org, INDUSTRY)
+
+
 def insurance_identity(org) -> bool:
     """This org IS an insurance agency (Max Life Command shell)."""
     return org is not None and _explicit(org, INSURANCE_FEATURE) and identity_allows(org, "insurance")
@@ -234,6 +246,8 @@ def experience_for(db: Session, user, org, is_program: bool, named_wholesale: Op
     # 2. Programs a capability can open - only where identity allows.
     if roofing_identity(org):
         return "roofing"
+    if jewelry_identity(org):
+        return "jewelry"
     if insurance_identity(org):
         return "insurance"
     if acquisition_identity(org):

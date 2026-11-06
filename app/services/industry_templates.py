@@ -415,6 +415,36 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
         "onboarding_questions": [],
     },
 
+    "jewelry": {
+        "key": "jewelry",
+        "label": "Gold, jewelry & coins",
+        "aliases": ["gold", "gold_buyer", "jeweler", "jewelry_store", "coins", "coin_dealer",
+                    "precious_metals", "gold_and_jewelry"],
+        "segments": ["Gold sellers", "Jewelry buyers", "Coin collectors"],
+        "lead_tiers": [
+            {"value": "new_customer", "label": "New Customer", "color": "blue",
+             "description": "Recently added"},
+            {"value": "follow_up", "label": "Follow Up", "color": "amber",
+             "description": "Waiting on a visit"},
+            {"value": "appointment_set", "label": "Appointment Set", "color": "amber",
+             "description": "Visit on the calendar"},
+            {"value": "returning", "label": "Returning Customer", "color": "green",
+             "description": "Bought or sold more than once"},
+            _EMAIL_ONLY,
+        ],
+        "tier_definition_key": "jewelry",
+        "appointment_types": UNIVERSAL_APPOINTMENT_TYPES + [
+            "Gold Evaluation", "Jewelry Consultation", "Coin Collection Evaluation",
+            "General Store Visit", "Customer Follow-Up",
+        ],
+        "crm_stages": ["Customer", "Contacted", "Appointment", "Visited", "Purchased"],
+        "custom_fields": [],
+        "vocabulary": {"lead": "customer", "leads": "customers",
+                       "appointment": "appointment", "appointments": "Appointments",
+                       "customer": "customer", "customers": "customers"},
+        "onboarding_questions": [],
+    },
+
     "real_estate": {
         "key": "real_estate",
         "label": "Real estate",
