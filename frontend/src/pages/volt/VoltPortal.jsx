@@ -1,3 +1,4 @@
+import { VOLT_PUBLIC_ORIGIN, VOLT_SUPPORT_EMAIL } from '../../utils/voltDomain'
 /* VOLT MARKETING - public applicant portal and rep dashboard (#535).
  *
  * /volt                      open opportunities, Register & Apply, Sign In
@@ -60,7 +61,7 @@ function Shell({ children, signedIn, onSignOut, onApply, showApply, onTalent }) 
       <main className="v-wrap" style={{ flex: 1 }}>{children}</main>
       <footer className="v-foot">
         <div className="v-wrap"><span>VOLT Marketing · Vision · Ownership · Leadership · Tenacity</span>
-          <span>{onTalent && <button type="button" className="v-btn v-btn--link v-foot-link" onClick={onTalent}>Get Future Opportunities</button>} Need help? Contact your recruiter.</span></div>
+          <span>{onTalent && <button type="button" className="v-btn v-btn--link v-foot-link" onClick={onTalent}>Get Future Opportunities</button>} Need help? <a href={`mailto:${VOLT_SUPPORT_EMAIL}`}>{VOLT_SUPPORT_EMAIL}</a></span></div>
       </footer>
       {showApply && (
         <div className="v-applybar" role="region" aria-label="Apply">
@@ -632,7 +633,7 @@ function Leaderboard({ projects }) {
 }
 
 function Dashboard({ me, portal }) {
-  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  const origin = VOLT_PUBLIC_ORIGIN
   const [inviteProject, setInviteProject] = useState(portal.open_projects[0]?.key || '')
   if (!me?.has_profile) return <Navigate to="/volt#projects" replace />
   const p = me.profile
