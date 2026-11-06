@@ -626,3 +626,26 @@ def test_wholesale_seat_admin_reaches_volt_through_program_access(volt):
     assert c.get("/volt/ops/%s" % volt["other"].id, headers=h).status_code == 403
     # Not owner: may not run the owner-only cleanup.
     assert c.post("/volt/ops/%s/test-records/purge" % org, headers=h).status_code == 403
+
+
+def test_volt_only_staff_can_sign_in_on_the_evosys_host(db_session, client):
+    """VOLT must sit on the EvoSys Pro platform, or a recruiter whose only
+    workspace is VOLT is refused at app.evosyspro.live (2026-11-05)."""
+    from app.models.models import Platform
+    db, c = db_session, client
+    plat = db.query(Platform).filter(Platform.slug == "evosyspro").first()
+    if plat is None:
+        plat = Platform(name="EvoSys Pro", slug="evosyspro", domain="app.evosyspro.live")
+        db.add(plat)
+        db.commit()
+    res = seed.ensure(db)
+    db.commit()
+    org = db.get(Organization, res["organization_id"])
+    assert org.platform_id == plat.id
+    assert seed.ensure(db)["platform"] is False          # idempotent
+    u = _user(db, "advisor", org, "org_admin")
+    from app.services.workspace_access import user_authorized_platform_slugs
+    assert "evosyspro" in user_authorized_platform_slugs(u, db)
+    r = c.post("/auth/login", data={"username": u.email, "password": "Pass12345!"},
+               headers={"Origin": "https://app.evosyspro.live", "Host": "app.evosyspro.live"})
+    assert r.status_code == 200, r.text
