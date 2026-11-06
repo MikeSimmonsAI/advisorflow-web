@@ -84,7 +84,7 @@ def test_branding_payload_names_bookaboost_and_leaves_everyone_else_unchanged(cl
         assert r.status_code == 200, r.text[:200]
         return r.json()["platform"]["products"]
     assert products("bab_admin", "bab") == {"wholesale": "BookaBoost Wholesale", "engine": None}
-    assert products("evo_admin", "evo") == {"wholesale": "EvoSys Wholesale"}          # byte-identical
+    assert products("evo_admin", "evo") == {"wholesale": "My Deal Room"}          # owner rebrand (was EvoSys Wholesale)
     assert products("fiber_admin", "fiber") == {"wholesale": None}                    # unchanged
 
 
@@ -95,8 +95,8 @@ def test_brand_word_and_product_helpers(brands):
     assert brand_word(db, brands["nobrand"]) == "EvoSys"          # unresolvable brand: unchanged
     assert brand_word(db, brands["bab"]) == "BookaBoost"
     assert brand_word(db, brands["bab"].id) == "BookaBoost"       # by id too
-    assert wholesale_product(db, brands["evo"]) == "EvoSys Wholesale"
-    assert wholesale_product(db, brands["nobrand"]) == "EvoSys Wholesale"
+    assert wholesale_product(db, brands["evo"]) == "My Deal Room"            # owner rebrand
+    assert wholesale_product(db, brands["nobrand"]) == "My Deal Room"
     assert wholesale_product(db, brands["bab"]) == "BookaBoost Wholesale"
     assert wholesale_product(db, brands["fiber"]) == "Wholesale"
 
@@ -185,4 +185,4 @@ def test_wholesale_inquiry_notice_names_the_workspaces_own_product(brands):
     _, bab_html = _email_html("BookaBoost Wholesale", job, None, "BookaBoost Wholesale")
     assert "turned on in BookaBoost Wholesale settings" in bab_html and "EvoSys" not in bab_html
     _, evo_html = _email_html("EVO Integrated Solutions LLC", job, None)          # old call shape
-    assert "turned on in EvoSys Wholesale settings" in evo_html
+    assert "turned on in My Deal Room settings" in evo_html

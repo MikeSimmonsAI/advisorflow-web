@@ -145,7 +145,7 @@ def _email_html(org_name: str, job: dict, link: Optional[str], product: Optional
                            "<p style='color:#56637a;font-size:12px'>You receive this because %s has "
                            "seller inquiry emails turned on in %s settings.</p>"
                            % (html.escape(heading), body, extra, cta, html.escape(org_name),
-                              html.escape(product or "EvoSys Wholesale")))
+                              html.escape(product or "My Deal Room")))
 
 
 def send_pending_email(db) -> List[dict]:

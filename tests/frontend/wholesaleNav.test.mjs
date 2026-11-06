@@ -243,7 +243,7 @@ check('the sidebar renders ONE product entry, not the wholesale groups', () => {
 
 check('God Mode has an EvoSys Wholesale entry', () => {
   const god = readFileSync(join(REPO, 'frontend', 'src', 'pages', 'GodShell.jsx'), 'utf8')
-  if (!/label: 'EvoSys Wholesale', action: 'wholesale'/.test(god)) throw new Error('no JUMP entry')
+  if (!/label: 'My Deal Room', action: 'wholesale'/.test(god)) throw new Error('no JUMP entry')   // owner rebrand
   if (!/action === 'wholesale'/.test(god)) throw new Error('JUMP entry not rendered')
 })
 

@@ -91,9 +91,16 @@ def view(db, org_id: str, user=None) -> Dict[str, Any]:
     r = row(db, org_id)
     own = _owner(db, org_id, user)
     brand = getattr(org, "brand_name", None) or getattr(org, "name", None)
+    from app.services.brand_config import brand_word
+    if not getattr(org, "brand_name", None) and brand_word(db, org_id) == "EvoSys":
+        # An EvoSys Pro workspace with no brand of its own shows the product,
+        # "My Deal Room" (owner rebrand). Saved settings still win; a
+        # workspace with its own brand (BookaBoost Wholesale) keeps it.
+        from app.services.brand_config import product_name
+        brand = product_name("evosyspro", "wholesale") or brand
     team = staff_people(db, org_id)
     pre = {
-        "name": "%s Deal Room" % brand if brand else "Private Deal Room",
+        "name": (brand if (brand or "").endswith("Deal Room") else "%s Deal Room" % brand) if brand else "Private Deal Room",
         "brand_name": brand, "tagline": "Exclusive real estate opportunities in Dallas - Fort Worth.",
         "owner_name": getattr(own, "full_name", None), "owner_email": getattr(own, "email", None),
         "owner_phone": getattr(own, "phone", None) or getattr(org, "org_phone", None),

@@ -182,11 +182,11 @@ def _not_found(request: Optional[Request] = None) -> HTMLResponse:
     page = served_files().get("index.html")
     body = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
-            '<title>Page not found | EvoSys Pro Wholesale</title>'
+            '<title>Page not found | My Deal Room</title>'
             '<link rel="stylesheet" href="/assets/site.css"></head><body>'
             '<main style="max-width:640px;margin:15vh auto;padding:0 20px;font-family:system-ui,sans-serif">'
             '<h1>Page not found</h1><p>The page you were looking for is not here.</p>'
-            '<p><a href="/">Go to EvoSys Pro Wholesale</a></p></main></body></html>')
+            '<p><a href="/">Go to My Deal Room</a></p></main></body></html>')
     return HTMLResponse(body if page else "Not found", status_code=404,
                         headers={"Cache-Control": "no-store"})
 

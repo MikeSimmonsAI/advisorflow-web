@@ -30,7 +30,7 @@ def test_an_evosyspro_workspace_resolves_evosyspro_and_its_wholesale_product(
     assert p["slug"] == "evosyspro"
     assert p["theme"] == "evosyspro"
     assert p["display_name"] == "EvoSys Pro"
-    assert p["products"]["wholesale"] == "EvoSys Wholesale"
+    assert p["products"]["wholesale"] == "My Deal Room"
 
 
 def test_another_brand_never_borrows_evosyspro_s_product_name(
@@ -49,8 +49,8 @@ def test_a_workspace_with_no_platform_states_that_rather_than_guessing(
 
 def test_product_names_are_brand_owned_and_never_guessed():
     from app.services.brand_config import product_name
-    assert product_name("evosyspro", "wholesale") == "EvoSys Wholesale"
-    assert product_name("EvoSysPro", "wholesale") == "EvoSys Wholesale"
+    assert product_name("evosyspro", "wholesale") == "My Deal Room"
+    assert product_name("EvoSysPro", "wholesale") == "My Deal Room"
     assert product_name("bookaboost", "wholesale") is None
     assert product_name(None, "wholesale") is None
     assert product_name("evosyspro", "unknown_module") is None

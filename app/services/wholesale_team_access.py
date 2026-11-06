@@ -579,14 +579,19 @@ def _send(db: Session, org: Organization, inv: WholesaleTeamInvite, link: str, a
     brand = LI._brand(db, org)
     identity = LI._sending_identity(db, org, brand)
     name = brand.get("name") or "your"
+    # EvoSys Pro workspaces: the product's own name ("My Deal Room"). Every
+    # other brand keeps exactly the wording it had ("BookaBoost Wholesale").
+    from app.services import brand_config as _BC
+    product = (_BC.product_name("evosyspro", "wholesale") if _BC.brand_word(db, org) == "EvoSys"
+               else "%s Wholesale" % name)
     if not getattr(identity, "from_email", None):
         return {"state": "failed", "error": "No verified sending address is set for %s." % name}
-    body = ("<p>Hi%s,</p><p>You've been invited to the %s Wholesale workspace for %s.</p>"
+    body = ("<p>Hi%s,</p><p>You've been invited to the %s workspace for %s.</p>"
             "<p><a href=\"%s\">%s</a></p><p>This link expires in %d days.</p>"
-            % ((" " + inv.full_name) if inv.full_name else "", name, org.name, link,
+            % ((" " + inv.full_name) if inv.full_name else "", product, org.name, link,
                "Set your password and sign in" if inv.kind == NEW_LOGIN else "Sign in and accept", INVITE_DAYS))
     try:
-        res = send_email_via_provider(inv.email, "You're invited to %s Wholesale" % name, body, org=identity,
+        res = send_email_via_provider(inv.email, "You're invited to %s" % product, body, org=identity,
                                       message_type="onboarding_invitation", sensitivity=email_identity.SENSITIVE,
                                       template_id="wholesale.team_invitation")
     except Exception as exc:  # noqa: BLE001

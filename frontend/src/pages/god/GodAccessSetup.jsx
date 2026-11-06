@@ -24,7 +24,7 @@ export default function GodAccessSetup() {
   return (
     <div style={{ maxWidth: 980, padding: '8px 4px' }}>
       <h1 style={{ margin: '0 0 6px', fontSize: 24 }}>SCI & Wholesale access</h1>
-      <p style={{ margin: '0 0 20px', color: '#5b6b75' }}>Put SCI under a login, and decide who may use EvoSys Wholesale.</p>
+      <p style={{ margin: '0 0 20px', color: '#5b6b75' }}>Put SCI under a login, and decide who may use My Deal Room.</p>
       <SciSetup />
       <WholesaleAccess />
       <SciContacts />
@@ -96,14 +96,14 @@ function WholesaleAccess() {
     try { const r = await api.post('/god/access-setup/wholesale/grant', { email: email.trim() }); setD(x => ({ ...x, lock_on: r.lock_on, holders: r.holders })); setEmail('') } catch (er) { setErr(errText(er)) }
   }
   const revoke = async who => {
-    if (!window.confirm(`Remove EvoSys Wholesale from ${who}?`)) return
+    if (!window.confirm(`Remove My Deal Room from ${who}?`)) return
     setErr('')
     try { const r = await api.post('/god/access-setup/wholesale/revoke', { email: who }); setD(x => ({ ...x, lock_on: r.lock_on, holders: r.holders })) } catch (er) { setErr(errText(er)) }
   }
   const active = (d?.holders || []).filter(h => h.active)
   return (
     <section style={box} aria-labelledby="wh-h">
-      <h2 id="wh-h" style={{ margin: '0 0 6px', fontSize: 18 }}>2. Who may use EvoSys Wholesale</h2>
+      <h2 id="wh-h" style={{ margin: '0 0 6px', fontSize: 18 }}>2. Who may use My Deal Room</h2>
       {!d ? <p>{err || 'Loading…'}</p> : (
         <>
           <p style={{ margin: '0 0 12px', fontSize: 14, color: d.lock_on ? '#245e46' : '#8d6024' }}>

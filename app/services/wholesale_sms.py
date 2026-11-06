@@ -83,6 +83,7 @@ REASON_CODES = (PROGRAM_DISABLED, PROGRAM_MISMATCH, INVALID_NUMBER, NO_SMS_CONSE
 
 # Message copy registered with the campaign. {brand} is the organization's
 # program display name, e.g. "EvoSys Wholesale"; {email} its support address.
+SMS_REGISTERED_NAMES = {"evosyspro": "EvoSys Wholesale"}   # as registered with the carriers
 OPT_IN_CONFIRMATION = ("{brand}: You're subscribed to messages about your property "
                        "inquiry. Msg frequency varies. Msg & data rates may apply. "
                        "Reply STOP to opt out, HELP for help.")
@@ -475,7 +476,11 @@ def program_brand(db, org_id: str) -> Dict[str, Optional[str]]:
         plat = (db.query(Platform).filter(Platform.id == org.platform_id).first()
                 if org is not None and getattr(org, "platform_id", None) else None)
         slug = (getattr(plat, "slug", None) or "").strip().lower()
-        name = brand_config.product_name(slug, "wholesale")
+        # Text-message copy is registered with the carriers word for word, so
+        # EvoSys Pro's program keeps its REGISTERED name even though the
+        # product on screen is now "My Deal Room" (renaming texts needs the
+        # registration updated first - an owner decision).
+        name = SMS_REGISTERED_NAMES.get(slug) or brand_config.product_name(slug, "wholesale")
         if name is None and slug and slug != "evosyspro":
             # Another brand's workspace (e.g. BookaBoost Wholesale): its own
             # Wholesale product name, never a bare "Wholesale:". EvoSys Pro and
