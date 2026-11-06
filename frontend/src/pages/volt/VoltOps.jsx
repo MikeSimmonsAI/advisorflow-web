@@ -17,6 +17,52 @@ const STAGES = [['draft', 'Draft'], ['submitted', 'Submitted'], ['needs_update',
 const STAGE = Object.fromEntries(STAGES)
 const REACHED = [['created', 'Application started'], ['submitted', 'Submitted'], ['approved', 'Approved'], ['started', 'Started']]
 const ANSWER = { yes: 'Yes', no: 'No', details: 'Would like details', explain: 'It depends', licensed: 'Licensed', in_progress: 'In progress', not_licensed: 'Not currently licensed' }
+const TIME_AWAY = { '1_2_weeks': '1–2 weeks', '3_4_weeks': '3–4 weeks', '1_3_months': '1–3 months', '3_plus_months': '3+ months', discuss: 'Wants to discuss' }
+const D2D = { yes: 'Door-to-door', some: 'Some field sales', no: 'New' }
+
+function travelCell(r) {
+  if (r.time_away) return `Away: ${TIME_AWAY[r.time_away] || r.time_away}${r.d2d_experience ? ` · ${D2D[r.d2d_experience] || r.d2d_experience}` : ''}`
+  if (r.willing_travel) return `Travel: ${ANSWER[r.willing_travel] || r.willing_travel}`
+  if (r.license_status) return `License: ${ANSWER[r.license_status] || r.license_status}`
+  return '—'
+}
+
+function shownQ(q, ans) { return !q.show_if || q.show_if[1].includes(ans[q.show_if[0]] || '') }
+function answerText(q, v) {
+  if (!v) return null
+  if (q.type === 'choice') return (q.options.find((o) => o[0] === v) || [v, v])[1]
+  if (q.type === 'date') return new Date(v.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  return v
+}
+
+// The project's answers, grouped by the application's steps; the first Fiber
+// form's answers (legacy) appear under "Earlier answers" when present.
+function Answers({ app }) {
+  const ans = app.answers || {}
+  const qs = app.questions || []
+  const sections = app.sections && app.sections.length ? app.sections : [{ id: 'project', label: 'Project questions' }]
+  const earlier = qs.filter((q) => q.legacy && ans[q.key])
+  return (
+    <div data-answers>
+      {sections.map((sec) => {
+        const list = qs.filter((q) => !q.legacy && (q.section || 'project') === sec.id && shownQ(q, ans))
+        if (!list.length) return null
+        return (
+          <div key={sec.id} data-answer-section={sec.id}>
+            {sec.id !== 'project' && <p className="v-label" style={{ marginTop: 10 }}>{sec.label}</p>}
+            <dl className="v-review">{list.map((q) => <Fragment key={q.key}><dt>{q.label}</dt><dd>{answerText(q, ans[q.key]) || <span className="v-muted">—</span>}</dd></Fragment>)}</dl>
+          </div>
+        )
+      })}
+      {earlier.length > 0 && (
+        <div data-answer-section="earlier">
+          <p className="v-label" style={{ marginTop: 10 }}>Earlier answers</p>
+          <dl className="v-review">{earlier.map((q) => <Fragment key={q.key}><dt>{q.label}</dt><dd>{answerText(q, ans[q.key])}</dd></Fragment>)}</dl>
+        </div>
+      )}
+    </div>
+  )
+}
 const ACTION_LABEL = { approved: 'Approve', needs_update: 'Return for update', started: 'Mark Started' }
 const TZS = ['America/Chicago', 'America/New_York', 'America/Denver', 'America/Phoenix', 'America/Los_Angeles', 'America/Anchorage', 'Pacific/Honolulu']
 
@@ -79,10 +125,12 @@ function Filters({ projects, f, set, showStage = false, showReached = false }) {
       {showReached && <label>Date applies to<select value={f.reached || 'created'} onChange={up('reached')}>
         {REACHED.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>}
       {showReached && <label>Location<input value={f.location || ''} placeholder="City, state, ZIP or region" onChange={up('location')} /></label>}
-      {showReached && <label>Willing to travel<select value={f.travel || ''} onChange={up('travel')}>
-        <option value="">Any answer</option><option value="yes">Yes</option><option value="no">No</option><option value="details">Would like details</option></select></label>}
+      {showReached && <label>Travel<select value={f.travel || ''} onChange={up('travel')}>
+        <option value="">Any answer</option>
+        <option value="long">Can be away 1 month or more</option><option value="short">Can be away up to 4 weeks</option><option value="discuss">Wants to talk it through</option>
+        <option value="yes">Earlier form: willing to travel</option><option value="no">Earlier form: not willing</option><option value="details">Earlier form: would like details</option></select></label>}
       {showReached && <label>Experience<select value={f.experience || ''} onChange={up('experience')}>
-        <option value="">Any</option><option value="has">Has relevant or listed experience</option><option value="none">No previous work experience</option></select></label>}
+        <option value="">Any</option><option value="d2d">Has door-to-door experience</option><option value="has">Has relevant or listed experience</option><option value="none">New / no previous experience</option></select></label>}
       <label>From<input type="date" value={f.date_from || ''} onChange={up('date_from')} /></label>
       <label>To<input type="date" value={f.date_to || ''} onChange={up('date_to')} /></label>
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 600 }}>
@@ -166,7 +214,7 @@ function ReviewQueue({ orgId, ops }) {
       <p className="v-small v-muted" data-count={list?.count}>{list ? `${list.count} application${list.count === 1 ? '' : 's'} · dates filter on "${list.reached_label}". The CSV is exactly this list.` : 'Loading…'}</p>
       <div className="v-panel v-scroll">
         <table className="v-table" data-table="queue">
-          <thead><tr><th>Applicant</th><th>Project</th><th>Stage</th><th>Location</th><th>Travel / license</th><th>Project recruiter</th><th>Original recruiter</th><th>Updated</th><th /></tr></thead>
+          <thead><tr><th>Applicant</th><th>Project</th><th>Stage</th><th>Location</th><th>Travel / experience / license</th><th>Project recruiter</th><th>Original recruiter</th><th>Updated</th><th /></tr></thead>
           <tbody>
             {list?.items.length === 0 && <tr><td colSpan="9" className="v-muted">No matching applications.</td></tr>}
             {list?.items.map((r) => (
@@ -174,7 +222,7 @@ function ReviewQueue({ orgId, ops }) {
                 <td><b>{r.applicant}</b><br /><span className="v-mono">{r.rep_code}</span>{r.is_test && <> <span className="v-tag v-tag--line">Test</span></>}</td>
                 <td>{r.project}</td><td><span className="v-tag">{r.status_label}</span></td>
                 <td>{[r.city, r.state].filter(Boolean).join(', ') || '—'}</td>
-                <td>{r.willing_travel ? `Travel: ${ANSWER[r.willing_travel] || r.willing_travel}` : r.license_status ? `License: ${ANSWER[r.license_status] || r.license_status}` : '—'}</td>
+                <td>{travelCell(r)}</td>
                 <td>{r.project_recruiter ? `${r.project_recruiter.display_name} · ${r.project_recruiter.rep_code}` : 'Direct'}</td>
                 <td>{r.original_recruiter ? `${r.original_recruiter.display_name} · ${r.original_recruiter.rep_code}` : 'Direct'}</td>
                 <td>{fmtDate(r.updated_at)}</td>
@@ -244,12 +292,7 @@ function ApplicationFile({ orgId, appId, viewer, onClose }) {
             <section className="v-panel" style={{ marginTop: 12 }}>
               <div className="v-row"><h3>{d.application.project.name}</h3><span className="v-tag" data-stage={d.application.status}>{d.application.status_label}</span></div>
               {d.application.return_reason && d.application.status === 'needs_update' && <p className="v-ferr">Returned: {d.application.return_reason}</p>}
-              <dl className="v-review" data-answers>
-                {(d.application.questions || []).map((q) => {
-                  const v = d.application.answers[q.key]
-                  return <Fragment key={q.key}><dt>{q.label}</dt><dd>{v ? (q.type === 'choice' ? (q.options.find((o) => o[0] === v) || [v, v])[1] : v) : <span className="v-muted">—</span>}</dd></Fragment>
-                })}
-              </dl>
+              <Answers app={d.application} />
               {d.missing.length > 0 && <p className="v-small v-muted">Applicant still needs: {d.missing.join('; ')}</p>}
               {!viewer && d.next_actions.length > 0 && (
                 <div style={{ marginTop: 12 }}>
@@ -317,22 +360,30 @@ function monthLabel(m) {
   return new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
 }
 
+// Person-level file. The rows this project's flow asks for always show; other
+// rows (filled in for another project, or on an earlier form) show only when
+// they have something in them.
 function HiringFile({ d }) {
   const h = d.hiring
   const opts = Object.fromEntries(d.availability_options || [])
+  const pf = d.application?.profile_fields || ['location', 'regions', 'earliest_start', 'availability', 'work_history', 'relevant_experience', 'additional_info']
+  const avail = (h.availability?.types || []).map((t) => opts[t] || t).join(', ')
+  const rows = [
+    ['location', 'Location', [h.city, h.state, h.zip_code].filter(Boolean).join(', ')],
+    ['regions', 'Preferred regions', h.preferred_regions],
+    ['earliest_start', 'Earliest start', h.earliest_start],
+    ['availability', 'Availability', avail ? `${avail}${h.availability?.notes ? ` · ${h.availability.notes}` : ''}` : ''],
+    ['work_history', 'Work history', h.no_experience ? 'No previous work experience' : (h.work_history || []).length ? (
+      <ul style={{ margin: 0, paddingLeft: 18 }}>{h.work_history.map((r, i) => (
+        <li key={i}><b>{r.title || '—'}</b>, {r.employer || '—'} · {monthLabel(r.start)} – {r.current ? 'Present' : monthLabel(r.end)}{r.summary ? <><br /><span className="v-small">{r.summary}</span></> : null}</li>))}</ul>) : ''],
+    ['relevant_experience', 'Relevant experience', h.relevant_experience],
+    ['additional_info', 'Anything else', h.additional_info],
+  ].filter(([k, , v]) => pf.includes(k) || v)
   return (
     <section className="v-panel" data-hiring>
       <h3>Hiring file</h3>
       <dl className="v-review">
-        <dt>Location</dt><dd>{[h.city, h.state, h.zip_code].filter(Boolean).join(', ') || '—'}</dd>
-        <dt>Preferred regions</dt><dd>{h.preferred_regions || '—'}</dd>
-        <dt>Earliest start</dt><dd>{h.earliest_start || '—'}</dd>
-        <dt>Availability</dt><dd>{(h.availability?.types || []).map((t) => opts[t] || t).join(', ') || '—'}{h.availability?.notes ? ` · ${h.availability.notes}` : ''}</dd>
-        <dt>Work history</dt><dd>{h.no_experience ? 'No previous work experience' : (h.work_history || []).length ? (
-          <ul style={{ margin: 0, paddingLeft: 18 }}>{h.work_history.map((r, i) => (
-            <li key={i}><b>{r.title || '—'}</b>, {r.employer || '—'} · {monthLabel(r.start)} – {r.current ? 'Present' : monthLabel(r.end)}{r.summary ? <><br /><span className="v-small">{r.summary}</span></> : null}</li>))}</ul>) : '—'}</dd>
-        <dt>Relevant experience</dt><dd>{h.relevant_experience || '—'}</dd>
-        <dt>Anything else</dt><dd>{h.additional_info || '—'}</dd>
+        {rows.map(([k, label, v]) => <Fragment key={k}><dt>{label}</dt><dd>{v || '—'}</dd></Fragment>)}
       </dl>
     </section>
   )

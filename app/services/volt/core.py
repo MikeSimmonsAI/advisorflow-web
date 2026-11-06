@@ -339,7 +339,7 @@ def doc_dict(d: VoltDocument) -> Dict[str, Any]:
 def missing_items(db, prog, rep, app) -> List[str]:
     from app.services.volt import hiring
     project = db.get(VoltProject, app.project_id)
-    missing = hiring.missing_profile(rep)
+    missing = hiring.missing_profile(rep, project)
     if project is not None:
         missing += hiring.missing_project(project, hiring.answers_of(app))
     for r in requirements(db, prog, rep, app) + requirements(db, prog, rep, None):
@@ -393,6 +393,7 @@ def application_dict(db, prog, rep, app, *, for_staff: bool = False) -> Dict[str
     out = {"id": app.id, "project": C.project_dict(project) if project else None, "status": app.status,
            "status_label": C.STATUS_LABELS.get(app.status, app.status), "answers": _answers(app),
            "questions": _questions(project),
+           "sections": _hiring().sections_for(project), "profile_fields": _hiring().profile_fields_for(project),
            "return_reason": app.return_reason, "referrer": C.public_rep(referrer),
            "referral_source": app.referral_source, "referral_confirmed_at": C.iso(app.referral_confirmed_at),
            "created_at": C.iso(app.created_at), "updated_at": C.iso(app.updated_at),
@@ -403,6 +404,11 @@ def application_dict(db, prog, rep, app, *, for_staff: bool = False) -> Dict[str
     if not for_staff:
         out["next_action"] = next_action(db, prog, rep, app)
     return out
+
+
+def _hiring():
+    from app.services.volt import hiring
+    return hiring
 
 
 def _answers(app):

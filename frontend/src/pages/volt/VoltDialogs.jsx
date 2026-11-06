@@ -11,7 +11,7 @@ import { volt } from './voltApi'
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
-export function Modal({ title, onClose, children, labelId = 'v-modal-title', wide = false }) {
+export function Modal({ title, onClose, children, labelId = 'v-modal-title', wide = false, name }) {
   const box = useRef(null)
   const opener = useRef(typeof document !== 'undefined' ? document.activeElement : null)
   useEffect(() => {
@@ -38,7 +38,7 @@ export function Modal({ title, onClose, children, labelId = 'v-modal-title', wid
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="v-modal-bg" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className={`v-modal${wide ? ' v-modal--wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby={labelId} ref={box}>
+      <div className={`v-modal${wide ? ' v-modal--wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby={labelId} ref={box} data-dialog={name}>
         <div className="v-row" style={{ marginBottom: 10 }}>
           <h2 id={labelId} style={{ fontSize: 24, letterSpacing: '-.03em' }}>{title}</h2>
           <button type="button" className="v-btn v-btn--line v-btn--sm" onClick={onClose} aria-label="Close">Close ✕</button>
@@ -50,26 +50,33 @@ export function Modal({ title, onClose, children, labelId = 'v-modal-title', wid
 }
 
 /** Apply Now: pick one of the open projects, then that project's application begins. */
-export function ApplyDialog({ projects, onPick, onClose }) {
+const PICK_NOTE = { aca: 'Health insurance', fiber: 'Traveling · Door-to-door sales' }
+
+export function ApplyDialog({ projects, onPick, onClose, onTalent }) {
   return (
-    <Modal title="Apply Now" onClose={onClose} labelId="v-apply-title">
-      <p className="v-muted" style={{ marginBottom: 12 }}>Choose the project you want to apply for.</p>
+    <Modal title="What would you like to apply for?" onClose={onClose} labelId="v-apply-title" name="apply">
+      <p className="v-muted" style={{ marginBottom: 12 }}>Choose a project to start your application.</p>
       <div className="v-pick" role="list">
         {projects.map((p, i) => (
           <button key={p.key} type="button" role="listitem" className="v-pick-item" data-pick={p.key}
                   data-autofocus={i === 0 ? '' : undefined} onClick={() => onPick(p.key)}>
             <span className="v-icon" aria-hidden="true">{p.icon}</span>
-            <span style={{ flex: 1 }}><b>{p.name}</b><br /><span className="v-muted v-small">{p.summary}</span></span>
+            <span style={{ flex: 1 }}><b>{p.name}</b><br /><span className="v-muted v-small">{PICK_NOTE[p.key] || p.summary}</span></span>
             <span aria-hidden="true">→</span>
           </button>
         ))}
       </div>
+      {onTalent && (
+        <p style={{ marginTop: 14, borderTop: '1px solid var(--v-line)', paddingTop: 12 }}>
+          <button type="button" className="v-btn v-btn--link" onClick={onTalent} data-talent="pick">Just looking? Get future opportunities →</button>
+        </p>
+      )}
     </Modal>
   )
 }
 
 /** Get Future Opportunities: saves interest only. */
-export function TalentDialog({ projects, invite, testMode, onClose, onBrowse, ReferralPicker }) {
+export function TalentDialog({ projects, invite, testMode, onClose, onBrowse, ReferralPicker, source = 'portal' }) {
   const [v, setV] = useState({ first_name: '', last_name: '', email: '' })
   const [interests, setInterests] = useState([])
   const [notify, setNotify] = useState(false)
@@ -86,7 +93,7 @@ export function TalentDialog({ projects, invite, testMode, onClose, onBrowse, Re
     if (refText.trim() && !referrer) { setErrs({ referrer: 'Select a matching recruiter from the list, or clear the field.' }); return }
     setBusy(true)
     try {
-      const r = await volt.talentSignup({ ...v, interests, notify, source: 'portal',
+      const r = await volt.talentSignup({ ...v, interests, notify, source,
         ...(referrer ? { referrer_rep_id: referrer.rep_id, referral_source: referrer.source } : {}) })
       setDone(r.message)
     } catch (x) { setErrs(x.detail?.fields || {}); setErr(x.message) } finally { setBusy(false) }
@@ -99,18 +106,19 @@ export function TalentDialog({ projects, invite, testMode, onClose, onBrowse, Re
     </label>
   )
   return (
-    <Modal title="Get Future Opportunities" onClose={onClose} labelId="v-talent-title">
+    <Modal title={done ? "You're on the list." : 'Be first to hear.'} onClose={onClose} labelId="v-talent-title" name="talent">
       {done ? (
         <div data-talent-done>
           <div className="v-alert v-alert--ok" role="status">{done}</div>
           <p style={{ margin: '12px 0' }}>When you are ready to apply, choose a current opportunity. Applying creates your account and your full application.</p>
           <div className="v-row" style={{ justifyContent: 'flex-start' }}>
-            <button type="button" className="v-btn v-btn--red" data-autofocus onClick={onBrowse}>See current opportunities</button>
+            <button type="button" className="v-btn v-btn--red" data-autofocus onClick={onBrowse}>Explore Current Projects →</button>
             <button type="button" className="v-btn v-btn--line" onClick={onClose}>Close</button>
           </div>
         </div>
       ) : (
         <form className="v-form" onSubmit={submit} noValidate data-form="talent">
+          <p className="v-muted">Join the list for future VOLT Marketing opportunities.</p>
           <p className="v-muted v-small">This saves your interest only. You will create your account and complete a full application when you choose to apply.</p>
           <div className="v-split">
             {f('first_name', 'First Name', { autoComplete: 'given-name', maxLength: 70, required: true, 'data-autofocus': '' })}
@@ -130,7 +138,7 @@ export function TalentDialog({ projects, invite, testMode, onClose, onBrowse, Re
           <label className="v-check v-consent"><input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} data-consent />
             Email me about future VOLT Marketing opportunities.</label>
           {err && <div className="v-alert v-alert--err" role="alert">{Object.keys(errs).length ? 'Please fix the highlighted fields.' : err}</div>}
-          <button className="v-btn v-btn--red" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save my interest'}</button>
+          <button className="v-btn v-btn--red" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save My Interest →'}</button>
         </form>
       )}
     </Modal>
