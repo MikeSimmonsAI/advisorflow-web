@@ -117,12 +117,18 @@ def _send_invite_email(db, inv: InvestorInvite, token: str) -> str:
     org = db.query(Organization).filter(Organization.id == inv.organization_id).first()
     if inv.is_test or inv.email.lower().rsplit(".", 1)[-1] in ("invalid", "test", "example", "localhost"):
         return "not_sent: practice address (link shown to staff only)"
-    html = ("<p>Hello %s,</p><p>%s has invited you to a private Deal Room to review investment "
+    # EvoSys Pro workspaces invite investors to the product by name ("My Deal
+    # Room"); every other brand keeps the neutral wording it always had.
+    from app.services import brand_config as _BC
+    product = _BC.product_name("evosyspro", "wholesale") if _BC.brand_word(db, inv.organization_id) == "EvoSys" else None
+    room_words = ("%s, a private room" % product) if product else "a private Deal Room"
+    html = ("<p>Hello %s,</p><p>%s has invited you to %s to review investment "
             "opportunities selected for you.</p><p><a href='%s'>Accept your invitation</a></p>"
             "<p>This link is for you only and expires in %d days.</p>" % (
-                _esc(inv.name), _esc(_brand_name(db, inv.organization_id)), url, INVITE_DAYS))
+                _esc(inv.name), _esc(_brand_name(db, inv.organization_id)), _esc(room_words), url, INVITE_DAYS))
     try:
-        r = email_service.send_email_via_provider(to_email=inv.email, subject="Your private Deal Room invitation",
+        r = email_service.send_email_via_provider(to_email=inv.email,
+                                                  subject=("Your %s invitation" % product) if product else "Your private Deal Room invitation",
                                                   body_html=html, org=org, message_type="deal_room_invite")
         return "delivered" if (r and r.get("success")) else "not_sent: %s" % ((r or {}).get("error") or "provider refused")[:120]
     except Exception as exc:  # noqa: BLE001 - recorded, never raised

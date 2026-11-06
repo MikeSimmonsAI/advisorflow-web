@@ -163,7 +163,7 @@ OPTIONAL_CONTEXT_FIELDS = ("interest", "current_system", "locations", "lead_volu
 # stored as given (cleaned) because it is context for the person taking the
 # call, not a field anything branches on. It is NOT a package choice - see the
 # note above - it is which product line brought them here.
-INTEREST_OPTIONS = ("EvoSysPro", "EvoSys Wholesale", "Insurance / Agency Automation",
+INTEREST_OPTIONS = ("EvoSysPro", "My Deal Room", "Insurance / Agency Automation",
                     "Energy / Sales CRM", "Custom / Other")
 
 

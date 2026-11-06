@@ -101,7 +101,7 @@ const JUMP = [
   // EVOSYS WHOLESALE — a PRODUCT of EvoSysPro, entered from the owner's rail.
   // Not a link for the same reason as Customer App: its records belong to one
   // organization, so it opens in the selected workspace, or asks for one first.
-  { label: 'EvoSys Wholesale', action: 'wholesale', icon: 'briefcase',
+  { label: 'My Deal Room', action: 'wholesale', icon: 'briefcase',
     hint: 'EvoSysPro product: EvoSense acquisition and wholesale deal operations, in the selected workspace' },
 ]
 

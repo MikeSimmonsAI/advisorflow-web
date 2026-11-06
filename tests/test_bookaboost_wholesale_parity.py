@@ -249,7 +249,7 @@ def test_evosys_site_host_is_unchanged_next_to_a_tenant_host(client, sites):
     assert r.status_code == 200 and "EvoSys Pro" in r.text
     assert client.get("/platform.html", headers={"host": EVO_HOST}).status_code == 200
     nf = client.get("/nope.html", headers={"host": EVO_HOST})
-    assert nf.status_code == 404 and "Page not found | EvoSys Pro Wholesale" in nf.text
+    assert nf.status_code == 404 and "Page not found | My Deal Room" in nf.text
     r = client.post("/intake.php", data=_buyer_form(), headers={"host": EVO_HOST})
     assert r.status_code == 201, r.text
     assert [b.organization_id for b in sites.db.query(WholesaleBuyer).all()] == [sites.evo.id]
@@ -337,7 +337,7 @@ def test_field_app_manifests():
     pub = pathlib.Path(__file__).resolve().parents[1] / "frontend" / "public"
     evo = json.loads((pub / "manifest-field.webmanifest").read_text(encoding="utf-8"))
     neutral = json.loads((pub / "manifest-field-neutral.webmanifest").read_text(encoding="utf-8"))
-    assert (evo["name"], evo["short_name"]) == ("EvoSys Wholesale", "EvoSys Field")      # unchanged
+    assert (evo["name"], evo["short_name"]) == ("My Deal Room", "EvoSys Field")          # owner rebrand
     assert "EvoSys" not in json.dumps(neutral) and neutral["short_name"] == "Field"
     assert neutral["start_url"] == evo["start_url"] and neutral["icons"] == evo["icons"]
     js = (pub.parent / "src" / "pages" / "wholesale" / "appts" / "fieldApp.js").read_text(encoding="utf-8")

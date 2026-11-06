@@ -137,7 +137,9 @@ FROZEN_BRAND_DEFAULTS = {
 # borrowing another brand's product name. Internal/technical names (routes,
 # packages, tables) are deliberately NOT derived from this.
 PRODUCT_NAMES = {
-    "evosyspro": {"wholesale": "EvoSys Wholesale"},
+    # Owner rebrand (Nov 2026): EvoSys Pro's Wholesale product is "My Deal Room".
+    # EvoSys Pro stays the parent platform; other brands/tenants keep their own.
+    "evosyspro": {"wholesale": "My Deal Room"},
 }
 
 
@@ -212,7 +214,7 @@ def sales_brand_short(db, platform) -> str:
 
 
 def wholesale_product(db, org) -> str:
-    """This workspace's Wholesale product name for notices. "EvoSys Wholesale"
+    """This workspace's Wholesale product name for notices. "My Deal Room"
     for EvoSys Pro organizations and any org without a brand (unchanged). A
     second Wholesale tenant (its own workspace - #272) uses its own name; any
     other brand its product name, else the neutral "Wholesale"."""
