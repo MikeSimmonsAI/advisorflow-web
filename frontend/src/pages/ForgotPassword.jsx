@@ -32,7 +32,8 @@ export default function ForgotPassword() {
           <button disabled={busy} style={{ width: '100%', padding: 12, borderRadius: 10, border: 0, background: '#0b3a5b',
                                            color: '#fff', fontWeight: 700, fontSize: 15 }}>{busy ? 'Sending…' : 'Send reset link'}</button>
         </>}
-        <p style={{ margin: '16px 0 0', textAlign: 'center' }}><a href="/login">Back to sign in</a></p>
+        {/* A VOLT applicant arrives with next=/volt/sign-in: that is their sign-in. */}
+        <p style={{ margin: '16px 0 0', textAlign: 'center' }}><a href={(params.get('next') || '').startsWith('/volt/') ? params.get('next') : '/login'}>Back to sign in</a></p>
       </form>
     </div>
   )
