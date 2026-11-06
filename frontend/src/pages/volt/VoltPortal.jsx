@@ -253,6 +253,7 @@ function Home({ portal, signedIn, onApply, onTalent }) {
           </article>
         ))}
       </div>
+      <WhyVolt />
       <section className="v-talent-band">
         <div><h2>Your next opportunity starts here.</h2><p>Leave your name and email to hear about future projects.</p></div>
         <button type="button" className="v-btn v-btn--red" onClick={onTalent} data-talent="section">Keep Me Updated →</button>
@@ -273,6 +274,32 @@ const CARD = {
     facts: ['Health insurance', 'Experience welcome'] },
   fiber: { short: 'Fiber', text: 'A traveling door-to-door fiber sales opportunity. Tell us where you’re based and when you can travel.',
     facts: ['Door-to-door sales', 'Traveling gig'] },
+}
+
+// ── Why build your future with VOLT? (homepage, Mike 2026-11-06) ───────────
+// Company-wide reasons only. The Fiber reasons (Great markets; Industry-leading
+// people and leadership; Training and development) belong to the Fiber Explore
+// page and are not repeated here; nothing here implies every opportunity
+// involves travel or door-to-door sales.
+const WHY_VOLT = [
+  ['01', 'Find your opportunity.', 'Explore different projects that fit your ambition and strengths.'],
+  ['02', 'Build toward freedom.', 'Develop experience and confidence that give you more control over your future.'],
+  ['03', 'Grow around driven people.', 'Surround yourself with people who push you to improve and take your next step.'],
+]
+
+function WhyVolt() {
+  return (
+    <section className="v-why" data-why-volt aria-labelledby="v-why-title">
+      <h2 id="v-why-title">Why build your future with <span className="v-red">VOLT?</span></h2>
+      <ol className="v-why-grid">
+        {WHY_VOLT.map(([n, t, d]) => (
+          <li key={n}><span className="v-why-n" aria-hidden="true">{n}</span><div><h3>{t}</h3><p>{d}</p></div></li>
+        ))}
+      </ol>
+      <p className="v-why-values"><span>Vision</span> / <span>Ownership</span> / <span>Leadership</span> / <span>Tenacity</span></p>
+      <p className="v-why-own">Ownership means freedom, independence and control over your future.</p>
+    </section>
+  )
 }
 
 // ── What VOLT stands for (both Explore pages; approved demo) ─────────────────
