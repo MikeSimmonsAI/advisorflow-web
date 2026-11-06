@@ -16,6 +16,7 @@
  *   No JavaScript theme state to manage — pure CSS variable overrides.
  */
 import { bookaboostProductBrand, OLP } from './brand/productBrand.js'
+import { isVoltHost } from './utils/voltDomain'
 
 export const THEMES = {
   BOOKABOOST: 'bookaboost',
@@ -145,6 +146,10 @@ export function applyTheme(theme) {
   if (typeof document === 'undefined') return
 
   document.documentElement.setAttribute('data-theme', theme)
+
+  // VOLT Marketing's own domain names itself on every page (sign-in, reset,
+  // activation included); index.html already set its title and red V mark.
+  if (isVoltHost()) { document.title = 'VOLT Marketing'; return }
 
   const titles = {
     [THEMES.ADVISORFLOW]:  'AdvisorFlow',
