@@ -200,8 +200,9 @@ def main(argv=None) -> int:
         try:
             res = volt_seed.ensure(_db)
             _db.commit()
-            log.info("volt: org=%s created_org=%s created_program=%s created_projects=%s",
-                     res.get("organization_id"), res["organization"], res["program"], ",".join(res["projects"]) or "-")
+            log.info("volt: org=%s created_org=%s created_program=%s created_projects=%s platform_set=%s",
+                     res.get("organization_id"), res["organization"], res["program"], ",".join(res["projects"]) or "-",
+                     res.get("platform"))
         except Exception:
             _db.rollback()
             raise

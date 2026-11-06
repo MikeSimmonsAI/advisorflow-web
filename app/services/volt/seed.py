@@ -16,12 +16,17 @@ from typing import Dict
 
 from sqlalchemy.orm import Session
 
-from app.models.models import Organization
+from app.models.models import Organization, Platform
 from app.models.volt_models import VoltProgram, VoltProject
 from app.services.volt.common import DEFAULT_SLUG, FEATURE_KEY
 
 ORG_SLUG = "volt-marketing"
 ORG_NAME = "VOLT Marketing"
+# VOLT runs on the EvoSys Pro platform. Sign-in on a brand host admits only
+# accounts with a workspace on that brand, and a workspace with NO platform is
+# treated as BookaBoost - so a recruiter whose only workspace is VOLT could not
+# sign in at app.evosyspro.live until this was set (found 2026-11-05).
+PLATFORM_SLUG = "evosyspro"
 
 _EXPERIENCE = [{"key": "experience_summary", "label": "Experience summary"}]
 
@@ -60,6 +65,12 @@ def ensure(db: Session) -> Dict[str, object]:
             org.enabled_features = json.dumps(keys)
         elif keys is None:
             org.enabled_features = json.dumps([FEATURE_KEY])
+    created["platform"] = False
+    if org.platform_id is None:
+        plat = db.query(Platform).filter(Platform.slug == PLATFORM_SLUG).first()
+        if plat is not None:
+            org.platform_id = plat.id
+            created["platform"] = True
     prog = db.get(VoltProgram, org.id)
     if prog is None:
         db.add(VoltProgram(organization_id=org.id, slug=DEFAULT_SLUG, name=ORG_NAME,
