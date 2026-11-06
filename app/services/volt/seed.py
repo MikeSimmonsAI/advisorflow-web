@@ -31,19 +31,66 @@ PLATFORM_SLUG = "evosyspro"
 _EXPERIENCE = [{"key": "experience_summary", "label": "Experience summary"}]
 
 PROJECTS = [
-    {"key": "aca", "name": "ACA (Obamacare) Health Insurance", "short_name": "ACA health insurance",
-     "summary": "Health insurance outreach", "icon": "✚",
+    {"key": "aca", "name": "ACA Health Insurance", "short_name": "ACA Health Insurance",
+     "summary": "Health insurance outreach", "icon": "\u271a",
      "question": "What experience do you have with ACA health insurance?",
-     "status": "open", "sort_order": 10, "required_docs": _EXPERIENCE},
-    {"key": "fiber", "name": "Fiber Internet Outreach", "short_name": "Fiber internet",
-     "summary": "Fiber internet outreach", "icon": "↯",
-     "question": "What experience do you have with fiber internet outreach?",
-     "status": "open", "sort_order": 20, "required_docs": _EXPERIENCE},
+     "status": "open", "sort_order": 10, "required_docs": []},
+    {"key": "fiber", "name": "T-Mobile D2D Fiber Sales", "short_name": "T-Mobile D2D Fiber",
+     "summary": "Traveling door-to-door fiber sales", "icon": "\u21af",
+     "question": "What door-to-door, telecom, fiber or field sales experience do you have?",
+     "status": "open", "sort_order": 20, "required_docs": []},
     {"key": "midterms", "name": "Midterms Flyer Distribution", "short_name": "Midterms flyers",
-     "summary": "Election outreach", "icon": "▤",
+     "summary": "Election outreach", "icon": "\u25a4",
      "question": "Which areas did you cover?",
      "status": "closed", "sort_order": 90, "required_docs": []},
 ]
+
+# TARGETED, IDEMPOTENT CORRECTIONS OF RECORDS ALREADY IN THE DATABASE.
+# Mike's naming (2026-11-06): "ACA Health Insurance" (no "Obamacare") and
+# "T-Mobile D2D Fiber Sales". The structured application replaced the required
+# "Experience summary" upload (a resume is now optional), so the original
+# default requirement is dropped. Each field changes ONLY while it still holds
+# the exact earlier default - a value staff edited is never overwritten - and
+# the row (id, key, applications, links, reports) is untouched otherwise.
+_OLD_DOCS = [{"key": "experience_summary", "label": "Experience summary"}]
+CORRECTIONS = {
+    "aca": {"name": ("ACA (Obamacare) Health Insurance", "ACA Health Insurance"),
+            "short_name": ("ACA health insurance", "ACA Health Insurance"),
+            "required_docs": (_OLD_DOCS, [])},
+    "fiber": {"name": ("Fiber Internet Outreach", "T-Mobile D2D Fiber Sales"),
+              "short_name": ("Fiber internet", "T-Mobile D2D Fiber"),
+              "summary": ("Fiber internet outreach", "Traveling door-to-door fiber sales"),
+              "question": ("What experience do you have with fiber internet outreach?",
+                           "What door-to-door, telecom, fiber or field sales experience do you have?"),
+              "required_docs": (_OLD_DOCS, [])},
+}
+
+
+def _apply_corrections(db: Session, org_id: str) -> list:
+    from app.models.volt_models import VoltAuditEvent
+    changed = []
+    for p in db.query(VoltProject).filter(VoltProject.organization_id == org_id).all():
+        for field, (old, new) in CORRECTIONS.get(p.key, {}).items():
+            cur = getattr(p, field)
+            if field == "required_docs":
+                try:
+                    cur_v = json.loads(cur) if cur else []
+                except (TypeError, ValueError):
+                    continue
+                if cur_v != old:
+                    continue
+                setattr(p, field, json.dumps(new))
+            else:
+                if cur != old:
+                    continue
+                setattr(p, field, new)
+            db.add(VoltAuditEvent(organization_id=org_id, entity_type="project", entity_id=p.id,
+                                  action="project_corrected", field=field,
+                                  old_value=json.dumps(old) if field == "required_docs" else old,
+                                  new_value=json.dumps(new) if field == "required_docs" else new,
+                                  reason="Approved naming and application update (2026-11-06)"))
+            changed.append("%s.%s" % (p.key, field))
+    return changed
 
 
 def ensure(db: Session) -> Dict[str, object]:
@@ -85,6 +132,8 @@ def ensure(db: Session) -> Dict[str, object]:
                            question=spec["question"], status=spec["status"], sort_order=spec["sort_order"],
                            required_docs=json.dumps(spec["required_docs"])))
         created["projects"].append(spec["key"])
+    db.flush()
+    created["corrected"] = _apply_corrections(db, org.id)
     db.flush()
     created["organization_id"] = org.id
     return created

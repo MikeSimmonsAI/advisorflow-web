@@ -94,8 +94,49 @@ class VoltRep(Base):
     original_recruited_at = Column(DateTime, nullable=True)
     # Synthetic QA record: never counted in reports unless asked for.
     is_test = Column(Boolean, nullable=False, default=False)
+    # ── HIRING FILE (person-level; shared by every project application) ──
+    city = Column(String, nullable=True)
+    state = Column(String, nullable=True)
+    zip_code = Column(String, nullable=True)
+    preferred_regions = Column(Text, nullable=True)
+    earliest_start = Column(Date, nullable=True)            # calendar date
+    availability = Column(Text, nullable=True)              # JSON {"types": [...], "notes": ""}
+    work_history = Column(Text, nullable=True)              # JSON list of roles
+    no_experience = Column(Boolean, nullable=True)          # explicit "No previous work experience"
+    relevant_experience = Column(Text, nullable=True)
+    additional_info = Column(Text, nullable=True)
+    hiring_updated_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class VoltTalentSignup(Base):
+    """Get Future Opportunities - an interest, NOT an applicant.
+
+    Kept apart from volt_reps / volt_applications on purpose: a signup never
+    creates an account, a rep ID or an application, so it can never inflate
+    application or hiring counts. One row per (tenant, email): a repeat
+    updates it. `notify_opt_in` is the person's own latest choice.
+    """
+    __tablename__ = "volt_talent_signups"
+    __table_args__ = (UniqueConstraint("organization_id", "email", name="uq_volt_talent_email"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    email = Column(String, nullable=False)                  # lower-case
+    first_name = Column(String, nullable=False)
+    last_name = Column(String, nullable=False)
+    interests = Column(Text, nullable=True)                 # JSON list of project keys or "any"
+    notify_opt_in = Column(Boolean, nullable=False, default=False)
+    notify_opt_in_at = Column(DateTime, nullable=True)
+    unsubscribed_at = Column(DateTime, nullable=True)
+    source = Column(String, nullable=False, default="portal")
+    referrer_serial = Column(Integer, ForeignKey("volt_reps.serial", ondelete="SET NULL"), nullable=True)
+    referral_source = Column(String, nullable=True)         # invite | search
+    submit_count = Column(Integer, nullable=False, default=1)
+    is_test = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class VoltApplication(Base):
