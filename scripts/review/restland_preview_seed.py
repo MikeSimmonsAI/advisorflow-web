@@ -117,6 +117,19 @@ def main():
     db.commit()
     db.add(Membership(user_id=staff.id, scope_type="customer_org", scope_id=rest.id, role="advisor", is_active=True))
     db.commit()
+    # The recorded clean-up + Batch 1 draft (Issue #507), exactly as production runs it.
+    from app.services.programs import workspace_reset as WR
+    for k, l in enumerate(db.query(Lead).filter(Lead.organization_id == rest.id).order_by(Lead.id).limit(40).all()):
+        if k < 8:
+            l.status, l.tier = "new", "pre_need"
+    db.commit()
+    for l in db.query(Lead).filter(Lead.organization_id == rest.id).all():
+        if l.status == "new" and l.tier == "partial":
+            l.tier = "pre_need"
+        l.phone = (l.phone or "").lstrip("+")
+    db.commit()
+    res = WR.apply(db, rest, "preview-1")
+    print("workspace reset:", res["summary"]["changes"])
     print("restland cutover:", out["reconciliation"])
     print("login: preview@example.com /", PW)
     print("sci org:", sci.id, "restland org:", rest.id)

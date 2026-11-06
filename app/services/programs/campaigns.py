@@ -60,7 +60,10 @@ AI_NOTES: Dict[str, Dict[str, str]] = {
 
 # Campaigns that speak ONLY with their own approved copy: never a playbook,
 # never the re-engagement follow-up line, never the program's generic touches.
-OWN_COPY_KEYS = {CENTRAL_ALABAMA_KEY}
+# Restland Family File Review (#507): its own drafted sequence, switched on
+# only by a person in Campaigns, never by approving a family.
+RESTLAND_FFR_KEY = "restland_family_file_review"
+OWN_COPY_KEYS = {CENTRAL_ALABAMA_KEY, RESTLAND_FFR_KEY}
 
 # ── per-touch copy ───────────────────────────────────────────────────────────
 #

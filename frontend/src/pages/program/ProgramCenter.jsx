@@ -34,6 +34,7 @@ import Campaigns from './sci/Campaigns'
 import Assets from './sci/Assets'
 import Launch from './sci/Launch'
 import Health from './sci/Health'
+import DataReview from './sci/DataReview'
 import Settings from './sci/Settings'
 import Send from './sci/Send'
 import Leads from './sci/Leads'
@@ -64,6 +65,7 @@ const TABS = [
   { key: 'health', label: 'Health', icon: 'health' },
   { key: 'sms-recovery', label: 'SMS Recovery', icon: 'health' },
   { key: 'settings', label: 'Settings', icon: 'settings' },
+  { key: 'cleanup', label: 'Clean-up & Batch 1', icon: 'review' },
 ]
 
 /** Open Review on the first queue that has work in it, most urgent first. */
@@ -256,6 +258,7 @@ export default function ProgramCenter() {
           {!personId && tab === 'launch' && <Launch isManager={isManager} onChange={load} goTab={goTab} />}
           {!personId && tab === 'send' && <Send locations={data.locations} isManager={isManager} locationId={locationId} goTab={goTab} automation={data.automation} openPerson={openPerson} />}
           {!personId && tab === 'health' && <Health goTab={goTab} />}
+          {!personId && tab === 'cleanup' && <DataReview openPerson={id => setParam('person', id)} />}
           {!personId && tab === 'sms-recovery' && <SmsRecoveryQueue openPerson={openPerson} />}
           {!personId && tab === 'settings' && <Settings isManager={isManager} program={prog} readiness={data.readiness}
             locations={realLocations} onChange={load} goTab={goTab} automation={data.automation} />}

@@ -1,0 +1,97 @@
+"""WORKSPACE DATA RESET - recorded, reversible clean-up of one workspace (Issue #507).
+
+Built for Restland Cemetery and Funeral Home (one location, ~10.6k families
+imported from several lists over the years) before its first program campaign.
+Nothing here is Restland-specific in code; a run names its organization.
+
+ADDITIVE ONLY. These are new tables; create_all() is the whole migration.
+
+EVERY CHANGE IS AN ITEM. A run writes one WorkspaceResetItem per row it touches
+(entity, before, after, why), and the rollback restores exactly those values.
+A lead's ORIGINAL values are never overwritten: dispositions, normalized
+phone/email and data notes sit beside the lead in LeadDisposition.
+
+AUDIENCE IS A SNAPSHOT. CampaignAudienceMember records who a campaign WOULD
+include or exclude and why, at a point in time. A member row never enrolls,
+approves or sends anything; the program's own approval step does that.
+"""
+import uuid
+from datetime import datetime
+
+from sqlalchemy import Boolean, Column, DateTime, Index, Integer, String, Text, UniqueConstraint
+
+from app.models.models import Base
+
+
+def _uuid() -> str:
+    return str(uuid.uuid4())
+
+
+class WorkspaceResetRun(Base):
+    __tablename__ = "workspace_reset_runs"
+    id = Column(String, primary_key=True, default=_uuid)
+    organization_id = Column(String, nullable=False, index=True)
+    run_key = Column(String, nullable=False)              # idempotency key, e.g. "restland-reset-1"
+    mode = Column(String, nullable=False)                 # plan | apply | rollback
+    status = Column(String, nullable=False, default="started")   # started | applied | planned | rolled_back | failed
+    summary_json = Column(Text, nullable=True)
+    error = Column(Text, nullable=True)
+    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    finished_at = Column(DateTime, nullable=True)
+    rolled_back_at = Column(DateTime, nullable=True)
+    __table_args__ = (UniqueConstraint("organization_id", "run_key", "mode", name="uq_reset_run_key"),)
+
+
+class WorkspaceResetItem(Base):
+    __tablename__ = "workspace_reset_items"
+    id = Column(String, primary_key=True, default=_uuid)
+    run_id = Column(String, nullable=False, index=True)
+    organization_id = Column(String, nullable=False)
+    entity = Column(String, nullable=False)               # cadence_state | pipeline_conversation | cadence_template | campaign_family | ...
+    entity_id = Column(String, nullable=False)
+    action = Column(String, nullable=False)               # pause | create | set_default | ...
+    before_json = Column(Text, nullable=True)
+    after_json = Column(Text, nullable=True)
+    reason = Column(Text, nullable=True)
+    reverted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class LeadDisposition(Base):
+    """One current clean-up decision per family. Original lead values untouched."""
+    __tablename__ = "lead_dispositions"
+    id = Column(String, primary_key=True, default=_uuid)
+    organization_id = Column(String, nullable=False)
+    lead_id = Column(String, nullable=False)
+    disposition = Column(String, nullable=False)    # retain | merged_duplicate | duplicate_review | manual_review | suppressed | test | email_only
+    review_queue = Column(String, nullable=True)    # needs_classification | contact_data | duplicate | none
+    phone_e164 = Column(String, nullable=True)      # normalized beside the original, never written onto the lead
+    phone_issue = Column(String, nullable=True)     # missing | invalid | None
+    email_issue = Column(String, nullable=True)     # missing | malformed | None
+    name_issue = Column(String, nullable=True)      # incomplete | None
+    canonical_lead_id = Column(String, nullable=True)
+    shares_phone_with = Column(Integer, nullable=False, default=0)
+    notes_json = Column(Text, nullable=True)
+    run_id = Column(String, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("organization_id", "lead_id", name="uq_lead_disposition"),
+                      Index("ix_lead_disposition_org_disp", "organization_id", "disposition"))
+
+
+class CampaignAudienceMember(Base):
+    """Who a campaign would include or exclude, and why - a snapshot, not an enrollment."""
+    __tablename__ = "campaign_audience_members"
+    id = Column(String, primary_key=True, default=_uuid)
+    organization_id = Column(String, nullable=False)
+    campaign_key = Column(String, nullable=False)
+    lead_id = Column(String, nullable=False)
+    status = Column(String, nullable=False)          # proposed | eligible | excluded
+    segment = Column(String, nullable=False)         # ready | prior_conversation | past_appointment | earlier_sequence | ...
+    reasons_json = Column(Text, nullable=True)
+    batch = Column(Integer, nullable=True)           # 1 for the staged first batch
+    destination = Column(String, nullable=True)      # E.164 the batch would text
+    is_staged = Column(Boolean, nullable=False, default=False)
+    run_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    __table_args__ = (UniqueConstraint("organization_id", "campaign_key", "lead_id", name="uq_campaign_audience"),
+                      Index("ix_campaign_audience_org_key_status", "organization_id", "campaign_key", "status"))
