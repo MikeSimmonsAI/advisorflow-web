@@ -547,7 +547,21 @@ def ops_purge_tests(org_id: str, db: Session = Depends(get_db), user: User = Dep
         apps = db.query(VoltApplication).filter(VoltApplication.rep_serial.in_(serials)).all()
         ids = [a.id for a in apps]
         removed["applications"] = len(apps)
+        # Sessions whose ONLY attendees were test reps are test sessions: remove
+        # them too. A session with any real attendee keeps everyone but the test rep.
+        touched = {sid for (sid,) in db.query(VoltSessionAttendee.session_id)
+                   .filter(VoltSessionAttendee.rep_serial.in_(serials)).distinct().all()}
         db.query(VoltSessionAttendee).filter(VoltSessionAttendee.rep_serial.in_(serials)).delete(synchronize_session=False)
+        removed["sessions"] = 0
+        for sid in touched:
+            if db.query(VoltSessionAttendee).filter(VoltSessionAttendee.session_id == sid).count() == 0:
+                sess = db.get(VoltSession, sid)
+                if sess is not None and sess.organization_id == org_id:
+                    db.query(VoltAuditEvent).filter(VoltAuditEvent.organization_id == org_id,
+                                                    VoltAuditEvent.entity_type == "session",
+                                                    VoltAuditEvent.entity_id == sid).delete(synchronize_session=False)
+                    db.delete(sess)
+                    removed["sessions"] += 1
         db.query(VoltAuditEvent).filter(VoltAuditEvent.organization_id == org_id,
                                         ((VoltAuditEvent.entity_type == "rep") & VoltAuditEvent.entity_id.in_([str(s) for s in serials]))
                                         | ((VoltAuditEvent.entity_type == "application") & VoltAuditEvent.entity_id.in_(ids or ["-"]))
