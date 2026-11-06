@@ -40,6 +40,10 @@ const PROGRAMS = {
   acquisition_ops: { rank: 8, variant: 'acquisition', symbol: '◎', kind: 'ACQUISITION CONTROL CENTER',
                      summary: 'Prospects, evidence, pipeline and pilot controls',
                      facts: ['Prospects', 'Pipeline', 'Pilot controls'] },
+  // VOLT Marketing recruiting program (#535) - owner-approved red and black.
+  volt: { rank: 7, variant: 'volt', symbol: 'ϟ', kind: 'VOLT MARKETING · RECRUITING',
+          summary: 'Applicants, reviews, referrals, Zoom sessions and reports',
+          facts: ['Applicants', 'Referrals', 'Zoom Sessions'] },
   business: { rank: 7, variant: 'general', symbol: '◈', kind: 'BUSINESS OPERATIONS',
               summary: 'Your dedicated business workspace',
               facts: ['Leads', 'Conversations', 'Calendar'] },
@@ -103,8 +107,10 @@ export function programCards(ctx) {
   const isProductHost = w => products.some(p => p.organization_id === w.organization_id)
   const cards = []
   const others = []
+  const voltOrgs = new Set((ctx?.volt_contexts || []).map(v => v.organization_id))
   for (const w of workspaces) {
     if (isProductHost(w)) continue
+    if (voltOrgs.has(w.organization_id)) continue
     // A workspace whose kind of business has no dedicated identity yet still
     // gets a full card, in the neutral EvoSys look (Mike, 2026-10-21) — never
     // a plain row. Only the presentation is neutral; the workspace and its
@@ -144,6 +150,15 @@ export function programCards(ctx) {
                  display: 'Acquisition Control Center',
                  summary: a.hub ? 'Master prospects, research, distribution and every cleaning client' : p.summary,
                  orgLabel: a.hub ? 'EvoSys Pro' : a.organization_name })
+  }
+  // VOLT MARKETING (#535): only where the server confirmed recruiting-staff
+  // or owner access for that tenant.
+  for (const v of ctx?.volt_contexts || []) {
+    const p = PROGRAMS.volt
+    cards.push({ ...v, type: 'volt_ops', organization_id: 'volt-ops:' + v.organization_id,
+                 volt_organization_id: v.organization_id, program: 'volt', variant: p.variant,
+                 symbol: p.symbol, rank: p.rank, kind: p.kind, facts: p.facts, display: 'VOLT Marketing',
+                 summary: p.summary, orgLabel: v.access === 'viewer' ? 'View only' : null })
   }
   // BACK OFFICE AND EXECUTIVE SUITE are separate destinations on the same
   // launcher - only when the server says this person has them, never the

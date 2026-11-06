@@ -600,3 +600,5 @@ import app.models.program_models  # noqa: F401  (outreach programs: location pro
 import app.models.esign_models  # noqa: F401  (esign_envelopes, esign_signers, esign_events - EvoSys e-signature)
 # Sign in with Google (#430): transactions, explicit account links, login tickets.
 import app.models.google_signin_models  # noqa: F401  (imported for side effects)
+# VOLT Marketing recruiting program (#535): projects, reps, applications, documents, Zoom sessions, audit.
+import app.models.volt_models  # noqa: F401  (imported for side effects)

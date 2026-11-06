@@ -286,6 +286,17 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
                                 detail="This login is for the Deal Room only.")
         return user
 
+    # ── VOLT APPLICANT FENCE (#535) ──────────────────────────────────────────
+    # A VOLT applicant/rep login (role "volt_rep", no workspace) reaches its own
+    # VOLT applicant API and the sign-in/session paths - nothing else. Staff
+    # screens (/volt/ops/*) re-check workspace authority and never see it.
+    if user.role == "volt_rep":
+        _p = request.url.path if request is not None else ""
+        if not (_p.startswith("/volt/rep/") or _p in INVESTOR_AUTH_PATHS):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                detail="This login is for the VOLT Marketing applicant portal only.")
+        return user
+
     # Enforce must_change_password server-side
     if user.must_change_password:
         path = request.url.path

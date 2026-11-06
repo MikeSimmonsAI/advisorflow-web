@@ -337,6 +337,15 @@ def _acquisition_ops(db: Session, user: User) -> List[Dict[str, Any]]:
         return []
 
 
+def _volt_contexts(db: Session, user: User) -> List[Dict[str, Any]]:
+    try:
+        from app.services.volt.common import contexts_for
+        return contexts_for(db, user)
+    except Exception:  # pragma: no cover - never let a hint break login
+        _log.warning("could not resolve VOLT access", exc_info=True)
+        return []
+
+
 def _acquisition_enabled(org) -> bool:
     """Opens the managed-acquisition client portal (Issue #452) - explicit
     `client_acquisition` key and a cleaning identity, never by name or slug."""
@@ -775,6 +784,9 @@ def authorized_contexts(db: Session, user: User, host_slug: Optional[str] = None
         # ACQUISITION OPERATIONS (Issue #452): clients this login was granted
         # operator access to by the platform owner. Never God Mode.
         "acquisition_ops": _acquisition_ops(db, user),
+        # VOLT MARKETING (#535): recruiting operations for the platform owner and
+        # the VOLT organization's own org_admin/manager members. Never applicants.
+        "volt_contexts": _volt_contexts(db, user),
         "workspace_count": len(workspaces),
         "default_context": default,
         # WHICH BRAND'S LOOK the launcher wears (e.g. BookaBoost), decided

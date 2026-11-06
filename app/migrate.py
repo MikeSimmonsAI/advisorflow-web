@@ -189,6 +189,27 @@ def main(argv=None) -> int:
         except Exception as e:                               # noqa: BLE001
             log.error("Retention demo errored (deploy continues): %s: %s", type(e).__name__, str(e)[:200])
 
+    # ── 3e. VOLT MARKETING (#535) - idempotent tenant + project load ──
+    # Creates the VOLT Marketing organization and its three projects if they
+    # are missing. Never changes a project staff already maintain, creates no
+    # login and no applicant. Never changes the exit code.
+    try:
+        from app.deps import SessionLocal
+        from app.services.volt import seed as volt_seed
+        _db = SessionLocal()
+        try:
+            res = volt_seed.ensure(_db)
+            _db.commit()
+            log.info("volt: org=%s created_org=%s created_program=%s created_projects=%s",
+                     res.get("organization_id"), res["organization"], res["program"], ",".join(res["projects"]) or "-")
+        except Exception:
+            _db.rollback()
+            raise
+        finally:
+            _db.close()
+    except Exception as e:                                   # noqa: BLE001
+        log.error("VOLT seed errored (deploy continues): %s: %s", type(e).__name__, str(e)[:200])
+
     # ── 4. SAY WHAT HAPPENED ──────────────────────────────────────────────
     log.info("migration outcome=%s elapsed=%ss columns_checked=%s",
              LAST_RUN["outcome"], LAST_RUN["elapsed_seconds"],

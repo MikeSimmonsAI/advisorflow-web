@@ -114,6 +114,9 @@ const ProgramLive = lazyPage(() => import('./pages/program/command/Command'))
 const RoofingShell = lazyPage(() => import('./pages/roofing/RoofingShell'))
 // Private Buyer Deal Room (#415): invited investors only; its own login and token slot.
 const InvestorPortal = lazyPage(() => import('./pages/investor/InvestorPortal'))
+// VOLT Marketing (#535): public applicant portal + rep dashboard, and staff operations.
+const VoltPortal = lazyPage(() => import('./pages/volt/VoltPortal'))
+const VoltOps = lazyPage(() => import('./pages/volt/VoltOps'))
 const RoofingMission = lazyPage(() => import('./pages/roofing/MissionControl'))
 const RoofingQueue = lazyPage(() => import('./pages/roofing/WorkQueue'))
 const RoofingConversations = lazyPage(() => import('./pages/roofing/Conversations'))
@@ -872,6 +875,10 @@ function WorkspaceRoute() {
     // requests, and that burst would carry the previous workspace's header -
     // a wrong-numbers bug, which is worse than an error because it looks fine.
     // Idempotent and guarded, so it is a write at most once per entry.
+    // VOLT MARKETING (#535) IS ITS OWN PROGRAM: its organization is never the
+    // general workspace. Staff the server confirmed for it open VOLT Operations.
+    const voltEntry = (ctx?.volt_contexts || []).find(v => v && v.organization_id === organizationId)
+    if (voltEntry) { clearWorkspaceContext(); return <Navigate to={voltEntry.path} replace /> }
     if (getWorkspaceContext() !== organizationId) setWorkspaceContext(organizationId)
     // A PROGRAM WORKSPACE (SCI) IS ITS OWN SUITE. Entering it opens the program
     // center - never the general workspace tools - for every login, the
@@ -1159,7 +1166,18 @@ function WorkspaceSelector() {
   const workspaces = ctx.workspace_contexts || []
   const products = ctx.product_contexts || []
   const previews = ctx.preview_contexts || []
-  if (workspaces.length === 1 && products.length === 0 && previews.length === 0) {
+  // VOLT MARKETING (#535): a recruiting-staff login whose only destination is
+  // VOLT lands in VOLT Operations, never the general workspace of its org.
+  const volts = ctx.volt_contexts || []
+  const voltOrgIds = new Set(volts.map(v => v.organization_id))
+  const nonVolt = workspaces.filter(w => !voltOrgIds.has(w.organization_id))
+  const otherDestinations = products.length + previews.length + (ctx.acquisition_ops || []).length
+    + (ctx.has_back_office ? 1 : 0) + (ctx.executive_contexts || []).length
+  if (volts.length === 1 && nonVolt.length === 0 && otherDestinations === 0) {
+    clearWorkspaceContext()
+    return <Navigate to={volts[0].path} replace />
+  }
+  if (volts.length === 0 && workspaces.length === 1 && products.length === 0 && previews.length === 0) {
     return <Navigate to={'/workspace/' + workspaces[0].organization_id} replace />
   }
   return <ProgramAccessPortal contexts={ctx} onChoose={(item) => {
@@ -1184,6 +1202,10 @@ function WorkspaceSelector() {
     if (item.type === 'acquisition_ops') {
       clearWorkspaceContext()
       navigate('/acquisition-ops'); return
+    }
+    if (item.type === 'volt_ops') {
+      clearWorkspaceContext()
+      navigate(item.path); return
     }
     if (item.type === 'executive') {
       clearWorkspaceContext()
@@ -1446,6 +1468,10 @@ export default function App() {
         <Route path="/investor/:token" element={<InvestorRoom />} />
         {/* PRIVATE BUYER DEAL ROOM (#415) - signed-in investors, server-fenced to /investor/* APIs. */}
         <Route path="/investors/*" element={<InvestorPortal />} />
+        {/* VOLT MARKETING (#535): public applicant portal; applicants use their own token slot, fenced server-side to /volt/rep/*. */}
+        <Route path="/volt/*" element={<VoltPortal />} />
+        {/* VOLT OPERATIONS: staff via Program Access; /volt/ops/* re-checks authority on every request. */}
+        <Route path="/volt-ops/:orgId/*" element={<ProtectedRoute bare><VoltOps /></ProtectedRoute>} />
         <Route path="/my-property/:token" element={<SellerTransaction />} />
         {/* ── CUSTOM COMMERCIAL AGREEMENTS ──
             NO ORGANIZATION ID ON THE CUSTOMER ROUTE, for the same reason the

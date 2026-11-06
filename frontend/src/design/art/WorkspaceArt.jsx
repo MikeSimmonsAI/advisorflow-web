@@ -21,6 +21,8 @@ const PALETTES = {
   general:   { sky: ['#f1f4f9', '#dae2ee'], hill: '#cbd5e3', hill2: '#b8c4d6', main: '#5b6b85', deep: '#27324a', light: '#ffffff', warm: '#eef2f8' },
   cleaning:  { sky: ['#e9f7fe', '#c7ebfb'], hill: '#a9def6', hill2: '#86cff0', main: '#0e95d4', deep: '#0b4a6b', light: '#ffffff', warm: '#eafaff' },
   acquisition: { sky: ['#f4effe', '#e2d6fb'], hill: '#d2c2f8', hill2: '#b9a1f2', main: '#6d3fd9', deep: '#2a1765', light: '#ffffff', warm: '#efe7ff' },
+  // VOLT Marketing (#535): red and black only.
+  volt:      { sky: ['#fff1f2', '#ffd6da'], hill: '#ffc2c8', hill2: '#ff9aa5', main: '#c8102e', deep: '#0b0b0c', light: '#ffffff', warm: '#ffe3e6' },
   preview:   { sky: ['#f0f1ff', '#dcdffd'], hill: '#c8cdfb', hill2: '#b1b8f7', main: '#5b5fe0', deep: '#2b2f86', light: '#ffffff', warm: '#eef0ff' },
 }
 
@@ -365,6 +367,21 @@ function CleaningScene({ p, id }) {
 
 // PREVIEW: a browser window showing a mockup - something you can open and look
 // at, clearly not a live business.
+// VOLT MARKETING: a black badge with the red lightning bolt and a team of reps.
+function VoltScene({ p, id }) {
+  return (
+    <Frame p={p} id={id}>
+      <Hills p={p} />
+      <g transform="translate(150 26)">
+        <rect width="104" height="118" rx="14" fill={p.deep} />
+        <path d="M58 14 L84 14 L66 52 L82 52 L40 104 L52 64 L34 64 Z" fill={p.main} />
+      </g>
+      <Person x={96} y={128} s={0.9} body={p.main} head="#e7b48d" hair="#2b1d14" />
+      <Person x={124} y={132} s={0.8} body={p.deep} head="#c98e65" hair="#1b1b1b" />
+    </Frame>
+  )
+}
+
 function PreviewScene({ p, id }) {
   return (
     <Frame p={p} id={id}>
@@ -432,7 +449,7 @@ function RetentionScene({ p, id }) {
 const SCENES = {
   sci: SciScene, energy: EnergyScene, roofing: RoofingScene, wholesale: WholesaleScene,
   retention: RetentionScene, insurance: InsuranceScene, funeral: FuneralScene, office: OfficeScene, general: GeneralScene,
-  cleaning: CleaningScene, acquisition: CleaningScene, preview: PreviewScene,
+  cleaning: CleaningScene, acquisition: CleaningScene, preview: PreviewScene, volt: VoltScene,
 }
 
 export const ART_VARIANTS = Object.keys(SCENES)
