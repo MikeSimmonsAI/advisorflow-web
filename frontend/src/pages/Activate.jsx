@@ -75,7 +75,8 @@ export default function Activate() {
         <div className="act-card">
           <h1>You're all set</h1>
           <div className="act-note ok">Your password is saved. You can sign in now.</div>
-          <button className="act-btn" onClick={() => nav(nextAfter ? '/login?next=' + encodeURIComponent(nextAfter) : '/login')}>Go to sign in</button>
+          {/* A VOLT applicant's reset link carries next=/volt/sign-in: that page IS the sign-in. */}
+          <button className="act-btn" onClick={() => nav(nextAfter.startsWith('/volt/') ? nextAfter : (nextAfter ? '/login?next=' + encodeURIComponent(nextAfter) : '/login'))}>Go to sign in</button>
         </div>
       </div>
     )

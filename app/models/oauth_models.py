@@ -76,7 +76,8 @@ PROVIDERS = (PROVIDER_GOOGLE, PROVIDER_MICROSOFT)
 FLOW_SETTINGS = "settings"      # a signed-in advisor connecting from /settings
 FLOW_SETUP = "setup"            # an advisor following an admin's setup link
 FLOW_MAILBOX = "mailbox"        # a platform owner connecting a shared reply mailbox
-FLOWS = (FLOW_SETTINGS, FLOW_SETUP, FLOW_MAILBOX)
+FLOW_VOLT_MAILBOX = "volt_mailbox"  # VOLT staff connecting VOLT's support mailbox
+FLOWS = (FLOW_SETTINGS, FLOW_SETUP, FLOW_MAILBOX, FLOW_VOLT_MAILBOX)
 
 # How long a started authorization may sit unfinished. Long enough for a real
 # person to read a consent screen, pick an account and approve; short enough
@@ -112,6 +113,11 @@ class OAuthAuthorizationTransaction(Base):
     # Who STARTED it, which is not always the subject: an org admin generates a
     # setup link for an advisor. Recorded for audit; never used to widen scope.
     initiated_by_user_id = Column(String, nullable=True)
+
+    # The workspace a grant is FOR when that is not the subject's own: VOLT
+    # staff connecting VOLT's support mailbox. Read only by that flow's
+    # callback; written only by its authorized initiation.
+    target_organization_id = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     expires_at = Column(DateTime, nullable=False)

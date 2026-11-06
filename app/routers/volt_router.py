@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -30,11 +30,19 @@ from app.models.volt_models import (
     VoltApplication, VoltDocument, VoltProject, VoltRep, VoltSession, VoltSessionAttendee, VoltTalentSignup,
 )
 from app.services.volt import common as C
-from app.services.volt import core, docs, hiring, reports, sessions, talent
+from app.services.volt import core, docs, hiring, mail, reports, sessions, talent
 
 public_router = APIRouter(prefix="/volt/public", tags=["volt-public"])
 rep_router = APIRouter(prefix="/volt/rep", tags=["volt-rep"])
 ops_router = APIRouter(prefix="/volt/ops", tags=["volt-ops"])
+
+
+def _send_after(background: BackgroundTasks, row) -> None:
+    """Send a queued VOLT email after the response, from its own session.
+    The row is committed with the request, so a lost background task is
+    picked up by the email poller's retry pass."""
+    if row is not None and row.state == "queued":
+        background.add_task(mail.flush_in_background, [row.id])
 
 
 def _token(db, user, request):
@@ -73,11 +81,19 @@ def invite(request: Request, slug: str, ref: str = "", project: str = "", db: Se
 @public_router.post("/{slug}/register")
 @limiter.limit("30/minute")
 def register(request: Request, slug: str, body: Dict[str, Any] = Body(...), db: Session = Depends(get_db)):
+    # (No BackgroundTasks parameter: the rate limiter's wrapper cannot resolve
+    # it. The task rides on the response instead - same effect.)
+    from fastapi.responses import JSONResponse
+    from starlette.background import BackgroundTask
     prog = C.program_by_slug(db, slug)
     user, rep, app = core.register(db, prog, body)
+    db.flush()
+    row = mail.on_registered(db, prog, rep, app)
     db.commit()
-    return {"access_token": _token(db, user, request), "token_type": "bearer", "rep": C.public_rep(rep),
-            "application_id": app.id}
+    out = {"access_token": _token(db, user, request), "token_type": "bearer", "rep": C.public_rep(rep),
+           "application_id": app.id}
+    task = BackgroundTask(mail.flush_in_background, [row.id]) if row is not None and row.state == "queued" else None
+    return JSONResponse(out, background=task)
 
 
 @public_router.post("/{slug}/talent-pool")
@@ -225,10 +241,14 @@ def put_answers(slug: str, app_id: str, body: Dict[str, Any] = Body(...), db: Se
 
 
 @rep_router.post("/{slug}/applications/{app_id}/submit")
-def submit_app(slug: str, app_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def submit_app(slug: str, app_id: str, background: BackgroundTasks, db: Session = Depends(get_db),
+               user: User = Depends(get_current_user)):
     prog, rep = _me(db, slug, user)
     app = core.own_application(db, _need_rep(rep), app_id)
+    was = app.status
     core.submit(db, prog, rep, app, user)
+    if app.status != was:
+        _send_after(background, mail.on_submitted(db, prog, rep, app))
     db.commit()
     return core.application_dict(db, prog, rep, app)
 
@@ -365,11 +385,14 @@ def ops_file(org_id: str, app_id: str, db: Session = Depends(get_db), user: User
 
 
 @ops_router.post("/{org_id}/applications/{app_id}/status")
-def ops_status(org_id: str, app_id: str, body: Dict[str, Any] = Body(...), db: Session = Depends(get_db),
-               user: User = Depends(get_current_user)):
+def ops_status(org_id: str, app_id: str, background: BackgroundTasks, body: Dict[str, Any] = Body(...),
+               db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     prog, _ = _staff(db, user, org_id, write=True)
     a = _app_in(db, org_id, app_id)
+    before = (a.status, a.return_reason)
     core.set_status(db, prog, a, body.get("status"), body.get("reason"), user)
+    if (a.status, a.return_reason) != before:
+        _send_after(background, mail.on_status(db, prog, a))
     db.commit()
     return {"id": a.id, "status": a.status, "approved_at": C.iso(a.approved_at), "started_at": C.iso(a.started_at)}
 
@@ -434,13 +457,16 @@ def ops_doc_file(org_id: str, doc_id: str, db: Session = Depends(get_db), user: 
 
 
 @ops_router.post("/{org_id}/documents/{doc_id}/review")
-def ops_doc_review(org_id: str, doc_id: str, body: Dict[str, Any] = Body(...), db: Session = Depends(get_db),
-                   user: User = Depends(get_current_user)):
+def ops_doc_review(org_id: str, doc_id: str, background: BackgroundTasks, body: Dict[str, Any] = Body(...),
+                   db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     prog, _ = _staff(db, user, org_id, write=True)
     d = db.get(VoltDocument, doc_id)
     if d is None or d.organization_id != org_id:
         raise HTTPException(status_code=404, detail="File not found.")
+    before = (d.status, d.reason)
     docs.review(db, prog, d, body.get("status"), body.get("reason"), user)
+    if (d.status, d.reason) != before:
+        _send_after(background, mail.on_doc_replace(db, prog, d))
     db.commit()
     return core.doc_dict(d)
 
@@ -578,3 +604,86 @@ def ops_purge_tests(org_id: str, db: Session = Depends(get_db), user: User = Dep
     C.program_for_org(db, org_id)
     from app.services.volt import cleanup
     return cleanup.purge(db, org_id)
+
+
+# ═══════════════════════════════════════════════ SUPPORT MAILBOX ══════
+# VOLT staff only. Tokens never leave the server; the status says which
+# mailbox is connected, whether it works and what was sent.
+
+@ops_router.get("/{org_id}/email")
+def ops_email_status(org_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    prog, access = _staff(db, user, org_id)
+    out = mail.status(db, prog)
+    out["can_connect"] = access in ("owner", "staff")
+    return out
+
+
+@ops_router.post("/{org_id}/email/connect")
+def ops_email_connect(org_id: str, request: Request, db: Session = Depends(get_db),
+                      user: User = Depends(get_current_user)):
+    """Start Microsoft's sign-in for VOLT's support mailbox. The person signs
+    in AS that mailbox on Microsoft's page; the callback refuses any other."""
+    prog, _ = _staff(db, user, org_id, write=True)
+    from app.models.oauth_models import FLOW_VOLT_MAILBOX, PROVIDER_MICROSOFT
+    from app.services import oauth_state_service
+    state = oauth_state_service.issue_state(
+        db, provider=PROVIDER_MICROSOFT, subject=user, flow=FLOW_VOLT_MAILBOX,
+        client_ip=(request.client.host if request.client else None), target_organization_id=org_id)
+    try:
+        return {"authorization_url": mail.authorization_url(state, mail.support_address(prog))}
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@ops_router.post("/{org_id}/email/poll-now")
+def ops_email_poll(org_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    prog, _ = _staff(db, user, org_id, write=True)
+    box = mail.mailbox(db, org_id)
+    if box is None:
+        raise HTTPException(status_code=409, detail="The support mailbox is not connected.")
+    res = mail.poll(db, box)
+    retried = mail.retry_due(db)
+    return {"result": res, "retried": retried, "status": mail.status(db, prog)}
+
+
+@ops_router.get("/{org_id}/inbox")
+def ops_inbox(org_id: str, show: str = Query("open"), db: Session = Depends(get_db),
+              user: User = Depends(get_current_user)):
+    _staff(db, user, org_id)
+    return {"threads": mail.threads(db, org_id, "all" if show == "all" else "open")}
+
+
+@ops_router.get("/{org_id}/inbox/thread")
+def ops_inbox_thread(org_id: str, conversation: str = Query(..., max_length=500), db: Session = Depends(get_db),
+                     user: User = Depends(get_current_user)):
+    _staff(db, user, org_id)
+    return mail.thread(db, org_id, conversation)
+
+
+@ops_router.post("/{org_id}/inbox/reply")
+def ops_inbox_reply(org_id: str, body: Dict[str, Any] = Body(...), db: Session = Depends(get_db),
+                    user: User = Depends(get_current_user)):
+    prog, _ = _staff(db, user, org_id, write=True)
+    return mail.reply(db, prog, str(body.get("conversation_id") or ""), user, str(body.get("text") or ""))
+
+
+@ops_router.post("/{org_id}/inbox/handled")
+def ops_inbox_handled(org_id: str, body: Dict[str, Any] = Body(...), db: Session = Depends(get_db),
+                      user: User = Depends(get_current_user)):
+    _staff(db, user, org_id, write=True)
+    conv = str(body.get("conversation_id") or "")
+    mail.mark_handled(db, org_id, conv, user, body.get("handled") is not False)
+    db.commit()
+    return mail.thread(db, org_id, conv)
+
+
+@ops_router.get("/{org_id}/inbox/messages/{message_id}/attachments/{att_id}")
+def ops_inbox_attachment(org_id: str, message_id: str, att_id: str, db: Session = Depends(get_db),
+                         user: User = Depends(get_current_user)):
+    _staff(db, user, org_id)
+    raw, name = mail.attachment(db, org_id, message_id, att_id)
+    # Untrusted file: always a download, never rendered by the browser here.
+    return Response(content=raw, media_type="application/octet-stream", headers={
+        "Content-Disposition": 'attachment; filename="%s"' % name.replace('"', ""),
+        "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store",
+        "Content-Security-Policy": "default-src 'none'; sandbox"})
