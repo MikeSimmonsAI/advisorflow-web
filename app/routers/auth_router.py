@@ -731,9 +731,19 @@ def forgot_password(request: Request, req: ForgotPasswordRequest, db: Session = 
         _row, raw = _staff.issue(db, user, user, purpose=PURPOSE_RESET, ttl_hours=1)
         base = (os.environ.get("FRONTEND_URL") or "").rstrip("/")
         nxt = _safe_next(req.next)
-        link = "%s/activate?token=%s%s" % (base, raw, ("&next=" + quote(nxt)) if nxt else "")
         env = (os.environ.get("APP_ENV") or "production").lower()
         where = "EvoSys Pro (staging)" if env == "staging" else "EvoSys Pro"
+        if getattr(user, "role", None) == "volt_rep":
+            # A VOLT applicant: VOLT's own sender, VOLT's domain, back to the
+            # VOLT sign-in afterwards. The shared reset token is unchanged.
+            from app.services.volt import mail as _volt_mail
+            if _volt_mail.password_reset(db, user, raw, _row.id):
+                _log.info("forgot-password: VOLT reset link emailed to user %s", user.id)
+                return _FORGOT_OK
+            v = _volt_mail.reset_link_for(db, user)
+            if v and v["origin"]:
+                base, nxt, where = v["origin"], v["next"], v["brand"]
+        link = "%s/activate?token=%s%s" % (base, raw, ("&next=" + quote(nxt)) if nxt else "")
         html = ("<p>Someone asked to reset the password for your %s account.</p>"
                 "<p><a href=\"%s\">Choose a new password</a> - this link works once, for one hour.</p>"
                 "<p>If you didn't ask for this, ignore this email; your password stays the same.</p>"

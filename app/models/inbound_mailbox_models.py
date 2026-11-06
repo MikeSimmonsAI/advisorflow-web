@@ -40,6 +40,10 @@ class InboundMailbox(Base):
     refresh_token_encrypted = Column(Text, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     connected_by_user_id = Column(String, nullable=True)
+    # NULL = the CRM reply mailbox routed to leads. "volt_support" = VOLT
+    # Marketing's own support mailbox: read and answered by
+    # app/services/volt/mail.py, never routed to leads.
+    purpose = Column(String, nullable=True)
     connected_at = Column(DateTime, default=datetime.utcnow)
 
     # Poll state. The cursor is the newest receivedDateTime handled, so a

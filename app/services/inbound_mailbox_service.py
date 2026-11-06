@@ -735,6 +735,10 @@ def _reconnect_alert(db: Session, box: InboundMailbox, error: str) -> None:
 
 def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[datetime] = None,
                  addresses: Optional[Dict[str, set]] = None, mover=None) -> Dict:
+    if getattr(box, "purpose", None):
+        # A purpose-built mailbox (VOLT support) is never routed to leads.
+        from app.services.volt import mail as _volt_mail
+        return dict(_volt_mail.poll(db, box, now=now), matched=0)
     now = now or datetime.utcnow()
     box.last_polled_at = now
     was_auth_error = box.last_status == "auth_error"
@@ -920,7 +924,8 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
 
 
 def probe(db: Session, box: InboundMailbox, folder: Optional[str] = None) -> Dict:
-    """Look at the mailbox without changing it: the access the sign-in actually
+    """
+Look at the mailbox without changing it: the access the sign-in actually
     grants, its folders and the 15 newest messages in ANY folder, so "why was
     nothing read / filed?" can be answered (moved to another folder, Junk, a
     different account signed in, a Mail.Read-only sign-in...). With `folder`
@@ -961,7 +966,10 @@ def probe(db: Session, box: InboundMailbox, folder: Optional[str] = None) -> Dic
 def poll_all_mailboxes(db: Session) -> Dict:
     totals = {"mailboxes_polled": 0, "mailbox_checked": 0, "mailbox_matched": 0,
               "mailbox_errors": 0, "mailbox_results": []}
-    boxes = db.query(InboundMailbox).filter(InboundMailbox.is_active.is_(True)).all()
+    # VOLT's support mailbox is read by app/services/volt/mail.py and never
+    # routed to leads; it is polled below, after the CRM mailboxes.
+    boxes = (db.query(InboundMailbox).filter(InboundMailbox.is_active.is_(True),
+                                             InboundMailbox.purpose.is_(None)).all())
     # Resolved once per run, not once per mailbox (see org_sending_addresses).
     addresses = org_sending_addresses(db) if boxes else None
     for box in boxes:
@@ -971,6 +979,12 @@ def poll_all_mailboxes(db: Session) -> Dict:
         totals["mailbox_matched"] += res.get("matched", 0)
         totals["mailbox_errors"] += res.get("errors", 0)
         totals["mailbox_results"].append(res)
+    try:
+        from app.services.volt import mail as _volt_mail
+        totals.update(_volt_mail.run_all(db))
+    except Exception:  # noqa: BLE001 - never stop the poller
+        db.rollback()
+        log.exception("VOLT support mailbox pass failed")
     try:
         from app.services.acquisition import outreach as _acq_outreach
         totals["acquisition_replies_applied"] = _acq_outreach.catch_up(db)

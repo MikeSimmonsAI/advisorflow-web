@@ -1699,6 +1699,12 @@ COLUMNS_TO_ADD = [
     ("volt_reps", "relevant_experience", "TEXT"),
     ("volt_reps", "additional_info", "TEXT"),
     ("volt_reps", "hiring_updated_at", "TIMESTAMP"),
+    # VOLT support mailbox (2026-11-06)
+    ("volt_programs", "support_email", "VARCHAR"),
+    ("volt_programs", "sender_name", "VARCHAR"),
+    ("volt_programs", "public_origin", "VARCHAR"),
+    ("inbound_mailboxes", "purpose", "VARCHAR"),
+    ("oauth_auth_transactions", "target_organization_id", "VARCHAR"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

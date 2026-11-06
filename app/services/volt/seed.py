@@ -93,6 +93,10 @@ def _apply_corrections(db: Session, org_id: str) -> list:
     return changed
 
 
+SUPPORT_EMAIL = "support@voltmarketing.live"
+PUBLIC_ORIGIN = "https://voltmarketing.live"
+
+
 def ensure(db: Session) -> Dict[str, object]:
     created = {"organization": False, "program": False, "projects": []}
     org = db.query(Organization).filter(Organization.slug == ORG_SLUG).first()
@@ -120,8 +124,9 @@ def ensure(db: Session) -> Dict[str, object]:
             created["platform"] = True
     prog = db.get(VoltProgram, org.id)
     if prog is None:
-        db.add(VoltProgram(organization_id=org.id, slug=DEFAULT_SLUG, name=ORG_NAME,
-                           profile_required_docs=json.dumps([])))
+        prog = VoltProgram(organization_id=org.id, slug=DEFAULT_SLUG, name=ORG_NAME,
+                           profile_required_docs=json.dumps([]))
+        db.add(prog)
         created["program"] = True
     have = {p.key for p in db.query(VoltProject).filter(VoltProject.organization_id == org.id).all()}
     for spec in PROJECTS:
@@ -133,6 +138,13 @@ def ensure(db: Session) -> Dict[str, object]:
                            required_docs=json.dumps(spec["required_docs"])))
         created["projects"].append(spec["key"])
     db.flush()
+    # VOLT's email identity (2026-11-06). Filled only where empty, so a value
+    # staff or a later release changes is never overwritten.
+    created["identity_set"] = []
+    for field, value in (("support_email", SUPPORT_EMAIL), ("sender_name", ORG_NAME), ("public_origin", PUBLIC_ORIGIN)):
+        if prog is not None and not getattr(prog, field, None):
+            setattr(prog, field, value)
+            created["identity_set"].append(field)
     created["corrected"] = _apply_corrections(db, org.id)
     db.flush()
     created["organization_id"] = org.id

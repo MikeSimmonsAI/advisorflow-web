@@ -543,7 +543,7 @@ function Apply({ portal, me, reload }) {
         }}
                         onTextChange={(t) => { setRefText(t); if (!t.trim()) setErrs((x) => { const n = { ...x }; delete n.referrer; return n }) }} signedIn={signedIn} testMode={testMode} invite={invite} error={errs.referrer} />
         {exists ? (
-          <Alert>This email already has an account. <Link to={`/volt/sign-in?next=/volt/apply/${projectKey}`}>Sign in to continue</Link> or <Link to="/forgot-password">reset your password</Link>.</Alert>
+          <Alert>This email already has an account. <Link to={`/volt/sign-in?next=/volt/apply/${projectKey}`}>Sign in to continue</Link> or <Link to="/forgot-password?next=/volt/sign-in">reset your password</Link>.</Alert>
         ) : <Alert>{err && !Object.keys(errs).length ? err : (Object.keys(errs).length ? 'Please fix the highlighted fields.' : '')}</Alert>}
         <button className="v-btn v-btn--red" type="submit" disabled={busy}>{busy ? 'Saving…' : hasProfile ? 'Start application →' : signedIn ? 'Create profile & start →' : 'Create account & start →'}</button>
         {!signedIn && <p className="v-small">Already registered? <Link to={`/volt/sign-in?next=/volt/apply/${projectKey}`}>Sign in</Link></p>}
@@ -581,7 +581,7 @@ function SignIn({ reload }) {
         <label htmlFor="v-si-pass">Password<input id="v-si-pass" type="password" autoComplete="current-password" required value={v.password} onChange={(e) => setV({ ...v, password: e.target.value })} /></label>
         <Alert>{err}</Alert>
         <button className="v-btn v-btn--red" type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign In →'}</button>
-        <p className="v-small"><Link to="/forgot-password">Forgot your password?</Link> · New here? <Link to="/volt#projects">Register & Apply</Link></p>
+        <p className="v-small"><Link to="/forgot-password?next=/volt/sign-in">Forgot your password?</Link> · New here? <Link to="/volt#projects">Register & Apply</Link></p>
       </form>
     </div>
   )

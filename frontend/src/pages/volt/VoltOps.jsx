@@ -104,6 +104,7 @@ function OpsShell({ orgId, home, children }) {
           <NavLink className="v-tab" to={`${base}/review`}>Review queue</NavLink>
           <NavLink className="v-tab" to={`${base}/sessions`}>Zoom Sessions</NavLink>
           <NavLink className="v-tab" to={`${base}/talent`}>Talent Pool</NavLink>
+          <NavLink className="v-tab" to={`${base}/email`}>Support email</NavLink>
           <NavLink className="v-tab" to={`${base}/reps`}>Reps</NavLink>
           <NavLink className="v-tab" to={`${base}/projects`}>Projects & documents</NavLink>
         </nav>
@@ -449,6 +450,165 @@ function TalentPool({ orgId }) {
   )
 }
 
+// ── Support email: connection, sent email, support inbox ───────────────────
+// The mailbox's Microsoft sign-in lives on the server only. Incoming mail is
+// untrusted: it is shown as plain text (React escapes it) and attachments are
+// downloads, never previews.
+const MAIL_KIND = { registered: 'Account ready', receipt: 'Application received', needs_update: 'Update requested',
+  doc_replace: 'Replace a document', approved: 'Approved', started: 'Started', password_reset: 'Password reset' }
+const MAIL_STATE = { sent: 'Sent', queued: 'Sending', failed: 'Failed', skipped: 'Not sent (test address)' }
+const CONNECT_ERR = { wrong_account: 'Microsoft signed in as a different account, so nothing was saved. Sign in as the support mailbox itself.',
+  not_authorized: 'Your VOLT access cannot connect the mailbox.', access_denied: 'The Microsoft permission request was declined.' }
+
+function fmtWhen(iso) { return iso ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—' }
+
+function SupportEmail({ orgId }) {
+  const [params, setParams] = useSearchParams()
+  const [st, setSt] = useState(null)
+  const [threads, setThreads] = useState(null)
+  const [show, setShow] = useState('open')
+  const [open, setOpen] = useState(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState('')
+  const load = useCallback(() => Promise.all([
+    api.get(`/volt/ops/${orgId}/email`).then(setSt),
+    api.get(`/volt/ops/${orgId}/inbox`, { params: { show } }).then((x) => setThreads(x.threads)),
+  ]).catch((e) => setErr(msg(e))), [orgId, show])
+  useEffect(() => { load() }, [load])
+  const connected = params.get('mailbox_connected')
+  const connectErr = params.get('mailbox_error')
+  async function connect() {
+    setBusy('connect'); setErr('')
+    try { const r = await api.post(`/volt/ops/${orgId}/email/connect`); window.location.assign(r.authorization_url) }
+    catch (e) { setErr(msg(e)); setBusy('') }
+  }
+  async function pollNow() {
+    setBusy('poll'); setErr('')
+    try { const r = await api.post(`/volt/ops/${orgId}/email/poll-now`); setSt(r.status); await load() }
+    catch (e) { setErr(msg(e)) } finally { setBusy('') }
+  }
+  const state = st?.state
+  return (
+    <>
+      <div className="v-row"><h2 style={{ fontSize: 30, letterSpacing: '-.04em' }}>Support email</h2>
+        {st && state !== 'not_connected' && <button type="button" className="v-btn v-btn--line" onClick={pollNow} disabled={!!busy}>{busy === 'poll' ? 'Checking…' : 'Check for new mail'}</button>}</div>
+      {connected && <div className="v-alert v-alert--ok" role="status">Connected {connected}. <button type="button" className="v-btn v-btn--link" onClick={() => setParams({})}>Dismiss</button></div>}
+      {connectErr && <div className="v-alert v-alert--err" role="alert">{CONNECT_ERR[connectErr] || 'The mailbox could not be connected. Try again.'} <button type="button" className="v-btn v-btn--link" onClick={() => setParams({})}>Dismiss</button></div>}
+      <Err>{err}</Err>
+      <section className="v-panel" data-mailbox-state={state || 'loading'}>
+        {!st ? <p className="v-muted">Loading…</p> : (
+          <div className="v-mailbox">
+            <div>
+              <span className="v-mono">Sends and receives as</span>
+              <h3>{st.sender_name} &lt;{st.expected_address}&gt;</h3>
+              <p className="v-small">
+                {state === 'connected' && <><span className="v-tag">● Connected</span> since {fmtWhen(st.connected_at)}{st.connected_by ? ` by ${st.connected_by}` : ''}. Last checked {fmtWhen(st.last_polled_at)}.</>}
+                {state === 'reconnect' && <><span className="v-tag v-tag--black">Reconnect needed</span> {st.last_error}</>}
+                {state === 'not_connected' && <><span className="v-tag v-tag--line">Not connected</span> Applicant emails are not sent and support mail is not read until the mailbox is connected.</>}
+              </p>
+              {st.microsoft_display_name && st.microsoft_display_name !== st.sender_name &&
+                <p className="v-small v-muted">Microsoft 365 shows this mailbox's name as "{st.microsoft_display_name}". Recipients may see that name; change it in the Microsoft 365 admin to "{st.sender_name}".</p>}
+              <p className="v-small v-muted">Permissions: read mail, send mail, stay signed in. Nothing here deletes or moves mail.</p>
+            </div>
+            {st.can_connect && state !== 'connected' &&
+              <button type="button" className="v-btn v-btn--red" onClick={connect} disabled={!!busy} data-connect>{busy === 'connect' ? 'Opening Microsoft…' : state === 'reconnect' ? 'Reconnect support mailbox' : 'Connect support mailbox'}</button>}
+          </div>)}
+      </section>
+
+      <div className="v-row" style={{ marginTop: 18 }}><h3>Support inbox</h3>
+        <label className="v-small" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input type="checkbox" style={{ width: 'auto', minHeight: 0, margin: 0 }} checked={show === 'all'} onChange={(e) => setShow(e.target.checked ? 'all' : 'open')} />Show answered</label></div>
+      <div className="v-panel v-scroll">
+        <table className="v-table" data-table="inbox">
+          <thead><tr><th>From</th><th>Subject</th><th>Messages</th><th>Last</th><th></th></tr></thead>
+          <tbody>
+            {threads?.length === 0 && <tr><td colSpan="5" className="v-muted">{show === 'open' ? 'Nothing waiting.' : 'No support mail yet.'}</td></tr>}
+            {threads?.map((t) => (
+              <tr key={t.conversation_id}>
+                <td><b>{t.from_name || t.from}</b>{t.rep_code && <> · {t.rep_code}</>}<br /><span className="v-small v-muted">{t.from}</span></td>
+                <td>{t.subject || '(no subject)'}{t.kind === 'bounce' && <> <span className="v-tag v-tag--black">Delivery failure</span></>}{t.kind === 'auto_reply' && <> <span className="v-tag v-tag--line">Auto-reply</span></>}{t.has_attachments && ' 📎'}</td>
+                <td>{t.count}</td><td>{fmtWhen(t.last_at)}{t.open ? '' : ' · Answered'}</td>
+                <td><button type="button" className="v-btn v-btn--line v-btn--sm" onClick={() => setOpen(t.conversation_id)}>Open</button></td>
+              </tr>))}
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style={{ marginTop: 18 }}>Applicant emails sent</h3>
+      <p className="v-small v-muted">Account, application, update and status emails. Each is sent once; failures retry automatically.</p>
+      <div className="v-panel v-scroll">
+        <table className="v-table" data-table="sent">
+          <thead><tr><th>Email</th><th>To</th><th>Result</th><th>When</th></tr></thead>
+          <tbody>
+            {st?.recent?.length === 0 && <tr><td colSpan="4" className="v-muted">Nothing sent yet.</td></tr>}
+            {st?.recent?.map((e) => (
+              <tr key={e.id}>
+                <td><b>{MAIL_KIND[e.kind] || e.kind}</b>{e.is_test && <> <span className="v-tag v-tag--line">Test</span></>}<br /><span className="v-small v-muted">{e.subject}</span></td>
+                <td>{e.to}</td>
+                <td>{MAIL_STATE[e.state] || e.state}{e.error && <><br /><span className="v-small v-muted">{e.error}</span></>}</td>
+                <td>{fmtWhen(e.sent_at || e.created_at)}</td>
+              </tr>))}
+          </tbody>
+        </table>
+      </div>
+      {open && <SupportThread orgId={orgId} conv={open} canWrite={st?.can_connect} onClose={() => { setOpen(null); load() }} />}
+    </>
+  )
+}
+
+function SupportThread({ orgId, conv, canWrite, onClose }) {
+  const [t, setT] = useState(null)
+  const [err, setErr] = useState('')
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    api.get(`/volt/ops/${orgId}/inbox/thread`, { params: { conversation: conv } }).then(setT).catch((e) => setErr(msg(e)))
+  }, [orgId, conv])
+  async function send() {
+    setBusy(true); setErr('')
+    try { setT(await api.post(`/volt/ops/${orgId}/inbox/reply`, { conversation_id: conv, text })); setText('') }
+    catch (e) { setErr(msg(e)) } finally { setBusy(false) }
+  }
+  async function handled(v) {
+    try { setT(await api.post(`/volt/ops/${orgId}/inbox/handled`, { conversation_id: conv, handled: v })) } catch (e) { setErr(msg(e)) }
+  }
+  async function download(m, a) {
+    try {
+      const url = await fetchObjectUrl(`/volt/ops/${orgId}/inbox/messages/${m.id}/attachments/${encodeURIComponent(a.id)}`)
+      const el = document.createElement('a'); el.href = url; el.download = a.name; el.click()
+      setTimeout(() => URL.revokeObjectURL(url), 2000)
+    } catch (e) { setErr(msg(e)) }
+  }
+  const last = t?.messages?.[t.messages.length - 1]
+  const canReply = canWrite && t?.messages?.some((m) => m.direction === 'in' && m.kind !== 'bounce')
+  return (
+    <div className="v-drawer-bg" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <aside className="v-drawer" role="dialog" aria-modal="true" aria-label="Support conversation" data-thread>
+        <div className="v-row"><h3>{t?.messages?.[0]?.subject || 'Conversation'}</h3><button type="button" className="v-btn v-btn--line v-btn--sm" onClick={onClose}>Close</button></div>
+        <Err>{err}</Err>
+        {!t ? <p className="v-muted">Loading…</p> : t.messages.map((m) => (
+          <article key={m.id} className={`v-msg v-msg--${m.direction}`} data-direction={m.direction}>
+            <div className="v-small"><b>{m.direction === 'out' ? `${m.from_name || 'VOLT Marketing'}${m.staff ? ` (${m.staff})` : ''}` : (m.from_name || m.from)}</b>
+              {m.direction === 'in' && <span className="v-muted"> &lt;{m.from}&gt;</span>}{m.rep_code && <> · {m.rep_code}</>} · {fmtWhen(m.received_at)}</div>
+            <div className="v-msg-body">{m.body_text}</div>
+            {m.attachments?.length > 0 && <div className="v-small">Attachments (downloads only; open with care):{' '}
+              {m.attachments.map((a) => <button key={a.id} type="button" className="v-btn v-btn--link" onClick={() => download(m, a)}>{a.name} ({Math.max(1, Math.round((a.size || 0) / 1024))} KB)</button>)}</div>}
+          </article>))}
+        {canReply && (
+          <div className="v-panel" style={{ marginTop: 12 }}>
+            <label className="v-small" htmlFor="v-reply"><b>Reply as VOLT Marketing</b> (sent from the support mailbox, in this thread, to {[...(t?.messages || [])].reverse().find((m) => m.direction === 'in')?.from})</label>
+            <textarea id="v-reply" rows={6} value={text} maxLength={10000} onChange={(e) => setText(e.target.value)} />
+            <div className="v-row" style={{ justifyContent: 'flex-end' }}>
+              <button type="button" className="v-btn v-btn--line" onClick={() => handled(t.open)}>{t.open ? 'Mark answered' : 'Reopen'}</button>
+              <button type="button" className="v-btn v-btn--red" onClick={send} disabled={busy || !text.trim()} data-send-reply>{busy ? 'Sending…' : 'Send reply'}</button>
+            </div>
+          </div>)}
+        {last && !canReply && canWrite && <button type="button" className="v-btn v-btn--line" onClick={() => handled(t.open)}>{t.open ? 'Mark handled' : 'Reopen'}</button>}
+      </aside>
+    </div>
+  )
+}
+
 // ── Zoom Sessions ───────────────────────────────────────────────────────────
 function RepPicker({ orgId, chosen, setChosen }) {
   const [q, setQ] = useState('')
@@ -690,6 +850,7 @@ export default function VoltOps() {
         <Route path="review" element={<ReviewQueue orgId={orgId} ops={ops} />} />
         <Route path="sessions" element={<Sessions orgId={orgId} ops={ops} />} />
         <Route path="talent" element={<TalentPool orgId={orgId} />} />
+        <Route path="email" element={<SupportEmail orgId={orgId} />} />
         <Route path="reps" element={<Reps orgId={orgId} ops={ops} />} />
         <Route path="projects" element={<Projects orgId={orgId} ops={ops} />} />
         <Route path="*" element={<Navigate to={`/volt-ops/${orgId}`} replace />} />

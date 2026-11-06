@@ -107,7 +107,8 @@ def _sweep(db: Session) -> None:
 def issue_state(db: Session, *, provider: str, subject: User,
                 flow: str = FLOW_SETTINGS,
                 initiated_by_user_id: Optional[str] = None,
-                client_ip: Optional[str] = None) -> str:
+                client_ip: Optional[str] = None,
+                target_organization_id: Optional[str] = None) -> str:
     """Start an authorization transaction and return the `state` to send.
 
     `subject` is the user whose provider grant this will become. The caller is
@@ -151,6 +152,7 @@ def issue_state(db: Session, *, provider: str, subject: User,
         initiated_by_user_id=initiated_by_user_id or persisted.id,
         expires_at=OAuthAuthorizationTransaction.default_expiry(),
         created_ip=(client_ip or None),
+        target_organization_id=(target_organization_id or None),
     )
     db.add(txn)
     db.commit()

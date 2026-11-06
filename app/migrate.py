@@ -205,6 +205,8 @@ def main(argv=None) -> int:
                      res.get("platform"))
             if res.get("corrected"):
                 log.info("volt: corrected %s", ",".join(res["corrected"]))
+            if res.get("identity_set"):
+                log.info("volt: email identity set %s", ",".join(res["identity_set"]))
         except Exception:
             _db.rollback()
             raise

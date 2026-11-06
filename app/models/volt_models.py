@@ -50,6 +50,12 @@ class VoltProgram(Base):
     name = Column(String, nullable=False, default="VOLT Marketing")
     # JSON list of {"key", "label"} every applicant's profile drawer requests.
     profile_required_docs = Column(Text, nullable=True)
+    # VOLT's own email identity (2026-11-06): the Microsoft 365 mailbox the
+    # program sends from and staff answer from. Set by the seed; the connected
+    # mailbox must BE this address (app/services/volt/mail.py).
+    support_email = Column(String, nullable=True)
+    sender_name = Column(String, nullable=True)
+    public_origin = Column(String, nullable=True)        # e.g. https://voltmarketing.live
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -236,3 +242,66 @@ class VoltAuditEvent(Base):
     new_value = Column(Text, nullable=True)
     reason = Column(Text, nullable=True)
     at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class VoltEmail(Base):
+    """One transactional email VOLT sends from its support mailbox.
+
+    `dedupe_key` is unique per organization: a retried request, a status saved
+    twice or a second poller run finds the existing row and sends nothing.
+    A credential-bearing message (password reset) keeps the envelope only -
+    `body_html` stays NULL so the link is never stored, and it is never retried.
+    """
+    __tablename__ = "volt_emails"
+    __table_args__ = (UniqueConstraint("organization_id", "dedupe_key", name="uq_volt_email_dedupe"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(String, nullable=False)          # registered | receipt | needs_update | doc_replace | approved | started | password_reset
+    dedupe_key = Column(String, nullable=False)
+    rep_serial = Column(Integer, ForeignKey("volt_reps.serial", ondelete="SET NULL"), nullable=True, index=True)
+    application_id = Column(String, nullable=True)
+    to_email = Column(String, nullable=False)
+    subject = Column(String, nullable=False)
+    body_html = Column(Text, nullable=True)
+    sensitive = Column(Boolean, nullable=False, default=False)
+    is_test = Column(Boolean, nullable=False, default=False)
+    state = Column(String, nullable=False, default="queued")   # queued | sent | failed | skipped
+    attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    next_attempt_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    sent_at = Column(DateTime, nullable=True)
+
+
+class VoltSupportMessage(Base):
+    """A message in VOLT's support inbox: one row per email read from the
+    mailbox (direction "in") or answered by staff (direction "out").
+
+    Incoming content is untrusted. Only the plain-text body Microsoft renders
+    is kept, it is shown as text (never HTML), and attachments are listed by
+    name and size and handed out only as downloads to VOLT staff.
+    """
+    __tablename__ = "volt_support_messages"
+    __table_args__ = (UniqueConstraint("mailbox_id", "graph_message_id", name="uq_volt_support_graph_id"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    mailbox_id = Column(String, nullable=False, index=True)
+    graph_message_id = Column(String, nullable=False)
+    internet_message_id = Column(String, nullable=True)
+    conversation_id = Column(String, nullable=True, index=True)
+    direction = Column(String, nullable=False, default="in")    # in | out
+    from_address = Column(String, nullable=True)
+    from_name = Column(String, nullable=True)
+    to_addresses = Column(Text, nullable=True)
+    subject = Column(String, nullable=True)
+    body_text = Column(Text, nullable=True)
+    received_at = Column(DateTime, nullable=True)
+    rep_serial = Column(Integer, ForeignKey("volt_reps.serial", ondelete="SET NULL"), nullable=True, index=True)
+    attachments = Column(Text, nullable=True)       # JSON [{id, name, size, content_type}]
+    kind = Column(String, nullable=False, default="message")    # message | bounce | auto_reply
+    staff_user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    handled_at = Column(DateTime, nullable=True)
+    handled_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

@@ -8,7 +8,7 @@ import os
 
 from app.deps import get_db, get_current_user
 from app.models.models import User
-from app.models.oauth_models import FLOW_MAILBOX, FLOW_SETUP, PROVIDER_MICROSOFT
+from app.models.oauth_models import FLOW_MAILBOX, FLOW_SETUP, FLOW_VOLT_MAILBOX, PROVIDER_MICROSOFT
 from app.services import oauth_state_service
 from app.services.oauth_state_service import OAuthStateError
 from app.services.microsoft_email_service import get_microsoft_authorization_url, handle_microsoft_oauth_callback
@@ -91,6 +91,31 @@ def microsoft_oauth_callback(
             logger.error("Shared mailbox connect failed (txn user %s): %s", txn.user_id, e)
             return RedirectResponse(url=f"{god_page}?mailbox_error=connection_failed")
         return RedirectResponse(url=f"{god_page}?mailbox_connected={quote(box.address)}")
+
+    if txn.flow == FLOW_VOLT_MAILBOX:
+        # VOLT staff connecting VOLT's support mailbox. The workspace comes
+        # from the transaction row (written by the authorized initiation),
+        # never from the browser; the mailbox must BE VOLT's support address.
+        org_id = txn.target_organization_id or ""
+        page = (os.environ.get("FRONTEND_URL", "http://localhost:5173") + "/volt-ops/%s/email" % quote(org_id))
+        if error or not code or not org_id:
+            return RedirectResponse(url=f"{page}?mailbox_error={quote(str(error or 'missing_code'))}")
+        try:
+            from app.services.volt import common as _vc
+            from app.services.volt import mail as _vm
+            from app.models.models import User as _U
+            subject = db.get(_U, txn.user_id)
+            if _vc.staff_access(db, subject, org_id) not in ("owner", "staff"):
+                return RedirectResponse(url=f"{page}?mailbox_error=not_authorized")
+            box = _vm.connect_from_code(db, code=code, org_id=org_id, user_id=txn.user_id)
+        except Exception as e:  # noqa: BLE001
+            db.rollback()
+            from app.services.volt.mail import WrongMailbox
+            if isinstance(e, WrongMailbox):
+                return RedirectResponse(url=f"{page}?mailbox_error=wrong_account")
+            logger.error("VOLT mailbox connect failed (txn user %s): %s", txn.user_id, type(e).__name__)
+            return RedirectResponse(url=f"{page}?mailbox_error=connection_failed")
+        return RedirectResponse(url=f"{page}?mailbox_connected={quote(box.address)}")
 
     is_setup_flow = (txn.flow == FLOW_SETUP)
     real_user_id = txn.user_id

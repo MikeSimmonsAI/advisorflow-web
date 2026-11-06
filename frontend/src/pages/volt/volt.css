@@ -248,3 +248,10 @@
 .v-valuegrid h3 { font-size: 21px; letter-spacing: -.02em; margin: 8px 0 4px; }
 .v-valuegrid p { font-size: 14px; color: var(--v-soft); }
 @media (max-width: 650px) { .v-valuegrid { grid-template-columns: 1fr 1fr; } }
+
+/* Support email (staff) */
+.v-mailbox { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.v-mailbox h3 { margin: 4px 0 8px; font-size: 20px; letter-spacing: -.02em; word-break: break-word; }
+.v-msg { border: 1px solid var(--v-line); border-radius: 10px; padding: 12px 14px; margin: 10px 0; }
+.v-msg--out { border-left: 4px solid var(--v-red); background: #fbf6f7; }
+.v-msg-body { white-space: pre-wrap; word-break: break-word; margin-top: 8px; font-size: 15px; line-height: 1.5; }
