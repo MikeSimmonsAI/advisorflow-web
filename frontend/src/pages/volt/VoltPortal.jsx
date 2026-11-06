@@ -14,7 +14,9 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { fmtDate, sessionTime, setVoltToken, uploadKey, useVoltTitle, volt, voltToken } from './voltApi'
+import { sessionTime, setVoltToken, useVoltTitle, volt, voltToken } from './voltApi'
+import ApplicationSteps, { DocRow, StageSteps } from './VoltApplication'
+import { ApplyDialog, TalentDialog } from './VoltDialogs'
 import './volt.css'
 
 const INVITE_KEY = 'af_volt_invite'
@@ -36,13 +38,14 @@ export function Wordmark({ to = '/volt' }) {
   )
 }
 
-function Shell({ children, signedIn, onSignOut }) {
+function Shell({ children, signedIn, onSignOut, onApply, showApply, onTalent }) {
   return (
-    <div className="volt">
-      <header className="v-head">
+    <div className={`volt${showApply ? ' volt--applybar' : ''}`}>
+      <header className="v-head v-head--sticky">
         <div className="v-wrap">
           <Wordmark />
           <nav aria-label="Applicant">
+            {showApply && <button type="button" className="v-btn v-btn--red v-btn--sm v-apply-head" onClick={onApply} data-apply="header">Apply Now</button>}
             {signedIn ? (
               <>
                 <Link className="v-btn v-btn--ghost v-btn--sm" to="/volt/me">My dashboard</Link>
@@ -56,8 +59,14 @@ function Shell({ children, signedIn, onSignOut }) {
       </header>
       <main className="v-wrap" style={{ flex: 1 }}>{children}</main>
       <footer className="v-foot">
-        <div className="v-wrap"><span>VOLT Marketing · Recruiting portal</span><span>Need help? Contact your recruiter.</span></div>
+        <div className="v-wrap"><span>VOLT Marketing · Recruiting portal</span>
+          <span>{onTalent && <button type="button" className="v-btn v-btn--link v-foot-link" onClick={onTalent}>Get Future Opportunities</button>} Need help? Contact your recruiter.</span></div>
       </footer>
+      {showApply && (
+        <div className="v-applybar" role="region" aria-label="Apply">
+          <button type="button" className="v-btn v-btn--red" onClick={onApply} data-apply="bar">Apply Now</button>
+        </div>
+      )}
     </div>
   )
 }
@@ -192,7 +201,7 @@ function referralProblem(text, selected) {
 }
 
 // ── Home ────────────────────────────────────────────────────────────────────
-function Home({ portal, signedIn }) {
+function Home({ portal, signedIn, onApply, onTalent }) {
   const loc = useLocation()
   useEffect(() => {
     const q = new URLSearchParams(loc.search)
@@ -213,12 +222,15 @@ function Home({ portal, signedIn }) {
         <article>
           <span className="v-eyebrow">Rep recruiting</span>
           <h1>Join a<br />project team.</h1>
-          <p>We are recruiting for ACA health insurance and fiber internet outreach. Choose a project to start your application.</p>
+          <p>We are recruiting for ACA health insurance and traveling door-to-door fiber sales. Choose a project to start your application.</p>
           <div className="v-row" style={{ justifyContent: 'flex-start' }}>
-            <a className="v-btn v-btn--red" href="#projects">See open projects ↓</a>
-            {!signedIn && <Link className="v-btn v-btn--ghost" to="/volt/sign-in">Sign In</Link>}
+            <button type="button" className="v-btn v-btn--red v-btn--lg" onClick={onApply} data-apply="hero">Apply Now</button>
+            <button type="button" className="v-btn v-btn--ghost" onClick={onTalent} data-talent="hero">Get Future Opportunities</button>
           </div>
-          {invite?.ref && <p className="v-small" style={{ marginTop: 12 }}>Invite code {invite.ref} saved for your application.</p>}
+          <p className="v-small" style={{ marginTop: 12 }}>
+            {signedIn ? <Link to="/volt/me">Go to my dashboard →</Link> : <>Already applied? <Link to="/volt/sign-in">Sign In</Link> to resume.</>}
+          </p>
+          {invite?.ref && <p className="v-small" style={{ marginTop: 6 }}>Invite code {invite.ref} saved for your application.</p>}
         </article>
         <HeroArt />
       </section>
@@ -232,7 +244,10 @@ function Home({ portal, signedIn }) {
             <div className="v-row"><span className="v-icon" aria-hidden="true">{p.icon}</span><span className="v-tag">● Recruiting</span></div>
             <h3>{p.name}</h3>
             <p className="v-muted">{p.summary}</p>
-            <Link className="v-btn v-btn--red" to={`/volt/apply/${p.key}`}>{signedIn ? 'Apply / view application' : 'Register & Apply'} →</Link>
+            <div className="v-row" style={{ width: '100%', marginTop: 'auto' }}>
+              <Link className="v-btn v-btn--line" to={`/volt/projects/${p.key}`}>Details</Link>
+              <Link className="v-btn v-btn--red" to={`/volt/apply/${p.key}`} style={{ flex: 1 }}>{signedIn ? 'Apply / resume' : 'Apply Now'} →</Link>
+            </div>
           </article>
         ))}
       </div>
@@ -242,8 +257,35 @@ function Home({ portal, signedIn }) {
           <span className="v-tag v-tag--black">Recruiting closed</span>
         </section>
       ))}
-      <p className="v-muted v-small" style={{ margin: '14px 0 30px' }}>Already applied? <Link to="/volt/sign-in">Sign in</Link> to resume where you left off.</p>
+      <section className="v-card v-talent-cta">
+        <div><h3>Not ready to apply?</h3><p className="v-muted">Save your interest and hear about future VOLT Marketing opportunities.</p></div>
+        <button type="button" className="v-btn v-btn--line" onClick={onTalent} data-talent="section">Get Future Opportunities</button>
+      </section>
     </>
+  )
+}
+
+const PROJECT_DETAIL = {
+  aca: 'Outreach for ACA health insurance. Tell us about your insurance, enrollment, sales or customer service experience and your license status; our team reviews every application.',
+  fiber: 'A traveling door-to-door fiber sales opportunity. The application asks about travel, door-to-door sales and transportation; our team reviews every application.',
+}
+
+function ProjectPage({ portal }) {
+  const { projectKey } = useParams()
+  const p = [...portal.open_projects, ...portal.past_projects].find((x) => x.key === projectKey)
+  if (!p) return <Navigate to="/volt" replace />
+  return (
+    <div className="v-page" style={{ maxWidth: 720 }}>
+      <Link to="/volt" className="v-btn v-btn--line v-btn--sm">← All opportunities</Link>
+      <div className="v-row" style={{ marginTop: 16 }}><span className="v-icon" aria-hidden="true">{p.icon}</span>
+        <span className={`v-tag ${p.recruiting ? '' : 'v-tag--black'}`}>{p.recruiting ? '● Recruiting' : 'Recruiting closed'}</span></div>
+      <h1 style={{ fontSize: 'clamp(32px,5vw,48px)', letterSpacing: '-.05em', margin: '10px 0' }}>{p.name}</h1>
+      <p style={{ fontSize: 18 }}>{p.summary}.</p>
+      {PROJECT_DETAIL[p.key] && <p className="v-muted" style={{ marginTop: 10 }}>{PROJECT_DETAIL[p.key]}</p>}
+      {p.recruiting
+        ? <Link className="v-btn v-btn--red v-btn--lg" to={`/volt/apply/${p.key}`} style={{ marginTop: 18 }} data-apply="project">Apply Now</Link>
+        : <p style={{ marginTop: 18 }}>This project is no longer accepting applications.</p>}
+    </div>
   )
 }
 
@@ -401,23 +443,6 @@ function SignIn({ reload }) {
 }
 
 // ── Rep dashboard ───────────────────────────────────────────────────────────
-const STAGES = ['draft', 'submitted', 'needs_update', 'approved', 'started']
-const STAGE_LABEL = { draft: 'Draft', submitted: 'Submitted', needs_update: 'Needs update', approved: 'Approved', started: 'Started' }
-
-function Steps({ status }) {
-  const order = ['draft', 'submitted', 'approved', 'started']
-  const at = status === 'needs_update' ? 1 : order.indexOf(status)
-  return (
-    <div className="v-steps" aria-label={`Stage: ${STAGE_LABEL[status]}`}>
-      {order.map((s, i) => (
-        <span key={s} className={`v-step ${i < at ? 'done' : ''} ${i === at ? 'now' : ''}`}>
-          {i === at && status === 'needs_update' ? 'Needs update' : STAGE_LABEL[s]}
-        </span>
-      ))}
-    </div>
-  )
-}
-
 function CopyField({ value, label }) {
   const [done, setDone] = useState(false)
   return (
@@ -484,7 +509,7 @@ function Dashboard({ me, portal }) {
             <div key={a.id} className="v-doc" data-application={a.id}>
               <div style={{ flex: 1, minWidth: 220 }}>
                 <b>{a.project?.name}</b>
-                <Steps status={a.status} />
+                <StageSteps status={a.status} />
                 <p className={a.next_action.kind === 'applicant' ? '' : 'v-muted'} style={{ fontSize: 14 }}>
                   <b>{a.next_action.label}.</b> {a.next_action.detail}
                 </p>
@@ -545,118 +570,6 @@ function Dashboard({ me, portal }) {
   )
 }
 
-// ── Documents ───────────────────────────────────────────────────────────────
-const STATE_LABEL = { requested: 'Requested', under_review: 'Under review', accepted: 'Accepted', replace: 'Replace' }
-
-function DocRow({ d, applicationId, editable, onDone }) {
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-  const key = useRef(uploadKey())
-  async function choose(e) {
-    const f = e.target.files && e.target.files[0]
-    if (!f) return
-    if (f.size > 10 * 1024 * 1024) { setErr('That file is too large. The limit is 10 MB.'); return }
-    setBusy(true); setErr('')
-    const form = new FormData()
-    form.append('file', f)
-    form.append('doc_key', d.key)
-    form.append('upload_key', key.current)
-    if (applicationId) form.append('application_id', applicationId)
-    try {
-      await volt.upload(form)
-      key.current = uploadKey()          // a new choice is a new upload; a retry reuses the key
-      await onDone()
-    } catch (x) { setErr(x.message + (x.status === 0 ? ' Your file was not saved; choose it again to retry.' : '')) } finally { setBusy(false); e.target.value = '' }
-  }
-  async function view() {
-    try { const b = await volt.file(d.document.id); window.open(URL.createObjectURL(b), '_blank', 'noopener') } catch (x) { setErr(x.message) }
-  }
-  const canUpload = editable && (d.state === 'requested' || d.state === 'replace' || d.state === 'under_review')
-  return (
-    <div className="v-doc" data-doc={d.key}>
-      <div style={{ flex: 1, minWidth: 200 }}>
-        <b>{d.label}</b> <span className={`v-tag ${d.state === 'accepted' ? 'v-tag--black' : d.state === 'requested' ? 'v-tag--line' : ''}`}>{STATE_LABEL[d.state]}</span>
-        {d.document && <p className="v-small v-muted">{d.document.filename} · version {d.document.version} · {fmtDate(d.document.uploaded_at)}</p>}
-        {d.reason && <p className="v-ferr">Reviewer: {d.reason}</p>}
-        {err && <p className="v-ferr" role="alert">{err}</p>}
-      </div>
-      <div className="v-row">
-        {d.document && <button type="button" className="v-btn v-btn--line v-btn--sm" onClick={view}>View</button>}
-        {canUpload && (
-          <label className="v-btn v-btn--red v-btn--sm" style={{ margin: 0 }}>
-            {busy ? 'Uploading…' : d.state === 'requested' ? 'Upload' : 'Replace'}
-            <input type="file" accept=".pdf,.doc,.docx,image/*" onChange={choose} disabled={busy} style={{ display: 'none' }} />
-          </label>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function ApplicationPage({ reload }) {
-  const { id } = useParams()
-  const [a, setA] = useState(null)
-  const [err, setErr] = useState('')
-  const [answer, setAnswer] = useState('')
-  const [saved, setSaved] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [missing, setMissing] = useState([])
-  const timer = useRef(null)
-  const load = useCallback(() => volt.application(id).then((x) => { setA(x); setAnswer(x.answers?.experience || '') }).catch((x) => setErr(x.message)), [id])
-  useEffect(() => { load() }, [load])
-  if (err && !a) return <div className="v-page"><Alert>{err}</Alert></div>
-  if (!a) return <Loading />
-  function type(v) {
-    setAnswer(v); setSaved('Saving…')
-    clearTimeout(timer.current)
-    timer.current = setTimeout(() => {
-      volt.saveAnswers(a.id, { experience: v }).then(() => setSaved('Draft saved')).catch((x) => setSaved(x.message))
-    }, 600)
-  }
-  async function submit() {
-    setBusy(true); setErr(''); setMissing([])
-    try {
-      clearTimeout(timer.current)
-      await volt.saveAnswers(a.id, { experience: answer })
-      const r = await volt.submit(a.id)
-      setA({ ...a, ...r })
-      await reload()
-    } catch (x) { setErr(x.message); setMissing(x.detail?.missing || []) } finally { setBusy(false) }
-  }
-  const docsAll = [...a.documents, ...(a.profile_documents || [])]
-  return (
-    <div className="v-page" style={{ maxWidth: 760 }}>
-      <Link to="/volt/me" className="v-btn v-btn--line v-btn--sm">← My dashboard</Link>
-      <p className="v-mono" style={{ marginTop: 14 }}>{a.project.short_name}</p>
-      <h2 style={{ fontSize: 30, letterSpacing: '-.04em' }}>{a.project.name}</h2>
-      <Steps status={a.status} />
-      <Alert kind={a.next_action.kind === 'applicant' ? 'info' : 'ok'}><b>{a.next_action.label}.</b> {a.next_action.detail}</Alert>
-      {a.status === 'needs_update' && a.return_reason && <div style={{ height: 8 }} />}
-      <section className="v-panel" style={{ marginTop: 12 }}>
-        <h3>Project application</h3>
-        <label htmlFor="v-answer">{a.project.question}
-          <textarea id="v-answer" value={answer} onChange={(e) => type(e.target.value)} disabled={!a.editable} maxLength={4000} />
-        </label>
-        <p className="v-small v-muted" aria-live="polite">{a.editable ? saved || 'Your answers save automatically as a draft.' : 'Submitted answers are locked while our team reviews them.'}</p>
-      </section>
-      <section className="v-panel">
-        <h3>Documents</h3>
-        {docsAll.length === 0 ? <p className="v-muted">No documents requested for this project.</p> : (
-          <>
-            {a.documents.map((d) => <DocRow key={'a' + d.key} d={d} applicationId={a.id} editable={a.editable} onDone={load} />)}
-            {(a.profile_documents || []).map((d) => <DocRow key={'p' + d.key} d={d} applicationId={null} editable onDone={load} />)}
-          </>
-        )}
-        <p className="v-small v-muted" style={{ marginTop: 8 }}>PDF, Word or photo, up to 10 MB. Files are private to you and our recruiting staff.</p>
-      </section>
-      {a.referrer && <p className="v-small" style={{ marginBottom: 10 }}>Referred by <b>{a.referrer.display_name} · {a.referrer.rep_code}</b></p>}
-      {missing.length > 0 && <Alert>Finish these first: {missing.join('; ')}</Alert>}
-      {err && !missing.length && <Alert>{err}</Alert>}
-      {a.editable && <button type="button" className="v-btn v-btn--red" onClick={submit} disabled={busy} style={{ marginTop: 10 }}>{busy ? 'Submitting…' : a.status === 'needs_update' ? 'Resubmit application →' : 'Submit application →'}</button>}
-    </div>
-  )
-}
-
 function ProfilePage({ me, reload }) {
   const [v, setV] = useState(() => ({ first_name: me?.profile?.first_name, last_name: me?.profile?.last_name, phone: me?.profile?.phone, date_of_birth: me?.profile?.date_of_birth }))
   const [errs, setErrs] = useState({})
@@ -711,23 +624,49 @@ export default function VoltPortal() {
     await volt.logout()
     setVoltToken(null); setMe(null); navigate('/volt')
   }
+  // Apply Now / Get Future Opportunities. The persistent Apply action lives on
+  // the public and dashboard screens only - never over an application's own
+  // Back / Next / Submit controls, sign-in or registration.
+  const [dialog, setDialog] = useState(null)
+  const [talentInvite, setTalentInvite] = useState({ status: 'none' })
+  const path = loc.pathname.replace(/\/+$/, '') || '/volt'
+  const projectMatch = path.match(/^\/volt\/projects\/([^/]+)$/)
+  const showApply = path === '/volt' || path === '/volt/me' || path === '/volt/me/profile' || !!projectMatch
+  function openApply() {
+    const key = projectMatch && portal?.open_projects.some((x) => x.key === projectMatch[1]) ? projectMatch[1] : null
+    if (key) { navigate(`/volt/apply/${key}`); return }        // on a project page: that application
+    setDialog('apply')
+  }
+  function openTalent() {
+    const inv = readInvite()
+    if (inv?.ref) volt.invite(inv.ref, '').then(setTalentInvite).catch(() => setTalentInvite({ status: 'none' }))
+    setDialog('talent')
+  }
   const signedIn = !!me
   if (!ready) return <Shell><Loading /></Shell>
   if (!portal) return <Shell><div className="v-page"><Alert>{err || 'The recruiting portal is unavailable right now.'}</Alert></div></Shell>
   const needAuth = (el) => (voltToken() ? el : <Navigate to={`/volt/sign-in?next=${encodeURIComponent(loc.pathname)}`} replace />)
   return (
-    <Shell signedIn={signedIn} onSignOut={signOut}>
+    <Shell signedIn={signedIn} onSignOut={signOut} showApply={showApply} onApply={openApply} onTalent={openTalent}>
       <Routes>
-        <Route index element={<Home portal={portal} signedIn={signedIn} />} />
+        <Route index element={<Home portal={portal} signedIn={signedIn} onApply={openApply} onTalent={openTalent} />} />
+        <Route path="projects/:projectKey" element={<ProjectPage portal={portal} />} />
         <Route path="apply/:projectKey" element={<Apply portal={portal} me={me} reload={reload} />} />
         <Route path="sign-in" element={<SignIn reload={reload} />} />
         <Route path="me" element={needAuth(<Dashboard me={me} portal={portal} />)} />
         <Route path="me/profile" element={needAuth(<ProfilePage me={me} reload={reload} />)} />
-        <Route path="me/applications/:id" element={needAuth(<ApplicationPage reload={reload} />)} />
+        <Route path="me/applications/:id" element={needAuth(<ApplicationSteps reload={reload} />)} />
         <Route path="*" element={<Navigate to="/volt" replace />} />
       </Routes>
+      {dialog === 'apply' && (
+        <ApplyDialog projects={portal.open_projects} onClose={() => setDialog(null)}
+                     onPick={(k) => { setDialog(null); navigate(`/volt/apply/${k}`) }} />
+      )}
+      {dialog === 'talent' && (
+        <TalentDialog projects={portal.open_projects} invite={talentInvite} ReferralPicker={ReferralPicker}
+                      onClose={() => setDialog(null)}
+                      onBrowse={() => { setDialog(null); navigate('/volt'); setTimeout(() => document.getElementById('projects')?.scrollIntoView({ behavior: 'smooth' }), 80) }} />
+      )}
     </Shell>
   )
 }
-
-export { STAGES, STAGE_LABEL }

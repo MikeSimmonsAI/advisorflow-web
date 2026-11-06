@@ -80,6 +80,8 @@ export const volt = {
   invite: (ref, project) => call(pub(`/invite?ref=${encodeURIComponent(ref || '')}&project=${encodeURIComponent(project || '')}`), { auth: false }),
   register: (body) => call(pub('/register'), { method: 'POST', body, auth: false }),
   login: (body) => call(pub('/login'), { method: 'POST', body, auth: false }),
+  talentSignup: (body) => call(pub('/talent-pool'), { method: 'POST', body, auth: false }),
+  saveHiring: (body) => call(rep('/hiring-profile'), { method: 'PUT', body }),
   me: () => call(rep('/me')),
   searchSignedIn: (q) => call(rep(`/recruiters?q=${encodeURIComponent(q)}`)),
   createProfile: (body) => call(rep('/profile'), { method: 'POST', body }),

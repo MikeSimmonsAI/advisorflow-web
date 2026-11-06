@@ -6,7 +6,7 @@
  * Nothing here decides access; a viewer simply sees no write buttons, and the
  * server refuses the write anyway.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, fetchObjectUrl } from '../../api/client'
 import { Bolt } from './VoltPortal'
@@ -16,6 +16,7 @@ import './volt.css'
 const STAGES = [['draft', 'Draft'], ['submitted', 'Submitted'], ['needs_update', 'Needs update'], ['approved', 'Approved'], ['started', 'Started']]
 const STAGE = Object.fromEntries(STAGES)
 const REACHED = [['created', 'Application started'], ['submitted', 'Submitted'], ['approved', 'Approved'], ['started', 'Started']]
+const ANSWER = { yes: 'Yes', no: 'No', details: 'Would like details', explain: 'It depends', licensed: 'Licensed', in_progress: 'In progress', not_licensed: 'Not currently licensed' }
 const ACTION_LABEL = { approved: 'Approve', needs_update: 'Return for update', started: 'Mark Started' }
 const TZS = ['America/Chicago', 'America/New_York', 'America/Denver', 'America/Phoenix', 'America/Los_Angeles', 'America/Anchorage', 'Pacific/Honolulu']
 
@@ -56,6 +57,7 @@ function OpsShell({ orgId, home, children }) {
           <NavLink end className="v-tab" to={base}>Overview</NavLink>
           <NavLink className="v-tab" to={`${base}/review`}>Review queue</NavLink>
           <NavLink className="v-tab" to={`${base}/sessions`}>Zoom Sessions</NavLink>
+          <NavLink className="v-tab" to={`${base}/talent`}>Talent Pool</NavLink>
           <NavLink className="v-tab" to={`${base}/reps`}>Reps</NavLink>
           <NavLink className="v-tab" to={`${base}/projects`}>Projects & documents</NavLink>
         </nav>
@@ -76,6 +78,11 @@ function Filters({ projects, f, set, showStage = false, showReached = false }) {
         <option value="">All stages</option>{STAGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>}
       {showReached && <label>Date applies to<select value={f.reached || 'created'} onChange={up('reached')}>
         {REACHED.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>}
+      {showReached && <label>Location<input value={f.location || ''} placeholder="City, state, ZIP or region" onChange={up('location')} /></label>}
+      {showReached && <label>Willing to travel<select value={f.travel || ''} onChange={up('travel')}>
+        <option value="">Any answer</option><option value="yes">Yes</option><option value="no">No</option><option value="details">Would like details</option></select></label>}
+      {showReached && <label>Experience<select value={f.experience || ''} onChange={up('experience')}>
+        <option value="">Any</option><option value="has">Has relevant or listed experience</option><option value="none">No previous work experience</option></select></label>}
       <label>From<input type="date" value={f.date_from || ''} onChange={up('date_from')} /></label>
       <label>To<input type="date" value={f.date_to || ''} onChange={up('date_to')} /></label>
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 600 }}>
@@ -159,13 +166,15 @@ function ReviewQueue({ orgId, ops }) {
       <p className="v-small v-muted" data-count={list?.count}>{list ? `${list.count} application${list.count === 1 ? '' : 's'} · dates filter on "${list.reached_label}". The CSV is exactly this list.` : 'Loading…'}</p>
       <div className="v-panel v-scroll">
         <table className="v-table" data-table="queue">
-          <thead><tr><th>Applicant</th><th>Project</th><th>Stage</th><th>Project recruiter</th><th>Original recruiter</th><th>Updated</th><th /></tr></thead>
+          <thead><tr><th>Applicant</th><th>Project</th><th>Stage</th><th>Location</th><th>Travel / license</th><th>Project recruiter</th><th>Original recruiter</th><th>Updated</th><th /></tr></thead>
           <tbody>
-            {list?.items.length === 0 && <tr><td colSpan="7" className="v-muted">No matching applications.</td></tr>}
+            {list?.items.length === 0 && <tr><td colSpan="9" className="v-muted">No matching applications.</td></tr>}
             {list?.items.map((r) => (
               <tr key={r.application_id}>
                 <td><b>{r.applicant}</b><br /><span className="v-mono">{r.rep_code}</span>{r.is_test && <> <span className="v-tag v-tag--line">Test</span></>}</td>
                 <td>{r.project}</td><td><span className="v-tag">{r.status_label}</span></td>
+                <td>{[r.city, r.state].filter(Boolean).join(', ') || '—'}</td>
+                <td>{r.willing_travel ? `Travel: ${ANSWER[r.willing_travel] || r.willing_travel}` : r.license_status ? `License: ${ANSWER[r.license_status] || r.license_status}` : '—'}</td>
                 <td>{r.project_recruiter ? `${r.project_recruiter.display_name} · ${r.project_recruiter.rep_code}` : 'Direct'}</td>
                 <td>{r.original_recruiter ? `${r.original_recruiter.display_name} · ${r.original_recruiter.rep_code}` : 'Direct'}</td>
                 <td>{fmtDate(r.updated_at)}</td>
@@ -235,8 +244,12 @@ function ApplicationFile({ orgId, appId, viewer, onClose }) {
             <section className="v-panel" style={{ marginTop: 12 }}>
               <div className="v-row"><h3>{d.application.project.name}</h3><span className="v-tag" data-stage={d.application.status}>{d.application.status_label}</span></div>
               {d.application.return_reason && d.application.status === 'needs_update' && <p className="v-ferr">Returned: {d.application.return_reason}</p>}
-              <p className="v-label">{d.application.project.question}</p>
-              <p>{d.application.answers.experience || <span className="v-muted">No answer yet.</span>}</p>
+              <dl className="v-review" data-answers>
+                {(d.application.questions || []).map((q) => {
+                  const v = d.application.answers[q.key]
+                  return <Fragment key={q.key}><dt>{q.label}</dt><dd>{v ? (q.type === 'choice' ? (q.options.find((o) => o[0] === v) || [v, v])[1] : v) : <span className="v-muted">—</span>}</dd></Fragment>
+                })}
+              </dl>
               {d.missing.length > 0 && <p className="v-small v-muted">Applicant still needs: {d.missing.join('; ')}</p>}
               {!viewer && d.next_actions.length > 0 && (
                 <div style={{ marginTop: 12 }}>
@@ -248,6 +261,7 @@ function ApplicationFile({ orgId, appId, viewer, onClose }) {
               )}
               {d.other_applications.length > 0 && <p className="v-small v-muted" style={{ marginTop: 8 }}>Also applied: {d.other_applications.map((o) => `${o.project} (${STAGE[o.status]})`).join(', ')}</p>}
             </section>
+            {d.hiring && <HiringFile d={d} />}
             <section className="v-panel">
               <h3>Recruiter attribution</h3>
               <p><b>Original recruiter:</b> {d.original_recruiter ? `${d.original_recruiter.display_name} · ${d.original_recruiter.rep_code}` : 'Direct signup'}</p>
@@ -294,6 +308,93 @@ function ApplicationFile({ orgId, appId, viewer, onClose }) {
         )}
       </div>
     </div>
+  )
+}
+
+function monthLabel(m) {
+  if (!m) return ''
+  const [y, mo] = m.split('-')
+  return new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+}
+
+function HiringFile({ d }) {
+  const h = d.hiring
+  const opts = Object.fromEntries(d.availability_options || [])
+  return (
+    <section className="v-panel" data-hiring>
+      <h3>Hiring file</h3>
+      <dl className="v-review">
+        <dt>Location</dt><dd>{[h.city, h.state, h.zip_code].filter(Boolean).join(', ') || '—'}</dd>
+        <dt>Preferred regions</dt><dd>{h.preferred_regions || '—'}</dd>
+        <dt>Earliest start</dt><dd>{h.earliest_start || '—'}</dd>
+        <dt>Availability</dt><dd>{(h.availability?.types || []).map((t) => opts[t] || t).join(', ') || '—'}{h.availability?.notes ? ` · ${h.availability.notes}` : ''}</dd>
+        <dt>Work history</dt><dd>{h.no_experience ? 'No previous work experience' : (h.work_history || []).length ? (
+          <ul style={{ margin: 0, paddingLeft: 18 }}>{h.work_history.map((r, i) => (
+            <li key={i}><b>{r.title || '—'}</b>, {r.employer || '—'} · {monthLabel(r.start)} – {r.current ? 'Present' : monthLabel(r.end)}{r.summary ? <><br /><span className="v-small">{r.summary}</span></> : null}</li>))}</ul>) : '—'}</dd>
+        <dt>Relevant experience</dt><dd>{h.relevant_experience || '—'}</dd>
+        <dt>Anything else</dt><dd>{h.additional_info || '—'}</dd>
+      </dl>
+    </section>
+  )
+}
+
+// ── Talent Pool ─────────────────────────────────────────────────────────────
+function TalentPool({ orgId }) {
+  const [f, setF] = useState({})
+  const [data, setData] = useState(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const seq = useRef(0)
+  useEffect(() => {
+    const n = ++seq.current
+    const t = setTimeout(() => api.get(`/volt/ops/${orgId}/talent-pool`, { params: clean(f) })
+      .then((x) => { if (n === seq.current) setData(x) }).catch((e) => setErr(msg(e))), 200)
+    return () => clearTimeout(t)
+  }, [orgId, JSON.stringify(f)]) // eslint-disable-line react-hooks/exhaustive-deps
+  const up = (k) => (e) => setF({ ...f, [k]: e.target.value })
+  async function exportCsv() {
+    setBusy(true)
+    try {
+      const url = await fetchObjectUrl(`/volt/ops/${orgId}/talent-pool.csv?${new URLSearchParams(clean(f))}`)
+      const a = document.createElement('a'); a.href = url; a.download = 'volt-marketing-talent-pool.csv'; a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 2000)
+    } catch (e) { setErr(msg(e)) } finally { setBusy(false) }
+  }
+  return (
+    <>
+      <div className="v-row"><h2 style={{ fontSize: 30, letterSpacing: '-.04em' }}>Talent Pool</h2>
+        <button type="button" className="v-btn v-btn--black" onClick={exportCsv} disabled={busy}>{busy ? 'Exporting…' : 'Export CSV ↓'}</button></div>
+      <p className="v-small v-muted">{data?.note || 'People who asked to hear about future opportunities.'}</p>
+      <div className="v-panel v-filters">
+        <label>Search<input value={f.q || ''} placeholder="Name or email" onChange={up('q')} /></label>
+        <label>Interest<select value={f.interest || ''} onChange={up('interest')}><option value="">Any interest</option>
+          {(data?.interests || []).map((i) => <option key={i.key} value={i.key}>{i.label}</option>)}</select></label>
+        <label>From<input type="date" value={f.date_from || ''} onChange={up('date_from')} /></label>
+        <label>To<input type="date" value={f.date_to || ''} onChange={up('date_to')} /></label>
+        <div style={{ display: 'grid', gap: 4 }}>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 600 }}><input type="checkbox" style={{ width: 'auto', minHeight: 0, margin: 0 }} checked={f.notify === '1'} onChange={(e) => setF({ ...f, notify: e.target.checked ? '1' : '' })} />Emails welcome only</label>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 600 }}><input type="checkbox" style={{ width: 'auto', minHeight: 0, margin: 0 }} checked={f.include_test === '1'} onChange={(e) => setF({ ...f, include_test: e.target.checked ? '1' : '' })} />Include test records</label>
+        </div>
+      </div>
+      <Err>{err}</Err>
+      <p className="v-small v-muted" data-talent-count={data?.count}>{data ? `${data.count} ${data.count === 1 ? 'person' : 'people'}. The CSV is exactly this list.` : 'Loading…'}</p>
+      <div className="v-panel v-scroll">
+        <table className="v-table" data-table="talent">
+          <thead><tr><th>Name</th><th>Email</th><th>Interests</th><th>Future emails</th><th>Referred by</th><th>Signed up</th><th>Times</th></tr></thead>
+          <tbody>
+            {data?.items.length === 0 && <tr><td colSpan="7" className="v-muted">Nobody yet.</td></tr>}
+            {data?.items.map((r) => (
+              <tr key={r.id}>
+                <td><b>{r.first_name} {r.last_name}</b>{r.is_test && <> <span className="v-tag v-tag--line">Test</span></>}</td>
+                <td>{r.email}</td><td>{r.interest_labels.join(', ') || '—'}</td>
+                <td>{r.notify_opt_in ? 'Yes' : 'No'}</td>
+                <td>{r.referrer ? `${r.referrer.display_name} · ${r.referrer.rep_code}` : '—'}</td>
+                <td>{fmtDate(r.created_at)}</td><td>{r.submit_count}</td>
+              </tr>))}
+          </tbody>
+        </table>
+      </div>
+    </>
   )
 }
 
@@ -537,6 +638,7 @@ export default function VoltOps() {
         <Route index element={<Overview orgId={orgId} ops={ops} />} />
         <Route path="review" element={<ReviewQueue orgId={orgId} ops={ops} />} />
         <Route path="sessions" element={<Sessions orgId={orgId} ops={ops} />} />
+        <Route path="talent" element={<TalentPool orgId={orgId} />} />
         <Route path="reps" element={<Reps orgId={orgId} ops={ops} />} />
         <Route path="projects" element={<Projects orgId={orgId} ops={ops} />} />
         <Route path="*" element={<Navigate to={`/volt-ops/${orgId}`} replace />} />
