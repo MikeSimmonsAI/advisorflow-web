@@ -71,7 +71,7 @@ def invite(request: Request, slug: str, ref: str = "", project: str = "", db: Se
 
 
 @public_router.post("/{slug}/register")
-@limiter.limit("10/minute")
+@limiter.limit("30/minute")
 def register(request: Request, slug: str, body: Dict[str, Any] = Body(...), db: Session = Depends(get_db)):
     prog = C.program_by_slug(db, slug)
     user, rep, app = core.register(db, prog, body)
