@@ -5,8 +5,8 @@ counts toward applications, approvals, starts or the leaderboard. Full
 application and account creation happen when the person chooses to apply.
 
 ONE ROW PER EMAIL PER TENANT. A repeat signup updates that row: the names and
-interests are refreshed (interests are merged), the email preference becomes
-the person's latest choice, and submit_count goes up. The public answer is the
+interests are refreshed (interests are merged), email consent once given stays
+on (an unchecked repeat never turns it off), and submit_count goes up. The public answer is the
 same whether the email is new, repeated or belongs to an existing applicant,
 so a signup can never reveal an account or touch a profile.
 
@@ -91,10 +91,11 @@ def signup(db: Session, prog: VoltProgram, body: Dict[str, Any]) -> VoltTalentSi
         if k not in merged:
             merged.append(k)
     row.interests = json.dumps(merged)
+    # Consent, once given, stays on: leaving the box unchecked on a later
+    # signup never turns it off (only an unsubscribe would).
     if notify and not row.notify_opt_in:
+        row.notify_opt_in = True
         row.notify_opt_in_at = now
-    row.notify_opt_in = notify
-    if notify:
         row.unsubscribed_at = None
     if referrer is not None and row.referrer_serial is None:
         # The first confirmed referral stands; a later one never overwrites it.

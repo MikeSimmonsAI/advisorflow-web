@@ -116,7 +116,7 @@ class VoltTalentSignup(Base):
     Kept apart from volt_reps / volt_applications on purpose: a signup never
     creates an account, a rep ID or an application, so it can never inflate
     application or hiring counts. One row per (tenant, email): a repeat
-    updates it. `notify_opt_in` is the person's own latest choice.
+    updates it. `notify_opt_in`, once given, stays on until an unsubscribe.
     """
     __tablename__ = "volt_talent_signups"
     __table_args__ = (UniqueConstraint("organization_id", "email", name="uq_volt_talent_email"),)
