@@ -68,10 +68,10 @@ def filters_from(params: Dict[str, Any]) -> Dict[str, Any]:
     except (TypeError, ValueError):
         rec = C.serial_from_code(rec)
     travel = params.get("travel") or None
-    if travel not in ("yes", "no", "details"):
+    if travel not in TRAVEL_FILTERS:
         travel = None
     experience = params.get("experience") or None
-    if experience not in ("has", "none"):
+    if experience not in ("has", "none", "d2d"):
         experience = None
     return {"project_id": params.get("project_id") or None, "status": status, "reached": reached,
             "recruiter": rec, "date_from": _d(params.get("date_from")), "date_to": _d(params.get("date_to")),
@@ -171,11 +171,9 @@ def rows(db: Session, org_id: str, f: Dict[str, Any], limit: Optional[int] = Non
                             (rep.preferred_regions if rep else "") or ""]).lower()
             if f["location"] not in hay:
                 continue
-        if f.get("travel") and ans.get("willing_travel") != f["travel"]:
+        if f.get("travel") and not _travel_match(f["travel"], ans):
             continue
-        if f.get("experience") == "has" and not (hs.get("has_experience") or ans.get("relevant_experience")):
-            continue
-        if f.get("experience") == "none" and not hs.get("no_experience"):
+        if f.get("experience") and not _experience_match(f["experience"], ans, hs):
             continue
         orig = reps.get(rep.original_recruiter_serial) if rep and rep.original_recruiter_serial else None
         ref = reps.get(a.referrer_serial) if a.referrer_serial else None
@@ -192,8 +190,49 @@ def rows(db: Session, org_id: str, f: Dict[str, Any], limit: Optional[int] = Non
                     "availability": hs.get("availability"), "work_history_count": hs.get("work_history_count", 0),
                     "no_experience": hs.get("no_experience", False),
                     "willing_travel": ans.get("willing_travel"), "comfortable_d2d": ans.get("comfortable_d2d"),
-                    "transportation": ans.get("transportation"), "license_status": ans.get("license_status")})
+                    "transportation": ans.get("transportation"), "license_status": ans.get("license_status"),
+                    "earliest_departure": ans.get("earliest_departure"), "time_away": ans.get("time_away"),
+                    "drivers_license": ans.get("drivers_license"), "smartphone": ans.get("smartphone"),
+                    "d2d_experience": ans.get("d2d_experience"), "d2d_duration": ans.get("d2d_duration"),
+                    "homeowner_comfort": ans.get("homeowner_comfort"), "training": ans.get("training"),
+                    "commitment": ans.get("commitment")})
     return out
+
+
+# Travel filter: the current Fiber answer (how long they can be away), or the
+# first Fiber form's yes / no / details answer for older applications.
+TRAVEL_FILTERS = {"long": ("time_away", {"1_3_months", "3_plus_months"}),
+                  "short": ("time_away", {"1_2_weeks", "3_4_weeks"}),
+                  "discuss": ("time_away", {"discuss"}),
+                  "yes": ("willing_travel", {"yes"}), "no": ("willing_travel", {"no"}),
+                  "details": ("willing_travel", {"details"})}
+
+
+def _travel_match(value: str, ans: Dict[str, Any]) -> bool:
+    key, ok = TRAVEL_FILTERS[value]
+    return ans.get(key) in ok
+
+
+def _experience_match(value: str, ans: Dict[str, Any], hs: Dict[str, Any]) -> bool:
+    d2d = ans.get("d2d_experience")
+    if value == "d2d":
+        return d2d == "yes"
+    if value == "has":
+        return d2d in ("yes", "some") or bool(hs.get("has_experience") or ans.get("relevant_experience"))
+    # "none": the Fiber answer when there is one, otherwise the person's file.
+    return d2d == "no" if d2d else bool(hs.get("no_experience"))
+
+
+def _label(key: str, value) -> str:
+    """The applicant-facing wording of a choice, for the CSV."""
+    if not value:
+        return ""
+    from app.services.volt import hiring
+    for qs in hiring.PROJECT_QUESTIONS.values():
+        for q in qs:
+            if q["key"] == key and q.get("options"):
+                return dict(q["options"]).get(value, value)
+    return str(value)
 
 
 def _cell(v) -> str:
@@ -209,7 +248,11 @@ def csv_text(db: Session, org_id: str, f: Dict[str, Any]) -> str:
     w.writerow(["Application ID", "Rep ID", "Applicant", "Project key", "Project", "Stage",
                 "Original recruiter ID", "Original recruiter", "Project recruiter ID", "Project recruiter",
                 "City", "State", "Earliest start", "Availability", "Jobs listed", "No previous work experience",
-                "Willing to travel", "Comfortable with door-to-door", "Reliable transportation", "License status",
+                "Willing to travel (earlier Fiber form)", "Comfortable with door-to-door (earlier Fiber form)",
+                "Reliable transportation", "License status",
+                "Earliest departure", "Time away", "Driver's license", "Smartphone and data",
+                "Door-to-door experience", "Time selling", "Comfort approaching homeowners", "Training and role-play (earlier Fiber form)",
+                "Travel role commitment",
                 "Application started (UTC)", "Submitted (UTC)", "Approved (UTC)", "Started (UTC)"])
     for r in rows(db, org_id, f):
         o, p = r["original_recruiter"] or {}, r["project_recruiter"] or {}
@@ -219,6 +262,14 @@ def csv_text(db: Session, org_id: str, f: Dict[str, Any]) -> str:
                                         r["city"], r["state"], r["earliest_start"], r["availability"],
                                         r["work_history_count"], "Yes" if r["no_experience"] else "",
                                         r["willing_travel"], r["comfortable_d2d"], r["transportation"],
-                                        r["license_status"], r["created_at"],
+                                        r["license_status"],
+                                        r["earliest_departure"], _label("time_away", r["time_away"]),
+                                        _label("drivers_license", r["drivers_license"]),
+                                        _label("smartphone", r["smartphone"]),
+                                        _label("d2d_experience", r["d2d_experience"]),
+                                        _label("d2d_duration", r["d2d_duration"]),
+                                        _label("homeowner_comfort", r["homeowner_comfort"]),
+                                        _label("training", r["training"]),
+                                        "Yes" if r["commitment"] == "yes" else "", r["created_at"],
                                         r["submitted_at"], r["approved_at"], r["started_at"])])
     return buf.getvalue()

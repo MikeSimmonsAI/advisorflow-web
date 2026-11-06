@@ -59,7 +59,7 @@ function Shell({ children, signedIn, onSignOut, onApply, showApply, onTalent }) 
       </header>
       <main className="v-wrap" style={{ flex: 1 }}>{children}</main>
       <footer className="v-foot">
-        <div className="v-wrap"><span>VOLT Marketing · Recruiting portal</span>
+        <div className="v-wrap"><span>VOLT Marketing · Vision · Ownership · Leadership · Tenacity</span>
           <span>{onTalent && <button type="button" className="v-btn v-btn--link v-foot-link" onClick={onTalent}>Get Future Opportunities</button>} Need help? Contact your recruiter.</span></div>
       </footer>
       {showApply && (
@@ -220,12 +220,12 @@ function Home({ portal, signedIn, onApply, onTalent }) {
     <>
       <section className="v-hero">
         <article>
-          <span className="v-eyebrow">Rep recruiting</span>
-          <h1>Join a<br />project team.</h1>
-          <p>We are recruiting for ACA health insurance and traveling door-to-door fiber sales. Choose a project to start your application.</p>
+          <span className="v-eyebrow">Vision · Ownership · Leadership · Tenacity</span>
+          <h1>Your next move.<br /><span className="v-red">Make it VOLT.</span></h1>
+          <p>Find your place in health insurance or hit the road with a traveling door-to-door fiber sales team.</p>
           <div className="v-row" style={{ justifyContent: 'flex-start' }}>
-            <button type="button" className="v-btn v-btn--red v-btn--lg" onClick={onApply} data-apply="hero">Apply Now</button>
-            <button type="button" className="v-btn v-btn--ghost" onClick={onTalent} data-talent="hero">Get Future Opportunities</button>
+            <button type="button" className="v-btn v-btn--red v-btn--lg" onClick={onApply} data-apply="hero">Apply Now →</button>
+            <button type="button" className="v-btn v-btn--ghost" onClick={onTalent} data-talent="hero">Get Future Opportunities ↗</button>
           </div>
           <p className="v-small" style={{ marginTop: 12 }}>
             {signedIn ? <Link to="/volt/me">Go to my dashboard →</Link> : <>Already applied? <Link to="/volt/sign-in">Sign In</Link> to resume.</>}
@@ -235,45 +235,189 @@ function Home({ portal, signedIn, onApply, onTalent }) {
         <HeroArt />
       </section>
       <div className="v-section-head" id="projects">
-        <h2>Open opportunities</h2>
-        <span className="v-mono">{String(portal.open_projects.length).padStart(2, '0')} recruiting</span>
+        <h2>Choose your opportunity.</h2>
+        <span className="v-mono">{portal.open_projects.length} open project{portal.open_projects.length === 1 ? '' : 's'}</span>
       </div>
       <div className="v-grid2">
         {portal.open_projects.map((p) => (
           <article className="v-card v-card--project" key={p.key} data-project={p.key}>
             <div className="v-row"><span className="v-icon" aria-hidden="true">{p.icon}</span><span className="v-tag">● Recruiting</span></div>
             <h3>{p.name}</h3>
-            <p className="v-muted">{p.summary}</p>
-            <div className="v-row" style={{ width: '100%', marginTop: 'auto' }}>
-              <Link className="v-btn v-btn--line" to={`/volt/projects/${p.key}`}>Details</Link>
-              <Link className="v-btn v-btn--red" to={`/volt/apply/${p.key}`} style={{ flex: 1 }}>{signedIn ? 'Apply / resume' : 'Apply Now'} →</Link>
+            <p className="v-muted">{CARD[p.key]?.text || p.summary}</p>
+            {CARD[p.key] && <div className="v-facts">{CARD[p.key].facts.map((f) => <span key={f}>{f}</span>)}</div>}
+            <div className="v-card-actions">
+              <Link className="v-btn v-btn--red" to={`/volt/projects/${p.key}`} data-explore={p.key}>Explore the Opportunity →</Link>
+              <Link className="v-btn v-btn--line" to={`/volt/apply/${p.key}`} data-apply-card={p.key}>{signedIn ? 'Apply / resume' : `Apply for ${CARD[p.key]?.short || p.short_name || p.name}`} →</Link>
             </div>
           </article>
         ))}
       </div>
+      <section className="v-talent-band">
+        <div><h2>Your next opportunity starts here.</h2><p>Leave your name and email to hear about future projects.</p></div>
+        <button type="button" className="v-btn v-btn--red" onClick={onTalent} data-talent="section">Keep Me Updated →</button>
+      </section>
       {portal.past_projects.map((p) => (
         <section className="v-card v-past" key={p.key} data-project={p.key}>
           <div><span className="v-mono">Past project</span><h3>{p.name}</h3></div>
           <span className="v-tag v-tag--black">Recruiting closed</span>
         </section>
       ))}
-      <section className="v-card v-talent-cta">
-        <div><h3>Not ready to apply?</h3><p className="v-muted">Save your interest and hear about future VOLT Marketing opportunities.</p></div>
-        <button type="button" className="v-btn v-btn--line" onClick={onTalent} data-talent="section">Get Future Opportunities</button>
-      </section>
     </>
+  )
+}
+
+// ── Homepage project cards (approved demo copy) ─────────────────────────────
+const CARD = {
+  aca: { short: 'ACA', text: 'Bring your sales, enrollment, or customer service experience to a health insurance opportunity.',
+    facts: ['Health insurance', 'Experience welcome'] },
+  fiber: { short: 'Fiber', text: 'A traveling door-to-door fiber sales opportunity. Tell us where you’re based and when you can travel.',
+    facts: ['Door-to-door sales', 'Traveling gig'] },
+}
+
+// ── What VOLT stands for (both Explore pages; approved demo) ─────────────────
+const VOLT_VALUES = [
+  ['V', 'Vision', 'Know what you’re building and where you want to go.'],
+  ['O', 'Ownership', 'Own your future. Build toward greater freedom, independence, and control over the direction of your life.'],
+  ['L', 'Leadership', 'Set the example and help others develop.'],
+  ['T', 'Tenacity', 'Stay disciplined, work through setbacks, and keep improving.'],
+]
+
+function VoltValues() {
+  return (
+    <section className="v-values" data-volt-meaning aria-labelledby="v-values-title">
+      <span className="v-eyebrow">The name is the standard</span>
+      <h2 id="v-values-title">What VOLT stands for.</h2>
+      <div className="v-valuegrid">
+        {VOLT_VALUES.map(([l, w, d]) => (
+          <article key={l} data-letter={l}><b aria-hidden="true">{l}</b><h3>{w}</h3><p>{d}</p></article>
+        ))}
+      </div>
+    </section>
   )
 }
 
 const PROJECT_DETAIL = {
   aca: 'Outreach for ACA health insurance. Tell us about your insurance, enrollment, sales or customer service experience and your license status; our team reviews every application.',
-  fiber: 'A traveling door-to-door fiber sales opportunity. The application asks about travel, door-to-door sales and transportation; our team reviews every application.',
+  fiber: 'A traveling door-to-door fiber sales opportunity. The application asks about travel readiness, door-to-door experience and coachability; our team reviews every application.',
 }
 
-function ProjectPage({ portal }) {
+// ── Explore pages (approved demo, 2026-11-06) ────────────────────────────────
+// Confirmed terms only. No pay, housing, expense, assignment-length, licensing
+// sponsorship or employment claims; no statistics, named records or
+// testimonials. Applicants apply to VOLT Marketing.
+function ExploreHero({ p, eyebrow, title, text, applyLabel }) {
+  return (
+    <section className="v-hero v-explore-hero">
+      <article>
+        <span className="v-eyebrow">{eyebrow}</span>
+        <h1>{title}</h1>
+        <p>{text}</p>
+        {p.recruiting
+          ? <Link className="v-btn v-btn--red v-btn--lg" to={`/volt/apply/${p.key}`} data-apply="project">{applyLabel}</Link>
+          : <p>This project is no longer accepting applications.</p>}
+      </article>
+      <HeroArt />
+    </section>
+  )
+}
+
+function Pillar({ id, eyebrow, title, children }) {
+  return (
+    <section className="v-pillar" data-pillar={id}>
+      <span className="v-eyebrow">{eyebrow}</span>
+      <h2>{title}</h2>
+      {children}
+    </section>
+  )
+}
+
+function ExploreClose({ p, title, text, applyLabel, onTalent }) {
+  return (
+    <section className="v-talent-band v-talent-band--stack">
+      {title.eyebrow && <span className="v-eyebrow">{title.eyebrow}</span>}
+      <h2>{title.h2}</h2>
+      {text.map((t) => <p key={t}>{t}</p>)}
+      <div className="v-row" style={{ justifyContent: 'flex-start' }}>
+        {p.recruiting && <Link className="v-btn v-btn--red" to={`/volt/apply/${p.key}`} data-apply="close">{applyLabel}</Link>}
+        {onTalent && <button type="button" className="v-btn v-btn--ghost" onClick={onTalent} data-talent="opportunity">Get Future Opportunities</button>}
+      </div>
+    </section>
+  )
+}
+
+function FiberOpportunity({ p, onTalent }) {
+  return (
+    <div className="v-opp" data-opportunity="fiber">
+      <ExploreHero p={p} eyebrow="Traveling T-Mobile Fiber D2D Sales"
+        title={<>Great markets.<br />Industry leaders.<br /><span className="v-red">Serious training.</span></>}
+        text="Take your ambition to the doors. Build your sales career around great markets, record-breaking professionals, and training that carries into the field."
+        applyLabel="Apply for Traveling Fiber Sales →" />
+      <div className="v-page">
+        <div className="v-section-head v-section-head--stack" data-reasons>
+          <h2>Three reasons to sell fiber with VOLT.</h2>
+          <p className="v-muted">Great Markets. Industry-Leading People and Leadership. Training and Development.</p>
+        </div>
+        <Pillar id="markets" eyebrow="Reason 1 · Great Markets" title="Put your effort in the right place.">
+          <p>Good selling starts before the first knock. Knowing where fiber is available, understanding the neighborhood, and having clear territory direction gives every conversation a purpose.</p>
+          <p className="v-muted">Our focus is matching a prepared team with a clear market plan. Your recruiter will walk you through the available assignment.</p>
+        </Pillar>
+        <Pillar id="people" eyebrow="Reason 2 · Industry-Leading People and Leadership" title="The best in the industry work here.">
+          <p data-best>Work alongside professionals breaking industry records. Learn from their preparation, discipline, and execution, with leadership that sets clear expectations and holds you accountable.</p>
+          <p className="v-muted">Bring the ambition to build your own future and the tenacity to improve. This is where ambition meets a high standard of work.</p>
+        </Pillar>
+        <Pillar id="training" eyebrow="Reason 3 · Training and Development" title={<>Learn it. Practice it.<br />Take it to the doors.</>}>
+          <p>Understand the product. Learn how to open a conversation, listen to a homeowner, explain the offer, work through objections respectfully, and complete an accurate order.</p>
+          <p className="v-muted">Role-play, feedback, and consistent practice connect what you learn with what you do in the field.</p>
+        </Pillar>
+        <ExploreClose p={p} onTalent={onTalent} applyLabel="Apply Now →"
+          title={{ eyebrow: 'The work', h2: 'Travel. Prepare. Knock. Improve.' }}
+          text={['You’ll travel to an assigned market, prepare with the team, meet homeowners door to door, explain fiber service, and follow through accurately. Coachability, persistence, integrity, and professionalism matter here.',
+            'This opportunity requires travel. Discuss assignment length, transportation, housing, compensation, and expenses with your recruiter before committing.']} />
+        <VoltValues />
+        <Link to="/volt" className="v-btn v-btn--line v-btn--sm">← All opportunities</Link>
+      </div>
+    </div>
+  )
+}
+
+function AcaOpportunity({ p, onTalent }) {
+  return (
+    <div className="v-opp" data-opportunity="aca">
+      <ExploreHero p={p} eyebrow="ACA Health Insurance"
+        title={<>Build a career.<br /><span className="v-red">Help people<br />understand coverage.</span></>}
+        text="Bring your ambition to health insurance sales. Develop the product knowledge, communication, and follow-through that support informed customer decisions."
+        applyLabel="Apply for ACA →" />
+      <div className="v-page">
+        <div className="v-section-head v-section-head--stack">
+          <h2>Explore ACA with VOLT.</h2>
+          <p className="v-muted">A professional sales opportunity built around knowledge, integrity, and consistent execution.</p>
+        </div>
+        <Pillar id="work" eyebrow="The work" title="Listen closely. Explain clearly. Follow through.">
+          <p>Help people understand available health insurance options. Learn to ask useful questions, explain coverage and enrollment steps accurately, and keep organized records of every conversation.</p>
+          <p className="v-muted">Your recruiter will explain the specific role, licensing expectations, available markets, and onboarding process.</p>
+        </Pillar>
+        <Pillar id="development" eyebrow="Leadership & development" title="Build your expertise with purpose.">
+          <p>Product knowledge and clear communication belong together. Our focus is professional development, direct feedback, responsible selling, and the skills to build greater independence.</p>
+        </Pillar>
+        <Pillar id="who" eyebrow="Who should apply" title={<>Bring your experience.<br />Or your commitment to learn.</>}>
+          <p>Tell us about your insurance, sales, enrollment, or customer service background. Share your current license status so a recruiter can discuss the appropriate next steps with you.</p>
+        </Pillar>
+        <VoltValues />
+        <ExploreClose p={p} onTalent={onTalent} applyLabel="Apply for ACA →"
+          title={{ h2: 'Take the next step.' }}
+          text={['Apply to discuss the ACA opportunity, or leave your details for future projects.']} />
+        <Link to="/volt" className="v-btn v-btn--line v-btn--sm">← All opportunities</Link>
+      </div>
+    </div>
+  )
+}
+
+function ProjectPage({ portal, onTalent }) {
   const { projectKey } = useParams()
   const p = [...portal.open_projects, ...portal.past_projects].find((x) => x.key === projectKey)
   if (!p) return <Navigate to="/volt" replace />
+  if (p.key === 'fiber') return <FiberOpportunity p={p} onTalent={onTalent} />
+  if (p.key === 'aca') return <AcaOpportunity p={p} onTalent={onTalent} />
   return (
     <div className="v-page" style={{ maxWidth: 720 }}>
       <Link to="/volt" className="v-btn v-btn--line v-btn--sm">← All opportunities</Link>
@@ -599,6 +743,8 @@ function ProfilePage({ me, reload }) {
 }
 
 // ── Root ────────────────────────────────────────────────────────────────────
+const AUTO_TALENT_MS = 10000
+let autoTalentDone = false   // module scope: once per page load
 export default function VoltPortal() {
   const [portal, setPortal] = useState(null)
   const [me, setMe] = useState(null)
@@ -637,11 +783,30 @@ export default function VoltPortal() {
     if (key) { navigate(`/volt/apply/${key}`); return }        // on a project page: that application
     setDialog('apply')
   }
-  function openTalent() {
+  const [talentSource, setTalentSource] = useState('portal')
+  function openTalent(source = 'portal') {
+    autoTalentDone = true                       // a manual open counts as shown
+    setTalentSource(typeof source === 'string' ? source : 'portal')
     const inv = readInvite()
     if (inv?.ref) volt.invite(inv.ref, '').then(setTalentInvite).catch(() => setTalentInvite({ status: 'none' }))
     setDialog('talent')
   }
+  // Get Future Opportunities opens on its own ~10 s after the homepage is
+  // entered, once per page load. It waits while another dialog is open and is
+  // never shown anywhere but the homepage (so never during an application).
+  const [autoDue, setAutoDue] = useState(false)
+  useEffect(() => {
+    if (!ready || !portal || path !== '/volt' || autoTalentDone) return undefined
+    const t = setTimeout(() => setAutoDue(true), AUTO_TALENT_MS)
+    return () => clearTimeout(t)
+  }, [ready, portal, path])
+  useEffect(() => {
+    if (!autoDue) return
+    if (path !== '/volt' || autoTalentDone) { setAutoDue(false); return }
+    if (dialog) return                          // deferred until that dialog closes
+    setAutoDue(false)
+    openTalent('auto_popup')
+  }, [autoDue, dialog, path]) // eslint-disable-line react-hooks/exhaustive-deps
   const signedIn = !!me
   if (!ready) return <Shell><Loading /></Shell>
   if (!portal) return <Shell><div className="v-page"><Alert>{err || 'The recruiting portal is unavailable right now.'}</Alert></div></Shell>
@@ -650,7 +815,7 @@ export default function VoltPortal() {
     <Shell signedIn={signedIn} onSignOut={signOut} showApply={showApply} onApply={openApply} onTalent={openTalent}>
       <Routes>
         <Route index element={<Home portal={portal} signedIn={signedIn} onApply={openApply} onTalent={openTalent} />} />
-        <Route path="projects/:projectKey" element={<ProjectPage portal={portal} />} />
+        <Route path="projects/:projectKey" element={<ProjectPage portal={portal} onTalent={openTalent} />} />
         <Route path="apply/:projectKey" element={<Apply portal={portal} me={me} reload={reload} />} />
         <Route path="sign-in" element={<SignIn reload={reload} />} />
         <Route path="me" element={needAuth(<Dashboard me={me} portal={portal} />)} />
@@ -659,13 +824,13 @@ export default function VoltPortal() {
         <Route path="*" element={<Navigate to="/volt" replace />} />
       </Routes>
       {dialog === 'apply' && (
-        <ApplyDialog projects={portal.open_projects} onClose={() => setDialog(null)}
+        <ApplyDialog projects={portal.open_projects} onClose={() => setDialog(null)} onTalent={() => openTalent()}
                      onPick={(k) => { setDialog(null); navigate(`/volt/apply/${k}`) }} />
       )}
       {dialog === 'talent' && (
-        <TalentDialog projects={portal.open_projects} invite={talentInvite} ReferralPicker={ReferralPicker}
+        <TalentDialog projects={portal.open_projects} invite={talentInvite} ReferralPicker={ReferralPicker} source={talentSource}
                       onClose={() => setDialog(null)}
-                      onBrowse={() => { setDialog(null); navigate('/volt'); setTimeout(() => document.getElementById('projects')?.scrollIntoView({ behavior: 'smooth' }), 80) }} />
+                      onBrowse={() => setDialog('apply')} />
       )}
     </Shell>
   )

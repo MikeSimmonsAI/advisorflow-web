@@ -1,10 +1,17 @@
 /* VOLT application, step by step (#535).
  *
- *   1 About you        location, preferred regions, earliest start, availability
- *   2 Experience       work history (repeatable) OR "No previous work experience",
- *                      relevant experience, optional resume, anything else
- *   3 Project          that project's questions, plus any document staff request
- *   4 Review & submit  everything on one page; anything missing links back
+ * The steps come from the project (the server sends `profile_fields` and
+ * `sections`):
+ *
+ *   ACA (full file)                      Fiber (approved demo; traveling door-to-door only)
+ *   1 About you   location, regions,     1 Travel   home base, departure, time away,
+ *                 start, availability               license, transportation, smartphone
+ *   2 Experience  work history or "No    2 Sales    door-to-door experience or the
+ *                 previous work                     beginner question; optional resume
+ *                 experience", resume    3 Mindset  motivation, setbacks, coaching,
+ *   3 Project questions                             commitment; anything else
+ *   4 Review & submit                    4 Review
+ *   ("You", the account step, comes before the application in both.)
  *
  * Every step saves to the server (Back/Next, and quietly while typing), so a
  * person can sign out on any step and resume exactly there. What is REQUIRED is
@@ -83,17 +90,36 @@ export function DocRow({ d, applicationId, editable, onDone }) {
   )
 }
 
-const STEPS = [
-  { id: 'about', label: 'About you' },
-  { id: 'experience', label: 'Experience' },
-  { id: 'project', label: 'Project questions' },
-  { id: 'review', label: 'Review & submit' },
-]
+export function buildSteps(a) {
+  const full = (a.profile_fields || []).includes('work_history')
+  const sections = a.sections && a.sections.length ? a.sections : [{ id: 'project', label: 'Project questions' }]
+  // Full file (ACA): About you, Experience, the project's questions, Review.
+  // Fiber (approved demo): Travel (with home base), Sales (with the optional
+  // resume), Mindset (with anything else), Review.
+  const steps = []
+  if (full) steps.push({ id: 'about', label: 'About you' }, { id: 'experience', label: 'Experience' })
+  sections.forEach((s) => steps.push({ id: `q:${s.id}`, section: s.id, label: s.label, title: s.title, intro: s.intro }))
+  steps.push({ id: 'review', label: full ? 'Review & submit' : 'Review' })
+  return steps
+}
 
-function stepOf(missing) {
-  if (/^Profile:/.test(missing)) return 0
-  if (/^Experience:/.test(missing)) return 1
-  return 2
+// A missing item's text starts with the step it belongs to.
+function stepOf(steps, missing) {
+  const at = (id) => Math.max(0, steps.findIndex((s) => s.id === id))
+  if (/^Profile:/.test(missing)) return steps.some((s) => s.id === 'about') ? at('about') : steps.findIndex((s) => s.section)
+  if (/^Experience:/.test(missing)) return at('experience')
+  const sec = steps.find((s) => s.section && missing.startsWith(`${s.label}:`))
+  if (sec) return steps.indexOf(sec)
+  if (/^(Upload|Replace):/.test(missing)) {
+    const sales = steps.findIndex((s) => s.section === 'experience')
+    return sales >= 0 && !steps.some((s) => s.id === 'about') ? sales : steps.length - 2
+  }
+  return steps.findIndex((s) => s.section) // "Answer: ..." -> the first question step
+}
+
+// show_if: a follow-up question appears only for the answers that lead to it.
+export function shown(q, ans) {
+  return !q.show_if || q.show_if[1].includes(ans[q.show_if[0]] || '')
 }
 
 const EMPTY_ROLE = { employer: '', title: '', start: '', end: '', current: false, summary: '' }
@@ -106,6 +132,10 @@ function Field({ id, label, error, children, hint }) {
       {error && <span className="v-ferr" id={`${id}-e`}>{error}</span>}
     </label>
   )
+}
+
+function fmtDay(d) {
+  return d ? new Date(d.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''
 }
 
 function fmtMonth(m) {
@@ -136,10 +166,11 @@ export default function ApplicationSteps({ reload }) {
   }, [id])
   useEffect(() => {
     load().then((x) => {
+      const last = buildSteps(x).length - 1
       let s = 0
       try { s = Number(sessionStorage.getItem(stepKey) || 0) } catch { /* private */ }
-      if (!x.editable) s = 3
-      setStep(Math.min(Math.max(s, 0), 3))
+      if (!x.editable) s = last
+      setStep(Math.min(Math.max(s || 0, 0), last))
     }).catch((x) => setErr(x.message))
   }, [load]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { try { sessionStorage.setItem(stepKey, String(step)) } catch { /* private */ } }, [step, stepKey])
@@ -188,7 +219,7 @@ export default function ApplicationSteps({ reload }) {
     setErr('')
     const ok = await persist()
     if (!ok) return
-    if (to === 3) { await load() }
+    if (to === buildSteps(a).length - 1) { await load() }
     setStep(to)
     setTimeout(() => top.current?.focus(), 30)
     window.scrollTo(0, 0)
@@ -217,11 +248,24 @@ export default function ApplicationSteps({ reload }) {
   const missing = a.missing || []
   const resume = (a.profile_documents || []).find((d) => d.key === 'resume')
   const otherProfileDocs = (a.profile_documents || []).filter((d) => d.key !== 'resume')
-  const q = a.questions || []
+  const STEPS = buildSteps(a)
+  const LAST = STEPS.length - 1
+  const cur = STEPS[Math.min(step, LAST)]
+  const pf = a.profile_fields || []
+  const full = pf.includes('work_history')
+  const allQ = a.questions || []
+  const q = allQ.filter((qq) => !qq.legacy)
+  const earlier = allQ.filter((qq) => qq.legacy && ans[qq.key])
+  const sectionOf = (qq) => qq.section || 'project'
+  const docStep = full ? STEPS.findIndex((x) => x.section) + (STEPS.filter((x) => x.section).length - 1) : STEPS.findIndex((x) => x.section === 'experience')
+  const firstSection = STEPS.find((x) => x.section)?.section
+  const lastSection = [...STEPS].reverse().find((x) => x.section)?.section
   const answerLabel = (qq) => {
     const v = ans[qq.key]
     if (!v) return '—'
+    if (qq.type === 'confirm') return v === 'yes' ? 'Yes, I understand' : '—'
     if (qq.type === 'choice') return (qq.options.find((o) => o[0] === v) || [v, v])[1]
+    if (qq.type === 'date') return fmtDay(v)
     return v
   }
 
@@ -235,7 +279,7 @@ export default function ApplicationSteps({ reload }) {
 
       {editable && (
         <nav className="v-progress" aria-label="Application steps">
-          <p className="v-small" ref={top} tabIndex={-1}><b>Step {step + 1} of {STEPS.length}:</b> {STEPS[step].label}</p>
+          <p className="v-small" ref={top} tabIndex={-1}><b>Step {step + 1} of {STEPS.length}:</b> {cur.label}</p>
           <div className="v-bar" role="progressbar" aria-valuemin={1} aria-valuemax={STEPS.length} aria-valuenow={step + 1}><span style={{ width: `${((step + 1) / STEPS.length) * 100}%` }} /></div>
           <ol className="v-steplist">
             {STEPS.map((s, i) => (
@@ -245,7 +289,7 @@ export default function ApplicationSteps({ reload }) {
         </nav>
       )}
 
-      {editable && step === 0 && (
+      {editable && cur.id === 'about' && (
         <section className="v-panel v-form" data-step="about">
           <h3>About you</h3>
           <p className="v-small v-muted">{a.profile.first_name} {a.profile.last_name} · {a.profile.email} · {a.profile.phone} · <Link to="/volt/me/profile">Edit name or contact details</Link></p>
@@ -255,10 +299,12 @@ export default function ApplicationSteps({ reload }) {
           </div>
           <div className="v-split">
             <Field id="v-zip" label="ZIP code" error={fe('zip_code')}><input id="v-zip" value={h.zip_code} inputMode="numeric" autoComplete="postal-code" maxLength={10} aria-invalid={fe('zip_code') ? 'true' : undefined} onChange={(e) => setHiring({ zip_code: e.target.value })} /></Field>
-            <Field id="v-start" label="Earliest available start date" error={fe('earliest_start')}><input id="v-start" type="date" value={h.earliest_start} aria-invalid={fe('earliest_start') ? 'true' : undefined} onChange={(e) => setHiring({ earliest_start: e.target.value })} /></Field>
+            {full && <Field id="v-start" label="Earliest available start date" error={fe('earliest_start')}><input id="v-start" type="date" value={h.earliest_start} aria-invalid={fe('earliest_start') ? 'true' : undefined} onChange={(e) => setHiring({ earliest_start: e.target.value })} /></Field>}
           </div>
-          <Field id="v-regions" label="Preferred work locations or regions" hint="Cities, states or regions you would work in."><textarea id="v-regions" value={h.preferred_regions} maxLength={500} onChange={(e) => setHiring({ preferred_regions: e.target.value })} /></Field>
-          <fieldset className="v-fieldset">
+          {!full && <p className="v-small v-muted">Where you live now. The next steps ask about travel.</p>}
+          {a.referrer && <p className="v-small" data-referral>Referred by <b>{a.referrer.display_name} · {a.referrer.rep_code}</b></p>}
+          {full && <Field id="v-regions" label="Preferred work locations or regions" hint="Cities, states or regions you would work in."><textarea id="v-regions" value={h.preferred_regions} maxLength={500} onChange={(e) => setHiring({ preferred_regions: e.target.value })} /></Field>}
+          {full && <fieldset className="v-fieldset" data-availability>
             <legend>Availability</legend>
             {opts.map(([k, l]) => (
               <label key={k} className="v-check"><input type="checkbox" checked={avail.types.includes(k)}
@@ -266,11 +312,11 @@ export default function ApplicationSteps({ reload }) {
             ))}
             <label htmlFor="v-avnotes" style={{ marginTop: 8 }}>Specific days or hours <span className="v-muted">(optional)</span>
               <input id="v-avnotes" value={avail.notes} maxLength={300} onChange={(e) => setHiring({ availability: { ...avail, notes: e.target.value } })} /></label>
-          </fieldset>
+          </fieldset>}
         </section>
       )}
 
-      {editable && step === 1 && (
+      {editable && cur.id === 'experience' && (
         <section className="v-panel v-form" data-step="experience">
           <h3>Experience</h3>
           <label className="v-check v-consent"><input type="checkbox" checked={!!h.no_experience} data-no-experience
@@ -303,10 +349,21 @@ export default function ApplicationSteps({ reload }) {
         </section>
       )}
 
-      {editable && step === 2 && (
-        <section className="v-panel v-form" data-step="project">
-          <h3>{a.project.name}</h3>
-          {q.map((qq) => (qq.type === 'choice' ? (
+      {editable && cur.section && (
+        <section className="v-panel v-form" data-step={cur.section === 'project' ? 'project' : cur.section}>
+          <h3>{cur.section === 'project' ? a.project.name : (cur.title || cur.label)}</h3>
+          {cur.intro && <p className="v-small v-muted">{cur.intro}</p>}
+          {!full && cur.section === firstSection && (
+            <div data-homebase>
+              <div className="v-split">
+                <Field id="v-city" label="Current city" error={fe('city')}><input id="v-city" value={h.city} autoComplete="address-level2" onChange={(e) => setHiring({ city: e.target.value })} /></Field>
+                <Field id="v-state" label="State" error={fe('state')}><input id="v-state" value={h.state} autoComplete="address-level1" maxLength={40} onChange={(e) => setHiring({ state: e.target.value })} /></Field>
+              </div>
+              <Field id="v-zip" label="ZIP code" error={fe('zip_code')}><input id="v-zip" value={h.zip_code} inputMode="numeric" autoComplete="postal-code" maxLength={10} aria-invalid={fe('zip_code') ? 'true' : undefined} onChange={(e) => setHiring({ zip_code: e.target.value })} /></Field>
+              {a.referrer && <p className="v-small" data-referral>Referred by <b>{a.referrer.display_name} · {a.referrer.rep_code}</b></p>}
+            </div>
+          )}
+          {q.filter((qq) => sectionOf(qq) === cur.section && shown(qq, ans)).map((qq) => (qq.type === 'choice' ? (
             <fieldset key={qq.key} className="v-fieldset" data-q={qq.key}>
               <legend>{qq.label}{qq.required ? '' : ' (optional)'}</legend>
               <div className="v-radios">
@@ -316,12 +373,30 @@ export default function ApplicationSteps({ reload }) {
               </div>
               {fe(qq.key) && <span className="v-ferr">{fe(qq.key)}</span>}
             </fieldset>
+          ) : qq.type === 'date' ? (
+            <Field key={qq.key} id={`v-q-${qq.key}`} label={qq.label} hint={qq.hint} error={fe(qq.key)}>
+              <input id={`v-q-${qq.key}`} type="date" data-q={qq.key} value={ans[qq.key] || ''} onChange={(e) => setAnswer(qq.key, e.target.value)} />
+            </Field>
+          ) : qq.type === 'confirm' ? (
+            <div key={qq.key} data-q={qq.key}>
+              <label className="v-check v-consent"><input type="checkbox" checked={ans[qq.key] === 'yes'} onChange={(e) => setAnswer(qq.key, e.target.checked ? 'yes' : '')} /> {qq.label}</label>
+              {fe(qq.key) && <span className="v-ferr">{fe(qq.key)}</span>}
+            </div>
           ) : (
-            <Field key={qq.key} id={`v-q-${qq.key}`} label={qq.label + ((qq.required || (qq.required_if && ans[qq.required_if[0]] === qq.required_if[1])) ? '' : ' (optional)')}>
+            <Field key={qq.key} id={`v-q-${qq.key}`} hint={qq.hint} label={qq.label + ((qq.required || (qq.required_if && ans[qq.required_if[0]] === qq.required_if[1])) ? '' : ' (optional)')}>
               <textarea id={`v-q-${qq.key}`} data-q={qq.key} value={ans[qq.key] || ''} maxLength={4000} onChange={(e) => setAnswer(qq.key, e.target.value)} />
             </Field>
           )))}
-          {(a.documents.length > 0 || otherProfileDocs.length > 0) && (
+          {!full && cur.section === 'experience' && resume && (
+            <div data-resume>
+              <p className="v-small v-muted" style={{ marginTop: 6 }}>A resume is optional. You can submit without one.</p>
+              <DocRow d={resume} applicationId={null} editable onDone={docsChanged} />
+            </div>
+          )}
+          {!full && cur.section === lastSection && (
+            <Field id="v-extra" label="Anything else you want our team to consider" hint="Optional."><textarea id="v-extra" value={h.additional_info} maxLength={2000} onChange={(e) => setHiring({ additional_info: e.target.value })} /></Field>
+          )}
+          {step === docStep && (a.documents.length > 0 || otherProfileDocs.length > 0) && (
             <div>
               <p className="v-label" style={{ marginTop: 6 }}>Requested documents</p>
               {a.documents.map((d) => <DocRow key={'a' + d.key} d={d} applicationId={a.id} editable onDone={docsChanged} />)}
@@ -331,7 +406,7 @@ export default function ApplicationSteps({ reload }) {
         </section>
       )}
 
-      {(step === 3 || !editable) && (
+      {(cur.id === 'review' || !editable) && (
         <section className="v-panel" data-step="review">
           <h3>{editable ? 'Review & submit' : 'Your application'}</h3>
           {a.next_action && <div className={`v-alert ${a.next_action.kind === 'applicant' ? 'v-alert--info' : 'v-alert--ok'}`} style={{ marginBottom: 12 }}><b>{a.next_action.label}.</b> {a.next_action.detail}</div>}
@@ -339,23 +414,40 @@ export default function ApplicationSteps({ reload }) {
             <div className="v-alert v-alert--err" role="alert" data-missing>
               <b>Before you submit:</b>
               <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
-                {missing.map((m) => <li key={m}>{m} <button type="button" className="v-btn v-btn--link" onClick={() => go(stepOf(m))}>Fix</button></li>)}
+                {missing.map((m) => <li key={m}>{m} <button type="button" className="v-btn v-btn--link" onClick={() => go(stepOf(STEPS, m))}>Fix</button></li>)}
               </ul>
             </div>
           )}
           <dl className="v-review">
             <dt>Location</dt><dd>{[h.city, h.state, h.zip_code].filter(Boolean).join(', ') || '—'}</dd>
-            <dt>Preferred regions</dt><dd>{h.preferred_regions || '—'}</dd>
-            <dt>Earliest start</dt><dd>{h.earliest_start ? new Date(h.earliest_start + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</dd>
-            <dt>Availability</dt><dd>{avail.types.map((t) => (opts.find((o) => o[0] === t) || [t, t])[1]).join(', ') || '—'}{avail.notes ? ` · ${avail.notes}` : ''}</dd>
-            <dt>Experience</dt><dd>{h.no_experience ? 'No previous work experience' : roles.length ? (
-              <ul style={{ margin: 0, paddingLeft: 18 }}>{roles.map((r, i) => <li key={i}><b>{r.title || '—'}</b>, {r.employer || '—'} · {fmtMonth(r.start)} – {r.current ? 'Present' : fmtMonth(r.end)}{r.summary ? ` · ${r.summary}` : ''}</li>)}</ul>) : '—'}</dd>
-            <dt>Relevant experience</dt><dd>{h.relevant_experience || '—'}</dd>
+            {full && <>
+              <dt>Preferred regions</dt><dd>{h.preferred_regions || '—'}</dd>
+              <dt>Earliest start</dt><dd>{h.earliest_start ? fmtDay(h.earliest_start) : '—'}</dd>
+              <dt>Availability</dt><dd>{avail.types.map((t) => (opts.find((o) => o[0] === t) || [t, t])[1]).join(', ') || '—'}{avail.notes ? ` · ${avail.notes}` : ''}</dd>
+              <dt>Experience</dt><dd>{h.no_experience ? 'No previous work experience' : roles.length ? (
+                <ul style={{ margin: 0, paddingLeft: 18 }}>{roles.map((r, i) => <li key={i}><b>{r.title || '—'}</b>, {r.employer || '—'} · {fmtMonth(r.start)} – {r.current ? 'Present' : fmtMonth(r.end)}{r.summary ? ` · ${r.summary}` : ''}</li>)}</ul>) : '—'}</dd>
+              <dt>Relevant experience</dt><dd>{h.relevant_experience || '—'}</dd>
+            </>}
             <dt>Resume</dt><dd>{resume?.document ? resume.document.filename : 'Not provided (optional)'}</dd>
             <dt>Anything else</dt><dd>{h.additional_info || '—'}</dd>
-            {q.map((qq) => <Fragment key={qq.key}><dt>{qq.label}</dt><dd>{answerLabel(qq)}</dd></Fragment>)}
             <dt>Referred by</dt><dd>{a.referrer ? `${a.referrer.display_name} · ${a.referrer.rep_code}` : 'Direct'}</dd>
           </dl>
+          {STEPS.filter((x) => x.section).map((x) => (
+            <div key={x.id} data-review-section={x.section}>
+              {x.section !== 'project' && <p className="v-label" style={{ marginTop: 14 }}>{x.label}</p>}
+              <dl className="v-review">
+                {q.filter((qq) => sectionOf(qq) === x.section && shown(qq, ans)).map((qq) => <Fragment key={qq.key}><dt>{qq.label}</dt><dd>{answerLabel(qq)}</dd></Fragment>)}
+              </dl>
+            </div>
+          ))}
+          {earlier.length > 0 && (
+            <div data-review-section="earlier">
+              <p className="v-label" style={{ marginTop: 14 }}>Earlier answers</p>
+              <dl className="v-review">
+                {earlier.map((qq) => <Fragment key={qq.key}><dt>{qq.label}</dt><dd>{answerLabel(qq)}</dd></Fragment>)}
+              </dl>
+            </div>
+          )}
         </section>
       )}
 
@@ -364,7 +456,7 @@ export default function ApplicationSteps({ reload }) {
         <div className="v-stepnav">
           {step > 0 ? <button type="button" className="v-btn v-btn--line" onClick={() => go(step - 1)}>← Back</button> : <span />}
           <span className="v-small v-muted" aria-live="polite">{saved}</span>
-          {step < 3
+          {step < LAST
             ? <button type="button" className="v-btn v-btn--red" onClick={() => go(step + 1)} data-next>Next →</button>
             : <button type="button" className="v-btn v-btn--red" onClick={submit} disabled={busy || missing.length > 0} data-submit>{busy ? 'Submitting…' : a.status === 'needs_update' ? 'Resubmit application →' : 'Submit application →'}</button>}
         </div>

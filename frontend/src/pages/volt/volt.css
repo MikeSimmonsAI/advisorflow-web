@@ -194,3 +194,57 @@
 .v-review dt { font-weight: 750; font-size: 14px; }
 .v-review dd { margin: 0; font-size: 15px; white-space: pre-wrap; }
 @media (max-width: 680px) { .v-review { grid-template-columns: 1fr; } .v-review dd { margin-bottom: 6px; } }
+
+/* ── Why Sell Fiber With VOLT? ─────────────────────────────────────────── */
+.v-opp { max-width: 980px; }
+.v-opp h2 { font-size: clamp(24px, 3.4vw, 34px); letter-spacing: -.04em; line-height: 1.08; margin: 4px 0 10px; }
+.v-opp-hero { background: var(--v-black); color: var(--v-white); border-radius: 16px; margin: 16px 0 18px;
+  padding: clamp(24px, 4.5vw, 56px); border-bottom: 6px solid var(--v-red); position: relative; overflow: hidden; }
+.v-opp-hero::after { content: ""; position: absolute; right: -60px; top: -60px; width: 260px; height: 260px;
+  border: 2px dashed var(--v-red); border-radius: 50%; opacity: .55; pointer-events: none; }
+.v-opp-hero h1 { font-size: clamp(38px, 6.4vw, 76px); line-height: .96; letter-spacing: -.06em; margin: 12px 0 14px; max-width: 760px; }
+.v-opp-hero p { max-width: 560px; font-size: 18px; margin-bottom: 20px; }
+.v-opp-travel { border-left: 6px solid var(--v-red); margin-bottom: 22px; }
+.v-opp-travel p { max-width: 720px; margin-top: 6px; }
+.v-opp-pillar { border-top: 2px solid var(--v-black); padding: 22px 0 8px; }
+.v-opp-pillar-head { display: flex; gap: 16px; align-items: flex-start; }
+.v-opp-pillar-head p { max-width: 640px; font-size: 17px; }
+.v-opp-n { font-family: var(--v-mono, ui-monospace, monospace); font-weight: 800; color: var(--v-red); font-size: 22px; padding-top: 6px; min-width: 34px; }
+.v-opp-points { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.v-opp-points li { background: var(--v-white); border: 1px solid var(--v-line); border-top: 3px solid var(--v-red); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 4px; }
+.v-opp-points--plain li { border-top-color: var(--v-black); }
+.v-opp-fit { margin: 22px 0; }
+.v-opp-steps ol { margin: 8px 0 8px; padding-left: 22px; display: grid; gap: 8px; max-width: 720px; }
+.v-opp-cta { background: var(--v-red); color: var(--v-white); border-radius: 16px; padding: clamp(22px, 4vw, 40px); margin: 22px 0 8px;
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: space-between; }
+.v-opp-cta h2 { margin: 0; }
+.v-opp-cta .v-btn--red { background: var(--v-black); border-color: var(--v-black); }
+@media (max-width: 640px) { .v-opp-pillar-head { flex-direction: column; gap: 4px; } }
+
+
+/* Approved demo (2026-11-06): homepage cards, talent band, Explore pages, values */
+.v-red { color: var(--v-red-hot); }
+.v-facts { display: flex; flex-wrap: wrap; gap: 8px; }
+.v-facts span { border: 1px solid var(--v-line); border-radius: 4px; padding: 4px 9px; font-size: 12px; }
+.v-card-actions { display: flex; flex-direction: column; gap: 8px; width: 100%; margin-top: auto; }
+.v-card-actions .v-btn { width: 100%; justify-content: center; margin-top: 0; }
+.v-talent-band { background: #20191d; color: var(--v-white); border-left: 4px solid var(--v-red); border-radius: 8px; padding: clamp(22px, 3.4vw, 30px);
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 22px 0; }
+.v-talent-band h2 { font-size: clamp(24px, 3vw, 32px); letter-spacing: -.04em; margin: 4px 0; }
+.v-talent-band p { color: #d3c6cc; margin: 6px 0 0; max-width: 700px; }
+.v-talent-band--stack { display: block; }
+.v-talent-band--stack .v-row { margin-top: 16px; }
+.v-explore-hero { margin-top: 18px; }
+.v-explore-hero p { max-width: 520px; }
+.v-section-head--stack { display: block; margin-top: 30px; }
+.v-pillar { max-width: 850px; padding: 30px 0; border-top: 1px solid var(--v-line); }
+.v-pillar h2 { font-size: clamp(26px, 3.6vw, 36px); letter-spacing: -.045em; line-height: 1.08; margin: 10px 0; }
+.v-pillar p { max-width: 730px; margin: 8px 0; font-size: 17px; }
+.v-values { margin: 26px 0 30px; }
+.v-values > h2 { font-size: clamp(26px, 3.4vw, 34px); letter-spacing: -.04em; margin: 6px 0 16px; }
+.v-valuegrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+.v-valuegrid article { border-top: 2px solid var(--v-red); padding-top: 14px; }
+.v-valuegrid b { color: var(--v-red); font-size: 42px; line-height: 1; font-weight: 900; }
+.v-valuegrid h3 { font-size: 21px; letter-spacing: -.02em; margin: 8px 0 4px; }
+.v-valuegrid p { font-size: 14px; color: var(--v-soft); }
+@media (max-width: 650px) { .v-valuegrid { grid-template-columns: 1fr 1fr; } }

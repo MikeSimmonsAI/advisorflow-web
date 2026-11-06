@@ -47,6 +47,11 @@ def _interests(db: Session, org_id: str, raw) -> List[str]:
     return out
 
 
+# Where a signup came from: a Get Future Opportunities button, or the popup
+# that opens on its own on the homepage.
+SOURCES = {"portal": "Signup button", "auto_popup": "Automatic popup"}
+
+
 def signup(db: Session, prog: VoltProgram, body: Dict[str, Any]) -> VoltTalentSignup:
     first = str(body.get("first_name") or "").strip()[:70]
     last = str(body.get("last_name") or "").strip()[:70]
@@ -72,7 +77,7 @@ def signup(db: Session, prog: VoltProgram, body: Dict[str, Any]) -> VoltTalentSi
         row = VoltTalentSignup(organization_id=prog.organization_id, email=email, first_name=first, last_name=last,
                                interests=json.dumps(interests), notify_opt_in=notify,
                                notify_opt_in_at=now if notify else None,
-                               source=str(body.get("source") or "portal")[:40],
+                               source=body.get("source") if body.get("source") in SOURCES else "portal",
                                referrer_serial=referrer.serial if referrer else None,
                                referral_source=(body.get("referral_source") if body.get("referral_source") in ("invite", "search") else "search") if referrer else None,
                                submit_count=1, is_test=C.is_test_email(email), created_at=now, updated_at=now)
@@ -167,6 +172,6 @@ def csv_text(db: Session, org_id: str, params: Dict[str, Any]) -> str:
         ref = d["referrer"] or {}
         w.writerow([_cell(x) for x in (d["first_name"], d["last_name"], d["email"], "; ".join(d["interest_labels"]),
                                         "Yes" if d["notify_opt_in"] else "No", d["notify_opt_in_at"],
-                                        ref.get("display_name"), ref.get("rep_code"), d["source"], d["submit_count"],
+                                        ref.get("display_name"), ref.get("rep_code"), SOURCES.get(d["source"], d["source"]), d["submit_count"],
                                         d["created_at"], d["updated_at"])])
     return buf.getvalue()
