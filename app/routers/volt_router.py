@@ -27,10 +27,10 @@ from app.deps import get_current_user, get_db
 from app.limiter import limiter
 from app.models.models import User
 from app.models.volt_models import (
-    VoltApplication, VoltDocument, VoltProject, VoltRep, VoltSession, VoltSessionAttendee,
+    VoltApplication, VoltDocument, VoltProject, VoltRep, VoltSession, VoltSessionAttendee, VoltTalentSignup,
 )
 from app.services.volt import common as C
-from app.services.volt import core, docs, reports, sessions
+from app.services.volt import core, docs, hiring, reports, sessions, talent
 
 public_router = APIRouter(prefix="/volt/public", tags=["volt-public"])
 rep_router = APIRouter(prefix="/volt/rep", tags=["volt-rep"])
@@ -51,7 +51,7 @@ def portal(request: Request, slug: str, db: Session = Depends(get_db)):
     ps = [C.project_dict(p) for p in C.projects(db, prog.organization_id)]
     for p in ps:
         p.pop("required_docs", None)
-    return {"name": prog.name, "slug": prog.slug,
+    return {"name": prog.name, "slug": prog.slug, "availability_options": hiring.AVAILABILITY,
             "open_projects": [p for p in ps if p["recruiting"]],
             "past_projects": [p for p in ps if not p["recruiting"]]}
 
@@ -78,6 +78,18 @@ def register(request: Request, slug: str, body: Dict[str, Any] = Body(...), db: 
     db.commit()
     return {"access_token": _token(db, user, request), "token_type": "bearer", "rep": C.public_rep(rep),
             "application_id": app.id}
+
+
+@public_router.post("/{slug}/talent-pool")
+@limiter.limit("10/minute")
+def talent_signup(request: Request, slug: str, body: Dict[str, Any] = Body(...), db: Session = Depends(get_db)):
+    """Get Future Opportunities. Saves interest only - never an account or an
+    application - and answers the same way for new, repeated and existing
+    applicant emails."""
+    prog = C.program_by_slug(db, slug)
+    talent.signup(db, prog, body)
+    db.commit()
+    return {"ok": True, "message": "You're on the list. We saved your interest in future VOLT Marketing opportunities."}
 
 
 @public_router.post("/{slug}/login")
@@ -133,6 +145,8 @@ def me(slug: str, db: Session = Depends(get_db), user: User = Depends(get_curren
             doc_requests += [dict(d, scope=a["project"]["short_name"], application_id=a["id"])
                              for d in a["documents"] if d["state"] in ("requested", "replace")]
     return {"has_profile": True, "profile": core.rep_profile_dict(rep, user, private=True),
+            "hiring": hiring.profile_dict(rep), "hiring_missing": hiring.missing_profile(rep),
+            "availability_options": hiring.AVAILABILITY,
             "original_recruiter": C.public_rep(orig), "applications": app_dicts,
             "profile_documents": profile_docs, "document_requests": doc_requests,
             "sessions": sessions.for_rep(db, rep),
@@ -160,6 +174,17 @@ def edit_profile(slug: str, body: Dict[str, Any] = Body(...), db: Session = Depe
     return core.rep_profile_dict(rep, user, private=True)
 
 
+@rep_router.put("/{slug}/hiring-profile")
+def put_hiring_profile(slug: str, body: Dict[str, Any] = Body(...), db: Session = Depends(get_db),
+                       user: User = Depends(get_current_user)):
+    """Draft save of the person-level hiring file (location, availability,
+    experience). Saves partial work; submit decides what is required."""
+    prog, rep = _me(db, slug, user)
+    hiring.save_profile(_need_rep(rep), body)
+    db.commit()
+    return {"saved": True, "hiring": hiring.profile_dict(rep), "hiring_missing": hiring.missing_profile(rep)}
+
+
 @rep_router.get("/{slug}/recruiters")
 def rep_recruiters(slug: str, q: str = "", db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     prog, rep = _me(db, slug, user)
@@ -182,6 +207,10 @@ def get_app(slug: str, app_id: str, db: Session = Depends(get_db), user: User = 
     app = core.own_application(db, _need_rep(rep), app_id)
     out = core.application_dict(db, prog, rep, app)
     out["profile_documents"] = core.requirements(db, prog, rep, None)
+    out["hiring"] = hiring.profile_dict(rep)
+    out["profile"] = core.rep_profile_dict(rep, user, private=True)
+    out["availability_options"] = hiring.AVAILABILITY
+    out["missing"] = core.missing_items(db, prog, rep, app) if app.status in ("draft", "needs_update") else []
     return out
 
 
@@ -322,6 +351,7 @@ def ops_file(org_id: str, app_id: str, db: Session = Depends(get_db), user: User
     return {"application": core.application_dict(db, prog, rep, a, for_staff=True),
             "profile": dict(core.rep_profile_dict(rep, owner, private=True), is_test=rep.is_test,
                             recruiter_active=rep.recruiter_active),
+            "hiring": hiring.profile_dict(rep), "availability_options": hiring.AVAILABILITY,
             "profile_documents": core.requirements(db, prog, rep, None),
             "document_versions": [core.doc_dict(d) for d in all_docs],
             "original_recruiter": C.public_rep(orig),
@@ -466,6 +496,27 @@ def ops_program(org_id: str, body: Dict[str, Any] = Body(...), db: Session = Dep
         prog.profile_required_docs = json.dumps(new)
     db.commit()
     return {"profile_required_docs": C.loads(prog.profile_required_docs, [])}
+
+
+# ── Talent Pool (Get Future Opportunities) ───────────────────────────────────
+
+@ops_router.get("/{org_id}/talent-pool")
+def ops_talent(org_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _staff(db, user, org_id)
+    params = dict(request.query_params)
+    names = talent.project_names(db, org_id)
+    rows = talent.query(db, org_id, params)
+    return {"items": [talent.row_dict(db, r, names) for r in rows], "count": len(rows),
+            "interests": [{"key": k, "label": v} for k, v in names.items()] + [{"key": talent.ANY, "label": "Any future opportunity"}],
+            "note": "Talent Pool signups are interest only. They are not applications and are not counted in applications, approvals, starts or the leaderboard."}
+
+
+@ops_router.get("/{org_id}/talent-pool.csv")
+def ops_talent_csv(org_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _staff(db, user, org_id)
+    return Response(content=talent.csv_text(db, org_id, dict(request.query_params)), media_type="text/csv",
+                    headers={"Content-Disposition": 'attachment; filename="volt-marketing-talent-pool.csv"',
+                             "Cache-Control": "private, no-store"})
 
 
 # ── Zoom sessions ────────────────────────────────────────────────────────────

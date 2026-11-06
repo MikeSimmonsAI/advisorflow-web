@@ -12,7 +12,7 @@ import pytest
 
 from app.models.models import Organization, User
 from app.models.sales_models import Membership
-from app.models.volt_models import VoltApplication, VoltAuditEvent, VoltProgram, VoltProject, VoltRep
+from app.models.volt_models import VoltApplication, VoltAuditEvent, VoltProgram, VoltProject, VoltRep, VoltTalentSignup
 from app.services.auth_service import create_access_token, hash_password
 from app.services.volt import seed
 
@@ -68,6 +68,11 @@ def volt(db_session, client):
                        required_docs=json.dumps([{"key": "experience_summary", "label": "Experience summary"}])))
     db.commit()
     other_staff = _user(db, "advisor", other, "org_admin")
+    # Most document tests below exercise a project-level requirement, which
+    # staff configure per project; give ACA and Fiber one here.
+    for pr in db.query(VoltProject).filter(VoltProject.organization_id == org.id, VoltProject.key.in_(["aca", "fiber"])).all():
+        pr.required_docs = json.dumps([{"key": "experience_summary", "label": "Experience summary"}])
+    db.commit()
     c = client
 
     def register(**kw):
@@ -91,9 +96,25 @@ def _upload(c, tok, app_id, key=None, data=PDF, name="experience.pdf"):
                   files={"file": (name, data, "application/pdf")})
 
 
+HIRING = {"city": "Dallas", "state": "TX", "zip_code": "75201", "preferred_regions": "North Texas",
+          "earliest_start": "2026-12-01", "availability": {"types": ["full_time", "weekends"], "notes": ""},
+          "work_history": [{"employer": "Example Retail", "title": "Sales associate", "start": "2023-01",
+                            "end": "", "current": True, "summary": "Opened accounts."}],
+          "no_experience": False, "relevant_experience": "Two years of community outreach.", "additional_info": ""}
+ANSWERS = {"aca": {"relevant_experience": "Customer service", "license_status": "not_licensed"},
+           "fiber": {"willing_travel": "yes", "comfortable_d2d": "yes", "transportation": "yes",
+                     "relevant_experience": "Door-to-door"}}
+
+
+def _fill(c, tok, app_id):
+    assert c.put("/volt/rep/%s/hiring-profile" % SLUG, headers=tok, json=HIRING).status_code == 200
+    key = c.get("/volt/rep/%s/applications/%s" % (SLUG, app_id), headers=tok).json()["project"]["key"]
+    r = c.put("/volt/rep/%s/applications/%s/answers" % (SLUG, app_id), headers=tok, json={"answers": ANSWERS[key]})
+    assert r.status_code == 200, r.text
+
+
 def _complete(c, tok, app_id):
-    assert c.put("/volt/rep/%s/applications/%s/answers" % (SLUG, app_id), headers=tok,
-                 json={"answers": {"experience": "Two years of community outreach."}}).status_code == 200
+    _fill(c, tok, app_id)
     assert _upload(c, tok, app_id).status_code == 200
     r = c.post("/volt/rep/%s/applications/%s/submit" % (SLUG, app_id), headers=tok)
     assert r.status_code == 200 and r.json()["status"] == "submitted", r.text
@@ -103,7 +124,8 @@ def _complete(c, tok, app_id):
 
 def test_public_portal_two_open_projects_and_midterms_closed(volt):
     r = volt["c"].get("/volt/public/%s" % SLUG).json()
-    assert [p["name"] for p in r["open_projects"]] == ["ACA (Obamacare) Health Insurance", "Fiber Internet Outreach"]
+    assert [p["name"] for p in r["open_projects"]] == ["ACA Health Insurance", "T-Mobile D2D Fiber Sales"]
+    assert "Obamacare" not in json.dumps(r)
     assert [p["name"] for p in r["past_projects"]] == ["Midterms Flyer Distribution"]
     assert r["past_projects"][0]["recruiting"] is False
 
@@ -117,14 +139,14 @@ def test_register_serial_draft_signin_resume(volt):
     assert rep.date_of_birth.isoformat() == "1990-02-28" and rep.is_test is True
     app_id = out["application_id"]
     assert c.put("/volt/rep/%s/applications/%s/answers" % (SLUG, app_id), headers=tok,
-                 json={"answers": {"experience": "Half done"}}).status_code == 200
+                 json={"answers": {"relevant_experience": "Half done"}}).status_code == 200
     # Sign back in from a new device.
     r = c.post("/volt/public/%s/login" % SLUG, json={"email": body["email"].upper(), "password": body["password"]})
     assert r.status_code == 200 and r.json()["has_profile"] is True and r.json()["rep"]["rep_id"] == serial
     t2 = {"Authorization": "Bearer " + r.json()["access_token"]}
     me = c.get("/volt/rep/%s/me" % SLUG, headers=t2).json()
     a = me["applications"][0]
-    assert a["status"] == "draft" and a["answers"]["experience"] == "Half done"
+    assert a["status"] == "draft" and a["answers"]["relevant_experience"] == "Half done"
     assert a["next_action"]["label"] == "Finish your application"
     assert "Upload: Experience summary" in a["next_action"]["detail"]
     assert me["profile"]["date_of_birth"] == "1990-02-28"
@@ -319,8 +341,7 @@ def test_document_upload_review_replace_accept_and_isolation(volt):
     r2 = _upload(c, tok, app_id, key=key)                       # interrupted-and-retried
     assert r1.status_code == 200 and r1.json()["id"] == r2.json()["id"]
     assert _upload(c, tok, app_id, data=b"MZ\x90\x00not a document", name="x.exe").status_code == 400
-    assert c.put("/volt/rep/%s/applications/%s/answers" % (SLUG, app_id), headers=tok,
-                 json={"answers": {"experience": "Yes"}}).status_code == 200
+    _fill(c, tok, app_id)
     assert c.post("/volt/rep/%s/applications/%s/submit" % (SLUG, app_id), headers=tok).status_code == 200
     doc_id = r1.json()["id"]
     sh = H(db, volt["staff"])
@@ -563,10 +584,11 @@ def test_purge_one_run_at_a_time_exact_counts_then_zeros(volt):
     r = c.post("/volt/ops/%s/test-records/purge" % org, headers=god)
     assert r.status_code == 200, r.text
     assert r.json() == {"reps": 2, "applications": 3, "documents": 1, "sessions": 0, "logins": 2,
-                        "logins_deactivated": 0}
+                        "logins_deactivated": 0, "talent_signups": 0}
     # Repeating it reports what it did: nothing.
     again = c.post("/volt/ops/%s/test-records/purge" % org, headers=god).json()
-    assert again == {"reps": 0, "applications": 0, "documents": 0, "sessions": 0, "logins": 0, "logins_deactivated": 0}
+    assert again == {"reps": 0, "applications": 0, "documents": 0, "sessions": 0, "logins": 0, "logins_deactivated": 0,
+                     "talent_signups": 0}
     # Another tenant's cleanup is never blocked by this one.
     other_lock = cleanup._try_lock(db, org)
     assert other_lock is not None
@@ -649,3 +671,207 @@ def test_volt_only_staff_can_sign_in_on_the_evosys_host(db_session, client):
     r = c.post("/auth/login", data={"username": u.email, "password": "Pass12345!"},
                headers={"Origin": "https://app.evosyspro.live", "Host": "app.evosyspro.live"})
     assert r.status_code == 200, r.text
+
+
+# ═════════════════════ 2026-11-06: names, hiring file, Talent Pool ═══════════
+
+def _no_required_docs(volt):
+    db = volt["db"]
+    for pr in db.query(VoltProject).filter(VoltProject.organization_id == volt["org"].id).all():
+        pr.required_docs = "[]"
+    db.commit()
+
+
+def test_corrections_rename_existing_rows_keep_ids_and_never_clobber_staff_edits(db_session):
+    """Production state before 2026-11-06: rows created with the first names."""
+    from app.services.volt import seed as S
+    db = db_session
+    org = Organization(name="VOLT Old", slug="volt-old-%s" % uuid.uuid4().hex[:5], plan="enterprise", is_active=True,
+                       enabled_features=json.dumps(["volt_recruiting"]))
+    db.add(org)
+    db.flush()
+    old_docs = json.dumps([{"key": "experience_summary", "label": "Experience summary"}])
+    aca = VoltProject(organization_id=org.id, key="aca", name="ACA (Obamacare) Health Insurance",
+                      short_name="ACA health insurance", status="open", required_docs=old_docs,
+                      question="What experience do you have with ACA health insurance?")
+    fib = VoltProject(organization_id=org.id, key="fiber", name="Fiber Internet Outreach", short_name="Fiber internet",
+                      summary="STAFF EDITED SUMMARY", status="open", required_docs=old_docs,
+                      question="What experience do you have with fiber internet outreach?")
+    db.add_all([aca, fib])
+    db.commit()
+    ids = (aca.id, fib.id)
+    changed = S._apply_corrections(db, org.id)
+    db.commit()
+    db.refresh(aca)
+    db.refresh(fib)
+    assert (aca.id, fib.id) == ids
+    assert aca.name == "ACA Health Insurance" and "Obamacare" not in (aca.short_name + aca.name)
+    assert fib.name == "T-Mobile D2D Fiber Sales" and fib.short_name == "T-Mobile D2D Fiber"
+    assert fib.summary == "STAFF EDITED SUMMARY"            # staff edit untouched
+    assert json.loads(aca.required_docs) == [] and json.loads(fib.required_docs) == []
+    assert "fiber.summary" not in changed and "aca.name" in changed
+    assert S._apply_corrections(db, org.id) == []            # idempotent
+
+
+def test_hiring_profile_drafts_validate_and_persist(volt):
+    c = volt["c"]
+    _, tok, out = volt["register"]()
+    r = c.put("/volt/rep/%s/hiring-profile" % SLUG, headers=tok, json={"zip_code": "7520", "earliest_start": "nope",
+              "work_history": [{"employer": "A", "title": "B", "start": "2024-13", "end": "2023-01"}]})
+    assert r.status_code == 422
+    f = r.json()["detail"]["fields"]
+    assert {"zip_code", "earliest_start", "work_history.0.start"} <= set(f)
+    # A partial draft saves.
+    r = c.put("/volt/rep/%s/hiring-profile" % SLUG, headers=tok, json={"city": "Dallas", "availability": {"types": ["weekends", "bogus"]}})
+    assert r.status_code == 200 and r.json()["hiring"]["availability"]["types"] == ["weekends"]
+    assert "Profile: state" in r.json()["hiring_missing"]
+    assert c.put("/volt/rep/%s/hiring-profile" % SLUG, headers=tok, json=HIRING).status_code == 200
+    me = c.get("/volt/rep/%s/me" % SLUG, headers=tok).json()
+    h = me["hiring"]
+    assert h["city"] == "Dallas" and h["zip_code"] == "75201" and h["earliest_start"] == "2026-12-01"
+    assert h["work_history"][0]["current"] is True and h["work_history"][0]["end"] == ""
+    assert me["hiring_missing"] == []
+
+
+def test_submit_with_no_experience_and_no_resume(volt):
+    c = volt["c"]
+    _no_required_docs(volt)
+    _, tok, out = volt["register"](project_key="fiber")
+    app_id = out["application_id"]
+    r = c.post("/volt/rep/%s/applications/%s/submit" % (SLUG, app_id), headers=tok)
+    assert r.status_code == 422
+    miss = r.json()["detail"]["missing"]
+    assert any("No previous work experience" in m for m in miss)
+    assert any("willing to travel" in m for m in miss) and any("transportation" in m for m in miss)
+    body = dict(HIRING, work_history=[], no_experience=True)
+    assert c.put("/volt/rep/%s/hiring-profile" % SLUG, headers=tok, json=body).status_code == 200
+    assert c.put("/volt/rep/%s/applications/%s/answers" % (SLUG, app_id), headers=tok,
+                 json={"answers": {"willing_travel": "maybe"}}).status_code == 422          # not an option
+    assert c.put("/volt/rep/%s/applications/%s/answers" % (SLUG, app_id), headers=tok,
+                 json={"answers": {"willing_travel": "details", "comfortable_d2d": "no", "transportation": "explain",
+                                   "transportation_notes": "Bus for now", "not_a_question": "x"}}).status_code == 200
+    a = c.get("/volt/rep/%s/applications/%s" % (SLUG, app_id), headers=tok).json()
+    assert "not_a_question" not in a["answers"] and a["missing"] == []
+    resume = [d for d in a["profile_documents"] if d["key"] == "resume"][0]
+    assert resume["optional"] is True and resume["state"] == "not_provided"
+    r = c.post("/volt/rep/%s/applications/%s/submit" % (SLUG, app_id), headers=tok)
+    assert r.status_code == 200 and r.json()["status"] == "submitted"
+
+
+def test_submit_with_work_history_and_resume_then_staff_reads_it(volt):
+    c, db = volt["c"], volt["db"]
+    _no_required_docs(volt)
+    _, tok, out = volt["register"]()
+    app_id = out["application_id"]
+    _fill(c, tok, app_id)
+    # ACA: licensed -> states required
+    c.put("/volt/rep/%s/applications/%s/answers" % (SLUG, app_id), headers=tok, json={"answers": {"license_status": "licensed"}})
+    miss = c.post("/volt/rep/%s/applications/%s/submit" % (SLUG, app_id), headers=tok).json()["detail"]["missing"]
+    assert miss == ["Answer: States where you are licensed"]
+    c.put("/volt/rep/%s/applications/%s/answers" % (SLUG, app_id), headers=tok, json={"answers": {"licensed_states": "TX, OK"}})
+    up = lambda data, name, ctype: c.post("/volt/rep/%s/documents" % SLUG, headers=tok,
+                                          data={"doc_key": "resume", "upload_key": uuid.uuid4().hex, "application_id": ""},
+                                          files={"file": (name, data, ctype)})
+    assert up(b"\x89PNG\r\n\x1a\n" + b"0" * 40, "me.png", "image/png").status_code == 400          # resumes are documents
+    r = up(PDF, "resume.pdf", "application/pdf")
+    assert r.status_code == 200 and r.json()["application_id"] is None
+    assert c.post("/volt/rep/%s/applications/%s/submit" % (SLUG, app_id), headers=tok).json()["status"] == "submitted"
+    f = c.get("/volt/ops/%s/applications/%s" % (volt["org"].id, app_id), headers=H(db, volt["staff"])).json()
+    assert f["hiring"]["work_history"][0]["employer"] == "Example Retail" and f["hiring"]["city"] == "Dallas"
+    assert f["application"]["answers"]["licensed_states"] == "TX, OK"
+    assert any(d["doc_key"] == "resume" for d in f["document_versions"])
+    # Another applicant cannot read the resume.
+    _, tok2, _ = volt["register"]()
+    assert c.get("/volt/rep/%s/documents/%s/file" % (SLUG, r.json()["id"]), headers=tok2).status_code == 404
+
+
+def test_legacy_draft_opens_and_is_prompted_for_new_information(volt):
+    c, db = volt["c"], volt["db"]
+    _no_required_docs(volt)
+    _, tok, out = volt["register"]()
+    a = db.get(VoltApplication, out["application_id"])
+    a.answers = json.dumps({"experience": "Old single answer"})     # what a pre-update draft holds
+    db.commit()
+    got = c.get("/volt/rep/%s/applications/%s" % (SLUG, a.id), headers=tok)
+    assert got.status_code == 200
+    j = got.json()
+    assert j["answers"]["relevant_experience"] == "Old single answer"
+    assert "Profile: current city" in j["missing"] and "Answer: Current health insurance license status" in j["missing"]
+    me = c.get("/volt/rep/%s/me" % SLUG, headers=tok).json()
+    assert me["applications"][0]["next_action"]["label"] == "Finish your application"
+    # Saving merges with the carried-over answer.
+    c.put("/volt/rep/%s/applications/%s/answers" % (SLUG, a.id), headers=tok, json={"answers": {"license_status": "in_progress"}})
+    db.refresh(a)
+    assert json.loads(a.answers) == {"relevant_experience": "Old single answer", "license_status": "in_progress"}
+
+
+def test_queue_filters_and_csv_hiring_columns(volt):
+    c, db = volt["c"], volt["db"]
+    org = volt["org"].id
+    _no_required_docs(volt)
+    _, tok, out = volt["register"](project_key="fiber")
+    _fill(c, tok, out["application_id"])
+    _, tok2, out2 = volt["register"](project_key="fiber")
+    c.put("/volt/rep/%s/hiring-profile" % SLUG, headers=tok2, json=dict(HIRING, city="Austin", work_history=[], no_experience=True))
+    c.put("/volt/rep/%s/applications/%s/answers" % (SLUG, out2["application_id"]), headers=tok2,
+          json={"answers": {"willing_travel": "no", "comfortable_d2d": "yes", "transportation": "yes"}})
+    sh = H(db, volt["staff"])
+    q = lambda **kw: c.get("/volt/ops/%s/applications" % org, headers=sh, params=dict(include_test=1, **kw)).json()["items"]
+    assert [r["application_id"] for r in q(location="austin")] == [out2["application_id"]]
+    assert [r["application_id"] for r in q(travel="yes")] == [out["application_id"]]
+    assert [r["application_id"] for r in q(experience="none")] == [out2["application_id"]]
+    text = c.get("/volt/ops/%s/export.csv" % org, headers=sh, params={"include_test": 1, "travel": "no"}).text
+    lines = text.strip().splitlines()
+    assert len(lines) == 2 and "Willing to travel" in lines[0] and "Austin" in lines[1]
+    assert "1990-02-28" not in text and "@example.test" not in text and "/documents/" not in text
+    # Overview counts are not narrowed by these queue-only filters.
+    assert c.get("/volt/ops/%s" % org, headers=sh, params={"include_test": 1, "travel": "no"}).json()["overview"]["applications"] == 2
+
+
+def test_talent_pool_dedupes_keeps_latest_choice_and_never_counts_as_an_application(volt):
+    c, db = volt["c"], volt["db"]
+    org = volt["org"].id
+    sh = H(db, volt["staff"])
+    before = c.get("/volt/ops/%s" % org, headers=sh, params={"include_test": 1}).json()["overview"]
+    _, _, d = volt["register"](first="Dangelo", last="Simmons")
+    email = "pool-%s@example.test" % uuid.uuid4().hex[:5]
+    base = {"first_name": "Pat", "last_name": "Pool", "email": email, "interests": ["fiber", "nope"], "notify": True}
+    r1 = c.post("/volt/public/%s/talent-pool" % SLUG, json=dict(base, referrer_rep_id=d["rep"]["rep_id"], referral_source="invite"))
+    assert r1.status_code == 200
+    r2 = c.post("/volt/public/%s/talent-pool" % SLUG, json=dict(base, email=email.upper(), interests=["aca"], notify=False,
+                                                                 referrer_rep_id=None))
+    assert r2.status_code == 200 and r2.json() == r1.json()
+    rows = db.query(VoltTalentSignup).filter(VoltTalentSignup.organization_id == org, VoltTalentSignup.email == email).all()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.submit_count == 2 and row.notify_opt_in is False and json.loads(row.interests) == ["fiber", "aca"]
+    assert row.referrer_serial == d["rep"]["rep_id"] and row.referral_source == "invite"
+    # Typed names never earn credit.
+    bad = c.post("/volt/public/%s/talent-pool" % SLUG, json=dict(base, email="x-" + email, referrer_rep_id="Dangelo"))
+    assert bad.status_code == 422
+    # Existing applicant email: same answer, profile untouched, no account created.
+    body, _, out = volt["register"](first="Real", last="Applicant")
+    users_before = db.query(User).count()
+    r3 = c.post("/volt/public/%s/talent-pool" % SLUG, json=dict(base, email=body["email"], first_name="Someone", last_name="Else"))
+    assert r3.json() == r1.json() and db.query(User).count() == users_before
+    assert db.get(VoltRep, out["rep"]["rep_id"]).first_name == "Real"
+    # Hiring numbers move only for the two real registrations.
+    after = c.get("/volt/ops/%s" % org, headers=sh, params={"include_test": 1}).json()["overview"]
+    assert after["applications"] == before["applications"] + 2
+    # Staff Talent Pool + CSV; others refused.
+    lst = c.get("/volt/ops/%s/talent-pool" % org, headers=sh, params={"include_test": 1, "interest": "aca"}).json()
+    assert [x["email"] for x in lst["items"]] == [email] and lst["items"][0]["referrer"]["display_name"] == "Dangelo Simmons"
+    csv_text = c.get("/volt/ops/%s/talent-pool.csv" % org, headers=sh, params={"include_test": 1, "q": "pat pool"}).text
+    assert len(csv_text.strip().splitlines()) == 2 and "Email me about future opportunities" in csv_text
+    for h in (H(db, volt["other_staff"]), H(db, volt["outsider"])):
+        assert c.get("/volt/ops/%s/talent-pool" % org, headers=h).status_code == 403
+        assert c.get("/volt/ops/%s/talent-pool.csv" % org, headers=h).status_code == 403
+    _, tok, _ = volt["register"]()
+    assert c.get("/volt/ops/%s/talent-pool" % org, headers=tok).status_code == 403
+    # The other tenant sees none of it.
+    assert c.get("/volt/ops/%s/talent-pool" % volt["other"].id, headers=H(db, volt["other_staff"]),
+                 params={"include_test": 1}).json()["count"] == 0
+    # Test-record cleanup removes test signups.
+    r = c.post("/volt/ops/%s/test-records/purge" % org, headers=H(db, volt["god"])).json()
+    assert r["talent_signups"] >= 2
+    assert db.query(VoltTalentSignup).filter(VoltTalentSignup.organization_id == org).count() == 0

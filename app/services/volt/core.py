@@ -282,14 +282,14 @@ def own_application(db: Session, rep: VoltRep, app_id: str) -> VoltApplication:
 
 
 def save_answers(db: Session, app: VoltApplication, answers: Dict[str, Any]) -> VoltApplication:
+    from app.services.volt import hiring
     if app.status not in ("draft", "needs_update"):
         raise HTTPException(status_code=409, detail="This application is with our team and cannot be edited right now.")
-    clean = {}
-    for k, v in (answers or {}).items():
-        if not isinstance(k, str) or len(k) > 60:
-            continue
-        clean[k] = str(v if v is not None else "")[:4000]
-    app.answers = json.dumps(clean)
+    project = db.get(VoltProject, app.project_id)
+    merged = hiring.answers_of(app)
+    merged.update(hiring.clean_answers(project, answers or {}))
+    merged.pop("experience", None)          # carried into relevant_experience by answers_of
+    app.answers = json.dumps(merged)
     return app
 
 
@@ -314,9 +314,19 @@ def requirements(db: Session, prog: VoltProgram, rep: VoltRep, app: Optional[Vol
         d = latest.get(key)
         out.append({"key": key, "label": r.get("label") or key, "state": d.status if d else "requested",
                     "reason": d.reason if d is not None and d.status == "replace" else None,
-                    "document": doc_dict(d) if d else None,
+                    "document": doc_dict(d) if d else None, "optional": False,
                     "versions": sum(1 for x in docs if x.doc_key == key)})
+    if app is None and not any(r["key"] == RESUME_KEY for r in out):
+        d = latest.get(RESUME_KEY)
+        out.append({"key": RESUME_KEY, "label": "Resume", "optional": True,
+                    "state": d.status if d else "not_provided",
+                    "reason": d.reason if d is not None and d.status == "replace" else None,
+                    "document": doc_dict(d) if d else None,
+                    "versions": sum(1 for x in docs if x.doc_key == RESUME_KEY)})
     return out
+
+
+RESUME_KEY = "resume"
 
 
 def doc_dict(d: VoltDocument) -> Dict[str, Any]:
@@ -327,12 +337,16 @@ def doc_dict(d: VoltDocument) -> Dict[str, Any]:
 
 
 def missing_items(db, prog, rep, app) -> List[str]:
+    from app.services.volt import hiring
     project = db.get(VoltProject, app.project_id)
-    answers = C.loads(app.answers, {})
-    missing = []
-    if project and project.question and not str(answers.get("experience") or "").strip():
-        missing.append("Answer: " + project.question)
+    missing = hiring.missing_profile(rep)
+    if project is not None:
+        missing += hiring.missing_project(project, hiring.answers_of(app))
     for r in requirements(db, prog, rep, app) + requirements(db, prog, rep, None):
+        if r.get("optional"):
+            if r["state"] == "replace":
+                missing.append("Replace: " + r["label"])
+            continue
         if r["state"] in ("requested", "replace"):
             missing.append(("Replace: " if r["state"] == "replace" else "Upload: ") + r["label"])
     return missing
@@ -377,7 +391,8 @@ def application_dict(db, prog, rep, app, *, for_staff: bool = False) -> Dict[str
     project = db.get(VoltProject, app.project_id)
     referrer = db.get(VoltRep, app.referrer_serial) if app.referrer_serial else None
     out = {"id": app.id, "project": C.project_dict(project) if project else None, "status": app.status,
-           "status_label": C.STATUS_LABELS.get(app.status, app.status), "answers": C.loads(app.answers, {}),
+           "status_label": C.STATUS_LABELS.get(app.status, app.status), "answers": _answers(app),
+           "questions": _questions(project),
            "return_reason": app.return_reason, "referrer": C.public_rep(referrer),
            "referral_source": app.referral_source, "referral_confirmed_at": C.iso(app.referral_confirmed_at),
            "created_at": C.iso(app.created_at), "updated_at": C.iso(app.updated_at),
@@ -388,6 +403,16 @@ def application_dict(db, prog, rep, app, *, for_staff: bool = False) -> Dict[str
     if not for_staff:
         out["next_action"] = next_action(db, prog, rep, app)
     return out
+
+
+def _answers(app):
+    from app.services.volt import hiring
+    return hiring.answers_of(app)
+
+
+def _questions(project):
+    from app.services.volt import hiring
+    return hiring.questions_for(project)
 
 
 def rep_profile_dict(rep: VoltRep, user: Optional[User], *, private: bool) -> Dict[str, Any]:

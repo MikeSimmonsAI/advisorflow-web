@@ -1687,6 +1687,18 @@ COLUMNS_TO_ADD = [
     ("acquisition_opportunities", "won_confirmed_by_id", "VARCHAR"),
     ("acquisition_opportunities", "geo_status", "VARCHAR"),
     ("acquisition_opportunities", "geo_note", "VARCHAR"),
+    # VOLT Marketing (#535): the applicant hiring file (person-level).
+    ("volt_reps", "city", "VARCHAR"),
+    ("volt_reps", "state", "VARCHAR"),
+    ("volt_reps", "zip_code", "VARCHAR"),
+    ("volt_reps", "preferred_regions", "TEXT"),
+    ("volt_reps", "earliest_start", "DATE"),
+    ("volt_reps", "availability", "TEXT"),
+    ("volt_reps", "work_history", "TEXT"),
+    ("volt_reps", "no_experience", "BOOLEAN"),
+    ("volt_reps", "relevant_experience", "TEXT"),
+    ("volt_reps", "additional_info", "TEXT"),
+    ("volt_reps", "hiring_updated_at", "TIMESTAMP"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

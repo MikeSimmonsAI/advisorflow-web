@@ -29,7 +29,13 @@ ACCEPTED = {"application/pdf", "image/jpeg", "image/png", "image/webp", "image/h
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
 
 
+RESUME_TYPES = {"application/pdf", "application/msword",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+
+
 def _requirement(db, prog: VoltProgram, app: Optional[VoltApplication], doc_key: str):
+    if app is None and doc_key == "resume":
+        return {"key": "resume", "label": "Resume"}          # optional, always accepted on the profile
     if app is None:
         reqs = C.loads(prog.profile_required_docs, [])
     else:
@@ -63,6 +69,8 @@ async def upload(db: Session, prog: VoltProgram, rep: VoltRep, file: UploadFile,
         raise HTTPException(status_code=413, detail="That file is too large. The limit is 10 MB.")
     if content_type not in ACCEPTED:
         raise HTTPException(status_code=400, detail="Upload a PDF, Word document or photo (JPG, PNG, WEBP, HEIC).")
+    if doc_key == "resume" and app is None and content_type not in RESUME_TYPES:
+        raise HTTPException(status_code=400, detail="Upload your resume as a PDF or Word document (.pdf, .doc, .docx).")
     scope = (VoltDocument.application_id == app.id) if app else VoltDocument.application_id.is_(None)
     latest = (db.query(func.max(VoltDocument.version)).filter(VoltDocument.rep_serial == rep.serial, scope,
                                                               VoltDocument.doc_key == doc_key).scalar()) or 0

@@ -203,6 +203,8 @@ def main(argv=None) -> int:
             log.info("volt: org=%s created_org=%s created_program=%s created_projects=%s platform_set=%s",
                      res.get("organization_id"), res["organization"], res["program"], ",".join(res["projects"]) or "-",
                      res.get("platform"))
+            if res.get("corrected"):
+                log.info("volt: corrected %s", ",".join(res["corrected"]))
         except Exception:
             _db.rollback()
             raise

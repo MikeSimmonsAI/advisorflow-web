@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 
 from app.models.models import User
 from app.models.volt_models import (
-    VoltApplication, VoltAuditEvent, VoltDocument, VoltRep, VoltSession, VoltSessionAttendee,
+    VoltApplication, VoltAuditEvent, VoltDocument, VoltRep, VoltSession, VoltSessionAttendee, VoltTalentSignup,
 )
 
 _LOCAL_LOCKS: Dict[str, threading.Lock] = {}
@@ -67,9 +67,17 @@ def purge(db: Session, org_id: str) -> Dict[str, int]:
 
 def _purge_locked(db: Session, org_id: str) -> Dict[str, int]:
     from app.services import wholesale_files as storage
-    removed = {"reps": 0, "applications": 0, "documents": 0, "sessions": 0, "logins": 0, "logins_deactivated": 0}
+    removed = {"reps": 0, "applications": 0, "documents": 0, "sessions": 0, "logins": 0, "logins_deactivated": 0,
+               "talent_signups": 0}
     reps = db.query(VoltRep).filter(VoltRep.organization_id == org_id, VoltRep.is_test.is_(True)).all()
     serials = [r.serial for r in reps]
+    # Test Talent Pool signups (and any real signup's pointer to a test recruiter).
+    removed["talent_signups"] = (db.query(VoltTalentSignup)
+                                 .filter(VoltTalentSignup.organization_id == org_id, VoltTalentSignup.is_test.is_(True))
+                                 .delete(synchronize_session=False))
+    if serials:
+        db.query(VoltTalentSignup).filter(VoltTalentSignup.referrer_serial.in_(serials)).update(
+            {VoltTalentSignup.referrer_serial: None}, synchronize_session=False)
     if not serials:
         db.commit()
         return removed

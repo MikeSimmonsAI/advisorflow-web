@@ -67,9 +67,17 @@ def filters_from(params: Dict[str, Any]) -> Dict[str, Any]:
         rec = int(rec) if rec not in (None, "") else None
     except (TypeError, ValueError):
         rec = C.serial_from_code(rec)
+    travel = params.get("travel") or None
+    if travel not in ("yes", "no", "details"):
+        travel = None
+    experience = params.get("experience") or None
+    if experience not in ("has", "none"):
+        experience = None
     return {"project_id": params.get("project_id") or None, "status": status, "reached": reached,
             "recruiter": rec, "date_from": _d(params.get("date_from")), "date_to": _d(params.get("date_to")),
-            "include_test": str(params.get("include_test") or "").lower() in ("1", "true", "yes")}
+            "include_test": str(params.get("include_test") or "").lower() in ("1", "true", "yes"),
+            "location": (str(params.get("location") or "").strip().lower()[:60] or None),
+            "travel": travel, "experience": experience}
 
 
 def application_query(db: Session, org_id: str, f: Dict[str, Any]):
@@ -92,7 +100,7 @@ def application_query(db: Session, org_id: str, f: Dict[str, Any]):
 
 
 def overview(db: Session, org_id: str, f: Dict[str, Any]) -> Dict[str, Any]:
-    base = {k: v for k, v in f.items() if k not in ("status", "reached")}
+    base = {k: v for k, v in f.items() if k not in ("status", "reached", "location", "travel", "experience")}
 
     def n(reached, status=None, distinct=False):
         q = application_query(db, org_id, dict(base, reached=reached, status=status))
@@ -115,7 +123,7 @@ def overview(db: Session, org_id: str, f: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def leaderboard(db: Session, org_id: str, f: Dict[str, Any], *, public: bool = False) -> Dict[str, Any]:
-    base = {k: v for k, v in f.items() if k not in ("status", "reached", "recruiter")}
+    base = {k: v for k, v in f.items() if k not in ("status", "reached", "recruiter", "location", "travel", "experience")}
     measures: Dict[int, Dict[str, int]] = {}
     for m in ("created", "submitted", "approved", "started"):
         q = (application_query(db, org_id, dict(base, reached=m))
@@ -151,10 +159,24 @@ def rows(db: Session, org_id: str, f: Dict[str, Any], limit: Optional[int] = Non
     if origs:
         reps.update({r.serial: r for r in db.query(VoltRep).filter(VoltRep.serial.in_(origs)).all()})
     projects = {p.id: p for p in db.query(VoltProject).filter(VoltProject.organization_id == org_id).all()}
+    from app.services.volt import hiring
     out = []
     for a in apps:
         rep = reps.get(a.rep_serial)
         p = projects.get(a.project_id)
+        hs = hiring.summary_fields(rep)
+        ans = hiring.answers_of(a)
+        if f.get("location"):
+            hay = " ".join([hs.get("city") or "", hs.get("state") or "", (rep.zip_code if rep else "") or "",
+                            (rep.preferred_regions if rep else "") or ""]).lower()
+            if f["location"] not in hay:
+                continue
+        if f.get("travel") and ans.get("willing_travel") != f["travel"]:
+            continue
+        if f.get("experience") == "has" and not (hs.get("has_experience") or ans.get("relevant_experience")):
+            continue
+        if f.get("experience") == "none" and not hs.get("no_experience"):
+            continue
         orig = reps.get(rep.original_recruiter_serial) if rep and rep.original_recruiter_serial else None
         ref = reps.get(a.referrer_serial) if a.referrer_serial else None
         out.append({"application_id": a.id, "rep_id": a.rep_serial, "rep_code": C.rep_code(a.rep_serial),
@@ -165,7 +187,12 @@ def rows(db: Session, org_id: str, f: Dict[str, Any], limit: Optional[int] = Non
                     "original_recruiter": C.public_rep(orig), "project_recruiter": C.public_rep(ref),
                     "created_at": C.iso(a.created_at), "submitted_at": C.iso(a.submitted_at),
                     "approved_at": C.iso(a.approved_at), "started_at": C.iso(a.started_at),
-                    "updated_at": C.iso(a.updated_at)})
+                    "updated_at": C.iso(a.updated_at),
+                    "city": hs.get("city"), "state": hs.get("state"), "earliest_start": hs.get("earliest_start"),
+                    "availability": hs.get("availability"), "work_history_count": hs.get("work_history_count", 0),
+                    "no_experience": hs.get("no_experience", False),
+                    "willing_travel": ans.get("willing_travel"), "comfortable_d2d": ans.get("comfortable_d2d"),
+                    "transportation": ans.get("transportation"), "license_status": ans.get("license_status")})
     return out
 
 
@@ -181,11 +208,17 @@ def csv_text(db: Session, org_id: str, f: Dict[str, Any]) -> str:
     w = csv.writer(buf)
     w.writerow(["Application ID", "Rep ID", "Applicant", "Project key", "Project", "Stage",
                 "Original recruiter ID", "Original recruiter", "Project recruiter ID", "Project recruiter",
+                "City", "State", "Earliest start", "Availability", "Jobs listed", "No previous work experience",
+                "Willing to travel", "Comfortable with door-to-door", "Reliable transportation", "License status",
                 "Application started (UTC)", "Submitted (UTC)", "Approved (UTC)", "Started (UTC)"])
     for r in rows(db, org_id, f):
         o, p = r["original_recruiter"] or {}, r["project_recruiter"] or {}
         w.writerow([_cell(x) for x in (r["application_id"], r["rep_code"], r["applicant"], r["project_key"],
                                         r["project"], r["status_label"], o.get("rep_code"), o.get("display_name"),
-                                        p.get("rep_code"), p.get("display_name"), r["created_at"],
+                                        p.get("rep_code"), p.get("display_name"),
+                                        r["city"], r["state"], r["earliest_start"], r["availability"],
+                                        r["work_history_count"], "Yes" if r["no_experience"] else "",
+                                        r["willing_travel"], r["comfortable_d2d"], r["transportation"],
+                                        r["license_status"], r["created_at"],
                                         r["submitted_at"], r["approved_at"], r["started_at"])])
     return buf.getvalue()
