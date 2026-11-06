@@ -11,6 +11,10 @@
 .jw-app{display:grid;grid-template-columns:252px 1fr}
 .jw-side{background:var(--navy);color:#dfe6f2;position:sticky;top:0;height:100vh;overflow:auto;display:flex;flex-direction:column;padding:18px 12px}
 .jw-brand{display:flex;gap:10px;align-items:center;padding:4px 8px 16px;border-bottom:1px solid rgba(255,255,255,.08)}
+.jw-brand>div{min-width:0}
+.jw-side__close{display:none;margin-left:auto;flex:none;width:36px;height:36px;border-radius:9px;border:1px solid rgba(255,255,255,.18);background:transparent;color:#fff;cursor:pointer;place-items:center}
+.jw-side__close:hover{background:rgba(255,255,255,.08)}
+.jw-side__close:focus-visible,.jw-top__menu:focus-visible,.jw-back:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .jw-brand b{display:block;font-family:var(--display);font-size:19px;line-height:1.05;color:#fff}
 .jw-brand small{display:block;font-size:9px;letter-spacing:2px;font-weight:800;color:var(--gold2);margin-top:4px}
 .jw-nav{margin-top:14px}
@@ -23,16 +27,18 @@
 .jw-powered b{color:#fff;font-size:13px;letter-spacing:.4px}
 .jw-side__note{font-size:11.5px;color:#9aa8bf;margin-top:6px}
 .jw-main{min-width:0;display:flex;flex-direction:column}
-.jw-top{position:sticky;top:0;z-index:20;background:rgba(250,247,239,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:10px 24px;flex-wrap:wrap}
-.jw-top--gate{position:static;background:none;border:0}
-.jw-top__menu{display:none}
-.jw-top__title{font-family:var(--display);font-size:20px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.jw-top__right{margin-left:auto;display:flex;gap:10px;align-items:center}
-.jw-back{display:inline-flex;align-items:center;gap:6px;background:var(--navy);color:#fff!important;text-decoration:none;font-weight:800;font-size:12px;letter-spacing:.6px;padding:8px 12px;border-radius:9px;border:1px solid var(--navy);white-space:nowrap}
-.jw-back:hover{background:var(--navy3)}
-.jw-chip-status{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:700;color:var(--amber);background:var(--amberbg);border:1px solid #efd9a8;padding:5px 10px;border-radius:99px}
-.jw-chip-status .dot{width:7px;height:7px;border-radius:50%;background:var(--amber)}
-.jw-me{display:flex;flex-direction:column;line-height:1.2;text-align:right}
+/* Header: [menu - narrow screens only] [business name] ........ [Back to Program Access] [signed-in person] */
+.jw-top{position:sticky;top:0;z-index:20;background:rgba(250,247,239,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:10px 24px;min-height:58px;flex-wrap:nowrap}
+.jw-top--gate{position:static;background:none;border:0;width:100%}
+.jw-top .jw-top__menu{display:none;flex:none;width:40px;height:40px;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer;align-items:center;justify-content:center;padding:0}
+.jw-top__title{flex:1 1 auto;min-width:0;font-family:var(--display);font-size:20px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jw-top__right{margin-left:auto;flex:none;display:flex;gap:14px;align-items:center}
+/* Same size and shape as the "Switch program" action in the other EvoSys programs. */
+.jw-back{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;border-radius:10px;border:1px solid var(--navy3);background:transparent;color:var(--navy)!important;text-decoration:none;font-weight:700;font-size:13px;line-height:1;white-space:nowrap;flex:none}
+.jw-back:hover{background:var(--navy);color:#fff!important}
+.jw-back__short{display:none}
+.jw-me{display:flex;flex-direction:column;line-height:1.2;text-align:right;padding-left:14px;border-left:1px solid var(--line);max-width:220px;min-width:0}
+.jw-me b,.jw-me small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .jw-me small{color:var(--muted);font-size:11px}
 .jw-content{padding:22px 24px 40px;max-width:1360px;width:100%}
 .jw-head{display:flex;justify-content:space-between;align-items:flex-end;gap:14px;flex-wrap:wrap;margin-bottom:16px}
@@ -103,8 +109,9 @@ textarea.jw-input{resize:vertical}
 .jw-field__label{display:block;font-size:11.5px;font-weight:800;color:var(--ink2);margin-bottom:5px}
 .jw-field__hint{display:block;font-size:11.5px;color:var(--muted);margin-top:4px}
 .jw-fieldset{border:0;padding:0;margin:0}
-.jw-form2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
-.jw-form3{display:grid;grid-template-columns:2fr 1fr 1fr;gap:0 10px}
+.jw-form2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px}
+.jw-form3{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr);gap:0 10px}
+.jw-form2>*,.jw-form3>*{min-width:0}
 .jw-check{display:flex;gap:8px;align-items:flex-start;margin:8px 0;font-size:13px}
 .jw-chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px}
 .jw-chip{border:1px solid var(--line);background:#fff;border-radius:99px;padding:5px 11px;font-size:12.5px;font-weight:700;color:var(--ink2);cursor:pointer}
@@ -135,6 +142,7 @@ textarea.jw-input{resize:vertical}
 .jw-note{font-size:12px;color:#5d4b20;background:#fffaf0;border:1px dashed #d8c99f;border-radius:10px;padding:8px 11px;margin-top:10px}
 .jw-list{list-style:none;margin:0;padding:0}
 .jw-list li{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line2);font-size:13px}
+.jw-list li>div{min-width:0;overflow-wrap:anywhere}
 .jw-list li:last-child{border-bottom:0}
 .jw-list li small{display:block;color:var(--muted);font-size:11.5px}
 .jw-list--dense li{padding:6px 0}
@@ -212,6 +220,7 @@ textarea.jw-input{resize:vertical}
 .jw-email__foot{font-size:11px;color:var(--muted);background:#fbf8f1;padding:8px 14px}
 .jw-checks{list-style:none;margin:8px 0 0;padding:0}
 .jw-checks li{display:flex;gap:9px;padding:7px 0;border-bottom:1px solid var(--line2);font-size:13px}
+.jw-checks li>div{min-width:0}
 .jw-checks li>span{color:var(--red);font-weight:800;width:14px;flex:none}
 .jw-checks li.ok>span{color:var(--green)}
 .jw-checks small{display:block;color:var(--muted);font-size:11.5px}
@@ -231,14 +240,22 @@ textarea.jw-input{resize:vertical}
 .jw-msg--ai small{display:block;font-size:10px;font-weight:800;letter-spacing:.6px;color:var(--goldink);margin-bottom:3px}
 .jw-details{margin-top:10px;font-size:13px}
 .jw-details summary{cursor:pointer;font-weight:700;color:var(--navy3);margin-bottom:8px}
-.jw-defs{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin:8px 0 0}
+.jw-defs{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(240px,100%),1fr));gap:10px;margin:8px 0 0}
 .jw-defs div{border:1px solid var(--line2);border-radius:10px;padding:9px 10px}
 .jw-defs dt{font-weight:800;text-transform:capitalize;font-size:12.5px}
 .jw-defs dd{margin:3px 0 0;color:var(--muted);font-size:12.5px}
-.jw-hours{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
-.jw-hours label{display:flex;align-items:center;gap:8px;font-size:12.5px}
-.jw-hours label span{width:80px;flex:none;color:var(--ink2);font-weight:700}
-.jw-qa{display:grid;grid-template-columns:1fr 1.5fr;gap:8px;margin-bottom:6px}
+/* Business hours: one row per day - [Monday] [hours]. Two columns when the card is wide
+   enough for both, one column otherwise (sized by the card, not the window). */
+.jw-hours-wrap{container-type:inline-size;margin-top:2px}
+.jw-hours{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px}
+.jw-hours__row{display:grid;grid-template-columns:96px minmax(0,1fr);align-items:center;gap:10px;min-width:0}
+.jw-hours__row label{font-size:13px;font-weight:700;color:var(--ink2);white-space:nowrap}
+.jw-hours__row .jw-input{height:38px;min-width:0}
+@container (max-width:520px){.jw-hours{grid-template-columns:minmax(0,1fr)}}
+/* Settings: cards keep their own height; the activity log scrolls instead of stretching the page. */
+.jw-settings{align-items:start}
+.jw-activity{max-height:420px;overflow:auto;padding-right:4px}
+.jw-qa{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:8px;margin-bottom:6px}
 .jw-gate{display:flex;flex-direction:column;align-items:center;padding:20px}
 .jw-gate__card{max-width:520px;text-align:center;margin-top:40px;display:flex;flex-direction:column;gap:10px;align-items:center}
 .jw-gate__card h1{font-family:var(--display);font-size:28px}
@@ -249,13 +266,13 @@ textarea.jw-input{resize:vertical}
 }
 @media (max-width:860px){
   .jw-app{grid-template-columns:1fr}
-  .jw-side{position:fixed;left:0;top:0;bottom:0;width:270px;z-index:40;transform:translateX(-102%);transition:transform .2s}
-  .jw-side.open{transform:none}
-  .jw-top{padding:8px 12px;gap:8px}
-  .jw-top__menu{display:inline-flex}
-  .jw-top__title{display:none}
+  .jw-side{position:fixed;left:0;top:0;bottom:0;width:min(290px,86vw);z-index:40;transform:translateX(-102%);visibility:hidden;transition:transform .2s,visibility 0s linear .2s}
+  .jw-side.open{transform:none;visibility:visible;transition:transform .2s}
+  .jw-side__close{display:grid}
+  .jw-top{padding:8px 12px;gap:10px;min-height:56px}
+  .jw-top .jw-top__menu{display:inline-flex}
+  .jw-top__title{font-size:18px}
   .jw-top__right .jw-me{display:none}
-  .jw-chip-status{font-size:10.5px;padding:4px 8px}
   .jw-content{padding:14px 12px 30px}
   .jw-grid--2,.jw-grid--3{grid-template-columns:1fr}
   .jw-form2,.jw-form3,.jw-qa{grid-template-columns:1fr}
@@ -268,8 +285,11 @@ textarea.jw-input{resize:vertical}
   .jw-head h1,.jw-profile h1,.jw-hero h1{font-size:28px}
   .jw-templates{grid-template-columns:1fr}
 }
+@media (max-width:560px){
+  .jw-back{padding:0 11px;font-size:12.5px}
+  .jw-back__long{display:none}
+  .jw-back__short{display:inline}
+}
 @media (max-width:420px){
-  .jw-back{font-size:11px;padding:7px 9px;letter-spacing:.3px}
-  .jw-chip-status{display:none}
   .jw-kpi__value{font-size:21px}
 }
