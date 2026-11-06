@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_tenant_or_observer, require_tenant_user
 from app.models.models import Lead, Message, User
-from app.models.program_models import (LocationProfile, ProgramConversation, ProgramResponse,
+from app.models.program_models import (CampaignFamily, LocationProfile, ProgramConversation, ProgramResponse,
                                        ProgramSourceRecord)
 from app.routers.program_router import _program, _require_manager, _sees_program
 from app.services import booking_time as _booking_time
@@ -1686,3 +1686,117 @@ def learning_status(learning_id: str, body: LearningStatusIn, db: Session = Depe
                target_type="handoff_learning", target_id=row.id, commit=False)
     db.commit()
     return HL.view(row)
+
+
+# ── DATA REVIEW + CAMPAIGN AUDIENCE (Issue #507) ─────────────────────────────
+# Read-only views over the recorded clean-up (lead_dispositions) and the
+# campaign audience snapshot (campaign_audience_members). Manager seats only;
+# scoped to the selected workspace like every program screen.
+
+REVIEW_BUCKETS = {
+    # bucket -> (kind, value)
+    "ready": ("segment", "ready"), "batch_1": ("batch", 1),
+    "prior_conversation": ("segment", "prior_conversation"), "past_appointment": ("segment", "past_appointment"),
+    "earlier_sequence": ("segment", "earlier_sequence"), "previously_contacted": ("segment", "previously_contacted"),
+    "shared_number": ("segment", "shared_number"), "audience_suppressed": ("segment", "suppressed"),
+    "needs_review": ("queue", "needs_classification"), "contact_data": ("queue", "contact_data"),
+    "duplicate_review": ("queue", "duplicate"), "suppressed": ("disposition", "suppressed"),
+    "merged_duplicate": ("disposition", "merged_duplicate"), "email_only": ("disposition", "email_only"),
+    "test": ("disposition", "test"), "retain": ("disposition", "retain"),
+}
+
+
+def _last_contact(db, ids):
+    from sqlalchemy import func
+    from app.models.models import EmailMessage, Reply
+    out = {}
+    for model, col in ((Message, Message.sent_at), (EmailMessage, EmailMessage.sent_at)):
+        for lid, at in (db.query(model.lead_id, func.max(col)).filter(model.lead_id.in_(ids or ["-"]))
+                        .group_by(model.lead_id).all()):
+            if at and (lid not in out or at > out[lid]):
+                out[lid] = at
+    replies = {lid for (lid,) in db.query(Reply.lead_id).filter(Reply.lead_id.in_(ids or ["-"])).distinct()}
+    return out, replies
+
+
+@router.get("/data-review/summary")
+def data_review_summary(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    import json as _json
+    from sqlalchemy import func
+    from app.models.reset_models import CampaignAudienceMember, LeadDisposition
+    from app.services.programs import workspace_reset as WR
+    prog = _program(db, user)
+    org = prog.organization_id
+    run = WR.last_run(db, org)
+    disp = dict(db.query(LeadDisposition.disposition, func.count(LeadDisposition.id))
+                .filter(LeadDisposition.organization_id == org).group_by(LeadDisposition.disposition).all())
+    queues = dict(db.query(LeadDisposition.review_queue, func.count(LeadDisposition.id))
+                  .filter(LeadDisposition.organization_id == org, LeadDisposition.review_queue.isnot(None))
+                  .group_by(LeadDisposition.review_queue).all())
+    segs = dict(db.query(CampaignAudienceMember.segment, func.count(CampaignAudienceMember.id))
+                .filter(CampaignAudienceMember.organization_id == org,
+                        CampaignAudienceMember.campaign_key == WR.CAMPAIGN_KEY)
+                .group_by(CampaignAudienceMember.segment).all())
+    staged = (db.query(CampaignAudienceMember.id).filter_by(organization_id=org, campaign_key=WR.CAMPAIGN_KEY,
+                                                            is_staged=True).count())
+    fam = db.query(CampaignFamily).filter_by(organization_id=org, key=WR.CAMPAIGN_KEY).first()
+    from app.services.programs import campaigns as _camp
+    return {
+        "run": None if run is None else {"id": run.id, "key": run.run_key, "status": run.status,
+                                         "finished_at": run.finished_at.isoformat() + "Z" if run.finished_at else None,
+                                         "summary": _json.loads(run.summary_json or "{}")},
+        "families": db.query(Lead.id).filter(Lead.organization_id == org).count(),
+        "dispositions": disp, "review_queues": queues, "audience_segments": segs, "batch_1": staged,
+        "campaign": None if fam is None else {
+            "key": fam.key, "name": fam.name, "is_active": bool(fam.is_active),
+            "sender": WR.SENDER_E164, "timezone": "America/Chicago",
+            "steps": [{"touch": n, "day": d, "hour": h, "text": _camp.sms_for(fam, n)} for n, d, h in WR.SMS_STEPS],
+            "email_steps": [{"touch": n, **(_camp.email_for(fam, n) or {})} for n, _d in _camp.email_steps()],
+            "activation_blocker": _camp.activation_blocker(fam, db),
+            "booking_user_set": bool(getattr(prog, "booking_user_id", None)),
+        },
+    }
+
+
+@router.get("/data-review/list")
+def data_review_list(bucket: str = Query(...), offset: int = Query(0, ge=0, le=200000),
+                     limit: int = Query(25, ge=1, le=100), db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_or_observer)):
+    import json as _json
+    from app.models.reset_models import CampaignAudienceMember, LeadDisposition
+    from app.services.programs import workspace_reset as WR
+    prog = _program(db, user)
+    org = prog.organization_id
+    if bucket not in REVIEW_BUCKETS:
+        raise HTTPException(status_code=400, detail="Unknown list.")
+    kind, value = REVIEW_BUCKETS[bucket]
+    if kind in ("segment", "batch"):
+        q = db.query(CampaignAudienceMember).filter_by(organization_id=org, campaign_key=WR.CAMPAIGN_KEY)
+        q = q.filter(CampaignAudienceMember.segment == value) if kind == "segment" else q.filter(
+            CampaignAudienceMember.batch == value)
+    else:
+        q = db.query(LeadDisposition).filter_by(organization_id=org)
+        q = q.filter(LeadDisposition.disposition == value) if kind == "disposition" else q.filter(
+            LeadDisposition.review_queue == value)
+    total = q.count()
+    rows = q.order_by(getattr(q.column_descriptions[0]["entity"], "lead_id")).offset(offset).limit(limit).all()
+    ids = [r.lead_id for r in rows]
+    leads = {l.id: l for l in db.query(Lead).filter(Lead.id.in_(ids or ["-"]), Lead.organization_id == org)}
+    disp = {d.lead_id: d for d in db.query(LeadDisposition).filter(LeadDisposition.organization_id == org,
+                                                                      LeadDisposition.lead_id.in_(ids or ["-"]))}
+    last, replied = _last_contact(db, ids)
+    items = []
+    for r in rows:
+        l, d = leads.get(r.lead_id), disp.get(r.lead_id)
+        if l is None:
+            continue
+        reasons = _json.loads(getattr(r, "reasons_json", None) or getattr(r, "notes_json", None) or "[]")
+        items.append({"lead_id": l.id, "name": ("%s %s" % (l.first_name or "", l.last_name or "")).strip().title()
+                      or "Family", "status": l.status, "tier": l.tier, "source_file": l.source_file,
+                      "phone": d.phone_e164 if d else None, "phone_issue": d.phone_issue if d else None,
+                      "email_issue": d.email_issue if d else None, "shares_phone_with": d.shares_phone_with if d else 0,
+                      "disposition": d.disposition if d else None, "reasons": reasons,
+                      "segment": getattr(r, "segment", None), "batch": getattr(r, "batch", None),
+                      "last_contact_at": last[l.id].isoformat() + "Z" if l.id in last else None,
+                      "replied_before": l.id in replied})
+    return {"items": items, "total": total, "offset": offset, "limit": limit, "bucket": bucket}

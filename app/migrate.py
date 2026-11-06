@@ -49,6 +49,7 @@ migrated it says so and exits non-zero. Recovery stays a deliberate act.
 """
 
 import logging
+import json
 import os
 import sys
 
@@ -214,6 +215,44 @@ def main(argv=None) -> int:
             _db.close()
     except Exception as e:                                   # noqa: BLE001
         log.error("VOLT seed errored (deploy continues): %s: %s", type(e).__name__, str(e)[:200])
+
+    # ── 3f. WORKSPACE DATA RESET (#507) - inert unless switched on ──
+    # WORKSPACE_RESET="<organization id>:<plan|apply>:<run key>" or
+    # "<organization id>:rollback:<run id>". `apply` is idempotent per run key
+    # (a second deploy with the same value changes nothing); every change is
+    # recorded with its before value. Sends nothing, approves nothing, switches
+    # nothing on. Never changes the exit code.
+    _reset = os.environ.get("WORKSPACE_RESET", "").strip()
+    if _reset:
+        try:
+            from app.deps import SessionLocal
+            from app.models.models import Organization
+            from app.services.programs import workspace_reset as _wr
+            org_id, mode, key = (_reset.split(":", 2) + ["", "", ""])[:3]
+            _db = SessionLocal()
+            try:
+                org = _db.query(Organization).filter(Organization.id == org_id).first()
+                if mode == "plan":
+                    res = _wr.plan(_db, org)["summary"]
+                    log.info("workspace reset plan org=%s: %s", org_id, json.dumps(res, sort_keys=True))
+                elif mode == "apply":
+                    res = _wr.apply(_db, org, key)
+                    log.info("workspace reset apply org=%s run=%s status=%s already=%s changes=%s",
+                             org_id, res["run_id"], res["status"], res["already"],
+                             json.dumps(res["summary"].get("changes", {}), sort_keys=True))
+                elif mode == "rollback":
+                    res = _wr.rollback(_db, org, key)
+                    log.info("workspace reset rollback org=%s: %s", org_id, json.dumps(res, sort_keys=True))
+                else:
+                    log.error("workspace reset: unknown mode %r (nothing done)", mode)
+            except Exception:
+                _db.rollback()
+                raise
+            finally:
+                _db.close()
+        except Exception as e:                               # noqa: BLE001
+            log.error("Workspace reset errored (deploy continues, nothing half-applied): %s: %s",
+                      type(e).__name__, str(e)[:300])
 
     # ── 4. SAY WHAT HAPPENED ──────────────────────────────────────────────
     log.info("migration outcome=%s elapsed=%ss columns_checked=%s",

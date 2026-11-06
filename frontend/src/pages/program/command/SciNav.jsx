@@ -83,9 +83,11 @@ export function navFor(profile) {
     so it is offered as "Location" (its profile/branding screen). */
 export function toolsFor(profile) {
   if (!profile?.single_location) return TOOLS
-  return TOOLS.map(i => (i[0] === 'locations' ? [i[0], i[1], 'Location', i[3]] : i))
+  // Issue #507: the single-location workspace's recorded clean-up and Batch 1 draft.
+  return [...TOOLS.map(i => (i[0] === 'locations' ? [i[0], i[1], 'Location', i[3]] : i)),
+    ['cleanup', 'review', 'Clean-up & Batch 1', '/program?tab=cleanup']]
 }
-const PC_TABS = new Set([...NAV, ...TOOLS].filter(i => i[3].startsWith('/program?')).map(i => i[0]))
+const PC_TABS = new Set([...NAV, ...TOOLS, ['cleanup', '', '', '/program?tab=cleanup']].filter(i => i[3].startsWith('/program?')).map(i => i[0]))
 export const LIVE_SCREENS = new Set(['search', 'inbox', 'appts', 'reports', 'consent'])
 
 /** Which menu item the current URL belongs to. */

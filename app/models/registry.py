@@ -603,3 +603,5 @@ import app.models.esign_models  # noqa: F401  (esign_envelopes, esign_signers, e
 import app.models.google_signin_models  # noqa: F401  (imported for side effects)
 # VOLT Marketing recruiting program (#535): projects, reps, applications, documents, Zoom sessions, audit.
 import app.models.volt_models  # noqa: F401  (imported for side effects)
+# Workspace data reset (#507) - recorded, reversible clean-up + campaign audience snapshots.
+import app.models.reset_models  # noqa: F401,E402  (imported for side effects)
