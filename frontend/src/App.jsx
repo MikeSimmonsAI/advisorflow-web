@@ -130,6 +130,17 @@ const RoofingHomeowner = lazyPage(() => import('./pages/roofing/Homeowner'))
 const RoofingSettings = lazyPage(() => import('./pages/roofing/Settings'))
 const RoofingLanding = lazyPage(() => import('./pages/roofing/RoofingLanding'))
 const RoofingDemo = lazyPage(() => import('./pages/roofing/demo/DemoApp'))
+// EvoSys Gold & Jewelry: its own shell (/program/jewelry/*), gated by `jewelry_program` server-side.
+const JewelryShell = lazyPage(() => import('./pages/jewelry/JewelryShell'))
+const JewelryDashboard = lazyPage(() => import('./pages/jewelry/Dashboard'))
+const JewelryCustomers = lazyPage(() => import('./pages/jewelry/Customers'))
+const JewelryCustomer = lazyPage(() => import('./pages/jewelry/CustomerDetail'))
+const JewelryAppointments = lazyPage(() => import('./pages/jewelry/Appointments'))
+const JewelryCampaigns = lazyPage(() => import('./pages/jewelry/Campaigns'))
+const JewelryInventory = lazyPage(() => import('./pages/jewelry/Inventory'))
+const JewelryReports = lazyPage(() => import('./pages/jewelry/Reports'))
+const JewelryReceptionist = lazyPage(() => import('./pages/jewelry/Receptionist'))
+const JewelrySettings = lazyPage(() => import('./pages/jewelry/Settings'))
 // Insurance retention workspace (Issue #499): /program/insurance/*.
 const InsuranceShell = lazyPage(() => import('./pages/insurance/InsuranceShell'))
 const insPage = name => lazyPage(() => import('./pages/insurance/InsurancePages').then(m => ({ default: m[name] })))
@@ -1610,6 +1621,19 @@ export default function App() {
              Avoid using cached branding for a client-side feature rejection:
              the previous workspace may be SCI while switching to Roofing.
              /roofing-ops enforces membership and explicit roofing_program server-side. */}
+        {/* JewelryShell checks /jewelry-ops/status against the CURRENT workspace;
+             /jewelry-ops enforces membership and explicit jewelry_program server-side. */}
+        <Route path="/program/jewelry" element={<ProtectedRoute bare><JewelryShell /></ProtectedRoute>}>
+          <Route index element={<JewelryDashboard />} />
+          <Route path="customers" element={<JewelryCustomers />} />
+          <Route path="customers/:id" element={<JewelryCustomer />} />
+          <Route path="appointments" element={<JewelryAppointments />} />
+          <Route path="campaigns" element={<JewelryCampaigns />} />
+          <Route path="inventory" element={<JewelryInventory />} />
+          <Route path="reports" element={<JewelryReports />} />
+          <Route path="receptionist" element={<JewelryReceptionist />} />
+          <Route path="settings" element={<JewelrySettings />} />
+        </Route>
         <Route path="/program/roofing" element={<ProtectedRoute bare><RoofingShell /></ProtectedRoute>}>
           <Route index element={<RoofingMission />} />
           <Route path="queue" element={<RoofingQueue />} />
