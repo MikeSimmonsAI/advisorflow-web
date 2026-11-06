@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { Suspense, useEffect, useState } from 'react'
 import { lazyPage } from './utils/lazyPage'
+import { isVoltHost } from './utils/voltDomain'
 import PageBoundary from './components/PageBoundary'
 import Layout from './components/Layout'
 import DemoBanner from './components/DemoBanner'
@@ -623,6 +624,12 @@ function ExecutiveRoute({ children }) {
  * domain. Send them to their own workspace instead. god_admin keeps the tenant
  * home because Mike legitimately operates across both.
  */
+function DomainHome() {
+  const location = useLocation()
+  if (isVoltHost()) return <Navigate to={{ pathname: '/volt', search: location.search, hash: location.hash }} replace />
+  return <HomeRedirect />
+}
+
 function HomeRedirect() {
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   if (mustChangePassword()) return <Navigate to="/change-password" replace />
@@ -1531,7 +1538,7 @@ export default function App() {
             because Demo Mode does not relax permissions. */}
         <Route path="/demo" element={
           isAuthenticated() ? <DemoConsole /> : <Navigate to="/login" replace />} />
-        <Route path="/" element={<HomeRedirect />} />
+        <Route path="/" element={<DomainHome />} />
         {/* ── Sales Workspace ── brand-sales members; guarded server-side ── */}
         {/* ── MY WORK ── every signed-in brand-sales member ── */}
         <Route path="/sales" element={<SalesRoute><MyDay /></SalesRoute>} />

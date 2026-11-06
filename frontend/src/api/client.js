@@ -2,7 +2,8 @@
 // public customer portal alike. Anything that talks to the backend imports this
 // rather than reading an env var of its own; a page with its own copy is a page
 // that keeps calling the old host after this one moves.
-export const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://advisorflow-backend.onrender.com'
+import { isVoltHost, VOLT_API_ORIGIN } from '../utils/voltDomain'
+export const API_BASE = isVoltHost() ? VOLT_API_ORIGIN : (import.meta.env.VITE_API_BASE_URL || 'https://advisorflow-backend.onrender.com')
 
 // ── Brand-neutral localStorage keys ──────────────────────────────────────────
 // All keys use the "af_" prefix — no white-label brand name ever appears in
