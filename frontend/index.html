@@ -26,6 +26,8 @@
         if (h.includes('evosyspro') || /^evosys-[a-z0-9-]*staging\.onrender\.com$/.test(h)) { name = 'EvoSys Pro';    color = '%23087cff'; letter = 'E';  fsize = '18' }
         if (h.includes('advisorflow'))   { name = 'AdvisorFlow';   color = '%23f59e0b'; letter = 'AF'; fsize = '14' }
         if (h.includes('harmonyhustle')) { name = 'Harmony Hustle';color = '%2310b981'; letter = 'HH'; fsize = '13' }
+        // VOLT Marketing's own domain: its applicants never see another brand.
+        if (h === 'voltmarketing.live' || h === 'www.voltmarketing.live') { name = 'VOLT Marketing'; color = '%23c8102e'; letter = 'V'; fsize = '18' }
         // THE EXTERNAL WHOLESALE PAGES ARE NOT OURS TO BRAND.
         //
         // These two routes are opened by an investor or a property owner who
@@ -118,6 +120,7 @@
         if (h.includes('evosyspro') || /^evosys-[a-z0-9-]*staging\.onrender\.com$/.test(h)) { name = 'EvoSys Pro';    color = '#087cff' }
         if (h.includes('advisorflow'))   { name = 'AdvisorFlow';   color = '#f59e0b' }
         if (h.includes('harmonyhustle')) { name = 'Harmony Hustle';color = '#10b981' }
+        if (h === 'voltmarketing.live' || h === 'www.voltmarketing.live') { name = 'VOLT Marketing'; color = '#c8102e' }
         // Same rule as the title block above: on the external wholesale pages
         // the splash shows the pulse and the loading bar and NO name. An
         // investor waiting a second and a half for the page to mount should
