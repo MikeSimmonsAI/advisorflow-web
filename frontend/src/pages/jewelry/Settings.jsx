@@ -35,12 +35,20 @@ function Profile({ status, reload, toast }) {
           <Field label="Email"><input className="jw-input" value={f.business_email} onChange={set('business_email')} /></Field>
           <Field label="Default appointment length (minutes)"><input className="jw-input" type="number" min="10" max="480" value={f.appointment_minutes} onChange={set('appointment_minutes')} /></Field>
         </div>
-        <Field label="Business hours" hint="Leave a day blank if not confirmed. The assistant states hours only when “confirmed by owner” is checked.">
-          <div className="jw-hours">{DAYS.map(([k, l]) => (
-            <label key={k}><span>{l}</span><input className="jw-input jw-input--sm" value={f.business_hours[k] || ''} placeholder="e.g. 10am–6pm or Closed"
-              onChange={e => setF({ ...f, business_hours: { ...f.business_hours, [k]: e.target.value } })} /></label>
-          ))}</div>
-        </Field>
+        {/* Not a <Field>: that is a <label>, and each day needs its own label. */}
+        <div className="jw-field" role="group" aria-labelledby="jw-hours-title" aria-describedby="jw-hours-hint">
+          <span className="jw-field__label" id="jw-hours-title">Business hours</span>
+          <div className="jw-hours-wrap">
+            <div className="jw-hours" data-hours>{DAYS.map(([k, l]) => (
+              <div key={k} className="jw-hours__row" data-hours-row>
+                <label htmlFor={`jw-hours-${k}`}>{l}</label>
+                <input id={`jw-hours-${k}`} className="jw-input" value={f.business_hours[k] || ''} placeholder="e.g. 10am–6pm or Closed"
+                  onChange={e => setF({ ...f, business_hours: { ...f.business_hours, [k]: e.target.value } })} />
+              </div>
+            ))}</div>
+          </div>
+          <span className="jw-field__hint" id="jw-hours-hint">Leave a day blank if not confirmed. The assistant states hours only when “confirmed by owner” is checked.</span>
+        </div>
         <label className="jw-check"><input type="checkbox" checked={!!f.hours_confirmed} onChange={e => setF({ ...f, hours_confirmed: e.target.checked })} /> Hours confirmed by owner</label>
         <div className="jw-form2">
           <Field label="Services offered" hint="One per line"><textarea className="jw-input" rows={5} value={f.services} onChange={set('services')} /></Field>
@@ -70,7 +78,7 @@ export default function Settings() {
   return (
     <div>
       <div className="jw-head"><div><div className="jw-eyebrow">Settings & Team</div><h1>Workspace settings</h1></div></div>
-      <div className="jw-grid jw-grid--main">
+      <div className="jw-grid jw-grid--main jw-settings">
         <Profile status={status} reload={reload} toast={toast} />
         <div>
           <div className="jw-card">
@@ -98,7 +106,7 @@ export default function Settings() {
           <div className="jw-card">
             <div className="jw-card__head"><h3>Activity log</h3></div>
             {!act ? <Loading /> : act.entries.length === 0 ? <Empty title="No activity yet" /> : (
-              <ul className="jw-list jw-list--dense">{act.entries.map(e => <li key={e.id}><div><b>{e.action.replace('jewelry.', '').replace(/[._]/g, ' ')}</b><small>{e.actor}</small></div><small>{ago(e.at)}</small></li>)}</ul>
+              <ul className="jw-list jw-list--dense jw-activity">{act.entries.map(e => <li key={e.id}><div><b>{e.action.replace('jewelry.', '').replace(/[._]/g, ' ')}</b><small>{e.actor}</small></div><small>{ago(e.at)}</small></li>)}</ul>
             )}
           </div>
         </div>
