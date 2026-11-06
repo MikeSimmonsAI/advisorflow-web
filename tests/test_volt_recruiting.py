@@ -828,7 +828,7 @@ def test_queue_filters_and_csv_hiring_columns(volt):
     assert c.get("/volt/ops/%s" % org, headers=sh, params={"include_test": 1, "travel": "no"}).json()["overview"]["applications"] == 2
 
 
-def test_talent_pool_dedupes_keeps_latest_choice_and_never_counts_as_an_application(volt):
+def test_talent_pool_dedupes_keeps_consent_and_never_counts_as_an_application(volt):
     c, db = volt["c"], volt["db"]
     org = volt["org"].id
     sh = H(db, volt["staff"])
@@ -844,8 +844,17 @@ def test_talent_pool_dedupes_keeps_latest_choice_and_never_counts_as_an_applicat
     rows = db.query(VoltTalentSignup).filter(VoltTalentSignup.organization_id == org, VoltTalentSignup.email == email).all()
     assert len(rows) == 1
     row = rows[0]
-    assert row.submit_count == 2 and row.notify_opt_in is False and json.loads(row.interests) == ["fiber", "aca"]
+    assert row.submit_count == 2 and row.notify_opt_in is True and row.notify_opt_in_at is not None and json.loads(row.interests) == ["fiber", "aca"]
     assert row.referrer_serial == d["rep"]["rep_id"] and row.referral_source == "invite"
+    first_at = row.notify_opt_in_at
+    c.post("/volt/public/%s/talent-pool" % SLUG, json=dict(base, notify=True))
+    db.refresh(row)
+    assert row.notify_opt_in is True and row.notify_opt_in_at == first_at
+    e2 = "late-%s@example.test" % uuid.uuid4().hex[:6]
+    c.post("/volt/public/%s/talent-pool" % SLUG, json=dict(base, email=e2, first_name="Lee", last_name="Late", notify=False))
+    c.post("/volt/public/%s/talent-pool" % SLUG, json=dict(base, email=e2, first_name="Lee", last_name="Late", notify=True))
+    late = db.query(VoltTalentSignup).filter(VoltTalentSignup.organization_id == org, VoltTalentSignup.email == e2).one()
+    assert late.notify_opt_in is True and late.notify_opt_in_at is not None
     # Typed names never earn credit.
     bad = c.post("/volt/public/%s/talent-pool" % SLUG, json=dict(base, email="x-" + email, referrer_rep_id="Dangelo"))
     assert bad.status_code == 422
