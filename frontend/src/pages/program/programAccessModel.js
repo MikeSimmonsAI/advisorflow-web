@@ -48,9 +48,10 @@ const PROGRAMS = {
           facts: ['Applicants', 'Referrals', 'Zoom Sessions'] },
   // EvoSys Gold & Jewelry (gold buyers, jewelry stores, coin dealers). The
   // card keeps the business's own name; navy & gold artwork (redesign lane).
-  jewelry: { rank: 6, variant: 'gold', symbol: '◇', kind: 'GOLD & JEWELRY · BUSINESS WORKSPACE',
-             summary: 'Customers, appointments, promotions, inventory and results',
-             facts: ['Customer Vault', 'Appointments', 'Promotions'] },
+  // Owner-approved identity (2026-11-06): live business command center, never a demo label.
+  jewelry: { rank: 6, variant: 'gold', symbol: '◇', kind: 'GOLD & JEWELRY · BUSINESS COMMAND CENTER',
+             summary: 'Customers • Promotions • Appointments • Inventory',
+             facts: [] },
   business: { rank: 7, variant: 'general', symbol: '◈', kind: 'BUSINESS OPERATIONS',
               summary: 'Your dedicated business workspace',
               facts: ['Leads', 'Conversations', 'Calendar'] },
