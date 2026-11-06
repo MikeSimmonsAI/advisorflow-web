@@ -9,6 +9,12 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="/icons/icon.svg">
+    <!-- Public static sales demos live in frontend/public/demo/<name>/index.html and are
+         served as plain files. Without the trailing slash, /demo/blue-ridge falls through
+         to the SPA's /demo/:token route instead, so send it to the static demo folder. -->
+    <script>
+      if (/^\/demo\/blue-ridge(\/index)?$/.test(location.pathname)) location.replace('/demo/blue-ridge/' + location.search + location.hash)
+    </script>
     <!-- Brand detection runs before anything renders — sets tab title and favicon immediately -->
     <script>
       (function () {
