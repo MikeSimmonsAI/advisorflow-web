@@ -20,8 +20,22 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../api/client'
 
+// Opened from Program Access by a signed-in team member: show a way back.
+// A plain link (not history.back), so it works in the new tab the launcher
+// opens. A prospect with the public link never sees it — they carry no
+// ?staff=1 and no session, and /workspaces would only send them to sign in.
+const STAFF_BAR = 44
+function staffReturnBar() {
+  try {
+    const staff = new URLSearchParams(window.location.search).get('staff') === '1'
+    const signedIn = !!(localStorage.getItem('af_token') || localStorage.getItem('bookaboost_token'))
+    return staff && signedIn
+  } catch (e) { return false }
+}
+
 export default function DemoSite() {
   const { token } = useParams()
+  const [showBar] = useState(staffReturnBar)
   const [demo, setDemo] = useState(null)
   const [error, setError] = useState(null)
 
@@ -61,6 +75,17 @@ export default function DemoSite() {
     )
   }
 
+  if (showBar) {
+    return (
+      <>
+        <nav style={S.bar} aria-label="Preview">
+          <a href="/workspaces" style={S.back}>← BACK TO PROGRAM ACCESS</a>
+          <span style={S.label}>Prospect preview · {demo.title}</span>
+        </nav>
+        <DemoFrame title={demo.title} html={demo.html} top={STAFF_BAR} />
+      </>
+    )
+  }
   return <DemoFrame title={demo.title} html={demo.html} />
 }
 
@@ -84,6 +109,17 @@ export function DemoFrame({ title, html, top = 0 }) {
 }
 
 const S = {
+  bar: {
+    position: 'fixed', top: 0, left: 0, right: 0, height: STAFF_BAR, zIndex: 2,
+    display: 'flex', alignItems: 'center', gap: 14, padding: '0 12px',
+    background: '#0a1220', borderBottom: '1px solid #24303d', color: '#e8eef5',
+    fontFamily: 'ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif', fontSize: 13,
+  },
+  back: {
+    color: '#e8eef5', border: '1px solid #3a4a5c', borderRadius: 7, padding: '6px 11px',
+    textDecoration: 'none', fontWeight: 700, letterSpacing: '.4px', whiteSpace: 'nowrap', flex: 'none',
+  },
+  label: { color: '#8fa3b6', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   center: {
     minHeight: '100vh', display: 'grid', placeItems: 'center',
     background: '#0f1720', padding: 24,
