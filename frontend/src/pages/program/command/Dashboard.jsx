@@ -107,8 +107,8 @@ export function Home({ a, sched, consent, openMetric, openFamily }) {
     ) : (
       <section className="sl-hero2">
         <div><strong>{b.on ? 'No new families waiting to start' : 'Automatic enrollment is OFF'}</strong>
-          <p>{b.on ? (pipe.awaiting_approval
-            ? `The next daily batch adds up to ${b.count} new families${a.next_batch ? ` on ${ctDate(a.next_batch, { weekday: 'long', month: 'short', day: 'numeric' })}` : ''} at ${b.start} (${n(pipe.awaiting_approval)} ready now).`
+          <p>{b.on ? ((b.ready?.total ?? pipe.awaiting_approval)
+            ? `The next daily batch adds up to ${b.count} new families${a.next_batch ? ` on ${ctDate(a.next_batch, { weekday: 'long', month: 'short', day: 'numeric' })}` : ''} at ${b.start} (${n(b.ready?.total ?? pipe.awaiting_approval)} ready now${b.ready ? `: ${n(b.ready.text_email)} text + email, ${n(b.ready.email_only)} email only` : ''}).`
             : `The daily batch is on (up to ${b.count} a day), but no family is ready for it: everyone left needs a cell phone, a campaign or a review first.`)
             : 'No new families are being added. Turn it on in Choose & Send › Every day, automatically.'}</p></div>
       </section>
