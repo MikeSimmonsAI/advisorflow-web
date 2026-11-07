@@ -100,7 +100,7 @@ class OutreachProgram(Base):
     daily_batch_count = Column(Integer, nullable=True, default=0)
     daily_batch_spacing = Column(Integer, nullable=True, default=8)
     daily_batch_start = Column(String, nullable=True, default="09:00")      # Central
-    daily_batch_days = Column(String, nullable=True, default="12345")       # Mon=1 .. Sun=7
+    daily_batch_days = Column(String, nullable=True, default="1234567")     # Mon=1 .. Sun=7 (Nov 7: every day)
     daily_batch_by = Column(String, nullable=True)
     daily_batch_last_date = Column(String, nullable=True)                   # YYYY-MM-DD Central
     # Self-check problems a person has acknowledged ("Got it"): {check key: signature}.

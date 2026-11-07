@@ -626,6 +626,7 @@ def run_due_cadences(db: Session, organization_id: str = None,
         now = now.astimezone(timezone.utc).replace(tzinfo=None)
     sending_on = bool(workspaces_sending(db))
     org_on_cache = {}
+    _window_cache = {}
 
     query = (
         db.query(CadenceState)
@@ -896,6 +897,24 @@ def run_due_cadences(db: Session, organization_id: str = None,
                 # wedging the row.
                 nxt = contact_hours.next_permitted_utc(lead, now)
                 state.next_touch_due_at = nxt or (now + RETRY_BACKOFF)
+                blocked_count += 1
+                db.commit()
+                continue
+
+            # ── THE SCI OUTREACH WINDOW (Nov 7) ────────────────────────────────
+            # Program workspaces send scheduled touches every day, 9 AM - 6 PM
+            # Central - narrower than the family's clock, never wider. Outside
+            # it the touch waits for the next opening; its interval is kept.
+            from app.services.programs import send_window as _sw
+            if _sw.applies_to_org(db, lead.organization_id, _window_cache) and not _sw.permits(now):
+                _log_touch(db, state, lead, touch_number=touch_number,
+                           attempt_seq=_next_attempt_seq(db, state, touch_number),
+                           claim=True, outcome=OUTCOME_BLOCKED,
+                           reason="quiet hours: outside the SCI sending window (%s)" % _sw.describe()["label"],
+                           scheduled_for=scheduled_for)
+                # Spread across the first 45 minutes after opening, so touches
+                # that fell due overnight never leave together at 9:00.
+                state.next_touch_due_at = _sw.next_open(now) + timedelta(minutes=_sw.stagger_minutes(state.id))
                 blocked_count += 1
                 db.commit()
                 continue

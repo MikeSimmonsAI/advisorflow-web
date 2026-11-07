@@ -349,6 +349,8 @@ def test_a_skipped_blank_text_is_recorded_not_sent(program, sample_advisor, monk
     monkeypatch.setattr(entitlements, "org_has_feature", lambda org, f: True)
     from app.services import contact_hours
     monkeypatch.setattr(contact_hours, "check", lambda lead, now=None: {"permitted": True})
+    from app.services.programs import send_window
+    monkeypatch.setattr(send_window, "permits", lambda now=None, days=None: True)   # not a test of the clock
     try:
         cadence_service.run_due_cadences(db)
     except TypeError:

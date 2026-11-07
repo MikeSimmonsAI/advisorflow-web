@@ -137,12 +137,15 @@ def used_today(db: Session, org_id: str, now: Optional[datetime] = None) -> int:
 
 
 def in_sending_hours(db: Session, org_id: str, now: Optional[datetime] = None) -> bool:
-    """Same window as texts: 8:30 AM - 7:45 PM Eastern."""
+    """Same window as texts: 8:30 AM - 7:45 PM Eastern, AND the SCI outreach
+    window (Nov 7: every day, 9 AM - 6 PM Central - send_window)."""
     from zoneinfo import ZoneInfo
     from app.services import contact_hours as ch
-    utc = (now or datetime.utcnow()).replace(tzinfo=ZoneInfo("UTC"))
+    from app.services.programs import send_window
+    n = now or datetime.utcnow()
+    utc = n.replace(tzinfo=ZoneInfo("UTC"))
     t = utc.astimezone(ZoneInfo(ch.WINDOW_ZONE)).time()
-    return ch.WINDOW_START <= t <= ch.WINDOW_END
+    return ch.WINDOW_START <= t <= ch.WINDOW_END and send_window.permits(n)
 
 
 # ── rendering (shared with the campaign preview) ────────────────────────────

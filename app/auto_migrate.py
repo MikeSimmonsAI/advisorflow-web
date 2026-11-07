@@ -189,7 +189,7 @@ COLUMNS_TO_ADD = [
     ("outreach_programs", "daily_batch_count", "INTEGER DEFAULT 0"),
     ("outreach_programs", "daily_batch_spacing", "INTEGER DEFAULT 8"),
     ("outreach_programs", "daily_batch_start", "VARCHAR DEFAULT '09:00'"),
-    ("outreach_programs", "daily_batch_days", "VARCHAR DEFAULT '12345'"),
+    ("outreach_programs", "daily_batch_days", "VARCHAR DEFAULT '1234567'"),
     ("outreach_programs", "daily_batch_by", "VARCHAR"),
     ("outreach_programs", "daily_batch_last_date", "VARCHAR"),
     ("outreach_programs", "self_check_ack", "TEXT"),

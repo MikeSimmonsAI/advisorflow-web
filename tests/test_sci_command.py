@@ -260,6 +260,7 @@ def test_an_on_hold_family_waits_instead_of_failing(program, sample_advisor):
     with patch("app.services.cadence_service.org_sending_enabled", return_value=True), \
          patch("app.services.entitlements.org_has_feature", return_value=True), \
          patch("app.services.contact_hours.check", return_value={"permitted": True, "reason": ""}), \
+         patch("app.services.programs.send_window.permits", return_value=True), \
          patch("app.services.sms_service.send_sms",
                side_effect=Exception("Lead x: ON HOLD: this contact was put on hold by a person.")):
         C.run_due_cadences(db, organization_id=org.id)

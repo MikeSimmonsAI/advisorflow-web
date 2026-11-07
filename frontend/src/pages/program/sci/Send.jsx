@@ -429,13 +429,17 @@ function CentralAlabamaPrepare() {
 // EVERY DAY, AUTOMATICALLY: a standing approval. Once a manager switches it
 // on, each sending day the program approves the next N people itself (same
 // people "Pick 25 for me" would tick), spread out from the start time.
+const dayLabel = d => (d === '1234567' ? 'every day' : d === '123456' ? 'every Mon–Sat' : d === '12345' ? 'every weekday'
+  : `on ${(d || '').split('').map(c => ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][Number(c)]).join(', ')}`)
+
 function DailyBatch() {
   const prof = useProgramProfile()
   const [d, setD] = useState(null)
   const [count, setCount] = useState(66)
   const [spacing, setSpacing] = useState(8)
   const [start, setStart] = useState('09:00')
-  const [sat, setSat] = useState(false)
+  // Nov 7 (owner): seven days a week by default; a manager can still choose fewer.
+  const [days, setDays] = useState('1234567')
   const [sure, setSure] = useState(false)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
@@ -445,7 +449,7 @@ function DailyBatch() {
       if (x.count) setCount(x.count)
       if (x.spacing_minutes) setSpacing(x.spacing_minutes)
       if (x.start) setStart(x.start)
-      setSat((x.days || '').includes('6'))
+      setDays(x.days || '1234567')
     }).catch(() => {})
   }, [])
   const save = async on => {
@@ -453,9 +457,9 @@ function DailyBatch() {
     try {
       const n = on ? Math.max(1, Math.min(200, Number(count) || 0)) : 0
       const x = await api.post('/program/daily-batch', { count: n, spacing_minutes: Number(spacing) || 8, start,
-        days: sat ? '123456' : '12345', confirm: on ? `DAILY ${n}` : undefined })
+        days, confirm: on ? `DAILY ${n}` : undefined })
       setD(x); setSure(false)
-      setNote(on ? `On: ${n} new people every ${sat ? 'Mon–Sat' : 'weekday'} from ${start}, one every ${x.spacing_minutes} min. If today's batch hasn't gone yet, it starts within a few minutes.`
+      setNote(on ? `On: ${n} new people ${dayLabel(x.days)} from ${start}, one every ${x.spacing_minutes} min, never past 6 PM Central. If today's batch hasn't gone yet, it starts within a few minutes.`
         : 'Off. No new daily batches; people already approved keep their schedule.')
     } catch (e) { setNote(errText(e)) } finally { setBusy(false) }
   }
@@ -472,10 +476,14 @@ function DailyBatch() {
         <label className="sci-micro">People a day <input type="number" min="1" max="200" value={count} onChange={e => setCount(e.target.value)} className="sci-input sm" style={{ width: 70 }} /></label>
         <label className="sci-micro">Start <input type="time" value={start} onChange={e => setStart(e.target.value)} className="sci-input sm" /></label>
         <label className="sci-micro">Every <input type="number" min="1" max="240" value={spacing} onChange={e => setSpacing(e.target.value)} className="sci-input sm" style={{ width: 56 }} /> min</label>
-        <label className="sci-micro"><input type="checkbox" checked={sat} onChange={e => setSat(e.target.checked)} /> Saturdays too</label>
+        <label className="sci-micro">Days <select value={days} onChange={e => setDays(e.target.value)} className="sci-input sm">
+          <option value="1234567">Every day (Mon–Sun)</option>
+          <option value="123456">Mon–Sat</option>
+          <option value="12345">Weekdays only</option>
+        </select></label>
       </div>
       <label className="sci-micro" style={{ display: 'block', marginTop: 10 }}>
-        <input type="checkbox" checked={sure} onChange={e => setSure(e.target.checked)} /> I approve texting and emailing {Number(count) || 0} new people every {sat ? 'Mon–Sat' : 'weekday'}.
+        <input type="checkbox" checked={sure} onChange={e => setSure(e.target.checked)} /> I approve texting and emailing {Number(count) || 0} new people {dayLabel(days)}.
       </label>
       <div className="sci-row-gap" style={{ marginTop: 10 }}>
         <button type="button" className="sci-btn gold sm" disabled={!sure || busy} onClick={() => save(true)}>{d?.on ? 'Save' : 'Turn on'}</button>

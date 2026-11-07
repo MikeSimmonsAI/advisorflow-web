@@ -27,7 +27,8 @@ across locations. For SCI, ALSO an SMS consent of record for the number
 
 WHEN
 ----
-On the listed weekdays (Central), the first pass at or after the start time
+On the listed days (Central; every day unless a manager chose fewer - Nov 7
+owner: seven days a week), the first pass at or after the start time
 approves the day's batch, first person a couple of minutes later, then one
 every `spacing` minutes. Once per day: daily_batch_last_date guards it, and
 the pass runs on the single-instance claimed program loop.
@@ -49,6 +50,26 @@ MAX_PER_DAY = 200
 # start - so the day's families are paced through business hours instead of
 # all being held overnight and then going out together when sending opens.
 LATEST_START = time(15, 0)
+# Nov 7 (owner): seven days a week. A program that never chose its days sends
+# every day; a stored choice (e.g. "12345") is still honoured as written.
+DEFAULT_DAYS = "1234567"
+
+
+def days_of(prog: OutreachProgram) -> str:
+    return prog.daily_batch_days or DEFAULT_DAYS
+
+
+def fits_today(start_local: datetime, spacing_minutes: int) -> int:
+    """How many starts, `spacing` apart from start + 2 min, fit before the
+    6 PM Central close (send_window.CLOSE). A batch never runs past the close:
+    anything after it would wait overnight and leave together at 9 AM."""
+    from app.services.programs import send_window
+    close = start_local.replace(hour=send_window.CLOSE.hour, minute=send_window.CLOSE.minute, second=0,
+                                microsecond=0)
+    first = start_local + timedelta(minutes=2)
+    if first >= close:
+        return 0
+    return int((close - first).total_seconds() // 60 // max(1, spacing_minutes)) + 1
 
 
 def _local_now(now: Optional[datetime] = None) -> datetime:
@@ -107,7 +128,7 @@ def pick(db: Session, prog: OutreachProgram, n: int) -> List[str]:
 
 def status(prog: OutreachProgram) -> Dict:
     return {"count": int(prog.daily_batch_count or 0), "spacing_minutes": int(prog.daily_batch_spacing or 8),
-            "start": prog.daily_batch_start or "09:00", "days": prog.daily_batch_days or "12345",
+            "start": prog.daily_batch_start or "09:00", "days": days_of(prog),
             "on": bool(prog.daily_batch_count), "set_by": prog.daily_batch_by,
             "last_date": prog.daily_batch_last_date}
 
@@ -123,7 +144,7 @@ def run_for(db: Session, prog: OutreachProgram, now: Optional[datetime] = None) 
     today = local.date().isoformat()
     if prog.daily_batch_last_date == today:
         return None
-    if str(local.isoweekday()) not in (prog.daily_batch_days or "12345"):
+    if str(local.isoweekday()) not in days_of(prog):
         return None
     start_t = _start_time(prog)
     if local.time() < start_t:
@@ -137,12 +158,14 @@ def run_for(db: Session, prog: OutreachProgram, now: Optional[datetime] = None) 
     # Claim the day first, so a failure below never sends a second batch.
     prog.daily_batch_last_date = today
     db.commit()
-    ids = pick(db, prog, n)
+    spacing = max(1, min(240, int(prog.daily_batch_spacing or 8)))
+    # Never more than fits before the 6 PM close (a late start shrinks it).
+    n = min(n, fits_today(local, spacing))
+    ids = pick(db, prog, n) if n > 0 else []
     if not ids:
         return {"approved": 0, "picked": 0}
     utc_now = (now or datetime.utcnow())
     start_at = utc_now + timedelta(minutes=2)
-    spacing = max(1, min(240, int(prog.daily_batch_spacing or 8)))
     r = sa.approve(db, prog, user, ids, mode="text_email", start_at=start_at, spacing_minutes=spacing)
     from app.routers.audit_log_router import log_action
     log_action(db, prog.organization_id, user.id, action="program.daily_batch",
@@ -170,7 +193,7 @@ def next_sending_start(prog: OutreachProgram, now: Optional[datetime] = None) ->
     from zoneinfo import ZoneInfo
     local = _local_now(now)
     start_t = _start_time(prog)
-    days = prog.daily_batch_days or "12345"
+    days = days_of(prog)
     d = local.date()
     for i in range(0, 8):
         day = d + timedelta(days=i)
