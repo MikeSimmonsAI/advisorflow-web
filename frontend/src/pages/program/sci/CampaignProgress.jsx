@@ -51,7 +51,8 @@ export default function CampaignProgress() {
       {!d && !err ? <Loading label="Counting the roster…" /> : !r ? (!err && <Empty>No campaign to show.</Empty>) : (
         <>
           <p className="sci-micro sci-muted" style={{ margin: '0 0 10px' }}>
-            Sending: <b>{r.window.label}</b>. Daily batch: {r.daily_batch.on ? `${r.daily_batch.count} a day, ${r.daily_batch.days_label.toLowerCase()} from ${r.daily_batch.start}${r.daily_batch.next_day ? `, next ${dayName(r.daily_batch.next_day)}` : ''} · ${r.daily_batch.ready_now == null ? '—' : num(r.daily_batch.ready_now)} ready to pick now` : 'off'}.
+            Sending: <b>{r.window.label}</b>. Daily batch: {r.daily_batch.on ? `${r.daily_batch.count} a day, ${r.daily_batch.days_label.toLowerCase()} from ${r.daily_batch.start}${r.daily_batch.next_day ? `, next ${dayName(r.daily_batch.next_day)}` : ''} · ${r.daily_batch.ready_now == null ? '—' : num(r.daily_batch.ready_now)} ready now${r.daily_batch.ready ? ` (${num(r.daily_batch.ready.text_email)} text + email, ${num(r.daily_batch.ready.email_only)} email only)` : ''}` : 'off'}.
+            {r.daily_batch.last_run && <> Last batch {ago(r.daily_batch.last_run.at)}: {num(r.daily_batch.last_run.approved ?? 0)} enrolled{r.daily_batch.last_run.email_only ? ` (${num(r.daily_batch.last_run.email_only)} email only)` : ''}.</>}
             {' '}Texts: {r.schedule.sms_steps.length} (days {r.schedule.sms_steps.map(s => s.day).join(', ')}). Emails: {r.schedule.email_touches}, every {r.schedule.email_every_days} days.
           </p>
           {r.program && <p className="sci-micro sci-muted" style={{ margin: '0 0 8px' }}>
@@ -60,6 +61,9 @@ export default function CampaignProgress() {
           <section className="sci-kpis four" aria-label="Roster">
             {GROUPS.map(([k, label, icon, tone, note]) => <Kpi key={k} icon={icon} tone={tone} value={ro[k] ?? 0} label={label} note={note} />)}
           </section>
+          {r.daily_batch.ready?.skipped && Object.keys(r.daily_batch.ready.skipped).length > 0 && (
+            <p className="sci-micro sci-muted" style={{ marginTop: 8 }}>Not picked by the daily batch (whole workspace): {Object.entries(r.daily_batch.ready.skipped).sort((x, y) => y[1] - x[1]).map(([k, v]) => `${v} ${k.toLowerCase()}`).join(' · ')}</p>
+          )}
           {ro.not_started > 0 && r.not_started_why && (
             <p className="sci-micro" style={{ marginTop: 8 }}>Not started: {Object.entries(r.not_started_why).map(([k, v]) => `${v} ${k.toLowerCase()}`).join(' · ')}</p>
           )}

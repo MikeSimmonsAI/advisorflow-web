@@ -88,7 +88,7 @@ def test_daily_batch_runs_on_weekends_and_never_past_6_pm(program, monkeypatch):
     p.daily_batch_days = None                                               # never chosen: every day
     db.commit()
     calls = []
-    monkeypatch.setattr(daily_batch, "pick", lambda db, prog, n: ["x%d" % i for i in range(n)])
+    monkeypatch.setattr(daily_batch, "pick_entries", lambda db, prog, n: [{"lead_id": "x%d" % i, "mode": "text_email"} for i in range(n)])
     monkeypatch.setattr(send_approval, "approve",
                         lambda db, prog, user, ids, **kw: calls.append((ids, kw)) or {"approved": len(ids)})
     assert daily_batch.run_for(db, p, SAT_10)["approved"] == 40             # Saturday is a sending day
@@ -329,7 +329,126 @@ def test_an_empty_daily_batch_day_is_recorded(program, monkeypatch):
     p = _prog(db, org)
     p.daily_batch_count, p.daily_batch_by, p.daily_batch_days = 40, admin.id, None
     db.commit()
-    monkeypatch.setattr(daily_batch, "pick", lambda db, prog, n: [])
+    monkeypatch.setattr(daily_batch, "pick_entries", lambda db, prog, n: [])
     assert daily_batch.run_for(db, p, SAT_10) == {"approved": 0, "picked": 0}
     row = db.query(AuditLogEntry).filter_by(action="program.daily_batch").order_by(AuditLogEntry.created_at.desc()).first()
     assert row is not None and '"picked": 0' in str(row.details)
+
+
+# ── standing authorization: the daily batch enrolls email-only families ─────
+
+def _pool_world(program, sample_advisor):
+    import json
+    from app.models.program_models import CampaignFamily
+    db, org = program["db"], program["org"]
+    p = _prog(db, org)
+    p.email_hold_providers = json.dumps(["yahoo", "outlook"])
+    spec = {   # source id: (phone, line type, email, extra)
+        "L001": ("2055550101", "mobile", "cell@example.com", {}),
+        "L002": ("2055550102", "voip", "voip@example.com", {}),
+        "L003": ("2055550103", "landline", "land@yahoo.com", {}),       # held provider, no textable phone
+        "L004": ("2055550104", "landline", "bounced@example.com", {"manual_flag": "bad_email"}),
+        "L005": ("2055550105", None, "unknown@example.com", {}),         # phone type unknown: never assumed cell
+        "L006": ("2055550106", "mobile", "dnc@example.com", {"status": "dnc"}),
+    }
+    leads = {}
+    for sid, (ph, lt, em, extra) in spec.items():
+        try:
+            l = _lead_for(db, org, sample_advisor, sid, phone=ph, email=em, first="F" + sid)
+        except Exception:                                  # fixture has fewer rows
+            continue
+        db.query(CadenceState).filter_by(lead_id=l.id).delete()
+        l.status, l.phone_line_type, l.is_test = extra.get("status", "new"), lt, False
+        l.manual_flag = extra.get("manual_flag")
+        leads[sid] = l
+    for f in db.query(CampaignFamily).filter_by(organization_id=org.id).all():
+        if f.key not in ("central_alabama_ms",):
+            f.is_active = True
+    db.commit()
+    return db, p, leads
+
+
+def test_the_batch_pool_routes_every_family_to_its_one_usable_channel(program, sample_advisor, monkeypatch):
+    db, p, leads = _pool_world(program, sample_advisor)
+    key = db.query(ProgramSourceRecord).filter_by(lead_id=leads["L001"].id).first().campaign_family
+    lt = {"L001": "mobile", "L002": "voip", "L003": "landline", "L004": "landline", "L005": None, "L006": "mobile"}
+    rows = [{"lead_id": l.id, "approved": False, "blocked": "Do not contact" if sid == "L006" else None,
+             "line_type": lt[sid], "campaign_key": key, "last_text_at": None, "last_email_at": None,
+             "status": "new", "location_id": "loc", "phone": l.phone, "source_lead_id": sid}
+            for sid, l in leads.items()]
+    rows.append({"lead_id": "already", "approved": False, "blocked": None, "line_type": "mobile", "campaign_key": key,
+                 "last_text_at": "2026-11-01T00:00:00Z", "last_email_at": None, "status": "new", "location_id": "loc",
+                 "phone": "12055550199"})
+    monkeypatch.setattr(send_approval, "list_contacts", lambda *a, **k: {"items": rows})
+    pool = daily_batch.pool(db, p)
+    mode = {e["lead_id"]: e["mode"] for e in pool["entries"]}
+    assert mode[leads["L001"].id] == "text_email"                           # cell + consent: text and email
+    assert mode[leads["L002"].id] == "email_only"                           # VoIP is never texted by the batch
+    assert leads["L003"].id not in mode                                     # landline + held provider email
+    assert leads["L004"].id not in mode                                     # bounced address suppressed
+    assert mode[leads["L005"].id] == "email_only"                           # unknown type: email, never a guess
+    assert leads["L006"].id not in mode and "already" not in mode           # DNC; already contacted
+    sk = pool["skipped"]
+    assert sk.get("Already contacted") == 1 and sk.get("Do not contact") == 1
+    assert any("email provider hold" in k for k in sk) and any("invalid or bounced" in k for k in sk)
+    assert not any("approv" in k.lower() for k in sk)                      # never "awaiting approval"
+    # a held provider lifted -> the same family becomes eligible with no other step
+    p.email_hold_providers = "[]"
+    db.commit()
+    assert leads["L003"].id in {e["lead_id"] for e in daily_batch.pool(db, p)["entries"]}
+
+
+def test_the_standing_batch_enrolls_email_only_families_without_a_click(program, sample_advisor):
+    from app.models.models import AuditLogEntry
+    db, p, leads = _pool_world(program, sample_advisor)
+    admin = program["admin"]
+    p.daily_batch_count, p.daily_batch_by, p.daily_batch_spacing, p.daily_batch_days = 40, admin.id, 10, None
+    p.daily_batch_last_date = None
+    db.commit()
+    res = daily_batch.run_for(db, p, SAT_10)
+    assert res["approved"] >= 2 and res.get("email_only", 0) >= 1
+    for sid in ("L002",):
+        if sid in leads:
+            recs = db.query(ProgramSourceRecord).filter_by(lead_id=leads[sid].id).all()
+            assert all(r.approved_to_send_at and r.send_mode == "email_only" for r in recs)
+            assert db.query(CadenceState).filter_by(lead_id=leads[sid].id).count() == 0   # no text journey
+    for sid in ("L003", "L004", "L006"):
+        if sid in leads:
+            assert not any(r.approved_to_send_at for r in
+                           db.query(ProgramSourceRecord).filter_by(lead_id=leads[sid].id).all())
+    log = db.query(AuditLogEntry).filter_by(action="program.daily_batch").order_by(AuditLogEntry.created_at.desc()).first()
+    assert "standing daily-batch approval" in str(log.details) and "email only" in str(log.details)
+    # again the same day: nothing more; next day: the same families are never picked twice
+    assert daily_batch.run_for(db, p, SAT_10 + timedelta(minutes=30)) is None
+    again = daily_batch.run_for(db, p, SUN_10)
+    assert again["picked"] == 0
+
+
+def test_the_batch_never_takes_more_than_its_daily_count(program, sample_advisor, monkeypatch):
+    db, p, leads = _pool_world(program, sample_advisor)
+    admin = program["admin"]
+    p.daily_batch_count, p.daily_batch_by, p.daily_batch_spacing, p.daily_batch_days = 1, admin.id, 10, None
+    p.daily_batch_last_date = None
+    db.commit()
+    res = daily_batch.run_for(db, p, SAT_10)
+    assert res["picked"] == 1 and res["approved"] <= 1
+
+
+def test_email_only_family_gets_its_email_journey_and_no_text(program, sample_advisor, monkeypatch):
+    """A VoIP family with a usable email, enrolled email-only by the standing
+    batch: the five-email journey runs; no text journey exists or goes."""
+    from tests.test_outreach_program import _fake_provider, _touch_ready
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch, source="L001",
+                                     email="voip@example.com")
+    db.query(CadenceState).filter_by(lead_id=lead.id).delete()
+    lead.status, lead.phone_line_type, lead.is_test = "new", "voip", False
+    db.commit()
+    p = _prog(db, org)
+    send_approval.approve(db, p, program["admin"], [lead.id], mode="email_only", start_at=SAT_10 - timedelta(hours=1))
+    assert db.query(CadenceState).filter_by(lead_id=lead.id).count() == 0
+    sent = []
+    with _fake_provider(sent), patch("app.services.sms_service.send_sms") as sms:
+        et.run(db, org.id, now=SAT_10)
+        et.run(db, org.id, now=SAT_10 + timedelta(minutes=10))             # a retry pass sends nothing more
+        cs.run_due_cadences(db, now=SAT_10)
+    assert len(sent) == 1 and sms.call_count == 0

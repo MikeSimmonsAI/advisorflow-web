@@ -85,38 +85,124 @@ def _start_time(prog: OutreachProgram) -> time:
         return time(9, 0)
 
 
-def pick(db: Session, prog: OutreachProgram, n: int) -> List[str]:
-    """Lead ids for the next n people, spread across locations."""
+TEXT_AND_EMAIL, EMAIL_ONLY = "text_email", "email_only"
+
+
+def _email_route_ok(prog, lead) -> Optional[str]:
+    """None when this family's email may carry the journey, else why not."""
+    from app.services.programs import email_touches
+    addr = (getattr(lead, "email", None) or "").strip()
+    if not addr:
+        return "No email address"
+    if getattr(lead, "allow_email", None) is False:
+        return "Email opt-out of record"
+    if (getattr(lead, "manual_flag", None) or "") == "bad_email":
+        return "Invalid or bounced email"
+    if email_touches.provider_hold_reason(prog, addr):
+        return "Email provider hold"
+    return None
+
+
+def pool(db: Session, prog: OutreachProgram) -> Dict:
+    """THE STANDING AUTHORIZATION'S POOL (owner, Nov 7): every real SCI family
+    the daily batch may enroll right now, with the channel it will use, and
+    every family left out with the exact reason. The owner switched the daily
+    batch on once ("DAILY <n>"); that standing approval covers every family
+    below - nobody is asked to approve them one by one.
+
+    In the pool: never contacted (no text, no email), status new, in a
+    campaign that is switched on, nothing blocking (STOP/DNC, holds, data /
+    location / duplicate review - send_approval.blocker), not a campaign with
+    its own started-journey workflow, and at least one usable channel:
+      * a CELL phone with an SMS consent of record -> text + email journey;
+      * otherwise a usable email (not opted out, not bounced, provider not on
+        hold) -> the email-only journey. VoIP, landline and unknown phone
+        types are never texted by the batch and never assumed to be cell.
+    """
+    from app.models.models import Lead as _Lead
+    from app.services import sms_programs, wholesale_sms
     from app.services.programs import send_approval as sa
+    from app.services.programs.campaigns import OWN_COPY_KEYS
     active = {k for (k,) in db.query(CampaignFamily.key).filter(
         CampaignFamily.organization_id == prog.organization_id, CampaignFamily.is_active.is_(True)).all()}
     rows = sa.list_contacts(db, prog, show="not_approved", limit=100000)["items"]
-    pool = [r for r in rows if not r["approved"] and not r["blocked"] and r["line_type"] == "mobile"
-            and r["campaign_key"] in active and not r["last_text_at"] and not r["last_email_at"]
-            and r["status"] == "new"]
-    # TEXTABLE MEANS CONSENT OF RECORD (Oct 16). The batch texts, so it only
-    # picks families whose number already has a usable SCI SMS consent; it
-    # never fills its quota with families the send gate would refuse.
-    from app.services import sms_programs, wholesale_sms
-    if sms_programs.is_sci_org(db, prog.organization_id):
+    sci = sms_programs.is_sci_org(db, prog.organization_id)
+    gone = ok = None
+    if sci:
         if sms_programs.auto_attest_at_send() and sms_programs.owner_holds_records():
-            # The owner's consent is filed at first send for every contact
-            # (SCI_AUTO_ATTEST_AT_SEND=on): only opted-out numbers are out.
             gone = sms_programs.opted_out_numbers(db, prog.organization_id)
-            pool = [r for r in pool if wholesale_sms.normalize_e164(r.get("phone")) not in gone]
         else:
             ok = sms_programs.consented_numbers(db, prog.organization_id)
-            pool = [r for r in pool if wholesale_sms.normalize_e164(r.get("phone")) in ok]
+    leads = {}
+    ids = [r["lead_id"] for r in rows]
+    for i in range(0, len(ids), 500):
+        for l in db.query(_Lead).filter(_Lead.id.in_(ids[i:i + 500])).all():
+            leads[l.id] = l
+    entries, skipped = [], {}
+
+    def skip(why):
+        skipped[why] = skipped.get(why, 0) + 1
+    for r in rows:
+        if r["approved"]:
+            continue
+        if r["last_text_at"] or r["last_email_at"]:
+            skip("Already contacted")
+            continue
+        if r["blocked"]:
+            skip(r["blocked"])
+            continue
+        if r["campaign_key"] not in active:
+            skip("Campaign switched off")
+            continue
+        if r["campaign_key"] in OWN_COPY_KEYS:
+            skip("Own journey - started from its campaign")
+            continue
+        if r["status"] != "new":
+            skip("Status is %s" % r["status"])
+            continue
+        lead = leads.get(r["lead_id"])
+        e164 = wholesale_sms.normalize_e164(r.get("phone"))
+        consent = True
+        if sci:
+            consent = (e164 not in gone) if gone is not None else (e164 in (ok or set()))
+        if r["line_type"] == "mobile" and consent:
+            entries.append({"lead_id": r["lead_id"], "location_id": r["location_id"], "mode": TEXT_AND_EMAIL,
+                            "why": "cell phone with SMS consent"})
+            continue
+        no_email = _email_route_ok(prog, lead) if lead is not None else "No email address"
+        if no_email is None:
+            phone_why = ("cell phone without SMS consent of record" if r["line_type"] == "mobile"
+                         else "%s phone" % (r["line_type"] or "unknown") if r.get("phone") else "no phone")
+            entries.append({"lead_id": r["lead_id"], "location_id": r["location_id"], "mode": EMAIL_ONLY,
+                            "why": "usable email; %s - email only" % phone_why})
+            continue
+        if r["line_type"] == "mobile":
+            skip("No SMS consent of record and %s" % no_email.lower())
+        elif r["line_type"] in ("voip", "landline"):
+            skip("%s phone and %s" % (r["line_type"].title(), no_email.lower()))
+        else:
+            skip("No textable phone and %s" % no_email.lower())
+    return {"entries": entries, "skipped": skipped,
+            "text_email": sum(1 for e in entries if e["mode"] == TEXT_AND_EMAIL),
+            "email_only": sum(1 for e in entries if e["mode"] == EMAIL_ONLY)}
+
+
+def pick(db: Session, prog: OutreachProgram, n: int) -> List[str]:
+    """Lead ids for the next n people, spread across locations."""
+    return [e["lead_id"] for e in pick_entries(db, prog, n)]
+
+
+def pick_entries(db: Session, prog: OutreachProgram, n: int) -> List[Dict]:
     by_loc: Dict[str, list] = {}
-    for r in pool:
-        by_loc.setdefault(r["location_id"] or "", []).append(r["lead_id"])
-    out: List[str] = []
+    for e in pool(db, prog)["entries"]:
+        by_loc.setdefault(e["location_id"] or "", []).append(e)
+    out: List[Dict] = []
     i = 0
     while len(out) < n:
         added = False
-        for ids in by_loc.values():
-            if i < len(ids):
-                out.append(ids[i])
+        for es in by_loc.values():
+            if i < len(es):
+                out.append(es[i])
                 added = True
                 if len(out) >= n:
                     break
@@ -128,11 +214,18 @@ def pick(db: Session, prog: OutreachProgram, n: int) -> List[str]:
 
 def ready_now(db: Session, prog: OutreachProgram) -> Optional[int]:
     """How many families the batch could pick right now (same rules as pick)."""
+    p = ready_detail(db, prog)
+    return None if p is None else p["total"]
+
+
+def ready_detail(db: Session, prog: OutreachProgram) -> Optional[Dict]:
     try:
-        return len(pick(db, prog, MAX_PER_DAY))
+        p = pool(db, prog)
     except Exception:                                    # noqa: BLE001 - a count, never a blocker
         log.exception("daily batch ready count failed for %s", prog.id)
         return None
+    return {"total": len(p["entries"]), "text_email": p["text_email"], "email_only": p["email_only"],
+            "skipped": p["skipped"]}
 
 
 def status(prog: OutreachProgram) -> Dict:
@@ -170,26 +263,45 @@ def run_for(db: Session, prog: OutreachProgram, now: Optional[datetime] = None) 
     spacing = max(1, min(240, int(prog.daily_batch_spacing or 8)))
     # Never more than fits before the 6 PM close (a late start shrinks it).
     n = min(n, fits_today(local, spacing))
-    ids = pick(db, prog, n) if n > 0 else []
-    if not ids:
+    entries = pick_entries(db, prog, n) if n > 0 else []
+    if not entries:
         # Nov 7: an empty day is recorded too, so the owner can see the batch
         # RAN and found nobody ready - not that it silently did nothing.
         from app.routers.audit_log_router import log_action
+        detail = ready_detail(db, prog) or {}
         log_action(db, prog.organization_id, user.id, action="program.daily_batch",
                    target_type="outreach_program", target_id=prog.id,
                    details={"date": today, "picked": 0, "approved": 0, "fits": n,
-                            "note": "nobody ready: no never-contacted cell phone in an active campaign"})
+                            "note": "nobody ready", "skipped": detail.get("skipped") or {}})
         db.commit()
         return {"approved": 0, "picked": 0}
     utc_now = (now or datetime.utcnow())
     start_at = utc_now + timedelta(minutes=2)
-    r = sa.approve(db, prog, user, ids, mode="text_email", start_at=start_at, spacing_minutes=spacing)
+    # One drip for the day: texts-and-email families first, then email-only
+    # families, `spacing` apart - same standing approval, same audit entry.
+    text_ids = [e["lead_id"] for e in entries if e.get("mode", TEXT_AND_EMAIL) == TEXT_AND_EMAIL]
+    email_ids = [e["lead_id"] for e in entries if e.get("mode") == EMAIL_ONLY]
+    approved, texting, emailing = 0, 0, 0
+    if text_ids:
+        r = sa.approve(db, prog, user, text_ids, mode=TEXT_AND_EMAIL, start_at=start_at, spacing_minutes=spacing)
+        approved += r.get("approved", 0)
+        texting = r.get("approved", 0)
+    if email_ids:
+        r2 = sa.approve(db, prog, user, email_ids, mode=EMAIL_ONLY,
+                        start_at=start_at + timedelta(minutes=spacing * len(text_ids)), spacing_minutes=spacing)
+        approved += r2.get("approved", 0)
+        emailing = r2.get("approved", 0)
     from app.routers.audit_log_router import log_action
     log_action(db, prog.organization_id, user.id, action="program.daily_batch",
                target_type="outreach_program", target_id=prog.id,
-               details={"date": today, "picked": len(ids), "approved": r.get("approved")})
+               details={"date": today, "picked": len(entries), "approved": approved,
+                        "text_email": texting, "email_only": emailing,
+                        "authority": "standing daily-batch approval",
+                        "selected": [{"lead_id": e["lead_id"], "mode": e.get("mode", TEXT_AND_EMAIL),
+                                      "why": e.get("why")} for e in entries]})
     db.commit()
-    return {"approved": r.get("approved", 0), "picked": len(ids), "date": today}
+    return {"approved": approved, "picked": len(entries), "date": today,
+            **({"email_only": emailing} if email_ids else {})}
 
 
 def run(db: Session, now: Optional[datetime] = None) -> Dict:

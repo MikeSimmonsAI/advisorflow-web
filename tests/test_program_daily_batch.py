@@ -39,7 +39,7 @@ def test_runs_once_a_day_after_start_on_weekdays(db_session, sample_org, monkeyp
     p.daily_batch_days = "12345"                       # a manager chose weekdays only: still honoured
     db_session.commit()
     calls = []
-    monkeypatch.setattr(daily_batch, "pick", lambda db, prog, n: ["a", "b", "c"][:n])
+    monkeypatch.setattr(daily_batch, "pick_entries", lambda db, prog, n: [{"lead_id": x, "mode": "text_email"} for x in ["a", "b", "c"][:n]])
     monkeypatch.setattr(send_approval, "approve",
                         lambda db, prog, user, ids, **kw: calls.append((user.id, ids, kw)) or {"approved": len(ids)})
     assert daily_batch.run_for(db_session, p, WED_8AM) is None          # before 9:00 Central

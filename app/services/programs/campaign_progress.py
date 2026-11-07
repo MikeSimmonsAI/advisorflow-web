@@ -69,6 +69,23 @@ def _next_batch_day(prog, now) -> Optional[str]:
         return None
 
 
+def _last_batch(db: Session, prog: OutreachProgram) -> Optional[Dict]:
+    """The newest daily-batch run in the audit log: when, how many, which channels."""
+    try:
+        import json as _json
+        from app.models.models import AuditLogEntry
+        row = (db.query(AuditLogEntry).filter(AuditLogEntry.organization_id == prog.organization_id,
+                                              AuditLogEntry.action == "program.daily_batch")
+               .order_by(AuditLogEntry.created_at.desc()).first())
+        if row is None:
+            return None
+        d = row.details if isinstance(row.details, dict) else _json.loads(row.details or "{}")
+        return {"at": _iso(row.created_at), "picked": d.get("picked"), "approved": d.get("approved"),
+                "text_email": d.get("text_email"), "email_only": d.get("email_only"), "skipped": d.get("skipped")}
+    except Exception:                                    # noqa: BLE001
+        return None
+
+
 def program_summary(db: Session, prog: OutreachProgram) -> Dict:
     """The whole workspace in rows and real families: test / simulation
     records left out, rows with no campaign, rows per campaign."""
@@ -307,6 +324,7 @@ def report(db: Session, prog: OutreachProgram, family_key: str, now: Optional[da
                        "minutes_ago": round(age, 1) if age is not None else None, "failed_24h": int(bad),
                        "healthy": bool(last) and age is not None and age < 20
                                   and getattr(last, "status", None) != "error"}
+    _ready = daily_batch.ready_detail(db, prog)
     ahead_days = [(local_today + timedelta(days=i)).isoformat() for i in range(DAYS_AHEAD)]
     return {
         "campaign": {"key": fam.key, "name": fam.name, "active": bool(fam.is_active), "own_journey": own_copy},
@@ -331,7 +349,8 @@ def report(db: Session, prog: OutreachProgram, family_key: str, now: Optional[da
                      "email_touches": email_max, "email_every_days": gap_days},
         "window": send_window.describe(),
         "daily_batch": dict(daily_batch.status(prog), days_label=send_window.describe(daily_batch.days_of(prog))["days_label"],
-                            ready_now=daily_batch.ready_now(db, prog), next_day=_next_batch_day(prog, now)),
+                            ready=_ready, ready_now=(_ready or {}).get("total"), next_day=_next_batch_day(prog, now),
+                            last_run=_last_batch(db, prog)),
         "program": program_summary(db, prog),
         "scheduler": sched,
     }
