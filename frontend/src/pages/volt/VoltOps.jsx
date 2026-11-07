@@ -16,14 +16,15 @@ import './volt.css'
 const STAGES = [['draft', 'Draft'], ['submitted', 'Submitted'], ['needs_update', 'Needs update'], ['approved', 'Approved'], ['started', 'Started']]
 const STAGE = Object.fromEntries(STAGES)
 const REACHED = [['created', 'Application started'], ['submitted', 'Submitted'], ['approved', 'Approved'], ['started', 'Started']]
-const ANSWER = { yes: 'Yes', no: 'No', details: 'Would like details', explain: 'It depends', licensed: 'Licensed', in_progress: 'In progress', not_licensed: 'Not currently licensed' }
+const ANSWER = { yes: 'Yes', no: 'No', details: 'Would like details', explain: 'It depends' }
+const OUTREACH = { yes: 'Outreach experience', some: 'Some outreach experience', no: 'New to outreach' }
 const TIME_AWAY = { '1_2_weeks': '1–2 weeks', '3_4_weeks': '3–4 weeks', '1_3_months': '1–3 months', '3_plus_months': '3+ months', discuss: 'Wants to discuss' }
 const D2D = { yes: 'Door-to-door', some: 'Some field sales', no: 'New' }
 
 function travelCell(r) {
   if (r.time_away) return `Away: ${TIME_AWAY[r.time_away] || r.time_away}${r.d2d_experience ? ` · ${D2D[r.d2d_experience] || r.d2d_experience}` : ''}`
   if (r.willing_travel) return `Travel: ${ANSWER[r.willing_travel] || r.willing_travel}`
-  if (r.license_status) return `License: ${ANSWER[r.license_status] || r.license_status}`
+  if (r.outreach_experience) return `${OUTREACH[r.outreach_experience] || r.outreach_experience}${r.languages ? ` · ${r.languages}` : ''}`
   return '—'
 }
 
@@ -215,7 +216,7 @@ function ReviewQueue({ orgId, ops }) {
       <p className="v-small v-muted" data-count={list?.count}>{list ? `${list.count} application${list.count === 1 ? '' : 's'} · dates filter on "${list.reached_label}". The CSV is exactly this list.` : 'Loading…'}</p>
       <div className="v-panel v-scroll">
         <table className="v-table" data-table="queue">
-          <thead><tr><th>Applicant</th><th>Project</th><th>Stage</th><th>Location</th><th>Travel / experience / license</th><th>Project recruiter</th><th>Original recruiter</th><th>Updated</th><th /></tr></thead>
+          <thead><tr><th>Applicant</th><th>Project</th><th>Stage</th><th>Location</th><th>Travel / experience</th><th>Project recruiter</th><th>Original recruiter</th><th>Updated</th><th /></tr></thead>
           <tbody>
             {list?.items.length === 0 && <tr><td colSpan="9" className="v-muted">No matching applications.</td></tr>}
             {list?.items.map((r) => (

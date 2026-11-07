@@ -31,9 +31,9 @@ PLATFORM_SLUG = "evosyspro"
 _EXPERIENCE = [{"key": "experience_summary", "label": "Experience summary"}]
 
 PROJECTS = [
-    {"key": "aca", "name": "ACA Health Insurance", "short_name": "ACA Health Insurance",
-     "summary": "Health insurance outreach", "icon": "\u271a",
-     "question": "What experience do you have with ACA health insurance?",
+    {"key": "aca", "name": "ACA Healthcare Outreach", "short_name": "ACA Healthcare Outreach",
+     "summary": "Healthcare outreach and enrollment assistance", "icon": "\u271a",
+     "question": "What community outreach, customer service or resource-access experience do you have?",
      "status": "open", "sort_order": 10, "required_docs": []},
     {"key": "fiber", "name": "T-Mobile D2D Fiber Sales", "short_name": "T-Mobile D2D Fiber",
      "summary": "Traveling door-to-door fiber sales", "icon": "\u21af",
@@ -53,9 +53,23 @@ PROJECTS = [
 # the exact earlier default - a value staff edited is never overwritten - and
 # the row (id, key, applications, links, reports) is untouched otherwise.
 _OLD_DOCS = [{"key": "experience_summary", "label": "Experience summary"}]
+
+
+class _ANY(tuple):
+    """Any of these earlier defaults (for a field corrected more than once)."""
+    def __new__(cls, *values):
+        return super().__new__(cls, values)
+
+
 CORRECTIONS = {
-    "aca": {"name": ("ACA (Obamacare) Health Insurance", "ACA Health Insurance"),
-            "short_name": ("ACA health insurance", "ACA Health Insurance"),
+    # ACA Healthcare Outreach (Mike, 2026-11-06): outreach, not insurance
+    # sales. A field moves from ANY earlier default (oldest first) to the new
+    # text; a staff-edited value matches none of them and is left alone.
+    "aca": {"name": (_ANY("ACA (Obamacare) Health Insurance", "ACA Health Insurance"), "ACA Healthcare Outreach"),
+            "short_name": (_ANY("ACA health insurance", "ACA Health Insurance"), "ACA Healthcare Outreach"),
+            "summary": (_ANY("Health insurance outreach"), "Healthcare outreach and enrollment assistance"),
+            "question": (_ANY("What experience do you have with ACA health insurance?"),
+                         "What community outreach, customer service or resource-access experience do you have?"),
             "required_docs": (_OLD_DOCS, [])},
     "fiber": {"name": ("Fiber Internet Outreach", "T-Mobile D2D Fiber Sales"),
               "short_name": ("Fiber internet", "T-Mobile D2D Fiber"),
@@ -81,14 +95,14 @@ def _apply_corrections(db: Session, org_id: str) -> list:
                     continue
                 setattr(p, field, json.dumps(new))
             else:
-                if cur != old:
+                if (cur not in old) if isinstance(old, _ANY) else (cur != old):
                     continue
                 setattr(p, field, new)
             db.add(VoltAuditEvent(organization_id=org_id, entity_type="project", entity_id=p.id,
                                   action="project_corrected", field=field,
-                                  old_value=json.dumps(old) if field == "required_docs" else old,
+                                  old_value=json.dumps(old) if field == "required_docs" else cur,
                                   new_value=json.dumps(new) if field == "required_docs" else new,
-                                  reason="Approved naming and application update (2026-11-06)"))
+                                  reason="Approved naming and application update (2026-11-06)"))  # noqa: E501
             changed.append("%s.%s" % (p.key, field))
     return changed
 
