@@ -22,7 +22,7 @@ at submit time, so a returning draft applicant is shown exactly what the newer
 form still needs, and submitted applications keep their historical status.
 
 Nothing here decides eligibility. Travel, door-to-door comfort, transportation
-and license status are answers for staff to review; no answer rejects anyone.
+and outreach answers are for staff to review; no answer rejects anyone.
 """
 from __future__ import annotations
 
@@ -118,15 +118,29 @@ FIBER_QUESTIONS: List[Dict[str, Any]] = [
 
 PROJECT_QUESTIONS: Dict[str, List[Dict[str, Any]]] = {
     "fiber": FIBER_QUESTIONS,
+    # ACA Healthcare Outreach (Mike, 2026-11-06): outreach and enrollment
+    # assistance, NOT insurance sales; no insurance license is needed. The
+    # first ACA form's license questions stay below as legacy, staff-only
+    # history: never asked, never required, never shown to applicants.
     "aca": [
+        {"key": "outreach_experience", "type": "choice", "required": True,
+         "label": "Do you have experience with community outreach, customer service or helping people access resources?",
+         "options": [["yes", "Yes"], ["some", "Some"], ["no", "Not yet"]]},
         {"key": "relevant_experience", "type": "text", "required": False,
-         "label": "Relevant insurance, enrollment, sales or customer service experience"},
-        {"key": "license_status", "label": "Current health insurance license status", "type": "choice",
-         "options": [["licensed", "Licensed"], ["in_progress", "In progress"], ["not_licensed", "Not currently licensed"]],
-         "required": True},
-        {"key": "licensed_states", "type": "text", "required": False, "required_if": ["license_status", "licensed"],
-         "label": "States where you are licensed"},
-        {"key": "license_number", "type": "text", "required": False, "label": "License number"},
+         "label": "Tell us about that experience",
+         "hint": "Optional. No experience yet? That's fine; leave this blank or tell us what interests you."},
+        {"key": "comfortable_explaining", "type": "choice", "required": True,
+         "label": "Are you comfortable speaking with people and explaining next steps?",
+         "options": [["yes", "Yes"], ["somewhat", "Somewhat"], ["learn", "I'd like to learn"]]},
+        {"key": "languages", "type": "text", "required": True, "label": "What languages do you speak?",
+         "hint": "For example: English, Spanish."},
+        {"key": "license_status", "legacy": True, "staff_only": True, "type": "choice", "required": False,
+         "label": "Health insurance license status (earlier ACA form, no longer asked)",
+         "options": [["licensed", "Licensed"], ["in_progress", "In progress"], ["not_licensed", "Not currently licensed"]]},
+        {"key": "licensed_states", "legacy": True, "staff_only": True, "type": "text", "required": False,
+         "label": "Licensed states (earlier ACA form, no longer asked)"},
+        {"key": "license_number", "legacy": True, "staff_only": True, "type": "text", "required": False,
+         "label": "License number (earlier ACA form, no longer asked)"},
     ],
 }
 

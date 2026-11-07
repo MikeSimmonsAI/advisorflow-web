@@ -50,7 +50,7 @@ export function Modal({ title, onClose, children, labelId = 'v-modal-title', wid
 }
 
 /** Apply Now: pick one of the open projects, then that project's application begins. */
-const PICK_NOTE = { aca: 'Health insurance', fiber: 'Traveling · Door-to-door sales' }
+const PICK_NOTE = { aca: 'Healthcare outreach · No license required', fiber: 'Traveling · Door-to-door sales' }
 
 export function ApplyDialog({ projects, onPick, onClose, onTalent }) {
   return (

@@ -390,9 +390,14 @@ def next_action(db, prog, rep, app) -> Dict[str, Any]:
 def application_dict(db, prog, rep, app, *, for_staff: bool = False) -> Dict[str, Any]:
     project = db.get(VoltProject, app.project_id)
     referrer = db.get(VoltRep, app.referrer_serial) if app.referrer_serial else None
+    answers = _answers(app)
+    if not for_staff:
+        # History only staff see (the first ACA form's license answers).
+        hidden = {q["key"] for q in _questions(project) if q.get("staff_only")}
+        answers = {k: v for k, v in answers.items() if k not in hidden}
     out = {"id": app.id, "project": C.project_dict(project) if project else None, "status": app.status,
-           "status_label": C.STATUS_LABELS.get(app.status, app.status), "answers": _answers(app),
-           "questions": _questions(project),
+           "status_label": C.STATUS_LABELS.get(app.status, app.status), "answers": answers,
+           "questions": [q for q in _questions(project) if for_staff or not q.get("staff_only")],
            "sections": _hiring().sections_for(project), "profile_fields": _hiring().profile_fields_for(project),
            "return_reason": app.return_reason, "referrer": C.public_rep(referrer),
            "referral_source": app.referral_source, "referral_confirmed_at": C.iso(app.referral_confirmed_at),

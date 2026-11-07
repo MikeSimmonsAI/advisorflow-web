@@ -195,7 +195,9 @@ def rows(db: Session, org_id: str, f: Dict[str, Any], limit: Optional[int] = Non
                     "drivers_license": ans.get("drivers_license"), "smartphone": ans.get("smartphone"),
                     "d2d_experience": ans.get("d2d_experience"), "d2d_duration": ans.get("d2d_duration"),
                     "homeowner_comfort": ans.get("homeowner_comfort"), "training": ans.get("training"),
-                    "commitment": ans.get("commitment")})
+                    "commitment": ans.get("commitment"),
+                    "outreach_experience": ans.get("outreach_experience"),
+                    "comfortable_explaining": ans.get("comfortable_explaining"), "languages": ans.get("languages")})
     return out
 
 
@@ -217,10 +219,16 @@ def _experience_match(value: str, ans: Dict[str, Any], hs: Dict[str, Any]) -> bo
     d2d = ans.get("d2d_experience")
     if value == "d2d":
         return d2d == "yes"
+    outreach = ans.get("outreach_experience")
     if value == "has":
-        return d2d in ("yes", "some") or bool(hs.get("has_experience") or ans.get("relevant_experience"))
-    # "none": the Fiber answer when there is one, otherwise the person's file.
-    return d2d == "no" if d2d else bool(hs.get("no_experience"))
+        return (d2d in ("yes", "some") or outreach in ("yes", "some")
+                or bool(hs.get("has_experience") or ans.get("relevant_experience")))
+    # "none": the project's own answer when there is one, otherwise the file.
+    if d2d:
+        return d2d == "no"
+    if outreach:
+        return outreach == "no"
+    return bool(hs.get("no_experience"))
 
 
 def _label(key: str, value) -> str:
@@ -249,10 +257,12 @@ def csv_text(db: Session, org_id: str, f: Dict[str, Any]) -> str:
                 "Original recruiter ID", "Original recruiter", "Project recruiter ID", "Project recruiter",
                 "City", "State", "Earliest start", "Availability", "Jobs listed", "No previous work experience",
                 "Willing to travel (earlier Fiber form)", "Comfortable with door-to-door (earlier Fiber form)",
-                "Reliable transportation", "License status",
+                "Reliable transportation",
                 "Earliest departure", "Time away", "Driver's license", "Smartphone and data",
                 "Door-to-door experience", "Time selling", "Comfort approaching homeowners", "Training and role-play (earlier Fiber form)",
                 "Travel role commitment",
+                "Outreach / customer service experience", "Comfortable explaining next steps", "Languages",
+                "License status (earlier ACA form, no longer asked)",
                 "Application started (UTC)", "Submitted (UTC)", "Approved (UTC)", "Started (UTC)"])
     for r in rows(db, org_id, f):
         o, p = r["original_recruiter"] or {}, r["project_recruiter"] or {}
@@ -262,7 +272,6 @@ def csv_text(db: Session, org_id: str, f: Dict[str, Any]) -> str:
                                         r["city"], r["state"], r["earliest_start"], r["availability"],
                                         r["work_history_count"], "Yes" if r["no_experience"] else "",
                                         r["willing_travel"], r["comfortable_d2d"], r["transportation"],
-                                        r["license_status"],
                                         r["earliest_departure"], _label("time_away", r["time_away"]),
                                         _label("drivers_license", r["drivers_license"]),
                                         _label("smartphone", r["smartphone"]),
@@ -270,6 +279,10 @@ def csv_text(db: Session, org_id: str, f: Dict[str, Any]) -> str:
                                         _label("d2d_duration", r["d2d_duration"]),
                                         _label("homeowner_comfort", r["homeowner_comfort"]),
                                         _label("training", r["training"]),
-                                        "Yes" if r["commitment"] == "yes" else "", r["created_at"],
+                                        "Yes" if r["commitment"] == "yes" else "",
+                                        _label("outreach_experience", r["outreach_experience"]),
+                                        _label("comfortable_explaining", r["comfortable_explaining"]),
+                                        r["languages"], _label("license_status", r["license_status"]),
+                                        r["created_at"],
                                         r["submitted_at"], r["approved_at"], r["started_at"])])
     return buf.getvalue()

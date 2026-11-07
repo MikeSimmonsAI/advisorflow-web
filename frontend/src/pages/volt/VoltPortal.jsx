@@ -298,8 +298,11 @@ function Home({ portal, signedIn, onApply, onTalent }) {
 
 // ── Homepage project cards (approved demo copy) ─────────────────────────────
 const CARD = {
-  aca: { short: 'ACA', line: 'Connect with people. Build your skills.', text: 'Bring your sales, enrollment, or customer service experience to a health insurance opportunity.',
-    facts: ['Health insurance', 'Experience welcome'] },
+  // ACA Healthcare Outreach (Mike, 2026-11-06): outreach and enrollment
+  // assistance, not insurance sales; no insurance license required.
+  aca: { short: 'ACA', line: 'Connect people with coverage. No license required.',
+    text: 'Help connect eligible people with ACA health coverage and guide them toward enrollment assistance. No insurance license required for this outreach role.',
+    facts: ['Healthcare outreach', 'No license required'] },
   fiber: { short: 'Fiber', line: 'Door-to-door. On the road. Room to grow.', text: 'A traveling door-to-door fiber sales opportunity. Tell us where you’re based and when you can travel.',
     facts: ['Door-to-door sales', 'Traveling gig'] },
 }
@@ -378,7 +381,7 @@ function VoltValues() {
 }
 
 const PROJECT_DETAIL = {
-  aca: 'Outreach for ACA health insurance. Tell us about your insurance, enrollment, sales or customer service experience and your license status; our team reviews every application.',
+  aca: 'Help connect eligible people with ACA health coverage and guide them toward enrollment assistance. No insurance license required for this outreach role; our team reviews every application.',
   fiber: 'A traveling door-to-door fiber sales opportunity. The application asks about travel readiness, door-to-door experience and coachability; our team reviews every application.',
 }
 
@@ -462,31 +465,34 @@ function FiberOpportunity({ p, onTalent }) {
 }
 
 function AcaOpportunity({ p, onTalent }) {
+  // Outreach, not sales (Mike, 2026-11-06). Accurate about coverage: no
+  // promise of free care; eligibility, plans and costs vary. Outreach workers
+  // are not described as licensed or certified enrollment assisters.
   return (
     <div className="v-opp" data-opportunity="aca">
-      <ExploreHero p={p} eyebrow="ACA Health Insurance"
-        title={<>Build a career.<br /><span className="v-red">Help people<br />understand coverage.</span></>}
-        text="Bring your ambition to health insurance sales. Develop the product knowledge, communication, and follow-through that support informed customer decisions."
-        applyLabel="Apply for ACA →" />
+      <ExploreHero p={p} eyebrow="ACA Healthcare Outreach"
+        title={<>Connect people<br /><span className="v-red">with coverage.</span></>}
+        text="Help connect eligible people with ACA health coverage and guide them toward enrollment assistance. No insurance license required for this outreach role."
+        applyLabel="Apply for ACA Outreach →" />
       <div className="v-page">
         <div className="v-section-head v-section-head--stack">
-          <h2>Explore ACA with VOLT.</h2>
-          <p className="v-muted">A professional sales opportunity built around knowledge, integrity, and consistent execution.</p>
+          <h2>Explore ACA Healthcare Outreach with VOLT.</h2>
+          <p className="v-muted">Community outreach built around clear conversations, accurate information and real follow-through.</p>
         </div>
-        <Pillar id="work" eyebrow="The work" title="Listen closely. Explain clearly. Follow through.">
-          <p>Help people understand available health insurance options. Learn to ask useful questions, explain coverage and enrollment steps accurately, and keep organized records of every conversation.</p>
-          <p className="v-muted">Your recruiter will explain the specific role, licensing expectations, available markets, and onboarding process.</p>
+        <Pillar id="work" eyebrow="The work" title="Reach out. Explain next steps. Connect people with help.">
+          <p>Help eligible individuals explore health coverage options, including $0-premium plans where available. Share accurate information, answer general questions about next steps, and connect people with enrollment assistance.</p>
+          <p className="v-muted">Eligibility, plan availability and costs vary by person and location. This is an outreach role: you don't sell insurance, recommend plans or complete enrollments.</p>
         </Pillar>
-        <Pillar id="development" eyebrow="Leadership & development" title="Build your expertise with purpose.">
-          <p>Product knowledge and clear communication belong together. Our focus is professional development, direct feedback, responsible selling, and the skills to build greater independence.</p>
+        <Pillar id="development" eyebrow="Leadership & development" title="Grow your skills with a driven team.">
+          <p>Learn to start conversations, listen, explain next steps clearly and keep accurate records, with direct feedback from leadership and the people working beside you.</p>
         </Pillar>
-        <Pillar id="who" eyebrow="Who should apply" title={<>Bring your experience.<br />Or your commitment to learn.</>}>
-          <p>Tell us about your insurance, sales, enrollment, or customer service background. Share your current license status so a recruiter can discuss the appropriate next steps with you.</p>
+        <Pillar id="who" eyebrow="Who should apply" title={<>No insurance license required.<br />Bring your people skills.</>}>
+          <p>Community outreach, customer service or experience helping people access resources helps, and so does speaking more than one language. No experience yet? Tell us why this work interests you.</p>
         </Pillar>
         <VoltValues />
-        <ExploreClose p={p} onTalent={onTalent} applyLabel="Apply for ACA →"
+        <ExploreClose p={p} onTalent={onTalent} applyLabel="Apply for ACA Outreach →"
           title={{ h2: 'Take the next step.' }}
-          text={['Apply to discuss the ACA opportunity, or leave your details for future projects.']} />
+          text={['Apply for ACA Healthcare Outreach, or leave your details for future projects.']} />
         <Link to="/volt" className="v-btn v-btn--line v-btn--sm">← All opportunities</Link>
       </div>
     </div>

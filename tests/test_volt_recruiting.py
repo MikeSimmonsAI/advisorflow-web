@@ -101,7 +101,8 @@ HIRING = {"city": "Dallas", "state": "TX", "zip_code": "75201", "preferred_regio
           "work_history": [{"employer": "Example Retail", "title": "Sales associate", "start": "2023-01",
                             "end": "", "current": True, "summary": "Opened accounts."}],
           "no_experience": False, "relevant_experience": "Two years of community outreach.", "additional_info": ""}
-ANSWERS = {"aca": {"relevant_experience": "Customer service", "license_status": "not_licensed"},
+ANSWERS = {"aca": {"outreach_experience": "yes", "relevant_experience": "Customer service",
+                   "comfortable_explaining": "yes", "languages": "English, Spanish"},
            "fiber": {"earliest_departure": "2026-12-01", "time_away": "1_3_months", "drivers_license": "yes",
                      "transportation": "yes", "smartphone": "yes", "d2d_experience": "yes",
                      "products_sold": "Fiber internet", "d2d_duration": "1_2y", "recent_company": "Example Door Co",
@@ -128,7 +129,8 @@ def _complete(c, tok, app_id):
 
 def test_public_portal_two_open_projects_and_midterms_closed(volt):
     r = volt["c"].get("/volt/public/%s" % SLUG).json()
-    assert [p["name"] for p in r["open_projects"]] == ["ACA Health Insurance", "T-Mobile D2D Fiber Sales"]
+    assert [p["name"] for p in r["open_projects"]] == ["ACA Healthcare Outreach", "T-Mobile D2D Fiber Sales"]
+    assert "insurance" not in json.dumps(r["open_projects"][0]).lower()
     assert "Obamacare" not in json.dumps(r)
     assert [p["name"] for p in r["past_projects"]] == ["Midterms Flyer Distribution"]
     assert r["past_projects"][0]["recruiting"] is False
@@ -709,7 +711,8 @@ def test_corrections_rename_existing_rows_keep_ids_and_never_clobber_staff_edits
     db.refresh(aca)
     db.refresh(fib)
     assert (aca.id, fib.id) == ids
-    assert aca.name == "ACA Health Insurance" and "Obamacare" not in (aca.short_name + aca.name)
+    assert aca.name == "ACA Healthcare Outreach" and aca.short_name == "ACA Healthcare Outreach"
+    assert "insurance" not in aca.question.lower()
     assert fib.name == "T-Mobile D2D Fiber Sales" and fib.short_name == "T-Mobile D2D Fiber"
     assert fib.summary == "STAFF EDITED SUMMARY"            # staff edit untouched
     assert json.loads(aca.required_docs) == [] and json.loads(fib.required_docs) == []
@@ -746,15 +749,21 @@ def test_aca_submit_with_no_experience_and_no_resume(volt):
     assert r.status_code == 422
     miss = r.json()["detail"]["missing"]
     assert any("No previous work experience" in m for m in miss) and "Profile: availability" in miss
-    assert any(m.startswith("Answer: ") and "license status" in m for m in miss)
+    assert not any("licens" in m.lower() or "insurance" in m.lower() for m in miss)
+    assert "Answer: Do you have experience with community outreach, customer service or helping people access resources?" in miss
+    assert "Answer: What languages do you speak?" in miss
     body = dict(HIRING, work_history=[], no_experience=True)
     assert c.put("/volt/rep/%s/hiring-profile" % SLUG, headers=tok, json=body).status_code == 200
     assert c.put("/volt/rep/%s/applications/%s/answers" % (SLUG, app_id), headers=tok,
-                 json={"answers": {"license_status": "maybe"}}).status_code == 422          # not an option
+                 json={"answers": {"outreach_experience": "maybe"}}).status_code == 422      # not an option
+    # The no-experience path: "Not yet", the details left blank, no license.
     assert c.put("/volt/rep/%s/applications/%s/answers" % (SLUG, app_id), headers=tok,
-                 json={"answers": {"license_status": "not_licensed", "not_a_question": "x"}}).status_code == 200
+                 json={"answers": {"outreach_experience": "no", "comfortable_explaining": "learn", "languages": "English",
+                                   "not_a_question": "x", "license_status": "licensed"}}).status_code == 200
     a = c.get("/volt/rep/%s/applications/%s" % (SLUG, app_id), headers=tok).json()
     assert "not_a_question" not in a["answers"] and a["missing"] == []
+    assert "license_status" not in a["answers"]                     # an old question is never stored again
+    assert not any("licens" in q["label"].lower() for q in a["questions"])
     assert a["sections"] == [{"id": "project", "label": "Project questions"}] and "availability" in a["profile_fields"]
     resume = [d for d in a["profile_documents"] if d["key"] == "resume"][0]
     assert resume["optional"] is True and resume["state"] == "not_provided"
@@ -841,11 +850,12 @@ def test_submit_with_work_history_and_resume_then_staff_reads_it(volt):
     _, tok, out = volt["register"]()
     app_id = out["application_id"]
     _fill(c, tok, app_id)
-    # ACA: licensed -> states required
-    c.put("/volt/rep/%s/applications/%s/answers" % (SLUG, app_id), headers=tok, json={"answers": {"license_status": "licensed"}})
+    # ACA: languages are required; the experience details are not.
+    c.put("/volt/rep/%s/applications/%s/answers" % (SLUG, app_id), headers=tok, json={"answers": {"languages": ""}})
     miss = c.post("/volt/rep/%s/applications/%s/submit" % (SLUG, app_id), headers=tok).json()["detail"]["missing"]
-    assert miss == ["Answer: States where you are licensed"]
-    c.put("/volt/rep/%s/applications/%s/answers" % (SLUG, app_id), headers=tok, json={"answers": {"licensed_states": "TX, OK"}})
+    assert miss == ["Answer: What languages do you speak?"]
+    c.put("/volt/rep/%s/applications/%s/answers" % (SLUG, app_id), headers=tok,
+          json={"answers": {"languages": "English, Spanish", "relevant_experience": ""}})
     up = lambda data, name, ctype: c.post("/volt/rep/%s/documents" % SLUG, headers=tok,
                                           data={"doc_key": "resume", "upload_key": uuid.uuid4().hex, "application_id": ""},
                                           files={"file": (name, data, ctype)})
@@ -855,7 +865,7 @@ def test_submit_with_work_history_and_resume_then_staff_reads_it(volt):
     assert c.post("/volt/rep/%s/applications/%s/submit" % (SLUG, app_id), headers=tok).json()["status"] == "submitted"
     f = c.get("/volt/ops/%s/applications/%s" % (volt["org"].id, app_id), headers=H(db, volt["staff"])).json()
     assert f["hiring"]["work_history"][0]["employer"] == "Example Retail" and f["hiring"]["city"] == "Dallas"
-    assert f["application"]["answers"]["licensed_states"] == "TX, OK"
+    assert f["application"]["answers"]["languages"] == "English, Spanish"
     assert any(d["doc_key"] == "resume" for d in f["document_versions"])
     # Another applicant cannot read the resume.
     _, tok2, _ = volt["register"]()
@@ -873,13 +883,43 @@ def test_legacy_draft_opens_and_is_prompted_for_new_information(volt):
     assert got.status_code == 200
     j = got.json()
     assert j["answers"]["relevant_experience"] == "Old single answer"
-    assert "Profile: current city" in j["missing"] and "Answer: Current health insurance license status" in j["missing"]
+    assert "Profile: current city" in j["missing"] and "Answer: What languages do you speak?" in j["missing"]
+    assert not any("licens" in m.lower() for m in j["missing"])
     me = c.get("/volt/rep/%s/me" % SLUG, headers=tok).json()
     assert me["applications"][0]["next_action"]["label"] == "Finish your application"
     # Saving merges with the carried-over answer.
-    c.put("/volt/rep/%s/applications/%s/answers" % (SLUG, a.id), headers=tok, json={"answers": {"license_status": "in_progress"}})
+    c.put("/volt/rep/%s/applications/%s/answers" % (SLUG, a.id), headers=tok, json={"answers": {"languages": "English"}})
     db.refresh(a)
-    assert json.loads(a.answers) == {"relevant_experience": "Old single answer", "license_status": "in_progress"}
+    assert json.loads(a.answers) == {"relevant_experience": "Old single answer", "languages": "English"}
+
+
+def test_old_aca_license_answers_stay_staff_history_and_never_block(volt):
+    """A draft saved on the first ACA form keeps its license answers as
+    history: staff see them as the earlier form, the applicant does not, and
+    nothing about a license is required to submit."""
+    c, db = volt["c"], volt["db"]
+    _no_required_docs(volt)
+    _, tok, out = volt["register"](project_key="aca")
+    a = db.get(VoltApplication, out["application_id"])
+    a.answers = json.dumps({"relevant_experience": "Front desk", "license_status": "licensed",
+                            "licensed_states": "TX", "license_number": "123"})
+    db.commit()
+    mine = c.get("/volt/rep/%s/applications/%s" % (SLUG, a.id), headers=tok).json()
+    assert not {"license_status", "licensed_states", "license_number"} & set(mine["answers"])
+    assert not any(q.get("staff_only") for q in mine["questions"])
+    _fill(c, tok, a.id)
+    assert c.post("/volt/rep/%s/applications/%s/submit" % (SLUG, a.id), headers=tok).json()["status"] == "submitted"
+    db.refresh(a)
+    assert json.loads(a.answers)["license_number"] == "123"                 # history kept, untouched
+    f = c.get("/volt/ops/%s/applications/%s" % (volt["org"].id, a.id), headers=H(db, volt["staff"])).json()
+    legacy = [q for q in f["application"]["questions"] if q.get("staff_only")]
+    assert [q["key"] for q in legacy] == ["license_status", "licensed_states", "license_number"]
+    assert all("no longer asked" in q["label"] for q in legacy)
+    assert f["application"]["answers"]["license_status"] == "licensed"
+    csv_text = c.get("/volt/ops/%s/export.csv" % volt["org"].id, headers=H(db, volt["staff"]),
+                     params={"include_test": 1, "project_id": volt["project"]("aca").id}).text
+    head = csv_text.splitlines()[0]
+    assert "Languages" in head and "License status (earlier ACA form, no longer asked)" in head and ",License status," not in head
 
 
 def test_queue_filters_and_csv_hiring_columns(volt):
@@ -984,3 +1024,46 @@ def test_talent_signup_records_where_it_came_from(volt):
     sh = H(db, volt["staff"])
     text = c.get("/volt/ops/%s/talent-pool.csv" % org, headers=sh, params={"include_test": 1, "q": "ada auto"}).text
     assert "Automatic popup" in text and "Signup button" in text
+
+
+def test_aca_outreach_correction_from_second_names_and_staff_edits_kept(db_session):
+    """Production rows already carry the second ACA names (2026-11-06 #1);
+    they move to ACA Healthcare Outreach, a staff-typed name is kept, and a
+    rerun changes nothing."""
+    from app.services.volt import seed as S
+    db = db_session
+    org = Organization(name="VOLT Mid", slug="volt-mid-%s" % uuid.uuid4().hex[:5], plan="enterprise", is_active=True,
+                       enabled_features=json.dumps(["volt_recruiting"]))
+    db.add(org)
+    db.flush()
+    aca = VoltProject(organization_id=org.id, key="aca", name="ACA Health Insurance", short_name="ACA Navigators",
+                      summary="Health insurance outreach", status="open", required_docs="[]",
+                      question="What experience do you have with ACA health insurance?")
+    fib = VoltProject(organization_id=org.id, key="fiber", name="T-Mobile D2D Fiber Sales", short_name="T-Mobile D2D Fiber",
+                      status="open", required_docs="[]", question="Fiber question")
+    db.add_all([aca, fib])
+    db.commit()
+    before_fiber = (fib.name, fib.short_name, fib.summary, fib.question)
+    changed = S._apply_corrections(db, org.id)
+    db.commit()
+    db.refresh(aca)
+    db.refresh(fib)
+    assert aca.name == "ACA Healthcare Outreach" and aca.short_name == "ACA Navigators"   # staff edit kept
+    assert aca.summary == "Healthcare outreach and enrollment assistance"
+    assert "aca.short_name" not in changed and {"aca.name", "aca.summary", "aca.question"} <= set(changed)
+    assert (fib.name, fib.short_name, fib.summary, fib.question) == before_fiber
+    assert S._apply_corrections(db, org.id) == []
+
+
+def test_fiber_questions_unchanged_and_no_license_question_for_aca():
+    from app.services.volt import hiring
+    import subprocess
+    main_src = subprocess.run(["git", "show", "e003e78:app/services/volt/hiring.py"], capture_output=True, text=True).stdout
+    if main_src:                                   # Fiber's questions are byte-for-byte what main had
+        ns = {}
+        exec(compile(main_src, "hiring_main", "exec"), ns)
+        assert ns["PROJECT_QUESTIONS"]["fiber"] == hiring.PROJECT_QUESTIONS["fiber"]
+    asked = [q for q in hiring.PROJECT_QUESTIONS["aca"] if not q.get("legacy")]
+    assert [q["key"] for q in asked] == ["outreach_experience", "relevant_experience", "comfortable_explaining", "languages"]
+    assert [q["key"] for q in asked if q.get("required")] == ["outreach_experience", "comfortable_explaining", "languages"]
+    assert not any("licens" in (q["label"] + q.get("hint", "")).lower() for q in asked)
