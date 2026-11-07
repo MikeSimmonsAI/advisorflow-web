@@ -102,7 +102,12 @@ def _resolve_twilio_creds(advisor: User, db: Session) -> tuple[Client, str, str 
     owner = _is_platform_owner(advisor)
 
     # --- 1. Advisor's own Twilio account (legacy / bring-your-own) ---
-    if (not owner) and advisor.twilio_account_sid and advisor.twilio_auth_token_encrypted:
+    # Only with the advisor's OWN NUMBER: an account copied onto a user row
+    # with no number (Issue #507: Restland's booking account) used to win
+    # here and hand Twilio no "from" at all - every text failed. Without a
+    # number it falls through to the organization's sender below.
+    if (not owner) and advisor.twilio_account_sid and advisor.twilio_auth_token_encrypted \
+            and advisor.twilio_phone_number:
         token = decrypt_value(advisor.twilio_auth_token_encrypted)
         client = Client(advisor.twilio_account_sid, token)
         return client, advisor.twilio_phone_number, advisor.twilio_caller_id_name
@@ -167,8 +172,9 @@ def describe_sms_sender(advisor: User, db: Session) -> dict:
     """
     owner = _is_platform_owner(advisor)
 
-    # --- 1. Advisor's own Twilio account (legacy / bring-your-own) ---
-    if (not owner) and advisor.twilio_account_sid and advisor.twilio_auth_token_encrypted:
+    # --- 1. Advisor's own Twilio account (legacy / bring-your-own), with its own number ---
+    if (not owner) and advisor.twilio_account_sid and advisor.twilio_auth_token_encrypted \
+            and advisor.twilio_phone_number:
         return {
             "ready": bool(advisor.twilio_phone_number),
             "source": "advisor",

@@ -251,6 +251,11 @@ def main(argv=None) -> int:
                     log.info("workspace configure org=%s run=%s status=%s already=%s summary=%s",
                              org_id, res["run_id"], res["status"], res["already"],
                              json.dumps(res["summary"], sort_keys=True, default=str)[:3500])
+                elif mode == "probe":
+                    # Read-only readiness check (calendar + sender). Changes nothing.
+                    from app.services.programs import workspace_configure as _wc
+                    res = _wc.probe_only(_db, org, os.environ.get("WORKSPACE_BOOKING_USER_ID", "").strip() or None)
+                    log.info("workspace probe org=%s: %s", org_id, json.dumps(res, sort_keys=True, default=str)[:3500])
                 elif mode == "rollback":
                     from app.models.reset_models import WorkspaceResetRun as _Run
                     _r = _db.query(_Run).filter_by(id=key, organization_id=org_id).first()

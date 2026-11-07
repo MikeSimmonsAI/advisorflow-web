@@ -142,7 +142,12 @@ def twilio_probe(db: Session, user: Optional[User]) -> Dict:
         from app.services.sms_service import _resolve_twilio_creds
         client, from_phone, _cid = _resolve_twilio_creds(user, db)
         out["sender"] = from_phone
+        if not from_phone:
+            # Never list without a number: Twilio would return the account's
+            # FIRST number, which may be another program's.
+            return dict(out, number_found=False, error="the resolver returned no sending number")
         nums = client.incoming_phone_numbers.list(phone_number=from_phone, limit=2)
+        nums = [x for x in nums if (getattr(x, "phone_number", None) or "") == from_phone]
         if not nums:
             return dict(out, number_found=False)
         num = nums[0]
@@ -443,3 +448,14 @@ def rollback(db: Session, org: Organization, run_id: str) -> Dict:
 def last_run(db: Session, org_id: str) -> Optional[WorkspaceResetRun]:
     return (db.query(WorkspaceResetRun).filter_by(organization_id=org_id, mode=MODE)
             .order_by(WorkspaceResetRun.started_at.desc()).first())
+
+
+
+def probe_only(db: Session, org: Organization, booking_user_id: Optional[str]) -> Dict:
+    """READ-ONLY readiness check: calendar + sender. Changes nothing."""
+    user = _booking_user(db, org.id, booking_user_id)
+    from app.services.programs.identity import program_for_org
+    prog = program_for_org(db, org.id)
+    return {"booking_user_ok": user is not None,
+            "program_booking_user_matches": bool(prog and user and prog.booking_user_id == user.id),
+            "calendar": calendar_probe(user), "sender": twilio_probe(db, user)}

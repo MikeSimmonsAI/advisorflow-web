@@ -34,6 +34,30 @@ def test_sender_resolves_to_the_shared_toll_free_number(rl):
     assert d.get("from_number", d.get("phone")) == SENDER or SENDER in str(d)
 
 
+def test_an_advisor_account_with_no_number_falls_through_to_the_org_sender(rl):
+    """Production shape (Nov 7): the booking account carries the EvoSys Twilio
+    SID/token but no number. It must resolve to the org's 855 sender, never to
+    a send with no "from", and never to the old 469 number."""
+    from app.utils.crypto import encrypt_value
+    db, org, adv = rl["db"], rl["org"], rl["advisor"]
+    org.org_twilio_account_sid = "AC" + "1" * 32
+    org.org_twilio_auth_token_encrypted = encrypt_value("orgtoken")
+    adv.twilio_account_sid = "AC" + "1" * 32
+    adv.twilio_auth_token_encrypted = encrypt_value("usertoken")
+    adv.twilio_phone_number = None
+    db.commit()
+    with patch("app.services.sms_service.Client"):
+        _client, sender, _cid = sms_service._resolve_twilio_creds(adv, db)
+    assert sender == SENDER and sender != "+14692241155"
+    d = sms_service.describe_sms_sender(adv, db)
+    assert SENDER in str(d)
+    # An advisor WITH their own number keeps using it (other tenants unchanged).
+    adv.twilio_phone_number = "+15555550123"
+    db.commit()
+    with patch("app.services.sms_service.Client"):
+        assert sms_service._resolve_twilio_creds(adv, db)[1] == "+15555550123"
+
+
 def test_inbound_sms_routes_to_restland_and_sends_nothing(twilio_webhook, rl):
     db = rl["db"]
     with patch("app.services.sms_service.Client") as tw:
