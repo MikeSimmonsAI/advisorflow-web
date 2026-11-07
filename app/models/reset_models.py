@@ -112,6 +112,7 @@ class CampaignCycleMember(Base):
     campaign_key = Column(String, nullable=False)
     cycle_key = Column(String, nullable=False)        # e.g. "ffr-batch-1"
     lead_id = Column(String, nullable=False)
+    round_number = Column(Integer, nullable=False, default=1)   # this family's 1st, 2nd ... round
     phone_e164 = Column(String, nullable=True)
     email_norm = Column(String, nullable=True)
     status = Column(String, nullable=False, default="staged")   # staged | active | completed | stopped | withdrawn
@@ -128,3 +129,59 @@ class CampaignCycleMember(Base):
                       Index("ix_cycle_members_org_status", "organization_id", "status"),
                       Index("ix_cycle_members_phone", "organization_id", "phone_e164"),
                       Index("ix_cycle_members_email", "organization_id", "email_norm"))
+
+
+
+class AppointmentNotification(Base):
+    """One appointment message for one channel (Issue #507): the booking
+    confirmation, a reminder, the change/cancel acknowledgement or the survey
+    invitation. Separate from campaign touches and from the rest period.
+
+    `version` is the appointment time it was written for: a reschedule
+    supersedes every row of the old version, so a stale reminder can never go.
+    Unique (booking, purpose, channel, version) = one message per channel per
+    appointment time, however many workers or webhook retries ask."""
+    __tablename__ = "appointment_notifications"
+    id = Column(String, primary_key=True, default=_uuid)
+    organization_id = Column(String, nullable=False)
+    booking_id = Column(String, nullable=False)
+    lead_id = Column(String, nullable=False)
+    purpose = Column(String, nullable=False)        # confirmation | reminder_24h | reminder_2h | updated | cancelled | survey
+    channel = Column(String, nullable=False)        # sms | email
+    version = Column(String, nullable=False)        # booked time ISO (local) it was written for
+    due_at = Column(DateTime, nullable=True)        # naive UTC
+    status = Column(String, nullable=False, default="scheduled")
+    # scheduled | claimed | sent | failed | retry | skipped | superseded | cancelled
+    reason = Column(Text, nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    next_attempt_at = Column(DateTime, nullable=True)
+    attempted_at = Column(DateTime, nullable=True)
+    sent_at = Column(DateTime, nullable=True)
+    message_id = Column(String, nullable=True)      # messages.id / email_messages.id
+    provider_id = Column(String, nullable=True)
+    delivery_state = Column(String, nullable=True)  # read from the message's own receipts
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    __table_args__ = (UniqueConstraint("booking_id", "purpose", "channel", "version", name="uq_appt_notification"),
+                      Index("ix_appt_notifications_due", "organization_id", "status", "due_at"))
+
+
+class AppointmentSurvey(Base):
+    """The post-visit survey for ONE completed appointment (Issue #507).
+    One unguessable token; the text and the email both open it; one answer."""
+    __tablename__ = "appointment_surveys"
+    id = Column(String, primary_key=True, default=_uuid)
+    organization_id = Column(String, nullable=False)
+    booking_id = Column(String, nullable=False, unique=True)
+    lead_id = Column(String, nullable=False)
+    token = Column(String, nullable=False, unique=True)
+    expires_at = Column(DateTime, nullable=False)
+    rating = Column(Integer, nullable=True)          # 1-5
+    helpful = Column(String, nullable=True)          # yes | somewhat | no
+    comments = Column(Text, nullable=True)
+    follow_up = Column(Boolean, nullable=True)
+    follow_up_method = Column(String, nullable=True)  # phone | text | email
+    submitted_at = Column(DateTime, nullable=True)
+    task_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

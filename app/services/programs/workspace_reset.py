@@ -55,7 +55,7 @@ SMS_STEPS = [(1, 0, 10), (2, 3, 11), (3, 8, 14)]
 SMS_COPY = {
     1: ("Hi {first_name}, this is Mike Simmons with Restland Cemetery & Funeral Home. I'm reaching out to "
         "families to schedule a short Family File Review here at Restland: about 20-30 minutes to confirm "
-        "your file is up to date, sign the permission-to-access form and go over our pre-planning guide. "
+        "your file is up to date, explain any permission-to-access paperwork that applies and go over our pre-planning guide. "
         "Would a weekday or a Saturday suit you better? Reply STOP to opt out."),
     2: ("Hi {first_name}, Mike Simmons at Restland again. If it helps, the Family File Review takes about "
         "20-30 minutes at 13005 Greenville Ave. {booking_line} Or just reply with a day that works for you. "
@@ -67,7 +67,7 @@ EMAIL_COPY = {
     1: ("Your Family File Review at Restland",
         "Hello {first_name},\n\nI'm Mike Simmons with Restland Cemetery & Funeral Home. We're meeting with "
         "families for a short Family File Review here at Restland - about 20-30 minutes in person to confirm "
-        "your file is up to date, complete the permission-to-access form and go over our pre-planning guide.\n\n"
+        "your file is up to date, explain any permission-to-access paperwork that applies and go over our pre-planning guide.\n\n"
         "{booking_line}\n\nOr reply to this email with a day that works.\n\nMike Simmons\nRestland Cemetery & "
         "Funeral Home\n13005 Greenville Ave, Dallas, TX 75243\n469-553-7417"),
     2: ("A short visit to review your family file",

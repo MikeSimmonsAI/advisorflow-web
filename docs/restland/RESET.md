@@ -209,3 +209,75 @@ Code:
    3. approve the families in Choose & Send;
    4. alerts;
    5. the AI setter, only if wanted.
+
+---
+
+# Return rounds, appointment messages and the 24-hour survey (Nov 7, PR after #563)
+
+Code:
+- `rotation.py` (rounds)
+- `appointment_notifications.py`
+- `appointment_ops.py`
+- `visit_survey.py` and `routers/visit_survey_router.py`
+- The page `frontend/src/pages/public/VisitSurvey.jsx`
+
+## Return rounds (second and later rounds)
+
+- **Rest ends → reviewed pool only.** A manager picks families from "Rest over: review" and presses **Stage for Return** (`POST /program/command/data-review/return/stage`). Each family is re-checked before it's staged:
+  - its earlier round finished unanswered;
+  - the 30-day rest is fully over (measured from the real last outreach; an undeliverable last touch uses the last attempt);
+  - no other open round or rest on its phone or email;
+  - not do-not-contact.
+
+  Families that replied, booked, opted out or cancelled are never staged. Staging moves the program record to the **Return** campaign. It is **not approved and not started**; the earlier round's start and approval are kept in the round's notes.
+- **Approval** refuses anyone not staged for that round. It also refuses a returning family on the first-round campaign, and anyone whose phone or email is resting or in another open round.
+- **Texts:** starting the journey restarts the family's text sequence from text 1 with a new start. The engine only counts attempts since that start, so round 1's attempts stay as history. Every attempt row carries its round (`cadence_touch_logs.cycle_key`).
+- **Emails:** round *k* uses touch numbers `100*(k-1)+n` (round 2 = 101–104), so the existing (family, touch) uniqueness still guarantees one email per touch per round. Round 1 rows are never touched. Every row carries its round (`program_email_touches.cycle_key`). SCI's numbering is unchanged.
+- **Re-checked again immediately before every text and email:** the phone or email must not have entered another round or a rest since approval.
+- **Copy:** the Return drafts say "I wrote a while back", never first-contact wording.
+
+## Appointment messages (confirmation, reminders, change and cancel notices)
+
+- **One schedule per appointment.** Each message is one row in `appointment_notifications`, unique on (appointment, purpose, channel, appointment time). A double click, a webhook retry or two workers can't send twice.
+- **Sent by text, and by email when the family has a usable, permitted address.** A booking never erases an opt-out: the channel is re-checked right before each send.
+- **Confirmation:** immediate. It gives the title, the assigned advisor, the date, the Central time, 45 minutes, and the place. At Restland: "13005 Greenville Ave – ask for <the assigned advisor>". At home: "<advisor> will come to you at <address>". It ends "Need to change or cancel? Just reply to this message or call <office line>".
+- **Reminders:** 24 hours and 2 hours before. They go only between 9:00 AM and 6:00 PM Central. A reminder that would fall outside that moves to the preceding permitted time (5:45 PM the evening before; e.g. the 2-hour reminder for a 10:00 AM visit). If that moved time is before the booking was made, or after the visit, it's skipped. A reminder whose time has already passed when the family books is **skipped**, never sent late. The 24-hour reminder is exactly 24 real hours before, across daylight saving.
+- **Reschedule:** the old time's unsent messages are superseded, and one "updated" notice plus new reminders are written.
+- **Cancel:** everything pending is cancelled, the calendar event is removed, and one cancellation notice per channel is written.
+- **Reassign ("Assign to"):** the calendar event moves to the new person's calendar. The family is **not** messaged; their next message names the new advisor.
+- **Missed while off:** messages that came due while sending was off are not dumped later. Confirmations more than 1 hour late, reminders more than 2 hours late and surveys more than 3 days late are skipped, with the reason recorded.
+- **Retries:** a provider failure retries after 15 minutes, then after 60 minutes, then shows as failed. A refusal (opt-out, texts off) is recorded as skipped with its reason.
+- **Staff can see** every message per appointment (Appointments → Messages): scheduled, sent, skipped or failed, why, and the delivery receipt.
+
+## The 24-hour survey
+
+- **Only for visits staff mark Completed** (Appointments → Completed / No-show). It goes 24 hours after the visit's recorded end, or its scheduled end, and never earlier. Outside 9–6 Central it waits for the next 9:00 AM. If attendance is marked late, it goes at the next permitted time.
+- **Never for:** a no-show, a cancellation, a visit with attendance not recorded (those are listed under "Record attendance" as staff work), or appointments that predate activation (`notifications.active_since`).
+- **One survey per visit.** The text and the email open the same survey, with an unguessable token in the link and nothing else.
+- **Questions:**
+  1. Overall experience, 1–5.
+  2. Was the review helpful? Yes / Somewhat / No.
+  3. Comments (optional).
+  4. Follow-up wanted? (optional), with a preferred method: phone, text or email.
+- **One answer.** A second submit is refused, and expired links say so.
+- **A follow-up request** creates an open task on the task list, assigned to the visit's advisor, plus an in-app note. No staff text or email is sent while alerts are off.
+- **No review links.** No message goes to the family because of an answer, and nothing restarts the campaign.
+
+## Switches (all OFF after deploy and configuration)
+
+- Appointments → **Appointment messages**: "Turn appointment messages on" (confirmations, reminders, notices) and "Turn survey on". Managers only; both are audited.
+- **Order to switch on:**
+  1. appointment messages;
+  2. the workspace texts switch (owner) for texts;
+  3. the survey.
+
+  Saving settings never sends anything.
+
+## Volume (upper bound, per day, steady state)
+
+- **Formula:** N new families a day gives at most **5N texts** and **4N emails** a day, before exits.
+  - At 15 a day: 75 texts and 60 emails.
+- **Segments** are counted from the final copy and the real link: today every first-round text is 2 segments, so 10 per family.
+- **Separate from campaign volume:** appointment messages (up to 4 per booking × 2 channels), conversations and staff alerts.
+- **Capacity:** 35 appointment starts a week for one person; reassignment adds another person's capacity.
+- **Screen:** Clean-up & Batch 1 shows the table, what's scheduled in the next 7 days, and the daily new-family cap (still 0).

@@ -1335,6 +1335,13 @@ class BookingLink(Base):
     # the family's address when it is at their home.
     meeting_type  = Column(String, nullable=True)
     visit_address = Column(Text, nullable=True)
+    # Issue #507 appointment follow-through: attendance and changes, recorded
+    # by staff (completed | no_show live in `status`).
+    completed_at  = Column(DateTime, nullable=True)   # when the visit actually ended (UTC)
+    attendance_recorded_at = Column(DateTime, nullable=True)
+    attendance_recorded_by = Column(String, nullable=True)
+    cancelled_at  = Column(DateTime, nullable=True)
+    rescheduled_at = Column(DateTime, nullable=True)
 
     # Appointment reminder tracking — set by appointment_reminder_cron.py
     confirmation_sent   = Column(Boolean, default=False)  # immediate lead confirmation on booking
@@ -1813,6 +1820,9 @@ class CadenceTouchLog(Base):
     email_message_id = Column(String, nullable=True)
 
     body_preview = Column(String(240), nullable=True)
+    # Issue #507: which campaign round this attempt belongs to (Restland
+    # rotation); NULL for everything else.
+    cycle_key = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (

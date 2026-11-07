@@ -421,7 +421,19 @@ def _skip_reason(db: Session, lead: Lead, replied: bool, prog=None) -> Optional[
         if db.query(EmailMessage.id).filter(EmailMessage.lead_id.in_(peers),
                                             EmailMessage.status != "failed").first():
             return "shares an email address with another contact - that inbox already gets one unaddressed email"
+    if rec_family_rotating(db, lead):
+        # Issue #507: re-checked at the moment of sending - the phone/email
+        # must not be resting or in another open round now.
+        from app.services.programs import rotation as _rot
+        _why = _rot.dispatch_refusal(db, lead)
+        if _why:
+            return _why
     return identity.send_refusal(db, lead, "cadence")
+
+
+def rec_family_rotating(db: Session, lead: Lead) -> bool:
+    rec = identity.source_record_for_lead(db, lead)
+    return rec is not None and rec.campaign_family in _RESTLAND_ROTATING
 
 
 DEFAULT_MAX_TOUCHES = 5
@@ -493,6 +505,14 @@ def _due_touch(touches: Dict[int, ProgramEmailTouch], now: datetime, schedule=No
     return None
 
 
+def _cycle_of(db: Session, item: Dict) -> Optional[str]:
+    """Issue #507: the campaign round this email belongs to (rotating campaigns only)."""
+    if item["family"].key not in _RESTLAND_ROTATING:
+        return None
+    from app.services.programs import rotation
+    return rotation.cycle_key_for(db, item["lead"])
+
+
 def _hold(db: Session, prog: OutreachProgram, item: Dict, prof: LocationProfile, reason: str) -> None:
     """Record a touch the quality gate held. Nothing is sent; it is re-checked
     after BLOCKED_RETRY_AFTER (copy or data may have been fixed meanwhile)."""
@@ -501,7 +521,8 @@ def _hold(db: Session, prog: OutreachProgram, item: Dict, prof: LocationProfile,
     if row is None:
         row = ProgramEmailTouch(organization_id=prog.organization_id, lead_id=item["lead"].id,
                                 source_record_id=item["record"].id, campaign_family=item["family"].key,
-                                location_id=prof.location_id, touch_number=item["touch"])
+                                location_id=prof.location_id, touch_number=item["touch"],
+                                cycle_key=_cycle_of(db, item))
         db.add(row)
     row.status, row.attempted_at, row.reason = "blocked", now, reason[:500]
     try:
@@ -537,6 +558,8 @@ def build_message(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof:
     from app.services.programs.campaigns import OWN_COPY_KEYS
     if fam.key in OWN_COPY_KEYS:
         # #441: this campaign's own words for THIS touch - never a playbook.
+        # #507: a later round's email 101 is that campaign's email 1.
+        touch = ((touch - 1) % 100) + 1 if touch > 100 else touch
         own = own_copy_email(fam, touch, r["fields"], prog.reply_instructions_email or "")
         if own is None:
             msg = {"touch": touch, "channel": "email", "subject": "", "body": "",
@@ -617,6 +640,12 @@ def plan(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
         underway.update(x for (x,) in db.query(_CS.lead_id).filter(
             _CS.lead_id.in_(chunk), _CS.current_touch_number >= 1).all())
     out = []
+    # Issue #507: later rounds of a rotating campaign number their emails
+    # 100*(round-1)+n; each round sees only its own rows.
+    _bases = {}
+    if any(f in _RESTLAND_ROTATING for f in fams):
+        from app.services.programs import rotation as _rot_b
+        _bases = _rot_b.email_bases(db, org_id, ids)
     for lead_id, rows in by_lead.items():
         lead = leads.get(lead_id)
         if lead is None:
@@ -644,6 +673,10 @@ def plan(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
                 t.reason = "the runner stopped mid-send; check the provider log before resending"
         from app.services.programs.campaigns import email_schedule as _own_days
         _sched = _own_days(fam.key)
+        _base = _bases.get(lead_id, 0) if fam.key in _RESTLAND_ROTATING else 0
+        if _base:
+            _sched = [(_base + n, d) for n, d in _sched]
+            mine = {n: t for n, t in mine.items() if _base < n <= _base + 99}
         _start = None
         if _sched:
             _starts = [r.journey_started_at for r in rows if getattr(r, "journey_started_at", None)]
@@ -689,6 +722,7 @@ def _claim(db: Session, prog: OutreachProgram, item: Dict, prof: LocationProfile
     row = ProgramEmailTouch(organization_id=prog.organization_id, lead_id=item["lead"].id,
                             source_record_id=item["record"].id, campaign_family=item["family"].key,
                             location_id=prof.location_id, touch_number=item["touch"],
+                            cycle_key=_cycle_of(db, item),
                             email_mode=r["email_mode"],
                             flyer_asset_id=r["flyer"].id if r["flyer"] is not None else None,
                             status="claimed", attempted_at=now)

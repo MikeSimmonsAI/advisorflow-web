@@ -757,6 +757,15 @@ COLUMNS_TO_ADD = [
     # family's home address for a home visit.
     ("booking_links", "meeting_type", "VARCHAR"),
     ("booking_links", "visit_address", "TEXT"),
+    ("booking_links", "completed_at", "TIMESTAMP"),
+    ("booking_links", "attendance_recorded_at", "TIMESTAMP"),
+    ("booking_links", "attendance_recorded_by", "VARCHAR"),
+    ("booking_links", "cancelled_at", "TIMESTAMP"),
+    ("booking_links", "rescheduled_at", "TIMESTAMP"),
+    # Issue #507 rotation: the round on every campaign touch.
+    ("program_email_touches", "cycle_key", "VARCHAR"),
+    ("cadence_touch_logs", "cycle_key", "VARCHAR"),
+    ("campaign_cycle_members", "round_number", "INTEGER NOT NULL DEFAULT 1"),
     # Social media lead capture — org-level webhook credentials + token
     ("organizations", "social_webhook_token", "VARCHAR"),
     ("organizations", "meta_page_access_token", "VARCHAR"),

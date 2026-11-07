@@ -414,11 +414,13 @@ def test_rest_and_open_rounds_are_enforced_per_destination(rl):
     m.next_eligible_at = datetime.utcnow() - timedelta(days=1)
     db.commit()
     assert rotation.conflicts(db, rl["org"].id, twin) == []                   # rest over: may be REVIEWED
-    # ... but approval still needs staging, and a returning family can't be sent a second round yet.
+    # ... but approval still needs staging; a returning family goes through the Return campaign.
     _assign(db, a)
     assert rotation.approval_refusal(db, rl["org"].id, twin, F.CAMPAIGN_KEY).startswith("Not staged")
     rotation.stage(db, rl["org"].id, F.RETURN_KEY, "ffr-return-1", [a])
-    assert "Returning family" in rotation.approval_refusal(db, rl["org"].id, a, F.RETURN_KEY)
+    assert rotation.approval_refusal(db, rl["org"].id, a, F.RETURN_KEY) is None
+    rotation.stage(db, rl["org"].id, F.CAMPAIGN_KEY, "ffr-batch-9", [twin])
+    assert rotation.approval_refusal(db, rl["org"].id, twin, F.CAMPAIGN_KEY)        # its phone is in an open round
 
 
 def test_approval_refuses_resting_destinations(rl):

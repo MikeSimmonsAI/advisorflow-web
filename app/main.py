@@ -55,6 +55,7 @@ from app.routers import proposal_router
 from app.routers import reports_router, crm_router, crm_inbound_router
 from app.routers.crm_native_router import router as crm_native_router
 from app.routers.survey_router import router as survey_router
+from app.routers.visit_survey_router import router as visit_survey_router
 from app.routers.pipeline_router import router as pipeline_router
 from app.routers.tier_definitions_router import router as tier_definitions_router
 from app.routers.dlc_router import router as dlc_router
@@ -1006,6 +1007,7 @@ app.include_router(crm_inbound_router.router)
 app.include_router(crm_native_router,
                    dependencies=[Depends(require_feature("crm"))])
 app.include_router(survey_router)
+app.include_router(visit_survey_router)   # Issue #507: Restland post-visit survey (public, token only)
 app.include_router(tier_definitions_router,
                    dependencies=[Depends(require_feature("tier_config"))])
 # A2P 10DLC — GOD-ONLY BY DEFAULT.
@@ -2155,6 +2157,16 @@ async def _program_sla_loop():
                         except Exception as exc:                 # noqa: BLE001
                             db.rollback()
                             _logger.error("program daily batch error: %s", exc, exc_info=True)
+                        # Appointment messages (Issue #507): returns at once for
+                        # every program that hasn't switched them on.
+                        try:
+                            from app.services.programs import appointment_notifications as _apn
+                            _r = _apn.run(db)
+                            if _r.get("sent") or _r.get("failed") or _r.get("skipped"):
+                                out["appointment_messages"] = _r
+                        except Exception as exc:                 # noqa: BLE001
+                            db.rollback()
+                            _logger.error("appointment messages error: %s", exc, exc_info=True)
                         try:
                             from app.services.programs import email_touches as _et
                             if _et.sending_enabled() and _et.pass_due():

@@ -507,6 +507,10 @@ class ProgramEmailTouch(Base):
     campaign_family = Column(String, nullable=True)
     location_id = Column(String, nullable=True)
     touch_number = Column(Integer, nullable=False)
+    # Issue #507: the campaign round (Restland rotation). Round k > 1 uses
+    # touch numbers 100*(k-1)+n, so (lead, touch) stays unique and round 1
+    # history is never overwritten. NULL = first round / every other campaign.
+    cycle_key = Column(String, nullable=True)
     email_mode = Column(String, nullable=True)               # none | hosted | attached
     flyer_asset_id = Column(String, nullable=True)
     status = Column(String, nullable=False, default="claimed")  # claimed | sent | failed | blocked | retry | unknown
