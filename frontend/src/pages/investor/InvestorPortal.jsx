@@ -17,6 +17,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { api as staffApi, fetchObjectUrl } from '../../api/client'
 import { engine } from '../wholesale/engine'
+import { hostTheme, THEMES } from '../../theme'
+import { useWholesaleFavicon } from '../../components/WholesaleShell'
 import { cap, fileSize, inv, investorToken, objectUrl, setInvestorToken, usd, when, words } from './investorApi'
 import './investor.css'
 
@@ -187,11 +189,21 @@ function OppCard({ o, onSave, preview }) {
 }
 
 // ── public: invitation and sign in ─────────────────────────────────────────
+// My Deal Room rooms (and unnamed pages on the EvoSys host, where every room
+// is My Deal Room unless renamed) wear the owner-supplied mark in the same
+// 30x30 spot; every other brand keeps the generic glyph.
+const MY_DEAL_ROOM = 'My Deal Room'
+const MY_DEAL_ROOM_MARK = '/brands/my-deal-room-mark.svg'
+
 function Brandmark({ name, light }) {
+  const mdr = name === MY_DEAL_ROOM || (!name && hostTheme() === THEMES.EVOSYSPRO)
+  useWholesaleFavicon(mdr, MY_DEAL_ROOM_MARK)
   return (
     <div className={`ir-brand${light ? ' ir-brand--light' : ''}`}>
-      <span className="ir-brand__mark" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30"><rect x="3" y="3" width="26" height="26" rx="7" fill="#2563eb" /><path d="M10 11h12M10 16h9M10 21h12" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" /></svg></span>
-      <span><b>{name || 'Deal Room'}</b><small>Investor portal</small></span>
+      <span className="ir-brand__mark" aria-hidden="true">{mdr
+        ? <img src={MY_DEAL_ROOM_MARK} width="30" height="30" alt="" style={{ display: 'block', borderRadius: 7 }} />
+        : <svg viewBox="0 0 32 32" width="30" height="30"><rect x="3" y="3" width="26" height="26" rx="7" fill="#2563eb" /><path d="M10 11h12M10 16h9M10 21h12" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" /></svg>}</span>
+      <span><b>{mdr ? MY_DEAL_ROOM : (name || 'Deal Room')}</b><small>Investor portal</small></span>
     </div>
   )
 }

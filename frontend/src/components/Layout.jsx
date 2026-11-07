@@ -783,7 +783,7 @@ export default function Layout({ children }) {
   // second Wholesale tenant, which never shows another brand's name - #272).
   const WHOLESALE_ENGINE = engineName(branding)
   const navSectionLabel = (label) => (label === 'Acquisition · EvoSense' && !WHOLESALE_ENGINE ? 'Acquisition' : label)
-  useWholesaleTitle(inWholesale, WHOLESALE_PRODUCT)
+  useWholesaleTitle(inWholesale, WHOLESALE_PRODUCT, SHELL_BRAND.wholesaleFaviconUrl)
   const brandName = isGodAdmin ? 'AdvisorFlow' : (branding?.brand_name || SHELL_BRAND.displayName)
   // WHAT THE WORKSPACE ITSELF IS CALLED, which is not the same question as
   // "what brand is this app". Used only by the vertical wordmark, where the
@@ -800,10 +800,15 @@ export default function Layout({ children }) {
     ? (branding?.brand_logo_url || null)
     : isElevated
       ? (PLATFORM_BRAND.logoUrl || null)
-      : (branding?.brand_logo_url || SHELL_BRAND.logoUrl
-         // The Wholesale rail wears the brand's own logo when the brand
-         // has one set for it (BookaBoost); other brands are unchanged.
-         || (inWholesale ? SHELL_BRAND.wholesaleLogoUrl : null) || null)
+      : (branding?.brand_logo_url
+         // The Wholesale rail wears the brand's own Wholesale logo when the
+         // brand has one (BookaBoost/OLP, My Deal Room); everywhere else the
+         // brand's logo is unchanged.
+         || (inWholesale ? SHELL_BRAND.wholesaleLogoUrl : null)
+         || SHELL_BRAND.logoUrl || null)
+  // The My Deal Room logo has navy lettering, so on the navy rail it sits on a
+  // white plate inside the same 180x72 slot (sized down, never stretched).
+  const logoPlate = !!(inWholesale && SHELL_BRAND.wholesaleLogoPlate && logoUrl === SHELL_BRAND.wholesaleLogoUrl)
 
   // The OLP theme is scoped to <html data-product-brand="olp"> so drawers and
   // dialogs rendered outside the layout (portals) wear it too; it is removed
@@ -893,7 +898,9 @@ export default function Layout({ children }) {
                 <img
                   src={logoUrl}
                   alt={brandName}
-                  style={{ height: 72, maxWidth: 180, objectFit: 'contain', borderRadius: 6, display: 'block', margin: '0 auto' }}
+                  style={logoPlate
+                    ? { height: 72, width: 180, maxWidth: 180, objectFit: 'contain', borderRadius: 6, display: 'block', margin: '0 auto', background: '#fff', padding: '8px 10px', boxSizing: 'border-box' }
+                    : { height: 72, maxWidth: 180, objectFit: 'contain', borderRadius: 6, display: 'block', margin: '0 auto' }}
                   onError={() => setLogoFailed(true)}
                 />
                 {/* In OLP mode the logo already names the product. */}

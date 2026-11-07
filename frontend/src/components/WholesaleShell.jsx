@@ -95,7 +95,8 @@ export function WholesaleProductLine({ name, engine = 'EvoSense' }) {
  * The browser tab names the product while a wholesale screen is showing
  * ("EvoSys Wholesale"), and gives the previous title back on the way out.
  */
-export function useWholesaleTitle(active, product) {
+export function useWholesaleTitle(active, product, favicon) {
+  useWholesaleFavicon(active, favicon)
   useEffect(() => {
     if (!active || typeof document === 'undefined') return undefined
     const previous = document.title
@@ -108,6 +109,31 @@ export function useWholesaleTitle(active, product) {
     if (obs) obs.observe(document.querySelector('title'), { childList: true, characterData: true, subtree: true })
     return () => { if (obs) obs.disconnect(); document.title = previous }
   }, [active, product])
+}
+
+/**
+ * The tab icon shows the product's own mark while a wholesale screen is up
+ * (My Deal Room), and the previous icon comes back on the way out. Brands
+ * without a wholesale icon (BookaBoost) are left exactly as they are.
+ */
+export function useWholesaleFavicon(active, href) {
+  useEffect(() => {
+    if (!active || !href || typeof document === 'undefined') return undefined
+    let link = document.querySelector("link[rel~='icon']")
+    const created = !link
+    if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link) }
+    const previous = link.getAttribute('href')
+    const apply = () => { if (link.getAttribute('href') !== href) link.setAttribute('href', href) }
+    apply()
+    // A late theme/brand payload can reset the icon; keep the product's mark.
+    const obs = typeof MutationObserver !== 'undefined' ? new MutationObserver(apply) : null
+    if (obs) obs.observe(link, { attributes: true, attributeFilter: ['href'] })
+    return () => {
+      if (obs) obs.disconnect()
+      if (created) link.remove()
+      else if (previous != null) link.setAttribute('href', previous)
+    }
+  }, [active, href])
 }
 
 /** Paints the page canvas light while a wholesale screen is showing. */
