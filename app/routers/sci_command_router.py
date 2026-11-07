@@ -1750,6 +1750,42 @@ def _last_contact(db, ids):
     return out, replies
 
 
+def _forecast(db, prog):
+    """Issue #507: campaign load (5N texts, 4N emails a day at most), segments
+    from the real copy and link, appointment-message load, and what is
+    already scheduled in the next 7 days."""
+    from datetime import timedelta as _td
+    from app.models.models import CadenceState
+    from app.models.reset_models import AppointmentNotification, CampaignAudienceMember
+    from app.services.programs import restland_ffr as _F
+    from app.services.public_identity import booking_url
+    org = prog.organization_id
+    try:
+        link = booking_url(db, org, "X" * 22)
+    except Exception:                                    # noqa: BLE001
+        link = ""
+    ready = [m.lead_id for m in db.query(CampaignAudienceMember).filter_by(
+        organization_id=org, campaign_key=_F.CAMPAIGN_KEY, segment="ready").all()]
+    with_email = db.query(Lead.id).filter(Lead.id.in_(ready or ["-"]), Lead.email.isnot(None),
+                                          Lead.email != "").count() if ready else 0
+    share = (with_email / len(ready)) if ready else 0.0
+    out = _F.forecast(link, email_share=share)
+    now = datetime.utcnow()
+    soon = now + _td(days=7)
+    out["email_share_of_ready"] = round(share, 3)
+    out["booking_link_sample_length"] = len(link)
+    out["scheduled_next_7_days"] = {
+        "text_sequences_due": db.query(CadenceState.id).join(Lead, Lead.id == CadenceState.lead_id).filter(
+            Lead.organization_id == org, CadenceState.status == "active", CadenceState.next_touch_due_at <= soon).count(),
+        "appointment_messages": db.query(AppointmentNotification.id).filter(
+            AppointmentNotification.organization_id == org, AppointmentNotification.status.in_(("scheduled", "retry")),
+            AppointmentNotification.due_at <= soon).count()}
+    out["daily_new_family_cap"] = {"current": prog.daily_batch_count or 0, "spacing_minutes": prog.daily_batch_spacing,
+                                   "proposal": "10 a day, 8 minutes apart, for the first two weeks; review replies, "
+                                               "bookings and delivery before raising it"}
+    return out
+
+
 @router.get("/data-review/summary")
 def data_review_summary(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     import json as _json
@@ -1798,6 +1834,7 @@ def data_review_summary(db: Session = Depends(get_db), user: User = Depends(requ
             "calendar": _cfg_sum.get("calendar"),
         },
         "schedule": _F.schedule_summary(),
+        "forecast": _forecast(db, prog),
         "rotation": _rot.groups(db, org),
         "return_campaign": None if _ret is None else {"name": _ret.name, "is_active": bool(_ret.is_active),
                                                      "activation_blocker": _camp.activation_blocker(_ret, db)},
@@ -1919,7 +1956,13 @@ def appointment_assign(booking_id: str, body: ApptAssignIn, db: Session = Depend
     if who is None:
         raise HTTPException(status_code=422, detail="That person is not on this team.")
     try:
-        return BP.reassign(db, prog, b, who, user)
+        _old = b.user_id
+        out = BP.reassign(db, prog, b, who, user)
+        if not out.get("unchanged"):
+            # The calendar follows the appointment; the family is not messaged.
+            from app.services.programs import appointment_ops as _ops
+            out["calendar"] = _ops.calendar_reassigned(db, b, _old)
+        return out
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(e))
@@ -1937,3 +1980,197 @@ def data_review_rotation_refresh(db: Session = Depends(get_db), user: User = Dep
     _require_manager(db, user)
     counts = _rot.refresh(db, prog.organization_id)
     return {"counts": counts, "groups": _rot.groups(db, prog.organization_id)}
+
+
+
+# ── APPOINTMENT FOLLOW-THROUGH (Issue #507): attendance, cancel, reschedule,
+#    the messages each appointment has, and the settings that control them.
+
+def _appt(db, prog, booking_id):
+    from app.models.models import BookingLink
+    b = (db.query(BookingLink).join(Lead, Lead.id == BookingLink.lead_id)
+         .filter(BookingLink.id == booking_id, Lead.organization_id == prog.organization_id).first())
+    if b is None:
+        raise HTTPException(status_code=404, detail="Appointment not found.")
+    return b
+
+
+@router.get("/appointments/{booking_id}/messages")
+def appointment_messages(booking_id: str, db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_or_observer)):
+    from app.models.reset_models import AppointmentNotification, AppointmentSurvey
+    from app.services.programs import appointment_notifications as AN
+    from app.services.programs import visit_survey as VS
+    prog = _program(db, user, managers_only=False)
+    b = _appt(db, prog, booking_id)
+    rows = (db.query(AppointmentNotification).filter(AppointmentNotification.booking_id == b.id)
+            .order_by(AppointmentNotification.due_at).all())
+    sv = db.query(AppointmentSurvey).filter(AppointmentSurvey.booking_id == b.id).first()
+    return {"booking_id": b.id, "status": b.status, "messages": [AN.view(db, r) for r in rows],
+            "survey": VS.staff_view(sv),
+            "attendance": {"recorded_at": b.attendance_recorded_at.isoformat() + "Z" if b.attendance_recorded_at
+                           else None, "completed_at": b.completed_at.isoformat() + "Z" if b.completed_at else None}}
+
+
+class AttendanceIn(BaseModel):
+    status: str                      # completed | no_show
+    ended_at: Optional[str] = None   # ISO UTC, when the visit actually ended
+
+
+@router.post("/appointments/{booking_id}/attendance")
+def appointment_attendance(booking_id: str, body: AttendanceIn, db: Session = Depends(get_db),
+                           user: User = Depends(require_tenant_user)):
+    from app.services.programs import appointment_ops as OPS
+    prog = _program(db, user, managers_only=False)
+    b = _appt(db, prog, booking_id)
+    ended = None
+    if body.ended_at:
+        try:
+            ended = datetime.fromisoformat(body.ended_at.replace("Z", "")[:19])
+        except ValueError:
+            raise HTTPException(status_code=422, detail="End time isn't a valid time.")
+    try:
+        return OPS.attendance(db, prog, b, body.status, user, ended_at=ended)
+    except OPS.OpError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/appointments/{booking_id}/cancel")
+def appointment_cancel(booking_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services.programs import appointment_ops as OPS
+    prog = _program(db, user, managers_only=False)
+    b = _appt(db, prog, booking_id)
+    try:
+        return OPS.cancel(db, prog, b, user)
+    except OPS.OpError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+class RescheduleIn(BaseModel):
+    slot: str                        # Central wall time, one of the offered times
+
+
+@router.post("/appointments/{booking_id}/reschedule")
+def appointment_reschedule(booking_id: str, body: RescheduleIn, db: Session = Depends(get_db),
+                           user: User = Depends(require_tenant_user)):
+    from app.services.programs import appointment_ops as OPS
+    prog = _program(db, user, managers_only=False)
+    b = _appt(db, prog, booking_id)
+    try:
+        slot = datetime.fromisoformat(body.slot[:16])
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Pick one of the offered times.")
+    try:
+        return OPS.reschedule(db, prog, b, slot, user)
+    except OPS.OpError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.get("/appointments-pending-attendance")
+def appointments_pending_attendance(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    from app.services.programs import appointment_ops as OPS
+    prog = _program(db, user, managers_only=False)
+    rows = OPS.pending_attendance(db, prog.organization_id)
+    leads = {l.id: l for l in db.query(Lead).filter(Lead.id.in_([b.lead_id for b in rows] or ["-"])).all()}
+    return {"items": [{"id": b.id, "lead_id": b.lead_id, "when": _booking_time.wire(db, b),
+                       "name": ("%s %s" % (leads[b.lead_id].first_name or "", leads[b.lead_id].last_name or "")).strip()
+                       if b.lead_id in leads else "", "meeting_type": b.meeting_type} for b in rows]}
+
+
+class MessageSettingsIn(BaseModel):
+    enabled: Optional[bool] = None
+    survey_enabled: Optional[bool] = None
+    reminder_minutes: Optional[list] = None
+    window: Optional[list] = None
+    survey_delay_hours: Optional[int] = None
+
+
+@router.get("/appointment-messages/settings")
+def appointment_message_settings(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    from app.services.programs import appointment_notifications as AN
+    from app.services.programs import booking_policy as BP
+    prog = _program(db, user, managers_only=False)
+    pol = BP.for_program(prog)
+    if pol is None:
+        raise HTTPException(status_code=404, detail="This program has no appointment rules.")
+    return {"settings": AN.settings(pol), "order": [
+        "1. Switch appointment messages on here (confirmations, reminders, change/cancel notices).",
+        "2. Texts also need the workspace texts switch (owner). Emails go through the normal email checks.",
+        "3. Survey invitations have their own switch here."]}
+
+
+@router.post("/appointment-messages/settings")
+def appointment_message_settings_save(body: MessageSettingsIn, db: Session = Depends(get_db),
+                                      user: User = Depends(require_tenant_user)):
+    """Managers only. Saving never sends anything by itself; messages written
+    while off that have passed their time are not sent late."""
+    import json as _json
+    from app.services.programs import appointment_notifications as AN
+    from app.services.programs import booking_policy as BP
+    prog = _program(db, user)
+    _require_manager(db, user)
+    pol = BP.for_program(prog)
+    if pol is None:
+        raise HTTPException(status_code=404, detail="This program has no appointment rules.")
+    cur = dict((pol.get("notifications") or {}))
+    before = dict(cur)
+    if body.reminder_minutes is not None:
+        try:
+            mins = sorted({int(x) for x in body.reminder_minutes}, reverse=True)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Reminder times must be minutes.")
+        if not mins or any(m < 15 or m > 10080 for m in mins) or len(mins) > 3:
+            raise HTTPException(status_code=422, detail="Up to 3 reminders, between 15 minutes and 7 days before.")
+        cur["reminder_minutes"] = mins
+    if body.window is not None:
+        try:
+            a, b = body.window
+            assert len(a) == 5 and len(b) == 5 and a < b
+            BP._hhmm(a), BP._hhmm(b)
+        except Exception:                                # noqa: BLE001
+            raise HTTPException(status_code=422, detail="Window is two times like 09:00 and 18:00.")
+        cur["window"] = [a, b]
+    if body.survey_delay_hours is not None:
+        if not 24 <= int(body.survey_delay_hours) <= 168:
+            raise HTTPException(status_code=422, detail="The survey waits at least 24 hours.")
+        cur["survey_delay_hours"] = int(body.survey_delay_hours)
+    for k in ("enabled", "survey_enabled"):
+        v = getattr(body, k)
+        if v is not None:
+            cur[k] = bool(v)
+    raw = _json.loads(prog.booking_policy_json)
+    raw["notifications"] = cur
+    prog.booking_policy_json = _json.dumps(raw, sort_keys=True)
+    from app.routers.audit_log_router import log_action
+    log_action(db, prog.organization_id, user.id, action="program.appointment_messages_settings",
+               target_type="outreach_program", target_id=prog.id, before=before, after=cur, commit=False)
+    db.commit()
+    return {"settings": AN.settings(BP.for_program(prog))}
+
+
+
+class StageReturnIn(BaseModel):
+    lead_ids: list
+
+
+@router.post("/data-review/return/stage")
+def data_review_stage_return(body: StageReturnIn, db: Session = Depends(get_db),
+                             user: User = Depends(require_tenant_user)):
+    """REVIEWED re-entry (Issue #507): a manager picks families from "Rest
+    over". Each is re-checked (finished unanswered round, rest fully over, no
+    conflict on its phone/email, not do-not-contact) and staged for the
+    Return campaign - not approved, not started, nothing sent."""
+    from app.services.programs import rotation as _rot
+    prog = _program(db, user)
+    _require_manager(db, user)
+    ids = [str(x) for x in (body.lead_ids or [])][:100]
+    leads = db.query(Lead).filter(Lead.organization_id == prog.organization_id, Lead.id.in_(ids or ["-"])).all()
+    key = "ffr-return-%s" % datetime.utcnow().strftime("%Y%m%d")
+    res = _rot.stage_return(db, prog.organization_id, leads, key, by=user)
+    from app.routers.audit_log_router import log_action
+    log_action(db, prog.organization_id, user.id, action="program.return_round_staged", target_type="outreach_program",
+               target_id=prog.id, details={"cycle": key, "staged": res["staged"], "refused": res["refused"]})
+    return res

@@ -40,6 +40,8 @@ export default function Appointments({ locationId, openPerson }) {
     <>
       <PageHead title="Appointments" sub="Visits families booked. Times show in your own time zone." />
       <ErrorLine text={err} />
+      <MessageSettings />
+      <PendingAttendance onDone={() => setReload(x => x + 1)} openPerson={openPerson} reload={reload} />
       <BookingActivity openPerson={openPerson} />
       <Panel title="Booked visits" labelledBy="sci-appts"
         aside={<span className="sci-micro sci-muted">{data ? `${num(data.items.length)} shown` : 'Loading…'}</span>}>
@@ -65,6 +67,7 @@ export default function Appointments({ locationId, openPerson }) {
                         {a.meeting_type === 'home' && a.visit_address ? <span className="sci-micro" style={{ display: 'block' }}>{a.visit_address}</span> : null}</td>
                       <td className="sci-small" onClick={e => e.stopPropagation()}>
                         <AssignTo appt={a} onDone={() => setReload(x => x + 1)} />
+                        <ApptActions appt={a} onDone={() => setReload(x => x + 1)} />
                       </td>
                       <td style={{ textAlign: 'right' }}><Chip tone={(STATUS[a.status] || [])[1] || ''} plain>{(STATUS[a.status] || [a.status])[0]}</Chip></td>
                     </tr>
@@ -177,5 +180,103 @@ function AssignTo({ appt, onDone }) {
       </select>
       {msg ? <span style={{ display: 'block', color: '#8a1c1c' }}>{msg}</span> : null}
     </label>
+  )
+}
+
+
+/* STAFF CONTROLS (Issue #507): record attendance (a COMPLETED visit gets the
+   survey 24 hours later), cancel, move to another open time, and see every
+   message this appointment has - scheduled, sent, skipped and why. */
+const MSG_LABEL = { confirmation: 'Confirmation', updated: 'Change notice', cancelled: 'Cancellation notice',
+  reminder_24h: 'Reminder (24 hours)', reminder_2h: 'Reminder (2 hours)', survey: 'Survey invitation' }
+function ApptActions({ appt, onDone }) {
+  const [open, setOpen] = useState(false)
+  const [d, setD] = useState(null)
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [moveDay, setMoveDay] = useState('')
+  const [slots, setSlots] = useState(null)
+  const live = appt.status === 'booked' || appt.status === 'confirmed'
+  const past = new Date(appt.when).getTime() < Date.now()
+  const load = () => api.get(`/program/command/appointments/${appt.id}/messages`).then(setD).catch(e => setMsg(errText(e)))
+  const act = async (path, body, ok) => {
+    setBusy(true); setMsg('')
+    try { await api.post(`/program/command/appointments/${appt.id}/${path}`, body || {}); setMsg(ok); onDone && onDone(); if (open) load() }
+    catch (e) { setMsg(errText(e)) } finally { setBusy(false) }
+  }
+  const pickDay = async day => {
+    setMoveDay(day); setSlots(null)
+    if (!day) return
+    try { setSlots(await api.get(`/program/command/day-slots?lead_id=${appt.lead_id}&date=${day}`)) } catch (e) { setSlots({ slots: [], reason: errText(e) }) }
+  }
+  return (
+    <div className="sci-micro" style={{ marginTop: 4 }}>
+      {live && past ? <>
+        <button type="button" className="sci-link" disabled={busy} onClick={() => act('attendance', { status: 'completed' }, 'Marked completed. The survey is scheduled for 24 hours after the visit.')}>Completed</button>{' · '}
+        <button type="button" className="sci-link" disabled={busy} onClick={() => act('attendance', { status: 'no_show' }, 'Marked no-show. No survey.')}>No-show</button>{' · '}
+      </> : null}
+      {live && !past ? <>
+        <button type="button" className="sci-link" disabled={busy} onClick={() => { if (window.confirm('Cancel this appointment? The family gets one cancellation notice (if appointment messages are on).')) act('cancel', {}, 'Cancelled.') }}>Cancel</button>{' · '}
+        <label>Move to <input type="date" value={moveDay} onChange={e => pickDay(e.target.value)} aria-label="Move to day" /></label>{' · '}
+      </> : null}
+      <button type="button" className="sci-link" onClick={() => { setOpen(!open); if (!open) load() }}>{open ? 'Hide messages' : 'Messages'}</button>
+      {slots ? <div>{(slots.slots || []).length ? slots.slots.map(x => <button key={x.value} type="button" disabled={busy} style={{ marginRight: 6 }}
+        onClick={() => act('reschedule', { slot: x.value }, `Moved to ${x.label}.`)}>{x.time}</button>) : <span className="sci-muted">{slots.reason || 'No open times that day.'}</span>}</div> : null}
+      {msg ? <div>{msg}</div> : null}
+      {open && d ? <div style={{ marginTop: 6 }}>
+        {(d.messages || []).length ? <table className="sci-table compact"><tbody>{d.messages.map(m => <tr key={m.id}>
+          <td>{MSG_LABEL[m.purpose] || m.purpose}</td><td>{m.channel === 'sms' ? 'Text' : 'Email'}</td>
+          <td>{m.status}{m.delivery ? ` · ${m.delivery}` : ''}</td><td>{m.due_at ? new Date(m.due_at).toLocaleString([], { timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}</td>
+          <td className="sci-muted">{m.reason || m.error || ''}</td></tr>)}</tbody></table> : <span className="sci-muted">No messages for this appointment.</span>}
+        {d.survey ? <div style={{ marginTop: 6 }}>Survey: {d.survey.submitted_at ? `answered · ${d.survey.rating}/5 · helpful: ${d.survey.helpful}${d.survey.follow_up ? ` · wants follow-up by ${d.survey.follow_up_method} (task created)` : ''}${d.survey.comments ? ` · “${d.survey.comments}”` : ''}` : 'not answered yet'}</div> : null}
+      </div> : null}
+    </div>
+  )
+}
+
+/* Visits that have ended with no attendance recorded: staff work, never an
+   assumed visit (no survey goes until someone marks it completed). */
+function PendingAttendance({ onDone, openPerson, reload }) {
+  const [d, setD] = useState(null)
+  useEffect(() => { api.get('/program/command/appointments-pending-attendance').then(setD).catch(() => setD(null)) }, [reload])
+  if (!d || !(d.items || []).length) return null
+  return (
+    <Panel title="Record attendance" aside={<Chip tone="warn" plain>{num(d.items.length)} waiting</Chip>}>
+      <p className="sci-micro sci-muted">These visits have ended. Mark each one completed or no-show; only completed visits get the survey.</p>
+      <table className="sci-table compact"><tbody>{d.items.map(a => <tr key={a.id}>
+        <td><button type="button" className="sci-namebtn" onClick={() => openPerson(a.lead_id)}>{a.name || 'Family'}</button></td>
+        <td>{timeOf(a.when)} · {dayKey(a.when)}</td><td>{a.meeting_type === 'home' ? 'Home visit' : 'At Restland'}</td>
+        <td><ApptActions appt={{ ...a, status: 'booked' }} onDone={onDone} /></td></tr>)}</tbody></table>
+    </Panel>
+  )
+}
+
+/* APPOINTMENT MESSAGES settings (managers). Off by default; saving sends nothing. */
+function MessageSettings() {
+  const [d, setD] = useState(null)
+  const [msg, setMsg] = useState('')
+  const [form, setForm] = useState(null)
+  useEffect(() => { api.get('/program/command/appointment-messages/settings').then(r => { setD(r); setForm(r.settings) }).catch(() => setD(null)) }, [])
+  if (!d || !form) return null
+  const save = async patch => {
+    setMsg('')
+    try { const r = await api.post('/program/command/appointment-messages/settings', patch); setForm(r.settings); setMsg('Saved. Nothing was sent.') }
+    catch (e) { setMsg(errText(e)) }
+  }
+  const hrs = m => (m % 60 === 0 ? `${m / 60} hour${m === 60 ? '' : 's'}` : `${m} minutes`)
+  return (
+    <Panel title="Appointment messages" aside={<Chip tone={form.enabled ? 'ok' : 'warn'} plain>{form.enabled ? 'On' : 'Off'}</Chip>}>
+      <dl className="rl-kv">
+        <dt>Confirmation</dt><dd>Right after booking, by text and email (where allowed)</dd>
+        <dt>Reminders</dt><dd>{form.reminder_minutes.map(hrs).join(' and ')} before the visit · between {form.window[0]} and {form.window[1]} Central</dd>
+        <dt>Survey</dt><dd>{form.survey_delay_hours} hours after a visit marked completed · {form.survey_enabled ? 'on' : 'off'}</dd>
+      </dl>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
+        <button type="button" onClick={() => save({ enabled: !form.enabled })}>{form.enabled ? 'Turn appointment messages off' : 'Turn appointment messages on'}</button>
+        <button type="button" onClick={() => save({ survey_enabled: !form.survey_enabled })}>{form.survey_enabled ? 'Turn survey off' : 'Turn survey on'}</button>
+      </div>
+      <ol className="sci-micro sci-muted" style={{ marginTop: 8 }}>{(d.order || []).map(x => <li key={x}>{x.replace(/^\d+\. /, '')}</li>)}</ol>
+      {msg ? <div className="sci-micro">{msg}</div> : null}
+    </Panel>
   )
 }

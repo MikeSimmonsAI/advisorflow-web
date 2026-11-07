@@ -388,6 +388,12 @@ def _log_touch(db: Session, state, lead, *, touch_number, attempt_seq, outcome,
         attempted_at=attempted_at,
         body_preview=(body_preview[:240] if body_preview else None),
     )
+    try:
+        # Issue #507: the campaign round this attempt belongs to (Restland).
+        from app.services.programs import rotation as _rot
+        row.cycle_key = _rot.cycle_key_for(db, lead) if getattr(lead, "organization_id", None) else None
+    except Exception:                                    # noqa: BLE001 - never block the log
+        row.cycle_key = None
     if message is not None:
         row.message_id = getattr(message, "id", None)
         row.provider = "twilio"
@@ -695,6 +701,21 @@ def run_due_cadences(db: Session, organization_id: str = None,
                 from app.services.programs import rotation as _rot
                 if not _rot.reply_counts_for_cadence(db, lead):
                     has_reply = None
+            if has_reply is None:
+                # Issue #507: re-checked at dispatch for the rotating campaigns -
+                # the phone/email must not be resting or in another open round.
+                from app.services.programs import rotation as _rot2
+                from app.services.programs import identity as _idr
+                _rec = _idr.source_record_for_lead(db, lead)
+                if _rec is not None and _rec.campaign_family in ("restland_family_file_review",
+                                                                 "restland_family_file_review_return"):
+                    _why = _rot2.dispatch_refusal(db, lead)
+                    if _why:
+                        _log_touch(db, state, lead, touch_number=touch_number,
+                                   attempt_seq=_next_attempt_seq(db, state, touch_number), claim=True,
+                                   outcome=OUTCOME_STOPPED, reason=_why[:200], scheduled_for=scheduled_for)
+                        stop_cadence_for_lead(db, lead.id, "stopped_conflict")
+                        continue
 
             if has_reply:
                 _log_touch(db, state, lead, touch_number=touch_number,

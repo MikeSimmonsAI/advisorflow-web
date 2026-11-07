@@ -768,7 +768,31 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
         _prog_loc = _li(db, lead) if lead else None
     except Exception:
         _prog_loc = None
-    if _prog_loc is not None and lead and lead.phone and advisor and not body.get("skip_family_text"):
+    # A PROGRAM WITH ITS OWN APPOINTMENT RULES (Issue #507, Restland): ONE
+    # confirmation per channel through appointment_notifications - idempotent
+    # per appointment time, off until the program switches appointment
+    # messages on, and it replaces the inline text below (never both).
+    _rules = None
+    try:
+        from app.services.programs import booking_policy as _bpn
+        _rules = _bpn.for_advisor(db, advisor) if (advisor and booking and _prog_slot is not None) else None
+    except Exception:                                    # noqa: BLE001
+        _rules = None
+    if _rules is not None:
+        try:
+            from app.services.programs import appointment_notifications as _an
+            db.commit()
+            _ev = "rescheduled" if (_already and not _same_slot) else "booked"
+            _sched = _an.on_booked(db, booking, event=_ev, skip_immediate=bool(body.get("skip_family_text")))
+            db.commit()
+            _ran = _an.run(db, lead.organization_id, booking_id=booking.id)
+            lead_sms_result = {"success": bool(_ran.get("sent")), "via": "appointment messages",
+                               "scheduled": _sched, "run": _ran}
+        except Exception as e:                           # noqa: BLE001
+            db.rollback()
+            logger.warning("booking-confirmed: appointment messages not scheduled: %s", e)
+            lead_sms_result = {"success": False, "error": str(e)[:200]}
+    elif _prog_loc is not None and lead and lead.phone and advisor and not body.get("skip_family_text"):
         # OUTREACH PROGRAM (SCI): sent through send_sms, so it goes out on the
         # program's own approved line with every program gate, signed by the
         # location - never from an advisor's or another organization's number.

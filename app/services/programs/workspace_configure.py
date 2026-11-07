@@ -114,13 +114,58 @@ def calendar_probe(user: Optional[User]) -> Dict:
                                  timeMax=(now + timedelta(days=1)).isoformat(), maxResults=1,
                                  singleEvents=True).execute()
         acct = (resp.get("summary") or "").strip().lower()
-        return dict(out, read_ok=True, calendar_timezone=resp.get("timeZone"),
-                    account_matches_login=bool(acct) and acct == (user.email or "").lower())
+        out = dict(out, read_ok=True, calendar_timezone=resp.get("timeZone"),
+                   account_matches_login=bool(acct) and acct == (user.email or "").lower(),
+                   destination=acct or None)
+        try:
+            cl = svc.calendarList().get(calendarId=out["calendar_id"]).execute()
+            out.update(access_role=cl.get("accessRole"), destination_name=cl.get("summary"),
+                       destination_primary=bool(cl.get("primary")))
+        except Exception as e:                           # noqa: BLE001 - reported, not fatal
+            out["access_role_error"] = str(e)[:160]
+        return out
     except Exception as e:                               # noqa: BLE001
         msg = str(e)
         return dict(out, read_ok=False, error=msg[:200],
                     needs_reconnect=any(k in msg.lower() for k in ("invalid_grant", "unauthorized", "revoked",
                                                                     "expired", "401")))
+
+
+def twilio_probe(db: Session, user: Optional[User]) -> Dict:
+    """READ-ONLY: which number a Restland text would go from, and what
+    Twilio itself says about that number and its toll-free verification.
+    No message is sent; no credential is logged."""
+    if user is None:
+        return {"checked": False, "reason": "no booking user"}
+    out = {"checked": True}
+    try:
+        from app.services.sms_service import _resolve_twilio_creds
+        client, from_phone, _cid = _resolve_twilio_creds(user, db)
+        out["sender"] = from_phone
+        nums = client.incoming_phone_numbers.list(phone_number=from_phone, limit=2)
+        if not nums:
+            return dict(out, number_found=False)
+        num = nums[0]
+        from urllib.parse import urlparse
+        caps = getattr(num, "capabilities", None) or {}
+        out.update(number_found=True, number_sid=num.sid,
+                   sms_webhook_host=urlparse(num.sms_url or "").netloc or None,
+                   voice_webhook_host=urlparse(num.voice_url or "").netloc or None,
+                   sms_capable=bool(caps.get("sms")) if isinstance(caps, dict) else None,
+                   voice_capable=bool(caps.get("voice")) if isinstance(caps, dict) else None)
+        try:
+            vs = client.messaging.v1.tollfree_verifications.list(tollfree_phone_number_sid=num.sid, limit=5)
+            out["tollfree_verifications"] = [{
+                "status": str(v.status), "use_case_categories": list(v.use_case_categories or []),
+                "message_volume": v.message_volume, "opt_in_type": str(v.opt_in_type) if v.opt_in_type else None,
+                "business_name": v.business_name,
+                "date_updated": v.date_updated.isoformat() if v.date_updated else None,
+                "rejection_reason": v.rejection_reason} for v in vs]
+        except Exception as e:                           # noqa: BLE001
+            out["tollfree_verification_error"] = str(e)[:200]
+    except Exception as e:                               # noqa: BLE001
+        out["error"] = str(e)[:200]
+    return out
 
 
 def _copy_steps(fam, sms: Dict, email: Dict, run, db, changes, reason) -> None:
@@ -187,9 +232,19 @@ def configure(db: Session, org: Organization, run_key: str, *, probe: bool = Tru
         _set(db, run, prog, "OutreachProgram", {"primary_contact_name": DISPLAY_NAME}, "name on outreach",
              changes, "contact_name_set")
 
-    # 2. Appointment rules.
-    _set(db, run, prog, "OutreachProgram", {"booking_policy_json": json.dumps(BP.RESTLAND_POLICY, sort_keys=True)},
-         "every day, 5 starts, 45 min + 45 min gap, office or home", changes, "booking_policy_set")
+    # 2. Appointment rules, plus the appointment-message settings (OFF; a
+    # setting a person already saved is kept).
+    pol = dict(BP.RESTLAND_POLICY)
+    cur = BP.for_program(prog) or {}
+    from app.services.programs import appointment_notifications as AN
+    notif = dict(AN.DEFAULTS)
+    notif.update(cur.get("notifications") or {})
+    if not notif.get("active_since"):
+        notif["active_since"] = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    pol["notifications"] = notif
+    _set(db, run, prog, "OutreachProgram", {"booking_policy_json": json.dumps(pol, sort_keys=True)},
+         "every day, 5 starts, 45 min + 45 min gap, office or home; appointment messages OFF", changes,
+         "booking_policy_set")
 
     # 3. The location's street address (blank -> verified address only).
     Location = _location_model()
@@ -242,8 +297,10 @@ def configure(db: Session, org: Organization, run_key: str, *, probe: bool = Tru
         raise WR.ResetRefused("The Batch 1 campaign is switched on; nothing is changed while it runs.")
     _copy_steps(fam, F.SMS, F.EMAIL, run, db, changes, "owner-approved 5 texts + 4 emails")
 
-    # 6. The Return campaign, drafted, OFF.
+    # 6. The Return campaign, drafted, OFF (its draft steps refreshed when it exists).
     ret = db.query(CampaignFamily).filter_by(organization_id=org.id, key=F.RETURN_KEY).first()
+    if ret is not None and not ret.is_active:
+        _copy_steps(ret, F.RETURN_SMS, F.RETURN_EMAIL, run, db, changes, "Return drafts refreshed")
     if ret is None:
         ret = CampaignFamily(organization_id=org.id, key=F.RETURN_KEY, name=F.RETURN_NAME,
                              source_campaign_patterns="[]", language="en", is_active=False,
@@ -318,10 +375,11 @@ def configure(db: Session, org: Organization, run_key: str, *, probe: bool = Tru
 
     # 8. Read-only calendar check.
     cal = calendar_probe(user) if probe else {"checked": False, "reason": "skipped"}
+    sender = twilio_probe(db, user) if probe else {"checked": False, "reason": "skipped"}
 
     run.status, run.finished_at = "applied", datetime.utcnow()
     run.summary_json = json.dumps({
-        "changes": dict(changes), "notes": notes, "calendar": cal,
+        "changes": dict(changes), "notes": notes, "calendar": cal, "sender": sender,
         "batch_1": {"kept": keep, "unstaged": dropped, "added": fresh},
         "audience_segments": p["summary"]["audience_segments"], "ready": p["summary"]["ready"],
         "applied_at": datetime.utcnow().isoformat() + "Z"}, default=str)

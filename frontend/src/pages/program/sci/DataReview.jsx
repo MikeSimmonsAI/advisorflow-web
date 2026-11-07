@@ -50,6 +50,13 @@ function List({ bucket, label, openPerson }) {
     api.get(`/program/command/data-review/list?bucket=${bucket}&offset=${page * PAGE}&limit=${PAGE}`)
       .then(r => { if (n === seq.current) setD(r) }).catch(e => { if (n === seq.current) setErr(errText(e)) })
   }, [bucket, page])
+  const stageReturn = async id => {
+    try {
+      const r = await api.post('/program/command/data-review/return/stage', { lead_ids: [id] })
+      window.alert(r.staged?.length ? 'Staged for the Return campaign. Not approved, nothing sent.' : `Not staged: ${(r.refused?.[0] || {}).reason || 'not eligible'}`)
+      setPage(p => p)
+    } catch (e) { window.alert(errText(e)) }
+  }
   if (err) return <ErrorLine text={`Could not load this list: ${err}`} />
   if (!d) return <Loading />
   if (!d.total) return <Empty title="Nobody in this list" />
@@ -62,6 +69,7 @@ function List({ bucket, label, openPerson }) {
       <thead><tr><th>Family</th><th>Number</th><th>Status</th><th>Why</th><th>Round · next touch</th><th>Last contact</th></tr></thead>
       <tbody>{d.items.map(i => <tr key={i.lead_id}>
         <td><button className="sci-link" onClick={() => openPerson(i.lead_id)}>{i.name}</button>
+          {bucket === 'returning' ? <> <button type="button" className="sci-link" onClick={() => stageReturn(i.lead_id)}>Stage for Return</button></> : null}
           {i.replied_before ? <> <Chip tone="info">replied before</Chip></> : null}</td>
         <td>{i.phone || (i.phone_issue ? <Chip tone="warn">{i.phone_issue}</Chip> : '—')}{i.shares_phone_with ? <small> · shared ×{i.shares_phone_with + 1}</small> : null}</td>
         <td>{(i.status || '').replace(/_/g, ' ')}{i.tier ? <small> · {i.tier.replace(/_/g, ' ')}</small> : null}</td>
@@ -106,6 +114,13 @@ export default function DataReview({ openPerson }) {
       {c.steps.map(t => <p key={t.touch} className="small"><b>Text {t.touch}</b> · day {t.day}, {t.hour > 12 ? `${t.hour - 12} PM` : `${t.hour} AM`} Central<br />{t.text}</p>)}
       <h4 style={{ margin: '14px 0 6px' }}>Emails</h4>
       {(c.email_steps || []).map(e => <p key={e.touch} className="small"><b>Email {e.touch}</b> · day {e.day}<br /><b>{e.subject}</b><br /><span style={{ whiteSpace: 'pre-line' }}>{e.body}</span></p>)}
+    </Panel>}
+    {s.forecast && <Panel title="Volume (upper bound)" aside={<Chip tone="info">Proposal, nothing set</Chip>}>
+      <p className="sci-micro sci-muted">{s.forecast.assumptions} Each first-round family gets {s.forecast.segments_per_family_first_round} text segments in total. {Math.round((s.forecast.email_share_of_ready || 0) * 100)}% of ready families have an email.</p>
+      <table className="sci-table compact"><thead><tr><th>New families a day</th><th>Texts a day</th><th>Segments a day</th><th>Emails a day (max · expected)</th><th>In sequence</th><th>Bookings a week (5% · 10% · 20%)</th></tr></thead>
+        <tbody>{s.forecast.by_volume.map(r => <tr key={r.new_families_per_day}><td>{r.new_families_per_day}</td><td>{r.texts_per_day}</td><td>{r.text_segments_per_day}</td>
+          <td>{r.emails_per_day_max} · {r.emails_per_day_at_share}</td><td>{r.families_in_sequence}</td><td>{Object.values(r.bookings_per_week).join(' · ')}</td></tr>)}</tbody></table>
+      <p className="sci-micro">Appointment capacity: {s.forecast.appointment_capacity.starts_per_week_for_one_person} starts a week for one person. Daily new-family cap now: {s.forecast.daily_new_family_cap.current} ({s.forecast.daily_new_family_cap.proposal}). Scheduled in the next 7 days: {s.forecast.scheduled_next_7_days.text_sequences_due} text sequences, {s.forecast.scheduled_next_7_days.appointment_messages} appointment messages.</p>
     </Panel>}
     {s.rotation && <Panel title="Rotation and the 30-day rest" aside={<Chip tone="info">Reviewed pool, never automatic</Chip>}>
       <dl className="rl-kv">

@@ -179,9 +179,30 @@ def _context(db: Session, org_id: str, ids: List[str]):
     return leads, touches, replied, booked, states
 
 
+def _return_round(db: Session, prog: OutreachProgram, lead: Lead) -> bool:
+    """Is this lead in a later round of a rotating campaign (Issue #507)?"""
+    from app.services.programs import rotation
+    try:
+        m = rotation.open_member(db, prog.organization_id, lead.id)
+    except Exception:                                    # noqa: BLE001
+        db.rollback()
+        return False
+    return m is not None and (m.round_number or 1) > 1
+
+
 def assess_all(db: Session, prog: OutreachProgram, fam: CampaignFamily) -> List[Dict]:
     people = _people(db, prog.organization_id, fam.key)
     leads, touches, replied, booked, states = _context(db, prog.organization_id, list(people))
+    from app.services.programs.campaigns import email_schedule as _own_days
+    if _own_days(fam.key):
+        # Issue #507: a later round sees only ITS OWN emails (touch base+n),
+        # and only replies that are not automatic.
+        from app.services.programs import rotation
+        bases = rotation.email_bases(db, prog.organization_id, list(people))
+        touches = {lid: {n - bases.get(lid, 0): t for n, t in ts.items()
+                         if bases.get(lid, 0) < n <= bases.get(lid, 0) + 99}
+                   for lid, ts in touches.items()}
+        replied = rotation.genuine_repliers(db, prog.organization_id, list(people)) & set(replied)
     names = {p.location_id: p.official_name for p in db.query(LocationProfile)
              .filter(LocationProfile.organization_id == prog.organization_id).all()}
     out = []
@@ -357,6 +378,16 @@ def start(db: Session, prog: OutreachProgram, fam: CampaignFamily, user, *, coun
                 if state is None and _may_enrol(lead):
                     db.add(CadenceState(lead_id=lead.id, status="active", current_touch_number=0,
                                         cadence_started_at=at, next_touch_due_at=at))
+                    texts = True
+                elif state is not None and state.status != "active" and _return_round(db, prog, lead) \
+                        and _may_enrol(lead):
+                    # Issue #507: a RETURNING family's new round restarts its
+                    # text journey from text 1 with a new start; the earlier
+                    # round's attempts stay as history (cadence_service only
+                    # counts attempts since cadence_started_at).
+                    state.status, state.current_touch_number = "active", 0
+                    state.cadence_started_at, state.next_touch_due_at = at, at
+                    state.completed_at = None
                     texts = True
                 elif state is not None and state.status == "active":
                     texts = True                        # an existing text journey keeps its place
