@@ -280,3 +280,22 @@ def test_the_screen_shows_seven_days_and_the_progress_panel():
                   "Texts attempted", "Delivered", "Emails sent", "Bounced", "Blocked", "Replies", "Handoffs", "Booked",
                   "Next 7 days", "overdue"):
         assert label in panel, label
+
+
+def test_a_held_central_alabama_family_is_never_shown_as_scheduled(client, program, sample_advisor):
+    """Production (Nov 7): SCI Live said "29 new families scheduled for Tuesday,
+    Nov 3" - families approved for Central Alabama whose journey can never
+    start (Outlook/Yahoo hold with no textable phone, DNC). Not scheduled."""
+    from app.services.programs import sci_analytics as SA
+    from tests.test_sci_441_central_alabama_cadence import _ca_lead, _fam
+    db, org, admin = program["db"], program["org"], program["admin"]
+    _fam(db, org)
+    held = _ca_lead(db, org, admin, source="L007", phone="", email="held@yahoo.com", first="held")
+    for r in db.query(ProgramSourceRecord).filter_by(lead_id=held.id):
+        r.approved_to_send_at, r.scheduled_start_at = datetime(2026, 10, 29, 14, 32), datetime(2026, 11, 3, 16, 4)
+    db.commit()
+    SA._CACHE.clear()
+    a = client.get("/program/command/analytics?range=today", headers=_h(db, admin)).json()
+    assert a["overview"]["scheduled_new"]["value"] == 0
+    src = open("frontend/src/pages/program/command/Dashboard.jsx", encoding="utf-8").read()
+    assert "no family is ready for it" in src

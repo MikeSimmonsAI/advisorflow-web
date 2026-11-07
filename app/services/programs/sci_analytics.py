@@ -182,6 +182,7 @@ class Ledger:
                 "imported_at": r.created_at, "approved_at": r.approved_to_send_at,
                 "on_hold": bool(r.on_hold), "hold_reason": r.hold_reason,
                 "campaign_key": r.campaign_family, "starts_at": r.scheduled_start_at,
+                "journey_started": bool(getattr(r, "journey_started_at", None)),
             }
         from app.models.program_models import CampaignFamily
         self.active_campaigns = {k for (k,) in db.query(CampaignFamily.key).filter(
@@ -644,6 +645,14 @@ def rows(L: Ledger, metric: str, w: Dict, f: Optional[Dict] = None) -> List[Dict
                 continue
             if metric in ("scheduled_new", "scheduled_sms_ready", "scheduled_no_consent"):
                 if not fam["approved_at"] or contacted:
+                    continue
+                # Nov 7: a campaign with its own journey (Central Alabama) sends
+                # nothing until the journey is started - an approved family
+                # whose journey was never started (held: provider hold, DNC,
+                # no usable contact) is NOT scheduled, whatever old start time
+                # its row carries. Campaign progress lists it under Not started.
+                from app.services.programs.campaigns import OWN_COPY_KEYS
+                if fam.get("campaign_key") in OWN_COPY_KEYS and not fam.get("journey_started"):
                     continue
                 if metric == "scheduled_sms_ready" and not fam.get("sms_consent"):
                     continue
