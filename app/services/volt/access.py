@@ -314,10 +314,11 @@ def history(db: Session, org_id: str, user_id: Optional[str] = None, limit: int 
 # ── seed: authorized VOLT org admins named by the deployment ────────────────
 
 def ensure_admins(db: Session, org_id: str, emails: List[str]) -> List[str]:
-    """Grant VOLT org-admin membership to EXISTING logins named in the
-    deployment's VOLT_ORG_ADMIN_EMAILS. Never creates an account, never touches
-    another workspace, and never re-grants a login whose VOLT access was
-    deliberately suspended or removed. Idempotent."""
+    """BOOTSTRAP: grant VOLT org-admin membership ONCE to EXISTING logins named
+    in the deployment's VOLT_ORG_ADMIN_EMAILS. Never creates an account, never
+    touches another workspace, and never re-grants: a login that was granted
+    before, or whose VOLT access was suspended/removed/restored, is left exactly
+    as it is. Idempotent."""
     granted = []
     for raw in emails:
         email = (raw or "").strip().lower()
@@ -328,6 +329,15 @@ def ensure_admins(db: Session, org_id: str, emails: List[str]) -> List[str]:
             continue
         if row_for(db, org_id, u.id) is not None:
             continue                                     # an explicit VOLT decision stands
+        if db.query(VoltAuditEvent).filter(VoltAuditEvent.organization_id == org_id,
+                                           VoltAuditEvent.entity_type == "access",
+                                           VoltAuditEvent.entity_id == u.id,
+                                           VoltAuditEvent.action == "access_granted").first() is not None:
+            # BOOTSTRAP ONLY. Granted once already: any later change to this
+            # login's VOLT access - a suspension, a removal, or the membership
+            # switched off anywhere else (God Mode Manage Access) - is the
+            # current decision, and a redeploy never reverses it.
+            continue
         m = _membership(db, org_id, u.id)
         if m is not None and m.is_active:
             continue

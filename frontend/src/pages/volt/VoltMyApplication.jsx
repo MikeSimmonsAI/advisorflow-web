@@ -172,6 +172,18 @@ function ZoomCard({ app, session, onPick, onChanged }) {
   )
 }
 
+function Remaining({ items }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="v-ma-remaining">
+      <button type="button" className="v-btn v-btn--link" aria-expanded={open} aria-controls="v-remaining" onClick={() => setOpen(!open)} data-view-remaining>
+        {open ? 'Hide remaining items' : `View remaining items (${items.length})`}
+      </button>
+      {open && <ul id="v-remaining" className="v-small" data-remaining>{items.map((m) => <li key={m}>{m.replace(/^(Profile|Answer|Experience): /, '')}</li>)}</ul>}
+    </div>
+  )
+}
+
 function nextButton(a, onPick) {
   if (a.status === 'draft') return <Link className="v-btn v-btn--red" to={`/volt/me/applications/${a.id}`} data-next-action>Continue application →</Link>
   if (a.status === 'needs_update') return <Link className="v-btn v-btn--red" to={`/volt/me/applications/${a.id}`} data-next-action>Make requested updates →</Link>
@@ -237,6 +249,7 @@ export default function MyApplication({ me, reload, portal }) {
         <section className="v-panel" aria-labelledby="v-next-h">
           <h3 id="v-next-h">What happens next</h3>
           <p className="v-muted" data-next-detail>{a.next_action?.detail}</p>
+          {(a.next_action?.remaining || []).length > 1 && <Remaining items={a.next_action.remaining} />}
           <div className="v-ma-action">
             <div><b>Your next action</b><div data-next-label>{a.next_action?.kind === 'applicant' ? a.next_action.label : a.next_action?.kind === 'done' ? a.next_action.label : "You're all caught up."}</div></div>
             {nextButton(a, () => setPicker(true))}

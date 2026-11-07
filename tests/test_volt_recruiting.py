@@ -154,7 +154,10 @@ def test_register_serial_draft_signin_resume(volt):
     a = me["applications"][0]
     assert a["status"] == "draft" and a["answers"]["relevant_experience"] == "Half done"
     assert a["next_action"]["label"] == "Finish your application"
-    assert "Upload: Experience summary" in a["next_action"]["detail"]
+    assert "Upload: Experience summary" in a["next_action"]["remaining"]
+    # Short card: the next step and a count; the full list sits behind "View remaining items".
+    na = a["next_action"]["detail"]
+    assert na.startswith("Next: ") and "left to finish" in na and len(na) < 120 and ";" not in na
     assert me["profile"]["date_of_birth"] == "1990-02-28"
 
 
