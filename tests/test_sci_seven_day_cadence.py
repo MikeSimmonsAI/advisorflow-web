@@ -452,3 +452,17 @@ def test_email_only_family_gets_its_email_journey_and_no_text(program, sample_ad
         et.run(db, org.id, now=SAT_10 + timedelta(minutes=10))             # a retry pass sends nothing more
         cs.run_due_cadences(db, now=SAT_10)
     assert len(sent) == 1 and sms.call_count == 0
+
+
+def test_screens_read_a_cached_ready_count_and_the_batch_always_reads_fresh(program, monkeypatch):
+    db, org = program["db"], program["org"]
+    p = _prog(db, org)
+    daily_batch._ready_cache.clear()
+    calls = []
+    monkeypatch.setattr(daily_batch, "pool", lambda db, prog: calls.append(1) or
+                        {"entries": [], "skipped": {}, "text_email": 0, "email_only": 0})
+    assert daily_batch.ready_detail(db, p, compute=False) is None            # a screen never waits for it
+    assert daily_batch.ready_detail(db, p)["total"] == 0 and len(calls) == 1
+    assert daily_batch.ready_detail(db, p, compute=False)["total"] == 0 and len(calls) == 1   # cached
+    daily_batch.pick_entries(db, p, 5)                                        # the batch: fresh, clears the copy
+    assert len(calls) == 2 and daily_batch.ready_detail(db, p, compute=False) is None

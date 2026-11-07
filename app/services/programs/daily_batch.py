@@ -193,6 +193,7 @@ def pick(db: Session, prog: OutreachProgram, n: int) -> List[str]:
 
 
 def pick_entries(db: Session, prog: OutreachProgram, n: int) -> List[Dict]:
+    _ready_cache.pop(prog.organization_id, None)         # the run changes the pool
     by_loc: Dict[str, list] = {}
     for e in pool(db, prog)["entries"]:
         by_loc.setdefault(e["location_id"] or "", []).append(e)
@@ -218,14 +219,31 @@ def ready_now(db: Session, prog: OutreachProgram) -> Optional[int]:
     return None if p is None else p["total"]
 
 
-def ready_detail(db: Session, prog: OutreachProgram) -> Optional[Dict]:
+# The pool walks every not-yet-approved family through the send gate (several
+# queries each), so screens read a copy at most READY_TTL old; the batch itself
+# always computes it fresh (pick_entries -> pool).
+READY_TTL = timedelta(minutes=10)
+_ready_cache: Dict[str, tuple] = {}
+
+
+def ready_detail(db: Session, prog: OutreachProgram, *, compute: bool = True) -> Optional[Dict]:
+    """The batch pool as counts: ready text+email, ready email-only, and the
+    reasons everyone else is left out. compute=False returns only a cached
+    copy (or None) - for screens that must stay fast."""
+    hit = _ready_cache.get(prog.organization_id)
+    if hit is not None and datetime.utcnow() - hit[0] < READY_TTL:
+        return hit[1]
+    if not compute:
+        return None
     try:
         p = pool(db, prog)
     except Exception:                                    # noqa: BLE001 - a count, never a blocker
         log.exception("daily batch ready count failed for %s", prog.id)
         return None
-    return {"total": len(p["entries"]), "text_email": p["text_email"], "email_only": p["email_only"],
-            "skipped": p["skipped"]}
+    out = {"total": len(p["entries"]), "text_email": p["text_email"], "email_only": p["email_only"],
+           "skipped": p["skipped"], "as_of": datetime.utcnow().isoformat() + "Z"}
+    _ready_cache[prog.organization_id] = (datetime.utcnow(), out)
+    return out
 
 
 def status(prog: OutreachProgram) -> Dict:
@@ -314,6 +332,9 @@ def run(db: Session, now: Optional[datetime] = None) -> Dict:
         except Exception:  # noqa: BLE001 - one program must not stop another
             db.rollback()
             log.exception("daily batch failed for program %s", prog.id)
+        # Keep the screens' "ready now" count warm (recomputed at most every
+        # READY_TTL, off the request path).
+        ready_detail(db, prog)
     return out
 
 

@@ -1530,7 +1530,7 @@ def command_analytics(range_: str = Query("today", alias="range"), start: Option
                      campaign=scope)
     out["campaign_name"] = L.memberships.name_of(scope)
     out["campaign_options"] = CA.catalog(L.memberships, set(L.families))
-    out["daily_batch"] = dict(daily_batch.status(prog), ready=daily_batch.ready_detail(db, prog))
+    out["daily_batch"] = dict(daily_batch.status(prog), ready=daily_batch.ready_detail(db, prog, compute=False))
     out["overview"] = SA.overview(L, db, location_id or None)
     out["streams"] = SA.streams(L, location_id or None)
     out["next_batch"] = _next_batch(prog)
