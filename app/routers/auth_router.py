@@ -734,6 +734,11 @@ def forgot_password(request: Request, req: ForgotPasswordRequest, db: Session = 
         env = (os.environ.get("APP_ENV") or "production").lower()
         where = "EvoSys Pro (staging)" if env == "staging" else "EvoSys Pro"
         if getattr(user, "role", None) == "volt_rep":
+            from app.models.volt_models import VoltAccess as _VA
+            if db.query(_VA).filter(_VA.user_id == user.id, _VA.state != "active").first() is not None:
+                # VOLT access suspended/removed: no reset link (same answer either way).
+                _log.info("forgot-password: VOLT access not active for user %s; no link", user.id)
+                return _FORGOT_OK
             # A VOLT applicant: VOLT's own sender, VOLT's domain, back to the
             # VOLT sign-in afterwards. The shared reset token is unchanged.
             from app.services.volt import mail as _volt_mail

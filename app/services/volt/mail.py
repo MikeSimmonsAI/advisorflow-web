@@ -421,8 +421,10 @@ def _status_events(db: Session, app: VoltApplication) -> int:
 def on_registered(db: Session, prog: VoltProgram, rep: VoltRep, app: Optional[VoltApplication]) -> Optional[VoltEmail]:
     to, _u = _recipient(db, rep)
     proj = _project(db, app) if app else None
-    paras = ["Hi %s, your VOLT Marketing account is ready. Your rep ID is <b>%s</b>."
-             % (_e(rep.first_name), _e(C.rep_code(rep.serial)))]
+    # An applicant is not a rep before approval/start: no rep ID here.
+    paras = ["Hi %s, your VOLT Marketing account is ready." % _e(rep.first_name)]
+    if app:
+        paras.append("Your application reference is <b>%s</b>." % _e(C.app_ref(app)))
     if proj:
         paras.append("Your %s application is saved as a draft. You can finish it any time; we review it once you submit."
                      % _e(proj))
@@ -482,6 +484,51 @@ def on_status(db: Session, prog: VoltProgram, app: VoltApplication) -> Optional[
                       "If anything about your start looks wrong, reply to this email."],
                      ("Open your dashboard", "%s/volt/me" % origin(prog)))
     return queue(db, prog, kind=app.status, key="status:%s:%s" % (app.id, n), to=to, subject=subject, html=html,
+                 rep_serial=rep.serial, application_id=app.id, is_test=rep.is_test)
+
+
+def _when(sess) -> str:
+    """'Thursday, November 12, 2026 at 10:00 AM CST (America/Chicago)' - DST-correct."""
+    from datetime import timezone as _tz
+    from zoneinfo import ZoneInfo
+    try:
+        loc = sess.starts_at.replace(tzinfo=_tz.utc).astimezone(ZoneInfo(sess.timezone))
+    except Exception:  # pragma: no cover
+        return C.iso(sess.starts_at)
+    return "%s at %s %s (%s)" % (loc.strftime("%A, %B %-d, %Y"), loc.strftime("%-I:%M %p"), loc.tzname(), sess.timezone)
+
+
+def on_booking(db: Session, prog: VoltProgram, rep: VoltRep, app: VoltApplication, sess, row,
+               event: str) -> Optional[VoltEmail]:
+    """Zoom booking notices: confirmed | rescheduled | canceled. One email per
+    real event (the key carries the event's own timestamp). The join button
+    lives on the applicant's signed-in application page, never in the email."""
+    to, _u = _recipient(db, rep)
+    kind = "interview" if sess.kind == "interview" else "orientation"
+    proj = _project(db, app)
+    when = _e(_when(sess))
+    if event == "confirmed":
+        stamp, subject = C.iso(row.booked_at), "Your VOLT Zoom %s is scheduled" % kind
+        paras = ["Hi %s, your Zoom %s for <b>%s</b> is confirmed." % (_e(rep.first_name), kind, _e(proj)),
+                 "<b>%s</b> &middot; %d minutes" % (when, sess.duration_minutes),
+                 "Your application stays active. Use the Join button on your application page at the scheduled time."]
+        heading = "Zoom scheduled"
+    elif event == "rescheduled":
+        stamp, subject = C.iso(sess.rescheduled_at), "Your VOLT Zoom %s has a new time" % kind
+        paras = ["Hi %s, our team moved your Zoom %s for <b>%s</b>." % (_e(rep.first_name), kind, _e(proj)),
+                 "New time: <b>%s</b> &middot; %d minutes" % (when, sess.duration_minutes),
+                 "Open your application page to see the details and join at the new time."]
+        heading = "New Zoom time"
+    else:
+        stamp = C.iso(sess.canceled_at if sess.status == "canceled" else row.canceled_at)
+        subject = "Your VOLT Zoom %s was canceled" % kind
+        paras = ["Hi %s, the Zoom %s for <b>%s</b> on %s was canceled." % (_e(rep.first_name), kind, _e(proj), when),
+                 "Your application is still active. Open your application page to see your next step, or reply to "
+                 "this email if you need help."]
+        heading = "Zoom canceled"
+    return queue(db, prog, kind="zoom_" + event, key="zoom_%s:%s:%s:%s" % (event, sess.id, rep.serial, stamp),
+                 to=to, subject=subject,
+                 html=_page(prog, heading, paras, ("Open My Application", "%s/volt/me?application=%s" % (origin(prog), quote(app.id)))),
                  rep_serial=rep.serial, application_id=app.id, is_test=rep.is_test)
 
 

@@ -160,6 +160,13 @@ def ensure(db: Session) -> Dict[str, object]:
             setattr(prog, field, value)
             created["identity_set"].append(field)
     created["corrected"] = _apply_corrections(db, org.id)
+    # Authorized VOLT org admins (2026-11-06). Named by the deployment, never
+    # in this public repository; existing logins only; never re-grants a login
+    # whose VOLT access was deliberately changed.
+    import os
+    from app.services.volt import access as _access
+    named = [e for e in (os.environ.get("VOLT_ORG_ADMIN_EMAILS") or "").split(",") if e.strip()]
+    created["admins_granted"] = len(_access.ensure_admins(db, org.id, named)) if named else 0
     db.flush()
     created["organization_id"] = org.id
     return created

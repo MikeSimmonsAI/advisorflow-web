@@ -208,6 +208,8 @@ def main(argv=None) -> int:
                 log.info("volt: corrected %s", ",".join(res["corrected"]))
             if res.get("identity_set"):
                 log.info("volt: email identity set %s", ",".join(res["identity_set"]))
+            if res.get("admins_granted"):
+                log.info("volt: org admin access granted to %d existing login(s)", res["admins_granted"])
         except Exception:
             _db.rollback()
             raise

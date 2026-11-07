@@ -184,100 +184,68 @@ def test_matching_name_alone_never_merges(volt):
 
 # ── 2. Referrals: click-to-confirm ───────────────────────────────────────────
 
-def test_dangelo_search_select_submit_saves_id(volt):
+def _set_history_referral(db, app_id, recruiter_serial):
+    """Referral facts recorded before referrals were paused (history)."""
+    a = db.get(VoltApplication, app_id)
+    a.referrer_serial, a.referral_source = recruiter_serial, "search"
+    rep = db.get(VoltRep, a.rep_serial)
+    rep.original_recruiter_serial = recruiter_serial
+    db.commit()
+    return a
+
+
+def test_referral_input_is_ignored_everywhere(volt):
+    """2026-11-06: referrals are not launching. Every signup door ignores
+    referral input and records no attribution; old links still sign up."""
     c, db = volt["c"], volt["db"]
     _, _, d = volt["register"](first="Dangelo", last="Simmons")
     dangelo = d["rep"]["rep_id"]
-    for q in ("Dangelo", "dangelo", "D'Angelo", "D’Angelo", "  dangelo   simmons ", "Simmons"):
-        res = c.get("/volt/public/%s/recruiters" % SLUG, params={"q": q, "test": 1}).json()["results"]
-        assert any(x["rep_id"] == dangelo for x in res), q
-        row = [x for x in res if x["rep_id"] == dangelo][0]
-        assert row == {"rep_id": dangelo, "rep_code": "REP-%d" % (dangelo + 1000), "display_name": "Dangelo Simmons"}
-    assert c.get("/volt/public/%s/recruiters" % SLUG, params={"q": "d", "test": 1}).json()["results"] == []
-    _, tok, out = volt["register"](first="New", last="Recruit", referrer_rep_id=dangelo, referral_source="search")
+    _, tok, out = volt["register"](first="New", last="Recruit", referrer_rep_id=dangelo, referral_source="invite",
+                                   ref="REP-%d" % (dangelo + 1000))
     a = db.get(VoltApplication, out["application_id"])
-    assert a.referrer_serial == dangelo and a.referral_source == "search"
-    assert db.get(VoltRep, out["rep"]["rep_id"]).original_recruiter_serial == dangelo
-    me = c.get("/volt/rep/%s/me" % SLUG, headers=tok).json()        # reload
-    assert me["applications"][0]["referrer"]["rep_id"] == dangelo
-    assert me["original_recruiter"]["display_name"] == "Dangelo Simmons"
+    assert a.referrer_serial is None and a.referral_source is None and a.referral_confirmed_at is None
+    assert db.get(VoltRep, out["rep"]["rep_id"]).original_recruiter_serial is None
+    # Garbage referral input no longer blocks signup.
+    assert c.post("/volt/public/%s/register" % SLUG, json=person(referrer_rep_id="Dangelo")).status_code == 200
+    # A second application ignores it too.
+    r = c.post("/volt/rep/%s/applications" % SLUG, headers=tok, json={"project_key": "fiber", "referrer_rep_id": dangelo})
+    assert r.status_code == 200 and db.get(VoltApplication, r.json()["id"]).referrer_serial is None
+    # No applicant-facing referral surface remains.
+    for path in ("/volt/public/%s/recruiters?q=dangelo" % SLUG, "/volt/public/%s/invite?ref=REP-1001" % SLUG):
+        assert c.get(path).status_code in (404, 405)
+    for path in ("/volt/rep/%s/recruiters?q=dangelo" % SLUG, "/volt/rep/%s/leaderboard" % SLUG):
+        assert c.get(path, headers=tok).status_code in (404, 405)
+    me = c.get("/volt/rep/%s/me" % SLUG, headers=tok).json()
+    assert "referrals" not in me and "original_recruiter" not in me
+    assert all("referrer" not in x for x in me["applications"])
+    assert "rep ID" not in json.dumps(me)
 
 
-def test_typed_name_without_selection_earns_nothing(volt):
+def test_historical_referrals_are_kept_for_staff_only(volt):
     c, db = volt["c"], volt["db"]
-    volt["register"](first="Dangelo", last="Simmons")
-    # A typed name is not a field the server reads for credit.
-    _, _, out = volt["register"](first="Typed", last="Only", referral_name="Dangelo", referrer="Dangelo")
-    a = db.get(VoltApplication, out["application_id"])
-    assert a.referrer_serial is None and db.get(VoltRep, out["rep"]["rep_id"]).original_recruiter_serial is None
-    r = c.post("/volt/public/%s/register" % SLUG, json=person(referrer_rep_id="Dangelo"))
-    assert r.status_code == 422 and "referrer" in r.json()["detail"]["fields"]
-
-
-def test_duplicate_names_are_separate_results(volt):
-    c = volt["c"]
-    _, _, a = volt["register"](first="Dangelo", last="Simmons")
-    _, _, b = volt["register"](first="Dangelo", last="Simmons")
-    res = c.get("/volt/public/%s/recruiters" % SLUG, params={"q": "dangelo", "test": 1}).json()["results"]
-    ids = {x["rep_id"] for x in res}
-    assert {a["rep"]["rep_id"], b["rep"]["rep_id"]} <= ids
-    assert len({x["rep_code"] for x in res}) == len(res)
-    for x in res:
-        assert set(x) == {"rep_id", "rep_code", "display_name"}        # nothing private
-
-
-def test_test_records_hidden_from_public_directory_by_default(volt):
-    volt["register"](first="Hidden", last="Tester")
-    assert volt["c"].get("/volt/public/%s/recruiters" % SLUG, params={"q": "hidden"}).json()["results"] == []
-
-
-def test_invites_invalid_inactive_other_tenant_and_self(volt):
-    c, db = volt["c"], volt["db"]
-    _, tok, d = volt["register"](first="Dangelo", last="Simmons")
-    code = d["rep"]["rep_code"]
-    ok = c.get("/volt/public/%s/invite" % SLUG, params={"ref": code, "project": "fiber"}).json()
-    assert ok["status"] == "valid" and ok["recruiter"]["rep_id"] == d["rep"]["rep_id"] and ok["project"]["key"] == "fiber"
-    assert c.get("/volt/public/%s/invite" % SLUG, params={"ref": "REP-999999"}).json()["status"] == "invalid"
-    assert c.get("/volt/public/%s/invite" % SLUG, params={"ref": "garbage"}).json()["status"] == "invalid"
-    rep = db.get(VoltRep, d["rep"]["rep_id"])
-    rep.recruiter_active = False
-    db.commit()
-    assert c.get("/volt/public/%s/invite" % SLUG, params={"ref": code}).json()["status"] == "inactive"
-    r = c.post("/volt/public/%s/register" % SLUG, json=person(referrer_rep_id=rep.serial, referral_source="invite"))
-    assert r.status_code == 422
-    rep.recruiter_active = True
-    db.commit()
-    # Out of scope: a recruiter in another tenant is not a recruiter here.
-    other_rep = VoltRep(organization_id=volt["other"].id, user_id=volt["other_staff"].id, first_name="Out",
-                        last_name="Scope", search_name="out scope")
-    db.add(other_rep)
-    db.commit()
-    assert c.get("/volt/public/%s/invite" % SLUG, params={"ref": "REP-%d" % (other_rep.serial + 1000)}).json()["status"] == "invalid"
-    assert c.post("/volt/public/%s/register" % SLUG, json=person(referrer_rep_id=other_rep.serial)).status_code == 422
-    # Self-referral on a second project.
-    r = c.post("/volt/rep/%s/applications" % SLUG, headers=tok, json={"project_key": "fiber", "referrer_rep_id": rep.serial})
-    assert r.status_code == 422 and "yourself" in json.dumps(r.json())
-    assert c.get("/volt/rep/%s/recruiters" % SLUG, headers=tok, params={"q": "dangelo"}).json()["results"] == []
-
-
-# ── 3. Second project keeps serial and original recruiter; no duplicates ─────
-
-def test_second_project_same_serial_original_recruiter_kept(volt):
-    c, db = volt["c"], volt["db"]
+    org = volt["org"].id
     _, _, d = volt["register"](first="Dangelo", last="Simmons")
-    _, _, m = volt["register"](first="Maria", last="Reed")
-    _, tok, out = volt["register"](first="Two", last="Projects", referrer_rep_id=d["rep"]["rep_id"])
+    _, tok, out = volt["register"](first="Old", last="Referral")
+    _set_history_referral(db, out["application_id"], d["rep"]["rep_id"])
+    mine = c.get("/volt/rep/%s/applications/%s" % (SLUG, out["application_id"]), headers=tok).json()
+    assert "referrer" not in mine
+    f = c.get("/volt/ops/%s/applications/%s" % (org, out["application_id"]), headers=H(db, volt["staff"])).json()
+    assert f["application"]["referrer"]["rep_id"] == d["rep"]["rep_id"]
+    assert f["original_recruiter"]["rep_id"] == d["rep"]["rep_id"]
+    assert db.get(VoltApplication, out["application_id"]).referrer_serial == d["rep"]["rep_id"]
+
+
+# ── 3. Second project keeps serial; no duplicates ─────────────────────────────
+
+def test_second_project_same_serial_no_duplicates(volt):
+    c, db = volt["c"], volt["db"]
+    _, tok, out = volt["register"](first="Two", last="Projects")
     serial = out["rep"]["rep_id"]
     for _ in range(3):   # double click / retry / second tab
-        r = c.post("/volt/rep/%s/applications" % SLUG, headers=tok,
-                   json={"project_key": "fiber", "referrer_rep_id": m["rep"]["rep_id"], "referral_source": "invite"})
+        r = c.post("/volt/rep/%s/applications" % SLUG, headers=tok, json={"project_key": "fiber"})
         assert r.status_code == 200
     apps = db.query(VoltApplication).filter(VoltApplication.rep_serial == serial).all()
     assert len(apps) == 2 and {a.project_id for a in apps} == {volt["project"]("aca").id, volt["project"]("fiber").id}
-    fiber = [a for a in apps if a.project_id == volt["project"]("fiber").id][0]
-    assert fiber.referrer_serial == m["rep"]["rep_id"]
-    assert db.get(VoltRep, serial).original_recruiter_serial == d["rep"]["rep_id"]
-    # Repeat registration of the same project does not create another.
     assert c.post("/volt/rep/%s/applications" % SLUG, headers=tok, json={"project_key": "aca"}).json()["id"] == out["application_id"]
 
 
@@ -428,9 +396,10 @@ def test_started_leaderboard_report_csv_reconcile_no_double_count(volt):
     org = volt["org"].id
     _, _, d = volt["register"](first="Dangelo", last="Simmons")
     dangelo = d["rep"]["rep_id"]
-    _, tok, out = volt["register"](first="Started", last="Twice", referrer_rep_id=dangelo)
-    fiber = c.post("/volt/rep/%s/applications" % SLUG, headers=tok,
-                   json={"project_key": "fiber", "referrer_rep_id": dangelo}).json()
+    _, tok, out = volt["register"](first="Started", last="Twice")
+    fiber = c.post("/volt/rep/%s/applications" % SLUG, headers=tok, json={"project_key": "fiber"}).json()
+    _set_history_referral(db, out["application_id"], dangelo)
+    _set_history_referral(db, fiber["id"], dangelo)
     sh = H(db, volt["staff"])
     for app_id in (out["application_id"], fiber["id"]):
         _complete(c, tok, app_id)
@@ -457,9 +426,8 @@ def test_started_leaderboard_report_csv_reconcile_no_double_count(volt):
     assert "1990" not in csv_text and "@example.test" not in csv_text and "/documents/" not in csv_text
     # Test records are excluded unless asked for.
     assert c.get("/volt/ops/%s" % org, headers=sh).json()["overview"]["starts"] == 0
-    # Rep dashboard leaderboard: names and counts only.
-    b = c.get("/volt/rep/%s/leaderboard" % SLUG, headers=tok).json()
-    assert all(set(r) <= {"rep_id", "rep_code", "display_name", "registrations", "submissions", "approvals", "starts", "rank"} for r in b["rows"])
+    # Applicants have no leaderboard any more (referrals are not launching).
+    assert c.get("/volt/rep/%s/leaderboard" % SLUG, headers=tok).status_code in (404, 405)
 
 
 def test_needs_update_requires_reason_and_audit_corrections(volt):
@@ -467,7 +435,8 @@ def test_needs_update_requires_reason_and_audit_corrections(volt):
     org = volt["org"].id
     _, _, d = volt["register"](first="Dangelo", last="Simmons")
     _, _, m = volt["register"](first="Maria", last="Reed")
-    _, tok, out = volt["register"](referrer_rep_id=d["rep"]["rep_id"])
+    _, tok, out = volt["register"]()
+    _set_history_referral(db, out["application_id"], d["rep"]["rep_id"])
     _complete(c, tok, out["application_id"])
     sh = H(db, volt["staff"])
     assert c.post("/volt/ops/%s/applications/%s/status" % (org, out["application_id"]), headers=sh,
@@ -969,7 +938,7 @@ def test_talent_pool_dedupes_keeps_consent_and_never_counts_as_an_application(vo
     assert len(rows) == 1
     row = rows[0]
     assert row.submit_count == 2 and row.notify_opt_in is True and row.notify_opt_in_at is not None and json.loads(row.interests) == ["fiber", "aca"]
-    assert row.referrer_serial == d["rep"]["rep_id"] and row.referral_source == "invite"
+    assert row.referrer_serial is None and row.referral_source is None     # referral input ignored
     first_at = row.notify_opt_in_at
     c.post("/volt/public/%s/talent-pool" % SLUG, json=dict(base, notify=True))
     db.refresh(row)
@@ -979,9 +948,9 @@ def test_talent_pool_dedupes_keeps_consent_and_never_counts_as_an_application(vo
     c.post("/volt/public/%s/talent-pool" % SLUG, json=dict(base, email=e2, first_name="Lee", last_name="Late", notify=True))
     late = db.query(VoltTalentSignup).filter(VoltTalentSignup.organization_id == org, VoltTalentSignup.email == e2).one()
     assert late.notify_opt_in is True and late.notify_opt_in_at is not None
-    # Typed names never earn credit.
-    bad = c.post("/volt/public/%s/talent-pool" % SLUG, json=dict(base, email="x-" + email, referrer_rep_id="Dangelo"))
-    assert bad.status_code == 422
+    # Referral input of any shape is ignored; the signup still saves.
+    ok = c.post("/volt/public/%s/talent-pool" % SLUG, json=dict(base, email="x-" + email, first_name="Xavi", referrer_rep_id="Dangelo"))
+    assert ok.status_code == 200
     # Existing applicant email: same answer, profile untouched, no account created.
     body, _, out = volt["register"](first="Real", last="Applicant")
     users_before = db.query(User).count()
@@ -993,7 +962,7 @@ def test_talent_pool_dedupes_keeps_consent_and_never_counts_as_an_application(vo
     assert after["applications"] == before["applications"] + 2
     # Staff Talent Pool + CSV; others refused.
     lst = c.get("/volt/ops/%s/talent-pool" % org, headers=sh, params={"include_test": 1, "interest": "aca"}).json()
-    assert [x["email"] for x in lst["items"]] == [email] and lst["items"][0]["referrer"]["display_name"] == "Dangelo Simmons"
+    assert [x["email"] for x in lst["items"]] == [email] and lst["items"][0]["referrer"] is None
     csv_text = c.get("/volt/ops/%s/talent-pool.csv" % org, headers=sh, params={"include_test": 1, "q": "pat pool"}).text
     assert len(csv_text.strip().splitlines()) == 2 and "Email me about future opportunities" in csv_text
     for h in (H(db, volt["other_staff"]), H(db, volt["outsider"])):

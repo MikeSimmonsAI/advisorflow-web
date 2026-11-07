@@ -2,9 +2,8 @@
 
     PUBLIC (no login)                         /volt/public/{slug}/...
         GET  ''                     portal: open and closed projects
-        GET  /recruiters?q=         click-to-confirm recruiter directory (name + rep code only)
-        GET  /invite?ref=&project=  what a shared link suggests (nothing is credited)
         POST /register              account + profile + serial + first draft application
+                                    (referral input is ignored: referrals are not launching)
         POST /login                 applicant sign-in
     APPLICANT (any signed-in login; role volt_rep is fenced to /volt/rep/* in deps)
                                               /volt/rep/{slug}/...
@@ -32,9 +31,24 @@ from app.models.volt_models import (
 from app.services.volt import common as C
 from app.services.volt import core, docs, hiring, mail, reports, sessions, talent
 
+from app.services.volt import access as volt_access
+
+
+def _volt_guard(request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """EVERY applicant and staff VOLT request: a suspended or removed login,
+    or a session VOLT revoked, is refused here - before any endpoint runs,
+    downloads included. The owner is never refused."""
+    pp = request.path_params or {}
+    org_id = pp.get("org_id")
+    if org_id is None and pp.get("slug") is not None:
+        org_id = C.program_by_slug(db, pp["slug"]).organization_id
+    if org_id:
+        volt_access.enforce(db, user, org_id, getattr(request.state, "auth_session", None))
+
+
 public_router = APIRouter(prefix="/volt/public", tags=["volt-public"])
-rep_router = APIRouter(prefix="/volt/rep", tags=["volt-rep"])
-ops_router = APIRouter(prefix="/volt/ops", tags=["volt-ops"])
+rep_router = APIRouter(prefix="/volt/rep", tags=["volt-rep"], dependencies=[Depends(_volt_guard)])
+ops_router = APIRouter(prefix="/volt/ops", tags=["volt-ops"], dependencies=[Depends(_volt_guard)])
 
 
 def _send_after(background: BackgroundTasks, row) -> None:
@@ -62,20 +76,6 @@ def portal(request: Request, slug: str, db: Session = Depends(get_db)):
     return {"name": prog.name, "slug": prog.slug, "availability_options": hiring.AVAILABILITY,
             "open_projects": [p for p in ps if p["recruiting"]],
             "past_projects": [p for p in ps if not p["recruiting"]]}
-
-
-@public_router.get("/{slug}/recruiters")
-@limiter.limit("40/minute")
-def public_recruiters(request: Request, slug: str, q: str = "", test: int = 0, db: Session = Depends(get_db)):
-    prog = C.program_by_slug(db, slug)
-    return core.directory_search(db, prog, q, include_test=bool(test))
-
-
-@public_router.get("/{slug}/invite")
-@limiter.limit("60/minute")
-def invite(request: Request, slug: str, ref: str = "", project: str = "", db: Session = Depends(get_db)):
-    prog = C.program_by_slug(db, slug)
-    return core.invite_preview(db, prog, ref, project)
 
 
 @public_router.post("/{slug}/register")
@@ -120,6 +120,11 @@ def login(request: Request, slug: str, body: Dict[str, Any] = Body(...), db: Ses
     if user is None:
         _login_record_failure(request, email, db)
         raise HTTPException(status_code=401, detail="Incorrect email or password.")
+    if volt_access.blocked(db, prog.organization_id, user):
+        # Same message for suspended and removed; nothing else is revealed.
+        raise HTTPException(status_code=403, detail={
+            "message": "Your VOLT Marketing access is not active. Contact support@voltmarketing.live.",
+            "code": "volt_access_inactive"})
     _login_clear_failures(request, email, db)
     rep = C.rep_for_user(db, prog, user)
     return {"access_token": _token(db, user, request), "token_type": "bearer",
@@ -149,11 +154,9 @@ def me(slug: str, db: Session = Depends(get_db), user: User = Depends(get_curren
                 "staff_access": C.staff_access(db, user, prog.organization_id)}
     apps = (db.query(VoltApplication).filter(VoltApplication.rep_serial == rep.serial)
             .order_by(VoltApplication.created_at.asc()).all())
-    orig = db.get(VoltRep, rep.original_recruiter_serial) if rep.original_recruiter_serial else None
-    direct = (db.query(VoltRep).filter(VoltRep.original_recruiter_serial == rep.serial).count())
-    project_refs = (db.query(VoltApplication.rep_serial).filter(VoltApplication.referrer_serial == rep.serial)
-                    .distinct().count())
     app_dicts = [core.application_dict(db, prog, rep, a) for a in apps]
+    for d, a in zip(app_dicts, apps):
+        d["zoom"] = _zoom_state(db, a)
     profile_docs = core.requirements(db, prog, rep, None)
     doc_requests = [dict(d, scope="Profile") for d in profile_docs if d["state"] in ("requested", "replace")]
     for a in app_dicts:
@@ -163,13 +166,62 @@ def me(slug: str, db: Session = Depends(get_db), user: User = Depends(get_curren
     return {"has_profile": True, "profile": core.rep_profile_dict(rep, user, private=True),
             "hiring": hiring.profile_dict(rep), "hiring_missing": hiring.missing_profile(rep),
             "availability_options": hiring.AVAILABILITY,
-            "original_recruiter": C.public_rep(orig), "applications": app_dicts,
+            "applications": app_dicts,
             "profile_documents": profile_docs, "document_requests": doc_requests,
             "sessions": sessions.for_rep(db, rep),
-            "referrals": {"code": C.rep_code(rep.serial), "direct_recruits": direct,
-                          "project_referrals": project_refs,
-                          "link_path": "/volt?ref=%s" % C.rep_code(rep.serial)},
+            "updates": _updates(db, prog, rep, apps),
+            "support_email": mail.support_address(prog),
             "staff_access": C.staff_access(db, user, prog.organization_id)}
+
+
+def _zoom_state(db, a: VoltApplication) -> Dict[str, Any]:
+    """The Zoom step for ONE application: waiting | choose | booked."""
+    b = sessions.active_booking(db, a)
+    if b is not None:
+        return {"state": "booked", "stage": a.schedule_stage, "session_id": b.session_id}
+    if sessions.eligible(a):
+        return {"state": "choose", "stage": a.schedule_stage}
+    return {"state": "waiting", "stage": None}
+
+
+_UPDATE_ACTIONS = {"status": "Application status", "zoom_booked": "Zoom booked",
+                   "zoom_booking_canceled": "Zoom booking canceled", "schedule_stage": "Zoom step",
+                   "reviewed": "Document reviewed"}
+
+
+def _updates(db, prog, rep, apps) -> List[Dict[str, Any]]:
+    """Staff updates the applicant may see: stage changes, document reviews,
+    the Zoom step. Never internal notes, never who on staff did it."""
+    from app.models.volt_models import VoltAuditEvent, VoltDocument
+    ids = [a.id for a in apps]
+    doc_ids = [d.id for d in db.query(VoltDocument.id).filter(VoltDocument.rep_serial == rep.serial).all()]
+    from sqlalchemy import and_, or_
+    conds = []
+    if ids:
+        conds.append(and_(VoltAuditEvent.entity_type == "application", VoltAuditEvent.entity_id.in_(ids)))
+    if doc_ids:
+        conds.append(and_(VoltAuditEvent.entity_type == "document", VoltAuditEvent.entity_id.in_(doc_ids)))
+    if not conds:
+        return []
+    rows = (db.query(VoltAuditEvent).filter(VoltAuditEvent.organization_id == prog.organization_id, or_(*conds),
+                                            VoltAuditEvent.action.in_(list(_UPDATE_ACTIONS)))
+            .order_by(VoltAuditEvent.at.desc()).limit(40).all())
+    out = []
+    for r in rows:
+        if r.action == "status":
+            text = "Status: %s" % C.STATUS_LABELS.get(r.new_value, r.new_value)
+            if r.new_value == "needs_update" and r.reason:
+                text += " - " + r.reason
+        elif r.action == "schedule_stage":
+            text = ("Zoom %s step opened" % r.new_value) if r.new_value else "Zoom step paused"
+        elif r.action == "reviewed":
+            text = "Document review: %s" % ({"accepted": "accepted", "replace": "replacement requested"}
+                                             .get(r.new_value, r.new_value or "updated"))
+        else:
+            text = _UPDATE_ACTIONS[r.action]
+        out.append({"at": C.iso(r.at), "text": text,
+                    "application_id": r.entity_id if r.entity_type == "application" else None})
+    return out
 
 
 @rep_router.post("/{slug}/profile")
@@ -199,13 +251,6 @@ def put_hiring_profile(slug: str, body: Dict[str, Any] = Body(...), db: Session 
     hiring.save_profile(_need_rep(rep), body)
     db.commit()
     return {"saved": True, "hiring": hiring.profile_dict(rep), "hiring_missing": hiring.missing_profile(rep)}
-
-
-@rep_router.get("/{slug}/recruiters")
-def rep_recruiters(slug: str, q: str = "", db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    prog, rep = _me(db, slug, user)
-    return core.directory_search(db, prog, q, exclude_serial=rep.serial if rep else None,
-                                 include_test=bool(rep and rep.is_test))
 
 
 @rep_router.post("/{slug}/applications")
@@ -280,15 +325,44 @@ def own_file(slug: str, doc_id: str, db: Session = Depends(get_db), user: User =
     return _file_response(db, d)
 
 
-@rep_router.get("/{slug}/leaderboard")
-def rep_leaderboard(slug: str, project_id: str = "", db: Session = Depends(get_db),
-                    user: User = Depends(get_current_user)):
+# ── Zoom: the applicant's own scheduling step ───────────────────────────────
+
+@rep_router.get("/{slug}/applications/{app_id}/zoom-times")
+def zoom_times(slug: str, app_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Times THIS application may choose. Empty until staff open the step.
+    Never a join link."""
+    prog, rep = _me(db, slug, user)
+    a = core.own_application(db, _need_rep(rep), app_id)
+    return {"state": _zoom_state(db, a), "times": sessions.available_for(db, a)}
+
+
+@rep_router.post("/{slug}/applications/{app_id}/zoom-booking")
+def zoom_book(slug: str, app_id: str, background: BackgroundTasks, body: Dict[str, Any] = Body(...),
+              db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     prog, rep = _me(db, slug, user)
     _need_rep(rep)
-    f = reports.filters_from({"project_id": project_id})
-    board = reports.leaderboard(db, prog.organization_id, f)
-    # Names and counts only - the public shape of each recruiter.
-    return board
+    row, created = sessions.book(db, rep, app_id, str(body.get("session_id") or ""), user)
+    a = db.get(VoltApplication, app_id)
+    s = db.get(VoltSession, row.session_id)
+    email = mail.on_booking(db, prog, rep, a, s, row, "confirmed") if created else None
+    db.commit()
+    _send_after(background, email)
+    return {"booked": True, "created": created, "zoom": _zoom_state(db, a),
+            "session": [x for x in sessions.for_rep(db, rep) if x["id"] == s.id][0],
+            "application": core.application_dict(db, prog, rep, a)}
+
+
+@rep_router.post("/{slug}/applications/{app_id}/zoom-booking/cancel")
+def zoom_cancel(slug: str, app_id: str, background: BackgroundTasks, db: Session = Depends(get_db),
+                user: User = Depends(get_current_user)):
+    prog, rep = _me(db, slug, user)
+    _need_rep(rep)
+    row = sessions.cancel_booking(db, rep, app_id, user)
+    a = db.get(VoltApplication, app_id)
+    email = mail.on_booking(db, prog, rep, a, db.get(VoltSession, row.session_id), row, "canceled") if row else None
+    db.commit()
+    _send_after(background, email)
+    return {"canceled": row is not None, "zoom": _zoom_state(db, a)}
 
 
 # ═════════════════════════════════════════════════════════════ STAFF ═══════
@@ -368,6 +442,8 @@ def ops_file(org_id: str, app_id: str, db: Session = Depends(get_db), user: User
     others = (db.query(VoltApplication).filter(VoltApplication.rep_serial == rep.serial,
                                                VoltApplication.id != a.id).all())
     nexts = list(core.STAFF_TRANSITIONS.get(a.status, ()))
+    if a.status == "withdrawn":
+        nexts = [a.closed_from_status or "submitted"]          # reopen, to exactly where it was
     return {"application": core.application_dict(db, prog, rep, a, for_staff=True),
             "profile": dict(core.rep_profile_dict(rep, owner, private=True), is_test=rep.is_test,
                             recruiter_active=rep.recruiter_active),
@@ -381,7 +457,10 @@ def ops_file(org_id: str, app_id: str, db: Session = Depends(get_db), user: User
             "history": core.history(db, org_id, [("application", a.id), ("rep", rep.serial)] +
                                     [("document", d.id) for d in all_docs]),
             "next_actions": nexts if access != "viewer" else [],
-            "missing": core.missing_items(db, prog, rep, a)}
+            "missing": core.missing_items(db, prog, rep, a),
+            "zoom": dict(_zoom_state(db, a), sessions=[x for x in sessions.for_rep(db, rep)
+                                                       if x.get("application_id") == a.id]),
+            "person": volt_access.describe(db, org_id, owner, rep)}
 
 
 @ops_router.post("/{org_id}/applications/{app_id}/status")
@@ -565,21 +644,146 @@ def ops_session_create(org_id: str, body: Dict[str, Any] = Body(...), db: Sessio
 
 
 @ops_router.patch("/{org_id}/sessions/{sid}")
-def ops_session_edit(org_id: str, sid: str, body: Dict[str, Any] = Body(...), db: Session = Depends(get_db),
-                     user: User = Depends(get_current_user)):
-    _staff(db, user, org_id, write=True)
+def ops_session_edit(org_id: str, sid: str, background: BackgroundTasks, body: Dict[str, Any] = Body(...),
+                     db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    prog, _ = _staff(db, user, org_id, write=True)
     s = sessions.save(db, org_id, body, user, _session_in(db, org_id, sid))
+    rows = _notify_attendees(db, prog, s, "rescheduled") if getattr(s, "_rescheduled", False) else []
     db.commit()
+    for r in rows:
+        _send_after(background, r)
     return sessions.staff_dict(db, s)
+
+
+def _notify_attendees(db, prog, s, event):
+    out = []
+    for att in db.query(VoltSessionAttendee).filter(VoltSessionAttendee.session_id == s.id).all():
+        if att.booking_status not in (None, "active") or not att.application_id:
+            continue
+        rep = db.get(VoltRep, att.rep_serial)
+        a = db.get(VoltApplication, att.application_id)
+        if rep is not None and a is not None:
+            out.append(mail.on_booking(db, prog, rep, a, s, att, event))
+    return out
 
 
 @ops_router.post("/{org_id}/sessions/{sid}/cancel")
-def ops_session_cancel(org_id: str, sid: str, body: Dict[str, Any] = Body(default={}), db: Session = Depends(get_db),
-                       user: User = Depends(get_current_user)):
+def ops_session_cancel(org_id: str, sid: str, background: BackgroundTasks, body: Dict[str, Any] = Body(default={}),
+                       db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    prog, _ = _staff(db, user, org_id, write=True)
+    s = _session_in(db, org_id, sid)
+    was = s.status
+    sessions.cancel(db, org_id, s, user, (body or {}).get("reason"))
+    rows = _notify_attendees(db, prog, s, "canceled") if was != "canceled" else []
+    db.commit()
+    for r in rows:
+        _send_after(background, r)
+    return sessions.staff_dict(db, s)
+
+
+@ops_router.post("/{org_id}/sessions/{sid}/booking")
+def ops_session_booking(org_id: str, sid: str, body: Dict[str, Any] = Body(...), db: Session = Depends(get_db),
+                        user: User = Depends(get_current_user)):
+    """Open or close this session for applicant booking. Existing bookings stay."""
     _staff(db, user, org_id, write=True)
-    s = sessions.cancel(db, org_id, _session_in(db, org_id, sid), user, (body or {}).get("reason"))
+    s = sessions.set_booking_open(db, org_id, _session_in(db, org_id, sid), bool(body.get("open")), user)
     db.commit()
     return sessions.staff_dict(db, s)
+
+
+@ops_router.post("/{org_id}/sessions/{sid}/bookings/{serial}/cancel")
+def ops_booking_cancel(org_id: str, sid: str, serial: int, background: BackgroundTasks,
+                       body: Dict[str, Any] = Body(default={}), db: Session = Depends(get_db),
+                       user: User = Depends(get_current_user)):
+    """Staff cancel ONE attendee's booking (frees the seat)."""
+    prog, _ = _staff(db, user, org_id, write=True)
+    s = _session_in(db, org_id, sid)
+    att = (db.query(VoltSessionAttendee).filter(VoltSessionAttendee.session_id == s.id,
+                                                VoltSessionAttendee.rep_serial == int(serial)).first())
+    if att is None or att.booking_status not in (None, "active"):
+        raise HTTPException(status_code=404, detail="That applicant has no active booking here.")
+    rep = _rep_in(db, org_id, serial)
+    reason = str((body or {}).get("reason") or "").strip()[:1000] or "Canceled by staff"
+    email = None
+    if att.application_id:
+        row = sessions.cancel_booking(db, rep, att.application_id, user, by_staff=True, reason=reason)
+        if row is not None:
+            email = mail.on_booking(db, prog, rep, db.get(VoltApplication, att.application_id), s, row, "canceled")
+    else:
+        att.booking_status, att.canceled_at, att.cancel_reason = "canceled", C.now(), reason
+        C.audit(db, org_id, user, "session", s.id, "assignment_canceled", field=C.rep_code(rep.serial), reason=reason)
+    db.commit()
+    _send_after(background, email)
+    return sessions.staff_dict(db, s)
+
+
+@ops_router.post("/{org_id}/applications/{app_id}/scheduling")
+def ops_scheduling(org_id: str, app_id: str, body: Dict[str, Any] = Body(...), db: Session = Depends(get_db),
+                   user: User = Depends(get_current_user)):
+    """Staff decide when an application reaches the Zoom step: interview,
+    orientation, or off (off keeps any existing booking)."""
+    _staff(db, user, org_id, write=True)
+    a = _app_in(db, org_id, app_id)
+    sessions.set_schedule_stage(db, org_id, a, body.get("stage"), user)
+    db.commit()
+    return {"id": a.id, "schedule_stage": a.schedule_stage, "zoom": _zoom_state(db, a)}
+
+
+# ── People & Access ─────────────────────────────────────────────────────────
+
+@ops_router.get("/{org_id}/people")
+def ops_people(org_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _staff(db, user, org_id)
+    qp = dict(request.query_params)
+    yes = lambda k: str(qp.get(k) or "").lower() in ("1", "true", "yes")
+    out = volt_access.people(db, org_id, q=qp.get("q") or "", role=qp.get("role") or "",
+                             access=qp.get("access") or "", include_archived=yes("include_archived"),
+                             include_test=yes("include_test"))
+    out["can_manage"] = volt_access.actor_level(db, user, org_id) is not None
+    out["actor_level"] = volt_access.actor_level(db, user, org_id)
+    out["me"] = {"user_id": user.id, "name": user.full_name or user.email}
+    return out
+
+
+@ops_router.get("/{org_id}/people/history")
+def ops_people_history(org_id: str, user_id: str = "", db: Session = Depends(get_db),
+                       user: User = Depends(get_current_user)):
+    _staff(db, user, org_id)
+    return {"items": volt_access.history(db, org_id, user_id or None)}
+
+
+def _person(db, org_id, user_id) -> User:
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Person not found.")
+    in_org = (db.query(VoltRep).filter(VoltRep.organization_id == org_id, VoltRep.user_id == user_id).first()
+              is not None) or volt_access.staff_role(db, org_id, user_id) is not None \
+        or volt_access.row_for(db, org_id, user_id) is not None
+    if not in_org and target.role != "god_admin":     # the owner: refused with a clear reason below
+        raise HTTPException(status_code=404, detail="Person not found.")
+    return target
+
+
+@ops_router.post("/{org_id}/people/{user_id}/access")
+def ops_person_access(org_id: str, user_id: str, body: Dict[str, Any] = Body(...), db: Session = Depends(get_db),
+                      user: User = Depends(get_current_user)):
+    _staff(db, user, org_id, write=True)
+    out = volt_access.change(db, org_id, user, _person(db, org_id, user_id), body.get("action"), body.get("reason"))
+    db.commit()
+    return out
+
+
+@ops_router.post("/{org_id}/people/{user_id}/archive")
+def ops_person_archive(org_id: str, user_id: str, body: Dict[str, Any] = Body(...), db: Session = Depends(get_db),
+                       user: User = Depends(get_current_user)):
+    _staff(db, user, org_id, write=True)
+    target = _person(db, org_id, user_id)
+    rep = db.query(VoltRep).filter(VoltRep.organization_id == org_id, VoltRep.user_id == target.id).first()
+    if rep is None:
+        raise HTTPException(status_code=409, detail="Only applicants have an application record to archive.")
+    volt_access.set_archived(db, org_id, user, rep, bool(body.get("archived")), body.get("reason"))
+    db.commit()
+    return volt_access.describe(db, org_id, target, rep)
 
 
 @ops_router.post("/{org_id}/sessions/{sid}/attendance")
