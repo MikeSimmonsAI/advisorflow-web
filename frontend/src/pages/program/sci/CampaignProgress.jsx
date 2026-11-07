@@ -9,8 +9,11 @@ import { Chip, Empty, ErrorLine, Kpi, Loading, Panel, ago, errText, num } from '
 
 const GROUPS = [
   ['source_records', 'Total roster', 'users', 'slate', 'Source rows'],
+  ['families', 'Unique families', 'users', 'slate', 'One per person'],
   ['approved_families', 'Approved', 'check', 'blue', 'Families'],
-  ['excluded', 'Excluded', 'pause', 'slate', 'Held out of this campaign'],
+  ['not_approved', 'Not approved', 'clock', 'slate', 'In the campaign, never approved'],
+  ['excluded', 'Excluded', 'pause', 'slate', 'Duplicate of another campaign'],
+  ['data_review', 'Needs review', 'alert', 'gold', 'Location / data check'],
   ['not_started', 'Not started', 'clock', 'gold', 'Approved, waiting'],
   ['active', 'Active', 'bolt', 'teal', 'Still moving'],
   ['stopped', 'Stopped', 'alert', 'red', 'STOP, reply, person, booked'],
@@ -48,9 +51,12 @@ export default function CampaignProgress() {
       {!d && !err ? <Loading label="Counting the roster…" /> : !r ? (!err && <Empty>No campaign to show.</Empty>) : (
         <>
           <p className="sci-micro sci-muted" style={{ margin: '0 0 10px' }}>
-            Sending: <b>{r.window.label}</b>. Daily batch: {r.daily_batch.on ? `${r.daily_batch.count} a day, ${r.daily_batch.days_label.toLowerCase()} from ${r.daily_batch.start}` : 'off'}.
+            Sending: <b>{r.window.label}</b>. Daily batch: {r.daily_batch.on ? `${r.daily_batch.count} a day, ${r.daily_batch.days_label.toLowerCase()} from ${r.daily_batch.start}${r.daily_batch.next_day ? `, next ${dayName(r.daily_batch.next_day)}` : ''} · ${r.daily_batch.ready_now == null ? '—' : num(r.daily_batch.ready_now)} ready to pick now` : 'off'}.
             {' '}Texts: {r.schedule.sms_steps.length} (days {r.schedule.sms_steps.map(s => s.day).join(', ')}). Emails: {r.schedule.email_touches}, every {r.schedule.email_every_days} days.
           </p>
+          {r.program && <p className="sci-micro sci-muted" style={{ margin: '0 0 8px' }}>
+            Whole workspace: {num(r.program.real_records)} real source rows ({num(r.program.real_families)} families) · {num(r.program.unassigned_records)} with no campaign · {num(r.program.test_records_left_out)} test / simulation rows left out of every count.
+          </p>}
           <section className="sci-kpis four" aria-label="Roster">
             {GROUPS.map(([k, label, icon, tone, note]) => <Kpi key={k} icon={icon} tone={tone} value={ro[k] ?? 0} label={label} note={note} />)}
           </section>
@@ -58,7 +64,7 @@ export default function CampaignProgress() {
             <p className="sci-micro" style={{ marginTop: 8 }}>Not started: {Object.entries(r.not_started_why).map(([k, v]) => `${v} ${k.toLowerCase()}`).join(' · ')}</p>
           )}
           {ro.stopped > 0 && (
-            <p className="sci-micro sci-muted">Stopped: {num(r.stopped_why.stop_dnc)} STOP/DNC · {num(r.stopped_why.replied)} replied · {num(r.stopped_why.person_has_it)} with a person · {num(r.stopped_why.appointment)} booked</p>
+            <p className="sci-micro sci-muted">Stopped: {num(r.stopped_why.stop_dnc)} DNC / STOP · {num(r.stopped_why.replied)} replied · {num(r.stopped_why.person_has_it)} with a person · {num(r.stopped_why.appointment)} booked</p>
           )}
           <div className="sci-row-gap" style={{ margin: '10px 0', flexWrap: 'wrap' }}>
             <Chip tone={healthy ? 'ok' : 'bad'}>{healthy ? 'Senders running' : 'Check the senders'}</Chip>

@@ -7,8 +7,11 @@ Every family is in exactly ONE roster group, decided in this order:
   excluded     - a source row held out of this campaign (e.g. already in the
                  original SCI campaign) and no approval
   data_review  - held for a location / data check, no approval
+  not_approved - in the campaign, never approved (and not excluded / held)
   not_started  - approved, journey never started (own-copy campaigns), or
                  approved and never contacted
+Internal test / simulation records (Lead.is_test) are never counted; how many
+were left out is reported.
   stopped      - STOP / DNC, replied, a person owns it, or an appointment
   held         - texts on an SMS Recovery hold
   completed    - texts done (or none) and emails done (or none possible)
@@ -27,7 +30,7 @@ from app.models.program_models import (CampaignFamily, OutreachProgram, ProgramC
                                        ProgramConversationTurn, ProgramEmailTouch, ProgramResponse,
                                        ProgramSourceRecord)
 
-GROUPS = ("excluded", "data_review", "not_started", "active", "stopped", "completed", "held")
+GROUPS = ("excluded", "data_review", "not_approved", "not_started", "active", "stopped", "completed", "held")
 DAYS_BACK = 7
 DAYS_AHEAD = 7
 OVERDUE_GRACE = timedelta(minutes=15)
@@ -56,6 +59,31 @@ def families(db: Session, prog: OutreachProgram) -> List[Dict]:
                   .group_by(ProgramSourceRecord.campaign_family).all())
     out = [{"key": k, "name": n, "active": bool(a), "records": counts.get(k, 0)} for k, n, a in rows]
     return sorted([f for f in out if f["records"]], key=lambda f: -f["records"])
+
+
+def _next_batch_day(prog, now) -> Optional[str]:
+    try:
+        from app.routers.sci_command_router import _next_batch
+        return _next_batch(prog)
+    except Exception:                                    # noqa: BLE001
+        return None
+
+
+def program_summary(db: Session, prog: OutreachProgram) -> Dict:
+    """The whole workspace in rows and real families: test / simulation
+    records left out, rows with no campaign, rows per campaign."""
+    org = prog.organization_id
+    q = (db.query(ProgramSourceRecord.campaign_family, ProgramSourceRecord.lead_id, Lead.is_test)
+         .outerjoin(Lead, Lead.id == ProgramSourceRecord.lead_id)
+         .filter(ProgramSourceRecord.organization_id == org).all())
+    rows = len(q)
+    test_rows = sum(1 for _c, _l, t in q if t)
+    real = [(c, l) for c, l, t in q if not t]
+    fams = {l for _c, l in real if l}
+    unassigned = [(c, l) for c, l in real if not c]
+    return {"source_records": rows, "test_records_left_out": test_rows, "real_records": len(real),
+            "real_families": len(fams) + sum(1 for _c, l in real if not l),
+            "unassigned_records": len(unassigned), "unassigned_families": len({l for _c, l in unassigned if l})}
 
 
 def _email_plan(touches: Dict[int, ProgramEmailTouch], max_t: int) -> Dict:
@@ -139,17 +167,17 @@ def report(db: Session, prog: OutreachProgram, family_key: str, now: Optional[da
             day_counts[d] = day_counts.get(d, 0) + 1
         return at
 
+    skipped_test: set = set()
     for lid, rows in by_lead.items():
         lead = leads.get(lid)
         approved = any(r.approved_to_send_at for r in rows)
-        if lead is None:
+        if lead is None or getattr(lead, "is_test", False):
+            skipped_test.add(lid)
             continue
         if not approved:
             hr = " ".join((r.hold_reason or "") for r in rows).upper()
             groups["excluded" if "EXCLUDED" in hr else "data_review" if any(r.on_hold or r.needs_data_review
-                                                                             for r in rows) else "not_started"] += 1
-            if "EXCLUDED" not in hr and not any(r.on_hold or r.needs_data_review for r in rows):
-                not_started_why["Not approved"] = not_started_why.get("Not approved", 0) + 1
+                                                                             for r in rows) else "not_approved"] += 1
             continue
         st = states.get(lid)
         started = any(r.journey_started_at for r in rows) if own_copy else (st is not None or lid in contacted)
@@ -283,9 +311,13 @@ def report(db: Session, prog: OutreachProgram, family_key: str, now: Optional[da
     return {
         "campaign": {"key": fam.key, "name": fam.name, "active": bool(fam.is_active), "own_journey": own_copy},
         "generated_at": _iso(now),
-        "roster": {"source_records": len(recs), "families": len(by_lead) + sum(no_lead.values()),
-                   "approved_records": sum(1 for r in recs if r.approved_to_send_at),
-                   "approved_families": sum(1 for rows in by_lead.values() if any(r.approved_to_send_at for r in rows)),
+        "roster": {"source_records": len(recs) - sum(len(by_lead[x]) for x in skipped_test),
+                   "families": len(by_lead) - len(skipped_test) + sum(no_lead.values()),
+                   "approved_records": sum(1 for lid, rows in by_lead.items() if lid not in skipped_test
+                                           for r in rows if r.approved_to_send_at),
+                   "approved_families": sum(1 for lid, rows in by_lead.items()
+                                            if lid not in skipped_test and any(r.approved_to_send_at for r in rows)),
+                   "test_records_left_out": sum(len(by_lead[x]) for x in skipped_test),
                    **groups},
         "stopped_why": stopped_why,
         "not_started_why": not_started_why,
@@ -298,6 +330,8 @@ def report(db: Session, prog: OutreachProgram, family_key: str, now: Optional[da
         "schedule": {"sms_steps": [{"touch": s[0], "day": s[1]} for s in steps],
                      "email_touches": email_max, "email_every_days": gap_days},
         "window": send_window.describe(),
-        "daily_batch": dict(daily_batch.status(prog), days_label=send_window.describe(daily_batch.days_of(prog))["days_label"]),
+        "daily_batch": dict(daily_batch.status(prog), days_label=send_window.describe(daily_batch.days_of(prog))["days_label"],
+                            ready_now=daily_batch.ready_now(db, prog), next_day=_next_batch_day(prog, now)),
+        "program": program_summary(db, prog),
         "scheduler": sched,
     }

@@ -276,7 +276,7 @@ def test_the_screen_shows_seven_days_and_the_progress_panel():
     dash = open("frontend/src/pages/program/sci/Dashboard.jsx", encoding="utf-8").read()
     assert "<CampaignProgress />" in dash
     panel = open("frontend/src/pages/program/sci/CampaignProgress.jsx", encoding="utf-8").read()
-    for label in ("Total roster", "Approved", "Excluded", "Not started", "Active", "Stopped", "Completed", "Held",
+    for label in ("Total roster", "Unique families", "Not approved", "Needs review", "Approved", "Excluded", "Not started", "Active", "Stopped", "Completed", "Held",
                   "Texts attempted", "Delivered", "Emails sent", "Bounced", "Blocked", "Replies", "Handoffs", "Booked",
                   "Next 7 days", "overdue"):
         assert label in panel, label
@@ -299,3 +299,37 @@ def test_a_held_central_alabama_family_is_never_shown_as_scheduled(client, progr
     assert a["overview"]["scheduled_new"]["value"] == 0
     src = open("frontend/src/pages/program/command/Dashboard.jsx", encoding="utf-8").read()
     assert "no family is ready for it" in src
+
+
+def test_progress_leaves_test_records_out_and_splits_not_approved(client, program, sample_advisor):
+    db, org, admin = program["db"], program["org"], program["admin"]
+    real = _lead_for(db, org, sample_advisor, "L001", phone="2055550101")
+    real.is_test = False
+    sim = _lead_for(db, org, sample_advisor, "L002", phone="2055550102", email="s@example.com")
+    sim.is_test = True
+    db.commit()
+    key = db.query(ProgramSourceRecord).filter_by(organization_id=org.id, source_lead_id="L001").one().campaign_family
+    same = db.query(ProgramSourceRecord).filter_by(organization_id=org.id, source_lead_id="L002").one().campaign_family
+    rep = client.get("/program/command/campaign-progress?campaign=%s" % key, headers=_h(db, admin)).json()["report"]
+    ro = rep["roster"]
+    groups = sum(ro[g] for g in ("excluded", "data_review", "not_approved", "not_started", "active", "stopped",
+                                 "completed", "held"))
+    assert groups == ro["families"]
+    assert ro["not_approved"] >= 1
+    if same == key:
+        assert ro["test_records_left_out"] == 1
+    assert rep["program"]["test_records_left_out"] >= 1
+    assert rep["program"]["real_records"] + rep["program"]["test_records_left_out"] == rep["program"]["source_records"]
+    assert "ready_now" in rep["daily_batch"]
+
+
+def test_an_empty_daily_batch_day_is_recorded(program, monkeypatch):
+    from app.models.models import AuditLogEntry
+    db, org, admin = program["db"], program["org"], program["admin"]
+    p = _prog(db, org)
+    p.daily_batch_count, p.daily_batch_by, p.daily_batch_days = 40, admin.id, None
+    db.commit()
+    monkeypatch.setattr(daily_batch, "pick", lambda db, prog, n: [])
+    assert daily_batch.run_for(db, p, SAT_10) == {"approved": 0, "picked": 0}
+    row = db.query(AuditLogEntry).filter_by(action="program.daily_batch").order_by(AuditLogEntry.created_at.desc()).first()
+    assert row is not None and '"picked": 0' in str(row.details)
