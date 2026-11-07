@@ -76,12 +76,10 @@ export function ApplyDialog({ projects, onPick, onClose, onTalent }) {
 }
 
 /** Get Future Opportunities: saves interest only. */
-export function TalentDialog({ projects, invite, testMode, onClose, onBrowse, ReferralPicker, source = 'portal' }) {
+export function TalentDialog({ projects, onClose, onBrowse, source = 'portal' }) {
   const [v, setV] = useState({ first_name: '', last_name: '', email: '' })
   const [interests, setInterests] = useState([])
   const [notify, setNotify] = useState(false)
-  const [referrer, setReferrer] = useState(null)
-  const [refText, setRefText] = useState('')
   const [errs, setErrs] = useState({})
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -90,11 +88,9 @@ export function TalentDialog({ projects, invite, testMode, onClose, onBrowse, Re
   async function submit(e) {
     e.preventDefault()
     setErr(''); setErrs({})
-    if (refText.trim() && !referrer) { setErrs({ referrer: 'Select a matching recruiter from the list, or clear the field.' }); return }
     setBusy(true)
     try {
-      const r = await volt.talentSignup({ ...v, interests, notify, source,
-        ...(referrer ? { referrer_rep_id: referrer.rep_id, referral_source: referrer.source } : {}) })
+      const r = await volt.talentSignup({ ...v, interests, notify, source })
       setDone(r.message)
     } catch (x) { setErrs(x.detail?.fields || {}); setErr(x.message) } finally { setBusy(false) }
   }
@@ -132,9 +128,6 @@ export function TalentDialog({ projects, invite, testMode, onClose, onBrowse, Re
             ))}
             <label className="v-check"><input type="checkbox" checked={interests.includes('any')} onChange={() => toggle('any')} /> Any future opportunity</label>
           </fieldset>
-          <ReferralPicker value={referrer} onChange={(r) => { setReferrer(r); setErrs((x) => { const n = { ...x }; delete n.referrer; return n }) }}
-                          onTextChange={setRefText} signedIn={false} testMode={testMode || /@example\.test$/i.test(v.email)}
-                          invite={invite} error={errs.referrer} />
           <label className="v-check v-consent"><input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} data-consent />
             Email me about future VOLT Marketing opportunities.</label>
           {err && <div className="v-alert v-alert--err" role="alert">{Object.keys(errs).length ? 'Please fix the highlighted fields.' : err}</div>}

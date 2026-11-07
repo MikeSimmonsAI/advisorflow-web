@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 
 from app.models.volt_models import VoltProgram, VoltProject, VoltRep, VoltTalentSignup
 from app.services.volt import common as C
-from app.services.volt.core import EMAIL_RE, field_error, resolve_referrer
+from app.services.volt.core import EMAIL_RE, field_error
 
 ANY = "any"
 
@@ -67,7 +67,7 @@ def signup(db: Session, prog: VoltProgram, body: Dict[str, Any]) -> VoltTalentSi
         errs["email"] = "Enter a valid email address, like name@example.com."
     if errs:
         field_error(errs)
-    referrer = resolve_referrer(db, prog, body.get("referrer_rep_id"))
+    referrer = None                     # referrals are not launching (2026-11-06): input ignored
     interests = _interests(db, prog.organization_id, body.get("interests"))
     notify = body.get("notify") is True
     now = C.now()

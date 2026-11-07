@@ -77,7 +77,8 @@ def filters_from(params: Dict[str, Any]) -> Dict[str, Any]:
             "recruiter": rec, "date_from": _d(params.get("date_from")), "date_to": _d(params.get("date_to")),
             "include_test": str(params.get("include_test") or "").lower() in ("1", "true", "yes"),
             "location": (str(params.get("location") or "").strip().lower()[:60] or None),
-            "travel": travel, "experience": experience}
+            "travel": travel, "experience": experience,
+            "include_archived": str(params.get("include_archived") or "").lower() in ("1", "true", "yes")}
 
 
 def application_query(db: Session, org_id: str, f: Dict[str, Any]):
@@ -96,6 +97,8 @@ def application_query(db: Session, org_id: str, f: Dict[str, Any]):
         q = q.filter(col < datetime.combine(f["date_to"] + timedelta(days=1), datetime.min.time()))
     if not f.get("include_test"):
         q = q.filter(VoltRep.is_test.is_(False))
+    if f.get("hide_archived") and not f.get("include_archived"):
+        q = q.filter(VoltRep.archived_at.is_(None))      # archived: out of the active queue only
     return q
 
 
@@ -151,6 +154,7 @@ def leaderboard(db: Session, org_id: str, f: Dict[str, Any], *, public: bool = F
 
 
 def rows(db: Session, org_id: str, f: Dict[str, Any], limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    f = dict(f, hide_archived=True)       # the queue and its CSV: archived people only when asked
     q = application_query(db, org_id, f).order_by(getattr(VoltApplication, REACHED[f["reached"]]).desc())
     apps = q.limit(limit).all() if limit else q.all()
     serials = {a.rep_serial for a in apps} | {a.referrer_serial for a in apps if a.referrer_serial}
@@ -160,6 +164,16 @@ def rows(db: Session, org_id: str, f: Dict[str, Any], limit: Optional[int] = Non
         reps.update({r.serial: r for r in db.query(VoltRep).filter(VoltRep.serial.in_(origs)).all()})
     projects = {p.id: p for p in db.query(VoltProject).filter(VoltProject.organization_id == org_id).all()}
     from app.services.volt import hiring
+    from app.models.volt_models import VoltSession, VoltSessionAttendee
+    zoom = {}
+    ids = [a.id for a in apps]
+    if ids:
+        for att, sess in (db.query(VoltSessionAttendee, VoltSession)
+                          .join(VoltSession, VoltSession.id == VoltSessionAttendee.session_id)
+                          .filter(VoltSessionAttendee.application_id.in_(ids), VoltSessionAttendee.booking_status == "active",
+                                  VoltSession.status == "scheduled").all()):
+            zoom[att.application_id] = {"session_id": sess.id, "kind": sess.kind, "starts_at": C.iso(sess.starts_at),
+                                        "timezone": sess.timezone, "attendance": att.attendance}
     out = []
     for a in apps:
         rep = reps.get(a.rep_serial)
@@ -197,7 +211,9 @@ def rows(db: Session, org_id: str, f: Dict[str, Any], limit: Optional[int] = Non
                     "homeowner_comfort": ans.get("homeowner_comfort"), "training": ans.get("training"),
                     "commitment": ans.get("commitment"),
                     "outreach_experience": ans.get("outreach_experience"),
-                    "comfortable_explaining": ans.get("comfortable_explaining"), "languages": ans.get("languages")})
+                    "comfortable_explaining": ans.get("comfortable_explaining"), "languages": ans.get("languages"),
+                    "reference": C.app_ref(a), "archived": bool(rep and rep.archived_at),
+                    "schedule_stage": a.schedule_stage, "zoom": zoom.get(a.id)})
     return out
 
 

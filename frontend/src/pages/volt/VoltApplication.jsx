@@ -23,7 +23,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { fmtDate, uploadKey, volt } from './voltApi'
 
-export const STAGE_LABEL = { draft: 'Draft', submitted: 'Submitted', needs_update: 'Needs update', approved: 'Approved', started: 'Started' }
+export const STAGE_LABEL = { draft: 'Draft', submitted: 'Submitted', needs_update: 'Needs update', approved: 'Approved', started: 'Started', withdrawn: 'Closed' }
 
 export function StageSteps({ status }) {
   const order = ['draft', 'submitted', 'approved', 'started']
@@ -271,7 +271,7 @@ export default function ApplicationSteps({ reload }) {
 
   return (
     <div className="v-page v-app" style={{ maxWidth: 780 }}>
-      <Link to="/volt/me" className="v-btn v-btn--line v-btn--sm">← My dashboard</Link>
+      <Link to={`/volt/me?application=${a.id}`} className="v-btn v-btn--line v-btn--sm">← My Application</Link>
       <p className="v-mono" style={{ marginTop: 14 }}>{a.project.short_name}</p>
       <h2 style={{ fontSize: 30, letterSpacing: '-.04em' }}>{a.project.name}</h2>
       <StageSteps status={a.status} />
@@ -302,7 +302,6 @@ export default function ApplicationSteps({ reload }) {
             {full && <Field id="v-start" label="Earliest available start date" error={fe('earliest_start')}><input id="v-start" type="date" value={h.earliest_start} aria-invalid={fe('earliest_start') ? 'true' : undefined} onChange={(e) => setHiring({ earliest_start: e.target.value })} /></Field>}
           </div>
           {!full && <p className="v-small v-muted">Where you live now. The next steps ask about travel.</p>}
-          {a.referrer && <p className="v-small" data-referral>Referred by <b>{a.referrer.display_name} · {a.referrer.rep_code}</b></p>}
           {full && <Field id="v-regions" label="Preferred work locations or regions" hint="Cities, states or regions you would work in."><textarea id="v-regions" value={h.preferred_regions} maxLength={500} onChange={(e) => setHiring({ preferred_regions: e.target.value })} /></Field>}
           {full && <fieldset className="v-fieldset" data-availability>
             <legend>Availability</legend>
@@ -360,8 +359,7 @@ export default function ApplicationSteps({ reload }) {
                 <Field id="v-state" label="State" error={fe('state')}><input id="v-state" value={h.state} autoComplete="address-level1" maxLength={40} onChange={(e) => setHiring({ state: e.target.value })} /></Field>
               </div>
               <Field id="v-zip" label="ZIP code" error={fe('zip_code')}><input id="v-zip" value={h.zip_code} inputMode="numeric" autoComplete="postal-code" maxLength={10} aria-invalid={fe('zip_code') ? 'true' : undefined} onChange={(e) => setHiring({ zip_code: e.target.value })} /></Field>
-              {a.referrer && <p className="v-small" data-referral>Referred by <b>{a.referrer.display_name} · {a.referrer.rep_code}</b></p>}
-            </div>
+                </div>
           )}
           {q.filter((qq) => sectionOf(qq) === cur.section && shown(qq, ans)).map((qq) => (qq.type === 'choice' ? (
             <fieldset key={qq.key} className="v-fieldset" data-q={qq.key}>
@@ -430,7 +428,6 @@ export default function ApplicationSteps({ reload }) {
             </>}
             <dt>Resume</dt><dd>{resume?.document ? resume.document.filename : 'Not provided (optional)'}</dd>
             <dt>Anything else</dt><dd>{h.additional_info || '—'}</dd>
-            <dt>Referred by</dt><dd>{a.referrer ? `${a.referrer.display_name} · ${a.referrer.rep_code}` : 'Direct'}</dd>
           </dl>
           {STEPS.filter((x) => x.section).map((x) => (
             <div key={x.id} data-review-section={x.section}>

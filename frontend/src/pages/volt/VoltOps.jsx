@@ -10,10 +10,12 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, fetchObjectUrl } from '../../api/client'
 import { Bolt } from './VoltPortal'
-import { fmtDate, sessionTime, useVoltTitle } from './voltApi'
+import { Modal } from './VoltDialogs'
+import { zoomWhen } from './VoltMyApplication'
+import { fmtDate, useVoltTitle } from './voltApi'
 import './volt.css'
 
-const STAGES = [['draft', 'Draft'], ['submitted', 'Submitted'], ['needs_update', 'Needs update'], ['approved', 'Approved'], ['started', 'Started']]
+const STAGES = [['draft', 'Draft'], ['submitted', 'Submitted'], ['needs_update', 'Needs update'], ['approved', 'Approved'], ['started', 'Started'], ['withdrawn', 'Withdrawn / closed']]
 const STAGE = Object.fromEntries(STAGES)
 const REACHED = [['created', 'Application started'], ['submitted', 'Submitted'], ['approved', 'Approved'], ['started', 'Started']]
 const ANSWER = { yes: 'Yes', no: 'No', details: 'Would like details', explain: 'It depends' }
@@ -64,7 +66,19 @@ function Answers({ app }) {
     </div>
   )
 }
-const ACTION_LABEL = { approved: 'Approve', needs_update: 'Return for update', started: 'Mark Started' }
+const ACTION_LABEL = { approved: 'Approve', needs_update: 'Return for update', started: 'Mark Started', withdrawn: 'Withdraw / close' }
+const REOPEN_LABEL = 'Reopen application'
+const ZOOM_STATE = { waiting: 'Not yet', choose: 'Can choose a time', booked: 'Zoom booked' }
+const AVAIL = { open: ['Open', 'v-tag--ok'], full: ['Full · closed', 'v-tag--black'], closed: ['Closed by staff', 'v-tag--line'],
+  canceled: ['Canceled', 'v-tag--black'], past: ['Past', 'v-tag--line'], assigned_only: ['Assigned only', 'v-tag--line'] }
+
+function useEscape(onClose) {
+  useEffect(() => {
+    const k = (e) => { if (e.key === 'Escape' && !document.querySelector('.v-modal-bg')) onClose() }
+    document.addEventListener('keydown', k)
+    return () => document.removeEventListener('keydown', k)
+  }, [onClose])
+}
 const TZS = ['America/Chicago', 'America/New_York', 'America/Denver', 'America/Phoenix', 'America/Los_Angeles', 'America/Anchorage', 'Pacific/Honolulu']
 
 function msg(e) { return e?.message || 'Something went wrong.' }
@@ -103,7 +117,8 @@ function OpsShell({ orgId, home, children }) {
         <nav className="v-tabs" aria-label="VOLT Operations sections">
           <NavLink end className="v-tab" to={base}>Overview</NavLink>
           <NavLink className="v-tab" to={`${base}/review`}>Review queue</NavLink>
-          <NavLink className="v-tab" to={`${base}/sessions`}>Zoom Sessions</NavLink>
+          <NavLink className="v-tab" to={`${base}/sessions`}>Zoom availability</NavLink>
+          <NavLink className="v-tab" to={`${base}/people`}>People & Access</NavLink>
           <NavLink className="v-tab" to={`${base}/talent`}>Talent Pool</NavLink>
           <NavLink className="v-tab" to={`${base}/email`}>Support email</NavLink>
           <NavLink className="v-tab" to={`${base}/reps`}>Reps</NavLink>
@@ -211,6 +226,8 @@ function ReviewQueue({ orgId, ops }) {
       <div className="v-row"><h2 style={{ fontSize: 30, letterSpacing: '-.04em' }}>Review queue</h2>
         <button type="button" className="v-btn v-btn--black" onClick={exportCsv} disabled={busy}>{busy ? 'Exporting…' : 'Export CSV ↓'}</button></div>
       <Filters projects={projects} f={f} set={(x) => setSp(clean(x))} showStage showReached />
+      <label className="v-check" style={{ margin: '0 0 8px' }}><input type="checkbox" checked={f.include_archived === '1'}
+        onChange={(e) => { const x = { ...f }; if (e.target.checked) x.include_archived = '1'; else delete x.include_archived; setSp(clean(x)) }} data-include-archived /> Include archived applicants</label>
       {f.recruiter && <p className="v-small">Recruiter: <b>{recruiterName ? `${recruiterName.display_name} · ${recruiterName.rep_code}` : f.recruiter}</b> <button type="button" className="v-btn v-btn--link" onClick={() => { const x = { ...f }; delete x.recruiter; setSp(clean(x)) }}>clear</button></p>}
       <Err>{err}</Err>
       <p className="v-small v-muted" data-count={list?.count}>{list ? `${list.count} application${list.count === 1 ? '' : 's'} · dates filter on "${list.reached_label}". The CSV is exactly this list.` : 'Loading…'}</p>
@@ -221,8 +238,11 @@ function ReviewQueue({ orgId, ops }) {
             {list?.items.length === 0 && <tr><td colSpan="9" className="v-muted">No matching applications.</td></tr>}
             {list?.items.map((r) => (
               <tr key={r.application_id}>
-                <td><b>{r.applicant}</b><br /><span className="v-mono">{r.rep_code}</span>{r.is_test && <> <span className="v-tag v-tag--line">Test</span></>}</td>
-                <td>{r.project}</td><td><span className="v-tag">{r.status_label}</span></td>
+                <td><b>{r.applicant}</b><br /><span className="v-mono">{r.rep_code}</span>{r.is_test && <> <span className="v-tag v-tag--line">Test</span></>}{r.archived && <> <span className="v-tag v-tag--line">Archived</span></>}</td>
+                <td>{r.project}<br /><span className="v-small v-muted">{r.reference}</span></td>
+                <td><span className="v-tag">{r.status_label}</span>
+                  {r.zoom ? <><br /><span className="v-small" data-zoom-booked>Zoom {r.zoom.kind}: {zoomWhen(r.zoom.starts_at, r.zoom.timezone)}</span></>
+                    : r.schedule_stage ? <><br /><span className="v-small v-muted">Zoom {r.schedule_stage} step open</span></> : null}</td>
                 <td>{[r.city, r.state].filter(Boolean).join(', ') || '—'}</td>
                 <td>{travelCell(r)}</td>
                 <td>{r.project_recruiter ? `${r.project_recruiter.display_name} · ${r.project_recruiter.rep_code}` : 'Direct'}</td>
@@ -265,10 +285,24 @@ function ApplicationFile({ orgId, appId, viewer, onClose }) {
   const [fixReason, setFixReason] = useState('')
   const load = useCallback(() => api.get(`/volt/ops/${orgId}/applications/${appId}`).then(setD).catch((e) => setErr(msg(e))), [orgId, appId])
   useEffect(() => { load() }, [load])
-  async function act(status) {
-    setErr('')
-    try { await api.post(`/volt/ops/${orgId}/applications/${appId}/status`, { status, reason: status === 'needs_update' ? reason : undefined }); setReason(''); await load() } catch (e) { setErr(msg(e)) }
+  const [busyAct, setBusyAct] = useState('')
+  const [closing, setClosing] = useState(false)
+  async function act(status, why) {
+    if (busyAct) return
+    setErr(''); setBusyAct(status)
+    try {
+      await api.post(`/volt/ops/${orgId}/applications/${appId}/status`, { status, reason: status === 'needs_update' ? reason : (why || undefined) })
+      setReason(''); setClosing(false); await load()
+    } catch (e) { setErr(msg(e)) } finally { setBusyAct('') }
   }
+  const [stage, setStage] = useState('')
+  useEffect(() => { if (d) setStage(d.application.schedule_stage || '') }, [d])
+  async function saveStage() {
+    if (busyAct) return
+    setErr(''); setBusyAct('stage')
+    try { await api.post(`/volt/ops/${orgId}/applications/${appId}/scheduling`, { stage: stage || null }); await load() } catch (e) { setErr(msg(e)) } finally { setBusyAct('') }
+  }
+  useEscape(onClose)
   async function reviewDoc(doc, status) {
     setErr('')
     try { await api.post(`/volt/ops/${orgId}/documents/${doc.id}/review`, { status, reason: docReason[doc.id] }); await load() } catch (e) { setErr(msg(e)) }
@@ -289,7 +323,9 @@ function ApplicationFile({ orgId, appId, viewer, onClose }) {
         {!d ? <p className="v-mono">Loading…</p> : (
           <>
             <h2 style={{ fontSize: 28, letterSpacing: '-.04em', margin: '8px 0 2px' }}>{d.profile.first_name} {d.profile.last_name}</h2>
-            <p className="v-mono">{d.profile.rep_code}{d.profile.is_test ? ' · TEST RECORD' : ''}</p>
+            <p className="v-mono">{d.profile.rep_code} · {d.application.reference}{d.profile.is_test ? ' · TEST RECORD' : ''}</p>
+            {d.person && (d.person.access !== 'active' || d.person.archived) && (
+              <p className="v-small" data-person-state>{d.person.access !== 'active' && <span className="v-tag">VOLT access {d.person.access_label}</span>} {d.person.archived && <span className="v-tag v-tag--line">Archived</span>}</p>)}
             <p className="v-small" style={{ marginTop: 6 }}>{d.profile.email} · {d.profile.phone} · DOB {d.profile.date_of_birth}</p>
             <section className="v-panel" style={{ marginTop: 12 }}>
               <div className="v-row"><h3>{d.application.project.name}</h3><span className="v-tag" data-stage={d.application.status}>{d.application.status_label}</span></div>
@@ -300,15 +336,34 @@ function ApplicationFile({ orgId, appId, viewer, onClose }) {
                 <div style={{ marginTop: 12 }}>
                   {d.next_actions.includes('needs_update') && <label>Reason for the applicant (required to return)<input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Exactly what to change" /></label>}
                   <div className="v-row" style={{ justifyContent: 'flex-start', marginTop: 8 }}>
-                    {d.next_actions.map((s) => <button key={s} type="button" className={`v-btn v-btn--sm ${s === 'needs_update' ? 'v-btn--line' : 'v-btn--red'}`} onClick={() => act(s)}>{ACTION_LABEL[s]}</button>)}
+                    {d.next_actions.filter((s) => s !== 'withdrawn').map((s) => (
+                      <button key={s} type="button" className={`v-btn v-btn--sm ${s === 'needs_update' ? 'v-btn--line' : 'v-btn--red'}`} disabled={!!busyAct}
+                              onClick={() => act(s)} data-action={s}>{busyAct === s ? 'Saving…' : d.application.status === 'withdrawn' ? REOPEN_LABEL : ACTION_LABEL[s]}</button>))}
+                    {d.next_actions.includes('withdrawn') && <button type="button" className="v-btn v-btn--line v-btn--sm" onClick={() => setClosing(true)} disabled={!!busyAct} data-action="withdrawn">Withdraw / close…</button>}
                   </div>
                 </div>
               )}
+              {d.application.status === 'withdrawn' && <p className="v-small v-muted">Closed {fmtDate(d.application.closed_at)} from {STAGE[d.application.closed_from_status] || 'Submitted'}. Reopening returns it there. Access is not affected.</p>}
               {d.other_applications.length > 0 && <p className="v-small v-muted" style={{ marginTop: 8 }}>Also applied: {d.other_applications.map((o) => `${o.project} (${STAGE[o.status]})`).join(', ')}</p>}
+            </section>
+            <section className="v-panel" data-zoom-step>
+              <h3>Zoom step</h3>
+              <p className="v-small">Applicant now: <b>{ZOOM_STATE[d.zoom?.state] || 'Not yet'}</b>{d.application.schedule_stage ? ` · ${d.application.schedule_stage}` : ''}</p>
+              {(d.zoom?.sessions || []).filter((x) => x.status !== 'canceled').map((x) => (
+                <p key={x.id} className="v-small">Booked: <b>{zoomWhen(x.starts_at, x.timezone)}</b> · {x.kind} · attendance {x.attendance.replace('_', ' ')}</p>))}
+              {!viewer && (
+                <div className="v-row" style={{ justifyContent: 'flex-start', alignItems: 'flex-end' }}>
+                  <label style={{ minWidth: 220 }}>Applicant may choose a Zoom time for
+                    <select value={stage} onChange={(e) => setStage(e.target.value)} data-stage-select disabled={['draft', 'withdrawn'].includes(d.application.status)}>
+                      <option value="">Not yet (waiting)</option><option value="interview">Interview</option><option value="orientation">Orientation</option></select></label>
+                  <button type="button" className="v-btn v-btn--red v-btn--sm" onClick={saveStage} disabled={!!busyAct || stage === (d.application.schedule_stage || '') || ['draft', 'withdrawn'].includes(d.application.status)} data-save-stage>
+                    {busyAct === 'stage' ? 'Saving…' : 'Save Zoom step'}</button>
+                </div>)}
+              <p className="v-small v-muted">Only open times for this project and step are offered. Turning the step off keeps an existing booking; the application's review status is unchanged.</p>
             </section>
             {d.hiring && <HiringFile d={d} />}
             <section className="v-panel">
-              <h3>Recruiter attribution</h3>
+              <h3>Recruiter attribution <span className="v-small v-muted">(history; referrals are paused)</span></h3>
               <p><b>Original recruiter:</b> {d.original_recruiter ? `${d.original_recruiter.display_name} · ${d.original_recruiter.rep_code}` : 'Direct signup'}</p>
               <p><b>Project referral:</b> {d.project_recruiter ? `${d.project_recruiter.display_name} · ${d.project_recruiter.rep_code}` : 'Direct'}{d.application.referral_source ? ` (${d.application.referral_source})` : ''}</p>
               {!viewer && !fix && <div className="v-row" style={{ justifyContent: 'flex-start', marginTop: 8 }}>
@@ -343,6 +398,10 @@ function ApplicationFile({ orgId, appId, viewer, onClose }) {
                   </div>
                 </div>))}
             </section>
+            {closing && (
+              <ConfirmAction title="Withdraw / close this application?" busy={busyAct === 'withdrawn'} onClose={() => setClosing(false)}
+                             onConfirm={(why) => act('withdrawn', why)} confirmLabel="Withdraw / close"
+                             body={<><b>{d.profile.first_name} {d.profile.last_name}</b> · {d.application.project.name} ({d.application.reference}). The application is closed and any Zoom booking for it is released. Records are kept, it can be reopened, and VOLT sign-in is not changed.</>} />)}
             <section className="v-panel">
               <h3>Review history</h3>
               <ol className="v-board">{d.history.map((h, i) => (
@@ -639,92 +698,316 @@ function SessionForm({ orgId, projects, initial, onSaved, onCancel }) {
   const [v, setV] = useState(() => initial ? {
     kind: initial.kind, title: initial.title || '', project_id: initial.project?.id, starts_local: initial.starts_local,
     timezone: initial.timezone, duration_minutes: initial.duration_minutes, join_url: initial.join_url, instructions: initial.instructions || '',
-  } : { kind: 'interview', title: '', project_id: projects.find((p) => p.recruiting)?.id || '', starts_local: '', timezone: 'America/Chicago', duration_minutes: 30, join_url: '', instructions: '' })
-  const [chosen, setChosen] = useState(() => initial?.attendees || [])
+    capacity: initial.capacity ?? '', booking_open: !!initial.booking_open,
+    cutoff_hours: initial.booking_cutoff_minutes != null ? String(initial.booking_cutoff_minutes / 60) : '',
+  } : { kind: 'interview', title: '', project_id: projects.find((p) => p.recruiting)?.id || '', starts_local: '', timezone: 'America/Chicago',
+    duration_minutes: 30, join_url: '', instructions: '', capacity: 1, booking_open: true, cutoff_hours: '' })
+  const [chosen, setChosen] = useState(() => (initial?.attendees || []).filter((a) => a.source !== 'booked'))
+  const [assign, setAssign] = useState(() => (initial?.attendees || []).some((a) => a.source !== 'booked'))
   const [errs, setErrs] = useState({})
   const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
   const up = (k) => (e) => setV({ ...v, [k]: e.target.value })
   async function save(e) {
-    e.preventDefault(); setErrs({}); setErr('')
-    const body = { ...v, duration_minutes: Number(v.duration_minutes), rep_ids: chosen.map((c) => c.rep_id) }
+    e.preventDefault()
+    if (busy) return
+    setErrs({}); setErr('')
+    const cap = String(v.capacity).trim() === '' ? null : Number(v.capacity)
+    if (cap !== null && (!Number.isInteger(cap) || cap < 1)) { setErrs({ capacity: 'Capacity must be a whole number, at least 1.' }); return }
+    const body = { kind: v.kind, title: v.title, project_id: v.project_id, starts_local: v.starts_local, timezone: v.timezone,
+      duration_minutes: Number(v.duration_minutes), join_url: v.join_url, instructions: v.instructions, capacity: cap,
+      booking_open: cap !== null && !!v.booking_open,
+      booking_cutoff_minutes: v.cutoff_hours === '' ? null : Math.round(Number(v.cutoff_hours) * 60) }
+    if (assign || initial) body.rep_ids = assign ? chosen.map((c) => c.rep_id) : []
+    setBusy(true)
     try {
       if (initial) await api.patch(`/volt/ops/${orgId}/sessions/${initial.id}`, body)
       else await api.post(`/volt/ops/${orgId}/sessions`, body)
-      onSaved()
-    } catch (x) { setErr(msg(x)); setErrs(x.detail?.fields || {}) }
+      onSaved(initial ? 'Saved in VOLT. If the time changed, booked applicants were told. Make the same change in Zoom.' : 'Published in VOLT.')
+    } catch (x) { setErr(msg(x)); setErrs(x.detail?.fields || {}) } finally { setBusy(false) }
   }
   const fe = (k) => errs[k] && <span className="v-ferr">{errs[k]}</span>
   return (
     <form className="v-panel v-form" onSubmit={save} noValidate data-form="session">
-      <h3>{initial ? 'Edit / reschedule session' : 'New Zoom session'}</h3>
+      <h3>{initial ? 'Edit / reschedule session' : 'Add a session'}</h3>
       <div className="v-note-staff">
-        Create the meeting in Zoom first, then paste its <b>participant join link</b> (zoom.us/j/…). VOLT shows that link only to the applicants you assign.
-        Editing or canceling here updates the VOLT schedule only. <b>Make the same change to the meeting in Zoom.</b>
+        Create the meeting in Zoom first, then paste its <b>participant join link</b> (zoom.us/j/…). Host/start links are refused.
+        VOLT shows the link only to applicants booked or assigned. Saving here changes <b>VOLT availability only</b>; VOLT does not create, move or cancel the meeting in Zoom.
       </div>
       <div className="v-split">
         <label>Type<select value={v.kind} onChange={up('kind')}><option value="interview">Interview</option><option value="orientation">Orientation</option></select></label>
-        <label>Project<select value={v.project_id} onChange={up('project_id')}>{projects.map((p) => <option key={p.id} value={p.id}>{p.short_name}{p.recruiting ? '' : ' (closed)'}</option>)}</select>{fe('project_id')}</label>
+        <label>Opportunity<select value={v.project_id} onChange={up('project_id')}>{projects.map((p) => <option key={p.id} value={p.id}>{p.short_name}{p.recruiting ? '' : ' (closed)'}</option>)}</select>{fe('project_id')}</label>
       </div>
-      <label>Title (optional)<input value={v.title} onChange={up('title')} maxLength={140} /></label>
+      <label>Title<input value={v.title} onChange={up('title')} maxLength={140} placeholder="e.g. ACA outreach interview" /></label>
       <div className="v-split">
-        <label>Date and time<input type="datetime-local" value={v.starts_local} onChange={up('starts_local')} aria-invalid={errs.starts_local ? 'true' : undefined} />{fe('starts_local')}</label>
+        <label>Date and start time<input type="datetime-local" value={v.starts_local} onChange={up('starts_local')} aria-invalid={errs.starts_local ? 'true' : undefined} required />{fe('starts_local')}</label>
         <label>Time zone<select value={v.timezone} onChange={up('timezone')}>{TZS.map((t) => <option key={t}>{t}</option>)}</select>{fe('timezone')}</label>
       </div>
       <div className="v-split">
         <label>Duration (minutes)<input type="number" min="5" max="480" value={v.duration_minutes} onChange={up('duration_minutes')} />{fe('duration_minutes')}</label>
-        <label>Zoom participant join link<input type="url" value={v.join_url} onChange={up('join_url')} placeholder="https://zoom.us/j/12345678901?pwd=…" aria-invalid={errs.join_url ? 'true' : undefined} />{fe('join_url')}</label>
+        <label>Capacity (people)<input type="number" min="1" max="500" value={v.capacity} onChange={up('capacity')} aria-invalid={errs.capacity ? 'true' : undefined} data-capacity />{fe('capacity')}</label>
       </div>
-      <label>Instructions for applicants<textarea value={v.instructions} onChange={up('instructions')} maxLength={2000} /></label>
-      <RepPicker orgId={orgId} chosen={chosen} setChosen={setChosen} />
+      <div className="v-split">
+        <label>Zoom participant join link<input type="url" value={v.join_url} onChange={up('join_url')} placeholder="https://zoom.us/j/12345678901?pwd=…" aria-invalid={errs.join_url ? 'true' : undefined} />{fe('join_url')}</label>
+        <label>Booking cutoff (hours before start, optional)<input type="number" min="0" max="336" step="0.5" value={v.cutoff_hours} onChange={up('cutoff_hours')} />{fe('booking_cutoff_minutes')}</label>
+      </div>
+      <label className="v-check"><input type="checkbox" checked={!!v.booking_open} onChange={(e) => setV({ ...v, booking_open: e.target.checked })} data-booking-open /> Open for booking (eligible applicants can choose this time)</label>
+      <label>Instructions for applicants (optional)<textarea value={v.instructions} onChange={up('instructions')} maxLength={2000} /></label>
+      <label className="v-check"><input type="checkbox" checked={assign} onChange={(e) => setAssign(e.target.checked)} /> Also assign specific applicants directly</label>
+      {assign && <RepPicker orgId={orgId} chosen={chosen} setChosen={setChosen} />}
       <Err>{err}</Err>
       <div className="v-row" style={{ justifyContent: 'flex-start' }}>
-        <button className="v-btn v-btn--red" type="submit">{initial ? 'Save changes' : 'Schedule session'}</button>
-        <button className="v-btn v-btn--line" type="button" onClick={onCancel}>Cancel</button>
+        <button className="v-btn v-btn--red" type="submit" disabled={busy}>{busy ? 'Saving…' : initial ? 'Save changes' : 'Publish available date'}</button>
+        <button className="v-btn v-btn--line" type="button" onClick={onCancel} disabled={busy}>Cancel</button>
       </div>
     </form>
+  )
+}
+
+function ConfirmAction({ title, body, confirmLabel = 'Confirm', busy, onConfirm, onClose, reasonLabel = 'Reason (optional)' }) {
+  const [why, setWhy] = useState('')
+  return (
+    <Modal title={title} onClose={busy ? () => {} : onClose} labelId="v-confirm-title" name="confirm">
+      <p data-confirm-body>{body}</p>
+      <label htmlFor="v-confirm-reason" style={{ display: 'block', marginTop: 10 }}>{reasonLabel}
+        <textarea id="v-confirm-reason" rows={3} value={why} onChange={(e) => setWhy(e.target.value)} maxLength={1000} /></label>
+      <div className="v-row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
+        <button type="button" className="v-btn v-btn--line" onClick={onClose} disabled={busy}>Cancel</button>
+        <button type="button" className="v-btn v-btn--red" onClick={() => onConfirm(why.trim())} disabled={busy} data-confirm-go>{busy ? 'Working…' : confirmLabel}</button>
+      </div>
+    </Modal>
   )
 }
 
 function Sessions({ orgId, ops }) {
   const [rows, setRows] = useState(null)
   const [err, setErr] = useState('')
+  const [note, setNote] = useState('')
   const [edit, setEdit] = useState(null)
+  const [busy, setBusy] = useState('')
+  const [confirm, setConfirm] = useState(null)
+  const [show, setShow] = useState('upcoming')
   useEffect(() => { if (!ops.home) ops.load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const load = useCallback(() => api.get(`/volt/ops/${orgId}/sessions`).then((r) => setRows(r.items)).catch((e) => setErr(msg(e))), [orgId])
   useEffect(() => { load() }, [load])
   const viewer = ops.home?.access === 'viewer'
-  async function cancel(s) {
-    try { await api.post(`/volt/ops/${orgId}/sessions/${s.id}/cancel`, {}); load() } catch (e) { setErr(msg(e)) }
+  async function run(key, fn, done) {
+    if (busy) return
+    setErr(''); setNote(''); setBusy(key)
+    try { await fn(); await load(); if (done) setNote(done) } catch (e) { setErr(msg(e)) } finally { setBusy(''); setConfirm(null) }
   }
-  async function attend(s, repId, attendance) {
-    try { await api.post(`/volt/ops/${orgId}/sessions/${s.id}/attendance`, { rep_id: repId, attendance }); load() } catch (e) { setErr(msg(e)) }
-  }
+  const toggle = (s) => run(`open-${s.id}`, () => api.post(`/volt/ops/${orgId}/sessions/${s.id}/booking`, { open: !s.booking_open }),
+    s.booking_open ? 'Booking closed in VOLT. Existing bookings stay.' : 'Booking reopened in VOLT.')
+  const attend = (s, a, value) => run(`att-${s.id}-${a.rep_id}`, () => api.post(`/volt/ops/${orgId}/sessions/${s.id}/attendance`, { rep_id: a.rep_id, attendance: value }))
+  const list = (rows || []).filter((s) => show === 'all' || (s.availability !== 'past' && s.availability !== 'canceled'))
+    .sort((a, b) => (a.starts_at < b.starts_at ? -1 : 1))
   return (
     <>
-      <div className="v-row"><h2 style={{ fontSize: 30, letterSpacing: '-.04em' }}>Zoom Sessions</h2>
-        {!viewer && !edit && <button type="button" className="v-btn v-btn--red" onClick={() => setEdit('new')}>+ New session</button>}</div>
-      <p className="v-small v-muted" style={{ marginBottom: 10 }}>Method: staff-supplied Zoom participant links. VOLT does not create, change or cancel meetings in Zoom.</p>
+      <div className="v-row"><div><h2 style={{ fontSize: 30, letterSpacing: '-.04em' }}>Zoom availability</h2>
+        <p className="v-muted">Set the dates applicants can choose. Each time shows its own time zone.</p></div>
+        {!viewer && !edit && <button type="button" className="v-btn v-btn--red" onClick={() => setEdit('new')} data-new-session>+ Add a session</button>}</div>
+      <p className="v-small v-muted" style={{ margin: '6px 0 10px' }}>Applicants see these times only after you open the Zoom step on their application (Review queue → application file → Zoom step). Capacity is enforced by the server: capacity 1 closes after one booking; group sessions close when full.</p>
       <Err>{err}</Err>
-      {edit && ops.home && <SessionForm orgId={orgId} projects={ops.home.projects} initial={edit === 'new' ? null : edit} onCancel={() => setEdit(null)} onSaved={() => { setEdit(null); load() }} />}
-      {rows?.length === 0 && <p className="v-muted">No sessions yet.</p>}
-      {rows?.map((s) => (
-        <section key={s.id} className="v-panel" data-session={s.id}>
-          <div className="v-row">
-            <div><b>{s.kind === 'interview' ? 'Interview' : 'Orientation'}{s.title ? ` · ${s.title}` : ''}</b> <span className={`v-tag ${s.status === 'canceled' ? 'v-tag--black' : ''}`}>{s.status}</span>
-              <p className="v-small">{s.project?.short_name} · {sessionTime(s.starts_at, s.timezone)} · {s.duration_minutes} min · {s.timezone}</p>
-              <p className="v-small v-muted" style={{ wordBreak: 'break-all' }}>{s.join_url}</p></div>
-            {!viewer && s.status !== 'canceled' && <div className="v-row">
-              <button type="button" className="v-btn v-btn--line v-btn--sm" onClick={() => setEdit(s)}>Edit / reschedule</button>
-              <button type="button" className="v-btn v-btn--black v-btn--sm" onClick={() => cancel(s)}>Cancel session</button></div>}
-          </div>
-          <table className="v-table" style={{ marginTop: 8 }}><thead><tr><th>Applicant</th><th>Attendance</th></tr></thead>
-            <tbody>{s.attendees.map((a) => (
-              <tr key={a.rep_id}><td>{a.display_name} <span className="v-mono">{a.rep_code}</span></td>
-                <td>{viewer || s.status === 'canceled' ? a.attendance : (
-                  <select aria-label={`Attendance for ${a.display_name}`} value={a.attendance} onChange={(e) => attend(s, a.rep_id, e.target.value)} style={{ width: 'auto' }}>
-                    <option value="invited">Invited</option><option value="attended">Attended</option><option value="no_show">No-show</option></select>)}</td></tr>))}
-            </tbody></table>
-        </section>))}
+      {note && <div className="v-alert v-alert--info" role="status">{note}</div>}
+      {edit && ops.home && <SessionForm orgId={orgId} projects={ops.home.projects} initial={edit === 'new' ? null : edit} onCancel={() => setEdit(null)} onSaved={(m) => { setEdit(null); setNote(m); load() }} />}
+      <div className="v-row" style={{ justifyContent: 'flex-start', margin: '6px 0' }}>
+        <label className="v-check"><input type="radio" name="v-sess-show" checked={show === 'upcoming'} onChange={() => setShow('upcoming')} /> Upcoming</label>
+        <label className="v-check"><input type="radio" name="v-sess-show" checked={show === 'all'} onChange={() => setShow('all')} /> Include past and canceled</label>
+      </div>
+      {rows === null ? <p className="v-mono">Loading…</p> : list.length === 0 ? <p className="v-muted v-empty">No sessions here yet.</p> : (
+        <div className="v-panel v-scroll">
+          <table className="v-table v-table--cards" data-table="sessions">
+            <thead><tr><th>Date · time zone</th><th>Session</th><th>Booked / capacity</th><th>Status</th><th>Availability</th></tr></thead>
+            <tbody>{list.map((s) => {
+              const [label, cls] = AVAIL[s.availability] || [s.availability, '']
+              const live = s.status !== 'canceled' && s.availability !== 'past'
+              return (
+                <Fragment key={s.id}>
+                  <tr data-session={s.id}>
+                    <td data-label="Date"><b>{zoomWhen(s.starts_at, s.timezone)}</b><br /><span className="v-small v-muted">{s.duration_minutes} min · {s.timezone}</span>
+                      {s.rescheduled_at && <><br /><span className="v-small">Rescheduled {fmtDate(s.rescheduled_at)}</span></>}</td>
+                    <td data-label="Session">{s.kind === 'interview' ? 'Interview' : 'Orientation'}{s.title ? ` · ${s.title}` : ''}<br /><span className="v-small v-muted">{s.project?.short_name}</span></td>
+                    <td data-label="Booked" data-booked={s.booked}>{s.capacity != null ? `${s.booked} / ${s.capacity}` : `${s.booked} assigned`}{s.spots_left != null && live ? <><br /><span className="v-small v-muted">{s.spots_left} left</span></> : null}</td>
+                    <td data-label="Status"><span className={`v-tag ${cls}`} data-availability={s.availability}>{label}</span>{s.cancel_reason && <><br /><span className="v-small v-muted">{s.cancel_reason}</span></>}</td>
+                    <td data-label="Actions">{!viewer && live && <div className="v-row" style={{ justifyContent: 'flex-start' }}>
+                      {s.capacity != null && <button type="button" className="v-btn v-btn--line v-btn--sm" onClick={() => toggle(s)} disabled={!!busy} data-toggle={s.id}>
+                        {busy === `open-${s.id}` ? 'Saving…' : s.booking_open ? 'Close availability' : 'Reopen availability'}</button>}
+                      <button type="button" className="v-btn v-btn--line v-btn--sm" onClick={() => setEdit(s)} disabled={!!busy}>Edit / reschedule</button>
+                      <button type="button" className="v-btn v-btn--black v-btn--sm" disabled={!!busy}
+                              onClick={() => setConfirm({ kind: 'session', s })}>Cancel session</button></div>}</td>
+                  </tr>
+                  {s.attendees.length > 0 && (
+                    <tr className="v-subrow"><td colSpan="5">
+                      <span className="v-label">Attendees</span>
+                      <ul className="v-attendees">{s.attendees.map((a) => (
+                        <li key={a.rep_id}><b>{a.display_name}</b> <span className="v-mono">{a.rep_code}</span> <span className="v-small v-muted">{a.source === 'booked' ? `booked ${fmtDate(a.booked_at)}` : 'assigned'}</span>
+                          {viewer || s.status === 'canceled' ? <span className="v-small"> · {a.attendance.replace('_', ' ')}</span> : (
+                            <>
+                              <select aria-label={`Attendance for ${a.display_name}`} value={a.attendance} onChange={(e) => attend(s, a, e.target.value)} style={{ width: 'auto' }}>
+                                <option value="invited">Booked / invited</option><option value="attended">Attended</option><option value="no_show">No-show</option></select>
+                              <button type="button" className="v-btn v-btn--link" disabled={!!busy} onClick={() => setConfirm({ kind: 'booking', s, a })}>Cancel booking</button>
+                            </>)}</li>))}</ul>
+                    </td></tr>)}
+                </Fragment>)
+            })}</tbody>
+          </table>
+        </div>)}
+      <p className="v-small v-muted">Closing availability stops new bookings; confirmed bookings stay. A full session stays unavailable even if reopened.</p>
+      {confirm?.kind === 'session' && (
+        <ConfirmAction title="Cancel this session in VOLT?" busy={busy === 'cancel'} confirmLabel="Cancel session" onClose={() => setConfirm(null)}
+          body={<>{confirm.s.kind} · {zoomWhen(confirm.s.starts_at, confirm.s.timezone)} · {confirm.s.booked} booked. Attendees lose the Join button and are emailed. <b>This does not cancel the meeting in Zoom</b>; do that in Zoom.</>}
+          onConfirm={(why) => run('cancel', () => api.post(`/volt/ops/${orgId}/sessions/${confirm.s.id}/cancel`, { reason: why }), 'Session canceled in VOLT. Cancel the meeting in Zoom too.')} />)}
+      {confirm?.kind === 'booking' && (
+        <ConfirmAction title="Cancel this booking?" busy={busy === 'cancel'} confirmLabel="Cancel booking" onClose={() => setConfirm(null)}
+          body={<><b>{confirm.a.display_name}</b> ({confirm.a.rep_code}) · {zoomWhen(confirm.s.starts_at, confirm.s.timezone)}. Their seat is released and they can choose another time. Their application is not changed.</>}
+          onConfirm={(why) => run('cancel', () => api.post(`/volt/ops/${orgId}/sessions/${confirm.s.id}/bookings/${confirm.a.rep_id}/cancel`, { reason: why }), 'Booking canceled. The seat is free again.')} />)}
+    </>
+  )
+}
+
+// ── People & Access ─────────────────────────────────────────────────────────
+const ACCESS_TAG = { active: 'v-tag--ok', suspended: '', removed: 'v-tag--line' }
+const ACTION_COPY = {
+  suspend: ['Suspend access', 'Block VOLT sign-in and every VOLT request now, and end their VOLT sessions. Their records are kept.'],
+  restore: ['Restore access', 'Allow VOLT sign-in again. Old sessions stay ended; they sign in fresh.'],
+  remove: ['Remove VOLT access', 'Remove their VOLT access (their VOLT staff role, if any) and end their VOLT sessions. Other businesses and their platform login are not touched. Records are kept.'],
+  archive: ['Archive applicant', 'Hide their applications from the default queues. Sign-in is not changed.'],
+  unarchive: ['Unarchive applicant', 'Return their applications to the default queues. Sign-in is not changed.'],
+}
+
+function PersonDrawer({ orgId, person, canManage, actorLevel, meId, onClose, onChanged }) {
+  const [hist, setHist] = useState(null)
+  const [ask, setAsk] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const closeBtn = useRef(null)
+  useEffect(() => { closeBtn.current?.focus() }, [])
+  useEscape(onClose)
+  const loadHist = useCallback(() => api.get(`/volt/ops/${orgId}/people/history`, { params: { user_id: person.user_id } }).then((r) => setHist(r.items)).catch(() => setHist([])), [orgId, person.user_id])
+  useEffect(() => { loadHist() }, [loadHist])
+  const self = person.user_id === meId
+  const adminTarget = person.is_admin && actorLevel !== 'owner'
+  const locked = !canManage || self || adminTarget
+  async function go(why) {
+    setBusy(true); setErr('')
+    try {
+      const r = (ask === 'archive' || ask === 'unarchive')
+        ? await api.post(`/volt/ops/${orgId}/people/${person.user_id}/archive`, { archived: ask === 'archive', reason: why })
+        : await api.post(`/volt/ops/${orgId}/people/${person.user_id}/access`, { action: ask, reason: why })
+      setAsk(null); await onChanged(r); await loadHist()
+    } catch (e) { setErr(msg(e)); setAsk(null) } finally { setBusy(false) }
+  }
+  return (
+    <div className="v-drawer-bg" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <aside className="v-drawer v-drawer--narrow" role="dialog" aria-modal="true" aria-labelledby="v-person-h" data-person-drawer={person.user_id}>
+        <div className="v-row"><span className="v-mono">Manage VOLT access</span><button ref={closeBtn} type="button" className="v-btn v-btn--line v-btn--sm" onClick={onClose} aria-label="Close access panel">Close ✕</button></div>
+        <h2 id="v-person-h" style={{ fontSize: 26, letterSpacing: '-.03em', margin: '10px 0 2px' }}>{person.name}</h2>
+        <p className="v-muted">{person.email}</p>
+        <p style={{ margin: '8px 0' }}>{person.roles.map((r) => <span key={r} className="v-tag v-tag--line" style={{ marginRight: 6 }}>{r}</span>)}{person.is_test && <span className="v-tag v-tag--line">Test</span>}</p>
+        <section className="v-panel">
+          <h3>VOLT access</h3>
+          <p>Current access: <span className={`v-tag ${ACCESS_TAG[person.access] || ''}`} data-access-state>{person.access_label}</span></p>
+          {person.reason && <p className="v-small v-muted">Last reason: {person.reason}</p>}
+          <Err>{err}</Err>
+          {locked ? (
+            <p className="v-small v-muted" data-locked>{self ? "You can't change your own access." : adminTarget ? "Only the owner can change another org admin's access." : 'Only the owner or a VOLT org admin can change access.'}</p>
+          ) : (
+            <div className="v-stack">
+              {person.access === 'active'
+                ? <button type="button" className="v-btn v-btn--red" onClick={() => setAsk('suspend')} data-act="suspend">Suspend access</button>
+                : <button type="button" className="v-btn v-btn--red" onClick={() => setAsk('restore')} data-act="restore">Restore access</button>}
+              {person.access !== 'removed' && <button type="button" className="v-btn v-btn--line" onClick={() => setAsk('remove')} data-act="remove">Remove VOLT access</button>}
+            </div>)}
+          <p className="v-small v-muted">Access changes apply to VOLT Marketing only. Other businesses and historical records stay intact.</p>
+        </section>
+        <section className="v-panel">
+          <h3>Application record</h3>
+          {person.applicant ? (
+            <>
+              <p className="v-small">{person.applications} application{person.applications === 1 ? '' : 's'}{person.archived ? ` · Archived ${fmtDate(person.archived_at)}` : ''}</p>
+              {canManage && <button type="button" className="v-btn v-btn--line" onClick={() => setAsk(person.archived ? 'unarchive' : 'archive')} data-act={person.archived ? 'unarchive' : 'archive'}>
+                {person.archived ? 'Unarchive applicant' : 'Archive applicant'}</button>}
+              <p className="v-small v-muted">Archiving hides the record from active queues. It does not block sign-in.</p>
+            </>) : <p className="v-small v-muted">Staff only; no application record.</p>}
+        </section>
+        <div className="v-audit" data-owner-note>🔒 Owner oversight is protected. Every access change is recorded.</div>
+        <section className="v-panel" style={{ marginTop: 12 }}>
+          <h3>History</h3>
+          {hist === null ? <p className="v-mono">Loading…</p> : hist.length === 0 ? <p className="v-muted v-small">No access changes recorded.</p> : (
+            <ul className="v-ma-updates">{hist.map((h, i) => <li key={i} className="v-small"><b>{h.action.replace('access_', '').replace('_', ' ')}</b> · {h.actor} · {new Date(h.at).toLocaleString('en-US', { timeZoneName: 'short' })}{h.reason ? ` · “${h.reason}”` : ''}</li>)}</ul>)}
+        </section>
+        {ask && (
+          <ConfirmAction title={`${ACTION_COPY[ask][0]}?`} busy={busy} confirmLabel={ACTION_COPY[ask][0]} onClose={() => setAsk(null)} onConfirm={go}
+            body={<><b>{person.name}</b> ({person.email}) · Scope: VOLT Marketing. {ACTION_COPY[ask][1]}</>} />)}
+      </aside>
+    </div>
+  )
+}
+
+function People({ orgId, ops }) {
+  const [f, setF] = useState({ q: '', role: '', access: '', include_archived: false, include_test: false })
+  const [data, setData] = useState(null)
+  const [hist, setHist] = useState([])
+  const [err, setErr] = useState('')
+  const [open, setOpen] = useState(null)
+  const [snap, setSnap] = useState(null)          // the open person, even if a filter now hides them
+  useEffect(() => { if (!ops.home) ops.load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const seq = useRef(0)
+  const load = useCallback(() => {
+    const n = ++seq.current
+    const params = clean({ ...f, include_archived: f.include_archived ? 1 : '', include_test: f.include_test ? 1 : '' })
+    return Promise.all([api.get(`/volt/ops/${orgId}/people`, { params }), api.get(`/volt/ops/${orgId}/people/history`)])
+      .then(([p, h]) => { if (n === seq.current) { setData(p); setHist(h.items) } }).catch((e) => setErr(msg(e)))
+  }, [orgId, JSON.stringify(f)]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { const t = setTimeout(load, 180); return () => clearTimeout(t) }, [load])
+  const listed = open && data?.people.find((p) => p.user_id === open)
+  const person = open ? (listed || (snap?.user_id === open ? snap : null)) : null
+  const t = data?.totals
+  return (
+    <>
+      <div className="v-row"><div><h2 style={{ fontSize: 30, letterSpacing: '-.04em' }}>People & Access</h2><p className="v-muted">Manage access to VOLT Marketing.</p></div>
+        <div style={{ textAlign: 'right' }}><b>{ops.home?.me?.full_name}</b><div className="v-small v-muted">{data?.actor_level === 'owner' ? 'Owner' : data?.can_manage ? 'VOLT org admin' : 'View only'}</div></div></div>
+      <div className="v-kpis v-kpis--3" data-people-totals>
+        <div className="v-kpi" role="group" aria-label="Active access"><span>Active access</span><b>{t ? t.active : '–'}</b></div>
+        <div className="v-kpi" role="group" aria-label="Suspended"><span>Suspended</span><b>{t ? t.suspended : '–'}</b></div>
+        <div className="v-kpi" role="group" aria-label="Archived records"><span>Archived records</span><b>{t ? t.archived : '–'}</b></div>
+      </div>
+      <Err>{err}</Err>
+      <section className="v-panel">
+        <div className="v-filters">
+          <input aria-label="Search people" placeholder="Search name or email" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} data-people-search />
+          <select aria-label="Role" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}><option value="">All roles</option><option value="applicant">Applicants</option><option value="staff">Staff</option></select>
+          <select aria-label="Access status" value={f.access} onChange={(e) => setF({ ...f, access: e.target.value })}><option value="">All access</option><option value="active">Active</option><option value="suspended">Suspended</option><option value="removed">Removed</option></select>
+          <label className="v-check"><input type="checkbox" checked={f.include_archived} onChange={(e) => setF({ ...f, include_archived: e.target.checked })} /> Include archived</label>
+          <label className="v-check"><input type="checkbox" checked={f.include_test} onChange={(e) => setF({ ...f, include_test: e.target.checked })} /> Include test records</label>
+        </div>
+        <div className="v-scroll">
+          <table className="v-table v-table--cards" data-table="people">
+            <thead><tr><th>Name</th><th>Role</th><th>Access</th><th>Applications</th><th><span className="v-sr">Action</span></th></tr></thead>
+            <tbody>
+              {data === null && <tr><td colSpan="5" className="v-mono">Loading…</td></tr>}
+              {data?.people.length === 0 && <tr><td colSpan="5" className="v-empty">No matching people.</td></tr>}
+              {data?.people.map((p) => (
+                <tr key={p.user_id} data-person={p.user_id}>
+                  <td data-label="Name"><b>{p.name}</b><br /><span className="v-small v-muted">{p.email}{p.archived ? ' · Archived' : ''}{p.is_test ? ' · Test' : ''}</span></td>
+                  <td data-label="Role">{p.roles.join(' · ')}</td>
+                  <td data-label="Access"><span className={`v-tag ${ACCESS_TAG[p.access] || ''}`}>{p.access_label}</span></td>
+                  <td data-label="Applications">{p.applicant ? p.applications : '—'}</td>
+                  <td data-label="Action"><button type="button" className="v-btn v-btn--line v-btn--sm" onClick={() => { setSnap(p); setOpen(p.user_id) }} data-manage={p.user_id}>Manage access →</button></td>
+                </tr>))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <p className="v-small v-muted">Owner oversight is protected. Archiving and access removal are separate actions. No delete feature exists here.</p>
+      <section className="v-panel">
+        <h3>Access history</h3>
+        {hist.length === 0 ? <p className="v-muted v-small">No access changes yet.</p> : (
+          <ul className="v-ma-updates" data-access-history>{hist.slice(0, 25).map((h, i) => (
+            <li key={i} className="v-small"><b>{h.action.replace('access_', '').replace('_', ' ')}</b> · {h.target} · by {h.actor} · {new Date(h.at).toLocaleString('en-US', { timeZoneName: 'short' })}{h.reason ? ` · “${h.reason}”` : ''}</li>))}</ul>)}
+      </section>
+      {person && <PersonDrawer orgId={orgId} person={person} canManage={data.can_manage} actorLevel={data.actor_level} meId={data.me?.user_id}
+                               onClose={() => setOpen(null)} onChanged={async (r) => { if (r?.user_id) setSnap(r); await load() }} />}
     </>
   )
 }
@@ -850,6 +1133,7 @@ export default function VoltOps() {
         <Route index element={<Overview orgId={orgId} ops={ops} />} />
         <Route path="review" element={<ReviewQueue orgId={orgId} ops={ops} />} />
         <Route path="sessions" element={<Sessions orgId={orgId} ops={ops} />} />
+        <Route path="people" element={<People orgId={orgId} ops={ops} />} />
         <Route path="talent" element={<TalentPool orgId={orgId} />} />
         <Route path="email" element={<SupportEmail orgId={orgId} />} />
         <Route path="reps" element={<Reps orgId={orgId} ops={ops} />} />

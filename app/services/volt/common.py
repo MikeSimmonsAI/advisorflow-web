@@ -31,9 +31,9 @@ DEFAULT_SLUG = "volt-marketing"
 STAFF_ROLES = ("org_admin", "manager", "super_admin")
 VIEW_ROLES = ("viewer", "spectator")
 
-STATUSES = ("draft", "submitted", "needs_update", "approved", "started")
+STATUSES = ("draft", "submitted", "needs_update", "approved", "started", "withdrawn")
 STATUS_LABELS = {"draft": "Draft", "submitted": "Submitted", "needs_update": "Needs update",
-                 "approved": "Approved", "started": "Started"}
+                 "approved": "Approved", "started": "Started", "withdrawn": "Withdrawn / closed"}
 
 REP_CODE_OFFSET = 1000      # serial 42 is shown as REP-1042
 
@@ -48,6 +48,14 @@ def iso(dt) -> Optional[str]:
     if hasattr(dt, "hour"):
         return dt.replace(microsecond=0).isoformat() + "Z"
     return dt.isoformat()
+
+
+def app_ref(app) -> Optional[str]:
+    """The applicant-facing APPLICATION reference, e.g. VOLT-3F9A1C2E. Derived
+    from the application's permanent id, so it never changes and never reveals
+    the internal person id (REP-xxxx stays staff-side)."""
+    aid = getattr(app, "id", None) or ""
+    return ("VOLT-" + aid.replace("-", "")[:8].upper()) if aid else None
 
 
 def rep_code(serial: Optional[int]) -> Optional[str]:
@@ -118,6 +126,9 @@ def staff_access(db: Session, user: User, org_id: str) -> Optional[str]:
         return None
     if getattr(user, "role", None) == "god_admin":
         return "owner"
+    from app.services.volt import access as _access
+    if _access.blocked(db, org_id, user):
+        return None                     # suspended / removed in VOLT (People & Access)
     from app.services import workspace_access
     role = workspace_access.workspace_role(user, db, org_id)
     if role in STAFF_ROLES:

@@ -112,6 +112,11 @@ class VoltRep(Base):
     relevant_experience = Column(Text, nullable=True)
     additional_info = Column(Text, nullable=True)
     hiring_updated_at = Column(DateTime, nullable=True)
+    # ARCHIVED (2026-11-06): hidden from the default staff queues; every record
+    # is kept and the person can be unarchived. NEVER an access decision -
+    # sign-in is governed by volt_access alone.
+    archived_at = Column(DateTime, nullable=True)
+    archived_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -154,8 +159,18 @@ class VoltApplication(Base):
     organization_id = Column(String, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     rep_serial = Column(Integer, ForeignKey("volt_reps.serial", ondelete="CASCADE"), nullable=False, index=True)
     project_id = Column(String, ForeignKey("volt_projects.id", ondelete="CASCADE"), nullable=False, index=True)
-    # draft | submitted | needs_update | approved | started
+    # draft | submitted | needs_update | approved | started | withdrawn
     status = Column(String, nullable=False, default="draft")
+    # Withdrawn/closed by staff: the stage it was closed from, so reopening
+    # returns it exactly there.
+    closed_from_status = Column(String, nullable=True)
+    closed_at = Column(DateTime, nullable=True)
+    # STAFF-CONTROLLED ZOOM STEP (2026-11-06). NULL: not yet. "interview" or
+    # "orientation": this application may book one session of that kind for
+    # its project. Scheduling is tracked beside the review status, never in it.
+    schedule_stage = Column(String, nullable=True)
+    schedule_enabled_at = Column(DateTime, nullable=True)
+    schedule_enabled_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     answers = Column(Text, nullable=True)                         # JSON
     referrer_serial = Column(Integer, ForeignKey("volt_reps.serial", ondelete="SET NULL"), nullable=True, index=True)
     referral_source = Column(String, nullable=True)                # search | invite
@@ -212,6 +227,15 @@ class VoltSession(Base):
     instructions = Column(Text, nullable=True)
     status = Column(String, nullable=False, default="scheduled")   # scheduled | canceled
     canceled_at = Column(DateTime, nullable=True)
+    cancel_reason = Column(Text, nullable=True)
+    # SELF-BOOKING (2026-11-06). capacity NULL = an assigned-only session (the
+    # first lane); a number = applicants made eligible by staff may book it,
+    # up to that many active bookings, while booking_open is true and before
+    # the cutoff. Capacity is enforced in the database transaction that books.
+    capacity = Column(Integer, nullable=True)
+    booking_open = Column(Boolean, nullable=False, default=False)
+    booking_cutoff_minutes = Column(Integer, nullable=True)
+    rescheduled_at = Column(DateTime, nullable=True)
     created_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -225,6 +249,15 @@ class VoltSessionAttendee(Base):
     session_id = Column(String, ForeignKey("volt_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
     rep_serial = Column(Integer, ForeignKey("volt_reps.serial", ondelete="CASCADE"), nullable=False, index=True)
     attendance = Column(String, nullable=False, default="invited")    # invited | attended | no_show
+    # assigned (staff put them here) | booked (the applicant chose it)
+    source = Column(String, nullable=True)
+    application_id = Column(String, ForeignKey("volt_applications.id", ondelete="SET NULL"), nullable=True, index=True)
+    # active | canceled. A canceled booking keeps its row (history) and frees
+    # its seat; rebooking the same session reuses the row.
+    booking_status = Column(String, nullable=True)
+    booked_at = Column(DateTime, nullable=True)
+    canceled_at = Column(DateTime, nullable=True)
+    cancel_reason = Column(Text, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
@@ -305,3 +338,30 @@ class VoltSupportMessage(Base):
     handled_at = Column(DateTime, nullable=True)
     handled_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class VoltAccess(Base):
+    """VOLT ACCESS STATE FOR ONE LOGIN IN ONE VOLT TENANT (2026-11-06).
+
+    No row = active. `suspended` and `removed` refuse every VOLT request -
+    applicant and staff - and VOLT sign-in, whatever token is presented.
+    `sessions_before`: any session created at or before this instant is not
+    accepted by VOLT again, so restoring access never revives an old session;
+    the person signs in fresh. It is scoped to VOLT: a shared platform login
+    keeps its other workspaces and its other sessions.
+
+    `removed_role`: the VOLT staff membership role a removal deactivated, so a
+    restore can put back exactly that and nothing more.
+    """
+    __tablename__ = "volt_access"
+    __table_args__ = (UniqueConstraint("organization_id", "user_id", name="uq_volt_access_user"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    state = Column(String, nullable=False, default="active")          # active | suspended | removed
+    sessions_before = Column(DateTime, nullable=True)
+    removed_role = Column(String, nullable=True)
+    reason = Column(Text, nullable=True)
+    changed_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    changed_at = Column(DateTime, default=datetime.utcnow, nullable=False)

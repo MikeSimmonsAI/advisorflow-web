@@ -1,6 +1,11 @@
-"""VOLT - applicants, applications and click-to-confirm referrals.
+"""VOLT - applicants, applications and (historical) referrals.
 
-MIKE'S REFERRAL RULE, AS CODE
+REFERRALS ARE NOT LAUNCHING (2026-11-06). Signup, profile creation and new
+applications IGNORE every referral input - an old ?ref= link, a stale client
+sending `referrer_rep_id` - and record no attribution. Existing referral data
+is kept as history and staff can still correct it; nothing here deletes it.
+
+THE EARLIER RULE (still how staff corrections are validated)
 -----------------------------
 Credit is given ONLY to a recruiter id the applicant clicked (search result or
 invite confirmation). This module never receives a typed name for referral
@@ -170,7 +175,7 @@ def register(db: Session, prog: VoltProgram, body: Dict[str, Any]):
         raise HTTPException(status_code=409, detail={
             "message": "This email already has an account. Sign in to continue, or reset your password.",
             "code": "account_exists", "fields": {"email": "This email already has an account."}})
-    referrer = resolve_referrer(db, prog, body.get("referrer_rep_id"))
+    referrer = None                     # referrals are not launching: input ignored
     user = User(email=data["email"], full_name=("%s %s" % (data["first_name"], data["last_name"])).strip(),
                 password_hash=hash_password(data["password"]), role="volt_rep", organization_id=None,
                 is_active=True, must_change_password=False)
@@ -207,7 +212,7 @@ def create_profile_for_user(db: Session, prog: VoltProgram, user: User, body: Di
         raise HTTPException(status_code=409, detail="You already have a VOLT profile.")
     data = clean_profile(body, need_email=False)
     project = _open_project(db, prog, body.get("project_key"))
-    referrer = resolve_referrer(db, prog, body.get("referrer_rep_id"), self_user_id=user.id)
+    referrer = None                     # referrals are not launching: input ignored
     try:
         rep = _new_rep(db, prog, user, data, referrer)
     except IntegrityError:
@@ -261,7 +266,7 @@ def start_application(db: Session, prog: VoltProgram, rep: VoltRep, body: Dict[s
     if project.status != "open":
         raise HTTPException(status_code=409, detail={"message": "Recruiting is closed for %s." % project.name,
                                                      "code": "recruiting_closed"})
-    referrer = resolve_referrer(db, prog, body.get("referrer_rep_id"), self_serial=rep.serial)
+    referrer = None                     # referrals are not launching: input ignored
     try:
         with db.begin_nested():
             app = _new_application(db, prog, rep, project, referrer, body.get("referral_source"))
@@ -355,6 +360,9 @@ def missing_items(db, prog, rep, app) -> List[str]:
 def submit(db: Session, prog: VoltProgram, rep: VoltRep, app: VoltApplication, actor: User) -> VoltApplication:
     if app.status in ("submitted", "approved", "started"):
         return app                                   # a repeat is a no-op
+    if app.status == "withdrawn":
+        raise HTTPException(status_code=409, detail={"message": "This application was closed. Contact support to reopen it.",
+                                                     "code": "application_closed"})
     project = db.get(VoltProject, app.project_id)
     if project is not None and project.status != "open" and app.status == "draft":
         raise HTTPException(status_code=409, detail={"message": "Recruiting is closed for %s." % project.name,
@@ -371,6 +379,20 @@ def submit(db: Session, prog: VoltProgram, rep: VoltRep, app: VoltApplication, a
 
 
 def next_action(db, prog, rep, app) -> Dict[str, Any]:
+    if app.status == "withdrawn":
+        return {"label": "Application closed",
+                "detail": "This application is closed. Contact support@voltmarketing.live if you think this is a mistake.",
+                "kind": "done"}
+    if app.status in ("submitted", "approved") and app.schedule_stage:
+        from app.services.volt import sessions as S
+        b = S.active_booking(db, app)
+        kind = "interview" if app.schedule_stage == "interview" else "orientation"
+        if b is not None:
+            return {"label": "Zoom scheduled", "detail": "Your %s is booked. Your application stays active." % kind,
+                    "kind": "wait"}
+        return {"label": "Choose a Zoom date",
+                "detail": "Our team has opened the %s step. Pick one of the available times." % kind,
+                "kind": "applicant"}
     if app.status == "draft":
         missing = missing_items(db, prog, rep, app)
         return {"label": "Finish your application" if missing else "Review and submit your application",
@@ -383,7 +405,8 @@ def next_action(db, prog, rep, app) -> Dict[str, Any]:
         return {"label": "Under review", "detail": "Our team is reviewing your application. Check back here for updates.",
                 "kind": "wait"}
     if app.status == "approved":
-        return {"label": "Approved", "detail": "Watch Upcoming Sessions for your orientation.", "kind": "wait"}
+        return {"label": "Approved", "detail": "Our team will open your next step here. Watch for an update.",
+                "kind": "wait"}
     return {"label": "Started", "detail": "You are on this project.", "kind": "done"}
 
 
@@ -395,18 +418,24 @@ def application_dict(db, prog, rep, app, *, for_staff: bool = False) -> Dict[str
         # History only staff see (the first ACA form's license answers).
         hidden = {q["key"] for q in _questions(project) if q.get("staff_only")}
         answers = {k: v for k, v in answers.items() if k not in hidden}
-    out = {"id": app.id, "project": C.project_dict(project) if project else None, "status": app.status,
+    out = {"id": app.id, "reference": C.app_ref(app),
+           "project": C.project_dict(project) if project else None, "status": app.status,
            "status_label": C.STATUS_LABELS.get(app.status, app.status), "answers": answers,
            "questions": [q for q in _questions(project) if for_staff or not q.get("staff_only")],
            "sections": _hiring().sections_for(project), "profile_fields": _hiring().profile_fields_for(project),
-           "return_reason": app.return_reason, "referrer": C.public_rep(referrer),
-           "referral_source": app.referral_source, "referral_confirmed_at": C.iso(app.referral_confirmed_at),
+           "return_reason": app.return_reason,
+           "schedule_stage": app.schedule_stage, "schedule_enabled_at": C.iso(app.schedule_enabled_at),
+           "closed_at": C.iso(app.closed_at), "closed_from_status": app.closed_from_status,
            "created_at": C.iso(app.created_at), "updated_at": C.iso(app.updated_at),
            "submitted_at": C.iso(app.submitted_at), "approved_at": C.iso(app.approved_at),
            "started_at": C.iso(app.started_at),
            "editable": app.status in ("draft", "needs_update"),
            "documents": requirements(db, prog, rep, app)}
-    if not for_staff:
+    if for_staff:
+        # Historical referral facts: staff only (referrals are not launching).
+        out.update({"referrer": C.public_rep(referrer), "referral_source": app.referral_source,
+                    "referral_confirmed_at": C.iso(app.referral_confirmed_at)})
+    else:
         out["next_action"] = next_action(db, prog, rep, app)
     return out
 
@@ -439,11 +468,12 @@ def rep_profile_dict(rep: VoltRep, user: Optional[User], *, private: bool) -> Di
 # ── staff actions ────────────────────────────────────────────────────────────
 
 STAFF_TRANSITIONS = {
-    "submitted": ("needs_update", "approved"),
-    "needs_update": ("approved",),
-    "approved": ("started", "needs_update"),
+    "submitted": ("needs_update", "approved", "withdrawn"),
+    "needs_update": ("approved", "withdrawn"),
+    "approved": ("started", "needs_update", "withdrawn"),
     "started": (),
-    "draft": (),
+    "draft": ("withdrawn",),
+    "withdrawn": (),            # reopened only to the stage it was closed from
 }
 
 
@@ -452,6 +482,16 @@ def set_status(db: Session, prog: VoltProgram, app: VoltApplication, status: str
     status = (status or "").strip().lower()
     if status not in C.STATUSES:
         raise HTTPException(status_code=422, detail="Unknown stage.")
+    if app.status == "withdrawn" and status != "withdrawn":
+        # REOPEN: only to exactly the stage it was closed from.
+        back = app.closed_from_status or "submitted"
+        if status != back:
+            raise HTTPException(status_code=409, detail="A closed application reopens to %s."
+                                % C.STATUS_LABELS.get(back, back))
+        app.status, app.closed_from_status, app.closed_at = back, None, None
+        C.audit(db, prog.organization_id, actor, "application", app.id, "status", field="status", old="withdrawn",
+                new=back, reason=(reason or None))
+        return app
     if status == app.status:
         if status == "needs_update" and reason and reason.strip() != (app.return_reason or ""):
             pass                                       # a corrected reason is a real change
@@ -465,6 +505,10 @@ def set_status(db: Session, prog: VoltProgram, app: VoltApplication, status: str
             field_error({"reason": "Tell the applicant exactly what to change."})
         app.return_reason = reason.strip()[:2000]
     old = app.status
+    if status == "withdrawn":
+        app.closed_from_status, app.closed_at = old, C.now()
+        from app.services.volt import sessions as S
+        S.release_for_application(db, app, actor, "Application withdrawn/closed")
     app.status = status
     if status == "approved":
         app.approved_at = app.approved_at or C.now()

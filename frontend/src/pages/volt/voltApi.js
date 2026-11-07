@@ -76,14 +76,11 @@ const rep = (p) => `/volt/rep/${SLUG}${p}`
 
 export const volt = {
   portal: () => call(pub(''), { auth: false }),
-  searchPublic: (q, test) => call(pub(`/recruiters?q=${encodeURIComponent(q)}${test ? '&test=1' : ''}`), { auth: false }),
-  invite: (ref, project) => call(pub(`/invite?ref=${encodeURIComponent(ref || '')}&project=${encodeURIComponent(project || '')}`), { auth: false }),
   register: (body) => call(pub('/register'), { method: 'POST', body, auth: false }),
   login: (body) => call(pub('/login'), { method: 'POST', body, auth: false }),
   talentSignup: (body) => call(pub('/talent-pool'), { method: 'POST', body, auth: false }),
   saveHiring: (body) => call(rep('/hiring-profile'), { method: 'PUT', body }),
   me: () => call(rep('/me')),
-  searchSignedIn: (q) => call(rep(`/recruiters?q=${encodeURIComponent(q)}`)),
   createProfile: (body) => call(rep('/profile'), { method: 'POST', body }),
   updateProfile: (body) => call(rep('/profile'), { method: 'PATCH', body }),
   startApplication: (body) => call(rep('/applications'), { method: 'POST', body }),
@@ -92,7 +89,9 @@ export const volt = {
   submit: (id) => call(rep(`/applications/${id}/submit`), { method: 'POST', body: {} }),
   upload: (form) => call(rep('/documents'), { method: 'POST', form }),
   file: (id) => call(rep(`/documents/${id}/file`), { blob: true }),
-  leaderboard: (projectId) => call(rep(`/leaderboard?project_id=${encodeURIComponent(projectId || '')}`)),
+  zoomTimes: (id) => call(rep(`/applications/${id}/zoom-times`)),
+  bookZoom: (id, sessionId) => call(rep(`/applications/${id}/zoom-booking`), { method: 'POST', body: { session_id: sessionId } }),
+  cancelZoom: (id) => call(rep(`/applications/${id}/zoom-booking/cancel`), { method: 'POST', body: {} }),
   logout: () => call('/auth/logout', { method: 'POST', body: {} }).catch(() => null),
 }
 

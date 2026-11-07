@@ -331,3 +331,60 @@
   .v-pbanner::after { background: linear-gradient(180deg, rgba(0,0,0,0) 30%, rgba(0,0,0,.85) 100%); }
   .v-pcta .v-row .v-btn { width: 100%; }
 }
+
+/* ── My Application (2026-11-06, #535) ─────────────────────────────────────── */
+.v-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.v-tag--ok { background: #e2f6e9; color: #1f6b3b; border: 1px solid #b8e2c6; }
+.v-ma-top { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin: 4px 0 16px; }
+.v-ma-title { font-size: 32px; letter-spacing: -.04em; line-height: 1.1; margin: 0 0 6px; }
+.v-ma-switch { display: grid; gap: 4px; font-weight: 700; font-size: 13px; min-width: min(320px, 100%); }
+.v-ma-status { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+.v-ma-status > div:first-child { min-width: 220px; }
+.v-ma-proj { font-size: 21px; letter-spacing: -.02em; margin: 0 0 8px; }
+.v-ma-steps { list-style: none; display: flex; flex: 1; gap: 8px; margin: 0; padding: 0; min-width: 0; }
+.v-ma-step { flex: 1; border-top: 3px solid #d9d9df; padding-top: 10px; font-size: 13px; font-weight: 700; color: #6b6b75; min-width: 0; }
+.v-ma-step.done { border-color: var(--v-red); color: var(--v-ink); }
+.v-ma-step.now { border-color: var(--v-red); color: var(--v-red); }
+.v-ma-action { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  background: var(--v-red-tint); border: 1px solid #ffd0d8; border-radius: 10px; padding: 14px; margin-top: 12px; }
+.v-ma-full { display: flex; width: 100%; justify-content: center; margin: 10px 0; }
+.v-ma-zoom h3:focus { outline: 3px solid #f78899; outline-offset: 3px; }
+.v-ma-times { list-style: none; margin: 8px 0 0; padding: 0; max-height: min(55vh, 460px); overflow: auto; }
+.v-ma-updates { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.v-empty { text-align: center; padding: 22px 8px; color: #6b6b75; }
+.v-toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 80; background: #17171c; color: #fff;
+  padding: 13px 20px; border-radius: 10px; max-width: calc(100vw - 32px); font-weight: 600; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+@media (max-width: 740px) {
+  .v-ma-title { font-size: 26px; }
+  .v-ma-status { display: block; }
+  .v-ma-steps { margin-top: 16px; gap: 5px; }
+  .v-ma-step { font-size: 11px; }
+  .v-ma-action { align-items: flex-start; flex-direction: column; }
+}
+
+/* ── People & Access / Zoom availability (2026-11-06, #535) ───────────────── */
+.v-drawer--narrow { width: min(430px, 100%); }
+.v-stack { display: grid; gap: 10px; margin: 12px 0; }
+.v-audit { font-size: 12px; line-height: 1.7; background: #f6f6f8; padding: 10px 12px; border-radius: 8px; }
+.v-filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.v-filters input[type=search], .v-filters > input { flex: 1 1 220px; min-width: 0; }
+.v-filters select { width: auto; }
+.v-kpis--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.v-kpis--3 .v-kpi { cursor: default; }
+.v-subrow td { background: #fafafb; }
+.v-attendees { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.v-attendees li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+@media (max-width: 740px) {
+  .v-kpis--3 { gap: 6px; }
+  .v-kpis--3 .v-kpi { padding: 10px; }
+  .v-kpis--3 .v-kpi b { font-size: 24px; }
+  /* Tables become readable cards on phones: no sideways page scroll. */
+  .v-table--cards thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .v-table--cards, .v-table--cards tbody, .v-table--cards tr, .v-table--cards td { display: block; width: 100%; }
+  .v-table--cards tr { border: 1px solid var(--v-line); border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; background: var(--v-white); }
+  .v-table--cards td { border: 0; padding: 4px 0; }
+  .v-table--cards td[data-label]::before { content: attr(data-label); display: block; font: 800 10px/1.3 ui-monospace, monospace;
+    text-transform: uppercase; letter-spacing: 1px; color: #6b6b75; }
+  .v-table--cards .v-subrow { margin-top: -8px; }
+  .v-filters select, .v-filters .v-check { width: 100%; }
+}
