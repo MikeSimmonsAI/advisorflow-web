@@ -1750,7 +1750,17 @@ def set_daily_batch(body: DailyBatchIn, db: Session = Depends(get_db), user: Use
     if body.start is not None:
         prog.daily_batch_start = body.start.strip()
     if body.days is not None:
-        prog.daily_batch_days = "".join(sorted(set(body.days.strip())))
+        new_days = "".join(sorted(set(body.days.strip())))
+        local = daily_batch._local_now()
+        # A day added after today's last start time cannot have a batch today:
+        # it is recorded as done, so the next batch is tomorrow's (nothing is
+        # sent, and no "missed batch" alarm is raised for a batch that could
+        # never have run).
+        if (str(local.isoweekday()) in new_days and str(local.isoweekday()) not in daily_batch.days_of(prog)
+                and local.time() >= max(daily_batch.LATEST_START, daily_batch._start_time(prog))
+                and prog.daily_batch_last_date != local.date().isoformat()):
+            prog.daily_batch_last_date = local.date().isoformat()
+        prog.daily_batch_days = new_days
     prog.daily_batch_by = user.id if n > 0 else prog.daily_batch_by
     from app.routers.audit_log_router import log_action
     log_action(db, prog.organization_id, user.id, action="program.daily_batch_set",

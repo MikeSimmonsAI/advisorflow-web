@@ -1485,7 +1485,7 @@ def _next_batch(prog) -> Optional[str]:
         d = d + timedelta(days=1)
     for i in range(8):
         day = d + timedelta(days=i)
-        if str(day.isoweekday()) in (prog.daily_batch_days or "12345"):
+        if str(day.isoweekday()) in daily_batch.days_of(prog):
             return day.isoformat()
     return None
 
@@ -1604,6 +1604,26 @@ def command_pipeline_health(hours: int = Query(24, ge=1, le=336), db: Session = 
     from app.services.programs import pipeline_health
     prog = _program(db, user)
     return pipeline_health.report(db, prog, hours=hours)
+
+
+@router.get("/campaign-progress")
+def command_campaign_progress(campaign: Optional[str] = Query(None, max_length=80), db: Session = Depends(get_db),
+                              user: User = Depends(require_tenant_or_observer)):
+    """CAMPAIGN PROGRESS (Nov 7): one campaign's whole roster in mutually
+    exclusive groups, what went out each day, what is due in the next seven
+    days, the senders' health, and the sending days and hours. Read-only;
+    counts only. Defaults to the largest active campaign."""
+    from app.services.programs import campaign_progress as CP
+    prog = _program(db, user)
+    fams = CP.families(db, prog)
+    key = campaign or next((f["key"] for f in fams if f["active"]), None)
+    if key is None:
+        return {"campaigns": fams, "report": None}
+    try:
+        rep = CP.report(db, prog, key)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+    return {"campaigns": fams, "report": rep}
 
 
 def _latest_activity(db, r, locs) -> Optional[dict]:

@@ -36,6 +36,7 @@ def test_runs_once_a_day_after_start_on_weekdays(db_session, sample_org, monkeyp
     admin = _program(db_session, sample_org)
     p = _prog(db_session, sample_org)
     p.daily_batch_count, p.daily_batch_by, p.daily_batch_spacing = 3, admin.id, 8
+    p.daily_batch_days = "12345"                       # a manager chose weekdays only: still honoured
     db_session.commit()
     calls = []
     monkeypatch.setattr(daily_batch, "pick", lambda db, prog, n: ["a", "b", "c"][:n])

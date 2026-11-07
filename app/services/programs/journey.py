@@ -40,10 +40,12 @@ DEFAULT_SPACING_MINUTES = 5
 # few minutes, ONLY inside a daily window on business days. A start that would
 # fall after the window rolls to the next business morning - never into the
 # night, where the senders would hold it and then release a pile at once.
+# Nov 7 (owner): SCI outreach runs SEVEN days a week, 9 AM - 6 PM Central
+# (send_window). Saturday and Sunday are ordinary release days now.
 RELEASE_TZ = "America/Chicago"
 RELEASE_START = (9, 0)          # first new start of a day, local
 RELEASE_END = (18, 0)           # no new start at or after this, local
-RELEASE_WEEKDAYS_ONLY = True
+RELEASE_WEEKDAYS_ONLY = False
 # (Texts and emails are allowed 8:30 AM - 7:45 PM Eastern = 7:30 AM - 6:45 PM
 # Central; the window sits inside that with room for a sender pass.)
 

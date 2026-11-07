@@ -214,7 +214,7 @@ def daily_batch_ran(db: Session, org_id: str, now: datetime) -> Dict:
     if prog is not None and (prog.daily_batch_count or 0) > 0:
         local = daily_batch._local_now(now)
         start = daily_batch._start_time(prog)
-        due = (str(local.isoweekday()) in (prog.daily_batch_days or "12345")
+        due = (str(local.isoweekday()) in (prog.daily_batch_days or "1234567")
                and local.hour * 60 + local.minute >= start.hour * 60 + start.minute + 30)
         if due and prog.daily_batch_last_date != local.date().isoformat():
             bad.append("Today's batch of %d has not been approved" % prog.daily_batch_count)

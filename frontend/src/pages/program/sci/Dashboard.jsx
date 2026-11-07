@@ -14,6 +14,7 @@ import EngagementGauge, { useEngagement } from '../EngagementGauge'
 import { useNavigate } from 'react-router-dom'
 import { api, getCurrentUser } from '../../../api/client'
 import Surveys from './Surveys'
+import CampaignProgress from './CampaignProgress'
 import {
   BarRow, CLASS_LABEL, CLASS_TONE, Chip, Empty, Icon, Kpi, MoreLink, PageHead, Panel, ago, num, pct,
 } from './ui'
@@ -147,6 +148,8 @@ export default function Dashboard({ data, goTab, setParam }) {
           </div>
         </Panel>
       </div>
+
+      <CampaignProgress />
 
       <div className="sci-grid-dash-b">
         {!single && <LocationPerformance rows={data.location_performance} sel={sel} pick={id => setParam('location', id)} goTab={goTab} />}

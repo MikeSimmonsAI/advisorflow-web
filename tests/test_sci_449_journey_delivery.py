@@ -597,7 +597,7 @@ def test_first_messages_check_does_not_page_for_a_family_held_on_purpose(program
 
 # ── Nov 1: the full campaign releases itself inside a daily window ──────────
 
-def test_release_slots_stay_inside_weekday_window_and_roll_over():
+def test_release_slots_stay_inside_the_window_and_roll_over_seven_days_a_week():
     from zoneinfo import ZoneInfo
     z, u = ZoneInfo("America/Chicago"), ZoneInfo("UTC")
     first = datetime(2026, 11, 2, 17, 5)                      # Mon 11:05 AM CST
@@ -605,12 +605,14 @@ def test_release_slots_stay_inside_weekday_window_and_roll_over():
     local = [t.replace(tzinfo=u).astimezone(z) for t in slots]
     assert len(set(slots)) == 245
     assert local[0].hour == 11 and local[0].minute == 5
-    assert all(x.weekday() < 5 and (9, 0) <= (x.hour, x.minute) < (18, 0) for x in local)
+    assert all((9, 0) <= (x.hour, x.minute) < (18, 0) for x in local)                  # Nov 7: every day
     gaps = [(b - a) for a, b in zip(slots, slots[1:])]
     assert all(g == timedelta(minutes=5) or g >= timedelta(hours=14) for g in gaps)   # 5 min, or overnight
     fri = journey.release_slots(datetime(2026, 11, 6, 23, 55), 2, timedelta(minutes=5))   # Fri 5:55 PM
     nxt = fri[1].replace(tzinfo=u).astimezone(z)
-    assert (nxt.weekday(), nxt.hour, nxt.minute) == (0, 9, 0)                         # Monday 9:00
+    assert (nxt.weekday(), nxt.hour, nxt.minute) == (5, 9, 0)                         # Saturday 9:00 (Nov 7)
+    wk = journey.release_slots(datetime(2026, 11, 6, 23, 55), 2, timedelta(minutes=5), weekdays_only=True)
+    assert wk[1].replace(tzinfo=u).astimezone(z).weekday() == 0                       # weekdays-only still works
     night = journey.release_slots(datetime(2026, 11, 3, 3, 0), 1, timedelta(minutes=5))  # Mon 9 PM
     n0 = night[0].replace(tzinfo=u).astimezone(z)
     assert (n0.day, n0.hour) == (3, 9)                                                # Tue 9:00
