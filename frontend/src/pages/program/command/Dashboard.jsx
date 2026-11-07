@@ -66,6 +66,15 @@ export function ScreenTabs({ screen, go }) {
     <span className="sl-tabs-note">Live production data · Central Time</span></div>
 }
 
+// Nov 7: the daily batch's own days, never assumed to be weekdays.
+const batchDays = d => {
+  const v = d || '1234567'
+  if (v === '1234567') return 'every day'
+  if (v === '12345') return 'weekdays'
+  if (v === '123456') return 'Mon–Sat'
+  return v.split('').map(c => ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][Number(c)]).join(', ')
+}
+
 export function Home({ a, sched, consent, openMetric, openFamily }) {
   const prof = useProgramProfile()
   if (!a) return <p className="cmd-muted">Loading live numbers…</p>
@@ -141,7 +150,7 @@ export function Home({ a, sched, consent, openMetric, openFamily }) {
 
       <section className="sl-card">
         <h3>Delivery readiness <Link className="sl-a" to="/program?tab=send">Open controls →</Link></h3>
-        <div className="sl-row"><span>Weekday automatic enrollment</span><em className={`sl-tag ${b.on ? 'green' : 'orange'}`}>{b.on ? `ON · ${b.count} / day` : 'OFF'}</em></div>
+        <div className="sl-row"><span>Automatic enrollment ({batchDays(b.days)})</span><em className={`sl-tag ${b.on ? 'green' : 'orange'}`}>{b.on ? `ON · ${b.count} / day` : 'OFF'}</em></div>
         <div className="sl-row"><span>Next automatic batch</span><b>{a.next_batch ? ctDate(a.next_batch, { weekday: 'short', month: 'short', day: 'numeric' }) : '—'}{a.next_batch && b.start ? ` · ${b.start}` : ''}</b></div>
         <div className="sl-row"><span>Quiet hours &amp; STOP / DNC</span><em className="sl-tag green">Gated</em></div>
         <Link className="sl-row cs-link" to="/program/live?s=consent&c=opted_in"><span>Families opted in</span><b>{consent ? n(consent.opted_in) : '…'}</b></Link>
