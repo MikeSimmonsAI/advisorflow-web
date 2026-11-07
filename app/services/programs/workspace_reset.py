@@ -265,6 +265,51 @@ def plan(db: Session, org: Organization) -> Dict:
             elif _name_issue(l):
                 seg = "contact_data"; reasons.append("first or last name missing")
         members[l.id] = {"segment": seg, "reasons": reasons, "destination": p}
+    # Rounds and rests (Issue #507 rotation), per destination: a family whose
+    # phone/email is in an open round of another record, resting, or stopped
+    # for a reply/booking/opt-out is not "ready". A family's OWN staged row in
+    # the Family File Review round is not a conflict.
+    try:
+        from app.models.reset_models import CampaignCycleMember as _CCM
+        cyc = db.query(_CCM).filter(_CCM.organization_id == org.id).all()
+    except Exception:                                    # noqa: BLE001 - table absent on an old DB
+        db.rollback()
+        cyc = []
+    if cyc:
+        now = datetime.utcnow()
+        by_key = defaultdict(list)
+        for c in cyc:
+            for k in (("p", c.phone_e164), ("e", c.email_norm), ("l", c.lead_id)):
+                if k[1]:
+                    by_key[k].append(c)
+        for l in pool:
+            m = members[l.id]
+            if m["segment"] != "ready":
+                continue
+            em = (l.email or "").strip().lower() or None
+            hits = {c.id: c for k in (("p", m["destination"]), ("e", em), ("l", l.id)) for c in by_key.get(k, [])}
+            for c in hits.values():
+                own = c.lead_id == l.id and c.campaign_key == CAMPAIGN_KEY and c.status in ("staged", "active")
+                if own:
+                    continue
+                if c.status in ("staged", "active"):
+                    m["segment"] = "in_round"
+                    m["reasons"].append("phone or email already in an open round (%s)" % c.cycle_key)
+                elif c.status == "completed" and c.next_eligible_at and c.next_eligible_at > now:
+                    m["segment"] = "resting"
+                    m["reasons"].append("resting until %s" % c.next_eligible_at.strftime("%b %-d, %Y"))
+                elif c.status == "completed":
+                    m["segment"] = "returning"
+                    m["reasons"].append("rest ended %s - review for the Return campaign" %
+                                        (c.next_eligible_at.strftime("%b %-d, %Y") if c.next_eligible_at else "-"))
+                elif c.status == "stopped" and c.completion_reason in ("replied", "booked", "cancelled_appointment",
+                                                                        "opted_out"):
+                    m["segment"] = "suppressed" if c.completion_reason == "opted_out" else "prior_conversation"
+                    m["reasons"].append("ended an earlier round: %s" % c.completion_reason)
+                else:
+                    continue
+                break
+
     # One family per destination: shared numbers send once, to the oldest record.
     seen = {}
     for l in pool:

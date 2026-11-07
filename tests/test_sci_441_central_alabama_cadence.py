@@ -81,9 +81,9 @@ def test_other_campaigns_are_untouched(program):
     _fam(db, org)
     vet = db.query(CampaignFamily).filter_by(organization_id=org.id, key="veteran_planning_guide").one()
     assert vet.touch_copy_json is None and C.missing_steps is not None
-    from app.services.programs.campaigns import OWN_COPY_KEYS, RESTLAND_FFR_KEY
-    # Only Central Alabama (SCI) and Restland's own Family File Review speak their own copy.
-    assert OWN_COPY_KEYS == {C.CENTRAL_ALABAMA_KEY, RESTLAND_FFR_KEY}
+    from app.services.programs.campaigns import OWN_COPY_KEYS, RESTLAND_FFR_KEY, RESTLAND_FFR_RETURN_KEY
+    # Only Central Alabama (SCI) and Restland's own Family File Review campaigns speak their own copy.
+    assert OWN_COPY_KEYS == {C.CENTRAL_ALABAMA_KEY, RESTLAND_FFR_KEY, RESTLAND_FFR_RETURN_KEY}
 
 
 # ── texts ───────────────────────────────────────────────────────────────────

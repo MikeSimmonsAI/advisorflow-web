@@ -38,6 +38,23 @@ def minutes_for(kind) -> int:
     return MINUTES.get(kind or VISIT, MINUTES[VISIT])
 
 
+def _policy(prog):
+    """The program's own appointment rules (Issue #507), or None."""
+    from app.services.programs import booking_policy
+    return booking_policy.for_program(prog)
+
+
+def _bookable_day(prog, d) -> bool:
+    """Weekdays only, unless the program's own rules say which days."""
+    pol = _policy(prog)
+    return d.weekday() < 5 if pol is None else str(d.weekday()) in pol["days"]
+
+
+def visit_minutes(prog, kind) -> int:
+    pol = _policy(prog)
+    return pol["duration"] if pol is not None else minutes_for(kind)
+
+
 def _today_central():
     from datetime import timezone
     from zoneinfo import ZoneInfo
@@ -73,7 +90,7 @@ def available_slots(db: Session, prog, *, want: int = 2, days: int = 14,
     spare: List[datetime] = []
     for i in range(days + 1):
         d = today + timedelta(days=i)
-        if d.weekday() >= 5:
+        if not _bookable_day(prog, d):
             continue
         res = compute_day_slots(db, advisor, d, program_visit=True, today=today, minutes=minutes_for(kind))
         if res.get("calendar_error"):
@@ -108,7 +125,7 @@ def slots_on_day(db: Session, prog, day, want: int = 2, kind: str = VISIT) -> Tu
     both exist). ([], reason) when that day has none."""
     from app.routers.calendar_router import compute_day_slots
     advisor = program_advisor(db, prog)
-    if advisor is None or day.weekday() >= 5:
+    if advisor is None or not _bookable_day(prog, day):
         return [], "no times that day"
     res = compute_day_slots(db, advisor, day, program_visit=True, today=_today_central().date(),
                             minutes=minutes_for(kind))
@@ -186,7 +203,8 @@ class _InternalRequest:
         return self._payload
 
 
-def book(db: Session, prog, lead, slot: datetime, kind: str, *, family_text: bool = True) -> Dict:
+def book(db: Session, prog, lead, slot: datetime, kind: str, *, family_text: bool = True,
+         meeting_key: Optional[str] = None, visit_address: Optional[str] = None) -> Dict:
     """Book `slot` for this family, through the booking page's own path.
     {"ok": True, "status": "confirmed", "booking_id", "booked_time"} only when
     the BookingLink reads back booked at that exact time."""
@@ -229,16 +247,27 @@ def book(db: Session, prog, lead, slot: datetime, kind: str, *, family_text: boo
                 "booking_id": existing.id, "booked_time": existing.booked_time.isoformat()}
     if not still_free(db, prog, slot, kind):
         return {"ok": False, "status": "taken", "reason": "that time is no longer open"}
+    pol = _policy(prog)
+    choice = None
+    if pol is not None:
+        # Issue #507: the program's own length and a place (office, or the
+        # family's home with a complete address).
+        from app.services.programs import booking_policy
+        try:
+            choice = booking_policy.meeting_choice(pol, meeting_key or booking_policy.OFFICE, visit_address)
+        except ValueError as e:
+            return {"ok": False, "status": "needs_place", "reason": str(e)}
     link = get_or_create_booking_link(db, lead, advisor)
     link.booked_time = slot
-    link.appt_duration = minutes_for(kind)
+    link.appt_duration = visit_minutes(prog, kind)
     db.flush()
     from app.routers.calendar_router import booking_confirmed_webhook
     payload = {"booking_token": link.token, "slot_display": slot.strftime("%Y-%m-%dT%H:%M:00"),
                "appt_label": ("TEST - owner live test, safe to delete" if owner_test
-                              else LABELS.get(kind, LABELS[VISIT])),
+                              else (choice or {}).get("appt_label") or LABELS.get(kind, LABELS[VISIT])),
                "lead_name": ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip(),
-               "lead_phone": lead.phone or "", "duration_minutes": minutes_for(kind), "from_setter": True,
+               "lead_phone": lead.phone or "", "duration_minutes": visit_minutes(prog, kind), "from_setter": True,
+               "meeting_key": (choice or {}).get("key"), "visit_address": visit_address,
                # Booked from an email conversation: the confirmation goes back by
                # email to the writer, not as a text to the record's phone.
                "skip_family_text": not family_text}

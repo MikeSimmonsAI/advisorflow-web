@@ -437,12 +437,46 @@ def max_touches() -> int:
         return DEFAULT_MAX_TOUCHES
 
 
-def _due_touch(touches: Dict[int, ProgramEmailTouch], now: datetime) -> Optional[int]:
+MIN_EMAIL_GAP = timedelta(hours=20)
+_RESTLAND_ROTATING = ("restland_family_file_review", "restland_family_file_review_return")
+
+
+def _due_touch(touches: Dict[int, ProgramEmailTouch], now: datetime, schedule=None,
+               start: Optional[datetime] = None) -> Optional[int]:
     """The touch due now (1..max_touches), or None.
 
     Touch n is due FOLLOWUP_DAYS after touch n-1 was SENT. A blocked touch is
     retried after BLOCKED_RETRY_AFTER, a temporary failure on its backoff;
-    failed / unknown / claimed stop the sequence until a person looks."""
+    failed / unknown / claimed stop the sequence until a person looks.
+
+    A campaign with its OWN email days (campaigns.EMAIL_SCHEDULES, e.g.
+    Restland: days 1, 4, 8, 12) passes `schedule` [(touch, day_offset)] and
+    the family's journey `start`: touch n is due on start + its offset, and
+    never sooner than the schedule's own gap after the previous email went
+    (so one that went late never pulls the next one in behind it)."""
+    if schedule:
+        offs = dict(schedule)
+        last = max(offs)
+        for n in sorted(offs):
+            t = touches.get(n)
+            if t is None:
+                if n == min(offs):
+                    return n
+                prev = touches.get(n - 1)
+                if prev is None or prev.attempted_at is None:
+                    return None
+                gap = max(MIN_EMAIL_GAP, timedelta(days=offs[n] - offs.get(n - 1, 0)))
+                on_day = (start + timedelta(days=offs[n])) if start is not None else now
+                return n if (now >= on_day and now - prev.attempted_at >= gap) else None
+            if t.status == "blocked":
+                return n if (t.attempted_at is None or now - t.attempted_at >= BLOCKED_RETRY_AFTER) else None
+            if t.status == "retry":
+                return n if (t.next_attempt_at is None or now >= t.next_attempt_at) else None
+            if t.status != "sent" or not t.attempted_at:
+                return None
+            if n == last:
+                return None
+        return None
     for n in range(1, max_touches() + 1):
         t = touches.get(n)
         if t is None:
@@ -608,12 +642,25 @@ def plan(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
             if t.status == "claimed" and t.attempted_at and now - t.attempted_at >= STALE_CLAIM_AFTER:
                 t.status = "unknown"
                 t.reason = "the runner stopped mid-send; check the provider log before resending"
-        touch = _due_touch(mine, now)
+        from app.services.programs.campaigns import email_schedule as _own_days
+        _sched = _own_days(fam.key)
+        _start = None
+        if _sched:
+            _starts = [r.journey_started_at for r in rows if getattr(r, "journey_started_at", None)]
+            _start = min(_starts) if _starts else None
+            if _start is not None and getattr(_start, "tzinfo", None) is not None:
+                _start = _start.replace(tzinfo=None)
+        touch = _due_touch(mine, now, _sched, _start)
         if touch is None:
             continue
+        _replied = lead_id in replied
+        if _replied and fam.key in _RESTLAND_ROTATING:
+            # #507: an automatic reply is not the family answering.
+            from app.services.programs import rotation as _rot
+            _replied = bool(_rot.genuine_repliers(db, org_id, [lead_id]))
         out.append({"lead": lead, "record": master, "family": fam, "touch": touch,
-                    "existing": mine.get(touch), "replied": lead_id in replied,
-                    "skip": _skip_reason(db, lead, lead_id in replied, prog) if with_skip else None})
+                    "existing": mine.get(touch), "replied": _replied,
+                    "skip": _skip_reason(db, lead, _replied, prog) if with_skip else None})
     return out
 
 

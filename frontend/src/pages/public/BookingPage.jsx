@@ -25,16 +25,18 @@ const MONTH_LABELS = [
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ];
 
-// The backend accepts weekdays only, today through today+14. Offering a day the
-// backend will reject with a 400 is a dead end for the family, so the chips only
-// ever contain days the backend will actually answer for.
-function bookableDays() {
+// The backend accepts weekdays only, today through today+14 - unless the
+// program has its own appointment days (`booking_days`, JS getDay numbers;
+// Restland: every day). Offering a day the backend will reject is a dead end
+// for the family, so the chips only ever contain days the backend answers for.
+function bookableDays(allowed) {
   const out = [];
   const now = new Date();
+  const ok = Array.isArray(allowed) && allowed.length ? new Set(allowed) : new Set([1, 2, 3, 4, 5]);
   for (let i = 0; i <= 14; i += 1) {
     const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
     const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
+    if (!ok.has(dow)) continue;
     out.push({
       iso: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
       weekday: DAY_LABELS[dow],
@@ -84,8 +86,11 @@ export default function BookingPage() {
   const [loadError, setLoadError] = useState('');
   const [context, setContext] = useState(null);
 
-  const days = useMemo(() => bookableDays(), []);
-  const [selectedDay, setSelectedDay] = useState(days[0] ? days[0].iso : '');
+  const days = useMemo(() => bookableDays(context?.booking_days), [context]);
+  const [selectedDay, setSelectedDay] = useState('');
+  useEffect(() => {
+    if (days.length && !days.some((d) => d.iso === selectedDay)) setSelectedDay(days[0].iso);
+  }, [days, selectedDay]);
   const [slots, setSlots] = useState([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotsReason, setSlotsReason] = useState('');
@@ -96,6 +101,8 @@ export default function BookingPage() {
   const [confirmed, setConfirmed] = useState(null);
   // Outreach program families choose a phone call or a visit first.
   const [meeting, setMeeting] = useState('');
+  // A home visit needs the family's address (street, city, state, ZIP).
+  const [address, setAddress] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -184,6 +191,7 @@ export default function BookingPage() {
   async function confirmBooking() {
     if (!selectedSlot || submitting) return;   // guards double submit
     if (meetingOptions && !chosenMeeting) return;
+    if (needsAddress && !addressLooksComplete) return;
     setSubmitting(true);
     setSubmitError('');
     try {
@@ -198,6 +206,8 @@ export default function BookingPage() {
           lead_name: context?.lead_name || '',
           lead_phone: context?.lead_phone || '',
           appt_label: chosenMeeting ? chosenMeeting.appt_label : (context?.appt_label || 'Appointment'),
+          meeting_key: chosenMeeting ? chosenMeeting.key : undefined,
+          visit_address: needsAddress ? address.trim() : undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -208,7 +218,7 @@ export default function BookingPage() {
             : 'We could not confirm that time. Please choose another.'
         );
       }
-      setConfirmed({ slot: selectedSlot, day: selectedDay });
+      setConfirmed({ slot: selectedSlot, day: selectedDay, where: chosenMeeting ? (needsAddress ? address.trim() : chosenMeeting.note) : '' });
     } catch (err) {
       setSubmitError(err.message || 'We could not confirm that time.');
       loadSlots(selectedDay);            // exits loading on the failure path too
@@ -236,6 +246,9 @@ export default function BookingPage() {
     ? context.meeting_options : null;
   const chosenMeeting = meetingOptions ? meetingOptions.find((m) => m.key === meeting) : null;
   const apptLabel = chosenMeeting ? chosenMeeting.appt_label : (context?.appt_label || 'appointment');
+  const needsAddress = Boolean(chosenMeeting && chosenMeeting.needs_address);
+  const addressLooksComplete = /^\d+\s+\S+.*,.*\b[A-Za-z]{2}\b.*\b\d{5}\b/.test(address.trim());
+  const blocked = !selectedSlot || submitting || (meetingOptions && !chosenMeeting) || (needsAddress && !addressLooksComplete);
   const S = styles(accent);
   const morning = slots.filter((x) => parseInt(String(x).split('T')[1] || '0', 10) < 12);
   const afternoon = slots.filter((x) => parseInt(String(x).split('T')[1] || '0', 10) >= 12);
@@ -256,7 +269,7 @@ export default function BookingPage() {
     const ics = [
       'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Booking//EN', 'BEGIN:VEVENT',
       `UID:${token}@booking`, `DTSTART;TZID=${tz}:${d}T${t.slice(0, 4)}00`, `DTEND;TZID=${tz}:${end}`,
-      `SUMMARY:${apptLabel}`, `LOCATION:${[businessName, businessAddress].filter(Boolean).join(', ')}`,
+      `SUMMARY:${apptLabel}`, `LOCATION:${confirmed.where || [businessName, businessAddress].filter(Boolean).join(', ')}`,
       `DESCRIPTION:${hostName ? `With ${hostName}. ` : ''}${businessPhone ? `Questions? Call ${businessPhone}.` : ''}`,
       'END:VEVENT', 'END:VCALENDAR',
     ].join('\r\n');
@@ -340,7 +353,7 @@ export default function BookingPage() {
                   <div style={S.ticket}>
                     <div style={S.ticketDay}>{labelForDay(days, confirmed.day)}</div>
                     <div style={S.ticketTime}>{formatSlotLabel(confirmed.slot)}</div>
-                    <div style={S.ticketWhere}>{apptLabel}</div>
+                    <div style={S.ticketWhere}>{apptLabel}{confirmed.where ? ` · ${confirmed.where}` : ''}</div>
                   </div>
                   <p style={S.body}>
                     A confirmation is on its way.{hostName ? ` ${hostName.split(' ')[0]} will be expecting you.` : ''}
@@ -389,6 +402,18 @@ export default function BookingPage() {
                 </div>
               ) : null}
 
+              {needsAddress ? (
+                <label style={{ display: 'block', margin: '0 0 16px' }}>
+                  <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, marginBottom: 6 }}>Your home address</span>
+                  <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} autoComplete="street-address"
+                    placeholder="Street, city, state and ZIP" aria-label="Your home address"
+                    style={{ width: '100%', boxSizing: 'border-box', padding: '12px 14px', borderRadius: 12, border: '1.5px solid #e2ded4', font: 'inherit', fontSize: 15 }} />
+                  {address && !addressLooksComplete ? (
+                    <span style={{ display: 'block', fontSize: 12.5, color: '#8a1c1c', marginTop: 6 }}>Please include the street, city, state and ZIP.</span>
+                  ) : null}
+                </label>
+              ) : null}
+
               <div style={S.dayRow}>
                 {days.map((d) => {
                   const active = d.iso === selectedDay;
@@ -422,13 +447,15 @@ export default function BookingPage() {
 
               <div style={S.ctaBar}>
                 <button type="button"
-                  disabled={!selectedSlot || submitting || (meetingOptions && !chosenMeeting)}
+                  disabled={blocked}
                   onClick={confirmBooking}
-                  style={(!selectedSlot || submitting || (meetingOptions && !chosenMeeting)) ? S.ctaDisabled : S.cta}>
+                  style={blocked ? S.ctaDisabled : S.cta}>
                   {submitting
                     ? 'Confirming…'
                     : meetingOptions && !chosenMeeting
-                      ? 'Choose a phone call or a visit'
+                      ? 'Choose where you would like to meet'
+                      : needsAddress && !addressLooksComplete
+                        ? 'Add your home address'
                       : selectedSlot
                         ? `Confirm ${labelForDay(days, selectedDay)} at ${formatSlotLabel(selectedSlot)}`
                         : 'Select a time'}

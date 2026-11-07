@@ -1165,9 +1165,14 @@ def command_slots(lead_id: str, kind: str = "visit", db: Session = Depends(get_d
     from app.services.programs import appointments as A
     prog = _program(db, user, managers_only=False)
     slots, why = A.available_slots(db, prog, want=4, kind=kind if kind in (A.PHONE, A.VISIT) else A.VISIT)
+    from app.services.programs import booking_policy as _bp
+    _pol = _bp.for_program(prog)
     return {"slots": [{"value": s.isoformat(), "label": A.describe(s),
                        "day": s.strftime("%a %b %-d"), "time": s.strftime("%-I:%M %p")} for s in slots],
-            "reason": why}
+            "reason": why,
+            # Issue #507: where the visit can be (office / the family's home).
+            "meeting_options": _bp.public_options(_pol) if _pol else [],
+            "minutes": _pol["duration"] if _pol else None}
 
 
 @router.get("/day-slots")
@@ -1209,6 +1214,8 @@ class ScheduleIn(BaseModel):
     lead_id: str
     slot: str                       # local Central ISO, from /slots
     kind: str = "visit"             # visit | phone
+    meeting_key: Optional[str] = None     # office | home (programs with their own rules)
+    visit_address: Optional[str] = None   # the family's address for a home visit
 
 
 @router.post("/schedule")
@@ -1226,7 +1233,9 @@ def command_schedule(body: ScheduleIn, db: Session = Depends(get_db), user: User
     except ValueError:
         raise HTTPException(status_code=422, detail="Pick one of the offered times.")
     kind = body.kind if body.kind in (A.PHONE, A.VISIT) else A.VISIT
-    res = A.book(db, prog, lead, slot, kind)
+    res = A.book(db, prog, lead, slot, kind, meeting_key=body.meeting_key, visit_address=body.visit_address)
+    if res.get("status") == "needs_place":
+        raise HTTPException(status_code=422, detail=res.get("reason"))
     if res.get("ok") and not res.get("simulated"):
         # Like the setter: the conversation is booked (created if the family
         # never had one) and the family's open replies are answered.
@@ -1723,6 +1732,8 @@ REVIEW_BUCKETS = {
     "duplicate_review": ("queue", "duplicate"), "suppressed": ("disposition", "suppressed"),
     "merged_duplicate": ("disposition", "merged_duplicate"), "email_only": ("disposition", "email_only"),
     "test": ("disposition", "test"), "retain": ("disposition", "retain"),
+    # Issue #507 rotation
+    "in_round": ("segment", "in_round"), "resting": ("segment", "resting"), "returning": ("segment", "returning"),
 }
 
 
@@ -1761,7 +1772,35 @@ def data_review_summary(db: Session = Depends(get_db), user: User = Depends(requ
                                                             is_staged=True).count())
     fam = db.query(CampaignFamily).filter_by(organization_id=org, key=WR.CAMPAIGN_KEY).first()
     from app.services.programs import campaigns as _camp
+    from app.services.programs import booking_policy as _bp
+    from app.services.programs import restland_ffr as _F
+    from app.services.programs import rotation as _rot
+    from app.services.programs import workspace_configure as _wc
+    _pol = _bp.for_program(prog)
+    _bu = db.query(User).filter(User.id == prog.booking_user_id).first() if getattr(prog, "booking_user_id", None) \
+        else None
+    _cfg = _wc.last_run(db, org)
+    _cfg_sum = _json.loads(_cfg.summary_json or "{}") if _cfg is not None else {}
+    _ret = db.query(CampaignFamily).filter_by(organization_id=org, key=_F.RETURN_KEY).first()
     return {
+        "configure_run": None if _cfg is None else {"id": _cfg.id, "key": _cfg.run_key, "status": _cfg.status,
+                                                    "finished_at": _cfg.finished_at.isoformat() + "Z"
+                                                    if _cfg.finished_at else None,
+                                                    "changes": _cfg_sum.get("changes"), "notes": _cfg_sum.get("notes"),
+                                                    "batch_1": _cfg_sum.get("batch_1")},
+        "booking": {
+            "user": None if _bu is None else {"name": _bu.full_name, "email": _bu.email},
+            "rules": None if _pol is None else {
+                "days": "Every day" if _pol["days"] == "0123456" else _pol["days"],
+                "starts": ["%d:%02d %s" % ((h - 1) % 12 + 1, m, "AM" if h < 12 else "PM") for h, m in _pol["starts"]],
+                "minutes": _pol["duration"], "gap_minutes": _pol["gap_after"], "timezone": _pol.get("timezone"),
+                "places": [o["label"] for o in _bp.public_options(_pol)]},
+            "calendar": _cfg_sum.get("calendar"),
+        },
+        "schedule": _F.schedule_summary(),
+        "rotation": _rot.groups(db, org),
+        "return_campaign": None if _ret is None else {"name": _ret.name, "is_active": bool(_ret.is_active),
+                                                     "activation_blocker": _camp.activation_blocker(_ret, db)},
         "run": None if run is None else {"id": run.id, "key": run.run_key, "status": run.status,
                                          "finished_at": run.finished_at.isoformat() + "Z" if run.finished_at else None,
                                          "summary": _json.loads(run.summary_json or "{}")},
@@ -1770,8 +1809,10 @@ def data_review_summary(db: Session = Depends(get_db), user: User = Depends(requ
         "campaign": None if fam is None else {
             "key": fam.key, "name": fam.name, "is_active": bool(fam.is_active),
             "sender": WR.SENDER_E164, "timezone": "America/Chicago",
-            "steps": [{"touch": n, "day": d, "hour": h, "text": _camp.sms_for(fam, n)} for n, d, h in WR.SMS_STEPS],
-            "email_steps": [{"touch": n, **(_camp.email_for(fam, n) or {})} for n, _d in _camp.email_steps()],
+            "steps": [{"touch": n, "day": d + 1, "hour": h, "text": _camp.sms_for(fam, n)}
+                      for n, d, h in _camp.sms_steps(db, org)],
+            "email_steps": [{"touch": n, "day": d + 1, **(_camp.email_for(fam, n) or {})}
+                            for n, d in _camp.email_steps(fam.key)],
             "activation_blocker": _camp.activation_blocker(fam, db),
             "booking_user_set": bool(getattr(prog, "booking_user_id", None)),
         },
@@ -1805,6 +1846,20 @@ def data_review_list(bucket: str = Query(...), offset: int = Query(0, ge=0, le=2
     disp = {d.lead_id: d for d in db.query(LeadDisposition).filter(LeadDisposition.organization_id == org,
                                                                       LeadDisposition.lead_id.in_(ids or ["-"]))}
     last, replied = _last_contact(db, ids)
+    # Issue #507: each family's round, booking and campaign assignment.
+    from app.models.models import BookingLink as _BL
+    from app.models.reset_models import CampaignCycleMember as _CCM
+    from app.services.programs import rotation as _rot
+    rounds = {}
+    for c in (db.query(_CCM).filter(_CCM.organization_id == org, _CCM.lead_id.in_(ids or ["-"]))
+              .order_by(_CCM.created_at).all()):
+        rounds[c.lead_id] = c
+    booked = {}
+    for b in db.query(_BL).filter(_BL.lead_id.in_(ids or ["-"]), _BL.booked_time.isnot(None)).all():
+        if b.lead_id not in booked or (b.booked_time and b.booked_time > booked[b.lead_id].booked_time):
+            booked[b.lead_id] = b
+    camp = {r.lead_id: r.campaign_family for r in db.query(ProgramSourceRecord).filter(
+        ProgramSourceRecord.organization_id == org, ProgramSourceRecord.lead_id.in_(ids or ["-"])).all()}
     items = []
     for r in rows:
         l, d = leads.get(r.lead_id), disp.get(r.lead_id)
@@ -1818,5 +1873,67 @@ def data_review_list(bucket: str = Query(...), offset: int = Query(0, ge=0, le=2
                       "disposition": d.disposition if d else None, "reasons": reasons,
                       "segment": getattr(r, "segment", None), "batch": getattr(r, "batch", None),
                       "last_contact_at": last[l.id].isoformat() + "Z" if l.id in last else None,
-                      "replied_before": l.id in replied})
+                      "replied_before": l.id in replied,
+                      "round": _rot.member_view(rounds.get(l.id)),
+                      "next_touch": ("Text 1 on the start day - not scheduled while the campaign is off"
+                                     if (rounds.get(l.id) is not None and rounds[l.id].status == "staged") else None),
+                      "booking": None if l.id not in booked else {"status": booked[l.id].status,
+                                                                   "when": _booking_time.wire(db, booked[l.id])},
+                      "campaign": camp.get(l.id)})
     return {"items": items, "total": total, "offset": offset, "limit": limit, "bucket": bucket}
+
+
+# ── APPOINTMENT REASSIGNMENT (Issue #507) ────────────────────────────────────
+# Staff only. Moves a booked appointment to another member of THIS workspace's
+# team when that person is free (their bookings + gap, their calendar). Keeps
+# the time, place, family and history; audited; the family is not messaged.
+
+class ApptAssignIn(BaseModel):
+    user_id: str
+
+
+@router.get("/appointments/{booking_id}/assignees")
+def appointment_assignees(booking_id: str, db: Session = Depends(get_db),
+                          user: User = Depends(require_tenant_user)):
+    from app.models.models import BookingLink
+    prog = _program(db, user, managers_only=False)
+    b = (db.query(BookingLink).join(Lead, Lead.id == BookingLink.lead_id)
+         .filter(BookingLink.id == booking_id, Lead.organization_id == prog.organization_id).first())
+    if b is None:
+        raise HTTPException(status_code=404, detail="Appointment not found.")
+    return {"booking_id": b.id, "current_user_id": b.user_id,
+            "team": [{"id": u.id, "name": u.full_name or u.email} for u in _team(db, prog.organization_id)]}
+
+
+@router.post("/appointments/{booking_id}/assign")
+def appointment_assign(booking_id: str, body: ApptAssignIn, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user)):
+    from app.models.models import BookingLink
+    from app.services.programs import booking_policy as BP
+    prog = _program(db, user, managers_only=False)
+    b = (db.query(BookingLink).join(Lead, Lead.id == BookingLink.lead_id)
+         .filter(BookingLink.id == booking_id, Lead.organization_id == prog.organization_id).first())
+    if b is None:
+        raise HTTPException(status_code=404, detail="Appointment not found.")
+    who = next((u for u in _team(db, prog.organization_id) if u.id == body.user_id), None)
+    if who is None:
+        raise HTTPException(status_code=422, detail="That person is not on this team.")
+    try:
+        return BP.reassign(db, prog, b, who, user)
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(e))
+    except PermissionError:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Appointment not found.")
+
+
+@router.post("/data-review/rotation/refresh")
+def data_review_rotation_refresh(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Bring every open round up to date (replies, bookings, opt-outs, finished
+    sequences -> rest dates). Reads history; sends nothing; enrolls nobody."""
+    from app.services.programs import rotation as _rot
+    prog = _program(db, user)
+    _require_manager(db, user)
+    counts = _rot.refresh(db, prog.organization_id)
+    return {"counts": counts, "groups": _rot.groups(db, prog.organization_id)}

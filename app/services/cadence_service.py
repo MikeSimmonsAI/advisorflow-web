@@ -688,6 +688,13 @@ def run_due_cadences(db: Session, organization_id: str = None,
                 continue
 
             has_reply = db.query(Reply).filter(Reply.lead_id == lead.id).first()
+            if has_reply is not None:
+                # Restland Family File Review (#507): an automatic reply ("I'm
+                # driving", out of office) is not the family answering - the
+                # spaced sequence continues. Every other campaign: unchanged.
+                from app.services.programs import rotation as _rot
+                if not _rot.reply_counts_for_cadence(db, lead):
+                    has_reply = None
 
             if has_reply:
                 _log_touch(db, state, lead, touch_number=touch_number,

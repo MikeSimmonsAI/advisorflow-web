@@ -107,3 +107,105 @@ A failed run rolls back its whole transaction and never stops the deploy.
    2. the workspace text switch (owner only);
    3. the AI setter, if wanted.
 7. **Voice (optional).** Decide whether calls to 855 should ring a person (needs a `phone_numbers` route) or keep going to voicemail.
+
+---
+
+# Booking, the 14-day campaign and the 30-day rest (Nov 7, owner decisions)
+
+Code:
+- `app/services/programs/booking_policy.py` (appointment rules)
+- `restland_ffr.py` (sequence and copy)
+- `rotation.py` (rounds and rest)
+- `workspace_configure.py` (the recorded setup run)
+
+## Booking
+
+- **Account:** the existing account Mike confirmed, which is Restland-only. Its id is passed in from the backend setting `WORKSPACE_BOOKING_USER_ID`, never written into the code.
+  - Its display name changes from "Jerome Simmons" to **Mike Simmons**.
+  - Its email, password, access and calendar grant are untouched.
+- **Rules:**
+  - Every day.
+  - Starts at **10:00, 11:30, 1:00, 2:30 and 4:00** Central. 4:00 is the last start and ends at 4:45.
+  - **45-minute** appointments plus a **45-minute gap**. Each appointment holds start → start + 90 minutes.
+  - Local wall time, so daylight saving moves nothing.
+- **One engine.** The booking page, staff "pick a time", the appointment setter and the booking confirmation all use `booking_policy` through `compute_day_slots`. Each one checks:
+  - existing appointments plus the gap (older visits hold their recorded length, 60 when unknown);
+  - the connected calendar, which fails closed;
+  - 2 hours' notice on the same day;
+  - a 14-day horizon.
+- **Office or home.** Both use the same times and the same calendar.
+  - A home visit needs a full street, city, state and ZIP.
+  - The place is stored on the booking (`meeting_type`, `visit_address`) and shown in:
+    - the confirmation text;
+    - the Google and Microsoft calendar event;
+    - Appointments, for staff.
+  - There's no mileage or service-area rule.
+  - Program families get no reminder texts today (only the confirmation), so there's no reminder copy to change.
+- **Reassignment.** Appointments has an "Assign to" control (`POST /program/command/appointments/{id}/assign`).
+  - Only this workspace's team can be chosen.
+  - It refuses if that person isn't free (their bookings plus the gap, and their calendar).
+  - It keeps the time, place and history, writes an audit entry, and never messages the family.
+
+## The sequence (5 texts, 4 emails, 14 days)
+
+| Day | Touch |
+|---|---|
+| 1 | text 1 (10 AM), then email 1 at least 4 hours later |
+| 3 | text 2 |
+| 4 | email 2 |
+| 6 | text 3 (Restland or home) |
+| 8 | email 3 (the form and the guide) |
+| 10 | text 4 (weekday or weekend) |
+| 12 | email 4 |
+| 14 | text 5 (close the loop) |
+
+- Every touch goes out 9 AM–6 PM Central, every day (`send_window`).
+- The emails have their own days (`campaigns.EMAIL_SCHEDULES`), measured from the family's start. A late email never pulls the next one in.
+- No usable email: five texts only. Missing emails never become texts.
+- **What stops the sequence:**
+  - A real reply, on any channel. Automatic replies ("I'm driving", out of office) don't count, for the Restland campaigns only; every other campaign is unchanged.
+  - A booking.
+  - An opt-out.
+
+## Rounds and the 30-day rest
+
+- `campaign_cycle_members` keeps one row per family per round: staged, active, completed or stopped. Each row records the start, the end, the reason, the last real outreach and the next eligible date.
+- **Finished with no reply:** next eligible = the **actual** last delivered outreach + 30 days.
+- **Last touch undelivered:** the round still ends, recorded as `undeliverable`, measured from the last attempt.
+- **Replied, booked, opted out or cancelled an appointment:** the family goes to a person or stays suppressed. They are never recycled.
+- **Enforced per destination.** A phone or email that is resting, or in an open round, blocks every record that shares it.
+  - The audience plan marks these families "in_round" or "resting".
+  - Approval refuses them.
+- **When the rest is over** the family can appear in a **reviewed** pool ("Rest over: review"). Never automatic enrollment.
+- **Returning families** use their own drafted campaign, "Restland — Family File Review — Return" (OFF), whose copy says we wrote before.
+- **Not built yet: sending a second round.** Email touches are numbered once per family, and the text cadence keeps one state per family. Until that's built, approving a returning family is refused with that reason. The earliest any family could return is about 44 days after launch.
+
+## Running the setup in production
+
+- `WORKSPACE_RESET=01fed629-9a95-412b-895a-c8b09f37a98c:configure:restland-config-1` runs once and is recorded.
+- It refuses SCI and refuses while a Restland campaign is on.
+- It also does one **read-only** calendar check and reports it in the run summary.
+- **Rollback:** `...:rollback:<configure run id>` restores:
+  - the booking user and display name;
+  - the appointment rules;
+  - the location address;
+  - the 3-text template;
+  - the earlier draft copy;
+  - Batch 1 staging.
+
+  It also removes the Return campaign and the round rows. It refuses once a campaign is on or a family is approved.
+
+## Launch checklist (nothing here is done by this work)
+
+1. Mike approves or edits the 5 texts and 4 emails, and the Return drafts.
+2. Mike reviews the 25 staged families in Clean-up & Batch 1.
+3. Decide the daily number of new families and the spacing. See the proposal in the #507 checkpoint.
+4. Choose staff-alert recipients.
+5. Reconnect the calendar if the setup run's check says it can't be read.
+6. Optional: one live test to an internal number Mike names. No family is ever used.
+7. Switch on, in order:
+   1. the campaign, in Campaigns;
+   2. the workspace texts switch (owner);
+   3. approve the families in Choose & Send;
+   4. alerts;
+   5. the AI setter, only if wanted.

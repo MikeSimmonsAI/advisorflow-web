@@ -219,7 +219,7 @@ def main(argv=None) -> int:
         log.error("VOLT seed errored (deploy continues): %s: %s", type(e).__name__, str(e)[:200])
 
     # ── 3f. WORKSPACE DATA RESET (#507) - inert unless switched on ──
-    # WORKSPACE_RESET="<organization id>:<plan|apply>:<run key>" or
+    # WORKSPACE_RESET="<organization id>:<plan|apply|configure>:<run key>" or
     # "<organization id>:rollback:<run id>". `apply` is idempotent per run key
     # (a second deploy with the same value changes nothing); every change is
     # recorded with its before value. Sends nothing, approves nothing, switches
@@ -242,8 +242,23 @@ def main(argv=None) -> int:
                     log.info("workspace reset apply org=%s run=%s status=%s already=%s changes=%s",
                              org_id, res["run_id"], res["status"], res["already"],
                              json.dumps(res["summary"].get("changes", {}), sort_keys=True))
+                elif mode == "configure":
+                    # Issue #507 (Nov 7): booking account + rules, the 14-day
+                    # campaign, Batch 1 revalidation. Recorded, reversible.
+                    from app.services.programs import workspace_configure as _wc
+                    res = _wc.configure(_db, org, key,
+                                        booking_user_id=os.environ.get("WORKSPACE_BOOKING_USER_ID", "").strip() or None)
+                    log.info("workspace configure org=%s run=%s status=%s already=%s summary=%s",
+                             org_id, res["run_id"], res["status"], res["already"],
+                             json.dumps(res["summary"], sort_keys=True, default=str)[:3500])
                 elif mode == "rollback":
-                    res = _wr.rollback(_db, org, key)
+                    from app.models.reset_models import WorkspaceResetRun as _Run
+                    _r = _db.query(_Run).filter_by(id=key, organization_id=org_id).first()
+                    if _r is not None and _r.mode == "configure":
+                        from app.services.programs import workspace_configure as _wc
+                        res = _wc.rollback(_db, org, key)
+                    else:
+                        res = _wr.rollback(_db, org, key)
                     log.info("workspace reset rollback org=%s: %s", org_id, json.dumps(res, sort_keys=True))
                 else:
                     log.error("workspace reset: unknown mode %r (nothing done)", mode)

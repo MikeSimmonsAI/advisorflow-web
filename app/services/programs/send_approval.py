@@ -550,6 +550,14 @@ def approve(db: Session, prog: OutreachProgram, user: User, lead_ids: List[str],
             skipped.append({"lead_id": lid, "reason": b})
             continue
         fam_key = _master(recs).campaign_family
+        # Issue #507: rotating campaigns (Restland Family File Review) - only a
+        # family staged for the round, whose phone/email is not resting or in
+        # another open round, may be approved.
+        from app.services.programs import rotation as _rot
+        _why = _rot.approval_refusal(db, prog.organization_id, lead, fam_key)
+        if _why:
+            skipped.append({"lead_id": lid, "reason": _why})
+            continue
         fam_row = (db.query(CampaignFamily).filter(CampaignFamily.organization_id == prog.organization_id,
                                                    CampaignFamily.key == fam_key).first()) if fam_key else None
         from app.services.programs import campaigns as _camp

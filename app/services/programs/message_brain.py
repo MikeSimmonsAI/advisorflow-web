@@ -207,6 +207,20 @@ PLAYBOOKS: Dict[str, Dict] = {
         ["the person filled out a survey requesting a pre-planning guide and savings certificate"],
         # No offer terms are on file: never a value, expiry or benefit.
         [r"\bworth\b", r"\bvalued at\b", r"\bexpir", r"\b\d+\s?%", r"\bvalid (until|through)\b"]),
+    # Restland Family File Review (#507): its own approved copy; the gate
+    # still checks every email names Mike and Restland and asks for a reply.
+    "restland_family_file_review": _pb(
+        "restland_family_file_review", "Family File Review",
+        "we're inviting families to a Family File Review at Restland", "your family's file",
+        "The review confirms your family's file is accurate and goes over the pre-planning guide.",
+        "A common question is whether the visit means deciding anything. It doesn't.",
+        ["Mike Simmons invites the family to a 45-minute Family File Review at Restland or at home"]),
+    "restland_family_file_review_return": _pb(
+        "restland_family_file_review_return", "Family File Review",
+        "we wrote before about a Family File Review at Restland", "your family's file",
+        "The review confirms your family's file is accurate and goes over the pre-planning guide.",
+        "A common question is whether the visit means deciding anything. It doesn't.",
+        ["Mike Simmons offers the Family File Review again after an earlier invitation"]),
     "seminar": _pb(
         "seminar", "Seminar",
         "you signed up for one of our planning seminars", "planning ahead",
@@ -471,7 +485,12 @@ def quality(packet: Dict, msg: Dict, *, prior_bodies: Optional[List[str]] = None
         fails.append("contact is suppressed / opted out")
     if packet.get("appointment_booked"):
         fails.append("an appointment is booked - nurture stops")
-    if packet.get("responses"):
+    _resp = packet.get("responses") or []
+    if packet.get("campaign_family") in ("restland_family_file_review", "restland_family_file_review_return"):
+        # #507: an automatic reply / an opt-out record is not a conversation
+        # (an opt-out is held by the suppression check above).
+        _resp = [r for r in _resp if (r.get("class") or "") not in ("auto_reply", "opt_out")]
+    if _resp:
         fails.append("the contact has replied - a person handles the conversation")
     if require_campaign_active and not packet.get("campaign_active"):
         fails.append("campaign is not switched on")

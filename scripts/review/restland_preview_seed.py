@@ -130,6 +130,20 @@ def main():
     db.commit()
     res = WR.apply(db, rest, "preview-1")
     print("workspace reset:", res["summary"]["changes"])
+    # Issue #507 (Nov 7): booking account, appointment rules, 14-day campaign.
+    # The preview uses a stand-in address for the booking account.
+    from app.services.programs import workspace_configure as WC
+    bu = User(email="mike.preview@example.com", full_name="Jerome Simmons", password_hash=hash_password(PW),
+              organization_id=rest.id, role="org_admin", is_active=True)
+    db.add(bu)
+    db.commit()
+    cfg = WC.configure(db, rest, "preview-cfg-1", probe=False, booking_user_id=bu.id)
+    print("configure:", cfg["summary"]["changes"])
+    from app.services.sms_service import get_or_create_booking_link
+    staged = db.query(Lead).filter(Lead.organization_id == rest.id, Lead.status == "new").first()
+    link = get_or_create_booking_link(db, staged, bu)
+    db.commit()
+    print("booking page: /book/%s" % link.token)
     print("restland cutover:", out["reconciliation"])
     print("login: preview@example.com /", PW)
     print("sci org:", sci.id, "restland org:", rest.id)

@@ -63,7 +63,21 @@ AI_NOTES: Dict[str, Dict[str, str]] = {
 # Restland Family File Review (#507): its own drafted sequence, switched on
 # only by a person in Campaigns, never by approving a family.
 RESTLAND_FFR_KEY = "restland_family_file_review"
-OWN_COPY_KEYS = {CENTRAL_ALABAMA_KEY, RESTLAND_FFR_KEY}
+RESTLAND_FFR_RETURN_KEY = "restland_family_file_review_return"
+OWN_COPY_KEYS = {CENTRAL_ALABAMA_KEY, RESTLAND_FFR_KEY, RESTLAND_FFR_RETURN_KEY}
+
+# Campaigns whose EMAILS keep their own days (touch, day offset from the
+# family's start date) instead of the runner's one gap for every touch.
+# Restland Family File Review (Nov 7): emails on days 1, 4, 8 and 12.
+EMAIL_SCHEDULES = {
+    RESTLAND_FFR_KEY: [(1, 0), (2, 3), (3, 7), (4, 11)],
+    RESTLAND_FFR_RETURN_KEY: [(1, 0), (2, 3), (3, 7), (4, 11)],
+}
+
+
+def email_schedule(fam_key: Optional[str]):
+    """This campaign's own email days, or None (the runner's usual gap)."""
+    return EMAIL_SCHEDULES.get(fam_key or "")
 
 # ── per-touch copy ───────────────────────────────────────────────────────────
 #
@@ -154,8 +168,12 @@ def sms_steps(db: Optional[Session], organization_id: Optional[str]):
     return list(DEFAULT_SMS_STEPS)
 
 
-def email_steps():
-    """[(touch, day_offset)] - the campaign email runner's touches."""
+def email_steps(fam_key: Optional[str] = None):
+    """[(touch, day_offset)] - the campaign email runner's touches (this
+    campaign's own days when it has them)."""
+    own = email_schedule(fam_key)
+    if own:
+        return list(own)
     from app.services.programs import email_touches as et
     return [(n, (n - 1) * et.followup_days()) for n in range(1, et.max_touches() + 1)]
 
@@ -204,7 +222,7 @@ def touch_copy(db: Optional[Session], fam) -> Dict:
                  "day_offset": d, "send_hour": h, "body": sms_for(fam, n) or ""}, **m("sms:%d" % n))
            for n, d, h in sms_steps(db, fam.organization_id)]
     email = []
-    for n, d in email_steps():
+    for n, d in email_steps(fam.key):
         e = email_for(fam, n) or {}
         email.append(dict({"touch": n, "channel": "email", "label": step_label("email", n),
                            "theme": ethemes.get(n), "day_offset": d,
@@ -303,7 +321,7 @@ def copy_problems(fam) -> list:
 
 def missing_steps(db: Optional[Session], fam) -> list:
     out = ["Text %d" % n for n, _d, _h in sms_steps(db, fam.organization_id) if sms_for(fam, n) is None]
-    out += ["Email %d" % n for n, _d in email_steps() if email_for(fam, n) is None]
+    out += ["Email %d" % n for n, _d in email_steps(fam.key) if email_for(fam, n) is None]
     return out
 
 

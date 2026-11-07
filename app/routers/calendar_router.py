@@ -234,6 +234,28 @@ def get_booking_by_token(request: Request, token: str, db: Session = Depends(get
     else:
         _program_location = None
 
+    # A program with its own appointment rules (Issue #507): its label and
+    # length, the host's name as families should see it, where they can meet
+    # (office or home) and which weekdays can be booked.
+    _booking_days = None
+    try:
+        from app.services.programs import booking_policy as _bp
+        _policy = _bp.for_org(db, getattr(lead, "organization_id", None)) if _loc is not None else None
+    except Exception:                                    # noqa: BLE001
+        _policy = None
+    if _policy is not None:
+        appt_label = _policy.get("label") or appt_label
+        appt_duration = _policy["duration"]
+        _meeting_options = _bp.public_options(_policy) or None
+        _booking_days = _bp.js_days(_policy)
+        if isinstance(_program_location, dict):
+            _program_location = dict(_program_location,
+                                     contact_name=_policy.get("host_name") or _program_location.get("contact_name"),
+                                     contact_title=_policy.get("host_title") or _program_location.get("contact_title"))
+            _office = _bp.option(_policy, _bp.OFFICE)
+            if _office and _office.get("address") and not _program_location.get("street"):
+                _program_location["street"] = _office["address"]
+
     if (booking.status or "") not in ("booked", "confirmed"):
         from app.services.programs import booking_events as _be
         _be.record(db, booking, _be.OPENED)
@@ -258,6 +280,8 @@ def get_booking_by_token(request: Request, token: str, db: Session = Depends(get
         "appt_label": appt_label,
         "appt_duration": appt_duration,
         "program_location": _program_location,
+        "booking_days": _booking_days,
+        "meeting_type": getattr(booking, "meeting_type", None),
         "status": booking.status,
         "created_at": booking.created_at,
     }
@@ -384,12 +408,29 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
                 _mins = int(body.get("duration_minutes") or 60)
             except (TypeError, ValueError):
                 _mins = 60
+            # A program's own rules (Issue #507) fix the length and require
+            # a place: office, or home with a complete address.
+            from app.services.programs import booking_policy as _bp
+            _policy = _bp.for_advisor(db, advisor)
+            _choice = None
+            if _policy is not None:
+                _mins = _policy["duration"]
+                try:
+                    _choice = _bp.meeting_choice(_policy, body.get("meeting_key") or getattr(booking, "meeting_type", None)
+                                                 or (_bp.OFFICE if body.get("from_setter") else None),
+                                                 body.get("visit_address") or getattr(booking, "visit_address", None))
+                except ValueError as _e:
+                    raise HTTPException(status_code=422, detail=str(_e))
             _res = compute_day_slots(db, advisor, _prog_slot.date(), program_visit=True, minutes=_mins)
             if _prog_slot.strftime("%Y-%m-%dT%H:%M:00") not in set(_res.get("slots") or []):
                 logger.warning("booking-confirmed: booking=%s slot %s is not open - refusing", booking.id, slot_display)
                 raise HTTPException(status_code=409, detail="That time is no longer available. Please pick another time.")
             booking.booked_time = _prog_slot
             booking.appt_duration = _mins
+            if _choice is not None:
+                booking.meeting_type, booking.visit_address = _choice["key"], _choice["address"]
+                appt_label = _choice["appt_label"] or appt_label
+                body = dict(body, appt_label=appt_label)
         booking.status = "booked"
         from app.services.programs import booking_events as _be
         _be.add_pending(db, booking, lead, _be.BOOKED, slot_display)
@@ -520,9 +561,12 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
                     # in code every tenant runs - so a booking anywhere else on
                     # the platform put that customer's address on the event.
                     "location": {
-                        "displayName": (org.org_address
-                                        if (org and getattr(org, "org_address", None))
-                                        else ""),
+                        # A program visit's own place (Issue #507: Restland or
+                        # the family's home), else the organization's address.
+                        "displayName": ((getattr(booking, "visit_address", None) or "")
+                                        or (org.org_address
+                                            if (org and getattr(org, "org_address", None))
+                                            else "")),
                     },
                 }
                 cal_response = httpx.post(
@@ -741,6 +785,17 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
             _txt = ("Hi %s, your %s with %s is confirmed for %s. If anything changes, just reply here."
                     % (_first, (appt_label or "appointment").lower() if appt_label and appt_label.startswith("Phone")
                        else "visit", _prog_loc["name"] or "us", _when))
+            try:
+                from app.services.programs import booking_policy as _bp
+                _pol = _bp.for_advisor(db, advisor)
+            except Exception:                            # noqa: BLE001
+                _pol = None
+            if _pol is not None and booking is not None:
+                # Issue #507: who, how long and where - in Central time.
+                _txt = ("Hi %s, your %s with %s is confirmed for %s Central (%d minutes) %s. "
+                        "If anything changes, just reply here."
+                        % (_first, _pol.get("label") or "appointment", _pol.get("host_name") or "us", _when,
+                           _pol["duration"], _bp.place_text(booking, _pol) or "at %s" % (_prog_loc["name"] or "us")))
             _send_sms(db, advisor, lead, _txt, include_booking_link=False,
                       send_source=_ss.APPOINTMENT_FOLLOWUP)
             if booking:
@@ -749,6 +804,10 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
         except Exception as e:
             logger.warning("booking-confirmed: program confirmation not sent: %s", e)
             lead_sms_result = {"success": False, "error": str(e)}
+    elif body.get("skip_family_text"):
+        # The caller confirms another way (an email conversation): no text at
+        # all - never the older direct-Twilio path below (Issue #507 review).
+        lead_sms_result = {"success": False, "note": "skipped - confirmed by email"}
     elif lead and lead.phone and advisor:
         try:
             from twilio.rest import Client as TwilioClient
@@ -1362,6 +1421,19 @@ def compute_day_slots(db: Session, advisor, target_date, *, program_visit: bool,
         except Exception:                                # noqa: BLE001
             today = date_cls.today()
 
+    # A PROGRAM WITH ITS OWN APPOINTMENT RULES (Issue #507, Restland: every
+    # day, five fixed starts, 45 minutes + a 45-minute gap) answers from
+    # programs/booking_policy - for every caller of this engine.
+    if _program_visit:
+        try:
+            from app.services.programs import booking_policy as _bp
+            _policy = _bp.for_advisor(db, advisor)
+        except Exception:                                # noqa: BLE001 - the usual rules apply
+            logger.exception("booking policy lookup failed for advisor %s", advisor_id)
+            _policy = None
+        if _policy is not None:
+            return _bp.day_slots(db, advisor, target_date, _policy, today=today)
+
     # Never a past day, a weekend, or beyond the two-week window - for EVERY
     # caller (booking page, setter offers, still_free re-checks, staff), not
     # only the public /slots route (Oct 20: a time offered yesterday and a
@@ -1542,12 +1614,18 @@ def get_available_slots(
         raise HTTPException(status_code=400, detail="Date is in the past")
     if target_date > max_date:
         raise HTTPException(status_code=400, detail="Date is more than 14 days out")
-    if target_date.weekday() >= 5:  # Saturday=5, Sunday=6
-        return {"date": date, "slots": [], "reason": "Weekend — no appointments"}
-
     advisor = db.query(User).filter(User.id == advisor_id).first()
     if not advisor:
         raise HTTPException(status_code=404, detail="Advisor not found")
+    # A program with its own appointment days (Issue #507) decides weekends
+    # itself, in compute_day_slots; everyone else keeps weekdays only.
+    try:
+        from app.services.programs import booking_policy as _bp
+        _has_policy = _bp.for_advisor(db, advisor) is not None
+    except Exception:                                    # noqa: BLE001
+        _has_policy = False
+    if target_date.weekday() >= 5 and not _has_policy:  # Saturday=5, Sunday=6
+        return {"date": date, "slots": [], "reason": "Weekend — no appointments"}
 
     # OUTREACH PROGRAM VISITS ARE 60 MINUTES (see compute_day_slots).
     from app.models.models import Lead as _Lead
