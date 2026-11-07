@@ -1,0 +1,19 @@
+{
+  "titles": {
+    "01-login": "AdvisorFlow",
+    "02-evosys-deal-operations": "My Deal Room",
+    "03-evosys-team": "My Deal Room",
+    "04-evosys-buyers": "My Deal Room",
+    "05-evosys-mobile": "My Deal Room",
+    "06-bookaboost-deal-operations": "OLP \u00b7 Overlooked Properties",
+    "07-bookaboost-team": "OLP \u00b7 Overlooked Properties",
+    "05b-evosys-mobile-sidebar-open": "My Deal Room",
+    "07b-bookaboost-mobile-sidebar-open": "OLP \u00b7 Overlooked Properties",
+    "12-evosys-parent-home": "My Deal Room",
+    "13-evosys-pro-login": "EvoSys Pro",
+    "14-bookaboost-login": "Sign in \u00b7 OLP - Overlooked Properties",
+    "11-favicons": ""
+  },
+  "public_404": "{\"detail\":\"Not Found\"}",
+  "field_manifest_name": "My Deal Room"
+}

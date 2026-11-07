@@ -19,19 +19,22 @@ from tests.test_wholesale_access_browser import DIST, ORIGIN, _launch
 from tests.test_wholesale_access_browser_roles import _page
 
 
-def _router(client):
+def _router(client, page_origin=ORIGIN):
     """Static build + in-process API, forwarding the page's own Authorization
-    (the investor portal sends its own token)."""
+    (the investor portal sends its own token). page_origin lets a page be
+    served from a brand host (e.g. evosyspro.live) while the API stays on
+    ORIGIN, exactly as in production."""
     import mimetypes
     from urllib.parse import urlsplit
 
     def route(r):
         req = r.request
         u = urlsplit(req.url)
-        if not req.url.startswith(ORIGIN):
+        on_page = req.url.startswith(page_origin)
+        if not (on_page or req.url.startswith(ORIGIN)):
             return r.abort()
         f = (DIST / u.path.lstrip("/")) if u.path not in ("", "/") else None
-        if req.resource_type == "document" or (f is not None and f.is_file()):
+        if on_page and (req.resource_type == "document" or (f is not None and f.is_file())):
             f = f if (f is not None and f.is_file()) else DIST / "index.html"
             ctype = "application/javascript" if f.suffix == ".js" else (mimetypes.guess_type(str(f))[0] or "application/octet-stream")
             return r.fulfill(status=200, body=f.read_bytes(), headers={"content-type": ctype})
@@ -55,10 +58,38 @@ def _save(page, name, titles, full=False):
     titles[name] = page.title()
 
 
+_ICON_JS = """async () => {
+  const l = document.querySelector("link[rel~='icon']");
+  if (!l) return null;
+  const r = await fetch(l.href); const blob = await r.blob();
+  return await new Promise(ok => { const f = new FileReader(); f.onload = () => ok(f.result); f.readAsDataURL(blob); });
+}"""
+
+
+def _icon(page):
+    """The page's current favicon as a data URL, plus its title."""
+    return {"src": page.evaluate(_ICON_JS), "title": page.title()}
+
+
+def _favicon_sheet(b, icons, titles, name):
+    """Headless Chromium draws no tab strip, so render each page's real favicon
+    the way a browser tab shows it (16px + title) and enlarged (64px)."""
+    rows = "".join(
+        '<div class="row"><div class="tab"><img src="%s" width="16" height="16"><span>%s</span></div>'
+        '<img src="%s" width="64" height="64"><code>%s</code></div>' % (v["src"] or "", v["title"], v["src"] or "", k)
+        for k, v in icons.items())
+    pg = b.new_page(viewport={"width": 900, "height": 120 + 90 * len(icons)})
+    pg.set_content("<style>body{font:14px Arial;background:#dee1e6;padding:20px}.row{display:flex;align-items:center;gap:24px;"
+                   "margin:10px 0}.tab{background:#fff;border-radius:8px 8px 0 0;padding:8px 12px;width:260px;display:flex;gap:8px;"
+                   "align-items:center}code{color:#333}</style>" + rows)
+    _save(pg, name, titles)
+    pg.close()
+
+
 def test_capture_staff_screens(client, ws):
     from playwright.sync_api import sync_playwright
     p, db = ws, ws["db"]
-    titles = {}
+    titles, icons = {}, {}
     with sync_playwright() as pwr:
         b = _launch(pwr)
         login = b.new_page(viewport={"width": 1440, "height": 900})
@@ -77,6 +108,47 @@ def test_capture_staff_screens(client, ws):
             pg.wait_for_load_state("networkidle")
             _save(pg, name, titles)
             pg.close()
+        # Mobile sidebar opened (where the logo lives on a phone).
+        pg = _page(b, client, db, p["evo_seat"], 390, 844)
+        pg.goto(ORIGIN + "/wholesale")
+        pg.wait_for_load_state("networkidle")
+        pg.click(".mobile-menu-btn")
+        _save(pg, "05b-evosys-mobile-sidebar-open", titles)
+        pg.close()
+        pg = _page(b, client, db, p["bab_owner"], 390, 844)
+        pg.goto(ORIGIN + "/wholesale")
+        pg.wait_for_load_state("networkidle")
+        pg.click(".mobile-menu-btn")
+        _save(pg, "07b-bookaboost-mobile-sidebar-open", titles)
+        pg.close()
+        # EvoSys Pro parent (non-wholesale) screen: must not change.
+        pg = _page(b, client, db, p["evo_seat"], 1440, 900)
+        pg.goto(ORIGIN + "/")
+        pg.wait_for_load_state("networkidle")
+        _save(pg, "12-evosys-parent-home", titles)
+        icons["12-evosys-parent-home"] = _icon(pg)
+        pg.goto(ORIGIN + "/wholesale")
+        pg.wait_for_load_state("networkidle")
+        pg.wait_for_timeout(1200)
+        icons["02-evosys-deal-operations"] = _icon(pg)
+        pg.close()
+        pg = _page(b, client, db, p["bab_owner"], 1440, 900)
+        pg.goto(ORIGIN + "/wholesale")
+        pg.wait_for_load_state("networkidle")
+        pg.wait_for_timeout(1200)
+        icons["06-bookaboost-deal-operations"] = _icon(pg)
+        pg.close()
+        # EvoSys Pro parent brand surfaces outside My Deal Room: must not change.
+        for name, origin in (("13-evosys-pro-login", "https://evosyspro.live"),
+                             ("14-bookaboost-login", "https://bookaboost.com")):
+            pg = b.new_page(viewport={"width": 1440, "height": 900})
+            pg.route("**/*", _router(client, origin))
+            pg.goto(origin + "/login")
+            pg.wait_for_load_state("networkidle")
+            _save(pg, name, titles)
+            icons[name] = _icon(pg)
+            pg.close()
+        _favicon_sheet(b, icons, titles, "11-favicons")
         b.close()
     extra = {"public_404": client.get("/__no_such_seller_page__", headers={"host": "sell.example.com"}).text[:300]}
     m = Path(__file__).resolve().parent.parent / "frontend" / "public" / "manifest-field.webmanifest"
@@ -99,5 +171,24 @@ def test_capture_investor_portal(client, room):
         page.goto(ORIGIN + "/investors")
         page.wait_for_load_state("networkidle")
         _save(page, "08-investor-portal", titles)
+        icons = {"08-investor-portal": _icon(page)}
+        page.close()
+        page = b.new_page(viewport={"width": 390, "height": 844})
+        page.route("**/*", _router(client))
+        page.add_init_script("localStorage.setItem('af_investor_token', %s);" % json.dumps(itok))
+        page.goto(ORIGIN + "/investors")
+        page.wait_for_load_state("networkidle")
+        _save(page, "09-investor-portal-mobile", titles)
+        page.close()
+        for name, origin in (("10-investor-login-evosyspro", "https://evosyspro.live"),
+                             ("10b-investor-login-bookaboost", "https://bookaboost.com")):
+            page = b.new_page(viewport={"width": 1440, "height": 900})
+            page.route("**/*", _router(client, origin))
+            page.goto(origin + "/investors")
+            page.wait_for_load_state("networkidle")
+            _save(page, name, titles)
+            icons[name] = _icon(page)
+            page.close()
+        _favicon_sheet(b, icons, titles, "11b-favicons-investor")
         b.close()
     (Path(OUT) / LABEL / "titles-investor.json").write_text(json.dumps(titles, indent=2))
