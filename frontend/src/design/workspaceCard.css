@@ -76,3 +76,9 @@
 
 /* Insurance retention workspace (#499): agency initials in the badge. */
 .ev-wcard[data-variant="retention"] .ev-wcard-badge { font-size: 16px; background: linear-gradient(135deg, #1d4ed8, #0f2a6b); }
+
+/* Gold & Jewelry (redesign lane): navy badge with a gold mark, matching the workspace. */
+.ev-wcard[data-variant="gold"] { border-color: #dcc58a; box-shadow: 0 0 0 1px rgba(201,162,74,.18), var(--ev-shadow-sm); }
+.ev-wcard[data-variant="gold"] .ev-wcard-badge { background: linear-gradient(135deg, #10264a, #0a1a33); color: #dfbf6e; }
+.ev-wcard[data-variant="gold"] .ev-wcard-open { background: #0a1a33; }
+.ev-wcard[data-variant="gold"]:hover .ev-wcard-open { background: #8a6a1f; }

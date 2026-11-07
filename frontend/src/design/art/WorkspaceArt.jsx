@@ -1,4 +1,5 @@
 import { useId } from 'react'
+import { CleanScene, GoldScene, InsuranceScene as CoverScene, MemorialScene, PowerScene, PropertyScene } from './IndustryScenes'
 
 /**
  * Workspace hero artwork — local, self-contained SVG (no third-party image
@@ -23,6 +24,7 @@ const PALETTES = {
   acquisition: { sky: ['#f4effe', '#e2d6fb'], hill: '#d2c2f8', hill2: '#b9a1f2', main: '#6d3fd9', deep: '#2a1765', light: '#ffffff', warm: '#efe7ff' },
   // VOLT Marketing (#535): red and black only.
   volt:      { sky: ['#fff1f2', '#ffd6da'], hill: '#ffc2c8', hill2: '#ff9aa5', main: '#c8102e', deep: '#0b0b0c', light: '#ffffff', warm: '#ffe3e6' },
+  gold:      { sky: ['#071327', '#1b365f'], hill: '#2a4a78', hill2: '#1b365f', main: '#c9a24a', deep: '#0a1a33', light: '#ffffff', warm: '#f3e2b3' },
   preview:   { sky: ['#f0f1ff', '#dcdffd'], hill: '#c8cdfb', hill2: '#b1b8f7', main: '#5b5fe0', deep: '#2b2f86', light: '#ffffff', warm: '#eef0ff' },
 }
 
@@ -446,10 +448,13 @@ function RetentionScene({ p, id }) {
   )
 }
 
+// Industry artwork (redesign lane): gold, insurance, property, energy,
+// cleaning and memorial scenes live in IndustryScenes.jsx. The earlier flat
+// scenes stay here for the programs that keep them.
 const SCENES = {
-  sci: SciScene, energy: EnergyScene, roofing: RoofingScene, wholesale: WholesaleScene,
-  retention: RetentionScene, insurance: InsuranceScene, funeral: FuneralScene, office: OfficeScene, general: GeneralScene,
-  cleaning: CleaningScene, acquisition: CleaningScene, preview: PreviewScene, volt: VoltScene,
+  sci: SciScene, energy: PowerScene, roofing: RoofingScene, wholesale: PropertyScene,
+  retention: RetentionScene, insurance: CoverScene, funeral: MemorialScene, office: OfficeScene, general: GeneralScene,
+  cleaning: CleanScene, acquisition: CleaningScene, preview: PreviewScene, volt: VoltScene, gold: GoldScene,
 }
 
 export const ART_VARIANTS = Object.keys(SCENES)
