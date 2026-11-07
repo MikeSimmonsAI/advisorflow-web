@@ -126,6 +126,15 @@ def pick(db: Session, prog: OutreachProgram, n: int) -> List[str]:
     return out
 
 
+def ready_now(db: Session, prog: OutreachProgram) -> Optional[int]:
+    """How many families the batch could pick right now (same rules as pick)."""
+    try:
+        return len(pick(db, prog, MAX_PER_DAY))
+    except Exception:                                    # noqa: BLE001 - a count, never a blocker
+        log.exception("daily batch ready count failed for %s", prog.id)
+        return None
+
+
 def status(prog: OutreachProgram) -> Dict:
     return {"count": int(prog.daily_batch_count or 0), "spacing_minutes": int(prog.daily_batch_spacing or 8),
             "start": prog.daily_batch_start or "09:00", "days": days_of(prog),
@@ -163,6 +172,14 @@ def run_for(db: Session, prog: OutreachProgram, now: Optional[datetime] = None) 
     n = min(n, fits_today(local, spacing))
     ids = pick(db, prog, n) if n > 0 else []
     if not ids:
+        # Nov 7: an empty day is recorded too, so the owner can see the batch
+        # RAN and found nobody ready - not that it silently did nothing.
+        from app.routers.audit_log_router import log_action
+        log_action(db, prog.organization_id, user.id, action="program.daily_batch",
+                   target_type="outreach_program", target_id=prog.id,
+                   details={"date": today, "picked": 0, "approved": 0, "fits": n,
+                            "note": "nobody ready: no never-contacted cell phone in an active campaign"})
+        db.commit()
         return {"approved": 0, "picked": 0}
     utc_now = (now or datetime.utcnow())
     start_at = utc_now + timedelta(minutes=2)
