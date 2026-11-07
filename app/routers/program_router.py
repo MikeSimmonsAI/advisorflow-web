@@ -569,7 +569,9 @@ def program_appointments(when: str = Query("upcoming"), location_id: Optional[st
                       "phone": l.phone, "email": l.email, "location_id": loc, "location": names.get(loc),
                       "when": _bt.wire(db, b), "status": b.status,
                       "label": getattr(b, "appt_label", None), "minutes": getattr(b, "appt_duration", None),
-                      "staff": staff.get(b.user_id), "has_case_file": b.id in cased})
+                      "staff": staff.get(b.user_id), "staff_id": b.user_id, "has_case_file": b.id in cased,
+                      "meeting_type": getattr(b, "meeting_type", None),
+                      "visit_address": getattr(b, "visit_address", None)})
     return {"items": items, "when": when}
 
 

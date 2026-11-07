@@ -232,6 +232,17 @@ def create_calendar_event_for_booking(
         "start": {"dateTime": booked_datetime.isoformat(), "timeZone": "America/Chicago"},
         "end": {"dateTime": end_time.isoformat(), "timeZone": "America/Chicago"},
     }
+    # A program visit's own place and name (Issue #507: Restland office or the
+    # family's home), so the event says where to be.
+    _where = (getattr(booking, "visit_address", None) or "").strip()
+    if _where:
+        event_body["location"] = _where
+    if getattr(booking, "meeting_type", None):
+        event_body["summary"] = "%s: %s" % (getattr(booking, "appt_label", None) or "Appointment", lead_name)
+        event_body["description"] = ("%s\nWhere: %s\nLength: %d minutes\n%s" % (
+            getattr(booking, "appt_label", None) or "Appointment",
+            ("Family's home - " + _where) if booking.meeting_type == "home" else (_where or "Office"),
+            duration_minutes, event_body["description"]))
 
     try:
         created_event = service.events().insert(calendarId=advisor.google_calendar_id, body=event_body).execute()

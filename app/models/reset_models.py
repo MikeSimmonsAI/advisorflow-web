@@ -95,3 +95,36 @@ class CampaignAudienceMember(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     __table_args__ = (UniqueConstraint("organization_id", "campaign_key", "lead_id", name="uq_campaign_audience"),
                       Index("ix_campaign_audience_org_key_status", "organization_id", "campaign_key", "status"))
+
+
+class CampaignCycleMember(Base):
+    """One family's place in one round of a campaign (Issue #507 rotation).
+
+    Auditable record of the rotation: when the family was staged, when its
+    journey started, when and why it ended, the last real outreach, and the
+    earliest date it may be REVIEWED for another round (last outreach + the
+    rest period). Eligibility is permission to appear in a reviewed pool -
+    never automatic enrollment. Destinations (phone/email) are stored so a
+    rest or an active round blocks every record that shares them."""
+    __tablename__ = "campaign_cycle_members"
+    id = Column(String, primary_key=True, default=_uuid)
+    organization_id = Column(String, nullable=False)
+    campaign_key = Column(String, nullable=False)
+    cycle_key = Column(String, nullable=False)        # e.g. "ffr-batch-1"
+    lead_id = Column(String, nullable=False)
+    phone_e164 = Column(String, nullable=True)
+    email_norm = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="staged")   # staged | active | completed | stopped | withdrawn
+    started_at = Column(DateTime, nullable=True)       # the family's journey start
+    completed_at = Column(DateTime, nullable=True)
+    completion_reason = Column(String, nullable=True)  # no_reply | undeliverable | replied | booked | opted_out | cancelled_appointment | unapproved
+    last_outreach_at = Column(DateTime, nullable=True)
+    next_eligible_at = Column(DateTime, nullable=True)
+    notes_json = Column(Text, nullable=True)
+    run_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    __table_args__ = (UniqueConstraint("organization_id", "cycle_key", "lead_id", name="uq_campaign_cycle_member"),
+                      Index("ix_cycle_members_org_status", "organization_id", "status"),
+                      Index("ix_cycle_members_phone", "organization_id", "phone_e164"),
+                      Index("ix_cycle_members_email", "organization_id", "email_norm"))

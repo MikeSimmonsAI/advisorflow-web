@@ -91,6 +91,9 @@ class OutreachProgram(Base):
     # it on). "draft": the AI writes the reply and offers real times, a person
     # sends it. "auto": the AI answers and books within the rules.
     ai_setter_mode = Column(String, nullable=True, default="off")
+    # Issue #507: this program's own appointment rules (programs/booking_policy).
+    # NULL = the platform's usual program-visit rules.
+    booking_policy_json = Column(Text, nullable=True)
     # APPROVAL MODE: automated sends go only to contacts a manager approved on
     # Choose & Send. Switched on by the first approval; never switched off by code.
     require_send_approval = Column(Boolean, nullable=False, default=False)

@@ -195,6 +195,9 @@ COLUMNS_TO_ADD = [
     ("outreach_programs", "self_check_ack", "TEXT"),
     ("outreach_programs", "alert_title", "VARCHAR"),
     ("outreach_programs", "ai_setter_mode", "VARCHAR DEFAULT 'off'"),
+    # Issue #507: a program's own appointment rules (days, start times,
+    # length, gap, office/home options). NULL = the platform's usual rules.
+    ("outreach_programs", "booking_policy_json", "TEXT"),
     ("program_conversations", "memory", "TEXT"),
     ("program_conversations", "followups_sent", "INTEGER DEFAULT 0"),
     ("program_conversations", "followup_reason", "VARCHAR"),
@@ -750,6 +753,10 @@ COLUMNS_TO_ADD = [
     # SMS 4 segments and got it filtered by carriers (Twilio 30007).
     ("booking_links", "appt_label", "VARCHAR"),
     ("booking_links", "appt_duration", "INTEGER"),
+    # Issue #507: where a program visit happens (office | home) and the
+    # family's home address for a home visit.
+    ("booking_links", "meeting_type", "VARCHAR"),
+    ("booking_links", "visit_address", "TEXT"),
     # Social media lead capture — org-level webhook credentials + token
     ("organizations", "social_webhook_token", "VARCHAR"),
     ("organizations", "meta_page_access_token", "VARCHAR"),

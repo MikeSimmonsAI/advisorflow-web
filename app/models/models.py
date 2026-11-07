@@ -1331,6 +1331,10 @@ class BookingLink(Base):
     # needed to carry anything but identity.
     appt_label    = Column(String, nullable=True)   # e.g. "Pre-Need Planning Consultation"
     appt_duration = Column(Integer, nullable=True)  # minutes
+    # Issue #507: where a program visit happens - "office" or "home" - and
+    # the family's address when it is at their home.
+    meeting_type  = Column(String, nullable=True)
+    visit_address = Column(Text, nullable=True)
 
     # Appointment reminder tracking — set by appointment_reminder_cron.py
     confirmation_sent   = Column(Boolean, default=False)  # immediate lead confirmation on booking

@@ -16,6 +16,7 @@ export default function Appointments({ locationId, openPerson }) {
   const [when, setWhen] = useState('upcoming')
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
+  const [reload, setReload] = useState(0)
 
   useEffect(() => {
     let alive = true
@@ -26,7 +27,7 @@ export default function Appointments({ locationId, openPerson }) {
       .then(d => { if (alive) setData(d) })
       .catch(e => { if (alive) { setErr(errText(e)); setData({ items: [] }) } })
     return () => { alive = false }
-  }, [when, locationId])
+  }, [when, locationId, reload])
 
   const groups = []
   for (const a of data?.items || []) {
@@ -60,7 +61,11 @@ export default function Appointments({ locationId, openPerson }) {
                         <button type="button" className="sci-namebtn" onClick={e => { e.stopPropagation(); openPerson(a.lead_id) }}>{a.name}</button>
                         <small>{[a.phone, a.email].filter(Boolean).join(' · ')}</small>
                       </td>
-                      <td className="sci-small">{a.location || '—'}<span className="sci-micro sci-muted" style={{ display: 'block' }}>{a.label || 'Visit'}{a.minutes ? ` · ${a.minutes} min` : ''}</span></td>
+                      <td className="sci-small">{a.meeting_type === 'home' ? 'Family\'s home' : (a.location || '—')}<span className="sci-micro sci-muted" style={{ display: 'block' }}>{a.label || 'Visit'}{a.minutes ? ` · ${a.minutes} min` : ''}</span>
+                        {a.meeting_type === 'home' && a.visit_address ? <span className="sci-micro" style={{ display: 'block' }}>{a.visit_address}</span> : null}</td>
+                      <td className="sci-small" onClick={e => e.stopPropagation()}>
+                        <AssignTo appt={a} onDone={() => setReload(x => x + 1)} />
+                      </td>
                       <td style={{ textAlign: 'right' }}><Chip tone={(STATUS[a.status] || [])[1] || ''} plain>{(STATUS[a.status] || [a.status])[0]}</Chip></td>
                     </tr>
                   ))}
@@ -139,5 +144,38 @@ function BookingActivity({ openPerson }) {
         </div>
       )}
     </Panel>
+  )
+}
+
+
+/* ASSIGN TO (staff only, Issue #507): move a booked appointment to another
+   team member. The server checks that person is free (their bookings plus the
+   gap, their calendar) and records who changed it. The family is not told. */
+function AssignTo({ appt, onDone }) {
+  const [team, setTeam] = useState(null)
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+  const upcoming = appt.status === 'booked' || appt.status === 'confirmed'
+  if (!upcoming) return <span className="sci-micro sci-muted">{appt.staff || '—'}</span>
+  const open = () => {
+    if (team) return
+    api.get(`/program/command/appointments/${appt.id}/assignees`).then(d => setTeam(d.team || [])).catch(e => setMsg(errText(e)))
+  }
+  const change = async uid => {
+    if (!uid || uid === appt.staff_id) return
+    setBusy(true); setMsg('')
+    try { await api.post(`/program/command/appointments/${appt.id}/assign`, { user_id: uid }); onDone && onDone() }
+    catch (e) { setMsg(errText(e)) } finally { setBusy(false) }
+  }
+  return (
+    <label className="sci-micro" style={{ display: 'block' }}>
+      <span className="sci-muted">With</span>{' '}
+      <select aria-label="Assign to" disabled={busy} value={appt.staff_id || ''} onFocus={open} onMouseDown={open}
+        onChange={e => change(e.target.value)}>
+        <option value={appt.staff_id || ''}>{appt.staff || 'Unassigned'}</option>
+        {(team || []).filter(u => u.id !== appt.staff_id).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+      </select>
+      {msg ? <span style={{ display: 'block', color: '#8a1c1c' }}>{msg}</span> : null}
+    </label>
   )
 }

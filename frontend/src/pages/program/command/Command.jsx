@@ -660,6 +660,9 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
   const [learnId, setLearnId] = useState(null)   // a just-captured AI learning candidate
   const [done, setDone] = useState({})
   const [pick, setPick] = useState(null)        // slot tapped, waiting for "Book it"
+  // Programs with office/home visits (Issue #507): where, and the home address.
+  const [where, setWhere] = useState('office')
+  const [homeAddr, setHomeAddr] = useState('')
   const [booked, setBooked] = useState(null)    // what happened, shown on the card
   const [dncAsk, setDncAsk] = useState(null)         // Do Not Contact: null = closed, string = reason
   const [customDay, setCustomDay] = useState('')     // "Choose custom time": the day picked
@@ -740,7 +743,8 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
   const book = async s => {
     setBusy(true); setBooked(null)
     try {
-      const r = await api.post('/program/command/schedule', { lead_id: id, slot: s.value, kind: 'visit' })
+      const place = slots?.meeting_options?.length ? { meeting_key: where, visit_address: where === 'home' ? homeAddr.trim() : null } : {}
+      const r = await api.post('/program/command/schedule', { lead_id: id, slot: s.value, kind: 'visit', ...place })
       const msg = r.ok ? (r.simulated ? `Test family - ${r.label} is open, but nothing was booked or sent.`
         : `Booked ${r.label}. ${f.name} was texted the confirmation, and it's on the calendar.`)
         : (r.reason ? `Not booked: ${r.reason}.` : 'Not booked: that time is no longer open.')
@@ -958,10 +962,16 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
         </details>
         {pick && <div className="cmd-pick" role="group" aria-label="Confirm booking">
           <p>Book <b>{f.name}</b> for <b>{pick.label || `${dayLabel(pick.value)} ${pick.time}`}</b>?{f.phone ? ` They get a text at ${fmtPhone(f.phone)} confirming it.` : ' They have no phone on file, so call them to let them know.'}</p>
+          {slots?.meeting_options?.length > 0 && <div className="cmd-where" role="radiogroup" aria-label="Where">
+            {slots.meeting_options.map(o => (
+              <label key={o.key} style={{ marginRight: 14 }}><input type="radio" name="cmd-where" checked={where === o.key} onChange={() => setWhere(o.key)} /> {o.label}</label>))}
+            {where === 'home' && <input type="text" value={homeAddr} onChange={e => setHomeAddr(e.target.value)} placeholder="Family's address: street, city, state, ZIP"
+              aria-label="Family's home address" style={{ display: 'block', width: '100%', marginTop: 8 }} />}
+          </div>}
           <div className="cmd-send">
             <button disabled={busy} onClick={() => setPick(null)}>Cancel</button>
             {f.phone && !f.handling?.opted_out && <button disabled={busy} onClick={() => offerOne(pick)}>Ask them first</button>}
-            <button className="primary" disabled={busy} onClick={() => book(pick)}>{busy ? 'Booking…' : f.phone ? 'Book it & text them' : 'Book it'}</button>
+            <button className="primary" disabled={busy || (where === 'home' && slots?.meeting_options?.length > 0 && !homeAddr.trim())} onClick={() => book(pick)}>{busy ? 'Booking…' : f.phone ? 'Book it & text them' : 'Book it'}</button>
           </div>
         </div>}
         {booked && <p className={`cmd-pick-result ${booked.ok ? 'ok' : 'bad'}`}>{booked.msg}</p>}
