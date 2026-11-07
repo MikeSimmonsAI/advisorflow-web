@@ -20,6 +20,7 @@ rollback, so a crashed request can never leave the lock held. Other databases
 from __future__ import annotations
 
 import threading
+from datetime import datetime
 import zlib
 from typing import Dict
 
@@ -29,7 +30,8 @@ from sqlalchemy.orm import Session
 
 from app.models.models import User
 from app.models.volt_models import (
-    VoltApplication, VoltAuditEvent, VoltDocument, VoltRep, VoltSession, VoltSessionAttendee, VoltTalentSignup,
+    VoltAccess, VoltApplication, VoltAuditEvent, VoltDocument, VoltRep, VoltSession, VoltSessionAttendee,
+    VoltTalentSignup,
 )
 
 _LOCAL_LOCKS: Dict[str, threading.Lock] = {}
@@ -98,7 +100,9 @@ def _purge_locked(db: Session, org_id: str) -> Dict[str, int]:
     apps = db.query(VoltApplication).filter(VoltApplication.rep_serial.in_(serials)).all()
     app_ids = [a.id for a in apps]
     removed["applications"] = len(apps)
-    # Sessions whose ONLY attendees were test reps are test sessions.
+    # Sessions whose ONLY attendees were test reps are test sessions - unless
+    # the session is live staff availability (open for booking, upcoming,
+    # not canceled): that stays, with its seats freed.
     touched = {sid for (sid,) in db.query(VoltSessionAttendee.session_id)
                .filter(VoltSessionAttendee.rep_serial.in_(serials)).distinct().all()}
     db.query(VoltSessionAttendee).filter(VoltSessionAttendee.rep_serial.in_(serials)).delete(synchronize_session=False)
@@ -106,19 +110,25 @@ def _purge_locked(db: Session, org_id: str) -> Dict[str, int]:
     for sid in touched:
         if db.query(VoltSessionAttendee).filter(VoltSessionAttendee.session_id == sid).count() == 0:
             sess = db.get(VoltSession, sid)
-            if sess is not None and sess.organization_id == org_id:
+            live = (sess is not None and sess.capacity is not None and sess.status == "scheduled"
+                    and sess.starts_at > datetime.utcnow())
+            if sess is not None and sess.organization_id == org_id and not live:
                 session_ids.append(sid)
                 db.delete(sess)
     removed["sessions"] = len(session_ids)
     q = db.query(VoltAuditEvent).filter(VoltAuditEvent.organization_id == org_id)
+    user_ids_all = [r.user_id for r in reps]
     for etype, ids in (("rep", [str(s) for s in serials]), ("application", app_ids),
-                       ("document", doc_ids), ("session", session_ids)):
+                       ("document", doc_ids), ("session", session_ids), ("access", user_ids_all)):
         if ids:
             q.filter(VoltAuditEvent.entity_type == etype, VoltAuditEvent.entity_id.in_(ids)).delete(
                 synchronize_session=False)
     for a in apps:
         db.delete(a)
     user_ids = [r.user_id for r in reps]
+    # VOLT access state of test logins (People & Access) goes with them.
+    db.query(VoltAccess).filter(VoltAccess.organization_id == org_id, VoltAccess.user_id.in_(user_ids)).delete(
+        synchronize_session=False)
     db.flush()
     for r in reps:
         db.delete(r)

@@ -10,6 +10,7 @@ import EvosysLogin from './login-evosys/EvosysLogin'
 import BookaBoostLogin from './login-bookaboost/BookaBoostLogin'
 import OLPLogin from './login-olp/OLPLogin'
 import { bookaboostProductBrand } from '../brand/productBrand'
+import { isVoltHost } from '../utils/voltDomain'
 
 const theme = detectTheme()
 const brand = BRAND_CONFIG[theme]
@@ -175,11 +176,14 @@ export default function Login() {
   // EVOSYS PRO wears its own, owner-approved sign-in. Same state, same
   // handleSubmit, same token handling and post-login routing as every brand -
   // only the presentation differs. Every other brand renders the page below.
-  if (theme === THEMES.EVOSYSPRO) {
+  // On voltmarketing.live the staff sign-in is the EvoSys Pro platform's own
+  // (VOLT Operations runs on EvoSys Pro) - never another brand's page.
+  if (theme === THEMES.EVOSYSPRO || isVoltHost()) {
+    const evo = BRAND_CONFIG[THEMES.EVOSYSPRO] || brand
     return (
       <EvosysLogin email={email} setEmail={setEmail} password={password} setPassword={setPassword}
                    error={error} loading={loading} onSubmit={handleSubmit} expired={expired}
-                   nextPath={nextPath} supportEmail={brand && brand.supportEmail}
+                   nextPath={nextPath} supportEmail={evo && evo.supportEmail}
                    googleHref={googleOn ? googleSigninStartUrl(nextPath) : null} googleError={googleError} />
     )
   }

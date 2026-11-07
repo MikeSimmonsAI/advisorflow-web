@@ -424,3 +424,120 @@ def test_multiple_applications_keep_their_own_zoom_state(volt):
     assert me["sessions"][0]["application_id"] == out["application_id"]
     t = c.get("/volt/rep/%s/applications/%s/zoom-times" % (SLUG, fib["id"]), headers=tok).json()
     assert t["times"] == []
+
+
+def test_bootstrap_admin_setting_never_undoes_a_revocation(volt, monkeypatch):
+    """revoke -> rerun provisioning (a redeploy) -> still revoked, for every
+    way access can be taken away."""
+    from app.services.volt import seed
+    c, db = volt["c"], volt["db"]
+    org = volt["org"]
+    people = {}
+    for key in ("suspended", "removed", "switched_off"):
+        u = User(email="boot.%s@example.com" % key, full_name="Boot %s" % key, password_hash="x", role="org_admin",
+                 is_active=True, must_change_password=False)
+        db.add(u)
+        people[key] = u
+    db.commit()
+    monkeypatch.setenv("VOLT_ORG_ADMIN_EMAILS", ",".join(u.email for u in people.values()))
+    assert seed.ensure(db)["admins_granted"] == 3
+    db.commit()
+    assert _access(volt, volt["god"], people["suspended"].id, "suspend").json()["access"] == "suspended"
+    assert _access(volt, volt["god"], people["removed"].id, "remove").json()["access"] == "removed"
+    # Switched off outside People & Access (God Mode Manage Access): no volt_access row at all.
+    m = db.query(Membership).filter(Membership.user_id == people["switched_off"].id, Membership.scope_id == org.id).one()
+    m.is_active = False
+    db.commit()
+    for _ in range(2):                                   # two later deploys
+        assert seed.ensure(db)["admins_granted"] == 0
+        db.commit()
+    db.expire_all()
+    from app.models.volt_models import VoltAccess
+    st = {a.user_id: a.state for a in db.query(VoltAccess).all()}
+    assert st[people["suspended"].id] == "suspended" and st[people["removed"].id] == "removed"
+    mems = {mm.user_id: mm.is_active for mm in db.query(Membership).filter(Membership.scope_id == org.id).all()}
+    assert mems[people["removed"].id] is False and mems[people["switched_off"].id] is False
+    for u in people.values():
+        assert c.get("/volt/ops/%s" % org.id, headers=H(db, u)).status_code == 403
+
+
+def test_waiting_zoom_notices_never_send_obsolete_or_duplicate_messages(volt, monkeypatch):
+    """Mailbox not connected: notices wait. When it connects, only notices that
+    still describe the current booking go out, each exactly once."""
+    from app.services.volt import mail
+    c, db = volt["c"], volt["db"]
+    org = volt["org"].id
+    sent = []
+
+    class _R:
+        status_code = 202
+        text = ""
+    tok, out = _submitted(volt, email="notice.one+volt-test@example.com")
+    _eligible(volt, out["application_id"])
+    s1 = _session(volt, capacity=2)
+    s2 = _session(volt, capacity=2, starts=_future(12))
+    _book(volt, tok, out["application_id"], s1["id"])                                  # confirmed #1 (will be obsolete)
+    c.post("/volt/rep/%s/applications/%s/zoom-booking/cancel" % (SLUG, out["application_id"]), headers=tok)  # cancel notice
+    _book(volt, tok, out["application_id"], s1["id"])                                  # rebooked: cancel notice obsolete
+    sh = H(db, volt["staff"])
+    c.patch("/volt/ops/%s/sessions/%s" % (org, s1["id"]), headers=sh, json={"starts_local": _future(8, 14)})  # resched #1
+    c.patch("/volt/ops/%s/sessions/%s" % (org, s1["id"]), headers=sh, json={"starts_local": _future(8, 16)})  # resched #2
+    tok2, out2 = _submitted(volt, first="Two", last="Session", email="notice.two+volt-test@example.com")
+    _eligible(volt, out2["application_id"])
+    _book(volt, tok2, out2["application_id"], s2["id"])
+    c.post("/volt/ops/%s/sessions/%s/cancel" % (org, s2["id"]), headers=sh, json={"reason": "Host out"})
+    rows = db.query(VoltEmail).filter(VoltEmail.kind.like("zoom_%")).all()
+    assert rows and all(r.state in ("queued", "failed") for r in rows)                  # nothing sent yet
+    # The mailbox connects.
+    monkeypatch.setattr(mail, "mailbox", lambda db_, org_id: object())
+    monkeypatch.setattr(mail, "_token", lambda db_, box: "t")
+    monkeypatch.setattr(mail, "_send_graph", lambda token, prog, to, subject, html, save: sent.append(subject) or _R())
+    for r in rows:
+        r.next_attempt_at = None
+        r.state = "queued"
+    db.commit()
+    for _ in range(3):                                                                  # poller runs repeatedly
+        mail.retry_due(db)
+    db.expire_all()
+    by = {}
+    for r in db.query(VoltEmail).filter(VoltEmail.kind.like("zoom_%")).all():
+        by.setdefault((r.kind, r.state), []).append(r)
+    # Exactly: the latest reschedule for applicant 1, and the session cancel for applicant 2.
+    assert sent.count("Your VOLT Zoom interview has a new time") == 1
+    assert sent.count("Your VOLT Zoom interview was canceled") == 1
+    assert sent.count("Your VOLT Zoom interview is scheduled") == 0      # both confirmations are superseded
+    skipped = [r for (k, st), rs in by.items() if st == "skipped" for r in rs]
+    assert all(r.last_error.startswith("Not sent:") for r in skipped) and len(skipped) == len(rows) - 2
+    n = len(sent)
+    mail.retry_due(db)
+    assert len(sent) == n                                                               # never twice
+
+
+def test_cleanup_removes_test_records_only_and_keeps_live_availability(volt):
+    c, db = volt["c"], volt["db"]
+    org = volt["org"].id
+    from app.models.volt_models import VoltRep
+    real_body, real_tok, real = volt["register"](first="Real", last="Person", email="real.person@example.com")
+    tok, out = _submitted(volt, first="Test", last="Booker")
+    _eligible(volt, out["application_id"])
+    live = _session(volt, capacity=2)
+    gone = _session(volt, capacity=1, starts=_future(13))
+    _book(volt, tok, out["application_id"], live["id"])
+    tok2, out2 = _submitted(volt, first="Test", last="Canceled")
+    _eligible(volt, out2["application_id"])
+    _book(volt, tok2, out2["application_id"], gone["id"])
+    c.post("/volt/ops/%s/sessions/%s/cancel" % (org, gone["id"]), headers=H(db, volt["staff"]), json={"reason": "QA"})
+    test_uid = db.get(VoltRep, db.get(VoltApplication, out["application_id"]).rep_serial).user_id
+    _access(volt, volt["staff"], test_uid, "suspend", "QA")
+    r = c.post("/volt/ops/%s/test-records/purge" % org, headers=H(db, volt["god"])).json()
+    assert r["reps"] == 2 and r["applications"] == 2 and r["sessions"] == 1
+    db.expire_all()
+    assert db.get(VoltSession, gone["id"]) is None                    # test-only, canceled: removed
+    s = db.get(VoltSession, live["id"])
+    assert s is not None                                              # live availability kept ...
+    staff = [x for x in c.get("/volt/ops/%s/sessions" % org, headers=H(db, volt["staff"])).json()["items"] if x["id"] == live["id"]][0]
+    assert staff["booked"] == 0                                       # ... with its seat freed
+    assert db.query(VoltAccess).filter(VoltAccess.user_id == test_uid).count() == 0
+    assert db.query(VoltAuditEvent).filter(VoltAuditEvent.entity_type == "access", VoltAuditEvent.entity_id == test_uid).count() == 0
+    assert db.get(VoltApplication, real["application_id"]) is not None   # real applicant preserved
+    assert c.post("/volt/ops/%s/test-records/purge" % org, headers=H(db, volt["god"])).json()["reps"] == 0

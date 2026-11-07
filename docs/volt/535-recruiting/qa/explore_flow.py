@@ -103,9 +103,19 @@ with sync_playwright() as p:
         pg.screenshot(path=f"{SHOTS}/{name}-03-fiber-explore.png", full_page=True)
         pg.goto(FE + "/volt/projects/aca"); pg.wait_for_selector("[data-opportunity=aca]")
         at = pg.inner_text("[data-opportunity=aca]")
-        check(f"{name}: ACA Explore page", "Explore ACA with VOLT." in at and "license status" in at.lower()
+        # Approved ACA Healthcare Outreach wording (2026-11-06): outreach and
+        # enrollment assistance, no insurance license required.
+        check(f"{name}: ACA Explore page", "Explore ACA Healthcare Outreach with VOLT." in at
+              and "No insurance license required" in at
+              and "Help connect eligible people with ACA health coverage and guide them toward enrollment assistance." in at
+              and "Eligibility, plan availability and costs vary" in at
               and pg.locator("[data-volt-meaning]").count() == 1, at[:300])
-        check(f"{name}: ACA Explore has no unconfirmed terms", not any(x in at.lower() for x in UNCONFIRMED), [x for x in UNCONFIRMED if x in at.lower()])
+        # "$" is allowed ONLY inside the approved "$0-premium plans where available".
+        APPROVED = "$0-premium plans where available"
+        rest = at.lower().replace(APPROVED.lower(), "")
+        check(f"{name}: ACA Explore has no unconfirmed terms (beyond the approved $0-premium line)",
+              APPROVED in at and not any(x in rest for x in UNCONFIRMED + ("insurance sales", "licensed agent", "free healthcare", "sales agent")),
+              [x for x in UNCONFIRMED if x in rest])
         pg.screenshot(path=f"{SHOTS}/{name}-04-aca-explore.png", full_page=True)
         pg.locator("[data-apply=project]").first.click(); pg.wait_for_url("**/volt/apply/aca")
         check(f"{name}: ACA Explore Apply Now goes straight to the ACA application", pg.url.endswith("/volt/apply/aca"))

@@ -301,9 +301,54 @@ def _send_graph(token: str, prog: VoltProgram, to: str, subject: str, html: str,
                       json={"message": msg, "saveToSentItems": bool(save)}, timeout=30)
 
 
+def obsolete_reason(db: Session, row: VoltEmail) -> Optional[str]:
+    """A Zoom notice waiting to be sent (for example while the mailbox is not
+    connected yet) is sent ONLY if it still describes the current booking.
+    Checked at send time, every time, so a retry after the mailbox connects
+    never delivers a stale confirmation, an outdated time or a cancel notice
+    for something that was rebooked. Returns why it is obsolete, or None."""
+    if not (row.kind or "").startswith("zoom_"):
+        return None
+    from app.models.volt_models import VoltSession, VoltSessionAttendee
+    try:
+        event_key, sid, serial, stamp = row.dedupe_key.split(":", 3)
+    except ValueError:
+        return "Unreadable notice key."
+    sess = db.get(VoltSession, sid)
+    if sess is None:
+        return "The session no longer exists."
+    if sess.starts_at <= datetime.utcnow():
+        return "The session time has passed."
+    att = (db.query(VoltSessionAttendee).filter(VoltSessionAttendee.session_id == sid,
+                                                VoltSessionAttendee.rep_serial == int(serial)).first())
+    active = att is not None and att.booking_status in (None, "active")
+    if row.kind == "zoom_confirmed":
+        if sess.status != "scheduled" or not active or C.iso(att.booked_at) != stamp:
+            return "The booking this confirms was canceled or replaced."
+        if sess.rescheduled_at is not None and sess.rescheduled_at > att.booked_at:
+            return "The session was rescheduled after this confirmation; the reschedule notice carries the current time."
+    elif row.kind == "zoom_rescheduled":
+        if sess.status != "scheduled" or not active or C.iso(sess.rescheduled_at) != stamp:
+            return "A newer change replaced this time, or the booking ended."
+    elif row.kind == "zoom_canceled":
+        if sess.status == "canceled":
+            if C.iso(sess.canceled_at) != stamp:
+                return "Superseded: the whole session was canceled; that notice is the current one."
+        elif active:
+            return "The applicant has an active booking for this session again."
+        elif att is None or C.iso(att.canceled_at) != stamp:
+            return "Superseded by a later notice."
+    return None
+
+
 def deliver(db: Session, row: VoltEmail, html: Optional[str] = None) -> VoltEmail:
     """Try to send a queued row now. Never raises; the row records the result."""
     if row.state in ("sent", "skipped"):
+        return row
+    why = obsolete_reason(db, row)
+    if why is not None:
+        row.state, row.last_error, row.next_attempt_at = "skipped", "Not sent: " + why, None
+        db.commit()
         return row
     body = html if html is not None else row.body_html
     prog = db.get(VoltProgram, row.organization_id)

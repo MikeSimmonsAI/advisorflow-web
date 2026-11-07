@@ -395,9 +395,16 @@ def next_action(db, prog, rep, app) -> Dict[str, Any]:
                 "kind": "applicant"}
     if app.status == "draft":
         missing = missing_items(db, prog, rep, app)
-        return {"label": "Finish your application" if missing else "Review and submit your application",
-                "detail": "; ".join(missing) or "Everything required is in. Submit when you are ready.",
-                "kind": "applicant"}
+        if not missing:
+            return {"label": "Review and submit your application",
+                    "detail": "Everything required is in. Submit when you are ready.", "kind": "applicant",
+                    "remaining": []}
+        first = missing[0].split(": ", 1)[-1]
+        first = first[:1].upper() + first[1:]
+        n = len(missing)
+        return {"label": "Finish your application",
+                "detail": "Next: %s. %d item%s left to finish." % (first.rstrip("."), n, "" if n == 1 else "s"),
+                "kind": "applicant", "remaining": missing}
     if app.status == "needs_update":
         return {"label": "Update requested", "detail": app.return_reason or "Our team asked for a change.",
                 "kind": "applicant"}

@@ -388,3 +388,6 @@
   .v-table--cards .v-subrow { margin-top: -8px; }
   .v-filters select, .v-filters .v-check { width: 100%; }
 }
+
+.v-ma-remaining { margin: 4px 0 2px; }
+.v-ma-remaining ul { margin: 6px 0 0 18px; padding: 0; display: grid; gap: 3px; }
