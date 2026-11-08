@@ -101,7 +101,8 @@ def calendar_probe(user: Optional[User]) -> Dict:
     """One read-only events.list on the booking calendar. Never writes."""
     if user is None:
         return {"checked": False, "reason": "no booking user"}
-    out = {"checked": True, "provider": "google", "calendar_id": getattr(user, "google_calendar_id", None) or "primary",
+    from app.services.calendar_service import booking_calendar_id
+    out = {"checked": True, "provider": "google", "calendar_id": booking_calendar_id(user),
            "token_present": bool(getattr(user, "google_oauth_refresh_token_encrypted", None))}
     if not out["token_present"]:
         return dict(out, read_ok=False, error="no Google grant stored")
@@ -160,14 +161,114 @@ def twilio_probe(db: Session, user: Optional[User]) -> Dict:
                    voice_capable=bool(caps.get("voice")) if isinstance(caps, dict) else None)
         try:
             vs = client.messaging.v1.tollfree_verifications.list(tollfree_phone_number_sid=num.sid, limit=5)
-            out["tollfree_verifications"] = [{
-                "status": str(v.status), "use_case_categories": list(v.use_case_categories or []),
-                "message_volume": v.message_volume, "opt_in_type": str(v.opt_in_type) if v.opt_in_type else None,
-                "business_name": v.business_name,
-                "date_updated": v.date_updated.isoformat() if v.date_updated else None,
-                "rejection_reason": v.rejection_reason} for v in vs]
+            out["tollfree_verifications"] = [verification_record(v, num.sid) for v in vs]
         except Exception as e:                           # noqa: BLE001
             out["tollfree_verification_error"] = str(e)[:200]
+    except Exception as e:                               # noqa: BLE001
+        out["error"] = str(e)[:200]
+    return out
+
+
+
+def _mask_email(e: Optional[str]) -> Optional[str]:
+    if not e or "@" not in e:
+        return None
+    local, dom = e.split("@", 1)
+    return "%s…@%s" % (local[:2], dom.lower())
+
+
+def verification_record(v, number_sid: str) -> Dict:
+    """What Twilio approved for this number - the claims that govern what it
+    may send. Business contact name/phone/email, street address and the
+    notification email are NOT copied (private; not needed to judge use)."""
+    def _iso(t):
+        return t.isoformat() if t else None
+    return {
+        "verification_sid": v.sid, "matches_number_sid": v.tollfree_phone_number_sid == number_sid,
+        "status": str(v.status), "date_created": _iso(v.date_created), "date_updated": _iso(v.date_updated),
+        "business_name": v.business_name, "business_website": v.business_website,
+        "business_city_state": ", ".join(x for x in (v.business_city, v.business_state_province_region) if x),
+        "use_case_categories": list(v.use_case_categories or []),
+        "use_case_summary": v.use_case_summary, "production_message_sample": v.production_message_sample,
+        "opt_in_type": str(v.opt_in_type) if v.opt_in_type else None,
+        "opt_in_image_urls": list(v.opt_in_image_urls or []), "message_volume": v.message_volume,
+        "additional_information": v.additional_information,
+        "edit_allowed": v.edit_allowed, "edit_expiration": _iso(v.edit_expiration),
+        "rejection_reason": v.rejection_reason, "rejection_reasons": v.rejection_reasons,
+        "error_code": v.error_code, "external_reference_id": v.external_reference_id,
+        "has_customer_profile": bool(v.customer_profile_sid), "has_trust_product": bool(v.trust_product_sid)}
+
+
+def calendar_identity(user, booking_event_ids) -> Dict:
+    """READ-ONLY: whose Google calendar receives bookings. Read from events
+    this calendar already holds (organizer/creator), because the stored grant
+    has no calendarList scope. Emails are masked; nothing is written."""
+    out = {"events_checked": 0, "organizers": [], "creators": [], "same_calendar": None}
+    if user is None or not booking_event_ids:
+        return out
+    try:
+        from app.services.calendar_service import _get_calendar_service, booking_calendar_id
+        svc = _get_calendar_service(user)
+        cal = booking_calendar_id(user)
+        out["calendar_id_used"] = cal
+        orgs, creators, selfs = set(), set(), []
+        for eid in list(booking_event_ids)[:3]:
+            try:
+                ev = svc.events().get(calendarId=cal, eventId=eid).execute()
+            except Exception as e:                       # noqa: BLE001
+                out.setdefault("event_errors", []).append(str(e)[:120])
+                continue
+            out["events_checked"] += 1
+            o, c = ev.get("organizer") or {}, ev.get("creator") or {}
+            orgs.add(_mask_email(o.get("email")))
+            creators.add(_mask_email(c.get("email")))
+            selfs.append(bool(o.get("self")))
+            out["organizer_display_name"] = o.get("displayName") or out.get("organizer_display_name")
+        out["organizers"], out["creators"] = sorted(x for x in orgs if x), sorted(x for x in creators if x)
+        out["organizer_is_self"] = all(selfs) if selfs else None
+        out["same_calendar"] = len(out["organizers"]) == 1 if out["organizers"] else None
+        login = (getattr(user, "email", "") or "").lower()
+        out["login_domain"] = login.split("@", 1)[1] if "@" in login else None
+        out["matches_login"] = bool(out["organizers"]) and all(
+            x.split("@", 1)[1] == out["login_domain"] and x[:2] == login[:2] for x in out["organizers"])
+    except Exception as e:                               # noqa: BLE001
+        out["error"] = str(e)[:200]
+    return out
+
+
+
+def copy_context(db: Session, org: Organization, user: Optional[User]) -> Dict:
+    """READ-ONLY: the real values Restland copy is rendered with - advisor and
+    location names, the office line, which public host a booking / survey
+    link uses and whether short location links apply. No link is minted and
+    no family detail is read beyond one staged record's location."""
+    out: Dict = {}
+    try:
+        from app.models.models import Lead
+        from app.models.reset_models import CampaignCycleMember
+        from app.services.programs import identity, location_links
+        from app.services.programs import appointment_notifications as AN
+        from app.services.public_identity import booking_url
+        from app.services import sms_programs
+        prog = identity.program_for_org(db, org.id)
+        out["primary_contact_name"] = getattr(prog, "primary_contact_name", None)
+        out["booking_user_full_name"] = getattr(user, "full_name", None) if user else None
+        m = db.query(CampaignCycleMember).filter(CampaignCycleMember.organization_id == org.id,
+                                                 CampaignCycleMember.status == "staged").first()
+        lead = db.query(Lead).filter(Lead.id == m.lead_id).first() if m else None
+        prof = identity.location_profile_for_lead(db, lead) if lead else None
+        out["location_name"] = getattr(prof, "official_name", None)
+        out["office_phone"] = AN._office_phone(db, lead) if lead else None
+        b = booking_url(db, org.id, "TOKEN")
+        out["booking_url_shape"] = b
+        out["survey_url_shape"] = AN.survey_url(db, org.id, "TOKEN")
+        dom = location_links.link_domain()
+        hide = identity.hides_location(prof) if prof is not None else None
+        out["short_links"] = {"domain_set": bool(dom), "hides_location": hide,
+                              "shape": ("https://%s.%s/CODE" % (location_links.profile_key(prof), dom))
+                              if (dom and prof is not None and not hide) else None}
+        out["links_allowed_for_sender"] = (sms_programs.content_allowance(db, lead) or {}).get("allow_links", True) \
+            if lead else None
     except Exception as e:                               # noqa: BLE001
         out["error"] = str(e)[:200]
     return out
@@ -456,6 +557,13 @@ def probe_only(db: Session, org: Organization, booking_user_id: Optional[str]) -
     user = _booking_user(db, org.id, booking_user_id)
     from app.services.programs.identity import program_for_org
     prog = program_for_org(db, org.id)
+    from app.models.models import BookingLink
+    evs = []
+    if user is not None:
+        evs = [b.calendar_event_id for b in db.query(BookingLink).filter(
+            BookingLink.user_id == user.id, BookingLink.calendar_event_id.isnot(None),
+            BookingLink.status.in_(("booked", "confirmed", "completed"))).order_by(BookingLink.created_at.desc()).limit(3)]
     return {"booking_user_ok": user is not None,
             "program_booking_user_matches": bool(prog and user and prog.booking_user_id == user.id),
-            "calendar": calendar_probe(user), "sender": twilio_probe(db, user)}
+            "calendar": calendar_probe(user), "calendar_identity": calendar_identity(user, evs),
+            "sender": twilio_probe(db, user), "copy_context": copy_context(db, org, user)}

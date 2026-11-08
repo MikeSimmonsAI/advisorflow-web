@@ -78,9 +78,9 @@ def _move_calendar(db, booking, old_user_id: Optional[str] = None) -> Dict:
     owner = db.query(User).filter(User.id == (old_user_id or booking.user_id)).first()
     if booking.calendar_event_id and owner is not None and getattr(owner, "google_calendar_connected", False):
         try:
-            from app.services.calendar_service import _get_calendar_service
+            from app.services.calendar_service import _get_calendar_service, booking_calendar_id
             _get_calendar_service(owner).events().delete(
-                calendarId=getattr(owner, "google_calendar_id", None) or "primary",
+                calendarId=booking_calendar_id(owner),
                 eventId=booking.calendar_event_id).execute()
             out["deleted"] = True
         except Exception as e:                           # noqa: BLE001
@@ -123,9 +123,9 @@ def _move_calendar_cancel(db, booking) -> Optional[str]:
     if not booking.calendar_event_id or owner is None or not getattr(owner, "google_calendar_connected", False):
         return None
     try:
-        from app.services.calendar_service import _get_calendar_service
+        from app.services.calendar_service import _get_calendar_service, booking_calendar_id
         _get_calendar_service(owner).events().delete(
-            calendarId=getattr(owner, "google_calendar_id", None) or "primary",
+            calendarId=booking_calendar_id(owner),
             eventId=booking.calendar_event_id).execute()
         booking.calendar_event_id = None
         return "deleted"

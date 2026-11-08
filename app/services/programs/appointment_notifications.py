@@ -28,7 +28,12 @@ TIMING (America/Chicago, daylight-saving aware):
     before for an early-morning time) - only if that is still after the
     booking was made and before the visit; otherwise that reminder is
     skipped. A reminder whose time has already passed when the family books is
-    skipped, never sent late in a burst.
+    skipped, never sent late in a burst. COLLISIONS: a reminder within 12
+    hours of another message for the same appointment is skipped unless it is
+    the final reminder going at its true time (see MIN_GAP). In practice a
+    10:00 AM visit gets only the 24-hour reminder; its 2-hour reminder would
+    be 5:45 PM the evening before and is not sent. The reminder text says
+    "today" / "tomorrow" from the moment it actually goes.
   * survey: 24 hours after the visit's recorded end (or its scheduled end),
     only for visits staff marked COMPLETED. Outside the window it waits for
     the next 9:00 AM. Marked late -> the next permitted time from now.
@@ -219,10 +224,15 @@ def on_booked(db: Session, booking, *, event: str = "booked", now: Optional[date
         if _add(db, booking, lead, purpose, ch, version, now):
             made += 1
     start = _start_utc(booking)
-    for mins in s["reminder_minutes"]:
+    # Earlier messages this family will get for this appointment; a reminder
+    # landing within MIN_GAP of one of them is a near-duplicate (see
+    # _collision_reason). The confirmation counts only if it is being written.
+    anchors = [now] if (chans and not skip_immediate) else []
+    last = min(s["reminder_minutes"]) if s["reminder_minutes"] else None
+    for mins in s["reminder_minutes"]:            # longest offset first (settings sorts it)
         key = "reminder_24h" if mins == 1440 else "reminder_2h" if mins == 120 else "reminder_%dm" % mins
-        due = start - timedelta(minutes=mins)
-        status, reason = "scheduled", None
+        ideal = start - timedelta(minutes=mins)
+        due, status, reason = ideal, "scheduled", None
         if due <= now:
             status, reason = "skipped", "booked inside this reminder's interval - not sent late"
         else:
@@ -231,13 +241,57 @@ def on_booked(db: Session, booking, *, event: str = "booked", now: Optional[date
                 if adj <= now or adj >= start:
                     status, reason = "skipped", "outside the notification window and no earlier permitted time"
                 else:
-                    reason = "moved into the notification window (was %s Central)" % _local(due).strftime("%-I:%M %p")
                     due = adj
+                    reason = moved_reason(ideal, adj, start, mins)
+            if status == "scheduled":
+                clash = _collision_reason(due, ideal, anchors, mins == last)
+                if clash:
+                    status, reason = "skipped", clash
+                else:
+                    anchors.append(due)
         for ch in chans:
             if _add(db, booking, lead, key, ch, version, due, status, reason):
                 made += 1
     db.flush()
     return {"scheduled": made, "superseded": superseded, "channels": chans, "enabled": s["enabled"]}
+
+
+
+# ── Reminder collision rule (deterministic) ─────────────────────────────────
+# Reminders are written longest offset first. A reminder is SKIPPED when it
+# would go within MIN_GAP of a message already planned for the same
+# appointment (the confirmation, or an earlier reminder), unless it is the
+# final reminder AND goes at its true time - the "shortly before" reminder is
+# the one worth keeping when it is genuinely shortly before. So:
+#   * 10:00 AM visit: the 2-hour reminder would be 8:00 AM (before 9 AM), so it
+#     would move to 5:45 PM the evening before - 7 h 45 m after the 24-hour
+#     reminder. It is skipped; the family gets the 24-hour one only.
+#   * booked 26 hours ahead: the 24-hour reminder would follow the confirmation
+#     by 2 hours, so it is skipped; the 2-hour reminder still goes.
+MIN_GAP = timedelta(hours=12)
+
+
+def _gap_text(d: timedelta) -> str:
+    m = int(d.total_seconds() // 60)
+    return ("%d h %02d m" % (m // 60, m % 60)) if m >= 60 else ("%d minutes" % m)
+
+
+def moved_reason(ideal: datetime, adj: datetime, start: datetime, mins: int) -> str:
+    before = start - adj
+    return ("sent at %s Central, %s before the visit, instead of %s before (%s Central is outside the "
+            "%s notification window)" % (_local(adj).strftime("%-I:%M %p %a"), _gap_text(before),
+                                          _gap_text(timedelta(minutes=mins)),
+                                          _local(ideal).strftime("%-I:%M %p"), "9 AM-6 PM"))
+
+
+def _collision_reason(due: datetime, ideal: datetime, anchors, is_last: bool) -> Optional[str]:
+    near = [a for a in anchors if abs(due - a) < MIN_GAP]
+    if not near or (is_last and due == ideal):
+        return None
+    gap = min(abs(due - a) for a in near)
+    moved = "" if due == ideal else (" (moved from %s, which is outside 9 AM-6 PM)" % _local(ideal).strftime("%-I:%M %p"))
+    return ("not sent: it would go at %s Central%s, only %s from another message for this appointment"
+            % (_local(due).strftime("%-I:%M %p %a"), moved, _gap_text(gap)))
 
 
 def on_cancelled(db: Session, booking, *, now: Optional[datetime] = None, acknowledge: bool = True) -> Dict:
@@ -339,6 +393,14 @@ def _office_phone(db, lead) -> str:
     return "(%s) %s-%s" % (d[:3], d[3:6], d[6:]) if len(d) == 10 else ""
 
 
+def _lead_in(sent: Optional[datetime], start: datetime) -> str:
+    """Said from the moment the reminder actually goes, not from its label."""
+    if sent is None:
+        return "coming up"
+    d = (_local(start).date() - _local(sent).date()).days
+    return "today" if d == 0 else "tomorrow" if d == 1 else "coming up"
+
+
 def _where(f: Dict) -> str:
     if f["home"]:
         return "%s will come to you at %s" % (f["advisor_first"], f["address"])
@@ -368,15 +430,17 @@ def compose(db: Session, row: AppointmentNotification, booking, lead, policy) ->
                 "here and %s will set one up." % (f["first_name"], f["title"], f["date"], f["time"], f["advisor_first"]))
         subj = "Your %s on %s is cancelled" % (f["title"], f["date"])
     elif p.startswith("reminder"):
-        lead_in = "tomorrow" if p == "reminder_24h" else "coming up"
+        lead_in = _lead_in(row.due_at, _start_utc(booking))
         text = ("Hi %s, a reminder that your %s with %s is %s: %s, %s. %s"
                 % (f["first_name"], f["title"], f["advisor"], lead_in, when, _where(f), _change_line(f)))
         subj = "Reminder: your %s on %s at %s" % (f["title"], f["date"], f["time"])
     elif p == "survey":
         sv = db.query(AppointmentSurvey).filter(AppointmentSurvey.booking_id == booking.id).first()
         link = survey_url(db, lead.organization_id, sv.token) if sv else ""
-        text = ("Hi %s, thank you for meeting with %s at Restland for your %s. Would you share how it went? "
-                "It takes about a minute: %s" % (f["first_name"], f["advisor"], f["title"], link))
+        # "at Restland" only when the visit was there - a home visit was not.
+        text = ("Hi %s, thank you for meeting with %s%s for your %s. Would you share how it went? "
+                "It takes about a minute: %s" % (f["first_name"], f["advisor"], "" if f["home"] else " at Restland",
+                                                f["title"], link))
         subj = "Thank you for meeting with %s" % f["advisor"]
     else:
         raise ValueError("unknown purpose %s" % p)

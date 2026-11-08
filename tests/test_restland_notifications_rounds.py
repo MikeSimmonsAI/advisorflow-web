@@ -164,8 +164,44 @@ def test_reminders_24h_and_2h_and_the_early_morning_move(rl):
     early = _booking(rl, rl["leads"][6], datetime(2026, 11, 13, 10, 0))   # 2 hours before = 8:00 AM
     AN.on_booked(db, early, now=now)
     r2e = _rows(rl, early, purpose="reminder_2h", channel="sms")[0]
-    assert r2e.status == "scheduled" and _due_local(r2e) == datetime(2026, 11, 12, 17, 45)
-    assert "moved into the notification window" in r2e.reason
+    # 8:00 AM would move to 5:45 PM the evening before - 7 h 45 m after the
+    # 24-hour reminder. The collision rule skips it; it is never called "2 hours".
+    assert r2e.status == "skipped" and _due_local(r2e) == datetime(2026, 11, 12, 17, 45)
+    assert "7 h 45 m" in r2e.reason and "8:00 AM" in r2e.reason
+    assert _rows(rl, early, purpose="reminder_24h", channel="sms")[0].status == "scheduled"
+
+
+def test_collision_rule_keeps_the_near_reminder_and_drops_the_one_after_the_confirmation(rl):
+    db = rl["db"]
+    configured(rl)
+    start = datetime(2026, 11, 13, 14, 30)                            # Fri 2:30 PM
+    now = AN._utc(start) - timedelta(hours=26)                        # booked Thu 12:30 PM
+    b = _booking(rl, rl["leads"][10], start)
+    AN.on_booked(db, b, now=now)
+    r24 = _rows(rl, b, purpose="reminder_24h", channel="sms")[0]
+    r2 = _rows(rl, b, purpose="reminder_2h", channel="sms")[0]
+    assert r24.status == "skipped" and "2 h 00 m" in r24.reason       # 2 hours after the confirmation
+    assert r2.status == "scheduled" and _due_local(r2) == datetime(2026, 11, 13, 12, 30)
+
+
+def test_a_moved_reminder_that_does_not_collide_is_described_accurately(rl):
+    db = rl["db"]
+    configured(rl)
+    import json
+    prog = prog_of(rl)
+    raw = json.loads(prog.booking_policy_json)
+    raw.setdefault("notifications", {})["reminder_minutes"] = [120]
+    prog.booking_policy_json = json.dumps(raw)
+    db.commit()
+    start = datetime(2026, 11, 13, 10, 0)
+    b = _booking(rl, rl["leads"][11], start)
+    AN.on_booked(db, b, now=AN._utc(start) - timedelta(days=5))
+    r2 = _rows(rl, b, purpose="reminder_2h", channel="sms")[0]
+    assert r2.status == "scheduled" and _due_local(r2) == datetime(2026, 11, 12, 17, 45)
+    assert "16 h 15 m before the visit" in r2.reason and "instead of 2 h 00 m" in r2.reason
+    policy, lead = AN._policy_for_booking(db, b)
+    text = AN.compose(db, r2, b, lead, policy)["body"]
+    assert "is tomorrow:" in text and "coming up" not in text
 
 
 def test_close_in_booking_skips_elapsed_reminders_instead_of_dumping_them(rl):
@@ -369,7 +405,8 @@ def test_two_complete_rounds_for_one_family_keep_round_one_history(rl, monkeypat
     journey.start(db, prog, fam, rl["mike"])
     st = db.query(CadenceState).filter_by(lead_id=lead.id).one()
     db.add(CadenceTouchLog(cadence_state_id=st.id, lead_id=lead.id, organization_id=org.id, touch_number=1,
-                           attempt_seq=1, outcome="sent", attempted_at=datetime.utcnow(), cycle_key="ffr-batch-1"))
+                           attempt_seq=1, outcome="sent", attempted_at=datetime.utcnow() - timedelta(days=58),
+                           cycle_key="ffr-batch-1"))
     db.commit()
     last1 = datetime.utcnow() - timedelta(days=45)
     _finish_round(rl, lead, 0, last1)
@@ -483,3 +520,63 @@ def test_forecast_uses_the_corrected_formula():
     assert row["text_segments_per_day"] == 15 * f["segments_per_family_first_round"]
     assert F.segments("a" * 160)["segments"] == 1 and F.segments("a" * 161)["segments"] == 2
     assert F.segments("é" * 10)["encoding"] == "GSM-7" and F.segments("✓")["encoding"] == "UCS-2"
+
+
+
+def test_the_rest_counts_from_the_last_attempt_and_never_gets_shorter(rl):
+    """A late retry, a failed last attempt or a late 'undelivered' receipt must
+    not shorten the 30-day rest - for this family or a shared phone/email."""
+    db = rl["db"]
+    configured(rl)
+    org = rl["org"]
+    m1 = db.query(CampaignCycleMember).filter_by(organization_id=org.id, status="staged").first()
+    lead = db.query(Lead).filter_by(id=m1.lead_id).one()
+    started = datetime.utcnow() - timedelta(days=50)
+    for r in db.query(ProgramSourceRecord).filter_by(lead_id=lead.id).all():
+        r.journey_started_at, r.approved_to_send_at = started, started
+    if db.query(CadenceState).filter_by(lead_id=lead.id).first() is None:
+        db.add(CadenceState(lead_id=lead.id, status="active"))
+    db.commit()
+    delivered = started + timedelta(days=13)
+    _finish_round(rl, lead, 0, delivered)
+    # The last text attempt after it FAILED (a retry); its receipt says undelivered.
+    failed = delivered + timedelta(days=2)
+    db.add(Message(lead_id=lead.id, sender_id=rl["mike"].id, body="t5 retry", sent_at=failed,
+                   delivery_status="undelivered"))
+    db.commit()
+    rotation.refresh(db, org.id)
+    db.refresh(m1)
+    assert m1.status == "completed" and m1.next_eligible_at == failed + timedelta(days=30)
+    # A retry logged AFTER the round closed pushes the rest later at every check.
+    late = failed + timedelta(days=5)
+    st = db.query(CadenceState).filter_by(lead_id=lead.id).first()
+    db.add(CadenceTouchLog(cadence_state_id=st.id, lead_id=lead.id, organization_id=org.id, touch_number=5,
+                           attempt_seq=2, outcome="failed", attempted_at=late))
+    db.commit()
+    assert rotation.rest_until(db, m1) == late + timedelta(days=30)
+    probe = late + timedelta(days=29)
+    assert rotation.stage_return(db, org.id, [lead], "ffr-return-z", now=probe)["refused"][0]["reason"] == "still resting"
+    assert any("resting until" in c for c in rotation.conflicts(db, org.id, lead, now=probe))
+    # A receipt arriving later can flip delivery state; the stored rest never moves earlier.
+    for m in db.query(Message).filter_by(lead_id=lead.id).all():
+        m.delivery_status = "undelivered"
+    m1.status = "active"
+    db.commit()
+    rotation.refresh(db, org.id)
+    db.refresh(m1)
+    assert m1.next_eligible_at >= late + timedelta(days=30)
+
+
+def test_survey_invitation_names_restland_only_for_office_visits(rl):
+    db = rl["db"]
+    configured(rl)
+    _activate_since(rl)
+    for meeting, expect in (("office", " at Restland for your"), ("home", "Mike Simmons for your")):
+        start = AN._local(datetime.utcnow() - timedelta(days=3)).replace(hour=13, minute=0, second=0, microsecond=0)
+        b = _booking(rl, rl["leads"][23 if meeting == "office" else 24], start, meeting=meeting,
+                     created=datetime.utcnow() - timedelta(hours=1))
+        OPS.attendance(db, prog_of(rl), b, "completed", rl["staff"], now=datetime.utcnow())
+        row = _rows(rl, b, purpose="survey", channel="sms")[0]
+        policy, lead = AN._policy_for_booking(db, b)
+        body = AN.compose(db, row, b, lead, policy)["body"]
+        assert expect in body

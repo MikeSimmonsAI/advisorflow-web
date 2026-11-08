@@ -96,6 +96,11 @@ class ResetRefused(RuntimeError):
 
 # ── normalization (never written onto the lead) ──────────────────────────────
 
+def _rest_until(db, member):
+    from app.services.programs.rotation import rest_until
+    return rest_until(db, member)
+
+
 def e164(raw: Optional[str]) -> Optional[str]:
     """A US number as +1XXXXXXXXXX, or None. 10 digits, or 11 starting with 1;
     area code and exchange may not start with 0 or 1."""
@@ -295,9 +300,9 @@ def plan(db: Session, org: Organization) -> Dict:
                 if c.status in ("staged", "active"):
                     m["segment"] = "in_round"
                     m["reasons"].append("phone or email already in an open round (%s)" % c.cycle_key)
-                elif c.status == "completed" and c.next_eligible_at and c.next_eligible_at > now:
+                elif c.status == "completed" and (_rest_until(db, c) or now) > now:
                     m["segment"] = "resting"
-                    m["reasons"].append("resting until %s" % c.next_eligible_at.strftime("%b %-d, %Y"))
+                    m["reasons"].append("resting until %s" % _rest_until(db, c).strftime("%b %-d, %Y"))
                 elif c.status == "completed":
                     m["segment"] = "returning"
                     m["reasons"].append("rest ended %s - review for the Return campaign" %

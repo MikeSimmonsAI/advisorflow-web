@@ -92,29 +92,66 @@ def genuine_repliers(db: Session, organization_id: str, lead_ids) -> Set[str]:
 
 
 def _outreach_times(db: Session, lead_id: str, since: Optional[datetime]):
-    """(last time anything reached a provider, last DELIVERED-or-unknown time,
-    any attempt that failed for good)."""
-    from app.models.models import EmailMessage, Message
+    """(LAST ATTEMPT of any kind, last DELIVERED-or-unknown time).
+
+    The rest counts from the last ATTEMPT - a text or email that reached the
+    provider, delivered or not, and any logged cadence / email-touch attempt
+    (a retry included). A failed or late "undelivered" receipt therefore can
+    never pull the rest earlier: it changes `last_ok`, which only decides the
+    round's reason (no_reply vs undeliverable), never its length."""
+    from app.models.models import CadenceTouchLog, EmailMessage, Message
+    from app.models.program_models import ProgramEmailTouch
     last_any, last_ok = None, None
+
+    def _seen(t, ok):
+        nonlocal last_any, last_ok
+        if t is None:
+            return
+        if getattr(t, "tzinfo", None) is not None:
+            t = t.replace(tzinfo=None)
+        last_any = t if last_any is None or t > last_any else last_any
+        if ok:
+            last_ok = t if last_ok is None or t > last_ok else last_ok
+
     q = db.query(Message).filter(Message.lead_id == lead_id)
     if since is not None:
         q = q.filter(Message.sent_at >= since)
     for m in q.all():
-        if (getattr(m, "direction", None) or "outbound") != "outbound" or m.sent_at is None:
+        if (getattr(m, "direction", None) or "outbound") != "outbound":
             continue
-        last_any = max(last_any or m.sent_at, m.sent_at)
-        if (m.delivery_status or "").lower() not in ("undelivered", "failed"):
-            last_ok = max(last_ok or m.sent_at, m.sent_at)
+        _seen(m.sent_at, (m.delivery_status or "").lower() not in ("undelivered", "failed"))
     q = db.query(EmailMessage).filter(EmailMessage.lead_id == lead_id)
     if since is not None:
         q = q.filter(EmailMessage.sent_at >= since)
     for e in q.all():
-        if e.sent_at is None:
-            continue
-        last_any = max(last_any or e.sent_at, e.sent_at)
-        if (e.status or "").lower() not in ("failed", "bounced"):
-            last_ok = max(last_ok or e.sent_at, e.sent_at)
+        _seen(e.sent_at, (e.status or "").lower() not in ("failed", "bounced"))
+    q = db.query(CadenceTouchLog.attempted_at).filter(CadenceTouchLog.lead_id == lead_id,
+                                                      CadenceTouchLog.outcome.in_(("sent", "failed")),
+                                                      CadenceTouchLog.attempted_at.isnot(None))
+    if since is not None:
+        q = q.filter(CadenceTouchLog.attempted_at >= since)
+    for (t,) in q.all():
+        _seen(t, False)
+    q = db.query(ProgramEmailTouch.attempted_at).filter(ProgramEmailTouch.lead_id == lead_id,
+                                                        ProgramEmailTouch.attempted_at.isnot(None))
+    if since is not None:
+        q = q.filter(ProgramEmailTouch.attempted_at >= since)
+    for (t,) in q.all():
+        _seen(t, False)
     return last_any, last_ok
+
+
+def rest_until(db: Session, member) -> Optional[datetime]:
+    """When this round's rest really ends: the stored value, pushed later by
+    any attempt logged for the family after the round was closed (a late
+    retry). Never earlier than what was stored."""
+    stored = member.next_eligible_at
+    since = member.started_at or member.created_at
+    last_any, _ok = _outreach_times(db, member.lead_id, since)
+    live = last_any + timedelta(days=REST_DAYS) if last_any is not None else None
+    if stored is None:
+        return live
+    return max(stored, live) if live is not None else stored
 
 
 def _texts_done(db: Session, lead) -> bool:
@@ -224,11 +261,9 @@ def assess(db: Session, member: CampaignCycleMember, now: Optional[datetime] = N
                                                     round_base(member))):
         return {"status": "active", "started_at": started}
     last_any, last_ok = _outreach_times(db, lead.id, started)
-    if last_ok is not None:
-        return {"status": "completed", "reason": "no_reply", "started_at": started, "last_outreach_at": last_ok,
-                "next_eligible_at": last_ok + timedelta(days=REST_DAYS)}
     basis = last_any or started
-    return {"status": "completed", "reason": "undeliverable", "started_at": started, "last_outreach_at": basis,
+    return {"status": "completed", "reason": "no_reply" if last_ok is not None else "undeliverable",
+            "started_at": started, "last_outreach_at": basis,
             "next_eligible_at": basis + timedelta(days=REST_DAYS)}
 
 
@@ -252,8 +287,8 @@ def refresh(db: Session, organization_id: str, now: Optional[datetime] = None, w
             m.status = st
             m.completed_at = now
             m.completion_reason = a.get("reason")
-            m.last_outreach_at = a.get("last_outreach_at")
-            m.next_eligible_at = a.get("next_eligible_at")
+            m.last_outreach_at = max([t for t in (m.last_outreach_at, a.get("last_outreach_at")) if t] or [None])
+            m.next_eligible_at = max([t for t in (m.next_eligible_at, a.get("next_eligible_at")) if t] or [None])
     if write:
         db.commit()
     return counts
@@ -283,8 +318,8 @@ def conflicts(db: Session, organization_id: str, lead, *, now: Optional[datetime
         same = "this family" if m.lead_id == lead.id else "another record with the same phone or email"
         if m.status in OPEN_STATUSES:
             out.append("%s is already in an open round (%s)" % (same, m.cycle_key))
-        elif m.status == "completed" and m.next_eligible_at and m.next_eligible_at > now:
-            out.append("%s is resting until %s" % (same, m.next_eligible_at.strftime("%b %-d, %Y")))
+        elif m.status == "completed" and (rest_until(db, m) or now) > now:
+            out.append("%s is resting until %s" % (same, rest_until(db, m).strftime("%b %-d, %Y")))
         elif m.status == "stopped" and m.completion_reason in ("replied", "booked", "cancelled_appointment"):
             out.append("%s %s - a person follows up, not a new round" % (
                 same, {"replied": "replied", "booked": "booked an appointment",
@@ -353,7 +388,7 @@ def stage_return(db: Session, organization_id: str, leads: Iterable, cycle_key: 
         why = None
         if prev is None or prev.status != "completed" or prev.completion_reason not in ("no_reply", "undeliverable"):
             why = "no finished, unanswered earlier round"
-        elif prev.next_eligible_at is None or prev.next_eligible_at > now:
+        elif rest_until(db, prev) is None or rest_until(db, prev) > now:
             why = "still resting"
         else:
             c = conflicts(db, organization_id, lead, now=now)
@@ -418,10 +453,11 @@ def groups(db: Session, organization_id: str, now: Optional[datetime] = None) ->
         if r.status in OPEN_STATUSES:
             out[r.status] += 1
         elif r.status == "completed":
-            if r.next_eligible_at and r.next_eligible_at > now:
+            until = rest_until(db, r)
+            if until and until > now:
                 out["resting"] += 1
-                if out["next_rest_ends"] is None or r.next_eligible_at < out["next_rest_ends"]:
-                    out["next_rest_ends"] = r.next_eligible_at
+                if out["next_rest_ends"] is None or until < out["next_rest_ends"]:
+                    out["next_rest_ends"] = until
             else:
                 out["rest_over"] += 1
         elif r.completion_reason in ("replied", "booked", "opted_out"):

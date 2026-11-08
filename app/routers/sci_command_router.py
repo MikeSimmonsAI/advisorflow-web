@@ -1769,7 +1769,20 @@ def _forecast(db, prog):
     with_email = db.query(Lead.id).filter(Lead.id.in_(ready or ["-"]), Lead.email.isnot(None),
                                           Lead.email != "").count() if ready else 0
     share = (with_email / len(ready)) if ready else 0.0
-    out = _F.forecast(link, email_share=share)
+    from app.models.program_models import CampaignFamily as _CF
+    from app.services.programs import campaigns as _camp
+    saved, saved_ret = {}, {}
+    for key, dest in ((_F.CAMPAIGN_KEY, saved), (_F.RETURN_KEY, saved_ret)):
+        fam = db.query(_CF).filter_by(organization_id=org, key=key).first()
+        if fam is not None:
+            for n in range(1, 6):
+                t = _camp.sms_for(fam, n)
+                if t:
+                    dest[n] = t
+    names = [(fn or "").strip() for (fn,) in db.query(Lead.first_name).filter(Lead.id.in_(ready or ["-"])).all()] \
+        if ready else []
+    out = _F.forecast(link, email_share=share, texts=saved or None, return_texts=saved_ret or None,
+                      first_names=names)
     now = datetime.utcnow()
     soon = now + _td(days=7)
     out["email_share_of_ready"] = round(share, 3)

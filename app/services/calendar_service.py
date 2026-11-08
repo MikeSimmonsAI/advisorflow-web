@@ -46,6 +46,31 @@ SCOPES = ["https://www.googleapis.com/auth/calendar.events", "https://www.google
 DEFAULT_APPOINTMENT_DURATION_MINUTES = 30
 
 
+
+def booking_calendar_id(user) -> str:
+    """THE calendar a booking is read from, written to, moved off and
+    cancelled on - one answer for every path (Issue #507). The user's stored
+    calendar id, else Google's "primary". Reads, creates, cancels and
+    reassignment all call this, so they cannot drift apart. Same precedence
+    as the availability reader (calendar_providers.google._calendar_id): a
+    connected Google connection row that names a calendar wins, then the
+    user's stored id, then "primary"."""
+    if user is None:
+        return "primary"
+    try:
+        from sqlalchemy.orm import object_session
+        from app.models.calendar_models import CalendarConnection
+        sess = object_session(user)
+        if sess is not None:
+            row = (sess.query(CalendarConnection)
+                   .filter(CalendarConnection.user_id == user.id, CalendarConnection.provider == "google",
+                           CalendarConnection.is_connected.is_(True)).first())
+            if row is not None and row.calendar_id:
+                return row.calendar_id
+    except Exception:                                    # noqa: BLE001 - fall back to the stored id
+        pass
+    return getattr(user, "google_calendar_id", None) or "primary"
+
 def get_oauth_flow() -> Flow:
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
         raise RuntimeError("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not configured.")
@@ -134,7 +159,7 @@ def _record_google_connection(db: Session, advisor: User) -> None:
     service = _get_calendar_service(advisor)
     now = datetime.now(_tz.utc)
     resp = service.events().list(
-        calendarId=advisor.google_calendar_id or "primary",
+        calendarId=booking_calendar_id(advisor),
         timeMin=now.isoformat(),
         timeMax=(now + timedelta(days=1)).isoformat(),
         maxResults=1, singleEvents=True,
@@ -245,7 +270,7 @@ def create_calendar_event_for_booking(
             duration_minutes, event_body["description"]))
 
     try:
-        created_event = service.events().insert(calendarId=advisor.google_calendar_id, body=event_body).execute()
+        created_event = service.events().insert(calendarId=booking_calendar_id(advisor), body=event_body).execute()
         booking.calendar_event_id = created_event.get("id")
         booking.status = "booked"
         booking.booked_time = booked_datetime
@@ -274,7 +299,7 @@ def cancel_calendar_event(db: Session, booking: BookingLink) -> dict:
             advisor = db.query(User).filter(User.id == booking.user_id).first()
             if advisor and getattr(advisor, "google_calendar_connected", False):
                 service = _get_calendar_service(advisor)
-                cal_id = getattr(advisor, "google_calendar_id", None) or "primary"
+                cal_id = booking_calendar_id(advisor)
                 service.events().delete(calendarId=cal_id, eventId=booking.calendar_event_id).execute()
                 calendar_note = "Calendar event deleted"
             else:
