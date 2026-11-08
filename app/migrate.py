@@ -255,7 +255,12 @@ def main(argv=None) -> int:
                     # Read-only readiness check (calendar + sender). Changes nothing.
                     from app.services.programs import workspace_configure as _wc
                     res = _wc.probe_only(_db, org, os.environ.get("WORKSPACE_BOOKING_USER_ID", "").strip() or None)
-                    log.info("workspace probe org=%s: %s", org_id, json.dumps(res, sort_keys=True, default=str)[:3500])
+                    # One line per part so no part is cut off by the log line limit.
+                    for _part in sorted(res):
+                        _txt = json.dumps(res[_part], sort_keys=True, default=str)
+                        for _i in range(0, max(len(_txt), 1), 3000):
+                            log.info("workspace probe org=%s part=%s[%d]: %s", org_id, _part, _i // 3000,
+                                     _txt[_i:_i + 3000])
                 elif mode == "rollback":
                     from app.models.reset_models import WorkspaceResetRun as _Run
                     _r = _db.query(_Run).filter_by(id=key, organization_id=org_id).first()

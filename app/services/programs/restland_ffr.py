@@ -36,7 +36,7 @@ RETURN copy is for a family coming back after the 30-day rest: it says we
 wrote before, never "first contact" wording. It lives in its own campaign
 (RETURN_KEY), drafted and OFF.
 """
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 CAMPAIGN_KEY = "restland_family_file_review"
 CAMPAIGN_NAME = "Restland — Family File Review — Batch 1"
@@ -187,33 +187,90 @@ def segments(text: str) -> Dict:
     return {"encoding": "UCS-2", "units": units, "segments": 1 if units <= 70 else -(-units // 67)}
 
 
+def _render(t: str, f: Dict) -> str:
+    try:
+        return " ".join(t.format(**f).split())
+    except (KeyError, IndexError, ValueError):
+        # Saved copy may use the platform's {{token}} style - fill those too.
+        out = t
+        for k, v in f.items():
+            out = out.replace("{{%s}}" % k, v).replace("{%s}" % k, v)
+        return " ".join(out.split())
+
+
+def family_segments(texts: Dict[int, str], f: Dict) -> int:
+    return sum(segments(_render(t, f))["segments"] for t in texts.values() if t)
+
+
 def forecast(sample_link: str, *, new_per_day=(5, 10, 15, 25), email_share: float = 1.0,
-             booking_rates=(0.05, 0.10, 0.20), first_name: str = "Margaret") -> Dict:
+             booking_rates=(0.05, 0.10, 0.20), first_name: str = "Margaret",
+             texts: Optional[Dict[int, str]] = None, return_texts: Optional[Dict[int, str]] = None,
+             first_names: Optional[List[str]] = None) -> Dict:
     """Upper-bound steady-state load: every family stays all 14 days on every
-    channel (no reply/booking exits, no missing channels). Real load is lower."""
+    channel (no reply/booking exits, no missing channels). Real load is lower.
+
+    Each family gets at most 5 texts and 4 emails IN TOTAL over its 14 days.
+    With N new families starting every day, 14 overlapping groups are in
+    sequence, so a steady day carries about 5N texts and 4N emails.
+    `texts` = the SAVED campaign copy (falls back to the code drafts);
+    `first_names` = the real ready audience, for the segment range."""
+    source = "saved campaign copy" if texts else "code drafts"
+    texts = texts or dict(SMS)
+    return_texts = return_texts or dict(RETURN_SMS)
     f = {"first_name": first_name, "primary_contact_name": "Mike Simmons",
          "location_name": "Restland Cemetery and Funeral Home",
-         "booking_line": ("Pick a time that works for you: %s" % sample_link) if sample_link else ""}
-    texts = []
-    for copy, label in ((SMS, "first round"), (RETURN_SMS, "return round")):
-        for n, t in copy.items():
-            body = " ".join(t.format(**f).split())
-            texts.append(dict(segments(body), touch=n, round=label, chars=len(body)))
-    first = [t for t in texts if t["round"] == "first round"]
+         "booking_line": ("Pick a time that works for you: %s" % sample_link) if sample_link else "",
+         "booking_link": sample_link or ""}
+    rows_t = []
+    for copy, label in ((texts, "first round"), (return_texts, "return round")):
+        for n, t in sorted(copy.items()):
+            if not t:
+                continue
+            body = _render(t, f)
+            rows_t.append(dict(segments(body), touch=n, round=label, chars=len(body)))
+    first = [t for t in rows_t if t["round"] == "first round"]
     seg_per_family = sum(t["segments"] for t in first)
+    # Real range across the ready audience's first names (name length and any
+    # non-GSM character change the count; the link length is fixed per org).
+    names = [x for x in (first_names or []) if x] or [first_name]
+    per = sorted(family_segments(texts, dict(f, first_name=x)) for x in names)
+    rng = {"families_measured": len(names), "min": per[0], "max": per[-1],
+           "mean": round(sum(per) / len(per), 2),
+           "unicode_families": sum(1 for x in names if any(c not in _GSM and c not in _GSM_EXT for c in x)),
+           "longest_first_name": max(len(x) for x in names)}
     rows = []
     for nday in new_per_day:
-        rows.append({"new_families_per_day": nday, "texts_per_day": 5 * nday,
+        rows.append({"new_families_per_day": nday,
+                     "texts_per_day": 5 * nday,
                      "text_segments_per_day": seg_per_family * nday,
+                     "text_segments_per_day_range": [rng["min"] * nday, rng["max"] * nday],
                      "emails_per_day_max": 4 * nday, "emails_per_day_at_share": round(4 * nday * email_share, 1),
                      "families_in_sequence": 14 * nday,
                      "bookings_per_week": {("%d%%" % int(r * 100)): round(7 * nday * r, 1) for r in booking_rates},
-                     # per booking: 1 confirmation + 2 reminders + 1 survey (if completed), x up to 2 channels
+                     # per booking: 1 confirmation + up to 2 reminders + 1 survey (if completed), x up to 2 channels
                      "appointment_messages_per_week_max": {("%d%%" % int(r * 100)): round(7 * nday * r * 4 * 2, 1)
                                                            for r in booking_rates}})
-    return {"assumptions": "Upper bound: no early exits, every channel present. Appointment messages, "
-                           "conversations and staff alerts are separate from campaign volume.",
-            "text_segments": texts, "segments_per_family_first_round": seg_per_family,
+    return {"assumptions": "Upper bound: no early exits, every channel present. Each family gets at most "
+                           "5 texts and 4 emails in total over 14 days; a steady day carries about 5 texts "
+                           "and 4 emails per family that starts each day. Appointment messages, conversations "
+                           "and staff alerts are separate from campaign volume.",
+            "copy_source": source,
+            "text_segments": rows_t, "segments_per_family_first_round": seg_per_family,
+            "segments_per_family_range": rng,
+            "billing": {
+                "message": "one text as written (one row in the conversation)",
+                "segment": "the unit carriers and Twilio count: 160 GSM-7 characters (153 per part when "
+                           "split) or 70 UCS-2 (67 per part)",
+                "billable_attempt": "every segment Twilio accepts is charged, delivered or not; a retry is "
+                                    "a new attempt and is charged again",
+                "charge_formula": "segments x (Twilio per-segment rate + the destination carrier's per-segment "
+                                  "toll-free fee) + monthly number lease. Read the current rates from the "
+                                  "Twilio US pricing page before quoting a dollar amount."},
+            "controls": {
+                "daily_intake": "how many NEW families start each day (the batch size; 0 now)",
+                "outbound_workload": "texts and emails due that day across every family already in sequence",
+                "provider_throughput": "how fast Twilio accepts messages from this toll-free number; set by the "
+                                       "verification, not by this app"},
             "appointment_capacity": {"starts_per_week_for_one_person": 35,
                                      "note": "5 starts x 7 days before calendar conflicts; staff reassignment "
                                              "adds a second person's capacity"},

@@ -170,15 +170,16 @@ Code:
 ## Rounds and the 30-day rest
 
 - `campaign_cycle_members` keeps one row per family per round: staged, active, completed or stopped. Each row records the start, the end, the reason, the last real outreach and the next eligible date.
-- **Finished with no reply:** next eligible = the **actual** last delivered outreach + 30 days.
-- **Last touch undelivered:** the round still ends, recorded as `undeliverable`, measured from the last attempt.
+- **The rest counts from the last ATTEMPT** - any text or email that reached the provider, delivered or not, and any logged cadence or email-touch attempt (retries included) - plus 30 days.
+  - A failed retry or a late "undelivered" receipt only changes the reason (`no_reply` vs `undeliverable`); it never makes the rest shorter.
+  - A stored rest end only ever moves later. An attempt logged after a round closed pushes it later at every check (approval, dispatch, Return staging, the rotation screen).
 - **Replied, booked, opted out or cancelled an appointment:** the family goes to a person or stays suppressed. They are never recycled.
 - **Enforced per destination.** A phone or email that is resting, or in an open round, blocks every record that shares it.
   - The audience plan marks these families "in_round" or "resting".
   - Approval refuses them.
 - **When the rest is over** the family can appear in a **reviewed** pool ("Rest over: review"). Never automatic enrollment.
 - **Returning families** use their own drafted campaign, "Restland — Family File Review — Return" (OFF), whose copy says we wrote before.
-- **Not built yet: sending a second round.** Email touches are numbered once per family, and the text cadence keeps one state per family. Until that's built, approving a returning family is refused with that reason. The earliest any family could return is about 44 days after launch.
+- **Second rounds** are built (see "Return rounds" below). The earliest any family could return is about 44 days after launch.
 
 ## Running the setup in production
 
@@ -241,7 +242,12 @@ Code:
 - **One schedule per appointment.** Each message is one row in `appointment_notifications`, unique on (appointment, purpose, channel, appointment time). A double click, a webhook retry or two workers can't send twice.
 - **Sent by text, and by email when the family has a usable, permitted address.** A booking never erases an opt-out: the channel is re-checked right before each send.
 - **Confirmation:** immediate. It gives the title, the assigned advisor, the date, the Central time, 45 minutes, and the place. At Restland: "13005 Greenville Ave – ask for <the assigned advisor>". At home: "<advisor> will come to you at <address>". It ends "Need to change or cancel? Just reply to this message or call <office line>".
-- **Reminders:** 24 hours and 2 hours before. They go only between 9:00 AM and 6:00 PM Central. A reminder that would fall outside that moves to the preceding permitted time (5:45 PM the evening before; e.g. the 2-hour reminder for a 10:00 AM visit). If that moved time is before the booking was made, or after the visit, it's skipped. A reminder whose time has already passed when the family books is **skipped**, never sent late. The 24-hour reminder is exactly 24 real hours before, across daylight saving.
+- **Reminders:** 24 hours and 2 hours before. They go only between 9:00 AM and 6:00 PM Central. A reminder that would fall outside that moves to the preceding permitted time (5:45 PM the evening before). If that moved time is before the booking was made, or after the visit, it's skipped.
+  - **Collision rule (deterministic):** a reminder within 12 hours of another message for the same visit (the confirmation or an earlier reminder) is skipped, unless it is the last reminder going at its true time.
+  - **10:00 AM visits get the 24-hour reminder only.** Their 2-hour reminder would be 5:45 PM the evening before, 7 h 45 m after the 24-hour one, so it is skipped with that reason. It is never described as "2 hours before".
+  - A booking made 26 hours ahead: the 24-hour reminder would follow the confirmation by 2 hours, so it is skipped; the 2-hour reminder still goes.
+  - 11:30, 1:00, 2:30 and 4:00 visits get both reminders at their true times.
+  - The text says "today" or "tomorrow" from when it actually goes. A reminder whose time has already passed when the family books is **skipped**, never sent late. The 24-hour reminder is exactly 24 real hours before, across daylight saving.
 - **Reschedule:** the old time's unsent messages are superseded, and one "updated" notice plus new reminders are written.
 - **Cancel:** everything pending is cancelled, the calendar event is removed, and one cancellation notice per channel is written.
 - **Reassign ("Assign to"):** the calendar event moves to the new person's calendar. The family is **not** messaged; their next message names the new advisor.
@@ -277,7 +283,46 @@ Code:
 
 - **Formula:** N new families a day gives at most **5N texts** and **4N emails** a day, before exits.
   - At 15 a day: 75 texts and 60 emails.
-- **Segments** are counted from the final copy and the real link: today every first-round text is 2 segments, so 10 per family.
+- **Per family, not per day:** each family gets at most 5 texts and 4 emails **in total** over its 14 days. A steady day carries about 5N texts and 4N emails because 14 starting groups overlap.
+- **Segments** are counted from the **saved** campaign copy, the real booking link and the **real first names** of the ready families, giving a per-family range (min-max), not one number.
+- **Messages, segments, attempts, charges:** a message is one text; a segment is the billing unit (160 GSM-7 / 153 per part, or 70 UCS-2 / 67); every segment Twilio accepts is billed whether delivered or not, and a retry is billed again. Charge = segments x (Twilio per-segment rate + the carrier's toll-free fee) + the number lease. Read current rates from Twilio before quoting dollars (published pages disagreed when checked).
+- **Three separate controls:** daily intake (new families started per day; **0 now**), outbound workload (all touches due that day), provider throughput (set by the toll-free verification, not the app).
+- **Pace proposal (not set):** 10 new families a day, 8 minutes apart, for the first two weeks.
 - **Separate from campaign volume:** appointment messages (up to 4 per booking × 2 channels), conversations and staff alerts.
 - **Capacity:** 35 appointment starts a week for one person; reassignment adds another person's capacity.
 - **Screen:** Clean-up & Batch 1 shows the table, what's scheduled in the next 7 days, and the daily new-family cap (still 0).
+
+
+# Launch readiness (Nov 7 evening) - nothing launched
+
+## One calendar for every booking action
+- Availability, new events, moves, cancellations and reassignment all use one target: `calendar_service.booking_calendar_id(user)` (a connected Google connection row's calendar, else the user's stored id, else "primary"). Today that is "primary" for the booking user.
+- The stored grant has `calendar.events` + `contacts` only, so `calendarList.get` is refused. The probe identifies the account from events the calendar already holds (organizer/creator), masked.
+- Reconnect path (only if Mike decides to change accounts): the in-app Calendar connection screen. Reconnecting writes a new grant; nothing here does it.
+
+## Read-only evidence probe
+- `WORKSPACE_RESET=<org>:probe:<key>` with `WORKSPACE_BOOKING_USER_ID=<booking user>`; clear both after. It sends nothing and writes nothing.
+- It logs: the sending number and its Twilio record, the full toll-free verification claims (category, use-case summary, sample message, opt-in type and evidence links, volume, edit/rejection fields) without contact names, phones, emails or street address, and the calendar identity (masked).
+- The full output is kept privately (Drive), not in this repository.
+
+## Activation order (Mike's decision at each step)
+1. Designate internal test recipients and an internal test appointment; run the live-test checklist.
+2. Approve the copy packet and the 25-family audience.
+3. Set the daily intake (proposal: 10 a day, 8 minutes apart).
+4. Turn on: workspace texts switch -> Family File Review campaign -> approve families -> start journeys.
+5. Appointment messages on; then the survey.
+6. Staff alerts once recipients are named.
+
+## Pause
+- Fastest: campaign OFF (stops new touches at dispatch). Appointment messages and the survey each have their own off switch. The workspace texts switch stops every text.
+- Nothing queued is dumped later: stale reminders/confirmations/surveys are skipped with a reason.
+
+## Recovery
+- A wrong or stuck message: Appointments -> Messages shows status, reason and receipt.
+- A family who replied/booked/opted out leaves the sequence on its own; check the rotation screen.
+- Configuration rollback: `WORKSPACE_RESET=<org>:rollback:<run key>` restores what a configure run changed.
+
+## Dependencies still open
+- Twilio verification category vs outreach use (see the private evidence report).
+- Calendar account identity (masked in the probe; Mike confirms it is the intended one).
+- Copy/audience approval, daily volume and spacing, alert recipients, internal test recipients and a calendar-write test authorization.

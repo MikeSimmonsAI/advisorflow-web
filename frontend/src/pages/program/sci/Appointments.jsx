@@ -268,7 +268,7 @@ function MessageSettings() {
     <Panel title="Appointment messages" aside={<Chip tone={form.enabled ? 'ok' : 'warn'} plain>{form.enabled ? 'On' : 'Off'}</Chip>}>
       <dl className="rl-kv">
         <dt>Confirmation</dt><dd>Right after booking, by text and email (where allowed)</dd>
-        <dt>Reminders</dt><dd>{form.reminder_minutes.map(hrs).join(' and ')} before the visit · between {form.window[0]} and {form.window[1]} Central</dd>
+        <dt>Reminders</dt><dd>{form.reminder_minutes.map(hrs).join(' and ')} before the visit · between {form.window[0]} and {form.window[1]} Central. A reminder that falls outside those hours moves earlier; if that puts it within 12 hours of another message for the same visit, it is not sent. A 10:00 AM visit gets the 24-hour reminder only.</dd>
         <dt>Survey</dt><dd>{form.survey_delay_hours} hours after a visit marked completed · {form.survey_enabled ? 'on' : 'off'}</dd>
       </dl>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
