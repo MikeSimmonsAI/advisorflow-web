@@ -408,6 +408,15 @@ class VoltDevJob(Base):
     deployed_at = Column(DateTime, nullable=True)
     deploy_detail = Column(Text, nullable=True)
     revert_of = Column(String, ForeignKey("volt_dev_jobs.id", ondelete="SET NULL"), nullable=True)
+    # Event-driven start (2026-11-09): the last GitHub workflow_dispatch this
+    # job caused. "dispatched" proves only that GitHub accepted the request;
+    # "running" is proven by the runner claiming the job.
+    dispatch_state = Column(String, nullable=True)          # dispatched | failed | not_configured
+    dispatch_purpose = Column(String, nullable=True)        # start | merge | retry | rollback | resend
+    dispatched_at = Column(DateTime, nullable=True)
+    dispatch_error = Column(Text, nullable=True)
+    dispatch_count = Column(Integer, nullable=False, default=0)
+    deploy_checked_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.deps import get_current_user, get_db
 from app.models.models import User
 from app.limiter import limiter
+from app.services.volt import devdispatch as D
 from app.services.volt import devrelay as R
 from app.services.volt import mail
 
@@ -41,10 +42,22 @@ def dev_me(org_id: str, db: Session = Depends(get_db), user: User = Depends(get_
     return {"principal": R.is_principal(db, user, org_id), "name": user.full_name or user.email}
 
 
+def _refresh(db, org_id):
+    """On every look at the jobs: re-send a missed start, and check whether
+    merged work is actually running in production."""
+    rows = []
+    for j in D.verify_deploys(db, org_id):
+        rows += R.notify(db, j, "deployed")
+    D.resend_stale(db, org_id)
+    db.commit()
+    _deliver(db, rows)
+
+
 @console.get("/{org_id}/jobs")
 def dev_jobs(org_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     R.require_principal(db, user, org_id)
-    return {"items": R.list_jobs(db, org_id), "statuses": R.STATUS_LABELS}
+    _refresh(db, org_id)
+    return {"items": R.list_jobs(db, org_id), "statuses": R.STATUS_LABELS, "instant_start": D.configured()}
 
 
 @console.post("/{org_id}/jobs")
@@ -53,12 +66,16 @@ def dev_submit(org_id: str, body: Dict[str, Any] = Body(...), db: Session = Depe
     R.require_principal(db, user, org_id)
     job, created = R.submit(db, org_id, user, body, via="console")
     db.commit()
+    if created:
+        D.dispatch(db, job, "start")
+        db.commit()
     return dict(R.job_dict(db, job, events=True), created=created)
 
 
 @console.get("/{org_id}/jobs/{ref}")
 def dev_job(org_id: str, ref: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     R.require_principal(db, user, org_id)
+    _refresh(db, org_id)
     return R.job_dict(db, R.by_ref(db, org_id, ref), events=True)
 
 
@@ -71,17 +88,29 @@ def dev_action(org_id: str, ref: str, action: str, db: Session = Depends(get_db)
 
 def _act(db, org_id, ref, action, user):
     job = R.by_ref(db, org_id, ref)
+    before = job.status
     if action == "approve-merge":
-        out = R.approve_merge(db, job, user)
+        out, purpose = R.approve_merge(db, job, user), "merge"
     elif action == "retry":
-        out = R.retry(db, job, user)
+        out, purpose = R.retry(db, job, user), "retry"
     elif action == "cancel":
-        out = R.cancel(db, job, user)
+        out, purpose = R.cancel(db, job, user), None
     elif action == "rollback":
-        out = R.request_revert(db, org_id, job, user)
+        out, purpose = R.request_revert(db, org_id, job, user), "rollback"
+    elif action == "dispatch":
+        out, purpose = job, ("merge" if job.status == "merge_requested" else "resend")
+        if not D.needs_runner(job):
+            raise HTTPException(status_code=409, detail={"message": "This job is not waiting for the runner.",
+                                                         "code": "not_waiting"})
     else:
         raise HTTPException(status_code=404, detail="Unknown action.")
     db.commit()
+    # Start the runner only when this call actually changed something (a
+    # repeated approve/rollback is a no-op and sends nothing).
+    changed = action == "dispatch" or out.id != job.id or out.status != before
+    if purpose and changed and D.needs_runner(out):
+        D.dispatch(db, out, purpose)
+        db.commit()
     return R.job_dict(db, out, events=True)
 
 
@@ -151,10 +180,10 @@ def openapi_doc(request: Request):
                         "responses": {"200": {"description": "The job"}}}},
             "/volt/dev/api/jobs/{ref}/{action}": {
                 "post": {"operationId": "jobAction",
-                         "summary": "approve-merge (ship the tested change), retry, cancel or rollback",
+                         "summary": "approve-merge (ship the tested change), retry, cancel, rollback, or dispatch (re-send a start request)",
                          "parameters": [{"name": "ref", "in": "path", "required": True, "schema": {"type": "string"}},
                                         {"name": "action", "in": "path", "required": True, "schema": {
-                                            "type": "string", "enum": ["approve-merge", "retry", "cancel", "rollback"]}}],
+                                            "type": "string", "enum": ["approve-merge", "retry", "cancel", "rollback", "dispatch"]}}],
                          "responses": {"200": {"description": "The job"}}}},
         },
     }
@@ -165,6 +194,7 @@ def openapi_doc(request: Request):
 def api_jobs(request: Request, db: Session = Depends(get_db), raw: str = Depends(_key_user)):
     user, org_id = R.token_user(db, raw)
     db.commit()
+    _refresh(db, org_id)
     return {"items": R.list_jobs(db, org_id, 20)}
 
 
@@ -177,6 +207,9 @@ def api_submit(request: Request, body: Dict[str, Any] = Body(...), db: Session =
         body = dict(body, idempotency_key=idempotency_key)
     job, created = R.submit(db, org_id, user, body, via="api")
     db.commit()
+    if created:
+        D.dispatch(db, job, "start")
+        db.commit()
     return dict(R.job_dict(db, job, events=True), created=created)
 
 
@@ -185,6 +218,7 @@ def api_submit(request: Request, body: Dict[str, Any] = Body(...), db: Session =
 def api_job(request: Request, ref: str, db: Session = Depends(get_db), raw: str = Depends(_key_user)):
     user, org_id = R.token_user(db, raw)
     db.commit()
+    _refresh(db, org_id)
     return R.job_dict(db, R.by_ref(db, org_id, ref), events=True)
 
 

@@ -1738,6 +1738,13 @@ COLUMNS_TO_ADD = [
     ("volt_session_attendees", "booked_at", "TIMESTAMP"),
     ("volt_session_attendees", "canceled_at", "TIMESTAMP"),
     ("volt_session_attendees", "cancel_reason", "TEXT"),
+    # VOLT development relay, event-driven dispatch (2026-11-09, #571)
+    ("volt_dev_jobs", "dispatch_state", "VARCHAR"),
+    ("volt_dev_jobs", "dispatch_purpose", "VARCHAR"),
+    ("volt_dev_jobs", "dispatched_at", "TIMESTAMP"),
+    ("volt_dev_jobs", "dispatch_error", "TEXT"),
+    ("volt_dev_jobs", "dispatch_count", "INTEGER DEFAULT 0"),
+    ("volt_dev_jobs", "deploy_checked_at", "TIMESTAMP"),
     ("inbound_mailboxes", "purpose", "VARCHAR"),
     ("oauth_auth_transactions", "target_organization_id", "VARCHAR"),
 ]

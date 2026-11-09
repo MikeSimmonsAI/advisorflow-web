@@ -207,3 +207,116 @@ def test_tests_or_docs_only_change_needs_no_deploy(dev):
     _next(dev, run_id="900")
     r = _report(dev, job["id"], run_id="900", status="merged", merge_sha="e" * 40, merged_head_sha="d" * 40)
     assert r.json()["status"] == "deployed"
+
+
+# ── event-driven dispatch (2026-11-09) ─────────────────────────────────────
+
+class _GH:
+    def __init__(self, status=204):
+        self.calls, self.status = [], status
+
+    def __call__(self, method, path, body=None, timeout=15):
+        self.calls.append((method, path, body))
+        if path.endswith("/dispatches"):
+            return self.status, None, (None if self.status == 204 else "GitHub answered %d" % self.status)
+        if "/compare/" in path:
+            return 200, {"status": "ahead"}, None
+        return 404, None, "nope"
+
+
+@pytest.fixture()
+def gh(dev, monkeypatch):
+    from app.services.volt import devdispatch as D
+    fake = _GH()
+    monkeypatch.setattr(D, "_gh", fake)
+    monkeypatch.setenv("VOLT_DEV_GITHUB_TOKEN", "ghp_secret_should_never_leak")
+    return fake
+
+
+def _dispatches(fake):
+    return [c for c in fake.calls if c[1].endswith("/dispatches")]
+
+
+def test_submit_dispatches_once_and_never_leaks_the_token(dev, gh):
+    r = _submit(dev, dev["collab"], idempotency_key="k1")
+    j = r.json()
+    assert j["dispatch"]["state"] == "dispatched" and "dispatched" in j["status_label"]
+    calls = _dispatches(gh)
+    assert len(calls) == 1 and calls[0][1] == "/repos/MikeSimmonsAI/advisorflow-web/actions/workflows/volt-dev.yml/dispatches"
+    assert calls[0][2]["ref"] == "main" and "DEV-1 start" in calls[0][2]["inputs"]["reason"]
+    _submit(dev, dev["collab"], idempotency_key="k1")                                   # duplicate submit
+    assert len(_dispatches(gh)) == 1
+    # A fresh request is not re-sent on every look.
+    dev["c"].get(_base(dev) + "/jobs", headers=H(dev["db"], dev["staff"]))
+    assert len(_dispatches(gh)) == 1
+    assert "ghp_secret" not in r.text and "ghp_secret" not in dev["c"].get(_base(dev) + "/jobs/DEV-1", headers=H(dev["db"], dev["staff"])).text
+    ev = [e["action"] for e in j["events"]]
+    assert ev[:2] == ["submitted", "dispatched"]
+    # "Running" appears only when the runner really claims it.
+    _next(dev)
+    assert dev["c"].get(_base(dev) + "/jobs/DEV-1", headers=H(dev["db"], dev["staff"])).json()["status_label"].startswith("Running")
+
+
+def test_failed_or_missed_start_is_resent_on_the_next_look(dev, gh):
+    from datetime import datetime, timedelta
+    gh.status = 503
+    j = _submit(dev, dev["staff"]).json()
+    assert j["dispatch"]["state"] == "failed" and "re-sent" in j["status_label"]
+    gh.status = 204
+    dev["c"].get(_base(dev) + "/jobs", headers=H(dev["db"], dev["collab"]))
+    assert len(_dispatches(gh)) == 2
+    row = dev["db"].query(VoltDevJob).one()
+    assert row.dispatch_state == "dispatched" and row.dispatch_purpose == "resend"
+    # Accepted, but no runner ever came (missed event): re-sent after 10 minutes.
+    row.dispatched_at = datetime.utcnow() - timedelta(minutes=11)
+    dev["db"].commit()
+    dev["c"].get(_base(dev) + "/jobs", headers=H(dev["db"], dev["collab"]))
+    assert len(_dispatches(gh)) == 3
+    # Manual "send again" exists too, and refuses jobs that aren't waiting.
+    assert dev["c"].post(_base(dev) + "/jobs/DEV-1/dispatch", headers=H(dev["db"], dev["staff"])).status_code == 200
+    _next(dev)
+    assert dev["c"].post(_base(dev) + "/jobs/DEV-1/dispatch", headers=H(dev["db"], dev["staff"])).status_code == 409
+
+
+def test_without_a_token_it_says_so_truthfully(dev, monkeypatch):
+    monkeypatch.delenv("VOLT_DEV_GITHUB_TOKEN", raising=False)
+    j = _submit(dev, dev["staff"]).json()
+    assert j["dispatch"]["state"] == "not_configured" and "scheduled check" in j["status_label"]
+    assert dev["c"].get(_base(dev) + "/jobs", headers=H(dev["db"], dev["staff"])).json()["instant_start"] is False
+
+
+def test_approval_dispatches_the_merge_once_and_runner_reports_more_work(dev, gh):
+    job = _submit(dev, dev["collab"]).json()
+    _submit(dev, dev["staff"], title="Second", request="Another harmless VOLT wording change.")
+    n = _next(dev).json()
+    assert n["job"]["ref"] == "DEV-1" and n["more"] == 1
+    _report(dev, job["id"], status="ready_to_test", changed_files=["app/services/volt/core.py"], tests_passed=True,
+            pr_number=7, head_sha="f" * 40)
+    before = len(_dispatches(gh))
+    c, db = dev["c"], dev["db"]
+    c.post(_base(dev) + "/jobs/DEV-1/approve-merge", headers=H(db, dev["collab"]))
+    c.post(_base(dev) + "/jobs/DEV-1/approve-merge", headers=H(db, dev["staff"]))          # repeat: no-op
+    merges = [x for x in _dispatches(gh)[before:] if "merge" in x[2]["inputs"]["reason"]]
+    assert len(merges) == 1
+
+
+def test_backend_verifies_the_deploy_itself(dev, gh, monkeypatch):
+    from app.services.volt import devdispatch as D
+    job = _submit(dev, dev["staff"]).json()
+    _next(dev)
+    _report(dev, job["id"], status="ready_to_test", changed_files=["app/services/volt/core.py", "frontend/src/pages/volt/VoltDev.jsx"],
+            tests_passed=True, pr_number=8, head_sha="1" * 40)
+    dev["c"].post(_base(dev) + "/jobs/DEV-1/approve-merge", headers=H(dev["db"], dev["staff"]))
+    _next(dev, run_id="881")
+    _report(dev, job["id"], run_id="881", status="merged", merge_sha="2" * 40, merged_head_sha="1" * 40)
+    # Frontend not deployed yet: stays "Merged - deploying".
+    monkeypatch.setattr(D, "_running_commits", lambda: {"backend": "2" * 40, "frontend": None})
+    j = dev["c"].get(_base(dev) + "/jobs/DEV-1", headers=H(dev["db"], dev["staff"])).json()
+    assert j["status"] == "merged"
+    row = dev["db"].query(VoltDevJob).one()
+    row.deploy_checked_at = None
+    dev["db"].commit()
+    monkeypatch.setattr(D, "_running_commits", lambda: {"backend": "2" * 40, "frontend": "3" * 40})
+    j = dev["c"].get(_base(dev) + "/jobs/DEV-1", headers=H(dev["db"], dev["staff"])).json()
+    assert j["status"] == "deployed" and "Verified running in production" in j["deploy_detail"]
+    assert dev["db"].query(VoltEmail).filter(VoltEmail.kind == "dev_deployed").count() == 2
