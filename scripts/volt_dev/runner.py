@@ -140,7 +140,8 @@ def cmd_next():
         print("deploy check skipped: %s" % e)
     action = work.get("action")
     job = work.get("job") or {}
-    print("action: %s %s" % (action, job.get("ref", "")))
+    output(more=int(work.get("more") or 0))
+    print("action: %s %s (more waiting: %s)" % (action, job.get("ref", ""), work.get("more") or 0))
     if action == "merge":
         return merge(job)
     if action in ("code", "revert"):

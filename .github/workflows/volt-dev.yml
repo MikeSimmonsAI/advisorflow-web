@@ -12,9 +12,18 @@
 name: VOLT development relay
 
 on:
+  # Normal starts are EVENT-DRIVEN: the VOLT backend sends workflow_dispatch the
+  # moment work is submitted/approved (VOLT_DEV_GITHUB_TOKEN, backend only), and
+  # a run that leaves work waiting dispatches the next run itself. The schedule
+  # is only a slow safety net - GitHub runs this repository's schedules hours apart.
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
+    inputs:
+      reason:
+        description: Why this run was started (job reference and event)
+        required: false
+        default: manual
 
 permissions: {}
 
@@ -30,6 +39,7 @@ jobs:
       contents: write        # volt-dev/* branches; squash-merge of an APPROVED commit
       pull-requests: write   # open the job's PR
       id-token: write        # OIDC identity for the VOLT API and claude-code-action
+      actions: write         # start the next run when more work is waiting
     env:
       VOLT_API: https://api.voltmarketing.live
       VOLT_FRONTEND: https://voltmarketing.live
@@ -42,7 +52,11 @@ jobs:
 
       - id: next
         name: Ask VOLT for work (merges, rollbacks and deploy proof happen here)
-        run: python3 scripts/volt_dev/runner.py next
+        env:
+          START_REASON: ${{ inputs.reason || github.event_name }}
+        run: |
+          echo "Started for: $START_REASON"
+          python3 scripts/volt_dev/runner.py next
 
       - name: Python for tests
         if: steps.next.outputs.action == 'code' || steps.next.outputs.action == 'revert'
@@ -123,3 +137,7 @@ jobs:
       - name: Report an unexpected runner failure
         if: failure() && (steps.next.outputs.action == 'code' || steps.next.outputs.action == 'revert')
         run: python3 scripts/volt_dev/runner.py fail "The GitHub run failed - see ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || true
+
+      - name: More work waiting - start the next run now
+        if: always() && steps.next.outputs.more != '' && steps.next.outputs.more != '0'
+        run: gh api -X POST repos/${{ github.repository }}/actions/workflows/volt-dev.yml/dispatches -f ref=main -f "inputs[reason]=continue (${{ steps.next.outputs.more }} waiting)"

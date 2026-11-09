@@ -68,11 +68,25 @@ SCOPE = (
 )
 
 STATUS_LABELS = {
-    "queued": "Queued", "claude_working": "Claude working", "coding_completed": "Coding completed",
-    "tests_failed": "Tests failed", "ready_to_test": "Ready to test", "merge_requested": "Merge approved - merging",
-    "merged": "Merged - deploying", "deployed": "Deployed to production", "failed": "Failed",
+    "queued": "Submitted", "claude_working": "Running - Claude working", "coding_completed": "Running - testing",
+    "tests_failed": "Tests failed", "ready_to_test": "PR ready - tests passed", "merge_requested": "Approved - merging",
+    "merged": "Merged - deploying", "deployed": "Deployed - verified running", "failed": "Failed",
     "canceled": "Canceled",
 }
+
+
+def display_status(job) -> str:
+    """The truthful one-line state, including whether the runner was asked."""
+    if job.status in ("queued", "merge_requested") and job.lease_run_id is None:
+        base = STATUS_LABELS[job.status]
+        if job.dispatch_state == "dispatched":
+            return base + " - dispatched, waiting for the runner to start"
+        if job.dispatch_state == "failed":
+            return base + " - start request failed; it will be re-sent"
+        if job.dispatch_state == "not_configured":
+            return base + " - waiting for the scheduled check (instant start not set up)"
+        return base
+    return STATUS_LABELS.get(job.status, job.status)
 TERMINAL = ("deployed", "failed", "canceled", "tests_failed")
 # What the runner may report, from which states.
 RUNNER_MOVES = {
@@ -263,7 +277,9 @@ def job_dict(db: Session, job: VoltDevJob, events: bool = False) -> Dict[str, An
     who = db.get(User, job.requested_by) if job.requested_by else None
     appr = db.get(User, job.merge_requested_by) if job.merge_requested_by else None
     out = {"id": job.id, "ref": "DEV-%d" % job.number, "number": job.number, "kind": job.kind, "title": job.title,
-           "request": job.request, "status": job.status, "status_label": STATUS_LABELS.get(job.status, job.status),
+           "request": job.request, "status": job.status, "status_label": display_status(job),
+           "dispatch": {"state": job.dispatch_state, "purpose": job.dispatch_purpose,
+                        "at": C.iso(job.dispatched_at), "error": job.dispatch_error, "count": job.dispatch_count or 0},
            "status_detail": job.status_detail, "attempt": job.attempt, "via": job.via,
            "requested_by": (who.full_name or who.email) if who else None,
            "created_at": C.iso(job.created_at), "updated_at": C.iso(job.updated_at),
@@ -358,12 +374,15 @@ def runner_next(db: Session, claims: Dict[str, Any]) -> Dict[str, Any]:
     deploy_watch = [{"id": j.id, "ref": "DEV-%d" % j.number, "merge_sha": j.merge_sha,
                      "targets": j.deploy_targets or ""}
                     for j in db.query(VoltDevJob).filter(VoltDevJob.status == "merged").all()]
+    def _more(exclude):
+        return (db.query(VoltDevJob).filter(VoltDevJob.status.in_(("queued", "merge_requested")),
+                                            VoltDevJob.lease_run_id.is_(None), VoltDevJob.id != exclude).count())
     m = (db.query(VoltDevJob).filter(VoltDevJob.status == "merge_requested", VoltDevJob.lease_run_id.is_(None))
          .order_by(VoltDevJob.merge_requested_at.asc()).first())
     if m is not None:
         m.lease_run_id, m.lease_expires_at = run_id, C.now() + LEASE
         _audit_user(db, m, None, "runner_merging", status=m.status, detail=run_url, kind="runner")
-        return {"action": "merge", "job": _runner_job(m), "deploy_watch": deploy_watch}
+        return {"action": "merge", "job": _runner_job(m), "deploy_watch": deploy_watch, "more": _more(m.id)}
     q = (db.query(VoltDevJob).filter(VoltDevJob.status == "queued").order_by(VoltDevJob.created_at.asc())
          .with_for_update(skip_locked=True).first())
     if q is not None:
@@ -373,10 +392,11 @@ def runner_next(db: Session, claims: Dict[str, Any]) -> Dict[str, Any]:
             orig = db.get(VoltDevJob, q.revert_of)
             payload = dict(_runner_job(q), revert_sha=orig.merge_sha if orig else None)
             _set(db, q, "claude_working", "Preparing the rollback", kind="runner", action="runner_claimed")
-            return {"action": "revert", "job": payload, "deploy_watch": deploy_watch}
-        _set(db, q, "claude_working", "Claude is working on it", kind="runner", action="runner_claimed")
-        return {"action": "code", "job": _runner_job(q), "deploy_watch": deploy_watch}
-    return {"action": "none", "deploy_watch": deploy_watch}
+            return {"action": "revert", "job": payload, "deploy_watch": deploy_watch, "more": _more(q.id)}
+        _set(db, q, "claude_working", "The runner started; Claude is working on it", kind="runner",
+             action="runner_claimed")
+        return {"action": "code", "job": _runner_job(q), "deploy_watch": deploy_watch, "more": _more(q.id)}
+    return {"action": "none", "deploy_watch": deploy_watch, "more": 0}
 
 
 def _runner_job(j: VoltDevJob) -> Dict[str, Any]:

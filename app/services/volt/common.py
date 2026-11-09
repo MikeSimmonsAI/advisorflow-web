@@ -212,4 +212,7 @@ def audit(db: Session, org_id: str, actor: Optional[User], entity_type: str, ent
 
 def is_test_email(email: str) -> bool:
     e = (email or "").strip().lower()
-    return e.endswith("@example.test") or e.endswith(".example.test") or e.endswith("@volt-test.invalid")
+    # "+volt-test" plus-addresses are Mike's own deliverable test inbox: a test
+    # record (cleanup, reports) that is still emailed, for real mail checks.
+    return (e.endswith("@example.test") or e.endswith(".example.test") or e.endswith("@volt-test.invalid")
+            or "+volt-test" in e.split("@")[0])

@@ -14,16 +14,23 @@ import { api, API_BASE } from '../../api/client'
 import { Modal } from './VoltDialogs'
 import { fmtDate } from './voltApi'
 
-const STEPS = [['queued', 'Queued'], ['claude_working', 'Claude working'], ['coding_completed', 'Coding completed'],
-  ['ready_to_test', 'Tests passed · ready to test'], ['merge_requested', 'Approved'], ['merged', 'Merged'], ['deployed', 'Deployed']]
+// Each step is shown done only when its proof arrived: "Dispatched" = GitHub
+// accepted the start request; "Running" = the runner claimed the job; "Deployed"
+// = production was seen running the merged commit.
+const STEPS = [['queued', 'Submitted'], ['dispatched', 'Dispatched'], ['claude_working', 'Running'], ['coding_completed', 'Testing'],
+  ['ready_to_test', 'PR ready'], ['merge_requested', 'Approved'], ['merged', 'Merged'], ['deployed', 'Deployed · verified']]
 const ORDER = STEPS.map(([k]) => k)
+function stepIndex(job) {
+  if (job.status === 'queued') return job.dispatch?.state === 'dispatched' ? 1 : 0
+  return ORDER.indexOf(job.status)
+}
 const BAD = { tests_failed: 'Tests failed', failed: 'Failed', canceled: 'Canceled' }
 
 const msg = (e) => e?.detail?.message || (typeof e?.detail === 'string' ? e.detail : null) || e?.message || 'Something went wrong.'
 const newKey = () => (window.crypto?.randomUUID ? window.crypto.randomUUID() : String(Date.now()) + Math.random())
 
 function Steps({ job }) {
-  const at = ORDER.indexOf(job.status)
+  const at = stepIndex(job)
   const bad = BAD[job.status]
   return (
     <ol className="v-ma-steps v-dev-steps" aria-label={`Progress of ${job.ref}`}>
@@ -73,7 +80,9 @@ function JobDrawer({ orgId, job: initial, onClose, onChanged }) {
             {job.can.retry && <button type="button" className="v-btn v-btn--line" onClick={() => setAsk('retry')} disabled={!!busy} data-retry>Retry</button>}
             {job.can.cancel && <button type="button" className="v-btn v-btn--line" onClick={() => setAsk('cancel')} disabled={!!busy}>Cancel</button>}
             {job.can.rollback && <button type="button" className="v-btn v-btn--black" onClick={() => setAsk('rollback')} disabled={!!busy} data-rollback>Roll back</button>}
+            {['queued', 'merge_requested'].includes(job.status) && job.dispatch?.state !== 'dispatched' && <button type="button" className="v-btn v-btn--line" onClick={() => act('dispatch')} disabled={!!busy} data-dispatch>{busy === 'dispatch' ? 'Sending…' : 'Send start request again'}</button>}
           </div>
+          {job.dispatch?.at && <p className="v-small v-muted" data-dispatch-info>Last start request: {job.dispatch.state === 'dispatched' ? 'accepted by GitHub' : job.dispatch.state === 'failed' ? `failed (${job.dispatch.error})` : job.dispatch.error} · {fmtDate(job.dispatch.at)}. Accepted means GitHub received it; "Running" appears once the runner actually picks the job up.</p>}
         </section>
         <section className="v-panel">
           <h3>Ready to test</h3>
@@ -157,7 +166,9 @@ export default function Development({ orgId }) {
     try {
       const j = await api.post(`/volt/dev/${orgId}/jobs`, { ...v, idempotency_key: idem })
       setV({ title: '', request: '' }); setIdem(newKey())
-      setNote(`${j.ref} received and queued. The runner picks it up within about 5–15 minutes.`)
+      setNote(j.dispatch?.state === 'dispatched'
+        ? `${j.ref} submitted, and GitHub accepted the start request. It shows "Running" once the runner picks it up (usually within a minute or two).`
+        : `${j.ref} submitted. ${j.dispatch?.error || 'Waiting for the runner.'}`)
       await load()
     } catch (x) { setErr(msg(x)) } finally { setBusy(false) }
   }
