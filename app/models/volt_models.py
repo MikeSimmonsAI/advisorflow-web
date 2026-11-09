@@ -365,3 +365,87 @@ class VoltAccess(Base):
     reason = Column(Text, nullable=True)
     changed_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     changed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+# ═══════════════════════════════ VOLT DEVELOPMENT RELAY (#571, 2026-11-09) ═══
+
+class VoltDevJob(Base):
+    """One development request for VOLT Marketing, from submission to a
+    verified production deploy. `number` is the human reference (DEV-12)."""
+    __tablename__ = "volt_dev_jobs"
+    __table_args__ = (UniqueConstraint("organization_id", "number", name="uq_volt_dev_job_number"),
+                      UniqueConstraint("organization_id", "requested_by", "idempotency_key", name="uq_volt_dev_job_idem"))
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    number = Column(Integer, nullable=False)
+    kind = Column(String, nullable=False, default="change")          # change | revert
+    title = Column(String, nullable=False)
+    request = Column(Text, nullable=False)
+    requested_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    via = Column(String, nullable=False, default="console")          # console | api
+    idempotency_key = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="queued", index=True)
+    status_detail = Column(Text, nullable=True)
+    attempt = Column(Integer, nullable=False, default=1)
+    lease_run_id = Column(String, nullable=True)
+    lease_expires_at = Column(DateTime, nullable=True)
+    run_url = Column(String, nullable=True)
+    branch = Column(String, nullable=True)
+    pr_number = Column(Integer, nullable=True)
+    pr_url = Column(String, nullable=True)
+    head_sha = Column(String, nullable=True)
+    tests_passed = Column(Boolean, nullable=True)
+    tests_summary = Column(Text, nullable=True)
+    changed_files = Column(Text, nullable=True)                      # JSON list
+    preview_url = Column(String, nullable=True)
+    merge_requested_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    merge_requested_at = Column(DateTime, nullable=True)
+    merge_approved_sha = Column(String, nullable=True)
+    merge_sha = Column(String, nullable=True)
+    merged_at = Column(DateTime, nullable=True)
+    deploy_targets = Column(String, nullable=True)                   # "backend,frontend" | "" (none)
+    deployed_at = Column(DateTime, nullable=True)
+    deploy_detail = Column(Text, nullable=True)
+    revert_of = Column(String, ForeignKey("volt_dev_jobs.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class VoltDevEvent(Base):
+    """Audit trail and timeline: who/what moved a job, when."""
+    __tablename__ = "volt_dev_events"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    job_id = Column(String, ForeignKey("volt_dev_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    actor_user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor_kind = Column(String, nullable=False, default="user")      # user | runner | system
+    action = Column(String, nullable=False)
+    status = Column(String, nullable=True)
+    detail = Column(Text, nullable=True)
+
+
+class VoltDevToken(Base):
+    """A personal access key for the ChatGPT action. Only a hash is stored;
+    the key is shown once. Tied to one person and one VOLT tenant, and it is
+    worthless the moment that person stops being an authorized principal."""
+    __tablename__ = "volt_dev_tokens"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    prefix = Column(String, nullable=False)
+    token_hash = Column(String, nullable=False, unique=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_used_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+
+
+class VoltDevNonce(Base):
+    """GitHub Actions identity tokens already used (replay protection)."""
+    __tablename__ = "volt_dev_nonces"
+
+    jti = Column(String, primary_key=True)
+    used_at = Column(DateTime, default=datetime.utcnow, nullable=False)

@@ -396,6 +396,11 @@ def _session_in(db, org_id, sid) -> VoltSession:
     return s
 
 
+def _dev_principal(db, user, org_id) -> bool:
+    from app.services.volt import devrelay
+    return devrelay.is_principal(db, user, org_id)
+
+
 @ops_router.get("/{org_id}")
 def ops_home(org_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     prog, access = _staff(db, user, org_id)
@@ -403,6 +408,7 @@ def ops_home(org_id: str, request: Request, db: Session = Depends(get_db), user:
     return {"program": {"organization_id": org_id, "name": prog.name, "slug": prog.slug,
                         "profile_required_docs": C.loads(prog.profile_required_docs, [])},
             "access": access, "me": {"email": user.email, "full_name": user.full_name},
+            "dev_principal": _dev_principal(db, user, org_id),
             "projects": [C.project_dict(p) for p in C.projects(db, org_id)],
             "overview": reports.overview(db, org_id, f), "leaderboard": reports.leaderboard(db, org_id, f),
             "filters": {k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in f.items()},

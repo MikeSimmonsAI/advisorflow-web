@@ -1260,6 +1260,12 @@ from app.routers.volt_router import rep_router as volt_rep_router  # noqa: E402
 app.include_router(volt_public_router)   # /volt/public/{slug}/* - VOLT Marketing applicant portal (#535)
 app.include_router(volt_rep_router)      # /volt/rep/{slug}/* - VOLT applicants (volt_rep fenced in deps)
 app.include_router(volt_ops_router)      # /volt/ops/{org_id}/* - VOLT recruiting staff + owner
+from app.routers.volt_dev_router import api as volt_dev_api_router  # noqa: E402
+from app.routers.volt_dev_router import console as volt_dev_console_router  # noqa: E402
+from app.routers.volt_dev_router import runner as volt_dev_runner_router  # noqa: E402
+app.include_router(volt_dev_api_router)      # /volt/dev/api/* - VOLT dev relay, personal access key (#571)
+app.include_router(volt_dev_runner_router)   # /volt/dev/runner/* - GitHub Actions OIDC only (#571)
+app.include_router(volt_dev_console_router)  # /volt/dev/{org_id}/* - the two authorized principals (#571)
 from app.routers.wholesale_intel_router import router as wholesale_intel_router  # noqa: E402
 app.include_router(wholesale_intel_router)       # /wholesale/intel/* - verification, underwriting, report (#415)
 from app.routers.wholesale_canvass_router import router as wholesale_canvass_router  # noqa: E402

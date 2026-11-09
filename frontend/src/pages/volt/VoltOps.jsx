@@ -12,6 +12,7 @@ import { api, fetchObjectUrl } from '../../api/client'
 import { Bolt } from './VoltPortal'
 import { Modal } from './VoltDialogs'
 import { zoomWhen } from './VoltMyApplication'
+import Development from './VoltDev'
 import { fmtDate, useVoltTitle } from './voltApi'
 import './volt.css'
 
@@ -119,6 +120,7 @@ function OpsShell({ orgId, home, children }) {
           <NavLink className="v-tab" to={`${base}/review`}>Review queue</NavLink>
           <NavLink className="v-tab" to={`${base}/sessions`}>Zoom availability</NavLink>
           <NavLink className="v-tab" to={`${base}/people`}>People & Access</NavLink>
+          {home?.dev_principal && <NavLink className="v-tab" to={`${base}/dev`} data-tab="dev">Development</NavLink>}
           <NavLink className="v-tab" to={`${base}/talent`}>Talent Pool</NavLink>
           <NavLink className="v-tab" to={`${base}/email`}>Support email</NavLink>
           <NavLink className="v-tab" to={`${base}/reps`}>Reps</NavLink>
@@ -1134,6 +1136,7 @@ export default function VoltOps() {
         <Route path="review" element={<ReviewQueue orgId={orgId} ops={ops} />} />
         <Route path="sessions" element={<Sessions orgId={orgId} ops={ops} />} />
         <Route path="people" element={<People orgId={orgId} ops={ops} />} />
+        <Route path="dev" element={<Development orgId={orgId} />} />
         <Route path="talent" element={<TalentPool orgId={orgId} />} />
         <Route path="email" element={<SupportEmail orgId={orgId} />} />
         <Route path="reps" element={<Reps orgId={orgId} ops={ops} />} />
