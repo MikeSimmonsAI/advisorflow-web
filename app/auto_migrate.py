@@ -1750,6 +1750,8 @@ COLUMNS_TO_ADD = [
     ("volt_dev_tokens", "expires_at", "TIMESTAMP"),
     ("volt_dev_tokens", "refresh_hash", "VARCHAR"),
     ("volt_dev_tokens", "refresh_expires_at", "TIMESTAMP"),
+    ("volt_dev_jobs", "blocked_reason", "TEXT"),
+    ("volt_dev_oauth_grants", "resource", "VARCHAR"),
     ("inbound_mailboxes", "purpose", "VARCHAR"),
     ("oauth_auth_transactions", "target_organization_id", "VARCHAR"),
 ]

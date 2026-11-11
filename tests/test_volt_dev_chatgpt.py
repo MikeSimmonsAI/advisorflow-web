@@ -261,3 +261,149 @@ def test_openapi_action_approval_requires_commit_and_accepts_signin_tokens(dev, 
     schema = c.get("/volt/dev/api/openapi.json").json()
     assert schema["components"]["securitySchemes"]["volt"]["type"] == "oauth2"
     assert c.get("/volt/dev/api/status", headers=hdr).json()["github"]["ok"] is True
+
+
+# ── 2026-11-10 (consolidated): one reading of progress, recovery, health ────
+
+def _submit_mcp(dev, a, title="Docs line", request="Add one harmless line to docs/volt/notes.md."):
+    return _tool(dev, a, "submit_change_request", title=title, request=request)["structuredContent"]
+
+
+def test_dashboard_and_chatgpt_read_the_same_progress(dev, gh):
+    c, db = dev["c"], dev["db"]
+    _client, tok = _tokens(dev, dev["collab"])
+    a = tok["access_token"]
+    j = _submit_mcp(dev, a)
+    assert j["stage"] == "Dispatched" and "GitHub accepted" in j["summary"] and j["dashboard_url"].endswith("?job=1")
+    job = db.query(VoltDevJob).one()
+    _next(dev)
+    st = _tool(dev, a, "get_change_request", ref="DEV-1")["structuredContent"]
+    assert st["stage"] == "Running"
+    _report(dev, job.id, status="ready_to_test", changed_files=["docs/volt/notes.md"], tests_passed=True,
+            pr_number=11, head_sha="a" * 40, pr_url="https://github.com/x/y/pull/11")
+    chat = _tool(dev, a, "get_change_request", ref="DEV-1")["structuredContent"]
+    dash = c.get("/volt/dev/%s/jobs/DEV-1" % dev["org"].id, headers=H(db, dev["collab"])).json()["progress"]
+    assert chat["stage"] == dash["stage"] == "Ready to review"
+    assert chat["summary"] == dash["summary"] and chat["tested_commit"] == dash["tested_commit"] == "a" * 40
+    assert chat["release_ready"] is True and "approve" in chat["next_action"]
+    mine = _tool(dev, a, "my_latest_requests")["structuredContent"]
+    assert [x["ref"] for x in mine["jobs"]] == ["DEV-1"]
+    # Release, merge: docs-only work says so honestly.
+    _tool(dev, a, "approve_release", ref="DEV-1", tested_commit="a" * 7, confirm_production=True)
+    _next(dev, run_id="901")
+    _report(dev, job.id, run_id="901", status="merged", merge_sha="b" * 40, merged_head_sha="a" * 40)
+    done = _tool(dev, a, "get_change_request", ref="DEV-1")["structuredContent"]
+    assert done["stage"] == "No runtime deployment needed" and "documentation" in done["summary"]
+    # Someone else's request is not in "my latest".
+    _tokens_staff = _tokens(dev, dev["staff"])[1]["access_token"]
+    assert _tool(dev, _tokens_staff, "my_latest_requests")["structuredContent"]["jobs"] == []
+
+
+def test_missing_claude_credential_blocks_instead_of_pretending(dev, gh):
+    from app.models.volt_models import VoltDevRunnerSeen, VoltEmail
+    c, db = dev["c"], dev["db"]
+    _client, tok = _tokens(dev, dev["collab"])
+    a = tok["access_token"]
+    _submit_mcp(dev, a)
+    r = c.post("/volt/dev/runner/next", headers=runner_token(event_name="workflow_dispatch"),
+               json={"claude_credentials": False, "reason": "DEV-1 start (attempt 1)"})
+    assert r.json()["action"] == "none"
+    job = db.query(VoltDevJob).one()
+    db.refresh(job)
+    assert job.status == "queued" and "no Claude credential" in job.blocked_reason
+    seen = db.get(VoltDevRunnerSeen, "runner")
+    assert seen.claude_credentials is False and seen.event == "workflow_dispatch"
+    why = _tool(dev, a, "what_is_blocking", ref="DEV-1")["structuredContent"]
+    assert why["stage"] == "Blocked" and "CLAUDE_CODE_OAUTH_TOKEN" in why["blocking"]
+    assert db.query(VoltEmail).filter(VoltEmail.kind == "dev_blocked").count() == 2      # both principals, once
+    st = _tool(dev, a, "relay_status")["structuredContent"]
+    assert st["runner_last_seen"]["claude_credential_present"] is False
+    assert all("***@" in e for e in st["email_notices_to"])
+    # A blocked job is not handed out; "send again" clears it, and with a credential it runs.
+    assert c.post("/volt/dev/runner/next", headers=runner_token(), json={"claude_credentials": True}).json()["action"] == "none"
+    _tool(dev, a, "resend_start", ref="DEV-1")
+    n = c.post("/volt/dev/runner/next", headers=runner_token(run_id="555"), json={"claude_credentials": True}).json()
+    assert n["action"] == "code" and n["job"]["ref"] == "DEV-1"
+
+
+def test_backend_recovers_missed_starts_with_backoff_then_blocks(dev, gh):
+    from datetime import timedelta
+    from app.models.volt_models import VoltEmail
+    from app.services.volt import common as C
+    db = dev["db"]
+    _client, tok = _tokens(dev, dev["collab"])
+    gh.status = 503
+    _submit_mcp(dev, tok["access_token"])
+    job = db.query(VoltDevJob).one()
+    assert job.dispatch_state == "failed" and job.dispatch_count == 1
+    D._SELFTEST["done"] = True
+    sends = lambda: len([x for x in gh.calls if x[1].endswith("/dispatches")])      # noqa: E731
+    D.watch_pass(db)                       # count 1 -> retry right away (0 min)
+    assert sends() == 2
+    D.watch_pass(db)                       # count 2 -> waits 1 minute
+    assert sends() == 2
+    for _ in range(10):
+        db.refresh(job)
+        job.dispatched_at = C.now() - timedelta(minutes=30)
+        db.commit()
+        D.watch_pass(db)
+    db.refresh(job)
+    assert job.dispatch_count == D.MAX_SENDS and "after 6 start requests" in job.blocked_reason
+    assert sends() == D.MAX_SENDS + 0      # bounded: no more requests once Blocked
+    assert db.query(VoltEmail).filter(VoltEmail.kind == "dev_blocked").count() == 2
+
+
+def test_watch_expires_dead_runs_and_merges_wait_again(dev, gh):
+    from datetime import timedelta
+    from app.services.volt import common as C
+    db = dev["db"]
+    D._SELFTEST["done"] = True
+    _client, tok = _tokens(dev, dev["collab"])
+    _submit_mcp(dev, tok["access_token"])
+    job = db.query(VoltDevJob).one()
+    _next(dev)
+    db.refresh(job)
+    job.lease_expires_at = C.now() - timedelta(minutes=1)
+    db.commit()
+    D.watch_pass(db)
+    db.refresh(job)
+    assert job.status == "failed" and "lease expired" in job.status_detail
+    # An approved merge whose run died goes back to waiting (not failed), and is re-sent.
+    _tool(dev, tok["access_token"], "retry_change_request", ref="DEV-1")
+    _next(dev, run_id="70")
+    _report(dev, job.id, run_id="70", status="ready_to_test", changed_files=["docs/volt/x.md"], tests_passed=True,
+            pr_number=3, head_sha="9" * 40)
+    _tool(dev, tok["access_token"], "approve_release", ref="DEV-1", tested_commit="9" * 8, confirm_production=True)
+    _next(dev, run_id="71")
+    db.refresh(job)
+    assert job.lease_run_id == "71"
+    job.lease_expires_at = C.now() - timedelta(minutes=1)
+    db.commit()
+    D.watch_pass(db)
+    db.refresh(job)
+    assert job.status == "merge_requested" and job.lease_run_id is None
+
+
+def test_selftest_checks_the_token_and_dispatches_once(dev, gh):
+    from app.models.volt_models import VoltDevRunnerSeen
+    db = dev["db"]
+    D._SELFTEST["done"] = False
+    D.watch_pass(db)
+    D.watch_pass(db)
+    sends = [x for x in gh.calls if x[1].endswith("/dispatches")]
+    assert len(sends) == 1 and sends[0][2]["inputs"]["reason"] == "token check (no job)"
+    row = db.get(VoltDevRunnerSeen, "runner")
+    assert json.loads(row.token_check)["ok"] is True and row.selftest_dispatch_at is not None
+    assert "ghp_secret_should_never_leak" not in row.token_check
+
+
+def test_sign_in_is_bound_to_the_volt_resource(dev):
+    c = dev["c"]
+    client = _register(c).json()
+    _v, ch = _pkce()
+    r = c.get("/volt/dev/oauth/authorize", params={
+        "response_type": "code", "client_id": client["client_id"], "redirect_uri": CB, "state": "s",
+        "code_challenge": ch, "code_challenge_method": "S256", "resource": "https://evil.example.com/api"},
+        follow_redirects=False)
+    assert r.status_code == 302 and "error=invalid_target" in r.headers["location"]
+    assert r.headers["location"].startswith(CB)

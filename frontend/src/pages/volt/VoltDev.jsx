@@ -18,13 +18,55 @@ import { fmtDate } from './voltApi'
 // accepted the start request; "Running" = the runner claimed the job; "Deployed"
 // = production was seen running the merged commit.
 const STEPS = [['queued', 'Submitted'], ['dispatched', 'Dispatched'], ['claude_working', 'Running'], ['coding_completed', 'Testing'],
-  ['ready_to_test', 'PR ready'], ['merge_requested', 'Approved'], ['merged', 'Merged'], ['deployed', 'Deployed · verified']]
+  ['ready_to_test', 'Ready to review'], ['merge_requested', 'Approved'], ['merged', 'Merged'], ['deployed', 'Deployed & verified']]
 const ORDER = STEPS.map(([k]) => k)
 function stepIndex(job) {
   if (job.status === 'queued') return job.dispatch?.state === 'dispatched' ? 1 : 0
   return ORDER.indexOf(job.status)
 }
 const BAD = { tests_failed: 'Tests failed', failed: 'Failed', canceled: 'Canceled' }
+
+// Refresh while the page is in front; pause while it is hidden, and catch up
+// the moment it is shown again. No refresh storms from background tabs.
+function useVisiblePoll(fn, ms) {
+  useEffect(() => {
+    fn()
+    const t = setInterval(() => { if (!document.hidden) fn() }, ms)
+    const v = () => { if (!document.hidden) fn() }
+    document.addEventListener('visibilitychange', v)
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', v) }
+  }, [fn, ms])
+}
+const VIA = { api: 'ChatGPT (action)', chatgpt: 'ChatGPT', console: 'VOLT Operations' }
+const stageTag = (p) => (p?.stage === 'Deployed and verified' || p?.stage === 'No runtime deployment needed' ? 'v-tag--ok'
+  : ['Failed', 'Blocked', 'Canceled'].includes(p?.stage) ? '' : 'v-tag--black')
+
+function Review({ orgId, job }) {
+  const [rv, setRv] = useState(null)
+  const [err, setErr] = useState('')
+  const [open, setOpen] = useState(false)
+  async function show() {
+    setOpen(true)
+    if (rv) return
+    try { setRv(await api.get(`/volt/dev/${orgId}/jobs/${job.ref}/review`)) } catch (e) { setErr(msg(e)) }
+  }
+  if (!job.pr_number) return null
+  return (
+    <div data-dev-review>
+      {!open && <button type="button" className="v-btn v-btn--line v-btn--sm" onClick={show} data-show-change>Show the change</button>}
+      {open && !rv && !err && <p className="v-small v-muted">Loading the change…</p>}
+      {err && <div className="v-alert v-alert--err" role="alert">{err}</div>}
+      {rv && (rv.review.available ? (
+        <div>
+          <p className="v-small">Tested commit <code>{(rv.tested_commit || '').slice(0, 12)}</code> · {rv.review.files.length} file(s)</p>
+          {rv.review.files.map((f) => (
+            <details key={f.file} className="v-small"><summary><code>{f.file}</code> ({f.status}, +{f.additions} −{f.deletions})</summary>
+              <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, maxHeight: 360, overflow: 'auto', background: 'rgba(0,0,0,.04)', padding: 8 }}>{f.diff || '(no text diff)'}{f.diff_truncated ? '\n… (shortened - full diff on the pull request)' : ''}</pre>
+            </details>))}
+        </div>) : <p className="v-small v-muted">{rv.review.detail}</p>)}
+    </div>
+  )
+}
 
 const msg = (e) => e?.detail?.message || (typeof e?.detail === 'string' ? e.detail : null) || e?.message || 'Something went wrong.'
 const newKey = () => (window.crypto?.randomUUID ? window.crypto.randomUUID() : String(Date.now()) + Math.random())
@@ -50,7 +92,7 @@ function JobDrawer({ orgId, job: initial, onClose, onChanged }) {
   const [err, setErr] = useState('')
   const [ask, setAsk] = useState(null)
   const load = useCallback(() => api.get(`/volt/dev/${orgId}/jobs/${initial.ref}`).then(setJob).catch((e) => setErr(msg(e))), [orgId, initial.ref])
-  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t) }, [load])
+  useVisiblePoll(load, 15000)
   useEffect(() => { const k = (e) => { if (e.key === 'Escape' && !document.querySelector('.v-modal-bg')) onClose() }; document.addEventListener('keydown', k); return () => document.removeEventListener('keydown', k) }, [onClose])
   async function act(action) {
     if (busy) return
@@ -58,7 +100,7 @@ function JobDrawer({ orgId, job: initial, onClose, onChanged }) {
     try { const j = await api.post(`/volt/dev/${orgId}/jobs/${job.ref}/${action}`, {}); setJob(j); setAsk(null); onChanged() } catch (e) { setErr(msg(e)); setAsk(null) } finally { setBusy('') }
   }
   const COPY = {
-    'approve-merge': ['Approve for production?', `Merge ${job.ref} at commit ${(job.head_sha || '').slice(0, 7)} into main. Render then deploys it to production. Only this tested commit can be merged.`],
+    'approve-merge': ['Approve for production?', `Release ${job.ref} at tested commit ${(job.head_sha || '').slice(0, 12)} (${job.tests_summary || 'tests passed'}). It is merged into main and Render deploys it. Only this exact commit can be merged; a newer or untested one is refused.`],
     rollback: ['Roll back this change?', `Create a rollback job that reverts ${job.ref}. It is tested and then needs approval like any change.`],
     cancel: ['Cancel this job?', 'It will not be worked on or merged. You can retry it later.'],
     retry: ['Run it again?', 'Claude starts over on a fresh branch.'],
@@ -69,28 +111,34 @@ function JobDrawer({ orgId, job: initial, onClose, onChanged }) {
         <div className="v-row"><span className="v-mono">{job.ref} · {job.kind === 'revert' ? 'Rollback' : 'Change'} · attempt {job.attempt}</span>
           <button type="button" className="v-btn v-btn--line v-btn--sm" onClick={onClose} autoFocus>Close ✕</button></div>
         <h2 id="v-dev-h" style={{ fontSize: 24, letterSpacing: '-.03em', margin: '10px 0 4px' }}>{job.title}</h2>
-        <p className="v-small v-muted">Requested by {job.requested_by} · {fmtDate(job.created_at)} · via {job.via === 'api' ? 'ChatGPT action' : 'VOLT Operations'}</p>
+        <p className="v-small v-muted">Requested by {job.requested_by} · {fmtDate(job.created_at)} · via {VIA[job.via] || job.via}</p>
         <section className="v-panel">
-          <p><span className={`v-tag ${job.status === 'deployed' ? 'v-tag--ok' : BAD[job.status] ? '' : 'v-tag--black'}`} data-dev-status>{job.status_label}</span></p>
+          <p><span className={`v-tag ${stageTag(job.progress)}`} data-dev-status>{job.progress?.stage || job.status_label}</span>
+            {job.progress?.latest_at && <span className="v-small v-muted"> · updated {fmtDate(job.progress.latest_at)}</span>}</p>
           <Steps job={job} />
-          {job.status_detail && <p className="v-small" style={{ marginTop: 10 }}>{job.status_detail}</p>}
+          {job.progress?.summary && <p className="v-small" style={{ marginTop: 10 }} data-dev-summary>{job.progress.summary}</p>}
+          {job.progress?.blocker && <div className="v-alert v-alert--err" role="status" data-dev-blocker>What is blocking it: {job.progress.blocker}</div>}
+          {job.progress?.next_action && <p className="v-small" data-dev-next><b>Next:</b> {job.progress.next_action}</p>}
           {err && <div className="v-alert v-alert--err" role="alert">{err}</div>}
           <div className="v-row" style={{ justifyContent: 'flex-start', marginTop: 10 }}>
             {job.can.approve_merge && <button type="button" className="v-btn v-btn--red" onClick={() => setAsk('approve-merge')} disabled={!!busy} data-approve>Approve &amp; deploy to production</button>}
             {job.can.retry && <button type="button" className="v-btn v-btn--line" onClick={() => setAsk('retry')} disabled={!!busy} data-retry>Retry</button>}
             {job.can.cancel && <button type="button" className="v-btn v-btn--line" onClick={() => setAsk('cancel')} disabled={!!busy}>Cancel</button>}
             {job.can.rollback && <button type="button" className="v-btn v-btn--black" onClick={() => setAsk('rollback')} disabled={!!busy} data-rollback>Roll back</button>}
-            {['queued', 'merge_requested'].includes(job.status) && job.dispatch?.state !== 'dispatched' && <button type="button" className="v-btn v-btn--line" onClick={() => act('dispatch')} disabled={!!busy} data-dispatch>{busy === 'dispatch' ? 'Sending…' : 'Send start request again'}</button>}
+            {job.can.resend && (job.dispatch?.state !== 'dispatched' || job.blocked_reason) && <button type="button" className="v-btn v-btn--line" onClick={() => act('dispatch')} disabled={!!busy} data-dispatch>{busy === 'dispatch' ? 'Sending…' : 'Send start request again'}</button>}
           </div>
           {job.dispatch?.at && <p className="v-small v-muted" data-dispatch-info>Last start request: {job.dispatch.state === 'dispatched' ? 'accepted by GitHub' : job.dispatch.state === 'failed' ? `failed (${job.dispatch.error})` : job.dispatch.error} · {fmtDate(job.dispatch.at)}. Accepted means GitHub received it; "Running" appears once the runner actually picks the job up.</p>}
         </section>
         <section className="v-panel">
-          <h3>Ready to test</h3>
+          <h3>Result</h3>
           {job.tests_summary ? <p className="v-small" data-tests>{job.tests_passed ? '✓ ' : '✗ '}{job.tests_summary}</p> : <p className="v-small v-muted">Tests run after Claude finishes.</p>}
           {job.pr_url && <p className="v-small">Code review: <a href={job.pr_url} target="_blank" rel="noreferrer">pull request #{job.pr_number}</a> (public GitHub page; no sign-in needed to read).</p>}
           {job.preview_url ? <p><a className="v-btn v-btn--line v-btn--sm" href={job.preview_url} target="_blank" rel="noreferrer">Open preview ↗</a></p>
             : <p className="v-small v-muted">No hosted preview environment exists yet; changes are tested automatically, then checked live after deploy.</p>}
+          {job.head_sha && <p className="v-small" data-tested-commit>Tested commit <code>{job.head_sha.slice(0, 12)}</code>{job.branch ? <> on <code>{job.branch}</code></> : null}</p>}
+          {job.run_url && <p className="v-small">GitHub run: <a href={job.run_url} target="_blank" rel="noreferrer">log ↗</a></p>}
           {job.changed_files?.length > 0 && <details><summary className="v-small">{job.changed_files.length} changed file(s)</summary><ul className="v-small">{job.changed_files.map((f) => <li key={f}><code>{f}</code></li>)}</ul></details>}
+          <Review orgId={orgId} job={job} />
           {job.merge_approved_by && <p className="v-small">Approved by {job.merge_approved_by} · {fmtDate(job.merge_requested_at)}</p>}
           {job.merge_sha && <p className="v-small">Merged commit <code>{job.merge_sha.slice(0, 7)}</code>{job.deploy_targets ? ` · deploys: ${job.deploy_targets}` : ''}</p>}
           {job.deploy_detail && <p className="v-small" data-deployed>{job.deploy_detail}</p>}
@@ -141,7 +189,7 @@ function Keys({ orgId }) {
         name it <b>VOLT Development</b>, paste this server URL and choose <b>OAuth</b> sign-in:</p>
       <p><code style={{ wordBreak: 'break-all' }} data-mcp-url>{mcpUrl}</code></p>
       <p className="v-small">ChatGPT then sends you to a VOLT page: sign in with <b>your own</b> login and click <b>Allow</b>. Install the plugin, start a new chat,
-        type <b>@VOLT Development</b> and ask for a change. It can submit requests, show status, the diff and test results, retry, and - only after you confirm a specific
+        type <b>@VOLT Development</b> and ask, e.g. <i>"Submit a VOLT change: …"</i>, <i>"Show my latest VOLT requests"</i>, <i>"What is blocking DEV-3?"</i>. It can submit requests, show status, the diff and test results, retry, and - only after you confirm a specific
         job and tested commit - approve a release. Ordinary chats, shared projects and other people&apos;s chats do not send anything; only this connection does.</p>
       {err && <div className="v-alert v-alert--err" role="alert">{err}</div>}
       <h4 style={{ margin: '12px 0 4px' }}>Your connections</h4>
@@ -168,7 +216,7 @@ export default function Development({ orgId }) {
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
   const load = useCallback(() => api.get(`/volt/dev/${orgId}/jobs`).then((r) => setJobs(r.items)).catch((e) => setErr(msg(e))), [orgId])
-  useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t) }, [load])
+  useVisiblePoll(load, 20000)
   const open = sp.get('job')
   const openJob = useMemo(() => (jobs || []).find((j) => String(j.number) === String(open) || j.ref === open), [jobs, open])
   async function submit(e) {
@@ -206,7 +254,8 @@ export default function Development({ orgId }) {
             <tbody>{jobs.map((j) => (
               <tr key={j.id} data-dev-job={j.ref}>
                 <td data-label="Job"><b>{j.ref}</b> {j.title}{j.kind === 'revert' ? ' (rollback)' : ''}</td>
-                <td data-label="Status"><span className={`v-tag ${j.status === 'deployed' ? 'v-tag--ok' : BAD[j.status] ? '' : 'v-tag--black'}`}>{j.status_label}</span></td>
+                <td data-label="Status"><span className={`v-tag ${stageTag(j.progress)}`}>{j.progress?.stage || j.status_label}</span>
+                  {j.progress?.latest_at && <><br /><span className="v-small v-muted">{fmtDate(j.progress.latest_at)}</span></>}</td>
                 <td data-label="Requested">{j.requested_by}<br /><span className="v-small v-muted">{fmtDate(j.created_at)}</span></td>
                 <td data-label="Open"><button type="button" className="v-btn v-btn--line v-btn--sm" onClick={() => setSp({ job: String(j.number) })}>Open →</button></td>
               </tr>))}</tbody></table></div>)}

@@ -416,6 +416,10 @@ class VoltDevJob(Base):
     dispatched_at = Column(DateTime, nullable=True)
     dispatch_error = Column(Text, nullable=True)
     dispatch_count = Column(Integer, nullable=False, default=0)
+    # 2026-11-10: set when the relay stopped trying on its own (start requests
+    # never picked up, or Claude cannot run). Cleared by "Send start request
+    # again" or a retry. The status is unchanged; the stage shows "Blocked".
+    blocked_reason = Column(Text, nullable=True)
     deploy_checked_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -485,6 +489,7 @@ class VoltDevOAuthGrant(Base):
     state = Column(Text, nullable=True)
     code_challenge = Column(String, nullable=True)
     scope = Column(String, nullable=True)
+    resource = Column(String, nullable=True)                   # RFC 8707 resource the token is for
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     expires_at = Column(DateTime, nullable=False)
     decision = Column(String, nullable=True)                   # allowed | denied
@@ -493,6 +498,24 @@ class VoltDevOAuthGrant(Base):
     code_hash = Column(String, nullable=True, unique=True)
     code_expires_at = Column(DateTime, nullable=True)
     used_at = Column(DateTime, nullable=True)
+
+
+class VoltDevRunnerSeen(Base):
+    """What the relay last heard from its GitHub runner - one row. Lets the
+    backend say, without a job and without reading GitHub logs, whether the
+    runner works, how it was started, and whether a Claude credential exists
+    in the repository's secrets (presence only, never the value)."""
+    __tablename__ = "volt_dev_runner_seen"
+
+    id = Column(String, primary_key=True, default="runner")
+    last_seen_at = Column(DateTime, nullable=True)
+    run_id = Column(String, nullable=True)
+    event = Column(String, nullable=True)                      # schedule | workflow_dispatch
+    reason = Column(String, nullable=True)                     # the dispatch reason the run reported
+    claude_credentials = Column(Boolean, nullable=True)
+    token_check_at = Column(DateTime, nullable=True)
+    token_check = Column(Text, nullable=True)                  # JSON: the backend's own GitHub token check
+    selftest_dispatch_at = Column(DateTime, nullable=True)
 
 
 class VoltDevNonce(Base):

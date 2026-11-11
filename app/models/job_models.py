@@ -63,6 +63,10 @@ class JobName:
     # Talks only to the browsers' own push services, only for people who
     # turned phone alerts on. Named so the ledger can say when it stopped.
     WEB_PUSH = "web_push_loop"
+    # VOLT development relay (#571): expire dead runner leases, verify deploys,
+    # re-send missed GitHub starts with backoff. Talks only to GitHub and the
+    # two principals' notification addresses.
+    VOLT_DEV_RELAY = "volt_dev_relay_loop"
     # The AI Workforce queue worker: claims due AI work items and runs them.
     # Every 2 minutes in the backend. Real messages stay off unless
     # AI_OPERATIONS_LIVE_SEND is set (app/jobs/run_ai_workforce_worker.py).
@@ -117,6 +121,7 @@ LOOP_JOB_NAMES = (
     JobName.WHOLESALE_EXCEPTIONS,
     JobName.PROGRAM_SLA,
     JobName.WEB_PUSH,
+    JobName.VOLT_DEV_RELAY,
     JobName.AI_WORKFORCE_WORKER,
     JobName.ACQUISITION_WORKFORCE,
 )
@@ -139,6 +144,7 @@ EXPECTED_INTERVAL_MINUTES = {
     JobName.WHOLESALE_EXCEPTIONS: 60,
     JobName.PROGRAM_SLA: 2,
     JobName.WEB_PUSH: 60,                 # checks in hourly when idle; sends every 20s when busy
+    JobName.VOLT_DEV_RELAY: 60,           # checks in hourly when idle; every 2 min when there is work
     JobName.AI_WORKFORCE_WORKER: 2,
     JobName.ACQUISITION_WORKFORCE: 5,
     JobName.CADENCE_CRON: 24 * 60,        # render.yaml: "0 14 * * *"

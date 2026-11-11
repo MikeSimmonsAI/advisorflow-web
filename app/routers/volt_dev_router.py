@@ -48,7 +48,8 @@ def _refresh(db, org_id):
     rows = []
     for j in D.verify_deploys(db, org_id):
         rows += R.notify(db, j, "deployed")
-    D.resend_stale(db, org_id)
+    for j in D.resend_stale(db, org_id)["blocked"]:
+        rows += R.notify(db, j, "blocked")
     db.commit()
     _deliver(db, rows)
 
@@ -102,6 +103,9 @@ def _act(db, org_id, ref, action, user, expected_sha=None):
         if not D.needs_runner(job):
             raise HTTPException(status_code=409, detail={"message": "This job is not waiting for the runner.",
                                                          "code": "not_waiting"})
+        if job.blocked_reason:
+            R._audit_user(db, job, user, "unblocked", status=job.status, detail="Start request sent again by hand")
+        job.blocked_reason, job.dispatch_count = None, 0
     else:
         raise HTTPException(status_code=404, detail="Unknown action.")
     db.commit()
@@ -112,6 +116,20 @@ def _act(db, org_id, ref, action, user, expected_sha=None):
         D.dispatch(db, out, purpose)
         db.commit()
     return R.job_dict(db, out, events=True)
+
+
+@console.get("/{org_id}/jobs/{ref}/review")
+def dev_review(org_id: str, ref: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    R.require_principal(db, user, org_id)
+    job = R.by_ref(db, org_id, ref)
+    return {"ref": "DEV-%d" % job.number, "tested_commit": job.head_sha, "review": D.review(job)}
+
+
+@console.get("/{org_id}/status")
+def dev_status(org_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    R.require_principal(db, user, org_id)
+    from app.routers.volt_dev_chatgpt_router import relay_status
+    return relay_status(db, user, org_id)
 
 
 @console.get("/{org_id}/tokens")
@@ -247,8 +265,8 @@ def api_job(request: Request, ref: str, db: Session = Depends(get_db), raw: str 
 def api_status(request: Request, db: Session = Depends(get_db), raw: str = Depends(_key_user)):
     user, org_id = R.token_user(db, raw)
     db.commit()
-    return {"you": user.full_name or user.email, "email": user.email, "volt_development_principal": True,
-            "instant_start_configured": D.configured(), "github": D.check_github()}
+    from app.routers.volt_dev_chatgpt_router import relay_status
+    return relay_status(db, user, org_id)
 
 
 @api.get("/jobs/{ref}/review")
@@ -286,10 +304,17 @@ def _claims(db, authorization: str):
 
 
 @runner.post("/next")
-def runner_next(db: Session = Depends(get_db), authorization: str = Header(default="")):
+def runner_next(body: Dict[str, Any] = Body(default={}), db: Session = Depends(get_db),
+                authorization: str = Header(default="")):
     claims = _claims(db, authorization)
-    out = R.runner_next(db, claims)
+    out = R.runner_next(db, claims, body)
+    rows = []
+    if out.get("blocked"):
+        from app.models.volt_models import VoltDevJob
+        j = db.get(VoltDevJob, out.pop("blocked"))
+        rows = R.notify(db, j, "blocked") if j is not None else []
     db.commit()
+    _deliver(db, rows)
     return out
 
 
