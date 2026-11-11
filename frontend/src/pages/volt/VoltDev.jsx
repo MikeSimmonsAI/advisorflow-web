@@ -131,18 +131,30 @@ function Keys({ orgId }) {
     try { setFresh(await api.post(`/volt/dev/${orgId}/tokens`, { name: 'ChatGPT' })); await load() } catch (e) { setErr(msg(e)) } finally { setBusy(false) }
   }
   async function revoke(id) { try { await api.delete(`/volt/dev/${orgId}/tokens/${id}`); await load() } catch (e) { setErr(msg(e)) } }
+  const base = String(API_BASE).replace(/\/$/, '')
+  const mcpUrl = `${base}/volt/dev/mcp`
+  const live = (items || []).filter((t) => !t.revoked)
   return (
     <section className="v-panel" data-dev-keys>
       <h3>ChatGPT access</h3>
-      <p className="v-small">To send requests from ChatGPT, create a custom GPT with an <b>Action</b>: import the schema from <code>{schema}</code>,
-        set Authentication to <b>API Key → Bearer</b>, and paste your personal key. The GPT can then submit requests, check status, approve and deploy, exactly as you can here.
-        ChatGPT does not forward ordinary chat or shared-project messages by itself; only the Action can send work.</p>
+      <p className="v-small"><b>Connect your own ChatGPT</b> (web, paid plan): go to <b>Plugins</b> (chatgpt.com/plugins) → <b>Add</b> → <b>Add custom MCP server</b>,
+        name it <b>VOLT Development</b>, paste this server URL and choose <b>OAuth</b> sign-in:</p>
+      <p><code style={{ wordBreak: 'break-all' }} data-mcp-url>{mcpUrl}</code></p>
+      <p className="v-small">ChatGPT then sends you to a VOLT page: sign in with <b>your own</b> login and click <b>Allow</b>. Install the plugin, start a new chat,
+        type <b>@VOLT Development</b> and ask for a change. It can submit requests, show status, the diff and test results, retry, and - only after you confirm a specific
+        job and tested commit - approve a release. Ordinary chats, shared projects and other people&apos;s chats do not send anything; only this connection does.</p>
       {err && <div className="v-alert v-alert--err" role="alert">{err}</div>}
-      {fresh && <div className="v-alert v-alert--info" role="status" data-new-key>Your new key (shown once - copy it now): <code style={{ wordBreak: 'break-all' }}>{fresh.token}</code></div>}
-      <button type="button" className="v-btn v-btn--line v-btn--sm" onClick={make} disabled={busy}>{busy ? 'Creating…' : 'Create a personal key'}</button>
-      {items?.length > 0 && <ul className="v-ma-updates" style={{ marginTop: 10 }}>{items.map((t) => (
-        <li key={t.id} className="v-small">{t.name} · <code>{t.prefix}…</code> · made {fmtDate(t.created_at)}{t.last_used_at ? ` · last used ${fmtDate(t.last_used_at)}` : ''}
-          {t.revoked ? ' · revoked' : <> · <button type="button" className="v-btn v-btn--link" onClick={() => revoke(t.id)}>Revoke</button></>}</li>))}</ul>}
+      <h4 style={{ margin: '12px 0 4px' }}>Your connections</h4>
+      {items && live.length === 0 && <p className="v-small v-muted">None yet.</p>}
+      {live.length > 0 && <ul className="v-ma-updates" data-dev-connections>{live.map((t) => (
+        <li key={t.id} className="v-small">{t.kind === 'oauth' ? 'ChatGPT sign-in' : 'Personal key'} · {t.name} · <code>{t.prefix}…</code> · made {fmtDate(t.created_at)}{t.last_used_at ? ` · last used ${fmtDate(t.last_used_at)}` : ''}
+          {' · '}<button type="button" className="v-btn v-btn--link" onClick={() => revoke(t.id)} data-revoke>{t.kind === 'oauth' ? 'Disconnect' : 'Revoke'}</button></li>))}</ul>}
+      <details className="v-small" style={{ marginTop: 10 }}>
+        <summary>Older custom GPT setup (custom GPTs stop working on Dec 11, 2026)</summary>
+        <p>A custom GPT Action can import <code>{schema}</code>. Use a personal key only in a GPT that you alone use - everyone using a GPT acts with its key.</p>
+        {fresh && <div className="v-alert v-alert--info" role="status" data-new-key>Your new key (shown once - copy it now): <code style={{ wordBreak: 'break-all' }}>{fresh.token}</code></div>}
+        <button type="button" className="v-btn v-btn--line v-btn--sm" onClick={make} disabled={busy}>{busy ? 'Creating…' : 'Create a personal key'}</button>
+      </details>
     </section>
   )
 }

@@ -1745,6 +1745,11 @@ COLUMNS_TO_ADD = [
     ("volt_dev_jobs", "dispatch_error", "TEXT"),
     ("volt_dev_jobs", "dispatch_count", "INTEGER DEFAULT 0"),
     ("volt_dev_jobs", "deploy_checked_at", "TIMESTAMP"),
+    ("volt_dev_tokens", "kind", "VARCHAR DEFAULT 'key'"),
+    ("volt_dev_tokens", "client_id", "VARCHAR"),
+    ("volt_dev_tokens", "expires_at", "TIMESTAMP"),
+    ("volt_dev_tokens", "refresh_hash", "VARCHAR"),
+    ("volt_dev_tokens", "refresh_expires_at", "TIMESTAMP"),
     ("inbound_mailboxes", "purpose", "VARCHAR"),
     ("oauth_auth_transactions", "target_organization_id", "VARCHAR"),
 ]

@@ -86,11 +86,11 @@ def dev_action(org_id: str, ref: str, action: str, db: Session = Depends(get_db)
     return _act(db, org_id, ref, action, user)
 
 
-def _act(db, org_id, ref, action, user):
+def _act(db, org_id, ref, action, user, expected_sha=None):
     job = R.by_ref(db, org_id, ref)
     before = job.status
     if action == "approve-merge":
-        out, purpose = R.approve_merge(db, job, user), "merge"
+        out, purpose = R.approve_merge(db, job, user, expected_sha), "merge"
     elif action == "retry":
         out, purpose = R.retry(db, job, user), "retry"
     elif action == "cancel":
@@ -155,13 +155,20 @@ def openapi_doc(request: Request):
                  "description": "Submit and track VOLT Marketing development requests. Every call acts as the "
                                 "person who owns the access key."},
         "servers": [{"url": base}],
-        "components": {"securitySchemes": {"key": {"type": "http", "scheme": "bearer"}},
+        "components": {"securitySchemes": {
+                           "key": {"type": "http", "scheme": "bearer",
+                                   "description": "A VOLT sign-in token (Connect ChatGPT) or a personal access key."},
+                           "volt": {"type": "oauth2", "flows": {"authorizationCode": {
+                               "authorizationUrl": base + "/volt/dev/oauth/authorize",
+                               "tokenUrl": base + "/volt/dev/oauth/token",
+                               "refreshUrl": base + "/volt/dev/oauth/token",
+                               "scopes": {"volt.dev": "VOLT Marketing development as you"}}}}},
                        "schemas": {"Job": {"type": "object", "properties": {
                            "ref": {"type": "string"}, "title": {"type": "string"}, "status": {"type": "string"},
                            "status_label": {"type": "string"}, "status_detail": {"type": "string"},
                            "pr_url": {"type": "string"}, "tests_summary": {"type": "string"},
                            "preview_url": {"type": "string"}}}}},
-        "security": [{"key": []}],
+        "security": [{"volt": ["volt.dev"]}, {"key": []}],
         "paths": {
             "/volt/dev/api/jobs": {
                 "get": {"operationId": "listJobs", "summary": "List recent VOLT development jobs and their status",
@@ -178,12 +185,25 @@ def openapi_doc(request: Request):
                 "get": {"operationId": "getJob", "summary": "Status and timeline of one job (DEV-n)",
                         "parameters": [{"name": "ref", "in": "path", "required": True, "schema": {"type": "string"}}],
                         "responses": {"200": {"description": "The job"}}}},
+            "/volt/dev/api/status": {
+                "get": {"operationId": "relayStatus", "summary": "Who you are and whether the GitHub connection works",
+                        "responses": {"200": {"description": "Status"}}}},
+            "/volt/dev/api/jobs/{ref}/review": {
+                "get": {"operationId": "getJobReview",
+                        "summary": "Changed files with their diff and test results at the tested commit (review before approving)",
+                        "parameters": [{"name": "ref", "in": "path", "required": True, "schema": {"type": "string"}}],
+                        "responses": {"200": {"description": "Review material"}}}},
             "/volt/dev/api/jobs/{ref}/{action}": {
                 "post": {"operationId": "jobAction",
-                         "summary": "approve-merge (ship the tested change), retry, cancel, rollback, or dispatch (re-send a start request)",
+                         "summary": "approve-merge (ship the tested change to production - ONLY after the person confirms the job and tested commit), retry, cancel, rollback, or dispatch (re-send a start request)",
+                         "x-openai-isConsequential": True,
                          "parameters": [{"name": "ref", "in": "path", "required": True, "schema": {"type": "string"}},
                                         {"name": "action", "in": "path", "required": True, "schema": {
                                             "type": "string", "enum": ["approve-merge", "retry", "cancel", "rollback", "dispatch"]}}],
+                         "requestBody": {"required": False, "content": {"application/json": {"schema": {
+                             "type": "object", "properties": {
+                                 "tested_commit": {"type": "string", "description": "approve-merge only: the job's tested commit SHA the person confirmed"},
+                                 "confirm_production": {"type": "boolean", "description": "approve-merge only: true after the person confirmed this exact release"}}}}}},
                          "responses": {"200": {"description": "The job"}}}},
         },
     }
@@ -222,12 +242,40 @@ def api_job(request: Request, ref: str, db: Session = Depends(get_db), raw: str 
     return R.job_dict(db, R.by_ref(db, org_id, ref), events=True)
 
 
+@api.get("/status")
+@limiter.limit("30/minute")
+def api_status(request: Request, db: Session = Depends(get_db), raw: str = Depends(_key_user)):
+    user, org_id = R.token_user(db, raw)
+    db.commit()
+    return {"you": user.full_name or user.email, "email": user.email, "volt_development_principal": True,
+            "instant_start_configured": D.configured(), "github": D.check_github()}
+
+
+@api.get("/jobs/{ref}/review")
+@limiter.limit("60/minute")
+def api_review(request: Request, ref: str, db: Session = Depends(get_db), raw: str = Depends(_key_user)):
+    user, org_id = R.token_user(db, raw)
+    db.commit()
+    job = R.by_ref(db, org_id, ref)
+    j = R.job_dict(db, job)
+    return {"ref": j["ref"], "status_label": j["status_label"], "tests_passed": j["tests_passed"],
+            "tests_summary": j["tests_summary"], "head_sha": job.head_sha, "review": D.review(job)}
+
+
 @api.post("/jobs/{ref}/{action}")
 @limiter.limit("30/minute")
-def api_action(request: Request, ref: str, action: str, db: Session = Depends(get_db),
-               raw: str = Depends(_key_user)):
+def api_action(request: Request, ref: str, action: str, body: Dict[str, Any] = Body(default={}),
+               db: Session = Depends(get_db), raw: str = Depends(_key_user)):
     user, org_id = R.token_user(db, raw)
-    return _act(db, org_id, ref, action, user)
+    sha = None
+    if action == "approve-merge":
+        # From outside VOLT Operations, approval names the exact commit reviewed.
+        sha = str((body or {}).get("tested_commit") or "").strip()
+        if len(sha) < 7 or (body or {}).get("confirm_production") is not True:
+            raise HTTPException(status_code=422, detail={
+                "message": "To release, send tested_commit (the job's tested commit) and confirm_production: true, "
+                           "after the person confirmed this exact release.", "code": "confirmation_required"})
+    return _act(db, org_id, ref, action, user, expected_sha=sha)
 
 
 # ── runner (GitHub Actions OIDC) ────────────────────────────────────────────

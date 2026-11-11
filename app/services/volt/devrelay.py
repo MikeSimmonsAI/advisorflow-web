@@ -146,11 +146,13 @@ def create_token(db: Session, org_id: str, user: User, name: str) -> Dict[str, A
 
 def token_user(db: Session, raw: str) -> tuple:
     """(user, org_id) for a valid, unrevoked key whose owner is still a principal."""
-    if not raw or not raw.startswith("vdt_"):
-        _err(401, "A VOLT development access key is required.", "bad_token")
+    if not raw or not (raw.startswith("vdt_") or raw.startswith("vdo_")):
+        _err(401, "Sign in to VOLT development first (Connect ChatGPT), or use a personal access key.", "bad_token")
     t = db.query(VoltDevToken).filter(VoltDevToken.token_hash == _hash(raw)).first()
     if t is None or t.revoked_at is not None:
-        _err(401, "This access key is not valid. Make a new one in VOLT Operations → Development.", "bad_token")
+        _err(401, "This connection or key is not valid (it may have been revoked). Connect again.", "bad_token")
+    if (t.kind or "key") == "oauth" and (t.expires_at is None or t.expires_at < C.now()):
+        _err(401, "This sign-in expired. ChatGPT renews it automatically; if not, connect again.", "token_expired")
     user = db.get(User, t.user_id)
     if not is_principal(db, user, t.organization_id):
         _err(403, "This key's owner is no longer authorized for VOLT development.", "not_principal")
@@ -161,8 +163,9 @@ def token_user(db: Session, raw: str) -> tuple:
 def list_tokens(db: Session, org_id: str, user: User) -> List[Dict[str, Any]]:
     rows = (db.query(VoltDevToken).filter(VoltDevToken.organization_id == org_id, VoltDevToken.user_id == user.id)
             .order_by(VoltDevToken.created_at.desc()).all())
-    return [{"id": t.id, "name": t.name, "prefix": t.prefix, "created_at": C.iso(t.created_at),
-             "last_used_at": C.iso(t.last_used_at), "revoked": t.revoked_at is not None} for t in rows]
+    return [{"id": t.id, "name": t.name, "prefix": t.prefix, "kind": t.kind or "key",
+             "created_at": C.iso(t.created_at), "last_used_at": C.iso(t.last_used_at),
+             "revoked": t.revoked_at is not None} for t in rows]
 
 
 def revoke_token(db: Session, org_id: str, user: User, token_id: str) -> None:
@@ -243,9 +246,19 @@ def cancel(db: Session, job: VoltDevJob, user: User) -> VoltDevJob:
     return job
 
 
-def approve_merge(db: Session, job: VoltDevJob, user: User) -> VoltDevJob:
+def _sha_matches(full: Optional[str], given: str) -> bool:
+    g = (given or "").strip().lower()
+    return bool(full) and len(g) >= 7 and re.fullmatch(r"[0-9a-f]{7,40}", g) is not None and full.lower().startswith(g)
+
+
+def approve_merge(db: Session, job: VoltDevJob, user: User, expected_sha: Optional[str] = None) -> VoltDevJob:
     """Approve shipping THIS tested commit. The runner merges it only if the PR
-    still points at exactly this commit."""
+    still points at exactly this commit. `expected_sha` (required from ChatGPT)
+    is the commit the person reviewed; anything else is refused."""
+    if expected_sha is not None and not _sha_matches(job.merge_approved_sha if job.status == "merge_requested"
+                                                     else job.head_sha, expected_sha):
+        _err(409, "DEV-%d's tested commit is %s, not %s. Review the current result before approving."
+             % (job.number, (job.head_sha or "none")[:12], str(expected_sha)[:12]), "commit_mismatch")
     if job.status == "merge_requested":
         return job
     if job.status != "ready_to_test" or not job.tests_passed or not job.head_sha or not job.pr_number:

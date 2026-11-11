@@ -1265,6 +1265,12 @@ from app.routers.volt_dev_router import console as volt_dev_console_router  # no
 from app.routers.volt_dev_router import runner as volt_dev_runner_router  # noqa: E402
 app.include_router(volt_dev_api_router)      # /volt/dev/api/* - VOLT dev relay, personal access key (#571)
 app.include_router(volt_dev_runner_router)   # /volt/dev/runner/* - GitHub Actions OIDC only (#571)
+from app.routers.volt_dev_chatgpt_router import mcp as volt_dev_mcp_router  # noqa: E402
+from app.routers.volt_dev_chatgpt_router import oauth as volt_dev_oauth_router  # noqa: E402
+from app.routers.volt_dev_chatgpt_router import wellknown as volt_dev_wellknown_router  # noqa: E402
+app.include_router(volt_dev_wellknown_router)  # /.well-known/oauth-* - ChatGPT sign-in discovery (#571)
+app.include_router(volt_dev_oauth_router)      # /volt/dev/oauth/* - Connect ChatGPT (OAuth 2.1 + PKCE) (#571)
+app.include_router(volt_dev_mcp_router)        # /volt/dev/mcp - MCP server for the ChatGPT plugin (#571)
 app.include_router(volt_dev_console_router)  # /volt/dev/{org_id}/* - the two authorized principals (#571)
 from app.routers.wholesale_intel_router import router as wholesale_intel_router  # noqa: E402
 app.include_router(wholesale_intel_router)       # /wholesale/intel/* - verification, underwriting, report (#415)
