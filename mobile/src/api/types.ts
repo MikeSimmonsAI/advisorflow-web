@@ -28,6 +28,8 @@ export type AuthorizedContext = {
   organization_id?: string;
   organization_name?: string;
   organization_slug?: string;
+  /** Returned by /auth/my-contexts only for an actual outreach-program workspace. */
+  is_program?: boolean;
 };
 
 export type MyContexts = {

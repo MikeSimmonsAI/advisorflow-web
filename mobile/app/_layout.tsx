@@ -85,6 +85,8 @@ function Gate() {
       <Stack.Screen name="(sales)" options={{ headerShown: false }} />
       <Stack.Screen name="(manager)" options={{ headerShown: false }} />
       <Stack.Screen name="(advisor)" options={{ headerShown: false }} />
+      <Stack.Screen name="(program)" options={{ headerShown: false }} />
+      <Stack.Screen name="program/family/[id]" options={{ title: 'Family conversation', headerShown: false }} />
       <Stack.Screen name="(exec)" options={{ headerShown: false }} />
       <Stack.Screen name="(owner)" options={{ headerShown: false }} />
       <Stack.Screen name="switch" options={{ title: 'Switch experience', presentation: 'modal' }} />

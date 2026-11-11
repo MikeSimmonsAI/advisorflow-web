@@ -29,6 +29,7 @@ export type ExperienceKind =
   | 'sales'
   | 'manager'
   | 'advisor'
+  | 'program'
   | 'executive'
   | 'owner';
 
@@ -53,6 +54,7 @@ const ROUTES: Record<ExperienceKind, string> = {
   sales: '/(sales)/my-day',
   manager: '/(manager)/home',
   advisor: '/(advisor)/home',
+  program: '/(program)/home',
   executive: '/(exec)/command',
   owner: '/(owner)/command',
 };
@@ -98,14 +100,17 @@ function executiveExperience(ctx: AuthorizedContext): Experience {
 }
 
 function workspaceExperience(ctx: AuthorizedContext): Experience {
+  // Product selection comes from the SERVER's is_program membership flag;
+  // never guess it from a customer name or show another organization's tools.
+  const kind: ExperienceKind = ctx.is_program === true ? 'program' : 'advisor';
   return {
-    key: `advisor:${ctx.organization_id}`,
-    kind: 'advisor',
+    key: `${kind}:${ctx.organization_id}`,
+    kind,
     label: ctx.organization_name ?? ctx.label ?? 'Workspace',
-    detail: 'Customer workspace',
+    detail: ctx.is_program === true ? 'Outreach program' : 'Customer workspace',
     organizationId: ctx.organization_id,
     role: ctx.role,
-    route: ROUTES.advisor,
+    route: ROUTES[kind],
   };
 }
 
@@ -130,7 +135,7 @@ export function resolveExperiences(contexts: MyContexts | null): Experience[] {
   }
 
   const rank: Record<ExperienceKind, number> = {
-    sales: 0, manager: 1, advisor: 2, executive: 3, owner: 4,
+    sales: 0, manager: 1, advisor: 2, program: 2, executive: 3, owner: 4,
   };
   return out.sort((a, b) => rank[a.kind] - rank[b.kind]);
 }
@@ -186,6 +191,12 @@ export const TABS: Record<ExperienceKind, Array<{ name: string; title: string }>
     { name: 'team', title: 'Team' },
     { name: 'pipeline', title: 'Pipeline' },
     { name: 'approvals', title: 'Approvals' },
+    { name: 'more', title: 'More' },
+  ],
+  program: [
+    { name: 'home', title: 'Overview' },
+    { name: 'inbox', title: 'Inbox' },
+    { name: 'visits', title: 'Visits' },
     { name: 'more', title: 'More' },
   ],
   advisor: [

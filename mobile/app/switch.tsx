@@ -29,6 +29,7 @@ const BLURB: Record<ExperienceKind, string> = {
   sales: 'Your day, your deals, your calendar and your pay.',
   manager: 'Everything a rep has, plus your team, pipeline and approvals.',
   advisor: 'One customer workspace: their leads, replies and calendar.',
+  program: 'An authorized outreach program: a quick view of families, messages and visits.',
   executive: 'The organizations assigned to you, and what moved.',
   owner: 'Platform command: critical issues, customers and revenue.',
 };
