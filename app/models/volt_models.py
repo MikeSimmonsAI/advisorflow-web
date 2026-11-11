@@ -450,6 +450,49 @@ class VoltDevToken(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     last_used_at = Column(DateTime, nullable=True)
     revoked_at = Column(DateTime, nullable=True)
+    # 2026-11-10: a ChatGPT sign-in ("Connect ChatGPT", OAuth) is a row here
+    # too, so it shows and is revoked in the same list as a key. kind "key" is
+    # a pasted personal key (vdt_), kind "oauth" an access token (vdo_) that
+    # expires, renewed with its refresh token (vdr_, hash only, rotated on use).
+    kind = Column(String, nullable=False, default="key")
+    client_id = Column(String, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+    refresh_hash = Column(String, nullable=True, unique=True)
+    refresh_expires_at = Column(DateTime, nullable=True)
+
+
+class VoltDevOAuthClient(Base):
+    """An app allowed to ask a principal to connect (ChatGPT). Registered
+    dynamically (RFC 7591) or by hand; it may only send people back to an
+    allowed ChatGPT callback, so a registration grants nothing by itself."""
+    __tablename__ = "volt_dev_oauth_clients"
+
+    id = Column(String, primary_key=True)                     # the client_id
+    name = Column(String, nullable=False)
+    secret_hash = Column(String, nullable=True)                # NULL = public client (PKCE only)
+    redirect_uris = Column(Text, nullable=False)               # JSON list
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class VoltDevOAuthGrant(Base):
+    """One "Connect ChatGPT" attempt: the request ChatGPT made, the person's
+    decision on the VOLT sign-in page, and the one-time code it produced."""
+    __tablename__ = "volt_dev_oauth_grants"
+
+    id = Column(String, primary_key=True)                     # opaque request id in the consent URL
+    client_id = Column(String, nullable=False, index=True)
+    redirect_uri = Column(Text, nullable=False)
+    state = Column(Text, nullable=True)
+    code_challenge = Column(String, nullable=True)
+    scope = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    decision = Column(String, nullable=True)                   # allowed | denied
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    organization_id = Column(String, nullable=True)
+    code_hash = Column(String, nullable=True, unique=True)
+    code_expires_at = Column(DateTime, nullable=True)
+    used_at = Column(DateTime, nullable=True)
 
 
 class VoltDevNonce(Base):

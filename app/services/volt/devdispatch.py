@@ -177,3 +177,59 @@ def verify_deploys(db: Session, org_id: str) -> list:
                                 detail=j.deploy_detail))
             done.append(j)
     return done
+
+
+# ── 2026-11-10: a live token check and the review material for ChatGPT ──────
+
+_CHECK = {"at": None, "out": None}
+
+
+def check_github() -> Dict[str, Any]:
+    """Does the saved token actually work? Reads this workflow's definition and
+    its recent runs (Actions: read) - it starts nothing. Cached for 60 s.
+    The write half (dispatch) is proven by the first real job's 204."""
+    now = C.now()
+    if _CHECK["at"] and now - _CHECK["at"] < timedelta(seconds=60):
+        return _CHECK["out"]
+    if not configured():
+        out = {"configured": False, "ok": False, "detail": "VOLT_DEV_GITHUB_TOKEN is not set on the backend."}
+    else:
+        st, data, err = _gh("GET", "/repos/%s/actions/workflows/volt-dev.yml" % R.REPO)
+        if st == 200:
+            st2, runs, err2 = _gh("GET", "/repos/%s/actions/workflows/volt-dev.yml/runs?per_page=1" % R.REPO)
+            last = ((runs or {}).get("workflow_runs") or [{}])[0] if st2 == 200 else {}
+            out = {"configured": True, "ok": True, "workflow_state": (data or {}).get("state"),
+                   "detail": "The token can read the relay workflow.",
+                   "last_run": {"event": last.get("event"), "status": last.get("status"),
+                                "conclusion": last.get("conclusion"), "created_at": last.get("created_at"),
+                                "url": last.get("html_url")} if last else None}
+        else:
+            out = {"configured": True, "ok": False, "detail": err or ("GitHub answered %d" % st)}
+    _CHECK["at"], _CHECK["out"] = now, out
+    return out
+
+
+def review(job: VoltDevJob, max_chars: int = 14000) -> Dict[str, Any]:
+    """The change itself, for review outside GitHub: each changed file with its
+    diff, from the job's PR at the exact tested commit. There is no hosted
+    preview for VOLT branches (Render PR previews are off), so this plus the
+    test results is the review material."""
+    if not job.pr_number:
+        return {"available": False, "detail": "No pull request yet - the change has not been written."}
+    if not configured():
+        return {"available": False, "detail": "The backend cannot read GitHub (token not set)."}
+    st, files, err = _gh("GET", "/repos/%s/pulls/%d/files?per_page=100" % (R.REPO, job.pr_number))
+    if st != 200 or not isinstance(files, list):
+        return {"available": False, "detail": err or ("GitHub answered %d" % st)}
+    out, used = [], 0
+    for f in files:
+        patch = f.get("patch") or ""
+        room = max(0, max_chars - used)
+        clipped = patch[:room]
+        used += len(clipped)
+        out.append({"file": f.get("filename"), "status": f.get("status"), "additions": f.get("additions"),
+                    "deletions": f.get("deletions"), "diff": clipped,
+                    "diff_truncated": len(clipped) < len(patch)})
+    return {"available": True, "pr_url": job.pr_url, "tested_commit": job.head_sha, "files": out,
+            "preview": "No live preview site exists for VOLT branches; review the diff and tests here, "
+                       "or open the pull request."}

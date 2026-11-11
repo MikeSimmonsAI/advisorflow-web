@@ -119,6 +119,7 @@ const InvestorPortal = lazyPage(() => import('./pages/investor/InvestorPortal'))
 // VOLT Marketing (#535): public applicant portal + rep dashboard, and staff operations.
 const VoltPortal = lazyPage(() => import('./pages/volt/VoltPortal'))
 const VoltOps = lazyPage(() => import('./pages/volt/VoltOps'))
+const VoltDevConnect = lazyPage(() => import('./pages/volt/VoltDevConnect'))
 const RoofingMission = lazyPage(() => import('./pages/roofing/MissionControl'))
 const RoofingQueue = lazyPage(() => import('./pages/roofing/WorkQueue'))
 const RoofingConversations = lazyPage(() => import('./pages/roofing/Conversations'))
@@ -1492,6 +1493,8 @@ export default function App() {
         <Route path="/volt/*" element={<VoltPortal />} />
         {/* VOLT OPERATIONS: staff via Program Access; /volt/ops/* re-checks authority on every request. */}
         <Route path="/volt-ops/:orgId/*" element={<ProtectedRoute bare><VoltOps /></ProtectedRoute>} />
+        {/* Connect ChatGPT (#571): handles its own sign-in redirect with ?next= */}
+        <Route path="/volt-dev/connect" element={<VoltDevConnect />} />
         <Route path="/my-property/:token" element={<SellerTransaction />} />
         {/* ── CUSTOM COMMERCIAL AGREEMENTS ──
             NO ORGANIZATION ID ON THE CUSTOMER ROUTE, for the same reason the
