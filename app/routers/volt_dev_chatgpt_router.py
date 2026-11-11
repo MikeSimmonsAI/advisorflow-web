@@ -173,9 +173,17 @@ TOOLS = [
      "description": "Shows who you are signed in as, and whether the backend's GitHub connection works "
                     "(instant start). Starts nothing.",
      "inputSchema": _schema({}, []), "annotations": {"readOnlyHint": True, "openWorldHint": False}},
-    {"name": "list_change_requests", "title": "List VOLT change requests",
-     "description": "Recent VOLT development jobs with their current status.",
+    {"name": "my_latest_requests", "title": "My latest VOLT requests",
+     "description": "The VOLT change requests YOU submitted, newest first, each with its stage, a plain summary, "
+                    "the latest time and the next action. Use for 'show my latest VOLT requests'.",
      "inputSchema": _schema({}, []), "annotations": {"readOnlyHint": True, "openWorldHint": False}},
+    {"name": "list_change_requests", "title": "All VOLT change requests",
+     "description": "Recent VOLT development jobs from both authorized people, with their stage.",
+     "inputSchema": _schema({}, []), "annotations": {"readOnlyHint": True, "openWorldHint": False}},
+    {"name": "what_is_blocking", "title": "What is blocking a job",
+     "description": "Why a job is not moving: its stage, the recorded blocker or failure reason, and what to do next.",
+     "inputSchema": _schema({"ref": {"type": "string", "description": "The job reference, e.g. DEV-3."}}, ["ref"]),
+     "annotations": {"readOnlyHint": True, "openWorldHint": False}},
     {"name": "submit_change_request", "title": "Submit a VOLT change request",
      "description": "Ask for a change to VOLT Marketing (recruiting site, VOLT Operations, VOLT emails). "
                     "Starts the runner immediately. Submitting the identical title and text again returns "
@@ -189,11 +197,13 @@ TOOLS = [
          ["title", "request"]),
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
     {"name": "get_change_request", "title": "Status of one change request",
-     "description": "Status, timeline, test summary, pull request and the tested commit of one job.",
+     "description": "Check one job: stage, plain summary, latest time, next action, timeline, test results, "
+                    "pull request, GitHub run and the tested commit. Use for 'check DEV-n'.",
      "inputSchema": _schema({"ref": REF}, ["ref"]), "annotations": {"readOnlyHint": True, "openWorldHint": False}},
     {"name": "get_change_review", "title": "Review a change (diff and tests)",
-     "description": "The changed files with their code diff and the test results, at the exact tested commit. "
-                    "Use this before approving.",
+     "description": "Show what changed (each file's diff), the test and build results, and the exact tested "
+                    "commit - the material to present before asking for release approval. There is no live "
+                    "preview site for VOLT branches; this and the pull request are the review.",
      "inputSchema": _schema({"ref": REF}, ["ref"]), "annotations": {"readOnlyHint": True, "openWorldHint": False}},
     {"name": "retry_change_request", "title": "Retry a failed change request",
      "description": "Run a failed, test-failed or canceled job again (starts the runner).",
@@ -223,14 +233,28 @@ TOOLS = [
 ]
 
 
-def _job_view(j: Dict[str, Any]) -> Dict[str, Any]:
-    keep = ("ref", "title", "status", "status_label", "status_detail", "requested_by", "via", "created_at",
-            "updated_at", "attempt", "dispatch", "pr_url", "head_sha", "tests_passed", "tests_summary",
-            "changed_files", "run_url", "merge_approved_by", "merge_sha", "deploy_detail", "deployed_at", "can",
-            "events")
-    out = {k: j.get(k) for k in keep if k in j}
-    if j.get("status") == "ready_to_test" and j.get("tests_passed"):
-        out["next"] = ("Tests passed. To release, review it (get_change_review), then the person must confirm "
+DASHBOARD = "https://app.evosyspro.live/volt-ops/%s/dev?job=%s"
+
+
+def _job_view(j: Dict[str, Any], org_id: Optional[str] = None) -> Dict[str, Any]:
+    """The same authoritative record the Development dashboard shows: the
+    shared `progress` reading (stage, summary, blocker, next action, latest
+    time) first, then the evidence behind it."""
+    keep = ("ref", "title", "status", "status_label", "requested_by", "via", "created_at", "updated_at",
+            "attempt", "dispatch", "branch", "pr_number", "pr_url", "head_sha", "tests_passed", "tests_summary",
+            "changed_files", "run_url", "merge_approved_by", "merge_sha", "deploy_targets", "deploy_detail",
+            "deployed_at", "can", "events")
+    p = j.get("progress") or {}
+    out = {"ref": j.get("ref"), "stage": p.get("stage"), "summary": p.get("summary"),
+           "blocking": p.get("blocker"), "next_action": p.get("next_action"), "latest_at": p.get("latest_at"),
+           "tested_commit": p.get("tested_commit"), "release_ready": p.get("release_ready")}
+    out.update({k: j.get(k) for k in keep if k in j})
+    if org_id:
+        out["dashboard_url"] = DASHBOARD % (org_id, j.get("number"))
+    out["preview"] = ("No live preview site exists for VOLT branches. Review material: get_change_review "
+                      "(diff + tests) and the pull request." if j.get("pr_url") else None)
+    if out.get("release_ready"):
+        out["next"] = ("To release: show the person the change (get_change_review) and ask them to confirm "
                        "releasing %s at commit %s." % (j["ref"], (j.get("head_sha") or "")[:12]))
     return out
 
@@ -244,11 +268,23 @@ def _auth(db: Session, request: Request):
 def _call(db: Session, user: User, org_id: str, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     from app.routers.volt_dev_router import _act, _refresh
     if name == "relay_status":
-        return {"you": user.full_name or user.email, "email": user.email, "volt_development_principal": True,
-                "instant_start_configured": D.configured(), "github": D.check_github()}
+        return relay_status(db, user, org_id)
     if name == "list_change_requests":
         _refresh(db, org_id)
-        return {"jobs": [_job_view(j) for j in R.list_jobs(db, org_id, 20)]}
+        return {"jobs": [_job_view(j, org_id) for j in R.list_jobs(db, org_id, 20)]}
+    if name == "my_latest_requests":
+        _refresh(db, org_id)
+        from app.models.volt_models import VoltDevJob
+        rows = (db.query(VoltDevJob).filter(VoltDevJob.organization_id == org_id, VoltDevJob.requested_by == user.id)
+                .order_by(VoltDevJob.number.desc()).limit(10).all())
+        return {"you": user.full_name or user.email,
+                "jobs": [_job_view(R.job_dict(db, j), org_id) for j in rows],
+                "note": None if rows else "You have not submitted any VOLT requests yet."}
+    if name == "what_is_blocking":
+        _refresh(db, org_id)
+        v = _job_view(R.job_dict(db, R.by_ref(db, org_id, args.get("ref")), events=True), org_id)
+        return {k: v.get(k) for k in ("ref", "stage", "summary", "blocking", "next_action", "latest_at",
+                                       "status_label", "dispatch", "run_url", "dashboard_url")}
     if name == "submit_change_request":
         body = {"title": args.get("title"), "request": args.get("request"),
                 "idempotency_key": args.get("idempotency_key")}
@@ -262,36 +298,57 @@ def _call(db: Session, user: User, org_id: str, name: str, args: Dict[str, Any])
         if created:
             D.dispatch(db, job, "start")
             db.commit()
-        out = _job_view(R.job_dict(db, job, events=True))
+        out = _job_view(R.job_dict(db, job, events=True), org_id)
         out["created"] = created
         out["note"] = ("New job. 'Dispatched' means GitHub accepted the start request; it becomes 'Running' when "
                        "the runner claims it." if created else "This exact request already exists; nothing new was sent.")
         return out
     if name == "get_change_request":
         _refresh(db, org_id)
-        return _job_view(R.job_dict(db, R.by_ref(db, org_id, args.get("ref")), events=True))
+        return _job_view(R.job_dict(db, R.by_ref(db, org_id, args.get("ref")), events=True), org_id)
     if name == "get_change_review":
         job = R.by_ref(db, org_id, args.get("ref"))
         j = R.job_dict(db, job)
-        return {"ref": j["ref"], "status_label": j["status_label"], "tests_passed": j["tests_passed"],
-                "tests_summary": j["tests_summary"], "review": D.review(job)}
+        return {"ref": j["ref"], "stage": j["progress"]["stage"], "summary": j["progress"]["summary"],
+                "tested_commit": job.head_sha, "release_ready": j["progress"]["release_ready"],
+                "tests_passed": j["tests_passed"], "tests_summary": j["tests_summary"], "pr_url": j["pr_url"],
+                "run_url": j["run_url"], "review": D.review(job), "dashboard_url": DASHBOARD % (org_id, job.number)}
     if name == "retry_change_request":
-        return _job_view(_act(db, org_id, args.get("ref"), "retry", user))
+        return _job_view(_act(db, org_id, args.get("ref"), "retry", user), org_id)
     if name == "cancel_change_request":
-        return _job_view(_act(db, org_id, args.get("ref"), "cancel", user))
+        return _job_view(_act(db, org_id, args.get("ref"), "cancel", user), org_id)
     if name == "resend_start":
-        return _job_view(_act(db, org_id, args.get("ref"), "dispatch", user))
+        return _job_view(_act(db, org_id, args.get("ref"), "dispatch", user), org_id)
     if name == "approve_release":
         if args.get("confirm_production") is not True:
             R._err(422, "confirm_production must be true, after the person confirmed this exact release.", "not_confirmed")
         sha = str(args.get("tested_commit") or "")
         if len(sha.strip()) < 7:
             R._err(422, "Give the tested commit (at least 7 characters).", "commit_required")
-        out = _job_view(_act(db, org_id, args.get("ref"), "approve-merge", user, expected_sha=sha))
+        out = _job_view(_act(db, org_id, args.get("ref"), "approve-merge", user, expected_sha=sha), org_id)
         out["note"] = ("Approved for production at %s. The runner merges only this commit; 'Deployed - verified "
                        "running' appears after production is checked." % (out.get("head_sha") or "")[:12])
         return out
     raise KeyError(name)
+
+
+def _mask(e: str) -> str:
+    local, _, dom = (e or "").partition("@")
+    return (local[:2] + "***@" + dom) if dom else "***"
+
+
+def relay_status(db: Session, user: User, org_id: str) -> Dict[str, Any]:
+    """Who is signed in, and what the relay can prove about its own health."""
+    from app.models.volt_models import VoltDevRunnerSeen
+    row = db.get(VoltDevRunnerSeen, "runner")
+    from app.services.volt import common as C
+    return {"you": user.full_name or user.email, "email": user.email, "volt_development_principal": True,
+            "instant_start_configured": D.configured(), "github": D.check_github(),
+            "runner_last_seen": None if row is None or row.last_seen_at is None else {
+                "at": C.iso(row.last_seen_at), "started_by": row.event, "reason": row.reason,
+                "claude_credential_present": row.claude_credentials},
+            "email_notices_to": [_mask(e) for e in R.notify_list()],
+            "dashboard_url": "https://app.evosyspro.live/volt-ops/%s/dev" % org_id}
 
 
 def _rpc_error(mid, code: int, message: str) -> Dict[str, Any]:

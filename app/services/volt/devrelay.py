@@ -87,6 +87,79 @@ def display_status(job) -> str:
             return base + " - waiting for the scheduled check (instant start not set up)"
         return base
     return STATUS_LABELS.get(job.status, job.status)
+def progress(job, events=None) -> Dict[str, Any]:
+    """ONE plain-language reading of a job, computed here and shown by both the
+    Development dashboard and ChatGPT, so they cannot disagree. Every claim is
+    tied to recorded evidence (a 204 from GitHub, the runner's own report, a
+    production check) - never to elapsed time."""
+    st, ref = job.status, "DEV-%d" % job.number
+    sha = (job.head_sha or "")[:12]
+    waiting = st in ("queued", "merge_requested") and job.lease_run_id is None
+    blocker, nxt = None, None
+    if job.blocked_reason and waiting:
+        stage = "Blocked"
+        blocker = job.blocked_reason
+        nxt = "Fix the cause, then use 'Send start request again'."
+        summary = "%s is blocked: %s" % (ref, job.blocked_reason)
+    elif st == "queued":
+        if job.dispatch_state == "dispatched":
+            stage, summary = "Dispatched", "%s is saved and GitHub accepted the start request; the runner has not picked it up yet." % ref
+            nxt = "Wait for the runner (usually 1-2 minutes). It is re-sent automatically if nothing happens."
+        elif job.dispatch_state == "failed":
+            stage, summary = "Dispatched", "%s is saved, but the last start request failed (%s). It is re-sent automatically with backoff." % (ref, job.dispatch_error or "no detail")
+            blocker = job.dispatch_error
+            nxt = "Nothing to do unless it turns Blocked."
+        elif job.dispatch_state == "not_configured":
+            stage, summary = "Blocked", "%s is saved, but instant start is not configured on the backend." % ref
+            blocker, nxt = "VOLT_DEV_GITHUB_TOKEN is not set.", "Set the backend token."
+        else:
+            stage, summary = "Submitted", "%s is saved; the start request is being sent." % ref
+    elif st == "claude_working":
+        stage, summary = "Running", "The runner claimed %s and Claude is writing the change." % ref
+        nxt = "Wait for tests."
+    elif st == "coding_completed":
+        stage, summary = "Testing", "Claude finished %s; the VOLT tests and the frontend build are running." % ref
+    elif st == "ready_to_test":
+        stage = "Ready to review"
+        summary = "%s is written, its tests and build passed, and PR #%s is open at tested commit %s." % (ref, job.pr_number, sha)
+        nxt = "Review the change and tests, then approve release of commit %s - or retry/cancel." % sha
+    elif st == "tests_failed":
+        stage, summary = "Failed", "%s's tests or build failed at commit %s. Nothing was released." % (ref, sha)
+        blocker, nxt = job.tests_summary or job.status_detail, "Retry (optionally with a clearer request) or cancel."
+    elif st == "failed":
+        stage, summary = "Failed", "%s failed: %s" % (ref, job.status_detail or "no detail")
+        blocker, nxt = job.status_detail, "Retry or cancel."
+    elif st == "merge_requested":
+        if job.lease_run_id:
+            stage, summary = "Approved", "Commit %s was approved; the runner is merging it." % (job.merge_approved_sha or "")[:12]
+        else:
+            stage = "Approved"
+            summary = "Commit %s was approved for production; waiting for the runner to merge it (%s)." % (
+                (job.merge_approved_sha or "")[:12], job.dispatch_state or "start request pending")
+    elif st == "merged":
+        stage = "Deploying"
+        summary = "Merged as %s. Waiting until production is seen running it (%s)." % ((job.merge_sha or "")[:12], job.deploy_targets or "no service")
+        nxt = "Nothing to do; checked automatically."
+    elif st == "deployed":
+        if not (job.deploy_targets or ""):
+            stage = "No runtime deployment needed"
+            summary = "%s is merged (%s). It changed only tests or documentation, so no running service had to change." % (ref, (job.merge_sha or "")[:12])
+        else:
+            stage = "Deployed and verified"
+            summary = "%s is running in production: %s" % (ref, job.deploy_detail or "verified")
+        nxt = "Roll back if something is wrong (a tested revert, same approval path)."
+    elif st == "canceled":
+        stage, summary = "Canceled", "%s was canceled. Nothing was released." % ref
+    else:
+        stage, summary = st, ref
+    latest = job.updated_at or job.created_at
+    if events:
+        latest = max([latest] + [e.at for e in events if e.at])
+    return {"stage": stage, "summary": summary, "blocker": blocker, "next_action": nxt,
+            "latest_at": C.iso(latest), "release_ready": st == "ready_to_test" and bool(job.tests_passed),
+            "tested_commit": job.head_sha, "runtime_deploy": (job.deploy_targets or "") if job.deploy_targets is not None else None}
+
+
 TERMINAL = ("deployed", "failed", "canceled", "tests_failed")
 # What the runner may report, from which states.
 RUNNER_MOVES = {
@@ -234,6 +307,7 @@ def retry(db: Session, job: VoltDevJob, user: User) -> VoltDevJob:
     job.tests_passed = job.tests_summary = None
     job.pr_number = job.pr_url = job.head_sha = job.branch = job.preview_url = None
     job.merge_requested_by = job.merge_requested_at = job.merge_approved_sha = None
+    job.blocked_reason, job.dispatch_count = None, 0
     _set(db, job, "queued", "Retry #%d" % job.attempt, user=user, action="retry")
     return job
 
@@ -308,7 +382,9 @@ def job_dict(db: Session, job: VoltDevJob, events: bool = False) -> Dict[str, An
            "can": {"approve_merge": job.status == "ready_to_test" and bool(job.tests_passed),
                    "retry": job.status in ("failed", "tests_failed", "canceled"),
                    "cancel": job.status in ("queued", "ready_to_test", "tests_failed"),
-                   "rollback": job.status in ("merged", "deployed") and bool(job.merge_sha)}}
+                   "rollback": job.status in ("merged", "deployed") and bool(job.merge_sha),
+                   "resend": job.status in ("queued", "merge_requested") and job.lease_run_id is None}}
+    rows = None
     if events:
         names = {}
         rows = db.query(VoltDevEvent).filter(VoltDevEvent.job_id == job.id).order_by(VoltDevEvent.at.asc()).all()
@@ -319,6 +395,8 @@ def job_dict(db: Session, job: VoltDevJob, events: bool = False) -> Dict[str, An
         out["events"] = [{"at": C.iso(e.at), "action": e.action, "status": e.status, "detail": e.detail,
                           "actor": names.get(e.actor_user_id) if e.actor_kind == "user" else
                           ("GitHub runner" if e.actor_kind == "runner" else "System")} for e in rows]
+    out["progress"] = progress(job, rows)
+    out["blocked_reason"] = job.blocked_reason
     return out
 
 
@@ -369,19 +447,52 @@ def check_claims(db: Session, claims: Dict[str, Any]) -> Dict[str, Any]:
     return claims
 
 
-def _expire_leases(db: Session) -> None:
+def _expire_leases(db: Session) -> list:
+    """A run that stopped reporting (crashed, timed out, cancelled) loses its
+    job: claimed work fails with the reason; an approved merge goes back to
+    waiting so it is merged by the next run."""
     now = C.now()
-    for j in (db.query(VoltDevJob).filter(VoltDevJob.status.in_(("claude_working", "coding_completed")),
+    out = []
+    for j in (db.query(VoltDevJob).filter(VoltDevJob.status.in_(("claude_working", "coding_completed", "merge_requested")),
+                                          VoltDevJob.lease_run_id.isnot(None),
                                           VoltDevJob.lease_expires_at < now).all()):
         j.lease_run_id = j.lease_expires_at = None
-        _set(db, j, "failed", "The runner stopped before finishing (lease expired). Retry to run it again.",
+        if j.status == "merge_requested":
+            _audit_user(db, j, None, "lease_expired", status=j.status,
+                        detail="The merging run stopped; the approved commit waits for the next run.", kind="system")
+            continue
+        _set(db, j, "failed", "The runner stopped before finishing (lease expired: no report for 60 minutes). Retry to run it again.",
              kind="system", action="lease_expired")
+        out.append(j)
+    return out
 
 
-def runner_next(db: Session, claims: Dict[str, Any]) -> Dict[str, Any]:
+CLAUDE_MISSING = ("Claude cannot run: the repository has no Claude credential in its GitHub Actions secrets "
+                  "(CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY). Add one, then 'Send start request again'.")
+
+
+def record_runner(db: Session, claims: Dict[str, Any], body: Optional[Dict[str, Any]]) -> Optional[bool]:
+    """Remember what the runner told us. Returns claude_credentials (None = not reported)."""
+    from app.models.volt_models import VoltDevRunnerSeen
+    row = db.get(VoltDevRunnerSeen, "runner")
+    if row is None:
+        row = VoltDevRunnerSeen(id="runner")
+        db.add(row)
+    body = body or {}
+    creds = body.get("claude_credentials")
+    creds = None if creds is None else (str(creds).lower() in ("1", "true", "yes"))
+    row.last_seen_at, row.run_id = C.now(), str(claims.get("run_id") or "")[:40]
+    row.event = str(claims.get("event_name") or "")[:40]
+    row.reason = str(body.get("reason") or "")[:200] or None
+    row.claude_credentials = creds
+    return creds
+
+
+def runner_next(db: Session, claims: Dict[str, Any], body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Hand the runner ONE thing to do: merges first, then the oldest queued
     job (VOLT tenants only). Plus the merged jobs awaiting deploy proof."""
     _expire_leases(db)
+    creds = record_runner(db, claims, body)
     run_id = str(claims.get("run_id") or "")
     run_url = "https://github.com/%s/actions/runs/%s" % (REPO, run_id) if run_id else None
     deploy_watch = [{"id": j.id, "ref": "DEV-%d" % j.number, "merge_sha": j.merge_sha,
@@ -389,15 +500,22 @@ def runner_next(db: Session, claims: Dict[str, Any]) -> Dict[str, Any]:
                     for j in db.query(VoltDevJob).filter(VoltDevJob.status == "merged").all()]
     def _more(exclude):
         return (db.query(VoltDevJob).filter(VoltDevJob.status.in_(("queued", "merge_requested")),
+                                            VoltDevJob.blocked_reason.is_(None),
                                             VoltDevJob.lease_run_id.is_(None), VoltDevJob.id != exclude).count())
-    m = (db.query(VoltDevJob).filter(VoltDevJob.status == "merge_requested", VoltDevJob.lease_run_id.is_(None))
+    m = (db.query(VoltDevJob).filter(VoltDevJob.status == "merge_requested", VoltDevJob.lease_run_id.is_(None),
+                                     VoltDevJob.blocked_reason.is_(None))
          .order_by(VoltDevJob.merge_requested_at.asc()).first())
     if m is not None:
         m.lease_run_id, m.lease_expires_at = run_id, C.now() + LEASE
         _audit_user(db, m, None, "runner_merging", status=m.status, detail=run_url, kind="runner")
         return {"action": "merge", "job": _runner_job(m), "deploy_watch": deploy_watch, "more": _more(m.id)}
-    q = (db.query(VoltDevJob).filter(VoltDevJob.status == "queued").order_by(VoltDevJob.created_at.asc())
-         .with_for_update(skip_locked=True).first())
+    q = (db.query(VoltDevJob).filter(VoltDevJob.status == "queued", VoltDevJob.blocked_reason.is_(None))
+         .order_by(VoltDevJob.created_at.asc()).with_for_update(skip_locked=True).first())
+    if q is not None and q.kind != "revert" and creds is False:
+        # Never pretend: a run without a Claude credential cannot write code.
+        q.blocked_reason = CLAUDE_MISSING
+        _audit_user(db, q, None, "blocked", status=q.status, detail=CLAUDE_MISSING, kind="runner")
+        return {"action": "none", "deploy_watch": deploy_watch, "more": 0, "blocked": q.id}
     if q is not None:
         q.lease_run_id, q.lease_expires_at, q.run_url = run_id, C.now() + LEASE, run_url
         q.branch = "volt-dev/dev-%d-a%d" % (q.number, q.attempt)
@@ -492,8 +610,9 @@ def runner_report(db: Session, claims: Dict[str, Any], job_id: str, body: Dict[s
 
 # ── notifications ───────────────────────────────────────────────────────────
 
-NOTIFY = {"ready_to_test": "is ready to test", "tests_failed": "failed its tests", "failed": "failed",
-          "merged": "was merged and is deploying", "deployed": "is live in production"}
+NOTIFY = {"ready_to_test": "is ready to review", "tests_failed": "failed its tests", "failed": "failed",
+          "blocked": "is blocked and needs attention",
+          "merged": "was merged and is deploying", "deployed": "is finished"}
 
 
 def notify_list() -> List[str]:
@@ -509,16 +628,17 @@ def notify(db: Session, job: VoltDevJob, status: str) -> List[Any]:
     from app.services.volt import mail
     prog = C.program_for_org(db, job.organization_id)
     link = "%s/volt-ops/%s/dev?job=%s" % ("https://app.evosyspro.live", job.organization_id, job.number)
-    paras = ["<b>DEV-%d: %s</b> %s." % (job.number, mail._e(job.title), NOTIFY[status])]
-    if job.status_detail:
-        paras.append(mail._e(job.status_detail))
-    if status == "ready_to_test":
-        paras.append("Tests passed. Review the change and approve it for production in VOLT Operations → Development.")
-    if status == "deployed" and job.deploy_detail:
-        paras.append(mail._e(job.deploy_detail))
+    pr = progress(job)
+    paras = ["<b>DEV-%d: %s</b> %s." % (job.number, mail._e(job.title), NOTIFY[status]),
+             "<b>%s.</b> %s" % (mail._e(pr["stage"]), mail._e(pr["summary"]))]
+    if pr.get("next_action"):
+        paras.append("Next: " + mail._e(pr["next_action"]))
+    paras.append("Open the Development page (or ask ChatGPT \"Check DEV-%d\") for the timeline, tests and the change."
+                 % job.number)
     rows = []
     for to in notify_list():
         rows.append(mail.queue(db, prog, kind="dev_" + status, key="dev:%s:%s:%d:%s" % (job.id, status, job.attempt, to),
-                               to=to, subject="VOLT DEV-%d %s" % (job.number, NOTIFY[status]),
+                               to=to, subject="VOLT DEV-%d %s" % (job.number, NOTIFY[status] if status != "deployed"
+                                                                   else "is finished: " + pr["stage"].lower()),
                                html=mail._page(prog, "VOLT development update", paras, ("Open Development", link))))
     return [r for r in rows if r is not None]

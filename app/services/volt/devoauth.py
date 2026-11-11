@@ -73,6 +73,12 @@ def _oauth_err(status: int, error: str, description: str):
     raise HTTPException(status_code=status, detail={"error": error, "error_description": description})
 
 
+def resources() -> List[str]:
+    """What a VOLT sign-in may be used for (RFC 8707 resource indicators)."""
+    base = issuer()
+    return [base, base + "/volt/dev/mcp", base + "/volt/dev/api"]
+
+
 def redirect_allowed(uri: str) -> bool:
     try:
         u = urlparse(uri)
@@ -181,9 +187,12 @@ def start(db: Session, q: Dict[str, str]) -> str:
         return back("invalid_request", "PKCE must use S256.")
     if not challenge and not c.secret_hash:
         return back("invalid_request", "PKCE (S256) is required.")
+    resource = (q.get("resource") or "").strip().rstrip("/") or None
+    if resource and resource not in resources():
+        return back("invalid_target", "This server only issues sign-ins for VOLT development.")
     g = VoltDevOAuthGrant(id=secrets.token_urlsafe(24), client_id=c.id, redirect_uri=redirect_uri,
                           state=(state or None) and state[:1000], code_challenge=challenge,
-                          scope=SCOPE, expires_at=C.now() + REQUEST_TTL)
+                          scope=SCOPE, resource=resource, expires_at=C.now() + REQUEST_TTL)
     db.add(g)
     db.flush()
     return consent_base() + "/volt-dev/connect?request=" + g.id
@@ -284,6 +293,9 @@ def token(db: Session, form: Dict[str, str], basic: Optional[tuple]) -> Dict[str
             _oauth_err(400, "invalid_grant", "The code expired. Connect again.")
         if form.get("redirect_uri") and form.get("redirect_uri") != g.redirect_uri:
             _oauth_err(400, "invalid_grant", "redirect_uri does not match.")
+        want = (form.get("resource") or "").strip().rstrip("/") or None
+        if want and (want not in resources() or (g.resource and want != g.resource)):
+            _oauth_err(400, "invalid_target", "The resource does not match the sign-in.")
         if not _verify_pkce(g.code_challenge, form.get("code_verifier")):
             _oauth_err(400, "invalid_grant", "PKCE verification failed.")
         g.used_at = C.now()

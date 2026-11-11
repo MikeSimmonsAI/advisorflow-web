@@ -54,6 +54,9 @@ jobs:
         name: Ask VOLT for work (merges, rollbacks and deploy proof happen here)
         env:
           START_REASON: ${{ inputs.reason || github.event_name }}
+          # true/false only: whether a Claude credential exists. The relay marks
+          # a job Blocked (with the reason) instead of running without one.
+          HAS_CLAUDE: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '' }}
         run: |
           echo "Started for: $START_REASON"
           python3 scripts/volt_dev/runner.py next

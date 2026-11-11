@@ -2011,6 +2011,49 @@ async def _acquisition_workforce_loop():
         await asyncio.sleep(interval)
 
 
+async def _volt_dev_relay_loop():
+    """VOLT development relay (#571): every 2 minutes, one pass across
+    instances - expire dead runner leases, verify deploys, re-send missed
+    GitHub starts with backoff (Blocked after a bounded number), and once per
+    process check the GitHub token. Idle passes are cheap (a few indexed
+    queries); the ledger is written when there is relay work, and hourly
+    while idle so a quiet relay never reads as stopped."""
+    from app.services.volt import devdispatch as _vdd
+    from app.services.job_run_service import record_job_run
+    from app.models.job_models import JobName
+    from app.models.volt_models import VoltDevJob
+    from app.deps import SessionLocal
+    import logging as _log
+    _logger = _log.getLogger("volt_dev_relay_loop")
+    import time as _time
+    _last_logged = 0.0
+    await asyncio.sleep(70)  # startup delay - offset from the other loops
+    while True:
+        try:
+            if await _pass_claimed(JobName.VOLT_DEV_RELAY, 120):
+                def _busy() -> bool:
+                    db = SessionLocal()
+                    try:
+                        return db.query(VoltDevJob.id).filter(VoltDevJob.status.in_(
+                            ("queued", "merge_requested", "claude_working", "coding_completed", "merged"))).first() is not None
+                    finally:
+                        db.close()
+                def _one_pass():
+                    db = SessionLocal()
+                    try:
+                        return _vdd.watch_pass(db)
+                    finally:
+                        db.close()
+                _checkin = (_time.monotonic() - _last_logged) >= 3600
+                if _checkin or not _vdd._SELFTEST["done"] or await _off_loop(_busy):
+                    _last_logged = _time.monotonic()
+                    async with record_job_run(JobName.VOLT_DEV_RELAY, db_factory=SessionLocal) as _m:
+                        _m.update(await _off_loop(_one_pass))
+        except Exception as exc:                               # noqa: BLE001
+            _logger.error("volt dev relay watch error: %s", exc, exc_info=True)
+        await asyncio.sleep(120)
+
+
 async def _program_sla_loop():
     """Location outreach programs: re-alert HOT replies past their SLA, and
     (only when PROGRAM_EMAIL_TOUCHES_SENDING is on) send due campaign emails.
@@ -2618,6 +2661,7 @@ async def on_startup():
         JobName.WHOLESALE_EXCEPTIONS: _wholesale_exception_loop,
         JobName.PROGRAM_SLA:          _program_sla_loop,
         JobName.WEB_PUSH:             _web_push_loop,
+        JobName.VOLT_DEV_RELAY:       _volt_dev_relay_loop,
         JobName.AI_WORKFORCE_WORKER:  _ai_workforce_worker_loop,
         JobName.ACQUISITION_WORKFORCE: _acquisition_workforce_loop,
     }

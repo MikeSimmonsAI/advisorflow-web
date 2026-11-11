@@ -108,25 +108,79 @@ def needs_runner(job: VoltDevJob) -> bool:
     return job.status in ("queued", "merge_requested") and job.lease_run_id is None
 
 
-def resend_stale(db: Session, org_id: str) -> int:
-    """Recovery for a missed event: a job waiting for the runner whose last
-    start request is missing, failed or older than 10 minutes is re-sent -
-    one dispatch covers all waiting work (the runner keeps going until none is
-    left)."""
+MAX_SENDS = 6                     # start requests per job before it is marked Blocked
+
+
+def _due(j: VoltDevJob, now) -> bool:
+    """Bounded backoff. A failed request is retried after 0, 1, 3, 7, 15 min;
+    a request GitHub accepted but no runner answered, every 10 minutes."""
+    if j.dispatched_at is None or j.dispatch_state is None:
+        return True                                       # saved, but the start was never sent (lost)
+    n = max(1, j.dispatch_count or 1)
+    if j.dispatch_state == "failed":
+        wait = timedelta(minutes=min(2 ** (n - 1) - 1, 15))
+    else:
+        wait = RESEND_AFTER
+    return now - j.dispatched_at >= wait
+
+
+def resend_stale(db: Session, org_id: Optional[str] = None) -> Dict[str, Any]:
+    """Recovery for a missed or failed start. Runs from the backend's own
+    background pass every 2 minutes (no one has to open anything) and when a
+    job list is viewed. One dispatch covers all waiting work: the runner keeps
+    going until none is left. After MAX_SENDS unanswered requests the job is
+    marked Blocked with the reason, and stops costing anything.
+    Returns {"sent": n, "blocked": [jobs]}."""
+    out: Dict[str, Any] = {"sent": 0, "blocked": []}
     if not configured():
-        return 0
-    waiting = [j for j in db.query(VoltDevJob).filter(VoltDevJob.organization_id == org_id,
-                                                      VoltDevJob.status.in_(("queued", "merge_requested"))).all()
-               if needs_runner(j)]
+        return out
+    q = db.query(VoltDevJob).filter(VoltDevJob.status.in_(("queued", "merge_requested")),
+                                    VoltDevJob.blocked_reason.is_(None))
+    if org_id:
+        q = q.filter(VoltDevJob.organization_id == org_id)
+    waiting = sorted([j for j in q.all() if needs_runner(j)], key=lambda j: j.created_at)
     now = C.now()
-    stale = [j for j in waiting if j.dispatched_at is None or j.dispatch_state != "dispatched"
-             or now - j.dispatched_at > RESEND_AFTER]
-    if not stale:
-        return 0
-    if any(j.dispatched_at and now - j.dispatched_at <= RESEND_AFTER and j.dispatch_state == "dispatched" for j in waiting):
-        return 0                                          # a fresh request is already on its way
-    oldest = min(stale, key=lambda j: j.created_at)
-    return 1 if dispatch(db, oldest, "resend") == "dispatched" else 0
+    if any(j.dispatch_state == "dispatched" and j.dispatched_at and now - j.dispatched_at < RESEND_AFTER
+           for j in waiting) and not any(j.dispatched_at is None for j in waiting):
+        return out                                        # a fresh request is already on its way
+    for j in waiting:
+        if not _due(j, now):
+            continue
+        if (j.dispatch_count or 0) >= MAX_SENDS:
+            j.blocked_reason = ("GitHub did not start the runner after %d start requests (last: %s). "
+                                "Check the repository's Actions settings, then send the start request again."
+                                % (j.dispatch_count, j.dispatch_error or "accepted, never picked up"))
+            db.add(VoltDevEvent(job_id=j.id, actor_kind="system", action="blocked", status=j.status,
+                                detail=j.blocked_reason))
+            out["blocked"].append(j)
+            continue
+        if dispatch(db, j, "resend") == "dispatched":
+            out["sent"] += 1
+        break                                             # one request per pass
+    return out
+
+
+def selftest(db: Session) -> Dict[str, Any]:
+    """Prove the saved token works without waiting for a real job: a read
+    check now, and - only until the runner has been seen started by a
+    workflow_dispatch - ONE dispatch with no job (the run finds no work and
+    reports whether a Claude credential exists). Once per process at most."""
+    from app.models.volt_models import VoltDevRunnerSeen
+    row = db.get(VoltDevRunnerSeen, "runner")
+    if row is None:
+        row = VoltDevRunnerSeen(id="runner")
+        db.add(row)
+    chk = check_github()
+    row.token_check_at, row.token_check = C.now(), json.dumps(chk)[:2000]
+    log.info("volt dev relay token check: ok=%s detail=%s", chk.get("ok"), chk.get("detail"))
+    out = {"token_ok": chk.get("ok")}
+    if chk.get("ok") and row.event != "workflow_dispatch":
+        st, _b, err = _gh("POST", "/repos/%s/actions/workflows/volt-dev.yml/dispatches" % R.REPO,
+                          {"ref": "main", "inputs": {"reason": "token check (no job)"}})
+        row.selftest_dispatch_at = C.now()
+        out["selftest_dispatch"] = st
+        log.info("volt dev relay self-test dispatch: GitHub answered %s%s", st, (" (%s)" % err) if err else "")
+    return out
 
 
 # ── deploy proof from the backend itself ───────────────────────────────────
@@ -233,3 +287,45 @@ def review(job: VoltDevJob, max_chars: int = 14000) -> Dict[str, Any]:
     return {"available": True, "pr_url": job.pr_url, "tested_commit": job.head_sha, "files": out,
             "preview": "No live preview site exists for VOLT branches; review the diff and tests here, "
                        "or open the pull request."}
+
+
+# ── the backend's own watch (every 2 minutes; nobody has to open a page) ────
+
+_SELFTEST = {"done": False}
+
+
+def watch_pass(db: Session) -> Dict[str, Any]:
+    """Expire dead leases, verify deploys, re-send missed starts with backoff
+    (Blocked after MAX_SENDS), and - once per process - check the GitHub token.
+    Sends the matching notices. Never raises."""
+    from app.services.volt import mail
+    rows, out = [], {}
+    try:
+        expired = R._expire_leases(db)
+        for j in expired:
+            rows += R.notify(db, j, "failed")
+        orgs = {o for (o,) in db.query(VoltDevJob.organization_id).filter(VoltDevJob.status == "merged").distinct()}
+        deployed = []
+        for org in orgs:
+            deployed += verify_deploys(db, org)
+        for j in deployed:
+            rows += R.notify(db, j, "deployed")
+        rs = resend_stale(db)
+        for j in rs["blocked"]:
+            rows += R.notify(db, j, "blocked")
+        out = {"expired": len(expired), "deployed": len(deployed), "resent": rs["sent"], "blocked": len(rs["blocked"])}
+        if not _SELFTEST["done"]:
+            _SELFTEST["done"] = True
+            if configured():
+                out["selftest"] = selftest(db)
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        log.exception("volt dev watch pass failed")
+        return {"error": True}
+    for r in rows:
+        try:
+            mail.deliver(db, r)
+        except Exception:  # noqa: BLE001
+            pass
+    return out

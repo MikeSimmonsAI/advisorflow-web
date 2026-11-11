@@ -133,7 +133,9 @@ def out_of_scope(paths):
 
 
 def cmd_next():
-    work = api("/volt/dev/runner/next")
+    # Presence only (the workflow computes true/false; values never reach here).
+    work = api("/volt/dev/runner/next", {"claude_credentials": os.environ.get("HAS_CLAUDE", "") == "true",
+                                         "reason": (os.environ.get("START_REASON") or "")[:200]})
     try:
         deploy_proof(work.get("deploy_watch") or [])
     except Exception as e:  # noqa: BLE001 - a deploy check never blocks other work
@@ -199,7 +201,14 @@ def cmd_finish(claude_outcome):
             sh("git", "commit", "-q", "-m", "%s: %s" % (job["ref"], job["title"]))
         files = changed_files()
         if not files:
-            report(jid, status="failed", detail="Claude made no changes (%s). Add detail and retry." % claude_outcome)
+            run = "%s/%s/actions/runs/%s" % (os.environ.get("GITHUB_SERVER_URL", "https://github.com"), REPO,
+                                             os.environ.get("GITHUB_RUN_ID", ""))
+            if claude_outcome == "failure":
+                detail = ("Claude's step failed before making a change (credential, usage limit or timeout). "
+                          "Run log: %s" % run)
+            else:
+                detail = "Claude finished without changing any files (%s). Add detail and retry." % claude_outcome
+            report(jid, status="failed", detail=detail)
             return
         bad = out_of_scope(files)
         if bad:

@@ -118,6 +118,8 @@ SCHEDULER_OWNER: Dict[str, str] = {
     JobName.PROGRAM_SLA: ROLE_BACKEND,
     # Phone alerts. Once, so an alert buzzes a phone once.
     JobName.WEB_PUSH: ROLE_BACKEND,
+    # VOLT development relay watch. Once, so a missed start is re-sent once.
+    JobName.VOLT_DEV_RELAY: ROLE_BACKEND,
     # AI Workforce queue worker. Once, so a work item is claimed by one
     # process (the claim is also a row-level lease, as a second lock).
     JobName.AI_WORKFORCE_WORKER: ROLE_BACKEND,
