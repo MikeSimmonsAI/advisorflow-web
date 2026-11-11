@@ -94,10 +94,13 @@ function wsScreenModule(path) {
   return null
 }
 // Where a custom-access login lands, in this order, when a page is not theirs.
-const WS_LANDING = ['/wholesale', '/wholesale/appointments', '/wholesale/properties', '/wholesale/callbacks',
+const WS_LANDING = ['/wholesale/home', '/wholesale', '/wholesale/appointments', '/wholesale/properties', '/wholesale/callbacks',
   '/wholesale/canvass', '/wholesale/buyers', '/wholesale/dispositions', '/wholesale/deal-room', '/wholesale/foreclosures',
   '/wholesale/closing', '/wholesale/funding', '/wholesale/board', '/wholesale/calculator', '/wholesale/team']
 const customMayOpen = (team, path) => {
+  // #439: their own dashboard is always theirs (the server builds it from
+  // their access); an ended login has no dashboard.
+  if ((path || '').split('?')[0] === '/wholesale/home') return !team.ended
   const mod = wsScreenModule(path)
   return !!mod && (team.modules || []).includes(mod)
 }
@@ -186,6 +189,8 @@ const NAV_GROUPS = [
   {
     label: 'Acquisition · EvoSense',
     items: [
+      // #439: each person's own dashboard, composed from their access.
+      { to: '/wholesale/home', label: 'My Dashboard', icon: 'grid', featureKey: 'wholesale_real_estate', end: true },
       { to: '/wholesale/evosense', label: 'Acquisition Command', icon: 'target', featureKey: 'wholesale_real_estate', end: true },
       { to: '/wholesale/foreclosures', label: 'Foreclosures', icon: 'calendar', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/evosense/inbox', label: 'Discovery Inbox', icon: 'search', featureKey: 'wholesale_real_estate' },
@@ -451,6 +456,9 @@ export default function Layout({ children }) {
       if (saved === '1') return true
       if (saved === '0') return false
     } catch { /* storage blocked */ }
+    // #439: a Wholesale team login works from the sidebar (its own screens
+    // only), so it starts open like the approved dashboards show.
+    try { const b = getBranding(); if (b && b.wholesale_team && (b.wholesale_team.custom || b.wholesale_team.wholesale_only)) return false } catch { /* no branding yet */ }
     return !isAdmin
   })
   useEffect(() => {
@@ -565,6 +573,14 @@ export default function Layout({ children }) {
   // shows only Wholesale screens and My Settings, and any other address
   // lands them back in Wholesale. The server says who they are.
   const wsTeam = (!isGodAdmin && branding?.wholesale_team) || null
+  // #439: a Wholesale team login's first visit opens the sidebar once its
+  // access is known (the shell did not know it yet when the sidebar started),
+  // unless the person has chosen collapsed themselves.
+  useEffect(() => {
+    if (!wsTeam || !(wsTeam.custom || wsTeam.wholesale_only)) return
+    try { if (localStorage.getItem('af_sidebar_user_set') === '1') return } catch { /* storage blocked */ }
+    setSidebarCollapsed(false)
+  }, [wsTeam && wsTeam.custom, wsTeam && wsTeam.wholesale_only])
   const wsOnly = !!wsTeam?.wholesale_only
   useEffect(() => {
     if (!wsOnly) return
@@ -919,7 +935,7 @@ export default function Layout({ children }) {
           <button type="button" className="sidebar-close-btn" onClick={closeSidebar} aria-label="Close">×</button>
           <button
             type="button"
-            onClick={() => setSidebarCollapsed(c => !c)}
+            onClick={() => { try { localStorage.setItem('af_sidebar_user_set', '1') } catch { /* storage blocked */ } setSidebarCollapsed(c => !c) }}
             title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             style={{
               position: 'absolute', right: 6, bottom: 6,
