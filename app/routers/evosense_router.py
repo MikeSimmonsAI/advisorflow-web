@@ -2403,6 +2403,97 @@ def patch_provider(payload: ProviderPatch, db: Session = Depends(get_db),
     return _ENV.for_viewer(user, PV.status_report(db, org_id))
 
 
+# ── PROVIDER INTELLIGENCE NETWORK (Project OVERDRIVE Phase B, #439) ──────────
+# ATTOM, PropStream and Tracerfy on one honest readiness view. Reads are open
+# to the workspace; tests and settings are workspace-admin actions; every row
+# touched is the caller's own workspace. Setting NAMES are hidden from tenants
+# (env_name_privacy); credential VALUES are never read into a payload.
+
+@router.get("/provider-network")
+def provider_network(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    from app.services.evosense import provider_network as PN
+    org_id = _read_org(db, user)
+    out = PN.readiness(db, org_id)
+    db.commit()
+    return _ENV.for_viewer(user, out)
+
+
+@router.post("/provider-network/{key}/test")
+def provider_network_test(key: str, db: Session = Depends(get_db),
+                          user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    from app.services.evosense import provider_network as PN
+    org_id = svc.write_org_id(db, user)
+    _admin(user, db)
+    if key not in PN.NETWORK:
+        raise HTTPException(status_code=404, detail="Unknown provider")
+    res = PN.test_connection(db, org_id, key, user=user)
+    db.commit()
+    return _ENV.for_viewer(user, {**res, "readiness": PN.readiness(db, org_id)})
+
+
+class NetworkSettingsIn(BaseModel):
+    enabled: Optional[bool] = None
+    unit_cents: Optional[int] = None        # ATTOM: contract price per request, in cents (0 = flat-rate plan)
+
+
+@router.patch("/provider-network/{key}")
+def provider_network_settings(key: str, payload: NetworkSettingsIn, db: Session = Depends(get_db),
+                              user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    from app.services.evosense import provider_network as PN
+    org_id = svc.write_org_id(db, user)
+    _admin(user, db)
+    if key not in PN.REGISTRY_KEY:
+        raise HTTPException(status_code=404, detail="Unknown provider" if key not in PN.NETWORK
+                            else "PropStream has no settings - it is imported from CSV exports.")
+    cfg = PV.config(db, org_id, PN.REGISTRY_KEY[key])
+    changed = {}
+    if payload.enabled is not None:
+        cfg.enabled = bool(payload.enabled)
+        changed["enabled"] = cfg.enabled
+    if payload.unit_cents is not None:
+        if key != "attom":
+            raise HTTPException(status_code=422, detail="Only ATTOM takes a price per request here.")
+        if payload.unit_cents < 0 or payload.unit_cents > 100000:
+            raise HTTPException(status_code=422, detail="Enter a price per request between $0 and $1,000.")
+        ov = C.jload(cfg.cost_overrides, {}) or {}
+        ov[C.ASSESSOR] = int(payload.unit_cents)
+        cfg.cost_overrides = C.jdump(ov)
+        changed["unit_cents"] = int(payload.unit_cents)
+    C.log_event(db, org_id, "provider.network.configured", user=user, actor_type=C.ACTOR_USER,
+                summary="%s settings changed" % key, details=changed)
+    db.commit()
+    return _ENV.for_viewer(user, PN.readiness(db, org_id))
+
+
+@router.get("/properties/{property_id}/intelligence")
+def property_intelligence(property_id: str, db: Session = Depends(get_db),
+                          user: User = Depends(require_tenant_or_observer)):
+    from app.services.evosense import provider_network as PN
+    org_id = _read_org(db, user)
+    prop = _prop(db, org_id, property_id)
+    out = PN.property_intelligence(db, org_id, prop)
+    db.commit()
+    return _ENV.for_viewer(user, out)
+
+
+class AttomLookupIn(BaseModel):
+    refresh: bool = False
+
+
+@router.post("/properties/{property_id}/attom")
+def property_attom(property_id: str, payload: AttomLookupIn, db: Session = Depends(get_db),
+                   user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """A PERSON asks ATTOM about ONE property. The router checks what is on
+    file, free county records, the cache, in-flight requests, the switch, the
+    price and the budget before anything is called."""
+    from app.services.evosense import provider_network as PN
+    org_id = svc.write_org_id(db, user)          # admin / team manager only: wholesale_team._ADMIN_ONLY_WRITES
+    prop = _prop(db, org_id, property_id)
+    res = PN.attom_lookup(db, org_id, prop, user=user, force=bool(payload.refresh))
+    db.commit()
+    return _ENV.for_viewer(user, res)
+
+
 @router.get("/controls")
 def get_controls(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     org_id = _read_org(db, user)

@@ -345,8 +345,10 @@ def test_registry_states_are_honest(client, db_session, sample_org, dfw_files, f
         assert reg[k]["state"] == "DISABLED", k                 # off until an admin enables it
         assert reg[k]["configured"] is True and reg[k]["operational"] is False
         assert reg[k]["cost"] == "free" and reg[k]["jurisdiction"] and reg[k]["access_method"]
-    for k in ("rentcast", "regrid", "attom"):
+    for k in ("rentcast", "regrid"):
         assert reg[k]["state"] == "NOT PURCHASED" and "paid" in reg[k]["cost"]
+    # OVERDRIVE Phase B: ATTOM has a real adapter now; with no key it is NOT CONFIGURED (never connected)
+    assert reg["attom"]["state"] == "NOT CONFIGURED" and "paid" in reg["attom"]["cost"]
     for k in ("dallas_foreclosure_manual", "dallas_tax_manual", "manual", "csv_import"):
         assert reg[k]["state"] == "MANUAL ONLY"
     assert not any(k.startswith("sandbox") for k in reg)
