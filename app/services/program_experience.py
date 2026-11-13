@@ -72,6 +72,7 @@ WHOLESALE_ALLOWED_PREFIXES = (
 BACK_OFFICE_PREFIXES = ("/sales",)
 # VOLT Marketing (#535): staff operations and the applicant's own API.
 VOLT_OPS_PREFIX = "/volt/ops/"
+VOLT_DEV_PREFIX = "/volt/dev/"
 VOLT_APPLICANT_PREFIX = "/volt/rep/"
 
 # ── CLEANING CUSTOMER LOCK (owner decision 2026-11-03, Issue #452) ──────────
@@ -383,6 +384,14 @@ def enforce(db: Session, user, request: Request) -> None:
                 return
         except Exception:  # pragma: no cover - fall through to the normal lock
             pass
+    if path.startswith(VOLT_DEV_PREFIX):
+        org_id, _, endpoint = path[len(VOLT_DEV_PREFIX):].partition("/")
+        # Only the signed-in Development console uses this workspace exception.
+        if endpoint.split("/", 1)[0] in {"me", "jobs", "status", "tokens"}:
+            from app.services.volt.devrelay import is_principal
+
+            if org_id and is_principal(db, user, org_id):
+                return
     if path.startswith(VOLT_APPLICANT_PREFIX):
         return
     if locked_experience(db, user, request) == WHOLESALE:
