@@ -6,14 +6,15 @@ function errorText(error) {
 }
 
 export function ApplicantExport({ orgId, filters, options }) {
-  const [columns, setColumns] = useState([])
+  const keys = Object.keys(options.columns)
+  const defaults = options.default_columns || keys
+  const [columns, setColumns] = useState(defaults)
   const [name, setName] = useState('')
   const [presets, setPresets] = useState(options.presets)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const base = `/volt/ops/${orgId}`
-  const keys = Object.keys(options.columns)
-  const selected = columns.length ? columns : (options.default_columns || keys)
+  const selected = columns
 
   async function run(save) {
     setBusy(true)
@@ -45,7 +46,7 @@ export function ApplicantExport({ orgId, filters, options }) {
     <summary>Configure applicant CSV</summary>
     <p>Choose fields in the order you want them exported.</p>
     <button type="button" onClick={() => setColumns(keys)}>Select all</button>
-    <button type="button" onClick={() => setColumns([])}>Reset order</button>
+    <button type="button" onClick={() => setColumns(defaults)}>Reset to default</button>
     <div className="v-checklist">{keys.map((key) => <label key={key} className="v-check">
       <input type="checkbox" checked={columns.includes(key)} onChange={(event) =>
         setColumns(event.target.checked ? [...columns, key] : columns.filter((field) => field !== key))} />
@@ -56,8 +57,8 @@ export function ApplicantExport({ orgId, filters, options }) {
       if (preset) { setColumns(preset.columns); setName(preset.name) }
     }}><option value="">Choose preset</option>{presets.map((item) => <option key={item.name}>{item.name}</option>)}</select></label>
     <label>Preset name <input maxLength={80} value={name} onChange={(event) => setName(event.target.value)} /></label>
-    <button type="button" className="v-btn" disabled={busy || !name.trim()} onClick={() => run(true)}>Save preset</button>
-    <button type="button" className="v-btn v-btn--black" disabled={busy} onClick={() => run(false)}>Download CSV</button>
+    <button type="button" className="v-btn" disabled={busy || !name.trim() || !selected.length} onClick={() => run(true)}>Save preset</button>
+    <button type="button" className="v-btn v-btn--black" disabled={busy || !selected.length} onClick={() => run(false)}>Download CSV</button>
     {message && <p role="status">{message}</p>}
   </details>
 }
