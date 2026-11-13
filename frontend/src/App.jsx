@@ -11,6 +11,7 @@ import DemoConsole from './pages/DemoConsole'
 import Login from './pages/Login'
 import GoogleSignInComplete from './pages/GoogleSignInComplete'
 import TeamPrices from './pages/TeamPrices'
+import { SalesDealBuilder, ExecutiveDealBuilder } from './pages/DealBuilders'
 import Onboarding from './pages/Onboarding'
 // Public customer-facing surfaces. DealRoom is the Checkpoint 4 sales deal
 // room; PortalAccess/PortalViewer are the pre-existing customer portal pages
@@ -1382,6 +1383,11 @@ export default function App() {
       <Routes>
         {/* Independent show-and-tell page: no workspace auth, dashboards or sales navigation. */}
         <Route path="/team-prices" element={<TeamPrices />} />
+        {/* Deal builders: the salesperson page holds customer prices only; the
+            executive page is fetched from the backend after a server-side access
+            check. The old public URL stays the executive entry point. */}
+        <Route path="/team-prices/sales-deal-builder" element={<SalesDealBuilder />} />
+        <Route path="/team-prices/deal-builder.html" element={<ExecutiveDealBuilder />} />
         <Route path="/login" element={isAuthenticated() ? <Navigate to="/" replace /> : <Login />} />
         {/* MOBILE / PWA SHELL. Own auth gate (/m/login), own chrome; every call is an existing, server-enforced endpoint. */}
         <Route path="/m/*" element={<MobileApp />} />

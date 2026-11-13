@@ -503,8 +503,13 @@ def test_the_grant_screen_lists_members_and_anybody_already_granted(
     # operator works for a BRAND and has organization_id = NULL, so brand
     # scope is the only shape that can hold this grant — the same reason the
     # compensation capabilities are here.
+    #
+    # `deal_builder_executive` is read by `deal_builder_router`: the executive
+    # Deal Builder page (every compensation layer) is served only to god_admin
+    # or a holder of this grant. Being a sales manager does not grant it.
     assert {c["key"] for c in d["available_capabilities"]} == {
-        "sales_comp_view", "sales_comp_manage", "support_console"}
+        "sales_comp_view", "sales_comp_manage", "support_console",
+        "deal_builder_executive"}
 
 
 def test_granting_is_audited_with_the_scope_it_applied_to(db_session, a, god):
