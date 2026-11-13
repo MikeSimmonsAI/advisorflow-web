@@ -441,6 +441,13 @@ def _columns(values, allowed, *, empty=False):
     return values
 
 
+def _default_columns(grant, allowed):
+    """Owner: contact-first default. Restricted staff: only owner-granted fields."""
+    if grant:
+        return list(allowed)
+    return [key for key in reports.DEFAULT_CSV_COLUMNS if key in allowed]
+
+
 def _grant_fields(grant, attribute):
     return [key for key in C.loads(getattr(grant, attribute), []) if key in ACA_FIELDS]
 
@@ -449,7 +456,7 @@ def _grant_fields(grant, attribute):
 def ops_export_options(org_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     access, _, grant = _applicant_scope(db, user, org_id, {})
     allowed = _grant_fields(grant, "export_fields") if grant else list(reports.CSV_COLUMNS)
-    default = [key for key in allowed if grant or key in reports.DEFAULT_CSV_COLUMNS]
+    default = _default_columns(grant, allowed)
     presets = db.query(VoltExportPreset).filter_by(organization_id=org_id, user_id=user.id).order_by(
         VoltExportPreset.name).all()
     return {"columns": {key: reports.CSV_COLUMNS[key] for key in allowed}, "default_columns": default,
@@ -550,8 +557,7 @@ def ops_export(org_id: str, request: Request, db: Session = Depends(get_db), use
     if not allowed:
         raise HTTPException(status_code=403, detail="Your login has no authorized export fields.")
     requested = request.query_params.getlist("column")
-    columns = (_columns(requested, allowed) if requested
-               else [key for key in allowed if grant or key in reports.DEFAULT_CSV_COLUMNS])
+    columns = _columns(requested, allowed) if requested else _default_columns(grant, allowed)
     csv_content = reports.csv_text(db, org_id, f, columns)
     C.audit(db, org_id, user, "export", "applications", "applicant_csv_export",
             new=json.dumps({"columns": columns, "project_id": f.get("project_id")}))
