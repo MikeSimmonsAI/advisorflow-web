@@ -1039,3 +1039,55 @@ def test_fiber_questions_unchanged_and_no_license_question_for_aca():
     assert [q["key"] for q in asked] == ["outreach_experience", "relevant_experience", "comfortable_explaining", "languages"]
     assert [q["key"] for q in asked if q.get("required")] == ["outreach_experience", "comfortable_explaining", "languages"]
     assert not any("licens" in (q["label"] + q.get("hint", "")).lower() for q in asked)
+
+
+def test_aca_staff_access_and_export_are_scoped(volt):
+    import csv
+    import io
+
+    c, db, org = volt["c"], volt["db"], volt["org"]
+    owner = H(db, volt["god"])
+    staff = H(db, volt["staff"])
+    base = f"/volt/ops/{org.id}"
+    _, aca_token, aca = volt["register"](first="ACA", last="Applicant")
+    _, _, fiber = volt["register"](first="Fiber", last="Applicant", project_key="fiber")
+    for app in (aca, fiber):
+        db.get(VoltRep, app["rep"]["rep_id"]).is_test = False
+    db.commit()
+    doc = _upload(c, aca_token, aca["application_id"])
+    assert doc.status_code == 200, doc.text
+
+    grant = {"email": volt["staff"].email, "active": True,
+             "view_fields": ["applicant", "status_label"], "export_fields": ["applicant"]}
+    assert c.put(f"{base}/aca-access", headers=staff, json=grant).status_code == 403
+    assert c.put(f"{base}/aca-access", headers=owner, json=grant).status_code == 200
+    home = c.get(base, headers=staff).json()
+    assert home["access"] == "aca_applicants"
+    assert [project["key"] for project in home["projects"]] == ["aca"]
+
+    queue = c.get(f"{base}/applications", headers=staff)
+    assert queue.status_code == 200, queue.text
+    assert queue.json()["items"] == [{"applicant": "ACA Applicant", "status_label": "Draft"}]
+    assert c.get(f"{base}/applications", headers=staff,
+                 params={"project_id": volt["project"]("fiber").id}).status_code == 403
+    for path in (f"applications/{aca['application_id']}", f"applications/{fiber['application_id']}",
+                 "documents/missing/file", "people", "talent-pool.csv", "reps", "sessions"):
+        assert c.get(f"{base}/{path}", headers=staff).status_code == 403, path
+    assert c.get(f"/volt/ops/{volt['other'].id}/applications", headers=staff).status_code == 403
+
+    assert c.get(f"{base}/export.csv", headers=staff, params={"column": "status_label"}).status_code == 422
+    export = c.get(f"{base}/export.csv", headers=staff)
+    assert list(csv.reader(io.StringIO(export.text))) == [["Applicant"], ["ACA Applicant"]]
+
+    preset = {"name": "Review", "columns": ["status_label", "applicant"]}
+    assert c.put(f"{base}/export-options/presets", headers=staff, json=preset).status_code == 422
+    assert c.put(f"{base}/export-options/presets", headers=owner, json=preset).status_code == 200
+    assert c.get(f"{base}/export-options", headers=owner).json()["presets"] == [preset]
+    assert c.get(f"{base}/export-options", headers=staff).json()["presets"] == []
+    ordered = c.get(f"{base}/export.csv", headers=owner, params={"column": preset["columns"]})
+    assert list(csv.reader(io.StringIO(ordered.text)))[0] == ["Stage", "Applicant"]
+    assert db.query(VoltAuditEvent).filter_by(action="applicant_csv_export").count() == 2
+
+    assert c.put(f"{base}/aca-access", headers=owner, json=dict(grant, active=False)).status_code == 200
+    assert c.get(f"{base}/export.csv", headers=staff).status_code == 403
+    assert c.get(f"{base}/applications", headers=staff).status_code == 403

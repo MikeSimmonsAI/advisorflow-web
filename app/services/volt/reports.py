@@ -264,12 +264,8 @@ def _cell(v) -> str:
     return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
 
 
-def csv_text(db: Session, org_id: str, f: Dict[str, Any]) -> str:
-    """The review queue's rows for the same filters. No DOB, no contact data,
-    no document links."""
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(["Application ID", "Rep ID", "Applicant", "Project key", "Project", "Stage",
+CSV_COLUMNS = dict(zip(['application_id', 'rep_code', 'applicant', 'project_key', 'project', 'status_label', 'original_recruiter_id', 'original_recruiter', 'project_recruiter_id', 'project_recruiter', 'city', 'state', 'earliest_start', 'availability', 'work_history_count', 'no_experience', 'willing_travel', 'comfortable_d2d', 'transportation', 'earliest_departure', 'time_away', 'drivers_license', 'smartphone', 'd2d_experience', 'd2d_duration', 'homeowner_comfort', 'training', 'commitment', 'outreach_experience', 'comfortable_explaining', 'languages', 'license_status', 'created_at', 'submitted_at', 'approved_at', 'started_at'],
+    ["Application ID", "Rep ID", "Applicant", "Project key", "Project", "Stage",
                 "Original recruiter ID", "Original recruiter", "Project recruiter ID", "Project recruiter",
                 "City", "State", "Earliest start", "Availability", "Jobs listed", "No previous work experience",
                 "Willing to travel (earlier Fiber form)", "Comfortable with door-to-door (earlier Fiber form)",
@@ -279,10 +275,19 @@ def csv_text(db: Session, org_id: str, f: Dict[str, Any]) -> str:
                 "Travel role commitment",
                 "Outreach / customer service experience", "Comfortable explaining next steps", "Languages",
                 "License status (earlier ACA form, no longer asked)",
-                "Application started (UTC)", "Submitted (UTC)", "Approved (UTC)", "Started (UTC)"])
+                "Application started (UTC)", "Submitted (UTC)", "Approved (UTC)", "Started (UTC)"], strict=True))
+
+
+def csv_text(db: Session, org_id: str, f: Dict[str, Any], columns: Optional[List[str]] = None) -> str:
+    """The review queue's rows for the same filters. No DOB, no contact data,
+    no document links."""
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    selected = columns if columns is not None else list(CSV_COLUMNS)
+    w.writerow([CSV_COLUMNS[key] for key in selected])
     for r in rows(db, org_id, f):
         o, p = r["original_recruiter"] or {}, r["project_recruiter"] or {}
-        w.writerow([_cell(x) for x in (r["application_id"], r["rep_code"], r["applicant"], r["project_key"],
+        values = (r["application_id"], r["rep_code"], r["applicant"], r["project_key"],
                                         r["project"], r["status_label"], o.get("rep_code"), o.get("display_name"),
                                         p.get("rep_code"), p.get("display_name"),
                                         r["city"], r["state"], r["earliest_start"], r["availability"],
@@ -300,5 +305,7 @@ def csv_text(db: Session, org_id: str, f: Dict[str, Any]) -> str:
                                         _label("comfortable_explaining", r["comfortable_explaining"]),
                                         r["languages"], _label("license_status", r["license_status"]),
                                         r["created_at"],
-                                        r["submitted_at"], r["approved_at"], r["started_at"])])
+                                        r["submitted_at"], r["approved_at"], r["started_at"])
+        cells = dict(zip(CSV_COLUMNS, values))
+        w.writerow([_cell(cells[key]) for key in selected])
     return buf.getvalue()

@@ -129,6 +129,10 @@ def staff_access(db: Session, user: User, org_id: str) -> Optional[str]:
     from app.services.volt import access as _access
     if _access.blocked(db, org_id, user):
         return None                     # suspended / removed in VOLT (People & Access)
+    from app.models.volt_models import VoltApplicantAccess
+    grant = db.get(VoltApplicantAccess, (org_id, user.id))
+    if grant is not None:
+        return "aca_applicants" if grant.active else None
     from app.services import workspace_access
     role = workspace_access.workspace_role(user, db, org_id)
     if role in STAFF_ROLES:
@@ -138,12 +142,14 @@ def staff_access(db: Session, user: User, org_id: str) -> Optional[str]:
     return None
 
 
-def require_staff(db: Session, user: User, org_id: str, write: bool = False) -> str:
+def require_staff(db: Session, user: User, org_id: str, write: bool = False, *, applicant_read: bool = False) -> str:
     access = staff_access(db, user, org_id)
     if access is None:
         # Same answer whether the tenant exists or not.
         raise HTTPException(status_code=403, detail="VOLT operations are for authorized recruiting staff.")
     program_for_org(db, org_id)
+    if access == "aca_applicants" and (write or not applicant_read):
+        raise HTTPException(status_code=403, detail="This login has ACA applicant access only.")
     if write and access == "viewer":
         raise HTTPException(status_code=403, detail="Your VOLT access is view-only.")
     return access

@@ -13,6 +13,7 @@ import { Bolt } from './VoltPortal'
 import { Modal } from './VoltDialogs'
 import { zoomWhen } from './VoltMyApplication'
 import Development from './VoltDev'
+import { AcaAccessSettings, AcaApplicants, ApplicantExport, useApplicantExport } from './VoltApplicantAccess'
 import { fmtDate, useVoltTitle } from './voltApi'
 import './volt.css'
 
@@ -115,7 +116,7 @@ function OpsShell({ orgId, home, children }) {
         </div>
       </header>
       <main className="v-wrap" style={{ flex: 1 }}>
-        <nav className="v-tabs" aria-label="VOLT Operations sections">
+        {home?.access !== 'aca_applicants' && <nav className="v-tabs" aria-label="VOLT Operations sections">
           <NavLink end className="v-tab" to={base}>Overview</NavLink>
           <NavLink className="v-tab" to={`${base}/review`}>Review queue</NavLink>
           <NavLink className="v-tab" to={`${base}/sessions`}>Zoom availability</NavLink>
@@ -125,7 +126,7 @@ function OpsShell({ orgId, home, children }) {
           <NavLink className="v-tab" to={`${base}/email`}>Support email</NavLink>
           <NavLink className="v-tab" to={`${base}/reps`}>Reps</NavLink>
           <NavLink className="v-tab" to={`${base}/projects`}>Projects & documents</NavLink>
-        </nav>
+        </nav>}
         {children}
       </main>
       <footer className="v-foot"><div className="v-wrap"><span>VOLT Marketing · Operations</span><a href="/volt" target="_blank" rel="noreferrer">Open applicant portal ↗</a></div></footer>
@@ -199,6 +200,7 @@ function Overview({ orgId, ops }) {
 
 // ── Review queue + application file ─────────────────────────────────────────
 function ReviewQueue({ orgId, ops }) {
+  const exportOptions = useApplicantExport(orgId)
   const [sp, setSp] = useSearchParams()
   const f = Object.fromEntries(sp.entries())
   const [list, setList] = useState(null)
@@ -227,6 +229,7 @@ function ReviewQueue({ orgId, ops }) {
     <>
       <div className="v-row"><h2 style={{ fontSize: 30, letterSpacing: '-.04em' }}>Review queue</h2>
         <button type="button" className="v-btn v-btn--black" onClick={exportCsv} disabled={busy}>{busy ? 'Exporting…' : 'Export CSV ↓'}</button></div>
+      {exportOptions && <ApplicantExport orgId={orgId} filters={clean(f)} options={exportOptions} />}
       <Filters projects={projects} f={f} set={(x) => setSp(clean(x))} showStage showReached />
       <label className="v-check" style={{ margin: '0 0 8px' }}><input type="checkbox" checked={f.include_archived === '1'}
         onChange={(e) => { const x = { ...f }; if (e.target.checked) x.include_archived = '1'; else delete x.include_archived; setSp(clean(x)) }} data-include-archived /> Include archived applicants</label>
@@ -969,6 +972,7 @@ function People({ orgId, ops }) {
     <>
       <div className="v-row"><div><h2 style={{ fontSize: 30, letterSpacing: '-.04em' }}>People & Access</h2><p className="v-muted">Manage access to VOLT Marketing.</p></div>
         <div style={{ textAlign: 'right' }}><b>{ops.home?.me?.full_name}</b><div className="v-small v-muted">{data?.actor_level === 'owner' ? 'Owner' : data?.can_manage ? 'VOLT org admin' : 'View only'}</div></div></div>
+      {ops.home?.access === 'owner' && <AcaAccessSettings orgId={orgId} />}
       <div className="v-kpis v-kpis--3" data-people-totals>
         <div className="v-kpi" role="group" aria-label="Active access"><span>Active access</span><b>{t ? t.active : '–'}</b></div>
         <div className="v-kpi" role="group" aria-label="Suspended"><span>Suspended</span><b>{t ? t.suspended : '–'}</b></div>
@@ -1128,6 +1132,10 @@ export default function VoltOps() {
         <div className="v-alert v-alert--err" role="alert">{ops.err}</div>
         <p style={{ marginTop: 12 }}><Link to="/workspaces">Back to Program Access</Link></p></div></div></div>
     )
+  }
+  if (!ops.home) return <div className="volt v-wrap" role="status">Loading VOLT Operations…</div>
+  if (ops.home.access === 'aca_applicants') {
+    return <OpsShell orgId={orgId} home={ops.home}><AcaApplicants orgId={orgId} /></OpsShell>
   }
   return (
     <OpsShell orgId={orgId} home={ops.home}>
