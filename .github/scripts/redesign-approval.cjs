@@ -105,11 +105,16 @@ async function runForEvent({ github, context, core }) {
 }
 
 /** workflow_dispatch: give every open PR a current result (used once when the check becomes required). */
-async function backfill({ github, context, core }) {
+async function backfill({ github, context, core }, pullNumber) {
   const { owner, repo } = context.repo
   const approver = (process.env.REDESIGN_APPROVER || '').trim()
-  const prs = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', per_page: 100 })
+  if (pullNumber && !/^[1-9][0-9]*$/.test(pullNumber)) throw new Error('Invalid pull request number')
+  const prs = pullNumber
+    ? [(await github.rest.pulls.get({ owner, repo, pull_number: Number(pullNumber) })).data]
+    : await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', per_page: 100 })
+
   for (const pr of prs) {
+    if (pr.state !== "open") continue
     const reviews = approver && isRedesign(pr) ? await listReviews(github, owner, repo, pr.number) : []
     const files = isRedesign(pr) ? await listFiles(github, owner, repo, pr.number) : []
     const res = evaluate(pr, reviews, approver, files)

@@ -263,6 +263,35 @@ def check_github() -> Dict[str, Any]:
     return out
 
 
+def release_blocker(job: VoltDevJob) -> Optional[str]:
+    """Check the tested PR head and required gate. GitHub still enforces all merge rules."""
+    root = "/repos/%s" % R.REPO
+    status, pr, error = _gh("GET", "%s/pulls/%d" % (root, job.pr_number))
+    if status != 200:
+        return "Cannot verify the pull request. %s. Check the GitHub connection." % error
+    if pr["head"]["sha"] != job.head_sha:
+        return "The PR head changed. Test the current commit and get fresh owner approval."
+    if pr["state"] != "open" or pr["draft"]:
+        return "The PR must be open and ready for review in GitHub."
+    if pr["mergeable"] is False:
+        return "The PR conflicts with main. Resolve the conflicts, retest, and get fresh owner approval."
+    status, data, error = _gh("GET", "%s/commits/%s/check-runs?check_name=Redesign%%20owner%%20approval" %
+                              (root, job.head_sha))
+    if status != 200:
+        return "Cannot read GitHub checks. %s. Check the GitHub token's check access." % error
+    checks = [check for check in data["check_runs"] if check["app"]["slug"] == "github-actions"]
+    if not checks:
+        return "Redesign owner approval is missing. Run the Redesign approval workflow for this PR on main."
+    gate = checks[0]
+    if gate["status"] != "completed":
+        return "Redesign owner approval is running. Wait for it to finish."
+    if gate["conclusion"] != "success":
+        return "Redesign owner approval: %s. Open the GitHub check and follow its instructions." % gate["conclusion"]
+    if pr["mergeable"] is None or pr.get("mergeable_state") in {"blocked", "unstable", "unknown", "behind"}:
+        return "GitHub merge status: %s. Open the PR to see pending checks, reviews, or branch updates." % pr.get("mergeable_state")
+    return None
+
+
 def review(job: VoltDevJob, max_chars: int = 14000) -> Dict[str, Any]:
     """The change itself, for review outside GitHub: each changed file with its
     diff, from the job's PR at the exact tested commit. There is no hosted

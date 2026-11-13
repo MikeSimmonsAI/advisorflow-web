@@ -38,6 +38,9 @@ def runner_token(**over):
 @pytest.fixture()
 def dev(volt, monkeypatch):
     db = volt["db"]
+    from app.services.volt import devdispatch as D
+
+    monkeypatch.setattr(D, "release_blocker", lambda job: None)
     monkeypatch.setattr(R, "_JWKS", _JWKS())
     collab = User(email="collab.dev@example.com", full_name="Dee Collaborator", password_hash="x", role="org_admin",
                   is_active=True, must_change_password=False)
@@ -156,7 +159,7 @@ def test_full_lifecycle_merge_approval_deploy_and_notices(dev):
     assert _report(dev, job["id"], status="ready_to_test").json()["ok"]             # duplicate: no-op
     assert db.query(VoltEmail).filter(VoltEmail.kind == "dev_ready_to_test").count() == 2   # both principals, once
     # Either principal approves - here the collaborator; the approval pins the tested commit.
-    ap = c.post(_base(dev) + "/jobs/DEV-1/approve-merge", headers=H(db, dev["collab"])).json()
+    ap = c.post(_base(dev) + "/jobs/DEV-1/approve-merge", headers=H(db, dev["collab"]), json={"tested_commit": "a" * 40}).json()
     assert ap["status"] == "merge_requested" and ap["merge_approved_by"] == "Dee Collaborator"
     m = _next(dev, run_id="778").json()
     assert m["action"] == "merge" and m["job"]["approved_sha"] == "a" * 40
@@ -203,7 +206,7 @@ def test_tests_or_docs_only_change_needs_no_deploy(dev):
     _next(dev)
     _report(dev, job["id"], status="ready_to_test", changed_files=["docs/volt/notes.md"], tests_passed=True,
             pr_number=9, head_sha="d" * 40)
-    dev["c"].post(_base(dev) + "/jobs/DEV-1/approve-merge", headers=H(dev["db"], dev["staff"]))
+    dev["c"].post(_base(dev) + "/jobs/DEV-1/approve-merge", headers=H(dev["db"], dev["staff"]), json={"tested_commit": "d" * 40})
     _next(dev, run_id="900")
     r = _report(dev, job["id"], run_id="900", status="merged", merge_sha="e" * 40, merged_head_sha="d" * 40)
     assert r.json()["status"] == "deployed"
@@ -294,8 +297,8 @@ def test_approval_dispatches_the_merge_once_and_runner_reports_more_work(dev, gh
             pr_number=7, head_sha="f" * 40)
     before = len(_dispatches(gh))
     c, db = dev["c"], dev["db"]
-    c.post(_base(dev) + "/jobs/DEV-1/approve-merge", headers=H(db, dev["collab"]))
-    c.post(_base(dev) + "/jobs/DEV-1/approve-merge", headers=H(db, dev["staff"]))          # repeat: no-op
+    c.post(_base(dev) + "/jobs/DEV-1/approve-merge", headers=H(db, dev["collab"]), json={"tested_commit": "f" * 40})
+    c.post(_base(dev) + "/jobs/DEV-1/approve-merge", headers=H(db, dev["staff"]), json={"tested_commit": "f" * 40})          # repeat: no-op
     merges = [x for x in _dispatches(gh)[before:] if "merge" in x[2]["inputs"]["reason"]]
     assert len(merges) == 1
 
@@ -306,7 +309,7 @@ def test_backend_verifies_the_deploy_itself(dev, gh, monkeypatch):
     _next(dev)
     _report(dev, job["id"], status="ready_to_test", changed_files=["app/services/volt/core.py", "frontend/src/pages/volt/VoltDev.jsx"],
             tests_passed=True, pr_number=8, head_sha="1" * 40)
-    dev["c"].post(_base(dev) + "/jobs/DEV-1/approve-merge", headers=H(dev["db"], dev["staff"]))
+    dev["c"].post(_base(dev) + "/jobs/DEV-1/approve-merge", headers=H(dev["db"], dev["staff"]), json={"tested_commit": "1" * 40})
     _next(dev, run_id="881")
     _report(dev, job["id"], run_id="881", status="merged", merge_sha="2" * 40, merged_head_sha="1" * 40)
     # Frontend not deployed yet: stays "Merged - deploying".
@@ -320,3 +323,26 @@ def test_backend_verifies_the_deploy_itself(dev, gh, monkeypatch):
     j = dev["c"].get(_base(dev) + "/jobs/DEV-1", headers=H(dev["db"], dev["staff"])).json()
     assert j["status"] == "deployed" and "Verified running in production" in j["deploy_detail"]
     assert dev["db"].query(VoltEmail).filter(VoltEmail.kind == "dev_deployed").count() == 2
+
+
+def test_release_check_reports_missing_workflow_and_conflicts(monkeypatch):
+    from types import SimpleNamespace
+    from app.services.volt import devdispatch as D
+
+    job = SimpleNamespace(pr_number=598, head_sha="a" * 40)
+    pr = {"head": {"sha": job.head_sha}, "state": "open", "draft": False,
+          "mergeable": True, "mergeable_state": "clean"}
+    checks = {"check_runs": []}
+
+    def github(method, path):
+        return 200, pr if "/pulls/" in path else checks, None
+
+    monkeypatch.setattr(D, "_gh", github)
+    assert "missing" in D.release_blocker(job)
+    gate = {"app": {"slug": "github-actions"}, "status": "completed", "conclusion": "failure"}
+    checks["check_runs"] = [gate]
+    assert "failure" in D.release_blocker(job)
+    gate["conclusion"] = "success"
+    assert D.release_blocker(job) is None
+    pr["mergeable"] = False
+    assert "conflicts" in D.release_blocker(job)

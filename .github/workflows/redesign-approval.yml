@@ -8,7 +8,12 @@ on:
     types: [opened, reopened, synchronize, edited, labeled, unlabeled, ready_for_review, converted_to_draft]
   pull_request_review:
     types: [submitted, dismissed, edited]
-  workflow_dispatch:   # one-off: post a current result on every open PR
+  workflow_dispatch:
+    inputs:
+      pull_number:
+        description: Pull request to check (blank checks all open PRs)
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -45,5 +50,5 @@ jobs:
         with:
           script: |
             const gate = require(process.env.GITHUB_WORKSPACE + '/judge/.github/scripts/redesign-approval.cjs')
-            if (context.eventName === 'workflow_dispatch') await gate.backfill({ github, context, core })
+            if (context.eventName === 'workflow_dispatch') await gate.backfill({ github, context, core }, context.payload.inputs?.pull_number)
             else await gate.runForEvent({ github, context, core })

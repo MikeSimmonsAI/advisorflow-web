@@ -244,6 +244,11 @@ def cmd_finish(claude_outcome):
             pr = gh("POST", "repos/%s/pulls" % REPO, {"title": "%s: %s" % (job["ref"], job["title"])[:240],
                                                       "head": job["branch"], "base": "main", "body": body})
         if passed:
+            try:
+                gh("POST", "repos/%s/actions/workflows/redesign-approval.yml/dispatches" % REPO,
+                   {"ref": "main", "inputs": {"pull_number": str(pr["number"])}})
+            except RuntimeError as exc:
+                print("Could not dispatch required PR check: %s" % exc)
             report(jid, status="ready_to_test", tests_passed=True, tests_summary=summary, pr_number=pr["number"],
                    pr_url=pr["html_url"], head_sha=head, branch=job["branch"], changed_files=files,
                    detail="Tests passed. Ready to test and approve.")
