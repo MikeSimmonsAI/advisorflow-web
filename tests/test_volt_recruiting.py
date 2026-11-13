@@ -426,7 +426,7 @@ def test_started_leaderboard_report_csv_reconcile_no_double_count(volt):
     csv_text = c.get("/volt/ops/%s/export.csv" % org, headers=sh, params=dict(q, project_id=aca, reached="started")).text
     lines = [x for x in csv_text.strip().splitlines()]
     assert len(lines) - 1 == lst["count"] and "REP-%d" % (dangelo + 1000) in lines[1]
-    assert "1990" not in csv_text and "@example.test" not in csv_text and "/documents/" not in csv_text
+    assert "1990" not in csv_text and "@example.test" in csv_text and "/documents/" not in csv_text
     # Test records are excluded unless asked for.
     assert c.get("/volt/ops/%s" % org, headers=sh).json()["overview"]["starts"] == 0
     # Applicants have no leaderboard any more (referrals are not launching).
@@ -926,7 +926,7 @@ def test_queue_filters_and_csv_hiring_columns(volt):
     lines = text.strip().splitlines()
     assert len(lines) == 2 and "Time away" in lines[0] and "Door-to-door experience" in lines[0] and "Austin" in lines[1]
     assert "1–2 weeks" in lines[1] and "Smartphone, but limited or no data plan" in lines[1]
-    assert "1990-02-28" not in text and "@example.test" not in text and "/documents/" not in text
+    assert "1990-02-28" not in text and "@example.test" in text and "/documents/" not in text
     # Overview counts are not narrowed by these queue-only filters.
     assert c.get("/volt/ops/%s" % org, headers=sh, params={"include_test": 1, "travel": "no"}).json()["overview"]["applications"] == 3
 
@@ -1120,10 +1120,20 @@ def test_csv_contact_columns_real_values_scoping_and_order(volt):
     assert list(csv.reader(io.StringIO(out.text))) == [
         ["Email", "Phone", "First name", "Last name", "Full name"],
         [login.email, "555-0101", "Ada", "Lovelace", "Ada Lovelace"]]
-    # No duplicate labels; contact fields are not in a default export.
+    # No duplicate labels; owner default export leads with the contact block.
     assert len(set(reports.CSV_COLUMNS.values())) == len(reports.CSV_COLUMNS)
-    default = c.get(f"{base}/export.csv", headers=owner).text
-    assert login.email not in default and "555-0101" not in default
+    default = list(csv.reader(io.StringIO(c.get(
+        f"{base}/export.csv", headers=owner, params={"project_id": volt["project"]("aca").id}).text)))
+    assert default[0][:5] == ["Full name", "Email", "Phone", "City", "State"]
+    assert default[0].count("Full name") == 1 and "First name" not in default[0]
+    assert default[1][:3] == ["Ada Lovelace", login.email, "555-0101"]
+    opts = c.get(f"{base}/export-options", headers=owner).json()
+    assert opts["default_columns"][:5] == ["applicant", "email", "phone", "city", "state"]
+    assert set(opts["default_columns"]) <= set(opts["columns"]) and "first_name" in opts["columns"]
+    # Deselecting a default field is respected (explicit columns are not re-padded).
+    trimmed = list(csv.reader(io.StringIO(c.get(f"{base}/export.csv", headers=owner, params={
+        "column": ["applicant", "city"], "project_id": volt["project"]("aca").id}).text)))
+    assert trimmed[0] == ["Full name", "City"]
     # Missing phone is an empty cell.
     rep.phone = None
     db.commit()
@@ -1144,6 +1154,7 @@ def test_csv_contact_columns_real_values_scoping_and_order(volt):
     assert c.get(f"{base}/export.csv", headers=staff, params={"column": "phone"}).status_code == 422
     only = list(csv.reader(io.StringIO(c.get(f"{base}/export.csv", headers=staff).text)))
     assert only[0] == ["Full name"] and len(only) == 2          # ACA only: no Fiber row
+    assert c.get(f"{base}/export-options", headers=staff).json()["default_columns"] == ["applicant"]
     grant["export_fields"] = ["email", "applicant"]
     assert c.put(f"{base}/aca-access", headers=owner, json=grant).status_code == 200
     ok = list(csv.reader(io.StringIO(c.get(f"{base}/export.csv", headers=staff,

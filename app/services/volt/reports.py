@@ -285,14 +285,17 @@ CSV_COLUMNS = dict(zip(['application_id', 'rep_code', 'applicant', 'first_name',
                 "Application started (UTC)", "Submitted (UTC)", "Approved (UTC)", "Started (UTC)"], strict=True))
 
 
-# Contact columns are opt-in: never part of a default export.
-CONTACT_COLUMNS = ("first_name", "last_name", "email", "phone")
-DEFAULT_CSV_COLUMNS = [key for key in CSV_COLUMNS if key not in CONTACT_COLUMNS]
+# Owner default export: contact block first, in a useful order, then the rest.
+# first_name/last_name stay selectable but are not defaults (Full name covers them).
+# ACA-restricted staff never use this list: their default is only owner-granted fields.
+CONTACT_DEFAULT = ("applicant", "email", "phone", "city", "state")
+DEFAULT_CSV_COLUMNS = list(CONTACT_DEFAULT) + [
+    key for key in CSV_COLUMNS if key not in CONTACT_DEFAULT and key not in ("first_name", "last_name")]
 
 
 def csv_text(db: Session, org_id: str, f: Dict[str, Any], columns: Optional[List[str]] = None) -> str:
     """The review queue's rows for the same filters. No DOB, no document
-    links. Name, email and phone appear only when explicitly selected."""
+    links. Default (no columns given) is the owner default."""
     buf = io.StringIO()
     w = csv.writer(buf)
     selected = columns if columns is not None else list(DEFAULT_CSV_COLUMNS)
