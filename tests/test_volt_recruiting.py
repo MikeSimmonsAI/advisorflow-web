@@ -576,7 +576,7 @@ def test_purge_one_run_at_a_time_exact_counts_then_zeros(volt):
         other_lock()
 
 
-def test_wholesale_seat_admin_reaches_volt_through_program_access(volt):
+def test_wholesale_seat_admin_reaches_volt_through_program_access(volt, monkeypatch):
     """platform@evosyspro.live's shape (production, 2026-11-05): home org is the
     EvoSys Wholesale host, a named Wholesale product seat, org_admin in several
     workspaces - and now VOLT Marketing. The Wholesale screen lock used to refuse
@@ -619,6 +619,13 @@ def test_wholesale_seat_admin_reaches_volt_through_program_access(volt):
     assert r.json()["access"] == "staff"
     assert c.get("/volt/ops/%s/applications" % org, headers=h).status_code == 200
     assert c.get("/volt/ops/%s/sessions" % org, headers=h).status_code == 200
+    dev_jobs = f"/volt/dev/{org}/jobs"
+    assert c.get(dev_jobs, headers=h).status_code == 403
+    monkeypatch.setenv("VOLT_DEV_PRINCIPALS", u.email)
+    assert c.get(f"/volt/dev/{org}/me", headers=h).json()["principal"] is True
+    jobs = c.get(dev_jobs, headers=h)
+    assert jobs.status_code == 200, jobs.text
+    assert c.get(f"/volt/dev/{volt['other'].id}/jobs", headers=h).status_code == 403
     # Still confined to Wholesale everywhere else.
     blocked = c.get("/campaigns", headers=h)
     assert blocked.status_code == 403 and "Wholesale" in blocked.json()["detail"]
