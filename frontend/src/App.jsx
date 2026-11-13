@@ -1192,13 +1192,18 @@ function WorkspaceSelector() {
   const volts = ctx.volt_contexts || []
   const voltOrgIds = new Set(volts.map(v => v.organization_id))
   const nonVolt = workspaces.filter(w => !voltOrgIds.has(w.organization_id))
+  // The Deal Builders are launcher destinations too: a person with one
+  // workspace AND a Deal Builder must still see Program Access, not be sent
+  // straight into the workspace.
+  const dealBuilders = (ctx.deal_builder?.sales ? 1 : 0) + (ctx.deal_builder?.executive ? 1 : 0)
   const otherDestinations = products.length + previews.length + (ctx.acquisition_ops || []).length
-    + (ctx.has_back_office ? 1 : 0) + (ctx.executive_contexts || []).length
+    + (ctx.has_back_office ? 1 : 0) + (ctx.executive_contexts || []).length + dealBuilders
   if (volts.length === 1 && nonVolt.length === 0 && otherDestinations === 0) {
     clearWorkspaceContext()
     return <Navigate to={volts[0].path} replace />
   }
-  if (volts.length === 0 && workspaces.length === 1 && products.length === 0 && previews.length === 0) {
+  if (volts.length === 0 && workspaces.length === 1 && products.length === 0 && previews.length === 0
+      && dealBuilders === 0) {
     return <Navigate to={'/workspace/' + workspaces[0].organization_id} replace />
   }
   return <ProgramAccessPortal contexts={ctx} onChoose={(item) => {

@@ -55,16 +55,21 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
   const user = userProp !== undefined ? userProp : getCurrentUser()
   const personName = user?.full_name || user?.name || user?.email || ''
   const personEmail = user?.full_name && user?.email ? user.email : ''
-  const [dealAccess, setDealAccess] = useState(null)
-
+  // Deal Builder cards come from the server's /auth/my-contexts answer
+  // (`deal_builder`), the same checks the /deal-builder routes enforce. An
+  // older backend without that field is asked directly instead.
+  const ctxDeal = contexts && contexts.deal_builder
+  const [fetchedDeal, setFetchedDeal] = useState(null)
   useEffect(() => {
+    if (ctxDeal) return undefined
     let active = true
-    setDealAccess(null)
+    setFetchedDeal(null)
     api.get('/deal-builder/access', { noOrgContext: true, skipRedirect: true })
-      .then(access => { if (active) setDealAccess(access) })
-      .catch(() => { if (active) setDealAccess(null) })
+      .then(access => { if (active) setFetchedDeal(access) })
+      .catch(() => { if (active) setFetchedDeal(null) })
     return () => { active = false }
-  }, [user?.id])
+  }, [user?.id, ctxDeal])
+  const dealAccess = ctxDeal || fetchedDeal
 
   const visible = [...workspaceCards]
   if (dealAccess?.executive) {

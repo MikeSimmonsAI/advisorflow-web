@@ -243,3 +243,76 @@ def test_no_team_split_in_public_frontend_source():
 def test_private_pages_not_mounted():
     main = open(os.path.join(ROOT, "app/main.py"), encoding="utf-8").read()
     assert "private_pages" not in main
+
+
+# ── production shape: admins who also hold the EvoSys Wholesale seat ─────────
+#
+# platform@evosyspro.live and Michael Schlueter are org admins of the EvoSys
+# Wholesale host org ("evo-integrated-solutions-llc") AND hold the named
+# Wholesale product seat. With that workspace active, program_experience locks
+# the login to Wholesale and refused EVERY /deal-builder call - including the
+# /access check Program Access uses - with "This workspace runs Wholesale".
+# The Deal Builder routes authorize themselves, so the lock must let them
+# through (the same treatment the sales Back Office already gets).
+
+@pytest.fixture()
+def wholesale_admins(db_session, team):
+    from app.models.models import Organization
+    db = db_session
+    host = Organization(name="EVO Integrated Solutions LLC", slug="evo-integrated-solutions-llc",
+                        plan="enterprise", is_active=True)
+    db.add(host); db.commit()
+    plat_user = User(organization_id=host.id, email="platform-like-%d@evosyspro.live" % next(_SEQ),
+                     password_hash=hash_password("x"), full_name="EvoSys Platform User",
+                     role="org_admin", must_change_password=False)
+    adv = _user(db, "Michael Schlueter")              # advisor, no home org
+    db.add(plat_user); db.commit()
+    for u in (plat_user, adv):
+        db.add(Membership(user_id=u.id, scope_type="customer_org", scope_id=host.id,
+                          role="org_admin", is_active=True))
+        db.add(Membership(user_id=u.id, scope_type="product", scope_id="wholesale",
+                          role="member", is_active=True))
+        db.add(Membership(user_id=u.id, scope_type=SCOPE_BRAND_SALES_ORG, scope_id=team["org"].id,
+                          role=ROLE_SALES_MANAGER, is_active=True))
+    db.commit()
+    return dict(db=db, host=host, plat=plat_user, adv=adv)
+
+
+def _hw(db, u, host_id=None):
+    h = {"Authorization": "Bearer " + create_access_token(u, db)}
+    if host_id:
+        h["X-Workspace-Id"] = host_id
+    return h
+
+
+@pytest.mark.parametrize("who", ["plat", "adv"])
+def test_wholesale_lock_does_not_block_deal_builder(client, team, wholesale_admins, who):
+    w = wholesale_admins
+    u = w[who]
+    for hdr in (_hw(w["db"], u), _hw(w["db"], u, w["host"].id)):
+        r = client.get("/deal-builder/access", headers=hdr)
+        assert r.status_code == 200, r.text
+        assert r.json()["sales"] is True and r.json()["executive"] is False
+        r = client.post("/deal-builder/my-commission", json=DEAL, headers=hdr)
+        assert r.status_code == 200, r.text
+        assert r.json()["recurring"]["monthly"] == 800.0
+        r = client.get("/deal-builder/executive-page", headers=hdr)
+        assert r.status_code == 403
+        assert "Wholesale" not in r.text  # the route's own answer, not the lock's
+
+
+@pytest.mark.parametrize("who", ["plat", "adv"])
+def test_wholesale_admin_with_executive_grant(client, team, wholesale_admins, who):
+    w = wholesale_admins
+    caps.set_brand_grants(w["db"], w[who], team["org"].id, team["org"].name, team["god"],
+                          ["deal_builder_executive"])
+    w["db"].commit()
+    r = client.get("/deal-builder/executive-page", headers=_hw(w["db"], w[who], w["host"].id))
+    assert r.status_code == 200 and "Area Sales Manager" in r.text
+    assert client.get("/deal-builder/access", headers=_hw(w["db"], w[who])).json()["executive"] is True
+
+
+def test_wholesale_lock_still_applies_elsewhere(client, team, wholesale_admins):
+    # Opening the Deal Builder does not widen the Wholesale lock for other screens.
+    from app.services import program_experience as pe
+    assert pe.DEAL_BUILDER_PREFIXES == ("/deal-builder/",)
