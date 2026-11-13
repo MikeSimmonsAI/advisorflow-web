@@ -1,18 +1,17 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import '../../design/evTokens.css'
 import './ProgramAccessPortal.css'
 import { programCards, isBookaBoostBrand } from './programAccessModel'
 import BookaBoostProgramAccess from './BookaBoostProgramAccess'
 import WorkspaceCard from '../../design/WorkspaceCard'
 import PlatformArt from '../../design/art/PlatformArt'
-import { getCurrentUser, logout } from '../../api/client'
+import { api, getCurrentUser, logout } from '../../api/client'
 
 /**
  * Multi-program identity = one authorized chooser, not a customer CRM.
  * Caller supplies the server's /auth/my-contexts payload; this surface
- * never computes permissions or changes credentials. Every card comes from
- * programCards(contexts) — nothing here can add a workspace the server did
- * not list for this login.
+ * never computes permissions or changes credentials. Deal Builder links use
+ * the server's separate access response.
  *
  * UI-REDESIGN lane, issue #275 — see docs/redesign/PROGRAM_ACCESS_SPEC.md.
  */
@@ -51,11 +50,39 @@ export default function ProgramAccessPortal(props) {
 }
 
 function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) {
-  const { visible, others, previews } = programCards(contexts)
+  const { visible: workspaceCards, others, previews } = programCards(contexts)
   const [view, setView] = useState(readView)
   const user = userProp !== undefined ? userProp : getCurrentUser()
   const personName = user?.full_name || user?.name || user?.email || ''
   const personEmail = user?.full_name && user?.email ? user.email : ''
+  const [dealAccess, setDealAccess] = useState(null)
+
+  useEffect(() => {
+    let active = true
+    setDealAccess(null)
+    api.get('/deal-builder/access', { noOrgContext: true, skipRedirect: true })
+      .then(access => { if (active) setDealAccess(access) })
+      .catch(() => { if (active) setDealAccess(null) })
+    return () => { active = false }
+  }, [user?.id])
+
+  const visible = [...workspaceCards]
+  if (dealAccess?.executive) {
+    visible.push({
+      type: 'deal_builder', key: 'executive', variant: 'office', symbol: 'DB',
+      kind: 'SALES TOOLS', display: 'Executive Deal Builder',
+      summary: 'Build customer quotes and review the full commission breakdown.',
+      href: '/team-prices/executive-deal-builder', actionLabel: 'Open Deal Builder',
+    })
+  }
+  if (dealAccess?.sales) {
+    visible.push({
+      type: 'deal_builder', key: 'sales', variant: 'office', symbol: 'DB',
+      kind: 'SALES TOOLS', display: 'Salesperson Deal Builder',
+      summary: 'Build customer quotes and estimate your own commission.',
+      href: '/team-prices/sales-deal-builder', actionLabel: 'Open Deal Builder',
+    })
+  }
   const count = visible.length + others.length
 
   const choose = (v) => { setView(v); saveView(v) }
@@ -133,7 +160,7 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
             <div className={'pa-grid pa-grid--' + view + ' pa-grid--n' + Math.min(visible.length, 5)} role="list" aria-label="Your programs">
               {visible.map(item => (
                 <div role="listitem" key={item.type + ':' + item.organization_id + ':' + (item.key || '')}>
-                  <WorkspaceCard item={item} onOpen={onChoose} layout={view} />
+                  <WorkspaceCard item={item} onOpen={onChoose} layout={view} href={item.type === 'deal_builder' ? item.href : undefined} />
                 </div>
               ))}
             </div>
