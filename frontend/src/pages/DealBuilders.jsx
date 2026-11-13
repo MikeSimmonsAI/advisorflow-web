@@ -9,8 +9,12 @@ import { API_BASE, clearToken } from '../api/client'
  *                                     customer prices only, and the
  *                                     salesperson's own commission comes from
  *                                     the server for sales-team members.
- *   /team-prices/deal-builder.html    the old public URL, kept so bookmarks
- *                                     work. The executive page is NOT in this
+ *   /team-prices/executive-deal-builder  executive entry. The old public URL
+ *                                     /team-prices/deal-builder.html is now a
+ *                                     static stub that forwards here (it must
+ *                                     overwrite the old file: the static host
+ *                                     keeps serving deleted files). The
+ *                                     executive page is NOT in this
  *                                     bundle or on the static site: it is
  *                                     downloaded from the backend, which serves
  *                                     it only to the owner or an explicit
@@ -20,7 +24,7 @@ import { API_BASE, clearToken } from '../api/client'
  */
 
 const SALES_PATH = '/team-prices/sales-deal-builder'
-const EXEC_PATH = '/team-prices/deal-builder.html'
+const EXEC_PATH = '/team-prices/executive-deal-builder'
 const frameStyle = { position: 'fixed', inset: 0, display: 'block', width: '100%', height: '100dvh', border: 0, background: '#f3f6f8' }
 const boxStyle = { maxWidth: 520, margin: '12vh auto', padding: 28, background: '#fff', border: '1px solid #dce5ea', borderRadius: 15, font: '15px/1.5 system-ui, sans-serif', color: '#102b40' }
 

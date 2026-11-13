@@ -1387,7 +1387,8 @@ export default function App() {
             executive page is fetched from the backend after a server-side access
             check. The old public URL stays the executive entry point. */}
         <Route path="/team-prices/sales-deal-builder" element={<SalesDealBuilder />} />
-        <Route path="/team-prices/deal-builder.html" element={<ExecutiveDealBuilder />} />
+        <Route path="/team-prices/executive-deal-builder" element={<ExecutiveDealBuilder />} />
+        <Route path="/team-prices/deal-builder.html" element={<Navigate to="/team-prices/executive-deal-builder" replace />} />
         <Route path="/login" element={isAuthenticated() ? <Navigate to="/" replace /> : <Login />} />
         {/* MOBILE / PWA SHELL. Own auth gate (/m/login), own chrome; every call is an existing, server-enforced endpoint. */}
         <Route path="/m/*" element={<MobileApp />} />
