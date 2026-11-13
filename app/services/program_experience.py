@@ -70,6 +70,13 @@ WHOLESALE_ALLOWED_PREFIXES = (
 
 
 BACK_OFFICE_PREFIXES = ("/sales",)
+# The Team Pricing Deal Builders are their own launcher destination, not a
+# platform screen. Every /deal-builder route authorizes itself on the server
+# (sales membership for the salesperson builder; god_admin or the explicit
+# `deal_builder_executive` grant for the executive page), so the Wholesale lock
+# has nothing to add - and it was refusing the /access check Program Access
+# uses, which hid both cards from admins who also hold the Wholesale seat.
+DEAL_BUILDER_PREFIXES = ("/deal-builder/",)
 # VOLT Marketing (#535): staff operations and the applicant's own API.
 VOLT_OPS_PREFIX = "/volt/ops/"
 VOLT_DEV_PREFIX = "/volt/dev/"
@@ -351,6 +358,8 @@ def enforce(db: Session, user, request: Request) -> None:
     # The sales Back Office is its own destination on the launcher, not a
     # general platform screen: a Wholesale-seat login that is also a member of
     # the brand sales team works it (wholesale@, owner decision 2026-10-21).
+    if path.startswith(DEAL_BUILDER_PREFIXES):
+        return
     if path.startswith(BACK_OFFICE_PREFIXES):
         from app.services import workspace_access
         if workspace_access.has_back_office(user, db):

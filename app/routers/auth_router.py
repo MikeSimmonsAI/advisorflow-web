@@ -297,8 +297,21 @@ def my_contexts(request: Request,
     arrangement where typing the URL fails too.
     """
     from app.services import workspace_access
-    return workspace_access.authorized_contexts(db, current_user,
-                                                host_slug=_brand_domain_slug(request))
+    ctx = workspace_access.authorized_contexts(db, current_user,
+                                               host_slug=_brand_domain_slug(request))
+    # TEAM PRICING DEAL BUILDERS — two booleans from the same checks the
+    # /deal-builder routes enforce, so the launcher can count them as
+    # destinations (and not auto-skip Program Access) without a second call.
+    # Booleans only: nothing about compensation travels here.
+    try:
+        from app.routers.deal_builder_router import (may_use_executive_builder,
+                                                     may_use_sales_builder)
+        ctx["deal_builder"] = {"sales": bool(may_use_sales_builder(current_user, db)),
+                               "executive": bool(may_use_executive_builder(current_user, db))}
+    except Exception:  # pragma: no cover - never let this break sign-in
+        _log.exception("deal_builder context failed for user=%s", current_user.id)
+        ctx["deal_builder"] = {"sales": False, "executive": False}
+    return ctx
 
 
 def _brand_domain_slug(request: Request) -> str | None:

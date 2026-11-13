@@ -72,9 +72,12 @@ export function ExecutiveDealBuilder() {
         if (r.status === 401) { clearToken(); setView({ kind: 'expired' }); return }
         if (r.ok) { setView({ kind: 'page', html: await r.text() }); return }
         if (r.status === 403) {
+          let detail = ''
+          try { detail = (await r.json()).detail || '' } catch { /* not JSON */ }
           const a = await fetch(API_BASE + '/deal-builder/access', { headers, cache: 'no-store' })
           const access = a.ok ? await a.json() : {}
-          if (!gone) setView({ kind: access.sales ? 'sales' : 'denied' })
+          if (!a.ok) { try { detail = (await a.json()).detail || detail } catch { /* keep */ } }
+          if (!gone) setView({ kind: access.sales ? 'sales' : 'denied', detail })
           return
         }
         setView({ kind: 'error' })
@@ -91,7 +94,8 @@ export function ExecutiveDealBuilder() {
   if (view.kind === 'denied') {
     return (
       <Notice title="This page needs executive access">
-        <p>Your account can't open the executive Deal Builder. If you sell for EvoSys Pro, ask the owner to add you to the sales team so you can use the Sales Deal Builder.</p>
+        <p>This login can't open the executive Deal Builder.</p>
+        {view.detail && <p style={{ color: '#607486' }}>Server answer: {view.detail}</p>}
         <p><Link to="/">Back to EvoSys Pro</Link></p>
       </Notice>
     )
