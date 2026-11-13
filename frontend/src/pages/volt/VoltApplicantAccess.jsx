@@ -13,7 +13,7 @@ export function ApplicantExport({ orgId, filters, options }) {
   const [busy, setBusy] = useState(false)
   const base = `/volt/ops/${orgId}`
   const keys = Object.keys(options.columns)
-  const selected = columns.length ? columns : keys
+  const selected = columns.length ? columns : (options.default_columns || keys)
 
   async function run(save) {
     setBusy(true)
@@ -46,7 +46,7 @@ export function ApplicantExport({ orgId, filters, options }) {
     <p>Choose fields in the order you want them exported.</p>
     <button type="button" onClick={() => setColumns(keys)}>Select all</button>
     <button type="button" onClick={() => setColumns([])}>Reset order</button>
-    <div className="v-filters">{keys.map((key) => <label key={key}>
+    <div className="v-checklist">{keys.map((key) => <label key={key} className="v-check">
       <input type="checkbox" checked={columns.includes(key)} onChange={(event) =>
         setColumns(event.target.checked ? [...columns, key] : columns.filter((field) => field !== key))} />
       {options.columns[key]}{columns.includes(key) && ` (${columns.indexOf(key) + 1})`}
@@ -150,7 +150,7 @@ export function AcaAccessSettings({ orgId }) {
         <option key={grant.email} value={grant.email}>{grant.email}{grant.active ? '' : ' (inactive)'}</option>)}</select></label>
       <label><input type="checkbox" checked={form.active} onChange={(event) =>
         setForm({ ...form, active: event.target.checked })} /> Active</label>
-      <div className="v-filters">{Object.entries(options?.aca_fields || {}).map(([key, label]) => <fieldset key={key}>
+      <div className="v-checklist">{Object.entries(options?.aca_fields || {}).map(([key, label]) => <fieldset key={key}>
         <legend>{label}</legend>
         <label><input type="checkbox" checked={form.view_fields.includes(key)} onChange={(event) =>
           setForm(event.target.checked ? { ...form, view_fields: [...form.view_fields, key] } :

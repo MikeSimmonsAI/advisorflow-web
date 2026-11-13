@@ -163,6 +163,9 @@ def rows(db: Session, org_id: str, f: Dict[str, Any], limit: Optional[int] = Non
     if origs:
         reps.update({r.serial: r for r in db.query(VoltRep).filter(VoltRep.serial.in_(origs)).all()})
     projects = {p.id: p for p in db.query(VoltProject).filter(VoltProject.organization_id == org_id).all()}
+    # Sign-in email lives on the linked login (users), not on volt_reps.
+    uids = {r.user_id for r in reps.values() if r.user_id}
+    emails = {u.id: u.email for u in db.query(User.id, User.email).filter(User.id.in_(uids)).all()} if uids else {}
     from app.services.volt import hiring
     from app.models.volt_models import VoltSession, VoltSessionAttendee
     zoom = {}
@@ -192,7 +195,11 @@ def rows(db: Session, org_id: str, f: Dict[str, Any], limit: Optional[int] = Non
         orig = reps.get(rep.original_recruiter_serial) if rep and rep.original_recruiter_serial else None
         ref = reps.get(a.referrer_serial) if a.referrer_serial else None
         out.append({"application_id": a.id, "rep_id": a.rep_serial, "rep_code": C.rep_code(a.rep_serial),
-                    "applicant": C.display_name(rep) if rep else "", "is_test": bool(rep and rep.is_test),
+                    "applicant": C.display_name(rep) if rep else "",
+                    "first_name": (rep.first_name or None) if rep else None,
+                    "last_name": (rep.last_name or None) if rep else None,
+                    "email": emails.get(rep.user_id) if rep else None,
+                    "phone": (rep.phone or None) if rep else None, "is_test": bool(rep and rep.is_test),
                     "project_id": a.project_id, "project_key": p.key if p else None,
                     "project": (p.short_name or p.name) if p else "", "status": a.status,
                     "status_label": C.STATUS_LABELS.get(a.status, a.status),
@@ -264,8 +271,8 @@ def _cell(v) -> str:
     return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
 
 
-CSV_COLUMNS = dict(zip(['application_id', 'rep_code', 'applicant', 'project_key', 'project', 'status_label', 'original_recruiter_id', 'original_recruiter', 'project_recruiter_id', 'project_recruiter', 'city', 'state', 'earliest_start', 'availability', 'work_history_count', 'no_experience', 'willing_travel', 'comfortable_d2d', 'transportation', 'earliest_departure', 'time_away', 'drivers_license', 'smartphone', 'd2d_experience', 'd2d_duration', 'homeowner_comfort', 'training', 'commitment', 'outreach_experience', 'comfortable_explaining', 'languages', 'license_status', 'created_at', 'submitted_at', 'approved_at', 'started_at'],
-    ["Application ID", "Rep ID", "Applicant", "Project key", "Project", "Stage",
+CSV_COLUMNS = dict(zip(['application_id', 'rep_code', 'applicant', 'first_name', 'last_name', 'email', 'phone', 'project_key', 'project', 'status_label', 'original_recruiter_id', 'original_recruiter', 'project_recruiter_id', 'project_recruiter', 'city', 'state', 'earliest_start', 'availability', 'work_history_count', 'no_experience', 'willing_travel', 'comfortable_d2d', 'transportation', 'earliest_departure', 'time_away', 'drivers_license', 'smartphone', 'd2d_experience', 'd2d_duration', 'homeowner_comfort', 'training', 'commitment', 'outreach_experience', 'comfortable_explaining', 'languages', 'license_status', 'created_at', 'submitted_at', 'approved_at', 'started_at'],
+    ["Application ID", "Rep ID", "Full name", "First name", "Last name", "Email", "Phone", "Project key", "Project", "Stage",
                 "Original recruiter ID", "Original recruiter", "Project recruiter ID", "Project recruiter",
                 "City", "State", "Earliest start", "Availability", "Jobs listed", "No previous work experience",
                 "Willing to travel (earlier Fiber form)", "Comfortable with door-to-door (earlier Fiber form)",
@@ -278,16 +285,22 @@ CSV_COLUMNS = dict(zip(['application_id', 'rep_code', 'applicant', 'project_key'
                 "Application started (UTC)", "Submitted (UTC)", "Approved (UTC)", "Started (UTC)"], strict=True))
 
 
+# Contact columns are opt-in: never part of a default export.
+CONTACT_COLUMNS = ("first_name", "last_name", "email", "phone")
+DEFAULT_CSV_COLUMNS = [key for key in CSV_COLUMNS if key not in CONTACT_COLUMNS]
+
+
 def csv_text(db: Session, org_id: str, f: Dict[str, Any], columns: Optional[List[str]] = None) -> str:
-    """The review queue's rows for the same filters. No DOB, no contact data,
-    no document links."""
+    """The review queue's rows for the same filters. No DOB, no document
+    links. Name, email and phone appear only when explicitly selected."""
     buf = io.StringIO()
     w = csv.writer(buf)
-    selected = columns if columns is not None else list(CSV_COLUMNS)
+    selected = columns if columns is not None else list(DEFAULT_CSV_COLUMNS)
     w.writerow([CSV_COLUMNS[key] for key in selected])
     for r in rows(db, org_id, f):
         o, p = r["original_recruiter"] or {}, r["project_recruiter"] or {}
-        values = (r["application_id"], r["rep_code"], r["applicant"], r["project_key"],
+        values = (r["application_id"], r["rep_code"], r["applicant"],
+                  r["first_name"], r["last_name"], r["email"], r["phone"], r["project_key"],
                                         r["project"], r["status_label"], o.get("rep_code"), o.get("display_name"),
                                         p.get("rep_code"), p.get("display_name"),
                                         r["city"], r["state"], r["earliest_start"], r["availability"],

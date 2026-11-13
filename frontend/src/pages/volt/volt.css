@@ -391,3 +391,10 @@
 
 .v-ma-remaining { margin: 4px 0 2px; }
 .v-ma-remaining ul { margin: 6px 0 0 18px; padding: 0; display: grid; gap: 3px; }
+
+/* Applicant CSV / ACA access field pickers: compact, touch-friendly rows. */
+.v-checklist { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px; margin: 10px 0; }
+.v-check { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; line-height: 1.25; }
+.v-check input[type="checkbox"] { width: 20px; height: 20px; flex: none; margin: 0; }
+.v-checklist fieldset { min-width: 0; margin: 0; padding: 6px 10px; }
+@media (max-width: 600px) { .v-checklist { grid-template-columns: 1fr; } }
