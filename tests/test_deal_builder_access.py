@@ -211,7 +211,13 @@ UPSTREAM_SOURCE = re.compile(r"Area Sales Manager|Sr Executive Vice|PACKAGE_PAY|
 
 
 def test_executive_page_not_in_public_static_site():
-    assert not os.path.exists(os.path.join(ROOT, "frontend/public/team-prices/deal-builder.html"))
+    # The old public path is now a forwarding stub. It must EXIST (the static
+    # host keeps serving a deleted file from an earlier deploy) and must carry
+    # nothing but the redirect.
+    stub = open(os.path.join(ROOT, "frontend/public/team-prices/deal-builder.html"), encoding="utf-8").read()
+    assert "/team-prices/executive-deal-builder" in stub
+    assert len(stub) < 1500
+    assert not re.search(r"\$\d|commission|<style|deal-core|Area Sales|Executive Vice|setup", stub, re.I)
     assert os.path.exists(os.path.join(ROOT, "app/private_pages/deal_builder_executive.html"))
 
 

@@ -8,7 +8,8 @@ TWO BUILDERS, ONE SET OF CUSTOMER PRICES
                         salesperson's own estimated commission, from
                         POST /deal-builder/my-commission.
 
-  Executive builder     /team-prices/deal-builder.html (frontend entry point)
+  Executive builder     /team-prices/executive-deal-builder (frontend entry;
+                        the old /team-prices/deal-builder.html forwards here)
                         The owner (god_admin) or a person explicitly granted
                         the brand capability `deal_builder_executive`.
                         GET /deal-builder/executive-page returns the full page,
