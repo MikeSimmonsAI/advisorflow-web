@@ -407,7 +407,8 @@ def _dev_principal(db, user, org_id) -> bool:
 # Restricted logins receive a separate, flat applicant view. The shared
 # staff dossier includes documents, audit history and other projects.
 ACA_FIELDS = (
-    "applicant", "rep_code", "status_label", "city", "state", "earliest_start",
+    "applicant", "first_name", "last_name", "email", "phone",
+    "rep_code", "status_label", "city", "state", "earliest_start",
     "availability", "outreach_experience", "comfortable_explaining", "languages",
     "created_at", "submitted_at", "approved_at", "started_at",
 )
@@ -448,9 +449,10 @@ def _grant_fields(grant, attribute):
 def ops_export_options(org_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     access, _, grant = _applicant_scope(db, user, org_id, {})
     allowed = _grant_fields(grant, "export_fields") if grant else list(reports.CSV_COLUMNS)
+    default = [key for key in allowed if grant or key in reports.DEFAULT_CSV_COLUMNS]
     presets = db.query(VoltExportPreset).filter_by(organization_id=org_id, user_id=user.id).order_by(
         VoltExportPreset.name).all()
-    return {"columns": {key: reports.CSV_COLUMNS[key] for key in allowed},
+    return {"columns": {key: reports.CSV_COLUMNS[key] for key in allowed}, "default_columns": default,
             "view_columns": {key: reports.CSV_COLUMNS[key] for key in _grant_fields(grant, "view_fields")} if grant else {},
             "aca_fields": {key: reports.CSV_COLUMNS[key] for key in ACA_FIELDS} if access == "owner" else {},
             "presets": [{"name": item.name, "columns": keys} for item in presets
@@ -548,7 +550,8 @@ def ops_export(org_id: str, request: Request, db: Session = Depends(get_db), use
     if not allowed:
         raise HTTPException(status_code=403, detail="Your login has no authorized export fields.")
     requested = request.query_params.getlist("column")
-    columns = _columns(requested, allowed) if requested else list(allowed)
+    columns = (_columns(requested, allowed) if requested
+               else [key for key in allowed if grant or key in reports.DEFAULT_CSV_COLUMNS])
     csv_content = reports.csv_text(db, org_id, f, columns)
     C.audit(db, org_id, user, "export", "applications", "applicant_csv_export",
             new=json.dumps({"columns": columns, "project_id": f.get("project_id")}))

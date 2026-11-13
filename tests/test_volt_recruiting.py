@@ -14,7 +14,7 @@ from app.models.models import Organization, User
 from app.models.sales_models import Membership
 from app.models.volt_models import VoltApplication, VoltAuditEvent, VoltProgram, VoltProject, VoltRep, VoltTalentSignup
 from app.services.auth_service import create_access_token, hash_password
-from app.services.volt import seed
+from app.services.volt import reports, seed
 
 SLUG = "volt-marketing"
 _SEQ = itertools.count(1)
@@ -1077,7 +1077,7 @@ def test_aca_staff_access_and_export_are_scoped(volt):
 
     assert c.get(f"{base}/export.csv", headers=staff, params={"column": "status_label"}).status_code == 422
     export = c.get(f"{base}/export.csv", headers=staff)
-    assert list(csv.reader(io.StringIO(export.text))) == [["Applicant"], ["ACA Applicant"]]
+    assert list(csv.reader(io.StringIO(export.text))) == [["Full name"], ["ACA Applicant"]]
 
     preset = {"name": "Review", "columns": ["status_label", "applicant"]}
     assert c.put(f"{base}/export-options/presets", headers=staff, json=preset).status_code == 422
@@ -1085,9 +1085,67 @@ def test_aca_staff_access_and_export_are_scoped(volt):
     assert c.get(f"{base}/export-options", headers=owner).json()["presets"] == [preset]
     assert c.get(f"{base}/export-options", headers=staff).json()["presets"] == []
     ordered = c.get(f"{base}/export.csv", headers=owner, params={"column": preset["columns"]})
-    assert list(csv.reader(io.StringIO(ordered.text)))[0] == ["Stage", "Applicant"]
+    assert list(csv.reader(io.StringIO(ordered.text)))[0] == ["Stage", "Full name"]
     assert db.query(VoltAuditEvent).filter_by(action="applicant_csv_export").count() == 2
 
     assert c.put(f"{base}/aca-access", headers=owner, json=dict(grant, active=False)).status_code == 200
     assert c.get(f"{base}/export.csv", headers=staff).status_code == 403
     assert c.get(f"{base}/applications", headers=staff).status_code == 403
+
+
+def test_csv_contact_columns_real_values_scoping_and_order(volt):
+    import csv
+    import io
+
+    c, db, org = volt["c"], volt["db"], volt["org"]
+    owner, staff = H(db, volt["god"]), H(db, volt["staff"])
+    base = f"/volt/ops/{org.id}"
+    _, _, aca = volt["register"](first="Ada", last="Lovelace")
+    _, _, fiber = volt["register"](first="Fiona", last="Fiber", project_key="fiber")
+    rep = db.get(VoltRep, aca["rep"]["rep_id"])
+    rep.is_test, rep.phone = False, "555-0101"
+    db.get(VoltRep, fiber["rep"]["rep_id"]).is_test = False
+    login = db.get(User, rep.user_id)
+    db.commit()
+    cols = ["email", "phone", "first_name", "last_name", "applicant"]
+    out = c.get(f"{base}/export.csv", headers=owner, params={"column": cols, "project_id": volt["project"]("aca").id})
+    assert out.status_code == 200, out.text
+    assert list(csv.reader(io.StringIO(out.text))) == [
+        ["Email", "Phone", "First name", "Last name", "Full name"],
+        [login.email, "555-0101", "Ada", "Lovelace", "Ada Lovelace"]]
+    # No duplicate labels; contact fields are not in a default export.
+    assert len(set(reports.CSV_COLUMNS.values())) == len(reports.CSV_COLUMNS)
+    default = c.get(f"{base}/export.csv", headers=owner).text
+    assert login.email not in default and "555-0101" not in default
+    # Missing phone is an empty cell.
+    rep.phone = None
+    db.commit()
+    blank = c.get(f"{base}/export.csv", headers=owner,
+                  params={"column": ["phone", "applicant"], "project_id": volt["project"]("aca").id}).text
+    assert list(csv.reader(io.StringIO(blank)))[1] == ["", "Ada Lovelace"]
+    # Spreadsheet-formula and comma/quote escaping.
+    rep.phone, rep.last_name = "=1+1", 'Love, "lace"'
+    db.commit()
+    esc = c.get(f"{base}/export.csv", headers=owner,
+                params={"column": ["phone", "last_name"], "project_id": volt["project"]("aca").id}).text
+    assert list(csv.reader(io.StringIO(esc)))[1] == ["'=1+1", 'Love, "lace"']
+    # Default deny for ACA-only staff until the owner grants the field.
+    grant = {"email": volt["staff"].email, "active": True, "view_fields": ["applicant", "email"],
+             "export_fields": ["applicant"]}
+    assert c.put(f"{base}/aca-access", headers=owner, json=grant).status_code == 200
+    assert c.get(f"{base}/export.csv", headers=staff, params={"column": "email"}).status_code == 422
+    assert c.get(f"{base}/export.csv", headers=staff, params={"column": "phone"}).status_code == 422
+    only = list(csv.reader(io.StringIO(c.get(f"{base}/export.csv", headers=staff).text)))
+    assert only[0] == ["Full name"] and len(only) == 2          # ACA only: no Fiber row
+    grant["export_fields"] = ["email", "applicant"]
+    assert c.put(f"{base}/aca-access", headers=owner, json=grant).status_code == 200
+    ok = list(csv.reader(io.StringIO(c.get(f"{base}/export.csv", headers=staff,
+                                           params={"column": ["email", "applicant"]}).text)))
+    assert ok == [["Email", "Full name"], [login.email, 'Ada Love, "lace"']]
+    assert "Fiona" not in str(ok)
+    assert c.get(f"/volt/ops/{volt['other'].id}/export.csv", headers=staff).status_code == 403
+    # Presets keep the chosen order, contact fields included.
+    preset = {"name": "Contact", "columns": ["email", "phone", "applicant"]}
+    assert c.put(f"{base}/export-options/presets", headers=owner, json=preset).status_code == 200
+    assert preset in c.get(f"{base}/export-options", headers=owner).json()["presets"]
+    assert c.put(f"{base}/export-options/presets", headers=staff, json=preset).status_code == 422
