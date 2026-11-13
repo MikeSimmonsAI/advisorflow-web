@@ -16,17 +16,20 @@ Every staff endpoint re-checks authority for the organization in the path.
 """
 from __future__ import annotations
 
+import json
+
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.deps import get_current_user, get_db
 from app.limiter import limiter
 from app.models.models import User
 from app.models.volt_models import (
-    VoltApplication, VoltDocument, VoltProject, VoltRep, VoltSession, VoltSessionAttendee, VoltTalentSignup,
+    VoltApplicantAccess, VoltExportPreset, VoltApplication, VoltDocument, VoltProject, VoltRep, VoltSession, VoltSessionAttendee, VoltTalentSignup,
 )
 from app.services.volt import common as C
 from app.services.volt import core, docs, hiring, mail, reports, sessions, talent
@@ -401,9 +404,119 @@ def _dev_principal(db, user, org_id) -> bool:
     return devrelay.is_principal(db, user, org_id)
 
 
+# Restricted logins receive a separate, flat applicant view. The shared
+# staff dossier includes documents, audit history and other projects.
+ACA_FIELDS = (
+    "applicant", "rep_code", "status_label", "city", "state", "earliest_start",
+    "availability", "outreach_experience", "comfortable_explaining", "languages",
+    "created_at", "submitted_at", "approved_at", "started_at",
+)
+
+
+def _applicant_scope(db, user, org_id, params):
+    access = C.require_staff(db, user, org_id, applicant_read=True)
+    filters = reports.filters_from(dict(params))
+    if access != "aca_applicants":
+        return access, filters, None
+    project = C.project_by_key(db, org_id, "aca")
+    if filters["project_id"] not in (None, project.id):
+        raise HTTPException(status_code=403, detail="This login has ACA applicant access only.")
+    filters = {key: filters[key] for key in ("status", "reached", "date_from", "date_to")}
+    filters["project_id"] = project.id
+    grant = db.get(VoltApplicantAccess, (org_id, user.id))
+    visible = _grant_fields(grant, "view_fields")
+    if "status_label" not in visible:
+        filters["status"] = None
+    if reports.REACHED[filters["reached"]] not in visible:
+        filters.update(reached="created", date_from=None, date_to=None)
+    return access, filters, grant
+
+
+def _columns(values, allowed, *, empty=False):
+    if (not isinstance(values, list) or len(values) > len(allowed)
+            or any(not isinstance(key, str) or key not in allowed for key in values)
+            or len(set(values)) != len(values) or (not empty and not values)):
+        raise HTTPException(status_code=422, detail="Choose unique, authorized applicant fields.")
+    return values
+
+
+def _grant_fields(grant, attribute):
+    return [key for key in C.loads(getattr(grant, attribute), []) if key in ACA_FIELDS]
+
+
+@ops_router.get("/{org_id}/export-options")
+def ops_export_options(org_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    access, _, grant = _applicant_scope(db, user, org_id, {})
+    allowed = _grant_fields(grant, "export_fields") if grant else list(reports.CSV_COLUMNS)
+    presets = db.query(VoltExportPreset).filter_by(organization_id=org_id, user_id=user.id).order_by(
+        VoltExportPreset.name).all()
+    return {"columns": {key: reports.CSV_COLUMNS[key] for key in allowed},
+            "view_columns": {key: reports.CSV_COLUMNS[key] for key in _grant_fields(grant, "view_fields")} if grant else {},
+            "aca_fields": {key: reports.CSV_COLUMNS[key] for key in ACA_FIELDS} if access == "owner" else {},
+            "presets": [{"name": item.name, "columns": keys} for item in presets
+                        if (keys := C.loads(item.columns, [])) and all(key in allowed for key in keys)]}
+
+
+@ops_router.put("/{org_id}/export-options/presets")
+def ops_save_export_preset(org_id: str, body: Dict[str, Any] = Body(...), db: Session = Depends(get_db),
+                           user: User = Depends(get_current_user)):
+    _, _, grant = _applicant_scope(db, user, org_id, {})
+    allowed = _grant_fields(grant, "export_fields") if grant else reports.CSV_COLUMNS
+    name = body.get("name")
+    if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80:
+        raise HTTPException(status_code=422, detail="Enter a preset name of up to 80 characters.")
+    columns = _columns(body.get("columns"), allowed)
+    db.merge(VoltExportPreset(organization_id=org_id, user_id=user.id, name=name.strip(),
+                              columns=json.dumps(columns)))
+    db.commit()
+    return {"name": name.strip(), "columns": columns}
+
+
+@ops_router.put("/{org_id}/aca-access")
+def ops_aca_access(org_id: str, body: Dict[str, Any] = Body(...), db: Session = Depends(get_db),
+                   user: User = Depends(get_current_user)):
+    _, access = _staff(db, user, org_id, write=True)
+    if access != "owner":
+        raise HTTPException(status_code=403, detail="Only the VOLT owner can manage ACA applicant access.")
+    email = body.get("email")
+    active = body.get("active")
+    if not isinstance(email, str) or not isinstance(active, bool):
+        raise HTTPException(status_code=422, detail="Provide an existing login email and access status.")
+    target = db.query(User).filter(func.lower(User.email) == email.strip().lower()).first()
+    if target is None:
+        raise HTTPException(status_code=404, detail="Existing login not found.")
+    if target.role in ("god_admin", "volt_rep"):
+        raise HTTPException(status_code=422, detail="Select a staff login.")
+    view_fields = _columns(body.get("view_fields"), ACA_FIELDS, empty=True)
+    export_fields = _columns(body.get("export_fields"), view_fields, empty=True)
+    db.merge(VoltApplicantAccess(organization_id=org_id, user_id=target.id, active=active,
+                                 view_fields=json.dumps(view_fields), export_fields=json.dumps(export_fields)))
+    C.audit(db, org_id, user, "access", target.id, "aca_applicant_access",
+            new=json.dumps({"active": active, "view_fields": view_fields, "export_fields": export_fields}))
+    db.commit()
+    return {"email": target.email, "active": active, "view_fields": view_fields, "export_fields": export_fields}
+
+
+@ops_router.get("/{org_id}/aca-access")
+def ops_aca_access_list(org_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _, access = _staff(db, user, org_id)
+    if access != "owner":
+        raise HTTPException(status_code=403, detail="Only the VOLT owner can manage ACA applicant access.")
+    grants = db.query(VoltApplicantAccess, User).join(User, User.id == VoltApplicantAccess.user_id).filter(
+        VoltApplicantAccess.organization_id == org_id).order_by(User.email).all()
+    return {"items": [{"email": target.email, "active": grant.active,
+                        "view_fields": _grant_fields(grant, "view_fields"),
+                        "export_fields": _grant_fields(grant, "export_fields")} for grant, target in grants]}
+
+
 @ops_router.get("/{org_id}")
 def ops_home(org_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    prog, access = _staff(db, user, org_id)
+    access = C.require_staff(db, user, org_id, applicant_read=True)
+    prog = C.program_for_org(db, org_id)
+    if access == "aca_applicants":
+        project = C.project_by_key(db, org_id, "aca")
+        return {"access": access, "me": {"email": user.email, "full_name": user.full_name},
+                "projects": [{"id": project.id, "key": project.key, "name": project.name}]}
     f = reports.filters_from(dict(request.query_params))
     return {"program": {"organization_id": org_id, "name": prog.name, "slug": prog.slug,
                         "profile_required_docs": C.loads(prog.profile_required_docs, [])},
@@ -418,9 +531,11 @@ def ops_home(org_id: str, request: Request, db: Session = Depends(get_db), user:
 
 @ops_router.get("/{org_id}/applications")
 def ops_queue(org_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    _staff(db, user, org_id)
-    f = reports.filters_from(dict(request.query_params))
-    items = reports.rows(db, org_id, f)
+    _, f, grant = _applicant_scope(db, user, org_id, request.query_params)
+    fields = _grant_fields(grant, "view_fields") if grant else None
+    items = reports.rows(db, org_id, f) if fields is None or fields else []
+    if fields is not None:
+        items = [{key: row.get(key) for key in fields} for row in items]
     return {"items": items, "count": len(items),
             "filters": {k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in f.items()},
             "reached_label": reports.REACHED_LABELS[f["reached"]]}
@@ -428,9 +543,17 @@ def ops_queue(org_id: str, request: Request, db: Session = Depends(get_db), user
 
 @ops_router.get("/{org_id}/export.csv")
 def ops_export(org_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    _staff(db, user, org_id)
-    f = reports.filters_from(dict(request.query_params))
-    return Response(content=reports.csv_text(db, org_id, f), media_type="text/csv",
+    _, f, grant = _applicant_scope(db, user, org_id, request.query_params)
+    allowed = _grant_fields(grant, "export_fields") if grant else reports.CSV_COLUMNS
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Your login has no authorized export fields.")
+    requested = request.query_params.getlist("column")
+    columns = _columns(requested, allowed) if requested else list(allowed)
+    csv_content = reports.csv_text(db, org_id, f, columns)
+    C.audit(db, org_id, user, "export", "applications", "applicant_csv_export",
+            new=json.dumps({"columns": columns, "project_id": f.get("project_id")}))
+    db.commit()
+    return Response(content=csv_content, media_type="text/csv",
                     headers={"Content-Disposition": 'attachment; filename="volt-marketing-applications.csv"',
                              "Cache-Control": "private, no-store"})
 

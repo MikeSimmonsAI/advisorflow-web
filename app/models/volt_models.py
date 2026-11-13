@@ -524,3 +524,22 @@ class VoltDevNonce(Base):
 
     jti = Column(String, primary_key=True)
     used_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class VoltApplicantAccess(Base):
+    __tablename__ = "volt_applicant_access"
+
+    organization_id = Column(String, ForeignKey("volt_programs.organization_id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    active = Column(Boolean, nullable=False, default=True)
+    view_fields = Column(Text, nullable=False)
+    export_fields = Column(Text, nullable=False)
+
+
+class VoltExportPreset(Base):
+    __tablename__ = "volt_export_presets"
+
+    organization_id = Column(String, ForeignKey("volt_programs.organization_id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    name = Column(String(80), primary_key=True)
+    columns = Column(Text, nullable=False)
