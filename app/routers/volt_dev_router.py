@@ -77,20 +77,31 @@ def dev_submit(org_id: str, body: Dict[str, Any] = Body(...), db: Session = Depe
 def dev_job(org_id: str, ref: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     R.require_principal(db, user, org_id)
     _refresh(db, org_id)
-    return R.job_dict(db, R.by_ref(db, org_id, ref), events=True)
+    job = R.by_ref(db, org_id, ref)
+    result = R.job_dict(db, job, events=True)
+    if result["can"]["approve_merge"]:
+        result["release_blocker"] = D.release_blocker(job)
+        result["can"]["approve_merge"] = not result["release_blocker"]
+    return result
 
 
 @console.post("/{org_id}/jobs/{ref}/{action}")
-def dev_action(org_id: str, ref: str, action: str, db: Session = Depends(get_db),
+def dev_action(org_id: str, ref: str, action: str, body: Dict[str, Any] = Body(default={}), db: Session = Depends(get_db),
                user: User = Depends(get_current_user)):
     R.require_principal(db, user, org_id)
-    return _act(db, org_id, ref, action, user)
+    return _act(db, org_id, ref, action, user, expected_sha=body.get("tested_commit"))
 
 
 def _act(db, org_id, ref, action, user, expected_sha=None):
     job = R.by_ref(db, org_id, ref)
     before = job.status
     if action == "approve-merge":
+        if job.status == "ready_to_test" and job.head_sha and job.pr_number:
+            if not expected_sha or not R._sha_matches(job.head_sha, expected_sha):
+                R._err(409, "Review and confirm the exact tested commit.", "commit_mismatch")
+            blocker = D.release_blocker(job)
+            if blocker:
+                R._err(409, blocker, "github_release_blocked")
         out, purpose = R.approve_merge(db, job, user, expected_sha), "merge"
     elif action == "retry":
         out, purpose = R.retry(db, job, user), "retry"

@@ -87,7 +87,7 @@ function Steps({ job }) {
 }
 
 function JobDrawer({ orgId, job: initial, onClose, onChanged }) {
-  const [job, setJob] = useState(initial)
+  const [job, setJob] = useState({ ...initial, can: { ...initial.can, approve_merge: false } })
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
   const [ask, setAsk] = useState(null)
@@ -97,7 +97,7 @@ function JobDrawer({ orgId, job: initial, onClose, onChanged }) {
   async function act(action) {
     if (busy) return
     setBusy(action); setErr('')
-    try { const j = await api.post(`/volt/dev/${orgId}/jobs/${job.ref}/${action}`, {}); setJob(j); setAsk(null); onChanged() } catch (e) { setErr(msg(e)); setAsk(null) } finally { setBusy('') }
+    try { const j = await api.post(`/volt/dev/${orgId}/jobs/${job.ref}/${action}`, action === 'approve-merge' ? { tested_commit: job.head_sha } : {}); setJob(j); setAsk(null); onChanged() } catch (e) { setErr(msg(e)); setAsk(null) } finally { setBusy('') }
   }
   const COPY = {
     'approve-merge': ['Approve for production?', `Release ${job.ref} at tested commit ${(job.head_sha || '').slice(0, 12)} (${job.tests_summary || 'tests passed'}). It is merged into main and Render deploys it. Only this exact commit can be merged; a newer or untested one is refused.`],
@@ -119,6 +119,7 @@ function JobDrawer({ orgId, job: initial, onClose, onChanged }) {
           {job.progress?.summary && <p className="v-small" style={{ marginTop: 10 }} data-dev-summary>{job.progress.summary}</p>}
           {job.progress?.blocker && <div className="v-alert v-alert--err" role="status" data-dev-blocker>What is blocking it: {job.progress.blocker}</div>}
           {job.progress?.next_action && <p className="v-small" data-dev-next><b>Next:</b> {job.progress.next_action}</p>}
+          {job.release_blocker && <div className="v-alert v-alert--err" role="status">{job.release_blocker}</div>}
           {err && <div className="v-alert v-alert--err" role="alert">{err}</div>}
           <div className="v-row" style={{ justifyContent: 'flex-start', marginTop: 10 }}>
             {job.can.approve_merge && <button type="button" className="v-btn v-btn--red" onClick={() => setAsk('approve-merge')} disabled={!!busy} data-approve>Approve &amp; deploy to production</button>}
