@@ -176,6 +176,16 @@ CAPABILITIES: Dict[str, Capability] = dict([
              "being able to change what anybody earns, and non-delegable "
              "because a plan spans a brand's whole team."),
 
+    _cap("deal_builder_executive",
+         "Executive Deal Builder — full team compensation split",
+         requires_feature=None, delegable=False,
+         why="The executive Deal Builder shows every compensation layer: the "
+             "salesperson, the Area Sales Manager, the Sr Executive Vice "
+             "President and what EvoSys keeps. Being a sales member or a sales "
+             "manager does NOT grant it; the owner grants it to a named "
+             "executive. Salespeople use the salesperson builder, which shows "
+             "only their own commission."),
+
     _cap("lead_import_manage",
          "Archive and manage import batches",
          requires_feature=None, delegable=True,
@@ -428,6 +438,10 @@ def grants_for(db: Session, user_id: str, org_id: str) -> List[str]:
 # The capabilities that MEAN something at brand scope. Deliberately short: this
 # list is the promise that a grant written here is a grant something enforces.
 BRAND_SCOPED_CAPABILITIES = ("sales_comp_view", "sales_comp_manage",
+                             # Read by app/routers/deal_builder_router.py: the
+                             # executive Deal Builder page is served only to
+                             # god_admin or a holder of this grant.
+                             "deal_builder_executive",
                              # Support operators work for a BRAND, not for a
                              # customer: `users.organization_id` is NULL for
                              # them, so a customer-org grant could not exist.
