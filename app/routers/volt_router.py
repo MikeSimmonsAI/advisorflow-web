@@ -1029,3 +1029,12 @@ def ops_inbox_attachment(org_id: str, message_id: str, att_id: str, db: Session 
         "Content-Disposition": 'attachment; filename="%s"' % name.replace('"', ""),
         "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store",
         "Content-Security-Policy": "default-src 'none'; sandbox"})
+
+
+# ═════════════════════════════════════════════════════════ CONSUMER LEADS ═══
+# DEV-4: mounted here (app/main.py is not edited). The staff routes inherit
+# ops_router's _volt_guard; see app/services/volt/leads.py for authorization.
+from app.routers import volt_leads_router as _leads  # noqa: E402
+
+public_router.include_router(_leads.public_router)
+ops_router.include_router(_leads.ops_router)
