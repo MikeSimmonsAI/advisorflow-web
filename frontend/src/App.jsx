@@ -12,6 +12,8 @@ import Login from './pages/Login'
 import GoogleSignInComplete from './pages/GoogleSignInComplete'
 import TeamPrices from './pages/TeamPrices'
 import { SalesDealBuilder, ExecutiveDealBuilder } from './pages/DealBuilders'
+import MyTeam from './pages/sales/MyTeam'
+import SalesOnboarding from './pages/SalesOnboarding'
 import Onboarding from './pages/Onboarding'
 // Public customer-facing surfaces. DealRoom is the Checkpoint 4 sales deal
 // room; PortalAccess/PortalViewer are the pre-existing customer portal pages
@@ -1196,6 +1198,7 @@ function WorkspaceSelector() {
   // workspace AND a Deal Builder must still see Program Access, not be sent
   // straight into the workspace.
   const dealBuilders = (ctx.deal_builder?.sales ? 1 : 0) + (ctx.deal_builder?.executive ? 1 : 0)
+    + (ctx.sales_team?.my_team ? 1 : 0) + (ctx.sales_team?.onboarding ? 1 : 0)
   const otherDestinations = products.length + previews.length + (ctx.acquisition_ops || []).length
     + (ctx.has_back_office ? 1 : 0) + (ctx.executive_contexts || []).length + dealBuilders
   if (volts.length === 1 && nonVolt.length === 0 && otherDestinations === 0) {
@@ -1392,6 +1395,11 @@ export default function App() {
             executive page is fetched from the backend after a server-side access
             check. The old public URL stays the executive entry point. */}
         <Route path="/team-prices/sales-deal-builder" element={<SalesDealBuilder />} />
+        {/* EvoSys Pro sales team: onboarding for new people (before approval
+            they can reach nothing else in the sales program) and My Team in
+            the Back Office. Both are authorized on the server. */}
+        <Route path="/sales-onboarding" element={<SalesRoute><SalesOnboarding /></SalesRoute>} />
+        <Route path="/sales/my-team" element={<SalesRoute><MyTeam /></SalesRoute>} />
         <Route path="/team-prices/executive-deal-builder" element={<ExecutiveDealBuilder />} />
         <Route path="/team-prices/deal-builder.html" element={<Navigate to="/team-prices/executive-deal-builder" replace />} />
         <Route path="/login" element={isAuthenticated() ? <Navigate to="/" replace /> : <Login />} />

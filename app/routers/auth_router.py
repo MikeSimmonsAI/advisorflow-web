@@ -311,6 +311,18 @@ def my_contexts(request: Request,
     except Exception:  # pragma: no cover - never let this break sign-in
         _log.exception("deal_builder context failed for user=%s", current_user.id)
         ctx["deal_builder"] = {"sales": False, "executive": False}
+    # My Team / Sales Onboarding cards - booleans only.
+    try:
+        from app.services import sales_onboarding, sales_team
+        rights = sales_team.actor_rights(db, current_user)
+        brand = sales_team.program_brand(db)
+        rec = sales_onboarding.record(db, current_user.id, brand.id) if brand else None
+        ctx["sales_team"] = {"my_team": bool(rights["can_view_team"]),
+                             "onboarding": bool(rec is not None and rec.status != "approved"
+                                                and rights["seat"] not in (None, "god", "owner"))}
+    except Exception:  # pragma: no cover
+        _log.exception("sales_team context failed for user=%s", current_user.id)
+        ctx["sales_team"] = {"my_team": False, "onboarding": False}
     return ctx
 
 

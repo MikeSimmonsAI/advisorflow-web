@@ -76,7 +76,7 @@ BACK_OFFICE_PREFIXES = ("/sales",)
 # `deal_builder_executive` grant for the executive page), so the Wholesale lock
 # has nothing to add - and it was refusing the /access check Program Access
 # uses, which hid both cards from admins who also hold the Wholesale seat.
-DEAL_BUILDER_PREFIXES = ("/deal-builder/",)
+DEAL_BUILDER_PREFIXES = ("/deal-builder/", "/sales-team/")
 # VOLT Marketing (#535): staff operations and the applicant's own API.
 VOLT_OPS_PREFIX = "/volt/ops/"
 VOLT_DEV_PREFIX = "/volt/dev/"
