@@ -92,6 +92,23 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
       href: '/team-prices/sales-deal-builder', actionLabel: 'Open Deal Builder',
     })
   }
+  const salesTeam = contexts && contexts.sales_team
+  if (salesTeam?.my_team) {
+    visible.push({
+      type: 'deal_builder', key: 'my_team', variant: 'office', symbol: 'MT',
+      kind: 'SALES TEAM', display: 'My Team',
+      summary: 'Invite your people, follow their onboarding and manage the team.',
+      href: '/sales/my-team', actionLabel: 'Open My Team',
+    })
+  }
+  if (salesTeam?.onboarding) {
+    visible.push({
+      type: 'deal_builder', key: 'onboarding', variant: 'office', symbol: 'ON',
+      kind: 'SALES TEAM', display: 'Sales Onboarding',
+      summary: 'Fill in your application and upload your documents to start selling.',
+      href: '/sales-onboarding', actionLabel: 'Continue onboarding',
+    })
+  }
   const count = visible.length + others.length
 
   const choose = (v) => { setView(v); saveView(v) }

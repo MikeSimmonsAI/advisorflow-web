@@ -55,6 +55,20 @@ def sales_memberships(user: User, db: Session) -> List[Membership]:
         )
         .all()
     )
+    # SALES ONBOARDING: a person who was invited and has not been approved yet
+    # holds a seat but may not use it - no Back Office, no pipeline, no Deal
+    # Builder - until an owner approves them (app/services/sales_onboarding.py).
+    # Members with no onboarding record predate it and are unaffected here.
+    if rows:
+        try:
+            from app.models.sales_team_models import ONB_APPROVED, SalesOnboarding
+            pending = {r[0] for r in db.query(SalesOnboarding.brand_sales_org_id)
+                       .filter(SalesOnboarding.user_id == user.id,
+                               SalesOnboarding.status != ONB_APPROVED).all()}
+            if pending:
+                rows = [m for m in rows if m.scope_id not in pending]
+        except Exception:  # pragma: no cover - never let this break sign-in
+            pass
     try:
         setattr(user, _MEMBERSHIP_MEMO, rows)
     except Exception:

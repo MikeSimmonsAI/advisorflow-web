@@ -135,6 +135,10 @@ def team(db_session):
                       role=ROLE_SALES_MANAGER, is_active=True))
     db.commit()
     caps.set_brand_grants(db, exe, org.id, org.name, god, ["deal_builder_executive"])
+    # Everyone sells only after onboarding is approved.
+    from app.models.sales_team_models import SalesOnboarding
+    for u in (mgr, rep, exe):
+        db.add(SalesOnboarding(brand_sales_org_id=org.id, user_id=u.id, status="approved"))
     db.commit()
     return dict(db=db, org=org, god=god, mgr=mgr, rep=rep, exe=exe, outsider=outsider)
 
@@ -210,8 +214,11 @@ def test_revoked_grant_loses_access(client, team):
 # ── what the public static site and bundle contain ─────────────────────────
 
 PUBLIC_DIRS = ["frontend/public", "frontend/src"]
-UPSTREAM_SOURCE = re.compile(r"Area Sales Manager|Sr Executive Vice|PACKAGE_PAY|setupRates|"
-                             r"55% M&M|M&M / EvoSys", re.I)
+# Role NAMES may appear in public screens (My Team shows seats); the team's
+# RATES and AMOUNTS may not.
+UPSTREAM_SOURCE = re.compile(r"PACKAGE_PAY|setupRates|55% M&M|M&M / EvoSys|package_setup|saas_pct|"
+                             r"(Area Sales Manager|Sr Executive Vice President|Sr EVP)[^\n]{0,40}\d+ ?%",
+                             re.I)
 
 
 def test_executive_page_not_in_public_static_site():
@@ -278,6 +285,8 @@ def wholesale_admins(db_session, team):
                           role="member", is_active=True))
         db.add(Membership(user_id=u.id, scope_type=SCOPE_BRAND_SALES_ORG, scope_id=team["org"].id,
                           role=ROLE_SALES_MANAGER, is_active=True))
+        from app.models.sales_team_models import SalesOnboarding
+        db.add(SalesOnboarding(brand_sales_org_id=team["org"].id, user_id=u.id, status="approved"))
     db.commit()
     return dict(db=db, host=host, plat=plat_user, adv=adv)
 
@@ -319,7 +328,7 @@ def test_wholesale_admin_with_executive_grant(client, team, wholesale_admins, wh
 def test_wholesale_lock_still_applies_elsewhere(client, team, wholesale_admins):
     # Opening the Deal Builder does not widen the Wholesale lock for other screens.
     from app.services import program_experience as pe
-    assert pe.DEAL_BUILDER_PREFIXES == ("/deal-builder/",)
+    assert pe.DEAL_BUILDER_PREFIXES == ("/deal-builder/", "/sales-team/")
 
 
 # ── rules v2 (2026-11-13) and views by seat ──────────────────────────────────
