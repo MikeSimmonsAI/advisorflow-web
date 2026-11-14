@@ -203,3 +203,16 @@ def download(onboarding_id: str, document_id: str, inline: bool = False,
     return Response(content=data, media_type=doc.content_type,
                     headers={**_NO_STORE, "Content-Disposition": '%s; filename="%s"' % (disp, doc.filename),
                              "X-Content-Type-Options": "nosniff"})
+
+
+# ── unclaimed commission: owners and God only ────────────────────────────────
+
+@router.get("/unclaimed")
+def unclaimed(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Commission no one was paid because the seat was empty or the person had
+    left the company, plus refunds with commission still standing. EvoSys keeps
+    unclaimed money; it never raises anyone else's pay."""
+    if not team.actor_rights(db, user)["is_admin"]:
+        raise HTTPException(status_code=403, detail="Only the owners can see unclaimed commission.")
+    from app.services import sales_program_comp
+    return sales_program_comp.unclaimed_report(db)
