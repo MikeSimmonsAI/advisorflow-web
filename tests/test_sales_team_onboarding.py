@@ -285,3 +285,22 @@ def test_roster_shows_god_as_god_not_manager(db_session=None):
     import inspect
     src = inspect.getsource(sales_team._seat_of_member)
     assert "is_god(user)" in src and "SEAT_GOD" in src
+
+
+def test_existing_member_without_record_gets_onboarding_card(client, org):
+    """No grandfathering: a rep who joined before onboarding existed is not
+    left with no way in - Program Access shows him the onboarding card."""
+    db = org["db"]
+    rep = _user(db, "Old rep")
+    db.add(Membership(user_id=rep.id, scope_type=SCOPE_BRAND_SALES_ORG,
+                      scope_id=org["brand"].id, role=ROLE_SALES_REP, is_active=True))
+    db.commit()
+    r = client.get("/auth/my-contexts", headers=H(org, rep))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    ctx = body if isinstance(body, dict) else {}
+    st = ctx.get("sales_team") or next((c.get("sales_team") for c in (body if isinstance(body, list) else []) if isinstance(c, dict) and c.get("sales_team")), None)
+    assert st and st["onboarding"] is True
+    for u in (org["god"], org["owner"]):
+        b = client.get("/auth/my-contexts", headers=H(org, u)).json()
+        assert b["sales_team"]["onboarding"] is False
