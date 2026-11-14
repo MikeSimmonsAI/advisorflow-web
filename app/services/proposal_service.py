@@ -1159,6 +1159,16 @@ def record_decision(db: Session, prop: Proposal, action: str,
         prop.sales_status = PROP_ACCEPTED
         prop.accepted_at = now
         ev_type, summary = PORTAL_ACCEPTED, "Proposal accepted"
+        # EvoSys Pro Sales: lock in the plan version and the credited team at
+        # acceptance. Never blocks the customer's acceptance.
+        try:
+            from app.services import sales_program_comp as _spc
+            _opp = db.query(Opportunity).filter(Opportunity.id == prop.opportunity_id).first()
+            if _opp is not None:
+                _spc.snapshot_credit(db, _opp, accepted_at=now)
+        except Exception:  # pragma: no cover - recorded later at first collection
+            import logging
+            logging.getLogger(__name__).exception("sales credit snapshot failed")
     elif action == "decline":
         prop.sales_status = PROP_DECLINED
         prop.declined_at = now

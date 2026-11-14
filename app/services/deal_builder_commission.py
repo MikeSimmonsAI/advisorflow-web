@@ -136,6 +136,10 @@ def split(deal: Dict[str, Any], filled: Optional[Dict[str, bool]] = None) -> Dic
 
     plan_setup = (_amount(deal.get("saas_setup"), "Custom SaaS setup")
                   if kind == "saas" else plan["setup"])
+    if kind == "package" and deal.get("package_setup") is not None:
+        # Earned records: the package's setup as actually priced on the deal.
+        # The fixed payout is prorated against this figure.
+        plan_setup = _amount(deal.get("package_setup"), "Package setup")
     setup_total = plan_setup + addon_setup
     pct = SAAS_PCT if kind == "saas" else PACKAGE_PCT
 

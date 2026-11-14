@@ -143,3 +143,22 @@ class SalesUnclaimedShare(Base):
     rules_version = Column(String, nullable=False)
     reversed = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class SalesCollectionSplit(Base):
+    """How one collected payment on an EvoSys Pro Sales deal was split between
+    setup and monthly service. Written once per (deal, collection) and reused,
+    so re-running the earn step can never classify the same money twice."""
+    __tablename__ = "sales_collection_splits"
+    __table_args__ = (UniqueConstraint("opportunity_id", "collection_reference",
+                                       name="uq_sales_collection_split_once"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    opportunity_id = Column(String, ForeignKey("opportunities.id", ondelete="CASCADE"),
+                            nullable=False, index=True)
+    collection_reference = Column(String, nullable=False)
+    collected_amount = Column(Numeric(12, 2), nullable=False)
+    setup_part = Column(Numeric(12, 2), nullable=False)
+    monthly_part = Column(Numeric(12, 2), nullable=False)
+    rules_version = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

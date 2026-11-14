@@ -407,6 +407,13 @@ def earn(db: Session, opp: Opportunity, *, collection_reference: str,
     collection_reference): re-running against the same collected payment
     returns the rows that already exist instead of paying twice.
     """
+    # EvoSys Pro Sales deals are paid under the versioned launch rules - the
+    # same rules the Deal Builder estimates with. See sales_program_comp.py.
+    from app.services import sales_program_comp as _spc
+    if _spc.applies(db, opp):
+        return _spc.earn(db, opp, collection_reference=collection_reference,
+                         collected_amount=collected_amount, collected_at=collected_at,
+                         commit=commit)
     if (opp.status or "").lower() != "won":
         raise NotEarnable("Opportunity %s is not Won; compensation cannot be "
                           "earned." % opp.id)
