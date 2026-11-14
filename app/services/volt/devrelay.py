@@ -59,11 +59,13 @@ LEASE = timedelta(minutes=60)
 
 # Files a relay change may touch. Anything else makes the job fail closed.
 SCOPE = (
-    re.compile(r"^app/services/volt/"),
-    re.compile(r"^app/routers/volt_router\.py$"),
+    re.compile(r"^app/services/volt/(?!dev(?:relay|dispatch|oauth)\.py\Z)"),
+    re.compile(r"^app/routers/volt_(?:router|leads_router)\.py\Z"),
+    re.compile(r"^app/models/volt_leads_models\.py\Z"),
+    re.compile(r"^alembic/versions/[0-9a-f]+_volt_leads_[a-z0-9_]+\.py\Z"),
     re.compile(r"^frontend/src/pages/volt/"),
     re.compile(r"^frontend/public/brands/volt/"),
-    re.compile(r"^tests/test_volt[^/]*\.py$"),
+    re.compile(r"^tests/test_volt[^/]*\.py\Z"),
     re.compile(r"^docs/volt/"),
 )
 
@@ -543,7 +545,7 @@ def in_scope(paths: List[str]) -> List[str]:
 
 def deploy_targets(paths: List[str]) -> str:
     t = []
-    if any(p.startswith("app/") or p.startswith("requirements") for p in paths):
+    if any(p.startswith(("app/", "alembic/versions/", "requirements")) for p in paths):
         t.append("backend")
     if any(p.startswith("frontend/") and not p.startswith("frontend/dist/") for p in paths):
         t.append("frontend")
