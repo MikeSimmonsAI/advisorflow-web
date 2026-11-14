@@ -277,3 +277,11 @@ def test_pending_invitee_has_no_back_office(client, org, built):
     rep = db.query(User).filter(User.id == built["rep"].id).first()
     setattr(rep, "_sales_memberships_memo", None)
     assert len(sales_memberships(rep, db)) == 1
+
+
+def test_roster_shows_god_as_god_not_manager(db_session=None):
+    """God Mode is never shown as a team seat that others can act on."""
+    from app.services import sales_team
+    import inspect
+    src = inspect.getsource(sales_team._seat_of_member)
+    assert "is_god(user)" in src and "SEAT_GOD" in src

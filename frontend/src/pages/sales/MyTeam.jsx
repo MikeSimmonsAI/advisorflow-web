@@ -88,7 +88,7 @@ export default function MyTeam() {
             </div>
             <div>
               {p.onboarding && <button style={btn} onClick={() => setOpen(open === p.user_id ? null : p.user_id)}>{open === p.user_id ? 'Hide checklist' : 'Checklist'}</button>}
-              {!p.is_self && p.seat !== 'owner' && !p.departed_at && (p.active
+              {!p.is_self && !['owner','god'].includes(p.seat) && !p.departed_at && (p.active
                 ? <button style={btn} disabled={!!busy} onClick={() => act('s' + p.user_id, () => api.post('/sales-team/members/' + p.user_id + '/suspend', {}), p.name + ' is suspended.')}>Suspend</button>
                 : <button style={btn} disabled={!!busy} onClick={() => act('r' + p.user_id, () => api.post('/sales-team/members/' + p.user_id + '/reactivate', {}), p.name + ' is active again.')}>Reactivate</button>)}
               {p.seat === 'rep' && !p.departed_at && (
@@ -96,7 +96,7 @@ export default function MyTeam() {
                   <option value="">Move to…</option>
                   {managers.filter(m => m.user_id !== p.manager_id).map(m => <option key={m.user_id} value={m.user_id}>{m.name}</option>)}
                 </select>)}
-              {r.can_record_departure && !p.is_self && p.seat !== 'owner' && !p.departed_at && (
+              {r.can_record_departure && !p.is_self && !['owner','god'].includes(p.seat) && !p.departed_at && (
                 <button style={btn} onClick={() => { if (window.confirm(p.name + ' left the company? From today they are paid nothing more; their share of later collections is tracked as unclaimed.')) act('d' + p.user_id, () => api.post('/sales-team/members/' + p.user_id + '/depart', {}), p.name + ' is recorded as left the company.') }}>Left the company</button>)}
             </div>
           </div>
