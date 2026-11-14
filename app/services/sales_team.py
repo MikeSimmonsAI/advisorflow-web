@@ -194,6 +194,8 @@ def actor_rights(db: Session, actor: User) -> Dict[str, Any]:
 
 
 def _seat_of_member(db: Session, user: User, m: Membership, brand_id: str) -> str:
+    if is_god(user):
+        return SEAT_GOD
     if _has(db, user, CAP_OWNER, brand_id):
         return SEAT_OWNER
     if _has(db, user, CAP_EXECUTIVE, brand_id):
@@ -231,7 +233,7 @@ def roster(db: Session, actor: User) -> Dict[str, Any]:
             "onboarding_id": onb.id if onb else None,
             "is_self": u.id == actor.id,
         })
-    order = {SEAT_OWNER: 0, SEAT_SEVP: 1, SEAT_ASM: 2, SEAT_REP: 3}
+    order = {SEAT_GOD: -1, SEAT_OWNER: 0, SEAT_SEVP: 1, SEAT_ASM: 2, SEAT_REP: 3}
     people.sort(key=lambda p: (order.get(p["seat"], 9), (p["name"] or "").lower()))
     return {"brand": {"id": brand.id, "name": brand.name}, "rights": rights, "people": people,
             "drive_status": onb_svc.DRIVE_STATUS}
