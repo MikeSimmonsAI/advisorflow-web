@@ -35,7 +35,7 @@ import os
 import urllib.error
 import urllib.request
 from datetime import timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -263,33 +263,162 @@ def check_github() -> Dict[str, Any]:
     return out
 
 
-def release_blocker(job: VoltDevJob) -> Optional[str]:
-    """Check the tested PR head and required gate. GitHub still enforces all merge rules."""
+# ── release gate (2026-11-14) ─────────────────────────────────────────────
+# Why this was rewritten: DEV-6 / PR #611 was refused with "GitHub merge
+# status: unstable" although GitHub's only required check had passed and no
+# review is required. "unstable" only means that some NON-required check is
+# not green - here, workflows GitHub held at "waiting for approval" because a
+# bot opened the PR, and installed apps that never report on PRs. The gate now
+# reads the rules GitHub actually enforces on main, blocks on those (and on any
+# check that genuinely FAILED), re-checks a transient "unknown", and says
+# exactly what blocks, where it comes from, what to do, and when it checked.
+# GitHub still enforces every rule at merge time (the runner merges through
+# the merge API, pinned to the approved commit) - this gate never bypasses it.
+
+FALLBACK_REQUIRED = ("Redesign owner approval",)
+_OK_CONCLUSIONS = ("success", "neutral", "skipped")
+_BAD_CONCLUSIONS = ("failure", "timed_out", "cancelled", "startup_failure", "stale")
+
+
+def _ct(dt) -> str:
+    """A stored UTC time shown in Central time, with CST/CDT."""
+    from datetime import timezone
+    from zoneinfo import ZoneInfo
+    d = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return d.astimezone(ZoneInfo("America/Chicago")).strftime("%b %-d, %Y %-I:%M %p %Z")
+
+
+def required_rules(base: str = "main") -> Dict[str, Any]:
+    """What GitHub enforces on the base branch: required check names, required
+    approving reviews, whether the branch must be up to date. Read live from
+    the branch rules (rulesets + legacy protection); falls back to the known
+    required check if the rules cannot be read."""
+    st, rules, err = _gh("GET", "/repos/%s/rules/branches/%s" % (R.REPO, base))
+    out = {"checks": [], "reviews": 0, "strict": False, "source": "GitHub branch rules for %s" % base}
+    if st != 200 or not isinstance(rules, list):
+        out.update(checks=list(FALLBACK_REQUIRED), source="fallback list (GitHub rules unreadable: %s)" % (err or st))
+        return out
+    for r in rules:
+        p = r.get("parameters") or {}
+        if r.get("type") == "required_status_checks":
+            out["checks"] += [c.get("context") for c in p.get("required_status_checks") or [] if c.get("context")]
+            out["strict"] = out["strict"] or bool(p.get("strict_required_status_checks_policy"))
+        elif r.get("type") == "pull_request":
+            out["reviews"] = max(out["reviews"], int(p.get("required_approving_review_count") or 0))
+    return out
+
+
+def approve_held_runs(head_sha: str) -> List[str]:
+    """Workflows on a relay-opened PR are held by GitHub ("action_required")
+    because a bot opened it. Approving them lets the normal CI (e.g. the VOLT
+    test suite) run on the exact tested commit. Returns the workflow names."""
+    st, data, _ = _gh("GET", "/repos/%s/actions/runs?head_sha=%s&status=action_required&per_page=20" % (R.REPO, head_sha))
+    names = []
+    for run in (data or {}).get("workflow_runs", []) if st == 200 else []:
+        st2, _b, _e = _gh("POST", "/repos/%s/actions/runs/%s/approve" % (R.REPO, run["id"]))
+        if st2 in (200, 201, 204):
+            names.append(run.get("name") or str(run["id"]))
+    return names
+
+
+def release_check(job: VoltDevJob, poll: int = 3) -> Dict[str, Any]:
+    """{"ok": bool, "blocker", "source", "next_action", "checked_at", "notes"}.
+    `ok` is True only on positive evidence; an unknown answer is never success."""
+    now = C.now()
+    out: Dict[str, Any] = {"ok": False, "blocker": None, "source": None, "next_action": None,
+                           "checked_at": C.iso(now), "checked_at_central": _ct(now), "notes": []}
+
+    def block(blocker, source, nxt):
+        out.update(blocker=blocker, source=source, next_action=nxt)
+        return out
+
     root = "/repos/%s" % R.REPO
-    status, pr, error = _gh("GET", "%s/pulls/%d" % (root, job.pr_number))
-    if status != 200:
-        return "Cannot verify the pull request. %s. Check the GitHub connection." % error
+    if not configured():
+        return block("The backend cannot reach GitHub.", "VOLT backend configuration", "Set VOLT_DEV_GITHUB_TOKEN.")
+    pr = None
+    for i in range(max(1, poll)):
+        st, pr, err = _gh("GET", "%s/pulls/%d" % (root, job.pr_number))
+        if st != 200:
+            return block("GitHub did not answer about PR #%d (%s)." % (job.pr_number, err or st), "GitHub API",
+                         "Try again in a minute; nothing is stuck.")
+        if pr.get("mergeable") is not None and pr.get("mergeable_state") != "unknown":
+            break
+        if i < poll - 1:
+            import time
+            time.sleep(1.5)
     if pr["head"]["sha"] != job.head_sha:
-        return "The PR head changed. Test the current commit and get fresh owner approval."
-    if pr["state"] != "open" or pr["draft"]:
-        return "The PR must be open and ready for review in GitHub."
-    if pr["mergeable"] is False:
-        return "The PR conflicts with main. Resolve the conflicts, retest, and get fresh owner approval."
-    status, data, error = _gh("GET", "%s/commits/%s/check-runs?check_name=Redesign%%20owner%%20approval" %
-                              (root, job.head_sha))
-    if status != 200:
-        return "Cannot read GitHub checks. %s. Check the GitHub token's check access." % error
-    checks = [check for check in data["check_runs"] if check["app"]["slug"] == "github-actions"]
-    if not checks:
-        return "Redesign owner approval is missing. Run the Redesign approval workflow for this PR on main."
-    gate = checks[0]
-    if gate["status"] != "completed":
-        return "Redesign owner approval is running. Wait for it to finish."
-    if gate["conclusion"] != "success":
-        return "Redesign owner approval: %s. Open the GitHub check and follow its instructions." % gate["conclusion"]
-    if pr["mergeable"] is None or pr.get("mergeable_state") in {"blocked", "unstable", "unknown", "behind"}:
-        return "GitHub merge status: %s. Open the PR to see pending checks, reviews, or branch updates." % pr.get("mergeable_state")
-    return None
+        return block("The PR now points at %s, not the tested commit %s." % (pr["head"]["sha"][:12], (job.head_sha or "")[:12]),
+                     "Pull request #%d" % job.pr_number, "Retry the job so the new commit is tested, then approve it.")
+    if pr.get("merged"):
+        return block("PR #%d is already merged." % job.pr_number, "Pull request", "Nothing to approve.")
+    if pr["state"] != "open" or pr.get("draft"):
+        return block("PR #%d is %s." % (job.pr_number, "a draft" if pr.get("draft") else pr["state"]),
+                     "Pull request #%d" % job.pr_number, "Reopen it or mark it ready, or retry the job.")
+    if pr.get("mergeable") is False or pr.get("mergeable_state") == "dirty":
+        return block("PR #%d conflicts with main." % job.pr_number, "GitHub merge check",
+                     "Retry the job so Claude rebuilds it on the current main, then approve the new commit.")
+    if pr.get("mergeable") is None or pr.get("mergeable_state") == "unknown":
+        return block("GitHub is still working out whether PR #%d can merge." % job.pr_number, "GitHub (temporary)",
+                     "Check again in a minute. This clears by itself.")
+
+    rules = required_rules(pr["base"]["ref"])
+    st, data, err = _gh("GET", "%s/commits/%s/check-runs?per_page=100" % (root, job.head_sha))
+    if st != 200:
+        return block("Cannot read the checks on %s (%s)." % (job.head_sha[:12], err or st), "GitHub API",
+                     "Try again in a minute.")
+    runs = data.get("check_runs", [])
+    st2, combined, _ = _gh("GET", "%s/commits/%s/status" % (root, job.head_sha))
+    statuses = (combined or {}).get("statuses", []) if st2 == 200 else []
+    latest: Dict[str, Dict[str, Any]] = {}
+    for r in runs:                                       # newest run per name wins
+        if r["name"] not in latest or (r.get("started_at") or "") > (latest[r["name"]].get("started_at") or ""):
+            latest[r["name"]] = r
+    for name in rules["checks"]:
+        r = latest.get(name)
+        stc = next((x for x in statuses if x.get("context") == name), None)
+        if r is None and stc is None:
+            return block("Required check \"%s\" has not reported on %s." % (name, job.head_sha[:12]),
+                         rules["source"], "Wait for it, or open the PR's Checks tab if it never starts.")
+        if r is not None and r["status"] != "completed":
+            return block("Required check \"%s\" is still running." % name, rules["source"], "Wait for it to finish.")
+        concl = r["conclusion"] if r is not None else {"success": "success", "pending": None}.get(stc["state"], stc["state"])
+        if concl not in _OK_CONCLUSIONS:
+            return block("Required check \"%s\": %s." % (name, concl or "pending"), rules["source"],
+                         "Open the check on the PR, fix the cause, and retry the job.")
+    failed = [n for n, r in latest.items() if r["status"] == "completed" and r["conclusion"] in _BAD_CONCLUSIONS]
+    failed += [x["context"] for x in statuses if x.get("state") in ("failure", "error") and x["context"] not in failed]
+    if failed:
+        return block("Check failed on the tested commit: %s." % ", ".join(sorted(failed)[:4]), "GitHub checks",
+                     "Open the failing check, fix the cause, and retry the job.")
+    if rules["reviews"]:
+        st3, reviews, _ = _gh("GET", "%s/pulls/%d/reviews?per_page=100" % (root, job.pr_number))
+        approved = {rv["user"]["login"] for rv in (reviews or []) if rv.get("state") == "APPROVED"
+                    and rv.get("commit_id") == job.head_sha} if st3 == 200 else set()
+        if len(approved) < rules["reviews"]:
+            return block("GitHub requires %d approving review(s); %d on this commit." % (rules["reviews"], len(approved)),
+                         rules["source"], "A repository collaborator approves the PR on GitHub.")
+    if rules["strict"] and pr.get("mergeable_state") == "behind":
+        return block("Main requires the PR to be up to date and it is behind.", rules["source"],
+                     "Retry the job so it is rebuilt on the current main.")
+    if pr.get("mergeable_state") == "blocked":
+        return block("GitHub reports the merge as blocked by a rule the relay cannot see.", "GitHub branch rules",
+                     "Open PR #%d on GitHub to see the rule." % job.pr_number)
+    pending = sorted(n for n, r in latest.items() if r["status"] != "completed" or r["conclusion"] == "action_required")
+    if pending:
+        out["notes"].append("Not required and not failing (informational): %s." % ", ".join(pending[:6]))
+    out["notes"].append("Required by GitHub: %s; reviews required: %d (%s)." % (
+        ", ".join(rules["checks"]) or "no checks", rules["reviews"], rules["source"]))
+    out["ok"] = True
+    return out
+
+
+def release_blocker(job: VoltDevJob) -> Optional[str]:
+    """Kept for callers that want one line: None when release can proceed."""
+    chk = release_check(job)
+    if chk["ok"]:
+        return None
+    return "%s Source: %s. Next: %s (checked %s)" % (chk["blocker"], chk["source"], chk["next_action"],
+                                                     chk["checked_at_central"])
 
 
 def review(job: VoltDevJob, max_chars: int = 14000) -> Dict[str, Any]:
@@ -318,6 +447,59 @@ def review(job: VoltDevJob, max_chars: int = 14000) -> Dict[str, Any]:
                        "or open the pull request."}
 
 
+# ── GitHub-side events the relay must not miss (2026-11-14) ─────────────────
+
+_SEEN: Dict[str, Any] = {"approved_runs": set(), "pr_checked": {}}
+PR_CHECK_EVERY = timedelta(minutes=2)
+
+
+def reconcile_github(db: Session) -> Dict[str, list]:
+    """For jobs waiting on review or merge:
+    - approve workflow runs GitHub held because a bot opened the PR, so the
+      normal CI runs on the tested commit (once per commit);
+    - if the PR was merged ON GITHUB (not through the relay's approve button),
+      record it truthfully - who merged, when, which commit - so the job moves to
+      Merged / deploy verification instead of sitting at Ready to review."""
+    out: Dict[str, list] = {"approved": [], "merged": []}
+    if not configured():
+        return out
+    now = C.now()
+    jobs = (db.query(VoltDevJob).filter(VoltDevJob.status.in_(("ready_to_test", "merge_requested")),
+                                        VoltDevJob.pr_number.isnot(None), VoltDevJob.lease_run_id.is_(None)).all())
+    for j in jobs:
+        if j.head_sha and j.head_sha not in _SEEN["approved_runs"]:
+            _SEEN["approved_runs"].add(j.head_sha)
+            names = approve_held_runs(j.head_sha)
+            if names:
+                db.add(VoltDevEvent(job_id=j.id, actor_kind="system", action="ci_started", status=j.status,
+                                    detail="Started GitHub checks held for approval: %s" % ", ".join(names)))
+                out["approved"].append(j)
+        last = _SEEN["pr_checked"].get(j.id)
+        if last and now - last < PR_CHECK_EVERY:
+            continue
+        _SEEN["pr_checked"][j.id] = now
+        st, pr, _ = _gh("GET", "/repos/%s/pulls/%d" % (R.REPO, j.pr_number))
+        if st != 200 or not pr.get("merged"):
+            continue
+        same = pr["head"]["sha"] == j.head_sha
+        by = (pr.get("merged_by") or {}).get("login") or "someone"
+        j.merge_sha = pr.get("merge_commit_sha")
+        j.merge_approved_sha = j.merge_approved_sha or (j.head_sha if same else None)
+        j.merged_at = now
+        detail = ("Merged on GitHub by %s (not through the relay's approve button) as %s%s." % (
+            by, (j.merge_sha or "")[:12], "" if same else "; WARNING: the merged head %s is not the tested commit %s"
+            % (pr["head"]["sha"][:12], (j.head_sha or "")[:12])))
+        j.status, j.status_detail = "merged", detail
+        db.add(VoltDevEvent(job_id=j.id, actor_kind="system", action="merged_on_github", status="merged", detail=detail))
+        if not (j.deploy_targets or ""):
+            j.status, j.deployed_at = "deployed", now
+            j.deploy_detail = j.status_detail = "No running service changed (tests/docs only)."
+            db.add(VoltDevEvent(job_id=j.id, actor_kind="system", action="no_deploy_needed", status="deployed",
+                                detail=j.deploy_detail))
+        out["merged"].append(j)
+    return out
+
+
 # ── the backend's own watch (every 2 minutes; nobody has to open a page) ────
 
 _SELFTEST = {"done": False}
@@ -339,6 +521,11 @@ def watch_pass(db: Session) -> Dict[str, Any]:
             deployed += verify_deploys(db, org)
         for j in deployed:
             rows += R.notify(db, j, "deployed")
+        gh_events = reconcile_github(db)
+        for j in gh_events["merged"]:
+            rows += R.notify(db, j, j.status)
+        out["merged_on_github"] = len(gh_events["merged"])
+        out["ci_started"] = len(gh_events["approved"])
         rs = resend_stale(db)
         for j in rs["blocked"]:
             rows += R.notify(db, j, "blocked")

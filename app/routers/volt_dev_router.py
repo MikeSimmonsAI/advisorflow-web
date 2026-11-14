@@ -80,8 +80,10 @@ def dev_job(org_id: str, ref: str, db: Session = Depends(get_db), user: User = D
     job = R.by_ref(db, org_id, ref)
     result = R.job_dict(db, job, events=True)
     if result["can"]["approve_merge"]:
-        result["release_blocker"] = D.release_blocker(job)
-        result["can"]["approve_merge"] = not result["release_blocker"]
+        chk = D.release_check(job)
+        result["release_check"] = chk
+        result["release_blocker"] = None if chk["ok"] else chk["blocker"]
+        result["can"]["approve_merge"] = chk["ok"]
     return result
 
 
@@ -99,9 +101,14 @@ def _act(db, org_id, ref, action, user, expected_sha=None):
         if job.status == "ready_to_test" and job.head_sha and job.pr_number:
             if not expected_sha or not R._sha_matches(job.head_sha, expected_sha):
                 R._err(409, "Review and confirm the exact tested commit.", "commit_mismatch")
-            blocker = D.release_blocker(job)
-            if blocker:
-                R._err(409, blocker, "github_release_blocked")
+            chk = D.release_check(job)
+            if not chk["ok"]:
+                R._audit_user(db, job, user, "release_blocked", status=job.status,
+                              detail="%s Source: %s. Next: %s" % (chk["blocker"], chk["source"], chk["next_action"]))
+                db.commit()
+                raise HTTPException(status_code=409, detail={
+                    "message": "%s Next: %s (checked %s)" % (chk["blocker"], chk["next_action"], chk["checked_at_central"]),
+                    "code": "github_release_blocked", "release_check": chk})
         out, purpose = R.approve_merge(db, job, user, expected_sha), "merge"
     elif action == "retry":
         out, purpose = R.retry(db, job, user), "retry"

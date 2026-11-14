@@ -119,7 +119,12 @@ function JobDrawer({ orgId, job: initial, onClose, onChanged }) {
           {job.progress?.summary && <p className="v-small" style={{ marginTop: 10 }} data-dev-summary>{job.progress.summary}</p>}
           {job.progress?.blocker && <div className="v-alert v-alert--err" role="status" data-dev-blocker>What is blocking it: {job.progress.blocker}</div>}
           {job.progress?.next_action && <p className="v-small" data-dev-next><b>Next:</b> {job.progress.next_action}</p>}
-          {job.release_blocker && <div className="v-alert v-alert--err" role="status">{job.release_blocker}</div>}
+          {job.release_check && !job.release_check.ok && (
+            <div className="v-alert v-alert--err" role="status" data-release-blocker>
+              <b>Release blocked:</b> {job.release_check.blocker}<br />
+              <span className="v-small">Where it comes from: {job.release_check.source} · Next: {job.release_check.next_action} · Checked {job.release_check.checked_at_central}</span>
+            </div>)}
+          {job.release_check?.ok && <p className="v-small v-muted" data-release-ok>Release check passed ({job.release_check.checked_at_central}). {(job.release_check.notes || []).join(' ')}</p>}
           {err && <div className="v-alert v-alert--err" role="alert">{err}</div>}
           <div className="v-row" style={{ justifyContent: 'flex-start', marginTop: 10 }}>
             {job.can.approve_merge && <button type="button" className="v-btn v-btn--red" onClick={() => setAsk('approve-merge')} disabled={!!busy} data-approve>Approve &amp; deploy to production</button>}
