@@ -41,6 +41,8 @@ def dev(volt, monkeypatch):
     from app.services.volt import devdispatch as D
 
     monkeypatch.setattr(D, "release_blocker", lambda job: None)
+    monkeypatch.setattr(D, "release_check", lambda job, poll=3: {"ok": True, "blocker": None, "notes": [],
+                                                                 "checked_at_central": "now"})
     monkeypatch.setattr(R, "_JWKS", _JWKS())
     collab = User(email="collab.dev@example.com", full_name="Dee Collaborator", password_hash="x", role="org_admin",
                   is_active=True, must_change_password=False)
@@ -325,27 +327,130 @@ def test_backend_verifies_the_deploy_itself(dev, gh, monkeypatch):
     assert dev["db"].query(VoltEmail).filter(VoltEmail.kind == "dev_deployed").count() == 2
 
 
-def test_release_check_reports_missing_workflow_and_conflicts(monkeypatch):
+class _FakeGH:
+    """GitHub as PR #611 really looked on Nov 14: mergeable, state "unstable"
+    because two workflows were held for approval and two apps never report,
+    while the only REQUIRED check (Redesign owner approval) had passed."""
+
+    def __init__(self, sha):
+        self.sha = sha
+        self.pr = {"head": {"sha": sha}, "base": {"ref": "main"}, "state": "open", "draft": False, "merged": False,
+                   "mergeable": True, "mergeable_state": "unstable"}
+        self.rules = [{"type": "pull_request", "parameters": {"required_approving_review_count": 0}},
+                      {"type": "required_status_checks", "parameters": {
+                          "required_status_checks": [{"context": "Redesign owner approval"}],
+                          "strict_required_status_checks_policy": False}}]
+        self.runs = [
+            {"name": "Redesign owner approval", "status": "completed", "conclusion": "success", "started_at": "2"},
+            {"name": "Vercel Preview Comments", "status": "completed", "conclusion": "success", "started_at": "2"},
+            {"name": "volt", "status": "completed", "conclusion": "action_required", "started_at": "1"}]
+        self.statuses = [{"context": "Vercel", "state": "success"}]
+        self.calls = []
+
+    def __call__(self, method, path, body=None, timeout=15):
+        self.calls.append((method, path))
+        if "/rules/branches/" in path:
+            return (200, self.rules, None) if self.rules is not None else (403, None, "no access")
+        if path.endswith("/status"):
+            return 200, {"statuses": self.statuses}, None
+        if "/check-runs" in path:
+            return 200, {"check_runs": self.runs}, None
+        if "/pulls/" in path and path.endswith("/reviews?per_page=100"):
+            return 200, [], None
+        if "/pulls/" in path:
+            return 200, dict(self.pr), None
+        if "/actions/runs?head_sha=" in path:
+            return 200, {"workflow_runs": [{"id": 77, "name": "VOLT Marketing recruiting"}]}, None
+        if path.endswith("/approve"):
+            return 201, {}, None
+        return 404, None, "unexpected %s" % path
+
+
+def _gate(monkeypatch, sha="a" * 40):
     from types import SimpleNamespace
     from app.services.volt import devdispatch as D
+    fake = _FakeGH(sha)
+    monkeypatch.setattr(D, "_gh", fake)
+    monkeypatch.setenv("VOLT_DEV_GITHUB_TOKEN", "x")
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    return D, fake, SimpleNamespace(pr_number=611, head_sha=sha)
 
-    job = SimpleNamespace(pr_number=598, head_sha="a" * 40)
-    pr = {"head": {"sha": job.head_sha}, "state": "open", "draft": False,
-          "mergeable": True, "mergeable_state": "clean"}
-    checks = {"check_runs": []}
 
-    def github(method, path):
-        return 200, pr if "/pulls/" in path else checks, None
+def test_release_gate_allows_unstable_when_required_rules_pass(monkeypatch):
+    D, fake, job = _gate(monkeypatch)
+    chk = D.release_check(job)
+    assert chk["ok"] is True and D.release_blocker(job) is None
+    assert "Redesign owner approval" in " ".join(chk["notes"]) and "volt" in " ".join(chk["notes"])
+    assert "CST" in chk["checked_at_central"] or "CDT" in chk["checked_at_central"]
 
-    monkeypatch.setattr(D, "_gh", github)
-    assert "missing" in D.release_blocker(job)
-    gate = {"app": {"slug": "github-actions"}, "status": "completed", "conclusion": "failure"}
-    checks["check_runs"] = [gate]
-    assert "failure" in D.release_blocker(job)
-    gate["conclusion"] = "success"
-    assert D.release_blocker(job) is None
-    pr["mergeable"] = False
-    assert "conflicts" in D.release_blocker(job)
+
+def test_release_gate_blocks_with_exact_reason_source_and_next_step(monkeypatch):
+    D, fake, job = _gate(monkeypatch)
+    fake.runs[0]["conclusion"] = "failure"                       # the required check failed
+    chk = D.release_check(job)
+    assert chk["ok"] is False and "Redesign owner approval" in chk["blocker"]
+    assert chk["source"].startswith("GitHub branch rules") and chk["next_action"] and chk["checked_at"]
+    fake.runs[0]["conclusion"] = "success"
+    fake.runs.append({"name": "lint", "status": "completed", "conclusion": "failure", "started_at": "3"})
+    assert "lint" in D.release_check(job)["blocker"]              # a real failure still blocks
+    fake.runs.pop()
+    fake.runs = [r for r in fake.runs if r["name"] != "Redesign owner approval"]
+    assert "has not reported" in D.release_check(job)["blocker"]
+    fake.rules = None                                             # rules unreadable -> known fallback, never "ok" by default
+    chk = D.release_check(job)
+    assert chk["ok"] is False and "fallback" in chk["source"]
+
+
+def test_release_gate_treats_unknown_as_temporary_and_never_success(monkeypatch):
+    D, fake, job = _gate(monkeypatch)
+    fake.pr.update(mergeable=None, mergeable_state="unknown")
+    chk = D.release_check(job)
+    assert chk["ok"] is False and "temporary" in chk["source"] and "clears by itself" in chk["next_action"]
+    assert len([c for c in fake.calls if c[1].endswith("/pulls/611")]) == 3           # re-asked, bounded
+    fake.pr.update(mergeable=False, mergeable_state="dirty")
+    assert "conflicts" in D.release_check(job)["blocker"]
+    fake.pr.update(mergeable=True, mergeable_state="unstable", head={"sha": "b" * 40})
+    assert "not the tested commit" in D.release_check(job)["blocker"]
+
+
+def test_release_gate_respects_required_reviews_and_up_to_date_rule(monkeypatch):
+    D, fake, job = _gate(monkeypatch)
+    fake.rules[0]["parameters"]["required_approving_review_count"] = 1
+    assert "approving review" in D.release_check(job)["blocker"]
+    fake.rules[0]["parameters"]["required_approving_review_count"] = 0
+    fake.rules[1]["parameters"]["strict_required_status_checks_policy"] = True
+    fake.pr["mergeable_state"] = "behind"
+    assert "up to date" in D.release_check(job)["blocker"]
+    fake.rules[1]["parameters"]["strict_required_status_checks_policy"] = False
+    assert D.release_check(job)["ok"] is True                     # behind is fine when not required
+
+
+def test_relay_starts_held_ci_and_records_a_github_merge(dev, monkeypatch):
+    from app.services.volt import devdispatch as D
+    from app.models.volt_models import VoltDevEvent
+    db = dev["db"]
+    fake = _FakeGH("c" * 40)
+    monkeypatch.setattr(D, "_gh", fake)
+    monkeypatch.setenv("VOLT_DEV_GITHUB_TOKEN", "x")
+    D._SEEN["approved_runs"].clear(); D._SEEN["pr_checked"].clear()
+    D._SELFTEST["done"] = True
+    from app.models.volt_models import VoltDevJob
+    assert _submit(dev, dev["staff"]).status_code == 200
+    job = db.query(VoltDevJob).order_by(VoltDevJob.number.desc()).first()
+    _next(dev)
+    _report(dev, job.id, status="ready_to_test", changed_files=["app/services/volt/leads.py"], tests_passed=True,
+            pr_number=611, head_sha="c" * 40)
+    D.watch_pass(db)
+    ev = [e.action for e in db.query(VoltDevEvent).filter(VoltDevEvent.job_id == job.id).all()]
+    assert "ci_started" in ev and ("POST", "/repos/%s/actions/runs/77/approve" % R.REPO) in fake.calls
+    D.watch_pass(db)                                              # once per commit
+    assert len([c for c in fake.calls if c[1].endswith("/approve")]) == 1
+    fake.pr.update(merged=True, state="closed", merge_commit_sha="d" * 40, merged_by={"login": "MikeSimmonsAI"})
+    D._SEEN["pr_checked"].clear()
+    D.watch_pass(db)
+    db.refresh(job)
+    assert job.status == "merged" and job.merge_sha == "d" * 40 and "MikeSimmonsAI" in job.status_detail
+    assert "merged_on_github" in [e.action for e in db.query(VoltDevEvent).filter(VoltDevEvent.job_id == job.id)]
 
 
 def test_relay_scope_allows_the_leads_build_and_refuses_everything_else():

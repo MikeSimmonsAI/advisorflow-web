@@ -312,7 +312,8 @@ def _call(db: Session, user: User, org_id: str, name: str, args: Dict[str, Any])
         return {"ref": j["ref"], "stage": j["progress"]["stage"], "summary": j["progress"]["summary"],
                 "tested_commit": job.head_sha, "release_ready": j["progress"]["release_ready"],
                 "tests_passed": j["tests_passed"], "tests_summary": j["tests_summary"], "pr_url": j["pr_url"],
-                "run_url": j["run_url"], "review": D.review(job), "dashboard_url": DASHBOARD % (org_id, job.number)}
+                "run_url": j["run_url"], "review": D.review(job), "dashboard_url": DASHBOARD % (org_id, job.number),
+                "release_check": D.release_check(job) if j["progress"]["release_ready"] else None}
     if name == "retry_change_request":
         return _job_view(_act(db, org_id, args.get("ref"), "retry", user), org_id)
     if name == "cancel_change_request":
