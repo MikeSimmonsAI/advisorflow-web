@@ -50,6 +50,42 @@ REVIEW_CHECKLIST = [
     "TCPA / state telemarketing rules checked for the call and text consent",
 ]
 
+# Consumer page copy (also needs the same compliance review as the consent).
+PAGE = {
+    "headline": "You May Qualify for $0 Monthly Health Insurance.",
+    "subhead": "Check in about two minutes. Free, no obligation, no account needed. A licensed agent can explain your options.",
+    "benefits": [
+        ["Lower monthly premiums", "Financial help can lower what you pay each month. For some people it brings the premium to $0."],
+        ["Doctor visits", "Plans cover visits to doctors in the plan's network. What you pay at the visit depends on the plan."],
+        ["Prescriptions", "Plans include prescription drug coverage. Your cost depends on the plan and the medicine."],
+        ["Preventive care", "Many checkups, screenings and vaccines are covered at no cost when you use the plan's network."],
+        ["Emergency care", "Emergency services are covered. Deductibles, copays or coinsurance may apply."],
+        ["A licensed agent helps you", "A licensed agent can compare plans with you and answer questions at no cost to you."],
+    ],
+    "disclaimers": [
+        "Not everyone qualifies. Eligibility depends on where you live, your household income and size, and other coverage you have.",
+        "A $0 monthly premium is not guaranteed.",
+        "A $0 monthly premium does not mean all care is free. Deductibles, copays and coinsurance may still apply.",
+        "This is not a government website and is not affiliated with HealthCare.gov or any government agency.",
+    ],
+    "medicare_note": ("If you are 65 or older, you may be eligible for Medicare, which works differently from these plans. "
+                      "A licensed agent can explain Medicare options with you. You can still send your request."),
+}
+
+STATES = ("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA",
+          "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR",
+          "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY")
+INCOME_RANGES = ("under_20k", "20k_35k", "35k_50k", "50k_75k", "75k_100k", "over_100k", "prefer_not")
+CONTACT_PREFS = ("call", "text", "email")
+BEST_TIMES = ("morning", "afternoon", "evening", "any")
+CHANNELS = ("meta", "google", "organic", "direct", "referral", "other")
+CHANNEL_LABELS = {"meta": "Meta / Facebook", "google": "Google", "organic": "Organic search", "direct": "Direct",
+                  "referral": "Referral", "other": "Other"}
+# Events an agent can record on a lead (beyond status/assignment/notes).
+CONTACT_EVENTS = {"call_attempted": "Call attempted", "contact_completed": "Contact completed",
+                  "appointment_set": "Appointment set", "appointment_changed": "Appointment changed",
+                  "enrollment_recorded": "Enrollment recorded"}
+
 AGE_RANGES = ("18-25", "26-44", "45-64", "65+")
 COVERAGE = ("none", "have_compare", "not_sure")
 SOURCES = ("facebook", "google", "direct", "other")
@@ -75,7 +111,36 @@ def settings_row(db: Session, org_id: str) -> VoltLeadSettings:
 def public_config(db: Session, org_id: str) -> Dict[str, Any]:
     row = db.get(VoltLeadSettings, org_id)
     return {"enabled": bool(row and row.intake_enabled), "consent_version": CONSENT_VERSION,
-            "consent_text": CONSENT_TEXT, "eligibility_caveat": ELIGIBILITY_CAVEAT}
+            "consent_text": CONSENT_TEXT, "eligibility_caveat": ELIGIBILITY_CAVEAT, "page": PAGE,
+            "states": list(STATES)}
+
+
+def _utc(dt) -> Optional[str]:
+    """Stored times are UTC (naive columns, written with utcnow). Always send
+    them with the offset so a browser never reads them as local time."""
+    if dt is None:
+        return None
+    from datetime import timezone
+    return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).isoformat()
+
+
+def channel_of(source: str, medium: str, referrer_host: str) -> str:
+    src, med, ref = (source or "").lower(), (medium or "").lower(), (referrer_host or "").lower()
+    if src in ("facebook", "fb", "meta", "instagram", "ig") or "facebook." in ref or "instagram." in ref:
+        return "meta"
+    if src in ("google", "adwords", "gads") or med in ("cpc", "ppc", "paid_search") and "google" in (src + ref):
+        return "google"
+    if src in ("referral", "ref") or med == "referral":
+        return "referral"
+    if ref and any(e in ref for e in ("google.", "bing.", "duckduckgo.", "yahoo.")):
+        return "organic"
+    if src in ("organic", "seo") or med == "organic":
+        return "organic"
+    if not src and not ref:
+        return "direct"
+    if ref and not src:
+        return "referral"
+    return "other"
 
 
 def set_intake(db: Session, org_id: str, actor: User, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -96,7 +161,7 @@ def set_intake(db: Session, org_id: str, actor: User, body: Dict[str, Any]) -> D
 
 def settings_dict(row: VoltLeadSettings) -> Dict[str, Any]:
     return {"intake_enabled": bool(row.intake_enabled), "review_note": row.review_note,
-            "reviewed_at": row.reviewed_at.isoformat() if row.reviewed_at else None,
+            "reviewed_at": _utc(row.reviewed_at),
             "consent_version": CONSENT_VERSION, "checklist": REVIEW_CHECKLIST}
 
 
@@ -150,15 +215,40 @@ def validate(body: Dict[str, Any]) -> Dict[str, Any]:
             _bad("household_size", "Household size must be a number.")
         if not 1 <= hh <= 20:
             _bad("household_size", "Household size must be between 1 and 20.")
+    state = str(body.get("state") or "").strip().upper() or None
+    if state is not None and state not in STATES:
+        _bad("state", "Choose your state.")
+    income = body.get("income_range") or None
+    if income is not None and income not in INCOME_RANGES:
+        _bad("income_range", "Choose an income range.")
+    pref = body.get("contact_preference") or None
+    if pref is not None and pref not in CONTACT_PREFS:
+        _bad("contact_preference", "Choose how you'd like to be contacted.")
+    if pref in ("call", "text") and not phone:
+        _bad("phone", "Enter a phone number so an agent can call or text you.")
+    if pref == "email" and not email:
+        _bad("email", "Enter an email address so an agent can email you.")
+    best = body.get("best_time") or None
+    if best is not None and best not in BEST_TIMES:
+        _bad("best_time", "Choose a time of day.")
     if body.get("consent") is not True:
         _bad("consent", "Please agree to be contacted so an agent can help you.")
     if body.get("consent_version") != CONSENT_VERSION:
         _bad("consent_version", "The consent wording changed. Reload the page and review it again.")
-    source = str(body.get("source") or "direct").strip().lower()
+    def utm(k, n=80):
+        return _clean_campaign(body.get(k))[:n] if _clean_campaign(body.get(k)) else None
+    utm_source, utm_medium = utm("utm_source") or utm("source"), utm("utm_medium")
+    ref = re.sub(r"[^a-z0-9.\-]", "", str(body.get("referrer_host") or "").lower())[:120] or None
+    landing = re.sub(r"[^A-Za-z0-9/_\-.]", "", str(body.get("landing_path") or ""))[:120] or None
+    chan = channel_of(utm_source or "", utm_medium or "", ref or "")
+    legacy = {"meta": "facebook", "google": "google", "direct": "direct"}.get(chan, "other")
     return {"first_name": first, "last_name": last, "zip_code": zip_code, "phone": phone, "email": email,
             "age_range": age, "coverage_status": cov, "household_size": hh,
             "help_wanted": body.get("help_wanted") is not False,
-            "source": source if source in SOURCES else "other", "campaign": _clean_campaign(body.get("campaign"))}
+            "source": legacy, "campaign": utm("utm_campaign") or _clean_campaign(body.get("campaign")),
+            "state": state, "income_range": income, "contact_preference": pref, "best_time": best,
+            "channel": chan, "utm_source": utm_source, "utm_medium": utm_medium, "utm_campaign": utm("utm_campaign"),
+            "utm_content": utm("utm_content"), "utm_term": utm("utm_term"), "referrer_host": ref, "landing_path": landing}
 
 
 def _event(db, lead, actor, action, old=None, new=None, note=None):
@@ -190,7 +280,9 @@ def submit(db: Session, org_id: str, body: Dict[str, Any]) -> None:
         except IntegrityError:           # a concurrent retry won the race
             existing = db.query(VoltLead).filter(VoltLead.organization_id == org_id, VoltLead.dedup_key == key).first()
         else:
-            _event(db, lead, None, "created", new=v["source"])
+            _event(db, lead, None, "created", new=v["channel"])
+            _event(db, lead, None, "consent_recorded", new=CONSENT_VERSION,
+                   note="consent text sha256 %s" % lead.consent_text_hash[:16])
             return
     existing.submissions = (existing.submissions or 1) + 1
     existing.updated_at = datetime.utcnow()
@@ -210,7 +302,13 @@ def access(db: Session, user: User, org_id: str) -> str:
     if base == "owner":
         return "all"
     if base == "staff":
-        return "all" if has_grant(db, org_id, user) else "assigned"
+        # VOLT's two authorized operators (the existing development-principal
+        # rule: named in VOLT_DEV_PRINCIPALS AND an active VOLT admin, re-checked
+        # every call) manage the whole campaign; others need an owner grant.
+        from app.services.volt import devrelay
+        if has_grant(db, org_id, user) or devrelay.is_principal(db, user, org_id):
+            return "all"
+        return "assigned"
     raise HTTPException(status_code=403, detail="VOLT consumer leads are for authorized agents.")
 
 
@@ -249,12 +347,18 @@ def lead_dict(lead: VoltLead, names: Dict[str, str], detail: bool = False) -> Di
            "zip": lead.zip_code, "source": lead.source, "status": lead.status,
            "status_label": STATUS_LABELS.get(lead.status, lead.status), "assigned_user_id": lead.assigned_user_id,
            "assigned_to": names.get(lead.assigned_user_id) if lead.assigned_user_id else None,
-           "created_at": lead.created_at.isoformat()}
+           "created_at": _utc(lead.created_at), "updated_at": _utc(lead.updated_at),
+           "channel": lead.channel or {"facebook": "meta"}.get(lead.source, lead.source),
+           "state": lead.state, "appointment_at": _utc(lead.appointment_at)}
     if detail:
         out.update(email=lead.email, age_range=lead.age_range, coverage_status=lead.coverage_status,
                    household_size=lead.household_size, help_wanted=lead.help_wanted, campaign=lead.campaign,
-                   consent_version=lead.consent_version, consent_at=lead.consent_at.isoformat(),
-                   submissions=lead.submissions)
+                   consent_version=lead.consent_version, consent_at=_utc(lead.consent_at),
+                   submissions=lead.submissions, income_range=lead.income_range,
+                   contact_preference=lead.contact_preference, best_time=lead.best_time,
+                   utm={k: getattr(lead, k) for k in ("utm_source", "utm_medium", "utm_campaign", "utm_content",
+                                                      "utm_term", "referrer_host", "landing_path")},
+                   enrolled_at=_utc(lead.enrolled_at), last_contact_at=_utc(lead.last_contact_at))
     return out
 
 
@@ -265,11 +369,15 @@ def listing(db: Session, user: User, org_id: str, params: Dict[str, Any]) -> Dic
         q = q.filter(VoltLead.status == status)
     if source:
         q = q.filter(VoltLead.source == source)
+    channel = params.get("channel") or ""
+    if channel:
+        q = q.filter(VoltLead.channel == channel)
     term = str(params.get("q") or "").strip()[:60]
     if term:
         like = "%" + term.lower().replace("%", "").replace("_", "") + "%"
         digits = re.sub(r"\D", "", term)
-        conds = [VoltLead.first_name.ilike(like), VoltLead.last_name.ilike(like), VoltLead.zip_code.like(like)]
+        conds = [VoltLead.first_name.ilike(like), VoltLead.last_name.ilike(like), VoltLead.zip_code.like(like),
+                 VoltLead.email.ilike(like)]
         if digits:
             conds.append(VoltLead.phone.like("%" + digits + "%"))
         q = q.filter(or_(*conds))
@@ -285,11 +393,24 @@ def listing(db: Session, user: User, org_id: str, params: Dict[str, Any]) -> Dic
 def detail(db: Session, user: User, org_id: str, lead_id: str) -> Dict[str, Any]:
     lead = _lead(db, user, org_id, lead_id)
     events = db.query(VoltLeadEvent).filter(VoltLeadEvent.lead_id == lead.id).order_by(VoltLeadEvent.created_at).all()
-    names = _names(db, [lead.assigned_user_id] + [e.actor_user_id for e in events])
+    ids = [lead.assigned_user_id] + [e.actor_user_id for e in events]
+    ids += [v for e in events if e.action == "assigned" for v in (e.old_value, e.new_value)]
+    names = _names(db, ids)
+
+    def show(e, v):
+        if v is None:
+            return None
+        if e.action == "assigned":
+            return names.get(v, "someone")
+        if e.action == "status":
+            return STATUS_LABELS.get(v, v)
+        return v
     out = lead_dict(lead, names, detail=True)
-    out["history"] = [{"action": e.action, "old": e.old_value, "new": e.new_value, "note": e.note,
+    out["history"] = [{"id": e.id, "action": e.action,
+                       "label": CONTACT_EVENTS.get(e.action) or e.action.replace("_", " ").capitalize(),
+                       "old": show(e, e.old_value), "new": show(e, e.new_value), "note": e.note,
                        "by": names.get(e.actor_user_id) if e.actor_user_id else "Visitor",
-                       "at": e.created_at.isoformat()} for e in events]
+                       "at": _utc(e.created_at)} for e in events]
     return out
 
 
@@ -303,9 +424,41 @@ def update(db: Session, user: User, org_id: str, lead_id: str, body: Dict[str, A
             _event(db, lead, user, "status", lead.status, status)
             lead.status = status
     note = str(body.get("note") or "").strip()[:1000]
+    ev = body.get("event")
+    now = datetime.utcnow()
+    if ev is not None:
+        if ev not in CONTACT_EVENTS:
+            _bad("event", "Unknown activity.")
+        if ev in ("appointment_set", "appointment_changed"):
+            try:
+                when = datetime.fromisoformat(str(body.get("appointment_at") or "").replace("Z", "+00:00"))
+            except ValueError:
+                _bad("appointment_at", "Give the appointment date and time.")
+            from datetime import timezone
+            when = when.astimezone(timezone.utc).replace(tzinfo=None) if when.tzinfo else when
+            old_appt = lead.appointment_at
+            ev = "appointment_changed" if old_appt else "appointment_set"
+            lead.appointment_at = when
+            _event(db, lead, user, ev, _utc(old_appt), _utc(when), note or None)
+            if lead.status in ("new", "contacted", "qualified"):
+                _event(db, lead, user, "status", lead.status, "appointment_set")
+                lead.status = "appointment_set"
+        elif ev == "enrollment_recorded":
+            lead.enrolled_at = now
+            _event(db, lead, user, ev, None, "enrolled", note or None)
+            if lead.status != "enrolled":
+                _event(db, lead, user, "status", lead.status, "enrolled")
+                lead.status = "enrolled"
+        else:
+            lead.last_contact_at = now
+            _event(db, lead, user, ev, None, None, note or None)
+            if ev == "contact_completed" and lead.status == "new":
+                _event(db, lead, user, "status", "new", "contacted")
+                lead.status = "contacted"
+        note = ""
     if note:
         _event(db, lead, user, "note", note=note)
-    lead.updated_at = datetime.utcnow()
+    lead.updated_at = now
     db.flush()
     return detail(db, user, org_id, lead.id)
 
@@ -336,16 +489,54 @@ def assign(db: Session, user: User, org_id: str, lead_id: str, body: Dict[str, A
 
 
 def report(db: Session, user: User, org_id: str) -> Dict[str, Any]:
+    """Counts from the real (scoped) lead table only. Cost figures appear only
+    when real spend has been recorded - none is today, so none are shown."""
     q, mode = scope(db, user, org_id)
-    rows = q.with_entities(VoltLead.status, VoltLead.source).all()
+    rows = q.with_entities(VoltLead.status, VoltLead.channel, VoltLead.source, VoltLead.assigned_user_id,
+                           VoltLead.appointment_at, VoltLead.updated_at).all()
     by_status = {s: 0 for s in STATUSES}
-    by_source: Dict[str, Dict[str, int]] = {}
-    for st, src in rows:
+    by_channel: Dict[str, Dict[str, int]] = {}
+    agents: Dict[str, Dict[str, int]] = {}
+    appts = 0
+    last = None
+    for st, ch, src, who, appt, upd in rows:
         by_status[st] = by_status.get(st, 0) + 1
-        b = by_source.setdefault(src, {"leads": 0, "enrolled": 0})
+        ch = ch or {"facebook": "meta"}.get(src, src or "other")
+        b = by_channel.setdefault(ch, {"leads": 0, "qualified": 0, "appointments": 0, "enrolled": 0})
         b["leads"] += 1
+        b["qualified"] += 1 if st in ("qualified", "appointment_set", "enrolled") else 0
+        b["appointments"] += 1 if (appt is not None or st in ("appointment_set", "enrolled")) else 0
         b["enrolled"] += 1 if st == "enrolled" else 0
-    return {"access": mode, "total": len(rows), "by_status": by_status, "by_source": by_source}
+        appts += 1 if (appt is not None or st in ("appointment_set", "enrolled")) else 0
+        if who:
+            a = agents.setdefault(who, {"assigned": 0, "enrolled": 0})
+            a["assigned"] += 1
+            a["enrolled"] += 1 if st == "enrolled" else 0
+        last = upd if last is None or (upd and upd > last) else last
+    names = _names(db, list(agents))
+    return {"access": mode, "total": len(rows), "by_status": by_status, "appointments": appts,
+            "enrollments": by_status.get("enrolled", 0), "last_activity_at": _utc(last),
+            "by_channel": [dict(channel=k, label=CHANNEL_LABELS.get(k, k), **v) for k, v in sorted(by_channel.items())],
+            "by_source": {k: {"leads": v["leads"], "enrolled": v["enrolled"]} for k, v in by_channel.items()},
+            "agents": [{"name": names.get(k, "Agent"), "assigned": v["assigned"], "enrolled": v["enrolled"],
+                        "conversion_pct": round(100.0 * v["enrolled"] / v["assigned"], 1) if v["assigned"] else None}
+                       for k, v in agents.items()],
+            "cost": None, "cost_note": "No ad spend has been recorded, so cost per lead and per enrollment are not shown."}
+
+
+def summary(db: Session, user: User, org_id: str) -> Dict[str, Any]:
+    """The campaign card: counts and last activity only - never lead details."""
+    r = report(db, user, org_id)
+    cfg = db.get(VoltLeadSettings, org_id)
+    from app.services.volt import devrelay
+    return {"title": "Consumer Leads", "subtitle": "Health Insurance Lead Acquisition & Enrollment",
+            "parent": "VOLT Marketing", "access": r["access"], "total": r["total"],
+            "new": r["by_status"].get("new", 0), "contacted": r["by_status"].get("contacted", 0),
+            "qualified": r["by_status"].get("qualified", 0), "appointments": r["appointments"],
+            "enrollments": r["enrollments"], "last_activity_at": r["last_activity_at"],
+            "intake_enabled": bool(cfg and cfg.intake_enabled),
+            "can_settings": C.staff_access(db, user, org_id) == "owner",
+            "can_develop": devrelay.is_principal(db, user, org_id)}
 
 
 # ── owner grants ────────────────────────────────────────────────────────────

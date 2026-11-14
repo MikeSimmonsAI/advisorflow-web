@@ -482,3 +482,22 @@ def test_leads_models_module_is_registered_for_deploy():
     import app.models.registry  # noqa: F401
     import sys
     assert "app.models.volt_leads_models" in sys.modules
+
+
+def test_consumer_leads_development_requests_carry_campaign_context(dev):
+    from app.models.volt_models import VoltDevJob
+    r = _submit(dev, dev["staff"], campaign="consumer_leads", idempotency_key="cl-req-1",
+                title="Bigger buttons", request="Make the Continue button larger on the coverage page.")
+    j = r.json()
+    assert r.status_code == 200 and j["title"] == "Consumer Leads: Bigger buttons"
+    job = dev["db"].query(VoltDevJob).filter(VoltDevJob.number == int(j["ref"].split("-")[1])).one()
+    for must in ("[Campaign: Consumer Leads - part of VOLT Marketing", dev["staff"].email, "[Request id: cl-req-1]",
+                 "app/services/volt/leads.py", "frontend/src/pages/volt/VoltLeads.jsx",
+                 "Make the Continue button larger"):
+        assert must in job.request
+    assert ("CST" in job.request) or ("CDT" in job.request)
+    again = _submit(dev, dev["staff"], campaign="consumer_leads", idempotency_key="cl-req-1",
+                    title="Bigger buttons", request="Make the Continue button larger on the coverage page.").json()
+    assert again["created"] is False and again["ref"] == j["ref"]                     # double click = one job
+    plain = _submit(dev, dev["staff"], campaign="not-a-campaign", title="Plain", request="A plain VOLT change here.").json()
+    assert plain["title"] == "Plain"

@@ -12,7 +12,7 @@ import { api, fetchObjectUrl } from '../../api/client'
 import { Bolt } from './VoltPortal'
 import { Modal } from './VoltDialogs'
 import { zoomWhen } from './VoltMyApplication'
-import { LeadsDashboard } from './VoltLeads'
+import { ConsumerLeadsCard, LeadsDashboard } from './VoltLeads'
 import Development from './VoltDev'
 import { AcaAccessSettings, AcaApplicants, ApplicantExport, useApplicantExport } from './VoltApplicantAccess'
 import { fmtDate, useVoltTitle } from './voltApi'
@@ -123,7 +123,7 @@ function OpsShell({ orgId, home, children }) {
           <NavLink className="v-tab" to={`${base}/sessions`}>Zoom availability</NavLink>
           <NavLink className="v-tab" to={`${base}/people`}>People & Access</NavLink>
           {home?.dev_principal && <NavLink className="v-tab" to={`${base}/dev`} data-tab="dev">Development</NavLink>}
-          <NavLink className="v-tab" to={`${base}/leads`}>Consumer leads</NavLink>
+          <NavLink className="v-tab" to={`${base}/leads`} data-tab="leads">Consumer Leads</NavLink>
           <NavLink className="v-tab" to={`${base}/talent`}>Talent Pool</NavLink>
           <NavLink className="v-tab" to={`${base}/email`}>Support email</NavLink>
           <NavLink className="v-tab" to={`${base}/reps`}>Reps</NavLink>
@@ -184,6 +184,7 @@ function Overview({ orgId, ops }) {
       <div className="v-kpis">
         {kpis.map(([k, l]) => <button key={k} type="button" className="v-kpi" data-kpi={k} onClick={() => open(k)}><b>{o[k]}</b><span>{l}</span></button>)}
       </div>
+      <ConsumerLeadsCard orgId={orgId} />
       <section className="v-panel">
         <h3>Referral performance{f.project_id ? ' · ' + (h.projects.find((p) => p.id === f.project_id)?.short_name || '') : ' · all projects'}</h3>
         <p className="v-small v-muted">{h.leaderboard.rule} Columns count distinct people credited to that recruiter for the project referral.</p>

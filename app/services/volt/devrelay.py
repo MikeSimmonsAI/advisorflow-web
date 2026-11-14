@@ -272,6 +272,14 @@ def _next_number(db, org_id: str) -> int:
     return (db.query(func.max(VoltDevJob.number)).filter(VoltDevJob.organization_id == org_id).scalar() or 0) + 1
 
 
+CAMPAIGNS = {
+    "consumer_leads": {"name": "Consumer Leads", "files": [
+        "app/services/volt/leads.py", "app/routers/volt_leads_router.py", "app/models/volt_leads_models.py",
+        "frontend/src/pages/volt/VoltLeads.jsx", "tests/test_volt_leads.py", "docs/volt/leads-rollout.md",
+        "docs/volt/design/volt_leads_v3.html", "docs/volt/design/volt_leads_backend_demo.html"]},
+}
+
+
 def submit(db: Session, org_id: str, user: User, body: Dict[str, Any], via: str = "console") -> tuple:
     title = str(body.get("title") or "").strip()
     request = str(body.get("request") or "").strip()
@@ -280,6 +288,22 @@ def submit(db: Session, org_id: str, user: User, body: Dict[str, Any], via: str 
     if len(request) < 10 or len(request) > 8000:
         _err(422, "Describe the change in 10 to 8000 characters.", "bad_request")
     key = str(body.get("idempotency_key") or "").strip()[:80] or None
+    campaign = CAMPAIGNS.get(str(body.get("campaign") or ""))
+    if campaign:
+        # Requests from a campaign's own Development button carry its identity
+        # and the code to start from, so Claude never has to guess the context.
+        from zoneinfo import ZoneInfo
+        from datetime import timezone as _tz
+        now = C.now().replace(tzinfo=_tz.utc)
+        request = ("[Campaign: %s - part of VOLT Marketing, separate from recruiting and from HIP]\n"
+                   "[Requested by %s <%s> at %s (%s)]\n[Request id: %s]\n"
+                   "[Start from: %s]\n\n%s" % (
+                       campaign["name"], user.full_name or user.email, user.email,
+                       now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                       now.astimezone(ZoneInfo("America/Chicago")).strftime("%b %-d, %Y %-I:%M %p %Z"),
+                       key or "-", ", ".join(campaign["files"]), request))[:8000]
+        if not title.lower().startswith(campaign["name"].lower()):
+            title = ("%s: %s" % (campaign["name"], title))[:140]
     if key:
         found = (db.query(VoltDevJob).filter(VoltDevJob.organization_id == org_id, VoltDevJob.requested_by == user.id,
                                              VoltDevJob.idempotency_key == key).first())

@@ -59,6 +59,23 @@ class VoltLead(Base):
     status = Column(String, nullable=False, default="new")
     assigned_user_id = Column(String, nullable=True)
     submissions = Column(Integer, nullable=False, default=1)
+    # 2026-11-14 (completion): directive fields. Added to the existing table by
+    # app/auto_migrate.py (additive, nullable).
+    state = Column(String(2), nullable=True)
+    income_range = Column(String, nullable=True)
+    contact_preference = Column(String, nullable=True)   # call | text | email
+    best_time = Column(String, nullable=True)            # morning | afternoon | evening | any
+    channel = Column(String, nullable=True)              # meta | google | organic | direct | referral | other
+    utm_source = Column(String, nullable=True)
+    utm_medium = Column(String, nullable=True)
+    utm_campaign = Column(String, nullable=True)
+    utm_content = Column(String, nullable=True)
+    utm_term = Column(String, nullable=True)
+    referrer_host = Column(String, nullable=True)
+    landing_path = Column(String, nullable=True)
+    appointment_at = Column(DateTime, nullable=True)     # UTC
+    enrolled_at = Column(DateTime, nullable=True)        # UTC
+    last_contact_at = Column(DateTime, nullable=True)    # UTC
     # Compliance-review flags, e.g. "intake_before_review" (none today).
     flags = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

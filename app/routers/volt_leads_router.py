@@ -42,6 +42,12 @@ def ops_leads(org_id: str, request: Request, db: Session = Depends(get_db), user
     return L.listing(db, user, org_id, dict(request.query_params))
 
 
+@ops_router.get("/{org_id}/leads/summary")
+def ops_leads_summary(org_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Campaign card: counts and last activity only."""
+    return L.summary(db, user, org_id)
+
+
 @ops_router.get("/{org_id}/leads/report")
 def ops_leads_report(org_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     return L.report(db, user, org_id)
