@@ -83,8 +83,12 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
   if (dealAccess?.sales) {
     visible.push({
       type: 'deal_builder', key: 'sales', variant: 'office', symbol: 'DB',
-      kind: 'SALES TOOLS', display: 'Salesperson Deal Builder',
-      summary: 'Build customer quotes and estimate your own commission.',
+      kind: 'SALES TOOLS',
+      // Same builder; the server decides which commission layers it shows.
+      display: dealAccess.team_view ? 'Team Deal Builder' : 'Salesperson Deal Builder',
+      summary: dealAccess.team_view
+        ? 'Build customer quotes and see your commission and your team\'s.'
+        : 'Build customer quotes and estimate your own commission.',
       href: '/team-prices/sales-deal-builder', actionLabel: 'Open Deal Builder',
     })
   }

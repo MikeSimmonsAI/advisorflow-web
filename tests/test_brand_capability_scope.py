@@ -509,7 +509,7 @@ def test_the_grant_screen_lists_members_and_anybody_already_granted(
     # or a holder of this grant. Being a sales manager does not grant it.
     assert {c["key"] for c in d["available_capabilities"]} == {
         "sales_comp_view", "sales_comp_manage", "support_console",
-        "deal_builder_executive"}
+        "deal_builder_executive", "sales_program_owner", "sales_team_executive"}
 
 
 def test_granting_is_audited_with_the_scope_it_applied_to(db_session, a, god):

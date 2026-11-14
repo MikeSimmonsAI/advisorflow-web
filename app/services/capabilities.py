@@ -176,6 +176,26 @@ CAPABILITIES: Dict[str, Capability] = dict([
              "being able to change what anybody earns, and non-delegable "
              "because a plan spans a brand's whole team."),
 
+    _cap("sales_program_owner",
+         "Sales program owner — runs the EvoSys Pro sales team",
+         requires_feature=None, delegable=False,
+         why="An owner of the sales program: sees every compensation layer, "
+             "EvoSys's share and the unclaimed report; invites, approves, "
+             "suspends, moves and removes team members; opens onboarding "
+             "documents; changes prices and rates. Granted only by God Mode. "
+             "Being a sales manager or the Sr Executive Vice President does "
+             "NOT grant it."),
+
+    _cap("sales_team_executive",
+         "Sr Executive Vice President — leads the sales team",
+         requires_feature=None, delegable=False,
+         why="The head of the sales team under the owners. Invites Area Sales "
+             "Managers and reps, suspends and reactivates them and moves reps "
+             "between managers - inside his own team only. Sees his own, his "
+             "managers' and his reps' commission, never EvoSys's share, and "
+             "only the onboarding STATUS of his people, never their documents. "
+             "Cannot approve anyone or change prices or rates."),
+
     _cap("deal_builder_executive",
          "Executive Deal Builder — full team compensation split",
          requires_feature=None, delegable=False,
@@ -442,6 +462,9 @@ BRAND_SCOPED_CAPABILITIES = ("sales_comp_view", "sales_comp_manage",
                              # executive Deal Builder page is served only to
                              # god_admin or a holder of this grant.
                              "deal_builder_executive",
+                             # Read by app/services/sales_team.py: who runs
+                             # the sales program, and who leads the team.
+                             "sales_program_owner", "sales_team_executive",
                              # Support operators work for a BRAND, not for a
                              # customer: `users.organization_id` is NULL for
                              # them, so a customer-org grant could not exist.

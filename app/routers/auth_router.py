@@ -304,10 +304,10 @@ def my_contexts(request: Request,
     # destinations (and not auto-skip Program Access) without a second call.
     # Booleans only: nothing about compensation travels here.
     try:
-        from app.routers.deal_builder_router import (may_use_executive_builder,
-                                                     may_use_sales_builder)
-        ctx["deal_builder"] = {"sales": bool(may_use_sales_builder(current_user, db)),
-                               "executive": bool(may_use_executive_builder(current_user, db))}
+        from app.routers.deal_builder_router import access_summary
+        a = access_summary(db, current_user)
+        ctx["deal_builder"] = {k: a[k] for k in ("sales", "executive", "team_view",
+                                                 "seat_label")}
     except Exception:  # pragma: no cover - never let this break sign-in
         _log.exception("deal_builder context failed for user=%s", current_user.id)
         ctx["deal_builder"] = {"sales": False, "executive": False}
