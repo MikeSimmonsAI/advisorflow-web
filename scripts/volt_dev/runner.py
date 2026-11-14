@@ -30,8 +30,10 @@ FRONTEND = os.environ.get("VOLT_FRONTEND", "https://voltmarketing.live").rstrip(
 REPO = os.environ.get("GITHUB_REPOSITORY", "MikeSimmonsAI/advisorflow-web")
 TMP = os.environ.get("RUNNER_TEMP", "/tmp")
 STATE = os.path.join(TMP, "volt-dev-job.json")
-SCOPE = (r"^app/services/volt/", r"^app/routers/volt_router\.py$", r"^frontend/src/pages/volt/",
-         r"^frontend/public/brands/volt/", r"^tests/test_volt[^/]*\.py$", r"^docs/volt/")
+SCOPE = (r"^app/services/volt/(?!dev(?:relay|dispatch|oauth)\.py\Z)", r"^app/routers/volt_(?:router|leads_router)\.py\Z",
+         r"^app/models/volt_leads_models\.py\Z",
+         r"^frontend/src/pages/volt/",
+         r"^frontend/public/brands/volt/", r"^tests/test_volt[^/]*\.py\Z", r"^docs/volt/")
 
 
 def sh(*cmd, check=True, capture=True, env=None):
@@ -124,8 +126,8 @@ def deploy_proof(watch):
 
 def changed_files():
     sh("git", "fetch", "-q", "origin", "main")
-    out = sh("git", "diff", "--name-only", "origin/main...HEAD")
-    return [p for p in out.splitlines() if p.strip()]
+    out = sh("git", "diff", "--no-renames", "--name-only", "-z", "origin/main...HEAD")
+    return [p for p in out.split("\0") if p]
 
 
 def out_of_scope(paths):
@@ -175,7 +177,10 @@ def merge(job):
         if pr["head"]["sha"] != job["approved_sha"]:
             raise RuntimeError("The PR changed after approval (now %s, approved %s). Retry to test it again."
                                % (pr["head"]["sha"][:7], job["approved_sha"][:7]))
-        files = [f["filename"] for f in gh("GET", "repos/%s/pulls/%d/files?per_page=100" % (REPO, job["pr_number"]))]
+        file_records = gh("GET", "repos/%s/pulls/%d/files?per_page=100" % (REPO, job["pr_number"]))
+        if len(file_records) != pr["changed_files"]:
+            raise RuntimeError("Cannot verify scope for every changed file. Split the pull request.")
+        files = [path for f in file_records for path in (f["filename"], f.get("previous_filename")) if path]
         bad = out_of_scope(files)
         if bad:
             raise RuntimeError("Changes outside VOLT scope: %s" % ", ".join(bad[:5]))
@@ -210,6 +215,13 @@ def cmd_finish(claude_outcome):
                 detail = "Claude finished without changing any files (%s). Add detail and retry." % claude_outcome
             report(jid, status="failed", detail=detail)
             return
+        blocker_doc = "docs/volt/dev-relay/%s.md" % job["ref"]
+        if claude_outcome != "rollback" and blocker_doc in files and all(p.startswith("docs/volt/") for p in files):
+            with open(blocker_doc, encoding="utf-8") as f:
+                _, marker, reason = f.read().partition("VOLT_IMPLEMENTATION_BLOCKED:")
+            if marker:
+                report(jid, status="failed", detail="Implementation blocked: " + reason.strip()[:350])
+                return
         bad = out_of_scope(files)
         if bad:
             report(jid, status="failed", changed_files=files,

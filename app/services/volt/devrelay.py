@@ -59,11 +59,14 @@ LEASE = timedelta(minutes=60)
 
 # Files a relay change may touch. Anything else makes the job fail closed.
 SCOPE = (
-    re.compile(r"^app/services/volt/"),
-    re.compile(r"^app/routers/volt_router\.py$"),
+    re.compile(r"^app/services/volt/(?!dev(?:relay|dispatch|oauth)\.py\Z)"),
+    re.compile(r"^app/routers/volt_(?:router|leads_router)\.py\Z"),
+    # DEV-4 consumer leads: NEW volt_lead* tables only. Registered in app/models/registry.py so
+    # deploy creates them; no Alembic (production does not run it - see app/migrate.py).
+    re.compile(r"^app/models/volt_leads_models\.py\Z"),
     re.compile(r"^frontend/src/pages/volt/"),
     re.compile(r"^frontend/public/brands/volt/"),
-    re.compile(r"^tests/test_volt[^/]*\.py$"),
+    re.compile(r"^tests/test_volt[^/]*\.py\Z"),
     re.compile(r"^docs/volt/"),
 )
 
@@ -543,7 +546,7 @@ def in_scope(paths: List[str]) -> List[str]:
 
 def deploy_targets(paths: List[str]) -> str:
     t = []
-    if any(p.startswith("app/") or p.startswith("requirements") for p in paths):
+    if any(p.startswith(("app/", "requirements")) for p in paths):
         t.append("backend")
     if any(p.startswith("frontend/") and not p.startswith("frontend/dist/") for p in paths):
         t.append("frontend")
