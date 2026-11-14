@@ -318,7 +318,9 @@ def my_contexts(request: Request,
         brand = sales_team.program_brand(db)
         rec = sales_onboarding.record(db, current_user.id, brand.id) if brand else None
         ctx["sales_team"] = {"my_team": bool(rights["can_view_team"]),
-                             "onboarding": bool(rec is not None and rec.status != "approved"
+                             # Existing members with no record yet still need to
+                             # onboard (no grandfathering), so they get the card too.
+                             "onboarding": bool((rec is None or rec.status != "approved")
                                                 and rights["seat"] not in (None, "god", "owner"))}
     except Exception:  # pragma: no cover
         _log.exception("sales_team context failed for user=%s", current_user.id)
