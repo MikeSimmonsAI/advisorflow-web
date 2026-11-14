@@ -303,3 +303,51 @@ def unclaimed_report(db: Session) -> Dict[str, Any]:
                               "status": "Not settled — refund policy decides recovery"})
     return {"rules_version": dbc.RULES_VERSION, "rows": out, "total": total,
             "refund_cases": cases}
+
+
+# ── Projection (what the God Mode pricing views show) ────────────────────────
+
+def project(db: Session, opp: Opportunity) -> Dict[str, Any]:
+    """Same shape as compensation.compute(): setup payouts plus one month of
+    monthly service, from the launch rules. Writes nothing."""
+    from app.services import compensation as comp
+    econ = comp.deal_economics(db, opp)
+    base = {"plan_id": None, "plan_name": "EvoSys launch rules %s" % dbc.RULES_VERSION,
+            "holdback_days": HOLDBACK_DAYS, "currency": econ.get("currency") or "USD",
+            "capped": False, "cap_amount": None, "economics": econ.get("quote"),
+            "deal_kind": econ.get("deal_kind")}
+    try:
+        plan_key = plan_key_for(econ)
+    except NotEarnable:
+        return {**base, "status": comp.PROJ_UNCONFIGURED, "payouts": [],
+                "seller_total": None, "override_total": None, "total": None}
+    plan = dbc.PLANS[plan_key]
+    fee = _d(econ.get("implementation_fee"))
+    deal: Dict[str, Any] = {"plan": plan_key, "basis": "quote", "monthly": str(_d(econ.get("mrr")))}
+    if plan["kind"] == "package":
+        deal["package_setup"] = str(min(fee, plan["setup"]))
+        deal["addon_setup"] = str(max(Decimal("0"), fee - plan["setup"]))
+    else:
+        deal["saas_setup"] = str(fee)
+    credit = db.query(SalesDealCredit).filter(SalesDealCredit.opportunity_id == opp.id).first()
+    chain = ({"rep": credit.rep_user_id, "asm": credit.asm_user_id, "sevp": credit.sevp_user_id}
+             if credit else _chain(db, opp.brand_sales_org_id, opp.owner_user_id))
+    full = dbc.split(deal, filled={r: bool(chain.get(r)) for r in dbc.ROLES})
+    payouts = []
+    for role in dbc.ROLES:
+        if not chain.get(role):
+            continue
+        layer = full["layers"][role]
+        amt = _q(_d(layer["one_time"]) + _d(layer["monthly"]))
+        payouts.append({"payee_user_id": chain[role],
+                        "payee_kind": comp.PAYEE_SELLER if role == "rep" else comp.PAYEE_OVERRIDE,
+                        "override_level": None if role == "rep" else LEVEL[role],
+                        "rule_id": None, "basis": "%s:%s" % (BASIS, dbc.RULES_VERSION),
+                        "rate_percent": layer["monthly_rate"],
+                        "rate_amount": float(plan["payout"][role]) if plan["kind"] == "package" else None,
+                        "amount": amt})
+    seller = sum((p["amount"] for p in payouts if p["payee_kind"] == comp.PAYEE_SELLER), Decimal("0"))
+    total = sum((p["amount"] for p in payouts), Decimal("0"))
+    status = comp.PROJ_PENDING_APPROVAL if comp.has_pending_pricing_approval(db, opp) else comp.PROJ_PROJECTED
+    return {**base, "status": status, "payouts": payouts, "seller_total": seller,
+            "override_total": total - seller, "total": total}

@@ -226,3 +226,13 @@ def test_unclaimed_report_is_owner_only(team, client):
     for who in (team.sevp, team.asm, team.rep):
         assert get(who).status_code == 403
     assert get(None).status_code == 401
+
+
+def test_projection_uses_the_same_rules(team):
+    opp = _deal(team)
+    r = comp.compute(team.db, opp)
+    got = {p["override_level"]: float(p["amount"]) for p in r["payouts"]}
+    # Basic + $200 add-on, full quote, plus one month of $597 service.
+    assert got == {None: 530 + 89.55, 1: 220 + 59.7, 2: 330 + 89.55}
+    assert r["plan_name"].startswith("EvoSys launch rules")
+    assert team.db.query(SalesDealCredit).filter_by(opportunity_id=opp.id).count() == 0  # writes nothing
