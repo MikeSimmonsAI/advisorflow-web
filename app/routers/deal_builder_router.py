@@ -39,7 +39,7 @@ from app.deps import get_current_user, get_db
 from app.models.models import User
 from app.services import capabilities as caps
 from app.services import deal_builder_commission as dbc
-from app.services.sales_access import is_god, is_sales_member
+from app.services import sales_team
 
 router = APIRouter(prefix="/deal-builder", tags=["deal-builder"])
 
@@ -51,13 +51,29 @@ _NO_STORE = {"Cache-Control": "no-store, private", "Pragma": "no-cache",
 
 
 def may_use_executive_builder(user: User, db: Session) -> bool:
-    if is_god(user):
-        return True
-    return bool(caps.brands_with_capability(db, user, EXEC_CAPABILITY))
+    """The full executive page: God, sales program owners and the named
+    executive-builder grant."""
+    return sales_team.deal_view(db, user) == dbc.VIEW_FULL
 
 
 def may_use_sales_builder(user: User, db: Session) -> bool:
-    return is_sales_member(user, db) or may_use_executive_builder(user, db)
+    """Any approved seat in the EvoSys Pro sales program (or a full-view user)."""
+    return sales_team.deal_view(db, user) is not None
+
+
+def access_summary(db: Session, user: User) -> dict:
+    """Booleans and labels only - no amounts."""
+    v = sales_team.deal_view(db, user)
+    seat = sales_team.seat(db, user)
+    return {
+        "sales": v is not None,
+        "executive": v == dbc.VIEW_FULL,
+        "view": v,
+        "team_view": v in (dbc.VIEW_ASM, dbc.VIEW_SEVP),
+        "seat": seat,
+        "seat_label": sales_team.SEAT_LABELS.get(seat, ""),
+        "name": user.full_name or "",
+    }
 
 
 @router.get("/access")
@@ -65,12 +81,13 @@ def deal_builder_access(user: User = Depends(get_current_user),
                         db: Session = Depends(get_db)):
     """Which builder this signed-in person may open. Booleans only."""
     return Response(
-        content=json.dumps({
-            "sales": may_use_sales_builder(user, db),
-            "executive": may_use_executive_builder(user, db),
-            "name": user.full_name or "",
-        }),
+        content=json.dumps(access_summary(db, user)),
         media_type="application/json", headers=_NO_STORE)
+
+
+class AllocationIn(BaseModel):
+    package: float | None = 0
+    addons: float | None = 0
 
 
 class DealIn(BaseModel):
@@ -81,6 +98,7 @@ class DealIn(BaseModel):
     basis: str | None = "quote"
     collected_setup: float | None = 0
     collected_monthly: float | None = 0
+    allocation: AllocationIn | None = None
 
 
 @router.post("/my-commission")
@@ -91,13 +109,42 @@ def my_commission(body: DealIn, user: User = Depends(get_current_user),
     Nothing about any other role is computed into, or returned by, this route.
     """
     if not may_use_sales_builder(user, db):
-        raise HTTPException(status_code=403, detail="Sales workspace access required.")
+        raise HTTPException(status_code=403, detail=_no_view_reason(db, user))
     try:
         result = dbc.seller_commission(body.model_dump())
     except dbc.DealInputError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return Response(content=json.dumps(result),
                     media_type="application/json", headers=_NO_STORE)
+
+
+@router.post("/commission")
+def commission(body: DealIn, user: User = Depends(get_current_user),
+               db: Session = Depends(get_db)):
+    """The commission this caller may see for the deal on screen.
+
+    The server decides the view from the caller's seat: a rep gets his own
+    layer, an Area Sales Manager his and his reps', the Sr EVP the three sales
+    layers, God and owners everything including EvoSys's share. Layers above
+    the caller are never computed into the response body.
+    """
+    v = sales_team.deal_view(db, user)
+    if v is None:
+        raise HTTPException(status_code=403, detail=_no_view_reason(db, user))
+    deal = body.model_dump()
+    try:
+        result = dbc.view(dbc.split(deal), v)
+    except dbc.DealInputError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return Response(content=json.dumps(result), media_type="application/json",
+                    headers=_NO_STORE)
+
+
+def _no_view_reason(db: Session, user: User) -> str:
+    seat = sales_team.seat(db, user)
+    if seat is None:
+        return "This login is not on the EvoSys Pro sales team."
+    return "Your onboarding has not been approved yet, so commission is not shown."
 
 
 @router.get("/executive-page")
@@ -109,5 +156,8 @@ def executive_page(user: User = Depends(get_current_user),
                             detail="The executive Deal Builder requires executive access.")
     with open(_PAGE, encoding="utf-8") as f:
         html = f.read()
+    # The page carries no rate table of its own: the one set of rules is
+    # injected here, so the executive page and every other view agree.
+    html = html.replace("/*__DEAL_RULES__*/null", json.dumps(dbc.RULES))
     return Response(content=html, media_type="text/html; charset=utf-8",
                     headers=_NO_STORE)

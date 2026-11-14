@@ -67,13 +67,13 @@ def test_standard_setup_price_comes_from_server_not_client():
     assert r["setup_total"] == 1600.0 and r["one_time"]["total"] == 500.0
 
 
-def test_addon_setup_is_proposed_and_separate():
+def test_addons_follow_the_deal():
+    # Package deal: add-on setup and monthly at the package rates (15/10/15).
     r = _c(plan="growth", addon_setup=1500, monthly=1300 + 299)
     assert r["one_time"]["package"] == 1000.0
-    assert r["one_time"]["addon"] == 225.0
-    assert r["one_time"]["addon_status"] == "proposed"
-    assert "not final" in r["one_time"]["addon_rule"]
-    assert r["recurring"]["monthly"] == round((1300 + 299) * 0.2, 2)
+    assert r["one_time"]["addon"] == 225.0            # 15% of 1,500
+    assert r["recurring"]["monthly"] == round((1300 + 299) * 0.15, 2)
+    assert "not final" not in json.dumps(r).lower()
 
 
 def test_collected_payment_is_proportionate():
@@ -119,8 +119,8 @@ def team(db_session):
     db = db_session
     plat = Platform(name="EvoSys", slug="evosys-%d" % next(_SEQ))
     db.add(plat); db.commit()
-    org = BrandSalesOrg(platform_id=plat.id, name="EvoSys Sales",
-                        slug="evosys-s-%d" % next(_SEQ))
+    org = BrandSalesOrg(platform_id=plat.id, name="EvoSys Pro Sales",
+                        slug="evosyspro-sales")
     db.add(org); db.commit()
     god = _user(db, "Owner", role="god_admin")
     mgr = _user(db, "Area Manager")
@@ -184,11 +184,15 @@ def test_executive_page_for_owner_and_grantee(client, team, who):
 def test_access_flags(client, team):
     def flags(who):
         return client.get("/deal-builder/access", headers=_h(team, who)).json()
-    assert flags("rep") == {"sales": True, "executive": False, "name": "Rep"}
-    assert flags("mgr")["executive"] is False
-    assert flags("exe")["executive"] is True
+    rep = flags("rep")
+    assert rep["sales"] is True and rep["executive"] is False and rep["view"] == "rep"
+    assert rep["team_view"] is False
+    mgr = flags("mgr")
+    assert mgr["executive"] is False and mgr["view"] == "asm" and mgr["team_view"] is True
+    assert flags("exe")["executive"] is True and flags("exe")["view"] == "full"
     assert flags("god")["executive"] is True
-    assert flags("outsider") == {"sales": False, "executive": False, "name": "Not Sales"}
+    out = flags("outsider")
+    assert out["sales"] is False and out["executive"] is False and out["view"] is None
 
 
 def test_non_sales_user_cannot_get_commission(client, team):
@@ -316,3 +320,139 @@ def test_wholesale_lock_still_applies_elsewhere(client, team, wholesale_admins):
     # Opening the Deal Builder does not widen the Wholesale lock for other screens.
     from app.services import program_experience as pe
     assert pe.DEAL_BUILDER_PREFIXES == ("/deal-builder/",)
+
+
+# ── rules v2 (2026-11-13) and views by seat ──────────────────────────────────
+
+def _full(**kw):
+    base = dict(plan="custom_saas", saas_setup=0, addon_setup=0, monthly=0, basis="quote")
+    base.update(kw)
+    return dbc.split(base)
+
+
+def test_package_monthly_is_15_10_15_60():
+    v = dbc.view(_full(plan="basic", monthly=700), "full")
+    by = {l["role"]: l for l in v["layers"]}
+    assert [by[r]["monthly"] for r in ("rep", "asm", "sevp")] == [105.0, 70.0, 105.0]
+    assert v["evosys"]["monthly"] == 420.0
+    assert [by[r]["one_time"] for r in ("rep", "asm", "sevp")] == [500.0, 200.0, 300.0]
+
+
+@pytest.mark.parametrize("plan,pay", [("basic", [500, 200, 300]), ("growth", [1000, 300, 600]),
+                                      ("professional", [2000, 400, 900])])
+def test_package_setup_payouts(plan, pay):
+    v = dbc.view(_full(plan=plan), "full")
+    assert [l["one_time"] for l in v["layers"]] == [float(x) for x in pay]
+
+
+def test_saas_split_and_override():
+    v = dbc.view(_full(saas_setup=50000, monthly=4000), "full")
+    by = {l["role"]: l for l in v["layers"]}
+    assert [by[r]["one_time"] for r in ("rep", "asm", "sevp")] == [10000.0, 5000.0, 7500.0]
+    assert [by[r]["monthly"] for r in ("rep", "asm", "sevp")] == [800.0, 400.0, 600.0]
+    assert v["evosys"] == {"one_time": 27500.0, "monthly": 2200.0}
+
+
+def test_saas_addon_follows_saas_rates():
+    v = dbc.view(_full(saas_setup=10000, addon_setup=1000, monthly=1600), "full")
+    rep = v["layers"][0]
+    assert rep["one_time_package"] == 2000.0 and rep["one_time_addons"] == 200.0
+    assert rep["monthly"] == 320.0
+
+
+def test_basic_addon_100_monthly_pays_rep_15():
+    v = dbc.view(_full(plan="basic", monthly=800), "rep")
+    assert v["own"]["monthly"] == 120.0      # 15% of 700 + 15% of the $100 add-on
+
+
+def test_mixed_partial_setup_payment_prorates_each_line():
+    # Basic ($1,600) + $200 setup add-on = $1,800; $900 collected = half of each line.
+    v = dbc.view(_full(plan="basic", addon_setup=200, basis="paid", collected_setup=900), "full")
+    by = {l["role"]: l for l in v["layers"]}
+    assert by["rep"]["one_time"] == 265.0
+    assert by["asm"]["one_time"] == 110.0
+    assert by["sevp"]["one_time"] == 165.0
+
+
+def test_receipt_allocated_to_one_line():
+    # $200 applied to the add-on only: no package payout yet, full add-on share.
+    v = dbc.view(_full(plan="basic", addon_setup=200, basis="paid",
+                       allocation={"package": 0, "addons": 200}), "full")
+    by = {l["role"]: l for l in v["layers"]}
+    assert by["rep"]["one_time_package"] == 0.0 and by["rep"]["one_time_addons"] == 30.0
+    assert by["asm"]["one_time"] == 20.0 and by["sevp"]["one_time"] == 30.0
+    assert v["setup_counted"] == 200.0
+
+
+def test_empty_seat_goes_to_unclaimed_not_to_anyone_else():
+    full = dbc.split(dict(plan="custom_saas", saas_setup=50000, monthly=4000, basis="quote"),
+                     filled={"asm": False})
+    v = dbc.view(full, "full")
+    assert v["unclaimed"]["monthly"] == 400.0 and v["unclaimed"]["one_time"] == 5000.0
+    assert v["unclaimed"]["reasons"][0]["reason"] == "seat empty"
+    by = {l["role"]: l for l in v["layers"]}
+    assert by["rep"]["monthly"] == 800.0 and by["sevp"]["monthly"] == 600.0
+    assert v["evosys"]["monthly"] == 2600.0   # includes the unclaimed 400
+
+
+@pytest.mark.parametrize("view_name,roles", [("rep", ["rep"]), ("asm", ["rep", "asm"]),
+                                             ("sevp", ["rep", "asm", "sevp"])])
+def test_views_never_carry_a_higher_layer(view_name, roles):
+    v = dbc.view(_full(saas_setup=50000, monthly=4000), view_name)
+    assert [l["role"] for l in v["layers"]] == roles
+    assert "evosys" not in v and "unclaimed" not in v
+    text = json.dumps(v)
+    assert "2200" not in text and "27500" not in text and "EvoSys" not in text
+    if view_name != "sevp":
+        assert "600.0" not in text and "Sr Executive" not in text
+    if view_name == "rep":
+        assert "400.0" not in text and "Area Sales" not in text
+
+
+def test_commission_endpoint_by_seat(client, team):
+    db = team["db"]
+    caps.set_brand_grants(db, team["mgr"], team["org"].id, team["org"].name, team["god"],
+                          ["sales_team_executive"])
+    db.commit()
+    deal = {"plan": "custom_saas", "saas_setup": 50000, "monthly": 4000, "basis": "quote"}
+    r = client.post("/deal-builder/commission", json=deal, headers=_h(team, "rep")).json()
+    assert r["view"] == "rep" and [l["role"] for l in r["layers"]] == ["rep"]
+    r = client.post("/deal-builder/commission", json=deal, headers=_h(team, "mgr")).json()
+    assert r["view"] == "sevp" and r["own"]["monthly"] == 600.0 and "evosys" not in r
+    r = client.post("/deal-builder/commission", json=deal, headers=_h(team, "god")).json()
+    assert r["view"] == "full" and r["evosys"]["monthly"] == 2200.0
+    r = client.post("/deal-builder/commission", json=deal, headers=_h(team, "outsider"))
+    assert r.status_code == 403 and "not on the EvoSys Pro sales team" in r.json()["detail"]
+    assert client.post("/deal-builder/commission", json=deal).status_code == 401
+    # Sr EVP still cannot open the full executive page.
+    assert client.get("/deal-builder/executive-page", headers=_h(team, "mgr")).status_code == 403
+
+
+def test_owner_grant_gives_full_view(client, team):
+    db = team["db"]
+    caps.set_brand_grants(db, team["outsider"], team["org"].id, team["org"].name, team["god"],
+                          ["sales_program_owner"])
+    db.commit()
+    a = client.get("/deal-builder/access", headers=_h(team, "outsider")).json()
+    assert a["view"] == "full" and a["seat"] == "owner"
+    r = client.get("/deal-builder/executive-page", headers=_h(team, "outsider"))
+    assert r.status_code == 200
+
+
+def test_executive_page_gets_rules_injected(client, team):
+    html = client.get("/deal-builder/executive-page", headers=_h(team, "god")).text
+    assert "/*__DEAL_RULES__*/null" not in html
+    assert '"version": "%s"' % dbc.RULES_VERSION in html
+    assert "setupRates" not in html and "PACKAGE_PAY" not in html
+
+
+def test_other_brand_members_do_not_get_the_evosys_builder(client, team, db_session):
+    other = BrandSalesOrg(platform_id=team["org"].platform_id, name="Other Sales",
+                          slug="other-sales-%d" % next(_SEQ))
+    db_session.add(other); db_session.commit()
+    u = _user(db_session, "Other Rep")
+    db_session.add(Membership(user_id=u.id, scope_type=SCOPE_BRAND_SALES_ORG, scope_id=other.id,
+                              role=ROLE_SALES_REP, is_active=True))
+    db_session.commit()
+    h = {"Authorization": "Bearer " + create_access_token(u, db_session)}
+    assert client.get("/deal-builder/access", headers=h).json()["sales"] is False
