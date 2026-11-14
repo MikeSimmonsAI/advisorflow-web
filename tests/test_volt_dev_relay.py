@@ -346,3 +346,34 @@ def test_release_check_reports_missing_workflow_and_conflicts(monkeypatch):
     assert D.release_blocker(job) is None
     pr["mergeable"] = False
     assert "conflicts" in D.release_blocker(job)
+
+
+def test_relay_scope_allows_the_leads_build_and_refuses_everything_else():
+    """The backend's scope and the runner's scope are the same list, and the
+    consumer-leads build (DEV-4) fits it without opening relay internals,
+    platform auth, app wiring or unused Alembic revisions."""
+    import importlib.util
+    import pathlib
+    from app.services.volt import devrelay as Rl
+    spec = importlib.util.spec_from_file_location(
+        "volt_runner", pathlib.Path(__file__).resolve().parents[1] / "scripts" / "volt_dev" / "runner.py")
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    assert [rx.pattern for rx in Rl.SCOPE] == list(runner.SCOPE)
+    allowed = ["app/services/volt/leads.py", "app/routers/volt_leads_router.py", "app/routers/volt_router.py",
+               "app/models/volt_leads_models.py", "frontend/src/pages/volt/Leads.jsx", "tests/test_volt_leads.py",
+               "docs/volt/design/README.md"]
+    refused = ["app/services/volt/devrelay.py", "app/services/volt/devdispatch.py", "app/services/volt/devoauth.py",
+               "app/models/volt_models.py", "app/models/registry.py", "app/main.py", "app/deps.py",
+               "alembic/versions/abc123_volt_leads_init.py", "app/routers/volt_dev_router.py",
+               "scripts/volt_dev/runner.py", ".github/workflows/volt-dev.yml", "tests/test_volt_x.py/evil.py",
+               "app/models/volt_leads_models.py.bak"]
+    assert Rl.in_scope(allowed) == []
+    assert Rl.in_scope(refused) == refused
+    assert not runner.out_of_scope(allowed) and sorted(runner.out_of_scope(refused)) == sorted(refused)
+
+
+def test_leads_models_module_is_registered_for_deploy():
+    import app.models.registry  # noqa: F401
+    import sys
+    assert "app.models.volt_leads_models" in sys.modules

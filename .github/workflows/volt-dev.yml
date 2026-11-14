@@ -116,8 +116,9 @@ jobs:
             RULES (the workflow enforces the scope rule and will discard anything outside it)
             - Change ONLY VOLT Marketing files: app/services/volt/, app/routers/volt_router.py,
               frontend/src/pages/volt/, frontend/public/brands/volt/, tests/test_volt*.py, docs/volt/.
-              Consumer leads may also use app/routers/volt_leads_router.py, app/models/volt_leads_models.py,
-              and alembic/versions/<hex>_volt_leads_<name>.py. Use the existing VOLT router and page entry points,
+              Consumer leads may also use app/routers/volt_leads_router.py (mount it from app/routers/volt_router.py;
+              app/main.py is off-limits) and app/models/volt_leads_models.py (NEW tables named volt_lead*, created at
+              deploy by create_all; no Alembic, no new columns on existing tables). Use the existing VOLT router and page entry points,
               reuse platform authentication without editing it, and keep lead roles and data isolated.
               For the consumer leads build, use docs/volt/design/README.md and the two local HTML references.
               Never touch workflows, scripts, relay internals, platform authentication, other workspaces, configuration or secrets.

@@ -61,8 +61,9 @@ LEASE = timedelta(minutes=60)
 SCOPE = (
     re.compile(r"^app/services/volt/(?!dev(?:relay|dispatch|oauth)\.py\Z)"),
     re.compile(r"^app/routers/volt_(?:router|leads_router)\.py\Z"),
+    # DEV-4 consumer leads: NEW volt_lead* tables only. Registered in app/models/registry.py so
+    # deploy creates them; no Alembic (production does not run it - see app/migrate.py).
     re.compile(r"^app/models/volt_leads_models\.py\Z"),
-    re.compile(r"^alembic/versions/[0-9a-f]+_volt_leads_[a-z0-9_]+\.py\Z"),
     re.compile(r"^frontend/src/pages/volt/"),
     re.compile(r"^frontend/public/brands/volt/"),
     re.compile(r"^tests/test_volt[^/]*\.py\Z"),
@@ -545,7 +546,7 @@ def in_scope(paths: List[str]) -> List[str]:
 
 def deploy_targets(paths: List[str]) -> str:
     t = []
-    if any(p.startswith(("app/", "alembic/versions/", "requirements")) for p in paths):
+    if any(p.startswith(("app/", "requirements")) for p in paths):
         t.append("backend")
     if any(p.startswith("frontend/") and not p.startswith("frontend/dist/") for p in paths):
         t.append("frontend")

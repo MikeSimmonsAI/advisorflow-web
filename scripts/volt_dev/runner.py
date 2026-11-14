@@ -31,7 +31,7 @@ REPO = os.environ.get("GITHUB_REPOSITORY", "MikeSimmonsAI/advisorflow-web")
 TMP = os.environ.get("RUNNER_TEMP", "/tmp")
 STATE = os.path.join(TMP, "volt-dev-job.json")
 SCOPE = (r"^app/services/volt/(?!dev(?:relay|dispatch|oauth)\.py\Z)", r"^app/routers/volt_(?:router|leads_router)\.py\Z",
-         r"^app/models/volt_leads_models\.py\Z", r"^alembic/versions/[0-9a-f]+_volt_leads_[a-z0-9_]+\.py\Z",
+         r"^app/models/volt_leads_models\.py\Z",
          r"^frontend/src/pages/volt/",
          r"^frontend/public/brands/volt/", r"^tests/test_volt[^/]*\.py\Z", r"^docs/volt/")
 
