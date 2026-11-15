@@ -305,6 +305,9 @@ def create_proposal(db: Session, opp: Opportunity, user, now=None,
     _event(db, opp.id, "proposal_created",
            "Proposal %s created" % prop.proposal_number,
            "Version 1", user.id, now)
+    # A quote saved from the Deal Builder on this deal is what this proposal quotes.
+    from app.services import sales_quote as _sq
+    _sq.snapshot(db, prop)
     return prop
 
 
@@ -364,6 +367,9 @@ def create_version(db: Session, prev: Proposal, user, now=None,
     _event(db, prev.opportunity_id, "proposal_versioned",
            "Proposal %s revised to v%d" % (nxt.proposal_number, nxt.version),
            "Version %d superseded" % (prev.version or 1), user.id, now)
+    # A new version quotes the deal's latest Deal Builder quote, if there is one.
+    from app.services import sales_quote as _sq
+    _sq.snapshot(db, nxt)
     return nxt
 
 
@@ -632,6 +638,12 @@ def _investment_markdown(db: Session, prop: Proposal) -> Optional[str]:
     # figure, and this proposal is explicitly not making one.
     if getattr(prop, "withhold_pricing", False):
         return None
+    # Quoted with the Deal Builder: the customer sees exactly that quote
+    # (prices only - no compensation is ever part of it).
+    from app.services import sales_quote as _sq
+    _snap = _sq.snapshot_for(db, prop)
+    if _snap:
+        return _sq.investment_markdown(_snap)
     if prop.final_amount is None and not prop.package_id:
         return None
 

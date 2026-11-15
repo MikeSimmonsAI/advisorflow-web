@@ -12,6 +12,7 @@ import Login from './pages/Login'
 import GoogleSignInComplete from './pages/GoogleSignInComplete'
 import TeamPrices from './pages/TeamPrices'
 import { SalesDealBuilder, ExecutiveDealBuilder } from './pages/DealBuilders'
+import DealQuote from './pages/sales/DealQuote'
 import MyTeam from './pages/sales/MyTeam'
 import SalesOnboarding from './pages/SalesOnboarding'
 import Onboarding from './pages/Onboarding'
@@ -1595,6 +1596,7 @@ export default function App() {
             brand's org id gets a 404 rather than a screen. */}
         <Route path="/sales/customers/:orgId/catalogue" element={<SalesRoute><SellCatalogue /></SalesRoute>} />
         <Route path="/sales/opportunities/:oppId" element={<SalesRoute><OpportunityDetail /></SalesRoute>} />
+        <Route path="/sales/opportunities/:oppId/quote" element={<SalesRoute><DealQuote /></SalesRoute>} />
         <Route path="/sales/team" element={<SalesRoute><TeamAvailability /></SalesRoute>} />
 
         {/* ── MY TEAM ── manager surfaces ──
