@@ -145,7 +145,14 @@ def in_sending_hours(db: Session, org_id: str, now: Optional[datetime] = None) -
     n = now or datetime.utcnow()
     utc = n.replace(tzinfo=ZoneInfo("UTC"))
     t = utc.astimezone(ZoneInfo(ch.WINDOW_ZONE)).time()
-    return ch.WINDOW_START <= t <= ch.WINDOW_END and send_window.permits(n)
+    if not (ch.WINDOW_START <= t <= ch.WINDOW_END):
+        return False
+    # Restland (Nov 15): its own window, 8:30 AM - 6:00 PM Central.
+    from app.services.programs import outreach_slots
+    cfg = outreach_slots.config_for_org(db, org_id)
+    if cfg is not None:
+        return outreach_slots.permits(n.replace(tzinfo=None) if n.tzinfo else n, cfg)
+    return send_window.permits(n)
 
 
 # ── rendering (shared with the campaign preview) ────────────────────────────
@@ -176,7 +183,7 @@ def flyer_for(db: Session, org_id: str, fam: CampaignFamily, location_id: str) -
 
 def render_touch(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof: LocationProfile,
                  first_name: Optional[str], touch: str = "first", flyer_cache: Optional[Dict] = None,
-                 booking_url: str = "") -> Dict:
+                 booking_url: str = "", time_offer: str = "") -> Dict:
     """Subject, plain body, HTML body and attachment for one family/location/touch."""
     mode = fam.first_touch_email_mode if touch == "first" else fam.followup_email_mode
     # A hidden location gets only the general flyer, never its own branded one.
@@ -205,6 +212,8 @@ def render_touch(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof: 
         "booking_line": ("Pick a time that works for you here: %s\n\n" % booking_url) if booking_url else "",
         # #441: the location's own number for an email signature.
         "location_phone": _pretty_phone(prof.facility_phone),
+        # Issue #507: two verified open times (or "what day works").
+        "time_offer": time_offer or "What day this week works for you to come by?",
     }
     subject = identity.render(fam.email_subject_template, fields)
     body = identity.render(fam.email_body_template,
@@ -453,6 +462,31 @@ MIN_EMAIL_GAP = timedelta(hours=20)
 _RESTLAND_ROTATING = ("restland_family_file_review", "restland_family_file_review_return")
 
 
+
+FIRST_EMAIL_AFTER_TEXT = timedelta(hours=4)
+
+
+def first_email_hold(db: Session, lead, start: Optional[datetime], now: datetime) -> Optional[str]:
+    """Restland (Nov 15): a texting family's day-1 email goes at least four
+    hours after its first text actually went. A family the journey does not
+    text (email-only, or its text journey ended without a text) gets email 1 at
+    its own start. None = may go now."""
+    from app.models.models import CadenceState, Message
+    st = db.query(CadenceState).filter(CadenceState.lead_id == lead.id).first()
+    if st is None:
+        return None
+    since = st.cadence_started_at or start
+    q = db.query(Message.sent_at).filter(Message.lead_id == lead.id)
+    if since is not None:
+        q = q.filter(Message.sent_at >= since - timedelta(minutes=5))
+    first = q.order_by(Message.sent_at).first()
+    if first is not None and first[0] is not None:
+        sent = first[0].replace(tzinfo=None) if getattr(first[0], "tzinfo", None) else first[0]
+        return None if now >= sent + FIRST_EMAIL_AFTER_TEXT else "waits 4 hours after the first text"
+    if st.status == "active":
+        return "waits for the first text"
+    return None
+
 def _due_touch(touches: Dict[int, ProgramEmailTouch], now: datetime, schedule=None,
                start: Optional[datetime] = None) -> Optional[int]:
     """The touch due now (1..max_touches), or None.
@@ -680,12 +714,20 @@ def plan(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
         _start = None
         if _sched:
             _starts = [r.journey_started_at for r in rows if getattr(r, "journey_started_at", None)]
+            if fam.key in _RESTLAND_ROTATING:
+                # Nov 15: the days count from the family's own scheduled start
+                # (its first text slot), not from when Start was pressed.
+                _starts = [r.scheduled_start_at for r in rows if getattr(r, "scheduled_start_at", None)] or _starts
             _start = min(_starts) if _starts else None
             if _start is not None and getattr(_start, "tzinfo", None) is not None:
                 _start = _start.replace(tzinfo=None)
         touch = _due_touch(mine, now, _sched, _start)
         if touch is None:
             continue
+        if fam.key in _RESTLAND_ROTATING and touch == (_base + 1) and mine.get(touch) is None:
+            _hold = first_email_hold(db, lead, _start, now)
+            if _hold:
+                continue
         _replied = lead_id in replied
         if _replied and fam.key in _RESTLAND_ROTATING:
             # #507: an automatic reply is not the family answering.
@@ -800,9 +842,12 @@ def run(db: Session, organization_id: Optional[str] = None, *, dry_run: bool = F
             except Exception:                         # noqa: BLE001 - the reply CTA still stands
                 log.exception("booking link for email touch failed for lead %s", lead.id)
                 booking_url = ""
+            _offer = ""
+            if fam.key in _RESTLAND_ROTATING:
+                _offer = identity.time_offer_for(db, lead, "email")
             r = render_touch(db, prog, fam, prof, None if blind else lead.first_name,
                              "first" if touch == 1 else "followup", flyer_cache=flyer_cache,
-                             booking_url=booking_url)
+                             booking_url=booking_url, time_offer=_offer)
             if r["email_mode"] in ("hosted", "attached") and r["flyer"] is None:
                 # The campaign is set to carry a flyer and no approved flyer is
                 # active for this location: an email promising a guide with no

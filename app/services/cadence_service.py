@@ -188,6 +188,12 @@ def stop_cadence_for_lead(db: Session, lead_id: str, reason) -> None:
     # CadenceState.status is plain VARCHAR — always store as string
     state.status = reason.value if hasattr(reason, "value") else str(reason)
     state.completed_at = datetime.now(timezone.utc)
+    # A stopped family gives its reserved text slots back (Restland schedule).
+    try:
+        from app.services.programs import outreach_slots as _slots
+        _slots.release(db, state.id)
+    except Exception:                                    # noqa: BLE001 - table absent on an old DB
+        logger.debug("slot release skipped for state %s", state.id)
     db.commit()
 
 
@@ -934,7 +940,10 @@ def run_due_cadences(db: Session, organization_id: str = None,
             # Central - narrower than the family's clock, never wider. Outside
             # it the touch waits for the next opening; its interval is kept.
             from app.services.programs import send_window as _sw
-            if _sw.applies_to_org(db, lead.organization_id, _window_cache) and not _sw.permits(now):
+            from app.services.programs import outreach_slots as _slots
+            _slot_cfg = _slots.config_for_org(db, lead.organization_id)
+            if _slot_cfg is None and _sw.applies_to_org(db, lead.organization_id, _window_cache) \
+                    and not _sw.permits(now):
                 _log_touch(db, state, lead, touch_number=touch_number,
                            attempt_seq=_next_attempt_seq(db, state, touch_number),
                            claim=True, outcome=OUTCOME_BLOCKED,
@@ -946,6 +955,22 @@ def run_due_cadences(db: Session, organization_id: str = None,
                 blocked_count += 1
                 db.commit()
                 continue
+
+            # ── THE TEXT SLOT SCHEDULE (Restland, Nov 15) ─────────────────────
+            # A text goes only in its own slot: a new family at 8:30 and every
+            # 8 minutes, a due follow-up 2 minutes after one of those. Anything
+            # else - a retry, a held touch, a missed slot - is queued for the
+            # next free follow-up slot, never sent early or in a burst.
+            if _slot_cfg is not None:
+                _wait = _slots.gate(db, state, lead, touch_number, now)
+                if _wait is not None:
+                    _log_touch(db, state, lead, touch_number=touch_number,
+                               attempt_seq=_next_attempt_seq(db, state, touch_number),
+                               claim=True, outcome=OUTCOME_SKIPPED, reason=("slot: " + _wait)[:500],
+                               scheduled_for=scheduled_for)
+                    skipped_count += 1
+                    db.commit()
+                    continue
 
             # ── THE CLAIM. One row, one send. ──────────────────────────────────
             #
@@ -1065,6 +1090,12 @@ def run_due_cadences(db: Session, organization_id: str = None,
             state.current_touch_number = touch_number
             state.last_touch_sent_at = now
             _advance_schedule(state, schedule, touch_number, total_touches, now)
+            if _slot_cfg is not None:
+                _slots.mark_used(db, state.id, touch_number)
+                if state.status == "active" and state.next_touch_due_at is not None:
+                    # The next text's own day, in the first free follow-up slot.
+                    _slots.place_followup(db, lead.organization_id, state, touch_number + 1,
+                                          state.next_touch_due_at, _slot_cfg)
             if state.status == "completed":
                 completed_count += 1
             sent_count += 1

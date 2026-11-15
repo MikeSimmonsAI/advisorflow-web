@@ -107,7 +107,7 @@ export default function DataReview({ openPerson }) {
         <dt>Booking</dt><dd>{s.booking?.user ? `${s.booking.user.name} (${s.booking.user.email})` : (c.booking_user_set ? 'Booking calendar set' : 'Booking calendar not set yet — texts carry no booking link until it is')}</dd>
         {s.booking?.rules && <><dt>Appointments</dt><dd>{s.booking.rules.days} · starts {s.booking.rules.starts.join(', ')} Central · {s.booking.rules.minutes} minutes + {s.booking.rules.gap_minutes}-minute gap · {s.booking.rules.places.join(' or ')}</dd></>}
         {s.booking?.calendar && <><dt>Calendar check</dt><dd>{s.booking.calendar.checked === false ? 'Not checked yet' : s.booking.calendar.read_ok ? `Read OK${s.booking.calendar.calendar_timezone ? ` (${s.booking.calendar.calendar_timezone})` : ''}` : `Not readable${s.booking.calendar.needs_reconnect ? ' — reconnect needed' : ''}${s.booking.calendar.error ? `: ${s.booking.calendar.error}` : ''}`}</dd></>}
-        {s.schedule && <><dt>Sequence</dt><dd>{s.schedule.days.map(d => `Day ${d.day}: ${d.touches.join(' + ')}`).join(' · ')} · {s.schedule.window} · {s.schedule.cooldown_days}-day rest after the last touch</dd></>}
+        {s.schedule && <><dt>Sequence</dt><dd>{s.schedule.days.map(d => `Day ${d.day}: ${d.touches.join(' + ')}`).join(' · ')} · {s.schedule.window}{s.schedule.slots ? ` · ${s.schedule.slots}` : ''} · {s.schedule.cooldown_days}-day rest after the last touch</dd></>}
         <dt>Switch-on check</dt><dd>{c.activation_blocker || 'Every step has wording. Switching on is a separate, deliberate step in Campaigns.'}</dd>
       </dl>
       <h4 style={{ margin: '14px 0 6px' }}>Texts</h4>

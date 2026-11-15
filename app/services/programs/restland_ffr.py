@@ -45,7 +45,8 @@ RETURN_NAME = "Restland — Family File Review — Return"
 
 CADENCE_NAME = "Restland Family File Review (5 texts, 14 days)"
 CADENCE_DESCRIPTION = ("Family File Review - 5 texts on days 1, 3, 6, 10 and 14; emails on days 1, 4, 8 and 12. "
-                       "9 AM - 6 PM Central, every day. Draft until the campaign is switched on.")
+                       "New families from 8:30 AM Central, one every 8 minutes; due follow-ups 2 minutes after "
+                       "each, until 6 PM, every day.")
 
 # (touch, day_offset, send_hour Central). Day 1 = offset 0.
 SMS_STEPS: List[Tuple[int, int, int]] = [(1, 0, 10), (2, 2, 11), (3, 5, 10), (4, 9, 11), (5, 13, 10)]
@@ -56,55 +57,64 @@ COOLDOWN_DAYS = 30
 
 _SIG = "{primary_contact_name}\n{location_name}\n13005 Greenville Ave, Dallas, TX 75243"
 
+# Nov 15 (owner): it's been a while; Mike wants to review the family's
+# Restland file with them this week, confirm it is current, go over any
+# permission-to-access paperwork that applies, and get them a Personal Planning
+# Guide if they haven't received one. In-person at Restland first; at their
+# home if they can't come in. Never virtual. {time_offer} names two times the
+# calendar really has open, or asks what day works when it can't verify any.
 SMS = {
-    1: ("Hi {first_name}, this is {primary_contact_name} with {location_name}. I'd like to invite you to a "
-        "45-minute Family File Review: we'll review your file with you, explain any permission-to-access "
-        "paperwork that applies, and go over our pre-planning guide. Reply STOP to opt out."),
-    2: ("Hi {first_name}, it's {primary_contact_name} at Restland. Which day would work for your Family File "
-        "Review? {booking_line} Or just reply with a day. Reply STOP to opt out."),
-    3: ("{first_name}, we can meet at Restland, or I'm happy to come to your home if that's more convenient. "
-        "Either way it's about 45 minutes. Reply with what suits you. - {primary_contact_name}. "
+    1: ("Hi {first_name}, this is {primary_contact_name} with Restland. It's been a while since we reviewed "
+        "your file, and I'd like to get you in this week to make sure everything is up to date. We'll go over "
+        "any permission-to-access paperwork that applies and get you a Personal Planning Guide if you haven't "
+        "received one. What day works for you to come by? Reply STOP to opt out."),
+    2: ("Hi {first_name}, it's {primary_contact_name} at Restland. I'd like to sit down with you this week and "
+        "go over your file. {time_offer} Reply STOP to opt out."),
+    3: ("{first_name}, it takes about 45 minutes at our office, 13005 Greenville Ave, and I'll have a Personal "
+        "Planning Guide ready for you. {time_offer} If coming in is hard, tell me and I'll come to you. "
+        "- {primary_contact_name}, Restland. Reply STOP to opt out."),
+    4: ("Hi {first_name}, I want to make sure the information in your Restland file is current, including any "
+        "permission-to-access paperwork that applies. Can we get you in this week? {booking_line} "
+        "- {primary_contact_name}. Reply STOP to opt out."),
+    5: ("Hi {first_name}, last note from me for now. I'd still like to review your Restland file with you and "
+        "get you your Personal Planning Guide. Just reply with a day that works. - {primary_contact_name}. "
         "Reply STOP to opt out."),
-    4: ("Hi {first_name}, {primary_contact_name} at Restland. Would a weekday or a weekend be better for your "
-        "Family File Review? I have times all seven days. {booking_line} Reply STOP to opt out."),
-    5: ("Hi {first_name}, this is my last note for now about your Family File Review. If you'd like to set a "
-        "time, just reply here, or I can reconnect with you later. Thank you. - {primary_contact_name}, "
-        "Restland. Reply STOP to opt out."),
 }
 
 EMAIL = {
-    1: ("Your Family File Review with {primary_contact_name} at Restland",
+    1: ("Your Restland file - can we meet this week?",
         "Hi {first_name},\n\n"
-        "I'm {primary_contact_name}, a Family Service Advisor with {location_name}. I'd like to invite you to "
-        "a Family File Review: a 45-minute, in-person visit where we:\n\n"
-        "- review the information in your family's file with you,\n"
-        "- explain any permission-to-access paperwork that applies, and\n"
-        "- go over our pre-planning guide together.\n\n"
-        "We can meet at Restland, or I'm happy to come to your home if that's more convenient.\n\n"
+        "This is {primary_contact_name}, Family Service Advisor at {location_name}. It's been a while since we "
+        "reviewed your file, and I'd like to get you in this week for a Family File Review to make sure "
+        "everything is up to date.\n\n"
+        "When we meet, we'll:\n\n"
+        "- confirm the information in your file is current,\n"
+        "- go over any permission-to-access paperwork that applies, and\n"
+        "- get you a Personal Planning Guide if you haven't received one.\n\n"
+        "It takes about 45 minutes at our office, 13005 Greenville Ave, Dallas. {time_offer}\n\n"
         "{booking_line}"
-        "Or simply reply to this email with a day that works for you.\n\n" + _SIG),
-    2: ("What happens at a Family File Review",
+        "Or just reply with a day that works for you.\n\n" + _SIG),
+    2: ("A time for your file review, {first_name}",
         "Hi {first_name},\n\n"
-        "A quick note on what to expect when we meet. We'll sit down together for about 45 minutes, look over "
-        "the information in your family's file at {location_name}, and make sure it's accurate and up to date.\n\n"
-        "To prepare, it helps to have any Restland paperwork you've kept at home and a list of any questions. "
-        "Nothing else is needed, and you're welcome to bring a family member.\n\n"
+        "I wanted to follow up on reviewing your file at {location_name}. It's a short sit-down at our office "
+        "on Greenville Ave, and I'll have your Personal Planning Guide ready for you.\n\n"
+        "{time_offer}\n\n"
         "{booking_line}"
-        "If you'd rather, reply with a day and time and I'll set it up.\n\n" + _SIG),
-    3: ("What we'll cover at your Family File Review",
+        "Reply with what works and I'll set it up.\n\n" + _SIG),
+    3: ("Keeping your Restland file current",
         "Hi {first_name},\n\n"
-        "Two things we'll cover when we meet:\n\n"
-        "Your family's file at {location_name}. We'll review it with you and explain any "
-        "permission-to-access paperwork that applies.\n\n"
-        "Our pre-planning guide. We'll go over it together, at your pace, and answer any questions.\n\n"
+        "Families' details change over the years, so I'd like to make sure the information in your file at "
+        "{location_name} is current and go over any permission-to-access paperwork that applies.\n\n"
+        "If it's hard to come in, I'm happy to meet you at your home instead. Just reply and tell me.\n\n"
         "{booking_line}"
-        "Reply here with any questions, or with a day that suits you.\n\n" + _SIG),
-    4: ("Still glad to find a time, {first_name}",
+        "Reply with a day that works this week.\n\n" + _SIG),
+    4: ("Your Personal Planning Guide, {first_name}",
         "Hi {first_name},\n\n"
-        "A brief reminder that I'd be glad to meet for your Family File Review, at Restland or at your home, "
-        "any day of the week.\n\n"
+        "This is my last note for now. I'd still like to sit down with you, review your file and get you your "
+        "Personal Planning Guide. We can meet at our office on Greenville Ave, or at your home if that's "
+        "easier.\n\n"
         "{booking_line}"
-        "Or reply with a day that works and I'll take care of the rest.\n\n" + _SIG),
+        "Reply with a day that works and I'll take care of the rest.\n\n" + _SIG),
 }
 
 # A family returning after the 30-day rest: acknowledges we wrote before.
@@ -167,7 +177,9 @@ def schedule_summary() -> Dict:
         days.setdefault(d + 1, []).append("email %d" % n)
     return {"days": [{"day": k, "touches": v} for k, v in sorted(days.items())],
             "texts": len(SMS_STEPS), "emails": len(EMAIL_STEPS), "span_days": 14,
-            "window": "9:00 AM - 6:00 PM Central, every day", "cooldown_days": COOLDOWN_DAYS}
+            "window": "8:30 AM - 6:00 PM Central, every day",
+            "slots": "a new family's first text at 8:30 AM and every 8 minutes; a due follow-up 2 minutes after each",
+            "cooldown_days": COOLDOWN_DAYS}
 
 
 # ── volume forecast (Issue #507, Nov 7 correction) ──────────────────────────

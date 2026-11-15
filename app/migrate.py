@@ -261,6 +261,21 @@ def main(argv=None) -> int:
                         for _i in range(0, max(len(_txt), 1), 3000):
                             log.info("workspace probe org=%s part=%s[%d]: %s", org_id, _part, _i // 3000,
                                      _txt[_i:_i + 3000])
+                elif mode in ("launch", "readback"):
+                    # Issue #507 (Nov 15): Restland File Review launch - the text
+                    # slot schedule, copy, audience, approval, journey start.
+                    # Sends nothing itself. "readback" only reads.
+                    from app.services.programs import restland_launch as _rl
+                    if mode == "launch":
+                        res = _rl.launch(_db, org, key,
+                                         booking_user_id=os.environ.get("WORKSPACE_BOOKING_USER_ID", "").strip() or None,
+                                         calendar_user_id=os.environ.get("WORKSPACE_CALENDAR_USER_ID", "").strip() or None,
+                                         start_local=os.environ.get("WORKSPACE_LAUNCH_AT", "").strip() or "2026-11-16T08:30")
+                    else:
+                        res = {"summary": {"readback": _rl.readback(_db, org)}}
+                    _txt = json.dumps(res, sort_keys=True, default=str)
+                    for _i in range(0, max(len(_txt), 1), 3000):
+                        log.info("workspace %s org=%s part[%d]: %s", mode, org_id, _i // 3000, _txt[_i:_i + 3000])
                 elif mode == "rollback":
                     from app.models.reset_models import WorkspaceResetRun as _Run
                     _r = _db.query(_Run).filter_by(id=key, organization_id=org_id).first()

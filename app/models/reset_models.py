@@ -185,3 +185,26 @@ class AppointmentSurvey(Base):
     submitted_at = Column(DateTime, nullable=True)
     task_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class OutreachTextSlot(Base):
+    """ONE sending moment on a program's text schedule (Issue #507, Nov 15).
+
+    Restland's schedule is a grid: a new family's first text at 8:30 AM Central
+    and every 8 minutes after; a due follow-up text in its own slot 2 minutes
+    after each of those. A slot carries at most one text - the unique
+    (organization_id, slot_at) constraint is the guarantee, even with two
+    runners. A follow-up that finds its slot taken waits for the next free
+    follow-up slot; nothing is sent early or stacked."""
+    __tablename__ = "outreach_text_slots"
+    id = Column(String, primary_key=True, default=_uuid)
+    organization_id = Column(String, nullable=False)
+    slot_at = Column(DateTime, nullable=False)          # naive UTC
+    kind = Column(String, nullable=False)                # new | followup
+    cadence_state_id = Column(String, nullable=False)
+    lead_id = Column(String, nullable=True)
+    touch_number = Column(Integer, nullable=False)
+    status = Column(String, nullable=False, default="reserved")   # reserved | used | released
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    __table_args__ = (UniqueConstraint("organization_id", "slot_at", name="uq_outreach_text_slot"),
+                      Index("ix_outreach_slots_state", "cadence_state_id", "touch_number"))

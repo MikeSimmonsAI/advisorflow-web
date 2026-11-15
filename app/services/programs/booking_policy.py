@@ -335,3 +335,47 @@ def _open_off_grid(db, user, booking, policy, busy_reader) -> bool:
     if err:
         return False
     return not any(s0 < be and bs < s1 for bs, be in busy or [])
+
+
+# ── two real openings for an outreach message (Issue #507, Nov 15) ──────────
+
+def open_times(db: Session, advisor, policy: Dict, *, count: int = 2, days: int = 7,
+               now_local: Optional[datetime] = None, busy_reader=None) -> List[datetime]:
+    """The next `count` start times this person really has open (calendar
+    read, failing closed), preferring different days. [] when the calendar
+    cannot be read or nothing is open in the next `days` days - the message
+    then asks what day works instead of naming times."""
+    now_local = now_local or _today_central()
+    picked: List[datetime] = []
+    spare: List[datetime] = []
+    for i in range(days + 1):
+        d = (now_local + timedelta(days=i)).date()
+        res = day_slots(db, advisor, d, policy, now_local=now_local, busy_reader=busy_reader)
+        if res.get("calendar_error"):
+            return []
+        slots = [datetime.strptime(s, "%Y-%m-%dT%H:%M:00") for s in (res.get("slots") or [])]
+        if slots:
+            picked.append(slots[0])
+            spare.extend(slots[1:])
+        if len(picked) >= count:
+            break
+    out = picked[:count]
+    for s in spare:
+        if len(out) >= count:
+            break
+        out.append(s)
+    return sorted(out)[:count]
+
+
+def say_time(t: datetime) -> str:
+    """"Tuesday, Nov 17 at 10:00 AM"."""
+    return "%s at %s" % (t.strftime("%A, %b %-d"), t.strftime("%-I:%M %p"))
+
+
+def time_offer(db: Session, advisor, policy: Dict, channel: str = "sms", **kw) -> str:
+    """One sentence offering two verified times, or asking for a day."""
+    times = open_times(db, advisor, policy, **kw) if advisor is not None and policy else []
+    if len(times) >= 2:
+        return ("I have %s or %s open at our office. Would either of those work?"
+                % (say_time(times[0]), say_time(times[1])))
+    return "What day this week works for you to come by?"

@@ -115,7 +115,11 @@ def calendar_probe(user: Optional[User]) -> Dict:
                                  timeMax=(now + timedelta(days=1)).isoformat(), maxResults=1,
                                  singleEvents=True).execute()
         acct = (resp.get("summary") or "").strip().lower()
+        from app.services.calendar_service import calendar_owner
+        owner = calendar_owner(user)
         out = dict(out, read_ok=True, calendar_timezone=resp.get("timeZone"),
+                   events_access_role=resp.get("accessRole"),
+                   via_shared_account=owner is not user,
                    account_matches_login=bool(acct) and acct == (user.email or "").lower(),
                    destination=acct or None)
         try:

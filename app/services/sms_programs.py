@@ -311,6 +311,27 @@ PROGRAM_TEXTS_OFF_REFUSAL = (
     "and the owner switches texts on for this workspace. Email and in-app work continue.")
 
 
+def program_content_allowance(db, lead) -> Dict[str, bool]:
+    """A non-SCI outreach program (Restland, Issue #507) texting from its own
+    organization number: links and phone numbers follow THAT sender's entry
+    in the registry. {} (platform default) for everyone else."""
+    from app.services import sms_campaigns
+    org_id = getattr(lead, "organization_id", None)
+    if not org_id or not is_program_org(db, org_id):
+        return {}
+    try:
+        from app.models.models import Organization
+        org = db.query(Organization).filter(Organization.id == org_id).first()
+        number = getattr(org, "org_twilio_phone_number", None) if org else None
+    except Exception:                                    # noqa: BLE001
+        return {}
+    entry = sms_campaigns.for_sender(number) if number else None
+    if not sms_campaigns.is_approved(entry):
+        return {}
+    f = sms_campaigns.features(entry)
+    return {"allow_links": f["links"], "allow_phone": f["phone"]}
+
+
 def program_text_refusal(db, lead) -> Optional[str]:
     """For a family of a NON-SCI outreach program: the reason no text may go
     out, or None. SCI has its own, stricter gate (sci_send_refusal); every
@@ -428,8 +449,10 @@ def content_allowance(db, lead) -> Dict[str, bool]:
     Only when the SCI sender is approved, lists SCI, and covers the message's
     category. {} for everyone else (the platform default - CO3YNIF - applies)."""
     from app.services import sms_campaigns
-    if lead is None or not is_sci_org(db, getattr(lead, "organization_id", None)):
+    if lead is None:
         return {}
+    if not is_sci_org(db, getattr(lead, "organization_id", None)):
+        return program_content_allowance(db, lead)
     entry = sci_sender_entry()
     ok = (sms_campaigns.is_approved(entry) and SCI in (entry.get("programs") or [])
           and sms_campaigns.scope_allows(entry, message_category(db, lead)))
