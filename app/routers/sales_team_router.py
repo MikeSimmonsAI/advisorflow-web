@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -124,7 +124,9 @@ def my_onboarding(user: User = Depends(get_current_user), db: Session = Depends(
     rec = _own(db, user)
     return Response(content=__import__("json").dumps(
         {"application": onb.application(rec), "checklist": onb.checklist(db, rec, with_file_names=True),
-         "fields": onb.APPLICATION_LABELS}),
+         "fields": onb.APPLICATION_LABELS,
+         "journey": __import__("app.services.sales_contractor", fromlist=["x"]).journey(db, rec, user),
+         "documents": __import__("app.services.sales_contractor", fromlist=["x"]).documents(db, rec, with_files=False)}),
         media_type="application/json", headers=_NO_STORE)
 
 
@@ -175,7 +177,9 @@ def onboarding_detail(onboarding_id: str, user: User = Depends(get_current_user)
 
 @router.post("/onboarding/{onboarding_id}/approve")
 def approve(onboarding_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services import sales_contractor as sc
     rec = _admin_record(db, user, onboarding_id)
+    sc.before_approval(db, rec, user)
     onb.approve(db, rec, user)
     db.commit()
     return {"ok": True}
@@ -186,12 +190,15 @@ class SendBackIn(BaseModel):
 
 
 @router.post("/onboarding/{onboarding_id}/send-back")
-def send_back(onboarding_id: str, body: SendBackIn, user: User = Depends(get_current_user),
+def send_back(onboarding_id: str, body: SendBackIn, request: Request, user: User = Depends(get_current_user),
               db: Session = Depends(get_db)):
+    from app.services import sales_contractor as sc
     rec = _admin_record(db, user, onboarding_id)
     onb.send_back(db, rec, user, body.note or "")
+    db.flush()
+    emailed = sc.notify_corrections(db, user, rec, _base_url(request))
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "email_sent": emailed, "corrections": sc.corrections(db, rec)}
 
 
 @router.get("/onboarding/{onboarding_id}/documents/{document_id}")
@@ -269,3 +276,196 @@ def pricing(db: Session = Depends(get_db), user: User = Depends(get_current_user
                           "only as a new rules version, so every saved quote and earned record keeps "
                           "the version it was made under."),
     }
+
+# ── contractor onboarding: invites, review, agreement signing ────────────────
+
+def _base_url(request: Optional[Request]) -> Optional[str]:
+    """Where links in onboarding emails point: the EvoSys Pro app (the people
+    who get them open them in the app, never on the API host)."""
+    import os
+    return (os.environ.get("EVOSYS_APP_URL") or "https://app.evosyspro.live").rstrip("/")
+
+
+def _ip(request: Request) -> Optional[str]:
+    fwd = request.headers.get("x-forwarded-for", "")
+    return (fwd.split(",")[0].strip() or (request.client.host if request.client else None)) or None
+
+
+@router.post("/members/{user_id}/resend-invite")
+def resend_invite(user_id: str, request: Request, user: User = Depends(get_current_user),
+                  db: Session = Depends(get_db)):
+    from app.services import sales_contractor as sc
+    return sc.resend_invite(db, user, user_id, _base_url(request))
+
+
+class ReviewIn(BaseModel):
+    status: str
+    note: Optional[str] = None
+
+
+@router.post("/onboarding/{onboarding_id}/documents/{document_id}/review")
+def review_document(onboarding_id: str, document_id: str, body: ReviewIn,
+                    user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services import sales_contractor as sc
+    rec = _admin_record(db, user, onboarding_id)
+    return sc.review_document(db, user, rec, document_id, body.status, body.note)
+
+
+class TemplateIn(BaseModel):
+    title: str
+    version_label: str
+    exhibit_version: str
+    body_text: str
+    requires_countersign: bool = False
+
+
+class ApproveTemplateIn(BaseModel):
+    approved_for_signing: bool = False
+
+
+@router.get("/agreement-templates")
+def list_templates(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services import sales_contractor as sc
+    return {"templates": sc.list_templates(db, user)}
+
+
+@router.post("/agreement-templates")
+def create_template(body: TemplateIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services import sales_contractor as sc
+    return sc.create_template(db, user, title=body.title, version_label=body.version_label,
+                              exhibit_version=body.exhibit_version, body_text=body.body_text,
+                              requires_countersign=body.requires_countersign)
+
+
+@router.post("/agreement-templates/{template_id}/approve")
+def approve_template(template_id: str, body: ApproveTemplateIn, user: User = Depends(get_current_user),
+                     db: Session = Depends(get_db)):
+    from app.services import sales_contractor as sc
+    return sc.approve_template(db, user, template_id, body.approved_for_signing)
+
+
+@router.post("/agreement-templates/{template_id}/retire")
+def retire_template(template_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services import sales_contractor as sc
+    return sc.retire_template(db, user, template_id)
+
+
+class SendAgreementIn(BaseModel):
+    template_id: str
+
+
+@router.post("/onboarding/{onboarding_id}/send-agreement")
+def send_agreement(onboarding_id: str, body: SendAgreementIn, request: Request,
+                   user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services import sales_contractor as sc
+    rec = _admin_record(db, user, onboarding_id)
+    return sc.send_agreement(db, user, rec, body.template_id, _base_url(request))
+
+
+class NoteIn(BaseModel):
+    note: str = ""
+
+
+class SignIn(BaseModel):
+    typed_name: str = ""
+    consent: bool = False
+
+
+@router.post("/onboarding/{onboarding_id}/agreement-correction")
+def owner_agreement_correction(onboarding_id: str, body: NoteIn, user: User = Depends(get_current_user),
+                               db: Session = Depends(get_db)):
+    from app.services import sales_contractor as sc
+    rec = _admin_record(db, user, onboarding_id)
+    return sc.request_agreement_correction(db, user, rec, body.note)
+
+
+@router.post("/onboarding/{onboarding_id}/agreement-countersign")
+def countersign(onboarding_id: str, body: SignIn, request: Request, user: User = Depends(get_current_user),
+                db: Session = Depends(get_db)):
+    from app.services import sales_contractor as sc
+    rec = _admin_record(db, user, onboarding_id)
+    return sc.countersign(db, user, rec, body.typed_name, _ip(request))
+
+
+@router.get("/onboarding/{onboarding_id}/signed-agreement")
+def owner_signed_copy(onboarding_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services import sales_contractor as sc
+    rec = _admin_record(db, user, onboarding_id)
+    data = sc.signed_copy(db, user, rec)
+    return Response(content=data, media_type="application/pdf",
+                    headers={**_NO_STORE, "Content-Disposition": 'attachment; filename="signed-agreement.pdf"',
+                             "X-Content-Type-Options": "nosniff"})
+
+
+@router.get("/onboarding/{onboarding_id}/journey")
+def owner_journey(onboarding_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services import sales_contractor as sc
+    rec = _admin_record(db, user, onboarding_id)
+    person = db.query(User).filter(User.id == rec.user_id).first()
+    return Response(content=__import__("json").dumps({
+        **sc.journey(db, rec, person), "documents": sc.documents(db, rec, with_files=True),
+        "application": onb.application(rec), "onboarding_id": rec.id,
+        "account": sc.account_status(db, person)}),
+        media_type="application/json", headers=_NO_STORE)
+
+
+@router.get("/onboarding/me/agreement")
+def my_agreement(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services import sales_contractor as sc
+    rec = _own(db, user)
+    env = sc.current_envelope(db, rec)
+    if env is not None and env.status == "sent":
+        sc.mark_viewed(db, rec, env)
+    from app.services.evosys_esign import CONSENT_TEXT
+    return Response(content=__import__("json").dumps({"agreement": sc.envelope_out(env, with_html=True),
+                                                      "consent_text": CONSENT_TEXT,
+                                                      "legal_name": rec.legal_name}),
+                    media_type="application/json", headers=_NO_STORE)
+
+
+@router.post("/onboarding/me/agreement/sign")
+def my_sign(body: SignIn, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services import sales_contractor as sc
+    rec = _own(db, user)
+    return sc.sign(db, user, rec, typed_name=body.typed_name, consent=body.consent,
+                   ip=_ip(request), ua=request.headers.get("user-agent"))
+
+
+@router.post("/onboarding/me/agreement/correction")
+def my_agreement_correction(body: NoteIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services import sales_contractor as sc
+    rec = _own(db, user)
+    return sc.request_agreement_correction(db, user, rec, body.note)
+
+
+@router.get("/onboarding/me/agreement/document")
+def my_agreement_document(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """The agreement as sent (before signing), to read offline or keep."""
+    from app.services import sales_contractor as sc
+    rec = _own(db, user)
+    env = sc.current_envelope(db, rec)
+    if env is None:
+        raise HTTPException(status_code=404, detail="No agreement has been sent to you yet.")
+    return Response(content="<!doctype html><meta charset=utf-8><title>%s</title>%s" % (env.title, env.document_html),
+                    media_type="text/html",
+                    headers={**_NO_STORE, "Content-Disposition": 'attachment; filename="contractor-agreement.html"',
+                             "X-Content-Type-Options": "nosniff"})
+
+
+@router.get("/onboarding/me/agreement/signed-copy")
+def my_signed_copy(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services import sales_contractor as sc
+    rec = _own(db, user)
+    data = sc.signed_copy(db, user, rec)
+    db.commit()
+    return Response(content=data, media_type="application/pdf",
+                    headers={**_NO_STORE, "Content-Disposition": 'attachment; filename="signed-agreement.pdf"',
+                             "X-Content-Type-Options": "nosniff"})
+
+
+
+@router.get("/getting-started")
+def getting_started(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """This salesperson's own path from approval to their first paid sale."""
+    from app.services import sales_getting_started as gs
+    return gs.steps_for(db, user)
