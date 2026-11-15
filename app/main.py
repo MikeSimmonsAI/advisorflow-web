@@ -1268,6 +1268,10 @@ from app.routers.volt_router import rep_router as volt_rep_router  # noqa: E402
 app.include_router(volt_public_router)   # /volt/public/{slug}/* - VOLT Marketing applicant portal (#535)
 app.include_router(volt_rep_router)      # /volt/rep/{slug}/* - VOLT applicants (volt_rep fenced in deps)
 app.include_router(volt_ops_router)      # /volt/ops/{org_id}/* - VOLT recruiting staff + owner
+# VOLT Google Sheets mirror: queue every lead/application change in its own
+# transaction (no Google call in any request; see sheets_outbox).
+from app.services.volt import sheets_outbox as _volt_sheets_outbox  # noqa: E402
+_volt_sheets_outbox.register_listeners()
 from app.routers.volt_dev_router import api as volt_dev_api_router  # noqa: E402
 from app.routers.volt_dev_router import console as volt_dev_console_router  # noqa: E402
 from app.routers.volt_dev_router import runner as volt_dev_runner_router  # noqa: E402
@@ -1921,6 +1925,62 @@ async def _web_push_loop():
         except Exception as exc:                               # noqa: BLE001
             _logger.error("web_push error: %s", exc, exc_info=True)
         await asyncio.sleep(20)
+
+
+async def _volt_sheets_loop():
+    """VOLT Google Sheets mirror (#571, PR #620): drains the outbox that every
+    lead/application change fills (app/services/volt/sheets_outbox.py).
+
+    Every 15 seconds while there is work, one instance at a time (lease plus a
+    database advisory lock inside sync_pass); a check-in every hour while
+    idle, so the ledger neither fills up nor reads as stopped. Every 30
+    minutes an incremental reconciliation re-queues any recent change whose
+    mirror is behind. Does nothing unless VOLT_SHEETS_SYNC_ENABLED=on and
+    VOLT_SHEETS_ORG_ID is set. Talks only to the Google Sheets API.
+    """
+    from app.services.job_run_service import record_job_run
+    from app.models.job_models import JobName
+    from app.deps import SessionLocal
+    from app.services.volt import sheets_outbox as _so
+    import logging as _log
+    import time as _time
+    _logger = _log.getLogger("volt_sheets_loop")
+    await asyncio.sleep(50)  # startup delay - offset from the other loops
+    _last_logged = 0.0
+    _last_reconcile = 0.0
+    while True:
+        try:
+            def _work() -> bool:
+                db = SessionLocal()
+                try:
+                    return _so.has_work(db)
+                finally:
+                    db.close()
+            _due_checkin = (_time.monotonic() - _last_logged) >= 3600
+            _due_reconcile = (_time.monotonic() - _last_reconcile) >= 1800
+            if _so.enabled() and _so.approved_org() and (_due_checkin or _due_reconcile or await _off_loop(_work)) \
+                    and await _pass_claimed(JobName.VOLT_SHEETS, 15):
+                _last_logged = _time.monotonic()
+                async with record_job_run(JobName.VOLT_SHEETS, db_factory=SessionLocal) as _m:
+                    def _one_pass():
+                        db = SessionLocal()
+                        try:
+                            out = {}
+                            if _due_reconcile:
+                                org = _so.approved_org()
+                                out["reconciled"] = sum(_so.reconcile(db, org, b) for b in _so.BUSINESSES)
+                                db.commit()
+                            out.update(_so.sync_pass(db))
+                            return out
+                        finally:
+                            db.close()
+                    report = await _off_loop(_one_pass)
+                    if _due_reconcile:
+                        _last_reconcile = _time.monotonic()
+                    _m.update(report)
+        except Exception as exc:                               # noqa: BLE001
+            _logger.error("volt sheets loop error: %s", type(exc).__name__)
+        await asyncio.sleep(15)
 
 
 async def _ai_workforce_worker_loop():
@@ -2685,6 +2745,7 @@ async def on_startup():
         JobName.PROGRAM_SLA:          _program_sla_loop,
         JobName.WEB_PUSH:             _web_push_loop,
         JobName.VOLT_DEV_RELAY:       _volt_dev_relay_loop,
+        JobName.VOLT_SHEETS:          _volt_sheets_loop,
         JobName.AI_WORKFORCE_WORKER:  _ai_workforce_worker_loop,
         JobName.ACQUISITION_WORKFORCE: _acquisition_workforce_loop,
     }

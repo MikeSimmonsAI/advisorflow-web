@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from fastapi import APIRouter, Body, Depends, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.deps import get_current_user, get_db
@@ -14,6 +14,7 @@ from app.limiter import limiter
 from app.models.models import User
 from app.services.volt import common as C
 from app.services.volt import lead_sources as S
+from app.services.volt import sheets_outbox as SO
 from app.services.volt import leads as L
 
 public_router = APIRouter()
@@ -90,6 +91,87 @@ def ops_leads_clear_test(org_id: str, db: Session = Depends(get_db), user: User 
     out = L.clear_test(db, user, org_id)
     db.commit()
     return out
+
+
+@ops_router.get("/{org_id}/leads/export.csv")
+def ops_leads_csv(org_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Consumer Leads CSV: exactly the leads this person may see (agents: their
+    own), with the same filters as the inbox plus a date range. UTF-8 with a
+    byte-order mark (opens correctly in Excel), formula-safe cells, audited."""
+    from fastapi.responses import Response
+    params = dict(request.query_params)
+    body, count = L.csv_export(db, user, org_id, params)
+    C.audit(db, org_id, user, "export", "consumer_leads", "lead_csv_export", new=str(count),
+            reason=",".join("%s=%s" % (k, v) for k, v in sorted(params.items()) if k != "q")[:500] or None)
+    db.commit()
+    name = "consumer-leads%s.csv" % ("-TEST-DATA" if L.is_test_param(params) else "")
+    return Response(content=body, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="%s"' % name, "Cache-Control": "no-store"})
+
+
+@ops_router.get("/{org_id}/sheets/status")
+def ops_sheets_status(org_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    SO.require_operator(db, user, org_id)
+    return SO.status(db, org_id)
+
+
+def _sheets_business(business: str) -> str:
+    if business not in SO.BUSINESSES:
+        raise HTTPException(status_code=404, detail="Unknown business.")
+    return business
+
+
+def _sheets_org(org_id: str) -> None:
+    if SO.approved_org() != org_id:
+        raise HTTPException(status_code=409, detail="Google Sheets export is not approved for this organization.")
+
+
+@ops_router.post("/{org_id}/sheets/{business}/retry")
+def ops_sheets_retry(org_id: str, business: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    SO.require_operator(db, user, org_id)
+    _sheets_org(org_id)
+    n = SO.retry_failed(db, org_id, _sheets_business(business))
+    C.audit(db, org_id, user, "google_sheets", business, "retry_failed", new=str(n))
+    db.commit()
+    return {"requeued": n}
+
+
+@ops_router.post("/{org_id}/sheets/{business}/reconcile")
+def ops_sheets_reconcile(org_id: str, business: str, body: Dict[str, Any] = Body(default={}),
+                         db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Re-queue records whose Sheet row may be behind. full=true (every real
+    record - the first backfill) is the owner's decision only."""
+    SO.require_operator(db, user, org_id)
+    _sheets_org(org_id)
+    full = body.get("full") is True
+    if full and C.staff_access(db, user, org_id) != "owner":
+        raise HTTPException(status_code=403, detail="Only the owner can copy every existing record into the Sheet.")
+    n = SO.reconcile(db, org_id, _sheets_business(business), full=full)
+    C.audit(db, org_id, user, "google_sheets", business, "reconcile_full" if full else "reconcile", new=str(n))
+    db.commit()
+    return {"queued": n, "full": full}
+
+
+@ops_router.post("/{org_id}/sheets/{business}/verify")
+def ops_sheets_verify(org_id: str, business: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    SO.require_operator(db, user, org_id)
+    _sheets_org(org_id)
+    out = SO.verify_now(db, org_id, _sheets_business(business))
+    C.audit(db, org_id, user, "google_sheets", business, "verify", new="ok" if out["ok"] else out["category"])
+    db.commit()
+    return out
+
+
+@ops_router.post("/{org_id}/sheets/{business}/pause")
+def ops_sheets_pause(org_id: str, business: str, body: Dict[str, Any] = Body(...), db: Session = Depends(get_db),
+                     user: User = Depends(get_current_user)):
+    SO.require_operator(db, user, org_id)
+    _sheets_org(org_id)
+    paused = body.get("paused") is True
+    SO.set_paused(db, org_id, _sheets_business(business), paused)
+    C.audit(db, org_id, user, "google_sheets", business, "paused" if paused else "resumed")
+    db.commit()
+    return SO.status(db, org_id)
 
 
 @ops_router.get("/{org_id}/leads/sources")

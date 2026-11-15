@@ -13,6 +13,7 @@ import { Bolt } from './VoltPortal'
 import { Modal } from './VoltDialogs'
 import { zoomWhen } from './VoltMyApplication'
 import { ConsumerLeadsCard } from './VoltLeads'
+import SheetsPanel, { OpenSheetLink } from './SheetsPanel'
 import Development from './VoltDev'
 import { AcaAccessSettings, AcaApplicants, ApplicantExport, useApplicantExport } from './VoltApplicantAccess'
 import { fmtDate, useVoltTitle } from './voltApi'
@@ -184,6 +185,7 @@ function Overview({ orgId, ops }) {
         {kpis.map(([k, l]) => <button key={k} type="button" className="v-kpi" data-kpi={k} onClick={() => open(k)}><b>{o[k]}</b><span>{l}</span></button>)}
       </div>
       <ConsumerLeadsCard orgId={orgId} />
+      <SheetsPanel orgId={orgId} business="recruiting" isOwner={h.access === 'owner'} />
       <section className="v-panel">
         <h3>Referral performance{f.project_id ? ' · ' + (h.projects.find((p) => p.id === f.project_id)?.short_name || '') : ' · all projects'}</h3>
         <p className="v-small v-muted">{h.leaderboard.rule} Columns count distinct people credited to that recruiter for the project referral.</p>
@@ -230,7 +232,8 @@ function ReviewQueue({ orgId, ops }) {
   return (
     <>
       <div className="v-row"><h2 style={{ fontSize: 30, letterSpacing: '-.04em' }}>Review queue</h2>
-        <button type="button" className="v-btn v-btn--black" onClick={exportCsv} disabled={busy}>{busy ? 'Exporting…' : 'Export CSV ↓'}</button></div>
+        <span style={{ display: 'flex', gap: 8 }}><OpenSheetLink orgId={orgId} business="recruiting" className="v-btn v-btn--line" />
+          <button type="button" className="v-btn v-btn--black" onClick={exportCsv} disabled={busy}>{busy ? 'Exporting…' : 'Export CSV ↓'}</button></span></div>
       {exportOptions && <ApplicantExport orgId={orgId} filters={clean(f)} options={exportOptions} />}
       <Filters projects={projects} f={f} set={(x) => setSp(clean(x))} showStage showReached />
       <label className="v-check" style={{ margin: '0 0 8px' }}><input type="checkbox" checked={f.include_archived === '1'}
