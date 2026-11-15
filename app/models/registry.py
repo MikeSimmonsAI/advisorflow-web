@@ -609,3 +609,5 @@ import app.models.volt_leads_models  # noqa: F401  (imported for side effects)
 import app.models.reset_models  # noqa: F401,E402  (imported for side effects)
 # EvoSys Pro sales team: onboarding, departures, per-deal credit, unclaimed shares.
 import app.models.sales_team_models  # noqa: F401,E402  (imported for side effects)
+# Program Access launcher: per-account pinned workspaces (preference only).
+import app.models.launcher_models  # noqa: F401,E402  (imported for side effects)

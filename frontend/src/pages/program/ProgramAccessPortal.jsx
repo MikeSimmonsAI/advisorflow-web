@@ -4,7 +4,6 @@ import './ProgramAccessPortal.css'
 import { programCards, isBookaBoostBrand } from './programAccessModel'
 import BookaBoostProgramAccess from './BookaBoostProgramAccess'
 import WorkspaceCard from '../../design/WorkspaceCard'
-import PlatformArt from '../../design/art/PlatformArt'
 import { api, getCurrentUser, logout } from '../../api/client'
 
 /**
@@ -30,14 +29,6 @@ function initials(name) {
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
 }
 
-const POINTS = [
-  { k: 'login', t: 'One secure login', d: 'A single sign-in for every business you are authorized to run.',
-    icon: <path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z" /> },
-  { k: 'env', t: 'Separate business environments', d: 'Each program opens in its own dedicated workspace.',
-    icon: <path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" /> },
-  { k: 'data', t: 'Organized data and permissions', d: 'Records, teams and access stay inside their business.',
-    icon: <path d="M12 3l8 3v6c0 4.5-3.3 7.6-8 9-4.7-1.4-8-4.5-8-9V6zM8.5 12l2.5 2.5 4.5-5" /> },
-]
 
 /**
  * Which launcher look to wear is the SERVER's answer (/auth/my-contexts
@@ -52,6 +43,7 @@ export default function ProgramAccessPortal(props) {
 function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) {
   const { visible: workspaceCards, others, previews } = programCards(contexts)
   const [view, setView] = useState(readView)
+  const [query, setQuery] = useState('')
   const user = userProp !== undefined ? userProp : getCurrentUser()
   const personName = user?.full_name || user?.name || user?.email || ''
   const personEmail = user?.full_name && user?.email ? user.email : ''
@@ -70,6 +62,30 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
     return () => { active = false }
   }, [user?.id, ctxDeal])
   const dealAccess = ctxDeal || fetchedDeal
+
+  // PINS: this account's own preference, kept on the server. A pin only shows
+  // while the server still lists that card for this login (a removed grant
+  // removes the card). Pins never load = no Pinned row; cards still work.
+  const [pins, setPins] = useState([])
+  const [pinNote, setPinNote] = useState('')
+  useEffect(() => {
+    let active = true
+    api.get('/launcher/pins', { noOrgContext: true, skipRedirect: true })
+      .then(r => { if (active) setPins(Array.isArray(r?.keys) ? r.keys : []) })
+      .catch(() => { if (active) setPins([]) })
+    return () => { active = false }
+  }, [user?.id])
+
+  // NEEDS ATTENTION: up to three real items from the server. Any failure here
+  // hides the row and nothing else.
+  const [attention, setAttention] = useState([])
+  useEffect(() => {
+    let active = true
+    api.get('/launcher/attention', { noOrgContext: true, skipRedirect: true })
+      .then(r => { if (active) setAttention(Array.isArray(r?.items) ? r.items.slice(0, 3) : []) })
+      .catch(() => { if (active) setAttention([]) })
+    return () => { active = false }
+  }, [user?.id])
 
   const visible = [...workspaceCards]
   if (dealAccess?.executive) {
@@ -111,11 +127,49 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
   }
   const count = visible.length + others.length
 
+  const keyOf = item => cardKey(item)
+  const pinnedSet = new Set(pins)
+  const pinnedCards = pins.map(k => visible.find(c => keyOf(c) === k)).filter(Boolean)
+  const restCards = visible.filter(c => !pinnedSet.has(keyOf(c)))
+  const q = query.trim().toLowerCase()
+  const matches = item => [item.display, item.summary, item.kind, item.orgLabel, item.organization_name]
+    .some(t => t && String(t).toLowerCase().includes(q))
+  const found = q ? visible.filter(matches) : []
+  const foundOthers = q ? others.filter(w => matches({ display: w.organization_name })) : []
+  const foundPreviews = q ? previews.filter(matches) : []
+
+  const togglePin = (item) => {
+    const k = keyOf(item)
+    const before = pins
+    const next = pinnedSet.has(k) ? pins.filter(x => x !== k) : [...pins, k]
+    // Only keys of cards this login can see right now are saved.
+    const allowed = new Set(visible.map(keyOf))
+    const save = next.filter(x => allowed.has(x))
+    setPins(save)
+    setPinNote('')
+    api.put('/launcher/pins', { keys: save })
+      .then(r => { if (Array.isArray(r?.keys)) setPins(r.keys) })
+      .catch(() => { setPins(before); setPinNote('Could not save your pins. Try again.') })
+  }
+
   const choose = (v) => { setView(v); saveView(v) }
   const signOut = onSignOut || (async () => { await logout(); window.location.href = '/login' })
+  const openItem = item => item.type === 'deal_builder' ? item.href : undefined
+
+  const grid = (items, label, pinnable = true) => (
+    <div className={'pa-grid pa-grid--compact pa-grid--' + view} role="list" aria-label={label}>
+      {items.map(item => (
+        <div role="listitem" key={keyOf(item)}>
+          <WorkspaceCard item={item} onOpen={onChoose} layout={view} compact href={openItem(item)}
+                         pinned={pinnable && pinnedSet.has(keyOf(item))}
+                         onTogglePin={pinnable ? togglePin : undefined} />
+        </div>
+      ))}
+    </div>
+  )
 
   return (
-    <div className="ev-ds pa-portal">
+    <div className="ev-ds pa-portal pa-portal--compact">
       <header className="pa-top">
         <div className="ev-container pa-top-inner">
           <div className="pa-brand">
@@ -140,34 +194,21 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
         </div>
       </header>
 
-      <main>
-        <section className="pa-hero" aria-labelledby="pa-title">
-          <div className="ev-container pa-hero-inner">
-            <div className="pa-hero-copy">
-              <p className="ev-eyebrow">Program access{personName ? ' · ' + personName.split(/\s+/)[0] : ''}</p>
-              <h1 id="pa-title">Choose your <span>business.</span></h1>
-              <p className="pa-lead">One login. Separate operations. Open a program to work inside its own dedicated environment.</p>
-              <ul className="pa-points">
-                {POINTS.map(p => (
-                  <li key={p.k}>
-                    <span className="pa-point-icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{p.icon}</svg>
-                    </span>
-                    <span><b>{p.t}</b><small>{p.d}</small></span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className="pa-hero-art"><PlatformArt /></div>
+      <main className="ev-container pa-work" aria-labelledby="pa-title">
+        <div className="pa-head">
+          <div>
+            <h1 id="pa-title">Choose your <span>business.</span></h1>
+            <p>{count === 0 ? 'No workspaces assigned yet' : count + (count === 1 ? ' business' : ' businesses') + ' available to this login'}</p>
           </div>
-        </section>
-
-        <section className="ev-container pa-work" aria-labelledby="pa-work-title">
-          <div className="pa-toolbar">
-            <div>
-              <h2 id="pa-work-title">Your workspaces</h2>
-              <p>{count === 0 ? 'No workspaces assigned yet' : count + (count === 1 ? ' business' : ' businesses') + ' available to this login'}</p>
-            </div>
+          <div className="pa-tools">
+            {(visible.length + others.length + previews.length) > 0 && (
+              <label className="pa-search">
+                <span className="pa-sr">Search your programs</span>
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M11 4a7 7 0 1 0 4.4 12.4L20 21M11 4a7 7 0 0 1 0 14" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" /></svg>
+                <input type="search" value={query} onChange={e => setQuery(e.target.value)}
+                       placeholder="Search programs" aria-label="Search your programs" />
+              </label>
+            )}
             {visible.length > 1 && (
               <div className="pa-viewtoggle" role="group" aria-label="Layout">
                 <button type="button" aria-pressed={view === 'grid'} onClick={() => choose('grid')}>
@@ -181,22 +222,16 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
               </div>
             )}
           </div>
+        </div>
+        {pinNote && <p className="pa-note" role="status">{pinNote}</p>}
 
-          {visible.length > 0 && (
-            <div className={'pa-grid pa-grid--' + view + ' pa-grid--n' + Math.min(visible.length, 5)} role="list" aria-label="Your programs">
-              {visible.map(item => (
-                <div role="listitem" key={item.type + ':' + item.organization_id + ':' + (item.key || '')}>
-                  <WorkspaceCard item={item} onOpen={onChoose} layout={view} href={item.type === 'deal_builder' ? item.href : undefined} />
-                </div>
-              ))}
-            </div>
-          )}
-
-          {others.length > 0 && (
-            <section className="pa-others" aria-labelledby="pa-others-title">
-              <h2 id="pa-others-title">Other authorized workspaces</h2>
-              <div className="pa-others-list">
-                {others.map(w => (
+        {q ? (
+          <section className="pa-section" aria-labelledby="pa-search-title">
+            <h2 id="pa-search-title">Results for “{query.trim()}”</h2>
+            {found.length > 0 && grid(found, 'Matching programs')}
+            {foundOthers.length > 0 && (
+              <div className="pa-others-list pa-others-list--found">
+                {foundOthers.map(w => (
                   <button type="button" key={w.organization_id} onClick={() => onChoose(w)}>
                     <span className="pa-others-mark" aria-hidden="true">{initials(w.organization_name)}</span>
                     <span className="pa-others-name">{w.organization_name}</span>
@@ -204,37 +239,103 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
                   </button>
                 ))}
               </div>
-            </section>
-          )}
-
-          {previews.length > 0 && (
-            <section className="pa-previews" aria-labelledby="pa-previews-title">
-              <div className="pa-toolbar">
-                <div>
-                  <h2 id="pa-previews-title">Previews</h2>
-                  <p>Demos built for prospects who are not customers yet. Open one to see exactly what that prospect was shown.</p>
-                </div>
-              </div>
-              <div className={'pa-grid pa-grid--' + view + ' pa-grid--n' + Math.min(previews.length, 5)} role="list" aria-label="Previews">
-                {previews.map(item => (
+            )}
+            {foundPreviews.length > 0 && (
+              <div className={'pa-grid pa-grid--compact pa-grid--' + view} role="list" aria-label="Matching previews">
+                {foundPreviews.map(item => (
                   <div role="listitem" key={item.organization_id}>
-                    <WorkspaceCard item={item} onOpen={onChoose} layout={view} actionLabel="Open preview" href={item.href || item.url} />
+                    <WorkspaceCard item={item} onOpen={onChoose} layout={view} compact actionLabel="Open preview" href={item.href || item.url} />
                   </div>
                 ))}
               </div>
-            </section>
-          )}
+            )}
+            {!found.length && !foundOthers.length && !foundPreviews.length && (
+              <p className="pa-none">Nothing you can open matches that search.</p>
+            )}
+          </section>
+        ) : (
+          <>
+            {pinnedCards.length > 0 && (
+              <section className="pa-section" aria-labelledby="pa-pinned-title">
+                <h2 id="pa-pinned-title">Pinned</h2>
+                {grid(pinnedCards, 'Pinned workspaces')}
+              </section>
+            )}
 
-          {!visible.length && !others.length && !previews.length && (
-            <div className="pa-empty">
-              <b>No workspaces have been assigned to this account.</b>
-              <span>Ask your administrator to grant access to a program.</span>
-            </div>
-          )}
-        </section>
+            {attention.length > 0 && (
+              <section className="pa-attn" aria-labelledby="pa-attn-title">
+                <h2 id="pa-attn-title">Needs attention</h2>
+                <ul>
+                  {attention.map(a => (
+                    <li key={a.kind}>
+                      <a href={a.href}>
+                        <b>{a.title}</b>
+                        {a.detail && <span>{a.at ? formatWhen(a.at) + ' · ' : ''}{a.detail}</span>}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {restCards.length > 0 && (
+              <section className="pa-section" aria-labelledby="pa-work-title">
+                <h2 id="pa-work-title">{pinnedCards.length ? 'All programs' : 'Your programs'}</h2>
+                {grid(restCards, 'Your programs')}
+              </section>
+            )}
+
+            {others.length > 0 && (
+              <section className="pa-others" aria-labelledby="pa-others-title">
+                <h2 id="pa-others-title">Other authorized workspaces</h2>
+                <div className="pa-others-list">
+                  {others.map(w => (
+                    <button type="button" key={w.organization_id} onClick={() => onChoose(w)}>
+                      <span className="pa-others-mark" aria-hidden="true">{initials(w.organization_name)}</span>
+                      <span className="pa-others-name">{w.organization_name}</span>
+                      <span aria-hidden="true">→</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {previews.length > 0 && (
+              <section className="pa-previews" aria-labelledby="pa-previews-title">
+                <h2 id="pa-previews-title">Previews</h2>
+                <p className="pa-sub">Demos built for prospects who are not customers yet. Open one to see exactly what that prospect was shown.</p>
+                <div className={'pa-grid pa-grid--compact pa-grid--' + view} role="list" aria-label="Previews">
+                  {previews.map(item => (
+                    <div role="listitem" key={item.organization_id}>
+                      <WorkspaceCard item={item} onOpen={onChoose} layout={view} compact actionLabel="Open preview" href={item.href || item.url} />
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+          </>
+        )}
+
+        {!visible.length && !others.length && !previews.length && (
+          <div className="pa-empty">
+            <b>No workspaces have been assigned to this account.</b>
+            <span>Ask your administrator to grant access to a program.</span>
+          </div>
+        )}
       </main>
 
       <footer className="ev-container pa-foot">Each program keeps its own data, workflow and permissions.</footer>
     </div>
   )
+}
+
+/** Stable per-card key for pins: the same card always has the same key. */
+export function cardKey(item) {
+  return (item.type || 'workspace') + ':' + (item.organization_id || '') + ':' + (item.key || '')
+}
+
+function formatWhen(iso) {
+  try {
+    return new Date(iso).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })
+  } catch { return '' }
 }

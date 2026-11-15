@@ -42,7 +42,10 @@ test('cards still come only from the server list — the redesign adds no access
 
 test('the page renders cards from programCards(contexts) and never from a hard-coded list', () => {
   assert.match(portal, /programCards\(contexts\)/)
-  assert.match(portal, /visible\.map\(item =>/)
+  // Compact launcher (Nov 2026): cards are the server list split into pinned
+  // and the rest - never a hard-coded list.
+  assert.match(portal, /const visible = \[\.\.\.workspaceCards\]/)
+  assert.match(portal, /visible\.filter\(c => !pinnedSet\.has/)
   for (const name of ['Atlantis Light & Power', 'Service Corporation International', 'John Doe', 'EvoSys Pro Roofing'])
     assert.equal(portal.includes(name), false, 'hard-coded ' + name)
 })

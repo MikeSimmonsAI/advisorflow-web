@@ -1621,6 +1621,7 @@ export default function App() {
             Same record and same authority as the deal — a demo is a stage on
             the opportunity, not a thing of its own. */}
         <Route path="/sales/demos" element={<SalesRoute><DemoQueue /></SalesRoute>} />
+        <Route path="/sales/demo-requests" element={<SalesRoute><DemoQueue /></SalesRoute>} />
         <Route path="/sales/demo-build/:oppId" element={<SalesRoute><DemoBuild /></SalesRoute>} />
         <Route path="/sales/salespeople" element={<SalesRoute><Salespeople /></SalesRoute>} />
         <Route path="/leads" element={<ProtectedRoute feature="leads"><Leads /></ProtectedRoute>} />

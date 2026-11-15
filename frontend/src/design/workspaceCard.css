@@ -82,3 +82,39 @@
 .ev-wcard[data-variant="gold"] .ev-wcard-badge { background: linear-gradient(135deg, #10264a, #0a1a33); color: #dfbf6e; }
 .ev-wcard[data-variant="gold"] .ev-wcard-open { background: #0a1a33; }
 .ev-wcard[data-variant="gold"]:hover .ev-wcard-open { background: #8a6a1f; }
+
+/* ---- compact launcher card (Program Access) ---- */
+.ev-ccard {
+  position: relative; display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 68px;
+  padding: 12px 44px 12px 12px; background: var(--ev-surface); border: 1px solid var(--ev-line);
+  border-left: 3px solid var(--acc); border-radius: 12px; box-shadow: var(--ev-shadow-sm);
+  transition: box-shadow .15s ease, border-color .15s ease;
+}
+.ev-ccard:hover { box-shadow: var(--ev-shadow-md, var(--ev-shadow-sm)); border-color: color-mix(in srgb, var(--acc) 40%, var(--ev-line)); border-left-color: var(--acc); }
+.ev-ccard:has(.ev-ccard-open:focus-visible) { box-shadow: var(--ev-focus); }
+.ev-ccard-mark {
+  width: 36px; height: 36px; flex: none; border-radius: 10px; display: grid; place-items: center;
+  font: 900 15px/1 var(--ev-font); letter-spacing: -.03em; color: #fff; background: var(--acc-strong);
+}
+.ev-ccard-text { min-width: 0; flex: 1; }
+.ev-ccard-name { margin: 0; font: 700 15px/1.25 var(--ev-font); color: var(--ev-ink); }
+.ev-ccard-open {
+  all: unset; cursor: pointer; color: inherit; overflow-wrap: anywhere;
+}
+.ev-ccard-open::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+.ev-ccard-open:focus-visible { outline: none; }
+.ev-ccard-line {
+  margin: 2px 0 0; font: 400 12.5px/1.4 var(--ev-font); color: var(--ev-ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ev-ccard-tag { flex: none; padding: 2px 8px; border-radius: 999px; font: 700 10.5px/1.4 var(--ev-font); color: var(--acc-ink); background: var(--acc-soft); }
+.ev-ccard-pin {
+  position: absolute; z-index: 2; top: 50%; right: 8px; transform: translateY(-50%);
+  width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 8px;
+  background: transparent; color: var(--ev-ink-3); cursor: pointer;
+}
+.ev-ccard-pin:hover { background: var(--ev-brand-soft); color: var(--ev-brand-strong); }
+.ev-ccard-pin.is-pinned { color: var(--acc-strong); }
+.ev-ccard-pin:focus-visible { outline: none; box-shadow: var(--ev-focus); }
+.ev-ccard--list { min-height: 56px; }
+@media (max-width: 720px) { .ev-ccard { min-height: 60px; } .ev-ccard-pin { width: 40px; height: 40px; } }
