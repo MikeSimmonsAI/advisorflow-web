@@ -282,6 +282,19 @@ def deal_billing_checkout(
                 "success_url": sub_targets["success_url"],
                 "cancel_url": sub_targets["cancel_url"],
             }
+            # MONTH 1 IS THE ONE-TIME FEE ONLY (EvoSys Pro Sales packages).
+            # The monthly fee starts in Month 2: the card is saved now and the
+            # first monthly charge falls on the anchor. Other deals: unchanged.
+            month2 = deal_billing.monthly_billing_start(
+                db, opp, pricing_mode=sub.get("pricing_mode"))
+            if month2 is not None:
+                import calendar as _cal
+                kwargs["subscription_data"]["billing_cycle_anchor"] = int(
+                    _cal.timegm(month2.utctimetuple()))
+                kwargs["subscription_data"]["proration_behavior"] = "none"
+                kwargs["subscription_data"]["metadata"]["monthly_billing_starts"] = (
+                    month2.date().isoformat())
+                kwargs["metadata"]["monthly_billing_starts"] = month2.date().isoformat()
             # NO SETUP FEE ON THIS SESSION. It used to be appended here as a
             # second line item so one payment covered both — Growth billed
             # $3,500 up front. The implementation fee is a separate obligation
@@ -373,8 +386,14 @@ def deal_billing_checkout(
     except Exception:
         log.exception("deal_billing: audit write failed")
 
+    starts = None
+    if part == "subscription":
+        starts = (kwargs.get("metadata") or {}).get("monthly_billing_starts")
     return {"checkout_url": session.url,
             "part": part,
+            # EvoSys Pro Sales packages: nothing is charged by this link in
+            # Month 1; the first monthly charge falls on this date.
+            "monthly_billing_starts": starts,
             "stripe_session_id": session.id,
             # Only the charge this session actually bills, so a caller cannot
             # display "you are collecting $3,500" for a $2,500 setup link.

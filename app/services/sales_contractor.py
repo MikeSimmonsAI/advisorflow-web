@@ -335,12 +335,17 @@ def exhibit_html(seat: str, exhibit_version: str) -> str:
     from app.services import deal_builder_commission as dbc
     role = {"sevp": "sevp", "asm": "asm"}.get(seat, "rep")
     label = dbc.ROLE_LABELS.get(role, role)
-    rows = "".join("<li>%s (setup %s): <b>$%s</b> when the setup is collected</li>"
+    rows = "".join("<li>%s (one-time fee %s): <b>$%s</b> flat when the one-time fee is collected</li>"
                    % (_html.escape(p["name"]), "${:,.0f}".format(p["setup"]), "{:,.0f}".format(p["payout"][role]))
                    for p in dbc.PLANS.values() if p["kind"] == "package")
     return ("<h2>Exhibit A — Your compensation (%s, version %s)</h2>"
             "<p>These are the commission terms for the %s seat only. Commission rules version %s.</p>"
-            "<ul>%s<li>Package monthly service: <b>%s%%</b> of the monthly fee collected</li>"
+            "<p><b>Basic, Growth and Professional packages.</b> Month 1: the customer pays only the "
+            "package's one-time fee, and you earn the flat amount below — it is not a percentage of "
+            "that fee. No monthly fee or residual is due in Month 1. Month 2 onward: the customer "
+            "pays the package's monthly fee, and you earn your residual on each monthly payment "
+            "collected.</p>"
+            "<ul>%s<li>Package monthly fee, Month 2 onward: <b>%s%%</b> of each monthly fee collected</li>"
             "<li>Custom SaaS setup and monthly service: <b>%s%%</b> of what is collected</li>"
             "<li>Add-ons follow the deal they are sold on.</li>"
             "<li>Commission is held 14 days after the customer pays. Partial payments are prorated.</li></ul>"

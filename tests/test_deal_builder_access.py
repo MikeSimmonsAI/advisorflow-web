@@ -68,11 +68,11 @@ def test_standard_setup_price_comes_from_server_not_client():
 
 
 def test_addons_follow_the_deal():
-    # Package deal: add-on setup and monthly at the package rates (15/10/15).
+    # Package deal: add-on setup and monthly at the package rates (20/10/15).
     r = _c(plan="growth", addon_setup=1500, monthly=1300 + 299)
     assert r["one_time"]["package"] == 1000.0
-    assert r["one_time"]["addon"] == 225.0            # 15% of 1,500
-    assert r["recurring"]["monthly"] == round((1300 + 299) * 0.15, 2)
+    assert r["one_time"]["addon"] == 300.0            # 20% of 1,500
+    assert r["recurring"]["monthly"] == round((1300 + 299) * 0.20, 2)
     assert "not final" not in json.dumps(r).lower()
 
 
@@ -340,11 +340,11 @@ def _full(**kw):
     return dbc.split(base)
 
 
-def test_package_monthly_is_15_10_15_60():
+def test_package_monthly_is_20_10_15_55():
     v = dbc.view(_full(plan="basic", monthly=700), "full")
     by = {l["role"]: l for l in v["layers"]}
-    assert [by[r]["monthly"] for r in ("rep", "asm", "sevp")] == [105.0, 70.0, 105.0]
-    assert v["evosys"]["monthly"] == 420.0
+    assert [by[r]["monthly"] for r in ("rep", "asm", "sevp")] == [140.0, 70.0, 105.0]
+    assert v["evosys"]["monthly"] == 385.0
     assert [by[r]["one_time"] for r in ("rep", "asm", "sevp")] == [500.0, 200.0, 300.0]
 
 
@@ -370,16 +370,16 @@ def test_saas_addon_follows_saas_rates():
     assert rep["monthly"] == 320.0
 
 
-def test_basic_addon_100_monthly_pays_rep_15():
+def test_basic_addon_100_monthly_pays_rep_20():
     v = dbc.view(_full(plan="basic", monthly=800), "rep")
-    assert v["own"]["monthly"] == 120.0      # 15% of 700 + 15% of the $100 add-on
+    assert v["own"]["monthly"] == 160.0      # 20% of 700 + 20% of the $100 add-on
 
 
 def test_mixed_partial_setup_payment_prorates_each_line():
     # Basic ($1,600) + $200 setup add-on = $1,800; $900 collected = half of each line.
     v = dbc.view(_full(plan="basic", addon_setup=200, basis="paid", collected_setup=900), "full")
     by = {l["role"]: l for l in v["layers"]}
-    assert by["rep"]["one_time"] == 265.0
+    assert by["rep"]["one_time"] == 270.0
     assert by["asm"]["one_time"] == 110.0
     assert by["sevp"]["one_time"] == 165.0
 
@@ -389,7 +389,7 @@ def test_receipt_allocated_to_one_line():
     v = dbc.view(_full(plan="basic", addon_setup=200, basis="paid",
                        allocation={"package": 0, "addons": 200}), "full")
     by = {l["role"]: l for l in v["layers"]}
-    assert by["rep"]["one_time_package"] == 0.0 and by["rep"]["one_time_addons"] == 30.0
+    assert by["rep"]["one_time_package"] == 0.0 and by["rep"]["one_time_addons"] == 40.0
     assert by["asm"]["one_time"] == 20.0 and by["sevp"]["one_time"] == 30.0
     assert v["setup_counted"] == 200.0
 

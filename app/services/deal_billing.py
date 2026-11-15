@@ -91,7 +91,9 @@ deal still bills only against its brand's configured Stripe price.
 
 from __future__ import annotations
 
+import calendar
 import logging
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
@@ -701,6 +703,20 @@ def terms_for(db: Session, opp) -> Dict[str, Any]:
     # each needs its own answer: a customer who already has a subscription can
     # still be sent an implementation-fee page, and a plan whose Stripe price
     # is missing does not make the setup fee uncollectable.
+    # EvoSys Pro Sales packages: the monthly fee starts in Month 2. Shown on
+    # the seller's panel before a link is created, so nobody is surprised.
+    _sub = next((c for c in out["charges"] if c["kind"] == "subscription"), None)
+    out["monthly_billing_starts"] = None
+    if _sub is not None:
+        try:
+            _impl = implementation_for(db, opp)
+            _m2 = monthly_billing_start(
+                db, opp, pricing_mode=_sub.get("pricing_mode"),
+                # Once a link exists, show the date that link was made with.
+                now=getattr(_impl, "subscription_checkout_at", None))
+            out["monthly_billing_starts"] = _m2.date().isoformat() if _m2 else None
+        except Exception:                               # pragma: no cover
+            log.exception("deal_billing: could not work out the Month 2 start")
     _kinds = {c["kind"] for c in out["charges"]}
     out["billable_parts"] = {
         "setup": ("setup_fee" in _kinds
@@ -722,3 +738,48 @@ def terms_for(db: Session, opp) -> Dict[str, Any]:
         log.exception("deal_billing: could not resolve billing state")
         out["state"] = None
     return out
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# EVOSYS PRO SALES PACKAGES: MONTHLY BILLING STARTS IN MONTH 2
+# ═══════════════════════════════════════════════════════════════════════════
+# Owner instruction, 2026-11-15, for Basic / Growth / Professional sold through
+# the EvoSys Pro Sales program: Month 1 collects only the package's flat
+# one-time fee. The configured monthly fee is billed from Month 2. So a
+# monthly-payment link for such a deal must not charge anything in Month 1.
+#
+# Stripe Checkout does that with `subscription_data.billing_cycle_anchor` plus
+# `proration_behavior="none"`: the card is saved, nothing is charged, and the
+# first full monthly invoice falls on the anchor. Stripe requires the anchor to
+# be in the future and before the next natural billing date (one month after
+# the checkout), so it is clamped into that window.
+#
+# Custom SaaS and every other brand are untouched (None is returned), and an
+# existing subscription is never modified by any of this.
+
+MONTH2_MIN_LEAD = timedelta(days=2)
+MONTH2_MAX_SLACK = timedelta(hours=12)
+
+
+def add_one_month(when: datetime) -> datetime:
+    y, m = (when.year + 1, 1) if when.month == 12 else (when.year, when.month + 1)
+    day = min(when.day, calendar.monthrange(y, m)[1])
+    return when.replace(year=y, month=m, day=day)
+
+
+def monthly_billing_start(db: Session, opp, *, pricing_mode: Optional[str] = None,
+                          now: Optional[datetime] = None) -> Optional[datetime]:
+    """When the monthly package fee starts for this deal, or None if the
+    Month-2 rule does not apply (not an EvoSys Pro Sales package deal)."""
+    from app.services import sales_program_comp
+    if pricing_mode == PRICING_CUSTOM:
+        return None
+    if not sales_program_comp.applies(db, opp):
+        return None
+    now = now or datetime.utcnow()
+    impl = implementation_for(db, opp)
+    first_payment = getattr(impl, "setup_paid_at", None) or now
+    start = add_one_month(first_payment)
+    latest = add_one_month(now) - MONTH2_MAX_SLACK
+    earliest = now + MONTH2_MIN_LEAD
+    return max(earliest, min(start, latest))
