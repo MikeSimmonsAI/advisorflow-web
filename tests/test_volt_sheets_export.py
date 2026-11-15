@@ -78,6 +78,9 @@ class FakeBook:
         def run():
             self._maybe_fail()
             assert valueInputOption == "RAW"
+            # Never INSERT_ROWS: inserted rows copy the header style and make
+            # Google shift every dashboard formula off the data (#630).
+            assert insertDataOption == "OVERWRITE"
             self.rows.extend([list(r) for r in body["values"]])
             return {}
         return Call(run)

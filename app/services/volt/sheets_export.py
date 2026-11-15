@@ -252,6 +252,12 @@ def upsert(business: str, rows: List[List[Any]], client=None) -> Dict[str, int]:
     if updates:
         values.batchUpdate(spreadsheetId=sid, body={"valueInputOption": "RAW", "data": updates}).execute()
     if appends:
+        # OVERWRITE, not INSERT_ROWS (#630): inserting rows directly under the
+        # header copied the header's navy styling onto every new row, dropped
+        # the prepared date formats, and made Google shift every dashboard
+        # formula (Applications!A2:A became A8:A after six inserts, so the
+        # dashboard counted nothing). OVERWRITE fills the next empty,
+        # pre-formatted row; Google still adds rows at the end if it must.
         values.append(spreadsheetId=sid, range=_range(business, "A:%s" % column(width)), valueInputOption="RAW",
-                      insertDataOption="INSERT_ROWS", body={"values": appends}).execute()
+                      insertDataOption="OVERWRITE", body={"values": appends}).execute()
     return {"updated": len(updates), "inserted": len(appends)}
