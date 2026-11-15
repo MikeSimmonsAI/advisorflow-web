@@ -88,7 +88,7 @@ Both files are private: owner only, plus D'Angelo once the owner shares them wit
 
 ## Privacy
 
-- Both files contain names, phone numbers and emails. Google acts as a processor, so the privacy notice must disclose this transfer before the sync is turned on.
+- Both files contain names, phone numbers and emails, so keep them private.
 - Consent evidence stays in EvoSys.
 - Public Consumer Leads intake remains off, under its own launch checklist.
 - Ad-platform connections (Meta/TikTok) are out of scope; see #619.
