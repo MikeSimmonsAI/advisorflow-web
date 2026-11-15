@@ -164,10 +164,18 @@ class VoltLeadDelivery(Base):
 
 
 class VoltLeadSheetOutbox(Base):
-    """Durable export queue for both VOLT workspaces; payload is only a DB key.
+    """Durable Google Sheets export queue for both VOLT businesses.
 
-    Actual customer/applicant contact details are loaded from the primary DB
-    only by the authorized worker. Disabled until explicit Sheets configuration.
+    One row per (organization, business, record). It holds only the record's
+    database key - never a name, phone or email: the worker reloads the record
+    from PostgreSQL when it syncs, so the Sheet always shows the latest state.
+
+    Written in the SAME transaction as the lead/application change (see
+    sheets_outbox.register_listeners), so a committed change is never lost and
+    a rolled-back one never reaches Google. `version` goes up on every change;
+    a worker that synced an older version leaves the row pending, so a change
+    made while Google was being written is never dropped. The worker holds no
+    database lock while it talks to Google (claim -> write -> finish).
     """
     __tablename__ = "volt_lead_sheet_outbox"
     __table_args__ = (UniqueConstraint("organization_id", "business", "record_id",
@@ -176,11 +184,38 @@ class VoltLeadSheetOutbox(Base):
     id = Column(String, primary_key=True, default=gen_uuid)
     organization_id = Column(String, ForeignKey("organizations.id", ondelete="CASCADE"),
                              nullable=False, index=True)
-    business = Column(String, nullable=False)  # consumer | recruiting
+    business = Column(String, nullable=False)          # consumer | recruiting
     record_id = Column(String, nullable=False)
-    status = Column(String, nullable=False, default="pending")  # pending | synced | failed
+    status = Column(String, nullable=False, default="pending", index=True)  # pending|processing|synced|failed|skipped
+    version = Column(Integer, nullable=False, default=1)
+    claimed_version = Column(Integer, nullable=True)
+    claim_token = Column(String, nullable=True)
+    claimed_at = Column(DateTime, nullable=True)
     attempts = Column(Integer, nullable=False, default=0)
     next_retry_at = Column(DateTime, nullable=True)
-    last_error = Column(String, nullable=True)  # error type only; NEVER PII
+    last_error = Column(String, nullable=True)         # error CATEGORY only - never a message, never PII
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     synced_at = Column(DateTime, nullable=True)
+
+
+class VoltSheetSyncState(Base):
+    """Health of one business's Google Sheet mirror, for the status panel and
+    alerts. No credentials, no personal data."""
+    __tablename__ = "volt_sheet_sync_state"
+
+    organization_id = Column(String, ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True)
+    business = Column(String, primary_key=True)        # consumer | recruiting
+    paused = Column(Boolean, nullable=False, default=False)
+    last_success_at = Column(DateTime, nullable=True)
+    last_attempt_at = Column(DateTime, nullable=True)
+    last_error_category = Column(String, nullable=True)
+    last_error_at = Column(DateTime, nullable=True)
+    consecutive_failures = Column(Integer, nullable=False, default=0)
+    verified_at = Column(DateTime, nullable=True)
+    verified_ok = Column(Boolean, nullable=True)
+    verify_detail = Column(String, nullable=True)
+    last_reconcile_at = Column(DateTime, nullable=True)
+    last_reconcile_count = Column(Integer, nullable=True)
+    alerted_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)

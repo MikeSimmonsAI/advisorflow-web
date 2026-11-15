@@ -331,16 +331,10 @@ def create_or_merge(db: Session, org_id: str, v: Dict[str, Any], *, test: bool, 
             _event(db, lead, actor, "created", new=v["channel"], note=origin)
             _event(db, lead, actor, "consent_recorded", new=consent_version,
                    note=consent_note or "consent text sha256 %s" % lead.consent_text_hash[:16])
-            if not test:
-                from app.services.volt import sheets_outbox
-                sheets_outbox.enqueue(db, org_id, "consumer", lead.id)
             return lead, True
     existing.submissions = (existing.submissions or 1) + 1
     existing.updated_at = datetime.utcnow()
     _event(db, existing, actor, "repeat_submission", note=origin)
-    if not test:
-        from app.services.volt import sheets_outbox
-        sheets_outbox.enqueue(db, org_id, "consumer", existing.id)
     return existing, False
 
 
@@ -497,9 +491,27 @@ def lead_dict(lead: VoltLead, names: Dict[str, str], detail: bool = False) -> Di
     return out
 
 
-def listing(db: Session, user: User, org_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
+def _filtered(db: Session, user: User, org_id: str, params: Dict[str, Any]):
+    """The inbox query: this person's scope (agents: their own leads) plus
+    the filters. Shared by the inbox and the CSV download."""
     test = is_test_param(params)
     q, mode = scope(db, user, org_id, test)
+    assigned = str(params.get("assigned") or "")
+    if assigned and mode == "all":
+        q = q.filter(VoltLead.assigned_user_id == assigned)
+    for key, op in (("from", "ge"), ("to", "lt")):
+        raw = str(params.get(key) or "").strip()
+        if raw:
+            try:
+                day = datetime.strptime(raw[:10], "%Y-%m-%d")
+            except ValueError:
+                _bad(key, "Use a date like 2026-11-15.")
+            from datetime import timezone
+            from zoneinfo import ZoneInfo
+            if key == "to":
+                day = day + timedelta(days=1)                    # through the end of that Central day
+            utc = day.replace(tzinfo=ZoneInfo("America/Chicago")).astimezone(timezone.utc).replace(tzinfo=None)
+            q = q.filter(VoltLead.created_at >= utc) if op == "ge" else q.filter(VoltLead.created_at < utc)
     status, source = params.get("status") or "", params.get("source") or ""
     if status:
         q = q.filter(VoltLead.status == status)
@@ -522,6 +534,11 @@ def listing(db: Session, user: User, org_id: str, params: Dict[str, Any]) -> Dic
         if digits:
             conds.append(VoltLead.phone.like("%" + digits + "%"))
         q = q.filter(or_(*conds))
+    return q, mode, test
+
+
+def listing(db: Session, user: User, org_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    q, mode, test = _filtered(db, user, org_id, params)
     try:
         limit = max(1, min(int(params.get("limit") or 100), MAX_PAGE))
     except (TypeError, ValueError):
@@ -529,6 +546,44 @@ def listing(db: Session, user: User, org_id: str, params: Dict[str, Any]) -> Dic
     rows = q.order_by(VoltLead.created_at.desc()).limit(limit).all()
     names = _names(db, [r.assigned_user_id for r in rows])
     return {"access": mode, "test": test, "leads": [lead_dict(r, names) for r in rows]}
+
+
+CSV_MAX = 20000
+CSV_HEADER = ("Lead ID", "Received (CT)", "First name", "Last name", "Phone", "Email", "State", "ZIP", "Age range",
+              "Household size", "Income range", "Coverage now", "Contact preference", "Best time", "Channel",
+              "Source", "Campaign", "Status", "Assigned agent", "Appointment (CT)", "Follow-up (CT)",
+              "Enrolled (CT)", "Last contact (CT)", "Consent recorded (CT)", "Consent version", "Submissions",
+              "Last updated (CT)")
+
+
+def _ct(dt) -> str:
+    if dt is None:
+        return ""
+    from datetime import timezone
+    from zoneinfo import ZoneInfo
+    return dt.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d %H:%M %Z")
+
+
+def csv_export(db: Session, user: User, org_id: str, params: Dict[str, Any]):
+    """(csv text, row count) for the leads this person may see."""
+    import csv as _csv
+    import io
+    from app.services.volt.sheets_export import safe, safe_phone
+    q, _mode, _test = _filtered(db, user, org_id, params)
+    rows = q.order_by(VoltLead.created_at.desc()).limit(CSV_MAX).all()
+    names = _names(db, [r.assigned_user_id for r in rows])
+    buf = io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(CSV_HEADER)
+    for r in rows:
+        w.writerow([safe(x) for x in (
+            r.id, _ct(r.created_at), r.first_name, r.last_name)] + [safe_phone(r.phone)] + [safe(x) for x in (
+            r.email, r.state, r.zip_code, r.age_range, r.household_size, r.income_range, r.coverage_status,
+            r.contact_preference, r.best_time, CHANNEL_LABELS.get(r.channel or "", r.channel or ""), r.source,
+            r.utm_campaign or r.campaign, STATUS_LABELS.get(r.status, r.status), names.get(r.assigned_user_id, ""),
+            _ct(r.appointment_at), _ct(r.next_follow_up_at), _ct(r.enrolled_at), _ct(r.last_contact_at),
+            _ct(r.consent_at), r.consent_version, r.submissions, _ct(r.updated_at))])
+    return "\ufeff" + buf.getvalue(), len(rows)
 
 
 def detail(db: Session, user: User, org_id: str, lead_id: str, test: bool = False) -> Dict[str, Any]:
@@ -609,9 +664,6 @@ def update(db: Session, user: User, org_id: str, lead_id: str, body: Dict[str, A
     if note:
         _event(db, lead, user, "note", note=note)
     lead.updated_at = now
-    if not test:
-        from app.services.volt import sheets_outbox
-        sheets_outbox.enqueue(db, org_id, "consumer", lead.id)
     db.flush()
     return detail(db, user, org_id, lead.id, test)
 
@@ -664,9 +716,6 @@ def assign(db: Session, user: User, org_id: str, lead_id: str, body: Dict[str, A
         _event(db, lead, user, "assigned", lead.assigned_user_id, target)
         lead.assigned_user_id = target
         lead.updated_at = datetime.utcnow()
-    if not test:
-        from app.services.volt import sheets_outbox
-        sheets_outbox.enqueue(db, org_id, "consumer", lead.id)
     db.flush()
     return detail(db, user, org_id, lead.id, test)
 

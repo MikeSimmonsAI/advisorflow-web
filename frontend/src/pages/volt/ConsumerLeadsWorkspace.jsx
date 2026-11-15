@@ -6,10 +6,11 @@
 // lead_sources.py). This page only shows what the server returns.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useParams, useSearchParams } from 'react-router-dom'
-import { api, API_BASE } from '../../api/client'
+import { api, API_BASE, fetchObjectUrl } from '../../api/client'
 import { VOLT_API_ORIGIN } from '../../utils/voltDomain'
 import { CoverageFunnel, fmtCT, publicSiteUrl } from './VoltLeads'
 import Development from './VoltDev'
+import SheetsPanel, { OpenSheetLink } from './SheetsPanel'
 import { useVoltTitle } from './voltApi'
 import './volt.css'
 
@@ -106,6 +107,7 @@ function Overview({ orgId, summary, test, q }) {
 export function LeadsInbox({ orgId, test, q, unassignedOnly = false, onChanged }) {
   const base = `/volt/ops/${orgId}/leads`
   const [f, setF] = useState({ q: '', status: '', channel: '', campaign: '' })
+  const [range, setRange] = useState({ from: '', to: '' })
   const [data, setData] = useState(null)
   const [sel, setSel] = useState(null)
   const [agents, setAgents] = useState([])
@@ -127,9 +129,24 @@ export function LeadsInbox({ orgId, test, q, unassignedOnly = false, onChanged }
   const patch = (body) => act(api.patch(`${base}/${sel.id}`, test ? { ...body, test: true } : body))
   const assign = (id, user_id) => api.post(`${base}/${id}/assign`, { user_id: user_id || null, ...(test ? { test: true } : {}) })
   const canAssign = data?.access === 'all'
+  const downloadCsv = async () => {
+    try {
+      const p = { ...Object.fromEntries(Object.entries(f).filter(([, v]) => v)), ...q, ...(unassignedOnly ? { unassigned: 1 } : {}), ...(range.from ? { from: range.from } : {}), ...(range.to ? { to: range.to } : {}) }
+      const url = await fetchObjectUrl(`${base}/export.csv?${new URLSearchParams(p)}`)
+      const a = document.createElement('a'); a.href = url; a.download = test ? 'consumer-leads-TEST-DATA.csv' : 'consumer-leads.csv'; a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 2000)
+    } catch (e) { setErr(msg(e)) }
+  }
   return (
     <section data-cl-leads>
       {err && <div className="v-alert v-alert--err" role="alert">{err}</div>}
+      {!unassignedOnly && <div className="v-row" style={{ justifyContent: 'flex-start', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }} data-export>
+        <label className="v-small">From<input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} data-csv-from /></label>
+        <label className="v-small">To<input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} data-csv-to /></label>
+        <button type="button" className="v-btn v-btn--black v-btn--sm" onClick={downloadCsv} data-download-csv>Download CSV ↓</button>
+        {!test && <OpenSheetLink orgId={orgId} business="consumer" />}
+        <span className="v-small v-muted">The CSV is exactly the leads you can see, with these filters{test ? ' (test data)' : ''}.</span>
+      </div>}
       {!unassignedOnly && <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '6px 0 14px' }}>
         <label>Search<input value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} placeholder="Name, phone, email or ZIP" data-lead-search /></label>
         <label>Status<select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}><option value="">All statuses</option>
@@ -445,6 +462,7 @@ function Settings({ orgId }) {
           <button type="button" className="v-btn v-btn--black v-btn--sm" disabled={!pick.user_id} onClick={() => grant(pick).then(() => setPick({ user_id: '', role: 'agent' }))} data-team-add>Add</button>
         </div>
       </div>
+      {s.can_intake !== undefined && <SheetsPanel orgId={orgId} business="consumer" isOwner={!!s.can_intake} />}
       <div className="v-panel" data-test-data>
         <h3>Test data</h3>
         <p className="v-small">Website-preview submissions and test sources write test data only. It never appears in real leads, reports or the workspace card.</p>
