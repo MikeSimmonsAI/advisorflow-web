@@ -378,7 +378,9 @@ def approve_by_policy(db: Session, job: VoltDevJob, checks: List[str]) -> VoltDe
     event names the policy and every check it passed."""
     if job.status != "ready_to_test" or not job.tests_passed or not job.head_sha or not job.pr_number:
         return job
-    job.merge_requested_by, job.merge_requested_at, job.merge_approved_sha = "policy:auto-release", C.now(), job.head_sha
+    # merge_requested_by is a users.id foreign key: the policy is not a person,
+    # so it stays empty and the auto_release event names the policy.
+    job.merge_requested_by, job.merge_requested_at, job.merge_approved_sha = None, C.now(), job.head_sha
     _set(db, job, "merge_requested", "Released automatically under the low-risk policy at %s. Checks: %s"
          % (job.head_sha[:7], "; ".join(checks)), kind="system", action="auto_release")
     return job
@@ -404,6 +406,8 @@ def request_revert(db: Session, org_id: str, job: VoltDevJob, user: User) -> Vol
 def job_dict(db: Session, job: VoltDevJob, events: bool = False) -> Dict[str, Any]:
     who = db.get(User, job.requested_by) if job.requested_by else None
     appr = db.get(User, job.merge_requested_by) if job.merge_requested_by else None
+    by_policy = (appr is None and job.merge_approved_sha is not None and db.query(VoltDevEvent.id).filter(
+        VoltDevEvent.job_id == job.id, VoltDevEvent.action == "auto_release").first() is not None)
     out = {"id": job.id, "ref": "DEV-%d" % job.number, "number": job.number, "kind": job.kind, "title": job.title,
            "request": job.request, "status": job.status, "status_label": display_status(job),
            "dispatch": {"state": job.dispatch_state, "purpose": job.dispatch_purpose,
@@ -415,7 +419,7 @@ def job_dict(db: Session, job: VoltDevJob, events: bool = False) -> Dict[str, An
            "tests_passed": job.tests_passed, "tests_summary": job.tests_summary,
            "changed_files": json.loads(job.changed_files) if job.changed_files else [],
            "preview_url": job.preview_url, "run_url": job.run_url,
-           "merge_approved_by": (appr.full_name or appr.email) if appr else None,
+           "merge_approved_by": (appr.full_name or appr.email) if appr else ("Automatic release policy" if by_policy else None),
            "merge_requested_at": C.iso(job.merge_requested_at), "merge_sha": job.merge_sha,
            "merged_at": C.iso(job.merged_at), "deploy_targets": job.deploy_targets,
            "deployed_at": C.iso(job.deployed_at), "deploy_detail": job.deploy_detail,

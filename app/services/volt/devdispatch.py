@@ -35,7 +35,7 @@ import os
 import re
 import urllib.error
 import urllib.request
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -450,6 +450,25 @@ AUTO_RELEASE_STOP_WORDS = ("intake_enabled", "toggleintake", "/settings", "/gran
                            "twilio", "dangerouslysetinnerhtml", "eval(", "af_token", "manager", "volt_dev_")
 
 
+# The policy applies ONLY to Consumer Leads requests submitted after it went
+# live (PR #615 merged 2026-11-15 03:47:57 UTC). Older relay jobs - including
+# docs-only DEV-1/4/5, which the owner kept out of production - are never
+# released by it.
+AUTO_RELEASE_SINCE = datetime(2026, 11, 15, 3, 47, 57)
+AUTO_RELEASE_TITLE = "Consumer Leads: "
+
+
+def auto_release_scope(job: VoltDevJob) -> Optional[str]:
+    """None when the job may be considered at all, else the reason it never is."""
+    if not (job.title or "").startswith(AUTO_RELEASE_TITLE):
+        return "Only Consumer Leads requests can be released automatically."
+    if job.created_at is None or job.created_at < AUTO_RELEASE_SINCE:
+        return "Requested before the automatic release policy existed."
+    if not job.requested_by:
+        return "No authorized operator recorded as the requester."
+    return None
+
+
 def auto_release_enabled() -> bool:
     return (os.environ.get("VOLT_DEV_AUTO_RELEASE") or "on").strip().lower() not in ("off", "0", "false", "no")
 
@@ -465,6 +484,9 @@ def auto_release_check(job: VoltDevJob, *, files_diff: Optional[Dict[str, Any]] 
         return no("Automatic release is switched off (VOLT_DEV_AUTO_RELEASE=off).")
     if job.kind == "revert":
         return no("Rollbacks are approved by a person.")
+    scope = auto_release_scope(job)
+    if scope:
+        return no(scope)
     if job.status != "ready_to_test" or not (job.tests_passed and job.head_sha and job.pr_number):
         return no("Not ready: tests must pass on an open PR.")
     passed.append("tests passed at %s" % job.head_sha[:7])
@@ -506,22 +528,44 @@ def auto_release_pass(db: Session) -> List[VoltDevJob]:
     out = []
     if not configured() or not auto_release_enabled():
         return out
-    for j in db.query(VoltDevJob).filter(VoltDevJob.status == "ready_to_test", VoltDevJob.pr_number.isnot(None)).all():
+    for j in waiting_for_auto_release(db):
         key = "%s:%s" % (j.id, j.head_sha)
         if key in _SEEN["auto_release"]:
             continue
-        res = auto_release_check(j)
-        if not res["eligible"] and res["reason"] and res["reason"].startswith("GitHub release rules"):
-            continue                       # checks still running: look again next pass
-        _SEEN["auto_release"].add(key)
-        if res["eligible"]:
-            R.approve_by_policy(db, j, res["passed"])
-            db.flush()
-            out.append(j)
-        else:
-            db.add(VoltDevEvent(job_id=j.id, actor_kind="system", action="auto_release_skipped", status=j.status,
-                                detail="Waiting for a person's approval. %s" % res["reason"]))
+        # One job's problem never stops the relay's watch (deploy checks,
+        # GitHub reconcile, notices): each job is its own savepoint.
+        try:
+            with db.begin_nested():
+                res = auto_release_check(j)
+                if not res["eligible"] and res["reason"] and res["reason"].startswith("GitHub release rules"):
+                    continue               # checks still running: look again next pass
+                _SEEN["auto_release"].add(key)
+                if res["eligible"]:
+                    R.approve_by_policy(db, j, res["passed"])
+                    db.flush()
+                    out.append(j)
+                else:
+                    db.add(VoltDevEvent(job_id=j.id, actor_kind="system", action="auto_release_skipped",
+                                        status=j.status, detail="Waiting for a person's approval. %s" % res["reason"]))
+                    db.flush()
+        except Exception as e:  # noqa: BLE001
+            _SEEN["auto_release"].add(key)
+            log.exception("auto-release check failed for DEV-%s", j.number)
+            db.add(VoltDevEvent(job_id=j.id, actor_kind="system", action="auto_release_error", status=j.status,
+                                detail="Automatic release could not decide (%s); a person approves this one."
+                                % type(e).__name__))
     return out
+
+
+def waiting_for_auto_release(db: Session) -> List[VoltDevJob]:
+    """Ready Consumer Leads jobs the policy may consider (also used by the
+    watch loop to run a pass promptly instead of hourly)."""
+    if not auto_release_enabled():
+        return []
+    rows = (db.query(VoltDevJob).filter(VoltDevJob.status == "ready_to_test", VoltDevJob.pr_number.isnot(None),
+                                        VoltDevJob.created_at >= AUTO_RELEASE_SINCE,
+                                        VoltDevJob.title.like(AUTO_RELEASE_TITLE + "%")).all())
+    return [j for j in rows if "%s:%s" % (j.id, j.head_sha) not in _SEEN["auto_release"]]
 
 
 def review(job: VoltDevJob, max_chars: int = 14000) -> Dict[str, Any]:

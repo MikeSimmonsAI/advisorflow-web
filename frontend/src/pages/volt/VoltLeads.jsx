@@ -54,7 +54,7 @@ export function CoverageFunnel({ preview = null } = {}) {
   // preview = { orgId }: signed-in preview from the back office. The whole site
   // works and a submission is saved as TEST data through an authenticated
   // endpoint - never the public one, never the real inbox.
-  useVoltTitle()
+  useVoltTitle(preview ? null : undefined)
   const [cfg, setCfg] = useState(null)
   const [started, setStarted] = useState(false)
   const [step, setStep] = useState(0)
