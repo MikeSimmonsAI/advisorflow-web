@@ -163,6 +163,22 @@ no messaging keys, no background jobs, noindex. Not production, not SCI staging.
 - Free database expires 30 days after creation (2026-12-15).
 - The preview password is not in the repo; it was shared privately.
 
+## Put it on your phone (preview)
+
+The preview's server sleeps when idle: the first sign-in after a quiet spell can
+take about a minute.
+
+**iPhone (Safari):**
+1. Open https://evosyspro-app-preview-osba.onrender.com/app in **Safari**.
+2. Sign in with the preview account you were given.
+3. Tap the **Share** button (square with an arrow), then **Add to Home Screen**,
+   then **Add**. The icon is the silver-and-gold EP; it opens on Programs.
+
+**Android (Chrome):**
+1. Open the same address in **Chrome** and sign in.
+2. Tap **⋮** (top right), then **Install app** (or **Add to Home screen**), then
+   **Install**. It opens on Programs.
+
 ## Known limits of the prototype
 
 - Chat updates by polling; no push notifications for new messages yet.
