@@ -325,3 +325,34 @@ def test_time_offer_names_two_verified_times_or_asks_for_a_day(rl):
     assert line.startswith("I have Monday, Nov 16 at 11:30 AM or Tuesday, Nov 17 at 10:00 AM open")
     down = BP.time_offer(db, rl["mike"], pol, now_local=now, busy_reader=lambda d, a, t: ([], "unreadable"))
     assert down == "What day this week works for you to come by?"
+
+
+def test_records_without_a_campaign_are_approved_and_a_second_run_continues_after_taken_slots(rl):
+    """Production (Nov 15): only the 25 pilot records were on the campaign;
+    the rest had none. A first run approved just the 25; a corrected second
+    run must approve the rest and schedule them after the 25's slots."""
+    db = rl["db"]
+    configured(rl)
+    staged = {m.lead_id for m in db.query(__import__("app.models.reset_models", fromlist=["x"]).CampaignCycleMember)
+              .filter_by(organization_id=rl["org"].id).all()}
+    for r in db.query(ProgramSourceRecord).filter_by(organization_id=rl["org"].id).all():
+        if r.lead_id not in staged:
+            r.campaign_family = None
+    db.commit()
+    first = RL.launch(db, rl["org"], "launch-a", booking_user_id=rl["mike"].id, calendar_user_id=None,
+                      start_local="2026-11-16T08:30", now=utc(2026, 11, 15, 17, 0))["summary"]
+    assert first["not_approved"].get("No campaign", 0) == 0
+    assert first["approved"] == first["journey"]["started"] > len(staged)
+    n1 = db.query(OutreachTextSlot).filter_by(kind="new").count()
+    second = RL.launch(db, rl["org"], "launch-b", booking_user_id=rl["mike"].id, calendar_user_id=None,
+                       start_local="2026-11-16T08:30", now=utc(2026, 11, 15, 17, 30))["summary"]
+    assert second["journey"]["started"] == 0                 # nobody started twice
+    assert db.query(OutreachTextSlot).filter_by(kind="new").count() == n1
+    slots = [s.slot_at for s in db.query(OutreachTextSlot).filter_by(kind="new").all()]
+    assert len(slots) == len(set(slots))
+
+
+def test_a_later_start_takes_the_next_free_new_family_slots():
+    taken = set(OS.new_family_slots(utc(2026, 11, 16, 8, 30), 25, CFG))
+    nxt = OS.new_family_slots(utc(2026, 11, 16, 8, 30), 2, CFG, taken=taken)
+    assert [local(t) for t in nxt] == ["11:50", "11:58"]
