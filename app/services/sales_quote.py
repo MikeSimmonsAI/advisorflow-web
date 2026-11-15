@@ -230,7 +230,7 @@ def investment_markdown(data: Dict[str, Any]) -> str:
         out.append("| %s | %s | %s |" % (a.replace("|", "/"), b, c))
     out += ["", "**First payment — one-time setup and services: %s.**" % _fmt(data.get("setup_total", 0)),
             "",
-            "Monthly service: **%s/month**, billed after setup. Usage, renewals and pass-through "
+            "Monthly service: **%s/month**, billed after setup (starting in Month 2 for Basic, Growth, and Professional). Usage, renewals and pass-through "
             "costs are separate." % _fmt(data.get("monthly_total", 0))]
     pending = data.get("pending") or []
     if pending:

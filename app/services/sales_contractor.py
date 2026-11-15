@@ -340,12 +340,12 @@ def exhibit_html(seat: str, exhibit_version: str) -> str:
                    for p in dbc.PLANS.values() if p["kind"] == "package")
     return ("<h2>Exhibit A — Your compensation (%s, version %s)</h2>"
             "<p>These are the commission terms for the %s seat only. Commission rules version %s.</p>"
-            "<ul>%s<li>Package monthly service: <b>%s%%</b> of the monthly fee collected</li>"
+            "<ul>%s<li>Package monthly service from Month 2 onward: <b>%s%%</b> of the monthly fee collected. Month 1 covers the flat setup fee only</li>"
             "<li>Custom SaaS setup and monthly service: <b>%s%%</b> of what is collected</li>"
             "<li>Add-ons follow the deal they are sold on.</li>"
             "<li>Commission is held 14 days after the customer pays. Partial payments are prorated.</li></ul>"
             % (_html.escape(label), _html.escape(exhibit_version), _html.escape(label), dbc.RULES_VERSION, rows,
-               dbc.PACKAGE_PCT[role], dbc.SAAS_PCT[role]))
+               dbc.PACKAGE_MONTHLY_PCT[role], dbc.SAAS_PCT[role]))
 
 
 # ── agreement envelopes ──────────────────────────────────────────────────────
