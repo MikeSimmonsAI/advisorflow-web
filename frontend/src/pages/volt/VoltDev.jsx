@@ -246,7 +246,7 @@ export default function Development({ orgId, campaign: fixedCampaign = null, bac
       {err && <div className="v-alert v-alert--err" role="alert">{err}</div>}
       <form className="v-panel v-form" onSubmit={submit} data-dev-form>
         <h3>Request a change{campaign ? ' · Consumer Leads' : ''}</h3>
-        {campaign && <p className="v-small" data-dev-campaign>This request is tagged <b>Consumer Leads</b>. Claude receives the campaign, your name, the time, a request id and the Consumer Leads code to start from automatically. <Link to={backTo || `/consumer-leads/${orgId}`}>Back to Consumer Leads</Link></p>}
+        {campaign && <p className="v-small" data-dev-campaign>This request is tagged <b>Consumer Leads</b>. Claude receives the campaign, your name, the time, a request id and the Consumer Leads code to start from automatically. A small change to the Consumer Leads screens or docs is released automatically once its tests and GitHub's checks pass, unless the automatic release switch is off; anything touching data, access, intake, consent or outreach waits for approval here, and the job says why. <Link to={backTo || `/consumer-leads/${orgId}`}>Back to Consumer Leads</Link></p>}
         <label>Title<input value={v.title} onChange={(e) => setV({ ...v, title: e.target.value })} maxLength={140} required data-dev-title /></label>
         <label>What should change?<textarea rows={5} value={v.request} onChange={(e) => setV({ ...v, request: e.target.value })} maxLength={8000} required data-dev-request
           placeholder="Describe the change in VOLT Marketing: which page, what it should say or do, anything to keep the same." /></label>

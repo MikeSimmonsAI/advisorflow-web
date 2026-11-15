@@ -112,7 +112,7 @@ def source_dict(db: Session, src: VoltLeadSource, slug: str) -> Dict[str, Any]:
     live_blocked = (not src.is_test) and src.status == "active" and not _intake_on(db, src.organization_id)
     return {"id": src.id, "provider": src.provider, "provider_label": p.get("label", src.provider),
             "name": src.name, "campaign": src.campaign, "test": bool(src.is_test), "status": src.status,
-            "state_label": ("Waiting for account connection" if src.status == "pending_connection"
+            "state_label": ("Awaiting account connection" if src.status == "pending_connection"
                             else "Paused" if src.status == "paused"
                             else "On, but held: public intake is off" if live_blocked else "On"),
             "ready": bool(p.get("ready")), "needs": p.get("needs"), "how": p.get("how"),

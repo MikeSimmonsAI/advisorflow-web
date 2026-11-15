@@ -20,7 +20,9 @@ export default function StagingBanner({ inShell = false }) {
     fetchEnvironment().then((d) => { if (alive) setEnv(d) })
     return () => { alive = false }
   }, [])
-  const b = stagingBanner(env)
+  // Wording only: Consumer Leads pages say so. Staging itself is still the backend's answer.
+  const cl = pathname.startsWith('/consumer-leads/') || pathname === '/volt/check-coverage'
+  const b = stagingBanner(env, cl ? 'consumer_leads' : null)
   if (!b) return null
   const inApp = pathname === '/app' || pathname.startsWith('/app/')
   if (inApp !== inShell) return null
