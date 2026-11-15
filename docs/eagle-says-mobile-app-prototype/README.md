@@ -54,9 +54,13 @@ grant reviews only the people ticked for that manager (`team_time_scopes`). Room
 management never opens DMs and never opens Team Time. Changing someone's team rights
 keeps their other platform grants (Demo Suite) exactly as they were.
 
-> Live-role note: the live Render database was not read for this build. If the
-> everyday platform login is not `super_admin`, give it the five rights in
-> Team access (or tell Claude to check its role).
+> **Live roles (read-only check, 2026-11-15).** The everyday platform login is an
+> `org_admin` and a **sales manager on EvoSys Pro Sales**; the owner partner is an
+> `advisor`, **sales manager** and EvoSys Pro executive. Both therefore get Chat and
+> Time automatically. Neither holds any team-management grant yet. When this
+> ships, the owner (God) account turns on, in Account → Team access, for the
+> platform login: *Manage chat rooms*, *Post announcements* and *Team Time*
+> (with the people it reviews); and for the partner whatever Mike chooses.
 
 **Chat.** DMs (one per pair, only those two can read them or their files), **Sales
 Team** (sales people auto-enrolled once; a removed person stays removed), **Company
@@ -131,11 +135,36 @@ the install check on a physical phone happens on a deployed address.
 | iPhone Safari "Add to Home Screen" | **Not run on a physical device** — needs an HTTPS deployment |
 | Android Chrome "Install app" | **Not run on a physical device** — needs an HTTPS deployment |
 
+## Returning to the app from a program
+
+Opening a program from **Programs** in the app remembers, for that tab only,
+that it came from the app (`frontend/src/pages/program/launcherOrigin.js`,
+sessionStorage, exact allow-list). Every existing "Program Access", "Switch
+program", "Other Workspaces" and Deal Builder "Back" link goes through the
+`/workspaces` route, which sends such a tab back to `/app/programs`. A web
+sign-in, the web launcher and a direct workspace link never set it, so they
+behave exactly as before. Deal Builders opened from the app carry
+`?from=/app/programs` (validated by `builderReturn.js`) and say "Back to Programs".
+
+Verified (phone emulation): SCI, a second workspace, Back Office (More →
+Other Workspaces), Executive and Salesperson Deal Builders all return to
+`/app/programs`; web sign-in still lands on `/workspaces`; a direct SCI link in
+a fresh tab returns to `/workspaces`.
+
+## Private HTTPS preview
+
+`render-team-app-preview.yaml` — a separate free-plan Render Blueprint
+(`evosyspro-app-preview`), its own database of synthetic `@preview.test` people,
+no messaging keys, no background jobs, noindex. Not production, not SCI staging.
+
+- App: https://evosyspro-app-preview-osba.onrender.com/app
+- API: https://evosyspro-app-preview-api-osba.onrender.com (sleeps after ~15 idle
+  minutes; the first request then takes about a minute)
+- Free database expires 30 days after creation (2026-12-15).
+- The preview password is not in the repo; it was shared privately.
+
 ## Known limits of the prototype
 
-- Opening a program from the Programs tab moves into the existing web screens; those
-  screens' own "Program Access" links go to the web launcher (`/workspaces`), not back
-  to `/app`. In an installed app on iPhone there is no browser back button there.
 - Chat updates by polling; no push notifications for new messages yet.
-- The Program Access list for a given live account was not checked against production
-  data (no production access was used); its rules are the existing, tested ones.
+- The live accounts' role shapes were read (read-only) and mirrored in the preview;
+  the live Program Access lists themselves are the existing, unchanged rules.
