@@ -38,7 +38,7 @@ from app.models.sales_models import (
     STAGE_PROSPECT, STAGE_CONTACTED, STAGE_DISCOVERY, STAGE_DEMO_BUILD,
     STAGE_PROPOSAL, STAGE_CLOSING, STAGE_WON, STAGE_ONBOARDING, STAGE_LIVE,
     STAGE_LOST, DEMO_REQUESTED, DEMO_READY, DEMO_IN_PROGRESS, DEMO_DELIVERED,
-    DEMO_NOT_REQUESTED, demo_is_outstanding,
+    DEMO_NOT_REQUESTED, DEMO_PENDING_REVIEW, demo_is_outstanding,
 )
 from app.models.scheduling_models import (
     SalesAppointment, AppointmentParticipant, MeetingType,
@@ -1551,6 +1551,18 @@ def patch_opportunity(opp_id: str, body: OpportunityPatch,
         opp.deal_value = Decimal(str(new_val))
 
     # ── demo build ──────────────────────────────────────────────────────────
+    # A CUSTOM demo request is decided through /demo-request/decision, by a
+    # manager who leads this salesperson. The general edit route can neither
+    # create one nor decide one.
+    _DEMO_WORK = ("demo_status", "demo_owner_user_id", "demo_due_at", "demo_url")
+    if data.get("demo_status") == DEMO_PENDING_REVIEW:
+        raise HTTPException(status_code=400,
+                            detail="Use Request Custom Demo to ask for a custom demo.")
+    if opp.demo_status == DEMO_PENDING_REVIEW and any(f in data for f in _DEMO_WORK):
+        from app.routers.sales_demo_requests_router import may_decide as _may_decide
+        if not _may_decide(db, user, opp):
+            raise HTTPException(status_code=403,
+                                detail="This custom demo request is waiting for a manager's decision.")
     if "demo_status" in data and data["demo_status"]:
         if data["demo_status"] not in DEMO_STATUSES:
             raise HTTPException(status_code=400,

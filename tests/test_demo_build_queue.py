@@ -277,8 +277,10 @@ class TestFilters:
 
         body = client.get("/sales/demo-queue?brand_sales_org_id=" + brand.id,
                           headers=_h(manager, db_session)).json()
-        # Still in demo_build stage, so it is still outstanding work.
-        assert body["summary"]["total"] == 1
+        # Ready is not outstanding work, even while the deal still sits in the
+        # Demo Build stage (owner decision, Nov 15 2026: "Ready and delivered
+        # items stay out of the outstanding build count").
+        assert body["summary"]["total"] == 0
 
         moved = client.patch("/sales/opportunities/" + a.id,
                              json={"stage": "demo_proposal"},

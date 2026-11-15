@@ -382,6 +382,10 @@ def demo_is_outstanding(opp) -> bool:
     if getattr(opp, "demo_status", None) == DEMO_PENDING_REVIEW:
         # Asked for, not approved: a decision, not build work.
         return False
+    if getattr(opp, "demo_status", None) in (DEMO_READY, DEMO_DELIVERED):
+        # Built. A deal can sit in the Demo Build stage after its demo is
+        # ready; that is not a demo still owed to anybody.
+        return False
     if getattr(opp, "stage", None) == STAGE_DEMO_BUILD:
         return True
     return getattr(opp, "demo_status", None) in DEMO_OUTSTANDING_STATUSES

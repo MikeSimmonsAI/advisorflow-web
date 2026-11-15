@@ -26,6 +26,7 @@
  * server: what is on screen is what the database holds.
  */
 import QuoteDraftCard from './QuoteDraftCard'
+import CustomDemoRequest from './CustomDemoRequest'
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
@@ -783,7 +784,7 @@ export default function OpportunityDetail() {
     : 'Nothing booked'
 
   const demoSummary = d.status
-    ? [d.status.replace('_', ' '), d.owner_name, d.due_at ? 'due ' + dateTime(d.due_at) : null]
+    ? [d.status === 'pending_review' ? 'waiting for a decision' : d.status.replace('_', ' '), d.owner_name, d.due_at ? 'due ' + dateTime(d.due_at) : null]
         .filter(Boolean).join(' · ')
     : 'Not requested'
 
@@ -880,8 +881,10 @@ export default function OpportunityDetail() {
             summary={demoSummary}
             badge={d.status === 'ready' || d.status === 'delivered'
               ? <Chip tone="green">Ready</Chip>
-              : (d.status ? <Chip tone="amber">{d.status.replace('_', ' ')}</Chip> : null)}
+              : (d.status ? <Chip tone="amber">{d.status === 'pending_review' ? 'Waiting for a decision' : d.status.replace('_', ' ')}</Chip> : null)}
           >
+            <CustomDemoRequest oppId={opp.id} onChanged={load} />
+            <div className="sw-mt" />
             <DemoPanel opp={opp} team={team} onPatch={patch} saving={saving}
                        onRequest={() => patch({ stage: 'demo_build' })} />
             {/* Directly under the demo panel, because publishing the demo is

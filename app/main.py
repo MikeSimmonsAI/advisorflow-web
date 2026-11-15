@@ -152,6 +152,7 @@ from app.routers.sales_catalog_router import router as sales_catalog_router
 from app.routers.deal_builder_router import router as deal_builder_router
 from app.routers.sales_team_router import router as sales_team_router
 from app.routers.launcher_router import router as launcher_router
+from app.routers.sales_demo_requests_router import router as sales_demo_requests_router
 from app.routers.launch_router import god_router as launch_god_router
 # Per-brand launch programme. Addressed by BRAND, not by customer, which is
 # why it is its own router rather than another path under /god/launch.
@@ -1085,6 +1086,7 @@ app.include_router(launch_router)             # /launch  — customer, session-s
 app.include_router(deal_billing_router)       # /sales/opportunities/{id}/billing
 app.include_router(sales_catalog_router)      # /sales/catalog — seller-assisted add-ons and services
 app.include_router(deal_builder_router)       # /deal-builder — salesperson own-commission + executive page (server-gated)
+app.include_router(sales_demo_requests_router)  # /sales — custom demo requests: request, decide, queue
 app.include_router(launcher_router)           # /launcher — Program Access pins + Needs Attention
 app.include_router(sales_team_router)         # /sales-team — My Team + sales onboarding (server-gated)
 app.include_router(launch_god_router)         # /god/launch — staff, god_admin only
