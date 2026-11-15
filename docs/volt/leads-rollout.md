@@ -35,6 +35,14 @@ Consumer Leads is a campaign **inside VOLT Marketing**. It is separate from recr
 - **Preview:** `/consumer-leads/<org>/preview` shows the customer website signed in. Submissions go to `POST /volt/ops/<org>/leads/preview` (managers, operators and the owner only) and are saved with `is_test = true`. Every query filters on `is_test`, so test rows never appear in real lists, reports or the card. "Remove all test leads" deletes test rows only.
 - **Public website:** always visible. With intake off it shows a notice, turns off the last step's boxes and the send button, and the public POST still answers 503.
 
+## Public website: V4 design (2026-11-14)
+- **Design and code:** `frontend/src/pages/volt/ConsumerSite.jsx` and `consumerSite.css`. The reference is `docs/volt/design/consumer_leads_v4_design_demo.html`.
+- **Its own route:** `/volt/check-coverage`, with no VOLT recruiting header. The loading screen shows no brand name on this page.
+- **Copy:** lives in `leads.PAGE`, one place for compliance review. "CoveragePath" (`PAGE["brand"]`) is a temporary working name, not a registered brand.
+- **Questions:** the same 8 the server accepts, with UTM, referrer and landing tracking, shown in a dialog (focus moves to the question, Escape closes, Tab stays inside).
+- **Intake off:** the site stays visible, the last step is turned off, and the public POST answers 503. The back-office preview submits test data.
+- **Compliance flag:** the consent text names VOLT while the site shows CoveragePath. Review it before intake goes on.
+
 ## Lead sources (`app/services/volt/lead_sources.py`)
 - **Working now:** custom webhook (HMAC-SHA256 over `<timestamp>.<body>`, 5-minute window), Google Ads lead-form webhook (`google_key`), and CSV import (a consent statement is required).
 - **Waiting for account connection (cannot be turned on):** Facebook and Instagram Lead Ads (an approved Meta app with `leads_retrieval`, plus Page authorization), and TikTok Instant Forms (an approved TikTok for Business app, plus the advertiser's authorization).

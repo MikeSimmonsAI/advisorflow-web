@@ -52,41 +52,61 @@ REVIEW_CHECKLIST = [
 
 # Consumer page copy (also needs the same compliance review as the consent).
 PAGE = {
-    "headline": "You May Qualify for $0 Monthly Health Insurance.",
-    "subhead": "Check in about two minutes. Free, no obligation, no account needed. A licensed agent can explain your options.",
-    "benefits": [
-        ["Lower monthly premiums", "Financial help can lower what you pay each month. For some people it brings the premium to $0."],
-        ["Doctor visits", "Plans cover visits to doctors in the plan's network. What you pay at the visit depends on the plan."],
-        ["Prescriptions", "Plans include prescription drug coverage. Your cost depends on the plan and the medicine."],
-        ["Preventive care", "Many checkups, screenings and vaccines are covered at no cost when you use the plan's network."],
-        ["Emergency care", "Emergency services are covered. Deductibles, copays or coinsurance may apply."],
-        ["A licensed agent helps you", "A licensed agent can compare plans with you and answer questions at no cost to you."],
+    # V4 design (docs/volt/design/consumer_leads_v4_design_demo.html, owner-approved direction 2026-11-14).
+    # "CoveragePath" is a TEMPORARY working name, not a registered brand: change it here only.
+    "brand": "CoveragePath",
+    "brand_note": "CoveragePath is a working name for an independent health coverage help service.",
+    "eyebrow": "Coverage help, made simple",
+    "headline": "Health coverage that fits your life and budget.",
+    "headline_accent": "fits your life",
+    "subhead": "You may qualify for health insurance with a $0 monthly premium. See what options might be available in your area.",
+    "cta": "Check My Options",
+    "trust": ["Free to check", "No obligation", "No account required", "Help from licensed agents"],
+    "highlights": [
+        ["Plans worth exploring", "Understand what may be available where you live"],
+        ["Possible monthly savings", "Financial help may lower your premium"],
+        ["Guidance from a person", "A licensed agent can explain your options"],
     ],
+    "benefits_title": "Coverage for the moments that matter.",
+    "benefits_intro": "Health plans can include benefits that help you take care of yourself and your family. What is covered, and what you pay, depends on the plan.",
+    "benefits": [
+        ["Potential premium savings", "Financial help can lower what you pay each month. For some people it brings the premium to $0, but not for everyone."],
+        ["Doctor visits", "Plans can help with check-ups and visits when you are sick. What you pay depends on the plan and its network."],
+        ["Prescription coverage", "Plans include coverage for medicines. Your cost depends on the plan and the medicine."],
+        ["Preventive care", "Many check-ups, screenings and vaccines are covered at no cost when you use the plan's network."],
+        ["Emergency benefits", "Plans cover emergency care. Deductibles, copays or coinsurance may apply."],
+        ["Human guidance", "A licensed agent can explain options and answer questions, at no cost to you."],
+    ],
+    "steps_title": "Three steps. That's it.",
+    "steps_intro": "Clear and simple from the first question to the last.",
+    "steps": [
+        ["Tell us a little about yourself", "Start with your ZIP code and answer a few basic questions."],
+        ["Explore possible options", "Find out whether savings or coverage options may be available for your situation."],
+        ["Get help from a person", "Ask a licensed agent to reach out and explain your options."],
+    ],
+    "faq_title": "Answers without the jargon.",
+    "faq": [
+        ["Does it cost anything to check?", "No. Checking your options is free, and there is no obligation to enroll. "
+         "Plan premiums and out-of-pocket costs depend on the coverage you choose."],
+        ["Is health insurance really $0 a month?", "Some people qualify for plans with a $0 monthly premium after financial "
+         "assistance. Eligibility is not guaranteed, and deductibles, copays and other costs may still apply."],
+        ["Do I have to sign up right now?", "No. These questions do not enroll you in anything. They help a licensed agent "
+         "understand what may be available to you."],
+        ["What if I'm 65 or older?", "Medicare may be the right fit, and it works differently from these plans. "
+         "A licensed agent can explain your options. This website does not decide eligibility."],
+        ["Is this a government website?", "No. This is an independent health coverage help service. It is not a "
+         "government website and is not affiliated with HealthCare.gov or any government agency."],
+    ],
+    "final_title": "See what options might fit your budget.",
+    "final_text": "No account, no pressure, no obligation.",
     "disclaimers": [
         "Not everyone qualifies. Eligibility depends on where you live, your household income and size, and other coverage you have.",
         "A $0 monthly premium is not guaranteed.",
         "A $0 monthly premium does not mean all care is free. Deductibles, copays and coinsurance may still apply.",
         "This is not a government website and is not affiliated with HealthCare.gov or any government agency.",
     ],
-    # From the approved V3 design (docs/volt/design/volt_leads_v3.html).
-    "steps": [
-        ["Answer a few questions", "Tell us your ZIP code and a little about your coverage needs."],
-        ["Explore your options", "Find out whether savings or coverage options may be available."],
-        ["Talk with a real person", "A licensed agent can explain plans and help with next steps."],
-    ],
-    "faq": [
-        ["Is health insurance really free?", "Some eligible people may qualify for plans with a $0 monthly premium after "
-         "financial assistance. That does not mean all healthcare is free. Deductibles, copays and other costs may apply."],
-        ["Does checking cost money?", "No. Exploring your options is free, and there is no obligation to enroll."],
-        ["Will everyone qualify for savings?", "No. Eligibility and savings depend on things like where you live, "
-         "household income, household size and other coverage you can get."],
-        ["Is this a government website?", "No. This is an independent health insurance help website. It is not a "
-         "government website and is not affiliated with HealthCare.gov."],
-        ["What if I have Medicare?", "Medicare and Marketplace coverage are different. Marketplace savings generally "
-         "are not available to people enrolled in Medicare. A licensed agent can help you understand which applies."],
-    ],
-    "medicare_note": ("If you are 65 or older, you may be eligible for Medicare, which works differently from these plans. "
-                      "A licensed agent can explain Medicare options with you. You can still send your request."),
+    "medicare_note": ("If you are 65 or older, Medicare may be a better fit, and it works differently from these plans. "
+                      "A licensed agent can explain your options. You can still continue."),
 }
 
 STATES = ("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA",
