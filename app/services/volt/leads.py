@@ -331,10 +331,16 @@ def create_or_merge(db: Session, org_id: str, v: Dict[str, Any], *, test: bool, 
             _event(db, lead, actor, "created", new=v["channel"], note=origin)
             _event(db, lead, actor, "consent_recorded", new=consent_version,
                    note=consent_note or "consent text sha256 %s" % lead.consent_text_hash[:16])
+            if not test:
+                from app.services.volt import sheets_outbox
+                sheets_outbox.enqueue(db, org_id, "consumer", lead.id)
             return lead, True
     existing.submissions = (existing.submissions or 1) + 1
     existing.updated_at = datetime.utcnow()
     _event(db, existing, actor, "repeat_submission", note=origin)
+    if not test:
+        from app.services.volt import sheets_outbox
+        sheets_outbox.enqueue(db, org_id, "consumer", existing.id)
     return existing, False
 
 
@@ -603,6 +609,9 @@ def update(db: Session, user: User, org_id: str, lead_id: str, body: Dict[str, A
     if note:
         _event(db, lead, user, "note", note=note)
     lead.updated_at = now
+    if not test:
+        from app.services.volt import sheets_outbox
+        sheets_outbox.enqueue(db, org_id, "consumer", lead.id)
     db.flush()
     return detail(db, user, org_id, lead.id, test)
 
@@ -655,6 +664,9 @@ def assign(db: Session, user: User, org_id: str, lead_id: str, body: Dict[str, A
         _event(db, lead, user, "assigned", lead.assigned_user_id, target)
         lead.assigned_user_id = target
         lead.updated_at = datetime.utcnow()
+    if not test:
+        from app.services.volt import sheets_outbox
+        sheets_outbox.enqueue(db, org_id, "consumer", lead.id)
     db.flush()
     return detail(db, user, org_id, lead.id, test)
 
