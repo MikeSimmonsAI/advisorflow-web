@@ -87,13 +87,20 @@ def sync_pass(db: Session, *, limit: int = 25) -> dict:
     """
     if os.getenv("VOLT_SHEETS_SYNC_ENABLED", "off").lower() != "on":
         return {"disabled": True, "synced": 0}
+    # A spreadsheet is an external PII destination. Never mix organizations:
+    # only the explicitly approved tenant may be exported to these two IDs.
+    approved_org_id = os.getenv("VOLT_SHEETS_ORG_ID", "").strip()
+    if not approved_org_id:
+        return {"disabled": True, "reason": "tenant_not_configured", "synced": 0}
     now = datetime.utcnow()
     items = (db.query(VoltLeadSheetOutbox)
-             .filter(VoltLeadSheetOutbox.status.in_(("pending", "failed")),
+             .filter(VoltLeadSheetOutbox.organization_id == approved_org_id,
+                     VoltLeadSheetOutbox.status.in_(("pending", "failed")),
                      (VoltLeadSheetOutbox.next_retry_at.is_(None) |
                       (VoltLeadSheetOutbox.next_retry_at <= now)),
                      VoltLeadSheetOutbox.attempts < MAX_ATTEMPTS)
              .order_by(VoltLeadSheetOutbox.updated_at, VoltLeadSheetOutbox.id)
+             .with_for_update(skip_locked=True)
              .limit(min(max(limit, 1), 100)).all())
     out = {"disabled": False, "synced": 0, "failed": 0, "unconfigured": 0}
     for item in items:
