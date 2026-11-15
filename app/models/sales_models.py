@@ -342,7 +342,11 @@ DEMO_REQUESTED     = "requested"
 DEMO_IN_PROGRESS   = "in_progress"
 DEMO_READY         = "ready"
 DEMO_DELIVERED     = "delivered"
-DEMO_STATUSES = (DEMO_NOT_REQUESTED, DEMO_REQUESTED, DEMO_IN_PROGRESS,
+# A CUSTOM demo the salesperson asked for, waiting for a manager's decision
+# (route to an existing demo, or approve a custom build). Not build work yet,
+# so it is deliberately NOT in DEMO_OUTSTANDING_STATUSES.
+DEMO_PENDING_REVIEW = "pending_review"
+DEMO_STATUSES = (DEMO_NOT_REQUESTED, DEMO_PENDING_REVIEW, DEMO_REQUESTED, DEMO_IN_PROGRESS,
                  DEMO_READY, DEMO_DELIVERED)
 
 # Statuses that mean a demo is still owed to somebody.
@@ -374,6 +378,9 @@ def demo_is_outstanding(opp) -> bool:
     if getattr(opp, "status", None) in ("won", "lost"):
         # A demo on a closed deal is not outstanding work: a won deal's demo
         # did its job, and a lost deal's will never be built.
+        return False
+    if getattr(opp, "demo_status", None) == DEMO_PENDING_REVIEW:
+        # Asked for, not approved: a decision, not build work.
         return False
     if getattr(opp, "stage", None) == STAGE_DEMO_BUILD:
         return True

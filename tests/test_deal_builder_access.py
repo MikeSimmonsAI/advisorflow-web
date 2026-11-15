@@ -328,7 +328,8 @@ def test_wholesale_admin_with_executive_grant(client, team, wholesale_admins, wh
 def test_wholesale_lock_still_applies_elsewhere(client, team, wholesale_admins):
     # Opening the Deal Builder does not widen the Wholesale lock for other screens.
     from app.services import program_experience as pe
-    assert pe.DEAL_BUILDER_PREFIXES == ("/deal-builder/", "/sales-team/")
+    # /launcher/ is the launcher's own pins + attention row (personal data only).
+    assert pe.DEAL_BUILDER_PREFIXES == ("/deal-builder/", "/sales-team/", "/launcher/")
 
 
 # ── rules v2 (2026-11-13) and views by seat ──────────────────────────────────

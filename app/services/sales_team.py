@@ -193,6 +193,28 @@ def actor_rights(db: Session, actor: User) -> Dict[str, Any]:
             "can_record_departure": admin, "is_admin": admin, "is_leader": leader}
 
 
+def opp_scope(db: Session, user: User, brand_id: str) -> Optional[set]:
+    """Whose deals this person leads in a brand, for team views and demo
+    decisions. None = the whole brand. A set = those salespeople only.
+
+    EvoSys Pro Sales follows the team tree: God Mode and the owners see the
+    whole brand; the Sr EVP and an Area Sales Manager see themselves and the
+    people under them. Other brands keep their existing rule: a sales manager
+    sees the brand."""
+    from app.services.sales_access import is_sales_manager
+    if is_god(user):
+        return None
+    brand = program_brand(db)
+    if brand is not None and brand.id == brand_id:
+        s = seat(db, user, brand)
+        if s in (SEAT_GOD, SEAT_OWNER):
+            return None
+        if s in (SEAT_SEVP, SEAT_ASM) and onboarding_cleared(db, user, brand):
+            return team_of(db, brand.id, user.id) | {user.id}
+        return {user.id}
+    return None if is_sales_manager(user, db, brand_id) else {user.id}
+
+
 def _seat_of_member(db: Session, user: User, m: Membership, brand_id: str) -> str:
     if is_god(user):
         return SEAT_GOD
