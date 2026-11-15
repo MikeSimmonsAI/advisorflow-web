@@ -22,7 +22,6 @@ import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } fr
 import { setVoltToken, useVoltTitle, volt, voltToken } from './voltApi'
 import ApplicationSteps, { DocRow } from './VoltApplication'
 import { ApplyDialog, TalentDialog } from './VoltDialogs'
-import { CoverageFunnel } from './VoltLeads'
 import MyApplication, { SupportPage } from './VoltMyApplication'
 import './volt.css'
 
@@ -635,7 +634,6 @@ export default function VoltPortal() {
         <Route index element={<Home portal={portal} signedIn={signedIn} onApply={openApply} onTalent={openTalent} />} />
         <Route path="projects/:projectKey" element={<ProjectPage portal={portal} onTalent={openTalent} />} />
         <Route path="apply/:projectKey" element={<Apply portal={portal} me={me} reload={reload} />} />
-        <Route path="check-coverage" element={<CoverageFunnel />} />
         <Route path="sign-in" element={<SignIn reload={reload} />} />
         <Route path="me" element={needAuth(<MyApplication me={me} reload={reload} portal={portal} />)} />
         <Route path="me/profile" element={needAuth(<ProfilePage me={me} reload={reload} />)} />

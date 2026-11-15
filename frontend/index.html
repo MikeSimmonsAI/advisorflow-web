@@ -126,6 +126,9 @@
         // investor waiting a second and a half for the page to mount should
         // not be reading the name of the wholesaler's software supplier.
         if (/^\/(investor|my-property)\//.test(location.pathname)) name = ''
+        // The Consumer Leads customer website has its own brand: no VOLT or
+        // platform name flashes while it loads.
+        if (/^\/volt\/check-coverage/.test(location.pathname)) name = ''
         // OLP exploration (src/brand/productBrand.js): on a BookaBoost host the
         // sign-in, password and Wholesale pages are OLP's, so their loading
         // splash says OLP instead of flashing "BookaBoost" first. Every other

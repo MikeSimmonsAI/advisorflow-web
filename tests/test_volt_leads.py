@@ -174,7 +174,7 @@ def test_new_fields_validation_and_attribution(volt):
     assert L.channel_of("", "", "") == "direct" and L.channel_of("", "", "news.example.com") == "referral"
     assert L.channel_of("referral", "", "") == "referral" and L.channel_of("tiktok", "", "") == "other"
     cfg = volt["c"].get("/volt/public/%s/leads/config" % SLUG).json()
-    assert cfg["page"]["headline"] == "You May Qualify for $0 Monthly Health Insurance."
+    assert cfg["page"]["headline"] == "Health coverage that fits your life and budget."
     text = " ".join(cfg["page"]["disclaimers"])
     for must in ("Not everyone qualifies", "not guaranteed", "does not mean all care is free", "not a government website", "HealthCare.gov"):
         assert must in text
