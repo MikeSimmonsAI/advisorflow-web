@@ -11,6 +11,8 @@ on:
       - 'app/routers/volt_router.py'
       - 'app/deps.py'
       - 'app/services/workspace_access.py'
+      - 'app/service_role.py'
+      - 'app/models/job_models.py'
       - 'app/migrate.py'
       - 'frontend/src/pages/volt/**'
       - 'frontend/src/pages/program/programAccessModel.js'
@@ -45,6 +47,12 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: '1'
         run: python -m pytest -q -o addopts='' tests/test_volt_leads.py tests/test_volt_consumer_leads_workspace.py tests/test_volt_dev_relay.py tests/test_volt_dev_chatgpt.py
+      # #630: #620 shipped the Sheets worker without a scheduler owner because
+      # neither its tests nor the one-owner-per-loop guard ran here.
+      - name: Google Sheets mirror, its scheduling, and scheduler ownership
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -m pytest -q -o addopts='' tests/test_volt_sheets_export.py tests/test_volt_sheets_scheduler.py tests/test_service_role.py
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
