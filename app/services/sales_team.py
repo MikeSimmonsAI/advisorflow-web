@@ -344,6 +344,9 @@ def invite(db: Session, actor: User, *, email: str, full_name: str, seat_key: st
         setup_url = staff_activation.activation_url(base_url, raw)
     db.commit()
     sent = _send_invite_email(user, actor, seat_key, setup_url, base_url)
+    from app.services import sales_contractor as _sc
+    _sc.record_send(db, brand.id, user.id, actor, "invite", bool(setup_url), sent)
+    db.commit()
     return {"user_id": user.id, "email": user.email, "seat": seat_key,
             "manager_id": manager_id, "new_account": created,
             "email_sent": sent,
@@ -502,7 +505,31 @@ def profile(db: Session, actor: User, target_id: str) -> Dict[str, Any]:
                        "waiting_for_decision": o.demo_status == DEMO_PENDING_REVIEW}
                       for o in opps if o.demo_status not in (None, "not_requested")],
     }
-    return {"person": {"user_id": u.id, "name": u.full_name or u.email, "email": u.email,
+    from app.services import sales_contractor as _sc
+    onboarding_view = None
+    if onb is not None:
+        j = _sc.journey(db, onb, u)
+        if rights["can_approve"]:
+            onboarding_view = {"onboarding_id": onb.id, "steps": j["steps"], "next": j["next"],
+                               "agreement": j["agreement"], "corrections": j["corrections"],
+                               "documents": _sc.documents(db, onb, with_files=True),
+                               "account": _sc.account_status(db, u), "can_act": True}
+        else:
+            # The Sr EVP / an ASM: where the person is, never what is in the files.
+            onboarding_view = {"steps": [{k: st.get(k) for k in ("key", "label", "done", "owner")} for st in j["steps"]],
+                               "next": j["next"], "can_act": False,
+                               "documents": [{"label": d["label"], "received": d["received"],
+                                              "review_label": d["review_label"]}
+                                             for d in _sc.documents(db, onb, with_files=False)]}
+    from app.services import sales_getting_started as _gs
+    first_sale = _gs.steps_for(db, u, brand.id)
+    return {"onboarding": onboarding_view,
+            "getting_started": {"steps": [{k: st.get(k) for k in ("key", "label", "done", "optional")}
+                                          for st in first_sale["steps"]],
+                                "next": ({"label": first_sale["next"]["label"]} if first_sale["next"] else None)},
+            "can_resend_invite": bool(onb is not None and onb.status != "approved"
+                                      and (rights["is_admin"] or rights["is_leader"])),
+            "person": {"user_id": u.id, "name": u.full_name or u.email, "email": u.email,
                        "seat": st, "seat_label": SEAT_LABELS[st],
                        "manager": (manager.full_name or manager.email) if manager else None,
                        "active": bool(m.is_active),

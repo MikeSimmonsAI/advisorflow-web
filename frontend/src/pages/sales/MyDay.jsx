@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import SalesShell, { useSales } from './SalesShell'
+import GettingStarted from './GettingStarted'
 import { wallTime } from './parts'
 import { followUpList, greeting, firstName, groupForSimpleBoard } from './simpleSales'
 import { Icon, ErrorLine, Skeleton } from './SimpleParts'
@@ -94,6 +95,7 @@ function MyDayBody() {
   return (
     <>
       <ErrorLine error={error} onRetry={load} />
+      <GettingStarted />
 
       <div className="ss-hero">
         <div className="ss-sun" aria-hidden="true">☀️</div>

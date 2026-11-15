@@ -8,7 +8,7 @@
  * than dropped. The full nine-stage board stays at /sales/pipeline/stages.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import SalesShell from './SalesShell'
 import NewProspect from './NewProspect'
@@ -30,7 +30,9 @@ function PipelineBody() {
   const [resp, setResp] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [creating, setCreating] = useState(false)
+  const [sp] = useSearchParams()
+  // ?add=1 (Getting Started on My Day) opens Add Lead straight away.
+  const [creating, setCreating] = useState(sp.get('add') === '1')
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, fetchObjectUrl } from '../../api/client'
+import { api } from '../../api/client'
+import AgreementVersions from './AgreementVersions'
 import TeamMemberProfile from './TeamMemberProfile'
 
 /**
@@ -40,7 +41,6 @@ export default function MyTeam() {
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState('')
   const [form, setForm] = useState({ full_name: '', email: '', seat: '', manager_id: '' })
-  const [open, setOpen] = useState(null)
   const [profile, setProfile] = useState(null)
 
   const load = useCallback(async () => {
@@ -66,16 +66,12 @@ export default function MyTeam() {
     e.preventDefault()
     act('invite', async () => {
       const res = await api.post('/sales-team/invite', { ...form, manager_id: form.manager_id || null, base_url: window.location.origin })
-      if (res.email_sent) setNote('Invite sent to ' + res.email + '.')
+      if (res.email_sent) setNote('Invite sent to ' + res.email + (res.new_account ? ' with a one-time set-up link (expires in 3 days).' : '. They already have an EvoSys login, so they just sign in.') + ' Open their Profile to follow setup.')
       else setNote('The email could not be sent. Send this one-time link to ' + res.email + ' yourself: ' + (res.setup_url || '(they already have a login - ask them to sign in)'))
       setForm({ full_name: '', email: '', seat: '', manager_id: '' })
     })
   }
 
-  const docUrl = (p, item) => '/sales-team/onboarding/' + p.onboarding_id + '/documents/' + item.document_id
-  const openDoc = async (p, item) => {
-    try { window.open(await fetchObjectUrl(docUrl(p, item) + '?inline=true'), '_blank', 'noopener') } catch (e) { setErr(errText(e)) }
-  }
 
   const kids = (parentId) => people.filter(p => parentId === null
     ? (!p.manager_id || !byId[p.manager_id])
@@ -90,7 +86,6 @@ export default function MyTeam() {
             </div>
             <div>
               {!['owner','god'].includes(p.seat) && <button style={btn} aria-expanded={profile === p.user_id} onClick={() => setProfile(profile === p.user_id ? null : p.user_id)}>{profile === p.user_id ? 'Hide profile' : 'Profile'}</button>}
-              {p.onboarding && <button style={btn} onClick={() => setOpen(open === p.user_id ? null : p.user_id)}>{open === p.user_id ? 'Hide checklist' : 'Checklist'}</button>}
               {r.can_manage && !p.is_self && !['owner','god'].includes(p.seat) && !p.departed_at && (p.active
                 ? <button style={btn} disabled={!!busy} onClick={() => act('s' + p.user_id, () => api.post('/sales-team/members/' + p.user_id + '/suspend', {}), p.name + ' is suspended.')}>Suspend</button>
                 : <button style={btn} disabled={!!busy} onClick={() => act('r' + p.user_id, () => api.post('/sales-team/members/' + p.user_id + '/reactivate', {}), p.name + ' is active again.')}>Reactivate</button>)}
@@ -104,24 +99,6 @@ export default function MyTeam() {
             </div>
           </div>
           {profile === p.user_id && <TeamMemberProfile userId={p.user_id} />}
-          {open === p.user_id && p.onboarding && (
-            <div style={{ marginTop: 10, fontSize: 13 }}>
-              {p.onboarding.items.map(i => (
-                <div key={i.key} style={{ padding: '3px 0' }}>
-                  {i.done ? '✓' : '○'} {i.label}
-                  {i.missing_fields && i.missing_fields.length > 0 && <span style={{ color: '#79551a' }}> — missing {i.missing_fields.join(', ')}</span>}
-                  {r.can_open_files && i.document_id && <button style={{ ...btn, marginTop: 0, padding: '2px 8px' }} onClick={() => openDoc(p, i)}>Open {i.filename}</button>}
-                </div>
-              ))}
-              {p.onboarding.returned_note && <p style={{ color: '#79551a' }}>Sent back: {p.onboarding.returned_note}</p>}
-              {r.can_approve && p.onboarding.status !== 'approved' && (
-                <div>
-                  <button style={primary} disabled={!p.onboarding.complete || !!busy} onClick={() => act('a' + p.user_id, () => api.post('/sales-team/onboarding/' + p.onboarding_id + '/approve', {}), p.name + ' is approved and can sell now.')}>Approve</button>
-                  <button style={btn} disabled={!!busy} onClick={() => { const n = window.prompt('What needs fixing?'); if (n !== null) act('b' + p.user_id, () => api.post('/sales-team/onboarding/' + p.onboarding_id + '/send-back', { note: n }), 'Sent back to ' + p.name + '.') }}>Send back</button>
-                </div>
-              )}
-            </div>
-          )}
         </div>
         {tree(p.user_id, depth + 1)}
       </div>
@@ -142,13 +119,13 @@ export default function MyTeam() {
 
       {r.can_invite && (
         <form onSubmit={invite} style={card}>
-          <h3 style={{ marginTop: 0 }}>Invite someone</h3>
-          <p style={{ fontSize: 13, color: '#607486' }}>They get an email to set their own password, then fill in the application and upload their documents. They can sell once an owner approves them.</p>
+          <h3 style={{ marginTop: 0 }}>Add Contractor</h3>
+          <p style={{ fontSize: 13, color: '#607486' }}>Enter their name, email, role and manager, then Send Invite. They get an email to set their own password (or, with an existing EvoSys login, just sign in), then complete the application, sign the agreement and upload their documents. Open their Profile to follow each step. They can sell once an owner approves them.</p>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <input required placeholder="Full name" value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} style={{ ...btn, flex: '1 1 180px' }} />
             <input required type="email" placeholder="Email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} style={{ ...btn, flex: '1 1 200px' }} />
             <select required value={form.seat} onChange={e => setForm({ ...form, seat: e.target.value })} style={btn}>
-              <option value="">Seat…</option>
+              <option value="">Role…</option>
               {seats.map(s => <option key={s} value={s}>{SEAT_NAME[s]}</option>)}
             </select>
             {form.seat === 'rep' && (
@@ -161,12 +138,13 @@ export default function MyTeam() {
                 <option value="">Reports to…</option>
                 {managers.filter(m => m.seat === 'sevp').map(m => <option key={m.user_id} value={m.user_id}>{m.name}</option>)}
               </select>)}
-            <button style={primary} disabled={busy === 'invite'}>{busy === 'invite' ? 'Sending…' : 'Send invite'}</button>
+            <button style={primary} disabled={busy === 'invite'}>{busy === 'invite' ? 'Sending…' : 'Send Invite'}</button>
           </div>
         </form>
       )}
 
       {people.length === 0 ? <div style={card}>Nobody on the team yet.</div> : tree(null, 0)}
+      {r.can_approve && <AgreementVersions />}
       {r.can_open_files && <p style={{ fontSize: 12, color: '#607486' }}>{d.drive_status} Every document you open is recorded.</p>}
     </div>
   )

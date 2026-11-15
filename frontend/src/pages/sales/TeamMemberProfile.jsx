@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../api/client'
+import ContractorOnboardingPanel from './ContractorOnboardingPanel'
 
 /**
  * One salesperson inside My Team: deals, activity and demo work. Read from
@@ -13,12 +14,9 @@ const when = iso => { try { return new Date(iso).toLocaleString([], { month: 'sh
 export default function TeamMemberProfile({ userId }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
-  useEffect(() => {
-    let on = true
-    api.get('/sales-team/members/' + userId + '/profile', { noOrgContext: true })
-      .then(r => { if (on) setD(r) }).catch(e => { if (on) setErr((e && e.detail) || 'Could not load this profile.') })
-    return () => { on = false }
-  }, [userId])
+  const load = () => api.get('/sales-team/members/' + userId + '/profile', { noOrgContext: true })
+    .then(r => setD(r)).catch(e => setErr((e && e.detail) || 'Could not load this profile.'))
+  useEffect(() => { load() }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
   if (err) return <div style={box}>{err}</div>
   if (!d) return <div style={box}>Loading…</div>
   const s = d.summary
@@ -28,6 +26,17 @@ export default function TeamMemberProfile({ userId }) {
         <b>{s.open_deals}</b> open deals · <b>{s.follow_ups_due}</b> follow-ups due · <b>{s.demos_building}</b> demos building
         {d.person.manager && <> · reports to {d.person.manager}</>}
       </div>
+      {d.getting_started && (
+        <div style={{ marginBottom: 8 }}>
+          <b>From approval to first sale</b>: {d.getting_started.steps.filter(x => x.done && !x.optional).length} of {d.getting_started.steps.filter(x => !x.optional).length} steps
+          {d.getting_started.next ? <> · next: {d.getting_started.next.label}</> : ' · complete'}
+          <div style={{ display: 'flex', gap: 3, marginTop: 4 }} aria-hidden="true">
+            {d.getting_started.steps.filter(x => !x.optional).map(x => <span key={x.key} title={x.label} style={{ flex: 1, height: 6, borderRadius: 3, background: x.done ? '#087f83' : '#dce5ea' }} />)}
+          </div>
+        </div>
+      )}
+      <ContractorOnboardingPanel ob={d.onboarding} userId={userId} canResend={d.can_resend_invite} onChanged={load} />
+      <div style={{ marginTop: 12 }} />
       <b>Deals</b>
       {d.deals.length === 0 ? <p style={{ margin: '4px 0 10px' }}>No open deals.</p> : (
         <table style={{ width: '100%', borderCollapse: 'collapse', margin: '4px 0 10px' }}>
