@@ -10,6 +10,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../../api/client'
 import { volt } from './voltApi'
 import './consumerSite.css'
+import { CONSUMER_PHOTOS, Photo } from './consumerImages'
 
 const msg = (e) => e?.message || 'Something went wrong. Please try again.'
 
@@ -254,12 +255,11 @@ export default function ConsumerSite({ preview = null } = {}) {
                 </div>
                 <ul className="cp-trust" data-trust>{(page.trust || []).map((t) => <li key={t}>{t}</li>)}</ul>
               </div>
-              <div className="cp-visual" aria-hidden="true">
-                <div className="cp-orb" />
-                <div className="cp-ill"><i className="cp-sun" /><i className="cp-plant" /><i className="cp-body" /><i className="cp-neck" />
-                  <i className="cp-face" /><i className="cp-hair" /><i className="cp-smile" /></div>
-                <div className="cp-float cp-float--top"><span>♡</span><strong>Real human help</strong><small>A licensed agent explains your options</small></div>
-                <div className="cp-float cp-float--bottom"><span>✓</span><strong>Simple steps</strong><small>A few easy questions</small></div>
+              <div className="cp-visual" data-hero-photo>
+                <div className="cp-orb" aria-hidden="true" />
+                <div className="cp-ill"><Photo p={CONSUMER_PHOTOS.hero} eager /></div>
+                <div className="cp-float cp-float--top" aria-hidden="true"><span>♡</span><strong>Real human help</strong><small>A licensed agent explains your options</small></div>
+                <div className="cp-float cp-float--bottom" aria-hidden="true"><span>✓</span><strong>Simple steps</strong><small>A few easy questions</small></div>
               </div>
             </div>
           </section>
@@ -272,6 +272,9 @@ export default function ConsumerSite({ preview = null } = {}) {
             <ul className="cp-benefits" data-benefits>{page.benefits.map(([t, d], i) => (
               <li key={t}><span className="cp-icon" aria-hidden="true">{['$', '♡', '✚', '✓', '☂', '☏'][i] || '✓'}</span><h3>{t}</h3><p>{d}</p></li>))}</ul>
           </section>
+          <div className="cp-max cp-photos" data-photo-band>
+            {CONSUMER_PHOTOS.band.map((p) => <figure key={p.src}><Photo p={p} /></figure>)}
+          </div>
           <section className="cp-section cp-how" id="cp-how" aria-labelledby="cp-how-h">
             <div className="cp-max">
               <div className="cp-head"><p className="cp-eyebrow" style={{ margin: 0 }}>No complicated process</p>
@@ -294,6 +297,7 @@ export default function ConsumerSite({ preview = null } = {}) {
         <footer className="cp-foot" data-funnel-disclaimers>
           <p><b>{brand}</b>. {page.brand_note}</p>
           <ul>{page.disclaimers.map((d) => <li key={d}>{d}</li>)}</ul>
+          <p className="cp-credit" data-photo-credit>{CONSUMER_PHOTOS.credit}</p>
         </footer>
         {wizard}
       </>}
