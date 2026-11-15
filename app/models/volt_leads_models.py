@@ -161,3 +161,26 @@ class VoltLeadDelivery(Base):
     next_retry_at = Column(DateTime, nullable=True)
     received_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     processed_at = Column(DateTime, nullable=True)
+
+
+class VoltLeadSheetOutbox(Base):
+    """Durable export queue for both VOLT workspaces; payload is only a DB key.
+
+    Actual customer/applicant contact details are loaded from the primary DB
+    only by the authorized worker. Disabled until explicit Sheets configuration.
+    """
+    __tablename__ = "volt_lead_sheet_outbox"
+    __table_args__ = (UniqueConstraint("organization_id", "business", "record_id",
+                                       name="uq_volt_lead_sheet_outbox"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id", ondelete="CASCADE"),
+                             nullable=False, index=True)
+    business = Column(String, nullable=False)  # consumer | recruiting
+    record_id = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="pending")  # pending | synced | failed
+    attempts = Column(Integer, nullable=False, default=0)
+    next_retry_at = Column(DateTime, nullable=True)
+    last_error = Column(String, nullable=True)  # error type only; NEVER PII
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    synced_at = Column(DateTime, nullable=True)
