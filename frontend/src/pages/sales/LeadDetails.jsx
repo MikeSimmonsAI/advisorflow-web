@@ -118,7 +118,7 @@ function LeadDetailsBody() {
             </div>
             <div className="ss-detail-actions">
               {!isWon && opp.stage !== LOST_STAGE && (
-                <button type="button" className="ss-btn ss-white" onClick={() => nav('/sales/opportunities/' + opp.id + '?section=quote')}>
+                <button type="button" className="ss-btn ss-white" onClick={() => nav('/sales/opportunities/' + opp.id + '/quote')}>
                   Build Quote
                 </button>
               )}

@@ -611,3 +611,5 @@ import app.models.reset_models  # noqa: F401,E402  (imported for side effects)
 import app.models.sales_team_models  # noqa: F401,E402  (imported for side effects)
 # Program Access launcher: per-account pinned workspaces (preference only).
 import app.models.launcher_models  # noqa: F401,E402  (imported for side effects)
+# Deal-linked quotes from the Salesperson Deal Builder (draft per deal + proposal snapshot).
+import app.models.sales_quote_models  # noqa: F401,E402  (imported for side effects)

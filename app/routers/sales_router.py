@@ -2283,3 +2283,72 @@ def opportunity_implementation(opportunity_id: str,
                 "message": ("Won — awaiting provisioning." if opp.status == "won"
                             else "Not won yet.")}
     return {"provisioned": True, **sales_projection(db, impl)}
+
+
+# ── the Salesperson Deal Builder inside the deal ─────────────────────────────
+
+@router.get("/opportunities/{opp_id}/quote-draft")
+def get_quote_draft(opp_id: str,
+                    user: User = Depends(require_sales_member),
+                    db: Session = Depends(get_db)):
+    """Everything the Deal Builder needs to quote THIS deal, from the server
+    record: the customer, the deal, who is credited, the saved quote and the
+    current proposal. Never any commission - the builder asks
+    /deal-builder/commission for that, which decides the view by seat."""
+    from app.services import proposal_service as _ps
+    from app.services import sales_quote as _sq
+    from app.models.models import PROPOSAL_EDITABLE_STATUSES
+    opp = _load(opp_id, user, db)
+    prop = _ps.current_proposal(db, opp.id)
+    try:
+        assert_can_edit_opportunity(user, opp, db)
+        can_edit = opp.status == "open"
+    except HTTPException:
+        can_edit = False
+    return {
+        "opportunity": {"id": opp.id, "company_name": opp.company_name,
+                        "contact_name": opp.contact_name, "email": opp.email,
+                        "stage": opp.stage, "stage_label": STAGE_LABELS.get(opp.stage, opp.stage),
+                        "status": opp.status},
+        "credited_salesperson": {"user_id": opp.owner_user_id,
+                                 "name": _user_name(db, opp.owner_user_id)},
+        "draft": _sq.draft_out(_sq.draft_for(db, opp.id)),
+        "proposal": ({"id": prop.id, "number": prop.proposal_number, "version": prop.version,
+                      "status": prop.sales_status,
+                      "editable": prop.sales_status in PROPOSAL_EDITABLE_STATUSES}
+                     if prop else None),
+        "can_edit": can_edit,
+        "return_to": "/sales/opportunities/%s" % opp.id,
+    }
+
+
+@router.put("/opportunities/{opp_id}/quote-draft")
+def put_quote_draft(opp_id: str, body: Dict[str, Any],
+                    user: User = Depends(require_sales_member),
+                    db: Session = Depends(get_db)):
+    from app.services import sales_quote as _sq
+    opp = _load(opp_id, user, db)
+    assert_can_edit_opportunity(user, opp, db)
+    if opp.status != "open":
+        raise HTTPException(status_code=409,
+                            detail="This deal is closed. Its quote can't be changed.")
+    try:
+        out = _sq.save(db, opp, user, body or {})
+    except _sq.QuoteError as e:
+        if str(e) == "conflict":
+            db.rollback()
+            raise HTTPException(status_code=409,
+                                detail="Someone saved a newer quote on this deal. Reload to see it.")
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(e))
+    d = out["draft"]
+    _event(db, opp, user, "quote_saved",
+           "Quote saved (revision %d): %s" % (d["revision"], d["plan_name"]),
+           "$%s one-time · $%s/month%s" % (format(d["setup_total"], ",.2f"),
+                                          format(d["monthly_total"], ",.2f"),
+                                          (" · applied to proposal %s v%d" % (
+                                              out["applied_to_proposal"]["proposal_number"],
+                                              out["applied_to_proposal"]["version"]))
+                                          if out["applied_to_proposal"] else ""))
+    db.commit()
+    return out

@@ -6,11 +6,13 @@
 
 .comm{background:#f0faf7;border:1px solid #bfe6dc;border-radius:12px;padding:16px;margin-top:14px}.comm table{margin-top:8px}.comm .stale{opacity:.55}.pill{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;padding:3px 7px;border-radius:5px;background:#fff4df;color:#79551a;margin-left:6px}.pill.ok{background:#e5f6f1;color:var(--teal)}.rules{font-size:12px;color:var(--muted);padding-left:18px;margin:10px 0 0}.rules li{margin-bottom:5px}.signin{font-size:12px;background:#fff4df;color:#79551a;border-radius:8px;padding:10px;margin-top:10px}.signin a{color:#79551a;font-weight:700}.yourbox .metric{font-size:28px}
 @media print{.comm{background:white;border-color:#ccc}}
+.dealbar{background:#e9f6f3;border-bottom:1px solid #bfe6dc;padding:10px 5%;display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:13px}.dealbar b{color:var(--navy)}.dealbar .grow{flex:1;min-width:200px}.dealbar .msg{font-weight:700}.dealbar .msg.err{color:#a1340c}.dealbar .msg.ok{color:var(--teal)}@media print{.dealbar{display:none}}
 </style></head><body>
 <!-- SALESPERSON DEAL BUILDER. Public file on purpose: it holds customer prices only.
      The salesperson's own commission comes from POST /deal-builder/my-commission,
      which computes it on the server and returns nothing about any other role. -->
 <header><div class="logo">EvoSys <span>Pro</span></div><small>SALES WORKSPACE &nbsp; / &nbsp; DEAL BUILDER</small></header>
+<div id="dealbar" class="dealbar hidden" role="region" aria-label="This deal"></div>
 <main class="shell"><div class="top"><div><div class="eyebrow">A simple quote, in three steps</div><h1>Choose. Add. Quote.</h1><p class="sub">Pick a package, add what the customer needs, and we do the math.</p></div><div class="fields"><button class="btn" id="mode" onclick="toggleMode()">Detailed view</button></div></div>
 <nav id="steps" aria-label="Quote steps"></nav>
 <div class="layout"><div>
@@ -95,4 +97,33 @@ async function printSheet(mine){const q=quoteTotals(),p=q.p,who=safe($('seller')
  $('sheet').innerHTML=`<div class="eyebrow">EvoSys Pro • Earnings sheet — PRIVATE, do not give to the customer</div><h1>${who}</h1><p>Deal: ${cust} · ${p.name} · ${new Date().toLocaleDateString('en-US')}</p><p>Customer pays: <b>${setupLabel(q.s)}</b> one time (first payment), then <b>${monthlyLabel(q.m)}/month</b> for monthly service.</p>${comm?earningsTable():'<p><b>Commission not available:</b> sign in to the sales workspace to include it.</p>'}<h3>How this works</h3><ul class="rules">${rulesHtml()}</ul><p class="printnote">These figures are estimates for this quote. They are not a statement of earnings and not a promise of payment. Your written agreement controls.</p>`;window.print()}
 const nav=document.createElement('div');nav.className='step-actions';nav.innerHTML='<button class="btn" id="back" onclick="go(stage-1)">← Back</button><button class="btn primary" id="next" onclick="go(stage+1)">Next: add services →</button>';document.querySelector('.layout > div').append(nav);
 catalog();render();
+// ── DEAL MODE: the same builder, inside one customer's deal ─────────────────
+// Opened as ?opp=<id> from Build Quote. The customer, the deal and the credited
+// salesperson come from the server record; the quote is saved on the deal so
+// it can be reloaded and revised. Commission is never saved - it is asked for
+// from /deal-builder/commission, which decides what this login may see.
+const DEAL=(()=>{try{return new URLSearchParams(location.search).get('opp')}catch(e){return null}})();
+let deal=null,dealRev=null,dealSaved='',dealMsg='',dealMsgKind='';
+function apiCall(path,opts){const t=token();return fetch(API+path,Object.assign({},opts||{},{headers:Object.assign({'Content-Type':'application/json'},t?{'Authorization':'Bearer '+t}:{})}))}
+function r2(n){return Math.round((+n||0)*100)/100}
+function builderState(){const c=plans.find(p=>p.saas);return {plan:plan,saas_setup:c.setup,saas_month:c.month,saas_override:saasMonthlyOverride,items:JSON.parse(JSON.stringify(state))}}
+function restoreState(st){if(!st)return;const c=plans.find(p=>p.saas);c.setup=+st.saas_setup||0;c.month=+st.saas_month||0;saasMonthlyOverride=!!st.saas_override;$('saasSetup').value=c.setup||'';$('saasMonthly').value=(c.setup||saasMonthlyOverride)?c.month:'';if(st.items)Object.keys(st.items).forEach(k=>{if(state[k])Object.assign(state[k],st.items[k])});if(Number.isInteger(st.plan)&&plans[st.plan])plan=st.plan}
+function dealPayloadFull(){const q=quoteTotals(),p=q.p;return {plan_key:PLAN_KEYS[p.name],setup_total:r2(q.s),monthly_total:r2(q.m),addon_setup:r2(q.addS),monthly_override:!!(p.saas&&saasMonthlyOverride),plan_line:{setup:r2(p.setup),monthly:r2(p.month)},lines:q.items.map(i=>({name:i.name,setup:r2(i.s),monthly:r2(i.m),usage:r2(i.u),note:i.n||null})),pending:q.pending,state:builderState()}}
+function dealKey(){const b=dealPayloadFull();delete b.state;return JSON.stringify(b)}
+function drawDealBar(){if(!DEAL)return;const bar=$('dealbar');bar.classList.remove('hidden');
+ if(!deal){bar.innerHTML='<span class="grow">'+(dealMsg?'<span class="msg '+dealMsgKind+'">'+safe(dealMsg)+'</span>':'Loading this deal…')+'</span>';return}
+ const o=deal.opportunity,dirty=dealKey()!==dealSaved,pr=deal.proposal;
+ bar.innerHTML='<span class="grow">Quoting for <b>'+safe(o.company_name)+'</b>'+(o.contact_name?' · '+safe(o.contact_name):'')+' · '+safe(o.stage_label)+' · credited to <b>'+safe((deal.credited_salesperson||{}).name||'unassigned')+'</b><br><small>'+(dealRev?'Saved quote: revision '+dealRev:'No quote saved on this deal yet')+(pr?' · Proposal '+safe(pr.number)+' v'+pr.version+(pr.editable?' (will use this quote)':' (already '+safe(pr.status)+' — start a new version to send changes)'):'')+'</small></span>'+(dealMsg?'<span class="msg '+dealMsgKind+'" role="status">'+safe(dealMsg)+'</span>':'')+(deal.can_edit?'<button class="btn primary" id="saveDeal" onclick="saveDeal()"'+(dirty?'':' disabled')+'>'+(dirty?'Save quote to deal':'Saved')+'</button>':'<span class="pill">Read only</span>')+'<a class="btn" href="'+safe(deal.return_to)+'" target="_top">Back to deal</a>'}
+async function loadDeal(){try{const r=await apiCall('/sales/opportunities/'+encodeURIComponent(DEAL)+'/quote-draft');
+  if(r.status===401){dealMsg='Your session ended. Sign in again.';dealMsgKind='err';drawDealBar();return}
+  if(!r.ok){let d='';try{d=(await r.json()).detail||''}catch(e){};dealMsg=d||'This deal could not be opened.';dealMsgKind='err';drawDealBar();return}
+  deal=await r.json();const o=deal.opportunity;$('customer').value=o.company_name||'';$('customer').readOnly=true;$('seller').value=(deal.credited_salesperson||{}).name||'';$('seller').readOnly=true;
+  if(deal.draft){restoreState(deal.draft.state);dealRev=deal.draft.revision}
+  catalog();render();dealSaved=dealRev?dealKey():'';drawDealBar()}catch(e){dealMsg='This deal could not be opened.';dealMsgKind='err';drawDealBar()}}
+async function saveDeal(){const b=dealPayloadFull();b.expected_revision=dealRev;dealMsg='Saving…';dealMsgKind='';drawDealBar();
+ try{const r=await apiCall('/sales/opportunities/'+encodeURIComponent(DEAL)+'/quote-draft',{method:'PUT',body:JSON.stringify(b)});let j={};try{j=await r.json()}catch(e){}
+  if(!r.ok){dealMsg=(j&&j.detail)||'Could not save the quote.';dealMsgKind='err';drawDealBar();return}
+  dealRev=j.draft.revision;dealSaved=dealKey();dealMsg='Saved as revision '+dealRev+(j.applied_to_proposal?' · proposal '+j.applied_to_proposal.proposal_number+' v'+j.applied_to_proposal.version+' updated':'');dealMsgKind='ok';
+  if(j.applied_to_proposal&&deal.proposal)deal.proposal.editable=true;drawDealBar()}catch(e){dealMsg='Could not save the quote.';dealMsgKind='err';drawDealBar()}}
+if(DEAL){const _render=render;render=function(){_render();drawDealBar()};loadDeal()}
 </script></body></html>

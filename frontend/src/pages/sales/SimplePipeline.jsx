@@ -119,7 +119,7 @@ function PipelineBody() {
                     <span className="ss-sp"><strong>{c.contact_name || c.company_name}</strong>
                       {c.contact_name ? ' — ' + c.company_name : ''}</span>
                     <button type="button" className="ss-btn ss-white ss-xs" onClick={() => nav('/sales/leads/' + c.id)}>Open</button>
-                    <button type="button" className="ss-btn ss-white ss-xs" onClick={() => nav('/sales/opportunities/' + c.id + '?section=quote')}>Build Quote</button>
+                    <button type="button" className="ss-btn ss-white ss-xs" onClick={() => nav('/sales/opportunities/' + c.id + '/quote')}>Build Quote</button>
                   </div>
                 ))}
               </div>

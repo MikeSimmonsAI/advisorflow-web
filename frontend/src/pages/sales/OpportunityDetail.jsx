@@ -25,6 +25,7 @@
  * Every write still goes to the real API and the record reloads from the
  * server: what is on screen is what the database holds.
  */
+import QuoteDraftCard from './QuoteDraftCard'
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
@@ -810,7 +811,7 @@ export default function OpportunityDetail() {
       actions={
         <>
           <button className="sw-btn" onClick={() => nav('/sales/pipeline')}>← Pipeline</button>
-          <button className="sw-btn" onClick={() => openSection('proposal')}>Build Quote</button>
+          <button className="sw-btn" onClick={() => nav('/sales/opportunities/' + oppId + '/quote')}>Build Quote</button>
           <button className="sw-btn" onClick={() => setFinding(true)}>Book Demo</button>
           {/* RUN DEMO — the entry point that was missing. A salesperson should
               never have to copy a demo URL, open God Mode or hunt through the
@@ -897,6 +898,7 @@ export default function OpportunityDetail() {
             badge={prop ? <Chip tone={prop.status === 'accepted' ? 'green' : 'amber'}>
               {prop.status_label}</Chip> : null}
           >
+            <QuoteDraftCard oppId={opp.id} />
             <PackageDeal opp={opp} packages={packages} onPatch={patch} saving={saving} />
             <div className="sw-mt">
               <ProposalPanel opp={opp} packages={packages}
