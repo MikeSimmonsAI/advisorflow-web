@@ -1,13 +1,14 @@
-// VOLT Consumer Leads - a campaign inside VOLT Marketing (separate from
+// Consumer Leads - VOLT Marketing's subsidiary business (separate from
 // recruiting and from HIP).
-//   CoverageFunnel      public, one-question-at-a-time eligibility page (/volt/check-coverage)
-//   ConsumerLeadsCard   campaign card on the VOLT Operations overview (counts only)
-//   LeadsDashboard      the internal dashboard (Consumer leads tab)
+//   CoverageFunnel      public, one-question-at-a-time eligibility page (/volt/check-coverage);
+//                       also rendered signed-in by the back office's Preview (test data only)
+//   ConsumerLeadsCard   card on the VOLT Operations overview (counts only)
+// The private back office is ConsumerLeadsWorkspace.jsx (/consumer-leads/:orgId).
 // Visual/interaction references: docs/volt/design/volt_leads_v3.html and
 // volt_leads_backend_demo.html. All access rules are enforced by the server
 // (app/services/volt/leads.py); this page only reflects them.
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { api } from '../../api/client'
 import { volt, useVoltTitle } from './voltApi'
 import './volt.css'
@@ -49,7 +50,10 @@ const QUESTIONS = [
   { key: 'contact', q: 'Where can the agent reach you?', hint: 'We use this only to follow up on your request.', type: 'contact' },
 ]
 
-export function CoverageFunnel() {
+export function CoverageFunnel({ preview = null } = {}) {
+  // preview = { orgId }: signed-in preview from the back office. The whole site
+  // works and a submission is saved as TEST data through an authenticated
+  // endpoint - never the public one, never the real inbox.
   useVoltTitle()
   const [cfg, setCfg] = useState(null)
   const [started, setStarted] = useState(false)
@@ -68,7 +72,7 @@ export function CoverageFunnel() {
   const page = cfg?.page
   // The website is always shown. Whether a request can be SENT is a separate
   // switch (cfg.enabled), and the server refuses submissions while it is off.
-  const open = !!cfg?.enabled
+  const open = !!preview || !!cfg?.enabled
 
   const valid = () => {
     if (q.type === 'zip') return /^\d{5}$/.test((a.zip || '').trim()) || 'Please enter a 5-digit ZIP code.'
@@ -94,7 +98,8 @@ export function CoverageFunnel() {
     let referrer = ''
     try { referrer = document.referrer ? new URL(document.referrer).hostname : '' } catch { referrer = '' }
     try {
-      await volt.submitLead({
+      const send = preview ? (b) => api.post(`/volt/ops/${preview.orgId}/leads/preview`, b) : volt.submitLead
+      await send({
         first_name: a.first_name, last_name: a.last_name, zip: a.zip, state: a.state, phone: a.phone, email: a.email,
         age_range: a.age_range, coverage_status: a.coverage_status, household_size: a.household_size,
         income_range: a.income_range, contact_preference: a.contact_preference, best_time: a.best_time,
@@ -117,8 +122,12 @@ export function CoverageFunnel() {
         {page && !open && <p role="note" data-intake-closed style={{ background: '#FFF4D6', border: '2px solid #E0B44C', borderRadius: 12,
           padding: '12px 16px', fontSize: 18, margin: '0 0 18px' }}><b>Online requests are not open yet.</b> You can read about the
           coverage and look through the questions, but we can’t take your information on this page right now. Please check back soon.</p>}
-        {open && done && <div className="v-card" role="status" style={{ borderColor: GREEN }}><h1 tabIndex={-1} ref={head}>Thank you.</h1>
+        {open && done && !preview && <div className="v-card" role="status" style={{ borderColor: GREEN }}><h1 tabIndex={-1} ref={head}>Thank you.</h1>
           <p>Your request was received. A licensed agent may contact you using the details you gave.</p></div>}
+        {done && preview && <div className="v-card" role="status" style={{ borderColor: GREEN }} data-preview-done><h1 tabIndex={-1} ref={head}>Test request saved.</h1>
+          <p>This is what a visitor would see after sending. Your answers were saved as <b>test data</b> only. No one was contacted.</p>
+          <p><Link to={`/consumer-leads/${preview.orgId}/leads?data=test`}>Open it in the test leads</Link> · <button type="button" className="v-btn v-btn--link"
+            onClick={() => { setDone(false); setStarted(false); setStep(0); setA({ consent: false }) }}>Start again</button></p></div>}
         {page && !done && !started && (
           <section aria-labelledby="lead-h" data-funnel-intro>
             <p className="v-eyebrow" style={{ color: GREEN }}>Free to check · No obligation · No account needed</p>
@@ -129,6 +138,22 @@ export function CoverageFunnel() {
             <ul style={{ listStyle: 'none', padding: 0, margin: '24px 0', display: 'grid', gap: 12 }}>
               {page.benefits.map(([t, d]) => <li key={t} style={{ background: BLUE, borderRadius: 12, padding: '14px 16px' }}><b>{t}.</b> {d}</li>)}
             </ul>
+            {page.steps && <section aria-labelledby="lead-steps" style={{ margin: '28px 0' }} data-funnel-steps>
+              <h2 id="lead-steps" style={{ fontSize: 26, color: NAVY }}>Three simple steps</h2>
+              <ol style={{ listStyle: 'none', padding: 0, display: 'grid', gap: 12 }}>
+                {page.steps.map(([t, d], i) => <li key={t} style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+                  <span aria-hidden="true" style={{ flex: 'none', width: 40, height: 40, borderRadius: 20, background: NAVY, color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 700 }}>{i + 1}</span>
+                  <span><b>{t}</b><br />{d}</span></li>)}
+              </ol>
+              <button type="button" className="v-btn" style={{ background: NAVY, color: '#fff', fontSize: 20, padding: '14px 24px', borderRadius: 12 }}
+                onClick={() => setStarted(true)}>Check my options →</button>
+            </section>}
+            {page.faq && <section aria-labelledby="lead-faq" style={{ margin: '28px 0' }} data-funnel-faq>
+              <h2 id="lead-faq" style={{ fontSize: 26, color: NAVY }}>Common questions</h2>
+              {page.faq.map(([qq, aa]) => <details key={qq} style={{ borderTop: '1px solid #c9d6e2', padding: '12px 0' }}>
+                <summary style={{ fontSize: 19, fontWeight: 600, cursor: 'pointer', minHeight: 32 }}>{qq}</summary>
+                <p style={{ margin: '8px 0 0' }}>{aa}</p></details>)}
+            </section>}
             <div className="v-small" style={{ fontSize: 16 }} data-funnel-disclaimers><b>Please know:</b>
               <ul>{page.disclaimers.map((d) => <li key={d}>{d}</li>)}</ul></div>
           </section>)}
@@ -196,7 +221,7 @@ export function ConsumerLeadsCard({ orgId }) {
   return (
     <section className="v-panel" data-campaign-card="consumer-leads" style={{ borderLeft: `6px solid ${NAVY}` }}>
       <div className="v-row"><div><h3 style={{ margin: 0 }}>Consumer Leads</h3>
-        <p className="v-small v-muted" style={{ margin: 0 }}>Health Insurance Lead Acquisition &amp; Enrollment · a VOLT Marketing campaign</p></div>
+        <p className="v-small v-muted" style={{ margin: 0 }}>Health Insurance Lead Acquisition &amp; Enrollment · a VOLT Marketing business</p></div>
         {s && <span className="v-tag">{s.intake_enabled ? 'Public intake ON' : 'Public intake OFF'}</span>}</div>
       {!s ? <p className="v-mono">Loading…</p> : <>
         <div className="v-kpis" style={{ marginTop: 10 }}>
@@ -204,131 +229,12 @@ export function ConsumerLeadsCard({ orgId }) {
         </div>
         <p className="v-small v-muted">Last activity: {fmtCT(s.last_activity_at)}{s.access === 'assigned' ? ' · counts include only leads assigned to you' : ''}</p>
         <div className="v-row" style={{ justifyContent: 'flex-start', gap: 8, flexWrap: 'wrap' }}>
-          <Link className="v-btn v-btn--red v-btn--sm" to={`/volt-ops/${orgId}/leads`} data-card-open>Open Dashboard</Link>
-          <a className="v-btn v-btn--line v-btn--sm" href={publicSiteUrl()} target="_blank" rel="noreferrer" data-card-site>View Customer Website ↗</a>
-          {s.can_develop && <Link className="v-btn v-btn--line v-btn--sm" to={`/volt-ops/${orgId}/dev?campaign=consumer_leads`} data-card-dev>Development</Link>}
-          {s.can_settings && <Link className="v-btn v-btn--line v-btn--sm" to={`/volt-ops/${orgId}/leads#settings`} data-card-settings>Campaign Settings</Link>}
+          <Link className="v-btn v-btn--red v-btn--sm" to={`/consumer-leads/${orgId}`} data-card-open>Open Consumer Leads</Link>
+          {s.can_preview && <Link className="v-btn v-btn--line v-btn--sm" to={`/consumer-leads/${orgId}/preview`} data-card-preview>Preview Customer Website</Link>}
+          <a className="v-btn v-btn--line v-btn--sm" href={publicSiteUrl()} target="_blank" rel="noreferrer" data-card-site>View Public Website ↗</a>
+          {s.can_develop && <Link className="v-btn v-btn--line v-btn--sm" to={`/consumer-leads/${orgId}/dev`} data-card-dev>Development</Link>}
+          {s.can_settings && <Link className="v-btn v-btn--line v-btn--sm" to={`/consumer-leads/${orgId}/settings`} data-card-settings>Settings</Link>}
         </div></>}
-    </section>
-  )
-}
-
-// ── internal dashboard ───────────────────────────────────────────────────────
-const STATUSES = [['new', 'New'], ['contacted', 'Contacted'], ['qualified', 'Qualified'], ['appointment_set', 'Appointment Set'], ['enrolled', 'Enrolled'], ['not_interested', 'Not Interested']]
-const CHANNELS = [['meta', 'Meta / Facebook'], ['google', 'Google'], ['organic', 'Organic search'], ['direct', 'Direct'], ['referral', 'Referral'], ['other', 'Other']]
-
-export function LeadsDashboard({ orgId }) {
-  const base = `/volt/ops/${orgId}/leads`
-  const navigate = useNavigate()
-  const [f, setF] = useState({ q: '', status: '', channel: '' })
-  const [data, setData] = useState(null)
-  const [report, setReport] = useState(null)
-  const [sel, setSel] = useState(null)
-  const [agents, setAgents] = useState([])
-  const [settings, setSettings] = useState(null)
-  const [note, setNote] = useState('')
-  const [appt, setAppt] = useState('')
-  const [err, setErr] = useState('')
-  const [summary, setSummary] = useState(null)
-  const seq = useRef(0)
-  const load = () => {
-    const n = ++seq.current
-    const params = Object.fromEntries(Object.entries(f).filter(([, v]) => v))
-    api.get(base, { params }).then((x) => { if (n === seq.current) setData(x) }).catch((e) => setErr(msg(e)))
-    api.get(`${base}/report`).then(setReport).catch(() => {})
-    api.get(`${base}/summary`).then(setSummary).catch(() => {})
-  }
-  useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t) }, [orgId, JSON.stringify(f)]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { api.get(`${base}/agents`).then((x) => setAgents(x.agents)).catch(() => {}) }, [orgId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { api.get(`${base}/settings`).then(setSettings).catch(() => setSettings(null)) }, [orgId]) // eslint-disable-line react-hooks/exhaustive-deps
-  const open = (id) => api.get(`${base}/${id}`).then((x) => { setSel(x); setAppt('') }).catch((e) => setErr(msg(e)))
-  const act = (p) => p.then((x) => { setSel(x); setNote(''); setErr(''); load() }).catch((e) => setErr(msg(e)))
-  const toggleIntake = () => {
-    const enable = !settings.intake_enabled
-    const review_note = enable ? window.prompt('Who approved the privacy copy, eligibility claims, consent and agent routing? (required)') : ''
-    if (enable && !review_note) return
-    api.put(`${base}/settings`, { intake_enabled: enable, reviewed: enable, review_note })
-      .then((s) => setSettings((x) => ({ ...x, ...s }))).catch((e) => setErr(msg(e)))
-  }
-  const grant = (user_id, active) => api.post(`${base}/grants`, { user_id, active })
-    .then((r) => setSettings((x) => ({ ...x, grants: r.grants }))).catch((e) => setErr(msg(e)))
-  const canAssign = data?.access === 'all'
-  const granted = new Set((settings?.grants || []).map((g) => g.user_id))
-
-  return (
-    <section aria-labelledby="leads-h" data-leads-dashboard>
-      <div className="v-row"><div><h2 id="leads-h" style={{ fontSize: 30, letterSpacing: '-.04em', marginBottom: 0 }}>Consumer Leads</h2>
-        <p className="v-small v-muted" style={{ marginTop: 0 }}>Health Insurance Lead Acquisition &amp; Enrollment · VOLT Marketing campaign · {data?.access === 'all' ? 'you see every lead' : 'you see only leads assigned to you'}</p></div>
-        <div className="v-row" style={{ gap: 8 }}>
-          <a className="v-btn v-btn--line v-btn--sm" href={publicSiteUrl()} target="_blank" rel="noreferrer">Customer website ↗</a>
-          {summary?.can_develop && <button type="button" className="v-btn v-btn--black v-btn--sm" onClick={() => navigate(`/volt-ops/${orgId}/dev?campaign=consumer_leads`)} data-leads-dev>Development</button>}
-        </div></div>
-      {err && <div className="v-alert v-alert--err" role="alert">{err}</div>}
-      {report && <div className="v-kpis" aria-label="Lead totals">
-        <div className="v-kpi"><b>{report.total}</b><span>Total leads</span></div>
-        {STATUSES.map(([k, l]) => <button type="button" className="v-kpi" key={k} onClick={() => setF({ ...f, status: f.status === k ? '' : k })}><b>{report.by_status[k] || 0}</b><span>{l}</span></button>)}
-      </div>}
-      {report && <p className="v-small v-muted">Last activity {fmtCT(report.last_activity_at)} · {report.appointments} appointment(s) · {report.enrollments} enrollment(s)</p>}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '14px 0' }}>
-        <label>Search<input value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} placeholder="Name, phone, email or ZIP" /></label>
-        <label>Status<select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}><option value="">All statuses</option>
-          {STATUSES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
-        <label>Channel<select value={f.channel} onChange={(e) => setF({ ...f, channel: e.target.value })}><option value="">All channels</option>
-          {CHANNELS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
-      </div>
-      <div className="v-scroll"><table className="v-table" data-table="leads"><thead><tr><th>Lead</th><th>ZIP / State</th><th>Channel</th><th>Assigned to</th><th>Status</th><th>Received</th><th><span className="v-sr">Open</span></th></tr></thead>
-        <tbody>{(data?.leads || []).map((l) => (
-          <tr key={l.id}><td>{l.name}<br /><span className="v-small">{l.phone}</span></td><td>{l.zip}{l.state ? ` · ${l.state}` : ''}</td><td>{l.channel}</td>
-            <td>{l.assigned_to || 'Unassigned'}</td><td>{l.status_label}{l.appointment_at ? <><br /><span className="v-small">Appt {fmtCT(l.appointment_at)}</span></> : null}</td>
-            <td className="v-small">{fmtCT(l.created_at)}</td>
-            <td><button type="button" className="v-btn v-btn--link" onClick={() => open(l.id)} aria-label={`Open ${l.name}`}>View</button></td></tr>))}
-          {data && !data.leads.length && <tr><td colSpan={7}>No matching leads.</td></tr>}</tbody></table></div>
-      {sel && <aside className="v-card" aria-label="Selected lead" style={{ marginTop: 16 }} data-lead-detail>
-        <h3>{sel.name}</h3>
-        <p className="v-small">Phone {sel.phone || '—'} · Email {sel.email || '—'} · ZIP {sel.zip}{sel.state ? ` · ${sel.state}` : ''} · Age {sel.age_range} · Household {sel.household_size || '—'} · Income {sel.income_range || '—'}<br />
-          Prefers {sel.contact_preference || '—'}{sel.best_time ? ` (${sel.best_time})` : ''} · Coverage now: {sel.coverage_status}<br />
-          Channel {sel.channel}{sel.utm?.utm_campaign ? ` · campaign ${sel.utm.utm_campaign}` : ''} · Consent {sel.consent_version} at {fmtCT(sel.consent_at)} · {sel.submissions} submission(s)</p>
-        <label>Status<select value={sel.status} onChange={(e) => act(api.patch(`${base}/${sel.id}`, { status: e.target.value }))} data-lead-status>
-          {STATUSES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
-        {canAssign && <label>Assign to<select value={sel.assigned_user_id || ''} onChange={(e) => act(api.post(`${base}/${sel.id}/assign`, { user_id: e.target.value || null }))} data-lead-assign>
-          <option value="">Unassigned</option>{agents.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
-        <div className="v-row" style={{ justifyContent: 'flex-start', gap: 8, flexWrap: 'wrap', margin: '10px 0' }}>
-          <button type="button" className="v-btn v-btn--line v-btn--sm" onClick={() => act(api.patch(`${base}/${sel.id}`, { event: 'call_attempted', note }))} data-log="call_attempted">Log call attempt</button>
-          <button type="button" className="v-btn v-btn--line v-btn--sm" onClick={() => act(api.patch(`${base}/${sel.id}`, { event: 'contact_completed', note }))} data-log="contact_completed">Contact made</button>
-          <label className="v-small">Appointment<input type="datetime-local" value={appt} onChange={(e) => setAppt(e.target.value)} data-appt-input /></label>
-          <button type="button" className="v-btn v-btn--line v-btn--sm" disabled={!appt}
-            onClick={() => act(api.patch(`${base}/${sel.id}`, { event: 'appointment_set', appointment_at: new Date(appt).toISOString(), note }))} data-log="appointment_set">{sel.appointment_at ? 'Change appointment' : 'Set appointment'}</button>
-          <button type="button" className="v-btn v-btn--line v-btn--sm" onClick={() => act(api.patch(`${base}/${sel.id}`, { event: 'enrollment_recorded', note }))} data-log="enrollment_recorded">Record enrollment</button>
-        </div>
-        <label>Note (added to the next action, or saved on its own)<input value={note} maxLength={1000} onChange={(e) => setNote(e.target.value)} data-lead-note /></label>
-        <button type="button" className="v-btn v-btn--red v-btn--sm" disabled={!note.trim()} onClick={() => act(api.patch(`${base}/${sel.id}`, { note }))}>Save note</button>
-        <h4>History (Central time)</h4><ul data-lead-history>{sel.history.map((h) => <li key={h.id} className="v-small">
-          <b>{fmtCT(h.at)}</b> · {h.label}{h.old || h.new ? `: ${h.old ? `${h.old} → ` : ''}${h.new || ''}` : ''}{h.note ? ` — ${h.note}` : ''} · {h.by}</li>)}</ul>
-        <button type="button" className="v-btn v-btn--line v-btn--sm" onClick={() => setSel(null)}>Close</button>
-      </aside>}
-      {report && <section className="v-panel" data-leads-report>
-        <h3>Campaign reporting</h3>
-        <div className="v-scroll"><table className="v-table"><thead><tr><th>Channel</th><th>Leads</th><th>Qualified</th><th>Appointments</th><th>Enrolled</th></tr></thead>
-          <tbody>{report.by_channel.length === 0 ? <tr><td colSpan={5} className="v-muted">No leads yet.</td></tr>
-            : report.by_channel.map((c) => <tr key={c.channel}><td>{c.label}</td><td>{c.leads}</td><td>{c.qualified}</td><td>{c.appointments}</td><td>{c.enrolled}</td></tr>)}</tbody></table></div>
-        <h4>Agents</h4>
-        <div className="v-scroll"><table className="v-table"><thead><tr><th>Agent</th><th>Assigned</th><th>Enrolled</th><th>Conversion</th></tr></thead>
-          <tbody>{report.agents.length === 0 ? <tr><td colSpan={4} className="v-muted">No assigned leads yet.</td></tr>
-            : report.agents.map((x) => <tr key={x.name}><td>{x.name}</td><td>{x.assigned}</td><td>{x.enrolled}</td><td>{x.conversion_pct == null ? '—' : `${x.conversion_pct}%`}</td></tr>)}</tbody></table></div>
-        <p className="v-small v-muted">{report.cost_note}</p>
-      </section>}
-      {settings && <section className="v-panel" id="settings" data-leads-settings>
-        <h3>Campaign settings</h3>
-        <p><strong>Public intake: {settings.intake_enabled ? 'ON' : 'OFF'}</strong>{settings.reviewed_at ? ` · last approved ${fmtCT(settings.reviewed_at)}` : ''}</p>
-        <p className="v-small">Before turning intake on, the owner confirms:</p>
-        <ul className="v-small">{settings.checklist.map((c) => <li key={c}>{c}</li>)}</ul>
-        <button type="button" className="v-btn v-btn--black v-btn--sm" onClick={toggleIntake}>{settings.intake_enabled ? 'Turn intake off' : 'Turn intake on'}</button>
-        <h4>Who can see every lead</h4>
-        <p className="v-small v-muted">The owner and VOLT&apos;s two authorized operators always can. Others see only leads assigned to them unless granted here.</p>
-        <ul className="v-small">{(settings.assignable || []).map((p) => <li key={p.id}>{p.name} · {granted.has(p.id)
-          ? <button type="button" className="v-btn v-btn--link" onClick={() => grant(p.id, false)}>Remove full access</button>
-          : <button type="button" className="v-btn v-btn--link" onClick={() => grant(p.id, true)}>Give full access</button>}</li>)}</ul>
-      </section>}
     </section>
   )
 }

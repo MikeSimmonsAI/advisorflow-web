@@ -5,6 +5,8 @@ on:
   pull_request:
     paths:
       - 'app/models/volt_models.py'
+      - 'app/models/volt_leads_models.py'
+      - 'app/routers/volt_leads_router.py'
       - 'app/services/volt/**'
       - 'app/routers/volt_router.py'
       - 'app/deps.py'
@@ -13,7 +15,8 @@ on:
       - 'frontend/src/pages/volt/**'
       - 'frontend/src/pages/program/programAccessModel.js'
       - 'frontend/src/App.jsx'
-      - 'tests/test_volt_recruiting.py'
+      - 'tests/test_volt_*.py'
+      - 'frontend/tests/consumerLeadsCard.test.mjs'
       - '.github/workflows/volt-recruiting.yml'
   workflow_dispatch:
 
@@ -33,11 +36,15 @@ jobs:
       - name: Install Python test dependencies
         run: python -m pip install -r requirements-dev.txt
       - name: Compile VOLT backend
-        run: python -m py_compile app/models/volt_models.py app/routers/volt_router.py app/services/volt/*.py
+        run: python -m py_compile app/models/volt_models.py app/models/volt_leads_models.py app/routers/volt_router.py app/routers/volt_leads_router.py app/services/volt/*.py
       - name: VOLT release checklist tests + neighbouring access tests
         env:
           PYTHONDONTWRITEBYTECODE: '1'
         run: python -m pytest -q -o addopts='' tests/test_volt_recruiting.py tests/test_acquisition_owner_access.py
+      - name: Consumer Leads and development relay tests (2026-11-14, #571)
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -m pytest -q -o addopts='' tests/test_volt_leads.py tests/test_volt_consumer_leads_workspace.py tests/test_volt_dev_relay.py tests/test_volt_dev_chatgpt.py
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -46,6 +53,9 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
+      - name: Program Access card model test
+        working-directory: frontend
+        run: node --test tests/consumerLeadsCard.test.mjs
       - name: Verify frontend build
         working-directory: frontend
         run: npm run build

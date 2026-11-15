@@ -213,7 +213,7 @@ function Keys({ orgId }) {
   )
 }
 
-export default function Development({ orgId }) {
+export default function Development({ orgId, campaign: fixedCampaign = null, backTo = null }) {
   const [sp, setSp] = useSearchParams()
   const [jobs, setJobs] = useState(null)
   const [err, setErr] = useState('')
@@ -224,7 +224,7 @@ export default function Development({ orgId }) {
   const load = useCallback(() => api.get(`/volt/dev/${orgId}/jobs`).then((r) => setJobs(r.items)).catch((e) => setErr(msg(e))), [orgId])
   useVisiblePoll(load, 20000)
   const open = sp.get('job')
-  const campaign = sp.get('campaign') === 'consumer_leads' ? 'consumer_leads' : null
+  const campaign = fixedCampaign || (sp.get('campaign') === 'consumer_leads' ? 'consumer_leads' : null)
   const openJob = useMemo(() => (jobs || []).find((j) => String(j.number) === String(open) || j.ref === open), [jobs, open])
   async function submit(e) {
     e.preventDefault()
@@ -246,7 +246,7 @@ export default function Development({ orgId }) {
       {err && <div className="v-alert v-alert--err" role="alert">{err}</div>}
       <form className="v-panel v-form" onSubmit={submit} data-dev-form>
         <h3>Request a change{campaign ? ' · Consumer Leads' : ''}</h3>
-        {campaign && <p className="v-small" data-dev-campaign>This request is tagged <b>Consumer Leads</b>. Claude receives the campaign, your name, the time, a request id and the Consumer Leads code to start from automatically. <Link to={`/volt-ops/${orgId}/leads`}>Back to Consumer Leads</Link></p>}
+        {campaign && <p className="v-small" data-dev-campaign>This request is tagged <b>Consumer Leads</b>. Claude receives the campaign, your name, the time, a request id and the Consumer Leads code to start from automatically. <Link to={backTo || `/consumer-leads/${orgId}`}>Back to Consumer Leads</Link></p>}
         <label>Title<input value={v.title} onChange={(e) => setV({ ...v, title: e.target.value })} maxLength={140} required data-dev-title /></label>
         <label>What should change?<textarea rows={5} value={v.request} onChange={(e) => setV({ ...v, request: e.target.value })} maxLength={8000} required data-dev-request
           placeholder="Describe the change in VOLT Marketing: which page, what it should say or do, anything to keep the same." /></label>

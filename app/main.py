@@ -2048,6 +2048,21 @@ async def _volt_dev_relay_loop():
                         return _vdd.watch_pass(db)
                     finally:
                         db.close()
+                def _lead_retries():
+                    # Consumer Leads: retry source deliveries that failed for a
+                    # temporary reason (one indexed query when there are none).
+                    from app.services.volt import lead_sources as _ls
+                    db = SessionLocal()
+                    try:
+                        n = _ls.retry_pass(db)
+                        db.commit()
+                        return n
+                    finally:
+                        db.close()
+                try:
+                    await _off_loop(_lead_retries)
+                except Exception as exc:                       # noqa: BLE001
+                    _logger.error("consumer leads retry pass error: %s", exc, exc_info=True)
                 _checkin = (_time.monotonic() - _last_logged) >= 3600
                 if _checkin or not _vdd._SELFTEST["done"] or await _off_loop(_busy):
                     _last_logged = _time.monotonic()

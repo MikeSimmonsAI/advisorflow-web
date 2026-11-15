@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -68,6 +68,23 @@ PAGE = {
         "A $0 monthly premium does not mean all care is free. Deductibles, copays and coinsurance may still apply.",
         "This is not a government website and is not affiliated with HealthCare.gov or any government agency.",
     ],
+    # From the approved V3 design (docs/volt/design/volt_leads_v3.html).
+    "steps": [
+        ["Answer a few questions", "Tell us your ZIP code and a little about your coverage needs."],
+        ["Explore your options", "Find out whether savings or coverage options may be available."],
+        ["Talk with a real person", "A licensed agent can explain plans and help with next steps."],
+    ],
+    "faq": [
+        ["Is health insurance really free?", "Some eligible people may qualify for plans with a $0 monthly premium after "
+         "financial assistance. That does not mean all healthcare is free. Deductibles, copays and other costs may apply."],
+        ["Does checking cost money?", "No. Exploring your options is free, and there is no obligation to enroll."],
+        ["Will everyone qualify for savings?", "No. Eligibility and savings depend on things like where you live, "
+         "household income, household size and other coverage you can get."],
+        ["Is this a government website?", "No. This is an independent health insurance help website. It is not a "
+         "government website and is not affiliated with HealthCare.gov."],
+        ["What if I have Medicare?", "Medicare and Marketplace coverage are different. Marketplace savings generally "
+         "are not available to people enrolled in Medicare. A licensed agent can help you understand which applies."],
+    ],
     "medicare_note": ("If you are 65 or older, you may be eligible for Medicare, which works differently from these plans. "
                       "A licensed agent can explain Medicare options with you. You can still send your request."),
 }
@@ -84,7 +101,9 @@ CHANNEL_LABELS = {"meta": "Meta / Facebook", "google": "Google", "organic": "Org
 # Events an agent can record on a lead (beyond status/assignment/notes).
 CONTACT_EVENTS = {"call_attempted": "Call attempted", "contact_completed": "Contact completed",
                   "appointment_set": "Appointment set", "appointment_changed": "Appointment changed",
-                  "enrollment_recorded": "Enrollment recorded"}
+                  "enrollment_recorded": "Enrollment recorded", "follow_up_scheduled": "Follow-up scheduled"}
+GRANT_ROLES = ("manager", "agent")
+HOME_SLUG = "volt-marketing"   # the VOLT program that owns the Consumer Leads business
 
 AGE_RANGES = ("18-25", "26-44", "45-64", "65+")
 COVERAGE = ("none", "have_compare", "not_sure")
@@ -183,7 +202,10 @@ def _norm_phone(v) -> Optional[str]:
     return d if len(d) == 10 and d[0] in "23456789" else None
 
 
-def validate(body: Dict[str, Any]) -> Dict[str, Any]:
+def validate(body: Dict[str, Any], strict: bool = True) -> Dict[str, Any]:
+    """strict=True for the website (every question answered, consent wording
+    version checked). strict=False for external sources (ad forms, CSV): the
+    questionnaire answers are optional and consent is checked by the caller."""
     first = str(body.get("first_name") or "").strip()
     if not 1 <= len(first) <= 60:
         _bad("first_name", "Enter your first name.")
@@ -199,11 +221,11 @@ def validate(body: Dict[str, Any]) -> Dict[str, Any]:
         _bad("email", "Enter a valid email address.")
     if not phone and not email:
         _bad("phone", "Enter a phone number or an email address so an agent can reach you.")
-    age = body.get("age_range")
-    if age not in AGE_RANGES:
+    age = body.get("age_range") or (None if not strict else body.get("age_range"))
+    if not (age is None and not strict) and age not in AGE_RANGES:
         _bad("age_range", "Choose an age range.")
-    cov = body.get("coverage_status")
-    if cov not in COVERAGE:
+    cov = body.get("coverage_status") or (None if not strict else body.get("coverage_status"))
+    if not (cov is None and not strict) and cov not in COVERAGE:
         _bad("coverage_status", "Choose the answer that best describes you.")
     hh = body.get("household_size")
     if hh in (None, ""):
@@ -233,7 +255,7 @@ def validate(body: Dict[str, Any]) -> Dict[str, Any]:
         _bad("best_time", "Choose a time of day.")
     if body.get("consent") is not True:
         _bad("consent", "Please agree to be contacted so an agent can help you.")
-    if body.get("consent_version") != CONSENT_VERSION:
+    if strict and body.get("consent_version") != CONSENT_VERSION:
         _bad("consent_version", "The consent wording changed. Reload the page and review it again.")
     def utm(k, n=80):
         return _clean_campaign(body.get(k))[:n] if _clean_campaign(body.get(k)) else None
@@ -258,70 +280,150 @@ def _event(db, lead, actor, action, old=None, new=None, note=None):
                          note=note))
 
 
+def _dedup_key(org_id: str, ident: str, test: bool) -> str:
+    return hashlib.sha256(("%s%s|%s" % ("test|" if test else "", org_id, ident)).encode()).hexdigest()
+
+
+def create_or_merge(db: Session, org_id: str, v: Dict[str, Any], *, test: bool, actor=None,
+                    consent_version: str = CONSENT_VERSION, consent_text: str = CONSENT_TEXT,
+                    consent_note: Optional[str] = None, origin: Optional[str] = None,
+                    source_id: Optional[str] = None):
+    """Every way a lead arrives ends here. Returns (lead, created). A repeat
+    from the same phone/email merges into the existing lead (one more
+    submission, one more history line) - never a second row. Test and real
+    rows are deduplicated separately and never merge into each other."""
+    ident = v["phone"] or v["email"]
+    key = _dedup_key(org_id, ident, test)
+    q = lambda: db.query(VoltLead).filter(VoltLead.organization_id == org_id, VoltLead.dedup_key == key).first()  # noqa: E731
+    existing = q()
+    if existing is None:
+        now = datetime.utcnow()
+        lead = VoltLead(organization_id=org_id, dedup_key=key, consent_version=consent_version,
+                        consent_text_hash=hashlib.sha256(consent_text.encode()).hexdigest(), consent_at=now,
+                        status="new", created_at=now, updated_at=now, is_test=bool(test), source_id=source_id, **v)
+        try:
+            with db.begin_nested():
+                db.add(lead)
+                db.flush()
+        except IntegrityError:           # a concurrent retry won the race
+            existing = q()
+        else:
+            _event(db, lead, actor, "created", new=v["channel"], note=origin)
+            _event(db, lead, actor, "consent_recorded", new=consent_version,
+                   note=consent_note or "consent text sha256 %s" % lead.consent_text_hash[:16])
+            return lead, True
+    existing.submissions = (existing.submissions or 1) + 1
+    existing.updated_at = datetime.utcnow()
+    _event(db, existing, actor, "repeat_submission", note=origin)
+    return existing, False
+
+
 def submit(db: Session, org_id: str, body: Dict[str, Any]) -> None:
     """Public intake. Same silent outcome for new and repeat submissions: the
     caller learns nothing about whether a person is already on file."""
     cfg = db.get(VoltLeadSettings, org_id)
     if cfg is None or not cfg.intake_enabled:
         raise HTTPException(status_code=503, detail="This form is not accepting requests right now.")
+    create_or_merge(db, org_id, validate(body), test=False)
+
+
+def preview_submit(db: Session, user: User, org_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Signed-in preview of the customer website. Works whether public intake
+    is on or off, and writes ONLY to the test partition (is_test=True): it never
+    shows in the real inbox, reports or card, and nothing is sent to anyone."""
+    if access(db, user, org_id) != "all":
+        raise HTTPException(status_code=403, detail="Previewing the customer website needs Consumer Leads manager access.")
     v = validate(body)
-    ident = v["phone"] or v["email"]
-    key = hashlib.sha256(("%s|%s" % (org_id, ident)).encode()).hexdigest()
-    existing = db.query(VoltLead).filter(VoltLead.organization_id == org_id, VoltLead.dedup_key == key).first()
-    if existing is None:
-        now = datetime.utcnow()
-        lead = VoltLead(organization_id=org_id, dedup_key=key, consent_version=CONSENT_VERSION,
-                        consent_text_hash=hashlib.sha256(CONSENT_TEXT.encode()).hexdigest(), consent_at=now,
-                        status="new", created_at=now, updated_at=now, **v)
-        try:
-            with db.begin_nested():
-                db.add(lead)
-                db.flush()
-        except IntegrityError:           # a concurrent retry won the race
-            existing = db.query(VoltLead).filter(VoltLead.organization_id == org_id, VoltLead.dedup_key == key).first()
-        else:
-            _event(db, lead, None, "created", new=v["channel"])
-            _event(db, lead, None, "consent_recorded", new=CONSENT_VERSION,
-                   note="consent text sha256 %s" % lead.consent_text_hash[:16])
-            return
-    existing.submissions = (existing.submissions or 1) + 1
-    existing.updated_at = datetime.utcnow()
-    _event(db, existing, None, "repeat_submission")
+    lead, created = create_or_merge(db, org_id, v, test=True, actor=user,
+                                    origin="Test submission from the website preview by %s" % (user.full_name or user.email))
+    C.audit(db, org_id, user, "lead_preview", lead.id, "test_lead_submitted")
+    db.flush()
+    return {"ok": True, "test": True, "lead_id": lead.id, "created": created}
+
+
+def clear_test(db: Session, user: User, org_id: str) -> Dict[str, Any]:
+    """Removes test-partition leads only. Real leads cannot be touched here."""
+    if access(db, user, org_id) != "all":
+        raise HTTPException(status_code=403, detail="Clearing test data needs Consumer Leads manager access.")
+    ids = [r[0] for r in db.query(VoltLead.id).filter(VoltLead.organization_id == org_id, VoltLead.is_test.is_(True)).all()]
+    if ids:
+        db.query(VoltLeadEvent).filter(VoltLeadEvent.lead_id.in_(ids)).delete(synchronize_session=False)
+        db.query(VoltLead).filter(VoltLead.id.in_(ids), VoltLead.is_test.is_(True)).delete(synchronize_session=False)
+    C.audit(db, org_id, user, "lead_preview", org_id, "test_leads_cleared", None, len(ids))
+    db.flush()
+    return {"removed": len(ids)}
 
 
 # ── authorization ───────────────────────────────────────────────────────────
 
-def has_grant(db: Session, org_id: str, user: User) -> bool:
+def _grant(db: Session, org_id: str, user: User) -> Optional[VoltLeadGrant]:
     g = db.get(VoltLeadGrant, (org_id, user.id))
-    return bool(g and g.active)
+    return g if g is not None and g.active else None
+
+
+def has_grant(db: Session, org_id: str, user: User) -> bool:
+    return _grant(db, org_id, user) is not None
+
+
+def _member(db: Session, user: User, org_id: str) -> bool:
+    """Belongs to the VOLT organization (any workspace role) and is not
+    suspended or removed in VOLT People & Access."""
+    from app.services import workspace_access
+    from app.services.volt import access as _access
+    if _access.blocked(db, org_id, user):
+        return False
+    return workspace_access.workspace_role(user, db, org_id) is not None
+
+
+def is_admin(db: Session, user: User, org_id: str) -> bool:
+    """Runs the Consumer Leads business: the owner, or one of VOLT's named
+    operators (VOLT_DEV_PRINCIPALS AND an active VOLT admin, re-checked on
+    every call - D'Angelo today)."""
+    if C.staff_access(db, user, org_id) == "owner":
+        return True
+    from app.services.volt import devrelay
+    return devrelay.is_principal(db, user, org_id)
 
 
 def access(db: Session, user: User, org_id: str) -> str:
-    """'all' | 'assigned'. Raises 403 for everyone else."""
-    base = C.staff_access(db, user, org_id)
-    if base == "owner":
+    """'all' | 'assigned'. Raises 403 for everyone else.
+
+    Consumer Leads is its own business inside VOLT Marketing: recruiting roles
+    give NO access here. Access comes only from
+      * the owner and VOLT's named operators -> every lead;
+      * a Consumer Leads grant (role manager -> every lead, role agent ->
+        leads assigned to them), held by an active member of the VOLT org."""
+    if user is None or not getattr(user, "is_active", False):
+        raise HTTPException(status_code=403, detail="Consumer Leads is for authorized staff.")
+    if is_admin(db, user, org_id):
         return "all"
-    if base == "staff":
-        # VOLT's two authorized operators (the existing development-principal
-        # rule: named in VOLT_DEV_PRINCIPALS AND an active VOLT admin, re-checked
-        # every call) manage the whole campaign; others need an owner grant.
-        from app.services.volt import devrelay
-        if has_grant(db, org_id, user) or devrelay.is_principal(db, user, org_id):
-            return "all"
-        return "assigned"
-    raise HTTPException(status_code=403, detail="VOLT consumer leads are for authorized agents.")
+    g = _grant(db, org_id, user)
+    if g is not None and _member(db, user, org_id):
+        return "all" if (g.role or "manager") == "manager" else "assigned"
+    raise HTTPException(status_code=403, detail="Consumer Leads is for authorized staff.")
 
 
-def scope(db: Session, user: User, org_id: str):
+def try_access(db: Session, user: User, org_id: str) -> Optional[str]:
+    try:
+        return access(db, user, org_id)
+    except HTTPException:
+        return None
+
+
+def is_test_param(params) -> bool:
+    return str((params or {}).get("test") or "").lower() in ("1", "true", "yes")
+
+
+def scope(db: Session, user: User, org_id: str, test: bool = False):
     mode = access(db, user, org_id)
-    q = db.query(VoltLead).filter(VoltLead.organization_id == org_id)
+    q = db.query(VoltLead).filter(VoltLead.organization_id == org_id, VoltLead.is_test.is_(bool(test)))
     if mode != "all":
         q = q.filter(VoltLead.assigned_user_id == user.id)
     return q, mode
 
 
-def _lead(db, user, org_id, lead_id) -> VoltLead:
-    q, _ = scope(db, user, org_id)
+def _lead(db, user, org_id, lead_id, test: bool = False) -> VoltLead:
+    q, _ = scope(db, user, org_id, test)
     lead = q.filter(VoltLead.id == lead_id).first()
     if lead is None:
         raise HTTPException(status_code=404, detail="Lead not found.")       # same for "exists but not yours"
@@ -331,6 +433,11 @@ def _lead(db, user, org_id, lead_id) -> VoltLead:
 def require_owner(db: Session, user: User, org_id: str) -> None:
     if C.staff_access(db, user, org_id) != "owner":
         raise HTTPException(status_code=403, detail="Only the VOLT owner can do this.")
+
+
+def require_admin(db: Session, user: User, org_id: str) -> None:
+    if not is_admin(db, user, org_id):
+        raise HTTPException(status_code=403, detail="Only the owner or a Consumer Leads operator can do this.")
 
 
 # ── dashboard ───────────────────────────────────────────────────────────────
@@ -349,7 +456,9 @@ def lead_dict(lead: VoltLead, names: Dict[str, str], detail: bool = False) -> Di
            "assigned_to": names.get(lead.assigned_user_id) if lead.assigned_user_id else None,
            "created_at": _utc(lead.created_at), "updated_at": _utc(lead.updated_at),
            "channel": lead.channel or {"facebook": "meta"}.get(lead.source, lead.source),
-           "state": lead.state, "appointment_at": _utc(lead.appointment_at)}
+           "state": lead.state, "appointment_at": _utc(lead.appointment_at),
+           "next_follow_up_at": _utc(lead.next_follow_up_at), "test": bool(lead.is_test),
+           "campaign": lead.utm_campaign or lead.campaign}
     if detail:
         out.update(email=lead.email, age_range=lead.age_range, coverage_status=lead.coverage_status,
                    household_size=lead.household_size, help_wanted=lead.help_wanted, campaign=lead.campaign,
@@ -363,7 +472,8 @@ def lead_dict(lead: VoltLead, names: Dict[str, str], detail: bool = False) -> Di
 
 
 def listing(db: Session, user: User, org_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    q, mode = scope(db, user, org_id)
+    test = is_test_param(params)
+    q, mode = scope(db, user, org_id, test)
     status, source = params.get("status") or "", params.get("source") or ""
     if status:
         q = q.filter(VoltLead.status == status)
@@ -372,6 +482,11 @@ def listing(db: Session, user: User, org_id: str, params: Dict[str, Any]) -> Dic
     channel = params.get("channel") or ""
     if channel:
         q = q.filter(VoltLead.channel == channel)
+    camp = _clean_campaign(params.get("campaign"))
+    if camp:
+        q = q.filter(or_(VoltLead.utm_campaign == camp, VoltLead.campaign == camp))
+    if params.get("unassigned") in ("1", "true"):
+        q = q.filter(VoltLead.assigned_user_id.is_(None))
     term = str(params.get("q") or "").strip()[:60]
     if term:
         like = "%" + term.lower().replace("%", "").replace("_", "") + "%"
@@ -387,11 +502,11 @@ def listing(db: Session, user: User, org_id: str, params: Dict[str, Any]) -> Dic
         limit = 100
     rows = q.order_by(VoltLead.created_at.desc()).limit(limit).all()
     names = _names(db, [r.assigned_user_id for r in rows])
-    return {"access": mode, "leads": [lead_dict(r, names) for r in rows]}
+    return {"access": mode, "test": test, "leads": [lead_dict(r, names) for r in rows]}
 
 
-def detail(db: Session, user: User, org_id: str, lead_id: str) -> Dict[str, Any]:
-    lead = _lead(db, user, org_id, lead_id)
+def detail(db: Session, user: User, org_id: str, lead_id: str, test: bool = False) -> Dict[str, Any]:
+    lead = _lead(db, user, org_id, lead_id, test)
     events = db.query(VoltLeadEvent).filter(VoltLeadEvent.lead_id == lead.id).order_by(VoltLeadEvent.created_at).all()
     ids = [lead.assigned_user_id] + [e.actor_user_id for e in events]
     ids += [v for e in events if e.action == "assigned" for v in (e.old_value, e.new_value)]
@@ -414,8 +529,17 @@ def detail(db: Session, user: User, org_id: str, lead_id: str) -> Dict[str, Any]
     return out
 
 
-def update(db: Session, user: User, org_id: str, lead_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
-    lead = _lead(db, user, org_id, lead_id)
+def _when(body, key, label):
+    from datetime import timezone
+    try:
+        when = datetime.fromisoformat(str(body.get(key) or "").replace("Z", "+00:00"))
+    except ValueError:
+        _bad(key, "Give the %s date and time." % label)
+    return when.astimezone(timezone.utc).replace(tzinfo=None) if when.tzinfo else when
+
+
+def update(db: Session, user: User, org_id: str, lead_id: str, body: Dict[str, Any], test: bool = False) -> Dict[str, Any]:
+    lead = _lead(db, user, org_id, lead_id, test)
     status = body.get("status")
     if status is not None:
         if status not in STATUSES:
@@ -429,13 +553,13 @@ def update(db: Session, user: User, org_id: str, lead_id: str, body: Dict[str, A
     if ev is not None:
         if ev not in CONTACT_EVENTS:
             _bad("event", "Unknown activity.")
-        if ev in ("appointment_set", "appointment_changed"):
-            try:
-                when = datetime.fromisoformat(str(body.get("appointment_at") or "").replace("Z", "+00:00"))
-            except ValueError:
-                _bad("appointment_at", "Give the appointment date and time.")
-            from datetime import timezone
-            when = when.astimezone(timezone.utc).replace(tzinfo=None) if when.tzinfo else when
+        if ev == "follow_up_scheduled":
+            when = _when(body, "follow_up_at", "follow-up")
+            old_fu = lead.next_follow_up_at
+            lead.next_follow_up_at = when
+            _event(db, lead, user, ev, _utc(old_fu), _utc(when), note or None)
+        elif ev in ("appointment_set", "appointment_changed"):
+            when = _when(body, "appointment_at", "appointment")
             old_appt = lead.appointment_at
             ev = "appointment_changed" if old_appt else "appointment_set"
             lead.appointment_at = when
@@ -460,23 +584,50 @@ def update(db: Session, user: User, org_id: str, lead_id: str, body: Dict[str, A
         _event(db, lead, user, "note", note=note)
     lead.updated_at = now
     db.flush()
-    return detail(db, user, org_id, lead.id)
+    return detail(db, user, org_id, lead.id, test)
+
+
+def _principal_ids(db: Session, org_id: str) -> List[str]:
+    from app.services.volt import devrelay
+    out = []
+    for email in devrelay.named_principals():
+        u = db.query(User).filter(func.lower(User.email) == email).first()
+        if u is not None and devrelay.is_principal(db, u, org_id):
+            out.append(u.id)
+    return out
 
 
 def assignable(db: Session, org_id: str) -> List[Dict[str, Any]]:
-    """Org staff who can hold leads: owner-role people are not listed (they see all)."""
-    from app.models.sales_models import Membership
-    ids = [m.user_id for m in db.query(Membership).filter(
-        Membership.scope_type == "customer_org", Membership.scope_id == org_id, Membership.is_active.is_(True),
-        Membership.role.in_(C.STAFF_ROLES)).all()]
+    """Who can hold leads: active Consumer Leads managers and agents, and
+    VOLT's named operators. Recruiting roles alone do not qualify."""
+    rows = db.query(VoltLeadGrant).filter(VoltLeadGrant.organization_id == org_id, VoltLeadGrant.active.is_(True)).all()
+    ids = [r.user_id for r in rows] + _principal_ids(db, org_id)
     users = db.query(User).filter(User.id.in_(ids), User.is_active.is_(True)).all() if ids else []
-    return [{"id": u.id, "name": u.full_name or u.email} for u in users if C.staff_access(db, u, org_id) == "staff"]
+    out = []
+    for u in users:
+        if u.id in {r.user_id for r in rows} and not _member(db, u, org_id):
+            continue
+        out.append({"id": u.id, "name": u.full_name or u.email})
+    return sorted(out, key=lambda x: x["name"].lower())
+
+
+def candidates(db: Session, org_id: str) -> List[Dict[str, Any]]:
+    """People who may be ADDED to the Consumer Leads team: active members of
+    the VOLT organization (not recruiting applicants/reps)."""
+    from app.models.sales_models import Membership
+    ids = {m.user_id for m in db.query(Membership).filter(
+        Membership.scope_type == "customer_org", Membership.scope_id == org_id, Membership.is_active.is_(True)).all()}
+    ids |= {u.id for u in db.query(User.id).filter(User.organization_id == org_id).all()}
+    users = db.query(User).filter(User.id.in_(ids), User.is_active.is_(True)).all() if ids else []
+    return sorted([{"id": u.id, "name": u.full_name or u.email} for u in users
+                   if u.role not in ("volt_rep", "god_admin") and _member(db, u, org_id)], key=lambda x: x["name"].lower())
 
 
 def assign(db: Session, user: User, org_id: str, lead_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     if access(db, user, org_id) != "all":
-        raise HTTPException(status_code=403, detail="Assigning leads needs an owner grant.")
-    lead = _lead(db, user, org_id, lead_id)
+        raise HTTPException(status_code=403, detail="Assigning leads needs Consumer Leads manager access.")
+    test = is_test_param(body)
+    lead = _lead(db, user, org_id, lead_id, test)
     target = body.get("user_id") or None
     if target is not None and target not in {a["id"] for a in assignable(db, org_id)}:
         _bad("user_id", "That person cannot be assigned leads.")
@@ -485,21 +636,28 @@ def assign(db: Session, user: User, org_id: str, lead_id: str, body: Dict[str, A
         lead.assigned_user_id = target
         lead.updated_at = datetime.utcnow()
     db.flush()
-    return detail(db, user, org_id, lead.id)
+    return detail(db, user, org_id, lead.id, test)
 
 
-def report(db: Session, user: User, org_id: str) -> Dict[str, Any]:
-    """Counts from the real (scoped) lead table only. Cost figures appear only
-    when real spend has been recorded - none is today, so none are shown."""
-    q, mode = scope(db, user, org_id)
+def report(db: Session, user: User, org_id: str, test: bool = False) -> Dict[str, Any]:
+    """Counts from the (scoped) lead table only - real rows, or the test
+    partition when test=True; never both. Cost figures appear only when real
+    spend has been recorded - none is today, so none are shown."""
+    q, mode = scope(db, user, org_id, test)
     rows = q.with_entities(VoltLead.status, VoltLead.channel, VoltLead.source, VoltLead.assigned_user_id,
-                           VoltLead.appointment_at, VoltLead.updated_at).all()
+                           VoltLead.appointment_at, VoltLead.updated_at, VoltLead.utm_campaign,
+                           VoltLead.campaign).all()
     by_status = {s: 0 for s in STATUSES}
     by_channel: Dict[str, Dict[str, int]] = {}
     agents: Dict[str, Dict[str, int]] = {}
     appts = 0
     last = None
-    for st, ch, src, who, appt, upd in rows:
+    by_campaign: Dict[str, Dict[str, int]] = {}
+    for st, ch, src, who, appt, upd, ucamp, camp in rows:
+        c = by_campaign.setdefault(ucamp or camp or "(none)", {"leads": 0, "appointments": 0, "enrolled": 0})
+        c["leads"] += 1
+        c["appointments"] += 1 if (appt is not None or st in ("appointment_set", "enrolled")) else 0
+        c["enrolled"] += 1 if st == "enrolled" else 0
         by_status[st] = by_status.get(st, 0) + 1
         ch = ch or {"facebook": "meta"}.get(src, src or "other")
         b = by_channel.setdefault(ch, {"leads": 0, "qualified": 0, "appointments": 0, "enrolled": 0})
@@ -514,7 +672,8 @@ def report(db: Session, user: User, org_id: str) -> Dict[str, Any]:
             a["enrolled"] += 1 if st == "enrolled" else 0
         last = upd if last is None or (upd and upd > last) else last
     names = _names(db, list(agents))
-    return {"access": mode, "total": len(rows), "by_status": by_status, "appointments": appts,
+    return {"access": mode, "test": test, "total": len(rows), "by_status": by_status, "appointments": appts,
+            "by_campaign": [dict(campaign=k, **v) for k, v in sorted(by_campaign.items())],
             "enrollments": by_status.get("enrolled", 0), "last_activity_at": _utc(last),
             "by_channel": [dict(channel=k, label=CHANNEL_LABELS.get(k, k), **v) for k, v in sorted(by_channel.items())],
             "by_source": {k: {"leads": v["leads"], "enrolled": v["enrolled"]} for k, v in by_channel.items()},
@@ -525,7 +684,8 @@ def report(db: Session, user: User, org_id: str) -> Dict[str, Any]:
 
 
 def summary(db: Session, user: User, org_id: str) -> Dict[str, Any]:
-    """The campaign card: counts and last activity only - never lead details."""
+    """The campaign card: counts and last activity only - never lead details,
+    never test rows."""
     r = report(db, user, org_id)
     cfg = db.get(VoltLeadSettings, org_id)
     from app.services.volt import devrelay
@@ -535,8 +695,11 @@ def summary(db: Session, user: User, org_id: str) -> Dict[str, Any]:
             "qualified": r["by_status"].get("qualified", 0), "appointments": r["appointments"],
             "enrollments": r["enrollments"], "last_activity_at": r["last_activity_at"],
             "intake_enabled": bool(cfg and cfg.intake_enabled),
-            "can_settings": C.staff_access(db, user, org_id) == "owner",
-            "can_develop": devrelay.is_principal(db, user, org_id)}
+            "can_settings": is_admin(db, user, org_id),
+            "can_intake": C.staff_access(db, user, org_id) == "owner",
+            "can_preview": r["access"] == "all",
+            "can_develop": devrelay.is_principal(db, user, org_id) or C.staff_access(db, user, org_id) == "owner",
+            "path": "/consumer-leads/%s" % org_id}
 
 
 # ── owner grants ────────────────────────────────────────────────────────────
@@ -544,19 +707,111 @@ def summary(db: Session, user: User, org_id: str) -> Dict[str, Any]:
 def grants(db: Session, org_id: str) -> List[Dict[str, Any]]:
     rows = db.query(VoltLeadGrant).filter(VoltLeadGrant.organization_id == org_id, VoltLeadGrant.active.is_(True)).all()
     names = _names(db, [r.user_id for r in rows])
-    return [{"user_id": r.user_id, "name": names.get(r.user_id)} for r in rows]
+    return [{"user_id": r.user_id, "name": names.get(r.user_id), "role": r.role or "manager"} for r in rows]
 
 
 def set_grant(db: Session, org_id: str, actor: User, body: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Add, change or remove a Consumer Leads team member. The owner or a named
+    operator may add agents; only the owner may make someone a manager (who
+    sees every lead)."""
+    require_admin(db, actor, org_id)
     uid = str(body.get("user_id") or "")
-    if uid not in {a["id"] for a in assignable(db, org_id)}:
-        _bad("user_id", "That person cannot be granted lead access.")
     active = body.get("active") is not False
+    role = str(body.get("role") or "agent")
     g = db.get(VoltLeadGrant, (org_id, uid))
+    if active:
+        if role not in GRANT_ROLES:
+            _bad("role", "Choose manager or agent.")
+        if role == "manager" and C.staff_access(db, actor, org_id) != "owner":
+            raise HTTPException(status_code=403, detail="Only the owner can make someone a Consumer Leads manager.")
+        if uid not in {c["id"] for c in candidates(db, org_id)}:
+            _bad("user_id", "That person is not an active member of the VOLT organization.")
+    elif g is None:
+        return grants(db, org_id)
+    elif (g.role or "manager") == "manager" and C.staff_access(db, actor, org_id) != "owner":
+        raise HTTPException(status_code=403, detail="Only the owner can remove a Consumer Leads manager.")
+    old = None if g is None or not g.active else (g.role or "manager")
     if g is None:
-        db.add(VoltLeadGrant(organization_id=org_id, user_id=uid, granted_by=actor.id, active=active))
+        db.add(VoltLeadGrant(organization_id=org_id, user_id=uid, granted_by=actor.id, active=True, role=role))
     else:
         g.active, g.granted_by = active, actor.id
-    C.audit(db, org_id, actor, "lead_grant", uid, "granted" if active else "revoked")
+        if active:
+            g.role = role
+    C.audit(db, org_id, actor, "lead_grant", uid, "granted" if active else "revoked", old, role if active else None)
     db.flush()
     return grants(db, org_id)
+
+
+# ── responses & follow-up ───────────────────────────────────────────────────
+
+def followup(db: Session, user: User, org_id: str, test: bool = False) -> Dict[str, Any]:
+    """Response-time monitoring and the follow-up queue. Read-only: nothing
+    here contacts a customer."""
+    q, mode = scope(db, user, org_id, test)
+    now = datetime.utcnow()
+    leads = q.all()
+    ids = [l.id for l in leads]
+    first: Dict[str, datetime] = {}
+    if ids:
+        for lid, at in (db.query(VoltLeadEvent.lead_id, VoltLeadEvent.created_at)
+                        .filter(VoltLeadEvent.lead_id.in_(ids),
+                                VoltLeadEvent.action.in_(("call_attempted", "contact_completed")))
+                        .order_by(VoltLeadEvent.created_at).all()):
+            first.setdefault(lid, at)
+    names = _names(db, [l.assigned_user_id for l in leads])
+    waiting = sorted([l for l in leads if l.id not in first and l.status == "new"], key=lambda l: l.created_at)
+    mins = sorted((first[l.id] - l.created_at).total_seconds() / 60.0 for l in leads if l.id in first)
+    due = sorted([l for l in leads if l.next_follow_up_at and l.next_follow_up_at <= now + timedelta(days=1)
+                  and l.status not in ("enrolled", "not_interested")], key=lambda l: l.next_follow_up_at)
+    appts = sorted([l for l in leads if l.appointment_at and l.appointment_at >= now - timedelta(hours=2)],
+                   key=lambda l: l.appointment_at)
+
+    def row(l):
+        d = lead_dict(l, names)
+        d["waiting_minutes"] = int((now - l.created_at).total_seconds() // 60)
+        d["overdue"] = bool(l.next_follow_up_at and l.next_follow_up_at < now)
+        return d
+    return {"access": mode, "test": test, "now": _utc(now),
+            "waiting_first_contact": [row(l) for l in waiting[:100]],
+            "follow_ups_due": [row(l) for l in due[:100]],
+            "upcoming_appointments": [row(l) for l in appts[:100]],
+            "response": {"contacted": len(mins), "median_minutes": round(mins[len(mins) // 2], 1) if mins else None,
+                         "within_15_min": sum(1 for m in mins if m <= 15), "never_contacted": len(waiting)},
+            "channels": [
+                {"key": "staff_new_lead", "label": "New-lead alert to managers", "state": "prepared",
+                 "note": "Built into the plan; off until you choose who gets it."},
+                {"key": "staff_assignment", "label": "Assignment alert to the agent", "state": "prepared",
+                 "note": "Off. Agents see new assignments in their inbox today."},
+                {"key": "escalation", "label": "Escalation when no one responds in time", "state": "prepared",
+                 "note": "Off. The waiting list above shows how long each new lead has waited."},
+                {"key": "customer_text", "label": "Text messages to customers", "state": "not_enabled",
+                 "note": "Off. Outreach rules, consent wording and calling/texting compliance are not final."},
+                {"key": "customer_email", "label": "Email follow-up to customers", "state": "not_enabled",
+                 "note": "Off. Not configured or authorized."},
+                {"key": "calling", "label": "Calling integration", "state": "not_enabled",
+                 "note": "Off. No dialer is connected."},
+            ]}
+
+
+# ── Program Access card ─────────────────────────────────────────────────────
+
+def contexts_for(db: Session, user: User) -> List[Dict[str, Any]]:
+    """One Program Access card per VOLT tenant whose Consumer Leads business
+    this login may enter - decided by access() above, nothing else."""
+    if user is None or getattr(user, "role", None) == "volt_rep":
+        return []
+    from app.models.volt_models import VoltProgram
+    out = []
+    # Consumer Leads is VOLT Marketing's subsidiary: the program whose public
+    # customer website is /volt/check-coverage (frontend voltApi SLUG).
+    for p in db.query(VoltProgram).filter(VoltProgram.slug == HOME_SLUG).all():
+        mode = try_access(db, user, p.organization_id)
+        if not mode:
+            continue
+        org = db.get(Organization, p.organization_id)
+        if org is None or org.is_active is False:
+            continue
+        out.append({"type": "consumer_leads", "organization_id": p.organization_id,
+                    "organization_name": "Consumer Leads", "parent_name": org.name, "access": mode,
+                    "path": "/consumer-leads/%s" % p.organization_id})
+    return out

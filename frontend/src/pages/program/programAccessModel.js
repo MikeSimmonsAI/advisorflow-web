@@ -46,6 +46,10 @@ const PROGRAMS = {
   volt: { rank: 7, variant: 'volt', symbol: 'ϟ', kind: 'VOLT MARKETING · RECRUITING',
           summary: 'Applicants, reviews, referrals, Zoom sessions and reports',
           facts: ['Applicants', 'Referrals', 'Zoom Sessions'] },
+  // Consumer Leads: VOLT Marketing's subsidiary business, its own card.
+  consumer_leads: { rank: 7, variant: 'volt', symbol: '✚', kind: 'VOLT MARKETING · CONSUMER LEADS',
+                    summary: 'Health insurance lead acquisition & enrollment',
+                    facts: ['Leads', 'Lead sources', 'Follow-up'] },
   // EvoSys Gold & Jewelry (gold buyers, jewelry stores, coin dealers). The
   // card keeps the business's own name; navy & gold artwork (redesign lane).
   // Owner-approved identity (2026-11-06): live business command center, never a demo label.
@@ -171,6 +175,16 @@ export function programCards(ctx) {
                  volt_organization_id: v.organization_id, program: 'volt', variant: p.variant,
                  symbol: p.symbol, rank: p.rank, kind: p.kind, facts: p.facts, display: 'VOLT Marketing',
                  summary: p.summary, orgLabel: v.access === 'viewer' ? 'View only' : null })
+  }
+  // CONSUMER LEADS: only where the server confirmed Consumer Leads access
+  // (owner, VOLT's named operators, or a Consumer Leads manager/agent).
+  for (const v of ctx?.consumer_leads_contexts || []) {
+    const p = PROGRAMS.consumer_leads
+    cards.push({ ...v, type: 'consumer_leads', organization_id: 'consumer-leads:' + v.organization_id,
+                 volt_organization_id: v.organization_id, program: 'consumer_leads', variant: p.variant,
+                 symbol: p.symbol, rank: p.rank, kind: p.kind, facts: p.facts, display: 'Consumer Leads',
+                 summary: p.summary, orgLabel: v.access === 'assigned' ? 'Your assigned leads' : null,
+                 actionLabel: 'Open Consumer Leads' })
   }
   // BACK OFFICE AND EXECUTIVE SUITE are separate destinations on the same
   // launcher - only when the server says this person has them, never the

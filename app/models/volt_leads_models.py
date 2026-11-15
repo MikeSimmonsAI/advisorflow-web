@@ -6,7 +6,7 @@ Registered in app/models/registry.py, so `python -m app.migrate` (pre-deploy)
 and app start-up create any NEW table defined here with create_all. Rules for
 this file (enforced by review and by the relay's file scope):
   - new tables only, every table name starting with `volt_lead`;
-  - no new columns on existing tables (that needs auto_migrate, outside scope);
+  - new columns on existing tables are added through app/auto_migrate.py;
   - no Alembic revisions (production does not run Alembic; see app/migrate.py).
 Empty until DEV-4 adds the models.
 """
@@ -76,6 +76,12 @@ class VoltLead(Base):
     appointment_at = Column(DateTime, nullable=True)     # UTC
     enrolled_at = Column(DateTime, nullable=True)        # UTC
     last_contact_at = Column(DateTime, nullable=True)    # UTC
+    # Test partition: preview submissions and test sources write is_test=True
+    # rows. Every dashboard query filters on it, so test rows never appear in
+    # the real inbox, reports or the workspace card, and real rows never in test.
+    is_test = Column(Boolean, nullable=False, default=False)
+    next_follow_up_at = Column(DateTime, nullable=True)  # UTC
+    source_id = Column(String, nullable=True)            # volt_lead_sources.id for external sources
     # Compliance-review flags, e.g. "intake_before_review" (none today).
     flags = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -108,3 +114,50 @@ class VoltLeadGrant(Base):
     granted_by = Column(String, nullable=True)
     active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    role = Column(String, nullable=False, default="manager")   # manager: every lead | agent: assigned leads only
+
+
+class VoltLeadSource(Base):
+    """Where leads come from besides the website: a signed webhook, a Google Ads
+    lead form, a CSV import, or a provider that still needs its account
+    connected (Meta, TikTok). Secrets are stored encrypted (crm_secrets)."""
+    __tablename__ = "volt_lead_sources"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider = Column(String, nullable=False)
+    name = Column(String, nullable=False)
+    campaign = Column(String, nullable=True)
+    is_test = Column(Boolean, nullable=False, default=False)
+    status = Column(String, nullable=False, default="paused")   # paused | active | pending_connection
+    secret_enc = Column(Text, nullable=True)
+    field_map = Column(Text, nullable=True)                      # JSON {target_field: source_key}
+    received_count = Column(Integer, nullable=False, default=0)
+    failed_count = Column(Integer, nullable=False, default=0)
+    duplicate_count = Column(Integer, nullable=False, default=0)
+    rejected_count = Column(Integer, nullable=False, default=0)
+    last_received_at = Column(DateTime, nullable=True)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class VoltLeadDelivery(Base):
+    """One inbound submission from a source. Idempotent per (source, external
+    id). The raw payload is kept only until it is processed (or while it waits
+    for a retry), then cleared."""
+    __tablename__ = "volt_lead_deliveries"
+    __table_args__ = (UniqueConstraint("source_id", "external_id", name="uq_volt_lead_delivery"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    source_id = Column(String, ForeignKey("volt_lead_sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    organization_id = Column(String, nullable=False, index=True)
+    external_id = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="received")  # received | processed | failed
+    lead_id = Column(String, nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    payload = Column(Text, nullable=True)
+    next_retry_at = Column(DateTime, nullable=True)
+    received_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    processed_at = Column(DateTime, nullable=True)

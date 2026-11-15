@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import urllib.error
 import urllib.request
 from datetime import timedelta
@@ -421,6 +422,108 @@ def release_blocker(job: VoltDevJob) -> Optional[str]:
                                                      chk["checked_at_central"])
 
 
+# ── automatic release policy (routine, low-risk changes) ────────────────────
+#
+# A job is released WITHOUT a person's approval only when every check passes:
+#   * tests passed on the runner and the PR still points at that exact commit;
+#   * GitHub's own release rules pass (release_check: required checks, reviews,
+#     conflicts, no failed check) - protections are never bypassed;
+#   * EVERY changed file is a low-risk file: the Consumer Leads screens and
+#     customer website, VOLT styles/images, VOLT docs, and VOLT tests that only
+#     ADD lines (a change that removes an existing test line needs a person).
+#     The Development and VOLT Operations screens are NOT on this list. Any
+#     backend file (auth, permissions,
+#     data, migrations, secrets, intake and consent rules, other businesses)
+#     means a person approves, as before;
+#   * the diff touches none of the sensitive words below (intake switch,
+#     consent wording, team/permission settings, secrets, outreach);
+#   * it is not a rollback, and the switch VOLT_DEV_AUTO_RELEASE is not "off".
+AUTO_RELEASE_FILES = (
+    re.compile(r"^frontend/src/pages/volt/(?:ConsumerLeadsWorkspace|VoltLeads)\.jsx\Z"),
+    re.compile(r"^frontend/src/pages/volt/[A-Za-z0-9_-]+\.css\Z"),
+    re.compile(r"^frontend/public/brands/volt/"),
+    re.compile(r"^docs/volt/"),
+    re.compile(r"^tests/test_volt[^/]*\.py\Z"),
+)
+AUTO_RELEASE_STOP_WORDS = ("intake_enabled", "toggleintake", "/settings", "/grants", "consent", "password", "secret",
+                           "token", "api_key", "apikey", "/preview", "is_test", "send_message", "sms",
+                           "twilio", "dangerouslysetinnerhtml", "eval(", "af_token", "manager", "volt_dev_")
+
+
+def auto_release_enabled() -> bool:
+    return (os.environ.get("VOLT_DEV_AUTO_RELEASE") or "on").strip().lower() not in ("off", "0", "false", "no")
+
+
+def auto_release_check(job: VoltDevJob, *, files_diff: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """{"eligible": bool, "passed": [...], "reason": str|None}. Never approves
+    anything itself."""
+    passed: List[str] = []
+
+    def no(reason):
+        return {"eligible": False, "passed": passed, "reason": reason}
+    if not auto_release_enabled():
+        return no("Automatic release is switched off (VOLT_DEV_AUTO_RELEASE=off).")
+    if job.kind == "revert":
+        return no("Rollbacks are approved by a person.")
+    if job.status != "ready_to_test" or not (job.tests_passed and job.head_sha and job.pr_number):
+        return no("Not ready: tests must pass on an open PR.")
+    passed.append("tests passed at %s" % job.head_sha[:7])
+    # GitHub's own file list for the PR is what counts (not only the runner's).
+    d = files_diff if files_diff is not None else review(job, max_chars=400000)
+    if not d.get("available"):
+        return no("Could not read the change from GitHub (%s), so a person reviews it." % d.get("detail", "no detail"))
+    files = [f.get("file") or "" for f in d.get("files") or []]
+    if not files or len(files) >= 100:
+        return no("Could not read the full file list, so a person reviews it.")
+    risky = [f for f in files if not any(rx.match(f) for rx in AUTO_RELEASE_FILES)]
+    if risky:
+        return no("Needs a person: changes %s (outside the low-risk screens/docs/tests)." % ", ".join(risky[:5]))
+    if any(f.get("diff_truncated") or (not f.get("diff") and f.get("status") != "removed") for f in d["files"]):
+        return no("Part of the change could not be read (too large or binary), so a person reviews it.")
+    weakened = [f["file"] for f in d["files"] if (f.get("file") or "").startswith("tests/")
+                and (f.get("status") == "removed" or any(l.startswith("-") and not l.startswith("---")
+                                                         for l in (f.get("diff") or "").splitlines()))]
+    if weakened:
+        return no("Needs a person: existing tests changed or removed in %s." % ", ".join(weakened[:3]))
+    passed.append("only low-risk files (%d)" % len(files))
+    changed = "\n".join(line for f in d["files"] for line in (f.get("diff") or "").splitlines()
+                        if line[:1] in "+-" and not line.startswith(("+++", "---"))).lower()
+    hit = [w for w in AUTO_RELEASE_STOP_WORDS if w in changed]
+    if hit:
+        return no("Needs a person: the change touches %s." % ", ".join(hit[:5]))
+    passed.append("no permission, consent, intake, secret or outreach changes")
+    chk = release_check(job)
+    if not chk["ok"]:
+        return no("GitHub release rules not met: %s (%s). Next: %s" % (chk["blocker"], chk["source"], chk["next_action"]))
+    passed.append("GitHub required checks and rules pass (checked %s)" % chk["checked_at_central"])
+    return {"eligible": True, "passed": passed, "reason": None}
+
+
+def auto_release_pass(db: Session) -> List[VoltDevJob]:
+    """Approves eligible ready jobs (once per tested commit) and starts the
+    pinned-commit merge. Jobs that are not eligible get ONE event saying why,
+    so the timeline shows that a person is needed."""
+    out = []
+    if not configured() or not auto_release_enabled():
+        return out
+    for j in db.query(VoltDevJob).filter(VoltDevJob.status == "ready_to_test", VoltDevJob.pr_number.isnot(None)).all():
+        key = "%s:%s" % (j.id, j.head_sha)
+        if key in _SEEN["auto_release"]:
+            continue
+        res = auto_release_check(j)
+        if not res["eligible"] and res["reason"] and res["reason"].startswith("GitHub release rules"):
+            continue                       # checks still running: look again next pass
+        _SEEN["auto_release"].add(key)
+        if res["eligible"]:
+            R.approve_by_policy(db, j, res["passed"])
+            db.flush()
+            out.append(j)
+        else:
+            db.add(VoltDevEvent(job_id=j.id, actor_kind="system", action="auto_release_skipped", status=j.status,
+                                detail="Waiting for a person's approval. %s" % res["reason"]))
+    return out
+
+
 def review(job: VoltDevJob, max_chars: int = 14000) -> Dict[str, Any]:
     """The change itself, for review outside GitHub: each changed file with its
     diff, from the job's PR at the exact tested commit. There is no hosted
@@ -449,7 +552,7 @@ def review(job: VoltDevJob, max_chars: int = 14000) -> Dict[str, Any]:
 
 # ── GitHub-side events the relay must not miss (2026-11-14) ─────────────────
 
-_SEEN: Dict[str, Any] = {"approved_runs": set(), "pr_checked": {}}
+_SEEN: Dict[str, Any] = {"approved_runs": set(), "pr_checked": {}, "auto_release": set()}
 PR_CHECK_EVERY = timedelta(minutes=2)
 
 
@@ -521,6 +624,11 @@ def watch_pass(db: Session) -> Dict[str, Any]:
             deployed += verify_deploys(db, org)
         for j in deployed:
             rows += R.notify(db, j, "deployed")
+        released = auto_release_pass(db)
+        db.commit()
+        for j in released:
+            dispatch(db, j, "merge")
+        out_auto = len(released)
         gh_events = reconcile_github(db)
         for j in gh_events["merged"]:
             rows += R.notify(db, j, j.status)
@@ -529,7 +637,8 @@ def watch_pass(db: Session) -> Dict[str, Any]:
         rs = resend_stale(db)
         for j in rs["blocked"]:
             rows += R.notify(db, j, "blocked")
-        out = {"expired": len(expired), "deployed": len(deployed), "resent": rs["sent"], "blocked": len(rs["blocked"])}
+        out = {"expired": len(expired), "deployed": len(deployed), "resent": rs["sent"], "blocked": len(rs["blocked"]),
+               "auto_released": out_auto}
         if not _SELFTEST["done"]:
             _SELFTEST["done"] = True
             if configured():
