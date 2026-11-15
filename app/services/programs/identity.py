@@ -511,9 +511,28 @@ def program_booking_url(db: Session, lead: Lead) -> str:
     return short or booking_url(db, lead.organization_id, link.token) or ""
 
 
+def time_offer_for(db: Session, lead: Lead, channel: str = "sms") -> str:
+    """{time_offer}: two times the booking person really has open (read from
+    the calendar at send time), else a plain "what day works" (Issue #507)."""
+    try:
+        from app.models.models import User
+        from app.services.programs import booking_policy as bp
+        prog = program_for_org(db, lead.organization_id)
+        policy = bp.for_program(prog) if prog is not None else None
+        uid = getattr(prog, "booking_user_id", None) if prog is not None else None
+        advisor = db.query(User).filter(User.id == uid).first() if uid else None
+        return bp.time_offer(db, advisor, policy, channel)
+    except Exception:                                    # noqa: BLE001 - never names a time it could not verify
+        import logging as _l
+        _l.getLogger(__name__).exception("time offer failed for lead %s", getattr(lead, "id", None))
+        return "What day this week works for you to come by?"
+
+
 def _with_booking(db: Session, lead: Lead, template: str, fields: Dict[str, str]) -> Dict[str, str]:
     """{booking_line} -> "Pick a time that works for you: <link>" (or nothing);
     {booking_link} -> the bare link. A link is minted only when the text uses one."""
+    if "{time_offer}" in (template or ""):
+        fields = dict(fields, time_offer=time_offer_for(db, lead, "sms"))
     if "{booking_line}" not in (template or "") and "{booking_link}" not in (template or ""):
         return dict(fields, booking_line="")
     from app.services import sms_programs as _sp

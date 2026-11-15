@@ -1396,7 +1396,8 @@ def _booking_window_busy(db: Session, advisor: User, target_date):
             Organization.id == advisor.organization_id).first()
 
     from app.services.tenant_scheduling import external_busy
-    intervals, err = external_busy(db, advisor, org, start_utc, end_utc)
+    from app.services.calendar_service import calendar_owner
+    intervals, err = external_busy(db, calendar_owner(advisor), org, start_utc, end_utc)
     if err:
         return [], err
 

@@ -1,0 +1,263 @@
+"""THE TEXT SLOT SCHEDULE (Issue #507, owner directive Nov 15 2026).
+
+For a program whose booking policy carries an "outreach" block (Restland only):
+
+  * NEW-FAMILY SLOTS: 8:30 AM Central, then every 8 minutes, the last one
+    before the 6:00 PM close (8:30, 8:38, ... 5:58 PM). Each holds one new
+    family's first text.
+  * FOLLOW-UP SLOTS: 2 minutes after each new-family slot (8:32, 8:40, ...),
+    while that is still before the close. Each holds one due follow-up text.
+
+Rules:
+  * One text per slot (OutreachTextSlot has a unique (org, slot_at)).
+  * A follow-up becomes due on its schedule day (days 3, 6, 10, 14 at the time
+    of day its first text went) and takes the first FREE follow-up slot at or
+    after that moment - never earlier. Extra due follow-ups queue for the next
+    free follow-up slots; they never use a new-family slot, so new families are
+    never delayed by them, and they still go when no new family is queued.
+  * A slot that was missed (the server was down, a pass came late) is never
+    caught up in a burst: anything more than GRACE late is moved to the next
+    free follow-up slot from now.
+  * Retries, quiet-hour holds and spacing holds all end up here too: whatever
+    time they choose, the text goes only in a free follow-up slot at or after it.
+
+Nothing here sends. cadence_service asks gate() before every Restland text and
+sends only when it returns None.
+"""
+import json
+import logging
+from datetime import datetime, time, timedelta
+from typing import Dict, List, Optional
+
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+log = logging.getLogger(__name__)
+
+TZ = "America/Chicago"
+GRACE = timedelta(minutes=3)
+SEARCH_DAYS = 120
+DEFAULTS = {"open": "08:30", "close": "18:00", "new_every_minutes": 8, "followup_offset_minutes": 2}
+
+
+def _zone():
+    from zoneinfo import ZoneInfo
+    return ZoneInfo(TZ)
+
+
+def _t(s: str) -> time:
+    h, m = (s or "00:00").split(":")
+    return time(int(h), int(m))
+
+
+def config_from_policy(raw) -> Optional[Dict]:
+    """The "outreach" block of a booking policy, or None (schedule not in use)."""
+    try:
+        pol = json.loads(raw) if isinstance(raw, str) else (raw or {})
+    except ValueError:
+        return None
+    o = (pol or {}).get("outreach")
+    if not isinstance(o, dict) or not o.get("slots"):
+        return None
+    out = dict(DEFAULTS)
+    out.update({k: o[k] for k in DEFAULTS if k in o})
+    out["new_every_minutes"] = max(1, int(out["new_every_minutes"]))
+    out["followup_offset_minutes"] = max(1, min(out["new_every_minutes"] - 1, int(out["followup_offset_minutes"])))
+    return out
+
+
+_cache: Dict[str, tuple] = {}
+CACHE_TTL = timedelta(seconds=60)
+
+
+def config_for_org(db: Session, org_id: Optional[str]) -> Optional[Dict]:
+    if not org_id:
+        return None
+    hit = _cache.get(org_id)
+    if hit is not None and datetime.utcnow() - hit[0] < CACHE_TTL:
+        return hit[1]
+    cfg = None
+    try:
+        from app.models.program_models import OutreachProgram
+        prog = db.query(OutreachProgram).filter(OutreachProgram.organization_id == org_id).first()
+        cfg = config_from_policy(getattr(prog, "booking_policy_json", None)) if prog is not None else None
+    except Exception:                                    # noqa: BLE001 - no schedule on a lookup error
+        db.rollback()
+        cfg = None
+    _cache[org_id] = (datetime.utcnow(), cfg)
+    return cfg
+
+
+def clear_cache() -> None:
+    _cache.clear()
+
+
+# ── the grid ─────────────────────────────────────────────────────────────────
+
+def _utc(local_dt: datetime) -> datetime:
+    from datetime import timezone
+    return local_dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _local(utc_naive: datetime) -> datetime:
+    from datetime import timezone
+    return utc_naive.replace(tzinfo=timezone.utc).astimezone(_zone())
+
+
+def day_slots(day, cfg: Dict, kind: str) -> List[datetime]:
+    """Naive-UTC slot times of one kind on one local date (DST-safe)."""
+    open_t, close_t = _t(cfg["open"]), _t(cfg["close"])
+    step = timedelta(minutes=cfg["new_every_minutes"])
+    off = timedelta(minutes=cfg["followup_offset_minutes"] if kind == "followup" else 0)
+    z = _zone()
+    at = datetime.combine(day, open_t).replace(tzinfo=z) + off
+    close = datetime.combine(day, close_t).replace(tzinfo=z)
+    out = []
+    while at < close:
+        out.append(_utc(at))
+        at = at + step
+    return out
+
+
+def slots_from(earliest: datetime, cfg: Dict, kind: str, days: int = SEARCH_DAYS):
+    """Every slot of `kind` at or after `earliest` (naive UTC), in order."""
+    d = _local(earliest).date()
+    for i in range(days):
+        for s in day_slots(d + timedelta(days=i), cfg, kind):
+            if s >= earliest:
+                yield s
+
+
+def permits(now_utc: datetime, cfg: Dict) -> bool:
+    lt = _local(now_utc).time().replace(tzinfo=None)
+    return _t(cfg["open"]) <= lt < _t(cfg["close"])
+
+
+def next_open(now_utc: datetime, cfg: Dict) -> datetime:
+    """Naive UTC: now when inside the window, else the next opening."""
+    if permits(now_utc, cfg):
+        return now_utc
+    return next(slots_from(now_utc, cfg, "new"))
+
+
+def new_family_slots(first: datetime, n: int, cfg: Dict) -> List[datetime]:
+    """n new-family slot times from `first` on (journey starts)."""
+    out = []
+    it = slots_from(first, cfg, "new")
+    while len(out) < n:
+        out.append(next(it))
+    return out
+
+
+# ── reservations ────────────────────────────────────────────────────────────
+
+def _model():
+    from app.models.reset_models import OutreachTextSlot
+    return OutreachTextSlot
+
+
+def reservation(db: Session, state_id: str, touch: int):
+    S = _model()
+    return (db.query(S).filter(S.cadence_state_id == state_id, S.touch_number == touch,
+                               S.status == "reserved").order_by(S.slot_at.desc()).first())
+
+
+def release(db: Session, state_id: str, touch: Optional[int] = None) -> int:
+    """Free a family's reserved slot(s) - the slot row is removed so another
+    text may take it."""
+    S = _model()
+    q = db.query(S).filter(S.cadence_state_id == state_id, S.status == "reserved")
+    if touch is not None:
+        q = q.filter(S.touch_number == touch)
+    n = q.delete(synchronize_session=False)
+    return n
+
+
+def reserve(db: Session, org_id: str, state, touch: int, at: datetime, kind: str) -> bool:
+    """Take this exact slot for this family's touch. False if it is taken."""
+    S = _model()
+    sp = db.begin_nested()
+    try:
+        db.add(S(organization_id=org_id, slot_at=at, kind=kind, cadence_state_id=state.id,
+                 lead_id=getattr(state, "lead_id", None), touch_number=touch))
+        db.flush()
+        sp.commit()
+        return True
+    except IntegrityError:
+        sp.rollback()
+        return False
+
+
+def place_followup(db: Session, org_id: str, state, touch: int, earliest: datetime,
+                   cfg: Optional[Dict] = None) -> Optional[datetime]:
+    """Give this touch the first free follow-up slot at or after `earliest`;
+    set the family's next due time to it. Returns the slot (or None)."""
+    cfg = cfg or config_for_org(db, org_id)
+    if cfg is None:
+        return None
+    release(db, state.id, touch)
+    S = _model()
+    taken = set()
+    horizon = earliest + timedelta(days=SEARCH_DAYS)
+    for (t,) in db.query(S.slot_at).filter(S.organization_id == org_id, S.slot_at >= earliest,
+                                           S.slot_at < horizon).all():
+        taken.add(t)
+    for s in slots_from(earliest, cfg, "followup"):
+        if s in taken:
+            continue
+        if reserve(db, org_id, state, touch, s, "followup"):
+            state.next_touch_due_at = s
+            return s
+        taken.add(s)
+    return None
+
+
+def assign_new(db: Session, org_id: str, state, at: datetime) -> bool:
+    """A new family's first text in its new-family slot (journey start)."""
+    release(db, state.id, 1)
+    if reserve(db, org_id, state, 1, at, "new"):
+        state.next_touch_due_at = at
+        return True
+    return False
+
+
+def gate(db: Session, state, lead, touch: int, now: datetime) -> Optional[str]:
+    """None = this text may go now, in its slot. Otherwise the text has been
+    (re)queued and the reason says until when. Commits nothing itself."""
+    org_id = getattr(lead, "organization_id", None)
+    cfg = config_for_org(db, org_id)
+    if cfg is None:
+        return None
+    r = reservation(db, state.id, touch)
+    due = state.next_touch_due_at or now
+    if r is not None and r.slot_at == due:
+        if now < r.slot_at:
+            return "waiting for its slot at %s" % _local(r.slot_at).strftime("%-I:%M %p %b %-d")
+        if now - r.slot_at <= GRACE:
+            return None
+        # Missed (late pass / downtime): never caught up in a burst.
+        s = place_followup(db, org_id, state, touch, now, cfg)
+        return "slot %s missed - moved to %s" % (_local(r.slot_at).strftime("%-I:%M %p"),
+                                                _local(s).strftime("%-I:%M %p %b %-d") if s else "-")
+    s = place_followup(db, org_id, state, touch, max(due, now), cfg)
+    return "queued for the follow-up slot at %s" % (_local(s).strftime("%-I:%M %p %b %-d") if s else "-")
+
+
+def mark_used(db: Session, state_id: str, touch: int) -> None:
+    S = _model()
+    db.query(S).filter(S.cadence_state_id == state_id, S.touch_number == touch,
+                       S.status == "reserved").update({"status": "used"}, synchronize_session=False)
+
+
+def queue_view(db: Session, org_id: str, now: Optional[datetime] = None, limit: int = 40) -> Dict:
+    """Read-back: the next reserved slots (times only, no family details)."""
+    now = now or datetime.utcnow()
+    S = _model()
+    rows = (db.query(S).filter(S.organization_id == org_id, S.status == "reserved", S.slot_at >= now - GRACE)
+            .order_by(S.slot_at).limit(limit).all())
+    counts = {}
+    for k in ("new", "followup"):
+        counts[k] = db.query(S).filter(S.organization_id == org_id, S.status == "reserved",
+                                       S.kind == k).count()
+    return {"reserved": counts, "next": [{"at": _local(r.slot_at).strftime("%a %b %-d %-I:%M %p"),
+                                          "kind": r.kind, "touch": r.touch_number} for r in rows]}

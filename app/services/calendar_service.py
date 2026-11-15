@@ -30,7 +30,10 @@ from google_auth_oauthlib.flow import Flow
 # exactly one call site, in the calendar client builder below. See
 # app/lazy_module.py for why the startup baseline matters.
 from sqlalchemy.orm import Session
+import logging
 from app.models.models import User, BookingLink, Lead
+
+logger = logging.getLogger(__name__)
 from app.utils.crypto import encrypt_value, decrypt_value
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
@@ -47,6 +50,39 @@ DEFAULT_APPOINTMENT_DURATION_MINUTES = 30
 
 
 
+def calendar_owner(user):
+    """The account whose Google calendar holds this user's program bookings.
+
+    Restland (Issue #507, Nov 15): office and home visits share ONE calendar -
+    the shared EvoSys appointment calendar, connected on the EvoSys platform
+    login. The program's booking policy names that login as
+    "calendar_user_id"; availability, new events, moves and cancellations for
+    every Restland staff member then use that connection. Everyone else: the
+    user themself, exactly as before."""
+    if user is None:
+        return None
+    try:
+        from sqlalchemy.orm import object_session
+        sess = object_session(user)
+        org_id = getattr(user, "organization_id", None)
+        if sess is None or not org_id:
+            return user
+        from app.models.program_models import OutreachProgram
+        prog = sess.query(OutreachProgram).filter(OutreachProgram.organization_id == org_id).first()
+        raw = getattr(prog, "booking_policy_json", None) if prog is not None else None
+        if not raw:
+            return user
+        import json as _json
+        cal_uid = (_json.loads(raw) or {}).get("calendar_user_id")
+        if not cal_uid or cal_uid == user.id:
+            return user
+        owner = sess.query(User).filter(User.id == cal_uid, User.is_active.is_(True)).first()
+        return owner if owner is not None and owner.google_oauth_refresh_token_encrypted else user
+    except Exception:                                    # noqa: BLE001 - the user's own calendar
+        logger.exception("calendar owner lookup failed for %s", getattr(user, "id", None))
+        return user
+
+
 def booking_calendar_id(user) -> str:
     """THE calendar a booking is read from, written to, moved off and
     cancelled on - one answer for every path (Issue #507). The user's stored
@@ -57,6 +93,7 @@ def booking_calendar_id(user) -> str:
     user's stored id, then "primary"."""
     if user is None:
         return "primary"
+    user = calendar_owner(user)
     try:
         from sqlalchemy.orm import object_session
         from app.models.calendar_models import CalendarConnection
@@ -209,6 +246,7 @@ def _record_google_connection(db: Session, advisor: User) -> None:
 
 
 def _get_calendar_service(advisor: User):
+    advisor = calendar_owner(advisor)
     if not advisor.google_oauth_refresh_token_encrypted:
         raise ValueError(f"Advisor {advisor.full_name} has not connected Google Calendar.")
 

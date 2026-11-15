@@ -326,3 +326,29 @@ Code:
 - Twilio verification category vs outreach use (see the private evidence report).
 - Calendar account identity (masked in the probe; Mike confirms it is the intended one).
 - Copy/audience approval, daily volume and spacing, alert recipients, internal test recipients and a calendar-write test authorization.
+
+# Launch (Nov 15 directive) - File Review live from Mon Nov 16, 8:30 AM Central
+
+## Sending schedule (Restland only)
+- New-family slots: 8:30 AM Central, then every 8 minutes, last at 5:58 PM (72 a day). Each holds one new family's first text.
+- Follow-up slots: 2 minutes after each new-family slot (8:32, 8:40 ... 5:52 PM; 71 a day). Each holds one due follow-up text.
+- A follow-up is due on its day (days 3, 6, 10, 14 at the time of day its first text went). It takes the first free follow-up slot at or after that. It is never sent early, never stacked, and never uses a new-family slot. Follow-ups still go when no new family is queued.
+- Missed slots (downtime, late pass) and retries move to the next free follow-up slot from now. There is no catch-up burst.
+- One text per slot: table `outreach_text_slots`, unique (organization, time).
+- A 30-second Restland pass (`program_text_slot_loop`) sends each text in its slot. Every other workspace stays on the 5-minute cadence loop.
+- Emails: days 1, 4, 8, 12 from the family's first text slot. Day 1 waits at least 4 hours after the first text actually went. Email-only families start on the same grid, shifted 4 minutes. Email window: 8:30 AM - 6:00 PM Central.
+- Capacity note: at 72 new families a day, follow-ups due from day 6 exceed the 71 follow-up slots, so later texts queue (see the launch report). Pace and slots are policy settings (`booking_policy_json.outreach`), not code.
+
+## Sender and calendar
+- 855-360-1164 is registered (`sms_campaigns`, key TF-8553601164). Links and the 469-553-7417 callback are allowed in Restland texts.
+- Office and home share one calendar. `booking_policy_json.calendar_user_id` names the login connected to that Google account. Availability, events, moves and cancellations use it for every Restland staff member.
+
+## Launch run
+- `WORKSPACE_RESET=<org>:launch:<key>` with WORKSPACE_BOOKING_USER_ID, WORKSPACE_CALENDAR_USER_ID and WORKSPACE_LAUNCH_AT.
+- It recomputes the audience, stages and approves the ready families, saves the copy, switches the campaign and workspace texts on, enables appointment messages and the survey, and starts the journey. It sends nothing itself.
+- `WORKSPACE_RESET=<org>:readback:-` reads back the switches, counts and queue. Clear the env values after each run.
+
+## Pause
+- Campaign OFF stops the next text and email at dispatch.
+- The workspace texts switch stops every Restland text.
+- Reserved slots stay; switching back on resumes in order. Missed slots move forward, never burst.

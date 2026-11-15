@@ -306,7 +306,21 @@ def impact(db: Session, prog: OutreachProgram, fam: CampaignFamily, now: Optiona
         "held": holds,
         "sends_now": 0,
         "families": rows,
+        # Restland (Nov 15): the text slot schedule that replaces the spacing box.
+        "slot_schedule": _slot_schedule(db, prog),
     }
+
+
+def _slot_schedule(db: Session, prog: OutreachProgram) -> Optional[Dict]:
+    from app.services.programs import outreach_slots as _os
+    cfg = _os.config_for_org(db, prog.organization_id)
+    if cfg is None:
+        return None
+    return dict(cfg, label=("A new family's first text at %s AM Central and every %d minutes until %s; "
+                            "a due follow-up %d minutes after each; every day."
+                            % (cfg["open"].lstrip("0"), cfg["new_every_minutes"],
+                               "6:00 PM" if cfg["close"] == "18:00" else cfg["close"],
+                               cfg["followup_offset_minutes"])))
 
 
 def _may_enrol(lead: Lead) -> bool:
@@ -336,7 +350,22 @@ def start(db: Session, prog: OutreachProgram, fam: CampaignFamily, user, *, coun
     if count is not None:
         eligible = eligible[:max(0, int(count))]
     overdue = _overdue(db, prog, fam, rows, now)
-    slots = release_slots(first, len(eligible) + len(overdue), spacing)
+    from app.services.programs import outreach_slots as _os
+    slot_cfg = _os.config_for_org(db, prog.organization_id)
+    if slot_cfg is not None:
+        # Restland text schedule (Nov 15): each texting family's first text in
+        # its own new-family slot (8:30 + every 8 minutes, Central); families
+        # reached by email only start on the same grid shifted 4 minutes, so
+        # they never take a text slot. Nothing overdue is re-spaced here: the
+        # slot gate moves any missed text to a follow-up slot.
+        overdue = []
+        n_text = sum(1 for r in eligible if r["textable"])
+        text_slots = iter(_os.new_family_slots(first, n_text, slot_cfg))
+        mail_slots = iter([t + timedelta(minutes=4) for t in
+                           _os.new_family_slots(first, len(eligible) - n_text, slot_cfg)])
+        slots = [next(text_slots) if r["textable"] else next(mail_slots) for r in eligible]
+    else:
+        slots = release_slots(first, len(eligible) + len(overdue), spacing)
     slot = 0
     started, texting, email_only, raced = 0, 0, 0, 0
     # RESUME FIRST: anyone already started whose next text was held back is
@@ -354,8 +383,8 @@ def start(db: Session, prog: OutreachProgram, fam: CampaignFamily, user, *, coun
         st.next_touch_due_at = at
         resumed += 1
     db.commit()
-    for r in eligible:
-        at = slots[slot]
+    for idx, r in enumerate(eligible):
+        at = slots[idx] if slot_cfg is not None else slots[slot]
         res = db.execute(update(ProgramSourceRecord)
                          .where(ProgramSourceRecord.organization_id == prog.organization_id,
                                 ProgramSourceRecord.lead_id == r["lead_id"],
@@ -376,8 +405,10 @@ def start(db: Session, prog: OutreachProgram, fam: CampaignFamily, user, *, coun
                 # the family is "started" without it, or due "now" by mistake.
                 state = db.query(CadenceState).filter(CadenceState.lead_id == lead.id).first()
                 if state is None and _may_enrol(lead):
-                    db.add(CadenceState(lead_id=lead.id, status="active", current_touch_number=0,
-                                        cadence_started_at=at, next_touch_due_at=at))
+                    state = CadenceState(lead_id=lead.id, status="active", current_touch_number=0,
+                                         cadence_started_at=at, next_touch_due_at=at)
+                    db.add(state)
+                    db.flush()
                     texts = True
                 elif state is not None and state.status != "active" and _return_round(db, prog, lead) \
                         and _may_enrol(lead):
@@ -391,6 +422,12 @@ def start(db: Session, prog: OutreachProgram, fam: CampaignFamily, user, *, coun
                     texts = True
                 elif state is not None and state.status == "active":
                     texts = True                        # an existing text journey keeps its place
+                if texts and slot_cfg is not None and state is not None \
+                        and (state.current_touch_number or 0) == 0:
+                    state.cadence_started_at = at
+                    if not _os.assign_new(db, prog.organization_id, state, at):
+                        # Taken by another start: the first free follow-up slot.
+                        _os.place_followup(db, prog.organization_id, state, 1, at, slot_cfg)
             db.commit()
         except Exception:                               # noqa: BLE001 - nothing half-started
             db.rollback()
@@ -404,8 +441,8 @@ def start(db: Session, prog: OutreachProgram, fam: CampaignFamily, user, *, coun
     mark(fam, "started_at", datetime.utcnow())
     db.commit()
     from app.routers.audit_log_router import log_action
-    last = slots[slot - 1] if slot else first
-    first = slots[0] if slots else first
+    last = (max(slots) if slots else first) if slot_cfg is not None else (slots[slot - 1] if slot else first)
+    first = (min(slots) if slots else first) if slot_cfg is not None else (slots[0] if slots else first)
     log_action(db, prog.organization_id, user.id, action="program.journey_started",
                target_type="program_campaign_family", target_id=fam.id,
                details={"key": fam.key, "started": started, "texting": texting, "email_only": email_only,
@@ -415,7 +452,7 @@ def start(db: Session, prog: OutreachProgram, fam: CampaignFamily, user, *, coun
     db.commit()
     from zoneinfo import ZoneInfo as _Z
     by_day: Dict[str, int] = {}
-    for t in slots[:slot]:
+    for t in (slots if slot_cfg is not None else slots[:slot]):
         d = t.replace(tzinfo=_Z("UTC")).astimezone(_Z(RELEASE_TZ)).strftime("%a %b %d")
         by_day[d] = by_day.get(d, 0) + 1
     return {"by_day": by_day, "started": started, "texting": texting, "email_only": email_only, "resumed": resumed,

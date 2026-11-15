@@ -735,17 +735,26 @@ function JourneyPanel({ cur, isManager, version, onDone }) {
           <Field label="How many to start now" hint={`Leave blank for all ${num(imp.will_start)}`}>
             <input type="number" min={0} max={imp.will_start} value={count} onChange={e => setCount(e.target.value)} placeholder="All" />
           </Field>
-          <Field label="Minutes between families" hint="Spreads the first messages out">
-            <input type="number" min={0} max={1440} value={spacing} onChange={e => setSpacing(e.target.value)} />
-          </Field>
+          {!imp.slot_schedule && (
+            <Field label="Minutes between families" hint="Spreads the first messages out">
+              <input type="number" min={0} max={1440} value={spacing} onChange={e => setSpacing(e.target.value)} />
+            </Field>
+          )}
           <Field label="First one at" hint="Blank = now. Contact hours still apply.">
             <input type="datetime-local" value={startAt} onChange={e => setStartAt(e.target.value)} />
           </Field>
         </div>
-        <p className="sci-micro sci-muted" style={{ margin: '0 0 8px' }}>
-          New families start only 9 AM–6 PM Central, Monday–Friday. Any that don't fit roll to the next weekday morning automatically.
-          {lastAt && n * (Number(spacing) || 0) <= 480 ? <> The last of these {num(n)} would start around {when(lastAt.toISOString())}.</> : null}
-        </p>
+        {imp.slot_schedule ? (
+          <p className="sci-micro sci-muted" style={{ margin: '0 0 8px' }}>
+            Sending schedule: {imp.slot_schedule.label} One text per slot. Follow-ups that fall due together wait for the
+            next free follow-up slot; nothing is sent early or in a burst.
+          </p>
+        ) : (
+          <p className="sci-micro sci-muted" style={{ margin: '0 0 8px' }}>
+            New families start only 9 AM–6 PM Central, Monday–Friday. Any that don't fit roll to the next weekday morning automatically.
+            {lastAt && n * (Number(spacing) || 0) <= 480 ? <> The last of these {num(n)} would start around {when(lastAt.toISOString())}.</> : null}
+          </p>
+        )}
         {isManager ? (
           <button type="button" className="sci-btn gold" disabled={!cur.is_active || !phrase || busy}
             title={!cur.is_active ? 'Switch the campaign on first - that alone sends nothing' : undefined}
@@ -764,7 +773,7 @@ function JourneyPanel({ cur, isManager, version, onDone }) {
       <TypedConfirm open={confirmOpen} title="Start these journeys?" phrase={phrase} actionLabel="Start journeys"
         tone="dangerfill" busy={busy} onCancel={() => setConfirmOpen(false)} onConfirm={go}>
         <p style={{ margin: 0 }}>
-          {n > 0 ? <>{num(n)} families get their first message scheduled, {Number(spacing) || 0} minutes apart. </> : null}
+          {n > 0 ? (imp.slot_schedule ? <>{num(n)} families get their first message in their own slot on the sending schedule. </> : <>{num(n)} families get their first message scheduled, {Number(spacing) || 0} minutes apart. </>) : null}
           {imp?.would_resume ? <>{num(imp.would_resume)} paused families pick up where they left off, re-spaced. </> : null}
           Messages go at the scheduled times through every check (contact hours, STOP, do-not-call, replies). This is audit-logged.
         </p>

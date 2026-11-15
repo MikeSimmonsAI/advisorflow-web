@@ -1679,6 +1679,51 @@ async def _cadence_loop():
         await asyncio.sleep(CADENCE_PASS_SECONDS)
 
 
+
+TEXT_SLOT_PASS_SECONDS = 30
+
+
+async def _program_text_slot_loop():
+    """Programs on the text slot schedule (Restland, Issue #507): run their due
+    texts every 30 seconds so each leaves in its own slot. Only organizations
+    whose booking policy carries an "outreach" slot block are touched; every
+    other workspace stays on the 5-minute cadence loop. The same claim rows
+    and checks apply (run_due_cadences), so the two loops never double-send."""
+    from app.services.cadence_service import run_due_cadences
+    from app.models.job_models import JobName
+    from app.deps import SessionLocal
+    import logging as _log
+    _logger = _log.getLogger("program_text_slot_loop")
+
+    def _one_pass():
+        db = SessionLocal()
+        try:
+            from app.models.program_models import OutreachProgram
+            from app.services.programs import outreach_slots
+            out = {}
+            for prog in db.query(OutreachProgram).filter(OutreachProgram.is_active.is_(True)).all():
+                if outreach_slots.config_from_policy(prog.booking_policy_json) is None:
+                    continue
+                r = run_due_cadences(db, organization_id=prog.organization_id)
+                if r.get("sent"):
+                    out[prog.organization_id] = r.get("sent")
+            return out
+        finally:
+            db.close()
+
+    await asyncio.sleep(75)
+    while True:
+        if not await _pass_claimed(JobName.PROGRAM_TEXT_SLOTS, TEXT_SLOT_PASS_SECONDS):
+            await asyncio.sleep(TEXT_SLOT_PASS_SECONDS)
+            continue
+        try:
+            res = await _off_loop(_one_pass)
+            if res:
+                _logger.info("text slots: sent %s", res)
+        except Exception as exc:                         # noqa: BLE001
+            _logger.error("text slot pass error: %s", exc)
+        await asyncio.sleep(TEXT_SLOT_PASS_SECONDS)
+
 async def _session_cleanup_loop():
     """Sweep long-dead `user_sessions` rows once a day.
 
@@ -2747,6 +2792,7 @@ async def on_startup():
         JobName.EVOSENSE_HUNT:        _evosense_hunt_loop,
         JobName.WHOLESALE_EXCEPTIONS: _wholesale_exception_loop,
         JobName.PROGRAM_SLA:          _program_sla_loop,
+        JobName.PROGRAM_TEXT_SLOTS:   _program_text_slot_loop,
         JobName.WEB_PUSH:             _web_push_loop,
         JobName.VOLT_DEV_RELAY:       _volt_dev_relay_loop,
         JobName.VOLT_SHEETS:          _volt_sheets_loop,

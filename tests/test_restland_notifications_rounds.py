@@ -440,6 +440,11 @@ def test_two_complete_rounds_for_one_family_keep_round_one_history(rl, monkeypat
     # Its emails are 101-104; round 1's 1-4 stay as they were.
     from app.services.programs import email_touches
     start2 = min(r.journey_started_at for r in db.query(ProgramSourceRecord).filter_by(lead_id=lead.id).all())
+    # Nov 15: the day-1 email follows the round's first text by 4 hours.
+    assert not [p for p in email_touches.plan(db, prog, now=start2 + timedelta(hours=5), with_skip=False)
+                if p["lead"].id == lead.id]
+    db.add(Message(lead_id=lead.id, sender_id=rl["mike"].id, body="r2 t1", sent_at=start2 + timedelta(minutes=1)))
+    db.commit()
     plan = email_touches.plan(db, prog, now=start2 + timedelta(hours=5), with_skip=False)
     mine = [p for p in plan if p["lead"].id == lead.id]
     assert mine and mine[0]["touch"] == 101
@@ -488,7 +493,7 @@ def test_copy_never_states_what_the_permission_form_authorizes(rl):
     texts += [s + b for s, b in F.EMAIL.values()] + [s + b for s, b in F.RETURN_EMAIL.values()]
     for t in texts:
         assert not re.search(r"records who|who (you give|may) |complete the permission|sign the permission", t, re.I)
-    assert "explain any permission-to-access paperwork that applies" in F.SMS[1]
+    assert "go over any permission-to-access paperwork that applies" in F.SMS[1]   # Nov 15 wording
     configured(rl)
     fam = rl["db"].query(CampaignFamily).filter_by(organization_id=rl["org"].id, key=F.CAMPAIGN_KEY).one()
     assert "records who" not in (campaigns.email_for(fam, 3) or {}).get("body", "")

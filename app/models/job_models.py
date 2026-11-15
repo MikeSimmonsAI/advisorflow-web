@@ -59,6 +59,10 @@ class JobName:
     # Location outreach programs: re-alert HOT replies nobody has handled
     # within the program's SLA. Writes alerts only; never contacts a customer.
     PROGRAM_SLA = "program_sla_loop"
+    # Restland text slots (Issue #507, Nov 15): a short pass every 30 seconds
+    # for programs on the slot schedule, so a text leaves in its own slot
+    # (8:30, 8:32, 8:38 ...) instead of up to five minutes late.
+    PROGRAM_TEXT_SLOTS = "program_text_slot_loop"
     # Phone alerts (web push): sends what notifications queued in push_events.
     # Talks only to the browsers' own push services, only for people who
     # turned phone alerts on. Named so the ledger can say when it stopped.
@@ -123,6 +127,7 @@ LOOP_JOB_NAMES = (
     JobName.EVOSENSE_HUNT,
     JobName.WHOLESALE_EXCEPTIONS,
     JobName.PROGRAM_SLA,
+    JobName.PROGRAM_TEXT_SLOTS,
     JobName.WEB_PUSH,
     JobName.VOLT_DEV_RELAY,
     JobName.VOLT_SHEETS,

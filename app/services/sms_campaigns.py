@@ -97,6 +97,26 @@ _BUILTIN: List[Dict[str, Any]] = [
         "approved_scope": [CATEGORY_INFORMATIONAL],
         "note": "EvoSys Pro toll-free - SCI SMS + inbound voicemail",
     },
+    {
+        # Restland's designated sender (Issue #507). Read from Twilio by the
+        # read-only probe on 2026-11-08 00:31 UTC: number SID
+        # PNb7edfa51c3ada4c360d29babf08084e5, Toll-Free Verification
+        # HHea3991824973d29356e23d014dc679de TWILIO_APPROVED (updated
+        # 2026-11-06), use case ACCOUNT_NOTIFICATIONS, opt-in Web Form. A
+        # toll-free verification carries no embedded-link / phone flags, so
+        # links and the callback number are permitted, as for the SCI line.
+        "key": "TF-8553601164",
+        "kind": KIND_TOLL_FREE,
+        "numbers": ["+18553601164"],
+        "verification_status": "TWILIO_APPROVED",
+        "verified_on": "2026-11-06",
+        "use_case": "ACCOUNT_NOTIFICATIONS",
+        "has_embedded_links": True,
+        "has_embedded_phone": True,
+        "programs": ["restland"],
+        "approved_scope": [CATEGORY_INFORMATIONAL],
+        "note": "EvoSys Pro toll-free - Restland Family File Review and appointment texts",
+    },
 ]
 
 
