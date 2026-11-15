@@ -356,6 +356,17 @@ def _volt_contexts(db: Session, user: User) -> List[Dict[str, Any]]:
         return []
 
 
+def _consumer_leads_contexts(db: Session, user: User) -> List[Dict[str, Any]]:
+    """Consumer Leads (a VOLT Marketing subsidiary): its own card, decided by
+    its own access rules in app/services/volt/leads.py."""
+    try:
+        from app.services.volt.leads import contexts_for
+        return contexts_for(db, user)
+    except Exception:  # pragma: no cover - never let a hint break login
+        _log.warning("could not resolve Consumer Leads access", exc_info=True)
+        return []
+
+
 def _acquisition_enabled(org) -> bool:
     """Opens the managed-acquisition client portal (Issue #452) - explicit
     `client_acquisition` key and a cleaning identity, never by name or slug."""
@@ -798,6 +809,7 @@ def authorized_contexts(db: Session, user: User, host_slug: Optional[str] = None
         # VOLT MARKETING (#535): recruiting operations for the platform owner and
         # the VOLT organization's own org_admin/manager members. Never applicants.
         "volt_contexts": _volt_contexts(db, user),
+        "consumer_leads_contexts": _consumer_leads_contexts(db, user),
         "workspace_count": len(workspaces),
         "default_context": default,
         # WHICH BRAND'S LOOK the launcher wears (e.g. BookaBoost), decided

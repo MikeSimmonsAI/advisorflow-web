@@ -122,6 +122,7 @@ const InvestorPortal = lazyPage(() => import('./pages/investor/InvestorPortal'))
 // VOLT Marketing (#535): public applicant portal + rep dashboard, and staff operations.
 const VoltPortal = lazyPage(() => import('./pages/volt/VoltPortal'))
 const VoltOps = lazyPage(() => import('./pages/volt/VoltOps'))
+const ConsumerLeadsWorkspace = lazyPage(() => import('./pages/volt/ConsumerLeadsWorkspace'))
 const VoltDevConnect = lazyPage(() => import('./pages/volt/VoltDevConnect'))
 const RoofingMission = lazyPage(() => import('./pages/roofing/MissionControl'))
 const RoofingQueue = lazyPage(() => import('./pages/roofing/WorkQueue'))
@@ -1200,6 +1201,7 @@ function WorkspaceSelector() {
   const dealBuilders = (ctx.deal_builder?.sales ? 1 : 0) + (ctx.deal_builder?.executive ? 1 : 0)
     + (ctx.sales_team?.my_team ? 1 : 0) + (ctx.sales_team?.onboarding ? 1 : 0)
   const otherDestinations = products.length + previews.length + (ctx.acquisition_ops || []).length
+    + (ctx.consumer_leads_contexts || []).length
     + (ctx.has_back_office ? 1 : 0) + (ctx.executive_contexts || []).length + dealBuilders
   if (volts.length === 1 && nonVolt.length === 0 && otherDestinations === 0) {
     clearWorkspaceContext()
@@ -1232,7 +1234,7 @@ function WorkspaceSelector() {
       clearWorkspaceContext()
       navigate('/acquisition-ops'); return
     }
-    if (item.type === 'volt_ops') {
+    if (item.type === 'volt_ops' || item.type === 'consumer_leads') {
       clearWorkspaceContext()
       navigate(item.path); return
     }
@@ -1513,6 +1515,8 @@ export default function App() {
         <Route path="/volt/*" element={<VoltPortal />} />
         {/* VOLT OPERATIONS: staff via Program Access; /volt/ops/* re-checks authority on every request. */}
         <Route path="/volt-ops/:orgId/*" element={<ProtectedRoute bare><VoltOps /></ProtectedRoute>} />
+        {/* CONSUMER LEADS - VOLT Marketing's subsidiary, its own workspace; the server decides access. */}
+        <Route path="/consumer-leads/:orgId/*" element={<ProtectedRoute bare><ConsumerLeadsWorkspace /></ProtectedRoute>} />
         {/* Connect ChatGPT (#571): handles its own sign-in redirect with ?next= */}
         <Route path="/volt-dev/connect" element={<VoltDevConnect />} />
         <Route path="/my-property/:token" element={<SellerTransaction />} />

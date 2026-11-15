@@ -275,7 +275,9 @@ def _next_number(db, org_id: str) -> int:
 CAMPAIGNS = {
     "consumer_leads": {"name": "Consumer Leads", "files": [
         "app/services/volt/leads.py", "app/routers/volt_leads_router.py", "app/models/volt_leads_models.py",
-        "frontend/src/pages/volt/VoltLeads.jsx", "tests/test_volt_leads.py", "docs/volt/leads-rollout.md",
+        "app/services/volt/lead_sources.py", "frontend/src/pages/volt/ConsumerLeadsWorkspace.jsx",
+        "frontend/src/pages/volt/VoltLeads.jsx", "tests/test_volt_leads.py",
+        "tests/test_volt_consumer_leads_workspace.py", "docs/volt/leads-rollout.md",
         "docs/volt/design/volt_leads_v3.html", "docs/volt/design/volt_leads_backend_demo.html"]},
 }
 
@@ -367,6 +369,18 @@ def approve_merge(db: Session, job: VoltDevJob, user: User, expected_sha: Option
     job.merge_requested_by, job.merge_requested_at, job.merge_approved_sha = user.id, C.now(), job.head_sha
     _set(db, job, "merge_requested", "Approved for production at %s" % job.head_sha[:7], user=user,
          action="approve_merge")
+    return job
+
+
+def approve_by_policy(db: Session, job: VoltDevJob, checks: List[str]) -> VoltDevJob:
+    """The automatic release policy (devdispatch.auto_release_check) approved
+    THIS tested commit. Same pinned-commit merge as a person's approval; the
+    event names the policy and every check it passed."""
+    if job.status != "ready_to_test" or not job.tests_passed or not job.head_sha or not job.pr_number:
+        return job
+    job.merge_requested_by, job.merge_requested_at, job.merge_approved_sha = "policy:auto-release", C.now(), job.head_sha
+    _set(db, job, "merge_requested", "Released automatically under the low-risk policy at %s. Checks: %s"
+         % (job.head_sha[:7], "; ".join(checks)), kind="system", action="auto_release")
     return job
 
 
@@ -647,6 +661,39 @@ def notify_list() -> List[str]:
     return [e.strip() for e in raw.split(",") if e.strip()]
 
 
+def _central(dt) -> str:
+    if dt is None:
+        return "—"
+    from datetime import timezone
+    from zoneinfo import ZoneInfo
+    d = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return d.astimezone(ZoneInfo("America/Chicago")).strftime("%b %-d, %Y, %-I:%M %p %Z")
+
+
+def consumer_leads_details(db: Session, job: VoltDevJob, status: str) -> List[str]:
+    """The facts a Consumer Leads operator needs in the email itself: where
+    to look, what exactly shipped, how it was tested, and what is still off."""
+    from app.services.volt import mail
+    from app.models.volt_leads_models import VoltLeadSettings
+    cfg = db.get(VoltLeadSettings, job.organization_id)
+    app_base = "https://app.evosyspro.live/consumer-leads/%s" % job.organization_id
+    rows = [("Project", "Consumer Leads (VOLT Marketing)"),
+            ("What changed", job.title or ""),
+            ("Public website", "https://voltmarketing.live/volt/check-coverage"),
+            ("Preview (signed in, test data only)", app_base + "/preview"),
+            ("Back office", app_base),
+            ("Pull request", job.pr_url or "—"),
+            ("Tested commit", (job.head_sha or "—")[:12]),
+            ("Tests", job.tests_summary or ("passed" if job.tests_passed else "—"))]
+    if status == "deployed":
+        rows += [("Deployed commit", (job.merge_sha or "—")[:12]),
+                 ("Verified running", job.deploy_detail or "—"),
+                 ("Completed", _central(job.deployed_at))]
+    rows.append(("Still restricted", "Public intake is %s. Customer texts, emails and calls are off. Facebook, Instagram "
+                 "and TikTok lead ads wait for their account connections." % ("ON" if cfg and cfg.intake_enabled else "OFF")))
+    return ["<b>%s:</b> %s" % (mail._e(k), mail._e(v)) for k, v in rows]
+
+
 def notify(db: Session, job: VoltDevJob, status: str) -> List[Any]:
     """Email both principals at the moments that need them. One email per
     job, status and attempt (the mail queue dedupes on that key)."""
@@ -660,6 +707,8 @@ def notify(db: Session, job: VoltDevJob, status: str) -> List[Any]:
              "<b>%s.</b> %s" % (mail._e(pr["stage"]), mail._e(pr["summary"]))]
     if pr.get("next_action"):
         paras.append("Next: " + mail._e(pr["next_action"]))
+    if status in ("deployed", "ready_to_test", "merged") and (job.title or "").startswith("Consumer Leads"):
+        paras += consumer_leads_details(db, job, status)
     paras.append("Open the Development page (or ask ChatGPT \"Check DEV-%d\") for the timeline, tests and the change."
                  % job.number)
     rows = []

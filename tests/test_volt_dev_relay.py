@@ -52,6 +52,8 @@ def dev(volt, monkeypatch):
     db.commit()
     monkeypatch.setenv("VOLT_DEV_PRINCIPALS", "%s,%s" % (volt["staff"].email, collab.email))
     monkeypatch.setenv("VOLT_DEV_NOTIFY", "mike+volt-test@example.com,dee+volt-test@example.com")
+    # The automatic release policy has its own tests below; here every release is a person's.
+    monkeypatch.setenv("VOLT_DEV_AUTO_RELEASE", "off")
     return dict(volt, collab=collab)
 
 
@@ -501,3 +503,104 @@ def test_consumer_leads_development_requests_carry_campaign_context(dev):
     assert again["created"] is False and again["ref"] == j["ref"]                     # double click = one job
     plain = _submit(dev, dev["staff"], campaign="not-a-campaign", title="Plain", request="A plain VOLT change here.").json()
     assert plain["title"] == "Plain"
+
+
+# ── automatic release policy (2026-11-14) ───────────────────────────────────
+
+def _files(*items):
+    return {"available": True, "files": [{"file": f, "status": "modified", "diff": d, "diff_truncated": False}
+                                         for f, d in items]}
+
+
+SAFE_JSX = ("frontend/src/pages/volt/VoltLeads.jsx", "@@ -1 +1 @@\n-<h2>Common questions</h2>\n+<h2>Questions people ask</h2>")
+
+
+def _ready_job(**over):
+    from app.models.volt_models import VoltDevJob
+    j = VoltDevJob(kind="change", status="ready_to_test", tests_passed=True, head_sha="e" * 40, pr_number=900, number=9)
+    for k, v in over.items():
+        setattr(j, k, v)
+    return j
+
+
+def test_auto_release_allows_only_low_risk_changes(monkeypatch):
+    from app.services.volt import devdispatch as D
+    monkeypatch.setenv("VOLT_DEV_AUTO_RELEASE", "on")
+    monkeypatch.setattr(D, "release_check", lambda job, poll=3: {"ok": True, "checked_at_central": "8:50 PM CST"})
+    ok = D.auto_release_check(_ready_job(), files_diff=_files(SAFE_JSX, ("tests/test_volt_leads.py", "@@\n+    assert True")))
+    assert ok["eligible"] is True and len(ok["passed"]) == 4
+    cases = [
+        (_files(SAFE_JSX, ("app/services/volt/leads.py", "@@\n+x = 1")), "outside the low-risk"),
+        (_files(("frontend/src/pages/volt/VoltDev.jsx", "@@\n+<p>hi</p>")), "outside the low-risk"),
+        (_files(("frontend/src/pages/volt/VoltOps.jsx", "@@\n+<p>hi</p>")), "outside the low-risk"),
+        (_files(("frontend/src/pages/volt/VoltLeads.jsx", "@@\n+<span>{cfg.consent_text}</span>")), "consent"),
+        (_files(("frontend/src/pages/volt/VoltLeads.jsx", "@@\n+api.put(`${base}/settings`, x)")), "/settings"),
+        (_files(SAFE_JSX, ("tests/test_volt_leads.py", "@@\n-    assert secure()\n+    pass")), "existing tests"),
+        ({"available": True, "files": [{"file": SAFE_JSX[0], "status": "modified", "diff": "+x", "diff_truncated": True}]},
+         "could not be read"),
+        ({"available": False, "detail": "GitHub answered 502"}, "Could not read"),
+    ]
+    for diff, why in cases:
+        r = D.auto_release_check(_ready_job(), files_diff=diff)
+        assert r["eligible"] is False and why in r["reason"], (why, r)
+    assert D.auto_release_check(_ready_job(kind="revert"), files_diff=_files(SAFE_JSX))["eligible"] is False
+    assert D.auto_release_check(_ready_job(tests_passed=False), files_diff=_files(SAFE_JSX))["eligible"] is False
+    monkeypatch.setattr(D, "release_check", lambda job, poll=3: {"ok": False, "blocker": "Required check failed",
+                                                                 "source": "GitHub", "next_action": "Fix it"})
+    r = D.auto_release_check(_ready_job(), files_diff=_files(SAFE_JSX))
+    assert r["eligible"] is False and r["reason"].startswith("GitHub release rules")       # never bypassed
+    monkeypatch.setenv("VOLT_DEV_AUTO_RELEASE", "off")
+    assert "switched off" in D.auto_release_check(_ready_job(), files_diff=_files(SAFE_JSX))["reason"]
+
+
+def test_auto_release_pass_approves_the_exact_commit_and_explains_skips(dev, monkeypatch):
+    from app.services.volt import devdispatch as D
+    from app.models.volt_models import VoltDevEvent, VoltDevJob
+    db = dev["db"]
+    monkeypatch.setenv("VOLT_DEV_AUTO_RELEASE", "on")
+    monkeypatch.setenv("VOLT_DEV_GITHUB_TOKEN", "x")
+    monkeypatch.setattr(D, "dispatch", lambda db, job, purpose: "sent")
+    D._SEEN["auto_release"].clear()
+    jobs = []
+    for i, files in enumerate(([SAFE_JSX], [SAFE_JSX, ("app/services/volt/leads.py", "@@\n+x")])):
+        assert _submit(dev, dev["staff"], title="Consumer Leads: change %d" % i).status_code == 200
+        j = db.query(VoltDevJob).order_by(VoltDevJob.number.desc()).first()
+        _next(dev, run_id=str(800 + i))
+        _report(dev, j.id, run_id=str(800 + i), status="ready_to_test", changed_files=[f for f, _ in files],
+                tests_passed=True, tests_summary="40 passed", pr_number=950 + i, head_sha=("%d" % i) * 40)
+        jobs.append((j, files))
+    monkeypatch.setattr(D, "review", lambda job, max_chars=0: _files(*next(f for jj, f in jobs if jj.id == job.id)))
+    out = D.auto_release_pass(db)
+    db.commit()
+    assert [j.id for j in out] == [jobs[0][0].id]
+    db.refresh(jobs[0][0]); db.refresh(jobs[1][0])
+    a, b = jobs[0][0], jobs[1][0]
+    assert a.status == "merge_requested" and a.merge_approved_sha == "0" * 40 and a.merge_requested_by == "policy:auto-release"
+    ev = db.query(VoltDevEvent).filter(VoltDevEvent.job_id == a.id, VoltDevEvent.action == "auto_release").one()
+    assert "GitHub required checks" in ev.detail and "low-risk" in ev.detail
+    assert b.status == "ready_to_test"
+    skip = db.query(VoltDevEvent).filter(VoltDevEvent.job_id == b.id, VoltDevEvent.action == "auto_release_skipped").all()
+    assert len(skip) == 1 and "app/services/volt/leads.py" in skip[0].detail
+    D.auto_release_pass(db)                                          # once per tested commit
+    assert db.query(VoltDevEvent).filter(VoltDevEvent.job_id == b.id, VoltDevEvent.action == "auto_release_skipped").count() == 1
+
+
+def test_consumer_leads_completion_email_has_the_facts(dev):
+    from app.services.volt import devrelay as RR
+    from app.models.volt_models import VoltDevJob
+    from datetime import datetime
+    db = dev["db"]
+    assert _submit(dev, dev["staff"], title="Website copy").status_code == 200
+    j = db.query(VoltDevJob).order_by(VoltDevJob.number.desc()).first()
+    assert j.title.startswith("Consumer Leads") is False
+    j.title = "Consumer Leads: website copy"
+    j.pr_url, j.head_sha, j.merge_sha, j.tests_summary = "https://github.com/x/pull/1", "a" * 40, "b" * 40, "40 passed"
+    j.deploy_detail, j.deployed_at = "frontend runs bbbbbbb", datetime(2026, 11, 15, 3, 5)
+    rows = RR.notify(db, j, "deployed")
+    assert {r.to_email for r in rows} == {"mike+volt-test@example.com", "dee+volt-test@example.com"}
+    html = rows[0].body_html
+    for s in ("Consumer Leads (VOLT Marketing)", "voltmarketing.live/volt/check-coverage", "/preview", "/consumer-leads/",
+              "bbbbbbbbbbbb", "40 passed", "Nov 14, 2026, 9:05 PM CST", "Public intake is OFF", "github.com/x/pull/1"):
+        assert s in html, s
+    again = RR.notify(db, j, "deployed")                              # same job/status/attempt: no second email
+    assert {r.id for r in again} <= {r.id for r in rows}

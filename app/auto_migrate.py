@@ -1766,6 +1766,12 @@ COLUMNS_TO_ADD = [
     ("volt_leads", "appointment_at", "TIMESTAMP"),
     ("volt_leads", "enrolled_at", "TIMESTAMP"),
     ("volt_leads", "last_contact_at", "TIMESTAMP"),
+    # Consumer Leads workspace (2026-11-14, #571): test partition, follow-ups,
+    # lead sources, and manager/agent roles on grants. Additive only.
+    ("volt_leads", "is_test", "BOOLEAN DEFAULT FALSE"),
+    ("volt_leads", "next_follow_up_at", "TIMESTAMP"),
+    ("volt_leads", "source_id", "VARCHAR"),
+    ("volt_lead_grants", "role", "VARCHAR DEFAULT 'manager'"),
     ("volt_dev_oauth_grants", "resource", "VARCHAR"),
     ("inbound_mailboxes", "purpose", "VARCHAR"),
     ("oauth_auth_transactions", "target_organization_id", "VARCHAR"),

@@ -24,9 +24,36 @@ Consumer Leads is a campaign **inside VOLT Marketing**. It is separate from recr
   - the owner (god_admin)
   - VOLT's named development operators (`VOLT_DEV_PRINCIPALS` plus active VOLT admin, re-checked every call; this is how D'Angelo manages the campaign; no identity is hard-coded)
   - VOLT staff the owner has granted full access
-- **Only their assigned leads:** other VOLT staff.
-- **Nothing (403):** viewers, ACA-applicant logins, other businesses, signed-out visitors.
-- **Who can be an agent:** today, agents must be VOLT staff (org admin or manager), and VOLT staff also see the recruiting screens. A lead-only agent role is a known follow-up.
+- **Managers (every lead):** people the OWNER adds as Consumer Leads managers.
+- **Agents (only their assigned leads):** people the owner or a named operator adds as Consumer Leads agents. An agent only needs to be an active member of the VOLT organization; recruiting roles are not needed and give nothing here.
+- **Nothing (403):** everyone else, including VOLT recruiting staff with no Consumer Leads role, viewers, ACA-applicant logins, other businesses, signed-out visitors.
+- Since 2026-11-14 (#571) recruiting roles no longer open Consumer Leads. Production had no leads and no grants when this changed. Grants that existed before default to "manager", keeping their earlier meaning.
+
+## Workspace (2026-11-14)
+- **Own card:** Consumer Leads has its own Program Access card (`consumer_leads_contexts` in `/auth/my-contexts`), shown only to people `leads.access()` allows. It covers only the `volt-marketing` program, whose customer website is `/volt/check-coverage`.
+- **Back office:** `/consumer-leads/<org>`. Sections: Overview, Leads, Lead Sources, Funnels & Campaigns, Assignments, Responses & Follow-Up, Reporting, Development, Settings. The VOLT Operations `leads` tab now redirects there.
+- **Preview:** `/consumer-leads/<org>/preview` shows the customer website signed in. Submissions go to `POST /volt/ops/<org>/leads/preview` (managers, operators and the owner only) and are saved with `is_test = true`. Every query filters on `is_test`, so test rows never appear in real lists, reports or the card. "Remove all test leads" deletes test rows only.
+- **Public website:** always visible. With intake off it shows a notice, turns off the last step's boxes and the send button, and the public POST still answers 503.
+
+## Lead sources (`app/services/volt/lead_sources.py`)
+- **Working now:** custom webhook (HMAC-SHA256 over `<timestamp>.<body>`, 5-minute window), Google Ads lead-form webhook (`google_key`), and CSV import (a consent statement is required).
+- **Waiting for account connection (cannot be turned on):** Facebook and Instagram Lead Ads (an approved Meta app with `leads_retrieval`, plus Page authorization), and TikTok Instant Forms (an approved TikTok for Business app, plus the advertiser's authorization).
+- **Real sources** accept leads only while public intake is on. **Test sources** write test data only.
+- **Deliveries:** idempotent per (source, external id). The payload is cleared once processed. Bad data waits for a mapping fix and Retry. Temporary errors are retried by the VOLT watch loop with backoff (up to 5 tries).
+
+## Responses & Follow-Up
+- Response-time monitoring, the first-contact queue, follow-ups due, and upcoming appointments are live.
+- Staff alerts are prepared but off.
+- Customer texts, emails and calls are OFF until outreach rules and compliance are final.
+
+## Automatic release policy (`devdispatch.auto_release_check`)
+A relay job is released without a person only when all of these hold:
+- tests passed at the exact commit;
+- GitHub's required checks and rules pass (never bypassed);
+- every file is `ConsumerLeadsWorkspace.jsx`, `VoltLeads.jsx`, a VOLT `.css`, a VOLT brand image, `docs/volt/`, or a VOLT test that only adds lines;
+- the changed lines mention no intake, consent, settings/grants, secrets/tokens, outreach, test-partition or preview code.
+
+Anything else waits for a person. The job timeline records `auto_release` (with every check passed) or `auto_release_skipped` (with the reason). Kill switch: `VOLT_DEV_AUTO_RELEASE=off`.
 
 ## Compliance review flags (public intake stays OFF until cleared)
 1. Consent wording: `CONSENT_TEXT` / `CONSENT_VERSION` (TCPA, state rules, autodialer language).
@@ -49,6 +76,6 @@ Consumer Leads is a campaign **inside VOLT Marketing**. It is separate from recr
   Values never change meaning, because they are already UTC.
 
 ## Rollback
-- **Intake:** turn it off on the Consumer Leads tab. Takes effect immediately.
+- **Intake:** turn it off in Consumer Leads → Settings. Takes effect immediately; real sources stop accepting too.
 - **Code:** revert the merge commit. The `volt_lead*` tables and the added columns are additive and nullable, so they can stay.
 - **Data:** no destructive data rollback is ever automatic.

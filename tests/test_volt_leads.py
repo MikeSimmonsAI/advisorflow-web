@@ -30,6 +30,12 @@ def post(v, **kw):
     return v["c"].post("/volt/public/%s/leads" % SLUG, json=lead(**kw))
 
 
+def team(v, who, role="agent"):
+    r = v["c"].post("/volt/ops/%s/leads/grants" % v["org"].id, headers=H(v["db"], v["god"]),
+                    json={"user_id": v[who].id, "role": role})
+    assert r.status_code == 200, r.text
+
+
 def ops(v, who, path="", method="get", **kw):
     return getattr(v["c"], method)("/volt/ops/%s/leads%s" % (v["org"].id, path), headers=H(v["db"], v[who]), **kw)
 
@@ -93,10 +99,16 @@ def test_isolation_assignment_and_history(volt):
     enable(volt)
     post(volt)
     lid = ops(volt, "god").json()["leads"][0]["id"]
-    # No grant: org admin sees nothing, cannot open, update or assign.
+    # Recruiting roles give no Consumer Leads access: a VOLT org admin with no
+    # Consumer Leads role is refused outright.
+    assert ops(volt, "staff").status_code == 403
+    assert ops(volt, "staff", "/" + lid).status_code == 403
+    assert ops(volt, "staff", "/" + lid, "patch", json={"status": "contacted"}).status_code == 403
+    assert ops(volt, "staff", "/%s/assign" % lid, "post", json={"user_id": volt["staff"].id}).status_code == 403
+    # Made a Consumer Leads AGENT: sees nothing until a lead is assigned.
+    team(volt, "staff")
     assert ops(volt, "staff").json()["leads"] == []
     assert ops(volt, "staff", "/" + lid).status_code == 404
-    assert ops(volt, "staff", "/" + lid, "patch", json={"status": "contacted"}).status_code == 404
     assert ops(volt, "staff", "/%s/assign" % lid, "post", json={"user_id": volt["staff"].id}).status_code == 403
     # Viewer, outsider and the other tenant's admin are refused outright.
     for who in ("viewer", "outsider", "other_staff"):
@@ -113,24 +125,24 @@ def test_isolation_assignment_and_history(volt):
     assert ops(volt, "staff", "/" + lid, "patch", json={"status": "bogus"}).status_code == 422
     hist = [h["action"] for h in ops(volt, "staff", "/" + lid).json()["history"]]
     assert hist == ["created", "consent_recorded", "assigned", "status", "note"]
-    # Assigning a non-staff person is refused.
+    # Assigning someone who is not on the Consumer Leads team is refused.
     assert ops(volt, "god", "/%s/assign" % lid, "post", json={"user_id": volt["viewer"].id}).status_code == 422
     # Other tenant's path never exposes this tenant's lead.
     r = volt["c"].get("/volt/ops/%s/leads/%s" % (volt["other"].id, lid), headers=H(volt["db"], volt["other_staff"]))
-    assert r.status_code == 404
+    assert r.status_code == 403 and "Lee" not in r.text
 
 
 def test_owner_grant_widens_access_and_can_be_revoked(volt):
     enable(volt)
     post(volt)
-    assert ops(volt, "staff").json()["leads"] == []
+    assert ops(volt, "staff").status_code == 403
     assert ops(volt, "staff", "/grants", "post", json={"user_id": volt["staff"].id}).status_code == 403
-    r = ops(volt, "god", "/grants", "post", json={"user_id": volt["staff"].id})
-    assert r.status_code == 200 and len(r.json()["grants"]) == 1
+    r = ops(volt, "god", "/grants", "post", json={"user_id": volt["staff"].id, "role": "manager"})
+    assert r.status_code == 200 and r.json()["grants"][0]["role"] == "manager"
     out = ops(volt, "staff").json()
     assert out["access"] == "all" and len(out["leads"]) == 1
     ops(volt, "god", "/grants", "post", json={"user_id": volt["staff"].id, "active": False})
-    assert ops(volt, "staff").json()["leads"] == []
+    assert ops(volt, "staff").status_code == 403
 
 
 def test_recruiting_data_untouched(volt):
@@ -173,6 +185,7 @@ def test_activity_events_timestamps_and_report(volt):
     enable(volt)
     assert post(volt, phone="(555) 234-0001", email="a1@example.test", utm_source="google", utm_medium="cpc").status_code == 200
     lid = volt["db"].query(VoltLead).one().id
+    team(volt, "staff")
     ops(volt, "god", "/%s/assign" % lid, "post", json={"user_id": volt["staff"].id})
     assert ops(volt, "staff", "/" + lid, "patch", json={"event": "call_attempted", "note": "no answer"}).status_code == 200
     r = ops(volt, "staff", "/" + lid, "patch", json={"event": "contact_completed"}).json()
@@ -209,6 +222,8 @@ def test_campaign_card_counts_only_and_scoped(volt):
     assert s["title"] == "Consumer Leads" and s["subtitle"] == "Health Insurance Lead Acquisition & Enrollment"
     assert s["total"] == 1 and s["new"] == 1 and s["intake_enabled"] is True and s["can_settings"] is True
     assert not any(k in s for k in ("leads", "phone", "email", "name"))               # no lead details on the card
+    assert ops(volt, "staff", "/summary").status_code == 403                             # recruiting role alone
+    team(volt, "staff")
     staff = ops(volt, "staff", "/summary").json()
     assert staff["access"] == "assigned" and staff["total"] == 0 and staff["can_settings"] is False
     for who in ("viewer", "outsider"):
@@ -218,7 +233,7 @@ def test_campaign_card_counts_only_and_scoped(volt):
 def test_named_operator_manages_all_leads_without_a_grant(volt, monkeypatch):
     enable(volt)
     post(volt, phone="(555) 234-0003", email="a3@example.test")
-    assert ops(volt, "staff").json()["access"] == "assigned"
+    assert ops(volt, "staff").status_code == 403
     monkeypatch.setenv("VOLT_DEV_PRINCIPALS", volt["staff"].email)
     r = ops(volt, "staff").json()
     assert r["access"] == "all" and len(r["leads"]) == 1
