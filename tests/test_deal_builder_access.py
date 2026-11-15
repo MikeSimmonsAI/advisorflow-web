@@ -68,11 +68,11 @@ def test_standard_setup_price_comes_from_server_not_client():
 
 
 def test_addons_follow_the_deal():
-    # Package deal: add-on setup and monthly at the package rates (15/10/15).
+    # Package add-on setup keeps 15%; recurring uses 20%.
     r = _c(plan="growth", addon_setup=1500, monthly=1300 + 299)
     assert r["one_time"]["package"] == 1000.0
     assert r["one_time"]["addon"] == 225.0            # 15% of 1,500
-    assert r["recurring"]["monthly"] == round((1300 + 299) * 0.15, 2)
+    assert r["recurring"]["monthly"] == round((1300 + 299) * 0.20, 2)
     assert "not final" not in json.dumps(r).lower()
 
 
@@ -340,12 +340,19 @@ def _full(**kw):
     return dbc.split(base)
 
 
-def test_package_monthly_is_15_10_15_60():
-    v = dbc.view(_full(plan="basic", monthly=700), "full")
-    by = {l["role"]: l for l in v["layers"]}
-    assert [by[r]["monthly"] for r in ("rep", "asm", "sevp")] == [105.0, 70.0, 105.0]
-    assert v["evosys"]["monthly"] == 420.0
-    assert [by[r]["one_time"] for r in ("rep", "asm", "sevp")] == [500.0, 200.0, 300.0]
+@pytest.mark.parametrize("plan,monthly,payouts", [
+    ("basic", 700, [140.0, 70.0, 105.0]),
+    ("growth", 1300, [260.0, 130.0, 195.0]),
+    ("professional", 2400, [480.0, 240.0, 360.0]),
+])
+def test_package_monthly_is_20_10_15_55(plan, monthly, payouts):
+    v = dbc.view(_full(plan=plan, monthly=monthly), "full")
+    assert [layer["monthly"] for layer in v["layers"]] == payouts
+    assert v["evosys"]["monthly"] == round(monthly * 0.55, 2)
+
+    first = dbc.view(_full(plan=plan, monthly=monthly, basis="paid",
+                           collected_setup=v["setup_total"], collected_monthly=0), "full")
+    assert all(layer["monthly"] == 0 for layer in first["layers"])
 
 
 @pytest.mark.parametrize("plan,pay", [("basic", [500, 200, 300]), ("growth", [1000, 300, 600]),
@@ -370,9 +377,9 @@ def test_saas_addon_follows_saas_rates():
     assert rep["monthly"] == 320.0
 
 
-def test_basic_addon_100_monthly_pays_rep_15():
+def test_basic_addon_100_monthly_pays_rep_20():
     v = dbc.view(_full(plan="basic", monthly=800), "rep")
-    assert v["own"]["monthly"] == 120.0      # 15% of 700 + 15% of the $100 add-on
+    assert v["own"]["monthly"] == 160.0
 
 
 def test_mixed_partial_setup_payment_prorates_each_line():
