@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom'
 import { fetchMyContexts } from '../api/client'
 import { programCards } from '../pages/program/programAccessModel'
 import { openProgramItem, salesToolCards } from '../pages/program/programDestinations'
+import { clearLauncherOrigin, MOBILE_PROGRAMS } from '../pages/program/launcherOrigin'
 import { badge, LABELS } from './teamHelpers'
 import { ErrorNote, Icon, Loading, ScreenTitle, useTeam } from './TeamApp'
 
@@ -23,6 +24,9 @@ export default function ProgramsScreen() {
   const [ctx, setCtx] = useState(null)
   const [error, setError] = useState(null)
   const [n, setN] = useState(0)
+  // Back on Programs: the round trip is over, so the web launcher is the web
+  // launcher again for anything this tab does next.
+  useEffect(() => { clearLauncherOrigin() }, [])
   useEffect(() => {
     let live = true
     setError(null)
@@ -34,7 +38,7 @@ export default function ProgramsScreen() {
   let rows = []
   if (ctx) {
     const { visible, others } = programCards(ctx)
-    rows = [...visible, ...others, ...salesToolCards(ctx, ctx.deal_builder, '/app/programs')]
+    rows = [...visible, ...others, ...salesToolCards(ctx, ctx.deal_builder, MOBILE_PROGRAMS)]
   }
 
   return (
@@ -58,7 +62,7 @@ export default function ProgramsScreen() {
           : <ul className="ta-list" aria-label="Programs">
             {rows.map(item => (
               <li key={(item.type || 'w') + ':' + (item.key || item.organization_id || item.display)}>
-                <button type="button" className="ta-row" onClick={() => openProgramItem(item, navigate)}>
+                <button type="button" className="ta-row" onClick={() => openProgramItem(item, navigate, { origin: MOBILE_PROGRAMS })}>
                   <span className="ta-row-icon"><Icon name={iconFor(item)} /></span>
                   <span className="ta-row-main">
                     <span className="ta-row-name">{item.display}</span>

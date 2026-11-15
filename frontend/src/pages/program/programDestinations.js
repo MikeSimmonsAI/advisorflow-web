@@ -14,12 +14,17 @@
  * behaviour is unchanged.
  */
 import { clearWorkspaceContext, setBrandContext, setWorkspaceContext } from '../../api/client'
+import { setLauncherOrigin } from './launcherOrigin.js'
 
 // salesToolCards lives in programAccessModel.js (pure, node-testable) and is
 // re-exported here so callers have one place to import destinations from.
 export { salesToolCards } from './programAccessModel.js'
 
-export function openProgramItem(item, navigate) {
+// `opts.origin`: the launcher this card was opened from. The mobile app passes
+// '/app/programs' so every workspace's Program Access / Back link returns there;
+// the web launcher passes nothing, which clears any earlier mobile origin.
+export function openProgramItem(item, navigate, opts = {}) {
+  setLauncherOrigin(opts.origin || null)
   // A PREVIEW is a deal's existing public demo link, not a workspace: no
   // context is set and nothing is entered. It opens in a new tab so the
   // launcher stays where it was.

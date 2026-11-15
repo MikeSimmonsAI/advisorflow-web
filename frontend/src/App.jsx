@@ -80,6 +80,7 @@ import WorkspaceView from './pages/WorkspaceView'
 import WorkQueue from './pages/WorkQueue'
 import ProgramAccessPortal from './pages/program/ProgramAccessPortal'
 import { openProgramItem } from './pages/program/programDestinations'
+import { launcherOrigin } from './pages/program/launcherOrigin'
 import { BookaBoostProgramAccessState } from './pages/program/BookaBoostProgramAccess'
 import { hostTheme } from './theme'
 import AutoSendQueue from './pages/AutoSendQueue'
@@ -1199,6 +1200,11 @@ function WorkspaceSelector() {
   const { ctx, phase, retry } = useAuthorizedContexts()
   const navigate = useNavigate()
   if (!isAuthenticated()) return <Navigate to="/login" replace />
+  // Opened from the EvoSys Pro mobile app? Every workspace's Program Access /
+  // Back link lands here; send this tab back to the app's Programs tab instead.
+  // A web entry or a direct workspace link never sets an origin.
+  const fromApp = launcherOrigin()
+  if (fromApp) return <Navigate to={fromApp} replace />
   if (!ctx) {
     // On a BookaBoost address the wait and a failed load are shown in the
     // BookaBoost look; everywhere else this stays blank, exactly as before.

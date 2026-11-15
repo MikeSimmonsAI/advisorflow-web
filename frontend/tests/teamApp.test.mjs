@@ -69,3 +69,40 @@ test('sales tool cards come only from the server answer', () => {
   assert.equal(cards[0].href, '/team-prices/sales-deal-builder?from=/workspaces')
   assert.equal(salesToolCards({}, { sales: true }, '/app/programs')[0].href, '/team-prices/sales-deal-builder?from=/app/programs')
 })
+
+// ── Return path: a workspace opened from the mobile app returns to /app/programs ──
+import { clearLauncherOrigin, launcherOrigin, safeOrigin, setLauncherOrigin, MOBILE_PROGRAMS } from '../src/pages/program/launcherOrigin.js'
+import { readFileSync } from 'node:fs'
+
+function fakeStore() {
+  const m = new Map()
+  return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k) }
+}
+
+test('launcher origin: only the mobile Programs path is ever stored or returned', () => {
+  const s = fakeStore()
+  assert.equal(launcherOrigin(s), null)                       // web entry / direct link: none
+  setLauncherOrigin(MOBILE_PROGRAMS, s)
+  assert.equal(launcherOrigin(s), '/app/programs')
+  setLauncherOrigin('https://evil.example', s)                 // anything else clears it
+  assert.equal(launcherOrigin(s), null)
+  s.setItem('af_launcher_origin', '//evil.example')            // tampered storage is ignored
+  assert.equal(launcherOrigin(s), null)
+  setLauncherOrigin(MOBILE_PROGRAMS, s); clearLauncherOrigin(s)
+  assert.equal(launcherOrigin(s), null)
+  assert.equal(safeOrigin('/app/programs/../god'), null)
+  const broken = { getItem() { throw new Error('blocked') }, setItem() { throw new Error('blocked') }, removeItem() {} }
+  setLauncherOrigin(MOBILE_PROGRAMS, broken)
+  assert.equal(launcherOrigin(broken), null)                   // blocked storage behaves as web
+})
+
+test('the web launcher honours the origin; app cards set it; web cards clear it', () => {
+  const app = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
+  assert.match(app, /const fromApp = launcherOrigin\(\)\n\s+if \(fromApp\) return <Navigate to=\{fromApp\} replace \/>/)
+  assert.match(app, /onChoose=\{\(item\) => openProgramItem\(item, navigate\)\}/)   // web: no origin -> cleared
+  const dest = readFileSync(new URL('../src/pages/program/programDestinations.js', import.meta.url), 'utf8')
+  assert.match(dest, /setLauncherOrigin\(opts\.origin \|\| null\)/)
+  const programs = readFileSync(new URL('../src/teamapp/ProgramsScreen.jsx', import.meta.url), 'utf8')
+  assert.match(programs, /openProgramItem\(item, navigate, \{ origin: MOBILE_PROGRAMS \}\)/)
+  assert.match(programs, /clearLauncherOrigin\(\)/)
+})
