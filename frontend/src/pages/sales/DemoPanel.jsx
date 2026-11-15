@@ -70,7 +70,7 @@ export default function DemoPanel({ opp, team, onPatch, onRequest, saving }) {
 
   return (
     <Card
-      title="DEMO"
+      title="CUSTOM DEMO"
       sub="Where the build is, without asking anyone"
       right={d.status
         ? <Chip tone={STATUS_TONE[d.status]}>{STATUS_LABEL[d.status] || d.status}</Chip>
@@ -93,7 +93,7 @@ export default function DemoPanel({ opp, team, onPatch, onRequest, saving }) {
       <div className="sw-flex sw-mt" style={{ flexWrap: 'wrap' }}>
         {!requested && (
           <button className="sw-btn sw-primary" disabled={saving} onClick={onRequest}>
-            Request demo
+            Request Custom Demo
           </button>
         )}
         {d.url && (

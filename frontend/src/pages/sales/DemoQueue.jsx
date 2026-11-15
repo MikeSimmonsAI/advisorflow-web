@@ -6,7 +6,7 @@
  * ===========================================================================
  *
  * Discovery → Request Demo → the count on /sales/proposals goes up → and then
- * nothing. "Demos to build — 3" was a number with no rows behind it, because
+ * nothing. "Custom Demo Requests — 3" was a number with no rows behind it, because
  * the only thing the server sent was an integer per rep. There was no way to
  * reach the individual demo that had just been requested, from anywhere.
  *
@@ -28,7 +28,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { api } from '../../api/client'
 import SalesShell from './SalesShell'
-import { Card, Chip, Empty, ErrorBar, Metric, dateTime, shortDate } from './parts'
+import { Card, Chip, Empty, ErrorBar, dateTime, shortDate } from './parts'
 
 const STATUS_TONE = {
   requested: 'amber', in_progress: 'amber', ready: 'green', delivered: 'green',
@@ -57,7 +57,7 @@ export function DemoJobRow({ job, onOpen }) {
       </span>
       <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
         {job.overdue ? <Chip tone="red">Past due</Chip> : null}
-        {!job.discovery_complete ? <Chip tone="amber">Discovery incomplete</Chip> : null}
+        {!job.discovery_complete && !['ready', 'delivered'].includes(job.demo_status) ? <Chip tone="amber">Discovery incomplete</Chip> : null}
         <Chip tone={STATUS_TONE[job.demo_status]}>{job.demo_status_label}</Chip>
       </span>
     </button>
@@ -96,18 +96,18 @@ export default function DemoQueue() {
   const open = id => nav('/sales/demo-build/' + id)
 
   if (loading && !data) {
-    return <SalesShell title="Demos to build"><div className="sw-subtle">Loading…</div></SalesShell>
+    return <SalesShell title="Custom Demo Requests"><div className="sw-subtle">Loading…</div></SalesShell>
   }
 
   const s = (data && data.summary) || { total: 0, by_builder: [] }
-  const jobs = (data && data.jobs) || []
+  const jobs = (data?.jobs || []).filter(job => showDone || !['ready', 'delivered'].includes(job.demo_status))
 
   return (
     <SalesShell
-      title="Demos to build"
+      title="Custom Demo Requests"
       subtitle={data?.brand_sales_org?.name
-        ? data.brand_sales_org.name + ' — every demo waiting to be built'
-        : 'Every demo waiting to be built'}
+        ? data.brand_sales_org.name + ' — custom demos linked to deals'
+        : 'Custom demos linked to deals'}
       actions={
         <>
           <button className="sw-btn" onClick={() => nav('/sales/proposals')}>
@@ -119,44 +119,17 @@ export default function DemoQueue() {
     >
       <ErrorBar error={error} onRetry={load} />
 
-      <div className="sw-metrics">
-        <Metric label="To build" value={s.total} attn={s.total > 0}
-                sub="outstanding" onClick={() => setBuilder('')} />
-        <Metric label="Unassigned" value={s.unassigned} attn={s.unassigned > 0}
-                sub="nobody is building these"
-                onClick={() => setBuilder('unassigned')} />
-        <Metric label="Past due" value={s.overdue} attn={s.overdue > 0}
-                sub="target date has passed" />
-        <Metric label="No target" value={s.no_target} attn={s.no_target > 0}
-                sub="no date agreed" />
-        <Metric label="Mine" value={s.mine} sub="assigned to me"
-                onClick={() => setBuilder('me')} />
+      <div className="sw-flex" style={{ flexWrap: 'wrap', marginBottom: 12 }}>
+        <select aria-label="Filter by builder" className="sw-select" value={builder}
+                onChange={e => setBuilder(e.target.value)}>
+          <option value="">All builders</option>
+          <option value="unassigned">Unassigned</option>
+          <option value="me">Assigned to me</option>
+          {(s.by_builder || []).filter(b => b.user_id).map(b => (
+            <option key={b.user_id} value={b.user_id}>{b.name}</option>
+          ))}
+        </select>
       </div>
-
-      {(s.by_builder || []).length ? (
-        <Card title="WHO IS BUILDING WHAT"
-              sub="By builder, from these rows. Salespeople counts the same work by sales owner, which is a different question."
-              bodyless>
-          <div className="sw-card-b">
-            <div className="sw-pnums"
-                 style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))' }}>
-              {s.by_builder.map(b => {
-                const key = b.user_id || 'unassigned'
-                const on = builder === key
-                return (
-                  <button key={key} className="sw-info"
-                          style={{ cursor: 'pointer', textAlign: 'left',
-                                   outline: on ? '2px solid var(--sw-accent, #3b82f6)' : 'none' }}
-                          onClick={() => setBuilder(on ? '' : key)}>
-                    <span>{b.name}</span>
-                    <b>{b.count} to build</b>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        </Card>
-      ) : null}
 
       <Card
         title={builder ? 'FILTERED' : 'ALL DEMO BUILDS'}
@@ -166,7 +139,7 @@ export default function DemoQueue() {
                                                 alignItems: 'center', fontSize: 12 }}>
             <input type="checkbox" checked={showDone}
                    onChange={e => setShowDone(e.target.checked)} />
-            Include finished
+            Include ready and delivered
           </label>
         }
       >

@@ -125,9 +125,12 @@ export default function MyTeam() {
 
   return (
     <div style={{ padding: 20, maxWidth: 980, margin: '0 auto', fontFamily: 'system-ui, sans-serif', color: '#102b40' }}>
-      <div style={{ fontWeight: 800, fontSize: 20 }}>EvoSys <span style={{ color: '#087f83' }}>Pro</span> <span style={{ fontSize: 13, color: '#607486', fontWeight: 600 }}>· Back Office</span></div>
-      <p style={{ margin: '4px 0 0' }}><Link to="/workspaces">← Program Access</Link></p>
-      <h1 style={{ fontSize: 24, marginBottom: 4 }}>My Team</h1>
+      <nav aria-label="Team tools" className="sw-flex" style={{ flexWrap: 'wrap', gap: 8 }}>
+        <Link className="sw-btn" to="/sales/manager">Team Overview</Link>
+        <Link className="sw-btn" to="/sales/salespeople">Salesperson Activity</Link>
+        <Link className="sw-btn" to="/sales/demos">Custom Demo Requests</Link>
+        <Link className="sw-btn" to="/sales/proposals">Team Proposals</Link>
+      </nav>
       <p style={{ color: '#607486', marginTop: 0 }}>{d.brand.name} · you are {r.seat_label || 'viewing'}{r.is_admin ? ' — you can approve onboarding and open documents' : ''}</p>
       {note && <div style={{ ...card, background: '#f0faf7', borderColor: '#bfe6dc', wordBreak: 'break-all' }}>{note}</div>}
       {err && <div style={{ ...card, background: '#fff4df', borderColor: '#f1d59b' }}>{err}</div>}

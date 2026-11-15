@@ -33,72 +33,19 @@ export function useSales() {
 // sees what to do and nothing else. A manager is still two people at once: this
 // is their MY WORK as a seller, and MY TEAM below is unchanged.
 const NAV = [
-  { to: '/sales',              label: 'My Day',         icon: 'home', end: true },
-  { to: '/sales/prospects',    label: 'Leads',          icon: 'users' },
-  { to: '/sales/follow-ups',   label: 'Follow Ups',     icon: 'phone', countKey: 'follow_ups_due' },
-  { to: '/sales/appointments', label: 'Appointments',   icon: 'calendar' },
-  // DEMOS TO BUILD is MY WORK, not a manager screen. `/sales/demo-queue`
-  // scopes to the caller's own book exactly as the pipeline does.
-  { to: '/sales/demos',        label: 'Demos to Build', icon: 'play' },
-  { to: '/sales/pipeline',     label: 'Pipeline',       icon: 'pipeline' },
-  { to: '/sales/my-results',   label: 'Reports',        icon: 'chart' },
+  { to: '/sales', label: 'My Day', icon: 'home', end: true },
+  { to: '/sales/pipeline', label: 'Pipeline', icon: 'pipeline', related: ['/sales/team-pipeline', '/sales/opportunities', '/sales/leads', '/sales/onboarding'] },
+  { to: '/sales/appointments', label: 'Calendar', icon: 'calendar', related: ['/sales/book', '/sales/availability', '/sales/calendar', '/sales/team'] },
+  { to: '/sales/my-team', label: 'My Team', icon: 'team', permission: 'view_team_pipeline', related: ['/sales/manager', '/sales/salespeople', '/sales/demos', '/sales/demo-build', '/sales/proposals'] },
+  { to: '/sales/my-compensation', label: 'Compensation', icon: 'chart', related: ['/sales/compensation'] },
 ]
 
-// Everything a rep could reach before the redesign and still can — kept one
-// click away under "More" instead of crowding the seven items above. Nothing
-// here was removed; Sold / Onboarding is where a Won deal hands off.
 const MORE_NAV = [
-  { to: '/sales/book',            label: 'Book a Demo',       icon: 'calendar' },
-  { to: '/sales/pipeline/stages', label: 'All Deal Stages',   icon: 'pipeline' },
-  { to: '/sales/availability',    label: 'My Availability',   icon: 'calendar' },
-  // THE DEMO SUITE. `present_demo` is the server's own answer from the
-  // `demo_suite` capability grant — the same row the Suite's routes check.
-  { to: '/demo-suite',            label: 'Demo Suite',        icon: 'play',
-    permission: 'present_demo' },
-  { to: '/sales/onboarding',      label: 'Sold / Onboarding', icon: 'folder' },
-  // A rep's OWN compensation, scoped by their token server-side.
-  { to: '/sales/my-compensation', label: 'My Compensation',   icon: 'chart' },
-]
-
-// Team Availability belongs to BOTH groups by right: a rep needs it to find a
-// colleague's free time, a manager needs it to run the week. It sits under
-// More for a rep and under MY TEAM for a manager, never in both.
-const REP_ONLY_MORE = [
-  { to: '/sales/team', label: 'Team Availability', icon: 'team' },
-]
-
-// Shown only to a manager - `permission` names the flag on /sales/me that
-// decides. This is presentation: every one of these routes is gated
-// server-side, so a rep who types the URL gets a 403, not a screen. The nav
-// item is a courtesy, never the control.
-const MANAGER_NAV = [
-  { to: '/sales/manager',       label: 'Team Command',      icon: 'home',
-    permission: 'view_team_pipeline', end: true },
-  { to: '/sales/calendar',      label: 'Team Calendar',     icon: 'calendar',
-    permission: 'view_team_pipeline' },
-  { to: '/sales/team-pipeline', label: 'Team Pipeline',     icon: 'pipeline',
-    permission: 'view_team_pipeline' },
-  { to: '/sales/team',          label: 'Team Availability', icon: 'team',
-    permission: 'view_team_pipeline' },
-  { to: '/sales/proposals',     label: 'Demos / Proposals', icon: 'play',
-    permission: 'view_team_pipeline' },
-  { to: '/sales/salespeople',   label: 'Salespeople',       icon: 'users',
-    permission: 'view_team_pipeline' },
-  // What the compensation rules PRODUCED — earned, on hold, payable, paid —
-  // and the settlement of it. Not the configuration screen: rates and plans
-  // live in God Mode → Pricing & Comp. Gated server-side by manager scope;
-  // settling payments needs platform finance authority on top.
-  // state tells CompensationCommand that it was opened from SalesShell so it
-  // can wrap itself in SalesShell chrome instead of a disconnected Back button.
-  { to: '/sales/compensation',  label: 'Compensation',      icon: 'chart',
-    permission: 'view_team_pipeline', state: { fromSales: true } },
-  // Reports is genuinely not built, and its PURPOSE has not been decided yet.
-  // Team Command was built on the principle that a manager screen measuring
-  // effort instead of obstacles becomes a stick; Reports may cut against that,
-  // so it waits for a decision rather than for an engineer. Shown disabled so
-  // nobody wonders whether it is hiding somewhere.
-  { to: '/sales/reports',       label: 'Team Reports',           icon: 'chart',
-    permission: 'view_team_pipeline', soon: true },
+  { to: '/sales/prospects', label: 'Leads', icon: 'users' },
+  { to: '/sales/follow-ups', label: 'Follow Ups', icon: 'phone', countKey: 'follow_ups_due' },
+  { to: '/sales/my-results', label: 'Reports', icon: 'chart' },
+  { to: '/sales/demos', label: 'My Demo Requests', icon: 'play', individualOnly: true },
+  { to: '/demo-suite', label: 'Demo Suite', icon: 'play', permission: 'present_demo' },
 ]
 
 export default function SalesShell({ title, subtitle, actions, children }) {
@@ -183,10 +130,9 @@ export default function SalesShell({ title, subtitle, actions, children }) {
   // and the API can never disagree about who a manager is. Hiding a nav item
   // is presentation; every route is re-checked server-side.
   const isManager = !!ctx?.permissions?.view_team_pipeline
-  const managerNav = MANAGER_NAV.filter(i => ctx?.permissions?.[i.permission])
   const allowed = i => !i.permission || ctx?.permissions?.[i.permission]
   const myWork = NAV.filter(allowed)
-  const more = (isManager ? MORE_NAV : [...MORE_NAV, ...REP_ONLY_MORE]).filter(allowed)
+  const more = MORE_NAV.filter(i => allowed(i) && (!i.individualOnly || !isManager))
   // Open "More" automatically when the current page lives in it, so the
   // highlighted item is never hidden.
   const inMore = more.some(i => loc.pathname === i.to || loc.pathname.startsWith(i.to + '/'))
@@ -220,21 +166,11 @@ export default function SalesShell({ title, subtitle, actions, children }) {
               Phones get the same entry inside More (the sidebar is a bar). */}
           <OtherWorkspacesLink state={others} className="ss-otherws ss-otherws-side" />
 
-          {isManager && <div className="sw-navtitle">MY WORK</div>}
           <nav className="sw-nav" aria-label="My work">
             {myWork.map(item => <NavItem key={item.to} item={item} count={item.countKey ? counts[item.countKey] : null} />)}
           </nav>
 
           <MoreGroup items={more} defaultOpen={inMore} />
-
-          {managerNav.length ? (
-            <>
-              <div className="sw-navtitle">MY TEAM</div>
-              <nav className="sw-nav" aria-label="My team">
-                {managerNav.map(item => <NavItem key={item.to} item={item} />)}
-              </nav>
-            </>
-          ) : null}
 
           <div className="sw-sidefill" />
           <div className="sw-mini">
@@ -280,6 +216,8 @@ export default function SalesShell({ title, subtitle, actions, children }) {
 }
 
 function NavItem({ item, count }) {
+  const { pathname } = useLocation()
+  const related = item.related?.some(path => pathname === path || pathname.startsWith(path + '/'))
   if (item.soon) {
     return (
       <a className="sw-disabled" aria-disabled="true"
@@ -291,7 +229,7 @@ function NavItem({ item, count }) {
   }
   return (
     <NavLink to={item.to} end={item.end} state={item.state}
-             className={({ isActive }) => (isActive ? 'sw-on' : '')}>
+             className={({ isActive }) => (isActive || related ? 'sw-on' : '')}>
       <Icon name={item.icon} /><span>{item.label}</span>
       {count ? <span className="sw-count">{count}</span> : null}
     </NavLink>

@@ -11,9 +11,9 @@
  * (`starts_at_local`), never re-read through the browser's zone.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
-import SalesShell from './SalesShell'
+import SalesShell, { useSales } from './SalesShell'
 import RescheduleDialog from './RescheduleDialog'
 import OutcomeDialog from './OutcomeDialog'
 import {
@@ -49,13 +49,15 @@ const who = a => a.prospect?.name || a.opportunity_company || a.prospect?.compan
 
 export default function SalesAppointments() {
   return (
-    <SalesShell title="Appointments" subtitle="See your schedule and book meetings.">
+    <SalesShell title="Calendar" subtitle="See your schedule and book meetings.">
       <AppointmentsBody />
     </SalesShell>
   )
 }
 
 function AppointmentsBody() {
+  const { permissions } = useSales()
+
   const nav = useNavigate()
   const [params] = useSearchParams()
   const [view, setView] = useState('day')
@@ -100,6 +102,12 @@ function AppointmentsBody() {
 
   return (
     <>
+      <nav className="sw-flex" aria-label="Calendar tools" style={{ flexWrap: 'wrap', marginBottom: 12 }}>
+        <Link className="sw-btn" to="/sales/book">Book a Demo</Link>
+        <Link className="sw-btn" to="/sales/availability">My Availability</Link>
+        <Link className="sw-btn" to="/sales/team">Team Availability</Link>
+        {permissions?.view_team_pipeline && <Link className="sw-btn" to="/sales/calendar">Team Calendar</Link>}
+      </nav>
       <ErrorLine error={error} onRetry={load} />
       <section className="ss-panel">
         <div className="ss-calendarbar">

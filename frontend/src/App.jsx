@@ -1402,7 +1402,7 @@ export default function App() {
             they can reach nothing else in the sales program) and My Team in
             the Back Office. Both are authorized on the server. */}
         <Route path="/sales-onboarding" element={<SalesRoute><SalesOnboarding /></SalesRoute>} />
-        <Route path="/sales/my-team" element={<SalesRoute><MyTeam /></SalesRoute>} />
+        <Route path="/sales/my-team" element={<SalesRoute><SalesShell title="My Team"><MyTeam /></SalesShell></SalesRoute>} />
         <Route path="/team-prices/executive-deal-builder" element={<ExecutiveDealBuilder />} />
         <Route path="/team-prices/deal-builder.html" element={<Navigate to="/team-prices/executive-deal-builder" replace />} />
         <Route path="/login" element={isAuthenticated() ? <Navigate to="/" replace /> : <Login />} />

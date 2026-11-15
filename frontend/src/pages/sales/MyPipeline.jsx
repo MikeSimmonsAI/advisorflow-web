@@ -119,6 +119,8 @@ export default function MyPipeline({ scope = 'mine' }) {
       subtitle={subtitle}
       actions={
         <>
+          <button className="sw-btn" onClick={() => nav('/sales/pipeline')}>My Deals</button>
+          {!isTeam && isManager && <button className="sw-btn" onClick={() => nav('/sales/team-pipeline')}>Team Deals</button>}
           {isTeam && isManager && team.length > 0 && (
             <select className="sw-select" style={{ width: 190 }}
                     value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)}>
@@ -161,7 +163,7 @@ export default function MyPipeline({ scope = 'mine' }) {
                    ? ', filtered to ' + (team.find(t => t.id === ownerFilter)?.full_name || 'one rep') + '.'
                    : '.')
               : (isManager
-                 ? 'The deals you personally own. Your team’s board is under MY TEAM.'
+                 ? 'The deals you personally own.'
                  : 'Your book of business.')}
           </div>
         </div>
