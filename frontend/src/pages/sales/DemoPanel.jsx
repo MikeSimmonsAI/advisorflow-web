@@ -25,6 +25,7 @@ const DEMO_STATUSES = [
 ]
 
 const STATUS_LABEL = {
+  pending_review: 'Waiting for a decision',
   not_requested: 'Not requested', requested: 'Requested',
   in_progress: 'In progress', ready: 'Ready', delivered: 'Delivered',
 }
@@ -77,9 +78,9 @@ export default function DemoPanel({ opp, team, onPatch, onRequest, saving }) {
         : <Chip>Not requested</Chip>}
     >
       {!requested ? (
-        <Empty title="No demo requested yet">
-          Requesting one moves this deal to Demo Build and hands the builder
-          everything discovery captured.
+        <Empty title="No demo build yet">
+          Use Request Custom Demo above. Once a manager approves a build, its
+          builder, target date and link show here.
         </Empty>
       ) : (
         <div className="sw-infogrid">
@@ -91,11 +92,9 @@ export default function DemoPanel({ opp, team, onPatch, onRequest, saving }) {
       )}
 
       <div className="sw-flex sw-mt" style={{ flexWrap: 'wrap' }}>
-        {!requested && (
-          <button className="sw-btn sw-primary" disabled={saving} onClick={onRequest}>
-            Request Custom Demo
-          </button>
-        )}
+        {/* Requesting a custom demo now goes through CustomDemoRequest
+            (a manager decides it); this panel tracks the build itself. */}
+        {!requested && onRequest && false}
         {d.url && (
           <a className="sw-btn sw-primary" href={d.url} target="_blank"
              rel="noopener noreferrer" style={{ textDecoration: 'none' }}>

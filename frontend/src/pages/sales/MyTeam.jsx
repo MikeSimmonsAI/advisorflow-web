@@ -128,7 +128,8 @@ export default function MyTeam() {
       <nav aria-label="Team tools" className="sw-flex" style={{ flexWrap: 'wrap', gap: 8 }}>
         <Link className="sw-btn" to="/sales/manager">Team Overview</Link>
         <Link className="sw-btn" to="/sales/salespeople">Salesperson Activity</Link>
-        <Link className="sw-btn" to="/sales/demos">Custom Demo Requests</Link>
+        <Link className="sw-btn" to="/sales/demo-requests">Custom Demo Requests</Link>
+        <Link className="sw-btn" to="/sales/demos">Demo Builds</Link>
         <Link className="sw-btn" to="/sales/proposals">Team Proposals</Link>
       </nav>
       <p style={{ color: '#607486', marginTop: 0 }}>{d.brand.name} · you are {r.seat_label || 'viewing'}{r.is_admin ? ' — you can approve onboarding and open documents' : ''}</p>

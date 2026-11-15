@@ -36,7 +36,7 @@ const NAV = [
   { to: '/sales', label: 'My Day', icon: 'home', end: true },
   { to: '/sales/pipeline', label: 'Pipeline', icon: 'pipeline', related: ['/sales/team-pipeline', '/sales/opportunities', '/sales/leads', '/sales/onboarding'] },
   { to: '/sales/appointments', label: 'Calendar', icon: 'calendar', related: ['/sales/book', '/sales/availability', '/sales/calendar', '/sales/team'] },
-  { to: '/sales/my-team', label: 'My Team', icon: 'team', permission: 'view_team_pipeline', related: ['/sales/manager', '/sales/salespeople', '/sales/demos', '/sales/demo-build', '/sales/proposals'] },
+  { to: '/sales/my-team', label: 'My Team', icon: 'team', permission: 'view_team_pipeline', related: ['/sales/manager', '/sales/salespeople', '/sales/demos', '/sales/demo-build', '/sales/proposals', '/sales/demo-requests'] },
   { to: '/sales/my-compensation', label: 'Compensation', icon: 'chart', related: ['/sales/compensation'] },
 ]
 
@@ -44,7 +44,7 @@ const MORE_NAV = [
   { to: '/sales/prospects', label: 'Leads', icon: 'users' },
   { to: '/sales/follow-ups', label: 'Follow Ups', icon: 'phone', countKey: 'follow_ups_due' },
   { to: '/sales/my-results', label: 'Reports', icon: 'chart' },
-  { to: '/sales/demos', label: 'My Demo Requests', icon: 'play', individualOnly: true },
+  { to: '/sales/demo-requests', label: 'Custom Demo Requests', icon: 'play', individualOnly: true },
   { to: '/demo-suite', label: 'Demo Suite', icon: 'play', permission: 'present_demo' },
 ]
 

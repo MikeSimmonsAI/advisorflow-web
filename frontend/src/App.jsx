@@ -13,6 +13,7 @@ import GoogleSignInComplete from './pages/GoogleSignInComplete'
 import TeamPrices from './pages/TeamPrices'
 import { SalesDealBuilder, ExecutiveDealBuilder } from './pages/DealBuilders'
 import DealQuote from './pages/sales/DealQuote'
+import DemoRequests from './pages/sales/DemoRequests'
 import MyTeam from './pages/sales/MyTeam'
 import SalesOnboarding from './pages/SalesOnboarding'
 import Onboarding from './pages/Onboarding'
@@ -1623,7 +1624,7 @@ export default function App() {
             Same record and same authority as the deal — a demo is a stage on
             the opportunity, not a thing of its own. */}
         <Route path="/sales/demos" element={<SalesRoute><DemoQueue /></SalesRoute>} />
-        <Route path="/sales/demo-requests" element={<SalesRoute><DemoQueue /></SalesRoute>} />
+        <Route path="/sales/demo-requests" element={<SalesRoute><SalesShell title="Custom Demo Requests"><DemoRequests /></SalesShell></SalesRoute>} />
         <Route path="/sales/demo-build/:oppId" element={<SalesRoute><DemoBuild /></SalesRoute>} />
         <Route path="/sales/salespeople" element={<SalesRoute><Salespeople /></SalesRoute>} />
         <Route path="/leads" element={<ProtectedRoute feature="leads"><Leads /></ProtectedRoute>} />
