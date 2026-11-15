@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../api/client'
-import { volt, useVoltTitle } from './voltApi'
+import { volt } from './voltApi'
 import './consumerSite.css'
 
 const msg = (e) => e?.message || 'Something went wrong. Please try again.'
@@ -31,6 +31,22 @@ export const QUESTIONS = [
 ]
 const PREFS = [['call', 'Phone call'], ['text', 'Text message'], ['email', 'Email']]
 const TIMES = [['morning', 'Morning'], ['afternoon', 'Afternoon'], ['evening', 'Evening'], ['any', 'Any time']]
+
+// The customer website names itself in the browser tab, never VOLT or the
+// platform (the host-wide title code would otherwise put "VOLT Marketing" there).
+// null leaves the title alone (the back-office preview keeps the workspace title).
+function useSiteTitle(title) {
+  useEffect(() => {
+    if (!title || typeof document === 'undefined') return undefined
+    const previous = document.title
+    const apply = () => { if (document.title !== title) document.title = title }
+    apply()
+    const el = document.querySelector('title')
+    const obs = el && typeof MutationObserver !== 'undefined' ? new MutationObserver(apply) : null
+    if (obs) obs.observe(el, { childList: true, characterData: true, subtree: true })
+    return () => { if (obs) obs.disconnect(); document.title = previous }
+  }, [title])
+}
 
 function Headline({ text, accent }) {
   const i = accent ? text.indexOf(accent) : -1
@@ -65,7 +81,7 @@ export default function ConsumerSite({ preview = null } = {}) {
   const dialog = useRef(null)
   const opener = useRef(null)
   const params = useRef(new URLSearchParams(typeof window !== 'undefined' ? window.location.search : ''))
-  useVoltTitle(preview ? null : `${cfg?.page?.brand || 'CoveragePath'} · Health coverage options`)
+  useSiteTitle(preview ? null : `${cfg?.page?.brand || 'CoveragePath'} · Health coverage options`)
 
   const load = () => { setCfg(null); volt.leadConfig().then(setCfg).catch(() => setCfg({ enabled: false, failed: true })) }
   useEffect(load, [])
