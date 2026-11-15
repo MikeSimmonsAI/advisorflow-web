@@ -152,6 +152,9 @@ def launch(db: Session, org: Organization, run_key: str, *, booking_user_id: Opt
     db.flush()
     approved, skipped = 0, Counter()
     modes = Counter()
+    # Records that were already on the campaign before this run keep it.
+    keep_ids = {r.id for r in db.query(ProgramSourceRecord).filter(
+        ProgramSourceRecord.organization_id == org.id, ProgramSourceRecord.campaign_family == F.CAMPAIGN_KEY).all()}
     for lid in ready_ids:
         lead = leads.get(lid)
         if lead is None or lid not in staged_ids:
@@ -164,17 +167,22 @@ def launch(db: Session, org: Organization, run_key: str, *, booking_user_id: Opt
         if any(r.campaign_family and r.campaign_family != F.CAMPAIGN_KEY for r in recs):
             skipped["record already in another campaign"] += 1
             continue
+        # The record goes on the campaign FIRST, so the send checks below judge
+        # it as a File Review family (an unassigned record reads "No campaign").
+        for r in recs:
+            r.campaign_family = F.CAMPAIGN_KEY
+        db.flush()
         b = send_approval.blocker(db, lead)
-        if b:
-            skipped[b.split(":")[0][:60]] += 1
-            continue
-        why = rotation.approval_refusal(db, org.id, lead, F.CAMPAIGN_KEY)
-        if why:
-            skipped[why[:60]] += 1
-            continue
+        why = b or rotation.approval_refusal(db, org.id, lead, F.CAMPAIGN_KEY)
         mode = "text_email" if send_approval.textable(lead) else "email_only"
-        if mode == "email_only" and not (lead.email or "").strip():
-            skipped["no textable phone and no email"] += 1
+        if not why and mode == "email_only" and not (lead.email or "").strip():
+            why = "no textable phone and no email"
+        if why:
+            skipped[why.split(":")[0][:60]] += 1
+            for r in recs:
+                if r.approved_to_send_at is None:
+                    r.campaign_family = None if r.campaign_family == F.CAMPAIGN_KEY and r.id not in keep_ids \
+                        else r.campaign_family
             continue
         for r in recs:
             r.campaign_family = F.CAMPAIGN_KEY

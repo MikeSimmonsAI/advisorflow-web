@@ -360,7 +360,8 @@ def start(db: Session, prog: OutreachProgram, fam: CampaignFamily, user, *, coun
         # slot gate moves any missed text to a follow-up slot.
         overdue = []
         n_text = sum(1 for r in eligible if r["textable"])
-        text_slots = iter(_os.new_family_slots(first, n_text, slot_cfg))
+        text_slots = iter(_os.new_family_slots(first, n_text, slot_cfg,
+                                               taken=_os.taken_slots(db, prog.organization_id, first)))
         mail_slots = iter([t + timedelta(minutes=4) for t in
                            _os.new_family_slots(first, len(eligible) - n_text, slot_cfg)])
         slots = [next(text_slots) if r["textable"] else next(mail_slots) for r in eligible]

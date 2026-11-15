@@ -140,13 +140,23 @@ def next_open(now_utc: datetime, cfg: Dict) -> datetime:
     return next(slots_from(now_utc, cfg, "new"))
 
 
-def new_family_slots(first: datetime, n: int, cfg: Dict) -> List[datetime]:
-    """n new-family slot times from `first` on (journey starts)."""
+def new_family_slots(first: datetime, n: int, cfg: Dict, taken=None) -> List[datetime]:
+    """n FREE new-family slot times from `first` on (journey starts); slots
+    already reserved (`taken`) are skipped, so a second start continues after
+    the families already scheduled."""
+    taken = taken or set()
     out = []
     it = slots_from(first, cfg, "new")
     while len(out) < n:
-        out.append(next(it))
+        s = next(it)
+        if s not in taken:
+            out.append(s)
     return out
+
+
+def taken_slots(db: Session, org_id: str, since: datetime) -> set:
+    S = _model()
+    return {t for (t,) in db.query(S.slot_at).filter(S.organization_id == org_id, S.slot_at >= since).all()}
 
 
 # ── reservations ────────────────────────────────────────────────────────────
