@@ -75,10 +75,16 @@ def main():
     if not p:
         p = Platform(name="EvoSys Pro", slug="evosyspro")
         db.add(p); db.flush()
-    bso = _get(db, BrandSalesOrg, slug="evosys-pro-sales-preview")
+    # The sales program the Deal Builder and Back Office look for
+    # (app/services/sales_team.PROGRAM_SLUG). An earlier preview seed used
+    # another slug; that row is renamed rather than duplicated.
+    from app.services.sales_team import PROGRAM_SLUG
+    bso = _get(db, BrandSalesOrg, slug=PROGRAM_SLUG) or _get(db, BrandSalesOrg, slug="evosys-pro-sales-preview")
     if not bso:
-        bso = BrandSalesOrg(platform_id=p.id, name="EvoSys Pro Sales", slug="evosys-pro-sales-preview")
+        bso = BrandSalesOrg(platform_id=p.id, name="EvoSys Pro Sales", slug=PROGRAM_SLUG)
         db.add(bso); db.flush()
+    elif bso.slug != PROGRAM_SLUG:
+        bso.slug = PROGRAM_SLUG
 
     def org(name, slug, industry):
         o = _get(db, Organization, slug=slug)
@@ -113,18 +119,24 @@ def main():
             db.add(UserCapabilityGrant(user_id=u.id, scope_type=SCOPE_PLATFORM, scope_id=p.id,
                                        organization_id=None, capability=key, is_active=True, granted_by=by.id))
 
+    def brand_grant(u, key, by):
+        if not _get(db, UserCapabilityGrant, user_id=u.id, scope_type=SCOPE_BRAND_SALES_ORG,
+                    scope_id=bso.id, capability=key):
+            db.add(UserCapabilityGrant(user_id=u.id, scope_type=SCOPE_BRAND_SALES_ORG, scope_id=bso.id,
+                                       organization_id=None, capability=key, is_active=True, granted_by=by.id))
+
     def scope(mgr, who, by):
         if not _get(db, TeamTimeScope, platform_id=p.id, manager_user_id=mgr.id, member_user_id=who.id):
             db.add(TeamTimeScope(platform_id=p.id, manager_user_id=mgr.id, member_user_id=who.id, granted_by=by.id))
 
-    owner = user("owner", "Owner (preview)", role="god_admin")
-    platform = user("platform", "Platform (preview)", role="org_admin", org_id=funeral.id)
-    partner = user("partner", "Owner Partner (preview)")
+    owner = user("owner", "Owner Preview", role="god_admin")
+    platform = user("platform", "Platform Preview", role="org_admin", org_id=funeral.id)
+    partner = user("partner", "Partner Preview")
     rep1 = user("rep1", "Rep One")
     rep2 = user("rep2", "Rep Two")
     newrep = user("newrep", "New Rep")
-    chatmgr = user("chatmgr", "Chat Manager (preview)", org_id=customer.id)
-    timemgr = user("timemgr", "Time Manager (preview)", org_id=customer.id)
+    chatmgr = user("chatmgr", "Chat Manager", org_id=customer.id)
+    timemgr = user("timemgr", "Time Manager", org_id=customer.id)
     outsider = user("outsider", "Outside Advisor", org_id=customer.id)
 
     for o in (sci, roofing, funeral):
@@ -139,6 +151,10 @@ def main():
         member(u, SCOPE_BRAND_SALES_ORG, bso.id, "sales_rep")
     member(partner, SCOPE_PLATFORM, p.id, ROLE_BRAND_EXECUTIVE)
 
+    # Same sales-team grants the live owner accounts hold (Deal Builders, compensation).
+    for u in (platform, partner):
+        for k in ("deal_builder_executive", "sales_program_owner", "sales_comp_view", "sales_comp_manage"):
+            brand_grant(u, k, owner)
     for k in ("team_chat_manage", "team_announce", "team_time_manage"):
         grant(platform, k, owner)
     grant(chatmgr, "team_chat_manage", owner)
