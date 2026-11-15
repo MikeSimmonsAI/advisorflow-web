@@ -148,16 +148,22 @@
     <script type="module" src="/src/main.jsx"></script>
     <script>
       // Remove splash once React has painted its first frame
+      // React can paint before DOMContentLoaded fires (module scripts run
+      // first). If the watcher only waited for a new change, it never saw one
+      // and the splash stayed behind the page for good. Check right away too.
       document.addEventListener('DOMContentLoaded', function() {
         var splash = document.getElementById('bb-splash');
-        var obs = new MutationObserver(function() {
-          if (document.getElementById('root').children.length > 0) {
-            splash.classList.add('fade');
-            setTimeout(function() { splash.remove(); }, 350);
-            obs.disconnect();
-          }
-        });
-        obs.observe(document.getElementById('root'), { childList: true });
+        var root = document.getElementById('root');
+        if (!splash) return;
+        var hide = function() {
+          if (root.children.length === 0) return false;
+          splash.classList.add('fade');
+          setTimeout(function() { splash.remove(); }, 350);
+          return true;
+        };
+        if (hide()) return;
+        var obs = new MutationObserver(function() { if (hide()) obs.disconnect(); });
+        obs.observe(root, { childList: true });
       });
     </script>
   </body>

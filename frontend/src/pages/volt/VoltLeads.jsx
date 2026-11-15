@@ -59,18 +59,23 @@ export function CoverageFunnel() {
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
   const head = useRef(null)
-  useEffect(() => { volt.leadConfig().then(setCfg).catch(() => setCfg({ enabled: false })) }, [])
+  const load = () => { setCfg(null); volt.leadConfig().then(setCfg).catch(() => setCfg({ enabled: false, failed: true })) }
+  useEffect(load, [])
   useEffect(() => { head.current?.focus() }, [step, done, started])
   const set = (k, v) => { setA((x) => ({ ...x, [k]: v })); setErr('') }
   const params = new URLSearchParams(window.location.search)
   const q = QUESTIONS[step]
   const page = cfg?.page
+  // The website is always shown. Whether a request can be SENT is a separate
+  // switch (cfg.enabled), and the server refuses submissions while it is off.
+  const open = !!cfg?.enabled
 
   const valid = () => {
     if (q.type === 'zip') return /^\d{5}$/.test((a.zip || '').trim()) || 'Please enter a 5-digit ZIP code.'
     if (q.type === 'state') return !!a.state || 'Please choose your state.'
     if (q.type === 'pref') return (!!a.contact_preference && !!a.best_time) || 'Please choose how and when to be contacted.'
     if (q.type === 'contact') {
+      if (!open) return 'Online requests are not open yet, so this form cannot be sent.'
       if (!(a.first_name || '').trim()) return 'Please enter your first name.'
       if (a.contact_preference !== 'email' && !(a.phone || '').trim()) return 'Please enter your phone number.'
       if (a.contact_preference === 'email' && !(a.email || '').trim()) return 'Please enter your email address.'
@@ -84,6 +89,7 @@ export function CoverageFunnel() {
     const v = valid()
     if (v !== true) { setErr(v); return }
     if (step < QUESTIONS.length - 1) { setStep(step + 1); return }
+    if (!open) return
     setBusy(true)
     let referrer = ''
     try { referrer = document.referrer ? new URL(document.referrer).hostname : '' } catch { referrer = '' }
@@ -105,11 +111,15 @@ export function CoverageFunnel() {
     <div className="volt" style={{ background: '#fff', minHeight: '100vh' }}>
       <main className="v-wrap" style={{ maxWidth: 720, padding: '24px 18px 48px', color: NAVY, ...big }} data-funnel>
         {!cfg && <p role="status">Loading…</p>}
-        {cfg && !cfg.enabled && <div className="v-card"><h1 tabIndex={-1} ref={head}>This form is not open yet</h1>
-          <p>We are not taking requests online right now. Please check back soon.</p><Link to="/volt">Back to VOLT Marketing</Link></div>}
-        {cfg?.enabled && done && <div className="v-card" role="status" style={{ borderColor: GREEN }}><h1 tabIndex={-1} ref={head}>Thank you.</h1>
+        {cfg?.failed && <div className="v-card" role="alert"><h1 tabIndex={-1} ref={head}>We couldn’t load this page</h1>
+          <p>Please check your connection and try again.</p>
+          <button type="button" className="v-btn" style={{ background: NAVY, color: '#fff' }} onClick={load}>Try again</button></div>}
+        {page && !open && <p role="note" data-intake-closed style={{ background: '#FFF4D6', border: '2px solid #E0B44C', borderRadius: 12,
+          padding: '12px 16px', fontSize: 18, margin: '0 0 18px' }}><b>Online requests are not open yet.</b> You can read about the
+          coverage and look through the questions, but we can’t take your information on this page right now. Please check back soon.</p>}
+        {open && done && <div className="v-card" role="status" style={{ borderColor: GREEN }}><h1 tabIndex={-1} ref={head}>Thank you.</h1>
           <p>Your request was received. A licensed agent may contact you using the details you gave.</p></div>}
-        {cfg?.enabled && !done && !started && page && (
+        {page && !done && !started && (
           <section aria-labelledby="lead-h" data-funnel-intro>
             <p className="v-eyebrow" style={{ color: GREEN }}>Free to check · No obligation · No account needed</p>
             <h1 id="lead-h" tabIndex={-1} ref={head} style={{ fontSize: 36, lineHeight: 1.15, color: NAVY }}>{page.headline}</h1>
@@ -122,7 +132,7 @@ export function CoverageFunnel() {
             <div className="v-small" style={{ fontSize: 16 }} data-funnel-disclaimers><b>Please know:</b>
               <ul>{page.disclaimers.map((d) => <li key={d}>{d}</li>)}</ul></div>
           </section>)}
-        {cfg?.enabled && !done && started && (
+        {page && !done && started && (
           <form className="v-card" onSubmit={next} noValidate aria-labelledby="lead-q" style={{ borderRadius: 16 }}>
             <p aria-live="polite" style={{ margin: 0 }}>Question {step + 1} of {QUESTIONS.length}</p>
             <progress max={QUESTIONS.length} value={step + 1} aria-label="Progress" style={{ width: '100%', height: 12, accentColor: NAVY }} />
@@ -151,23 +161,25 @@ export function CoverageFunnel() {
                     checked={a.best_time === v} onChange={() => set('best_time', v)} /> {l}</label>))}</fieldset>
             </>}
             {q.type === 'contact' && <>
-              <label>First name<input style={field} autoComplete="given-name" value={a.first_name || ''} onChange={(e) => set('first_name', e.target.value)} /></label>
-              <label>Last name<input style={field} autoComplete="family-name" value={a.last_name || ''} onChange={(e) => set('last_name', e.target.value)} /></label>
-              <label>Phone{a.contact_preference === 'email' ? ' (optional)' : ''}<input style={field} type="tel" autoComplete="tel" value={a.phone || ''} onChange={(e) => set('phone', e.target.value)} /></label>
-              <label>Email{a.contact_preference === 'email' ? '' : ' (optional)'}<input style={field} type="email" autoComplete="email" value={a.email || ''} onChange={(e) => set('email', e.target.value)} /></label>
+              {!open && <p role="note" data-closed-final style={{ background: '#FFF4D6', borderRadius: 10, padding: 12 }}>
+                This is the last step. Requests can’t be sent yet, so these boxes are turned off and nothing you see here is saved.</p>}
+              <label>First name<input style={field} autoComplete="given-name" value={a.first_name || ''} disabled={!open} onChange={(e) => set('first_name', e.target.value)} /></label>
+              <label>Last name<input style={field} autoComplete="family-name" value={a.last_name || ''} disabled={!open} onChange={(e) => set('last_name', e.target.value)} /></label>
+              <label>Phone{a.contact_preference === 'email' ? ' (optional)' : ''}<input style={field} type="tel" autoComplete="tel" value={a.phone || ''} disabled={!open} onChange={(e) => set('phone', e.target.value)} /></label>
+              <label>Email{a.contact_preference === 'email' ? '' : ' (optional)'}<input style={field} type="email" autoComplete="email" value={a.email || ''} disabled={!open} onChange={(e) => set('email', e.target.value)} /></label>
               <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', margin: '14px 0', fontSize: 17 }}>
-                <input type="checkbox" style={{ width: 24, height: 24, flex: 'none' }} checked={a.consent} onChange={(e) => set('consent', e.target.checked)} />
+                <input type="checkbox" style={{ width: 24, height: 24, flex: 'none' }} disabled={!open} checked={a.consent} onChange={(e) => set('consent', e.target.checked)} />
                 <span>{cfg.consent_text}</span></label>
             </>}
             <div id="lead-err" role="alert" className={err ? 'v-alert v-alert--err' : ''}>{err}</div>
             <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
               <button type="button" className="v-btn v-btn--line" style={{ fontSize: 18, minHeight: 52 }}
                 onClick={() => { setErr(''); if (step === 0) setStarted(false); else setStep(step - 1) }}>← Back</button>
-              <button type="submit" className="v-btn" style={{ background: NAVY, color: '#fff', fontSize: 18, minHeight: 52, flex: 1 }} disabled={busy}>
-                {step === QUESTIONS.length - 1 ? (busy ? 'Sending…' : 'Send my request') : 'Continue →'}</button>
+              <button type="submit" className="v-btn" style={{ background: NAVY, color: '#fff', fontSize: 18, minHeight: 52, flex: 1 }} disabled={busy || (!open && step === QUESTIONS.length - 1)} data-funnel-next>
+                {step === QUESTIONS.length - 1 ? (!open ? 'Requests open soon' : busy ? 'Sending…' : 'Send my request') : 'Continue →'}</button>
             </div>
           </form>)}
-        {cfg?.enabled && page && started && !done && <p style={{ fontSize: 15, marginTop: 18 }}>{page.disclaimers.join(' ')}</p>}
+        {page && started && !done && <p style={{ fontSize: 15, marginTop: 18 }}>{page.disclaimers.join(' ')}</p>}
       </main>
     </div>
   )
