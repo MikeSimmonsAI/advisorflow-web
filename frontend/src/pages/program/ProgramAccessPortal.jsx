@@ -93,7 +93,7 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
       type: 'deal_builder', key: 'executive', variant: 'office', symbol: 'DB',
       kind: 'SALES TOOLS', display: 'Executive Deal Builder',
       summary: 'Build customer quotes and review the full commission breakdown.',
-      href: '/team-prices/executive-deal-builder', actionLabel: 'Open Deal Builder',
+      href: '/team-prices/executive-deal-builder?from=/workspaces', actionLabel: 'Open Deal Builder',
     })
   }
   if (dealAccess?.sales) {
@@ -105,7 +105,7 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
       summary: dealAccess.team_view
         ? 'Build customer quotes and see your commission and your team\'s.'
         : 'Build customer quotes and estimate your own commission.',
-      href: '/team-prices/sales-deal-builder', actionLabel: 'Open Deal Builder',
+      href: '/team-prices/sales-deal-builder?from=/workspaces', actionLabel: 'Open Deal Builder',
     })
   }
   const salesTeam = contexts && contexts.sales_team

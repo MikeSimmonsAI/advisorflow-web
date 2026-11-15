@@ -711,3 +711,23 @@ def test_system_health_states_what_an_unmeasured_scheduler_does_not_mean():
     src = _src("pages/SystemHealth.jsx")
     assert "not a report that" in src.lower()
     assert "UNAVAILABLE" in src
+
+
+def test_rate_fix_link_never_sends_a_non_god_user_into_god_mode(db_session):
+    """The reported bug: platform@evosyspro.live clicked the unrated-package
+    item on Team Compensation and landed on /god/pricing, which God Mode
+    answers with 'workspace not found'. God Mode is owner-only, so everyone
+    else gets the Back Office Pricing & Plans page instead."""
+    b = _brand(db_session, "NoGod", with_plan=False)
+    _won(db_session, b, status="open")
+    res = ledger.attention(db_session, b["manager"], brand_sales_org_id=b["org"].id, can_settle=True)
+    routes = [i["action_route"] for i in res["items"] if i["key"] == "unconfigured_commission"]
+    assert routes == ["/sales/pricing"]
+    god = User(email="god-sev-%d@example.test" % next(_SEQ_GOD), full_name="God",
+               role="god_admin", password_hash=hash_password("x"))
+    db_session.add(god); db_session.commit()
+    res = ledger.attention(db_session, god, brand_sales_org_id=b["org"].id, can_settle=True)
+    assert [i["action_route"] for i in res["items"] if i["key"] == "unconfigured_commission"] == ["/god/pricing"]
+
+
+_SEQ_GOD = itertools.count(1)

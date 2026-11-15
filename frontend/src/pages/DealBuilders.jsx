@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Link, Navigate } from 'react-router-dom'
+import { Link, Navigate, useLocation } from 'react-router-dom'
 import { API_BASE, clearToken } from '../api/client'
+import { safeReturn } from './builderReturn'
 
 /**
  * TEAM PRICING DEAL BUILDERS — two entry points, access decided by the server.
@@ -28,6 +29,25 @@ const EXEC_PATH = '/team-prices/executive-deal-builder'
 const frameStyle = { position: 'fixed', inset: 0, display: 'block', width: '100%', height: '100dvh', border: 0, background: '#f3f6f8' }
 const boxStyle = { maxWidth: 520, margin: '12vh auto', padding: 28, background: '#fff', border: '1px solid #dce5ea', borderRadius: 15, font: '15px/1.5 system-ui, sans-serif', color: '#102b40' }
 
+const barH = 46
+const framedStyle = { position: 'fixed', left: 0, right: 0, bottom: 0, top: barH, display: 'block', width: '100%', height: 'calc(100dvh - ' + barH + 'px)', border: 0, background: '#f3f6f8' }
+const barStyle = { position: 'fixed', top: 0, left: 0, right: 0, height: barH, display: 'flex', alignItems: 'center', gap: 12, padding: '0 14px', background: '#102b40', color: '#fff', font: '600 14px/1 system-ui, sans-serif', zIndex: 2 }
+const backStyle = { color: '#fff', textDecoration: 'none', padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(255,255,255,.35)', minHeight: 32, display: 'inline-flex', alignItems: 'center' }
+
+function BuilderFrame({ title, children }) {
+  const loc = useLocation()
+  const back = safeReturn(new URLSearchParams(loc.search).get('from'))
+  return (
+    <>
+      <header style={barStyle}>
+        <Link to={back.to} style={backStyle} aria-label={'Back to ' + back.label}>← Back to {back.label}</Link>
+        <span style={{ opacity: .85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
+      </header>
+      {children}
+    </>
+  )
+}
+
 function token() {
   try { return localStorage.getItem('af_token') || localStorage.getItem('bookaboost_token') } catch { return null }
 }
@@ -52,12 +72,18 @@ function Notice({ title, children }) {
 
 export function SalesDealBuilder() {
   shareApiBase()
-  if (!token()) return <Navigate to={loginUrl(SALES_PATH)} replace />
-  return <iframe title="EvoSys Pro Sales Deal Builder" src="/team-prices/sales-builder-frame.html" style={frameStyle} />
+  const { search } = useLocation()
+  if (!token()) return <Navigate to={loginUrl(SALES_PATH + (search || ''))} replace />
+  return (
+    <BuilderFrame title="Salesperson Deal Builder">
+      <iframe title="EvoSys Pro Sales Deal Builder" src="/team-prices/sales-builder-frame.html" style={framedStyle} />
+    </BuilderFrame>
+  )
 }
 
 export function ExecutiveDealBuilder() {
   const [view, setView] = useState({ kind: 'loading' })
+  const { search } = useLocation()
   shareApiBase()
   const signedIn = !!token()
 
@@ -88,15 +114,21 @@ export function ExecutiveDealBuilder() {
     return () => { gone = true }
   }, [signedIn])
 
-  if (!signedIn || view.kind === 'expired') return <Navigate to={loginUrl(EXEC_PATH)} replace />
-  if (view.kind === 'sales') return <Navigate to={SALES_PATH} replace />
-  if (view.kind === 'page') return <iframe title="EvoSys Pro Executive Deal Builder" srcDoc={view.html} style={frameStyle} />
+  if (!signedIn || view.kind === 'expired') return <Navigate to={loginUrl(EXEC_PATH + (search || ''))} replace />
+  if (view.kind === 'sales') return <Navigate to={SALES_PATH + (search || '')} replace />
+  if (view.kind === 'page') {
+    return (
+      <BuilderFrame title="Executive Deal Builder">
+        <iframe title="EvoSys Pro Executive Deal Builder" srcDoc={view.html} style={framedStyle} />
+      </BuilderFrame>
+    )
+  }
   if (view.kind === 'denied') {
     return (
       <Notice title="This page needs executive access">
         <p>This login can't open the executive Deal Builder.</p>
         {view.detail && <p style={{ color: '#607486' }}>Server answer: {view.detail}</p>}
-        <p><Link to="/">Back to EvoSys Pro</Link></p>
+        <p><Link to="/workspaces">Back to Program Access</Link></p>
       </Notice>
     )
   }
