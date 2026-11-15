@@ -42,6 +42,9 @@
         // it knows. A neutral mark, no name, no substitute.
         var ext = /^\/(investor|my-property)\//.test(location.pathname)
         if (ext) { letter = ''; color = '%23e2e8f0' }
+        // The Consumer Leads customer website has its own (working) brand: a
+        // neutral health mark and title, never VOLT or the platform's.
+        if (/^\/volt\/check-coverage/.test(location.pathname)) { name = 'Health coverage options'; color = '%23087e79'; letter = '+'; fsize = '22' }
         if (!ext) document.title = name
         // Inject favicon immediately — before JS bundle loads
         var svg = "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='" + color + "'/%3E%3Ctext x='16' y='22' font-family='Arial,sans-serif' font-size='" + fsize + "' font-weight='700' fill='white' text-anchor='middle'%3E" + letter + "%3C/text%3E%3C/svg%3E"
