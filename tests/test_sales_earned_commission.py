@@ -84,25 +84,25 @@ def _by_role(entries):
 
 
 def test_partial_setup_basic_plus_addon_is_prorated(team):
-    """Basic $1,600 + $200 add-on, $900 collected -> $265 / $110 / $165."""
+    """Basic $1,600 + $200 add-on, $900 collected -> $270 / $110 / $165."""
     opp = _deal(team)
     got = _by_role(_pay(team, opp, "pay-1", "900"))
-    assert got == {"rep": 265.0, "asm": 110.0, "sevp": 165.0}
+    assert got == {"rep": 270.0, "asm": 110.0, "sevp": 165.0}
 
 
 def test_rest_of_setup_then_monthly(team):
     opp = _deal(team)
     _pay(team, opp, "pay-1", "900")
-    assert _by_role(_pay(team, opp, "pay-2", "900")) == {"rep": 265.0, "asm": 110.0, "sevp": 165.0}
-    # Setup is done; the next $597 is monthly service at 15 / 10 / 15.
-    assert _by_role(_pay(team, opp, "pay-3", "597")) == {"rep": 89.55, "asm": 59.7, "sevp": 89.55}
+    assert _by_role(_pay(team, opp, "pay-2", "900")) == {"rep": 270.0, "asm": 110.0, "sevp": 165.0}
+    # Setup is done; the next $597 is monthly service (Month 2) at 20 / 10 / 15.
+    assert _by_role(_pay(team, opp, "pay-3", "597")) == {"rep": 119.4, "asm": 59.7, "sevp": 89.55}
 
 
 def test_one_payment_spanning_setup_and_monthly(team):
     opp = _deal(team)
     # 1,800 setup + 597 first month in one payment.
     got = _by_role(_pay(team, opp, "pay-1", "2397"))
-    assert got == {"rep": 530 + 89.55, "asm": 220 + 59.7, "sevp": 330 + 89.55}
+    assert got == {"rep": 540 + 119.4, "asm": 220 + 59.7, "sevp": 330 + 89.55}
     split = team.db.query(SalesCollectionSplit).filter_by(opportunity_id=opp.id).one()
     assert float(split.setup_part) == 1800.0 and float(split.monthly_part) == 597.0
 
@@ -137,7 +137,7 @@ def test_empty_manager_seat_goes_to_unclaimed_and_raises_nobody(team):
     _member(team.db, lone, team.brand, ROLE_SALES_REP, team.sevp)   # no ASM above him
     opp = _deal(team, lone)
     got = _by_role(_pay(team, opp, "pay-1", "900"))
-    assert got == {"rep": 265.0, "sevp": 165.0}                      # sevp not raised
+    assert got == {"rep": 270.0, "sevp": 165.0}                      # sevp not raised
     u = team.db.query(SalesUnclaimedShare).filter_by(opportunity_id=opp.id).one()
     assert (u.role, u.reason, float(u.amount)) == ("asm", "seat empty", 110.0)
 
@@ -164,7 +164,7 @@ def test_suspension_is_not_departure(team):
     m.is_active = False
     team.db.commit()
     opp = _deal(team)
-    assert _by_role(_pay(team, opp, "pay-1", "900"))["rep"] == 265.0
+    assert _by_role(_pay(team, opp, "pay-1", "900"))["rep"] == 270.0
 
 
 def test_moved_rep_keeps_old_manager_on_past_deals(team):
@@ -179,7 +179,7 @@ def test_moved_rep_keeps_old_manager_on_past_deals(team):
     asm_entry = [e for e in entries if e.payee_kind == "asm"][0]
     assert asm_entry.payee_user_id == team.asm.id
     credit = team.db.query(SalesDealCredit).filter_by(opportunity_id=opp.id).one()
-    assert credit.rules_version == "2026-11-13"
+    assert credit.rules_version == "2026-11-15"
     # A NEW deal after the move credits the new manager.
     opp2 = _deal(team)
     e2 = [e for e in _pay(team, opp2, "x-1", "900") if e.payee_kind == "asm"][0]
@@ -233,6 +233,6 @@ def test_projection_uses_the_same_rules(team):
     r = comp.compute(team.db, opp)
     got = {p["override_level"]: float(p["amount"]) for p in r["payouts"]}
     # Basic + $200 add-on, full quote, plus one month of $597 service.
-    assert got == {None: 530 + 89.55, 1: 220 + 59.7, 2: 330 + 89.55}
+    assert got == {None: 540 + 119.4, 1: 220 + 59.7, 2: 330 + 89.55}
     assert r["plan_name"].startswith("EvoSys launch rules")
     assert team.db.query(SalesDealCredit).filter_by(opportunity_id=opp.id).count() == 0  # writes nothing

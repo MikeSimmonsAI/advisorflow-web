@@ -442,8 +442,13 @@ export default function DealBillingPanel({ opp }) {
         <Obligation
           label="MONTHLY SUBSCRIPTION"
           amount={money(sub.cents) + '/mo'}
-          detail={data.commitment_label
-            || (data.term_months ? data.term_months + '-month agreement' : null)}
+          detail={[data.commitment_label
+            || (data.term_months ? data.term_months + '-month agreement' : null),
+            data.monthly_billing_starts
+              ? 'Month 1 is the one-time fee only. Monthly billing starts in Month 2 — '
+                + 'the customer saves a card on this page and is first charged on '
+                + data.monthly_billing_starts + '.'
+              : null].filter(Boolean).join(' · ') || null}
           presentation={subP}
           checkoutUrl={subState.checkout_url}
           settled={subSettled}

@@ -18,16 +18,23 @@ WHO SEES WHAT (decided on the server, never in the browser)
   rep   A rep: his own commission only.
 A view never receives a number for a layer above it.
 
-THE LAUNCH RATES (version 2026-11-13)
+THE LAUNCH RATES (version 2026-11-15)
 -------------------------------------
-Packages - setup is a fixed dollar amount per role:
-    Basic         rep $500    ASM $200   Sr EVP $300
-    Growth        rep $1,000  ASM $300   Sr EVP $600
-    Professional  rep $2,000  ASM $400   Sr EVP $900
-  Monthly platform fee: rep 15%, ASM 10%, Sr EVP 15%, EvoSys 60%.
+Packages (Basic, Growth, Professional) - final owner instruction, 2026-11-15:
+  Month 1   the customer pays only the package's flat one-time fee. Each role
+            earns the configured FLAT payout below - never a percentage of
+            the one-time fee (Basic rep is $500, not 20% of $1,600):
+              Basic         rep $500    ASM $200   Sr EVP $300
+              Growth        rep $1,000  ASM $300   Sr EVP $600
+              Professional  rep $2,000  ASM $400   Sr EVP $900
+            No monthly fee and no residual is due in Month 1.
+  Month 2+  the package's configured monthly fee is billed; the residual on
+            each monthly payment collected is locked at
+            rep 20%, ASM 10%, Sr EVP 15%, EvoSys 55%.
+  (Version 2026-11-13 had the package rep residual at 15%. Corrected here.)
 Custom SaaS - setup AND every monthly payment while the contract is active:
   rep 20%, ASM 10%, Sr EVP 15%, EvoSys 55%.
-Add-ons follow the deal they are on: package-deal add-ons at 15/10/15/60,
+Add-ons follow the deal they are on: package-deal add-ons at 20/10/15/55,
 SaaS add-ons at 20/10/15/55, on both their setup and monthly amounts. There is
 no separate add-on rate.
 À la carte (no package): not decided by the owners yet - estimated with the
@@ -46,7 +53,7 @@ CENT = Decimal("0.01")
 MAX_AMOUNT = Decimal("100000000")
 D = Decimal
 
-RULES_VERSION = "2026-11-13"
+RULES_VERSION = "2026-11-15"
 ROLES = ("rep", "asm", "sevp")
 ROLE_LABELS = {"rep": "Salesperson", "asm": "Area Sales Manager",
                "sevp": "Sr Executive Vice President", "evosys": "EvoSys"}
@@ -70,7 +77,7 @@ PLANS: Dict[str, Dict[str, Any]] = {
                      "payout": {"rep": D("2000"), "asm": D("400"), "sevp": D("900")}},
     "custom_saas":  {"name": "Custom SaaS",  "kind": "saas",     "setup": None},
 }
-PACKAGE_PCT = {"rep": D("15"), "asm": D("10"), "sevp": D("15")}   # EvoSys 60
+PACKAGE_PCT = {"rep": D("20"), "asm": D("10"), "sevp": D("15")}   # EvoSys 55 - Month 2 onward
 SAAS_PCT    = {"rep": D("20"), "asm": D("10"), "sevp": D("15")}   # EvoSys 55
 
 # What the executive page receives (and the saved-plan seed writes). Plain
@@ -262,5 +269,5 @@ def seller_commission(deal: Dict[str, Any]) -> Dict[str, Any]:
             "total": own["one_time"],
         },
         "recurring": {"monthly": own["monthly"],
-                      "rule": "%g%% of eligible monthly service collected" % own["monthly_rate"]},
+                      "rule": "%g%% of eligible monthly service collected (monthly billing starts in Month 2)" % own["monthly_rate"]},
     }

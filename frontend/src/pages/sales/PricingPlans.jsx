@@ -31,14 +31,15 @@ export default function PricingPlans() {
         {d.can_edit_in_god_mode && <p style={{ margin: '8px 0 0' }}><Link to="/god/pricing">Edit in God Mode → Pricing</Link></p>}
       </div>
       <div style={card}>
-        <b>Commission on setup (fixed per package)</b>
+        <b>Month 1 — flat payout on the package's one-time fee</b>
         <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 8 }}>
-          <thead><tr><th style={th}>Package</th><th style={th}>Setup price</th><th style={th}>Salesperson</th><th style={th}>Area Sales Manager</th><th style={th}>Sr EVP</th></tr></thead>
+          <thead><tr><th style={th}>Package</th><th style={th}>One-time fee</th><th style={th}>Salesperson</th><th style={th}>Area Sales Manager</th><th style={th}>Sr EVP</th></tr></thead>
           <tbody>{c.plans.filter(p => p.kind === 'package').map(p => (
             <tr key={p.key}><td style={td}>{p.name}</td><td style={td}>{usd(p.setup)}</td><td style={td}>{usd(p.payout.rep)}</td><td style={td}>{usd(p.payout.asm)}</td><td style={td}>{usd(p.payout.sevp)}</td></tr>
           ))}</tbody>
         </table>
-        <p style={{ margin: '10px 0 0' }}>Package monthly service: <b>{c.package_monthly_pct.rep}% / {c.package_monthly_pct.asm}% / {c.package_monthly_pct.sevp}%</b>. Custom SaaS setup and monthly: <b>{c.saas_pct.rep}% / {c.saas_pct.asm}% / {c.saas_pct.sevp}%</b>. Add-ons follow the deal they are sold on. Commission is held {c.holdback_days} days after the customer pays.</p>
+        <p style={{ margin: '10px 0 0' }}>Month 1: the customer pays only the one-time fee, and these flat amounts are paid — they are not a percentage of the fee. No monthly fee or residual is due in Month 1.</p>
+        <p style={{ margin: '6px 0 0' }}>Month 2 onward, on each package monthly fee collected: <b>{c.package_monthly_pct.rep}% / {c.package_monthly_pct.asm}% / {c.package_monthly_pct.sevp}%</b> (Salesperson / Area Sales Manager / Sr EVP). Custom SaaS setup and monthly: <b>{c.custom_saas_rates.rep}% / {c.custom_saas_rates.asm}% / {c.custom_saas_rates.sevp}%</b>. Add-ons follow the deal they are sold on. Commission is held {c.holdback_days} days after the customer pays.</p>
       </div>
       <div style={card}>
         <b>Customer package prices (back office catalogue)</b>

@@ -265,7 +265,7 @@ def pricing(db: Session = Depends(get_db), user: User = Depends(get_current_user
         "rules_version": dbc.RULES_VERSION,
         "commission": {"plans": plans,
                        "package_monthly_pct": {k: float(v) for k, v in dbc.PACKAGE_PCT.items()},
-                       "saas_pct": {k: float(v) for k, v in dbc.SAAS_PCT.items()},
+                       "custom_saas_rates": {k: float(v) for k, v in dbc.SAAS_PCT.items()},
                        "holdback_days": 14},
         "packages": [{"key": k.key, "name": k.name,
                       "setup_fee": float(k.setup_fee) if k.setup_fee is not None else None,
