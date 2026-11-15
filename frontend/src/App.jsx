@@ -14,6 +14,7 @@ import TeamPrices from './pages/TeamPrices'
 import { SalesDealBuilder, ExecutiveDealBuilder } from './pages/DealBuilders'
 import DealQuote from './pages/sales/DealQuote'
 import DemoRequests from './pages/sales/DemoRequests'
+import PricingPlans from './pages/sales/PricingPlans'
 import MyTeam from './pages/sales/MyTeam'
 import SalesOnboarding from './pages/SalesOnboarding'
 import Onboarding from './pages/Onboarding'
@@ -1613,7 +1614,8 @@ export default function App() {
             finance authority, so a rep who types either URL gets a 403 rather
             than a screen. My Compensation is scoped to the caller's own token
             and takes no payee parameter at all. */}
-        <Route path="/sales/compensation" element={<SalesRoute><SalesShell><CompensationCommand embedded /></SalesShell></SalesRoute>} />
+        <Route path="/sales/compensation" element={<SalesRoute><SalesShell title="Team Compensation"><CompensationCommand embedded intro /></SalesShell></SalesRoute>} />
+        <Route path="/sales/pricing" element={<SalesRoute><SalesShell title="Pricing & Plans"><PricingPlans /></SalesShell></SalesRoute>} />
         <Route path="/sales/my-compensation" element={<SalesRoute><MyCompensation /></SalesRoute>} />
         <Route path="/sales/calendar" element={<SalesRoute><TeamCalendar /></SalesRoute>} />
         <Route path="/sales/team-pipeline" element={<SalesRoute><MyPipeline scope="team" /></SalesRoute>} />

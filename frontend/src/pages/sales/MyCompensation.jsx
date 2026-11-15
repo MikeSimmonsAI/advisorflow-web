@@ -81,7 +81,8 @@ function CompensationLinks() {
   return (
     <nav className="sw-flex" aria-label="Compensation tools" style={{ flexWrap: 'wrap', marginBottom: 12 }}>
       {permissions?.view_team_pipeline && <Link className="sw-btn" to="/sales/compensation">Team Compensation</Link>}
-      {executive && <Link className="sw-btn" to="/team-prices/executive-deal-builder">Executive Deal Builder</Link>}
+      {executive && <Link className="sw-btn" to="/team-prices/executive-deal-builder?from=/sales/my-compensation">Executive Deal Builder</Link>}
+      <Link className="sw-btn" to="/team-prices/sales-deal-builder?from=/sales/my-compensation">Salesperson Deal Builder</Link>
     </nav>
   )
 }

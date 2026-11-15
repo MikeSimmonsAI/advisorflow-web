@@ -243,7 +243,7 @@ function PayDialog({ lines, onClose, onDone }) {
 
 /* ── the screen ───────────────────────────────────────────────────────────── */
 
-export default function CompensationCommand({ embedded = false }) {
+export default function CompensationCommand({ embedded = false, intro = false }) {
   const nav = useNavigate()
   const [d, setD] = useState(null)
   const [payables, setPayables] = useState(null)
@@ -298,6 +298,22 @@ export default function CompensationCommand({ embedded = false }) {
 
   return (
     <CompShell embedded={embedded}>
+      {intro && (
+        <div className="sw-card" style={{ padding: 14, marginBottom: 12 }}>
+          <b>Team Compensation</b>
+          <p style={{ margin: '6px 0 0' }}>
+            What your team is projected to earn on open deals, what has been earned, what is still in the
+            14-day hold, what is payable now and what has been paid — only for the people you are allowed to see.
+            {payables?.can_process_payments
+              ? ' You can release elapsed holds and settle payouts below.'
+              : ' Payouts and reconciliation are done by the owners; this login can view only.'}
+          </p>
+          <p style={{ margin: '8px 0 0', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <a className="sw-btn" href="/sales/my-compensation">My commission</a>
+            <a className="sw-btn" href="/sales/pricing">Pricing & Plans</a>
+          </p>
+        </div>
+      )}
       {err ? <div className="sw-err">{err}</div> : null}
       {!d && !err ? <div className="sw-muted">Loading…</div> : null}
 

@@ -482,6 +482,14 @@ def projected(db: Session, user: User, *,
 
 # ── what needs a human ──────────────────────────────────────────────────────
 
+def _is_god_user(user) -> bool:
+    try:
+        from app.services.sales_access import is_god
+        return bool(is_god(user))
+    except Exception:
+        return False
+
+
 def attention(db: Session, user: User, *,
               brand_sales_org_id: Optional[str] = None,
               payee_user_id: Optional[str] = None,
@@ -557,8 +565,11 @@ def attention(db: Session, user: User, *,
             # GodPricingCompensation; a plausible-looking `/god/pricing-
             # compensation` would render the Command Center via the /god/*
             # catch-all and look like the button did nothing.
-            action_label="Set the rates",
-            action_route="/god/pricing")
+            # God Mode is owner-only: anyone else is sent to the Back Office
+            # page that explains the rates and who can change them (the God
+            # route answers "workspace not found" to them - the reported bug).
+            action_label="Set the rates" if _is_god_user(user) else "See pricing & plans",
+            action_route="/god/pricing" if _is_god_user(user) else "/sales/pricing")
 
     # ── 2. money waiting on a pricing decision ─────────────────────────────
     if proj.get("pending_approval_deals"):

@@ -222,3 +222,50 @@ def unclaimed(db: Session = Depends(get_db), user: User = Depends(get_current_us
         raise HTTPException(status_code=403, detail="Only the owners can see unclaimed commission.")
     from app.services import sales_program_comp
     return sales_program_comp.unclaimed_report(db)
+
+
+# ── Pricing & Plans (Back Office): what the rates are, and who changes them ──
+
+@router.get("/pricing")
+def pricing(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """The EvoSys Pro Sales launch commission rules (versioned) and the
+    customer package prices, for God Mode, the owners and anyone granted
+    compensation view/manage on the brand. Read-only here: the commission
+    rules change only as a new version, and package prices are edited in God
+    Mode, which stays owner-only."""
+    from app.models.sales_models import BrandPackage
+    from app.services import deal_builder_commission as dbc
+    from app.services.sales_access import is_god
+    brand = team.program_brand(db)
+    if brand is None:
+        raise HTTPException(status_code=404, detail="EvoSys Pro Sales is not set up.")
+    rights = team.actor_rights(db, user)
+    allowed = rights["is_admin"] or team._has(db, user, "sales_comp_view", brand.id) \
+        or team._has(db, user, "sales_comp_manage", brand.id)
+    if not allowed:
+        raise HTTPException(status_code=403,
+                            detail="Pricing & Plans is for the owners and people allowed to see team compensation.")
+    pkgs = (db.query(BrandPackage).filter(BrandPackage.platform_id == brand.platform_id)
+            .order_by(BrandPackage.setup_fee.is_(None), BrandPackage.setup_fee).all())
+    plans = []
+    for key, p in dbc.PLANS.items():
+        plans.append({"key": key, "name": p["name"], "kind": p["kind"],
+                      "setup": float(p.get("setup") or 0) if p.get("setup") is not None else None,
+                      "monthly": float(p["month"]) if p.get("month") is not None else None,
+                      "payout": {k: float(v) for k, v in (p.get("payout") or {}).items()}})
+    return {
+        "brand": {"id": brand.id, "name": brand.name},
+        "rules_version": dbc.RULES_VERSION,
+        "commission": {"plans": plans,
+                       "package_monthly_pct": {k: float(v) for k, v in dbc.PACKAGE_PCT.items()},
+                       "saas_pct": {k: float(v) for k, v in dbc.SAAS_PCT.items()},
+                       "holdback_days": 14},
+        "packages": [{"key": k.key, "name": k.name,
+                      "setup_fee": float(k.setup_fee) if k.setup_fee is not None else None,
+                      "monthly_price": float(k.monthly_price) if k.monthly_price is not None else None}
+                     for k in pkgs],
+        "can_edit_in_god_mode": bool(is_god(user)),
+        "how_to_change": ("Package prices are edited in God Mode → Pricing. Commission rates change "
+                          "only as a new rules version, so every saved quote and earned record keeps "
+                          "the version it was made under."),
+    }
