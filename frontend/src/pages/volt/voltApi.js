@@ -15,18 +15,19 @@ export const VOLT_TITLE = 'VOLT Marketing'
  * so the title is watched and put back while VOLT is showing, and the previous
  * title is restored when the person leaves VOLT for another program.
  */
-export function useVoltTitle() {
+// title: the tab title to keep; null leaves the title to the page around it.
+export function useVoltTitle(title = VOLT_TITLE) {
   useEffect(() => {
-    if (typeof document === 'undefined') return undefined
-    const previous = document.title === VOLT_TITLE ? '' : document.title
-    const apply = () => { if (document.title !== VOLT_TITLE) document.title = VOLT_TITLE }
+    if (typeof document === 'undefined' || !title) return undefined
+    const previous = document.title === title ? '' : document.title
+    const apply = () => { if (document.title !== title) document.title = title }
     apply()
     let el = document.querySelector('title')
     if (!el) { el = document.createElement('title'); document.head.appendChild(el); apply() }
     const obs = typeof MutationObserver !== 'undefined' ? new MutationObserver(apply) : null
     if (obs) obs.observe(el, { childList: true, characterData: true, subtree: true })
     return () => { if (obs) obs.disconnect(); if (previous) document.title = previous }
-  }, [])
+  }, [title])
 }
 
 export const SLUG = 'volt-marketing'

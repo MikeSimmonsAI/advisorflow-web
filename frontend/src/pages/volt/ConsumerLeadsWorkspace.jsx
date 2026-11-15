@@ -277,7 +277,7 @@ function LeadSources({ orgId }) {
         <p className="v-small">{d.website.path} · attribution from utm_source, utm_medium, utm_campaign and the referring site.</p></div>
       <h3>Connections</h3>
       <div className="v-scroll"><table className="v-table" data-providers><thead><tr><th>Source</th><th>Status</th><th>What it needs</th></tr></thead>
-        <tbody>{d.providers.map((p) => <tr key={p.key} data-provider={p.key}><td>{p.label}</td><td>{p.ready ? 'Available' : 'Waiting for account connection'}</td><td className="v-small">{p.ready ? p.how : p.needs}</td></tr>)}</tbody></table></div>
+        <tbody>{d.providers.map((p) => <tr key={p.key} data-provider={p.key}><td>{p.label}</td><td>{p.ready ? 'Available' : 'Awaiting account connection'}</td><td className="v-small">{p.ready ? p.how : p.needs}</td></tr>)}</tbody></table></div>
       <form className="v-card" onSubmit={create} style={{ margin: '14px 0' }} data-add-source>
         <h3>Add a source</h3>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
@@ -474,9 +474,8 @@ export default function ConsumerLeadsWorkspace() {
   const [summary, setSummary] = useState(null)
   const [err, setErr] = useState('')
   const [test, setTest, q] = useDataMode()
-  useVoltTitle()
+  useVoltTitle('Consumer Leads · VOLT Marketing')
   useEffect(() => { api.get(`/volt/ops/${orgId}/leads/summary`).then(setSummary).catch((e) => setErr(msg(e))) }, [orgId])
-  useEffect(() => { document.title = 'Consumer Leads · VOLT Marketing' }, [])
   if (err && !summary) {
     return <div className="volt"><div className="v-wrap v-center"><div data-cl-denied>
       <h2>Consumer Leads</h2><div className="v-alert v-alert--err" role="alert">{err}</div>

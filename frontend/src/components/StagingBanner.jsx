@@ -6,6 +6,7 @@
  * looks identical in every shell. Renders nothing at all outside staging.
  */
 import { useEffect, useState } from 'react'
+import { useMatch } from 'react-router-dom'
 import { fetchEnvironment } from '../api/demo'
 import { stagingBanner } from '../pages/god/controlRoomView'
 
@@ -16,7 +17,10 @@ export default function StagingBanner() {
     fetchEnvironment().then((d) => { if (alive) setEnv(d) })
     return () => { alive = false }
   }, [])
-  const b = stagingBanner(env)
+  // Wording only: Consumer Leads pages say so. Staging itself is still the backend's answer.
+  const cl = useMatch('/consumer-leads/*')
+  const site = useMatch('/volt/check-coverage')
+  const b = stagingBanner(env, cl || site ? 'consumer_leads' : null)
   if (!b) return null
   return (
     <div role="status" data-testid="staging-banner" style={{
