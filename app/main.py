@@ -1946,8 +1946,12 @@ async def _volt_sheets_loop():
     import time as _time
     _logger = _log.getLogger("volt_sheets_loop")
     await asyncio.sleep(50)  # startup delay - offset from the other loops
-    _last_logged = 0.0
-    _last_reconcile = 0.0
+    # -inf, not 0: time.monotonic() counts from the machine's boot, so on a
+    # freshly started instance "0 seconds ago" could look recent and push the
+    # first reconcile/check-in out by up to an hour. A new process reconciles
+    # and checks in on its first pass (#630).
+    _last_logged = float("-inf")
+    _last_reconcile = float("-inf")
     while True:
         try:
             def _work() -> bool:
