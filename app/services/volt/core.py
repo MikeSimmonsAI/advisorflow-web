@@ -375,6 +375,9 @@ def submit(db: Session, prog: VoltProgram, rep: VoltRep, app: VoltApplication, a
     app.status = "submitted"
     app.submitted_at = app.submitted_at or C.now()
     C.audit(db, prog.organization_id, actor, "application", app.id, "status", field="status", old=old, new="submitted")
+    if not rep.is_test:
+        from app.services.volt import sheets_outbox
+        sheets_outbox.enqueue(db, prog.organization_id, "recruiting", app.id)
     return app
 
 
