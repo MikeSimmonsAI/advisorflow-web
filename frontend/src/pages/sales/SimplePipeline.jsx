@@ -58,6 +58,11 @@ function PipelineBody() {
           <h2>My Pipeline</h2>
           <p>See where each customer stands. Click a card to work the deal.</p>
         </div>
+        <div className="sw-flex" style={{ flexWrap: 'wrap' }}>
+          {resp?.is_manager && <button className="sw-btn" onClick={() => nav('/sales/team-pipeline')}>Team Deals</button>}
+          <button className="sw-btn" onClick={() => nav('/sales/pipeline/stages')}>All Stages</button>
+          <button className="sw-btn" onClick={() => nav('/sales/onboarding')}>Sold / Onboarding</button>
+        </div>
         {/* THE one Add Lead. A new lead starts as a Prospect (New Leads) — the
             same rule as everywhere else; it is moved from Lead Details. */}
         <button type="button" className="ss-btn ss-white" onClick={() => setCreating(true)}>
@@ -114,6 +119,7 @@ function PipelineBody() {
                     <span className="ss-sp"><strong>{c.contact_name || c.company_name}</strong>
                       {c.contact_name ? ' — ' + c.company_name : ''}</span>
                     <button type="button" className="ss-btn ss-white ss-xs" onClick={() => nav('/sales/leads/' + c.id)}>Open</button>
+                    <button type="button" className="ss-btn ss-white ss-xs" onClick={() => nav('/sales/opportunities/' + c.id + '?section=quote')}>Build Quote</button>
                   </div>
                 ))}
               </div>

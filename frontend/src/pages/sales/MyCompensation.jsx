@@ -19,8 +19,9 @@
  * apart; payable carries the accent; on hold is amber. One vocabulary.
  */
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../api/client'
-import SalesShell from './SalesShell'
+import SalesShell, { useSales } from './SalesShell'
 
 function usd(n) {
   if (n === null || n === undefined) return '—'
@@ -67,6 +68,24 @@ function Sev({ severity, label }) {
   return <span className={'sw-sev sv-' + (severity || 'no_data')}>{label}</span>
 }
 
+function CompensationLinks() {
+  const { permissions } = useSales()
+  const [executive, setExecutive] = useState(false)
+  useEffect(() => {
+    let active = true
+    api.get('/deal-builder/access', { noOrgContext: true, skipRedirect: true })
+      .then(access => { if (active) setExecutive(access.executive === true) })
+      .catch(() => {})
+    return () => { active = false }
+  }, [])
+  return (
+    <nav className="sw-flex" aria-label="Compensation tools" style={{ flexWrap: 'wrap', marginBottom: 12 }}>
+      {permissions?.view_team_pipeline && <Link className="sw-btn" to="/sales/compensation">Team Compensation</Link>}
+      {executive && <Link className="sw-btn" to="/team-prices/executive-deal-builder">Executive Deal Builder</Link>}
+    </nav>
+  )
+}
+
 export default function MyCompensation() {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
@@ -84,6 +103,7 @@ export default function MyCompensation() {
   return (
     <SalesShell title="My Compensation"
                 subtitle="What you have earned, what is on hold, and what has been paid.">
+      <CompensationLinks />
       {err ? <div className="sw-err">{err}</div> : null}
       {!d && !err ? <div className="sw-muted">Loading…</div> : null}
 

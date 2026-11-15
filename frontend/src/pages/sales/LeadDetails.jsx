@@ -117,6 +117,11 @@ function LeadDetailsBody() {
                 : <DueStatus bucket={bucket} iso={opp.next_action_due_at} />}
             </div>
             <div className="ss-detail-actions">
+              {!isWon && opp.stage !== LOST_STAGE && (
+                <button type="button" className="ss-btn ss-white" onClick={() => nav('/sales/opportunities/' + opp.id + '?section=quote')}>
+                  Build Quote
+                </button>
+              )}
               {blocked ? <DncChip /> : hasPhone ? (
                 <>
                   <button type="button" className="ss-btn ss-green" onClick={() => contact.call(opp)}

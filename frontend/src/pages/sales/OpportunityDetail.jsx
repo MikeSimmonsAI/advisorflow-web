@@ -26,7 +26,7 @@
  * server: what is on screen is what the database holds.
  */
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import SalesShell from './SalesShell'
 import FindTeamTime from './FindTeamTime'
@@ -558,6 +558,8 @@ function Row({ label, value, primary }) {
 export default function OpportunityDetail() {
   const { oppId } = useParams()
   const nav = useNavigate()
+  const [params] = useSearchParams()
+  const startWithQuote = params.get('section') === 'quote'
   const [opp, setOpp] = useState(null)
   const [packages, setPackages] = useState([])
   const [team, setTeam] = useState([])
@@ -640,8 +642,8 @@ export default function OpportunityDetail() {
   useEffect(() => {
     if (!opp || seededOpen.current === opp.id) return
     seededOpen.current = opp.id
-    setOpen([SECTION_FOR_STAGE[opp.stage] || 'discovery'])
-  }, [opp])
+    setOpen([startWithQuote ? 'proposal' : (SECTION_FOR_STAGE[opp.stage] || 'discovery')])
+  }, [opp, startWithQuote])
 
   function toggle(id) {
     setOpen(o => (o.indexOf(id) === -1 ? o.concat([id]) : o.filter(x => x !== id)))
@@ -808,6 +810,8 @@ export default function OpportunityDetail() {
       actions={
         <>
           <button className="sw-btn" onClick={() => nav('/sales/pipeline')}>← Pipeline</button>
+          <button className="sw-btn" onClick={() => openSection('proposal')}>Build Quote</button>
+          <button className="sw-btn" onClick={() => setFinding(true)}>Book Demo</button>
           {/* RUN DEMO — the entry point that was missing. A salesperson should
               never have to copy a demo URL, open God Mode or hunt through the
               Suite to present the deal they are already looking at. The
@@ -887,7 +891,7 @@ export default function OpportunityDetail() {
           </StageSection>
 
           <StageSection
-            id="proposal" step={3} title="PROPOSAL" state={stateOf('proposal')}
+            id="proposal" step={3} title="QUOTE & PROPOSAL" state={stateOf('proposal')}
             open={isOpen('proposal')} onToggle={toggle}
             summary={proposalSummary}
             badge={prop ? <Chip tone={prop.status === 'accepted' ? 'green' : 'amber'}>
