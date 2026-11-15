@@ -77,6 +77,11 @@ BACK_OFFICE_PREFIXES = ("/sales",)
 # has nothing to add - and it was refusing the /access check Program Access
 # uses, which hid both cards from admins who also hold the Wholesale seat.
 DEAL_BUILDER_PREFIXES = ("/deal-builder/", "/sales-team/", "/launcher/")
+# The EvoSys Pro mobile team app's Chat and Time (Eagle Says prototype):
+# company-wide, not a workspace screen, so no workspace lock applies to it.
+# Every /team-app route authorizes itself from role, sales membership and
+# platform-scoped grants (app/services/team_app_access.py).
+TEAM_APP_PREFIX = "/team-app/"
 # VOLT Marketing (#535): staff operations and the applicant's own API.
 VOLT_OPS_PREFIX = "/volt/ops/"
 VOLT_DEV_PREFIX = "/volt/dev/"
@@ -362,6 +367,8 @@ def enforce(db: Session, user, request: Request) -> None:
     # general platform screen: a Wholesale-seat login that is also a member of
     # the brand sales team works it (wholesale@, owner decision 2026-10-21).
     if path.startswith(DEAL_BUILDER_PREFIXES):
+        return
+    if path.startswith(TEAM_APP_PREFIX):
         return
     if path.startswith(BACK_OFFICE_PREFIXES):
         from app.services import workspace_access

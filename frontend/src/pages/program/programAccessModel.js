@@ -274,3 +274,53 @@ export function previewCards(ctx) {
 export function isBookaBoostBrand(ctx) {
   return String(ctx?.brand?.theme || '').toLowerCase() === 'bookaboost'
 }
+
+/**
+ * The Deal Builder / My Team / Sales Onboarding cards, from the server's
+ * /auth/my-contexts answer (`deal_builder`, `sales_team`). Shared by the web
+ * launcher and the mobile app (/app/programs). Nothing here grants anything.
+ */
+// `from` is where the Deal Builder's Back action returns to: the web launcher
+// by default, the mobile app's Programs tab when the app builds the cards.
+export function salesToolCards(contexts, dealAccess, from = '/workspaces') {
+  const back = '?from=' + from
+  const out = []
+  if (dealAccess?.executive) {
+    out.push({
+      type: 'deal_builder', key: 'executive', variant: 'office', symbol: 'DB',
+      kind: 'SALES TOOLS', display: 'Executive Deal Builder',
+      summary: 'Build customer quotes and review the full commission breakdown.',
+      href: '/team-prices/executive-deal-builder' + back, actionLabel: 'Open Deal Builder',
+    })
+  }
+  if (dealAccess?.sales) {
+    out.push({
+      type: 'deal_builder', key: 'sales', variant: 'office', symbol: 'DB',
+      kind: 'SALES TOOLS',
+      // Same builder; the server decides which commission layers it shows.
+      display: dealAccess.team_view ? 'Team Deal Builder' : 'Salesperson Deal Builder',
+      summary: dealAccess.team_view
+        ? 'Build customer quotes and see your commission and your team\'s.'
+        : 'Build customer quotes and estimate your own commission.',
+      href: '/team-prices/sales-deal-builder' + back, actionLabel: 'Open Deal Builder',
+    })
+  }
+  const salesTeam = contexts && contexts.sales_team
+  if (salesTeam?.my_team) {
+    out.push({
+      type: 'deal_builder', key: 'my_team', variant: 'office', symbol: 'MT',
+      kind: 'SALES TEAM', display: 'My Team',
+      summary: 'Invite your people, follow their onboarding and manage the team.',
+      href: '/sales/my-team', actionLabel: 'Open My Team',
+    })
+  }
+  if (salesTeam?.onboarding) {
+    out.push({
+      type: 'deal_builder', key: 'onboarding', variant: 'office', symbol: 'ON',
+      kind: 'SALES TEAM', display: 'Sales Onboarding',
+      summary: 'Fill in your application and upload your documents to start selling.',
+      href: '/sales-onboarding', actionLabel: 'Continue onboarding',
+    })
+  }
+  return out
+}

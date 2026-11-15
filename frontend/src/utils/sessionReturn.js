@@ -8,8 +8,10 @@ export function sessionExpiredUrl(loc) {
   const path = (loc && loc.pathname) || '/'
   const here = path + ((loc && loc.search) || '')
   const mobile = path === '/m' || path.startsWith('/m/')
-  const login = mobile ? '/m/login' : '/login'
-  if (path === '/login' || path === '/m/login') return login
+  // The EvoSys Pro team app (/app) has its own sign-in screen.
+  const teamApp = path === '/app' || path.startsWith('/app/')
+  const login = teamApp ? '/app/login' : mobile ? '/m/login' : '/login'
+  if (path === '/login' || path === '/m/login' || path === '/app/login') return login
   return login + '?expired=1&next=' + encodeURIComponent(here)
 }
 
@@ -17,6 +19,6 @@ export function sessionExpiredUrl(loc) {
 export function safeNextPath(raw) {
   const p = String(raw || '')
   if (!p.startsWith('/') || p.startsWith('//') || p.startsWith('/\\')) return null
-  if (/^\/(m\/)?login(\b|\/|\?|$)/.test(p)) return null
+  if (/^\/((m|app)\/)?login(\b|\/|\?|$)/.test(p)) return null
   return p
 }

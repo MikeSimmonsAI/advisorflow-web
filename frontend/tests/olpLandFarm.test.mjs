@@ -7,6 +7,7 @@ import { olpWorkspaceCards, olpWorkspaceView, OLP_WORKSPACES } from '../src/bran
 const R = (p) => readFileSync(new URL(p, import.meta.url)).toString()
 const layout = R('../src/components/Layout.jsx')
 const app = R('../src/App.jsx')
+const destinations = R('../src/pages/program/programDestinations.js')
 const access = R('../src/pages/program/BookaBoostProgramAccess.jsx')
 
 const wholesale = { type: 'product', key: 'wholesale', program: 'wholesale', organization_id: 'org-1', display: 'Wholesale', path: '/wholesale/evosense' }
@@ -34,7 +35,8 @@ test('the view parameter only ever opens one of the two fixed screens', () => {
 test('the workspace hand-off uses the view only for the server-proven Wholesale product', () => {
   assert.match(app, /requestedProduct === 'wholesale' && path \? olpWorkspaceView\(/)
   assert.match(app, /destination=\{view \|\| path\}/)
-  assert.match(app, /\+ \(item\.view \? '&view=' \+ encodeURIComponent\(item\.view\) : ''\)/)
+  // The card-open rule moved to the shared module (web launcher + mobile app).
+  assert.match(destinations, /\+ \(item\.view \? '&view=' \+ encodeURIComponent\(item\.view\) : ''\)/)
 })
 
 test('menu items carry the same feature gate as the radar and show only in OLP mode', () => {
