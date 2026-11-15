@@ -94,15 +94,15 @@ def test_rest_of_setup_then_monthly(team):
     opp = _deal(team)
     _pay(team, opp, "pay-1", "900")
     assert _by_role(_pay(team, opp, "pay-2", "900")) == {"rep": 265.0, "asm": 110.0, "sevp": 165.0}
-    # Setup is done; the next $597 is monthly service at 15 / 10 / 15.
-    assert _by_role(_pay(team, opp, "pay-3", "597")) == {"rep": 89.55, "asm": 59.7, "sevp": 89.55}
+    # Setup is done; the next $597 is monthly service at 20 / 10 / 15.
+    assert _by_role(_pay(team, opp, "pay-3", "597")) == {"rep": 119.4, "asm": 59.7, "sevp": 89.55}
 
 
 def test_one_payment_spanning_setup_and_monthly(team):
     opp = _deal(team)
-    # 1,800 setup + 597 first month in one payment.
+    # 1,800 setup balance + 597 recurring balance in one collection.
     got = _by_role(_pay(team, opp, "pay-1", "2397"))
-    assert got == {"rep": 530 + 89.55, "asm": 220 + 59.7, "sevp": 330 + 89.55}
+    assert got == {"rep": 530 + 119.4, "asm": 220 + 59.7, "sevp": 330 + 89.55}
     split = team.db.query(SalesCollectionSplit).filter_by(opportunity_id=opp.id).one()
     assert float(split.setup_part) == 1800.0 and float(split.monthly_part) == 597.0
 
@@ -233,6 +233,6 @@ def test_projection_uses_the_same_rules(team):
     r = comp.compute(team.db, opp)
     got = {p["override_level"]: float(p["amount"]) for p in r["payouts"]}
     # Basic + $200 add-on, full quote, plus one month of $597 service.
-    assert got == {None: 530 + 89.55, 1: 220 + 59.7, 2: 330 + 89.55}
+    assert got == {None: 530 + 119.4, 1: 220 + 59.7, 2: 330 + 89.55}
     assert r["plan_name"].startswith("EvoSys launch rules")
     assert team.db.query(SalesDealCredit).filter_by(opportunity_id=opp.id).count() == 0  # writes nothing

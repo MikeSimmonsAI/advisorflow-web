@@ -18,18 +18,17 @@ WHO SEES WHAT (decided on the server, never in the browser)
   rep   A rep: his own commission only.
 A view never receives a number for a layer above it.
 
-THE LAUNCH RATES (version 2026-11-13)
+THE LAUNCH RATES (version 2026-11-15)
 -------------------------------------
 Packages - setup is a fixed dollar amount per role:
     Basic         rep $500    ASM $200   Sr EVP $300
     Growth        rep $1,000  ASM $300   Sr EVP $600
     Professional  rep $2,000  ASM $400   Sr EVP $900
-  Monthly platform fee: rep 15%, ASM 10%, Sr EVP 15%, EvoSys 60%.
+  Month 2 onward: rep 20%, ASM 10%, Sr EVP 15%, EvoSys 55%.
 Custom SaaS - setup AND every monthly payment while the contract is active:
   rep 20%, ASM 10%, Sr EVP 15%, EvoSys 55%.
-Add-ons follow the deal they are on: package-deal add-ons at 15/10/15/60,
-SaaS add-ons at 20/10/15/55, on both their setup and monthly amounts. There is
-no separate add-on rate.
+Package add-on setup uses 15/10/15/60. Package recurring service uses
+20/10/15/55. SaaS add-ons use 20/10/15/55 for setup and recurring.
 À la carte (no package): not decided by the owners yet - estimated with the
 package add-on rates and flagged as such.
 
@@ -46,7 +45,7 @@ CENT = Decimal("0.01")
 MAX_AMOUNT = Decimal("100000000")
 D = Decimal
 
-RULES_VERSION = "2026-11-13"
+RULES_VERSION = "2026-11-15"
 ROLES = ("rep", "asm", "sevp")
 ROLE_LABELS = {"rep": "Salesperson", "asm": "Area Sales Manager",
                "sevp": "Sr Executive Vice President", "evosys": "EvoSys"}
@@ -71,6 +70,7 @@ PLANS: Dict[str, Dict[str, Any]] = {
     "custom_saas":  {"name": "Custom SaaS",  "kind": "saas",     "setup": None},
 }
 PACKAGE_PCT = {"rep": D("15"), "asm": D("10"), "sevp": D("15")}   # EvoSys 60
+PACKAGE_MONTHLY_PCT = {"rep": D("20"), "asm": D("10"), "sevp": D("15")}
 SAAS_PCT    = {"rep": D("20"), "asm": D("10"), "sevp": D("15")}   # EvoSys 55
 
 # What the executive page receives (and the saved-plan seed writes). Plain
@@ -80,6 +80,7 @@ RULES: Dict[str, Any] = {
     "package_setup": {PLANS[k]["name"]: [float(PLANS[k]["payout"][r]) for r in ROLES]
                       for k in ("basic", "growth", "professional")},
     "package_pct": [float(PACKAGE_PCT[r]) for r in ROLES],
+    "package_monthly_pct": [float(PACKAGE_MONTHLY_PCT[r]) for r in ROLES],
     "saas_pct": [float(SAAS_PCT[r]) for r in ROLES],
 }
 
@@ -143,6 +144,8 @@ def split(deal: Dict[str, Any], filled: Optional[Dict[str, bool]] = None) -> Dic
     setup_total = plan_setup + addon_setup
     pct = SAAS_PCT if kind == "saas" else PACKAGE_PCT
 
+    monthly_pct = PACKAGE_MONTHLY_PCT if kind == "package" else pct
+
     # How much of each setup line counts.
     alloc = deal.get("allocation") if basis == "paid" else None
     if basis == "quote":
@@ -170,12 +173,12 @@ def split(deal: Dict[str, Any], filled: Optional[Dict[str, bool]] = None) -> Dic
         else:
             pkg_part = plan_setup * pct[role] / 100 * f_pkg
         add_part = addon_setup * pct[role] / 100 * f_add
-        month_part = counted_monthly * pct[role] / 100
+        month_part = counted_monthly * monthly_pct[role] / 100
         entry = {
             "role": role, "label": ROLE_LABELS[role],
             "one_time_package": pkg_part, "one_time_addons": add_part,
             "one_time": pkg_part + add_part, "monthly": month_part,
-            "monthly_rate": float(pct[role]),
+            "monthly_rate": float(monthly_pct[role]),
             "setup_rule": (("Fixed %s setup payout" % plan["name"]) if kind == "package"
                            else ("%s%% of setup" % pct[role]) if kind == "saas"
                            else "No package setup"),
