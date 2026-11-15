@@ -87,6 +87,14 @@ than a workspace screen and authorizes itself.
 
 ## Run it locally (preview)
 
+**Windows: double-click `START_EAGLE_SAYS_PREVIEW.bat`** (repo root). It gets this
+branch into its own folder (`C:\Dev\lanes\eagle-says-mobile`) without touching your
+current checkout, installs what is missing, seeds the made-up people, starts the API
+(port 8010) and web app (port 5174), and opens `http://localhost:5174/app`.
+Stop it with `START_EAGLE_SAYS_PREVIEW.bat stop`.
+
+Manual steps (macOS/Linux shell):
+
 No per-branch preview environment exists for this repo (the only staging blueprint
 is tied to the SCI lane's `sci-program` branch). Local run with synthetic people:
 
@@ -104,7 +112,7 @@ VITE_API_BASE_URL=http://localhost:8000 npx vite --port 5173 --host localhost
 # 3. Open http://localhost:5173/app  (use "localhost", not 127.0.0.1 — CORS)
 ```
 
-Windows: use `set NAME=value` instead of `export`. Synthetic logins (password
+Synthetic logins (password
 `Preview123!`): `platform@`, `partner@`, `chatmgr@`, `timemgr@`, `rep1@`, `rep2@`,
 `outsider@` — all `@preview.test`.
 
