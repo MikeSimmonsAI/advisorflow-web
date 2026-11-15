@@ -54,6 +54,12 @@ class InviteIn(BaseModel):
     base_url: Optional[str] = None
 
 
+@router.get("/members/{user_id}/profile")
+def member_profile(user_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """A salesperson's deals, activity and demo work, inside the caller's team scope."""
+    return team.profile(db, user, user_id)
+
+
 @router.post("/invite")
 def invite(body: InviteIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return team.invite(db, user, email=body.email, full_name=body.full_name, seat_key=body.seat,

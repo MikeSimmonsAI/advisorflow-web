@@ -185,8 +185,12 @@ def actor_rights(db: Session, actor: User) -> Dict[str, Any]:
     s = seat(db, actor, brand) if brand else None
     admin = s in (SEAT_GOD, SEAT_OWNER)
     leader = s == SEAT_SEVP and brand is not None and onboarding_cleared(db, actor, brand)
+    # An approved Area Sales Manager sees his own people (read only): their
+    # deals, activity and demo work. He does not invite, suspend or move.
+    viewer = s == SEAT_ASM and brand is not None and onboarding_cleared(db, actor, brand)
     return {"seat": s, "seat_label": SEAT_LABELS.get(s, ""),
-            "can_view_team": admin or leader,
+            "can_view_team": admin or leader or viewer,
+            "can_manage": admin or leader,
             "can_invite": admin or leader,
             "invite_seats": list(INVITE_SEATS) if admin else ([SEAT_ASM, SEAT_REP] if leader else []),
             "can_approve": admin, "can_open_files": admin,
@@ -230,7 +234,7 @@ def roster(db: Session, actor: User) -> Dict[str, Any]:
     brand = _require_brand(db)
     rights = actor_rights(db, actor)
     if not rights["can_view_team"]:
-        raise HTTPException(status_code=403, detail="My Team is for the owners and the Sr Executive Vice President.")
+        raise HTTPException(status_code=403, detail="My Team is for the owners and approved sales leaders.")
     members = _all_members(db, brand.id)
     scope = None if rights["is_admin"] else (team_of(db, brand.id, actor.id) | {actor.id})
     departures = {d.user_id: d for d in db.query(SalesDeparture)
@@ -430,3 +434,85 @@ def departed_at(db: Session, brand_id: str, user_id: Optional[str]) -> Optional[
     d = (db.query(SalesDeparture).filter(SalesDeparture.brand_sales_org_id == brand_id,
                                          SalesDeparture.user_id == user_id).first())
     return d.departed_at if d else None
+
+
+def profile(db: Session, actor: User, target_id: str) -> Dict[str, Any]:
+    """One salesperson's page in My Team: who they are, their onboarding
+    status, their open deals, recent activity and demo work - the same team
+    records and the same scope as the roster. Onboarding documents are never
+    listed here (owners open them from the checklist)."""
+    from datetime import datetime as _now_dt
+    from app.models.sales_models import (DEMO_PENDING_REVIEW, STAGE_LABELS, Opportunity,
+                                         OpportunityEvent, demo_is_outstanding)
+    from app.services import sales_onboarding as onb_svc
+    brand = _require_brand(db)
+    rights = actor_rights(db, actor)
+    if not rights["can_view_team"]:
+        raise HTTPException(status_code=403, detail="My Team is for the owners and approved sales leaders.")
+    scope = None if rights["is_admin"] else (team_of(db, brand.id, actor.id) | {actor.id})
+    if scope is not None and target_id not in scope:
+        raise HTTPException(status_code=403, detail="That person is not on your team.")
+    m = (db.query(Membership)
+         .filter(Membership.user_id == target_id, Membership.scope_type == SCOPE_BRAND_SALES_ORG,
+                 Membership.scope_id == brand.id).first())
+    u = db.query(User).filter(User.id == target_id).first()
+    if m is None or u is None:
+        raise HTTPException(status_code=404, detail="That person is not on the sales team.")
+    st = _seat_of_member(db, u, m, brand.id)
+    onb = onb_svc.record(db, u.id, brand.id)
+    chk = onb_svc.checklist(db, onb, with_file_names=False) if onb else None
+    manager = db.query(User).filter(User.id == m.reports_to_user_id).first() if m.reports_to_user_id else None
+    now = _now_dt.utcnow()
+
+    from app.models.sales_quote_models import SalesQuoteDraft
+    opps = (db.query(Opportunity).filter(Opportunity.brand_sales_org_id == brand.id,
+                                         Opportunity.owner_user_id == u.id,
+                                         Opportunity.status == "open")
+            .order_by(Opportunity.next_action_due_at.is_(None), Opportunity.next_action_due_at,
+                      Opportunity.updated_at.desc()).limit(100).all())
+    quotes = {q.opportunity_id: q.revision for q in db.query(SalesQuoteDraft)
+              .filter(SalesQuoteDraft.opportunity_id.in_([o.id for o in opps] or ["-"])).all()}
+    deals = [{"opportunity_id": o.id, "company_name": o.company_name,
+              "stage": STAGE_LABELS.get(o.stage, o.stage),
+              "next_action": o.next_action,
+              "next_action_due_at": o.next_action_due_at.isoformat() + "Z" if o.next_action_due_at else None,
+              "follow_up_due": bool(o.next_action_due_at and o.next_action_due_at <= now),
+              "demo_status": o.demo_status, "quote_revision": quotes.get(o.id),
+              "href": "/sales/opportunities/%s" % o.id,
+              "quote_href": "/sales/opportunities/%s/quote" % o.id} for o in opps]
+
+    events = (db.query(OpportunityEvent, Opportunity)
+              .join(Opportunity, Opportunity.id == OpportunityEvent.opportunity_id)
+              .filter(Opportunity.brand_sales_org_id == brand.id,
+                      OpportunityEvent.actor_user_id == u.id)
+              .order_by(OpportunityEvent.occurred_at.desc()).limit(25).all())
+    activity = [{"summary": e.summary, "company_name": o.company_name,
+                 "at": e.occurred_at.isoformat() + "Z" if e.occurred_at else None,
+                 "href": "/sales/opportunities/%s" % o.id} for e, o in events]
+
+    built = (db.query(Opportunity).filter(Opportunity.brand_sales_org_id == brand.id,
+                                          Opportunity.demo_owner_user_id == u.id,
+                                          Opportunity.status == "open").all())
+    demo_work = {
+        "building": [{"company_name": o.company_name, "status": o.demo_status,
+                      "target_at": o.demo_due_at.isoformat() + "Z" if o.demo_due_at else None,
+                      "overdue": bool(o.demo_due_at and o.demo_due_at < now and demo_is_outstanding(o))}
+                     for o in built if demo_is_outstanding(o)],
+        "requested": [{"company_name": o.company_name, "status": o.demo_status,
+                       "waiting_for_decision": o.demo_status == DEMO_PENDING_REVIEW}
+                      for o in opps if o.demo_status not in (None, "not_requested")],
+    }
+    return {"person": {"user_id": u.id, "name": u.full_name or u.email, "email": u.email,
+                       "seat": st, "seat_label": SEAT_LABELS[st],
+                       "manager": (manager.full_name or manager.email) if manager else None,
+                       "active": bool(m.is_active),
+                       "departed_at": (departed_at(db, brand.id, u.id).isoformat()
+                                       if departed_at(db, brand.id, u.id) else None),
+                       "onboarding_status": onb.status if onb else None,
+                       "onboarding_missing": (chk or {}).get("missing", []) if chk else []},
+            "deals": deals,
+            "summary": {"open_deals": len(deals),
+                        "follow_ups_due": sum(1 for d in deals if d["follow_up_due"]),
+                        "demos_building": len(demo_work["building"])},
+            "activity": activity, "demo_work": demo_work,
+            "can_build_quote": rights["is_admin"] or rights["can_view_team"]}

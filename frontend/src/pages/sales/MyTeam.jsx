@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, fetchObjectUrl } from '../../api/client'
+import TeamMemberProfile from './TeamMemberProfile'
 
 /**
  * MY TEAM — /sales/my-team (Back Office)
@@ -40,6 +41,7 @@ export default function MyTeam() {
   const [busy, setBusy] = useState('')
   const [form, setForm] = useState({ full_name: '', email: '', seat: '', manager_id: '' })
   const [open, setOpen] = useState(null)
+  const [profile, setProfile] = useState(null)
 
   const load = useCallback(async () => {
     try { setD(await api.get('/sales-team/roster', { noOrgContext: true })); setErr('') } catch (e) { setErr(errText(e)) }
@@ -87,11 +89,12 @@ export default function MyTeam() {
               <div style={{ fontSize: 13, color: '#36505f' }}>{p.seat_label}{p.is_self ? ' (you)' : ''}<Status p={p} /></div>
             </div>
             <div>
+              {!['owner','god'].includes(p.seat) && <button style={btn} aria-expanded={profile === p.user_id} onClick={() => setProfile(profile === p.user_id ? null : p.user_id)}>{profile === p.user_id ? 'Hide profile' : 'Profile'}</button>}
               {p.onboarding && <button style={btn} onClick={() => setOpen(open === p.user_id ? null : p.user_id)}>{open === p.user_id ? 'Hide checklist' : 'Checklist'}</button>}
-              {!p.is_self && !['owner','god'].includes(p.seat) && !p.departed_at && (p.active
+              {r.can_manage && !p.is_self && !['owner','god'].includes(p.seat) && !p.departed_at && (p.active
                 ? <button style={btn} disabled={!!busy} onClick={() => act('s' + p.user_id, () => api.post('/sales-team/members/' + p.user_id + '/suspend', {}), p.name + ' is suspended.')}>Suspend</button>
                 : <button style={btn} disabled={!!busy} onClick={() => act('r' + p.user_id, () => api.post('/sales-team/members/' + p.user_id + '/reactivate', {}), p.name + ' is active again.')}>Reactivate</button>)}
-              {p.seat === 'rep' && !p.departed_at && (
+              {r.can_manage && p.seat === 'rep' && !p.departed_at && (
                 <select style={{ ...btn, padding: '5px 6px' }} value="" onChange={e => e.target.value && act('m' + p.user_id, () => api.post('/sales-team/members/' + p.user_id + '/move', { manager_id: e.target.value }), p.name + ' moved. Deals already sold stay with their original manager.')}>
                   <option value="">Move to…</option>
                   {managers.filter(m => m.user_id !== p.manager_id).map(m => <option key={m.user_id} value={m.user_id}>{m.name}</option>)}
@@ -100,6 +103,7 @@ export default function MyTeam() {
                 <button style={btn} onClick={() => { if (window.confirm(p.name + ' left the company? From today they are paid nothing more; their share of later collections is tracked as unclaimed.')) act('d' + p.user_id, () => api.post('/sales-team/members/' + p.user_id + '/depart', {}), p.name + ' is recorded as left the company.') }}>Left the company</button>)}
             </div>
           </div>
+          {profile === p.user_id && <TeamMemberProfile userId={p.user_id} />}
           {open === p.user_id && p.onboarding && (
             <div style={{ marginTop: 10, fontSize: 13 }}>
               {p.onboarding.items.map(i => (
