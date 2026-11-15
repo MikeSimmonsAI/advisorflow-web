@@ -2065,6 +2065,21 @@ async def _volt_dev_relay_loop():
                     await _off_loop(_lead_retries)
                 except Exception as exc:                       # noqa: BLE001
                     _logger.error("consumer leads retry pass error: %s", exc, exc_info=True)
+                def _sheets_export_pass():
+                    # Runs only on the claimed VOLT scheduler; no outbound
+                    # Sheets request unless owner has explicitly enabled sync.
+                    from app.services.volt import sheets_outbox as _sheets
+                    db = SessionLocal()
+                    try:
+                        result = _sheets.sync_pass(db)
+                        db.commit()
+                        return result
+                    finally:
+                        db.close()
+                try:
+                    await _off_loop(_sheets_export_pass)
+                except Exception as exc:                       # noqa: BLE001
+                    _logger.error("VOLT Google Sheets export pass error: %s", type(exc).__name__)
                 _checkin = (_time.monotonic() - _last_logged) >= 3600
                 if _checkin or not _vdd._SELFTEST["done"] or await _off_loop(_busy):
                     _last_logged = _time.monotonic()
