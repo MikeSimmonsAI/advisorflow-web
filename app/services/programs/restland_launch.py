@@ -61,7 +61,8 @@ def _ensure_tables(db: Session) -> None:
 
 
 def launch(db: Session, org: Organization, run_key: str, *, booking_user_id: Optional[str],
-           calendar_user_id: Optional[str], start_local: str, now: Optional[datetime] = None) -> Dict:
+           calendar_user_id: Optional[str], start_local: str, now: Optional[datetime] = None,
+           tiers=("pre_need",)) -> Dict:
     from app.services import sms_programs
     from app.services.programs import campaigns as C
     from app.services.programs import journey, outreach_slots, rotation, send_approval
@@ -135,11 +136,12 @@ def launch(db: Session, org: Organization, run_key: str, *, booking_user_id: Opt
     db.flush()
 
     # 3. Audience from production, staged, records on the campaign, approved.
-    p = WR.plan(db, org)
+    p = WR.plan(db, org, tiers=tuple(tiers))
+    summary["audience_tiers"] = list(tiers)
     segs = Counter(m["segment"] for m in p["members"].values())
     ready_ids = [lid for lid, m in p["members"].items() if m["segment"] == "ready"]
-    summary["audience"] = {"source": "pre-need families in this workspace with a usable phone "
-                                     "(workspace_reset.plan)", "considered": len(p["members"]),
+    summary["audience"] = {"source": "families of tiers %s in this workspace with a usable phone "
+                                     "(workspace_reset.plan)" % ", ".join(tiers), "considered": len(p["members"]),
                            "segments": dict(segs), "ready": len(ready_ids)}
     leads = {l.id: l for l in db.query(Lead).filter(Lead.organization_id == org.id,
                                                      Lead.id.in_(ready_ids or ["-"])).all()}
@@ -312,14 +314,12 @@ def pause(db: Session, org: Organization, run_key: str, *, now: Optional[datetim
 # "Review Priority"; the import kept both on the program record but did not
 # set the family's tier, so the File Review audience (pre-need families only,
 # workspace_reset.plan) found nobody. classify() copies the file's own answer:
-#   "Pre Need" -> tier pre_need, "At Need" -> tier at_need (never texted by
-#   File Review); a family the file marks "3 · Confirm location and fit" is
-#   held for a person to confirm (its program record on hold, with the reason).
+#   "Pre Need" -> tier pre_need, "At Need" -> tier at_need. Owner, Nov 16
+#   1:04 PM: every family in this file gets the file review by text and email,
+#   so the launch takes both tiers (WORKSPACE_LAUNCH_TIERS) and nobody is held.
 # Only families with no tier yet are touched; every change is recorded with
 # its before value (WorkspaceResetItem). Restland only; sends nothing.
 NEED_TIER = {"pre need": "pre_need", "at need": "at_need"}
-CONFIRM_PRIORITY = "3"
-CONFIRM_HOLD = "Confirm location and fit before outreach (file Review Priority 3)"
 
 
 def classify(db: Session, org: Organization, run_key: str) -> Dict:
@@ -335,7 +335,7 @@ def classify(db: Session, org: Organization, run_key: str) -> Dict:
     run = run or WorkspaceResetRun(organization_id=org.id, run_key=run_key, mode="classify")
     db.add(run)
     db.flush()
-    tiers, held, unknown = Counter(), 0, Counter()
+    tiers, unknown = Counter(), Counter()
     leads = {l.id: l for l in db.query(Lead).filter(Lead.organization_id == org.id).all()}
     recs = (db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == org.id,
                                                   ProgramSourceRecord.lead_id.isnot(None)).all())
@@ -358,17 +358,7 @@ def classify(db: Session, org: Organization, run_key: str) -> Dict:
                                           after_json=json.dumps({"tier": tier}), reason="File Need Type: %s" % need))
                 lead.tier = tier
                 tiers[tier] += 1
-        prio = str(raw.get("Review Priority") or "").strip()
-        if (lead.tier == "pre_need" and prio.startswith(CONFIRM_PRIORITY) and not r.on_hold
-                and r.approved_to_send_at is None):
-            db.add(WorkspaceResetItem(run_id=run.id, organization_id=org.id, entity="program_source_record",
-                                      entity_id=r.id, action="hold",
-                                      before_json=json.dumps({"on_hold": r.on_hold, "hold_reason": r.hold_reason}),
-                                      after_json=json.dumps({"on_hold": True, "hold_reason": CONFIRM_HOLD}),
-                                      reason=CONFIRM_HOLD))
-            r.on_hold, r.hold_reason = True, CONFIRM_HOLD
-            held += 1
-    summary = {"tier_set": dict(tiers), "held_confirm_location": held, "need_type_not_recognized": dict(unknown),
+    summary = {"tier_set": dict(tiers), "need_type_not_recognized": dict(unknown),
                "tiers_now": dict(Counter(l.tier or "(none)" for l in leads.values()))}
     run.status, run.finished_at, run.summary_json = "applied", datetime.utcnow(), json.dumps(summary)
     db.commit()

@@ -314,7 +314,9 @@ def main(argv=None) -> int:
                         res = _rl.launch(_db, org, key,
                                          booking_user_id=os.environ.get("WORKSPACE_BOOKING_USER_ID", "").strip() or None,
                                          calendar_user_id=os.environ.get("WORKSPACE_CALENDAR_USER_ID", "").strip() or None,
-                                         start_local=os.environ.get("WORKSPACE_LAUNCH_AT", "").strip() or "2026-11-16T08:30")
+                                         start_local=os.environ.get("WORKSPACE_LAUNCH_AT", "").strip() or "2026-11-16T08:30",
+                                         tiers=tuple(t.strip() for t in (os.environ.get("WORKSPACE_LAUNCH_TIERS", "")
+                                                     or "pre_need").split(",") if t.strip()))
                     else:
                         res = {"summary": {"readback": _rl.readback(_db, org)}}
                     _txt = json.dumps(res, sort_keys=True, default=str)

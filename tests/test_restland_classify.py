@@ -1,6 +1,7 @@
 """Nov 16 launch of the Historical Family Review: the file's own Need Type
-becomes each family's tier, its "confirm location" rows are held, and the
-File Review audience then holds exactly the pre-need families. Synthetic data."""
+becomes each family's tier, nobody is held, and the launch audience takes
+every family of the file (pre-need and at-need) - owner, Nov 16 1:04 PM - while
+the default File Review audience stays pre-need only. Synthetic data."""
 import json
 import uuid
 
@@ -24,7 +25,7 @@ def _family(db, org, need, prio, phone):
     return lead, rec
 
 
-def test_need_type_becomes_the_tier_and_confirm_rows_are_held(db_session, sample_org, monkeypatch):
+def test_need_type_becomes_the_tier_and_the_launch_takes_the_whole_file(db_session, sample_org, monkeypatch):
     monkeypatch.delenv("SMS_PROGRAM_ORG_SCI", raising=False)
     db = db_session
     pre1, _ = _family(db, sample_org, "Pre Need", "1 · Texas Pre Need, two channels", "2145550101")
@@ -39,23 +40,25 @@ def test_need_type_becomes_the_tier_and_confirm_rows_are_held(db_session, sample
     out = RL.classify(db, sample_org, "classify-1")
     s = out["summary"]
     assert s["tier_set"] == {"pre_need": 3, "at_need": 1}
-    assert s["held_confirm_location"] == 1 and s["need_type_not_recognized"] == {"(blank)": 1}
+    assert s["need_type_not_recognized"] == {"(blank)": 1}
     for l in (pre1, pre2, conf, at, odd, keep):
         db.refresh(l)
     assert (pre1.tier, pre2.tier, conf.tier, at.tier, odd.tier, keep.tier) == \
         ("pre_need", "pre_need", "pre_need", "at_need", None, "imminent")      # a set tier is never changed
     db.refresh(conf_rec)
     db.refresh(at_rec)
-    assert conf_rec.on_hold is True and "Confirm location" in conf_rec.hold_reason
-    assert at_rec.on_hold is False                                             # at-need: not texted by tier, not held
+    assert conf_rec.on_hold is False and at_rec.on_hold is False              # nobody held
     items = db.query(WorkspaceResetItem).filter_by(run_id=out["run_id"]).all()
-    assert len(items) == 5 and all(i.before_json for i in items)              # every change can be undone
+    assert len(items) == 4 and all(i.before_json for i in items)              # every change can be undone
     assert RL.classify(db, sample_org, "classify-1")["already"] is True
-    # The File Review audience: only the two pre-need families with no hold.
     from app.services.programs import workspace_reset as WR
+    # Default File Review audience: pre-need only (unchanged).
     ready = {lid for lid, m in WR.plan(db, sample_org)["members"].items() if m["segment"] == "ready"}
-    assert pre1.id in ready and pre2.id in ready
-    assert conf.id not in ready and at.id not in ready and odd.id not in ready
+    assert {pre1.id, pre2.id, conf.id} <= ready and at.id not in ready and odd.id not in ready
+    # This launch (WORKSPACE_LAUNCH_TIERS=pre_need,at_need): the whole file.
+    ready = {lid for lid, m in WR.plan(db, sample_org, tiers=("pre_need", "at_need"))["members"].items()
+             if m["segment"] == "ready"}
+    assert {pre1.id, pre2.id, conf.id, at.id} <= ready and odd.id not in ready and keep.id not in ready
 
 
 def test_classify_refuses_sci(db_session, monkeypatch):

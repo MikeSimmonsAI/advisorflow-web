@@ -178,7 +178,9 @@ def _evidence(db: Session, org_id: str) -> Dict:
 
 # ── the plan (read-only) ─────────────────────────────────────────────────────
 
-def plan(db: Session, org: Organization) -> Dict:
+def plan(db: Session, org: Organization, tiers=("pre_need",)) -> Dict:
+    """`tiers`: the family tiers the File Review audience takes (default pre-need
+    only; the Nov 16 Historical Family Review launch takes its whole file)."""
     ev = _evidence(db, org.id)
     leads = ev["leads"]
     by_id = {l.id: l for l in leads}
@@ -234,10 +236,10 @@ def plan(db: Session, org: Organization) -> Dict:
                               "email_issue": ei, "name_issue": ni, "canonical_lead_id": canon,
                               "shares_phone_with": shares, "notes": notes}
 
-    # ── campaign audience: pre-need families only ───────────────────────────
+    # ── campaign audience: the chosen tiers (pre-need families by default) ──
     members: Dict[str, Dict] = {}
     pool = [l for l in leads if not l.is_test and not l.is_duplicate and l.status == "new"
-            and (l.tier or "") == "pre_need" and e164(l.phone)]
+            and (l.tier or "") in tiers and e164(l.phone)]
     for l in pool:
         reasons, seg = [], "ready"
         p = e164(l.phone)
