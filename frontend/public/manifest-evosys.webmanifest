@@ -1,7 +1,7 @@
 {
   "name": "EvoSys Pro",
   "short_name": "EvoSys",
-  "description": "Programs, Team Chat and Time for the EvoSys Pro team.",
+  "description": "Programs, Team Chat and Activity for the EvoSys Pro team.",
   "id": "/app",
   "start_url": "/app/programs",
   "scope": "/",
