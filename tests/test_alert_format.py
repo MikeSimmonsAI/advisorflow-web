@@ -1,3 +1,4 @@
+import pytest
 """Oct 14 alert format: "EvoSys Pro SCI POC" header, how they replied, what
 they said, and both phone and email (the way they replied first)."""
 import json
@@ -6,6 +7,13 @@ from unittest.mock import patch
 from app.models.program_models import ProgramResponse
 from app.services.programs import responses
 from tests.test_outreach_program import _lead_for, program  # noqa: F401 (fixture)
+
+
+@pytest.fixture(autouse=True)
+def _sci_workspace_identity(monkeypatch, sample_org):
+    """These are SCI's alerts, run in the shared test organization; say so,
+    as production does (SMS_PROGRAM_ORG_SCI), so they keep the "SCI" label."""
+    monkeypatch.setenv("SMS_PROGRAM_ORG_SCI", sample_org.id)
 
 
 def test_email_reply_alert_has_header_both_contacts_email_first(program, sample_advisor, client):
@@ -97,7 +105,7 @@ def test_owner_test_sms_sends_exact_text_to_owner_only(program, client, monkeypa
     tw = MagicMock()
     tw.messages.create.return_value = SimpleNamespace(sid="SMx1", status="queued")
     monkeypatch.setattr(sms_programs, "sci_sender", lambda: (tw, "+18449172171"))
-    msg = "EvoSys Pro SCI POC: A new family response needs attention. Please check your SCI Responses inbox."
+    msg = "EvoSys Pro SCI POC: A new family response needs attention. Please check your Responses inbox."
     r = client.post("/program/alerts/test-sms", headers=_h(db, program["admin"]), json={"message": msg}).json()
     assert r["accepted"] and r["sid"] == "SMx1"
     kw = tw.messages.create.call_args.kwargs

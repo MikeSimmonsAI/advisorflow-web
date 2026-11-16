@@ -15,6 +15,13 @@ from tests.test_alert_dedupe import OWNER_PHONE, _reply, wired  # noqa: F401
 from tests.test_outreach_program import _lead_for, program  # noqa: F401
 
 
+@pytest.fixture(autouse=True)
+def _sci_workspace_identity(monkeypatch, sample_org):
+    """These are SCI's alerts, run in the shared test organization; say so,
+    as production does (SMS_PROGRAM_ORG_SCI), so they keep the "SCI" label."""
+    monkeypatch.setenv("SMS_PROGRAM_ORG_SCI", sample_org.id)
+
+
 def _owner_texts(sent):
     return [b for c, t, b in sent if c == "sms" and t == OWNER_PHONE]
 

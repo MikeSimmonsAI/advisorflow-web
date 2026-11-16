@@ -1354,7 +1354,7 @@ def _handoff(db, prog, lead, conv, reason, *, notify: bool):
             sms = L.sms_line("home_visit" if home else "handoff", who,
                              detail=("asked for a visit at home - call to set a time" if home
                                      else "needs a person - %s" % (reason or "")),
-                             link=L.family_link(lead.id))
+                             link=L.family_link(lead.id), program=L.program_label(db, prog))
             subject = "%s - HUMAN HANDOFF: %s needs a person" % (R.alert_title(prog), who)
             body = ('<p style="background:#c62828;color:#ffffff;font-size:16px;font-weight:800;padding:10px 14px;'
                     'border-radius:8px">HUMAN HANDOFF - the AI sent this family nothing.</p>'

@@ -88,7 +88,7 @@ def alert_all(db: Session, now: Optional[datetime] = None) -> int:
             mins = int((now - fam["at"]).total_seconds() // 60)
             sms = L.sms_line("sla_breach", fam["name"],
                              detail="wants to come in, no time sent yet (%d min). Send times" % mins,
-                             link=L.family_link(fam["lead_id"]))
+                             link=L.family_link(fam["lead_id"]), program=L.program_label(db, prog))
             subject = "%s - %s wants to come in, no time sent yet" % (R.alert_title(prog), fam["name"])
             body = ("<p><b>%s</b> said: &ldquo;%s&rdquo;</p><p>That was %d minutes ago. No booking, and no "
                     "times or booking link have gone to them since. Open the family and tap "

@@ -82,8 +82,8 @@ def _alert(db: Session, prog, day, out: Dict, failed) -> None:
         rows.append("<li><b>%s</b> - family: &ldquo;%s&rdquo;<br>AI: &ldquo;%s&rdquo;<br>Wrong: %s</li>" % (
             _html.escape(sc["id"]), _html.escape((sc["turns"][0]["text"] or "")[:200]),
             _html.escape((t.get("reply") or "(no reply)")[:300]), _html.escape(probs[:300])))
-    sms = ("SCI Practice Check | %d of %d practice conversations went wrong overnight. Nothing was sent "
-           "to any family. Details are in your email." % (out["failed"], out["ran"]))
+    sms = ("%s Practice Check | %d of %d practice conversations went wrong overnight. Nothing was sent "
+           "to any family. Details are in your email." % (L.program_label(db, prog), out["failed"], out["ran"]))
     try:
         L.page(db, prog, lead_id=None, key="practice:%s" % day.isoformat(), kind="handoff", sms_text=sms,
                subject="%s - practice check: %d of %d went wrong" % (R.alert_title(prog), out["failed"], out["ran"]),
