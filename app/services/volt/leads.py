@@ -29,14 +29,14 @@ from sqlalchemy.orm import Session
 from app.models.models import Organization, User
 from app.models.volt_leads_models import VoltLead, VoltLeadEvent, VoltLeadGrant, VoltLeadSettings
 from app.services.volt import common as C
+from app.services.volt import leads_compliance as LC
 
 # ── content that needs compliance review before real traffic ────────────────
-CONSENT_VERSION = "2026-11-draft-1"
-CONSENT_TEXT = (
-    "I agree that a licensed agent working with VOLT may contact me by phone, text message or email "
-    "about health coverage options, including with an automated dialer. Consent is not required to "
-    "get coverage or help. Message and data rates may apply. I can withdraw consent at any time."
-)
+# #619: the consent now names the collecting company (owner-entered) and is two
+# boxes - the required request consent and a separate, optional automated
+# calls/texts consent. CONSENT_TEXT is the wording before a company is entered.
+CONSENT_VERSION = LC.CONSENT_VERSION
+CONSENT_TEXT = LC.consent_texts(None)[0]
 ELIGIBILITY_CAVEAT = (
     "Some people qualify for plans with a $0 monthly premium after financial assistance. That does not "
     "mean all healthcare is free, and not everyone qualifies. Eligibility depends on location, household "
@@ -44,10 +44,11 @@ ELIGIBILITY_CAVEAT = (
 )
 # Shown on the staff screen: everything the owner must clear before turning intake on.
 REVIEW_CHECKLIST = [
-    "Privacy notice and consent wording (CONSENT_TEXT, CONSENT_VERSION) approved by compliance",
-    "$0-premium / savings eligibility claims approved by compliance",
-    "Agent routing and the licensed-agent list confirmed",
-    "TCPA / state telemarketing rules checked for the call and text consent",
+    "The collecting company's legal name, mailing address and privacy contact are entered and correct",
+    "The privacy notice and the two consent boxes name that company and match how leads are really handled",
+    "$0-premium / savings wording does not promise coverage, approval, prices or savings",
+    "At least one licensed agent's NPN and states verified; leads stay unassigned until a licensed agent exists",
+    "Automated calls/texts only for people who ticked the optional box; no automatic outreach is switched on",
 ]
 
 # Consumer page copy (also needs the same compliance review as the consent).
@@ -149,9 +150,16 @@ def settings_row(db: Session, org_id: str) -> VoltLeadSettings:
 
 def public_config(db: Session, org_id: str) -> Dict[str, Any]:
     row = db.get(VoltLeadSettings, org_id)
-    return {"enabled": bool(row and row.intake_enabled), "consent_version": CONSENT_VERSION,
-            "consent_text": CONSENT_TEXT, "eligibility_caveat": ELIGIBILITY_CAVEAT, "page": PAGE,
-            "states": list(STATES)}
+    c = LC.collector(row)
+    contact, automated = LC.consent_texts(c)
+    page = dict(PAGE)
+    if c:
+        page["brand_note"] = "%s is a working name for a health coverage help service offered by %s." % (PAGE["brand"], c["name"])
+    return {"enabled": bool(row and row.intake_enabled and c), "consent_version": CONSENT_VERSION,
+            "consent_text": contact, "automated_consent_text": automated,
+            "collector": {"name": c["name"], "email": c["email"], "phone": c["phone"]} if c else None,
+            "privacy": LC.privacy_notice(c, PAGE["brand"]), "privacy_path": LC.PRIVACY_PATH,
+            "eligibility_caveat": ELIGIBILITY_CAVEAT, "page": page, "states": list(STATES)}
 
 
 def _utc(dt) -> Optional[str]:
@@ -187,6 +195,10 @@ def set_intake(db: Session, org_id: str, actor: User, body: Dict[str, Any]) -> D
     row = settings_row(db, org_id)
     enable = bool(body.get("intake_enabled"))
     note = str(body.get("review_note") or "").strip()[:1000]
+    if enable:
+        missing = [r["label"] for r in LC.readiness(db, row) if not r["ok"]]
+        if missing:
+            raise HTTPException(status_code=422, detail="Intake can't be turned on yet. Still missing: " + "; ".join(missing) + ".")
     if enable and (body.get("reviewed") is not True or len(note) < 10):
         raise HTTPException(status_code=422, detail="Confirm the compliance review and record who approved it before turning intake on.")
     old = row.intake_enabled
@@ -195,13 +207,37 @@ def set_intake(db: Session, org_id: str, actor: User, body: Dict[str, Any]) -> D
         row.review_note, row.reviewed_by, row.reviewed_at = note, actor.id, datetime.utcnow()
     row.updated_at = datetime.utcnow()
     C.audit(db, org_id, actor, "lead_settings", org_id, "intake_enabled", "intake_enabled", old, enable, note or None)
-    return settings_dict(row)
+    return settings_dict(row, db)
 
 
-def settings_dict(row: VoltLeadSettings) -> Dict[str, Any]:
+def set_collector(db: Session, org_id: str, actor: User, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Owner only (checked by the caller)."""
+    row = settings_row(db, org_id)
+    LC.set_collector(db, row, actor, body, lambda field, old, new, note=None: C.audit(
+        db, org_id, actor, "lead_settings", org_id, field, field, old, new, note))
+    row.updated_at = datetime.utcnow()
+    db.flush()
+    return settings_dict(row, db)
+
+
+def set_license(db: Session, org_id: str, actor: User, uid: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Owner only (checked by the caller)."""
+    out = LC.set_license(db, org_id, actor, uid, body, STATES, lambda who, action, old, new: C.audit(
+        db, org_id, actor, "lead_grant", who, action, "licensed_states", old, new))
+    db.flush()
+    return out
+
+
+def settings_dict(row: VoltLeadSettings, db: Optional[Session] = None) -> Dict[str, Any]:
+    c = LC.collector(row)
     return {"intake_enabled": bool(row.intake_enabled), "review_note": row.review_note,
             "reviewed_at": _utc(row.reviewed_at),
-            "consent_version": CONSENT_VERSION, "checklist": REVIEW_CHECKLIST}
+            "consent_version": CONSENT_VERSION, "checklist": REVIEW_CHECKLIST,
+            "collector": {"name": row.collector_name, "address": row.collector_address,
+                          "email": row.privacy_email, "phone": row.privacy_phone,
+                          "complete": c is not None, "updated_at": _utc(row.collector_updated_at)},
+            "privacy_path": LC.PRIVACY_PATH, "privacy_version": LC.PRIVACY_VERSION,
+            "readiness": LC.readiness(db, row) if db is not None else None}
 
 
 # ── intake ──────────────────────────────────────────────────────────────────
@@ -257,24 +293,28 @@ def validate(body: Dict[str, Any], strict: bool = True) -> Dict[str, Any]:
             _bad("household_size", "Household size must be a number.")
         if not 1 <= hh <= 20:
             _bad("household_size", "Household size must be between 1 and 20.")
+    if strict and hh is None:
+        _bad("household_size", "Choose your household size.")
     state = str(body.get("state") or "").strip().upper() or None
-    if state is not None and state not in STATES:
-        _bad("state", "Choose your state.")
+    if (state is not None or strict) and state not in STATES:
+        _bad("state", "Choose your state.")       # the website must say where: licensed-agent routing depends on it
     income = body.get("income_range") or None
-    if income is not None and income not in INCOME_RANGES:
+    if (income is not None or strict) and income not in INCOME_RANGES:
         _bad("income_range", "Choose an income range.")
     pref = body.get("contact_preference") or None
-    if pref is not None and pref not in CONTACT_PREFS:
+    if (pref is not None or strict) and pref not in CONTACT_PREFS:
         _bad("contact_preference", "Choose how you'd like to be contacted.")
     if pref in ("call", "text") and not phone:
         _bad("phone", "Enter a phone number so an agent can call or text you.")
     if pref == "email" and not email:
         _bad("email", "Enter an email address so an agent can email you.")
     best = body.get("best_time") or None
-    if best is not None and best not in BEST_TIMES:
+    if (best is not None or strict) and best not in BEST_TIMES:
         _bad("best_time", "Choose a time of day.")
     if body.get("consent") is not True:
         _bad("consent", "Please agree to be contacted so an agent can help you.")
+    if body.get("automated_consent") not in (None, True, False):
+        _bad("automated_consent", "Choose whether you agree to automated calls and texts.")
     if strict and body.get("consent_version") != CONSENT_VERSION:
         _bad("consent_version", "The consent wording changed. Reload the page and review it again.")
     def utm(k, n=80):
@@ -287,6 +327,7 @@ def validate(body: Dict[str, Any], strict: bool = True) -> Dict[str, Any]:
     return {"first_name": first, "last_name": last, "zip_code": zip_code, "phone": phone, "email": email,
             "age_range": age, "coverage_status": cov, "household_size": hh,
             "help_wanted": body.get("help_wanted") is not False,
+            "automated_contact_consent": body.get("automated_consent") is True,
             "source": legacy, "campaign": utm("utm_campaign") or _clean_campaign(body.get("campaign")),
             "state": state, "income_range": income, "contact_preference": pref, "best_time": best,
             "channel": chan, "utm_source": utm_source, "utm_medium": utm_medium, "utm_campaign": utm("utm_campaign"),
@@ -307,19 +348,23 @@ def _dedup_key(org_id: str, ident: str, test: bool) -> str:
 def create_or_merge(db: Session, org_id: str, v: Dict[str, Any], *, test: bool, actor=None,
                     consent_version: str = CONSENT_VERSION, consent_text: str = CONSENT_TEXT,
                     consent_note: Optional[str] = None, origin: Optional[str] = None,
-                    source_id: Optional[str] = None):
+                    source_id: Optional[str] = None, automated_text: Optional[str] = None):
     """Every way a lead arrives ends here. Returns (lead, created). A repeat
     from the same phone/email merges into the existing lead (one more
     submission, one more history line) - never a second row. Test and real
     rows are deduplicated separately and never merge into each other."""
     ident = v["phone"] or v["email"]
+    v = dict(v)
+    auto = bool(v.get("automated_contact_consent")) and automated_text is not None
+    v["automated_contact_consent"] = True if auto else (False if automated_text is not None else v.get("automated_contact_consent"))
+    chash = LC.consent_hash(consent_text, automated_text or "", auto)
     key = _dedup_key(org_id, ident, test)
     q = lambda: db.query(VoltLead).filter(VoltLead.organization_id == org_id, VoltLead.dedup_key == key).first()  # noqa: E731
     existing = q()
     if existing is None:
         now = datetime.utcnow()
         lead = VoltLead(organization_id=org_id, dedup_key=key, consent_version=consent_version,
-                        consent_text_hash=hashlib.sha256(consent_text.encode()).hexdigest(), consent_at=now,
+                        consent_text_hash=chash, consent_at=now,
                         status="new", created_at=now, updated_at=now, is_test=bool(test), source_id=source_id, **v)
         try:
             with db.begin_nested():
@@ -330,11 +375,18 @@ def create_or_merge(db: Session, org_id: str, v: Dict[str, Any], *, test: bool, 
         else:
             _event(db, lead, actor, "created", new=v["channel"], note=origin)
             _event(db, lead, actor, "consent_recorded", new=consent_version,
-                   note=consent_note or "consent text sha256 %s" % lead.consent_text_hash[:16])
+                   note=consent_note or ("consent text sha256 %s; automated calls/texts: %s" % (
+                       lead.consent_text_hash[:16], "agreed" if auto else "not agreed")))
             return lead, True
     existing.submissions = (existing.submissions or 1) + 1
     existing.updated_at = datetime.utcnow()
-    _event(db, existing, actor, "repeat_submission", note=origin)
+    _event(db, existing, actor, "repeat_submission",
+           note=(origin or "") + (" (this person asked to stop contact; it stays stopped)" if existing.contact_opt_out_at else "") or None)
+    if auto and existing.automated_contact_consent is not True:
+        # An unticked repeat never removes it; a ticked repeat adds it, with its own proof.
+        existing.automated_contact_consent = True
+        _event(db, existing, actor, "automated_consent_recorded", new=consent_version,
+               note="consent text sha256 %s" % chash[:16])
     return existing, False
 
 
@@ -342,9 +394,11 @@ def submit(db: Session, org_id: str, body: Dict[str, Any]) -> None:
     """Public intake. Same silent outcome for new and repeat submissions: the
     caller learns nothing about whether a person is already on file."""
     cfg = db.get(VoltLeadSettings, org_id)
-    if cfg is None or not cfg.intake_enabled:
+    c = LC.collector(cfg)
+    if cfg is None or not cfg.intake_enabled or c is None:
         raise HTTPException(status_code=503, detail="This form is not accepting requests right now.")
-    create_or_merge(db, org_id, validate(body), test=False)
+    contact, automated = LC.consent_texts(c)
+    create_or_merge(db, org_id, validate(body), test=False, consent_text=contact, automated_text=automated)
 
 
 def preview_submit(db: Session, user: User, org_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -354,7 +408,8 @@ def preview_submit(db: Session, user: User, org_id: str, body: Dict[str, Any]) -
     if access(db, user, org_id) != "all":
         raise HTTPException(status_code=403, detail="Previewing the customer website needs Consumer Leads manager access.")
     v = validate(body)
-    lead, created = create_or_merge(db, org_id, v, test=True, actor=user,
+    contact, automated = LC.consent_texts(LC.collector(db.get(VoltLeadSettings, org_id)))
+    lead, created = create_or_merge(db, org_id, v, test=True, actor=user, consent_text=contact, automated_text=automated,
                                     origin="Test submission from the website preview by %s" % (user.full_name or user.email))
     C.audit(db, org_id, user, "lead_preview", lead.id, "test_lead_submitted")
     db.flush()
@@ -478,7 +533,9 @@ def lead_dict(lead: VoltLead, names: Dict[str, str], detail: bool = False) -> Di
            "channel": lead.channel or {"facebook": "meta"}.get(lead.source, lead.source),
            "state": lead.state, "appointment_at": _utc(lead.appointment_at),
            "next_follow_up_at": _utc(lead.next_follow_up_at), "test": bool(lead.is_test),
-           "campaign": lead.utm_campaign or lead.campaign}
+           "campaign": lead.utm_campaign or lead.campaign,
+           "awaiting_agent": lead.assigned_user_id is None and lead.status == "new",
+           "do_not_contact": lead.contact_opt_out_at is not None}
     if detail:
         out.update(email=lead.email, age_range=lead.age_range, coverage_status=lead.coverage_status,
                    household_size=lead.household_size, help_wanted=lead.help_wanted, campaign=lead.campaign,
@@ -487,7 +544,9 @@ def lead_dict(lead: VoltLead, names: Dict[str, str], detail: bool = False) -> Di
                    contact_preference=lead.contact_preference, best_time=lead.best_time,
                    utm={k: getattr(lead, k) for k in ("utm_source", "utm_medium", "utm_campaign", "utm_content",
                                                       "utm_term", "referrer_host", "landing_path")},
-                   enrolled_at=_utc(lead.enrolled_at), last_contact_at=_utc(lead.last_contact_at))
+                   enrolled_at=_utc(lead.enrolled_at), last_contact_at=_utc(lead.last_contact_at),
+                   automated_contact_consent=lead.automated_contact_consent,
+                   contact_opt_out_at=_utc(lead.contact_opt_out_at))
     return out
 
 
@@ -688,7 +747,8 @@ def assignable(db: Session, org_id: str) -> List[Dict[str, Any]]:
     for u in users:
         if u.id in {r.user_id for r in rows} and not _member(db, u, org_id):
             continue
-        out.append({"id": u.id, "name": u.full_name or u.email})
+        g = next((r for r in rows if r.user_id == u.id), None)
+        out.append({"id": u.id, "name": u.full_name or u.email, "licensed_states": LC.states_of(g)})
     return sorted(out, key=lambda x: x["name"].lower())
 
 
@@ -712,10 +772,27 @@ def assign(db: Session, user: User, org_id: str, lead_id: str, body: Dict[str, A
     target = body.get("user_id") or None
     if target is not None and target not in {a["id"] for a in assignable(db, org_id)}:
         _bad("user_id", "That person cannot be assigned leads.")
+    if target is not None and not lead.is_test and target != lead.assigned_user_id:
+        LC.check_assignable(db, org_id, target, lead.state)    # real leads: verified license for the lead's state
     if target != lead.assigned_user_id:
         _event(db, lead, user, "assigned", lead.assigned_user_id, target)
         lead.assigned_user_id = target
         lead.updated_at = datetime.utcnow()
+    db.flush()
+    return detail(db, user, org_id, lead.id, test)
+
+
+def record_opt_out(db: Session, user: User, org_id: str, lead_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    """The person asked to stop contact (by phone, text STOP, email or the
+    privacy contact). Anyone who can see the lead records it; it cannot be
+    undone here, and a later form submission does not undo it either."""
+    test = is_test_param(body)
+    lead = _lead(db, user, org_id, lead_id, test)
+    if lead.contact_opt_out_at is None:
+        how = re.sub(r"[^A-Za-z0-9 ,.'/-]", "", str(body.get("how") or ""))[:120] or None
+        lead.contact_opt_out_at = lead.updated_at = datetime.utcnow()
+        _event(db, lead, user, "contact_opt_out", note=how)
+        C.audit(db, org_id, user, "lead", lead.id, "contact_opt_out")
     db.flush()
     return detail(db, user, org_id, lead.id, test)
 
@@ -788,7 +865,8 @@ def summary(db: Session, user: User, org_id: str) -> Dict[str, Any]:
 def grants(db: Session, org_id: str) -> List[Dict[str, Any]]:
     rows = db.query(VoltLeadGrant).filter(VoltLeadGrant.organization_id == org_id, VoltLeadGrant.active.is_(True)).all()
     names = _names(db, [r.user_id for r in rows])
-    return [{"user_id": r.user_id, "name": names.get(r.user_id), "role": r.role or "manager"} for r in rows]
+    return [{"user_id": r.user_id, "name": names.get(r.user_id), "role": r.role or "manager",
+             "license": LC.license_dict(r)} for r in rows]
 
 
 def set_grant(db: Session, org_id: str, actor: User, body: Dict[str, Any]) -> List[Dict[str, Any]]:

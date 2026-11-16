@@ -162,7 +162,8 @@ export function LeadsInbox({ orgId, test, q, unassignedOnly = false, onChanged }
             <td>{unassignedOnly && canAssign
               ? <select aria-label={`Assign ${l.name}`} defaultValue="" onChange={(e) => e.target.value && assign(l.id, e.target.value).then(() => { load(); onChanged?.() }).catch((x) => setErr(msg(x)))} data-quick-assign>
                 <option value="">Choose…</option>{agents.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
-              : (l.assigned_to || 'Unassigned')}</td>
+              : (l.assigned_to || (l.test ? 'Unassigned' : 'Awaiting licensed agent'))}
+              {l.do_not_contact && <><br /><span className="v-tag" data-dnc>DO NOT CONTACT</span></>}</td>
             <td>{l.status_label}{l.appointment_at ? <><br /><span className="v-small">Appt {fmtCT(l.appointment_at)}</span></> : null}
               {l.next_follow_up_at ? <><br /><span className="v-small">Follow up {fmtCT(l.next_follow_up_at)}</span></> : null}</td>
             <td className="v-small">{fmtCT(l.created_at)}</td>
@@ -172,11 +173,17 @@ export function LeadsInbox({ orgId, test, q, unassignedOnly = false, onChanged }
         <h3>{sel.name}{sel.test && <span className="v-tag" style={{ marginLeft: 8 }}>TEST DATA</span>}</h3>
         <p className="v-small">Phone {sel.phone || '—'} · Email {sel.email || '—'} · ZIP {sel.zip}{sel.state ? ` · ${sel.state}` : ''} · Age {sel.age_range || '—'} · Household {sel.household_size || '—'} · Income {sel.income_range || '—'}<br />
           Prefers {sel.contact_preference || '—'}{sel.best_time ? ` (${sel.best_time})` : ''} · Coverage now: {sel.coverage_status || '—'}<br />
-          Channel {sel.channel}{sel.utm?.utm_campaign ? ` · campaign ${sel.utm.utm_campaign}` : ''} · Consent {sel.consent_version} at {fmtCT(sel.consent_at)} · {sel.submissions} submission(s)</p>
+          Channel {sel.channel}{sel.utm?.utm_campaign ? ` · campaign ${sel.utm.utm_campaign}` : ''} · Consent {sel.consent_version} at {fmtCT(sel.consent_at)} · {sel.submissions} submission(s)<br />
+          <span data-auto-consent>Automated calls/texts: <b>{sel.automated_contact_consent ? 'agreed' : 'NOT agreed - call or write by hand only'}</b></span></p>
+        {sel.contact_opt_out_at
+          ? <div className="v-alert v-alert--err" role="note" data-dnc-detail><b>Do not contact.</b> This person asked to stop contact on {fmtCT(sel.contact_opt_out_at)}.</div>
+          : <button type="button" className="v-btn v-btn--line v-btn--sm" data-opt-out
+              onClick={() => window.confirm('Record that this person asked to stop all contact? This cannot be undone here.')
+                && act(api.post(`${base}/${sel.id}/opt-out`, { how: note || undefined, ...(test ? { test: true } : {}) }))}>Record “stop contacting me”</button>}
         <label>Status<select value={sel.status} onChange={(e) => patch({ status: e.target.value })} data-lead-status>
           {STATUSES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
         {canAssign && <label>Assign to<select value={sel.assigned_user_id || ''} onChange={(e) => act(assign(sel.id, e.target.value))} data-lead-assign>
-          <option value="">Unassigned</option>{agents.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
+          <option value="">Unassigned</option>{agents.map((x) => <option key={x.id} value={x.id}>{x.name}{x.licensed_states?.length ? ` (licensed: ${x.licensed_states.join(', ')})` : ' (no verified license)'}</option>)}</select></label>}
         <div className="v-row" style={{ justifyContent: 'flex-start', gap: 8, flexWrap: 'wrap', margin: '10px 0' }}>
           <button type="button" className="v-btn v-btn--line v-btn--sm" onClick={() => patch({ event: 'call_attempted', note })} data-log="call_attempted">Log call attempt</button>
           <button type="button" className="v-btn v-btn--line v-btn--sm" onClick={() => patch({ event: 'contact_completed', note })} data-log="contact_completed">Contact made</button>
@@ -433,6 +440,18 @@ function Settings({ orgId }) {
     api.put(`${base}/settings`, { intake_enabled: enable, reviewed: enable, review_note }).then(load).catch((e) => setErr(msg(e)))
   }
   const grant = (body) => api.post(`${base}/grants`, body).then(load).catch((e) => setErr(msg(e)))
+  const saveCollector = (e) => {
+    e.preventDefault()
+    const f = new FormData(e.currentTarget)
+    api.put(`${base}/settings/collector`, Object.fromEntries(f.entries())).then(load).catch((x) => setErr(msg(x)))
+  }
+  const saveLicense = (uid, e) => {
+    e.preventDefault()
+    const f = new FormData(e.currentTarget)
+    const states = String(f.get('states') || '').toUpperCase().split(/[^A-Z]+/).filter(Boolean)
+    api.put(`${base}/grants/${uid}/license`, { npn: f.get('npn'), states, verified: f.get('verified') === 'on' })
+      .then(load).catch((x) => setErr(msg(x)))
+  }
   if (err && !s) return <div className="v-alert v-alert--err" role="alert">{err}</div>
   if (!s) return <p role="status">Loading…</p>
   const on = new Set(s.grants.map((g) => g.user_id))
@@ -445,14 +464,37 @@ function Settings({ orgId }) {
         <p><strong>{s.intake_enabled ? 'ON' : 'OFF'}</strong>{s.reviewed_at ? ` · last approved ${fmtCT(s.reviewed_at)}` : ''}</p>
         <p className="v-small">The customer website is always visible. This switch decides whether it (and real lead sources) accept requests. Before turning it on, the owner confirms:</p>
         <ul className="v-small">{s.checklist.map((c) => <li key={c}>{c}</li>)}</ul>
+        {s.readiness && <ul className="v-small" data-readiness>{s.readiness.map((r) => (
+          <li key={r.key} data-ready={r.key} data-ok={r.ok ? 'yes' : 'no'}>{r.ok ? '✓' : '✗'} {r.label} - <span className="v-muted">{r.detail}</span></li>))}</ul>}
+        <p className="v-small">Customer privacy notice: <a href={s.privacy_path} target="_blank" rel="noopener">{s.privacy_path}</a> (version {s.privacy_version})</p>
         {s.can_intake ? <button type="button" className="v-btn v-btn--black v-btn--sm" onClick={toggleIntake}>{s.intake_enabled ? 'Turn intake off' : 'Turn intake on'}</button>
           : <p className="v-small v-muted">Only the owner can change this.</p>}
+      </div>
+      <div className="v-panel" data-collector>
+        <h3>Who collects the information</h3>
+        <p className="v-small">The legal company named in the consent boxes and the privacy notice. Use the exact registered name. Changing it later turns intake off until it is reviewed again.</p>
+        {s.can_intake ? <form onSubmit={saveCollector} style={{ display: 'grid', gap: 8, maxWidth: 560 }} data-collector-form>
+          <label>Legal company name<input name="collector_name" defaultValue={s.collector?.name || ''} required minLength={3} /></label>
+          <label>Mailing address<input name="collector_address" defaultValue={s.collector?.address || ''} required minLength={10} /></label>
+          <label>Privacy contact email<input name="privacy_email" type="email" defaultValue={s.collector?.email || ''} required /></label>
+          <label>Privacy contact phone (optional)<input name="privacy_phone" defaultValue={s.collector?.phone || ''} /></label>
+          <button type="submit" className="v-btn v-btn--black v-btn--sm" style={{ justifySelf: 'start' }}>Save</button>
+        </form> : <p className="v-small">{s.collector?.complete ? s.collector.name : 'Not entered yet.'} <span className="v-muted">Only the owner can change this.</span></p>}
       </div>
       <div className="v-panel" data-team>
         <h3>Team</h3>
         <p className="v-small v-muted">Managers see every lead. Agents see only leads assigned to them. Recruiting roles do not give Consumer Leads access. {s.can_make_manager ? '' : 'Only the owner can add or remove managers.'}</p>
-        <ul className="v-small">{s.grants.map((g) => <li key={g.user_id} data-member={g.user_id}>{g.name} · {g.role === 'manager' ? 'Manager' : 'Agent'} · {(g.role === 'agent' || s.can_make_manager)
-          && <button type="button" className="v-btn v-btn--link" onClick={() => grant({ user_id: g.user_id, active: false })}>Remove</button>}</li>)}
+        <p className="v-small v-muted">Real leads can only be assigned to someone whose health insurance license the owner has verified for the lead&apos;s state.</p>
+        <ul className="v-small">{s.grants.map((g) => <li key={g.user_id} data-member={g.user_id}>{g.name} · {g.role === 'manager' ? 'Manager' : 'Agent'} · {g.license?.verified
+            ? <span data-license="verified">Licensed (NPN {g.license.npn}): {g.license.states.join(', ')}</span>
+            : <span className="v-muted" data-license="none">No verified license</span>} · {(g.role === 'agent' || s.can_make_manager)
+          && <button type="button" className="v-btn v-btn--link" onClick={() => grant({ user_id: g.user_id, active: false })}>Remove</button>}
+          {s.can_intake && <form onSubmit={(e) => saveLicense(g.user_id, e)} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', margin: '4px 0 8px' }} data-license-form={g.user_id}>
+            <input name="npn" placeholder="NPN" aria-label={`NPN for ${g.name}`} defaultValue={g.license?.npn || ''} inputMode="numeric" size={10} />
+            <input name="states" placeholder="States, e.g. TX, OK" aria-label={`Licensed states for ${g.name}`} defaultValue={(g.license?.states || []).join(', ')} size={18} />
+            <label className="v-small"><input type="checkbox" name="verified" /> I checked this license myself (e.g. on NIPR)</label>
+            <button type="submit" className="v-btn v-btn--line v-btn--sm">Save license</button>
+          </form>}</li>)}
           {!s.grants.length && <li className="v-muted">No managers or agents yet (the owner and VOLT&apos;s named operators always have access).</li>}</ul>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <label>Person<select value={pick.user_id} onChange={(e) => setPick({ ...pick, user_id: e.target.value })} data-team-person>

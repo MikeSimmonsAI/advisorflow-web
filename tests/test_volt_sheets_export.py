@@ -13,7 +13,7 @@ from app.models.volt_leads_models import VoltLead, VoltLeadSheetOutbox, VoltShee
 from app.models.volt_models import VoltApplication, VoltEmail, VoltRep
 from app.services.volt import sheets_export as X
 from app.services.volt import sheets_outbox as SO
-from tests.test_volt_leads import SLUG, enable, lead, post, team
+from tests.test_volt_leads import SLUG, enable, lead, licensed, post, team
 from tests.test_volt_recruiting import H, _complete, _user, volt  # noqa: F401  (fixture)
 
 
@@ -168,6 +168,7 @@ def test_assignment_status_and_follow_up_update_the_same_row(gs):
     gs["db"].commit()
     gs["agent"] = agent
     team(gs, "agent")
+    licensed(gs, "agent")
     assert _ops(gs, "god", "/leads/%s/assign" % lid, "post", json={"user_id": agent.id}).status_code == 200
     assert _ops(gs, "god", "/leads/" + lid, "patch", json={"status": "qualified"}).status_code == 200
     assert _ops(gs, "god", "/leads/" + lid, "patch", json={"event": "follow_up_scheduled",
@@ -423,6 +424,7 @@ def test_consumer_csv_scope_filters_and_safety(gs):
     db.commit()
     gs["agent"] = agent
     team(gs, "agent")
+    licensed(gs, "agent")
     _ops(gs, "god", "/leads/%s/assign" % b.id, "post", json={"user_id": agent.id})
     r = _ops(gs, "god", "/leads/export.csv")
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
