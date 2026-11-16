@@ -11,7 +11,7 @@
  */
 import { createContext, Suspense, useContext, useEffect, useState } from 'react'
 import { NavLink, Navigate, Outlet, useLocation } from 'react-router-dom'
-import { api } from '../../api/client'
+import { api, getAcqClientView } from '../../api/client'
 import ProgramSwitchLink from '../../components/ProgramSwitchLink'
 import { Icon, Loading, errText, initials, useFont } from './ui'
 import './acquisition.css'
@@ -54,6 +54,13 @@ export default function AcquisitionShell() {
   const [open, setOpen] = useState(false)
   const [ops, setOps] = useState(undefined)
   const loc = useLocation()
+  // An EvoSys Acquisition admin looking through this company's portal.
+  const adminView = getAcqClientView()
+  const leaveAdminView = async () => {
+    const { exitAcquisitionClient } = await import('../god/enterCustomer')
+    await exitAcquisitionClient()
+    window.location.href = '/acquisition-ops/clients'
+  }
 
   const loadStatus = async () => {
     try { setStatus(await api.get('/acquisition/status')); setError(null) } catch (e) { setError(e) }
@@ -127,6 +134,9 @@ export default function AcquisitionShell() {
                 <div><b>{name}</b><span>{me ? `${me.split(' ')[0]} · Client` : 'Client'}</span></div></span>
             </div>
           </header>
+          {adminView && <div className="aq-adminview" role="status">
+            <span>EvoSys admin view — <b>{adminView.orgName}</b>. You see what this company sees.</span>
+            <button className="aq-btn aq-btn--sm" onClick={leaveAdminView}>Return to Acquisition Control Center</button></div>}
           <Suspense fallback={<Loading />}><Outlet /></Suspense>
         </div>
       </div>

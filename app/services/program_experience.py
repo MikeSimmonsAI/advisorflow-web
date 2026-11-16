@@ -121,6 +121,10 @@ def acquisition_customer_locked(db: Session, user, request: Optional[Request]) -
     """This request comes from a cleaning customer's own login working in its
     acquisition workspace. EvoSys staff (owner/internal roles, granted
     operators on /acquisition-ops) are never customers."""
+    # ...except while an Acquisition admin is looking through a client's own
+    # portal: then exactly the client's narrow allow-list applies.
+    if user is not None and getattr(user, "_acq_client_org", None):
+        return True
     if user is None or getattr(user, "role", None) in INTERNAL_ROLES:
         return False
     from app.models.models import Organization

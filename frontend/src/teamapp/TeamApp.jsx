@@ -28,6 +28,7 @@ import { badge, initials, safeAppPath, tabsFor } from './teamHelpers'
 import ProgramsScreen from './ProgramsScreen'
 import { ChatList, Conversation, NewChat, RoomMembers } from './ChatScreens'
 import ActivityScreen from './ActivityScreen'
+import { ProgramDashboard, ProgramMore, ProgramReplies, ProgramThread } from './ProgramWorkspace'
 import StagingBanner from '../components/StagingBanner'
 import { AccountScreen, ProfileScreen, TeamAccessScreen } from './AccountScreens'
 import './teamapp.css'
@@ -263,6 +264,7 @@ function Shell() {
   const tabs = tabsFor(me ? access : {})
   const user = (me && me.user) || getCurrentUser() || {}
   const inConversation = /^\/app\/chat\/(?!new$)[^/]+/.test(location.pathname)
+    || /^\/app\/p\/[^/]+\/replies\/[^/]+/.test(location.pathname)
 
   return (
     <Ctx.Provider value={value}>
@@ -301,6 +303,10 @@ export default function TeamApp() {
       <Route element={<Shell />}>
         <Route index element={<Navigate to="/app/programs" replace />} />
         <Route path="programs" element={<ProgramsScreen />} />
+        <Route path="p/:pid" element={<ProgramDashboard />} />
+        <Route path="p/:pid/replies" element={<ProgramReplies />} />
+        <Route path="p/:pid/replies/:leadId" element={<ProgramThread />} />
+        <Route path="p/:pid/more" element={<ProgramMore />} />
         <Route path="chat" element={<ChatList />} />
         <Route path="chat/new" element={<NewChat />} />
         <Route path="chat/:roomId" element={<Conversation />} />

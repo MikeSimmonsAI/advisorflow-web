@@ -65,8 +65,9 @@ class Memberships:
                                               .filter(R.organization_id == org_id, R.lead_id.isnot(None))
                                               .order_by(R.created_at).all()):
             self.by_lead[lead_id].append({"key": key or None, "run": run_id, "at": created})
-        self.families = {f.key: f for f in db.query(CampaignFamily)
-                         .filter(CampaignFamily.organization_id == org_id).all()}
+        from app.services.programs import campaigns as _camp507
+        self.families = {f.key: f for f in _camp507.visible(db, org_id, db.query(CampaignFamily)
+                         .filter(CampaignFamily.organization_id == org_id)).all()}
         self.runs = {r.id: r for r in db.query(ProgramImportRun)
                      .filter(ProgramImportRun.organization_id == org_id,
                              ProgramImportRun.dry_run.is_(False)).all()}

@@ -3,8 +3,7 @@ uvicorn[standard]==0.30.6
 sqlalchemy==2.0.35
 psycopg2-binary==2.9.9
 pydantic==2.9.2
-python-jose==3.3.0
-pyjwt==2.9.0
+pyjwt==2.15.0
 bcrypt==4.2.0
 cryptography==43.0.1
 twilio==9.3.7
@@ -15,8 +14,8 @@ pandas==2.2.3
 # lead upload accepted by app/routers/leads_router.py:59. Removing this breaks
 # Excel lead import in production with a runtime ImportError, not a build error.
 openpyxl==3.1.5
-python-multipart==0.0.12
-python-dotenv==1.0.1
+python-multipart==0.0.31
+python-dotenv==1.2.2
 openai==1.54.3
 resend==2.36.0
 google-auth==2.35.0
@@ -44,4 +43,4 @@ pywebpush==2.0.3
 py-vapid==1.9.2
 http-ece==1.2.1
 phonenumbers>=8.13,<9
-dnspython==2.7.0
+dnspython==2.9.2

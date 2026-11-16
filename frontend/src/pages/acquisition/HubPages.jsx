@@ -485,7 +485,7 @@ function BulkConvert({ opts, onDone, onCancel }) {
 
 export function ClientDirectory() {
   const god = useGodOnly()
-  const { onSelectOrg, reloadClients } = useOps()
+  const { onSelectOrg, reloadClients, clients } = useOps()
   const nav = useNavigate()
   const qs = new URLSearchParams(window.location.search)
   const [dir, err, reload] = useLoad(god ? '/god/acquisition/directory' : null)
@@ -499,7 +499,14 @@ export function ClientDirectory() {
   const done = () => { reload(); reloadClients && reloadClients() }
   const openOps = c => { onSelectOrg(c.organization_id); nav(`${OPS}/client-dashboard`) }
   const openPortal = async c => {
-    try { const { enterCustomer } = await import('../god/enterCustomer'); await enterCustomer(c.organization_id, c.name); window.location.href = '/program/acquisition' }
+    // The owner enters through God Mode; an EvoSys Acquisition admin (not God)
+    // through the Acquisition entry, which the server re-checks every request.
+    try {
+      const m = await import('../god/enterCustomer')
+      if (clients?.global_owner) await m.enterCustomer(c.organization_id, c.name)
+      else await m.enterAcquisitionClient(c.organization_id, c.name)
+      window.location.href = '/program/acquisition'
+    }
     catch (e) { say(errText(e)) }
   }
   const sendInvite = async () => {

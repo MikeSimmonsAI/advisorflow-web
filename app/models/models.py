@@ -19,7 +19,7 @@ from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, Date, ForeignKey, Text,
     UniqueConstraint, Index, Enum as SAEnum, LargeBinary, Numeric
 )
-from sqlalchemy.orm import relationship, declarative_base
+from sqlalchemy.orm import relationship, declarative_base, deferred
 from sqlalchemy.sql import func
 from sqlalchemy import text
 from datetime import datetime
@@ -826,7 +826,12 @@ class User(Base):
 
     # Profile photo — stored as base64 data URL (e.g. "data:image/jpeg;base64,...")
     # so it's self-contained with no external storage dependency.
-    profile_photo_url = Column(Text, nullable=True)
+    # DEFERRED (audit #650, 2026-11-15): production photos run up to 2.48 MB
+    # per row (11 MB across 10 users). get_current_user loads the User on every
+    # authenticated request, so without this each API call from one of those
+    # accounts read the whole photo. It now loads only when a screen reads it
+    # (settings/profile, admin user list) - same request session, same value.
+    profile_photo_url = deferred(Column(Text, nullable=True))
 
     # Personal contact info (NOT Twilio) — used for directory/profile display
     phone = Column(String, nullable=True)       # e.g. "+14155551234"
@@ -887,7 +892,7 @@ class ContactRegistry(Base):
     organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
     normalized_phone = Column(String, nullable=False)  # E.164, digits only
     normalized_last_name = Column(String, nullable=False)  # lowercased, stripped
-    first_seen_lead_id = Column(String, ForeignKey("leads.id"), nullable=True)
+    first_seen_lead_id = Column(String, ForeignKey("leads.id"), nullable=True, index=True)
     owning_user_id = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
@@ -1043,7 +1048,7 @@ class Lead(Base):
     capacity_held_at      = Column(DateTime, nullable=True)
     capacity_hold_reason  = Column(String, nullable=True)   # e.g. "max_leads"
     capacity_released_at  = Column(DateTime, nullable=True)
-    duplicate_of_lead_id = Column(String, ForeignKey("leads.id"), nullable=True)
+    duplicate_of_lead_id = Column(String, ForeignKey("leads.id"), nullable=True, index=True)
 
     # Physical address — collected at import or via lead edit
     street_address = Column(String, nullable=True)
