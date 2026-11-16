@@ -398,7 +398,8 @@ class NotEarnable(Exception):
 
 def earn(db: Session, opp: Opportunity, *, collection_reference: str,
          collected_amount: Any, collected_at: Optional[datetime] = None,
-         commit: bool = True) -> List[CompensationEntry]:
+         commit: bool = True,
+         collection_kind: Optional[str] = None) -> List[CompensationEntry]:
     """Turn a projection into money owed, because funds actually arrived.
 
     THE TWO CONDITIONS ARE BOTH REQUIRED and are checked here rather than by
@@ -416,7 +417,7 @@ def earn(db: Session, opp: Opportunity, *, collection_reference: str,
     if _spc.applies(db, opp):
         return _spc.earn(db, opp, collection_reference=collection_reference,
                          collected_amount=collected_amount, collected_at=collected_at,
-                         commit=commit)
+                         commit=commit, collection_kind=collection_kind)
     if (opp.status or "").lower() != "won":
         raise NotEarnable("Opportunity %s is not Won; compensation cannot be "
                           "earned." % opp.id)

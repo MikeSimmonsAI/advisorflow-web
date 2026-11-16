@@ -133,8 +133,18 @@ def plan_key_for(econ: Dict[str, Any]) -> str:
     return plan
 
 
+# What kind of money a collection is, when the billing system knows it.
+#   KIND_SETUP      the one-time setup checkout (Month 1). Never a residual.
+#   KIND_RECURRING  a subscription invoice (Month 2 onward). Never setup.
+#   None            unknown (a manual or legacy collection): money counts
+#                   toward setup until setup is fully collected, the rest is
+#                   monthly - the original rule.
+KIND_SETUP = "setup"
+KIND_RECURRING = "recurring"
+
+
 def classify(db: Session, opp: Opportunity, ref: str, amount: Decimal,
-             setup_total: Decimal) -> SalesCollectionSplit:
+             setup_total: Decimal, kind: Optional[str] = None) -> SalesCollectionSplit:
     row = (db.query(SalesCollectionSplit)
            .filter(SalesCollectionSplit.opportunity_id == opp.id,
                    SalesCollectionSplit.collection_reference == ref).first())
@@ -143,10 +153,21 @@ def classify(db: Session, opp: Opportunity, ref: str, amount: Decimal,
     prior = _d(db.query(func.coalesce(func.sum(SalesCollectionSplit.setup_part), 0))
                .filter(SalesCollectionSplit.opportunity_id == opp.id).scalar())
     remaining = max(Decimal("0"), setup_total - prior)
-    setup_part = min(amount, remaining)
+    if kind == KIND_RECURRING:
+        # A subscription invoice is monthly service by definition - it must
+        # never be swallowed by a setup balance (which would pay a prorated
+        # setup payout instead of the residual).
+        setup_part = Decimal("0")
+    elif kind == KIND_SETUP:
+        # The one-time checkout. Anything above the setup balance is still not
+        # monthly service (no residual from a setup payment), so it is capped.
+        setup_part = min(amount, remaining)
+    else:
+        setup_part = min(amount, remaining)
+    monthly_part = Decimal("0") if kind == KIND_SETUP else amount - setup_part
     row = SalesCollectionSplit(opportunity_id=opp.id, collection_reference=ref,
                                collected_amount=amount, setup_part=setup_part,
-                               monthly_part=amount - setup_part,
+                               monthly_part=monthly_part,
                                rules_version=dbc.RULES_VERSION)
     db.add(row)
     db.flush()
@@ -164,7 +185,7 @@ def _departed_before(db: Session, brand_id: str, user_id: str, when: datetime) -
 
 def earn(db: Session, opp: Opportunity, *, collection_reference: str,
          collected_amount: Any, collected_at: Optional[datetime] = None,
-         commit: bool = True) -> List[CompensationEntry]:
+         commit: bool = True, collection_kind: Optional[str] = None) -> List[CompensationEntry]:
     from app.services import compensation as comp
 
     if (opp.status or "").lower() != "won":
@@ -196,7 +217,7 @@ def earn(db: Session, opp: Opportunity, *, collection_reference: str,
     setup_total = fee
 
     credit = snapshot_credit(db, opp)
-    split_row = classify(db, opp, ref, amount, setup_total)
+    split_row = classify(db, opp, ref, amount, setup_total, kind=collection_kind)
     deal["collected_setup"] = str(split_row.setup_part)
     deal["monthly"] = str(split_row.monthly_part)
     deal["collected_monthly"] = str(split_row.monthly_part)

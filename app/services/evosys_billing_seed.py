@@ -58,7 +58,13 @@ log = logging.getLogger(__name__)
 # `brand_packages`. Two different economic objects; same three words. Nothing
 # here reads or writes that table.
 #
-# APPROVED PRICING, SEPTEMBER 2026. The recurring figures below replace the
+# SUPERSEDED 2026-11-15: the approved standard packages are now Basic $1,600 +
+# $700/mo, Growth $3,200 + $1,300/mo, Professional $5,900 + $2,400/mo, one
+# monthly price from Month 2 (deal_builder_commission.STANDARD_PACKAGES,
+# applied by evosys_package_catalog). The plan amounts below follow them, so a
+# re-run of this seed cannot put the old prices back.
+#
+# APPROVED PRICING, SEPTEMBER 2026 (historical). The recurring figures below replace the
 # earlier $497 / $997 / $1,997. They are stated here — brand configuration a
 # God admin previews and applies — and nowhere in the billing engine, which
 # reads them back out of `brand_billing_plans` like any other brand's.
@@ -115,10 +121,10 @@ log = logging.getLogger(__name__)
 EVOSYS_PLANS = [
     {
         "key": "starter",
-        "name": "Starter",
+        "name": "Basic",
         "sort_order": 10,
-        "monthly_cents": 50000,          # $500 / month, committed
-        "month_to_month_cents": 59700,   # $597 / month, no commitment
+        "monthly_cents": 70000,          # approved 2026-11-15 (Month 2+), no term discount
+        "month_to_month_cents": 70000,   # same price - one monthly price
         "max_leads": 2500,
         "max_users": 1,
         "max_locations": None,
@@ -131,8 +137,8 @@ EVOSYS_PLANS = [
         "key": "growth",
         "name": "Growth",
         "sort_order": 20,
-        "monthly_cents": 100000,         # $1,000 / month, committed
-        "month_to_month_cents": 129700,  # $1,297 / month, no commitment
+        "monthly_cents": 130000,          # approved 2026-11-15 (Month 2+), no term discount
+        "month_to_month_cents": 130000,   # same price - one monthly price
         "max_leads": 5000,
         "max_users": 3,
         "max_locations": None,
@@ -145,8 +151,8 @@ EVOSYS_PLANS = [
         "key": "professional",
         "name": "Professional",
         "sort_order": 30,
-        "monthly_cents": 200000,         # $2,000 / month, committed
-        "month_to_month_cents": 259700,  # $2,597 / month, no commitment
+        "monthly_cents": 240000,          # approved 2026-11-15 (Month 2+), no term discount
+        "month_to_month_cents": 240000,   # same price - one monthly price
         "max_leads": 10000,
         "max_users": 5,
         "max_locations": None,

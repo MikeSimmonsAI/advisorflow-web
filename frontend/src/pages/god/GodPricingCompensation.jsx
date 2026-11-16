@@ -708,9 +708,10 @@ function PlanCard({ plan, data, onSaved }) {
   const rules = plan.rules || []
 
   return (
-    <section className="go-panel" style={{ marginBottom: 14 }}>
+    <section className="go-panel" style={{ marginBottom: 14, opacity: plan.legacy_for_program ? 0.75 : 1 }}>
+      {plan.legacy_note ? <div className="go-note warn" style={{ margin: 0 }}>{plan.legacy_note}</div> : null}
       <h2>
-        {plan.name}
+        {plan.name}{plan.legacy_for_program ? ' (legacy)' : ''}
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
           <State row={plan} />
           <button className="go-btn sm ghost" onClick={() => (editHead ? setEditHead(false) : beginHead())}>
@@ -1259,6 +1260,38 @@ function AuditPanel() {
 
 /* ── the screen ──────────────────────────────────────────────────────────── */
 
+/* The rules EvoSys Pro Sales deals are actually paid and billed by. Read-only
+   here: they are the versioned launch rules in the code, the same ones both
+   Deal Builders, saved quotes and every earned commission record use. */
+function ActiveRules({ rules }) {
+  if (!rules || !rules.packages) return null
+  const usd = v => '$' + Number(v).toLocaleString('en-US')
+  const r = rules.monthly_residual_pct, a = rules.addon_setup_pct
+  return (
+    <section className="go-panel" style={{ marginBottom: 14 }}>
+      <h2>Active rules — {rules.brand_name || 'EvoSys Pro Sales'} (prices {rules.prices_version}, pay rules {rules.rules_version})</h2>
+      <div className="go-body">
+        <p style={{ marginTop: 0 }}>{rules.billing}</p>
+        <table className="go-table">
+          <thead><tr><th>Package</th><th>Month 1 setup</th><th>Month 2+ monthly</th>
+            <th>Flat setup pay (Rep / ASM / Sr EVP)</th><th>Monthly residual at full collection</th></tr></thead>
+          <tbody>{rules.packages.map(p => (
+            <tr key={p.catalog_key}>
+              <td>{p.name}{p.catalog_key !== p.name.toLowerCase() ? <small> (key {p.catalog_key})</small> : null}</td>
+              <td>{usd(p.setup)}</td><td>{usd(p.monthly)}/mo</td>
+              <td>{usd(p.flat_setup_payout.rep)} / {usd(p.flat_setup_payout.asm)} / {usd(p.flat_setup_payout.sevp)}</td>
+              <td>{usd(p.monthly * r.rep / 100)} / {usd(p.monthly * r.asm / 100)} / {usd(p.monthly * r.sevp / 100)}</td>
+            </tr>))}</tbody>
+        </table>
+        <p>Residual on each monthly payment collected: {r.rep}% / {r.asm}% / {r.sevp}% (EvoSys {100 - r.rep - r.asm - r.sevp}%).
+          Held {rules.holdback_days} days after the customer pays; partial payments are prorated.
+          Package add-on one-time setup: {a.rep}% / {a.asm}% / {a.sevp}% (unchanged by the package approval).</p>
+        <p style={{ fontSize: 12, marginBottom: 0 }}>Source: {rules.source}. Plans below that belong to this brand are legacy and are not used for its deals.</p>
+      </div>
+    </section>
+  )
+}
+
 export default function GodPricingCompensation() {
   const nav = useNavigate()
   const [data, setData] = useState(null)
@@ -1316,6 +1349,8 @@ export default function GodPricingCompensation() {
           </div>
         </div>
       ) : null}
+
+      <ActiveRules rules={data.active_rules} />
 
       <PoliciesPanel data={data} onSaved={load} />
 

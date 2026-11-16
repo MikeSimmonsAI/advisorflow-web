@@ -497,8 +497,9 @@ def test_the_seed_is_idempotent(db_session):
 
 
 def test_the_seed_carries_the_APPROVED_evosys_recurring_prices(db_session):
-    """The approved figures, pinned. September 2026: $500 / $1,000 / $2,000 per
-    month, replacing $497 / $997 / $1,997.
+    """The approved figures, pinned. November 15 2026: $700 / $1,300 / $2,400 per
+    month from Month 2, one price (no term discount), replacing September's
+    $500 / $1,000 / $2,000 term and $597 / $1,297 / $2,597 month-to-month.
 
     Pinned in a test rather than only in a comment because these are the
     numbers that land on a customer's card. A refactor that reintroduces the
@@ -508,11 +509,12 @@ def test_the_seed_carries_the_APPROVED_evosys_recurring_prices(db_session):
     brand = _platform(db_session)
     evosys_billing_seed.seed(db_session, brand.id, apply=True)
 
-    expected = {"starter": 50000, "growth": 100000, "professional": 200000}
+    expected = {"starter": 70000, "growth": 130000, "professional": 240000}
     for key, cents in expected.items():
         plan = billing_catalog.resolve_plan(db_session, brand.id, key)
         assert plan is not None, key
         assert plan.monthly_cents == cents, key
+        assert plan.month_to_month_cents == cents, key
         assert plan.is_purchasable is True, key
 
     # Enterprise / Custom carries NO price. A default here would be an invented
@@ -607,8 +609,8 @@ def test_the_seed_sets_no_annual_price(db_session):
 
 
 def test_the_seeded_prices_are_the_saas_prices_not_the_setup_fees(db_session):
-    """$500 / $1,000 / $2,000 a MONTH. `brand_packages` sells the same three
-    names as $1,500 / $2,500 / $5,000 ONE-TIME, and nothing maps them.
+    """$700 / $1,300 / $2,400 a MONTH. `brand_packages` sells the same three
+    names as $1,600 / $3,200 / $5,900 ONE-TIME, and nothing maps them.
 
     The protection is unchanged by the September 2026 reprice: these two
     catalogues use the same three words for two different economic objects, and
@@ -619,7 +621,7 @@ def test_the_seeded_prices_are_the_saas_prices_not_the_setup_fees(db_session):
     evosys_billing_seed.seed(db_session, brand.id, apply=True)
     prices = {p.key: p.monthly_cents
               for p in billing_catalog.plans_for(db_session, brand.id)}
-    assert prices == {"starter": 50000, "growth": 100000,
-                      "professional": 200000, "enterprise": None}
+    assert prices == {"starter": 70000, "growth": 130000,
+                      "professional": 240000, "enterprise": None}
     # And none of them is a setup fee.
-    assert set(prices.values()).isdisjoint({150000, 250000, 500000})
+    assert set(prices.values()).isdisjoint({160000, 320000, 590000})

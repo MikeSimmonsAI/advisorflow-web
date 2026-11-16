@@ -311,6 +311,8 @@ COLUMNS_TO_ADD = [
     # would query a column its database does not have and take down billing.
     ("brand_billing_plans", "month_to_month_cents", "INTEGER"),
     ("brand_billing_plans", "stripe_price_id_month_to_month", "VARCHAR"),
+    # Old Stripe Prices kept recognisable after a price change (2026-11-15).
+    ("brand_billing_plans", "stripe_price_ids_legacy", "TEXT"),
 
     # ── Capacity a plan card may state, as CONFIGURATION (2026-09-11) ──────
     #

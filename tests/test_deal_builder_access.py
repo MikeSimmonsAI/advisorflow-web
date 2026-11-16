@@ -68,10 +68,10 @@ def test_standard_setup_price_comes_from_server_not_client():
 
 
 def test_addons_follow_the_deal():
-    # Package deal: add-on setup and monthly at the package rates (20/10/15).
+    # Package deal: add-on one-time setup at 15/10/15 (unchanged); monthly at 20/10/15.
     r = _c(plan="growth", addon_setup=1500, monthly=1300 + 299)
     assert r["one_time"]["package"] == 1000.0
-    assert r["one_time"]["addon"] == 300.0            # 20% of 1,500
+    assert r["one_time"]["addon"] == 225.0            # 15% of 1,500
     assert r["recurring"]["monthly"] == round((1300 + 299) * 0.20, 2)
     assert "not final" not in json.dumps(r).lower()
 
@@ -379,7 +379,7 @@ def test_mixed_partial_setup_payment_prorates_each_line():
     # Basic ($1,600) + $200 setup add-on = $1,800; $900 collected = half of each line.
     v = dbc.view(_full(plan="basic", addon_setup=200, basis="paid", collected_setup=900), "full")
     by = {l["role"]: l for l in v["layers"]}
-    assert by["rep"]["one_time"] == 270.0
+    assert by["rep"]["one_time"] == 265.0
     assert by["asm"]["one_time"] == 110.0
     assert by["sevp"]["one_time"] == 165.0
 
@@ -389,7 +389,7 @@ def test_receipt_allocated_to_one_line():
     v = dbc.view(_full(plan="basic", addon_setup=200, basis="paid",
                        allocation={"package": 0, "addons": 200}), "full")
     by = {l["role"]: l for l in v["layers"]}
-    assert by["rep"]["one_time_package"] == 0.0 and by["rep"]["one_time_addons"] == 40.0
+    assert by["rep"]["one_time_package"] == 0.0 and by["rep"]["one_time_addons"] == 30.0
     assert by["asm"]["one_time"] == 20.0 and by["sevp"]["one_time"] == 30.0
     assert v["setup_counted"] == 200.0
 

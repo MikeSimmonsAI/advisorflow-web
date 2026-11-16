@@ -258,7 +258,7 @@ def pricing(db: Session = Depends(get_db), user: User = Depends(get_current_user
     for key, p in dbc.PLANS.items():
         plans.append({"key": key, "name": p["name"], "kind": p["kind"],
                       "setup": float(p.get("setup") or 0) if p.get("setup") is not None else None,
-                      "monthly": float(p["month"]) if p.get("month") is not None else None,
+                      "monthly": float(p["monthly"]) if p.get("monthly") is not None else None,
                       "payout": {k: float(v) for k, v in (p.get("payout") or {}).items()}})
     return {
         "brand": {"id": brand.id, "name": brand.name},
@@ -266,15 +266,19 @@ def pricing(db: Session = Depends(get_db), user: User = Depends(get_current_user
         "commission": {"plans": plans,
                        "package_monthly_pct": {k: float(v) for k, v in dbc.PACKAGE_PCT.items()},
                        "custom_saas_rates": {k: float(v) for k, v in dbc.SAAS_PCT.items()},
+                       "addon_setup_rates": {k: float(v) for k, v in dbc.PACKAGE_ADDON_SETUP_PCT.items()},
+                       "prices_version": dbc.STANDARD_PRICES_VERSION,
                        "holdback_days": 14},
         "packages": [{"key": k.key, "name": k.name,
                       "setup_fee": float(k.setup_fee) if k.setup_fee is not None else None,
                       "monthly_price": float(k.monthly_price) if k.monthly_price is not None else None}
                      for k in pkgs],
         "can_edit_in_god_mode": bool(is_god(user)),
-        "how_to_change": ("Package prices are edited in God Mode → Pricing. Commission rates change "
-                          "only as a new rules version, so every saved quote and earned record keeps "
-                          "the version it was made under."),
+        "how_to_change": ("Basic, Growth and Professional prices come from the approved price table "
+                          "(version %s) and are applied to billing and Stripe from God Mode. "
+                          "Commission rates change only as a new rules version, so every saved quote "
+                          "and earned record keeps the version it was made under."
+                          % dbc.STANDARD_PRICES_VERSION),
     }
 
 # ── contractor onboarding: invites, review, agreement signing ────────────────

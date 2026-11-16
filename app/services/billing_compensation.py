@@ -167,7 +167,8 @@ def resolve_opportunity(db: Session, org: Organization):
 
 
 def earn_for_payment(db: Session, payment: BillingPayment, *,
-                     commit: bool = True) -> dict:
+                     commit: bool = True,
+                     collection_kind: Optional[str] = None) -> dict:
     """Attempt to earn compensation for one recorded Stripe payment.
 
     ALWAYS RETURNS. Never raises for a business reason - "nobody is owed
@@ -232,6 +233,10 @@ def earn_for_payment(db: Session, payment: BillingPayment, *,
             collected_amount=collected,
             collected_at=payment.collected_at or datetime.utcnow(),
             commit=False,
+            # "setup" for the one-time checkout, "recurring" for a
+            # subscription invoice: so a setup payment never pays a residual
+            # and a monthly invoice never pays a setup payout.
+            collection_kind=collection_kind,
         )
     except comp.NotEarnable as exc:
         # THE IMPORTANT BRANCH. NotEarnable is the engine saying, correctly,

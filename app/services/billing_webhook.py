@@ -798,8 +798,9 @@ def _handle_setup_payment(db: Session, org: Organization, obj: dict) -> None:
                 .first())
 
     amount = obj.get("amount_total")
+    new_payment = None
     if existing is None:
-        db.add(BillingPayment(
+        new_payment = BillingPayment(
             organization_id=org.id,
             platform_id=getattr(org, "platform_id", None),
             collection_reference=reference,
@@ -821,15 +822,39 @@ def _handle_setup_payment(db: Session, org: Organization, obj: dict) -> None:
             compensation_skipped_reason=(
                 "One-time setup fee. Compensation on implementation fees is a "
                 "policy decision and is not configured."),
-        ))
+        )
+        db.add(new_payment)
 
     if impl is not None:
+        first_time = impl.setup_payment_status != "paid" or impl.setup_paid_at is None
         impl.setup_payment_status = "paid"
         impl.setup_payment_intent_id = pi
         impl.setup_paid_cents = amount
-        impl.setup_paid_at = datetime.utcnow()
+        # The ACTUAL setup payment date. Month 2 billing is scheduled from it,
+        # so a replayed event must not move it.
+        if first_time:
+            impl.setup_paid_at = datetime.utcnow()
         if obj.get("id"):
             impl.setup_checkout_session_id = obj.get("id")
+
+    # EVOSYS PRO SALES PACKAGES: the flat Month 1 payout is earned on the
+    # collected setup payment (owner approval 2026-11-15). Only for a NEW
+    # payment row, so a replay cannot earn twice; the compensation engine is
+    # idempotent on the collection reference as well. Other brands keep the
+    # "not configured" outcome recorded above.
+    if new_payment is not None and opportunity_id:
+        try:
+            from app.models.sales_models import Opportunity
+            from app.services import billing_compensation, sales_program_comp
+            opp = db.query(Opportunity).filter(Opportunity.id == opportunity_id).first()
+            if opp is not None and sales_program_comp.applies(db, opp):
+                new_payment.compensation_skipped_reason = None
+                db.flush()
+                billing_compensation.earn_for_payment(
+                    db, new_payment, commit=False,
+                    collection_kind=sales_program_comp.KIND_SETUP)
+        except Exception:                                   # pragma: no cover
+            log.exception("billing_webhook: setup payout could not be earned")
 
 
 def _handle_catalog_purchase_payment(db: Session, org: Organization,
@@ -985,7 +1010,10 @@ def _handle_invoice_paid(db: Session, org: Organization, obj: dict,
                             "count." % payment.collection_reference)
         return False
 
-    outcome = billing_compensation.earn_for_payment(db, payment, commit=False)
+    outcome = billing_compensation.earn_for_payment(
+        db, payment, commit=False,
+        # Every invoice here belongs to a subscription: Month 2+ service.
+        collection_kind="recurring" if obj.get("subscription") else None)
     event_row.earned_compensation = bool(outcome.get("earned"))
     event_row.compensation_note = (
         "Earned %d compensation entr%s." % (outcome["entries"],

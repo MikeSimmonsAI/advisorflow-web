@@ -120,12 +120,35 @@ def resolve_plan_by_price_id(db: Session, platform_id: Optional[str],
     # back into a plan key on every renewal. Omitting the third column would
     # mean every month-to-month customer resolved to no plan at all — losing
     # their tier, and with it their entitlements, silently and permanently.
-    return (db.query(BrandBillingPlan)
-            .filter(BrandBillingPlan.platform_id == platform_id)
-            .filter((BrandBillingPlan.stripe_price_id_monthly == price_id)
-                    | (BrandBillingPlan.stripe_price_id_annual == price_id)
-                    | (BrandBillingPlan.stripe_price_id_month_to_month == price_id))
-            .first())
+    found = (db.query(BrandBillingPlan)
+             .filter(BrandBillingPlan.platform_id == platform_id)
+             .filter((BrandBillingPlan.stripe_price_id_monthly == price_id)
+                     | (BrandBillingPlan.stripe_price_id_annual == price_id)
+                     | (BrandBillingPlan.stripe_price_id_month_to_month == price_id))
+             .first())
+    if found is not None:
+        return found
+    # A subscription still on an EARLIER price of a plan (kept after a price
+    # change) must keep resolving to that plan on every renewal.
+    for plan in (db.query(BrandBillingPlan)
+                 .filter(BrandBillingPlan.platform_id == platform_id,
+                         BrandBillingPlan.stripe_price_ids_legacy.isnot(None))
+                 .all()):
+        if price_id in legacy_price_ids(plan):
+            return plan
+    return None
+
+
+def legacy_price_ids(plan: BrandBillingPlan) -> list:
+    raw = getattr(plan, "stripe_price_ids_legacy", None)
+    if not raw:
+        return []
+    try:
+        import json as _json
+        ids = _json.loads(raw)
+        return [str(i) for i in ids if i] if isinstance(ids, list) else []
+    except Exception:
+        return []
 
 
 def interval_for_price_id(plan: BrandBillingPlan, price_id: str) -> Optional[str]:
@@ -140,6 +163,9 @@ def interval_for_price_id(plan: BrandBillingPlan, price_id: str) -> Optional[str
         return BillingInterval.YEAR
     if price_id in (plan.stripe_price_id_monthly,
                     plan.stripe_price_id_month_to_month):
+        return BillingInterval.MONTH
+    if price_id in legacy_price_ids(plan):
+        # Every legacy EvoSys price is a monthly price.
         return BillingInterval.MONTH
     return None
 

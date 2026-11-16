@@ -118,6 +118,12 @@ B_NOTHING_TO_CHARGE = "deal_has_nothing_to_charge"
 B_SUBSCRIPTION_EXISTS = "customer_already_has_a_subscription"
 B_CUSTOM_DENIED = "custom_recurring_rate_was_denied"
 B_CUSTOM_DECISION_PENDING = "custom_pricing_decision_still_pending"
+# EvoSys Pro Sales package deals: the payment link must match the quote.
+B_QUOTE_MISSING = "no_saved_quote_for_this_deal"
+B_QUOTE_SETUP_MISMATCH = "setup_amount_differs_from_quote"
+B_QUOTE_MONTHLY_MISMATCH = "monthly_amount_differs_from_quote"
+B_QUOTE_PACKAGE_MISMATCH = "package_differs_from_quote"
+B_SETUP_NOT_PAID = "setup_not_paid_yet"
 
 # HOW a recurring charge gets its amount. The router branches on this rather
 # than on "is `plan` None", so a future third mode has to declare itself here
@@ -164,6 +170,25 @@ BLOCKER_TEXT = {
         "A custom pricing decision on this deal is still waiting on a manager. "
         "The rate is not settled yet, so charging it now could bill the customer "
         "an amount that is about to change.",
+    B_QUOTE_MISSING:
+        "There is no saved quote on this deal. Build and save the quote (Build "
+        "Quote) so the payment link can be checked against what the customer "
+        "was quoted.",
+    B_QUOTE_SETUP_MISMATCH:
+        "The one-time amount this link would charge is not what the customer "
+        "was quoted. Revise the quote or the deal so they agree, then create "
+        "the link.",
+    B_QUOTE_MONTHLY_MISMATCH:
+        "The monthly amount this link would charge is not what the customer "
+        "was quoted. Revise the quote or the deal so they agree, then create "
+        "the link.",
+    B_QUOTE_PACKAGE_MISMATCH:
+        "The package on this deal is not the package the customer was quoted. "
+        "Revise the quote or the deal so they agree.",
+    B_SETUP_NOT_PAID:
+        "Month 1 is the one-time setup only. The monthly link is created after "
+        "the setup payment arrives, so the first monthly charge is scheduled one "
+        "month after the actual setup payment.",
 }
 
 
@@ -202,6 +227,9 @@ BLOCKER_SCOPE = {
     # else — so an unsettled one does not make the setup fee unsettled.
     B_CUSTOM_DENIED: SUBSCRIPTION_ONLY,
     B_CUSTOM_DECISION_PENDING: SUBSCRIPTION_ONLY,
+    B_QUOTE_SETUP_MISMATCH: ("setup",),
+    B_QUOTE_MONTHLY_MISMATCH: SUBSCRIPTION_ONLY,
+    B_SETUP_NOT_PAID: SUBSCRIPTION_ONLY,
 }
 
 
@@ -695,7 +723,6 @@ def terms_for(db: Session, opp) -> Dict[str, Any]:
         out["charges"].append({"kind": "setup_fee", "cents": _cents(setup),
                                "label": "Implementation fee"})
 
-    out["billable"] = bool(out["charges"]) and not blockers
 
     # ── readiness, PER OBLIGATION ─────────────────────────────────────────
     # `billable` is the whole-deal answer and stays exactly as it was, because
@@ -703,6 +730,13 @@ def terms_for(db: Session, opp) -> Dict[str, Any]:
     # each needs its own answer: a customer who already has a subscription can
     # still be sent an implementation-fee page, and a plan whose Stripe price
     # is missing does not make the setup fee uncollectable.
+    # ── EvoSys Pro Sales packages: the link must match the quote ──────────
+    try:
+        _quote_checks(db, opp, res, out, blockers)
+    except Exception:                                   # pragma: no cover
+        log.exception("deal_billing: quote check failed")
+        blockers.append(_blocker(B_QUOTE_MISSING))
+
     # EvoSys Pro Sales packages: the monthly fee starts in Month 2. Shown on
     # the seller's panel before a link is created, so nobody is surprised.
     _sub = next((c for c in out["charges"] if c["kind"] == "subscription"), None)
@@ -717,6 +751,7 @@ def terms_for(db: Session, opp) -> Dict[str, Any]:
             out["monthly_billing_starts"] = _m2.date().isoformat() if _m2 else None
         except Exception:                               # pragma: no cover
             log.exception("deal_billing: could not work out the Month 2 start")
+    out["billable"] = bool(out["charges"]) and not blockers
     _kinds = {c["kind"] for c in out["charges"]}
     out["billable_parts"] = {
         "setup": ("setup_fee" in _kinds
@@ -783,3 +818,78 @@ def monthly_billing_start(db: Session, opp, *, pricing_mode: Optional[str] = Non
     latest = add_one_month(now) - MONTH2_MAX_SLACK
     earliest = now + MONTH2_MIN_LEAD
     return max(earliest, min(start, latest))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# QUOTE-TO-CHECKOUT AGREEMENT (EvoSys Pro Sales standard packages)
+# ═══════════════════════════════════════════════════════════════════════════
+# A payment link may only charge what the customer was quoted. The quote of
+# record is the accepted proposal's frozen Deal Builder quote when there is
+# one, otherwise the deal's latest saved Deal Builder quote. The package, the
+# one-time amount and the monthly amount must all agree with what the link
+# would charge, or the link is refused with the reason. A quote saved under
+# old prices therefore has to be visibly revised before a new link is issued.
+# The monthly link also waits for the actual setup payment (Month 2 rule).
+
+def quote_of_record(db: Session, opp) -> Optional[Dict[str, Any]]:
+    import json as _json
+    from app.models.models import Proposal
+    from app.models.sales_quote_models import SalesQuoteDraft, SalesQuoteSnapshot
+    accepted = (db.query(Proposal)
+                .filter(Proposal.opportunity_id == opp.id, Proposal.deleted_at.is_(None),
+                        Proposal.accepted_at.isnot(None))
+                .order_by(Proposal.accepted_at.desc()).first())
+    if accepted is not None:
+        snap = (db.query(SalesQuoteSnapshot)
+                .filter(SalesQuoteSnapshot.proposal_id == accepted.id).first())
+        if snap is not None:
+            try:
+                data = _json.loads(snap.data_json or "{}")
+            except Exception:
+                data = {}
+            if data.get("plan_key") is not None:
+                return {"source": "accepted proposal %s" % (accepted.proposal_number or accepted.id),
+                        "revision": snap.draft_revision, "plan_key": data.get("plan_key"),
+                        "setup_total": Decimal(str(data.get("setup_total") or 0)),
+                        "monthly_total": Decimal(str(data.get("monthly_total") or 0))}
+    d = db.query(SalesQuoteDraft).filter(SalesQuoteDraft.opportunity_id == opp.id).first()
+    if d is None:
+        return None
+    return {"source": "saved quote", "revision": d.revision, "plan_key": d.plan_key,
+            "setup_total": Decimal(str(d.setup_total)), "monthly_total": Decimal(str(d.monthly_total)),
+            "rules_version": d.rules_version}
+
+
+def _quote_checks(db: Session, opp, res: Dict[str, Any], out: Dict[str, Any], blockers: list) -> None:
+    from app.services import sales_program_comp
+    if not sales_program_comp.applies(db, opp) or res.get("is_custom_rate"):
+        return
+    pkg_key = (getattr(res.get("package"), "key", None) or "").lower()
+    plan_key = sales_program_comp.PACKAGE_TO_PLAN.get(pkg_key)
+    if plan_key not in ("basic", "growth", "professional"):
+        return                                   # Custom SaaS / à la carte: unchanged
+    q = quote_of_record(db, opp)
+    out["quote_of_record"] = None
+    if q is None:
+        blockers.append(_blocker(B_QUOTE_MISSING))
+        return
+    out["quote_of_record"] = {"source": q["source"], "revision": q["revision"],
+                              "plan_key": q["plan_key"],
+                              "setup_cents": _cents(q["setup_total"]),
+                              "monthly_cents": _cents(q["monthly_total"])}
+    if q["plan_key"] != plan_key:
+        blockers.append(_blocker(B_QUOTE_PACKAGE_MISMATCH, quoted=q["plan_key"], deal=plan_key))
+    setup = next((c for c in out["charges"] if c["kind"] == "setup_fee"), None)
+    sub = next((c for c in out["charges"] if c["kind"] == "subscription"), None)
+    if setup is not None and setup["cents"] != _cents(q["setup_total"]):
+        blockers.append(_blocker(B_QUOTE_SETUP_MISMATCH, quoted_cents=_cents(q["setup_total"]),
+                                 link_cents=setup["cents"], quote=q["source"],
+                                 revision=q["revision"]))
+    if sub is not None and sub["cents"] != _cents(q["monthly_total"]):
+        blockers.append(_blocker(B_QUOTE_MONTHLY_MISMATCH, quoted_cents=_cents(q["monthly_total"]),
+                                 link_cents=sub["cents"], quote=q["source"],
+                                 revision=q["revision"]))
+    if sub is not None:
+        impl = implementation_for(db, opp)
+        if getattr(impl, "setup_payment_status", None) != "paid" or not getattr(impl, "setup_paid_at", None):
+            blockers.append(_blocker(B_SETUP_NOT_PAID))

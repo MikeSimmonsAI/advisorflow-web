@@ -230,12 +230,46 @@ def overview(brand_sales_org_id: str = Query(None),
             if r.package_id and (r.amount is not None or r.percent is not None):
                 ruled.add(r.package_id)
 
+    # THE RULES ACTUALLY USED for EvoSys Pro Sales deals. compensation.earn()
+    # and compute() send every deal of that brand to sales_program_comp, which
+    # pays from deal_builder_commission - so the plans below are NOT used for
+    # it, and are marked legacy rather than left to look authoritative.
+    from app.services import deal_builder_commission as _dbc
+    from app.services import sales_team as _st
+    program = _st.program_brand(db)
+    program_id = getattr(program, "id", None)
+    active_rules = {
+        "brand_sales_org_id": program_id,
+        "brand_name": getattr(program, "name", None),
+        "rules_version": _dbc.RULES_VERSION,
+        "prices_version": _dbc.STANDARD_PRICES_VERSION,
+        "holdback_days": 14,
+        "billing": "Month 1: the one-time setup fee only. Month 2 onward: the monthly price, "
+                   "first charged one month after the setup payment.",
+        "packages": [{"name": sp["name"], "catalog_key": sp["catalog_key"],
+                      "setup": float(sp["setup"]), "monthly": float(sp["monthly"]),
+                      "flat_setup_payout": {r: float(v) for r, v in sp["payout"].items()}}
+                     for sp in _dbc.STANDARD_PACKAGES],
+        "monthly_residual_pct": {r: float(v) for r, v in _dbc.PACKAGE_PCT.items()},
+        "addon_setup_pct": {r: float(v) for r, v in _dbc.PACKAGE_ADDON_SETUP_PCT.items()},
+        "custom_saas_pct": {r: float(v) for r, v in _dbc.SAAS_PCT.items()},
+        "source": "app/services/deal_builder_commission.py (used by Deal Builders, "
+                  "saved quotes and every earned commission record for this brand)",
+    }
+
     return {
         "brands": [{"id": b.id, "name": b.name, "platform_id": b.platform_id}
                    for b in brands],
+        "active_rules": active_rules,
         "selected_brand_sales_org_id": scope,
         "policies": [_policy_out(p) for p in policies],
-        "plans": [_plan_out(db, p) for p in plans],
+        "plans": [dict(_plan_out(db, p),
+                       legacy_for_program=bool(program_id and p.brand_sales_org_id == program_id),
+                       legacy_note=("LEGACY — not used. EvoSys Pro Sales deals are paid by "
+                                    "the launch rules %s shown above; this plan cannot "
+                                    "override them." % _dbc.RULES_VERSION)
+                       if program_id and p.brand_sales_org_id == program_id else None)
+                  for p in plans],
         "packages": [{"id": p.id, "name": p.name, "key": p.key,
                       "platform_id": p.platform_id,
                       "setup_fee": _f(p.setup_fee if p.setup_fee is not None else p.price),

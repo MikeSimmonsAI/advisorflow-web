@@ -153,6 +153,13 @@ def test_subscription_link_for_program_package_charges_nothing_in_month1(client,
     world["pkg"].billing_plan_key = "growth"
     world["org"].stripe_customer_id = "cus_test123"
     world["impl"].setup_paid_at = datetime.utcnow() - timedelta(days=3)
+    world["impl"].setup_payment_status = "paid"
+    # The link must match the saved quote (quote-to-checkout check).
+    from app.models.sales_quote_models import SalesQuoteDraft
+    db_session.add(SalesQuoteDraft(opportunity_id=world["opp"].id, revision=1, plan_key="growth",
+                                   setup_total=Decimal("2500"), monthly_total=Decimal("500"),
+                                   addon_setup=Decimal("0"), data_json="{}",
+                                   rules_version=dbc.RULES_VERSION))
     db_session.commit()
     with patch("app.services.sales_program_comp.applies", return_value=True), \
          patch("stripe.checkout.Session.create", return_value=tdb._Sess()) as create, \
