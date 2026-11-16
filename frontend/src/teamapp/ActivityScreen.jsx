@@ -49,11 +49,6 @@ function resolve(item, inv) {
   return { accent: look.accent, icon: look.icon, name: card ? card.display : (item.headline || item.workspace), card }
 }
 
-function changeIcon(item) {
-  if (item.kind === 'mention') return null
-  return item.change === 'cancelled' ? 'calendarX' : item.change === 'updated' ? 'calendarEdit' : 'calendarCheck'
-}
-
 function endOf(startWire, minutes) {
   if (!startWire || !minutes) return null
   const d = new Date(startWire)
@@ -65,32 +60,44 @@ function Row({ item, inv, tz, mode, nowIso }) {
   const navigate = useNavigate()
   const r = resolve(item, inv)
   const open = r.to ? () => navigate(r.to) : r.card ? () => openProgramItem(r.card, navigate, { origin: MOBILE_PROGRAMS }) : null
-  const tileIcon = mode === 'updates' ? (changeIcon(item) || r.icon) : r.icon
   const end = endOf(item.starts_at, item.minutes)
+  const style = { '--acc': r.accent }
   return (
     <li>
-      <button type="button" className="ta-arow" style={{ '--acc': r.accent }} onClick={open || undefined} disabled={!open}
-              data-kind={item.kind}>
-        <span className="ta-prow-tile" aria-hidden><Icon name={tileIcon} size={22} /></span>
+      <button type="button" className="ta-acard" style={style} onClick={open || undefined} disabled={!open}
+              data-kind={item.kind} data-change={item.change || ''}>
+        <span className="ta-acard-tile" aria-hidden><Icon name={r.icon} size={24} /></span>
         <span className="ta-prow-main">
           {mode === 'updates' ? <>
-            <span className="ta-prow-name">{r.name}</span>
-            <span className="ta-arow-text">{item.text}</span>
+            <span className="ta-acard-title">{r.name} · {String(item.text || '').replace(/\.$/, '')}</span>
             {item.kind === 'mention' && item.preview && <span className="ta-arow-sub">“{item.preview}”</span>}
             {item.kind !== 'mention' && item.starts_at && (
-              <span className="ta-arow-sub">{item.title} · {fmtLocalDay(localYmd(item.starts_at, tz))} {fmtTime(item.starts_at, tz)}</span>)}
+              <span className="ta-arow-sub">{item.title} · {fmtLocalDay(localYmd(item.starts_at, tz))}, {fmtTime(item.starts_at, tz)}</span>)}
             <span className="ta-arow-when">{fmtListTime(item.at, tz, nowIso)}</span>
           </> : <>
-            <span className="ta-prow-name">{r.name === 'Sales Workspace' ? item.title : r.name + ' ' + item.title}</span>
-            <span className="ta-arow-line"><Icon name="calendar" size={16} /> {fmtLocalDay(localYmd(item.starts_at, tz))}</span>
-            <span className="ta-arow-line"><Icon name="clock" size={16} /> {fmtTime(item.starts_at, tz)}{end ? ' – ' + fmtTime(end, tz) : ''}
-              {item.where ? ' · ' + item.where : ''}</span>
+            <span className="ta-acard-title">{r.name === 'Sales Workspace' ? item.title : r.name + ' ' + item.title}</span>
+            <span className="ta-acard-time">{fmtTime(item.starts_at, tz)}{end ? ' – ' + fmtTime(end, tz) : ''}</span>
+            {item.where && <span className="ta-arow-sub">{item.where}</span>}
           </>}
         </span>
         {open && <Icon name="chev" size={20} />}
       </button>
     </li>
   )
+}
+
+/** Group update items by the local day they happened: Today, Yesterday, or the date. */
+function groupByDay(items, tz) {
+  const today = localYmd(new Date().toISOString(), tz)
+  const yesterday = addDays(today, -1)
+  const out = []
+  for (const it of items) {
+    const d = localYmd(it.at, tz)
+    const label = d === today ? 'Today' : d === yesterday ? 'Yesterday' : fmtLocalDay(d)
+    const last = out[out.length - 1]
+    if (last && last.label === label) last.items.push(it); else out.push({ label, items: [it] })
+  }
+  return out
 }
 
 function Unavailable({ sources }) {
@@ -112,7 +119,11 @@ function Updates({ inv, tz }) {
     <Unavailable sources={data.sources} />
     {data.items.length === 0
       ? <div className="ta-state">Nothing new in the last {data.days} days.<br />Bookings, appointment changes{data.chat ? ' and chat mentions' : ''} show up here.</div>
-      : <ul className="ta-plist" aria-label="Updates">{data.items.map(i => <Row key={i.id} item={i} inv={inv} tz={tz} mode="updates" nowIso={nowIso} />)}</ul>}
+      : groupByDay(data.items, tz).map(g => (
+        <section key={g.label} className="ta-section">
+          <h2 className="ta-h2">{g.label}</h2>
+          <ul className="ta-cards" aria-label={'Updates, ' + g.label}>{g.items.map(i => <Row key={i.id} item={i} inv={inv} tz={tz} mode="updates" nowIso={nowIso} />)}</ul>
+        </section>))}
   </>
 }
 
@@ -120,20 +131,27 @@ function Upcoming({ inv, tz }) {
   const today = localYmd(new Date().toISOString(), tz)
   const [day, setDay] = useState(today)
   const { data, error, loading, reload } = useTeamApi('/team-app/activity/upcoming?date=' + day)
+  const heading = day === today ? 'Today' : day === addDays(today, 1) ? 'Tomorrow' : day === addDays(today, -1) ? 'Yesterday' : fmtLocalDay(day)
   return <>
     <div className="ta-daynav">
       <button type="button" className="ta-daybtn" onClick={() => setDay(d => addDays(d, -1))} aria-label="Previous day"><Icon name="back" size={20} /></button>
-      <button type="button" className="ta-daylabel" onClick={() => setDay(today)} aria-label={'Showing ' + fmtLocalDay(day) + '. Tap for today.'}>
-        <Icon name="calendar" size={20} /> {fmtLocalDay(day)}{day === today ? ' · Today' : ''}</button>
+      <label className="ta-daylabel">
+        <span>{fmtLocalDay(day)}</span><Icon name="chevDown" size={18} />
+        <input type="date" value={day} aria-label="Choose a day" onChange={e => { if (e.target.value) setDay(e.target.value) }} />
+      </label>
       <button type="button" className="ta-daybtn ta-flip" onClick={() => setDay(d => addDays(d, 1))} aria-label="Next day"><Icon name="back" size={20} /></button>
+    </div>
+    <div className="ta-section-head">
+      <h2 className="ta-h2">{heading}</h2>
+      {day !== today && <button type="button" className="ta-linkbtn" onClick={() => setDay(today)}>Back to today</button>}
     </div>
     {loading && !data && <Loading />}
     {error && <ErrorNote error={error} onRetry={reload} />}
     {data && data.date === day && <>
       <Unavailable sources={data.sources} />
       {data.items.length === 0
-        ? <div className="ta-state">Nothing scheduled for {fmtLocalDay(day)}.</div>
-        : <ul className="ta-plist" aria-label={'Upcoming on ' + fmtLocalDay(day)}>{data.items.map(i => <Row key={i.id} item={i} inv={inv} tz={tz} mode="upcoming" />)}</ul>}
+        ? <div className="ta-empty"><Icon name="calendar" size={30} /><p>Nothing scheduled for {fmtLocalDay(day)}.</p></div>
+        : <ul className="ta-cards" aria-label={'Upcoming on ' + fmtLocalDay(day)}>{data.items.map(i => <Row key={i.id} item={i} inv={inv} tz={tz} mode="upcoming" />)}</ul>}
     </>}
   </>
 }

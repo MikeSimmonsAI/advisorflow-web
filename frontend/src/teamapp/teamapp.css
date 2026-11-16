@@ -4,7 +4,7 @@
    Scoped under .ta-* so nothing leaks into the web app. */
 .ta-shell, .ta-login, .ta-convo {
   --ta-navy: #0b1a3a; --ta-navy-2: #12285a; --ta-blue: #1554e8; --ta-blue-soft: #e8efff;
-  --ta-gold: #e7b84a; --ta-bg: #eef2f8; --ta-card: #ffffff; --ta-line: #e3e8f0; --ta-text: #0f172a;
+  --ta-gold: #e7b84a; --ta-bg: #e8eef7; --ta-card: #ffffff; --ta-line: #e3e8f0; --ta-text: #0f172a;
   --ta-muted: #5b6475; --ta-red: #c62828; --ta-green: #138a4c;
   --ta-safe-b: env(safe-area-inset-bottom, 0px); --ta-safe-t: env(safe-area-inset-top, 0px);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -13,7 +13,8 @@
 /* The shell is exactly the screen: header and tabs are fixed rows, the middle
    panel is the only thing that scrolls (so the program list is always reachable
    and nothing jumps when the browser bars show or hide). */
-.ta-shell { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--ta-bg); overflow: hidden; }
+.ta-shell { position: fixed; inset: 0; display: flex; flex-direction: column; overflow: hidden;
+  background: linear-gradient(180deg, #edf2fa 0%, #e2e9f4 100%); }
 .ta-top { flex: none; z-index: 5; display: flex; align-items: center; justify-content: space-between;
   background: var(--ta-navy); color: #fff; padding: calc(10px + var(--ta-safe-t)) max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left)); }
 .ta-envstrip { flex: none; }
@@ -213,6 +214,123 @@
 .ta-toggle small { color: var(--ta-muted); font-size: 13px; }
 .ta-toggle--sm { padding: 6px 0; }
 .ta-scope { border-top: 1px solid var(--ta-line); margin-top: 6px; }
+
+/* ── Redesign (approved boards, 2026-11-15): pinned cards, program grid, chat
+   inbox, activity cards, account tiles ─────────────────────────────────── */
+.ta-section { margin: 0 0 6px; }
+.ta-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.ta-section .ta-h2, .ta-section-head .ta-h2 { font-size: 20px; font-weight: 800; margin: 14px 0 10px; }
+.ta-linkbtn { border: 0; background: none; color: var(--ta-blue); font: inherit; font-weight: 700; font-size: 16px; padding: 10px 4px; min-height: 44px; cursor: pointer; }
+
+/* Pinned: two large shortcuts side by side */
+.ta-pins { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ta-pins.is-one { grid-template-columns: 1fr 1fr; }
+.ta-pin, .ta-feat { --acc: #3b4a63; --acc2: var(--acc); position: relative; overflow: hidden; border: 0; border-radius: 16px; min-height: 112px;
+  padding: 14px; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 4px; text-align: left;
+  font: inherit; color: #fff; cursor: pointer; box-shadow: 0 6px 16px rgba(15, 23, 42, .18);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--acc) 92%, #000) 0%, var(--acc) 55%, color-mix(in srgb, var(--acc) 70%, #fff) 100%); }
+.ta-pin.has-second { box-shadow: inset 0 -4px 0 var(--acc2), 0 6px 16px rgba(15, 23, 42, .18); }
+.ta-pin:active, .ta-feat:active { transform: scale(.985); }
+.ta-pin-art { position: absolute; right: -6px; bottom: -4px; width: 62%; height: auto; color: rgba(255, 255, 255, .28); pointer-events: none; }
+.ta-pin-icon, .ta-feat-icon { position: relative; display: inline-flex; margin-bottom: auto; }
+.ta-pin.has-second .ta-pin-icon { color: var(--acc2); }
+.ta-pin-name, .ta-feat-name { position: relative; font-weight: 800; font-size: 20px; line-height: 1.12; overflow-wrap: break-word; max-width: 100%; text-shadow: 0 1px 2px rgba(0,0,0,.25); }
+.ta-pin-sub { position: relative; font-size: 12.5px; opacity: .9; }
+.ta-pin-empty { width: 100%; min-height: 72px; border: 2px dashed #b9c6dc; border-radius: 16px; background: rgba(255,255,255,.55); color: var(--ta-navy);
+  font: inherit; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; padding: 12px; }
+
+/* All Programs: compact three-column grid; two columns on narrow phones */
+.ta-grid { list-style: none; margin: 0 0 12px; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 339px) { .ta-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.ta-tile { --acc: #3b4a63; --acc2: var(--acc); width: 100%; height: 100%; min-height: 112px; border: 1px solid #dbe3ef; border-radius: 16px;
+  background: linear-gradient(180deg, #fff, #f3f6fb); box-shadow: 0 2px 6px rgba(15, 23, 42, .07); padding: 12px 6px 10px;
+  display: flex; flex-direction: column; align-items: center; gap: 7px; font: inherit; color: var(--ta-text); cursor: pointer; text-align: center; }
+.ta-tile:active { transform: scale(.98); }
+.ta-tile-icon { width: 54px; height: 50px; border-radius: 13px; display: grid; place-items: center; color: #fff;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--acc) 75%, #fff), var(--acc)); box-shadow: 0 3px 8px color-mix(in srgb, var(--acc) 35%, transparent); }
+.ta-tile-icon.has-second { color: var(--acc2); background: linear-gradient(160deg, color-mix(in srgb, var(--acc) 85%, #fff), var(--acc)); }
+.ta-tile-name { font-weight: 800; font-size: 14.5px; line-height: 1.15; overflow-wrap: break-word; max-width: 100%; }
+.ta-tile-sub { font-size: 11.5px; color: var(--ta-muted); line-height: 1.2; overflow-wrap: break-word; max-width: 100%;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Edit pins sheet */
+.ta-sheet-grip { width: 44px; height: 5px; border-radius: 3px; background: #cdd5e2; margin: 2px auto 10px; }
+.ta-sheet-title { font-size: 22px; font-weight: 800; margin: 0 0 2px; }
+.ta-pinlist { list-style: none; margin: 8px 0 14px; padding: 0; border: 1px solid var(--ta-line); border-radius: 14px; overflow: hidden; }
+.ta-pinlist > li + li { border-top: 1px solid var(--ta-line); }
+.ta-pinrow { display: flex; align-items: center; gap: 12px; padding: 10px 14px; min-height: 56px; cursor: pointer; background: #fff; }
+.ta-pinrow.is-off { opacity: .55; cursor: default; }
+.ta-pinrow-tile { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; color: #fff; background: var(--acc); flex: none; }
+.ta-pinrow-name { flex: 1; min-width: 0; font-weight: 700; font-size: 16.5px; display: flex; flex-direction: column; }
+.ta-pinrow-name small { color: var(--ta-muted); font-weight: 500; font-size: 12.5px; }
+.ta-pinrow input { width: 24px; height: 24px; accent-color: var(--ta-blue); flex: none; }
+
+/* Chat inbox */
+.ta-compose { width: 46px; height: 46px; border-radius: 12px; border: 0; background: var(--ta-blue); color: #fff; display: grid; place-items: center; cursor: pointer;
+  box-shadow: 0 3px 8px rgba(21, 84, 232, .35); }
+.ta-feat { --acc: #2563EB; justify-content: flex-end; }
+.ta-feat.is-news { --acc: #475569; }
+.ta-feat-name { font-size: 17px; }
+@media (max-width: 380px) { .ta-feat-name, .ta-pin-name { font-size: 16px; } }
+.ta-feat-badge { position: absolute; top: 10px; right: 10px; min-width: 22px; height: 22px; border-radius: 11px; background: #fff; color: var(--ta-blue);
+  font-weight: 800; font-size: 12.5px; display: grid; place-items: center; padding: 0 6px; }
+.ta-cards { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.ta-chatcard { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 10px 12px 14px; min-height: 70px; border: 1px solid #dbe3ef;
+  border-radius: 16px; background: #fff; box-shadow: 0 2px 6px rgba(15, 23, 42, .06); font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.ta-chatcard > .ta-avatar:not(.ta-avatar--icon) { width: 46px; height: 46px; font-size: 16px; }
+.ta-chatcard .ta-avatar--icon { background: #e3ebfb; color: var(--ta-blue); }
+.ta-chatcard.is-unread .ta-chatrow-name { color: #0b1a3a; }
+.ta-chatcard .ta-chatrow-preview { display: block; }
+.ta-count { flex: none; min-width: 24px; height: 24px; border-radius: 12px; background: var(--ta-blue); color: #fff; font-size: 12.5px; font-weight: 800;
+  display: grid; place-items: center; padding: 0 7px; }
+
+/* Open conversation: same navy and slate as the rest of the app */
+.ta-convo { background: #e8eef7; }
+.ta-msgs { background: linear-gradient(180deg, #edf2fa, #e4ebf5); }
+.ta-bubble { background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .08); }
+.ta-msg.is-mine .ta-bubble { background: var(--ta-blue); color: #fff; }
+.ta-msg.is-mine .ta-mention { color: #fff; text-decoration: underline; }
+.ta-msg.is-mine .ta-quote { color: rgba(255,255,255,.85); border-left-color: rgba(255,255,255,.6); }
+.ta-composer { background: #fff; box-shadow: 0 -2px 8px rgba(15, 23, 42, .06); }
+.ta-input { border-radius: 22px; padding: 11px 16px; background: #f4f7fc; }
+.ta-input:focus, .ta-input:focus-visible, .ta-drive input:focus { outline: none !important; border-color: var(--ta-blue) !important; box-shadow: 0 0 0 3px rgba(21, 84, 232, .15) !important; }
+/* The web app's global input glow is for its own forms; inside these boxes the box itself shows focus. */
+.ta-searchbox input:focus, .ta-field input:focus { box-shadow: none !important; border-color: transparent !important; }
+.ta-send { border-radius: 22px; }
+
+/* Activity cards */
+.ta-acard { --acc: #3b4a63; width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 10px 12px 12px; min-height: 76px;
+  border: 1px solid color-mix(in srgb, var(--acc) 22%, #fff); border-radius: 16px; font: inherit; color: inherit; text-align: left; cursor: pointer;
+  background: linear-gradient(100deg, color-mix(in srgb, var(--acc) 13%, #fff), color-mix(in srgb, var(--acc) 5%, #fff));
+  box-shadow: 0 2px 6px rgba(15, 23, 42, .06); }
+.ta-acard:disabled { cursor: default; }
+.ta-acard:active:not(:disabled) { filter: brightness(.97); }
+.ta-acard-tile { flex: none; width: 48px; height: 48px; border-radius: 13px; display: grid; place-items: center; color: #fff;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--acc) 78%, #fff), var(--acc)); }
+.ta-acard-title { font-weight: 800; font-size: 16.5px; line-height: 1.22; color: #0f172a; overflow-wrap: break-word; }
+.ta-acard-time { font-size: 15px; color: #334155; font-variant-numeric: tabular-nums; }
+.ta-seg { background: #fff; border: 1px solid #d5dce8; border-radius: 22px; }
+.ta-seg button { border-radius: 18px; }
+.ta-daylabel { position: relative; }
+.ta-daylabel input[type="date"] { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.ta-empty { text-align: center; color: var(--ta-muted); padding: 30px 12px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.ta-empty p { margin: 6px 0 0; }
+
+/* Account */
+.ta-profile { padding: 16px; border-radius: 18px; }
+.ta-profile .ta-avatar { background: linear-gradient(160deg, #dbe7ff, #bcd2fb); }
+.ta-profile-text { min-width: 0; border-left: 1px solid var(--ta-line); padding-left: 14px; }
+.ta-profile-name { font-weight: 800; font-size: 21px; overflow-wrap: break-word; }
+.ta-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 4px 0 12px; }
+.ta-action { min-height: 128px; border: 1px solid #dbe3ef; border-radius: 18px; background: #fff; box-shadow: 0 2px 6px rgba(15, 23, 42, .06);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font: inherit; color: var(--ta-text); cursor: pointer; padding: 12px 8px; }
+.ta-action:active { transform: scale(.98); }
+.ta-action-icon { width: 62px; height: 56px; border-radius: 14px; display: grid; place-items: center; color: #fff; }
+.ta-action--blue .ta-action-icon { background: linear-gradient(160deg, #3b82f6, #1d4ed8); }
+.ta-action--green .ta-action-icon { background: linear-gradient(160deg, #22a06b, #087F68); }
+.ta-action--red .ta-action-icon { background: linear-gradient(160deg, #ef4444, #C62839); }
+.ta-action-label { font-weight: 800; font-size: 17px; text-align: center; line-height: 1.15; }
+.ta-action-sub { font-size: 12.5px; color: var(--ta-muted); margin-top: -6px; }
 
 @media (min-width: 700px) {
   .ta-convo { left: 50%; transform: translateX(-50%); max-width: 640px; border-left: 1px solid var(--ta-line); border-right: 1px solid var(--ta-line); }

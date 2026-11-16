@@ -386,3 +386,32 @@ def test_one_failing_source_does_not_hide_the_others(client, team, monkeypatch):
     body = client.get("/team-app/activity/updates", headers=h["rep2"]).json()
     assert {s["key"]: s["available"] for s in body["sources"]}["workspace_bookings"] is False
     assert [i for i in body["items"] if i["kind"] == "mention"]
+
+
+# ── Programs: phone pins ────────────────────────────────────────────────────
+
+def test_pins_are_per_account_capped_at_two_and_editable(client, team):
+    h = team["h"]
+    assert client.get("/team-app/pins", headers=h["rep1"]).json() == {"keys": [], "max": 2}
+    r = client.put("/team-app/pins", json={"keys": ["workspace:a:", "deal_builder::calc"]}, headers=h["rep1"])
+    assert r.status_code == 200 and r.json()["keys"] == ["workspace:a:", "deal_builder::calc"]
+    # Order kept, duplicates dropped, a third pin refused and nothing changed.
+    assert client.put("/team-app/pins", json={"keys": ["x", "y", "z"]}, headers=h["rep1"]).status_code == 400
+    assert client.get("/team-app/pins", headers=h["rep1"]).json()["keys"] == ["workspace:a:", "deal_builder::calc"]
+    # Another account sees only its own pins.
+    assert client.get("/team-app/pins", headers=h["rep2"]).json()["keys"] == []
+    # Change and remove.
+    client.put("/team-app/pins", json={"keys": ["deal_builder::calc", "deal_builder::calc"]}, headers=h["rep1"])
+    assert client.get("/team-app/pins", headers=h["rep1"]).json()["keys"] == ["deal_builder::calc"]
+    client.put("/team-app/pins", json={"keys": []}, headers=h["rep1"])
+    assert client.get("/team-app/pins", headers=h["rep1"]).json()["keys"] == []
+    assert client.get("/team-app/pins").status_code == 401
+
+
+def test_phone_pins_do_not_touch_desktop_pins(client, team):
+    h = team["h"]["owner"]
+    client.put("/launcher/pins", json={"keys": ["a", "b", "c"]}, headers=h)
+    client.put("/team-app/pins", json={"keys": ["b"]}, headers=h)
+    assert client.get("/launcher/pins", headers=h).json()["keys"] == ["a", "b", "c"]
+    client.put("/launcher/pins", json={"keys": ["c"]}, headers=h)
+    assert client.get("/team-app/pins", headers=h).json()["keys"] == ["b"]

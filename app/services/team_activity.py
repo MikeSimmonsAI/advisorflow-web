@@ -96,7 +96,8 @@ def _booking_json(db: Session, b: BookingLink, lead: Lead, ws: Dict[str, Any]) -
 
 def _booking_rows(db: Session, org_ids: List[str]):
     if not org_ids:
-        return db.query(BookingLink, Lead).filter(BookingLink.id.is_(None))
+        return (db.query(BookingLink, Lead).join(Lead, Lead.id == BookingLink.lead_id)
+                .filter(BookingLink.id.is_(None)))
     return (db.query(BookingLink, Lead).join(Lead, Lead.id == BookingLink.lead_id)
             .filter(Lead.organization_id.in_(org_ids), Lead.is_test.isnot(True),
                     BookingLink.booked_time.isnot(None)))

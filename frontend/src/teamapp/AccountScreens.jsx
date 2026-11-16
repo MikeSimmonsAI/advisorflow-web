@@ -10,27 +10,67 @@ import { isInstalled, isIOS, canPromptInstall, promptInstall } from '../pages/wh
 import { LABELS, TEAM_RIGHTS } from './teamHelpers'
 import { Avatar, ErrorNote, Icon, Loading, ScreenTitle, useTeam, useTeamApi } from './TeamApp'
 
+function roleLine(user, a) {
+  if (a.is_platform) return 'Platform'
+  return a.platform_name || ''
+}
+
+function ActionTile({ icon, label, tone, onClick, sub }) {
+  return (
+    <button type="button" className={'ta-action ta-action--' + tone} onClick={onClick}>
+      <span className="ta-action-icon" aria-hidden><Icon name={icon} size={30} /></span>
+      <span className="ta-action-label">{label}</span>
+      {sub && <span className="ta-action-sub">{sub}</span>}
+    </button>
+  )
+}
+
 export function AccountScreen() {
   const navigate = useNavigate()
-  const { me, signOut, tz } = useTeam()
+  const { me, signOut } = useTeam()
   const [installMsg, setInstallMsg] = useState(null)
   const user = (me && me.user) || {}
   const a = (me && me.access) || {}
   const installed = isInstalled()
   async function install() {
+    if (installed) { setInstallMsg('EvoSys is already installed on this device.'); return }
     if (canPromptInstall()) { const ok = await promptInstall(); setInstallMsg(ok ? 'Installed.' : null); return }
     setInstallMsg(isIOS()
       ? 'In Safari, tap the Share button, then “Add to Home Screen”.'
       : 'In Chrome, open the ⋮ menu, then “Install app” or “Add to Home screen”.')
   }
-  const rights = [a.chat && 'Chat', a.announce && 'Post announcements',
-                  a.chat_manage && 'Manage chat rooms'].filter(Boolean)
+  const line = roleLine(user, a)
   return (
     <div className="ta-screen">
       <ScreenTitle title={LABELS.account} />
       <section className="ta-card ta-profile">
+        <Avatar text={user.initials} size={64} />
+        <div className="ta-profile-text"><div className="ta-profile-name">{user.name}</div>
+          {line && <div className="ta-row-sub">{line}</div>}</div>
+      </section>
+      <div className="ta-actions">
+        <ActionTile icon="user" label="Profile" tone="blue" onClick={() => navigate('/app/account/profile')} />
+        {a.manage_access && <ActionTile icon="team" label="Team access" tone="green" onClick={() => navigate('/app/account/team-access')} />}
+        <ActionTile icon="download" label="Install EvoSys" tone="blue" onClick={install} sub={installed ? 'Installed' : null} />
+        <ActionTile icon="logout" label="Sign out" tone="red" onClick={signOut} />
+      </div>
+      {installMsg && <p className="ta-note" role="status">{installMsg}</p>}
+    </div>
+  )
+}
+
+export function ProfileScreen() {
+  const navigate = useNavigate()
+  const { me, tz } = useTeam()
+  const user = (me && me.user) || {}
+  const a = (me && me.access) || {}
+  const rights = [a.chat && 'Chat', a.announce && 'Post announcements', a.chat_manage && 'Manage chat rooms'].filter(Boolean)
+  return (
+    <div className="ta-screen">
+      <div className="ta-subhead"><button type="button" className="ta-icon-btn" onClick={() => navigate('/app/account')} aria-label="Back"><Icon name="back" /></button><h1 className="ta-title">Profile</h1></div>
+      <section className="ta-card ta-profile">
         <Avatar text={user.initials} size={56} />
-        <div><div className="ta-row-name">{user.name}</div><div className="ta-row-sub">{user.email}</div>
+        <div className="ta-profile-text"><div className="ta-profile-name">{user.name}</div><div className="ta-row-sub">{user.email}</div>
           {a.platform_name && <div className="ta-row-sub">{a.platform_name}{a.is_platform ? ' · Platform' : ''}</div>}</div>
       </section>
       <section className="ta-card">
@@ -38,19 +78,6 @@ export function AccountScreen() {
         <p className="ta-muted">{['Programs', 'Activity', ...rights].join(' · ')}</p>
         <p className="ta-muted ta-small">Times shown in {tz.replace('_', ' ')}.</p>
       </section>
-      {(a.manage_access) && (
-        <ul className="ta-list"><li><button type="button" className="ta-row" onClick={() => navigate('/app/account/team-access')}>
-          <span className="ta-row-icon"><Icon name="team" /></span><span className="ta-row-main"><span className="ta-row-name">Team access</span>
-            <span className="ta-row-sub">Chat, announcements and chat rooms</span></span><Icon name="chev" size={20} /></button></li></ul>
-      )}
-      {!installed && (
-        <section className="ta-card">
-          <h2 className="ta-h3">Add EvoSys to your home screen</h2>
-          <button type="button" className="ta-btn ta-btn--ghost" onClick={install}>Install app</button>
-          {installMsg && <p className="ta-muted">{installMsg}</p>}
-        </section>
-      )}
-      <button type="button" className="ta-btn ta-btn--danger ta-btn--block" onClick={signOut}>Sign out</button>
     </div>
   )
 }

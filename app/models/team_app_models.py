@@ -123,3 +123,21 @@ class TeamChatRead(Base):
     last_read_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("room_id", "user_id", name="uq_team_chat_read"),)
+
+
+class TeamAppPin(Base):
+    """EvoSys Pro Mobile: the (at most two) programs a person pinned on the
+    phone's Programs screen. A preference only - it never grants anything; the
+    app shows a pin only while /auth/my-contexts still lists that program for
+    this login. Kept apart from the desktop launcher's pins (launcher_pins),
+    whose list is longer and is replaced as a whole on every desktop save, so
+    neither screen can overwrite the other's choices."""
+    __tablename__ = "team_app_pins"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_key = Column(String(160), nullable=False)
+    position = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (UniqueConstraint("user_id", "item_key", name="uq_team_app_pin_once"),)

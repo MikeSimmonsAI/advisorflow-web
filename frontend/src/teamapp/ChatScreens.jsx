@@ -7,7 +7,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
-import { badge, bodyPieces, fileSize, fmtListTime, fmtTime, insertMention, LABELS, mentionedIds,
+import { badge, bodyPieces, chatSections, fileSize, fmtListTime, fmtTime, insertMention, LABELS, mentionedIds,
          mentionMatches, mentionQuery, mergeMessages } from './teamHelpers'
 import { Avatar, ErrorNote, Icon, Loading, ScreenTitle, useTeam, useTeamApi } from './TeamApp'
 
@@ -19,43 +19,78 @@ function roomIcon(room) {
   return <Avatar text={room.initials} />
 }
 
-// ── Chat list ───────────────────────────────────────────────────────────────
+// ── Chat inbox (board: search, compose, featured rooms, messages) ───────────
+function Featured({ room, onOpen }) {
+  const news = room.kind === 'announcements'
+  return (
+    <button type="button" className={'ta-feat' + (news ? ' is-news' : '')} onClick={onOpen} data-room={room.slug || room.kind}>
+      <svg className="ta-pin-art" viewBox="0 0 120 90" aria-hidden focusable="false">
+        <path d="M60 90V38l22-10v62M86 90V22l20 8v60" fill="none" stroke="currentColor" strokeWidth="1.4" />
+        <path d="M64 46h14M64 54h14M64 62h14M90 34h12M90 42h12M90 50h12M90 58h12" stroke="currentColor" strokeWidth="1" />
+      </svg>
+      <span className="ta-feat-icon" aria-hidden><Icon name={news ? 'megaphone' : 'briefcase'} size={28} /></span>
+      <span className="ta-feat-name">{room.name}</span>
+      {room.unread > 0 && <span className="ta-feat-badge" aria-label={room.unread + ' unread'}>{badge(room.unread)}</span>}
+    </button>
+  )
+}
+
 export function ChatList() {
   const navigate = useNavigate()
   const { tz, me, setUnread } = useTeam()
   const { data, error, loading, reload } = useTeamApi('/team-app/chat/rooms', { pollMs: 5000 })
+  const [q, setQ] = useState('')
   useEffect(() => { if (data) setUnread(data.unread_total || 0) }, [data, setUnread])
   if (me && me.access && !me.access.chat) return <div className="ta-screen"><ErrorNote error={{ status: 403, message: 'Chat is not turned on for your account.' }} /></div>
+  const { featured, messages } = chatSections(data && data.rooms, q)
+  const searching = q.trim().length > 0
   return (
     <div className="ta-screen">
       <ScreenTitle title={LABELS.teamChat} action={
-        <button type="button" className="ta-icon-btn ta-icon-btn--accent" aria-label="New message" onClick={() => navigate('/app/chat/new')}>
-          <Icon name="compose" size={24} /></button>} />
+        <button type="button" className="ta-compose" aria-label="New message" onClick={() => navigate('/app/chat/new')}>
+          <Icon name="compose" size={22} /></button>} />
+      <label className="ta-searchbox">
+        <Icon name="search" size={20} />
+        <span className="ta-sr">Search conversations</span>
+        <input type="search" placeholder="Search conversations…" value={q} onChange={e => setQ(e.target.value)} enterKeyHint="search" autoComplete="off" />
+        {q && <button type="button" className="ta-icon-btn ta-icon-btn--sm" onClick={() => setQ('')} aria-label="Clear search"><Icon name="x" size={16} /></button>}
+      </label>
       {loading && !data && <Loading />}
       {error && !data && <ErrorNote error={error} onRetry={reload} />}
+      {data && !searching && featured.length > 0 && (
+        <section className="ta-section" aria-labelledby="ta-feat-h">
+          <h2 id="ta-feat-h" className="ta-h2">Featured Shortcuts</h2>
+          <div className={'ta-pins' + (featured.length === 1 ? ' is-one' : '')}>
+            {featured.map(r => <Featured key={r.id} room={r} onOpen={() => navigate('/app/chat/' + r.id)} />)}
+          </div>
+        </section>
+      )}
       {data && (
-        <ul className="ta-list ta-list--chat">
-          {data.rooms.map(r => (
-            <li key={r.id}>
-              <button type="button" className="ta-chatrow" onClick={() => navigate('/app/chat/' + r.id)}>
-                {roomIcon(r)}
-                <span className="ta-chatrow-main">
-                  <span className="ta-chatrow-top">
-                    <span className={'ta-chatrow-name' + (r.unread ? ' is-unread' : '')}>{r.name}</span>
-                    <span className="ta-chatrow-time">{r.last ? fmtListTime(r.last.at, tz) : ''}</span>
-                  </span>
-                  <span className="ta-chatrow-bottom">
+        <section className="ta-section" aria-labelledby="ta-msgs-h">
+          <h2 id="ta-msgs-h" className="ta-h2">{searching ? 'Results' : 'Messages'}</h2>
+          {messages.length === 0 && <div className="ta-state">{searching ? 'No conversation matches “' + q + '”.' : 'No conversations yet. Tap the pencil to message a coworker.'}</div>}
+          <ul className="ta-cards" aria-label="Conversations">
+            {messages.map(r => (
+              <li key={r.id}>
+                <button type="button" className={'ta-chatcard' + (r.unread ? ' is-unread' : '')} onClick={() => navigate('/app/chat/' + r.id)}>
+                  {roomIcon(r)}
+                  <span className="ta-chatrow-main">
+                    <span className="ta-chatrow-top">
+                      <span className="ta-chatrow-name">{r.name}</span>
+                      <span className="ta-chatrow-time">{r.last ? fmtListTime(r.last.at, tz) : ''}</span>
+                    </span>
                     <span className="ta-chatrow-preview">
                       {r.last ? (r.last.mine ? 'You: ' : (r.kind !== 'dm' && r.last.sender_name ? r.last.sender_name.split(' ')[0] + ': ' : '')) + r.last.text
                         : (r.kind === 'announcements' ? 'Company-wide news' : 'No messages yet')}
                     </span>
-                    {r.unread > 0 && <span className="ta-dot" aria-label={r.unread + ' unread'}>{r.unread > 1 ? badge(r.unread) : ''}</span>}
                   </span>
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+                  {r.unread > 0 && <span className="ta-count" aria-label={r.unread + ' unread'}>{badge(r.unread)}</span>}
+                  <Icon name="chev" size={20} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
     </div>
   )
