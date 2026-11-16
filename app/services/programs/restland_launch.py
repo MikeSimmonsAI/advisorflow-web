@@ -252,3 +252,55 @@ def readback(db: Session, org: Organization, now: Optional[datetime] = None) -> 
         "first_start": loc(starts[0]) if starts else None, "last_start": loc(starts[-1]) if starts else None,
         "queue": outreach_slots.queue_view(db, org.id, now=now, limit=12),
     }
+
+
+def pause(db: Session, org: Organization, run_key: str, *, now: Optional[datetime] = None) -> Dict:
+    """STOP ALL RESTLAND OUTREACH (Nov 15, 8:48 PM - owner: "pause it right
+    away" ahead of the workspace reset). Recorded as mode "pause"; safe to
+    re-run. Every campaign off, the workspace texts switch off, every active
+    text journey paused, every reserved text slot given back, pending email
+    touches can no longer go (their campaign is off). Opt-out handling,
+    inbound replies and appointment messages are untouched. Sends nothing."""
+    from app.models.reset_models import OutreachTextSlot
+    from app.services.programs import outreach_slots
+    from app.services import sms_programs
+    now = now or datetime.utcnow()
+    if org is None:
+        raise LaunchRefused("Organization not found.")
+    if sms_programs.is_sci_org(db, org.id):
+        raise LaunchRefused("Refused: this is the SCI organization.")
+    run = db.query(WorkspaceResetRun).filter_by(organization_id=org.id, run_key=run_key, mode="pause").first() \
+        or WorkspaceResetRun(organization_id=org.id, run_key=run_key, mode="pause")
+    db.add(run)
+    db.flush()
+    out: Dict = {}
+    fams = db.query(CampaignFamily).filter(CampaignFamily.organization_id == org.id).all()
+    out["campaigns_turned_off"] = [f.key for f in fams if f.is_active]
+    for f in fams:
+        f.is_active = False
+    sw = db.query(WorkspaceSwitch).filter(WorkspaceSwitch.organization_id == org.id).first()
+    if sw is None:
+        sw = WorkspaceSwitch(organization_id=org.id)
+        db.add(sw)
+    out["texts_switch_was_on"] = bool(sw.texts_on)
+    sw.texts_on, sw.updated_at = False, now
+    prog = db.query(OutreachProgram).filter(OutreachProgram.organization_id == org.id).first()
+    if prog is not None:
+        out["daily_batch_was"] = int(prog.daily_batch_count or 0)
+        prog.daily_batch_count = 0
+    lead_ids = [i for (i,) in db.query(Lead.id).filter(Lead.organization_id == org.id).all()]
+    paused = 0
+    for i in range(0, len(lead_ids), 500):
+        chunk = lead_ids[i:i + 500]
+        paused += (db.query(CadenceState).filter(CadenceState.lead_id.in_(chunk), CadenceState.status == "active")
+                   .update({"status": "paused"}, synchronize_session=False))
+    out["text_journeys_paused"] = paused
+    out["slots_released"] = (db.query(OutreachTextSlot).filter(OutreachTextSlot.organization_id == org.id,
+                                                               OutreachTextSlot.status == "reserved")
+                             .delete(synchronize_session=False))
+    outreach_slots.clear_cache()
+    run.status, run.finished_at = "applied", datetime.utcnow()
+    run.summary_json = json.dumps(out, default=str)
+    db.commit()
+    out["readback"] = readback(db, org, now=now)
+    return out
