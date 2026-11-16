@@ -2084,6 +2084,37 @@ INDEXES_TO_CREATE = [
     # lookup of a brand's bookable meeting types.
     "CREATE INDEX IF NOT EXISTS ix_sales_appt_booking_source "
     "ON sales_appointments(brand_sales_org_id, booking_source)",
+
+    # ── FOREIGN KEYS INTO leads (overnight audit #650, 2026-11-15) ─────────
+    # Deleting a lead makes Postgres look up every row that points at it. With
+    # no index on the pointing column that is a full scan of the child table
+    # per deleted lead. The Restland clear deleted 10,576 leads in one
+    # statement: 1,173 s, and while it held the database every program screen
+    # and sign-in returned 500 for ~5 minutes (19:29-19:34 CT). Same cause and
+    # cure as ix_isr_duplicate_of above. Every lead FK found unindexed in
+    # production; each table is small (largest 14 MB), so building them is
+    # sub-second. A table that does not exist yet is skipped by the loop.
+    "CREATE INDEX IF NOT EXISTS ix_leads_duplicate_of_lead_id ON leads(duplicate_of_lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_program_source_records_lead_id ON program_source_records(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_contact_registry_first_seen_lead_id ON contact_registry(first_seen_lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_sms_consent_records_lead_id ON sms_consent_records(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_notifications_lead_id ON notifications(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_lead_outcomes_lead_id ON lead_outcomes(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_conversation_states_lead_id ON conversation_states(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_wholesale_deals_seller_lead_id ON wholesale_deals(seller_lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_wholesale_seller_profiles_lead_id ON wholesale_seller_profiles(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_wholesale_field_appointments_lead_id ON wholesale_field_appointments(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_wholesale_enrichment_requests_lead_id ON wholesale_enrichment_requests(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_wholesale_seller_callbacks_lead_id ON wholesale_seller_callbacks(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_wholesale_conversation_controls_lead_id ON wholesale_conversation_controls(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_wholesale_temperature_overrides_lead_id ON wholesale_temperature_overrides(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_jewelry_ai_exchanges_lead_id ON jewelry_ai_exchanges(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_program_lead_files_lead_id ON program_lead_files(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_auto_send_candidates_lead_id ON auto_send_candidates(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_auto_send_queue_lead_id ON auto_send_queue(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_auto_sent_log_lead_id ON auto_sent_log(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_lead_referrals_source_lead_id ON lead_referrals(source_lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_lead_referrals_referred_lead_id ON lead_referrals(referred_lead_id)",
 ]
 
 
