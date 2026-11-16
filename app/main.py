@@ -1328,6 +1328,8 @@ from app.routers.program_router import (router as program_router,
                                         god_router as program_god_router)
 from app.routers.sci_command_router import router as sci_command_router
 app.include_router(sci_command_router)   # /program/command - SCI Command phone screens
+from app.routers.sci_mobile_router import router as sci_mobile_router
+app.include_router(sci_mobile_router)    # /program/command/mobile - EvoSys Pro Mobile program workspace
 from app.routers.sms_recovery_router import router as sms_recovery_router
 app.include_router(sms_recovery_router)  # /sms-recovery - SMS Delivery Recovery Queue (#482)
 # /program/intake - the Intelligent Lead Importer's steps for an SCI workspace
