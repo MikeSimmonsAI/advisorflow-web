@@ -132,6 +132,9 @@ SCHEDULER_OWNER: Dict[str, str] = {
     # #452 Harvey AI workforce for Acquisition. Once: its jobs are leased rows,
     # and one owner keeps two processes from planning the same pass.
     JobName.ACQUISITION_WORKFORCE: ROLE_BACKEND,
+    # Service Operations recurring visits. Once: the pass is claimed per
+    # interval, and the (schedule, date) unique key backs it up.
+    JobName.SERVICE_OPS_RECURRING: ROLE_BACKEND,
 }
 
 # A guard rather than a comment: a loop added to JobName without an owner here

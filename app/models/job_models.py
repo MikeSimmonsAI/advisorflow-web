@@ -82,6 +82,11 @@ class JobName:
     # minutes, only while the owner has it Running. Drafts, research and
     # classification only - it never sends, texts or calls anyone.
     ACQUISITION_WORKFORCE = "acquisition_workforce_loop"
+    # Service Operations (#452/#506): creates the next visits of recurring
+    # service agreements inside a bounded horizon. Creates jobs only - never
+    # messages, invoices or charges anyone. Unique (schedule, date) keys make
+    # a second instance or a retried pass a no-op.
+    SERVICE_OPS_RECURRING = "service_ops_recurring_loop"
 
     # Render cron SERVICES. Separate names on purpose, even where the work
     # overlaps a loop above: cadence runs hourly in the web dyno AND daily as a
@@ -133,6 +138,7 @@ LOOP_JOB_NAMES = (
     JobName.VOLT_SHEETS,
     JobName.AI_WORKFORCE_WORKER,
     JobName.ACQUISITION_WORKFORCE,
+    JobName.SERVICE_OPS_RECURRING,
 )
 
 ALL_JOB_NAMES = LOOP_JOB_NAMES + CRON_JOB_NAMES
@@ -157,6 +163,7 @@ EXPECTED_INTERVAL_MINUTES = {
     JobName.VOLT_SHEETS: 60,              # checks in hourly when idle; every 15 s when there is work
     JobName.AI_WORKFORCE_WORKER: 2,
     JobName.ACQUISITION_WORKFORCE: 5,
+    JobName.SERVICE_OPS_RECURRING: 15,
     JobName.CADENCE_CRON: 24 * 60,        # render.yaml: "0 14 * * *"
     JobName.EMAIL_POLLER: 5,              # render.yaml: "*/5 * * * *"
     # ai_conversation_cron is RETIRED (see RETIRED_JOB_NAMES): no interval, so

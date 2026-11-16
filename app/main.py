@@ -977,6 +977,9 @@ app.include_router(acquisition_router.router)       # /acquisition
 app.include_router(acquisition_router.god_router)   # /god/acquisition (setup, operator grants)
 app.include_router(acquisition_router.ops_router)   # /acquisition-ops (god or granted operator)
 app.include_router(acquisition_router.public_router)  # /acquisition-public (prospect walkthrough page)
+from app.routers import service_ops_router
+app.include_router(service_ops_router.router)        # /service-ops (company staff, workers, buyer portal)
+app.include_router(service_ops_router.admin_router)  # EvoSys switch + buyer network
 from app.routers.push_router import router as push_router  # noqa: E402
 app.include_router(push_router)   # /push/* web push subscriptions (configured:false until VAPID keys + pywebpush)
 from app.routers.god_demo_router import router as god_demo_router  # noqa: E402
@@ -2128,6 +2131,38 @@ async def _acquisition_workforce_loop():
         await asyncio.sleep(interval)
 
 
+async def _service_ops_recurring_loop():
+    """Service Operations (#452/#506): every 15 minutes, create the visits
+    recurring agreements owe inside the 35-day horizon. One instance per pass
+    (_pass_claimed); the unique (schedule, local date) key makes a repeat or
+    concurrent pass create nothing. Never sends, invoices or charges."""
+    from app.services.job_run_service import record_job_run
+    from app.models.job_models import JobName
+    from app.deps import SessionLocal
+    import logging as _log
+    _logger = _log.getLogger("service_ops_recurring_loop")
+    interval = 900
+    await asyncio.sleep(140)  # startup delay - offset from the other loops
+    while True:
+        if not await _pass_claimed(JobName.SERVICE_OPS_RECURRING, interval):
+            await asyncio.sleep(interval)
+            continue
+        try:
+            async with record_job_run(JobName.SERVICE_OPS_RECURRING, db_factory=SessionLocal) as _m:
+                def _one_pass():
+                    from app.services.service_ops import recurring as _R
+                    db = SessionLocal()
+                    try:
+                        return _R.run_pass(db)
+                    finally:
+                        db.close()
+                summary = await _off_loop(_one_pass)
+                _m.update(summary or {})
+        except Exception:                                    # noqa: BLE001
+            _logger.exception("Service operations recurring pass failed")
+        await asyncio.sleep(interval)
+
+
 async def _volt_dev_relay_loop():
     """VOLT development relay (#571): every 2 minutes, one pass across
     instances - expire dead runner leases, verify deploys, re-send missed
@@ -2798,6 +2833,7 @@ async def on_startup():
         JobName.VOLT_SHEETS:          _volt_sheets_loop,
         JobName.AI_WORKFORCE_WORKER:  _ai_workforce_worker_loop,
         JobName.ACQUISITION_WORKFORCE: _acquisition_workforce_loop,
+        JobName.SERVICE_OPS_RECURRING: _service_ops_recurring_loop,
     }
     # Rows left 'running' by a process that was killed mid-pass (OOM, deploy)
     # are closed as errors with the reason, by the process that owns the loops,
