@@ -179,6 +179,18 @@ const AcqResults = lazyPage(() => import('./pages/acquisition/ClientPages').then
 const AcqSettings = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Settings })))
 const AcqFeedback = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Feedback })))
 const AcqEstimates = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Estimates })))
+// Service Operations (#452/#506) - inside the same client portal, shown only when switched on.
+const SvcOverview = lazyPage(() => import('./pages/acquisition/ServiceOps').then(m => ({ default: m.OpsOverview })))
+const SvcCustomers = lazyPage(() => import('./pages/acquisition/ServiceOps').then(m => ({ default: m.OpsCustomers })))
+const SvcJobs = lazyPage(() => import('./pages/acquisition/ServiceOps').then(m => ({ default: m.OpsJobs })))
+const SvcJob = lazyPage(() => import('./pages/acquisition/ServiceOps').then(m => ({ default: m.OpsJob })))
+const SvcSchedule = lazyPage(() => import('./pages/acquisition/ServiceOps').then(m => ({ default: m.OpsSchedule })))
+const SvcTeam = lazyPage(() => import('./pages/acquisition/ServiceOps').then(m => ({ default: m.OpsTeam })))
+const SvcHistory = lazyPage(() => import('./pages/acquisition/ServiceOps').then(m => ({ default: m.OpsHistory })))
+const SvcInvoices = lazyPage(() => import('./pages/acquisition/ServiceOps').then(m => ({ default: m.OpsInvoices })))
+const SvcWorkerHome = lazyPage(() => import('./pages/acquisition/WorkerApp').then(m => ({ default: m.WorkerHome })))
+const SvcWorkerJob = lazyPage(() => import('./pages/acquisition/WorkerApp').then(m => ({ default: m.WorkerJob })))
+const SvcBuyer = lazyPage(() => import('./pages/acquisition/WorkerApp').then(m => ({ default: m.BuyerPortal })))
 // Acquisition Control Center (/acquisition-ops/*): God, or a granted operator - never God Mode itself.
 const AcqOps = lazyPage(() => import('./pages/acquisition/AcquisitionOps'))
 const AcqOpsHome = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.ControlCenter })))
@@ -1720,7 +1732,19 @@ export default function App() {
           <Route path="settings" element={<AcqSettings />} />
           <Route path="feedback" element={<AcqFeedback />} />
           <Route path="estimates" element={<AcqEstimates />} />
+          <Route path="ops/overview" element={<SvcOverview />} />
+          <Route path="ops/customers" element={<SvcCustomers />} />
+          <Route path="ops/jobs" element={<SvcJobs />} />
+          <Route path="ops/jobs/:id" element={<SvcJob />} />
+          <Route path="ops/schedule" element={<SvcSchedule />} />
+          <Route path="ops/team" element={<SvcTeam />} />
+          <Route path="ops/history" element={<SvcHistory />} />
+          <Route path="ops/invoices" element={<SvcInvoices />} />
         </Route>
+        {/* Field workers and the company's own customers: simple, phone-first views. */}
+        <Route path="/program/acquisition/work" element={<ProtectedRoute bare><SvcWorkerHome /></ProtectedRoute>} />
+        <Route path="/program/acquisition/work/jobs/:id" element={<ProtectedRoute bare><SvcWorkerJob /></ProtectedRoute>} />
+        <Route path="/program/acquisition/customer" element={<ProtectedRoute bare><SvcBuyer /></ProtectedRoute>} />
         <Route path="/acquisition-ops" element={<ProtectedRoute bare><AcqOps /></ProtectedRoute>}>
           <Route index element={<AcqOpsHome />} />
           <Route path="client-dashboard" element={<AcqOpsHome />} />

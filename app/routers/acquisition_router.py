@@ -56,7 +56,14 @@ def ctx_dep(request: Request, db: Session = Depends(get_db),
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if not C.acquisition_identity(org):
         raise HTTPException(403, "This workspace does not have the acquisition program.")
-    return C.Ctx(db, user, org, lead_scope.is_manager_here(user, db, request), request)
+    manager = lead_scope.is_manager_here(user, db, request)
+    if not manager:
+        # Field staff and the company's own customers use Service Operations,
+        # never the sales (Acquisition) portal.
+        from app.services.service_ops.core import is_ops_only_user
+        if is_ops_only_user(db, org.id, user.id):
+            raise HTTPException(403, "This login is for service operations, not the appointment portal.")
+    return C.Ctx(db, user, org, manager, request)
 
 
 def _visible_lead_ids(ctx: C.Ctx):

@@ -10,7 +10,7 @@
  * appointments, and a customer login is refused on every other API.
  */
 import { createContext, Suspense, useContext, useEffect, useState } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { NavLink, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { api } from '../../api/client'
 import ProgramSwitchLink from '../../components/ProgramSwitchLink'
 import { Icon, Loading, errText, initials, useFont } from './ui'
@@ -31,7 +31,20 @@ const NAV = [
   { to: `${BASE}/settings`, label: 'My Business', icon: 'store' },
   { to: `${BASE}/feedback`, label: 'Feedback & Support', icon: 'chat' },
 ]
-const TITLES = Object.fromEntries(NAV.map(n => [n.to, n.label]))
+// Service Operations (#452/#506): only when EvoSys switched it on for this
+// company, and only the screens this person's role may use (the server
+// enforces the same rules on every request).
+const OPS_NAV = [
+  { to: `${BASE}/ops/overview`, label: 'Operations', icon: 'heart', any: ['reports', 'schedule'] },
+  { to: `${BASE}/ops/customers`, label: 'Customers & Locations', icon: 'building', any: ['view_all'] },
+  { to: `${BASE}/ops/jobs`, label: 'Jobs', icon: 'list', any: ['view_all', 'view_team', 'schedule'] },
+  { to: `${BASE}/ops/schedule`, label: 'Schedule', icon: 'calendar', any: ['view_all'] },
+  { to: `${BASE}/ops/team`, label: 'Team', icon: 'users', any: ['team', 'schedule'] },
+  { to: `${BASE}/ops/history`, label: 'Service History', icon: 'check', any: ['view_all'] },
+  { to: `${BASE}/ops/invoices`, label: 'Invoices', icon: 'dollar', any: ['billing'] },
+]
+const WORKER_ROLES = ['field_worker', 'team_lead']
+const TITLES = Object.fromEntries([...NAV, ...OPS_NAV].map(n => [n.to, n.label]))
 
 export default function AcquisitionShell() {
   useFont()
@@ -39,11 +52,13 @@ export default function AcquisitionShell() {
   const [error, setError] = useState(null)
   const [counts, setCounts] = useState({})
   const [open, setOpen] = useState(false)
+  const [ops, setOps] = useState(undefined)
   const loc = useLocation()
 
   const loadStatus = async () => {
     try { setStatus(await api.get('/acquisition/status')); setError(null) } catch (e) { setError(e) }
   }
+  useEffect(() => { api.get('/service-ops/me').then(setOps).catch(() => setOps(null)) }, [])
   const loadCounts = async () => {
     try {
       const d = await api.get('/acquisition/dashboard')
@@ -54,7 +69,12 @@ export default function AcquisitionShell() {
   useEffect(() => { if (status) loadCounts() }, [loc.pathname, status])
   useEffect(() => { setOpen(false) }, [loc.pathname])
 
-  if (error) {
+  // Field staff and the company's own customers have their own simple views.
+  if (error && error.status === 403 && ops === undefined) return <div className="aq aq-dark"><Loading /></div>
+  if (error && error.status === 403 && ops?.is_buyer) return <Navigate to={`${BASE}/customer`} replace />
+  if (error && error.status === 403 && ops?.role && WORKER_ROLES.includes(ops.role)) return <Navigate to={`${BASE}/work`} replace />
+  const opsOnly = !!(error && error.status === 403 && ops?.role)
+  if (error && !opsOnly) {
     const denied = error.status === 403 || error.status === 402
     return (
       <div className="aq aq-dark aq-gate">
@@ -69,25 +89,30 @@ export default function AcquisitionShell() {
       </div>
     )
   }
-  if (!status) return <div className="aq aq-dark"><Loading label="Opening your appointment portal…" /></div>
+  if (!status && !opsOnly) return <div className="aq aq-dark"><Loading label="Opening your appointment portal…" /></div>
+  if (opsOnly && loc.pathname.replace(/\/$/, '') === BASE) return <Navigate to={`${BASE}/ops/jobs`} replace />
 
-  const name = status.profile?.business_name || status.organization_name
-  const me = status.me?.name || ''
+  const opsNav = ops?.ops_enabled && ops?.role ? OPS_NAV.filter(n => n.any.some(p => ops.perms.includes(p))) : []
+  const nav = opsOnly ? opsNav : [...NAV.slice(0, 2), ...opsNav.filter(n => !n.to.endsWith('/invoices')),
+                                   ...NAV.slice(2, 4), ...opsNav.filter(n => n.to.endsWith('/invoices')), ...NAV.slice(4)]
+  const name = status?.profile?.business_name || status?.organization_name || 'Service Operations'
+  const me = status?.me?.name || ''
   const page = TITLES[loc.pathname] || 'Appointment'
   return (
-    <Ctx.Provider value={{ status, name, reloadStatus: loadStatus, reloadCounts: loadCounts }}>
+    <Ctx.Provider value={{ status, name, ops, reloadStatus: loadStatus, reloadCounts: loadCounts }}>
       <div className="aq aq-app aq-dark">
         {open && <div className="aq-scrim" onClick={() => setOpen(false)} />}
         <aside className={`aq-side ${open ? 'open' : ''}`} aria-label="Client portal navigation">
           <div className="aq-logo"><span className="aq-logo__mark"><Icon name="spark" size={16} /></span>
             <span>EvoSys Pro<small>Client Portal</small></span></div>
           <nav className="aq-nav" style={{ marginTop: 10 }}>
-            {NAV.map(it => (
+            {nav.map(it => (
               <NavLink key={it.to} to={it.to} end={it.end}>
                 <Icon name={it.icon} />{it.label}
                 {it.count && counts[it.count] > 0 && <span className="aq-nav__count">{counts[it.count]}</span>}
               </NavLink>
             ))}
+            {ops?.member_id && <NavLink to={`${BASE}/work`}><Icon name="clock" />My Jobs</NavLink>}
           </nav>
           <div className="aq-help"><b>Need something?</b>Use “Request EvoSys Follow-Up” on any appointment, or Feedback &amp; Support.</div>
         </aside>

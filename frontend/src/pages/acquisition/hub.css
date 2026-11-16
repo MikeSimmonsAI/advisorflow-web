@@ -287,3 +287,48 @@ a.hb-stat:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(0,0,0
 .hw-test { margin-left: 6px; font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(251,191,36,.15); color: #fbbf24; }
 @media (max-width: 560px) { .hw-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); } .hw-caps, .hw-costs { grid-template-columns: 1fr; } }
 .hb-client__note { display: block; font-size: 11px; color: var(--aq-side-ink); opacity: .75; margin-top: 4px; }
+
+/* ── Service Operations (#452/#506) ─────────────────────────────────────── */
+.hb-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.hb-tabs button { background: transparent; border: 1px solid var(--aq-line); color: var(--aq-sub); border-radius: 99px; padding: 6px 14px; font-weight: 700; cursor: pointer; }
+.hb-tabs button.on { background: var(--aq-lav-2); color: var(--aq-ink); }
+.hb-kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; font-size: 14px; margin-bottom: 10px; }
+.hb-kv span { color: var(--aq-sub); }
+.hb-kv b { font-weight: 600; white-space: pre-wrap; }
+.hb-check { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+/* Worker & buyer views: phone first, one column, big tap targets. */
+.wk { min-height: 100vh; }
+.wk-top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px; padding: 14px 16px;
+  background: rgba(11,10,31,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--aq-line); }
+.wk-top b { flex: 1; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-back, .wk-switch { color: var(--aq-sub); text-decoration: none; font-size: 13px; display: inline-flex; }
+.wk-main { max-width: 560px; margin: 0 auto; padding: 14px 14px 60px; display: flex; flex-direction: column; gap: 12px; }
+.wk-main.wk-wide { max-width: 760px; }
+.wk-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.wk-tabs button { padding: 12px; border-radius: 12px; border: 1px solid var(--aq-line); background: var(--aq-card); color: var(--aq-sub); font-weight: 800; font-size: 15px; }
+.wk-tabs button.on { background: var(--aq-lav-2); color: var(--aq-ink); }
+.wk-card { display: flex; gap: 12px; align-items: center; padding: 14px; border-radius: 14px; background: var(--aq-card);
+  border: 1px solid var(--aq-line); color: var(--aq-ink); text-decoration: none; text-align: left; width: 100%; cursor: pointer; }
+.wk-card__time { min-width: 64px; font-weight: 800; font-size: 15px; display: flex; flex-direction: column; }
+.wk-card__time small { color: var(--aq-sub); font-weight: 600; font-size: 11px; }
+.wk-card__main { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wk-card__main span { font-size: 13px; color: var(--aq-sub); }
+.wk-st { font-size: 11px; font-weight: 800; padding: 3px 8px; border-radius: 8px; background: var(--aq-lav); color: var(--aq-ink); white-space: nowrap; }
+.wk-st--in_progress { background: rgba(251,191,36,.18); }
+.wk-st--completed, .wk-st--customer_review { background: var(--aq-green-soft); }
+.wk-st--needs_attention { background: rgba(244,63,94,.18); }
+.wk-sec { background: var(--aq-card); border: 1px solid var(--aq-line); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.wk-sec h2 { margin: 0; font-size: 15px; }
+.wk-sec textarea { min-height: 80px; border-radius: 10px; padding: 10px; background: var(--aq-card-2); color: var(--aq-ink); border: 1px solid var(--aq-line); font: inherit; }
+.wk-row { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; flex-wrap: wrap; }
+.wk-row > span { flex: 1; min-width: 180px; }
+.wk-note { background: var(--aq-card-2); border-radius: 10px; padding: 10px 12px; font-size: 14px; display: flex; flex-direction: column; gap: 4px; white-space: pre-wrap; }
+.wk-note b { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--aq-sub); }
+.wk-check { display: flex; gap: 12px; align-items: center; padding: 12px; border-radius: 10px; background: var(--aq-card-2); font-size: 15px; }
+.wk-check input { width: 22px; height: 22px; accent-color: #8b5cf6; }
+.wk-check.done span { color: var(--aq-sub); text-decoration: line-through; }
+.wk-big { width: 100%; padding: 14px; font-size: 16px; border-radius: 12px; }
+.wk-flags { display: flex; gap: 8px; flex-wrap: wrap; }
+.wk-photos { display: flex; gap: 8px; flex-wrap: wrap; }
+.wk-photo { width: 104px; height: 104px; object-fit: cover; border-radius: 10px; }
+.wk-done { text-align: center; color: var(--aq-green); font-weight: 800; padding: 10px; display: flex; gap: 8px; justify-content: center; }

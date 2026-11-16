@@ -91,6 +91,9 @@ ACQUISITION = "acquisition"
 ACQUISITION_FEATURE_KEY = "client_acquisition"
 ACQUISITION_CLIENT_ALLOWED_PREFIXES = (
     "/acquisition/",
+    # Service Operations (#452/#506): the company's own jobs, team and
+    # customers. Role checks inside decide what each login sees.
+    "/service-ops/",
     "/auth/",
     "/branding",
     "/notifications",
