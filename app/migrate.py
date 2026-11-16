@@ -261,12 +261,14 @@ def main(argv=None) -> int:
                         for _i in range(0, max(len(_txt), 1), 3000):
                             log.info("workspace probe org=%s part=%s[%d]: %s", org_id, _part, _i // 3000,
                                      _txt[_i:_i + 3000])
-                elif mode in ("launch", "readback"):
+                elif mode in ("launch", "readback", "pause"):
                     # Issue #507 (Nov 15): Restland File Review launch - the text
                     # slot schedule, copy, audience, approval, journey start.
                     # Sends nothing itself. "readback" only reads.
                     from app.services.programs import restland_launch as _rl
-                    if mode == "launch":
+                    if mode == "pause":
+                        res = _rl.pause(_db, org, key)
+                    elif mode == "launch":
                         res = _rl.launch(_db, org, key,
                                          booking_user_id=os.environ.get("WORKSPACE_BOOKING_USER_ID", "").strip() or None,
                                          calendar_user_id=os.environ.get("WORKSPACE_CALENDAR_USER_ID", "").strip() or None,

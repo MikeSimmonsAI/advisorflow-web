@@ -356,3 +356,20 @@ def test_a_later_start_takes_the_next_free_new_family_slots():
     taken = set(OS.new_family_slots(utc(2026, 11, 16, 8, 30), 25, CFG))
     nxt = OS.new_family_slots(utc(2026, 11, 16, 8, 30), 2, CFG, taken=taken)
     assert [local(t) for t in nxt] == ["11:50", "11:58"]
+
+
+def test_pause_stops_every_restland_send_and_nothing_goes_at_830(rl, sender):
+    db = rl["db"]
+    _launch(rl)
+    out = RL.pause(db, rl["org"], "pause-1")
+    assert out["campaigns_turned_off"] and out["text_journeys_paused"] > 0
+    assert db.query(OutreachTextSlot).filter_by(status="reserved").count() == 0
+    rb = out["readback"]
+    assert rb["texts_switch_on"] is False and not any(rb["campaigns_on"].values())
+    _run(db, utc(2026, 11, 16, 8, 30))
+    _run(db, utc(2026, 11, 16, 12, 0))
+    assert sender == []
+    from app.services.programs import email_touches as ET
+    assert ET.plan(db, prog_of(rl), now=utc(2026, 11, 16, 13, 0), with_skip=False) == []
+    again = RL.pause(db, rl["org"], "pause-1")
+    assert again["text_journeys_paused"] == 0
