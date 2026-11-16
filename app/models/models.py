@@ -1458,6 +1458,38 @@ class SuppressionEntry(Base):
     )
 
 
+class ContactSuppression(Base):
+    """A do-not-contact block kept on the DESTINATION, not on a contact row
+    (Issue #507, Nov 15 Restland reset).
+
+    suppression_entries holds phone numbers for texting and calls only. This
+    table holds what that one cannot: email addresses, and the FAMILY-WIDE
+    scope of a do-not-contact - a family that asked not to be contacted stays
+    blocked on every channel at every one of its phones and addresses, even
+    after its contact rows are deleted and the family is imported again under
+    a new record or in another format.
+
+      kind   "phone" (11 digits, 1XXXXXXXXXX) | "email" (trimmed, lower case)
+      scope  "family" - nothing to this family on any channel
+             "email"  - no email to this address (a phone is unaffected)
+      reason the minimum evidence, in plain words (no message text, no names)
+    """
+    __tablename__ = "contact_suppressions"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    kind = Column(String, nullable=False)
+    value = Column(String, nullable=False)
+    scope = Column(String, nullable=False, default="family")
+    reason = Column(Text, nullable=False)
+    source = Column(String, nullable=False, default="manual")
+    added_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "kind", "value", name="uq_contact_suppression"),
+    )
+
+
 
 
 # ---------------------------------------------------------------------------

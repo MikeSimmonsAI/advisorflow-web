@@ -352,3 +352,22 @@ Code:
 - Campaign OFF stops the next text and email at dispatch.
 - The workspace texts switch stops every Restland text.
 - Reserved slots stay; switching back on resumes in order. Missed slots move forward, never burst.
+- Nov 15, 8:48 PM: the File Review launch was paused before its first slot (`:pause:<key>`): campaigns and workspace texts off, daily batch 0, journeys paused, reserved slots released. Nothing went out.
+
+# Workspace reset (Nov 15 directive) - clear the old Restland data
+
+## Do-not-contact first (`restland_reset.py`)
+- Every real do-not-contact is copied onto its phone and email, apart from any contact row: `suppression_entries` (phones, used at every send) and `contact_suppressions` (phones and emails, with scope: family or email only).
+- Kept: source DNC, a duplicate whose original is DNC, numbers already suppressed (original scope kept), a removal flag from an advisor, an opt-out reply, and any DNC with no clear reason (held as blocked). Bad emails block email only.
+- Not carried: duplicates the old import marked DNC only because they were duplicates (the original family is contactable). Fixed in the importer on Aug 29.
+- New contacts are checked when they are saved, using the same rules for formatting numbers and emails: a family-wide block arrives as DNC; an email-only block turns email off; a suppressed phone turns texting off. A lookup error marks the new contact DNC.
+- The same check runs at enrollment (send approval, journey start) and at dispatch (texts, emails, compliance preflight).
+- `:dncpreserve:<key>` copies and proves; `:dncverify:-` proves only (alternate formats and a probe reimport, rolled back); `:dncsummary:-` counts. Counts only in the logs.
+
+## Clear (`restland_clear.py`)
+- `:clearinventory:-` counts only. `:clear:<key>` clears.
+- The clear re-runs the do-not-contact copy and proof first and stops with nothing deleted if the proof fails. It also refuses if any other program's or tenant's row points at a Restland contact.
+- Every row removed is first copied whole into `workspace_reset_items` under that run (the private restore point, kept in the database).
+- Tables are cleared children-first, each in its own transaction. A failure stops the run where it is; re-running the same key carries on.
+- Cleared: contacts and families, the duplicate registry, import records, notes and activity, texts, emails, replies and calls, campaign memberships and audience, cadence states and touch logs, text slots, booking links and their follow-ups, outcomes and surveys, case files and CRM contacts.
+- Kept: the workspace, staff and logins, sender and inbox connections, calendar connection and booking settings, campaign and cadence templates (all off), all do-not-contact records, audit and billing records, and run summaries. Calendar events in Google are not touched. Nothing is sent.

@@ -153,8 +153,16 @@ def check_compliance_preflight(db: Session, lead: Lead,
             f"on any channel until capacity is available or the plan is upgraded."
         )
 
+    # Destination-level do-not-contact (#507): independent of the contact row.
+    from app.services import contact_suppression as _cs
+    _b = _cs.for_lead(db, lead)
+    if _b["family"]:
+        raise ValueError(f"Lead {lead.id}: {_b['family']} - blocked from sending on any channel.")
+
     if (channel or CHANNEL_SMS).strip().lower() == CHANNEL_EMAIL:
         _check_email_permission(lead)
+        if _b["email"]:
+            raise ValueError(f"Lead {lead.id}: {_b['email']} - blocked from sending.")
         return None
 
     # Phone channels. An independent guard, never a substitute for the DNC

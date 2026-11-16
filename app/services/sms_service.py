@@ -661,6 +661,12 @@ def send_sms(
     from app.services.compliance_service import is_phone_suppressed
     if is_phone_suppressed(db, lead.organization_id, lead.phone):
         raise ValueError(f"Lead {lead.id}'s phone number is on the suppression list - blocked from sending.")
+    # Destination-level do-not-contact (#507): a family-wide block on any of
+    # this family's phones or addresses, kept apart from the contact row.
+    from app.services import contact_suppression as _cs
+    _blk = _cs.for_lead(db, lead)["sms"]
+    if _blk:
+        raise ValueError(f"Lead {lead.id}: {_blk} - blocked from sending.")
 
     # ── THE WHOLESALE SELLER SMS PROGRAM GATE ───────────────────────────────
     # A Wholesale seller is texted ONLY with program consent, never outside
@@ -835,6 +841,10 @@ def send_mms(
     from app.services.compliance_service import is_phone_suppressed
     if is_phone_suppressed(db, lead.organization_id, lead.phone):
         raise ValueError(f"Lead {lead.id}'s phone is on the suppression list - blocked.")
+    from app.services import contact_suppression as _cs
+    _blk = _cs.for_lead(db, lead)["sms"]
+    if _blk:
+        raise ValueError(f"Lead {lead.id}: {_blk} - blocked.")
 
     # The Wholesale seller SMS program registers text only. A Wholesale seller
     # never receives MMS, consented or not. See app/services/wholesale_sms.py.
