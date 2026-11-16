@@ -135,6 +135,18 @@ def main():
     check("Only the owner can change Team access", call(T["platform"], "GET", "/team-app/admin/people")[0] == 403
           and call(T["owner"], "GET", "/team-app/admin/people")[0] == 200)
 
+    # Programs: two pins per account, kept on the server, survive a new sign-in.
+    s, r = call(T["platform"], "PUT", "/team-app/pins", {"keys": ["workspace:a:", "deal_builder::b"]})
+    check("Pins: platform saves two", s == 200 and r["keys"] == ["workspace:a:", "deal_builder::b"], (s, r))
+    check("Pins: a third is refused", call(T["platform"], "PUT", "/team-app/pins", {"keys": ["x", "y", "z"]})[0] == 400)
+    fresh = login("platform")
+    check("Pins: still there after signing in again", call(fresh, "GET", "/team-app/pins")[1]["keys"] == ["workspace:a:", "deal_builder::b"])
+    check("Pins: another account does not see them", call(T["partner"], "GET", "/team-app/pins")[1]["keys"] != ["workspace:a:", "deal_builder::b"])
+    check("Pins: desktop pins untouched", call(T["platform"], "GET", "/launcher/pins")[0] == 200)
+    call(T["platform"], "PUT", "/team-app/pins", {"keys": []})
+    check("Pins: removed", call(T["platform"], "GET", "/team-app/pins")[1]["keys"] == [])
+    check("Pins: refused without sign-in", call(None, "GET", "/team-app/pins")[0] == 401)
+
     call(T["rep2"], "POST", "/auth/logout", {})
     check("sign-out ends the session", call(T["rep2"], "GET", "/team-app/me")[0] == 401)
     print("\n%d checks failed. %.0fs" % (len(FAILS), time.time() - t0))
