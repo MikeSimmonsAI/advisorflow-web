@@ -531,3 +531,13 @@ def test_portal_unchanged_when_feature_off(pilot):
     assert p["c"].get("/acquisition/status", headers=_o(p)).status_code == 200
     me = p["c"].get("/service-ops/me", headers=_o(p)).json()
     assert me["ops_enabled"] is False and me["role"] is None
+
+
+def test_invoice_dates_use_the_company_day_not_utc(ops):
+    """Found in the live check: issued 7 PM Central on Nov 15 was dated Nov 16."""
+    from app.services.service_ops import billing as BL
+    p = ops
+    evening_utc = datetime(2026, 11, 16, 0, 50)          # 6:50 PM Central, Nov 15
+    assert BL.local_today(p["db"], p["shine"].id, evening_utc) == date(2026, 11, 15)
+    p["c"].put("/service-ops/settings", json={"timezone": "Asia/Tokyo"}, headers=_o(p))
+    assert BL.local_today(p["db"], p["shine"].id, evening_utc) == date(2026, 11, 16)

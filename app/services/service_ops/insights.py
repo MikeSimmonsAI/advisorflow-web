@@ -51,7 +51,7 @@ def report(ctx: K.OpsCtx, *, days: int = 30, now: Optional[datetime] = None) -> 
         "confirmed_paid": round(sum(i.amount_confirmed for i in issued), 2),
         "reported_not_confirmed": round(sum(i.amount_reported for i in issued), 2),
         "outstanding": round(sum(i.total - i.amount_confirmed for i in issued), 2),
-        "overdue_invoices": sum(1 for i in issued if BL.display_status(i) == "overdue"),
+        "overdue_invoices": sum(1 for i in issued if BL.display_status(i, BL.local_today(db, org)) == "overdue"),
         "open_requests": db.query(ServiceRequest).filter(ServiceRequest.organization_id == org,
                                                          ServiceRequest.status == "open").count(),
     }
@@ -95,7 +95,7 @@ def suggestions(ctx: K.OpsCtx, *, now: Optional[datetime] = None) -> List[Dict[s
                         "text": "Finished work not invoiced yet: %s ($%.2f)" % (j.service_type, j.price)})
     for i in db.query(ServiceInvoice).filter(ServiceInvoice.organization_id == org,
                                              ServiceInvoice.status.in_(("issued", "partially_paid"))):
-        if BL.display_status(i) == "overdue":
+        if BL.display_status(i, BL.local_today(db, org)) == "overdue":
             out.append({"kind": "overdue_invoice", "severity": "medium", "invoice_id": i.id,
                         "text": "Invoice %s is past due ($%.2f open)" % (i.number, i.total - i.amount_confirmed)})
         if i.amount_reported > 0:

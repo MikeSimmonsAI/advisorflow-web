@@ -97,7 +97,7 @@ export default function AcquisitionShell() {
                                    ...NAV.slice(2, 4), ...opsNav.filter(n => n.to.endsWith('/invoices')), ...NAV.slice(4)]
   const name = status?.profile?.business_name || status?.organization_name || 'Service Operations'
   const me = status?.me?.name || ''
-  const page = TITLES[loc.pathname] || 'Appointment'
+  const page = TITLES[loc.pathname] || (loc.pathname.includes('/ops/jobs/') ? 'Job' : 'Appointment')
   return (
     <Ctx.Provider value={{ status, name, ops, reloadStatus: loadStatus, reloadCounts: loadCounts }}>
       <div className="aq aq-app aq-dark">
