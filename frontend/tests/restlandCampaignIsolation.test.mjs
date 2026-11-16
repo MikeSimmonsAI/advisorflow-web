@@ -29,8 +29,9 @@ test('SCI keeps its own default and its own campaign', () => {
 test("the import wizard names the program from its profile, never a hard-coded SCI", () => {
   const src = readFileSync(new URL('../src/pages/intake/ImportWizard.jsx', import.meta.url), 'utf8')
   const visible = src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l) && /SCI/.test(l))
-    .filter(l => !/SCI_(LEADS|FROZEN|REFUSAL|KEPT|KIND_LABEL|PROFILE)|sci-|_sci|sciSteps|sciStatus|is_sci/.test(l))
+    .filter(l => !/SCI_(LEADS|FROZEN|REFUSAL|KEPT|KIND_LABEL|PROFILE)|sci-|_sci|sciSteps|sciStatus|is_sci|const sourceLabel/.test(l))
   assert.deepEqual(visible, [])
   assert.ok(src.includes("'Import Leads into ' + P"))
   assert.ok(src.includes("loadProgramProfile"))
+  assert.ok(src.includes("sourceLabel(batch.source)"))                  // an old batch's stored label too
 })
