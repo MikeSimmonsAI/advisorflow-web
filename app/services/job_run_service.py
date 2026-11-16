@@ -325,3 +325,45 @@ def close_abandoned_runs(db_factory, *, older_than_seconds: int = ABANDONED_AFTE
         return 0
     finally:
         db.close()
+
+
+# ── RETENTION (audit #650, 2026-11-15) ──────────────────────────────────────
+# Nothing ever deleted from job_runs: 159,975 rows / 55 MB in production,
+# +3,307 rows a day, 70,138 of them older than 30 days. Every reader wants
+# recent rows (latest per job for health/readiness, newest-first pages in God
+# diagnostics), so the old ones are dead weight on a 256 MB database.
+#
+# Rules: keep everything newer than JOB_RUN_RETENTION_DAYS; ALWAYS keep the
+# newest row of every job_name (a retired or rare job still shows when it last
+# ran); never touch a 'running' row; at most JOB_RUN_PURGE_BATCH rows per pass,
+# oldest first, so one pass is a short indexed delete, not a long lock.
+JOB_RUN_RETENTION_DAYS = 30
+JOB_RUN_PURGE_BATCH = 20_000
+
+
+def purge_old_job_runs(db: Session, *, retain_days: int | None = None,
+                       batch_limit: int | None = None, now=None) -> int:
+    """Delete job_runs rows past retention. Returns rows deleted. Caller commits."""
+    from datetime import timedelta
+    from sqlalchemy import func
+    from app.models.job_models import JobRun
+    days = JOB_RUN_RETENTION_DAYS if retain_days is None else int(retain_days)
+    limit = JOB_RUN_PURGE_BATCH if batch_limit is None else int(batch_limit)
+    if days < 1 or limit < 1:
+        return 0
+    now = now or datetime.now(timezone.utc)
+    # started_at is naive UTC (see close_abandoned_runs).
+    cutoff = (now.astimezone(timezone.utc) if now.tzinfo else now).replace(tzinfo=None) \
+        - timedelta(days=days)
+    newest_per_job = db.query(func.max(JobRun.id)).group_by(JobRun.job_name).subquery()
+    ids = [i for (i,) in (db.query(JobRun.id)
+                          .filter(JobRun.started_at < cutoff,
+                                  JobRun.status != "running",
+                                  ~JobRun.id.in_(db.query(newest_per_job.c[0])))
+                          .order_by(JobRun.id)
+                          .limit(limit).all())]
+    if not ids:
+        return 0
+    n = (db.query(JobRun).filter(JobRun.id.in_(ids))
+         .delete(synchronize_session=False))
+    return int(n or 0)
