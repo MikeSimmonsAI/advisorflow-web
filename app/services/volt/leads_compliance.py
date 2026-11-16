@@ -18,8 +18,8 @@ from sqlalchemy.orm import Session
 from app.models.models import User
 from app.models.volt_leads_models import VoltLeadGrant, VoltLeadSettings
 
-CONSENT_VERSION = "2026-11-v2"
-PRIVACY_VERSION = "2026-11-v1"
+CONSENT_VERSION = "2026-11-v3"
+PRIVACY_VERSION = "2026-11-v2"
 PRIVACY_UPDATED = "November 15, 2026"
 PRIVACY_PATH = "/volt/check-coverage/privacy"
 _EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$")
@@ -77,12 +77,13 @@ def consent_texts(c: Optional[Dict[str, str]]) -> Tuple[str, str]:
     box that is never a condition of getting help."""
     who = c["name"] if c else NOT_SET
     contact = (
-        "I am asking %s to help me with health coverage options. A licensed insurance agent working with %s "
-        "may contact me about this request by phone, text message or email, using the details I entered. "
-        "This is not a requirement to buy anything. I can stop contact at any time by telling the agent, "
-        "replying STOP to a text, or using the privacy contact in the privacy notice." % (who, who))
+        "I am asking %s to pass my request for help with health coverage options to a licensed insurance agent "
+        "or agency it works with. %s and that licensed agent or agency may contact me about this request by phone, "
+        "text message or email, using the details I entered. %s does not sell insurance. This is not a requirement "
+        "to buy anything. I can stop contact at any time by telling the caller, replying STOP to a text, or using "
+        "the privacy contact in the privacy notice." % (who, who, who))
     automated = (
-        "Optional: I also agree that %s and the licensed agents working with it may call or text me at the phone "
+        "Optional: I also agree that %s and the licensed insurance agents or agencies it works with may call or text me at the phone "
         "number I entered about health coverage using automated technology, including autodialed or prerecorded "
         "calls and automated text messages. This consent is not a condition of any purchase or of getting help. "
         "Message frequency varies. Message and data rates may apply. Reply STOP to opt out." % who)
@@ -106,8 +107,10 @@ def privacy_notice(c: Optional[Dict[str, str]], brand: str) -> Dict[str, Any]:
         c["email"], (" or call %s" % c["phone"]) if c.get("phone") else "", who, c["address"])
     s = [
         ["Who we are", [
-            "%s is a working name for a health coverage help service offered by %s (\"we\", \"us\"). "
-            "%s collects the information on this website and is responsible for it." % (brand, who, who),
+            "%s is a working name used by %s (\"we\", \"us\"). We collect requests from people looking for help "
+            "with health coverage and pass them to licensed insurance agents or agencies we work with. We do not sell "
+            "insurance and we do not give insurance advice. %s collects the information on this website and is "
+            "responsible for it." % (brand, who, who),
             "This is not a government website and we are not affiliated with HealthCare.gov or any government agency."]],
         ["What we collect", [
             "What you type into the form: first and last name, phone number, email address, ZIP code and state.",
@@ -119,30 +122,32 @@ def privacy_notice(c: Optional[Dict[str, str]], brand: str) -> Dict[str, Any]:
             "the website that sent you (its domain only) and the page you arrived on.",
             "We do not ask for your Social Security number, medical history or health conditions on this website."]],
         ["Why we collect it", [
-            "To answer your request: to understand what kind of coverage help you are looking for and have a licensed "
-            "insurance agent contact you about it.",
+            "To answer your request: to understand what kind of coverage help you are looking for and pass your request "
+            "to a licensed insurance agent or agency who can contact you about it.",
             "To keep records required for insurance and telemarketing rules, including proof of your consent and any "
             "request to stop contact.",
             "To measure which of our campaigns bring people to this website."]],
         ["Who may contact you", [
-            "Licensed insurance agents working with %s, using the contact method you chose. We contact you by automated "
-            "calls or automated text messages only if you ticked that separate, optional box." % who,
+            "Our staff, to confirm your request, and the licensed insurance agents or agencies we pass it to, using the "
+            "contact method you chose. Automated calls or automated text messages are used only if you ticked that "
+            "separate, optional box.",
             "Submitting the form does not enroll you in any plan."]],
         ["Who we share it with", [
-            "Licensed insurance agents working with %s, so they can help with your request." % who,
+            "Licensed insurance agents or agencies we work with, so they can contact you about your request. We may be "
+            "paid by them for passing on requests.",
             "Service providers that run our systems for us under contract, such as website and database hosting, "
             "email, and our internal record-keeping spreadsheets. They may use the information only to provide those "
             "services to us.",
             "If you choose to apply for a plan, the information needed for that application goes to the insurance "
             "company or marketplace you choose, with your permission.",
             "When the law requires it, for example in response to a valid legal request.",
-            "We do not sell your personal information, and we do not share it with other companies for their own marketing."]],
+            "We do not share your information with anyone else for their own marketing."]],
         ["How long we keep it", [
             "We keep your request while we are helping you and for as long as insurance and telemarketing record-keeping "
             "rules require. After that we delete it or remove what identifies you.",
             "A request to stop contact is kept so that we keep honoring it."]],
         ["Your choices and rights", [
-            "You can stop contact at any time: tell the agent, reply STOP to a text, or use the contact details below.",
+            "You can stop contact at any time: tell the caller, reply STOP to a text, or use the contact details below.",
             "You can ask what information we hold about you, ask us to correct it, or ask us to delete it. Some state laws "
             "give you additional rights; we honor requests as those laws require. We will not treat you differently for "
             "making a request.",
@@ -223,8 +228,6 @@ def readiness(db: Session, row: VoltLeadSettings) -> List[Dict[str, Any]]:
     """Each launch safeguard, met or not, with what is missing. Public intake
     can be turned on only when every item is met."""
     c = collector(row)
-    agents = licensed_agents(db, row.organization_id)
-    covered = sorted({s for g in agents for s in states_of(g)})
     return [
         {"key": "collector", "ok": c is not None, "label": "Collecting company named (legal name, mailing address, privacy contact)",
          "detail": c["name"] if c else "Not entered yet."},
@@ -232,7 +235,4 @@ def readiness(db: Session, row: VoltLeadSettings) -> List[Dict[str, Any]]:
          "detail": "Version %s" % PRIVACY_VERSION if c else "Needs the collecting company."},
         {"key": "consent", "ok": c is not None, "label": "Consent names the company; automated calls/texts are a separate optional box",
          "detail": "Version %s" % CONSENT_VERSION if c else "Needs the collecting company."},
-        {"key": "agents", "ok": bool(agents), "label": "At least one licensed agent verified by the owner",
-         "detail": ("%d agent(s); states: %s" % (len(agents), ", ".join(covered))) if agents else
-                   "None yet. The website promises a licensed agent, so at least one must be verified."},
     ]
