@@ -2084,6 +2084,37 @@ INDEXES_TO_CREATE = [
     # lookup of a brand's bookable meeting types.
     "CREATE INDEX IF NOT EXISTS ix_sales_appt_booking_source "
     "ON sales_appointments(brand_sales_org_id, booking_source)",
+
+    # ── FOREIGN KEYS INTO leads (overnight audit #650, 2026-11-15) ─────────
+    # Deleting a lead makes Postgres look up every row that points at it. With
+    # no index on the pointing column that is a full scan of the child table
+    # per deleted lead. The Restland clear deleted 10,576 leads in one
+    # statement: 1,173 s, and while it held the database every program screen
+    # and sign-in returned 500 for ~5 minutes (19:29-19:34 CT). Same cause and
+    # cure as ix_isr_duplicate_of above. Every lead FK found unindexed in
+    # production; each table is small (largest 14 MB), so building them is
+    # sub-second. A table that does not exist yet is skipped by the loop.
+    "CREATE INDEX IF NOT EXISTS ix_leads_duplicate_of_lead_id ON leads(duplicate_of_lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_program_source_records_lead_id ON program_source_records(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_contact_registry_first_seen_lead_id ON contact_registry(first_seen_lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_sms_consent_records_lead_id ON sms_consent_records(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_notifications_lead_id ON notifications(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_lead_outcomes_lead_id ON lead_outcomes(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_conversation_states_lead_id ON conversation_states(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_wholesale_deals_seller_lead_id ON wholesale_deals(seller_lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_wholesale_seller_profiles_lead_id ON wholesale_seller_profiles(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_wholesale_field_appointments_lead_id ON wholesale_field_appointments(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_wholesale_enrichment_requests_lead_id ON wholesale_enrichment_requests(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_wholesale_seller_callbacks_lead_id ON wholesale_seller_callbacks(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_wholesale_conversation_controls_lead_id ON wholesale_conversation_controls(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_wholesale_temperature_overrides_lead_id ON wholesale_temperature_overrides(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_jewelry_ai_exchanges_lead_id ON jewelry_ai_exchanges(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_program_lead_files_lead_id ON program_lead_files(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_auto_send_candidates_lead_id ON auto_send_candidates(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_auto_send_queue_lead_id ON auto_send_queue(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_auto_sent_log_lead_id ON auto_sent_log(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_lead_referrals_source_lead_id ON lead_referrals(source_lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_lead_referrals_referred_lead_id ON lead_referrals(referred_lead_id)",
 ]
 
 
@@ -2477,15 +2508,35 @@ def run_auto_migrations(engine) -> None:
         # and SQLite. Run these after all columns are confirmed to exist so the
         # index can always find its target column. Each index is independent;
         # one failure doesn't block the rest.
+        #
+        # BOUNDED LOCK WAIT (audit #650 release, 2026-11-16). A plain
+        # CREATE INDEX takes a SHARE lock - it waits for every open write on
+        # the table and, while it waits, every new write queues behind it.
+        # That holds even for `IF NOT EXISTS` on an index that already exists
+        # (Postgres takes the lock before it notices), so every boot touched
+        # every indexed table this way with no limit - the lock-queue hazard
+        # the column loop above was hardened against. Same cure: give up
+        # after 5 s, retry twice, and cap the build itself. A skipped index is
+        # built on the next boot; the build is transactional, so a timeout
+        # never leaves a half-built (INVALID) index behind.
         for idx_sql in INDEXES_TO_CREATE:
-            try:
-                conn.execute(text(idx_sql))
-                conn.commit()
-            # IntegrityError: a UNIQUE index over rows that already collide.
-            # It is reported and skipped - never a reason to refuse to boot.
-            except (OperationalError, ProgrammingError, IntegrityError) as e:
-                conn.rollback()
-                print(f"[auto_migrate] Index skipped: {e}")
+            for attempt in range(_COLUMN_ADD_ATTEMPTS):
+                try:
+                    if not is_sqlite:
+                        conn.execute(text("SET LOCAL lock_timeout = '5s'"))
+                        conn.execute(text("SET LOCAL statement_timeout = '120s'"))
+                    conn.execute(text(idx_sql))
+                    conn.commit()
+                    break
+                # IntegrityError: a UNIQUE index over rows that already collide.
+                # It is reported and skipped - never a reason to refuse to boot.
+                except (OperationalError, ProgrammingError, IntegrityError) as e:
+                    conn.rollback()
+                    if _is_lock_contention(e) and attempt + 1 < _COLUMN_ADD_ATTEMPTS:
+                        _time.sleep(_COLUMN_ADD_RETRY_SECONDS)
+                        continue
+                    print(f"[auto_migrate] Index skipped: {e}")
+                    break
 
     _elapsed = round(_time.monotonic() - _started, 2)
     print(f"[auto_migrate] Startup migration check complete ({len(COLUMNS_TO_ADD)} columns, {len(ENUM_VALUES_TO_ADD)} enum values, {len(INDEXES_TO_CREATE)} indexes checked) in {_elapsed}s.")

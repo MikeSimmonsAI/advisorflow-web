@@ -343,6 +343,9 @@ def start(db: Session, prog: OutreachProgram, fam: CampaignFamily, user, *, coun
           now: Optional[datetime] = None) -> Dict:
     """Start (or resume) the journey. Sends nothing itself; schedules only."""
     now = now or datetime.utcnow()
+    from app.services.programs import campaigns as _camp507
+    if _camp507.hidden_in(db, prog.organization_id, fam.key):
+        raise ValueError(_camp507.SCI_ONLY_REFUSAL)
     if not fam.is_active:
         raise ValueError("Switch the campaign on first. Switching it on sends nothing by itself.")
     spacing = timedelta(minutes=max(0, min(MAX_SPACING_MINUTES, int(spacing_minutes or 0))))

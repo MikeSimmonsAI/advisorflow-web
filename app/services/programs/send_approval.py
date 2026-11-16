@@ -565,6 +565,8 @@ def approve(db: Session, prog: OutreachProgram, user: User, lead_ids: List[str],
         fam_row = (db.query(CampaignFamily).filter(CampaignFamily.organization_id == prog.organization_id,
                                                    CampaignFamily.key == fam_key).first()) if fam_key else None
         from app.services.programs import campaigns as _camp
+        if fam_row is not None and _camp.hidden_in(db, prog.organization_id, fam_row.key):
+            fam_row = None                   # #507: another program's campaign is never this one's
         if fam_row is None:
             # #385: a record with no campaign is never worked under another
             # campaign's words.

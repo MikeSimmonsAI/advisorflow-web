@@ -335,3 +335,49 @@
 @media (min-width: 700px) {
   .ta-convo { left: 50%; transform: translateX(-50%); max-width: 640px; border-left: 1px solid var(--ta-line); border-right: 1px solid var(--ta-line); }
 }
+
+/* ── A program on the phone (/app/p/...): Dashboard, Replies, More ──────────
+   Same tokens and rows as the rest of the app; large tap targets. */
+.ta-prog-head { margin-bottom: 10px; }
+.ta-prog-back { display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; color: var(--ta-blue);
+  font: inherit; font-weight: 700; font-size: 16px; padding: 8px 4px 8px 0; min-height: 44px; cursor: pointer; }
+.ta-prog-title { display: flex; align-items: center; gap: 10px; --acc: var(--ta-navy); }
+.ta-prog-title h1 { margin: 0; font-size: 24px; font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.ta-prog-icon { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; color: #fff;
+  background: var(--acc); flex: none; }
+.ta-prog-sub { margin: 4px 0 0 48px; }
+.ta-prog-tabs a { flex: 1; min-height: 40px; display: grid; place-items: center; border-radius: 18px; font-weight: 700;
+  color: #1f2a3d; text-decoration: none; }
+.ta-prog-tabs a.is-on { background: var(--ta-blue); color: #fff; box-shadow: 0 1px 3px rgba(21, 84, 232, .35); }
+.ta-prog-loc select { width: 100%; font: inherit; font-size: 16px; min-height: 44px; border: 1px solid #cfd6e3;
+  border-radius: 10px; padding: 8px 10px; background: #fff; margin-bottom: 12px; }
+.ta-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.ta-stat { background: #fff; border: 1px solid var(--ta-line); border-radius: 14px; padding: 12px 10px; display: flex;
+  flex-direction: column; gap: 4px; min-width: 0; }
+.ta-stat-n { font-size: 28px; font-weight: 800; line-height: 1; color: var(--ta-navy); }
+.ta-stat-l { font-size: 12.5px; font-weight: 600; color: #3b4459; line-height: 1.2; overflow-wrap: normal; word-break: normal;
+  hyphens: auto; -webkit-hyphens: auto; }
+.ta-stats-h { font-size: 13px; font-weight: 800; letter-spacing: .06em; color: var(--ta-muted); margin: 2px 2px 6px; }
+.ta-stat-note { font-size: 11.5px; color: var(--ta-muted); }
+.ta-prog-note { margin: 8px 2px 4px; }
+.ta-prog-kind { font-size: 12px; font-weight: 800; letter-spacing: .06em; color: var(--ta-muted); margin: 0 0 6px; }
+.ta-qrow { align-items: flex-start; }
+.ta-qrow .ta-row-main { gap: 2px; }
+.ta-qrow-text { font-size: 15px; color: #26324a; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; overflow-wrap: anywhere; }
+.ta-flag { flex: none; font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 10px; background: #eef1f6;
+  color: #3b4459; align-self: center; }
+.ta-flag.is-hot { background: #fdecec; color: var(--ta-red); }
+/* A card with a count: the count is its own tap target (opens Replies). */
+.ta-cardwrap { position: relative; height: 100%; }
+.ta-count { position: absolute; top: 6px; right: 6px; min-width: 32px; height: 32px; padding: 0 8px; border-radius: 16px;
+  border: 2px solid #fff; background: var(--ta-red); color: #fff; font: inherit; font-weight: 800; font-size: 14px;
+  cursor: pointer; z-index: 1; box-shadow: 0 1px 3px rgba(15, 23, 42, .25); }
+.ta-count::after { content: ""; position: absolute; inset: -6px; }      /* 44px tap area */
+.ta-bubble--static { cursor: default; }
+.ta-bubble.is-draft { background: #fff7e0; }
+.ta-prog-meta { text-align: center; margin: 0 0 10px; }
+.ta-suggest { margin-bottom: 6px; }
+.ta-keep { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ta-muted); padding: 8px 2px 0; min-height: 36px; }
+.ta-keep input { width: 20px; height: 20px; }
+@media (max-width: 340px) { .ta-stats { grid-template-columns: 1fr; } .ta-stat { flex-direction: row; align-items: baseline; gap: 10px; } }

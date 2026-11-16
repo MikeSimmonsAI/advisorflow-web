@@ -18,6 +18,14 @@ from app.services.programs import bounces as B, campaigns as C, identity, journe
 from tests.test_outreach_program import _addresses, _admin, _fake_provider, _h, program  # noqa: F401
 from tests.test_sci_441_central_alabama_cadence import _ca_lead, _fam
 
+
+@pytest.fixture(autouse=True)
+def _sci_workspace_identity(monkeypatch, sample_org):
+    """These tests run SCI's own Central Alabama campaign in the shared test
+    organization; say so, as production does (SMS_PROGRAM_ORG_SCI). Since #507
+    the campaign is SCI's only - another workspace never sees it."""
+    monkeypatch.setenv("SMS_PROGRAM_ORG_SCI", sample_org.id)
+
 @pytest.fixture(autouse=True)
 def _release_any_time(request, monkeypatch):
     """Most tests here are about WHO starts, not WHEN: let the release window

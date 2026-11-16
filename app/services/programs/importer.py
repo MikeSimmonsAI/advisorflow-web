@@ -354,7 +354,9 @@ def stage(db: Session, org: Organization, content: bytes, *, filename: Optional[
     rows = parse_csv(content)
     profiles = {p.id: p for p in db.query(LocationProfile)
                 .filter(LocationProfile.organization_id == org.id).all()}
-    families = db.query(CampaignFamily).filter(CampaignFamily.organization_id == org.id).all()
+    from app.services.programs import campaigns as _camp
+    # #507: another program's SCI-only campaign is never a choice or a pattern match here.
+    families = _camp.visible(db, org.id, db.query(CampaignFamily).filter(CampaignFamily.organization_id == org.id)).all()
     if campaign_family and campaign_family not in {f.key for f in families}:
         raise ValueError("unknown campaign %r" % campaign_family)
     result = analyze(rows, profiles, families, campaign_family=campaign_family)
