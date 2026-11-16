@@ -104,8 +104,11 @@ def _ts(value: Any) -> Optional[datetime]:
 def _org_by_customer(db: Session, customer_id: Optional[str]) -> Optional[Organization]:
     if not customer_id:
         return None
+    # Sandbox customer id, or the Live one (EvoSys Pro Sales after the Live
+    # cutover). Stripe customer ids are unique per account and mode.
     return (db.query(Organization)
-            .filter(Organization.stripe_customer_id == customer_id)
+            .filter((Organization.stripe_customer_id == customer_id)
+                    | (Organization.stripe_live_customer_id == customer_id))
             .first())
 
 
@@ -691,8 +694,14 @@ def _handle_checkout_completed(db: Session, org: Organization, obj: dict) -> Non
     moment, and it is handled explicitly below rather than falling through and
     leaving the money invisible.
     """
-    if obj.get("customer") and not org.stripe_customer_id:
-        org.stripe_customer_id = obj.get("customer")
+    if obj.get("customer"):
+        # A Live session records the Live customer; a sandbox one the sandbox
+        # customer. Neither ever overwrites the other.
+        if obj.get("livemode"):
+            if not getattr(org, "stripe_live_customer_id", None):
+                org.stripe_live_customer_id = obj.get("customer")
+        elif not org.stripe_customer_id:
+            org.stripe_customer_id = obj.get("customer")
     sub_id = obj.get("subscription")
     if sub_id:
         org.stripe_subscription_id = sub_id

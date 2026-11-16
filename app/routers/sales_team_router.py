@@ -268,6 +268,7 @@ def pricing(db: Session = Depends(get_db), user: User = Depends(get_current_user
                        "custom_saas_rates": {k: float(v) for k, v in dbc.SAAS_PCT.items()},
                        "addon_setup_rates": {k: float(v) for k, v in dbc.PACKAGE_ADDON_SETUP_PCT.items()},
                        "prices_version": dbc.STANDARD_PRICES_VERSION,
+                       "checkout_mode": __import__("app.services.stripe_live", fromlist=["x"]).checkout_mode(db),
                        "holdback_days": 14},
         "packages": [{"key": k.key, "name": k.name,
                       "setup_fee": float(k.setup_fee) if k.setup_fee is not None else None,

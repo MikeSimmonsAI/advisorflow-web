@@ -628,6 +628,11 @@ class Organization(Base):
     # against this brand's billing catalogue, kept separate so the legacy
     # column can keep its existing meaning while brand-scoped plans land.
     stripe_customer_id      = Column(String, nullable=True)
+    # The SAME customer in Stripe LIVE mode (EvoSys Pro Sales checkout after the
+    # Live cutover). Kept apart from the sandbox id above: a Stripe customer
+    # exists in exactly one mode, and mixing them would send a Live checkout to
+    # a sandbox customer that Live cannot see.
+    stripe_live_customer_id = Column(String, nullable=True)
     stripe_subscription_id  = Column(String, nullable=True)
     stripe_plan_interval    = Column(String, nullable=True)  # 'month' | 'year'
 

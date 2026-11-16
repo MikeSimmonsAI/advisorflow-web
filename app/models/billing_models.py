@@ -235,6 +235,12 @@ class BrandBillingPlan(Base):
     # this plan - so the old ids are kept here and matched by
     # billing_catalog.resolve_plan_by_price_id. Never used for a new checkout.
     stripe_price_ids_legacy = Column(Text, nullable=True)
+    # Stripe LIVE objects for this plan, kept apart from the sandbox ids above
+    # so the two modes can never be confused. Written only by the Live
+    # provisioning step (stripe_live.py); read only when new checkout runs in
+    # Live mode.
+    stripe_live_product_id = Column(String, nullable=True)
+    stripe_live_price_id = Column(String, nullable=True)
 
     # ── Entitlement ceilings ──────────────────────────────────────────────
     # These were previously returned to the UI and enforced by NOTHING - no
@@ -368,6 +374,10 @@ class BrandBillingConfig(Base):
     # cancellation in customer_lifecycle.py (offboarding a workspace).
     # CANCELLATION IS NOT DELETION applies to both: neither removes history.
     cancel_timing = Column(String, nullable=True)        # ChangeTiming
+    # Which Stripe mode NEW EvoSys Pro Sales checkout uses: "test" (sandbox,
+    # the default) or "live". Changed only by the God Mode Live switch, which
+    # refuses until the Live key, account, prices and webhook all verify.
+    sales_checkout_mode = Column(String, nullable=True)
 
     # ── Trial ─────────────────────────────────────────────────────────────
     # NULL = no trial offered. Never guessed - a trial nobody configured that

@@ -182,7 +182,24 @@ def deal_billing_checkout(
     br._stripe_client()
     import stripe
 
-    customer_id = br._get_or_create_customer(org, db)
+    # STRIPE MODE FOR THIS LINK. New EvoSys Pro Sales package links use Stripe
+    # LIVE once God Mode has switched (and only after the Live key, account,
+    # prices and webhook all verified). Everything else stays on the sandbox
+    # key, untouched. Live calls pass api_key per request, so the sandbox key
+    # held globally by the other billing flows is never swapped.
+    from app.services import stripe_live
+    live = terms.get("checkout_mode") == stripe_live.MODE_LIVE
+    live_kw = {}
+    if live:
+        try:
+            live_kw = {"api_key": stripe_live.require_key()}
+            customer_id = stripe_live.live_customer(db, org)
+        except stripe_live.LiveNotReady as exc:
+            raise HTTPException(status_code=409, detail={
+                "message": "New checkout is set to Stripe Live but Live is not ready: %s" % exc,
+                "part": part, "blockers": []})
+    else:
+        customer_id = br._get_or_create_customer(org, db)
     # SERVER-BUILT, ALLOWLISTED, BRANDED. `_return_targets` is the billing
     # router's own wrapper over `stripe_return`, so a seller-assisted checkout
     # returns the customer to exactly the same place their own checkout would
@@ -195,7 +212,8 @@ def deal_billing_checkout(
     # the trail from payment back to what was sold survives without a second
     # lookup that could resolve differently later. `part` is what lets the
     # webhook update ONE state and leave the other alone.
-    meta = {"org_id": org.id, "opportunity_id": opp.id,
+    meta = {"stripe_mode": "live" if live else "test",
+            "org_id": org.id, "opportunity_id": opp.id,
             "source": "deal_billing", "part": part}
     if terms.get("proposal_id"):
         meta["proposal_id"] = str(terms["proposal_id"])
@@ -267,6 +285,10 @@ def deal_billing_checkout(
                 # card would be charged $500.
                 price_id = billing_catalog.stripe_price_id_for(
                     plan, "month", sub.get("commitment"))
+                if live:
+                    # The verified Live price for this package (terms_for
+                    # refuses the link when there is none).
+                    price_id = sub["live_price_id"]
                 line_item = {"price": price_id, "quantity": 1}
                 sub_meta = {**meta, "plan": sub["plan"]}
             kwargs = {
@@ -300,7 +322,7 @@ def deal_billing_checkout(
             # $3,500 up front. The implementation fee is a separate obligation
             # with its own Stripe object, its own state and its own link; see
             # the `part` docstring above.
-            session = stripe.checkout.Session.create(**kwargs)
+            session = stripe.checkout.Session.create(**kwargs, **live_kw)
         else:
             # THE ONE-TIME SETUP PAYMENT. `mode="payment"` — no subscription is
             # created, none is started, and nothing about the customer's plan
@@ -310,6 +332,7 @@ def deal_billing_checkout(
             # AND ON THEIR CARD STATEMENT, so it says what it is rather than
             # leaving them to work out why they are being charged.
             session = stripe.checkout.Session.create(
+                **live_kw,
                 customer=customer_id,
                 mode="payment",
                 line_items=[{
@@ -394,6 +417,7 @@ def deal_billing_checkout(
             # EvoSys Pro Sales packages: nothing is charged by this link in
             # Month 1; the first monthly charge falls on this date.
             "monthly_billing_starts": starts,
+            "stripe_mode": "live" if live else "test",
             "stripe_session_id": session.id,
             # Only the charge this session actually bills, so a caller cannot
             # display "you are collecting $3,500" for a $2,500 setup link.

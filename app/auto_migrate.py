@@ -313,6 +313,12 @@ COLUMNS_TO_ADD = [
     ("brand_billing_plans", "stripe_price_id_month_to_month", "VARCHAR"),
     # Old Stripe Prices kept recognisable after a price change (2026-11-15).
     ("brand_billing_plans", "stripe_price_ids_legacy", "TEXT"),
+    # Stripe LIVE cutover for EvoSys Pro Sales checkout (2026-11-15). Live ids
+    # kept in their own columns; the mode switch defaults to the sandbox.
+    ("brand_billing_plans", "stripe_live_product_id", "VARCHAR"),
+    ("brand_billing_plans", "stripe_live_price_id", "VARCHAR"),
+    ("organizations", "stripe_live_customer_id", "VARCHAR"),
+    ("brand_billing_configs", "sales_checkout_mode", "VARCHAR"),
 
     # ── Capacity a plan card may state, as CONFIGURATION (2026-09-11) ──────
     #
