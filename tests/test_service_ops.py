@@ -401,7 +401,7 @@ def test_workers_and_buyers_are_kept_out_of_the_sales_portal_and_admin(ops):
     assert r.status_code == 403
     # Deactivated member loses access.
     p["c"].put("/service-ops/team/%s" % m["id"], json={"active": False}, headers=_o(p))
-    assert p["c"].get("/service-ops/jobs?mine=true", headers=wh).status_code == 403
+    assert p["c"].get("/service-ops/jobs?mine=true", headers=wh).status_code in (401, 403)   # signed out entirely
 
 
 def test_team_invite_returns_setup_link_and_sends_nothing(ops):

@@ -52,11 +52,12 @@ const SUPPORT_NAV = [
   { to: `${OPS}/onboarding`, label: 'Client Configuration', icon: 'building' },
   { to: `${OPS}/calendar`, label: 'Booking & Calendar', icon: 'calendar' },
   { to: `${OPS}/settings`, label: 'Pause, Exclusions & Operators', icon: 'settings' },
+  { to: `${OPS}/service-ops`, label: 'Service Operations', icon: 'list' },
   { to: `${OPS}/activity`, label: 'Audit History', icon: 'clock' },
 ]
 const MASTER_PATHS = [OPS, ...MASTER_NAV.slice(1).map(x => x.to), ...OPS_NAV.map(x => x.to), `${OPS}/activity`]
 // Pages that need a chosen client. The owner is never dropped into one by default.
-const CLIENT_PATHS = [...CLIENT_NAV.map(x => x.to), `${OPS}/onboarding`, `${OPS}/settings`]
+const CLIENT_PATHS = [...CLIENT_NAV.map(x => x.to), `${OPS}/onboarding`, `${OPS}/settings`, `${OPS}/service-ops`]
 const TITLES = Object.fromEntries([...MASTER_NAV, ...OPS_NAV, ...CLIENT_NAV, ...SUPPORT_NAV].map(x => [x.to, x.label]))
 
 function NavGroup({ title, items, children, pre = [], startOpen = true }) {

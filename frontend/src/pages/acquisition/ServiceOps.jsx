@@ -19,6 +19,7 @@ const TONE = { draft: 'gray', scheduled: 'blue', assigned: 'blue', confirmed: 'v
                issued: 'blue', partially_paid: 'amber', paid: 'green', overdue: 'red', void: 'gray' }
 const can = (me, p) => !!me?.perms?.includes(p)
 const field = (id, label, input) => <div className="aq-field"><label htmlFor={id}>{label}</label>{input}</div>
+const SETUP_LABEL = { pending: 'Invited — link not used yet', expired: 'Link expired — send a new one', revoked: 'Link replaced', accepted: 'Set up — not signed in yet' }
 const usd = v => (v === null || v === undefined ? '—' : '$' + Number(v).toFixed(2))
 
 export function useOps() {
@@ -168,8 +169,9 @@ export function OpsCustomers() {
               </div>
                 {can(me, 'customers') && edit?.id !== l.id && <button className="aq-btn aq-btn--sm" onClick={() => setEdit({ id: l.id, f: { access_instructions: l.access_instructions || '', special_requirements: l.special_requirements || '', standard_duration_min: l.standard_duration_min || '', assigned_member_ids: l.assigned_member_ids } })}>Edit</button>}</div>))}
             {buyers?.items?.filter(b => b.customer_id === c.id).map(b => (
-              <div className="aq-row" key={b.id}><div className="aq-row__main"><span>Portal: {b.name} · {b.email} · {b.status}</span></div>
-                {b.status !== 'revoked' && <button className="aq-btn aq-btn--sm" onClick={() => revoke(b.id)}>Remove access</button>}</div>))}
+              <div className="aq-row" key={b.id}><div className="aq-row__main"><span>Portal: {b.name} · {b.email} · {b.status === 'revoked' ? 'access removed' : SETUP_LABEL[b.setup?.state] || b.status}</span></div>
+                {b.status !== 'revoked' && <><button className="aq-btn aq-btn--sm" onClick={async () => { try { const r = await api.post(`/service-ops/buyers/${b.id}/setup-link`, {}); setLink(r.setup_url); reloadBuyers() } catch (e) { say(errText(e)) } }}>New link</button>
+                  <button className="aq-btn aq-btn--sm" onClick={() => revoke(b.id)}>Remove access</button></>}</div>))}
           </section>))}
     </div>
   )
@@ -369,7 +371,8 @@ export function OpsTeam() {
   const [toast, say] = useToast()
   const load = Object.fromEntries((w?.items || []).map(m => [m.id, m.upcoming]))
   const invite = async () => { try { const r = await api.post('/service-ops/team', inv); setLink(r.setup_url); setInv(null); reload() } catch (e) { say(errText(e)) } }
-  const upd = async (id, body) => { try { await api.put(`/service-ops/team/${id}`, body); reload(); say('Saved') } catch (e) { say(errText(e)) } }
+  const upd = async (id, body) => { try { await api.put(`/service-ops/team/${id}`, body); reload(); say(body.active === false ? 'Turned off — they can’t sign in' : 'Saved') } catch (e) { say(errText(e)) } }
+  const relink = async id => { try { const r = await api.post(`/service-ops/team/${id}/setup-link`, {}); setLink(r.setup_url); reload() } catch (e) { say(errText(e)) } }
   return (
     <div className="aq-page">{toast}
       <PageHeader eyebrow="Service Operations" title="Team & Assignments" sub="Everyone uses their own EvoSys login. Field workers see only the jobs they’re assigned."
@@ -387,8 +390,9 @@ export function OpsTeam() {
           <tbody>{d.items.map(m => <tr key={m.id}><td><b>{m.name}</b><div className="hb-muted">{m.email}</div></td>
             <td>{can(me, 'team') && m.role !== 'company_admin' ? <select aria-label="Role" value={m.role} onChange={e => upd(m.id, { role: e.target.value })}>{d.roles.filter(r => r.key !== 'company_admin').map(r => <option key={r.key} value={r.key}>{r.label}</option>)}</select> : m.role_label}</td>
             <td>{m.team_name || '—'}</td><td>{load[m.id] ? `${load[m.id].jobs} jobs · ${Math.round(load[m.id].minutes / 60)} h` : '—'}</td>
-            <td>{m.active ? (m.has_signed_in ? 'Active' : 'Invited') : 'Off'}</td>
-            <td>{can(me, 'team') && <button className="aq-btn aq-btn--sm" onClick={() => upd(m.id, { active: !m.active })}>{m.active ? 'Turn off' : 'Turn on'}</button>}</td></tr>)}</tbody></table></div>}
+            <td>{!m.active ? 'Off — can’t sign in' : m.has_signed_in ? 'Active' : SETUP_LABEL[m.setup?.state] || 'Invited'}</td>
+            <td>{can(me, 'team') && <>{m.active && m.role !== 'company_admin' && <button className="aq-btn aq-btn--sm" onClick={() => relink(m.id)}>{m.has_signed_in ? 'Password reset link' : 'New setup link'}</button>}
+              <button className="aq-btn aq-btn--sm" onClick={() => upd(m.id, { active: !m.active })}>{m.active ? 'Turn off' : 'Turn on'}</button></>}</td></tr>)}</tbody></table></div>}
     </div>
   )
 }

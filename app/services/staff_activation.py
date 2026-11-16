@@ -256,9 +256,26 @@ def preview(db: Session, raw_token: str) -> dict:
                 agency = (s.display_name if s is not None and s.display_name else (org.name if org else None))
         except Exception:  # noqa: BLE001 - wording only; never blocks activation
             agency = None
+    service_portal = None
+    if brand is None and agency is None:
+        # A service company's field team or its own customer (Service
+        # Operations, #452/#506): name the company and don't call them an
+        # administrator. Wording only; never blocks activation.
+        try:
+            from app.models.models import Organization
+            from app.models.service_ops_models import ServiceBuyerAccess, ServiceOpsSettings, ServiceTeamMember
+            org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+            s = db.query(ServiceOpsSettings).filter(ServiceOpsSettings.organization_id == user.organization_id).first()
+            name = (s.business_name if s is not None and s.business_name else (org.name if org else None))
+            if db.query(ServiceTeamMember).filter(ServiceTeamMember.user_id == user.id).first() is not None:
+                agency = name
+            elif db.query(ServiceBuyerAccess).filter(ServiceBuyerAccess.user_id == user.id).first() is not None:
+                service_portal = name
+        except Exception:  # noqa: BLE001
+            agency = agency
     return {"full_name": user.full_name, "email": user.email,
             "workspace": brand, "purpose": row.purpose,
-            "agency": agency, "expires_at": row.expires_at}
+            "agency": agency, "service_portal": service_portal, "expires_at": row.expires_at}
 
 
 def accept(db: Session, raw_token: str, new_password: str) -> User:
