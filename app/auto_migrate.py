@@ -2508,15 +2508,35 @@ def run_auto_migrations(engine) -> None:
         # and SQLite. Run these after all columns are confirmed to exist so the
         # index can always find its target column. Each index is independent;
         # one failure doesn't block the rest.
+        #
+        # BOUNDED LOCK WAIT (audit #650 release, 2026-11-16). A plain
+        # CREATE INDEX takes a SHARE lock - it waits for every open write on
+        # the table and, while it waits, every new write queues behind it.
+        # That holds even for `IF NOT EXISTS` on an index that already exists
+        # (Postgres takes the lock before it notices), so every boot touched
+        # every indexed table this way with no limit - the lock-queue hazard
+        # the column loop above was hardened against. Same cure: give up
+        # after 5 s, retry twice, and cap the build itself. A skipped index is
+        # built on the next boot; the build is transactional, so a timeout
+        # never leaves a half-built (INVALID) index behind.
         for idx_sql in INDEXES_TO_CREATE:
-            try:
-                conn.execute(text(idx_sql))
-                conn.commit()
-            # IntegrityError: a UNIQUE index over rows that already collide.
-            # It is reported and skipped - never a reason to refuse to boot.
-            except (OperationalError, ProgrammingError, IntegrityError) as e:
-                conn.rollback()
-                print(f"[auto_migrate] Index skipped: {e}")
+            for attempt in range(_COLUMN_ADD_ATTEMPTS):
+                try:
+                    if not is_sqlite:
+                        conn.execute(text("SET LOCAL lock_timeout = '5s'"))
+                        conn.execute(text("SET LOCAL statement_timeout = '120s'"))
+                    conn.execute(text(idx_sql))
+                    conn.commit()
+                    break
+                # IntegrityError: a UNIQUE index over rows that already collide.
+                # It is reported and skipped - never a reason to refuse to boot.
+                except (OperationalError, ProgrammingError, IntegrityError) as e:
+                    conn.rollback()
+                    if _is_lock_contention(e) and attempt + 1 < _COLUMN_ADD_ATTEMPTS:
+                        _time.sleep(_COLUMN_ADD_RETRY_SECONDS)
+                        continue
+                    print(f"[auto_migrate] Index skipped: {e}")
+                    break
 
     _elapsed = round(_time.monotonic() - _started, 2)
     print(f"[auto_migrate] Startup migration check complete ({len(COLUMNS_TO_ADD)} columns, {len(ENUM_VALUES_TO_ADD)} enum values, {len(INDEXES_TO_CREATE)} indexes checked) in {_elapsed}s.")
