@@ -12,9 +12,7 @@ import { Avatar, ErrorNote, Icon, Loading, ScreenTitle, useTeam, useTeamApi } fr
 
 function roleLine(user, a) {
   if (a.is_platform) return 'Platform'
-  if (a.chat_manage) return 'Chat manager'
-  if (a.platform_name) return a.platform_name
-  return ''
+  return a.platform_name || ''
 }
 
 function ActionTile({ icon, label, tone, onClick, sub }) {

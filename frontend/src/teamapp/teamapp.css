@@ -234,7 +234,7 @@
 .ta-pin-art { position: absolute; right: -6px; bottom: -4px; width: 62%; height: auto; color: rgba(255, 255, 255, .28); pointer-events: none; }
 .ta-pin-icon, .ta-feat-icon { position: relative; display: inline-flex; margin-bottom: auto; }
 .ta-pin.has-second .ta-pin-icon { color: var(--acc2); }
-.ta-pin-name, .ta-feat-name { position: relative; font-weight: 800; font-size: 20px; line-height: 1.12; overflow-wrap: anywhere; text-shadow: 0 1px 2px rgba(0,0,0,.25); }
+.ta-pin-name, .ta-feat-name { position: relative; font-weight: 800; font-size: 20px; line-height: 1.12; overflow-wrap: break-word; max-width: 100%; text-shadow: 0 1px 2px rgba(0,0,0,.25); }
 .ta-pin-sub { position: relative; font-size: 12.5px; opacity: .9; }
 .ta-pin-empty { width: 100%; min-height: 72px; border: 2px dashed #b9c6dc; border-radius: 16px; background: rgba(255,255,255,.55); color: var(--ta-navy);
   font: inherit; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; padding: 12px; }
@@ -249,8 +249,9 @@
 .ta-tile-icon { width: 54px; height: 50px; border-radius: 13px; display: grid; place-items: center; color: #fff;
   background: linear-gradient(160deg, color-mix(in srgb, var(--acc) 75%, #fff), var(--acc)); box-shadow: 0 3px 8px color-mix(in srgb, var(--acc) 35%, transparent); }
 .ta-tile-icon.has-second { color: var(--acc2); background: linear-gradient(160deg, color-mix(in srgb, var(--acc) 85%, #fff), var(--acc)); }
-.ta-tile-name { font-weight: 800; font-size: 14.5px; line-height: 1.15; overflow-wrap: anywhere; hyphens: auto; }
-.ta-tile-sub { font-size: 11.5px; color: var(--ta-muted); line-height: 1.2; overflow-wrap: anywhere; }
+.ta-tile-name { font-weight: 800; font-size: 14.5px; line-height: 1.15; overflow-wrap: break-word; max-width: 100%; }
+.ta-tile-sub { font-size: 11.5px; color: var(--ta-muted); line-height: 1.2; overflow-wrap: break-word; max-width: 100%;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* Edit pins sheet */
 .ta-sheet-grip { width: 44px; height: 5px; border-radius: 3px; background: #cdd5e2; margin: 2px auto 10px; }
@@ -269,7 +270,8 @@
   box-shadow: 0 3px 8px rgba(21, 84, 232, .35); }
 .ta-feat { --acc: #2563EB; justify-content: flex-end; }
 .ta-feat.is-news { --acc: #475569; }
-.ta-feat-name { font-size: 18px; }
+.ta-feat-name { font-size: 17px; }
+@media (max-width: 380px) { .ta-feat-name, .ta-pin-name { font-size: 16px; } }
 .ta-feat-badge { position: absolute; top: 10px; right: 10px; min-width: 22px; height: 22px; border-radius: 11px; background: #fff; color: var(--ta-blue);
   font-weight: 800; font-size: 12.5px; display: grid; place-items: center; padding: 0 6px; }
 .ta-cards { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
@@ -291,6 +293,9 @@
 .ta-msg.is-mine .ta-quote { color: rgba(255,255,255,.85); border-left-color: rgba(255,255,255,.6); }
 .ta-composer { background: #fff; box-shadow: 0 -2px 8px rgba(15, 23, 42, .06); }
 .ta-input { border-radius: 22px; padding: 11px 16px; background: #f4f7fc; }
+.ta-input:focus, .ta-input:focus-visible, .ta-drive input:focus { outline: none !important; border-color: var(--ta-blue) !important; box-shadow: 0 0 0 3px rgba(21, 84, 232, .15) !important; }
+/* The web app's global input glow is for its own forms; inside these boxes the box itself shows focus. */
+.ta-searchbox input:focus, .ta-field input:focus { box-shadow: none !important; border-color: transparent !important; }
 .ta-send { border-radius: 22px; }
 
 /* Activity cards */
@@ -302,7 +307,7 @@
 .ta-acard:active:not(:disabled) { filter: brightness(.97); }
 .ta-acard-tile { flex: none; width: 48px; height: 48px; border-radius: 13px; display: grid; place-items: center; color: #fff;
   background: linear-gradient(160deg, color-mix(in srgb, var(--acc) 78%, #fff), var(--acc)); }
-.ta-acard-title { font-weight: 800; font-size: 16.5px; line-height: 1.22; color: #0f172a; overflow-wrap: anywhere; }
+.ta-acard-title { font-weight: 800; font-size: 16.5px; line-height: 1.22; color: #0f172a; overflow-wrap: break-word; }
 .ta-acard-time { font-size: 15px; color: #334155; font-variant-numeric: tabular-nums; }
 .ta-seg { background: #fff; border: 1px solid #d5dce8; border-radius: 22px; }
 .ta-seg button { border-radius: 18px; }
@@ -315,7 +320,7 @@
 .ta-profile { padding: 16px; border-radius: 18px; }
 .ta-profile .ta-avatar { background: linear-gradient(160deg, #dbe7ff, #bcd2fb); }
 .ta-profile-text { min-width: 0; border-left: 1px solid var(--ta-line); padding-left: 14px; }
-.ta-profile-name { font-weight: 800; font-size: 21px; overflow-wrap: anywhere; }
+.ta-profile-name { font-weight: 800; font-size: 21px; overflow-wrap: break-word; }
 .ta-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 4px 0 12px; }
 .ta-action { min-height: 128px; border: 1px solid #dbe3ef; border-radius: 18px; background: #fff; box-shadow: 0 2px 6px rgba(15, 23, 42, .06);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font: inherit; color: var(--ta-text); cursor: pointer; padding: 12px 8px; }
