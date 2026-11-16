@@ -174,6 +174,11 @@ def test_a_server_error_still_carries_cors_headers(db_session, sample_org):
 
     if not any(getattr(r, "path", None) == "/__probe_boom" for r in app.routes):
         app.include_router(probe)
+        # The short-link catch-all GET /{code} is registered last and matches
+        # any one-segment path, so an appended probe would never be reached
+        # (404). Move the probe in front of it.
+        mine = [x for x in app.router.routes if getattr(x, "path", None) == "/__probe_boom"]
+        app.router.routes[:] = mine + [x for x in app.router.routes if x not in mine]
     try:
         r = TestClient(app, raise_server_exceptions=False).get("/__probe_boom", headers={"Origin": origin})
     finally:
