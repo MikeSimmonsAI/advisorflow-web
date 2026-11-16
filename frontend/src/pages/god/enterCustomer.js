@@ -19,7 +19,8 @@
  * is checked on every single entry rather than trusted.
  */
 import { api, setOrgContext, setBrandContext, clearOrgContext, clearBranding,
-         fetchAndStoreBranding } from '../../api/client'
+         fetchAndStoreBranding, setAcqClientView, getAcqClientView,
+         clearAcqClientView } from '../../api/client'
 // THE SECOND CACHE THAT DESCRIBES THIS WORKSPACE. `af_branding` and
 // `af_terminology` answer the same question — which customer is this — and
 // only the first was ever dropped on a switch. See the call sites below.
@@ -50,6 +51,7 @@ export async function enterCustomer(orgId, orgName) {
 
   const name = (r && r.context && r.context.customer && r.context.customer.name) || orgName || orgId
   setOrgContext(orgId, name)
+  clearAcqClientView()   // one selected customer at a time
 
   // The cached branding belongs to whoever was entered LAST, and it carries
   // `enabled_features` — an allow-list keyed to one organization. Keeping it
@@ -116,6 +118,42 @@ export async function exitCustomer() {
   clearOrgContext()
   // Same reason as entering: the allow-list left behind belongs to the
   // customer just left, and nothing outside a customer should render from it.
+  clearBranding()
+  clearTerminology()
+}
+
+/**
+ * OPEN A SERVICE COMPANY'S CLIENT PORTAL AS AN EVOSYS ACQUISITION ADMIN (#452).
+ *
+ * The admin is not God, so the God entry above is refused to them (and, for a
+ * login holding a Wholesale seat, the Wholesale program lock refused it first:
+ * "This workspace runs Wholesale. That screen is not part of Wholesale.").
+ * This asks the Acquisition endpoint instead. It grants nothing - the
+ * membership counts are asserted unchanged exactly as above - and the portal is
+ * then reached request by request with the client named, re-checked by the
+ * server every time.
+ */
+export async function enterAcquisitionClient(orgId, orgName) {
+  if (!orgId) throw new Error('No service company selected.')
+  const r = await api.post('/acquisition-ops/' + orgId + '/client-portal', {})
+  if (r && r.memberships_before !== r.memberships_after) {
+    throw new Error('Refusing to enter: the server reported a membership change ' +
+      `(${r.memberships_before} → ${r.memberships_after}). Opening a client portal must never grant one.`)
+  }
+  const name = (r && r.context && r.context.customer && r.context.customer.name) || orgName || orgId
+  setAcqClientView(orgId, name)
+  // The previous workspace's presentation and words must not dress this client.
+  clearBranding()
+  clearTerminology()
+  try { await fetchAndStoreBranding({ applyTheme: false, asCustomer: orgId }) } catch (_) { /* open */ }
+  return r ? r.context : null
+}
+
+/** Leave the client portal (audited); the local selection goes either way. */
+export async function exitAcquisitionClient() {
+  const v = getAcqClientView()
+  try { if (v) await api.post('/acquisition-ops/client-portal/exit', { organization_id: v.orgId }) } catch (_) { /* leaving regardless */ }
+  clearAcqClientView()
   clearBranding()
   clearTerminology()
 }

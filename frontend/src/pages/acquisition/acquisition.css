@@ -195,3 +195,8 @@
   .aq-chevrons { flex-wrap: wrap; }
   .aq-chev, .aq-chev:first-child { flex: 1 1 30%; clip-path: none; border-radius: 10px; }
 }
+
+/* EvoSys admin looking through a client's portal (#452): says so, and the way back. */
+.aq-adminview { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  margin: 0 0 12px; padding: 8px 12px; border-radius: 10px; background: rgba(139, 92, 246, .14);
+  border: 1px solid rgba(139, 92, 246, .45); font-size: 13px; }

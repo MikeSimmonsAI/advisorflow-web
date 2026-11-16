@@ -1019,6 +1019,12 @@ def selected_workspace_id(user: User, db: Session,
     single-workspace or legacy answer rather than being refused for not sending
     a header the old client does not know about.
     """
+    # An Acquisition admin inside a client portal (validated in
+    # acquisition/client_view.py for this request): the client wins over any
+    # workspace the browser still remembers selecting.
+    forced = getattr(user, "_acq_client_org", None)
+    if forced:
+        return forced
     if request is None:
         return None
     requested = request.headers.get(WORKSPACE_HEADER)

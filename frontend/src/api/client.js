@@ -170,7 +170,8 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
   // because the leak that the route rule closed was the header being sent
   // IMPLICITLY from wherever somebody happened to be standing. The server
   // authorizes it exactly as before.
-  const orgOverride = orgOverrideFor(
+  const orgOverride = acqClientOverride(
+    typeof window !== 'undefined' ? window.location.pathname : '/', options) || orgOverrideFor(
     typeof window !== 'undefined' ? window.location.pathname : '/',
     { orgId: getOrgContext()?.orgId || null,
       noOrgContext: !!options.noOrgContext,
@@ -377,6 +378,7 @@ function _getDedupeKey(path, opts) {
   // platform-context read of the same path already in flight — which is the
   // same wrong answer this option exists to stop, arriving by another route.
   const org = opts.asCustomer
+    || acqClientOverride(typeof window !== 'undefined' ? window.location.pathname : '/', opts)
     || (opts.noOrgContext ? '' : (getOrgContext()?.orgId || ''))
   const brand = getBrandContext()?.platformId || ''
   const ws = getWorkspaceContext() || ''
@@ -437,7 +439,8 @@ export async function fetchObjectUrl(path) {
   const headers = token ? { Authorization: `Bearer ${token}` } : {}
   // The SAME workspace the page is reading: without it the platform owner
   // standing in a customer workspace (SCI Live) got 403 and no voicemail played.
-  const orgOverride = orgOverrideFor(
+  const orgOverride = acqClientOverride(
+    typeof window !== 'undefined' ? window.location.pathname : '/', {}) || orgOverrideFor(
     typeof window !== 'undefined' ? window.location.pathname : '/',
     { orgId: getOrgContext()?.orgId || null, noOrgContext: false, asCustomer: null })
   if (orgOverride) headers['X-Org-Override'] = orgOverride
@@ -873,6 +876,41 @@ export function getOrgContext() {
 }
 
 
+// ── AN EVOSYS ACQUISITION ADMIN INSIDE A CLIENT'S PORTAL (#452) ─────────────
+//
+// Separate from the owner's God Mode selection on purpose. It is sent ONLY
+// from the client portal's own screens (/program/acquisition/*) - never from
+// the admin's Wholesale or other workspaces - and the server honours it only
+// for a login holding the Acquisition admin grant, only for an acquisition
+// client, only on that portal's API (app/services/acquisition/client_view.py).
+// Like every other context here it is a REQUEST, never a grant.
+const ACQ_CLIENT_KEY = 'af_acq_client_view'
+const ACQ_PORTAL = '/program/acquisition'
+
+export function setAcqClientView(orgId, orgName) {
+  try { localStorage.setItem(ACQ_CLIENT_KEY, JSON.stringify({ orgId, orgName })) } catch { /* not sent */ }
+}
+
+export function getAcqClientView() {
+  try {
+    const raw = localStorage.getItem(ACQ_CLIENT_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+export function clearAcqClientView() {
+  try { localStorage.removeItem(ACQ_CLIENT_KEY) } catch { /* nothing to clear */ }
+}
+
+export function acqClientOverride(pathname, opts = {}) {
+  if (opts.asCustomer || opts.noOrgContext) return null
+  const p = (pathname || '/').split('?')[0]
+  if (!(p === ACQ_PORTAL || p.startsWith(ACQ_PORTAL + '/'))) return null
+  return getAcqClientView()?.orgId || null
+}
+
 export function clearOrgContext() {
   localStorage.removeItem(ORG_CONTEXT_KEY)
   localStorage.removeItem('bb_org_context') // clean up legacy key
@@ -949,6 +987,7 @@ export function clearAllContext() {
   clearWorkspaceContext()
   clearWorkspaceLocation()
   clearObservationContext()
+  clearAcqClientView()
 }
 
 // ── THE SELECTED LOCATION (entitlement "workspace") ─────────────────────────
