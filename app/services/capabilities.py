@@ -239,32 +239,22 @@ CAPABILITIES: Dict[str, Capability] = dict([
              "seeded fictional data. It carries no authority over any real "
              "customer, no platform administration, and no God function — a "
              "salesperson who can demo still cannot see a customer's leads."),
-    # ── EvoSys Pro Team App (mobile): chat and timekeeping ──────────────────
+    # ── EvoSys Pro Mobile: Team Chat ────────────────────────────────────────
     # Platform-scoped, never delegable to a customer. The platform owner and
-    # super_admins of the platform hold all five without a row; anybody else
+    # super_admins of the platform hold all three without a row; anybody else
     # (an owner partner, a sales leader) holds exactly what is granted here.
     _cap("team_chat",
          "Team Chat — DMs, Sales Team and Company Announcements",
          requires_feature=None, delegable=False,
          why="Lets someone who is not on a sales team use the company chat."),
-    _cap("team_time",
-         "Timekeeping — clock in, clock out and My Time",
-         requires_feature=None, delegable=False,
-         why="Lets someone who is not on a sales team keep their own time."),
     _cap("team_chat_manage",
          "Manage chat rooms — add and remove room members",
          requires_feature=None, delegable=False,
-         why="Room membership only. It grants no access to anybody's private "
-             "DMs and no access to Team Time."),
+         why="Room membership only. It grants no access to anybody's private DMs."),
     _cap("team_announce",
          "Publish Company Announcements",
          requires_feature=None, delegable=False,
          why="Post to the read-only announcements channel everyone sees."),
-    _cap("team_time_manage",
-         "Team Time — review and correct the time of assigned people",
-         requires_feature=None, delegable=False,
-         why="Reviews and corrects ONLY the people assigned to this manager; "
-             "every correction needs a reason and is recorded."),
     _cap("demo_admin",
          "Demo environment administration — rebuild, reset and reseed",
          requires_feature=None, delegable=False,
@@ -662,8 +652,7 @@ def set_brand_grants(db: Session, target: User, brand_sales_org_id: str,
 # this list is the promise that a grant written here is a grant something
 # enforces.
 PLATFORM_SCOPED_CAPABILITIES = ("demo_suite", "demo_admin",
-                                "team_chat", "team_time", "team_chat_manage",
-                                "team_announce", "team_time_manage")
+                                "team_chat", "team_chat_manage", "team_announce")
 
 
 def platform_grants_for(db: Session, user_id: str, platform_id: str) -> List[str]:

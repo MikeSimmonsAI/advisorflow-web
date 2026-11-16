@@ -1,28 +1,28 @@
-"""/team-app — the EvoSys Pro mobile app's Chat, Time and access screens.
+"""/team-app — EvoSys Pro Mobile: Chat, Activity and the Team access screen.
 
-Eagle Says Mobile App Prototype. Program Access is NOT here: the app reads the
-existing /auth/my-contexts answer for that, exactly as the web launcher does.
+Program Access is NOT here: the app reads the existing /auth/my-contexts
+answer for that, exactly as the web launcher does.
 
 Every route authenticates with the normal EvoSys session (get_current_user)
 and re-decides authority from team_app_access on every call. Nothing the phone
 sends about who it is or what it may do is believed. Every response is
 `Cache-Control: no-store` so no browser, proxy or service worker keeps a
-message, a file or a time record.
+message, a file or an activity item.
 """
 from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.deps import get_current_user, get_db
 from app.models.models import User
-from app.models.team_app_models import TeamChatAttachment, TeamTimeEntry, TeamTimeScope
+from app.models.team_app_models import TeamChatAttachment
+from app.services import team_activity as activity
 from app.services import team_app_access as acc
 from app.services import team_chat as chat
-from app.services import team_time as tt
 from app.services import wholesale_files as files
 
 router = APIRouter(prefix="/team-app", tags=["team-app"])
@@ -45,12 +45,10 @@ def me(response: Response, user: User = Depends(get_current_user), db: Session =
     a = _access(db, user)
     out = {"user": {"id": user.id, "name": user.full_name, "email": user.email,
                     "initials": chat.initials(user.full_name), "role": user.role},
-           "access": a.as_dict(), "time_zone": tt.tz_name_for(db, user)}
+           "access": a.as_dict(), "time_zone": activity.user_tz(db, user)}
     if a.chat:
         chat.ensure_builtin(db, a.platform_id)
         out["chat_unread"] = chat.unread_total(db, a, user)
-    if a.time:
-        out["time_status"] = tt.status(db, user)
     return out
 
 
@@ -226,91 +224,29 @@ def remove_member(room_id: str, member_id: str, response: Response,
     return chat.room_members(db, a, room)
 
 
-# ── Time ────────────────────────────────────────────────────────────────────
+# ── Activity ────────────────────────────────────────────────────────────────
+# Open to every signed-in person: each source inside applies its own rule
+# (workspaces this login may open, appointments it takes part in, chat rooms
+# it can read). The brand host is read the same way /auth/my-contexts reads it,
+# so Activity covers exactly the workspaces desktop Program Access lists.
 
-@router.get("/time/status")
-def time_status(response: Response, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def _host_slug(request: Request):
+    from app.routers.auth_router import _brand_domain_slug
+    return _brand_domain_slug(request)
+
+
+@router.get("/activity/updates")
+def activity_updates(request: Request, response: Response, user: User = Depends(get_current_user),
+                     db: Session = Depends(get_db)):
     _nostore(response)
-    a = _access(db, user)
-    acc.require(a, "time")
-    return tt.status(db, user)
+    return activity.updates(db, user, _access(db, user), _host_slug(request))
 
 
-@router.post("/time/clock-in")
-def clock_in(response: Response, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@router.get("/activity/upcoming")
+def activity_upcoming(request: Request, response: Response, date: Optional[str] = None,
+                      user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     _nostore(response)
-    a = _access(db, user)
-    acc.require(a, "time")
-    return tt.clock_in(db, user, a.platform_id)
-
-
-@router.post("/time/clock-out")
-def clock_out(response: Response, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    _nostore(response)
-    a = _access(db, user)
-    acc.require(a, "time")
-    return tt.clock_out(db, user)
-
-
-@router.get("/time/mine")
-def my_time(response: Response, week_of: Optional[str] = None,
-            user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    _nostore(response)
-    a = _access(db, user)
-    acc.require(a, "time")
-    return tt.my_week(db, user, week_of)
-
-
-def _team_ids(db: Session, user: User, a) -> List[str]:
-    acc.require(a, "time_manage")
-    return tt.managed_user_ids(db, user, a, acc.time_people(db, a.platform_id))
-
-
-@router.get("/time/team")
-def team_time(response: Response, date_from: Optional[str] = None, date_to: Optional[str] = None,
-              user_id: Optional[str] = None, user: User = Depends(get_current_user),
-              db: Session = Depends(get_db)):
-    _nostore(response)
-    a = _access(db, user)
-    ids = _team_ids(db, user, a)
-    return tt.team_range(db, user, ids, date_from, date_to, user_id)
-
-
-def _entry_in_scope(db: Session, user: User, a, entry_id: str) -> TeamTimeEntry:
-    ids = _team_ids(db, user, a)
-    e = db.query(TeamTimeEntry).filter(TeamTimeEntry.id == entry_id).first()
-    if not e or e.user_id not in ids:
-        raise HTTPException(status_code=404, detail="Time entry not found.")
-    return e
-
-
-class CorrectionIn(BaseModel):
-    clock_in_at: Optional[str] = None
-    clock_out_at: Optional[str] = None
-    reason: str
-
-
-@router.patch("/time/entries/{entry_id}")
-def correct_entry(entry_id: str, body: CorrectionIn, response: Response,
-                  user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    _nostore(response)
-    a = _access(db, user)
-    e = _entry_in_scope(db, user, a, entry_id)
-    tt.correct(db, user, e, body.clock_in_at, body.clock_out_at, body.reason)
-    return {"entry": tt.serialize(e, tt.now_utc()), "history": tt.history(db, e.id)}
-
-
-@router.get("/time/entries/{entry_id}/history")
-def entry_history(entry_id: str, response: Response, user: User = Depends(get_current_user),
-                  db: Session = Depends(get_db)):
-    _nostore(response)
-    a = _access(db, user)
-    e = db.query(TeamTimeEntry).filter(TeamTimeEntry.id == entry_id).first()
-    # A person may see the history of their OWN entry; a manager, of their team's.
-    if e and e.user_id == user.id and a.time:
-        return {"history": tt.history(db, e.id)}
-    e = _entry_in_scope(db, user, a, entry_id)
-    return {"history": tt.history(db, e.id)}
+    return activity.upcoming(db, user, date, _host_slug(request))
 
 
 # ── Team access (platform only) ─────────────────────────────────────────────
@@ -326,19 +262,13 @@ def admin_people(response: Response, user: User = Depends(get_current_user), db:
     _nostore(response)
     a = _require_platform(db, user)
     sales = acc.sales_member_ids(db, a.platform_id)
-    scopes = db.query(TeamTimeScope).filter(TeamTimeScope.platform_id == a.platform_id).all()
-    by_mgr = {}
-    for s in scopes:
-        by_mgr.setdefault(s.manager_user_id, []).append(s.member_user_id)
     out = []
     for u in acc.access_candidates(db, a.platform_id):
         out.append({"id": u.id, "name": u.full_name, "initials": chat.initials(u.full_name),
                     "is_platform": acc.is_platform_user(u, a.platform_id),
                     "sales_member": u.id in sales,
-                    "grants": acc.team_grants(db, u.id, a.platform_id),
-                    "time_scope": by_mgr.get(u.id, [])})
-    return {"people": out, "keys": list(acc.TEAM_KEYS),
-            "time_people": [{"id": u.id, "name": u.full_name} for u in acc.time_people(db, a.platform_id)]}
+                    "grants": acc.team_grants(db, u.id, a.platform_id)})
+    return {"people": out, "keys": list(acc.TEAM_KEYS)}
 
 
 class GrantsIn(BaseModel):
@@ -363,30 +293,3 @@ def admin_set_grants(user_id: str, body: GrantsIn, response: Response,
     capabilities.set_platform_grants(db, target, a.platform_id, a.platform_name, user,
                                      others + wanted, commit=True)
     return {"id": target.id, "grants": acc.team_grants(db, target.id, a.platform_id)}
-
-
-class ScopeIn(BaseModel):
-    member_ids: List[str]
-
-
-@router.put("/admin/people/{user_id}/time-scope")
-def admin_set_scope(user_id: str, body: ScopeIn, response: Response,
-                    user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    _nostore(response)
-    a = _require_platform(db, user)
-    target = db.query(User).filter(User.id == user_id).first()
-    if not target or target.id not in {u.id for u in acc.access_candidates(db, a.platform_id)}:
-        raise HTTPException(status_code=404, detail="Person not found.")
-    eligible = {u.id for u in acc.time_people(db, a.platform_id)}
-    wanted = {m for m in body.member_ids if m in eligible and m != target.id}
-    rows = db.query(TeamTimeScope).filter(TeamTimeScope.platform_id == a.platform_id,
-                                          TeamTimeScope.manager_user_id == target.id).all()
-    have = {r.member_user_id: r for r in rows}
-    for mid, r in have.items():
-        if mid not in wanted:
-            db.delete(r)
-    for mid in wanted - set(have):
-        db.add(TeamTimeScope(platform_id=a.platform_id, manager_user_id=target.id,
-                             member_user_id=mid, granted_by=user.id))
-    db.commit()
-    return {"id": target.id, "time_scope": sorted(wanted)}

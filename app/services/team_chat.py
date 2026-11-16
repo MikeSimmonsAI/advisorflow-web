@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from fastapi import HTTPException
@@ -34,7 +34,11 @@ from app.models.models import User
 from app.models.team_app_models import (ROOM_ANNOUNCEMENTS, ROOM_DM, ROOM_GROUP, TeamChatAttachment,
                                         TeamChatMember, TeamChatMessage, TeamChatRead, TeamChatRoom)
 from app.services import team_app_access as acc
-from app.services.team_time import iso
+
+def iso(dt: Optional[datetime]) -> Optional[str]:
+    """Naive UTC from the database -> '2026-11-16T14:05:00Z' for the browser."""
+    return dt.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z") if dt else None
+
 
 SALES_SLUG = "sales-team"
 ANNOUNCE_SLUG = "announcements"

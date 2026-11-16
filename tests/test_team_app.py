@@ -1,11 +1,11 @@
-"""EvoSys Pro team app (Eagle Says mobile prototype): Chat and Time.
+"""EvoSys Pro Mobile: Chat and Activity (timekeeping was removed from the release).
 
 Synthetic people only:
   owner      god_admin                     -> the platform: every right
   partner    brand executive, no grants    -> nothing until granted
-  chatmgr    team_chat_manage grant        -> room membership, no DMs, no Team Time
-  timemgr    team_time_manage grant + scope over rep1 only
-  rep1/rep2  sales reps on the brand team  -> own Chat and Time
+  chatmgr    team_chat_manage grant        -> room membership, no DMs
+  timemgr    team_chat grant only          -> Chat, nothing else
+  rep1/rep2  sales reps on the brand team  -> Chat
   outsider   customer advisor              -> nothing
 """
 from datetime import datetime, timedelta
@@ -15,7 +15,6 @@ import pytest
 from app.models.models import Platform, User, UserCapabilityGrant
 from app.models.sales_models import (BrandSalesOrg, Membership, ROLE_BRAND_EXECUTIVE,
                                      SCOPE_BRAND_SALES_ORG, SCOPE_PLATFORM)
-from app.models.team_app_models import TeamTimeEntry, TeamTimeScope
 from app.services.auth_service import create_access_token, hash_password
 
 PDF = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
@@ -52,13 +51,11 @@ def team(db_session, sample_org):
                           scope_id=bso.id, role="sales_rep", is_active=True))
     db.add(Membership(user_id=people["partner"].id, scope_type=SCOPE_PLATFORM, scope_id=p.id,
                       role=ROLE_BRAND_EXECUTIVE, is_active=True))
-    for who, keys in (("chatmgr", ["team_chat_manage"]), ("timemgr", ["team_time_manage", "team_chat"])):
+    for who, keys in (("chatmgr", ["team_chat_manage"]), ("timemgr", ["team_chat"])):
         for k in keys:
             db.add(UserCapabilityGrant(user_id=people[who].id, scope_type=SCOPE_PLATFORM,
                                        scope_id=p.id, organization_id=None, capability=k,
                                        is_active=True))
-    db.add(TeamTimeScope(platform_id=p.id, manager_user_id=people["timemgr"].id,
-                         member_user_id=people["rep1"].id))
     db.commit()
     headers = {k: {"Authorization": "Bearer " + create_access_token(u, db)} for k, u in people.items()}
     return {"db": db, "platform": p, "people": people, "h": headers}
@@ -75,22 +72,21 @@ def _rooms(client, h):
 def test_access_flags_per_person(client, team):
     h = team["h"]
     a = {k: client.get("/team-app/me", headers=h[k]).json()["access"] for k in h}
-    assert a["owner"]["is_platform"] and a["owner"]["chat"] and a["owner"]["time_manage"]
-    assert a["rep1"]["chat"] and a["rep1"]["time"] and not a["rep1"]["time_manage"]
+    assert a["owner"]["is_platform"] and a["owner"]["chat"] and a["owner"]["announce"]
+    assert a["rep1"]["chat"] and a["rep1"]["activity"]
     assert not a["rep1"]["announce"] and not a["rep1"]["chat_manage"]
-    assert not a["partner"]["chat"] and not a["partner"]["time"] and not a["partner"]["announce"]
-    assert a["chatmgr"]["chat_manage"] and a["chatmgr"]["chat"] and not a["chatmgr"]["time_manage"]
-    assert a["timemgr"]["time_manage"] and not a["timemgr"]["chat_manage"]
-    assert not a["outsider"]["chat"] and not a["outsider"]["time"]
+    assert not a["partner"]["chat"] and not a["partner"]["announce"]
+    assert a["chatmgr"]["chat_manage"] and a["chatmgr"]["chat"] and not a["chatmgr"]["announce"]
+    assert a["timemgr"]["chat"] and not a["timemgr"]["chat_manage"]
+    assert not a["outsider"]["chat"] and a["outsider"]["activity"]
 
 
 def test_unauthorized_and_unauthenticated_are_refused(client, team):
     h = team["h"]
-    for path in ("/team-app/chat/rooms", "/team-app/time/status", "/team-app/time/mine"):
+    for path in ("/team-app/chat/rooms", "/team-app/chat/people", "/team-app/chat/unread"):
         assert client.get(path, headers=h["outsider"]).status_code == 403
         assert client.get(path).status_code == 401
-    assert client.post("/team-app/time/clock-in", headers=h["outsider"]).status_code == 403
-    assert client.get("/team-app/time/team", headers=h["rep1"]).status_code == 403
+    assert client.get("/team-app/activity/updates").status_code == 401
     assert client.get("/team-app/admin/people", headers=h["timemgr"]).status_code == 403
 
 
@@ -121,7 +117,7 @@ def test_announce_right_is_separately_grantable(client, team):
                    json={"keys": ["team_announce"]})
     assert r.status_code == 200, r.text
     a = client.get("/team-app/me", headers=h["partner"]).json()["access"]
-    assert a["announce"] and a["chat"] and not a["chat_manage"] and not a["time_manage"]
+    assert a["announce"] and a["chat"] and not a["chat_manage"]
     ann = _rooms(client, h["partner"])["announcements"]["id"]
     assert client.post("/team-app/chat/rooms/%s/messages" % ann, headers=h["partner"],
                        json={"body": "Posted by partner"}).status_code == 200
@@ -134,9 +130,9 @@ def test_grant_change_keeps_other_platform_grants(client, team):
                                organization_id=None, capability="demo_suite", is_active=True))
     db.commit()
     client.put("/team-app/admin/people/%s/grants" % partner.id, headers=team["h"]["owner"],
-               json={"keys": ["team_time"]})
+               json={"keys": ["team_chat", "team_time"]})   # an unknown key is ignored
     from app.services import capabilities
-    assert set(capabilities.platform_grants_for(db, partner.id, pid)) == {"demo_suite", "team_time"}
+    assert set(capabilities.platform_grants_for(db, partner.id, pid)) == {"demo_suite", "team_chat"}
 
 
 def test_dm_is_private_even_from_chat_manager_and_platform(client, team):
@@ -231,108 +227,162 @@ def test_chat_manager_manages_room_membership(client, team):
     assert client.get("/team-app/chat/rooms/%s/messages" % room, headers=h["rep2"]).status_code == 404
     client.post("/team-app/chat/rooms/%s/members" % room, headers=h["chatmgr"], json={"user_id": ppl["rep2"].id})
     assert "sales-team" in _rooms(client, h["rep2"])
-    # Chat management alone opens no Team Time.
-    assert client.get("/team-app/time/team", headers=h["chatmgr"]).status_code == 403
+    # Chat management alone opens no announcements and no access screen.
+    assert client.get("/team-app/admin/people", headers=h["chatmgr"]).status_code == 403
 
 
-# ── Time ────────────────────────────────────────────────────────────────────
+# ── Time is gone ────────────────────────────────────────────────────────────
 
-def test_clock_in_out_is_idempotent(client, team):
+def test_timekeeping_is_not_part_of_the_release(client, team):
+    h = team["h"]["owner"]
+    for path in ("/team-app/time/status", "/team-app/time/mine", "/team-app/time/team"):
+        assert client.get(path, headers=h).status_code == 404
+    assert client.post("/team-app/time/clock-in", headers=h).status_code == 404
+    a = client.get("/team-app/me", headers=h).json()["access"]
+    assert "time" not in a and "time_manage" not in a and a["activity"] is True
+    from app.services import capabilities
+    assert "team_time" not in capabilities.CAPABILITIES and "team_time_manage" not in capabilities.CAPABILITIES
+
+
+# ── Activity ────────────────────────────────────────────────────────────────
+
+def _booking(db, org_id, advisor_id, when_local, label="File Review", status="booked", **kw):
+    from app.models.models import BookingLink, Lead
+    lead = Lead(organization_id=org_id, first_name="Synthetic", last_name="Family", is_test=kw.pop("is_test", False))
+    db.add(lead)
+    db.flush()
+    b = BookingLink(lead_id=lead.id, user_id=advisor_id, status=status, booked_time=when_local,
+                    appt_label=label, appt_duration=60, **kw)
+    db.add(b)
+    db.commit()
+    return b
+
+
+@pytest.fixture()
+def activity(team, sample_org):
+    """rep1 works in sample_org; a second org nobody here belongs to."""
+    from app.models.models import Organization
+    from app.models.sales_models import SCOPE_CUSTOMER_ORG
+    db, ppl = team["db"], team["people"]
+    other = Organization(name="Private Other Co", slug="private-other-co", plan="standard", industry="generic")
+    db.add(other)
+    db.commit()
+    db.add(Membership(user_id=ppl["rep1"].id, scope_type=SCOPE_CUSTOMER_ORG, scope_id=sample_org.id,
+                      role="advisor", is_active=True))
+    db.commit()
+    from app.services import workspace_access
+    workspace_access.invalidate_workspace_memberships(ppl["rep1"])
+    soon = datetime.utcnow().replace(microsecond=0) + timedelta(days=1)
+    mine = _booking(db, sample_org.id, ppl["rep1"].id, soon, label="File Review")
+    hidden = _booking(db, other.id, ppl["rep1"].id, soon, label="Secret Visit")
+    test_lead = _booking(db, sample_org.id, ppl["rep1"].id, soon, label="Test Lead Visit", is_test=True)
+    return {"org": sample_org, "other": other, "mine": mine, "hidden": hidden, "when": soon, "test": test_lead}
+
+
+def test_updates_show_only_workspaces_this_login_may_open(client, team, activity):
     h = team["h"]
-    a = client.post("/team-app/time/clock-in", headers=h["rep1"]).json()
-    b = client.post("/team-app/time/clock-in", headers=h["rep1"]).json()
-    assert a["clocked_in"] and not a["already"] and b["already"]
-    assert a["entry"]["id"] == b["entry"]["id"]
-    c = client.post("/team-app/time/clock-out", headers=h["rep1"]).json()
-    d = client.post("/team-app/time/clock-out", headers=h["rep1"]).json()
-    assert not c["clocked_in"] and not c["already"] and d["already"]
-    assert team["db"].query(TeamTimeEntry).filter(TeamTimeEntry.user_id == team["people"]["rep1"].id).count() == 1
+    r = client.get("/team-app/activity/updates", headers=h["rep1"])
+    assert r.status_code == 200 and "no-store" in r.headers["cache-control"]
+    body = r.json()
+    titles = [i["title"] for i in body["items"] if i["kind"] == "booking"]
+    assert "File Review" in titles
+    assert "Secret Visit" not in titles and "Test Lead Visit" not in titles
+    item = [i for i in body["items"] if i.get("title") == "File Review"][0]
+    assert item["organization_id"] == activity["org"].id and item["text"] == "Appointment booked."
+    for leak in ("Synthetic", "Family", "phone", "email"):
+        assert leak not in str(item)
+    assert {s["key"] for s in body["sources"]} == {"workspace_bookings", "sales_appointments", "chat_mentions"}
+    # Someone with no workspace sees no booking at all.
+    other = client.get("/team-app/activity/updates", headers=h["partner"]).json()
+    assert not [i for i in other["items"] if i["kind"] == "booking"]
 
 
-def test_database_refuses_a_second_open_shift(team):
-    """Two simultaneous Clock In requests: the second insert loses in the DB."""
-    from sqlalchemy.exc import IntegrityError
-    db, p, rep = team["db"], team["platform"], team["people"]["rep1"]
-    db.add(TeamTimeEntry(platform_id=p.id, user_id=rep.id, clock_in_at=datetime.utcnow(), open_marker=rep.id))
+def test_updates_follow_access_changes(client, team, activity):
+    from app.services import workspace_access
+    db, rep1 = team["db"], team["people"]["rep1"]
+    m = db.query(Membership).filter(Membership.user_id == rep1.id, Membership.scope_id == activity["org"].id).first()
+    m.is_active = False
     db.commit()
-    db.add(TeamTimeEntry(platform_id=p.id, user_id=rep.id, clock_in_at=datetime.utcnow(), open_marker=rep.id))
-    with pytest.raises(IntegrityError):
-        db.commit()
-    db.rollback()
-    from app.services import team_time
-    out = team_time.clock_in(db, rep, p.id)
-    assert out["already"]
+    workspace_access.invalidate_workspace_memberships(rep1)
+    body = client.get("/team-app/activity/updates", headers=team["h"]["rep1"]).json()
+    assert not [i for i in body["items"] if i["kind"] == "booking"]
 
 
-def _entry(db, p, u, start, end):
-    e = TeamTimeEntry(platform_id=p.id, user_id=u.id, clock_in_at=start, clock_out_at=end)
-    db.add(e)
+def test_cancel_and_reschedule_show_as_updates(client, team, activity):
+    db = team["db"]
+    b = activity["mine"]
+    b.status = "cancelled"
+    b.cancelled_at = datetime.utcnow()
     db.commit()
-    return e
+    items = client.get("/team-app/activity/updates", headers=team["h"]["rep1"]).json()["items"]
+    assert any(i["kind"] == "booking" and i["change"] == "cancelled" and i["text"] == "Appointment cancelled."
+               for i in items)
 
 
-def test_weekly_total_overnight_and_daylight_saving(client, team):
-    """US clocks fell back at 2:00 AM Sunday 2026-11-01 (America/Chicago)."""
-    db, p, rep = team["db"], team["platform"], team["people"]["rep1"]
-    # Sat 10:00 PM CDT -> Sun 6:00 AM CST = 9 real hours, across the DST change.
-    _entry(db, p, rep, datetime(2026, 11, 1, 3, 0), datetime(2026, 11, 1, 12, 0))
-    # Sun 10:00 PM CST -> Mon 2:00 AM CST: 2h this week, 2h next week.
-    _entry(db, p, rep, datetime(2026, 11, 2, 4, 0), datetime(2026, 11, 2, 8, 0))
-    wk = client.get("/team-app/time/mine", headers=team["h"]["rep1"], params={"week_of": "2026-10-28"}).json()
-    assert wk["time_zone"] == "America/Chicago"
-    assert wk["week_start"] == "2026-10-26"
-    assert wk["total_seconds"] == 11 * 3600
-    days = {d["date"]: d["seconds"] for d in wk["days"]}
-    assert days["2026-10-31"] == 2 * 3600          # 10 PM - midnight CDT
-    assert days["2026-11-01"] == 9 * 3600          # 7h of the first shift + 2h of the second
-    nxt = client.get("/team-app/time/mine", headers=team["h"]["rep1"], params={"week_of": "2026-11-02"}).json()
-    assert nxt["total_seconds"] == 2 * 3600
+def test_upcoming_lists_the_days_appointments_in_local_time(client, team, activity):
+    day = activity["when"].date().isoformat()
+    body = client.get("/team-app/activity/upcoming", headers=team["h"]["rep1"], params={"date": day}).json()
+    assert body["date"] == day and body["time_zone"] == "America/Chicago"
+    titles = [i["title"] for i in body["items"]]
+    assert titles == ["File Review"]
+    assert body["items"][0]["starts_at"].startswith(day)
+    empty = client.get("/team-app/activity/upcoming", headers=team["h"]["rep1"],
+                       params={"date": (activity["when"].date() + timedelta(days=3)).isoformat()}).json()
+    assert empty["items"] == []
+    assert client.get("/team-app/activity/upcoming", headers=team["h"]["rep1"],
+                      params={"date": "nope"}).status_code == 400
+    assert client.get("/team-app/activity/upcoming").status_code == 401
 
 
-def test_team_time_is_scoped_to_assigned_people(client, team):
-    db, p, ppl, h = team["db"], team["platform"], team["people"], team["h"]
-    start = datetime.utcnow() - timedelta(hours=5)
-    e1 = _entry(db, p, ppl["rep1"], start, start + timedelta(hours=2))
-    e2 = _entry(db, p, ppl["rep2"], start, start + timedelta(hours=3))
-    mine = client.get("/team-app/time/team", headers=h["timemgr"]).json()
-    assert {x["user_id"] for x in mine["people"]} == {ppl["rep1"].id}
-    assert {x["id"] for x in mine["entries"]} == {e1.id}
-    assert client.get("/team-app/time/team", headers=h["timemgr"],
-                      params={"user_id": ppl["rep2"].id}).status_code == 403
-    assert client.patch("/team-app/time/entries/%s" % e2.id, headers=h["timemgr"],
-                        json={"reason": "fix", "clock_out_at": None}).status_code == 404
-    everyone = client.get("/team-app/time/team", headers=h["owner"]).json()
-    assert {ppl["rep1"].id, ppl["rep2"].id} <= {x["user_id"] for x in everyone["people"]}
+def test_mentions_appear_only_while_the_room_is_readable(client, team):
+    h, ppl = team["h"], team["people"]
+    room = _rooms(client, h["rep1"])["sales-team"]["id"]
+    client.post("/team-app/chat/rooms/%s/messages" % room, headers=h["rep1"],
+                json={"body": "@Rep Two please look", "mentions": [ppl["rep2"].id]})
+    items = client.get("/team-app/activity/updates", headers=h["rep2"]).json()["items"]
+    mention = [i for i in items if i["kind"] == "mention"]
+    assert mention and mention[0]["room_id"] == room and mention[0]["headline"] == "Sales Team"
+    assert client.get("/team-app/activity/updates", headers=h["rep1"]).json()["items"] == [] or \
+        not [i for i in client.get("/team-app/activity/updates", headers=h["rep1"]).json()["items"] if i["kind"] == "mention"]
+    client.delete("/team-app/chat/rooms/%s/members/%s" % (room, ppl["rep2"].id), headers=h["chatmgr"])
+    items = client.get("/team-app/activity/updates", headers=h["rep2"]).json()["items"]
+    assert not [i for i in items if i["kind"] == "mention"]
 
 
-def test_correction_needs_reason_and_is_recorded(client, team):
-    db, p, ppl, h = team["db"], team["platform"], team["people"], team["h"]
-    start = datetime(2026, 11, 10, 14, 0)
-    e = _entry(db, p, ppl["rep1"], start, start + timedelta(hours=8))
-    url = "/team-app/time/entries/%s" % e.id
-    assert client.patch(url, headers=h["timemgr"], json={"reason": "", "clock_out_at": "2026-11-10T15:00"}).status_code == 400
-    assert client.patch(url, headers=h["rep1"], json={"reason": "mine", "clock_out_at": "2026-11-10T15:00"}).status_code == 403
-    r = client.patch(url, headers=h["timemgr"],
-                     json={"reason": "Forgot to clock out at lunch", "clock_out_at": "2026-11-10T12:00"})
-    assert r.status_code == 200, r.text
-    assert r.json()["entry"]["clock_out_at"] == "2026-11-10T18:00:00Z"   # noon CST = 18:00 UTC
-    hist = r.json()["history"][0]
-    assert hist["reason"] == "Forgot to clock out at lunch"
-    assert hist["changed_by"] == ppl["timemgr"].id
-    assert hist["before"]["clock_out_at"] == "2026-11-10T22:00:00Z"
-    # The rep sees the history of their own entry.
-    own = client.get(url + "/history", headers=h["rep1"])
-    assert own.status_code == 200 and len(own.json()["history"]) == 1
-    assert client.get(url + "/history", headers=h["rep2"]).status_code == 403
+def test_sales_appointments_for_participants_only(client, team):
+    from app.models.scheduling_models import AppointmentParticipant, SalesAppointment
+    from app.models.sales_models import BrandSalesOrg
+    db, ppl = team["db"], team["people"]
+    bso = db.query(BrandSalesOrg).first()
+    start = datetime.utcnow().replace(microsecond=0) + timedelta(days=2)
+    a = SalesAppointment(brand_sales_org_id=bso.id, title="Demo with Synthetic Co", starts_at=start,
+                         ends_at=start + timedelta(minutes=45))
+    db.add(a)
+    db.flush()
+    db.add(AppointmentParticipant(appointment_id=a.id, user_id=ppl["rep1"].id, busy_start_at=start,
+                                  busy_end_at=start + timedelta(minutes=45)))
+    db.commit()
+    up = client.get("/team-app/activity/updates", headers=team["h"]["rep1"]).json()["items"]
+    assert any(i["kind"] == "sales_appointment" and i["title"] == "Demo with Synthetic Co" for i in up)
+    other = client.get("/team-app/activity/updates", headers=team["h"]["rep2"]).json()["items"]
+    assert not [i for i in other if i["kind"] == "sales_appointment"]
+    from zoneinfo import ZoneInfo
+    from datetime import timezone as _tz
+    local_day = start.replace(tzinfo=_tz.utc).astimezone(ZoneInfo("America/Chicago")).date().isoformat()
+    cal = client.get("/team-app/activity/upcoming", headers=team["h"]["rep1"], params={"date": local_day}).json()
+    assert [i["minutes"] for i in cal["items"] if i["kind"] == "sales_appointment"] == [45]
 
 
-def test_correction_rejects_overlap_and_future(client, team):
-    db, p, ppl, h = team["db"], team["platform"], team["people"], team["h"]
-    a = _entry(db, p, ppl["rep1"], datetime(2026, 11, 9, 14, 0), datetime(2026, 11, 9, 18, 0))
-    _entry(db, p, ppl["rep1"], datetime(2026, 11, 9, 19, 0), datetime(2026, 11, 9, 22, 0))
-    r = client.patch("/team-app/time/entries/%s" % a.id, headers=h["owner"],
-                     json={"reason": "extend", "clock_out_at": "2026-11-09T20:00Z"})
-    assert r.status_code == 409
-    r = client.patch("/team-app/time/entries/%s" % a.id, headers=h["owner"],
-                     json={"reason": "future", "clock_out_at": "2099-01-01T00:00Z"})
-    assert r.status_code == 400
+def test_one_failing_source_does_not_hide_the_others(client, team, monkeypatch):
+    from app.services import team_activity
+
+    def boom(*a, **k):
+        raise RuntimeError("source down")
+    monkeypatch.setattr(team_activity, "_workspaces", boom)
+    h, ppl = team["h"], team["people"]
+    room = _rooms(client, h["rep1"])["sales-team"]["id"]
+    client.post("/team-app/chat/rooms/%s/messages" % room, headers=h["rep1"],
+                json={"body": "@Rep Two hi", "mentions": [ppl["rep2"].id]})
+    body = client.get("/team-app/activity/updates", headers=h["rep2"]).json()
+    assert {s["key"]: s["available"] for s in body["sources"]}["workspace_bookings"] is False
+    assert [i for i in body["items"] if i["kind"] == "mention"]

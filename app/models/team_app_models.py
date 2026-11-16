@@ -1,26 +1,21 @@
-"""EVOSYS PRO TEAM APP - Team Chat and Timekeeping for the mobile app.
+"""EVOSYS PRO MOBILE - Team Chat storage.
 
-Eagle Says Mobile App Prototype. The app opens Programs (the existing Program
-Access answer), Chat and Time behind ONE EvoSys login. This module holds only
-what nothing in the platform already stored: chat rooms, messages, attachments
-and read positions, and time entries with their correction history.
+The app opens Programs (the existing Program Access answer), Chat, Activity and
+Account behind ONE EvoSys login. This module holds only what nothing in the
+platform already stored: chat rooms, messages, attachments and read positions.
+Activity reads existing records (bookings, sales appointments, chat mentions)
+and stores nothing.
 
-WHO MAY USE CHAT AND TIME IS NOT STORED HERE. It is decided by
+WHO MAY USE CHAT IS NOT STORED HERE. It is decided by
 app/services/team_app_access.py from things that already exist:
   * users.role (god_admin / super_admin are the platform),
   * memberships (sales reps and managers of the platform's brand sales teams),
-  * user_capability_grants scoped to the platform (team_chat, team_time,
-    team_chat_manage, team_announce, team_time_manage) - the same table and
-    scope vocabulary the Demo Suite grants already use.
-
-The only authority table here is `team_time_scopes`: WHICH people a delegated
-time manager reviews. A time-manager grant with no scope rows reviews nobody.
+  * user_capability_grants scoped to the platform (team_chat,
+    team_chat_manage, team_announce) - the same table and scope vocabulary
+    the Demo Suite grants already use.
 
 ADDITIVE ONLY. Every table is new; create_all() is the whole migration.
-
-TIME IS UTC. Every DateTime column here holds naive UTC (the codebase's
-convention, datetime.utcnow) written by the SERVER. A phone's clock is never
-read. Display conversion happens in the service with zoneinfo.
+Timestamps are naive UTC written by the server (datetime.utcnow).
 """
 from datetime import datetime
 
@@ -128,57 +123,3 @@ class TeamChatRead(Base):
     last_read_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("room_id", "user_id", name="uq_team_chat_read"),)
-
-
-class TeamTimeEntry(Base):
-    __tablename__ = "team_time_entries"
-
-    id = Column(String, primary_key=True, default=gen_uuid)
-    platform_id = Column(String, ForeignKey("platforms.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    clock_in_at = Column(DateTime, nullable=False)       # UTC, server time
-    clock_out_at = Column(DateTime, nullable=True)       # UTC, server time
-    # ONE OPEN SHIFT PER PERSON, ENFORCED BY THE DATABASE. Holds the user id
-    # while the shift is open and NULL once it is closed; a unique constraint
-    # on it refuses a second open shift from a double tap or two phones at
-    # once. (A plain unique column, not a partial index, so SQLite and
-    # Postgres behave the same: both allow many NULLs.)
-    open_marker = Column(String, nullable=True, unique=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    __table_args__ = (Index("ix_team_time_entries_user", "user_id", "clock_in_at"),)
-
-
-class TeamTimeCorrection(Base):
-    """Who changed which entry, from what to what, when and why."""
-    __tablename__ = "team_time_corrections"
-
-    id = Column(String, primary_key=True, default=gen_uuid)
-    entry_id = Column(String, ForeignKey("team_time_entries.id", ondelete="CASCADE"), nullable=False)
-    changed_by = Column(String, ForeignKey("users.id"), nullable=False)
-    reason = Column(Text, nullable=False)
-    before_clock_in_at = Column(DateTime, nullable=True)
-    before_clock_out_at = Column(DateTime, nullable=True)
-    after_clock_in_at = Column(DateTime, nullable=True)
-    after_clock_out_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-    __table_args__ = (Index("ix_team_time_corrections_entry", "entry_id"),)
-
-
-class TeamTimeScope(Base):
-    """A delegated time manager reviews exactly these people."""
-    __tablename__ = "team_time_scopes"
-
-    id = Column(String, primary_key=True, default=gen_uuid)
-    platform_id = Column(String, ForeignKey("platforms.id", ondelete="CASCADE"), nullable=False)
-    manager_user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    member_user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    granted_by = Column(String, ForeignKey("users.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-    __table_args__ = (
-        UniqueConstraint("platform_id", "manager_user_id", "member_user_id",
-                         name="uq_team_time_scope"),
-    )

@@ -256,7 +256,7 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
                 <h2 id="pa-others-title">Other authorized workspaces</h2>
                 <div className="pa-others-list">
                   {others.map(w => (
-                    <button type="button" key={w.organization_id} onClick={() => onChoose(w)}>
+                    <button type="button" key={w.organization_id} onClick={() => onChoose(w)} data-program-key={cardKey(w)}>
                       <span className="pa-others-mark" aria-hidden="true">{initials(w.organization_name)}</span>
                       <span className="pa-others-name">{w.organization_name}</span>
                       <span aria-hidden="true">→</span>

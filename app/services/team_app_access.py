@@ -1,4 +1,4 @@
-"""WHO MAY USE THE TEAM APP'S CHAT AND TIME - decided on the server, every call.
+"""WHO MAY USE EVOSYS PRO MOBILE'S CHAT - decided on the server, every call.
 
 Nothing here reads an email address. Authority comes from three things that
 already exist in the platform:
@@ -6,18 +6,16 @@ already exist in the platform:
   1. users.role        god_admin anywhere, super_admin of this platform
                        -> "platform": every team-app right.
   2. memberships       an ACTIVE sales_rep / sales_manager row on one of this
-                       platform's brand sales teams -> Chat and Time for
-                       themselves.
+                       platform's brand sales teams -> Chat.
   3. user_capability_grants, scope (platform, <platform id>)
-                       team_chat, team_time            use Chat / Time
+                       team_chat                       use Chat
                        team_chat_manage                room membership only
                        team_announce                   post announcements
-                       team_time_manage                Team Time, scoped by
-                                                       team_time_scopes rows
 
 Program Access (workspaces) is a separate answer - /auth/my-contexts - and is
-neither read nor widened here. Chat or Time can be granted to someone with no
-workspace at all, and a workspace grants neither.
+neither read nor widened here. Chat can be granted to someone with no
+workspace at all, and a workspace does not grant it. Activity is open to every
+signed-in person; each of its sources applies that source's own access rule.
 """
 from __future__ import annotations
 
@@ -33,8 +31,7 @@ from app.models.sales_models import (BRAND_SALES_ROLES, ROLE_BRAND_EXECUTIVE,
                                      BrandSalesOrg, Membership)
 from app.models.models import UserCapabilityGrant
 
-TEAM_KEYS = ("team_chat", "team_time", "team_chat_manage", "team_announce",
-             "team_time_manage")
+TEAM_KEYS = ("team_chat", "team_chat_manage", "team_announce")
 PLATFORM_ROLES = ("god_admin", "super_admin")
 
 
@@ -54,11 +51,6 @@ class TeamAccess:
             or bool({"team_chat", "team_chat_manage", "team_announce"} & set(self.grants)))
 
     @property
-    def time(self) -> bool:
-        return bool(self.platform_id) and (
-            self.is_platform or self.sales_member or "team_time" in self.grants)
-
-    @property
     def chat_manage(self) -> bool:
         return bool(self.platform_id) and (self.is_platform or "team_chat_manage" in self.grants)
 
@@ -66,18 +58,13 @@ class TeamAccess:
     def announce(self) -> bool:
         return bool(self.platform_id) and (self.is_platform or "team_announce" in self.grants)
 
-    @property
-    def time_manage(self) -> bool:
-        return bool(self.platform_id) and (self.is_platform or "team_time_manage" in self.grants)
-
     def as_dict(self) -> Dict:
         return {
             "platform_id": self.platform_id,
             "platform_name": self.platform_name,
             "is_platform": self.is_platform,
-            "chat": self.chat, "time": self.time,
+            "chat": self.chat, "activity": True,
             "chat_manage": self.chat_manage, "announce": self.announce,
-            "time_manage": self.time_manage,
             "manage_access": self.is_platform,
         }
 
@@ -180,10 +167,8 @@ def require(a: TeamAccess, right: str) -> None:
     if not getattr(a, right):
         raise HTTPException(status_code=403, detail={
             "chat": "Chat is not turned on for your account.",
-            "time": "Time is not turned on for your account.",
             "chat_manage": "Managing chat rooms is not part of your access.",
             "announce": "Posting Company Announcements is not part of your access.",
-            "time_manage": "Team Time is not part of your access.",
             "is_platform": "Only the platform can change team access.",
         }.get(right, "Not available for your account."))
 
@@ -215,12 +200,6 @@ def _active(db: Session, ids: Set[str]) -> List[User]:
 def chat_people(db: Session, platform_id: str) -> List[User]:
     ids = (_platform_admins(db, platform_id) | sales_member_ids(db, platform_id)
            | _grant_holders(db, platform_id, ("team_chat", "team_chat_manage", "team_announce")))
-    return _active(db, ids)
-
-
-def time_people(db: Session, platform_id: str) -> List[User]:
-    ids = (_platform_admins(db, platform_id) | sales_member_ids(db, platform_id)
-           | _grant_holders(db, platform_id, ("team_time",)))
     return _active(db, ids)
 
 

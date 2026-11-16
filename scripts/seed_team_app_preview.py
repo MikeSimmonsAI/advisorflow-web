@@ -17,14 +17,18 @@ real names or emails):
   owner@      god_admin - the only account that can change Team access
   platform@   org_admin; org admin of SCI + other workspaces; sales manager on
               the EvoSys Pro sales team; team grants: manage chat rooms,
-              publish announcements, Team Time over every rep
+              publish announcements
   partner@    advisor role; sales manager + EvoSys Pro executive; org admin of
               SCI + Roofing; NO team-management grants (turn on in Team access)
-  rep1@ rep2@ sales reps (Chat + Time)
-  newrep@     sales rep with no workspace at all (Chat + Time still work)
+  rep1@ rep2@ sales reps (Chat)
+  newrep@     sales rep with no workspace at all (Chat still works)
   chatmgr@    manage chat rooms only
-  timemgr@    Team Time over Rep One only
-  outsider@   customer advisor - no Chat, no Time
+  timemgr@    Chat by grant only (name kept from the prototype)
+  outsider@   customer advisor - no Chat; Activity shows only its own workspace
+
+Activity examples (synthetic): bookings in the SCI and Restland preview
+workspaces (today and tomorrow, one rescheduled, one cancelled), a booking in
+the outsider's workspace that nobody else may see, and a sales appointment.
 """
 import os
 import sys
@@ -55,7 +59,7 @@ from app.models.models import Base, Organization, Platform, User, UserCapability
 from app.models.program_models import OutreachProgram  # noqa: E402
 from app.models.sales_models import (BrandSalesOrg, Membership, ROLE_BRAND_EXECUTIVE,  # noqa: E402
                                      SCOPE_BRAND_SALES_ORG, SCOPE_CUSTOMER_ORG, SCOPE_PLATFORM)
-from app.models.team_app_models import TeamTimeScope  # noqa: E402
+from app.models.models import BookingLink, Lead  # noqa: E402
 from app.services.auth_service import hash_password  # noqa: E402
 from app.services.sms_programs import SCI_ORG_NAME  # noqa: E402
 
@@ -98,7 +102,9 @@ def main():
         db.add(OutreachProgram(organization_id=sci.id, name="SCI Family Outreach (preview)",
                                primary_contact_name="Preview Contact"))
     roofing = org("Preview Roofing Co", "roofing-preview", "roofing")
-    funeral = org("Preview Funeral Home", "funeral-preview", "funeral")
+    funeral = org("Restland Preview", "funeral-preview", "funeral")
+    if funeral.name != "Restland Preview":
+        funeral.name = "Restland Preview"
     customer = org("Preview Customer Co", "customer-preview", "generic")
 
     def user(key, name, role="advisor", org_id=None):
@@ -124,10 +130,6 @@ def main():
                     scope_id=bso.id, capability=key):
             db.add(UserCapabilityGrant(user_id=u.id, scope_type=SCOPE_BRAND_SALES_ORG, scope_id=bso.id,
                                        organization_id=None, capability=key, is_active=True, granted_by=by.id))
-
-    def scope(mgr, who, by):
-        if not _get(db, TeamTimeScope, platform_id=p.id, manager_user_id=mgr.id, member_user_id=who.id):
-            db.add(TeamTimeScope(platform_id=p.id, manager_user_id=mgr.id, member_user_id=who.id, granted_by=by.id))
 
     owner = user("owner", "Owner Preview", role="god_admin")
     platform = user("platform", "Platform Preview", role="org_admin", org_id=funeral.id)
@@ -155,16 +157,52 @@ def main():
     for u in (platform, partner):
         for k in ("deal_builder_executive", "sales_program_owner", "sales_comp_view", "sales_comp_manage"):
             brand_grant(u, k, owner)
-    for k in ("team_chat_manage", "team_announce", "team_time_manage"):
+    for k in ("team_chat_manage", "team_announce"):
         grant(platform, k, owner)
     grant(chatmgr, "team_chat_manage", owner)
-    grant(timemgr, "team_time_manage", owner)
     grant(timemgr, "team_chat", owner)
-    for r in (rep1, rep2, newrep):
-        scope(platform, r, owner)
-    scope(timemgr, rep1, owner)
+    # Prototype-only grants that no longer exist are switched off if present.
+    for g in db.query(UserCapabilityGrant).filter(UserCapabilityGrant.capability.in_(("team_time", "team_time_manage"))).all():
+        g.is_active = False
+    db.commit()
+    _activity(db, sci, funeral, customer, platform, rep1, bso)
     db.commit()
     print("Preview people ready (synthetic, %s)." % DOMAIN)
+
+
+def _activity(db, sci, funeral, customer, advisor, rep, bso):
+    """Synthetic bookings + one sales appointment, added once (wall-clock
+    Central time, the booking convention). Re-seeding never duplicates them."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    if db.query(Lead).filter(Lead.organization_id.in_([sci.id, funeral.id, customer.id])).first():
+        return
+    now = datetime.now(ZoneInfo("America/Chicago")).replace(tzinfo=None, second=0, microsecond=0)
+    today = now.replace(hour=0, minute=0)
+
+    def book(org, label, day, hour, minute=0, minutes=60, **kw):
+        lead = Lead(organization_id=org.id, first_name="Synthia", last_name="Householder",
+                    phone="+15555550100", email="householder@preview.test")
+        db.add(lead); db.flush()
+        db.add(BookingLink(lead_id=lead.id, user_id=advisor.id, status=kw.pop("status", "booked"),
+                           booked_time=today + timedelta(days=day, hours=hour, minutes=minute),
+                           appt_label=label, appt_duration=minutes, **kw))
+
+    from datetime import timezone as _tz
+    utc = datetime.now(_tz.utc).replace(tzinfo=None)
+    book(sci, "File Review", 0, 15)
+    book(sci, "File Review", 1, 9)
+    book(funeral, "Office Visit", 0, 17, rescheduled_at=utc - timedelta(hours=2))
+    book(funeral, "Office Visit", 1, 13)
+    book(funeral, "Family Meeting", 2, 10, status="cancelled", cancelled_at=utc - timedelta(hours=5))
+    book(customer, "Private Customer Visit", 0, 16)      # only the outsider's workspace
+    from app.models.scheduling_models import AppointmentParticipant, SalesAppointment
+    start = utc.replace(second=0, microsecond=0) + timedelta(days=1, hours=1)
+    a = SalesAppointment(brand_sales_org_id=bso.id, title="Demo with Synthetic Co", starts_at=start,
+                         ends_at=start + timedelta(minutes=45))
+    db.add(a); db.flush()
+    db.add(AppointmentParticipant(appointment_id=a.id, user_id=rep.id, busy_start_at=start,
+                                  busy_end_at=start + timedelta(minutes=45)))
 
 
 if __name__ == "__main__":

@@ -1,8 +1,12 @@
 /**
- * EVOSYS PRO — THE TEAM APP (/app). Eagle Says Mobile App Prototype.
+ * EVOSYS PRO MOBILE (/app).
  *
- * One EvoSys login opens Programs (the existing Program Access answer), Chat
- * and Time. Mounted in App.jsx with one line: <Route path="/app/*" .../>.
+ * One EvoSys login opens Programs (the existing Program Access answer), Chat,
+ * Activity and Account. Mounted in App.jsx with one line: <Route path="/app/*" .../>.
+ *
+ * LAYOUT: the navy header and the navy bottom tabs never move; only the middle
+ * panel scrolls, so the whole program list stays reachable. The staging/preview
+ * strip renders INSIDE the shell (under the header), never above the page.
  *
  * WHAT THIS SHELL DECIDES: nothing about permission. It asks the server
  * (/team-app/me) which tabs this person has and draws those. Every screen's
@@ -13,7 +17,7 @@
  * the EP emblem icons (same swap the field app uses), so Add to Home Screen
  * installs "EvoSys" opening on Programs. The service worker (public/sw.js)
  * caches the app shell only — never the API, which is a different origin and
- * carries messages, files and time records.
+ * carries messages, files and activity.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
@@ -23,7 +27,8 @@ import { registerServiceWorker } from '../mobile/pwa'
 import { badge, initials, safeAppPath, tabsFor } from './teamHelpers'
 import ProgramsScreen from './ProgramsScreen'
 import { ChatList, Conversation, NewChat, RoomMembers } from './ChatScreens'
-import { TimeScreen, TeamTimeScreen } from './TimeScreens'
+import ActivityScreen from './ActivityScreen'
+import StagingBanner from '../components/StagingBanner'
 import { AccountScreen, TeamAccessScreen } from './AccountScreens'
 import './teamapp.css'
 
@@ -66,6 +71,23 @@ export function Icon({ name, size = 22 }) {
     case 'layers': return <svg {...p}><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg>
     case 'chat': return <svg {...p}><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>
     case 'clock': return <svg {...p}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+    case 'calendar': return <svg {...p}><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M8 14h3v3H8z"/></svg>
+    case 'calendarCheck': return <svg {...p}><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M9 15l2 2 4-4"/></svg>
+    case 'calendarEdit': return <svg {...p}><path d="M21 11V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h6"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M14 21l1-3 5-5 2 2-5 5z"/></svg>
+    case 'calendarX': return <svg {...p}><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M10 13l4 4M14 13l-4 4"/></svg>
+    case 'folder': return <svg {...p}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+    case 'building': return <svg {...p}><rect x="4" y="3" width="10" height="18" rx="1"/><path d="M14 9h5a1 1 0 0 1 1 1v11H14M7 7h2M7 11h2M7 15h2M17 13h1M17 17h1"/></svg>
+    case 'star': return <svg {...p}><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg>
+    case 'broom': return <svg {...p}><path d="M14 4l6 6M17 7l-6 6"/><path d="M11 13l-6 2-1 5 5-1 2-6z"/><path d="M7 16l1 1"/></svg>
+    case 'home': return <svg {...p}><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></svg>
+    case 'bolt': return <svg {...p}><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>
+    case 'target': return <svg {...p}><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>
+    case 'shield': return <svg {...p}><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>
+    case 'diamond': return <svg {...p}><path d="M6 3h12l3 6-9 12L3 9z"/><path d="M3 9h18M9 3l3 18 3-18"/></svg>
+    case 'calculator': return <svg {...p}><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 12h2M12 12h2M16 12h0M8 16h2M12 16h2"/></svg>
+    case 'grid': return <svg {...p}><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg>
+    case 'search': return <svg {...p}><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    case 'at': return <svg {...p}><circle cx="12" cy="12" r="4"/><path d="M16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-3.5 7.1"/></svg>
     case 'user': return <svg {...p}><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
     case 'back': return <svg {...p}><path d="M15 18l-6-6 6-6"/></svg>
     case 'chev': return <svg {...p}><path d="M9 6l6 6-6 6"/></svg>
@@ -160,6 +182,7 @@ export function AppLogin() {
   if (isAuthed() && !busy) return <Navigate to={next} replace />
   return (
     <div className="ta-login">
+      <StagingBanner inShell />
       <div className="ta-login-top">
         {logoOk
           ? <img className="ta-login-logo" src={LOCKUP} alt="EvoSys Pro" width="440" height="281" onError={() => setLogoOk(false)} />
@@ -244,6 +267,7 @@ function Shell() {
             <NavLink to="/app/account" className="ta-me" aria-label="Account">{(me && me.user.initials) || initials(user.full_name || user.name)}</NavLink>
           </header>
         )}
+        <div className="ta-envstrip"><StagingBanner inShell /></div>
         <main className="ta-main">
           {meError && !me ? <ErrorNote error={meError} onRetry={loadMe} /> : <Outlet />}
         </main>
@@ -275,8 +299,10 @@ export default function TeamApp() {
         <Route path="chat/new" element={<NewChat />} />
         <Route path="chat/:roomId" element={<Conversation />} />
         <Route path="chat/:roomId/members" element={<RoomMembers />} />
-        <Route path="time" element={<TimeScreen />} />
-        <Route path="time/team" element={<TeamTimeScreen />} />
+        <Route path="activity" element={<ActivityScreen />} />
+        {/* Timekeeping is not part of EvoSys Pro Mobile: an old Time link
+            (or a home-screen shortcut saved from the prototype) lands on Activity. */}
+        <Route path="time/*" element={<Navigate to="/app/activity" replace />} />
         <Route path="account" element={<AccountScreen />} />
         <Route path="account/team-access" element={<TeamAccessScreen />} />
         <Route path="*" element={<Navigate to="/app/programs" replace />} />

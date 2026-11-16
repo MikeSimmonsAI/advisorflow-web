@@ -6,10 +6,14 @@
  * looks identical in every shell. Renders nothing at all outside staging.
  */
 import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { fetchEnvironment } from '../api/demo'
 import { stagingBanner } from '../pages/god/controlRoomView'
 
-export default function StagingBanner() {
+// EvoSys Pro Mobile (/app) draws this strip INSIDE its own shell (inShell), so
+// the page-level copy stays out of the way there and the phone layout never shifts.
+export default function StagingBanner({ inShell = false }) {
+  const { pathname } = useLocation()
   const [env, setEnv] = useState(null)
   useEffect(() => {
     let alive = true
@@ -18,6 +22,15 @@ export default function StagingBanner() {
   }, [])
   const b = stagingBanner(env)
   if (!b) return null
+  const inApp = pathname === '/app' || pathname.startsWith('/app/')
+  if (inApp !== inShell) return null
+  if (inShell) {
+    return (
+      <div role="status" data-testid="staging-banner" className="ta-envbanner">
+        <strong>● {b.label}</strong> <span>{b.text}</span>
+      </div>
+    )
+  }
   return (
     <div role="status" data-testid="staging-banner" style={{
       background: '#7c2d12', color: '#fff', padding: '6px 14px', display: 'flex', gap: 10, flexWrap: 'wrap',

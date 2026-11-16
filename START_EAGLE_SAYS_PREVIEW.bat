@@ -105,13 +105,12 @@ echo.
 echo   READY  -^>  http://localhost:%WEB_PORT%/app
 echo.
 echo   Sign in with any of these (password for all: Preview123!)
-echo     rep1@preview.test       sales rep  - Chat + Time
+echo     rep1@preview.test       sales rep  - Chat, Activity
 echo     rep2@preview.test       sales rep  - use a second browser window to chat with rep1
-echo     platform@preview.test   platform   - every right, Team access, Team Time
-echo     timemgr@preview.test    Team Time for Rep One only
+echo     platform@preview.test   SCI + workspaces, announcements, chat rooms
+echo     partner@preview.test    SCI + Roofing, Chat only until granted
 echo     chatmgr@preview.test    manages chat rooms only
-echo     partner@preview.test    nothing until turned on in Team access
-echo     outsider@preview.test   no Chat or Time
+echo     outsider@preview.test   no Chat; Activity shows only its own workspace
 echo.
 echo   Phone-size view in Edge/Chrome: press F12, then Ctrl+Shift+M.
 echo   Stop: run  START_EAGLE_SAYS_PREVIEW.bat stop

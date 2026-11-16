@@ -324,3 +324,25 @@ export function salesToolCards(contexts, dealAccess, from = '/workspaces') {
   }
   return out
 }
+
+/**
+ * EVERY PROGRAM THIS LOGIN MAY OPEN, as one flat list - what desktop Program
+ * Access renders (its cards, its sales tools, "Other authorized workspaces"
+ * and Previews), in the same order, from the same server answer. The mobile
+ * app (/app/programs) shows exactly this list: no cap, no mobile-only filter.
+ * Each entry keeps the fields openProgramItem() needs for its destination.
+ */
+export function programInventory(ctx, dealAccess, from) {
+  const { visible, others, previews } = programCards(ctx)
+  return [
+    ...visible,
+    ...salesToolCards(ctx, dealAccess, from),
+    ...others.map(w => ({ ...w, display: w.organization_name, orgLabel: null })),
+    ...previews,
+  ]
+}
+
+/** The key desktop and mobile both use for one program entry (parity checks, pins). */
+export function programKey(item) {
+  return (item.type || 'workspace') + ':' + (item.organization_id || '') + ':' + (item.key || '')
+}

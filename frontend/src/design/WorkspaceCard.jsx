@@ -1,5 +1,7 @@
 import WorkspaceArt from './art/WorkspaceArt'
 import './workspaceCard.css'
+// The same key the mobile app uses, so desktop and mobile lists can be compared.
+import { programKey } from '../pages/program/programAccessModel'
 
 /**
  * Reusable branded workspace card (UI-REDESIGN design system).
@@ -23,7 +25,7 @@ export default function WorkspaceCard({ item, onOpen, layout = 'grid', actionLab
   const facts = item.facts || []
   const name = item.display
   return (
-    <article className={'ev-wcard ev-wcard--' + layout} data-accent={variant} data-variant={variant}>
+    <article className={'ev-wcard ev-wcard--' + layout} data-accent={variant} data-variant={variant} data-program-key={programKey(item)}>
       <div className="ev-wcard-art">
         <WorkspaceArt variant={variant} />
         <span className="ev-wcard-badge" aria-hidden="true">{item.symbol}</span>
@@ -81,7 +83,7 @@ function CompactCard({ item, onOpen, layout, actionLabel, href, pinned, onToggle
   const line = item.orgLabel ? item.orgLabel + ' — ' + (item.summary || '') : (item.summary || '')
   const label = actionLabel + ': ' + name + (item.orgLabel ? ' (' + item.orgLabel + ')' : '')
   return (
-    <article className={'ev-ccard ev-ccard--' + layout} data-accent={variant} data-variant={variant}>
+    <article className={'ev-ccard ev-ccard--' + layout} data-accent={variant} data-variant={variant} data-program-key={programKey(item)}>
       <span className="ev-ccard-mark" aria-hidden="true">{item.symbol}</span>
       <div className="ev-ccard-text">
         <h3 className="ev-ccard-name">

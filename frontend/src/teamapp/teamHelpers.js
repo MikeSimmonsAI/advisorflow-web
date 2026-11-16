@@ -1,5 +1,5 @@
 /**
- * EVOSYS PRO TEAM APP — PURE HELPERS (no DOM, no storage, no imports).
+ * EVOSYS PRO MOBILE — PURE HELPERS (no DOM, no storage, no imports).
  * Tested under plain node: frontend/tests/teamApp.test.mjs
  *
  * Times arrive from the server as UTC ISO strings ("2026-11-16T14:05:00Z")
@@ -13,26 +13,15 @@ export const DEFAULT_TZ = 'America/Chicago'
 
 /** The words used everywhere in the app. One list, so screens never drift. */
 export const LABELS = {
-  programs: 'Programs', chat: 'Chat', time: 'Time', account: 'Account',
-  clockIn: 'Clock In', clockOut: 'Clock Out', myTime: 'My Time', teamTime: 'Team Time',
+  programs: 'Programs', chat: 'Chat', activity: 'Activity', account: 'Account',
+  updates: 'Updates', upcoming: 'Upcoming',
   salesTeam: 'Sales Team', announcements: 'Company Announcements',
   programAccess: 'Program Access', teamChat: 'Team Chat',
 }
 
 export function pad2(n) { return String(n).padStart(2, '0') }
 
-/** 3725 -> "1h 02m"; 59 -> "0h 00m"; null -> "—". */
-export function fmtHours(seconds) {
-  if (seconds == null || Number.isNaN(seconds)) return '—'
-  const s = Math.max(0, Math.floor(seconds))
-  return `${Math.floor(s / 3600)}h ${pad2(Math.floor((s % 3600) / 60))}m`
-}
 
-/** Live elapsed clock: 3725 -> "1:02:05". */
-export function fmtElapsed(seconds) {
-  const s = Math.max(0, Math.floor(seconds || 0))
-  return `${Math.floor(s / 3600)}:${pad2(Math.floor((s % 3600) / 60))}:${pad2(s % 60)}`
-}
 
 export function parseUtc(iso) {
   if (!iso) return null
@@ -104,13 +93,6 @@ export function addDays(ymd, n) {
   return `${t.getUTCFullYear()}-${pad2(t.getUTCMonth() + 1)}-${pad2(t.getUTCDate())}`
 }
 
-/** Seconds elapsed since an ISO instant, measured against the SERVER's now
- *  (server_now + how long ago we received it), never the phone's clock alone. */
-export function elapsedSince(startIso, serverNowIso, receivedAtMs, nowMs) {
-  const start = parseUtc(startIso); const sn = parseUtc(serverNowIso)
-  if (!start || !sn) return 0
-  return Math.max(0, Math.floor((sn.getTime() + ((nowMs ?? Date.now()) - (receivedAtMs ?? Date.now())) - start.getTime()) / 1000))
-}
 
 export function initials(name) {
   return String(name || '').split(/\s+/).filter(w => /^[A-Za-z]/.test(w)).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?'
@@ -179,14 +161,14 @@ export function fileSize(bytes) {
   return (bytes / 1048576).toFixed(1) + ' MB'
 }
 
-/** Which bottom tabs this person sees. Programs and Account always; Chat and
- *  Time only when the server turned them on. */
+/** The bottom tabs: Programs, Chat, Activity, Account. Chat only when the
+ *  server turned it on for this person; the other three always. */
 export function tabsFor(access) {
   const a = access || {}
   return [
     { key: 'programs', to: '/app/programs', label: LABELS.programs, icon: 'layers' },
     a.chat ? { key: 'chat', to: '/app/chat', label: LABELS.chat, icon: 'chat' } : null,
-    a.time ? { key: 'time', to: '/app/time', label: LABELS.time, icon: 'clock' } : null,
+    { key: 'activity', to: '/app/activity', label: LABELS.activity, icon: 'calendar' },
     { key: 'account', to: '/app/account', label: LABELS.account, icon: 'user' },
   ].filter(Boolean)
 }
@@ -198,8 +180,50 @@ export function safeAppPath(p) {
 
 export const TEAM_RIGHTS = [
   { key: 'team_chat', label: 'Chat', help: 'DMs, Sales Team and Company Announcements' },
-  { key: 'team_time', label: 'Time', help: 'Clock In, Clock Out and My Time' },
   { key: 'team_announce', label: 'Post announcements', help: 'Publish Company Announcements' },
   { key: 'team_chat_manage', label: 'Manage chat rooms', help: 'Add and remove room members. No access to DMs.' },
-  { key: 'team_time_manage', label: 'Team Time', help: 'Review and correct the time of assigned people' },
 ]
+
+/**
+ * PROGRAM LOOK: accent colour and icon for a Program Access entry. Presentation
+ * only - which programs appear, and where they open, is the server's answer.
+ * Approved accents (EvoSys Pro Mobile board, 2026-11-15) for SCI, Restland,
+ * Sales Workspace, VOLT, Commercial Cleaning and Back Office; other programs
+ * keep a colour of their own; anything unknown gets the neutral fallback.
+ */
+export const ACCENTS = {
+  sci: '#4F46E5', restland: '#087F68', sales: '#2563EB', volt: '#C62839',
+  cleaning: '#7C3AED', back_office: '#475569', roofing: '#C2410C', energy: '#B45309',
+  wholesale: '#0E7490', insurance: '#1D4ED8', gold: '#A16207', executive: '#334155',
+  preview: '#64748B', fallback: '#3B4A63',
+}
+
+export function programStyle(item) {
+  const it = item || {}
+  const program = it.program || ''
+  const name = String(it.display || it.organization_name || '').toLowerCase()
+  const pick = (accent, icon) => ({ accent: ACCENTS[accent], icon, tone: accent })
+  if (it.type === 'deal_builder') return pick('sales', it.key === 'onboarding' || it.key === 'my_team' ? 'team' : 'calculator')
+  if (program === 'sci') return pick('sci', 'layers')
+  if (program === 'funeral' || /restland/.test(name)) return pick('restland', 'building')
+  if (program === 'back_office') return pick('back_office', 'folder')
+  if (program === 'executive') return pick('executive', 'star')
+  if (program === 'volt' || program === 'consumer_leads') return pick('volt', 'megaphone')
+  if (program === 'cleaning' || program === 'acquisition' || program === 'acquisition_ops') return pick('cleaning', 'broom')
+  if (program === 'roofing') return pick('roofing', 'home')
+  if (program === 'energy') return pick('energy', 'bolt')
+  if (program === 'wholesale') return pick('wholesale', 'target')
+  if (program === 'insurance' || program === 'insurance_retention') return pick('insurance', 'shield')
+  if (program === 'jewelry') return pick('gold', 'diamond')
+  if (program === 'preview') return pick('preview', 'eye')
+  if (/sales/.test(name)) return pick('sales', 'briefcase')
+  return pick('fallback', 'grid')
+}
+
+/** Case-insensitive match on a program's name, its business name and its kind. */
+export function matchesProgram(item, query) {
+  const q = String(query || '').trim().toLowerCase()
+  if (!q) return true
+  return [item.display, item.orgLabel, item.organization_name, item.kind, item.platform_name]
+    .some(v => v && String(v).toLowerCase().includes(q))
+}

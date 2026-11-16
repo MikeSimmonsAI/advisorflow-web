@@ -1,4 +1,4 @@
-"""End-to-end check of a team-app preview over its real API (synthetic people only).
+"""End-to-end check of an EvoSys Pro Mobile preview over its real API (synthetic people only).
 
     set PREVIEW_PASSWORD=...   (never commit it)
     python scripts/check_team_app_preview.py https://<api host> https://<web host>
@@ -68,13 +68,14 @@ def main():
           any(x.get("program_is_sci") for x in C["platform"]["workspace_contexts"]))
     check("Partner sees only assigned workspaces", ws("partner") == ["Preview Roofing Co", "Service Corporation International"], ws("partner"))
     check("New rep has no workspace", ws("newrep") == [], ws("newrep"))
-    check("Platform: Chat, Time, announce, manage rooms, Team Time",
-          all(A["platform"][k] for k in ("chat", "time", "announce", "chat_manage", "time_manage")), A["platform"])
-    check("Partner: Chat + Time only until granted",
-          A["partner"]["chat"] and A["partner"]["time"] and not any(A["partner"][k] for k in ("announce", "chat_manage", "time_manage")), A["partner"])
-    check("New rep (no workspace): Chat + Time", A["newrep"]["chat"] and A["newrep"]["time"], A["newrep"])
-    check("Outsider: no Chat, no Time", not A["outsider"]["chat"] and not A["outsider"]["time"])
-    check("Chat manager: rooms but no Team Time", A["chatmgr"]["chat_manage"] and not A["chatmgr"]["time_manage"])
+    check("Platform: Chat, announce, manage rooms",
+          all(A["platform"][k] for k in ("chat", "announce", "chat_manage")), A["platform"])
+    check("Partner: Chat only until granted",
+          A["partner"]["chat"] and not any(A["partner"][k] for k in ("announce", "chat_manage")), A["partner"])
+    check("New rep (no workspace): Chat", A["newrep"]["chat"], A["newrep"])
+    check("Outsider: no Chat", not A["outsider"]["chat"])
+    check("No timekeeping anywhere", all("time" not in A[w] and "time_manage" not in A[w] for w in who)
+          and call(T["platform"], "GET", "/team-app/time/status")[0] == 404)
 
     rooms = {r["slug"] or r["id"]: r for r in call(T["rep1"], "GET", "/team-app/chat/rooms")[1]["rooms"]}
     sales, ann = rooms["sales-team"]["id"], rooms["announcements"]["id"]
@@ -107,17 +108,30 @@ def main():
     check("outsider direct link to a room refused", call(T["outsider"], "GET", "/team-app/chat/rooms/%s/messages" % sales)[0] == 403)
     check("chat manager cannot manage a DM", call(T["chatmgr"], "GET", "/team-app/chat/rooms/%s/members" % dm["id"])[0] == 404)
 
-    a = call(T["newrep"], "POST", "/team-app/time/clock-in", {})[1]
-    b = call(T["newrep"], "POST", "/team-app/time/clock-in", {})[1]
-    check("clock in (double tap = one shift)", a["clocked_in"] and b["already"] and a["entry"]["id"] == b["entry"]["id"])
-    c = call(T["newrep"], "POST", "/team-app/time/clock-out", {})[1]
-    check("clock out", not c["clocked_in"])
-    wk = call(T["newrep"], "GET", "/team-app/time/mine")[1]
-    check("My Time shows the shift in America/Chicago", wk["time_zone"] == "America/Chicago" and len(wk["entries"]) >= 1)
-    tm = {p["name"] for p in call(T["timemgr"], "GET", "/team-app/time/team")[1]["people"]}
-    check("Time manager sees only Rep One", tm == {"Rep One"}, tm)
-    check("Chat manager refused Team Time", call(T["chatmgr"], "GET", "/team-app/time/team")[0] == 403)
-    check("Partner refused Team Time until granted", call(T["partner"], "GET", "/team-app/time/team")[0] == 403)
+    call(T["rep1"], "POST", "/team-app/chat/rooms/%s/messages" % sales,
+         {"body": "@Rep Two can you take the 3 PM?", "mentions": [me2], "client_key": uuid.uuid4().hex})
+    U = {w: call(T[w], "GET", "/team-app/activity/updates")[1] for w in ("platform", "partner", "outsider", "rep2", "newrep")}
+    ws_of = lambda w: {i.get("workspace") for i in U[w]["items"] if i["kind"] == "booking"}
+    check("Activity: Platform sees SCI and Restland bookings", {"Service Corporation International", "Restland Preview"} <= ws_of("platform"), ws_of("platform"))
+    check("Activity: booked, updated and cancelled all show",
+          {i.get("change") for i in U["platform"]["items"] if i["kind"] == "booking"} >= {"booked", "updated", "cancelled"})
+    check("Activity: Partner sees only its workspaces", "Restland Preview" not in ws_of("partner")
+          and "Preview Customer Co" not in ws_of("partner") and "Service Corporation International" in ws_of("partner"), ws_of("partner"))
+    check("Activity: Outsider never sees SCI or Restland", not ({"Service Corporation International", "Restland Preview"} & ws_of("outsider")), ws_of("outsider"))
+    check("Activity: no customer name, phone or email sent", all(not any(x in json.dumps(i) for x in ("Synthia", "Householder", "5555550100", "householder@")) for w in U for i in U[w]["items"]))
+    check("Activity: New rep (no workspace) sees no bookings", not ws_of("newrep"))
+    check("Activity: rep2 sees the @mention", any(i["kind"] == "mention" and i.get("headline") == "Sales Team" for i in U["rep2"]["items"]))
+    check("Activity: nobody else gets rep2's mention", not any(i["kind"] == "mention" for i in U["platform"]["items"]))
+    check("Activity: every source answered", all(s["available"] for w in U for s in U[w]["sources"]))
+    from datetime import datetime as _dt, timedelta as _td
+    from zoneinfo import ZoneInfo as _ZI
+    today = _dt.now(_ZI("America/Chicago")).date()
+    up = call(T["platform"], "GET", "/team-app/activity/upcoming?date=%s" % (today + _td(days=1)).isoformat())[1]
+    check("Upcoming: tomorrow's SCI and Restland visits, Central time",
+          up["time_zone"] == "America/Chicago" and {"File Review", "Office Visit"} <= {i["title"] for i in up["items"]}, up.get("items"))
+    check("Upcoming: cancelled visits are not on the agenda",
+          not any(i["title"] == "Family Meeting" for d in (2,) for i in call(T["platform"], "GET",
+                  "/team-app/activity/upcoming?date=%s" % (today + _td(days=d)).isoformat())[1]["items"]))
     check("Only the owner can change Team access", call(T["platform"], "GET", "/team-app/admin/people")[0] == 403
           and call(T["owner"], "GET", "/team-app/admin/people")[0] == 200)
 
