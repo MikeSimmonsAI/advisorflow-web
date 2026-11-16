@@ -49,6 +49,8 @@ const SCI_REFUSAL = 'SCI files are loaded through SCI'
 const ProgramName = createContext('the program')
 const useProgramName = () => useContext(ProgramName)
 const cap = t => (t ? t.charAt(0).toUpperCase() + t.slice(1) : t)
+// Batches saved before #507 carry the old stored label; show it neutrally.
+const sourceLabel = s => (s === 'SCI program file' ? 'Program file' : s)
 const possessive = t => (t === 'the program' ? "the program's" : t + (t.endsWith('s') ? "'" : "'s"))
 
 function useProfileName(sci) {
@@ -172,7 +174,7 @@ function ImportWizardInner({ target = 'crm', basePath = '/imports', onDone } = {
           <span className="mono ic-strong">{batch.batch_code}</span>
           <span className="ic-muted">{batch.filename}</span>
           <span className="ic-muted">{fmt(batch.rows_submitted)} rows</span>
-          <span className="ic-muted">{batch.source}{batch.source_detail ? ` · ${batch.source_detail}` : ''}</span>
+          <span className="ic-muted">{sourceLabel(batch.source)}{batch.source_detail ? ` · ${batch.source_detail}` : ''}</span>
           <Pill tone={STATUS_TONE[batch.status]}>{sci ? (sciStatus(P)[batch.status] || STATUS_LABEL[batch.status] || batch.status) : (STATUS_LABEL[batch.status] || batch.status)}</Pill>
         </div>
       )}
