@@ -76,7 +76,9 @@ test('one brand: the same single Back Office card as before, no brand carried', 
 })
 
 test('choosing a brand Back Office sends that brand with /sales requests', () => {
-  const app = src('src/App.jsx')
+  // The card-open rule is shared by the web launcher and the mobile app.
+  const app = src('src/pages/program/programDestinations.js')
+  assert.match(src('src/App.jsx'), /openProgramItem\(item, navigate\)/)
   assert.match(app, /if \(item\.platform_id\) setBrandContext\(item\.platform_id, item\.platform_name \|\| ''\)/)
 })
 

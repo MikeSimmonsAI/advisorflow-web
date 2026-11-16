@@ -5,6 +5,8 @@
  */
 const RETURN_TO = [
   [/^\/workspaces$/, 'Program Access'],
+  // The EvoSys Pro mobile app's Programs tab (Eagle Says prototype).
+  [/^\/app\/programs$/, 'Programs'],
   [/^\/sales$/, 'Back Office'],
   [/^\/sales\/(my-day|pipeline)$/, 'Back Office'],
   [/^\/sales\/compensation$/, 'Team Compensation'],

@@ -1,0 +1,17 @@
+{
+  "name": "EvoSys Pro",
+  "short_name": "EvoSys",
+  "description": "Programs, Team Chat and Time for the EvoSys Pro team.",
+  "id": "/app",
+  "start_url": "/app/programs",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b1a3a",
+  "theme_color": "#0b1a3a",
+  "icons": [
+    { "src": "/icons/evosys-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/evosys-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/evosys-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

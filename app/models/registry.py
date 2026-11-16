@@ -617,3 +617,7 @@ import app.models.launcher_models  # noqa: F401,E402  (imported for side effects
 import app.models.sales_quote_models  # noqa: F401,E402  (imported for side effects)
 # Contractor onboarding: invite sends, document review, in-app agreement signing.
 import app.models.sales_contractor_models  # noqa: F401,E402  (imported for side effects)
+# EvoSys Pro Team App (Eagle Says mobile prototype): team chat rooms, messages,
+# attachments, read positions, time entries, corrections and time-manager
+# scopes. Without this import none of those tables is ever created.
+import app.models.team_app_models  # noqa: F401  (imported for side effects)

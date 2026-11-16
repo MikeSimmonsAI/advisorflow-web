@@ -79,6 +79,8 @@ import Appointments from './pages/Appointments'
 import WorkspaceView from './pages/WorkspaceView'
 import WorkQueue from './pages/WorkQueue'
 import ProgramAccessPortal from './pages/program/ProgramAccessPortal'
+import { openProgramItem } from './pages/program/programDestinations'
+import { launcherOrigin } from './pages/program/launcherOrigin'
 import { BookaBoostProgramAccessState } from './pages/program/BookaBoostProgramAccess'
 import { hostTheme } from './theme'
 import AutoSendQueue from './pages/AutoSendQueue'
@@ -109,6 +111,8 @@ import FollowUpQueues, { RenewalsQueues } from './pages/energy/FollowUpQueues'
 import MoveConcierge from './pages/energy/MoveConcierge'
 import Suppliers from './pages/energy/Suppliers'
 import MobileApp from './mobile/routes'
+// EvoSys Pro team app (Eagle Says mobile prototype): Programs, Chat, Time, Account.
+const TeamApp = lazyPage(() => import('./teamapp/TeamApp'))
 // WHOLESALE REAL ESTATE. Five screens behind one feature key. `feature` on the
 // routes below is what stops a workspace without the module walking into the
 // server's 402 — the entitlement itself is enforced on every one of those
@@ -1196,6 +1200,11 @@ function WorkspaceSelector() {
   const { ctx, phase, retry } = useAuthorizedContexts()
   const navigate = useNavigate()
   if (!isAuthenticated()) return <Navigate to="/login" replace />
+  // Opened from the EvoSys Pro mobile app? Every workspace's Program Access /
+  // Back link lands here; send this tab back to the app's Programs tab instead.
+  // A web entry or a direct workspace link never sets an origin.
+  const fromApp = launcherOrigin()
+  if (fromApp) return <Navigate to={fromApp} replace />
   if (!ctx) {
     // On a BookaBoost address the wait and a failed load are shown in the
     // BookaBoost look; everywhere else this stays blank, exactly as before.
@@ -1228,48 +1237,8 @@ function WorkspaceSelector() {
       && dealBuilders === 0) {
     return <Navigate to={'/workspace/' + workspaces[0].organization_id} replace />
   }
-  return <ProgramAccessPortal contexts={ctx} onChoose={(item) => {
-    // A PREVIEW is a deal's existing public demo link, not a workspace: no
-    // context is set and nothing is entered. It opens in a new tab so the
-    // launcher stays where it was.
-    if (item.type === 'preview') {
-      // A God-granted preview opens inside this app (signed in, re-checked).
-      if (item.grant_id && item.path) { navigate(item.path); return }
-      if (item.url) window.open(item.url, '_blank', 'noopener,noreferrer')
-      return
-    }
-    // Back Office / Executive Suite: leave any program workspace first, so no
-    // stale workspace header follows the person into the back office.
-    if (item.type === 'back_office') {
-      clearWorkspaceContext()
-      // The brand this Back Office sells travels with every /sales request; the
-      // server honours it only for a brand this person already sells for.
-      if (item.platform_id) setBrandContext(item.platform_id, item.platform_name || '')
-      navigate(item.path || '/sales'); return
-    }
-    if (item.type === 'acquisition_ops') {
-      clearWorkspaceContext()
-      navigate('/acquisition-ops'); return
-    }
-    if (item.type === 'volt_ops' || item.type === 'consumer_leads') {
-      clearWorkspaceContext()
-      navigate(item.path); return
-    }
-    if (item.type === 'executive') {
-      clearWorkspaceContext()
-      if (item.platform_id) setBrandContext(item.platform_id, item.platform_name || '')
-      navigate('/executive'); return
-    }
-    // Selection is a context choice, not an authorization grant. The
-    // /workspace route confirms membership again and product routes enforce
-    // their own named seat.
-    setWorkspaceContext(item.organization_id)
-    const target = item.type === 'product'
-      ? '/workspace/' + item.organization_id + '?product=' + encodeURIComponent(item.key)
-        + (item.view ? '&view=' + encodeURIComponent(item.view) : '')
-      : '/workspace/' + item.organization_id
-    navigate(target)
-  }} />
+  // What a tapped card does is shared with the mobile app (/app/programs).
+  return <ProgramAccessPortal contexts={ctx} onChoose={(item) => openProgramItem(item, navigate)} />
 }
 
 /**
@@ -1424,6 +1393,7 @@ export default function App() {
         <Route path="/login" element={isAuthenticated() ? <Navigate to="/" replace /> : <Login />} />
         {/* MOBILE / PWA SHELL. Own auth gate (/m/login), own chrome; every call is an existing, server-enforced endpoint. */}
         <Route path="/m/*" element={<MobileApp />} />
+        <Route path="/app/*" element={<TeamApp />} />
         {/* ── CUSTOMER WORKSPACE ENTRY ──
             Membership answers "may this person enter"; P0's lead_scope still
             answers "what may they see once inside". Two questions, two

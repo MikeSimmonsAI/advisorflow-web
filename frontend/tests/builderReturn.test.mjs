@@ -25,3 +25,8 @@ test('both standalone builders draw the back bar outside the iframe', () => {
   assert.equal((src.match(/<BuilderFrame title=/g) || []).length, 2)
   assert.match(src, /Back to \{back\.label\}/)
 })
+
+test('the mobile app Programs tab is a valid Back target', () => {
+  assert.deepEqual(safeReturn('/app/programs'), { to: '/app/programs', label: 'Programs' })
+  assert.deepEqual(safeReturn('/app/programs/../god').to, '/workspaces')
+})

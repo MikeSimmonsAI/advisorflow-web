@@ -1,0 +1,93 @@
+# EvoSys Pro mobile app (Eagle Says prototype, PR #628) - PRIVATE HTTPS PREVIEW
+#
+# A separate Blueprint, NOT render.yaml (production) and NOT render-staging.yaml
+# (SCI staging, branch sci-program). Everything here is new, free-plan, and
+# built from branch feature/eagle-says-mobile-prototype:
+#
+#   evosyspro-app-preview-db    free Postgres holding SYNTHETIC people only
+#   evosyspro-app-preview-api   free web service (FastAPI backend)
+#   evosyspro-app-preview       free static site (the web app, /app)
+#
+# Isolation:
+#   * its own database; scripts/seed_team_app_preview.py refuses any database
+#     that holds a person outside @preview.test
+#   * no Twilio, email, Microsoft, Google or Stripe keys - nothing can message
+#     anyone; SERVICE_ROLE is unset, so no background schedulers run
+#   * sign-in required; preview accounts use PREVIEW_PASSWORD (set at approval,
+#     never committed)
+#   * the static site's name contains "evosyspro" because sign-in reads the
+#     brand from the web address
+#
+# Free-plan limits: the API sleeps after ~15 idle minutes (first request then
+# takes about a minute); a free database expires after 30 days.
+#
+# After the first sync, set on the API:  CORS_EXTRA_ORIGINS=https://<static host>
+# and on the static site:                VITE_API_BASE_URL=https://<api host>
+# (hostnames are only known once Render creates them), then redeploy both.
+
+databases:
+  - name: evosyspro-app-preview-db
+    plan: free
+    databaseName: team_app_preview
+    user: team_app_preview
+
+services:
+  - type: web
+    name: evosyspro-app-preview-api
+    runtime: python
+    plan: free
+    branch: feature/eagle-says-mobile-prototype
+    autoDeploy: true
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python -m app.migrate && python scripts/seed_team_app_preview.py && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.9"
+      - key: MALLOC_ARENA_MAX
+        value: "2"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: evosyspro-app-preview-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: BOOKING_SECRET
+        generateValue: true
+      # Labels the process non-production in /health (only production,
+      # staging and demo are recognised; staging bootstraps stay inert).
+      - key: APP_ENV
+        value: staging
+      - key: TEAM_APP_PREVIEW
+        value: "1"
+      - key: PROGRAM_EMAIL_TOUCHES_SENDING
+        value: "off"
+      - key: CADENCE_SMS_SENDING
+        value: "off"
+      - key: PREVIEW_PASSWORD
+        sync: false
+      - key: CORS_EXTRA_ORIGINS
+        sync: false
+
+  - type: web
+    name: evosyspro-app-preview
+    runtime: static
+    branch: feature/eagle-says-mobile-prototype
+    autoDeploy: true
+    buildCommand: "cd frontend && npm ci && npm run build"
+    staticPublishPath: frontend/dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Robots-Tag
+        value: noindex, nofollow
+    envVars:
+      - key: NODE_VERSION
+        value: "20.11.0"
+      - key: VITE_API_BASE_URL
+        sync: false
