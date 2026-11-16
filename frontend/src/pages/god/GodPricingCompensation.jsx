@@ -1272,6 +1272,7 @@ function ActiveRules({ rules }) {
       <h2>Active rules — {rules.brand_name || 'EvoSys Pro Sales'} (prices {rules.prices_version}, pay rules {rules.rules_version})</h2>
       <div className="go-body">
         <p style={{ marginTop: 0 }}>{rules.billing}</p>
+        <p><b>New checkout uses: {rules.checkout_mode === 'live' ? 'Stripe Live (real payments)' : 'Stripe sandbox (test mode — no real payments)'}</b></p>
         <table className="go-table">
           <thead><tr><th>Package</th><th>Month 1 setup</th><th>Month 2+ monthly</th>
             <th>Flat setup pay (Rep / ASM / Sr EVP)</th><th>Monthly residual at full collection</th></tr></thead>

@@ -1339,6 +1339,52 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
 
 # ---------------------------------------------------------------------------
+# POST /billing/webhook/live  (no auth — validated by the LIVE signing secret)
+#
+# The Stripe LIVE endpoint for EvoSys Pro Sales checkout after the Live
+# cutover. Kept apart from /billing/webhook (the sandbox endpoint, untouched):
+# it verifies with STRIPE_LIVE_WEBHOOK_SECRET only, accepts only events whose
+# `livemode` is true, and then runs the same handler, so event-id and payment
+# deduplication, commission and every guard are identical. A sandbox event
+# can never reach Live state through here, and the reverse holds on the other
+# endpoint because the two signing secrets differ.
+# ---------------------------------------------------------------------------
+@router.post("/webhook/live", include_in_schema=False)
+async def stripe_webhook_live(request: Request, db: Session = Depends(get_db)):
+    from app.services import stripe_live
+    secret = stripe_live.webhook_secret()
+    if not secret:
+        raise HTTPException(status_code=503, detail="Live webhook not configured")
+    body = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+    try:
+        event = stripe.Webhook.construct_event(body, sig, secret)
+    except stripe.error.SignatureVerificationError as e:
+        logger.warning("Stripe LIVE signature failed: %s", e)
+        raise HTTPException(status_code=400, detail="Invalid signature")
+    except Exception as e:
+        logger.error("Stripe LIVE webhook error: %s", e)
+        raise HTTPException(status_code=400, detail="Webhook error")
+    if not event.get("livemode"):
+        # Signed with the Live secret but not a Live event: refuse to apply it.
+        logger.warning("Stripe LIVE endpoint received a non-live event %s", event.get("id"))
+        return {"received": True, "ignored": True, "detail": "Not a Live event."}
+    result = billing_webhook.handle_event(db, event)
+    # Mark the event row as a LIVE delivery, so God Mode can show real Live
+    # webhook deliveries apart from sandbox ones and from simulated tests.
+    try:
+        from app.models.billing_models import BillingEvent
+        row = (db.query(BillingEvent)
+               .filter(BillingEvent.stripe_event_id == event.get("id")).first())
+        if row is not None and not (row.detail or "").startswith("[live]"):
+            row.detail = "[live] " + (row.detail or "delivered")
+            db.commit()
+    except Exception:                                       # pragma: no cover
+        logger.exception("could not mark live event")
+    return {"received": True, "livemode": True, **result}
+
+
+# ---------------------------------------------------------------------------
 # GET /billing/all  (god admin — all orgs billing overview)
 # ---------------------------------------------------------------------------
 @router.get("/all")

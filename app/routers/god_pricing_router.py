@@ -180,6 +180,14 @@ def _plan_out(db: Session, p: CompensationPlan) -> Dict[str, Any]:
 # The screen's single read
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _checkout_mode(db: Session) -> str:
+    try:
+        from app.services import stripe_live
+        return stripe_live.checkout_mode(db)
+    except Exception:                                       # pragma: no cover
+        return "test"
+
+
 @router.get("/overview")
 def overview(brand_sales_org_id: str = Query(None),
              db: Session = Depends(get_db),
@@ -253,6 +261,7 @@ def overview(brand_sales_org_id: str = Query(None),
         "monthly_residual_pct": {r: float(v) for r, v in _dbc.PACKAGE_PCT.items()},
         "addon_setup_pct": {r: float(v) for r, v in _dbc.PACKAGE_ADDON_SETUP_PCT.items()},
         "custom_saas_pct": {r: float(v) for r, v in _dbc.SAAS_PCT.items()},
+        "checkout_mode": _checkout_mode(db),
         "source": "app/services/deal_builder_commission.py (used by Deal Builders, "
                   "saved quotes and every earned commission record for this brand)",
     }

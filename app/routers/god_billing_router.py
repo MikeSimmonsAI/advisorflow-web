@@ -1066,6 +1066,108 @@ def apply_evosys_standard_packages(db: Session = Depends(get_db),
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# STRIPE LIVE — new EvoSys Pro Sales checkout only (see stripe_live.py)
+# ═══════════════════════════════════════════════════════════════════════════
+# Nothing here returns or logs a key or signing secret: only whether each is
+# present, the Live account's public facts, public object ids, and amounts.
+
+def _live_err(exc) -> HTTPException:
+    from app.services import stripe_live
+    if isinstance(exc, stripe_live.LiveNotReady):
+        return HTTPException(status_code=409, detail=str(exc))
+    log.exception("stripe live: provider call failed")
+    return HTTPException(status_code=502, detail="Stripe refused the Live request. Nothing was "
+                         "changed. See the service log for the processor's reply.")
+
+
+@router.get("/evosys-live")
+def evosys_live_status(db: Session = Depends(get_db), user: User = Depends(require_god)):
+    """Mode in use, key presence, Live account, prices, webhook, and the last
+    Live webhook deliveries actually received."""
+    from app.models.billing_models import BillingEvent
+    from app.services import stripe_live
+    out = stripe_live.preflight(db)
+    out["live_deliveries"] = [
+        {"event_id": e.stripe_event_id, "type": e.event_type, "outcome": e.outcome,
+         "received_at": e.received_at, "detail": (e.detail or "")[:160]}
+        for e in (db.query(BillingEvent).filter(BillingEvent.detail.like("[live]%"))
+                  .order_by(BillingEvent.received_at.desc()).limit(10).all())]
+    out["mapping"] = [{"catalog_key": p.key, "name": p.name,
+                       "sandbox_price_id": p.stripe_price_id_month_to_month,
+                       "live_price_id": p.stripe_live_price_id,
+                       "live_product_id": p.stripe_live_product_id}
+                      for p in stripe_live._plans(db, stripe_live._program_platform_id(db) or "")]
+    db.rollback()
+    return out
+
+
+@router.post("/evosys-live/prices")
+def evosys_live_prices(body: ProvisionIn = ProvisionIn(), db: Session = Depends(get_db),
+                       user: User = Depends(require_god)):
+    """Preview (default) or create/reuse the Live product and monthly price for
+    Basic, Growth and Professional. Idempotent."""
+    from app.services import stripe_live
+    try:
+        result = stripe_live.provision(db, apply=bool(body.apply))
+    except Exception as exc:
+        db.rollback()
+        raise _live_err(exc)
+    if not body.apply:
+        db.rollback()
+        return result
+    _audit(db, user, "billing_catalogue.evosys_live_prices", AUDIT_TARGET_PLAN,
+           stripe_live._program_platform_id(db) or "", before=None,
+           after={"packages": [{"package": p["package"], "product": p["product"], "price": p["price"]}
+                               for p in result["packages"]]},
+           note="Stripe LIVE products/prices mapped for EvoSys Pro standard packages")
+    db.commit()
+    result["verification"] = stripe_live.verify_prices(db)
+    return result
+
+
+@router.post("/evosys-live/probe")
+def evosys_live_probe(db: Session = Depends(get_db), user: User = Depends(require_god)):
+    """Open and immediately expire two Live checkout sessions for an internal
+    non-customer record (no customer, never sent) to prove mode, amounts and
+    the Month-2 anchor on Stripe's side. Nothing can be paid."""
+    from app.services import stripe_live
+    try:
+        result = stripe_live.probe(db)
+    except Exception as exc:
+        db.rollback()
+        raise _live_err(exc)
+    _audit(db, user, "billing.evosys_live_probe", AUDIT_TARGET_PLAN,
+           stripe_live._program_platform_id(db) or "", before=None, after=result,
+           note="Live preflight checkout sessions opened and expired (nothing charged)")
+    db.commit()
+    return result
+
+
+class LiveModeIn(BaseModel):
+    mode: str
+
+
+@router.post("/evosys-live/mode")
+def evosys_live_mode(body: LiveModeIn, db: Session = Depends(get_db),
+                     user: User = Depends(require_god)):
+    """Switch NEW EvoSys Pro Sales checkout between the sandbox ("test") and
+    Stripe Live ("live"). Live is refused unless the full preflight passes.
+    Switching back to "test" is always allowed."""
+    from app.services import stripe_live
+    try:
+        result = stripe_live.set_mode(db, body.mode)
+    except Exception as exc:
+        db.rollback()
+        raise _live_err(exc)
+    _audit(db, user, "billing.evosys_checkout_mode", AUDIT_TARGET_PLAN,
+           stripe_live._program_platform_id(db) or "", before={"mode": result["before"]},
+           after={"mode": result["after"]},
+           note="New EvoSys Pro Sales checkout mode set to %s" % result["after"])
+    db.commit()
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # REVENUE — real numbers, or an honest null
 # ═══════════════════════════════════════════════════════════════════════════
 

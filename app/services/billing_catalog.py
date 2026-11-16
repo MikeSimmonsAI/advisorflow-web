@@ -124,7 +124,8 @@ def resolve_plan_by_price_id(db: Session, platform_id: Optional[str],
              .filter(BrandBillingPlan.platform_id == platform_id)
              .filter((BrandBillingPlan.stripe_price_id_monthly == price_id)
                      | (BrandBillingPlan.stripe_price_id_annual == price_id)
-                     | (BrandBillingPlan.stripe_price_id_month_to_month == price_id))
+                     | (BrandBillingPlan.stripe_price_id_month_to_month == price_id)
+                     | (BrandBillingPlan.stripe_live_price_id == price_id))
              .first())
     if found is not None:
         return found
@@ -164,8 +165,8 @@ def interval_for_price_id(plan: BrandBillingPlan, price_id: str) -> Optional[str
     if price_id in (plan.stripe_price_id_monthly,
                     plan.stripe_price_id_month_to_month):
         return BillingInterval.MONTH
-    if price_id in legacy_price_ids(plan):
-        # Every legacy EvoSys price is a monthly price.
+    if price_id in legacy_price_ids(plan) or price_id == getattr(plan, "stripe_live_price_id", None):
+        # Every legacy EvoSys price, and the Live price, is a monthly price.
         return BillingInterval.MONTH
     return None
 
@@ -180,7 +181,8 @@ def commitment_for_price_id(plan: BrandBillingPlan,
     """
     if not price_id:
         return None
-    if plan.stripe_price_id_month_to_month == price_id:
+    if plan.stripe_price_id_month_to_month == price_id \
+            or price_id == getattr(plan, "stripe_live_price_id", None):
         return BillingCommitment.MONTH_TO_MONTH
     if price_id in (plan.stripe_price_id_monthly, plan.stripe_price_id_annual):
         return BillingCommitment.TERM

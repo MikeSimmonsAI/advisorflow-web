@@ -124,6 +124,7 @@ B_QUOTE_SETUP_MISMATCH = "setup_amount_differs_from_quote"
 B_QUOTE_MONTHLY_MISMATCH = "monthly_amount_differs_from_quote"
 B_QUOTE_PACKAGE_MISMATCH = "package_differs_from_quote"
 B_SETUP_NOT_PAID = "setup_not_paid_yet"
+B_NO_LIVE_PRICE = "no_live_stripe_price_for_this_package"
 
 # HOW a recurring charge gets its amount. The router branches on this rather
 # than on "is `plan` None", so a future third mode has to declare itself here
@@ -185,6 +186,9 @@ BLOCKER_TEXT = {
     B_QUOTE_PACKAGE_MISMATCH:
         "The package on this deal is not the package the customer was quoted. "
         "Revise the quote or the deal so they agree.",
+    B_NO_LIVE_PRICE:
+        "New checkout is in Stripe Live mode, but this package has no verified "
+        "Live monthly price. Map the Live prices in God Mode first.",
     B_SETUP_NOT_PAID:
         "Month 1 is the one-time setup only. The monthly link is created after "
         "the setup payment arrives, so the first monthly charge is scheduled one "
@@ -230,6 +234,7 @@ BLOCKER_SCOPE = {
     B_QUOTE_SETUP_MISMATCH: ("setup",),
     B_QUOTE_MONTHLY_MISMATCH: SUBSCRIPTION_ONLY,
     B_SETUP_NOT_PAID: SUBSCRIPTION_ONLY,
+    B_NO_LIVE_PRICE: SUBSCRIPTION_ONLY,
 }
 
 
@@ -893,3 +898,14 @@ def _quote_checks(db: Session, opp, res: Dict[str, Any], out: Dict[str, Any], bl
         impl = implementation_for(db, opp)
         if getattr(impl, "setup_payment_status", None) != "paid" or not getattr(impl, "setup_paid_at", None):
             blockers.append(_blocker(B_SETUP_NOT_PAID))
+    # Which Stripe mode a NEW link for this deal would use.
+    from app.services import stripe_live
+    mode = stripe_live.checkout_mode(db)
+    out["checkout_mode"] = mode
+    if mode == stripe_live.MODE_LIVE and sub is not None:
+        plan = billing_catalog.resolve_plan(db, billing_catalog.platform_id_for_org(
+            db, customer_org_for(db, opp)), sub.get("plan"))
+        if plan is None or not getattr(plan, "stripe_live_price_id", None):
+            blockers.append(_blocker(B_NO_LIVE_PRICE))
+        else:
+            sub["live_price_id"] = plan.stripe_live_price_id
