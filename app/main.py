@@ -2316,6 +2316,21 @@ async def _program_sla_loop():
                         except Exception as exc:                 # noqa: BLE001
                             db.rollback()
                             _logger.error("stuck-visit check error: %s", exc, exc_info=True)
+                        # A family told a time by a person with nothing booked
+                        # (Nov 16): page the team (7 AM - 9 PM Central).
+                        try:
+                            from app.services.programs import email_touches as _et_ub
+                            from app.services.programs import unbooked_confirmations as _ub
+                            from datetime import timedelta as _td_ub, datetime as _dt_ub
+                            from zoneinfo import ZoneInfo as _ZI_ub
+                            _hr_ub = _dt_ub.now(_ZI_ub("America/Chicago")).hour
+                            if 7 <= _hr_ub < 21 and _et_ub.pass_due(key="unbooked", every=_td_ub(minutes=5)):
+                                _n_ub = _ub.alert_all(db)
+                                if _n_ub:
+                                    out["unbooked_alerts"] = _n_ub
+                        except Exception as exc:                 # noqa: BLE001
+                            db.rollback()
+                            _logger.error("unbooked-confirmation check error: %s", exc, exc_info=True)
                         # #385: the Central Alabama campaign exists (OFF, no copy).
                         try:
                             from app.services.programs import email_touches as _et_c385

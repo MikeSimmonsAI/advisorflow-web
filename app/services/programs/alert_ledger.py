@@ -54,7 +54,7 @@ log = logging.getLogger(__name__)
 # How important an event is. A page is suppressed only by an earlier page of
 # the SAME OR HIGHER tier for the same family inside the window.
 TIER = {"low": 1, "active": 1, "reply": 1, "hot": 2, "handoff": 2, "sla_breach": 2, "booked": 3,
-        "opt_out_request": 4}                       # never merged away: staff must not text them back
+        "opt_out_request": 4, "unbooked": 4}                       # never merged away: staff must not text them back
 DEFAULT_COALESCE_MINUTES = 30
 MAX_ATTEMPTS = 3
 # While a family's reply is being handled, a hand-off or a booking during that
@@ -328,7 +328,8 @@ def sms_line(kind: str, name: str, *, words: Optional[str] = None, location: Opt
     p = (program or "SCI").strip() or "SCI"
     label = p + " " + {"hot": "Appointment Request", "handoff": "HUMAN HANDOFF", "booked": "Booked",
                        "sla_breach": "Still Waiting", "home_visit": "Home Visit Request",
-                       "opt_out_request": "Opted Out But Asked - Call/Email, No Texts"}.get(kind, "Reply")
+                       "opt_out_request": "Opted Out But Asked - Call/Email, No Texts",
+                       "unbooked": "NOT BOOKED"}.get(kind, "Reply")
     if test:
         label = "TEST " + label
     tail = " Open EvoSys Pro to respond." if kind in ("low", "active", "reply") else " Review in EvoSys Pro."

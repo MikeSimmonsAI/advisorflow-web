@@ -263,6 +263,26 @@ def _get_calendar_service(advisor: User):
     return build("calendar", "v3", credentials=creds)
 
 
+def appointment_invitees(db: Session, lead) -> list:
+    """Everyone the lead's program invites to every appointment (the program's
+    appointment_invitees), so the event lands on each of their calendars. An
+    empty list when the program names nobody - never fails a booking."""
+    import json as _json
+    try:
+        from app.services.programs.identity import program_for_org
+        prog = program_for_org(db, getattr(lead, "organization_id", None)) if lead is not None else None
+        raw = _json.loads(getattr(prog, "appointment_invitees", None) or "[]") if prog is not None else []
+        out = []
+        for e in raw:
+            e = str(e or "").strip()
+            if "@" in e and e.lower() not in [x.lower() for x in out]:
+                out.append(e)
+        return out
+    except Exception:                                    # noqa: BLE001
+        logging.getLogger(__name__).exception("could not read appointment invitees")
+        return []
+
+
 def create_calendar_event_for_booking(
     db: Session,
     booking: BookingLink,
@@ -307,8 +327,15 @@ def create_calendar_event_for_booking(
             ("Family's home - " + _where) if booking.meeting_type == "home" else (_where or "Office"),
             duration_minutes, event_body["description"]))
 
+    guests = appointment_invitees(db, lead)
+    if guests:
+        event_body["attendees"] = [{"email": e} for e in guests]
     try:
-        created_event = service.events().insert(calendarId=booking_calendar_id(advisor), body=event_body).execute()
+        # sendUpdates="all": each guest gets the invite by email and the event
+        # on their own calendar.
+        _kw = {"sendUpdates": "all"} if guests else {}
+        created_event = service.events().insert(calendarId=booking_calendar_id(advisor), body=event_body,
+                                                **_kw).execute()
         booking.calendar_event_id = created_event.get("id")
         booking.status = "booked"
         booking.booked_time = booked_datetime
@@ -338,7 +365,10 @@ def cancel_calendar_event(db: Session, booking: BookingLink) -> dict:
             if advisor and getattr(advisor, "google_calendar_connected", False):
                 service = _get_calendar_service(advisor)
                 cal_id = booking_calendar_id(advisor)
-                service.events().delete(calendarId=cal_id, eventId=booking.calendar_event_id).execute()
+                # Guests get the cancellation too (and it leaves their calendars).
+                _lead = db.query(Lead).filter(Lead.id == booking.lead_id).first()
+                _kw = {"sendUpdates": "all"} if appointment_invitees(db, _lead) else {}
+                service.events().delete(calendarId=cal_id, eventId=booking.calendar_event_id, **_kw).execute()
                 calendar_note = "Calendar event deleted"
             else:
                 calendar_note = "Advisor Google Calendar not connected — skipped"

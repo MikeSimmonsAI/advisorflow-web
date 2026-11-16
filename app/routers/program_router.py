@@ -164,6 +164,7 @@ def _program_json(db: Session, prog: OutreachProgram) -> dict:
         "send_via_mailbox": getattr(prog, "send_via_mailbox", None),
         "email_hold_providers": sorted(_et_hold(prog)),
         "booking_user_id": getattr(prog, "booking_user_id", None),
+        "appointment_invitees": json.loads(getattr(prog, "appointment_invitees", None) or "[]"),
         "primary_contact_title": prog.primary_contact_title,
         "primary_contact_user_id": prog.primary_contact_user_id,
         "alert_email": prog.alert_email, "alert_phone": prog.alert_phone,
@@ -225,6 +226,7 @@ class SettingsIn(BaseModel):
     email_hold_providers: Optional[List[str]] = None
     booking_user_id: Optional[str] = None
     ai_setter_mode: Optional[str] = None
+    appointment_invitees: Optional[List[str]] = None
 
 
 _EMAIL_RE = __import__("re").compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -303,6 +305,13 @@ def update_settings(body: SettingsIn, db: Session = Depends(get_db),
             if e:
                 clean[k] = e
         prog.placement_seed_addresses = json.dumps(clean)
+    if "appointment_invitees" in data:
+        seen = []
+        for e in data.pop("appointment_invitees") or []:
+            e = _clean_email(e, "Appointment invitee")
+            if e and e.lower() not in [x.lower() for x in seen]:
+                seen.append(e)
+        prog.appointment_invitees = json.dumps(seen) if seen else None
     if "booking_user_id" in data:
         uid = (data.pop("booking_user_id") or "").strip() or None
         if uid and db.query(User).filter(User.id == uid, User.is_active.is_(True)).first() is None:
