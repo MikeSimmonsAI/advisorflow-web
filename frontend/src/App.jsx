@@ -127,6 +127,7 @@ const VoltPortal = lazyPage(() => import('./pages/volt/VoltPortal'))
 const VoltOps = lazyPage(() => import('./pages/volt/VoltOps'))
 const ConsumerLeadsWorkspace = lazyPage(() => import('./pages/volt/ConsumerLeadsWorkspace'))
 const ConsumerSite = lazyPage(() => import('./pages/volt/ConsumerSite'))
+const ConsumerPrivacy = lazyPage(() => import('./pages/volt/ConsumerSite').then((m) => ({ default: m.ConsumerPrivacy })))
 const VoltDevConnect = lazyPage(() => import('./pages/volt/VoltDevConnect'))
 const RoofingMission = lazyPage(() => import('./pages/roofing/MissionControl'))
 const RoofingQueue = lazyPage(() => import('./pages/roofing/WorkQueue'))
@@ -1518,6 +1519,7 @@ export default function App() {
         {/* VOLT MARKETING (#535): public applicant portal; applicants use their own token slot, fenced server-side to /volt/rep/*. */}
         {/* CONSUMER LEADS public website (V4): its own page, outside the VOLT recruiting portal shell. */}
         <Route path="/volt/check-coverage" element={<ConsumerSite />} />
+        <Route path="/volt/check-coverage/privacy" element={<ConsumerPrivacy />} />
         <Route path="/volt/*" element={<VoltPortal />} />
         {/* VOLT OPERATIONS: staff via Program Access; /volt/ops/* re-checks authority on every request. */}
         <Route path="/volt-ops/:orgId/*" element={<ProtectedRoute bare><VoltOps /></ProtectedRoute>} />

@@ -30,6 +30,14 @@ class VoltLeadSettings(Base):
     reviewed_by = Column(String, nullable=True)
     reviewed_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    # #619 launch safeguards: the legal company that collects the information
+    # (named in the consent and the privacy notice). Owner-entered, audited.
+    collector_name = Column(String, nullable=True)
+    collector_address = Column(Text, nullable=True)
+    privacy_email = Column(String, nullable=True)
+    privacy_phone = Column(String, nullable=True)
+    collector_updated_by = Column(String, nullable=True)
+    collector_updated_at = Column(DateTime, nullable=True)
 
 
 class VoltLead(Base):
@@ -84,6 +92,10 @@ class VoltLead(Base):
     source_id = Column(String, nullable=True)            # volt_lead_sources.id for external sources
     # Compliance-review flags, e.g. "intake_before_review" (none today).
     flags = Column(String, nullable=True)
+    # #619: the separate, optional automated calls/texts consent, and a recorded
+    # request to stop contact (kept so it keeps being honored).
+    automated_contact_consent = Column(Boolean, nullable=True)
+    contact_opt_out_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -115,6 +127,12 @@ class VoltLeadGrant(Base):
     active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     role = Column(String, nullable=False, default="manager")   # manager: every lead | agent: assigned leads only
+    # #619: health insurance license the OWNER verified (NPN + states). Real
+    # leads go only to someone licensed in the lead's state.
+    license_npn = Column(String, nullable=True)
+    licensed_states = Column(String, nullable=True)       # "TX,OK"
+    license_verified_by = Column(String, nullable=True)
+    license_verified_at = Column(DateTime, nullable=True)
 
 
 class VoltLeadSource(Base):

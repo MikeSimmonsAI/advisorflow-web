@@ -15,12 +15,36 @@ SLUG = "volt-marketing"
 def lead(**kw):
     b = {"first_name": "Lee", "last_name": "Sample", "zip": "19103", "phone": "(555) 234-5678",
          "email": "lee@example.test", "age_range": "26-44", "coverage_status": "none", "household_size": 2,
-         "consent": True, "consent_version": L.CONSENT_VERSION, "source": "facebook", "campaign": "spring<script>"}
+         "consent": True, "consent_version": L.CONSENT_VERSION, "source": "facebook", "campaign": "spring<script>",
+         "state": "PA", "income_range": "35k_50k", "contact_preference": "call", "best_time": "any"}
     b.update(kw)
     return b
 
 
+# Synthetic launch details (#619): intake can only be turned on once a
+# collecting company and at least one verified licensed agent exist.
+COLLECTOR = {"collector_name": "Example Coverage Test LLC", "collector_address": "100 Test Street, Testville, TX 75000",
+             "privacy_email": "privacy@example.test"}
+
+
+def licensed(v, who, states=None):
+    """Owner verifies a synthetic health insurance license for v[who]."""
+    r = v["c"].put("/volt/ops/%s/leads/grants/%s/license" % (v["org"].id, v[who].id), headers=H(v["db"], v["god"]),
+                   json={"npn": "1234567", "states": states or list(L.STATES), "verified": True})
+    assert r.status_code == 200, r.text
+
+
+def ready(v):
+    r = v["c"].put("/volt/ops/%s/leads/settings/collector" % v["org"].id, headers=H(v["db"], v["god"]), json=COLLECTOR)
+    assert r.status_code == 200, r.text
+    if "licensed_agent" not in v:
+        v["licensed_agent"] = _user(v["db"], "advisor", v["org"], "spectator")
+        team(v, "licensed_agent")
+        licensed(v, "licensed_agent")
+
+
 def enable(v):
+    ready(v)
     r = v["c"].put("/volt/ops/%s/leads/settings" % v["org"].id, headers=H(v["db"], v["god"]),
                    json={"intake_enabled": True, "reviewed": True, "review_note": "Compliance approved 2026-11-14"})
     assert r.status_code == 200, r.text
@@ -114,7 +138,8 @@ def test_isolation_assignment_and_history(volt):
     for who in ("viewer", "outsider", "other_staff"):
         assert ops(volt, who).status_code == 403
         assert ops(volt, who, "/report").status_code == 403
-    # Owner assigns; the agent now sees exactly that lead.
+    # Owner assigns (once the agent's license is verified); the agent now sees exactly that lead.
+    licensed(volt, "staff")
     r = ops(volt, "god", "/%s/assign" % lid, "post", json={"user_id": volt["staff"].id})
     assert r.status_code == 200 and r.json()["assigned_user_id"] == volt["staff"].id
     assert len(ops(volt, "staff").json()["leads"]) == 1
@@ -138,7 +163,8 @@ def test_owner_grant_widens_access_and_can_be_revoked(volt):
     assert ops(volt, "staff").status_code == 403
     assert ops(volt, "staff", "/grants", "post", json={"user_id": volt["staff"].id}).status_code == 403
     r = ops(volt, "god", "/grants", "post", json={"user_id": volt["staff"].id, "role": "manager"})
-    assert r.status_code == 200 and r.json()["grants"][0]["role"] == "manager"
+    assert r.status_code == 200
+    assert next(g for g in r.json()["grants"] if g["user_id"] == volt["staff"].id)["role"] == "manager"
     out = ops(volt, "staff").json()
     assert out["access"] == "all" and len(out["leads"]) == 1
     ops(volt, "god", "/grants", "post", json={"user_id": volt["staff"].id, "active": False})
@@ -186,6 +212,7 @@ def test_activity_events_timestamps_and_report(volt):
     assert post(volt, phone="(555) 234-0001", email="a1@example.test", utm_source="google", utm_medium="cpc").status_code == 200
     lid = volt["db"].query(VoltLead).one().id
     team(volt, "staff")
+    licensed(volt, "staff")
     ops(volt, "god", "/%s/assign" % lid, "post", json={"user_id": volt["staff"].id})
     assert ops(volt, "staff", "/" + lid, "patch", json={"event": "call_attempted", "note": "no answer"}).status_code == 200
     r = ops(volt, "staff", "/" + lid, "patch", json={"event": "contact_completed"}).json()

@@ -11,7 +11,7 @@ from app.models.volt_leads_models import VoltLead, VoltLeadDelivery, VoltLeadEve
 from app.services.volt import lead_sources as S
 from app.services.volt import leads as L
 from tests.test_volt_recruiting import H, _user, volt  # noqa: F401  (fixture)
-from tests.test_volt_leads import SLUG, enable, lead, ops, post, team
+from tests.test_volt_leads import SLUG, enable, lead, licensed, ops, post, team
 
 
 def _ops(v, who, path, method="get", **kw):
@@ -50,6 +50,7 @@ def test_leads_only_agent_and_team_rules(volt):
     a = _agent(volt)
     assert _ops(volt, "leads.only", "").status_code == 403                        # member, no role yet
     team(volt, "leads.only")                                                      # owner adds as agent
+    licensed(volt, "leads.only")                                                  # owner verifies the license
     assert _ops(volt, "leads.only", "").json() == {"access": "assigned", "test": False, "leads": []}
     assert _ops(volt, "god", "/%s/assign" % lid, "post", json={"user_id": a.id}).status_code == 200
     assert len(_ops(volt, "leads.only", "").json()["leads"]) == 1

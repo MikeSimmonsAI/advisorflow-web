@@ -74,7 +74,7 @@ export default function ConsumerSite({ preview = null } = {}) {
   const [cfg, setCfg] = useState(null)
   const [wiz, setWiz] = useState(false)
   const [step, setStep] = useState(0)
-  const [a, setA] = useState({ consent: false })
+  const [a, setA] = useState({ consent: false, automated_consent: false })
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
@@ -141,7 +141,7 @@ export default function ConsumerSite({ preview = null } = {}) {
         first_name: a.first_name, last_name: a.last_name, zip: a.zip, state: a.state, phone: a.phone, email: a.email,
         age_range: a.age_range, coverage_status: a.coverage_status, household_size: a.household_size,
         income_range: a.income_range, contact_preference: a.contact_preference, best_time: a.best_time,
-        consent: true, consent_version: cfg.consent_version,
+        consent: true, automated_consent: !!a.automated_consent, consent_version: cfg.consent_version,
         utm_source: p.get('utm_source') || '', utm_medium: p.get('utm_medium') || '',
         utm_campaign: p.get('utm_campaign') || '', utm_content: p.get('utm_content') || '',
         utm_term: p.get('utm_term') || '', referrer_host: referrer, landing_path: window.location.pathname,
@@ -150,7 +150,7 @@ export default function ConsumerSite({ preview = null } = {}) {
     } catch (x) { setErr(msg(x)) } finally { setBusy(false) }
   }
   const back = () => { setErr(''); if (step === 0) close(); else setStep(step - 1) }
-  const restart = () => { setDone(false); setStep(0); setA({ consent: false }); setErr('') }
+  const restart = () => { setDone(false); setStep(0); setA({ consent: false, automated_consent: false }); setErr('') }
 
   if (!cfg) return <div className="cp" role="status" style={{ padding: 40 }}>Loading…</div>
   if (cfg.failed || !page) {
@@ -214,8 +214,14 @@ export default function ConsumerSite({ preview = null } = {}) {
               <input id="cp-ph" className="cp-field" type="tel" autoComplete="tel" value={a.phone || ''} disabled={!open} onChange={(e) => set('phone', e.target.value)} />
               <label className="cp-label" htmlFor="cp-em">Email{a.contact_preference === 'email' ? '' : ' (optional)'}</label>
               <input id="cp-em" className="cp-field" type="email" autoComplete="email" value={a.email || ''} disabled={!open} onChange={(e) => set('email', e.target.value)} />
+              <p className="cp-note" data-collector-line>
+                {cfg.collector ? <>Your request goes to <b>{cfg.collector.name}</b>. </> : null}
+                Before you send it, read our <a href={cfg.privacy_path} target="_blank" rel="noopener" data-privacy-link="form">privacy notice</a>.</p>
               <label className="cp-consent"><input type="checkbox" checked={a.consent} disabled={!open} onChange={(e) => set('consent', e.target.checked)} data-consent />
-                <span>{cfg.consent_text}</span></label>
+                <span>{cfg.consent_text} <b>(Required)</b></span></label>
+              {cfg.automated_consent_text && <label className="cp-consent"><input type="checkbox" checked={a.automated_consent} disabled={!open}
+                onChange={(e) => set('automated_consent', e.target.checked)} data-automated-consent />
+                <span>{cfg.automated_consent_text}</span></label>}
             </>}
             <div id="cp-err" className="cp-error" role="alert">{err}</div>
             <div className="cp-wiz-buttons">
@@ -296,11 +302,47 @@ export default function ConsumerSite({ preview = null } = {}) {
         </main>
         <footer className="cp-foot" data-funnel-disclaimers>
           <p><b>{brand}</b>. {page.brand_note}</p>
+          <p data-footer-privacy><a href={cfg.privacy_path} data-privacy-link="footer">Privacy notice</a>
+            {cfg.collector ? <> · Privacy questions: <a href={`mailto:${cfg.collector.email}`}>{cfg.collector.email}</a></> : null}</p>
           <ul>{page.disclaimers.map((d) => <li key={d}>{d}</li>)}</ul>
           <p className="cp-credit" data-photo-credit>{CONSUMER_PHOTOS.credit}</p>
         </footer>
         {wizard}
       </>}
+    </div>
+  )
+}
+
+
+// ── Privacy notice: /volt/check-coverage/privacy ────────────────────────────
+// Rendered from the server (leads_compliance.privacy_notice) so the notice,
+// the consent and the company named in them never drift apart.
+export function ConsumerPrivacy() {
+  const [cfg, setCfg] = useState(null)
+  useEffect(() => { volt.leadConfig().then(setCfg).catch(() => setCfg({ failed: true })) }, [])
+  const brand = cfg?.page?.brand || 'CoveragePath'
+  useSiteTitle(`Privacy notice · ${brand}`)
+  if (!cfg) return <div className="cp" role="status" style={{ padding: 40 }}>Loading…</div>
+  const n = cfg.privacy
+  return (
+    <div className="cp" data-consumer-privacy>
+      <header className="cp-max cp-nav">
+        <Link className="cp-logo" to="/volt/check-coverage"><span className="cp-mark" aria-hidden="true">✚</span><span>{brand}</span></Link>
+        <nav className="cp-navr" aria-label="Privacy notice"><Link to="/volt/check-coverage">Back to the website</Link></nav>
+      </header>
+      <main className="cp-max cp-privacy" style={{ padding: '24px 24px 64px', maxWidth: 820 }}>
+        <h1 style={{ fontSize: 'clamp(30px, 6vw, 44px)' }}>{n?.title || 'Privacy notice'}</h1>
+        {cfg.failed && <p role="alert">We couldn’t load this page. Please check your connection and try again.</p>}
+        {n && !n.available && <p role="note" data-privacy-pending>{n.message}</p>}
+        {n && n.available && <>
+          <p className="cp-note" data-privacy-meta>Last updated {n.updated} · Version {n.version}</p>
+          {n.sections.map(([h, paras]) => (
+            <section key={h} aria-labelledby={`pv-${h}`} style={{ marginTop: 26 }}>
+              <h2 id={`pv-${h}`} style={{ fontSize: 22 }}>{h}</h2>
+              {paras.map((t) => <p key={t} style={{ fontSize: 17, lineHeight: 1.6 }}>{t}</p>)}
+            </section>))}
+        </>}
+      </main>
     </div>
   )
 }

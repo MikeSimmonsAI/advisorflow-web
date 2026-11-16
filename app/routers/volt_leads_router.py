@@ -218,7 +218,7 @@ def ops_delivery_retry(org_id: str, delivery_id: str, db: Session = Depends(get_
 @ops_router.get("/{org_id}/leads/settings")
 def ops_leads_settings(org_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     L.require_admin(db, user, org_id)
-    out = L.settings_dict(L.settings_row(db, org_id))
+    out = L.settings_dict(L.settings_row(db, org_id), db)
     out["grants"] = L.grants(db, org_id)
     out["candidates"] = L.candidates(db, org_id)
     out["can_intake"] = C.staff_access(db, user, org_id) == "owner"
@@ -232,6 +232,34 @@ def ops_leads_settings_put(org_id: str, body: Dict[str, Any] = Body(...), db: Se
                            user: User = Depends(get_current_user)):
     L.require_owner(db, user, org_id)
     out = L.set_intake(db, org_id, user, body)
+    db.commit()
+    return out
+
+
+@ops_router.put("/{org_id}/leads/settings/collector")
+def ops_leads_collector(org_id: str, body: Dict[str, Any] = Body(...), db: Session = Depends(get_db),
+                        user: User = Depends(get_current_user)):
+    """Owner only: the legal company that collects the information (#619)."""
+    L.require_owner(db, user, org_id)
+    out = L.set_collector(db, org_id, user, body)
+    db.commit()
+    return out
+
+
+@ops_router.put("/{org_id}/leads/grants/{member_id}/license")
+def ops_leads_license(org_id: str, member_id: str, body: Dict[str, Any] = Body(...), db: Session = Depends(get_db),
+                      user: User = Depends(get_current_user)):
+    """Owner only: record an agent's verified health insurance license (#619)."""
+    L.require_owner(db, user, org_id)
+    out = L.set_license(db, org_id, user, member_id, body)
+    db.commit()
+    return out
+
+
+@ops_router.post("/{org_id}/leads/{lead_id}/opt-out")
+def ops_lead_opt_out(org_id: str, lead_id: str, body: Dict[str, Any] = Body(default={}), db: Session = Depends(get_db),
+                     user: User = Depends(get_current_user)):
+    out = L.record_opt_out(db, user, org_id, lead_id, body or {})
     db.commit()
     return out
 
