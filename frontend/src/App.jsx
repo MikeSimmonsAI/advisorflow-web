@@ -213,6 +213,7 @@ const BusinessImport = lazyPage(() => import('./pages/intake/BusinessImport'))
 const AcqOpsMaster = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.MasterPoolPage })))
 const AcqOpsResearch = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.ResearchPage })))
 const AcqOpsAssign = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.AssignmentsPage })))
+const AcqOpsServiceOps = lazyPage(() => import('./pages/acquisition/ServiceOpsAdmin').then(m => ({ default: m.ServiceOpsAdmin })))
 const AcqOpsClients = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.ClientDirectory })))
 const AcqOpsReporting = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.Reporting })))
 const AcqOpsActivity = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.Activity })))
@@ -1729,6 +1730,7 @@ export default function App() {
           <Route path="pipeline" element={<AcqOpsPipeline />} />
           <Route path="health" element={<AcqOpsHealth />} />
           <Route path="settings" element={<AcqOpsSettings />} />
+          <Route path="service-ops" element={<AcqOpsServiceOps />} />
           <Route path="import" element={<PlatformPoolImport />} />
           <Route path="master" element={<AcqOpsMaster />} />
           <Route path="research" element={<AcqOpsResearch />} />

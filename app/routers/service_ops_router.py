@@ -169,9 +169,21 @@ def team_workload(days: int = Query(14, ge=1, le=60), ctx: K.OpsCtx = Depends(op
     return {"items": J.workload(ctx, days)}
 
 
+def _base_url(request: Request) -> str:
+    """The site the admin is using, so the copied link opens there. Same rule
+    as the client invitations in the Acquisition Control Center."""
+    origin = request.headers.get("origin") or ""
+    return origin if origin.startswith("https://") or origin.startswith("http://localhost") else ""
+
+
 @router.post("/team", dependencies=_WRITE)
-def invite(payload: dict = Body(...), ctx: K.OpsCtx = Depends(ops)):
-    return K.invite_member(ctx, payload)
+def invite(request: Request, payload: dict = Body(...), ctx: K.OpsCtx = Depends(ops)):
+    return K.invite_member(ctx, dict(payload, base_url=_base_url(request)))
+
+
+@router.post("/team/{mid}/setup-link", dependencies=_WRITE)
+def team_link(mid: str, request: Request, ctx: K.OpsCtx = Depends(ops)):
+    return K.reissue_member_link(ctx, mid, _base_url(request))
 
 
 @router.put("/team/{mid}", dependencies=_WRITE)
@@ -412,8 +424,13 @@ def buyers(ctx: K.OpsCtx = Depends(ops)):
 
 
 @router.post("/buyers", dependencies=_WRITE)
-def invite_buyer(payload: dict = Body(...), ctx: K.OpsCtx = Depends(ops)):
-    return BY.invite_buyer(ctx, payload)
+def invite_buyer(request: Request, payload: dict = Body(...), ctx: K.OpsCtx = Depends(ops)):
+    return BY.invite_buyer(ctx, dict(payload, base_url=_base_url(request)))
+
+
+@router.post("/buyers/{aid}/setup-link", dependencies=_WRITE)
+def buyer_link(aid: str, request: Request, ctx: K.OpsCtx = Depends(ops)):
+    return BY.reissue_buyer_link(ctx, aid, _base_url(request))
 
 
 @router.post("/buyers/{aid}/revoke", dependencies=_WRITE)
@@ -512,19 +529,29 @@ def buyer_new_request(payload: dict = Body(...), b: BY.BuyerCtx = Depends(buyer)
 # ── EvoSys: switch it on per company; the buyer network ───────────────────
 @admin_router.get("/acquisition-ops/{org_id}/service-ops")
 def admin_get(org_id: str, db: Session = Depends(get_db), me: User = Depends(require_acq_master)):
+    """The company's Service Operations switches, readiness and history.
+    EvoSys owner or authorized Acquisition program admins only."""
+    from app.services.service_ops import admin as AD
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if org is None or not AC.acquisition_identity(org):
         raise HTTPException(404, "Company not found")
-    return K.settings_json(K.settings(db, org_id))
+    return dict(AD.status(db, org_id), settings=K.settings_json(K.settings(db, org_id)))
 
 
 @admin_router.put("/acquisition-ops/{org_id}/service-ops", dependencies=_WRITE)
 def admin_put(org_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
               me: User = Depends(require_acq_master)):
-    org = db.query(Organization).filter(Organization.id == org_id).first()
-    if org is None or not AC.acquisition_identity(org):
-        raise HTTPException(404, "Company not found")
-    return K.settings_json(K.save_settings(db, org_id, me, payload, entitlements=True))
+    """Turn switches on/off. Dependencies are enforced, turning off deletes
+    nothing, and every change is audited."""
+    from app.services.service_ops import admin as AD
+    return dict(AD.apply(db, me, org_id, payload or {}), settings=K.settings_json(K.settings(db, org_id)))
+
+
+@admin_router.get("/god/acquisition/service-ops/states")
+def admin_states(db: Session = Depends(get_db), me: User = Depends(require_acq_master)):
+    """On/off per company, for the Service Companies cards."""
+    from app.services.service_ops import admin as AD
+    return {"items": AD.directory_states(db)}
 
 
 @admin_router.get("/god/acquisition/buyer-network")

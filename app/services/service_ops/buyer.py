@@ -61,7 +61,7 @@ def resolve_buyer(db: Session, user: User, org: Organization) -> BuyerCtx:
 # ── staff side: invite / revoke ──────────────────────────────────────────
 def access_json(db: Session, a: ServiceBuyerAccess) -> Dict[str, Any]:
     u = db.query(User).filter(User.id == a.user_id).first()
-    return {"id": a.id, "customer_id": a.customer_id, "user_id": a.user_id, "name": u.full_name if u else None,
+    return {"id": a.id, "setup": K.setup_state(db, u), "customer_id": a.customer_id, "user_id": a.user_id, "name": u.full_name if u else None,
             "email": u.email if u else None, "location_ids": K.jload(a.location_ids, None),
             "can_approve_estimates": a.can_approve_estimates, "status": a.status,
             "invited_at": K.iso(a.invited_at), "revoked_at": K.iso(a.revoked_at)}
@@ -118,6 +118,24 @@ def invite_buyer(ctx: K.OpsCtx, data: Dict[str, Any]) -> Dict[str, Any]:
     return dict(access_json(db, a), setup_url=url)
 
 
+def reissue_buyer_link(ctx: K.OpsCtx, aid: str, base_url) -> Dict[str, Any]:
+    ctx.need("buyers", "re-issue portal links")
+    a = (ctx.db.query(ServiceBuyerAccess).filter(ServiceBuyerAccess.organization_id == ctx.org_id,
+                                                 ServiceBuyerAccess.id == aid).first())
+    if a is None:
+        raise HTTPException(404, "Portal access not found")
+    if a.status == "revoked":
+        raise HTTPException(409, "This portal access was removed; invite them again to restore it")
+    u = ctx.db.query(User).filter(User.id == a.user_id).first()
+    from app.services import staff_activation
+    from app.models.staff_models import PURPOSE_SETUP, PURPOSE_RESET
+    row, raw = staff_activation.issue(ctx.db, u, ctx.user, purpose=PURPOSE_RESET if u.last_login_at else PURPOSE_SETUP)
+    ctx.db.commit()
+    K.audit(ctx.db, ctx.org_id, ctx.user, "service_buyer_link_reissued", "service_buyer_access", a.id,
+            {"token_prefix": row.token_prefix})
+    return dict(access_json(ctx.db, a), setup_url=staff_activation.activation_url(base_url, raw))
+
+
 def revoke_buyer(ctx: K.OpsCtx, aid: str) -> Dict[str, Any]:
     ctx.need("buyers", "change customer portal access")
     a = (ctx.db.query(ServiceBuyerAccess).filter(ServiceBuyerAccess.organization_id == ctx.org_id,
@@ -128,6 +146,10 @@ def revoke_buyer(ctx: K.OpsCtx, aid: str) -> Dict[str, Any]:
     u = ctx.db.query(User).filter(User.id == a.user_id).first()
     if u is not None and K.member_for(ctx.db, ctx.org_id, u.id) is None:
         u.is_active = False                         # a buyer-only login stops signing in
+        from app.models.staff_models import StaffActivation, STAFF_INVITE_PENDING, STAFF_INVITE_REVOKED
+        for row in ctx.db.query(StaffActivation).filter(StaffActivation.user_id == u.id,
+                                                        StaffActivation.status == STAFF_INVITE_PENDING).all():
+            row.status, row.revoked_at = STAFF_INVITE_REVOKED, datetime.utcnow()
     ctx.db.commit()
     K.audit(ctx.db, ctx.org_id, ctx.user, "service_buyer_revoke", "service_buyer_access", a.id, {})
     return access_json(ctx.db, a)

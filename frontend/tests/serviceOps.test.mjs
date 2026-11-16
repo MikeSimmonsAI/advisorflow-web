@@ -37,3 +37,21 @@ test('payments: reported is not paid; invites hand back a link and send nothing'
   assert.ok(o.includes('nothing was emailed') && o.includes('EvoSys didn’t email anyone'))
   assert.ok(o.includes('Suggestions only — nothing here acts on its own.'))
 })
+
+test('EvoSys switches live in the company area of the Acquisition Control Center and call the real API', () => {
+  const a = src('ServiceOpsAdmin.jsx')
+  assert.ok(a.includes('api.put(`/acquisition-ops/${orgId}/service-ops`'))
+  assert.ok(a.includes('confirm_upcoming: true') && a.includes('Turn off, keep everything'))
+  assert.ok(a.includes('cap.blocked_reason') && a.includes('cap.last_change'))
+  const ops = src('AcquisitionOps.jsx')
+  assert.ok(ops.includes("{ to: `${OPS}/service-ops`, label: 'Service Operations'"))
+  const hub = src('HubPages.jsx')
+  const dir = hub.slice(hub.indexOf('export function ClientDirectory'))
+  assert.ok(dir.includes('/god/acquisition/service-ops/states') && dir.includes('nav(`${OPS}/service-ops`)'))
+})
+
+test('team page manages logins without God Mode: new link, turn off', () => {
+  const o = src('ServiceOps.jsx')
+  assert.ok(o.includes('/service-ops/team/${id}/setup-link') && o.includes('/service-ops/buyers/${b.id}/setup-link'))
+  assert.ok(o.includes("Off — can’t sign in"))
+})

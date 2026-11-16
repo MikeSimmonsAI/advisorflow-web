@@ -468,8 +468,23 @@ def _clean_availability(v) -> Dict[str, List[str]]:
     return out
 
 
-def member_json(m: ServiceTeamMember, user: Optional[User]) -> Dict[str, Any]:
+def setup_state(db: Session, user: Optional[User]) -> Dict[str, Any]:
+    """Where this person's setup link stands (never the link itself)."""
+    if user is None:
+        return {"state": "none"}
+    from app.services import staff_activation
+    row = staff_activation.latest_for_user(db, user.id)
+    if row is None:
+        return {"state": "signed_in" if user.last_login_at else "none"}
+    st = row.status
+    if st == "pending" and row.expires_at and row.expires_at <= datetime.utcnow():
+        st = "expired"
+    return {"state": st, "expires_at": iso(row.expires_at), "accepted_at": iso(row.accepted_at)}
+
+
+def member_json(m: ServiceTeamMember, user: Optional[User], db: Optional[Session] = None) -> Dict[str, Any]:
     return {"id": m.id, "user_id": m.user_id, "name": user.full_name if user else None,
+            **({"setup": setup_state(db, user)} if db is not None else {}),
             "email": user.email if user else None, "role": m.ops_role, "role_label": ROLE_LABEL.get(m.ops_role),
             "team_name": m.team_name, "active": m.active, "availability": jload(m.availability, {}),
             "has_signed_in": bool(user and user.last_login_at), "login_active": bool(user and user.is_active)}
@@ -480,7 +495,7 @@ def list_team(ctx: OpsCtx) -> List[Dict[str, Any]]:
         raise HTTPException(403, "Your role can't see the team")
     rows = ctx.db.query(ServiceTeamMember).filter(ServiceTeamMember.organization_id == ctx.org_id).all()
     users = {u.id: u for u in ctx.db.query(User).filter(User.id.in_([m.user_id for m in rows] or ["-"])).all()}
-    return sorted((member_json(m, users.get(m.user_id)) for m in rows), key=lambda x: (not x["active"], x["name"] or ""))
+    return sorted((member_json(m, users.get(m.user_id), ctx.db) for m in rows), key=lambda x: (not x["active"], x["name"] or ""))
 
 
 def invite_member(ctx: OpsCtx, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -515,6 +530,8 @@ def invite_member(ctx: OpsCtx, data: Dict[str, Any]) -> Dict[str, Any]:
         m = ServiceTeamMember(organization_id=ctx.org_id, user_id=user.id, created_by_id=ctx.user.id)
         db.add(m)
     m.ops_role, m.active = role, True
+    if not user.is_active and _ops_only_login(db, ctx.org_id, user):
+        user.is_active = True               # re-inviting someone who was turned off
     m.team_name = text(data.get("team_name"), 80)
     if "availability" in data:
         m.availability = jdump(_clean_availability(data.get("availability")))
@@ -527,7 +544,48 @@ def invite_member(ctx: OpsCtx, data: Dict[str, Any]) -> Dict[str, Any]:
     db.commit()
     audit(db, ctx.org_id, ctx.user, "service_team_invite", "service_team_member", m.id,
           {"email": email, "role": role})
-    return dict(member_json(m, user), setup_url=setup_url)
+    return dict(member_json(m, user, db), setup_url=setup_url)
+
+
+def _ops_only_login(db: Session, org_id: str, u: User) -> bool:
+    """A login that exists only for this company's Service Operations team
+    (not a workspace manager, not a member of anything else)."""
+    from app.services.lead_scope import MANAGER_ROLES
+    from app.models.sales_models import Membership
+    from app.models.sales_models import SCOPE_CUSTOMER_ORG
+    if u.organization_id != org_id or u.role in MANAGER_ROLES:
+        return False
+    for m in db.query(Membership).filter(Membership.user_id == u.id, Membership.is_active.is_(True)).all():
+        # Their own home-company membership (created with every login) is fine;
+        # anything else - another company, a brand, a manager role - is not ours to switch off.
+        if not (m.scope_type == SCOPE_CUSTOMER_ORG and m.scope_id == org_id and m.role not in MANAGER_ROLES):
+            return False
+    return True
+
+
+def reissue_member_link(ctx: OpsCtx, mid: str, base_url: Optional[str]) -> Dict[str, Any]:
+    """A fresh one-time setup link (the old one stops working). For people who
+    haven't finished setup or need to set a new password. Nothing is sent."""
+    ctx.need("team", "re-issue setup links")
+    m = (ctx.db.query(ServiceTeamMember)
+         .filter(ServiceTeamMember.organization_id == ctx.org_id, ServiceTeamMember.id == mid).first())
+    if m is None:
+        raise HTTPException(404, "Team member not found")
+    if not m.active:
+        raise HTTPException(409, "Turn this person back on before issuing a link")
+    u = ctx.db.query(User).filter(User.id == m.user_id).first()
+    if u is None or u.organization_id != ctx.org_id:
+        raise HTTPException(409, "This login belongs to another workspace; manage it there")
+    if not _ops_only_login(ctx.db, ctx.org_id, u):
+        raise HTTPException(409, "This person is a workspace manager; reset their access from user management")
+    from app.services import staff_activation
+    from app.models.staff_models import PURPOSE_SETUP, PURPOSE_RESET
+    purpose = PURPOSE_RESET if u.last_login_at else PURPOSE_SETUP
+    row, raw = staff_activation.issue(ctx.db, u, ctx.user, purpose=purpose)
+    ctx.db.commit()
+    audit(ctx.db, ctx.org_id, ctx.user, "service_team_link_reissued", "service_team_member", m.id,
+          {"token_prefix": row.token_prefix})
+    return dict(member_json(m, u, ctx.db), setup_url=staff_activation.activation_url(base_url, raw))
 
 
 def update_member(ctx: OpsCtx, mid: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -545,6 +603,14 @@ def update_member(ctx: OpsCtx, mid: str, data: Dict[str, Any]) -> Dict[str, Any]
         m.ops_role = data["role"]
     if "active" in data:
         m.active = bool(data["active"])
+        u = ctx.db.query(User).filter(User.id == m.user_id).first()
+        if u is not None and _ops_only_login(ctx.db, ctx.org_id, u):
+            u.is_active = m.active          # a field-only login can't sign in at all while off
+            if not m.active:                # and any unused setup link dies with it
+                from app.models.staff_models import StaffActivation, STAFF_INVITE_PENDING, STAFF_INVITE_REVOKED
+                for row in ctx.db.query(StaffActivation).filter(StaffActivation.user_id == u.id,
+                                                                StaffActivation.status == STAFF_INVITE_PENDING).all():
+                    row.status, row.revoked_at = STAFF_INVITE_REVOKED, datetime.utcnow()
     if "team_name" in data:
         m.team_name = text(data["team_name"], 80)
     if "availability" in data:
@@ -553,4 +619,4 @@ def update_member(ctx: OpsCtx, mid: str, data: Dict[str, Any]) -> Dict[str, Any]
     user = ctx.db.query(User).filter(User.id == m.user_id).first()
     audit(ctx.db, ctx.org_id, ctx.user, "service_team_update", "service_team_member", m.id,
           {"before": before, "after": {"role": m.ops_role, "active": m.active}})
-    return member_json(m, user)
+    return member_json(m, user, ctx.db)

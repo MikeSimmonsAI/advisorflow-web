@@ -490,6 +490,7 @@ export function ClientDirectory() {
   const qs = new URLSearchParams(window.location.search)
   const [dir, err, reload] = useLoad(god ? '/god/acquisition/directory' : null)
   const [opts] = useLoad(god ? '/god/acquisition/onboarding-options' : null)
+  const [svc] = useLoad(god ? '/god/acquisition/service-ops/states' : null)
   const [mode, setMode] = useState(qs.get('add') ? 'add' : qs.get('convert') ? 'convert' : '')
   const [inv, setInv] = useState(null)
   const [invOut, setInvOut] = useState(null)
@@ -523,7 +524,8 @@ export function ClientDirectory() {
           <div className="hb-ccard__top"><span className="hb-strip__mark" style={{ width: 36, height: 36 }}>{c.name.split(/\s+/).map(w => w[0]).slice(0, 2).join('')}</span>
             <div style={{ minWidth: 0 }}><b>{c.name}</b>{c.is_test && <> <Dot tone="amber">TEST — not counted in results</Dot></>}<div className="hb-muted">{c.contact || 'No contact yet'} · added {c.created_at ? new Date(c.created_at).toLocaleDateString() : '—'}</div></div></div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{c.service_category_label && <span className="aq-pill">{c.service_category_label}</span>}<Dot tone={STATUS_TONE[c.status]}>{STATUS_LABEL[c.status]}</Dot>
-            <Dot tone={c.paused ? 'amber' : 'green'}>{c.paused ? 'Paused' : 'Running'}</Dot></div>
+            <Dot tone={c.paused ? 'amber' : 'green'}>{c.paused ? 'Paused' : 'Running'}</Dot>
+            {svc && <Dot tone={svc.items[c.organization_id]?.ops ? 'violet' : 'gray'}>Service Operations {svc.items[c.organization_id]?.ops ? 'on' : 'off'}</Dot>}</div>
           <div className="hb-muted">Client login: <Dot tone={INVITE_TONE[c.invitation.status]}>{c.invitation.label}</Dot>
             {c.invitation.status !== 'active' && <span> — the workspace exists, but the client can't sign in until they accept an invitation.</span>}</div>
           <div><div className="hb-muted" style={{ marginBottom: 4 }}>Onboarding {c.onboarding.done}/{c.onboarding.total}</div><div className="hb-bar"><i style={{ width: `${(c.onboarding.done / c.onboarding.total) * 100}%` }} /></div></div>
@@ -536,6 +538,7 @@ export function ClientDirectory() {
             <button className="aq-btn aq-btn--sm" onClick={() => setInv({ organization_id: c.organization_id, org: c.name, email: c.contact_email || '', name: c.contact || '' })}>{c.invitation.status === 'not_sent' ? 'Invite client' : c.invitation.status === 'active' ? 'Add client login' : 'Resend invitation'}</button>
             <button className="aq-btn aq-btn--sm" onClick={() => openPortal(c)}>Open Client Portal</button>
             <button className="aq-btn aq-btn--sm" onClick={() => { onSelectOrg(c.organization_id); nav(`${OPS}/settings`) }}>Pause · Operators</button>
+            <button className="aq-btn aq-btn--sm" onClick={() => { onSelectOrg(c.organization_id); nav(`${OPS}/service-ops`) }}>Service Operations</button>
           </div>
         </div>))}</div> : <Empty icon="store" title="No service companies yet" action={<button className="aq-btn aq-btn--primary" onClick={() => setMode('add')}>Add Service Company</button>} />}
     </div>
