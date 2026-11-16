@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_current_user, get_db
 from app.models.models import User
-from app.models.team_app_models import TeamChatAttachment
+from app.models.team_app_models import TeamAppPin, TeamChatAttachment
 from app.services import team_activity as activity
 from app.services import team_app_access as acc
 from app.services import team_chat as chat
@@ -50,6 +50,48 @@ def me(response: Response, user: User = Depends(get_current_user), db: Session =
         chat.ensure_builtin(db, a.platform_id)
         out["chat_unread"] = chat.unread_total(db, a, user)
     return out
+
+
+# ── Programs: the phone's two pins ──────────────────────────────────────────
+# A pin is this account's own preference and never access: the app draws a pin
+# only while /auth/my-contexts still lists that program for this login, so a
+# removed grant hides the pin even though the row is still here.
+
+MAX_PINS = 2
+
+
+class PinsIn(BaseModel):
+    keys: List[str] = Field(default_factory=list)
+
+
+def _pin_keys(db: Session, user: User) -> List[str]:
+    rows = (db.query(TeamAppPin).filter(TeamAppPin.user_id == user.id)
+            .order_by(TeamAppPin.position, TeamAppPin.created_at).all())
+    return [r.item_key for r in rows]
+
+
+@router.get("/pins")
+def get_pins(response: Response, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _nostore(response)
+    return {"keys": _pin_keys(db, user), "max": MAX_PINS}
+
+
+@router.put("/pins")
+def put_pins(body: PinsIn, response: Response, user: User = Depends(get_current_user),
+             db: Session = Depends(get_db)):
+    _nostore(response)
+    keys: List[str] = []
+    for k in body.keys or []:
+        k = (k or "").strip()
+        if k and len(k) <= 160 and k not in keys:
+            keys.append(k)
+    if len(keys) > MAX_PINS:
+        raise HTTPException(status_code=400, detail="You can pin up to %d programs." % MAX_PINS)
+    db.query(TeamAppPin).filter(TeamAppPin.user_id == user.id).delete()
+    for i, k in enumerate(keys):
+        db.add(TeamAppPin(user_id=user.id, item_key=k, position=i))
+    db.commit()
+    return {"keys": keys, "max": MAX_PINS}
 
 
 # ── Chat ────────────────────────────────────────────────────────────────────

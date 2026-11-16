@@ -193,18 +193,22 @@ export const TEAM_RIGHTS = [
  */
 export const ACCENTS = {
   sci: '#4F46E5', restland: '#087F68', sales: '#2563EB', volt: '#C62839',
-  cleaning: '#7C3AED', back_office: '#475569', roofing: '#C2410C', energy: '#B45309',
+  cleaning: '#7C3AED', back_office: '#475569', blue_ridge: '#1E3A8A', roofing: '#C2410C', energy: '#B45309',
   wholesale: '#0E7490', insurance: '#1D4ED8', gold: '#A16207', executive: '#334155',
   preview: '#64748B', fallback: '#3B4A63',
 }
+
+/** Second colour for a program whose identity is two colours (Blue Ridge: navy with gold). */
+export const SECOND = { blue_ridge: '#E7B84A' }
 
 export function programStyle(item) {
   const it = item || {}
   const program = it.program || ''
   const name = String(it.display || it.organization_name || '').toLowerCase()
-  const pick = (accent, icon) => ({ accent: ACCENTS[accent], icon, tone: accent })
+  const pick = (accent, icon) => ({ accent: ACCENTS[accent], second: SECOND[accent] || null, icon, tone: accent })
   if (it.type === 'deal_builder') return pick('sales', it.key === 'onboarding' || it.key === 'my_team' ? 'team' : 'calculator')
   if (program === 'sci') return pick('sci', 'layers')
+  if (/blue ridge/.test(name)) return pick('blue_ridge', 'mountain')
   if (program === 'funeral' || /restland/.test(name)) return pick('restland', 'building')
   if (program === 'back_office') return pick('back_office', 'folder')
   if (program === 'executive') return pick('executive', 'star')
@@ -226,4 +230,46 @@ export function matchesProgram(item, query) {
   if (!q) return true
   return [item.display, item.orgLabel, item.organization_name, item.kind, item.platform_name]
     .some(v => v && String(v).toLowerCase().includes(q))
+}
+
+/**
+ * PINS on the phone's Programs screen: at most two, this account's own choice.
+ * A pin is shown only while the program is still in this login's inventory, so
+ * a revoked program's pin disappears without anyone editing it. Pinned programs
+ * stay in All Programs too.
+ */
+export const MAX_PINS = 2
+
+export function pinnedItems(inventory, keys, keyOf, max = MAX_PINS) {
+  const byKey = new Map((inventory || []).map(it => [keyOf(it), it]))
+  return (keys || []).map(k => byKey.get(k)).filter(Boolean).slice(0, max)
+}
+
+/** Toggle one key in the pin list; refuses (returns the same list) past the cap. */
+export function togglePinKey(keys, key, max = MAX_PINS) {
+  const list = (keys || []).slice()
+  const i = list.indexOf(key)
+  if (i >= 0) { list.splice(i, 1); return list }
+  if (list.length >= max) return keys || []
+  return [...list, key]
+}
+
+/** Keys still valid for this inventory (drops revoked or stale pins). */
+export function livePinKeys(inventory, keys, keyOf, max = MAX_PINS) {
+  return pinnedItems(inventory, keys, keyOf, max).map(keyOf)
+}
+
+/** Chat inbox: the two featured rooms (only those this login can read) and the
+ *  conversation list, optionally narrowed by a search over name and preview. */
+export const SALES_SLUG = 'sales-team'
+export const ANNOUNCE_SLUG = 'announcements'
+
+export function chatSections(rooms, query) {
+  const list = rooms || []
+  const sales = list.find(r => r.slug === SALES_SLUG) || null
+  const news = list.find(r => r.slug === ANNOUNCE_SLUG || r.kind === 'announcements') || null
+  const q = String(query || '').trim().toLowerCase()
+  const messages = !q ? list : list.filter(r => [r.name, r.last && r.last.text, r.last && r.last.sender_name]
+    .some(v => v && String(v).toLowerCase().includes(q)))
+  return { featured: [sales, news].filter(Boolean), messages }
 }

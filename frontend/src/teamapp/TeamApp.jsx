@@ -29,7 +29,7 @@ import ProgramsScreen from './ProgramsScreen'
 import { ChatList, Conversation, NewChat, RoomMembers } from './ChatScreens'
 import ActivityScreen from './ActivityScreen'
 import StagingBanner from '../components/StagingBanner'
-import { AccountScreen, TeamAccessScreen } from './AccountScreens'
+import { AccountScreen, ProfileScreen, TeamAccessScreen } from './AccountScreens'
 import './teamapp.css'
 
 const EMBLEM = '/brands/evosyspro-emblem-96.png'
@@ -103,6 +103,12 @@ export function Icon({ name, size = 22 }) {
     case 'x': return <svg {...p}><path d="M6 6l12 12M18 6L6 18"/></svg>
     case 'eye': return <svg {...p}><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
     case 'mail': return <svg {...p}><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+    case 'mountain': return <svg {...p}><path d="M2 19l7-11 4 6 3-4 6 9z"/><path d="M7.5 10.5l1.5 1 1.5-1" /></svg>
+    case 'download': return <svg {...p}><path d="M12 4v11M7 10l5 5 5-5"/><path d="M5 20h14"/></svg>
+    case 'logout': return <svg {...p}><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/><path d="M10 8l-4 4 4 4M6 12h11"/></svg>
+    case 'chevDown': return <svg {...p}><path d="M6 9l6 6 6-6"/></svg>
+    case 'check': return <svg {...p}><path d="M5 12l5 5 9-10"/></svg>
+    case 'pin': return <svg {...p}><path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/></svg>
     case 'lock': return <svg {...p}><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
     default: return null
   }
@@ -304,6 +310,7 @@ export default function TeamApp() {
             (or a home-screen shortcut saved from the prototype) lands on Activity. */}
         <Route path="time/*" element={<Navigate to="/app/activity" replace />} />
         <Route path="account" element={<AccountScreen />} />
+        <Route path="account/profile" element={<ProfileScreen />} />
         <Route path="account/team-access" element={<TeamAccessScreen />} />
         <Route path="*" element={<Navigate to="/app/programs" replace />} />
       </Route>

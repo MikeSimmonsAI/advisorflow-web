@@ -130,3 +130,44 @@ test('the web launcher honours the origin; app cards set it; web cards clear it'
   assert.match(programs, /openProgramItem\(item, navigate, \{ origin: MOBILE_PROGRAMS \}\)/)
   assert.match(programs, /clearLauncherOrigin\(\)/)
 })
+
+import { chatSections, livePinKeys, MAX_PINS, pinnedItems, SECOND, togglePinKey } from '../src/teamapp/teamHelpers.js'
+
+test('pins: at most two, kept in order, hidden once access is revoked', () => {
+  const inv = [{ key: 'a' }, { key: 'b' }, { key: 'c' }]
+  const keyOf = x => x.key
+  assert.equal(MAX_PINS, 2)
+  assert.deepEqual(togglePinKey([], 'a'), ['a'])
+  assert.deepEqual(togglePinKey(['a'], 'b'), ['a', 'b'])
+  assert.deepEqual(togglePinKey(['a', 'b'], 'c'), ['a', 'b'], 'a third pin is refused')
+  assert.deepEqual(togglePinKey(['a', 'b'], 'a'), ['b'], 'unpin')
+  assert.deepEqual(pinnedItems(inv, ['c', 'a'], keyOf).map(keyOf), ['c', 'a'])
+  // "b" revoked: its pin disappears, the other stays.
+  const after = inv.filter(x => x.key !== 'b')
+  assert.deepEqual(pinnedItems(after, ['b', 'c'], keyOf).map(keyOf), ['c'])
+  assert.deepEqual(livePinKeys(after, ['b', 'c', 'zz'], keyOf), ['c'])
+})
+
+test('chat inbox: featured rooms only when readable, search over name and preview', () => {
+  const rooms = [
+    { id: 1, slug: 'sales-team', kind: 'room', name: 'Sales Team', last: { text: 'Updated sales materials.' } },
+    { id: 2, slug: 'announcements', kind: 'announcements', name: 'Company Announcements' },
+    { id: 3, slug: null, kind: 'dm', name: 'Rep Two', last: { text: 'Appointment confirmed.', sender_name: 'Rep Two' } },
+  ]
+  const s = chatSections(rooms, '')
+  assert.deepEqual(s.featured.map(r => r.id), [1, 2])
+  assert.equal(s.messages.length, 3)
+  assert.deepEqual(chatSections(rooms.slice(2), '').featured, [], 'no access -> no shortcut')
+  assert.deepEqual(chatSections(rooms, 'confirmed').messages.map(r => r.id), [3])
+  assert.deepEqual(chatSections(rooms, 'SALES').messages.map(r => r.id), [1])
+})
+
+test('Blue Ridge is navy with gold; approved identities unchanged', () => {
+  const br = programStyle({ program: 'funeral', display: 'Blue Ridge Funeral Services' })
+  assert.equal(br.accent, ACCENTS.blue_ridge)
+  assert.equal(br.second, SECOND.blue_ridge)
+  assert.equal(programStyle({ program: 'funeral', display: 'Restland' }).accent, '#087F68')
+  assert.equal(programStyle({ program: 'sci', display: 'SCI' }).accent, '#4F46E5')
+  assert.equal(programStyle({ program: 'volt', display: 'VOLT Marketing' }).accent, '#C62839')
+  assert.equal(programStyle({ program: 'zzz', display: 'Unknown' }).accent, ACCENTS.fallback)
+})
