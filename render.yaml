@@ -299,6 +299,15 @@ services:
     # Catch-all rewrite so React Router handles deep links on hard refresh.
     # Without this, Render's static server returns 404 for /leads/123, /settings, etc.
     routes:
+      # EvoSys Pro Mobile: /app and every /app/... deep link get app.html (built
+      # from index.html; same bundle) so the first HTML Safari sees names the
+      # EvoSys Pro manifest and EP icon. Must come before the catch-all.
+      - type: rewrite
+        source: /app
+        destination: /app.html
+      - type: rewrite
+        source: /app/*
+        destination: /app.html
       - type: rewrite
         source: /*
         destination: /index.html
@@ -311,6 +320,16 @@ services:
       - path: /manifest.webmanifest
         name: Content-Type
         value: application/manifest+json
+      - path: /manifest-evosys.webmanifest
+        name: Content-Type
+        value: application/manifest+json
+      # Install metadata is read when someone adds the app; never serve a stale copy.
+      - path: /manifest-evosys.webmanifest
+        name: Cache-Control
+        value: no-cache
+      - path: /app.html
+        name: Cache-Control
+        value: no-cache
     envVars:
       - key: NODE_VERSION
         value: "20.11.0"
