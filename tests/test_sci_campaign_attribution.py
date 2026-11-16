@@ -15,6 +15,14 @@ from app.services.programs import sci_analytics as SA
 from tests.test_outreach_program import _h, _lead_for, program  # noqa: F401 (fixture)
 from tests.test_sci_analytics import _today_at, _touch
 
+
+@pytest.fixture(autouse=True)
+def _sci_workspace_identity(monkeypatch, sample_org):
+    """These tests run SCI's own Central Alabama campaign in the shared test
+    organization; say so, as production does (SMS_PROGRAM_ORG_SCI). Since #507
+    the campaign is SCI's only - another workspace never sees it."""
+    monkeypatch.setenv("SMS_PROGRAM_ORG_SCI", sample_org.id)
+
 CA_KEY = "central_alabama_ms"
 
 

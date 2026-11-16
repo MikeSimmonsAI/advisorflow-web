@@ -1,3 +1,4 @@
+import pytest
 """#441 (round 2) - Central Alabama campaign editor: the six owner themes, a
 one-time upgrade of untouched first-draft wording, who saved each step and
 when, draft preview through the delivery renderer, the full family roster
@@ -12,6 +13,14 @@ from app.models.program_models import CampaignFamily, LocationProfile, ProgramSo
 from app.services.programs import campaigns as C, identity, setup
 from tests.test_outreach_program import _admin, _h, program  # noqa: F401
 from tests.test_sci_441_central_alabama_cadence import LOCS, _ca_lead, _fam
+
+
+@pytest.fixture(autouse=True)
+def _sci_workspace_identity(monkeypatch, sample_org):
+    """These tests run SCI's own Central Alabama campaign in the shared test
+    organization; say so, as production does (SMS_PROGRAM_ORG_SCI). Since #507
+    the campaign is SCI's only - another workspace never sees it."""
+    monkeypatch.setenv("SMS_PROGRAM_ORG_SCI", sample_org.id)
 
 
 def _sends(db):

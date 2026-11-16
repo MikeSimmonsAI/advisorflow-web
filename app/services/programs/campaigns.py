@@ -378,10 +378,40 @@ def upgrade_seeded_copy(fam) -> bool:
     return True
 
 
+# ── SCI-ONLY CAMPAIGNS (#507, Nov 16) ─────────────────────────────────────────
+# Central Alabama is SCI's own campaign: its copy is SCI's survey and its
+# sources are SCI's. Another program workspace never sees, opens, edits,
+# switches on, starts or sends it - even if a legacy row exists there (the
+# shared importer used to seed it in every workspace). The row is kept as it
+# is (history and audit); it is simply not this workspace's campaign.
+SCI_ONLY_KEYS = frozenset({CENTRAL_ALABAMA_KEY})
+SCI_ONLY_REFUSAL = "This campaign belongs to another program and is not available here."
+
+
+def hidden_in(db: Session, organization_id: Optional[str], key: Optional[str]) -> bool:
+    """True when `key` is an SCI-only campaign and this is not SCI's workspace."""
+    if key not in SCI_ONLY_KEYS:
+        return False
+    from app.services import sms_programs
+    return not sms_programs.is_sci_org(db, organization_id)
+
+
+def visible(db: Session, organization_id: Optional[str], query):
+    """A CampaignFamily query without another program's SCI-only campaigns."""
+    from app.models.program_models import CampaignFamily
+    from app.services import sms_programs
+    if sms_programs.is_sci_org(db, organization_id):
+        return query
+    return query.filter(CampaignFamily.key.notin_(list(SCI_ONLY_KEYS)))
+
+
 def ensure_central_alabama(db: Session, organization_id: str):
     """Create the campaign OFF, once, with the owner's message sequence as its
-    draft copy. Never switches it on and never overwrites copy a person edited."""
+    draft copy. Never switches it on and never overwrites copy a person edited.
+    SCI's workspace only: anywhere else this creates nothing and returns None."""
     from app.models.program_models import CampaignFamily
+    if hidden_in(db, organization_id, CENTRAL_ALABAMA_KEY):
+        return None
     fam = (db.query(CampaignFamily).filter(CampaignFamily.organization_id == organization_id,
                                            CampaignFamily.key == CENTRAL_ALABAMA_KEY).first())
     if fam is not None:
@@ -536,6 +566,8 @@ def ai_notes_for(campaign_family: Optional[str]) -> Optional[Dict[str, str]]:
 
 def activation_blocker(fam, db: Optional[Session] = None) -> Optional[str]:
     """Why this campaign may not be switched on yet, or None."""
+    if db is not None and hidden_in(db, fam.organization_id, fam.key):
+        return SCI_ONLY_REFUSAL
     if fam.key in OWN_COPY_KEYS:
         missing = missing_steps(db, fam)
         if missing:
