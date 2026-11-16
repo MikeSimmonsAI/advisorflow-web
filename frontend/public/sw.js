@@ -16,8 +16,16 @@
  *
  * `shouldCache` is exported for tests via self.__mshell when present.
  */
-var CACHE = 'mshell-v1';
-var SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon.svg'];
+// v2: EvoSys Pro Mobile has its own entry (app.html) and manifest. Bumping the
+// name makes activate delete v1, so no phone keeps offering the old install tags.
+var CACHE = 'mshell-v2';
+var SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon.svg',
+             '/app.html', '/manifest-evosys.webmanifest', '/icons/evosys-apple-180.png'];
+
+/** Offline fallback for a navigation: /app pages get the EvoSys Pro shell. */
+function shellFor(pathname) {
+  return /^\/app(\/|$)/.test(pathname) ? '/app.html' : '/index.html';
+}
 
 function shouldCache(url, origin, method, hasAuth) {
   if (method !== 'GET' || hasAuth) return false;
@@ -35,7 +43,7 @@ function isNavigation(req) {
 }
 
 if (typeof self !== 'undefined') {
-  self.__mshell = { shouldCache: shouldCache, CACHE: CACHE, SHELL: SHELL };
+  self.__mshell = { shouldCache: shouldCache, shellFor: shellFor, CACHE: CACHE, SHELL: SHELL };
 }
 
 if (typeof self !== 'undefined' && self.addEventListener) {
@@ -62,12 +70,26 @@ if (typeof self !== 'undefined' && self.addEventListener) {
     if (isNavigation(req)) {
       // SPA route (/m/..., /leads, ...): network first, shell as offline fallback.
       // The navigation RESPONSE is not stored — only the precached shell is used.
+      var shell = shellFor(new URL(req.url).pathname);
       event.respondWith(fetch(req).catch(function () {
-        return caches.match('/index.html').then(function (r) { return r || caches.match('/'); });
+        return caches.match(shell).then(function (r) { return r || caches.match('/index.html'); })
+          .then(function (r) { return r || caches.match('/'); });
       }));
       return;
     }
     if (!shouldCache(req.url, origin, req.method, hasAuth)) return;
+    // Install metadata and HTML entries: network first, so a phone always sees
+    // the current manifest when someone adds the app; cache only offline.
+    if (/\.(webmanifest|html)$/.test(new URL(req.url).pathname)) {
+      event.respondWith(fetch(req).then(function (res) {
+        if (res && res.ok && res.type === 'basic') {
+          var copy = res.clone();
+          caches.open(CACHE).then(function (c) { c.put(req, copy); });
+        }
+        return res;
+      }).catch(function () { return caches.match(req); }));
+      return;
+    }
     event.respondWith(caches.match(req).then(function (hit) {
       if (hit) return hit;
       return fetch(req).then(function (res) {

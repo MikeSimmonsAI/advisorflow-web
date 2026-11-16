@@ -4,7 +4,7 @@
   "description": "Programs, Team Chat and Activity for the EvoSys Pro team.",
   "id": "/app",
   "start_url": "/app/programs",
-  "scope": "/",
+  "scope": "/app",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0b1a3a",

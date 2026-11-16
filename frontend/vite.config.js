@@ -1,5 +1,8 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import fs from 'node:fs'
+import path from 'node:path'
+import { toAppHtml } from './appEntry.mjs'
 
 // build-info.json: which commit this build came from, so "is my change live?"
 // is answered by what is actually being served (the VOLT development relay,
@@ -21,8 +24,21 @@ function buildInfo() {
   }
 }
 
+function appEntry() {
+  return {
+    name: 'evosys-app-entry',
+    apply: 'build',
+    enforce: 'post',
+    writeBundle(opts) {
+      const dir = opts.dir || 'dist'
+      const html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8')
+      fs.writeFileSync(path.join(dir, 'app.html'), toAppHtml(html))
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), buildInfo()],
+  plugins: [react(), buildInfo(), appEntry()],
   server: {
     port: 5173,
   },
