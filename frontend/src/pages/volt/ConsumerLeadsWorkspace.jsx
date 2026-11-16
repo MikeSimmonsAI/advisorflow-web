@@ -162,7 +162,7 @@ export function LeadsInbox({ orgId, test, q, unassignedOnly = false, onChanged }
             <td>{unassignedOnly && canAssign
               ? <select aria-label={`Assign ${l.name}`} defaultValue="" onChange={(e) => e.target.value && assign(l.id, e.target.value).then(() => { load(); onChanged?.() }).catch((x) => setErr(msg(x)))} data-quick-assign>
                 <option value="">Choose…</option>{agents.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
-              : (l.assigned_to || (l.test ? 'Unassigned' : 'Awaiting licensed agent'))}
+              : (l.assigned_to || 'Unassigned')}
               {l.do_not_contact && <><br /><span className="v-tag" data-dnc>DO NOT CONTACT</span></>}</td>
             <td>{l.status_label}{l.appointment_at ? <><br /><span className="v-small">Appt {fmtCT(l.appointment_at)}</span></> : null}
               {l.next_follow_up_at ? <><br /><span className="v-small">Follow up {fmtCT(l.next_follow_up_at)}</span></> : null}</td>
@@ -484,7 +484,7 @@ function Settings({ orgId }) {
       <div className="v-panel" data-team>
         <h3>Team</h3>
         <p className="v-small v-muted">Managers see every lead. Agents see only leads assigned to them. Recruiting roles do not give Consumer Leads access. {s.can_make_manager ? '' : 'Only the owner can add or remove managers.'}</p>
-        <p className="v-small v-muted">Real leads can only be assigned to someone whose health insurance license the owner has verified for the lead&apos;s state.</p>
+        <p className="v-small v-muted">Optional: record the license of an agent or agency you pass leads to.</p>
         <ul className="v-small">{s.grants.map((g) => <li key={g.user_id} data-member={g.user_id}>{g.name} · {g.role === 'manager' ? 'Manager' : 'Agent'} · {g.license?.verified
             ? <span data-license="verified">Licensed (NPN {g.license.npn}): {g.license.states.join(', ')}</span>
             : <span className="v-muted" data-license="none">No verified license</span>} · {(g.role === 'agent' || s.can_make_manager)

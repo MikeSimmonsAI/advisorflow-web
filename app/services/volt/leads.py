@@ -47,7 +47,7 @@ REVIEW_CHECKLIST = [
     "The collecting company's legal name, mailing address and privacy contact are entered and correct",
     "The privacy notice and the two consent boxes name that company and match how leads are really handled",
     "$0-premium / savings wording does not promise coverage, approval, prices or savings",
-    "At least one licensed agent's NPN and states verified; leads stay unassigned until a licensed agent exists",
+    "We collect requests and pass them to licensed agents or agencies; we do not sell insurance",
     "Automated calls/texts only for people who ticked the optional box; no automatic outreach is switched on",
 ]
 
@@ -95,7 +95,8 @@ PAGE = {
          "understand what may be available to you."],
         ["What if I'm 65 or older?", "Medicare may be the right fit, and it works differently from these plans. "
          "A licensed agent can explain your options. This website does not decide eligibility."],
-        ["Is this a government website?", "No. This is an independent health coverage help service. It is not a "
+        ["Is this a government website?", "No. This is an independent service that collects requests and passes them to licensed insurance agents. "
+         "We do not sell insurance. It is not a "
          "government website and is not affiliated with HealthCare.gov or any government agency."],
     ],
     "final_title": "See what options might fit your budget.",
@@ -772,8 +773,6 @@ def assign(db: Session, user: User, org_id: str, lead_id: str, body: Dict[str, A
     target = body.get("user_id") or None
     if target is not None and target not in {a["id"] for a in assignable(db, org_id)}:
         _bad("user_id", "That person cannot be assigned leads.")
-    if target is not None and not lead.is_test and target != lead.assigned_user_id:
-        LC.check_assignable(db, org_id, target, lead.state)    # real leads: verified license for the lead's state
     if target != lead.assigned_user_id:
         _event(db, lead, user, "assigned", lead.assigned_user_id, target)
         lead.assigned_user_id = target

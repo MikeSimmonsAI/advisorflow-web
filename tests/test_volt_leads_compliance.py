@@ -14,19 +14,24 @@ def cfg(v):
     return v["c"].get("/volt/public/%s/leads/config" % SLUG).json()
 
 
-def test_intake_refuses_until_company_and_licensed_agent_exist(volt):
+def test_intake_refuses_until_company_is_entered(volt):
     r = ops(volt, "god", "/settings", "put", json=ON)
     assert r.status_code == 422
     assert "company" in r.text.lower() or "collect" in r.text.lower()
-    # Company alone is not enough: no verified licensed agent yet.
+    # The company is the only launch prerequisite: VOLT collects leads and does not sell insurance.
     assert ops(volt, "god", "/settings/collector", "put", json=COLLECTOR).status_code == 200
-    r = ops(volt, "god", "/settings", "put", json=ON)
-    assert r.status_code == 422 and "licens" in r.text.lower()
     s = ops(volt, "god", "/settings").json()
-    assert {x["key"]: x["ok"] for x in s["readiness"]}["collector"] is True
-    assert not all(x["ok"] for x in s["readiness"])
+    assert all(x["ok"] for x in s["readiness"]) and "agents" not in {x["key"] for x in s["readiness"]}
+    assert ops(volt, "god", "/settings", "put", json=ON).status_code == 200
+    assert cfg(volt)["enabled"] is True
+    assert ops(volt, "god", "/settings", "put", json={"intake_enabled": False}).status_code == 200
     # Only the owner may set the company.
     assert ops(volt, "staff", "/settings/collector", "put", json=COLLECTOR).status_code == 403
+    assert cfg(volt)["enabled"] is False and post(volt).status_code == 503
+
+
+def test_no_company_means_no_intake(volt):
+    assert ops(volt, "god", "/settings", "put", json=ON).status_code == 422
     assert cfg(volt)["enabled"] is False and post(volt).status_code == 503
 
 
@@ -49,7 +54,8 @@ def test_privacy_notice_names_company_and_says_no_selling(volt):
     assert c["privacy_path"] == LC.PRIVACY_PATH and c["collector"]["name"] == COLLECTOR["collector_name"]
     text = " ".join(" ".join(paras) for _, paras in c["privacy"]["sections"])
     assert COLLECTOR["collector_name"] in text and COLLECTOR["privacy_email"] in text
-    assert "do not sell" in text.lower()
+    assert "do not sell insurance" in text.lower() and "pass" in text.lower()
+    assert "does not sell insurance" in c["consent_text"]
     for claim in ("government", "guarantee"):
         assert claim not in c["consent_text"].lower()
     assert COLLECTOR["collector_name"] in c["consent_text"] and COLLECTOR["collector_name"] in c["automated_consent_text"]
@@ -94,26 +100,17 @@ def test_opt_out_is_permanent_and_survives_resubmission(volt):
     assert "stays stopped" in hist
 
 
-def test_real_leads_need_a_verified_license_for_their_state(volt):
+def test_leads_can_be_assigned_without_a_license_on_file(volt):
     enable(volt)
-    post(volt)                                       # PA lead
+    post(volt)
     lid = ops(volt, "god").json()["leads"][0]["id"]
-    assert ops(volt, "god").json()["leads"][0]["awaiting_agent"] is True
     team(volt, "staff")
-    assert ops(volt, "god", "/%s/assign" % lid, "post", json={"user_id": volt["staff"].id}).status_code == 422
-    licensed(volt, "staff", states=["TX"])
-    assert ops(volt, "god", "/%s/assign" % lid, "post", json={"user_id": volt["staff"].id}).status_code == 422
-    licensed(volt, "staff", states=["TX", "PA"])
     assert ops(volt, "god", "/%s/assign" % lid, "post", json={"user_id": volt["staff"].id}).status_code == 200
-    # License entry is owner-only and needs the "verified" tick and a real-looking NPN.
+    # Recording a partner agent's license stays optional, owner-only and validated.
     base = "/grants/%s/license" % volt["staff"].id
     assert ops(volt, "staff", base, "put", json={"npn": "1234567", "states": ["PA"], "verified": True}).status_code == 403
-    assert ops(volt, "god", base, "put", json={"npn": "1234567", "states": ["PA"], "verified": False}).status_code == 422
     assert ops(volt, "god", base, "put", json={"npn": "12", "states": ["PA"], "verified": True}).status_code == 422
-    outsider = _user(volt["db"], "advisor", volt["org"], "spectator")
-    volt["outsider"] = outsider
-    assert ops(volt, "god", "/grants/%s/license" % outsider.id, "put",
-               json={"npn": "1234567", "states": ["PA"], "verified": True}).status_code in (404, 422)
+    assert ops(volt, "god", base, "put", json={"npn": "1234567", "states": ["PA"], "verified": True}).status_code == 200
 
 
 def test_submitting_sends_nothing_to_the_customer(volt, monkeypatch):
