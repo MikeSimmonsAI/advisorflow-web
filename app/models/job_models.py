@@ -87,6 +87,8 @@ class JobName:
     # messages, invoices or charges anyone. Unique (schedule, date) keys make
     # a second instance or a retried pass a no-op.
     SERVICE_OPS_RECURRING = "service_ops_recurring_loop"
+    # EvoSys Sales automatic follow-up email (approved + switched on only).
+    EVOSYS_SALES_OUTREACH = "evosys_sales_outreach_loop"
 
     # Render cron SERVICES. Separate names on purpose, even where the work
     # overlaps a loop above: cadence runs hourly in the web dyno AND daily as a
@@ -139,6 +141,7 @@ LOOP_JOB_NAMES = (
     JobName.AI_WORKFORCE_WORKER,
     JobName.ACQUISITION_WORKFORCE,
     JobName.SERVICE_OPS_RECURRING,
+    JobName.EVOSYS_SALES_OUTREACH,
 )
 
 ALL_JOB_NAMES = LOOP_JOB_NAMES + CRON_JOB_NAMES
@@ -164,6 +167,7 @@ EXPECTED_INTERVAL_MINUTES = {
     JobName.AI_WORKFORCE_WORKER: 2,
     JobName.ACQUISITION_WORKFORCE: 5,
     JobName.SERVICE_OPS_RECURRING: 15,
+    JobName.EVOSYS_SALES_OUTREACH: 5,
     JobName.CADENCE_CRON: 24 * 60,        # render.yaml: "0 14 * * *"
     JobName.EMAIL_POLLER: 5,              # render.yaml: "*/5 * * * *"
     # ai_conversation_cron is RETIRED (see RETIRED_JOB_NAMES): no interval, so

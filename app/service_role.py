@@ -135,6 +135,8 @@ SCHEDULER_OWNER: Dict[str, str] = {
     # Service Operations recurring visits. Once: the pass is claimed per
     # interval, and the (schedule, date) unique key backs it up.
     JobName.SERVICE_OPS_RECURRING: ROLE_BACKEND,
+    # EvoSys Sales follow-up email. Once: rows are locked skip_locked per pass.
+    JobName.EVOSYS_SALES_OUTREACH: ROLE_BACKEND,
 }
 
 # A guard rather than a comment: a loop added to JobName without an owner here
