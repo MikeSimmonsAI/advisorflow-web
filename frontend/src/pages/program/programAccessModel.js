@@ -59,6 +59,11 @@ const PROGRAMS = {
   business: { rank: 7, variant: 'general', symbol: '◈', kind: 'BUSINESS OPERATIONS',
               summary: 'Your dedicated business workspace',
               facts: ['Leads', 'Conversations', 'Calendar'] },
+  // EvoSys's own sales team (businesses EvoSys is signing up) - its own card,
+  // never the platform console. Owner request 2026-11-16.
+  evosys_sales: { rank: 2, variant: 'office', symbol: '➚', kind: 'EVOSYS PRO · SALES',
+                  summary: 'Businesses EvoSys is signing up: prospects, outreach, replies and booked calls',
+                  facts: ['Prospects', 'Outreach', 'Booked calls'] },
   back_office: { rank: 8, variant: 'office', symbol: '▤', kind: 'BACK OFFICE',
                  summary: 'Sales pipeline, customers and brand operations',
                  facts: ['Pipeline', 'Customers', 'Brand ops'] },
@@ -189,14 +194,29 @@ export function programCards(ctx) {
   // BACK OFFICE AND EXECUTIVE SUITE are separate destinations on the same
   // launcher - only when the server says this person has them, never the
   // platform console (God Mode has its own home).
-  if (ctx?.has_back_office && ctx.back_office_path && ctx.back_office_path !== '/god') {
+  // A sales team membership opens /sales even for the owner login, whose first
+  // platform destination is the console (/god): the brand destinations below
+  // are the sales memberships only, so the console never becomes a card.
+  const salesDests = (ctx?.back_office_destinations || []).filter(d => d && d.path && d.path !== '/god')
+  if (ctx?.has_back_office && ((ctx.back_office_path && ctx.back_office_path !== '/god') || salesDests.length)) {
     const p = PROGRAMS.back_office
     // ONE CARD PER BRAND (#272) for someone on more than one brand's sales
     // team, each naming its brand and carrying it, so the Back Office opens on
     // the brand they chose. One brand: the same single card as always.
-    const dests = ctx.back_office_destinations || []
+    const dests = salesDests
     const many = dests.length > 1
     for (const d of (many ? dests : [dests[0] || null])) {
+      if (d && isEvoSysSales(d)) {
+        const e = PROGRAMS.evosys_sales
+        cards.push({ type: 'back_office', organization_id: many ? 'back-office:' + d.brand_sales_org_id : 'back-office',
+                     path: d.path, platform_id: many ? d.platform_id : undefined,
+                     platform_name: many ? d.platform_name : undefined,
+                     brand_sales_org_id: many ? d.brand_sales_org_id : undefined,
+                     program: 'evosys_sales', variant: e.variant, symbol: e.symbol, rank: e.rank, kind: e.kind,
+                     facts: e.facts, display: 'EvoSys Sales', summary: e.summary, orgLabel: null,
+                     actionLabel: 'Open EvoSys Sales' })
+        continue
+      }
       cards.push({ type: 'back_office', organization_id: many ? 'back-office:' + d.brand_sales_org_id : 'back-office',
                    path: (d && d.path) || ctx.back_office_path,
                    // Only when there is a choice to carry: a one-brand Back Office
@@ -219,6 +239,14 @@ export function programCards(ctx) {
   const held = new Set(workspaces.map(w => String(w.organization_name || '').trim().toLowerCase()))
   const previews = previewCards(ctx).filter(p => !held.has(String(p.display).trim().toLowerCase()))
   return { visible: cards, others, previews }
+}
+
+/** EvoSys Pro's own sales team, by the brand the server named (presentation only). */
+export function isEvoSysSales(d) {
+  const slug = String(d?.platform_slug || '').toLowerCase()
+  const name = String(d?.platform_name || d?.label || '').toLowerCase()
+  if (/demonstration|demo\b/i.test(String(d?.label || ''))) return false
+  return slug === 'evosyspro' || slug === 'evosys' || /^evosys\b/.test(name)
 }
 
 /** "Commercial Cleaning Blueprint — Daniel Almaguer" -> the business name,
