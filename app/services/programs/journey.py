@@ -120,9 +120,11 @@ def _assess(db: Session, prog: OutreachProgram, lead: Lead, rows: List[ProgramSo
     from app.services.programs import identity, send_approval
     started = any(r.journey_started_at for r in rows)
     mode = next((r.send_mode for r in rows if r.send_mode), None) or "text_email"
+    from app.services import contact_suppression as _cs
+    _blk = _cs.for_lead(db, lead)
     textable = send_approval.textable(lead) and mode not in ("email_only", "call") and lead.allow_sms is not False \
-        and not (lead.phone and is_phone_suppressed(db, lead.organization_id, lead.phone))
-    email_ok = _email_usable(lead) and mode != "call"
+        and not (lead.phone and is_phone_suppressed(db, lead.organization_id, lead.phone)) and not _blk["sms"]
+    email_ok = _email_usable(lead) and mode != "call" and not _blk["email"]
     # #449 (Oct 31, 4:32 PM): an address whose provider the program holds
     # (Outlook / Yahoo / AOL ...) gets no email. A family with no textable
     # phone and only such an address can't be reached - never "started".

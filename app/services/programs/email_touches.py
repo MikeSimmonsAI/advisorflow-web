@@ -381,6 +381,10 @@ def _skip_reason(db: Session, lead: Lead, replied: bool, prog=None) -> Optional[
         return "no email address"
     if lead.allow_email is False:
         return "email opt-out of record"
+    from app.services import contact_suppression as _cs
+    _blk = _cs.for_lead(db, lead)["email"]
+    if _blk:
+        return _blk
     hold = provider_hold_reason(prog, lead.email) if prog is not None else None
     if hold:
         return hold

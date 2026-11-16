@@ -89,6 +89,12 @@ _pool_kwargs = build_pool_kwargs(DATABASE_URL)
 engine = create_engine(DATABASE_URL, **_pool_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# Destination-level do-not-contact (Issue #507): every NEW contact row, from any
+# importer or form, is checked against the blocked phones and emails of its
+# organization before it is written.
+from app.services import contact_suppression as _contact_suppression  # noqa: E402
+_contact_suppression.register()
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 

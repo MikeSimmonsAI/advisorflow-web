@@ -145,8 +145,12 @@ def blocker(db: Session, lead: Lead) -> Optional[str]:
         return "Do not contact"
     if not (lead.phone or (lead.email or "").strip()):
         return "No phone or email"
-    has_email = bool((lead.email or "").strip()) and lead.allow_email is not False
-    if not textable(lead) and not has_email:
+    from app.services import contact_suppression as _cs
+    _blk = _cs.for_lead(db, lead)
+    if _blk["family"]:
+        return "Do not contact"
+    has_email = bool((lead.email or "").strip()) and lead.allow_email is not False and not _blk["email"]
+    if (not textable(lead) or _blk["sms"]) and not has_email:
         if getattr(lead, "phone_line_type", None) == "landline":
             return "Landline - call instead"
         return "Bad phone number"

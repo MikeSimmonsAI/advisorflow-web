@@ -261,6 +261,38 @@ def main(argv=None) -> int:
                         for _i in range(0, max(len(_txt), 1), 3000):
                             log.info("workspace probe org=%s part=%s[%d]: %s", org_id, _part, _i // 3000,
                                      _txt[_i:_i + 3000])
+                elif mode in ("dncpreserve", "dncverify", "dncsummary"):
+                    # Issue #507 (Nov 15 reset): move every real do-not-contact
+                    # onto its phones / emails before any contact is deleted,
+                    # and prove it holds. Counts only; sends nothing.
+                    from app.services.programs import restland_reset as _rr
+                    if mode == "dncpreserve":
+                        res = {"preserve": _rr.preserve(_db, org), "verify": _rr.verify(_db, org)}
+                    elif mode == "dncverify":
+                        res = {"verify": _rr.verify(_db, org), "summary": _rr.summary(_db, org)}
+                    else:
+                        res = {"summary": _rr.summary(_db, org)}
+                    _txt = json.dumps(res, sort_keys=True, default=str)
+                    for _i in range(0, max(len(_txt), 1), 3000):
+                        log.info("workspace %s org=%s part[%d]: %s", mode, org_id, _i // 3000, _txt[_i:_i + 3000])
+                elif mode in ("clear", "clearinventory"):
+                    # Issue #507 (Nov 15 reset): clear Restland's old customer data.
+                    # Re-runs the do-not-contact copy and proof first; refuses on
+                    # any failure. Every removed row is copied privately first.
+                    # "clearinventory" only counts. Sends nothing.
+                    from app.services.programs import restland_clear as _rc
+                    from app.services.programs import restland_reset as _rr
+                    if mode == "clear":
+                        try:
+                            res = _rc.clear(_db, org, key)
+                        except (_rc.ClearRefused, _rr.ResetRefused) as _e:
+                            res = {"refused": str(_e)}
+                    else:
+                        _rr._guard(_db, org)
+                        res = {"inventory": _rc.inventory(_db, org.id), "dnc": _rr.summary(_db, org)}
+                    _txt = json.dumps(res, sort_keys=True, default=str)
+                    for _i in range(0, max(len(_txt), 1), 3000):
+                        log.info("workspace %s org=%s part[%d]: %s", mode, org_id, _i // 3000, _txt[_i:_i + 3000])
                 elif mode in ("launch", "readback", "pause"):
                     # Issue #507 (Nov 15): Restland File Review launch - the text
                     # slot schedule, copy, audience, approval, journey start.
