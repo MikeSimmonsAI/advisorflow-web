@@ -13,9 +13,11 @@
  * a revoked program's pin disappears on its own. Pinned programs stay in All
  * Programs too.
  *
- * A tap opens the entry with the shared openProgramItem() rule, remembering
- * that it came from the app so the workspace's Back / Program Access returns
- * to /app/programs.
+ * A TAP OPENS THE PROGRAM'S PHONE WORKSPACE (/app/p/<pid>: Dashboard,
+ * Replies, More - ProgramWorkspace.jsx), whose More -> Open Full Workspace uses
+ * the shared openProgramItem() rule. A deal's demo and the Deal Builder tools
+ * still open directly, as before. A program with a reply queue shows its
+ * unanswered count on the card; tapping the count opens Replies.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -25,6 +27,8 @@ import { openProgramItem } from '../pages/program/programDestinations'
 import { clearLauncherOrigin, MOBILE_PROGRAMS } from '../pages/program/launcherOrigin'
 import { LABELS, MAX_PINS, livePinKeys, matchesProgram, pinnedItems, programStyle, togglePinKey } from './teamHelpers'
 import { ErrorNote, Icon, Loading, ScreenTitle } from './TeamApp'
+import { useReplyCount } from './ProgramWorkspace'
+import { mobileProgramPath, opensDirect } from './programMobile'
 
 const OPTS = { noOrgContext: true, skipRedirect: true }
 
@@ -38,32 +42,49 @@ function subLabel(item) {
   return item.orgLabel || ''
 }
 
+/** The unanswered-replies count on a card: its own tap target, opening Replies. */
+function CountBadge({ item, onReplies }) {
+  const label = useReplyCount(item)
+  if (!label) return null
+  return (
+    <button type="button" className="ta-count" onClick={onReplies}
+            aria-label={label + ' conversation' + (label === '1' ? '' : 's') + ' need a reply - open Replies'}>
+      {label}</button>
+  )
+}
+
 /** Large pinned shortcut: coloured card with a soft skyline. */
-function PinCard({ item, onOpen }) {
+function PinCard({ item, onOpen, onReplies }) {
   const { look, style } = looks(item)
   return (
-    <button type="button" className={'ta-pin' + (look.second ? ' has-second' : '')} style={style} onClick={onOpen}
-            data-program-key={programKey(item)}>
-      <svg className="ta-pin-art" viewBox="0 0 120 90" aria-hidden focusable="false">
-        <path d="M60 90V38l22-10v62M86 90V22l20 8v60M40 90V56l16-6v40" fill="none" stroke="currentColor" strokeWidth="1.4" />
-        <path d="M64 46h14M64 54h14M64 62h14M64 70h14M90 34h12M90 42h12M90 50h12M90 58h12M90 66h12" stroke="currentColor" strokeWidth="1" />
-      </svg>
-      <span className="ta-pin-icon" aria-hidden><Icon name={look.icon} size={30} /></span>
-      <span className="ta-pin-name">{item.display}</span>
-      {subLabel(item) && <span className="ta-pin-sub">{subLabel(item)}</span>}
-    </button>
+    <div className="ta-cardwrap">
+      <button type="button" className={'ta-pin' + (look.second ? ' has-second' : '')} style={style} onClick={onOpen}
+              data-program-key={programKey(item)}>
+        <svg className="ta-pin-art" viewBox="0 0 120 90" aria-hidden focusable="false">
+          <path d="M60 90V38l22-10v62M86 90V22l20 8v60M40 90V56l16-6v40" fill="none" stroke="currentColor" strokeWidth="1.4" />
+          <path d="M64 46h14M64 54h14M64 62h14M64 70h14M90 34h12M90 42h12M90 50h12M90 58h12M90 66h12" stroke="currentColor" strokeWidth="1" />
+        </svg>
+        <span className="ta-pin-icon" aria-hidden><Icon name={look.icon} size={30} /></span>
+        <span className="ta-pin-name">{item.display}</span>
+        {subLabel(item) && <span className="ta-pin-sub">{subLabel(item)}</span>}
+      </button>
+      <CountBadge item={item} onReplies={onReplies} />
+    </div>
   )
 }
 
 /** Compact grid tile: colour icon tile, name underneath (wraps). */
-export function ProgramTile({ item, onOpen }) {
+export function ProgramTile({ item, onOpen, onReplies }) {
   const { look, style } = looks(item)
   return (
-    <button type="button" className="ta-tile" style={style} onClick={onOpen} data-program-key={programKey(item)}>
-      <span className={'ta-tile-icon' + (look.second ? ' has-second' : '')} aria-hidden><Icon name={look.icon} size={26} /></span>
-      <span className="ta-tile-name">{item.display}</span>
-      {subLabel(item) && <span className="ta-tile-sub">{subLabel(item)}</span>}
-    </button>
+    <div className="ta-cardwrap">
+      <button type="button" className="ta-tile" style={style} onClick={onOpen} data-program-key={programKey(item)}>
+        <span className={'ta-tile-icon' + (look.second ? ' has-second' : '')} aria-hidden><Icon name={look.icon} size={26} /></span>
+        <span className="ta-tile-name">{item.display}</span>
+        {subLabel(item) && <span className="ta-tile-sub">{subLabel(item)}</span>}
+      </button>
+      {onReplies && <CountBadge item={item} onReplies={onReplies} />}
+    </div>
   )
 }
 
@@ -150,7 +171,10 @@ export default function ProgramsScreen() {
   const pinned = useMemo(() => pinnedItems(all, pins || [], programKey), [all, pins])
   const searching = query.trim().length > 0
   const rows = all.filter(item => matchesProgram(item, query))
-  const open = item => openProgramItem(item, navigate, { origin: MOBILE_PROGRAMS })
+  const open = item => opensDirect(item)
+    ? openProgramItem(item, navigate, { origin: MOBILE_PROGRAMS })
+    : navigate(mobileProgramPath(item))
+  const replies = item => navigate(mobileProgramPath(item, 'replies'))
 
   async function savePins(keys) {
     const r = await api.put('/team-app/pins', { keys })
@@ -181,7 +205,7 @@ export default function ProgramsScreen() {
           {pinErr && <p className="ta-muted ta-small">Your pins could not be loaded. You can still pick them with Edit.</p>}
           {pinned.length > 0
             ? <div className={'ta-pins' + (pinned.length === 1 ? ' is-one' : '')}>
-                {pinned.map(item => <PinCard key={programKey(item)} item={item} onOpen={() => open(item)} />)}
+                {pinned.map(item => <PinCard key={programKey(item)} item={item} onOpen={() => open(item)} onReplies={() => replies(item)} />)}
               </div>
             : <button type="button" className="ta-pin-empty" onClick={() => setEditing(true)}>
                 <Icon name="pin" size={22} /> Pin up to {MAX_PINS} programs you open most</button>}
@@ -194,7 +218,7 @@ export default function ProgramsScreen() {
           {rows.length === 0
             ? <div className="ta-state">No program matches “{query}”.</div>
             : <ul className="ta-grid" aria-label={searching ? 'Matching programs' : 'All programs'} data-count={rows.length} data-total={all.length}>
-                {rows.map(item => <li key={programKey(item)}><ProgramTile item={item} onOpen={() => open(item)} /></li>)}
+                {rows.map(item => <li key={programKey(item)}><ProgramTile item={item} onOpen={() => open(item)} onReplies={() => replies(item)} /></li>)}
               </ul>}
         </section>
       )}

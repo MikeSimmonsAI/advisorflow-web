@@ -29,9 +29,13 @@ function store(s) {
   try { return typeof window !== 'undefined' ? window.sessionStorage : null } catch { return null }
 }
 
+// A mobile program workspace (/app/p/<pid>[/replies|/more]) is also an origin:
+// its "Open Full Workspace" returns to it. Strict shape, nothing else.
+const PROGRAM_PAGE = /^\/app\/p\/[A-Za-z0-9_-]{1,400}(\/(replies|more))?$/
+
 /** A launcher origin is accepted only when it is one of the known in-app paths. */
 export function safeOrigin(raw) {
-  return typeof raw === 'string' && ORIGINS.has(raw) ? raw : null
+  return typeof raw === 'string' && (ORIGINS.has(raw) || PROGRAM_PAGE.test(raw)) ? raw : null
 }
 
 export function setLauncherOrigin(path, s) {
