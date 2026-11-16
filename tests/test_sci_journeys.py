@@ -43,6 +43,13 @@ from tests.test_outreach_program import _h, _lead_for, hash_password, program  #
 from tests.test_sci_appointment_setter import _Fake, _d
 from tests.test_sci_decline_alternatives import YES_HOME, _location
 
+
+@pytest.fixture(autouse=True)
+def _sci_workspace_identity(monkeypatch, sample_org):
+    """These are SCI's alerts, run in the shared test organization; say so,
+    as production does (SMS_PROGRAM_ORG_SCI), so they keep the "SCI" label."""
+    monkeypatch.setenv("SMS_PROGRAM_ORG_SCI", sample_org.id)
+
 REAL_SEND_SMS = sms_service.send_sms
 
 INVITE = "Ollie, quick question from Eastern Gate: could you stop by for a short visit this week?"

@@ -180,7 +180,7 @@ TEST_MARK = "TEST ONLY - not a real family"
 
 
 def plain_alert_sms(prog: OutreachProgram, test: bool = False) -> str:
-    text = "%s: A new family response needs attention. Please check your SCI Responses inbox." % alert_title(prog)
+    text = "%s: A new family response needs attention. Please check your Responses inbox." % alert_title(prog)
     # A synthetic test contact's alert says TEST up front so nobody mistakes
     # it for a real family (Oct 14 end-to-end verification).
     return ("TEST - " + text) if test else text
@@ -260,7 +260,8 @@ def alert_content(db: Session, prog: OutreachProgram, resp: ProgramResponse, kin
         detail = "replied %d min ago and has not been answered yet" % (
             int((datetime.utcnow() - when).total_seconds() // 60) if when else 0)
     sms = _L.sms_line(sms_kind, name, words=None if detail else said, location=where, detail=detail,
-                      link=_L.family_link(resp.lead_id), test=test)
+                      link=_L.family_link(resp.lead_id), test=test,
+                      program=_L.program_label(db, prog))
     if test:
         head = "%s - %s" % (TEST_MARK, head)
     rows = [("Who", who), ("Replied by", "%s, %s" % (how, when_s)), ("Said", '"%s"' % said)]

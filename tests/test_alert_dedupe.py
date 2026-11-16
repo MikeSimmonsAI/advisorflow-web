@@ -21,6 +21,13 @@ from app.services.programs import alert_ledger as L
 from app.services.programs import responses as R
 from tests.test_outreach_program import _lead_for, program  # noqa: F401 (fixture)
 
+
+@pytest.fixture(autouse=True)
+def _sci_workspace_identity(monkeypatch, sample_org):
+    """These are SCI's alerts, run in the shared test organization; say so,
+    as production does (SMS_PROGRAM_ORG_SCI), so they keep the "SCI" label."""
+    monkeypatch.setenv("SMS_PROGRAM_ORG_SCI", sample_org.id)
+
 OWNER_PHONE, OWNER_EMAIL = "+18435550000", "owner@example.com"
 KERRY, SCHL, SCHL_EMAIL = "+14105550100", "+14105550200", "mps@example.com"
 

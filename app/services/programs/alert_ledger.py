@@ -304,14 +304,31 @@ def first_last(lead) -> str:
         or "A family"
 
 
+def program_label(db, prog) -> str:
+    """The program's name at the front of a staff alert text: "SCI" for SCI,
+    the program's own short name everywhere else (Restland alerts said "SCI"
+    before Nov 16). Never fails: a label must not stop an alert."""
+    try:
+        from app.services.programs.program_profile import profile
+        p = profile(db, prog) if prog is not None else None
+        if p and p.get("short_name"):
+            return "SCI" if p.get("is_sci") else str(p["short_name"]).strip()
+    except Exception:                                    # noqa: BLE001
+        pass
+    return "SCI"
+
+
 def sms_line(kind: str, name: str, *, words: Optional[str] = None, location: Optional[str] = None,
-             detail: Optional[str] = None, link: Optional[str] = None, test: bool = False) -> str:
+             detail: Optional[str] = None, link: Optional[str] = None, test: bool = False,
+             program: str = "SCI") -> str:
     """A short, specific staff text. The label says WHAT happened; the
     preview is the family's real words (or the system's real reason) - never
-    a made-up summary. Fits one segment without a link."""
-    label = {"hot": "SCI Appointment Request", "handoff": "SCI HUMAN HANDOFF", "booked": "SCI Booked",
-             "sla_breach": "SCI Still Waiting", "home_visit": "SCI Home Visit Request",
-             "opt_out_request": "SCI Opted Out But Asked - Call/Email, No Texts"}.get(kind, "SCI Reply")
+    a made-up summary. Fits one segment without a link. `program` is the
+    program's name (program_label) - SCI's own alerts keep "SCI"."""
+    p = (program or "SCI").strip() or "SCI"
+    label = p + " " + {"hot": "Appointment Request", "handoff": "HUMAN HANDOFF", "booked": "Booked",
+                       "sla_breach": "Still Waiting", "home_visit": "Home Visit Request",
+                       "opt_out_request": "Opted Out But Asked - Call/Email, No Texts"}.get(kind, "Reply")
     if test:
         label = "TEST " + label
     tail = " Open EvoSys Pro to respond." if kind in ("low", "active", "reply") else " Review in EvoSys Pro."

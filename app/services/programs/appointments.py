@@ -312,7 +312,8 @@ def notify_team_booked(db: Session, prog, lead, slot: datetime, kind: str) -> No
     test = bool(getattr(lead, "is_test", False)) or is_demo_lead(lead)
     who = L.first_last(lead)
     sms = L.sms_line("booked", who, detail="booked a %s for %s" % (what, describe(slot)),
-                     link=L.family_link(lead.id), test=test)
+                     link=L.family_link(lead.id), test=test,
+                     program=L.program_label(db, prog))
     email = "%s booked a %s for %s." % (who, what, describe(slot))
     L.page(db, prog, lead_id=lead.id, key="booked:%s:%s" % (lead.id, slot.strftime("%Y%m%d%H%M")), kind="booked",
            sms_text=sms, subject="%s - Appointment booked: %s" % (R.alert_title(prog), who),
