@@ -236,7 +236,8 @@ def buyer_estimates(b: BuyerCtx) -> List[Dict[str, Any]]:
             .order_by(ServiceEstimate.created_at.desc()).all())
     if b.location_ids:
         rows = [e for e in rows if e.location_id is None or e.location_id in b.location_ids]
-    return [dict(BL.estimate_json(e), can_decide=b.access.can_approve_estimates and e.status == "sent")
+    today = BL.local_today(b.db, b.org_id)
+    return [dict(BL.estimate_json(e, None, today), can_decide=b.access.can_approve_estimates and e.status == "sent")
             for e in rows]
 
 

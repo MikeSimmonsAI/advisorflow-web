@@ -58,6 +58,14 @@ def totals(lines: List[Dict[str, Any]], discount: float, tax_rate: float) -> Tup
     return sub, tax, r2(sub - disc + tax)
 
 
+def local_today(db: Session, org_id: str, now: Optional[datetime] = None) -> date_cls:
+    """The company's calendar date (its own time zone), not the server's UTC date:
+    an invoice issued at 7 PM Central on Nov 15 is dated Nov 15."""
+    from zoneinfo import ZoneInfo
+    tz = K.company_tz(db, org_id)
+    return (now or datetime.utcnow()).replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(tz)).date()
+
+
 def _settings(db: Session, org_id: str) -> ServiceOpsSettings:
     s = K.settings(db, org_id)
     if s is None:
@@ -79,8 +87,9 @@ def _next_number(db: Session, org_id: str, kind: str) -> str:
 
 
 # ── estimates ─────────────────────────────────────────────────────────────
-def estimate_json(e: ServiceEstimate, customer: Optional[ServiceCustomer] = None) -> Dict[str, Any]:
-    today = date_cls.today()
+def estimate_json(e: ServiceEstimate, customer: Optional[ServiceCustomer] = None,
+                  today: Optional[date_cls] = None) -> Dict[str, Any]:
+    today = today or date_cls.today()
     status = "expired" if e.status == "sent" and e.expires_on and e.expires_on < today else e.status
     return {"id": e.id, "number": e.number, "customer_id": e.customer_id,
             "customer_name": customer.name if customer else None, "location_id": e.location_id,
@@ -111,7 +120,7 @@ def create_estimate(ctx: K.OpsCtx, data: Dict[str, Any]) -> ServiceEstimate:
     e = ServiceEstimate(organization_id=ctx.org_id, number=_next_number(db, ctx.org_id, "estimate"),
                         customer_id=cust.id, location_id=loc_id, opportunity_id=opp_id, lines=K.jdump(lines),
                         discount=disc, tax_rate=rate, subtotal=sub, tax=tax, total=total, status="draft",
-                        expires_on=date_cls.fromisoformat(exp[:10]) if exp else date_cls.today() + timedelta(days=30),
+                        expires_on=date_cls.fromisoformat(exp[:10]) if exp else local_today(db, ctx.org_id) + timedelta(days=30),
                         notes=K.text(data.get("notes"), 2000), created_by_id=ctx.user.id)
     db.add(e)
     db.commit()
@@ -133,7 +142,7 @@ def set_estimate_status(ctx: K.OpsCtx, eid: str, status: str, *, by_buyer: bool 
         return e
     if status not in allowed.get(e.status, set()):
         raise HTTPException(409, "A %s estimate can't be marked %s" % (e.status, status))
-    if status == "accepted" and e.expires_on and e.expires_on < date_cls.today():
+    if status == "accepted" and e.expires_on and e.expires_on < local_today(ctx.db, ctx.org_id):
         raise HTTPException(409, "This estimate has expired")
     e.status = status
     if status == "accepted":
@@ -150,7 +159,8 @@ def list_estimates(ctx: K.OpsCtx) -> List[Dict[str, Any]]:
             .order_by(ServiceEstimate.created_at.desc()).limit(500).all())
     custs = {c.id: c for c in ctx.db.query(ServiceCustomer)
              .filter(ServiceCustomer.id.in_([e.customer_id for e in rows] or ["-"])).all()}
-    return [estimate_json(e, custs.get(e.customer_id)) for e in rows]
+    today = local_today(ctx.db, ctx.org_id)
+    return [estimate_json(e, custs.get(e.customer_id), today) for e in rows]
 
 
 # ── invoices ──────────────────────────────────────────────────────────────
@@ -164,7 +174,7 @@ def display_status(i: ServiceInvoice, today: Optional[date_cls] = None) -> str:
 def invoice_json(db: Session, i: ServiceInvoice) -> Dict[str, Any]:
     cust = db.query(ServiceCustomer).filter(ServiceCustomer.id == i.customer_id).first()
     pays = db.query(ServicePayment).filter(ServicePayment.invoice_id == i.id).order_by(ServicePayment.reported_at).all()
-    st = display_status(i)
+    st = display_status(i, local_today(db, i.organization_id))
     return {"id": i.id, "number": i.number, "customer_id": i.customer_id, "customer_name": cust.name if cust else None,
             "location_id": i.location_id, "job_id": i.job_id, "schedule_id": i.schedule_id,
             "opportunity_id": i.opportunity_id, "billing_name": i.billing_name, "billing_address": i.billing_address,
@@ -260,7 +270,7 @@ def issue_invoice(ctx: K.OpsCtx, iid: str) -> ServiceInvoice:
         raise HTTPException(409, "Only a draft can be issued")
     s = _settings(ctx.db, ctx.org_id)
     i.status, i.issued_at = "issued", datetime.utcnow()
-    i.due_date = date_cls.today() + timedelta(days=s.payment_terms_days or 0)
+    i.due_date = local_today(ctx.db, ctx.org_id) + timedelta(days=s.payment_terms_days or 0)
     ctx.db.commit()
     K.audit(ctx.db, ctx.org_id, ctx.user, "service_invoice_issue", "service_invoice", i.id, {"number": i.number})
     return i
@@ -374,9 +384,12 @@ def invoice_pdf(db: Session, i: ServiceInvoice) -> bytes:
     if contact:
         parts.append(Paragraph(e(contact), st["Normal"]))
     parts.append(Spacer(1, 12))
-    status = INVOICE_STATUS_LABEL.get(display_status(i), i.status).upper()
+    from zoneinfo import ZoneInfo
+    tz = K.company_tz(db, i.organization_id)
+    status = INVOICE_STATUS_LABEL.get(display_status(i, local_today(db, i.organization_id)), i.status).upper()
+    issued_local = (i.issued_at.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(tz)) if i.issued_at else None)
     head = [["INVOICE", i.number], ["Status", status],
-            ["Issued", i.issued_at.strftime("%b %d, %Y") if i.issued_at else "Not issued (draft)"],
+            ["Issued", issued_local.strftime("%b %d, %Y") if issued_local else "Not issued (draft)"],
             ["Due", i.due_date.strftime("%b %d, %Y") if i.due_date else "-"]]
     t = Table(head, colWidths=[1.3 * inch, 2.6 * inch])
     t.setStyle(TableStyle([("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 10)]))
