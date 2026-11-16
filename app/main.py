@@ -1776,6 +1776,26 @@ async def _session_cleanup_loop():
                 removed = await _off_loop(_one_pass)
                 _m["sessions_purged"] = removed
                 _m["retain_days"] = session_service.SESSION_RETENTION_DAYS
+
+                # Same daily pass, same ledger: job history past retention
+                # (audit #650). Its own session, so a failure here never undoes
+                # the session purge above.
+                def _job_runs_pass():
+                    from app.services.job_run_service import purge_old_job_runs
+                    db = SessionLocal()
+                    try:
+                        n = purge_old_job_runs(db)
+                        db.commit()
+                        return n
+                    except Exception:
+                        db.rollback()
+                        raise
+                    finally:
+                        db.close()
+                try:
+                    _m["job_runs_purged"] = await _off_loop(_job_runs_pass)
+                except Exception as exc:                       # noqa: BLE001
+                    _logger.error("job_runs retention error: %s", exc, exc_info=True)
                 if removed:
                     _logger.info("session_cleanup: purged %d dead sessions",
                                  removed)
