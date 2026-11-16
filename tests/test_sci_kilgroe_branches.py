@@ -1,3 +1,4 @@
+import pytest
 """Kilgroe is two branches (owner decision, Nov 3 2026): SCI 7008 = Pell City,
 7901 = Leeds, each with its own verified address and phone. The existing
 Kilgroe location becomes Pell City (it already had the Pell City phone), a
@@ -10,6 +11,14 @@ from app.models.program_models import LocationProfile, ProgramSourceRecord
 from app.services.programs import campaigns as C, importer, setup, unsubscribe
 from tests.test_outreach_program import program  # noqa: F401
 from tests.test_sci_385_central_alabama import HEAD, _ca, _r, _recs
+
+
+@pytest.fixture(autouse=True)
+def _sci_workspace_identity(monkeypatch, sample_org):
+    """SCI's own branches and campaign, in the shared test organization: say
+    so, as production does (SMS_PROGRAM_ORG_SCI). Since #507 Central Alabama
+    is SCI's only - another workspace never sees it."""
+    monkeypatch.setenv("SMS_PROGRAM_ORG_SCI", sample_org.id)
 
 
 def _stage(db, org, rows):

@@ -13,6 +13,14 @@ from app.models.program_models import CampaignFamily, LocationProfile, ProgramSo
 from app.services.programs import campaigns as C, identity, setup
 from tests.test_outreach_program import _addresses, _fake_provider, _h, _lead_for, program  # noqa: F401
 
+
+@pytest.fixture(autouse=True)
+def _sci_workspace_identity(monkeypatch, sample_org):
+    """These tests run SCI's own Central Alabama campaign in the shared test
+    organization; say so, as production does (SMS_PROGRAM_ORG_SCI). Since #507
+    the campaign is SCI's only - another workspace never sees it."""
+    monkeypatch.setenv("SMS_PROGRAM_ORG_SCI", sample_org.id)
+
 LOCS = ["Southern Heritage Funeral Home", "Eastern Gate Memorial Gardens"]
 
 

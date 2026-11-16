@@ -345,6 +345,9 @@ def context_packet(db: Session, lead, now: Optional[datetime] = None) -> Optiona
     fam_key = (rec.campaign_family if rec else None) or FAMILY_FALLBACK
     fam = (db.query(CampaignFamily).filter(CampaignFamily.organization_id == lead.organization_id,
                                            CampaignFamily.key == fam_key).first())
+    from app.services.programs import campaigns as _camp507
+    if fam is not None and _camp507.hidden_in(db, lead.organization_id, fam.key):
+        fam = None                           # #507: never another program's copy
     outbound = (db.query(EmailMessage).filter(EmailMessage.lead_id == lead.id)
                 .order_by(EmailMessage.sent_at.desc()).limit(10).all())
     texts = (db.query(Message).filter(Message.lead_id == lead.id)
