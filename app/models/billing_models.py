@@ -229,6 +229,12 @@ class BrandBillingPlan(Base):
     # Stripe models one product sold at two prices, so nothing here invents a
     # structure Stripe does not already have.
     stripe_price_id_month_to_month = Column(String, nullable=True)
+    # Earlier Stripe Prices this plan was sold at, as a JSON list of ids.
+    # A price change maps NEW sales to a new Price; subscriptions already on an
+    # old Price keep billing on it, and their renewals must still resolve to
+    # this plan - so the old ids are kept here and matched by
+    # billing_catalog.resolve_plan_by_price_id. Never used for a new checkout.
+    stripe_price_ids_legacy = Column(Text, nullable=True)
 
     # ── Entitlement ceilings ──────────────────────────────────────────────
     # These were previously returned to the UI and enforced by NOTHING - no

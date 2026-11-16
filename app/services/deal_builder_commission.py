@@ -34,11 +34,22 @@ Packages (Basic, Growth, Professional) - final owner instruction, 2026-11-15:
   (Version 2026-11-13 had the package rep residual at 15%. Corrected here.)
 Custom SaaS - setup AND every monthly payment while the contract is active:
   rep 20%, ASM 10%, Sr EVP 15%, EvoSys 55%.
-Add-ons follow the deal they are on: package-deal add-ons at 20/10/15/55,
-SaaS add-ons at 20/10/15/55, on both their setup and monthly amounts. There is
-no separate add-on rate.
+Customer prices (approved 2026-11-15, the production catalogue for new EvoSys
+Pro Sales deals - see STANDARD_PACKAGES and evosys_package_catalog.py):
+    Basic         $1,600 Month 1, then $700 / month from Month 2
+    Growth        $3,200 Month 1, then $1,300 / month from Month 2
+    Professional  $5,900 Month 1, then $2,400 / month from Month 2
+  No term discount. Basic's catalogue key is still `starter` (existing records
+  and links use it); it is shown as Basic.
+Custom SaaS - setup AND every monthly payment while the contract is active:
+  rep 20%, ASM 10%, Sr EVP 15%, EvoSys 55%.
+Add-ons are OUTSIDE the 2026-11-15 approval and keep their earlier rule:
+  on a package deal an add-on's ONE-TIME setup pays 15/10/15 (EvoSys 60) -
+  the 20% package residual is NOT an approval of a 20% one-time add-on payout.
+  An add-on's monthly amount is part of the package's monthly fee and earns the
+  Month 2+ residual with it. SaaS add-ons follow Custom SaaS, 20/10/15/55.
 À la carte (no package): not decided by the owners yet - estimated with the
-package add-on rates and flagged as such.
+earlier package add-on rates (15/10/15) and flagged as such.
 
 Earned only on money actually collected. A partial setup payment is prorated
 across the setup lines in proportion to their size, unless the receipt is
@@ -70,15 +81,33 @@ VIEW_LAYERS = {
 PLANS: Dict[str, Dict[str, Any]] = {
     "alacarte":     {"name": "À la carte",   "kind": "alacarte", "setup": D("0")},
     "basic":        {"name": "Basic",        "kind": "package",  "setup": D("1600"),
+                     "monthly": D("700"), "catalog_key": "starter",
                      "payout": {"rep": D("500"), "asm": D("200"), "sevp": D("300")}},
     "growth":       {"name": "Growth",       "kind": "package",  "setup": D("3200"),
+                     "monthly": D("1300"), "catalog_key": "growth",
                      "payout": {"rep": D("1000"), "asm": D("300"), "sevp": D("600")}},
     "professional": {"name": "Professional", "kind": "package",  "setup": D("5900"),
+                     "monthly": D("2400"), "catalog_key": "professional",
                      "payout": {"rep": D("2000"), "asm": D("400"), "sevp": D("900")}},
     "custom_saas":  {"name": "Custom SaaS",  "kind": "saas",     "setup": None},
 }
 PACKAGE_PCT = {"rep": D("20"), "asm": D("10"), "sevp": D("15")}   # EvoSys 55 - Month 2 onward
 SAAS_PCT    = {"rep": D("20"), "asm": D("10"), "sevp": D("15")}   # EvoSys 55
+# One-time add-on setup on a package deal (and the à la carte estimate): the
+# earlier approved 15/10/15 - unchanged by the 2026-11-15 package approval.
+PACKAGE_ADDON_SETUP_PCT = {"rep": D("15"), "asm": D("10"), "sevp": D("15")}   # EvoSys 60
+
+# THE ONE AUTHORITATIVE TABLE of standard package prices for new EvoSys Pro
+# Sales deals. The production catalogue (brand_packages / brand_billing_plans /
+# Stripe) is applied FROM this table by evosys_package_catalog.apply(), and a
+# test holds the Deal Builder page (deal-core.js) to the same figures.
+STANDARD_PRICES_VERSION = "2026-11-15"
+STANDARD_PACKAGES = [
+    {"plan": k, "catalog_key": PLANS[k]["catalog_key"], "name": PLANS[k]["name"],
+     "setup": PLANS[k]["setup"], "monthly": PLANS[k]["monthly"],
+     "payout": dict(PLANS[k]["payout"])}
+    for k in ("basic", "growth", "professional")
+]
 
 # What the executive page receives (and the saved-plan seed writes). Plain
 # numbers, ordered [rep, asm, sevp].
@@ -87,7 +116,10 @@ RULES: Dict[str, Any] = {
     "package_setup": {PLANS[k]["name"]: [float(PLANS[k]["payout"][r]) for r in ROLES]
                       for k in ("basic", "growth", "professional")},
     "package_pct": [float(PACKAGE_PCT[r]) for r in ROLES],
+    "package_addon_setup_pct": [float(PACKAGE_ADDON_SETUP_PCT[r]) for r in ROLES],
     "saas_pct": [float(SAAS_PCT[r]) for r in ROLES],
+    "package_prices": {PLANS[k]["name"]: [float(PLANS[k]["setup"]), float(PLANS[k]["monthly"])]
+                       for k in ("basic", "growth", "professional")},
 }
 
 
@@ -148,7 +180,10 @@ def split(deal: Dict[str, Any], filled: Optional[Dict[str, bool]] = None) -> Dic
         # The fixed payout is prorated against this figure.
         plan_setup = _amount(deal.get("package_setup"), "Package setup")
     setup_total = plan_setup + addon_setup
-    pct = SAAS_PCT if kind == "saas" else PACKAGE_PCT
+    # Month 2+ residual, and the one-time add-on setup rate, by kind of deal.
+    pct = SAAS_PCT if kind == "saas" else (PACKAGE_PCT if kind == "package"
+                                           else PACKAGE_ADDON_SETUP_PCT)
+    addon_pct = SAAS_PCT if kind == "saas" else PACKAGE_ADDON_SETUP_PCT
 
     # How much of each setup line counts.
     alloc = deal.get("allocation") if basis == "paid" else None
@@ -176,13 +211,14 @@ def split(deal: Dict[str, Any], filled: Optional[Dict[str, bool]] = None) -> Dic
             pkg_part = plan["payout"][role] * f_pkg
         else:
             pkg_part = plan_setup * pct[role] / 100 * f_pkg
-        add_part = addon_setup * pct[role] / 100 * f_add
+        add_part = addon_setup * addon_pct[role] / 100 * f_add
         month_part = counted_monthly * pct[role] / 100
         entry = {
             "role": role, "label": ROLE_LABELS[role],
             "one_time_package": pkg_part, "one_time_addons": add_part,
             "one_time": pkg_part + add_part, "monthly": month_part,
             "monthly_rate": float(pct[role]),
+            "addon_setup_rate": float(addon_pct[role]),
             "setup_rule": (("Fixed %s setup payout" % plan["name"]) if kind == "package"
                            else ("%s%% of setup" % pct[role]) if kind == "saas"
                            else "No package setup"),
@@ -228,7 +264,8 @@ def view(full: Dict[str, Any], view_name: str) -> Dict[str, Any]:
                 "one_time_package": _c(e["one_time_package"]),
                 "one_time_addons": _c(e["one_time_addons"]),
                 "one_time": _c(e["one_time"]), "monthly": _c(e["monthly"]),
-                "monthly_rate": e["monthly_rate"], "setup_rule": e["setup_rule"]}
+                "monthly_rate": e["monthly_rate"], "addon_setup_rate": e["addon_setup_rate"],
+                "setup_rule": e["setup_rule"]}
 
     out = {
         "rules_version": full["rules_version"], "view": view_name,
@@ -264,7 +301,7 @@ def seller_commission(deal: Dict[str, Any]) -> Dict[str, Any]:
         "one_time": {
             "package": own["one_time_package"], "package_rule": own["setup_rule"],
             "addon": own["one_time_addons"],
-            "addon_rule": "%g%% of add-on setup (add-ons follow the deal)" % own["monthly_rate"],
+            "addon_rule": "%g%% of add-on setup" % own["addon_setup_rate"],
             "addon_status": addon_status,
             "total": own["one_time"],
         },

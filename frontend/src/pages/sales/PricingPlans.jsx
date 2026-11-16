@@ -39,7 +39,7 @@ export default function PricingPlans() {
           ))}</tbody>
         </table>
         <p style={{ margin: '10px 0 0' }}>Month 1: the customer pays only the one-time fee, and these flat amounts are paid — they are not a percentage of the fee. No monthly fee or residual is due in Month 1.</p>
-        <p style={{ margin: '6px 0 0' }}>Month 2 onward, on each package monthly fee collected: <b>{c.package_monthly_pct.rep}% / {c.package_monthly_pct.asm}% / {c.package_monthly_pct.sevp}%</b> (Salesperson / Area Sales Manager / Sr EVP). Custom SaaS setup and monthly: <b>{c.custom_saas_rates.rep}% / {c.custom_saas_rates.asm}% / {c.custom_saas_rates.sevp}%</b>. Add-ons follow the deal they are sold on. Commission is held {c.holdback_days} days after the customer pays.</p>
+        <p style={{ margin: '6px 0 0' }}>Month 2 onward, on each package monthly fee collected: <b>{c.package_monthly_pct.rep}% / {c.package_monthly_pct.asm}% / {c.package_monthly_pct.sevp}%</b> (Salesperson / Area Sales Manager / Sr EVP). Custom SaaS setup and monthly: <b>{c.custom_saas_rates.rep}% / {c.custom_saas_rates.asm}% / {c.custom_saas_rates.sevp}%</b>. Package add-on one-time setup: <b>{c.addon_setup_rates ? `${c.addon_setup_rates.rep}% / ${c.addon_setup_rates.asm}% / ${c.addon_setup_rates.sevp}%` : '—'}</b> (unchanged). Commission is held {c.holdback_days} days after the customer pays.</p>
       </div>
       <div style={card}>
         <b>Customer package prices (back office catalogue)</b>

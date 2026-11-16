@@ -347,10 +347,12 @@ def exhibit_html(seat: str, exhibit_version: str) -> str:
             "collected.</p>"
             "<ul>%s<li>Package monthly fee, Month 2 onward: <b>%s%%</b> of each monthly fee collected</li>"
             "<li>Custom SaaS setup and monthly service: <b>%s%%</b> of what is collected</li>"
-            "<li>Add-ons follow the deal they are sold on.</li>"
+            "<li>Add-ons sold on a package deal: <b>%s%%</b> of the add-on's one-time setup price; "
+            "an add-on's monthly amount is part of the monthly fee above. On Custom SaaS, add-ons "
+            "follow the Custom SaaS rate.</li>"
             "<li>Commission is held 14 days after the customer pays. Partial payments are prorated.</li></ul>"
             % (_html.escape(label), _html.escape(exhibit_version), _html.escape(label), dbc.RULES_VERSION, rows,
-               dbc.PACKAGE_PCT[role], dbc.SAAS_PCT[role]))
+               dbc.PACKAGE_PCT[role], dbc.SAAS_PCT[role], dbc.PACKAGE_ADDON_SETUP_PCT[role]))
 
 
 # ── agreement envelopes ──────────────────────────────────────────────────────

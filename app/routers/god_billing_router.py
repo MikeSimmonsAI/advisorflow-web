@@ -1013,6 +1013,59 @@ def provision_stripe(platform_id: str, body: ProvisionIn = ProvisionIn(),
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# EVOSYS PRO STANDARD PACKAGES — the approved prices, applied end to end
+# ═══════════════════════════════════════════════════════════════════════════
+# Basic / Growth / Professional from deal_builder_commission.STANDARD_PACKAGES
+# into brand_packages, brand_billing_plans and TEST-mode Stripe Prices. See
+# app/services/evosys_package_catalog.py for exactly what is and is not touched.
+
+@router.get("/evosys-standard-packages")
+def evosys_standard_packages(db: Session = Depends(get_db),
+                             user: User = Depends(require_god)):
+    """Preview what applying the approved prices would change, plus a
+    read-only check of the database against Stripe. Writes nothing."""
+    from app.services import evosys_package_catalog
+    result = evosys_package_catalog.run(db, apply=False)
+    db.rollback()
+    return result
+
+
+@router.post("/evosys-standard-packages/apply")
+def apply_evosys_standard_packages(db: Session = Depends(get_db),
+                                   user: User = Depends(require_god)):
+    """Apply the approved prices. Idempotent: a second call changes nothing."""
+    from app.services import evosys_package_catalog
+    planned = evosys_package_catalog.run(db, apply=False)
+    if any(p.get("stripe_price", {}).get("action") == "blocked" for p in planned["packages"]) \
+            or planned["blockers"]:
+        db.rollback()
+        raise HTTPException(status_code=409, detail={
+            "message": "Not applied - fix these first.", "blockers": planned["blockers"],
+            "packages": [{"package": p["package"], "stripe_price": p.get("stripe_price")}
+                         for p in planned["packages"]]})
+    try:
+        result = evosys_package_catalog.run(db, apply=True)
+    except Exception:                                       # pragma: no cover
+        db.rollback()
+        log.exception("evosys standard packages: apply failed")
+        raise HTTPException(status_code=502, detail="Applying the approved prices failed. "
+                            "Nothing was written. See the service log.")
+    _audit(db, user, "billing_catalogue.evosys_standard_packages_applied", AUDIT_TARGET_PLAN,
+           result.get("platform_id") or "", before={"packages": [
+               {"package": p["package"],
+                "package_before": p.get("package_before"), "plan_before": p.get("plan_before")}
+               for p in result["packages"]]},
+           after={"version": result["version"], "packages": [
+               {"package": p["package"], "package_changes": p.get("package_changes"),
+                "plan_changes": p.get("plan_changes"),
+                "stripe_price": p.get("stripe_price")} for p in result["packages"]]},
+           note="Approved EvoSys Pro standard package prices %s applied" % result["version"],
+           platform_id=result.get("platform_id"))
+    db.commit()
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # REVENUE — real numbers, or an honest null
 # ═══════════════════════════════════════════════════════════════════════════
 
