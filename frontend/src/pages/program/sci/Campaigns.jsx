@@ -15,6 +15,7 @@ import {
   Banner, Chip, Empty, ErrorLine, Field, FilterChips, Icon, Kpi, Loading, PageHead, Panel, SearchBox, Tabs, TypedConfirm,
   errText, num, when,
 } from './ui'
+import { defaultCampaign } from './campaignDefault'
 
 const PURPOSE = {
   cemetery_x_sell: 'Additional cemetery planning options', cremation: 'Cremation and memorial options',
@@ -53,7 +54,7 @@ export default function Campaigns({ isManager, locationId, locations, performanc
   useEffect(() => {
     api.get('/program/campaigns').then(d => {
       setRows(d)
-      setCur(c => d.find(f => f.key === targetCampaign) || c || d[0] || null)
+      setCur(c => defaultCampaign(d, targetCampaign, c))
     }).catch(e => setErr(errText(e)))
     api.get('/program/health').then(h => setSms(h.sms || null)).catch(() => setSms(null))
   }, []) // initial selection follows the deep link if provided

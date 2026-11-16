@@ -80,7 +80,7 @@ function sleep(ms) {
 // THE OPTIONS THAT ARE OURS, NOT `fetch`'s. Everything else in `options` is
 // spread into fetch() verbatim, so anything we invent has to be named here or
 // it silently becomes a no-op property on the request init object.
-const CLIENT_ONLY_OPTIONS = ['params', 'noOrgContext', 'skipRedirect', 'asCustomer', 'asBlob']
+const CLIENT_ONLY_OPTIONS = ['params', 'noOrgContext', 'skipRedirect', 'asCustomer', 'asBlob', 'workspaceId']
 
 /**
  * Serialise a `params` object onto a path as a query string.
@@ -170,7 +170,8 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
   // because the leak that the route rule closed was the header being sent
   // IMPLICITLY from wherever somebody happened to be standing. The server
   // authorizes it exactly as before.
-  const orgOverride = orgOverrideFor(
+  const orgOverride = acqClientOverride(
+    typeof window !== 'undefined' ? window.location.pathname : '/', options) || orgOverrideFor(
     typeof window !== 'undefined' ? window.location.pathname : '/',
     { orgId: getOrgContext()?.orgId || null,
       noOrgContext: !!options.noOrgContext,
@@ -193,14 +194,20 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
   // an active customer_org membership on arrival and ignores it otherwise, so
   // editing this value in devtools changes which workspace you ASK for and
   // never which one you get.
-  const wsId = getWorkspaceContext()
+  // `workspaceId`: one call asking for one named workspace (the mobile app's
+  // program cards each ask about their own). Still only a request: the server
+  // validates it against an active membership exactly as the stored one.
+  const wsId = options.workspaceId || getWorkspaceContext()
   if (wsId) headers['X-Workspace-Id'] = wsId
   // THE SELECTED LOCATION (the entitlement control plane's "workspace") —
   // also a REQUEST, never a grant. Sent only when the server advertised the
   // header on /branding/org (it does so only once its CORS allow-list carries
   // it) and only for the organization the selection was made in. The server
   // re-validates it against the person's location assignments every time.
-  const wsLoc = workspaceLocationHeader()
+  // A call naming its own workspace carries a location only when the saved
+  // selection belongs to that same workspace.
+  const wsLoc = (options.workspaceId && (getWorkspaceLocation() || {}).orgId !== options.workspaceId)
+    ? null : workspaceLocationHeader()
   if (wsLoc) headers[wsLoc[0]] = wsLoc[1]
   // Executive Observation Mode: inject org context header so the server can
   // pass require_tenant_user while still marking the session read-only.
@@ -377,9 +384,10 @@ function _getDedupeKey(path, opts) {
   // platform-context read of the same path already in flight — which is the
   // same wrong answer this option exists to stop, arriving by another route.
   const org = opts.asCustomer
+    || acqClientOverride(typeof window !== 'undefined' ? window.location.pathname : '/', opts)
     || (opts.noOrgContext ? '' : (getOrgContext()?.orgId || ''))
   const brand = getBrandContext()?.platformId || ''
-  const ws = getWorkspaceContext() || ''
+  const ws = opts.workspaceId || getWorkspaceContext() || ''
   const wsLocation = (workspaceLocationHeader() || [])[1] || ''
   const obs = _observationOrgId || ''
   const flags = [opts.noOrgContext ? 1 : 0, opts.skipRedirect ? 1 : 0,
@@ -409,7 +417,12 @@ function dedupedGet(path, opts = {}) {
 export const api = {
   get: (path, opts = {}) => dedupedGet(path, opts),
   // `opts.headers` carries per-call headers such as Idempotency-Key.
-  post: (path, body, opts = {}) => request(path, { method: 'POST', body: body instanceof FormData ? body : JSON.stringify(body), ...(opts.headers ? { headers: opts.headers } : {}) }),
+  // `opts.asCustomer` / `opts.workspaceId`: the one workspace this write is for
+  // (as on reads); the server re-authorizes it. Omitted, nothing changes.
+  post: (path, body, opts = {}) => request(path, { method: 'POST', body: body instanceof FormData ? body : JSON.stringify(body),
+    ...(opts.headers ? { headers: opts.headers } : {}),
+    ...(opts.asCustomer ? { asCustomer: opts.asCustomer } : {}),
+    ...(opts.workspaceId ? { workspaceId: opts.workspaceId } : {}) }, 0, opts.skipRedirect || false),
   put: (path, body) => request(path, { method: 'PUT', body: body instanceof FormData ? body : JSON.stringify(body) }),
   patch: (path, body) => request(path, { method: 'PATCH', body: body instanceof FormData ? body : JSON.stringify(body) }),
   delete: (path) => request(path, { method: 'DELETE' }),
@@ -437,7 +450,8 @@ export async function fetchObjectUrl(path) {
   const headers = token ? { Authorization: `Bearer ${token}` } : {}
   // The SAME workspace the page is reading: without it the platform owner
   // standing in a customer workspace (SCI Live) got 403 and no voicemail played.
-  const orgOverride = orgOverrideFor(
+  const orgOverride = acqClientOverride(
+    typeof window !== 'undefined' ? window.location.pathname : '/', {}) || orgOverrideFor(
     typeof window !== 'undefined' ? window.location.pathname : '/',
     { orgId: getOrgContext()?.orgId || null, noOrgContext: false, asCustomer: null })
   if (orgOverride) headers['X-Org-Override'] = orgOverride
@@ -873,6 +887,41 @@ export function getOrgContext() {
 }
 
 
+// ── AN EVOSYS ACQUISITION ADMIN INSIDE A CLIENT'S PORTAL (#452) ─────────────
+//
+// Separate from the owner's God Mode selection on purpose. It is sent ONLY
+// from the client portal's own screens (/program/acquisition/*) - never from
+// the admin's Wholesale or other workspaces - and the server honours it only
+// for a login holding the Acquisition admin grant, only for an acquisition
+// client, only on that portal's API (app/services/acquisition/client_view.py).
+// Like every other context here it is a REQUEST, never a grant.
+const ACQ_CLIENT_KEY = 'af_acq_client_view'
+const ACQ_PORTAL = '/program/acquisition'
+
+export function setAcqClientView(orgId, orgName) {
+  try { localStorage.setItem(ACQ_CLIENT_KEY, JSON.stringify({ orgId, orgName })) } catch { /* not sent */ }
+}
+
+export function getAcqClientView() {
+  try {
+    const raw = localStorage.getItem(ACQ_CLIENT_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+export function clearAcqClientView() {
+  try { localStorage.removeItem(ACQ_CLIENT_KEY) } catch { /* nothing to clear */ }
+}
+
+export function acqClientOverride(pathname, opts = {}) {
+  if (opts.asCustomer || opts.noOrgContext) return null
+  const p = (pathname || '/').split('?')[0]
+  if (!(p === ACQ_PORTAL || p.startsWith(ACQ_PORTAL + '/'))) return null
+  return getAcqClientView()?.orgId || null
+}
+
 export function clearOrgContext() {
   localStorage.removeItem(ORG_CONTEXT_KEY)
   localStorage.removeItem('bb_org_context') // clean up legacy key
@@ -949,6 +998,7 @@ export function clearAllContext() {
   clearWorkspaceContext()
   clearWorkspaceLocation()
   clearObservationContext()
+  clearAcqClientView()
 }
 
 // ── THE SELECTED LOCATION (entitlement "workspace") ─────────────────────────

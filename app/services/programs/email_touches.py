@@ -651,8 +651,9 @@ def plan(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
     per-contact review check runs only for contacts actually due a touch."""
     now = now or datetime.utcnow()
     org_id = prog.organization_id
-    fams = {f.key: f for f in db.query(CampaignFamily).filter(
-        CampaignFamily.organization_id == org_id, CampaignFamily.is_active.is_(True)).all()}
+    from app.services.programs import campaigns as _camp507
+    fams = {f.key: f for f in _camp507.visible(db, org_id, db.query(CampaignFamily).filter(
+        CampaignFamily.organization_id == org_id, CampaignFamily.is_active.is_(True))).all()}
     if not fams:
         return []
     recs = (db.query(ProgramSourceRecord)

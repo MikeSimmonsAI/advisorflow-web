@@ -11,6 +11,14 @@ from app.models.program_models import CampaignFamily, ProgramSourceRecord
 from app.services.programs import campaigns as C, holds, identity, importer, promote, send_approval, setup
 from tests.test_outreach_program import _h, program  # noqa: F401
 
+
+@pytest.fixture(autouse=True)
+def _sci_workspace_identity(monkeypatch, sample_org):
+    """These tests run SCI's own Central Alabama campaign in the shared test
+    organization; say so, as production does (SMS_PROGRAM_ORG_SCI). Since #507
+    the campaign is SCI's only - another workspace never sees it."""
+    monkeypatch.setenv("SMS_PROGRAM_ORG_SCI", sample_org.id)
+
 HEAD = ("Lead Owner: Manager,Lead Owner,First Name,Last Name,Email,Lead Status,Last Activity,"
         "Last Activity Date,Phone,Nearest/Preferred Location,Campaign Channel,Create Date\n")
 

@@ -708,6 +708,36 @@ def op_dep(org_id: str, request: Request, db: Session = Depends(get_db),
     return Op(db, user, org, False, perms)
 
 
+@ops_router.post("/client-portal/exit")
+def exit_client_portal(payload: dict = Body(default={}), db: Session = Depends(get_db),
+                       user: User = Depends(require_acq_master)):
+    """Leaving a client's portal - audited on that client's log."""
+    org_id = (payload or {}).get("organization_id")
+    org = db.query(Organization).filter(Organization.id == org_id).first() if org_id else None
+    if org is not None and C.acquisition_identity(org):
+        log_action(db, org.id, user.id, "acquisition_client_portal_exit", "organization", org.id,
+                   details={"by": user.email})
+    return {"status": "exited"}
+
+
+@ops_router.post("/{org_id}/client-portal")
+def enter_client_portal(org_id: str, db: Session = Depends(get_db),
+                        user: User = Depends(require_acq_master)):
+    """Open a service company's own client portal as an EvoSys Acquisition
+    admin (or the owner). Grants nothing: the portal is reached request by
+    request through the selected-client header, re-checked by the server every
+    time (app/services/acquisition/client_view.py). Audited."""
+    from app.services.acquisition import client_view as CV
+    org = _client_org(db, org_id)
+    before = CV.membership_count(db, user.id)
+    log_action(db, org.id, user.id, "acquisition_client_portal_enter", "organization", org.id,
+               details={"by": user.email})
+    after = CV.membership_count(db, user.id)
+    return {"context": {"customer": {"id": org.id, "name": org.name}},
+            "memberships_before": before, "memberships_after": after,
+            "landing": "/program/acquisition"}
+
+
 @ops_router.get("/clients")
 def ops_clients(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     # WHO IS SIGNED IN, stated by the server (#452 owner-access fix): the shell
