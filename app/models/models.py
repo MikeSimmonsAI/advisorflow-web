@@ -19,7 +19,7 @@ from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, Date, ForeignKey, Text,
     UniqueConstraint, Index, Enum as SAEnum, LargeBinary, Numeric
 )
-from sqlalchemy.orm import relationship, declarative_base
+from sqlalchemy.orm import relationship, declarative_base, deferred
 from sqlalchemy.sql import func
 from sqlalchemy import text
 from datetime import datetime
@@ -826,7 +826,12 @@ class User(Base):
 
     # Profile photo — stored as base64 data URL (e.g. "data:image/jpeg;base64,...")
     # so it's self-contained with no external storage dependency.
-    profile_photo_url = Column(Text, nullable=True)
+    # DEFERRED (audit #650, 2026-11-15): production photos run up to 2.48 MB
+    # per row (11 MB across 10 users). get_current_user loads the User on every
+    # authenticated request, so without this each API call from one of those
+    # accounts read the whole photo. It now loads only when a screen reads it
+    # (settings/profile, admin user list) - same request session, same value.
+    profile_photo_url = deferred(Column(Text, nullable=True))
 
     # Personal contact info (NOT Twilio) — used for directory/profile display
     phone = Column(String, nullable=True)       # e.g. "+14155551234"
