@@ -15,7 +15,9 @@ from tests.test_evosense_discovery_types import _P, _stacked
 from tests.test_evosense_foreclosure_cycles import TODAY, world  # noqa: F401 - fixture
 
 
-def _fc(sale="2026-11-03", verified=True):
+def _fc(sale=None, verified=True):
+    # An upcoming sale whatever day the suite runs (a fixed date stops counting once it passes).
+    sale = sale or (date.today() + timedelta(days=18)).isoformat()
     ev = {"source": "tx_clerk_foreclosure" if verified else "csv_import",
           "provenance": {"sale_date": sale, "claim": not verified}}
     return {"signal_type": "PRE_FORECLOSURE", "freshness": "current", "sources": [ev["source"]],

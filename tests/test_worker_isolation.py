@@ -69,7 +69,16 @@ def review_env(db_session, sample_org, sample_advisor, monkeypatch):
     from app.crons import review_request_cron as rc
     from app.services import public_identity, wholesale_sms
     from app.utils.crypto import encrypt_value
+    from app.services import contact_hours
     import twilio.rest
+
+    # Texting hours (9 AM - 8 PM, family's time zone) are real wall-clock
+    # rules; these tests are about claims and retries, so run them at noon CT
+    # whatever time the suite runs (they failed every night otherwise).
+    _check = contact_hours.check
+    _noon = datetime(2026, 11, 16, 18, 0, 0)
+    monkeypatch.setattr(contact_hours, "check",
+                        lambda lead, now_utc=None: _check(lead, now_utc or _noon))
 
     leads = [_lead(db_session, sample_org, sample_advisor, i) for i in (1, 2)]
     bookings = []
