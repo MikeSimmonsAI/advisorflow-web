@@ -892,7 +892,7 @@ class ContactRegistry(Base):
     organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
     normalized_phone = Column(String, nullable=False)  # E.164, digits only
     normalized_last_name = Column(String, nullable=False)  # lowercased, stripped
-    first_seen_lead_id = Column(String, ForeignKey("leads.id"), nullable=True)
+    first_seen_lead_id = Column(String, ForeignKey("leads.id"), nullable=True, index=True)
     owning_user_id = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
@@ -1048,7 +1048,7 @@ class Lead(Base):
     capacity_held_at      = Column(DateTime, nullable=True)
     capacity_hold_reason  = Column(String, nullable=True)   # e.g. "max_leads"
     capacity_released_at  = Column(DateTime, nullable=True)
-    duplicate_of_lead_id = Column(String, ForeignKey("leads.id"), nullable=True)
+    duplicate_of_lead_id = Column(String, ForeignKey("leads.id"), nullable=True, index=True)
 
     # Physical address — collected at import or via lead edit
     street_address = Column(String, nullable=True)

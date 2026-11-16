@@ -251,7 +251,7 @@ class ProgramSourceRecord(Base):
     journey_started_by = Column(String, nullable=True)
     # Set only when the staged row is later committed to a live contact/lead.
     org_contact_id = Column(String, nullable=True)
-    lead_id = Column(String, ForeignKey("leads.id"), nullable=True)
+    lead_id = Column(String, ForeignKey("leads.id"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

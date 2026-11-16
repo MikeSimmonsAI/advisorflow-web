@@ -392,7 +392,8 @@ def send_refusal(db: Session, lead: Lead, send_source: Optional[str] = None) -> 
         active = (db.query(CampaignFamily.is_active)
                   .filter(CampaignFamily.organization_id == lead.organization_id,
                           CampaignFamily.key == key).scalar())
-        if not active:
+        from app.services.programs import campaigns as _camp507
+        if not active or _camp507.hidden_in(db, lead.organization_id, key):
             return CAMPAIGN_OFF_REFUSAL
         from app.services.programs.campaigns import OWN_COPY_KEYS
         # Cold outreach only: answering a family who wrote back or booked
@@ -580,6 +581,8 @@ def cadence_text(db: Session, lead: Lead, touch_number: int) -> Optional[str]:
         fam = (db.query(CampaignFamily)
                .filter(CampaignFamily.organization_id == lead.organization_id,
                        CampaignFamily.key == rec.campaign_family).first())
+        if fam is not None and _camp.hidden_in(db, lead.organization_id, fam.key):
+            fam = None                       # #507: never another program's copy
         tpl = _camp.sms_for(fam, touch_number) if fam is not None else None
         if not tpl:
             return None
@@ -589,6 +592,9 @@ def cadence_text(db: Session, lead: Lead, touch_number: int) -> Optional[str]:
     fam = (db.query(CampaignFamily)
            .filter(CampaignFamily.organization_id == lead.organization_id,
                    CampaignFamily.key == key).first())
+    from app.services.programs import campaigns as _camp507
+    if fam is not None and _camp507.hidden_in(db, lead.organization_id, fam.key):
+        fam = None                           # #507: never another program's copy
     if fam is None or not fam.sms_template:
         return None
     return render(fam.sms_template, _with_booking(db, lead, fam.sms_template, ctx["fields"]))

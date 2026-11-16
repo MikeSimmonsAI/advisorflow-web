@@ -69,7 +69,9 @@ SOURCE_LABELS = dict(SOURCE_OPTIONS)
 # upload can never mark its own batch as an SCI one.
 SCI_DESTINATION = "sci"
 SCI_SOURCE_SYSTEM = "program"
-SCI_SOURCE_LABEL = "SCI program file"
+# Display only (#507): a program workspace's file - SCI's or Restland's. Batches are
+# identified by SCI_SOURCE_SYSTEM, never by this label.
+SCI_SOURCE_LABEL = "Program file"
 
 
 def is_sci_batch(batch) -> bool:

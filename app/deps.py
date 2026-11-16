@@ -318,6 +318,13 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
     # super_admin are the internal administration experience and never locked.
     # See app/services/program_experience.py.
     if user.role not in ("god_admin", "super_admin"):
+        # An EvoSys Acquisition admin working inside a client's portal: the
+        # client becomes this request's tenant BEFORE the program lock decides,
+        # so the lock judges the client portal, not the admin's own Wholesale
+        # workspace. Honoured only for the grant + an acquisition client + the
+        # portal's own API (app/services/acquisition/client_view.py).
+        from app.services.acquisition import client_view as _acq_cv
+        _acq_cv.apply(db, user, request)
         from app.services import program_experience
         program_experience.enforce(db, user, request)
 

@@ -668,7 +668,9 @@ def dashboard(location_id: Optional[str] = Query(None), db: Session = Depends(ge
         })
     loc_perf.sort(key=lambda x: (-x["leads"], x["name"]))
 
-    fams = {f.key: f for f in db.query(CampaignFamily).filter(CampaignFamily.organization_id == org_id).all()}
+    from app.services.programs import campaigns as _camp507
+    fams = {f.key: f for f in _camp507.visible(db, org_id, db.query(CampaignFamily)
+                                               .filter(CampaignFamily.organization_id == org_id)).all()}
     fam_counts = Counter(r.campaign_family or "unmapped" for r in recs)
     fam_resp = Counter(r.campaign_family or "unmapped" for r in resps)
     campaign_perf = [{"key": k, "name": fams[k].name if k in fams else "Unmapped",
@@ -1804,9 +1806,21 @@ def send_unapprove(body: PickIn, db: Session = Depends(get_db), user: User = Dep
 @router.get("/campaigns")
 def list_campaigns(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     prog = _program(db, user)
-    return [_family_full(db, f) for f in db.query(CampaignFamily)
-            .filter(CampaignFamily.organization_id == prog.organization_id)
+    from app.services.programs import campaigns as _camp
+    return [_family_full(db, f) for f in _camp.visible(db, prog.organization_id, db.query(CampaignFamily)
+            .filter(CampaignFamily.organization_id == prog.organization_id))
             .order_by(CampaignFamily.name).all()]
+
+
+def _own_family(db: Session, prog, family_id: str) -> CampaignFamily:
+    """This workspace's campaign, or 404 - another program's SCI-only campaign
+    (#507) is answered exactly like one that does not exist."""
+    from app.services.programs import campaigns as _camp
+    f = db.query(CampaignFamily).filter(CampaignFamily.id == family_id,
+                                        CampaignFamily.organization_id == prog.organization_id).first()
+    if f is None or _camp.hidden_in(db, prog.organization_id, f.key):
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+    return f
 
 
 class FamilyIn(BaseModel):
@@ -1826,10 +1840,7 @@ def update_campaign(family_id: str, body: FamilyIn, db: Session = Depends(get_db
     """Edit a family's modes and copy. Activation is not done here - see readiness."""
     prog = _program(db, user)
     _require_manager(db, user)
-    f = db.query(CampaignFamily).filter(CampaignFamily.id == family_id,
-                                        CampaignFamily.organization_id == prog.organization_id).first()
-    if f is None:
-        raise HTTPException(status_code=404, detail="Campaign not found.")
+    f = _own_family(db, prog, family_id)
     data = body.dict(exclude_unset=True)
     for k in ("first_touch_email_mode", "followup_email_mode"):
         if k in data and data[k] not in EMAIL_MODES:
@@ -1882,10 +1893,7 @@ def set_campaign_active(family_id: str, body: ActivationIn, db: Session = Depend
     family's name, and is audit-logged."""
     prog = _program(db, user)
     _require_manager(db, user)
-    f = db.query(CampaignFamily).filter(CampaignFamily.id == family_id,
-                                        CampaignFamily.organization_id == prog.organization_id).first()
-    if f is None:
-        raise HTTPException(status_code=404, detail="Campaign not found.")
+    f = _own_family(db, prog, family_id)
     if body.active and (body.confirm or "").strip().lower() != f.name.strip().lower():
         raise HTTPException(status_code=422, detail="Type the campaign name to confirm switching it on.")
     if body.active:
@@ -1913,10 +1921,7 @@ def preview_campaign(family_id: str, location_id: Optional[str] = Query(None),
     """Render one family for one location (and optionally one contact, or a
     made-up sample first name). Sends nothing."""
     prog = _program(db, user)
-    f = db.query(CampaignFamily).filter(CampaignFamily.id == family_id,
-                                        CampaignFamily.organization_id == prog.organization_id).first()
-    if f is None:
-        raise HTTPException(status_code=404, detail="Campaign not found.")
+    f = _own_family(db, prog, family_id)
     rec = None
     if record_id:
         rec = db.query(ProgramSourceRecord).filter(ProgramSourceRecord.id == record_id,
@@ -1967,10 +1972,7 @@ def preview_campaign_draft(family_id: str, body: DraftPreviewIn, db: Session = D
     import re as _re
     from app.services.programs import campaigns as _camp
     prog = _program(db, user)
-    f = db.query(CampaignFamily).filter(CampaignFamily.id == family_id,
-                                        CampaignFamily.organization_id == prog.organization_id).first()
-    if f is None:
-        raise HTTPException(status_code=404, detail="Campaign not found.")
+    f = _own_family(db, prog, family_id)
     if f.key not in _camp.OWN_COPY_KEYS:
         raise HTTPException(status_code=422, detail="Draft preview is for campaigns with their own sequence.")
     prof = db.query(LocationProfile).filter(LocationProfile.organization_id == prog.organization_id,
@@ -2070,6 +2072,8 @@ def central_alabama_roster(location_id: Optional[str] = Query(None), db: Session
     from app.models.program_models import ProgramEmailTouch, ProgramResponse
     prog = _program(db, user)
     org_id = prog.organization_id
+    if _camp.hidden_in(db, org_id, _camp.CENTRAL_ALABAMA_KEY):
+        raise HTTPException(status_code=404, detail="Campaign not found.")
     all_recs = (db.query(ProgramSourceRecord)
                 .filter(ProgramSourceRecord.organization_id == org_id,
                         ProgramSourceRecord.campaign_family == _camp.CENTRAL_ALABAMA_KEY).all())
@@ -2233,7 +2237,7 @@ def _ca_family(db: Session, prog, family_id: Optional[str] = None) -> CampaignFa
     q = db.query(CampaignFamily).filter(CampaignFamily.organization_id == prog.organization_id)
     f = (q.filter(CampaignFamily.id == family_id) if family_id else
          q.filter(CampaignFamily.key == _camp.CENTRAL_ALABAMA_KEY)).first()
-    if f is None:
+    if f is None or _camp.hidden_in(db, prog.organization_id, f.key):
         raise HTTPException(status_code=404, detail="Campaign not found.")
     if f.key not in _camp.OWN_COPY_KEYS:
         raise HTTPException(status_code=422, detail="Start / Resume Journey is for campaigns with their own sequence.")
@@ -2915,12 +2919,14 @@ def sci_import_preview(batch_id: str, db: Session = Depends(get_db),
         out["stage"] = translate_rows(res["stage"], built["row_numbers"])
         out["promotion_plan"] = res.get("promotion_plan")
         if res["stage"].get("errors"):
-            blockers = blockers or ["SCI refuses this file: blank or repeated Lead IDs."]
+            blockers = blockers or ["This file was refused: blank or repeated Lead IDs."]
     out["blockers"] = blockers
+    # #507 (Nov 16): previewing a file seeds no campaign; only this workspace's
+    # own campaigns are offered (never SCI's Central Alabama elsewhere).
     from app.services.programs import campaigns as _camp
-    _camp.ensure_central_alabama(db, org.id)
     out["campaigns"] = [{"key": f.key, "name": f.name, "active": bool(f.is_active)}
-                        for f in db.query(CampaignFamily).filter(CampaignFamily.organization_id == org.id)
+                        for f in _camp.visible(db, org.id, db.query(CampaignFamily)
+                                               .filter(CampaignFamily.organization_id == org.id))
                         .order_by(CampaignFamily.name).all()]
     out["can_load"] = not blockers and b.commit_mode != SCI_LOAD
     out["sends_nothing"] = True
@@ -2951,8 +2957,11 @@ def sci_import_load(batch_id: str, body: Optional[SciLoadIn] = None, db: Session
         raise HTTPException(status_code=400, detail="mode must be 'stage' or 'load'.")
     prog, org = _sci_importer(db, user)
     b = _sci_batch(db, prog, batch_id)
+    # #507 (Nov 16): loading a file seeds no campaign, and a campaign that is
+    # not this workspace's is refused like one that does not exist.
     from app.services.programs import campaigns as _camp
-    _camp.ensure_central_alabama(db, org.id)
+    if body is not None and body.campaign_family and _camp.hidden_in(db, org.id, body.campaign_family):
+        raise HTTPException(status_code=404, detail="Campaign not found.")
     stored = json.loads(b.commit_report_json) if b.commit_report_json else None
     # IDEMPOTENT: a loaded batch is never loaded twice (a double click, a
     # retry); staging a staged batch again changes nothing either.
@@ -3009,7 +3018,7 @@ def sci_import_load(batch_id: str, body: Optional[SciLoadIn] = None, db: Session
     st = intake_bridge.translate_rows(res.get("stage") or {}, built["row_numbers"])
     if st.get("refused"):
         _release()
-        raise HTTPException(status_code=422, detail={"message": "SCI refused the file: %s" % st["refused"],
+        raise HTTPException(status_code=422, detail={"message": "The file was refused: %s" % st["refused"],
                                                      "blockers": [st["refused"]]})
     report = {
         "mode": mode, "run_id": res.get("run_id"),
