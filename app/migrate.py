@@ -293,6 +293,16 @@ def main(argv=None) -> int:
                     _txt = json.dumps(res, sort_keys=True, default=str)
                     for _i in range(0, max(len(_txt), 1), 3000):
                         log.info("workspace %s org=%s part[%d]: %s", mode, org_id, _i // 3000, _txt[_i:_i + 3000])
+                elif mode == "classify":
+                    # Nov 16: the Historical Family Review file's own Need Type
+                    # onto each family (tier) and its "confirm location" rows
+                    # held, before the launch. Sends nothing.
+                    from app.services.programs import restland_launch as _rlc
+                    try:
+                        res = _rlc.classify(_db, org, key)
+                    except _rlc.LaunchRefused as _e:
+                        res = {"refused": str(_e)}
+                    log.info("workspace classify org=%s: %s", org_id, json.dumps(res, sort_keys=True, default=str)[:3000])
                 elif mode in ("launch", "readback", "pause"):
                     # Issue #507 (Nov 15): Restland File Review launch - the text
                     # slot schedule, copy, audience, approval, journey start.

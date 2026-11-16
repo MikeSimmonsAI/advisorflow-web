@@ -304,3 +304,72 @@ def pause(db: Session, org: Organization, run_key: str, *, now: Optional[datetim
     db.commit()
     out["readback"] = readback(db, org, now=now)
     return out
+
+
+# ── NEED TYPE FROM THE FILE (Nov 16 launch of the Historical Family Review) ──
+# The Historical Family Review file (batch RES-20261116-001) carries each
+# family's need in its own "Need Type" column and the reviewer's order in
+# "Review Priority"; the import kept both on the program record but did not
+# set the family's tier, so the File Review audience (pre-need families only,
+# workspace_reset.plan) found nobody. classify() copies the file's own answer:
+#   "Pre Need" -> tier pre_need, "At Need" -> tier at_need (never texted by
+#   File Review); a family the file marks "3 · Confirm location and fit" is
+#   held for a person to confirm (its program record on hold, with the reason).
+# Only families with no tier yet are touched; every change is recorded with
+# its before value (WorkspaceResetItem). Restland only; sends nothing.
+NEED_TIER = {"pre need": "pre_need", "at need": "at_need"}
+CONFIRM_PRIORITY = "3"
+CONFIRM_HOLD = "Confirm location and fit before outreach (file Review Priority 3)"
+
+
+def classify(db: Session, org: Organization, run_key: str) -> Dict:
+    from app.models.reset_models import WorkspaceResetItem
+    from app.services import sms_programs
+    if org is None:
+        raise LaunchRefused("Organization not found.")
+    if sms_programs.is_sci_org(db, org.id):
+        raise LaunchRefused("Refused: this is the SCI organization.")
+    run = db.query(WorkspaceResetRun).filter_by(organization_id=org.id, run_key=run_key, mode="classify").first()
+    if run is not None and run.status == "applied":
+        return {"run_id": run.id, "already": True, "summary": json.loads(run.summary_json or "{}")}
+    run = run or WorkspaceResetRun(organization_id=org.id, run_key=run_key, mode="classify")
+    db.add(run)
+    db.flush()
+    tiers, held, unknown = Counter(), 0, Counter()
+    leads = {l.id: l for l in db.query(Lead).filter(Lead.organization_id == org.id).all()}
+    recs = (db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == org.id,
+                                                  ProgramSourceRecord.lead_id.isnot(None)).all())
+    for r in recs:
+        lead = leads.get(r.lead_id)
+        if lead is None:
+            continue
+        try:
+            raw = json.loads(r.raw_json or "{}")
+        except ValueError:
+            raw = {}
+        need = str(raw.get("Need Type") or "").strip().lower()
+        tier = NEED_TIER.get(need)
+        if not lead.tier:
+            if tier is None:
+                unknown[need or "(blank)"] += 1
+            else:
+                db.add(WorkspaceResetItem(run_id=run.id, organization_id=org.id, entity="lead", entity_id=lead.id,
+                                          action="set_tier", before_json=json.dumps({"tier": lead.tier}),
+                                          after_json=json.dumps({"tier": tier}), reason="File Need Type: %s" % need))
+                lead.tier = tier
+                tiers[tier] += 1
+        prio = str(raw.get("Review Priority") or "").strip()
+        if (lead.tier == "pre_need" and prio.startswith(CONFIRM_PRIORITY) and not r.on_hold
+                and r.approved_to_send_at is None):
+            db.add(WorkspaceResetItem(run_id=run.id, organization_id=org.id, entity="program_source_record",
+                                      entity_id=r.id, action="hold",
+                                      before_json=json.dumps({"on_hold": r.on_hold, "hold_reason": r.hold_reason}),
+                                      after_json=json.dumps({"on_hold": True, "hold_reason": CONFIRM_HOLD}),
+                                      reason=CONFIRM_HOLD))
+            r.on_hold, r.hold_reason = True, CONFIRM_HOLD
+            held += 1
+    summary = {"tier_set": dict(tiers), "held_confirm_location": held, "need_type_not_recognized": dict(unknown),
+               "tiers_now": dict(Counter(l.tier or "(none)" for l in leads.values()))}
+    run.status, run.finished_at, run.summary_json = "applied", datetime.utcnow(), json.dumps(summary)
+    db.commit()
+    return {"run_id": run.id, "already": False, "summary": summary}
