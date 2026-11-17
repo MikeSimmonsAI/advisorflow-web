@@ -44,6 +44,8 @@ def run(page, who, state):
             if route.request.method == "PUT":
                 pins["keys"] = json.loads(route.request.post_data or "{}").get("keys", [])
             body = pins
+        elif path == "/launcher/demos":
+            body = {"items": f.get("demos", [])}
         elif path == "/launcher/attention":
             body = {"items": f.get("attention", [])}
         elif path == "/health/ready":
@@ -65,7 +67,7 @@ def run(page, who, state):
     page.evaluate("""([t, u]) => { localStorage.clear(); localStorage.setItem('af_token', t);
                       localStorage.setItem('af_user', JSON.stringify(u)); }""",
                   [fake_jwt(f["user"]["id"]), f["user"]])
-    page.goto(APP + "/workspaces")
+    page.goto(APP + state.get("path", "/workspaces"))
     page.wait_for_selector(".pa2", timeout=15000)
     page.wait_for_timeout(800)
     # Load lazy photos: walk down the page, then wait (bounded) for every image.
@@ -83,6 +85,8 @@ def main():
         ("owner", "mockup-size-1672x941", {"width": 1672, "height": 941}, dict(ccb, viewport_only=True)),
         ("owner", "desktop-1536-viewport", {"width": 1536, "height": 864}, dict(ccb, viewport_only=True)),
         ("owner", "desktop-1536", {"width": 1536, "height": 1100}, {}),
+        ("owner", "demos-1536", {"width": 1536, "height": 900}, {"path": "/workspaces?view=demos"}),
+        ("owner", "demos-phone-390", {"width": 390, "height": 844}, {"path": "/workspaces?view=demos"}),
         ("owner", "desktop-1920", {"width": 1920, "height": 1200}, {}),
         ("owner", "laptop-1280", {"width": 1280, "height": 860}, {}),
         ("owner", "tablet-834", {"width": 834, "height": 1112}, {}),

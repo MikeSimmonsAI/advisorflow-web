@@ -187,3 +187,23 @@ test('Project Command Center (#667) is an owner tool: Administration, not a clie
   assert.equal(summaryCounts(owner, [], []).clients, summaryCounts(plain, [], []).clients)
   assert.match(read('src/pages/program/ProgramAccessPortal.jsx'), /item\.type === 'project_checklist'\) \? item\.href/)
 })
+
+test('Demos page: every demo grouped by link and deal status, names cleaned', async () => {
+  const { demoGroup, demoStatus, previewDisplayName, DEMO_FILTERS } = await import('../src/pages/program/v2/commandCenterModel.js')
+  const items = fixtures.owner.demos
+  const groups = Object.fromEntries(items.map(d => [previewDisplayName(d), demoGroup(d)]))
+  assert.equal(groups['Countryside Land Partners'], 'lost')
+  assert.equal(groups['VP Wraps Vehicle Protection'], 'lost')
+  assert.equal(groups['Commercial Cleaning Blueprint'], 'lost')     // "— Daniel Almaguer" removed
+  assert.equal(groups['Blue Ridge Gold & Jewelry'], 'open')
+  assert.equal(groups['Example Expired Demo Co'], 'expired')
+  assert.equal(demoStatus({ status: 'won' }).label, 'Won')
+  assert.equal(demoStatus({ status: 'open', customer: true }).label, 'Customer')
+  assert.deepEqual(DEMO_FILTERS.map(f => f.key), ['all', 'open', 'won', 'lost', 'expired'])
+  const panel = read('src/pages/program/v2/DemosPanel.jsx')
+  assert.match(panel, /\{d\.live && d\.url \? \(/)                    // only a live link is a link
+  assert.equal(/window\.open/.test(panel), false)
+  const center = read('src/pages/program/v2/CommandCenter.jsx')
+  assert.match(center, /\{demos\.length > 0 && \(/)                   // Demos only when the server listed some
+  assert.match(read('src/pages/program/ProgramAccessPortal.jsx'), /api\.get\('\/launcher\/demos'/)
+})

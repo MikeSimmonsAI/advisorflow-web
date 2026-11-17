@@ -69,12 +69,27 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
     return () => { active = false }
   }, [user?.id])
 
+  // DEMOS: every demo built for deals this login manages (open, won or lost)
+  // - the server's /launcher/demos answer, the same people as Previews. Any
+  // failure simply leaves the Demos page out.
+  const [demos, setDemos] = useState([])
+  useEffect(() => {
+    let active = true
+    api.get('/launcher/demos', { noOrgContext: true, skipRedirect: true })
+      .then(r => { if (active) setDemos(Array.isArray(r?.items) ? r.items : []) })
+      .catch(() => { if (active) setDemos([]) })
+    return () => { active = false }
+  }, [user?.id])
+
   // PLATFORM HEALTH: the public readiness report (/health/ready - app,
   // database, jobs). No answer = no tile; never a made-up "LIVE".
   const [health, setHealth] = useState(null)
   useEffect(() => {
     let active = true
+    // Readiness first; if that call fails, the plain liveness check (/health)
+    // still gives a real answer. Neither answering = no tile.
     api.get('/health/ready', { noOrgContext: true, skipRedirect: true })
+      .catch(() => api.get('/health', { noOrgContext: true, skipRedirect: true }))
       .then(r => { if (active) setHealth(r || null) })
       .catch(() => { if (active) setHealth(null) })
     return () => { active = false }
@@ -119,7 +134,7 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
     <CommandCenter user={user} cards={visible} others={others} previews={previews}
                    pins={pins} pinNote={pinNote} onTogglePin={togglePin} keyOf={keyOf}
                    onChoose={onChoose} hrefOf={hrefOf} attention={attention} health={health}
-                   isOwner={isOwner} canManageTeam={canManageTeam} myDayHref={myDayHref}
+                   isOwner={isOwner} canManageTeam={canManageTeam} myDayHref={myDayHref} demos={demos}
                    onSignOut={signOut} />
   )
 }

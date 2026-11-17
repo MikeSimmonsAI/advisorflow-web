@@ -1,3 +1,4 @@
+import { previewName } from '../programAccessModel.js'
 /**
  * PROGRAM ACCESS V2 (Premium Command Center) - presentation rules only.
  *
@@ -214,4 +215,37 @@ export function matchesQuery(item, q) {
   if (!q) return true
   return [item.display, item.summary, item.kind, item.orgLabel, item.organization_name, item.company_name]
     .some(t => t && String(t).toLowerCase().includes(q))
+}
+
+/* ── Demos page ──────────────────────────────────────────────────────────
+ * Grouping and wording for /launcher/demos entries (server facts only).
+ */
+
+export const DEMO_FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: 'open', label: 'Open deals' },
+  { key: 'won', label: 'Won' },
+  { key: 'lost', label: 'Lost' },
+  { key: 'expired', label: 'Link expired' },
+]
+
+/** One filter group per demo: a dead link first, then the deal's status. */
+export function demoGroup(d) {
+  if (!d?.live) return 'expired'
+  if (d.customer || d.status === 'won') return 'won'
+  if (d.status === 'lost') return 'lost'
+  return 'open'
+}
+
+/** The deal's status pill. */
+export function demoStatus(d) {
+  if (d?.customer) return { tone: 'won', label: 'Customer' }
+  if (d?.status === 'won') return { tone: 'won', label: 'Won' }
+  if (d?.status === 'lost') return { tone: 'lost', label: 'Lost' }
+  return { tone: 'open', label: 'Open deal' }
+}
+
+/** "Commercial Cleaning Blueprint — Daniel Almaguer" -> the business name. */
+export function previewDisplayName(d) {
+  return previewName(d) || String(d?.company_name || '')
 }

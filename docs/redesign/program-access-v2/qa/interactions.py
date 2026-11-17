@@ -55,6 +55,10 @@ def main():
         check("pinned/featured first: first card is the first in server order (SCI)",
               page.locator(".pa2-grid .pa2-card-name").first.inner_text() == "SCI")
         check("God Mode link for the owner", page.locator('a.pa2-nav-item[href="/god"]').count() == 1)
+        nav = [" ".join(t.split()) for t in page.locator(".pa2-nav-item").all_inner_texts()]
+        check("owner sidebar says where each link goes",
+              nav == ["Program Access", "Demos 7", "Sales — My Day", "Notifications 2", "People & Access", "Training",
+                      "God Mode", "Change Password"], str(nav))
 
         # search
         page.fill(".pa2-search input", "deal builder")
@@ -125,12 +129,48 @@ def main():
         check("no page errors", not errors, "; ".join(errors))
         ctx.close()
 
+        # demos page: sidebar item, view switch, filters, dead links, back
+        ctx = b.new_context(viewport={"width": 1536, "height": 1000})
+        page = ctx.new_page()
+        shots.run(page, "owner", {})
+        page.get_by_role("link", name="Demos 7").click()
+        page.wait_for_selector(".pa2-demos")
+        check("Demos opens from the sidebar (url ?view=demos)", "view=demos" in page.url, page.url)
+        check("Demos lists all 7 demos incl. lost deals", page.locator(".pa2-demo").count() == 7)
+        names = page.locator(".pa2-demo-name").all_inner_texts()
+        check("lost demos are back (Countryside, VP Wraps, Building Equity, Commercial Cleaning)",
+              all(n in names for n in ["Countryside Land Partners", "VP Wraps Vehicle Protection",
+                                       "Building Equity Investments LLC", "Commercial Cleaning Blueprint"]), str(names))
+        check("workspace cards and banner are not shown on Demos", page.locator(".pa2-grid .pa2-card").count() == 0
+              and page.locator(".pa2-feature").count() == 0)
+        page.get_by_role("button", name="Lost (4)").click()
+        check("Lost filter", page.locator(".pa2-demo").count() == 4)
+        page.get_by_role("button", name="Link expired (1)").click()
+        dead = page.locator(".pa2-demo").first
+        check("expired demo has no Open link", dead.locator("a").count() == 0 and "no longer works" in dead.inner_text())
+        page.get_by_role("button", name="All (7)").click()
+        hrefs = page.locator(".pa2-demo a").evaluate_all("els => els.map(e => [e.getAttribute('href'), e.target])")
+        check("live demos open in a new tab", len(hrefs) == 6 and all(h and t == "_blank" for h, t in hrefs), str(hrefs))
+        page.fill(".pa2-search input", "wraps")
+        check("search works on Demos", page.locator(".pa2-demo-name").all_inner_texts() == ["VP Wraps Vehicle Protection"])
+        page.fill(".pa2-search input", "")
+        page.go_back()
+        page.wait_for_timeout(300)
+        check("browser Back returns to the workspaces", page.locator(".pa2-grid .pa2-card").count() == 16)
+        page.get_by_role("link", name="Demos 7").click()
+        page.get_by_role("button", name="← Program Access").click()
+        page.wait_for_timeout(300)
+        check("Program Access button returns to the workspaces", page.locator(".pa2-grid .pa2-card").count() == 16 and "view=" not in page.url)
+        ctx.close()
+
         # salesperson: no owner-only items, pinned featured
         ctx = b.new_context(viewport={"width": 1536, "height": 1000})
         page = ctx.new_page()
         shots.run(page, "salesperson", {})
         nav = page.locator(".pa2-nav").inner_text()
         check("salesperson: no God Mode / People & Access", "God Mode" not in nav and "People" not in nav, nav)
+        check("salesperson: no Demos item (server lists none)", "Demos" not in nav, nav)
+        check("salesperson: no My Workspaces item", "My Workspaces" not in nav, nav)
         check("salesperson: no Executive Deal Builder", "Executive Deal Builder" not in page.content())
         check("salesperson: pinned Deal Builder is featured",
               page.locator("#pa2-feature-title").inner_text() == "Salesperson Deal Builder")

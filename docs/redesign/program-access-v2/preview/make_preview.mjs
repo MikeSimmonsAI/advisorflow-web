@@ -48,6 +48,7 @@ const script = `/* Program Access V2 design preview - TEST DATA ONLY (no real AP
       body = { keys: pins };
     }
     else if (p === '/launcher/attention') body = { items: f.attention || [] };
+    else if (p === '/launcher/demos') body = { items: f.demos || [] };
     else if (p === '/health/ready') body = { status: 'ok' };
     else if (p === '/settings/profile') body = f.user;
     return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }));
