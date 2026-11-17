@@ -171,3 +171,30 @@ test('Blue Ridge is navy with gold; approved identities unchanged', () => {
   assert.equal(programStyle({ program: 'volt', display: 'VOLT Marketing' }).accent, '#C62839')
   assert.equal(programStyle({ program: 'zzz', display: 'Unknown' }).accent, ACCENTS.fallback)
 })
+
+import { pinnedOrDesktop } from '../src/teamapp/teamHelpers.js'
+import { availableCategories, categoryOf, photoKeyFor, shortLine } from '../src/pages/program/v2/commandCenterModel.js'
+
+test('Pinned: phone pins first; otherwise desktop pins; otherwise desktop featured; never a preview', () => {
+  const keyOf = x => x.k
+  const inv = [{ k: 'a', type: 'workspace' }, { k: 'b', type: 'workspace' }, { k: 'p', type: 'preview', program: 'preview' }]
+  assert.deepEqual(pinnedOrDesktop(inv, ['b'], ['a'], keyOf), { items: [inv[1]], fromDesktop: false })
+  assert.deepEqual(pinnedOrDesktop(inv, [], ['b', 'a', 'x'], keyOf).items.map(keyOf), ['b', 'a'])
+  assert.equal(pinnedOrDesktop(inv, [], ['b'], keyOf).fromDesktop, true)
+  assert.deepEqual(pinnedOrDesktop(inv, [], [], keyOf).items.map(keyOf), ['a'], 'desktop featured = first workspace')
+  assert.deepEqual(pinnedOrDesktop(inv, [], ['p'], keyOf).items.map(keyOf), ['a'], 'a preview is never pinned')
+  assert.deepEqual(pinnedOrDesktop(inv, ['gone'], ['gone2'], keyOf).items.map(keyOf), ['a'], 'revoked pins fall through')
+  assert.deepEqual(pinnedOrDesktop([], [], [], keyOf).items, [])
+})
+
+test('phone cards use desktop V2 identity: photo, short line, category', () => {
+  const sci = { type: 'workspace', program: 'sci', display: 'SCI', orgLabel: 'Service Corporation International' }
+  const sales = { type: 'workspace', program: 'evosys_sales', display: 'EvoSys Sales' }
+  const db = { type: 'deal_builder', key: 'executive', display: 'Executive Deal Builder' }
+  assert.equal(photoKeyFor(sci), 'sci'); assert.equal(shortLine(sci), 'Service Corporation International')
+  assert.equal(shortLine(sales), 'Prospects & Outreach'); assert.equal(categoryOf(sales), 'sales')
+  assert.equal(categoryOf(db), 'sales'); assert.equal(categoryOf(sci), 'clients')
+  assert.deepEqual(availableCategories([sci, sales]).map(c => c.key), ['all', 'sales', 'clients'])
+  assert.equal(programStyle(sales).icon, 'briefcase')
+  assert.equal(programStyle({ type: 'project_checklist', key: 'projects' }).icon, 'check')
+})
