@@ -4,7 +4,7 @@
     POST /god/launch-board/projects                add (lands in backlog, unapproved)
     POST /god/launch-board/projects/{id}/{action}  lane|priority|approve|revoke|evidence|task|product
 
-God-only (require_god). Mutates only the launch-board tables (durable DB store; the file adapter is explicit
+The launch controls require God Mode. Checklist routes also allow the EvoSys platform login. Mutates only the launch-board tables (durable DB store; the file adapter is explicit
 local/test use via LAUNCH_BOARD_BACKEND=file); never triggers a relay run,
 messages anyone, or touches production.
 """
@@ -14,7 +14,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel, Field
 
-from app.deps import require_god
+from app.deps import get_current_user, require_god
 from app.models.models import User
 from app.services import launch_board as lb
 from app.services import launch_board_store as store
@@ -69,6 +69,12 @@ def board(response: Response, _god: User = Depends(require_god)):
         raise HTTPException(status_code=503, detail=str(e))
 
 
+def require_checklist_access(user: User = Depends(get_current_user)) -> User:
+    if not checklist.can_manage(user):
+        raise HTTPException(status_code=403, detail="Project Command Center access denied.")
+    return user
+
+
 class ChecklistTaskIn(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     done: bool = False
@@ -83,7 +89,7 @@ class ChecklistIn(BaseModel):
 
 
 @router.get("/checklist")
-def read_checklist(response: Response, _god: User = Depends(require_god)):
+def read_checklist(response: Response, _god: User = Depends(require_checklist_access)):
     response.headers["Cache-Control"] = "no-store"
     try:
         projects = store.get_store().load()["projects"]
@@ -101,7 +107,7 @@ def read_checklist(response: Response, _god: User = Depends(require_god)):
 
 
 @router.post("/checklist")
-def create_checklist(body: ChecklistIn, god: User = Depends(require_god),
+def create_checklist(body: ChecklistIn, god: User = Depends(require_checklist_access),
                      idempotency_key: Optional[str] = Header(default=None, max_length=120)):
     pid, replayed = _run(lambda b: checklist.save(b, None, body.model_dump(), _actor(god)),
                          idempotency_key)
@@ -109,7 +115,7 @@ def create_checklist(body: ChecklistIn, god: User = Depends(require_god),
 
 
 @router.post("/checklist/{pid}/save")
-def update_checklist(pid: int, body: ChecklistIn, god: User = Depends(require_god),
+def update_checklist(pid: int, body: ChecklistIn, god: User = Depends(require_checklist_access),
                      idempotency_key: Optional[str] = Header(default=None, max_length=120)):
     if store.backend() == "db" and body.expected_version is None:
         raise HTTPException(status_code=400, detail="Reload the project before saving.")
@@ -119,7 +125,7 @@ def update_checklist(pid: int, body: ChecklistIn, god: User = Depends(require_go
 
 
 @router.post("/checklist/starter")
-def starter_checklist(god: User = Depends(require_god)):
+def starter_checklist(god: User = Depends(require_checklist_access)):
     added, _ = _run(lambda b: checklist.import_starter(b, _actor(god)))
     return {"added": added}
 

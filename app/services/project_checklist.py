@@ -1,6 +1,17 @@
 """Owner checklist metadata on existing Launch Board projects."""
 from app.services import launch_board as lb
 
+PLATFORM_LOGIN = "platform@evosyspro.live"
+
+
+def can_manage(user):
+    """The owner and the named EvoSys operating account share the checklist."""
+    return user.is_active and (
+        user.role == "god_admin" or
+        (user.role == "org_admin" and (user.email or "").strip().lower() == PLATFORM_LOGIN)
+    )
+
+
 def status_for(project):
     if project.get("checklist_status"):
         return project["checklist_status"]

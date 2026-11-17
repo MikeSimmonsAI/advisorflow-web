@@ -243,7 +243,7 @@ export function programCards(ctx) {
       type: 'project_checklist', key: 'projects', variant: 'office', symbol: 'PC',
       kind: 'PLATFORM', display: 'Project Command Center',
       summary: 'Check off work, track project progress, and capture new ideas.',
-      href: '/god/project-command-center', actionLabel: 'Open Project Command Center',
+      href: '/project-command-center', actionLabel: 'Open Project Command Center',
     })
   }
   return { visible: cards, others, previews }
