@@ -1516,6 +1516,23 @@ export default function Layout({ children }) {
             one customer to another both land on the same path. */}
         <main className="main-content">
           <MdrNavContext.Provider value={mdrNav}>
+          {/* Buyers & Deals is one workflow (find buyers → criteria → room →
+              outreach → dispositions → deals): its screens are linked across
+              the top so moving along it needs no trip back to the rail. */}
+          {mdrNav ? (() => {
+            const g = mdrNav.groups.find((x) => x.key === 'buyers')
+            if (!g || !g.items.some((i) => i.to === mdrNav.activeTo)) return null
+            return (
+              <nav className="mdr-flow" aria-label="Buyers and deals workflow">
+                {g.items.map((i, n) => (
+                  <Link key={i.to} to={i.to} className={`mdr-flow__step${i.to === mdrNav.activeTo ? ' is-on' : ''}`}
+                        aria-current={i.to === mdrNav.activeTo ? 'page' : undefined}>
+                    <span className="mdr-flow__n" aria-hidden="true">{n + 1}</span>{i.label}
+                  </Link>
+                ))}
+              </nav>
+            )
+          })() : null}
           <PageBoundary key={location.pathname + '\u0000' + workspaceKey}>
             {/* A page that loads on first visit (utils/lazyPage) waits HERE,
                 inside the shell - without this the App-level fallback

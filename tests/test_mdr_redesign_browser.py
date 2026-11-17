@@ -73,12 +73,43 @@ def _no_page_error(page):
     assert "Something went wrong" not in txt and "This page failed" not in txt, txt[:300]
 
 
+def _sale_case(db, org_id, address, sale, handoff_sale):
+    """The screenshots' case on a sandbox property: the property's CURRENT sale
+    event is `sale` (verified clerk notice); an open hand-off was escalated
+    earlier for `handoff_sale` and carries that date in its note."""
+    import json as _j
+    from datetime import date as _d
+    from app.models.evosense_models import EvoSenseHandoff
+    from app.services.evosense import opportunity as OP
+    from app.services.evosense import sandbox_seed as SS
+    from app.services.evosense import work_priority as WP
+    p = SS.prop_at(db, org_id, address)
+    au = WP.auction_urgency("notice_verified", sale)
+    wp = WP.work_priority(au, workflow_state="DISCOVERED", contact_ready=False, owner_review=False, deal_level=None,
+                          score=p.opportunity_score, prop_id=p.id)
+    d = OP.detail(p) or {}
+    d["version"] = OP.VERSION
+    d.setdefault("measures", {})["row"] = WP.summary(au, wp)
+    p.opportunity_detail = _j.dumps(d)
+    p.sale_deadline = _d.fromisoformat(sale)
+    p.work_priority, p.work_priority_rank = wp["level"], wp["rank"]
+    db.add(EvoSenseHandoff(organization_id=org_id, property_id=p.id, status="open", priority=95, is_test=bool(p.is_test),
+                           reasons=_j.dumps([{"code": "AUCTION_DEADLINE", "label": "Verified foreclosure sale within two weeks",
+                                              "sale_date": handoff_sale}]),
+                           next_action="Foreclosure auction %s - Find contact" % handoff_sale))
+    db.commit()
+    return p
+
+
 @pytest.fixture()
 def mdr(client, ws):
     from app.services.evosense import sandbox_seed as SS
     db = ws["db"]
     SS.seed_review(db, ws["evo"].id, ws["evo_seat"], replies=True)
     db.commit()
+    # the moved sale (Nov 3 -> Dec 1) and a real disagreement (Dec 1 vs Dec 8)
+    _sale_case(db, ws["evo"].id, "2124 S Ervay St", "2026-12-01", "2026-11-03")
+    _sale_case(db, ws["evo"].id, "6120 Wedgwood Dr", "2026-12-01", "2026-12-08")
     return ws
 
 
@@ -213,8 +244,26 @@ def test_queue_views_drawer_and_return_position(client, mdr):
             _settle(page)
             _no_page_error(page)
             _shot(page, "06-queue-" + v)
+        # Upcoming Auctions: the moved sale and the disagreement, current date first
+        page.goto(ORIGIN + "/wholesale/evosense?view=auctions")
+        _settle(page)
+        text = page.inner_text(".wq-rows")
+        assert "2124 S Ervay St" in text and "Dec 1, 2026" in text and "Needs verification" in text
+        assert "Nov 3" not in text, "the passed hand-off date is never shown as the current sale"
+        page.click(".wq-row:has-text('2124 S Ervay St')")
+        page.wait_for_selector(".wq-detail .wq-callout")
+        det = page.inner_text(".wq-detail")
+        assert "Sale moved" in det and "Nov 3, 2026" in det and "Dec 1, 2026" in det
+        assert "Original note" in det and "2026-11-03" in det
+        _shot(page, "08-sale-moved-history")
+        page.click(".wq-row:has-text('6120 Wedgwood Dr')")
+        page.wait_for_selector(".wq-detail .wq-callout--verify")
+        det = page.inner_text(".wq-detail")
+        assert "Needs verification" in det and "Dec 1, 2026" in det and "Dec 8, 2026" in det
+        _shot(page, "09-sale-needs-verification")
         page.fill("#wq-q", "zzzz-nothing")
-        page.keyboard.press("Enter")
+        page.press("#wq-q", "Enter")
+        page.wait_for_url("**q=zzzz-nothing**")
         _settle(page)
         assert "Nothing matches that filter" in page.inner_text(".wq-rows")
         _shot(page, "07-queue-empty-filter")

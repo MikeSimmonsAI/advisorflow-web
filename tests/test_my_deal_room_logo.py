@@ -24,6 +24,10 @@ BRANDS = ROOT / "frontend" / "public" / "brands"
 SRC = ROOT / "frontend" / "src"
 LOGO = "/brands/my-deal-room-logo.svg"
 MARK = "/brands/my-deal-room-mark.svg"
+# My Deal Room redesign (Nov 2026): the open-door mark replaced the house tile in
+# the rail, the tab icon and the investor portal. The owner's original files are
+# kept and still ship (assets tests below).
+DOOR = "/brands/my-deal-room-door.svg"
 NS = "{http://www.w3.org/2000/svg}"
 
 
@@ -61,7 +65,7 @@ def test_only_evosys_wholesale_points_at_the_logo():
     t = (SRC / "theme.js").read_text(encoding="utf-8-sig")
     evo = _brand_block(t, "EVOSYSPRO")
     assert "wholesaleLogoUrl: '%s'" % LOGO in evo
-    assert "wholesaleFaviconUrl: '%s'" % MARK in evo
+    assert "wholesaleFaviconUrl: '%s'" % DOOR in evo
     assert "logoUrl: 'data:image/svg+xml;base64," in evo, "EvoSys Pro's own logo must stay"
     bab = _brand_block(t, "BOOKABOOST")
     assert "my-deal-room" not in bab and "wholesaleFaviconUrl" not in bab
@@ -98,9 +102,9 @@ def test_rendered_rail_slot_favicon_and_restore(client, ws):
                 pg.click(".mobile-menu-btn")
             pg.wait_for_timeout(800)
             r = _rail(pg)
-            assert r["src"] == LOGO and r["loaded"], r
-            assert (r["w"], r["h"]) == (180, 72), "same slot as before: %r" % r
-            assert r["icon"] == MARK and r["title"] == "My Deal Room"
+            assert r["src"] == DOOR and r["loaded"], r
+            assert (r["w"], r["h"]) == (32, 32), "open-door mark beside the wordmark: %r" % r
+            assert r["icon"] == DOOR and r["title"] == "My Deal Room"
             if width > 800:
                 # Leave the Wholesale shell inside the same page (a seat is held in
                 # Wholesale, so go to the public investor page, which unmounts the
@@ -108,7 +112,7 @@ def test_rendered_rail_slot_favicon_and_restore(client, ws):
                 pg.evaluate("() => { history.pushState({}, '', '/investors'); dispatchEvent(new PopStateEvent('popstate')) }")
                 pg.wait_for_timeout(1500)
                 icon = pg.evaluate("() => [location.pathname, document.title, document.querySelector(\"link[rel~='icon']\").getAttribute('href')]")
-                assert icon[0].startswith("/investors") and icon[2] != MARK and icon[2].startswith("data:image/svg+xml"), \
+                assert icon[0].startswith("/investors") and icon[2] != DOOR and icon[2].startswith("data:image/svg+xml"), \
                     "favicon must be restored outside My Deal Room screens: %r" % icon
             pg.close()
         pg = _page(b, client, db, p["bab_owner"], 1440, 900)
@@ -140,7 +144,7 @@ def test_investor_brandmark_only_for_my_deal_room(client, room):
         pg.goto(ORIGIN + "/investors")
         pg.wait_for_load_state("networkidle")
         pg.wait_for_timeout(800)
-        assert pg.evaluate(js) == {"img": MARK, "loaded": True, "w": 30, "name": "My Deal Room"}
+        assert pg.evaluate(js) == {"img": DOOR, "loaded": True, "w": 30, "name": "My Deal Room"}
         pg.close()
         for origin, mdr in (("https://evosyspro.live", True), ("https://bookaboost.com", False)):
             pg = b.new_page(viewport={"width": 1440, "height": 900})
@@ -151,14 +155,14 @@ def test_investor_brandmark_only_for_my_deal_room(client, room):
             got = pg.evaluate(js)
             icon = pg.evaluate("() => document.querySelector(\"link[rel~='icon']\").getAttribute('href')")
             if mdr:
-                assert got["img"] == MARK and got["loaded"] and got["name"] == "My Deal Room" and icon == MARK, got
+                assert got["img"] == DOOR and got["loaded"] and got["name"] == "My Deal Room" and icon == DOOR, got
             else:
-                assert got["img"] is None and got["name"] == "Deal Room" and icon != MARK, got
+                assert got["img"] is None and got["name"] == "Deal Room" and icon != DOOR, got
             pg.close()
         b.close()
 
 
-@pytest.mark.parametrize("name", ["my-deal-room-logo.svg", "my-deal-room-mark.svg"])
+@pytest.mark.parametrize("name", ["my-deal-room-logo.svg", "my-deal-room-mark.svg", "my-deal-room-door.svg"])
 def test_assets_ship_in_the_build(name):
     dist = ROOT / "frontend" / "dist" / "brands" / name
     if not (ROOT / "frontend" / "dist").exists():

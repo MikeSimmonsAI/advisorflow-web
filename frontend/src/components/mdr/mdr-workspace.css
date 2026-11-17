@@ -289,3 +289,21 @@ html:root body .layout--mdr .top-bar-right { gap: 8px; }
 .layout--mdr .od-hero .od-btn--white { border-color: var(--mdr-line-strong); box-shadow: none; }
 .layout--mdr .od-metric { padding: 12px 14px; border-radius: 10px; }
 .layout--mdr .od-metric__ic { width: 36px; height: 36px; border-radius: 9px; }
+
+/* Buyers & Deals workflow strip (above the page) */
+.mdr-flow { display: flex; gap: 2px; overflow-x: auto; margin: -32px -40px 0; padding: 6px 40px; background: #fff;
+  border-bottom: 1px solid var(--mdr-line); position: relative; z-index: 1; scrollbar-width: none; }
+.mdr-flow::-webkit-scrollbar { display: none; }
+.mdr-flow__step { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px; border-radius: 6px; white-space: nowrap;
+  font: 600 12.5px var(--mdr-font); color: var(--mdr-ink-2); text-decoration: none; }
+.mdr-flow__step:hover { background: var(--mdr-inset); color: var(--mdr-ink); }
+.mdr-flow__step.is-on { background: var(--mdr-green-soft); color: var(--mdr-green-ink); }
+.mdr-flow__n { width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10.5px; background: #ece9e2; color: var(--mdr-ink-3); }
+.mdr-flow__step.is-on .mdr-flow__n { background: var(--mdr-green); color: #fff; }
+.layout--mdr .mdr-flow ~ .evo-app.evo-app, .layout--mdr .mdr-flow ~ * .evo-app.evo-app { margin-top: 0; }
+@media (max-width: 768px) { .mdr-flow { margin: -16px -14px 0; padding: 6px 14px; } }
+@media (max-width: 768px) {
+  html:root body .layout--mdr .sidebar-brand { padding-right: 52px; }
+  .mdr-brand__engine { white-space: normal; }
+}

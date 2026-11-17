@@ -72,6 +72,15 @@ def _day(v) -> Optional[date]:
     return WP._day(v)
 
 
+def _ct_day(dt) -> Optional[date]:
+    """A stored (naive UTC) timestamp as a Central Time calendar day."""
+    if dt is None:
+        return None
+    from datetime import timezone
+    from zoneinfo import ZoneInfo
+    return dt.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(WP.TZ)).date()
+
+
 def _fmt(d: Optional[date]) -> Optional[str]:
     return ("%s %d, %d" % (d.strftime("%b"), d.day, d.year)) if d else None
 
@@ -110,7 +119,7 @@ def sale_context(work: Optional[Dict[str, Any]], handoff: Optional[EvoSenseHando
                 seen.add(d)
                 noted.append({"date": d.isoformat(), "display": _fmt(d),
                               "source": "Hand-off opened %s for this sale" % (
-                                  _fmt(handoff.created_at.date()) if handoff.created_at else "earlier")})
+                                  _fmt(_ct_day(handoff.created_at)) if handoff.created_at else "earlier")})
         for m in _ISO.findall(handoff.next_action or ""):
             d = _day(m)
             if d and d not in seen:
@@ -132,17 +141,18 @@ def sale_context(work: Optional[Dict[str, Any]], handoff: Optional[EvoSenseHando
         past_other = [n for n in others if _day(n["date"]) < today]
         if future_other:
             status = "needs_verification"
-            message = ("Two sale dates disagree: the current sale event says %s; %s says %s. "
+            message = ("Two sale dates disagree. The current sale event says %s; the %s says %s. "
                        "Verify which is on the official record." % (
-                           current["display"] or "no date", future_other[0]["source"].lower(),
+                           current["display"] or "no date",
+                           "hand-off note" if "note" in future_other[0]["source"] else "hand-off",
                            future_other[0]["display"]))
         elif unverified and current["urgency"] not in (WP.A_NONE, None):
             status = "needs_verification"
             message = current.get("why") or "The sale is not verified on the official record."
         elif past_other:
             status = "historical"
-            message = ("The sale moved: the hand-off was opened for %s, which has passed. "
-                       "The current sale is %s." % (past_other[0]["display"], current["display"] or "not dated"))
+            message = ("The hand-off was opened for the %s sale, which has passed. The current sale is %s." % (
+                past_other[0]["display"], current["display"] or "not dated"))
         for n in past_other:
             n["historical"] = True
     return {"status": status, "current": current, "history": others, "message": message}

@@ -193,7 +193,7 @@ function OppCard({ o, onSave, preview }) {
 // is My Deal Room unless renamed) wear the owner-supplied mark in the same
 // 30x30 spot; every other brand keeps the generic glyph.
 const MY_DEAL_ROOM = 'My Deal Room'
-const MY_DEAL_ROOM_MARK = '/brands/my-deal-room-mark.svg'
+const MY_DEAL_ROOM_MARK = '/brands/my-deal-room-door.svg'
 
 function Brandmark({ name, light }) {
   const mdr = name === MY_DEAL_ROOM || (!name && hostTheme() === THEMES.EVOSYSPRO)

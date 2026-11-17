@@ -363,6 +363,7 @@ function QueueDetail({ it, onClose, onChanged, onOpen }) {
             ) : null}
             {contactPhone && !contactPhone.is_test && !it.is_test ? <a className="evo-btn evo-btn--secondary evo-btn--sm" href={`tel:${contactPhone.value}`}>Call seller</a> : null}
             <button type="button" className={`evo-btn ${handoff && handoff.status === 'open' ? 'evo-btn--secondary' : 'evo-btn--primary'} evo-btn--sm`} onClick={onOpen}>Work this property</button>
+            {it.promoted_deal_id ? <Link className="evo-btn evo-btn--secondary evo-btn--sm" to={`/wholesale/deals/${it.promoted_deal_id}`}>Open the deal</Link> : null}
             {handoff ? (
               <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => resolve('dismissed')}
                       title="Close the hand-off without a deal. It stays in the property history.">Dismiss hand-off</button>

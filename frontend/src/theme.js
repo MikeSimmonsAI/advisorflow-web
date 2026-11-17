@@ -252,7 +252,7 @@ export const BRAND_CONFIG = {
     // Wholesale reads these, so the EvoSys Pro brand itself is unchanged.
     wholesaleLogoUrl: '/brands/my-deal-room-logo.svg',
     wholesaleLogoPlate: true,
-    wholesaleFaviconUrl: '/brands/my-deal-room-mark.svg',
+    wholesaleFaviconUrl: '/brands/my-deal-room-door.svg',
   },
   [THEMES.HARMONYHUSTLE]: {
     displayName: 'Harmony Hustle',

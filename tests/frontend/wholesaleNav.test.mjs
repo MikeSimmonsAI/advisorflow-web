@@ -100,11 +100,19 @@ check('every wholesale route names a key the server knows', () => {
 })
 
 check('every wholesale nav item has a route, and vice versa', () => {
+  // Screens reached from inside another screen, not from the rail: Acquisition
+  // Command's Activity & system health view (its header links to it). A nav
+  // item may also open one view of a parameterised route (Investor Outreach is
+  // /wholesale/deal-room/:view with view=investors).
+  const SUBVIEWS = new Set(['/wholesale/evosense/activity'])
+  const PARAM_ROUTES = ROUTE_WHOLESALE_PATHS.filter((p) => p.includes(':'))
+    .map((p) => new RegExp('^' + p.replace(/:[^/]+/g, '[^/]+') + '$'))
   const navPaths = NAV_WHOLESALE_ITEMS
-    .map((s) => s.match(/to:\s*'([^']+)'/)[1]).sort()
+    .map((s) => s.match(/to:\s*'([^']+)'/)[1])
   const routePaths = ROUTE_WHOLESALE_PATHS
-    .filter((p) => !p.includes(':')).sort()
-  eq(navPaths, routePaths, 'nav paths vs route paths')
+    .filter((p) => !p.includes(':') && !SUBVIEWS.has(p)).sort()
+  const viaParam = navPaths.filter((n) => !routePaths.includes(n) && PARAM_ROUTES.some((re) => re.test(n)))
+  eq(navPaths.filter((n) => !viaParam.includes(n)).sort(), routePaths, 'nav paths vs route paths')
 })
 
 check('every wholesale nav item carries a feature key', () => {
