@@ -39,7 +39,8 @@ DEFAULT_INDUSTRIES: List[Dict[str, Any]] = [
 SPECIFIC_FIRST = ["window_washing", "carpet_cleaning", "pressure_washing"]
 
 DEFAULT_MARKETS: List[Dict[str, Any]] = [
-    {"key": "dfw", "label": "DFW", "state": "TX", "aliases": ["dfw", "dallas-fort worth", "dallas fort worth", "metroplex"],
+    {"key": "dfw", "label": "DFW", "state": "TX", "aliases": ["dfw", "dallas-fort worth", "dallas fort worth", "metroplex", "north texas", "dallas",
+                                                          "fort worth", "ft worth", "tarrant county", "collin county"],
      "cities": ["dallas", "fort worth", "arlington", "plano", "irving", "garland", "frisco", "mckinney", "grand prairie",
                 "mesquite", "carrollton", "denton", "richardson", "lewisville", "allen", "flower mound", "mansfield",
                 "rowlett", "euless", "desoto", "grapevine", "bedford", "cedar hill", "keller", "wylie", "coppell",
@@ -86,8 +87,60 @@ def industries(settings) -> List[Dict[str, Any]]:
     return (getattr(settings, "industries", None) or DEFAULT_INDUSTRIES)
 
 
-def markets(settings) -> List[Dict[str, Any]]:
+STATE_NAMES = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California", "CO": "Colorado",
+    "CT": "Connecticut", "DE": "Delaware", "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho",
+    "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana",
+    "ME": "Maine", "MD": "Maryland", "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota",
+    "MS": "Mississippi", "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+    "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York", "NC": "North Carolina",
+    "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania",
+    "RI": "Rhode Island", "SC": "South Carolina", "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas",
+    "UT": "Utah", "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
+    "WI": "Wisconsin", "WY": "Wyoming", "DC": "Washington DC"}
+STATE_PREFIX = "st_"
+
+
+def state_markets(configured: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """One market per state, for leads outside the configured metro areas. A
+    state that has metros (Texas) gets 'Texas - other areas'."""
+    with_metros = {m.get("state") for m in configured}
+    return [{"key": STATE_PREFIX + code.lower(), "state": code, "aliases": [], "cities": [], "statewide": True,
+             "label": ("%s - other areas" % name) if code in with_metros else name}
+            for code, name in sorted(STATE_NAMES.items(), key=lambda kv: kv[1])]
+
+
+def configured_markets(settings) -> List[Dict[str, Any]]:
     return (getattr(settings, "markets", None) or DEFAULT_MARKETS)
+
+
+def markets(settings) -> List[Dict[str, Any]]:
+    """Configured metro markets first, then one per state."""
+    conf = configured_markets(settings)
+    have = {m["key"] for m in conf}
+    return conf + [m for m in state_markets(conf) if m["key"] not in have]
+
+
+_STATE_ABBR_RE = re.compile(r"\b(%s)\b" % "|".join(sorted(US_STATES)))
+_STATE_NAME_RE = re.compile(r"\b(%s)\b" % "|".join(sorted((n.lower() for n in STATE_NAMES.values()), key=len, reverse=True)))
+_NAME_TO_CODE = {n.lower(): c for c, n in STATE_NAMES.items()}
+
+
+def states_in(text: str) -> List[str]:
+    """States written in a free-text service area: 'Jacksonville Fl', 'Utah: Sandy',
+    'Memphis TN Metro'. Two-letter codes are only trusted as a separate word
+    after a place name or at the end, so 'IN' or 'OR' in a sentence is ignored."""
+    t = text or ""
+    found = [_NAME_TO_CODE[m.group(1)] for m in _STATE_NAME_RE.finditer(t.lower())]
+    for m in re.finditer(r"(?:^|[,\s])([A-Za-z]{2})(?=$|[\s,.;:)(]|\s+(?:metro|area|&))", t.strip()):
+        code = m.group(1).upper()
+        if code in US_STATES and m.start(1) > 0:
+            found.append(code)
+    out = []
+    for c in found:
+        if c not in out:
+            out.append(c)
+    return out
 
 
 def label_of(items: List[Dict[str, Any]], key: Optional[str]) -> Optional[str]:
@@ -172,7 +225,7 @@ def match_market(settings, city: Optional[str], state: Optional[str], text: str)
     found = []
     c = (city or "").strip().lower()
     t = " %s " % re.sub(r"[^a-z0-9 -]", " ", (text or "").lower())
-    for m in markets(settings):
+    for m in configured_markets(settings):
         if state and m.get("state") and m["state"] != state:
             continue
         if c and c in (m.get("cities") or []):
@@ -186,6 +239,13 @@ def match_market(settings, city: Optional[str], state: Optional[str], text: str)
         return keys[0], next(r for k, r in found if k == keys[0])
     if len(keys) > 1:
         return None, "more than one market (%s)" % ", ".join(label_of(markets(settings), k) for k in keys)
+    # Outside the configured metros: group by state when exactly one is named.
+    sts = [state] if state else states_in(" ".join([city or "", text or ""]))
+    if len(sts) == 1 and sts[0] in STATE_NAMES:
+        mk = STATE_PREFIX + sts[0].lower()
+        return mk, "outside the metro markets; grouped by state (%s)" % label_of(markets(settings), mk)
+    if len(sts) > 1:
+        return None, "more than one state (%s)" % ", ".join(sts)
     if state and not c:
         return None, "only the state (%s) is known" % state
     if c:
