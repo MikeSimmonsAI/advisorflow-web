@@ -159,9 +159,11 @@ def _first_name(opp: Opportunity) -> str:
     return n[0].title() if n else "there"
 
 
-def fill(text: str, opp: Opportunity, s: EvoSysOutreachSettings) -> str:
+def fill(text: str, opp: Opportunity, s: EvoSysOutreachSettings, campaign=None) -> str:
+    src = campaign if campaign is not None else s
     vals = {"first_name": _first_name(opp), "company": (opp.company_name or "your company").strip(),
-            "offer": (s.offer or "").strip(), "booking_link": (s.booking_url or "").strip(),
+            "offer": (getattr(src, "offer", None) or "").strip(),
+            "booking_link": (getattr(src, "booking_url", None) or "").strip(),
             "sender_name": (s.sender_name or "").strip()}
     return re.sub(r"\{(first_name|company|offer|booking_link|sender_name)\}",
                   lambda m: vals[m.group(1)], text or "")
@@ -182,9 +184,9 @@ def read_opt_out(token: str) -> Optional[str]:
     return v[4:] if v and v.startswith("evs:") else None
 
 
-def render_email(opp: Opportunity, s: EvoSysOutreachSettings, step: dict) -> dict:
-    subject = fill(step.get("subject"), opp, s)
-    text = fill(step.get("body"), opp, s)
+def render_email(opp: Opportunity, s: EvoSysOutreachSettings, step: dict, campaign=None) -> dict:
+    subject = fill(step.get("subject"), opp, s, campaign)
+    text = fill(step.get("body"), opp, s, campaign)
     paras = "".join("<p>%s</p>" % _html.escape(p).replace("\n", "<br>")
                     for p in text.split("\n\n") if p.strip())
     paras = re.sub(r"(https?://[^\s<]+)", r'<a href="\1">\1</a>', paras)
@@ -201,18 +203,30 @@ def _has_email(opp) -> bool:
 
 
 def enroll_new(db: Session, bso_id: str, now: datetime) -> int:
-    """Every working lead with an email and no follow-up yet joins it."""
+    """Every working lead with an email, a clear group and no follow-up yet
+    joins the campaign that fits it - only if that campaign is approved and on.
+    A lead whose campaign is off simply waits; nothing is queued for it."""
+    from app.services.evosys_sales import campaigns as CA, grouping as G
+    from app.models.evosys_sales_models import EvoSysLead
+    s = get_settings(db, bso_id)
     have = db.query(EvoSysOutreachState.opportunity_id).filter(
         EvoSysOutreachState.brand_sales_org_id == bso_id)
     rows = (db.query(Opportunity).filter(Opportunity.brand_sales_org_id == bso_id,
                                          Opportunity.stage.in_(WORKING_STAGES),
+                                         Opportunity.status == "open",
                                          ~Opportunity.id.in_(have)).all())
     n = 0
     for o in rows:
         if not _has_email(o):
             continue
+        lead = db.get(EvoSysLead, o.id) or G.ensure(db, s, o)
+        if lead.review_status not in G.SENDABLE:
+            continue
+        c = CA.campaign_for(db, s, lead)
+        if c is None or not CA.can_send(c, s):
+            continue
         db.add(EvoSysOutreachState(opportunity_id=o.id, brand_sales_org_id=bso_id, status="active",
-                                   next_step=0, next_due_at=now, started_at=now))
+                                   next_step=0, next_due_at=now, started_at=now, campaign_id=c.id))
         n += 1
     db.flush()
     return n
@@ -273,14 +287,19 @@ def in_send_window(now_utc: datetime) -> bool:
     return local.weekday() < 5 and SEND_START_HOUR <= local.hour < SEND_END_HOUR
 
 
-def sent_today(db: Session, bso_id: str, now_utc: datetime) -> int:
-    local = now_utc.replace(tzinfo=ZoneInfo("UTC")).astimezone(CENTRAL)
+def sent_today(db: Session, bso_id: str, now_utc: datetime, campaign_id: Optional[str] = None,
+               tz: str = "America/Chicago") -> int:
+    local = now_utc.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(tz))
     start = local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
-    return (db.query(func.count(EvoSysOutreachMessage.id))
-            .filter(EvoSysOutreachMessage.brand_sales_org_id == bso_id,
-                    EvoSysOutreachMessage.direction == "out",
-                    EvoSysOutreachMessage.status == "sent",
-                    EvoSysOutreachMessage.created_at >= start).scalar() or 0)
+    q = (db.query(func.count(EvoSysOutreachMessage.id))
+         .filter(EvoSysOutreachMessage.brand_sales_org_id == bso_id,
+                 EvoSysOutreachMessage.direction == "out",
+                 EvoSysOutreachMessage.channel == "email",
+                 EvoSysOutreachMessage.status == "sent",
+                 EvoSysOutreachMessage.created_at >= start))
+    if campaign_id:
+        q = q.filter(EvoSysOutreachMessage.campaign_id == campaign_id)
+    return q.scalar() or 0
 
 
 def _booked(db: Session, opp_id: str) -> bool:
@@ -310,36 +329,53 @@ def _send(to: str, msg: dict, s: EvoSysOutreachSettings, opp_id: str) -> dict:
 
 
 def run_pass(db: Session, now: Optional[datetime] = None, sender=None) -> dict:
-    """One pass: enrol new leads, send what is due (inside the window and the
-    daily limit), advance each lead to its next step. Safe to run repeatedly."""
+    """One pass: enrol new leads into campaigns that are approved and on, then
+    send what is due - per campaign, inside that campaign's days and hours and
+    daily limit - and advance each lead. Safe to run repeatedly.
+
+    A due lead whose campaign is off or no longer approved is NOT sent and NOT
+    moved: it waits ("paused with emails waiting") and goes out when the
+    campaign is approved and on again, without being queued twice."""
+    from app.services.evosys_sales import campaigns as CA, grouping as G, replies as _replies
+    from app.services import sales_suppression as SDNC
+    from app.models.evosys_sales_models import EvoSysLead
     now = now or datetime.utcnow()
     sender = sender or _send
     bso_id = brand_id(db)
-    out = {"brand": bso_id, "enrolled": 0, "sent": 0, "failed": 0, "held": 0, "stopped": 0, "skipped": None}
+    out = {"brand": bso_id, "enrolled": 0, "sent": 0, "failed": 0, "held": 0, "stopped": 0,
+           "waiting": 0, "skipped": None}
     if not bso_id:
         out["skipped"] = "no EvoSys sales team"
         return out
     s = get_settings(db, bso_id)
-    if not (s.sending_on and s.approved_at) or settings_problems(s):
+    camps = {c.id: c for c in CA.all_for(db, s)}
+    live = {cid: c for cid, c in camps.items() if CA.can_send(c, s)}
+    db.commit()
+    if not live:
         out["skipped"] = "off"
-        db.commit()
         return out
     out["enrolled"] = enroll_new(db, bso_id, now)
     db.commit()
-    if not in_send_window(now):
+    open_now = {cid for cid, c in live.items() if CA.in_window(c, now)}
+    if not open_now:
         out["skipped"] = "outside sending hours"
         return out
-    room = max(0, int(s.daily_limit or 0) - sent_today(db, bso_id, now))
-    steps = s.steps or []
+    room = {cid: max(0, int(live[cid].daily_limit or 0) - sent_today(db, bso_id, now, cid, live[cid].timezone))
+            for cid in open_now}
     due = (db.query(EvoSysOutreachState)
            .filter(EvoSysOutreachState.brand_sales_org_id == bso_id,
                    EvoSysOutreachState.status == "active",
                    EvoSysOutreachState.next_due_at <= now)
            .order_by(EvoSysOutreachState.next_due_at)
-           .with_for_update(skip_locked=True).limit(200).all())
+           .with_for_update(skip_locked=True).limit(500).all())
     for st in due:
+        if st.campaign_id not in open_now:
+            out["waiting"] += 1          # campaign off, unapproved or outside its hours: wait
+            continue
+        c = live[st.campaign_id]
+        steps = c.steps or []
         opp = db.get(Opportunity, st.opportunity_id)
-        if opp is None or opp.stage not in WORKING_STAGES:
+        if opp is None or opp.stage not in WORKING_STAGES or opp.status != "open":
             stop(db, st.opportunity_id, "stage", now); out["stopped"] += 1; continue
         if _booked(db, opp.id):
             stop(db, opp.id, "booked", now); out["stopped"] += 1; continue
@@ -349,28 +385,40 @@ def run_pass(db: Session, now: Optional[datetime] = None, sender=None) -> dict:
             st.status, st.next_due_at = "finished", None; continue
         step = steps[st.next_step]
         if step.get("channel") == "text":
-            # No EvoSys texting number yet: record it once and move on.
+            # No EvoSys texting number: recorded once, never sent.
             db.add(EvoSysOutreachMessage(brand_sales_org_id=bso_id, opportunity_id=opp.id, direction="out",
                                          channel="text", step_no=st.next_step + 1, to_address=opp.phone,
-                                         body=fill(step.get("body"), opp, s), status="held",
+                                         body=fill(step.get("body"), opp, s, c), status="held", campaign_id=c.id,
                                          error="EvoSys Sales has no texting number yet.", created_at=now))
             out["held"] += 1
             _advance(st, steps, now)
             continue
-        if room <= 0:
-            break
-        # Re-read this lead right before sending: a reply, opt-out or booking
-        # recorded since the due list was read (by the mailbox poller, the
-        # opt-out link, a rep) must stop this email.
+        if room[c.id] <= 0:
+            out["waiting"] += 1
+            continue
+        # Re-read this lead right before sending: a reply, opt-out, booking,
+        # hold or Do Not Contact recorded since the due list was read (by the
+        # mailbox poller, the opt-out link, a person) must stop this email.
         db.refresh(st)
         db.refresh(opp)
+        db.refresh(c)
         if st.status != "active" or st.replied_at or st.opted_out_at:
             out["stopped"] += 1
             continue
+        if not CA.can_send(c, s):
+            out["waiting"] += 1
+            continue
         if opp.stage not in WORKING_STAGES or _booked(db, opp.id):
             stop(db, opp.id, "booked" if _booked(db, opp.id) else "stage", now); out["stopped"] += 1; continue
-        from app.services.evosys_sales import replies as _replies
-        msg = render_email(opp, s, step)
+        if SDNC.for_opportunity(db, opp) or SDNC.find(db, bso_id, opp.phone, opp.email):
+            stop(db, opp.id, "opted_out", now); out["stopped"] += 1; continue
+        lead = db.get(EvoSysLead, opp.id)
+        if lead is not None and lead.review_status == "excluded":
+            stop(db, opp.id, "excluded", now); out["stopped"] += 1; continue
+        if lead is not None and lead.review_status not in G.SENDABLE:
+            out["waiting"] += 1          # held / needs review: not sent, not moved
+            continue
+        msg = render_email(opp, s, step, c)
         msg["reply_to"] = _replies.tagged_address(s.reply_to_email or DEFAULT_FROM, _replies.ensure_code(db, st))
         try:
             r = sender(opp.email.strip(), msg, s, opp.id)
@@ -379,24 +427,24 @@ def run_pass(db: Session, now: Optional[datetime] = None, sender=None) -> dict:
         ok = bool(r.get("success"))
         db.add(EvoSysOutreachMessage(brand_sales_org_id=bso_id, opportunity_id=opp.id, direction="out",
                                      channel="email", step_no=st.next_step + 1, to_address=opp.email.strip(),
-                                     subject=msg["subject"], body=msg["text"],
+                                     subject=msg["subject"], body=msg["text"], campaign_id=c.id,
                                      status="sent" if ok else "failed",
                                      error=None if ok else str(r.get("error") or "")[:1000],
                                      provider_message_id=r.get("provider_message_id"), created_at=now))
         if ok:
             out["sent"] += 1
-            room -= 1
+            room[c.id] -= 1
             if opp.stage == STAGE_PROSPECT:
                 opp.stage = STAGE_CONTACTED
                 opp.stage_changed_at = now
             opp.contacted_at = opp.contacted_at or now
             db.add(OpportunityEvent(opportunity_id=opp.id, event_type="outreach_email",
-                                    summary="Follow-up email %d sent" % (st.next_step + 1),
+                                    summary="Follow-up email %d sent (%s)" % (st.next_step + 1, c.name),
                                     detail=msg["subject"], occurred_at=now))
             _advance(st, steps, now)
         else:
             out["failed"] += 1
-            # Try again in an hour; a bad address stops after three failures.
+            # Try again in an hour; a bad address stops after two failures.
             db.flush()
             fails = (db.query(func.count(EvoSysOutreachMessage.id))
                      .filter(EvoSysOutreachMessage.opportunity_id == opp.id,

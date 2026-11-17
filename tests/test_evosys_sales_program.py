@@ -128,7 +128,12 @@ class TestPass:
         f = FakeSender()
         assert O.run_pass(db_session, NIGHT, f)["skipped"] == "outside sending hours"
         assert f.calls == []
-        s.daily_limit = 2; db_session.commit()
+        # The limit is the campaign's; changing it needs a new approval and switch-on.
+        from app.services.evosys_sales import campaigns as CA
+        camp = CA.ensure_default(db_session, s)
+        assert CA.save(db_session, camp, {"daily_limit": 2}, "u") and camp.sending_on is False
+        assert O.run_pass(db_session, IN_WINDOW, f)["skipped"] == "off"
+        CA.approve(db_session, camp, s, "u"); CA.switch(db_session, camp, s, True, "u"); db_session.commit()
         assert O.run_pass(db_session, IN_WINDOW, f)["sent"] == 2
         assert O.run_pass(db_session, IN_WINDOW + timedelta(minutes=5), f)["sent"] == 0
 

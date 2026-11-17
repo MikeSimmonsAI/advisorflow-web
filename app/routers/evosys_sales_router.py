@@ -90,7 +90,8 @@ def _row(o: Opportunity, st, last=None, booked=False) -> dict:
 def _msg(m: EvoSysOutreachMessage) -> dict:
     return {"id": m.id, "direction": m.direction, "channel": m.channel, "step": m.step_no,
             "to": m.to_address, "subject": m.subject, "body": m.body, "status": m.status,
-            "error": m.error, "how": m.match_method, "at": m.created_at.isoformat() + "Z"}
+            "error": m.error, "how": m.match_method, "label": m.label, "campaign_id": m.campaign_id,
+            "at": m.created_at.isoformat() + "Z"}
 
 
 def _booked_ids(db: Session, bso: str) -> set:
@@ -200,17 +201,38 @@ def _appt(a, by_id) -> dict:
 # ── leads ─────────────────────────────────────────────────────────────────────
 
 @router.get("/leads")
-def leads(view: str = "all", q: str = "", c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+def leads(view: str = "all", q: str = "", group: str = "", c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     rows = _leads_q(db, c).order_by(Opportunity.created_at.desc()).all()
     ids = [o.id for o in rows]
     states = {x.opportunity_id: x for x in db.query(EvoSysOutreachState)
               .filter(EvoSysOutreachState.opportunity_id.in_(ids)).all()} if ids else {}
     booked = _booked_ids(db, c.bso)
+    from app.models.evosys_sales_models import EvoSysLead
+    from app.services.evosys_sales import grouping as G
+    s = O.get_settings(db, c.bso)
+    G.backfill(db, s, c.bso)
+    leads_ = {l.opportunity_id: l for l in db.query(EvoSysLead).filter(EvoSysLead.opportunity_id.in_(ids)).all()} if ids else {}
     needle = q.strip().lower()
     out = []
     for o in rows:
         r = _row(o, states.get(o.id), booked=o.id in booked)
+        l = leads_.get(o.id)
+        r.update({"industry": G.label_of(G.industries(s), l.industry_key) if l else None,
+                  "market": G.label_of(G.markets(s), l.market_key) if l else None,
+                  "industry_key": l.industry_key if l else None, "market_key": l.market_key if l else None,
+                  "city": l.city if l else None, "state": l.state if l else None,
+                  "review_status": l.review_status if l else None,
+                  "review_label": G.REVIEW_LABEL.get(l.review_status) if l else None,
+                  "source_label": G.SOURCE_LABEL.get(l.source_channel or "", "Other") if l else None,
+                  "source_record_id": o.source_record_id})
         k = r["outreach"]["key"]
+        rv = r["review_status"]
+        if view == "needs_review" and rv not in ("unclear_market", "possible_duplicate"):
+            continue
+        if view in ("held", "excluded", "possible_duplicate", "unclear_market") and rv != view:
+            continue
+        if group and "%s|%s" % (r["industry_key"] or "", r["market_key"] or "") != group:
+            continue
         if view == "followup" and k != "active":
             continue
         if view == "no_email" and k != "no_email":
@@ -224,6 +246,7 @@ def leads(view: str = "all", q: str = "", c: Ctx = Depends(ctx), db: Session = D
         if needle and needle not in " ".join(str(x or "") for x in (o.company_name, o.contact_name, o.phone, o.email)).lower():
             continue
         out.append(r)
+    db.commit()
     return {"leads": out, "total": len(rows)}
 
 
@@ -235,12 +258,16 @@ def lead(opp_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
             .order_by(EvoSysOutreachMessage.created_at).all())
     events = (db.query(OpportunityEvent).filter(OpportunityEvent.opportunity_id == o.id)
               .order_by(OpportunityEvent.occurred_at.desc()).limit(30).all())
+    from app.models.evosys_sales_models import EvoSysCampaign
+    from app.services.evosys_sales import campaigns as CA
     s = O.get_settings(db, c.bso)
+    camp = db.get(EvoSysCampaign, st.campaign_id) if st and st.campaign_id else None
     nxt = None
-    if st and st.status == "active" and st.next_step < len(s.steps or []):
-        step = (s.steps or [])[st.next_step]
-        nxt = {"step": st.next_step + 1, "channel": step.get("channel"),
-               "subject": O.fill(step.get("subject"), o, s), "body": O.fill(step.get("body"), o, s),
+    if st and camp and st.status == "active" and st.next_step < len(camp.steps or []):
+        step = (camp.steps or [])[st.next_step]
+        nxt = {"step": st.next_step + 1, "channel": step.get("channel"), "campaign": camp.name,
+               "paused": not CA.can_send(camp, s),
+               "subject": O.fill(step.get("subject"), o, s, camp), "body": O.fill(step.get("body"), o, s, camp),
                "due_at": st.next_due_at.isoformat() + "Z" if st.next_due_at else None}
     db.commit()
     return {"lead": _row(o, st, booked=o.id in _booked_ids(db, c.bso)),
@@ -288,9 +315,26 @@ def stop_lead(opp_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db))
 
 @router.post("/leads/{opp_id}/restart")
 def restart_lead(opp_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """Restart a stopped follow-up. An explicit choice by a person; refused when
+    the lead opted out, is on Do Not Contact, has a booked call or is excluded."""
+    from app.services import sales_suppression as SDNC
+    from app.models.evosys_sales_models import EvoSysLead
     o = _opp(db, c, opp_id)
+    st = db.get(EvoSysOutreachState, o.id)
+    lead = db.get(EvoSysLead, o.id)
+    if SDNC.for_opportunity(db, o) or SDNC.find(db, c.bso, o.phone, o.email):
+        raise HTTPException(409, "This lead is on Do Not Contact.")
+    if o.id in _booked_ids(db, c.bso):
+        raise HTTPException(409, "This lead has a booked call; the follow-up stays stopped.")
+    if lead is not None and lead.review_status == "excluded":
+        raise HTTPException(409, "This lead is excluded.")
+    if st is not None and st.campaign_id is None:
+        from app.services.evosys_sales import campaigns as CA
+        st.campaign_id = CA.ensure_default(db, O.get_settings(db, c.bso)).id
     if O.restart(db, o.id) is None:
         raise HTTPException(409, "This lead opted out or has not started follow-up yet.")
+    db.add(OpportunityEvent(opportunity_id=o.id, event_type="note", actor_user_id=c.user.id,
+                            summary="Follow-up restarted by a person", occurred_at=datetime.utcnow()))
     db.commit()
     return {"ok": True}
 
@@ -368,7 +412,16 @@ def results(days: int = 14, c: Ctx = Depends(ctx), db: Session = Depends(get_db)
             "by_day": sorted(per_day.values(), key=lambda e: e["date"])}
 
 
-# ── outreach settings ─────────────────────────────────────────────────────────
+# ── outreach settings (the team's send settings + the default campaign) ──────
+#
+# Kept for the existing Outreach screen: the team-wide sender fields live on the
+# settings row; the copy, offer, link and limit are the DEFAULT campaign's
+# (campaigns.ensure_default carried them over unchanged). Per-campaign work is
+# in evosys_sales_work_router.py.
+
+TEAM_KEYS = ("sender_name", "from_email", "reply_to_email", "mailing_address")
+CAMPAIGN_KEYS = ("steps", "offer", "booking_url", "daily_limit")
+
 
 class SettingsIn(BaseModel):
     steps: Optional[list] = None
@@ -381,32 +434,84 @@ class SettingsIn(BaseModel):
     daily_limit: Optional[int] = None
 
 
+def _default_out(db: Session, s, c: Ctx) -> dict:
+    from app.services.evosys_sales import campaigns as CA
+    d = CA.ensure_default(db, s)
+    out = _settings_out(s, c, db)
+    out.update({"steps": d.steps or [], "offer": d.offer, "booking_url": d.booking_url, "daily_limit": d.daily_limit,
+                "sending_on": bool(d.sending_on), "approved": CA.is_approved(d, s),
+                "approved_at": iso(d.approved_at) if CA.is_approved(d, s) else None,
+                "problems": CA.problems(d, s), "campaign_id": d.id, "version": d.version,
+                "sending_hours": _hours_text(d)})
+    return out
+
+
+def _hours_text(camp) -> str:
+    from app.services.evosys_sales import campaigns as CA
+    names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    ds = CA.days(camp)
+    dtxt = "Weekdays" if ds == [0, 1, 2, 3, 4] else "Every day" if ds == list(range(7)) else ", ".join(names[d] for d in ds)
+
+    def h(x):
+        x = int(x)
+        return "12 AM" if x in (0, 24) else "12 PM" if x == 12 else ("%d AM" % x if x < 12 else "%d PM" % (x - 12))
+    tz = {"America/Chicago": "Central", "America/New_York": "Eastern", "America/Denver": "Mountain",
+          "America/Los_Angeles": "Pacific"}.get(camp.timezone, camp.timezone)
+    return "%s %s - %s %s" % (dtxt, h(camp.send_start_hour), h(camp.send_end_hour), tz)
+
+
+def save_team_settings(db: Session, s, data: dict, user_id: str) -> bool:
+    """Team-wide send settings. A change stops every campaign: each needs
+    approving again (its approved version no longer matches what would go out)."""
+    from app.services.evosys_sales import campaigns as CA
+    changed = False
+    for k in TEAM_KEYS:
+        if k in data and data[k] is not None and getattr(s, k) != data[k]:
+            setattr(s, k, data[k])
+            changed = True
+    if changed:
+        s.approved_at, s.approved_by, s.sending_on = None, None, False
+        for camp in CA.all_for(db, s):
+            camp.sending_on = False
+    s.updated_at, s.updated_by = datetime.utcnow(), user_id
+    db.flush()
+    return changed
+
+
 @router.get("/outreach")
 def get_outreach(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     s = O.get_settings(db, c.bso)
+    out = _default_out(db, s, c)
     db.commit()
-    return _settings_out(s, c, db)
+    return out
 
 
 @router.put("/outreach")
 def put_outreach(body: SettingsIn, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    from app.services.evosys_sales import campaigns as CA
     _manager(c)
     s = O.get_settings(db, c.bso)
-    O.save_settings(db, s, body.model_dump(exclude_none=True), c.user.id)
+    data = body.model_dump(exclude_none=True)
+    save_team_settings(db, s, data, c.user.id)
+    CA.save(db, CA.ensure_default(db, s), {k: data[k] for k in CAMPAIGN_KEYS if k in data}, c.user.id)
+    out = _default_out(db, s, c)
     db.commit()
-    return _settings_out(s, c, db)
+    return out
 
 
 @router.post("/outreach/approve")
 def approve(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    from app.services.evosys_sales import campaigns as CA
     _manager(c)
     s = O.get_settings(db, c.bso)
-    p = O.settings_problems(s)
-    if p:
-        raise HTTPException(400, " ".join(p))
+    try:
+        CA.approve(db, CA.ensure_default(db, s), s, c.user.id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     s.approved_at, s.approved_by = datetime.utcnow(), c.user.id
+    out = _default_out(db, s, c)
     db.commit()
-    return _settings_out(s, c, db)
+    return out
 
 
 class Switch(BaseModel):
@@ -415,42 +520,83 @@ class Switch(BaseModel):
 
 @router.post("/outreach/switch")
 def switch(body: Switch, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    from app.services.evosys_sales import campaigns as CA
     _manager(c)
     s = O.get_settings(db, c.bso)
-    if body.on and (s.approved_at is None or O.settings_problems(s)):
+    try:
+        CA.switch(db, CA.ensure_default(db, s), s, body.on, c.user.id)
+    except ValueError:
         raise HTTPException(400, "Approve the messages before turning outreach on.")
     s.sending_on = bool(body.on)
-    s.updated_at, s.updated_by = datetime.utcnow(), c.user.id
+    out = _default_out(db, s, c)
     db.commit()
-    return _settings_out(s, c, db)
+    return out
+
+
+AD_CLAIM = __import__("re").compile(r"\b(ad|ads|advert\w*|facebook|instagram|tiktok|post)\b", __import__("re").I)
+AD_SOURCES = ("facebook_ads", "facebook_groups", "instagram_meta", "tiktok")
+
+
+def claim_warnings(text: str, source_channel: Optional[str]) -> list:
+    """Plain checks on the rendered copy for THIS lead: a line that mentions an
+    ad or a social post when the lead did not come from one."""
+    out = []
+    if AD_CLAIM.search(text or "") and source_channel not in AD_SOURCES:
+        out.append("This email mentions an ad or a post, but this lead came from %s." %
+                   (source_channel or "an unknown source").replace("_", " "))
+    return out
 
 
 @router.get("/outreach/preview")
-def preview(lead_id: Optional[str] = None, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+def preview(lead_id: Optional[str] = None, campaign_id: Optional[str] = None,
+            c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    from app.models.evosys_sales_models import EvoSysCampaign, EvoSysLead
+    from app.services.evosys_sales import campaigns as CA
     s = O.get_settings(db, c.bso)
-    o = _opp(db, c, lead_id) if lead_id else (
-        _leads_q(db, c).filter(Opportunity.email.isnot(None), Opportunity.email != "")
-        .order_by(Opportunity.created_at.desc()).first())
+    camp = (db.get(EvoSysCampaign, campaign_id) if campaign_id else None) or CA.ensure_default(db, s)
+    if camp.brand_sales_org_id != c.bso:
+        raise HTTPException(404, "Campaign not found.")
+    q = _leads_q(db, c).filter(Opportunity.email.isnot(None), Opportunity.email != "")
+    if not lead_id and (camp.industry_key or camp.market_key):
+        q = q.join(EvoSysLead, EvoSysLead.opportunity_id == Opportunity.id)
+        if camp.industry_key:
+            q = q.filter(EvoSysLead.industry_key == camp.industry_key)
+        if camp.market_key:
+            q = q.filter(EvoSysLead.market_key == camp.market_key)
+    o = _opp(db, c, lead_id) if lead_id else q.order_by(Opportunity.created_at.desc()).first()
     if o is None:
-        return {"lead": None, "steps": []}
+        db.commit()
+        return {"lead": None, "steps": [], "campaign_id": camp.id}
+    lead = db.get(EvoSysLead, o.id)
+    ch = lead.source_channel if lead else None
+    steps = []
+    for st in (camp.steps or []):
+        r = O.render_email(o, s, st, camp)
+        steps.append(dict(r, day=st.get("day"), channel=st.get("channel"),
+                          warnings=claim_warnings(r["subject"] + " " + r["text"], ch)))
     db.commit()
-    return {"lead": {"id": o.id, "company": o.company_name, "contact": o.contact_name, "email": o.email},
-            "steps": [dict(O.render_email(o, s, st), day=st.get("day"), channel=st.get("channel"))
-                      for st in (s.steps or [])]}
+    return {"lead": {"id": o.id, "company": o.company_name, "contact": o.contact_name, "email": o.email,
+                     "source_channel": ch}, "steps": steps, "campaign_id": camp.id}
 
 
 class TestSend(BaseModel):
     to: str
     step: int = 1
+    campaign_id: Optional[str] = None
 
 
 @router.post("/outreach/test")
 def test_send(body: TestSend, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     """Sends one step, filled in with a real lead's details, to an address the
     manager types (their own). Never to the lead."""
+    from app.models.evosys_sales_models import EvoSysCampaign
+    from app.services.evosys_sales import campaigns as CA
     _manager(c)
     s = O.get_settings(db, c.bso)
-    steps = s.steps or []
+    camp = (db.get(EvoSysCampaign, body.campaign_id) if body.campaign_id else None) or CA.ensure_default(db, s)
+    if camp.brand_sales_org_id != c.bso:
+        raise HTTPException(404, "Campaign not found.")
+    steps = camp.steps or []
     if not (1 <= body.step <= len(steps)) or steps[body.step - 1].get("channel") != "email":
         raise HTTPException(400, "Pick an email step.")
     if "@" not in (body.to or ""):
@@ -459,9 +605,10 @@ def test_send(body: TestSend, c: Ctx = Depends(ctx), db: Session = Depends(get_d
          .order_by(Opportunity.created_at.desc()).first())
     if o is None:
         raise HTTPException(400, "No lead with an email to fill the test in with.")
-    msg = O.render_email(o, s, steps[body.step - 1])
+    msg = O.render_email(o, s, steps[body.step - 1], camp)
     msg = dict(msg, subject="[TEST] " + msg["subject"])
     r = O._send(body.to.strip(), msg, s, o.id)
+    db.commit()
     if not r.get("success"):
         raise HTTPException(502, "The test email did not send: %s" % (r.get("error") or "unknown error"))
     return {"ok": True, "sent_to": body.to.strip()}

@@ -1276,6 +1276,8 @@ app.include_router(volt_ops_router)      # /volt/ops/{org_id}/* - VOLT recruitin
 from app.routers.evosys_sales_router import router as evosys_sales_router  # noqa: E402
 from app.routers.evosys_sales_router import public_router as evosys_sales_public_router  # noqa: E402
 app.include_router(evosys_sales_router)         # /sales/evosys/* - EvoSys Sales program (EvoSys sales team)
+from app.routers.evosys_sales_work_router import router as evosys_sales_work_router  # noqa: E402
+app.include_router(evosys_sales_work_router)    # /sales/evosys/* - campaigns, lead review, AI help, intro calls
 app.include_router(evosys_sales_public_router)  # /evosys-sales-public/* - opt-out link in outreach email
 # VOLT Google Sheets mirror: queue every lead/application change in its own
 # transaction (no Google call in any request; see sheets_outbox).

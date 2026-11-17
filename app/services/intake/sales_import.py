@@ -166,7 +166,23 @@ def write(db: Session, b, user, n: Dict[str, Any], row) -> str:
     db.add(opp)
     db.flush()
     _add_events(db, opp, user, b, n, created=True)
+    _evosys_group(db, org, opp, n)
     return opp.id
+
+
+def _evosys_group(db: Session, org, opp: Opportunity, n: Dict[str, Any]) -> None:
+    """EvoSys Sales: give the new lead its industry + market group (by rule)
+    and flag a possible duplicate for a person to resolve. Never blocks the row."""
+    try:
+        from app.services.evosys_sales import grouping as G, outreach as O
+        if org.id != O.brand_id(db):
+            return
+        dup = G.possible_duplicate(db, opp)
+        G.ensure(db, O.get_settings(db, org.id), opp, city=n.get("city"), state=n.get("state"),
+                 extra_text=" ".join(x for x in (n.get("industry"), n.get("notes")) if x), duplicate_of=dup)
+    except Exception:  # noqa: BLE001 - grouping can be redone from the Leads screen
+        import logging
+        logging.getLogger(__name__).exception("EvoSys Sales grouping failed for %s", opp.id)
 
 
 def attach_to_matched(db: Session, b, user) -> Dict[str, Any]:
