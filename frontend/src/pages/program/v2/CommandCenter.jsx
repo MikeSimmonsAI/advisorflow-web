@@ -241,7 +241,6 @@ export default function CommandCenter({
               <Svg name="team" size={22} /> {isOwner ? <>People &amp; Access</> : 'My Team'}
             </a>
           )}
-          <a className="pa2-nav-item" href="/training"><Svg name="book" size={22} /> Training</a>
           {isOwner && (
             <a className="pa2-nav-item pa2-nav-item--owner" href="/god"><Svg name="shield" size={22} /> God Mode</a>
           )}

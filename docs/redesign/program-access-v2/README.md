@@ -33,7 +33,6 @@ The BookaBoost launcher (`BookaBoostProgramAccess.jsx`) is untouched. The only c
 | People & Access link | Owner → `/god/access`; a sales manager with `sales_team.my_team` → `/sales/my-team` | Hidden |
 | Settings | `/change-password` (the account setting every signed-in login has) | — |
 | My Day | `/sales`, only when the server gives this login a sales Back Office at `/sales` | Hidden |
-| Resources | `/training` (every signed-in login; the server decides what it shows) | — |
 | Manage Access (banner) | `/god/access`, owner only (same check as the God Mode link) | Hidden |
 | "Active" on a card | Every card is a destination the server lists for this login right now; a sample workspace says "Sample data" and a view-only one says "View only" | — |
 | Name, role, initials | The signed-in user (`af_user`), never hard-coded | — |

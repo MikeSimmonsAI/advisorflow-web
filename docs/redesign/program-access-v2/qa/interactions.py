@@ -57,7 +57,7 @@ def main():
         check("God Mode link for the owner", page.locator('a.pa2-nav-item[href="/god"]').count() == 1)
         nav = [" ".join(t.split()) for t in page.locator(".pa2-nav-item").all_inner_texts()]
         check("owner sidebar says where each link goes",
-              nav == ["Program Access", "Demos 7", "Sales — My Day", "Notifications 2", "People & Access", "Training",
+              nav == ["Program Access", "Demos 7", "Sales — My Day", "Notifications 2", "People & Access",
                       "God Mode", "Change Password"], str(nav))
 
         # search
