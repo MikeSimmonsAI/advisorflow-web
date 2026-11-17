@@ -160,13 +160,20 @@ def _first_name(opp: Opportunity) -> str:
 
 
 def fill(text: str, opp: Opportunity, s: EvoSysOutreachSettings, campaign=None) -> str:
-    src = campaign if campaign is not None else s
-    vals = {"first_name": _first_name(opp), "company": (opp.company_name or "your company").strip(),
-            "offer": (getattr(src, "offer", None) or "").strip(),
-            "booking_link": (getattr(src, "booking_url", None) or "").strip(),
-            "sender_name": (s.sender_name or "").strip()}
-    return re.sub(r"\{(first_name|company|offer|booking_link|sender_name)\}",
-                  lambda m: vals[m.group(1)], text or "")
+    return _fill(text, opp, s, campaign)[0]
+
+
+def _fill(text: str, opp: Opportunity, s: EvoSysOutreachSettings, campaign=None):
+    """(text, facts used, missing facts) - see facts.py. Nothing is invented:
+    a fill-in whose fact is not saved stays visible and is reported missing."""
+    from app.models.evosys_sales_models import EvoSysLead
+    from app.services.evosys_sales import facts as F
+    lead = None
+    try:
+        lead = Session.object_session(opp).get(EvoSysLead, opp.id) if Session.object_session(opp) else None
+    except Exception:  # noqa: BLE001
+        lead = None
+    return F.fill(text, F.facts_for(opp, s, campaign, lead))
 
 
 def opt_out_url(opp_id: str) -> str:
@@ -185,15 +192,17 @@ def read_opt_out(token: str) -> Optional[str]:
 
 
 def render_email(opp: Opportunity, s: EvoSysOutreachSettings, step: dict, campaign=None) -> dict:
-    subject = fill(step.get("subject"), opp, s, campaign)
-    text = fill(step.get("body"), opp, s, campaign)
+    subject, u1, m1 = _fill(step.get("subject"), opp, s, campaign)
+    text, u2, m2 = _fill(step.get("body"), opp, s, campaign)
+    used = u1 + [u for u in u2 if u["key"] not in {x["key"] for x in u1}]
+    missing = m1 + [m for m in m2 if m not in m1]
     paras = "".join("<p>%s</p>" % _html.escape(p).replace("\n", "<br>")
                     for p in text.split("\n\n") if p.strip())
     paras = re.sub(r"(https?://[^\s<]+)", r'<a href="\1">\1</a>', paras)
     footer = ('<p style="font-size:12px;color:#6b7f8c;margin-top:24px">%s<br>'
               'Not interested? <a href="%s">Stop these emails</a>.</p>'
               % (_html.escape((s.mailing_address or "").strip()), opt_out_url(opp.id)))
-    return {"subject": subject, "text": text, "html": paras + footer}
+    return {"subject": subject, "text": text, "html": paras + footer, "facts_used": used, "missing": missing}
 
 
 # ── enrolment and stopping ────────────────────────────────────────────────────
@@ -419,6 +428,15 @@ def run_pass(db: Session, now: Optional[datetime] = None, sender=None) -> dict:
             out["waiting"] += 1          # held / needs review: not sent, not moved
             continue
         msg = render_email(opp, s, step, c)
+        if msg["missing"]:
+            # A fact the message needs is not saved on this contact: hold it for
+            # a person (shown on the lead), never send a guessed sentence.
+            st.held_reason = "missing:" + ",".join(msg["missing"])[:50]
+            out["waiting"] += 1
+            db.commit()
+            continue
+        st.held_reason = None
+        msg = {k: v for k, v in msg.items() if k not in ("facts_used", "missing")}
         msg["reply_to"] = _replies.tagged_address(s.reply_to_email or DEFAULT_FROM, _replies.ensure_code(db, st))
         try:
             r = sender(opp.email.strip(), msg, s, opp.id)

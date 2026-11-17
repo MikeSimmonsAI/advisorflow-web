@@ -51,7 +51,7 @@ class EvoSysOutreachState(Base):
 
     opportunity_id = Column(String, ForeignKey("opportunities.id", ondelete="CASCADE"), primary_key=True)
     brand_sales_org_id = Column(String, ForeignKey("brand_sales_orgs.id", ondelete="CASCADE"), nullable=False)
-    status = Column(String, default="active", nullable=False)   # active | stopped | finished
+    status = Column(String, default="active", nullable=False)   # queued | active | stopped | finished
     stop_reason = Column(String, nullable=True)                  # replied | booked | opted_out | no_email | stage | manual
     next_step = Column(Integer, default=0, nullable=False)       # index into settings.steps
     next_due_at = Column(DateTime, nullable=True)
@@ -66,6 +66,10 @@ class EvoSysOutreachState(Base):
     # enrolment; existing enrolments are mapped to the default campaign with
     # their step and due time unchanged.
     campaign_id = Column(String, ForeignKey("evosys_campaigns.id", ondelete="SET NULL"), nullable=True)
+    # PR #663: queued = in a picked campaign's audience, waiting for it to be
+    # turned on. held_reason = why it will not be emailed yet (a fact its
+    # message needs is missing); cleared when the fact is saved.
+    held_reason = Column(String(60), nullable=True)
 
     __table_args__ = (
         Index("ix_evosys_outreach_due", "brand_sales_org_id", "status", "next_due_at"),
@@ -115,6 +119,14 @@ class EvoSysCampaign(Base):
     industry_key = Column(String(60), nullable=True)   # None = any industry
     market_key = Column(String(60), nullable=True)     # None = any market
     is_default = Column(Boolean, default=False, nullable=False)
+    # EvoSys Business Development (PR #663). "group" campaigns reach every lead
+    # in their industry + market automatically (campaign_for). Every other kind
+    # is built from leads a person picked (an event, a relationship, a
+    # project...): only its own audience is emailed, never by routing.
+    kind = Column(String(20), default="group", nullable=False)
+    context = Column(String(200), nullable=True)      # the event, referrer or project, in Mike's words
+    tone = Column(String(20), nullable=True)           # warm | researched
+    archived_at = Column(DateTime, nullable=True)
     steps = Column(JSON, nullable=True)
     offer = Column(Text, nullable=True)
     booking_url = Column(String, nullable=True)
