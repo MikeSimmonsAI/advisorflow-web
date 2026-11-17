@@ -111,7 +111,7 @@ _RULES: List[Tuple[str, str]] = [
     (r"^/wholesale/evosense/foreclosure", "foreclosures"),
     # acquisition command
     (r"^/wholesale/(command-center|dashboard|needs-you|operating-board|events)(/|$)", "acquisition"),
-    (r"^/wholesale/evosense/(command-center|funnel|inbox|handoffs|opportunity|opportunity-queue|opportunity-radar|automation|events|capabilities)(/|$)", "acquisition"),
+    (r"^/wholesale/evosense/(command-center|work-queue|funnel|inbox|handoffs|opportunity|opportunity-queue|opportunity-radar|automation|events|capabilities)(/|$)", "acquisition"),
     # sellers
     (r"^/wholesale/(sellers|outreach-seller)(/|$)", "sellers"),
     (r"^/wholesale/ops/(leads|notes|callbacks)(/|$)", "sellers"),

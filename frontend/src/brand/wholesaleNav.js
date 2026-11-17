@@ -61,19 +61,76 @@ export const WHOLESALE_NAV = Object.freeze([
 
 export const FALLBACK_GROUP = 'operations'
 
+/* MY DEAL ROOM WORKSPACE (redesign, Nov 2026). The same items, the same flags
+ * and the same visible() filter as Design A; only the grouping, two labels and
+ * the default open state differ. Used only on the My Deal Room shell (EvoSys
+ * Pro brand); BookaBoost keeps Design A above, and OLP keeps olpNav.js.
+ *
+ * Deal Operations (/wholesale) is the transaction board the Buyers & Deals
+ * screens act on, so it sits with them; Contracts & Closing and Dispositions
+ * remain focused views of the same deals. */
+export const DEALS_ROUTE = '/wholesale'
+export const MDR_NAV = Object.freeze([
+  {
+    key: 'acquire',
+    label: 'Acquire',
+    routes: [INBOX_ROUTE, '/wholesale/foreclosures', '/wholesale/portfolios', '/wholesale/properties',
+      '/wholesale/evosense/strategies', MULTIFAMILY_ROUTE,
+      '/wholesale/evosense/overlooked', '/wholesale/land-partners', '/wholesale/farm-ranch'],
+  },
+  {
+    key: 'buyers',
+    label: 'Buyers & Deals',
+    routes: ['/wholesale/buyers', '/wholesale/buyers/buy-boxes', '/wholesale/deal-room', '/wholesale/deal-room/investors',
+      '/wholesale/dispositions', DEALS_ROUTE],
+  },
+  {
+    key: 'closing',
+    label: 'Closing & Tools',
+    routes: ['/wholesale/appointments', '/wholesale/closing', '/wholesale/funding', '/wholesale/calculator'],
+  },
+  {
+    key: 'team',
+    label: 'Team & Field',
+    routes: ['/wholesale/board', '/wholesale/canvass', '/wholesale/callbacks', '/wholesale/team'],
+  },
+  {
+    key: 'settings',
+    label: 'Settings',
+    routes: ['/wholesale/evosense/controls', '/wholesale/exceptions', '/wholesale/pilot', '/wholesale/settings'],
+  },
+])
+export const MDR_FALLBACK_GROUP = 'closing'
+/** Labels the My Deal Room rail says differently. Routes are unchanged. */
+export const MDR_LABELS = Object.freeze({
+  '/wholesale/portfolios': 'Seller Portfolios',
+  [DEALS_ROUTE]: 'Deal Operations',
+})
+/** One line per group for its landing page. */
+export const MDR_GROUP_BLURB = Object.freeze({
+  acquire: 'Find and evaluate properties before a deal exists.',
+  buyers: 'Match buyers, publish deals and move them to assignment.',
+  closing: 'Book appointments, paper the contract, fund and run the numbers.',
+  team: 'Who is working what, in the office and in the field.',
+  settings: 'Providers, controls, exceptions and workspace configuration.',
+})
+
 /**
  * @param {Array<{label: string, items: Array<{to: string}>}>} wsGroups  Layout's Wholesale groups
  * @returns {{ pinned: object|null, groups: Array<{key: string, label: string, items: Array}> }}
  *   the same items regrouped (empty groups dropped), Acquisition Command pinned.
  */
-export function wholesaleRail(wsGroups) {
+export function wholesaleRail(wsGroups, { variant } = {}) {
+  const mdr = variant === 'mdr'
+  const NAV = mdr ? MDR_NAV : WHOLESALE_NAV
+  const FALLBACK = mdr ? MDR_FALLBACK_GROUP : FALLBACK_GROUP
   const all = []
   const seen = new Set()
   for (const g of wsGroups || []) {
     for (const item of g.items || []) {
       if (!item || !item.to || seen.has(item.to)) continue
       seen.add(item.to)
-      all.push(item)
+      all.push(mdr && MDR_LABELS[item.to] ? { ...item, label: MDR_LABELS[item.to] } : item)
     }
   }
   const byRoute = new Map(all.map((item) => [item.to, item]))
@@ -83,13 +140,13 @@ export function wholesaleRail(wsGroups) {
   }
   const pinned = byRoute.get(PINNED_ROUTE) || null
   const placed = new Set(pinned ? [PINNED_ROUTE] : [])
-  const groups = WHOLESALE_NAV.map((g) => ({
+  const groups = NAV.map((g) => ({
     key: g.key,
     label: g.label,
     items: g.routes.filter((r) => byRoute.has(r) && !placed.has(r)).map((r) => { placed.add(r); return byRoute.get(r) }),
   }))
   const rest = all.filter((item) => !placed.has(item.to))
-  if (rest.length) groups.find((g) => g.key === FALLBACK_GROUP).items.push(...rest)
+  if (rest.length) groups.find((g) => g.key === FALLBACK).items.push(...rest)
   return { pinned, groups: groups.filter((g) => g.items.length) }
 }
 
@@ -100,6 +157,7 @@ function splitTo(to) {
 
 /** Screens with no rail entry of their own, and the entry that owns them. */
 const OWNERS = [
+  [/^\/wholesale\/evosense\/activity$/, PINNED_ROUTE],     // Acquisition Command's activity & system health view
   [/^\/wholesale\/evosense\/property\//, PINNED_ROUTE],   // the one-property Acquisition Command screen
   [/^\/wholesale\/deals\//, '/wholesale'],                  // a deal opens from Deal Operations
   [/^\/wholesale\/evosense\/lists\//, INBOX_ROUTE],
@@ -159,3 +217,24 @@ export function readClosedGroups(storage) {
 export function writeClosedGroups(storage, closed) {
   try { storage && storage.setItem(COLLAPSE_KEY, JSON.stringify([...closed])) } catch { /* storage unavailable */ }
 }
+
+/* My Deal Room: groups start CLOSED except the one holding the current page;
+ * the person's explicit openings are remembered. (Design A remembers closings
+ * instead, and opens everything by default.) */
+export const MDR_OPEN_KEY = 'af_mdr_nav_open'
+
+export function readOpenGroups(storage) {
+  try {
+    const raw = storage && storage.getItem(MDR_OPEN_KEY)
+    const arr = raw ? JSON.parse(raw) : []
+    const keys = new Set(MDR_NAV.map((g) => g.key))
+    return new Set(Array.isArray(arr) ? arr.filter((k) => keys.has(k)) : [])
+  } catch { return new Set() }
+}
+
+export function writeOpenGroups(storage, open) {
+  try { storage && storage.setItem(MDR_OPEN_KEY, JSON.stringify([...open])) } catch { /* storage unavailable */ }
+}
+
+/** The landing route of a My Deal Room rail group. */
+export const hubRoute = (key) => '/wholesale/hub/' + key

@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
+import { useMdrNav } from '../../components/mdr/MdrShell'
 import { errText } from './wsShared'
 import { AuthImage } from './wsFiles'
 import MorningCommand from './wsMorning'
@@ -73,6 +74,9 @@ function Progress({ stage }) {
 
 export default function WholesaleCommand({ focus }) {
   const navigate = useNavigate()
+  // My Deal Room: the deal list is the task. The sandbox switch joins the
+  // header actions and the morning summary moves into the side rail.
+  const mdr = !!useMdrNav()
   const env = useEnvironment()
   const [includeTest, setIncludeTest] = useState(null)
   const [board, setBoard] = useState(null)
@@ -137,8 +141,9 @@ export default function WholesaleCommand({ focus }) {
       <Hero scene={HERO.scene} eyebrow={HERO.eyebrow} title={HERO.title} sub={HERO.sub} quote={HERO.quote}
             meta={[{ label: <>As of <b>{new Date(ops.as_of).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</b></> },
                    ops.include_test ? { label: 'Including sandbox records', tone: 'paused' } : null]}
-            actions={<Link className="evo-btn evo-btn--primary" to="/wholesale/properties?add=1">+ New Deal</Link>} />
-      <div className="evo-toolbar evo-toolbar--end">{sandboxToggle}</div>
+            actions={mdr ? <>{sandboxToggle}<Link className="evo-btn evo-btn--primary" to="/wholesale/properties?add=1">+ New Deal</Link></>
+              : <Link className="evo-btn evo-btn--primary" to="/wholesale/properties?add=1">+ New Deal</Link>} />
+      {mdr ? null : <div className="evo-toolbar evo-toolbar--end">{sandboxToggle}</div>}
     </>
   )
 
@@ -154,7 +159,7 @@ export default function WholesaleCommand({ focus }) {
     <EvoApp world={world}>
       {head}
       <Alert>{error}</Alert>
-      <MorningCommand includeTest={!!includeTest} dealSteps={ops ? ops.attention_total : 0} />
+      {mdr ? null : <MorningCommand includeTest={!!includeTest} dealSteps={ops ? ops.attention_total : 0} />}
       <Metrics label="Deal operations">
         <Metric label="Active deals" value={h.active_deals} tone="primary" />
         <Metric label="Under contract" value={h.under_contract} tone="success" />
@@ -286,6 +291,7 @@ export default function WholesaleCommand({ focus }) {
         </div>
 
         <aside className="evo-rail" aria-label="Closings, risk and activity">
+          {mdr ? <div className="mdr-morning"><MorningCommand includeTest={!!includeTest} dealSteps={ops ? ops.attention_total : 0} /></div> : null}
           <Panel title="Upcoming closings" count={ops.closings_total}
                  action={<Link className="evo-link" to="/wholesale/closing">All →</Link>}>
             {!ops.upcoming_closings.length ? <p className="evo-muted" style={{ margin: 0 }}>Nothing scheduled in the next 30 days.</p> : (

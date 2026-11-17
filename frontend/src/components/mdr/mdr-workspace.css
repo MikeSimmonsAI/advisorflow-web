@@ -1,0 +1,362 @@
+/* MY DEAL ROOM WORKSPACE — redesign (Nov 2026).
+ *
+ * Scoped by `.layout--mdr`, which Layout sets ONLY on the My Deal Room shell
+ * (EvoSys Pro brand, inside /wholesale, never OLP / BookaBoost / a vertical).
+ * Two layers:
+ *   1. the shell: charcoal rail, compact top bar, account menu, quick jump;
+ *   2. the workspace: the Wholesale design-system tokens (evo-ds.css) are
+ *      re-pointed to a warm neutral canvas, deep green primary actions and
+ *      compact type/spacing. Every routed My Deal Room screen renders inside
+ *      `.evo-app`, so the whole workspace changes together; decorative hero
+ *      banners collapse into a one-line page header.
+ */
+
+/* ════════════════════════ TOKENS ════════════════════════════════════════ */
+.layout--mdr {
+  --sidebar-width: 236px;
+  --mdr-rail: #1f2326;
+  --mdr-rail-2: #272c30;
+  --mdr-rail-line: rgba(255, 255, 255, .08);
+  --mdr-rail-text: #d6d3cc;
+  --mdr-rail-muted: #8f918f;
+  --mdr-canvas: #f4f2ed;
+  --mdr-surface: #ffffff;
+  --mdr-inset: #f9f8f5;
+  --mdr-line: #e4dfd5;
+  --mdr-line-strong: #d3ccbf;
+  --mdr-ink: #1d2023;
+  --mdr-ink-2: #4c4f54;
+  --mdr-ink-3: #6b6d70;
+  --mdr-green: #1d5c45;
+  --mdr-green-hover: #174b38;
+  --mdr-green-ink: #17543e;
+  --mdr-green-soft: #e4efe8;
+  --mdr-amber: #a35a00;
+  --mdr-amber-soft: #fbf0dc;
+  --mdr-red: #b42335;
+  --mdr-red-soft: #fbe7ea;
+  --mdr-blue-ink: #1f4f8a;
+  --mdr-blue-soft: #e6eef8;
+  --mdr-font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --mdr-radius: 8px;
+  --mdr-shadow: 0 1px 2px rgba(29, 32, 35, .05);
+  --mdr-shadow-lg: 0 12px 32px -12px rgba(29, 32, 35, .28);
+}
+
+/* the design system, re-pointed (outranks `.evo-app, .evo-tokens`) */
+.layout--mdr .evo-app,
+.layout--mdr .evo-tokens,
+html:root body .layout--mdr ~ .evo-drawer-root,
+html:root[data-mdr] .evo-drawer-root {
+  --evo-bg: var(--mdr-canvas, #f4f2ed);
+  --evo-surface: #ffffff;
+  --evo-surface-elevated: #ffffff;
+  --evo-surface-raised: #f1eee7;
+  --evo-surface-inset: #f9f8f5;
+  --evo-line: #e4dfd5;
+  --evo-line-strong: #d3ccbf;
+  --evo-text-primary: #1d2023;
+  --evo-text-secondary: #4c4f54;
+  --evo-text-tertiary: #6b6d70;
+  --evo-navy: #1d2023;
+  --evo-primary: #1d5c45;
+  --evo-primary-fill: #1d5c45;
+  --evo-primary-ink: #17543e;
+  --evo-primary-soft: #e4efe8;
+  --evo-module: #1d5c45;
+  --evo-score-contact: #1f4f8a;
+  --evo-radius-sm: 6px;
+  --evo-radius: 8px;
+  --evo-radius-lg: 10px;
+  --evo-gap: 14px;
+  --evo-shadow: 0 1px 2px rgba(29, 32, 35, .05);
+  --evo-shadow-lg: 0 10px 28px -14px rgba(29, 32, 35, .3);
+  --evo-font-display: var(--evo-font);
+  --evo-font-serif: var(--evo-font);
+  --bg-row: #fbfaf7;
+  --bg-row-hover: #f4f1ea;
+}
+
+/* ════════════════════════ SHELL: RAIL ═══════════════════════════════════ */
+html:root body .layout--mdr .sidebar {
+  background: var(--mdr-rail); box-shadow: none; border-right: 1px solid #15181a; color: var(--mdr-rail-text);
+}
+@media (min-width: 769px) {
+  html:root body .layout.layout--wholesale.layout--wsnav.layout--mdr { background: linear-gradient(90deg, var(--mdr-rail) 0, var(--mdr-rail) var(--sidebar-width), var(--mdr-canvas) var(--sidebar-width)); }
+  html:root body .layout.layout--wholesale.layout--wsnav.layout--mdr:has(.sidebar--collapsed) { background: linear-gradient(90deg, var(--mdr-rail) 0, var(--mdr-rail) 60px, var(--mdr-canvas) 60px); }
+}
+html:root body .layout--mdr .sidebar-brand { padding: 14px 14px 12px; border-bottom: 1px solid var(--mdr-rail-line); min-height: 0; }
+.mdr-brand { display: flex; align-items: center; gap: 10px; min-width: 0; color: #fff; text-decoration: none; }
+.mdr-brand__mark { width: 32px; height: 32px; flex: none; display: block; }
+.mdr-brand__text { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
+.mdr-brand__word { font: 700 15.5px/1.15 var(--mdr-font); letter-spacing: -.01em; color: #fff; white-space: nowrap; }
+.mdr-brand__engine { font: 500 11px/1.3 var(--mdr-font); color: var(--mdr-rail-muted); white-space: nowrap; }
+.mdr-brand__engine b { color: #b9d8c8; font-weight: 600; }
+
+html:root body .layout--mdr .sidebar-nav { padding: 10px 8px 12px; }
+html:root body .layout--mdr .sidebar .wsnav-pinned .nav-item { font-weight: 600; }
+html:root body .layout--mdr .wsnav-pinned { margin: 0 0 6px; padding: 0 0 8px; border-bottom: 1px solid var(--mdr-rail-line); }
+html:root body .layout--mdr .wsnav-group { margin: 0 0 2px; padding: 0; border-bottom: 0; }
+html:root body .layout--mdr .sidebar .nav-item {
+  min-height: 34px; padding: 0 10px; gap: 10px; border-radius: 6px; font: 500 13px/1.2 var(--mdr-font);
+  color: var(--mdr-rail-text); white-space: nowrap; overflow: visible; text-overflow: clip;
+}
+html:root body .layout--mdr .sidebar .nav-item svg { width: 16px; height: 16px; color: var(--mdr-rail-muted); }
+html:root body .layout--mdr .sidebar .nav-item:hover { background: rgba(255, 255, 255, .06); color: #fff; }
+html:root body .layout--mdr .sidebar .nav-item--active,
+html:root body .layout--mdr .sidebar .nav-item--active:hover { background: var(--mdr-green); color: #fff; box-shadow: none; }
+html:root body .layout--mdr .sidebar .nav-item--active svg { color: #d7ebe0; }
+html:root body .layout--mdr .wsnav-group > [role="group"] .nav-item { padding-left: 14px; }
+
+.mdr-grouphead { display: flex; align-items: center; gap: 2px; }
+html:root body .layout--mdr .sidebar .mdr-grouphead .nav-section-toggle {
+  flex: 1 1 auto; min-height: 32px; padding: 0 8px 0 10px; border-radius: 6px;
+  font: 600 11px/1.2 var(--mdr-font); letter-spacing: .06em; text-transform: uppercase; color: var(--mdr-rail-muted);
+}
+html:root body .layout--mdr .sidebar .mdr-grouphead .nav-section-toggle:hover { background: rgba(255, 255, 255, .05); color: #fff; }
+html:root body .layout--mdr .sidebar .nav-section--current .mdr-grouphead .nav-section-toggle { color: #e8e5de; }
+html:root body .layout--mdr .sidebar .mdr-grouphead .nav-section-toggle svg { width: 14px; height: 14px; }
+.mdr-grouphead__hub {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px;
+  color: var(--mdr-rail-muted); text-decoration: none;
+}
+.mdr-grouphead__hub:hover, .mdr-grouphead__hub.is-on { background: rgba(255, 255, 255, .07); color: #fff; }
+.mdr-grouphead__hub svg { width: 14px; height: 14px; }
+html:root body .layout--mdr .sidebar .nav-item:focus-visible,
+html:root body .layout--mdr .sidebar .nav-section-toggle:focus-visible,
+.mdr-grouphead__hub:focus-visible { outline: 2px solid #8fc6aa; outline-offset: 1px; }
+
+/* footer: the account lives in the top bar on My Deal Room */
+html:root body .layout--mdr .sidebar-footer { display: none; }
+html:root body .layout--mdr .sidebar--collapsed .mdr-brand__text { display: none; }
+
+/* ════════════════════════ SHELL: TOP BAR ════════════════════════════════ */
+html:root body .layout--mdr .top-bar {
+  height: 52px; min-height: 52px; padding: 0 20px; gap: 12px; background: #fff;
+  border-bottom: 1px solid var(--mdr-line); box-shadow: none;
+}
+html:root body .layout--mdr .main-content { background: var(--mdr-canvas); }
+html:root body .layout--mdr .wsx-search { max-width: 460px; height: 34px; border-radius: 7px; background: var(--mdr-inset); border: 1px solid var(--mdr-line); }
+html:root body .layout--mdr .wsx-search input { font: 400 13px var(--mdr-font); }
+html:root body .layout--mdr .top-bar-right { gap: 8px; }
+
+.mdr-jump { position: relative; }
+.mdr-jump__btn, .mdr-acct__btn {
+  display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border-radius: 7px;
+  border: 1px solid var(--mdr-line); background: #fff; color: var(--mdr-ink); font: 500 13px var(--mdr-font); cursor: pointer;
+}
+.mdr-jump__btn:hover, .mdr-acct__btn:hover { background: var(--mdr-inset); }
+.mdr-jump__btn kbd { font: 600 10.5px var(--mdr-font); color: var(--mdr-ink-3); border: 1px solid var(--mdr-line); border-radius: 4px; padding: 1px 5px; }
+.mdr-pop {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 400; width: 300px; max-height: min(70vh, 520px); overflow: auto;
+  background: #fff; border: 1px solid var(--mdr-line); border-radius: 10px; box-shadow: var(--mdr-shadow-lg); padding: 6px;
+  font-family: var(--mdr-font); color: var(--mdr-ink);
+}
+.mdr-jump .mdr-pop { right: auto; left: 0; }
+.mdr-pop__search { width: 100%; height: 34px; padding: 0 10px; border: 1px solid var(--mdr-line); border-radius: 7px; font: 400 13px var(--mdr-font); margin-bottom: 6px; }
+.mdr-pop__group { margin: 8px 8px 4px; font: 600 10.5px var(--mdr-font); letter-spacing: .06em; text-transform: uppercase; color: var(--mdr-ink-3); }
+.mdr-pop__item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 0 8px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--mdr-ink); font: 500 13px var(--mdr-font); text-align: left; text-decoration: none; cursor: pointer; }
+.mdr-pop__item:hover, .mdr-pop__item.is-on, .mdr-pop__item:focus-visible { background: var(--mdr-green-soft); color: var(--mdr-green-ink); outline: none; }
+.mdr-pop__item svg { width: 15px; height: 15px; color: var(--mdr-ink-3); }
+.mdr-pop__empty { padding: 10px; color: var(--mdr-ink-3); font-size: 13px; }
+.mdr-pop__sep { height: 1px; background: var(--mdr-line); margin: 6px 4px; }
+.mdr-pop__id { padding: 8px 10px 6px; }
+.mdr-pop__id dt { font: 600 10.5px var(--mdr-font); letter-spacing: .06em; text-transform: uppercase; color: var(--mdr-ink-3); margin-top: 6px; }
+.mdr-pop__id dd { margin: 1px 0 0; font: 500 13px var(--mdr-font); color: var(--mdr-ink); overflow-wrap: anywhere; }
+.mdr-pop .program-switch, .mdr-pop .ctx-switcher { width: 100%; }
+
+.mdr-acct { position: relative; }
+.mdr-acct__avatar { width: 24px; height: 24px; border-radius: 50%; background: var(--mdr-green); color: #fff; display: inline-flex;
+  align-items: center; justify-content: center; font: 700 11px var(--mdr-font); overflow: hidden; flex: none; }
+.mdr-acct__avatar img { width: 100%; height: 100%; object-fit: cover; }
+.mdr-acct__name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 768px) {
+  html:root body .layout--mdr .top-bar { padding: 0 10px 0 56px; gap: 6px; }
+  html:root body .layout--mdr .wsx-search { max-width: none; flex: 1 1 auto; min-width: 0; }
+  .mdr-acct__name, .mdr-jump__label, .mdr-jump__btn kbd { display: none; }
+  html:root body .layout--mdr .program-switch__label { display: none; }
+  .mdr-pop { position: fixed; left: 8px !important; right: 8px !important; top: 58px; width: auto; }
+}
+
+/* ════════════════════════ WORKSPACE ═════════════════════════════════════ */
+.layout--mdr .evo-app.evo-app { padding: 16px 24px 40px; font-size: 13.5px; line-height: 1.45; }
+@media (max-width: 768px) { .layout--mdr .evo-app.evo-app { padding: 10px 12px 36px; } }
+
+/* decorative heroes → one compact page header (title, chips, actions) */
+.layout--mdr .evo-herobox {
+  min-height: 0; background: transparent; box-shadow: none; overflow: visible; border-radius: 0;
+  margin: 0 0 12px; padding: 0 0 12px; border-bottom: 1px solid var(--evo-line);
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 16px;
+}
+.layout--mdr .evo-herobox::before,
+.layout--mdr .evo-herobox__art,
+.layout--mdr .evo-herobox__quote { display: none; }
+.layout--mdr .evo-herobox__body { padding: 0; max-width: none; flex: 1 1 360px; color: var(--evo-text-primary); }
+.layout--mdr .evo-herobox__eyebrow { margin: 0 0 2px; font-size: 11px; letter-spacing: .06em; color: var(--evo-text-tertiary); }
+.layout--mdr .evo-herobox__title { font: 700 20px/1.2 var(--evo-font); letter-spacing: -.01em; color: var(--evo-text-primary); text-shadow: none; }
+.layout--mdr .evo-herobox__sub { margin: 3px 0 0; font-size: 13px; color: var(--evo-text-secondary); }
+.layout--mdr .evo-herobox__meta { margin-top: 8px; gap: 6px; }
+.layout--mdr .evo-herobox__chip { height: 24px; padding: 0 9px; background: var(--evo-surface-inset); color: var(--evo-text-secondary);
+  box-shadow: inset 0 0 0 1px var(--evo-line); font-size: 12px; }
+.layout--mdr .evo-herobox__chip.is-live { background: var(--mdr-green-soft); color: var(--mdr-green-ink); box-shadow: none; }
+.layout--mdr .evo-herobox__chip.is-paused { background: var(--mdr-amber-soft); color: var(--mdr-amber); box-shadow: none; }
+.layout--mdr .evo-herobox__actions { position: static; padding: 0; display: flex; gap: 8px; flex-wrap: wrap; align-self: flex-end; }
+.layout--mdr .evo-herobox__score { position: static; padding: 0; }
+.layout--mdr .evo-head { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--evo-line); }
+.layout--mdr .evo-head__title { font: 700 20px/1.2 var(--evo-font); }
+.layout--mdr .evo-head__sub { font-size: 13px; }
+
+/* controls */
+.layout--mdr .evo-btn { min-height: 34px; padding: 0 12px; border-radius: 7px; font-size: 13px; font-weight: 600; }
+.layout--mdr .evo-btn--sm { min-height: 28px; padding: 0 10px; font-size: 12px; border-radius: 6px; }
+.layout--mdr .evo-btn--lg { min-height: 38px; padding: 0 14px; font-size: 13.5px; }
+.layout--mdr .evo-btn--primary { background: var(--mdr-green); box-shadow: none; }
+.layout--mdr .evo-btn--primary:hover:not(:disabled) { background: var(--mdr-green-hover); }
+.layout--mdr .evo-btn--success { background: var(--mdr-green); }
+.layout--mdr .evo-input, .layout--mdr .evo-search input, .layout--mdr .evo-textarea, .layout--mdr .evo-app select {
+  border-radius: 7px; font-size: 13px; }
+.layout--mdr .evo-input, .layout--mdr .evo-app select:not([class*="mdr-"]) { min-height: 34px; }
+
+/* surfaces */
+.layout--mdr .evo-panel { border-radius: 10px; box-shadow: inset 0 0 0 1px var(--evo-line); }
+.layout--mdr .evo-panel__head { padding: 10px 14px; }
+.layout--mdr .evo-panel__title { font-size: 14px; font-weight: 700; }
+.layout--mdr .evo-metrics { gap: 10px; margin-bottom: 12px; }
+.layout--mdr .evo-metric { padding: 10px 12px; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--evo-line); }
+.layout--mdr .evo-metric__value { font-size: 20px; }
+.layout--mdr .evo-metric__label { font-size: 11.5px; }
+.layout--mdr .evo-section-title { font: 700 14px/1.3 var(--evo-font); margin: 16px 0 8px; }
+
+/* tables */
+.layout--mdr .evo-table th { padding: 8px 12px; font-size: 11.5px; letter-spacing: .02em; background: var(--evo-surface-inset); }
+.layout--mdr .evo-table td { padding: 9px 12px; }
+.layout--mdr .evo-table tbody tr:hover td { background: var(--bg-row-hover); }
+
+/* status labels */
+.layout--mdr .evo-status { height: 22px; padding: 0 8px; border-radius: 5px; font-size: 11.5px; }
+.layout--mdr .evo-tag { height: 20px; border-radius: 5px; font-size: 11px; }
+.layout--mdr .evo-tabs, .layout--mdr .evo-seg { font-size: 13px; }
+.layout--mdr .evo-alert { border-radius: 8px; padding: 9px 12px; font-size: 13px; }
+
+/* the Owner Deal Room and Buyer Intelligence keep their structure; they adopt
+   the palette (deep green primary actions instead of blue) */
+.layout--mdr .od-title { font-family: var(--mdr-font); }
+.layout--mdr .evo-app { --drm-blue: #1d5c45; --drm-blue-d: #174b38; --drm-blue-soft: #e4efe8; --drm-navy: #1d2023; --drm-navy-2: #2a2f33; }
+.layout--mdr .od-btn--primary, .layout--mdr .od-lcta__ic, .layout--mdr .od-badge--blue { background: var(--mdr-green); box-shadow: none; }
+.layout--mdr .od-btn--primary:hover { background: var(--mdr-green-hover); transform: none; }
+.layout--mdr .od-btn--white, .layout--mdr .od-btn--ghost, .layout--mdr .od-link, .layout--mdr .od-tabs [role=tab].is-on { color: var(--mdr-green-ink) !important; }
+.layout--mdr .od-tabs [role=tab].is-on { border-bottom-color: var(--mdr-green); }
+.layout--mdr .od-btn--ghost { border-color: var(--mdr-line-strong); }
+.layout--mdr .od-btn--ghost:hover, .layout--mdr .od-qa button:hover { background: var(--mdr-green-soft); border-color: var(--mdr-green); }
+.layout--mdr .od-metric__ic, .layout--mdr .od-chart-empty__ic, .layout--mdr .od-qa__ic, .layout--mdr .bi-cmd__i { background: var(--mdr-green-soft); color: var(--mdr-green); }
+.layout--mdr .od-pill--info, .layout--mdr .od-tag--blue, .layout--mdr .od-act__ic.is-info { background: var(--mdr-blue-soft); color: var(--mdr-blue-ink); }
+.layout--mdr .bi-cmd__btn { border-radius: 10px; box-shadow: inset 0 0 0 1px var(--mdr-line); }
+.layout--mdr .bi-cmd__btn:hover { border-color: var(--mdr-green); transform: none; }
+.layout--mdr .bi-cmd__btn--primary { background: var(--mdr-green); border-color: var(--mdr-green); }
+.layout--mdr .bi-cmd__btn--primary .bi-cmd__i { background: rgba(255, 255, 255, .14); color: #fff; }
+
+/* ════════════════════════ SHARED MDR PIECES ═════════════════════════════ */
+.mdr-label { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 5px;
+  font: 600 11.5px/1 var(--mdr-font); white-space: nowrap; background: #efede8; color: #4c4f54; }
+.mdr-label--critical { background: var(--mdr-red-soft); color: var(--mdr-red); }
+.mdr-label--warn { background: var(--mdr-amber-soft); color: var(--mdr-amber); }
+.mdr-label--good { background: var(--mdr-green-soft); color: var(--mdr-green-ink); }
+.mdr-label--info { background: var(--mdr-blue-soft); color: var(--mdr-blue-ink); }
+.mdr-label--verify { background: #fff4d6; color: #7a4a00; box-shadow: inset 0 0 0 1px #f0d48e; }
+
+/* group landing page */
+.mdr-hub__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.mdr-hub__tile { display: flex; gap: 12px; align-items: flex-start; padding: 14px; background: #fff; border-radius: 10px;
+  box-shadow: inset 0 0 0 1px var(--evo-line); color: var(--evo-text-primary); text-decoration: none; }
+.mdr-hub__tile:hover { box-shadow: inset 0 0 0 1px var(--mdr-green); }
+.mdr-hub__icon { flex: none; width: 34px; height: 34px; border-radius: 8px; background: var(--mdr-green-soft); color: var(--mdr-green);
+  display: inline-flex; align-items: center; justify-content: center; }
+.mdr-hub__icon svg { width: 17px; height: 17px; }
+.mdr-hub__name { font-weight: 700; font-size: 14px; }
+.mdr-hub__desc { margin: 2px 0 0; color: var(--evo-text-secondary); font-size: 12.5px; }
+
+/* Owner Deal Room welcome banner → a compact action bar */
+.layout--mdr .od-hero { min-height: 0; background: #fff; color: var(--mdr-ink); border-radius: 10px; box-shadow: inset 0 0 0 1px var(--mdr-line); }
+.layout--mdr .od-hero__photo, .layout--mdr .od-hero__veil { display: none; }
+.layout--mdr .od-hero__body { padding: 12px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.layout--mdr .od-hero__h { margin: 0; font: 700 17px/1.2 var(--mdr-font); color: var(--mdr-ink); letter-spacing: -.01em; }
+.layout--mdr .od-hero__h span { color: var(--mdr-green-ink); }
+.layout--mdr .od-hero__p { display: none; }
+.layout--mdr .od-hero__btns { gap: 6px; margin-left: auto; }
+.layout--mdr .od-hero .od-btn { min-height: 34px; padding: 0 12px; font-size: 13px; border-radius: 7px; }
+.layout--mdr .od-hero .od-btn--white { border-color: var(--mdr-line-strong); box-shadow: none; }
+.layout--mdr .od-metric { padding: 12px 14px; border-radius: 10px; }
+.layout--mdr .od-metric__ic { width: 36px; height: 36px; border-radius: 9px; }
+
+/* Buyers & Deals workflow strip (above the page) */
+.mdr-flow { display: flex; gap: 2px; overflow-x: auto; margin: -32px -40px 0; padding: 6px 40px; background: #fff;
+  border-bottom: 1px solid var(--mdr-line); position: relative; z-index: 1; scrollbar-width: none; }
+.mdr-flow::-webkit-scrollbar { display: none; }
+.mdr-flow__step { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px; border-radius: 6px; white-space: nowrap;
+  font: 600 12.5px var(--mdr-font); color: var(--mdr-ink-2); text-decoration: none; }
+.mdr-flow__step:hover { background: var(--mdr-inset); color: var(--mdr-ink); }
+.mdr-flow__step.is-on { background: var(--mdr-green-soft); color: var(--mdr-green-ink); }
+.mdr-flow__n { width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10.5px; background: #ece9e2; color: var(--mdr-ink-3); }
+.mdr-flow__step.is-on .mdr-flow__n { background: var(--mdr-green); color: #fff; }
+.layout--mdr .mdr-flow ~ .evo-app.evo-app, .layout--mdr .mdr-flow ~ * .evo-app.evo-app { margin-top: 0; }
+@media (max-width: 768px) { .mdr-flow { margin: -16px -14px 0; padding: 6px 14px; } }
+@media (max-width: 768px) {
+  html:root body .layout--mdr .sidebar-brand { padding-right: 52px; }
+  .mdr-brand__engine { white-space: normal; }
+}
+
+/* ════════════════════════ ROUND 2: screen layouts ═══════════════════════ */
+/* Summary numbers are context, not the task: one compact strip, not a row of cards */
+.layout--mdr .evo-metrics { gap: 0; margin-bottom: 12px; background: #fff; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--evo-line);
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); overflow: hidden; }
+.layout--mdr .evo-metric { box-shadow: none; border-radius: 0; background: transparent; padding: 8px 12px; min-height: 0;
+  border-right: 1px solid var(--evo-line); }
+.layout--mdr .evo-metric:last-child { border-right: 0; }
+.layout--mdr .evo-metric__value { font-size: 18px; margin-bottom: 1px; }
+.layout--mdr .evo-metric__label { font-size: 11.5px; margin-bottom: 0; }
+.layout--mdr .evo-metric__sub { font-size: 11px; margin-top: 0; }
+.layout--mdr .evo-metric.is-attention { background: #fffaf0; box-shadow: none; }
+@media (max-width: 560px) {
+  .layout--mdr .evo-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .layout--mdr .evo-metric { border-bottom: 1px solid var(--evo-line); }
+}
+
+/* Providers & Controls: banner → page header; summary → strip */
+.layout--mdr .pc-banner { background: transparent; color: var(--mdr-ink); box-shadow: none; border-radius: 0; padding: 0 0 10px;
+  margin-bottom: 10px; border-bottom: 1px solid var(--mdr-line); }
+.layout--mdr .pc-banner__eyebrow { color: var(--mdr-ink-3); letter-spacing: .06em; }
+.layout--mdr .pc-banner__title { font: 700 20px/1.2 var(--mdr-font); color: var(--mdr-ink); }
+.layout--mdr .pc-banner__sub, .layout--mdr .pc-banner__time { color: var(--mdr-ink-3); }
+.layout--mdr .pc-banner__side .pc-pill { background: var(--mdr-green-soft); color: var(--mdr-green-ink); }
+.layout--mdr .pc-banner__refresh { border-color: var(--mdr-line-strong); color: var(--mdr-ink); }
+.layout--mdr .pc-stats { gap: 0; background: #fff; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--mdr-line); overflow: hidden; }
+.layout--mdr .pc-stat { border: 0; border-right: 1px solid var(--mdr-line); border-radius: 0; box-shadow: none; padding: 8px 12px; border-top: 3px solid transparent; }
+.layout--mdr .pc-stat.is-good { border-top-color: var(--mdr-green); }
+.layout--mdr .pc-stat.is-warn { border-top-color: #d9a441; }
+.layout--mdr .pc-stat.is-danger { border-top-color: var(--mdr-red); }
+/* Deal Operations: the morning summary in the side rail */
+.layout--mdr .mdr-morning .evo-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.layout--mdr .mdr-morning .evo-metric { border-bottom: 1px solid var(--evo-line); }
+.layout--mdr .evo-filterbar--more { border-top: 1px dashed var(--evo-line); background: var(--evo-surface-inset); }
+.layout--mdr .bi-roomstate { font-weight: 500; opacity: .85; }
+/* page header: no leftover hero padding or height at any width */
+.layout--mdr .evo-app .evo-herobox, .layout--mdr .evo-app .evo-herobox--compact { min-height: 0; padding-top: 0; }
+.layout--mdr .evo-app .evo-herobox .evo-herobox__body,
+.layout--mdr .evo-app .evo-herobox--compact .evo-herobox__body,
+.layout--mdr .evo-app .evo-herobox.has-actions .evo-herobox__body { padding: 0; }
+.layout--mdr .evo-app .evo-herobox .evo-herobox__actions { padding: 0; }
+.layout--mdr .evo-app .evo-herobox__actions .evo-btn { box-shadow: none; }
+@media (max-width: 768px) {
+  .layout--mdr .evo-app .evo-herobox { flex-direction: column; align-items: stretch; gap: 8px; }
+  .layout--mdr .evo-app .evo-herobox__title { font-size: 18px; }
+  .layout--mdr .evo-app .evo-herobox__sub { font-size: 12.5px; }
+  .layout--mdr .evo-app .evo-herobox__actions .evo-btn { flex: 0 1 auto; }
+  .wq-head__actions .evo-btn { flex: 1 1 auto; }
+}
+@media (max-width: 768px) {
+  /* in a column, the desktop flex-basis would become a 360px-tall body */
+  .layout--mdr .evo-app .evo-herobox .evo-herobox__body { flex: 0 0 auto; }
+}

@@ -40,6 +40,10 @@ function download(path, name) {
   })
 }
 
+/** A number the portfolio does not have yet: said plainly, never a dash. */
+const Miss = ({ what = 'Missing' }) => <span className="pf-miss">{what}</span>
+const has = (v) => !(v === null || v === undefined || v === '')
+
 function Partial({ t, of }) {
   if (!t) return null
   if (!t.counted) return <>none on file yet</>
@@ -64,7 +68,7 @@ export function PortfolioList() {
 
   return (
     <EvoApp world="acquisition">
-      <Hero compact scene="estate" eyebrow="Acquisition Command" title="Portfolio Acquisitions"
+      <Hero compact scene="estate" eyebrow="Acquire" title="Seller Portfolios"
             sub="One seller, many properties. Evaluate each property, then build and compare purchase packages."
             meta={rows ? [{ label: <><b>{rows.length}</b> portfolio{rows.length === 1 ? '' : 's'}</> }] : null}
             actions={<button type="button" className="evo-btn evo-btn--primary" onClick={() => setCreating(true)}>+ New portfolio</button>} />
@@ -194,6 +198,15 @@ export function PortfolioDetail() {
   const [open, setOpen] = useState(null)        // item id for the evaluation drawer
   const [drawer, setDrawer] = useState(null)    // 'import' | 'add' | 'assign' | 'edit'
   const [pkgFocus, setPkgFocus] = useState(null)
+  // laptop and up: the review panel docks beside the grid; smaller: a drawer
+  const [wide, setWide] = useState(() => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(min-width: 1181px)').matches)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined
+    const m = window.matchMedia('(min-width: 1181px)')
+    const f = () => setWide(m.matches)
+    m.addEventListener ? m.addEventListener('change', f) : m.addListener(f)
+    return () => { m.removeEventListener ? m.removeEventListener('change', f) : m.removeListener(f) }
+  }, [])
 
   const load = useCallback(() => {
     setError(null)
@@ -258,7 +271,7 @@ export function PortfolioDetail() {
 
   return (
     <EvoApp world="acquisition">
-      <Hero compact scene="estate" eyebrow={<><Link to="/wholesale/portfolios" className="pf-crumb">Portfolio Acquisitions</Link> · {p.label}</>}
+      <Hero compact scene="estate" eyebrow={<><Link to="/wholesale/portfolios" className="pf-crumb">Seller Portfolios</Link> · {p.label}</>}
             title={p.name}
             sub={[p.seller_name ? `Seller: ${p.seller_name}` : 'Seller not set', p.source ? `Source: ${p.source}` : null].filter(Boolean).join(' · ')}
             meta={[{ label: p.status_label }, { label: <><b>{s.properties}</b> properties</> },
@@ -281,49 +294,55 @@ export function PortfolioDetail() {
 
       {tab === 'inventory' ? (
         <div role="tabpanel" id="panel-inventory" aria-labelledby="tab-inventory">
-          <Metrics label="Portfolio totals">
-            <Metric label="Seller asking" value={money(s.seller_asking.total)} sub={<>seller stated · <Partial t={s.seller_asking} of={s.properties} /></>} />
-            <Metric label="Stated rent / month" value={money(s.seller_rent_monthly.total)} sub={<>scheduled, not collected · <Partial t={s.seller_rent_monthly} of={s.seller_rent_monthly.of} />{s.land ? ` · ${s.land} land excluded` : ''}</>} />
-            <Metric label="Estimated value" tone="info" value={money(s.estimated_value.total)} sub={<Partial t={s.estimated_value} of={s.properties} />} attention={s.estimated_value.partial} />
-            <Metric label="Estimated repairs" value={money(s.repairs.total)} sub={<Partial t={s.repairs} of={s.properties} />} />
-            <Metric label="Our target offers" tone="primary" value={money(s.target_offers.total)} sub={<Partial t={s.target_offers} of={s.properties} />} />
-            <Metric label="Estimated spread" tone="success" value={money(s.estimated_spread.total)} sub={<>evaluated only · {s.estimated_spread.counted} of {s.properties}</>} />
-          </Metrics>
-          <Panel flush>
-            <div className="evo-filterbar">
-              <label className="evo-search"><span className="evo-sr">Search this portfolio</span>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
-                <input className="evo-input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search address or row" /></label>
-              <select aria-label="Filter properties" className="evo-select" value={filter} onChange={(e) => setFilter(e.target.value)}>
-                {FILTERS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
-              <select aria-label="Sort properties" className="evo-select" value={sort} onChange={(e) => setSort(e.target.value)}>
-                {SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
-              <span className="pf-selbar">
-                <button type="button" className="evo-btn evo-btn--primary evo-btn--sm" disabled={!chosen.length} onClick={() => newPackage(true)}>
-                  {chosen.length ? `Package ${chosen.length} selected` : 'Select to build a package'}</button>
-                <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={!chosen.length} onClick={() => setDrawer('assign')}>Assign</button>
-                <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={!chosen.length} onClick={removeSelected}>Remove</button>
-              </span>
-            </div>
-            {sort !== 'row' ? <p className="pf-rank">{{
-              spread: 'Ranked by estimated profit at our target offer = value − offer − repairs − transaction costs. Properties without all four are listed last.',
-              yield: 'Ranked by the seller-stated rent × 12 ÷ our target offer. Gross, before any expense; the rent is not verified.',
-              repairs: 'Ranked by repairs ÷ value. Properties without both are listed last.',
-              confidence: 'Ranked by the valuation confidence on file (high, medium, low, insufficient).',
-              asking: 'Ordered by the seller’s stated price.',
-            }[sort]}</p> : null}
-            {!data.rows.length ? (
-              <Empty title="No properties in this portfolio yet"
-                     action={<div className="evo-actionbar" style={{ justifyContent: 'center' }}>
-                       <button type="button" className="evo-btn evo-btn--primary" onClick={() => setDrawer('import')}>Import seller list</button>
-                       <button type="button" className="evo-btn evo-btn--secondary" onClick={() => setDrawer('add')}>Add existing properties</button></div>}>
-                Import the seller’s list (CSV or Excel), type rows from a photo of it, or link properties already in My Deal Room.
-              </Empty>
-            ) : (
+          {!data.rows.length ? (
+            /* EMPTY: importing the seller's list is the only task, so it comes first. */
+            <section className="pf-start" aria-label="Start this portfolio">
+              <div className="pf-start__main">
+                <h2>Import the seller’s property list</h2>
+                <p>CSV or Excel, or type the rows from a photo of the list. You review every row before anything is saved.</p>
+                <div className="evo-actionbar">
+                  <button type="button" className="evo-btn evo-btn--primary evo-btn--lg" onClick={() => setDrawer('import')}>Import seller list</button>
+                  <button type="button" className="evo-btn evo-btn--secondary evo-btn--lg" onClick={() => setDrawer('add')}>Add existing properties</button>
+                </div>
+              </div>
+              <ol className="pf-start__next" aria-label="What happens next">
+                <li><b>Review each property.</b> Seller figures stay as stated; value, repairs and offer are your assumptions.</li>
+                <li><b>Select properties and build an offer package.</b> Compare packages side by side.</li>
+              </ol>
+            </section>
+          ) : (
+            /* POPULATED: the grid and the review panel come first; totals sit
+               in the panel's place until a property is opened. */
+            <div className={`pf-work${open && wide ? ' has-review' : ''}`}>
+              <div className="pf-work__grid">
+                <Panel flush>
+                  <div className="evo-filterbar">
+                    <label className="evo-search"><span className="evo-sr">Search this portfolio</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
+                      <input className="evo-input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search address or row" /></label>
+                    <select aria-label="Filter properties" className="evo-select" value={filter} onChange={(e) => setFilter(e.target.value)}>
+                      {FILTERS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+                    <select aria-label="Sort properties" className="evo-select" value={sort} onChange={(e) => setSort(e.target.value)}>
+                      {SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+                    <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm pf-pkgall" onClick={() => newPackage(false)}
+                            title="A draft package of every property in this portfolio">Package all</button>
+                  </div>
+                  {sort !== 'row' ? <p className="pf-rank">{{
+                    spread: 'Ranked by estimated profit at our target offer = value − offer − repairs − transaction costs. Properties without all four are listed last.',
+                    yield: 'Ranked by the seller-stated rent × 12 ÷ our target offer. Gross, before any expense; the rent is not verified.',
+                    repairs: 'Ranked by repairs ÷ value. Properties without both are listed last.',
+                    confidence: 'Ranked by the valuation confidence on file (high, medium, low, insufficient).',
+                    asking: 'Ordered by the seller’s stated price.',
+                  }[sort]}</p> : null}
               <div className="evo-table-wrap">
                 <table className="evo-table evo-table--cards pf-table">
                   <caption className="evo-sr">{rows.length} properties</caption>
-                  <thead><tr>
+                  <thead><tr className="pf-thgroup">
+                    <th colSpan={3} aria-hidden="true" />
+                    <th colSpan={2} scope="colgroup" className="pf-th-seller">Seller stated</th>
+                    <th colSpan={4} scope="colgroup" className="pf-th-ours">Our assumptions</th>
+                    <th aria-hidden="true" />
+                  </tr><tr>
                     <th scope="col" style={{ width: 36 }}><input type="checkbox" aria-label="Select all shown"
                       checked={rows.length > 0 && rows.every((r) => sel[r.item_id])}
                       onChange={(e) => setSel(e.target.checked ? Object.fromEntries(rows.map((r) => [r.item_id, true])) : {})} /></th>
@@ -345,23 +364,62 @@ export function PortfolioDetail() {
                           <span className="evo-prop__sub">{r.occupancy_status === 'unknown' ? 'Occupancy unknown' : fmtLabel(r.occupancy_status)}{r.review_status === 'needs_review' ? ' · listing needs review' : ''}{r.extraction_confidence === 'low' ? ' · low confidence' : ''}</span>
                         </td>
                         <td data-label="Type">{r.is_land ? <Tag>Land</Tag> : fmtLabel(r.property_type || r.seller_type, '—')}</td>
-                        <td data-label="Seller asking" className="is-right">{money(r.seller_price)}</td>
-                        <td data-label="Stated rent" className="is-right">{r.is_land ? <span className="evo-muted">n/a</span> : money(r.seller_rent)}</td>
-                        <td data-label="Est. value" className="is-right">{r.arv === null ? <span className="evo-muted">Research needed</span>
+                        <td data-label="Seller asking" className="is-right pf-td-seller">{has(r.seller_price) ? money(r.seller_price) : <Miss what="Not stated" />}</td>
+                        <td data-label="Stated rent" className="is-right pf-td-seller">{r.is_land ? <span className="evo-muted">n/a</span> : has(r.seller_rent) ? money(r.seller_rent) : <Miss what="Not stated" />}</td>
+                        <td data-label="Est. value" className="is-right">{r.arv === null ? <Miss what="Research needed" />
                           : <>{money(r.arv)}<span className="evo-prop__sub">{fmtLabel(r.arv_confidence || r.arv_source)}</span></>}</td>
-                        <td data-label="Repairs" className="is-right">{money(r.repairs)}{r.repairs !== null ? <span className="evo-prop__sub">{r.repair_status_label}</span> : null}</td>
-                        <td data-label="Our target offer" className="is-right">{money(r.target_offer)}
+                        <td data-label="Repairs" className="is-right">{has(r.repairs) ? <>{money(r.repairs)}<span className="evo-prop__sub">{r.repair_status_label}</span></> : <Miss />}</td>
+                        <td data-label="Our target offer" className="is-right">{has(r.target_offer) ? money(r.target_offer) : <Miss />}
                           {r.mao !== null ? <span className="evo-prop__sub">MAO {money(r.mao)}</span> : null}</td>
-                        <td data-label="Potential spread" className="is-right">{money(r.estimated_profit)}</td>
+                        <td data-label="Potential spread" className="is-right">{has(r.estimated_profit) ? money(r.estimated_profit) : <Miss what="Needs all four" />}</td>
                         <td data-label="Status"><Status status={r.status} label={r.status_label} tone={STATUS_TONE[r.status]} /></td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            )}
-          </Panel>
-          <p className="pf-foot">{data.notice} Seller figures are as the seller stated them.</p>
+                  {chosen.length ? (
+                    <div className="pf-selbar-sticky" role="region" aria-label="Selected properties">
+                      <span><b>{chosen.length}</b> selected</span>
+                      <button type="button" className="evo-btn evo-btn--primary evo-btn--sm" onClick={() => newPackage(true)}>Build offer package</button>
+                      <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => setDrawer('assign')}>Assign</button>
+                      <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={removeSelected}>Remove</button>
+                      <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => setSel({})}>Clear</button>
+                    </div>
+                  ) : (
+                    <p className="pf-selhint">Tick properties to build an offer package from them.</p>
+                  )}
+                </Panel>
+                <p className="pf-foot">{data.notice} Seller figures are as the seller stated them.</p>
+              </div>
+              {open && wide ? (
+                <Evaluation docked id={id} itemId={open} onClose={() => setOpen(null)} onChanged={load} />
+              ) : null}
+              {open && wide ? null : (
+                <aside className="pf-side" aria-label="Portfolio totals">
+                  <div className="pf-bands">
+                    <section className="pf-band" aria-label="Seller stated">
+                      <h3>Seller stated <span>as given, not verified</span></h3>
+                      <Metrics label="Seller stated totals">
+                        <Metric label="Asking" value={money(s.seller_asking.total)} sub={<Partial t={s.seller_asking} of={s.properties} />} attention={!!s.seller_asking.missing} />
+                        <Metric label="Rent / month" value={money(s.seller_rent_monthly.total)} sub={<>scheduled, not collected · <Partial t={s.seller_rent_monthly} of={s.seller_rent_monthly.of} />{s.land ? ` · ${s.land} land excluded` : ''}</>} />
+                      </Metrics>
+                    </section>
+                    <section className="pf-band pf-band--ours" aria-label="Our assumptions">
+                      <h3>Our assumptions <span>internal estimates</span></h3>
+                      <Metrics label="Our assumption totals">
+                        <Metric label="Estimated value" tone="info" value={money(s.estimated_value.total)} sub={<Partial t={s.estimated_value} of={s.properties} />} attention={s.estimated_value.partial} />
+                        <Metric label="Repairs" value={money(s.repairs.total)} sub={<Partial t={s.repairs} of={s.properties} />} attention={!!s.repairs.missing} />
+                        <Metric label="Target offers" tone="primary" value={money(s.target_offers.total)} sub={<Partial t={s.target_offers} of={s.properties} />} attention={!!s.target_offers.missing} />
+                        <Metric label="Spread" tone="success" value={money(s.estimated_spread.total)} sub={<>evaluated only · {s.estimated_spread.counted} of {s.properties}</>} />
+                      </Metrics>
+                    </section>
+                  </div>
+                  <p className="pf-small">Totals cover only the properties that have each number. Open a property to review it beside the list.</p>
+                </aside>
+              )}
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -372,7 +430,7 @@ export function PortfolioDetail() {
 
       {tab === 'summary' ? <Summary data={data} pk={pk} /> : null}
 
-      {open ? <Evaluation id={id} itemId={open} onClose={() => setOpen(null)} onChanged={load} /> : null}
+      {open && !(wide && tab === 'inventory') ? <Evaluation id={id} itemId={open} onClose={() => setOpen(null)} onChanged={load} /> : null}
       <ImportDrawer open={drawer === 'import'} id={id} onClose={() => setDrawer(null)} onDone={(msg) => { setNotice(msg); load() }} />
       <AddExisting open={drawer === 'add'} id={id} have={new Set(data.rows.map((r) => r.property_id))} onClose={() => setDrawer(null)}
                    onDone={(msg) => { setDrawer(null); setNotice(msg); load() }} />
@@ -384,7 +442,27 @@ export function PortfolioDetail() {
 }
 
 /* ── C. Individual property evaluation ─────────────────────────────────── */
-function Evaluation({ id, itemId, onClose, onChanged }) {
+/** The review panel docked beside the grid (laptop and up), same content as the drawer. */
+function DockedPanel({ title, sub, onClose, footer, children }) {
+  useEffect(() => {
+    const k = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', k)
+    return () => document.removeEventListener('keydown', k)
+  }, [onClose])
+  return (
+    <aside className="pf-review" aria-label={`Review: ${title}`}>
+      <div className="pf-review__head">
+        <div style={{ minWidth: 0 }}><h2 className="pf-review__title">{title}</h2>{sub ? <p className="pf-review__sub">{sub}</p> : null}</div>
+        <button type="button" className="evo-x" onClick={onClose} aria-label="Close the review panel">×</button>
+      </div>
+      <div className="pf-review__body">{children}</div>
+      {footer ? <div className="pf-review__foot">{footer}</div> : null}
+    </aside>
+  )
+}
+
+function Evaluation({ id, itemId, onClose, onChanged, docked }) {
+  const Wrap = docked ? DockedPanel : Drawer
   const [ev, setEv] = useState(null)
   const [err, setErr] = useState(null)
   const [form, setForm] = useState({ arv: '', repairs: '', target_offer: '', as_is_value: '', occupancy_status: '', source: 'manual', note: '' })
@@ -419,7 +497,7 @@ function Evaluation({ id, itemId, onClose, onChanged }) {
   const base_ = a?.scenarios?.base
   const needsNote = ['arv', 'repairs', 'as_is_value'].some((k) => form[k] !== '')
   return (
-    <Drawer open wide onClose={onClose} title={r ? r.address : 'Property evaluation'}
+    <Wrap open wide onClose={onClose} title={r ? r.address : 'Property evaluation'}
             sub={r ? `${ev.portfolio.label}${r.source_row ? ` · seller’s row ${r.source_row}` : ''} · ${r.status_label}` : null}
             footer={<>
               {r?.deal_id ? <Link className="evo-btn evo-btn--ghost" to={`/wholesale/deals/${r.deal_id}`}>Open full deal room</Link> : null}
@@ -527,7 +605,7 @@ function Evaluation({ id, itemId, onClose, onChanged }) {
           <p className="pf-foot">{ev.notice}</p>
         </div>
       )}
-    </Drawer>
+    </Wrap>
   )
 }
 

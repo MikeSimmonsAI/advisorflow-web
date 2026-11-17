@@ -183,7 +183,9 @@ export default function EvoInbox() {
     setParams(next)
   }
   const activeExtra = EXTRA.filter(([k]) => params.get(k)).length + (signal.includes(',') ? 1 : 0)
-  const [showMore, setShowMore] = useState(activeExtra > 0)
+  const activeSecondary = ['strategy', 'signal', 'county', 'source', 'min_score', 'archived', 'economics', 'confidence', 'top']
+    .filter((k) => params.get(k)).length
+  const [showMore, setShowMore] = useState(activeExtra + activeSecondary > 0)
   const [moreKey, setMoreKey] = useState(0)
 
   const counts = Object.fromEntries((data?.buckets || []).map((b) => [b.key, b.count]))
@@ -233,41 +235,6 @@ export default function EvoInbox() {
                      value={q} onChange={(e) => setQ(e.target.value)} />
             </label>
           </form>
-          <label><span className="evo-sr">Strategy</span>
-            <select className="evo-select" value={strategy} onChange={(e) => set('strategy', e.target.value)}>
-              <option value="">All strategies</option>
-              {(data?.strategies || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </label>
-          <label><span className="evo-sr">Signal</span>
-            <select className="evo-select" value={signal.includes(',') ? '__many' : signal} onChange={(e) => set('signal', e.target.value === '__many' ? signal : e.target.value)}>
-              <option value="">Any signal</option>
-              {signal.includes(',') ? <option value="__many">{signal.split(',').length} signals (all of)</option> : null}
-              {(data?.signal_types || []).map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-            </select>
-          </label>
-          <label><span className="evo-sr">County</span>
-            <select className="evo-select" value={county} onChange={(e) => set('county', e.target.value)}>
-              <option value="">Any county</option>
-              {(data?.counties || []).map((c) => <option key={c} value={c}>{c} County</option>)}
-            </select>
-          </label>
-          <label><span className="evo-sr">Source</span>
-            <select className="evo-select" value={source} onChange={(e) => set('source', e.target.value)}>
-              <option value="">Any source</option>
-              {(data?.sources || []).map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
-            </select>
-          </label>
-          <label><span className="evo-sr">Minimum opportunity</span>
-            <select className="evo-select" value={minScore} onChange={(e) => set('min_score', e.target.value)}>
-              <option value="">Any score</option>
-              {['30', '45', '60', '75'].map((v) => <option key={v} value={v}>{v}+ opportunity</option>)}
-            </select>
-          </label>
-          <label className="evo-small" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <input type="checkbox" checked={archived} onChange={(e) => set('archived', e.target.checked ? '1' : '')} />
-            Rolled-back pilot
-          </label>
           <label><span className="evo-sr">Category</span>
             <select className="evo-select" value={category} onChange={(e) => set('category', e.target.value)}
                     data-testid="inbox-category">
@@ -275,33 +242,10 @@ export default function EvoInbox() {
               {(data?.categories || []).map((c) => <option key={c.key} value={c.key}>{c.label} ({c.count})</option>)}
             </select>
           </label>
-          <label><span className="evo-sr">Economics</span>
-            <select className="evo-select" value={econ} onChange={(e) => set('economics', e.target.value)}>
-              <option value="">Any economics</option>
-              <option value="supportable">Spread supportable</option>
-              <option value="needs_underwriting">Needs underwriting</option>
-            </select>
-          </label>
-          <label><span className="evo-sr">Evidence confidence</span>
-            <select className="evo-select" value={conf} onChange={(e) => set('confidence', e.target.value)}>
-              <option value="">Any confidence</option>
-              <option value="verified">Verified evidence</option>
-              <option value="partial">Partial evidence</option>
-              <option value="insufficient">Insufficient evidence</option>
-            </select>
-          </label>
           <label><span className="evo-sr">Work priority</span>
             <select className="evo-select" value={prio} onChange={(e) => set('priority', e.target.value)} data-testid="inbox-priority">
               <option value="">Any work priority</option>
               {WORK_OPTIONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-            </select>
-          </label>
-          <label><span className="evo-sr">Show</span>
-            <select className="evo-select" value={top} onChange={(e) => set('top', e.target.value)} data-testid="inbox-top">
-              <option value="">All (paged)</option>
-              <option value="10">Top 10</option>
-              <option value="25">Top 25</option>
-              <option value="100">Top 100</option>
             </select>
           </label>
           <label><span className="evo-sr">Sort</span>
@@ -332,9 +276,73 @@ export default function EvoInbox() {
           </label>
           <button type="button" className={`evo-btn evo-btn--sm ${showMore ? 'evo-btn--secondary' : 'evo-btn--ghost'}`}
                   aria-expanded={showMore} onClick={() => setShowMore(!showMore)}>
-            More filters{activeExtra ? ` (${activeExtra})` : ''}
+            More filters{activeExtra + activeSecondary ? ` (${activeExtra + activeSecondary})` : ''}
           </button>
         </div>
+        {/* The task is to scan the list: search, type, priority and sort stay
+            on the bar; every other filter is one click away under More filters. */}
+        {showMore ? (
+          <div className="evo-filterbar evo-filterbar--more">
+            <label><span className="evo-sr">Strategy</span>
+              <select className="evo-select" value={strategy} onChange={(e) => set('strategy', e.target.value)}>
+                <option value="">All strategies</option>
+                {(data?.strategies || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </label>
+            <label><span className="evo-sr">Signal</span>
+              <select className="evo-select" value={signal.includes(',') ? '__many' : signal} onChange={(e) => set('signal', e.target.value === '__many' ? signal : e.target.value)}>
+                <option value="">Any signal</option>
+                {signal.includes(',') ? <option value="__many">{signal.split(',').length} signals (all of)</option> : null}
+                {(data?.signal_types || []).map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+              </select>
+            </label>
+            <label><span className="evo-sr">County</span>
+              <select className="evo-select" value={county} onChange={(e) => set('county', e.target.value)}>
+                <option value="">Any county</option>
+                {(data?.counties || []).map((c) => <option key={c} value={c}>{c} County</option>)}
+              </select>
+            </label>
+            <label><span className="evo-sr">Source</span>
+              <select className="evo-select" value={source} onChange={(e) => set('source', e.target.value)}>
+                <option value="">Any source</option>
+                {(data?.sources || []).map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
+              </select>
+            </label>
+            <label><span className="evo-sr">Minimum opportunity</span>
+              <select className="evo-select" value={minScore} onChange={(e) => set('min_score', e.target.value)}>
+                <option value="">Any score</option>
+                {['30', '45', '60', '75'].map((v) => <option key={v} value={v}>{v}+ opportunity</option>)}
+              </select>
+            </label>
+            <label className="evo-small" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" checked={archived} onChange={(e) => set('archived', e.target.checked ? '1' : '')} />
+              Rolled-back pilot
+            </label>
+            <label><span className="evo-sr">Economics</span>
+              <select className="evo-select" value={econ} onChange={(e) => set('economics', e.target.value)}>
+                <option value="">Any economics</option>
+                <option value="supportable">Spread supportable</option>
+                <option value="needs_underwriting">Needs underwriting</option>
+              </select>
+            </label>
+            <label><span className="evo-sr">Evidence confidence</span>
+              <select className="evo-select" value={conf} onChange={(e) => set('confidence', e.target.value)}>
+                <option value="">Any confidence</option>
+                <option value="verified">Verified evidence</option>
+                <option value="partial">Partial evidence</option>
+                <option value="insufficient">Insufficient evidence</option>
+              </select>
+            </label>
+            <label><span className="evo-sr">Show</span>
+              <select className="evo-select" value={top} onChange={(e) => set('top', e.target.value)} data-testid="inbox-top">
+                <option value="">All (paged)</option>
+                <option value="10">Top 10</option>
+                <option value="25">Top 25</option>
+                <option value="100">Top 100</option>
+              </select>
+            </label>
+          </div>
+        ) : null}
         {showMore ? (
           <MoreFilters key={moreKey} params={params} data={data}
                        onApply={(vals) => setMany(vals)}

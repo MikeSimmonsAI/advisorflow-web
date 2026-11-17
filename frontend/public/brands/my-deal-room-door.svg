@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="My Deal Room">
+  <title>My Deal Room</title>
+  <rect width="64" height="64" rx="14" fill="#1d5c45"/>
+  <!-- door frame -->
+  <path d="M19 52V14.5a2.5 2.5 0 0 1 2.5-2.5h21a2.5 2.5 0 0 1 2.5 2.5V52" fill="none" stroke="#f6f1e7" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- light through the open doorway -->
+  <path d="M36.5 15.5H41.5V52H36.5Z" fill="#f2c46d"/>
+  <!-- the door, swung open -->
+  <path d="M22.5 15.5L36.5 19.5V52L22.5 48.5Z" fill="#f6f1e7"/>
+  <circle cx="33" cy="35" r="1.8" fill="#1d5c45"/>
+  <!-- threshold -->
+  <path d="M14 52H50" stroke="#f6f1e7" stroke-width="3.5" stroke-linecap="round"/>
+</svg>

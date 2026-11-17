@@ -25,7 +25,8 @@ import { bookaboostProductBrand, OLP } from '../brand/productBrand'
 import { olpGroups, olpHeaderFor } from '../brand/olpNav'
 // PROJECT OVERDRIVE (#439): the owner-approved Wholesale rail - Acquisition
 // Command pinned over five collapsible groups. Rearranges Layout's own items.
-import { wholesaleRail, activeRoute, readClosedGroups, writeClosedGroups } from '../brand/wholesaleNav'
+import { wholesaleRail, activeRoute, readClosedGroups, writeClosedGroups, readOpenGroups, writeOpenGroups, hubRoute } from '../brand/wholesaleNav'
+import { MdrBrand, MdrNavContext, MdrQuickJump, MdrAccountMenu, isMdrShell } from './mdr/MdrShell'
 import './overdrive-nav.css'
 import '../brand/olp-workspace.css'
 // The workspace's vocabulary cache, dropped alongside its branding cache.
@@ -99,6 +100,8 @@ const WS_LANDING = ['/wholesale', '/wholesale/appointments', '/wholesale/propert
   '/wholesale/canvass', '/wholesale/buyers', '/wholesale/dispositions', '/wholesale/deal-room', '/wholesale/foreclosures',
   '/wholesale/closing', '/wholesale/funding', '/wholesale/board', '/wholesale/calculator', '/wholesale/team']
 const customMayOpen = (team, path) => {
+  // A rail group's landing page lists only the tools the rail shows them.
+  if ((path || '').startsWith('/wholesale/hub/')) return true
   const mod = wsScreenModule(path)
   return !!mod && (team.modules || []).includes(mod)
 }
@@ -556,6 +559,14 @@ export default function Layout({ children }) {
   // the collapsed rail is (af_sidebar_collapsed). A group holding the current
   // page is always open, whatever was stored.
   const [wsClosed, setWsClosed] = useState(() => readClosedGroups(typeof localStorage === 'undefined' ? null : localStorage))
+  // My Deal Room: groups start closed; the one holding the page is open, and
+  // the person's own openings are remembered (brand/wholesaleNav.js).
+  const [mdrOpen, setMdrOpen] = useState(() => readOpenGroups(typeof localStorage === 'undefined' ? null : localStorage))
+  const toggleMdrGroup = (key) => setMdrOpen((s) => {
+    const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key)
+    writeOpenGroups(typeof localStorage === 'undefined' ? null : localStorage, n)
+    return n
+  })
   const toggleWsGroup = (key) => setWsClosed((s) => {
     const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key)
     writeClosedGroups(typeof localStorage === 'undefined' ? null : localStorage, n)
@@ -780,6 +791,11 @@ export default function Layout({ children }) {
   // turns both off and leaves the approved BookaBoost look untouched.
   const olpBrand = shellResolution.theme === THEMES.BOOKABOOST && bookaboostProductBrand() === 'olp'
   const olpShell = olpBrand && inWholesale
+  // MY DEAL ROOM (redesign, Nov 2026): the EvoSys Pro Wholesale product wears
+  // its own shell. BookaBoost and OLP Wholesale are unchanged.
+  const mdrShell = isMdrShell({ inWholesale, olpShell, theme: shellResolution.theme, evosysTheme: THEMES.EVOSYSPRO })
+  // what the rail shows, handed to the group landing pages and "Go to"
+  let mdrNav = null
   // The commercial product name this brand gives the Wholesale module
   // (EvoSysPro -> "EvoSys Wholesale"); the neutral module name otherwise.
   const WHOLESALE_PRODUCT = olpBrand ? `${OLP.short} · ${OLP.name}` : (productName(branding, 'wholesale') || 'Wholesale')
@@ -828,14 +844,18 @@ export default function Layout({ children }) {
     } else {
       root.removeAttribute('data-product-brand'); root.removeAttribute('data-olp-header')
     }
-    return () => { root.removeAttribute('data-product-brand'); root.removeAttribute('data-olp-header') }
-  }, [olpShell, location.pathname])
+    // drawers render in portals outside the layout; they read the palette here
+    if (mdrShell) root.setAttribute('data-mdr', '')
+    else root.removeAttribute('data-mdr')
+    return () => {
+      root.removeAttribute('data-mdr'); root.removeAttribute('data-product-brand'); root.removeAttribute('data-olp-header') }
+  }, [olpShell, mdrShell, location.pathname])
 
   // Reset logo failure state when the URL changes (e.g. org switch)
   useEffect(() => { setLogoFailed(false) }, [logoUrl])
 
   return (
-    <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}${inWholesale ? ' layout--wholesale' : ''}${inDealRoom && !olpShell ? ' layout--dealroom' : ''}${inWholesale && !olpShell ? ' layout--wsnav' : ''}`}
+    <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}${inWholesale ? ' layout--wholesale' : ''}${inDealRoom && !olpShell && !mdrShell ? ' layout--dealroom' : ''}${inWholesale && !olpShell ? ' layout--wsnav' : ''}${mdrShell ? ' layout--mdr' : ''}`}
          data-brand-theme={shellResolution.theme} data-brand-source={shellResolution.source}
          data-brand-platform={branding?.platform?.slug || ''} data-org-id={branding?.organization_id || ''}
          data-product={inWholesale ? WHOLESALE_PRODUCT : undefined}
@@ -854,7 +874,9 @@ export default function Layout({ children }) {
               demo) which white-label product they are actually inside. The
               operator's way back is unaffected: every one of those actions is
               in WorkspaceAdminMenu at the end of the top bar. */}
-          {vertical && !sidebarCollapsed ? (
+          {mdrShell ? (
+            <MdrBrand engine={WHOLESALE_ENGINE} collapsed={sidebarCollapsed} />
+          ) : vertical && !sidebarCollapsed ? (
             <div className="vertical-brand">
               {logoUrl && !logoFailed ? (
                 <img className="vertical-brand-logo" src={logoUrl} alt=""
@@ -1148,6 +1170,56 @@ export default function Layout({ children }) {
                 <Icon name={item.icon} />{!sidebarCollapsed && item.label}
               </NavLink>
             )
+            if (mdrShell) {
+              // MY DEAL ROOM. Same items, same visible() filter as Design A;
+              // the grouping and default-closed groups differ (wholesaleNav.js).
+              const isWs = (group) => group.items.some((item) => isWholesalePath(item.to))
+              const rail = wholesaleRail(groups.filter(isWs), { variant: 'mdr' })
+              const pinned = rail.pinned && visible(rail.pinned) ? rail.pinned : null
+              const shown = rail.groups.map((g) => ({ ...g, items: g.items.filter(visible) })).filter((g) => g.items.length)
+              const activeTo = activeRoute([pinned, ...shown.flatMap((g) => g.items)].filter(Boolean), location.pathname, location.search)
+              const hubMatch = /^\/wholesale\/hub\/([a-z]+)/.exec(location.pathname)
+              mdrNav = { pinned, groups: shown, activeTo }
+              const renderWs = (item) => {
+                const on = item.to === activeTo
+                return (
+                  <Link key={item.to} to={item.to} className={`nav-item${on ? ' nav-item--active' : ''}`}
+                        aria-current={on ? 'page' : undefined} onClick={closeSidebar} title={item.label}
+                        data-nav-route={item.to}>
+                    <Icon name={item.icon} />{!sidebarCollapsed && item.label}
+                  </Link>
+                )
+              }
+              return (
+                <div className="wsnav mdrnav" data-wsnav="mdr">
+                  {pinned ? <div className="nav-section wsnav-pinned">{renderWs(pinned)}</div> : null}
+                  {shown.map((group) => {
+                    const holds = group.items.some((item) => item.to === activeTo) || (hubMatch && hubMatch[1] === group.key)
+                    const open = sidebarCollapsed || holds || mdrOpen.has(group.key)
+                    const gid = 'wsnav-grp-' + group.key
+                    const onHub = hubMatch && hubMatch[1] === group.key
+                    return (
+                      <div key={group.key} className={`nav-section wsnav-group${holds ? ' nav-section--current' : ''}`} data-nav-group={group.key}>
+                        {sidebarCollapsed ? <div className="nav-divider" title={group.label} /> : (
+                          <div className="mdr-grouphead">
+                            <button type="button" className="nav-section-toggle" aria-expanded={open} aria-controls={gid}
+                                    onClick={() => toggleMdrGroup(group.key)}>
+                              <span>{group.label}</span>
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+                            </button>
+                            <Link to={hubRoute(group.key)} className={`mdr-grouphead__hub${onHub ? ' is-on' : ''}`} onClick={closeSidebar}
+                                  aria-label={`${group.label}: all tools`} title={`${group.label}: all tools`} aria-current={onHub ? 'page' : undefined}>
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></svg>
+                            </Link>
+                          </div>
+                        )}
+                        {open ? <div id={gid} role="group" aria-label={group.label}>{group.items.map(renderWs)}</div> : null}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            }
             if (inWholesale && !olpShell) {
               // DESIGN A (owner approved, #439). Exactly one entry is highlighted:
               // activeRoute() picks the most specific match (Multifamily over
@@ -1349,6 +1421,31 @@ export default function Layout({ children }) {
             is the platform announcing itself on their home screen, and the
             same action lives in the one control at the end of the top bar. */}
         {!vertical && <GodReturnBar context="the customer app" />}
+        {mdrShell ? (
+          <header className="top-bar">
+            <WholesaleSearch />
+            <MdrQuickJump nav={mdrNav} Icon={Icon} />
+            <div className="top-bar-right">
+              <WholesaleEnvironment />
+              {locationChoices.length > 0 && (
+                <label className="ws-location-picker" title="Location you are working in">
+                  <span className="ws-location-label">Location</span>
+                  <select className="ws-location-select" value={selectedLocation} disabled={locationBusy}
+                          onChange={(e) => handleLocationChange(e.target.value)} aria-label="Location you are working in">
+                    <option value="">{branding?.workspace_location?.mode === 'organization' ? 'All locations' : 'All my locations'}</option>
+                    {locationChoices.map((l) => (<option key={l.id} value={l.id}>{l.name}</option>))}
+                  </select>
+                </label>
+              )}
+              <ProgramSwitchLink />
+              <NotificationBell />
+              <MdrAccountMenu person={personName} role={workspaceRoleLabel} org={workspaceOrgName} photo={profilePhoto}
+                              website={identity?.website_url || (inHomeWorkspace ? SHELL_BRAND.websiteUrl : null)}
+                              onSignOut={handleLogout}
+                              platformNav={<ContextSwitcher current="workspace" />} />
+            </div>
+          </header>
+        ) : (
         <header className="top-bar">
           {inWholesale ? <WholesaleSearch /> : <LiveClock />}
           <div className="top-bar-right">
@@ -1386,6 +1483,7 @@ export default function Layout({ children }) {
             {inWholesale && <WholesaleUser user={user} photo={profilePhoto} />}
           </div>
         </header>
+        )}
         {/* THE SECOND CONTEXT BANNER WAS REMOVED, NOT THE FIRST.
             Three strips used to stack here: GodReturnBar above ("viewing the
             customer app", with the way back), this one, and ContextBanner
@@ -1417,6 +1515,24 @@ export default function Layout({ children }) {
             not catch it: entering a customer from God Mode and switching from
             one customer to another both land on the same path. */}
         <main className="main-content">
+          <MdrNavContext.Provider value={mdrNav}>
+          {/* Buyers & Deals is one workflow (find buyers → criteria → room →
+              outreach → dispositions → deals): its screens are linked across
+              the top so moving along it needs no trip back to the rail. */}
+          {mdrNav ? (() => {
+            const g = mdrNav.groups.find((x) => x.key === 'buyers')
+            if (!g || !g.items.some((i) => i.to === mdrNav.activeTo)) return null
+            return (
+              <nav className="mdr-flow" aria-label="Buyers and deals workflow">
+                {g.items.map((i, n) => (
+                  <Link key={i.to} to={i.to} className={`mdr-flow__step${i.to === mdrNav.activeTo ? ' is-on' : ''}`}
+                        aria-current={i.to === mdrNav.activeTo ? 'page' : undefined}>
+                    <span className="mdr-flow__n" aria-hidden="true">{n + 1}</span>{i.label}
+                  </Link>
+                ))}
+              </nav>
+            )
+          })() : null}
           <PageBoundary key={location.pathname + '\u0000' + workspaceKey}>
             {/* A page that loads on first visit (utils/lazyPage) waits HERE,
                 inside the shell - without this the App-level fallback
@@ -1425,6 +1541,7 @@ export default function Layout({ children }) {
               {children}
             </Suspense>
           </PageBoundary>
+          </MdrNavContext.Provider>
         </main>
       </div>
       <ProfileOnboarding />
