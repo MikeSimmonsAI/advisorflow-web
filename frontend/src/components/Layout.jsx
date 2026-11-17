@@ -79,6 +79,7 @@ const fieldMayOpen = (p) => FIELD_PAGES.some((x) => p === x.replace(/\/$/, '') |
 const WS_SCREEN_MODULE = [
   ['/wholesale/buyers/buy-boxes', 'buy_boxes'], ['/wholesale/evosense/controls', 'settings'],
   ['/wholesale/evosense/inbox', 'acquisition'], ['/wholesale/evosense/overlooked', 'properties'],
+  ['/wholesale/portfolios', 'portfolios'],
   ['/wholesale/evosense/strategies', 'properties'], ['/wholesale/evosense/property', 'properties'],
   ['/wholesale/deal-room', 'deal_room'], ['/wholesale/appointments', 'appointments'], ['/wholesale/board', 'team_board'],
   ['/wholesale/buyers', 'buyer_intel'], ['/wholesale/calculator', 'underwriting'], ['/wholesale/callbacks', 'sellers'],
@@ -189,6 +190,9 @@ const NAV_GROUPS = [
       { to: '/wholesale/evosense', label: 'Acquisition Command', icon: 'target', featureKey: 'wholesale_real_estate', end: true },
       { to: '/wholesale/foreclosures', label: 'Foreclosures', icon: 'calendar', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/evosense/inbox', label: 'Discovery Inbox', icon: 'search', featureKey: 'wholesale_real_estate' },
+      // My Deal Room's Portfolio Acquisitions: one seller's list of properties,
+      // evaluated and packaged. Not on BookaBoost's rail (owner scope, Nov 16).
+      { to: '/wholesale/portfolios', label: 'Portfolio Acquisitions', icon: 'layers', featureKey: 'wholesale_real_estate', notBookaboost: true },
       { to: '/wholesale/evosense/overlooked', label: 'Overlooked Properties', icon: 'search', featureKey: 'wholesale_real_estate', bookaboostOnly: true },
       // OLP workspaces on the same Wholesale engine and access (owner request, Oct 29).
       { to: '/wholesale/land-partners', label: 'Land Partners', icon: 'layers', featureKey: 'wholesale_real_estate', bookaboostOnly: true, olpOnly: true },
@@ -1053,6 +1057,7 @@ export default function Layout({ children }) {
             const visible = (item) => {
               if (item.fiberOnly && !(branding && branding.industry === 'fiber')) return false
               if (item.bookaboostOnly && shellResolution.theme !== THEMES.BOOKABOOST) return false
+              if (item.notBookaboost && shellResolution.theme === THEMES.BOOKABOOST) return false
               if (item.olpOnly && !olpBrand) return false
               // Only orgs with an open implementation see Launch. `null`
               // means the answer has not arrived yet, and the item stays
