@@ -23,6 +23,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models.evosys_sales_models import (
@@ -86,8 +87,18 @@ def brand_id(db: Session) -> Optional[str]:
 
 # ── settings ──────────────────────────────────────────────────────────────────
 
+def team_lock(db: Session, bso_id: str) -> None:
+    """Serialize first-time setup for one team. The Today screen loads several
+    endpoints at once; without this they all try to create the same rows."""
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": "evosys-setup:" + str(bso_id)})
+
+
 def get_settings(db: Session, bso_id: str) -> EvoSysOutreachSettings:
     row = db.get(EvoSysOutreachSettings, bso_id)
+    if row is None:
+        team_lock(db, bso_id)
+        row = db.get(EvoSysOutreachSettings, bso_id, populate_existing=True)
     if row is None:
         row = EvoSysOutreachSettings(
             brand_sales_org_id=bso_id, steps=[dict(s) for s in DEFAULT_STEPS], offer=DEFAULT_OFFER,
