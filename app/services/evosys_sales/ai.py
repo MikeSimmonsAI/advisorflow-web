@@ -107,7 +107,7 @@ GROUP_SYSTEM = (
     "\"evidence\":[\"exact short quotes copied from facts.record\"]}. Never invent a location.")
 
 
-def suggest_group(db: Session, settings, opp, lead, user_id: str, record_text: str) -> EvoSysAITask:
+def suggest_group(db: Session, settings, opp, lead, user_id: str, record_text: str, force: bool = False) -> EvoSysAITask:
     from app.services.evosys_sales import grouping as G
     inds = {i["key"]: i["label"] for i in G.industries(settings)}
     mks = {m["key"]: "%s (%s)" % (m["label"], m.get("state") or "") for m in G.markets(settings)}
@@ -131,7 +131,7 @@ def suggest_group(db: Session, settings, opp, lead, user_id: str, record_text: s
                "evidence": real[:5], "problems": problems}
         return {"output": out, "status": "needs_person" if problems or not (ind and mk) else "done"}
     return run(db, kind="group_lead", target_id=opp.id, bso_id=opp.brand_sales_org_id, user_id=user_id,
-               facts=facts, system=GROUP_SYSTEM, check=check)
+               facts=facts, system=GROUP_SYSTEM, check=check, force=force)
 
 
 # ── draft a campaign ──────────────────────────────────────────────────────────
@@ -144,7 +144,7 @@ DRAFT_SYSTEM = (
     "is true. Return JSON {\"steps\":[{\"day\":0,\"subject\":..,\"body\":..},...],\"notes\":\"what you assumed\"}.")
 
 
-def draft_campaign(db: Session, settings, campaign, user_id: str, source_seen: bool) -> EvoSysAITask:
+def draft_campaign(db: Session, settings, campaign, user_id: str, source_seen: bool, force: bool = False) -> EvoSysAITask:
     from app.services.evosys_sales import grouping as G
     facts = {"industry": G.label_of(G.industries(settings), campaign.industry_key) or "service businesses",
              "market": G.label_of(G.markets(settings), campaign.market_key) or "their area",
@@ -168,7 +168,7 @@ def draft_campaign(db: Session, settings, campaign, user_id: str, source_seen: b
         return {"output": {"steps": steps, "notes": str(raw.get("notes") or "")[:500], "problems": problems},
                 "status": "needs_person" if problems else "done"}
     return run(db, kind="draft_campaign", target_id=campaign.id, bso_id=campaign.brand_sales_org_id,
-               user_id=user_id, facts=facts, system=DRAFT_SYSTEM, check=check)
+               user_id=user_id, facts=facts, system=DRAFT_SYSTEM, check=check, force=force)
 
 
 # ── a reply ───────────────────────────────────────────────────────────────────
@@ -181,7 +181,8 @@ REPLY_SYSTEM = (
     "they ask about price, say Mike will follow up with pricing and set category to pricing. Never promise results.")
 
 
-def reply_assist(db: Session, settings, campaign, opp, reply_msg, original_text: str, user_id: str) -> EvoSysAITask:
+def reply_assist(db: Session, settings, campaign, opp, reply_msg, original_text: str, user_id: str,
+                 force: bool = False) -> EvoSysAITask:
     offer = ""
     if campaign is not None:
         from app.services.evosys_sales import campaigns as CA
@@ -210,7 +211,7 @@ def reply_assist(db: Session, settings, campaign, opp, reply_msg, original_text:
                "needs_person": needs, "used_offer": bool(offer)}
         return {"output": out, "status": "needs_person" if needs else "done"}
     return run(db, kind="reply_assist", target_id=reply_msg.id, bso_id=opp.brand_sales_org_id, user_id=user_id,
-               facts=facts, system=REPLY_SYSTEM, check=check)
+               facts=facts, system=REPLY_SYSTEM, check=check, force=force)
 
 
 def resolve(db: Session, t: EvoSysAITask, outcome: str) -> None:

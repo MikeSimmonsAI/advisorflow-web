@@ -122,7 +122,7 @@ def location_text(db: Session, opp: Opportunity) -> Tuple[Optional[str], Optiona
     ("Location: Houston, TX."). Nothing is looked up or invented."""
     texts = [opp.source or ""]
     for e in (db.query(OpportunityEvent.detail).filter(OpportunityEvent.opportunity_id == opp.id,
-                                                       OpportunityEvent.event_type == "note").limit(10).all()):
+                                                       OpportunityEvent.event_type.in_(("created", "note"))).limit(10).all()):
         m = _LOC_NOTE.search(e[0] or "")
         if m:
             texts.insert(0, m.group(1))

@@ -71,10 +71,10 @@ def _audience(db: Session, s, camp: EvoSysCampaign) -> Dict[str, int]:
     leads = db.query(EvoSysLead).filter(EvoSysLead.brand_sales_org_id == camp.brand_sales_org_id).all()
     n = sum(1 for l in leads if CA.campaign_for(db, s, l) is not None and CA.campaign_for(db, s, l).id == camp.id)
     sts = db.query(EvoSysOutreachState).filter(EvoSysOutreachState.campaign_id == camp.id).all()
-    now = datetime.utcnow()
+    paused = not CA.can_send(camp, s)
     return {"matching_leads": n, "in_followup": sum(1 for x in sts if x.status == "active"),
-            "waiting": sum(1 for x in sts if x.status == "active" and x.next_due_at and x.next_due_at <= now
-                           and not CA.can_send(camp, s)),
+            # Follow-ups held by this campaign while it is off or needs approval.
+            "waiting": sum(1 for x in sts if x.status == "active") if paused else 0,
             "finished": sum(1 for x in sts if x.status == "finished"),
             "stopped": sum(1 for x in sts if x.status == "stopped")}
 
@@ -219,15 +219,15 @@ def review_lead(opp_id: str, body: ReviewIn, c: Ctx = Depends(ctx), db: Session 
 
 
 @router.post("/leads/{opp_id}/ai-group")
-def ai_group(opp_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+def ai_group(opp_id: str, again: bool = False, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     _manager(c)
     s = _settings(db, c)
     o = _opp(db, c, opp_id)
     lead = _lead_row(db, s, o)
     notes = [e.detail or "" for e in db.query(OpportunityEvent).filter(
-        OpportunityEvent.opportunity_id == o.id, OpportunityEvent.event_type == "note").limit(6).all()]
+        OpportunityEvent.opportunity_id == o.id, OpportunityEvent.event_type.in_(("created", "note"))).limit(8).all()]
     record = "\n".join(x for x in [o.company_name or "", o.industry or "", o.source or "", o.website or ""] + notes if x)
-    t = AI.suggest_group(db, s, o, lead, c.user.id, record[:4000])
+    t = AI.suggest_group(db, s, o, lead, c.user.id, record[:4000], force=again)
     db.commit()
     return AI.payload(t)
 
@@ -342,7 +342,7 @@ def switch_campaign(cid: str, body: SwitchIn, c: Ctx = Depends(ctx), db: Session
 
 
 @router.post("/campaigns/{cid}/ai-draft")
-def ai_draft(cid: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+def ai_draft(cid: str, again: bool = False, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     """AI drafts the emails. Nothing is changed until a person applies it."""
     _manager(c)
     s = _settings(db, c)
@@ -350,7 +350,7 @@ def ai_draft(cid: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     chans = {l.source_channel for l in db.query(EvoSysLead).filter(EvoSysLead.brand_sales_org_id == c.bso).all()
              if CA.campaign_for(db, s, l) is not None and CA.campaign_for(db, s, l).id == camp.id}
     seen = bool(chans) and chans <= set(AD_SOURCES)
-    t = AI.draft_campaign(db, s, camp, c.user.id, source_seen=seen)
+    t = AI.draft_campaign(db, s, camp, c.user.id, source_seen=seen, force=again)
     db.commit()
     return AI.payload(t)
 
@@ -386,7 +386,7 @@ def _reply_msg(db: Session, c: Ctx, mid: str) -> EvoSysOutreachMessage:
 
 
 @router.post("/messages/{mid}/assist")
-def assist(mid: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+def assist(mid: str, again: bool = False, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     """Summarise a reply and draft an answer. Only for a reply that already
     stopped the follow-up (deterministic rules); nothing is sent."""
     s = _settings(db, c)
@@ -401,7 +401,7 @@ def assist(mid: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
                                                        EvoSysOutreachMessage.channel == "email",
                                                        EvoSysOutreachMessage.status == "sent")
                 .order_by(EvoSysOutreachMessage.created_at.desc()).first())
-    t = AI.reply_assist(db, s, camp, opp, m, last_out.body if last_out else "", c.user.id)
+    t = AI.reply_assist(db, s, camp, opp, m, last_out.body if last_out else "", c.user.id, force=again)
     if t.status != "failed" and (t.output or {}).get("category") in ("interested", "pricing", "question",
                                                                        "not_interested", "wrong_person", "unsubscribe"):
         m.label = m.label or (t.output or {}).get("category")
