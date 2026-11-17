@@ -52,8 +52,8 @@ def test_portfolio_screens_in_a_real_browser(client, pf):
         pg.goto(ORIGIN + "/wholesale/portfolios")
         pg.wait_for_load_state("networkidle")
         link = pg.locator(".sidebar a[href='/wholesale/portfolios']")
-        assert link.count() == 1 and "Portfolio Acquisitions" in link.inner_text()
-        assert pg.get_by_role("heading", name="Portfolio Acquisitions").count() >= 1
+        assert link.count() == 1 and "Seller Portfolios" in link.inner_text()     # My Deal Room redesign label
+        assert pg.get_by_role("heading", name="Seller Portfolios").count() >= 1
         assert "Seller Portfolio #001" in pg.inner_text("main")
         _shot(pg, "01-portfolio-list-desktop")
 
@@ -61,9 +61,9 @@ def test_portfolio_screens_in_a_real_browser(client, pf):
         pg.goto(ORIGIN + "/wholesale/portfolios/%s" % pid)
         pg.wait_for_load_state("networkidle")
         body = pg.inner_text("main")
-        for text in ("Seller asking", "Estimated value", "Our target offers", "Estimated spread", "Research needed",
-                     "partial · 3 of 5"):
-            assert text in body, text
+        for text in ("Seller stated", "Our assumptions", "Asking", "Estimated value", "Target offers", "Spread",
+                     "Research needed", "partial · 3 of 5", "Import the seller’s list", "Build an offer package"):
+            assert text.lower() in body.lower(), text
         assert pg.locator(".pf-table tbody tr").count() == 5
         _shot(pg, "02-portfolio-inventory-desktop", full=True)
         pg.get_by_label("Filter properties").select_option("land")

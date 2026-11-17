@@ -261,6 +261,8 @@ const EvoStrategyBuilder = lazyPage(() => import('./pages/wholesale/evosense/Evo
 const EvoControls = lazyPage(() => import('./pages/wholesale/evosense/EvoControls'))
 const EvoCohort = lazyPage(() => import('./pages/wholesale/evosense/EvoCohort'))
 const ForeclosureCenter = lazyPage(() => import('./pages/wholesale/evosense/ForeclosureCenter'))
+const WholesaleGroupHub = lazyPage(() => import('./pages/wholesale/hub/GroupHub'))
+const EvoActivity = lazyPage(() => import('./pages/wholesale/evosense/EvoActivity'))
 import AIHub from './pages/AIHub'
 import Availability from './pages/Availability'
 import { Unauthorized, NotFound, VerificationUnavailable } from './pages/AccessState'
@@ -1845,6 +1847,9 @@ export default function App() {
         <Route path="/wholesale/evosense/controls" element={<ProtectedRoute feature="wholesale_real_estate"><EvoControls /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/lists/:kind" element={<ProtectedRoute feature="wholesale_real_estate"><EvoCohort /></ProtectedRoute>} />
         <Route path="/wholesale/foreclosures" element={<ProtectedRoute feature="wholesale_real_estate"><ForeclosureCenter /></ProtectedRoute>} />
+        {/* My Deal Room: a rail group's landing page, and Acquisition Command's activity & system health view. */}
+        <Route path="/wholesale/hub/:group" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleGroupHub /></ProtectedRoute>} />
+        <Route path="/wholesale/evosense/activity" element={<ProtectedRoute feature="wholesale_real_estate"><EvoActivity /></ProtectedRoute>} />
         <Route path="/ai-hub" element={<ProtectedRoute><AIHub /></ProtectedRoute>} />
         {/* AI WORKFORCE — ONE FRONT DOOR (Lane F, #5). Every customer reaches
             the whole product from /ai-workforce: SET UP | WORKING | NEEDS YOU

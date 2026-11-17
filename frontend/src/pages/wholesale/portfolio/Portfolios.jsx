@@ -40,6 +40,34 @@ function download(path, name) {
   })
 }
 
+/** A number the portfolio does not have yet: said plainly, never a dash. */
+const Miss = ({ what = 'Missing' }) => <span className="pf-miss">{what}</span>
+const has = (v) => !(v === null || v === undefined || v === '')
+
+/** Import → Review → Offer package, with where this portfolio stands. */
+function Flow({ s, drafts, chosen, onImport, onReview, onPackage }) {
+  const step = !s.properties ? 0 : s.evaluated < s.properties ? 1 : 2
+  const items = [
+    ['Import the seller’s list', s.properties ? `${s.properties} propert${s.properties === 1 ? 'y' : 'ies'}` : 'Nothing imported yet',
+      <button key="i" type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={onImport}>Import</button>],
+    ['Review each property', s.properties ? `${s.evaluated} of ${s.properties} evaluated` : '—',
+      <button key="r" type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={!s.properties} onClick={onReview}>Needs research</button>],
+    ['Build an offer package', drafts ? `${drafts} draft package${drafts === 1 ? '' : 's'}` : 'No package yet',
+      <button key="p" type="button" className="evo-btn evo-btn--primary evo-btn--sm" disabled={!s.properties} onClick={onPackage}>
+        {chosen ? `Package ${chosen} selected` : 'Package all'}</button>],
+  ]
+  return (
+    <ol className="pf-flow" aria-label="Portfolio workflow">
+      {items.map(([t, sub, btn], i) => (
+        <li key={t} className={i < step ? 'is-done' : i === step ? 'is-now' : ''} aria-current={i === step ? 'step' : undefined}>
+          <span className="pf-flow__n" aria-hidden="true">{i < step ? '✓' : i + 1}</span>
+          <span className="pf-flow__t"><b>{t}</b><span>{sub}</span></span>{btn}
+        </li>
+      ))}
+    </ol>
+  )
+}
+
 function Partial({ t, of }) {
   if (!t) return null
   if (!t.counted) return <>none on file yet</>
@@ -64,7 +92,7 @@ export function PortfolioList() {
 
   return (
     <EvoApp world="acquisition">
-      <Hero compact scene="estate" eyebrow="Acquisition Command" title="Portfolio Acquisitions"
+      <Hero compact scene="estate" eyebrow="Acquire" title="Seller Portfolios"
             sub="One seller, many properties. Evaluate each property, then build and compare purchase packages."
             meta={rows ? [{ label: <><b>{rows.length}</b> portfolio{rows.length === 1 ? '' : 's'}</> }] : null}
             actions={<button type="button" className="evo-btn evo-btn--primary" onClick={() => setCreating(true)}>+ New portfolio</button>} />
@@ -258,7 +286,7 @@ export function PortfolioDetail() {
 
   return (
     <EvoApp world="acquisition">
-      <Hero compact scene="estate" eyebrow={<><Link to="/wholesale/portfolios" className="pf-crumb">Portfolio Acquisitions</Link> · {p.label}</>}
+      <Hero compact scene="estate" eyebrow={<><Link to="/wholesale/portfolios" className="pf-crumb">Seller Portfolios</Link> · {p.label}</>}
             title={p.name}
             sub={[p.seller_name ? `Seller: ${p.seller_name}` : 'Seller not set', p.source ? `Source: ${p.source}` : null].filter(Boolean).join(' · ')}
             meta={[{ label: p.status_label }, { label: <><b>{s.properties}</b> properties</> },
@@ -281,14 +309,29 @@ export function PortfolioDetail() {
 
       {tab === 'inventory' ? (
         <div role="tabpanel" id="panel-inventory" aria-labelledby="tab-inventory">
-          <Metrics label="Portfolio totals">
-            <Metric label="Seller asking" value={money(s.seller_asking.total)} sub={<>seller stated · <Partial t={s.seller_asking} of={s.properties} /></>} />
-            <Metric label="Stated rent / month" value={money(s.seller_rent_monthly.total)} sub={<>scheduled, not collected · <Partial t={s.seller_rent_monthly} of={s.seller_rent_monthly.of} />{s.land ? ` · ${s.land} land excluded` : ''}</>} />
-            <Metric label="Estimated value" tone="info" value={money(s.estimated_value.total)} sub={<Partial t={s.estimated_value} of={s.properties} />} attention={s.estimated_value.partial} />
-            <Metric label="Estimated repairs" value={money(s.repairs.total)} sub={<Partial t={s.repairs} of={s.properties} />} />
-            <Metric label="Our target offers" tone="primary" value={money(s.target_offers.total)} sub={<Partial t={s.target_offers} of={s.properties} />} />
-            <Metric label="Estimated spread" tone="success" value={money(s.estimated_spread.total)} sub={<>evaluated only · {s.estimated_spread.counted} of {s.properties}</>} />
-          </Metrics>
+          <Flow s={s} drafts={(pk?.packages || []).filter((k) => k.status === 'draft').length} chosen={chosen.length}
+                onImport={() => setDrawer('import')} onReview={() => setFilter('research_needed')}
+                onPackage={() => newPackage(chosen.length > 0)} />
+          {/* Two kinds of number, never mixed: what the SELLER says, and OUR
+              assumptions. Each total says how many properties it covers. */}
+          <div className="pf-bands">
+            <section className="pf-band" aria-label="Seller stated">
+              <h3>Seller stated <span>as given, not verified</span></h3>
+              <Metrics label="Seller stated totals">
+                <Metric label="Asking" value={money(s.seller_asking.total)} sub={<Partial t={s.seller_asking} of={s.properties} />} attention={!!s.seller_asking.missing} />
+                <Metric label="Rent / month" value={money(s.seller_rent_monthly.total)} sub={<>scheduled, not collected · <Partial t={s.seller_rent_monthly} of={s.seller_rent_monthly.of} />{s.land ? ` · ${s.land} land excluded` : ''}</>} />
+              </Metrics>
+            </section>
+            <section className="pf-band pf-band--ours" aria-label="Our assumptions">
+              <h3>Our assumptions <span>internal estimates</span></h3>
+              <Metrics label="Our assumption totals">
+                <Metric label="Estimated value" tone="info" value={money(s.estimated_value.total)} sub={<Partial t={s.estimated_value} of={s.properties} />} attention={s.estimated_value.partial} />
+                <Metric label="Repairs" value={money(s.repairs.total)} sub={<Partial t={s.repairs} of={s.properties} />} attention={!!s.repairs.missing} />
+                <Metric label="Target offers" tone="primary" value={money(s.target_offers.total)} sub={<Partial t={s.target_offers} of={s.properties} />} attention={!!s.target_offers.missing} />
+                <Metric label="Spread" tone="success" value={money(s.estimated_spread.total)} sub={<>evaluated only · {s.estimated_spread.counted} of {s.properties}</>} />
+              </Metrics>
+            </section>
+          </div>
           <Panel flush>
             <div className="evo-filterbar">
               <label className="evo-search"><span className="evo-sr">Search this portfolio</span>
@@ -323,7 +366,12 @@ export function PortfolioDetail() {
               <div className="evo-table-wrap">
                 <table className="evo-table evo-table--cards pf-table">
                   <caption className="evo-sr">{rows.length} properties</caption>
-                  <thead><tr>
+                  <thead><tr className="pf-thgroup">
+                    <th colSpan={3} aria-hidden="true" />
+                    <th colSpan={2} scope="colgroup" className="pf-th-seller">Seller stated</th>
+                    <th colSpan={4} scope="colgroup" className="pf-th-ours">Our assumptions</th>
+                    <th aria-hidden="true" />
+                  </tr><tr>
                     <th scope="col" style={{ width: 36 }}><input type="checkbox" aria-label="Select all shown"
                       checked={rows.length > 0 && rows.every((r) => sel[r.item_id])}
                       onChange={(e) => setSel(e.target.checked ? Object.fromEntries(rows.map((r) => [r.item_id, true])) : {})} /></th>
@@ -345,14 +393,14 @@ export function PortfolioDetail() {
                           <span className="evo-prop__sub">{r.occupancy_status === 'unknown' ? 'Occupancy unknown' : fmtLabel(r.occupancy_status)}{r.review_status === 'needs_review' ? ' · listing needs review' : ''}{r.extraction_confidence === 'low' ? ' · low confidence' : ''}</span>
                         </td>
                         <td data-label="Type">{r.is_land ? <Tag>Land</Tag> : fmtLabel(r.property_type || r.seller_type, '—')}</td>
-                        <td data-label="Seller asking" className="is-right">{money(r.seller_price)}</td>
-                        <td data-label="Stated rent" className="is-right">{r.is_land ? <span className="evo-muted">n/a</span> : money(r.seller_rent)}</td>
-                        <td data-label="Est. value" className="is-right">{r.arv === null ? <span className="evo-muted">Research needed</span>
+                        <td data-label="Seller asking" className="is-right pf-td-seller">{has(r.seller_price) ? money(r.seller_price) : <Miss what="Not stated" />}</td>
+                        <td data-label="Stated rent" className="is-right pf-td-seller">{r.is_land ? <span className="evo-muted">n/a</span> : has(r.seller_rent) ? money(r.seller_rent) : <Miss what="Not stated" />}</td>
+                        <td data-label="Est. value" className="is-right">{r.arv === null ? <Miss what="Research needed" />
                           : <>{money(r.arv)}<span className="evo-prop__sub">{fmtLabel(r.arv_confidence || r.arv_source)}</span></>}</td>
-                        <td data-label="Repairs" className="is-right">{money(r.repairs)}{r.repairs !== null ? <span className="evo-prop__sub">{r.repair_status_label}</span> : null}</td>
-                        <td data-label="Our target offer" className="is-right">{money(r.target_offer)}
+                        <td data-label="Repairs" className="is-right">{has(r.repairs) ? <>{money(r.repairs)}<span className="evo-prop__sub">{r.repair_status_label}</span></> : <Miss />}</td>
+                        <td data-label="Our target offer" className="is-right">{has(r.target_offer) ? money(r.target_offer) : <Miss />}
                           {r.mao !== null ? <span className="evo-prop__sub">MAO {money(r.mao)}</span> : null}</td>
-                        <td data-label="Potential spread" className="is-right">{money(r.estimated_profit)}</td>
+                        <td data-label="Potential spread" className="is-right">{has(r.estimated_profit) ? money(r.estimated_profit) : <Miss what="Needs all four" />}</td>
                         <td data-label="Status"><Status status={r.status} label={r.status_label} tone={STATUS_TONE[r.status]} /></td>
                       </tr>
                     ))}

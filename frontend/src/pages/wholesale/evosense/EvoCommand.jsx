@@ -27,14 +27,22 @@ import PropertyPhoto, { usePropertyPhoto } from './PropertyPhoto'
 import { ActFirst, FunnelPanel } from './Readiness'
 import { ReadyToRun } from './Acquire'
 import { WorkCell, WORK_TONE } from './Measures'
+import { useMdrNav } from '../../../components/mdr/MdrShell'
+import WorkQueueCommand from './WorkQueueCommand'
 
-const ACT_TONE = {
+export const ACT_TONE = {
   'handoff.opened': 'attention', 'reply.read': 'info', 'reply.received': 'info', 'promoted': 'good',
   'enrichment.found': 'good', 'provider.failed': 'bad', 'outreach.blocked': 'attention',
   'hunt.succeeded': 'good', 'hunt.failed': 'bad', 'nurture.set': 'info', 'outreach.started': 'info',
 }
 
-export default function EvoCommand() {
+/** My Deal Room gets the work-queue screen (WorkQueueCommand.jsx); every
+ *  other Wholesale brand keeps this page exactly as it was. */
+export default function EvoCommandRoute() {
+  return useMdrNav() ? <WorkQueueCommand /> : <EvoCommand />
+}
+
+export function EvoCommand() {
   // Anyone may pause; only a workspace admin may resume (server rule).
   const isAdmin = isWholesaleAdmin()
   const navigate = useNavigate()
@@ -411,7 +419,7 @@ function NeedsYouHero({ n, onOpen }) {
   )
 }
 
-function SystemStatus({ cc }) {
+export function SystemStatus({ cc }) {
   const a = cc.automation || {}
   const i = a.inbound || {}
   const ctl = cc.controls || {}
@@ -471,7 +479,7 @@ function FragmentRow({ k, v }) {
   return <><dt title="Next automatic hunt for this strategy">Next hunt · {k}</dt><dd>{v}</dd></>
 }
 
-function BudgetUsage({ spent }) {
+export function BudgetUsage({ spent }) {
   return (
     <Panel title="Budget usage" action={<Link className="evo-link" to="/wholesale/evosense/controls#budget">Budgets</Link>}>
       <div className="evo-budget__totals">
@@ -498,7 +506,7 @@ function BudgetUsage({ spent }) {
   )
 }
 
-function RoutingReviews({ items, busy, onResolve }) {
+export function RoutingReviews({ items, busy, onResolve }) {
   return (
     <Panel title="Routing review required" count={items.length}
            hint="An inbound SMS could belong to more than one conversation. It is saved and attached to none until you choose.">
