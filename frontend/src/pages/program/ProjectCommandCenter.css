@@ -160,3 +160,20 @@
   margin: 0;
   box-shadow: 0 8px 22px #15213926;
 }
+
+.pcc-hero-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.pcc .pcc-chat-toggle { background: #ffffff12; color: white; border-color: #91addf; }
+.pcc-chat { margin: 18px 0; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: #fff; }
+.pcc-chat header, .pcc-chat form { display: flex; align-items: center; gap: 12px; padding: 14px; flex-wrap: wrap; }
+.pcc-chat header { justify-content: space-between; background: #edf2fb; }
+.pcc-chat header h2 { font-size: 18px; }
+.pcc-chat header label { display: flex; align-items: center; gap: 8px; max-width: 100%; }
+.pcc-chat header select { max-width: min(54vw, 300px); }
+.pcc-chat-log { max-height: 290px; overflow: auto; padding: 14px; }
+.pcc-chat-log p { margin: 0 0 6px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.pcc-chat-turn + .pcc-chat-turn { margin-top: 12px; }
+.pcc-chat-message, .pcc-chat-reply { max-width: 90%; width: fit-content; border-radius: 10px; padding: 9px 12px; }
+.pcc-chat-log .pcc-chat-message { margin-left: auto; background: #e6efff; }
+.pcc-chat-reply { background: #f1f4f9; }
+.pcc-chat form { border-top: 1px solid var(--line); }
+.pcc-chat textarea { flex: 1 1 200px; min-height: 48px; resize: vertical; }

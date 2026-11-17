@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { Link } from 'react-router-dom'
 import { api } from '../../api/client'
 import { BOARD_URL, errorText, isStale, newRequestKey, withExpectedVersion, writeHeaders } from '../../utils/launchBoard'
+import ProjectChecklistChat from './ProjectChecklistChat'
 import './ProjectCommandCenter.css'
 
 const ENDPOINT = BOARD_URL + '/checklist'
@@ -125,6 +126,7 @@ export default function ProjectCommandCenter() {
   const [filter, setFilter] = useState('all')
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState(null)
+  const [chatOpen, setChatOpen] = useState(false)
   const [notice, setNotice] = useState(null)
   const [busy, setBusy] = useState(false)
   const reload = useCallback(async () => {
@@ -198,9 +200,13 @@ export default function ProjectCommandCenter() {
           <div className="pcc-hero-content">
             <div>
               <h1>Project<br />Command Center</h1>
-              <button type="button" className="pcc-primary"
-                      onClick={() => { setNotice(null); setEditing({ ...NEW_PROJECT, status: filter === 'wishlist' ? 'wishlist' : 'todo' }) }}
-                      disabled={!data || busy}>+ Add project</button>
+              <div className="pcc-hero-actions">
+                <button type="button" className="pcc-primary"
+                        onClick={() => { setNotice(null); setEditing({ ...NEW_PROJECT, status: filter === 'wishlist' ? 'wishlist' : 'todo' }) }}
+                        disabled={!data || busy}>+ Add project</button>
+                <button type="button" className="pcc-chat-toggle" disabled={!data} aria-expanded={chatOpen}
+                        aria-controls="pcc-project-chat" onClick={() => setChatOpen(open => !open)}>Project Chat</button>
+              </div>
             </div>
             {data && <div className="pcc-overview">
               <div className="pcc-ring" style={{ '--completion': completion + '%' }} aria-hidden="true"><strong>{completion}%</strong></div>
@@ -216,6 +222,10 @@ export default function ProjectCommandCenter() {
           ? <button type="button" disabled={busy} onClick={() => run(async () => {}, () => 'Board refreshed.')}>Reload board</button>
           : <p role="status">Loading projects…</p>)}
         {data && <>
+          <div id="pcc-project-chat" hidden={!chatOpen}>
+            <ProjectChecklistChat projects={projects} open={chatOpen} boardBusy={busy}
+                  onReview={draft => { setNotice(null); setEditing(draft) }} />
+          </div>
           <nav className="pcc-filters" aria-label="Project status">
             {[['all', 'All Projects'], ...Object.entries(STATUSES)].map(([key, label]) => (
               <button key={key} type="button" data-status={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>

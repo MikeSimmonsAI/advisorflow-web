@@ -11,15 +11,17 @@ messages anyone, or touches production.
 # No `from __future__ import annotations` in a router module (see god_access_router).
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
+from app.limiter import limiter
 from app.deps import get_current_user, require_god
 from app.models.models import User
 from app.services import launch_board as lb
 from app.services import launch_board_store as store
 from app.services import relay_control_room as rcr
 from app.services import project_checklist as checklist
+from app.services import project_checklist_chat
 
 router = APIRouter(prefix="/god/launch-board", tags=["God Mode — Launch Board"])
 
@@ -88,22 +90,63 @@ class ChecklistIn(BaseModel):
     expected_version: Optional[int] = None
 
 
-@router.get("/checklist")
-def read_checklist(response: Response, _god: User = Depends(require_checklist_access)):
-    response.headers["Cache-Control"] = "no-store"
+def _checklist_projects():
     try:
         projects = store.get_store().load()["projects"]
     except lb.BoardError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    return {
-        "projects": [{
-            "id": p["id"], "name": p["name"], "summary": p["summary"],
-            "status": checklist.status_for(p), "tasks": p.get("checklist_tasks", []),
-            "version": p.get("version"),
-        } for p in sorted(projects, key=lambda project: (project["priority"], project["id"]))
-          if p["lane"] != "archived"],
-        "storage": store.storage_status(),
-    }
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    return [{
+        "id": p["id"], "name": p["name"], "summary": p["summary"],
+        "status": checklist.status_for(p), "tasks": p.get("checklist_tasks", []),
+        "version": p.get("version"),
+    } for p in sorted(projects, key=lambda project: (project["priority"], project["id"]))
+      if p["lane"] != "archived"]
+
+
+@router.get("/checklist")
+def read_checklist(response: Response, _god: User = Depends(require_checklist_access)):
+    response.headers["Cache-Control"] = "no-store"
+    return {"projects": _checklist_projects(), "storage": store.storage_status()}
+
+
+class ChecklistChatIn(BaseModel):
+    message: str = Field(min_length=1, max_length=1500)
+    previous_message: str = Field(default="", max_length=1500)
+    project_id: Optional[int] = None
+
+
+class ChecklistChatResult(BaseModel):
+    reply: str = Field(min_length=1, max_length=2500)
+    action: Literal["answer", "create", "update"]
+    draft: Optional[ChecklistIn] = None
+
+
+@router.post("/checklist/chat")
+@limiter.limit("15/minute")
+def chat_checklist(request: Request, response: Response, body: ChecklistChatIn,
+                   user: User = Depends(require_checklist_access)):
+    response.headers["Cache-Control"] = "no-store"
+    projects = _checklist_projects()
+    if body.project_id is not None:
+        selected = next((p for p in projects if p["id"] == body.project_id), None)
+        if selected is None:
+            raise HTTPException(status_code=404, detail="That project is no longer on the board.")
+    else:
+        named = [p for p in projects if p["name"].casefold() in body.message.casefold()]
+        selected = named[0] if len(named) == 1 else None
+    try:
+        result = ChecklistChatResult.model_validate(project_checklist_chat.propose(
+            body.message, body.previous_message, projects, selected, str(user.id)))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail="Project chat could not respond. Try again in a moment.") from e
+    if result.action == "answer":
+        return {"reply": result.reply}
+    if result.draft is None or (result.action == "update" and selected is None):
+        return {"reply": "Choose a project to update, or describe the new card you want to add."}
+    draft = result.draft.model_dump(exclude={"expected_version"})
+    if result.action == "update":
+        draft.update(id=selected["id"], name=selected["name"], version=selected["version"])
+    return {"reply": result.reply, "draft": draft}
 
 
 @router.post("/checklist")
