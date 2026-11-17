@@ -120,6 +120,20 @@ def command_center(hours: int = Query(24, ge=1, le=24 * 30), db: Session = Depen
     return V.command_center(db, org_id, hours=hours, include_test=V.sandbox_only(db, org_id))
 
 
+@router.get("/work-queue")
+def work_queue(view: str = Query("needs_decision", max_length=20), sort: str = Query("work", max_length=20),
+               q: Optional[str] = Query(None, max_length=80), offset: int = Query(0, ge=0, le=100000),
+               limit: int = Query(25, ge=1, le=100), db: Session = Depends(get_db),
+               user: User = Depends(require_tenant_or_observer)):
+    """Acquisition Command's one work queue (services/evosense/work_queue.py):
+    bounded, paginated, one row per property with every open task on it, and
+    the current sale kept apart from dates written into older tasks."""
+    from app.services.evosense import work_queue as WQ
+    org_id = _read_org(db, user)
+    return WQ.queue(db, org_id, view=view, sort=sort, q=q, offset=offset, limit=limit,
+                    include_test=V.sandbox_only(db, org_id))
+
+
 @router.get("/opportunity-radar")
 def opportunity_radar(
     market: str = Query("all", max_length=20),
