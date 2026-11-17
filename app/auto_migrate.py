@@ -1796,6 +1796,20 @@ COLUMNS_TO_ADD = [
     ("volt_dev_oauth_grants", "resource", "VARCHAR"),
     ("inbound_mailboxes", "purpose", "VARCHAR"),
     ("oauth_auth_transactions", "target_organization_id", "VARCHAR"),
+    # EvoSys Business Development (PR #663): how a contact was met, kept on the
+    # existing sales record so nothing is copied elsewhere.
+    ("opportunities", "contact_role", "VARCHAR"),
+    ("opportunities", "source_detail", "VARCHAR"),
+    ("opportunities", "met_on", "DATE"),
+    ("opportunities", "preferred_contact", "VARCHAR"),
+    ("opportunities", "intro_note", "TEXT"),
+    # Picked campaigns and held contacts (tables are new in this PR; these are
+    # here so a database that already has them gets the columns too).
+    ("evosys_campaigns", "kind", "VARCHAR(20) DEFAULT 'group' NOT NULL"),
+    ("evosys_campaigns", "context", "VARCHAR(200)"),
+    ("evosys_campaigns", "tone", "VARCHAR(20)"),
+    ("evosys_campaigns", "archived_at", "TIMESTAMP"),
+    ("evosys_outreach_states", "held_reason", "VARCHAR(60)"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

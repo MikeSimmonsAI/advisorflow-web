@@ -40,6 +40,13 @@ TEAM_FIELDS = ("sender_name", "from_email", "reply_to_email", "mailing_address")
 OFFER_PLACEHOLDER_RE = re.compile(r"^\s*\[your offer", re.I)
 
 
+def real_offer(text: Optional[str]) -> Optional[str]:
+    """An offer someone actually wrote. The old placeholder ("[Your offer goes
+    here: ...]") is not an offer: it is never sent and never quoted."""
+    t = (text or "").strip()
+    return None if (not t or OFFER_PLACEHOLDER_RE.match(t)) else t
+
+
 def content_hash(c: EvoSysCampaign, settings) -> str:
     body = {k: getattr(c, k) for k in CONTENT_FIELDS}
     body.update({k: getattr(settings, k, None) for k in TEAM_FIELDS})
@@ -91,6 +98,8 @@ def campaign_for(db: Session, settings, lead: Optional[EvoSysLead]) -> Optional[
     market > industry only / market only > the default. Ties go to the oldest."""
     best, score = None, -1
     for c in all_for(db, settings):
+        if (c.kind or "group") != "group" or c.archived_at is not None:
+            continue          # picked campaigns only email their own audience
         if c.industry_key and (lead is None or lead.industry_key != c.industry_key):
             continue
         if c.market_key and (lead is None or lead.market_key != c.market_key):
@@ -108,8 +117,14 @@ def problems(c: EvoSysCampaign, settings) -> List[str]:
     steps = c.steps or []
     if not steps:
         out.append("Add at least one step.")
-    if not (c.offer or "").strip() or OFFER_PLACEHOLDER_RE.match(c.offer or ""):
+    uses_offer = any("{offer}" in ((x.get("subject") or "") + (x.get("body") or "")) for x in steps)
+    if uses_offer and not real_offer(c.offer):
         out.append("Write the offer.")
+    from app.services.evosys_sales import facts as F
+    unknown = sorted({k for x in steps for k in F.placeholders_in((x.get("subject") or "") + (x.get("body") or ""))}
+                     - set(F.PLACEHOLDERS))
+    if unknown:
+        out.append("Unknown fill-in: %s." % ", ".join("{%s}" % k for k in unknown))
     if not (c.booking_url or "").strip().lower().startswith("http"):
         out.append("Add the booking link.")
     for i, st in enumerate(steps, 1):
@@ -185,6 +200,23 @@ def switch(db: Session, c: EvoSysCampaign, settings, on: bool, user_id: str) -> 
         raise ValueError("Approve this exact version before turning it on.")
     if on and problems(c, settings):
         raise ValueError(" ".join(problems(c, settings)))
+    if on and c.archived_at is not None:
+        raise ValueError("This campaign is archived.")
     c.sending_on = bool(on)
     c.updated_at, c.updated_by = datetime.utcnow(), user_id
+    if on:
+        start_queued(db, c)
     db.flush()
+
+
+def start_queued(db: Session, c: EvoSysCampaign, now: Optional[datetime] = None) -> int:
+    """A picked campaign turned on: its waiting audience starts at message 1.
+    Contacts that already started keep their place (nothing is sent twice)."""
+    now = now or datetime.utcnow()
+    n = 0
+    for st in db.query(EvoSysOutreachState).filter(EvoSysOutreachState.campaign_id == c.id,
+                                                   EvoSysOutreachState.status == "queued").all():
+        st.status, st.next_step, st.next_due_at, st.started_at = "active", 0, now, now
+        n += 1
+    db.flush()
+    return n

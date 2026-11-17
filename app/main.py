@@ -1273,6 +1273,10 @@ from app.routers.volt_router import rep_router as volt_rep_router  # noqa: E402
 app.include_router(volt_public_router)   # /volt/public/{slug}/* - VOLT Marketing applicant portal (#535)
 app.include_router(volt_rep_router)      # /volt/rep/{slug}/* - VOLT applicants (volt_rep fenced in deps)
 app.include_router(volt_ops_router)      # /volt/ops/{org_id}/* - VOLT recruiting staff + owner
+# EvoSys Business Development (PR #663): its own paths, registered first so a
+# fixed path such as /sales/evosys/contacts is never read as a lead id.
+from app.routers.evosys_bd_router import router as evosys_bd_router  # noqa: E402
+app.include_router(evosys_bd_router)            # /sales/evosys/* - today, contacts, picked campaigns, inbox, calls
 from app.routers.evosys_sales_router import router as evosys_sales_router  # noqa: E402
 from app.routers.evosys_sales_router import public_router as evosys_sales_public_router  # noqa: E402
 app.include_router(evosys_sales_router)         # /sales/evosys/* - EvoSys Sales program (EvoSys sales team)

@@ -58,13 +58,17 @@ DEFAULT_MARKETS: List[Dict[str, Any]] = [
 SOURCE_CHANNELS = [
     ("facebook_ads", "Facebook ads"), ("facebook_groups", "Facebook groups"), ("tiktok", "TikTok"),
     ("google", "Google"), ("instagram_meta", "Instagram / Meta"), ("website", "Website / demo request"),
-    ("cold_email_research", "Cold-email research"), ("existing_list", "Existing list"), ("other", "Other"),
+    ("cold_email_research", "Cold-email research"), ("existing_list", "Existing list"),
+    ("networking", "Networking / business cards"), ("referral", "Referral"), ("other", "Other"),
 ]
 SOURCE_LABEL = dict(SOURCE_CHANNELS)
 # How each channel reaches EvoSys today. "import" = a file you upload; nothing
 # here claims a live connection that has not been verified.
 SOURCE_ACCESS = {k: "import" for k, _ in SOURCE_CHANNELS}
 SOURCE_ACCESS["website"] = "connected"   # the evosyspro.live request-demo form (public_booking)
+# Typed in by a person (Add contacts) - nothing to connect.
+SOURCE_ACCESS["networking"] = "connected"
+SOURCE_ACCESS["referral"] = "connected"
 
 REVIEW_LABEL = {"ok": "Grouped", "unclear_market": "Unclear market", "possible_duplicate": "Possible duplicate",
                 "held": "Held", "excluded": "Excluded"}
@@ -103,7 +107,8 @@ def group_label(settings, industry_key, market_key) -> str:
 
 def channel_of(source_system: Optional[str], source: Optional[str]) -> str:
     t = ("%s %s" % (source_system or "", source or "")).lower()
-    for key, words in (("facebook_groups", ["facebook group", "fb group"]),
+    for key, words in (("networking", ["networking", "business card"]), ("referral", ["referral", "referred"]),
+                       ("facebook_groups", ["facebook group", "fb group"]),
                        ("facebook_ads", ["facebook", "fb-", "fb_ad", "facebook_ad"]),
                        ("tiktok", ["tiktok"]), ("instagram_meta", ["instagram", "meta ads"]),
                        ("google", ["google"]), ("website", ["website", "discovery + demo", "request-demo"]),
