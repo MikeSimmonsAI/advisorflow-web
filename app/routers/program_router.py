@@ -153,9 +153,17 @@ def _et_hold(prog):
     return held_providers(prog)
 
 
-# Who may let the AI answer families: the owner's own logins (god account and
-# his super-admin account). Anyone who manages the program may switch it OFF.
+# Who may let the AI answer families: the owner's own logins - the god account,
+# his super-admin account, and his everyday platform login (owner, Nov 17).
+# Anyone who manages the program may switch it OFF.
 AI_ON_ROLES = ("god_admin", "super_admin")
+
+
+def _may_turn_ai_on(user) -> bool:
+    if getattr(user, "role", None) in AI_ON_ROLES:
+        return True
+    from app.services.project_checklist import PLATFORM_LOGIN
+    return (getattr(user, "email", None) or "").strip().lower() == PLATFORM_LOGIN.lower()
 
 
 def _ai_killed() -> bool:
@@ -184,7 +192,7 @@ def _program_json(db: Session, prog: OutreachProgram, user=None) -> dict:
         "alert_title": getattr(prog, "alert_title", None),
         "ai_setter_mode": getattr(prog, "ai_setter_mode", None) or "off",
         # Who may switch AI replies on (the owner's logins) - see AI_ON_ROLES.
-        "ai_setter_can_turn_on": getattr(user, "role", None) in AI_ON_ROLES,
+        "ai_setter_can_turn_on": _may_turn_ai_on(user) if user is not None else False,
         "ai_setter_stopped_everywhere": _ai_killed(),
         "management_recipients": json.loads(prog.management_recipients or "[]"),
         "hot_sla_minutes": prog.hot_sla_minutes,
@@ -306,7 +314,7 @@ def update_settings(body: SettingsIn, db: Session = Depends(get_db),
         m = (data.get("ai_setter_mode") or "off").strip().lower()
         if m not in ("off", "draft", "auto"):
             raise HTTPException(status_code=422, detail="ai_setter_mode must be off, draft or auto.")
-        if m != "off" and getattr(user, "role", None) not in AI_ON_ROLES:
+        if m != "off" and not _may_turn_ai_on(user):
             # Letting AI answer families is the owner's decision alone.
             raise HTTPException(status_code=403, detail="Only the owner can switch the appointment setter on.")
         data["ai_setter_mode"] = m
