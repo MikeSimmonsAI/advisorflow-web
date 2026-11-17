@@ -177,3 +177,21 @@
 .pcc-chat-reply { background: #f1f4f9; }
 .pcc-chat form { border-top: 1px solid var(--line); }
 .pcc-chat textarea { flex: 1 1 200px; min-height: 48px; resize: vertical; }
+
+.pcc-insights { display: grid; grid-template-columns: 1fr 1.15fr; gap: 16px; margin-top: 20px; }
+.pcc-insight-panel { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: clamp(16px, 2vw, 24px); min-width: 0; }
+.pcc-insight-panel h2 { font-size: 22px; letter-spacing: -.025em; }
+.pcc-insight-panel > p { color: var(--muted); margin: 5px 0 14px; font-size: 13px; }
+.pcc-priority-chart { display: grid; gap: 6px; }
+.pcc-priority-chart button { display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; border-color: transparent; background: #f6f8fc; text-align: left; padding: 8px 12px; font-size: 13px; }
+.pcc-priority-chart button[aria-pressed="true"] { border-color: var(--priority-color); }
+.pcc-priority-chart strong { font-variant-numeric: tabular-nums; }
+.pcc-bar-track { grid-column: 1 / -1; display: block; background: #e3e9f4; height: 7px; border-radius: 6px; }
+.pcc-bar-track span { display: block; height: 100%; border-radius: inherit; background: var(--priority-color); }
+.pcc-next { display: grid; gap: 5px; margin: 0; padding-left: 24px; }
+.pcc-next li::marker { color: #2459d4; font-weight: 700; }
+.pcc-next button { display: grid; width: 100%; text-align: left; border-color: transparent; padding: 4px 8px; }
+.pcc-next button span { color: var(--muted); font-weight: 400; font-size: 13px; }
+.pcc-card-labels { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pcc-priority-tag { font-size: 11px; font-weight: 750; color: var(--priority-color); border: 1px solid currentColor; border-radius: 20px; padding: 2px 7px; }
+@media (max-width: 740px) { .pcc-insights { grid-template-columns: 1fr; } }
