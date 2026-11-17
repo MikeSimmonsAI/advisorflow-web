@@ -63,7 +63,7 @@ export default function ProjectChecklistChat({ projects, open, boardBusy, onRevi
         {messages.map((turn, index) => <div key={index} className="pcc-chat-turn">
           <p className="pcc-chat-message" aria-label="You">{turn.message}</p>
           {turn.reply && <div className="pcc-chat-reply">
-            <p>{turn.reply}</p>
+            <p>{turn.draft ? 'Draft ready to review. Save it to update the board.' : turn.reply}</p>
             {turn.draft && <button type="button" disabled={boardBusy}
                                    onClick={() => onReview(turn.draft)}>Review {turn.draft.id ? 'change' : 'new card'}</button>}
           </div>}
