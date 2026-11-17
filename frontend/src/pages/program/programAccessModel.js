@@ -209,7 +209,7 @@ export function programCards(ctx) {
       if (d && isEvoSysSales(d)) {
         const e = PROGRAMS.evosys_sales
         cards.push({ type: 'back_office', organization_id: many ? 'back-office:' + d.brand_sales_org_id : 'back-office',
-                     path: d.path, platform_id: many ? d.platform_id : undefined,
+                     path: '/program/evosys-sales', platform_id: many ? d.platform_id : undefined,
                      platform_name: many ? d.platform_name : undefined,
                      brand_sales_org_id: many ? d.brand_sales_org_id : undefined,
                      program: 'evosys_sales', variant: e.variant, symbol: e.symbol, rank: e.rank, kind: e.kind,

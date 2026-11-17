@@ -825,6 +825,15 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
             elif not sender or sender == box.address:
                 row.outcome, row.detail = "own_mail", "Sent by the mailbox itself."
             else:
+                # EvoSys Sales: a reply to a lead's tagged Reply-To is theirs,
+                # whatever else the sender matches (evosys_sales/replies.py).
+                evs = _evosys_sales_reply(db, m, sender, received, token, allow_sender=False)
+                if evs is not None:
+                    row.outcome, row.detail = evs[0], evs[1][:1000]
+                    db.add(row)
+                    db.commit()
+                    matched += 1 if evs[0] == "evs_reply" else 0
+                    continue
                 alias_prof = _alias_location(db, m)
                 if alias_prof is not None:
                     from app.services.programs import aliases as _aliases
@@ -835,6 +844,16 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
                 else:
                     lead, outcome, detail = route(db, org_ids, sender, m.get("subject"))
                 row.outcome, row.detail = outcome, detail
+                if lead is None and alias_prof is None:
+                    # Nothing else claimed it: the sender alone may name exactly
+                    # one emailed EvoSys Sales lead (never a guess between two).
+                    evs = _evosys_sales_reply(db, m, sender, received, token, allow_sender=True)
+                    if evs is not None:
+                        row.outcome, row.detail = evs[0], evs[1][:1000]
+                        db.add(row)
+                        db.commit()
+                        matched += 1 if evs[0] == "evs_reply" else 0
+                        continue
                 if lead is None and alias_prof is not None:
                     # Addressed to a location but no contact matches: kept,
                     # alerted and queued in the program - never left unread.
@@ -921,6 +940,37 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
     box.last_checked, box.last_matched = len(messages), matched
     db.commit()
     return {"mailbox": box.address, "checked": len(messages), "matched": matched, "errors": errors}
+
+
+def _evosys_sales_reply(db: Session, m: dict, sender: str, received: datetime, token: Optional[str],
+                        allow_sender: bool):
+    """EvoSys Sales reply handling (evosys_sales/replies.py). Returns
+    (outcome, detail, opportunity_id) or None when the message is not theirs.
+    Headers (for automatic-reply detection) are read only for a message that
+    did match an EvoSys Sales lead."""
+    from app.services.evosys_sales import replies as _evs
+
+    def headers_for():
+        if m.get("internetMessageHeaders") is not None:
+            return m.get("internetMessageHeaders")
+        if not token or not m.get("id"):
+            return None
+        r = httpx.get(f"{GRAPH}/me/messages/{m['id']}", timeout=15,
+                      headers={"Authorization": f"Bearer {token}", "Prefer": 'IdType="ImmutableId"'},
+                      params={"$select": "internetMessageHeaders"})
+        return r.json().get("internetMessageHeaders") if r.status_code == 200 else None
+
+    body = clean_body((m.get("body") or {}).get("content") or m.get("bodyPreview") or "")
+    try:
+        out = _evs.handle(db, m, sender=sender, received_at=received, body=body,
+                          allow_sender=allow_sender, headers_for=headers_for)
+    except Exception:  # noqa: BLE001 - the mailbox's own routing carries on
+        db.rollback()
+        log.exception("EvoSys Sales reply handling failed for %s", m.get("id"))
+        return None
+    if out is not None and out[2]:
+        out = (out[0], "%s [EvoSys Sales lead %s]" % (out[1], out[2]), out[2])
+    return out
 
 
 def probe(db: Session, box: InboundMailbox, folder: Optional[str] = None) -> Dict:

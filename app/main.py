@@ -1275,6 +1275,12 @@ from app.routers.volt_router import rep_router as volt_rep_router  # noqa: E402
 app.include_router(volt_public_router)   # /volt/public/{slug}/* - VOLT Marketing applicant portal (#535)
 app.include_router(volt_rep_router)      # /volt/rep/{slug}/* - VOLT applicants (volt_rep fenced in deps)
 app.include_router(volt_ops_router)      # /volt/ops/{org_id}/* - VOLT recruiting staff + owner
+from app.routers.evosys_sales_router import router as evosys_sales_router  # noqa: E402
+from app.routers.evosys_sales_router import public_router as evosys_sales_public_router  # noqa: E402
+app.include_router(evosys_sales_router)         # /sales/evosys/* - EvoSys Sales program (EvoSys sales team)
+from app.routers.evosys_sales_work_router import router as evosys_sales_work_router  # noqa: E402
+app.include_router(evosys_sales_work_router)    # /sales/evosys/* - campaigns, lead review, AI help, intro calls
+app.include_router(evosys_sales_public_router)  # /evosys-sales-public/* - opt-out link in outreach email
 # VOLT Google Sheets mirror: queue every lead/application change in its own
 # transaction (no Google call in any request; see sheets_outbox).
 from app.services.volt import sheets_outbox as _volt_sheets_outbox  # noqa: E402
@@ -2137,6 +2143,37 @@ async def _acquisition_workforce_loop():
         await asyncio.sleep(interval)
 
 
+async def _evosys_sales_outreach_loop():
+    """EvoSys Sales automatic follow-up: every 5 minutes, one claimed pass.
+    Sends only when Mike approved the messages AND the switch is on, only on
+    weekdays 8 AM - 6 PM Central, within the daily limit (outreach.run_pass)."""
+    from app.services.job_run_service import record_job_run
+    from app.models.job_models import JobName
+    from app.deps import SessionLocal
+    import logging as _log
+    _logger = _log.getLogger("evosys_sales_outreach_loop")
+    interval = 300
+    await asyncio.sleep(170)  # startup delay - offset from the other loops
+    while True:
+        if not await _pass_claimed(JobName.EVOSYS_SALES_OUTREACH, interval):
+            await asyncio.sleep(interval)
+            continue
+        try:
+            async with record_job_run(JobName.EVOSYS_SALES_OUTREACH, db_factory=SessionLocal) as _m:
+                def _one_pass():
+                    from app.services.evosys_sales import outreach as _O
+                    db = SessionLocal()
+                    try:
+                        return _O.run_pass(db)
+                    finally:
+                        db.close()
+                summary = await _off_loop(_one_pass)
+                _m.update(summary or {})
+        except Exception:                                    # noqa: BLE001
+            _logger.exception("EvoSys Sales outreach pass failed")
+        await asyncio.sleep(interval)
+
+
 async def _service_ops_recurring_loop():
     """Service Operations (#452/#506): every 15 minutes, create the visits
     recurring agreements owe inside the 35-day horizon. One instance per pass
@@ -2855,6 +2892,7 @@ async def on_startup():
         JobName.AI_WORKFORCE_WORKER:  _ai_workforce_worker_loop,
         JobName.ACQUISITION_WORKFORCE: _acquisition_workforce_loop,
         JobName.SERVICE_OPS_RECURRING: _service_ops_recurring_loop,
+        JobName.EVOSYS_SALES_OUTREACH: _evosys_sales_outreach_loop,
     }
     # Rows left 'running' by a process that was killed mid-pass (OOM, deploy)
     # are closed as errors with the reason, by the process that owns the loops,

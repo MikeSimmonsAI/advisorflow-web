@@ -24,7 +24,9 @@ export function programEntry(entry) {
 }
 
 // /acquisition-ops answers 403 itself unless the owner granted operator access.
-const SHARED_OK = ['/change-password', '/login', '/logout', '/workspaces', '/acquisition-ops']
+// /program/evosys-sales is EvoSys's own sales program, its own launcher card
+// for the sales team; /sales/evosys/* refuses anyone not on that team.
+const SHARED_OK = ['/change-password', '/login', '/logout', '/workspaces', '/acquisition-ops', '/program/evosys-sales']
 
 export function activeWorkspaceEntry(ctx, selectedId, homeOrgId) {
   const list = ctx?.workspace_contexts || []

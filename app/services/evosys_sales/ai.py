@@ -1,0 +1,219 @@
+"""EvoSys Sales AI: suggestions a person reviews. Never decisions.
+
+Through the platform's one AI door (app.services.ai_gateway): manual mode,
+named after the person who pressed the button, existing capabilities and
+approved models only. No new provider; no Grok or Harvey connection is used
+or claimed here.
+
+WHAT AI DOES HERE
+  group_lead      suggest an industry + market for an unclear lead
+  draft_campaign  draft a campaign's emails from its verified details
+  reply_assist    summarise a reply that ALREADY stopped the follow-up (by
+                  deterministic rules) and draft an answer
+
+WHAT AI NEVER DOES: change an offer, approve or switch on a campaign, send,
+override an opt-out, or mark a call booked. Every result is checked by rules
+before it is shown (keys must be configured ones; quoted evidence must really
+be in the record; a price may only come from the approved offer), and saved
+with exactly the facts it was given. A failure is saved too, and the manual
+workflow stays usable. The same request with the same inputs returns the saved
+answer instead of asking again; prior saved work is never deleted.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import re
+from datetime import datetime
+from typing import Any, Callable, Dict, Optional
+
+from sqlalchemy.orm import Session
+
+from app.models.evosys_sales_models import EvoSysAITask
+
+log = logging.getLogger(__name__)
+FEATURE = "evosys_sales"
+CAPABILITY = {"group_lead": "lead_analysis", "draft_campaign": "campaign_copy", "reply_assist": "draft_reply"}
+REPLY_CATEGORIES = ("interested", "pricing", "question", "not_interested", "wrong_person", "unsubscribe", "unclear")
+MONEY_RE = re.compile(r"\$\s?\d[\d,]*(\.\d+)?|\b\d+\s?(dollars|usd)\b", re.I)
+
+
+def _get_client():
+    """Test seam: None in production (the gateway's own client)."""
+    return None
+
+
+def _hash(kind: str, facts: Dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps([kind, facts], sort_keys=True, default=str).encode()).hexdigest()
+
+
+def latest(db: Session, kind: str, target_id: str) -> Optional[EvoSysAITask]:
+    return (db.query(EvoSysAITask).filter(EvoSysAITask.kind == kind, EvoSysAITask.target_id == target_id)
+            .order_by(EvoSysAITask.created_at.desc()).first())
+
+
+def payload(t: Optional[EvoSysAITask]) -> Optional[Dict[str, Any]]:
+    if t is None:
+        return None
+    return {"id": t.id, "kind": t.kind, "status": t.status, "output": t.output, "facts": t.facts,
+            "error": t.error, "outcome": t.outcome, "at": t.created_at.isoformat() + "Z"}
+
+
+def _ask(kind: str, user_id: str, org_id: str, system: str, facts: Dict[str, Any]) -> Dict[str, Any]:
+    from app.services import ai_gateway
+    resp = ai_gateway.chat_completion(
+        feature=FEATURE, capability=CAPABILITY[kind], mode=ai_gateway.MANUAL, actor=user_id, org_id=org_id,
+        client=_get_client(), response_format={"type": "json_object"}, temperature=0.2,
+        messages=[{"role": "system", "content": system},
+                  {"role": "user", "content": json.dumps(facts, default=str)}])
+    text = resp.choices[0].message.content or "{}"
+    return json.loads(text)
+
+
+def run(db: Session, *, kind: str, target_id: str, bso_id: str, user_id: str, facts: Dict[str, Any],
+        system: str, check: Callable[[Dict[str, Any]], Dict[str, Any]], force: bool = False) -> EvoSysAITask:
+    """Ask once per (kind, target, facts). `check` turns the raw answer into
+    {"output": ..., "status": "done"|"needs_person", "error": ...}."""
+    h = _hash(kind, facts)
+    prior = (db.query(EvoSysAITask).filter(EvoSysAITask.kind == kind, EvoSysAITask.target_id == target_id,
+                                           EvoSysAITask.input_hash == h, EvoSysAITask.status != "failed")
+             .order_by(EvoSysAITask.created_at.desc()).first())
+    if prior is not None and not force:
+        return prior
+    t = EvoSysAITask(brand_sales_org_id=bso_id, kind=kind, target_id=target_id, input_hash=h, facts=facts,
+                     created_by=user_id, created_at=datetime.utcnow(), status="failed")
+    try:
+        raw = _ask(kind, user_id, bso_id, system, facts)
+        res = check(raw if isinstance(raw, dict) else {})
+        t.output, t.status, t.error = res.get("output"), res.get("status", "done"), res.get("error")
+    except Exception as exc:                                  # noqa: BLE001 - shown, manual path stays usable
+        name = type(exc).__name__
+        t.status = "failed"
+        t.error = ("AI is turned off for manual actions." if name == "AIDisabled"
+                   else "AI couldn't finish (%s). Nothing was changed; you can do this by hand or try again." % name)
+        log.warning("evosys_sales ai %s for %s failed: %s", kind, target_id, name)
+    db.add(t)
+    db.flush()
+    return t
+
+
+# ── group a lead ──────────────────────────────────────────────────────────────
+
+GROUP_SYSTEM = (
+    "You sort service businesses into ONE industry and ONE market for a sales team. Use only the JSON facts given. "
+    "Choose industry_key from facts.industries and market_key from facts.markets (or null if the facts do not say). "
+    "Return JSON: {\"industry_key\":..,\"market_key\":..,\"reason\":\"one plain sentence\","
+    "\"evidence\":[\"exact short quotes copied from facts.record\"]}. Never invent a location.")
+
+
+def suggest_group(db: Session, settings, opp, lead, user_id: str, record_text: str, force: bool = False) -> EvoSysAITask:
+    from app.services.evosys_sales import grouping as G
+    inds = {i["key"]: i["label"] for i in G.industries(settings)}
+    mks = {m["key"]: "%s (%s)" % (m["label"], m.get("state") or "") for m in G.markets(settings)}
+    facts = {"record": record_text, "industries": inds, "markets": mks,
+             "city": lead.city if lead else None, "state": lead.state if lead else None}
+
+    def check(raw):
+        ind, mk = raw.get("industry_key"), raw.get("market_key")
+        ev = [e for e in (raw.get("evidence") or []) if isinstance(e, str)]
+        problems = []
+        if ind is not None and ind not in inds:
+            problems.append("suggested an industry that is not configured")
+            ind = None
+        if mk is not None and mk not in mks:
+            problems.append("suggested a market that is not configured")
+            mk = None
+        real = [e for e in ev if e.strip() and e.strip().lower() in record_text.lower()]
+        if ev and len(real) < len(ev):
+            problems.append("quoted text that is not in the record")
+        out = {"industry_key": ind, "market_key": mk, "reason": str(raw.get("reason") or "")[:400],
+               "evidence": real[:5], "problems": problems}
+        return {"output": out, "status": "needs_person" if problems or not (ind and mk) else "done"}
+    return run(db, kind="group_lead", target_id=opp.id, bso_id=opp.brand_sales_org_id, user_id=user_id,
+               facts=facts, system=GROUP_SYSTEM, check=check, force=force)
+
+
+# ── draft a campaign ──────────────────────────────────────────────────────────
+
+DRAFT_SYSTEM = (
+    "Write a short, plain cold-email follow-up (4 steps) from EvoSys Pro to owners of service businesses. "
+    "Use ONLY facts given. Keep these placeholders exactly where they belong: {first_name}, {company}, {offer}, "
+    "{booking_link}, {sender_name}. Never state a price, guarantee, result or number of appointments yourself - "
+    "the offer goes only where {offer} is. Do not claim you saw their ad, post or website unless facts.source_seen "
+    "is true. Return JSON {\"steps\":[{\"day\":0,\"subject\":..,\"body\":..},...],\"notes\":\"what you assumed\"}.")
+
+
+def draft_campaign(db: Session, settings, campaign, user_id: str, source_seen: bool, force: bool = False) -> EvoSysAITask:
+    from app.services.evosys_sales import grouping as G
+    facts = {"industry": G.label_of(G.industries(settings), campaign.industry_key) or "service businesses",
+             "market": G.label_of(G.markets(settings), campaign.market_key) or "their area",
+             "what_evosys_does": ("finds businesses near the service company that need its services, reaches out, "
+                                  "follows up and books appointments on its calendar"),
+             "source_seen": bool(source_seen), "sender_name": settings.sender_name, "step_days": [0, 3, 7, 14]}
+
+    def check(raw):
+        steps, problems = [], []
+        for i, st in enumerate((raw.get("steps") or [])[:6]):
+            body = str((st or {}).get("body") or "")
+            subj = str((st or {}).get("subject") or "")
+            if MONEY_RE.search(body + " " + subj):
+                problems.append("Step %d named a price; prices only come from the approved offer." % (i + 1))
+            if not source_seen and re.search(r"\b(saw|noticed|came across)\b.{0,40}\b(ad|post|listing)\b", body, re.I):
+                problems.append("Step %d claims we saw their ad, but these leads did not come from ads." % (i + 1))
+            steps.append({"day": int((st or {}).get("day") or (0, 3, 7, 14, 21, 28)[min(i, 5)]),
+                          "channel": "email", "subject": subj[:200], "body": body[:5000]})
+        if not steps:
+            problems.append("No steps came back.")
+        return {"output": {"steps": steps, "notes": str(raw.get("notes") or "")[:500], "problems": problems},
+                "status": "needs_person" if problems else "done"}
+    return run(db, kind="draft_campaign", target_id=campaign.id, bso_id=campaign.brand_sales_org_id,
+               user_id=user_id, facts=facts, system=DRAFT_SYSTEM, check=check, force=force)
+
+
+# ── a reply ───────────────────────────────────────────────────────────────────
+
+REPLY_SYSTEM = (
+    "A business owner replied to EvoSys Pro's sales email. Using ONLY the facts, return JSON "
+    "{\"category\": one of " + ", ".join(REPLY_CATEGORIES) + ", \"summary\":\"what they asked, one sentence\","
+    "\"draft\":\"a short reply signed with facts.sender_name\"}. If they are interested, suggest a short intro call "
+    "and include facts.booking_link. Quote a price ONLY by copying facts.offer exactly; if facts.offer is empty and "
+    "they ask about price, say Mike will follow up with pricing and set category to pricing. Never promise results.")
+
+
+def reply_assist(db: Session, settings, campaign, opp, reply_msg, original_text: str, user_id: str,
+                 force: bool = False) -> EvoSysAITask:
+    offer = ""
+    if campaign is not None:
+        from app.services.evosys_sales import campaigns as CA
+        if CA.is_approved(campaign, settings) and not CA.OFFER_PLACEHOLDER_RE.match(campaign.offer or ""):
+            offer = (campaign.offer or "").strip()
+    facts = {"reply": (reply_msg.body or "")[:3000], "their_company": opp.company_name,
+             "their_name": opp.contact_name, "our_email": (original_text or "")[:3000], "offer": offer,
+             "booking_link": (campaign.booking_url if campaign else None) or "", "sender_name": settings.sender_name}
+
+    def check(raw):
+        cat = raw.get("category") if raw.get("category") in REPLY_CATEGORIES else "unclear"
+        draft = str(raw.get("draft") or "")[:4000]
+        needs = []
+        prices = [m.group(0) for m in MONEY_RE.finditer(draft)]
+        if prices and not all(p in offer for p in prices):
+            needs.append("The draft names a price that isn't in the approved offer.")
+            draft = ""
+        if cat == "pricing" and not offer:
+            needs.append("No approved offer on file - Mike answers pricing.")
+        if cat in ("wrong_person", "unclear"):
+            needs.append("Wrong person or unclear - read it yourself.")
+        if cat in ("unsubscribe", "not_interested"):
+            needs.append("They don't want more emails - consider Do Not Contact. No draft.")
+            draft = ""
+        out = {"category": cat, "summary": str(raw.get("summary") or "")[:400], "draft": draft,
+               "needs_person": needs, "used_offer": bool(offer)}
+        return {"output": out, "status": "needs_person" if needs else "done"}
+    return run(db, kind="reply_assist", target_id=reply_msg.id, bso_id=opp.brand_sales_org_id, user_id=user_id,
+               facts=facts, system=REPLY_SYSTEM, check=check, force=force)
+
+
+def resolve(db: Session, t: EvoSysAITask, outcome: str) -> None:
+    t.outcome, t.resolved_at = outcome, datetime.utcnow()
+    db.flush()

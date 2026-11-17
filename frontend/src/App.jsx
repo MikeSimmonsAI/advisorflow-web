@@ -174,6 +174,16 @@ const InsReports = insPage('ReportsPage')
 const InsAutomation = insPage('AutomationPage')
 const InsImport = insPage('ImportPage')
 const InsSettings = insPage('SettingsPage')
+// EvoSys Sales program (/program/evosys-sales/*): EvoSys's own sales team.
+const EvsShell = lazyPage(() => import('./pages/evosysSales/EvoSysSales'))
+const evsPage = name => lazyPage(() => import('./pages/evosysSales/EvoSysSales').then(m => ({ default: m[name] })))
+const EvsToday = evsPage('Today')
+const EvsLeads = evsPage('Leads')
+const EvsLead = evsPage('Lead')
+const EvsConversations = evsPage('Conversations')
+const EvsOutreach = evsPage('Outreach')
+const EvsAppointments = evsPage('Appointments')
+const EvsResults = evsPage('Results')
 // Managed client acquisition (Issue #452): the client's portal (/program/acquisition/*).
 const AcquisitionShell = lazyPage(() => import('./pages/acquisition/AcquisitionShell'))
 const AcqHome = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Home })))
@@ -1697,6 +1707,16 @@ export default function App() {
           <Route path="automation" element={<InsAutomation />} />
           <Route path="import" element={<InsImport />} />
           <Route path="settings" element={<InsSettings />} />
+        </Route>
+        {/* EvoSys Sales program: /sales/evosys/* admits only the EvoSys Pro sales team. */}
+        <Route path="/program/evosys-sales" element={<ProtectedRoute bare><EvsShell /></ProtectedRoute>}>
+          <Route index element={<EvsToday />} />
+          <Route path="leads" element={<EvsLeads />} />
+          <Route path="leads/:id" element={<EvsLead />} />
+          <Route path="conversations" element={<EvsConversations />} />
+          <Route path="outreach" element={<EvsOutreach />} />
+          <Route path="appointments" element={<EvsAppointments />} />
+          <Route path="results" element={<EvsResults />} />
         </Route>
         {/* Managed client acquisition (Issue #452). /acquisition enforces membership,
              explicit client_acquisition and cleaning identity server-side. */}
