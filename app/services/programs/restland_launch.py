@@ -41,7 +41,7 @@ MODE = "launch"
 TZ = "America/Chicago"
 CYCLE_KEY = "ffr-batch-1"
 CAMPAIGN_NAME = "Restland — Family File Review"
-OUTREACH = {"slots": True, "open": "08:30", "close": "18:00", "new_every_minutes": 8,
+OUTREACH = {"slots": True, "open": "08:30", "close": "19:00", "new_every_minutes": 8,
             "followup_offset_minutes": 2}
 
 

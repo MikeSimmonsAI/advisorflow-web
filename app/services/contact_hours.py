@@ -290,7 +290,7 @@ def check(lead, now_utc: Optional[datetime] = None) -> Dict[str, Any]:
     local = {name: dt.strftime("%H:%M") for name, dt in pairs}
     aware = now_utc if now_utc.tzinfo else now_utc.replace(tzinfo=_timezone.utc)
     et_zone = _zone(WINDOW_ZONE)
-    if et_zone is not None:
+    if et_zone is not None and not _own_window(lead):
         et = aware.astimezone(et_zone).time()
         if not (WINDOW_START <= et <= WINDOW_END):
             return {"permitted": False, "code": OUTSIDE_WINDOW,
@@ -316,6 +316,20 @@ def check(lead, now_utc: Optional[datetime] = None) -> Dict[str, Any]:
             "reason": "Inside the permitted contact window in %s."
                       % ", ".join(local),
             "basis": resolved["basis"], "zones": zones, "local": local}
+
+
+def _own_window(lead) -> bool:
+    """The lead's program sets its own sending hours (outreach_slots), which
+    replace the Eastern clock above. The local 8 AM - 9 PM clock still holds."""
+    org_id = getattr(lead, "organization_id", None)
+    if not org_id:
+        return False
+    try:
+        from sqlalchemy.orm import object_session
+        from app.services.programs.outreach_slots import owns_window
+        return owns_window(org_id, object_session(lead))
+    except Exception:                                    # noqa: BLE001
+        return False
 
 
 def is_permitted(lead, now_utc: Optional[datetime] = None) -> bool:
