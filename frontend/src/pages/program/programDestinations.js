@@ -34,7 +34,7 @@ export function openProgramItem(item, navigate, opts = {}) {
     if (item.url) window.open(item.url, '_blank', 'noopener,noreferrer')
     return
   }
-  if (item.type === 'deal_builder' && item.href) { navigate(item.href); return }
+  if (['deal_builder', 'project_checklist'].includes(item.type) && item.href) { navigate(item.href); return }
   // Back Office / Executive Suite: leave any program workspace first, so no
   // stale workspace header follows the person into the back office.
   if (item.type === 'back_office') {
