@@ -184,6 +184,18 @@ const EvsConversations = evsPage('Conversations')
 const EvsOutreach = evsPage('Outreach')
 const EvsAppointments = evsPage('Appointments')
 const EvsResults = evsPage('Results')
+// EvoSys Business Development (/program/evosys-business-development/*): the second
+// version of the same program, on the same data, so both can be compared.
+const BdShell = lazyPage(() => import('./pages/evosysBD/EvoSysBD'))
+const bdPage = name => lazyPage(() => import('./pages/evosysBD/EvoSysBD').then(m => ({ default: m[name] })))
+const BdToday = bdPage('Today')
+const BdLeads = bdPage('Leads')
+const BdLead = bdPage('Lead')
+const BdConversations = bdPage('Conversations')
+const BdOutreach = bdPage('Outreach')
+const BdCampaign = bdPage('Campaign')
+const BdAppointments = bdPage('Appointments')
+const BdResults = bdPage('Results')
 // Managed client acquisition (Issue #452): the client's portal (/program/acquisition/*).
 const AcquisitionShell = lazyPage(() => import('./pages/acquisition/AcquisitionShell'))
 const AcqHome = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Home })))
@@ -1717,6 +1729,16 @@ export default function App() {
           <Route path="outreach" element={<EvsOutreach />} />
           <Route path="appointments" element={<EvsAppointments />} />
           <Route path="results" element={<EvsResults />} />
+        </Route>
+        <Route path="/program/evosys-business-development" element={<ProtectedRoute bare><BdShell /></ProtectedRoute>}>
+          <Route index element={<BdToday />} />
+          <Route path="leads" element={<BdLeads />} />
+          <Route path="leads/:id" element={<BdLead />} />
+          <Route path="conversations" element={<BdConversations />} />
+          <Route path="outreach" element={<BdOutreach />} />
+          <Route path="outreach/:id" element={<BdCampaign />} />
+          <Route path="appointments" element={<BdAppointments />} />
+          <Route path="results" element={<BdResults />} />
         </Route>
         {/* Managed client acquisition (Issue #452). /acquisition enforces membership,
              explicit client_acquisition and cleaning identity server-side. */}

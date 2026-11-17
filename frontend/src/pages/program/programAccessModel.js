@@ -64,6 +64,12 @@ const PROGRAMS = {
   evosys_sales: { rank: 2, variant: 'office', symbol: '➚', kind: 'EVOSYS PRO · SALES',
                   summary: 'Businesses EvoSys is signing up: prospects, outreach, replies and booked calls',
                   facts: ['Prospects', 'Outreach', 'Booked calls'] },
+  // EvoSys Business Development (draft built for the PR #663 brief): shown
+  // NEXT TO EvoSys Sales so the two versions can be compared side by side on
+  // the same data. One of the two cards is removed once a version is chosen.
+  evosys_bd: { rank: 2, variant: 'office', symbol: '✦', kind: 'EVOSYS PRO PLATFORM',
+               summary: 'Add contacts, run outreach, and book business development calls.',
+               facts: ['Contacts', 'Campaigns', 'Booked calls'] },
   back_office: { rank: 8, variant: 'office', symbol: '▤', kind: 'BACK OFFICE',
                  summary: 'Sales pipeline, customers and brand operations',
                  facts: ['Pipeline', 'Customers', 'Brand ops'] },
@@ -215,6 +221,14 @@ export function programCards(ctx) {
                      program: 'evosys_sales', variant: e.variant, symbol: e.symbol, rank: e.rank, kind: e.kind,
                      facts: e.facts, display: 'EvoSys Sales', summary: e.summary, orgLabel: null,
                      actionLabel: 'Open EvoSys Sales' })
+        const b = PROGRAMS.evosys_bd
+        cards.push({ type: 'back_office', organization_id: (many ? 'evosys-bd:' + d.brand_sales_org_id : 'evosys-bd'),
+                     path: '/program/evosys-business-development', platform_id: many ? d.platform_id : undefined,
+                     platform_name: many ? d.platform_name : undefined,
+                     brand_sales_org_id: many ? d.brand_sales_org_id : undefined,
+                     program: 'evosys_bd', variant: b.variant, symbol: b.symbol, rank: b.rank, kind: b.kind,
+                     facts: b.facts, display: 'EvoSys Business Development', summary: b.summary, orgLabel: null,
+                     actionLabel: 'Open Business Development' })
         continue
       }
       cards.push({ type: 'back_office', organization_id: many ? 'back-office:' + d.brand_sales_org_id : 'back-office',

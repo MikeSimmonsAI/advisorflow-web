@@ -9,7 +9,7 @@ const evo = { type: 'back_office', brand_sales_org_id: '365a', label: 'EvoSys Pr
 
 test('the EvoSys sales team shows as an EvoSys Sales card that opens its own program', () => {
   const r = programCards({ has_back_office: true, back_office_path: '/sales', back_office_destinations: [evo] })
-  const c = r.visible.find(x => x.type === 'back_office')
+  const c = r.visible.find(x => x.type === 'back_office' && x.program === 'evosys_sales')
   assert.equal(c.display, 'EvoSys Sales')
   assert.equal(c.path, '/program/evosys-sales')
   assert.equal(c.kind, 'EVOSYS PRO · SALES')
@@ -18,9 +18,9 @@ test('the EvoSys sales team shows as an EvoSys Sales card that opens its own pro
 test('the owner login (console first) still gets the EvoSys Sales card, never a console card', () => {
   const r = programCards({ has_back_office: true, back_office_path: '/god', back_office_destinations: [evo] })
   const c = r.visible.filter(x => x.type === 'back_office')
-  assert.equal(c.length, 1)
-  assert.equal(c[0].path, '/program/evosys-sales')
-  assert.equal(c[0].display, 'EvoSys Sales')
+  assert.equal(c.length, 2)
+  assert.deepEqual(c.map(x => x.path).sort(), ['/program/evosys-business-development', '/program/evosys-sales'])
+  assert.ok(c.every(x => x.path !== '/god'))
 })
 
 test('no sales membership, no card; the console alone never becomes one', () => {
@@ -34,5 +34,15 @@ test('other brands and the demonstration team keep their Back Office naming', ()
   assert.equal(isEvoSysSales({ label: 'EvoSys Pro Sales (Demonstration)', platform_slug: 'evosyspro' }), false)
   const r = programCards({ has_back_office: true, back_office_path: '/sales', back_office_destinations: [
     evo, { ...evo, brand_sales_org_id: 'bb', label: 'BookaBoost Sales', platform_name: 'BookaBoost', platform_slug: 'bookaboost', platform_id: 'p2' }] })
-  assert.deepEqual(r.visible.filter(x => x.type === 'back_office').map(x => x.display).sort(), ['Back Office', 'EvoSys Sales'])
+  assert.deepEqual(r.visible.filter(x => x.type === 'back_office').map(x => x.display).sort(), ['Back Office', 'EvoSys Business Development', 'EvoSys Sales'])
+})
+
+test('side by side: EvoSys Business Development is a second card on the same team', () => {
+  const r = programCards({ has_back_office: true, back_office_path: '/sales', back_office_destinations: [evo] })
+  const c = r.visible.filter(x => x.type === 'back_office')
+  assert.deepEqual(c.map(x => x.display).sort(), ['EvoSys Business Development', 'EvoSys Sales'])
+  const bd = c.find(x => x.program === 'evosys_bd')
+  assert.equal(bd.path, '/program/evosys-business-development')
+  assert.equal(bd.summary, 'Add contacts, run outreach, and book business development calls.')
+  assert.notEqual(bd.organization_id, c.find(x => x.program === 'evosys_sales').organization_id)
 })
