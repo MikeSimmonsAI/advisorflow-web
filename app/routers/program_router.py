@@ -153,7 +153,20 @@ def _et_hold(prog):
     return held_providers(prog)
 
 
-def _program_json(db: Session, prog: OutreachProgram) -> dict:
+# Who may let the AI answer families: the owner's own logins (god account and
+# his super-admin account). Anyone who manages the program may switch it OFF.
+AI_ON_ROLES = ("god_admin", "super_admin")
+
+
+def _ai_killed() -> bool:
+    try:
+        from app.services.programs.ai_setter import killed
+        return killed()
+    except Exception:                                    # noqa: BLE001
+        return False
+
+
+def _program_json(db: Session, prog: OutreachProgram, user=None) -> dict:
     logo = db.query(ProgramAsset).filter(ProgramAsset.id == prog.logo_asset_id).first() \
         if prog.logo_asset_id else None
     return {
@@ -170,6 +183,9 @@ def _program_json(db: Session, prog: OutreachProgram) -> dict:
         "alert_email": prog.alert_email, "alert_phone": prog.alert_phone,
         "alert_title": getattr(prog, "alert_title", None),
         "ai_setter_mode": getattr(prog, "ai_setter_mode", None) or "off",
+        # Who may switch AI replies on (the owner's logins) - see AI_ON_ROLES.
+        "ai_setter_can_turn_on": getattr(user, "role", None) in AI_ON_ROLES,
+        "ai_setter_stopped_everywhere": _ai_killed(),
         "management_recipients": json.loads(prog.management_recipients or "[]"),
         "hot_sla_minutes": prog.hot_sla_minutes,
         "customer_channels": identity.channels(prog),
@@ -204,7 +220,7 @@ def program_status(db: Session = Depends(get_db), user: User = Depends(require_t
 
 @router.get("/me")
 def program_me(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
-    return _program_json(db, _program(db, user, managers_only=False))
+    return _program_json(db, _program(db, user, managers_only=False), user)
 
 
 class SettingsIn(BaseModel):
@@ -290,7 +306,7 @@ def update_settings(body: SettingsIn, db: Session = Depends(get_db),
         m = (data.get("ai_setter_mode") or "off").strip().lower()
         if m not in ("off", "draft", "auto"):
             raise HTTPException(status_code=422, detail="ai_setter_mode must be off, draft or auto.")
-        if m != "off" and getattr(user, "role", None) != "god_admin":
+        if m != "off" and getattr(user, "role", None) not in AI_ON_ROLES:
             # Letting AI answer families is the owner's decision alone.
             raise HTTPException(status_code=403, detail="Only the owner can switch the appointment setter on.")
         data["ai_setter_mode"] = m
@@ -710,7 +726,7 @@ def dashboard(location_id: Optional[str] = Query(None), db: Session = Depends(ge
 
     sel = next((p for p in profiles if p.location_id == location_id), None) if location_id else None
     return {
-        "program": _program_json(db, prog),
+        "program": _program_json(db, prog, user),
         "locations": [{"location_id": p.location_id, "name": p.official_name,
                        "is_review_bucket": p.is_review_bucket} for p in profiles],
         "selected_location": _profile_json(db, prog, sel) if sel else None,

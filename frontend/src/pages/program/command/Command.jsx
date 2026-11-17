@@ -872,7 +872,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
         </div>
         <p className="cmd-muted small">
           {f.handling?.opted_out ? 'This family opted out. Nobody texts or emails them.'
-            : f.program_ai_mode === 'off' ? 'The AI appointment setter is OFF for this program: a person answers every reply. Nothing is sent automatically.'
+            : f.program_ai_mode === 'off' ? <>AI replies are OFF for this program: a person answers every reply. Nothing is sent automatically. <Link to="/program?tab=settings">Turn AI replies on in Settings</Link>.</>
             : f.handling?.owner === 'ai' ? 'The AI answers this family\'s next text or email, knowing everything sent so far.'
               : `A person has this conversation. The AI reads it but does not reply.${f.handling?.reason ? ` (${f.handling.reason})` : ''}`}
           {f.handling?.changed_at ? ` Last change: ${dayLabel(f.handling.changed_at)} ${time(f.handling.changed_at)}${f.handling.changed_by ? ` by ${f.handling.changed_by}` : ''}.` : ''}

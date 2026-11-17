@@ -46,6 +46,56 @@ function validate(f) {
   return e
 }
 
+/* AI replies to families: one switch (owner, Nov 17). ON = the AI answers
+   families' replies, offers times and books them (the same as SCI). OFF = a
+   person answers every reply; nothing is sent automatically. Saved at once.
+   Only the owner's logins may switch it ON; any manager may switch it OFF. */
+export function AiRepliesSwitch({ program, isManager, onChange }) {
+  const mode = program.ai_setter_mode || 'off'
+  const on = mode !== 'off'
+  const [ask, setAsk] = useState(false)
+  const [state, setState] = useState({ kind: 'idle', text: '' })
+  const canOn = !!program.ai_setter_can_turn_on
+  const flip = async next => {
+    setState({ kind: 'saving', text: '' })
+    try {
+      await api.patch('/program/settings', { ai_setter_mode: next })
+      setAsk(false)
+      setState({ kind: 'saved', text: next === 'off' ? 'AI replies are off.' : 'AI replies are on.' })
+      onChange && onChange()
+    } catch (e) { setState({ kind: 'error', text: errText(e) }) }
+  }
+  return (
+    <div className="sci-card" aria-label="AI replies to families">
+      <h3 className="sci-h3">AI replies to families{' '}
+        <Chip tone={on ? 'ok' : 'warn'}>{mode === 'auto' ? 'ON' : mode === 'draft' ? 'ON — drafts only' : 'OFF'}</Chip></h3>
+      <p className="sci-micro" style={{ marginTop: 0 }}>
+        {on ? (mode === 'draft'
+          ? 'The AI writes a reply to each family; a person approves it before it goes out.'
+          : 'The AI answers families\' replies by itself: it answers questions, offers visit times and books them.')
+          : 'Off: a person answers every reply. Nothing is sent to a family automatically.'}
+        {program.ai_setter_stopped_everywhere ? ' The AI is stopped for every program right now, whatever this switch says.' : ''}
+      </p>
+      {isManager && !ask && (on
+        ? <button type="button" className="sci-btn" disabled={state.kind === 'saving'} onClick={() => flip('off')}>
+            <Icon name="x" />{state.kind === 'saving' ? 'Turning off…' : 'Turn AI replies off'}</button>
+        : canOn
+          ? <button type="button" className="sci-btn gold" disabled={state.kind === 'saving'} onClick={() => setAsk(true)}>
+              <Icon name="check" />Turn AI replies on</button>
+          : <p className="sci-micro sci-muted" style={{ marginBottom: 0 }}>Only the owner can turn AI replies on.</p>)}
+      {ask && (
+        <div role="alertdialog" aria-label="Turn AI replies on?">
+          <p className="sci-micro"><b>Turn AI replies on?</b> From the next reply, the AI answers families by itself and can book visits.</p>
+          <button type="button" className="sci-btn gold" disabled={state.kind === 'saving'} onClick={() => flip('auto')}>
+            <Icon name="check" />{state.kind === 'saving' ? 'Turning on…' : 'Yes, turn on'}</button>{' '}
+          <button type="button" className="sci-btn" onClick={() => setAsk(false)}>Cancel</button>
+        </div>
+      )}
+      {state.text && <p className={`sci-micro ${state.kind === 'error' ? '' : 'sci-muted'}`} role="status">{state.text}</p>}
+    </div>
+  )
+}
+
 export default function Settings({ isManager, program, readiness, locations, onChange, goTab, automation }) {
   const [cat, setCat] = useState('general')
   const [form, setForm] = useState(() => formFrom(program))
@@ -130,6 +180,7 @@ export default function Settings({ isManager, program, readiness, locations, onC
                 </div>
                 <p className="sci-micro sci-muted" style={{ marginBottom: 0 }}>Credentials are never shown in the browser.</p>
               </div>
+              <AiRepliesSwitch program={program} isManager={isManager} onChange={onChange} />
             </div>
           )}
 
