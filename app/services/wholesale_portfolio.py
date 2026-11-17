@@ -44,7 +44,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.models import User
-from app.models.wholesale_models import (ACTOR_USER, VALUE_MANUAL, VALUE_SOURCES, WholesaleComp, WholesaleDeal,
+from app.models.wholesale_models import (ACTOR_USER, VALUE_MANUAL, WholesaleComp, WholesaleDeal,
                                          WholesaleEvent, WholesaleOffer, WholesaleProperty)
 from app.models.wholesale_portfolio_models import (CONFIDENCE, DISCOUNT_MODES, PORTFOLIO_STATUSES, REVIEW_STATUSES,
                                                    SOURCE_KINDS, WholesalePortfolio, WholesalePortfolioItem,
@@ -360,11 +360,14 @@ def item_rows(db: Session, org_id: str, p: WholesalePortfolio, visible: Optional
 
 def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Portfolio cards. Each total says how many properties it covers."""
-    def tot(key):
-        vals = [_d(r.get(key)) for r in rows]
+    def tot(key, skip_land=False):
+        # Land carries no rent: for the rent card it is neither counted nor "missing".
+        pool = [r for r in rows if not (skip_land and r["is_land"])]
+        vals = [_d(r.get(key)) for r in pool]
         t, missing = _sum(vals)
-        return {"total": _f(t) if len(rows) - missing else None, "counted": len(rows) - missing,
-                "missing": missing, "partial": bool(missing) and missing < len(rows)}
+        return {"total": _f(t) if len(pool) - missing else None, "counted": len(pool) - missing,
+                "missing": missing, "partial": bool(missing) and missing < len(pool),
+                "of": len(pool)}
     evaluated = [r for r in rows if r["status"] == "evaluated"]
     valued = [r for r in rows if r.get("arv") is not None]
     by_status: Dict[str, int] = {}
@@ -376,7 +379,7 @@ def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "evaluated": len(evaluated), "valued": len(valued), "awaiting_valuation": len(rows) - len(valued),
         "progress_pct": round(len(evaluated) * 100 / len(rows)) if rows else 0,
         "by_status": by_status,
-        "seller_asking": tot("seller_price"), "seller_rent_monthly": tot("seller_rent"),
+        "seller_asking": tot("seller_price"), "seller_rent_monthly": tot("seller_rent", skip_land=True),
         "estimated_value": tot("arv"), "repairs": tot("repairs"), "target_offers": tot("target_offer"),
         # The spread is summed over EVALUATED properties only (it needs every term).
         "estimated_spread": {"total": _f(_sum(spread_vals)[0]) if evaluated else None,

@@ -283,7 +283,7 @@ export function PortfolioDetail() {
         <div role="tabpanel" id="panel-inventory" aria-labelledby="tab-inventory">
           <Metrics label="Portfolio totals">
             <Metric label="Seller asking" value={money(s.seller_asking.total)} sub={<>seller stated · <Partial t={s.seller_asking} of={s.properties} /></>} />
-            <Metric label="Stated rent / month" value={money(s.seller_rent_monthly.total)} sub={<>scheduled, not collected · <Partial t={s.seller_rent_monthly} of={s.properties} /></>} />
+            <Metric label="Stated rent / month" value={money(s.seller_rent_monthly.total)} sub={<>scheduled, not collected · <Partial t={s.seller_rent_monthly} of={s.seller_rent_monthly.of} />{s.land ? ` · ${s.land} land excluded` : ''}</>} />
             <Metric label="Estimated value" tone="info" value={money(s.estimated_value.total)} sub={<Partial t={s.estimated_value} of={s.properties} />} attention={s.estimated_value.partial} />
             <Metric label="Estimated repairs" value={money(s.repairs.total)} sub={<Partial t={s.repairs} of={s.properties} />} />
             <Metric label="Our target offers" tone="primary" value={money(s.target_offers.total)} sub={<Partial t={s.target_offers} of={s.properties} />} />

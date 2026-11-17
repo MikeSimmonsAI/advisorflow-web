@@ -140,6 +140,9 @@ def test_commit_creates_properties_links_items_keeps_provenance_and_sends_nothin
     s = d["summary"]
     assert s["properties"] == 5 and s["awaiting_valuation"] == 5 and s["evaluated"] == 0
     assert s["seller_asking"]["total"] == 85000 + 120000 + 25000 + 40000 + 60000
+    # land is neither counted nor "missing" for rent: 4 rentable properties, all with a stated rent
+    assert s["seller_rent_monthly"] == {"total": 950.0 + 1250 + 500 + 800, "counted": 4, "missing": 0,
+                                        "partial": False, "of": 4}
     assert s["estimated_value"]["total"] is None and s["estimated_spread"]["total"] is None
 
 
@@ -248,7 +251,7 @@ def test_summary_is_partial_until_everything_is_valued(pf):
     rows = _imported(pf)["rows"]
     _ok(_evaluate(pf, rows[0]["item_id"], arv=160000, repairs=25000, target_offer=80000, note="synthetic comps"))
     s = _detail(pf)["summary"]
-    assert s["estimated_value"] == {"total": 160000.0, "counted": 1, "missing": 4, "partial": True}
+    assert s["estimated_value"] == {"total": 160000.0, "counted": 1, "missing": 4, "partial": True, "of": 5}
     assert s["evaluated"] == 1 and s["awaiting_valuation"] == 4 and s["progress_pct"] == 20
     assert s["estimated_spread"]["partial"] and s["estimated_spread"]["counted"] == 1
 
