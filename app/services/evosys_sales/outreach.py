@@ -112,6 +112,8 @@ def settings_problems(s: EvoSysOutreachSettings) -> list:
         out.append("Add the booking link.")
     if not re.match(r"[^@\s]+@evosyspro\.live$", (s.from_email or "").strip().lower()):
         out.append("The From address must be an @evosyspro.live address.")
+    if not re.match(r"[^@+\s]+@evosyspro\.live$", (s.reply_to_email or "").strip().lower()):
+        out.append("Replies must go to an @evosyspro.live address, so they can be read and matched.")
     for i, st in enumerate(steps, 1):
         if st.get("channel") == "email" and not (st.get("subject") or "").strip():
             out.append("Step %d needs a subject." % i)
@@ -253,7 +255,7 @@ def log_reply(db: Session, opp: Opportunity, user_id: str, note: str, channel: s
     now = datetime.utcnow()
     m = EvoSysOutreachMessage(brand_sales_org_id=opp.brand_sales_org_id, opportunity_id=opp.id,
                               direction="in", channel=channel if channel in ("email", "text", "call") else "email",
-                              body=(note or "").strip()[:5000] or "(replied)", status="logged",
+                              body=(note or "").strip()[:5000] or "(replied)", status="logged", match_method="manual",
                               actor_user_id=user_id, created_at=now)
     db.add(m)
     stop(db, opp.id, "replied", now)
@@ -290,10 +292,10 @@ class _Sender:
     """What send_email_via_provider reads off an org: from, name, reply-to."""
     resolved = True
 
-    def __init__(self, s: EvoSysOutreachSettings):
+    def __init__(self, s: EvoSysOutreachSettings, reply_to: Optional[str] = None):
         self.from_email = (s.from_email or DEFAULT_FROM).strip()
         self.from_name = ((s.sender_name or "").strip() + " | EvoSys Pro").strip(" |")
-        self.reply_to_email = (s.reply_to_email or "").strip() or None
+        self.reply_to_email = (reply_to or s.reply_to_email or "").strip() or None
         self.cc_email = None
         self.resend_api_key = None
 
@@ -301,7 +303,7 @@ class _Sender:
 def _send(to: str, msg: dict, s: EvoSysOutreachSettings, opp_id: str) -> dict:
     from app.services.email_service import send_email_via_provider
     return send_email_via_provider(
-        to, msg["subject"], msg["html"], org=_Sender(s), message_type="sales_outreach",
+        to, msg["subject"], msg["html"], org=_Sender(s, msg.get("reply_to")), message_type="sales_outreach",
         sensitivity="none",
         headers={"List-Unsubscribe": "<%s>" % opt_out_url(opp_id),
                  "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"})
@@ -357,7 +359,19 @@ def run_pass(db: Session, now: Optional[datetime] = None, sender=None) -> dict:
             continue
         if room <= 0:
             break
+        # Re-read this lead right before sending: a reply, opt-out or booking
+        # recorded since the due list was read (by the mailbox poller, the
+        # opt-out link, a rep) must stop this email.
+        db.refresh(st)
+        db.refresh(opp)
+        if st.status != "active" or st.replied_at or st.opted_out_at:
+            out["stopped"] += 1
+            continue
+        if opp.stage not in WORKING_STAGES or _booked(db, opp.id):
+            stop(db, opp.id, "booked" if _booked(db, opp.id) else "stage", now); out["stopped"] += 1; continue
+        from app.services.evosys_sales import replies as _replies
         msg = render_email(opp, s, step)
+        msg["reply_to"] = _replies.tagged_address(s.reply_to_email or DEFAULT_FROM, _replies.ensure_code(db, st))
         try:
             r = sender(opp.email.strip(), msg, s, opp.id)
         except Exception as e:                                    # noqa: BLE001

@@ -55,6 +55,9 @@ class EvoSysOutreachState(Base):
     stopped_at = Column(DateTime, nullable=True)
     opted_out_at = Column(DateTime, nullable=True)
     replied_at = Column(DateTime, nullable=True)
+    # Short random code in this lead's Reply-To (info+evs-<code>@evosyspro.live):
+    # a reply comes back addressed to it, which names the lead without guessing.
+    reply_code = Column(String(16), nullable=True, unique=True)
 
     __table_args__ = (
         Index("ix_evosys_outreach_due", "brand_sales_org_id", "status", "next_due_at"),
@@ -75,7 +78,8 @@ class EvoSysOutreachMessage(Base):
     body = Column(Text, nullable=True)
     status = Column(String, nullable=False)                      # sent | failed | held | logged
     error = Column(Text, nullable=True)
-    provider_message_id = Column(String, nullable=True)
+    provider_message_id = Column(String, nullable=True)   # out: Resend id; in: Internet Message-ID
+    match_method = Column(String, nullable=True)          # in: reply_address | sender | manual
     actor_user_id = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

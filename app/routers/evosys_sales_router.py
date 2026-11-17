@@ -90,7 +90,7 @@ def _row(o: Opportunity, st, last=None, booked=False) -> dict:
 def _msg(m: EvoSysOutreachMessage) -> dict:
     return {"id": m.id, "direction": m.direction, "channel": m.channel, "step": m.step_no,
             "to": m.to_address, "subject": m.subject, "body": m.body, "status": m.status,
-            "error": m.error, "at": m.created_at.isoformat() + "Z"}
+            "error": m.error, "how": m.match_method, "at": m.created_at.isoformat() + "Z"}
 
 
 def _booked_ids(db: Session, bso: str) -> set:
@@ -100,7 +100,7 @@ def _booked_ids(db: Session, bso: str) -> set:
                     SalesAppointment.opportunity_id.isnot(None)).all()}
 
 
-def _settings_out(s, c: Ctx) -> dict:
+def _settings_out(s, c: Ctx, db: Session) -> dict:
     return {"steps": s.steps or [], "offer": s.offer, "booking_url": s.booking_url,
             "sender_name": s.sender_name, "from_email": s.from_email,
             "reply_to_email": s.reply_to_email, "mailing_address": s.mailing_address,
@@ -109,7 +109,40 @@ def _settings_out(s, c: Ctx) -> dict:
             "approved_at": s.approved_at.isoformat() + "Z" if s.approved_at else None,
             "problems": O.settings_problems(s), "can_manage": c.manager,
             "texting_ready": False,
+            "reply_tracking": _reply_tracking(db, s),
             "sending_hours": "Weekdays 8:00 AM - 6:00 PM Central"}
+
+
+def _reply_tracking(db: Session, s) -> dict:
+    """Where replies are read, in plain words. A reply address on the same
+    domain as a connected mailbox is delivered into it (info@ and plus-tagged
+    addresses arrive in support@evosyspro.live: checked 2026-11-16 with real
+    mail), and the mailbox poller reads it every 5 minutes."""
+    from app.models.inbound_mailbox_models import InboundMailbox
+    addr = (s.reply_to_email or "").strip().lower()
+    domain = addr.split("@", 1)[1] if "@" in addr else ""
+    boxes = [b for b in db.query(InboundMailbox).filter(InboundMailbox.is_active.is_(True),
+                                                        InboundMailbox.purpose.is_(None)).all()]
+    box = next((b for b in boxes if b.address.lower() == addr), None) or \
+        next((b for b in boxes if domain and b.address.lower().endswith("@" + domain)), None)
+    last = (db.query(func.max(EvoSysOutreachMessage.created_at))
+            .filter(EvoSysOutreachMessage.direction == "in",
+                    EvoSysOutreachMessage.match_method.in_(("reply_address", "sender"))).scalar())
+    if box is None:
+        return {"automatic": False, "mailbox": None, "last_auto_reply_at": None,
+                "text": ("Replies to %s are not read automatically: no connected mailbox receives "
+                         "that domain. Use \"They replied\" until one is connected." % (addr or "-"))}
+    ok = box.last_status == "ok"
+    return {"automatic": ok, "mailbox": box.address, "last_polled_at": iso(box.last_polled_at),
+            "last_auto_reply_at": iso(last),
+            "text": ("Replies to %s arrive in %s, which is read every 5 minutes. A reply stops that "
+                     "lead's emails by itself; out-of-office replies are ignored." % (addr, box.address))
+                    if ok else ("The %s mailbox needs attention (%s), so replies are not being read right now."
+                                % (box.address, box.last_status or "unknown"))}
+
+
+def iso(d):
+    return d.isoformat() + "Z" if d else None
 
 
 # ── overview ──────────────────────────────────────────────────────────────────
@@ -352,7 +385,7 @@ class SettingsIn(BaseModel):
 def get_outreach(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     s = O.get_settings(db, c.bso)
     db.commit()
-    return _settings_out(s, c)
+    return _settings_out(s, c, db)
 
 
 @router.put("/outreach")
@@ -361,7 +394,7 @@ def put_outreach(body: SettingsIn, c: Ctx = Depends(ctx), db: Session = Depends(
     s = O.get_settings(db, c.bso)
     O.save_settings(db, s, body.model_dump(exclude_none=True), c.user.id)
     db.commit()
-    return _settings_out(s, c)
+    return _settings_out(s, c, db)
 
 
 @router.post("/outreach/approve")
@@ -373,7 +406,7 @@ def approve(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
         raise HTTPException(400, " ".join(p))
     s.approved_at, s.approved_by = datetime.utcnow(), c.user.id
     db.commit()
-    return _settings_out(s, c)
+    return _settings_out(s, c, db)
 
 
 class Switch(BaseModel):
@@ -389,7 +422,7 @@ def switch(body: Switch, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     s.sending_on = bool(body.on)
     s.updated_at, s.updated_by = datetime.utcnow(), c.user.id
     db.commit()
-    return _settings_out(s, c)
+    return _settings_out(s, c, db)
 
 
 @router.get("/outreach/preview")
