@@ -271,7 +271,27 @@ BLOCKED_RETRY_AFTER = timedelta(hours=24)   # a refused touch is re-tried, not b
 # request was sent) is retried on this backoff; anything else is permanent.
 # A timeout is NOT temporary here: the provider may have accepted the email,
 # so it is "unknown" and never re-sent automatically.
-RETRY_BACKOFF = (timedelta(minutes=10), timedelta(minutes=45), timedelta(hours=3))
+# Nov 17: a Microsoft 365 outage (Nov 12, ~3-6 PM, 502/503) used up the old
+# 10m/45m/3h backoff and ENDED 11 families' email journeys. The provider
+# refused those sends (nothing went out), so an outage now waits it out for
+# days, and a touch that gave up on temporary failures before this change is
+# tried again once a day for OUTAGE_GIVE_UP days from its first attempt.
+RETRY_BACKOFF = (timedelta(minutes=10), timedelta(minutes=45), timedelta(hours=3), timedelta(hours=12),
+                 timedelta(hours=24), timedelta(hours=24))
+OUTAGE_GIVE_UP = timedelta(days=10)
+_GAVE_UP = "gave up after "
+
+
+def outage_retry_due(t: "ProgramEmailTouch", now: datetime) -> Optional[bool]:
+    """For a touch that GAVE UP on temporary provider failures (never sent):
+    True = try again now, False = not yet, None = not that kind of failure or
+    past OUTAGE_GIVE_UP (a person looks)."""
+    if t.status != "failed" or not (t.reason or "").startswith(_GAVE_UP) or "temporary" not in (t.reason or ""):
+        return None
+    first = t.created_at or t.attempted_at
+    if first is not None and now - first > OUTAGE_GIVE_UP:
+        return None
+    return t.attempted_at is None or now - t.attempted_at >= BLOCKED_RETRY_AFTER
 _TRANSIENT = ("429", "rate limit", "too many requests", "500", "502", "503", "504",
               "service unavailable", "bad gateway", "connection refused", "connecterror",
               "name or service not known", "temporarily")
@@ -523,6 +543,9 @@ def _due_touch(touches: Dict[int, ProgramEmailTouch], now: datetime, schedule=No
                 return n if (t.attempted_at is None or now - t.attempted_at >= BLOCKED_RETRY_AFTER) else None
             if t.status == "retry":
                 return n if (t.next_attempt_at is None or now >= t.next_attempt_at) else None
+            _o = outage_retry_due(t, now)
+            if _o is not None:
+                return n if _o else None
             if t.status != "sent" or not t.attempted_at:
                 return None
             if n == last:
@@ -539,6 +562,9 @@ def _due_touch(touches: Dict[int, ProgramEmailTouch], now: datetime, schedule=No
             return n if (t.attempted_at is None or now - t.attempted_at >= BLOCKED_RETRY_AFTER) else None
         if t.status == "retry":
             return n if (t.next_attempt_at is None or now >= t.next_attempt_at) else None
+        _o = outage_retry_due(t, now)
+        if _o is not None:
+            return n if _o else None
         if t.status != "sent" or not t.attempted_at:
             return None                          # failed / unknown / claimed: a person looks
     return None
@@ -754,9 +780,12 @@ def _claim(db: Session, prog: OutreachProgram, item: Dict, prof: LocationProfile
     now = datetime.utcnow()
     existing = item.get("existing")
     if existing is not None:
+        from sqlalchemy import and_, or_
         res = db.execute(update(ProgramEmailTouch)
                          .where(ProgramEmailTouch.id == existing.id,
-                                ProgramEmailTouch.status.in_(("blocked", "retry")),
+                                or_(ProgramEmailTouch.status.in_(("blocked", "retry")),
+                                    and_(ProgramEmailTouch.status == "failed",
+                                         ProgramEmailTouch.reason.like(_GAVE_UP + "%"))),
                                 ProgramEmailTouch.attempted_at == existing.attempted_at)
                          .values(status="claimed", attempted_at=now, reason=None,
                                  location_id=prof.location_id,      # the record's location now (Kilgroe split)

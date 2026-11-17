@@ -28,6 +28,30 @@ const DAY_COLS = [
 const dayName = d => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
 const dateOnly = iso => (iso ? new Date(iso).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/Chicago' }) : '—')
 
+// THE OUTREACH PIPELINE (Nov 17): what is left to enroll and how long it lasts.
+// An empty pool with healthy senders is a used-up audience, never shown as a failure.
+function Pipeline({ p }) {
+  const re = p.reengagement
+  return (
+    <section className="sci-hint" aria-label="Outreach pipeline" style={{ marginBottom: 10, padding: "10px 12px", borderRadius: 12 }}>
+      <div className="sci-row-gap" style={{ flexWrap: 'wrap' }}>
+        <Chip tone={p.ready > 0 ? 'ok' : 'warn'}>{p.ready == null ? 'Counting…' : `${num(p.ready)} ready to enroll`}</Chip>
+        <span className="sci-micro">Today's target {num(p.daily_target)} · enrolled today {num(p.enrolled_today)}</span>
+        {p.ready > 0 && <span className="sci-micro">Pool lasts about {num(p.days_of_pool_left)} day{p.days_of_pool_left === 1 ? '' : 's'} (empty around {dateOnly(`${p.pool_empty_on}T18:00:00Z`)})</span>}
+      </div>
+      {p.warning && <p className="sci-micro" style={{ margin: '6px 0 0' }}><b>Audience running out.</b> {p.warning}</p>}
+      <p className="sci-micro sci-muted" style={{ margin: '6px 0 0' }}>
+        Campaigns on: {p.active_campaigns.map(c => `${c.name} (${num(c.families)})`).join(' · ') || 'none'}.
+        {' '}{p.next_wave.exists ? `${p.next_wave.name}: ${p.next_wave.on ? 'on' : 'off'}, ${num(p.next_wave.families)} families - wording from General Survey.` : ''}
+      </p>
+      {re && <p className="sci-micro sci-muted" style={{ margin: '4px 0 0' }}>
+        Re-engagement (separate, off): {num(re.families_finished)} finished families with no reply · {num(re.eligible_now)} past the {re.policy.rest_days}-day rest
+        {re.first_eligible_on ? ` · first eligible ${dateOnly(`${re.first_eligible_on}T18:00:00Z`)}` : ''} · wording {re.campaign.ready ? 'ready' : 'not reviewed yet'}.
+      </p>}
+    </section>
+  )
+}
+
 export default function CampaignProgress() {
   const [campaign, setCampaign] = useState('')
   const [d, setD] = useState(null)
@@ -55,6 +79,7 @@ export default function CampaignProgress() {
             {r.daily_batch.last_run && <> Last batch {ago(r.daily_batch.last_run.at)}: {num(r.daily_batch.last_run.approved ?? 0)} enrolled{r.daily_batch.last_run.email_only ? ` (${num(r.daily_batch.last_run.email_only)} email only)` : ''}.</>}
             {' '}Texts: {r.schedule.sms_steps.length} (days {r.schedule.sms_steps.map(s => s.day).join(', ')}). Emails: {r.schedule.email_touches}, every {r.schedule.email_every_days} days.
           </p>
+          {r.pipeline && <Pipeline p={r.pipeline} />}
           {r.program && <p className="sci-micro sci-muted" style={{ margin: '0 0 8px' }}>
             Whole workspace: {num(r.program.real_records)} real source rows ({num(r.program.real_families)} families) · {num(r.program.unassigned_records)} with no campaign · {num(r.program.test_records_left_out)} test / simulation rows left out of every count.
           </p>}
