@@ -174,3 +174,16 @@ test('desktop cards are short and wide; four columns on desktop', () => {
   assert.match(css, /\.pa2 \.pa2-grid--grid \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\); \}/)
   assert.match(css, /\.pa2 \.pa2-feature \{[^}]*height: 185px;/)
 })
+
+test('Project Command Center (#667) is an owner tool: Administration, not a client, a plain link', async () => {
+  const { programCards } = await import('../src/pages/program/programAccessModel.js')
+  const owner = programCards({ ...fixtures.owner.contexts, project_checklist: true }).visible
+  const pc = owner.find(c => c.type === 'project_checklist')
+  assert.ok(pc, 'listed when the server says project_checklist')
+  assert.equal(categoryOf(pc), 'admin')
+  assert.equal(photoKeyFor(pc), 'onboarding')
+  const plain = programCards({ ...fixtures.owner.contexts }).visible
+  assert.equal(plain.some(c => c.type === 'project_checklist'), false, 'never without the server flag')
+  assert.equal(summaryCounts(owner, [], []).clients, summaryCounts(plain, [], []).clients)
+  assert.match(read('src/pages/program/ProgramAccessPortal.jsx'), /item\.type === 'project_checklist'\) \? item\.href/)
+})

@@ -34,6 +34,7 @@ const SALES_TOOL_KEYS = new Set(['executive', 'sales', 'my_team', 'onboarding'])
 
 export function categoryOf(item) {
   if (!item) return 'clients'
+  if (item.type === 'project_checklist') return 'admin'
   if (item.type === 'deal_builder' && SALES_TOOL_KEYS.has(item.key)) return 'sales'
   return PROGRAM_CATEGORY[item.program] || 'clients'
 }
@@ -82,6 +83,7 @@ const INDUSTRY_PHOTO = [
 export function photoKeyFor(item) {
   if (!item) return 'business'
   if (item.type === 'deal_builder') return SALES_TOOL_PHOTO[item.key] || 'backoffice'
+  if (item.type === 'project_checklist') return 'onboarding'
   if (item.program === 'preview') {
     const hint = [item.industry, item.display, item.company_name].filter(Boolean).join(' ')
     for (const [re, key] of INDUSTRY_PHOTO) if (re.test(hint)) return key
@@ -122,7 +124,8 @@ export function chooseFeatured(cards, pins, keyOf) {
 export function summaryCounts(cards, others, previews) {
   const orgs = new Set()
   for (const c of cards || []) {
-    if (c.type === 'deal_builder' || c.type === 'back_office' || c.type === 'executive') continue
+    if (c.type === 'deal_builder' || c.type === 'back_office' || c.type === 'executive'
+        || c.type === 'project_checklist') continue
     if (c.type === 'acquisition_ops') {
       if (!c.hub && c.client_organization_id) orgs.add(c.client_organization_id)
       continue
@@ -167,6 +170,7 @@ export function shortLine(item) {
   if (!item) return ''
   if (item.orgLabel && item.orgLabel !== 'View only') return item.orgLabel
   if (item.type === 'deal_builder') return SALES_TOOL_LINE[item.key] || ''
+  if (item.type === 'project_checklist') return 'Projects & Ideas'
   return SHORT_LINE[item.program] || ''
 }
 

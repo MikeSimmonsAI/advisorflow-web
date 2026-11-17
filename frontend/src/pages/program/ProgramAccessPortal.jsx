@@ -100,9 +100,10 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
   }
 
   const signOut = onSignOut || (async () => { await logout(); window.location.href = '/login' })
-  // Deal Builder cards are plain in-app links; every other card runs the
+  // Deal Builder and Project Command Center cards are plain in-app links (the
+  // server lists Project Command Center for the owner only); every other card runs the
   // shared openProgramItem (context choice, then the destination re-checks).
-  const hrefOf = item => item.type === 'deal_builder' ? item.href : undefined
+  const hrefOf = item => (item.type === 'deal_builder' || item.type === 'project_checklist') ? item.href : undefined
   // The God Mode entry is shown only when the SERVER lists the platform
   // console for this login (owner only); /god enforces it again.
   const isOwner = user?.role === 'god_admin'
