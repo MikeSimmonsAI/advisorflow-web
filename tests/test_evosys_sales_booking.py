@@ -31,7 +31,13 @@ def test_booking_from_the_email_link_lands_in_appointments_and_stops_follow_up(
     db_session.add(lead); db_session.commit()
     s = O.get_settings(db_session, bso.id)
     s.mailing_address, s.offer = "100 Main St, Dallas, TX 75201", "Free for 30 days."
-    s.approved_at, s.sending_on = datetime.utcnow(), True
+    s.eligible_markets = ["any"]
+    db_session.commit()
+    from app.services.evosys_sales import campaigns as C
+    camp = C.create(db_session, bso.id, None, name="Booking test", kind="list", offer=s.offer)
+    C.add_leads(db_session, camp, s, [lead.id], bso.id, None)
+    C.approve(db_session, camp, s, None)
+    C.switch(db_session, camp, s, True, None)
     db_session.commit()
     now = datetime.utcnow().replace(hour=16, minute=0) + timedelta(days=(7 - datetime.utcnow().weekday()) % 7 or 7)
     snd = Sender()

@@ -151,7 +151,9 @@ def record(db: Session, opp: Opportunity, *, subject: Optional[str], body: str, 
         if prior is not None:
             return prior, False
     from app.services.evosys_sales import outreach as O
+    st0 = db.get(EvoSysOutreachState, opp.id)
     m = EvoSysOutreachMessage(brand_sales_org_id=opp.brand_sales_org_id, opportunity_id=opp.id,
+                              campaign_id=st0.campaign_id if st0 else None,
                               direction="in", channel="email", to_address=sender, subject=(subject or "")[:300],
                               body=(body or "(Replied with no text.)")[:5000], status="received",
                               provider_message_id=internet_message_id, match_method=method,

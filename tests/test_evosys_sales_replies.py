@@ -53,7 +53,15 @@ def _lead(db, brand, company, email):
 def _ready(db, brand):
     s = O.get_settings(db, brand.id)
     s.mailing_address, s.offer = "100 Main St, Dallas, TX 75201", "Free for 30 days."
-    s.approved_at, s.sending_on = datetime.utcnow(), True
+    s.eligible_markets = ["any"]
+    db.commit()
+    from app.services.evosys_sales import campaigns as C
+    camp = C.create(db, brand.id, None, name="Replies test", kind="list", offer=s.offer)
+    camp.steps = [dict(x) for x in O.DEFAULT_STEPS]
+    ids = [o.id for o in db.query(Opportunity).filter(Opportunity.brand_sales_org_id == brand.id).all()]
+    C.add_leads(db, camp, s, ids, brand.id, None)
+    C.approve(db, camp, s, None)
+    C.switch(db, camp, s, True, None)
     db.commit()
     return s
 
@@ -151,20 +159,37 @@ def test_automatic_replies_are_ignored(db_session, brand, box, subject, headers)
 
 def test_untagged_reply_matches_only_a_single_emailed_lead(db_session, brand, box):
     a = _lead(db_session, brand, "Solo Co", "solo@x.test")
-    _lead(db_session, brand, "Twin 1", "twin@x.test"); _lead(db_session, brand, "Twin 2", "twin@x.test")
+    t1 = _lead(db_session, brand, "Twin 1", "twin@x.test"); t2 = _lead(db_session, brand, "Twin 2", "twin@x.test")
     _ready(db_session, brand)
-    _sent_to(db_session, brand, Sender())
+    calls = _sent_to(db_session, brand, Sender())
+    # Two contacts share an address: only one of them is emailed (PR #663).
+    assert sorted(calls) == ["solo@x.test", "twin@x.test"]
+    held = [st for st in (db_session.get(EvoSysOutreachState, t1.id), db_session.get(EvoSysOutreachState, t2.id))
+            if st.held_reason == "duplicate_email"]
+    assert len(held) == 1
     S.poll_mailbox(db_session, box, fetch=lambda since: [
         _graph("g1", "solo@x.test", "info@evosyspro.live"),
         _graph("g2", "twin@x.test", "info@evosyspro.live"),
         _graph("g3", "never-emailed@x.test", "info@evosyspro.live")])
     out = {r.graph_message_id: r.outcome for r in db_session.query(InboundMailboxMessage).all()}
     assert out["g1"] == "evs_reply"
-    assert out["g2"] == "evs_ambiguous"            # two leads: attached to neither
+    assert out["g2"] == "evs_reply"                # exactly one emailed contact has that address
     assert out["g3"] not in ("evs_reply", "evs_ambiguous")
     assert db_session.get(EvoSysOutreachState, a.id).stop_reason == "replied"
-    twins = db_session.query(EvoSysOutreachState).filter(EvoSysOutreachState.stop_reason == "replied").count()
-    assert twins == 1
+
+
+def test_untagged_reply_from_an_address_two_emailed_leads_share_attaches_to_neither(db_session, brand, box):
+    t1 = _lead(db_session, brand, "Twin 1", "twin@x.test"); t2 = _lead(db_session, brand, "Twin 2", "twin@x.test")
+    # Older history: both were emailed before the duplicate guard existed.
+    for o in (t1, t2):
+        db_session.add(EvoSysOutreachMessage(brand_sales_org_id=brand.id, opportunity_id=o.id, direction="out",
+                                             channel="email", to_address="twin@x.test", status="sent"))
+        db_session.add(EvoSysOutreachState(opportunity_id=o.id, brand_sales_org_id=brand.id, status="active",
+                                           next_step=1))
+    db_session.commit()
+    S.poll_mailbox(db_session, box, fetch=lambda since: [_graph("g9", "twin@x.test", "info@evosyspro.live")])
+    assert db_session.query(InboundMailboxMessage).one().outcome == "evs_ambiguous"
+    assert db_session.query(EvoSysOutreachMessage).filter_by(direction="in").count() == 0
 
 
 def test_unknown_tag_attaches_to_nobody(db_session, brand, box):
@@ -181,7 +206,6 @@ def test_a_reply_recorded_mid_pass_stops_the_queued_email(db_session, brand):
     a = _lead(db_session, brand, "First Co", "first@x.test")
     b = _lead(db_session, brand, "Second Co", "second@x.test")
     _ready(db_session, brand)
-    O.enroll_new(db_session, brand.id, MON_10AM)
     db_session.get(EvoSysOutreachState, a.id).next_due_at = MON_10AM - timedelta(minutes=2)
     db_session.get(EvoSysOutreachState, b.id).next_due_at = MON_10AM - timedelta(minutes=1)
     db_session.commit()

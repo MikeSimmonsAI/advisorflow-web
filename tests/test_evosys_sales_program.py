@@ -6,6 +6,7 @@ import pytest
 
 from app.models.evosys_sales_models import EvoSysOutreachMessage, EvoSysOutreachState
 from app.models.sales_models import Opportunity, ROLE_SALES_MANAGER, ROLE_SALES_REP
+from app.services.evosys_sales import campaigns as C
 from app.services.evosys_sales import outreach as O
 
 from tests.test_sales_workspace import (  # noqa: F401  (fixtures)
@@ -31,13 +32,23 @@ def _lead(db, brand, owner=None, company="Sparkle Co", email="owner@sparkle.test
     return o
 
 
-def _ready(db, brand, on=True):
+def _ready(db, brand, on=True, steps=None):
+    """Team settings filled in, one campaign holding every workable lead,
+    approved, and switched on (unless on=False)."""
     s = O.get_settings(db, brand.id)
     s.mailing_address = "100 Main St, Dallas, TX 75201"
     s.offer = "Try it free for 30 days."
-    s.approved_at = datetime.utcnow()
-    s.sending_on = on
+    s.eligible_markets = ["any"]
     db.commit()
+    camp = C.create(db, brand.id, None, name="Test campaign", kind="list", offer=s.offer)
+    camp.steps = [dict(x) for x in (steps or O.DEFAULT_STEPS)]
+    ids = [o.id for o in db.query(Opportunity).filter(Opportunity.brand_sales_org_id == brand.id).all()]
+    C.add_leads(db, camp, s, ids, brand.id, None)
+    C.approve(db, camp, s, None)
+    if on:
+        C.switch(db, camp, s, True, None)
+    db.commit()
+    s._camp = camp
     return s
 
 
@@ -66,6 +77,8 @@ class TestAccess:
         assert [x["company"] for x in r["leads"]] == ["Mine Co"]
         assert client.post("/sales/evosys/outreach/switch", json={"on": True},
                            headers=rep_headers).status_code == 403
+        assert client.post("/sales/evosys/campaigns", json={"name": "X"},
+                           headers=rep_headers).status_code == 403
 
     def test_manager_sees_all(self, client, db_session, brand, manager, manager_headers, rep):
         _lead(db_session, brand, rep, "A"); _lead(db_session, brand, manager, "B")
@@ -73,20 +86,40 @@ class TestAccess:
 
 
 class TestApproval:
-    def test_cannot_turn_on_before_approval_and_edit_clears_it(self, client, db_session, brand, manager_headers):
-        r = client.get("/sales/evosys/outreach", headers=manager_headers).json()
-        assert r["sending_on"] is False and r["approved"] is False
-        assert any("mailing address" in p for p in r["problems"])
-        assert client.post("/sales/evosys/outreach/switch", json={"on": True},
-                           headers=manager_headers).status_code == 400
-        assert client.post("/sales/evosys/outreach/approve", headers=manager_headers).status_code == 400
+    def test_campaign_starts_off_needs_exact_approval_and_edit_clears_it(self, client, db_session, brand,
+                                                                         manager_headers):
+        o = _lead(db_session, brand)
+        r = client.post("/sales/evosys/campaigns", json={"name": "DFW Cleaning", "kind": "industry",
+                                                          "pick": {"lead_ids": [o.id]}},
+                        headers=manager_headers)
+        assert r.status_code == 201
+        k = r.json()["campaign"]
+        assert k["sending_on"] is False and k["approved"] is False and r.json()["added"]["added"] == 1
+        assert any("mailing address" in p for p in k["problems"])
+        url = "/sales/evosys/campaigns/%s" % k["id"]
+        assert client.post(url + "/switch", json={"on": True}, headers=manager_headers).status_code == 400
+        assert client.post(url + "/approve", headers=manager_headers).status_code == 400
         client.put("/sales/evosys/outreach", json={"mailing_address": "100 Main St, Dallas, TX",
-                                                   "offer": "Free for 30 days."}, headers=manager_headers)
-        assert client.post("/sales/evosys/outreach/approve", headers=manager_headers).status_code == 200
-        r = client.post("/sales/evosys/outreach/switch", json={"on": True}, headers=manager_headers).json()
-        assert r["sending_on"] is True
-        r = client.put("/sales/evosys/outreach", json={"offer": "Changed."}, headers=manager_headers).json()
-        assert r["approved"] is False and r["sending_on"] is False
+                                                   "eligible_markets": ["any"]}, headers=manager_headers)
+        client.put(url, json={"offer": "Free for 30 days."}, headers=manager_headers)
+        assert client.post(url + "/approve", headers=manager_headers).status_code == 200
+        # Approval alone sends nothing.
+        assert O.run_pass(db_session, IN_WINDOW, FakeSender())["sent"] == 0
+        r = client.post(url + "/switch", json={"on": True}, headers=manager_headers).json()
+        assert r["sending_on"] is True and r["started"] == 1
+        r = client.put(url, json={"offer": "Changed."}, headers=manager_headers).json()
+        assert r["approved"] is False and r["sending_on"] is False and r["approval_cleared"] is True
+        # Changing the team's mailing address also needs a fresh approval.
+        assert client.post(url + "/approve", headers=manager_headers).status_code == 200
+        client.post(url + "/switch", json={"on": True}, headers=manager_headers)
+        client.put("/sales/evosys/outreach", json={"mailing_address": "200 Elm St, Dallas, TX"},
+                   headers=manager_headers)
+        r = client.get(url, headers=manager_headers).json()
+        assert r["sending_on"] is False and r["status"]["key"] == "needs_approval"
+
+    def test_old_team_switch_points_to_campaigns(self, client, db_session, brand, manager_headers):
+        assert client.post("/sales/evosys/outreach/switch", json={"on": True},
+                           headers=manager_headers).status_code == 410
 
     def test_from_must_be_evosys(self, db_session, brand):
         s = _ready(db_session, brand)
@@ -110,7 +143,7 @@ class TestPass:
         _ready(db_session, brand)
         f = FakeSender()
         r = O.run_pass(db_session, IN_WINDOW, f)
-        assert r["enrolled"] == 1 and r["sent"] == 1
+        assert r["sent"] == 1
         to, msg, _ = f.calls[0]
         assert to == "owner@sparkle.test"
         assert "Sparkle Co" in msg["subject"] and "Ana" in msg["text"]
@@ -149,9 +182,7 @@ class TestPass:
 
     def test_text_steps_are_held_never_sent(self, db_session, brand):
         o = _lead(db_session, brand)
-        s = _ready(db_session, brand)
-        s.steps = [{"day": 0, "channel": "text", "subject": "", "body": "Hi {first_name}"}]
-        db_session.commit()
+        _ready(db_session, brand, steps=[{"day": 0, "channel": "text", "subject": "", "body": "Hi {first_name}"}])
         f = FakeSender()
         r = O.run_pass(db_session, IN_WINDOW, f)
         assert r["held"] == 1 and f.calls == []
@@ -192,7 +223,7 @@ class TestScreens:
         conv = client.get("/sales/evosys/conversations", headers=manager_headers).json()["conversations"]
         assert conv[0]["company"] == "Sparkle Co" and conv[0]["message_count"] == 1
         res = client.get("/sales/evosys/results", headers=manager_headers).json()
-        assert res["totals"]["in_followup"] == 1
+        assert res["totals"]["emailed"] == 1 and res["emails_sent"] == 1
         assert client.get("/sales/evosys/appointments", headers=manager_headers).status_code == 200
         lead_id = conv[0]["id"]
         d = client.get("/sales/evosys/leads/%s" % lead_id, headers=manager_headers).json()

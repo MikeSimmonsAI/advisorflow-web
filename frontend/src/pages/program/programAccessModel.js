@@ -59,11 +59,12 @@ const PROGRAMS = {
   business: { rank: 7, variant: 'general', symbol: '◈', kind: 'BUSINESS OPERATIONS',
               summary: 'Your dedicated business workspace',
               facts: ['Leads', 'Conversations', 'Calendar'] },
-  // EvoSys's own sales team (businesses EvoSys is signing up) - its own card,
-  // never the platform console. Owner request 2026-11-16.
-  evosys_sales: { rank: 2, variant: 'office', symbol: '➚', kind: 'EVOSYS PRO · SALES',
-                  summary: 'Businesses EvoSys is signing up: prospects, outreach, replies and booked calls',
-                  facts: ['Prospects', 'Outreach', 'Booked calls'] },
+  // EvoSys Business Development (PR #663): how EvoSys reaches out to people and
+  // businesses it wants to work with. Its own card in the Pro Platform working
+  // suite, never the platform console.
+  evosys_sales: { rank: 2, variant: 'office', symbol: '➚', kind: 'EVOSYS PRO PLATFORM',
+                  summary: 'Add contacts, run outreach, and book business development calls.',
+                  facts: ['Contacts', 'Campaigns', 'Booked calls'] },
   back_office: { rank: 8, variant: 'office', symbol: '▤', kind: 'BACK OFFICE',
                  summary: 'Sales pipeline, customers and brand operations',
                  facts: ['Pipeline', 'Customers', 'Brand ops'] },
@@ -213,8 +214,8 @@ export function programCards(ctx) {
                      platform_name: many ? d.platform_name : undefined,
                      brand_sales_org_id: many ? d.brand_sales_org_id : undefined,
                      program: 'evosys_sales', variant: e.variant, symbol: e.symbol, rank: e.rank, kind: e.kind,
-                     facts: e.facts, display: 'EvoSys Sales', summary: e.summary, orgLabel: null,
-                     actionLabel: 'Open EvoSys Sales' })
+                     facts: e.facts, display: 'EvoSys Business Development', summary: e.summary, orgLabel: null,
+                     actionLabel: 'Open Business Development' })
         continue
       }
       cards.push({ type: 'back_office', organization_id: many ? 'back-office:' + d.brand_sales_org_id : 'back-office',

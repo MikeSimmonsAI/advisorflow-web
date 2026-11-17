@@ -174,7 +174,7 @@ const InsReports = insPage('ReportsPage')
 const InsAutomation = insPage('AutomationPage')
 const InsImport = insPage('ImportPage')
 const InsSettings = insPage('SettingsPage')
-// EvoSys Sales program (/program/evosys-sales/*): EvoSys's own sales team.
+// EvoSys Business Development (/program/evosys-sales/*, path kept for saved links): EvoSys's own outreach.
 const EvsShell = lazyPage(() => import('./pages/evosysSales/EvoSysSales'))
 const evsPage = name => lazyPage(() => import('./pages/evosysSales/EvoSysSales').then(m => ({ default: m[name] })))
 const EvsToday = evsPage('Today')
@@ -182,6 +182,7 @@ const EvsLeads = evsPage('Leads')
 const EvsLead = evsPage('Lead')
 const EvsConversations = evsPage('Conversations')
 const EvsOutreach = evsPage('Outreach')
+const EvsCampaign = evsPage('Campaign')
 const EvsAppointments = evsPage('Appointments')
 const EvsResults = evsPage('Results')
 // Managed client acquisition (Issue #452): the client's portal (/program/acquisition/*).
@@ -1703,13 +1704,14 @@ export default function App() {
           <Route path="import" element={<InsImport />} />
           <Route path="settings" element={<InsSettings />} />
         </Route>
-        {/* EvoSys Sales program: /sales/evosys/* admits only the EvoSys Pro sales team. */}
+        {/* EvoSys Business Development: /sales/evosys/* admits only the EvoSys Pro platform team. */}
         <Route path="/program/evosys-sales" element={<ProtectedRoute bare><EvsShell /></ProtectedRoute>}>
           <Route index element={<EvsToday />} />
           <Route path="leads" element={<EvsLeads />} />
           <Route path="leads/:id" element={<EvsLead />} />
           <Route path="conversations" element={<EvsConversations />} />
           <Route path="outreach" element={<EvsOutreach />} />
+          <Route path="outreach/:id" element={<EvsCampaign />} />
           <Route path="appointments" element={<EvsAppointments />} />
           <Route path="results" element={<EvsResults />} />
         </Route>

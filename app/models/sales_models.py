@@ -517,6 +517,19 @@ class Opportunity(Base):
     # point where the selling domain touches the using domain.
     customer_organization_id = Column(String, ForeignKey("organizations.id"), nullable=True)
 
+    # EvoSys Business Development (PR #663): how this contact was met and who
+    # they are. Optional; a researched lead usually has none of it, and outreach
+    # never invents what is missing.
+    contact_role      = Column(String, nullable=True)   # "Owner", "Office manager"
+    market            = Column(String, nullable=True)   # "DFW", "San Antonio"
+    source_detail     = Column(String, nullable=True)   # the event or the referrer
+    met_on            = Column(Date, nullable=True)
+    preferred_contact = Column(String, nullable=True)   # email | phone | text
+    intro_note        = Column(Text, nullable=True)     # a personal note usable in a first message
+    # The campaign that first reached this contact. Kept through signup and
+    # onboarding so Results can credit the source and campaign that won it.
+    bd_campaign_id    = Column(String, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

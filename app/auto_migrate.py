@@ -1796,6 +1796,22 @@ COLUMNS_TO_ADD = [
     ("volt_dev_oauth_grants", "resource", "VARCHAR"),
     ("inbound_mailboxes", "purpose", "VARCHAR"),
     ("oauth_auth_transactions", "target_organization_id", "VARCHAR"),
+    # EvoSys Business Development (PR #663): who a contact is and how Mike met
+    # them, kept on the existing sales record so nothing is copied elsewhere.
+    ("opportunities", "contact_role", "VARCHAR"),
+    ("opportunities", "market", "VARCHAR"),
+    ("opportunities", "source_detail", "VARCHAR"),
+    ("opportunities", "met_on", "DATE"),
+    ("opportunities", "preferred_contact", "VARCHAR"),
+    ("opportunities", "intro_note", "TEXT"),
+    ("opportunities", "bd_campaign_id", "VARCHAR"),
+    # Campaigns: a lead's follow-up belongs to one campaign; every message
+    # records the campaign it went out for.
+    ("evosys_outreach_states", "campaign_id", "VARCHAR"),
+    ("evosys_outreach_states", "joined_at", "TIMESTAMP"),
+    ("evosys_outreach_states", "held_reason", "VARCHAR"),
+    ("evosys_outreach_messages", "campaign_id", "VARCHAR"),
+    ("evosys_outreach_settings", "eligible_markets", "JSON"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

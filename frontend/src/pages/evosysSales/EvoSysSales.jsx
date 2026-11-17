@@ -1,24 +1,30 @@
 /**
- * EVOSYS SALES (/program/evosys-sales/*) - owner request 2026-11-16.
+ * EVOSYS BUSINESS DEVELOPMENT (/program/evosys-sales/*) - PR #663.
  *
- * EvoSys's own sales program: the businesses EvoSys is signing up (cleaning
- * companies first). Today, Leads, Conversations, Outreach, Appointments,
- * Results. Layout follows the approved "Simplified Sales Workflow - My Day"
- * (compact navy sidebar, light workspace, big action cards); colours are the
- * EvoSys Pro navy / blue / gold with the official EP emblem.
+ * How EvoSys reaches out to people and businesses it wants to work with:
+ * networking cards, referrals, inbound requests, researched lists. Add the
+ * contacts, see them next to the leads already in the system, and build a
+ * reach-out campaign around what you're working on.
  *
- * The server is the authority (/sales/evosys/*): only the EvoSys Pro sales
- * team gets in, reps see their own leads, and only a manager can change,
- * approve or switch on the automatic follow-up.
+ * Today, Leads, Conversations, Outreach, Appointments, Results. Design:
+ * "EvoSys Sales workflow dashboard redesign.png" (compact navy sidebar, EP
+ * emblem, light work area, cobalt actions, gold only for what needs
+ * attention). The route keeps its original path so saved links still work.
+ *
+ * The server is the authority (/sales/evosys/*): only the EvoSys Pro team
+ * gets in, reps see their own leads, and only a manager can change, approve
+ * or switch on a campaign.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, NavLink, Outlet, useLocation, useParams } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
 import { api, getCurrentUser } from '../../api/client'
 import './evosysSales.css'
 
 export const BASE = '/program/evosys-sales'
 const API = '/sales/evosys'
 const EMBLEM = '/brands/evosyspro-emblem-96.png'
+export const PRODUCT = 'EvoSys Business Development'
+const TZ = 'America/Chicago'
 
 // ── icons (inline, no new dependency) ────────────────────────────────────────
 const P = {
@@ -32,8 +38,17 @@ const P = {
   back: 'M15 18l-6-6 6-6',
   arrow: 'M9 6l6 6-6 6',
   reply: 'M10 9V5l-7 7 7 7v-4c5 0 8 1.5 11 5-1-6-4-10-11-11z',
+  plus: 'M12 5v14M5 12h14',
+  people: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M2 21a7 7 0 0 1 14 0M17 11a3 3 0 1 0 0-6M22 21a6 6 0 0 0-4-5.6',
+  warn: 'M12 3 2 21h20zM12 10v5M12 18v.01',
+  spark: 'M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z',
+  off: 'M3 3l18 18M10.6 6.1A9 9 0 0 1 21 12a9 9 0 0 1-1.6 3.4M6 6.5A9 9 0 0 0 3 12c2 4 5.5 6 9 6 1.6 0 3.1-.4 4.4-1',
+  tag: 'M3 12V3h9l9 9-9 9zM7.5 7.5v.01',
+  copy: 'M9 9h11v11H9zM5 15H4V4h11v1',
+  branch: 'M6 3v12M18 9a3 3 0 1 0 0-.01M6 21a3 3 0 1 0 0-.01M18 12c0 4-6 3-12 6',
+  upload: 'M12 16V4M6 10l6-6 6 6M4 20h16',
 }
-function Icon({ name, size = 20 }) {
+export function Icon({ name, size = 20 }) {
   return (
     <svg className="evs-ico" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
          strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -47,12 +62,13 @@ const NAV = [
   { to: `${BASE}/leads`, label: 'Leads', icon: 'leads' },
   { to: `${BASE}/conversations`, label: 'Conversations', short: 'Replies', icon: 'chat' },
   { to: `${BASE}/outreach`, label: 'Outreach', icon: 'send' },
-  { to: `${BASE}/appointments`, label: 'Appointments', short: 'Calls', icon: 'cal' },
+  { to: `${BASE}/appointments`, label: 'Appointments', short: 'Calls', icon: 'phone' },
   { to: `${BASE}/results`, label: 'Results', icon: 'chart' },
 ]
 
 export function errText(e) {
   if (typeof e?.detail === 'string') return e.detail
+  if (e?.detail?.message) return e.detail.message
   return e?.message || 'Something went wrong. Please try again.'
 }
 
@@ -60,6 +76,7 @@ function useLoad(path) {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const load = useCallback(() => {
+    if (!path) return Promise.resolve()
     setError(null)
     return api.get(path).then(setData).catch(e => setError(errText(e)))
   }, [path])
@@ -67,18 +84,30 @@ function useLoad(path) {
   return { data, error, reload: load }
 }
 
+function useTitle(t) {
+  useEffect(() => { document.title = `${t} · ${PRODUCT}` }, [t])
+}
+
+// Dates are shown with their time zone wherever the operator acts on them.
 export function when(iso, opts) {
   if (!iso) return ''
-  return new Date(iso).toLocaleString(undefined, opts || { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  return new Date(iso).toLocaleString(undefined, opts || { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: TZ, timeZoneName: 'short' })
 }
-const LONG = { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }
+export function whenTZ(iso) {
+  if (!iso) return ''
+  return when(iso, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: TZ, timeZoneName: 'short' })
+}
+function day(iso) {
+  return iso ? new Date(iso + (iso.length === 10 ? 'T12:00:00' : '')).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : ''
+}
 
+const TONE = { active: 'blue', replied: 'gold', booked: 'good', finished: 'muted', no_email: 'warn', none: 'muted',
+               queued: 'muted', held: 'warn', opted_out: 'bad', email_failed: 'bad', manual: 'muted', stage: 'muted', not_in: 'muted' }
 function Status({ o }) {
   if (!o) return null
-  const tone = { active: 'blue', replied: 'gold', booked: 'good', finished: 'muted', no_email: 'warn',
-                 waiting: 'muted', opted_out: 'bad', email_failed: 'bad' }[o.key] || 'muted'
-  return <span className={'evs-pill evs-' + tone}>{o.label}</span>
+  return <span className={'evs-pill ' + (TONE[o.key] || 'muted')}>{o.label}</span>
 }
+const CAMP_TONE = { on: 'good', approved: 'blue', needs_approval: 'gold', draft: 'muted', archived: 'muted' }
 
 function Box({ error, data, children }) {
   if (error) return <div className="evs-error" role="alert">{error}</div>
@@ -86,34 +115,34 @@ function Box({ error, data, children }) {
   return children
 }
 
-function CallBtn({ phone, label = 'Call' }) {
-  if (!phone) return null
-  return <a className="evs-act evs-act-call" href={'tel:' + phone} onClick={e => e.stopPropagation()}><Icon name="phone" size={16} />{label}</a>
-}
-
 function PageHead({ title, sub, children }) {
   return (
     <div className="evs-head">
       <div><h1>{title}</h1>{sub && <p>{sub}</p>}</div>
-      {children}
+      {children && <div className="evs-head-acts">{children}</div>}
     </div>
   )
 }
 
+function CallBtn({ phone, label = 'Call' }) {
+  if (!phone) return null
+  return <a className="evs-btn sm" href={'tel:' + phone} onClick={e => e.stopPropagation()}><Icon name="phone" size={16} />{label}</a>
+}
+
 // ── shell ────────────────────────────────────────────────────────────────────
 
-export default function EvoSysSalesShell() {
+export default function EvoSysBusinessDevelopmentShell() {
   const user = getCurrentUser() || {}
-  const name = user.full_name || user.name || ''
-  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || 'ES'
   const { pathname } = useLocation()
+  const [adding, setAdding] = useState(false)
+  const [bump, setBump] = useState(0)
   useEffect(() => { window.scrollTo?.(0, 0) }, [pathname])
   return (
     <div className="evs">
-      <aside className="evs-side" aria-label="EvoSys Sales">
+      <aside className="evs-side" aria-label={PRODUCT}>
         <div className="evs-logo">
           <img src={EMBLEM} alt="EvoSys Pro" width="40" height="40" />
-          <div><b>EvoSys Sales</b><small>Signing up new businesses</small></div>
+          <div><b>EvoSys Business</b><small>Development</small></div>
         </div>
         <nav className="evs-nav">
           {NAV.map(n => (
@@ -123,165 +152,507 @@ export default function EvoSysSalesShell() {
           ))}
         </nav>
         <div className="evs-side-foot">
+          <div className="evs-me">{user.full_name || user.email || ''}</div>
           <Link to="/workspaces" className="evs-back"><Icon name="back" size={16} />Program Access</Link>
-          <div className="evs-me"><span className="evs-avatar">{initials}</span><span>{name || 'Signed in'}</span></div>
         </div>
       </aside>
 
       <header className="evs-mtop">
         <img src={EMBLEM} alt="EvoSys Pro" width="32" height="32" />
-        <b>EvoSys Sales</b>
-        <Link to="/workspaces" className="evs-back evs-back-m"><Icon name="back" size={16} />Programs</Link>
+        <b>EvoSys Business<small>Development</small></b>
+        <Link to="/workspaces" className="evs-back"><Icon name="back" size={14} />Programs</Link>
       </header>
 
-      <main className="evs-main"><Outlet /></main>
+      <main className="evs-main"><Outlet context={{ openAdd: () => setAdding(true), bump }} /></main>
 
-      <nav className="evs-tabbar" aria-label="EvoSys Sales sections">
+      <nav className="evs-tabbar" aria-label={`${PRODUCT} sections`}>
         {NAV.map(n => (
           <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => 'evs-tab' + (isActive ? ' on' : '')}>
             <Icon name={n.icon} size={20} /><span>{n.short || n.label}</span>
           </NavLink>
         ))}
       </nav>
+      {adding && <AddContact onClose={() => setAdding(false)} onSaved={() => setBump(b => b + 1)} />}
     </div>
   )
 }
 
-// ── Today ────────────────────────────────────────────────────────────────────
+// ── Add contacts ─────────────────────────────────────────────────────────────
 
-function greeting() {
-  const h = new Date().getHours()
-  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
-}
+const SOURCE_OPTS = [
+  ['networking', 'Networking event / business card'], ['referral', 'Referral'], ['website', 'Website / inbound'],
+  ['facebook', 'Facebook'], ['tiktok', 'TikTok'], ['instagram', 'Instagram / Meta'], ['google', 'Google'],
+  ['cold_email', 'Researched'], ['other', 'Other'],
+]
+const BLANK = { contact_name: '', company_name: '', email: '', phone: '', role: '', industry: '', market: '',
+                source: 'networking', source_detail: '', met_on: '', notes: '', intro_note: '', preferred_contact: '', website: '' }
 
-export function Today() {
-  const { data, error } = useLoad(`${API}/overview`)
-  const c = data?.counts || {}
-  const o = data?.outreach || {}
-  const first = ((getCurrentUser() || {}).full_name || '').split(' ')[0]
-  const replies = data?.replies || []
+export function AddContact({ onClose, onSaved }) {
+  const [f, setF] = useState(() => {
+    try { const last = JSON.parse(localStorage.getItem('evs.lastEvent') || 'null'); return last ? { ...BLANK, ...last } : BLANK }
+    catch { return BLANK }
+  })
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const [dupes, setDupes] = useState(null)
+  const [saved, setSaved] = useState([])
+  const set = k => e => setF(x => ({ ...x, [k]: e.target.value }))
+  const detailLabel = f.source === 'referral' ? 'Who referred them' : f.source === 'networking' ? 'Event' : 'Where you found them'
+  async function save(force = false) {
+    setBusy(true); setErr(null)
+    const body = Object.fromEntries(Object.entries({ ...f, force }).filter(([, v]) => v !== ''))
+    try {
+      const r = await api.post(`${API}/contacts`, body)
+      setSaved(s => [r.lead, ...s]); setDupes(null)
+      try { localStorage.setItem('evs.lastEvent', JSON.stringify({ source: f.source, source_detail: f.source_detail, met_on: f.met_on, market: f.market })) } catch { /* not kept */ }
+      setF(x => ({ ...BLANK, source: x.source, source_detail: x.source_detail, met_on: x.met_on, market: x.market }))
+      onSaved?.()
+    } catch (e) {
+      if (e.status === 409 && e.detail?.duplicates) setDupes(e.detail.duplicates)
+      else setErr(errText(e))
+    } finally { setBusy(false) }
+  }
   return (
-    <Box error={error} data={data}>
-      <PageHead title="Today" sub="Who to contact, who replied, and what's booked." />
-
-      <section className="evs-hello">
-        <div>
-          <h2>{greeting()}{first ? `, ${first}` : ''}!</h2>
-          <p>{replies.length} {replies.length === 1 ? 'reply' : 'replies'} to answer · {c.to_call || 0} to call · {(data?.appointments || []).length} booked</p>
-        </div>
-        <Link to={`${BASE}/outreach`} className={'evs-flag ' + (o.sending_on ? 'on' : 'off')}>
-          <i />{o.sending_on ? 'Follow-up emails ON' : 'Follow-up emails OFF'}
-        </Link>
-      </section>
-
-      <div className="evs-stats">
-        <Stat n={replies.length} label="Replies to answer" to={`${BASE}/conversations`} tone="gold" />
-        <Stat n={c.to_call} label="To call (no email)" to={`${BASE}/leads?view=no_email`} />
-        <Stat n={c.in_followup} label="In follow-up" to={`${BASE}/leads?view=followup`} />
-        <Stat n={c.booked} label="Booked calls" to={`${BASE}/appointments`} />
+    <div className="evs-modal-bg" role="dialog" aria-modal="true" aria-label="Add contacts" onClick={onClose}>
+      <div className="evs-modal" onClick={e => e.stopPropagation()}>
+        <h2>Add contacts</h2>
+        <p className="evs-muted" style={{ marginTop: 0 }}>Type in a business card, a referral or anyone you want to reach. Only a name or company is needed. Card photo scanning isn't built yet.</p>
+        {err && <div className="evs-error">{err}</div>}
+        {saved.length > 0 && <div className="evs-ok">Saved {saved.length}: {saved.map(s => s.contact || s.company).join(', ')}. Add the next one, or close.</div>}
+        {dupes && (
+          <div className="evs-note">
+            <b>This looks like a contact you already have:</b>
+            {dupes.map(d => <div key={d.id} style={{ marginTop: 6 }}><Link to={`${BASE}/leads/${d.id}`} onClick={onClose}>{d.company}{d.contact ? ` · ${d.contact}` : ''}</Link> <span className="evs-muted evs-small">{d.email || d.phone} · {d.source_label}</span></div>)}
+            <div className="evs-acts" style={{ marginTop: 10 }}>
+              <button className="evs-btn sm" onClick={() => setDupes(null)}>Edit details</button>
+              <button className="evs-btn sm" disabled={busy} onClick={() => save(true)}>Save as a new contact anyway</button>
+            </div>
+          </div>
+        )}
+        <form className="evs-form" onSubmit={e => { e.preventDefault(); save(false) }}>
+          <div className="two">
+            <label>Name<input value={f.contact_name} onChange={set('contact_name')} autoFocus autoComplete="off" /></label>
+            <label>Company<input value={f.company_name} onChange={set('company_name')} autoComplete="off" /></label>
+          </div>
+          <div className="two">
+            <label>Email<input type="email" value={f.email} onChange={set('email')} autoComplete="off" /></label>
+            <label>Phone<input type="tel" value={f.phone} onChange={set('phone')} autoComplete="off" /></label>
+          </div>
+          <div className="two">
+            <label>How you know them<select value={f.source} onChange={set('source')}>{SOURCE_OPTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+            <label>{detailLabel} <input value={f.source_detail} onChange={set('source_detail')} placeholder={f.source === 'networking' ? 'e.g. Dallas Chamber Mixer' : ''} /></label>
+          </div>
+          <details className="evs-more">
+            <summary>More details <span className="opt">(optional)</span></summary>
+            <div className="evs-form" style={{ marginTop: 10 }}>
+              <div className="two">
+                <label>Their role<input value={f.role} onChange={set('role')} placeholder="Owner, office manager…" /></label>
+                <label>Date you met<input type="date" value={f.met_on} onChange={set('met_on')} /></label>
+              </div>
+              <div className="two">
+                <label>Industry<input value={f.industry} onChange={set('industry')} placeholder="Cleaning, roofing…" /></label>
+                <label>City / market<input value={f.market} onChange={set('market')} placeholder="DFW, Houston…" /></label>
+              </div>
+              <div className="two">
+                <label>Best way to reach them<select value={f.preferred_contact} onChange={set('preferred_contact')}><option value="">Not sure</option><option value="email">Email</option><option value="phone">Phone call</option><option value="text">Text</option></select></label>
+                <label>Website<input value={f.website} onChange={set('website')} /></label>
+              </div>
+              <label>Personal note for your first message <span className="opt">(only used if you write it)</span><input value={f.intro_note} onChange={set('intro_note')} placeholder="e.g. Congrats on the new location" /></label>
+              <label>Notes<textarea value={f.notes} onChange={set('notes')} /></label>
+            </div>
+          </details>
+          <div className="evs-modal-foot">
+            <Link className="evs-btn" to={`${BASE}/leads?import=1`} onClick={onClose}><Icon name="upload" size={16} />Import a list instead</Link>
+            <button type="button" className="evs-btn" onClick={onClose}>Close</button>
+            <button className="evs-btn primary" disabled={busy}>{busy ? 'Saving…' : 'Save contact'}</button>
+          </div>
+        </form>
       </div>
-
-      <div className="evs-bigacts">
-        <Link to={`${BASE}/conversations`} className="evs-big evs-big-blue"><Icon name="reply" size={26} /><div><b>Answer replies</b><small>{replies.length} waiting</small></div></Link>
-        <a href="#evs-call" className="evs-big evs-big-navy"><Icon name="phone" size={26} /><div><b>Start calling</b><small>{c.to_call || 0} leads with no email</small></div></a>
-        <Link to={`${BASE}/appointments`} className="evs-big evs-big-gold"><Icon name="cal" size={26} /><div><b>Booked calls</b><small>{c.booked || 0} on the calendar</small></div></Link>
-      </div>
-
-      {!o.sending_on && (
-        <div className="evs-banner">
-          <b>Automatic follow-up is off.</b>{' '}
-          {o.approved ? 'Your messages are approved — turn it on in Outreach.' : 'Approve your messages in Outreach, then turn it on.'}
-          {' '}<Link to={`${BASE}/outreach`}>Go to Outreach</Link>
-        </div>
-      )}
-
-      <section className="evs-card">
-        <div className="evs-card-h"><h3>Replied — answer these first</h3><Link to={`${BASE}/conversations`}>All conversations <Icon name="arrow" size={14} /></Link></div>
-        {replies.length ? replies.map(m => (
-          <div key={m.id} className="evs-row">
-            <Link to={`${BASE}/leads/${m.lead.id}`} className="evs-row-main">
-              <b>{m.lead.company}</b>
-              <small>{m.lead.contact} · replied {when(m.at)}</small>
-              <span className="evs-snip">“{m.body}”</span>
-            </Link>
-            <div className="evs-row-acts">
-              <CallBtn phone={m.lead.phone} />
-              <Link className="evs-act" to={`${BASE}/leads/${m.lead.id}`}>Open</Link>
-            </div>
-          </div>
-        )) : <p className="evs-empty">No replies yet. A reply to a follow-up email shows up here by itself and stops that lead's emails.</p>}
-      </section>
-
-      <section className="evs-card" id="evs-call">
-        <div className="evs-card-h"><h3>Call these (no email address)</h3><Link to={`${BASE}/leads?view=no_email`}>See all {c.to_call || 0} <Icon name="arrow" size={14} /></Link></div>
-        {data?.to_call?.length ? data.to_call.map(l => (
-          <div key={l.id} className="evs-row">
-            <Link to={`${BASE}/leads/${l.id}`} className="evs-row-main"><b>{l.company}</b><small>{l.contact || 'No name'} · {l.phone}</small></Link>
-            <div className="evs-row-acts">
-              <CallBtn phone={l.phone} />
-              <Link className="evs-act" to={`${BASE}/leads/${l.id}`}>Log call</Link>
-            </div>
-          </div>
-        )) : <p className="evs-empty">Nobody to call right now.</p>}
-      </section>
-
-      <section className="evs-card">
-        <div className="evs-card-h"><h3>Booked calls</h3><Link to={`${BASE}/appointments`}>Appointments <Icon name="arrow" size={14} /></Link></div>
-        {data?.appointments?.length ? data.appointments.map(a => (
-          <div key={a.id} className="evs-row">
-            <div className="evs-row-main"><b>{a.company || a.title}</b><small>{a.contact ? a.contact + ' · ' : ''}{when(a.starts_at, LONG)}</small></div>
-            <div className="evs-row-acts">
-              {a.lead_id && <Link className="evs-act" to={`${BASE}/leads/${a.lead_id}`}>Open lead</Link>}
-            </div>
-          </div>
-        )) : <p className="evs-empty">No calls booked yet. Leads book from the link in your emails.</p>}
-      </section>
-    </Box>
+    </div>
   )
 }
 
-function Stat({ n, label, to, tone }) {
-  return <Link to={to} className={'evs-stat' + (tone ? ' evs-stat-' + tone : '')}><b>{n ?? '–'}</b><span>{label}</span></Link>
+function AddButton({ label = 'Add contacts' }) {
+  const ctx = useOutletCtx()
+  return <button className="evs-btn primary" onClick={() => ctx?.openAdd?.()}><Icon name="plus" size={18} />{label}</button>
+}
+
+// The shell passes { openAdd, bump } to every screen through the outlet.
+function useOutletCtx() {
+  return useOutletContext() || null
+}
+
+// ── Today ────────────────────────────────────────────────────────────────────
+
+export function Today() {
+  useTitle('Today')
+  const ctx = useOutletCtx()
+  const { data, error, reload } = useLoad(`${API}/overview`)
+  useEffect(() => { if (ctx?.bump) reload() }, [ctx?.bump]) // eslint-disable-line react-hooks/exhaustive-deps
+  const [tab, setTab] = useState('replies')
+  const c = data?.counts || {}
+  const o = data?.outreach || {}
+  const replies = data?.replies || []
+  const calls = data?.to_call || []
+  const review = data?.needs_review || []
+  const s = data?.suggestion
+  const dupN = review.filter(x => x.kind === 'duplicate').length
+  const heldN = review.filter(x => x.kind === 'held').length
+  if (error || !data) return <Box error={error} data={data} />
+  return (
+    <>
+      <PageHead title="Today">
+        <Link to={`${BASE}/outreach`} className={'evs-chip' + (o.any_on ? ' on' : '')}>
+          <Icon name={o.any_on ? 'send' : 'off'} size={18} />{o.any_on ? `Outreach on · ${o.campaigns_on} campaign${o.campaigns_on === 1 ? '' : 's'}` : 'Outreach off'}
+        </Link>
+        {c.replies > 0 && <Link to={`${BASE}/conversations`} className="evs-chip soft"><Icon name="reply" size={18} />{c.replies} {c.replies === 1 ? 'reply' : 'replies'} waiting</Link>}
+        <AddButton />
+      </PageHead>
+
+      <nav className="evs-counts" aria-label="Today's numbers">
+        <Count n={c.replies} label="Replies" icon="chat" attn={c.replies > 0} onClick={() => setTab('replies')} />
+        <Count n={c.to_call} label="To call" icon="phone" onClick={() => setTab('calls')} />
+        <Count n={c.in_followup} label="In follow-up" icon="people" to={`${BASE}/leads?view=followup`} />
+        <Count n={c.booked} label="Booked" icon="cal" to={`${BASE}/appointments`} />
+      </nav>
+
+      <div className="evs-today">
+        <section className="evs-card" aria-label="Work queue">
+          <h2>Work queue</h2>
+          <div className="evs-tabs" role="tablist">
+            <button role="tab" aria-selected={tab === 'replies'} className={tab === 'replies' ? 'on' : ''} onClick={() => setTab('replies')}><Icon name="chat" size={18} />Replies ({replies.length})</button>
+            <button role="tab" aria-selected={tab === 'calls'} className={tab === 'calls' ? 'on' : ''} onClick={() => setTab('calls')}><Icon name="phone" size={18} />Calls ({c.to_call || 0})</button>
+            <button role="tab" aria-selected={tab === 'review'} className={tab === 'review' ? 'on' : ''} onClick={() => setTab('review')}><Icon name="warn" size={18} />Needs review ({review.length})</button>
+          </div>
+          {tab === 'replies' && (replies.length ? replies.map((m, i) => (
+            <div key={m.id} className={'evs-item' + (i === 0 ? ' hot' : '')}>
+              <div style={{ minWidth: 0 }}>
+                <b>{m.lead.company}</b>
+                <div className="who">{m.lead.contact || m.to || ''} · Replied {when(m.at)}{m.needs_review && <> · <span className="evs-pill gold">Needs review</span></>}</div>
+                <q>{(m.body || '').slice(0, 220)}</q>
+              </div>
+              <div className="evs-item-acts">
+                <Link className={'evs-btn sm' + (i === 0 ? ' primary' : '')} to={`${BASE}/conversations?lead=${m.lead.id}`}>{m.needs_review ? 'Review reply' : 'Open reply'} <Icon name="arrow" size={14} /></Link>
+              </div>
+            </div>
+          )) : <p className="evs-empty">No replies waiting. Replies to your campaigns show up here by themselves.</p>)}
+          {tab === 'calls' && (calls.length ? calls.map(l => (
+            <div key={l.id} className="evs-item">
+              <div style={{ minWidth: 0 }}>
+                <b>{l.company}</b>
+                <div className="who">{[l.contact, l.phone, l.market].filter(Boolean).join(' · ')}</div>
+                <span className="evs-small evs-muted">{l.email ? 'Prefers a call' : 'No email on file'} · {l.source_label}</span>
+              </div>
+              <div className="evs-item-acts"><CallBtn phone={l.phone} /><Link className="evs-btn sm" to={`${BASE}/leads/${l.id}`}>Open</Link></div>
+            </div>
+          )) : <p className="evs-empty">Nobody to call right now.</p>)}
+          {tab === 'review' && (review.length ? review.map((r, i) => (
+            <div key={i} className="evs-item">
+              <div><b>{r.text}</b><div className="who">{r.label} · {r.detail}</div></div>
+              <div className="evs-item-acts"><Link className="evs-btn sm" to={r.lead_ids.length === 1 ? `${BASE}/leads/${r.lead_ids[0]}` : `${BASE}/leads?view=review`}>Review</Link></div>
+            </div>
+          )) : <p className="evs-empty">Nothing needs review.</p>)}
+        </section>
+
+        <div>
+          <section className="evs-side-card" aria-label="Suggestion">
+            <h3><Icon name="spark" />Suggestion</h3>
+            {s ? (
+              <div className="evs-ai">
+                <Icon name={s.kind === 'pricing' ? 'tag' : s.kind === 'review' ? 'warn' : 'spark'} />
+                <div>
+                  <b>{s.title}</b><p>{s.text}</p>
+                  <Link className="evs-btn sm primary" to={s.lead_id ? `${BASE}/conversations?lead=${s.lead_id}` : s.campaign_id ? `${BASE}/outreach/${s.campaign_id}` : `${BASE}/${s.to}`}>{s.action} <Icon name="arrow" size={14} /></Link>
+                </div>
+              </div>
+            ) : <p className="evs-empty">Nothing to suggest. Add contacts from your last event to get started.</p>}
+            <p className="evs-small evs-muted" style={{ margin: '8px 0 0' }}>Worked out from your replies, review list and campaigns.</p>
+          </section>
+          <section className="evs-side-card" aria-label="Needs review">
+            <h3><Icon name="warn" />Needs review</h3>
+            <div className="evs-revrow"><Icon name="copy" />{dupN} possible duplicate{dupN === 1 ? '' : 's'}</div>
+            <div className="evs-revrow"><Icon name="branch" />{heldN} held in campaigns</div>
+            <Link to={`${BASE}/leads?view=review`} style={{ fontWeight: 700, display: 'inline-block', marginTop: 8 }}>Review leads <Icon name="arrow" size={14} /></Link>
+          </section>
+          <section className="evs-side-card" aria-label="Next booked call">
+            <h3><Icon name="cal" />Next booked call</h3>
+            {data.next_call ? (
+              <Link className="evs-nextcall" to={data.next_call.lead_id ? `${BASE}/leads/${data.next_call.lead_id}` : `${BASE}/appointments`}>
+                <div><b>{data.next_call.company || data.next_call.title}</b><span>{whenTZ(data.next_call.starts_at)}</span></div><Icon name="arrow" />
+              </Link>
+            ) : <p className="evs-empty" style={{ padding: 0 }}>No calls booked yet.</p>}
+          </section>
+        </div>
+      </div>
+    </>
+  )
+}
+
+function Count({ n, label, icon, to, attn, onClick }) {
+  const inner = <><Icon name={icon} size={26} /><div><b>{n ?? 0}</b><span>{label}</span></div></>
+  if (to) return <Link to={to} className={'evs-count' + (attn ? ' attn' : '')}>{inner}</Link>
+  return <a href="#queue" className={'evs-count' + (attn ? ' attn' : '')} onClick={e => { e.preventDefault(); onClick?.() }}>{inner}</a>
 }
 
 // ── Leads ────────────────────────────────────────────────────────────────────
 
-const VIEWS = [['all', 'All'], ['followup', 'In follow-up'], ['no_email', 'No email'], ['replied', 'Replied'],
-               ['booked', 'Booked'], ['stopped', 'Stopped']]
+const VIEWS = [['all', 'All'], ['unassigned', 'Not in a campaign'], ['followup', 'In follow-up'], ['no_email', 'To call'],
+               ['replied', 'Replied'], ['booked', 'Booked'], ['review', 'Needs review'], ['stopped', 'Stopped']]
 
 export function Leads() {
-  const params = new URLSearchParams(useLocation().search)
-  const [view, setView] = useState(params.get('view') || 'all')
+  useTitle('Leads')
+  const ctx = useOutletCtx()
+  const [sp, setSp] = useSearchParams()
+  const view = sp.get('view') || 'all'
+  const source = sp.get('source') || ''
+  const campaign = sp.get('campaign') || ''
   const [q, setQ] = useState('')
-  const { data, error } = useLoad(`${API}/leads?view=${view}`)
-  const rows = useMemo(() => {
-    const n = q.trim().toLowerCase()
-    return (data?.leads || []).filter(l => !n || [l.company, l.contact, l.phone, l.email].join(' ').toLowerCase().includes(n))
-  }, [data, q])
+  const [debounced, setDebounced] = useState('')
+  useEffect(() => { const t = setTimeout(() => setDebounced(q), 250); return () => clearTimeout(t) }, [q])
+  const path = `${API}/leads?view=${view}&source=${encodeURIComponent(source)}&campaign=${encodeURIComponent(campaign)}&q=${encodeURIComponent(debounced)}`
+  const { data, error, reload } = useLoad(path)
+  useEffect(() => { if (ctx?.bump) reload() }, [ctx?.bump]) // eslint-disable-line react-hooks/exhaustive-deps
+  const [sel, setSel] = useState([])
+  const [modal, setModal] = useState(null)
+  const [showBatches, setShowBatches] = useState(sp.get('import') === '1')
+  const rows = data?.leads || []
+  useEffect(() => { setSel([]) }, [path])
+  const setParam = (k, v) => { const n = new URLSearchParams(sp); if (v) n.set(k, v); else n.delete(k); setSp(n, { replace: true }) }
+  const toggle = id => setSel(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id])
+  const all = rows.length > 0 && sel.length === rows.length
+  const filterPick = { view, q: debounced, source, campaign }
   return (
     <>
-      <PageHead title="Leads" sub={data ? `${rows.length} of ${data.total} businesses` : 'Businesses EvoSys is signing up'} />
-      <div className="evs-filters">
-        {VIEWS.map(([k, l]) => <button key={k} className={'evs-chip' + (view === k ? ' on' : '')} onClick={() => setView(k)}>{l}</button>)}
-        <input className="evs-input evs-search" placeholder="Search company, name, phone…" value={q} onChange={e => setQ(e.target.value)} />
+      <PageHead title="Leads" sub={data ? `${data.total} contacts · ${rows.length} shown` : ''}>
+        <button className="evs-btn" onClick={() => setShowBatches(v => !v)}><Icon name="upload" size={16} />Import & batches</button>
+        <AddButton />
+      </PageHead>
+      {showBatches && <Batches />}
+      <div className="evs-views" role="group" aria-label="Show">
+        {VIEWS.map(([k, l]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setParam('view', k === 'all' ? '' : k)}>{l}</button>)}
       </div>
+      <div className="evs-filters">
+        <input type="search" placeholder="Search name, company, phone, market…" value={q} onChange={e => setQ(e.target.value)} aria-label="Search leads" />
+        <select value={source} onChange={e => setParam('source', e.target.value)} aria-label="Source">
+          <option value="">All sources</option>
+          {(data?.sources || []).map(s => <option key={s.key} value={s.key}>{s.label} ({s.count})</option>)}
+        </select>
+        <select value={campaign} onChange={e => setParam('campaign', e.target.value)} aria-label="Campaign">
+          <option value="">All campaigns</option><option value="none">Not in a campaign</option>
+          {(data?.campaigns || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      </div>
+      {data?.can_manage && (sel.length > 0 || rows.length > 0) && (
+        <div className="evs-bulk" role="region" aria-label="Bulk actions">
+          <span>{sel.length ? `${sel.length} selected` : `Use all ${rows.length} shown`}</span>
+          <button className="evs-btn sm primary" onClick={() => setModal({ kind: 'create', pick: sel.length ? { lead_ids: sel } : filterPick })}><Icon name="plus" size={14} />Create campaign</button>
+          <button className="evs-btn sm" onClick={() => setModal({ kind: 'add', pick: sel.length ? { lead_ids: sel } : filterPick })}>Add to campaign</button>
+          {sel.length > 0 && <button className="evs-btn sm" onClick={() => setSel([])}>Clear</button>}
+        </div>
+      )}
       <Box error={error} data={data}>
-        <div className="evs-card evs-list">
-          {rows.length ? rows.map(l => (
-            <div key={l.id} className="evs-row">
-              <Link to={`${BASE}/leads/${l.id}`} className="evs-row-main">
-                <b>{l.company}</b><small>{[l.contact, l.phone, l.email].filter(Boolean).join(' · ')}</small>
-              </Link>
-              <div className="evs-row-acts">
-                <Status o={l.outreach} />
-                <CallBtn phone={l.phone} />
-                <Link className="evs-act" to={`${BASE}/leads/${l.id}`}>Open</Link>
+        {rows.length === 0 ? <p className="evs-empty">No contacts here. Add contacts or import a list.</p> : (
+          <>
+            <table className="evs-table">
+              <thead><tr>
+                {data.can_manage && <th><input type="checkbox" aria-label="Select all" checked={all} onChange={() => setSel(all ? [] : rows.map(r => r.id))} /></th>}
+                <th>Contact</th><th>Source</th><th>Market</th><th>Campaign</th><th>Status</th><th />
+              </tr></thead>
+              <tbody>{rows.map(r => (
+                <tr key={r.id}>
+                  {data.can_manage && <td><input type="checkbox" aria-label={`Select ${r.company}`} checked={sel.includes(r.id)} onChange={() => toggle(r.id)} /></td>}
+                  <td><Link className="row-link" to={`${BASE}/leads/${r.id}`}>{r.company}</Link><div className="evs-small evs-muted">{[r.contact, r.role].filter(Boolean).join(', ')}{r.email ? ` · ${r.email}` : r.phone ? ` · ${r.phone}` : ''}</div></td>
+                  <td>{r.source_label}{r.source_detail && <div className="evs-small evs-muted">{r.source_detail}</div>}</td>
+                  <td>{r.market || <span className="evs-muted">-</span>}</td>
+                  <td>{r.campaign || <span className="evs-muted">-</span>}</td>
+                  <td><Status o={r.outreach} />{r.booked && <> <span className="evs-pill good">Booked</span></>}</td>
+                  <td><CallBtn phone={r.phone} /></td>
+                </tr>
+              ))}</tbody>
+            </table>
+            <div className="evs-cards">{rows.map(r => (
+              <div key={r.id} className="evs-lcard">
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {data.can_manage && <input type="checkbox" aria-label={`Select ${r.company}`} checked={sel.includes(r.id)} onChange={() => toggle(r.id)} />}
+                  <Link to={`${BASE}/leads/${r.id}`}>{r.company}</Link>
+                </div>
+                <span className="evs-small evs-muted">{[r.contact, r.source_label, r.market].filter(Boolean).join(' · ')}</span>
+                <div><Status o={r.outreach} />{r.campaign && <span className="evs-small evs-muted"> · {r.campaign}</span>}</div>
+              </div>
+            ))}</div>
+          </>
+        )}
+      </Box>
+      {modal?.kind === 'create' && <CreateCampaign pick={modal.pick} onClose={() => setModal(null)} onDone={() => { setModal(null); reload() }} />}
+      {modal?.kind === 'add' && <AddToCampaign pick={modal.pick} campaigns={data?.campaigns || []} onClose={() => setModal(null)} onDone={() => { setModal(null); reload() }} />}
+    </>
+  )
+}
+
+function Batches() {
+  const { data, error } = useLoad(`${API}/leads/batches`)
+  const { data: src } = useLoad(`${API}/sources`)
+  const tone = { connected: 'good', import: 'blue', setup: 'gold' }
+  return (
+    <section className="evs-card" aria-label="Lead batches">
+      <div className="evs-card-h"><h3>Lead batches</h3>{src?.import_path && <Link className="evs-btn sm primary" to={src.import_path}><Icon name="upload" size={14} />Import a list</Link>}</div>
+      <p className="evs-small evs-muted" style={{ marginTop: 0 }}>Every list already in the system, counted. Re-importing the same list matches the contacts you already have; it never makes duplicates.</p>
+      <Box error={error} data={data}>
+        <table className="evs-table" style={{ display: 'table' }}>
+          <thead><tr><th>Batch</th><th>Total</th><th>Still workable</th><th>With email</th><th>Closed</th><th>Added</th></tr></thead>
+          <tbody>{(data?.batches || []).map(b => (
+            <tr key={b.batch}><td><b>{b.batch}</b><div className="evs-small evs-muted">{b.source}</div></td><td>{b.total}</td><td>{b.working}</td><td>{b.with_email}</td><td>{b.closed}</td><td className="evs-small">{day(b.first)}{b.last && b.last !== b.first ? ` – ${day(b.last)}` : ''}</td></tr>
+          ))}</tbody>
+        </table>
+      </Box>
+      {src && (
+        <>
+          <h3 style={{ marginTop: 16 }}>Where contacts come from</h3>
+          <div className="evs-filters">{src.sources.map(s => <span key={s.key} className="evs-chip" title={s.how}>{s.label} <span className={'evs-pill ' + tone[s.status]}>{s.status_label}</span></span>)}</div>
+          <p className="evs-small evs-muted">{src.card_scanning}</p>
+        </>
+      )}
+    </section>
+  )
+}
+
+const KIND_OPTS = [['event', 'Event'], ['relationship', 'Relationship / referrals'], ['project', 'Project'], ['offer', 'Offer'],
+                   ['industry', 'Industry'], ['market', 'Market'], ['list', 'List']]
+
+function AudienceTable({ rows }) {
+  if (!rows) return null
+  return (
+    <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 12, marginTop: 10 }}>
+      <table className="evs-table" style={{ display: 'table' }}>
+        <thead><tr><th>Contact</th><th>Will it be emailed?</th></tr></thead>
+        <tbody>{rows.map(r => (
+          <tr key={r.id}><td><b>{r.company}</b><div className="evs-small evs-muted">{[r.contact, r.email, r.market].filter(Boolean).join(' · ')}</div></td>
+            <td>{r.will_email ? <span className="evs-pill good">Yes</span> : <span className="evs-pill warn">{r.held_label}</span>}
+              {r.other_campaign && <div className="evs-small evs-muted">Now in "{r.other_campaign}"</div>}</td></tr>
+        ))}</tbody>
+      </table>
+    </div>
+  )
+}
+
+function CreateCampaign({ pick, onClose, onDone }) {
+  const nav = useNavigate()
+  const [groups, setGroups] = useState(null)
+  const [g, setG] = useState(null)
+  const [f, setF] = useState({ name: '', kind: 'list', context: '', industry: '', market: '' })
+  const [aud, setAud] = useState(null)
+  const [move, setMove] = useState(false)
+  const [err, setErr] = useState(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    api.post(`${API}/campaigns/suggest`, pick).then(r => {
+      setGroups(r.groups)
+      if (r.groups[0]) choose(r.groups[0])
+    }).catch(e => setErr(errText(e)))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  function choose(x) {
+    setG(x)
+    setF({ name: x.name, kind: x.kind, context: x.context || '', industry: x.industry || '', market: x.market || '' })
+  }
+  const thePick = g ? { lead_ids: g.lead_ids } : pick
+  useEffect(() => {
+    if (!groups) return
+    api.post(`${API}/campaigns/audience/preview`, { kind: f.kind, market: f.market || null, industry: f.industry || null, pick: thePick })
+      .then(setAud).catch(e => setErr(errText(e)))
+  }, [groups, g, f.kind, f.market]) // eslint-disable-line react-hooks/exhaustive-deps
+  async function create() {
+    setBusy(true); setErr(null)
+    try {
+      const r = await api.post(`${API}/campaigns`, { ...f, context: f.context || null, industry: f.industry || null, market: f.market || null, pick: thePick, move })
+      onDone()
+      nav(`${BASE}/outreach/${r.campaign.id}`)
+    } catch (e) { setErr(errText(e)) } finally { setBusy(false) }
+  }
+  const set = k => e => setF(x => ({ ...x, [k]: e.target.value }))
+  return (
+    <div className="evs-modal-bg" role="dialog" aria-modal="true" aria-label="Create campaign" onClick={onClose}>
+      <div className="evs-modal wide" onClick={e => e.stopPropagation()}>
+        <h2>Create campaign</h2>
+        <p className="evs-muted" style={{ marginTop: 0 }}>Build it around the actual work: an event, a referral, a project, an industry or a market. It starts Off. Nothing is sent until you approve the messages and turn it on.</p>
+        {err && <div className="evs-error">{err}</div>}
+        {!groups ? <div className="evs-loading">Looking at these contacts…</div> : (
+          <>
+            {groups.length > 1 && (
+              <>
+                <b className="evs-small">Suggested groups</b>
+                <div className="evs-groups">
+                  {groups.map((x, i) => <button key={i} className={'evs-group' + (g === x ? ' on' : '')} onClick={() => choose(x)}><b>{x.name} · {x.count}</b><span>{x.why}</span></button>)}
+                  <button className={'evs-group' + (g === null ? ' on' : '')} onClick={() => setG(null)}><b>Everyone selected · {groups.reduce((n, x) => n + x.count, 0)}</b><span>One campaign for all of them</span></button>
+                </div>
+              </>
+            )}
+            {groups.length === 1 && <p className="evs-small evs-muted">Suggested because: {groups[0].why}.</p>}
+            <div className="evs-form">
+              <div className="two">
+                <label>Campaign name<input value={f.name} onChange={set('name')} /></label>
+                <label>Built around<select value={f.kind} onChange={set('kind')}>{KIND_OPTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+              </div>
+              <div className="two">
+                <label>{f.kind === 'event' ? 'Event' : f.kind === 'relationship' ? 'Relationship' : 'About'} <span className="opt">(optional)</span><input value={f.context} onChange={set('context')} /></label>
+                <label>Market <span className="opt">(optional)</span><input value={f.market} onChange={set('market')} placeholder="San Antonio, DFW…" /></label>
               </div>
             </div>
-          )) : <p className="evs-empty">No leads here.</p>}
+            {aud && (
+              <>
+                <p style={{ margin: '14px 0 0' }}><b>{aud.will_email}</b> will be emailed · <b>{aud.held}</b> held for review or calls{aud.in_other_campaigns > 0 && <> · <b>{aud.in_other_campaigns}</b> already in another campaign</>}</p>
+                {aud.in_other_campaigns > 0 && <label className="evs-small" style={{ display: 'flex', gap: 8, marginTop: 6 }}><input type="checkbox" checked={move} onChange={e => setMove(e.target.checked)} />Move them here (only if that other campaign isn't emailing them right now)</label>}
+                <AudienceTable rows={aud.rows} />
+              </>
+            )}
+          </>
+        )}
+        <div className="evs-modal-foot">
+          <button className="evs-btn" onClick={onClose}>Cancel</button>
+          <button className="evs-btn primary" disabled={busy || !f.name.trim() || !groups} onClick={create}>{busy ? 'Creating…' : 'Create campaign (Off)'}</button>
         </div>
-      </Box>
-    </>
+      </div>
+    </div>
+  )
+}
+
+function AddToCampaign({ pick, campaigns, onClose, onDone }) {
+  const [id, setId] = useState(campaigns[0]?.id || '')
+  const [aud, setAud] = useState(null)
+  const [move, setMove] = useState(false)
+  const [res, setRes] = useState(null)
+  const [err, setErr] = useState(null)
+  useEffect(() => {
+    if (!id) return
+    setAud(null)
+    api.post(`${API}/campaigns/${id}/audience/preview`, pick).then(setAud).catch(e => setErr(errText(e)))
+  }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  async function add() {
+    setErr(null)
+    try { setRes(await api.post(`${API}/campaigns/${id}/leads`, { ...pick, move })) } catch (e) { setErr(errText(e)) }
+  }
+  return (
+    <div className="evs-modal-bg" role="dialog" aria-modal="true" aria-label="Add to campaign" onClick={onClose}>
+      <div className="evs-modal wide" onClick={e => e.stopPropagation()}>
+        <h2>Add to campaign</h2>
+        {err && <div className="evs-error">{err}</div>}
+        {!campaigns.length ? <p className="evs-empty">No campaigns yet. Use Create campaign.</p> : (
+          <div className="evs-form"><label>Campaign<select value={id} onChange={e => setId(e.target.value)}>{campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label></div>
+        )}
+        {res ? (
+          <div className="evs-ok" style={{ marginTop: 12 }}>Added {res.added}{res.moved ? ` (moved ${res.moved})` : ''}. {res.already_here ? `${res.already_here} were already in it. ` : ''}{res.held.length ? `${res.held.length} held for review or calls. ` : ''}{res.refused.length ? `${res.refused.length} not added: ${res.refused.map(r => `${r.company} (${r.reason})`).join('; ')}` : ''}</div>
+        ) : aud && (
+          <>
+            <p style={{ margin: '14px 0 0' }}><b>{aud.will_email}</b> new to email · <b>{aud.already_here}</b> already in it · <b>{aud.held}</b> held · <b>{aud.in_other_campaigns}</b> in another campaign</p>
+            {aud.in_other_campaigns > 0 && <label className="evs-small" style={{ display: 'flex', gap: 8, marginTop: 6 }}><input type="checkbox" checked={move} onChange={e => setMove(e.target.checked)} />Move them here (only if that campaign isn't emailing them right now)</label>}
+            <AudienceTable rows={aud.rows} />
+          </>
+        )}
+        <div className="evs-modal-foot">
+          <button className="evs-btn" onClick={res ? onDone : onClose}>{res ? 'Done' : 'Cancel'}</button>
+          {!res && <button className="evs-btn primary" disabled={!id || !aud} onClick={add}>Add</button>}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -289,82 +660,206 @@ export function Leads() {
 
 export function Lead() {
   const { id } = useParams()
+  const nav = useNavigate()
   const { data, error, reload } = useLoad(`${API}/leads/${id}`)
+  useTitle(data?.lead?.company || 'Lead')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
-  const act = async (path, body) => {
+  const [edit, setEdit] = useState(false)
+  const [book, setBook] = useState(false)
+  async function act(path, body, ok) {
     setBusy(true); setMsg(null)
-    try { await api.post(`${API}/leads/${id}/${path}`, body || {}); setNote(''); await reload() }
-    catch (e) { setMsg(errText(e)) } finally { setBusy(false) }
+    try { await api.post(`${API}/leads/${id}/${path}`, body || {}); setNote(''); setMsg({ ok: true, text: ok }); await reload() }
+    catch (e) { setMsg({ ok: false, text: errText(e) }) } finally { setBusy(false) }
+  }
+  const [handoff, setHandoff] = useState(null)
+  async function signup() {
+    setBusy(true)
+    try { setHandoff(await api.post(`${API}/leads/${id}/signup`, {})); await reload() } catch (e) { setMsg({ ok: false, text: errText(e) }) } finally { setBusy(false) }
   }
   const l = data?.lead
+  if (error || !data) return <Box error={error} data={data} />
   return (
-    <Box error={error} data={data}>
+    <>
       <Link className="evs-crumb" to={`${BASE}/leads`}><Icon name="back" size={14} />Leads</Link>
-      <PageHead title={l?.company} sub={l?.contact}>
-        <div className="evs-row-acts"><Status o={l?.outreach} /><CallBtn phone={l?.phone} label={l?.phone} /></div>
+      <PageHead title={l?.company} sub={[l?.contact, l?.role].filter(Boolean).join(', ')}>
+        <CallBtn phone={l?.phone} />
+        <button className="evs-btn" onClick={() => setBook(true)}><Icon name="cal" size={16} />Book intro call</button>
+        <button className="evs-btn primary" disabled={busy} onClick={signup}>{data?.signed_up ? 'Open deal & onboarding' : 'Start signup'}</button>
       </PageHead>
-      <div className="evs-card evs-facts">
-        <div><span>Email</span><b>{l?.email || '—'}</b></div>
-        <div><span>Website</span><b>{l?.website ? <a href={l.website.startsWith('http') ? l.website : 'https://' + l.website} target="_blank" rel="noreferrer">{l.website}</a> : '—'}</b></div>
-        <div><span>Pipeline</span><b>{l?.stage_label}</b></div>
-        <div><span>Booked</span><b>{l?.booked ? 'Yes' : 'Not yet'}</b></div>
-      </div>
-
-      <section className="evs-card">
-        <h3>What happened</h3>
-        <textarea className="evs-input" rows={3} placeholder="What they said, or how the call went…" value={note} onChange={e => setNote(e.target.value)} />
-        <div className="evs-actions">
-          <button className="evs-btn" disabled={busy} onClick={() => act('call', { note })}>I called them</button>
-          <button className="evs-btn evs-ghost" disabled={busy} onClick={() => act('reply', { note, channel: 'email' })}>They replied (by phone or another inbox)</button>
-          {l?.outreach?.key === 'active'
-            ? <button className="evs-btn evs-ghost" disabled={busy} onClick={() => act('stop')}>Stop follow-up</button>
-            : ['manual', 'replied', 'finished'].includes(l?.outreach?.key) &&
-              <button className="evs-btn evs-ghost" disabled={busy} onClick={() => act('restart')}>Restart follow-up</button>}
+      {msg && <div className={msg.ok ? 'evs-ok' : 'evs-error'}>{msg.text}</div>}
+      {handoff && (
+        <div className="evs-note">
+          <b>Signup started.</b> Source ({handoff.source}){handoff.campaign ? ` and campaign (${handoff.campaign})` : ''} stay on this record. Finish it in the existing flow:
+          <div className="evs-acts" style={{ marginTop: 8 }}>
+            <button className="evs-btn sm primary" onClick={() => nav(handoff.path)}>Open the deal (Won → onboarding)</button>
+            {handoff.acquisition_path && <button className="evs-btn sm" onClick={() => nav(handoff.acquisition_path)}>Add as a service company (Acquisition Control Center)</button>}
+          </div>
+          {handoff.acquisition_note && <div className="evs-small evs-muted" style={{ marginTop: 6 }}>{handoff.acquisition_note}</div>}
         </div>
-        {msg && <div className="evs-error" role="alert">{msg}</div>}
-        <p className="evs-hint">Email replies are picked up by themselves and stop the follow-up. Use “They replied” only when they answered some other way.</p>
-      </section>
-
-      {data?.next && (
-        <section className="evs-card">
-          <h3>Next email · step {data.next.step} · {when(data.next.due_at)}</h3>
-          <p className="evs-subject">{data.next.subject}</p>
-          <pre className="evs-body">{data.next.body}</pre>
-        </section>
       )}
-
-      <section className="evs-card">
-        <h3>Conversation</h3>
-        {data?.messages?.length ? data.messages.map(m => <Message key={m.id} m={m} />)
-          : <p className="evs-empty">Nothing sent yet.</p>}
-      </section>
-
-      <section className="evs-card">
-        <h3>History</h3>
-        {(data?.timeline || []).map((e, i) => (
-          <div key={i} className="evs-hist"><small>{when(e.at)}</small> {e.summary}</div>
-        ))}
-      </section>
-    </Box>
+      {book && <BookCall lead={l} me={data.me} onClose={() => setBook(false)} onBooked={() => { setBook(false); setMsg({ ok: true, text: 'Intro call booked. Follow-up emails stop for this contact.' }); reload() }} />}
+      <div className="evs-grid2">
+        <div>
+          <section className="evs-card">
+            <div className="evs-card-h"><h3>Outreach</h3><Status o={l?.outreach} /></div>
+            <p style={{ margin: '0 0 6px' }}>Campaign: {l?.campaign ? <b>{l.campaign}</b> : <span className="evs-muted">not in a campaign</span>}</p>
+            {data.next && (
+              <div className="evs-note">
+                <b>Next: message {data.next.step}</b> · {data.next.campaign_on ? `due ${whenTZ(data.next.due_at)}` : `waiting (campaign is off)`}
+                <div className="evs-small" style={{ marginTop: 6 }}><b>{data.next.subject}</b></div>
+                <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', margin: '6px 0 0', fontSize: 13.5 }}>{data.next.body}</pre>
+                <div className="evs-facts-used">{data.next.facts_used.map(f => <span key={f.key} className="evs-pill blue" title={f.from}>{f.key}: {f.value}</span>)}</div>
+              </div>
+            )}
+            <div className="evs-acts">
+              {l?.outreach?.key === 'active' && <button className="evs-btn sm" disabled={busy} onClick={() => act('stop', {}, 'Follow-up stopped.')}>Stop follow-up</button>}
+              {['manual', 'finished'].includes(l?.outreach?.key) && l?.campaign && <button className="evs-btn sm" disabled={busy} onClick={() => act('restart', {}, 'Follow-up restarted.')}>Restart follow-up</button>}
+            </div>
+          </section>
+          <section className="evs-card">
+            <h3>Conversation</h3>
+            {data.messages.length ? <div className="evs-thread">{data.messages.map(m => <Message key={m.id} m={m} />)}</div> : <p className="evs-empty">Nothing sent or received yet.</p>}
+            <div className="evs-form" style={{ marginTop: 12 }}>
+              <label>Note<textarea value={note} onChange={e => setNote(e.target.value)} placeholder="What they said, or what you did" /></label>
+              <div className="evs-acts">
+                <button className="evs-btn sm" disabled={busy} onClick={() => act('reply', { note }, 'Reply logged. Automatic follow-up stopped.')}>They replied</button>
+                <button className="evs-btn sm" disabled={busy} onClick={() => act('call', { note }, 'Call logged.')}>I called them</button>
+                {data.reply_waiting && <button className="evs-btn sm" disabled={busy} onClick={() => act('handled', { note }, 'Marked answered.')}>Mark answered</button>}
+              </div>
+            </div>
+          </section>
+        </div>
+        <div>
+          <section className="evs-card">
+            <div className="evs-card-h"><h3>Details</h3><button className="evs-btn sm ghost" onClick={() => setEdit(e => !e)}>{edit ? 'Close' : 'Edit'}</button></div>
+            {edit ? <EditLead lead={l} intro={data.intro_note} onSaved={() => { setEdit(false); reload() }} /> : (
+              <dl className="evs-facts">
+                <dt>Email</dt><dd>{l.email || '-'}</dd>
+                <dt>Phone</dt><dd>{l.phone || '-'}</dd>
+                <dt>Source</dt><dd>{l.source_label}{l.source_detail ? ` · ${l.source_detail}` : ''}</dd>
+                <dt>Met</dt><dd>{l.met_on ? day(l.met_on) : '-'}</dd>
+                <dt>Industry</dt><dd>{l.industry || '-'}</dd>
+                <dt>Market</dt><dd>{l.market || '-'}</dd>
+                <dt>Prefers</dt><dd>{l.preferred_contact || '-'}</dd>
+                <dt>Stage</dt><dd>{l.stage_label}</dd>
+                <dt>Added</dt><dd>{whenTZ(l.created_at)}</dd>
+                <dt>Batch</dt><dd>{l.batch}</dd>
+                {data.intro_note && <><dt>Personal note</dt><dd>{data.intro_note}</dd></>}
+              </dl>
+            )}
+          </section>
+          {data.appointments.length > 0 && (
+            <section className="evs-card">
+              <h3>Calls</h3>
+              {data.appointments.map(a => <div key={a.id} className="evs-revrow"><Icon name="cal" />{whenTZ(a.starts_at)} <span className="evs-pill muted">{a.status}</span></div>)}
+            </section>
+          )}
+          <section className="evs-card">
+            <h3>Timeline</h3>
+            <ul className="evs-timeline">{data.timeline.map((e, i) => <li key={i}><time>{whenTZ(e.at)}</time>{e.summary}{e.detail && <div className="evs-small evs-muted">{e.detail.slice(0, 200)}</div>}</li>)}</ul>
+          </section>
+        </div>
+      </div>
+    </>
   )
 }
 
-const HOW = { reply_address: 'matched by their reply address', sender: 'matched by their email address', manual: 'logged by hand' }
-
 function Message({ m }) {
-  const inbound = m.direction === 'in'
-  const who = inbound ? 'They replied' : m.channel === 'call' ? 'Call' : m.channel === 'text' ? 'Text' : 'Email ' + (m.step || '')
-  const problem = m.status === 'held' ? 'Not sent - no texting number yet' : m.status === 'failed' ? 'Did not send' : null
+  const who = m.direction === 'in' ? 'They wrote' : m.channel === 'call' ? 'Call' : m.status === 'logged' ? 'You noted' : m.status === 'held' ? 'Held (text)' : 'Sent'
   return (
-    <div className={'evs-msg ' + (inbound ? 'in' : 'out')}>
-      <div className="evs-msg-head"><b>{who}</b><small>{when(m.at)}{inbound && HOW[m.how] ? ' · ' + HOW[m.how] : ''}</small>
-        {problem && <span className="evs-pill evs-bad">{problem}</span>}
+    <article className={'evs-msg' + (m.direction === 'in' ? ' in' : '')}>
+      <header><span><b>{who}</b>{m.step ? ` · message ${m.step}` : ''}{m.campaign ? ` · ${m.campaign}` : ''}</span><time>{whenTZ(m.at)}</time></header>
+      {m.subject && <div style={{ fontWeight: 700, marginBottom: 4 }}>{m.subject}</div>}
+      <pre>{m.body}</pre>
+      {m.status === 'failed' && <div className="evs-small" style={{ color: 'var(--bad)' }}>Didn't send: {m.error}</div>}
+    </article>
+  )
+}
+
+function EditLead({ lead, intro, onSaved }) {
+  const [f, setF] = useState({ contact_name: lead.contact || '', company_name: lead.company || '', email: lead.email || '', phone: lead.phone || '',
+    role: lead.role || '', industry: lead.industry || '', market: lead.market || '', source_detail: lead.source_detail || '',
+    met_on: lead.met_on || '', intro_note: intro || '', preferred_contact: lead.preferred_contact || '' })
+  const [err, setErr] = useState(null)
+  const set = k => e => setF(x => ({ ...x, [k]: e.target.value }))
+  async function save() {
+    setErr(null)
+    const body = { ...f, met_on: f.met_on || null }
+    try { await api.patch(`${API}/leads/${lead.id}`, body); onSaved() } catch (e) { setErr(errText(e)) }
+  }
+  return (
+    <div className="evs-form">
+      {err && <div className="evs-error">{err}</div>}
+      <label>Name<input value={f.contact_name} onChange={set('contact_name')} /></label>
+      <label>Company<input value={f.company_name} onChange={set('company_name')} /></label>
+      <label>Email<input value={f.email} onChange={set('email')} /></label>
+      <label>Phone<input value={f.phone} onChange={set('phone')} /></label>
+      <label>Role<input value={f.role} onChange={set('role')} /></label>
+      <label>{lead.source_key === 'referral' ? 'Referred by' : 'Event'}<input value={f.source_detail} onChange={set('source_detail')} /></label>
+      <label>Date met<input type="date" value={f.met_on} onChange={set('met_on')} /></label>
+      <label>Industry<input value={f.industry} onChange={set('industry')} /></label>
+      <label>Market<input value={f.market} onChange={set('market')} /></label>
+      <label>Personal note<input value={f.intro_note} onChange={set('intro_note')} /></label>
+      <label>Prefers<select value={f.preferred_contact} onChange={set('preferred_contact')}><option value="">Not sure</option><option value="email">Email</option><option value="phone">Phone call</option><option value="text">Text</option></select></label>
+      <button className="evs-btn primary" onClick={save}>Save</button>
+    </div>
+  )
+}
+
+function BookCall({ lead, me, onClose, onBooked }) {
+  const [d, setD] = useState('')
+  const [t, setT] = useState('10:00')
+  const [mins, setMins] = useState(30)
+  const [err, setErr] = useState(null)
+  const [open, setOpen] = useState(null)
+  const [busy, setBusy] = useState(false)
+  function centralToUtc(dateStr, timeStr) {
+    // The meeting is agreed in Central time.
+    const guess = new Date(`${dateStr}T${timeStr}:00Z`)
+    const asCentral = new Date(guess.toLocaleString('en-US', { timeZone: TZ }))
+    const offset = guess.getTime() - asCentral.getTime()
+    return new Date(guess.getTime() + offset)
+  }
+  async function findOpen() {
+    try {
+      const r = await api.post('/sales/availability/find', { duration_minutes: mins, required_user_ids: [me], date_from: d || new Date().toISOString().slice(0, 10), opportunity_id: lead.id })
+      setOpen((r.slots || []).slice(0, 6))
+    } catch { setOpen([]) }
+  }
+  async function book(startIso) {
+    setBusy(true); setErr(null)
+    const starts = startIso || centralToUtc(d, t).toISOString()
+    try {
+      await api.post('/sales/appointments', { starts_at: starts, duration_minutes: Number(mins), opportunity_id: lead.id, required_user_ids: [me],
+        title: `Intro call: ${lead.company}`, timezone: TZ, prospect_name: lead.contact || lead.company, prospect_email: lead.email || null, prospect_phone: lead.phone || null })
+      onBooked()
+    } catch (e) {
+      setErr(errText(e))
+      if (e.status === 409) findOpen()
+    } finally { setBusy(false) }
+  }
+  return (
+    <div className="evs-modal-bg" role="dialog" aria-modal="true" aria-label="Book intro call" onClick={onClose}>
+      <div className="evs-modal" onClick={e => e.stopPropagation()}>
+        <h2>Book an intro call</h2>
+        <p className="evs-muted" style={{ marginTop: 0 }}>With {lead.contact || lead.company}. Times are Central. Booking checks your calendar so a taken time is never double-booked.</p>
+        {err && <div className="evs-error">{err}</div>}
+        {open && (open.length ? <div className="evs-note"><b>Open times:</b><div className="evs-acts" style={{ marginTop: 8 }}>{open.map(s => <button key={s.starts_at} className="evs-btn sm" onClick={() => book(s.starts_at)}>{whenTZ(s.starts_at)}</button>)}</div></div>
+          : <div className="evs-note">Pick another time.</div>)}
+        <div className="evs-form">
+          <div className="two">
+            <label>Date<input type="date" value={d} onChange={e => setD(e.target.value)} /></label>
+            <label>Time (Central)<input type="time" value={t} onChange={e => setT(e.target.value)} /></label>
+          </div>
+          <label>Length<select value={mins} onChange={e => setMins(e.target.value)}><option value={15}>15 minutes</option><option value={30}>30 minutes</option><option value={45}>45 minutes</option></select></label>
+        </div>
+        <div className="evs-modal-foot">
+          <button className="evs-btn" onClick={onClose}>Cancel</button>
+          <button className="evs-btn primary" disabled={busy || !d} onClick={() => book()}>{busy ? 'Booking…' : 'Book call'}</button>
+        </div>
       </div>
-      {m.subject && <div className="evs-subject">{m.subject}</div>}
-      <pre className="evs-body">{m.body}</pre>
-      {m.error && m.status === 'failed' && <small className="evs-err-small">{m.error}</small>}
     </div>
   )
 }
@@ -372,199 +867,339 @@ function Message({ m }) {
 // ── Conversations ────────────────────────────────────────────────────────────
 
 export function Conversations() {
-  const { data, error } = useLoad(`${API}/conversations`)
+  useTitle('Conversations')
+  const [sp, setSp] = useSearchParams()
+  const { data, error, reload } = useLoad(`${API}/conversations`)
+  const rows = data?.conversations || []
+  const pick = sp.get('lead') || (rows.find(r => r.waiting) || rows[0])?.id
   return (
     <>
-      <PageHead title="Conversations" sub="Everyone you've emailed, newest first. Replies come in by themselves." />
+      <PageHead title="Conversations" sub="Replies first. What they said, what AI suggests, and what you can do." />
       <Box error={error} data={data}>
-        <div className="evs-card evs-list">
-          {data?.conversations?.length ? data.conversations.map(c => {
-            const lm = c.last_message || {}
-            return (
-              <div key={c.id} className={'evs-row' + (lm.direction === 'in' ? ' evs-row-new' : '')}>
-                <Link to={`${BASE}/leads/${c.id}`} className="evs-row-main">
-                  <b>{c.company}</b>
-                  <small>{lm.direction === 'in' ? 'They replied' : (lm.subject || lm.channel)} · {when(lm.at)} · {c.message_count} message{c.message_count === 1 ? '' : 's'}</small>
-                  {lm.direction === 'in' && lm.body && <span className="evs-snip">“{lm.body}”</span>}
-                </Link>
-                <div className="evs-row-acts">
-                  <Status o={c.outreach} />
-                  <CallBtn phone={c.phone} />
-                  <Link className="evs-act" to={`${BASE}/leads/${c.id}`}>Open</Link>
-                </div>
-              </div>
-            )
-          }) : <p className="evs-empty">No messages yet. They appear here once outreach is on.</p>}
-        </div>
+        {!rows.length ? <p className="evs-empty">No conversations yet. Messages and replies from your campaigns appear here.</p> : (
+          <div className="evs-grid2">
+            <section className="evs-card" aria-label="All conversations">
+              {rows.map(r => (
+                <button key={r.id} className={'evs-item' + (r.id === pick ? ' hot' : '')} style={{ width: '100%', textAlign: 'left' }} onClick={() => setSp({ lead: r.id }, { replace: true })}>
+                  <div style={{ minWidth: 0 }}>
+                    <b>{r.company}</b>
+                    <div className="who">{r.contact || ''}{r.last_message ? ` · ${when(r.last_message.at)}` : ''}</div>
+                    <span className="evs-small">{(r.waiting ? r.reply?.body : r.last_message?.body || '').slice(0, 90)}</span>
+                  </div>
+                  <div>{r.waiting ? <span className={'evs-pill ' + (r.needs_review ? 'gold' : 'blue')}>{r.needs_review ? 'Needs review' : r.intent?.label}</span> : <span className="evs-pill muted">{r.message_count}</span>}</div>
+                </button>
+              ))}
+            </section>
+            {pick && <Thread id={pick} row={rows.find(r => r.id === pick)} onChanged={reload} />}
+          </div>
+        )}
       </Box>
     </>
   )
 }
 
-// ── Outreach ─────────────────────────────────────────────────────────────────
-
-export function Outreach() {
-  const { data, error, reload } = useLoad(`${API}/outreach`)
-  const [form, setForm] = useState(null)
+function Thread({ id, row, onChanged }) {
+  const { data, error, reload } = useLoad(`${API}/leads/${id}`)
+  const [ai, setAi] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [draft, setDraft] = useState('')
   const [msg, setMsg] = useState(null)
-  const [preview, setPreview] = useState(null)
-  const [testTo, setTestTo] = useState('')
-  useEffect(() => { if (data) setForm(JSON.parse(JSON.stringify(data))) }, [data])
-  const dirty = form && data && JSON.stringify(pick(form)) !== JSON.stringify(pick(data))
-  const run = async (fn, ok) => {
-    setBusy(true); setMsg(null)
-    try { await fn(); if (ok) setMsg({ ok: true, text: ok }); await reload() }
-    catch (e) { setMsg({ ok: false, text: errText(e) }) } finally { setBusy(false) }
+  useEffect(() => { setAi(null); setDraft(''); setMsg(null) }, [id])
+  async function suggest() {
+    setBusy(true); setAi(null)
+    try { const r = await api.post(`${API}/conversations/${id}/suggest`, {}); setAi(r); setDraft(r.draft || '') }
+    catch (e) { setAi({ ok: false, error: errText(e) }) } finally { setBusy(false) }
   }
-  const setStep = (i, k, v) => setForm(f => ({ ...f, steps: f.steps.map((s, j) => j === i ? { ...s, [k]: k === 'day' ? Number(v) : v } : s) }))
-  const loadPreview = () => api.get(`${API}/outreach/preview`).then(setPreview).catch(e => setMsg({ ok: false, text: errText(e) }))
-  const can = form?.can_manage
-  const rt = form?.reply_tracking
+  async function handled() {
+    try { await api.post(`${API}/leads/${id}/handled`, { note: draft }); setMsg('Marked answered.'); reload(); onChanged() } catch (e) { setMsg(errText(e)) }
+  }
   return (
-    <Box error={error} data={form}>
-      <PageHead title="Outreach" sub="The automatic follow-up emails. Nothing sends until you approve them and turn it on." />
-      <div className={'evs-card evs-switchcard ' + (form?.sending_on ? 'on' : '')}>
-        <div>
-          <b>Automatic follow-up is {form?.sending_on ? 'ON' : 'OFF'}</b>
-          <small>{form?.approved ? 'Messages approved ' + when(form.approved_at) : 'Messages not approved yet'} · {form?.sending_hours}</small>
-        </div>
-        {can && (form?.sending_on
-          ? <button className="evs-btn evs-danger" disabled={busy} onClick={() => run(() => api.post(`${API}/outreach/switch`, { on: false }), 'Outreach is off.')}>Turn off</button>
-          : <button className="evs-btn" disabled={busy || dirty || !form?.approved}
-                    onClick={() => run(() => api.post(`${API}/outreach/switch`, { on: true }), 'Outreach is on.')}>Turn on</button>)}
-      </div>
-      {rt && (
-        <div className={'evs-banner ' + (rt.automatic ? 'evs-banner-ok' : '')}>
-          <b>{rt.automatic ? 'Replies are read automatically.' : 'Replies are not read automatically.'}</b> {rt.text}
-          {rt.last_auto_reply_at && <> Last reply picked up {when(rt.last_auto_reply_at)}.</>}
-        </div>
-      )}
-      {form?.problems?.length > 0 && (
-        <div className="evs-banner"><b>Before you can approve:</b>
-          <ul>{form.problems.map(p => <li key={p}>{p}</li>)}</ul></div>
-      )}
-      {msg && <div className={msg.ok ? 'evs-okmsg' : 'evs-error'} role="status">{msg.text}</div>}
-
-      <section className="evs-card">
-        <h3>Your details</h3>
-        <div className="evs-grid">
-          <Field label="Offer (goes where {offer} is)" wide>
-            <textarea className="evs-input" rows={2} disabled={!can} value={form?.offer || ''} onChange={e => setForm({ ...form, offer: e.target.value })} />
-          </Field>
-          <Field label="Booking link ({booking_link})" wide>
-            <input className="evs-input" disabled={!can} value={form?.booking_url || ''} onChange={e => setForm({ ...form, booking_url: e.target.value })} />
-          </Field>
-          <Field label="Your name ({sender_name})">
-            <input className="evs-input" disabled={!can} value={form?.sender_name || ''} onChange={e => setForm({ ...form, sender_name: e.target.value })} />
-          </Field>
-          <Field label="Sends from">
-            <input className="evs-input" disabled={!can} value={form?.from_email || ''} onChange={e => setForm({ ...form, from_email: e.target.value })} />
-          </Field>
-          <Field label="Replies go to">
-            <input className="evs-input" disabled={!can} value={form?.reply_to_email || ''} onChange={e => setForm({ ...form, reply_to_email: e.target.value })} />
-          </Field>
-          <Field label="Most emails a day">
-            <input className="evs-input" type="number" min="1" max="300" disabled={!can} value={form?.daily_limit || 60} onChange={e => setForm({ ...form, daily_limit: Number(e.target.value) })} />
-          </Field>
-          <Field label="Mailing address (required at the bottom of every sales email)" wide>
-            <input className="evs-input" disabled={!can} placeholder="Street, City, State ZIP" value={form?.mailing_address || ''} onChange={e => setForm({ ...form, mailing_address: e.target.value })} />
-          </Field>
-        </div>
-      </section>
-
-      <section className="evs-card">
-        <h3>The emails</h3>
-        <p className="evs-hint">These fill in by themselves: {'{first_name}'}, {'{company}'}, {'{offer}'}, {'{booking_link}'}, {'{sender_name}'}. Each lead gets them in order and stops when they reply, book, or opt out. An opt-out link is added to every email.</p>
-        {(form?.steps || []).map((s, i) => (
-          <div key={i} className="evs-step">
-            <div className="evs-step-head">
-              <b>Step {i + 1}</b>
-              <label>Day <input className="evs-input evs-day" type="number" min="0" max="90" disabled={!can} value={s.day} onChange={e => setStep(i, 'day', e.target.value)} /></label>
-              <select className="evs-input evs-chan" disabled={!can} value={s.channel} onChange={e => setStep(i, 'channel', e.target.value)}>
-                <option value="email">Email</option>
-                <option value="text">Text (waits for a texting number)</option>
-              </select>
-              {can && form.steps.length > 1 && <button className="evs-link" onClick={() => setForm({ ...form, steps: form.steps.filter((_, j) => j !== i) })}>Remove</button>}
+    <section className="evs-card" aria-label="Conversation">
+      <Box error={error} data={data}>
+        <div className="evs-card-h"><h3><Link to={`${BASE}/leads/${id}`}>{data?.lead?.company}</Link></h3><CallBtn phone={data?.lead?.phone} /></div>
+        {row?.needs_review && <div className="evs-note"><b>Pricing question.</b> There's no approved offer on file, so this needs your answer. AI won't quote a price.</div>}
+        <div className="evs-thread">{(data?.messages || []).map(m => <Message key={m.id} m={m} />)}</div>
+        {row?.waiting && (
+          <div style={{ marginTop: 14 }}>
+            <div className="evs-acts">
+              <button className="evs-btn sm" disabled={busy} onClick={suggest}><Icon name="spark" size={14} />{busy ? 'Thinking…' : 'Suggest a reply'}</button>
+              <button className="evs-btn sm" onClick={handled}>Mark answered</button>
+              <Link className="evs-btn sm" to={`${BASE}/leads/${id}`}>Book a call</Link>
             </div>
-            {s.channel === 'email' && <input className="evs-input" disabled={!can} placeholder="Subject" value={s.subject} onChange={e => setStep(i, 'subject', e.target.value)} />}
-            <textarea className="evs-input" rows={7} disabled={!can} value={s.body} onChange={e => setStep(i, 'body', e.target.value)} />
+            {ai && !ai.ok && <div className="evs-error" style={{ marginTop: 10 }}>{ai.error}</div>}
+            {ai?.ok && (
+              <div className="evs-form" style={{ marginTop: 10 }}>
+                <p className="evs-small" style={{ margin: 0 }}><b>What they want:</b> {ai.summary || ai.intent?.label}</p>
+                <label>Draft (edit, then send it from your email or call them)<textarea value={draft} onChange={e => setDraft(e.target.value)} /></label>
+                <div className="evs-facts-used">{(ai.facts_used || []).map(f => <span key={f.key} className="evs-pill blue">{f.key}: {String(f.value).slice(0, 40)}</span>)}</div>
+                <div className="evs-acts"><button className="evs-btn sm" onClick={() => navigator.clipboard?.writeText(draft)}><Icon name="copy" size={14} />Copy</button></div>
+              </div>
+            )}
+            {msg && <div className="evs-ok" style={{ marginTop: 10 }}>{msg}</div>}
           </div>
-        ))}
-        {can && (form?.steps?.length || 0) < 10 && (
-          <button className="evs-btn evs-ghost" onClick={() => setForm({ ...form, steps: [...form.steps, { day: (form.steps.at(-1)?.day || 0) + 7, channel: 'email', subject: '', body: '' }] })}>+ Add a step</button>
         )}
-      </section>
-
-      {can && (
-        <div className="evs-card evs-actions">
-          <button className="evs-btn" disabled={busy || !dirty} onClick={() => run(() => api.put(`${API}/outreach`, pick(form)), 'Saved. Approve the messages again to send them.')}>Save changes</button>
-          <button className="evs-btn evs-btn-gold" disabled={busy || dirty || form?.approved || form?.problems?.length > 0}
-                  onClick={() => run(() => api.post(`${API}/outreach/approve`, {}), 'Approved. Now you can turn outreach on.')}>Approve messages</button>
-          <button className="evs-btn evs-ghost" disabled={busy} onClick={loadPreview}>Preview with a real lead</button>
-        </div>
-      )}
-
-      {can && (
-        <section className="evs-card">
-          <h3>Send yourself a test</h3>
-          <div className="evs-actions">
-            <input className="evs-input" placeholder="Your email" value={testTo} onChange={e => setTestTo(e.target.value)} />
-            <button className="evs-btn evs-ghost" disabled={busy || dirty || !testTo}
-                    onClick={() => run(() => api.post(`${API}/outreach/test`, { to: testTo, step: 1 }), 'Test sent to ' + testTo + '.')}>Send step 1 to me</button>
-          </div>
-          <p className="evs-hint">Goes only to the address you type, never to a lead.</p>
-        </section>
-      )}
-
-      {preview && (
-        <section className="evs-card">
-          <h3>Preview for {preview.lead?.company || '—'}</h3>
-          {(preview.steps || []).map((s, i) => (
-            <div key={i} className="evs-msg out">
-              <div className="evs-msg-head"><b>Step {i + 1} · day {s.day} · {s.channel}</b></div>
-              <div className="evs-subject">{s.subject}</div>
-              <div className="evs-html" dangerouslySetInnerHTML={{ __html: s.html }} />
-            </div>
-          ))}
-        </section>
-      )}
-    </Box>
+      </Box>
+    </section>
   )
 }
 
-function pick(f) {
-  const { steps, offer, booking_url, sender_name, from_email, reply_to_email, mailing_address, daily_limit } = f || {}
-  return { steps, offer, booking_url, sender_name, from_email, reply_to_email, mailing_address, daily_limit }
+// ── Outreach: campaigns and team settings ────────────────────────────────────
+
+export function Outreach() {
+  useTitle('Outreach')
+  const { data, error, reload } = useLoad(`${API}/campaigns`)
+  const [creating, setCreating] = useState(false)
+  return (
+    <>
+      <PageHead title="Outreach" sub="Each campaign has its own messages, approval and on/off switch. New campaigns start Off.">
+        {data?.can_manage && <button className="evs-btn primary" onClick={() => setCreating(true)}><Icon name="plus" size={16} />New campaign</button>}
+      </PageHead>
+      <Box error={error} data={data}>
+        {data?.team_problems?.length > 0 && <div className="evs-note"><b>Before any campaign can go on:</b><ul className="evs-blockers">{data.team_problems.map(p => <li key={p}>{p}</li>)}</ul></div>}
+        <div className="evs-camps">
+          {(data?.campaigns || []).map(k => (
+            <Link key={k.id} to={`${BASE}/outreach/${k.id}`} className="evs-camp">
+              <div>
+                <b>{k.name}</b> <span className="evs-pill muted">{k.kind_label}</span>
+                <div className="meta">{k.counts.audience} contacts · {k.counts.in_followup} in follow-up · {k.counts.sent} sent · {k.counts.replied} replied{k.counts.held ? ` · ${k.counts.held} held` : ''}{k.next_send_at && k.sending_on ? ` · next email due ${whenTZ(k.next_send_at)}` : ''}</div>
+                {k.problems.length > 0 && <ul className="evs-blockers">{k.problems.slice(0, 3).map(p => <li key={p}>{p}</li>)}</ul>}
+              </div>
+              <div><span className={'evs-pill ' + (CAMP_TONE[k.status.key] || 'muted')}>{k.status.label}</span></div>
+            </Link>
+          ))}
+          {!(data?.campaigns || []).length && <p className="evs-empty">No campaigns yet. Select contacts on Leads and choose Create campaign, or start one here.</p>}
+        </div>
+        <TeamSettings />
+      </Box>
+      {creating && <NewEmptyCampaign onClose={() => setCreating(false)} onDone={reload} />}
+    </>
+  )
 }
 
-function Field({ label, wide, children }) {
-  return <label className={'evs-field' + (wide ? ' wide' : '')}><span>{label}</span>{children}</label>
+function NewEmptyCampaign({ onClose, onDone }) {
+  const nav = useNavigate()
+  const [f, setF] = useState({ name: '', kind: 'event', context: '', market: '' })
+  const [err, setErr] = useState(null)
+  const set = k => e => setF(x => ({ ...x, [k]: e.target.value }))
+  async function go() {
+    try { const r = await api.post(`${API}/campaigns`, { ...f, context: f.context || null, market: f.market || null }); onDone(); nav(`${BASE}/outreach/${r.campaign.id}`) }
+    catch (e) { setErr(errText(e)) }
+  }
+  return (
+    <div className="evs-modal-bg" role="dialog" aria-modal="true" aria-label="New campaign" onClick={onClose}>
+      <div className="evs-modal" onClick={e => e.stopPropagation()}>
+        <h2>New campaign</h2>
+        <p className="evs-muted" style={{ marginTop: 0 }}>E.g. "DFW Networking Follow-Up", "Partner Introductions" or "Commercial Cleaning · San Antonio". Add contacts from Leads afterwards.</p>
+        {err && <div className="evs-error">{err}</div>}
+        <div className="evs-form">
+          <label>Name<input value={f.name} onChange={set('name')} autoFocus /></label>
+          <div className="two">
+            <label>Built around<select value={f.kind} onChange={set('kind')}>{KIND_OPTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+            <label>Market <span className="opt">(optional)</span><input value={f.market} onChange={set('market')} /></label>
+          </div>
+          <label>About <span className="opt">(optional)</span><input value={f.context} onChange={set('context')} /></label>
+        </div>
+        <div className="evs-modal-foot"><button className="evs-btn" onClick={onClose}>Cancel</button><button className="evs-btn primary" disabled={!f.name.trim()} onClick={go}>Create (Off)</button></div>
+      </div>
+    </div>
+  )
+}
+
+function TeamSettings() {
+  const { data, error, reload } = useLoad(`${API}/outreach`)
+  const [f, setF] = useState(null)
+  const [msg, setMsg] = useState(null)
+  useEffect(() => { if (data) setF({ ...data, markets: (data.eligible_markets || []).join(', ') }) }, [data])
+  if (error) return <div className="evs-error">{error}</div>
+  if (!data || !f) return null
+  const set = k => e => setF(x => ({ ...x, [k]: e.target.value }))
+  async function save() {
+    setMsg(null)
+    try {
+      await api.put(`${API}/outreach`, { sender_name: f.sender_name, from_email: f.from_email, reply_to_email: f.reply_to_email,
+        mailing_address: f.mailing_address, daily_limit: Number(f.daily_limit) || 60, booking_url: f.booking_url,
+        eligible_markets: f.markets.split(',').map(s => s.trim()).filter(Boolean) })
+      setMsg({ ok: true, text: 'Saved. If the sender or address changed, approve and turn on each campaign again.' }); reload()
+    } catch (e) { setMsg({ ok: false, text: errText(e) }) }
+  }
+  return (
+    <section className="evs-card" style={{ marginTop: 16 }} aria-label="Team settings">
+      <div className="evs-card-h"><h3>Sending settings (all campaigns)</h3><span className="evs-small evs-muted">{data.sending_hours} · {data.sent_today} sent today</span></div>
+      {msg && <div className={msg.ok ? 'evs-ok' : 'evs-error'}>{msg.text}</div>}
+      <p className="evs-small">{data.reply_tracking?.text}</p>
+      <div className="evs-form">
+        <div className="two">
+          <label>From name<input value={f.sender_name || ''} onChange={set('sender_name')} disabled={!data.can_manage} /></label>
+          <label>From address<input value={f.from_email || ''} onChange={set('from_email')} disabled={!data.can_manage} /></label>
+        </div>
+        <div className="two">
+          <label>Replies go to<input value={f.reply_to_email || ''} onChange={set('reply_to_email')} disabled={!data.can_manage} /></label>
+          <label>Daily limit (all campaigns)<input type="number" min="1" max="300" value={f.daily_limit || 60} onChange={set('daily_limit')} disabled={!data.can_manage} /></label>
+        </div>
+        <label>Mailing address (shown in every email)<input value={f.mailing_address || ''} onChange={set('mailing_address')} disabled={!data.can_manage} placeholder="Required by law before anything sends" /></label>
+        <label>Markets outreach may reach <span className="opt">(comma separated, e.g. DFW, Houston; "any" for anywhere)</span><input value={f.markets} onChange={set('markets')} disabled={!data.can_manage} /></label>
+        <label>Default booking link<input value={f.booking_url || ''} onChange={set('booking_url')} disabled={!data.can_manage} /></label>
+        <p className="evs-small evs-muted" style={{ margin: 0 }}>Texting isn't set up for this team, so any text step is held, never sent.</p>
+        {data.can_manage && <div><button className="evs-btn primary" onClick={save}>Save settings</button></div>}
+      </div>
+    </section>
+  )
+}
+
+export function Campaign() {
+  const { id } = useParams()
+  const { data, error, reload } = useLoad(`${API}/campaigns/${id}`)
+  useTitle(data?.name || 'Campaign')
+  const [steps, setSteps] = useState(null)
+  const [meta, setMeta] = useState(null)
+  const [msg, setMsg] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [preview, setPreview] = useState(null)
+  const [testTo, setTestTo] = useState('')
+  useEffect(() => {
+    if (!data) return
+    setSteps(data.steps.map(s => ({ ...s })))
+    setTestTo(t => t || data.my_email || '')
+    setMeta({ name: data.name, offer: data.offer || '', booking_url: data.booking_url || '', context: data.context || '', market: data.market || '', tone: data.tone })
+    api.get(`${API}/campaigns/${id}/preview`).then(setPreview).catch(() => setPreview(null))
+  }, [data, id])
+  const dirty = useMemo(() => data && steps && meta && (JSON.stringify(steps) !== JSON.stringify(data.steps) || meta.offer !== (data.offer || '')
+    || meta.booking_url !== (data.booking_url || '') || meta.name !== data.name || meta.context !== (data.context || '') || meta.market !== (data.market || '') || meta.tone !== data.tone), [data, steps, meta])
+  async function run(fn, ok) {
+    setBusy(true); setMsg(null)
+    try { const r = await fn(); setMsg({ ok: true, text: typeof ok === 'function' ? ok(r) : ok }); await reload() }
+    catch (e) { setMsg({ ok: false, text: errText(e) }) } finally { setBusy(false) }
+  }
+  async function aiDraft() {
+    setBusy(true); setMsg(null)
+    try { const r = await api.post(`${API}/campaigns/${id}/ai-draft`, {}); setSteps(r.steps); setMsg({ ok: true, text: r.note }) }
+    catch (e) { setMsg({ ok: false, text: errText(e) }) } finally { setBusy(false) }
+  }
+  if (error) return <div className="evs-error">{error}</div>
+  if (!data || !steps || !meta) return <div className="evs-loading">Loading…</div>
+  const can = data.can_manage
+  const st = data.status
+  const setStep = (i, k, v) => setSteps(ss => ss.map((s, j) => j === i ? { ...s, [k]: k === 'day' ? Number(v) : v } : s))
+  return (
+    <>
+      <Link className="evs-crumb" to={`${BASE}/outreach`}><Icon name="back" size={14} />Outreach</Link>
+      <PageHead title={data.name} sub={`${data.kind_label}${data.context ? ' · ' + data.context : ''}${data.market ? ' · ' + data.market : ''} · version ${data.version}${data.approved_version ? ` (approved: v${data.approved_version})` : ''}`}>
+        <span className={'evs-pill ' + (CAMP_TONE[st.key] || 'muted')}>{st.label}</span>
+        {can && (
+          <span className="evs-switch">
+            <button aria-label={data.sending_on ? 'Turn campaign off' : 'Turn campaign on'} className={data.sending_on ? 'on' : ''} disabled={busy || (!data.sending_on && (!data.approved || data.problems.length > 0) ) || dirty}
+                    onClick={() => run(() => api.post(`${API}/campaigns/${id}/switch`, { on: !data.sending_on }), r => r.sending_on ? `On. ${r.started} contacts started.` : 'Off. Queued emails wait; nothing is lost.')} />
+            {data.sending_on ? 'On' : 'Off'}
+          </span>
+        )}
+      </PageHead>
+      {msg && <div className={msg.ok ? 'evs-ok' : 'evs-error'}>{msg.text}</div>}
+      {data.problems.length > 0 && <div className="evs-note"><b>What's blocking launch:</b><ul className="evs-blockers">{data.problems.map(p => <li key={p}>{p}</li>)}</ul><span className="evs-small">You can still add contacts and plan while these are open.</span></div>}
+      {!data.problems.length && !data.approved && !dirty && <div className="evs-note">Approve this version to be able to turn the campaign on. Approval alone sends nothing.</div>}
+
+      <div className="evs-kv" style={{ marginBottom: 16 }}>
+        <div><b>{data.counts.audience}</b><span>Contacts</span></div>
+        <div><b>{data.counts.in_followup}</b><span>In follow-up</span></div>
+        <div><b>{data.counts.waiting}</b><span>Waiting for On</span></div>
+        <div><b>{data.counts.held}</b><span>Held</span></div>
+        <div><b>{data.counts.sent}</b><span>Sent</span></div>
+        <div><b>{data.counts.replied}</b><span>Replied</span></div>
+      </div>
+      {data.next_send_at && data.sending_on && <p className="evs-small">Next email due {whenTZ(data.next_send_at)}. It goes out in the next sending window ({data.sending_hours}).</p>}
+
+      <div className="evs-grid2">
+        <section className="evs-card" aria-label="Messages">
+          <div className="evs-card-h"><h3>Messages</h3>{can && <button className="evs-btn sm" disabled={busy} onClick={aiDraft}><Icon name="spark" size={14} />Draft with AI</button>}</div>
+          <div className="evs-form">
+            <div className="two">
+              <label>Name<input value={meta.name} onChange={e => setMeta(m => ({ ...m, name: e.target.value }))} disabled={!can} /></label>
+              <label>Voice<select value={meta.tone} onChange={e => setMeta(m => ({ ...m, tone: e.target.value }))} disabled={!can}><option value="warm">Warm: people you met or were introduced to</option><option value="researched">Researched: no prior relationship</option></select></label>
+            </div>
+            <div className="two">
+              <label>About<input value={meta.context} onChange={e => setMeta(m => ({ ...m, context: e.target.value }))} disabled={!can} /></label>
+              <label>Market<input value={meta.market} onChange={e => setMeta(m => ({ ...m, market: e.target.value }))} disabled={!can} /></label>
+            </div>
+            <label>Offer <span className="opt">(used where a message says {'{offer}'}; leave blank if you haven't decided)</span><textarea value={meta.offer} onChange={e => setMeta(m => ({ ...m, offer: e.target.value }))} disabled={!can} style={{ minHeight: 60 }} /></label>
+            <label>Booking link<input value={meta.booking_url} onChange={e => setMeta(m => ({ ...m, booking_url: e.target.value }))} disabled={!can} /></label>
+          </div>
+          <p className="evs-small evs-muted">Fill-ins: {data.placeholders.map(p => `{${p}}`).join(' ')}. {'{event}'}, {'{referrer}'} and {'{personal_note}'} only come from what's saved on the contact; anyone without it is held for review.</p>
+          {steps.map((s, i) => (
+            <div key={i} className="evs-step">
+              <div className="evs-step-h">Message {i + 1} · day <input type="number" min="0" max="90" value={s.day} onChange={e => setStep(i, 'day', e.target.value)} disabled={!can} aria-label={`Day for message ${i + 1}`} />
+                {s.channel === 'text' && <span className="evs-pill warn">Text: held, not sent</span>}
+                {can && <button className="evs-btn sm ghost danger" onClick={() => setSteps(ss => ss.filter((_, j) => j !== i))}>Remove</button>}</div>
+              <input aria-label={`Subject ${i + 1}`} value={s.subject} onChange={e => setStep(i, 'subject', e.target.value)} disabled={!can} style={{ border: '1px solid #d5dce8', borderRadius: 10, padding: '9px 12px' }} />
+              <textarea aria-label={`Message ${i + 1}`} value={s.body} onChange={e => setStep(i, 'body', e.target.value)} disabled={!can} style={{ border: '1px solid #d5dce8', borderRadius: 10, padding: '9px 12px', minHeight: 140 }} />
+            </div>
+          ))}
+          {can && (
+            <div className="evs-acts">
+              <button className="evs-btn sm" onClick={() => setSteps(ss => [...ss, { day: (ss[ss.length - 1]?.day || 0) + 4, channel: 'email', subject: '', body: '' }])}><Icon name="plus" size={14} />Add message</button>
+              <button className="evs-btn sm primary" disabled={busy || !dirty} onClick={() => run(() => api.put(`${API}/campaigns/${id}`, { ...meta, steps }), r => r.approval_cleared ? 'Saved. This is a new version: approve it, then turn it on.' : 'Saved.')}>Save changes</button>
+              <button className="evs-btn sm" disabled={busy || dirty || data.approved || data.problems.length > 0} onClick={() => run(() => api.post(`${API}/campaigns/${id}/approve`, {}), 'Approved this exact version. Turn it on when ready.')}>{data.approved ? 'Approved' : 'Approve this version'}</button>
+            </div>
+          )}
+        </section>
+        <div>
+          <section className="evs-card" aria-label="Preview">
+            <h3>Preview with real contacts</h3>
+            {dirty && <p className="evs-small evs-muted">Save to refresh the preview.</p>}
+            {!preview?.examples?.length ? <p className="evs-empty">Add contacts to see real examples.</p> : preview.examples.map(ex => (
+              <details key={ex.lead.id} open={ex === preview.examples[0]} style={{ marginBottom: 10 }}>
+                <summary><b>{ex.lead.company}</b> <span className="evs-small evs-muted">{ex.lead.email || 'no email'}</span></summary>
+                {ex.steps.slice(0, 2).map((s, i) => (
+                  <div key={i} className="evs-msg" style={{ marginTop: 8 }}>
+                    <header><span>Message {i + 1} · day {s.day}</span></header>
+                    <div style={{ fontWeight: 700 }}>{s.subject}</div><pre>{s.text}</pre>
+                    <div className="evs-facts-used">{s.facts_used.map(f => <span key={f.key} className="evs-pill blue" title={f.from}>{f.key}</span>)}{s.missing.map(m => <span key={m} className="evs-pill warn">missing: {m}</span>)}</div>
+                  </div>
+                ))}
+              </details>
+            ))}
+            {can && (
+              <div className="evs-form" style={{ marginTop: 10 }}>
+                <label>Send message 1 to yourself<input type="email" value={testTo} onChange={e => setTestTo(e.target.value)} /></label>
+                <div><button className="evs-btn sm" disabled={busy || !testTo} onClick={() => run(() => api.post(`${API}/campaigns/${id}/test`, { to: testTo, step: 1 }), r => `Test sent to ${r.sent_to} (filled in with ${r.filled_with}).`)}>Send test to me</button></div>
+              </div>
+            )}
+          </section>
+          <section className="evs-card" aria-label="Audience">
+            <div className="evs-card-h"><h3>Audience</h3><Link className="evs-btn sm" to={`${BASE}/leads?campaign=none`}>Add from Leads</Link></div>
+            {!data.audience.length ? <p className="evs-empty">No contacts yet.</p> : data.audience.map(a => (
+              <div key={a.id} className="evs-revrow" style={{ justifyContent: 'space-between' }}>
+                <span><Link to={`${BASE}/leads/${a.id}`}>{a.company}</Link> <span className="evs-small evs-muted">{a.email || a.phone || ''}</span></span>
+                <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Status o={a.outreach} />
+                  {can && <button className="evs-btn sm ghost danger" aria-label={`Remove ${a.company}`} onClick={() => run(() => api.delete(`${API}/campaigns/${id}/leads/${a.id}`), 'Removed.')}>✕</button>}</span>
+              </div>
+            ))}
+          </section>
+          {can && !data.archived && <button className="evs-btn sm danger" onClick={() => { if (window.confirm('Archive this campaign? Its contacts stop getting its emails.')) run(() => api.post(`${API}/campaigns/${id}/archive`, {}), 'Archived.') }}>Archive campaign</button>}
+        </div>
+      </div>
+    </>
+  )
 }
 
 // ── Appointments ─────────────────────────────────────────────────────────────
 
 export function Appointments() {
+  useTitle('Appointments')
   const { data, error } = useLoad(`${API}/appointments`)
-  const row = a => (
-    <div key={a.id} className="evs-row">
-      <div className="evs-row-main"><b>{a.company || a.title}</b><small>{a.contact ? a.contact + ' · ' : ''}{when(a.starts_at, LONG)}</small></div>
-      <div className="evs-row-acts">
-        <span className="evs-pill evs-muted">{a.status}</span>
-        {a.lead_id && <Link className="evs-act" to={`${BASE}/leads/${a.lead_id}`}>Open lead</Link>}
-      </div>
-    </div>
-  )
   return (
     <>
-      <PageHead title="Appointments" sub="Calls booked from the link in your emails." />
+      <PageHead title="Appointments" sub="Intro calls and demos. Times in Central." />
       <Box error={error} data={data}>
-        <section className="evs-card"><h3>Coming up</h3>
-          {data?.upcoming?.length ? data.upcoming.map(row) : <p className="evs-empty">No calls booked yet.</p>}
+        {data?.problems?.length > 0 && (
+          <section className="evs-card"><h3><Icon name="warn" />Needs attention</h3>
+            {data.problems.map(a => <div key={a.id} className="evs-item"><div><b>{a.company || a.title}</b><div className="who">{whenTZ(a.starts_at)}</div><span className="evs-pill gold">{a.problem}</span></div>{a.lead_id && <Link className="evs-btn sm" to={`${BASE}/leads/${a.lead_id}`}>Open</Link>}</div>)}
+          </section>
+        )}
+        <section className="evs-card"><h3>Upcoming</h3>
+          {data?.upcoming?.length ? data.upcoming.map(a => (
+            <div key={a.id} className="evs-item"><div><b>{a.company || a.title}</b><div className="who">{whenTZ(a.starts_at)}{a.contact ? ` · ${a.contact}` : ''}</div><span className="evs-pill blue">{a.status}</span></div>{a.lead_id && <Link className="evs-btn sm" to={`${BASE}/leads/${a.lead_id}`}>Open</Link>}</div>
+          )) : <p className="evs-empty">No calls booked. Book one from a contact's page, or they book from the link in your emails.</p>}
         </section>
-        <section className="evs-card"><h3>Last 30 days</h3>
-          {data?.recent?.length ? data.recent.map(row) : <p className="evs-empty">None.</p>}
-        </section>
+        {data?.recent?.length > 0 && <section className="evs-card"><h3>Recent</h3>{data.recent.map(a => <div key={a.id} className="evs-revrow">{whenTZ(a.starts_at)} · {a.company || a.title} <span className="evs-pill muted">{a.status}</span></div>)}</section>}
       </Box>
     </>
   )
@@ -573,38 +1208,28 @@ export function Appointments() {
 // ── Results ──────────────────────────────────────────────────────────────────
 
 export function Results() {
-  const [days, setDays] = useState(14)
+  useTitle('Results')
+  const [days, setDays] = useState(30)
   const { data, error } = useLoad(`${API}/results?days=${days}`)
-  const t = data?.totals || {}
-  const max = Math.max(1, ...(data?.by_day || []).map(d => d.sent))
+  const cols = [['contacts', 'Contacts'], ['emailed', 'Emailed'], ['replied', 'Replied'], ['booked', 'Booked call'], ['completed', 'Call held'], ['demos', 'Demo'], ['signups', 'Signed up']]
   return (
     <>
-      <PageHead title="Results" sub="What the follow-up is doing." />
-      <div className="evs-filters">
-        {[7, 14, 30, 90].map(d => <button key={d} className={'evs-chip' + (days === d ? ' on' : '')} onClick={() => setDays(d)}>Last {d} days</button>)}
-      </div>
+      <PageHead title="Results" sub="Replies, booked calls, completed calls, demos and signups, kept separate.">
+        <select value={days} onChange={e => setDays(Number(e.target.value))} aria-label="Period" className="evs-btn"><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option><option value={365}>Last year</option></select>
+      </PageHead>
       <Box error={error} data={data}>
-        <div className="evs-stats evs-stats-6">
-          <div className="evs-stat"><b>{t.emails_sent}</b><span>Emails sent</span></div>
-          <div className="evs-stat evs-stat-gold"><b>{t.replied}</b><span>Replied ({t.reply_rate}%)</span></div>
-          <div className="evs-stat"><b>{t.booked}</b><span>Booked calls</span></div>
-          <div className="evs-stat"><b>{t.calls_logged}</b><span>Calls logged</span></div>
-          <div className="evs-stat"><b>{t.opted_out}</b><span>Opted out</span></div>
-          <div className="evs-stat"><b>{t.bounced}</b><span>Bad emails</span></div>
-        </div>
-        <section className="evs-card">
-          <h3>Emails sent by day</h3>
-          {data?.by_day?.length ? (
-            <div className="evs-bars">
-              {data.by_day.map(d => (
-                <div key={d.date} className="evs-bar" title={`${d.date}: ${d.sent} sent, ${d.replies} replies`}>
-                  <i style={{ height: `${Math.round(100 * d.sent / max)}%` }} />
-                  <small>{d.date.slice(5)}</small>
-                </div>
-              ))}
+        <div className="evs-kv" style={{ marginBottom: 16 }}>{cols.map(([k, l]) => <div key={k}><b>{data?.totals?.[k] ?? 0}</b><span>{l}</span></div>)}</div>
+        <p className="evs-small evs-muted">{data?.emails_sent} emails sent in this period · {data?.opted_out} opted out · {data?.bounced} bounced. Replies count in the period chosen; calls, demos and signups count across all time.</p>
+        {[['By source', data?.by_source], ['By campaign', data?.by_campaign]].map(([title, rows]) => (
+          <section key={title} className="evs-card"><h3>{title}</h3>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="evs-table" style={{ display: 'table' }}>
+                <thead><tr><th />{cols.map(([k, l]) => <th key={k}>{l}</th>)}</tr></thead>
+                <tbody>{(rows || []).map(r => <tr key={r.label}><td><b>{r.label}</b></td>{cols.map(([k]) => <td key={k}>{r[k]}</td>)}</tr>)}</tbody>
+              </table>
             </div>
-          ) : <p className="evs-empty">Nothing sent in this period.</p>}
-        </section>
+          </section>
+        ))}
       </Box>
     </>
   )
