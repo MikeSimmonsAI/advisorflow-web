@@ -178,6 +178,113 @@
         "detail": "Countryside Land Partners",
         "href": "/sales/demos"
       }
+    ],
+    "demos": [
+      {
+        "opportunity_id": "op-d1",
+        "company_name": "Blue Ridge Gold & Jewelry",
+        "contact_name": null,
+        "industry": "jewelry",
+        "stage": "prospect",
+        "stage_label": "Prospect",
+        "status": "open",
+        "customer": false,
+        "demo_slot": "platform",
+        "live": true,
+        "expires_at": "2027-02-04T04:33:36",
+        "created_at": "2026-09-15T00:00:00",
+        "url": "https://example.test/demo/d1?staff=1"
+      },
+      {
+        "opportunity_id": "op-d2",
+        "company_name": "Atlantis Light & Power",
+        "contact_name": null,
+        "industry": "energy",
+        "stage": "onboarding",
+        "stage_label": "Onboarding",
+        "status": "open",
+        "customer": false,
+        "demo_slot": "platform",
+        "live": true,
+        "expires_at": "2026-12-15T22:23:15",
+        "created_at": "2026-09-15T00:00:00",
+        "url": "https://example.test/demo/d2?staff=1"
+      },
+      {
+        "opportunity_id": "op-d3",
+        "company_name": "Building Equity Investments LLC",
+        "contact_name": null,
+        "industry": "real estate",
+        "stage": "lost",
+        "stage_label": "Lost",
+        "status": "lost",
+        "customer": false,
+        "demo_slot": "platform",
+        "live": true,
+        "expires_at": "2026-12-18T01:58:55",
+        "created_at": "2026-09-15T00:00:00",
+        "url": "https://example.test/demo/d3?staff=1"
+      },
+      {
+        "opportunity_id": "op-d4",
+        "company_name": "Countryside Land Partners",
+        "contact_name": null,
+        "industry": "land",
+        "stage": "lost",
+        "stage_label": "Lost",
+        "status": "lost",
+        "customer": false,
+        "demo_slot": "website",
+        "live": true,
+        "expires_at": "2026-12-14T23:01:11",
+        "created_at": "2026-09-15T00:00:00",
+        "url": "https://example.test/demo/d4?staff=1"
+      },
+      {
+        "opportunity_id": "op-d5",
+        "company_name": "VP Wraps Vehicle Protection",
+        "contact_name": null,
+        "industry": "automotive",
+        "stage": "lost",
+        "stage_label": "Lost",
+        "status": "lost",
+        "customer": false,
+        "demo_slot": "platform",
+        "live": true,
+        "expires_at": "2026-12-14T02:41:30",
+        "created_at": "2026-09-15T00:00:00",
+        "url": "https://example.test/demo/d5?staff=1"
+      },
+      {
+        "opportunity_id": "op-d6",
+        "company_name": "Commercial Cleaning Blueprint — Daniel Almaguer",
+        "contact_name": "Daniel Almaguer",
+        "industry": "cleaning",
+        "stage": "lost",
+        "stage_label": "Lost",
+        "status": "lost",
+        "customer": false,
+        "demo_slot": "platform",
+        "live": true,
+        "expires_at": "2026-11-25T21:55:23",
+        "created_at": "2026-09-15T00:00:00",
+        "url": "https://example.test/demo/d6?staff=1"
+      },
+      {
+        "opportunity_id": "op-d7",
+        "company_name": "Example Expired Demo Co",
+        "contact_name": null,
+        "industry": "cleaning",
+        "stage": "demo_build",
+        "stage_label": "Demo build",
+        "status": "open",
+        "customer": false,
+        "demo_slot": "platform",
+        "live": false,
+        "expires_at": "2026-10-01T00:00:00",
+        "created_at": "2026-09-15T00:00:00",
+        "url": null
+      }
     ]
   },
   "salesperson": {
@@ -210,7 +317,8 @@
     "pins": [
       "deal_builder::sales"
     ],
-    "attention": []
+    "attention": [],
+    "demos": []
   },
   "operator": {
     "user": {
@@ -252,6 +360,7 @@
       }
     },
     "pins": [],
-    "attention": []
+    "attention": [],
+    "demos": []
   }
 }

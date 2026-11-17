@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import './commandCenter.css'
 import { accentPhoto, cardPhoto, widePhoto } from './photos'
+import DemosPanel from './DemosPanel'
 import {
   availableCategories, cardStatus, categoryOf, chooseFeatured, factLine, firstName, healthLabel,
   matchesQuery, photoKeyFor, roleLabel, shortLine, summaryCounts,
@@ -78,6 +80,7 @@ const Icon = {
   binoculars: <path d="M6 18a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 18a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM9 15h6M4 13l2-8h3l1 7M20 13l-2-8h-3l-1 7" />,
   star: <path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" />,
   key: <path d="M15 8a4 4 0 1 1-3.5 6L5 20.5 3.5 19M8 17l2 2" />,
+  play: <path d="M3 5h18v12H3zM8 21h8M12 17v4M10 8.5v5l4.5-2.5z" />,
 }
 function Svg({ name, size = 20, fill = 'none' }) {
   return (
@@ -123,8 +126,19 @@ function CardTile({ item, photo }) {
 
 export default function CommandCenter({
   user, cards, others, previews, pins, pinNote, onTogglePin, keyOf, onChoose, hrefOf,
-  attention, health, isOwner, canManageTeam, myDayHref, onSignOut,
+  attention, health, isOwner, canManageTeam, myDayHref, demos = [], onSignOut,
 }) {
+  // THE DEMOS PAGE lives in the address (/workspaces?view=demos) so Back and
+  // a bookmark both work; it is offered only when the server listed demos.
+  const [params, setParams] = useSearchParams()
+  const onDemos = params.get('view') === 'demos' && demos.length > 0
+  const showView = (v) => {
+    setNavOpen(false)
+    const next = new URLSearchParams(params)
+    if (v) next.set('view', v); else next.delete('view')
+    setParams(next)
+    if (typeof window !== 'undefined') window.scrollTo(0, 0)
+  }
   const [view, setView] = useState(readView)
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('all')
@@ -179,15 +193,6 @@ export default function CommandCenter({
   }, [navOpen])
 
   const choose = (v) => { setView(v); saveView(v) }
-  const jumpToWorkspaces = () => {
-    setNavOpen(false)
-    const el = workspacesRef.current
-    if (!el) return
-    const reduce = typeof window !== 'undefined' && window.matchMedia
-      && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
-    el.focus({ preventScroll: true })
-  }
 
   const nothing = !all.length && !previews.length
   const featuredPhoto = featured ? photoKeyFor(featured) : null
@@ -210,13 +215,17 @@ export default function CommandCenter({
           </button>
         </div>
         <nav className="pa2-nav">
-          <a className="pa2-nav-item is-active" href="/workspaces" aria-current="page">
+          <a className={'pa2-nav-item' + (onDemos ? '' : ' is-active')} href="/workspaces"
+             aria-current={onDemos ? undefined : 'page'}
+             onClick={(e) => { e.preventDefault(); showView(null) }}>
             <Svg name="home" size={22} /> Program Access
           </a>
-          {allCount > 0 && (
-            <button type="button" className="pa2-nav-item" onClick={jumpToWorkspaces}>
-              <Svg name="layers" size={22} /> My Workspaces
-            </button>
+          {demos.length > 0 && (
+            <a className={'pa2-nav-item' + (onDemos ? ' is-active' : '')} href="/workspaces?view=demos"
+               aria-current={onDemos ? 'page' : undefined}
+               onClick={(e) => { e.preventDefault(); showView('demos') }}>
+              <Svg name="play" size={22} /> Demos <span className="pa2-nav-count">{demos.length}</span>
+            </a>
           )}
           {myDayHref && (
             <a className="pa2-nav-item" href={myDayHref}><Svg name="day" size={22} /> My Day</a>
@@ -263,12 +272,13 @@ export default function CommandCenter({
               <p>Your business command center. Access, manage and grow all of your EvoSys workspaces.</p>
             </div>
             <div className="pa2-top-tools">
-              {(allCount + previews.length) > 0 && (
+              {(allCount + previews.length + demos.length) > 0 && (
                 <label className="pa2-search">
                   <Svg name="search" size={20} />
                   <span className="pa2-sr">Search your workspaces</span>
                   <input type="search" value={query} onChange={e => setQuery(e.target.value)}
-                         placeholder="Search workspaces…" aria-label="Search your workspaces" />
+                         placeholder={onDemos ? 'Search demos…' : 'Search workspaces…'}
+                         aria-label={onDemos ? 'Search your demos' : 'Search your workspaces'} />
                 </label>
               )}
               {attention.length > 0 && (
@@ -315,7 +325,9 @@ export default function CommandCenter({
         <main id="pa2-main" className="pa2-main" tabIndex={-1}>
           {pinNote && <p className="pa2-note" role="status">{pinNote}</p>}
 
-          {featured && !q && (
+          {onDemos && <DemosPanel demos={demos} query={q} rawQuery={query.trim()} onBack={() => showView(null)} />}
+
+          {!onDemos && featured && !q && (
             <section className="pa2-feature" aria-labelledby="pa2-feature-title" data-program-key={keyOf(featured)}>
               <img className="pa2-feature-img" src={widePhoto(featuredPhoto)} alt="" width="900" height="440"
                    fetchpriority="high" />
@@ -345,7 +357,7 @@ export default function CommandCenter({
             </section>
           )}
 
-          {allCount > 0 && (
+          {!onDemos && allCount > 0 && (
             <section className="pa2-section" aria-labelledby="pa2-ws-title" ref={workspacesRef} tabIndex={-1}>
               <div className="pa2-section-head">
                 <h2 id="pa2-ws-title"><Svg name="building" size={22} />
@@ -389,7 +401,7 @@ export default function CommandCenter({
             </section>
           )}
 
-          {previews.length > 0 && (
+          {!onDemos && previews.length > 0 && (
             <section className="pa2-previews" aria-labelledby="pa2-pv-title">
               <div className="pa2-pv-intro">
                 <h2 id="pa2-pv-title"><Svg name="binoculars" size={24} /> Prospect Previews</h2>
@@ -401,7 +413,7 @@ export default function CommandCenter({
             </section>
           )}
 
-          {nothing && (
+          {!onDemos && nothing && (
             <div className="pa2-empty">
               <b>No workspaces have been assigned to this account.</b>
               <span>Ask your administrator to grant access to a program.</span>
