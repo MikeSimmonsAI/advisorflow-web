@@ -88,6 +88,32 @@ def config_for_org(db: Session, org_id: Optional[str]) -> Optional[Dict]:
     return cfg
 
 
+def owns_window(org_id: Optional[str], db: Optional[Session] = None) -> bool:
+    """A program with its own text schedule sets its own hours (owner, Nov 16:
+    Restland 8:30 AM - 7:00 PM Central every day). Those hours replace the
+    8:30 AM - 7:45 PM Eastern clock for its families; the family's own 8 AM -
+    9 PM local clock still applies (contact_hours). Read with its own short
+    session when the cache is cold; False on any error (the Eastern clock
+    then stays in force)."""
+    if not org_id:
+        return False
+    hit = _cache.get(org_id)
+    if hit is not None and datetime.utcnow() - hit[0] < CACHE_TTL:
+        return hit[1] is not None
+    if db is not None:
+        return config_for_org(db, org_id) is not None
+    try:
+        from app.deps import SessionLocal
+        s = SessionLocal()
+        try:
+            return config_for_org(s, org_id) is not None
+        finally:
+            s.close()
+    except Exception:                                    # noqa: BLE001
+        log.exception("own-window lookup failed for %s", org_id)
+        return False
+
+
 def clear_cache() -> None:
     _cache.clear()
 

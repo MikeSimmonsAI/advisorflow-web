@@ -30,7 +30,7 @@ export const WHOLESALE_NAV = Object.freeze([
   {
     key: 'acquisition',
     label: 'Acquisition',
-    routes: ['/wholesale/foreclosures', INBOX_ROUTE, '/wholesale/properties', '/wholesale/evosense/strategies',
+    routes: ['/wholesale/foreclosures', INBOX_ROUTE, '/wholesale/portfolios', '/wholesale/properties', '/wholesale/evosense/strategies',
       MULTIFAMILY_ROUTE,
       // Not named in the approved list; they are acquisition screens, so they
       // stay discoverable here (each still carries its own brand flag).

@@ -207,6 +207,8 @@ export function programStyle(item) {
   const name = String(it.display || it.organization_name || '').toLowerCase()
   const pick = (accent, icon) => ({ accent: ACCENTS[accent], second: SECOND[accent] || null, icon, tone: accent })
   if (it.type === 'deal_builder') return pick('sales', it.key === 'onboarding' || it.key === 'my_team' ? 'team' : 'calculator')
+  if (it.type === 'project_checklist') return pick('back_office', 'check')
+  if (program === 'evosys_sales') return pick('sales', 'briefcase')
   if (program === 'sci') return pick('sci', 'layers')
   if (/blue ridge/.test(name)) return pick('blue_ridge', 'mountain')
   if (program === 'funeral' || /restland/.test(name)) return pick('restland', 'building')
@@ -272,4 +274,20 @@ export function chatSections(rooms, query) {
   const messages = !q ? list : list.filter(r => [r.name, r.last && r.last.text, r.last && r.last.sender_name]
     .some(v => v && String(v).toLowerCase().includes(q)))
   return { featured: [sales, news].filter(Boolean), messages }
+}
+
+/**
+ * PINNED, BEFORE THE PERSON PICKS PHONE PINS: show what desktop Program Access
+ * features for the same login - their desktop pins (same key format), else
+ * desktop's featured card (the first workspace the server lists). Never a
+ * preview, never more than MAX_PINS, and only entries still in the inventory.
+ * Returns { items, fromDesktop }.
+ */
+export function pinnedOrDesktop(inventory, phoneKeys, desktopKeys, keyOf, max = MAX_PINS) {
+  const own = pinnedItems(inventory, phoneKeys, keyOf, max)
+  if (own.length) return { items: own, fromDesktop: false }
+  const usable = (inventory || []).filter(it => it && it.type !== 'preview' && it.program !== 'preview')
+  const desk = pinnedItems(usable, desktopKeys, keyOf, max)
+  if (desk.length) return { items: desk, fromDesktop: true }
+  return { items: usable.slice(0, 1), fromDesktop: true }
 }

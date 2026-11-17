@@ -53,6 +53,7 @@ SCOPE_LABELS = {ASSIGNED: "Only records assigned to them",
 # API), so it follows Acquisition Command and cannot be restricted separately.
 MODULES: List[Tuple[str, str, str, bool, str]] = [
     ("acquisition", "Acquisition Command", "Command center, Discovery Inbox (including its Multifamily view), funnel and handoffs.", False, "Acquisition"),
+    ("portfolios", "Portfolio Acquisitions", "Seller portfolios: importing the seller's list, evaluating each property and building purchase packages. Record visibility applies to the properties inside a portfolio.", True, "Acquisition"),
     ("properties", "Properties and discovery", "Property records, EvoSense discovery, strategies and hunts, comps and valuation.", True, "Acquisition"),
     ("foreclosures", "Foreclosures", "Foreclosure filings and events.", False, "Acquisition"),
     ("sellers", "Seller leads and contacts", "Sellers, callbacks, notes, call queue, first contact and follow-ups.", True, "Acquisition"),
@@ -104,6 +105,8 @@ _RULES: List[Tuple[str, str]] = [
     (r"^/wholesale/ops/pilot(/|$)", "settings"),
     (r"^/wholesale/data-sources(/|$)", "settings"),
     (r"^/wholesale/deal-room/(settings|activate|pause)(/|$)", "settings"),
+    # portfolio acquisitions (before the properties catch-all)
+    (r"^/wholesale/portfolios(/|$)", "portfolios"),
     # foreclosures
     (r"^/wholesale/evosense/foreclosure", "foreclosures"),
     # acquisition command
@@ -218,7 +221,8 @@ def action_for(path: str, method: str) -> str:
 _CREATE_TAILS = {"notes", "photos", "batch", "documents", "upload", "comps", "add", "signals", "contacts",
                  "offers", "repairs", "itemized", "files", "follow-up", "listing", "invites", "outreach",
                  "nurture", "reply", "send", "resend", "remind", "signature-request", "permission-link",
-                 "from-exception", "underwriting", "disposition", "cadence", "photo", "proof-of-funds"}
+                 "from-exception", "underwriting", "disposition", "cadence", "photo", "proof-of-funds",
+                 "imports", "packages", "duplicate"}
 
 
 def catalog(routes: Iterable[Any]) -> List[Dict[str, Any]]:

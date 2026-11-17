@@ -172,6 +172,14 @@ def _sales_items(db: Session, user: User) -> List[Dict[str, Any]]:
     return items
 
 
+@router.get("/demos")
+def get_demos(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Every demo built for deals this login manages (open, won or lost).
+    Same people as Prospect Previews: the brand's sales managers."""
+    from app.services import workspace_access
+    return {"items": workspace_access.demo_library(db, user)}
+
+
 @router.get("/attention")
 def attention(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:

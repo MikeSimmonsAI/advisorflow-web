@@ -88,19 +88,24 @@ with sync_playwright() as pw:
         ok(f"{tag}: a pin without access is hidden", len(pg.query_selector_all(".ta-pins .ta-pin"))==1)
         req=urllib.request.Request(API+"/team-app/pins",method="PUT",data=json.dumps({"keys":pinned}).encode(),headers={"Authorization":"Bearer "+t,"Content-Type":"application/json"})
         urllib.request.urlopen(req); pg.reload(); pg.wait_for_selector(".ta-pin")
-        # workspace return
-        pg.click(".ta-pins .ta-pin >> nth=0"); pg.wait_for_timeout(2500)
-        left=pg.url
-        back=pg.query_selector("a:has-text('Programs'), button:has-text('Programs'), a:has-text('Switch program'), button:has-text('Switch program'), a:has-text('Program Access')")
-        if back:
-            back.click(); pg.wait_for_timeout(2000)
-        ok(f"{tag}: open pinned program and come back to /app/programs", "/app/" not in left and pg.url.endswith("/app/programs"), (left, pg.url))
+        # a pinned program opens its phone workspace (/app/p/...); Back returns to Programs
+        pg.click(".ta-pins .ta-pin >> nth=0"); pg.wait_for_url("**/app/p/**"); left=pg.url
+        pg.go_back(); pg.wait_for_url("**/app/programs")
+        ok(f"{tag}: pinned program opens its phone workspace, Back returns to Programs", "/app/p/" in left, left)
+        # same look as desktop V2: photos, short lines, category chips
+        photos=pg.eval_on_selector_all(".ta-tile--photo","els=>els.map(e=>getComputedStyle(e).getPropertyValue('--photo'))")
+        ok(f"{tag}: every tile wears a desktop program photo", photos and all(".webp" in x for x in photos), photos[:2])
+        chips=pg.eval_on_selector_all(".ta-chip","els=>els.map(e=>e.textContent)")
+        ok(f"{tag}: desktop category chips", chips[:1]==[f"All ({total})"] and len(chips)>=3, chips)
+        pg.click(".ta-chip >> nth=1"); pg.wait_for_timeout(200)
+        n1=int(pg.get_attribute(".ta-grid","data-count")); pg.click(".ta-chip >> nth=0"); pg.wait_for_timeout(200)
+        ok(f"{tag}: a chip narrows the grid, All restores it", 0<n1<total and int(pg.get_attribute(".ta-grid","data-count"))==total, (n1,total))
         # Chat inbox
         pg.goto(WEB+"/app/chat"); pg.wait_for_selector(".ta-chatcard")
         feat=pg.eval_on_selector_all(".ta-feat","els=>els.map(e=>e.dataset.room)")
         ok(f"{tag}: Sales Team + Announcements shortcuts", feat==["sales-team","announcements"], feat)
         if tag=="iphone": pg.screenshot(path=OUT+"04-chat-inbox.png")
-        pg.click(".ta-feat >> nth=0"); pg.wait_for_selector(".ta-msg")
+        pg.click(".ta-feat >> nth=0"); pg.wait_for_selector(".ta-msgs")
         pg.click(".ta-input"); pg.fill(".ta-input","See you at the @Rep")
         pg.set_viewport_size({"width":pg.viewport_size["width"],"height":480}); pg.wait_for_timeout(500)
         vis=pg.eval_on_selector(".ta-composer","e=>{const r=e.getBoundingClientRect();return r.bottom<=innerHeight+1 && r.top>0}")
@@ -109,7 +114,9 @@ with sync_playwright() as pw:
         if tag=="iphone": pg.screenshot(path=OUT+"05-conversation-keyboard.png")
         pg.fill(".ta-input",""); pg.set_viewport_size({"width":pg.viewport_size["width"],"height":844 if tag=="iphone" else 915})
         # Activity
-        pg.goto(WEB+"/app/activity"); pg.wait_for_selector(".ta-acard, .ta-state")
+        pg.goto(WEB+"/app/activity")
+        try: pg.wait_for_selector(".ta-acard", timeout=15000)
+        except Exception: pass
         ok(f"{tag}: Updates cards", len(pg.query_selector_all(".ta-acard"))>0)
         if tag=="iphone": pg.screenshot(path=OUT+"06-activity-updates.png")
         pg.click("button[role=tab]:has-text('Upcoming')"); pg.wait_for_selector(".ta-daynav")
@@ -129,6 +136,8 @@ with sync_playwright() as pw:
     # Team access tile only for the account that may change access; sign out; account switch
     ctx=br.new_context(**pw.devices["iPhone 13"]); pg=ctx.new_page()
     login(pg,"owner"); pg.goto(WEB+"/app/account"); pg.wait_for_selector(".ta-actions")
+    try: pg.wait_for_selector(".ta-action-label:has-text('Team access')", timeout=10000)
+    except Exception: pass
     ok("owner sees Team access", "Team access" in pg.eval_on_selector_all(".ta-action-label","els=>els.map(e=>e.textContent)"))
     pg.click("text=Team access"); pg.wait_for_selector(".ta-access"); ok("Team access opens for owner", True)
     pg.goto(WEB+"/app/account"); pg.click("text=Sign out"); pg.wait_for_url("**/app/login")
@@ -136,8 +145,16 @@ with sync_playwright() as pw:
     login(pg,"partner"); pg.goto(WEB+"/app/account"); pg.wait_for_selector(".ta-actions")
     ok("partner (switched account) has no Team access tile", "Team access" not in pg.eval_on_selector_all(".ta-action-label","els=>els.map(e=>e.textContent)"))
     pg.goto(WEB+"/app/account/team-access"); pg.wait_for_selector(".ta-state--err"); ok("partner typing the Team access URL is refused", True)
-    pg.goto(WEB+"/app/programs"); pg.wait_for_selector(".ta-section")
-    ok("partner does not inherit platform's pins", len(pg.query_selector_all(".ta-pins .ta-pin"))==0)
+    pg.goto(WEB+"/app/programs"); pg.wait_for_selector(".ta-section"); pg.wait_for_timeout(800)
+    pk=[e.get_attribute("data-program-key") for e in pg.query_selector_all(".ta-pins .ta-pin")]
+    ok("partner does not inherit platform's pins (shows its own desktop featured)", pk and pg.query_selector(".ta-pin-note") is not None, pk)
+    # desktop pins fill an empty phone Pinned row
+    pt=pg.evaluate("localStorage.getItem('af_token')") or ""
+    grid=[e.get_attribute("data-program-key") for e in pg.query_selector_all(".ta-grid [data-program-key]")]
+    want=grid[-2:]
+    pg.evaluate("""async k=>{const t=localStorage.getItem('af_token');await fetch('%s/launcher/pins',{method:'PUT',headers:{'Content-Type':'application/json',Authorization:'Bearer '+t},body:JSON.stringify({keys:k})})}""" % API, want)
+    pg.reload(); pg.wait_for_selector(".ta-pin"); pg.wait_for_timeout(800)
+    ok("partner: desktop pins fill the phone's Pinned row", [e.get_attribute("data-program-key") for e in pg.query_selector_all(".ta-pins .ta-pin")]==want)
     pg.goto(WEB+"/app/time"); pg.wait_for_url("**/app/activity"); ok("old Time link lands on Activity", True)
     ctx.close()
     # narrow phone

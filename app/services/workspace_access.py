@@ -927,6 +927,88 @@ def preview_contexts(db: Session, user: User) -> List[Dict[str, Any]]:
     return out
 
 
+def demo_library(db: Session, user: User) -> List[Dict[str, Any]]:
+    """EVERY DEMO BUILT for deals this person may already manage - the
+    launcher's Demos page.
+
+    WHO: exactly the people who get Prospect Previews - sales managers of the
+    brand that owns the deal (they can already list and revoke these links at
+    /sales/opportunities/{id}/demo-sites). Anyone else gets an empty list.
+
+    WHAT: one entry per deal that has at least one demo link, whatever the
+    deal's stage or status (open, won or lost) - unlike previews, which are
+    open deals only. The best link is chosen as for previews (a live platform
+    demo, then a live website concept); a deal whose links are all expired or
+    revoked is still listed, marked not live, with no link. Nothing is created,
+    extended or re-opened here.
+
+    Never raises: on any error the page shows no demos.
+    """
+    out: List[Dict[str, Any]] = []
+    try:
+        from app.models.sales_models import Opportunity, ROLE_SALES_MANAGER, STAGE_LABELS
+        from app.models.demo_site_models import DemoSite
+        from app.services import demo_sites as _demos
+        from app.services.appointment_invites import brand_identity_for_brand, PUBLIC_BASE_URL
+
+        brands = sorted({m.scope_id for m in platform_memberships(user, db)
+                         if m.role == ROLE_SALES_MANAGER and m.is_active})
+        if not brands:
+            return out
+        demos = (db.query(DemoSite)
+                   .filter(DemoSite.brand_sales_org_id.in_(brands))
+                   .order_by(DemoSite.created_at.desc()).all())
+        if not demos:
+            return out
+        opps = {o.id: o for o in db.query(Opportunity)
+                .filter(Opportunity.id.in_({d.opportunity_id for d in demos if d.opportunity_id}),
+                        Opportunity.brand_sales_org_id.in_(brands)).all()}
+        now = datetime.utcnow()
+
+        def rank(d):
+            platform = (d.slot or _demos.DEFAULT_SLOT) == _demos.DEFAULT_SLOT
+            return (1 if d.is_live(now) else 0, 1 if platform else 0)
+
+        best: Dict[str, Any] = {}
+        for d in demos:                                  # newest first
+            if d.opportunity_id not in opps:
+                continue
+            cur = best.get(d.opportunity_id)
+            if cur is None or rank(d) > rank(cur):
+                best[d.opportunity_id] = d
+        bases: Dict[str, str] = {}
+        for opp_id, d in best.items():
+            o = opps[opp_id]
+            live = d.is_live(now)
+            url = None
+            if live:
+                if o.brand_sales_org_id not in bases:
+                    ident = brand_identity_for_brand(db, o.brand_sales_org_id) or {}
+                    bases[o.brand_sales_org_id] = ident.get("app_base_url") or PUBLIC_BASE_URL
+                url = _demos.public_url(bases[o.brand_sales_org_id], d.slug or d.token) + "?staff=1"
+            out.append({
+                "opportunity_id": o.id,
+                "company_name": o.company_name,
+                "contact_name": o.contact_name,
+                "industry": (getattr(o, "industry", None) or "").strip().lower() or None,
+                "stage": o.stage,
+                "stage_label": STAGE_LABELS.get(o.stage, o.stage),
+                "status": o.status,
+                "customer": o.customer_organization_id is not None,
+                "demo_slot": d.slot or _demos.DEFAULT_SLOT,
+                "live": live,
+                "expires_at": d.expires_at.isoformat() if d.expires_at else None,
+                "created_at": d.created_at.isoformat() if getattr(d, "created_at", None) else None,
+                "url": url,
+            })
+        out.sort(key=lambda x: (not x["live"], x["status"] != "open", (x["company_name"] or "").lower()))
+    except Exception:                                    # pragma: no cover
+        _log.warning("could not resolve the demo library for %s",
+                     getattr(user, "id", None), exc_info=True)
+        return []
+    return out
+
+
 def back_office_destinations(db: Session, platform_contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """One Back Office destination per brand sales team in `platform_contexts`
     (the caller's own active sales memberships), carrying the brand."""

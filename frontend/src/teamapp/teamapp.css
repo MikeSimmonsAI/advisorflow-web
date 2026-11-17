@@ -381,3 +381,32 @@
 .ta-keep { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ta-muted); padding: 8px 2px 0; min-height: 36px; }
 .ta-keep input { width: 20px; height: 20px; }
 @media (max-width: 340px) { .ta-stats { grid-template-columns: 1fr; } .ta-stat { flex-direction: row; align-items: baseline; gap: 10px; } }
+
+/* ── Same look as desktop Program Access V2: program photos, short lines,
+   category chips (photos from pages/program/v2/img, bundled and licensed) ── */
+.ta-pin.ta-pin--photo { min-height: 128px; justify-content: flex-end;
+  background: linear-gradient(180deg, rgba(8, 18, 40, .05) 0%, rgba(8, 18, 40, .55) 55%, rgba(8, 18, 40, .88) 100%),
+              linear-gradient(135deg, color-mix(in srgb, var(--acc) 55%, transparent), transparent 60%),
+              var(--photo) center / cover no-repeat, var(--acc); }
+.ta-pin--photo .ta-pin-icon { position: absolute; top: 10px; left: 10px; margin: 0; width: 38px; height: 38px; border-radius: 10px;
+  display: grid; place-items: center; background: rgba(255, 255, 255, .94); color: var(--acc); box-shadow: 0 2px 6px rgba(0, 0, 0, .2); }
+.ta-pin--photo.has-second .ta-pin-icon { color: var(--acc); box-shadow: inset 0 -3px 0 var(--acc2), 0 2px 6px rgba(0, 0, 0, .2); }
+.ta-pin--photo .ta-pin-name { font-size: 18px; }
+.ta-pin--photo .ta-pin-sub { font-size: 12.5px; opacity: .92; text-shadow: 0 1px 2px rgba(0, 0, 0, .35); }
+.ta-pin-note { margin: -4px 0 8px; }
+
+.ta-tile.ta-tile--photo { position: relative; padding: 0 0 10px; overflow: hidden; gap: 4px; }
+.ta-tile-photo { display: block; width: 100%; height: 58px; flex: none;
+  background: linear-gradient(180deg, transparent 40%, rgba(8, 18, 40, .35)),
+              linear-gradient(135deg, color-mix(in srgb, var(--acc) 45%, transparent), transparent 70%),
+              var(--photo) center / cover no-repeat, var(--acc); }
+.ta-tile--photo .ta-tile-icon { width: 36px; height: 36px; border-radius: 10px; margin: -20px 0 2px; border: 2px solid #fff;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, .25); position: relative; }
+.ta-tile--photo .ta-tile-name { padding: 0 6px; font-size: 14px; }
+.ta-tile--photo .ta-tile-sub { padding: 0 6px; }
+
+.ta-chips { display: flex; gap: 8px; overflow-x: auto; margin: -2px -4px 12px; padding: 2px 4px 4px; scrollbar-width: none; }
+.ta-chips::-webkit-scrollbar { display: none; }
+.ta-chip { flex: none; min-height: 38px; padding: 0 14px; border-radius: 19px; border: 1px solid #cfd8e6; background: #fff;
+  color: var(--ta-navy); font: inherit; font-size: 14.5px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.ta-chip.is-on { background: var(--ta-blue); border-color: var(--ta-blue); color: #fff; box-shadow: 0 2px 6px rgba(21, 84, 232, .3); }

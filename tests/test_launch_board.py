@@ -144,10 +144,11 @@ class RouterContract(unittest.TestCase):
                   and any(isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
                           and isinstance(d.func.value, ast.Name) and d.func.value.id == "router"
                           for d in n.decorator_list)]
-        # 3 board routes + the read-only GitHub status (Oct 22 2026 Launch Board).
-        self.assertEqual(len(routes), 4)
+        # Four Launch Board routes and five project checklist routes.
+        self.assertEqual(len(routes), 9)
         for fn in routes:
-            self.assertIn("require_god", ast.dump(fn.args), fn.name)
+            guard = "require_checklist_access" if "checklist" in fn.name else "require_god"
+            self.assertIn(guard, ast.dump(fn.args), fn.name)
         with open(os.path.join(ROOT, "app", "main.py"), encoding="utf-8") as f:
             self.assertIn("god_launch_board_router", f.read())
 

@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react'
-import '../../design/evTokens.css'
-import './ProgramAccessPortal.css'
 import { programCards, isBookaBoostBrand } from './programAccessModel'
 import { salesToolCards } from './programDestinations'
 import BookaBoostProgramAccess from './BookaBoostProgramAccess'
-import WorkspaceCard from '../../design/WorkspaceCard'
+import CommandCenter from './v2/CommandCenter'
 import { api, getCurrentUser, logout } from '../../api/client'
 
 /**
@@ -13,28 +11,14 @@ import { api, getCurrentUser, logout } from '../../api/client'
  * never computes permissions or changes credentials. Deal Builder links use
  * the server's separate access response.
  *
- * UI-REDESIGN lane, issue #275 — see docs/redesign/PROGRAM_ACCESS_SPEC.md.
+ * UI-REDESIGN lane: Program Access V2 (Premium Command Center) - see
+ * docs/redesign/program-access-v2/README.md. Earlier spec: issue #275.
  */
-
-const VIEW_KEY = 'ev.programAccess.view'
-function readView() {
-  try { return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid' } catch { return 'grid' }
-}
-function saveView(v) {
-  try { localStorage.setItem(VIEW_KEY, v) } catch { /* storage unavailable: keep in memory only */ }
-}
-
-function initials(name) {
-  const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
-  if (!parts.length) return '?'
-  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
-}
-
 
 /**
  * Which launcher look to wear is the SERVER's answer (/auth/my-contexts
  * `brand`). A BookaBoost login gets the BookaBoost launcher; everyone else
- * gets the EvoSys launcher below, unchanged. Same cards either way.
+ * gets the EvoSys command center below. Same cards either way.
  */
 export default function ProgramAccessPortal(props) {
   if (isBookaBoostBrand(props.contexts)) return <BookaBoostProgramAccess {...props} />
@@ -43,11 +27,7 @@ export default function ProgramAccessPortal(props) {
 
 function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) {
   const { visible: workspaceCards, others, previews } = programCards(contexts)
-  const [view, setView] = useState(readView)
-  const [query, setQuery] = useState('')
   const user = userProp !== undefined ? userProp : getCurrentUser()
-  const personName = user?.full_name || user?.name || user?.email || ''
-  const personEmail = user?.full_name && user?.email ? user.email : ''
   // Deal Builder cards come from the server's /auth/my-contexts answer
   // (`deal_builder`), the same checks the /deal-builder routes enforce. An
   // older backend without that field is asked directly instead.
@@ -66,7 +46,8 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
 
   // PINS: this account's own preference, kept on the server. A pin only shows
   // while the server still lists that card for this login (a removed grant
-  // removes the card). Pins never load = no Pinned row; cards still work.
+  // removes the card). Pins never load = nothing pinned; cards still work.
+  // The first pinned card is the FEATURED workspace.
   const [pins, setPins] = useState([])
   const [pinNote, setPinNote] = useState('')
   useEffect(() => {
@@ -77,8 +58,8 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
     return () => { active = false }
   }, [user?.id])
 
-  // NEEDS ATTENTION: up to three real items from the server. Any failure here
-  // hides the row and nothing else.
+  // NEEDS ATTENTION (the notifications list): up to three real items from the
+  // server. Any failure hides the bell and nothing else.
   const [attention, setAttention] = useState([])
   useEffect(() => {
     let active = true
@@ -88,28 +69,43 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
     return () => { active = false }
   }, [user?.id])
 
+  // DEMOS: every demo built for deals this login manages (open, won or lost)
+  // - the server's /launcher/demos answer, the same people as Previews. Any
+  // failure simply leaves the Demos page out.
+  const [demos, setDemos] = useState([])
+  useEffect(() => {
+    let active = true
+    api.get('/launcher/demos', { noOrgContext: true, skipRedirect: true })
+      .then(r => { if (active) setDemos(Array.isArray(r?.items) ? r.items : []) })
+      .catch(() => { if (active) setDemos([]) })
+    return () => { active = false }
+  }, [user?.id])
+
+  // PLATFORM HEALTH: the public readiness report (/health/ready - app,
+  // database, jobs). No answer = no tile; never a made-up "LIVE".
+  const [health, setHealth] = useState(null)
+  useEffect(() => {
+    let active = true
+    // Readiness first; if that call fails, the plain liveness check (/health)
+    // still gives a real answer. Neither answering = no tile.
+    api.get('/health/ready', { noOrgContext: true, skipRedirect: true })
+      .catch(() => api.get('/health', { noOrgContext: true, skipRedirect: true }))
+      .then(r => { if (active) setHealth(r || null) })
+      .catch(() => { if (active) setHealth(null) })
+    return () => { active = false }
+  }, [])
+
   const visible = [...workspaceCards]
   // Deal Builder / My Team / Sales Onboarding: shared with the mobile app.
   visible.push(...salesToolCards(contexts, dealAccess))
-  const count = visible.length + others.length
 
-  const keyOf = item => cardKey(item)
-  const pinnedSet = new Set(pins)
-  const pinnedCards = pins.map(k => visible.find(c => keyOf(c) === k)).filter(Boolean)
-  const restCards = visible.filter(c => !pinnedSet.has(keyOf(c)))
-  const q = query.trim().toLowerCase()
-  const matches = item => [item.display, item.summary, item.kind, item.orgLabel, item.organization_name]
-    .some(t => t && String(t).toLowerCase().includes(q))
-  const found = q ? visible.filter(matches) : []
-  const foundOthers = q ? others.filter(w => matches({ display: w.organization_name })) : []
-  const foundPreviews = q ? previews.filter(matches) : []
-
+  const keyOf = cardKey
   const togglePin = (item) => {
     const k = keyOf(item)
     const before = pins
-    const next = pinnedSet.has(k) ? pins.filter(x => x !== k) : [...pins, k]
+    const next = pins.includes(k) ? pins.filter(x => x !== k) : [...pins, k]
     // Only keys of cards this login can see right now are saved.
-    const allowed = new Set(visible.map(keyOf))
+    const allowed = new Set([...visible, ...others].map(keyOf))
     const save = next.filter(x => allowed.has(x))
     setPins(save)
     setPinNote('')
@@ -118,180 +114,28 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
       .catch(() => { setPins(before); setPinNote('Could not save your pins. Try again.') })
   }
 
-  const choose = (v) => { setView(v); saveView(v) }
   const signOut = onSignOut || (async () => { await logout(); window.location.href = '/login' })
-  const openItem = item => item.type === 'deal_builder' ? item.href : undefined
-
-  const grid = (items, label, pinnable = true) => (
-    <div className={'pa-grid pa-grid--compact pa-grid--' + view} role="list" aria-label={label}>
-      {items.map(item => (
-        <div role="listitem" key={keyOf(item)}>
-          <WorkspaceCard item={item} onOpen={onChoose} layout={view} compact href={openItem(item)}
-                         pinned={pinnable && pinnedSet.has(keyOf(item))}
-                         onTogglePin={pinnable ? togglePin : undefined} />
-        </div>
-      ))}
-    </div>
-  )
+  // Deal Builder and Project Command Center cards are plain in-app links (the
+  // server lists Project Command Center for the owner only); every other card runs the
+  // shared openProgramItem (context choice, then the destination re-checks).
+  const hrefOf = item => (item.type === 'deal_builder' || item.type === 'project_checklist') ? item.href : undefined
+  // The God Mode entry is shown only when the SERVER lists the platform
+  // console for this login (owner only); /god enforces it again.
+  const isOwner = user?.role === 'god_admin'
+    && (contexts?.platform_contexts || []).some(c => c && c.path === '/god')
+  const canManageTeam = !!contexts?.sales_team?.my_team
+  // MY DAY is the sales home (/sales). Offered only when the server gives this
+  // login a sales Back Office there; /sales re-checks (SalesRoute).
+  const myDayHref = contexts?.has_back_office
+    && (contexts.back_office_path === '/sales'
+        || (contexts.back_office_destinations || []).some(d => d && d.path === '/sales')) ? '/sales' : null
 
   return (
-    <div className="ev-ds pa-portal pa-portal--compact">
-      <header className="pa-top">
-        <div className="ev-container pa-top-inner">
-          <div className="pa-brand">
-            <span className="pa-brand-mark" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 6h14M5 12h10M5 18h14" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" /></svg>
-            </span>
-            <span className="pa-brand-text"><span>EvoSys <b>Pro</b></span><small>Program Access</small></span>
-          </div>
-          <div className="pa-top-right">
-            <span className="ev-pill pa-private">
-              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z" stroke="currentColor" strokeWidth="2" fill="none" strokeLinejoin="round" /></svg>
-              Authorized workspaces only
-            </span>
-            {personName && (
-              <div className="pa-user">
-                <span className="pa-avatar" aria-hidden="true">{initials(personName)}</span>
-                <span className="pa-user-text"><b>{personName}</b>{personEmail && <small>{personEmail}</small>}</span>
-              </div>
-            )}
-            <button type="button" className="ev-btn ev-btn--ghost pa-signout" onClick={signOut}>Sign out</button>
-          </div>
-        </div>
-      </header>
-
-      <main className="ev-container pa-work" aria-labelledby="pa-title">
-        <div className="pa-head">
-          <div>
-            <h1 id="pa-title">Choose your <span>business.</span></h1>
-            <p>{count === 0 ? 'No workspaces assigned yet' : count + (count === 1 ? ' business' : ' businesses') + ' available to this login'}</p>
-          </div>
-          <div className="pa-tools">
-            {(visible.length + others.length + previews.length) > 0 && (
-              <label className="pa-search">
-                <span className="pa-sr">Search your programs</span>
-                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M11 4a7 7 0 1 0 4.4 12.4L20 21M11 4a7 7 0 0 1 0 14" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" /></svg>
-                <input type="search" value={query} onChange={e => setQuery(e.target.value)}
-                       placeholder="Search programs" aria-label="Search your programs" />
-              </label>
-            )}
-            {visible.length > 1 && (
-              <div className="pa-viewtoggle" role="group" aria-label="Layout">
-                <button type="button" aria-pressed={view === 'grid'} onClick={() => choose('grid')}>
-                  <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z" fill="currentColor" /></svg>
-                  Grid
-                </button>
-                <button type="button" aria-pressed={view === 'list'} onClick={() => choose('list')}>
-                  <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2 3h12v2.5H2zM2 6.75h12v2.5H2zM2 10.5h12V13H2z" fill="currentColor" /></svg>
-                  List
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-        {pinNote && <p className="pa-note" role="status">{pinNote}</p>}
-
-        {q ? (
-          <section className="pa-section" aria-labelledby="pa-search-title">
-            <h2 id="pa-search-title">Results for “{query.trim()}”</h2>
-            {found.length > 0 && grid(found, 'Matching programs')}
-            {foundOthers.length > 0 && (
-              <div className="pa-others-list pa-others-list--found">
-                {foundOthers.map(w => (
-                  <button type="button" key={w.organization_id} onClick={() => onChoose(w)}>
-                    <span className="pa-others-mark" aria-hidden="true">{initials(w.organization_name)}</span>
-                    <span className="pa-others-name">{w.organization_name}</span>
-                    <span aria-hidden="true">→</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            {foundPreviews.length > 0 && (
-              <div className={'pa-grid pa-grid--compact pa-grid--' + view} role="list" aria-label="Matching previews">
-                {foundPreviews.map(item => (
-                  <div role="listitem" key={item.organization_id}>
-                    <WorkspaceCard item={item} onOpen={onChoose} layout={view} compact actionLabel="Open preview" href={item.href || item.url} />
-                  </div>
-                ))}
-              </div>
-            )}
-            {!found.length && !foundOthers.length && !foundPreviews.length && (
-              <p className="pa-none">Nothing you can open matches that search.</p>
-            )}
-          </section>
-        ) : (
-          <>
-            {pinnedCards.length > 0 && (
-              <section className="pa-section" aria-labelledby="pa-pinned-title">
-                <h2 id="pa-pinned-title">Pinned</h2>
-                {grid(pinnedCards, 'Pinned workspaces')}
-              </section>
-            )}
-
-            {attention.length > 0 && (
-              <section className="pa-attn" aria-labelledby="pa-attn-title">
-                <h2 id="pa-attn-title">Needs attention</h2>
-                <ul>
-                  {attention.map(a => (
-                    <li key={a.kind}>
-                      <a href={a.href}>
-                        <b>{a.title}</b>
-                        {a.detail && <span>{a.at ? formatWhen(a.at) + ' · ' : ''}{a.detail}</span>}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
-
-            {restCards.length > 0 && (
-              <section className="pa-section" aria-labelledby="pa-work-title">
-                <h2 id="pa-work-title">{pinnedCards.length ? 'All programs' : 'Your programs'}</h2>
-                {grid(restCards, 'Your programs')}
-              </section>
-            )}
-
-            {others.length > 0 && (
-              <section className="pa-others" aria-labelledby="pa-others-title">
-                <h2 id="pa-others-title">Other authorized workspaces</h2>
-                <div className="pa-others-list">
-                  {others.map(w => (
-                    <button type="button" key={w.organization_id} onClick={() => onChoose(w)} data-program-key={cardKey(w)}>
-                      <span className="pa-others-mark" aria-hidden="true">{initials(w.organization_name)}</span>
-                      <span className="pa-others-name">{w.organization_name}</span>
-                      <span aria-hidden="true">→</span>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {previews.length > 0 && (
-              <section className="pa-previews" aria-labelledby="pa-previews-title">
-                <h2 id="pa-previews-title">Previews</h2>
-                <p className="pa-sub">Demos built for prospects who are not customers yet. Open one to see exactly what that prospect was shown.</p>
-                <div className={'pa-grid pa-grid--compact pa-grid--' + view} role="list" aria-label="Previews">
-                  {previews.map(item => (
-                    <div role="listitem" key={item.organization_id}>
-                      <WorkspaceCard item={item} onOpen={onChoose} layout={view} compact actionLabel="Open preview" href={item.href || item.url} />
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-          </>
-        )}
-
-        {!visible.length && !others.length && !previews.length && (
-          <div className="pa-empty">
-            <b>No workspaces have been assigned to this account.</b>
-            <span>Ask your administrator to grant access to a program.</span>
-          </div>
-        )}
-      </main>
-
-      <footer className="ev-container pa-foot">Each program keeps its own data, workflow and permissions.</footer>
-    </div>
+    <CommandCenter user={user} cards={visible} others={others} previews={previews}
+                   pins={pins} pinNote={pinNote} onTogglePin={togglePin} keyOf={keyOf}
+                   onChoose={onChoose} hrefOf={hrefOf} attention={attention} health={health}
+                   isOwner={isOwner} canManageTeam={canManageTeam} myDayHref={myDayHref} demos={demos}
+                   onSignOut={signOut} />
   )
 }
 
@@ -300,8 +144,3 @@ export function cardKey(item) {
   return (item.type || 'workspace') + ':' + (item.organization_id || '') + ':' + (item.key || '')
 }
 
-function formatWhen(iso) {
-  try {
-    return new Date(iso).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })
-  } catch { return '' }
-}

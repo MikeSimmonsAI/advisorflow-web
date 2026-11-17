@@ -29,7 +29,9 @@ test('Program Access dispatches on the brand and keeps the EvoSys launcher body'
   const src = read('../src/pages/program/ProgramAccessPortal.jsx')
   assert.match(src, /if \(isBookaBoostBrand\(props\.contexts\)\) return <BookaBoostProgramAccess \{\.\.\.props\} \/>/)
   assert.match(src, /return <EvoSysProgramAccess \{\.\.\.props\} \/>/)
-  assert.match(src, /<span>EvoSys <b>Pro<\/b><\/span><small>Program Access<\/small>/)
+  // The EvoSys body is the V2 command center (official logo, navy sidebar).
+  assert.match(src, /import CommandCenter from '\.\/v2\/CommandCenter'/)
+  assert.match(read('../src/pages/program/v2/CommandCenter.jsx'), /src="\/brands\/evosyspro-emblem-96\.png"[\s\S]*<b>EvoSys Pro<\/b><span>Business Command Platform<\/span>/)
 })
 
 test('BookaBoost screens never name another brand and every style is scoped', () => {

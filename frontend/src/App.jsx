@@ -260,6 +260,8 @@ import {
 // Wholesale Phase 7 — EvoSense acquisition engine. Same feature key.
 const EvoCommand = lazyPage(() => import('./pages/wholesale/evosense/EvoCommand'))
 const EvoInbox = lazyPage(() => import('./pages/wholesale/evosense/EvoInbox'))
+const PortfolioList = lazyPage(() => import('./pages/wholesale/portfolio/Portfolios').then(m => ({ default: m.PortfolioList })))
+const PortfolioDetail = lazyPage(() => import('./pages/wholesale/portfolio/Portfolios').then(m => ({ default: m.PortfolioDetail })))
 const OpportunityRadar = lazyPage(() => import('./pages/wholesale/evosense/OpportunityRadar'))
 const LandPartners = lazyPage(() => import('./pages/wholesale/olp/LandPartners'))
 const FarmRanch = lazyPage(() => import('./pages/wholesale/olp/FarmRanch'))
@@ -394,6 +396,7 @@ const ControlRoom = lazyPage(() => import('./pages/god/ControlRoom'))
 // Settings & Security overview. Both are new; no existing route changed.
 const GodLaunchBoardPage = lazyPage(() => import('./pages/god/LaunchBoardPage'))
 const GodSettingsHub = lazyPage(() => import('./pages/god/SettingsHub'))
+const ProjectCommandCenter = lazyPage(() => import('./pages/program/ProjectCommandCenter'))
 const RoadmapBoard = lazyPage(() => import('./pages/god/RoadmapBoard'))
 const GodLaunches = lazyPage(() => import('./pages/god/GodLaunches'))
 import HelpSupport from './pages/HelpSupport'
@@ -1237,15 +1240,16 @@ function WorkspaceSelector() {
   // straight into the workspace.
   const dealBuilders = (ctx.deal_builder?.sales ? 1 : 0) + (ctx.deal_builder?.executive ? 1 : 0)
     + (ctx.sales_team?.my_team ? 1 : 0) + (ctx.sales_team?.onboarding ? 1 : 0)
+  const ownerTools = ctx.project_checklist ? 1 : 0
   const otherDestinations = products.length + previews.length + (ctx.acquisition_ops || []).length
     + (ctx.consumer_leads_contexts || []).length
-    + (ctx.has_back_office ? 1 : 0) + (ctx.executive_contexts || []).length + dealBuilders
+    + (ctx.has_back_office ? 1 : 0) + (ctx.executive_contexts || []).length + dealBuilders + ownerTools
   if (volts.length === 1 && nonVolt.length === 0 && otherDestinations === 0) {
     clearWorkspaceContext()
     return <Navigate to={volts[0].path} replace />
   }
   if (volts.length === 0 && workspaces.length === 1 && products.length === 0 && previews.length === 0
-      && dealBuilders === 0) {
+      && dealBuilders === 0 && ownerTools === 0) {
     return <Navigate to={'/workspace/' + workspaces[0].organization_id} replace />
   }
   // What a tapped card does is shared with the mobile app (/app/programs).
@@ -1411,6 +1415,7 @@ export default function App() {
             mechanisms, deliberately not merged. */}
         <Route path="/workspace/:organizationId" element={<WorkspaceRoute />} />
         <Route path="/workspaces" element={<WorkspaceSelector />} />
+        <Route path="/project-command-center" element={<ProtectedRoute bare><ProjectCommandCenter /></ProtectedRoute>} />
         {/* A God-granted preview of one deal's demo - signed in; the server re-checks the grant every open. */}
         <Route path="/previews/:grantId" element={isAuthenticated() ? <GrantedPreview /> : <Navigate to="/login" replace />} />
         <Route path="/sci" element={<SciFrontDoor />} />
@@ -1849,6 +1854,8 @@ export default function App() {
         {/* Phase 7 EvoSense — discovery before a deal exists. */}
         <Route path="/wholesale/evosense" element={<ProtectedRoute feature="wholesale_real_estate"><EvoCommand /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/inbox" element={<ProtectedRoute feature="wholesale_real_estate"><EvoInbox /></ProtectedRoute>} />
+        <Route path="/wholesale/portfolios" element={<ProtectedRoute feature="wholesale_real_estate"><PortfolioList /></ProtectedRoute>} />
+        <Route path="/wholesale/portfolios/:id" element={<ProtectedRoute feature="wholesale_real_estate"><PortfolioDetail /></ProtectedRoute>} />
         <Route path="/wholesale/evosense/overlooked" element={<ProtectedRoute feature="wholesale_real_estate"><OpportunityRadar /></ProtectedRoute>} />
         <Route path="/wholesale/land-partners" element={<ProtectedRoute feature="wholesale_real_estate"><LandPartners /></ProtectedRoute>} />
         <Route path="/wholesale/farm-ranch" element={<ProtectedRoute feature="wholesale_real_estate"><FarmRanch /></ProtectedRoute>} />
@@ -2049,6 +2056,7 @@ export default function App() {
         <Route path="/god/launch-board"          element={<GodRoute><GodModeLayout><GodLaunchBoardPage /></GodModeLayout></GodRoute>} />
         <Route path="/god/settings"              element={<GodRoute><GodModeLayout><GodSettingsHub /></GodModeLayout></GodRoute>} />
         {/* GOD-04: platform roadmap board */}
+        <Route path="/god/project-command-center" element={<Navigate to="/project-command-center" replace />} />
         <Route path="/god/roadmap"               element={<GodRoute><GodModeLayout><RoadmapBoard /></GodModeLayout></GodRoute>} />
         {/* Customer Launches — the staff view of onboarding intake. Sits in
             God Mode beside the other implementation surfaces rather than

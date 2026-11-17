@@ -333,8 +333,25 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
     db_session.add(wa_invite)
     db_session.commit()
 
+    # Portfolio Acquisitions: a portfolio with a committed list, a pending
+    # preview and a package, all the victim's.
+    pf = ok(client.post("/wholesale/portfolios", headers=auth_headers,
+                        json={"name": "Victim portfolio", "is_test": True}))["portfolio"]
+    pf_src = ok(client.post("/wholesale/portfolios/%s/imports/rows" % pf["id"], headers=auth_headers,
+                            json={"kind": "manual", "rows": [{"address": "5 Victim Portfolio Ln", "city": "Dallas",
+                                                              "zip_code": "75201", "seller_price": "90000"}]}))
+    ok(client.post("/wholesale/portfolios/%s/imports/%s/commit" % (pf["id"], pf_src["id"]), headers=auth_headers))
+    pf_item = ok(client.get("/wholesale/portfolios/%s" % pf["id"], headers=auth_headers))["rows"][0]["item_id"]
+    pf_pending = ok(client.post("/wholesale/portfolios/%s/imports/rows" % pf["id"], headers=auth_headers,
+                                json={"kind": "manual", "rows": [{"address": "6 Victim Portfolio Ln",
+                                                                  "city": "Dallas"}]}))
+    pf_pkg = ok(client.post("/wholesale/portfolios/%s/packages" % pf["id"], headers=auth_headers,
+                            json={"name": "Victim package", "all": True}))["created_id"]
+
     return {
         **es_ids,
+        "pf_id": pf["id"], "pf_item_id": pf_item, "pf_source_id": pf_src["id"],
+        "pf_pending_source_id": pf_pending["id"], "pf_package_id": pf_pkg,
         "access_profile_id": wa_profile.id,
         "team_invite_id": wa_invite.id,
         "appointment_id": appt["id"],
@@ -823,6 +840,37 @@ def evosense_attacks(ids):
         # another workspace's run id must not roll back anything here
         ("post", "%s/roll-fix/%s/rollback" % (base, ids["es_reprocess_run_id"]),
          {"confirm": "ROLLBACK %s" % ids["es_reprocess_run_id"]}),
+    ] + portfolio_attacks(ids)
+
+
+def portfolio_attacks(ids):
+    """Portfolio Acquisitions: every route that names a portfolio, item, import or package."""
+    b = "/wholesale/portfolios/%s" % ids["pf_id"]
+    it, src, pend, pkg = ids["pf_item_id"], ids["pf_source_id"], ids["pf_pending_source_id"], ids["pf_package_id"]
+    return [
+        ("get", b, None), ("patch", b, {"name": "stolen"}), ("delete", b, None),
+        ("post", b + "/archive", {"archived": True}),
+        ("get", b + "/export.csv", None),
+        ("post", b + "/items/add", {"property_ids": [ids["property_id"]]}),
+        ("post", b + "/items/remove", {"item_ids": [it], "also_from_packages": True}),
+        ("patch", b + "/items/%s" % it, {"seller_price": 1}),
+        ("get", b + "/items/%s/evaluation" % it, None),
+        ("post", b + "/items/%s/evaluation" % it, {"arv": 1, "note": "stranger"}),
+        ("get", b + "/items/%s/export.csv" % it, None),
+        ("post", b + "/assign", {"item_ids": [it], "user_id": ids.get("advisor_id") or "x"}),
+        ("get", b + "/imports", None),
+        ("post", b + "/imports/rows", {"kind": "manual", "rows": [{"address": "1 Planted St"}]}),
+        ("get", b + "/imports/%s" % pend, None),
+        ("patch", b + "/imports/%s/rows/1" % pend, {"address": "1 Planted St"}),
+        ("post", b + "/imports/%s/commit" % pend, None),
+        ("post", b + "/imports/%s/discard" % pend, None),
+        ("post", b + "/imports/%s/undo" % src, None),
+        ("get", b + "/packages", None),
+        ("post", b + "/packages", {"name": "stranger", "all": True}),
+        ("patch", b + "/packages/%s" % pkg, {"name": "stolen"}),
+        ("post", b + "/packages/%s/duplicate" % pkg, {"name": "stolen"}),
+        ("get", b + "/packages/%s/export.csv" % pkg, None),
+        ("get", b + "/packages/compare/export.csv", None),
     ]
 
 
@@ -850,6 +898,8 @@ def upload_attacks(ids):
         ("/wholesale/deals/%s/comps/import" % ids["deal_id"],
          (b"address,sale_price,sale_date,mls_number\n1 Stolen St,100000,2026-01-01,X1\n", "c.csv", "text/csv"),
          {}, "file"),
+        ("/wholesale/portfolios/%s/imports" % ids["pf_id"],
+         (b"Address,City,Price\n1 Planted St,Dallas,1\n", "planted.csv", "text/csv"), {}, "file"),
         ("/wholesale/evosense/cohorts/%s/reattach" % ids["es_list_kind"],
          (b"street_address,zip_code,sale_date\n77 Victim List Ln,75215,2026-11-03\n", "planted.csv", "text/csv"),
          {}, "file"),
@@ -919,6 +969,7 @@ def test_every_id_bearing_wholesale_route_is_in_the_attack_list(theirs):
     # A document KIND is a path parameter too (contracts/{kind}/...); the attack
     # uses the purchase agreement, so that word squashes like an id.
     values.add("purchase_agreement")
+    values.add("1")                     # an import row number (portfolios/{pid}/imports/{sid}/rows/{n})
 
     def template(path):
         return "/".join("{}" if part in values else part

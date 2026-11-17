@@ -238,6 +238,14 @@ export function programCards(ctx) {
   // is not offered again as a preview (exact name match only).
   const held = new Set(workspaces.map(w => String(w.organization_name || '').trim().toLowerCase()))
   const previews = previewCards(ctx).filter(p => !held.has(String(p.display).trim().toLowerCase()))
+  if (ctx?.project_checklist) {
+    cards.unshift({
+      type: 'project_checklist', key: 'projects', variant: 'office', symbol: 'PC',
+      kind: 'PLATFORM', display: 'Project Command Center',
+      summary: 'Check off work, track project progress, and capture new ideas.',
+      href: '/project-command-center', actionLabel: 'Open Project Command Center',
+    })
+  }
   return { visible: cards, others, previews }
 }
 

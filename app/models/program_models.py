@@ -86,6 +86,10 @@ class OutreachProgram(Base):
     # booking link is minted for this user). NULL = program texts carry no
     # booking link.
     booking_user_id = Column(String, nullable=True)
+    # Everyone invited to every appointment this program books (JSON list of
+    # emails): the calendar event names them as guests, so it lands on each of
+    # their calendars with an emailed invite. NULL = only the booking calendar.
+    appointment_invitees = Column(Text, nullable=True)
     # THE APPOINTMENT SETTER (services/programs/ai_setter.py). "off": a person
     # answers every reply (the default, and production's until the owner turns
     # it on). "draft": the AI writes the reply and offers real times, a person

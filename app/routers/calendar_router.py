@@ -538,6 +538,7 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
             else:
                 from datetime import timedelta
                 event_end = event_start + timedelta(minutes=_event_minutes(booking, body))
+                from app.services.calendar_service import appointment_invitees as _appointment_invitees
                 event_body_payload = {
                     "subject": f"{appt_label} — {lead_name or lead_phone}",
                     "body": {
@@ -556,6 +557,10 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
                         "dateTime": event_end.strftime("%Y-%m-%dT%H:%M:%S"),
                         "timeZone": "America/Chicago",
                     },
+                    # Program guests (appointment_invitees): Outlook emails each
+                    # one the invite, which puts it on their calendar.
+                    "attendees": [{"emailAddress": {"address": _g}, "type": "required"}
+                                  for _g in _appointment_invitees(db, lead)],
                     # The ORGANIZATION's own address. The literal that used to
                     # sit in this fallback was one customer's street address,
                     # in code every tenant runs - so a booking anywhere else on

@@ -33,8 +33,9 @@ def test_the_grid_is_830_every_8_minutes_with_followups_2_minutes_after():
     fol = OS.day_slots(date(2026, 11, 16), CFG, "followup")
     assert [local(t) for t in new[:3]] == ["08:30", "08:38", "08:46"]
     assert [local(t) for t in fol[:3]] == ["08:32", "08:40", "08:48"]
-    assert local(new[-1]) == "17:58" and local(fol[-1]) == "17:52"   # nothing at or after 6 PM
-    assert len(new) == 72 and len(fol) == 71
+    # Owner, Nov 16: open until 7 PM Central - nothing at or after 7 PM.
+    assert local(new[-1]) == "18:54" and local(fol[-1]) == "18:56"
+    assert len(new) == 79 and len(fol) == 79
     merged = sorted([(t, "n") for t in new[:2]] + [(t, "f") for t in fol[:2]])
     assert [(local(t), k) for t, k in merged] == [("08:30", "n"), ("08:32", "f"), ("08:38", "n"), ("08:40", "f")]
 

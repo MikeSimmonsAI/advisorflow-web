@@ -325,6 +325,53 @@ def test_wholesale_admin_with_executive_grant(client, team, wholesale_admins, wh
     assert client.get("/deal-builder/access", headers=_hw(w["db"], w[who])).json()["executive"] is True
 
 
+def test_project_checklist_for_named_platform_login(client, wholesale_admins, monkeypatch, tmp_path):
+    w = wholesale_admins
+    db, platform = w["db"], w["plat"]
+    platform.email = "platform@evosyspro.live"
+    db.commit()
+    headers = _hw(db, platform, w["host"].id)
+    monkeypatch.setenv("LAUNCH_BOARD_BACKEND", "file")
+    monkeypatch.setenv("LAUNCH_BOARD_PATH", str(tmp_path / "checklist.json"))
+    contexts = client.get("/auth/my-contexts", headers=headers)
+    assert contexts.status_code == 200, contexts.text
+    assert contexts.json()["project_checklist"] is True
+    url = "/god/launch-board/checklist"
+    project = {"name": "Platform checklist", "status": "todo"}
+    created = client.post(url, json=project, headers=headers)
+    assert created.status_code == 200, created.text
+    pid = created.json()["id"]
+    updated = client.post(f"{url}/{pid}/save", json={**project, "status": "wishlist"}, headers=headers)
+    assert updated.status_code == 200, updated.text
+    assert client.get(url, headers=headers).json()["projects"][0]["status"] == "wishlist"
+    assert client.get("/god/launch-board", headers=headers).status_code == 403
+
+    from app.services import project_checklist_chat
+
+    def propose(message, previous, projects, selected, actor):
+        assert selected["id"] == pid and actor == str(platform.id)
+        return {"action": "update", "reply": "Review this idea.",
+                "draft": {**project, "name": "Ignore model-supplied rename", "summary": "Draft notes"}}
+
+    monkeypatch.setattr(project_checklist_chat, "propose", propose)
+    response = client.post(url + "/chat", json={"message": "Update Platform checklist"}, headers=headers)
+    assert response.status_code == 200, response.text
+    draft = response.json()["draft"]
+    assert draft["id"] == pid and draft["name"] == "Platform checklist"
+    assert draft["summary"] == "Draft notes"
+    assert client.get(url, headers=headers).json()["projects"][0]["summary"] == ""
+
+
+    other = w["adv"]
+    other.full_name = "EvoSys Platform User"
+    db.commit()
+    other_headers = _hw(db, other, w["host"].id)
+    assert client.get("/auth/my-contexts", headers=other_headers).json()["project_checklist"] is False
+    assert client.get(url, headers=other_headers).status_code == 403
+    assert client.post(url, json=project, headers=other_headers).status_code == 403
+    assert client.post(url + "/chat", json={"message": "Hello"}, headers=other_headers).status_code == 403
+
+
 def test_wholesale_lock_still_applies_elsewhere(client, team, wholesale_admins):
     # Opening the Deal Builder does not widen the Wholesale lock for other screens.
     from app.services import program_experience as pe

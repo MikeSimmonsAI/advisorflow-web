@@ -17,6 +17,7 @@ from unittest import mock
 
 from app.services import launch_board as lb
 from app.services import launch_board_store as st
+from app.services import project_checklist as checklist
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
@@ -82,6 +83,35 @@ class Base(unittest.TestCase):
             return c.execute("SELECT COUNT(*) FROM " + table).fetchone()[0]
         finally:
             c.close()
+
+
+class ChecklistPersistence(Base):
+    def test_checklist_edits_preserve_queue_and_reject_stale_versions(self):
+        pid, _ = self.add("A")
+        initial = self.store.load()["projects"][0]
+        self.assertEqual(checklist.status_for(initial), "todo")
+        data = {"name": "A", "summary": "Notes", "status": "wishlist",
+                "tasks": [{"title": "Task", "done": False}]}
+        self.store.mutate(lambda b: checklist.save(b, pid, data, "mike"),
+                          expected={pid: initial["version"]})
+        saved = self.store.load()["projects"][0]
+        self.assertEqual(saved["checklist_tasks"], data["tasks"])
+        self.assertEqual(checklist.status_for(saved), "wishlist")
+        self.assertEqual(lb.view(self.store.load())["queue"], [])
+        with self.assertRaises(st.StaleError):
+            self.store.mutate(lambda b: checklist.save(b, pid, data, "mike"),
+                              expected={pid: initial["version"]})
+        with self.assertRaises(lb.BoardError):
+            self.store.mutate(lambda b: checklist.save(b, pid, {**data, "status": "done"}, "mike"))
+
+    def test_starter_import_keeps_existing_projects_and_is_repeatable(self):
+        existing, _ = self.add(checklist.STARTER[0][0])
+        operation = lambda b: checklist.import_starter(b, "mike")
+        self.assertEqual(self.store.mutate(operation)[0], len(checklist.STARTER) - 1)
+        self.assertEqual(self.store.mutate(operation)[0], 0)
+        original = next(p for p in self.store.load()["projects"] if p["id"] == existing)
+        self.assertEqual(original["version"], 1)
+        self.assertEqual(lb.view(self.store.load())["queue"], [])
 
 
 class Persistence(Base):

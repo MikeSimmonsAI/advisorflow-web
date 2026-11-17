@@ -39,7 +39,9 @@ test('the five approved groups, in the approved order', () => {
 
 test('each group holds the owner-approved screens in the approved order', () => {
   const by = Object.fromEntries(rail().groups.map((g) => [g.key, g.items.map((i) => i.label)]))
-  assert.deepEqual(by.acquisition.slice(0, 5), ['Foreclosures', 'Discovery Inbox', 'Properties', 'Strategies', 'Multifamily'])
+  // Portfolio Acquisitions joined the Acquisition group after the Discovery Inbox
+  // (owner directive, Nov 16 2026: "Acquisition Command → Portfolio Acquisitions").
+  assert.deepEqual(by.acquisition.slice(0, 6), ['Foreclosures', 'Discovery Inbox', 'Portfolio Acquisitions', 'Properties', 'Strategies', 'Multifamily'])
   assert.deepEqual(by.buyers, ['Buyer Intelligence', 'Deal Room', 'Investor Outreach', 'Buy Boxes', 'Dispositions'])
   assert.deepEqual(by.operations, ['Deal Operations', 'Appointments', 'Contracts & Closing', 'Funding Partners', 'Deal Calculator'])
   assert.deepEqual(by.team, ['Team Board', 'Canvassing', 'Callback Center', 'Team'])
@@ -59,6 +61,7 @@ test('items keep their own permission and brand flags (the rail cannot widen acc
   assert.match(by['/wholesale/team'].flags, /workspaceAdminOnly: true/)
   assert.match(by['/wholesale/evosense/overlooked'].flags, /bookaboostOnly: true/)
   assert.match(by['/wholesale/land-partners'].flags, /olpOnly: true/)
+  assert.match(by['/wholesale/portfolios'].flags, /notBookaboost: true/)
 })
 
 test('Multifamily is the Discovery Inbox filtered to multifamily - same flags, and only when the inbox is on the rail', () => {
