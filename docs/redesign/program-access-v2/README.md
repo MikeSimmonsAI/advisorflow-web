@@ -25,18 +25,22 @@ The BookaBoost launcher (`BookaBoostProgramAccess.jsx`) is untouched. The only c
 | Authorized Workspaces | Number of cards this login can open (previews not counted) | — |
 | Active Clients | Distinct client organizations behind those cards. Back Office, Executive Suite, Deal Builders, My Team, onboarding and the Acquisition hub are internal, not clients. VOLT Marketing and Consumer Leads are one organization and count once. | — |
 | Prospect Previews | Preview cards (`preview_contexts`) | Tile hidden at 0 |
-| Platform Health | Public readiness report `GET /health/ready` (app, database, jobs) | Tile hidden |
+| Platform Health | Public readiness report `GET /health/ready` (app, database, jobs): ok → "Live", degraded → "Degraded", failed → "Down" | Tile hidden |
 | Notifications (bell + sidebar) | `GET /launcher/attention` (up to 3 real items) | Bell and nav item hidden |
 | Featured workspace | First pinned card the server still lists; otherwise the first card in server order. There is no "recently opened" record in the system, so that step is not invented. Previews are never featured. | — |
 | Pins | `GET/PUT /launcher/pins` (unchanged) | Nothing pinned |
 | God Mode link | Only when the user's role is `god_admin` **and** the server lists `/god` in `platform_contexts` | Hidden |
-| People & Access link | `sales_team.my_team` from the server → `/sales/my-team` | Hidden |
+| People & Access link | Owner → `/god/access`; a sales manager with `sales_team.my_team` → `/sales/my-team` | Hidden |
 | Settings | `/change-password` (the account setting every signed-in login has) | — |
+| My Day | `/sales`, only when the server gives this login a sales Back Office at `/sales` | Hidden |
+| Resources | `/training` (every signed-in login; the server decides what it shows) | — |
+| Manage Access (banner) | `/god/access`, owner only (same check as the God Mode link) | Hidden |
+| "Active" on a card | Every card is a destination the server lists for this login right now; a sample workspace says "Sample data" and a view-only one says "View only" | — |
 | Name, role, initials | The signed-in user (`af_user`), never hard-coded | — |
 
-Sidebar items from the brief that have no launcher-level page in the app (My Day, Activity, Resources)
-are left out rather than linked to dead or wrong pages. "My Workspaces", "Prospect Previews" and
-"Notifications" jump to or open the matching part of this page.
+"Activity" from the mockup is left out: the app's activity page needs a workspace to be chosen first,
+so from the launcher it would be a wrong page. "My Workspaces" and "Notifications" jump to or open the
+matching part of this page.
 
 ## Categories
 
@@ -65,18 +69,40 @@ The screenshots use **test data** shaped like the owner's account (same 16 progr
 fake ids, fake API). They are not production screenshots. Production screenshots are taken after the
 owner approves and the change is deployed.
 
-## Visual comparison with the approved mockup
+## Visual comparison with the approved mockup (round 2, after the owner's rejection)
 
-The approved hybrid mockup image was not attached to the request and was not found in the Drive inbox,
-so a side-by-side comparison has not been possible yet. The build follows the written brief point by point
-(sidebar 252 px, banner ~210 px, 4-column grid of ~280 px photo cards, navy/blue palette, compact tiles,
-separate light preview section). Once the image is supplied, a side-by-side will be added here and any
-differences corrected before approval.
+The first version used tall portrait cards and was rejected. Round 2 was rebuilt against the approved image,
+rendered at the image's own size (1672 x 941) and compared side by side (the comparison image is in the owner's
+Drive inbox, not in this public repo, because the mockup shows the owner's name).
+
+| Measure (at 1672 x 941) | Mockup | Implementation |
+|---|---|---|
+| Sidebar width | ~250 px | 250 px |
+| Dark header incl. summary tiles | ~155 px | ~150 px |
+| Summary tiles | 4 white tiles ~170 x 60, top right | 4 white tiles ~165 x 60, top right |
+| Featured banner | ~185 px tall, building left, cleaning equipment right, 3 actions | 185 px, building left, cleaning supplies right, 3 actions (Manage Access owner-only) |
+| Workspace cards | 4 columns, ~333 x 140 (first row) | 4 columns, ~334 x 139 (2.4 : 1) |
+| Grid gap | ~18 px | 18 px |
+| Card layout | icon tile + name left, green "Active", blue Open bottom-right | same |
+| Previews | one row: intro + 3 cards with photo and outlined "Open Preview" | same |
+
+Remaining differences (intentional or data-driven):
+- 16 workspaces instead of the mockup's 12, so the 4th card row and the previews sit below the first screen.
+- Mockup rows 2-3 are shorter (~92 px); all rows here use the first row's size (2.4 : 1) so every card matches.
+- Card order follows the server (SCI first), not the mockup's order; the featured workspace is the first pin.
+- Official EvoSys Pro emblem instead of the mockup's white "EP" drawing; initials instead of a profile photo
+  (profile photos are no longer loaded on every request, #654).
+- No "Activity" nav item, no "?" help button and no verified badge: there is no real destination or data for them.
+- God Mode stays in the sidebar for the owner only (required by the brief; not drawn in the mockup).
+- Photos are licensed stock chosen to match the mockup's subjects; they are not the mockup's generated images.
+
+## Working preview (test data)
+
+`preview/make_preview.mjs` turns a normal build into a static design preview that answers every request from
+`qa/fixtures.json` (no real server, account or customer data) and shows a "Design preview - test data" ribbon with
+owner / salesperson / operator views.
 
 ## Known limitations
 
-- Comparison with the mockup image is still to do (above).
-- Program logos: no official third-party logos are drawn; cards show the existing program symbol.
 - A login with exactly one workspace and an Acquisition operator grant is still sent straight into its
   workspace (existing rule in `App.jsx` `WorkspaceSelector`, unchanged here).
-- Restland and SCI photos are dignified memorial-garden scenes, not either business's own grounds.

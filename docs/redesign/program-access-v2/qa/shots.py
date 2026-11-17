@@ -31,7 +31,7 @@ def fake_jwt(user_id):
 
 def run(page, who, state):
     f = FIX[who]
-    pins = {"keys": list(f.get("pins", []))}
+    pins = {"keys": list(state.get("pins", f.get("pins", [])))}
     log = []
 
     def handle(route):
@@ -77,7 +77,11 @@ def run(page, who, state):
 
 
 def main():
+    ccb = {"pins": ["workspace:org-ccb:"]}
     shots = [
+        # same size as the approved mockup (1672 x 941), Commercial Cleaning pinned as in the mockup
+        ("owner", "mockup-size-1672x941", {"width": 1672, "height": 941}, dict(ccb, viewport_only=True)),
+        ("owner", "desktop-1536-viewport", {"width": 1536, "height": 864}, dict(ccb, viewport_only=True)),
         ("owner", "desktop-1536", {"width": 1536, "height": 1100}, {}),
         ("owner", "desktop-1920", {"width": 1920, "height": 1200}, {}),
         ("owner", "laptop-1280", {"width": 1280, "height": 860}, {}),
@@ -100,7 +104,7 @@ def main():
             page.on("pageerror", lambda e: errors.append(str(e)))
             print("render", who, name, flush=True)
             run(page, who, state)
-            page.screenshot(path=str(OUT / f"{who}-{name}.png"), full_page=True)
+            page.screenshot(path=str(OUT / f"{who}-{name}.png"), full_page=not state.get("viewport_only"))
             if errors:
                 print(who, name, "PAGE ERRORS:", errors)
             ctx.close()

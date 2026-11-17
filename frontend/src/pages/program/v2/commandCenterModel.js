@@ -144,18 +144,56 @@ export function summaryCounts(cards, others, previews) {
 /** /health/ready -> a plain label, or null when there is no trustworthy answer. */
 export function healthLabel(report) {
   const s = String(report?.status || '').toLowerCase()
-  if (s === 'ok') return { tone: 'ok', label: 'All systems normal' }
-  if (s === 'degraded') return { tone: 'warn', label: 'Running with issues' }
-  if (s === 'failed') return { tone: 'bad', label: 'Service problem' }
+  if (s === 'ok') return { tone: 'ok', label: 'Live', detail: 'All systems normal' }
+  if (s === 'degraded') return { tone: 'warn', label: 'Degraded', detail: 'Running with issues' }
+  if (s === 'failed') return { tone: 'bad', label: 'Down', detail: 'Service problem' }
   return null
+}
+
+/* ── Card wording ────────────────────────────────────────────────────────
+ * The short line under a card's name: the organization the server named
+ * (when the title is a program name), otherwise a two-to-three word line.
+ */
+const SHORT_LINE = {
+  sci: 'Family Services', funeral: 'Cemetery & Funeral', energy: 'Energy Operations',
+  roofing: 'AI Roofing Operations', wholesale: 'Acquisition Command', jewelry: 'Business Command Center',
+  insurance: 'Insurance Agency', insurance_retention: 'Renewals & Retention', cleaning: 'Commercial Cleaning',
+  acquisition: 'Client Portal', acquisition_ops: 'Prospects & Pipeline', volt: 'Recruiting & Enrollment',
+  consumer_leads: 'Lead Acquisition', evosys_sales: 'Prospects & Outreach', back_office: 'Sales Pipeline & Reports',
+  executive: 'Portfolio Performance', business: 'Business Workspace',
+}
+const SALES_TOOL_LINE = { executive: 'Quotes & Commissions', sales: 'Quotes & Estimates', my_team: 'Team & Onboarding', onboarding: 'Start Selling' }
+export function shortLine(item) {
+  if (!item) return ''
+  if (item.orgLabel && item.orgLabel !== 'View only') return item.orgLabel
+  if (item.type === 'deal_builder') return SALES_TOOL_LINE[item.key] || ''
+  return SHORT_LINE[item.program] || ''
+}
+
+/** A card's status pill. Every card here is a destination the server listed
+ *  for this login right now, so "Active" is true by construction; a sample or
+ *  view-only workspace says so instead. */
+export function cardStatus(item) {
+  if (!item) return null
+  if (item.badge) return { tone: 'muted', label: item.badge }
+  if (item.orgLabel === 'View only') return { tone: 'muted', label: 'View only' }
+  if (item.program === 'preview') return null
+  return { tone: 'ok', label: 'Active' }
+}
+
+/** The featured banner's line of focus areas ("Prospects • Follow-up • ..."). */
+export function factLine(item) {
+  const f = (item?.facts || []).filter(Boolean)
+  if (f.length) return f.join(' • ')
+  return String(item?.summary || '')
 }
 
 /** Shown under the person's name. Server role values -> plain words. */
 export function roleLabel(role) {
   const r = String(role || '').toLowerCase()
   const map = {
-    god_admin: 'Platform owner', super_admin: 'Administrator', owner: 'Owner', admin: 'Administrator',
-    manager: 'Manager', member: 'Team member', agent: 'Agent', viewer: 'Viewer', sales: 'Sales',
+    god_admin: 'Platform Owner', super_admin: 'Administrator', owner: 'Owner', admin: 'Administrator',
+    manager: 'Manager', member: 'Team Member', agent: 'Agent', viewer: 'Viewer', sales: 'Sales',
   }
   if (map[r]) return map[r]
   return r ? r.replace(/_/g, ' ').replace(/\b\w/g, m => m.toUpperCase()) : ''

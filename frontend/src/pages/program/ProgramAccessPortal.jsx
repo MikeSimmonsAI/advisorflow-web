@@ -108,12 +108,18 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
   const isOwner = user?.role === 'god_admin'
     && (contexts?.platform_contexts || []).some(c => c && c.path === '/god')
   const canManageTeam = !!contexts?.sales_team?.my_team
+  // MY DAY is the sales home (/sales). Offered only when the server gives this
+  // login a sales Back Office there; /sales re-checks (SalesRoute).
+  const myDayHref = contexts?.has_back_office
+    && (contexts.back_office_path === '/sales'
+        || (contexts.back_office_destinations || []).some(d => d && d.path === '/sales')) ? '/sales' : null
 
   return (
     <CommandCenter user={user} cards={visible} others={others} previews={previews}
                    pins={pins} pinNote={pinNote} onTogglePin={togglePin} keyOf={keyOf}
                    onChoose={onChoose} hrefOf={hrefOf} attention={attention} health={health}
-                   isOwner={isOwner} canManageTeam={canManageTeam} onSignOut={signOut} />
+                   isOwner={isOwner} canManageTeam={canManageTeam} myDayHref={myDayHref}
+                   onSignOut={signOut} />
   )
 }
 

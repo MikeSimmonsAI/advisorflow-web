@@ -90,7 +90,7 @@ test('each business wears its own bundled photo, and every photo file exists', (
 test('every bundled photo has recorded provenance', () => {
   const credits = read('../docs/redesign/program-access-v2/PHOTO_CREDITS.md')
   const files = readdirSync(new URL('../src/pages/program/v2/img/', import.meta.url))
-  const keys = [...new Set(files.map(f => f.replace(/-(card|wide)\.webp$/, '')))]
+  const keys = [...new Set(files.map(f => f.replace(/-(card|wide|accent)\.webp$/, '')))]
   for (const k of keys) assert.match(credits, new RegExp('`' + k + '`'), 'credit for ' + k)
 })
 
@@ -105,6 +105,7 @@ test('featured = first pinned card the server still lists, otherwise the first c
 
 test('platform health is shown only from a real readiness answer', () => {
   assert.equal(healthLabel({ status: 'ok' }).tone, 'ok')
+  assert.equal(healthLabel({ status: 'ok' }).label, 'Live')
   assert.equal(healthLabel({ status: 'degraded' }).tone, 'warn')
   assert.equal(healthLabel({ status: 'failed' }).tone, 'bad')
   assert.equal(healthLabel(null), null)
@@ -114,8 +115,8 @@ test('platform health is shown only from a real readiness answer', () => {
 test('names and roles come from the signed-in user, never a hard-coded owner', () => {
   assert.equal(firstName({ full_name: 'Jordan Rivera' }), 'Jordan')
   assert.equal(firstName({ email: 'x@y.z' }), '')
-  assert.equal(roleLabel('god_admin'), 'Platform owner')
-  assert.equal(roleLabel('member'), 'Team member')
+  assert.equal(roleLabel('god_admin'), 'Platform Owner')
+  assert.equal(roleLabel('member'), 'Team Member')
   assert.equal(roleLabel('area_manager'), 'Area Manager')
 })
 
@@ -131,8 +132,10 @@ test('God Mode and People & Access appear only on the server\'s word', () => {
   assert.match(portal, /const isOwner = user\?\.role === 'god_admin'\s*\n\s*&& \(contexts\?\.platform_contexts \|\| \[\]\)\.some\(c => c && c\.path === '\/god'\)/)
   assert.match(portal, /const canManageTeam = !!contexts\?\.sales_team\?\.my_team/)
   const center = read('src/pages/program/v2/CommandCenter.jsx')
-  assert.match(center, /\{isOwner && \(/)
-  assert.match(center, /\{canManageTeam && \(/)
+  assert.match(center, /\{isOwner && \(\s*<a className="pa2-nav-item pa2-nav-item--owner" href="\/god">/)
+  assert.match(center, /\{\(isOwner \|\| canManageTeam\) && \(/)
+  assert.match(center, /\{isOwner && \(\s*<a className="pa2-btn pa2-btn--ghost pa2-btn--lg" href="\/god\/access">/)
+  assert.match(portal, /const myDayHref = contexts\?\.has_back_office/)
 })
 
 test('previews are real links and nothing opens a script pop-up', () => {
@@ -148,4 +151,25 @@ test('V2 styles are scoped and use no third-party image URLs', () => {
     assert.match(part.trim(), /^\.pa2\b/, 'unscoped selector: ' + part.trim())
   for (const f of ['src/pages/program/v2/CommandCenter.jsx', 'src/pages/program/v2/photos.js', 'src/pages/program/v2/commandCenter.css'])
     assert.equal(/https?:\/\/(?!www\.w3\.org)/.test(read(f)), false, f)
+})
+
+test('card wording and status come from server facts, never a client name', async () => {
+  const { shortLine, cardStatus, factLine } = await import('../src/pages/program/v2/commandCenterModel.js')
+  const { cards } = cardsFor('owner')
+  const by = Object.fromEntries(cards.map(c => [c.display, c]))
+  assert.equal(shortLine(by.SCI), 'Service Corporation International')
+  assert.equal(shortLine(by.Wholesale), 'Acquisition Command')
+  assert.equal(shortLine(by['Back Office']), 'Sales Pipeline & Reports')
+  assert.equal(shortLine(by['VOLT Marketing']), 'Recruiting & Enrollment')
+  for (const c of cards) assert.equal(cardStatus(c).label, 'Active', c.display)
+  assert.equal(cardStatus({ badge: 'Sample data' }).label, 'Sample data')
+  assert.equal(cardStatus({ orgLabel: 'View only' }).label, 'View only')
+  assert.equal(factLine(by['Commercial Cleaning Blueprint']), 'Prospects • Follow-up • Walkthroughs')
+})
+
+test('desktop cards are short and wide; four columns on desktop', () => {
+  const css = read('src/pages/program/v2/commandCenter.css')
+  assert.match(css, /\.pa2 \.pa2-card--grid \{ aspect-ratio: 2\.4 \/ 1;/)
+  assert.match(css, /\.pa2 \.pa2-grid--grid \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\); \}/)
+  assert.match(css, /\.pa2 \.pa2-feature \{[^}]*height: 185px;/)
 })

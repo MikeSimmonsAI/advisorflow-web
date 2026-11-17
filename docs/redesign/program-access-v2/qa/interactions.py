@@ -35,8 +35,14 @@ def main():
         check("3 prospect previews render", page.locator(".pa2-pv").count() == 3)
         check("featured banner shows the first card (SCI)", page.locator("#pa2-feature-title").inner_text() == "SCI")
         stats = page.locator(".pa2-stat-value").all_inner_texts()
-        check("stat tiles show 16 / 10 / 3", stats == ["16", "10", "3"], str(stats))
-        check("platform health from /health/ready", "All systems normal" in page.locator(".pa2-stats").inner_text())
+        check("stat tiles show 16 / 10 / 3 / Live", stats == ["16", "10", "3", "Live"], str(stats))
+        check("platform health from /health/ready", "Platform Health" in page.locator(".pa2-stats").inner_text())
+        # desktop cards are SHORT and WIDE (mockup first row: ~333 x 140)
+        box = page.locator(".pa2-grid .pa2-card").first.bounding_box()
+        ratio = box["width"] / box["height"]
+        check("desktop cards are short and wide (2.2-2.6 : 1)", 2.2 <= ratio <= 2.6, "%.0fx%.0f ratio %.2f" % (box["width"], box["height"], ratio))
+        cols = len({round(b["x"]) for b in page.locator(".pa2-grid .pa2-card").evaluate_all("els => els.map(e => e.getBoundingClientRect().toJSON())")})
+        check("four columns at desktop width", cols == 4, str(cols))
         check("God Mode link for the owner", page.locator('a.pa2-nav-item[href="/god"]').count() == 1)
 
         # search
@@ -58,7 +64,7 @@ def main():
         page.fill(".pa2-search input", "")
         page.get_by_role("button", name="Administration", exact=True).click()
         check("Administration filter", page.locator(".pa2-grid .pa2-card-name").all_inner_texts() == ["Back Office"])
-        page.get_by_role("button", name="All Workspaces", exact=True).click()
+        page.get_by_role("button", name="All Workspaces (16)", exact=True).click()
 
         # list / grid toggle (remembered)
         page.get_by_role("button", name="List view").click()
@@ -77,6 +83,8 @@ def main():
         page.get_by_role("button", name="Unpin Commercial Cleaning Blueprint").click()
         page.wait_for_timeout(300)
         check("unpin restores SCI as featured", page.locator("#pa2-feature-title").inner_text() == "SCI")
+        check("Manage Access (owner) goes to access management",
+              page.locator(".pa2-feature a.pa2-btn--ghost").get_attribute("href") == "/god/access")
 
         # notifications
         page.get_by_role("button", name="Notifications: 2 need attention").click()
@@ -116,6 +124,8 @@ def main():
         check("salesperson: pinned Deal Builder is featured",
               page.locator("#pa2-feature-title").inner_text() == "Salesperson Deal Builder")
         check("salesperson: own name shown", "Welcome back, Jordan" in page.locator("h1").inner_text())
+        check("salesperson: no Manage Access", page.locator(".pa2-feature a.pa2-btn--ghost").count() == 0)
+        check("salesperson: no My Day (no sales Back Office)", "My Day" not in nav)
         ctx.close()
 
         # operator: health endpoint down -> no health tile
@@ -131,6 +141,8 @@ def main():
         shots.run(page, "owner", {})
         overflow = page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
         check("phone: no horizontal overflow", overflow <= 0, str(overflow))
+        cols = len({round(b["x"]) for b in page.locator(".pa2-grid .pa2-card").evaluate_all("els => els.map(e => e.getBoundingClientRect().toJSON())")})
+        check("phone: cards stack in one column", cols == 1, str(cols))
         page.get_by_role("button", name="Open menu").click()
         page.wait_for_timeout(400)
         box = page.locator(".pa2-side").bounding_box()
