@@ -143,15 +143,16 @@ def in_sending_hours(db: Session, org_id: str, now: Optional[datetime] = None) -
     from app.services import contact_hours as ch
     from app.services.programs import send_window
     n = now or datetime.utcnow()
-    utc = n.replace(tzinfo=ZoneInfo("UTC"))
-    t = utc.astimezone(ZoneInfo(ch.WINDOW_ZONE)).time()
-    if not (ch.WINDOW_START <= t <= ch.WINDOW_END):
-        return False
-    # Restland (Nov 15): its own window, 8:30 AM - 6:00 PM Central.
+    # A program with its own hours (Restland, Nov 16: 8:30 AM - 7:00 PM
+    # Central every day) uses them in place of the Eastern clock.
     from app.services.programs import outreach_slots
     cfg = outreach_slots.config_for_org(db, org_id)
     if cfg is not None:
         return outreach_slots.permits(n.replace(tzinfo=None) if n.tzinfo else n, cfg)
+    utc = n.replace(tzinfo=ZoneInfo("UTC"))
+    t = utc.astimezone(ZoneInfo(ch.WINDOW_ZONE)).time()
+    if not (ch.WINDOW_START <= t <= ch.WINDOW_END):
+        return False
     return send_window.permits(n)
 
 

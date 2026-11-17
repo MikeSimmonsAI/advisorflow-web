@@ -2165,6 +2165,57 @@ def appointment_message_settings_save(body: MessageSettingsIn, db: Session = Dep
 
 
 
+class OutreachHoursIn(BaseModel):
+    open: str                       # "08:30" Central
+    close: str                      # "19:00" Central
+
+
+@router.get("/outreach-hours")
+def outreach_hours(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """This program's own sending hours (programs with a text schedule only)."""
+    from app.services.programs import outreach_slots as OS
+    prog = _program(db, user, managers_only=False)
+    cfg = OS.config_for_org(db, prog.organization_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="This program has no text schedule of its own.")
+    return {"open": cfg["open"], "close": cfg["close"], "timezone": OS.TZ, "days": "every day"}
+
+
+@router.post("/outreach-hours")
+def outreach_hours_save(body: OutreachHoursIn, db: Session = Depends(get_db),
+                        user: User = Depends(require_tenant_user)):
+    """Managers only (owner, Nov 16: Restland 8:30 AM - 7:00 PM Central every
+    day). Texts and campaign emails both follow these hours; the family's own
+    8 AM - 9 PM local clock still applies. Sends nothing by itself."""
+    import json as _json
+    from app.services.programs import outreach_slots as OS
+    prog = _program(db, user)
+    _require_manager(db, user)
+    cfg = OS.config_for_org(db, prog.organization_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="This program has no text schedule of its own.")
+    try:
+        a, b = OS._t(body.open), OS._t(body.close)
+        assert len(body.open) == 5 and len(body.close) == 5
+    except Exception:                                    # noqa: BLE001
+        raise HTTPException(status_code=422, detail="Hours are two times like 08:30 and 19:00.")
+    from datetime import time as _time
+    if not (_time(8, 0) <= a < b <= _time(21, 0)):
+        raise HTTPException(status_code=422, detail="Hours must be between 08:00 and 21:00, opening first.")
+    raw = _json.loads(prog.booking_policy_json or "{}")
+    before = dict(raw.get("outreach") or {})
+    raw["outreach"] = dict(before, open=body.open, close=body.close)
+    prog.booking_policy_json = _json.dumps(raw, sort_keys=True)
+    from app.routers.audit_log_router import log_action
+    log_action(db, prog.organization_id, user.id, action="program.outreach_hours", target_type="outreach_program",
+               target_id=prog.id, before={"open": before.get("open"), "close": before.get("close")},
+               after={"open": body.open, "close": body.close}, commit=False)
+    db.commit()
+    OS.clear_cache()
+    cfg = OS.config_for_org(db, prog.organization_id)
+    return {"open": cfg["open"], "close": cfg["close"], "timezone": OS.TZ, "days": "every day"}
+
+
 class StageReturnIn(BaseModel):
     lead_ids: list
 
