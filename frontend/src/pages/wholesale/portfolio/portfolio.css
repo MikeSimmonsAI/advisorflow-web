@@ -1,0 +1,56 @@
+/* Portfolio Acquisitions — layout only. Colors, type, buttons, tables, drawers
+   and badges come from the Wholesale design system (ds/evo-ds.css). */
+.pf-stack { display: flex; flex-direction: column; gap: var(--evo-gap, 16px); }
+.pf-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--evo-gap, 16px); }
+.pf-cols--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pf-crumb { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.pf-progress { display: block; width: 96px; height: 6px; border-radius: 3px; background: var(--evo-surface-inset); overflow: hidden; }
+.pf-progress > span { display: block; height: 100%; background: var(--evo-success); }
+.pf-selbar { display: inline-flex; flex-wrap: wrap; gap: 8px; margin-left: auto; align-items: center; }
+.pf-rank, .pf-foot, .pf-small { font-size: 12.5px; line-height: 1.5; color: var(--evo-text-secondary); }
+.pf-rank { margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--evo-line); background: var(--evo-surface-inset); }
+.pf-foot { margin: 10px 2px 0; }
+.pf-linkbtn { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.pf-linkbtn:hover { text-decoration: underline; }
+.pf-table .pf-linkbtn { white-space: normal; max-width: 240px; display: inline-block; }
+.pf-table th, .pf-table td { padding-left: 10px; padding-right: 10px; }
+.pf-rownum { display: inline-block; min-width: 2.2em; color: var(--evo-text-tertiary); font-variant-numeric: tabular-nums; }
+.pf-table td.is-right, .pf-compare td { font-variant-numeric: tabular-nums; }
+.pf-offer { width: 120px; text-align: right; }
+.pf-warn { color: var(--evo-danger-ink); }
+.pf-ok { color: var(--evo-success-ink); }
+.pf-flag td { background: var(--evo-warning-soft); }
+.pf-issues { margin: 0; padding-left: 16px; font-size: 12.5px; color: var(--evo-warning-ink); }
+.pf-preview td, .pf-entry td { vertical-align: top; }
+.pf-preview .evo-input, .pf-entry .evo-input { min-width: 70px; }
+.pf-form { display: grid; gap: 12px; }
+.pf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; }
+.pf-grid .evo-actionbar { grid-column: 1 / -1; }
+.pf-eval { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.pf-card { border: 1px solid var(--evo-line); border-radius: var(--evo-radius, 10px); padding: 14px 16px; background: var(--evo-surface); min-width: 0; }
+.pf-card h3 { margin: 0 0 10px; font-size: 14px; display: flex; gap: 8px; align-items: center; }
+.pf-card--wide, .pf-eval .pf-foot { grid-column: 1 / -1; }
+.pf-dl { margin: 0; display: grid; gap: 6px; }
+.pf-dl > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 10px; font-size: 13.5px; }
+.pf-dl dt { color: var(--evo-text-secondary); }
+.pf-dl dd { margin: 0; overflow-wrap: anywhere; }
+.pf-note { margin: 10px 0 0; font-size: 12.5px; padding: 8px 10px; border-radius: var(--evo-radius-sm, 6px); background: var(--evo-info-soft); color: var(--evo-info-ink); }
+.pf-steps { margin-top: 10px; font-size: 13px; }
+.pf-steps ol { margin: 6px 0 0; padding-left: 18px; }
+.pf-history { margin: 0; padding-left: 16px; font-size: 13px; display: grid; gap: 4px; }
+.pf-pkghead { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.pf-pkgtabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.pf-pkgtabs .evo-btn[aria-pressed="true"] { background: var(--evo-primary-soft); color: var(--evo-primary-ink); border-color: var(--evo-primary); }
+.pf-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; padding: 0 0 8px; }
+.pf-discount { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; padding: 8px 0 12px; }
+.pf-pkgactions { padding: 12px 0 0; }
+.pf-addlist { display: grid; gap: 6px; margin-top: 10px; max-height: 360px; overflow: auto; }
+.pf-compare th[scope="row"] { font-weight: 500; color: var(--evo-text-secondary); white-space: nowrap; }
+.pf-rank-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13.5px; }
+@media (max-width: 1100px) { .pf-cols--3 { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 768px) {
+  .pf-cols, .pf-eval { grid-template-columns: minmax(0, 1fr); }
+  .pf-dl > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .pf-selbar { margin-left: 0; }
+  .pf-offer { width: 100%; }
+}

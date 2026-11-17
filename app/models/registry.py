@@ -270,6 +270,8 @@ import app.models.wholesale_buyer_engine_models  # noqa: F401  (imported for sid
 import app.models.wholesale_investor_models  # noqa: F401  (imported for side effects)
 # #439 Wholesale team access: profiles, per-person access, invitations.
 import app.models.wholesale_access_models  # noqa: F401  (imported for side effects)
+# Portfolio Acquisitions: seller portfolios, sources, items and purchase packages.
+import app.models.wholesale_portfolio_models  # noqa: F401  (imported for side effects)
 # EvoSense Acquisition Engine (evosense_*): strategies, canonical properties,
 # observations, signals, owner graph, scores, cost ledger, engagements. Phase 7.
 # Added to BOTH blocks in this file, per the merge-artefact note above.
@@ -565,6 +567,8 @@ import app.models.wholesale_buyer_engine_models  # noqa: F401  (imported for sid
 import app.models.wholesale_investor_models  # noqa: F401  (imported for side effects)
 # #439 Wholesale team access: profiles, per-person access, invitations.
 import app.models.wholesale_access_models  # noqa: F401  (imported for side effects)
+# Portfolio Acquisitions: seller portfolios, sources, items and purchase packages.
+import app.models.wholesale_portfolio_models  # noqa: F401  (imported for side effects)
 # EvoSense Acquisition Engine (evosense_*): strategies, canonical properties,
 # observations, signals, owner graph, scores, cost ledger, engagements. Phase 7.
 # Added to BOTH blocks in this file, per the merge-artefact note above.
