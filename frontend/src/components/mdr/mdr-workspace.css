@@ -356,3 +356,7 @@ html:root body .layout--mdr .top-bar-right { gap: 8px; }
   .layout--mdr .evo-app .evo-herobox__actions .evo-btn { flex: 0 1 auto; }
   .wq-head__actions .evo-btn { flex: 1 1 auto; }
 }
+@media (max-width: 768px) {
+  /* in a column, the desktop flex-basis would become a 360px-tall body */
+  .layout--mdr .evo-app .evo-herobox .evo-herobox__body { flex: 0 0 auto; }
+}

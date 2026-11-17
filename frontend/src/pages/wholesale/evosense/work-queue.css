@@ -152,3 +152,4 @@
 .wq-filter input { max-width: none; }
 .wq-detail:focus { outline: none; }
 .wq-detail:focus-visible { box-shadow: inset 0 0 0 2px var(--evo-primary-fill); }
+@media (max-width: 768px) { .wq-labels { flex-wrap: wrap; } }

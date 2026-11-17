@@ -92,7 +92,7 @@ Role behaviour is unchanged because the new rail is computed from the same items
 
 ## 4. Evidence
 
-Screenshots are in `shots/`: desktop 1440×900 and phone 390×844, captured with `MDR_SHOTS=… pytest tests/test_mdr_redesign_browser.py` against the real build with the sandbox seed data. Addresses and numbers are synthetic.
+Before and after screenshots of every destination are in `before-after/before/` (built from `main` 2851b07c) and `before-after/after/` (built from this branch). Both sets are desktop 1440×900 and phone 390×844, with the same seed. They were captured with `MDR_CAPTURE=… MDR_LABEL=before|after pytest tests/test_mdr_capture.py`. The walkthrough recordings are in `walkthrough/`. Addresses and numbers are synthetic.
 
 ## 5. Checks run
 
@@ -116,3 +116,49 @@ Screenshots are in `shots/`: desktop 1440×900 and phone 390×844, captured with
 - Rows use the property photo in the detail panel only. Street View costs one paid lookup per photo, so the list does not fetch 25 photos per page.
 - There is no per-PR preview for the main web app here. Vercel builds only `booking-app`, and Render has no PR previews for the main services. Acceptance as `platform@evosyspro.live` needs a deploy after approval.
 - `escalate()` still waits until a moved sale is critical before re-escalating it (see section 2).
+
+
+## 7. Round 2: screen-by-screen status
+
+The two reference images ("Acquisition Command work queue.png", "Seller Portfolio Underwriting Workspace.png") were again not attached. They are not in Drive, and a search of the owner's user folder on the linked computer found nothing. This round follows the written brief.
+
+**Rule used:** a screen counts as complete when its primary task is in the first viewport at 1440×900 and its layout supports that task. Each screen is either *rebuilt* (layout changed for the task) or *checked* (the layout was already task-first; it gets the shared header and number strip, and nothing else needed to change).
+
+| Destination | Primary task | Status | What changed |
+|---|---|---|---|
+| Acquisition Command | work the next property | rebuilt | One-line tabs above the filter, denser rows (one label per row). The first row opens on a laptop, so its next action is on screen without a click. Next action sits above the photo. The panel overlays the list below 1181px; on a phone it is a full-width view. |
+| Activity & system health | check engine health | rebuilt (round 1) | Reporting moved off the work screen. |
+| Seller Portfolios (list) | open or start a portfolio | checked | Compact header; "+ New portfolio" and the list in the first viewport. |
+| Seller Portfolio (detail) | import → review → package | rebuilt | **Empty:** import card first, with Import / Add existing as the main actions and what happens next beside it. **Populated:** the grid comes first. Opening a row docks the review panel beside the grid (a drawer below 1181px) and keeps the deciding columns. Totals ("Seller stated" and "Our assumptions", each with coverage) come after the grid. Selecting rows raises a sticky bar with Build offer package / Assign / Remove / Clear; "Package all" is on the filter bar. |
+| Discovery Inbox, Multifamily | scan and open properties | rebuilt | The bar keeps search, opportunity type, work priority and sort. Strategy, signal, county, source, score, rolled-back, economics, confidence and Top-N move under **More filters**, which opens automatically when any of them is set. The list starts in the first viewport. |
+| Deal Operations | move deals | rebuilt | The deal list (Pipeline / Needs attention / Closings / At risk) leads. The sandbox switch joins the header actions, and "This morning" moves into the side rail. |
+| Contracts & Closing, Dispositions | work deals in that stage | rebuilt | They share the Deal Operations header: the sandbox switch is in the header and the numbers are one strip, so the stage tabs and list sit in the first viewport. |
+| Buyer Intelligence | find, qualify, match buyers | rebuilt | The three command cards become header buttons (Find buyers, Invite investor, Open Deal Room with its state). The numbers are one strip, and the tabs and list are in the first viewport. |
+| Deal Room, Investor Outreach | manage investors and listings | rebuilt (round 1) | The welcome banner becomes a compact action bar, and the Buyers & Deals strip links the six screens. |
+| Buy Boxes | review buyer criteria | checked | |
+| Providers & Controls | see sources and switches | rebuilt | The navy banner becomes a page header, and the four summary cards become one strip. |
+| Properties, Callback Center, Team Board | work the list | checked | Numbers are one strip. |
+| Foreclosures, Appointments, Canvassing, Funding Partners, Exceptions, Team, Strategies, Wholesale Settings, Pilot Controls | — | checked | Primary controls were already at the top. Deal Calculator's bottom line was already sticky. Pilot Controls keeps its two "Automatic distribution: OFF" notices at the top, because they are safety state. |
+
+Every route, permission and action is unchanged. New checks in `tests/test_mdr_redesign_browser.py`:
+- An empty portfolio puts Import in the first viewport on desktop and on a phone.
+- In the populated grid, the grid sits above the totals and the selection bar offers Build offer package.
+
+`tests/test_portfolio_browser.py` now checks the docked review panel.
+
+## 8. Walkthrough
+
+- `walkthrough/queue-flow.gif` (and `.mp4`) shows the queue flow:
+  - Acquisition Command opens with the first row already showing its next action.
+  - Upcoming Auctions shows "Sale moved" for the Nov 3 → Dec 1 property and "Needs verification" for Dec 1 vs Dec 8.
+  - All → filter "fort worth" → select a row → Open full property → Back returns to the same filtered view and row.
+- `walkthrough/portfolio-flow.gif` (and `.mp4`) shows the portfolio flow:
+  - The empty portfolio shows the import card.
+  - In the populated portfolio, opening a row docks the review panel. Closing it, ticking two rows and pressing Build offer package opens Packages with the new draft next to the others.
+
+There is no working preview. Vercel builds only `booking-app`, and the main web app has no per-PR environment on Render. These recordings come from the real build against an in-process API with synthetic data.
+
+## 9. CI and test baselines
+
+- Foreclosure test: see [`FORECLOSURE_TEST_ROLLOVER.md`](FORECLOSURE_TEST_ROLLOVER.md). It reproduces identically on `main` and on this branch. It fails only on a UTC machine between 6 PM and midnight Central.
+- `node tests/frontend/wholesaleNav.test.mjs` on `main` (2851b07c): **18 passed, 2 failed**. The failures are the nav/route parity check (Investor Outreach's `/deal-room/:view`) and "`/wholesale/team` should not be adminOnly". On this branch: **19 passed, 1 failed**. The parity check now handles sub-views and view params; the Team check is the same pre-existing failure on both.
