@@ -138,6 +138,7 @@ CAPABILITY_MODELS: Dict[str, str] = {
     "auto_send_reply":        "gpt-4o",       # auto-send draft to an inbound SMS
     "reengagement_draft":     "gpt-4o",       # proactive re-engagement drafts
     "concierge_chat":         "gpt-4o",       # concierge conversation
+    "project_checklist_chat": "gpt-4o-mini",  # interactive checklist drafts
     "support_chat":           "gpt-4o",       # support assistant
     "pipeline_reply":         "gpt-4o",       # pipeline conversation reply
     "sci_appointment_setter": "gpt-4o",       # SCI setter: answer a family, offer real times

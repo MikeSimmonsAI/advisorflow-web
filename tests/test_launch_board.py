@@ -144,8 +144,8 @@ class RouterContract(unittest.TestCase):
                   and any(isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
                           and isinstance(d.func.value, ast.Name) and d.func.value.id == "router"
                           for d in n.decorator_list)]
-        # Four Launch Board routes and four project checklist routes.
-        self.assertEqual(len(routes), 8)
+        # Four Launch Board routes and five project checklist routes.
+        self.assertEqual(len(routes), 9)
         for fn in routes:
             guard = "require_checklist_access" if "checklist" in fn.name else "require_god"
             self.assertIn(guard, ast.dump(fn.args), fn.name)
