@@ -367,6 +367,9 @@ def enforce(db: Session, user, request: Request) -> None:
                             detail="This login is for your EvoSys appointment portal. That screen is not part of it.")
     if path.startswith(WHOLESALE_ALLOWED_PREFIXES):
         return
+    # This platform checklist has its own named-account authorization.
+    if path == "/god/launch-board/checklist" or path.startswith("/god/launch-board/checklist/"):
+        return
     # The sales Back Office is its own destination on the launcher, not a
     # general platform screen: a Wholesale-seat login that is also a member of
     # the brand sales team works it (wholesale@, owner decision 2026-10-21).

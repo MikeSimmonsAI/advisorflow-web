@@ -7,6 +7,8 @@ import { programCards } from '../src/pages/program/programAccessModel.js'
 
 const read = (p) => readFileSync(new URL('../' + p, import.meta.url), 'utf8')
 const portal = read('src/pages/program/ProgramAccessPortal.jsx')
+// Program Access V2 (Premium Command Center): the EvoSys launcher body.
+const center = read('src/pages/program/v2/CommandCenter.jsx')
 const card = read('src/design/WorkspaceCard.jsx')
 const art = read('src/design/art/WorkspaceArt.jsx')
 const hero = read('src/design/art/PlatformArt.jsx')
@@ -42,16 +44,21 @@ test('cards still come only from the server list — the redesign adds no access
 
 test('the page renders cards from programCards(contexts) and never from a hard-coded list', () => {
   assert.match(portal, /programCards\(contexts\)/)
-  // Compact launcher (Nov 2026): cards are the server list split into pinned
-  // and the rest - never a hard-coded list.
+  // V2: cards are the server list (pinned first, then the rest) - never a
+  // hard-coded list, in the launcher or in the command center.
   assert.match(portal, /const visible = \[\.\.\.workspaceCards\]/)
-  assert.match(portal, /visible\.filter\(c => !pinnedSet\.has/)
-  for (const name of ['Atlantis Light & Power', 'Service Corporation International', 'John Doe', 'EvoSys Pro Roofing'])
-    assert.equal(portal.includes(name), false, 'hard-coded ' + name)
+  assert.match(portal, /<CommandCenter [^>]*cards=\{visible\}/)
+  assert.match(center, /all\.filter\(c => !pinnedSet\.has\(keyOf\(c\)\)\)/)
+  for (const src of [portal, center])
+    for (const name of ['Atlantis Light & Power', 'Service Corporation International', 'John Doe', 'EvoSys Pro Roofing',
+                        'Commercial Cleaning Blueprint', 'Mike'])
+      assert.equal(src.includes(name), false, 'hard-coded ' + name)
 })
 
 test('opening a card goes through the caller\'s onChoose — no routing decided in the card', () => {
-  assert.match(portal, /onOpen=\{onChoose\}/)
+  assert.match(portal, /onChoose=\{onChoose\}/)
+  assert.match(center, /onClick=\{\(\) => onChoose\(item\)\}/)
+  assert.equal(/navigate\(|window\.location/.test(center), false)
   assert.match(card, /onClick=\{\(\) => onOpen\(item\)\}/)
   assert.equal(/navigate\(|window\.location/.test(card), false)
 })
@@ -77,11 +84,11 @@ test('design tokens are scoped to .ev-ds and do not touch :root', () => {
 })
 
 test('the Grid/List toggle is wired to real state, and the indicator is kept', () => {
-  assert.match(portal, /layout=\{view\}/)
-  assert.match(portal, /aria-pressed=\{view === 'grid'\}/)
-  assert.match(portal, /aria-pressed=\{view === 'list'\}/)
-  assert.match(portal, /Authorized workspaces only/)
-  assert.match(portal, /Choose your <span>business\.<\/span>/)
+  assert.match(center, /layout=\{view\}/)
+  assert.match(center, /aria-pressed=\{view === 'grid'\}/)
+  assert.match(center, /aria-pressed=\{view === 'list'\}/)
+  assert.match(center, /const VIEW_KEY = 'ev\.programAccess\.view'/)
+  assert.match(center, /Welcome back\{first \? ', ' \+ first : ''\}/)
 })
 
 test('accent button colours meet WCAG AA (4.5:1) against white text', () => {
