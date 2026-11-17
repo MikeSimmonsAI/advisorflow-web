@@ -299,7 +299,8 @@ def my_contexts(request: Request,
     from app.services import workspace_access
     ctx = workspace_access.authorized_contexts(db, current_user,
                                                host_slug=_brand_domain_slug(request))
-    ctx["project_checklist"] = workspace_access.is_god(current_user)
+    from app.services.project_checklist import can_manage
+    ctx["project_checklist"] = can_manage(current_user)
     # TEAM PRICING DEAL BUILDERS — two booleans from the same checks the
     # /deal-builder routes enforce, so the launcher can count them as
     # destinations (and not auto-skip Program Access) without a second call.

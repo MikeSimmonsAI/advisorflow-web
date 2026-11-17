@@ -1403,6 +1403,7 @@ export default function App() {
             mechanisms, deliberately not merged. */}
         <Route path="/workspace/:organizationId" element={<WorkspaceRoute />} />
         <Route path="/workspaces" element={<WorkspaceSelector />} />
+        <Route path="/project-command-center" element={<ProtectedRoute bare><ProjectCommandCenter /></ProtectedRoute>} />
         {/* A God-granted preview of one deal's demo - signed in; the server re-checks the grant every open. */}
         <Route path="/previews/:grantId" element={isAuthenticated() ? <GrantedPreview /> : <Navigate to="/login" replace />} />
         <Route path="/sci" element={<SciFrontDoor />} />
@@ -2031,7 +2032,7 @@ export default function App() {
         <Route path="/god/launch-board"          element={<GodRoute><GodModeLayout><GodLaunchBoardPage /></GodModeLayout></GodRoute>} />
         <Route path="/god/settings"              element={<GodRoute><GodModeLayout><GodSettingsHub /></GodModeLayout></GodRoute>} />
         {/* GOD-04: platform roadmap board */}
-        <Route path="/god/project-command-center" element={<GodRoute><ProjectCommandCenter /></GodRoute>} />
+        <Route path="/god/project-command-center" element={<Navigate to="/project-command-center" replace />} />
         <Route path="/god/roadmap"               element={<GodRoute><GodModeLayout><RoadmapBoard /></GodModeLayout></GodRoute>} />
         {/* Customer Launches — the staff view of onboarding intake. Sits in
             God Mode beside the other implementation surfaces rather than
