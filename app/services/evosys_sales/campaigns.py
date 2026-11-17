@@ -66,6 +66,11 @@ def ensure_default(db: Session, settings) -> EvoSysCampaign:
     c = (db.query(EvoSysCampaign).filter(EvoSysCampaign.brand_sales_org_id == bso,
                                          EvoSysCampaign.is_default.is_(True)).first())
     if c is None:
+        from app.services.evosys_sales.outreach import team_lock
+        team_lock(db, bso)
+        c = (db.query(EvoSysCampaign).populate_existing()
+             .filter(EvoSysCampaign.brand_sales_org_id == bso, EvoSysCampaign.is_default.is_(True)).first())
+    if c is None:
         c = EvoSysCampaign(brand_sales_org_id=bso, name="All leads", is_default=True,
                            industry_key=None, market_key=None,
                            steps=[dict(s) for s in (settings.steps or [])], offer=settings.offer,
