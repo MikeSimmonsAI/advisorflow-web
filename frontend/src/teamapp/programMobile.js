@@ -50,7 +50,7 @@ export function findProgram(all, pid) {
 
 /** A deal's demo and the Deal Builder tools are not program workspaces: they open as before. */
 export function opensDirect(item) {
-  return !item || item.type === 'preview' || item.type === 'deal_builder'
+  return !item || item.type === 'preview' || item.type === 'deal_builder' || item.type === 'project_checklist'
 }
 
 /**

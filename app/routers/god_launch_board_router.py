@@ -9,16 +9,17 @@ local/test use via LAUNCH_BOARD_BACKEND=file); never triggers a relay run,
 messages anyone, or touches production.
 """
 # No `from __future__ import annotations` in a router module (see god_access_router).
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.deps import require_god
 from app.models.models import User
 from app.services import launch_board as lb
 from app.services import launch_board_store as store
 from app.services import relay_control_room as rcr
+from app.services import project_checklist as checklist
 
 router = APIRouter(prefix="/god/launch-board", tags=["God Mode — Launch Board"])
 
@@ -66,6 +67,61 @@ def board(response: Response, _god: User = Depends(require_god)):
         return out
     except lb.BoardError as e:   # includes StorageError: fail closed, show the reason
         raise HTTPException(status_code=503, detail=str(e))
+
+
+class ChecklistTaskIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    done: bool = False
+
+
+class ChecklistIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=4000)
+    status: Literal["todo", "in_progress", "done", "wishlist"]
+    tasks: list[ChecklistTaskIn] = Field(default_factory=list, max_length=100)
+    expected_version: Optional[int] = None
+
+
+@router.get("/checklist")
+def read_checklist(response: Response, _god: User = Depends(require_god)):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        projects = store.get_store().load()["projects"]
+    except lb.BoardError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    return {
+        "projects": [{
+            "id": p["id"], "name": p["name"], "summary": p["summary"],
+            "status": checklist.status_for(p), "tasks": p.get("checklist_tasks", []),
+            "version": p.get("version"),
+        } for p in sorted(projects, key=lambda project: (project["priority"], project["id"]))
+          if p["lane"] != "archived"],
+        "storage": store.storage_status(),
+    }
+
+
+@router.post("/checklist")
+def create_checklist(body: ChecklistIn, god: User = Depends(require_god),
+                     idempotency_key: Optional[str] = Header(default=None, max_length=120)):
+    pid, replayed = _run(lambda b: checklist.save(b, None, body.model_dump(), _actor(god)),
+                         idempotency_key)
+    return {"id": pid, "replayed": replayed}
+
+
+@router.post("/checklist/{pid}/save")
+def update_checklist(pid: int, body: ChecklistIn, god: User = Depends(require_god),
+                     idempotency_key: Optional[str] = Header(default=None, max_length=120)):
+    if store.backend() == "db" and body.expected_version is None:
+        raise HTTPException(status_code=400, detail="Reload the project before saving.")
+    expected = {pid: body.expected_version} if body.expected_version is not None else None
+    _run(lambda b: checklist.save(b, pid, body.model_dump(), _actor(god)), idempotency_key, expected)
+    return {"ok": True}
+
+
+@router.post("/checklist/starter")
+def starter_checklist(god: User = Depends(require_god)):
+    added, _ = _run(lambda b: checklist.import_starter(b, _actor(god)))
+    return {"added": added}
 
 
 @router.post("/projects")

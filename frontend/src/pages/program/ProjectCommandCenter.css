@@ -1,0 +1,61 @@
+.pcc {
+  background: #f2f5fa;
+  color: #17253d;
+  font: 15px/1.5 Inter, system-ui, sans-serif;
+  min-height: 100vh;
+  padding: clamp(16px, 4vw, 48px) max(16px, calc((100vw - 1220px) / 2));
+}
+.pcc-header, .pcc-toolbar, .pcc-card-head, .pcc-actions, .pcc-progress-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pcc h1 { margin: 6px 0 0; font-size: clamp(24px, 4vw, 38px); line-height: 1.16; }
+.pcc h2 { margin: 5px 0 0; font-size: 19px; overflow-wrap: anywhere; }
+.pcc a { color: #214c92; }
+.pcc button, .pcc input, .pcc select, .pcc textarea {
+  border: 1px solid #aab8cd;
+  border-radius: 8px;
+  background: white;
+  color: inherit;
+  font: inherit;
+  padding: 8px 12px;
+}
+.pcc input, .pcc select, .pcc textarea { min-width: 0; }
+.pcc button { cursor: pointer; font-weight: 650; }
+.pcc button:disabled { opacity: .58; cursor: default; }
+.pcc .pcc-primary { background: #163b75; border-color: #163b75; color: white; }
+.pcc-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(114px, 1fr));
+  gap: 8px;
+  margin: 24px 0 16px;
+}
+.pcc-filters button { text-align: left; }
+.pcc-filters button strong { display: block; font-size: 23px; }
+.pcc-filters button[aria-pressed="true"] { background: #163b75; border-color: #163b75; color: white; }
+.pcc-toolbar { margin-bottom: 16px; }
+.pcc-toolbar input { flex: 1 1 240px; }
+.pcc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 14px; }
+.pcc-card, .pcc-editor, .pcc-notice { background: white; border: 1px solid #d4deed; border-radius: 12px; padding: 16px; }
+.pcc-card-head { flex-wrap: nowrap; align-items: flex-start; }
+.pcc-card-head div { min-width: 0; }
+.pcc-status { display: inline-block; border-radius: 20px; background: #e5edf9; color: #234876; padding: 2px 8px; font-size: 12px; font-weight: 700; }
+.pcc-status[data-status="done"] { background: #d9f2e6; color: #125b40; }
+.pcc-status[data-status="wishlist"] { background: #eee2fa; color: #5c2a84; }
+.pcc-notes { white-space: pre-wrap; overflow-wrap: anywhere; }
+.pcc-progress-label { margin-top: 12px; font-size: 13px; }
+.pcc progress { display: block; width: 100%; height: 12px; accent-color: #167756; }
+.pcc-card ul { list-style: none; padding: 0; margin: 10px 0 0; }
+.pcc-card li label { display: flex; gap: 8px; align-items: baseline; overflow-wrap: anywhere; cursor: pointer; padding: 5px 0; }
+.pcc-card li input { accent-color: #167756; flex: 0 0 auto; }
+.pcc-editor { margin-bottom: 16px; }
+.pcc-editor fieldset { min-width: 0; border: 0; padding: 0; margin: 0 0 10px; }
+.pcc-editor legend { font-weight: 750; margin-bottom: 8px; }
+.pcc-editor label { display: grid; gap: 3px; margin-bottom: 10px; }
+.pcc-editor .pcc-actions { justify-content: flex-start; }
+.pcc-task-editor { display: flex; gap: 8px; margin-bottom: 6px; }
+.pcc-task-editor input { flex: 1; }
+.pcc-notice[role="alert"] { border-color: #ad4150; color: #8a2130; }
