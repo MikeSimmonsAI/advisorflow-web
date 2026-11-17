@@ -303,3 +303,22 @@ def test_phone_compact_list_and_full_width_detail(client, mdr):
             _no_page_error(page)
             _shot(page, "m-" + r.strip("/").replace("/", "-"))
         b.close()
+
+
+def test_empty_portfolio_puts_import_first(client, mdr):
+    from playwright.sync_api import sync_playwright
+    p = client.post("/wholesale/portfolios", headers=mdr["owner_h"], json={
+        "name": "Empty synthetic portfolio", "seller_name": "Example Seller (synthetic)", "is_test": True}).json()["portfolio"]
+    with sync_playwright() as pwr:
+        b = _launch(pwr)
+        for wd, ht, tag in ((1440, 900, "desktop"), (390, 844, "phone")):
+            page = _page(b, client, mdr["db"], mdr["evo_seat"], wd, ht)
+            page.goto(ORIGIN + "/wholesale/portfolios/%s" % p["id"])
+            _settle(page)
+            assert not page.query_selector(".pf-table") and not page.query_selector(".pf-bands")
+            btn = page.locator(".pf-start button", has_text="Import seller list")
+            box = btn.bounding_box()
+            assert box and box["y"] + box["height"] <= ht, "import is in the first %s viewport (%r)" % (tag, box)
+            _shot(page, "pf-empty-" + tag)
+            page.close()
+        b.close()

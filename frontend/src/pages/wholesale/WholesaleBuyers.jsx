@@ -5,6 +5,7 @@
  * guess: a note cannot be matched against, and a buyer list stored as notes is a
  * contact list, not a disposition tool.
  */
+import { useMdrNav } from '../../components/mdr/MdrShell'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import '../../styles/shared.css'
@@ -87,16 +88,29 @@ export default function WholesaleBuyers() {
     remove: (id, name) => setDeleting({ id, display_name: name }),
   }
 
+  // My Deal Room: the three commands sit in the page header (one row), so the
+  // buyer list starts in the first viewport. Elsewhere: the command cards.
+  const mdr = !!useMdrNav()
+  function findBuyers() {
+    setRequestTab({ tab: 'find', at: Date.now() })
+    setTimeout(() => { const el = document.querySelector('.bi-tabs'); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, 50)
+  }
   return (
     <EvoApp world="operations">
       <Hero scene="capital" eyebrow="Buyers" title="Buyer Intelligence"
             sub="Find investors. Build relationships. Match deals."
-            quote="The right buyer turns opportunity into profit." />
-      <nav className="bi-cmd" aria-label="Buyer actions">
-        <button type="button" className="bi-cmd__btn" onClick={() => {
-          setRequestTab({ tab: 'find', at: Date.now() })
-          setTimeout(() => { const el = document.querySelector('.bi-tabs'); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, 50)
-        }}>
+            quote="The right buyer turns opportunity into profit."
+            actions={mdr ? <>
+              <button type="button" className="evo-btn evo-btn--secondary" onClick={findBuyers}>Find buyers</button>
+              <button type="button" className="evo-btn evo-btn--secondary" onClick={() => setInviting(true)}>Invite investor</button>
+              <Link to="/wholesale/deal-room" className="evo-btn evo-btn--primary"
+                    title={!room ? 'Checking the Deal Room…' : room.status === 'active' ? `Live · ${room.counts.investors} investor(s), ${room.counts.listings_live} live deal(s)`
+                      : room.status === 'paused' ? 'Paused - open to manage' : 'Not set up yet - open to set it up'}>
+                Open Deal Room{room ? <span className="bi-roomstate"> · {room.status === 'active' ? 'live' : room.status === 'paused' ? 'paused' : 'not set up'}</span> : null}
+              </Link>
+            </> : undefined} />
+      {mdr ? null : <nav className="bi-cmd" aria-label="Buyer actions">
+        <button type="button" className="bi-cmd__btn" onClick={findBuyers}>
           <span className="bi-cmd__i" aria-hidden="true">⌕</span>
           <span><span className="bi-cmd__t">Find buyers</span><span className="bi-cmd__s">County records, your lists, practice buyers</span></span>
         </button>
@@ -110,7 +124,7 @@ export default function WholesaleBuyers() {
             <span className="bi-cmd__s">{!room ? 'Checking…' : room.status === 'active' ? `Live · ${room.counts.investors} investor(s), ${room.counts.listings_live} live deal(s)`
               : room.status === 'paused' ? 'Paused - open to manage' : 'Not set up yet - open to set it up'}</span></span>
         </Link>
-      </nav>
+      </nav>}
       <Alert>{error}</Alert>
       <Alert kind="ok">{notice}</Alert>
       <BuyerIntelligence legacy={legacy} reloadKey={reloadKey} requestTab={requestTab} />

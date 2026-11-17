@@ -62,9 +62,16 @@ def test_portfolio_screens_in_a_real_browser(client, pf):
         pg.wait_for_load_state("networkidle")
         body = pg.inner_text("main")
         for text in ("Seller stated", "Our assumptions", "Asking", "Estimated value", "Target offers", "Spread",
-                     "Research needed", "partial · 3 of 5", "Import the seller’s list", "Build an offer package"):
+                     "Research needed", "partial · 3 of 5", "Package all", "Tick properties to build an offer package"):
             assert text.lower() in body.lower(), text
         assert pg.locator(".pf-table tbody tr").count() == 5
+        # the grid comes before the totals; selecting rows puts the package action beside them
+        assert pg.evaluate("() => document.querySelector('.pf-table').getBoundingClientRect().top < document.querySelector('.pf-side').getBoundingClientRect().top")
+        pg.locator(".pf-table tbody input[type=checkbox]").nth(0).check()
+        pg.locator(".pf-table tbody input[type=checkbox]").nth(1).check()
+        bar = pg.locator(".pf-selbar-sticky")
+        assert "2 selected" in bar.inner_text() and bar.get_by_role("button", name="Build offer package").is_visible()
+        bar.get_by_role("button", name="Clear").click()
         _shot(pg, "02-portfolio-inventory-desktop", full=True)
         pg.get_by_label("Filter properties").select_option("land")
         assert pg.locator(".pf-table tbody tr").count() == 1
@@ -75,9 +82,11 @@ def test_portfolio_screens_in_a_real_browser(client, pf):
         assert "202 Synthetic Elm" in first                      # the biggest spread of the three valued
 
         # C. evaluation drawer
+        # on a laptop the review docks beside the grid (My Deal Room redesign)
         pg.locator(".pf-table tbody tr").first.click()
-        pg.wait_for_selector(".evo-drawer .pf-eval")
-        drawer = pg.inner_text(".evo-drawer")
+        pg.wait_for_selector(".pf-review .pf-eval")
+        assert pg.locator(".pf-work.has-review").count() == 1
+        drawer = pg.inner_text(".pf-review")
         for text in ("Seller’s listing", "not verified", "Maximum allowable offer", "Estimated profit",
                      "Change a number", "Internal investment estimate"):
             assert text in drawer, text

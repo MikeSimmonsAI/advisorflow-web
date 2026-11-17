@@ -307,3 +307,52 @@ html:root body .layout--mdr .top-bar-right { gap: 8px; }
   html:root body .layout--mdr .sidebar-brand { padding-right: 52px; }
   .mdr-brand__engine { white-space: normal; }
 }
+
+/* ════════════════════════ ROUND 2: screen layouts ═══════════════════════ */
+/* Summary numbers are context, not the task: one compact strip, not a row of cards */
+.layout--mdr .evo-metrics { gap: 0; margin-bottom: 12px; background: #fff; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--evo-line);
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); overflow: hidden; }
+.layout--mdr .evo-metric { box-shadow: none; border-radius: 0; background: transparent; padding: 8px 12px; min-height: 0;
+  border-right: 1px solid var(--evo-line); }
+.layout--mdr .evo-metric:last-child { border-right: 0; }
+.layout--mdr .evo-metric__value { font-size: 18px; margin-bottom: 1px; }
+.layout--mdr .evo-metric__label { font-size: 11.5px; margin-bottom: 0; }
+.layout--mdr .evo-metric__sub { font-size: 11px; margin-top: 0; }
+.layout--mdr .evo-metric.is-attention { background: #fffaf0; box-shadow: none; }
+@media (max-width: 560px) {
+  .layout--mdr .evo-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .layout--mdr .evo-metric { border-bottom: 1px solid var(--evo-line); }
+}
+
+/* Providers & Controls: banner → page header; summary → strip */
+.layout--mdr .pc-banner { background: transparent; color: var(--mdr-ink); box-shadow: none; border-radius: 0; padding: 0 0 10px;
+  margin-bottom: 10px; border-bottom: 1px solid var(--mdr-line); }
+.layout--mdr .pc-banner__eyebrow { color: var(--mdr-ink-3); letter-spacing: .06em; }
+.layout--mdr .pc-banner__title { font: 700 20px/1.2 var(--mdr-font); color: var(--mdr-ink); }
+.layout--mdr .pc-banner__sub, .layout--mdr .pc-banner__time { color: var(--mdr-ink-3); }
+.layout--mdr .pc-banner__side .pc-pill { background: var(--mdr-green-soft); color: var(--mdr-green-ink); }
+.layout--mdr .pc-banner__refresh { border-color: var(--mdr-line-strong); color: var(--mdr-ink); }
+.layout--mdr .pc-stats { gap: 0; background: #fff; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--mdr-line); overflow: hidden; }
+.layout--mdr .pc-stat { border: 0; border-right: 1px solid var(--mdr-line); border-radius: 0; box-shadow: none; padding: 8px 12px; border-top: 3px solid transparent; }
+.layout--mdr .pc-stat.is-good { border-top-color: var(--mdr-green); }
+.layout--mdr .pc-stat.is-warn { border-top-color: #d9a441; }
+.layout--mdr .pc-stat.is-danger { border-top-color: var(--mdr-red); }
+/* Deal Operations: the morning summary in the side rail */
+.layout--mdr .mdr-morning .evo-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.layout--mdr .mdr-morning .evo-metric { border-bottom: 1px solid var(--evo-line); }
+.layout--mdr .evo-filterbar--more { border-top: 1px dashed var(--evo-line); background: var(--evo-surface-inset); }
+.layout--mdr .bi-roomstate { font-weight: 500; opacity: .85; }
+/* page header: no leftover hero padding or height at any width */
+.layout--mdr .evo-app .evo-herobox, .layout--mdr .evo-app .evo-herobox--compact { min-height: 0; padding-top: 0; }
+.layout--mdr .evo-app .evo-herobox .evo-herobox__body,
+.layout--mdr .evo-app .evo-herobox--compact .evo-herobox__body,
+.layout--mdr .evo-app .evo-herobox.has-actions .evo-herobox__body { padding: 0; }
+.layout--mdr .evo-app .evo-herobox .evo-herobox__actions { padding: 0; }
+.layout--mdr .evo-app .evo-herobox__actions .evo-btn { box-shadow: none; }
+@media (max-width: 768px) {
+  .layout--mdr .evo-app .evo-herobox { flex-direction: column; align-items: stretch; gap: 8px; }
+  .layout--mdr .evo-app .evo-herobox__title { font-size: 18px; }
+  .layout--mdr .evo-app .evo-herobox__sub { font-size: 12.5px; }
+  .layout--mdr .evo-app .evo-herobox__actions .evo-btn { flex: 0 1 auto; }
+  .wq-head__actions .evo-btn { flex: 1 1 auto; }
+}

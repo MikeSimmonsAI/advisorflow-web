@@ -81,7 +81,7 @@ function Scores({ it }) {
   )
 }
 
-function TaskLabels({ it }) {
+function TaskLabels({ it, one }) {
   const out = []
   for (const t of it.tasks || []) {
     if (t.kind === 'handoff') out.push(<L key={t.id} tone={t.status === 'open' ? 'critical' : 'info'}>{t.status === 'open' ? 'Needs decision' : 'Hand-off in progress'}</L>)
@@ -89,7 +89,8 @@ function TaskLabels({ it }) {
   if (it.work && it.work.work_priority && it.work.work_priority !== 'NORMAL') {
     out.push(<L key="wp" tone={WORK_TONE[it.work.work_priority]}>{it.work.work_priority_label || humanize(it.work.work_priority)}</L>)
   }
-  return out.length ? <span className="wq-labels">{out}</span> : null
+  if (!out.length) return null
+  return <span className="wq-labels">{one ? out[0] : out}</span>
 }
 
 export default function WorkQueueCommand() {
@@ -171,6 +172,15 @@ export default function WorkQueueCommand() {
   const counts = (data && data.counts) || {}
   const total = (data && data.total) || 0
   const pages = Math.max(1, Math.ceil(total / PAGE))
+  // On a laptop the panel is docked: open the first row so the next action is
+  // on screen without a click. (Tablet/phone: the panel covers the list, so
+  // nothing opens until the person picks a row.)
+  const closedByUser = useRef(false)
+  useEffect(() => { closedByUser.current = false }, [view])
+  useEffect(() => {
+    if (sel || closedByUser.current || !items.length || typeof window === 'undefined') return
+    if (window.matchMedia && window.matchMedia('(min-width: 1181px)').matches) set({ sel: items[0].id }, { replace: true })
+  }, [items, sel]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // header facts (all from /command-center, as before)
   const a = (cc && cc.automation) || {}
@@ -262,7 +272,7 @@ export default function WorkQueueCommand() {
                       <span className="wq-row__main">
                         <span className="wq-row__addr">{it.address}{it.unit ? ` #${it.unit}` : ''}</span>
                         <span className="wq-row__place">{[it.city || (it.county ? `${it.county} County` : null), it.state].filter(Boolean).join(', ')} {it.zip_code}{it.is_test ? <> · <SandboxTag /></> : null}</span>
-                        <TaskLabels it={it} />
+                        <TaskLabels it={it} one />
                       </span>
                       <span className="wq-row__sale"><SaleCell sale={it.sale} compact /></span>
                       <span className="wq-row__scores"><Scores it={it} /></span>
@@ -283,7 +293,7 @@ export default function WorkQueueCommand() {
         </section>
 
         {selected ? (
-          <QueueDetail it={selected} onClose={() => set({ sel: null })} onChanged={() => { loadQueue(); loadHeader() }}
+          <QueueDetail it={selected} onClose={() => { closedByUser.current = true; set({ sel: null }) }} onChanged={() => { loadQueue(); loadHeader() }}
                        onOpen={() => navigate(`/wholesale/evosense/property/${selected.id}`)} />
         ) : (
           <aside className="wq-detail wq-detail--empty" aria-label="Selected property">
@@ -310,7 +320,8 @@ function QueueDetail({ it, onClose, onChanged, onOpen }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)
-    if (panel.current) panel.current.focus()
+    // focus moves into the panel only where it covers the list (tablet / phone)
+    if (panel.current && window.matchMedia && !window.matchMedia('(min-width: 1181px)').matches) panel.current.focus()
     return () => document.removeEventListener('keydown', onKey)
   }, [it.id, onClose])
 
@@ -345,13 +356,9 @@ function QueueDetail({ it, onClose, onChanged, onOpen }) {
         <Link className="evo-btn evo-btn--secondary evo-btn--sm" to={`/wholesale/evosense/property/${it.id}`}>Open full property</Link>
       </div>
       <div className="wq-detail__scroll">
-        <div className="wq-detail__photo">
-          <PropertyPhoto propertyId={it.id} address={it.address} isTest={it.is_test} showWhy={false} />
-        </div>
         <h2 className="wq-detail__addr">{it.address}</h2>
         <p className="wq-detail__place">{[it.city, it.state].filter(Boolean).join(', ')} {it.zip_code}{it.county ? ` · ${it.county} County` : ''}{it.property_type ? ` · ${humanize(it.property_type)}` : ''}</p>
         <TaskLabels it={it} />
-
         <section className="wq-next" aria-label="Next action">
           <span className="wq-k">Next action</span>
           <b>{it.next_action || '—'}</b>
@@ -371,6 +378,9 @@ function QueueDetail({ it, onClose, onChanged, onOpen }) {
           </div>
           {err ? <p className="wq-err" role="alert">{err}</p> : null}
         </section>
+        <div className="wq-detail__photo">
+          <PropertyPhoto propertyId={it.id} address={it.address} isTest={it.is_test} showWhy={false} />
+        </div>
 
         <section className="wq-sec" aria-label="Sale">
           <h3>Sale</h3>
