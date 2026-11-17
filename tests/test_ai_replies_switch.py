@@ -49,3 +49,15 @@ def test_bad_mode_is_refused(client, program):
     owner = _user(db, org, "super_admin", "owner2@example.com")
     assert client.patch("/program/settings", headers=_h(db, owner),
                         json={"ai_setter_mode": "sometimes"}).status_code == 422
+
+
+def test_the_owners_everyday_platform_login_can_turn_it_on(client, program):
+    from app.services.project_checklist import PLATFORM_LOGIN
+    db, org = program["db"], program["org"]
+    plat = _user(db, org, "org_admin", PLATFORM_LOGIN)
+    assert client.get("/program/me", headers=_h(db, plat)).json()["ai_setter_can_turn_on"] is True
+    assert client.patch("/program/settings", headers=_h(db, plat),
+                        json={"ai_setter_mode": "auto"}).status_code == 200
+    other = _user(db, org, "org_admin", "other.manager@example.com")
+    assert client.patch("/program/settings", headers=_h(db, other),
+                        json={"ai_setter_mode": "auto"}).status_code == 403
