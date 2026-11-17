@@ -163,6 +163,15 @@ def overview(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
                                                      EvoSysOutreachMessage.direction == "in",
                                                      EvoSysOutreachMessage.created_at >= week)
                .order_by(EvoSysOutreachMessage.created_at.desc()).limit(20).all()) if ids else []
+    # Only replies nobody has answered yet: no email from us to that lead after it.
+    answered_after = {}
+    if ids:
+        for oid, at in (db.query(EvoSysOutreachMessage.opportunity_id, func.max(EvoSysOutreachMessage.created_at))
+                        .filter(EvoSysOutreachMessage.opportunity_id.in_(ids), EvoSysOutreachMessage.direction == "out",
+                                EvoSysOutreachMessage.actor_user_id.isnot(None))
+                        .group_by(EvoSysOutreachMessage.opportunity_id).all()):
+            answered_after[oid] = at
+    replies = [m for m in replies if not (answered_after.get(m.opportunity_id) and answered_after[m.opportunity_id] > m.created_at)]
     by_id = {o.id: o for o in leads}
     working = [o for o in leads if o.stage in O.WORKING_STAGES]
     to_call = [o for o in working if not O._has_email(o) and o.id not in booked
@@ -269,8 +278,11 @@ def lead(opp_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
                "paused": not CA.can_send(camp, s),
                "subject": O.fill(step.get("subject"), o, s, camp), "body": O.fill(step.get("body"), o, s, camp),
                "due_at": st.next_due_at.isoformat() + "Z" if st.next_due_at else None}
+    from app.services.evosys_sales import ai as _AI
+    last_in = next((m for m in reversed(msgs) if m.direction == "in"), None)
+    reply_ai = _AI.payload(_AI.latest(db, "reply_assist", last_in.id)) if last_in else None
     db.commit()
-    return {"lead": _row(o, st, booked=o.id in _booked_ids(db, c.bso)),
+    return {"lead": _row(o, st, booked=o.id in _booked_ids(db, c.bso)), "reply_ai": reply_ai,
             "messages": [_msg(m) for m in msgs], "next": nxt,
             "timeline": [{"summary": e.summary, "detail": e.detail, "type": e.event_type,
                           "at": e.occurred_at.isoformat() + "Z"} for e in events]}

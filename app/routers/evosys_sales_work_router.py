@@ -703,8 +703,10 @@ def attention(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
             m = db.get(EvoSysOutreachMessage, t.target_id)
             if m is not None and m.opportunity_id in opps:
                 why = "; ".join((t.output or {}).get("needs_person") or []) or "Needs a person."
-                add("reply_needs_person", "%s: %s" % (opps[m.opportunity_id].company_name,
-                                                      ((t.output or {}).get("category") or "reply").replace("_", " ").capitalize()),
+                cat = {"pricing": "Pricing question", "wrong_person": "Wrong person", "unclear": "Unclear reply",
+                       "unsubscribe": "Wants no more emails", "not_interested": "Not interested"}.get(
+                    (t.output or {}).get("category"), "Reply needs you")
+                add("reply_needs_person", "%s: %s" % (opps[m.opportunity_id].company_name, cat),
                     why, "Open conversation", lead_id=m.opportunity_id)
     for camp in CA.all_for(db, s):
         a = _audience(db, s, camp)

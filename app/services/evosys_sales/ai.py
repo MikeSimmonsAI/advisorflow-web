@@ -201,11 +201,11 @@ def reply_assist(db: Session, settings, campaign, opp, reply_msg, original_text:
             needs.append("The draft names a price that isn't in the approved offer.")
             draft = ""
         if cat == "pricing" and not offer:
-            needs.append("They asked about price and there is no approved offer on file - Mike answers this one.")
+            needs.append("No approved offer on file - Mike answers pricing.")
         if cat in ("wrong_person", "unclear"):
-            needs.append("Wrong person or unclear - a person should read this.")
+            needs.append("Wrong person or unclear - read it yourself.")
         if cat in ("unsubscribe", "not_interested"):
-            needs.append("They don't want to hear more - consider adding them to Do Not Contact; no draft is sent.")
+            needs.append("They don't want more emails - consider Do Not Contact. No draft.")
             draft = ""
         out = {"category": cat, "summary": str(raw.get("summary") or "")[:400], "draft": draft,
                "needs_person": needs, "used_offer": bool(offer)}
