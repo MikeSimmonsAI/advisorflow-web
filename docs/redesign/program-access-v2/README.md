@@ -81,15 +81,16 @@ Drive inbox, not in this public repo, because the mockup shows the owner's name)
 | Dark header incl. summary tiles | ~155 px | ~150 px |
 | Summary tiles | 4 white tiles ~170 x 60, top right | 4 white tiles ~165 x 60, top right |
 | Featured banner | ~185 px tall, building left, cleaning equipment right, 3 actions | 185 px, building left, cleaning supplies right, 3 actions (Manage Access owner-only) |
-| Workspace cards | 4 columns, ~333 x 140 (first row) | 4 columns, ~334 x 139 (2.4 : 1) |
+| Workspace cards, first row | 4 columns, ~333 x 140 | 4 columns, 334 x 139 (2.4 : 1) |
+| Workspace cards, later rows | ~333 x 92 | 334 x 108 (one-line names) to ~112 (two-line names; text is never clipped, the card grows) |
 | Grid gap | ~18 px | 18 px |
 | Card layout | icon tile + name left, green "Active", blue Open bottom-right | same |
 | Previews | one row: intro + 3 cards with photo and outlined "Open Preview" | same |
 
 Remaining differences (intentional or data-driven):
-- 16 workspaces instead of the mockup's 12, so the 4th card row and the previews sit below the first screen.
-- Mockup rows 2-3 are shorter (~92 px); all rows here use the first row's size (2.4 : 1) so every card matches.
-- Card order follows the server (SCI first), not the mockup's order; the featured workspace is the first pin.
+- 16 workspaces instead of the mockup's 12, so at 1672 x 941 the 4th card row and the previews sit just below the first screen.
+- Later rows are 108 px rather than the mockup's ~92 px so a two-line business name, its subtitle, "Active" and "Open" all fit without clipping.
+- Card order: the pinned workspaces first (the first pin is the featured one), then the server's stable order (SCI first). The mockup's order is not a rule the server knows.
 - Official EvoSys Pro emblem instead of the mockup's white "EP" drawing; initials instead of a profile photo
   (profile photos are no longer loaded on every request, #654).
 - No "Activity" nav item, no "?" help button and no verified badge: there is no real destination or data for them.

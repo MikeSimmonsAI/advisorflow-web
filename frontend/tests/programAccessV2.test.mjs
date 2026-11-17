@@ -169,7 +169,8 @@ test('card wording and status come from server facts, never a client name', asyn
 
 test('desktop cards are short and wide; four columns on desktop', () => {
   const css = read('src/pages/program/v2/commandCenter.css')
-  assert.match(css, /\.pa2 \.pa2-card--grid \{ aspect-ratio: 2\.4 \/ 1;/)
+  assert.match(css, /\.pa2 \.pa2-card--lead \{ aspect-ratio: 2\.4 \/ 1;/)
+  assert.match(css, /\.pa2 \.pa2-card--compact \{ min-height: 108px; \}/)
   assert.match(css, /\.pa2 \.pa2-grid--grid \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\); \}/)
   assert.match(css, /\.pa2 \.pa2-feature \{[^}]*height: 185px;/)
 })

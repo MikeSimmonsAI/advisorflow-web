@@ -27,6 +27,27 @@ function saveView(v) {
   try { localStorage.setItem(VIEW_KEY, v) } catch { /* storage unavailable: keep in memory only */ }
 }
 
+/* How many card columns the grid shows right now (the same breakpoints as
+ * commandCenter.css). The first row of cards is the tall "lead" row; later
+ * rows are compact, as in the approved mockup. */
+const COLUMN_QUERIES = [['(min-width: 1341px)', 4], ['(min-width: 1024px)', 3], ['(min-width: 641px)', 2]]
+function currentColumns() {
+  if (typeof window === 'undefined' || !window.matchMedia) return 4
+  for (const [q, n] of COLUMN_QUERIES) if (window.matchMedia(q).matches) return n
+  return 1
+}
+function useColumns() {
+  const [cols, setCols] = useState(currentColumns)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined
+    const lists = COLUMN_QUERIES.map(([q]) => window.matchMedia(q))
+    const update = () => setCols(currentColumns())
+    lists.forEach(l => (l.addEventListener ? l.addEventListener('change', update) : l.addListener(update)))
+    return () => lists.forEach(l => (l.removeEventListener ? l.removeEventListener('change', update) : l.removeListener(update)))
+  }, [])
+  return cols
+}
+
 function initials(name) {
   const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
   if (!parts.length) return '?'
@@ -111,6 +132,7 @@ export default function CommandCenter({
   const [bellOpen, setBellOpen] = useState(false)
   const bellRef = useRef(null)
   const workspacesRef = useRef(null)
+  const columns = useColumns()
 
   const personName = user?.full_name || user?.name || user?.email || ''
   const first = firstName(user)
@@ -169,7 +191,9 @@ export default function CommandCenter({
 
   const nothing = !all.length && !previews.length
   const featuredPhoto = featured ? photoKeyFor(featured) : null
-  const featuredAccent = featuredPhoto ? accentPhoto(featuredPhoto) : null
+  // Right-hand picture: the program's dedicated equipment shot where one
+  // exists (Commercial Cleaning), otherwise its own card photo.
+  const featuredAccent = featuredPhoto ? (accentPhoto(featuredPhoto) || cardPhoto(featuredPhoto)) : null
   const featuredStatus = featured ? cardStatus(featured) : null
   const allCount = all.length
 
@@ -273,14 +297,15 @@ export default function CommandCenter({
           </div>
 
           {!nothing && (
-            <section className="pa2-stats" aria-label="Summary">
+            <section className="pa2-stats" aria-label="Summary"
+                     style={{ '--pa2-stat-cols': 2 + (counts.previews > 0 ? 1 : 0) + (healthInfo ? 1 : 0) }}>
               <Stat icon="layers" value={counts.workspaces} label="Workspaces" title="Authorized workspaces this login can open" />
-              <Stat icon="people" value={counts.clients} label="Active Clients" title="Client businesses this login can open" />
+              <Stat icon="people" value={counts.clients} label="Active Clients" short="Clients" title="Client businesses this login can open" />
               {counts.previews > 0 && (
                 <Stat icon="bars" value={counts.previews} label="Previews" title="Prospect demos (not customers)" />
               )}
               {healthInfo && (
-                <Stat icon="check" value={healthInfo.label} label="Platform Health" title={healthInfo.detail}
+                <Stat icon="check" value={healthInfo.label} label="Platform Health" short="Health" title={healthInfo.detail}
                       health={healthInfo.tone} />
               )}
             </section>
@@ -347,9 +372,10 @@ export default function CommandCenter({
               </div>
               {shown.length > 0 ? (
                 <div className={'pa2-grid pa2-grid--' + view} role="list" aria-label="Your workspaces">
-                  {shown.map(item => (
+                  {shown.map((item, i) => (
                     <div role="listitem" key={keyOf(item)}>
                       <WorkspaceTile item={item} layout={view} hrefOf={hrefOf} onChoose={onChoose}
+                                     size={i < columns ? 'lead' : 'compact'}
                                      pinned={pinnedSet.has(keyOf(item))} onTogglePin={onTogglePin}
                                      programKey={keyOf(item)} />
                     </div>
@@ -387,13 +413,16 @@ export default function CommandCenter({
   )
 }
 
-function Stat({ icon, value, label, title, health }) {
+function Stat({ icon, value, label, short, title, health }) {
   return (
-    <div className={'pa2-stat' + (health ? ' pa2-stat--health pa2-stat--' + health : '')} title={title}>
+    <div className={'pa2-stat' + (health ? ' pa2-stat--health pa2-stat--' + health : '')} title={title}
+         aria-label={label + ': ' + value}>
       <span className="pa2-stat-icon" aria-hidden="true"><Svg name={icon} size={health ? 20 : 30} /></span>
       <span className="pa2-stat-text">
         <b className="pa2-stat-value">{value}</b>
-        <span className="pa2-stat-label">{label}</span>
+        <span className="pa2-stat-label">
+          {short ? <><span className="pa2-stat-long">{label}</span><span className="pa2-stat-short" aria-hidden="true">{short}</span></> : label}
+        </span>
       </span>
     </div>
   )
@@ -412,12 +441,13 @@ function OpenAction({ item, hrefOf, onChoose, className, stretch }) {
     : <button type="button" className={cls} aria-label={aria} onClick={() => onChoose(item)}>{inner}</button>
 }
 
-function WorkspaceTile({ item, layout, hrefOf, onChoose, pinned, onTogglePin, programKey }) {
+function WorkspaceTile({ item, layout, hrefOf, onChoose, pinned, onTogglePin, programKey, size = 'lead' }) {
   const status = cardStatus(item)
   const photo = photoKeyFor(item)
   const line = shortLine(item)
   return (
-    <article className={'pa2-card pa2-card--' + layout} data-program-key={programKey}
+    <article className={'pa2-card pa2-card--' + layout + (layout === 'grid' ? ' pa2-card--' + size : '')}
+             data-program-key={programKey}
              data-category={categoryOf(item)}>
       <img className="pa2-card-img" src={cardPhoto(photo)} alt="" width="720" height="330" loading="lazy" decoding="async" />
       <div className="pa2-card-head">

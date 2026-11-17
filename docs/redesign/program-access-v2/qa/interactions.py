@@ -43,6 +43,17 @@ def main():
         check("desktop cards are short and wide (2.2-2.6 : 1)", 2.2 <= ratio <= 2.6, "%.0fx%.0f ratio %.2f" % (box["width"], box["height"], ratio))
         cols = len({round(b["x"]) for b in page.locator(".pa2-grid .pa2-card").evaluate_all("els => els.map(e => e.getBoundingClientRect().toJSON())")})
         check("four columns at desktop width", cols == 4, str(cols))
+        hs = page.locator(".pa2-grid .pa2-card").evaluate_all("els => els.map(e => Math.round(e.getBoundingClientRect().height))")
+        check("first row tall (~120-145), later rows compact (90-112)",
+              all(120 <= h <= 145 for h in hs[:4]) and all(90 <= h <= 112 for h in hs[4:]), str(hs))
+        clipped = page.locator(".pa2-grid .pa2-card").evaluate_all("""els => els.filter(c => {
+            const n = c.querySelector('.pa2-card-titles').getBoundingClientRect();
+            const f = c.querySelector('.pa2-card-foot').getBoundingClientRect();
+            const name = c.querySelector('.pa2-card-name');
+            return n.bottom > f.top + 1 || name.scrollHeight > name.clientHeight + 1 }).map(c => c.dataset.programKey)""")
+        check("no card text overlaps its buttons or is cut off", not clipped, str(clipped))
+        check("pinned/featured first: first card is the first in server order (SCI)",
+              page.locator(".pa2-grid .pa2-card-name").first.inner_text() == "SCI")
         check("God Mode link for the owner", page.locator('a.pa2-nav-item[href="/god"]').count() == 1)
 
         # search
@@ -143,6 +154,12 @@ def main():
         check("phone: no horizontal overflow", overflow <= 0, str(overflow))
         cols = len({round(b["x"]) for b in page.locator(".pa2-grid .pa2-card").evaluate_all("els => els.map(e => e.getBoundingClientRect().toJSON())")})
         check("phone: cards stack in one column", cols == 1, str(cols))
+        top = page.locator(".pa2-grid .pa2-card").first.bounding_box()["y"]
+        check("phone: first workspace card starts on the first screen", top < 600, str(round(top)))
+        labels = page.locator(".pa2-stat").evaluate_all("els => els.filter(e => { const l = e.querySelector('.pa2-stat-label'); return l.scrollWidth > l.clientWidth + 1 }).length")
+        check("phone: stat labels not clipped", labels == 0, str(labels))
+        small = page.locator(".pa2-btn, .pa2-chip, .pa2-menu, .pa2-bell-btn").evaluate_all("els => els.filter(e => { const r = e.getBoundingClientRect(); return r.width && r.height < 30 }).length")
+        check("phone: touch targets at least 30px tall", small == 0, str(small))
         page.get_by_role("button", name="Open menu").click()
         page.wait_for_timeout(400)
         box = page.locator(".pa2-side").bounding_box()
