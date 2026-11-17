@@ -1,0 +1,257 @@
+{
+  "_note": "TEST DATA for local screenshots only. Shaped like /auth/my-contexts for three kinds of login. Organization ids are fake; names match the owner's screenshot so the layout can be compared.",
+  "owner": {
+    "user": {
+      "id": "u-owner",
+      "full_name": "Mike Simmons",
+      "email": "owner@example.test",
+      "role": "god_admin"
+    },
+    "contexts": {
+      "platform_contexts": [
+        {
+          "type": "platform",
+          "path": "/god",
+          "role": "god_admin"
+        }
+      ],
+      "workspace_contexts": [
+        {
+          "type": "workspace",
+          "organization_id": "org-sci",
+          "organization_name": "Service Corporation International",
+          "is_program": true,
+          "industry": "funeral"
+        },
+        {
+          "type": "workspace",
+          "organization_id": "org-atl",
+          "organization_name": "Atlantis Light & Power",
+          "industry": "energy",
+          "experience": "energy"
+        },
+        {
+          "type": "workspace",
+          "organization_id": "org-roof",
+          "organization_name": "EvoSys Pro Roofing",
+          "industry": "roofing",
+          "program_route": "/program/roofing"
+        },
+        {
+          "type": "workspace",
+          "organization_id": "org-evo",
+          "organization_name": "EVO Integrated Solutions LLC",
+          "industry": "generic"
+        },
+        {
+          "type": "workspace",
+          "organization_id": "org-rest",
+          "organization_name": "Restland Cemetery and Funeral Home",
+          "is_program": true,
+          "program_is_sci": false,
+          "industry": "cemetery"
+        },
+        {
+          "type": "workspace",
+          "organization_id": "org-gold",
+          "organization_name": "Blue Ridge Gold & Jewelry",
+          "industry": "jewelry",
+          "program_route": "/program/jewelry"
+        },
+        {
+          "type": "workspace",
+          "organization_id": "org-ins",
+          "organization_name": "EvoSys Insurance",
+          "industry": "insurance",
+          "experience": "insurance"
+        },
+        {
+          "type": "workspace",
+          "organization_id": "org-vga",
+          "organization_name": "Vincent Greene Agency",
+          "industry": "insurance",
+          "program_route": "/program/insurance",
+          "presentation": {
+            "kind": "insurance_retention",
+            "title": "Vincent Greene Agency",
+            "eyebrow": "INSURANCE AGENCY",
+            "description": "Renewals, client reviews, appointments and team service"
+          }
+        },
+        {
+          "type": "workspace",
+          "organization_id": "org-ccb",
+          "organization_name": "Commercial Cleaning Blueprint",
+          "industry": "cleaning"
+        }
+      ],
+      "product_contexts": [
+        {
+          "type": "product",
+          "key": "wholesale",
+          "label": "Wholesale Operations",
+          "organization_id": "org-evo",
+          "path": "/wholesale/evosense"
+        }
+      ],
+      "volt_contexts": [
+        {
+          "organization_id": "org-volt",
+          "path": "/volt-ops/org-volt",
+          "access": "owner"
+        }
+      ],
+      "consumer_leads_contexts": [
+        {
+          "organization_id": "org-volt",
+          "path": "/consumer-leads/org-volt",
+          "access": "owner"
+        }
+      ],
+      "acquisition_ops": [
+        {
+          "organization_id": "org-evo",
+          "organization_name": "EvoSys Pro",
+          "hub": true
+        }
+      ],
+      "has_back_office": true,
+      "back_office_path": "/sales",
+      "back_office_destinations": [
+        {
+          "path": "/sales",
+          "platform_id": "p1",
+          "platform_name": "Demonstration Brand",
+          "label": "Demonstration Brand",
+          "brand_sales_org_id": "b1"
+        }
+      ],
+      "executive_contexts": [],
+      "deal_builder": {
+        "sales": true,
+        "executive": true,
+        "team_view": false
+      },
+      "sales_team": {
+        "my_team": true,
+        "onboarding": false
+      },
+      "preview_contexts": [
+        {
+          "opportunity_id": "op-1",
+          "company_name": "Building Equity Investments LLC",
+          "industry": "real estate",
+          "url": "https://example.test/demo/bei",
+          "stage_label": "Proposal",
+          "proposal_sent": true,
+          "demo_slot": "platform"
+        },
+        {
+          "opportunity_id": "op-2",
+          "company_name": "Countryside Land Partners",
+          "industry": "land",
+          "url": "https://example.test/demo/clp",
+          "stage_label": "Discovery",
+          "demo_slot": "website"
+        },
+        {
+          "opportunity_id": "op-3",
+          "company_name": "VP Wraps Vehicle Protection",
+          "industry": "automotive",
+          "url": "https://example.test/demo/vpw",
+          "stage_label": "Demo booked",
+          "demo_slot": "website"
+        }
+      ]
+    },
+    "pins": [],
+    "attention": [
+      {
+        "kind": "replies",
+        "title": "3 new replies",
+        "detail": "SCI families waiting for an answer",
+        "href": "/program"
+      },
+      {
+        "kind": "demos",
+        "title": "1 demo to review",
+        "detail": "Countryside Land Partners",
+        "href": "/sales/demos"
+      }
+    ]
+  },
+  "salesperson": {
+    "user": {
+      "id": "u-rep",
+      "full_name": "Jordan Rivera",
+      "email": "rep@example.test",
+      "role": "member"
+    },
+    "contexts": {
+      "workspace_contexts": [
+        {
+          "type": "workspace",
+          "organization_id": "org-ccb",
+          "organization_name": "Commercial Cleaning Blueprint",
+          "industry": "cleaning"
+        }
+      ],
+      "deal_builder": {
+        "sales": true,
+        "executive": false,
+        "team_view": false
+      },
+      "sales_team": {
+        "my_team": false,
+        "onboarding": true
+      },
+      "preview_contexts": []
+    },
+    "pins": [
+      "deal_builder::sales"
+    ],
+    "attention": []
+  },
+  "operator": {
+    "user": {
+      "id": "u-op",
+      "full_name": "Dana Cole",
+      "email": "ops@example.test",
+      "role": "admin"
+    },
+    "contexts": {
+      "workspace_contexts": [
+        {
+          "type": "workspace",
+          "organization_id": "org-ccb",
+          "organization_name": "Commercial Cleaning Blueprint",
+          "industry": "cleaning"
+        },
+        {
+          "type": "workspace",
+          "organization_id": "org-atl",
+          "organization_name": "Atlantis Light & Power",
+          "industry": "energy",
+          "experience": "energy"
+        }
+      ],
+      "acquisition_ops": [
+        {
+          "organization_id": "org-ccb",
+          "organization_name": "Commercial Cleaning Blueprint",
+          "hub": false
+        }
+      ],
+      "deal_builder": {
+        "sales": false,
+        "executive": false
+      },
+      "sales_team": {
+        "my_team": false,
+        "onboarding": false
+      }
+    },
+    "pins": [],
+    "attention": []
+  }
+}
