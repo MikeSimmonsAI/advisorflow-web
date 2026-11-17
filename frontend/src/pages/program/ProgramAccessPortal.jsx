@@ -86,7 +86,10 @@ function EvoSysProgramAccess({ contexts, onChoose, user: userProp, onSignOut }) 
   const [health, setHealth] = useState(null)
   useEffect(() => {
     let active = true
+    // Readiness first; if that call fails, the plain liveness check (/health)
+    // still gives a real answer. Neither answering = no tile.
     api.get('/health/ready', { noOrgContext: true, skipRedirect: true })
+      .catch(() => api.get('/health', { noOrgContext: true, skipRedirect: true }))
       .then(r => { if (active) setHealth(r || null) })
       .catch(() => { if (active) setHealth(null) })
     return () => { active = false }

@@ -228,7 +228,7 @@ export default function CommandCenter({
             </a>
           )}
           {myDayHref && (
-            <a className="pa2-nav-item" href={myDayHref}><Svg name="day" size={22} /> My Day</a>
+            <a className="pa2-nav-item" href={myDayHref}><Svg name="day" size={22} /> Sales — My Day</a>
           )}
           {attention.length > 0 && (
             <button type="button" className="pa2-nav-item" aria-haspopup="true" aria-expanded={bellOpen}
@@ -238,14 +238,14 @@ export default function CommandCenter({
           )}
           {(isOwner || canManageTeam) && (
             <a className="pa2-nav-item" href={isOwner ? '/god/access' : '/sales/my-team'}>
-              <Svg name="team" size={22} /> People &amp; Access
+              <Svg name="team" size={22} /> {isOwner ? <>People &amp; Access</> : 'My Team'}
             </a>
           )}
-          <a className="pa2-nav-item" href="/training"><Svg name="book" size={22} /> Resources</a>
+          <a className="pa2-nav-item" href="/training"><Svg name="book" size={22} /> Training</a>
           {isOwner && (
             <a className="pa2-nav-item pa2-nav-item--owner" href="/god"><Svg name="shield" size={22} /> God Mode</a>
           )}
-          <a className="pa2-nav-item" href="/change-password"><Svg name="gear" size={22} /> Settings</a>
+          <a className="pa2-nav-item" href="/change-password"><Svg name="key" size={22} /> Change Password</a>
         </nav>
         <div className="pa2-me">
           <span className="pa2-me-avatar" aria-hidden="true">{initials(personName)}<i /></span>

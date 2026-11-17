@@ -55,6 +55,10 @@ def main():
         check("pinned/featured first: first card is the first in server order (SCI)",
               page.locator(".pa2-grid .pa2-card-name").first.inner_text() == "SCI")
         check("God Mode link for the owner", page.locator('a.pa2-nav-item[href="/god"]').count() == 1)
+        nav = [" ".join(t.split()) for t in page.locator(".pa2-nav-item").all_inner_texts()]
+        check("owner sidebar says where each link goes",
+              nav == ["Program Access", "Demos 7", "Sales — My Day", "Notifications 2", "People & Access", "Training",
+                      "God Mode", "Change Password"], str(nav))
 
         # search
         page.fill(".pa2-search input", "deal builder")
@@ -166,6 +170,7 @@ def main():
         nav = page.locator(".pa2-nav").inner_text()
         check("salesperson: no God Mode / People & Access", "God Mode" not in nav and "People" not in nav, nav)
         check("salesperson: no Demos item (server lists none)", "Demos" not in nav, nav)
+        check("salesperson: no My Workspaces item", "My Workspaces" not in nav, nav)
         check("salesperson: no Executive Deal Builder", "Executive Deal Builder" not in page.content())
         check("salesperson: pinned Deal Builder is featured",
               page.locator("#pa2-feature-title").inner_text() == "Salesperson Deal Builder")
