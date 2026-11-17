@@ -86,6 +86,63 @@ def _last_batch(db: Session, prog: OutreachProgram) -> Optional[Dict]:
         return None
 
 
+_reeng_cache: Dict[str, tuple] = {}
+REENG_TTL = timedelta(hours=1)
+
+
+def pipeline(db: Session, prog: OutreachProgram, now: datetime, ready: Optional[Dict]) -> Dict:
+    """THE OUTREACH PIPELINE (owner, Nov 17): is anything left to enroll, how
+    long the ready pool lasts at the daily count, which campaigns are on, the
+    Next Outreach Wave, and when finished families may be re-engaged. An empty
+    pool with healthy senders is an EXHAUSTED AUDIENCE, not a failure."""
+    import math
+    from app.services.programs import campaigns, daily_batch
+    org = prog.organization_id
+    on = (db.query(CampaignFamily.key, CampaignFamily.name).filter(CampaignFamily.organization_id == org,
+                                                                   CampaignFamily.is_active.is_(True)).all())
+    fams = dict(db.query(ProgramSourceRecord.campaign_family, func.count(func.distinct(ProgramSourceRecord.lead_id)))
+                .outerjoin(Lead, Lead.id == ProgramSourceRecord.lead_id)
+                .filter(ProgramSourceRecord.organization_id == org, Lead.is_test.isnot(True))
+                .group_by(ProgramSourceRecord.campaign_family).all())
+    st = daily_batch.status(prog)
+    target = int(st.get("count") or 0) if st.get("on") else 0
+    total = (ready or {}).get("total")
+    last = _last_batch(db, prog)
+    today = _local_day(now)
+    enrolled_today = (last or {}).get("approved") if last and last.get("at") and _local_day(
+        datetime.strptime(last["at"], "%Y-%m-%dT%H:%M:%SZ")) == today else 0
+    days_left = math.ceil(total / target) if total and target else 0
+    empty_on = None
+    if total is not None and target:
+        from zoneinfo import ZoneInfo
+        d0 = now.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("America/Chicago")).date()
+        empty_on = (d0 + timedelta(days=max(0, days_left))).isoformat()
+    nw_row = (db.query(CampaignFamily).filter(CampaignFamily.organization_id == org,
+                                             CampaignFamily.key == campaigns.NEXT_WAVE_KEY).first())
+    hit = _reeng_cache.get(org)
+    if hit is None or now - hit[0] > REENG_TTL:
+        try:
+            from app.services.programs import reengagement
+            hit = (now, reengagement.audit(db, prog, now))
+            _reeng_cache[org] = hit
+        except Exception:                                # noqa: BLE001
+            hit = (now, None)
+    warn = None
+    if target and total is not None and total < target:
+        warn = ("Only %d famil%s ready for a daily batch of %d. The audience is used up, not the senders: import "
+                "the next real SCI family list into \"%s\" (Import - Campaign for this file) and the batch picks "
+                "them up automatically." % (total, "y is" if total == 1 else "ies are", target,
+                                             campaigns.NEXT_WAVE_NAME))
+    return {"active_campaigns": [{"key": k, "name": n, "families": int(fams.get(k, 0) or 0)} for k, n in on],
+            "daily_target": target, "ready": total, "enrolled_today": enrolled_today or 0,
+            "days_of_pool_left": days_left, "pool_empty_on": empty_on, "warning": warn,
+            "next_wave": {"exists": nw_row is not None, "name": campaigns.NEXT_WAVE_NAME,
+                          "key": campaigns.NEXT_WAVE_KEY, "on": bool(nw_row and nw_row.is_active),
+                          "families": int(fams.get(campaigns.NEXT_WAVE_KEY, 0) or 0),
+                          "copy_from": campaigns.NEXT_WAVE_BASE},
+            "reengagement": hit[1]}
+
+
 def program_summary(db: Session, prog: OutreachProgram) -> Dict:
     """The whole workspace in rows and real families: test / simulation
     records left out, rows with no campaign, rows per campaign."""
@@ -106,7 +163,11 @@ def program_summary(db: Session, prog: OutreachProgram) -> Dict:
 def _email_plan(touches: Dict[int, ProgramEmailTouch], max_t: int) -> Dict:
     sent = [n for n, t in touches.items() if t.status == "sent"]
     last_n = max(sent) if sent else 0
-    stopped = any(t.status in EMAIL_STOPS for t in touches.values())
+    from app.services.programs.email_touches import outage_retry_due
+    now = datetime.utcnow()
+    # A touch that only gave up on a provider outage is retried (Nov 17), so it
+    # does not end the family's email journey.
+    stopped = any(t.status in EMAIL_STOPS and outage_retry_due(t, now) is None for t in touches.values())
     blocked = any(t.status == "blocked" for t in touches.values())
     last_at = touches[last_n].attempted_at if last_n else None
     return {"last_n": last_n, "last_at": last_at, "stopped": stopped, "blocked": blocked,
@@ -352,5 +413,6 @@ def report(db: Session, prog: OutreachProgram, family_key: str, now: Optional[da
                             ready=_ready, ready_now=(_ready or {}).get("total"), next_day=_next_batch_day(prog, now),
                             last_run=_last_batch(db, prog)),
         "program": program_summary(db, prog),
+        "pipeline": pipeline(db, prog, now, _ready),
         "scheduler": sched,
     }

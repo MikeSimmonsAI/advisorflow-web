@@ -384,7 +384,22 @@ def upgrade_seeded_copy(fam) -> bool:
 # switches on, starts or sends it - even if a legacy row exists there (the
 # shared importer used to seed it in every workspace). The row is kept as it
 # is (history and audit); it is simply not this workspace's campaign.
-SCI_ONLY_KEYS = frozenset({CENTRAL_ALABAMA_KEY})
+# SCI — NEXT OUTREACH WAVE (owner, Nov 17): the campaign the NEXT real SCI
+# family list is imported into ("Campaign for this file" on import). Its own
+# identity, history and progress - never Central Alabama restarted. Its
+# messages start as a copy of General Survey's APPROVED wording (same SCI
+# survey-lead purpose: an appointment to go over planning), and the AI uses
+# General Survey's playbook. It is ON only when that base copy is approved,
+# so families imported into it flow straight into the standing daily batch
+# (40/day, 9-6 Central, every day) with no per-family approval. Nothing in it
+# matches a source-campaign pattern: only a file a person imports into it.
+NEXT_WAVE_KEY = "sci_next_wave"
+NEXT_WAVE_NAME = "SCI — Next Outreach Wave"
+NEXT_WAVE_BASE = "general_survey"
+# A campaign that speaks with another campaign's playbook / flyers.
+BASED_ON = {NEXT_WAVE_KEY: NEXT_WAVE_BASE}
+
+SCI_ONLY_KEYS = frozenset({CENTRAL_ALABAMA_KEY, NEXT_WAVE_KEY})
 SCI_ONLY_REFUSAL = "This campaign belongs to another program and is not available here."
 
 
@@ -550,10 +565,54 @@ def ensure_kilgroe_branches(db: Session, organization_id: str) -> Dict[str, Any]
     return out
 
 
+def ensure_next_wave(db: Session, organization_id: str):
+    """Create "SCI — Next Outreach Wave" once, in SCI's workspace only, from
+    General Survey's approved copy. Never overwrites it afterwards (a person
+    may edit its wording in Campaigns), never touches General Survey."""
+    from app.models.program_models import CampaignFamily
+    if hidden_in(db, organization_id, NEXT_WAVE_KEY):
+        return None
+    fam = (db.query(CampaignFamily).filter(CampaignFamily.organization_id == organization_id,
+                                           CampaignFamily.key == NEXT_WAVE_KEY).first())
+    if fam is not None:
+        return fam
+    base = (db.query(CampaignFamily).filter(CampaignFamily.organization_id == organization_id,
+                                            CampaignFamily.key == NEXT_WAVE_BASE).first())
+    fam = CampaignFamily(organization_id=organization_id, key=NEXT_WAVE_KEY, name=NEXT_WAVE_NAME,
+                         source_campaign_patterns=json.dumps([]), language="en", is_active=False)
+    if base is not None:
+        for col in ("asset_category", "first_touch_email_mode", "followup_email_mode", "sms_template",
+                    "email_subject_template", "email_body_template", "cadence_template_id", "touch_copy_json"):
+            setattr(fam, col, getattr(base, col))
+        fam.is_active = bool(base.is_active) and activation_blocker(base, db) is None
+    db.add(fam)
+    try:
+        db.commit()
+    except Exception:  # noqa: BLE001 - another process created it first
+        db.rollback()
+        fam = (db.query(CampaignFamily).filter(CampaignFamily.organization_id == organization_id,
+                                               CampaignFamily.key == NEXT_WAVE_KEY).first())
+        return fam
+    try:   # recorded in the name of the person who owns the standing daily batch
+        from app.routers.audit_log_router import log_action
+        from app.services.programs import identity
+        prog = identity.program_for_org(db, organization_id)
+        actor = getattr(prog, "daily_batch_by", None) or getattr(prog, "created_by", None)
+        if actor:
+            log_action(db, organization_id, actor, action="program.campaign_created",
+                       target_type="campaign_family", target_id=fam.id,
+                       details={"key": NEXT_WAVE_KEY, "name": NEXT_WAVE_NAME, "copy_from": NEXT_WAVE_BASE,
+                                "on": bool(fam.is_active), "by": "system (owner directive Nov 17)"})
+    except Exception:  # noqa: BLE001 - the audit line never blocks the campaign
+        db.rollback()
+    return fam
+
+
 def ensure_for_sci(db: Session) -> Optional[str]:
     from app.services import sms_programs
     org_id = sms_programs.sci_org_id(db)
     if org_id:
+        ensure_next_wave(db, org_id)
         ensure_central_alabama(db, org_id)
         ensure_kilgroe_for_sci(db, org_id)
         ensure_kilgroe_branches(db, org_id)

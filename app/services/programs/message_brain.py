@@ -306,7 +306,9 @@ _SMS = {
 
 
 def playbook(family_key: Optional[str]) -> Dict:
-    return PLAYBOOKS.get(family_key or "", PLAYBOOKS[FAMILY_FALLBACK])
+    from app.services.programs.campaigns import BASED_ON
+    key = BASED_ON.get(family_key or "", family_key or "")
+    return PLAYBOOKS.get(key, PLAYBOOKS[FAMILY_FALLBACK])
 
 
 # ── 1. context packet ────────────────────────────────────────────────────────
