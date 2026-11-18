@@ -325,6 +325,7 @@ export function Leads() {
         <div className="evs-card evs-list">
           {rows.length ? rows.map(l => (
             <div key={l.id} className="evs-row">
+              <LogoThumb lead={l} />
               <Link to={`${BASE}/leads/${l.id}`} className="evs-row-main">
                 <b>{l.company}</b>
                 <small>{[l.contact, l.phone, l.email].filter(Boolean).join(' · ')}</small>
@@ -429,6 +430,74 @@ function ImportPanel({ meta, onDone, onClose }) {
 
 // ── one lead ─────────────────────────────────────────────────────────────────
 
+// ── the business's own logo (owner request 2026-11-17, PR #691) ─────────────
+// Cut from the ad they ran. Clean and name-only logos go at the top of our
+// emails to them; a rough one is kept here for reference and never sent.
+const LOGO_LABEL = { clean: 'Clean', name_only: 'Name only', rough: 'Rough' }
+
+export function LogoThumb({ lead }) {
+  return (
+    <span className="evs-logo-thumb" aria-hidden={!lead?.logo_url}>
+      {lead?.logo_url
+        ? <img src={lead.logo_url} alt={`${lead.company} logo`} loading="lazy" />
+        : <span>{(lead?.company || '?').trim().charAt(0).toUpperCase()}</span>}
+    </span>
+  )
+}
+
+function LogoCard({ id, lead, manage, onChange }) {
+  const [quality, setQuality] = useState('clean')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+  useEffect(() => { if (lead?.logo_quality) setQuality(lead.logo_quality) }, [lead?.logo_quality])
+  const upload = async (file) => {
+    if (!file) return
+    setBusy(true); setMsg(null)
+    try {
+      const image_base64 = await new Promise((resolve, reject) => {
+        const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(file)
+      })
+      await api.put(`${API}/leads/${id}/logo`, { image_base64, quality })
+      await onChange(); setMsg({ ok: true, text: 'Logo saved. Nothing was sent.' })
+    } catch (e) { setMsg({ ok: false, text: errText(e) }) } finally { setBusy(false) }
+  }
+  const remove = async () => {
+    if (!window.confirm(`Remove the logo from ${lead?.company}?`)) return
+    setBusy(true); setMsg(null)
+    try { await api.delete(`${API}/leads/${id}/logo`); await onChange(); setMsg({ ok: true, text: 'Logo removed.' }) }
+    catch (e) { setMsg({ ok: false, text: errText(e) }) } finally { setBusy(false) }
+  }
+  return (
+    <section className="evs-card evs-logo-card">
+      <h3>Their logo</h3>
+      {lead?.logo_url ? (
+        <>
+          <div className="evs-logo-big"><img src={lead.logo_url} alt={`${lead.company} logo`} /></div>
+          <p className="evs-hint">
+            {LOGO_LABEL[lead.logo_quality] || 'Saved'} ·{' '}
+            {lead.logo_in_email ? 'Shown at the top of our emails to them.' : 'Kept for reference. Not used in emails.'}
+          </p>
+        </>
+      ) : <p className="evs-empty">No logo yet. Emails go out without one.</p>}
+      {manage && (
+        <div className="evs-actions">
+          <select className="evs-input" value={quality} disabled={busy} onChange={e => setQuality(e.target.value)} aria-label="Logo quality">
+            <option value="clean">Clean - use in emails</option>
+            <option value="name_only">Name only - use in emails</option>
+            <option value="rough">Rough - keep, don't use</option>
+          </select>
+          <label className="evs-btn evs-ghost">
+            <Icon name="upload" size={14} />{lead?.logo_url ? 'Replace' : 'Add logo'}
+            <input type="file" accept="image/*" hidden disabled={busy} onChange={e => { upload(e.target.files?.[0]); e.target.value = '' }} />
+          </label>
+          {lead?.logo_url && <button className="evs-btn evs-ghost" disabled={busy} onClick={remove}>Remove</button>}
+        </div>
+      )}
+      {msg && <div className={msg.ok ? 'evs-okmsg' : 'evs-error'} role="status">{msg.text}</div>}
+    </section>
+  )
+}
+
 export function Lead() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -477,6 +546,7 @@ export function Lead() {
             <section className="evs-card">
               <h3>Next email · {data.next.campaign} · step {data.next.step} · {when(data.next.due_at)}</h3>
               {data.next.paused && <p className="evs-banner">This campaign is paused or needs approving, so this email is waiting.</p>}
+              {l?.logo_in_email && <img className="evs-email-logo" src={l.logo_url} alt={`${l.company} logo`} />}
               <p className="evs-subject">{data.next.subject}</p>
               <pre className="evs-body">{data.next.body}</pre>
             </section>
@@ -497,6 +567,7 @@ export function Lead() {
         </div>
 
         <div>
+          <LogoCard id={id} lead={l} manage={manage} onChange={reload} />
           <GroupCard id={id} grp={grp} meta={meta.data} manage={manage} onChange={() => { grp.reload(); reload() }} />
           <IntroCall lead={l} onBooked={() => { reload(); grp.reload() }} />
           <section className="evs-card evs-facts1">
