@@ -23,6 +23,7 @@ from app.models.models import User
 from app.models.sales_models import STAGE_LABELS, Opportunity, OpportunityEvent
 from app.services import sales_access
 from app.services.evosys_sales import outreach as O
+from app.services.evosys_sales import logos as _logos
 
 router = APIRouter(prefix="/sales/evosys", tags=["evosys-sales"])
 public_router = APIRouter(prefix="/evosys-sales-public", tags=["evosys-sales-public"])
@@ -84,7 +85,9 @@ def _row(o: Opportunity, st, last=None, booked=False) -> dict:
             "stage_label": STAGE_LABELS.get(o.stage, o.stage), "source": o.source,
             "created_at": o.created_at.isoformat() + "Z" if o.created_at else None,
             "outreach": _status(st, o), "booked": booked,
-            "last_message": last}
+            "last_message": last,
+            "logo_url": _logos.view_url(o), "logo_quality": o.logo_quality,
+            "logo_in_email": _logos.usable(o)}
 
 
 def _msg(m: EvoSysOutreachMessage) -> dict:
@@ -286,6 +289,40 @@ def lead(opp_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
             "messages": [_msg(m) for m in msgs], "next": nxt,
             "timeline": [{"summary": e.summary, "detail": e.detail, "type": e.event_type,
                           "at": e.occurred_at.isoformat() + "Z"} for e in events]}
+
+
+class LogoIn(BaseModel):
+    image_base64: str
+    quality: str = "clean"
+
+
+@router.put("/leads/{opp_id}/logo")
+def set_logo(opp_id: str, body: LogoIn, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """Save the business's logo on the lead. Managers only. Sends nothing."""
+    _manager(c)
+    o = _opp(db, c, opp_id)
+    try:
+        png = _logos.normalize(_logos.decode_upload(body.image_base64))
+        _logos.store(o, png, body.quality, datetime.utcnow())
+    except _logos.LogoError as e:
+        raise HTTPException(400, str(e))
+    db.add(OpportunityEvent(opportunity_id=o.id, event_type="note", actor_user_id=c.user.id,
+                            summary="Logo saved (%s)" % body.quality.replace("_", " ")))
+    db.commit()
+    return {"ok": True, "logo_url": _logos.view_url(o), "logo_quality": o.logo_quality,
+            "logo_in_email": _logos.usable(o)}
+
+
+@router.delete("/leads/{opp_id}/logo")
+def remove_logo(opp_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    _manager(c)
+    o = _opp(db, c, opp_id)
+    if _logos.has_logo(o):
+        _logos.clear(o)
+        db.add(OpportunityEvent(opportunity_id=o.id, event_type="note", actor_user_id=c.user.id,
+                                summary="Logo removed"))
+        db.commit()
+    return {"ok": True}
 
 
 class Note(BaseModel):
@@ -642,6 +679,20 @@ def _opt_out(token: str, db: Session) -> bool:
                             summary="Opted out of EvoSys emails", occurred_at=datetime.utcnow()))
     db.commit()
     return True
+
+
+@public_router.get("/logo/{token}.png")
+def logo_png(token: str, db: Session = Depends(get_db)):
+    """The lead's logo, for the emails we send them. No login: the token names
+    one lead and cannot be forged."""
+    from fastapi.responses import Response
+    opp_id = _logos.read_token(token)
+    o = db.get(Opportunity, opp_id) if opp_id else None
+    data = o.logo_png if o is not None and _logos.has_logo(o) else None
+    if not data:
+        raise HTTPException(404, "Not found.")
+    return Response(content=data, media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=86400"})
 
 
 @public_router.get("/stop/{token}", response_class=HTMLResponse)

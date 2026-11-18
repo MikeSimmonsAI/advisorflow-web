@@ -32,6 +32,10 @@ slowapi==0.1.9
 # EvoSys e-signature: builds the signed contract PDF and its certificate page
 # (app/services/esign_pdf.py). Pure-Python wheel; pulls in pillow + chardet.
 reportlab==4.2.5
+# Prospect logos for EvoSys Sales outreach (app/services/evosys_sales/logos.py)
+# read and re-draw the uploaded picture. Already installed by reportlab; named
+# here so the dependency is stated rather than inherited.
+pillow>=10.0
 
 # pytest and alembic moved to requirements-dev.txt — neither is imported by any
 # module under app/, neither is invoked by deploy.ps1 or by any Render build or

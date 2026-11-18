@@ -620,6 +620,12 @@ COLUMNS_TO_ADD = [
     #
     # Mirrored onto proposals as a SNAPSHOT: what was quoted must not move when
     # the deal is renegotiated.
+    # The prospect's own logo for personal outreach - see
+    # app/services/evosys_sales/logos.py. NULL on every existing row, which
+    # means "no logo" and leaves every email exactly as it was.
+    ("opportunities", "logo_png", "BYTEA"),
+    ("opportunities", "logo_quality", "VARCHAR"),
+    ("opportunities", "logo_updated_at", "TIMESTAMP"),
     ("opportunities", "custom_unit_price", "NUMERIC(12,2)"),
     ("opportunities", "custom_unit_label", "VARCHAR"),
     ("opportunities", "custom_min_units", "INTEGER"),

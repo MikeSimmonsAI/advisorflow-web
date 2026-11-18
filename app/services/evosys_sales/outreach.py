@@ -213,7 +213,10 @@ def render_email(opp: Opportunity, s: EvoSysOutreachSettings, step: dict, campai
     footer = ('<p style="font-size:12px;color:#6b7f8c;margin-top:24px">%s<br>'
               'Not interested? <a href="%s">Stop these emails</a>.</p>'
               % (_html.escape((s.mailing_address or "").strip()), opt_out_url(opp.id)))
-    return {"subject": subject, "text": text, "html": paras + footer, "facts_used": used, "missing": missing}
+    from app.services.evosys_sales import logos as _logos
+    header = _logos.email_header_html(opp)
+    return {"subject": subject, "text": text, "html": header + paras + footer, "facts_used": used,
+            "missing": missing, "logo": bool(header)}
 
 
 # ── enrolment and stopping ────────────────────────────────────────────────────

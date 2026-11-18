@@ -35,9 +35,9 @@ Stripe plans in billing_router (see BrandPackage docstring).
 
 from sqlalchemy import (
     Column, String, Boolean, DateTime, Date, ForeignKey, Text, Integer,
-    Numeric, UniqueConstraint, Index,
+    Numeric, UniqueConstraint, Index, LargeBinary,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, deferred
 from datetime import datetime
 import uuid
 
@@ -426,6 +426,17 @@ class Opportunity(Base):
     source_system    = Column(String, nullable=True)
     source_record_id = Column(String, nullable=True, index=True)
     import_batch_id  = Column(String, nullable=True, index=True)
+
+    # THE PROSPECT'S OWN LOGO (owner request 2026-11-17). Cut from the ad they
+    # ran, shown at the top of the emails we send them so they see at once the
+    # message is about them. A small PNG kept on the row and served by our own
+    # API (see app/services/evosys_sales/logos.py). `logo_quality` is "clean",
+    # "name_only" or "rough"; only the first two are ever put in an email.
+    # deferred: lead lists never pull the picture bytes; only the picture
+    # route does.
+    logo_png         = deferred(Column(LargeBinary, nullable=True))
+    logo_quality     = Column(String, nullable=True)
+    logo_updated_at  = Column(DateTime, nullable=True)
 
     # Packages / value — decision #9. deal_value derives from the package unless
     # explicitly overridden, and the override is recorded and audited rather than
