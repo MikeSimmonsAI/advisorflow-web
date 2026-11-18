@@ -294,7 +294,7 @@ def copy_problems(fam) -> list:
     prohibited = [p for p, _ in brain._COMMON_PROHIBITED] + list(pb.get("prohibited") or [])
     known = {"first_name", "location_name", "primary_contact_name", "appointment_options",
              "location_phone", "booking_line", "reply_instructions", "location_website", "call_line",
-             "time_offer"}
+             "time_offer", "tomorrow_offer", "full_name"}
     def check(label, text, email):
         for name in re.findall(r"\{(\w+)\}", text or ""):
             if name not in known:

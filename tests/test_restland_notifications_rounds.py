@@ -493,7 +493,8 @@ def test_copy_never_states_what_the_permission_form_authorizes(rl):
     texts += [s + b for s, b in F.EMAIL.values()] + [s + b for s, b in F.RETURN_EMAIL.values()]
     for t in texts:
         assert not re.search(r"records who|who (you give|may) |complete the permission|sign the permission", t, re.I)
-    assert "go over any permission-to-access paperwork that applies" in F.SMS[1]   # Nov 15 wording
+    # Nov 17: the owner's own opening - a form to fill out, never what it authorizes.
+    assert "have you fill out your Permission to Access form" in F.SMS[1]
     configured(rl)
     fam = rl["db"].query(CampaignFamily).filter_by(organization_id=rl["org"].id, key=F.CAMPAIGN_KEY).one()
     assert "records who" not in (campaigns.email_for(fam, 3) or {}).get("body", "")

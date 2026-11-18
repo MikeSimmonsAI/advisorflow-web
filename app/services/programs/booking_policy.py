@@ -372,6 +372,36 @@ def say_time(t: datetime) -> str:
     return "%s at %s" % (t.strftime("%A, %b %-d"), t.strftime("%-I:%M %p"))
 
 
+def _clock(t: datetime) -> str:
+    return t.strftime("%-I:%M %p")
+
+
+def tomorrow_offer(db: Session, advisor, policy: Dict, channel: str = "sms", *,
+                   now_local: Optional[datetime] = None, busy_reader=None) -> str:
+    """Owner, Nov 17 (Restland File Review): "What time tomorrow works best
+    for you, 10:00 AM or 2:30 PM?" - two times really open TOMORROW (read from
+    the calendar at send time, failing closed), spread across the day. A full
+    tomorrow names the next day with two openings ("What time Thursday ...").
+    Never a time it could not verify."""
+    ask = "What day and time work best for you to come in?"
+    if advisor is None or not policy:
+        return ask
+    now_local = now_local or _today_central()
+    for i in range(1, 8):
+        d = (now_local + timedelta(days=i)).date()
+        res = day_slots(db, advisor, d, policy, now_local=now_local, busy_reader=busy_reader)
+        if res.get("calendar_error"):
+            return ask
+        slots = sorted(datetime.strptime(s, "%Y-%m-%dT%H:%M:00") for s in (res.get("slots") or []))
+        if len(slots) < 2:
+            continue
+        first = slots[0]
+        later = next((s for s in slots[1:] if s - first >= timedelta(hours=3)), slots[-1])
+        day = "tomorrow" if i == 1 else d.strftime("%A")
+        return "What time %s works best for you, %s or %s?" % (day, _clock(first), _clock(later))
+    return ask
+
+
 def time_offer(db: Session, advisor, policy: Dict, channel: str = "sms", **kw) -> str:
     """One sentence offering two verified times, or asking for a day."""
     times = open_times(db, advisor, policy, **kw) if advisor is not None and policy else []

@@ -64,10 +64,14 @@ _SIG = "{primary_contact_name}\n{location_name}\n13005 Greenville Ave, Dallas, T
 # home if they can't come in. Never virtual. {time_offer} names two times the
 # calendar really has open, or asks what day works when it can't verify any.
 SMS = {
-    1: ("Hi {first_name}, this is {primary_contact_name} with Restland. It's been a while since we reviewed "
-        "your file, and I'd like to get you in this week to make sure everything is up to date. We'll go over "
-        "any permission-to-access paperwork that applies and get you a Personal Planning Guide if you haven't "
-        "received one. What day works for you to come by? Reply STOP to opt out."),
+    # Owner, Nov 17: THE File Review opening - his words, aimed at getting a
+    # reply (good, bad or ugly). {full_name} stands in for "Mr./Mrs. ___" (the
+    # file holds no title); {tomorrow_offer} asks "What time tomorrow works
+    # best for you, X or Y?" with two times really open.
+    1: ("Hi {full_name}, this is Mike with Restland Cemetery and Funeral Home. The reason for my text is that we "
+        "have a few things that must be taken care of with every family here at Restland. We need to review your "
+        "file, get you your Personal Planning Guide and have you fill out your Permission to Access form. "
+        "{tomorrow_offer} Reply STOP to opt out."),
     2: ("Hi {first_name}, it's {primary_contact_name} at Restland. I'd like to sit down with you this week and "
         "go over your file. {time_offer} Reply STOP to opt out."),
     3: ("{first_name}, it takes about 45 minutes at our office, 13005 Greenville Ave, and I'll have a Personal "
@@ -82,18 +86,19 @@ SMS = {
 }
 
 EMAIL = {
-    1: ("Your Restland file - can we meet this week?",
-        "Hi {first_name},\n\n"
-        "This is {primary_contact_name}, Family Service Advisor at {location_name}. It's been a while since we "
-        "reviewed your file, and I'd like to get you in this week for a Family File Review to make sure "
-        "everything is up to date.\n\n"
-        "When we meet, we'll:\n\n"
-        "- confirm the information in your file is current,\n"
-        "- go over any permission-to-access paperwork that applies, and\n"
-        "- get you a Personal Planning Guide if you haven't received one.\n\n"
-        "It takes about 45 minutes at our office, 13005 Greenville Ave, Dallas. {time_offer}\n\n"
+    # Owner, Nov 17: the same opening as the first text, laid out for email.
+    1: ("A few things we need to take care of with your Restland file",
+        "Hi {full_name},\n\n"
+        "This is Mike with Restland Cemetery and Funeral Home.\n\n"
+        "The reason for my email is that we have a few things that must be taken care of with every family "
+        "here at Restland. We need to:\n\n"
+        "- review your file,\n"
+        "- get you your Personal Planning Guide, and\n"
+        "- have you fill out your Permission to Access form.\n\n"
+        "It takes about 45 minutes at our office, 13005 Greenville Ave, Dallas.\n\n"
+        "{tomorrow_offer}\n\n"
         "{booking_line}"
-        "Or just reply with a day that works for you.\n\n" + _SIG),
+        "Or just reply with a time that works for you.\n\n" + _SIG),
     2: ("A time for your file review, {first_name}",
         "Hi {first_name},\n\n"
         "I wanted to follow up on reviewing your file at {location_name}. It's a short sit-down at our office "
@@ -232,7 +237,13 @@ def forecast(sample_link: str, *, new_per_day=(5, 10, 15, 25), email_share: floa
     f = {"first_name": first_name, "primary_contact_name": "Mike Simmons",
          "location_name": "Restland Cemetery and Funeral Home",
          "booking_line": ("Pick a time that works for you: %s" % sample_link) if sample_link else "",
-         "booking_link": sample_link or ""}
+         "booking_link": sample_link or "",
+         # A realistic full name and the longest offer wording, so segment
+         # counts are measured on what really goes out.
+         "full_name": "%s Whitfield-Henderson" % first_name,
+         "tomorrow_offer": "What time Wednesday works best for you, 10:00 AM or 2:30 PM?",
+         "time_offer": ("I have Wednesday, Nov 18 at 10:00 AM or Thursday, Nov 19 at 2:30 PM open at our office. "
+                        "Would either of those work?")}
     rows_t = []
     for copy, label in ((texts, "first round"), (return_texts, "return round")):
         for n, t in sorted(copy.items()):
@@ -245,7 +256,8 @@ def forecast(sample_link: str, *, new_per_day=(5, 10, 15, 25), email_share: floa
     # Real range across the ready audience's first names (name length and any
     # non-GSM character change the count; the link length is fixed per org).
     names = [x for x in (first_names or []) if x] or [first_name]
-    per = sorted(family_segments(texts, dict(f, first_name=x)) for x in names)
+    per = sorted(family_segments(texts, dict(f, first_name=x, full_name="%s Whitfield-Henderson" % x))
+                 for x in names)
     rng = {"families_measured": len(names), "min": per[0], "max": per[-1],
            "mean": round(sum(per) / len(per), 2),
            "unicode_families": sum(1 for x in names if any(c not in _GSM and c not in _GSM_EXT for c in x)),
