@@ -2056,12 +2056,21 @@ def _own_copy_preview(db: Session, prog, f: CampaignFamily, prof: LocationProfil
     except ValueError:
         raise HTTPException(status_code=422, detail="touch must look like sms:2 or email:3")
     who = (rec.first_name if rec else None) or sample_name or "Pat"
+    last = (rec.last_name if rec else None) or (None if (rec or sample_name) else "Sample")
+    # The real offers the family would get right now (calendar read, failing
+    # closed) - the preview shows exactly what goes out (owner, Nov 17).
+    from types import SimpleNamespace as _NS
+    _who = _NS(id=None, organization_id=prog.organization_id)
+    offers = {"time_offer": identity.time_offer_for(db, _who, "sms"),
+              "tomorrow_offer": identity.tomorrow_offer_for(db, _who, "sms")}
     r = _et.render_touch(db, prog, f, prof, who, "first",
-                         booking_url="(their own booking link)")
+                         booking_url="(their own booking link)", last_name=last,
+                         time_offer=offers["time_offer"], tomorrow_offer=offers["tomorrow_offer"])
     # Texts: the SAME field builder delivery uses (identity.location_fields),
     # and the SAME content allowance (this program's sender approval).
     fields = identity.location_fields(db, prog, prof, who,
-                                      prog.reply_instructions_sms or "", f.key)
+                                      prog.reply_instructions_sms or "", f.key, last_name=last)
+    fields.update(offers)
     fields["booking_line"] = "Pick a time that works for you: (their own booking link)"
     from types import SimpleNamespace
     from app.services import sms_programs as _sp
