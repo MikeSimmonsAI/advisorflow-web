@@ -100,17 +100,89 @@ def handle(db: Session, *, from_number: str, to_number: str, body: str, message_
                                 detail=text[:2000], occurred_at=now))
     db.commit()
     if not opted_out:
-        _alert_owner(db, O.get_settings(db, bso), opp, text)
+        s = O.get_settings(db, bso)
+        answered = None
+        try:
+            answered = _auto_answer(db, s, opp, message_sid)
+        except Exception:                                   # noqa: BLE001 - the reply is safe on the lead
+            db.rollback()
+            log.exception("[evosys-sales sms] AI answer failed for lead %s", opp.id)
+        _alert_owner(db, s, opp, text, answered)
     return True
 
 
-def _alert_owner(db: Session, s, opp: Opportunity, text: str) -> None:
+AUTO_MAX_PER_LEAD = 3
+
+
+def conversation(db: Session, opp_id: str) -> list:
+    rows = (db.query(EvoSysOutreachMessage).filter(EvoSysOutreachMessage.opportunity_id == opp_id,
+                                                   EvoSysOutreachMessage.channel == "text",
+                                                   EvoSysOutreachMessage.status.in_(("sent", "received")))
+            .order_by(EvoSysOutreachMessage.created_at).all())
+    return [{"from": "them" if m.direction == "in" else "us", "text": (m.body or "")[:500]} for m in rows]
+
+
+def _auto_answer(db: Session, s, opp: Opportunity, message_sid: str) -> Optional[str]:
+    """When the team turned it on, let AI answer a SIMPLE text reply by itself
+    (yes / is it free / how does it work). Anything else waits for a person
+    with the draft ready on the lead. Returns the text sent, or None."""
+    from app.models.evosys_sales_models import EvoSysCampaign, EvoSysOutreachState
+    from app.services import sales_suppression as SDNC
+    from app.services.evosys_sales import ai as AI
+    from app.services.evosys_sales import outreach as O
+    reply = (db.query(EvoSysOutreachMessage).filter(EvoSysOutreachMessage.opportunity_id == opp.id,
+                                                    EvoSysOutreachMessage.provider_message_id == message_sid).first())
+    if reply is None:
+        return None
+    st = db.get(EvoSysOutreachState, opp.id)
+    camp = db.get(EvoSysCampaign, st.campaign_id) if st is not None and st.campaign_id else None
+    if not s.text_auto_reply:
+        return None                       # off: a person drafts it from the lead
+    background = True
+    t = AI.text_reply(db, s, camp, opp, reply, conversation(db, opp.id), opp.owner_user_id or "system",
+                      background=background)
+    out = t.output or {}
+    if out.get("category"):
+        reply.label = reply.label or out["category"]
+    db.commit()
+    if not out.get("auto_ok"):
+        return None
+    auto_sent = (db.query(EvoSysOutreachMessage).filter(EvoSysOutreachMessage.opportunity_id == opp.id,
+                                                        EvoSysOutreachMessage.direction == "out",
+                                                        EvoSysOutreachMessage.channel == "text",
+                                                        EvoSysOutreachMessage.label == "ai_answer").count())
+    if auto_sent >= AUTO_MAX_PER_LEAD:
+        return None
+    if (st is not None and st.opted_out_at) or SDNC.for_opportunity(db, opp) or SDNC.find(db, s.brand_sales_org_id, opp.phone, opp.email):
+        return None
+    to = O.e164(opp.phone)
+    body = out["draft"]
+    r = O._send_text(to, body, s)
+    ok = bool(r.get("success"))
+    db.add(EvoSysOutreachMessage(brand_sales_org_id=s.brand_sales_org_id, opportunity_id=opp.id, direction="out",
+                                 channel="text", to_address=to, body=body, label="ai_answer",
+                                 status="sent" if ok else "failed", error=None if ok else str(r.get("error") or "")[:1000],
+                                 provider_message_id=r.get("provider_message_id"),
+                                 campaign_id=st.campaign_id if st else None, created_at=datetime.utcnow()))
+    if ok:
+        AI.resolve(db, t, "auto_sent")
+        db.add(OpportunityEvent(opportunity_id=opp.id, event_type="outreach_reply_sent",
+                                summary="AI answered their text", detail=body[:500], occurred_at=datetime.utcnow()))
+    db.commit()
+    return body if ok else None
+
+
+def _alert_owner(db: Session, s, opp: Opportunity, text: str, answered: Optional[str] = None) -> None:
     """Tell the owner a prospect texted back - by text and email, the same way
     SCI and Restland replies reach him. A failed alert never loses the reply
     (it is already on the lead)."""
     who = opp.company_name or opp.contact_name or "A prospect"
     phone = opp.phone or ""
-    line = "EvoSys Sales - NEEDS A PERSON: %s (%s) texted back: \"%s\"" % (who, phone, (text or "")[:160])
+    if answered:
+        line = "EvoSys Sales - %s (%s) texted: \"%s\" AI answered: \"%s\"" % (who, phone, (text or "")[:110], answered[:120])
+    else:
+        line = "EvoSys Sales - NEEDS A PERSON: %s (%s) texted back: \"%s\" (draft ready on the lead)" % (
+            who, phone, (text or "")[:150])
     if s.alert_phone:
         try:
             from app.services import sms_programs as _sci
@@ -125,9 +197,12 @@ def _alert_owner(db: Session, s, opp: Opportunity, text: str) -> None:
             from app.services.email_service import send_email_via_provider
             from app.services.evosys_sales.outreach import _Sender
             body = ("<p><b>%s</b> (%s) texted back to the EvoSys Sales number:</p><blockquote>%s</blockquote>"
-                    "<p>The automatic follow-up for this lead has stopped. Open the lead in EvoSys Sales to answer.</p>"
                     % (_html.escape(who), _html.escape(phone), _html.escape(text or "")))
-            send_email_via_provider(s.alert_email, "EvoSys Sales - NEEDS A PERSON: %s texted back" % who, body,
+            body += (("<p>AI answered for you:</p><blockquote>%s</blockquote>" % _html.escape(answered)) if answered else
+                     "<p>The automatic follow-up has stopped. A draft answer is ready on the lead in EvoSys Sales.</p>")
+            subj = ("EvoSys Sales - %s texted back (AI answered)" if answered
+                    else "EvoSys Sales - NEEDS A PERSON: %s texted back") % who
+            send_email_via_provider(s.alert_email, subj, body,
                                     org=_Sender(s), message_type="notification", sensitivity="none")
         except Exception:                                   # noqa: BLE001
             log.exception("[evosys-sales sms] reply alert email failed for lead %s", opp.id)

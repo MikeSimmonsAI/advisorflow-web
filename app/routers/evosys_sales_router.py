@@ -115,6 +115,7 @@ def _settings_out(s, c: Ctx, db: Session) -> dict:
             "problems": O.settings_problems(s), "can_manage": c.manager,
             "sms_from_number": s.sms_from_number,
             "alert_phone": s.alert_phone, "alert_email": s.alert_email,
+            "text_auto_reply": bool(s.text_auto_reply),
             "texting_ready": bool(O.e164(s.sms_from_number)),
             "reply_tracking": _reply_tracking(db, s),
             "sending_hours": "Weekdays 8:00 AM - 6:00 PM Central"}
@@ -286,7 +287,8 @@ def lead(opp_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
                "due_at": st.next_due_at.isoformat() + "Z" if st.next_due_at else None}
     from app.services.evosys_sales import ai as _AI
     last_in = next((m for m in reversed(msgs) if m.direction == "in"), None)
-    reply_ai = _AI.payload(_AI.latest(db, "reply_assist", last_in.id)) if last_in else None
+    reply_ai = (_AI.payload(_AI.latest(db, "text_reply" if last_in.channel == "text" else "reply_assist", last_in.id))
+                if last_in else None)
     db.commit()
     return {"lead": _row(o, st, booked=o.id in _booked_ids(db, c.bso)), "reply_ai": reply_ai,
             "messages": [_msg(m) for m in msgs], "next": nxt,
@@ -486,6 +488,7 @@ class SettingsIn(BaseModel):
     sms_from_number: Optional[str] = None
     alert_phone: Optional[str] = None
     alert_email: Optional[str] = None
+    text_auto_reply: Optional[bool] = None
     daily_limit: Optional[int] = None
 
 
@@ -532,6 +535,8 @@ def save_team_settings(db: Session, s, data: dict, user_id: str) -> bool:
     # never stops a campaign.
     if data.get("alert_phone") is not None:
         s.alert_phone = O.e164(data["alert_phone"]) or None
+    if data.get("text_auto_reply") is not None:
+        s.text_auto_reply = bool(data["text_auto_reply"])
     if data.get("alert_email") is not None:
         e = str(data["alert_email"]).strip().lower()
         s.alert_email = e if re.match(r"[^@\s]+@[^@\s]+\.[^@\s]+$", e) else None

@@ -708,6 +708,7 @@ const CATEGORY = { interested: 'Interested', pricing: 'Pricing question', questi
                    wrong_person: 'Wrong person', unsubscribe: 'Wants no more emails', unclear: 'Unclear' }
 
 function ReplyHelp({ lead, reply, saved, onSent }) {
+  const isText = reply.channel === 'text'
   const reSubject = 'Re: ' + (reply.subject || 'our conversation').replace(/^Re:\s*/i, '')
   const [t, setT] = useState(saved && !saved.outcome ? saved : null)
   const [subject, setSubject] = useState(saved ? reSubject : '')
@@ -723,7 +724,7 @@ function ReplyHelp({ lead, reply, saved, onSent }) {
   }
   const send = async () => {
     setBusy(true); setMsg(null)
-    try { await api.post(`${API}/leads/${lead.id}/send-reply`, { subject, body, ai_task_id: t?.id }); setMsg({ ok: true, text: 'Sent. Their next reply will land here too.' }); setBody(''); onSent() }
+    try { await api.post(`${API}/leads/${lead.id}/send-reply`, { subject, body, ai_task_id: t?.id, channel: isText ? 'text' : 'email' }); setMsg({ ok: true, text: isText ? 'Text sent from your EvoSys number. Their answer will land here too.' : 'Sent. Their next reply will land here too.' }); setBody(''); onSent() }
     catch (e) { setMsg({ ok: false, text: errText(e) }) } finally { setBusy(false) }
   }
   const out = t?.output || {}
@@ -731,7 +732,7 @@ function ReplyHelp({ lead, reply, saved, onSent }) {
     <section className="evs-card evs-replyhelp">
       <h3 className="evs-h3i"><Icon name="reply" size={18} />They replied {when(reply.at)}</h3>
       <blockquote className="evs-quoteblock">{reply.body}</blockquote>
-      <p className="evs-hint">Their emails already stopped. {reply.how === 'reply_address' ? 'Matched by their reply address.' : reply.how === 'sender' ? 'Matched by their email address.' : ''}</p>
+      <p className="evs-hint">{isText ? 'Their automatic texts already stopped.' : 'Their emails already stopped.'} {reply.how === 'reply_address' ? 'Matched by their reply address.' : reply.how === 'sender' ? 'Matched by their email address.' : ''}</p>
       {!t && (
         <div className="evs-actions">
           <button className="evs-btn" disabled={busy} onClick={() => ask(false)}><Icon name="spark" size={16} />{busy ? 'Reading…' : 'Summarise and draft an answer'}</button>
@@ -744,20 +745,20 @@ function ReplyHelp({ lead, reply, saved, onSent }) {
           <Icon name="spark" size={20} />
           <div>
             <b>{CATEGORY[out.category] || 'Reply'}: {out.summary}</b>
-            <small>AI used: their reply, our last email, {out.used_offer ? 'your approved offer' : 'no offer (none approved)'}, the booking link.</small>
+            <small>{isText ? 'AI used: their text, the conversation, your offer (3 free appointments, 30 days, no obligation), the booking link.' : <>AI used: their reply, our last email, {out.used_offer ? 'your approved offer' : 'no offer (none approved)'}, the booking link.</>}</small>
             {(out.needs_person || []).map((n, k) => <small key={k} className="evs-err-small">{n}</small>)}
           </div>
         </div>
       )}
       {t && (
         <>
-          <label className="evs-field"><span>Subject</span><input className="evs-input" value={subject} onChange={e => setSubject(e.target.value)} /></label>
-          <label className="evs-field"><span>Your answer {t.manual ? '' : '(edit before sending)'}</span><textarea className="evs-input" rows={6} value={body} onChange={e => setBody(e.target.value)} placeholder="Write your answer…" /></label>
+          {!isText && <label className="evs-field"><span>Subject</span><input className="evs-input" value={subject} onChange={e => setSubject(e.target.value)} /></label>}
+          <label className="evs-field"><span>Your answer {t.manual ? '' : '(edit before sending)'}{isText ? ` - ${body.length} characters` : ''}</span><textarea className="evs-input" rows={isText ? 4 : 6} value={body} onChange={e => setBody(e.target.value)} placeholder="Write your answer…" /></label>
           <div className="evs-actions">
-            <button className="evs-btn" disabled={busy || !body.trim()} onClick={send}>Send answer</button>
+            <button className="evs-btn" disabled={busy || !body.trim()} onClick={send}>{isText ? 'Send text' : 'Send answer'}</button>
             {!t.manual && <button className="evs-btn evs-ghost" disabled={busy} onClick={() => ask(true)}>Draft again</button>}
           </div>
-          <p className="evs-hint">Sends from your EvoSys address with your mailing address and opt-out link. It does not restart the follow-up.</p>
+          <p className="evs-hint">{isText ? 'Sends from your EvoSys texting number. It does not restart the follow-up.' : 'Sends from your EvoSys address with your mailing address and opt-out link. It does not restart the follow-up.'}</p>
         </>
       )}
       {msg && <div className={msg.ok ? 'evs-okmsg' : 'evs-error'} role="status">{msg.text}</div>}
@@ -769,12 +770,12 @@ const HOW = { reply_address: 'matched by their reply address', sender: 'matched 
 
 function Message({ m }) {
   const inbound = m.direction === 'in'
-  const who = inbound ? 'They replied' : m.channel === 'call' ? 'Call' : m.channel === 'text' ? 'Text' : m.step ? 'Email ' + m.step : 'Your answer'
+  const who = inbound ? 'They replied' : m.label === 'ai_answer' ? 'AI answered' : m.channel === 'call' ? 'Call' : m.channel === 'text' ? (m.step ? 'Text ' + m.step : 'Your text') : m.step ? 'Email ' + m.step : 'Your answer'
   const problem = m.status === 'held' ? (m.channel === 'text' ? 'Not sent - no texting number yet' : 'Not sent') : m.status === 'failed' ? 'Did not send' : null
   return (
     <div className={'evs-msg ' + (inbound ? 'in' : 'out')}>
       <div className="evs-msg-head"><b>{who}</b><small>{when(m.at)}{inbound && HOW[m.how] ? ' · ' + HOW[m.how] : ''}</small>
-        {m.label && <span className="evs-pill evs-gold">{CATEGORY[m.label] || m.label}</span>}
+        {m.label && m.label !== 'ai_answer' && <span className="evs-pill evs-gold">{CATEGORY[m.label] || m.label}</span>}
         {problem && <span className="evs-pill evs-bad">{problem}</span>}
       </div>
       {m.subject && <div className="evs-subject">{m.subject}</div>}

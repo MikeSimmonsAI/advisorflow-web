@@ -93,7 +93,7 @@ def background_enabled() -> bool:
 # setter checks the program's OFF/DRAFT/AUTO mode and its emergency switch).
 # The grant lives in a ContextVar for the duration of one call, names the
 # organization, and every budget cap and the provider breaker still apply.
-SCOPED_FEATURES = frozenset({"sci_appointment_setter", "acquisition_workforce"})
+SCOPED_FEATURES = frozenset({"sci_appointment_setter", "acquisition_workforce", "evosys_sales_text_replies"})
 _GRANT: contextvars.ContextVar = contextvars.ContextVar("ai_scoped_grant", default=None)
 
 

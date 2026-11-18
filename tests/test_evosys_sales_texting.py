@@ -224,3 +224,75 @@ def test_unnamed_business_is_held_not_texted(db_session, brand, manager):
     O.run_pass(db_session, MON_10AM, Rec(), texts)
     assert not texts.calls
     assert (db_session.get(EvoSysOutreachState, o.id).held_reason or "").startswith("missing:company")
+
+
+# ── AI answers to text replies (owner request 2026-11-18) ─────────────────────
+
+import json as _json
+from types import SimpleNamespace as _NS
+
+from app.services.evosys_sales import ai as AI
+
+
+class _FakeAI:
+    def __init__(self, *answers):
+        self.answers, self.seen = list(answers), []
+        self.chat = _NS(completions=_NS(create=self._create))
+
+    def _create(self, **kw):
+        self.seen.append(kw)
+        return _NS(choices=[_NS(message=_NS(content=_json.dumps(self.answers.pop(0))))], usage=None)
+
+
+def _auto_world(db_session, brand, manager, monkeypatch, answer, auto=True):
+    s = _ready(db_session, brand)
+    s.text_auto_reply = auto
+    db_session.commit()
+    o = _lead(db_session, brand, manager, "Shine Co", phone="2145550120")
+    O.run_pass(db_session, MON_10AM, Rec(), Rec())
+    fake = _FakeAI(answer)
+    monkeypatch.setattr(AI, "_get_client", lambda: fake)
+    sent = []
+    monkeypatch.setattr(O, "_send_text", lambda to, body, s: sent.append((to, body)) or {"success": True, "provider_message_id": "SMai"})
+    from app.services import sms_programs
+    monkeypatch.setattr(sms_programs, "sci_sender", lambda: (_NS(messages=_NS(create=lambda **k: None)), "+18449172171"))
+    return o, fake, sent
+
+
+def test_ai_answers_a_simple_yes_by_itself(db_session, brand, manager, monkeypatch):
+    o, fake, sent = _auto_world(db_session, brand, manager, monkeypatch, {
+        "category": "interested", "summary": "Said yes", "simple": True,
+        "draft": "Awesome! Let's get you those 3 appointments. Got 10 minutes for a quick call? https://x.test/book"})
+    IN.handle(db_session, from_number="+12145550120", to_number=TEAM_NO, body="Yes", message_sid="SMy1")
+    assert sent and sent[0][0] == "+12145550120" and "3 appointments" in sent[0][1]
+    out = db_session.query(EvoSysOutreachMessage).filter_by(opportunity_id=o.id, label="ai_answer").one()
+    assert out.status == "sent"
+    # the model was told the owner's offer, in background mode for this one feature
+    assert "absolutely free" in fake.seen[0]["messages"][0]["content"]
+
+
+def test_ai_never_auto_sends_a_price_or_a_hard_one(db_session, brand, manager, monkeypatch):
+    o, fake, sent = _auto_world(db_session, brand, manager, monkeypatch, {
+        "category": "question", "summary": "Asked the price", "simple": True,
+        "draft": "After 30 days it's $497 a month."})
+    IN.handle(db_session, from_number="+12145550120", to_number=TEAM_NO, body="How much after?", message_sid="SMy2")
+    assert not sent
+    t = AI.latest(db_session, "text_reply",
+                  db_session.query(EvoSysOutreachMessage).filter_by(provider_message_id="SMy2").one().id)
+    assert t.output["auto_ok"] is False and t.output["draft"] == ""
+
+
+def test_with_ai_answers_off_nothing_is_sent_or_asked(db_session, brand, manager, monkeypatch):
+    o, fake, sent = _auto_world(db_session, brand, manager, monkeypatch, {
+        "category": "interested", "summary": "", "simple": True, "draft": "Hi"}, auto=False)
+    IN.handle(db_session, from_number="+12145550120", to_number=TEAM_NO, body="Yes", message_sid="SMy3")
+    assert not sent and not fake.seen
+
+
+def test_ai_stops_after_three_answers_per_lead(db_session, brand, manager, monkeypatch):
+    ans = {"category": "interested", "summary": "", "simple": True, "draft": "Great, let's talk: https://x.test"}
+    o, fake, sent = _auto_world(db_session, brand, manager, monkeypatch, ans)
+    fake.answers = [dict(ans) for _ in range(4)]
+    for i in range(4):
+        IN.handle(db_session, from_number="+12145550120", to_number=TEAM_NO, body="yes %d" % i, message_sid="SMz%d" % i)
+    assert len(sent) == 3

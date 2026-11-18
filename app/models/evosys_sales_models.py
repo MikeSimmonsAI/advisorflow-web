@@ -41,6 +41,10 @@ class EvoSysOutreachSettings(Base):
     # alert_phone / alert_email. Empty = no alert (the lead still shows it).
     alert_phone = Column(String(20), nullable=True)
     alert_email = Column(String, nullable=True)
+    # Owner request 2026-11-18: AI answers simple text replies on its own
+    # (interested / "is it free" / "how does it work"); anything else waits
+    # for a person with a draft ready. Off by default.
+    text_auto_reply = Column(Boolean, default=False, nullable=False, server_default="false")
     daily_limit = Column(Integer, default=60, nullable=False)
     sending_on = Column(Boolean, default=False, nullable=False)
     # Configurable groups (grouping.py has the defaults): [{"key","label","keywords":[..]}]
