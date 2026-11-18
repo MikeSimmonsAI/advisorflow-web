@@ -41,9 +41,19 @@ def facts_for(opp, s, camp=None, lead=None) -> Dict[str, Dict[str, Any]]:
         "industry": {"value": ind, "from": "lead group"},
         "market": {"value": mk, "from": "lead group"},
         "offer": {"value": CA.real_offer(getattr(src, "offer", None)), "from": "campaign offer"},
-        "booking_link": {"value": (getattr(src, "booking_url", None) or "").strip() or None, "from": "booking link"},
+        "booking_link": {"value": _booking_link(src, opp), "from": "booking link"},
         "sender_name": {"value": (s.sender_name or "").strip() or None, "fallback": "", "from": "team settings"},
     }
+
+
+def _booking_link(src, opp):
+    """The campaign's booking link. When it is our own booking page, each lead
+    gets their own signed link so one tap books them."""
+    url = (getattr(src, "booking_url", None) or "").strip() or None
+    from app.services.evosys_sales import booking_page as BP
+    if url and BP.is_page_base(url) and getattr(opp, "id", None):
+        return BP.url_for(opp.id)
+    return url
 
 
 def fill(text: str, facts: Dict[str, Dict[str, Any]]) -> Tuple[str, List[dict], List[str]]:

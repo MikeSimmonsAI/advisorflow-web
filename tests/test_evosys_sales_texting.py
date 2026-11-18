@@ -296,3 +296,56 @@ def test_ai_stops_after_three_answers_per_lead(db_session, brand, manager, monke
     for i in range(4):
         IN.handle(db_session, from_number="+12145550120", to_number=TEAM_NO, body="yes %d" % i, message_sid="SMz%d" % i)
     assert len(sent) == 3
+
+
+# ── own booking page (owner request 2026-11-18) ───────────────────────────────
+
+from app.services.evosys_sales import booking_page as BP
+from app.services.evosys_sales import facts as FACTS
+
+
+def test_booking_link_is_each_leads_own_page(db_session, brand, manager, monkeypatch):
+    monkeypatch.setenv("PROGRAM_ASSET_BASE_URL", "https://links.example.test")
+    s = _ready(db_session, brand)
+    c = CA.ensure_default(db_session, s)
+    c.booking_url = "https://links.example.test/evosys-sales-public/book"
+    o = _lead(db_session, brand, manager, "Book Co", phone="2145550130")
+    r = O.render_text(o, s, {"body": "Grab a time: {booking_link}"}, c)
+    url = r["text"].split("Grab a time: ")[1].split(" ")[0]
+    assert url.startswith("https://links.example.test/evosys-sales-public/book/")
+    assert BP.read(url.rsplit("/", 1)[1]) == o.id
+    assert BP.read("forged") is None
+
+
+def test_booking_from_the_link_books_stops_and_confirms(db_session, brand, manager, monkeypatch):
+    from datetime import timedelta as _td
+    s = _ready(db_session, brand)
+    s.alert_phone = "+18435550199"
+    db_session.commit()
+    o = _lead(db_session, brand, manager, "Book Co", phone="2145550131")
+    O.run_pass(db_session, MON_10AM, Rec(), Rec())
+    when = datetime.utcnow().replace(microsecond=0, second=0, minute=0) + _td(days=2)
+    monkeypatch.setattr(BP, "slots", lambda db, opp, start=None, days=7: {"slots": [when.isoformat() + "Z"]})
+    made = []
+    import app.routers.sales_scheduling_router as SR
+    monkeypatch.setattr(SR, "create_appointment", lambda body, user, db: made.append(body) or {"id": "a1"})
+    sent, alerts = [], []
+    monkeypatch.setattr(O, "_send_text", lambda to, body, s: sent.append((to, body)) or {"success": True})
+    monkeypatch.setattr(IN, "notify_owner", lambda s, line, subj, html: alerts.append(line))
+    out = BP.book(db_session, o, when)
+    assert out["status"] == "booked" and made and made[0].opportunity_id == o.id
+    assert db_session.get(EvoSysOutreachState, o.id).stop_reason == "booked"
+    assert sent and sent[0][0] == "+12145550131" and "You're booked" in sent[0][1]
+    assert alerts and "BOOKED" in alerts[0]
+    # a time not on offer is refused
+    assert BP.book(db_session, _lead(db_session, brand, manager, "Two Co", phone="2145550132"),
+                   when + _td(hours=1))["status"] == "taken"
+
+
+def test_booking_page_renders_for_a_real_lead_only(db_session, brand, manager):
+    from app.routers import evosys_sales_router as R
+    o = _lead(db_session, brand, manager, "Office Pride (DFW)", phone="2145550133")
+    tok = BP.url_for(o.id).rsplit("/", 1)[1]
+    page = R.booking_page(tok, db_session)
+    assert page.status_code == 200 and b"Office Pride &mdash;" in page.body and b"(DFW)" not in page.body
+    assert R.booking_page("nope", db_session).status_code == 404
