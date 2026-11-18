@@ -81,3 +81,38 @@ def test_sci_is_refused(rl, monkeypatch):
     monkeypatch.setenv("SMS_PROGRAM_ORG_SCI", rl["org"].id)
     with pytest.raises(RR.RestartRefused):
         RR.run(rl["db"], rl["org"], "r1", apply=False, now=NOW)
+
+
+def test_front_of_the_line_and_everyone_waiting_moves_back_in_order(rl):
+    """Owner's choice, Nov 17: front of the line. They go first from the next
+    opening; the families still waiting keep their order behind them; nobody
+    is texted again within 20 hours; no two families share a slot."""
+    db, org = rl["db"], rl["org"]
+    _launch(rl)
+    states = _texted(db, rl)
+    a, b = states[0], states[1]
+    for st in (a, b):
+        _got_old_text(db, st)
+    a.last_touch_sent_at = NOW - timedelta(hours=2)          # texted 2 hours ago
+    b.last_touch_sent_at = NOW - timedelta(days=1)
+    db.commit()
+    waiting = [s for s in _texted(db, rl) if s.current_touch_number == 0]
+    before = [s.id for s in sorted(waiting, key=lambda s: s.next_touch_due_at)]
+    out = RR.run(db, org, "front-1", apply=True, now=NOW, position="front")
+    s = out["summary"]
+    assert s["position"] == "front" and s["families"] == 2 and s["waiting_moved_back"] == len(waiting)
+    db.refresh(a), db.refresh(b)
+    assert a.next_touch_due_at >= NOW - timedelta(hours=2) + timedelta(hours=20)   # the 20-hour gap holds
+    assert b.current_touch_number == 0
+    for w in waiting:
+        db.refresh(w)
+    moved = sorted(waiting, key=lambda s: s.next_touch_due_at)
+    assert [x.id for x in moved] == before                              # same order as before
+    assert b.next_touch_due_at < moved[0].next_touch_due_at             # put back at the front
+    slots = [x.slot_at for x in db.query(OutreachTextSlot).filter(OutreachTextSlot.organization_id == org.id,
+                                                                    OutreachTextSlot.status == "reserved").all()]
+    assert len(slots) == len(set(slots))                                # no slot handed out twice
+    for st in [a, b] + moved:
+        r = db.query(OutreachTextSlot).filter_by(cadence_state_id=st.id, touch_number=1, status="reserved").one()
+        assert r.slot_at == st.next_touch_due_at == st.cadence_started_at
+    assert RR.run(db, org, "front-1", apply=True, now=NOW, position="front")["already"] is True

@@ -2219,6 +2219,7 @@ def outreach_hours_save(body: OutreachHoursIn, db: Session = Depends(get_db),
 class RestartIn(BaseModel):
     apply: bool = False
     run_key: str = "restart-unanswered-1"
+    position: str = "back"                 # "front" (owner's choice, Nov 17) or "back"
 
 
 @router.post("/restart-unanswered")
@@ -2232,7 +2233,10 @@ def restart_unanswered(body: RestartIn, db: Session = Depends(get_db), user: Use
     _require_manager(db, user)
     org = db.query(Organization).filter(Organization.id == prog.organization_id).first()
     try:
-        out = RR.run(db, org, (body.run_key or "restart-unanswered-1")[:80], apply=bool(body.apply))
+        if body.position not in ("front", "back"):
+            raise HTTPException(status_code=422, detail="position is front or back.")
+        out = RR.run(db, org, (body.run_key or "restart-unanswered-1")[:80], apply=bool(body.apply),
+                     position=body.position)
     except RR.RestartRefused as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     if body.apply and out.get("applied"):
