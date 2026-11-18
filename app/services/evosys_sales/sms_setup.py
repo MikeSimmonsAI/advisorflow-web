@@ -54,7 +54,7 @@ def check(s) -> Dict:
                 "sms_capable": bool(caps.get("sms")) if isinstance(caps, dict) else None,
                 "replies_go_to": num.sms_url or None,
                 "replies_connected": bool(want) and (num.sms_url or "") == want,
-                "messaging_service": num.messaging_service_sid or None}
+                "messaging_service": getattr(num, "messaging_service_sid", None)}
     except Exception as e:                       # noqa: BLE001
         return {"ok": False, "error": str(e)[:200]}
 
