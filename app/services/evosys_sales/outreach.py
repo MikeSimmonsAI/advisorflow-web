@@ -257,8 +257,29 @@ def _with_stop(body: str) -> str:
 def render_text(opp: Opportunity, s: EvoSysOutreachSettings, step: dict, campaign=None) -> dict:
     """The text as it would go out: filled in, and always ending with the
     opt-out line. A fill-in whose fact is missing is reported, never guessed."""
-    body, used, missing = _fill(step.get("body"), opp, s, campaign)
-    return {"text": _with_stop(body), "facts_used": used, "missing": missing}
+    tpl = step.get("body") or ""
+    used_pre, missing_pre = [], []
+    if "{company}" in tpl:
+        name = text_company_name(getattr(opp, "company_name", None))
+        if name:
+            tpl = tpl.replace("{company}", name)
+            used_pre.append({"key": "company", "value": name, "from": "company"})
+        else:
+            missing_pre.append("company")
+    body, used, missing = _fill(tpl, opp, s, campaign)
+    return {"text": _with_stop(body), "facts_used": used_pre + used, "missing": missing_pre + missing}
+
+
+def text_company_name(raw) -> Optional[str]:
+    """The business name as it should read in a text: our bracketed notes
+    ("Office Pride (DFW)", "Cleaning Services (Mindy)") are dropped, and a
+    name we never actually saw ("Limpieza (name not shown)") counts as
+    missing, so that lead is held instead of texted with a placeholder."""
+    n = str(raw or "").strip()
+    if not n or re.search(r"name not shown|no name|unknown", n, re.I):
+        return None
+    n = re.sub(r"\s*\([^)]*\)", "", n).strip(" -,")
+    return n if len(n) >= 2 else None
 
 
 def _send_text(to: str, body: str, s: EvoSysOutreachSettings) -> dict:
