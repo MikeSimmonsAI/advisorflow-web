@@ -236,12 +236,13 @@ function TeamSettings({ team, onSaved }) {
   const [f, setF] = useState(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
-  useEffect(() => { if (team) setF({ sender_name: team.sender_name, from_email: team.from_email, reply_to_email: team.reply_to_email, mailing_address: team.mailing_address, sms_from_number: team.sms_from_number }) }, [team])
+  useEffect(() => { if (team) setF({ sender_name: team.sender_name, from_email: team.from_email, reply_to_email: team.reply_to_email, mailing_address: team.mailing_address, sms_from_number: team.sms_from_number, text_auto_reply: !!team.text_auto_reply }) }, [team])
   if (!team || !f) return null
-  const dirty = ['sender_name', 'from_email', 'reply_to_email', 'mailing_address', 'sms_from_number'].some(k => (f[k] || '') !== (team[k] || ''))
+  const contentDirty = ['sender_name', 'from_email', 'reply_to_email', 'mailing_address', 'sms_from_number'].some(k => (f[k] || '') !== (team[k] || ''))
+  const dirty = contentDirty || !!f.text_auto_reply !== !!team.text_auto_reply
   const save = async () => {
     setBusy(true); setMsg(null)
-    try { await api.put(`${API}/outreach`, f); setMsg({ ok: true, text: 'Saved. Every campaign was turned off and needs approving again.' }); onSaved() }
+    try { await api.put(`${API}/outreach`, f); setMsg({ ok: true, text: contentDirty ? 'Saved. Every campaign was turned off and needs approving again.' : 'Saved.' }); onSaved() }
     catch (e) { setMsg({ ok: false, text: errText(e) }) } finally { setBusy(false) }
   }
   const can = team.can_manage
@@ -253,6 +254,7 @@ function TeamSettings({ team, onSaved }) {
         <Field label="Sends from"><input className="evs-input" disabled={!can} value={f.from_email || ''} onChange={e => setF({ ...f, from_email: e.target.value })} /></Field>
         <Field label="Replies go to"><input className="evs-input" disabled={!can} value={f.reply_to_email || ''} onChange={e => setF({ ...f, reply_to_email: e.target.value })} /></Field>
         <Field label="Texts go from"><input className="evs-input" disabled={!can} placeholder="+18665551234" value={f.sms_from_number || ''} onChange={e => setF({ ...f, sms_from_number: e.target.value })} /></Field>
+        <Field label="AI answers simple texts"><label className="evs-check"><input type="checkbox" disabled={!can} checked={!!f.text_auto_reply} onChange={e => setF({ ...f, text_auto_reply: e.target.checked })} /> On - "yes", "is it free?", "how does it work?" get answered right away; anything else waits for you with a draft</label></Field>
         <Field label="Mailing address (required at the bottom of every sales email)" wide>
           <input className="evs-input" disabled={!can} placeholder="Street, City, State ZIP" value={f.mailing_address || ''} onChange={e => setF({ ...f, mailing_address: e.target.value })} />
         </Field>

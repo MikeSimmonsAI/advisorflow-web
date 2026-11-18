@@ -396,6 +396,13 @@ def assist(mid: str, again: bool = False, c: Ctx = Depends(ctx), db: Session = D
     if st is None or st.status == "active":
         raise HTTPException(409, "This lead's follow-up is still running; AI help is for replies that stopped it.")
     camp = db.get(EvoSysCampaign, st.campaign_id) if st.campaign_id else None
+    if m.channel == "text":
+        from app.services.evosys_sales import sms_inbound as SI
+        t = AI.text_reply(db, s, camp, opp, m, SI.conversation(db, opp.id), c.user.id, force=again)
+        if t.status != "failed" and (t.output or {}).get("category"):
+            m.label = m.label or (t.output or {}).get("category")
+        db.commit()
+        return AI.payload(t)
     last_out = (db.query(EvoSysOutreachMessage).filter(EvoSysOutreachMessage.opportunity_id == opp.id,
                                                        EvoSysOutreachMessage.direction == "out",
                                                        EvoSysOutreachMessage.channel == "email",
@@ -424,8 +431,9 @@ def label(mid: str, body: LabelIn, c: Ctx = Depends(ctx), db: Session = Depends(
 
 
 class ReplyIn(BaseModel):
-    subject: str
+    subject: str = ""
     body: str
+    channel: str = "email"
     ai_task_id: Optional[str] = None
     reply_to_message_id: Optional[str] = None
 
@@ -439,11 +447,13 @@ def send_reply(opp_id: str, body: ReplyIn, c: Ctx = Depends(ctx), db: Session = 
     from app.services.evosys_sales import replies as R
     s = _settings(db, c)
     o = _opp(db, c, opp_id)
-    if not O._has_email(o):
-        raise HTTPException(409, "This lead has no email address.")
     st = db.get(EvoSysOutreachState, o.id)
     if (st is not None and st.opted_out_at) or SDNC.for_opportunity(db, o) or SDNC.find(db, c.bso, o.phone, o.email):
         raise HTTPException(409, "This lead asked not to be contacted.")
+    if body.channel == "text":
+        return _send_text_reply(db, c, s, o, st, body)
+    if not O._has_email(o):
+        raise HTTPException(409, "This lead has no email address.")
     if not (body.body or "").strip() or not (body.subject or "").strip():
         raise HTTPException(422, "Write a subject and a message.")
     if st is None:
@@ -480,6 +490,43 @@ def send_reply(opp_id: str, body: ReplyIn, c: Ctx = Depends(ctx), db: Session = 
     db.commit()
     if not ok:
         raise HTTPException(502, "The email did not send: %s. Nothing else changed; try again." % (r.get("error") or "unknown error"))
+    return {"ok": True, "message": _msg(m)}
+
+
+def _send_text_reply(db: Session, c: Ctx, s, o, st, body: ReplyIn):
+    """A person answers a text from the team's texting number, so the whole
+    conversation stays on one number and on this lead."""
+    to, text = O.e164(o.phone), (body.body or "").strip()
+    if not to:
+        raise HTTPException(409, "This lead has no phone number we can text.")
+    if not O.e164(s.sms_from_number):
+        raise HTTPException(409, "EvoSys Sales has no texting number.")
+    if not text:
+        raise HTTPException(422, "Write a message.")
+    if len(text) > 640:
+        raise HTTPException(422, "That is too long for a text (keep it under 640 characters).")
+    try:
+        r = O._send_text(to, text, s)
+    except Exception as e:  # noqa: BLE001
+        r = {"success": False, "error": str(e)}
+    ok = bool(r.get("success"))
+    m = EvoSysOutreachMessage(brand_sales_org_id=c.bso, opportunity_id=o.id, direction="out", channel="text",
+                              to_address=to, body=text[:5000], status="sent" if ok else "failed",
+                              error=None if ok else str(r.get("error") or "")[:1000],
+                              provider_message_id=r.get("provider_message_id"), actor_user_id=c.user.id,
+                              campaign_id=st.campaign_id if st else None, created_at=datetime.utcnow())
+    db.add(m)
+    if body.ai_task_id:
+        t = db.get(EvoSysAITask, body.ai_task_id)
+        if t is not None and t.kind == "text_reply":
+            same = ((t.output or {}).get("draft") or "").strip() == text
+            AI.resolve(db, t, "accepted" if same else "edited")
+    if ok:
+        db.add(OpportunityEvent(opportunity_id=o.id, event_type="outreach_reply_sent", actor_user_id=c.user.id,
+                                summary="Answered their text", detail=text[:500], occurred_at=datetime.utcnow()))
+    db.commit()
+    if not ok:
+        raise HTTPException(502, "The text did not send: %s. Nothing else changed; try again." % (r.get("error") or "unknown error"))
     return {"ok": True, "message": _msg(m)}
 
 

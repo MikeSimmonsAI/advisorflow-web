@@ -34,7 +34,9 @@ from app.models.evosys_sales_models import EvoSysAITask
 
 log = logging.getLogger(__name__)
 FEATURE = "evosys_sales"
-CAPABILITY = {"group_lead": "lead_analysis", "draft_campaign": "campaign_copy", "reply_assist": "draft_reply"}
+CAPABILITY = {"group_lead": "lead_analysis", "draft_campaign": "campaign_copy", "reply_assist": "draft_reply",
+              "text_reply": "draft_reply"}
+TEXT_FEATURE = "evosys_sales_text_replies"
 REPLY_CATEGORIES = ("interested", "pricing", "question", "not_interested", "wrong_person", "unsubscribe", "unclear")
 MONEY_RE = re.compile(r"\$\s?\d[\d,]*(\.\d+)?|\b\d+\s?(dollars|usd)\b", re.I)
 
@@ -60,19 +62,27 @@ def payload(t: Optional[EvoSysAITask]) -> Optional[Dict[str, Any]]:
             "error": t.error, "outcome": t.outcome, "at": t.created_at.isoformat() + "Z"}
 
 
-def _ask(kind: str, user_id: str, org_id: str, system: str, facts: Dict[str, Any]) -> Dict[str, Any]:
+def _ask(kind: str, user_id: str, org_id: str, system: str, facts: Dict[str, Any],
+         background: bool = False) -> Dict[str, Any]:
     from app.services import ai_gateway
-    resp = ai_gateway.chat_completion(
-        feature=FEATURE, capability=CAPABILITY[kind], mode=ai_gateway.MANUAL, actor=user_id, org_id=org_id,
-        client=_get_client(), response_format={"type": "json_object"}, temperature=0.2,
-        messages=[{"role": "system", "content": system},
-                  {"role": "user", "content": json.dumps(facts, default=str)}])
+    kw = dict(capability=CAPABILITY[kind], actor=user_id, org_id=org_id,
+              client=_get_client(), response_format={"type": "json_object"}, temperature=0.2,
+              messages=[{"role": "system", "content": system},
+                        {"role": "user", "content": json.dumps(facts, default=str)}])
+    if background:
+        # A text came in with nobody at the keyboard: only this one feature,
+        # only for this team, under every budget cap and breaker.
+        with ai_gateway.scoped_grant(TEXT_FEATURE, org_id):
+            resp = ai_gateway.chat_completion(feature=TEXT_FEATURE, mode=ai_gateway.BACKGROUND, **kw)
+    else:
+        resp = ai_gateway.chat_completion(feature=FEATURE, mode=ai_gateway.MANUAL, **kw)
     text = resp.choices[0].message.content or "{}"
     return json.loads(text)
 
 
 def run(db: Session, *, kind: str, target_id: str, bso_id: str, user_id: str, facts: Dict[str, Any],
-        system: str, check: Callable[[Dict[str, Any]], Dict[str, Any]], force: bool = False) -> EvoSysAITask:
+        system: str, check: Callable[[Dict[str, Any]], Dict[str, Any]], force: bool = False,
+        background: bool = False) -> EvoSysAITask:
     """Ask once per (kind, target, facts). `check` turns the raw answer into
     {"output": ..., "status": "done"|"needs_person", "error": ...}."""
     h = _hash(kind, facts)
@@ -84,7 +94,7 @@ def run(db: Session, *, kind: str, target_id: str, bso_id: str, user_id: str, fa
     t = EvoSysAITask(brand_sales_org_id=bso_id, kind=kind, target_id=target_id, input_hash=h, facts=facts,
                      created_by=user_id, created_at=datetime.utcnow(), status="failed")
     try:
-        raw = _ask(kind, user_id, bso_id, system, facts)
+        raw = _ask(kind, user_id, bso_id, system, facts, background=background)
         res = check(raw if isinstance(raw, dict) else {})
         t.output, t.status, t.error = res.get("output"), res.get("status", "done"), res.get("error")
     except Exception as exc:                                  # noqa: BLE001 - shown, manual path stays usable
@@ -212,6 +222,68 @@ def reply_assist(db: Session, settings, campaign, opp, reply_msg, original_text:
         return {"output": out, "status": "needs_person" if needs else "done"}
     return run(db, kind="reply_assist", target_id=reply_msg.id, bso_id=opp.brand_sales_org_id, user_id=user_id,
                facts=facts, system=REPLY_SYSTEM, check=check, force=force)
+
+
+# ── answer a TEXT reply (owner's own words, 2026-11-18) ───────────────────────
+
+OFFER_FACTS = (
+    "WHAT WE OFFER (the owner's own words - the only facts you may state): "
+    "Mike with EvoSys Pro books cleaning companies at least 3 appointments this month with businesses that need "
+    "cleaning, so the cleaner can do a walkthrough and give a quote. The cleaner does the selling and closing; we "
+    "just get them in front of customers. It is absolutely free: no obligation, no contract, no hidden fees. "
+    "\"We're trying to earn your business before you get the business.\" It runs for 30 days. If they like the "
+    "service, Mike will then talk with them about what the system looks like; they also get a back office to see how "
+    "the system works. It works anywhere - it's all done online, so their location doesn't matter. "
+    "NEXT STEP: a short call with Mike so he learns where they like to work, what services they offer and what "
+    "kind of customers they want. It is NOT free cleaning, and we do NOT hand out job addresses yet - first the call, "
+    "then we book the walkthroughs.")
+
+TEXT_REPLY_SYSTEM = (
+    "A cleaning business answered EvoSys Pro's text. " + OFFER_FACTS + " "
+    "Using ONLY those facts and the JSON given, return JSON {\"category\": one of " + ", ".join(REPLY_CATEGORIES) + ", "
+    "\"summary\": \"what they said, one sentence\", \"draft\": \"the text to send back\", \"simple\": true|false}. "
+    "The draft: plain and friendly, under 300 characters, from Mike, in the SAME language they wrote in (Spanish if "
+    "they wrote Spanish), answers exactly what they asked, and ends by asking for the short call with "
+    "facts.booking_link. Never invent prices, numbers of contracts, results, guarantees, dates or anything not in "
+    "the facts; say 'our goal is' rather than promising. simple=true ONLY when they said yes / are interested, or "
+    "asked whether it is free / what the catch is / how it works / what this is / whether it is real - things the "
+    "facts fully answer. simple=false for anything else: angry, not interested, wrong number, asks for a price after "
+    "the 30 days, asks something the facts don't answer, or you are unsure.")
+
+AUTO_CATEGORIES = ("interested", "question")
+
+
+def text_reply(db: Session, settings, campaign, opp, reply_msg, conversation: list, user_id: str,
+               force: bool = False, background: bool = False) -> EvoSysAITask:
+    """Summarise a text reply and draft the answer. `output.auto_ok` says the
+    rules allow it to go out by itself; the caller decides."""
+    facts = {"their_text": (reply_msg.body or "")[:1500], "their_company": opp.company_name,
+             "their_name": opp.contact_name, "conversation": conversation[-8:],
+             "booking_link": ((campaign.booking_url if campaign else None) or settings.booking_url or ""),
+             "sender_name": settings.sender_name or "Mike"}
+
+    def check(raw):
+        cat = raw.get("category") if raw.get("category") in REPLY_CATEGORIES else "unclear"
+        draft = re.sub(r"\s+", " ", str(raw.get("draft") or "")).strip()[:600]
+        needs = []
+        if MONEY_RE.search(draft):
+            needs.append("The draft names a price - Mike answers pricing.")
+            draft = ""
+        if re.search(r"\bguarantee", draft, re.I):
+            needs.append("The draft promises a guarantee - check it.")
+        if cat in ("unsubscribe", "not_interested"):
+            needs.append("They don't want this - no answer drafted.")
+            draft = ""
+        if cat in ("wrong_person", "unclear", "pricing"):
+            needs.append("Read this one yourself.")
+        if len(draft) > 320:
+            needs.append("The draft is long for a text - trim it.")
+        auto_ok = (bool(raw.get("simple")) and cat in AUTO_CATEGORIES and not needs and bool(draft))
+        out = {"category": cat, "summary": str(raw.get("summary") or "")[:400], "draft": draft,
+               "needs_person": needs, "auto_ok": auto_ok, "used_offer": True}
+        return {"output": out, "status": "needs_person" if needs else "done"}
+    return run(db, kind="text_reply", target_id=reply_msg.id, bso_id=opp.brand_sales_org_id, user_id=user_id,
+               facts=facts, system=TEXT_REPLY_SYSTEM, check=check, force=force, background=background)
 
 
 def resolve(db: Session, t: EvoSysAITask, outcome: str) -> None:

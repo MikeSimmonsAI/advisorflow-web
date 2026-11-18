@@ -629,6 +629,7 @@ COLUMNS_TO_ADD = [
     ("evosys_outreach_settings", "sms_from_number", "VARCHAR(20)"),
     ("evosys_outreach_settings", "alert_phone", "VARCHAR(20)"),
     ("evosys_outreach_settings", "alert_email", "VARCHAR"),
+    ("evosys_outreach_settings", "text_auto_reply", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("opportunities", "logo_quality", "VARCHAR"),
     ("opportunities", "logo_updated_at", "TIMESTAMP"),
     ("opportunities", "custom_unit_price", "NUMERIC(12,2)"),
