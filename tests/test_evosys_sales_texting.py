@@ -208,3 +208,19 @@ def test_test_text_goes_only_to_the_alert_phone(db_session, brand, manager, monk
     assert sent == [("+18435550199", out["text"])]
     assert out["text"].endswith("Reply STOP to opt out.") and "Test Co" in out["text"]
     assert not db_session.query(EvoSysOutreachMessage).filter_by(opportunity_id=o.id).count()
+
+
+def test_texts_drop_bracketed_notes_and_hold_unnamed_businesses():
+    assert O.text_company_name("Office Pride (DFW)") == "Office Pride"
+    assert O.text_company_name("Fresh Nest (A KGM Services Company)") == "Fresh Nest"
+    assert O.text_company_name("Limpieza (name not shown)") is None
+    assert O.text_company_name("Shine Co") == "Shine Co"
+
+
+def test_unnamed_business_is_held_not_texted(db_session, brand, manager):
+    _ready(db_session, brand)
+    o = _lead(db_session, brand, manager, "Cleaning (name not shown)", phone="2145550111")
+    texts = Rec()
+    O.run_pass(db_session, MON_10AM, Rec(), texts)
+    assert not texts.calls
+    assert (db_session.get(EvoSysOutreachState, o.id).held_reason or "").startswith("missing:company")
