@@ -218,7 +218,7 @@ def eligibility(db: Session, s, o: Opportunity, st, lead, camp: EvoSysCampaign, 
         other = camps.get(st.campaign_id)
         return "sending_elsewhere" if (other is not None and other.sending_on and st.status == "active") \
             else "in_other_campaign"
-    if not O._has_email(o):
+    if not O._reachable(o, s):
         return "no_email"
     if lead is not None and lead.review_status == "possible_duplicate":
         return "duplicate"

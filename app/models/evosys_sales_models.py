@@ -34,6 +34,13 @@ class EvoSysOutreachSettings(Base):
     from_email = Column(String, nullable=True)
     reply_to_email = Column(String, nullable=True)
     mailing_address = Column(Text, nullable=True)
+    # The team's own texting number (E.164, e.g. +18664870628), on the
+    # platform Twilio account. Empty = text steps are held, never sent.
+    sms_from_number = Column(String(20), nullable=True)
+    # Who is told when a prospect replies by text - same as SCI / Restland's
+    # alert_phone / alert_email. Empty = no alert (the lead still shows it).
+    alert_phone = Column(String(20), nullable=True)
+    alert_email = Column(String, nullable=True)
     daily_limit = Column(Integer, default=60, nullable=False)
     sending_on = Column(Boolean, default=False, nullable=False)
     # Configurable groups (grouping.py has the defaults): [{"key","label","keywords":[..]}]
