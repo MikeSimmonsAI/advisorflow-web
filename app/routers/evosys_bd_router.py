@@ -988,13 +988,53 @@ def examples(cid: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     for o in opps[:3]:
         steps = []
         for st in camp.steps or []:
-            r = O.render_email(o, s, st, camp)
+            r = O.render_text(o, s, st, camp) if st.get("channel") == "text" else O.render_email(o, s, st, camp)
+            r.setdefault("subject", "")
             steps.append({"day": st.get("day"), "channel": st.get("channel"), "subject": r["subject"], "text": r["text"],
                           "facts_used": r["facts_used"], "missing": r["missing"]})
         exs.append({"lead": {"id": o.id, "company": o.company_name or o.contact_name, "email": o.email},
                     "steps": steps})
     db.commit()
     return {"examples": exs}
+
+
+class TestTextIn(BaseModel):
+    step: int = 1
+
+
+@router.post("/campaigns/{cid}/test-text")
+def test_text(cid: str, body: TestTextIn, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """Send ONE text step, filled in for a real contact in this campaign, to
+    the team's own alert phone (the owner's cell) - never to a prospect. The
+    words are exactly what that business would get. Nothing is recorded on the
+    lead and the campaign does not move."""
+    _manager(c)
+    s = _s(db, c)
+    camp = db.get(EvoSysCampaign, cid)
+    if camp is None or camp.brand_sales_org_id != c.bso:
+        raise HTTPException(404, "Campaign not found.")
+    to = O.e164(s.alert_phone)
+    if not to:
+        raise HTTPException(400, "Save the alert phone first; test texts only go there.")
+    steps = camp.steps or []
+    if not (1 <= body.step <= len(steps)) or steps[body.step - 1].get("channel") != "text":
+        raise HTTPException(400, "Step %d is not a text." % body.step)
+    st = (db.query(EvoSysOutreachState).filter(EvoSysOutreachState.campaign_id == camp.id)
+          .order_by(EvoSysOutreachState.opportunity_id).first())
+    opp = db.get(Opportunity, st.opportunity_id) if st else None
+    if opp is None:
+        raise HTTPException(400, "This campaign has no contacts to fill the text in for.")
+    r = O.render_text(opp, s, steps[body.step - 1], camp)
+    if r["missing"]:
+        raise HTTPException(400, "Missing for this contact: %s" % ", ".join(r["missing"]))
+    try:
+        res = O._send_text(to, r["text"], s)
+    except Exception as e:                                   # noqa: BLE001
+        res = {"success": False, "error": str(e)[:200]}
+    if not res.get("success"):
+        raise HTTPException(502, "Test text not sent: %s" % res.get("error"))
+    return {"sent_to": to, "sent_from": O.e164(s.sms_from_number), "filled_in_for": opp.company_name,
+            "text": r["text"], "provider_message_id": res.get("provider_message_id")}
 
 
 @router.post("/campaigns/{cid}/audience/preview")

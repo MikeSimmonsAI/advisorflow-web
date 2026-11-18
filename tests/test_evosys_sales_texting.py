@@ -187,3 +187,24 @@ def test_texts_only_campaign_needs_no_mailing_address(db_session, brand):
     assert not any("mailing address" in p for p in CA.problems(c, s))
     c.steps = STEPS
     assert any("mailing address" in p for p in CA.problems(c, s))
+
+
+def test_test_text_goes_only_to_the_alert_phone(db_session, brand, manager, monkeypatch):
+    from app.routers import evosys_bd_router as R
+    s = _ready(db_session, brand)
+    c = CA.ensure_default(db_session, s)
+    o = _lead(db_session, brand, manager, "Test Co", phone="2145550110")
+    db_session.add(EvoSysOutreachState(opportunity_id=o.id, brand_sales_org_id=brand.id, campaign_id=c.id,
+                                       status="queued", next_step=0))
+    db_session.commit()
+    sent = []
+    monkeypatch.setattr(O, "_send_text", lambda to, body, s: sent.append((to, body)) or {"success": True})
+    ctx = R.Ctx(manager, brand.id, True)
+    with pytest.raises(Exception):
+        R.test_text(c.id, R.TestTextIn(step=1), ctx, db_session)      # no alert phone yet
+    s.alert_phone = "+18435550199"
+    db_session.commit()
+    out = R.test_text(c.id, R.TestTextIn(step=1), ctx, db_session)
+    assert sent == [("+18435550199", out["text"])]
+    assert out["text"].endswith("Reply STOP to opt out.") and "Test Co" in out["text"]
+    assert not db_session.query(EvoSysOutreachMessage).filter_by(opportunity_id=o.id).count()
