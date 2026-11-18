@@ -184,7 +184,8 @@ def flyer_for(db: Session, org_id: str, fam: CampaignFamily, location_id: str) -
 
 def render_touch(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof: LocationProfile,
                  first_name: Optional[str], touch: str = "first", flyer_cache: Optional[Dict] = None,
-                 booking_url: str = "", time_offer: str = "") -> Dict:
+                 booking_url: str = "", time_offer: str = "", last_name: Optional[str] = None,
+                 tomorrow_offer: str = "") -> Dict:
     """Subject, plain body, HTML body and attachment for one family/location/touch."""
     mode = fam.first_touch_email_mode if touch == "first" else fam.followup_email_mode
     # A hidden location gets only the general flyer, never its own branded one.
@@ -204,7 +205,8 @@ def render_touch(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof: 
         attachment = {"filename": flyer.filename or "%s.pdf" % flyer.title, "asset_id": flyer.id}
     name = (first_name or "").strip().title() or "there"
     fields = {
-        "first_name": name, "location_name": prof.official_name,
+        "first_name": name, "full_name": identity.full_name(first_name, last_name),
+        "location_name": prof.official_name,
         "primary_contact_name": prog.primary_contact_name or "",
         "location_website": prof.website or "", "flyer_link": flyer_link,
         # #378: ask for the appointment the ways THIS location offers, with the
@@ -215,6 +217,8 @@ def render_touch(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof: 
         "location_phone": _pretty_phone(prof.facility_phone),
         # Issue #507: two verified open times (or "what day works").
         "time_offer": time_offer or "What day this week works for you to come by?",
+        # Owner, Nov 17: two times really open tomorrow (Restland File Review).
+        "tomorrow_offer": tomorrow_offer or "What day and time work best for you to come in?",
     }
     subject = identity.render(fam.email_subject_template, fields)
     body = identity.render(fam.email_body_template,
@@ -877,12 +881,15 @@ def run(db: Session, organization_id: Optional[str] = None, *, dry_run: bool = F
             except Exception:                         # noqa: BLE001 - the reply CTA still stands
                 log.exception("booking link for email touch failed for lead %s", lead.id)
                 booking_url = ""
-            _offer = ""
+            _offer, _tomorrow = "", ""
             if fam.key in _RESTLAND_ROTATING:
                 _offer = identity.time_offer_for(db, lead, "email")
+                _tomorrow = identity.tomorrow_offer_for(db, lead, "email")
             r = render_touch(db, prog, fam, prof, None if blind else lead.first_name,
                              "first" if touch == 1 else "followup", flyer_cache=flyer_cache,
-                             booking_url=booking_url, time_offer=_offer)
+                             booking_url=booking_url, time_offer=_offer,
+                             last_name=None if blind else getattr(lead, "last_name", None),
+                             tomorrow_offer=_tomorrow)
             if r["email_mode"] in ("hosted", "attached") and r["flyer"] is None:
                 # The campaign is set to carry a flyer and no approved flyer is
                 # active for this location: an email promising a guide with no

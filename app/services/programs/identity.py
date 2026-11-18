@@ -195,16 +195,28 @@ def context_for(db: Session, lead: Lead, channel: str = "sms",
         "display_name": display_name(prog, prof),
         "sms_signoff": sms_signoff(prog, prof),
         "fields": location_fields(db, prog, prof, lead.first_name, reply,
-                                  rec.campaign_family if rec else None, flyer_link),
+                                  rec.campaign_family if rec else None, flyer_link,
+                                  last_name=getattr(lead, "last_name", None)),
     }
 
 
+def full_name(first_name, last_name) -> str:
+    """{full_name}: "Andra Bogdan" - the greeting the owner wants in place of a
+    Mr./Mrs. the file does not hold (Nov 17). First name alone when there is
+    no last name; "there" when there is neither."""
+    first = (first_name or "").strip().title()
+    last = (last_name or "").strip().title()
+    return (" ".join(x for x in (first, last) if x)) or "there"
+
+
 def location_fields(db: Session, prog: OutreachProgram, prof, first_name, reply: str = "",
-                    family: Optional[str] = None, flyer_link: Optional[str] = None) -> Dict[str, str]:
+                    family: Optional[str] = None, flyer_link: Optional[str] = None,
+                    last_name: Optional[str] = None) -> Dict[str, str]:
     """The fields a program message is rendered with - the ONE builder used by
     sending and by the campaign preview (#441)."""
     return {
             "first_name": (first_name or "").strip().title() or "there",
+            "full_name": full_name(first_name, last_name),
             "location_name": prof.official_name,
             "primary_contact_name": prog.primary_contact_name or "",
             "reply_instructions": reply,
@@ -529,11 +541,30 @@ def time_offer_for(db: Session, lead: Lead, channel: str = "sms") -> str:
         return "What day this week works for you to come by?"
 
 
+def tomorrow_offer_for(db: Session, lead: Lead, channel: str = "sms") -> str:
+    """{tomorrow_offer}: "What time tomorrow works best for you, X or Y?" with
+    two times really open (booking_policy.tomorrow_offer)."""
+    try:
+        from app.models.models import User
+        from app.services.programs import booking_policy as bp
+        prog = program_for_org(db, lead.organization_id)
+        policy = bp.for_program(prog) if prog is not None else None
+        uid = getattr(prog, "booking_user_id", None) if prog is not None else None
+        advisor = db.query(User).filter(User.id == uid).first() if uid else None
+        return bp.tomorrow_offer(db, advisor, policy, channel)
+    except Exception:                                    # noqa: BLE001 - never names a time it could not verify
+        import logging as _l
+        _l.getLogger(__name__).exception("tomorrow offer failed for lead %s", getattr(lead, "id", None))
+        return "What day and time work best for you to come in?"
+
+
 def _with_booking(db: Session, lead: Lead, template: str, fields: Dict[str, str]) -> Dict[str, str]:
     """{booking_line} -> "Pick a time that works for you: <link>" (or nothing);
     {booking_link} -> the bare link. A link is minted only when the text uses one."""
     if "{time_offer}" in (template or ""):
         fields = dict(fields, time_offer=time_offer_for(db, lead, "sms"))
+    if "{tomorrow_offer}" in (template or ""):
+        fields = dict(fields, tomorrow_offer=tomorrow_offer_for(db, lead, "sms"))
     if "{booking_line}" not in (template or "") and "{booking_link}" not in (template or ""):
         return dict(fields, booking_line="")
     from app.services import sms_programs as _sp

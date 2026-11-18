@@ -103,7 +103,7 @@ def test_new_copy_is_saved_and_no_longer_a_draft(rl):
     _launch(rl)
     from app.models.program_models import CampaignFamily
     fam = db.query(CampaignFamily).filter_by(organization_id=rl["org"].id, key="restland_family_file_review").one()
-    assert "It's been a while since we reviewed your file" in fam.sms_template
+    assert "few things that must be taken care of with every family" in fam.sms_template   # owner, Nov 17
     assert "Personal Planning Guide" in fam.sms_template
     d = json.loads(fam.touch_copy_json)
     assert d["draft"] is False and "{time_offer}" in d["sms"]["2"]
