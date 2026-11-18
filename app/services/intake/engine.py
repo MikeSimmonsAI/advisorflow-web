@@ -72,6 +72,13 @@ SCI_SOURCE_SYSTEM = "program"
 # Display only (#507): a program workspace's file - SCI's or Restland's. Batches are
 # identified by SCI_SOURCE_SYSTEM, never by this label.
 SCI_SOURCE_LABEL = "Program file"
+# Batches stored before Nov 16 say "SCI program file". Every screen shows the
+# neutral name (owner, Nov 17: SCI and Restland share nothing).
+OLD_SCI_SOURCE_LABEL = "SCI program file"
+
+
+def shown_source(label):
+    return SCI_SOURCE_LABEL if label == OLD_SCI_SOURCE_LABEL else label
 
 
 def is_sci_batch(batch) -> bool:

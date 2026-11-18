@@ -31,6 +31,7 @@ here that reads or writes without a selected organization, and every query
 filters on that organization's id.
 """
 from __future__ import annotations
+from app.services.intake.engine import shown_source as _shown_source
 
 import json
 import logging
@@ -144,7 +145,7 @@ def _batch_payload(db: Session, b: ImportBatch, detail: bool = False) -> dict:
     out = {
         "id": b.id, "batch_code": b.batch_code, "display_name": b.display_name,
         "status": status, "stage": b.stage, "progress_pct": b.progress_pct,
-        "filename": b.source_filename, "source": b.source_label,
+        "filename": b.source_filename, "source": _shown_source(b.source_label),
         "source_system": b.source_system, "source_detail": b.source_detail,
         "source_year": b.source_year, "list_name": b.import_list_name,
         "campaign_purpose": b.campaign_purpose, "offer_hook": b.offer_hook,
@@ -302,7 +303,7 @@ async def upload(file: UploadFile = File(...),
         raise HTTPException(400, str(exc))
     audit.record(db, ctx, "intake.file_uploaded", b.id,
                  {"filename": b.source_filename, "rows": b.original_row_count,
-                  "columns": len(_j(b.headers_json, [])), "source": b.source_label,
+                  "columns": len(_j(b.headers_json, [])), "source": _shown_source(b.source_label),
                   "source_detail": b.source_detail, "batch_code": b.batch_code})
     db.commit()
     return _batch_payload(db, b, detail=True)
@@ -328,7 +329,7 @@ def upload_google_contacts(payload: Optional[GoogleImportIn] = None, db: Session
         raise HTTPException(400, str(exc))
     audit.record(db, ctx, "intake.file_uploaded", b.id,
                  {"filename": b.source_filename, "rows": b.original_row_count,
-                  "columns": len(_j(b.headers_json, [])), "source": b.source_label,
+                  "columns": len(_j(b.headers_json, [])), "source": _shown_source(b.source_label),
                   "source_detail": b.source_detail, "batch_code": b.batch_code})
     db.commit()
     return _batch_payload(db, b, detail=True)

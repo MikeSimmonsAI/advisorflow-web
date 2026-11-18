@@ -71,6 +71,13 @@ def test_a_non_sci_program_never_shows_sci(client, db_session, sample_org, monke
                 CampaignFamily(organization_id=org.id, key=campaigns.NEXT_WAVE_KEY,
                                name=campaigns.NEXT_WAVE_NAME, is_active=False)])
     db.add(Lead(organization_id=org.id, first_name="Jo", last_name="Sample", phone="2145550111", status="new"))
+    # An upload stored before Nov 16 under the old "SCI program file" label
+    # (Restland's own family file was one).
+    from app.models.import_models import ImportBatch
+    from app.services.intake import engine as ENG
+    db.add(ImportBatch(organization_id=org.id, batch_code="ZZ-OLD-1", status="committed", source_type="csv",
+                       source_filename="families.csv", source_label="SCI program file",
+                       source_system=ENG.SCI_SOURCE_SYSTEM, pipeline=ENG.PIPELINE))
     db.commit()
     assert _scan(client, db, mgr, SCI_WORDS) == {}
 
