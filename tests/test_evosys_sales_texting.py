@@ -148,3 +148,32 @@ def test_emails_must_go_from_support(db_session, brand):
     s.from_email = "support@evosyspro.live"
     assert not any("go out from" in p for p in O.settings_problems(s))
     assert O._Sender(s).from_email == "support@evosyspro.live"
+
+
+def test_a_reply_alerts_the_owner_by_text_and_email(db_session, brand, manager, monkeypatch):
+    s = _ready(db_session, brand)
+    s.alert_phone, s.alert_email = "+18435550199", "owner@alerts.test"
+    db_session.commit()
+    o = _lead(db_session, brand, manager, "Alert Co", phone="2145550108")
+    texts, mails = [], []
+
+    class _Msgs:
+        def create(self, **kw):
+            texts.append(kw)
+
+    class _Client:
+        messages = _Msgs()
+
+    from app.services import sms_programs, email_service
+    monkeypatch.setattr(sms_programs, "sci_sender", lambda: (_Client(), "+18449172171"))
+    monkeypatch.setattr(email_service, "send_email_via_provider",
+                        lambda to, subj, html, **kw: mails.append((to, subj, kw["org"].from_email)) or {"success": True})
+    IN.handle(db_session, from_number="+12145550108", to_number=TEAM_NO, body="Call me", message_sid="SMin4")
+    assert texts and texts[0]["to"] == "+18435550199" and "Alert Co" in texts[0]["body"]
+    assert mails and mails[0][0] == "owner@alerts.test" and mails[0][2] == "support@evosyspro.live"
+    # STOP does not page anyone
+    texts.clear(); mails.clear()
+    _lead(db_session, brand, manager, "Quiet Co", phone="2145550109")
+    IN.handle(db_session, from_number="+12145550109", to_number=TEAM_NO, body="stop", message_sid="SMin5")
+    assert not texts and not mails
+    assert o is not None

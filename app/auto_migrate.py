@@ -627,6 +627,8 @@ COLUMNS_TO_ADD = [
     # EvoSys Sales texting number (owner request 2026-11-17). NULL = text steps
     # stay held exactly as before.
     ("evosys_outreach_settings", "sms_from_number", "VARCHAR(20)"),
+    ("evosys_outreach_settings", "alert_phone", "VARCHAR(20)"),
+    ("evosys_outreach_settings", "alert_email", "VARCHAR"),
     ("opportunities", "logo_quality", "VARCHAR"),
     ("opportunities", "logo_updated_at", "TIMESTAMP"),
     ("opportunities", "custom_unit_price", "NUMERIC(12,2)"),

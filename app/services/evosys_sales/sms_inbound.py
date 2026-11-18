@@ -99,7 +99,38 @@ def handle(db: Session, *, from_number: str, to_number: str, body: str, message_
                                 summary="NEEDS A PERSON - replied by text, automatic follow-up stopped",
                                 detail=text[:2000], occurred_at=now))
     db.commit()
+    if not opted_out:
+        _alert_owner(db, O.get_settings(db, bso), opp, text)
     return True
+
+
+def _alert_owner(db: Session, s, opp: Opportunity, text: str) -> None:
+    """Tell the owner a prospect texted back - by text and email, the same way
+    SCI and Restland replies reach him. A failed alert never loses the reply
+    (it is already on the lead)."""
+    who = opp.company_name or opp.contact_name or "A prospect"
+    phone = opp.phone or ""
+    line = "EvoSys Sales - NEEDS A PERSON: %s (%s) texted back: \"%s\"" % (who, phone, (text or "")[:160])
+    if s.alert_phone:
+        try:
+            from app.services import sms_programs as _sci
+            client, from_ = _sci.sci_sender()
+            from app.services.twilio_callbacks import apply_status_callback
+            client.messages.create(**apply_status_callback(dict(body=line[:320], from_=from_, to=s.alert_phone)))
+        except Exception:                                   # noqa: BLE001
+            log.exception("[evosys-sales sms] reply alert text failed for lead %s", opp.id)
+    if s.alert_email:
+        try:
+            import html as _html
+            from app.services.email_service import send_email_via_provider
+            from app.services.evosys_sales.outreach import _Sender
+            body = ("<p><b>%s</b> (%s) texted back to the EvoSys Sales number:</p><blockquote>%s</blockquote>"
+                    "<p>The automatic follow-up for this lead has stopped. Open the lead in EvoSys Sales to answer.</p>"
+                    % (_html.escape(who), _html.escape(phone), _html.escape(text or "")))
+            send_email_via_provider(s.alert_email, "EvoSys Sales - NEEDS A PERSON: %s texted back" % who, body,
+                                    org=_Sender(s), message_type="notification", sensitivity="none")
+        except Exception:                                   # noqa: BLE001
+            log.exception("[evosys-sales sms] reply alert email failed for lead %s", opp.id)
 
 
 def _do_not_contact(db: Session, opp: Opportunity, text: str) -> None:
