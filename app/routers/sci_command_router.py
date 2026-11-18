@@ -2216,6 +2216,33 @@ def outreach_hours_save(body: OutreachHoursIn, db: Session = Depends(get_db),
     return {"open": cfg["open"], "close": cfg["close"], "timezone": OS.TZ, "days": "every day"}
 
 
+class RestartIn(BaseModel):
+    apply: bool = False
+    run_key: str = "restart-unanswered-1"
+
+
+@router.post("/restart-unanswered")
+def restart_unanswered(body: RestartIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Owner, Nov 17: families who got the OLD File Review opening and never
+    answered go back in line for the new one (restland_restart). apply=false
+    is a dry run with counts only. Managers only; never SCI; sends nothing."""
+    from app.models.models import Organization
+    from app.services.programs import restland_restart as RR
+    prog = _program(db, user)
+    _require_manager(db, user)
+    org = db.query(Organization).filter(Organization.id == prog.organization_id).first()
+    try:
+        out = RR.run(db, org, (body.run_key or "restart-unanswered-1")[:80], apply=bool(body.apply))
+    except RR.RestartRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    if body.apply and out.get("applied"):
+        from app.routers.audit_log_router import log_action
+        log_action(db, prog.organization_id, user.id, action="program.restart_unanswered",
+                   target_type="outreach_program", target_id=prog.id, details=out.get("summary"))
+        db.commit()
+    return out
+
+
 class StageReturnIn(BaseModel):
     lead_ids: list
 

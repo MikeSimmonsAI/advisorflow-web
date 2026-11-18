@@ -106,7 +106,7 @@ def test_new_copy_is_saved_and_no_longer_a_draft(rl):
     assert "few things that must be taken care of with every family" in fam.sms_template   # owner, Nov 17
     assert "Personal Planning Guide" in fam.sms_template
     d = json.loads(fam.touch_copy_json)
-    assert d["draft"] is False and "{time_offer}" in d["sms"]["2"]
+    assert d["draft"] is False and "{tomorrow_offer}" in d["sms"]["2"]          # owner, Nov 17
 
 
 # ── the dispatcher ──────────────────────────────────────────────────────────

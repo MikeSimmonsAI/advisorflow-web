@@ -72,17 +72,20 @@ SMS = {
         "have a few things that must be taken care of with every family here at Restland. We need to review your "
         "file, get you your Personal Planning Guide and have you fill out your Permission to Access form. "
         "{tomorrow_offer} Reply STOP to opt out."),
-    2: ("Hi {first_name}, it's {primary_contact_name} at Restland. I'd like to sit down with you this week and "
-        "go over your file. {time_offer} Reply STOP to opt out."),
-    3: ("{first_name}, it takes about 45 minutes at our office, 13005 Greenville Ave, and I'll have a Personal "
-        "Planning Guide ready for you. {time_offer} If coming in is hard, tell me and I'll come to you. "
-        "- {primary_contact_name}, Restland. Reply STOP to opt out."),
-    4: ("Hi {first_name}, I want to make sure the information in your Restland file is current, including any "
-        "permission-to-access paperwork that applies. Can we get you in this week? {booking_line} "
-        "- {primary_contact_name}. Reply STOP to opt out."),
-    5: ("Hi {first_name}, last note from me for now. I'd still like to review your Restland file with you and "
-        "get you your Personal Planning Guide. Just reply with a day that works. - {primary_contact_name}. "
+    # Owner, Nov 17: every follow-up keeps the opening's voice and goal - the
+    # three things every Restland family takes care of, and a time tomorrow.
+    2: ("Hi {full_name}, it's Mike with Restland again. We still need to get your file reviewed, get you your "
+        "Personal Planning Guide and have you fill out your Permission to Access form. {tomorrow_offer} "
         "Reply STOP to opt out."),
+    3: ("{full_name}, this is Mike at Restland. It takes about 45 minutes at our office on Greenville Ave to "
+        "review your file, get you your Personal Planning Guide and fill out your Permission to Access form. "
+        "If coming in is hard, I'll come to you. {tomorrow_offer} Reply STOP to opt out."),
+    4: ("Hi {full_name}, Mike at Restland. These are things we take care of with every family here, and I "
+        "still need to get yours done: your file review, your Personal Planning Guide and your Permission to "
+        "Access form. {tomorrow_offer} Reply STOP to opt out."),
+    5: ("Hi {full_name}, it's Mike at Restland. I still need to take care of your file with you, get you your "
+        "Personal Planning Guide and your Permission to Access form. {tomorrow_offer} If another day is "
+        "better, just reply with it. Reply STOP to opt out."),
 }
 
 EMAIL = {
@@ -99,69 +102,85 @@ EMAIL = {
         "{tomorrow_offer}\n\n"
         "{booking_line}"
         "Or just reply with a time that works for you.\n\n" + _SIG),
-    2: ("A time for your file review, {first_name}",
-        "Hi {first_name},\n\n"
-        "I wanted to follow up on reviewing your file at {location_name}. It's a short sit-down at our office "
-        "on Greenville Ave, and I'll have your Personal Planning Guide ready for you.\n\n"
-        "{time_offer}\n\n"
+    2: ("We still need to take care of your Restland file",
+        "Hi {full_name},\n\n"
+        "It's Mike with Restland Cemetery and Funeral Home again. We still have a few things to take care of "
+        "with your file, the same things we take care of with every family here at Restland:\n\n"
+        "- review your file,\n"
+        "- get you your Personal Planning Guide, and\n"
+        "- have you fill out your Permission to Access form.\n\n"
+        "{tomorrow_offer}\n\n"
         "{booking_line}"
-        "Reply with what works and I'll set it up.\n\n" + _SIG),
-    3: ("Keeping your Restland file current",
-        "Hi {first_name},\n\n"
-        "Families' details change over the years, so I'd like to make sure the information in your file at "
-        "{location_name} is current and go over any permission-to-access paperwork that applies.\n\n"
-        "If it's hard to come in, I'm happy to meet you at your home instead. Just reply and tell me.\n\n"
+        "Or just reply with a time that works for you.\n\n" + _SIG),
+    3: ("About 45 minutes to take care of your Restland file",
+        "Hi {full_name},\n\n"
+        "This is Mike at Restland. Taking care of your file only takes about 45 minutes at our office, 13005 "
+        "Greenville Ave, Dallas. We'll review your file, I'll get you your Personal Planning Guide, and we'll "
+        "get your Permission to Access form filled out.\n\n"
+        "If it's hard to come in, tell me and I'll come to you.\n\n"
+        "{tomorrow_offer}\n\n"
         "{booking_line}"
-        "Reply with a day that works this week.\n\n" + _SIG),
-    4: ("Your Personal Planning Guide, {first_name}",
-        "Hi {first_name},\n\n"
-        "This is my last note for now. I'd still like to sit down with you, review your file and get you your "
-        "Personal Planning Guide. We can meet at our office on Greenville Ave, or at your home if that's "
-        "easier.\n\n"
+        "Or just reply with a time that works for you.\n\n" + _SIG),
+    4: ("Your Restland file, {first_name}",
+        "Hi {full_name},\n\n"
+        "Mike at Restland again. I still need to get you in to review your file, give you your Personal Planning "
+        "Guide and get your Permission to Access form filled out. It's something we take care of with every "
+        "family here.\n\n"
+        "{tomorrow_offer}\n\n"
         "{booking_line}"
-        "Reply with a day that works and I'll take care of the rest.\n\n" + _SIG),
+        "If another day is better, just reply with it and I'll make it work.\n\n" + _SIG),
 }
 
 # A family returning after the 30-day rest: acknowledges we wrote before.
 RETURN_SMS = {
-    1: ("Hi {first_name}, it's {primary_contact_name} with {location_name} again. I wrote a while back about a "
-        "45-minute Family File Review. If now is a better time, I'd be glad to set one up. "
-        "Reply STOP to opt out."),
-    2: ("Hi {first_name}, {primary_contact_name} at Restland. Is there a day that suits you for your Family File "
-        "Review? {booking_line} Reply STOP to opt out."),
-    3: ("{first_name}, we can meet at Restland, or I can come to your home if that's easier. Just reply with "
-        "what works. - {primary_contact_name}. Reply STOP to opt out."),
-    4: ("Hi {first_name}, {primary_contact_name} at Restland. Would a weekday or a weekend be better? I have times "
-        "all seven days. {booking_line} Reply STOP to opt out."),
-    5: ("Hi {first_name}, I'll leave it here for now. Whenever you'd like to set up your Family File Review, "
-        "just reply. Thank you. - {primary_contact_name}, Restland. Reply STOP to opt out."),
+    # Owner, Nov 17: the same voice for a family coming back after the rest.
+    1: ("Hi {full_name}, this is Mike with Restland Cemetery and Funeral Home. I wrote to you a while back. We "
+        "still have a few things that must be taken care of with every family here at Restland: review your "
+        "file, get you your Personal Planning Guide and have you fill out your Permission to Access form. "
+        "{tomorrow_offer} Reply STOP to opt out."),
+    2: ("Hi {full_name}, it's Mike at Restland. Your file review, your Personal Planning Guide and your "
+        "Permission to Access form still need to be taken care of. {tomorrow_offer} Reply STOP to opt out."),
+    3: ("{full_name}, Mike at Restland. It takes about 45 minutes at our office on Greenville Ave, or I can come "
+        "to you if that's easier. {tomorrow_offer} Reply STOP to opt out."),
+    4: ("Hi {full_name}, Mike at Restland. I have times all seven days to review your file, get you your "
+        "Personal Planning Guide and your Permission to Access form. {tomorrow_offer} Reply STOP to opt out."),
+    5: ("Hi {full_name}, it's Mike at Restland. I still need to take care of your file with you. "
+        "{tomorrow_offer} If another day works better, just reply with it. Reply STOP to opt out."),
 }
 RETURN_EMAIL = {
-    1: ("Following up on your Family File Review",
-        "Hi {first_name},\n\n"
-        "This is {primary_contact_name} with {location_name}. I wrote a little while ago about a Family File "
-        "Review, and I wanted to offer it again in case the timing is better now.\n\n"
-        "It's a 45-minute visit to review your family's file with you, explain any permission-to-access "
-        "paperwork that applies, and go over our pre-planning guide. We can meet at Restland or at your home.\n\n"
+    1: ("A few things we still need to take care of with your Restland file",
+        "Hi {full_name},\n\n"
+        "This is Mike with Restland Cemetery and Funeral Home. I wrote to you a while back.\n\n"
+        "We still have a few things that must be taken care of with every family here at Restland. We need "
+        "to:\n\n"
+        "- review your file,\n"
+        "- get you your Personal Planning Guide, and\n"
+        "- have you fill out your Permission to Access form.\n\n"
+        "It takes about 45 minutes at our office, 13005 Greenville Ave, Dallas, or I can come to you.\n\n"
+        "{tomorrow_offer}\n\n"
         "{booking_line}"
-        "Or reply with a day that works for you.\n\n" + _SIG),
-    2: ("How the review works",
-        "Hi {first_name},\n\n"
-        "We'll spend about 45 minutes together looking over your family's file at {location_name} and making "
-        "sure it's up to date. Any Restland paperwork you've kept at home is helpful, along with any questions.\n\n"
+        "Or just reply with a time that works for you.\n\n" + _SIG),
+    2: ("Your Restland file still needs to be taken care of",
+        "Hi {full_name},\n\n"
+        "It's Mike at Restland. Your file review, your Personal Planning Guide and your Permission to Access "
+        "form still need to be taken care of.\n\n"
+        "{tomorrow_offer}\n\n"
         "{booking_line}"
-        "Reply with a day and I'll set it up.\n\n" + _SIG),
-    3: ("Your file review, briefly",
-        "Hi {first_name},\n\n"
-        "At your Family File Review we'll review your family's file at {location_name} with you, explain any "
-        "permission-to-access paperwork that applies, and go over our pre-planning guide together.\n\n"
+        "Or just reply with a time that works for you.\n\n" + _SIG),
+    3: ("About 45 minutes, at Restland or at your home",
+        "Hi {full_name},\n\n"
+        "Mike at Restland. Taking care of your file takes about 45 minutes at our office on Greenville Ave, or "
+        "I can come to your home if that's easier. We'll review your file, I'll get you your Personal Planning "
+        "Guide, and we'll get your Permission to Access form filled out.\n\n"
+        "{tomorrow_offer}\n\n"
         "{booking_line}"
-        "Reply here with any questions.\n\n" + _SIG),
-    4: ("Whenever it suits you",
-        "Hi {first_name},\n\n"
-        "I'll leave this with you. Whenever you'd like to meet, at Restland or at home, any day of the week, "
-        "just reply.\n\n"
-        "{booking_line}" + _SIG),
+        "Reply with what works and I'll set it up.\n\n" + _SIG),
+    4: ("Your Restland file, {first_name}",
+        "Hi {full_name},\n\n"
+        "It's Mike at Restland. I still need to take care of your file with you, any day of the week.\n\n"
+        "{tomorrow_offer}\n\n"
+        "{booking_line}"
+        "If another day works better, just reply with it.\n\n" + _SIG),
 }
 
 PLAYBOOK = {

@@ -258,7 +258,7 @@ def test_five_texts_four_emails_on_the_approved_days(rl):
     assert campaigns.email_for(fam, 5) is None                                   # the old 5th draft email is cleared
     assert "{tomorrow_offer}" in campaigns.sms_for(fam, 1) and "45 minutes" in campaigns.sms_for(fam, 3) \
         and "come to you" in campaigns.sms_for(fam, 3)          # Nov 15 wording: office first, home if needed
-    assert "current" in campaigns.sms_for(fam, 4)
+    assert "Permission to Access form" in campaigns.sms_for(fam, 4)
     # Other campaigns keep the runner's usual gap.
     assert campaigns.email_steps("central_alabama_ms")[1][1] == 4
 
@@ -278,7 +278,9 @@ def test_rendered_texts_fit_and_name_mike_and_restland(rl):
             assert F.segments(out)["segments"] <= 3, (n, len(out))
             # Text 1 is the owner's "This is Mike with Restland..." (the sign-off
             # with his full name is added at send); the rest name him in full.
-            assert ("Mike Simmons" in out or "this is Mike with Restland" in out) and "STOP" in out
+            # Owner, Nov 17: every text is from "Mike" at Restland (the sign-off
+            # with his full name is added at send).
+            assert "Mike" in out and "Restland" in out and "STOP" in out
     for n, (subj, body) in F.EMAIL.items():
         out = body.format(**dict(fields, booking_line=fields["booking_line"] + "\n\n"))
         assert "Restland Cemetery and Funeral Home" in out and "reply" in out.lower()
