@@ -44,6 +44,9 @@ function Pipeline({ p }) {
         Campaigns on: {p.active_campaigns.map(c => `${c.name} (${num(c.families)})`).join(' · ') || 'none'}.
         {' '}{p.next_wave.exists ? `${p.next_wave.name}: ${p.next_wave.on ? 'on' : 'off'}, ${num(p.next_wave.families)} families - wording from General Survey.` : ''}
       </p>
+      {p.rerun && <p className="sci-micro" style={{ margin: '4px 0 0' }}>
+        <b>Starting over (Re-engagement wording):</b> {num(p.rerun.started)} started · {num(p.rerun.queued)} waiting ({num(p.rerun.never_reached_queued)} never reached go first, then {num(p.rerun.no_reply_queued)} who didn't reply) · {num(p.rerun.skipped)} left out at start time · from Fri Nov 20, inside the daily 40.
+      </p>}
       {re && <p className="sci-micro sci-muted" style={{ margin: '4px 0 0' }}>
         Re-engagement (separate, off): {num(re.families_finished)} finished families with no reply · {num(re.eligible_now)} past the {re.policy.rest_days}-day rest
         {re.first_eligible_on ? ` · first eligible ${dateOnly(`${re.first_eligible_on}T18:00:00Z`)}` : ''} · wording {re.campaign.ready ? 'ready' : 'not reviewed yet'}.

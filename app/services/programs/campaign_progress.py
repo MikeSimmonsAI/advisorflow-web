@@ -144,7 +144,16 @@ def pipeline(db: Session, prog: OutreachProgram, now: datetime, ready: Optional[
                            "key": campaigns.NEXT_WAVE_KEY, "on": bool(nw_row and nw_row.is_active),
                            "families": int(fams.get(campaigns.NEXT_WAVE_KEY, 0) or 0),
                            "copy_from": campaigns.NEXT_WAVE_BASE} if own_wave else None),
-            "reengagement": hit[1]}
+            "reengagement": hit[1], "rerun": _rerun_counts(db, prog)}
+
+
+def _rerun_counts(db: Session, prog: OutreachProgram) -> Optional[Dict]:
+    try:
+        from app.services.programs import sci_rerun
+        c = sci_rerun.counts(db, prog)
+        return c if (c.get("queued") or c.get("started") or c.get("skipped")) else None
+    except Exception:                                    # noqa: BLE001
+        return None
 
 
 def program_summary(db: Session, prog: OutreachProgram) -> Dict:
@@ -208,7 +217,8 @@ def report(db: Session, prog: OutreachProgram, family_key: str, now: Optional[da
             states[s.lead_id] = s
         for t in db.query(ProgramEmailTouch).filter(ProgramEmailTouch.organization_id == org,
                                                     ProgramEmailTouch.lead_id.in_(chunk)).all():
-            touches.setdefault(t.lead_id, {})[t.touch_number] = t
+            if t.touch_number < 900:                     # 900+ = an earlier round, kept as history
+                touches.setdefault(t.lead_id, {})[t.touch_number] = t
         replied.update(x for (x,) in db.query(ProgramResponse.lead_id).filter(
             ProgramResponse.organization_id == org, ProgramResponse.lead_id.in_(chunk)).all())
         booked.update(x for (x,) in db.query(BookingLink.lead_id).filter(
