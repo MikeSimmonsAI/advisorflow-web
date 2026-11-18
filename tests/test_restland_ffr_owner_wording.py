@@ -6,6 +6,7 @@ from datetime import datetime
 from app.services.programs import booking_policy as BP
 from app.services.programs import identity as I
 from app.services.programs import restland_ffr as F
+from tests.test_restland_booking_cadence import rl  # noqa: F401 (fixture)
 
 NOW = datetime(2026, 11, 17, 19, 0)          # Tuesday evening, Central
 
@@ -56,3 +57,28 @@ def test_the_opening_text_is_the_owners_words():
     assert F.segments(t)["segments"] <= 3
     subject, body = F.EMAIL[1]
     assert "Permission to Access form" in body and "{tomorrow_offer}" in body and "{full_name}" in body
+
+
+def test_preview_renders_offer_and_full_name(client, rl, monkeypatch):
+    from tests.test_restland_booking_cadence import configured
+    from app.models.program_models import CampaignFamily, ProgramSourceRecord
+    from tests.test_outreach_program import _h
+    from app.services.programs import identity as I2
+    monkeypatch.setattr(I2, "tomorrow_offer_for", lambda db, lead, ch="sms":
+                        "What time tomorrow works best for you, 10:00 AM or 2:30 PM?")
+    monkeypatch.setattr(I2, "time_offer_for", lambda db, lead, ch="sms": "Would Wednesday work?")
+    configured(rl)
+    db = rl["db"]
+    rl["mike"].must_change_password = False
+    db.commit()
+    fam = db.query(CampaignFamily).filter_by(organization_id=rl["org"].id, key=F.CAMPAIGN_KEY).one()
+    rec = db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == rl["org"].id,
+                                               ProgramSourceRecord.last_name.isnot(None)).first()
+    r = client.get("/program/campaigns/%s/preview?record_id=%s&touch=first" % (fam.id, rec.id),
+                   headers=_h(db, rl["mike"])).json()
+    assert r["ok"], r
+    who = I.full_name(rec.first_name, rec.last_name)
+    assert r["sms"].startswith("Hi %s, this is Mike with Restland Cemetery and Funeral Home." % who)
+    assert "What time tomorrow works best for you, 10:00 AM or 2:30 PM?" in r["sms"] and "{" not in r["sms"]
+    assert r["email_body"].startswith("Hi %s," % who) and "What time tomorrow works best" in r["email_body"]
+    assert "{" not in r["email_body"]
