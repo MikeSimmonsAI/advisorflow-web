@@ -28,6 +28,7 @@ ROLLBACK SUPPORT
   updated records with the exact prior value of every field changed.
 """
 from __future__ import annotations
+from app.services.intake.engine import shown_source as _shown_source
 
 import json
 import logging
@@ -239,7 +240,7 @@ def _contact_values(row: ImportStagedRow, batch: ImportBatch) -> dict:
         "outreach_reasons": json.dumps(norm.get("outreach_reasons") or []),
         "street_address": row.street_address, "city": row.city, "state": row.state,
         "zip_code": row.zip_code, "country": norm.get("country"),
-        "source": ("Program file" if batch.source_label == "SCI program file" else batch.source_label), "source_detail": batch.source_detail or batch.source_filename,
+        "source": _shown_source(batch.source_label), "source_detail": batch.source_detail or batch.source_filename,
         "source_system": row.source_system or (batch.source_system if row.source_record_id else None),
         "source_record_id": row.source_record_id,
         "import_batch_id": batch.id, "source_row_number": row.row_number,
@@ -446,7 +447,7 @@ def activate_lead(db, batch, row, contact: OrgContact, cat, ctx_name: str, capac
         contact_channel="sms" if phone else "email_only",
         relationship_type=(cd.relationship_type if cd and cd.relationship_type
                            else batch.relationship_type),
-        source=batch.source_label, source_detail=batch.source_detail or batch.source_filename,
+        source=_shown_source(batch.source_label), source_detail=batch.source_detail or batch.source_filename,
         source_file=batch.source_filename, source_year=batch.source_year,
         import_list_name=batch.import_list_name, imported_by_name=ctx_name,
         source_category=row.classification,

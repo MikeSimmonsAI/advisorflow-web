@@ -118,7 +118,7 @@ async def upload(file: UploadFile = File(...), list_name: Optional[str] = Form(N
         raise HTTPException(400, str(exc))
     audit.record(db, ctx, "intake.file_uploaded", b.id,
                  {"filename": b.source_filename, "rows": b.original_row_count,
-                  "columns": len(IR._j(b.headers_json, [])), "source": b.source_label,
+                  "columns": len(IR._j(b.headers_json, [])), "source": ENG.shown_source(b.source_label),
                   "source_detail": b.source_detail, "batch_code": b.batch_code,
                   "destination": "sci"})
     db.commit()
