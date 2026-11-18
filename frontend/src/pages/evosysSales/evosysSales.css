@@ -318,3 +318,13 @@
   .evs .evs-head-acts .evs-chipbtn { padding: 7px 12px; font-size: 13px; }
   .evs .evs-qrow .evs-act { width: auto; }
 }
+
+/* the business's own logo (PR #691) */
+.evs .evs-logo-thumb { flex: 0 0 44px; width: 44px; height: 44px; border-radius: 8px; border: 1px solid var(--line, #e3e8ee);
+  background: #fff; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.evs .evs-logo-thumb img { max-width: 40px; max-height: 40px; object-fit: contain; }
+.evs .evs-logo-thumb span { color: var(--muted); font-weight: 700; font-size: 16px; }
+.evs .evs-logo-big { background: #fff; border: 1px solid var(--line, #e3e8ee); border-radius: 10px; padding: 12px;
+  display: flex; justify-content: center; }
+.evs .evs-logo-big img { max-width: 100%; max-height: 120px; object-fit: contain; }
+.evs .evs-email-logo { display: block; max-width: 220px; max-height: 90px; margin: 4px 0 10px; }
