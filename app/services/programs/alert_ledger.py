@@ -315,7 +315,15 @@ def program_label(db, prog) -> str:
             return "SCI" if p.get("is_sci") else str(p["short_name"]).strip()
     except Exception:                                    # noqa: BLE001
         pass
-    return "SCI"
+    # Never another program's name: SCI only when this IS SCI.
+    try:
+        from app.services import sms_programs as _sp
+        if prog is not None and _sp.is_sci_org(db, prog.organization_id):
+            return "SCI"
+    except Exception:                                    # noqa: BLE001
+        pass
+    own = (getattr(prog, "hero_title", None) or getattr(prog, "name", None) or "").strip() if prog is not None else ""
+    return own or "Program"
 
 
 def sms_line(kind: str, name: str, *, words: Optional[str] = None, location: Optional[str] = None,

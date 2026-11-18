@@ -239,7 +239,7 @@ def _contact_values(row: ImportStagedRow, batch: ImportBatch) -> dict:
         "outreach_reasons": json.dumps(norm.get("outreach_reasons") or []),
         "street_address": row.street_address, "city": row.city, "state": row.state,
         "zip_code": row.zip_code, "country": norm.get("country"),
-        "source": batch.source_label, "source_detail": batch.source_detail or batch.source_filename,
+        "source": ("Program file" if batch.source_label == "SCI program file" else batch.source_label), "source_detail": batch.source_detail or batch.source_filename,
         "source_system": row.source_system or (batch.source_system if row.source_record_id else None),
         "source_record_id": row.source_record_id,
         "import_batch_id": batch.id, "source_row_number": row.row_number,

@@ -427,7 +427,7 @@ def stage(db: Session, org: Organization, content: bytes, *, filename: Optional[
                 d["existing_master"] = target
                 d["master_key"] = target
                 d["link_status"] = "linked"
-                d["link_reason"] = "same person as a family already in SCI (%s)" % target
+                d["link_reason"] = "same person as a family already in this program (%s)" % target
                 linked_existing += 1
             continue
         for d in members:
@@ -436,7 +436,7 @@ def stage(db: Session, org: Organization, content: bytes, *, filename: Optional[
                 if d[kind]:
                     others |= {m for (p, m) in people[kind].get(d[kind], set()) if p != d["person"]}
             if others:
-                reason = "same phone/email as a different person already in SCI (%s)" % ", ".join(sorted(others)[:3])
+                reason = "same phone/email as a different person already in this program (%s)" % ", ".join(sorted(others)[:3])
                 d["dup_review"] = "; ".join(x for x in (d.get("dup_review"), reason) if x)
     summary["linked_to_existing_families"] = linked_existing
     summary["reused_earlier_records"] = reused

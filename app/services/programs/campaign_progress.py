@@ -52,8 +52,10 @@ def _chunks(ids: List[str], n: int = 500):
 
 
 def families(db: Session, prog: OutreachProgram) -> List[Dict]:
-    rows = (db.query(CampaignFamily.key, CampaignFamily.name, CampaignFamily.is_active)
-            .filter(CampaignFamily.organization_id == prog.organization_id).all())
+    from app.services.programs import campaigns as _camps
+    rows = _camps.visible(db, prog.organization_id,
+                          db.query(CampaignFamily.key, CampaignFamily.name, CampaignFamily.is_active)
+                          .filter(CampaignFamily.organization_id == prog.organization_id)).all()
     counts = dict(db.query(ProgramSourceRecord.campaign_family, func.count(ProgramSourceRecord.id))
                   .filter(ProgramSourceRecord.organization_id == prog.organization_id)
                   .group_by(ProgramSourceRecord.campaign_family).all())
@@ -98,8 +100,10 @@ def pipeline(db: Session, prog: OutreachProgram, now: datetime, ready: Optional[
     import math
     from app.services.programs import campaigns, daily_batch
     org = prog.organization_id
-    on = (db.query(CampaignFamily.key, CampaignFamily.name).filter(CampaignFamily.organization_id == org,
-                                                                   CampaignFamily.is_active.is_(True)).all())
+    on = campaigns.visible(db, org, db.query(CampaignFamily.key, CampaignFamily.name).filter(
+        CampaignFamily.organization_id == org, CampaignFamily.is_active.is_(True))).all()
+    # The Next Outreach Wave is SCI's own campaign: no other program sees it.
+    own_wave = not campaigns.hidden_in(db, org, campaigns.NEXT_WAVE_KEY)
     fams = dict(db.query(ProgramSourceRecord.campaign_family, func.count(func.distinct(ProgramSourceRecord.lead_id)))
                 .outerjoin(Lead, Lead.id == ProgramSourceRecord.lead_id)
                 .filter(ProgramSourceRecord.organization_id == org, Lead.is_test.isnot(True))
@@ -118,7 +122,7 @@ def pipeline(db: Session, prog: OutreachProgram, now: datetime, ready: Optional[
         d0 = now.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("America/Chicago")).date()
         empty_on = (d0 + timedelta(days=max(0, days_left))).isoformat()
     nw_row = (db.query(CampaignFamily).filter(CampaignFamily.organization_id == org,
-                                             CampaignFamily.key == campaigns.NEXT_WAVE_KEY).first())
+                                             CampaignFamily.key == campaigns.NEXT_WAVE_KEY).first()) if own_wave else None
     hit = _reeng_cache.get(org)
     if hit is None or now - hit[0] > REENG_TTL:
         try:
@@ -130,16 +134,16 @@ def pipeline(db: Session, prog: OutreachProgram, now: datetime, ready: Optional[
     warn = None
     if target and total is not None and total < target:
         warn = ("Only %d famil%s ready for a daily batch of %d. The audience is used up, not the senders: import "
-                "the next real SCI family list into \"%s\" (Import - Campaign for this file) and the batch picks "
-                "them up automatically." % (total, "y is" if total == 1 else "ies are", target,
-                                             campaigns.NEXT_WAVE_NAME))
+                "the next family list%s and the batch picks them up automatically."
+                % (total, "y is" if total == 1 else "ies are", target,
+                   (" into \"%s\" (Import - Campaign for this file)" % campaigns.NEXT_WAVE_NAME) if own_wave else ""))
     return {"active_campaigns": [{"key": k, "name": n, "families": int(fams.get(k, 0) or 0)} for k, n in on],
             "daily_target": target, "ready": total, "enrolled_today": enrolled_today or 0,
             "days_of_pool_left": days_left, "pool_empty_on": empty_on, "warning": warn,
-            "next_wave": {"exists": nw_row is not None, "name": campaigns.NEXT_WAVE_NAME,
-                          "key": campaigns.NEXT_WAVE_KEY, "on": bool(nw_row and nw_row.is_active),
-                          "families": int(fams.get(campaigns.NEXT_WAVE_KEY, 0) or 0),
-                          "copy_from": campaigns.NEXT_WAVE_BASE},
+            "next_wave": ({"exists": nw_row is not None, "name": campaigns.NEXT_WAVE_NAME,
+                           "key": campaigns.NEXT_WAVE_KEY, "on": bool(nw_row and nw_row.is_active),
+                           "families": int(fams.get(campaigns.NEXT_WAVE_KEY, 0) or 0),
+                           "copy_from": campaigns.NEXT_WAVE_BASE} if own_wave else None),
             "reengagement": hit[1]}
 
 
@@ -181,7 +185,7 @@ def report(db: Session, prog: OutreachProgram, family_key: str, now: Optional[da
     org = prog.organization_id
     fam = (db.query(CampaignFamily).filter(CampaignFamily.organization_id == org,
                                           CampaignFamily.key == family_key).first())
-    if fam is None:
+    if fam is None or campaigns.hidden_in(db, org, fam.key):
         raise LookupError("campaign not found")
     own_copy = fam.key in campaigns.OWN_COPY_KEYS
     recs = (db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == org,

@@ -3271,6 +3271,23 @@ def _mask(v: Optional[str], keep: int = 4) -> str:
     return ("*" * max(0, len(v) - keep)) + v[-keep:] if v else ""
 
 
+def _staff_line(db: Session, prog):
+    """The texting line THIS program's staff alerts go out on - the same rule
+    responses.page_one uses: SCI (no number of its own) texts from the EvoSys
+    toll-free line; every other program from its own organization number.
+    Never another program's line (owner, Nov 17)."""
+    from app.models.models import Organization
+    from app.services import sms_programs as _sp
+    from app.services.sms_service import Client, _org_twilio_credentials
+    org = db.query(Organization).filter(Organization.id == prog.organization_id).first()
+    if _sp.is_sci_org(db, prog.organization_id) and not (org and org.org_twilio_phone_number):
+        return _sp.sci_sender()
+    sid, token = _org_twilio_credentials(org)
+    if not (sid and token and org and org.org_twilio_phone_number):
+        raise HTTPException(status_code=409, detail="This program has no texting number of its own configured.")
+    return Client(sid, token), org.org_twilio_phone_number
+
+
 @router.get("/alerts/sms-check")
 def alert_sms_check(hours: int = Query(6, ge=1, le=72), db: Session = Depends(get_db),
                     user: User = Depends(require_tenant_user)):
@@ -3285,7 +3302,7 @@ def alert_sms_check(hours: int = Query(6, ge=1, le=72), db: Session = Depends(ge
     _require_manager(db, user)
     staff = {prog.alert_phone} | {m.get("phone") for m in R._managers(prog)}
     staff = {p for p in staff if p}
-    client, from_ = _sci.sci_sender()
+    client, from_ = _staff_line(db, prog)
     since = datetime.utcnow() - _td(hours=hours)
     rows = []
     for to in sorted(staff):
@@ -3333,7 +3350,7 @@ def alert_test_sms(body: AlertTestSmsIn, db: Session = Depends(get_db), user: Us
     for aud, who, to in targets:
         rc, ok, why = {}, False, None
         try:
-            client, from_ = _sci.sci_sender()
+            client, from_ = _staff_line(db, prog)
             sent = client.messages.create(**apply_status_callback(dict(body=text, from_=from_, to=to)))
             rc = {"sid": getattr(sent, "sid", None), "status": getattr(sent, "status", None)}
             ok = True
@@ -3879,10 +3896,12 @@ def setter_live_test_email_start(db: Session = Depends(get_db), user: User = Dep
                                owner_changed_at=datetime.utcnow(), owner_changed_by=user.id,
                                owner_note="Human Handling on (live email test)"))
     db.commit()
-    subject = "SCI Live email test %s" % datetime.utcnow().strftime("%b %d %H:%M")
-    html = ("<p>This is the EvoSys Pro SCI Live email test.</p>"
+    from app.services.programs import alert_ledger as _L_live
+    _live = "%s Live" % _L_live.program_label(db, prog)
+    subject = "%s email test %s" % (_live, datetime.utcnow().strftime("%b %d %H:%M"))
+    html = ("<p>This is the EvoSys Pro %s email test.</p>"
             "<p>Please reply to this email with any short question about planning ahead. "
-            "Your reply should appear in SCI Live, where it can be answered in this same thread.</p>")
+            "Your reply should appear in %s, where it can be answered in this same thread.</p>" % (_live, _live))
     res = mailbox_send.send(db, prog, to_email=owner_email, subject=subject, body_html=html)
     if res is None:
         raise HTTPException(status_code=409, detail="The program has no sending mailbox.")
@@ -4110,10 +4129,12 @@ def alert_simulate_reply(body: SimulateReplyIn, db: Session = Depends(get_db),
     _require_manager(db, user)
     if body.channel not in ("sms", "email"):
         raise HTTPException(status_code=422, detail="channel must be sms or email")
+    from app.services.programs import alert_ledger as _L_t
+    _alert_first = "%s Alert" % _L_t.program_label(db, prog)
     lead = (db.query(Lead).filter(Lead.organization_id == prog.organization_id, Lead.is_test.is_(True),
-                                  Lead.first_name == "SCI Alert", Lead.last_name == "Test (synthetic)").first())
+                                  Lead.first_name == _alert_first, Lead.last_name == "Test (synthetic)").first())
     if lead is None:
-        lead = Lead(organization_id=prog.organization_id, first_name="SCI Alert", last_name="Test (synthetic)",
+        lead = Lead(organization_id=prog.organization_id, first_name=_alert_first, last_name="Test (synthetic)",
                     phone=None, email=None, status="new", is_test=True,
                     assigned_to_id=getattr(prog, "booking_user_id", None) or user.id)
         db.add(lead)

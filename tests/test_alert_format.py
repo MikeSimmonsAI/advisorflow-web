@@ -101,6 +101,9 @@ def test_owner_test_sms_sends_exact_text_to_owner_only(program, client, monkeypa
     db, prog = program["db"], program["prog"]
     prog.alert_phone = "+18435550000"
     prog.management_recipients = '[{"name":"K","phone":"+14105550100","role":"team"}]'
+    # As in production: SCI has no number of its own, so its staff texts go
+    # from the EvoSys toll-free line (other programs use their own number).
+    program["org"].org_twilio_phone_number = None
     db.commit()
     tw = MagicMock()
     tw.messages.create.return_value = SimpleNamespace(sid="SMx1", status="queued")

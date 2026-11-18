@@ -947,7 +947,7 @@ def run_due_cadences(db: Session, organization_id: str = None,
                 _log_touch(db, state, lead, touch_number=touch_number,
                            attempt_seq=_next_attempt_seq(db, state, touch_number),
                            claim=True, outcome=OUTCOME_BLOCKED,
-                           reason="quiet hours: outside the SCI sending window (%s)" % _sw.describe()["label"],
+                           reason="quiet hours: outside the program's sending window (%s)" % _sw.describe()["label"],
                            scheduled_for=scheduled_for)
                 # Spread across the first 45 minutes after opening, so touches
                 # that fell due overnight never leave together at 9:00.
