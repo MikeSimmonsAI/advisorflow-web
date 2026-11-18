@@ -11,6 +11,14 @@ Editing the steps clears the approval. Sends happen only on weekdays between
 8:00 AM and 6:00 PM Central, at most `daily_limit` a day. Text steps are held
 (never sent) until EvoSys Sales has a texting number of its own; the screen
 says so.
+
+Texting (owner request 2026-11-17): once the team's `sms_from_number` is saved,
+a text step is sent from that number on the platform Twilio account, to leads
+with a usable US mobile/landline number, under the same approval, switch,
+hours, daily limit and Do Not Contact checks as email. Every text names EvoSys
+Pro and carries "Reply STOP to opt out". A lead with only a phone (no email)
+now joins the follow-up: it gets the text steps and skips the email steps; a
+lead with only an email skips the text steps.
 """
 from __future__ import annotations
 
@@ -39,7 +47,11 @@ SEND_START_HOUR, SEND_END_HOUR = 8, 18
 WORKING_STAGES = (STAGE_PROSPECT, STAGE_CONTACTED)
 
 DEFAULT_BOOKING_URL = "https://evosyspro.live/request-demo/"
-DEFAULT_FROM = "info@evosyspro.live"
+DEFAULT_FROM = "info@evosyspro.live"          # the reply mailbox (matched by replies.py)
+# Owner rule (2026-11-17): outgoing email goes ONLY from the support address.
+SEND_FROM = "support@evosyspro.live"
+STOP_LINE = "Reply STOP to opt out."
+TEXT_MAX = 480
 
 # Drafts for Mike to edit and approve. {offer} is his offer text.
 DEFAULT_STEPS = [
@@ -102,7 +114,7 @@ def get_settings(db: Session, bso_id: str) -> EvoSysOutreachSettings:
     if row is None:
         row = EvoSysOutreachSettings(
             brand_sales_org_id=bso_id, steps=[dict(s) for s in DEFAULT_STEPS], offer=DEFAULT_OFFER,
-            booking_url=DEFAULT_BOOKING_URL, sender_name="Mike Simmons", from_email=DEFAULT_FROM,
+            booking_url=DEFAULT_BOOKING_URL, sender_name="Mike Simmons", from_email=SEND_FROM,
             reply_to_email=DEFAULT_FROM, mailing_address=None, daily_limit=60, sending_on=False)
         db.add(row)
         db.flush()
@@ -121,8 +133,10 @@ def settings_problems(s: EvoSysOutreachSettings) -> list:
         out.append("Write the offer.")
     if not (s.booking_url or "").strip().lower().startswith("http"):
         out.append("Add the booking link.")
-    if not re.match(r"[^@\s]+@evosyspro\.live$", (s.from_email or "").strip().lower()):
-        out.append("The From address must be an @evosyspro.live address.")
+    if (s.from_email or "").strip().lower() != SEND_FROM:
+        out.append("Emails must go out from %s." % SEND_FROM)
+    if (s.sms_from_number or "").strip() and not e164(s.sms_from_number):
+        out.append("The texting number must be a US number like +18665551234.")
     if not re.match(r"[^@+\s]+@evosyspro\.live$", (s.reply_to_email or "").strip().lower()):
         out.append("Replies must go to an @evosyspro.live address, so they can be read and matched.")
     for i, st in enumerate(steps, 1):
@@ -130,12 +144,14 @@ def settings_problems(s: EvoSysOutreachSettings) -> list:
             out.append("Step %d needs a subject." % i)
         if not (st.get("body") or "").strip():
             out.append("Step %d needs a message." % i)
+        if st.get("channel") == "text" and len(_with_stop(st.get("body") or "")) > TEXT_MAX:
+            out.append("Step %d text is too long (keep it under %d characters)." % (i, TEXT_MAX - 40))
     return out
 
 
 def save_settings(db: Session, s: EvoSysOutreachSettings, data: dict, user_id: str) -> None:
     content_keys = ("steps", "offer", "booking_url", "sender_name", "from_email",
-                    "reply_to_email", "mailing_address")
+                    "reply_to_email", "mailing_address", "sms_from_number")
     changed = False
     for k in content_keys + ("daily_limit",):
         if k in data and data[k] is not None:
@@ -144,6 +160,8 @@ def save_settings(db: Session, s: EvoSysOutreachSettings, data: dict, user_id: s
                 v = [_clean_step(x) for x in (v or [])][:10]
             if k == "daily_limit":
                 v = max(1, min(int(v), 300))
+            if k == "sms_from_number":
+                v = e164(v) or (str(v).strip()[:20] or None)
             if getattr(s, k) != v:
                 setattr(s, k, v)
                 changed = changed or k in content_keys
@@ -219,10 +237,63 @@ def render_email(opp: Opportunity, s: EvoSysOutreachSettings, step: dict, campai
             "missing": missing, "logo": bool(header)}
 
 
+# ── texts ─────────────────────────────────────────────────────────────────────
+
+def e164(phone) -> Optional[str]:
+    """A US number as +1XXXXXXXXXX, or None."""
+    d = re.sub(r"\D", "", str(phone or ""))
+    if len(d) == 11 and d.startswith("1"):
+        d = d[1:]
+    if len(d) != 10 or d[0] in "01" or d[3] in "01":
+        return None
+    return "+1" + d
+
+
+def _with_stop(body: str) -> str:
+    b = (body or "").strip()
+    return b if re.search(r"\bstop\b", b, re.I) else (b + " " + STOP_LINE).strip()
+
+
+def render_text(opp: Opportunity, s: EvoSysOutreachSettings, step: dict, campaign=None) -> dict:
+    """The text as it would go out: filled in, and always ending with the
+    opt-out line. A fill-in whose fact is missing is reported, never guessed."""
+    body, used, missing = _fill(step.get("body"), opp, s, campaign)
+    return {"text": _with_stop(body), "facts_used": used, "missing": missing}
+
+
+def _send_text(to: str, body: str, s: EvoSysOutreachSettings) -> dict:
+    """Send one text from the team's number on the platform Twilio account."""
+    from app.utils.twilio_webhook_guard import platform_account
+    acct = platform_account()
+    frm = e164(s.sms_from_number)
+    if not (acct and frm):
+        return {"success": False, "error": "texting is not set up (number or platform Twilio account missing)"}
+    from twilio.rest import Client
+    kw = {"from_": frm, "to": to, "body": body}
+    try:
+        from app.services.twilio_callbacks import public_api_base
+        base = public_api_base()
+        if base:
+            kw["status_callback"] = base + "/sms/webhook/status-callback"
+    except Exception:  # noqa: BLE001 - a missing callback never blocks a send
+        pass
+    m = Client(acct[0], acct[1]).messages.create(**kw)
+    return {"success": True, "provider_message_id": m.sid}
+
+
 # ── enrolment and stopping ────────────────────────────────────────────────────
 
 def _has_email(opp) -> bool:
     return bool(re.match(r"[^@\s]+@[^@\s]+\.[^@\s]+$", (opp.email or "").strip()))
+
+
+def _has_phone(opp) -> bool:
+    return e164(getattr(opp, "phone", None)) is not None
+
+
+def _reachable(opp, s: EvoSysOutreachSettings) -> bool:
+    """Email, or a phone the team can text."""
+    return _has_email(opp) or (_has_phone(opp) and bool(e164(s.sms_from_number)))
 
 
 def enroll_new(db: Session, bso_id: str, now: datetime) -> int:
@@ -240,7 +311,7 @@ def enroll_new(db: Session, bso_id: str, now: datetime) -> int:
                                          ~Opportunity.id.in_(have)).all())
     n = 0
     for o in rows:
-        if not _has_email(o):
+        if not _reachable(o, s):
             continue
         lead = db.get(EvoSysLead, o.id) or G.ensure(db, s, o)
         if lead.review_status not in G.SENDABLE:
@@ -317,7 +388,7 @@ def sent_today(db: Session, bso_id: str, now_utc: datetime, campaign_id: Optiona
     q = (db.query(func.count(EvoSysOutreachMessage.id))
          .filter(EvoSysOutreachMessage.brand_sales_org_id == bso_id,
                  EvoSysOutreachMessage.direction == "out",
-                 EvoSysOutreachMessage.channel == "email",
+                 EvoSysOutreachMessage.channel.in_(("email", "text")),
                  EvoSysOutreachMessage.status == "sent",
                  EvoSysOutreachMessage.created_at >= start))
     if campaign_id:
@@ -335,7 +406,7 @@ class _Sender:
     resolved = True
 
     def __init__(self, s: EvoSysOutreachSettings, reply_to: Optional[str] = None):
-        self.from_email = (s.from_email or DEFAULT_FROM).strip()
+        self.from_email = SEND_FROM
         self.from_name = ((s.sender_name or "").strip() + " | EvoSys Pro").strip(" |")
         self.reply_to_email = (reply_to or s.reply_to_email or "").strip() or None
         self.cc_email = None
@@ -351,7 +422,7 @@ def _send(to: str, msg: dict, s: EvoSysOutreachSettings, opp_id: str) -> dict:
                  "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"})
 
 
-def run_pass(db: Session, now: Optional[datetime] = None, sender=None) -> dict:
+def run_pass(db: Session, now: Optional[datetime] = None, sender=None, text_sender=None) -> dict:
     """One pass: enrol new leads into campaigns that are approved and on, then
     send what is due - per campaign, inside that campaign's days and hours and
     daily limit - and advance each lead. Safe to run repeatedly.
@@ -364,6 +435,7 @@ def run_pass(db: Session, now: Optional[datetime] = None, sender=None) -> dict:
     from app.models.evosys_sales_models import EvoSysLead
     now = now or datetime.utcnow()
     sender = sender or _send
+    text_sender = text_sender or _send_text
     bso_id = brand_id(db)
     out = {"brand": bso_id, "enrolled": 0, "sent": 0, "failed": 0, "held": 0, "stopped": 0,
            "waiting": 0, "skipped": None}
@@ -402,12 +474,13 @@ def run_pass(db: Session, now: Optional[datetime] = None, sender=None) -> dict:
             stop(db, st.opportunity_id, "stage", now); out["stopped"] += 1; continue
         if _booked(db, opp.id):
             stop(db, opp.id, "booked", now); out["stopped"] += 1; continue
-        if not _has_email(opp):
+        if not _reachable(opp, s):
             stop(db, opp.id, "no_email", now); out["stopped"] += 1; continue
         if st.next_step >= len(steps):
             st.status, st.next_due_at = "finished", None; continue
         step = steps[st.next_step]
-        if step.get("channel") == "text":
+        is_text = step.get("channel") == "text"
+        if is_text and not e164(s.sms_from_number):
             # No EvoSys texting number: recorded once, never sent.
             db.add(EvoSysOutreachMessage(brand_sales_org_id=bso_id, opportunity_id=opp.id, direction="out",
                                          channel="text", step_no=st.next_step + 1, to_address=opp.phone,
@@ -416,12 +489,19 @@ def run_pass(db: Session, now: Optional[datetime] = None, sender=None) -> dict:
             out["held"] += 1
             _advance(st, steps, now)
             continue
+        if (is_text and not _has_phone(opp)) or (not is_text and not _has_email(opp)):
+            # This lead can't get this kind of step (no phone / no email): skip
+            # it and move to the next one. Nothing is sent or recorded.
+            _advance(st, steps, now)
+            db.commit()
+            continue
         if room[c.id] <= 0:
             out["waiting"] += 1
             continue
         # Re-read this lead right before sending: a reply, opt-out, booking,
         # hold or Do Not Contact recorded since the due list was read (by the
-        # mailbox poller, the opt-out link, a person) must stop this email.
+        # mailbox poller, the texting webhook, the opt-out link, a person) must
+        # stop this message.
         db.refresh(st)
         db.refresh(opp)
         db.refresh(c)
@@ -440,6 +520,54 @@ def run_pass(db: Session, now: Optional[datetime] = None, sender=None) -> dict:
             stop(db, opp.id, "excluded", now); out["stopped"] += 1; continue
         if lead is not None and lead.review_status not in G.SENDABLE:
             out["waiting"] += 1          # held / needs review: not sent, not moved
+            continue
+        if is_text:
+            tmsg = render_text(opp, s, step, c)
+            if tmsg["missing"]:
+                st.held_reason = "missing:" + ",".join(tmsg["missing"])[:50]
+                out["waiting"] += 1
+                db.commit()
+                continue
+            st.held_reason = None
+            to = e164(opp.phone)
+            try:
+                r = text_sender(to, tmsg["text"], s)
+            except Exception as e:                                # noqa: BLE001
+                r = {"success": False, "error": str(e)}
+            ok = bool(r.get("success"))
+            db.add(EvoSysOutreachMessage(brand_sales_org_id=bso_id, opportunity_id=opp.id, direction="out",
+                                         channel="text", step_no=st.next_step + 1, to_address=to,
+                                         body=tmsg["text"], campaign_id=c.id,
+                                         status="sent" if ok else "failed",
+                                         error=None if ok else str(r.get("error") or "")[:1000],
+                                         provider_message_id=r.get("provider_message_id"), created_at=now))
+            if ok:
+                out["sent"] += 1
+                room[c.id] -= 1
+                if opp.stage == STAGE_PROSPECT:
+                    opp.stage = STAGE_CONTACTED
+                    opp.stage_changed_at = now
+                opp.contacted_at = opp.contacted_at or now
+                db.add(OpportunityEvent(opportunity_id=opp.id, event_type="outreach_text",
+                                        summary="Follow-up text %d sent (%s)" % (st.next_step + 1, c.name),
+                                        detail=tmsg["text"][:500], occurred_at=now))
+                _advance(st, steps, now)
+            else:
+                out["failed"] += 1
+                # A text that did not go out does not count: try this step again
+                # in an hour; after two failures move on to the next step (the
+                # email steps still go).
+                db.flush()
+                fails = (db.query(func.count(EvoSysOutreachMessage.id))
+                         .filter(EvoSysOutreachMessage.opportunity_id == opp.id,
+                                 EvoSysOutreachMessage.channel == "text",
+                                 EvoSysOutreachMessage.step_no == st.next_step + 1,
+                                 EvoSysOutreachMessage.status == "failed").scalar() or 0)
+                if fails >= 2:
+                    _advance(st, steps, now)
+                else:
+                    st.next_due_at = now + timedelta(hours=1)
+            db.commit()
             continue
         msg = render_email(opp, s, step, c)
         if msg["missing"]:

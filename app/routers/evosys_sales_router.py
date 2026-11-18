@@ -112,7 +112,8 @@ def _settings_out(s, c: Ctx, db: Session) -> dict:
             "approved": s.approved_at is not None,
             "approved_at": s.approved_at.isoformat() + "Z" if s.approved_at else None,
             "problems": O.settings_problems(s), "can_manage": c.manager,
-            "texting_ready": False,
+            "sms_from_number": s.sms_from_number,
+            "texting_ready": bool(O.e164(s.sms_from_number)),
             "reply_tracking": _reply_tracking(db, s),
             "sending_hours": "Weekdays 8:00 AM - 6:00 PM Central"}
 
@@ -468,7 +469,7 @@ def results(days: int = 14, c: Ctx = Depends(ctx), db: Session = Depends(get_db)
 # (campaigns.ensure_default carried them over unchanged). Per-campaign work is
 # in evosys_sales_work_router.py.
 
-TEAM_KEYS = ("sender_name", "from_email", "reply_to_email", "mailing_address")
+TEAM_KEYS = ("sender_name", "from_email", "reply_to_email", "mailing_address", "sms_from_number")
 CAMPAIGN_KEYS = ("steps", "offer", "booking_url", "daily_limit")
 
 
@@ -480,6 +481,7 @@ class SettingsIn(BaseModel):
     from_email: Optional[str] = None
     reply_to_email: Optional[str] = None
     mailing_address: Optional[str] = None
+    sms_from_number: Optional[str] = None
     daily_limit: Optional[int] = None
 
 
@@ -515,9 +517,13 @@ def save_team_settings(db: Session, s, data: dict, user_id: str) -> bool:
     from app.services.evosys_sales import campaigns as CA
     changed = False
     for k in TEAM_KEYS:
-        if k in data and data[k] is not None and getattr(s, k) != data[k]:
-            setattr(s, k, data[k])
-            changed = True
+        if k in data and data[k] is not None:
+            v = data[k]
+            if k == "sms_from_number":
+                v = O.e164(v) or (str(v).strip()[:20] or None)
+            if getattr(s, k) != v:
+                setattr(s, k, v)
+                changed = True
     if changed:
         s.approved_at, s.approved_by, s.sending_on = None, None, False
         for camp in CA.all_for(db, s):
@@ -545,6 +551,27 @@ def put_outreach(body: SettingsIn, c: Ctx = Depends(ctx), db: Session = Depends(
     CA.save(db, CA.ensure_default(db, s), {k: data[k] for k in CAMPAIGN_KEYS if k in data}, c.user.id)
     out = _default_out(db, s, c)
     db.commit()
+    return out
+
+
+@router.get("/texting/check")
+def texting_check(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """READ ONLY: is the team's texting number on the platform Twilio account,
+    and where do its incoming texts go? Nothing is sent or changed."""
+    _manager(c)
+    from app.services.evosys_sales import sms_setup
+    return sms_setup.check(O.get_settings(db, c.bso))
+
+
+@router.post("/texting/connect-replies")
+def texting_connect(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """Point the team number's incoming texts at this system's inbound webhook,
+    so STOP and replies reach the lead. Changes only that one number."""
+    _manager(c)
+    from app.services.evosys_sales import sms_setup
+    out = sms_setup.connect_replies(O.get_settings(db, c.bso))
+    if out.get("error"):
+        raise HTTPException(400, out["error"])
     return out
 
 

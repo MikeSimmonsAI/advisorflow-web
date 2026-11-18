@@ -383,6 +383,19 @@ async def inbound_webhook(
     # subaccount is held to its own organization. Checked BEFORE any side effect.
     _check_tenant_owns_called_number(db, _resolved, To)
 
+    # EVOSYS SALES (owner request 2026-11-17). A text to the EvoSys Sales
+    # texting number is a prospect business answering our outreach: it is
+    # recorded on that lead (STOP -> opted out + Do Not Contact) and never
+    # reaches the customer-side pipeline below. Every other number returns
+    # False here and carries on exactly as before.
+    try:
+        from app.services.evosys_sales import sms_inbound as _evs_sms
+        if _evs_sms.handle(db, from_number=From, to_number=To, body=Body, message_sid=MessageSid):
+            return _twiml_ack()
+    except Exception:                                       # noqa: BLE001
+        db.rollback()
+        logger.exception("evosys sales: inbound text not recorded for %s", MessageSid)
+
     # AI OPERATIONS (T7): route the reply to an AI conversation if one owns
     # this contact. Placed AFTER the authentication guard and BEFORE the
     # existing pipeline, because an opt-out has to stop the AI employee at

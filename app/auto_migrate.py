@@ -624,6 +624,9 @@ COLUMNS_TO_ADD = [
     # app/services/evosys_sales/logos.py. NULL on every existing row, which
     # means "no logo" and leaves every email exactly as it was.
     ("opportunities", "logo_png", "BYTEA"),
+    # EvoSys Sales texting number (owner request 2026-11-17). NULL = text steps
+    # stay held exactly as before.
+    ("evosys_outreach_settings", "sms_from_number", "VARCHAR(20)"),
     ("opportunities", "logo_quality", "VARCHAR"),
     ("opportunities", "logo_updated_at", "TIMESTAMP"),
     ("opportunities", "custom_unit_price", "NUMERIC(12,2)"),

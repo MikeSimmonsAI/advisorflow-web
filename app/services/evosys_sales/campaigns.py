@@ -36,7 +36,7 @@ from app.models.evosys_sales_models import EvoSysCampaign, EvoSysLead, EvoSysOut
 
 CONTENT_FIELDS = ("steps", "offer", "booking_url", "daily_limit", "send_days", "send_start_hour",
                   "send_end_hour", "timezone", "industry_key", "market_key")
-TEAM_FIELDS = ("sender_name", "from_email", "reply_to_email", "mailing_address")
+TEAM_FIELDS = ("sender_name", "from_email", "reply_to_email", "mailing_address", "sms_from_number")
 OFFER_PLACEHOLDER_RE = re.compile(r"^\s*\[your offer", re.I)
 
 

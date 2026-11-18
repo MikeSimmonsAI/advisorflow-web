@@ -770,7 +770,7 @@ const HOW = { reply_address: 'matched by their reply address', sender: 'matched 
 function Message({ m }) {
   const inbound = m.direction === 'in'
   const who = inbound ? 'They replied' : m.channel === 'call' ? 'Call' : m.channel === 'text' ? 'Text' : m.step ? 'Email ' + m.step : 'Your answer'
-  const problem = m.status === 'held' ? 'Not sent - no texting number yet' : m.status === 'failed' ? 'Did not send' : null
+  const problem = m.status === 'held' ? (m.channel === 'text' ? 'Not sent - no texting number yet' : 'Not sent') : m.status === 'failed' ? 'Did not send' : null
   return (
     <div className={'evs-msg ' + (inbound ? 'in' : 'out')}>
       <div className="evs-msg-head"><b>{who}</b><small>{when(m.at)}{inbound && HOW[m.how] ? ' · ' + HOW[m.how] : ''}</small>

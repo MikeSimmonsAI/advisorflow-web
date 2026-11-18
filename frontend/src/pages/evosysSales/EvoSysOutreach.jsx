@@ -163,7 +163,7 @@ function CampaignEditor({ id, meta, onChange }) {
               <label>Day <input className="evs-input evs-day" type="number" min="0" max="90" disabled={!can} value={s.day} onChange={e => setStep(i, 'day', e.target.value)} /></label>
               <select className="evs-input evs-chan" disabled={!can} value={s.channel} onChange={e => setStep(i, 'channel', e.target.value)}>
                 <option value="email">Email</option>
-                <option value="text">Text (waits for a texting number)</option>
+                <option value="text">Text (ends with "Reply STOP to opt out")</option>
               </select>
               {can && form.steps.length > 1 && <button className="evs-link" onClick={() => setForm({ ...form, steps: form.steps.filter((_, j) => j !== i) })}>Remove</button>}
             </div>
@@ -236,9 +236,9 @@ function TeamSettings({ team, onSaved }) {
   const [f, setF] = useState(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
-  useEffect(() => { if (team) setF({ sender_name: team.sender_name, from_email: team.from_email, reply_to_email: team.reply_to_email, mailing_address: team.mailing_address }) }, [team])
+  useEffect(() => { if (team) setF({ sender_name: team.sender_name, from_email: team.from_email, reply_to_email: team.reply_to_email, mailing_address: team.mailing_address, sms_from_number: team.sms_from_number }) }, [team])
   if (!team || !f) return null
-  const dirty = ['sender_name', 'from_email', 'reply_to_email', 'mailing_address'].some(k => (f[k] || '') !== (team[k] || ''))
+  const dirty = ['sender_name', 'from_email', 'reply_to_email', 'mailing_address', 'sms_from_number'].some(k => (f[k] || '') !== (team[k] || ''))
   const save = async () => {
     setBusy(true); setMsg(null)
     try { await api.put(`${API}/outreach`, f); setMsg({ ok: true, text: 'Saved. Every campaign was turned off and needs approving again.' }); onSaved() }
@@ -252,6 +252,7 @@ function TeamSettings({ team, onSaved }) {
         <Field label="Your name ({sender_name})"><input className="evs-input" disabled={!can} value={f.sender_name || ''} onChange={e => setF({ ...f, sender_name: e.target.value })} /></Field>
         <Field label="Sends from"><input className="evs-input" disabled={!can} value={f.from_email || ''} onChange={e => setF({ ...f, from_email: e.target.value })} /></Field>
         <Field label="Replies go to"><input className="evs-input" disabled={!can} value={f.reply_to_email || ''} onChange={e => setF({ ...f, reply_to_email: e.target.value })} /></Field>
+        <Field label="Texts go from"><input className="evs-input" disabled={!can} placeholder="+18665551234" value={f.sms_from_number || ''} onChange={e => setF({ ...f, sms_from_number: e.target.value })} /></Field>
         <Field label="Mailing address (required at the bottom of every sales email)" wide>
           <input className="evs-input" disabled={!can} placeholder="Street, City, State ZIP" value={f.mailing_address || ''} onChange={e => setF({ ...f, mailing_address: e.target.value })} />
         </Field>
