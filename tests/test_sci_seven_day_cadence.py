@@ -151,7 +151,7 @@ def test_a_touch_due_before_9_waits_for_the_opening_then_goes_once(sci_text):
     assert due.strftime("%a") == "Sat" and (9, 0) <= (due.hour, due.minute) < (9, 45)   # spread, not 9:00 sharp
     assert st.current_touch_number == 2                                    # nothing skipped or advanced
     held = [l for l in _logs(db, sci_text["lead"]) if l.outcome == cs.OUTCOME_BLOCKED]
-    assert held and "SCI sending window" in held[-1].reason
+    assert held and "program's sending window" in held[-1].reason
     with patch("app.services.sms_service.send_sms") as send:
         send.return_value = Message(lead_id=sci_text["lead"].id, body="t3", twilio_sid="SMok", twilio_status="queued",
                                     sent_at=SAT_10)

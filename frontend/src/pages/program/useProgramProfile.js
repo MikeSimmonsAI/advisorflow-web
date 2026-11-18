@@ -21,13 +21,23 @@ export const SCI_PROFILE = Object.freeze({
   sci_only_panels: true, visit_label: 'In-person visit (60 min)', theme: null,
 })
 
+/* NEUTRAL until the server says which program this is (owner, Nov 17: SCI
+   and Restland share nothing). A program never shows another program's name,
+   footer or panels - not while loading, not when the answer fails. */
+export const NEUTRAL_PROFILE = Object.freeze({
+  is_sci: false, display_name: '', short_name: 'Program', live_label: 'Live', menu_label: 'Menu',
+  pilot_label: '', footer: '', location_count: null, single_location: false, location: null,
+  timezone: 'America/Chicago', sci_only_panels: false, visit_label: 'In-person visit', theme: null,
+})
+
 const cache = new Map()   // workspace id -> profile
 const waiting = new Map() // workspace id -> promise
 
-/** Pure: the profile to draw for a server answer (null/absent -> SCI wording). */
+/** Pure: the profile to draw for a server answer (null/absent -> neutral:
+    never another program's wording or panels). */
 export function profileFrom(status) {
   const p = status && status.profile
-  return p && typeof p === 'object' ? { ...SCI_PROFILE, ...p } : SCI_PROFILE
+  return p && typeof p === 'object' ? { ...NEUTRAL_PROFILE, ...p } : NEUTRAL_PROFILE
 }
 
 function key() { return getWorkspaceContext() || '_home' }
@@ -38,14 +48,14 @@ export function loadProgramProfile() {
   if (!waiting.has(k)) {
     waiting.set(k, api.get('/program/status')
       .then(s => { const p = profileFrom(s); cache.set(k, p); return p })
-      .catch(() => SCI_PROFILE)
+      .catch(() => NEUTRAL_PROFILE)
       .finally(() => waiting.delete(k)))
   }
   return waiting.get(k)
 }
 
 export function useProgramProfile() {
-  const [p, setP] = useState(() => cache.get(key()) || SCI_PROFILE)
+  const [p, setP] = useState(() => cache.get(key()) || NEUTRAL_PROFILE)
   useEffect(() => {
     let alive = true
     loadProgramProfile().then(x => { if (alive) setP(x) })

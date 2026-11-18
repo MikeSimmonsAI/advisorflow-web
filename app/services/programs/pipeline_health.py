@@ -167,23 +167,23 @@ def _config_problems(cfg: Dict) -> List[Dict]:
     if not cfg["booking_user_set"]:
         out.append(_problem("config_no_booking_user", "configuration", "medium",
                             "No booking calendar owner is set, so texts carry no booking link and the AI cannot book.",
-                            "In SCI Settings, choose whose calendar bookings land on.", count=1))
+                            "In Settings, choose whose calendar bookings land on.", count=1))
     if not cfg["staff_alerts_on"]:
         out.append(_problem("config_staff_alerts_off", "configuration", "high",
                             "Staff alerts are switched off - nobody is texted or emailed when a family replies.",
-                            "Turn staff alerts on in SCI Settings.", count=1))
+                            "Turn staff alerts on in Settings.", count=1))
     if not cfg["alert_phone_set"] and not cfg["alert_email_set"]:
         out.append(_problem("config_no_alert_recipient", "configuration", "high",
                             "There is no alert phone and no alert email - alerts have nowhere to go.",
-                            "Add the alert phone and/or alert email in SCI Settings.", count=1))
+                            "Add the alert phone and/or alert email in Settings.", count=1))
     elif not cfg["alert_phone_set"]:
         out.append(_problem("config_no_alert_phone", "configuration", "low",
                             "There is no alert phone - alerts go by email only.",
-                            "Add an alert phone in SCI Settings if the team should be texted.", count=1))
+                            "Add an alert phone in Settings if the team should be texted.", count=1))
     elif not cfg["alert_email_set"]:
         out.append(_problem("config_no_alert_email", "configuration", "low",
                             "There is no alert email - alerts go by text only.",
-                            "Add an alert email in SCI Settings if the team should be emailed.", count=1))
+                            "Add an alert email in Settings if the team should be emailed.", count=1))
     if cfg["ai_setter_mode"] != "off" and not cfg["openai_key_present"]:
         out.append(_problem("config_no_ai_key", "configuration", "high",
                             "The appointment setter is on but the AI key is missing on the server - every reply goes to a person.",
@@ -306,7 +306,7 @@ def _alerts_undelivered(db, org_id, now) -> Optional[Dict]:
         return None
     return _problem("alerts_undelivered", "notification", "high",
                     "Staff alert texts were accepted but the carrier reported them not delivered.",
-                    "Check the staff phone can receive texts from the SCI line (carrier block, landline, "
+                    "Check the staff phone can receive texts from the program's texting line (carrier block, landline, "
                     "opted out); make sure the team saw these families another way.",
                     count=len(rows), oldest=rows[0].created_at, ids=[r.id for r in rows], id_type="alert",
                     reasons=[r.provider_error or r.provider_status for r in rows])
@@ -338,7 +338,7 @@ def _held_turns(db, org_id, now, test_ids) -> Optional[Dict]:
     return _problem("ai_turns_held_too_long", "ai_answer", "high",
                     "AI replies have waited more than 30 minutes for contact hours, and contact hours are open now.",
                     "The held-reply sender may not be running - check the background jobs; or answer these "
-                    "families by hand from SCI Live.",
+                    "families by hand from Live.",
                     count=len(late), oldest=late[0].created_at, ids=[r.id for r in late], id_type="turn")
 
 
@@ -357,7 +357,7 @@ def _blocked_turns(db, org_id, since, test_ids) -> Optional[Dict]:
         return None
     return _problem("ai_turns_blocked", "ai_answer", "medium",
                     "AI replies were stopped before sending (a safety rule refused them or the send failed).",
-                    "Open each family in SCI Live and answer them yourself; the reason says what stopped the reply.",
+                    "Open each family in Live and answer them yourself; the reason says what stopped the reply.",
                     count=len(rows), oldest=rows[0].created_at, ids=[r.id for r in rows], id_type="turn",
                     reasons=[r.reason for r in rows])
 
@@ -414,7 +414,7 @@ def _hot_past_sla(db, org_id, now, test_ids) -> Optional[Dict]:
         return None
     return _problem("hot_past_sla", "human_action", "high",
                     "HOT replies (a family asking to meet) are past their response time and nobody has opened them.",
-                    "Open each reply in SCI Live and contact the family now, then mark it handled.",
+                    "Open each reply in Live and contact the family now, then mark it handled.",
                     count=len(rows), oldest=rows[0].received_at, ids=[r.id for r in rows], id_type="response",
                     location_ids=[r.location_id for r in rows])
 
@@ -455,7 +455,7 @@ def _handoffs_without_alert(db, org_id, since, test_ids) -> Optional[Dict]:
         resp_ids[lid] = rid
     return _problem("handoff_without_alert", "notification", "high",
                     "Conversations were handed to a person but no staff alert was recorded for them.",
-                    "Check staff alerts are on and have a recipient; open these families in SCI Live - "
+                    "Check staff alerts are on and have a recipient; open these families in Live - "
                     "nobody was told they need a person.",
                     count=len(missing), oldest=missing[0].updated_at,
                     ids=[resp_ids.get(c.lead_id) for c in missing], id_type="response")

@@ -201,7 +201,8 @@ def snapshot(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
     out["sms"] = _sms_block(db, org_id, org)
 
     # ── campaigns ──
-    fams = db.query(CampaignFamily).filter(CampaignFamily.organization_id == org_id).all()
+    from app.services.programs import campaigns as _camps
+    fams = _camps.visible(db, org_id, db.query(CampaignFamily).filter(CampaignFamily.organization_id == org_id)).all()
     from app.services.programs import email_touches as _et
     from app.services import outbound_brake
     out["campaigns"] = {

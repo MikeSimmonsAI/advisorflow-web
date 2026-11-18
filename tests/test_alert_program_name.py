@@ -19,5 +19,5 @@ def test_other_program_uses_its_own_name():
 
 
 def test_label_never_breaks_on_bad_program():
-    assert L.program_label(None, None) == "SCI"
+    assert L.program_label(None, None) == "Program"
     assert L.sms_line("hot", "A Family", words="hi", program="  ").startswith("SCI Appointment Request")
