@@ -127,7 +127,7 @@ def settings_problems(s: EvoSysOutreachSettings) -> list:
     steps = s.steps or []
     if not steps:
         out.append("Add at least one step.")
-    if not (s.mailing_address or "").strip():
+    if not (s.mailing_address or "").strip() and any(x.get("channel") != "text" for x in steps):
         out.append("Add a mailing address. The law requires one in every sales email.")
     if not (s.offer or "").strip() or (s.offer or "").strip().startswith("[Your offer"):
         out.append("Write the offer.")

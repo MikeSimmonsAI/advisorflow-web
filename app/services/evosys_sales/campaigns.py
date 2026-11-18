@@ -118,8 +118,15 @@ def campaign_for(db: Session, settings, lead: Optional[EvoSysLead]) -> Optional[
 def problems(c: EvoSysCampaign, settings) -> List[str]:
     from app.services.evosys_sales import outreach as O
     out = [p for p in O.settings_problems(settings)
-           if not p.startswith(("Write the offer", "Add the booking link", "Add at least one step", "Step "))]
+           if not p.startswith(("Write the offer", "Add the booking link", "Add at least one step", "Step ",
+                                "Add a mailing address"))]
     steps = c.steps or []
+    # The mailing address belongs in sales EMAILS; a texts-only campaign needs none.
+    if any(x.get("channel") != "text" for x in steps) and not (settings.mailing_address or "").strip():
+        out.append("Add a mailing address. The law requires one in every sales email.")
+    for i, x in enumerate(steps, 1):
+        if x.get("channel") == "text" and len(O._with_stop(x.get("body") or "")) > O.TEXT_MAX:
+            out.append("Step %d text is too long (keep it under %d characters)." % (i, O.TEXT_MAX - 40))
     if not steps:
         out.append("Add at least one step.")
     uses_offer = any("{offer}" in ((x.get("subject") or "") + (x.get("body") or "")) for x in steps)

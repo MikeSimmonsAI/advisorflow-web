@@ -177,3 +177,13 @@ def test_a_reply_alerts_the_owner_by_text_and_email(db_session, brand, manager, 
     IN.handle(db_session, from_number="+12145550109", to_number=TEAM_NO, body="stop", message_sid="SMin5")
     assert not texts and not mails
     assert o is not None
+
+
+def test_texts_only_campaign_needs_no_mailing_address(db_session, brand):
+    s = _ready(db_session, brand)
+    s.mailing_address = None
+    c = CA.ensure_default(db_session, s)
+    c.steps = [STEPS[0]]
+    assert not any("mailing address" in p for p in CA.problems(c, s))
+    c.steps = STEPS
+    assert any("mailing address" in p for p in CA.problems(c, s))
