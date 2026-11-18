@@ -282,6 +282,26 @@ def run_for(db: Session, prog: OutreachProgram, now: Optional[datetime] = None) 
     # Never more than fits before the 6 PM close (a late start shrinks it).
     n = min(n, fits_today(local, spacing))
     entries = pick_entries(db, prog, n) if n > 0 else []
+    utc_now = (now or datetime.utcnow())
+    start_at = utc_now + timedelta(minutes=2)
+    # Nov 17 (owner): room the new families leave goes to families starting
+    # their cadence over (sci_rerun: never-reached first), after them on the
+    # same drip - one daily count for both.
+    rerun: List[Dict] = []
+    try:
+        from app.services.programs import sci_rerun
+        rerun = sci_rerun.start_next(db, prog, user, n - len(entries),
+                                     start_at + timedelta(minutes=spacing * len(entries)), spacing, now=utc_now)
+    except Exception:                                    # noqa: BLE001 - never stops the new families
+        db.rollback()
+        log.exception("sci rerun start failed for %s", prog.id)
+    if rerun:
+        from app.routers.audit_log_router import log_action
+        log_action(db, prog.organization_id, user.id, action="program.rerun_started",
+                   target_type="outreach_program", target_id=prog.id,
+                   details={"date": today, "started": len(rerun), "authority": "owner directive Nov 17",
+                            "families": rerun})
+        db.commit()
     if not entries:
         # Nov 7: an empty day is recorded too, so the owner can see the batch
         # RAN and found nobody ready - not that it silently did nothing.
@@ -292,9 +312,7 @@ def run_for(db: Session, prog: OutreachProgram, now: Optional[datetime] = None) 
                    details={"date": today, "picked": 0, "approved": 0, "fits": n,
                             "note": "nobody ready", "skipped": detail.get("skipped") or {}})
         db.commit()
-        return {"approved": 0, "picked": 0}
-    utc_now = (now or datetime.utcnow())
-    start_at = utc_now + timedelta(minutes=2)
+        return {"approved": 0, "picked": 0, **({"rerun_started": len(rerun)} if rerun else {})}
     # One drip for the day: texts-and-email families first, then email-only
     # families, `spacing` apart - same standing approval, same audit entry.
     text_ids = [e["lead_id"] for e in entries if e.get("mode", TEXT_AND_EMAIL) == TEXT_AND_EMAIL]
@@ -319,12 +337,18 @@ def run_for(db: Session, prog: OutreachProgram, now: Optional[datetime] = None) 
                                       "why": e.get("why")} for e in entries]})
     db.commit()
     return {"approved": approved, "picked": len(entries), "date": today,
-            **({"email_only": emailing} if email_ids else {})}
+            **({"email_only": emailing} if email_ids else {}), **({"rerun_started": len(rerun)} if rerun else {})}
 
 
 def run(db: Session, now: Optional[datetime] = None) -> Dict:
     out = {}
     for prog in db.query(OutreachProgram).filter(OutreachProgram.daily_batch_count > 0).all():
+        try:   # Nov 17: queue the families starting over (once; sends nothing)
+            from app.services.programs import sci_rerun
+            sci_rerun.ensure_staged(db, prog, now=now)
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            log.exception("sci rerun staging failed for program %s", prog.id)
         try:
             res = run_for(db, prog, now)
             if res is not None:
