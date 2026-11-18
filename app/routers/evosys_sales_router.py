@@ -29,7 +29,7 @@ from app.services.evosys_sales import logos as _logos
 router = APIRouter(prefix="/sales/evosys", tags=["evosys-sales"])
 public_router = APIRouter(prefix="/evosys-sales-public", tags=["evosys-sales-public"])
 
-STOP_LABELS = {"replied": "Replied", "booked": "Booked a call", "opted_out": "Opted out",
+STOP_LABELS = {"replied": "Replied", "booked": "Booked a call", "opted_out": "Opted out - Do Not Contact",
                "no_email": "No email address", "stage": "Moved on in the pipeline",
                "manual": "Stopped by you", "email_failed": "Email bounced"}
 
@@ -78,6 +78,11 @@ def _status(st: Optional[EvoSysOutreachState], opp: Opportunity) -> dict:
     if st.status == "finished":
         return {"key": "finished", "label": "All steps sent"}
     return {"key": st.stop_reason or "stopped", "label": STOP_LABELS.get(st.stop_reason, "Stopped")}
+
+
+def _on_dnc(db: Session, o: Opportunity) -> bool:
+    from app.services import sales_suppression as SDNC
+    return bool(SDNC.for_opportunity(db, o) or SDNC.find(db, o.brand_sales_org_id, o.phone, o.email))
 
 
 def _row(o: Opportunity, st, last=None, booked=False) -> dict:
@@ -257,7 +262,10 @@ def leads(view: str = "all", q: str = "", group: str = "", c: Ctx = Depends(ctx)
             continue
         if view == "booked" and not r["booked"]:
             continue
-        if view == "stopped" and k in ("active", "waiting", "no_email", "not_in"):
+        if view in ("dnc", "stopped") and not (k == "opted_out" or _on_dnc(db, o)):
+            # Do Not Contact: only businesses that opted out (STOP, the email
+            # link) or are on the Do Not Contact list - NOT every lead whose
+            # automatic follow-up stopped because they replied or booked.
             continue
         if needle and needle not in " ".join(str(x or "") for x in (o.company_name, o.contact_name, o.phone, o.email)).lower():
             continue
@@ -736,6 +744,69 @@ def logo_png(token: str, db: Session = Depends(get_db)):
         raise HTTPException(404, "Not found.")
     return Response(content=data, media_type="image/png",
                     headers={"Cache-Control": "public, max-age=86400"})
+
+
+@public_router.get("/book/{token}", response_class=HTMLResponse)
+def booking_page(token: str, db: Session = Depends(get_db)):
+    """A lead's own booking page (no login; the token names one lead)."""
+    import json as _json
+    from app.services.evosys_sales import booking_page as BP
+    oid = BP.read(token)
+    o = db.get(Opportunity, oid) if oid else None
+    if o is None:
+        return HTMLResponse(_PAGE % ("Link not recognized", "This booking link is not valid. Text us back and we'll set a time."),
+                            status_code=404)
+    import html as _h
+    from app.services.evosys_sales.outreach import text_company_name
+    name = text_company_name(o.company_name)
+    return HTMLResponse(BP.PAGE % {"company": (_h.escape(name) + " &mdash; ") if name else "",
+                                   "mins": 30, "token": _json.dumps(token), "base": _json.dumps(BP.PATH)},
+                        headers={"Cache-Control": "no-store"})
+
+
+@public_router.get("/book/{token}/slots")
+def booking_slots(token: str, request: Request, db: Session = Depends(get_db)):
+    from datetime import date as _date
+    from app.models.scheduling_models import SalesAppointment
+    from app.services.evosys_sales import booking_page as BP
+    oid = BP.read(token)
+    o = db.get(Opportunity, oid) if oid else None
+    if o is None:
+        raise HTTPException(404, "Not found.")
+    prior = (db.query(SalesAppointment).filter(SalesAppointment.opportunity_id == o.id,
+                                               SalesAppointment.status == "scheduled",
+                                               SalesAppointment.starts_at >= datetime.utcnow()).first())
+    if prior is not None:
+        return {"booked": prior.starts_at.isoformat() + "Z", "slots": []}
+    start = None
+    f = request.query_params.get("from")
+    if f:
+        try:
+            start = _date.fromisoformat(f[:10])
+        except ValueError:
+            start = None
+    start = start or datetime.utcnow().date()
+    out = BP.slots(db, o, start, 7)
+    db.commit()
+    return {"slots": out.get("slots", []), "next_from": (start + timedelta(days=7)).isoformat(),
+            "duration_minutes": out.get("duration_minutes", 30)}
+
+
+class BookPublicIn(BaseModel):
+    starts_at: datetime
+
+
+@public_router.post("/book/{token}")
+def booking_book(token: str, body: BookPublicIn, db: Session = Depends(get_db)):
+    from app.services import sales_suppression as SDNC
+    from app.services.evosys_sales import booking_page as BP
+    oid = BP.read(token)
+    o = db.get(Opportunity, oid) if oid else None
+    if o is None:
+        raise HTTPException(404, "Not found.")
+    if SDNC.for_opportunity(db, o):
+        return {"status": "error", "message": "Please text us back to set a time."}
+    return BP.book(db, o, body.starts_at)
 
 
 @public_router.get("/stop/{token}", response_class=HTMLResponse)

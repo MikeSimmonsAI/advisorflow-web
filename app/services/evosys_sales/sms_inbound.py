@@ -172,17 +172,9 @@ def _auto_answer(db: Session, s, opp: Opportunity, message_sid: str) -> Optional
     return body if ok else None
 
 
-def _alert_owner(db: Session, s, opp: Opportunity, text: str, answered: Optional[str] = None) -> None:
-    """Tell the owner a prospect texted back - by text and email, the same way
-    SCI and Restland replies reach him. A failed alert never loses the reply
-    (it is already on the lead)."""
-    who = opp.company_name or opp.contact_name or "A prospect"
-    phone = opp.phone or ""
-    if answered:
-        line = "EvoSys Sales - %s (%s) texted: \"%s\" AI answered: \"%s\"" % (who, phone, (text or "")[:110], answered[:120])
-    else:
-        line = "EvoSys Sales - NEEDS A PERSON: %s (%s) texted back: \"%s\" (draft ready on the lead)" % (
-            who, phone, (text or "")[:150])
+def notify_owner(s, line: str, subject: str, html_body: str) -> None:
+    """Text + email the team's alert phone / email (same path as SCI and
+    Restland alerts). Never raises: a failed alert loses nothing."""
     if s.alert_phone:
         try:
             from app.services import sms_programs as _sci
@@ -190,22 +182,35 @@ def _alert_owner(db: Session, s, opp: Opportunity, text: str, answered: Optional
             from app.services.twilio_callbacks import apply_status_callback
             client.messages.create(**apply_status_callback(dict(body=line[:320], from_=from_, to=s.alert_phone)))
         except Exception:                                   # noqa: BLE001
-            log.exception("[evosys-sales sms] reply alert text failed for lead %s", opp.id)
+            log.exception("[evosys-sales] owner alert text failed")
     if s.alert_email:
         try:
-            import html as _html
             from app.services.email_service import send_email_via_provider
             from app.services.evosys_sales.outreach import _Sender
-            body = ("<p><b>%s</b> (%s) texted back to the EvoSys Sales number:</p><blockquote>%s</blockquote>"
-                    % (_html.escape(who), _html.escape(phone), _html.escape(text or "")))
-            body += (("<p>AI answered for you:</p><blockquote>%s</blockquote>" % _html.escape(answered)) if answered else
-                     "<p>The automatic follow-up has stopped. A draft answer is ready on the lead in EvoSys Sales.</p>")
-            subj = ("EvoSys Sales - %s texted back (AI answered)" if answered
-                    else "EvoSys Sales - NEEDS A PERSON: %s texted back") % who
-            send_email_via_provider(s.alert_email, subj, body,
+            send_email_via_provider(s.alert_email, subject, html_body,
                                     org=_Sender(s), message_type="notification", sensitivity="none")
         except Exception:                                   # noqa: BLE001
-            log.exception("[evosys-sales sms] reply alert email failed for lead %s", opp.id)
+            log.exception("[evosys-sales] owner alert email failed")
+
+
+def _alert_owner(db: Session, s, opp: Opportunity, text: str, answered: Optional[str] = None) -> None:
+    """Tell the owner a prospect texted back - by text and email, the same way
+    SCI and Restland replies reach him."""
+    import html as _html
+    who = opp.company_name or opp.contact_name or "A prospect"
+    phone = opp.phone or ""
+    if answered:
+        line = "EvoSys Sales - %s (%s) texted: \"%s\" AI answered: \"%s\"" % (who, phone, (text or "")[:110], answered[:120])
+    else:
+        line = "EvoSys Sales - NEEDS A PERSON: %s (%s) texted back: \"%s\" (draft ready on the lead)" % (
+            who, phone, (text or "")[:150])
+    body = ("<p><b>%s</b> (%s) texted back to the EvoSys Sales number:</p><blockquote>%s</blockquote>"
+            % (_html.escape(who), _html.escape(phone), _html.escape(text or "")))
+    body += (("<p>AI answered for you:</p><blockquote>%s</blockquote>" % _html.escape(answered)) if answered else
+             "<p>The automatic follow-up has stopped. A draft answer is ready on the lead in EvoSys Sales.</p>")
+    subj = ("EvoSys Sales - %s texted back (AI answered)" if answered
+            else "EvoSys Sales - NEEDS A PERSON: %s texted back") % who
+    notify_owner(s, line, subj, body)
 
 
 def _do_not_contact(db: Session, opp: Opportunity, text: str) -> None:

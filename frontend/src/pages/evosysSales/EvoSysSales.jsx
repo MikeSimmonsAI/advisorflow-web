@@ -282,7 +282,7 @@ export function Today() {
 // ── Leads ────────────────────────────────────────────────────────────────────
 
 const VIEWS = [['all', 'All'], ['needs_review', 'Needs review'], ['followup', 'In follow-up'], ['no_email', 'No email'],
-               ['replied', 'Replied'], ['booked', 'Booked'], ['held', 'Held'], ['excluded', 'Excluded'], ['stopped', 'Stopped']]
+               ['replied', 'Replied'], ['booked', 'Booked'], ['held', 'Held'], ['excluded', 'Excluded'], ['dnc', 'Do Not Contact']]
 
 export function Leads() {
   const loc = useLocation()
