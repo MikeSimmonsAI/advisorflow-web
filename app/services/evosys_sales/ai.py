@@ -274,6 +274,13 @@ def text_name(name):
     return text_company_name(name) or None
 
 
+def _lead_booking_link(settings, campaign, opp) -> str:
+    """This lead's own booking link (short), never the bare page address."""
+    from app.services.evosys_sales import facts as F
+    src = campaign if (campaign is not None and (campaign.booking_url or "").strip()) else settings
+    return F._booking_link(src, opp) or ""
+
+
 def text_reply(db: Session, settings, campaign, opp, reply_msg, conversation: list, user_id: str,
                force: bool = False, background: bool = False) -> EvoSysAITask:
     """Summarise a text reply and draft the answer. `output.auto_ok` says the
@@ -282,7 +289,7 @@ def text_reply(db: Session, settings, campaign, opp, reply_msg, conversation: li
     facts = {"their_text": (reply_msg.body or "")[:1500], "reply_language": lang,
              "their_company": text_name(opp.company_name),
              "their_name": opp.contact_name, "conversation": conversation[-8:],
-             "booking_link": ((campaign.booking_url if campaign else None) or settings.booking_url or ""),
+             "booking_link": _lead_booking_link(settings, campaign, opp),
              "sender_name": settings.sender_name or "Mike"}
 
     def check(raw):
