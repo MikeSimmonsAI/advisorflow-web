@@ -42,6 +42,9 @@ const PROGRAMS = {
   acquisition_ops: { rank: 8, variant: 'acquisition', symbol: '◎', kind: 'ACQUISITION CONTROL CENTER',
                      summary: 'Prospects, evidence, pipeline and pilot controls',
                      facts: ['Prospects', 'Pipeline', 'Pilot controls'] },
+  client_portals: { rank: 8, variant: 'acquisition', symbol: '◉', kind: 'EVOSYS PRO · CLIENT PORTALS',
+                    summary: 'Each service company’s own portal: setup, appointments and results - see what they see',
+                    facts: ['Client setup', 'Appointments', 'Results'] },
   // VOLT Marketing recruiting program (#535) - owner-approved red and black.
   volt: { rank: 7, variant: 'volt', symbol: 'ϟ', kind: 'VOLT MARKETING · RECRUITING',
           summary: 'Applicants, reviews, referrals, Zoom sessions and reports',
@@ -177,6 +180,15 @@ export function programCards(ctx) {
                  display: 'Acquisition Control Center',
                  summary: a.hub ? 'Master prospects, research, distribution and every cleaning client' : p.summary,
                  orgLabel: a.hub ? 'EvoSys Pro' : a.organization_name })
+    // Client Portals (2026-11-18): the owner's way into each service company's
+    // own portal - pick a company, see exactly what they see.
+    if (a.hub) {
+      const c = PROGRAMS.client_portals
+      cards.push({ ...a, type: 'acquisition_ops', organization_id: 'client-portals:' + a.organization_id, path: '/acquisition-ops/clients',
+                   client_organization_id: a.organization_id, program: 'client_portals', variant: c.variant, symbol: c.symbol,
+                   rank: c.rank, kind: c.kind, facts: c.facts, display: 'Client Portals', summary: c.summary,
+                   orgLabel: 'EvoSys Pro', actionLabel: 'Open Client Portals' })
+    }
   }
   // VOLT MARKETING (#535): only where the server confirmed recruiting-staff
   // or owner access for that tenant.

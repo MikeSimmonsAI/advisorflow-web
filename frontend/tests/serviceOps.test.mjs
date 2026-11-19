@@ -11,7 +11,10 @@ test('menu items appear only when Service Operations is on and the role allows t
   assert.ok(s.includes("api.get('/service-ops/me')"))
   assert.ok(s.includes('ops?.ops_enabled && ops?.role ? OPS_NAV.filter(n => n.any.some(p => ops.perms.includes(p))) : []'),
     'no Service Operations menu when the feature is off')
-  assert.ok(s.includes('...NAV.slice(0, 2)') && s.includes('...NAV.slice(4)'), 'existing menu kept intact')
+  // 2026-11-18 design: the six main pages stay together; Service Operations
+  // pages sit under "More tools" (only when switched on for this role).
+  assert.ok(s.includes("const main = opsOnly ? [] : NAV") && s.includes('main.map('), 'existing menu kept intact')
+  assert.ok(s.includes('opsNav.map(') && s.includes("t('nav_more')"), 'Service Operations under More tools')
 })
 
 test('field staff and buyers are routed to their own views, never the sales portal', () => {

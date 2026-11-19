@@ -16,6 +16,8 @@ import ProgramSwitchLink from '../../components/ProgramSwitchLink'
 import { Icon, Loading, errText, initials, useFont } from './ui'
 import './acquisition.css'
 import './hub.css'
+import './teal.css'
+import { useT } from './portalText'
 
 export { errText, money, when, Pill, useToast, Loading } from './ui'
 
@@ -24,12 +26,12 @@ export const useAcq = () => useContext(Ctx)
 export const BASE = '/program/acquisition'
 
 const NAV = [
-  { to: BASE, label: 'Dashboard', icon: 'dashboard', end: true },
-  { to: `${BASE}/appointments`, label: 'Appointments', icon: 'calendar', count: 'upcoming' },
-  { to: `${BASE}/results`, label: 'Results', icon: 'chart' },
-  { to: `${BASE}/estimates`, label: 'Estimates & Contracts', icon: 'doc' },
-  { to: `${BASE}/settings`, label: 'My Business', icon: 'store' },
-  { to: `${BASE}/feedback`, label: 'Feedback & Support', icon: 'chat' },
+  { to: BASE, label: 'Dashboard', k: 'nav_dashboard', tab: 'tab_home', icon: 'dashboard', end: true },
+  { to: `${BASE}/appointments`, label: 'Appointments', k: 'nav_appointments', tab: 'tab_appts', icon: 'calendar', count: 'upcoming' },
+  { to: `${BASE}/results`, label: 'Results', k: 'nav_results', tab: 'tab_results', icon: 'chart' },
+  { to: `${BASE}/estimates`, label: 'Estimates & Contracts', k: 'nav_estimates', icon: 'doc' },
+  { to: `${BASE}/settings`, label: 'My Business', k: 'nav_business', tab: 'tab_business', icon: 'store' },
+  { to: `${BASE}/feedback`, label: 'Support', k: 'nav_support', tab: 'tab_support', icon: 'headset' },
 ]
 // Service Operations (#452/#506): only when EvoSys switched it on for this
 // company, and only the screens this person's role may use (the server
@@ -48,6 +50,7 @@ const TITLES = Object.fromEntries([...NAV, ...OPS_NAV].map(n => [n.to, n.label])
 
 export default function AcquisitionShell() {
   useFont()
+  const { t, lang, setLang } = useT()
   const [status, setStatus] = useState(null)
   const [error, setError] = useState(null)
   const [counts, setCounts] = useState({})
@@ -100,44 +103,57 @@ export default function AcquisitionShell() {
   if (opsOnly && loc.pathname.replace(/\/$/, '') === BASE) return <Navigate to={`${BASE}/ops/jobs`} replace />
 
   const opsNav = ops?.ops_enabled && ops?.role ? OPS_NAV.filter(n => n.any.some(p => ops.perms.includes(p))) : []
-  const nav = opsOnly ? opsNav : [...NAV.slice(0, 2), ...opsNav.filter(n => !n.to.endsWith('/invoices')),
-                                   ...NAV.slice(2, 4), ...opsNav.filter(n => n.to.endsWith('/invoices')), ...NAV.slice(4)]
   const name = status?.profile?.business_name || status?.organization_name || 'Service Operations'
   const me = status?.me?.name || ''
-  const page = TITLES[loc.pathname] || (loc.pathname.includes('/ops/jobs/') ? 'Job' : 'Appointment')
+  const page = TITLES[loc.pathname] || (loc.pathname.endsWith('/setup') ? 'Setup' : loc.pathname.includes('/ops/jobs/') ? 'Job' : 'Appointment')
+  const logo = status?.logo_url
+  const main = opsOnly ? [] : NAV
   return (
     <Ctx.Provider value={{ status, name, ops, reloadStatus: loadStatus, reloadCounts: loadCounts }}>
-      <div className="aq aq-app aq-dark">
+      <div className="aq aq-app aq-dark aq-client">
         {open && <div className="aq-scrim" onClick={() => setOpen(false)} />}
         <aside className={`aq-side ${open ? 'open' : ''}`} aria-label="Client portal navigation">
-          <div className="aq-logo"><span className="aq-logo__mark"><Icon name="spark" size={16} /></span>
-            <span>EvoSys Pro<small>Client Portal</small></span></div>
-          <nav className="aq-nav" style={{ marginTop: 10 }}>
-            {nav.map(it => (
+          <div className="cp-brand">
+            {logo ? <img src={logo} alt="" className="cp-brand__logo" /> : <span className="cp-brand__mark"><Icon name="sparkle" size={26} /></span>}
+            <b>{name}</b><small>{t('powered')}</small>
+          </div>
+          <nav className="aq-nav">
+            {main.map(it => (
               <NavLink key={it.to} to={it.to} end={it.end}>
-                <Icon name={it.icon} />{it.label}
+                <Icon name={it.icon} />{t(it.k)}
                 {it.count && counts[it.count] > 0 && <span className="aq-nav__count">{counts[it.count]}</span>}
               </NavLink>
             ))}
-            {ops?.member_id && <NavLink to={`${BASE}/work`}><Icon name="clock" />My Jobs</NavLink>}
           </nav>
-          <div className="aq-help"><b>Need something?</b>Use “Request EvoSys Follow-Up” on any appointment, or Feedback &amp; Support.</div>
+          {(opsNav.length > 0 || ops?.member_id) && <div className="cp-more">
+            <div className="cp-more__title"><Icon name="tools" size={16} />{t('nav_more')}</div>
+            <nav className="aq-nav">
+              {opsNav.map(it => <NavLink key={it.to} to={it.to}><Icon name={it.icon} />{it.label}</NavLink>)}
+              {ops?.member_id && <NavLink to={`${BASE}/work`}><Icon name="clock" />My Jobs</NavLink>}
+            </nav></div>}
+          <div className="cp-powered">{t('powered')}</div>
         </aside>
         <div className="aq-main">
           <header className="aq-top">
             <button className="aq-btn aq-btn--sm aq-top__menu" onClick={() => setOpen(true)} aria-label="Open navigation"><Icon name="menu" /></button>
-            <nav className="hb-crumbs" aria-label="Breadcrumb"><a href="/workspaces">Program Access</a><span>›</span>
-              <span className="hb-crumb-mid">Client Portal</span><span className="hb-crumb-mid">›</span><b>{page}</b></nav>
+            <nav className="hb-crumbs" aria-label="Breadcrumb"><a href="/workspaces">Program Access</a><span>›</span><b>{page}</b></nav>
             <div className="aq-top__right">
+              <div className="cp-lang" role="group" aria-label="Language">
+                <button className={lang === 'en' ? 'on' : ''} onClick={() => setLang('en')}>English</button>
+                <button className={lang === 'es' ? 'on' : ''} onClick={() => setLang('es')}>Español</button>
+              </div>
               <ProgramSwitchLink />
               <span className="aq-me"><span className="aq-avatar">{initials(name)}</span>
-                <div><b>{name}</b><span>{me ? `${me.split(' ')[0]} · Client` : 'Client'}</span></div></span>
+                <div><b>{me || name}</b><span>{name}</span></div></span>
             </div>
           </header>
           {adminView && <div className="aq-adminview" role="status">
             <span>EvoSys admin view — <b>{adminView.orgName}</b>. You see what this company sees.</span>
             <button className="aq-btn aq-btn--sm" onClick={leaveAdminView}>Return to Acquisition Control Center</button></div>}
           <Suspense fallback={<Loading />}><Outlet /></Suspense>
+          {!opsOnly && <nav className="cp-tabs" aria-label="Client portal">
+            {NAV.filter(n => n.tab).map(it => <NavLink key={it.to} to={it.to} end={it.end}><Icon name={it.icon} size={20} /><span>{t(it.tab)}</span></NavLink>)}
+          </nav>}
         </div>
       </div>
     </Ctx.Provider>

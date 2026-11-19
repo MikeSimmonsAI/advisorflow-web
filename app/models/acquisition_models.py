@@ -66,6 +66,12 @@ class AcquisitionProfile(Base):
     offer_terms = Column(Text, nullable=True)            # what was agreed, in words; no billing is created
     # The EvoSys Sales opportunity this client was converted from (rapid onboarding).
     sales_opportunity_id = Column(String, nullable=True, index=True)
+    # Client-filled setup (2026-11-18): which setup steps the client has saved,
+    # when they finished, and when / who agreed to the offer EvoSys set.
+    setup_steps = Column(Text, nullable=True)            # JSON list of step keys
+    setup_completed_at = Column(DateTime, nullable=True)
+    offer_accepted_at = Column(DateTime, nullable=True)
+    offer_accepted_by = Column(String, nullable=True)    # user id
     appointment_minutes = Column(Integer, nullable=False, default=45)
     # #452 Phase 3: where and how EvoSys books this client's appointments.
     min_notice_hours = Column(Integer, nullable=True)       # earliest bookable time from now

@@ -9,6 +9,7 @@ import { api, fetchObjectUrl } from '../../api/client'
 import { Icon, Loading, errText, useFont, useLoad, useToast, when } from './ui'
 import './acquisition.css'
 import './hub.css'
+import './teal.css'
 
 export const WORK = '/program/acquisition/work'
 
