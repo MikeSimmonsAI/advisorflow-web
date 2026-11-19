@@ -66,6 +66,31 @@ def enable(db: Session, org: Organization, actor: User) -> dict:
             "paused": bool(p.paused)}
 
 
+# ── offer the client agrees to (2026-11-18) ────────────────────────────────
+OFFER_DAYS = {"free_pilot": 30, "growth_pilot_250": 30}
+
+
+def offer_configured(p) -> bool:
+    """EvoSys has set this company's offer (type chosen on purpose). A profile
+    that never had one shows "pending" - nothing is invented for it."""
+    return bool(p is not None and (getattr(p, "offer_type", None) or getattr(p, "offer_terms", None)))
+
+
+def offer_version(p) -> Optional[str]:
+    """Fingerprint of what the client agrees to. Any change to the offer type or
+    terms changes it, so the earlier agreement no longer counts."""
+    if not offer_configured(p):
+        return None
+    import hashlib
+    raw = "%s|%s" % (p.offer_type or C.FREE_PILOT, (p.offer_terms or "").strip())
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def offer_accepted(p) -> bool:
+    v = offer_version(p)
+    return bool(v and getattr(p, "offer_accepted_at", None) and getattr(p, "offer_accepted_version", None) == v)
+
+
 # ── serialization ──────────────────────────────────────────────────────────
 def profile_json(org: Organization, p: Optional[AcquisitionProfile], full: bool) -> Dict[str, Any]:
     out = {
@@ -101,8 +126,13 @@ def profile_json(org: Organization, p: Optional[AcquisitionProfile], full: bool)
         "configured": p is not None,
         "setup": {"steps": C.jload(getattr(p, "setup_steps", None), []) if p else [],
                   "completed_at": C.iso(getattr(p, "setup_completed_at", None)) if p else None,
-                  "offer_accepted_at": C.iso(getattr(p, "offer_accepted_at", None)) if p else None,
+                  "offer_configured": offer_configured(p),
+                  "offer_version": offer_version(p),
+                  # Counts only for the offer as it stands now; a changed offer needs a new "I agree".
+                  "offer_accepted_at": C.iso(getattr(p, "offer_accepted_at", None)) if offer_accepted(p) else None,
+                  "offer_previously_accepted_at": C.iso(getattr(p, "offer_accepted_at", None)) if p else None,
                   "never_contact_count": len(C.jload(p.exclusions, [])) if p else 0},
+        "offer_days": OFFER_DAYS.get((p.offer_type if p else None) or C.FREE_PILOT),
     }
     if full:
         out.update({
@@ -484,6 +514,10 @@ def client_outcome(db: Session, opp: AcquisitionOpportunity, actor: User, data: 
         raise HTTPException(422, "Unknown outcome")
     if opp.stage not in allowed_from:
         raise HTTPException(409, "%s can't be recorded from %s" % (C.STAGE_LABEL[to], C.STAGE_LABEL[opp.stage]))
+    if to == C.QUOTED and opp.stage == C.BOOKED:
+        # An estimate means the visit happened: record it, so the visit is
+        # counted and kept in the history before the estimate.
+        _move(db, opp, C.HELD, actor.id, None)
     if to == C.QUOTED:
         opp.quote_amount = C.money(data.get("quote_amount"))
         opp.monthly_value = C.money(data.get("monthly_value")) if data.get("monthly_value") not in (None, "") else opp.monthly_value
@@ -495,6 +529,9 @@ def client_outcome(db: Session, opp: AcquisitionOpportunity, actor: User, data: 
             opp.monthly_value = mv
         from app.services.acquisition.outcomes import apply_contract
         apply_contract(opp, data)
+        if opp.contract_type == "one_time":
+            # One-time work is total contract value, never monthly recurring value.
+            opp.monthly_value = None
     if to == C.LOST:
         opp.lost_reason = (data.get("reason") or "").strip()[:300] or None
     note = (data.get("note") or "").strip()[:2000]

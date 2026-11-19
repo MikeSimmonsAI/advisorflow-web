@@ -114,7 +114,7 @@ export default function AcquisitionShell() {
         {open && <div className="aq-scrim" onClick={() => setOpen(false)} />}
         <aside className={`aq-side ${open ? 'open' : ''}`} aria-label="Client portal navigation">
           <div className="cp-brand">
-            {logo ? <img src={logo} alt="" className="cp-brand__logo" /> : <span className="cp-brand__mark"><Icon name="sparkle" size={26} /></span>}
+            {logo ? <img src={logo} alt="" className="cp-brand__logo" /> : <span className="cp-initials cp-initials--lg" aria-hidden="true">{initials(name)}</span>}
             <b>{name}</b><small>{t('powered')}</small>
           </div>
           <nav className="aq-nav">

@@ -72,6 +72,9 @@ def config(db: Session, org: Organization) -> Dict[str, Any]:
         "reschedule_rules": getattr(p, "reschedule_rules", None),
         "confirmation_pref": getattr(p, "confirmation_pref", None) or "calendar_only",
         "ready": bool(booker and connected),
+        "provider": (("Google" if getattr(booker, "google_calendar_connected", False) else
+                      "Microsoft 365" if getattr(booker, "microsoft_365_connected", False) else None)
+                     if booker and connected else None),
         "status": ("ready" if booker and connected else "calendar_not_connected" if booker else "no_booking_user"),
         "status_label": ("Ready - EvoSys can book real times" if booker and connected else
                          "%s hasn't connected a Microsoft or Google calendar yet" % (booker.full_name or booker.email)

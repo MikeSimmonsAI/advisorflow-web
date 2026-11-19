@@ -72,6 +72,7 @@ class AcquisitionProfile(Base):
     setup_completed_at = Column(DateTime, nullable=True)
     offer_accepted_at = Column(DateTime, nullable=True)
     offer_accepted_by = Column(String, nullable=True)    # user id
+    offer_accepted_version = Column(String(64), nullable=True)  # hash of the offer agreed to
     appointment_minutes = Column(Integer, nullable=False, default=45)
     # #452 Phase 3: where and how EvoSys books this client's appointments.
     min_notice_hours = Column(Integer, nullable=True)       # earliest bookable time from now

@@ -1712,6 +1712,7 @@ COLUMNS_TO_ADD = [
     ("acquisition_profiles", "setup_completed_at", "TIMESTAMP"),
     ("acquisition_profiles", "offer_accepted_at", "TIMESTAMP"),
     ("acquisition_profiles", "offer_accepted_by", "VARCHAR"),
+    ("acquisition_profiles", "offer_accepted_version", "VARCHAR"),
     # #452 Phase 5: per-grant worker permissions (NULL = legacy full operator).
     ("acquisition_operators", "permissions", "TEXT"),
     # #452 Phase 3: client calendar / booking configuration.

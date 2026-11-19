@@ -297,6 +297,12 @@ def my_contexts(request: Request,
     arrangement where typing the URL fails too.
     """
     from app.services import workspace_access
+    try:
+        # An acquisition client's admin created without a membership (P0).
+        workspace_access.heal_acquisition_client_membership(db, current_user)
+    except Exception:
+        _log.warning("acquisition membership heal failed for user=%s", current_user.id, exc_info=True)
+        db.rollback()
     ctx = workspace_access.authorized_contexts(db, current_user,
                                                host_slug=_brand_domain_slug(request))
     from app.services.project_checklist import can_manage

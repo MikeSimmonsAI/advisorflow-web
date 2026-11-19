@@ -17,11 +17,20 @@ const ICON = { business: 'building', services: 'list', customers: 'users', area:
 const list = v => (Array.isArray(v) ? v : []).join(', ')
 const split = s => String(s || '').split(/[,\n]/).map(x => x.trim()).filter(Boolean)
 
+// Progress comes from what is actually saved, never from button clicks.
 export function stepDone(k, profile, cal) {
-  const s = profile?.setup || {}
+  const p = profile || {}
+  const s = p.setup || {}
+  const has = v => Array.isArray(v) ? v.length > 0 : !!(v && String(v).trim())
+  if (k === 'business') return has(p.business_name) && has(p.contact_phone) && has(p.contact_email) && has(p.mailing_address)
+  if (k === 'services') return has(p.services)
+  if (k === 'customers') return has(p.segments)
+  if (k === 'area') return (has(p.service_area) || has(p.service_zips)) && has(p.service_states)
+  // "None to add" is a real answer: the client saved this step on purpose.
+  if (k === 'never') return (s.never_contact_count || 0) > 0 || (s.steps || []).includes('never')
+  if (k === 'calendar') return !!cal?.ready
   if (k === 'offer') return !!s.offer_accepted_at
-  if (k === 'calendar') return !!cal?.ready || (s.steps || []).includes('calendar')
-  return (s.steps || []).includes(k)
+  return false
 }
 
 export function SetupCard({ profile, cal }) {
@@ -53,21 +62,23 @@ export function Setup() {
   const [fail, setFail] = useState(null)
   useEffect(() => {
     const p = profile || {}
-    setF({ business_name: p.business_name || '', owner_name: p.owner_name || '', contact_phone: p.contact_phone || '',
-           contact_email: p.contact_email || '', website: p.website || '', services: list(p.services),
-           segments: p.segments || [], service_area: list(p.service_area), service_zips: list(p.service_zips),
-           never_contact: '' })
+    // Keep what the person typed if a save fails; only fill from the record
+    // for fields they haven't touched yet.
+    setF(cur => ({ business_name: p.business_name || '', owner_name: p.owner_name || '', contact_phone: p.contact_phone || '',
+           contact_email: p.contact_email || '', website: p.website || '', mailing_address: p.mailing_address || '',
+           services: list(p.services), segments: p.segments || [], service_area: list(p.service_area),
+           service_zips: list(p.service_zips), service_states: list(p.service_states), never_contact: '', ...cur.__dirty }))
   }, [profile])
   if (!status) return <Loading />
   if (!status.can_manage) return <div className="aq-page cp"><div className="aq-note">{t('admin_only_setup')}</div></div>
-  const set = k => e => setF({ ...f, [k]: e.target.value })
+  const set = k => e => setF({ ...f, [k]: e.target.value, __dirty: { ...(f.__dirty || {}), [k]: e.target.value } })
   const go = k => { setStep(k); setFail(null); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   const nextOf = k => STEPS[STEPS.indexOf(k) + 1]
   const save = async (body) => {
     setBusy(true); setFail(null)
     try {
       const p = await api.put('/acquisition/profile', { ...body, setup_step: step })
-      setProfile(p); reloadStatus && reloadStatus()
+      setF(cur => ({ ...cur, __dirty: {} })); setProfile(p); reloadStatus && reloadStatus()
       const n = nextOf(step); if (n) go(n)
     } catch (e) { setFail(errText(e)) } finally { setBusy(false) }
   }
@@ -79,7 +90,15 @@ export function Setup() {
     setBusy(true); setFail(null)
     try { setProfile(await api.post('/acquisition/setup/complete', {})); reloadStatus && reloadStatus() } catch (e) { setFail(errText(e)) } finally { setBusy(false) }
   }
-  const connect = async path => { try { const r = await api.get(path); window.location.href = r.authorization_url } catch (e) { setFail(errText(e)) } }
+  // The client's own calendar: if EvoSys hasn't chosen one, appointments go to
+  // theirs. "Connected" is shown only when the server says it is.
+  const connectMine = async path => {
+    setBusy(true); setFail(null)
+    try {
+      if (!cal?.booking_user) await api.put('/acquisition/profile', { use_my_calendar: true })
+      const r = await api.get(path); window.location.href = r.authorization_url
+    } catch (e) { setFail(errText(e)); setBusy(false) }
+  }
   const segs = status.segments || []
   const allDone = STEPS.every(k => stepDone(k, profile, cal))
   const completed = !!profile?.setup?.completed_at
@@ -104,7 +123,9 @@ export function Setup() {
               <div className="cp-two"><Field l={t('f_phone')}><input className="cp-input" inputMode="tel" value={f.contact_phone || ''} onChange={set('contact_phone')} /></Field>
                 <Field l={t('f_email')}><input className="cp-input" type="email" value={f.contact_email || ''} onChange={set('contact_email')} /></Field></div>
               <Field l={t('f_website')}><input className="cp-input" value={f.website || ''} onChange={set('website')} /></Field>
-              <Save t={t} busy={busy} disabled={!f.business_name} onClick={() => save({ business_name: f.business_name, owner_name: f.owner_name, contact_phone: f.contact_phone, contact_email: f.contact_email, website: f.website })} />
+              <Field l={t('f_mailing')}><input className="cp-input" value={f.mailing_address || ''} onChange={set('mailing_address')} placeholder={t('f_mailing_ph')} /></Field>
+              <small className="hb-muted">{t('f_mailing_help')}</small>
+              <Save t={t} busy={busy} disabled={!f.business_name || !f.contact_phone || !f.contact_email || !f.mailing_address} onClick={() => save({ business_name: f.business_name, owner_name: f.owner_name, contact_phone: f.contact_phone, contact_email: f.contact_email, website: f.website, mailing_address: f.mailing_address })} />
             </>}
             {step === 'services' && <>
               <p className="hb-muted">{t('f_services_help')}</p>
@@ -121,9 +142,10 @@ export function Setup() {
               <Save t={t} busy={busy} disabled={!(f.segments || []).length} onClick={() => save({ segments: f.segments })} />
             </>}
             {step === 'area' && <>
-              <Field l={t('f_cities')}><input className="cp-input" value={f.service_area || ''} onChange={set('service_area')} placeholder="Memphis, Germantown, Cordova" /></Field>
-              <Field l={t('f_zips')}><input className="cp-input" value={f.service_zips || ''} onChange={set('service_zips')} placeholder="38103, 38117" /></Field>
-              <Save t={t} busy={busy} disabled={!split(f.service_area).length && !split(f.service_zips).length} onClick={() => save({ service_area: split(f.service_area), service_zips: split(f.service_zips) })} />
+              <Field l={t('f_cities')}><input className="cp-input" value={f.service_area || ''} onChange={set('service_area')} placeholder={t('f_cities_ph')} /></Field>
+              <div className="cp-two"><Field l={t('f_states')}><input className="cp-input" value={f.service_states || ''} onChange={set('service_states')} placeholder="TN" /></Field>
+                <Field l={t('f_zips')}><input className="cp-input" value={f.service_zips || ''} onChange={set('service_zips')} placeholder="38103, 38117" /></Field></div>
+              <Save t={t} busy={busy} disabled={(!split(f.service_area).length && !split(f.service_zips).length) || !split(f.service_states).length} onClick={() => save({ service_area: split(f.service_area), service_zips: split(f.service_zips), service_states: split(f.service_states) })} />
             </>}
             {step === 'never' && <>
               <p className="hb-muted">{t('f_never_help')}</p>
@@ -133,31 +155,34 @@ export function Setup() {
             </>}
             {step === 'calendar' && <>
               <p className="hb-muted">{t('f_cal_help')}</p>
-              {cal?.ready ? <div className="cp-done"><Icon name="check" size={18} />{t('cal_connected')}</div> : <>
-                {cal?.is_my_calendar ? <div className="cp-actions">
-                  <button className="cp-btn" onClick={() => connect('/calendar/connect')}>{t('f_cal_google')}</button>
-                  <button className="cp-btn cp-btn--ghost" onClick={() => connect('/microsoft/connect')}>{t('f_cal_ms')}</button></div>
-                  : <p className="hb-muted">{t('f_cal_evosys')}</p>}
-                <Save t={t} busy={busy} label={t('f_cal_later')} ghost onClick={() => save({})} />
-              </>}
+              {cal?.ready && <div className="cp-done"><Icon name="check" size={18} />{t('cal_connected')}{cal.provider ? ' · ' + cal.provider : ''}</div>}
+              {!cal?.ready && cal?.booking_user && !cal?.is_my_calendar && <p className="hb-muted">{t('f_cal_other', { name: cal.booking_user.name })}</p>}
+              {(!cal?.booking_user || cal?.is_my_calendar) && <div className="cp-actions">
+                <button className="cp-btn" disabled={busy} onClick={() => connectMine('/calendar/connect')}>{cal?.ready ? t('f_cal_reconnect_g') : t('f_cal_google')}</button>
+                <button className="cp-btn cp-btn--ghost" disabled={busy} onClick={() => connectMine('/microsoft/connect')}>{cal?.ready ? t('f_cal_reconnect_m') : t('f_cal_ms')}</button></div>}
+              {!cal?.ready && <p className="hb-muted">{t('f_cal_after')}</p>}
+              {cal?.ready && nextOf(step) && <button className="cp-btn" onClick={() => go(nextOf(step))}>{t('save_continue')}</button>}
             </>}
             {step === 'offer' && <>
-              <div className="cp-offer">
-                <b>{t('free3')}</b>
-                <p>{t('offer_text')}</p>
-                {profile?.offer_terms && <p className="hb-muted">{profile.offer_terms}</p>}
-                <small className="hb-muted">{t('offer_readonly')}</small>
-              </div>
-              {profile?.setup?.offer_accepted_at
-                ? <div className="cp-done"><Icon name="check" size={18} />{t('offer_agreed', { d: new Date(profile.setup.offer_accepted_at).toLocaleDateString() })}</div>
-                : <button className="cp-btn cp-btn--block" disabled={busy} onClick={accept}>{t('offer_agree')}</button>}
+              {!profile?.setup?.offer_configured ? <div className="cp-offer"><b>{t('offer_pending')}</b><p>{t('offer_pending_text')}</p></div> : <>
+                <div className="cp-offer">
+                  <b>{status.offer_label || t('free3')}</b>
+                  {profile?.offer_days ? <p>{t('offer_days', { d: profile.offer_days })}</p> : null}
+                  {profile?.offer_terms ? <p>{profile.offer_terms}</p> : <p className="hb-muted">{t('offer_no_terms')}</p>}
+                  <small className="hb-muted">{t('offer_readonly')}</small>
+                </div>
+                {profile?.setup?.offer_accepted_at
+                  ? <div className="cp-done"><Icon name="check" size={18} />{t('offer_agreed', { d: new Date(profile.setup.offer_accepted_at).toLocaleDateString() })}</div>
+                  : <>{profile?.setup?.offer_previously_accepted_at && <div className="aq-note aq-note--warn">{t('offer_changed')}</div>}
+                    <button className="cp-btn cp-btn--block" disabled={busy} onClick={accept}>{t('offer_agree')}</button></>}
+              </>}
             </>}
             {fail && <div className="aq-err">{fail}</div>}
           </div>
         </div>
         {!completed && <div className="cp-finish">
           <span>{allDone ? t('setup_all_done') : t('setup_left', { n: STEPS.length - doneCount })}</span>
-          <button className="cp-btn" disabled={busy || !profile?.setup?.offer_accepted_at} onClick={finish}>{t('setup_finish')}</button></div>}
+          <button className="cp-btn" disabled={busy || !allDone} onClick={finish}>{t('setup_finish')}</button></div>}
       </div>
     </div>
   )

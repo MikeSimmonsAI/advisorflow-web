@@ -1149,6 +1149,42 @@ def _is_evosys_operator(db: Session, user_id: str, organization_id: str) -> bool
     return user_id in plan_limits._evosys_operator_ids(db, {user_id})
 
 
+def heal_acquisition_client_membership(db: Session, user: Optional[User]) -> bool:
+    """A SERVICE-CLIENT ADMIN WITHOUT A MEMBERSHIP (P0, 2026-11-18).
+
+    The acquisition client's administrator login was created by
+    onboarding.invite with `users.organization_id` only. The estate-wide
+    legacy backfill had already completed, so no membership was ever minted:
+    the login had no workspace, the app fell back to the general tenant home
+    and drew the cleaning dashboard (Prospects, VA Activity, Reports) - screens
+    the server refuses for this login anyway.
+
+    This writes exactly what the login's own column says, for ONE kind of
+    login only: a non-internal user whose home organization is an acquisition
+    client. Same rules as the legacy backfill - a valid customer workspace
+    only, never a duplicate, and NEVER resurrecting a membership somebody
+    revoked (any existing row, active or not, means "leave it alone").
+    """
+    if user is None or getattr(user, "role", None) in ("god_admin", "super_admin"):
+        return False
+    home = getattr(user, "organization_id", None)
+    if not home or not is_valid_customer_workspace(db, home):
+        return False
+    exists = db.query(Membership.id).filter(Membership.user_id == user.id,
+                                            Membership.scope_type == SCOPE_CUSTOMER_ORG,
+                                            Membership.scope_id == home).first()
+    if exists is not None:
+        return False
+    org = db.query(Organization).filter(Organization.id == home).first()
+    if org is None or not _acquisition_enabled(org):
+        return False
+    role = getattr(user, "role", None) if getattr(user, "role", None) in WORKSPACE_ROLES else "org_admin"
+    grant_workspace_membership(db, user.id, home, role=role, granted_by=None, commit=True, check_capacity=False)
+    invalidate_workspace_memberships(user)
+    _log.info("acquisition client membership HEALED user=%s org=%s role=%s", user.id, home, role)
+    return True
+
+
 def grant_workspace_membership(db: Session, user_id: str, organization_id: str,
                                role: str = DEFAULT_WORKSPACE_ROLE,
                                granted_by: Optional[str] = None,

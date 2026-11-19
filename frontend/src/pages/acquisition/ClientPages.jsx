@@ -8,15 +8,19 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import { BASE, useAcq } from './AcquisitionShell'
 import { BusinessForm, Readiness } from './BusinessForm'
-import { Dot, Empty, Feed, Icon, Loading, PageHeader, Stat, Toolbar, clock, errText, money, useLoad, useToast, when } from './ui'
+import { Dot, Empty, Feed, Icon, Loading, PageHeader, Stat, Toolbar, clock, errText, initials, money, useLoad, useToast, when } from './ui'
+import { ReportResult, fmtWhen } from './ClientHome'
+import { useT } from './portalText'
 
 const STATUS_TONE = { appointment_booked: 'blue', appointment_held: 'green', no_show: 'amber', quote_issued: 'violet',
                       won: 'green', lost: 'gray' }
 const STATUS_LABEL = { appointment_booked: 'Upcoming', appointment_held: 'Completed', no_show: 'No-show',
                        quote_issued: 'Estimate sent', won: 'Contract won', lost: 'Not moving forward' }
+const isCancelled = x => x.stage === 'lost' && /^they cancelled/i.test(x.lost_reason || '')
 const PERIODS = [['7d', 'Last 7 days'], ['month', 'This month'], ['last_month', 'Last month'], ['90d', 'Last 90 days'], ['all', 'All time']]
 
 function Status({ x }) {
+  if (isCancelled(x)) return <Dot tone="amber">Cancelled</Dot>
   return <Dot tone={STATUS_TONE[x.stage] || 'gray'}>{STATUS_LABEL[x.stage] || x.stage_label}</Dot>
 }
 
@@ -27,10 +31,10 @@ function ApptTable({ items, empty }) {
     <div className="hb-mcards">{items.map(x => (
       <article className="hb-mcard" key={x.id}>
         <div className="hb-mcard__top"><b>{x.business_name}</b><Status x={x} /></div>
-        <div className="hb-muted">{x.segment_label || 'Commercial cleaning'} · {x.appointment?.time ? `${when(x.appointment.time)}` : 'Time to be confirmed'}</div>
+        <div className="hb-muted">{x.segment_label || 'Commercial cleaning'} · {x.appointment?.time ? fmtWhen(x.appointment.time) : 'Time to be confirmed'}</div>
         <div className="hb-muted">{[x.contact_name, x.phone].filter(Boolean).join(' · ') || 'Contact shared at booking'}</div>
         <div className="hb-mcard__foot"><span className="hb-muted">{x.city || ''}</span>
-          <Link className="aq-btn aq-btn--sm aq-btn--primary" to={`${BASE}/appointments/${x.id}`}>Open</Link></div>
+          <Link className="aq-btn aq-btn--sm aq-btn--primary" to={`${BASE}/appointments/${x.id}`}>Open · Update result</Link></div>
       </article>))}</div>
     <div className="hb-table-wrap hb-desk"><table className="aq-table"><thead><tr>
       <th>Business</th><th>Type</th><th>Date &amp; time</th><th>Contact</th><th>Status</th></tr></thead>
@@ -38,7 +42,7 @@ function ApptTable({ items, empty }) {
         <tr key={x.id} className="hb-click" onClick={() => nav(`${BASE}/appointments/${x.id}`)}>
           <td><b>{x.business_name}</b>{x.city && <div className="hb-muted">{x.city}</div>}</td>
           <td>{x.segment_label || '—'}</td>
-          <td>{x.appointment?.time ? <>{new Date(x.appointment.time).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}<div className="hb-muted">{clock(x.appointment.time)}</div></> : '—'}</td>
+          <td>{x.appointment?.time ? fmtWhen(x.appointment.time) : '—'}</td>
           <td>{x.contact_name || '—'}{x.phone && <div className="hb-muted">{x.phone}</div>}</td>
           <td><Status x={x} /></td></tr>))}</tbody></table></div>
   </>)
@@ -102,19 +106,20 @@ export function Appointments() {
   const all = d?.all || []
   const lists = {
     upcoming: d?.upcoming || [],
-    completed: all.filter(x => ['appointment_held', 'quote_issued', 'won', 'lost'].includes(x.stage)),
+    completed: all.filter(x => ['appointment_held', 'quote_issued', 'won', 'lost'].includes(x.stage) && !isCancelled(x)),
     no_show: all.filter(x => x.stage === 'no_show'),
+    cancelled: all.filter(isCancelled),
     all,
   }
   return (
     <div className="aq-page">
       <PageHeader eyebrow="Client Portal" title="Appointments" sub="Every appointment EvoSys booked for you, and where each one stands. Each is also on your connected calendar." />
-      {err && <div className="aq-err">{errText(err)}</div>}
+      {err && <div className="aq-err" role="alert">This list couldn’t load. <button className="aq-btn aq-btn--sm" onClick={() => window.location.reload()}>Try again</button></div>}
       <div className="aq-tabs">
-        {[['upcoming', `Upcoming (${lists.upcoming.length})`], ['completed', `Completed (${lists.completed.length})`], ['no_show', `No-shows (${lists.no_show.length})`], ['all', `All (${all.length})`]].map(([k, l]) => (
+        {[['upcoming', `Upcoming (${lists.upcoming.length})`], ['completed', `Completed (${lists.completed.length})`], ['no_show', `No-shows (${lists.no_show.length})`], ['cancelled', `Cancelled (${lists.cancelled.length})`], ['all', `All (${all.length})`]].map(([k, l]) => (
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>))}
       </div>
-      <section className="aq-card">{!d ? <Loading /> : <ApptTable items={lists[tab]} empty="Nothing here yet" />}</section>
+      <section className="aq-card">{err ? null : !d ? <Loading /> : <ApptTable items={lists[tab]} empty="Nothing here yet" />}</section>
     </div>
   )
 }
@@ -131,6 +136,7 @@ const NEXT = {
 export function Prospect() {
   const { id } = useParams()
   const { status, reloadCounts } = useAcq()
+  const { t } = useT()
   const [x, err, reload] = useLoad(`/acquisition/prospects/${id}`)
   const [fu] = useLoad('/acquisition/followups')
   const [pick, setPick] = useState(null)
@@ -167,35 +173,21 @@ export function Prospect() {
           <Feed items={(x.history || []).map(h => ({ icon: h.kind === 'stage' ? 'check' : 'clock', tone: h.kind === 'stage' ? 'green' : 'blue', title: h.label, sub: h.note || '', at: h.at }))} empty="No history yet." />
         </section>
         <div>
-          <section className="aq-card" id="outcome" style={{ marginBottom: 14 }}>
-            <h2>Report the outcome</h2>
-            <dl className="aq-dl">
-              <dt>Estimate</dt><dd>{money(x.quote_amount)}</dd>
-              <dt>Monthly value</dt><dd>{money(x.monthly_value)}{x.contract?.confirmed ? ' · confirmed by EvoSys' : x.stage === 'won' ? ' · reported, awaiting EvoSys confirmation' : ''}</dd>
-              {x.contract?.contract_type && <><dt>Contract</dt><dd>{x.contract.contract_type.replace('_', ' ')}{x.contract.service_frequency ? ` · ${x.contract.service_frequency}` : ''}{x.contract.contract_start ? ` · starts ${new Date(x.contract.contract_start).toLocaleDateString()}` : ''}</dd></>}
-              {x.lost_reason && <><dt>Why not</dt><dd>{x.lost_reason}</dd></>}
-              {x.outcome_note && <><dt>Your notes</dt><dd>{x.outcome_note}</dd></>}
-            </dl>
-            {!status.can_manage ? <p className="hb-muted">Your company administrator records results.</p>
-              : choices.length ? <>
-                <div className="aq-actions">{choices.map(([k, l]) => <button key={k} className={`aq-btn ${pick === k ? 'aq-btn--primary' : ''}`} onClick={() => { setPick(k); setFail(null) }}>{l}</button>)}</div>
-                {pick && <div style={{ marginTop: 12 }}>
-                  {pick === 'quote_issued' && <div className="aq-grid aq-two"><div className="aq-field"><label htmlFor="o-q">Estimate amount ($)</label><input id="o-q" inputMode="decimal" value={form.quote_amount || ''} onChange={set('quote_amount')} /></div>
-                    <div className="aq-field"><label htmlFor="o-m">Monthly equivalent ($)</label><input id="o-m" inputMode="decimal" value={form.monthly_value || ''} onChange={set('monthly_value')} /></div></div>}
-                  {pick === 'won' && <div className="aq-grid aq-two">
-                    <div className="aq-field"><label htmlFor="o-ct">Contract type</label><select id="o-ct" value={form.contract_type || ''} onChange={set('contract_type')}><option value="">Choose…</option><option value="recurring">Recurring</option><option value="one_time">One-time</option><option value="trial">Trial</option></select></div>
-                    <div className="aq-field"><label htmlFor="o-f">Service frequency</label><input id="o-f" placeholder="e.g. 3x weekly" value={form.service_frequency || ''} onChange={set('service_frequency')} /></div>
-                    <div className="aq-field"><label htmlFor="o-v">Total contract value ($)</label><input id="o-v" inputMode="decimal" value={form.contract_value || ''} onChange={set('contract_value')} /></div>
-                    <div className="aq-field"><label htmlFor="o-mv">Monthly recurring equivalent ($)</label><input id="o-mv" inputMode="decimal" value={form.monthly_value || ''} onChange={set('monthly_value')} /></div>
-                    <div className="aq-field"><label htmlFor="o-s">Start date</label><input id="o-s" type="date" value={form.contract_start || ''} onChange={set('contract_start')} /></div></div>}
-                  {pick === 'lost' && <div className="aq-field"><label htmlFor="o-r">Why not? (optional)</label><input id="o-r" value={form.reason || ''} onChange={set('reason')} /></div>}
-                  <div className="aq-field"><label htmlFor="o-n">Private notes (optional)</label><textarea id="o-n" value={form.note || ''} onChange={set('note')} /></div>
-                  <button className="aq-btn aq-btn--primary" disabled={busy} onClick={saveOutcome}>{busy ? 'Saving…' : 'Save result'}</button>
-                </div>}</>
-                : <p className="hb-muted">This appointment is closed. Need something? Ask EvoSys below.</p>}
-          </section>
+          <div id="outcome" style={{ marginBottom: 14 }}>
+            <ReportResult items={[x]} single t={t} canManage={status.can_manage} onSaved={async () => { await reload(); reloadCounts() }} />
+            {(x.quote_amount || x.monthly_value || x.contract?.contract_type || x.lost_reason || x.outcome_note) && <section className="aq-card" style={{ marginTop: 14 }}>
+              <h2>Reported so far</h2>
+              <dl className="aq-dl">
+                {x.quote_amount != null && <><dt>Estimate</dt><dd>{money(x.quote_amount)}</dd></>}
+                {x.contract?.contract_type && <><dt>Contract</dt><dd>{x.contract.contract_type.replace('_', '-')}{x.contract.contract_start ? ` · starts ${new Date(x.contract.contract_start).toLocaleDateString()}` : ''}</dd></>}
+                {x.contract?.contract_type === 'one_time' && x.contract?.contract_value != null && <><dt>Total value</dt><dd>{money(x.contract.contract_value)}</dd></>}
+                {x.monthly_value != null && <><dt>Monthly value</dt><dd>{money(x.monthly_value)}{x.contract?.confirmed ? ' · confirmed by EvoSys' : x.stage === 'won' ? ' · reported, awaiting EvoSys confirmation' : ''}</dd></>}
+                {x.lost_reason && <><dt>Why not</dt><dd>{x.lost_reason}</dd></>}
+                {x.outcome_note && <><dt>Your notes</dt><dd style={{ whiteSpace: 'pre-wrap' }}>{x.outcome_note}</dd></>}
+              </dl></section>}
+          </div>
           <section className="aq-card" id="followup">
-            <h2>Request EvoSys follow-up</h2>
+            <h2>Ask EvoSys to reschedule or follow up</h2>
             <p className="hb-muted">Can’t make it, need the business to answer, or want a second visit? EvoSys handles the conversation — nothing is sent automatically.</p>
             {(x.open_followups || []).map(f => <div className="aq-note" key={f.id}><b>{f.reason_label}</b> — {f.status === 'open' ? 'waiting for EvoSys' : 'EvoSys is on it'}</div>)}
             <div className="aq-field"><label htmlFor="f-r">What do you need?</label><select id="f-r" value={req.reason} onChange={e => setReq({ ...req, reason: e.target.value })}>
@@ -219,7 +211,8 @@ export function Results() {
   const won = (list?.all || []).filter(x => x.stage === 'won')
   return (
     <div className="aq-page">
-      <PageHeader eyebrow="Client Portal" title="Results" sub="What EvoSys delivered and what came of it. Each number is a different step, counted from your own records." />
+      <PageHeader eyebrow="Client Portal" title="Results" sub="What EvoSys delivered and what came of it. Each number is a different step, counted from your own records. Monthly value is contract value, not money collected."
+        actions={<Link className="aq-btn" to={`${BASE}/estimates`}><Icon name="doc" size={16} />Estimates &amp; Contracts →</Link>} />
       <Toolbar><div className="aq-tabs" style={{ marginBottom: 0 }}>{PERIODS.map(([k, l]) => <button key={k} className={period === k ? 'on' : ''} onClick={() => setPeriod(k)}>{l}</button>)}</div></Toolbar>
       {err && <div className="aq-err">{errText(err)}</div>}
       {!r ? <Loading /> : <>
@@ -301,18 +294,62 @@ export function Settings() {
   const { status, reloadStatus } = useAcq()
   const [p, err, reload] = useLoad('/acquisition/profile')
   const [toast, say] = useToast()
-  if (err) return <div className="aq-page"><div className="aq-err">{errText(err)}</div></div>
+  if (err) return <div className="aq-page"><div className="aq-err" role="alert">My Business couldn’t load. <button className="aq-btn aq-btn--sm" onClick={reload}>Try again</button></div></div>
   if (!p) return <div className="aq-page"><Loading /></div>
+  const s = p.setup || {}
   return (
     <div className="aq-page">{toast}
-      <PageHeader eyebrow="Client Portal" title="My Business" sub="How EvoSys describes you and which businesses we book for you. Only what’s true today — we never claim anything you haven’t confirmed." />
+      <PageHeader eyebrow="My Business" title={p.business_name || 'My Business'} sub="How EvoSys describes you and which businesses we book for you. Only what’s true today — we never claim anything you haven’t confirmed."
+        actions={!s.completed_at && status.can_manage ? <Link className="aq-btn aq-btn--primary" to={`${BASE}/setup`}>Finish your setup</Link> : null} />
+      <div className="aq-grid aq-two" style={{ marginBottom: 14 }}>
+        <LogoCard name={p.business_name} logo={status.logo_url} canEdit={status.can_manage} onChange={reloadStatus} say={say} />
+        <section className="aq-card"><h2>Your offer</h2>
+          {!s.offer_configured ? <p className="hb-muted">EvoSys hasn’t set your offer yet. It will appear here for you to review.</p> : <>
+            <dl className="aq-dl"><dt>Offer</dt><dd>{status.offer_label}</dd>
+              {p.offer_days ? <><dt>Length</dt><dd>{p.offer_days} days</dd></> : null}
+              <dt>Terms</dt><dd>{p.offer_terms || 'No extra terms'}</dd>
+              <dt>Agreed</dt><dd>{s.offer_accepted_at ? new Date(s.offer_accepted_at).toLocaleString() : s.offer_previously_accepted_at ? 'Offer changed — please review and agree again' : 'Not yet'}</dd></dl>
+            <p className="hb-muted" style={{ marginBottom: 0 }}>Set by EvoSys and read-only here. Ask EvoSys if anything looks wrong.</p>
+            {!s.offer_accepted_at && status.can_manage && <Link className="aq-btn aq-btn--primary" style={{ marginTop: 10 }} to={`${BASE}/setup?step=offer`}>Review and agree</Link>}</>}
+        </section>
+      </div>
       <CalendarPanel />
-      <Readiness r={p.readiness} />
       <div style={{ marginTop: 14 }}>
         <BusinessForm profile={p} segments={status.segments} canEdit={status.can_manage}
           onSave={async body => { await api.put('/acquisition/profile', body); say('Saved'); await reload(); reloadStatus() }} />
       </div>
     </div>
+  )
+}
+
+function LogoCard({ name, logo, canEdit, onChange, say }) {
+  const [busy, setBusy] = useState(false)
+  const [fail, setFail] = useState(null)
+  const pick = e => {
+    const file = e.target.files?.[0]; if (!file) return
+    if (file.size > 5 * 1024 * 1024) { setFail('Please choose an image under 5 MB.'); return }
+    const r = new FileReader()
+    r.onload = async () => {
+      setBusy(true); setFail(null)
+      try { await api.put('/acquisition/logo', { image_base64: String(r.result) }); say('Logo saved'); onChange && onChange() }
+      catch (err) { setFail(errText(err)) } finally { setBusy(false) }
+    }
+    r.readAsDataURL(file)
+  }
+  const remove = async () => { setBusy(true); try { await api.delete('/acquisition/logo'); onChange && onChange() } catch (err) { setFail(errText(err)) } finally { setBusy(false) } }
+  return (
+    <section className="aq-card"><h2>Your logo</h2>
+      <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+        {logo ? <img src={logo} alt="" style={{ maxWidth: 160, maxHeight: 70, objectFit: 'contain' }} />
+          : <span className="cp-initials cp-initials--lg">{initials(name || '')}</span>}
+        <div className="hb-muted" style={{ flex: '1 1 200px' }}>Shown at the top of your portal. PNG or JPG, under 5 MB.</div>
+      </div>
+      {canEdit && <div className="aq-actions">
+        <label className="aq-btn aq-btn--primary" style={{ cursor: 'pointer' }}>{busy ? 'Saving…' : logo ? 'Replace logo' : 'Upload logo'}
+          <input type="file" accept="image/png,image/jpeg,image/webp" onChange={pick} style={{ display: 'none' }} disabled={busy} /></label>
+        {logo && <button className="aq-btn" disabled={busy} onClick={remove}>Remove</button>}</div>}
+      {fail && <div className="aq-err">{fail}</div>}
+    </section>
   )
 }
 
@@ -331,10 +368,10 @@ export function Feedback() {
   const ask = () => run(async () => { const r = await api.post('/acquisition/followups', req); setReq({ reason: '', note: '' }); say(r.message); reloadFu() })
   return (
     <div className="aq-page">{toast}
-      <PageHeader eyebrow="Client Portal" title="Feedback & Support" sub="Tell EvoSys what’s working, or ask for help. Requests become a task for the EvoSys team — nothing is sent to a business automatically." />
+      <PageHeader eyebrow="Support" title="Message EvoSys" sub="Ask for help or tell us what’s working. Each request goes to the EvoSys team and shows its status here — this isn’t live chat, and nothing is sent to a business automatically." />
       {fail && <div className="aq-err">{fail}</div>}
       <div className="aq-grid aq-two">
-        <section className="aq-card"><h2>Ask EvoSys</h2>
+        <section className="aq-card"><h2>Ask EvoSys for help</h2>
           <div className="aq-field"><label htmlFor="s-r">What do you need?</label><select id="s-r" value={req.reason} onChange={e => setReq({ ...req, reason: e.target.value })}>
             <option value="">Choose…</option>{(fu?.reasons || []).map(r => <option key={r.key} value={r.key}>{r.label}</option>)}</select></div>
           <div className="aq-field"><label htmlFor="s-n">Details</label><textarea id="s-n" value={req.note} onChange={e => setReq({ ...req, note: e.target.value })} /></div>
