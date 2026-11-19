@@ -271,3 +271,9 @@
   .cg-table td:not([data-label]) { padding-left: 0; }
   .cg-table td:not([data-label])::before { display: none; }
 }
+/* very narrow phones: the brand mark stays, the words give way to the buttons */
+@media (max-width: 420px) {
+  .cg-top { padding: 8px 12px; }
+  .cg-brand-name, .cg-bar { display: none; }
+  .cg-toplink { padding: 6px 9px; font-size: 12.5px; }
+}
