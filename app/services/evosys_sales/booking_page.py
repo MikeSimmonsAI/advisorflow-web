@@ -136,7 +136,7 @@ def book(db: Session, opp: Opportunity, starts_at: datetime) -> dict:
         return {"status": "taken", "message": "That time was just taken. Please pick another one."}
     mt = _meeting_type(db, opp.brand_sales_org_id, MEETING_KEY)
     try:
-        create_appointment(BookIn(starts_at=when, meeting_type_id=mt.id if mt else None,
+        made = create_appointment(BookIn(starts_at=when, meeting_type_id=mt.id if mt else None,
                                   duration_minutes=None if mt else 30, opportunity_id=opp.id,
                                   brand_sales_org_id=opp.brand_sales_org_id,
                                   title="Intro call - %s" % (opp.company_name or ""),
@@ -155,17 +155,51 @@ def book(db: Session, opp: Opportunity, starts_at: datetime) -> dict:
                             summary="Booked their intro call from the booking link",
                             detail=when.isoformat() + "Z", occurred_at=datetime.utcnow()))
     db.commit()
-    _after_booking(db, opp, when)
+    appt_id = made.get("id") if isinstance(made, dict) else getattr(made, "id", None)
+    _after_booking(db, opp, when, appt_id)
     return {"status": "booked", "already_booked": False, "starts_at": when.isoformat() + "Z"}
 
 
-def _ct(when: datetime) -> str:
+def _ct(when: datetime, spanish: bool = False) -> str:
     from zoneinfo import ZoneInfo
     t = when.replace(tzinfo=__import__("datetime").timezone.utc).astimezone(ZoneInfo("America/Chicago"))
+    if spanish:
+        dias = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+        return "el %s %d a las %s (hora del centro)" % (dias[t.weekday()], t.day, t.strftime("%-I:%M %p"))
     return t.strftime("%a %b %-d at %-I:%M %p") + " Central"
 
 
-def _after_booking(db: Session, opp: Opportunity, when: datetime) -> None:
+def zoom_link(db: Session, appt_id: Optional[str]) -> Optional[str]:
+    """The Zoom join link the scheduler already created for this call (the
+    join link only - never the host link)."""
+    if not appt_id:
+        return None
+    from app.models.meeting_models import AppointmentMeeting
+    m = (db.query(AppointmentMeeting).filter(AppointmentMeeting.appointment_id == appt_id)
+         .order_by(AppointmentMeeting.created_at.desc()).first())
+    return m.join_url if m is not None and m.join_url and m.status not in ("cancelled", "failed") else None
+
+
+def is_spanish(db: Session, opp: Opportunity) -> bool:
+    """The business talks to us in Spanish: their last text, or our last
+    campaign text to them, is Spanish."""
+    from app.models.evosys_sales_models import EvoSysOutreachMessage
+    from app.services.evosys_sales.ai import looks_spanish
+    last_in = (db.query(EvoSysOutreachMessage).filter(EvoSysOutreachMessage.opportunity_id == opp.id,
+                                                      EvoSysOutreachMessage.channel == "text",
+                                                      EvoSysOutreachMessage.direction == "in")
+               .order_by(EvoSysOutreachMessage.created_at.desc()).first())
+    if last_in is not None and len((last_in.body or "").split()) >= 3:
+        return looks_spanish(last_in.body)
+    first_out = (db.query(EvoSysOutreachMessage).filter(EvoSysOutreachMessage.opportunity_id == opp.id,
+                                                        EvoSysOutreachMessage.channel == "text",
+                                                        EvoSysOutreachMessage.direction == "out",
+                                                        EvoSysOutreachMessage.step_no.isnot(None))
+                 .order_by(EvoSysOutreachMessage.created_at).first())
+    return bool(first_out is not None and looks_spanish(first_out.body))
+
+
+def _after_booking(db: Session, opp: Opportunity, when: datetime, appt_id: Optional[str] = None) -> None:
     """Confirmation text to the business; booking alert to the owner."""
     from app.models.evosys_sales_models import EvoSysOutreachMessage
     from app.services.evosys_sales import outreach as O
@@ -173,8 +207,15 @@ def _after_booking(db: Session, opp: Opportunity, when: datetime) -> None:
     s = O.get_settings(db, opp.brand_sales_org_id)
     to = O.e164(opp.phone)
     if to and O.e164(s.sms_from_number):
-        body = ("You're booked! Mike with EvoSys Pro will call you %s to talk about your 3 free appointments. "
-                "Need a different time? Just text back." % _ct(when))
+        es = is_spanish(db, opp)
+        z = zoom_link(db, appt_id)
+        if es:
+            body = ("¡Listo! Su llamada con Mike de EvoSys Pro sobre sus 3 citas gratis es %s. %s"
+                    "¿Necesita otro horario? Solo responda este mensaje." %
+                    (_ct(when, True), ("Por Zoom: %s " % z) if z else ""))
+        else:
+            body = ("You're booked! Your call with Mike from EvoSys Pro about your 3 free appointments is %s. %s"
+                    "Need a different time? Just text back." % (_ct(when), ("Join on Zoom: %s " % z) if z else ""))
         try:
             r = O._send_text(to, body, s)
         except Exception as e:                               # noqa: BLE001
@@ -289,9 +330,16 @@ def send_reminders(db: Session, now: Optional[datetime] = None) -> dict:
                 EvoSysOutreachMessage.label == "r1:" + stamp).first():
             continue
         t = _local(a.starts_at).strftime("%-I:%M %p")
-        when = ("tomorrow at %s Central" % t) if kind == "reminder_day" else ("in about an hour, at %s Central" % t)
-        body = ("Reminder: your call with Mike from EvoSys Pro about your 3 free appointments is %s. "
-                "Need a different time? Just text back." % when)
+        z = zoom_link(db, a.id)
+        if is_spanish(db, opp):
+            when = ("mañana a las %s (hora del centro)" % t) if kind == "reminder_day" else \
+                ("en una hora, a las %s (hora del centro)" % t)
+            body = ("Recordatorio: su llamada con Mike de EvoSys Pro sobre sus 3 citas gratis es %s. %s"
+                    "¿Necesita otro horario? Solo responda." % (when, ("Por Zoom: %s " % z) if z else ""))
+        else:
+            when = ("tomorrow at %s Central" % t) if kind == "reminder_day" else ("in about an hour, at %s Central" % t)
+            body = ("Reminder: your call with Mike from EvoSys Pro about your 3 free appointments is %s. %s"
+                    "Need a different time? Just text back." % (when, ("Join on Zoom: %s " % z) if z else ""))
         try:
             r = O._send_text(to, body, s)
         except Exception as e:                               # noqa: BLE001
