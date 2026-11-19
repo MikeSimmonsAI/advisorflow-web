@@ -29,6 +29,7 @@ const PROGRAM_CATEGORY = {
   volt: 'operations',
   consumer_leads: 'operations',
   evosys_sales: 'sales',
+  client_growth: 'sales',
   back_office: 'admin',
   executive: 'admin',
 }
@@ -69,6 +70,7 @@ const PROGRAM_PHOTO = {
   volt: 'volt',
   consumer_leads: 'consumer',
   evosys_sales: 'evosys-sales',
+  client_growth: 'evosys-sales',
   back_office: 'backoffice',
   executive: 'executive',
 }
@@ -128,7 +130,7 @@ export function summaryCounts(cards, others, previews) {
   const orgs = new Set()
   for (const c of cards || []) {
     if (c.type === 'deal_builder' || c.type === 'back_office' || c.type === 'executive'
-        || c.type === 'project_checklist') continue
+        || c.type === 'project_checklist' || c.type === 'client_growth') continue
     if (c.type === 'acquisition_ops') {
       if (!c.hub && c.client_organization_id) orgs.add(c.client_organization_id)
       continue
@@ -165,7 +167,7 @@ const SHORT_LINE = {
   roofing: 'AI Roofing Operations', wholesale: 'Acquisition Command', jewelry: 'Business Command Center',
   insurance: 'Insurance Agency', insurance_retention: 'Renewals & Retention', cleaning: 'Commercial Cleaning',
   acquisition: 'Client Portal', acquisition_ops: 'Prospects & Pipeline', client_portals: 'What each client sees', volt: 'Recruiting & Enrollment',
-  consumer_leads: 'Lead Acquisition', evosys_sales: 'Prospects & Outreach', back_office: 'Sales Pipeline & Reports',
+  consumer_leads: 'Lead Acquisition', evosys_sales: 'Prospects & Outreach', client_growth: 'Discovery • Questionnaires • Proposals', back_office: 'Sales Pipeline & Reports',
   executive: 'Portfolio Performance', business: 'Business Workspace',
 }
 const SALES_TOOL_LINE = { executive: 'Quotes & Commissions', sales: 'Quotes & Estimates', my_team: 'Team & Onboarding', onboarding: 'Start Selling' }

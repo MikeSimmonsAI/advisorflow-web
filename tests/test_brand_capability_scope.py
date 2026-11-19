@@ -507,9 +507,14 @@ def test_the_grant_screen_lists_members_and_anybody_already_granted(
     # `deal_builder_executive` is read by `deal_builder_router`: the executive
     # Deal Builder page (every compensation layer) is served only to god_admin
     # or a holder of this grant. Being a sales manager does not grant it.
+    #
+    # `client_growth` is read by `services/client_growth/access.level`: Client
+    # Growth (discovery questionnaires) opens for God Mode, the sales program
+    # owners, and a holder of this grant over EvoSys Pro Sales.
     assert {c["key"] for c in d["available_capabilities"]} == {
         "sales_comp_view", "sales_comp_manage", "support_console",
-        "deal_builder_executive", "sales_program_owner", "sales_team_executive"}
+        "deal_builder_executive", "sales_program_owner", "sales_team_executive",
+        "client_growth"}
 
 
 def test_granting_is_audited_with_the_scope_it_applied_to(db_session, a, god):

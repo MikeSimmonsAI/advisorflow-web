@@ -78,6 +78,7 @@ export const SECTIONS = [
       { label: 'Pricing', path: '/god/pricing' },
       { label: 'Sales team pay', path: '/god/compensation' },
       { label: 'Sales pipeline', path: '/god/sales-operations', match: ['/god/opportunities', '/god/proposals', '/god/meetings'] },
+      { label: 'Client Growth', path: '/god/client-growth', hint: 'Discovery questionnaires, submissions, proposal tasks and who can open Client Growth' },
       { label: 'Lead intelligence', path: '/god/lead-intelligence', match: ['/god/lead-scraper', '/god/lead-browser'] },
     ],
   },

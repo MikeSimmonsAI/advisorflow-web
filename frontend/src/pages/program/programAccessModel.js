@@ -73,6 +73,11 @@ const PROGRAMS = {
   evosys_bd: { rank: 2, variant: 'office', symbol: '✦', kind: 'EVOSYS PRO PLATFORM',
                summary: 'Add contacts, run outreach, and book business development calls.',
                facts: ['Contacts', 'Campaigns', 'Booked calls'] },
+  // CLIENT GROWTH: EvoSys Pro platform discovery workspace (questionnaires and
+  // proposals for prospective clients in any vertical). Its own card.
+  client_growth: { rank: 2, variant: 'office', symbol: '↗', kind: 'EVOSYS PRO PLATFORM',
+                   summary: 'Discovery • Questionnaires • Proposals',
+                   facts: ['Discovery', 'Questionnaires', 'Proposals'] },
   back_office: { rank: 8, variant: 'office', symbol: '▤', kind: 'BACK OFFICE',
                  summary: 'Sales pipeline, customers and brand operations',
                  facts: ['Pipeline', 'Customers', 'Brand ops'] },
@@ -208,6 +213,14 @@ export function programCards(ctx) {
                  symbol: p.symbol, rank: p.rank, kind: p.kind, facts: p.facts, display: 'Consumer Leads',
                  summary: p.summary, orgLabel: v.access === 'assigned' ? 'Your assigned leads' : null,
                  actionLabel: 'Open Consumer Leads' })
+  }
+  // CLIENT GROWTH: only where the server confirmed access (God Mode, the sales
+  // program owners, or the client_growth grant).
+  for (const g of ctx?.client_growth_contexts || []) {
+    const p = PROGRAMS.client_growth
+    cards.push({ ...g, type: 'client_growth', organization_id: 'client-growth', program: 'client_growth',
+                 variant: p.variant, symbol: p.symbol, rank: p.rank, kind: p.kind, facts: p.facts,
+                 display: 'Client Growth', summary: p.summary, orgLabel: null, actionLabel: 'Open workspace' })
   }
   // BACK OFFICE AND EXECUTIVE SUITE are separate destinations on the same
   // launcher - only when the server says this person has them, never the

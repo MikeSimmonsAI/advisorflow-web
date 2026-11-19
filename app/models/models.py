@@ -151,6 +151,9 @@ class NotificationType(str, enum.Enum):
     # An investor in the private Deal Room needs a person: a message, an
     # exclusive-review request, an upload or an interest (wholesale_deal_room).
     DEAL_ROOM = "deal_room"
+    # A prospect submitted a Client Growth discovery questionnaire. In-app, to
+    # the people who hold Client Growth access (God Mode and the owners).
+    CLIENT_GROWTH = "client_growth"
 
 
 # ---------------------------------------------------------------------------

@@ -264,6 +264,15 @@ CAPABILITIES: Dict[str, Capability] = dict([
              "being able to rebuild the environment other presenters are "
              "standing in."),
 
+    # ── Client Growth ───────────────────────────────────────────────────────
+    # Brand-scoped (EvoSys Pro Sales), never delegable. God Mode and the sales
+    # program owners have it by their seat; anyone else only by this grant.
+    _cap("client_growth",
+         "Client Growth — discovery questionnaires, submissions and proposal tasks",
+         requires_feature=None, delegable=False,
+         why="Reads prospective clients' submitted discovery answers and creates "
+             "private questionnaire links. It carries no God Mode control, no "
+             "customer workspace access and no sales-team administration."),
     # ── Support Intelligence ────────────────────────────────────────────────
     _cap("support_console",
          "Operate the support queue for a brand",
@@ -486,7 +495,9 @@ BRAND_SCOPED_CAPABILITIES = ("sales_comp_view", "sales_comp_manage",
                              # them, so a customer-org grant could not exist.
                              # Brand scope is the only shape that can hold
                              # this, and `support_authority.py` is what reads it.
-                             "support_console")
+                             "support_console",
+                             # Read by app/services/client_growth/access.py.
+                             "client_growth")
 
 
 def brand_grants_for(db: Session, user_id: str,
