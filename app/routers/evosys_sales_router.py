@@ -122,6 +122,7 @@ def _settings_out(s, c: Ctx, db: Session) -> dict:
             "sms_from_number": s.sms_from_number,
             "alert_phone": s.alert_phone, "alert_email": s.alert_email,
             "text_auto_reply": bool(s.text_auto_reply),
+            "alert_also": s.alert_also or [], "reply_examples": s.reply_examples or [],
             "texting_ready": bool(O.e164(s.sms_from_number)),
             "reply_tracking": _reply_tracking(db, s),
             "sending_hours": "Weekdays 8:00 AM - 6:00 PM Central"}
@@ -504,6 +505,8 @@ class SettingsIn(BaseModel):
     alert_phone: Optional[str] = None
     alert_email: Optional[str] = None
     text_auto_reply: Optional[bool] = None
+    alert_also: Optional[list] = None
+    reply_examples: Optional[list] = None
     daily_limit: Optional[int] = None
 
 
@@ -550,6 +553,19 @@ def save_team_settings(db: Session, s, data: dict, user_id: str) -> bool:
     # never stops a campaign.
     if data.get("alert_phone") is not None:
         s.alert_phone = O.e164(data["alert_phone"]) or None
+    if data.get("alert_also") is not None:
+        cleaned = []
+        for r in data["alert_also"][:10]:
+            if not isinstance(r, dict):
+                continue
+            ph = O.e164(r.get("phone")) if r.get("phone") else None
+            em = str(r.get("email") or "").strip().lower()
+            em = em if re.match(r"[^@\s]+@[^@\s]+\.[^@\s]+$", em) else None
+            if ph or em:
+                cleaned.append({"name": str(r.get("name") or "")[:80], "phone": ph, "email": em})
+        s.alert_also = cleaned
+    if data.get("reply_examples") is not None:
+        s.reply_examples = [str(x).strip()[:1500] for x in data["reply_examples"][:10] if str(x).strip()]
     if data.get("text_auto_reply") is not None:
         s.text_auto_reply = bool(data["text_auto_reply"])
     if data.get("alert_email") is not None:

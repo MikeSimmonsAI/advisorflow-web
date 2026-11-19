@@ -236,13 +236,19 @@ function TeamSettings({ team, onSaved }) {
   const [f, setF] = useState(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
-  useEffect(() => { if (team) setF({ sender_name: team.sender_name, from_email: team.from_email, reply_to_email: team.reply_to_email, mailing_address: team.mailing_address, sms_from_number: team.sms_from_number, text_auto_reply: !!team.text_auto_reply }) }, [team])
+  useEffect(() => { if (team) setF({ sender_name: team.sender_name, from_email: team.from_email, reply_to_email: team.reply_to_email, mailing_address: team.mailing_address, sms_from_number: team.sms_from_number, text_auto_reply: !!team.text_auto_reply,
+    alert_also: (team.alert_also || []).length ? team.alert_also : [], examples_text: (team.reply_examples || []).join('\n---\n') }) }, [team])
   if (!team || !f) return null
   const contentDirty = ['sender_name', 'from_email', 'reply_to_email', 'mailing_address', 'sms_from_number'].some(k => (f[k] || '') !== (team[k] || ''))
-  const dirty = contentDirty || !!f.text_auto_reply !== !!team.text_auto_reply
+  const alsoDirty = JSON.stringify(f.alert_also || []) !== JSON.stringify(team.alert_also || [])
+  const exDirty = (f.examples_text || '') !== (team.reply_examples || []).join('\n---\n')
+  const dirty = contentDirty || !!f.text_auto_reply !== !!team.text_auto_reply || alsoDirty || exDirty
   const save = async () => {
     setBusy(true); setMsg(null)
-    try { await api.put(`${API}/outreach`, f); setMsg({ ok: true, text: contentDirty ? 'Saved. Every campaign was turned off and needs approving again.' : 'Saved.' }); onSaved() }
+    const examples = (f.examples_text || '').split(/\n\s*---\s*\n/).map(x => x.trim()).filter(Boolean)
+    const payload = { ...f, reply_examples: examples, alert_also: (f.alert_also || []).filter(r => r.phone || r.email) }
+    delete payload.examples_text
+    try { await api.put(`${API}/outreach`, payload); setMsg({ ok: true, text: contentDirty ? 'Saved. Every campaign was turned off and needs approving again.' : 'Saved. Campaigns keep running.' }); onSaved() }
     catch (e) { setMsg({ ok: false, text: errText(e) }) } finally { setBusy(false) }
   }
   const can = team.can_manage
@@ -254,6 +260,22 @@ function TeamSettings({ team, onSaved }) {
         <Field label="Sends from"><input className="evs-input" disabled={!can} value={f.from_email || ''} onChange={e => setF({ ...f, from_email: e.target.value })} /></Field>
         <Field label="Replies go to"><input className="evs-input" disabled={!can} value={f.reply_to_email || ''} onChange={e => setF({ ...f, reply_to_email: e.target.value })} /></Field>
         <Field label="Texts go from"><input className="evs-input" disabled={!can} placeholder="+18665551234" value={f.sms_from_number || ''} onChange={e => setF({ ...f, sms_from_number: e.target.value })} /></Field>
+        <Field label="Also gets every reply and booking alert">
+          <div>
+            {(f.alert_also || []).map((r, i) => (
+              <div key={i} className="evs-row-inline" style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                <input className="evs-input" disabled={!can} placeholder="Name" value={r.name || ''} onChange={e => { const a = [...f.alert_also]; a[i] = { ...r, name: e.target.value }; setF({ ...f, alert_also: a }) }} />
+                <input className="evs-input" disabled={!can} placeholder="Cell" value={r.phone || ''} onChange={e => { const a = [...f.alert_also]; a[i] = { ...r, phone: e.target.value }; setF({ ...f, alert_also: a }) }} />
+                <input className="evs-input" disabled={!can} placeholder="Email" value={r.email || ''} onChange={e => { const a = [...f.alert_also]; a[i] = { ...r, email: e.target.value }; setF({ ...f, alert_also: a }) }} />
+                {can && <button className="evs-link-plain" onClick={() => setF({ ...f, alert_also: f.alert_also.filter((_, j) => j !== i) })}>Remove</button>}
+              </div>
+            ))}
+            {can && <button className="evs-link-plain" onClick={() => setF({ ...f, alert_also: [...(f.alert_also || []), { name: '', phone: '', email: '' }] })}>+ Add someone</button>}
+          </div>
+        </Field>
+        <Field label="Example answers - AI writes its text replies like these (separate examples with a line of ---)">
+          <textarea className="evs-input" rows={8} disabled={!can} value={f.examples_text || ''} onChange={e => setF({ ...f, examples_text: e.target.value })} placeholder="Hi! Mike here with EvoSys Pro..." />
+        </Field>
         <Field label="AI answers simple texts"><label className="evs-check"><input type="checkbox" disabled={!can} checked={!!f.text_auto_reply} onChange={e => setF({ ...f, text_auto_reply: e.target.checked })} /> On - "yes", "is it free?", "how does it work?" get answered right away; anything else waits for you with a draft</label></Field>
         <Field label="Mailing address (required at the bottom of every sales email)" wide>
           <input className="evs-input" disabled={!can} placeholder="Street, City, State ZIP" value={f.mailing_address || ''} onChange={e => setF({ ...f, mailing_address: e.target.value })} />
