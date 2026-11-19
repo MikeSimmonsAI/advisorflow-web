@@ -505,6 +505,7 @@ def submission_row(db: Session, s: ClientGrowthSubmission, full: bool = False) -
     row = {"id": s.id, "prospect_id": s.opportunity_id, "company": o.company_name if o else None,
            "contact": (s.answers or {}).get("contact_name") or (o.contact_name if o else None),
            "invitation_id": s.invitation_id, "template_key": s.template_key, "template_version": s.template_version,
+           "template_name": (lambda t: t.name if t else s.template_key)(db.get(ClientGrowthTemplate, s.template_id)),
            "status": s.status, "status_label": SUB_LABELS.get(s.status, s.status),
            "submitted_at": iso(s.submitted_at), "review_started_at": iso(s.review_started_at),
            "proposal_prepared_at": iso(s.proposal_prepared_at), "task": task_row(k), "is_test": bool(s.is_test)}
