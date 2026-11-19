@@ -50,7 +50,7 @@ export function Badge ({ children, tone }) {
 }
 
 const INV_TONE = { active: 'navy', sent: 'info', opened: 'gold', submitted: 'ok', revoked: 'bad', expired: 'muted' }
-const INV_LABEL = { active: 'Link created · not sent', sent: 'Sent (you recorded it)', opened: 'Opened by prospect',
+const INV_LABEL = { active: 'Link created · not sent', sent: 'Sent (you recorded it)', opened: 'Link opened',
   submitted: 'Answered', revoked: 'Revoked', expired: 'Expired' }
 const SUB_TONE = { submitted: 'gold', under_review: 'info', proposal_prepared: 'ok' }
 
