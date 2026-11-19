@@ -99,6 +99,10 @@ def profile_json(org: Organization, p: Optional[AcquisitionProfile], full: bool)
         "offer_terms": getattr(p, "offer_terms", None) if p else None,
         "readiness": readiness(org, p),
         "configured": p is not None,
+        "setup": {"steps": C.jload(getattr(p, "setup_steps", None), []) if p else [],
+                  "completed_at": C.iso(getattr(p, "setup_completed_at", None)) if p else None,
+                  "offer_accepted_at": C.iso(getattr(p, "offer_accepted_at", None)) if p else None,
+                  "never_contact_count": len(C.jload(p.exclusions, [])) if p else 0},
     }
     if full:
         out.update({
@@ -494,6 +498,11 @@ def client_outcome(db: Session, opp: AcquisitionOpportunity, actor: User, data: 
     if to == C.LOST:
         opp.lost_reason = (data.get("reason") or "").strip()[:300] or None
     note = (data.get("note") or "").strip()[:2000]
+    if to == C.NO_SHOW and (data.get("reason") or "").strip():
+        # Why it didn't happen (they cancelled / didn't show / not a fit) so
+        # EvoSys can see the pattern; kept with the client's own note.
+        why = "No-show reason: %s" % data["reason"].strip()[:120]
+        note = (why + ("\n" + note if note else ""))[:2000]
     if note:
         opp.outcome_note = note
     _move(db, opp, to, actor.id, note or None)
@@ -585,6 +594,16 @@ def update_profile(db: Session, org_id: str, data: Dict[str, Any], owner: bool) 
         if rp and rp not in C.RECURRING_PREFS:
             raise HTTPException(422, "Choose recurring, one-time or both")
         p.recurring_pref = rp
+    if not owner and data.get("never_contact"):
+        raw = data["never_contact"]
+        have = C.jload(p.exclusions, [])
+        add = [x for x in H.split_entries(" ".join(raw) if isinstance(raw, list) else str(raw)) if x not in have]
+        p.exclusions = C.jdump((have + add)[:2000])
+    if not owner and data.get("setup_step"):
+        steps = C.jload(getattr(p, "setup_steps", None), [])
+        k = str(data["setup_step"])[:40]
+        if k not in steps:
+            p.setup_steps = C.jdump(steps + [k])
     if "qualification_questions" in data:
         raw = data["qualification_questions"]
         items = raw if isinstance(raw, list) else str(raw or "").split("\n")

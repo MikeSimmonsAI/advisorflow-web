@@ -19,10 +19,10 @@ function cardsFor(who) {
   return { cards: [...visible, ...salesToolCards(ctx, ctx.deal_builder)], others, previews, ctx }
 }
 
-test('the owner sees all 16 programs and all 3 prospect previews', () => {
+test('the owner sees all 17 programs and all 3 prospect previews', () => {
   const { cards, previews } = cardsFor('owner')
   assert.deepEqual(cards.map(c => c.display).sort(), [
-    'Acquisition Control Center', 'Atlantis Light & Power', 'Back Office', 'Blue Ridge Gold & Jewelry',
+    'Acquisition Control Center', 'Atlantis Light & Power', 'Back Office', 'Blue Ridge Gold & Jewelry', 'Client Portals',
     'Commercial Cleaning Blueprint', 'Consumer Leads', 'Executive Deal Builder', 'Insurance', 'My Team',
     'Restland Cemetery and Funeral Home', 'Roofing', 'SCI', 'Salesperson Deal Builder', 'VOLT Marketing',
     'Vincent Greene Agency', 'Wholesale',
@@ -43,10 +43,10 @@ test('a salesperson never gets the Executive Deal Builder, owner tools or other 
 
 test('summary numbers are counted once each, from the same cards', () => {
   const o = cardsFor('owner')
-  // 16 destinations; 10 client businesses (VOLT + Consumer Leads are one org;
+  // 17 destinations (incl. Client Portals); 10 client businesses (VOLT + Consumer Leads are one org;
   // the Acquisition hub, Back Office and the sales tools are not clients);
   // previews are separate and never counted as workspaces or clients.
-  assert.deepEqual(summaryCounts(o.cards, o.others, o.previews), { workspaces: 16, clients: 10, previews: 3 })
+  assert.deepEqual(summaryCounts(o.cards, o.others, o.previews), { workspaces: 17, clients: 10, previews: 3 })
   const s = cardsFor('salesperson')
   assert.deepEqual(summaryCounts(s.cards, s.others, s.previews), { workspaces: 3, clients: 1, previews: 0 })
   assert.deepEqual(summaryCounts([], [], []), { workspaces: 0, clients: 0, previews: 0 })
@@ -62,7 +62,7 @@ test('every card is filed under exactly one real category, and empty categories 
     ;(by[k] = by[k] || []).push(c.display)
   }
   assert.deepEqual(by.admin.sort(), ['Back Office'])
-  assert.deepEqual(by.operations.sort(), ['Acquisition Control Center', 'Consumer Leads', 'VOLT Marketing'])
+  assert.deepEqual(by.operations.sort(), ['Acquisition Control Center', 'Client Portals', 'Consumer Leads', 'VOLT Marketing'])
   assert.deepEqual(by.sales.sort(), ['Executive Deal Builder', 'My Team', 'Salesperson Deal Builder'])
   assert.equal(by.clients.length, 9)
   assert.deepEqual(availableCategories(cardsFor('salesperson').cards).map(c => c.key), ['all', 'sales', 'clients'])
@@ -74,7 +74,7 @@ test('each business wears its own bundled photo, and every photo file exists', (
     SCI: 'sci', 'Restland Cemetery and Funeral Home': 'restland', 'Atlantis Light & Power': 'energy',
     Roofing: 'roofing', Wholesale: 'wholesale', 'Commercial Cleaning Blueprint': 'cleaning',
     'Blue Ridge Gold & Jewelry': 'gold', Insurance: 'insurance', 'Vincent Greene Agency': 'agency',
-    'VOLT Marketing': 'volt', 'Consumer Leads': 'consumer', 'Acquisition Control Center': 'acquisition',
+    'VOLT Marketing': 'volt', 'Consumer Leads': 'consumer', 'Acquisition Control Center': 'acquisition', 'Client Portals': 'cleaning',
     'Back Office': 'backoffice', 'Executive Deal Builder': 'exec-builder', 'Salesperson Deal Builder': 'sales-builder',
     'My Team': 'team', 'Building Equity Investments LLC': 'realestate', 'Countryside Land Partners': 'land',
     'VP Wraps Vehicle Protection': 'wraps',

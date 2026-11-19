@@ -13,6 +13,7 @@ import { BusinessForm, Readiness } from './BusinessForm'
 import { DateChip, Icon, Kpi, Loading, Logo, PageHeader, Pill, apptPill, clock, errText, initials, money, useFont, useLoad, useToast, when } from './ui'
 import './acquisition.css'
 import './hub.css'
+import './teal.css'
 
 import { OPS, OpsCtx as Ctx, useOps } from './opsContext'
 import { MasterOverview, OperatorQueue } from './HubPages'
@@ -233,12 +234,12 @@ function ProgressChart({ progress }) {
   const line = k => s.map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(r[k]).toFixed(1)}`).join(' ')
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Pilot progress">
-      {[0, .5, 1].map(f => <line key={f} x1={P} x2={W - P} y1={y(max * f)} y2={y(max * f)} stroke="#ece6fb" />)}
-      <path d={`${line('researched')} L${x(s.length - 1)},${y(0)} L${x(0)},${y(0)} Z`} fill="rgba(139,92,246,.14)" />
-      <path d={line('researched')} fill="none" stroke="#8b5cf6" strokeWidth="2.5" />
-      <path d={line('interested')} fill="none" stroke="#2f6fdb" strokeWidth="2.5" />
+      {[0, .5, 1].map(f => <line key={f} x1={P} x2={W - P} y1={y(max * f)} y2={y(max * f)} stroke="#e3eeef" />)}
+      <path d={`${line('researched')} L${x(s.length - 1)},${y(0)} L${x(0)},${y(0)} Z`} fill="rgba(15,143,122,.12)" />
+      <path d={line('researched')} fill="none" stroke="#13a58a" strokeWidth="2.5" />
+      <path d={line('interested')} fill="none" stroke="#2b8aa0" strokeWidth="2.5" />
       <path d={line('booked')} fill="none" stroke="#15924a" strokeWidth="2.5" />
-      {[1, 7, 14, 21, 30].map(d => <text key={d} x={x(d - 1)} y={H - 8} fontSize="11" textAnchor="middle" fill="#5f5a7a">Day {d}</text>)}
+      {[1, 7, 14, 21, 30].map(d => <text key={d} x={x(d - 1)} y={H - 8} fontSize="11" textAnchor="middle" fill="#5b6f75">Day {d}</text>)}
     </svg>
   )
 }
@@ -248,8 +249,8 @@ function TargetRing({ booked, high }) {
   return (
     <div className="aq-ring">
       <svg width="140" height="140" viewBox="0 0 140 140" aria-hidden="true">
-        <circle cx="70" cy="70" r={r} fill="none" stroke="#ece6fb" strokeWidth="12" />
-        <circle cx="70" cy="70" r={r} fill="none" stroke="#7c4dea" strokeWidth="12" strokeLinecap="round"
+        <circle cx="70" cy="70" r={r} fill="none" stroke="#e3eeef" strokeWidth="12" />
+        <circle cx="70" cy="70" r={r} fill="none" stroke="#0f8f7a" strokeWidth="12" strokeLinecap="round"
                 strokeDasharray={`${C * f} ${C}`} transform="rotate(-90 70 70)" />
       </svg>
       <div className="aq-ring__txt"><b>{booked} of {high}</b><span>Appointments</span></div>
@@ -287,7 +288,7 @@ function ClientControlCenter() {
       <div className="aq-grid aq-split">
         <section className="aq-card">
           <h2>Pilot Progress (30 Days)</h2>
-          <div className="aq-legend"><span><i style={{ background: '#8b5cf6' }} />Leads Researched</span><span><i style={{ background: '#2f6fdb' }} />Interested</span><span><i style={{ background: '#15924a' }} />Appointments</span></div>
+          <div className="aq-legend"><span><i style={{ background: '#13a58a' }} />Leads Researched</span><span><i style={{ background: '#2b8aa0' }} />Interested</span><span><i style={{ background: '#15924a' }} />Appointments</span></div>
           <ProgressChart progress={ov.progress} />
         </section>
         <section className="aq-card">
