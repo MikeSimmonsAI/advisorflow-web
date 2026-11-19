@@ -335,7 +335,7 @@ def test_booking_from_the_link_books_stops_and_confirms(db_session, brand, manag
     out = BP.book(db_session, o, when)
     assert out["status"] == "booked" and made and made[0].opportunity_id == o.id
     assert db_session.get(EvoSysOutreachState, o.id).stop_reason == "booked"
-    assert sent and sent[0][0] == "+12145550131" and "You're booked" in sent[0][1]
+    assert sent and sent[0][0] == "+12145550131" and "booked" in sent[0][1]
     assert alerts and "BOOKED" in alerts[0]
     # a time not on offer is refused
     assert BP.book(db_session, _lead(db_session, brand, manager, "Two Co", phone="2145550132"),
@@ -403,3 +403,18 @@ def test_text_reminders_day_before_and_hour_before_once_each(db_session, brand, 
     BP.send_reminders(db_session, datetime(2026, 11, 24, 15, 0))    # 1 hour before
     BP.send_reminders(db_session, datetime(2026, 11, 24, 15, 10))
     assert len(sent) == 2 and "in about an hour" in sent[1]
+
+
+def test_confirmation_has_zoom_and_speaks_spanish(db_session, brand, manager, monkeypatch):
+    from datetime import timedelta as _td
+    _ready(db_session, brand)
+    o = _lead(db_session, brand, manager, "Limpieza Sol", phone="2145550150")
+    db_session.add(EvoSysOutreachMessage(brand_sales_org_id=brand.id, opportunity_id=o.id, direction="in",
+                                         channel="text", body="Sí, me interesa mucho, gracias", status="received"))
+    db_session.commit()
+    monkeypatch.setattr(BP, "zoom_link", lambda db, appt_id: "https://zoom.example/j/1")
+    sent = []
+    monkeypatch.setattr(O, "_send_text", lambda to, body, s: sent.append(body) or {"success": True})
+    monkeypatch.setattr(IN, "notify_owner", lambda *a: None)
+    BP._after_booking(db_session, o, datetime(2026, 11, 24, 21, 30), "appt-1")
+    assert sent and sent[0].startswith("¡Listo!") and "https://zoom.example/j/1" in sent[0] and "martes 24" in sent[0]
