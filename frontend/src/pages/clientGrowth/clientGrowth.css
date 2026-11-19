@@ -17,9 +17,9 @@
 .cg-brand { display: flex; align-items: center; gap: 12px; }
 .cg-brand img { width: 36px; height: 36px; display: block; }
 .cg-bar { width: 1px; height: 26px; background: rgba(255,255,255,.5); }
-.cg-brand-name { color: #fff; font-family: var(--cg-serif); font-size: 23px; }
+.cg-brand-name { color: #fff; font-family: var(--cg-serif); font-size: 23px; white-space: nowrap; }
 .cg-topnav { display: flex; gap: 8px; }
-.cg-toplink { color: #fff; background: transparent; border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 7px 14px; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; }
+.cg-toplink { color: #fff; background: transparent; border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 7px 14px; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; white-space: nowrap; }
 .cg-toplink:hover { border-color: var(--cg-gold-2); color: var(--cg-gold-2); }
 
 /* hero band */
@@ -228,7 +228,10 @@
 /* phone: tables become stacked cards */
 @media (max-width: 720px) {
   .cg-top { padding: 10px 14px; }
-  .cg-brand-name { font-size: 20px; }
+  .cg-brand-name { font-size: 19px; }
+  .cg-brand img { width: 30px; height: 30px; }
+  .cg-brand { gap: 8px; }
+  .cg-topnav { gap: 6px; }
   .cg-toplink { padding: 6px 10px; font-size: 13px; }
   .cg-hero-inner { padding: 16px 14px 12px; }
   .cg-hero-title { font-size: 30px; }
