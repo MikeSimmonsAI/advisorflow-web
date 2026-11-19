@@ -95,6 +95,8 @@ def status(ctx: C.Ctx = Depends(ctx_dep)):
             "can_manage": ctx.manager, "segments": C.SEGMENTS,
             "logo_url": getattr(ctx.org, "brand_logo_url", None),
             "offer_label": C.OFFER_LABEL.get((getattr(p, "offer_type", None) if p else None) or C.FREE_PILOT),
+            "offer_days": E.OFFER_DAYS.get((getattr(p, "offer_type", None) if p else None) or C.FREE_PILOT),
+            "paused": bool(p.paused) if p else True,
             "me": {"id": ctx.user.id, "name": ctx.user.full_name or ctx.user.email}}
 
 
@@ -211,6 +213,11 @@ def get_profile(ctx: C.Ctx = Depends(ctx_dep)):
 def put_profile(payload: dict = Body(...), ctx: C.Ctx = Depends(ctx_dep)):
     C.require_manager(ctx)
     p = E.update_profile(ctx.db, ctx.org_id, payload, owner=False)
+    if payload.get("use_my_calendar") and p.booking_user_id is None and ctx.user.organization_id == ctx.org_id:
+        # The client's own setup: appointments go to THEIR calendar when EvoSys
+        # hasn't chosen one. Never replaces a calendar EvoSys already set.
+        p.booking_user_id = ctx.user.id
+        ctx.db.commit()
     _audit(ctx.db, ctx.org_id, ctx.user, "acquisition_profile_update", "acquisition_profile", p.id,
            {"fields": sorted(payload.keys())})
     return E.profile_json(ctx.org, p, full=False)
@@ -224,10 +231,13 @@ def accept_offer(ctx: C.Ctx = Depends(ctx_dep)):
     p = E.get_profile(ctx.db, ctx.org_id)
     if p is None:
         raise HTTPException(409, "This program has not been set up yet")
-    if p.offer_accepted_at is None:
+    if not E.offer_configured(p):
+        raise HTTPException(409, "EvoSys hasn't set your offer yet")
+    if not E.offer_accepted(p):
         p.offer_accepted_at, p.offer_accepted_by = datetime.utcnow(), ctx.user.id
+        p.offer_accepted_version = E.offer_version(p)
         E._event(ctx.db, ctx.org_id, None, "offer_accepted", ctx.user.id,
-                 note=C.OFFER_LABEL.get(p.offer_type or C.FREE_PILOT))
+                 note="%s (version %s)" % (C.OFFER_LABEL.get(p.offer_type or C.FREE_PILOT), p.offer_accepted_version))
         ctx.db.commit()
         _audit(ctx.db, ctx.org_id, ctx.user, "acquisition_offer_accepted", "acquisition_profile", p.id, {})
     return E.profile_json(ctx.org, p, full=False)
@@ -241,7 +251,7 @@ def complete_setup(ctx: C.Ctx = Depends(ctx_dep)):
     p = E.get_profile(ctx.db, ctx.org_id)
     if p is None:
         raise HTTPException(409, "This program has not been set up yet")
-    if p.offer_accepted_at is None:
+    if not E.offer_accepted(p):
         raise HTTPException(422, "Review and agree to your offer first")
     if p.setup_completed_at is None:
         p.setup_completed_at = datetime.utcnow()
@@ -249,6 +259,34 @@ def complete_setup(ctx: C.Ctx = Depends(ctx_dep)):
         ctx.db.commit()
         _audit(ctx.db, ctx.org_id, ctx.user, "acquisition_setup_completed", "acquisition_profile", p.id, {})
     return E.profile_json(ctx.org, p, full=False)
+
+
+@router.put("/logo", dependencies=_WRITE)
+def put_logo(payload: dict = Body(...), ctx: C.Ctx = Depends(ctx_dep)):
+    """The company's own logo for its portal. Checked and re-drawn as a PNG by
+    the same code that handles EvoSys Sales logos; stored on the company."""
+    C.require_manager(ctx)
+    from app.services.evosys_sales import logos as L
+    import base64
+    try:
+        png = L.normalize(L.decode_upload(str(payload.get("image_base64") or "")))
+    except L.LogoError as e:
+        raise HTTPException(400, str(e))
+    if len(png) > 400_000:
+        raise HTTPException(400, "That logo is too large. Try a smaller image.")
+    ctx.org.brand_logo_url = "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+    ctx.db.commit()
+    _audit(ctx.db, ctx.org_id, ctx.user, "acquisition_logo_update", "organization", ctx.org_id, {})
+    return {"logo_url": ctx.org.brand_logo_url}
+
+
+@router.delete("/logo", dependencies=_WRITE)
+def delete_logo(ctx: C.Ctx = Depends(ctx_dep)):
+    C.require_manager(ctx)
+    ctx.org.brand_logo_url = None
+    ctx.db.commit()
+    _audit(ctx.db, ctx.org_id, ctx.user, "acquisition_logo_remove", "organization", ctx.org_id, {})
+    return {"logo_url": None}
 
 
 @router.get("/feedback")

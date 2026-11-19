@@ -340,3 +340,9 @@
   .cp-two { grid-template-columns: 1fr; }
 }
 @media (min-width: 861px) { .cp-setup .cp-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.cp-initials { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: #dff3ef; color: #0b5a4d; font-weight: 800; letter-spacing: .02em; flex: none; }
+.cp-initials--lg { width: 64px; height: 64px; border-radius: 18px; font-size: 22px; }
+.cp-money { flex: 1 1 100%; display: grid; grid-template-columns: 96px 1fr; gap: 8px; }
+.cp-estline--center { display: inline-flex; margin-top: 14px; }
+.cp-money > *, .cp-won > *, .cp-opt .cp-input, .cp-opt .cp-select { min-width: 0; max-width: 100%; }
+.aq.aq-dark .cp-money .cp-input { width: 100%; }

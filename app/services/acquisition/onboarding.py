@@ -137,6 +137,12 @@ def invite(db: Session, org: Organization, actor: User, email: str, full_name: O
              must_change_password=True, is_active=True)
     db.add(u)
     db.flush()
+    # The login's workspace: without it the app opened the general tenant
+    # dashboard instead of the client portal (P0, 2026-11-18). The seat was
+    # reserved just above, so capacity isn't counted twice.
+    from app.services import workspace_access as WA
+    WA.grant_workspace_membership(db, u.id, org.id, role="org_admin", granted_by=actor.id,
+                                  commit=False, check_capacity=False)
     row, raw = SA.issue(db, u, actor, purpose=PURPOSE_SETUP)
     return {"status": "invitation_pending", "user_id": u.id, "email": u.email,
             "setup_url": SA.activation_url(base_url, raw), "resent": False, "expires_at": C.iso(row.expires_at)}
