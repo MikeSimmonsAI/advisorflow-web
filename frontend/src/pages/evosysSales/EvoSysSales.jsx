@@ -356,11 +356,30 @@ function ImportPanel({ meta, onDone, onClose }) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
   const [done, setDone] = useState(null)
+  const [mode, setMode] = useState('one')
+  const [one, setOne] = useState({ company: '', contact: '', phone: '', email: '', city: '', state: '', industry: 'Commercial cleaning', notes: '', spanish: false })
+  const [camps, setCamps] = useState([])
+  const [campId, setCampId] = useState('')
+  const [added, setAdded] = useState(null)
+  useEffect(() => { api.get(`${API}/campaigns`).then(r => {
+    const list = (r.campaigns || []).filter(c => c.kind !== 'group' && !c.archived_at)
+    setCamps(list)
+    const fb = list.find(c => /FB Cleaners - Texts$/.test(c.name || '')) || list[0]
+    if (fb) setCampId(fb.id)
+  }).catch(() => {}) }, [])
   const base = `/intake/sales/${team}/batches`
+  const csvCell = v => '"' + String(v || '').replace(/"/g, '""') + '"'
+  const oneAsFile = () => {
+    const head = ['company', 'contact', 'phone', 'email', 'city', 'state', 'industry', 'source ID', 'notes']
+    const notes = [one.notes, one.spanish ? 'Spanish only - write to them in Spanish' : ''].filter(Boolean).join('. ')
+    const row = [one.company, one.contact, one.phone, one.email, one.city, one.state, one.industry,
+                 'ONE-' + Date.now().toString(36).toUpperCase(), notes]
+    return new File([head.map(csvCell).join(',') + '\n' + row.map(csvCell).join(',') + '\n'], 'one-lead.csv', { type: 'text/csv' })
+  }
   const step = async fn => { setBusy(true); setMsg(null); try { await fn() } catch (e) { setMsg(errText(e)) } finally { setBusy(false) } }
   const upload = () => step(async () => {
     const fd = new FormData()
-    fd.append('file', file); fd.append('source_system', source)
+    fd.append('file', mode === 'one' ? oneAsFile() : file); fd.append('source_system', source)
     const b = await api.post(base, fd)
     const a = await api.post(`${base}/${b.id}/analyze`, {})
     setBatch(a)
@@ -368,6 +387,15 @@ function ImportPanel({ meta, onDone, onClose }) {
   })
   const create = () => step(async () => {
     const r = await api.post(`${base}/${batch.id}/commit`, { confirm_target_id: team })
+    if (mode === 'one' && campId && (r.created || 0) > 0) {
+      const digits = (one.phone || '').replace(/\D/g, '').slice(-10)
+      const found = await api.get(`${API}/leads?q=${encodeURIComponent(digits || one.company)}`)
+      const lead = (found.leads || []).find(l => (l.phone || '').replace(/\D/g, '').endsWith(digits) || l.company === one.company)
+      if (lead) {
+        try { const a = await api.post(`${API}/campaigns/${campId}/leads`, { lead_ids: [lead.id] }); setAdded({ ok: (a.added || 0) > 0, lead, out: a }) }
+        catch (e) { setAdded({ ok: false, lead, err: errText(e) }) }
+      }
+    }
     setDone(r); onDone()
   })
   const src = meta.sources.find(s => s.key === source)
@@ -376,6 +404,38 @@ function ImportPanel({ meta, onDone, onClose }) {
     <section className="evs-card evs-import">
       <div className="evs-card-h"><h3><Icon name="upload" size={18} /> Add leads</h3><button className="evs-link-plain" onClick={onClose}>Close</button></div>
       {!batch && (
+        <div className="evs-chips" style={{ marginBottom: 12 }}>
+          <button className={'evs-chip' + (mode === 'one' ? ' on' : '')} onClick={() => setMode('one')}>One lead</button>
+          <button className={'evs-chip' + (mode === 'file' ? ' on' : '')} onClick={() => setMode('file')}>A file of leads</button>
+        </div>
+      )}
+      {!batch && mode === 'one' && (
+        <div className="evs-grid">
+          <label className="evs-field"><span>Business name *</span><input className="evs-input" value={one.company} onChange={e => setOne({ ...one, company: e.target.value })} /></label>
+          <label className="evs-field"><span>Contact name</span><input className="evs-input" value={one.contact} onChange={e => setOne({ ...one, contact: e.target.value })} /></label>
+          <label className="evs-field"><span>Phone *</span><input className="evs-input" value={one.phone} onChange={e => setOne({ ...one, phone: e.target.value })} placeholder="214-555-0101" /></label>
+          <label className="evs-field"><span>Email</span><input className="evs-input" value={one.email} onChange={e => setOne({ ...one, email: e.target.value })} /></label>
+          <label className="evs-field"><span>City / area *</span><input className="evs-input" value={one.city} onChange={e => setOne({ ...one, city: e.target.value })} placeholder="Dallas, or DFW" /></label>
+          <label className="evs-field"><span>State *</span><input className="evs-input" value={one.state} onChange={e => setOne({ ...one, state: e.target.value })} placeholder="TX" /></label>
+          <label className="evs-field"><span>Industry</span><input className="evs-input" value={one.industry} onChange={e => setOne({ ...one, industry: e.target.value })} /></label>
+          <label className="evs-field"><span>Where they came from</span>
+            <select className="evs-input" value={source} onChange={e => setSource(e.target.value)}>
+              {meta.sources.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+            </select>
+          </label>
+          <label className="evs-field wide2"><span>Notes (services, what the ad said)</span><input className="evs-input" value={one.notes} onChange={e => setOne({ ...one, notes: e.target.value })} /></label>
+          <label className="evs-field"><span>Language</span><label className="evs-check"><input type="checkbox" checked={one.spanish} onChange={e => { const on = e.target.checked; setOne({ ...one, spanish: on }); const es = camps.find(c => /Spanish/i.test(c.name || '')); const en = camps.find(c => /FB Cleaners - Texts$/.test(c.name || '')); if (on && es) setCampId(es.id); if (!on && en && campId === es?.id) setCampId(en.id) }} /> Speaks Spanish only</label></label>
+          <label className="evs-field"><span>Start texting them in</span>
+            <select className="evs-input" value={campId} onChange={e => setCampId(e.target.value)}>
+              <option value="">No campaign yet</option>
+              {camps.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </label>
+          <p className="evs-hint wide">It goes through the same checks as a file (duplicates, location, grouping). Nothing is sent until you press Create below{campId ? '; then it joins the campaign and gets its first text in the next sending window.' : '.'}</p>
+          <div className="evs-actions wide"><button className="evs-btn" disabled={busy || !one.company.trim() || !(one.phone.trim() || one.email.trim()) || !(one.city.trim() || one.state.trim())} onClick={upload}>{busy ? 'Checking…' : 'Check this lead'}</button></div>
+        </div>
+      )}
+      {!batch && mode === 'file' && (
         <div className="evs-grid">
           <label className="evs-field"><span>Where they came from</span>
             <select className="evs-input" value={source} onChange={e => setSource(e.target.value)}>
@@ -412,10 +472,16 @@ function ImportPanel({ meta, onDone, onClose }) {
             ))}
           </div>
           <div className="evs-actions">
-            <button className="evs-btn" disabled={busy || !counts.ready} onClick={create}>Create {counts.ready || 0} leads</button>
+            <button className="evs-btn" disabled={busy || !counts.ready} onClick={create}>{mode === 'one' ? 'Create this lead' : `Create ${counts.ready || 0} leads`}</button>
             <button className="evs-btn evs-ghost" disabled={busy} onClick={() => { setBatch(null); setRows(null) }}>Start over</button>
           </div>
         </>
+      )}
+      {done && added && (
+        <div className={added.ok ? 'evs-okmsg' : 'evs-error'}>
+          {added.ok ? <>{added.lead.company} joined <b>{camps.find(c => c.id === campId)?.name}</b> - their first text goes out in the next sending window.</>
+            : <>{added.lead.company} was created but didn't join the campaign: {added.err || ((added.out?.refused || [])[0]?.reason) || 'it was refused'}.</>}
+        </div>
       )}
       {done && (
         <div className="evs-okmsg">
