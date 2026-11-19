@@ -202,7 +202,8 @@ const BdAppointments = bdPage('Appointments')
 const BdResults = bdPage('Results')
 // Managed client acquisition (Issue #452): the client's portal (/program/acquisition/*).
 const AcquisitionShell = lazyPage(() => import('./pages/acquisition/AcquisitionShell'))
-const AcqHome = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Home })))
+const AcqHome = lazyPage(() => import('./pages/acquisition/ClientHome').then(m => ({ default: m.Home })))
+const AcqSetup = lazyPage(() => import('./pages/acquisition/ClientSetup').then(m => ({ default: m.Setup })))
 const AcqProspects = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Prospects })))
 const AcqProspect = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Prospect })))
 const AcqAppointments = lazyPage(() => import('./pages/acquisition/ClientPages').then(m => ({ default: m.Appointments })))
@@ -1755,6 +1756,7 @@ export default function App() {
              explicit client_acquisition and cleaning identity server-side. */}
         <Route path="/program/acquisition" element={<ProtectedRoute bare><AcquisitionShell /></ProtectedRoute>}>
           <Route index element={<AcqHome />} />
+          <Route path="setup" element={<AcqSetup />} />
           <Route path="prospects" element={<AcqProspects />} />
           <Route path="prospects/:id" element={<AcqProspect />} />
           <Route path="appointments" element={<AcqAppointments />} />

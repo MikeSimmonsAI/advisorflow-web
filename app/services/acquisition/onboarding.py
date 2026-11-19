@@ -315,6 +315,11 @@ def directory(db: Session) -> Dict[str, Any]:
                       "segments": C.jload(p.segments, []) if p else [],
                       "offer_label": C.OFFER_LABEL.get((getattr(p, "offer_type", None) or C.FREE_PILOT)),
                       "sales_opportunity_id": getattr(p, "sales_opportunity_id", None) if p else None,
+                      # Client-filled setup: "waiting on client" until she finishes, then "ready for review".
+                      "client_setup": ("done" if getattr(p, "setup_completed_at", None) else
+                                       "started" if C.jload(getattr(p, "setup_steps", None), []) else "not_started") if p else "not_started",
+                      "setup_completed_at": C.iso(getattr(p, "setup_completed_at", None)) if p else None,
+                      "offer_accepted_at": C.iso(getattr(p, "offer_accepted_at", None)) if p else None,
                       **s})
     return {"items": items, "limit": C.PILOT_ORG_LIMIT}
 

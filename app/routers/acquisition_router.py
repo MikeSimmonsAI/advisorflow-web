@@ -93,6 +93,8 @@ def status(ctx: C.Ctx = Depends(ctx_dep)):
             "running": bool(p and not p.paused and p.pilot_started_at),
             "pilot_started_at": C.iso(p.pilot_started_at) if p else None,
             "can_manage": ctx.manager, "segments": C.SEGMENTS,
+            "logo_url": getattr(ctx.org, "brand_logo_url", None),
+            "offer_label": C.OFFER_LABEL.get((getattr(p, "offer_type", None) if p else None) or C.FREE_PILOT),
             "me": {"id": ctx.user.id, "name": ctx.user.full_name or ctx.user.email}}
 
 
@@ -211,6 +213,41 @@ def put_profile(payload: dict = Body(...), ctx: C.Ctx = Depends(ctx_dep)):
     p = E.update_profile(ctx.db, ctx.org_id, payload, owner=False)
     _audit(ctx.db, ctx.org_id, ctx.user, "acquisition_profile_update", "acquisition_profile", p.id,
            {"fields": sorted(payload.keys())})
+    return E.profile_json(ctx.org, p, full=False)
+
+
+@router.post("/setup/accept-offer", dependencies=_WRITE)
+def accept_offer(ctx: C.Ctx = Depends(ctx_dep)):
+    """The client agrees to the offer EvoSys set. Read-only for her: this records
+    who agreed and when; it never changes the offer, price or terms."""
+    C.require_manager(ctx)
+    p = E.get_profile(ctx.db, ctx.org_id)
+    if p is None:
+        raise HTTPException(409, "This program has not been set up yet")
+    if p.offer_accepted_at is None:
+        p.offer_accepted_at, p.offer_accepted_by = datetime.utcnow(), ctx.user.id
+        E._event(ctx.db, ctx.org_id, None, "offer_accepted", ctx.user.id,
+                 note=C.OFFER_LABEL.get(p.offer_type or C.FREE_PILOT))
+        ctx.db.commit()
+        _audit(ctx.db, ctx.org_id, ctx.user, "acquisition_offer_accepted", "acquisition_profile", p.id, {})
+    return E.profile_json(ctx.org, p, full=False)
+
+
+@router.post("/setup/complete", dependencies=_WRITE)
+def complete_setup(ctx: C.Ctx = Depends(ctx_dep)):
+    """The client says her setup is done. EvoSys reviews it; outreach stays
+    paused until EvoSys turns it on."""
+    C.require_manager(ctx)
+    p = E.get_profile(ctx.db, ctx.org_id)
+    if p is None:
+        raise HTTPException(409, "This program has not been set up yet")
+    if p.offer_accepted_at is None:
+        raise HTTPException(422, "Review and agree to your offer first")
+    if p.setup_completed_at is None:
+        p.setup_completed_at = datetime.utcnow()
+        E._event(ctx.db, ctx.org_id, None, "setup_completed", ctx.user.id, note="Client finished setup - ready for review")
+        ctx.db.commit()
+        _audit(ctx.db, ctx.org_id, ctx.user, "acquisition_setup_completed", "acquisition_profile", p.id, {})
     return E.profile_json(ctx.org, p, full=False)
 
 

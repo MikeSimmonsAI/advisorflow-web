@@ -46,7 +46,7 @@ export function openProgramItem(item, navigate, opts = {}) {
   }
   if (item.type === 'acquisition_ops') {
     clearWorkspaceContext()
-    navigate('/acquisition-ops'); return
+    navigate(item.path || '/acquisition-ops'); return
   }
   if (item.type === 'client_growth') {
     clearWorkspaceContext()

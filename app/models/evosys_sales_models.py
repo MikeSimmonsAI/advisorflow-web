@@ -106,6 +106,8 @@ class EvoSysOutreachMessage(Base):
     campaign_id = Column(String, ForeignKey("evosys_campaigns.id", ondelete="SET NULL"), nullable=True)
     # in: interested | pricing | question | not_interested | wrong_person | unsubscribe | unclear
     label = Column(String(30), nullable=True)
+    # English version of a message written in Spanish (owner reads English only).
+    translation = Column(Text, nullable=True)
     actor_user_id = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

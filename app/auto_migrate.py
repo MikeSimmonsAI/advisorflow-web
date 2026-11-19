@@ -630,6 +630,7 @@ COLUMNS_TO_ADD = [
     ("evosys_outreach_settings", "alert_phone", "VARCHAR(20)"),
     ("evosys_outreach_settings", "alert_email", "VARCHAR"),
     ("evosys_outreach_settings", "text_auto_reply", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("evosys_outreach_messages", "translation", "TEXT"),
     ("opportunities", "logo_quality", "VARCHAR"),
     ("opportunities", "logo_updated_at", "TIMESTAMP"),
     ("opportunities", "custom_unit_price", "NUMERIC(12,2)"),
@@ -1705,6 +1706,10 @@ COLUMNS_TO_ADD = [
     ("acquisition_profiles", "offer_type", "VARCHAR"),
     ("acquisition_profiles", "offer_terms", "TEXT"),
     ("acquisition_profiles", "sales_opportunity_id", "VARCHAR"),
+    ("acquisition_profiles", "setup_steps", "TEXT"),
+    ("acquisition_profiles", "setup_completed_at", "TIMESTAMP"),
+    ("acquisition_profiles", "offer_accepted_at", "TIMESTAMP"),
+    ("acquisition_profiles", "offer_accepted_by", "VARCHAR"),
     # #452 Phase 5: per-grant worker permissions (NULL = legacy full operator).
     ("acquisition_operators", "permissions", "TEXT"),
     # #452 Phase 3: client calendar / booking configuration.

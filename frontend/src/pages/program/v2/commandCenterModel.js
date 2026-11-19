@@ -25,6 +25,7 @@ export const CATEGORIES = [
 
 const PROGRAM_CATEGORY = {
   acquisition_ops: 'operations',
+  client_portals: 'operations',
   volt: 'operations',
   consumer_leads: 'operations',
   evosys_sales: 'sales',
@@ -65,6 +66,7 @@ const PROGRAM_PHOTO = {
   cleaning: 'cleaning',
   acquisition: 'cleaning',
   acquisition_ops: 'acquisition',
+  client_portals: 'cleaning',
   volt: 'volt',
   consumer_leads: 'consumer',
   evosys_sales: 'evosys-sales',
@@ -164,7 +166,7 @@ const SHORT_LINE = {
   sci: 'Family Services', funeral: 'Cemetery & Funeral', energy: 'Energy Operations',
   roofing: 'AI Roofing Operations', wholesale: 'Acquisition Command', jewelry: 'Business Command Center',
   insurance: 'Insurance Agency', insurance_retention: 'Renewals & Retention', cleaning: 'Commercial Cleaning',
-  acquisition: 'Client Portal', acquisition_ops: 'Prospects & Pipeline', volt: 'Recruiting & Enrollment',
+  acquisition: 'Client Portal', acquisition_ops: 'Prospects & Pipeline', client_portals: 'What each client sees', volt: 'Recruiting & Enrollment',
   consumer_leads: 'Lead Acquisition', evosys_sales: 'Prospects & Outreach', client_growth: 'Discovery • Questionnaires • Proposals', back_office: 'Sales Pipeline & Reports',
   executive: 'Portfolio Performance', business: 'Business Workspace',
 }

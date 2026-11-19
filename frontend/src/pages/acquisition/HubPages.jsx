@@ -39,7 +39,7 @@ export function MasterOverview() {
       <PageHeader eyebrow="Program Access · Acquisition" title="EvoSys Pro — Acquisition Control Center"
         sub="Service-Business Prospecting, Outreach, Appointment Acquisition & Client Delivery"
         actions={<>
-          <a className="aq-btn aq-btn--primary" href={`${OPS}/clients?add=1`}><Icon name="store" size={16} />Add Service Company</a>
+          <a className="aq-btn aq-btn--primary hb-add" href={`${OPS}/clients?add=1`}><Icon name="plus" size={16} />Add service company</a>
           <a className="aq-btn" href={`${OPS}/import`}><Icon name="upload" size={16} />Import Businesses</a>
           <button className="aq-btn" onClick={reload}>Refresh</button></>} />
       <div className="hb-stats">
@@ -517,7 +517,7 @@ export function ClientDirectory() {
     <div className="aq-page">{toast}
       <PageHeader eyebrow="EvoSys Master Acquisition" title="Service Companies"
         sub="Every service company EvoSys serves — cleaning, window washing, pest control and more. Create first, finish details later. Every new company starts paused."
-        actions={<><button className="aq-btn aq-btn--primary" onClick={() => setMode('add')}><Icon name="store" size={16} />+ Add Service Company</button>
+        actions={<><button className="aq-btn aq-btn--primary hb-add" onClick={() => setMode('add')}><Icon name="plus" size={16} />Add service company</button>
           <button className="aq-btn" onClick={() => setMode('convert')}><Icon name="users" size={16} />Convert Sales Prospects</button></>} />
       {mode === 'add' && <div style={{ marginBottom: 14 }}><AddCompanyWizard opts={opts} onDone={done} onCancel={() => setMode('')} /></div>}
       {mode === 'convert' && <div style={{ marginBottom: 14 }}><BulkConvert opts={opts} onDone={done} onCancel={() => setMode('')} /></div>}
@@ -533,10 +533,15 @@ export function ClientDirectory() {
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{c.service_category_label && <span className="aq-pill">{c.service_category_label}</span>}<Dot tone={STATUS_TONE[c.status]}>{STATUS_LABEL[c.status]}</Dot>
             <Dot tone={c.paused ? 'amber' : 'green'}>{c.paused ? 'Paused' : 'Running'}</Dot>
             {svc && <Dot tone={svc.items[c.organization_id]?.ops ? 'violet' : 'gray'}>Service Operations {svc.items[c.organization_id]?.ops ? 'on' : 'off'}</Dot>}</div>
+          <div className="hb-setup">{c.client_setup === 'done'
+            ? <Dot tone="green">Ready for review — client finished setup {c.setup_completed_at ? new Date(c.setup_completed_at).toLocaleDateString() : ''}</Dot>
+            : c.client_setup === 'started' ? <Dot tone="amber">Waiting on client — setup started</Dot>
+            : <Dot tone="gray">Waiting on client — setup not started</Dot>}
+            {c.offer_accepted_at && <span className="hb-muted"> · offer agreed {new Date(c.offer_accepted_at).toLocaleDateString()}</span>}</div>
           <div className="hb-muted">Client login: <Dot tone={INVITE_TONE[c.invitation.status]}>{c.invitation.label}</Dot>
             {c.invitation.status !== 'active' && <span> — the workspace exists, but the client can't sign in until they accept an invitation.</span>}</div>
           <div><div className="hb-muted" style={{ marginBottom: 4 }}>Onboarding {c.onboarding.done}/{c.onboarding.total}</div><div className="hb-bar"><i style={{ width: `${(c.onboarding.done / c.onboarding.total) * 100}%` }} /></div></div>
-          <div className="hb-muted">Territory: {c.territory_confirmed ? c.territory.join(', ') : <b style={{ color: '#fbbf24' }}>not confirmed</b>} · {c.offer_label}{c.pilot_started_at ? ' · pilot active' : ' · pilot not started'}</div>
+          <div className="hb-muted">Territory: {c.territory_confirmed ? c.territory.join(', ') : <b style={{ color: '#b26b00' }}>not confirmed</b>} · {c.offer_label}{c.pilot_started_at ? ' · pilot active' : ' · pilot not started'}</div>
           <dl><div><dt>Assigned</dt><dd>{c.assigned}</dd></div><div><dt>Verified contacts</dt><dd>{c.contacts_verified}</dd></div><div><dt>Contacted</dt><dd>{c.contacted}</dd></div>
             <div><dt>Appointments</dt><dd>{c.booked}</dd></div><div><dt>Won</dt><dd>{c.won}</dd></div><div><dt>Monthly won</dt><dd>{money(c.monthly_value_won)}</dd></div></dl>
           <div className="aq-actions" style={{ marginTop: 0 }}>
