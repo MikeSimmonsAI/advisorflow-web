@@ -365,3 +365,17 @@ def test_reply_language_and_short_link(db_session, brand, manager, monkeypatch):
     url = BP.short_url_for(o)
     assert url.startswith("https://links.example.test/evosys-sales-public/b/") and len(url) < 70
     assert BP.by_code(db_session, url.rsplit("/", 1)[1]).id == o.id
+
+
+def test_ai_reply_gets_the_leads_own_booking_link(db_session, brand, manager, monkeypatch):
+    monkeypatch.setenv("PROGRAM_ASSET_BASE_URL", "https://links.example.test")
+    o, fake, sent = _auto_world(db_session, brand, manager, monkeypatch, {
+        "category": "interested", "summary": "", "simple": True, "draft": "Great! Book here: https://x.test"})
+    s = O.get_settings(db_session, brand.id)
+    s.booking_url = "https://links.example.test/evosys-sales-public/book"
+    for c in CA.all_for(db_session, s):
+        c.booking_url = s.booking_url
+    db_session.commit()
+    IN.handle(db_session, from_number="+12145550120", to_number=TEAM_NO, body="Yes", message_sid="SMbl1")
+    link = _json.loads(fake.seen[0]["messages"][1]["content"])["booking_link"]
+    assert "/evosys-sales-public/b/" in link
