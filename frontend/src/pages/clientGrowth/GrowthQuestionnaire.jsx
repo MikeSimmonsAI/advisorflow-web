@@ -11,8 +11,8 @@
  * Phone (< 900px): three steps with Back / Continue and visible progress.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { API_BASE } from '../../api/client'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { API_BASE, api } from '../../api/client'
 import '@fontsource/playfair-display/600.css'
 import '@fontsource/playfair-display/700.css'
 import './growthQuestionnaire.css'
@@ -234,9 +234,15 @@ function Panel ({ panel }) {
   )
 }
 
-function Shell ({ product, children }) {
+function Shell ({ product, children, preview }) {
   return (
     <div className="gq-page">
+      {preview ? (
+        <div className="gq-preview-bar" role="status">
+          <strong>Preview</strong> — this is what your prospect sees. Nothing is saved and no one is notified.
+          <Link to="/client-growth?tab=templates">Back to Client Growth</Link>
+        </div>
+      ) : null}
       <Header product={product || 'Agency Growth Questionnaire'} />
       <main className="gq-main">{children}</main>
     </div>
@@ -255,8 +261,16 @@ function Notice ({ title, message, action }) {
 
 /* ── page ────────────────────────────────────────────────────────────────── */
 
-export default function GrowthQuestionnaire () {
-  const { inviteToken } = useParams()
+/* PREVIEW (/client-growth/preview/:templateId): the same page for signed-in
+ * Client Growth staff, built from the template itself. No invitation is read,
+ * opened or answered, and Submit saves nothing. */
+export function GrowthQuestionnairePreview () {
+  return <GrowthQuestionnaire preview />
+}
+
+export default function GrowthQuestionnaire ({ preview = false }) {
+  const { inviteToken, templateId } = useParams()
+  const [search] = useSearchParams()
   const phone = useIsPhone()
   const [state, setState] = useState({ phase: 'loading' })
   const [answers, setAnswers] = useState({})
@@ -270,6 +284,22 @@ export default function GrowthQuestionnaire () {
 
   const load = useCallback(async () => {
     setState({ phase: 'loading' })
+    if (preview) {
+      try {
+        const r = await api.get('/client-growth/templates/' + encodeURIComponent(templateId || ''))
+        const d = r.definition || {}
+        const pub = { ...(d.public || {}) }
+        const who = search.get('for') || 'Your prospect'
+        pub.eyebrow = (pub.eyebrow || '').replace('{prepared_for}', who)
+        const prefill = {}
+        for (const k of ['contact_name', 'business_name', 'email']) if (search.get(k)) prefill[k] = search.get(k)
+        setAnswers(prefill)
+        setState({ phase: 'ready', data: { state: 'ready', public: pub, steps: d.steps || [], prefill } })
+      } catch (e) {
+        setState({ phase: 'error' })
+      }
+      return
+    }
     try {
       const res = await fetch(`${API_BASE}/client-growth-public/invitations/${encodeURIComponent(inviteToken || '')}`,
         { cache: 'no-store', referrerPolicy: 'no-referrer' })
@@ -282,7 +312,7 @@ export default function GrowthQuestionnaire () {
     } catch {
       setState({ phase: 'error' })
     }
-  }, [inviteToken])
+  }, [inviteToken, preview, templateId, search])
   useEffect(() => { load() }, [load])
 
   const steps = state.data?.steps || []
@@ -340,6 +370,12 @@ export default function GrowthQuestionnaire () {
       focusFirst(all)
       return
     }
+    if (preview) {
+      const first = String(answers.contact_name || '').trim().split(/\s+/)[0] || 'there'
+      setState({ phase: 'success', message: (state.data.public.success || 'Thanks, {first_name}.').replace('{first_name}', first), data: state.data })
+      window.scrollTo(0, 0)
+      return
+    }
     sending.current = true
     setBusy(true)
     try {
@@ -386,19 +422,19 @@ export default function GrowthQuestionnaire () {
   ), [pub.eyebrow, pub.headline, pub.description, pub.estimate])
 
   if (state.phase === 'loading') {
-    return <Shell><div className="gq-loading" role="status" aria-live="polite"><span className="gq-spinner" aria-hidden="true" />Loading your questionnaire…</div></Shell>
+    return <Shell preview={preview}><div className="gq-loading" role="status" aria-live="polite"><span className="gq-spinner" aria-hidden="true" />Loading your questionnaire…</div></Shell>
   }
   if (state.phase === 'error') {
-    return <Shell><Notice title="We couldn't load this page" message="Something went wrong on our side or with the connection. Your link is fine."
+    return <Shell preview={preview}><Notice title="We couldn't load this page" message="Something went wrong on our side or with the connection. Your link is fine."
       action={<button type="button" className="gq-cta gq-cta--small" onClick={load}>Try again</button>} /></Shell>
   }
-  if (state.phase === 'invalid') return <Shell><Notice title="Link not found" message={state.message || 'This questionnaire link isn’t valid. Please check the link you were sent.'} /></Shell>
-  if (state.phase === 'revoked') return <Shell><Notice title="This link is no longer active" message={state.message} /></Shell>
-  if (state.phase === 'expired') return <Shell><Notice title="This link has expired" message={state.message} /></Shell>
-  if (state.phase === 'submitted') return <Shell><Notice title="Answers already received" message={state.message} /></Shell>
+  if (state.phase === 'invalid') return <Shell preview={preview}><Notice title="Link not found" message={state.message || 'This questionnaire link isn’t valid. Please check the link you were sent.'} /></Shell>
+  if (state.phase === 'revoked') return <Shell preview={preview}><Notice title="This link is no longer active" message={state.message} /></Shell>
+  if (state.phase === 'expired') return <Shell preview={preview}><Notice title="This link has expired" message={state.message} /></Shell>
+  if (state.phase === 'submitted') return <Shell preview={preview}><Notice title="Answers already received" message={state.message} /></Shell>
   if (state.phase === 'success') {
     return (
-      <Shell product={pub.product}>
+      <Shell product={pub.product} preview={preview}>
         <div className="gq-notice gq-success" role="status" aria-live="polite">
           <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="21" /><path d="M14 25l7 7 13-15" /></svg>
           <h1>{(state.message || '').split('. ')[0] + '.'}</h1>
@@ -410,7 +446,7 @@ export default function GrowthQuestionnaire () {
 
   const last = stepIx === steps.length - 1
   return (
-    <Shell product={pub.product}>
+    <Shell product={pub.product} preview={preview}>
       {intro}
       {phone ? (
         <ol className="gq-progress" aria-label="Progress">

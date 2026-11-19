@@ -188,3 +188,8 @@
 @media (min-width: 900px) {
   .gq-back { display: none; }
 }
+
+/* staff preview banner */
+.gq-preview-bar { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; justify-content: center; padding: 9px 16px;
+  background: #fff4d6; color: #5c4300; font-size: 14px; border-bottom: 1px solid #f2dd9c; }
+.gq-preview-bar a { color: var(--gq-navy); font-weight: 700; }
