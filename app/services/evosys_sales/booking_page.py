@@ -26,6 +26,7 @@ from app.models.sales_models import Opportunity, OpportunityEvent
 log = logging.getLogger(__name__)
 PATH = "/evosys-sales-public/book"
 MEETING_KEY = "discovery"          # the existing 30-minute intro call type
+GAP_MINUTES = 15                   # owner, 2026-11-18: 15 minutes free after each call
 
 
 def base_url() -> str:
@@ -101,6 +102,13 @@ def slots(db: Session, opp: Opportunity, start: Optional[date] = None, days: int
         log.info("[evosys-sales booking] no slots for %s: %s", opp.id, e.detail)
         return {"slots": [], "problem": "unavailable"}
     now = datetime.utcnow() + timedelta(hours=2)          # never offer a time less than 2 hours out
+    dur = timedelta(minutes=((mt.duration_minutes if mt else 30) or 30))
+    gap = timedelta(minutes=GAP_MINUTES)
+    from app.models.scheduling_models import AppointmentParticipant
+    busy = [(p.busy_start_at, p.busy_end_at) for p in db.query(AppointmentParticipant).filter(
+        AppointmentParticipant.user_id == owner.id, AppointmentParticipant.is_blocking.is_(True),
+        AppointmentParticipant.busy_end_at >= datetime.combine(start, datetime.min.time()) - timedelta(days=1),
+        AppointmentParticipant.busy_start_at <= datetime.combine(start, datetime.min.time()) + timedelta(days=days + 1)).all()]
     out = []
     for s in (r or {}).get("slots") or []:
         st = s.get("starts_at") or s.get("start")
@@ -110,8 +118,12 @@ def slots(db: Session, opp: Opportunity, start: Optional[date] = None, days: int
                 t = t.astimezone(__import__("datetime").timezone.utc).replace(tzinfo=None)
         except Exception:                                    # noqa: BLE001
             continue
-        if t >= now:
-            out.append(t.isoformat() + "Z")
+        if t < now:
+            continue
+        # keep GAP_MINUTES clear before and after every booked call
+        if any(t < e + gap and t + dur + gap > b for b, e in busy):
+            continue
+        out.append(t.isoformat() + "Z")
     return {"slots": out[:40], "duration_minutes": (mt.duration_minutes if mt else 30) or 30,
             "timezone": "America/Chicago"}
 

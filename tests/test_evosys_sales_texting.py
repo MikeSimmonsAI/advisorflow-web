@@ -418,3 +418,39 @@ def test_confirmation_has_zoom_and_speaks_spanish(db_session, brand, manager, mo
     monkeypatch.setattr(IN, "notify_owner", lambda *a: None)
     BP._after_booking(db_session, o, datetime(2026, 11, 24, 21, 30), "appt-1")
     assert sent and sent[0].startswith("¡Listo!") and "https://zoom.example/j/1" in sent[0] and "martes 24" in sent[0]
+
+
+def test_ai_learns_from_answers_a_person_sent(db_session, brand, manager, monkeypatch):
+    o, fake, sent = _auto_world(db_session, brand, manager, monkeypatch, {
+        "category": "interested", "summary": "", "simple": True, "draft": "Hi! Pick a time: https://x.test"})
+    other = _lead(db_session, brand, manager, "Earlier Co", phone="2145550160")
+    db_session.add(EvoSysOutreachMessage(brand_sales_org_id=brand.id, opportunity_id=other.id, direction="in",
+                                         channel="text", body="is this legit?", status="received",
+                                         created_at=datetime(2026, 11, 18, 20, 0)))
+    db_session.add(EvoSysOutreachMessage(brand_sales_org_id=brand.id, opportunity_id=other.id, direction="out",
+                                         channel="text", body="Totally legit! Grab a time: https://x/b/abc",
+                                         status="sent", actor_user_id=manager.id,
+                                         created_at=datetime(2026, 11, 18, 20, 5)))
+    db_session.commit()
+    IN.handle(db_session, from_number="+12145550120", to_number=TEAM_NO, body="Yes please", message_sid="SMex1")
+    ex = _json.loads(fake.seen[0]["messages"][1]["content"])["examples"]
+    assert ex == [{"they_said": "is this legit?", "mike_answered": "Totally legit! Grab a time: [booking link]"}]
+
+
+def test_booking_page_keeps_15_minutes_clear_around_calls(db_session, brand, manager, monkeypatch):
+    from datetime import timedelta as _td
+    from app.models.scheduling_models import SalesAppointment, AppointmentParticipant
+    import app.routers.sales_scheduling_router as SR
+    o = _lead(db_session, brand, manager, "Gap Co", phone="2145550161")
+    day = (datetime.utcnow() + _td(days=3)).replace(hour=20, minute=0, second=0, microsecond=0)
+    a = SalesAppointment(brand_sales_org_id=brand.id, title="x", starts_at=day, ends_at=day + _td(minutes=30),
+                         status="scheduled")
+    db_session.add(a); db_session.flush()
+    db_session.add(AppointmentParticipant(appointment_id=a.id, user_id=manager.id, busy_start_at=day,
+                                          busy_end_at=day + _td(minutes=30), is_blocking=True))
+    db_session.commit()
+    offered = [day + _td(minutes=m) for m in (-60, -45, -30, 30, 45, 60)]
+    monkeypatch.setattr(SR, "find_team_time", lambda body, user, db: {"slots": [{"starts_at": t.isoformat() + "Z"} for t in offered]})
+    got = BP.slots(db_session, o, day.date(), 2)["slots"]
+    mins = sorted(int((datetime.fromisoformat(x[:-1]) - day).total_seconds() // 60) for x in got)
+    assert mins == [-60, -45, 45, 60]        # -30 and +30 are inside the 15-minute gap

@@ -243,6 +243,8 @@ OFFER_FACTS = (
 
 TEXT_REPLY_SYSTEM = (
     "A cleaning business answered EvoSys Pro's text. " + OFFER_FACTS + " "
+    "facts.examples are real answers Mike sent or approved to earlier texts: match their tone, length and wording "
+    "style (never copy their links or names). Greet facts.their_name if given, otherwise just 'Hi!'. "
     "Using ONLY those facts and the JSON given, return JSON {\"category\": one of " + ", ".join(REPLY_CATEGORIES) + ", "
     "\"summary\": \"what they said, one sentence\", \"draft\": \"the text to send back\", \"simple\": true|false}. "
     "The draft: plain and friendly, from Mike, written ONLY in facts.reply_language, answers each thing they asked "
@@ -269,6 +271,37 @@ def looks_spanish(text) -> bool:
     return es > en
 
 
+def first_names(raw) -> Optional[str]:
+    """'Luz; Karla' -> 'Luz and Karla'; 'Imani McKinney' -> 'Imani'."""
+    parts = [p.strip() for p in re.split(r"[;,/&]|\band\b", raw or "") if p.strip()]
+    firsts = [p.split()[0] for p in parts if p.split()]
+    firsts = [f for f in firsts if f.lower() not in ("mz", "ms", "mr", "mrs", "miss")] or \
+        [" ".join(parts[0].split()[:2])] if parts else []
+    if not firsts:
+        return None
+    return firsts[0] if len(firsts) == 1 else ", ".join(firsts[:-1]) + " and " + firsts[-1]
+
+
+def approved_examples(db: Session, bso_id: str, lang: str, limit: int = 8) -> list:
+    """The last answers a PERSON sent by text (written or approved), each with
+    the text it answered - so AI drafts learn how Mike answers. AI's own
+    automatic answers are never used as examples."""
+    from app.models.evosys_sales_models import EvoSysOutreachMessage as M
+    outs = (db.query(M).filter(M.brand_sales_org_id == bso_id, M.channel == "text", M.direction == "out",
+                               M.status == "sent", M.actor_user_id.isnot(None))
+            .order_by(M.created_at.desc()).limit(40).all())
+    ex = []
+    for o in outs:
+        prev = (db.query(M).filter(M.opportunity_id == o.opportunity_id, M.direction == "in", M.channel == "text",
+                                   M.created_at <= o.created_at).order_by(M.created_at.desc()).first())
+        if prev is None or looks_spanish(o.body) != (lang == "Spanish"):
+            continue
+        ex.append({"they_said": (prev.body or "")[:300], "mike_answered": re.sub(r"https?://\S+", "[booking link]", o.body or "")[:400]})
+        if len(ex) >= limit:
+            break
+    return ex
+
+
 def text_name(name):
     from app.services.evosys_sales.outreach import text_company_name
     return text_company_name(name) or None
@@ -288,7 +321,8 @@ def text_reply(db: Session, settings, campaign, opp, reply_msg, conversation: li
     lang = "Spanish" if looks_spanish(reply_msg.body) else "English"
     facts = {"their_text": (reply_msg.body or "")[:1500], "reply_language": lang,
              "their_company": text_name(opp.company_name),
-             "their_name": opp.contact_name, "conversation": conversation[-8:],
+             "their_name": first_names(opp.contact_name), "conversation": conversation[-8:],
+             "examples": approved_examples(db, opp.brand_sales_org_id, lang),
              "booking_link": _lead_booking_link(settings, campaign, opp),
              "sender_name": settings.sender_name or "Mike"}
 
