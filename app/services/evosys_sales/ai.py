@@ -35,7 +35,7 @@ from app.models.evosys_sales_models import EvoSysAITask
 log = logging.getLogger(__name__)
 FEATURE = "evosys_sales"
 CAPABILITY = {"group_lead": "lead_analysis", "draft_campaign": "campaign_copy", "reply_assist": "draft_reply",
-              "text_reply": "draft_reply"}
+              "text_reply": "draft_reply", "translate": "draft_reply"}
 TEXT_FEATURE = "evosys_sales_text_replies"
 REPLY_CATEGORIES = ("interested", "pricing", "question", "not_interested", "wrong_person", "unsubscribe", "unclear")
 MONEY_RE = re.compile(r"\$\s?\d[\d,]*(\.\d+)?|\b\d+\s?(dollars|usd)\b", re.I)
@@ -247,7 +247,8 @@ TEXT_REPLY_SYSTEM = (
     "facts.examples are real answers Mike sent or approved to earlier texts: match their tone, length and wording "
     "style (never copy their links or names). Greet facts.their_name if given, otherwise just 'Hi!'. "
     "Using ONLY those facts and the JSON given, return JSON {\"category\": one of " + ", ".join(REPLY_CATEGORIES) + ", "
-    "\"summary\": \"what they said, one sentence\", \"draft\": \"the text to send back\", \"simple\": true|false}. "
+    "\"summary\": \"what they said, one sentence IN ENGLISH\", \"draft\": \"the text to send back\", "
+    "\"draft_english\": \"the same draft in English (only when the draft is in Spanish)\", \"simple\": true|false}. "
     "The draft: plain and friendly, from Mike, written ONLY in facts.reply_language, answers each thing they asked "
     "directly (one short sentence each), and ends by asking for the short call with facts.booking_link. Keep the "
     "words (not counting the link) under 230 characters. Never invent prices, numbers of contracts, results, guarantees, dates or anything not in "
@@ -260,9 +261,12 @@ AUTO_CATEGORIES = ("interested", "question")
 _ES_WORDS = {"hola", "gracias", "que", "qué", "por", "para", "como", "cómo", "cuánto", "cuanto", "sí", "si", "pues",
              "mándeme", "manda", "trabajos", "limpieza", "usted", "gente", "quiero", "puedo", "nomás", "sea",
              "solo", "ahí", "estaré", "intentémoslo", "también", "dónde", "donde", "negocios", "citas", "gratis",
-             "le", "lo", "los", "las", "una", "el", "es", "está", "de", "y", "con", "mi", "su", "sus"}
+             "le", "lo", "los", "las", "una", "el", "es", "está", "de", "y", "con", "mi", "su", "sus", "me",
+             "interesa", "trabajo", "manera", "esa", "ese", "esta", "este", "bien", "bueno", "quien", "cuando",
+             "necesito", "tengo", "tiene", "ahora", "hoy", "mañana", "favor", "claro", "mucho", "nada", "nos",
+             "nosotros", "ustedes", "hacer", "hago", "cuesta", "precio", "llamar", "llamada", "ok", "vale"}
 _EN_WORDS = {"the", "and", "you", "what", "how", "is", "are", "thanks", "thank", "yes", "for", "your", "it", "this",
-             "of", "to", "do", "they", "free", "would", "can", "we", "i", "me", "my"}
+             "of", "to", "do", "they", "free", "would", "can", "we", "i", "my", "ok", "not", "interested", "call"}
 
 
 def looks_spanish(text) -> bool:
@@ -301,6 +305,37 @@ def approved_examples(db: Session, bso_id: str, lang: str, limit: int = 8) -> li
         if len(ex) >= limit:
             break
     return ex
+
+
+TRANSLATE_SYSTEM = ("Translate each string in facts.texts from Spanish into plain, natural American English, keeping "
+                    "the meaning and tone exactly (do not add or soften anything; keep links as they are). Return JSON "
+                    "{\"translations\": [one English string per input, same order]}.")
+
+
+def translate(texts: list, bso_id: str, actor: str, background: bool = False) -> list:
+    """English for each Spanish text (None where it failed). Never raises."""
+    if not texts:
+        return []
+    try:
+        raw = _ask("translate", actor, bso_id, TRANSLATE_SYSTEM, {"texts": [t[:1500] for t in texts]},
+                   background=background)
+        out = raw.get("translations") if isinstance(raw, dict) else None
+        if isinstance(out, list) and len(out) == len(texts):
+            return [str(x)[:2000] if x else None for x in out]
+    except Exception as exc:                                  # noqa: BLE001
+        log.warning("evosys_sales translate failed: %s", type(exc).__name__)
+    return [None] * len(texts)
+
+
+def fill_translations(db: Session, msgs: list, bso_id: str, actor: str, background: bool = False) -> None:
+    """Translate the Spanish messages in `msgs` that have no English yet."""
+    todo = [m for m in msgs if m.channel == "text" and not m.translation and looks_spanish(m.body)]
+    if not todo:
+        return
+    for m, t in zip(todo, translate([m.body or "" for m in todo], bso_id, actor, background)):
+        if t:
+            m.translation = t
+    db.flush()
 
 
 def text_name(name):
@@ -348,7 +383,8 @@ def text_reply(db: Session, settings, campaign, opp, reply_msg, conversation: li
             needs.append("The draft is not in %s - check it." % lang)
         auto_ok = (bool(raw.get("simple")) and cat in AUTO_CATEGORIES and not needs and bool(draft))
         out = {"category": cat, "summary": str(raw.get("summary") or "")[:400], "draft": draft,
-               "needs_person": needs, "auto_ok": auto_ok, "used_offer": True}
+               "needs_person": needs, "auto_ok": auto_ok, "used_offer": True,
+               "draft_english": (str(raw.get("draft_english") or "")[:600] or None) if lang == "Spanish" and draft else None}
         return {"output": out, "status": "needs_person" if needs else "done"}
     return run(db, kind="text_reply", target_id=reply_msg.id, bso_id=opp.brand_sales_org_id, user_id=user_id,
                facts=facts, system=TEXT_REPLY_SYSTEM, check=check, force=force, background=background)

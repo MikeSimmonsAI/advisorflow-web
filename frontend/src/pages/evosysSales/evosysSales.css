@@ -328,3 +328,7 @@
   display: flex; justify-content: center; }
 .evs .evs-logo-big img { max-width: 100%; max-height: 120px; object-fit: contain; }
 .evs .evs-email-logo { display: block; max-width: 220px; max-height: 90px; margin: 4px 0 10px; }
+
+.evs-translation { margin-top: 8px; padding: 8px 10px; border-left: 3px solid #0b62d6; background: rgba(11, 98, 214, 0.06); border-radius: 6px; }
+.evs-translation small { display: block; font-weight: 700; color: #0b62d6; margin-bottom: 2px; }
+.evs-translation p { margin: 0; white-space: pre-wrap; }

@@ -100,6 +100,7 @@ def _msg(m: EvoSysOutreachMessage) -> dict:
     return {"id": m.id, "direction": m.direction, "channel": m.channel, "step": m.step_no,
             "to": m.to_address, "subject": m.subject, "body": m.body, "status": m.status,
             "error": m.error, "how": m.match_method, "label": m.label, "campaign_id": m.campaign_id,
+            "translation": getattr(m, "translation", None),
             "at": m.created_at.isoformat() + "Z"}
 
 
@@ -280,6 +281,12 @@ def lead(opp_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     st = db.get(EvoSysOutreachState, o.id)
     msgs = (db.query(EvoSysOutreachMessage).filter(EvoSysOutreachMessage.opportunity_id == o.id)
             .order_by(EvoSysOutreachMessage.created_at).all())
+    try:
+        from app.services.evosys_sales import ai as _AIT
+        _AIT.fill_translations(db, msgs, c.bso, c.user.id)
+        db.commit()
+    except Exception:                                         # noqa: BLE001 - English is a convenience
+        db.rollback()
     events = (db.query(OpportunityEvent).filter(OpportunityEvent.opportunity_id == o.id)
               .order_by(OpportunityEvent.occurred_at.desc()).limit(30).all())
     from app.models.evosys_sales_models import EvoSysCampaign
