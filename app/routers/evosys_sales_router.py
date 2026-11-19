@@ -764,6 +764,19 @@ def booking_page(token: str, db: Session = Depends(get_db)):
                         headers={"Cache-Control": "no-store"})
 
 
+@public_router.get("/b/{code}")
+def booking_short(code: str, db: Session = Depends(get_db)):
+    """The short booking link used in texts: sends the business to its page."""
+    from fastapi.responses import RedirectResponse
+    from app.services.evosys_sales import booking_page as BP
+    o = BP.by_code(db, code)
+    if o is None:
+        return HTMLResponse(_PAGE % ("Link not recognized", "This booking link is not valid. Text us back and we'll set a time."),
+                            status_code=404)
+    db.commit()
+    return RedirectResponse(BP.url_for(o.id).replace(BP.base_url(), ""), status_code=302)
+
+
 @public_router.get("/book/{token}/slots")
 def booking_slots(token: str, request: Request, db: Session = Depends(get_db)):
     from datetime import date as _date

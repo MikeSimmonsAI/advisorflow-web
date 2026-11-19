@@ -49,6 +49,27 @@ def url_for(opp_id: str) -> str:
     return "%s/%s" % (page_base(), _u.make_token("evb:" + opp_id))
 
 
+def short_url_for(opp) -> str:
+    """A short link for texts: .../b/<10-character code>. The code is the
+    lead's existing random reply code (unique, unguessable); it redirects to
+    the full signed booking page. Falls back to the full link."""
+    from sqlalchemy.orm import object_session
+    from app.models.evosys_sales_models import EvoSysOutreachState
+    from app.services.evosys_sales import replies as R
+    db = object_session(opp)
+    st = db.get(EvoSysOutreachState, opp.id) if db is not None else None
+    if st is None:
+        return url_for(opp.id)
+    return "%s/b/%s" % (base_url() + PATH.rsplit("/", 1)[0], R.ensure_code(db, st))
+
+
+def by_code(db: Session, code: str):
+    from app.models.evosys_sales_models import EvoSysOutreachState
+    st = (db.query(EvoSysOutreachState).filter(EvoSysOutreachState.reply_code == code).first()
+          if code and len(code) <= 16 else None)
+    return db.get(Opportunity, st.opportunity_id) if st else None
+
+
 def read(token: str) -> Optional[str]:
     from app.services.programs import unsubscribe as _u
     raw = _u.read_token(token)
