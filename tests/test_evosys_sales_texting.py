@@ -379,3 +379,27 @@ def test_ai_reply_gets_the_leads_own_booking_link(db_session, brand, manager, mo
     IN.handle(db_session, from_number="+12145550120", to_number=TEAM_NO, body="Yes", message_sid="SMbl1")
     link = _json.loads(fake.seen[0]["messages"][1]["content"])["booking_link"]
     assert "/evosys-sales-public/b/" in link
+
+
+def test_text_reminders_day_before_and_hour_before_once_each(db_session, brand, manager, monkeypatch):
+    from datetime import timedelta as _td
+    from app.models.scheduling_models import SalesAppointment
+    _ready(db_session, brand)
+    o = _lead(db_session, brand, manager, "Remind Co", phone="2145550140")
+    call = datetime(2026, 11, 24, 16, 0)            # Tue 10:00 AM Central
+    db_session.add(SalesAppointment(brand_sales_org_id=brand.id, opportunity_id=o.id, title="Intro call",
+                                    starts_at=call, ends_at=call + _td(minutes=30), status="scheduled",
+                                    created_by_user_id=manager.id) if hasattr(SalesAppointment, "created_by_user_id")
+                   else SalesAppointment(brand_sales_org_id=brand.id, opportunity_id=o.id, title="Intro call",
+                                         starts_at=call, ends_at=call + _td(minutes=30), status="scheduled"))
+    db_session.commit()
+    sent = []
+    monkeypatch.setattr(O, "_send_text", lambda to, body, s: sent.append(body) or {"success": True})
+    BP.send_reminders(db_session, datetime(2026, 11, 23, 8, 0))     # Mon 2 AM Central: too early, nothing
+    assert not sent
+    BP.send_reminders(db_session, datetime(2026, 11, 23, 17, 0))    # Mon 11 AM Central: day-before
+    BP.send_reminders(db_session, datetime(2026, 11, 23, 18, 0))    # again: not repeated
+    assert len(sent) == 1 and "tomorrow at 10:00 AM Central" in sent[0]
+    BP.send_reminders(db_session, datetime(2026, 11, 24, 15, 0))    # 1 hour before
+    BP.send_reminders(db_session, datetime(2026, 11, 24, 15, 10))
+    assert len(sent) == 2 and "in about an hour" in sent[1]
