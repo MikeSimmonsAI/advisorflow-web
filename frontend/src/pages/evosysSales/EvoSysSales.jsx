@@ -732,7 +732,7 @@ function ReplyHelp({ lead, reply, saved, onSent }) {
     <section className="evs-card evs-replyhelp">
       <h3 className="evs-h3i"><Icon name="reply" size={18} />They replied {when(reply.at)}</h3>
       <blockquote className="evs-quoteblock">{reply.body}</blockquote>
-      <p className="evs-hint">{isText ? 'Their automatic texts already stopped.' : 'Their emails already stopped.'} {reply.how === 'reply_address' ? 'Matched by their reply address.' : reply.how === 'sender' ? 'Matched by their email address.' : ''}</p>
+      <p className="evs-hint">{isText ? 'Their automatic texts already stopped.' : 'Their emails already stopped.'} {reply.how === 'reply_address' ? 'Matched by their reply address.' : reply.how === 'sender' ? (isText ? 'Matched by their phone number.' : 'Matched by their email address.') : ''}</p>
       {!t && (
         <div className="evs-actions">
           <button className="evs-btn" disabled={busy} onClick={() => ask(false)}><Icon name="spark" size={16} />{busy ? 'Reading…' : 'Summarise and draft an answer'}</button>
@@ -774,7 +774,7 @@ function Message({ m }) {
   const problem = m.status === 'held' ? (m.channel === 'text' ? 'Not sent - no texting number yet' : 'Not sent') : m.status === 'failed' ? 'Did not send' : null
   return (
     <div className={'evs-msg ' + (inbound ? 'in' : 'out')}>
-      <div className="evs-msg-head"><b>{who}</b><small>{when(m.at)}{inbound && HOW[m.how] ? ' · ' + HOW[m.how] : ''}</small>
+      <div className="evs-msg-head"><b>{who}</b><small>{when(m.at)}{inbound && HOW[m.how] ? ' · ' + (m.channel === 'text' && m.how === 'sender' ? 'matched by their phone number' : HOW[m.how]) : ''}</small>
         {m.label && m.label !== 'ai_answer' && <span className="evs-pill evs-gold">{CATEGORY[m.label] || m.label}</span>}
         {problem && <span className="evs-pill evs-bad">{problem}</span>}
       </div>

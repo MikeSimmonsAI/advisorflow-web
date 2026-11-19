@@ -234,6 +234,9 @@ OFFER_FACTS = (
     "\"We're trying to earn your business before you get the business.\" It runs for 30 days. If they like the "
     "service, Mike will then talk with them about what the system looks like; they also get a back office to see how "
     "the system works. It works anywhere - it's all done online, so their location doesn't matter. "
+    "WHERE / WHAT KIND: the businesses we line up are in the cleaner's OWN service area, and they need the kind of "
+    "cleaning the cleaner already does (offices, medical, retail, homes - whatever they offer). On the call Mike asks "
+    "which cities they cover and what services they want, so the appointments fit them. "
     "NEXT STEP: a short call with Mike so he learns where they like to work, what services they offer and what "
     "kind of customers they want. It is NOT free cleaning, and we do NOT hand out job addresses yet - first the call, "
     "then we book the walkthroughs.")
@@ -242,22 +245,42 @@ TEXT_REPLY_SYSTEM = (
     "A cleaning business answered EvoSys Pro's text. " + OFFER_FACTS + " "
     "Using ONLY those facts and the JSON given, return JSON {\"category\": one of " + ", ".join(REPLY_CATEGORIES) + ", "
     "\"summary\": \"what they said, one sentence\", \"draft\": \"the text to send back\", \"simple\": true|false}. "
-    "The draft: plain and friendly, under 300 characters, from Mike, in the SAME language they wrote in (Spanish if "
-    "they wrote Spanish), answers exactly what they asked, and ends by asking for the short call with "
-    "facts.booking_link. Never invent prices, numbers of contracts, results, guarantees, dates or anything not in "
+    "The draft: plain and friendly, from Mike, written ONLY in facts.reply_language, answers each thing they asked "
+    "directly (one short sentence each), and ends by asking for the short call with facts.booking_link. Keep the "
+    "words (not counting the link) under 230 characters. Never invent prices, numbers of contracts, results, guarantees, dates or anything not in "
     "the facts; say 'our goal is' rather than promising. simple=true ONLY when they said yes / are interested, or "
     "asked whether it is free / what the catch is / how it works / what this is / whether it is real - things the "
     "facts fully answer. simple=false for anything else: angry, not interested, wrong number, asks for a price after "
     "the 30 days, asks something the facts don't answer, or you are unsure.")
 
 AUTO_CATEGORIES = ("interested", "question")
+_ES_WORDS = {"hola", "gracias", "que", "qué", "por", "para", "como", "cómo", "cuánto", "cuanto", "sí", "si", "pues",
+             "mándeme", "manda", "trabajos", "limpieza", "usted", "gente", "quiero", "puedo", "nomás", "sea",
+             "solo", "ahí", "estaré", "intentémoslo", "también", "dónde", "donde", "negocios", "citas", "gratis",
+             "le", "lo", "los", "las", "una", "el", "es", "está", "de", "y", "con", "mi", "su", "sus"}
+_EN_WORDS = {"the", "and", "you", "what", "how", "is", "are", "thanks", "thank", "yes", "for", "your", "it", "this",
+             "of", "to", "do", "they", "free", "would", "can", "we", "i", "me", "my"}
+
+
+def looks_spanish(text) -> bool:
+    words = re.findall(r"[a-záéíóúñü]+", (text or "").lower())
+    es = sum(w in _ES_WORDS for w in words) + 2 * len(re.findall(r"[ñ¿¡áéíóú]", (text or "").lower()))
+    en = sum(w in _EN_WORDS for w in words)
+    return es > en
+
+
+def text_name(name):
+    from app.services.evosys_sales.outreach import text_company_name
+    return text_company_name(name) or None
 
 
 def text_reply(db: Session, settings, campaign, opp, reply_msg, conversation: list, user_id: str,
                force: bool = False, background: bool = False) -> EvoSysAITask:
     """Summarise a text reply and draft the answer. `output.auto_ok` says the
     rules allow it to go out by itself; the caller decides."""
-    facts = {"their_text": (reply_msg.body or "")[:1500], "their_company": opp.company_name,
+    lang = "Spanish" if looks_spanish(reply_msg.body) else "English"
+    facts = {"their_text": (reply_msg.body or "")[:1500], "reply_language": lang,
+             "their_company": text_name(opp.company_name),
              "their_name": opp.contact_name, "conversation": conversation[-8:],
              "booking_link": ((campaign.booking_url if campaign else None) or settings.booking_url or ""),
              "sender_name": settings.sender_name or "Mike"}
@@ -276,8 +299,11 @@ def text_reply(db: Session, settings, campaign, opp, reply_msg, conversation: li
             draft = ""
         if cat in ("wrong_person", "unclear", "pricing"):
             needs.append("Read this one yourself.")
-        if len(draft) > 320:
+        words_only = re.sub(r"https?://\S+", "", draft)
+        if len(words_only) > 280:
             needs.append("The draft is long for a text - trim it.")
+        if draft and (looks_spanish(draft) != (lang == "Spanish")):
+            needs.append("The draft is not in %s - check it." % lang)
         auto_ok = (bool(raw.get("simple")) and cat in AUTO_CATEGORIES and not needs and bool(draft))
         out = {"category": cat, "summary": str(raw.get("summary") or "")[:400], "draft": draft,
                "needs_person": needs, "auto_ok": auto_ok, "used_offer": True}

@@ -349,3 +349,19 @@ def test_booking_page_renders_for_a_real_lead_only(db_session, brand, manager):
     page = R.booking_page(tok, db_session)
     assert page.status_code == 200 and b"Office Pride &mdash;" in page.body and b"(DFW)" not in page.body
     assert R.booking_page("nope", db_session).status_code == 404
+
+
+def test_reply_language_and_short_link(db_session, brand, manager, monkeypatch):
+    assert AI.looks_spanish("Con gusto nomás mándeme la dirección de los trabajos")
+    assert not AI.looks_spanish("Hi Mike, thanks for reaching out! What cities are the businesses located in?")
+    o, fake, sent = _auto_world(db_session, brand, manager, monkeypatch, {
+        "category": "question", "summary": "", "simple": True,
+        "draft": "Hola, gracias por su interés. Las empresas están en su zona. ¿Hablamos?"})
+    IN.handle(db_session, from_number="+12145550120", to_number=TEAM_NO,
+              body="Thanks! What cities are the businesses in, and is it really free?", message_sid="SMl1")
+    assert not sent                                   # Spanish draft to an English text: held for a person
+    assert '"reply_language": "English"' in fake.seen[0]["messages"][1]["content"]
+    monkeypatch.setenv("PROGRAM_ASSET_BASE_URL", "https://links.example.test")
+    url = BP.short_url_for(o)
+    assert url.startswith("https://links.example.test/evosys-sales-public/b/") and len(url) < 70
+    assert BP.by_code(db_session, url.rsplit("/", 1)[1]).id == o.id

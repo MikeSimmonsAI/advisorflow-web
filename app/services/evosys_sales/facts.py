@@ -52,7 +52,7 @@ def _booking_link(src, opp):
     url = (getattr(src, "booking_url", None) or "").strip() or None
     from app.services.evosys_sales import booking_page as BP
     if url and BP.is_page_base(url) and getattr(opp, "id", None):
-        return BP.url_for(opp.id)
+        return BP.short_url_for(opp)
     return url
 
 
