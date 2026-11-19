@@ -2166,9 +2166,16 @@ async def _evosys_sales_outreach_loop():
             async with record_job_run(JobName.EVOSYS_SALES_OUTREACH, db_factory=SessionLocal) as _m:
                 def _one_pass():
                     from app.services.evosys_sales import outreach as _O
+                    from app.services.evosys_sales import booking_page as _BP
                     db = SessionLocal()
                     try:
-                        return _O.run_pass(db)
+                        out = _O.run_pass(db) or {}
+                        try:
+                            out.update(_BP.send_reminders(db))
+                        except Exception:                    # noqa: BLE001 - never blocks the outreach pass
+                            db.rollback()
+                            _logger.exception("EvoSys Sales reminders failed")
+                        return out
                     finally:
                         db.close()
                 summary = await _off_loop(_one_pass)

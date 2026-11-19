@@ -770,12 +770,12 @@ const HOW = { reply_address: 'matched by their reply address', sender: 'matched 
 
 function Message({ m }) {
   const inbound = m.direction === 'in'
-  const who = inbound ? 'They replied' : m.label === 'ai_answer' ? 'AI answered' : m.channel === 'call' ? 'Call' : m.channel === 'text' ? (m.step ? 'Text ' + m.step : 'Your text') : m.step ? 'Email ' + m.step : 'Your answer'
+  const who = inbound ? 'They replied' : m.label === 'ai_answer' ? 'AI answered' : (m.label || '').startsWith('rd:') ? 'Reminder (day before)' : (m.label || '').startsWith('r1:') ? 'Reminder (1 hour before)' : m.label === 'booking_confirmation' ? 'Booking confirmed' : m.channel === 'call' ? 'Call' : m.channel === 'text' ? (m.step ? 'Text ' + m.step : 'Your text') : m.step ? 'Email ' + m.step : 'Your answer'
   const problem = m.status === 'held' ? (m.channel === 'text' ? 'Not sent - no texting number yet' : 'Not sent') : m.status === 'failed' ? 'Did not send' : null
   return (
     <div className={'evs-msg ' + (inbound ? 'in' : 'out')}>
       <div className="evs-msg-head"><b>{who}</b><small>{when(m.at)}{inbound && HOW[m.how] ? ' · ' + (m.channel === 'text' && m.how === 'sender' ? 'matched by their phone number' : HOW[m.how]) : ''}</small>
-        {m.label && m.label !== 'ai_answer' && <span className="evs-pill evs-gold">{CATEGORY[m.label] || m.label}</span>}
+        {m.label && CATEGORY[m.label] && <span className="evs-pill evs-gold">{CATEGORY[m.label]}</span>}
         {problem && <span className="evs-pill evs-bad">{problem}</span>}
       </div>
       {m.subject && <div className="evs-subject">{m.subject}</div>}

@@ -228,3 +228,79 @@ async function book(){const g=document.getElementById('go');g.disabled=true;g.te
 function done(t,already){app.innerHTML='<div class="ok"><div style="font-size:44px">&#9989;</div><h2>'+(already?'You\\'re already booked':'You\\'re booked!')+'</h2><p>'+fmtDay(t)+' at '+fmtT(t)+' Central.</p><p class="msg">Mike will call you then. We\\'ll text you a confirmation. Need a different time? Just text us back.</p></div>'}
 load();
 </script></body></html>"""
+
+
+# ── text reminders (owner request 2026-11-18) ─────────────────────────────────
+
+REMINDER_DAY_HOURS = (9, 19)        # day-before reminders only go 9 AM - 7 PM Central
+
+
+def _local(dt: datetime):
+    from zoneinfo import ZoneInfo
+    return dt.replace(tzinfo=__import__("datetime").timezone.utc).astimezone(ZoneInfo("America/Chicago"))
+
+
+def send_reminders(db: Session, now: Optional[datetime] = None) -> dict:
+    """Text each booked business a reminder the day before its intro call and
+    another 1 hour before, from the team number. Each reminder is recorded on
+    the lead and sent once per appointment time; a moved call gets new ones.
+    A business that opted out or is on Do Not Contact gets nothing."""
+    from app.models.evosys_sales_models import EvoSysOutreachMessage, EvoSysOutreachState
+    from app.models.scheduling_models import SalesAppointment
+    from app.services import sales_suppression as SDNC
+    from app.services.evosys_sales import outreach as O
+    now = now or datetime.utcnow()
+    out = {"reminders_sent": 0, "reminders_failed": 0}
+    bso = O.brand_id(db)
+    if not bso:
+        return out
+    s = O.get_settings(db, bso)
+    if not O.e164(s.sms_from_number):
+        return out
+    appts = (db.query(SalesAppointment)
+             .filter(SalesAppointment.brand_sales_org_id == bso, SalesAppointment.status == "scheduled",
+                     SalesAppointment.opportunity_id.isnot(None),
+                     SalesAppointment.starts_at > now, SalesAppointment.starts_at <= now + timedelta(hours=30))
+             .all())
+    for a in appts:
+        opp = db.get(Opportunity, a.opportunity_id)
+        to = O.e164(opp.phone) if opp is not None else None
+        if not to:
+            continue
+        st = db.get(EvoSysOutreachState, opp.id)
+        if (st is not None and st.opted_out_at) or SDNC.for_opportunity(db, opp) or SDNC.find(db, bso, opp.phone, opp.email):
+            continue
+        left = a.starts_at - now
+        kind = None
+        if left <= timedelta(minutes=75):
+            kind = "reminder_1h"
+        elif left <= timedelta(hours=28) and REMINDER_DAY_HOURS[0] <= _local(now).hour < REMINDER_DAY_HOURS[1] \
+                and _local(a.starts_at).date() > _local(now).date():
+            kind = "reminder_day"
+        if kind is None:
+            continue
+        stamp = a.starts_at.strftime("%Y%m%d%H%M")
+        tag = ("r1:" if kind == "reminder_1h" else "rd:") + stamp          # fits the 30-character label
+        if db.query(EvoSysOutreachMessage.id).filter(EvoSysOutreachMessage.opportunity_id == opp.id,
+                                                     EvoSysOutreachMessage.label == tag).first():
+            continue
+        if kind == "reminder_day" and db.query(EvoSysOutreachMessage.id).filter(
+                EvoSysOutreachMessage.opportunity_id == opp.id,
+                EvoSysOutreachMessage.label == "r1:" + stamp).first():
+            continue
+        t = _local(a.starts_at).strftime("%-I:%M %p")
+        when = ("tomorrow at %s Central" % t) if kind == "reminder_day" else ("in about an hour, at %s Central" % t)
+        body = ("Reminder: your call with Mike from EvoSys Pro about your 3 free appointments is %s. "
+                "Need a different time? Just text back." % when)
+        try:
+            r = O._send_text(to, body, s)
+        except Exception as e:                               # noqa: BLE001
+            r = {"success": False, "error": str(e)}
+        ok = bool(r.get("success"))
+        db.add(EvoSysOutreachMessage(brand_sales_org_id=bso, opportunity_id=opp.id, direction="out", channel="text",
+                                     to_address=to, body=body, label=tag, status="sent" if ok else "failed",
+                                     error=None if ok else str(r.get("error") or "")[:500],
+                                     provider_message_id=r.get("provider_message_id"), created_at=now))
+        db.commit()
+        out["reminders_sent" if ok else "reminders_failed"] += 1
+    return out
