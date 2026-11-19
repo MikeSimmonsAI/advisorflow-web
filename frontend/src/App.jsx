@@ -496,7 +496,7 @@ import AIWorkforceEmployee from './pages/AIWorkforceEmployee'
 import AIWorkforceHome from './pages/AIWorkforceHome'
 const GodAIWorkforceBuilder = lazyPage(() => import('./pages/god/GodAIWorkforceBuilder'))
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
-         api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext, setBrandContext,
+         api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext, setBrandContext, getAcqClientView,
          clearWorkspaceContext, getBranding, fetchAndStoreBranding } from './api/client'
 import { decideWorkspaceAccess, contextsListWorkspace,
          VERIFYING, AUTHORIZED, DENIED, UNVERIFIED } from './auth/workspaceGuard'
@@ -606,6 +606,13 @@ function ExperienceGate({ children }) {
   const user = getCurrentUser()
   const here = typeof window !== 'undefined' ? window.location.pathname : ''
   if (phase === 'loading' && !ctx) return null
+  // EvoSys staff looking through a client's portal see exactly the client's
+  // pages: a general-platform screen opened then goes to the portal, the same
+  // as for the client's own login (the server applies the client's lock too).
+  const ownWay = ['/program/acquisition', '/acquisition-ops', '/workspaces', '/god', '/login', '/logout', '/change-password']
+  if (getAcqClientView() && !ownWay.some(p => here === p || here.startsWith(p + '/'))) {
+    return <Navigate to="/program/acquisition" replace />
+  }
   const to = experienceRedirect(ctx, here, getWorkspaceContext(), user?.organization_id, user?.role)
   if (to) return <Navigate to={to} replace />
   return children
