@@ -15,6 +15,7 @@ export function ServiceOpsAdmin() {
   const [d, err, reload] = useLoad(orgId ? `/acquisition-ops/${orgId}/service-ops` : null)
   const [ask, setAsk] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [demo, setDemo] = useState(null)
   const [toast, say] = useToast()
   const flip = async (key, on, extra = {}) => {
     setBusy(true)
@@ -57,6 +58,15 @@ export function ServiceOpsAdmin() {
             </div>
           </section>))}
       </div>
+      <section className="aq-card"><h2>Example data for demos</h2>
+        <p className="aq-lede">Fills this company with example appointments, results, customers, crew, jobs, recurring service, an estimate and invoices so every client screen has something to show. Every name says “(Example)”. Nothing is emailed, texted or put on a real calendar. Runs once per company.</p>
+        {demo && <div className="aq-note">{demo.status === 'already_filled' ? 'Example data was already added to this company.' : `Added ${demo.done.length} parts.`}
+          {demo.skipped?.length > 0 && <ul className="hw-reasons">{demo.skipped.map(x => <li key={x}>{x}</li>)}</ul>}</div>}
+        <div className="aq-actions"><button className="aq-btn aq-btn--primary" disabled={busy} onClick={async () => {
+          setBusy(true)
+          try { const r = await api.post(`/god/acquisition/clients/${orgId}/demo-fill`, {}); setDemo(r); reload() } catch (e) { say(errText(e)) } finally { setBusy(false) }
+        }}>{busy ? 'Working…' : 'Fill with example data'}</button></div>
+      </section>
       <section className="aq-card"><h2>When it’s off</h2><p className="aq-lede">{d.while_off}</p></section>
       {ask && <Confirm text="Turn Service Operations off?" danger confirmLabel="Turn off, keep everything"
         onCancel={() => setAsk(null)} onConfirm={() => flip(ask.key, false, { confirm_upcoming: true })}>

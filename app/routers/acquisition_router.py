@@ -261,6 +261,22 @@ def complete_setup(ctx: C.Ctx = Depends(ctx_dep)):
     return E.profile_json(ctx.org, p, full=False)
 
 
+@router.put("/availability", dependencies=_WRITE)
+def put_availability(payload: dict = Body(...), ctx: C.Ctx = Depends(ctx_dep)):
+    """The client's own availability for appointments EvoSys books: which
+    hours each weekday, how long a visit takes, notice and gaps between
+    visits, and where they meet. Calendar choice stays with EvoSys."""
+    C.require_manager(ctx)
+    allowed = {"booking_windows", "appointment_minutes", "min_notice_hours", "buffer_minutes",
+               "meeting_location", "timezone"}
+    body = {k: v for k, v in (payload or {}).items() if k in allowed}
+    out = CAL.update(ctx.db, ctx.org, ctx.user, body)
+    _audit(ctx.db, ctx.org_id, ctx.user, "acquisition_availability_update", "acquisition_profile", ctx.org_id,
+           {"fields": sorted(body.keys())})
+    out.pop("candidates", None)
+    return out
+
+
 @router.put("/logo", dependencies=_WRITE)
 def put_logo(payload: dict = Body(...), ctx: C.Ctx = Depends(ctx_dep)):
     """The company's own logo for its portal. Checked and re-drawn as a PNG by
@@ -630,6 +646,21 @@ def provision_client(request: Request, payload: dict = Body(...), db: Session = 
         _audit(db, out["organization_id"], god, "acquisition_client_onboarded", "organization", out["organization_id"],
                {"status": out["status"], "source": out.get("source"),
                 "invited": bool(out.get("invitation") and out["invitation"].get("status") == "invitation_pending")})
+    return out
+
+
+@god_router.post("/clients/{org_id}/demo-fill")
+def demo_fill(org_id: str, db: Session = Depends(get_db), god: User = Depends(require_acq_master)):
+    """Fill ONE company with "(Example)" records for a sales demo. Owner/master
+    only, explicit per company, once. Sends nothing."""
+    from app.services.acquisition import demo_fill as DF
+    org = _client_org(db, org_id)
+    try:
+        out = DF.fill(db, org, god)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    _audit(db, org.id, god, "acquisition_demo_fill", "organization", org.id,
+           {"status": out["status"], "parts": len(out["done"])})
     return out
 
 
