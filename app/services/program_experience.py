@@ -397,6 +397,17 @@ def enforce(db: Session, user, request: Request) -> None:
                 return
         except Exception:  # pragma: no cover - fall through to the normal lock
             pass
+    # CLIENT GROWTH is its own platform destination on the launcher: it opens
+    # for exactly the logins services/client_growth/access.py names (God Mode,
+    # the sales program owners, the client_growth grant), re-checked by every
+    # /client-growth handler. God Mode controls stay under /god/client-growth.
+    if path.startswith("/client-growth/"):
+        try:
+            from app.services.client_growth.access import level as _cg_level
+            if _cg_level(db, user):
+                return
+        except Exception:  # pragma: no cover - fall through to the normal lock
+            pass
     # VOLT MARKETING (#535) is its own destination on the launcher, not a
     # platform screen. Its operations open for a login the server confirms as
     # VOLT staff for THAT organization (the org id in the path is re-checked

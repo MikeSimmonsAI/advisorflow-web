@@ -629,3 +629,6 @@ import app.models.sales_contractor_models  # noqa: F401,E402  (imported for side
 import app.models.team_app_models  # noqa: F401  (imported for side effects)
 # EvoSys Sales program: outreach settings, per-lead follow-up state, message log.
 import app.models.evosys_sales_models  # noqa: F401,E402  (imported for side effects)
+# Client Growth: discovery questionnaire templates, private invitations,
+# original submissions and proposal-preparation tasks (prospects stay opportunities).
+import app.models.client_growth_models  # noqa: F401,E402  (imported for side effects)

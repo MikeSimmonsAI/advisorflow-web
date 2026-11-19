@@ -48,6 +48,10 @@ export function openProgramItem(item, navigate, opts = {}) {
     clearWorkspaceContext()
     navigate('/acquisition-ops'); return
   }
+  if (item.type === 'client_growth') {
+    clearWorkspaceContext()
+    navigate(item.path || '/client-growth'); return
+  }
   if (item.type === 'volt_ops' || item.type === 'consumer_leads') {
     clearWorkspaceContext()
     navigate(item.path); return

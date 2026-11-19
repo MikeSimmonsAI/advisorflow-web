@@ -1910,6 +1910,7 @@ ENUM_VALUES_TO_ADD = [
     ("notificationtype", "WHOLESALE_OFFER"),
     ("notificationtype", "WHOLESALE_APPOINTMENT"),
     ("notificationtype", "DEAL_ROOM"),
+    ("notificationtype", "CLIENT_GROWTH"),
 ]
 
 

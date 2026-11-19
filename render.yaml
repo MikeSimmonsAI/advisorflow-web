@@ -330,6 +330,17 @@ services:
       - path: /app.html
         name: Cache-Control
         value: no-cache
+      # CLIENT GROWTH private questionnaire links: never indexed, never cached,
+      # and the token in the address is never sent on as a referrer.
+      - path: /growth-plan/*
+        name: X-Robots-Tag
+        value: noindex, nofollow
+      - path: /growth-plan/*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /growth-plan/*
+        name: Cache-Control
+        value: no-store
     envVars:
       - key: NODE_VERSION
         value: "20.11.0"

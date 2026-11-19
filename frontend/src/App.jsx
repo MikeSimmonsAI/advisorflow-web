@@ -129,6 +129,10 @@ const InvestorPortal = lazyPage(() => import('./pages/investor/InvestorPortal'))
 // VOLT Marketing (#535): public applicant portal + rep dashboard, and staff operations.
 const VoltPortal = lazyPage(() => import('./pages/volt/VoltPortal'))
 const VoltOps = lazyPage(() => import('./pages/volt/VoltOps'))
+// CLIENT GROWTH: platform discovery workspace, its God Mode page, and the prospect's private form.
+const ClientGrowthWorkspace = lazyPage(() => import('./pages/clientGrowth/ClientGrowthWorkspace'))
+const GodClientGrowth = lazyPage(() => import('./pages/clientGrowth/GodClientGrowth'))
+const GrowthQuestionnaire = lazyPage(() => import('./pages/clientGrowth/GrowthQuestionnaire'))
 const ConsumerLeadsWorkspace = lazyPage(() => import('./pages/volt/ConsumerLeadsWorkspace'))
 const ConsumerSite = lazyPage(() => import('./pages/volt/ConsumerSite'))
 const ConsumerPrivacy = lazyPage(() => import('./pages/volt/ConsumerSite').then((m) => ({ default: m.ConsumerPrivacy })))
@@ -1257,6 +1261,7 @@ function WorkspaceSelector() {
   const ownerTools = ctx.project_checklist ? 1 : 0
   const otherDestinations = products.length + previews.length + (ctx.acquisition_ops || []).length
     + (ctx.consumer_leads_contexts || []).length
+    + (ctx.client_growth_contexts || []).length
     + (ctx.has_back_office ? 1 : 0) + (ctx.executive_contexts || []).length + dealBuilders + ownerTools
   if (volts.length === 1 && nonVolt.length === 0 && otherDestinations === 0) {
     clearWorkspaceContext()
@@ -1535,6 +1540,10 @@ export default function App() {
         <Route path="/volt/*" element={<VoltPortal />} />
         {/* VOLT OPERATIONS: staff via Program Access; /volt/ops/* re-checks authority on every request. */}
         <Route path="/volt-ops/:orgId/*" element={<ProtectedRoute bare><VoltOps /></ProtectedRoute>} />
+        {/* CLIENT GROWTH: staff via its Program Access card; /client-growth/* re-checks access on every request. */}
+        <Route path="/client-growth" element={<ProtectedRoute bare><ClientGrowthWorkspace /></ProtectedRoute>} />
+        {/* A prospect's private questionnaire: no login, no navigation; the token names one invitation. */}
+        <Route path="/growth-plan/:inviteToken" element={<GrowthQuestionnaire />} />
         {/* CONSUMER LEADS - VOLT Marketing's subsidiary, its own workspace; the server decides access. */}
         <Route path="/consumer-leads/:orgId/*" element={<ProtectedRoute bare><ConsumerLeadsWorkspace /></ProtectedRoute>} />
         {/* Connect ChatGPT (#571): handles its own sign-in redirect with ?next= */}
@@ -1985,6 +1994,7 @@ export default function App() {
         <Route path="/god/organizations" element={<GodRoute><GodModeLayout><GodOrganizations /></GodModeLayout></GodRoute>} />
         <Route path="/god/entitlements" element={<GodRoute><GodModeLayout><FeatureEntitlements /></GodModeLayout></GodRoute>} />
         <Route path="/god/sales-operations" element={<GodRoute><GodModeLayout><GodSalesOps /></GodModeLayout></GodRoute>} />
+        <Route path="/god/client-growth" element={<GodRoute><GodModeLayout><GodClientGrowth /></GodModeLayout></GodRoute>} />
         <Route path="/god/brands/:brandId" element={<GodRoute><GodModeLayout><GodBrandDetail /></GodModeLayout></GodRoute>} />
         <Route path="/god/provision/:oppId" element={<GodRoute><GodModeLayout><GodProvision /></GodModeLayout></GodRoute>} />
         <Route path="/god/implementations" element={<GodRoute><GodModeLayout><GodImplementations /></GodModeLayout></GodRoute>} />
