@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.deps import get_db
+from app.deps import get_db, require_god
 from app.limiter import limiter
 from app.models.models import User
 from app.models.sales_models import (
@@ -647,6 +647,39 @@ def put_my_availability(body: AvailabilityIn,
 
     db.commit()
     return _profile_out(db, prof)
+
+
+# ── owner: fix someone else's availability ──────────────────────────────────
+# Owner request 2026-11-18: the platform owner must be able to correct a team
+# member's hours (e.g. a blocked period saved as 11 PM instead of 11 AM)
+# without signing in as that person. GOD ONLY; same validation and
+# replace-in-place semantics as /availability/me, applied to the named user.
+
+def _owner_target(db: Session, user_id: str) -> User:
+    target = db.query(User).filter(User.id == user_id).first()
+    if target is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return target
+
+
+@router.get("/availability/users/{user_id}")
+def owner_get_availability(user_id: str, god: User = Depends(require_god),
+                           db: Session = Depends(get_db)):
+    target = _owner_target(db, user_id)
+    prof = av.get_or_create_profile(db, target)
+    db.commit()
+    return _profile_out(db, prof)
+
+
+@router.put("/availability/users/{user_id}")
+def owner_put_availability(user_id: str, body: AvailabilityIn,
+                           god: User = Depends(require_god),
+                           db: Session = Depends(get_db)):
+    target = _owner_target(db, user_id)
+    import logging
+    logging.getLogger(__name__).info("AUDIT: OWNER_EDIT_AVAILABILITY | admin=%s | user=%s | fields=%s",
+             god.email, target.id, sorted(body.model_dump(exclude_unset=True).keys()))
+    return put_my_availability(body, user=target, db=db)
 
 
 @router.post("/availability/time-off", status_code=201)
