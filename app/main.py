@@ -1288,6 +1288,10 @@ app.include_router(evosys_sales_router)         # /sales/evosys/* - EvoSys Sales
 from app.routers.evosys_sales_work_router import router as evosys_sales_work_router  # noqa: E402
 app.include_router(evosys_sales_work_router)    # /sales/evosys/* - campaigns, lead review, AI help, intro calls
 app.include_router(evosys_sales_public_router)  # /evosys-sales-public/* - opt-out link in outreach email
+from app.routers.evosys_open_booking_router import router as evosys_open_booking_router  # noqa: E402
+from app.routers.evosys_open_booking_router import public_router as evosys_open_booking_public_router  # noqa: E402
+app.include_router(evosys_open_booking_router)         # /sales/evosys/open-booking - Mike's one booking link (team)
+app.include_router(evosys_open_booking_public_router)  # /evosys-sales-public/meet - book a call with Mike, no lead needed
 # VOLT Google Sheets mirror: queue every lead/application change in its own
 # transaction (no Google call in any request; see sheets_outbox).
 from app.services.volt import sheets_outbox as _volt_sheets_outbox  # noqa: E402
