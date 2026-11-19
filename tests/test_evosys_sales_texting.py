@@ -454,3 +454,16 @@ def test_booking_page_keeps_15_minutes_clear_around_calls(db_session, brand, man
     got = BP.slots(db_session, o, day.date(), 2)["slots"]
     mins = sorted(int((datetime.fromisoformat(x[:-1]) - day).total_seconds() // 60) for x in got)
     assert mins == [-60, -45, 45, 60]        # -30 and +30 are inside the 15-minute gap
+
+
+def test_spanish_texts_get_english(db_session, brand, manager, monkeypatch):
+    o, fake, sent = _auto_world(db_session, brand, manager, monkeypatch, {"translations": ["Thanks, I'm not interested"]},
+                                auto=False)
+    IN.handle(db_session, from_number="+12145550120", to_number=TEAM_NO, body="Gracias no me interesa",
+              message_sid="SMes1")
+    m = db_session.query(EvoSysOutreachMessage).filter_by(provider_message_id="SMes1").one()
+    assert m.translation == "Thanks, I'm not interested"
+    # English texts are never sent for translation
+    n = len(fake.seen)
+    IN.handle(db_session, from_number="+12145550120", to_number=TEAM_NO, body="Thanks, what is this?", message_sid="SMes2")
+    assert len(fake.seen) == n

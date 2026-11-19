@@ -99,6 +99,18 @@ def handle(db: Session, *, from_number: str, to_number: str, body: str, message_
                                 summary="NEEDS A PERSON - replied by text, automatic follow-up stopped",
                                 detail=text[:2000], occurred_at=now))
     db.commit()
+    english = None
+    try:
+        from app.services.evosys_sales import ai as _AI
+        if _AI.looks_spanish(text):
+            new = (db.query(EvoSysOutreachMessage).filter(EvoSysOutreachMessage.opportunity_id == opp.id,
+                                                          EvoSysOutreachMessage.provider_message_id == message_sid).first())
+            if new is not None:
+                _AI.fill_translations(db, [new], bso, opp.owner_user_id or "system", background=True)
+                english = new.translation
+                db.commit()
+    except Exception:                                       # noqa: BLE001
+        db.rollback()
     if not opted_out:
         s = O.get_settings(db, bso)
         answered = None
@@ -107,7 +119,7 @@ def handle(db: Session, *, from_number: str, to_number: str, body: str, message_
         except Exception:                                   # noqa: BLE001 - the reply is safe on the lead
             db.rollback()
             log.exception("[evosys-sales sms] AI answer failed for lead %s", opp.id)
-        _alert_owner(db, s, opp, text, answered)
+        _alert_owner(db, s, opp, text + (" [English: %s]" % english if english else ""), answered)
     return True
 
 

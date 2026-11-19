@@ -731,7 +731,7 @@ function ReplyHelp({ lead, reply, saved, onSent }) {
   return (
     <section className="evs-card evs-replyhelp">
       <h3 className="evs-h3i"><Icon name="reply" size={18} />They replied {when(reply.at)}</h3>
-      <blockquote className="evs-quoteblock">{reply.body}</blockquote>
+      <blockquote className="evs-quoteblock">{reply.body}{reply.translation && <><br /><small><b>In English:</b> {reply.translation}</small></>}</blockquote>
       <p className="evs-hint">{isText ? 'Their automatic texts already stopped.' : 'Their emails already stopped.'} {reply.how === 'reply_address' ? 'Matched by their reply address.' : reply.how === 'sender' ? (isText ? 'Matched by their phone number.' : 'Matched by their email address.') : ''}</p>
       {!t && (
         <div className="evs-actions">
@@ -754,6 +754,7 @@ function ReplyHelp({ lead, reply, saved, onSent }) {
         <>
           {!isText && <label className="evs-field"><span>Subject</span><input className="evs-input" value={subject} onChange={e => setSubject(e.target.value)} /></label>}
           <label className="evs-field"><span>Your answer {t.manual ? '' : '(edit before sending)'}{isText ? ` - ${body.length} characters` : ''}</span><textarea className="evs-input" rows={isText ? 4 : 6} value={body} onChange={e => setBody(e.target.value)} placeholder="Write your answer…" /></label>
+          {isText && out.draft_english && body === out.draft && <p className="evs-hint"><b>In English:</b> {out.draft_english}</p>}
           <div className="evs-actions">
             <button className="evs-btn" disabled={busy || !body.trim()} onClick={send}>{isText ? 'Send text' : 'Send answer'}</button>
             {!t.manual && <button className="evs-btn evs-ghost" disabled={busy} onClick={() => ask(true)}>Draft again</button>}
@@ -780,6 +781,7 @@ function Message({ m }) {
       </div>
       {m.subject && <div className="evs-subject">{m.subject}</div>}
       <pre className="evs-body">{m.body}</pre>
+      {m.translation && <div className="evs-translation"><small>In English</small><p>{m.translation}</p></div>}
       {m.error && m.status === 'failed' && <small className="evs-err-small">{m.error}</small>}
     </div>
   )
