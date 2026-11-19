@@ -228,10 +228,11 @@ def reply_assist(db: Session, settings, campaign, opp, reply_msg, original_text:
 
 OFFER_FACTS = (
     "WHAT WE OFFER (the owner's own words - the only facts you may state): "
-    "Mike with EvoSys Pro books cleaning companies at least 3 appointments this month with businesses that need "
+    "Mike with EvoSys Pro books cleaning companies at least 3 appointments within the next 30 days with businesses that need "
     "cleaning, so the cleaner can do a walkthrough and give a quote. The cleaner does the selling and closing; we "
     "just get them in front of customers. It is absolutely free: no obligation, no contract, no hidden fees. "
-    "\"We're trying to earn your business before you get the business.\" It runs for 30 days. If they like the "
+    "\"We're trying to earn your business before you get the business.\" It runs for 30 days - always say 'within "
+    "30 days' / 'in the next 30 days', never 'this month' or 'by the end of the month'. If they like the "
     "service, Mike will then talk with them about what the system looks like; they also get a back office to see how "
     "the system works. It works anywhere - it's all done online, so their location doesn't matter. "
     "WHERE / WHAT KIND: the businesses we line up are in the cleaner's OWN service area, and they need the kind of "
