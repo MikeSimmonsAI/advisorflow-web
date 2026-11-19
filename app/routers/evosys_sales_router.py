@@ -820,13 +820,34 @@ def booking_slots(token: str, request: Request, db: Session = Depends(get_db)):
     start = start or datetime.utcnow().date()
     out = BP.slots(db, o, start, 7, exclude_appt_id=prior.id if (prior is not None and moving) else None)
     db.commit()
-    return {"slots": out.get("slots", []), "next_from": (start + timedelta(days=7)).isoformat(),
-            "duration_minutes": out.get("duration_minutes", 30)}
+    res = {"slots": out.get("slots", []), "next_from": (start + timedelta(days=7)).isoformat(),
+           "duration_minutes": out.get("duration_minutes", 30), "timezone": "America/Chicago"}
+    if out.get("problem"):
+        res["problem"] = "unavailable"          # customer sees a plain message; the reason is logged
+    if prior is not None and moving:
+        res["current"] = {"starts_at": prior.starts_at.isoformat() + "Z", "ends_at": prior.ends_at.isoformat() + "Z"}
+    return res
 
 
 class BookPublicIn(BaseModel):
     starts_at: datetime
     reschedule: bool = False
+
+
+@public_router.get("/book/{token}/event.ics")
+def booking_ics(token: str, db: Session = Depends(get_db)):
+    """The business's own call as a calendar file (its OWN appointment only -
+    the signed token names the lead; no appointment id is ever taken)."""
+    from fastapi.responses import Response
+    from app.services.evosys_sales import booking_page as BP
+    oid = BP.read(token)
+    o = db.get(Opportunity, oid) if oid else None
+    a = BP.current(db, o) if o is not None else None
+    if a is None:
+        raise HTTPException(404, "Not found.")
+    return Response(BP.ics_for(db, o, a), media_type="text/calendar; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="business-growth-call.ics"',
+                             "Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
 
 
 @public_router.post("/book/{token}")

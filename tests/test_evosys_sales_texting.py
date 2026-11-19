@@ -328,12 +328,22 @@ def test_booking_from_the_link_books_stops_and_confirms(db_session, brand, manag
     monkeypatch.setattr(BP, "slots", lambda db, opp, start=None, days=7: {"slots": [when.isoformat() + "Z"]})
     made = []
     import app.routers.sales_scheduling_router as SR
-    monkeypatch.setattr(SR, "create_appointment", lambda body, user, db: made.append(body) or {"id": "a1"})
+    from app.models.scheduling_models import SalesAppointment as _SA
+
+    def _mk(body, user, db):
+        made.append(body)
+        a = _SA(brand_sales_org_id=body.brand_sales_org_id, opportunity_id=body.opportunity_id, title=body.title,
+                starts_at=body.starts_at, ends_at=body.starts_at + _td(minutes=30), status="scheduled")
+        db.add(a); db.commit()
+        return {"id": a.id}
+    monkeypatch.setattr(SR, "create_appointment", _mk)
+    monkeypatch.setattr(BP, "zoom_state", lambda db, a, now=None: {"zoom_status": "ready", "zoom_url": "https://zoom.example/j/1"})
     sent, alerts = [], []
     monkeypatch.setattr(O, "_send_text", lambda to, body, s: sent.append((to, body)) or {"success": True})
     monkeypatch.setattr(IN, "notify_owner", lambda s, line, subj, html: alerts.append(line))
     out = BP.book(db_session, o, when)
     assert out["status"] == "booked" and made and made[0].opportunity_id == o.id
+    assert made[0].title == "Business Growth Call - Book Co" and out["duration_minutes"] == 30
     assert db_session.get(EvoSysOutreachState, o.id).stop_reason == "booked"
     assert sent and sent[0][0] == "+12145550131" and "booked" in sent[0][1]
     assert alerts and "BOOKED" in alerts[0]
@@ -517,6 +527,7 @@ def test_reschedule_moves_the_same_call(db_session, brand, manager, monkeypatch)
         db.flush()
     monkeypatch.setattr(SR, "reschedule_appointment", fake_move)
     monkeypatch.setattr(BP, "zoom_link", lambda db, i: "https://zoom.example/j/9")
+    monkeypatch.setattr(BP, "zoom_state", lambda db, a, now=None: {"zoom_status": "ready", "zoom_url": "https://zoom.example/j/9"})
     sent = []
     monkeypatch.setattr(O, "_send_text", lambda to, body, s: sent.append(body) or {"success": True})
     monkeypatch.setattr(IN, "notify_owner", lambda *x: None)
