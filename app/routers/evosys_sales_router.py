@@ -779,12 +779,9 @@ def booking_page(token: str, db: Session = Depends(get_db)):
     if o is None:
         return HTMLResponse(_PAGE % ("Link not recognized", "This booking link is not valid. Text us back and we'll set a time."),
                             status_code=404)
-    import html as _h
     from app.services.evosys_sales.outreach import text_company_name
-    name = text_company_name(o.company_name)
-    return HTMLResponse(BP.PAGE % {"company": (_h.escape(name) + " &mdash; ") if name else "",
-                                   "mins": 30, "token": _json.dumps(token), "base": _json.dumps(BP.PATH)},
-                        headers={"Cache-Control": "no-store"})
+    return HTMLResponse(BP.render(token, text_company_name(o.company_name), 30),
+                        headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex", "Referrer-Policy": "no-referrer"})
 
 
 @public_router.get("/b/{code}")
@@ -809,11 +806,10 @@ def booking_slots(token: str, request: Request, db: Session = Depends(get_db)):
     o = db.get(Opportunity, oid) if oid else None
     if o is None:
         raise HTTPException(404, "Not found.")
-    prior = (db.query(SalesAppointment).filter(SalesAppointment.opportunity_id == o.id,
-                                               SalesAppointment.status == "scheduled",
-                                               SalesAppointment.starts_at >= datetime.utcnow()).first())
-    if prior is not None:
-        return {"booked": prior.starts_at.isoformat() + "Z", "slots": []}
+    prior = BP.current(db, o)
+    moving = request.query_params.get("reschedule") == "1"
+    if prior is not None and not moving:
+        return {"booked": BP.booked_out(db, prior), "slots": []}
     start = None
     f = request.query_params.get("from")
     if f:
@@ -822,14 +818,36 @@ def booking_slots(token: str, request: Request, db: Session = Depends(get_db)):
         except ValueError:
             start = None
     start = start or datetime.utcnow().date()
-    out = BP.slots(db, o, start, 7)
+    out = BP.slots(db, o, start, 7, exclude_appt_id=prior.id if (prior is not None and moving) else None)
     db.commit()
-    return {"slots": out.get("slots", []), "next_from": (start + timedelta(days=7)).isoformat(),
-            "duration_minutes": out.get("duration_minutes", 30)}
+    res = {"slots": out.get("slots", []), "next_from": (start + timedelta(days=7)).isoformat(),
+           "duration_minutes": out.get("duration_minutes", 30), "timezone": "America/Chicago"}
+    if out.get("problem"):
+        res["problem"] = "unavailable"          # customer sees a plain message; the reason is logged
+    if prior is not None and moving:
+        res["current"] = {"starts_at": prior.starts_at.isoformat() + "Z", "ends_at": prior.ends_at.isoformat() + "Z"}
+    return res
 
 
 class BookPublicIn(BaseModel):
     starts_at: datetime
+    reschedule: bool = False
+
+
+@public_router.get("/book/{token}/event.ics")
+def booking_ics(token: str, db: Session = Depends(get_db)):
+    """The business's own call as a calendar file (its OWN appointment only -
+    the signed token names the lead; no appointment id is ever taken)."""
+    from fastapi.responses import Response
+    from app.services.evosys_sales import booking_page as BP
+    oid = BP.read(token)
+    o = db.get(Opportunity, oid) if oid else None
+    a = BP.current(db, o) if o is not None else None
+    if a is None:
+        raise HTTPException(404, "Not found.")
+    return Response(BP.ics_for(db, o, a), media_type="text/calendar; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="business-growth-call.ics"',
+                             "Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
 
 
 @public_router.post("/book/{token}")
@@ -842,7 +860,7 @@ def booking_book(token: str, body: BookPublicIn, db: Session = Depends(get_db)):
         raise HTTPException(404, "Not found.")
     if SDNC.for_opportunity(db, o):
         return {"status": "error", "message": "Please text us back to set a time."}
-    return BP.book(db, o, body.starts_at)
+    return BP.reschedule(db, o, body.starts_at) if body.reschedule else BP.book(db, o, body.starts_at)
 
 
 @public_router.get("/stop/{token}", response_class=HTMLResponse)

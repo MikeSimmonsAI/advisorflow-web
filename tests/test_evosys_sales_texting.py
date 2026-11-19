@@ -328,12 +328,22 @@ def test_booking_from_the_link_books_stops_and_confirms(db_session, brand, manag
     monkeypatch.setattr(BP, "slots", lambda db, opp, start=None, days=7: {"slots": [when.isoformat() + "Z"]})
     made = []
     import app.routers.sales_scheduling_router as SR
-    monkeypatch.setattr(SR, "create_appointment", lambda body, user, db: made.append(body) or {"id": "a1"})
+    from app.models.scheduling_models import SalesAppointment as _SA
+
+    def _mk(body, user, db):
+        made.append(body)
+        a = _SA(brand_sales_org_id=body.brand_sales_org_id, opportunity_id=body.opportunity_id, title=body.title,
+                starts_at=body.starts_at, ends_at=body.starts_at + _td(minutes=30), status="scheduled")
+        db.add(a); db.commit()
+        return {"id": a.id}
+    monkeypatch.setattr(SR, "create_appointment", _mk)
+    monkeypatch.setattr(BP, "zoom_state", lambda db, a, now=None: {"zoom_status": "ready", "zoom_url": "https://zoom.example/j/1"})
     sent, alerts = [], []
     monkeypatch.setattr(O, "_send_text", lambda to, body, s: sent.append((to, body)) or {"success": True})
     monkeypatch.setattr(IN, "notify_owner", lambda s, line, subj, html: alerts.append(line))
     out = BP.book(db_session, o, when)
     assert out["status"] == "booked" and made and made[0].opportunity_id == o.id
+    assert made[0].title == "Business Growth Call - Book Co" and out["duration_minutes"] == 30
     assert db_session.get(EvoSysOutreachState, o.id).stop_reason == "booked"
     assert sent and sent[0][0] == "+12145550131" and "booked" in sent[0][1]
     assert alerts and "BOOKED" in alerts[0]
@@ -347,7 +357,8 @@ def test_booking_page_renders_for_a_real_lead_only(db_session, brand, manager):
     o = _lead(db_session, brand, manager, "Office Pride (DFW)", phone="2145550133")
     tok = BP.url_for(o.id).rsplit("/", 1)[1]
     page = R.booking_page(tok, db_session)
-    assert page.status_code == 200 and b"Office Pride &mdash;" in page.body and b"(DFW)" not in page.body
+    assert page.status_code == 200 and b'"Office Pride"' in page.body and b"(DFW)" not in page.body
+    assert b"Business Growth Call" in page.body and b"Confirm my call" in page.body
     assert R.booking_page("nope", db_session).status_code == 404
 
 
@@ -494,3 +505,33 @@ def test_alerts_go_to_everyone_on_the_list_and_ai_sees_owner_examples(db_session
     assert sorted(mails) == ["michael@alerts.test", "owner@alerts.test"]
     facts = _json.loads(fake.seen[0]["messages"][1]["content"])
     assert facts["style_examples"][0].startswith("Hi! Mike here")
+
+
+
+def test_reschedule_moves_the_same_call(db_session, brand, manager, monkeypatch):
+    from datetime import timedelta as _td
+    from app.models.scheduling_models import SalesAppointment
+    import app.routers.sales_scheduling_router as SR
+    _ready(db_session, brand)
+    o = _lead(db_session, brand, manager, "Move Co", phone="2145550180")
+    t1 = datetime.utcnow().replace(microsecond=0, second=0, minute=0) + _td(days=2)
+    a = SalesAppointment(brand_sales_org_id=brand.id, opportunity_id=o.id, title="Intro", starts_at=t1,
+                         ends_at=t1 + _td(minutes=30), status="scheduled")
+    db_session.add(a); db_session.commit()
+    t2 = t1 + _td(hours=2)
+    seen = {}
+    monkeypatch.setattr(BP, "slots", lambda db, opp, start=None, days=7, exclude_appt_id=None:
+                        seen.update(ex=exclude_appt_id) or {"slots": [t2.isoformat() + "Z"]})
+    def fake_move(appt_id, body, user, db):
+        x = db.get(SalesAppointment, appt_id); x.starts_at = body.starts_at; x.ends_at = body.starts_at + _td(minutes=30)
+        db.flush()
+    monkeypatch.setattr(SR, "reschedule_appointment", fake_move)
+    monkeypatch.setattr(BP, "zoom_link", lambda db, i: "https://zoom.example/j/9")
+    monkeypatch.setattr(BP, "zoom_state", lambda db, a, now=None: {"zoom_status": "ready", "zoom_url": "https://zoom.example/j/9"})
+    sent = []
+    monkeypatch.setattr(O, "_send_text", lambda to, body, s: sent.append(body) or {"success": True})
+    monkeypatch.setattr(IN, "notify_owner", lambda *x: None)
+    out = BP.reschedule(db_session, o, t2)
+    assert out["status"] == "booked" and out["zoom_url"] == "https://zoom.example/j/9" and seen["ex"] == a.id
+    assert db_session.query(SalesAppointment).filter_by(opportunity_id=o.id).count() == 1
+    assert sent and "moved" in sent[0] and "zoom.example" in sent[0]
