@@ -184,23 +184,47 @@ def _auto_answer(db: Session, s, opp: Opportunity, message_sid: str) -> Optional
     return body if ok else None
 
 
+def recipients(s) -> list:
+    """(phone, email) for the owner and everyone on alert_also."""
+    out = [(s.alert_phone, s.alert_email)]
+    for r in (s.alert_also or []):
+        if isinstance(r, dict):
+            out.append((r.get("phone"), r.get("email")))
+    return out
+
+
 def notify_owner(s, line: str, subject: str, html_body: str) -> None:
-    """Text + email the team's alert phone / email (same path as SCI and
-    Restland alerts). Never raises: a failed alert loses nothing."""
-    if s.alert_phone:
+    """Text + email everyone who gets EvoSys Sales alerts (same path as SCI
+    and Restland alerts). Never raises: a failed alert loses nothing."""
+    from app.services.evosys_sales.outreach import e164
+    phones, emails = [], []
+    for ph, em in recipients(s):
+        if e164(ph) and e164(ph) not in phones:
+            phones.append(e164(ph))
+        if em and em.strip().lower() not in emails:
+            emails.append(em.strip().lower())
+    if phones:
         try:
             from app.services import sms_programs as _sci
             client, from_ = _sci.sci_sender()
             from app.services.twilio_callbacks import apply_status_callback
-            client.messages.create(**apply_status_callback(dict(body=line[:320], from_=from_, to=s.alert_phone)))
+            for ph in phones:
+                try:
+                    client.messages.create(**apply_status_callback(dict(body=line[:320], from_=from_, to=ph)))
+                except Exception:                           # noqa: BLE001
+                    log.exception("[evosys-sales] alert text to one recipient failed")
         except Exception:                                   # noqa: BLE001
             log.exception("[evosys-sales] owner alert text failed")
-    if s.alert_email:
+    if emails:
         try:
             from app.services.email_service import send_email_via_provider
             from app.services.evosys_sales.outreach import _Sender
-            send_email_via_provider(s.alert_email, subject, html_body,
-                                    org=_Sender(s), message_type="notification", sensitivity="none")
+            for em in emails:
+                try:
+                    send_email_via_provider(em, subject, html_body,
+                                            org=_Sender(s), message_type="notification", sensitivity="none")
+                except Exception:                           # noqa: BLE001
+                    log.exception("[evosys-sales] alert email to one recipient failed")
         except Exception:                                   # noqa: BLE001
             log.exception("[evosys-sales] owner alert email failed")
 

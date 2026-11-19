@@ -631,6 +631,8 @@ COLUMNS_TO_ADD = [
     ("evosys_outreach_settings", "alert_email", "VARCHAR"),
     ("evosys_outreach_settings", "text_auto_reply", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("evosys_outreach_messages", "translation", "TEXT"),
+    ("evosys_outreach_settings", "alert_also", "JSON"),
+    ("evosys_outreach_settings", "reply_examples", "JSON"),
     ("opportunities", "logo_quality", "VARCHAR"),
     ("opportunities", "logo_updated_at", "TIMESTAMP"),
     ("opportunities", "custom_unit_price", "NUMERIC(12,2)"),

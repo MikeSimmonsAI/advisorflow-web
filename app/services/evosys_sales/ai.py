@@ -235,6 +235,12 @@ OFFER_FACTS = (
     "30 days' / 'in the next 30 days', never 'this month' or 'by the end of the month'. If they like the "
     "service, Mike will then talk with them about what the system looks like; they also get a back office to see how "
     "the system works. It works anywhere - it's all done online, so their location doesn't matter. "
+    "HOW MIKE PUTS IT: we're testing a new appointment-setting service for cleaners and inviting companies to try "
+    "it free for 30 days. We find potential business customers and work to schedule appointments for them to visit, "
+    "give an estimate and win the cleaning business. They set their own prices, handle the walkthrough and keep the "
+    "cleaning revenue. The pilot goal is 3 appointments, with no fee or obligation to continue. It's free so we can "
+    "gather feedback and see how well it works for cleaning companies. Good questions to end on: which parts of "
+    "their area they serve, and what types of properties they want more of (offices, medical facilities, etc.). "
     "WHERE / WHAT KIND: the businesses we line up are in the cleaner's OWN service area, and they need the kind of "
     "cleaning the cleaner already does (offices, medical, retail, homes - whatever they offer). On the call Mike asks "
     "which cities they cover and what services they want, so the appointments fit them. "
@@ -250,8 +256,9 @@ TEXT_REPLY_SYSTEM = (
     "\"summary\": \"what they said, one sentence IN ENGLISH\", \"draft\": \"the text to send back\", "
     "\"draft_english\": \"the same draft in English (only when the draft is in Spanish)\", \"simple\": true|false}. "
     "The draft: plain and friendly, from Mike, written ONLY in facts.reply_language, answers each thing they asked "
-    "directly (one short sentence each), and ends by asking for the short call with facts.booking_link. Keep the "
-    "words (not counting the link) under 230 characters. Never invent prices, numbers of contracts, results, guarantees, dates or anything not in "
+    "directly, and ends by asking which areas they serve / what properties they want and offering the short call "
+    "with facts.booking_link. facts.style_examples are answers Mike wrote himself - follow their tone, structure "
+    "and length closely. Keep the words (not counting the link) under 600 characters. Never invent prices, numbers of contracts, results, guarantees, dates or anything not in "
     "the facts; say 'our goal is' rather than promising. simple=true ONLY when they said yes / are interested, or "
     "asked whether it is free / what the catch is / how it works / what this is / whether it is real - things the "
     "facts fully answer. simple=false for anything else: angry, not interested, wrong number, asks for a price after "
@@ -359,6 +366,7 @@ def text_reply(db: Session, settings, campaign, opp, reply_msg, conversation: li
              "their_company": text_name(opp.company_name),
              "their_name": first_names(opp.contact_name), "conversation": conversation[-8:],
              "examples": approved_examples(db, opp.brand_sales_org_id, lang),
+             "style_examples": [str(x)[:1200] for x in (settings.reply_examples or []) if str(x).strip()][:6],
              "booking_link": _lead_booking_link(settings, campaign, opp),
              "sender_name": settings.sender_name or "Mike"}
 
@@ -377,7 +385,7 @@ def text_reply(db: Session, settings, campaign, opp, reply_msg, conversation: li
         if cat in ("wrong_person", "unclear", "pricing"):
             needs.append("Read this one yourself.")
         words_only = re.sub(r"https?://\S+", "", draft)
-        if len(words_only) > 280:
+        if len(words_only) > 640:
             needs.append("The draft is long for a text - trim it.")
         if draft and (looks_spanish(draft) != (lang == "Spanish")):
             needs.append("The draft is not in %s - check it." % lang)

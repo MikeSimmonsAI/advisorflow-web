@@ -41,6 +41,11 @@ class EvoSysOutreachSettings(Base):
     # alert_phone / alert_email. Empty = no alert (the lead still shows it).
     alert_phone = Column(String(20), nullable=True)
     alert_email = Column(String, nullable=True)
+    # Everyone else who gets the same alerts (owner 2026-11-18: Michael
+    # Schlueter gets every reply and every booking too): [{"name","phone","email"}].
+    alert_also = Column(JSON, nullable=True)
+    # Example answers the owner wrote; AI text replies follow their style.
+    reply_examples = Column(JSON, nullable=True)
     # Owner request 2026-11-18: AI answers simple text replies on its own
     # (interested / "is it free" / "how does it work"); anything else waits
     # for a person with a draft ready. Off by default.

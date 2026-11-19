@@ -467,3 +467,30 @@ def test_spanish_texts_get_english(db_session, brand, manager, monkeypatch):
     n = len(fake.seen)
     IN.handle(db_session, from_number="+12145550120", to_number=TEAM_NO, body="Thanks, what is this?", message_sid="SMes2")
     assert len(fake.seen) == n
+
+
+def test_alerts_go_to_everyone_on_the_list_and_ai_sees_owner_examples(db_session, brand, manager, monkeypatch):
+    s = _ready(db_session, brand)
+    s.alert_phone, s.alert_email = "+18435550199", "owner@alerts.test"
+    s.alert_also = [{"name": "Michael", "phone": "+15405550111", "email": "michael@alerts.test"}]
+    s.reply_examples = ["Hi! Mike here with EvoSys Pro. We're testing a new appointment-setting service..."]
+    s.text_auto_reply = True
+    db_session.commit()
+    o = _lead(db_session, brand, manager, "Multi Co", phone="2145550170")
+    O.run_pass(db_session, MON_10AM, Rec(), Rec())
+    texts, mails = [], []
+
+    class _Msgs:
+        def create(self, **kw):
+            texts.append(kw["to"])
+
+    from app.services import sms_programs, email_service
+    monkeypatch.setattr(sms_programs, "sci_sender", lambda: (_NS(messages=_Msgs()), "+18449172171"))
+    monkeypatch.setattr(email_service, "send_email_via_provider", lambda to, subj, html, **kw: mails.append(to))
+    fake = _FakeAI({"category": "pricing", "summary": "", "simple": False, "draft": "Mike will follow up."})
+    monkeypatch.setattr(AI, "_get_client", lambda: fake)
+    IN.handle(db_session, from_number="+12145550170", to_number=TEAM_NO, body="How much after?", message_sid="SMcc1")
+    assert sorted(texts) == ["+15405550111", "+18435550199"]
+    assert sorted(mails) == ["michael@alerts.test", "owner@alerts.test"]
+    facts = _json.loads(fake.seen[0]["messages"][1]["content"])
+    assert facts["style_examples"][0].startswith("Hi! Mike here")
