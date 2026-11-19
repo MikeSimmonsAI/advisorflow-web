@@ -11,6 +11,7 @@ import { BusinessForm, Readiness } from './BusinessForm'
 import { Dot, Empty, Feed, Icon, Loading, PageHeader, Stat, Toolbar, clock, errText, initials, money, useLoad, useToast, when } from './ui'
 import { ReportResult, fmtWhen } from './ClientHome'
 import { useT } from './portalText'
+import { AvailabilityPanel } from './ClientTools'
 
 const STATUS_TONE = { appointment_booked: 'blue', appointment_held: 'green', no_show: 'amber', quote_issued: 'violet',
                       won: 'green', lost: 'gray' }
@@ -102,6 +103,7 @@ export function Home() {
 // ── Appointments ────────────────────────────────────────────────────────
 export function Appointments() {
   const [d, err] = useLoad('/acquisition/appointments')
+  const [toast, say] = useToast()
   const [tab, setTab] = useState('upcoming')
   const all = d?.all || []
   const lists = {
@@ -112,8 +114,9 @@ export function Appointments() {
     all,
   }
   return (
-    <div className="aq-page">
+    <div className="aq-page">{toast}
       <PageHeader eyebrow="Client Portal" title="Appointments" sub="Every appointment EvoSys booked for you, and where each one stands. Each is also on your connected calendar." />
+      <AvailabilityPanel say={say} />
       {err && <div className="aq-err" role="alert">This list couldn’t load. <button className="aq-btn aq-btn--sm" onClick={() => window.location.reload()}>Try again</button></div>}
       <div className="aq-tabs">
         {[['upcoming', `Upcoming (${lists.upcoming.length})`], ['completed', `Completed (${lists.completed.length})`], ['no_show', `No-shows (${lists.no_show.length})`], ['cancelled', `Cancelled (${lists.cancelled.length})`], ['all', `All (${all.length})`]].map(([k, l]) => (
@@ -242,22 +245,50 @@ export function Estimates() {
   // Every delivered prospect, not only those with a calendar booking: a quote
   // or contract still counts when the visit was booked by phone or moved.
   const [d, err] = useLoad('/acquisition/prospects')
+  const { ops } = useAcq() || {}
+  const opsOn = !!ops?.perms?.length
+  const canBill = !!ops?.perms?.includes('billing')
+  const canSched = !!ops?.perms?.includes('schedule')
+  const [won, , reloadWon] = useLoad(canSched ? '/service-ops/won' : null)
+  const [est] = useLoad(canBill ? '/service-ops/estimates' : null)
+  const [toast, say] = useToast()
+  const nav = useNavigate()
+  const [busy, setBusy] = useState(null)
   const all = d?.items || []
   const open = all.filter(x => x.stage === 'quote_issued')
-  const won = all.filter(x => x.stage === 'won')
-  const total = open.reduce((a, x) => a + (x.monthly_value || 0), 0)
-  const row = x => <div className="aq-row" key={x.id}><div className="aq-row__main"><b>{x.business_name}</b><span>{[x.segment_label, x.quote_amount != null ? `Estimate ${money(x.quote_amount)}` : null].filter(Boolean).join(' · ')}</span></div>
-    {x.monthly_value != null && <span className="aq-time">{money(x.monthly_value, '/mo')}</span>}<Link className="aq-btn aq-btn--sm" to={`${BASE}/appointments/${x.id}#outcome`}>Update</Link></div>
+  const wonList = all.filter(x => x.stage === 'won')
+  const total = open.reduce((a, x) => a + (x.monthly_value || x.quote_amount || 0), 0)
+  const jobFor = Object.fromEntries((won?.items || []).map(x => [x.id, x.job_id]))
+  const toJob = async x => {
+    setBusy(x.id)
+    try {
+      const r = await api.post(`/service-ops/won/${x.id}/convert`, { location: { name: x.business_name, service_category: 'cleaning', address: x.address || '' }, job: {} })
+      reloadWon(); say('Job created'); nav(`${BASE}/ops/jobs/${r.job.id}`)
+    } catch (e) { say(errText(e)) } finally { setBusy(null) }
+  }
+  const row = (x, isWon) => <div className="aq-row" key={x.id}><div className="aq-row__main"><b>{x.business_name}</b><span>{[x.segment_label, x.quote_amount != null ? `Estimate ${money(x.quote_amount)}` : null, x.contract_type === 'one_time' && x.contract_value != null ? `One-time ${money(x.contract_value)}` : null].filter(Boolean).join(' · ')}</span></div>
+    {x.monthly_value != null && <span className="aq-time">{money(x.monthly_value, '/mo')}</span>}
+    {isWon && canSched && (jobFor[x.id] ? <Link className="aq-btn aq-btn--sm" to={`${BASE}/ops/jobs/${jobFor[x.id]}`}>Open job</Link>
+      : <button className="aq-btn aq-btn--sm aq-btn--primary" disabled={busy === x.id} onClick={() => toJob(x)}>{busy === x.id ? 'Setting up…' : 'Turn into a job'}</button>)}
+    <Link className="aq-btn aq-btn--sm" to={`${BASE}/appointments/${x.id}#outcome`}>Update</Link></div>
   return (
-    <div className="aq-page">
-      <PageHeader eyebrow="Client Portal" title="Estimates & Contracts" sub="Quotes waiting on an answer, and contracts you’ve won. Mark each estimate won or lost when you hear back." />
+    <div className="aq-page">{toast}
+      <PageHeader eyebrow="Client Portal" title="Estimates & Contracts" sub="Quotes waiting on an answer, and contracts you’ve won. Mark each estimate won or lost when you hear back, then turn a win into scheduled work."
+        actions={opsOn && <>{canBill && <Link className="aq-btn aq-btn--primary" to={`${BASE}/ops/invoices?new=estimate`}>New estimate</Link>}
+          {canSched && <Link className="aq-btn" to={`${BASE}/ops/schedule?new=1`}>New recurring service</Link>}</>} />
       {err && <div className="aq-err">{errText(err)}</div>}
-      <div className="hb-stats"><Stat icon="doc" label="Open estimates" value={d ? open.length : '—'} /><Stat icon="chart" tone="blue" label="Monthly value quoted (forecast)" value={d ? money(total) : '—'} />
-        <Stat icon="handshake" tone="green" label="Contracts won" value={d ? won.length : '—'} /></div>
+      <div className="hb-stats"><Stat icon="doc" label="Open estimates" value={d ? open.length : '—'} /><Stat icon="chart" tone="blue" label="Value quoted (forecast)" value={d ? money(total) : '—'} />
+        <Stat icon="handshake" tone="green" label="Contracts won" value={d ? wonList.length : '—'} /></div>
+      {!opsOn && <div className="aq-note">Want to price jobs, send estimates and schedule the work here too? Ask EvoSys to turn on Service Operations for your account.</div>}
       <div className="aq-grid aq-two">
-        <section className="aq-card"><h2>Open estimates</h2>{!d ? <Loading /> : open.length ? open.map(row) : <Empty icon="doc" title="No open estimates" />}</section>
-        <section className="aq-card"><h2>Contracts won</h2>{!d ? <Loading /> : won.length ? won.map(row) : <Empty icon="handshake" title="No contracts won yet" />}</section>
+        <section className="aq-card"><h2>Estimates from your appointments</h2>{!d ? <Loading /> : open.length ? open.map(x => row(x, false)) : <Empty icon="doc" title="No open estimates" text="When you quote someone EvoSys booked, mark it on the appointment." />}</section>
+        <section className="aq-card"><h2>Contracts won</h2>{!d ? <Loading /> : wonList.length ? wonList.map(x => row(x, true)) : <Empty icon="handshake" title="No contracts won yet" />}</section>
       </div>
+      {canBill && <section className="aq-card"><h2>Your written estimates</h2>
+        {!est ? <Loading /> : !est.items.length ? <Empty icon="doc" title="No written estimates yet" text="Choose New estimate to price out work line by line." />
+          : est.items.map(e => <div className="aq-row" key={e.id}><div className="aq-row__main"><b>{e.number} · {e.customer_name}</b><span>${Number(e.total).toFixed(2)} · {e.status}{e.expires_on ? ` · expires ${e.expires_on}` : ''}</span></div>
+            <Link className="aq-btn aq-btn--sm" to={`${BASE}/ops/invoices`}>Open</Link></div>)}
+      </section>}
     </div>
   )
 }

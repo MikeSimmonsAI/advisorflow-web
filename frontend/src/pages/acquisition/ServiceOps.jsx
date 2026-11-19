@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, fetchObjectUrl } from '../../api/client'
 import { BASE, useAcq } from './AcquisitionShell'
+import { AvailabilityPanel, NewScheduleForm, QuickActions, qsNew } from './ClientTools'
 import { Confirm, Dot, Empty, Loading, PageHeader, Stat, Toolbar, errText, money, useLoad, useToast, when } from './ui'
 
 export const OPS = `${BASE}/ops`
@@ -57,6 +58,7 @@ export function OpsOverview() {
   return (
     <div className="aq-page">{toast}
       <PageHeader eyebrow="Service Operations" title="Operations" sub="The work you deliver after a contract is won." />
+      <QuickActions me={me} />
       {r && <div className="hb-stats">
         <Stat icon="check" tone="green" label="Completed (30 days)" value={r.completed_in_period} sub={r.on_time_rate !== null ? `${Math.round(r.on_time_rate * 100)}% started on time` : null} />
         <Stat icon="calendar" tone="blue" label="Recurring agreements" value={r.recurring_agreements} sub={`${money(r.recurring_monthly_value)}/mo expected`} />
@@ -93,7 +95,7 @@ export function OpsCustomers() {
   const [d, err, reload] = useLoad('/service-ops/customers')
   const [team] = useLoad('/service-ops/team')
   const [buyers, , reloadBuyers] = useLoad(can(me, 'buyers') && me?.buyer_portal_enabled ? '/service-ops/buyers' : null)
-  const [form, setForm] = useState(null)
+  const [form, setForm] = useState(() => (qsNew() ? { ...blankCust } : null))
   const [locFor, setLocFor] = useState(null)
   const [edit, setEdit] = useState(null)
   const [invite, setInvite] = useState(null)
@@ -204,6 +206,9 @@ export function OpsJobs() {
   const create = async () => {
     try { const r = await api.post('/service-ops/jobs', { ...nj, idempotency_key: nj.key }); nav(`${OPS}/jobs/${r.id}`) } catch (e) { say(errText(e)) }
   }
+  useEffect(() => {
+    if (qsNew() && cust && !nj) setNj({ location_id: locs[0]?.id || '', local_start: '', duration_min: 60, price: '', service_type: '', key: crypto.randomUUID?.() || String(Date.now()) })
+  }, [cust]) // eslint-disable-line react-hooks/exhaustive-deps
   const pending = (won?.items || []).filter(x => !x.job_id)
   return (
     <div className="aq-page">{toast}
@@ -345,11 +350,18 @@ export function OpsSchedule() {
   const [cust] = useLoad('/service-ops/customers')
   const [toast, say] = useToast()
   const names = useMemo(() => Object.fromEntries((cust?.items || []).flatMap(c => c.locations.map(l => [l.id, `${c.name} — ${l.name}`]))), [cust])
+  const [team] = useLoad('/service-ops/team')
+  const [adding, setAdding] = useState(() => !!qsNew())
+  const locs = useMemo(() => (cust?.items || []).flatMap(c => c.locations.map(l => ({ ...l, cname: c.name }))), [cust])
   const set = async (id, status) => { try { await api.post(`/service-ops/schedules/${id}/status`, { status, reason: status === 'cancelled' ? 'Cancelled by office' : undefined }); reload(); say('Updated') } catch (e) { say(errText(e)) } }
   return (
     <div className="aq-page">{toast}
-      <PageHeader eyebrow="Service Operations" title="Schedule" sub="Recurring service. Visits are created up to five weeks ahead and keep their local time across daylight-saving changes. Create one from any job." />
-      {err ? <div className="aq-err">{errText(err)}</div> : !d ? <Loading /> : !d.items.length ? <Empty icon="calendar" title="No recurring service yet" text="Open a job and choose Create Recurring Schedule." />
+      <PageHeader eyebrow="Service Operations" title="Schedule" sub="Recurring service for your customers, and the hours EvoSys can book new appointments for you."
+        actions={can(me, 'schedule') && !adding && <button className="aq-btn aq-btn--primary" onClick={() => setAdding(true)}>New recurring service</button>} />
+      {adding && cust && <NewScheduleForm locs={locs} team={(team?.items || []).filter(m => m.active)} say={say} onCancel={() => setAdding(false)}
+        onDone={() => { setAdding(false); reload(); say('Recurring service created — visits are on the Jobs page') }} />}
+      <AvailabilityPanel say={say} compact />
+      {err ? <div className="aq-err">{errText(err)}</div> : !d ? <Loading /> : !d.items.length ? <Empty icon="calendar" title="No recurring service yet" text="Choose New recurring service above, or open a job and choose Create Recurring Schedule." />
         : <div className="hb-table-wrap"><table className="aq-table"><thead><tr><th>Location</th><th>Service</th><th>How often</th><th>Next visit</th><th>Value</th><th>Status</th><th /></tr></thead>
           <tbody>{d.items.map(s => <tr key={s.id}><td>{names[s.location_id] || '—'}</td><td>{s.service_type}</td>
             <td>{s.frequency_label} · {s.start_time} {s.timezone.split('/')[1]?.replace('_', ' ')}</td><td>{s.next_visit ? when(s.next_visit) : '—'}</td>
@@ -366,7 +378,7 @@ export function OpsTeam() {
   const me = useOps()
   const [d, err, reload] = useLoad('/service-ops/team')
   const [w] = useLoad('/service-ops/team/workload')
-  const [inv, setInv] = useState(null)
+  const [inv, setInv] = useState(() => (qsNew() ? { full_name: '', email: '', role: 'field_worker', team_name: '' } : null))
   const [link, setLink] = useState(null)
   const [toast, say] = useToast()
   const load = Object.fromEntries((w?.items || []).map(m => [m.id, m.upcoming]))
@@ -410,21 +422,39 @@ export function OpsInvoices() {
   const [setg, , reloadSet] = useLoad('/service-ops/settings')
   const [open, setOpen] = useState(() => new URLSearchParams(window.location.search).get('open'))
   const [pay, setPay] = useState(null)
-  const [ne, setNe] = useState(null)
+  const [ne, setNe] = useState(() => (qsNew() === 'estimate' ? { customer_id: '', lines: [{ description: '', quantity: 1, rate: '' }] } : null))
+  const [ni, setNi] = useState(() => (qsNew() === 'invoice' ? { customer_id: '', lines: [{ description: '', quantity: 1, rate: '' }] } : null))
   const [st, setSt] = useState(null)
+  useEffect(() => {
+    const first = cust?.items?.[0]?.id
+    if (!first) return
+    if (ne && !ne.customer_id) setNe({ ...ne, customer_id: first })
+    if (ni && !ni.customer_id) setNi({ ...ni, customer_id: first })
+  }, [cust, ne, ni])
   const [toast, say] = useToast()
   const act = async (fn, ok) => { try { await fn(); reload(); if (ok) say(ok) } catch (e) { say(errText(e)) } }
   const inv = d?.items.find(i => i.id === open)
   return (
     <div className="aq-page">{toast}
       <PageHeader eyebrow="Service Operations" title="Invoices & Estimates" sub="Payments are recorded here, not collected. A reported payment counts as paid only once you confirm it arrived."
-        actions={<><button className="aq-btn" onClick={() => setNe({ customer_id: cust?.items?.[0]?.id || '', lines: [{ description: '', quantity: 1, rate: '' }] })}>New estimate</button>
+        actions={<><button className="aq-btn aq-btn--primary" onClick={() => setNi({ customer_id: cust?.items?.[0]?.id || '', lines: [{ description: '', quantity: 1, rate: '' }] })}>New invoice</button>
+          <button className="aq-btn" onClick={() => setNe({ customer_id: cust?.items?.[0]?.id || '', lines: [{ description: '', quantity: 1, rate: '' }] })}>New estimate</button>
           {me?.role === 'company_admin' && <button className="aq-btn" onClick={() => setSt({ ...setg })}>Invoice settings</button>}</>} />
       {st && <section className="aq-card"><h2>Invoice settings</h2><div className="aq-grid aq-two">
         {['business_name', 'billing_address', 'billing_email', 'billing_phone', 'payment_instructions', 'default_tax_rate', 'payment_terms_days', 'invoice_prefix'].map(k =>
           field(`st-${k}`, k.replace(/_/g, ' '), <input id={`st-${k}`} value={st[k] ?? ''} onChange={e => setSt({ ...st, [k]: e.target.value })} />))}
         <div className="aq-actions"><button className="aq-btn" onClick={() => setSt(null)}>Cancel</button><button className="aq-btn aq-btn--primary" onClick={async () => {
           try { const b = Object.fromEntries(Object.entries(st).filter(([k]) => !k.endsWith('_enabled') && k !== 'timezone' && k !== 'estimate_prefix')); await api.put('/service-ops/settings', b); setSt(null); reloadSet(); say('Saved') } catch (e) { say(errText(e)) } }}>Save</button></div></div></section>}
+      {ni && <section className="aq-card"><h2>New invoice</h2>
+        {field('ni-c', 'Customer', <select id="ni-c" value={ni.customer_id} onChange={e => setNi({ ...ni, customer_id: e.target.value })}>{(cust?.items || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>)}
+        {ni.lines.map((l, i) => <div className="aq-grid aq-two" key={i}>
+          {field(`ni-d${i}`, 'Description', <input id={`ni-d${i}`} value={l.description} onChange={e => { const ls = [...ni.lines]; ls[i] = { ...l, description: e.target.value }; setNi({ ...ni, lines: ls }) }} />)}
+          {field(`ni-r${i}`, 'Rate ($) × qty', <span style={{ display: 'flex', gap: 6, minWidth: 0 }}><input id={`ni-r${i}`} inputMode="decimal" style={{ minWidth: 0 }} value={l.rate} onChange={e => { const ls = [...ni.lines]; ls[i] = { ...l, rate: e.target.value }; setNi({ ...ni, lines: ls }) }} />
+            <input aria-label="Quantity" inputMode="decimal" style={{ width: 70 }} value={l.quantity} onChange={e => { const ls = [...ni.lines]; ls[i] = { ...l, quantity: e.target.value }; setNi({ ...ni, lines: ls }) }} /></span>)}</div>)}
+        {!cust?.items?.length && <p className="hb-muted">Add a customer first.</p>}
+        <div className="aq-actions"><button className="aq-btn aq-btn--sm" onClick={() => setNi({ ...ni, lines: [...ni.lines, { description: '', quantity: 1, rate: '' }] })}>Add line</button>
+          <button className="aq-btn" onClick={() => setNi(null)}>Cancel</button>
+          <button className="aq-btn aq-btn--primary" disabled={!ni.customer_id} onClick={async () => { try { const r = await api.post('/service-ops/invoices', ni); setNi(null); reload(); setOpen(r.id || r.invoice?.id || null); say('Draft invoice saved — mark it issued when you send it') } catch (e) { say(errText(e)) } }}>Save invoice</button></div></section>}
       {ne && <section className="aq-card"><h2>New estimate</h2>
         {field('ne-c', 'Customer', <select id="ne-c" value={ne.customer_id} onChange={e => setNe({ ...ne, customer_id: e.target.value })}>{(cust?.items || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>)}
         {ne.lines.map((l, i) => <div className="aq-grid aq-two" key={i}>
