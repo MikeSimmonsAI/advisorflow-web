@@ -307,6 +307,9 @@ function InvitationTable ({ rows, reload, openSubmission, compact }) {
                 {i.sent_at ? null : <button className="cg-btn cg-btn--small" onClick={() => markSent(i)} title="Record that you sent it yourself">I sent it</button>}
                 <button className="cg-btn cg-btn--small cg-btn--danger" onClick={() => setRevoking(i)}>Revoke</button>
               </> : null}
+              {i.template && i.template.id ? <Link className="cg-btn cg-btn--small" title="See the form as this prospect will - their link is not opened"
+                to={'/client-growth/preview/' + i.template.id + '?for=' + encodeURIComponent(i.prepared_for || '')
+                  + '&contact_name=' + encodeURIComponent(i.contact || '') + '&business_name=' + encodeURIComponent(i.company || '')}>Preview</Link> : null}
               {i.submission_id ? <button className="cg-btn cg-btn--small" onClick={() => openSubmission(i.submission_id)}>Open answers</button> : null}
               {['revoked', 'expired', 'submitted'].includes(i.state) && !compact
                 ? <button className="cg-btn cg-btn--small" onClick={() => reissue(i)} title="Correction / re-invitation: a fresh link; earlier answers stay as received">New link</button> : null}
@@ -447,7 +450,9 @@ function Templates () {
           <tr key={t.id}><td>{t.name}</td><td>{t.vertical || 'Any'}</td><td>v{t.version}</td>
             <td>{t.steps.map(s => `${s.title} (${s.questions})`).join(' · ')}</td><td>{t.invitations}</td>
             <td><Badge tone={t.is_active ? 'ok' : 'muted'}>{t.is_active ? 'Active' : 'Off'}</Badge></td>
-            <td><button className="cg-btn cg-btn--small" onClick={() => setOpen(open === t.id ? null : t.id)}>{open === t.id ? 'Hide' : 'Questions'}</button></td></tr>
+            <td className="cg-actions">
+              <Link className="cg-btn cg-btn--small cg-btn--primary" to={'/client-growth/preview/' + t.id}>Preview form</Link>
+              <button className="cg-btn cg-btn--small" onClick={() => setOpen(open === t.id ? null : t.id)}>{open === t.id ? 'Hide' : 'Questions'}</button></td></tr>
         ))}
       </tbody></table>
       {open && def ? (

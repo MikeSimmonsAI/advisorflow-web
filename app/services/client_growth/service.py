@@ -252,7 +252,7 @@ def invitation_row(db: Session, i: ClientGrowthInvitation, with_link: bool = Fal
     st = invite_state(i)
     row = {"id": i.id, "prospect_id": i.opportunity_id, "company": o.company_name if o else None,
            "contact": o.contact_name if o else None, "prepared_for": i.prepared_for,
-           "template": {"key": t.key, "version": t.version, "name": t.name} if t else None,
+           "template": {"id": t.id, "key": t.key, "version": t.version, "name": t.name} if t else None,
            "state": st, "state_label": INVITE_LABELS[st], "created_at": iso(i.created_at),
            "expires_at": iso(i.expires_at), "sent_at": iso(i.sent_at), "sent_note": i.sent_note,
            "last_copied_at": iso(i.last_copied_at), "opened_at": iso(i.opened_at),

@@ -133,6 +133,7 @@ const VoltOps = lazyPage(() => import('./pages/volt/VoltOps'))
 const ClientGrowthWorkspace = lazyPage(() => import('./pages/clientGrowth/ClientGrowthWorkspace'))
 const GodClientGrowth = lazyPage(() => import('./pages/clientGrowth/GodClientGrowth'))
 const GrowthQuestionnaire = lazyPage(() => import('./pages/clientGrowth/GrowthQuestionnaire'))
+const GrowthQuestionnairePreview = lazyPage(() => import('./pages/clientGrowth/GrowthQuestionnaire').then(m => ({ default: m.GrowthQuestionnairePreview })))
 const ConsumerLeadsWorkspace = lazyPage(() => import('./pages/volt/ConsumerLeadsWorkspace'))
 const ConsumerSite = lazyPage(() => import('./pages/volt/ConsumerSite'))
 const ConsumerPrivacy = lazyPage(() => import('./pages/volt/ConsumerSite').then((m) => ({ default: m.ConsumerPrivacy })))
@@ -1543,6 +1544,8 @@ export default function App() {
         <Route path="/volt-ops/:orgId/*" element={<ProtectedRoute bare><VoltOps /></ProtectedRoute>} />
         {/* CLIENT GROWTH: staff via its Program Access card; /client-growth/* re-checks access on every request. */}
         <Route path="/client-growth" element={<ProtectedRoute bare><ClientGrowthWorkspace /></ProtectedRoute>} />
+        {/* Staff preview of the prospect's form, built from the template; reads no invitation, saves nothing. */}
+        <Route path="/client-growth/preview/:templateId" element={<ProtectedRoute bare><GrowthQuestionnairePreview /></ProtectedRoute>} />
         {/* A prospect's private questionnaire: no login, no navigation; the token names one invitation. */}
         <Route path="/growth-plan/:inviteToken" element={<GrowthQuestionnaire />} />
         {/* CONSUMER LEADS - VOLT Marketing's subsidiary, its own workspace; the server decides access. */}
