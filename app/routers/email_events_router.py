@@ -30,7 +30,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -128,6 +128,19 @@ async def resend_event(request: Request, db: Session = Depends(get_db)):
             lead.manual_flag = "bad_email"
             lead.manual_flag_reason = "email bounced (%s)" % (btype or "hard")
             action = "bounced; address flagged bad_email"
+        elif lead is not None and not lead.manual_flag:
+            # A REPEATED "transient" bounce is the address, not a bad day
+            # (2026-11-20: @icloud.coom bounced transient twice, stayed live).
+            from app.services.programs.bounces import PROVIDER_TRANSIENT_FLAG_AFTER
+            db.flush()                       # this bounce counts too
+            bounced = (db.query(EmailMessage.id)
+                       .filter(EmailMessage.lead_id == lead.id, EmailMessage.status == "bounced",
+                               EmailMessage.sent_at >= datetime.utcnow() - timedelta(days=30))
+                       .count())
+            if bounced >= PROVIDER_TRANSIENT_FLAG_AFTER:
+                lead.manual_flag = "bad_email"
+                lead.manual_flag_reason = "email bounced %d times (%s)" % (bounced, btype or "transient")
+                action = "bounced again; address flagged bad_email"
     elif etype == "email.complained":
         msg.status = "complained"
         if lead is not None:

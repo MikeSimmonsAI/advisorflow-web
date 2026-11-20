@@ -372,13 +372,13 @@ def _deliver_staff_alert(db: Session, prog: OutreachProgram, channel: str, to: s
                 log.exception("alert format failed for response %s", response_id)
     try:
         if channel == "email" and rich is not None:
-            from app.services.email_service import send_email_via_provider
+            from app.services import staff_alert_email
             from app.services.public_identity import sending_identity_for_org
-            res = send_email_via_provider(to, rich["subject"], rich["html"],
-                                          org=sending_identity_for_org(db, prog.organization_id))
+            res = staff_alert_email.send(to, rich["subject"], rich["html"], db=db,
+                                         org=sending_identity_for_org(db, prog.organization_id))
             return bool(res.get("success")), res.get("error")
         if channel == "email":
-            from app.services.email_service import send_email_via_provider
+            from app.services import staff_alert_email
             from app.services.public_identity import sending_identity_for_org
             import html as _html
             label = {"hot": "HOT RESPONSE", "sla_breach": "HOT RESPONSE - NOT YET HANDLED",
@@ -389,8 +389,8 @@ def _deliver_staff_alert(db: Session, prog: OutreachProgram, channel: str, to: s
             body = "<p>%s</p>" % _html.escape(message)
             if link:
                 body += '<p><a href="%s">Open it in EvoSys</a></p>' % _html.escape(link)
-            res = send_email_via_provider(to, "%s - %s" % (alert_title(prog), label), body,
-                                          org=sending_identity_for_org(db, prog.organization_id))
+            res = staff_alert_email.send(to, "%s - %s" % (alert_title(prog), label), body, db=db,
+                                         org=sending_identity_for_org(db, prog.organization_id))
             return bool(res.get("success")), res.get("error")
         from app.services.sms_service import Client, _org_twilio_credentials
         from app.services import sms_programs as _sci

@@ -2987,3 +2987,40 @@ def run_auto_migrations(engine) -> None:
         # reader in crm_secrets keeps every existing connection working whether
         # this pass ran or not.
         print(f"[auto_migrate] crm secrets note: {e}")
+
+    # ── Addresses that keep bouncing stop being emailed (2026-11-20) ────────
+    #
+    # Same rule the live bounce handlers now apply (programs/bounces.py
+    # PROVIDER_TRANSIENT_FLAG_AFTER / BLOCKED_FLAG_AFTER), run over the last
+    # 30 days so the addresses that bounced BEFORE the rule existed are caught:
+    # two bounces of any final kind, or three spam-filter blocks, for one
+    # family flags the address bad_email (email only; texts untouched). A
+    # person's correction (program.email_recovered after the last bounce) is
+    # never undone. Converges to zero work: a flagged lead is skipped.
+    if not is_sqlite:
+        try:
+            with engine.connect() as conn:
+                res = conn.execute(text("""
+                    UPDATE leads l
+                       SET manual_flag = 'bad_email',
+                           manual_flag_reason = 'email bounced ' || c.n || ' times - no more email until the address is corrected'
+                      FROM (SELECT lead_id, count(*) AS n, max(sent_at) AS last_sent
+                              FROM email_messages
+                             WHERE status = 'bounced'
+                               AND sent_at > now() - interval '30 days'
+                             GROUP BY lead_id
+                            HAVING count(*) FILTER (WHERE bounce_type IS NULL
+                                                    OR bounce_type NOT IN ('blocked', 'temporary', 'sender_config')) >= 2
+                                OR count(*) FILTER (WHERE bounce_type = 'blocked') >= 3) c
+                     WHERE l.id = c.lead_id
+                       AND l.manual_flag IS NULL
+                       AND NOT EXISTS (SELECT 1 FROM audit_log_entries a
+                                        WHERE a.target_id = l.id
+                                          AND a.action = 'program.email_recovered'
+                                          AND a.created_at >= c.last_sent)
+                """))
+                conn.commit()
+                if res.rowcount:
+                    print("[auto_migrate] repeat-bounce addresses flagged: %d" % res.rowcount)
+        except Exception as e:
+            print(f"[auto_migrate] repeat-bounce flag note: {e}")

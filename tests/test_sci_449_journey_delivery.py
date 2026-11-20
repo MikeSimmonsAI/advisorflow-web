@@ -641,3 +641,17 @@ def test_starting_everyone_never_schedules_outside_the_window(program):
                      .filter(ProgramSourceRecord.journey_started_at.isnot(None))})
     loc = [t.replace(tzinfo=u).astimezone(z) for t in starts]
     assert (loc[0].hour, loc[0].minute) == (17, 58) and (loc[1].day, loc[1].hour, loc[1].minute) == (4, 9, 0)
+
+
+def test_a_third_spam_block_for_one_address_flags_it(program, sample_advisor):
+    """2026-11-20: one address was "blocked" six times in two weeks and kept
+    being mailed. One or two blocks never flag; the third does."""
+    db, org, admin = program["db"], program["org"], program["admin"]
+    lead = _ca(db, org, admin, email="always-blocked@example.com")
+    for i, subj in enumerate(("One", "Two", "Three"), start=1):
+        _sent_email(db, lead, subject=subj, sender=sample_advisor.id, touch=i)
+        _notice(db, org, lead, NDR_SPAM, subject="Undeliverable: %s" % subj)
+        db.refresh(lead)
+        if i < 3:
+            assert lead.manual_flag is None
+    assert lead.manual_flag == "bad_email"
