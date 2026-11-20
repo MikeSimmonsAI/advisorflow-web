@@ -375,3 +375,30 @@ def test_template_validator_rejects_unknown_types():
     assert errs and clean == {}
     clean, errs = T.validate(T.insurance_v1(), dict(GOOD, new_customers_per_month="help"))
     assert not errs and clean["new_customers_per_month"] == "help"
+
+
+def test_private_proposal_link(client, db_session, bso, god, owner):
+    prospect = _prospect(client, db_session, god)
+    path = "/god/client-growth/prospects/" + prospect["id"] + "/proposals"
+    html = "<!doctype html><title>Proposal</title><script>document.title = 'Ready'</script>"
+    headers = _h(db_session, god)
+    assert client.post(path, headers=_h(db_session, owner), json={"html": html}).status_code == 403
+    assert client.post(path, headers=headers, json={"html": "not HTML"}).status_code == 422
+
+    created = client.post(path, headers=headers, json={"html": html})
+    assert created.status_code == 201, created.text
+    proposal = created.json()
+    public = "/client-growth-public/proposals/" + _token(proposal["url"])
+    assert client.get(public + "x").status_code == 404
+    response = client.get(public)
+    assert response.status_code == 200
+    assert response.text == html
+    assert response.headers["cache-control"] == "no-store"
+    assert "noindex" in response.headers["x-robots-tag"]
+    assert "sandbox allow-scripts" in response.headers["content-security-policy"]
+    assert "allow-same-origin" not in response.headers["content-security-policy"]
+    assert client.get(path, headers=headers).json()["proposals"][0]["active"] is True
+
+    assert client.delete(path + "/" + proposal["id"], headers=headers).status_code == 204
+    assert client.get(public).status_code == 404
+    assert client.get(path, headers=headers).json()["proposals"][0]["active"] is False
