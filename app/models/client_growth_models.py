@@ -139,3 +139,16 @@ class ClientGrowthTask(Base):
     completed_at = Column(DateTime, nullable=True)
     completed_by = Column(String, ForeignKey("users.id"), nullable=True)
     is_test = Column(Boolean, nullable=False, default=False)
+
+
+class ClientGrowthProposal(Base):
+    __tablename__ = "client_growth_proposals"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    opportunity_id = Column(String, ForeignKey("opportunities.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True)
+    html = Column(Text, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+    created_by = Column(String, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

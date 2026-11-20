@@ -13,17 +13,21 @@ Nothing here sends an email, a text or any other message to a prospect.
 # NO `from __future__ import annotations` IN A ROUTER MODULE - see the note in
 # god_access_router.py. Under a `@limiter.limit` wrapper FastAPI cannot resolve
 # a stringified body annotation and the app refuses to import.
+import hashlib
+import secrets
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
-from pydantic import BaseModel
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_god
 from app.limiter import limiter
 from app.models.client_growth_models import (ClientGrowthInvitation, ClientGrowthSubmission, ClientGrowthTask,
-                                             ClientGrowthTemplate)
+                                             ClientGrowthTemplate, ClientGrowthProposal)
 from app.models.models import User
 from app.models.sales_models import Opportunity, OpportunityEvent
 from app.services.client_growth import access as A
@@ -369,3 +373,74 @@ class SubmitIn(BaseModel):
 def public_submit(request: Request, response: Response, token: str, body: SubmitIn, db: Session = Depends(get_db)):
     _private(response)
     return S.submit(db, token, {"answers": body.answers})
+
+
+class ProposalHTMLIn(BaseModel):
+    html: str = Field(min_length=1, max_length=250_000)
+
+
+def _proposal_prospect(db: Session, prospect_id: str) -> None:
+    brand = A.brand(db)
+    prospect = db.get(Opportunity, prospect_id)
+    if brand is None or prospect is None or prospect.brand_sales_org_id != brand.id:
+        raise HTTPException(404, "Prospect not found.")
+
+
+@god_router.post("/prospects/{prospect_id}/proposals", status_code=201)
+def create_proposal(prospect_id: str, body: ProposalHTMLIn,
+                    god: User = Depends(require_god), db: Session = Depends(get_db)):
+    _proposal_prospect(db, prospect_id)
+    if not body.html.lstrip().lower().startswith("<!doctype html>"):
+        raise HTTPException(422, "Upload a standalone HTML document.")
+    token = secrets.token_urlsafe(32)
+    row = ClientGrowthProposal(opportunity_id=prospect_id, html=body.html, created_by=god.id,
+                               token_hash=hashlib.sha256(token.encode()).hexdigest(),
+                               expires_at=datetime.utcnow() + timedelta(days=30))
+    db.add(row)
+    db.commit()
+    return {"id": row.id, "url": f"https://links.evosyspro.live/client-growth-public/proposals/{token}",
+            "expires_at": row.expires_at.isoformat() + "Z"}
+
+
+@god_router.delete("/prospects/{prospect_id}/proposals/{proposal_id}", status_code=204)
+def revoke_proposal(prospect_id: str, proposal_id: str,
+                    god: User = Depends(require_god), db: Session = Depends(get_db)):
+    _proposal_prospect(db, prospect_id)
+    row = db.get(ClientGrowthProposal, proposal_id)
+    if row is None or row.opportunity_id != prospect_id:
+        raise HTTPException(404, "Proposal not found.")
+    if row.revoked_at is None:
+        row.revoked_at = datetime.utcnow()
+        db.commit()
+    return Response(status_code=204)
+
+
+@god_router.get("/prospects/{prospect_id}/proposals")
+def list_proposals(prospect_id: str, god: User = Depends(require_god), db: Session = Depends(get_db)):
+    _proposal_prospect(db, prospect_id)
+    now = datetime.utcnow()
+    rows = (db.query(ClientGrowthProposal).filter(ClientGrowthProposal.opportunity_id == prospect_id)
+            .order_by(ClientGrowthProposal.created_at.desc()).limit(50).all())
+    return {"proposals": [{"id": row.id, "expires_at": row.expires_at.isoformat() + "Z",
+                           "active": row.revoked_at is None and row.expires_at > now} for row in rows]}
+
+
+@public_router.get("/proposals/{token}", response_class=HTMLResponse)
+@limiter.limit(PUBLIC_LIMIT)
+def public_proposal(request: Request, token: str, db: Session = Depends(get_db)):
+    row = None
+    if len(token) == 43:
+        row = db.query(ClientGrowthProposal).filter_by(
+            token_hash=hashlib.sha256(token.encode()).hexdigest()
+        ).one_or_none()
+    if row is None or row.revoked_at is not None or row.expires_at <= datetime.utcnow():
+        response = HTMLResponse("This proposal link is unavailable.", status_code=404)
+    else:
+        response = HTMLResponse(row.html)
+    _private(response)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Content-Security-Policy"] = (
+        "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; "
+        "style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    )
+    return response

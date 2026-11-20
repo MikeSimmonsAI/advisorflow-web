@@ -257,7 +257,46 @@ function InviteForm ({ prospect, onCreated }) {
   )
 }
 
-function ProspectDetail ({ id, openSubmission, onBack }) {
+
+function ProposalLinks ({ prospectId }) {
+  const path = '/god/client-growth/prospects/' + prospectId + '/proposals'
+  const [st, reload] = useLoad(() => api.get(path), [path])
+  const [file, setFile] = useState(null)
+  const [created, setCreated] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  async function change (action) {
+    setBusy(true)
+    setError('')
+    try { await action(); reload() } catch (e) { setError(errText(e)) } finally { setBusy(false) }
+  }
+  return (
+    <Section title="Proposal links" sub="Upload a standalone HTML proposal. Links expire in 30 days.">
+      {error && <p role="alert">{error}</p>}
+      <Field label="Proposal HTML">
+        <input type="file" accept=".html,text/html" onChange={e => setFile(e.target.files?.[0] || null)} />
+      </Field>
+      <button className="cg-btn cg-btn--gold" disabled={!file || busy} onClick={() => change(async () => {
+        if (file.size > 250000) throw new Error('The proposal must be under 250 KB.')
+        setCreated(await api.post(path, { html: await file.text() }))
+      })}>Create proposal link</button>
+      {created && <div className="cg-linkbox"><code>{created.url}</code><CopyButton url={created.url} primary /></div>}
+      <Loading state={st} retry={reload}>
+        {(st.data?.proposals || []).filter(p => p.active).map(p => (
+          <div key={p.id} className="cg-linkbox">
+            <span>Expires {fmtDay(p.expires_at)}</span>
+            <button className="cg-btn cg-btn--sm" disabled={busy} onClick={() => change(async () => {
+              await api.delete(path + '/' + p.id)
+              if (created?.id === p.id) setCreated(null)
+            })}>Revoke link</button>
+          </div>
+        ))}
+      </Loading>
+    </Section>
+  )
+}
+
+function ProspectDetail ({ id, openSubmission, onBack, isOwner }) {
   const [st, reload] = useLoad(() => api.get('/client-growth/prospects/' + id), [id])
   const [created, setCreated] = useState(null)
   const p = st.data?.prospect
@@ -291,6 +330,7 @@ function ProspectDetail ({ id, openSubmission, onBack }) {
               ) : <p className="cg-muted">No activity yet.</p>}
             </div>
           </div>
+          {isOwner && <ProposalLinks key={id} prospectId={id} />}
           <Section title="Links">
             {st.data.invitations.length ? <InvitationTable rows={st.data.invitations} reload={reload} openSubmission={openSubmission} /> : <Empty>None yet.</Empty>}
           </Section>
@@ -303,13 +343,13 @@ function ProspectDetail ({ id, openSubmission, onBack }) {
   )
 }
 
-function Prospects ({ openSubmission, initialId }) {
+function Prospects ({ openSubmission, initialId, isOwner }) {
   const [q, setQ] = useState('')
   const [term, setTerm] = useState('')
   const [sel, setSel] = useState(initialId || null)
   const [st, reload] = useLoad(() => api.get('/client-growth/prospects', { params: term ? { q: term } : {} }), [term])
   useEffect(() => { const t = setTimeout(() => setTerm(q.trim()), 250); return () => clearTimeout(t) }, [q])
-  if (sel) return <ProspectDetail id={sel} openSubmission={openSubmission} onBack={() => { setSel(null); reload() }} />
+  if (sel) return <ProspectDetail isOwner={isOwner} id={sel} openSubmission={openSubmission} onBack={() => { setSel(null); reload() }} />
   return (
     <div className="cg-two cg-two--wide">
       <div>
@@ -682,7 +722,7 @@ export default function ClientGrowthWorkspace () {
       </div>
       <main className="cg-wrap">
         {tab === 'overview' ? <Overview openSubmission={openSubmission} setTab={setTab} /> : null}
-        {tab === 'prospects' ? <Prospects key={prospectId || 'list'} openSubmission={openSubmission} initialId={prospectId} /> : null}
+        {tab === 'prospects' ? <Prospects key={prospectId || 'list'} openSubmission={openSubmission} initialId={prospectId} isOwner={me?.is_owner} /> : null}
         {tab === 'questionnaires' ? <Questionnaires openSubmission={openSubmission} /> : null}
         {tab === 'tasks' ? <Tasks openSubmission={openSubmission} /> : null}
         {tab === 'templates' ? <Templates /> : null}
